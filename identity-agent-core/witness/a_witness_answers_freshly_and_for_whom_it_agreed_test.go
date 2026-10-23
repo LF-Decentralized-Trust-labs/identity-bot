@@ -21,6 +21,7 @@ import (
 // it delegated, approved in its key log.
 type delegation struct {
 	w                     *Service
+	mc                    *memContacts
 	wkey                  string
 	e                     *keriengine.Engine
 	org, delegate         string
@@ -31,7 +32,7 @@ type delegation struct {
 
 func newDelegation(t *testing.T) *delegation {
 	t.Helper()
-	w, _ := testService(t)
+	w, mc := testService(t)
 	wpub, wpriv, _ := ed25519.GenerateKey(rand.Reader)
 	wkey := iacrypto.NonTransferableAIDQB64(wpub)
 	w.SignReceipt = func(msg string) (string, string, error) {
@@ -60,8 +61,8 @@ func newDelegation(t *testing.T) *delegation {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = w.Store.SaveContactMeta(ContactMeta{ContactAID: icp.AID, WitnessingFor: true, BackendType: BackendDesktop})
-	return &delegation{w: w, wkey: wkey, e: e, org: icp.AID, delegate: d.AID, orgSeed: orgSeed, delegateSeed: recSeed,
+	agreeToWitness(t, w, mc, icp.AID, true)
+	return &delegation{w: w, mc: mc, wkey: wkey, e: e, org: icp.AID, delegate: d.AID, orgSeed: orgSeed, delegateSeed: recSeed,
 		icpB64: icp.RawBytesB64, approvalB64: base64.StdEncoding.EncodeToString(approval.Raw), dipB64: d.RawBytesB64}
 }
 
@@ -258,5 +259,60 @@ func TestATipAnswerIsBelievedOnlyAsAsked(t *testing.T) {
 func TestTheTipStatementIsFixed(t *testing.T) {
 	if got := TipStatement("EAid", "n-1", 17, "ESaid"); got != "witness-kel-tip/v1\nEAid\nn-1\n17\nESaid" {
 		t.Fatalf("the tip statement is %q", got)
+	}
+}
+
+// A witness whose tip is not known, such as an older witness with no tip
+// route, is sent nothing rather than the whole log.
+func TestAWitnessWithNoTipIsSentNothing(t *testing.T) {
+	d := newDelegation(t)
+	sender, mc := testService(t)
+	mc.contacts["EWitness"] = store.ContactRecord{AID: "EWitness", OobiURL: "http://w.test", IsWitness: true}
+	_ = sender.Store.SaveContactMeta(ContactMeta{ContactAID: "EWitness", WitnessKey: d.wkey})
+	posts := 0
+	sender.PostEvent = func(context.Context, string, []byte) (map[string]interface{}, error) {
+		posts++
+		return nil, fmt.Errorf("not reached")
+	}
+	sender.FetchTip = func(context.Context, string) (TipAnswer, error) {
+		return TipAnswer{}, fmt.Errorf("witness GET 404")
+	}
+	raw, _ := base64.StdEncoding.DecodeString(d.icpB64)
+	sig, _ := login.SignString(string(raw), d.orgSeed)
+	sender.BringUpToDate(context.Background(), d.org, []SignedEvent{{RawBytesB64: d.icpB64, CesrSignature: sig}}, []string{d.wkey}, 1)
+	if posts != 0 {
+		t.Fatalf("%d events were sent to a witness whose tip is not known", posts)
+	}
+}
+
+// A delegator whose agreement did not ask for its delegates has none
+// witnessed.
+func TestADelegatorThatDidNotAskHasNoDelegatesWitnessed(t *testing.T) {
+	d := newDelegation(t)
+	agreeToWitness(t, d.w, d.mc, d.org, false)
+	d.approved(t)
+	if _, err := d.send(d.delegate, d.dipB64, d.delegateSeed); err == nil {
+		t.Fatal("a delegate was witnessed for a delegator that did not ask")
+	}
+}
+
+// A witness request says whether it asks for the requester's delegates to be
+// witnessed, as this agent decides.
+func TestAWitnessRequestSaysWhetherItCoversDelegates(t *testing.T) {
+	for _, asks := range []bool{true, false} {
+		s, mc := testService(t)
+		mc.contacts["EPeer"] = store.ContactRecord{AID: "EPeer", OobiURL: "http://peer.test", Status: "accepted", ContactCategory: "trusted"}
+		s.AskToCoverDelegates = func() bool { return asks }
+		var sent map[string]interface{}
+		s.PostEvent = func(_ context.Context, _ string, body []byte) (map[string]interface{}, error) {
+			_ = json.Unmarshal(body, &sent)
+			return map[string]interface{}{}, nil
+		}
+		if err := s.SendWitnessRequest(context.Background(), "EPeer"); err != nil {
+			t.Fatal(err)
+		}
+		if sent["covers_delegates"] != asks {
+			t.Fatalf("a request that asks=%v says %v", asks, sent["covers_delegates"])
+		}
 	}
 }

@@ -2,18 +2,24 @@ package witness
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"identity-agent-core/store"
 )
 
 type memContacts struct {
+	// mu: the service reads contacts from goroutines it starts, such as a
+	// reciprocal witness request, while a test is still writing them.
+	mu       sync.Mutex
 	contacts map[string]store.ContactRecord
 	identity *store.IdentityState
 	tasks    []store.TaskRecord
 }
 
 func (m *memContacts) GetContacts() ([]store.ContactRecord, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var out []store.ContactRecord
 	for _, c := range m.contacts {
 		out = append(out, c)
@@ -22,6 +28,8 @@ func (m *memContacts) GetContacts() ([]store.ContactRecord, error) {
 }
 
 func (m *memContacts) GetContact(aid string) (*store.ContactRecord, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	c, ok := m.contacts[aid]
 	if !ok {
 		return nil, nil
@@ -30,6 +38,8 @@ func (m *memContacts) GetContact(aid string) (*store.ContactRecord, error) {
 }
 
 func (m *memContacts) SaveContact(c store.ContactRecord) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.contacts[c.AID] = c
 	return nil
 }
@@ -40,6 +50,8 @@ func (m *memContacts) GetIdentity() (*store.IdentityState, error) {
 
 func (m *memContacts) SaveWitnessReceipt(store.WitnessReceiptRecord) error { return nil }
 func (m *memContacts) SaveTask(t store.TaskRecord) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.tasks == nil {
 		m.tasks = []store.TaskRecord{}
 	}
@@ -52,7 +64,11 @@ func (m *memContacts) SaveTask(t store.TaskRecord) error {
 	m.tasks = append(m.tasks, t)
 	return nil
 }
-func (m *memContacts) GetTasks() ([]store.TaskRecord, error) { return m.tasks, nil }
+func (m *memContacts) GetTasks() ([]store.TaskRecord, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.tasks, nil
+}
 
 func testService(t *testing.T) (*Service, *memContacts) {
 	t.Helper()

@@ -426,11 +426,20 @@ func (s *CoreServer) witnessRecord(ownerAID, recordAID string, witnesses []strin
 		return
 	}
 	s.record.witnessMu.Lock()
-	s.record.witnessJob = witnessJob{owner: ownerAID, record: recordAID, witnesses: witnesses, toad: toad}
+	job := witnessJob{owner: ownerAID, record: recordAID, witnesses: witnesses, toad: toad}
+	// A request for the identity's own log alone does not drop a record
+	// identity a pass is already due to send.
+	if job.record == "" {
+		job.record = s.record.witnessJob.record
+	}
+	s.record.witnessJob = job
 	s.record.witnessMu.Unlock()
 	s.record.witnessOnce.Do(func() {
 		s.record.witnessKick = make(chan struct{}, 1)
-		go s.keepWitnessing()
+		s.anchorStopMu.Lock()
+		stop := s.anchorStop
+		s.anchorStopMu.Unlock()
+		go s.keepWitnessing(stop)
 	})
 	select {
 	case s.record.witnessKick <- struct{}{}:
@@ -439,10 +448,10 @@ func (s *CoreServer) witnessRecord(ownerAID, recordAID string, witnesses []strin
 }
 
 // keepWitnessing runs one witnessing pass per request, one at a time.
-func (s *CoreServer) keepWitnessing() {
+func (s *CoreServer) keepWitnessing(stop <-chan struct{}) {
 	for {
 		select {
-		case <-s.anchorStop:
+		case <-stop:
 			return
 		case <-s.record.witnessKick:
 		}
@@ -451,7 +460,9 @@ func (s *CoreServer) keepWitnessing() {
 		s.record.witnessMu.Unlock()
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		s.WitnessService.BringUpToDate(ctx, job.owner, s.signedEventsOf(job.owner), job.witnesses, job.toad)
-		s.WitnessService.BringUpToDate(ctx, job.record, s.signedEventsOf(job.record), job.witnesses, job.toad)
+		if job.record != "" {
+			s.WitnessService.BringUpToDate(ctx, job.record, s.signedEventsOf(job.record), job.witnesses, job.toad)
+		}
 		cancel()
 	}
 }
@@ -692,7 +703,6 @@ func (s *CoreServer) keepAnchoring(stop <-chan struct{}) {
 		case <-stop:
 			return
 		case <-t.C:
-			s.backfillControllerGrants()
 			if _, err := s.anchorRecord(); err != nil && !errors.Is(err, errKeyElsewhere) {
 				log.Printf("[record] anchoring: %v", err)
 			}

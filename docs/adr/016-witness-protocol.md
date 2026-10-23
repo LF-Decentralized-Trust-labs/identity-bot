@@ -115,13 +115,17 @@ Receives the accept/decline response from a remote Identity Agent to a witness r
 
 ### Identities a witnessed identity delegated (amended 2026-10-22)
 
-An agent that witnesses for an identity, by the request above, also witnesses an identity
-that identity delegated, from its delegated inception, when the key log it holds for the
+Witnessing an identity's delegates is consented to, not assumed. A witness request says
+whether it covers the identities the requester delegates (`covers_delegates`); an Identity
+Agent that anchors its record through a delegated identity asks for it. A witness that
+accepted such a request, and whose operator allows it, witnesses an identity that
+requester delegated, from its delegated inception, when the key log it holds for the
 delegator approves exactly that inception, and only once the inception's own signature
 holds. It witnesses the delegate only while it still witnesses the delegator: when it
 stops, by withdrawal or otherwise, it stops witnessing the delegates too. The operator can
-switch this off (`witness.delegates` = `off`) or cap how many delegates one delegator may
-have witnessed (`witness.delegates_max`); it is on, uncapped, by default.
+switch delegate witnessing off (`witness.delegates` = `off`) or cap how many delegates one
+delegator may have witnessed (`witness.delegates_max`). A request that does not ask covers
+no delegate.
 
 An event the witness already holds is answered with the receipt it gave, so a controller
 sending its key log from where it thinks the witness stopped carries on; something else at

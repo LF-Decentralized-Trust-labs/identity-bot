@@ -964,7 +964,7 @@ func TestARealWitnessWitnessesTheRecord(t *testing.T) {
 	// The witness agrees to witness for the organisation, the ordinary way.
 	owner, _ := s.DataStore.GetIdentity()
 	peer.svc.Contacts.SaveContact(store.ContactRecord{AID: owner.AID, Status: "accepted", ContactCategory: "trusted"})
-	if res := peer.svc.ProcessInboundRequest(context.Background(), witness.WitnessRequest{RequesterAID: owner.AID, BackendType: witness.BackendDesktop}); !res.Accepted {
+	if res := peer.svc.ProcessInboundRequest(context.Background(), witness.WitnessRequest{RequesterAID: owner.AID, BackendType: witness.BackendDesktop, CoversDelegates: true}); !res.Accepted {
 		t.Fatalf("the witness did not agree to witness for the organisation: %s", res.Reason)
 	}
 
@@ -1000,5 +1000,73 @@ func TestARealWitnessWitnessesTheRecord(t *testing.T) {
 	}
 	if got["anchor_broken_at"] != nil || got["witnessed_through"] != got["anchored_through"] {
 		t.Fatalf("the record reads as %v", got)
+	}
+}
+
+// Stopping while the witnessing worker runs ends it, with no race on the
+// channel that tells it to stop.
+func TestStoppingWhileWitnessingEndsTheWorker(t *testing.T) {
+	s := recordWorld(t)
+	s.anchorStopMu.Lock()
+	s.anchorStop = make(chan struct{})
+	s.anchorStopMu.Unlock()
+	sq := s.DataStore.(*store.SQLiteStore)
+	s.WitnessService = witness.NewService(witness.NewSQLiteStore(sq.DB()), sq, s.KeriDriver, witness.BackendDesktop)
+	s.WitnessService.FetchTip = func(context.Context, string) (witness.TipAnswer, error) {
+		return witness.TipAnswer{}, fmt.Errorf("offline")
+	}
+	owner, _ := s.DataStore.GetIdentity()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 50; i++ {
+			s.witnessRecord(owner.AID, owner.AID, []string{"BWitness"}, 1)
+		}
+	}()
+	s.anchorStopMu.Lock()
+	close(s.anchorStop)
+	s.anchorStop = nil
+	s.anchorStopMu.Unlock()
+	<-done
+}
+
+// A request to witness the identity's own log does not drop the record
+// identity a pass is already due to send.
+func TestWitnessingTheOwnLogKeepsTheRecordDue(t *testing.T) {
+	s := recordWorld(t)
+	sq := s.DataStore.(*store.SQLiteStore)
+	s.WitnessService = witness.NewService(witness.NewSQLiteStore(sq.DB()), sq, s.KeriDriver, witness.BackendDesktop)
+	hold := make(chan struct{})
+	t.Cleanup(func() { close(hold) })
+	s.WitnessService.FetchTip = func(context.Context, string) (witness.TipAnswer, error) {
+		<-hold
+		return witness.TipAnswer{}, fmt.Errorf("offline")
+	}
+	s.witnessRecord("EOwner", "ERecord", []string{"BWitness"}, 1)
+	s.witnessRecord("EOwner", "", []string{"BWitness"}, 1)
+	s.record.witnessMu.Lock()
+	defer s.record.witnessMu.Unlock()
+	if s.record.witnessJob.record != "ERecord" {
+		t.Fatal("the record identity due to be witnessed was dropped")
+	}
+}
+
+// A witness request that asks for the requester's delegates is recorded as
+// covering them, and one that does not, as not.
+func TestAWitnessRequestCarriesWhetherItCoversDelegates(t *testing.T) {
+	for _, asks := range []bool{true, false} {
+		s := recordWorld(t)
+		sq := s.DataStore.(*store.SQLiteStore)
+		s.WitnessService = witness.NewService(witness.NewSQLiteStore(sq.DB()), sq, s.KeriDriver, witness.BackendDesktop)
+		s.DataStore.SaveContact(store.ContactRecord{AID: "ERequester0000000000000000000000000000000000", Status: "accepted", ContactCategory: "trusted"})
+		body := fmt.Sprintf(`{"requester_aid":"ERequester0000000000000000000000000000000000","backend_type":"desktop","covers_delegates":%v}`, asks)
+		rec := httptest.NewRecorder()
+		s.handleWitnessRequest(rec, httptest.NewRequest("POST", "/api/witness/request", strings.NewReader(body)))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("the request: %d %s", rec.Code, rec.Body.String())
+		}
+		if got := s.WitnessService.CoversDelegatesOf("ERequester0000000000000000000000000000000000"); got != asks {
+			t.Fatalf("a request asking=%v is recorded as covering delegates=%v", asks, got)
+		}
 	}
 }

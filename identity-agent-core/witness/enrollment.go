@@ -16,6 +16,10 @@ type WitnessRequest struct {
 	RequesterAID  string
 	RequesterOOBI string
 	BackendType   string
+	// CoversDelegates asks the witness to witness the identities the
+	// requester delegates too. Not assumed: a request that does not ask
+	// covers none.
+	CoversDelegates bool
 }
 
 // AcceptCallback is the accept POST-back body.
@@ -90,6 +94,7 @@ func (s *Service) ProcessInboundRequest(ctx context.Context, req WitnessRequest)
 			reason = "enroll_failed"
 			detail = err.Error()
 		} else {
+			s.agreeToDelegates(req.RequesterAID, req.CoversDelegates)
 			taskStatus = "completed"
 			detail = fmt.Sprintf("Now witnessing key events for %s", req.RequesterAID[:12])
 		}

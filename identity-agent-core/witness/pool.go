@@ -26,6 +26,9 @@ func (s *Service) SendWitnessRequest(ctx context.Context, contactAID string) err
 		"requester_aid":  s.ourAID(),
 		"requester_oobi": s.ourOOBI(),
 		"backend_type":   s.BackendType,
+		// Whether this identity asks for the identities it delegates to be
+		// witnessed too.
+		"covers_delegates": s.AskToCoverDelegates != nil && s.AskToCoverDelegates(),
 	})
 	url := witnessRequestURL(c.OobiURL)
 	_, err = s.PostEvent(ctx, url, body)

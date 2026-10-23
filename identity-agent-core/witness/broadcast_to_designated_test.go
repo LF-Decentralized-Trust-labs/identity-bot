@@ -222,7 +222,7 @@ func TestAWitnessFollowsAKeyLogPastItsSixteenthEvent(t *testing.T) {
 // A witness takes on a delegated identity only from the approval it holds in
 // the delegator's key log, and only once the inception's own signature holds.
 func TestAWitnessTakesOnADelegateOnlyFromItsApproval(t *testing.T) {
-	witness, _ := testService(t)
+	witness, mc := testService(t)
 	wpub, wpriv, _ := ed25519.GenerateKey(rand.Reader)
 	wkey := iacrypto.NonTransferableAIDQB64(wpub)
 	witness.SignReceipt = func(said string) (string, string, error) {
@@ -246,7 +246,7 @@ func TestAWitnessTakesOnADelegateOnlyFromItsApproval(t *testing.T) {
 		_, err := witness.ReceiveEvent(aid, raw, sig)
 		return err
 	}
-	_ = witness.Store.SaveContactMeta(ContactMeta{ContactAID: icp.AID, WitnessingFor: true, BackendType: BackendDesktop})
+	agreeToWitness(t, witness, mc, icp.AID, true)
 	if err := send(icp.AID, icp.RawBytesB64, orgSeed); err != nil {
 		t.Fatal(err)
 	}
@@ -277,5 +277,15 @@ func TestAWitnessTakesOnADelegateOnlyFromItsApproval(t *testing.T) {
 	}
 	if err := send(d.AID, d.RawBytesB64, recSeed); err != nil {
 		t.Fatalf("an approved delegate was refused: %v", err)
+	}
+}
+
+// agreeToWitness has the witness agree to witness for aid by the ordinary
+// request, covering its delegates or not.
+func agreeToWitness(t *testing.T, w *Service, mc *memContacts, aid string, coversDelegates bool) {
+	t.Helper()
+	_ = mc.SaveContact(store.ContactRecord{AID: aid, Status: "accepted", ContactCategory: "trusted"})
+	if res := w.ProcessInboundRequest(context.Background(), WitnessRequest{RequesterAID: aid, BackendType: BackendDesktop, CoversDelegates: coversDelegates}); !res.Accepted {
+		t.Fatalf("the witness did not agree: %s", res.Reason)
 	}
 }

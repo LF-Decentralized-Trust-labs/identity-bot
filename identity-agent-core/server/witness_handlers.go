@@ -144,6 +144,9 @@ func (s *CoreServer) handleWitnessRequest(w http.ResponseWriter, r *http.Request
 		RequesterOOBI string `json:"requester_oobi"`
 		BackendType   string `json:"backend_type"`
 		EventJSON     string `json:"event_json"`
+		// CoversDelegates asks for the identities the requester delegates to
+		// be witnessed too.
+		CoversDelegates bool `json:"covers_delegates"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid witness request body", err.Error())
@@ -163,6 +166,7 @@ func (s *CoreServer) handleWitnessRequest(w http.ResponseWriter, r *http.Request
 	}
 	result := s.WitnessService.ProcessInboundRequest(ctx, witness.WitnessRequest{
 		RequesterAID: req.RequesterAID, RequesterOOBI: req.RequesterOOBI, BackendType: req.BackendType,
+		CoversDelegates: req.CoversDelegates,
 	})
 	status := "declined"
 	if result.Accepted {

@@ -43,6 +43,9 @@ type Service struct {
 	HTTPClient  *http.Client
 	PostEvent   EventPoster
 	delegatesMu sync.Mutex
+	// AskToCoverDelegates says whether this agent's witness requests ask for
+	// the identities it delegates to be witnessed too.
+	AskToCoverDelegates func() bool
 	// FetchTip asks a witness how far it holds an identity's key log. Replaceable
 	// so a test needs no network.
 	FetchTip    func(ctx context.Context, url string) (TipAnswer, error)
@@ -366,7 +369,7 @@ func (s *Service) ReceiveEvent(signerAID string, rawEvent []byte, cesrSig string
 			return nil, fmt.Errorf("not_witnessing")
 		}
 		if !s.delegatesAccepted(delegator) {
-			return nil, fmt.Errorf("not_witnessing: delegates not accepted")
+			return nil, fmt.Errorf("not_witnessing: the delegator's agreement does not cover its delegates, or this witness's operator does not accept them")
 		}
 		enrolAs, enrolUnder = BackendDesktop, delegator
 		if dm, _ := s.Store.GetContactMeta(delegator); dm != nil && dm.BackendType != "" {
@@ -568,8 +571,8 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 // return. A witness refuses an event that does not follow the last one it
 // holds, so a key log some of whose events never reached its witnesses has to
 // be sent from where each witness stopped, not one event at a time. Each
-// witness is asked only for its tip; one whose answer does not check out is
-// sent the whole log, and answers what it already holds with its receipt.
+// witness is asked only for its tip, and one whose tip is not known is sent
+// nothing this time.
 func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []SignedEvent, designated []string, threshold int) {
 	known := s.designatedTargets(designated)
 	// Each event's receipts are counted against its threshold, so each has a
@@ -600,10 +603,17 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 		wg.Add(1)
 		go func(key string, w witnessTarget) {
 			defer wg.Done()
-			from := 0
-			if tip, ok := s.askTip(ctx, w, key, signerAID); ok {
-				from = tip.SN + 1
+			// A witness whose tip is not known this time, because it did not
+			// answer, answered too often, has no tip route or answered with
+			// something that does not check out, is left for the next pass.
+			// Sending it the whole log instead is what overruns a witness's
+			// limits, and an older witness reads an event it holds as a
+			// conflicting history.
+			tip, ok := s.askTip(ctx, w, key, signerAID)
+			if !ok {
+				return
 			}
+			from := tip.SN + 1
 			for _, e := range events {
 				raw, err := base64.StdEncoding.DecodeString(e.RawBytesB64)
 				if err != nil {
@@ -1267,9 +1277,46 @@ func (s *Service) recordDelegate(aid, delegator string) {
 	s.saveDelegateMap(m)
 }
 
+// configDelegatorsCovered are the identities whose agreement to be witnessed
+// asked for their delegates to be witnessed too.
+const configDelegatorsCovered = "witness.delegators_covered"
+
+// agreeToDelegates records whether requester's agreement covers the
+// identities it delegates.
+func (s *Service) agreeToDelegates(requester string, covers bool) {
+	s.delegatesMu.Lock()
+	defer s.delegatesMu.Unlock()
+	covered := map[string]bool{}
+	if raw, err := s.Store.GetConfig(configDelegatorsCovered); err == nil && raw != "" {
+		_ = json.Unmarshal([]byte(raw), &covered)
+	}
+	if covers {
+		covered[requester] = true
+	} else {
+		delete(covered, requester)
+	}
+	raw, _ := json.Marshal(covered)
+	_ = s.Store.SetConfig(configDelegatorsCovered, string(raw))
+}
+
+// CoversDelegatesOf reports whether delegator's agreement asked for the
+// identities it delegates to be witnessed too.
+func (s *Service) CoversDelegatesOf(delegator string) bool { return s.delegatorCovered(delegator) }
+
+func (s *Service) delegatorCovered(delegator string) bool {
+	covered := map[string]bool{}
+	if raw, err := s.Store.GetConfig(configDelegatorsCovered); err == nil && raw != "" {
+		_ = json.Unmarshal([]byte(raw), &covered)
+	}
+	return covered[delegator]
+}
+
 // delegatesAccepted reports whether another delegate of delegator may be
-// witnessed under the operator's settings.
+// witnessed: its agreement asked for it, and the operator's settings allow it.
 func (s *Service) delegatesAccepted(delegator string) bool {
+	if !s.delegatorCovered(delegator) {
+		return false
+	}
 	if v, _ := s.Store.GetConfig(ConfigDelegates); strings.EqualFold(strings.TrimSpace(v), "off") {
 		return false
 	}
