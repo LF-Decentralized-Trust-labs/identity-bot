@@ -709,7 +709,7 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 			if !ok {
 				return
 			}
-			s.confirm(signerAID, key, tip.SN)
+			s.heldNow(signerAID, key, tip.SN)
 			from := tip.SN + 1
 			for _, e := range events {
 				raw, err := base64.StdEncoding.DecodeString(e.RawBytesB64)
@@ -1469,21 +1469,53 @@ func (s *Service) dropDelegatesOf(delegator string) {
 }
 
 func (s *Service) confirmedTip(aid, witnessKey string) int {
-	if v, ok := s.confirmed.Load(aid + "|" + witnessKey); ok {
-		return v.(int)
+	v, ok := s.confirmed.Load(aid + "|" + witnessKey)
+	if !ok {
+		return -1
 	}
-	return -1
+	c := v.(confirmation)
+	// Asked again now and then even when nothing has changed here, so a
+	// witness that has fallen behind (restored from an older copy, say) is
+	// noticed and filled again.
+	if time.Since(c.at) > RecheckWitnessesEvery {
+		return -1
+	}
+	return c.sn
 }
 
+// RecheckWitnessesEvery is how long a witness's confirmed tip is trusted
+// before the witness is asked again.
+var RecheckWitnessesEvery = time.Hour
+
+// confirmation is how far a witness was last shown to hold a key log, and
+// when.
+type confirmation struct {
+	sn int
+	at time.Time
+}
+
+// confirm records a receipt showing a witness holds a key log to sn: never
+// lowered by one, and the time it was last shown kept.
 func (s *Service) confirm(aid, witnessKey string, sn int) {
 	key := aid + "|" + witnessKey
 	for {
-		v, loaded := s.confirmed.LoadOrStore(key, sn)
+		now := confirmation{sn: sn, at: time.Now()}
+		v, loaded := s.confirmed.LoadOrStore(key, now)
 		if !loaded {
 			return
 		}
-		if v.(int) >= sn || s.confirmed.CompareAndSwap(key, v, sn) {
+		old := v.(confirmation)
+		if old.sn > sn {
+			now.sn = old.sn
+		}
+		if s.confirmed.CompareAndSwap(key, v, now) {
 			return
 		}
 	}
+}
+
+// heldNow records how far a witness says, in a signed tip, it holds a key
+// log now: what it says, higher or lower than before.
+func (s *Service) heldNow(aid, witnessKey string, sn int) {
+	s.confirmed.Store(aid+"|"+witnessKey, confirmation{sn: sn, at: time.Now()})
 }

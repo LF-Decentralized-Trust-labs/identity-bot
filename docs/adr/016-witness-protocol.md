@@ -150,7 +150,8 @@ log: the newest event's place and digest, signed by the witness's own key togeth
 the asker's nonce, so the answer is fresh and the witness's own. A controller asks this
 before sending, and sends only what the witness lacks; a witness that has confirmed holding
 the log as far as it goes, by its tip or its receipts, is not asked again until there is
-more to send. `GET /witness/kel/{aid}/event/{sn}` hands back one event of a key log
+more to send, or until an hour has passed, so a witness that has fallen behind is noticed
+and filled again; a witness's signed tip is believed as it stands, lower than before too. `GET /witness/kel/{aid}/event/{sn}` hands back one event of a key log
 exactly as its controller published and signed it; the asker checks it extends its own
 key log and is signed by the identity's key before believing it. An event is sent to
 exactly the witnesses it names, and a send that runs in the background is not cut short

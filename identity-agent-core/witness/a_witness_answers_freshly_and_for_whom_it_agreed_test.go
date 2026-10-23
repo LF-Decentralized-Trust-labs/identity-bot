@@ -432,6 +432,40 @@ func TestAWitnessUpToDateIsNotAskedAgain(t *testing.T) {
 	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey}, 1)
 	if asked != 2 {
 		t.Fatal("a witness was not asked once there was more to send")
+	} // Nothing new, but long enough since: asked again, so a witness that has
+	// fallen behind is noticed.
+	prior := RecheckWitnessesEvery
+	RecheckWitnessesEvery = 0
+	t.Cleanup(func() { RecheckWitnessesEvery = prior })
+	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey}, 1)
+	if asked != 3 {
+		t.Fatal("a witness was not asked again after the recheck interval")
+	} // The witness loses what it held past the inception (restored from an
+	// older copy): on the next recheck it is filled again.
+	d.w.Store.(*SQLiteStore).db.Exec(`DELETE FROM witness_kel_events WHERE signer_aid = ? AND sequence_num >= 1`, d.org)
+	RecheckWitnessesEvery = time.Hour
+	sender.heldNow(d.org, d.wkey, 2) // what it was last shown to hold, an hour ago
+	RecheckWitnessesEvery = 0
+	// Found behind, and this time not reachable to send to: believed as it
+	// stands, so the next pass, within the hour, tries again.
+	post := sender.PostEvent
+	sender.PostEvent = func(context.Context, string, []byte) (map[string]interface{}, error) {
+		return nil, fmt.Errorf("unreachable")
+	}
+	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey}, 1)
+	sender.PostEvent = post
+	RecheckWitnessesEvery = time.Hour
+	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey}, 1)
+	if held, _ := d.w.Store.GetKelEvents(d.org); len(held) != len(log) {
+		t.Fatalf("a witness that fell behind holds %d of %d after the recheck", len(held), len(log))
+	}
+	// And, believed as it now stands, it is not asked again before the next
+	// recheck.
+	RecheckWitnessesEvery = time.Hour
+	before := asked
+	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey}, 1)
+	if asked != before {
+		t.Fatal("a witness filled again was asked again at once")
 	}
 }
 
@@ -530,5 +564,21 @@ func TestAPassLooksOnlyAtWhatIsNotConfirmed(t *testing.T) {
 	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey}, 1)
 	if n := counting.looked - before; n != 0 {
 		t.Fatalf("a pass with nothing new looked up %d finalisations", n)
+	}
+}
+
+// A witness's signed tip is believed as it is, lower than before too, so one
+// that has fallen behind is sent from where it now stands; a receipt never
+// lowers what is known.
+func TestAWitnessThatFellBehindIsBelieved(t *testing.T) {
+	s, _ := testService(t)
+	s.confirm("EAid", "BKey", 5)
+	s.confirm("EAid", "BKey", 3)
+	if got := s.confirmedTip("EAid", "BKey"); got != 5 {
+		t.Fatalf("a receipt lowered what is known to %d", got)
+	}
+	s.heldNow("EAid", "BKey", 1)
+	if got := s.confirmedTip("EAid", "BKey"); got != 1 {
+		t.Fatalf("a witness saying it holds less is taken to hold %d", got)
 	}
 }
