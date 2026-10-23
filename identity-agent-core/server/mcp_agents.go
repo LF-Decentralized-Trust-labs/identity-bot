@@ -120,6 +120,13 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 	// invoke time, so authority is credential-proven rather than a server-side list.
 	// Non-fatal: on a driverless build the stored ceiling still governs.
 	grantSAID, err := s.issueCapabilityGrant(agent, by)
+	grantPending := false
+	if errors.Is(err, errKeyElsewhere) {
+		// The identity's key is on another device, which alone can issue the
+		// grant. The AI agent is made, may do nothing, and says its grant is
+		// waiting for that device, as a machine's does.
+		grantPending, err = true, nil
+	}
 	if err != nil {
 		// With an engine, a grant that cannot be issued, or does not rest on
 		// the request that asked for it, ends the provisioning: an AI agent
@@ -156,6 +163,7 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		DelegatorAID: agent.DelegatorAID,
 		AssetID:      agent.ID,
 		GrantSAID:    grantSAID,
+		GrantPending: grantPending,
 	})
 	if err := s.saveMCPTokens(toks); err != nil {
 		jsonError(w, "failed to persist agent token", http.StatusInternalServerError)
@@ -173,6 +181,7 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		"agent_config":  cfg,
 		"grant_said":    grantSAID,
 		"grant_issued":  grantSAID != "",
+		"grant_pending": grantPending,
 		"token":         plaintext,
 		"note":          "store this token now; only its hash is kept. Every call it makes is recorded as this agent AID, chained to the owner root.",
 	})
@@ -208,6 +217,9 @@ type agentView struct {
 	Config              *asset.AgentConfig     `json:"agent_config,omitempty"`
 	Status              string                 `json:"status"` // active | revoked
 	CreatedAt           time.Time              `json:"created_at"`
+	// GrantPending says the AI agent may do nothing yet: its grant waits for
+	// the device that holds the identity's key.
+	GrantPending bool `json:"grant_pending,omitempty"`
 }
 
 // handleListAgents lists the org's ai_agent assets — the workforce roster.
@@ -220,6 +232,14 @@ func (s *CoreServer) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	}
 	// Map asset id → grant status via the credential store (revoked grants show as revoked).
 	agents := s.assetHandler.ListAgents()
+	pending := map[string]bool{}
+	mcpTokensMu.Lock()
+	for _, t := range s.loadMCPTokens() {
+		if t.GrantPending && t.GrantSAID == "" {
+			pending[t.AssetID] = true
+		}
+	}
+	mcpTokensMu.Unlock()
 	out := make([]agentView, 0, len(agents))
 	for _, a := range agents {
 		out = append(out, agentView{
@@ -232,6 +252,7 @@ func (s *CoreServer) handleListAgents(w http.ResponseWriter, r *http.Request) {
 			Config:              a.AgentConfig,
 			Status:              s.agentStatus(a.PairwiseAID),
 			CreatedAt:           a.CreatedAt,
+			GrantPending:        pending[a.ID],
 		})
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -352,6 +373,11 @@ func (s *CoreServer) handleSetAgentCapabilities(w http.ResponseWriter, r *http.R
 	grantSAID := ""
 	if s.KeriDriver != nil {
 		g, err := s.issueCapabilityGrant(&candidate, by)
+		if errors.Is(err, errKeyElsewhere) && s.agentGrantPending(id) {
+			// Its grant already waits for the device that holds the key; the
+			// change is recorded and waits with it.
+			err = nil
+		}
 		if err != nil {
 			jsonError(w, "the grant could not be re-issued, so nothing was changed: "+err.Error(),
 				http.StatusBadGateway)
@@ -536,4 +562,23 @@ func nonNilConstraints(c map[string]interface{}) map[string]interface{} {
 		return map[string]interface{}{}
 	}
 	return c
+}
+
+// agentGrantPending reports whether an AI agent's grant waits for the device
+// that holds the identity's key: it has a token with a pending grant and none
+// issued.
+func (s *CoreServer) agentGrantPending(assetID string) bool {
+	mcpTokensMu.Lock()
+	defer mcpTokensMu.Unlock()
+	pending := false
+	for _, t := range s.loadMCPTokens() {
+		if t.AssetID != assetID {
+			continue
+		}
+		if t.GrantSAID != "" {
+			return false
+		}
+		pending = pending || t.GrantPending
+	}
+	return pending
 }

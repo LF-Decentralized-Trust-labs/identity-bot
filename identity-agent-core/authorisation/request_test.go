@@ -455,3 +455,32 @@ func TestTheCredentialMayNotAddToWhatWasAsked(t *testing.T) {
 		t.Fatal("a credential claiming more was asked than the body asked was accepted")
 	}
 }
+
+// A machine's grant rests on a request to grant that machine, with that key,
+// label and grade, and on no other.
+func TestAMachinesGrantMustBeTheOneAskedFor(t *testing.T) {
+	w := newWorld(t)
+	const machine = "BMachineAID0000000000000000000000000000000"
+	body := `{"controller_aid":"` + machine + `","public_key":"DKey","label":"Desk","grade":"enrolled"}`
+	grant := func(holder string, attrs map[string]interface{}) []byte {
+		req := w.signs("POST", "/api/controllers", body, ago(time.Minute))
+		a := map[string]interface{}{"asset_type": "controller", "name": "Desk", "label": "Desk", "public_key": "DKey", "grade": "enrolled", "request": req}
+		for k, v := range attrs {
+			a[k] = v
+		}
+		cred, _ := w.build(schemas.ControllerGrant.Schema.SAID, holder, time.Now().UTC(), a, w.edge())
+		return cred
+	}
+	w.body = body
+	if err := w.check(grant(machine, nil)); err != nil {
+		t.Fatalf("a machine's grant that rests on its request was refused: %v", err)
+	}
+	if err := w.check(grant("BAnotherMachine000000000000000000000000000", nil)); err == nil {
+		t.Fatal("a grant to another machine than was asked for was accepted")
+	}
+	for _, f := range []string{"public_key", "grade", "label"} {
+		if err := w.check(grant(machine, map[string]interface{}{f: "other"})); err == nil {
+			t.Fatalf("a grant with another %s than was asked for was accepted", f)
+		}
+	}
+}

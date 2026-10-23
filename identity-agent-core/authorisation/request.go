@@ -73,7 +73,8 @@ var ErrBodyWithheld = errors.New("the request's body was not given, so what it a
 
 // askedFields are what a credential keeps of its request's body: what was
 // asked for, and nothing else the body may carry.
-var askedFields = []string{"name", "capabilities", "resource_constraints", "nonce"}
+var askedFields = []string{"name", "capabilities", "resource_constraints", "nonce",
+	"controller_aid", "public_key", "grade", "label"}
 
 // Asked is what a request's body asked for, as a credential keeps it. The one
 // definition the issuer uses to write it and a verifier uses to check it.
@@ -390,6 +391,18 @@ func checkAskedFor(cred acdc, method, path string, asked map[string]json.RawMess
 		}
 		if rc, ok := asked["resource_constraints"]; ok && !sameJSON(rc, cred.A["resource_constraints"]) {
 			return fmt.Errorf("the request asked for other limits than were granted")
+		}
+	case schemas.ControllerGrant.Schema.SAID:
+		if method != "POST" || path != "/api/controllers" {
+			return fmt.Errorf("%s %s is not a request that grants a machine", method, path)
+		}
+		if stringOf(asked["controller_aid"]) != stringAttr(cred.A, "i") {
+			return fmt.Errorf("the request granted another machine than the credential names")
+		}
+		for _, f := range []string{"public_key", "grade", "label"} {
+			if stringOf(asked[f]) != stringAttr(cred.A, f) {
+				return fmt.Errorf("the request asked for another %s than was granted", f)
+			}
 		}
 	case schemas.AIAgentBody.Schema.SAID:
 		if method != "POST" || len(segments) != 7 || segments[4] != "bodies" || segments[6] != "approve" {

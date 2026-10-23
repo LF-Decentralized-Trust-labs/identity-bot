@@ -188,6 +188,12 @@ rather than inside the Identity Agent: validate the issuer's key log and pass it
 credential's and the grant's own logs, so ordering is by anchoring; take each body from the
 export and pass it, so rule 5 is shown; and apply rule 7 across everything it holds.
 
+**A machine's own grant.** A Controller Grant issued on the owner's signed request carries
+it like any other: the request must be `POST /api/controllers`, naming the machine the
+credential is issued to, with the same key, label and grade. A machine or AI agent that
+existed before grants is given one only this way, on the owner's request (ADR-044);
+nothing issues one from what is on disk.
+
 **Credentials issued while a grant is pending.** Where the identity's key is on another
 device, a machine's grant is recorded with its credential pending there. A credential
 issued on that machine's request meanwhile carries no edge, so it fails this check until it

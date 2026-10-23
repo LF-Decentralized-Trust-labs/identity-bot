@@ -65,7 +65,7 @@ func newTalkWorld(t *testing.T, caps ...string) *talkWorld {
 	}
 	// Granted as a real one is: anchored. Its signer is settled at first use.
 	g, _, _ := s.controllers().Get(w.ctlAID)
-	if _, err := s.grantController(g, time.Now().UTC()); err != nil {
+	if _, err := s.grantController(g, time.Now().UTC(), authority{}); err != nil {
 		t.Fatalf("anchoring the controller's grant: %v", err)
 	}
 

@@ -176,13 +176,11 @@ type CoreServer struct {
 	running            bool
 	// anchorStop ends the record's anchoring when the server stops.
 	anchorStop chan struct{}
+	// anchorStopMu guards anchorStop, which Stop closes while workers read it.
+	anchorStopMu sync.Mutex
 	// grantsMu holds machines' grants still while a credential is issued on
 	// one: revoking, re-issuing or replacing a grant takes it exclusively.
-	earlierGrantsMu sync.Mutex
-	// startedWithoutIdentity is an Identity Agent with no identity when it
-	// started, so with nothing made before grants were given at pairing.
-	startedWithoutIdentity bool
-	grantsMu               sync.RWMutex
+	grantsMu sync.RWMutex
 	// record is the state of the record's anchoring.
 	record recordState
 	// edgesSince is when the first credential naming who authorised it was
@@ -404,6 +402,9 @@ func New(cfg Config) (*CoreServer, error) {
 		s.EventHub.Broadcast(AgentEvent{Type: eventType, Payload: payload})
 	}
 	wsvc.SignReceipt = s.signWitnessReceipt
+	// An Identity Agent that anchors its record through a delegated record
+	// identity asks its witnesses to witness that identity too.
+	wsvc.AskToCoverDelegates = s.anchorsItsRecord
 	wsvc.OurWitnessAID = func() (string, error) {
 		_, aid, err := s.witnessSigningKey()
 		return aid, err
@@ -428,11 +429,6 @@ func New(cfg Config) (*CoreServer, error) {
 	// Seed the engine from what was persisted, so issuing and anchoring work
 	// after a restart without a fresh inception. Both implementations start
 	// empty, so both need this.
-	// An Identity Agent that starts with no identity has nothing that
-	// predates grants: whatever it later holds was made by this version.
-	if id, err := s.DataStore.GetIdentity(); err == nil && id == nil {
-		s.startedWithoutIdentity = true
-	}
 	s.prepareKeyLogs()
 
 	if s.WitnessService != nil {
@@ -701,8 +697,11 @@ func (s *CoreServer) Start() error {
 	// EndpointService ranks it above the ephemeral tunnel. Absent a configured
 	// relay this returns immediately, leaving the tunnel/direct path in place.
 	go s.startRelay()
+	s.anchorStopMu.Lock()
 	s.anchorStop = make(chan struct{})
-	go s.keepAnchoring(s.anchorStop)
+	stop := s.anchorStop
+	s.anchorStopMu.Unlock()
+	go s.keepAnchoring(stop)
 
 	s.httpSrv = s.httpServer()
 	go func() {
@@ -740,10 +739,12 @@ func (s *CoreServer) Stop() {
 		s.TunnelManager.Disconnect()
 	}
 
+	s.anchorStopMu.Lock()
 	if s.anchorStop != nil {
 		close(s.anchorStop)
 		s.anchorStop = nil
 	}
+	s.anchorStopMu.Unlock()
 	if s.RelayManager != nil {
 		s.RelayManager.Stop()
 	}
@@ -905,6 +906,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		r.Post("/controllers", s.handleGrantController)
 		r.Get("/controllers", s.handleListControllers)
 		r.Delete("/controllers/{aid}", s.handleRevokeController)
+		r.Get("/grants/awaiting-approval", s.handleGrantsAwaitingApproval)
 
 		r.Post("/keystore/root-seed", s.handleSetRootSeed)
 		r.Get("/keystore/root-seed", s.handleRootSeedStatus)
@@ -4594,7 +4596,6 @@ func (s *CoreServer) handleDeletePendingRequest(w http.ResponseWriter, r *http.R
 // its grant.
 func (s *CoreServer) prepareKeyLogs() {
 	s.reloadKeyLogs()
-	s.backfillControllerGrants()
 }
 
 // reloadKeyLogs hands the engine every key log this Identity Agent writes to:

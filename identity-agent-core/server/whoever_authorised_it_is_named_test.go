@@ -8,8 +8,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -212,7 +210,7 @@ func TestAConversationNamesTheGrantItWasOpenedUnder(t *testing.T) {
 func TestTyingAMachineToItsSignerReissuesItsGrant(t *testing.T) {
 	w := newTalkWorld(t)
 	g := aGrant(GradeEnrolled)
-	granted, err := w.s.grantController(g, time.Now().UTC())
+	granted, err := w.s.grantController(g, time.Now().UTC(), authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,30 +330,12 @@ func TestAFirstVersionCredentialIssuedAfterwardsIsNotHonoured(t *testing.T) {
 	}
 }
 
-// Machines paired before machines were given grants are given one at start.
-func TestMachinesPairedEarlierAreGivenGrants(t *testing.T) {
-	s, _ := grantWorld(t)
-	s.DeclaredEntityType = "organization"
-	g := aGrant(GradeEnrolled)
-	if _, err := s.controllers().Grant(g, time.Now().UTC()); err != nil {
-		t.Fatal(err)
-	}
-	s.prepareKeyLogs()
-	got, _, _ := s.controllers().Get(g.ControllerAID)
-	if got.CredentialSAID == "" {
-		t.Fatal("a machine paired earlier was not given a grant")
-	}
-	if statusOf(t, s, got.CredentialSAID) != keri.StatusIssued {
-		t.Fatal("the grant given is not in force")
-	}
-}
-
 // Settling a machine's signer, when its grant cannot be re-issued, changes
 // nothing and is tried again next time.
 func TestSettlingASignerIsTriedAgainWhenItsGrantCannotBeReissued(t *testing.T) {
 	w := newTalkWorld(t)
 	g := aGrant(GradeEnrolled)
-	granted, err := w.s.grantController(g, time.Now().UTC())
+	granted, err := w.s.grantController(g, time.Now().UTC(), authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -379,11 +359,11 @@ func TestSettlingASignerIsTriedAgainWhenItsGrantCannotBeReissued(t *testing.T) {
 func TestReGrantingAMachine(t *testing.T) {
 	s, _ := grantWorld(t)
 	g := aGrant(GradeEnrolled)
-	first, err := s.grantController(g, time.Now().UTC())
+	first, err := s.grantController(g, time.Now().UTC(), authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := s.grantController(g, time.Now().UTC())
+	second, err := s.grantController(g, time.Now().UTC(), authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +372,7 @@ func TestReGrantingAMachine(t *testing.T) {
 	}
 	engine := s.KeriDriver
 	s.KeriDriver = nil
-	if _, err := s.grantController(g, time.Now().UTC()); err == nil {
+	if _, err := s.grantController(g, time.Now().UTC(), authority{}); err == nil {
 		t.Fatal("a re-grant with nothing to anchor it in succeeded")
 	}
 	s.KeriDriver = engine
@@ -409,14 +389,14 @@ func TestReGrantingAMachine(t *testing.T) {
 func TestAMachineNeverHasTwoGrantsInForce(t *testing.T) {
 	s, _ := grantWorld(t)
 	g := aGrant(GradeEnrolled)
-	first, err := s.grantController(g, time.Now().UTC())
+	first, err := s.grantController(g, time.Now().UTC(), authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DataStore.DeleteCredential(first.CredentialSAID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.grantController(g, time.Now().UTC()); err == nil {
+	if _, err := s.grantController(g, time.Now().UTC(), authority{}); err == nil {
 		t.Fatal("a machine was re-granted while its earlier grant could not be withdrawn")
 	}
 	for _, c := range credentialsOf(t, s, g.ControllerAID) {
@@ -438,7 +418,7 @@ func TestAMachineIsGrantedWithItsCredentialPendingWhereTheKeyIsElsewhere(t *test
 	elsewhere, _ := keri.GenerateSigner(true)
 	owner.PublicKey, _ = elsewhere.PublicKey()
 	s.DataStore.SaveIdentity(*owner)
-	g, err := s.grantController(aGrant(GradeEnrolled), time.Now().UTC())
+	g, err := s.grantController(aGrant(GradeEnrolled), time.Now().UTC(), authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -450,8 +430,9 @@ func TestAMachineIsGrantedWithItsCredentialPendingWhereTheKeyIsElsewhere(t *test
 	}
 }
 
-// A machine whose grant has been withdrawn authorises nothing; one paired
-// before machines were given grants is given its grant when it asks.
+// A machine whose grant has been withdrawn authorises nothing, and nor does
+// one paired before machines were given grants, which is not given one by
+// asking.
 func TestAMachineWithoutAGrantInForceAuthorisesNothing(t *testing.T) {
 	w := newTalkWorld(t)
 	asked := 0
@@ -469,11 +450,11 @@ func TestAMachineWithoutAGrantInForceAuthorisesNothing(t *testing.T) {
 	unanchored := ctl
 	unanchored.CredentialSAID = ""
 	w.s.controllers().Put(unanchored)
-	if code := put(); code != http.StatusOK {
+	if code := put(); code != http.StatusForbidden {
 		t.Fatalf("a machine paired before grants was answered %d", code)
 	}
-	if got, _, _ := w.s.controllers().Get(w.ctlAID); got.CredentialSAID == "" {
-		t.Fatal("the machine was answered without being given its grant")
+	if got, _, _ := w.s.controllers().Get(w.ctlAID); got.CredentialSAID != "" {
+		t.Fatal("the machine was given a grant by asking")
 	}
 	w.s.controllers().Put(ctl)
 	if err := w.s.withdrawControllerGrant(ctl.CredentialSAID); err != nil {
@@ -521,7 +502,7 @@ func TestASessionIssuesNoAuthority(t *testing.T) {
 func TestSettlingASignerNeverLeavesTwoGrantsInForce(t *testing.T) {
 	w := newTalkWorld(t)
 	g := aGrant(GradeEnrolled)
-	granted, err := w.s.grantController(g, time.Now().UTC())
+	granted, err := w.s.grantController(g, time.Now().UTC(), authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -665,272 +646,9 @@ func TestAnAIAgentWithNoGrantMayDoNothing(t *testing.T) {
 	}
 }
 
-// An individual whose desktop was paired before machines were given grants,
-// and who holds no AI agent yet, can create one from that desktop.
-func TestAnIndividualsEarlierDesktopCanCreateAnAIAgent(t *testing.T) {
-	w := newTalkWorld(t)
-	w.s.DeclaredEntityType = "individual"
-	w.s.assetHandler.Store.DeleteAsset(w.a.ID)
-	ctl, _, _ := w.s.controllers().Get(w.ctlAID)
-	ctl.CredentialSAID = ""
-	w.s.controllers().Put(ctl)
-	w.s.prepareKeyLogs()
-	body := `{"name":"First","capabilities":["` + capabilityMessageAgent + `"]}`
-	rec := httptest.NewRecorder()
-	w.s.router.ServeHTTP(rec, asThatMachine(t, w.ctlAID, "POST", "/api/mcp/agents", body, w.ctlSeed, authprovider.LevelVerified, time.Now()))
-	if rec.Code != http.StatusOK && rec.Code != http.StatusCreated {
-		t.Fatalf("the desktop could not create the first AI agent: %d %s", rec.Code, rec.Body.String())
-	}
-}
-
-// What existed before grants is sealed in the identity's key log once, and
-// only once, however often the Identity Agent starts.
-func TestWhatExistedBeforeGrantsIsSealedOnce(t *testing.T) {
-	s, _ := grantWorld(t)
-	owner, _ := s.DataStore.GetIdentity()
-	before, _ := s.DataStore.GetEvents(owner.AID)
-	s.prepareKeyLogs()
-	s.prepareKeyLogs()
-	after, _ := s.DataStore.GetEvents(owner.AID)
-	if len(after) != len(before)+1 {
-		t.Fatalf("sealing what existed before grants wrote %d events", len(after)-len(before))
-	}
-	if taken, _, _ := s.anchoredEarlierGrants(owner.AID); !taken {
-		t.Fatal("the snapshot is not found in the key log")
-	}
-}
-
-// An AI agent provisioned before every AI agent was given a grant is given
-// one, so its token is not left able to do nothing.
-func TestAnAIAgentProvisionedEarlierIsGivenAGrant(t *testing.T) {
-	w := newTalkWorld(t)
-	rec := httptest.NewRecorder()
-	w.s.router.ServeHTTP(rec, local("POST", "/api/mcp/agents", `{"name":"Earlier","capabilities":["`+capabilityMessageAgent+`"]}`))
-	var made map[string]interface{}
-	json.Unmarshal(rec.Body.Bytes(), &made)
-	id, _ := made["asset_id"].(string)
-	if id == "" {
-		t.Fatalf("provisioning: %d %s", rec.Code, rec.Body.String())
-	}
-	mcpTokensMu.Lock()
-	toks := w.s.loadMCPTokens()
-	n := 0
-	for i := range toks {
-		if toks[i].AssetID == id {
-			toks[i].GrantSAID = ""
-			n++
-		}
-	}
-	w.s.saveMCPTokens(toks)
-	mcpTokensMu.Unlock()
-	if n == 0 {
-		t.Fatal("the AI agent has no token")
-	}
-	w.s.backfillControllerGrants()
-	for _, tok := range w.s.loadMCPTokens() {
-		if tok.AssetID != id {
-			continue
-		}
-		cc := sandbox.CallerContext{Scopes: []string{capabilityMessageAgent}}
-		w.s.applyGrantScopes(tok, &cc)
-		if tok.GrantSAID == "" || len(cc.Scopes) == 0 {
-			t.Fatalf("the AI agent provisioned earlier was not given a usable grant: %+v %v", tok.GrantSAID, cc.Scopes)
-		}
-	}
-}
-
-// A back-fill that failed is tried again on the next anchoring tick.
-func TestABackFillIsTriedAgain(t *testing.T) {
-	s, _ := grantWorld(t)
-	s.DeclaredEntityType = "organization"
-	g := aGrant(GradeEnrolled)
-	s.controllers().Grant(g, time.Now().UTC())
-	was := anchorInterval
-	anchorInterval = 20 * time.Millisecond
-	t.Cleanup(func() { anchorInterval = was })
-	stop := make(chan struct{})
-	go s.keepAnchoring(stop)
-	defer close(stop)
-	for i := 0; i < 100; i++ {
-		if got, _, _ := s.controllers().Get(g.ControllerAID); got.CredentialSAID != "" {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatal("a machine with no grant was not given one on a later tick")
-}
-
-// The reviewer's attack: somebody who can write the data directory, holding
-// no key, clears an AI agent's grant from its token and widens what it may do.
-// Nothing they wrote becomes a grant.
-func TestAWidenedAIAgentIsNotGrantedFromItsFiles(t *testing.T) {
-	w := newTalkWorld(t)
-	rec := httptest.NewRecorder()
-	w.s.router.ServeHTTP(rec, local("POST", "/api/mcp/agents", `{"name":"Narrow","capabilities":["`+capabilityMessageAgent+`"]}`))
-	var made map[string]interface{}
-	json.Unmarshal(rec.Body.Bytes(), &made)
-	id, _ := made["asset_id"].(string)
-	if id == "" {
-		t.Fatalf("provisioning: %d %s", rec.Code, rec.Body.String())
-	}
-	w.s.backfillControllerGrants() // the snapshot is sealed
-	a, _ := w.s.assetHandler.Store.GetAsset(id)
-	a.Capabilities = append(a.Capabilities, "infra.dns_record.create")
-	w.s.assetHandler.Store.UpsertAsset(a)
-	mcpTokensMu.Lock()
-	toks := w.s.loadMCPTokens()
-	for i := range toks {
-		if toks[i].AssetID == id {
-			toks[i].GrantSAID = ""
-			toks[i].Scopes = append(toks[i].Scopes, "infra.dns_record.create")
-		}
-	}
-	w.s.saveMCPTokens(toks)
-	mcpTokensMu.Unlock()
-	held := len(credentialsOf(t, w.s, a.PairwiseAID))
-	w.s.backfillControllerGrants()
-	if now := len(credentialsOf(t, w.s, a.PairwiseAID)); now != held {
-		t.Fatal("a grant was issued from what the files say")
-	}
-	for _, tok := range w.s.loadMCPTokens() {
-		if tok.AssetID != id {
-			continue
-		}
-		cc := sandbox.CallerContext{Scopes: tok.Scopes}
-		w.s.applyGrantScopes(tok, &cc)
-		if tok.GrantSAID != "" || len(cc.Scopes) != 0 {
-			t.Fatalf("the widened AI agent may do %v under grant %q", cc.Scopes, tok.GrantSAID)
-		}
-	}
-}
-
-// A machine row added to the controllers file after the snapshot is given no
-// grant, by the back-fill or when it asks.
-func TestAnAddedMachineRowIsNotGranted(t *testing.T) {
-	w := newTalkWorld(t)
-	w.s.backfillControllerGrants() // the snapshot is sealed
-	ctl, _, _ := w.s.controllers().Get(w.ctlAID)
-	w.s.controllers().Revoke(w.ctlAID)
-	added := ctl
-	added.CredentialSAID = ""
-	w.s.controllers().Put(added)
-	w.s.backfillControllerGrants()
-	if got, _, _ := w.s.controllers().Get(w.ctlAID); got.CredentialSAID != "" {
-		t.Fatal("a machine row added to the file was given a grant")
-	}
-	req := asThatMachine(t, w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
-		`{"capabilities":["`+capabilityMessageAgent+`"]}`, w.ctlSeed, authprovider.LevelVerified, time.Now())
-	rec := httptest.NewRecorder()
-	w.s.router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("a machine row added to the file was answered %d", rec.Code)
-	}
-	if got, _, _ := w.s.controllers().Get(w.ctlAID); got.CredentialSAID != "" {
-		t.Fatal("a machine row added to the file was given a grant when it asked")
-	}
-}
-
-// The list kept beside the database, removed or edited, matches nothing the
-// key log sealed: nothing is granted, and no second snapshot is taken.
-func TestAnAlteredSnapshotListGrantsNothing(t *testing.T) {
-	for _, alter := range []string{"removed", "edited"} {
-		t.Run(alter, func(t *testing.T) {
-			s, _ := grantWorld(t)
-			s.DeclaredEntityType = "organization"
-			g := aGrant(GradeEnrolled)
-			s.controllers().Grant(g, time.Now().UTC())
-			owner, _ := s.DataStore.GetIdentity()
-			path := filepath.Join(s.DataDir, earlierGrantsFile)
-			// Seal a snapshot that does not hold the machine, then alter the
-			// list so it would.
-			s.controllers().Revoke(g.ControllerAID)
-			if _, ok := s.earlierGrantsSnapshot(); !ok {
-				t.Fatal("no snapshot was sealed")
-			}
-			s.controllers().Grant(g, time.Now().UTC())
-			got, _, _ := s.controllers().Get(g.ControllerAID)
-			if alter == "removed" {
-				os.Remove(path)
-			} else {
-				os.WriteFile(path, []byte(`{"identity":"`+owner.AID+`","controllers":[`+asJSON(machineAsItStands(got))+`],"agents":[]}`), 0o600)
-			}
-			before, _ := s.DataStore.GetEvents(owner.AID)
-			s.backfillControllerGrants()
-			if now, _, _ := s.controllers().Get(g.ControllerAID); now.CredentialSAID != "" {
-				t.Fatal("a machine was granted on an altered list")
-			}
-			if after, _ := s.DataStore.GetEvents(owner.AID); len(after) != len(before) {
-				t.Fatal("a second snapshot was sealed")
-			}
-		})
-	}
-}
-
-// Started without an identity, an Identity Agent seals that nothing predates
-// grants, whatever its files hold by the time it has one.
-func TestAFreshIdentityAgentOwesNoGrantAfterwards(t *testing.T) {
-	s, _ := grantWorld(t)
-	s.startedWithoutIdentity = true
-	g := aGrant(GradeEnrolled)
-	s.controllers().Grant(g, time.Now().UTC())
-	s.backfillControllerGrants()
-	if got, _, _ := s.controllers().Get(g.ControllerAID); got.CredentialSAID != "" {
-		t.Fatal("a fresh Identity Agent granted a machine from its file")
-	}
-}
-
 func asJSON(v interface{}) string {
 	raw, _ := json.Marshal(v)
 	return string(raw)
-}
-
-// An AI agent the snapshot sealed, widened since, is given no grant: never
-// more than it had when the snapshot was taken.
-func TestAnEarlierAIAgentWidenedSinceIsNotGranted(t *testing.T) {
-	w := newTalkWorld(t)
-	rec := httptest.NewRecorder()
-	w.s.router.ServeHTTP(rec, local("POST", "/api/mcp/agents", `{"name":"Earlier","capabilities":["`+capabilityMessageAgent+`"]}`))
-	var made map[string]interface{}
-	json.Unmarshal(rec.Body.Bytes(), &made)
-	id, _ := made["asset_id"].(string)
-	mcpTokensMu.Lock()
-	toks := w.s.loadMCPTokens()
-	for i := range toks {
-		if toks[i].AssetID == id {
-			toks[i].GrantSAID = ""
-		}
-	}
-	w.s.saveMCPTokens(toks)
-	mcpTokensMu.Unlock()
-	if snap, ok := w.s.earlierGrantsSnapshot(); !ok || len(snap.Agents) != 1 {
-		t.Fatalf("the earlier AI agent was not sealed: %+v", snap)
-	}
-	a, _ := w.s.assetHandler.Store.GetAsset(id)
-	a.Capabilities = append(a.Capabilities, "infra.dns_record.create")
-	w.s.assetHandler.Store.UpsertAsset(a)
-	w.s.backfillControllerGrants()
-	for _, tok := range w.s.loadMCPTokens() {
-		if tok.AssetID == id && tok.GrantSAID != "" {
-			t.Fatal("an AI agent widened since the snapshot was given a grant")
-		}
-	}
-}
-
-// A machine the snapshot sealed, changed since, is given no grant.
-func TestAnEarlierMachineChangedSinceIsNotGranted(t *testing.T) {
-	s, _ := grantWorld(t)
-	g := aGrant(GradeEnrolled)
-	s.controllers().Grant(g, time.Now().UTC())
-	if snap, ok := s.earlierGrantsSnapshot(); !ok || len(snap.Controllers) != 1 {
-		t.Fatalf("the earlier machine was not sealed: %+v", snap)
-	}
-	got, _, _ := s.controllers().Get(g.ControllerAID)
-	got.Grade = GradeScoped
-	s.controllers().Put(got)
-	s.backfillControllerGrants()
-	if now, _, _ := s.controllers().Get(g.ControllerAID); now.CredentialSAID != "" {
-		t.Fatal("a machine changed since the snapshot was given a grant")
-	}
 }
 
 // A granted machine's row changed since its grant is not acted on, and no
@@ -973,7 +691,9 @@ func TestAGrantIsNotIssuedUnsignedWhereTheKeyIsElsewhere(t *testing.T) {
 	if _, err := s.issueCapabilityGrant(agent, authority{About: agent.ID}); !errors.Is(err, errKeyElsewhere) {
 		t.Fatalf("issuing where the key is elsewhere: %v", err)
 	}
-	s.backfillControllerGrants()
+	if g, err := s.grantController(aGrant(GradeEnrolled), time.Now().UTC(), authority{}); err != nil || !g.CredentialPending {
+		t.Fatalf("a machine granted where the key is elsewhere: %+v %v", g, err)
+	}
 	after, _ := s.DataStore.GetEvents(owner.AID)
 	if len(after) != len(before) {
 		t.Fatal("an event was written into a key log whose key is elsewhere")
@@ -982,5 +702,216 @@ func TestAGrantIsNotIssuedUnsignedWhereTheKeyIsElsewhere(t *testing.T) {
 		if ev.CesrSignature == "" {
 			t.Fatalf("event %d of the identity's key log is unsigned", ev.SequenceNumber)
 		}
+	}
+}
+
+// awaiting is what the approval list says is waiting.
+func awaiting(t *testing.T, s *CoreServer) (machines, agents map[string]string) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	s.handleGrantsAwaitingApproval(rec, local("GET", "/api/grants/awaiting-approval", ""))
+	var out struct {
+		Machines []map[string]interface{} `json:"machines"`
+		Agents   []map[string]interface{} `json:"agents"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("awaiting approval: %d %s", rec.Code, rec.Body.String())
+	}
+	machines, agents = map[string]string{}, map[string]string{}
+	for _, m := range out.Machines {
+		machines[m["controller_aid"].(string)], _ = m["awaiting"].(string)
+	}
+	for _, a := range out.Agents {
+		agents[a["asset_id"].(string)], _ = a["awaiting"].(string)
+	}
+	return machines, agents
+}
+
+// everythingRuns is every path that once gave a grant without being asked:
+// starting, and the anchoring tick.
+func everythingRuns(s *CoreServer) {
+	s.prepareKeyLogs()
+	s.anchorRecord()
+}
+
+// The owner removes a machine; somebody who can write the data directory puts
+// its row back. It is never granted without the owner's signature: not at
+// start, not on the tick, not by asking, and it waits for approval.
+func TestARestoredMachineRowIsNeverGrantedWithoutTheOwner(t *testing.T) {
+	w := newTalkWorld(t)
+	resetSeenSignatures(t)
+	ctl, _, _ := w.s.controllers().Get(w.ctlAID)
+	if err := w.s.revokeController(w.ctlAID); err != nil {
+		t.Fatal(err)
+	}
+	restored := ctl
+	restored.CredentialSAID = ""
+	w.s.controllers().Put(restored)
+	everythingRuns(w.s)
+	req := asThatMachine(t, w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
+		`{"capabilities":["`+capabilityMessageAgent+`"]}`, w.ctlSeed, authprovider.LevelVerified, time.Now())
+	rec := httptest.NewRecorder()
+	w.s.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("a restored machine row was answered %d", rec.Code)
+	}
+	everythingRuns(w.s)
+	if got, _, _ := w.s.controllers().Get(w.ctlAID); got.CredentialSAID != "" || got.CredentialPending {
+		t.Fatal("a restored machine row was given a grant")
+	}
+	if m, _ := awaiting(t, w.s); m[w.ctlAID] != "the owner's approval" {
+		t.Fatalf("the restored machine is not listed as awaiting the owner: %v", m)
+	}
+}
+
+// A machine row added to the file is never granted without the owner either.
+func TestAnAddedMachineRowIsNeverGrantedWithoutTheOwner(t *testing.T) {
+	s, _ := grantWorld(t)
+	s.DeclaredEntityType = "organization"
+	g := aGrant(GradeEnrolled)
+	s.controllers().Grant(g, time.Now().UTC())
+	everythingRuns(s)
+	if got, _, _ := s.controllers().Get(g.ControllerAID); got.CredentialSAID != "" || got.CredentialPending {
+		t.Fatal("a machine row added to the file was given a grant")
+	}
+	if m, _ := awaiting(t, s); m[g.ControllerAID] != "the owner's approval" {
+		t.Fatalf("the added machine is not listed as awaiting the owner: %v", m)
+	}
+}
+
+// An AI agent with no grant, widened in the files, is never granted from them:
+// it may do nothing and waits for the owner.
+func TestAnAIAgentWithNoGrantIsNeverGrantedFromItsFiles(t *testing.T) {
+	w := newTalkWorld(t)
+	rec := httptest.NewRecorder()
+	w.s.router.ServeHTTP(rec, local("POST", "/api/mcp/agents", `{"name":"Earlier","capabilities":["`+capabilityMessageAgent+`"]}`))
+	var made map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &made)
+	id, _ := made["asset_id"].(string)
+	a, _ := w.s.assetHandler.Store.GetAsset(id)
+	a.Capabilities = append(a.Capabilities, "infra.dns_record.create")
+	w.s.assetHandler.Store.UpsertAsset(a)
+	mcpTokensMu.Lock()
+	toks := w.s.loadMCPTokens()
+	for i := range toks {
+		if toks[i].AssetID == id {
+			toks[i].GrantSAID = ""
+			toks[i].Scopes = append(toks[i].Scopes, "infra.dns_record.create")
+		}
+	}
+	w.s.saveMCPTokens(toks)
+	mcpTokensMu.Unlock()
+	held := len(credentialsOf(t, w.s, a.PairwiseAID))
+	everythingRuns(w.s)
+	if now := len(credentialsOf(t, w.s, a.PairwiseAID)); now != held {
+		t.Fatal("a grant was issued from what the files say")
+	}
+	for _, tok := range w.s.loadMCPTokens() {
+		if tok.AssetID != id {
+			continue
+		}
+		cc := sandbox.CallerContext{Scopes: tok.Scopes}
+		w.s.applyGrantScopes(tok, &cc)
+		if len(cc.Scopes) != 0 {
+			t.Fatalf("the AI agent may do %v without a grant", cc.Scopes)
+		}
+	}
+	if _, ag := awaiting(t, w.s); ag[id] != "the owner's approval" {
+		t.Fatalf("the AI agent is not listed as awaiting the owner: %v", ag)
+	}
+}
+
+// The owner approves an earlier machine by granting it again, signed: the
+// grant names the owner's request and rests on it.
+func TestTheOwnerApprovesAnEarlierMachine(t *testing.T) {
+	w := newTalkWorld(t)
+	resetSeenSignatures(t)
+	ctl, _, _ := w.s.controllers().Get(w.ctlAID)
+	earlier := ctl
+	earlier.CredentialSAID = ""
+	w.s.controllers().Put(earlier)
+	body := `{"controller_aid":"` + ctl.ControllerAID + `","public_key":"` + ctl.PublicKey + `","label":"` + ctl.Label + `","grade":"` + string(ctl.Grade) + `"}`
+	rec := httptest.NewRecorder()
+	w.s.router.ServeHTTP(rec, signed(t, "POST", "/api/controllers", body, testOwnerSeed(), time.Now()))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("the owner's approval: %d %s", rec.Code, rec.Body.String())
+	}
+	got, _, _ := w.s.controllers().Get(w.ctlAID)
+	if got.CredentialSAID == "" {
+		t.Fatal("the approved machine has no grant")
+	}
+	req, _ := acdcOf(t, w.s, got.CredentialSAID)["a"].(map[string]interface{})["request"].(map[string]interface{})
+	if req["kind"] != "owner" {
+		t.Fatalf("the grant does not name the owner's request: %v", req)
+	}
+	if m, _ := awaiting(t, w.s); m[w.ctlAID] != "" {
+		t.Fatal("the approved machine is still listed as awaiting")
+	}
+}
+
+// The owner approves an earlier AI agent by setting its capabilities, signed.
+func TestTheOwnerApprovesAnEarlierAIAgent(t *testing.T) {
+	w := newTalkWorld(t)
+	resetSeenSignatures(t)
+	rec := httptest.NewRecorder()
+	w.s.router.ServeHTTP(rec, local("POST", "/api/mcp/agents", `{"name":"Earlier","capabilities":["`+capabilityMessageAgent+`"]}`))
+	var made map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &made)
+	id, _ := made["asset_id"].(string)
+	mcpTokensMu.Lock()
+	toks := w.s.loadMCPTokens()
+	for i := range toks {
+		if toks[i].AssetID == id {
+			toks[i].GrantSAID = ""
+		}
+	}
+	w.s.saveMCPTokens(toks)
+	mcpTokensMu.Unlock()
+	body := `{"capabilities":["` + capabilityMessageAgent + `"]}`
+	rec = httptest.NewRecorder()
+	w.s.router.ServeHTTP(rec, signed(t, "PUT", "/api/mcp/agents/"+id+"/capabilities", body, testOwnerSeed(), time.Now()))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("the owner's approval: %d %s", rec.Code, rec.Body.String())
+	}
+	for _, tok := range w.s.loadMCPTokens() {
+		if tok.AssetID != id {
+			continue
+		}
+		cc := sandbox.CallerContext{Scopes: tok.Scopes}
+		w.s.applyGrantScopes(tok, &cc)
+		if tok.GrantSAID == "" || len(cc.Scopes) == 0 {
+			t.Fatal("the approved AI agent may still do nothing")
+		}
+	}
+	if _, ag := awaiting(t, w.s); ag[id] != "" {
+		t.Fatal("the approved AI agent is still listed as awaiting")
+	}
+}
+
+// Approved where the identity's key is another device's, a machine waits for
+// that device, as one paired there now does, and says so.
+func TestAnApprovalWhereTheKeyIsElsewhereWaitsForThatDevice(t *testing.T) {
+	s, _ := grantWorld(t)
+	owner, _ := s.DataStore.GetIdentity()
+	elsewhere, _ := keri.GenerateSigner(true)
+	owner.PublicKey, _ = elsewhere.PublicKey()
+	s.DataStore.SaveIdentity(*owner)
+	g := aGrant(GradeEnrolled)
+	s.controllers().Grant(g, time.Now().UTC())
+	if _, err := s.grantController(g, time.Now().UTC(), authority{}); err != nil {
+		t.Fatal(err)
+	}
+	if m, _ := awaiting(t, s); m[g.ControllerAID] != "the device that holds the identity's key" {
+		t.Fatalf("the approved machine does not say what it waits for: %v", m)
+	}
+}
+
+// The list of what awaits approval is served where the apps ask for it.
+func TestTheApprovalListIsServed(t *testing.T) {
+	w := newTalkWorld(t)
+	rec := httptest.NewRecorder()
+	w.s.router.ServeHTTP(rec, local("GET", "/api/grants/awaiting-approval", ""))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"machines"`) {
+		t.Fatalf("the approval list: %d %s", rec.Code, rec.Body.String())
 	}
 }

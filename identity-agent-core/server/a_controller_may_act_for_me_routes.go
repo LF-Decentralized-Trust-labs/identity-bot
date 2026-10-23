@@ -35,6 +35,14 @@ import (
 // and derived a pairwise owner identity for this machine. The agent is the
 // register here, never the decider.
 func (s *CoreServer) handleGrantController(w http.ResponseWriter, r *http.Request) {
+	// Who asked, read before the body is: the owner's signed request, kept as
+	// it was signed, is the authority the grant names.
+	by, release, err := s.authorityOf(r)
+	if err != nil {
+		writeError(w, http.StatusForbidden, "who asked for this grant: "+err.Error(), "")
+		return
+	}
+	defer release()
 	var req struct {
 		ControllerAID string `json:"controller_aid"`
 		PublicKey     string `json:"public_key"`
@@ -72,7 +80,7 @@ func (s *CoreServer) handleGrantController(w http.ResponseWriter, r *http.Reques
 	}
 
 	now := time.Now().UTC()
-	granted, err := s.grantController(g, now)
+	granted, err := s.grantController(g, now, by)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error(), "")
 		return

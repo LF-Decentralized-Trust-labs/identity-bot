@@ -73,11 +73,6 @@ func (s *CoreServer) authorityOf(r *http.Request) (authority, func(), error) {
 		return authority{}, release, err
 	}
 	if grant, ok := TheControllerThatAsked(r); ok {
-		// A machine paired before machines were given grants is given its
-		// grant now, rather than refused until a back-fill reaches it.
-		if err := s.grantIfMissing(grant.ControllerAID); err != nil {
-			return authority{}, release, err
-		}
 		s.grantsMu.RLock()
 		release = s.grantsMu.RUnlock
 		current, had, err := s.controllers().Get(grant.ControllerAID)
@@ -91,7 +86,7 @@ func (s *CoreServer) authorityOf(r *http.Request) (authority, func(), error) {
 		}
 		if current.CredentialSAID == "" && !current.CredentialPending {
 			release()
-			return authority{}, func() {}, fmt.Errorf("this machine's grant is not anchored yet, so what it asks for could not be shown to rest on it")
+			return authority{}, func() {}, fmt.Errorf("this machine was paired before machines were given grants, and needs the owner's approval before what it asks for can rest on it")
 		}
 		if current.CredentialSAID != "" {
 			if err := s.grantStillStands(current.CredentialSAID); err != nil {
@@ -309,7 +304,7 @@ var errKeyElsewhere = errors.New("the identity's key is held on another device")
 // Where the identity's key is held on another device, the grant is recorded
 // with its credential pending on that device, and nothing is written into the
 // key log here.
-func (s *CoreServer) grantController(g ControllerGrant, now time.Time) (ControllerGrant, error) {
+func (s *CoreServer) grantController(g ControllerGrant, now time.Time, by authority) (ControllerGrant, error) {
 	s.grantsMu.Lock()
 	defer s.grantsMu.Unlock()
 	checked, err := s.controllers().Check(g, now)
@@ -320,7 +315,8 @@ func (s *CoreServer) grantController(g ControllerGrant, now time.Time) (Controll
 	if err != nil {
 		return ControllerGrant{}, err
 	}
-	said, err := s.issueControllerGrant(checked)
+	by.About = checked.ControllerAID
+	said, err := s.issueControllerGrant(checked, by)
 	if errors.Is(err, errKeyElsewhere) {
 		checked.CredentialPending = true
 		if err := s.controllers().Put(checked); err != nil {
@@ -346,7 +342,7 @@ func (s *CoreServer) grantController(g ControllerGrant, now time.Time) (Controll
 }
 
 // issueControllerGrant issues the credential for a grant.
-func (s *CoreServer) issueControllerGrant(g ControllerGrant) (string, error) {
+func (s *CoreServer) issueControllerGrant(g ControllerGrant, by authority) (string, error) {
 	if s.DataStore == nil || s.KeriDriver == nil {
 		return "", fmt.Errorf("this Identity Agent has no key log to anchor the grant in")
 	}
@@ -369,7 +365,7 @@ func (s *CoreServer) issueControllerGrant(g ControllerGrant) (string, error) {
 	if !g.ExpiresAt.IsZero() {
 		expiry = g.ExpiresAt.UTC().Format(time.RFC3339)
 	}
-	return s.issueAssetCredential(schemas.ControllerGrant, g.ControllerAID, identity.AID, claims, expiry, authority{})
+	return s.issueAssetCredential(schemas.ControllerGrant, g.ControllerAID, identity.AID, claims, expiry, by)
 }
 
 // revokeController takes a machine's authorisation away, and withdraws its
@@ -416,7 +412,7 @@ func (s *CoreServer) bindSigner(aid, signer string) (ControllerGrant, error) {
 		if err := s.rowIsItsGrant(g); err != nil {
 			return g, err
 		}
-		said, err := s.issueControllerGrant(bound)
+		said, err := s.issueControllerGrant(bound, authority{About: bound.ControllerAID})
 		if err != nil {
 			return g, fmt.Errorf("the machine's grant could not be re-issued to name its signer: %w", err)
 		}
@@ -457,124 +453,6 @@ func (s *CoreServer) withdrawOrSay(said string) {
 	}
 }
 
-// backfillControllerGrants issues a Controller Grant for every machine paired
-// before machines were given one, so none goes on authorising credentials that
-// cannot name it, and a grant for every AI agent provisioned before every AI
-// agent was given one. Where the identity's key is not held here a machine's is
-// marked pending on the device that holds it. Only an Identity Agent with
-// paired machines or AI agents writes anything. Run at start and on every
-// anchoring tick, so one that fails is tried again.
-func (s *CoreServer) backfillControllerGrants() {
-	if s.DataStore == nil || s.KeriDriver == nil {
-		return
-	}
-	// What existed before grants is sealed the first time this runs, before
-	// anything is given one.
-	if _, ok := s.earlierGrantsSnapshot(); !ok {
-		return
-	}
-	all, err := s.controllers().All()
-	if err != nil {
-		log.Printf("[controller] machines paired earlier could not be read to give them grants: %v", err)
-		return
-	}
-	for _, g := range all {
-		if g.CredentialSAID != "" || g.CredentialPending {
-			continue
-		}
-		if err := s.grantIfMissing(g.ControllerAID); err != nil {
-			log.Printf("[controller] machine %s paired earlier could not be given a grant: %v", g.ControllerAID, err)
-		}
-	}
-	s.backfillAgentGrants()
-}
-
-// grantIfMissing gives a live machine with no grant credential its grant, or
-// marks it pending where the identity's key is held elsewhere.
-func (s *CoreServer) grantIfMissing(controllerAID string) error {
-	s.grantsMu.Lock()
-	defer s.grantsMu.Unlock()
-	g, had, err := s.controllers().Get(controllerAID)
-	if err != nil || !had || g.CredentialSAID != "" || g.CredentialPending {
-		return err
-	}
-	if live, _ := g.Live(time.Now()); !live {
-		return nil
-	}
-	// Only a machine that stood exactly so when what existed before grants
-	// was sealed; one added or changed since waits for the identity to grant
-	// it the ordinary way.
-	if snap, ok := s.earlierGrantsSnapshot(); !ok || !snap.machineIsInSnapshot(g) {
-		return nil
-	}
-	said, err := s.issueControllerGrant(g)
-	switch {
-	case errors.Is(err, errKeyElsewhere):
-		g.CredentialPending = true
-		return s.controllers().Put(g)
-	case err != nil:
-		return err
-	}
-	g.CredentialSAID = said
-	if err := s.controllers().Put(g); err != nil {
-		s.withdrawOrSay(said)
-		return err
-	}
-	return nil
-}
-
-// backfillAgentGrants gives every AI agent provisioned before every AI agent
-// was given a grant one, issued on this Identity Agent's own authority, so its
-// token is not left with nothing it may do.
-func (s *CoreServer) backfillAgentGrants() {
-	if s.assetHandler == nil || s.assetHandler.Store == nil {
-		return
-	}
-	mcpTokensMu.Lock()
-	var missing []mcpToken
-	for _, t := range s.loadMCPTokens() {
-		if t.AgentAID != "" && t.GrantSAID == "" && t.AssetID != "" {
-			missing = append(missing, t)
-		}
-	}
-	mcpTokensMu.Unlock()
-	for _, t := range missing {
-		s.backfillAgentGrant(t.AssetID)
-	}
-}
-
-func (s *CoreServer) backfillAgentGrant(assetID string) {
-	unlock := lockAgentGrant(assetID)
-	defer unlock()
-	agent, ok := s.assetHandler.Store.GetAsset(assetID)
-	if !ok {
-		return
-	}
-	// Only an AI agent that stands exactly as it did when what existed before
-	// grants was sealed: never one added since, never one widened since.
-	if snap, ok := s.earlierGrantsSnapshot(); !ok || !snap.agentInSnapshot(agent) {
-		return
-	}
-	said, err := s.issueCapabilityGrant(&agent, authority{About: assetID})
-	if err != nil {
-		if !errors.Is(err, errKeyElsewhere) {
-			log.Printf("[mcp] AI agent %s provisioned earlier could not be given a grant: %v", agent.PairwiseAID, err)
-		}
-		return
-	}
-	mcpTokensMu.Lock()
-	defer mcpTokensMu.Unlock()
-	toks := s.loadMCPTokens()
-	for i := range toks {
-		if toks[i].AssetID == assetID && toks[i].GrantSAID == "" {
-			toks[i].GrantSAID = said
-		}
-	}
-	if err := s.saveMCPTokens(toks); err != nil {
-		log.Printf("[mcp] AI agent %s was given grant %s, but its token could not be updated: %v", agent.PairwiseAID, said, err)
-	}
-}
-
 // rowIsItsGrant checks a machine's row against the grant credential it holds:
 // the same machine, key, label and grade. The row is a file; the grant is what
 // the identity signed, and a row that no longer says what was granted is not
@@ -599,4 +477,63 @@ func (s *CoreServer) rowIsItsGrant(g ControllerGrant) error {
 		return fmt.Errorf("this machine's record no longer says what its grant does")
 	}
 	return nil
+}
+
+// Machines paired, and AI agents provisioned, before every one of them was
+// given a grant have none, and are never given one from what a file says:
+// each waits for the owner's approval, given the ordinary way. A machine is
+// approved by granting it again (POST /api/controllers), an AI agent by
+// setting its capabilities (PUT /api/mcp/agents/{id}/capabilities); each
+// carries the owner's request into the grant, and the grant is checked
+// against it like any other.
+//
+// handleGrantsAwaitingApproval lists them, so an app can ask the owner.
+func (s *CoreServer) handleGrantsAwaitingApproval(w http.ResponseWriter, r *http.Request) {
+	now := time.Now().UTC()
+	machines := []map[string]any{}
+	if all, err := s.controllers().All(); err == nil {
+		for _, g := range all {
+			if g.CredentialSAID != "" {
+				continue
+			}
+			if live, _ := g.Live(now); !live {
+				continue
+			}
+			m := onTheWire(g, now)
+			m["awaiting"] = awaitingWhat(g.CredentialPending)
+			machines = append(machines, m)
+		}
+	}
+	agents := []map[string]any{}
+	if s.assetHandler != nil && s.assetHandler.Store != nil && s.KeriDriver != nil {
+		mcpTokensMu.Lock()
+		toks := s.loadMCPTokens()
+		mcpTokensMu.Unlock()
+		seen := map[string]bool{}
+		for _, t := range toks {
+			if t.AgentAID == "" || t.GrantSAID != "" || t.AssetID == "" || seen[t.AssetID] {
+				continue
+			}
+			a, ok := s.assetHandler.Store.GetAsset(t.AssetID)
+			if !ok {
+				continue
+			}
+			seen[t.AssetID] = true
+			agents = append(agents, map[string]any{
+				"asset_id": a.ID, "name": a.DisplayName, "agent_aid": a.PairwiseAID,
+				"capabilities": a.Capabilities, "resource_constraints": nonNilConstraints(a.GrantConstraints),
+				"awaiting": awaitingWhat(t.GrantPending),
+			})
+		}
+	}
+	writeJSON(w, map[string]any{"machines": machines, "agents": agents})
+}
+
+// awaitingWhat says what a grant is waiting for: the owner's approval, or,
+// once approved where the key is elsewhere, the device that holds it.
+func awaitingWhat(pending bool) string {
+	if pending {
+		return "the device that holds the identity's key"
+	}
+	return "the owner's approval"
 }

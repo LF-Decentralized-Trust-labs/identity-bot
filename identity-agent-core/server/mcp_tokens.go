@@ -51,6 +51,9 @@ type mcpToken struct {
 	// credential-proven at invoke time; otherwise the resolver falls back to
 	// the Scopes list above (the stored ceiling).
 	GrantSAID string `json:"grant_said,omitempty"`
+	// GrantPending is a grant that only the device holding the identity's key
+	// can issue. Until it is issued the token may do nothing.
+	GrantPending bool `json:"grant_pending,omitempty"`
 }
 
 var mcpTokensMu sync.Mutex

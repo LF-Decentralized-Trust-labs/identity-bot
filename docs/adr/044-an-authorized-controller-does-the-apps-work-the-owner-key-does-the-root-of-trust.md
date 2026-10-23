@@ -88,19 +88,18 @@ written into the key log here. Re-granting a machine, or settling which signer i
 as, issues a new credential and withdraws the old one first; if the old one cannot be
 withdrawn nothing changes, so a machine never has two grants in force. Removing the
 machine revokes its credential; the machine stops at once even when that revocation cannot
-be written. Machines paired, and AI agents
-provisioned, before this are given grants afterwards, but never from what a file says
-now. The first time this version runs where the identity's key is held, it writes one
-interaction into the identity's key log sealing what existed then without a grant:
-each such machine and AI agent exactly as it stood. The interaction carries a marker
-seal anybody can recompute, so it is found without the list, and it is never taken
-twice. An Identity Agent that started without an identity seals that nothing predates
-grants. A grant is given afterwards, at start, on every anchoring, or when a machine
-next asks, only to one that matches that list exactly; anything added or widened since,
-or a list that no longer matches its seal, is given nothing until the identity grants
-it the ordinary way. Where the identity's key is held on another device nothing is
-sealed or issued, and no event is written unsigned. A machine whose row no longer
-says what its grant credential says is neither acted on nor re-issued from. A credential is issued
+be written. **Upgrading.** Machines paired, and AI agents provisioned, before machines and AI agents
+were given grants have none, and are never given one from what is on disk: not at start,
+not on a timer, not by asking. Every attempt to do that automatically turned a write to a
+file into a grant the identity signed. Each waits for the owner's approval, given the
+ordinary way: a machine is approved by granting it again (`POST /api/controllers`, which
+no machine may call), an AI agent by setting its capabilities. The owner's request is
+carried into the grant and checked against it like any other (ADR-045). Until then a
+machine's requests that would issue a credential are refused, and an AI agent may do
+nothing. `GET /api/grants/awaiting-approval` lists what waits, and for what. Where the
+identity's key is held on another device, an approval waits for that device, as a machine
+paired there does, and no event is written unsigned. A machine whose row no longer says
+what its grant credential says is neither acted on nor re-issued from. A credential is issued
 on a machine's grant only while the grant is in force in the registry, and the grant
 cannot be revoked while one is being issued on it.
 
