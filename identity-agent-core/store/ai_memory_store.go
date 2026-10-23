@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"identity-agent-core/sqlitedb"
 	"log"
 	"os"
 	"path/filepath"
@@ -58,22 +59,9 @@ func NewAIMemoryStore(dir string) (*AIMemoryStore, error) {
 	}
 
 	dbPath := filepath.Join(dir, "ai-memory.db")
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sqlitedb.Open(dbPath, sqlitedb.Settings{ForeignKeys: true})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open ai-memory.db: %w", err)
-	}
-
-	pragmas := []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA busy_timeout=5000",
-		"PRAGMA foreign_keys=ON",
-		"PRAGMA synchronous=NORMAL",
-	}
-	for _, p := range pragmas {
-		if _, err := db.Exec(p); err != nil {
-			db.Close()
-			return nil, fmt.Errorf("failed to set pragma (%s): %w", p, err)
-		}
 	}
 
 	s := &AIMemoryStore{db: db}

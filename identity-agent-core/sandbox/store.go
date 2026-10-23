@@ -3,6 +3,7 @@ package sandbox
 import (
 	"database/sql"
 	"fmt"
+	"identity-agent-core/sqlitedb"
 	"log"
 	"os"
 	"path/filepath"
@@ -146,7 +147,7 @@ func NewSandboxStore(dataDir string) (*SandboxStore, error) {
 	}
 
 	dbPath := filepath.Join(dataDir, "sandbox.db")
-	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=on")
+	db, err := sqlitedb.Open(dbPath, sqlitedb.Settings{ForeignKeys: true})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open sandbox database: %w", err)
 	}

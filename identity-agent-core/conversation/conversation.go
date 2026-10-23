@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"identity-agent-core/sqlitedb"
 	"os"
 	"path/filepath"
 	"strings"
@@ -103,7 +104,7 @@ func OpenStore(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", filepath.Join(dir, "conversations.db")+"?_journal_mode=WAL&_busy_timeout=5000")
+	db, err := sqlitedb.Open(filepath.Join(dir, "conversations.db"), sqlitedb.Settings{})
 	if err != nil {
 		return nil, err
 	}

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/sqlitedb"
 	"log"
 	"os"
 	"path/filepath"
@@ -28,26 +29,10 @@ func NewSQLiteStore(dir string) (*SQLiteStore, error) {
 	}
 
 	dbPath := filepath.Join(dir, "identity.db")
-	// The wait for a busy database is set on every connection the pool opens,
-	// not only the first: a PRAGMA run once applies to one connection, and
-	// every other then fails at once while another writes.
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout(5000)")
+	// Every setting on every connection the pool opens (sqlitedb).
+	db, err := sqlitedb.Open(dbPath, sqlitedb.Settings{ForeignKeys: true})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open identity.db: %w", err)
-	}
-
-	// WAL mode + settings — same pattern as sandbox/store.go
-	pragmas := []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA busy_timeout=5000",
-		"PRAGMA foreign_keys=ON",
-		"PRAGMA synchronous=NORMAL",
-	}
-	for _, p := range pragmas {
-		if _, err := db.Exec(p); err != nil {
-			db.Close()
-			return nil, fmt.Errorf("failed to set pragma (%s): %w", p, err)
-		}
 	}
 
 	s := &SQLiteStore{db: db, dir: dir}
