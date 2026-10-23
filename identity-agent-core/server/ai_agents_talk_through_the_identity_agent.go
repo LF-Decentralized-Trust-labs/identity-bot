@@ -107,6 +107,22 @@ func (s *CoreServer) thePersonAsking(r *http.Request) (agentmessage.PersonRef, *
 	if !ok {
 		return agentmessage.PersonRef{}, nil, errNoProvablePerson
 	}
+	// The person is read from the machine's record only where that record is
+	// what its grant says: a signer or an expiry written into the file is
+	// refused, not attributed. A machine with no grant awaits the owner's
+	// approval; one whose grant waits for another device is believed only
+	// where the key really is elsewhere.
+	if current, had, err := s.controllers().Get(grant.ControllerAID); err == nil && had {
+		switch {
+		case current.CredentialSAID != "":
+			if err := s.rowIsItsGrant(current); err != nil {
+				return agentmessage.PersonRef{}, nil, err
+			}
+		case !current.CredentialPending || s.identityKeyHeldHere():
+			return agentmessage.PersonRef{}, nil, fmt.Errorf("this machine was paired before machines were given grants, and awaits the owner's approval")
+		}
+		grant = current
+	}
 	person, err := s.signerOf(grant)
 	if err != nil {
 		return agentmessage.PersonRef{}, nil, err

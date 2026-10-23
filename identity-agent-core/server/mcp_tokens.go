@@ -281,6 +281,7 @@ func (s *CoreServer) applyGrantScopes(entry mcpToken, cc *sandbox.CallerContext)
 		if entry.AgentAID != "" {
 			log.Printf("[mcp] agent %s holds no grant — denying", entry.AgentAID)
 			cc.Scopes = nil
+			cc.NoScopesBecause = "this AI agent is " + awaitingPhrase(entry.GrantPending)
 		}
 		return
 	}

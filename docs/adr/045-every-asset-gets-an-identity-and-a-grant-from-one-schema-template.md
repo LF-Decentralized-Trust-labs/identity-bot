@@ -190,9 +190,14 @@ export and pass it, so rule 5 is shown; and apply rule 7 across everything it ho
 
 **A machine's own grant.** A Controller Grant issued on the owner's signed request carries
 it like any other: the request must be `POST /api/controllers`, naming the machine the
-credential is issued to, with the same key, label and grade. A machine or AI agent that
-existed before grants is given one only this way, on the owner's request (ADR-044);
-nothing issues one from what is on disk.
+credential is issued to, with the same key, label and grade, the signer it named, if it
+named one, and the same end. A machine or AI agent that existed before grants is given one
+only this way, on the owner's request (ADR-044); nothing issues one from what is on disk.
+
+**Checked before it is written.** The Identity Agent builds each credential, checks it
+against its request, and only then appends the interaction that anchors it, so a
+credential that would fail is never in the key log, issued and then withdrawn. Once
+appended it is checked again with the order of events read from the key log.
 
 **Credentials issued while a grant is pending.** Where the identity's key is on another
 device, a machine's grant is recorded with its credential pending there. A credential

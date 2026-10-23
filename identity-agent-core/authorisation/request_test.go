@@ -484,3 +484,32 @@ func TestAMachinesGrantMustBeTheOneAskedFor(t *testing.T) {
 		}
 	}
 }
+
+// A machine's grant names the signer and end the request asked for, and
+// compares its label and key as written, spaces aside.
+func TestAMachinesGrantHasTheSignerAndEndAskedFor(t *testing.T) {
+	w := newWorld(t)
+	const machine = "BMachineAID0000000000000000000000000000000"
+	end := time.Now().UTC().Add(48 * time.Hour).Truncate(time.Second)
+	body := `{"controller_aid":"` + machine + `","public_key":" DKey ","label":"Desk ","grade":"enrolled","signer":"ESigner","expires_at":"` + end.Format(time.RFC3339) + `"}`
+	grant := func(attrs map[string]interface{}) []byte {
+		req := w.signs("POST", "/api/controllers", body, ago(time.Minute))
+		a := map[string]interface{}{"asset_type": "controller", "name": "Desk", "label": "Desk", "public_key": "DKey", "grade": "enrolled",
+			"signer": "ESigner", "valid_until": end.Format(time.RFC3339), "request": req}
+		for k, v := range attrs {
+			a[k] = v
+		}
+		cred, _ := w.build(schemas.ControllerGrant.Schema.SAID, machine, time.Now().UTC(), a, w.edge())
+		return cred
+	}
+	w.body = body
+	if err := w.check(grant(nil)); err != nil {
+		t.Fatalf("a grant with the signer and end asked for was refused: %v", err)
+	}
+	if err := w.check(grant(map[string]interface{}{"signer": "EOther"})); err == nil {
+		t.Fatal("a grant naming another signer than asked was accepted")
+	}
+	if err := w.check(grant(map[string]interface{}{"valid_until": end.Add(time.Hour).Format(time.RFC3339)})); err == nil {
+		t.Fatal("a grant ending later than asked was accepted")
+	}
+}

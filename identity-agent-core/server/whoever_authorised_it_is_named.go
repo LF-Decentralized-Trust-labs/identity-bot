@@ -84,7 +84,9 @@ func (s *CoreServer) authorityOf(r *http.Request) (authority, func(), error) {
 			release()
 			return authority{}, func() {}, fmt.Errorf("this machine's grant has been removed")
 		}
-		if current.CredentialSAID == "" && !current.CredentialPending {
+		// A mark that the grant waits for another device is believed only
+		// where the key really is elsewhere.
+		if current.CredentialSAID == "" && (!current.CredentialPending || s.identityKeyHeldHere()) {
 			release()
 			return authority{}, func() {}, fmt.Errorf("this machine was paired before machines were given grants, and needs the owner's approval before what it asks for can rest on it")
 		}
@@ -199,20 +201,34 @@ func (s *CoreServer) checkAuthorisation(said string, by authority) error {
 	if err != nil {
 		return err
 	}
+	return s.checkAuthorisationOf(acdc, rec.IssuerAID, rec.RegistrySAID, said, by)
+}
+
+// checkAuthorisationOf checks a credential against the request it carries.
+// Given where it was issued (registry and said), the order of issue and
+// revocation is read from where each is anchored in the issuer's key log;
+// without them, for a credential built and not yet appended, from the times
+// the grant's log states.
+func (s *CoreServer) checkAuthorisationOf(acdc []byte, issuer, registry, said string, by authority) error {
+	if by.Request == nil {
+		return nil
+	}
 	in := authorisation.Input{Credential: acdc, Body: by.Request.Body, HaveBody: true}
-	// The issuer's key log and this credential's own log, so the order of
-	// issue and revocation is read from where each is anchored.
-	if events, err := s.DataStore.GetEvents(rec.IssuerAID); err == nil {
-		for _, ev := range events {
-			if raw, err := base64.StdEncoding.DecodeString(ev.RawBytesB64); err == nil && len(raw) > 0 {
-				in.IssuerKEL = append(in.IssuerKEL, raw)
+	if said != "" {
+		// The issuer's key log and this credential's own log, so the order of
+		// issue and revocation is read from where each is anchored.
+		if events, err := s.DataStore.GetEvents(issuer); err == nil {
+			for _, ev := range events {
+				if raw, err := base64.StdEncoding.DecodeString(ev.RawBytesB64); err == nil && len(raw) > 0 {
+					in.IssuerKEL = append(in.IssuerKEL, raw)
+				}
 			}
 		}
-	}
-	if own, _, err := s.credentialLog(rec.RegistrySAID, said); err == nil {
-		for _, ev := range own {
-			raw, _ := base64.StdEncoding.DecodeString(ev)
-			in.CredentialLog = append(in.CredentialLog, raw)
+		if own, _, err := s.credentialLog(registry, said); err == nil {
+			for _, ev := range own {
+				raw, _ := base64.StdEncoding.DecodeString(ev)
+				in.CredentialLog = append(in.CredentialLog, raw)
+			}
 		}
 	}
 	switch by.Request.Kind {
@@ -315,6 +331,12 @@ func (s *CoreServer) grantController(g ControllerGrant, now time.Time, by author
 	if err != nil {
 		return ControllerGrant{}, err
 	}
+	// A machine already granted is not re-granted where the key is on
+	// another device: its grant could not be withdrawn here, and both would
+	// stand.
+	if had && before.CredentialSAID != "" && !s.identityKeyHeldHere() {
+		return ControllerGrant{}, fmt.Errorf("%w, and this machine's current grant could not be withdrawn here", errKeyElsewhere)
+	}
 	by.About = checked.ControllerAID
 	said, err := s.issueControllerGrant(checked, by)
 	if errors.Is(err, errKeyElsewhere) {
@@ -351,10 +373,8 @@ func (s *CoreServer) issueControllerGrant(g ControllerGrant, by authority) (stri
 		return "", fmt.Errorf("this Identity Agent has no identity to grant for")
 	}
 	// Issuing writes an interaction into the identity's key log, which only
-	// the holder of its key may sign.
-	if _, err := s.identitySigningSeed(); err != nil {
-		return "", errKeyElsewhere
-	}
+	// the holder of its key may sign: where that is another device, the grant
+	// is built here and waits for it (issueAssetCredential).
 	claims := map[string]interface{}{
 		"name": g.Label, "label": g.Label, "public_key": g.PublicKey, "grade": string(g.Grade),
 	}
@@ -407,6 +427,9 @@ func (s *CoreServer) bindSigner(aid, signer string) (ControllerGrant, error) {
 	}
 	bound := g
 	bound.Signer = signer
+	if g.CredentialSAID != "" && !s.identityKeyHeldHere() {
+		return g, fmt.Errorf("%w, and this machine's grant could not be re-issued to name its signer", errKeyElsewhere)
+	}
 	if g.CredentialSAID != "" {
 		// Re-issued from what the grant says, never from a row changed since.
 		if err := s.rowIsItsGrant(g); err != nil {
@@ -472,9 +495,13 @@ func (s *CoreServer) rowIsItsGrant(g ControllerGrant) error {
 	if json.Unmarshal(raw, &acdc) != nil || acdc.A == nil {
 		return fmt.Errorf("this machine's grant is unreadable")
 	}
-	str := func(k string) string { v, _ := acdc.A[k].(string); return v }
-	if str("i") != g.ControllerAID || str("public_key") != g.PublicKey || str("grade") != string(g.Grade) || str("label") != g.Label {
+	str := func(k string) string { v, _ := acdc.A[k].(string); return strings.TrimSpace(v) }
+	if str("i") != g.ControllerAID || str("public_key") != strings.TrimSpace(g.PublicKey) ||
+		str("grade") != string(g.Grade) || str("label") != strings.TrimSpace(g.Label) || str("signer") != g.Signer {
 		return fmt.Errorf("this machine's record no longer says what its grant does")
+	}
+	if !sameMoment(str("valid_until"), g.ExpiresAt) {
+		return fmt.Errorf("this machine's record no longer says when its grant ends")
 	}
 	return nil
 }
@@ -490,6 +517,7 @@ func (s *CoreServer) rowIsItsGrant(g ControllerGrant) error {
 // handleGrantsAwaitingApproval lists them, so an app can ask the owner.
 func (s *CoreServer) handleGrantsAwaitingApproval(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
+	keyHere := s.identityKeyHeldHere()
 	machines := []map[string]any{}
 	if all, err := s.controllers().All(); err == nil {
 		for _, g := range all {
@@ -500,29 +528,35 @@ func (s *CoreServer) handleGrantsAwaitingApproval(w http.ResponseWriter, r *http
 				continue
 			}
 			m := onTheWire(g, now)
-			m["awaiting"] = awaitingWhat(g.CredentialPending)
+			// A mark that the grant waits for another device is believed only
+			// where the key really is elsewhere.
+			m["awaiting"] = awaitingWhat(g.CredentialPending && !keyHere)
 			machines = append(machines, m)
 		}
 	}
+	// Every AI agent with no usable grant, whether it holds a token or
+	// authenticates by its own signature.
 	agents := []map[string]any{}
-	if s.assetHandler != nil && s.assetHandler.Store != nil && s.KeriDriver != nil {
+	if s.assetHandler != nil && s.KeriDriver != nil {
+		tokenWithout := map[string]bool{}
 		mcpTokensMu.Lock()
-		toks := s.loadMCPTokens()
+		for _, t := range s.loadMCPTokens() {
+			if t.AgentAID != "" && t.GrantSAID == "" {
+				tokenWithout[t.AssetID] = true
+			}
+		}
 		mcpTokensMu.Unlock()
-		seen := map[string]bool{}
-		for _, t := range toks {
-			if t.AgentAID == "" || t.GrantSAID != "" || t.AssetID == "" || seen[t.AssetID] {
+		for _, a := range s.assetHandler.ListAgents() {
+			if s.agentStatus(a.PairwiseAID) == "revoked" {
 				continue
 			}
-			a, ok := s.assetHandler.Store.GetAsset(t.AssetID)
-			if !ok {
+			if !tokenWithout[a.ID] && s.findCapabilityGrant(a.PairwiseAID) != nil {
 				continue
 			}
-			seen[t.AssetID] = true
 			agents = append(agents, map[string]any{
 				"asset_id": a.ID, "name": a.DisplayName, "agent_aid": a.PairwiseAID,
 				"capabilities": a.Capabilities, "resource_constraints": nonNilConstraints(a.GrantConstraints),
-				"awaiting": awaitingWhat(t.GrantPending),
+				"awaiting": awaitingWhat(s.agentGrantPendingFor(a.ID)),
 			})
 		}
 	}
@@ -536,4 +570,22 @@ func awaitingWhat(pending bool) string {
 		return "the device that holds the identity's key"
 	}
 	return "the owner's approval"
+}
+
+// awaitingPhrase is the same, as it is said of an AI agent.
+func awaitingPhrase(pending bool) string {
+	if pending {
+		return "waiting for its grant to be signed on the device that holds the identity's key"
+	}
+	return "awaiting the owner's approval"
+}
+
+// sameMoment reports whether a grant's stated end and a record's are the same
+// time, both absent counting as the same.
+func sameMoment(stated string, at time.Time) bool {
+	if stated == "" || at.IsZero() {
+		return stated == "" && at.IsZero()
+	}
+	t, err := time.Parse(time.RFC3339, stated)
+	return err == nil && t.Equal(at)
 }

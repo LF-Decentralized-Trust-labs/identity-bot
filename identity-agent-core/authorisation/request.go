@@ -74,7 +74,7 @@ var ErrBodyWithheld = errors.New("the request's body was not given, so what it a
 // askedFields are what a credential keeps of its request's body: what was
 // asked for, and nothing else the body may carry.
 var askedFields = []string{"name", "capabilities", "resource_constraints", "nonce",
-	"controller_aid", "public_key", "grade", "label"}
+	"controller_aid", "public_key", "grade", "label", "signer", "expires_at"}
 
 // Asked is what a request's body asked for, as a credential keeps it. The one
 // definition the issuer uses to write it and a verifier uses to check it.
@@ -396,13 +396,21 @@ func checkAskedFor(cred acdc, method, path string, asked map[string]json.RawMess
 		if method != "POST" || path != "/api/controllers" {
 			return fmt.Errorf("%s %s is not a request that grants a machine", method, path)
 		}
-		if stringOf(asked["controller_aid"]) != stringAttr(cred.A, "i") {
+		if strings.TrimSpace(stringOf(asked["controller_aid"])) != stringAttr(cred.A, "i") {
 			return fmt.Errorf("the request granted another machine than the credential names")
 		}
 		for _, f := range []string{"public_key", "grade", "label"} {
-			if stringOf(asked[f]) != stringAttr(cred.A, f) {
+			if strings.TrimSpace(stringOf(asked[f])) != strings.TrimSpace(stringAttr(cred.A, f)) {
 				return fmt.Errorf("the request asked for another %s than was granted", f)
 			}
+		}
+		// A signer the request named is the one granted; one it left to be
+		// settled may be the organisation's only signer, set when granted.
+		if asked := strings.TrimSpace(stringOf(asked["signer"])); asked != "" && asked != stringAttr(cred.A, "signer") {
+			return fmt.Errorf("the request asked for another signer than was granted")
+		}
+		if !sameInstant(strings.TrimSpace(stringOf(asked["expires_at"])), stringAttr(cred.A, "valid_until")) {
+			return fmt.Errorf("the request asked for another end to the grant than was granted")
 		}
 	case schemas.AIAgentBody.Schema.SAID:
 		if method != "POST" || len(segments) != 7 || segments[4] != "bodies" || segments[6] != "approve" {
@@ -458,4 +466,15 @@ func sameJSON(a, b json.RawMessage) bool {
 		y = nil
 	}
 	return reflect.DeepEqual(x, y)
+}
+
+// sameInstant reports whether two stated times are the same moment, both
+// absent counting as the same.
+func sameInstant(a, b string) bool {
+	if a == "" || b == "" {
+		return a == "" && b == ""
+	}
+	ta, errA := time.Parse(time.RFC3339, a)
+	tb, errB := time.Parse(time.RFC3339, b)
+	return errA == nil && errB == nil && ta.Equal(tb)
 }

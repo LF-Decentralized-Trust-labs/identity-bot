@@ -82,11 +82,14 @@ var (
 // identity + ACDC-scope resolution is wired through the governance gateway + delegated
 // identity; this is the minimal governance input the endpoint enforces today.
 type CallerContext struct {
-	Remote        bool
-	Scopes        []string
-	CallerAID     string
-	CorrelationID string
-	Transport     string
+	Remote bool
+	Scopes []string
+	// NoScopesBecause says why a caller has no scopes, when it is something
+	// the caller's owner can do something about, so a denial says so.
+	NoScopesBecause string
+	CallerAID       string
+	CorrelationID   string
+	Transport       string
 	// DelegationChain is the caller's KERI lineage, root-last (e.g.
 	// [agentAID, rootAID]) — populated when the caller is a provisioned agent
 	// identity, so the audit event proves "owner -> agent". Empty for a bare

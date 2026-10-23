@@ -35,6 +35,9 @@ func (structuralAuthorizer) AuthorizeIngress(ctx context.Context, caller CallerC
 		return fmt.Errorf("%w: host_control capability %q is not invocable by a remote caller", ErrDenied, capDef.ID)
 	}
 	if caller.Remote && !containsStr(caller.Scopes, capDef.ID) {
+		if caller.NoScopesBecause != "" {
+			return fmt.Errorf("%w: caller lacks scope for capability %q: %s", ErrDenied, capDef.ID, caller.NoScopesBecause)
+		}
 		return fmt.Errorf("%w: caller lacks scope for capability %q", ErrDenied, capDef.ID)
 	}
 	if capDef.RequireSignedRequest && !caller.EnvelopeVerified {

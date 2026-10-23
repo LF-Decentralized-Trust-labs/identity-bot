@@ -915,3 +915,101 @@ func TestTheApprovalListIsServed(t *testing.T) {
 		t.Fatalf("the approval list: %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+// An AI agent that authenticates by its own signature, with no token and no
+// grant, is told it awaits the owner's approval, and is listed as waiting.
+func TestAnAIAgentWithNoTokenAndNoGrantAwaitsTheOwner(t *testing.T) {
+	w := newTalkWorld(t)
+	// An AI agent from before grants has none at all.
+	recordDB(t, w.s).Exec(`DELETE FROM credentials WHERE holder_aid = ?`, w.a.PairwiseAID)
+	cc, ok := w.s.ResolveAgentCaller(w.a.PairwiseAID)
+	if !ok || len(cc.Scopes) != 0 || !strings.Contains(cc.NoScopesBecause, "awaiting the owner's approval") {
+		t.Fatalf("an AI agent with no grant resolves as %+v", cc)
+	}
+	if _, ag := awaiting(t, w.s); ag[w.a.ID] != "the owner's approval" {
+		t.Fatalf("the AI agent is not listed as waiting: %v", ag)
+	}
+	tok := mcpToken{AgentAID: w.a.PairwiseAID, AssetID: w.a.ID}
+	cc = sandbox.CallerContext{Scopes: []string{capabilityMessageAgent}}
+	w.s.applyGrantScopes(tok, &cc)
+	if !strings.Contains(cc.NoScopesBecause, "awaiting the owner's approval") {
+		t.Fatalf("a token with no grant is denied without saying why: %q", cc.NoScopesBecause)
+	}
+}
+
+// A granted machine whose signer or end was written into its file is refused,
+// for what it asks for and for who is speaking from it.
+func TestAMachinesFileEditedSignerOrEndIsRefused(t *testing.T) {
+	for _, edit := range []string{"signer", "end"} {
+		t.Run(edit, func(t *testing.T) {
+			w := newTalkWorld(t)
+			resetSeenSignatures(t)
+			ctl, _, _ := w.s.controllers().Get(w.ctlAID)
+			edited := ctl
+			if edit == "signer" {
+				edited.Signer = "EImpostorSigner"
+			} else {
+				edited.ExpiresAt = time.Now().UTC().Add(24 * 365 * time.Hour)
+			}
+			w.s.controllers().Put(edited)
+			if err := w.s.rowIsItsGrant(edited); err == nil {
+				t.Fatal("the edited row was taken for its grant")
+			}
+			req := asThatMachine(t, w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
+				`{"capabilities":["`+capabilityMessageAgent+`"]}`, w.ctlSeed, authprovider.LevelVerified, time.Now())
+			if _, _, err := w.s.thePersonAsking(withController(req, edited)); err == nil || !strings.Contains(err.Error(), "no longer says") {
+				t.Fatalf("a person was attributed from an edited row: %v", err)
+			}
+		})
+	}
+}
+
+// A mark that a machine's grant waits for another device is not believed
+// where the key is here.
+func TestAPendingMarkIsNotBelievedWhereTheKeyIsHere(t *testing.T) {
+	w := newTalkWorld(t)
+	resetSeenSignatures(t)
+	ctl, _, _ := w.s.controllers().Get(w.ctlAID)
+	marked := ctl
+	marked.CredentialSAID, marked.CredentialPending = "", true
+	w.s.controllers().Put(marked)
+	req := asThatMachine(t, w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
+		`{"capabilities":["`+capabilityMessageAgent+`"]}`, w.ctlSeed, authprovider.LevelVerified, time.Now())
+	rec := httptest.NewRecorder()
+	w.s.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("a machine marked as waiting, where the key is here, was answered %d", rec.Code)
+	}
+	if m, _ := awaiting(t, w.s); m[w.ctlAID] != "the owner's approval" {
+		t.Fatalf("a machine marked as waiting, where the key is here, is listed as %q", m[w.ctlAID])
+	}
+}
+
+// withController is r as a machine's request reaches a handler.
+func withController(r *http.Request, g ControllerGrant) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), controllerContextKey{}, g))
+}
+
+// A credential that does not rest on its request never reaches the key log:
+// it is checked when built, not issued and then withdrawn.
+func TestACredentialThatFailsItsCheckWritesNothing(t *testing.T) {
+	w := newTalkWorld(t)
+	rec := httptest.NewRecorder()
+	w.s.router.ServeHTTP(rec, local("POST", "/api/mcp/agents", `{"name":"First","capabilities":["`+capabilityMessageAgent+`"]}`))
+	if rec.Code >= 400 {
+		t.Fatalf("provisioning: %d %s", rec.Code, rec.Body.String())
+	}
+	before, _ := w.s.DataStore.GetCredentials()
+	req := local("POST", "/api/mcp/agents", `{"name":"Unwanted","capabilities":["`+capabilityMessageAgent+`"]}`)
+	req.Header.Set(headerOwnerSig, "0Bjunk")
+	req.Header.Set(headerOwnerTimestamp, time.Now().UTC().Format(time.RFC3339))
+	rec = httptest.NewRecorder()
+	w.s.router.ServeHTTP(rec, req)
+	if rec.Code < 400 {
+		t.Fatalf("a badly signed request was answered %d", rec.Code)
+	}
+	// Issued and withdrawn, it would be on record, revoked.
+	if after, _ := w.s.DataStore.GetCredentials(); len(after) != len(before) {
+		t.Fatalf("a credential that failed its check was issued (%d more on record)", len(after)-len(before))
+	}
+}

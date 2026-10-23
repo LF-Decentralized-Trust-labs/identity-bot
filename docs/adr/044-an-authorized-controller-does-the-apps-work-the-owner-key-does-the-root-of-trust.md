@@ -96,10 +96,19 @@ ordinary way: a machine is approved by granting it again (`POST /api/controllers
 no machine may call), an AI agent by setting its capabilities. The owner's request is
 carried into the grant and checked against it like any other (ADR-045). Until then a
 machine's requests that would issue a credential are refused, and an AI agent may do
-nothing. `GET /api/grants/awaiting-approval` lists what waits, and for what. Where the
-identity's key is held on another device, an approval waits for that device, as a machine
-paired there does, and no event is written unsigned. A machine whose row no longer says
-what its grant credential says is neither acted on nor re-issued from. A credential is issued
+nothing. `GET /api/grants/awaiting-approval` lists what waits, and for what. Where the identity's key is held on another device, a grant (a machine's, or an AI
+agent's, new or approved) is built here exactly as it will be issued, checked against its
+request, and asked of that device on the signing-request queue: the request's payload is
+the interaction that anchors the grant, and its summary says what signing it grants. When
+the signature comes back it is checked against the identity's current key, the request is
+checked again, and the grant is appended with that signature; one built on a key log that
+has moved on is refused and built again. Until then the machine or AI agent waits and may
+do nothing a grant would let it, and nothing is written unsigned. A machine or AI agent
+that already holds a grant is not re-granted from there, since its grant could not be
+withdrawn there; approving an AI agent's body needs the key. A mark that a grant waits for
+another device is believed only where the key really is elsewhere. A machine whose row no
+longer says what its grant credential says (machine, key, label, grade, signer, end) is
+neither acted on, nor re-issued from, nor taken as saying who is speaking from it. A credential is issued
 on a machine's grant only while the grant is in force in the registry, and the grant
 cannot be revoked while one is being issued on it.
 
