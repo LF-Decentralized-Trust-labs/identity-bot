@@ -96,7 +96,7 @@ func (w *talkWorld) enrolBody(t *testing.T, a *asset.Asset) (*agenthost.Host, te
 	t.Helper()
 	m := newTestMachine(t)
 	host, _, _ := agentbody.Identity(m)
-	h := &agenthost.Host{DataDir: t.TempDir(), Signer: m, Hardware: true}
+	h := &agenthost.Host{DataDir: t.TempDir(), Signer: m, Hardware: true, PollEvery: 20 * time.Millisecond}
 	done := make(chan error, 1)
 	approveWhenAsked(t, w.s, a.ID, strings.Join(agentbody.Words(host), " "), done)
 	if _, err := h.Enrol(enrolmentVia(t, w.s, w.srv.URL, a.ID), "computer", 20*time.Second); err != nil {

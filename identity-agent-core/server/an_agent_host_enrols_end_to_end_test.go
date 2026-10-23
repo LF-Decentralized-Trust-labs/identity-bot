@@ -49,7 +49,7 @@ func TestAnAgentHostEnrolsAgainstARunningIdentityAgent(t *testing.T) {
 
 	m := newTestMachine(t)
 	host, _, _ := agentbody.Identity(m)
-	h := &agenthost.Host{DataDir: t.TempDir(), Signer: m, Hardware: true}
+	h := &agenthost.Host{DataDir: t.TempDir(), Signer: m, Hardware: true, PollEvery: 20 * time.Millisecond}
 
 	enrolment := enrolmentVia(t, s, srv.URL, agentID)
 	done := make(chan error, 1)
@@ -121,7 +121,7 @@ func TestAnAgentHostRefusesAnIdentityAgentThatIsNotTheOneNamed(t *testing.T) {
 		e := good
 		tamper(&e)
 		str, _ := e.Encode()
-		h := &agenthost.Host{DataDir: t.TempDir(), Signer: newTestMachine(t)}
+		h := &agenthost.Host{DataDir: t.TempDir(), Signer: newTestMachine(t), PollEvery: 20 * time.Millisecond}
 		if _, err := h.Enrol(str, "computer", time.Second); err == nil {
 			t.Fatalf("%s: the machine enrolled", name)
 		}
