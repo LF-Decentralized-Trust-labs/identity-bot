@@ -513,3 +513,15 @@ func TestAMachinesGrantHasTheSignerAndEndAskedFor(t *testing.T) {
 		t.Fatal("a grant ending later than asked was accepted")
 	}
 }
+
+// A registry with backers is not one the device signs: its state would be set
+// by parties the owner is not shown.
+func TestARegistryWithBackersIsNotSigned(t *testing.T) {
+	vcp, err := keri.BuildRegistryInception(keri.RegistryInput{Issuer: "EIssuer000000000000000000000000000000000000", Nonce: "0AAx", Toad: 1, Backers: []string{"BBacker000000000000000000000000000000000000"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WhatSigningRegisters(nil, vcp); err == nil || !strings.Contains(err.Error(), "backers") {
+		t.Fatalf("a registry with backers: %v", err)
+	}
+}

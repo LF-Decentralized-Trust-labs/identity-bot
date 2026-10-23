@@ -150,11 +150,21 @@ func WhatSigningRegisters(ixnRaw, vcpRaw []byte) (*ToSign, error) {
 		return nil, fmt.Errorf("the event is not a registry inception")
 	}
 	var body struct {
-		I  string `json:"i"`
-		II string `json:"ii"`
+		I  string   `json:"i"`
+		II string   `json:"ii"`
+		C  []string `json:"c"`
+		BT string   `json:"bt"`
+		B  []string `json:"b"`
 	}
 	if err := json.Unmarshal(vcpRaw, &body); err != nil {
 		return nil, err
+	}
+	// Only the registry this agent makes: no backers, so its state is read
+	// from the issuer's own key log. Anything else would put parties the owner
+	// is not shown in charge of what the registry says.
+	traitsOK := len(body.C) == 0 || (len(body.C) == 1 && body.C[0] == "NB")
+	if len(body.B) != 0 || (body.BT != "" && body.BT != "0") || !traitsOK {
+		return nil, fmt.Errorf("the registry is not one with no backers, which is the only kind signed here")
 	}
 	registry := firstNonEmpty(body.I, vcp.SAID)
 	if body.II == "" {

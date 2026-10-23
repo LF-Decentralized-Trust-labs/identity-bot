@@ -44,6 +44,9 @@ import (
 const (
 	signingKindGrant    = "grant-issuance"
 	signingKindRegistry = "registry-inception"
+	// waitingBehind is a grant kept behind the interaction already waiting:
+	// only one interaction waits at a time, since each extends the same tip.
+	waitingBehind = "behind"
 )
 
 // grantSpec is everything a grant is built from, so it can be built again.
@@ -118,6 +121,19 @@ func (s *CoreServer) awaitRegistry(p *drivers.PreparedRegistry, spec grantSpec) 
 
 func (s *CoreServer) queueForTheKey(kind string, pending pendingIssuance, payload []byte, summary string) (string, error) {
 	s.withdrawWaitingFor(pending.Spec.Holder)
+	// One interaction waits for the device at a time: each extends the
+	// identity's key log at its tip, and two built on one tip would ask the
+	// device for two events at one place. Another is kept behind it and built
+	// once it lands.
+	if s.anInteractionWaits() {
+		behind := pendingIssuance{Kind: waitingBehind, Spec: pending.Spec}
+		body, err := json.Marshal(behind)
+		if err != nil {
+			return "", err
+		}
+		id := fmt.Sprintf("%s-%020d", waitingBehind, time.Now().UnixNano())
+		return id, s.DataStore.SavePendingIssuance(id, string(body))
+	}
 	body, err := json.Marshal(pending)
 	if err != nil {
 		return "", err
@@ -396,6 +412,7 @@ func (s *CoreServer) completeGrant(requestID string, pending pendingIssuance, si
 	_ = s.DataStore.DeletePendingIssuance(requestID)
 	s.grantArrived(kind, pending.Spec, said)
 	s.witnessOwnLog()
+	s.buildNextBehind()
 	return nil
 }
 
@@ -413,7 +430,19 @@ func (s *CoreServer) completeRegistry(requestID string, pending pendingIssuance,
 	defer s.signedElsewhere.Delete(ixnB64)
 	if _, err := preparer.AppendPreparedRegistry(pending.Spec.Issuer, pending.Registry); err != nil {
 		if errors.Is(err, drivers.ErrStalePreparation) {
+			// Built on a key log that has moved on: built again and asked
+			// afresh, as a grant is, unless a registry has been made since.
 			_ = s.DataStore.DeletePendingIssuance(requestID)
+			if reg, rerr := s.DataStore.GetRegistryByIssuer(pending.Spec.Issuer); rerr == nil && reg != nil && reg.VcpRawB64 != "" {
+				return fmt.Errorf("%w; a registry has been made since", err)
+			}
+			fresh, perr := preparer.PrepareRegistryInception(pending.Spec.Issuer)
+			if perr == nil {
+				if _, perr = s.awaitRegistry(fresh, pending.Spec); perr == nil {
+					return fmt.Errorf("%w; it has been built again and asked for afresh", err)
+				}
+			}
+			return fmt.Errorf("%w, and it could not be built again: %v", err, perr)
 		}
 		return fmt.Errorf("the registry could not be appended: %w", err)
 	}
@@ -432,6 +461,7 @@ func (s *CoreServer) completeRegistry(requestID string, pending pendingIssuance,
 	if _, err := s.issueAssetCredential(kind, pending.Spec.Holder, pending.Spec.Issuer, claims, pending.Spec.Expiry, pending.Spec.by()); err != nil && !errors.Is(err, errKeyElsewhere) {
 		return fmt.Errorf("the registry was made, and the grant waiting behind it could not be built: %w", err)
 	}
+	s.buildNextBehind()
 	return nil
 }
 
@@ -508,4 +538,51 @@ func (s *CoreServer) queuedParts(id string) map[string]string {
 		return map[string]string{"registry_b64": base64.StdEncoding.EncodeToString(p.Registry.VcpRaw)}
 	}
 	return nil
+}
+
+// anInteractionWaits reports whether an interaction is waiting for the device
+// that holds the key: one whose request is still open.
+func (s *CoreServer) anInteractionWaits() bool {
+	for _, row := range s.waitingRows() {
+		if row.Pending.Kind == waitingBehind {
+			continue
+		}
+		if req, err := s.DataStore.GetSigningRequest(row.ID); err == nil && req != nil && req.Status == SigningStatusPending {
+			if req.ExpiresAt != "" {
+				if exp, err := time.Parse(time.RFC3339, req.ExpiresAt); err == nil && exp.Before(time.Now()) {
+					continue
+				}
+			}
+			return true
+		}
+	}
+	return false
+}
+
+// buildNextBehind builds the grant kept longest behind the interaction that
+// was waiting, now that none is, and asks for it.
+func (s *CoreServer) buildNextBehind() {
+	if s.anInteractionWaits() {
+		return
+	}
+	for _, row := range s.waitingRows() { // in the order they were kept
+		if row.Pending.Kind != waitingBehind {
+			continue
+		}
+		_ = s.DataStore.DeletePendingIssuance(row.ID)
+		kind := grantKindNamed(row.Pending.Spec.Schema)
+		if kind == nil {
+			continue
+		}
+		claims := map[string]interface{}{}
+		for k, v := range row.Pending.Spec.Claims {
+			claims[k] = v
+		}
+		if _, err := s.issueAssetCredential(kind, row.Pending.Spec.Holder, row.Pending.Spec.Issuer, claims,
+			row.Pending.Spec.Expiry, row.Pending.Spec.by()); err != nil && !errors.Is(err, errKeyElsewhere) {
+			log.Printf("[grants] the grant kept for %s could not be built: %v", row.Pending.Spec.Holder, err)
+			continue
+		}
+		return
+	}
 }

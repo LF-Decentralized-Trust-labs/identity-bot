@@ -102,20 +102,28 @@ against that request, and asked of that device on the signing-request queue, wit
 credential, its issuance event and the interaction that anchors it; where the identity has
 no registry yet, the registry's inception is asked for first and the grant built on it
 once signed. The device checks what it is asked to sign itself and is shown only what the
-credential says (ADR-045). When a signature comes back it must be over the request's own
+credential says (ADR-045). The device signs through its own core, never by signing the
+bytes alone: in one step its core checks the interaction, records it as the next event
+of its own key log, and signs it, and it signs no second, different event at a place it
+has already filled, since two signed events at one place would be duplicity. Only one
+interaction waits for the device at a time, as each extends the same tip; another is kept
+and built once the one before it is appended, refused or expired. When a signature comes back it must be over the request's own
 payload, which must be the interaction kept; the grant is derived again from what was kept
 and compared; the machine or AI agent must still be there, still be what the grant says,
 and not have been granted anything meanwhile; and the request is checked again. Only then
-is the grant appended with that signature; one built on a key log that has moved on is
-refused and built again. At most one grant waits for each machine or AI agent: asking
+is the grant appended with that signature, so both key logs hold the same event and both
+send it to the witnesses; one built on a key log that has moved on, a registry's inception
+included, is refused and built again. At most one grant waits for each machine or AI agent: asking
 again, or removing the machine, withdraws the one waiting, and a grant the device refused
 or let expire is listed so, for the owner to ask again. Until a grant is appended, the
 machine or AI agent may do nothing it would allow, and nothing is written unsigned. A
 machine or AI agent that already holds a grant is not re-granted from there, since its
 grant could not be withdrawn there; approving an AI agent's body, and making any identity
-delegated from this one, such as an AI agent's, need the key and are refused there with
-that reason. A mark that a grant waits for another device is believed only where the key
-really is elsewhere. A machine's signer is one of the identity's active signers. A machine
+delegated from this one (an AI agent, an enrolled machine, any delegated asset) need the
+key and are refused there with that reason. The key is elsewhere only where a seed is held
+here and derives another key; a seed held here that cannot be read is a fault, answered as
+unavailable, and nothing waits on it. A mark that a grant waits for another device is
+believed only where the key really is elsewhere. A machine's signer is one of the identity's active signers. A machine
 whose row no longer says what its grant credential says (machine, key, label, grade,
 signer, end) is neither acted on, nor re-issued from, nor taken as saying who is speaking
 from it. A credential is issued

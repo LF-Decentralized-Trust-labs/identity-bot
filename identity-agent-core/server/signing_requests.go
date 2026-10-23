@@ -160,6 +160,7 @@ func (s *CoreServer) mountSigningRequestRoutes(r chi.Router) {
 	r.Post("/signing-requests/{id}/fulfil", s.handleFulfilSigningRequest)
 	r.Post("/signing-requests/{id}/refuse", s.handleRefuseSigningRequest)
 	r.Post("/signing-requests/check", s.handleCheckWhatIsToBeSigned)
+	r.Post("/signing-requests/sign-for-another", s.handleSignForAnother)
 }
 
 // handleListSigningRequests returns what is waiting for the controller device.
@@ -187,6 +188,9 @@ func (s *CoreServer) handleListSigningRequests(w http.ResponseWriter, r *http.Re
 				req.Status = SigningStatusExpired
 				req.ResolvedAt = now.Format(time.RFC3339)
 				_ = s.DataStore.SaveSigningRequest(req)
+				if req.Kind == signingKindGrant || req.Kind == signingKindRegistry {
+					defer s.buildNextBehind()
+				}
 				continue
 			}
 		}
@@ -313,6 +317,10 @@ func (s *CoreServer) handleRefuseSigningRequest(w http.ResponseWriter, r *http.R
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	// A grant refused frees its place: the one kept behind it is built.
+	if req.Kind == signingKindGrant || req.Kind == signingKindRegistry {
+		s.buildNextBehind()
+	}
 	json.NewEncoder(w).Encode(map[string]any{"refused": true, "id": id})
 }
 

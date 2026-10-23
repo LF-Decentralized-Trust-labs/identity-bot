@@ -3,9 +3,12 @@ package server
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	keri "github.com/grapeid/keri-go"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -256,23 +259,19 @@ func TestAWronglySignedGrantIsRefused(t *testing.T) {
 // built again for the device to sign afresh.
 func TestAStaleGrantIsBuiltAgain(t *testing.T) {
 	e := keyElsewhere(t)
-	a, b := grantFor(5, GradeEnrolled), grantFor(6, GradeEnrolled)
-	e.pairMachine(t, a)
-	e.pairMachine(t, b)
-	reqs := waiting(t, e.s)
-	if len(reqs) != 2 {
-		t.Fatalf("%d requests wait", len(reqs))
-	}
-	first := reqs[0]
-	if rec := fulfil(t, e.s, first, e.seed); rec.Code != http.StatusOK {
-		t.Fatalf("the first: %d %s", rec.Code, rec.Body.String())
-	}
-	second := reqs[1]
-	if rec := fulfil(t, e.s, second, e.seed); rec.Code != http.StatusConflict {
+	e.pairMachine(t, grantFor(5, GradeEnrolled))
+	stale := waiting(t, e.s)[0]
+	body, _, _ := e.s.DataStore.GetPendingIssuance(stale.ID)
+	var p pendingIssuance
+	json.Unmarshal([]byte(body), &p)
+	p.Prepared.Prior = "Ethe-key-log-moved-on"
+	nb, _ := json.Marshal(p)
+	recordDB(t, e.s).Exec(`UPDATE pending_issuances SET body=? WHERE signing_request_id=?`, string(nb), stale.ID)
+	if rec := fulfil(t, e.s, stale, e.seed); rec.Code != http.StatusConflict {
 		t.Fatalf("a stale grant was answered %d %s", rec.Code, rec.Body.String())
 	}
 	fresh := waiting(t, e.s)
-	if len(fresh) != 1 || fresh[0].ID == second.ID {
+	if len(fresh) != 1 || fresh[0].ID == stale.ID {
 		t.Fatalf("the stale grant was not asked for afresh: %+v", fresh)
 	}
 	if rec := fulfil(t, e.s, fresh[0], e.seed); rec.Code != http.StatusOK {
@@ -446,9 +445,20 @@ func TestAGrantSwappedWhileItWaitsIsRefused(t *testing.T) {
 func TestTheDeviceDetectsASwappedCredential(t *testing.T) {
 	e := keyElsewhere(t)
 	e.pairMachine(t, grantFor(5, GradeEnrolled))
-	e.pairMachine(t, grantFor(6, GradeEnrolled))
 	reqs := waiting(t, e.s)
-	a, b := e.s.queuedParts(reqs[0].ID), e.s.queuedParts(reqs[1].ID)
+	a := e.s.queuedParts(reqs[0].ID)
+	// Another grant built at the same place, as one swapped in would be.
+	owner, _ := e.s.DataStore.GetIdentity()
+	reg, _ := e.s.DataStore.GetRegistryByIssuer(owner.AID)
+	g := grantFor(6, GradeEnrolled)
+	other, err := e.s.KeriDriver.(drivers.PreparedIssuer).PrepareCredentialInRegistry(owner.AID, map[string]interface{}{
+		"name": g.Label, "label": g.Label, "public_key": g.PublicKey, "grade": string(g.Grade), "i": g.ControllerAID,
+		"asset_type": schemas.ControllerGrant.AssetType}, schemas.ControllerGrant.Schema.SAID, g.ControllerAID, nil, reg.RegistrySAID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b64 := base64.StdEncoding.EncodeToString
+	b := map[string]string{"credential_b64": b64(other.AcdcRaw), "issuance_b64": b64(other.IssRaw)}
 	if _, err := e.s.whatIsToBeSigned(reqs[0].PayloadB64, b["credential_b64"], b["issuance_b64"], ""); err == nil {
 		t.Fatal("a credential swapped behind the interaction passed the device's check")
 	}
@@ -458,8 +468,7 @@ func TestTheDeviceDetectsASwappedCredential(t *testing.T) {
 	// An interaction built to seal one credential with another's issuance.
 	payloadA, _ := base64.StdEncoding.DecodeString(reqs[0].PayloadB64)
 	ixnA, _ := keri.ParseEvent(payloadA)
-	issB, _ := base64.StdEncoding.DecodeString(b["issuance_b64"])
-	issEvent, _ := keri.VerifyTELEvent(issB)
+	issEvent, _ := keri.VerifyTELEvent(other.IssRaw)
 	credA, _ := base64.StdEncoding.DecodeString(a["credential_b64"])
 	cred, _ := keri.VerifyCredential(credA)
 	mixed, err := keri.BuildInteraction(keri.InteractionInput{Prefix: ixnA.Identifier, PriorSAID: ixnA.PriorSAID, SN: int(ixnA.SN),
@@ -467,13 +476,13 @@ func TestTheDeviceDetectsASwappedCredential(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.s.whatIsToBeSigned(base64.StdEncoding.EncodeToString(mixed), a["credential_b64"], b["issuance_b64"], ""); err == nil {
+	if _, err := e.s.whatIsToBeSigned(b64(mixed), a["credential_b64"], b["issuance_b64"], ""); err == nil {
 		t.Fatal("an interaction sealing a credential with another's issuance passed the device's check")
 	}
 	if rec := fulfil(t, e.s, reqs[0], e.seed); rec.Code != http.StatusOK {
 		t.Fatalf("the first: %d", rec.Code)
 	}
-	if _, err := e.s.whatIsToBeSigned(reqs[1].PayloadB64, b["credential_b64"], b["issuance_b64"], ""); err == nil {
+	if _, err := e.s.whatIsToBeSigned(b64(other.IxnRaw), b["credential_b64"], b["issuance_b64"], ""); err == nil {
 		t.Fatal("an interaction that no longer extends the key log passed the device's check")
 	}
 }
@@ -619,5 +628,76 @@ func TestAnAIAgentIsNotMadeWhereTheKeyIsElsewhere(t *testing.T) {
 		if ev.CesrSignature == "" {
 			t.Fatalf("event %d of the key log is unsigned", ev.SequenceNumber)
 		}
+	}
+}
+
+// A key held here that cannot be read right now is not a key held elsewhere:
+// it is reported as unavailable, nothing is asked of a device that does not
+// exist, and the stored seed is never replaced.
+func TestAnUnreadableKeyIsNotAKeyElsewhere(t *testing.T) {
+	w := newTalkWorld(t)
+	resetSeenSignatures(t)
+	path := filepath.Join(w.s.DataDir, "secureenclave", "root_seed.key")
+	if err := os.Chmod(path, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(path, 0o600) })
+	if err := w.s.keyCanSign(); !errors.Is(err, errKeyUnavailable) {
+		t.Fatalf("an unreadable key reads as %v", err)
+	}
+	if w.s.keyIsElsewhere() {
+		t.Fatal("an unreadable key reads as held elsewhere")
+	}
+	g := grantFor(5, GradeEnrolled)
+	body := `{"controller_aid":"` + g.ControllerAID + `","public_key":"` + g.PublicKey + `","label":"` + g.Label + `","grade":"` + string(g.Grade) + `"}`
+	rec := httptest.NewRecorder()
+	w.s.router.ServeHTTP(rec, signed(t, "POST", "/api/controllers", body, testOwnerSeed(), time.Now()))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("granting with the key unreadable was answered %d %s", rec.Code, rec.Body.String())
+	}
+	if len(waiting(t, w.s)) != 0 {
+		t.Fatal("a grant was asked of another device, where there is none")
+	}
+	if got, _, _ := w.s.controllers().Get(g.ControllerAID); got.CredentialPending {
+		t.Fatal("the machine was marked as waiting for another device")
+	}
+	rec = httptest.NewRecorder()
+	w.s.router.ServeHTTP(rec, signed(t, "POST", "/api/mcp/agents", `{"name":"Later","capabilities":["`+capabilityMessageAgent+`"]}`, testOwnerSeed(), time.Now().Add(time.Second)))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("making an AI agent with the key unreadable was answered %d %s", rec.Code, rec.Body.String())
+	}
+	os.Chmod(path, 0o600)
+	if err := w.s.keyCanSign(); err != nil {
+		t.Fatalf("once readable again, the stored seed is not the one it was: %v", err)
+	}
+}
+
+// Where the key is genuinely held on another device, it reads so.
+func TestAKeyElsewhereReadsSo(t *testing.T) {
+	e := keyElsewhere(t)
+	if !e.s.keyIsElsewhere() || !errors.Is(e.s.keyCanSign(), errKeyElsewhere) {
+		t.Fatalf("a key elsewhere reads as %v", e.s.keyCanSign())
+	}
+}
+
+// A registry inception the key log has moved past is built again and asked
+// for afresh, as a stale grant is.
+func TestAStaleRegistryIsBuiltAgain(t *testing.T) {
+	e := keyElsewhere(t)
+	recordDB(t, e.s).Exec(`DELETE FROM credential_registries`)
+	e.pairMachine(t, grantFor(5, GradeEnrolled))
+	req := waiting(t, e.s)[0]
+	body, _, _ := e.s.DataStore.GetPendingIssuance(req.ID)
+	var p pendingIssuance
+	json.Unmarshal([]byte(body), &p)
+	p.Registry.Prior = "Ethe-key-log-moved-on"
+	nb, _ := json.Marshal(p)
+	recordDB(t, e.s).Exec(`UPDATE pending_issuances SET body=? WHERE signing_request_id=?`, string(nb), req.ID)
+	if rec := fulfil(t, e.s, req, e.seed); rec.Code != http.StatusConflict {
+		t.Fatalf("a stale registry was answered %d %s", rec.Code, rec.Body.String())
+	}
+	fresh := waiting(t, e.s)
+	if len(fresh) != 1 || fresh[0].ID == req.ID || fresh[0].Kind != signingKindRegistry {
+		t.Fatalf("the stale registry was not asked for afresh: %+v", fresh)
 	}
 }
