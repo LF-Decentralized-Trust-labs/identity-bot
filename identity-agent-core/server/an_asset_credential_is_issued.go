@@ -47,6 +47,7 @@ func (s *CoreServer) issueAssetCredential(
 			if _, err := s.adoptWhatTheDeviceSigned(nil); err != nil {
 				log.Printf("[grants] %v", err)
 			}
+			s.askAgainForWithdrawals()
 		case err != nil:
 			// Held here and unreadable right now: reported, and nothing is
 			// asked of another device, since there is none.

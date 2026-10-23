@@ -30,6 +30,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+
+	"github.com/go-chi/chi/v5"
 	"os"
 	"path/filepath"
 	"sync"
@@ -509,10 +511,12 @@ func (s *CoreServer) settleAfterAdoption() {
 		}
 		asked := s.stillAsked(row)
 		_ = s.DataStore.DeletePendingIssuance(row.ID)
-		if !asked {
+		if !asked && row.Pending.Revocation == nil {
 			s.closeExpired(row.ID)
 			continue
 		}
+		// A withdrawal that expired is asked for again; one refused was
+		// recorded so when it was refused, and is not here.
 		if req, err := s.DataStore.GetSigningRequest(row.ID); err == nil && req != nil {
 			req.Status = SigningStatusRefused
 			req.ResolvedAt = time.Now().UTC().Format(time.RFC3339)
@@ -552,6 +556,14 @@ func (s *CoreServer) queueRevocation(said string) error {
 	rec, err := s.DataStore.GetCredential(said)
 	if err != nil || rec == nil {
 		return fmt.Errorf("no credential %s to withdraw", said)
+	}
+	// Asked for afresh: whatever was asked before, refused or expired, is
+	// done with.
+	for _, row := range s.waitingRows() {
+		if row.Pending.Revokes == said && (row.Pending.Kind == withdrawalRefusedKind || !s.stillAsked(row)) {
+			_ = s.DataStore.DeletePendingIssuance(row.ID)
+			s.closeExpired(row.ID)
+		}
 	}
 	if s.anInteractionWaits() {
 		return s.keepBehind(pendingIssuance{Kind: waitingBehind, Spec: grantSpec{Issuer: rec.IssuerAID}, Revokes: said})
@@ -655,6 +667,20 @@ func (s *CoreServer) handleAdoptSigned(w http.ResponseWriter, r *http.Request) {
 // anchors that is not held here.
 func (s *CoreServer) keyLogReport() map[string]any {
 	out := map[string]any{}
+	if pending := s.withdrawingGrants(); len(pending) > 0 {
+		var list []map[string]string
+		for _, c := range pending {
+			state := s.withdrawalState(c.SAID)
+			entry := map[string]string{"credential": c.SAID, "holder": c.HolderAID, "kind": c.CredentialType, "withdrawal": state,
+				"detail": "Removed here, but still authorised in the published record until the device signs its withdrawal."}
+			if state == "refused" {
+				entry["detail"] = "Removed here, but still authorised in the published record: the device refused its withdrawal. " +
+					"Ask again with POST /api/grants/withdrawing/" + c.SAID + "/ask."
+			}
+			list = append(list, entry)
+		}
+		out["grants_withdrawing"] = list
+	}
 	if !s.keyIsElsewhere() {
 		return out
 	}
@@ -668,4 +694,102 @@ func (s *CoreServer) keyLogReport() map[string]any {
 		out["key_log_anchors_not_held"] = notHeld
 	}
 	return out
+}
+
+// withdrawalRefusedKind marks a withdrawal the device refused: the grant stays
+// in force in the published record until it is asked for again. Not asked
+// for again on its own, since refusing may be the owner's choice.
+const withdrawalRefusedKind = "withdrawal-refused"
+
+// withdrawalRefused records that the device refused the withdrawal asked for
+// by request id.
+func (s *CoreServer) withdrawalRefused(id string) {
+	body, ok, err := s.DataStore.GetPendingIssuance(id)
+	if err != nil || !ok {
+		return
+	}
+	var p pendingIssuance
+	if json.Unmarshal([]byte(body), &p) != nil || p.Revokes == "" {
+		return
+	}
+	_ = s.DataStore.DeletePendingIssuance(id)
+	_ = s.keepRow(withdrawalRefusedKind+"-"+p.Revokes, pendingIssuance{Kind: withdrawalRefusedKind, Spec: grantSpec{Issuer: p.Spec.Issuer}, Revokes: p.Revokes})
+}
+
+func (s *CoreServer) keepRow(id string, p pendingIssuance) error {
+	body, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+	return s.DataStore.SavePendingIssuance(id, string(body))
+}
+
+// withdrawalState says where the withdrawal of a grant that is not wanted
+// stands: waiting for the device, queued behind what waits, refused by it,
+// or expired (or never asked), which is asked for again.
+func (s *CoreServer) withdrawalState(said string) string {
+	state := "expired"
+	for _, row := range s.waitingRows() {
+		if row.Pending.Revokes != said {
+			continue
+		}
+		switch {
+		case row.Pending.Kind == withdrawalRefusedKind:
+			return "refused"
+		case row.Pending.Kind == waitingBehind:
+			state = "queued"
+		case s.stillAsked(row):
+			return "waiting"
+		}
+	}
+	return state
+}
+
+// withdrawingGrants are the grants in the key log that are not wanted here
+// and not yet revoked.
+func (s *CoreServer) withdrawingGrants() []store.CredentialRecord {
+	all, err := s.DataStore.GetCredentials()
+	if err != nil {
+		return nil
+	}
+	var out []store.CredentialRecord
+	for _, c := range all {
+		if c.Status == credentialStatusWithdrawing {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// askAgainForWithdrawals asks the device again for every withdrawal that
+// expired, or was never asked for; a refused one is left to the owner.
+func (s *CoreServer) askAgainForWithdrawals() {
+	for _, c := range s.withdrawingGrants() {
+		if s.withdrawalState(c.SAID) != "expired" {
+			continue
+		}
+		if err := s.queueRevocation(c.SAID); err != nil {
+			log.Printf("[grants] the withdrawal of %s could not be asked for again: %v", c.SAID, err)
+		}
+	}
+}
+
+// handleAskAgainToWithdraw asks the device again to withdraw a grant that is
+// not wanted here, after it refused.
+func (s *CoreServer) handleAskAgainToWithdraw(w http.ResponseWriter, r *http.Request) {
+	if !s.isOwner(r) {
+		writeError(w, http.StatusForbidden, "owner only", "only this agent's owner asks for a withdrawal")
+		return
+	}
+	said := chi.URLParam(r, "said")
+	c, err := s.DataStore.GetCredential(said)
+	if err != nil || c == nil || c.Status != credentialStatusWithdrawing {
+		writeError(w, http.StatusNotFound, "nothing to withdraw", "no grant here waits to be withdrawn under that identifier")
+		return
+	}
+	if err := s.queueRevocation(said); err != nil {
+		writeError(w, http.StatusConflict, "not asked", err.Error())
+		return
+	}
+	writeJSON(w, map[string]string{"withdrawal": s.withdrawalState(said)})
 }

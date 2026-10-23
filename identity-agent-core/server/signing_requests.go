@@ -331,6 +331,9 @@ func (s *CoreServer) handleRefuseSigningRequest(w http.ResponseWriter, r *http.R
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if req.Kind == signingKindRevocation {
+		s.withdrawalRefused(id)
+	}
 	// A grant refused frees its place: the one kept behind it is built.
 	if isGrantKind(req.Kind) {
 		s.buildNextBehind()

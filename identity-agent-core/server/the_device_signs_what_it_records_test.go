@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	keri "github.com/grapeid/keri-go"
+	"identity-agent-core/sandbox"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -77,6 +78,12 @@ func (c *twoCores) openRequester(t *testing.T) *CoreServer {
 	if err := r.initAssetHandler(); err != nil {
 		t.Fatal(err)
 	}
+	mgr, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: c.dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(mgr.Stop)
+	r.SandboxManager = mgr
 	r.router = r.buildRouter("")
 	r.fetchSignedEvent = func(aid string, sn int) []heldEvent {
 		if c.noWitnesses {
@@ -527,4 +534,93 @@ func TestTheDeviceWithdrawsOnlyWhatItIssued(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "never issued") {
 		t.Fatalf("the device withdrew a grant it never issued: %v", err)
 	}
+}
+
+// withdrawalAsked brings the requester to a grant signed on the device, not
+// wanted here, whose withdrawal waits for the device.
+func (c *twoCores) withdrawalAsked(t *testing.T) (ControllerGrant, store.SigningRequest) {
+	t.Helper()
+	a := grantFor(5, GradeEnrolled)
+	c.requester.pairMachine(t, a)
+	c.lostReply(t)
+	c.requester.s.revokeController(a.ControllerAID)
+	c.requester.s.tick()
+	reqs := waiting(t, c.requester.s)
+	if len(reqs) != 1 || reqs[0].Kind != signingKindRevocation {
+		t.Fatalf("no withdrawal waits: %+v", reqs)
+	}
+	return a, reqs[0]
+}
+
+func withdrawingListed(t *testing.T, s *CoreServer, holder, state string) {
+	t.Helper()
+	for _, path := range []string{"/api/grants/awaiting-approval", "/api/activity/chain"} {
+		rec := httptest.NewRecorder()
+		s.router.ServeHTTP(rec, local("GET", path, ""))
+		var out struct {
+			Withdrawing []map[string]string `json:"grants_withdrawing"`
+		}
+		json.Unmarshal(rec.Body.Bytes(), &out)
+		found := false
+		for _, g := range out.Withdrawing {
+			if g["holder"] == holder && g["withdrawal"] == state && strings.Contains(g["detail"], "still authorised in the published record") {
+				found = state != "refused" || strings.Contains(g["detail"], "/api/grants/withdrawing/"+g["credential"]+"/ask")
+			}
+		}
+		if state == "" && len(out.Withdrawing) != 0 {
+			t.Fatalf("%s still lists %v", path, out.Withdrawing)
+		}
+		if state != "" && !found {
+			t.Fatalf("%s does not list %s as %s: %s", path, holder, state, rec.Body.String())
+		}
+	}
+}
+
+// A withdrawal that expired is asked for again on the tick, and ends revoked.
+func TestAnExpiredWithdrawalIsAskedAgain(t *testing.T) {
+	c := newTwoCores(t)
+	a, req := c.withdrawalAsked(t)
+	withdrawingListed(t, c.requester.s, a.ControllerAID, "waiting")
+	recordDB(t, c.requester.s).Exec(`UPDATE signing_requests SET expires_at = ? WHERE id = ?`,
+		time.Now().Add(-time.Minute).UTC().Format(time.RFC3339), req.ID)
+	c.requester.s.tick()
+	again := waiting(t, c.requester.s)
+	if len(again) != 1 || again[0].Kind != signingKindRevocation || again[0].ID == req.ID {
+		t.Fatalf("the expired withdrawal was not asked again: %+v", again)
+	}
+	c.signAll(t)
+	c.logsAgree(t)
+	c.signedAndWithdrawn(t, a.ControllerAID)
+	withdrawingListed(t, c.requester.s, a.ControllerAID, "")
+}
+
+// A withdrawal the device refused is not asked again on its own, is listed
+// as still authorised in the published record, and can be asked again.
+func TestARefusedWithdrawalIsListedAndCanBeAskedAgain(t *testing.T) {
+	c := newTwoCores(t)
+	a, req := c.withdrawalAsked(t)
+	if code := httptestRefuse(t, c.requester.s, req.ID); code != http.StatusOK {
+		t.Fatalf("refusing: %d", code)
+	}
+	c.requester.s.tick()
+	if n := len(waiting(t, c.requester.s)); n != 0 {
+		t.Fatalf("a refused withdrawal was asked again on its own: %d waiting", n)
+	}
+	withdrawingListed(t, c.requester.s, a.ControllerAID, "refused")
+	creds, _ := c.requester.s.DataStore.GetCredentials()
+	var said string
+	for _, cr := range creds {
+		if cr.HolderAID == a.ControllerAID {
+			said = cr.SAID
+		}
+	}
+	rec := httptest.NewRecorder()
+	c.requester.s.router.ServeHTTP(rec, local("POST", "/api/grants/withdrawing/"+said+"/ask", ""))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("asking again: %d %s", rec.Code, rec.Body.String())
+	}
+	c.signAll(t)
+	c.logsAgree(t)
+	c.signedAndWithdrawn(t, a.ControllerAID)
+	withdrawingListed(t, c.requester.s, a.ControllerAID, "")
 }

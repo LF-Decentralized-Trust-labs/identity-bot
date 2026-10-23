@@ -726,6 +726,7 @@ func (s *CoreServer) tick() {
 	if _, err := s.adoptWhatTheDeviceSigned(nil); err != nil {
 		log.Printf("[grants] %v", err)
 	}
+	s.askAgainForWithdrawals()
 	s.witnessOwnLog()
 }
 

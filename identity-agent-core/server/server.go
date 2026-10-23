@@ -920,6 +920,7 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		r.Get("/controllers", s.handleListControllers)
 		r.Delete("/controllers/{aid}", s.handleRevokeController)
 		r.Get("/grants/awaiting-approval", s.handleGrantsAwaitingApproval)
+		r.Post("/grants/withdrawing/{said}/ask", s.handleAskAgainToWithdraw)
 
 		r.Post("/keystore/root-seed", s.handleSetRootSeed)
 		r.Get("/keystore/root-seed", s.handleRootSeedStatus)

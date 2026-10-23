@@ -116,7 +116,10 @@ reopen the duplicity it prevents. A grant taken up that is no longer wanted (its
 removed, its request withdrawn or changed) is kept so the registry's log is whole, is
 never in force, and is withdrawn at once by a revocation the device signs on the same
 queue, ahead of anything else; the device signs a revocation only of a grant its own key
-log issued. An Identity Agent whose key log holds events written by an earlier version
+log issued. A withdrawal that expires is asked for again; one the device refuses, which may be
+the owner's choice, is not, and the grant is listed, in the waiting list and the log
+check, as removed but still authorised in the published record, with the way to ask
+again. An Identity Agent whose key log holds events written by an earlier version
 without the key, which the device never had, asks the device for nothing and says so. Only one
 interaction waits for the device at a time, as each extends the same tip; another is kept
 and built once the one before it is appended, refused or expired. When a signature comes back it must be over the request's own
