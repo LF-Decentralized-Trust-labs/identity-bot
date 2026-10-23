@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -172,5 +173,47 @@ func TestARealDelegatedInceptionIsWitnessed(t *testing.T) {
 	held := sender.KelHeldBy(context.Background(), d.AID, []string{wkey})
 	if tip, ok := held[wkey]; !ok || tip.SN != 1 || tip.SAID != ixn.Said {
 		t.Fatalf("the witness says it holds %+v", held)
+	}
+}
+
+// A key event's sequence number is hexadecimal. A witness receipts a real key
+// log past its tenth and sixteenth events, where reading it as decimal would
+// have refused it as out of order.
+func TestAWitnessFollowsAKeyLogPastItsSixteenthEvent(t *testing.T) {
+	witness, _ := testService(t)
+	wpub, wpriv, _ := ed25519.GenerateKey(rand.Reader)
+	wkey := iacrypto.NonTransferableAIDQB64(wpub)
+	witness.SignReceipt = func(said string) (string, string, error) {
+		sig, err := login.SignString(said, wpriv.Seed())
+		return wkey, sig, err
+	}
+	e := keriengine.New()
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	nextPub, _, _ := ed25519.GenerateKey(rand.Reader)
+	icp, err := e.CreateInceptionNamed(iacrypto.VerkeyQB64(pub), iacrypto.VerkeyQB64(nextPub), "id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = witness.Store.SaveContactMeta(ContactMeta{ContactAID: icp.AID, WitnessingFor: true, BackendType: BackendDesktop})
+	receive := func(rawB64 string) {
+		raw, _ := base64.StdEncoding.DecodeString(rawB64)
+		sig, _ := login.SignString(string(raw), priv.Seed())
+		if _, err := witness.ReceiveEvent(icp.AID, raw, sig); err != nil {
+			t.Fatalf("the witness refused a real event: %v", err)
+		}
+	}
+	receive(icp.RawBytesB64)
+	var last string
+	for i := 1; i <= 17; i++ {
+		ixn, err := e.Interact("id", []interface{}{map[string]interface{}{"d": fmt.Sprintf("Eseal%d", i)}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		receive(ixn.RawBytesB64)
+		last = ixn.Said
+	}
+	held, _ := witness.GetKelReplica(icp.AID)
+	if sn, _ := eventSeq(held[len(held)-1]); sn != 17 || held[len(held)-1]["d"] != last {
+		t.Fatalf("the witness holds the key log to %d", sn)
 	}
 }

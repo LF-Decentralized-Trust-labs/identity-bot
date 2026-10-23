@@ -16,11 +16,13 @@ func eventAID(ev map[string]interface{}) string {
 func eventSeq(ev map[string]interface{}) (int, error) {
 	switch v := ev["s"].(type) {
 	case string:
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			return -1, err
+		// A key event's sequence number is hexadecimal: the eleventh event
+		// is "a", the seventeenth "10".
+		n, err := strconv.ParseInt(v, 16, 64)
+		if err != nil || n < 0 {
+			return -1, fmt.Errorf("invalid sequence %q", v)
 		}
-		return n, nil
+		return int(n), nil
 	case float64:
 		return int(v), nil
 	case int:
