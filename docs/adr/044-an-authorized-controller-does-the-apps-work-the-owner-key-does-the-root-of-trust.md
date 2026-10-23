@@ -123,7 +123,13 @@ again. Nothing already asked of the device, or already done, is asked of it agai
 second withdrawal of one grant is refused before it is built, the engine builds no
 revocation of a revoked credential, and the device signs none its own log already made.
 An event the device signed is taken up even where what it anchors cannot be kept here,
-so the two key logs never diverge. An Identity Agent whose key log holds events written by an earlier version
+so the two key logs never diverge. Every grant revoked where the key is elsewhere, whether its
+machine is removed, it is re-granted, an AI agent's grant is replaced or its body
+removed, or it is revoked directly, is withdrawn the same way: marked withdrawing here,
+never in force, and its revocation signed on the device; a machine re-granted there has
+its old grant's withdrawal asked for ahead of the new grant. The engine itself appends no
+interaction to a key log unless that identity's current key signed it, checked in one
+place, so no path can leave an unsigned event there. An Identity Agent whose key log holds events written by an earlier version
 without the key, which the device never had, asks the device for nothing and says so. Only one
 interaction waits for the device at a time, as each extends the same tip; another is kept
 and built once the one before it is appended, refused or expired. When a signature comes back it must be over the request's own

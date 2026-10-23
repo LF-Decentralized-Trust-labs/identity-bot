@@ -100,6 +100,13 @@ func (s *CoreServer) signForAnother(payloadB64 string, parts map[string]string) 
 		return "", &errPlaceFilled{SN: int(ixn.SN), Held: s.heldAt(ev)}
 	}
 	if _, err := s.whatIsToBeSigned(payloadB64, parts); err != nil {
+		// A grant this device's key log already withdraws: what it holds
+		// there is handed back, for the Identity Agent that asked to take up.
+		if parts["revocation_b64"] != "" {
+			if held, ok := s.withdrawalHeld(events, parts["credential_b64"]); ok {
+				return "", &errPlaceFilled{SN: -1, Held: held, Why: err.Error()}
+			}
+		}
 		return "", err
 	}
 	seed, err := s.identitySigningSeed()
@@ -127,10 +134,8 @@ func (s *CoreServer) signForAnother(payloadB64 string, parts map[string]string) 
 		if !bytes.Equal(k.Raw, payload) {
 			return fmt.Errorf("the interaction this device would make here is not the one it was asked to sign")
 		}
-		sig, err := signEventBytes(k.Raw, seed)
-		if err != nil {
-			return err
-		}
+		_ = seed // signed by the engine's own check, with this identity's key
+		sig := k.Signature
 		var parsed map[string]interface{}
 		if err := json.Unmarshal(k.Raw, &parsed); err != nil {
 			return err
@@ -148,6 +153,7 @@ func (s *CoreServer) signForAnother(payloadB64 string, parts map[string]string) 
 		signature = sig
 		return nil
 	}
+	s.engineSigns()
 	if _, err := keeper.InteractKept(identity.AID, data, keep); err != nil {
 		return "", err
 	}
@@ -161,9 +167,14 @@ func (s *CoreServer) signForAnother(payloadB64 string, parts map[string]string) 
 type errPlaceFilled struct {
 	SN   int
 	Held heldEvent
+	// Why is set where what is held is the grant's withdrawal, already made.
+	Why string
 }
 
 func (e *errPlaceFilled) Error() string {
+	if e.Why != "" {
+		return e.Why
+	}
 	return fmt.Sprintf("this device has already signed another event at place %d of this identity's key log, and signs no second one there", e.SN)
 }
 
@@ -197,4 +208,23 @@ func shownParts(in map[string]string) map[string]string {
 		}
 	}
 	return out
+}
+
+// withdrawalHeld is the event of this device's key log that withdraws the
+// grant in credentialB64, as it holds it.
+func (s *CoreServer) withdrawalHeld(events []store.EventRecord, credentialB64 string) (heldEvent, bool) {
+	raw, err := base64.StdEncoding.DecodeString(credentialB64)
+	if err != nil {
+		return heldEvent{}, false
+	}
+	cred, err := keri.VerifyCredential(raw)
+	if err != nil {
+		return heldEvent{}, false
+	}
+	for _, ev := range events {
+		if anchorsSealOf([]store.EventRecord{ev}, cred.SAID, "1") {
+			return s.heldAt(ev), true
+		}
+	}
+	return heldEvent{}, false
 }

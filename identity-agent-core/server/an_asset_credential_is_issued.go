@@ -193,9 +193,9 @@ func (s *CoreServer) finishIssuance(kind *schemas.AssetGrant, result *drivers.Dr
 // out, and marks it so whatever the registry says.
 func (s *CoreServer) withdrawIssued(said string) {
 	if rec, _ := s.DataStore.GetCredential(said); rec != nil {
-		if _, err := s.revokeIssuedCredential(rec); err != nil {
+		if _, _, err := s.withdrawCredential(rec); err != nil {
 			log.Printf("[asset] %s was issued and is not to be used, and its revocation failed: %v", said, err)
+			_ = s.DataStore.UpdateCredentialStatus(said, "revoked")
 		}
-		_ = s.DataStore.UpdateCredentialStatus(said, "revoked")
 	}
 }

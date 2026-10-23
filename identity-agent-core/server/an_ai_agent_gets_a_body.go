@@ -220,10 +220,10 @@ func (s *CoreServer) handleApproveBody(w http.ResponseWriter, r *http.Request) {
 		// expired, or the record could not be written. Withdraw the credential,
 		// or the registry would show a live body the owner never got.
 		if rec, _ := s.DataStore.GetCredential(credSAID); rec != nil {
-			if _, rerr := s.revokeIssuedCredential(rec); rerr != nil {
+			if _, _, rerr := s.withdrawCredential(rec); rerr != nil {
 				log.Printf("[body] credential %s issued for a body that did not become live, and its revocation failed: %v", credSAID, rerr)
+				_ = s.DataStore.UpdateCredentialStatus(credSAID, "revoked")
 			}
-			_ = s.DataStore.UpdateCredentialStatus(credSAID, "revoked")
 		}
 		jsonError(w, err.Error(), http.StatusConflict)
 		return
@@ -291,16 +291,14 @@ func (s *CoreServer) handleRevokeBody(w http.ResponseWriter, r *http.Request) {
 		writeJSONStatus(w, http.StatusOK, map[string]any{"revoked": b, "tel_revoked": rec != nil})
 		return
 	}
-	if _, err := s.revokeIssuedCredential(rec); err != nil {
+	telRevoked, status, err := s.withdrawCredential(rec)
+	if err != nil {
 		jsonError(w, "the machine can no longer speak as the AI agent, but the revocation could not be "+
 			"written to the registry, so others checking it would still see it live — try again: "+err.Error(),
 			http.StatusBadGateway)
 		return
 	}
-	if err := s.DataStore.UpdateCredentialStatus(rec.SAID, "revoked"); err != nil {
-		log.Printf("[body] %s revoked in the registry, but not marked revoked here: %v", b.Host, err)
-	}
-	writeJSONStatus(w, http.StatusOK, map[string]any{"revoked": b, "tel_revoked": true})
+	writeJSONStatus(w, http.StatusOK, map[string]any{"revoked": b, "tel_revoked": telRevoked, "status": status})
 }
 
 // bodyEnrolRequest is what a machine sends to ask to become a body.

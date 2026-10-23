@@ -520,14 +520,12 @@ func (s *CoreServer) issueCapabilityGrant(agent *asset.Asset, by authority) (str
 	// what its gateway reads — and the failure is reported, never skipped.
 	for i := range superseded {
 		old := superseded[i]
-		status := "revoked"
-		if _, err := s.revokeIssuedCredential(&old); err != nil {
+		if _, _, err := s.withdrawCredential(&old); err != nil {
 			log.Printf("[mcp] grant %s superseded by %s: its revocation was not recorded in the registry (%v); "+
 				"it is marked superseded and no longer admits anything here", old.SAID, grantSAID, err)
-			status = "superseded"
-		}
-		if err := s.DataStore.UpdateCredentialStatus(old.SAID, status); err != nil {
-			log.Printf("[mcp] grant %s superseded by %s but not marked %s: %v", old.SAID, grantSAID, status, err)
+			if err := s.DataStore.UpdateCredentialStatus(old.SAID, "superseded"); err != nil {
+				log.Printf("[mcp] grant %s superseded by %s but not marked so: %v", old.SAID, grantSAID, err)
+			}
 		}
 	}
 	log.Printf("[mcp] issued capability grant %s to agent %s (%d capabilities)", grantSAID, agentAID, len(capabilities))

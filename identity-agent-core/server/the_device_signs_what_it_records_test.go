@@ -75,6 +75,7 @@ func (c *twoCores) openRequester(t *testing.T) *CoreServer {
 	}
 	r := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: c.dir, DataStore: rds, EventHub: NewEventHub()}
 	r.KeriDriver = keriengine.New()
+	r.engineSigns()
 	r.reloadIdentityIntoDriver()
 	if err := r.initAssetHandler(); err != nil {
 		t.Fatal(err)
@@ -741,8 +742,10 @@ func TestAnEventIsTakenUpEvenWhenWhatItAnchorsIsRefused(t *testing.T) {
 	if now, _, _ := c.requester.s.ownTip(owner.AID); now != tipSN+1 {
 		t.Fatal("the key-log event was not taken up")
 	}
-	if notHeld := c.requester.s.anchoredNotHeld(); len(notHeld) != 1 {
-		t.Fatalf("what it anchors is not reported: %v", notHeld)
+	notHeld := c.requester.s.anchoredNotHeld()
+	if len(notHeld) != 1 || notHeld[0].Interaction != saidOf(ixn) || len(notHeld[0].Anchors) != 1 ||
+		!strings.Contains(string(notHeld[0].Anchors[0]), said) || !strings.Contains(string(notHeld[0].Anchors[0]), second.RevSAID) {
+		t.Fatalf("what it anchors is not named: %+v", notHeld)
 	}
 }
 
@@ -758,4 +761,169 @@ func TestTheSameThingIsNeverQueuedTwice(t *testing.T) {
 		t.Fatalf("the same withdrawal was queued twice: %v", err)
 	}
 	_ = said
+}
+
+// grantedOnBoth grants a machine through the device that holds the key.
+func (c *twoCores) grantedOnBoth(t *testing.T, g ControllerGrant) string {
+	t.Helper()
+	if rec := c.requester.pairMachine(t, g); rec.Code != http.StatusOK {
+		t.Fatalf("pairing: %d %s", rec.Code, rec.Body.String())
+	}
+	c.signAll(t)
+	got, _, _ := c.requester.s.controllers().Get(g.ControllerAID)
+	if got.CredentialSAID == "" {
+		t.Fatal("not granted")
+	}
+	return got.CredentialSAID
+}
+
+// The reviewer's case: a granted machine removed where the key is on another
+// device. Nothing is written into the key log here; the grant stops being in
+// force and its revocation is asked of the device, which signs it; both logs
+// agree and the grant is revoked in the published record.
+func TestZZRemoveGrantedMachineKeyElsewhere(t *testing.T) {
+	c := newTwoCores(t)
+	a := grantFor(5, GradeEnrolled)
+	said := c.grantedOnBoth(t, a)
+	owner, _ := c.requester.s.DataStore.GetIdentity()
+	before, _ := c.requester.s.DataStore.GetEvents(owner.AID)
+	if err := c.requester.s.revokeController(a.ControllerAID); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ := c.requester.s.DataStore.GetEvents(owner.AID); len(after) != len(before) {
+		t.Fatal("removing a machine wrote into the key log here")
+	}
+	if rec, _ := c.requester.s.DataStore.GetCredential(said); rec.Status != credentialStatusWithdrawing {
+		t.Fatalf("the removed machine's grant is %q", rec.Status)
+	}
+	if unsigned := c.requester.s.unsignedOwnEvents(); len(unsigned) != 0 {
+		t.Fatalf("unsigned events here: %v", unsigned)
+	}
+	reqs := waiting(t, c.requester.s)
+	if len(reqs) != 1 || reqs[0].Kind != signingKindRevocation {
+		t.Fatalf("the withdrawal was not asked of the device: %+v", reqs)
+	}
+	c.signAll(t)
+	c.logsAgree(t)
+	c.signedAndWithdrawn(t, a.ControllerAID)
+	// Published: the device's key log anchors the revocation.
+	events, _ := c.device.DataStore.GetEvents(owner.AID)
+	if !anchorsSealOf(events, said, "1") {
+		t.Fatal("the revocation is not in the published key log")
+	}
+}
+
+// Every way a grant is revoked goes through the device where the key is
+// elsewhere: the grant API, re-granting, and removing an AI agent's body all
+// leave nothing unsigned here.
+func TestEveryRevocationWaitsForTheDevice(t *testing.T) {
+	c := newTwoCores(t)
+	a := grantFor(5, GradeEnrolled)
+	said := c.grantedOnBoth(t, a)
+	rec := httptest.NewRecorder()
+	c.requester.s.router.ServeHTTP(rec, local("POST", "/api/credentials/"+said+"/revoke", ""))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), credentialStatusWithdrawing) {
+		t.Fatalf("revoking through the API: %d %s", rec.Code, rec.Body.String())
+	}
+	if unsigned := c.requester.s.unsignedOwnEvents(); len(unsigned) != 0 {
+		t.Fatalf("unsigned events here: %v", unsigned)
+	}
+	c.signAll(t)
+	c.logsAgree(t)
+	c.signedAndWithdrawn(t, a.ControllerAID)
+}
+
+// A granted machine re-granted where the key is on another device, with a
+// new label, grade and end: the old grant's withdrawal and the new grant are
+// both asked of the device, in that order, and both land.
+func TestAMachineIsReGrantedWhereTheKeyIsElsewhere(t *testing.T) {
+	c := newTwoCores(t)
+	a := grantFor(5, GradeEnrolled)
+	old := c.grantedOnBoth(t, a)
+	a.Label = "renamed"
+	if rec := c.requester.pairMachine(t, a); rec.Code != http.StatusOK {
+		t.Fatalf("re-granting: %d %s", rec.Code, rec.Body.String())
+	}
+	if r, _ := c.requester.s.DataStore.GetCredential(old); r.Status != credentialStatusWithdrawing {
+		t.Fatalf("the replaced grant is %q", r.Status)
+	}
+	c.signAll(t)
+	c.logsAgree(t)
+	if r, _ := c.requester.s.DataStore.GetCredential(old); r.Status != "revoked" {
+		t.Fatalf("the replaced grant ends %q", r.Status)
+	}
+	got, _, _ := c.requester.s.controllers().Get(a.ControllerAID)
+	if got.CredentialSAID == "" || got.CredentialSAID == old || got.Label != "renamed" {
+		t.Fatalf("the machine was not re-granted: %+v", got)
+	}
+}
+
+// A withdrawal the device signed whose revocation event did not reach here
+// with it: the key log here already withdraws the grant, so it is recorded
+// revoked and not asked for again; and the device's own answer, asked again,
+// hands back the revocation, which is kept.
+func TestAWithdrawalAlreadyInTheKeyLogIsNotAskedAgain(t *testing.T) {
+	c := newTwoCores(t)
+	a, req := c.withdrawalAsked(t)
+	said := withdrawingSAID(t, c.requester.s, a.ControllerAID)
+	parts := c.requester.s.queuedParts(req.ID)
+	if _, err := c.sign(t, req.ID); err != nil {
+		t.Fatal(err)
+	}
+	// The request is lost here with what it kept; the event comes from the
+	// witnesses alone, so only the key-log event is taken up.
+	c.requester.s.DataStore.DeletePendingIssuance(req.ID)
+	recordDB(t, c.requester.s).Exec(`UPDATE signing_requests SET status = 'expired' WHERE id = ?`, req.ID)
+	c.requester.s.tick()
+	c.logsAgree(t)
+	if n := len(waiting(t, c.requester.s)); n != 0 {
+		t.Fatalf("a grant the key log already withdraws was asked for again: %d waiting", n)
+	}
+	if r, _ := c.requester.s.DataStore.GetCredential(said); r.Status != "revoked" {
+		t.Fatalf("a grant the key log withdraws is %q", r.Status)
+	}
+	// The device, asked to withdraw it again, says so and hands back what
+	// it holds; taken up, the revocation is kept here.
+	owner, _ := c.device.DataStore.GetIdentity()
+	tipSN, tipSAID, _ := c.device.ownTip(owner.AID)
+	rec, _ := c.requester.s.DataStore.GetCredential(said)
+	rev, _ := keri.BuildRevocation(keri.RevocationInput{CredentialSAID: said, Registry: rec.RegistrySAID, PriorISSSAID: rec.IssSAID, DT: "2026-10-23T00:00:00.000000+00:00"})
+	revEvent, _ := keri.VerifyTELEvent(rev)
+	ixn, _ := keri.BuildInteraction(keri.InteractionInput{Prefix: owner.AID, PriorSAID: tipSAID, SN: tipSN + 1,
+		Data: []json.RawMessage{json.RawMessage(`{"i":"` + said + `","s":"1","d":"` + revEvent.SAID + `"}`)}})
+	body, _ := json.Marshal(map[string]string{"payload_b64": base64.StdEncoding.EncodeToString(ixn), "credential_b64": parts["credential_b64"],
+		"revocation_b64": base64.StdEncoding.EncodeToString(rev)})
+	w := httptest.NewRecorder()
+	c.device.router.ServeHTTP(w, local("POST", "/api/signing-requests/sign-for-another", string(body)))
+	var out struct {
+		Detail string    `json:"detail"`
+		Held   heldEvent `json:"held"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &out)
+	if w.Code != http.StatusConflict || !strings.Contains(out.Detail, "already withdrawn") || out.Held.Parts["revocation_b64"] == "" {
+		t.Fatalf("the device asked to withdraw it again answered %d %s", w.Code, w.Body.String())
+	}
+	held, _ := json.Marshal(out.Held)
+	w = httptest.NewRecorder()
+	c.requester.s.router.ServeHTTP(w, local("POST", "/api/signing-requests/adopt", string(held)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("taking up the revocation: %d %s", w.Code, w.Body.String())
+	}
+	tel, _ := c.requester.s.DataStore.GetCredentialTEL(rec.RegistrySAID, said)
+	if len(tel) != 2 {
+		t.Fatalf("the credential's log here holds %d events, not its issuance and revocation", len(tel))
+	}
+}
+
+// A grant whose withdrawal cannot even be asked of the device stays
+// withdrawing here, never in force and never read as revoked.
+func TestAGrantWhoseWithdrawalCannotBeAskedStaysWithdrawing(t *testing.T) {
+	c := newTwoCores(t)
+	owner, _ := c.requester.s.DataStore.GetIdentity()
+	c.requester.s.DataStore.SaveCredential(store.CredentialRecord{SAID: "Egrant-in-no-registry-here", IssuerAID: owner.AID, HolderAID: "Bmachine",
+		SchemaSAID: schemas.ControllerGrant.Schema.SAID, Status: "issued", RegistrySAID: "Eno-such-registry", IssSAID: "Eiss", Format: "acdc"})
+	c.requester.s.withdrawOrSay("Egrant-in-no-registry-here")
+	if r, _ := c.requester.s.DataStore.GetCredential("Egrant-in-no-registry-here"); r.Status != credentialStatusWithdrawing {
+		t.Fatalf("a grant still in the published record reads %q here", r.Status)
+	}
 }

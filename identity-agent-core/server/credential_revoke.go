@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -34,19 +35,14 @@ func (s *CoreServer) handleRevokeCredential(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	telRevoked, err := s.revokeIssuedCredential(rec)
+	telRevoked, status, err := s.withdrawCredential(rec)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "TEL revocation failed", err.Error())
 		return
 	}
-
-	if err := s.DataStore.UpdateCredentialStatus(said, "revoked"); err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to revoke credential", err.Error())
-		return
-	}
-	log.Printf("[credential] revoked %s (schema %s, holder %s, tel=%v)", said, rec.SchemaSAID, rec.HolderAID, telRevoked)
+	log.Printf("[credential] %s %s (schema %s, holder %s, tel=%v)", status, said, rec.SchemaSAID, rec.HolderAID, telRevoked)
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"said": said, "status": "revoked", "tel_revoked": telRevoked})
+	_ = json.NewEncoder(w).Encode(map[string]any{"said": said, "status": status, "tel_revoked": telRevoked})
 }
 
 // revokeIssuedCredential writes the revocation of a credential this identity
@@ -80,4 +76,39 @@ func (s *CoreServer) revokeIssuedCredential(rec *store.CredentialRecord) (bool, 
 	}
 	log.Printf("[credential] TEL-revoked %s (rev %s, registry %s)", rec.SAID, resp.RevSaid, rec.RegistrySAID)
 	return true, nil
+}
+
+// withdrawCredential withdraws a credential this identity issued and records
+// it so, returning whether its revocation is in the registry's log now and
+// the status it is left with.
+//
+// Where the identity's key is on another device nothing is written into the
+// key log here: the credential is marked withdrawing, which is never in
+// force, and its revocation is asked of that device on the signing-request
+// queue (the_device_log_is_adopted.go). It is revoked when that is signed.
+func (s *CoreServer) withdrawCredential(rec *store.CredentialRecord) (bool, string, error) {
+	if s.withdrawnByTheDevice(rec) {
+		if err := s.DataStore.UpdateCredentialStatus(rec.SAID, credentialStatusWithdrawing); err != nil {
+			return false, "", err
+		}
+		if err := s.queueRevocation(rec.SAID); err != nil && !errors.Is(err, errAlreadyAsked) {
+			return false, credentialStatusWithdrawing, fmt.Errorf("it is no longer in force here, and its withdrawal could not be asked for: %w", err)
+		}
+		return false, credentialStatusWithdrawing, nil
+	}
+	revoked, err := s.revokeIssuedCredential(rec)
+	if err != nil {
+		return false, "", err
+	}
+	return revoked, "revoked", s.DataStore.UpdateCredentialStatus(rec.SAID, "revoked")
+}
+
+// withdrawnByTheDevice reports whether a credential's revocation must be
+// signed on the device that holds the issuer's key.
+func (s *CoreServer) withdrawnByTheDevice(rec *store.CredentialRecord) bool {
+	if rec == nil || rec.RegistrySAID == "" || rec.IssSAID == "" {
+		return false
+	}
+	identity, err := s.DataStore.GetIdentity()
+	return err == nil && identity != nil && identity.AID == rec.IssuerAID && s.keyIsElsewhere()
 }

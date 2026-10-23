@@ -341,12 +341,23 @@ func (s *CoreServer) grantController(g ControllerGrant, now time.Time, by author
 	if err != nil {
 		return ControllerGrant{}, err
 	}
-	// A machine already granted is not re-granted where the key is on
-	// another device: its grant could not be withdrawn here, and both would
-	// stand.
+	// A machine already granted, re-granted where the key is on another
+	// device: its current grant stops being in force here now, and its
+	// withdrawal is asked of that device ahead of the new grant, which waits
+	// behind it.
 	if had && before.CredentialSAID != "" {
-		if err := s.keyCanSign(); err != nil {
-			return ControllerGrant{}, fmt.Errorf("%w, and this machine's current grant could not be withdrawn here", err)
+		switch err := s.keyCanSign(); {
+		case errors.Is(err, errKeyElsewhere):
+			rec, gerr := s.DataStore.GetCredential(before.CredentialSAID)
+			if gerr != nil || rec == nil {
+				return ControllerGrant{}, fmt.Errorf("this machine's current grant %s is not on record", before.CredentialSAID)
+			}
+			if _, _, werr := s.withdrawCredential(rec); werr != nil {
+				return ControllerGrant{}, fmt.Errorf("this machine's current grant could not be withdrawn: %w", werr)
+			}
+			before.CredentialSAID = ""
+		case err != nil:
+			return ControllerGrant{}, err
 		}
 	}
 	by.About = checked.ControllerAID
@@ -478,10 +489,8 @@ func (s *CoreServer) withdrawControllerGrant(said string) error {
 	if err != nil || rec == nil {
 		return fmt.Errorf("grant credential %s is not on record", said)
 	}
-	if _, err := s.revokeIssuedCredential(rec); err != nil {
-		return err
-	}
-	return s.DataStore.UpdateCredentialStatus(said, "revoked")
+	_, _, err = s.withdrawCredential(rec)
+	return err
 }
 
 // withdrawOrSay withdraws a Controller Grant credential, saying so when it
@@ -489,7 +498,11 @@ func (s *CoreServer) withdrawControllerGrant(said string) error {
 func (s *CoreServer) withdrawOrSay(said string) {
 	if err := s.withdrawControllerGrant(said); err != nil {
 		log.Printf("[controller] grant credential %s: its revocation was not recorded in the registry: %v", said, err)
-		_ = s.DataStore.UpdateCredentialStatus(said, "revoked")
+		// Not in force here either way; where the key is on another device it
+		// stays withdrawing, which says so, rather than reading as revoked.
+		if rec, _ := s.DataStore.GetCredential(said); rec == nil || rec.Status != credentialStatusWithdrawing {
+			_ = s.DataStore.UpdateCredentialStatus(said, "revoked")
+		}
 	}
 }
 

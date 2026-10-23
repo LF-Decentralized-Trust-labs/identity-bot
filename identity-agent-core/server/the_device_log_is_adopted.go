@@ -479,34 +479,45 @@ func (s *CoreServer) adoptBare(aid string, raw []byte, signature string) error {
 		if err := json.Unmarshal(k.Raw, &parsed); err != nil {
 			return err
 		}
-		rec, err := s.ownInteractionRecord(aid, parsed, base64.StdEncoding.EncodeToString(k.Raw), k.SN, signature)
+		rec, err := s.ownInteractionRecord(aid, parsed, base64.StdEncoding.EncodeToString(k.Raw), k.SN, k.Signature)
 		if err != nil {
 			return err
 		}
 		return s.DataStore.SaveEvent(rec)
 	}
-	if _, err := keeper.InteractKept(aid, data, keep); err != nil {
+	if err := s.withSignature(raw, signature, func() error {
+		_, err := keeper.InteractKept(aid, data, keep)
+		return err
+	}); err != nil {
 		return err
 	}
-	s.noteAnchoredNotHeld(body.D)
+	s.noteAnchoredNotHeld(body.D, body.A)
 	return nil
 }
 
 const anchoredNotHeldFile = "anchored_not_held.json"
 
-// noteAnchoredNotHeld records an interaction taken up whose anchored event
+// notHeldAnchor is an interaction taken up whose anchored events this
+// Identity Agent could not obtain, and what it anchors: for each, the
+// credential (or registry) and the event of its log, by place and digest.
+type notHeldAnchor struct {
+	Interaction string            `json:"interaction"`
+	Anchors     []json.RawMessage `json:"anchors"`
+}
+
+// noteAnchoredNotHeld records an interaction taken up whose anchored events
 // this Identity Agent could not obtain.
-func (s *CoreServer) noteAnchoredNotHeld(said string) {
+func (s *CoreServer) noteAnchoredNotHeld(said string, anchors []json.RawMessage) {
 	list := s.anchoredNotHeld()
-	list = append(list, said)
+	list = append(list, notHeldAnchor{Interaction: said, Anchors: anchors})
 	if b, err := json.Marshal(list); err == nil {
 		_ = os.WriteFile(filepath.Join(s.DataDir, anchoredNotHeldFile), b, 0o600)
 	}
-	log.Printf("[grants] took up %s, signed on the device that holds the key; what it anchors is not held here", said)
+	log.Printf("[grants] took up %s, signed on the device that holds the key; what it anchors (%s) is not held here", said, anchors)
 }
 
-func (s *CoreServer) anchoredNotHeld() []string {
-	var list []string
+func (s *CoreServer) anchoredNotHeld() []notHeldAnchor {
+	var list []notHeldAnchor
 	if b, err := os.ReadFile(filepath.Join(s.DataDir, anchoredNotHeldFile)); err == nil {
 		_ = json.Unmarshal(b, &list)
 	}
@@ -580,6 +591,12 @@ func (s *CoreServer) queueRevocation(said string) error {
 	}
 	if rec.Status != credentialStatusWithdrawing {
 		return fmt.Errorf("%w: the grant is %q, not waiting to be withdrawn", errAlreadyAsked, rec.Status)
+	}
+	// Already withdrawn in the key log, as the device signed it, though its
+	// revocation event did not reach here: revoked, and not asked again.
+	if events, err := s.DataStore.GetEvents(rec.IssuerAID); err == nil && anchorsSealOf(events, said, "1") {
+		s.withdrawnInTheKeyLog(said)
+		return fmt.Errorf("%w: the key log already withdraws it", errAlreadyAsked)
 	}
 	if state := s.withdrawalState(said); state == "waiting" || state == "queued" {
 		return fmt.Errorf("%w: its withdrawal is already %s", errAlreadyAsked, state)
@@ -676,6 +693,15 @@ func (s *CoreServer) handleAdoptSigned(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid body", err.Error())
 		return
 	}
+	// An event already here whose revocation did not come with it.
+	if kept, err := s.takeUpWhatIsAnchored(held); err != nil || kept {
+		if err != nil {
+			writeError(w, http.StatusConflict, "not taken up", err.Error())
+			return
+		}
+		writeJSON(w, map[string]int{"adopted": 0, "anchored_taken_up": 1})
+		return
+	}
 	n, err := s.adoptWhatTheDeviceSigned(&held)
 	if err != nil {
 		writeError(w, http.StatusConflict, "not taken up", err.Error())
@@ -721,6 +747,56 @@ func (s *CoreServer) keyLogReport() map[string]any {
 		out["key_log_anchors_not_held"] = notHeld
 	}
 	return out
+}
+
+// withdrawnInTheKeyLog records a grant the key log here already withdraws as
+// revoked, and drops whatever was kept to ask for its withdrawal.
+func (s *CoreServer) withdrawnInTheKeyLog(said string) {
+	_ = s.DataStore.UpdateCredentialStatus(said, "revoked")
+	for _, row := range s.waitingRows() {
+		if row.Pending.Revokes == said {
+			_ = s.DataStore.DeletePendingIssuance(row.ID)
+			s.closeExpired(row.ID)
+		}
+	}
+	log.Printf("[grants] %s is withdrawn in the key log, as signed on the device that holds the key", said)
+}
+
+// takeUpWhatIsAnchored keeps what an event already in the key log here
+// anchors, from the parts the device kept with it: a revocation that did not
+// reach here with the event.
+func (s *CoreServer) takeUpWhatIsAnchored(held heldEvent) (bool, error) {
+	raw, err := base64.StdEncoding.DecodeString(held.RawB64)
+	if err != nil {
+		return false, nil
+	}
+	ev, err := keri.ParseEvent(raw)
+	if err != nil {
+		return false, nil
+	}
+	events, err := s.DataStore.GetEvents(ev.Identifier)
+	if err != nil {
+		return false, nil
+	}
+	here := false
+	for _, e := range events {
+		if e.SequenceNumber == int(ev.SN) && e.RawBytesB64 == held.RawB64 {
+			here = true
+		}
+	}
+	if !here || held.Parts["revocation_b64"] == "" {
+		return false, nil
+	}
+	dec := func(k string) []byte { b, _ := base64.StdEncoding.DecodeString(held.Parts[k]); return b }
+	shown, err := authorisation.WhatSigningRevokes(raw, dec("revocation_b64"), dec("credential_b64"))
+	if err != nil {
+		return false, err
+	}
+	if err := s.keepCredentialEvent(shown.Registry, shown.Credential, held.Parts["revocation_b64"]); err != nil {
+		return false, err
+	}
+	s.withdrawnInTheKeyLog(shown.Credential)
+	return true, nil
 }
 
 // withdrawalRefusedKind marks a withdrawal the device refused: the grant stays
