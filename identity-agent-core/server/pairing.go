@@ -453,6 +453,10 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 		foundedRaw       string
 		foundedSig       string
 		foundedWitnessed bool
+		// foundedNamed and foundedToad are the witnesses the founding event
+		// names, and how many must receipt it.
+		foundedNamed []string
+		foundedToad  int
 	)
 
 	// Who the founded identity answers to, decided once so the inception and
@@ -523,6 +527,7 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 		}
 		identityAID, eventType, eventBody = result.AID, "icp", result.InceptionEvent
 		foundedRaw, foundedWitnessed = result.RawBytesB64, len(witnesses) > 0
+		foundedNamed, foundedToad = witnesses, toad
 
 		// Signed here, with the key this machine holds and nobody else does.
 		// A witness cannot attest to an event it cannot verify, and this is the
@@ -576,10 +581,11 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 	// uncorroborated rather than as invalid.
 	if foundedWitnessed && s.WitnessService != nil && foundedSig != "" {
 		if raw, derr := base64.StdEncoding.DecodeString(foundedRaw); derr == nil {
+			// To exactly the witnesses the event names.
 			go func(aid string, body []byte, sig string) {
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel()
-				if berr := s.WitnessService.BroadcastEvent(ctx, aid, body, sig); berr != nil {
+				if berr := s.WitnessService.BroadcastToDesignated(ctx, aid, body, sig, foundedNamed, foundedToad); berr != nil {
 					log.Printf("[pairing] %s named witnesses but they did not accept its "+
 						"inception (%v) — its history is uncorroborated until they do", aid, berr)
 				}

@@ -54,7 +54,9 @@ type Service struct {
 	SignAsRequester func(statement string) (string, error)
 	// FetchTip asks a witness how far it holds an identity's key log. Replaceable
 	// so a test needs no network.
-	FetchTip    func(ctx context.Context, url string) (TipAnswer, error)
+	FetchTip func(ctx context.Context, url string) (TipAnswer, error)
+	// FetchEvent asks a witness for one signed event of a key log.
+	FetchEvent  func(ctx context.Context, url string) (SignedEvent, error)
 	OurAID      func() string
 	OurOOBI     func() string
 	BackendType string
@@ -112,7 +114,66 @@ func NewService(st Store, contacts ContactStore, driver drivers.KeriEngine, back
 	}
 	s.PostEvent = s.defaultPostEvent
 	s.FetchTip = s.defaultFetchTip
+	s.FetchEvent = s.defaultFetchEvent
 	return s
+}
+
+func (s *Service) defaultFetchEvent(ctx context.Context, url string) (SignedEvent, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return SignedEvent{}, err
+	}
+	resp, err := s.HTTPClient.Do(req)
+	if err != nil {
+		return SignedEvent{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return SignedEvent{}, fmt.Errorf("witness GET %d", resp.StatusCode)
+	}
+	var out SignedEvent
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil {
+		return SignedEvent{}, err
+	}
+	return out, nil
+}
+
+// EventAt is one event of an identity's key log as a witness holds it, with
+// its controller's signature: what an Identity Agent asks for to take up an
+// event signed on the device that holds the key.
+func (s *Service) EventAt(aid string, sn int) (SignedEvent, error) {
+	kel, err := s.Store.GetKelEvents(aid)
+	if err != nil {
+		return SignedEvent{}, err
+	}
+	for _, e := range kel {
+		if e.SequenceNum == sn && e.RawBytesB64 != "" && e.CesrSignature != "" {
+			return SignedEvent{RawBytesB64: e.RawBytesB64, CesrSignature: e.CesrSignature}, nil
+		}
+	}
+	return SignedEvent{}, fmt.Errorf("not_found")
+}
+
+// EventsHeldAt asks each designated witness for the event at sn of an
+// identity's key log. What comes back is only a candidate: the asker checks
+// it extends its own key log and is signed by the identity's key.
+func (s *Service) EventsHeldAt(ctx context.Context, aid string, sn int, designated []string) []SignedEvent {
+	targets := s.designatedTargets(designated)
+	var out []SignedEvent
+	for _, key := range designated {
+		w, ok := targets[key]
+		if !ok {
+			continue
+		}
+		cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		url := witnessBase(w.URL) + witnessPathPrefix(w.Commercial) + "/witness/kel/" + aid + "/event/" + strconv.Itoa(sn)
+		ev, err := s.FetchEvent(cctx, url)
+		cancel()
+		if err == nil && ev.RawBytesB64 != "" {
+			out = append(out, ev)
+		}
+	}
+	return out
 }
 
 func (s *Service) defaultFetchTip(ctx context.Context, url string) (TipAnswer, error) {
@@ -799,6 +860,11 @@ func (s *Service) enrolledWitnesses(kind AidKind, aid string) ([]witnessTarget, 
 // anything. A witness returning 200 and no receipt finalised an event just as
 // well as one that signed it.
 func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, eventSAID, witnessAID string) {
+	// Its own time, not the caller's: every caller starts this in the
+	// background and returns, and a caller that cancels its context on return
+	// cancelled the post before it reached the witness.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
 	resp, err := s.PostEvent(ctx, url, body)
 	if err != nil {
 		time.Sleep(BroadcastRetryDelay)

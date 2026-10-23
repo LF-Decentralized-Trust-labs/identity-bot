@@ -434,3 +434,47 @@ func TestAWitnessUpToDateIsNotAskedAgain(t *testing.T) {
 		t.Fatal("a witness was not asked once there was more to send")
 	}
 }
+
+// A witness hands back an event it holds exactly as its controller published
+// and signed it, asked for by place; the asker reaches it at the witness's
+// address.
+func TestAWitnessHandsBackAnEventItHolds(t *testing.T) {
+	d := newDelegation(t)
+	sender, mc := testService(t)
+	mc.contacts["EWitness"] = store.ContactRecord{AID: "EWitness", OobiURL: "http://w.test", IsWitness: true}
+	_ = sender.Store.SaveContactMeta(ContactMeta{ContactAID: "EWitness", WitnessKey: d.wkey})
+	sender.PostEvent = func(_ context.Context, _ string, body []byte) (map[string]interface{}, error) {
+		var req struct {
+			AID   string `json:"aid"`
+			Event string `json:"event_b64"`
+			Sig   string `json:"cesr_signature"`
+		}
+		_ = json.Unmarshal(body, &req)
+		raw, _ := base64.StdEncoding.DecodeString(req.Event)
+		return d.w.ReceiveEvent(req.AID, raw, req.Sig)
+	}
+	sender.FetchTip = func(_ context.Context, url string) (TipAnswer, error) {
+		_, nonce, _ := strings.Cut(url, "?nonce=")
+		return d.w.KelTip(d.org, nonce)
+	}
+	asked := ""
+	sender.FetchEvent = func(_ context.Context, url string) (SignedEvent, error) {
+		asked = url
+		return d.w.EventAt(d.org, 1)
+	}
+	raw, _ := base64.StdEncoding.DecodeString(d.approvalB64)
+	sig, _ := login.SignString(string(raw), d.orgSeed)
+	icp, _ := base64.StdEncoding.DecodeString(d.icpB64)
+	icpSig, _ := login.SignString(string(icp), d.orgSeed)
+	sender.BringUpToDate(context.Background(), d.org, []SignedEvent{{d.icpB64, icpSig}, {d.approvalB64, sig}}, []string{d.wkey}, 1)
+	got := sender.EventsHeldAt(context.Background(), d.org, 1, []string{d.wkey})
+	if len(got) != 1 || got[0].RawBytesB64 != d.approvalB64 || got[0].CesrSignature != sig {
+		t.Fatalf("the witness handed back %+v", got)
+	}
+	if asked != "http://w.test/api/witness/kel/"+d.org+"/event/1" {
+		t.Fatalf("asked at %s", asked)
+	}
+	if _, err := d.w.EventAt(d.org, 7); err == nil {
+		t.Fatal("a witness handed back an event it does not hold")
+	}
+}

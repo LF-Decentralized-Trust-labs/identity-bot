@@ -1000,6 +1000,11 @@ func TestARealWitnessWitnessesTheRecord(t *testing.T) {
 	}
 	if got["anchor_broken_at"] != nil || got["witnessed_through"] != got["anchored_through"] {
 		t.Fatalf("the record reads as %v", got)
+	} // The witness hands back, over HTTP, an event it holds exactly as signed:
+	// where an Identity Agent finds what the device holding the key signed.
+	back := s.WitnessService.EventsHeldAt(context.Background(), owner.AID, 1, []string{peer.witnessKey})
+	if len(back) != 1 || back[0].RawBytesB64 != ownerEvents[1].RawBytesB64 || back[0].CesrSignature != ownerEvents[1].CesrSignature {
+		t.Fatalf("the witness handed back %+v", back)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"identity-agent-core/store"
@@ -21,6 +22,7 @@ func (s *CoreServer) mountWitnessRoutes(r chi.Router) {
 	r.Post("/witness/event", s.handleWitnessEvent)
 	r.Get("/witness/kel/{signer_aid}", s.handleWitnessKel)
 	r.Get("/witness/kel/{signer_aid}/tip", s.handleWitnessKelTip)
+	r.Get("/witness/kel/{signer_aid}/event/{sn}", s.handleWitnessKelEvent)
 	r.Get("/witness/status", s.handleWitnessStatus)
 	r.Post("/witness/endpoint", s.handleWitnessEndpointRecord)
 	r.Get("/witness/endpoint/{controller_aid}", s.handleWitnessEndpointLookup)
@@ -316,4 +318,21 @@ func (s *CoreServer) handleWitnessEndpointLookup(w http.ResponseWriter, r *http.
 		"records":        records,
 		"count":          len(records),
 	})
+}
+
+// handleWitnessKelEvent answers one event of a key log this witness holds,
+// as its controller published and signed it.
+func (s *CoreServer) handleWitnessKelEvent(w http.ResponseWriter, r *http.Request) {
+	sn, err := strconv.Atoi(chi.URLParam(r, "sn"))
+	if err != nil || sn < 0 {
+		writeError(w, http.StatusBadRequest, "a place in the key log is a number", "")
+		return
+	}
+	ev, err := s.WitnessService.EventAt(chi.URLParam(r, "signer_aid"), sn)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not held", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ev)
 }

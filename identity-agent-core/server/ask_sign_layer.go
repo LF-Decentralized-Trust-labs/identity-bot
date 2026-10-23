@@ -160,14 +160,17 @@ func (s *CoreServer) mintPairwiseIn(pool, name string) (aid, oobi string, seed [
 			// they arrive; an identity whose receipts have not landed yet is
 			// correctly reported as uncorroborated rather than as invalid.
 			if s.WitnessService != nil && len(witnesses) > 0 {
-				go func(aid string, raw []byte, sig string) {
+				// To exactly the witnesses the event names: choosing again here
+				// by another digest sent it, most of the time, to a witness it
+				// does not name.
+				go func(aid string, raw []byte, sig string, named []string, toad int) {
 					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 					defer cancel()
-					if berr := s.WitnessService.BroadcastEvent(ctx, aid, raw, sig); berr != nil {
+					if berr := s.WitnessService.BroadcastToDesignated(ctx, aid, raw, sig, named, toad); berr != nil {
 						log.Printf("[pairwise] %s designated witnesses but its inception was not "+
 							"accepted by them (%v) — its history is uncorroborated until it is", aid, berr)
 					}
-				}(icp.AID, raw, sig)
+				}(icp.AID, raw, sig, witnesses, toad)
 			}
 		}
 	}
