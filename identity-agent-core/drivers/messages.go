@@ -293,6 +293,19 @@ type PreparedIssuance struct {
 	Prior    string `json:"prior"`
 }
 
+// PreparedRegistry is a registry's inception, built but not yet appended,
+// with the interaction in the issuer's key log that anchors it.
+type PreparedRegistry struct {
+	Issuer   string `json:"issuer"`
+	Registry string `json:"registry"`
+	VcpRaw   []byte `json:"vcp_raw"`
+	VcpSAID  string `json:"vcp_said"`
+	IxnRaw   []byte `json:"ixn_raw"`
+	IxnSAID  string `json:"ixn_said"`
+	SN       int    `json:"sn"`
+	Prior    string `json:"prior"`
+}
+
 // ErrStalePreparation is a prepared issuance whose key log has moved on since
 // it was built: its interaction no longer extends the tip.
 var ErrStalePreparation = errors.New("the key log has moved on since this issuance was prepared")
@@ -302,6 +315,8 @@ var ErrStalePreparation = errors.New("the key log has moved on since this issuan
 type PreparedIssuer interface {
 	PrepareCredentialInRegistry(name string, claims map[string]interface{}, schemaSaid, holderAid string, edges map[string]interface{}, registrySaid string) (*PreparedIssuance, error)
 	AppendPreparedIssuance(name string, p *PreparedIssuance) (*DriverIssueCredentialResponse, error)
+	PrepareRegistryInception(name string) (*PreparedRegistry, error)
+	AppendPreparedRegistry(name string, p *PreparedRegistry) (*DriverRegistryInceptResponse, error)
 }
 
 // KELKeep is an event an engine is about to append to an identity's key log,

@@ -1884,3 +1884,20 @@ func (s *SQLiteStore) DeletePendingIssuance(signingRequestID string) error {
 	_, err := s.db.Exec(`DELETE FROM pending_issuances WHERE signing_request_id = ?`, signingRequestID)
 	return err
 }
+
+func (s *SQLiteStore) ListPendingIssuances() (map[string]string, error) {
+	rows, err := s.db.Query(`SELECT signing_request_id, body FROM pending_issuances`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id, body string
+		if err := rows.Scan(&id, &body); err != nil {
+			return nil, err
+		}
+		out[id] = body
+	}
+	return out, rows.Err()
+}

@@ -72,6 +72,20 @@ func (s *CoreServer) issueAssetCredential(
 	} else if reg, err := s.DataStore.GetRegistryByIssuer(issuer); err == nil && reg != nil && reg.VcpRawB64 != "" {
 		registrySAID = reg.RegistrySAID
 	} else {
+		// No registry yet: its inception is asked of the device that holds
+		// the key first, and the grant is built on it once it is signed.
+		preparer, can := s.KeriDriver.(drivers.PreparedIssuer)
+		if !can || (kind != schemas.AIAgentGrant && kind != schemas.ControllerGrant) {
+			return "", errKeyElsewhere
+		}
+		reg, err := preparer.PrepareRegistryInception(issuer)
+		if err != nil {
+			return "", err
+		}
+		if _, err := s.awaitRegistry(reg, grantSpec{Schema: kind.Schema.SAID, Issuer: issuer, Claims: claims, Edges: edges,
+			Holder: holder, Expiry: expiry, RequestDigest: requestDigest, About: by.About, Grant: by.ControllerGrant, Request: by.Request}); err != nil {
+			return "", err
+		}
 		return "", errKeyElsewhere
 	}
 	preparer, canPrepare := s.KeriDriver.(drivers.PreparedIssuer)
@@ -105,7 +119,8 @@ func (s *CoreServer) issueAssetCredential(
 		if kind != schemas.AIAgentGrant && kind != schemas.ControllerGrant {
 			return "", errKeyElsewhere
 		}
-		if _, err := s.awaitSignature(kind, prepared, claims, edges, holder, expiry, requestDigest, by); err != nil {
+		if _, err := s.awaitSignature(kind, prepared, grantSpec{Schema: kind.Schema.SAID, Issuer: issuer, Claims: claims, Edges: edges,
+			Holder: holder, Expiry: expiry, RequestDigest: requestDigest, About: by.About, Grant: by.ControllerGrant, Request: by.Request}); err != nil {
 			return "", err
 		}
 		return "", errKeyElsewhere
@@ -157,6 +172,8 @@ func (s *CoreServer) finishIssuance(kind *schemas.AssetGrant, result *drivers.Dr
 		s.withdrawIssued(result.AcdcSaid)
 		return "", fmt.Errorf("%s was not issued: it does not rest on the request that asked for it: %w", kind.Schema.Name, err)
 	}
+	// The interaction anchoring it goes to the identity's witnesses.
+	s.witnessOwnLog()
 	return result.AcdcSaid, nil
 }
 

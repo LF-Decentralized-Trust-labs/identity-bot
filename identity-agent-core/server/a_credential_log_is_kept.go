@@ -91,7 +91,12 @@ func (s *CoreServer) keepTELCommit(c drivers.TELCommit) error {
 	if err := checkRegistryInception(telB64, ev.Subject, kelB64); err != nil {
 		return err
 	}
-	anchor, err := s.ownInteractionRecord(c.AID, ixn, kelB64, c.SN, "")
+	// Signed on the device that holds the key, when it was.
+	signature := ""
+	if v, ok := s.signedElsewhere.Load(kelB64); ok {
+		signature, _ = v.(string)
+	}
+	anchor, err := s.ownInteractionRecord(c.AID, ixn, kelB64, c.SN, signature)
 	if err != nil {
 		return fmt.Errorf("the registry's anchor could not be kept: %w", err)
 	}

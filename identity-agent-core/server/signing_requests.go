@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"identity-agent-core/authorisation"
 	"identity-agent-core/drivers"
 	"log"
 	"net/http"
@@ -158,6 +159,7 @@ func (s *CoreServer) mountSigningRequestRoutes(r chi.Router) {
 	r.Get("/signing-requests", s.handleListSigningRequests)
 	r.Post("/signing-requests/{id}/fulfil", s.handleFulfilSigningRequest)
 	r.Post("/signing-requests/{id}/refuse", s.handleRefuseSigningRequest)
+	r.Post("/signing-requests/check", s.handleCheckWhatIsToBeSigned)
 }
 
 // handleListSigningRequests returns what is waiting for the controller device.
@@ -191,8 +193,23 @@ func (s *CoreServer) handleListSigningRequests(w http.ResponseWriter, r *http.Re
 		live = append(live, req)
 	}
 
+	// A grant, or a registry, waiting for this device carries what the
+	// interaction anchors, so the device can check what it is asked to sign
+	// (POST /api/signing-requests/check) rather than believe the summary.
+	out := make([]map[string]any, 0, len(live))
+	for _, req := range live {
+		raw, _ := json.Marshal(req)
+		var m map[string]any
+		_ = json.Unmarshal(raw, &m)
+		if req.Kind == signingKindGrant || req.Kind == signingKindRegistry {
+			for k, v := range s.queuedParts(req.ID) {
+				m[k] = v
+			}
+		}
+		out = append(out, m)
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"requests": live, "count": len(live)})
+	json.NewEncoder(w).Encode(map[string]any{"requests": out, "count": len(out)})
 }
 
 // handleFulfilSigningRequest accepts the signature the controller device made.
@@ -240,8 +257,8 @@ func (s *CoreServer) handleFulfilSigningRequest(w http.ResponseWriter, r *http.R
 	// A grant waiting for this signature is appended with it first, so a
 	// signature that does not hold, or a grant that no longer can be, leaves
 	// the request as it was rather than marking it signed.
-	if req.Kind == signingKindGrant {
-		if err := s.completeWaitingGrant(id, body.Signature); err != nil {
+	if req.Kind == signingKindGrant || req.Kind == signingKindRegistry {
+		if err := s.completeWaiting(*req, body.Signature); err != nil {
 			status := http.StatusConflict
 			if errors.Is(err, errGrantSignature) {
 				status = http.StatusBadRequest
@@ -297,4 +314,64 @@ func (s *CoreServer) handleRefuseSigningRequest(w http.ResponseWriter, r *http.R
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"refused": true, "id": id})
+}
+
+// handleCheckWhatIsToBeSigned is run by the device that holds the identity's
+// key, on its own core, before it signs a grant or a registry asked of it by
+// another Identity Agent: it checks the interaction anchors exactly the
+// credential's issuance (or the registry's inception) and extends this
+// identity's key log as this device holds it, and says what signing grants,
+// read from the credential itself.
+func (s *CoreServer) handleCheckWhatIsToBeSigned(w http.ResponseWriter, r *http.Request) {
+	if !s.isOwner(r) {
+		writeError(w, http.StatusForbidden, "owner only", "only this agent's owner checks what it is asked to sign")
+		return
+	}
+	var body struct {
+		PayloadB64    string `json:"payload_b64"`
+		CredentialB64 string `json:"credential_b64"`
+		IssuanceB64   string `json:"issuance_b64"`
+		RegistryB64   string `json:"registry_b64"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid body", err.Error())
+		return
+	}
+	shown, err := s.whatIsToBeSigned(body.PayloadB64, body.CredentialB64, body.IssuanceB64, body.RegistryB64)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "this is not safe to sign", err.Error())
+		return
+	}
+	writeJSON(w, shown)
+}
+
+// whatIsToBeSigned is what signing payload grants, checked as described at
+// handleCheckWhatIsToBeSigned.
+func (s *CoreServer) whatIsToBeSigned(payloadB64, credentialB64, issuanceB64, registryB64 string) (*authorisation.ToSign, error) {
+	dec := func(v string) []byte { b, _ := base64.StdEncoding.DecodeString(v); return b }
+	var shown *authorisation.ToSign
+	var err error
+	if registryB64 != "" {
+		shown, err = authorisation.WhatSigningRegisters(dec(payloadB64), dec(registryB64))
+	} else {
+		shown, err = authorisation.WhatSigningGrants(dec(payloadB64), dec(issuanceB64), dec(credentialB64))
+	}
+	if err != nil {
+		return nil, err
+	}
+	identity, err := s.DataStore.GetIdentity()
+	if err != nil || identity == nil || identity.AID != shown.Issuer {
+		return nil, fmt.Errorf("this is not this identity's key log to extend")
+	}
+	events, err := s.DataStore.GetEvents(identity.AID)
+	if err != nil || len(events) == 0 {
+		return nil, fmt.Errorf("this device holds no key log for this identity")
+	}
+	last := events[len(events)-1]
+	var tip map[string]interface{}
+	_ = json.Unmarshal([]byte(last.EventJSON), &tip)
+	if tipSAID, _ := tip["d"].(string); tipSAID != shown.Prior || last.SequenceNumber+1 != shown.SN {
+		return nil, fmt.Errorf("the interaction does not extend this identity's key log as this device holds it")
+	}
+	return shown, nil
 }

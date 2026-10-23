@@ -194,6 +194,18 @@ credential is issued to, with the same key, label and grade, the signer it named
 named one, and the same end. A machine or AI agent that existed before grants is given one
 only this way, on the owner's request (ADR-044); nothing issues one from what is on disk.
 
+**What the device holding the key checks before it signs**
+(`authorisation.WhatSigningGrants`, run by that device's own core at `POST /api/signing-
+requests/check`, and called from the apps through `agent_client`'s
+`CheckingWhatYouAreAskedToSign`): the credential verifies against its own identifier; the
+issuance event is of that credential, in its registry; the interaction is a well-formed
+event of the credential's issuer whose one seal anchors exactly that issuance; and the
+interaction extends the identity's key log as the device holds it. What is shown is read
+from the credential: its kind, whom it grants, the machine's key and its fingerprint
+(`authorisation.KeyFingerprint`, which pairing shows too), grade, signer, end,
+capabilities and limits, never text the asking Identity Agent wrote. A registry's
+inception is checked the same way (`WhatSigningRegisters`).
+
 **Checked before it is written.** The Identity Agent builds each credential, checks it
 against its request, and only then appends the interaction that anchors it, so a
 credential that would fail is never in the key log, issued and then withdrawn. Once

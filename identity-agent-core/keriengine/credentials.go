@@ -58,7 +58,36 @@ func (e *Engine) InceptRegistry(name string) (*drivers.DriverRegistryInceptRespo
 		return nil, err
 	}
 	defer release()
+	p, err := e.prepareRegistry(id)
+	if err != nil {
+		return nil, err
+	}
+	return e.appendPreparedRegistry(id, p)
+}
 
+// PrepareRegistryInception builds a registry's inception and the interaction
+// that anchors it, on the key log as it stands now, without appending them.
+func (e *Engine) PrepareRegistryInception(name string) (*drivers.PreparedRegistry, error) {
+	id, release, err := e.holdForWriting(name)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return e.prepareRegistry(id)
+}
+
+// AppendPreparedRegistry appends a registry's inception exactly as it was
+// prepared, while its interaction still extends the key log's tip.
+func (e *Engine) AppendPreparedRegistry(name string, p *drivers.PreparedRegistry) (*drivers.DriverRegistryInceptResponse, error) {
+	id, release, err := e.holdForWriting(name)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return e.appendPreparedRegistry(id, p)
+}
+
+func (e *Engine) prepareRegistry(id *identity) (*drivers.PreparedRegistry, error) {
 	// A registry needs a nonce, or two registries founded by the same issuer
 	// would have the same identifier — and an issuance into one would read as
 	// an issuance into the other.
@@ -82,20 +111,64 @@ func (e *Engine) InceptRegistry(name string) (*drivers.DriverRegistryInceptRespo
 	if registrySAID == "" {
 		registrySAID = vcpEvent.SAID
 	}
-
 	seal, err := eventSeal(registrySAID, "0", vcpEvent.SAID)
 	if err != nil {
 		return nil, err
 	}
+	e.state.mu.RLock()
+	prior, sn := id.LastSAID, id.SN+1
+	e.state.mu.RUnlock()
 	ixn, err := keri.BuildInteraction(keri.InteractionInput{
 		Prefix:    id.AID,
-		PriorSAID: id.LastSAID,
-		SN:        id.SN + 1,
+		PriorSAID: prior,
+		SN:        sn,
 		Data:      []json.RawMessage{seal},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("anchoring the registry: %w", err)
 	}
+	ixnEvent, err := keri.ParseEvent(ixn)
+	if err != nil {
+		return nil, err
+	}
+	return &drivers.PreparedRegistry{Issuer: id.AID, Registry: registrySAID, VcpRaw: vcp, VcpSAID: vcpEvent.SAID,
+		IxnRaw: ixn, IxnSAID: ixnEvent.SAID, SN: int(ixnEvent.SN), Prior: prior}, nil
+}
+
+func (e *Engine) appendPreparedRegistry(id *identity, p *drivers.PreparedRegistry) (*drivers.DriverRegistryInceptResponse, error) {
+	if p == nil || p.Issuer != id.AID {
+		return nil, fmt.Errorf("the prepared registry is not this identity's")
+	}
+	e.state.mu.RLock()
+	tipSAID, tipSN := id.LastSAID, id.SN
+	e.state.mu.RUnlock()
+	if p.Prior != tipSAID || p.SN != tipSN+1 {
+		return nil, drivers.ErrStalePreparation
+	}
+	vcpEvent, err := keri.VerifyTELEvent(p.VcpRaw)
+	if err != nil || vcpEvent.SAID != p.VcpSAID {
+		return nil, fmt.Errorf("the prepared registry inception does not verify")
+	}
+	vcpBody, err := eventMap(p.VcpRaw)
+	if err != nil {
+		return nil, err
+	}
+	registrySAID, _ := vcpBody["i"].(string)
+	if registrySAID == "" {
+		registrySAID = vcpEvent.SAID
+	}
+	if registrySAID != p.Registry {
+		return nil, fmt.Errorf("the prepared registry inception is of another registry")
+	}
+	seal, err := eventSeal(registrySAID, "0", vcpEvent.SAID)
+	if err != nil {
+		return nil, err
+	}
+	want, err := keri.BuildInteraction(keri.InteractionInput{Prefix: id.AID, PriorSAID: p.Prior, SN: p.SN, Data: []json.RawMessage{seal}})
+	if err != nil || string(want) != string(p.IxnRaw) {
+		return nil, fmt.Errorf("the prepared interaction does not anchor the prepared registry")
+	}
+	vcp, ixn := p.VcpRaw, p.IxnRaw
 	ixnEvent, err := keri.ParseEvent(ixn)
 	if err != nil {
 		return nil, err

@@ -5,16 +5,22 @@ package server
 // Issuing a Controller Grant or an AI Agent Grant appends an interaction to
 // the identity's key log, which only the device holding the key may sign.
 // Where that is another device, the grant is built here exactly as it will be
-// issued, checked against the request it rests on, and kept; the interaction
-// that anchors it is queued for that device to sign, as a signing request
-// whose payload is exactly those bytes and whose summary says what signing it
-// grants. When the signature comes back it is checked against the identity's
-// current key, the grant is appended exactly as built, and the machine or AI
-// agent stops waiting. Nothing is written into the key log here unsigned.
+// issued, checked against the signed request it rests on, and kept; the
+// interaction that anchors it is queued for that device to sign, together
+// with the credential and its issuance event, so the device can check what it
+// is asked to sign and show what the credential itself says
+// (authorisation.WhatSigningGrants), never anything written here about it.
+// Where the identity has no registry yet, the registry's inception is asked
+// for first, and the grant is built on it once it is signed.
 //
-// The device signing it is trusted to sign only an interaction that extends
-// the key log as it holds it: an interaction built here on a key log that has
-// moved on is refused when it comes back, and built again.
+// When a signature comes back it must be over the request's own payload,
+// which must be the interaction kept; the credential is derived again from
+// what was kept and compared; the machine or AI agent must still be there and
+// still be what the grant says; and nothing may have been granted it
+// meanwhile. Only then is the grant appended with that signature. At most one
+// grant waits for each machine or AI agent: asking again, or removing it,
+// withdraws the one waiting. Nothing is written into the key log here
+// unsigned.
 
 import (
 	"encoding/base64"
@@ -22,33 +28,50 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
+	"sync"
+	"time"
 
+	"identity-agent-core/authorisation"
 	"identity-agent-core/drivers"
 	"identity-agent-core/login"
 	"identity-agent-core/schemas"
+	"identity-agent-core/store"
 )
 
-// signingKindGrant is the signing request for a grant's anchoring interaction.
-const signingKindGrant = "grant-issuance"
+// The signing requests for a grant's, and a registry's, anchoring interaction.
+const (
+	signingKindGrant    = "grant-issuance"
+	signingKindRegistry = "registry-inception"
+)
 
-// pendingIssuance is a grant built and waiting for its interaction to be
-// signed by the device that holds the identity's key.
-type pendingIssuance struct {
-	Schema        string                   `json:"schema"`
-	Claims        map[string]interface{}   `json:"claims"`
-	Edges         map[string]interface{}   `json:"edges,omitempty"`
-	Prepared      drivers.PreparedIssuance `json:"prepared"`
-	Holder        string                   `json:"holder"`
-	Expiry        string                   `json:"expiry,omitempty"`
-	RequestDigest string                   `json:"request_digest,omitempty"`
-	About         string                   `json:"about,omitempty"`
-	Grant         string                   `json:"controller_grant,omitempty"`
-	Request       *signedRequest           `json:"request,omitempty"`
+// grantSpec is everything a grant is built from, so it can be built again.
+type grantSpec struct {
+	Schema        string                 `json:"schema"`
+	Issuer        string                 `json:"issuer"`
+	Claims        map[string]interface{} `json:"claims"`
+	Edges         map[string]interface{} `json:"edges,omitempty"`
+	Holder        string                 `json:"holder"`
+	Expiry        string                 `json:"expiry,omitempty"`
+	RequestDigest string                 `json:"request_digest,omitempty"`
+	About         string                 `json:"about,omitempty"`
+	Grant         string                 `json:"controller_grant,omitempty"`
+	Request       *signedRequest         `json:"request,omitempty"`
 }
 
-func (p pendingIssuance) by() authority {
-	return authority{About: p.About, ControllerGrant: p.Grant, Request: p.Request}
+func (g grantSpec) by() authority {
+	return authority{About: g.About, ControllerGrant: g.Grant, Request: g.Request}
+}
+
+// pendingIssuance is what waits for the device that holds the identity's key:
+// a grant built and waiting for its interaction to be signed, or a registry's
+// inception the grant waits behind.
+type pendingIssuance struct {
+	Kind     string                    `json:"kind"`
+	Spec     grantSpec                 `json:"spec"`
+	Prepared *drivers.PreparedIssuance `json:"prepared,omitempty"`
+	Registry *drivers.PreparedRegistry `json:"registry,omitempty"`
 }
 
 func grantKindNamed(schema string) *schemas.AssetGrant {
@@ -61,18 +84,47 @@ func grantKindNamed(schema string) *schemas.AssetGrant {
 	return nil
 }
 
+// errNeedsSignedRequest is a grant asked for, where the key is on another
+// device, by a request that was not signed: there is nothing to show that
+// device as the authority for it.
+var errNeedsSignedRequest = errors.New("where the identity's key is on another device, a grant is asked for only by a signed request")
+
 // awaitSignature keeps a prepared grant and asks the device that holds the
-// identity's key to sign its anchoring interaction.
-func (s *CoreServer) awaitSignature(kind *schemas.AssetGrant, p *drivers.PreparedIssuance, claims, edges map[string]interface{},
-	holder, expiry, requestDigest string, by authority) (string, error) {
-	pending := pendingIssuance{Schema: kind.Schema.SAID, Claims: claims, Edges: edges, Prepared: *p, Holder: holder, Expiry: expiry,
-		RequestDigest: requestDigest, About: by.About, Grant: by.ControllerGrant, Request: by.Request}
+// identity's key to sign its anchoring interaction, withdrawing any grant
+// already waiting for the same machine or AI agent.
+func (s *CoreServer) awaitSignature(kind *schemas.AssetGrant, p *drivers.PreparedIssuance, spec grantSpec) (string, error) {
+	if spec.Request == nil {
+		return "", errNeedsSignedRequest
+	}
+	shown, err := authorisation.WhatSigningGrants(p.IxnRaw, p.IssRaw, p.AcdcRaw)
+	if err != nil {
+		return "", err
+	}
+	return s.queueForTheKey(signingKindGrant, pendingIssuance{Kind: signingKindGrant, Spec: spec, Prepared: p}, p.IxnRaw, summaryOf(shown))
+}
+
+// awaitRegistry asks the device that holds the identity's key to sign the
+// inception of its registry, with the grant that waits behind it.
+func (s *CoreServer) awaitRegistry(p *drivers.PreparedRegistry, spec grantSpec) (string, error) {
+	if spec.Request == nil {
+		return "", errNeedsSignedRequest
+	}
+	shown, err := authorisation.WhatSigningRegisters(p.IxnRaw, p.VcpRaw)
+	if err != nil {
+		return "", err
+	}
+	return s.queueForTheKey(signingKindRegistry, pendingIssuance{Kind: signingKindRegistry, Spec: spec, Registry: p}, p.IxnRaw, summaryOf(shown))
+}
+
+func (s *CoreServer) queueForTheKey(kind string, pending pendingIssuance, payload []byte, summary string) (string, error) {
+	s.withdrawWaitingFor(pending.Spec.Holder)
 	body, err := json.Marshal(pending)
 	if err != nil {
 		return "", err
 	}
-	summary, detail := s.whatSigningGrants(kind, p, holder)
-	id, err := s.EnqueueSigningRequest(p.Issuer, signingKindGrant, summary, detail, p.IxnRaw, PresentationConsent)
+	id, err := s.EnqueueSigningRequest(pending.Spec.Issuer, kind, summary,
+		"Your key is on this device, so this waits for it here. What is shown is read from the credential itself.",
+		payload, PresentationConsent)
 	if err != nil {
 		return "", err
 	}
@@ -82,72 +134,228 @@ func (s *CoreServer) awaitSignature(kind *schemas.AssetGrant, p *drivers.Prepare
 	return id, nil
 }
 
-// whatSigningGrants is what the person is shown: what signing this grants,
-// and to whom.
-func (s *CoreServer) whatSigningGrants(kind *schemas.AssetGrant, p *drivers.PreparedIssuance, holder string) (string, string) {
-	var acdc struct {
-		A map[string]interface{} `json:"a"`
-	}
-	_ = json.Unmarshal(p.AcdcRaw, &acdc)
-	name, _ := acdc.A["name"].(string)
-	switch kind {
-	case schemas.ControllerGrant:
-		grade, _ := acdc.A["grade"].(string)
-		return fmt.Sprintf("Let the machine %q act for you", name),
-			fmt.Sprintf("Signing this grants the machine %s (%s) authority to act for this identity, at the %s grade. "+
-				"Your key is on this device, so the grant waits for it here.", name, holder, grade)
-	default:
-		var caps []string
-		if list, ok := acdc.A["capabilities"].([]interface{}); ok {
-			for _, c := range list {
-				if v, ok := c.(string); ok {
-					caps = append(caps, v)
-				}
-			}
-		}
+// summaryOf is the one line shown, made from what the credential says.
+func summaryOf(t *authorisation.ToSign) string {
+	switch t.Kind {
+	case "machine":
+		return fmt.Sprintf("Let the machine %q (key %s) act for you", t.Name, t.KeyFingerprint)
+	case "ai_agent":
 		what := "nothing"
-		if len(caps) > 0 {
-			what = strings.Join(caps, ", ")
+		if len(t.Capabilities) > 0 {
+			what = strings.Join(t.Capabilities, ", ")
 		}
-		return fmt.Sprintf("Let the AI agent %q do what it was granted", name),
-			fmt.Sprintf("Signing this grants the AI agent %s (%s): %s. Until it is signed the AI agent may do nothing. "+
-				"Your key is on this device, so the grant waits for it here.", name, holder, what)
+		return fmt.Sprintf("Let the AI agent %q do: %s", t.Name, what)
+	default:
+		return "Make the registry this identity issues its grants into"
+	}
+}
+
+// waitingRow is one row of what waits for the device that holds the key.
+type waitingRow struct {
+	ID      string
+	Pending pendingIssuance
+}
+
+func (s *CoreServer) waitingRows() []waitingRow {
+	rows, err := s.DataStore.ListPendingIssuances()
+	if err != nil {
+		return nil
+	}
+	var out []waitingRow
+	for id, body := range rows {
+		var p pendingIssuance
+		if json.Unmarshal([]byte(body), &p) == nil {
+			out = append(out, waitingRow{ID: id, Pending: p})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// withdrawWaitingFor withdraws whatever waits for the device that holds the
+// key on behalf of holder, and the request asking it to sign.
+func (s *CoreServer) withdrawWaitingFor(holder string) {
+	if holder == "" {
+		return
+	}
+	for _, row := range s.waitingRows() {
+		if row.Pending.Spec.Holder != holder {
+			continue
+		}
+		_ = s.DataStore.DeletePendingIssuance(row.ID)
+		if req, err := s.DataStore.GetSigningRequest(row.ID); err == nil && req != nil && req.Status == SigningStatusPending {
+			req.Status = SigningStatusRefused
+			req.ResolvedAt = time.Now().UTC().Format(time.RFC3339)
+			_ = s.DataStore.SaveSigningRequest(*req)
+		}
+		log.Printf("[grants] the grant waiting for %s was withdrawn", holder)
 	}
 }
 
 // errGrantSignature is a signature for a waiting grant that does not hold.
 var errGrantSignature = errors.New("the signature does not hold for the identity's current key")
 
-// completeWaitingGrant appends a waiting grant with the signature the device
-// that holds the key made over its interaction, and stops the machine or AI
-// agent waiting. A signature that does not hold changes nothing; a grant whose
-// key log has moved on is built again and asked for afresh.
-func (s *CoreServer) completeWaitingGrant(requestID, signature string) error {
-	body, ok, err := s.DataStore.GetPendingIssuance(requestID)
+// fulfilLocks holds one lock per signing request, so two signatures for one
+// request are not both acted on.
+var fulfilLocks sync.Map
+
+func lockFulfil(id string) func() {
+	m, _ := fulfilLocks.LoadOrStore(id, &sync.Mutex{})
+	mu := m.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
+
+// completeWaiting acts on the signature the device that holds the key made
+// over a waiting grant's, or registry's, interaction.
+func (s *CoreServer) completeWaiting(req store.SigningRequest, signature string) error {
+	unlock := lockFulfil(req.ID)
+	defer unlock()
+	body, ok, err := s.DataStore.GetPendingIssuance(req.ID)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("no grant waits for this signature")
+		return fmt.Errorf("nothing waits for this signature")
 	}
 	var pending pendingIssuance
 	if err := json.Unmarshal([]byte(body), &pending); err != nil {
 		return err
 	}
-	kind := grantKindNamed(pending.Schema)
-	if kind == nil {
-		return fmt.Errorf("the waiting grant is of no kind this agent issues")
+	if pending.Spec.Request == nil {
+		return errNeedsSignedRequest
+	}
+	// The signature is over the request's own payload, which is the
+	// interaction kept: neither can have been swapped for the other's.
+	payload, err := base64.StdEncoding.DecodeString(req.PayloadB64)
+	if err != nil {
+		return err
+	}
+	var kept []byte
+	switch {
+	case pending.Kind == signingKindGrant && pending.Prepared != nil:
+		kept = pending.Prepared.IxnRaw
+	case pending.Kind == signingKindRegistry && pending.Registry != nil:
+		kept = pending.Registry.IxnRaw
+	default:
+		return fmt.Errorf("what waits is of no kind this agent completes")
+	}
+	if req.Kind != pending.Kind || string(payload) != string(kept) {
+		return fmt.Errorf("the request asks to sign something other than what waits")
 	}
 	identity, err := s.DataStore.GetIdentity()
-	if err != nil || identity == nil || identity.AID != pending.Prepared.Issuer {
-		return fmt.Errorf("the waiting grant is not this identity's")
+	if err != nil || identity == nil || identity.AID != pending.Spec.Issuer {
+		return fmt.Errorf("what waits is not this identity's")
 	}
 	pub, err := login.DecodeVerkey(identity.PublicKey)
 	if err != nil {
 		return err
 	}
-	if ok, err := login.VerifyString(string(pending.Prepared.IxnRaw), signature, pub); err != nil || !ok {
+	if ok, err := login.VerifyString(string(payload), signature, pub); err != nil || !ok {
 		return errGrantSignature
+	}
+	if pending.Kind == signingKindRegistry {
+		return s.completeRegistry(req.ID, pending, signature)
+	}
+	return s.completeGrant(req.ID, pending, signature)
+}
+
+// sameAsBuilt derives what the kept grant says from its own bytes and
+// compares it with what it was built from.
+func sameAsBuilt(pending pendingIssuance) (*authorisation.ToSign, error) {
+	p := pending.Prepared
+	shown, err := authorisation.WhatSigningGrants(p.IxnRaw, p.IssRaw, p.AcdcRaw)
+	if err != nil {
+		return nil, err
+	}
+	var acdc struct {
+		S string                 `json:"s"`
+		A map[string]interface{} `json:"a"`
+	}
+	if err := json.Unmarshal(p.AcdcRaw, &acdc); err != nil {
+		return nil, err
+	}
+	if acdc.S != pending.Spec.Schema || shown.Holder != pending.Spec.Holder || shown.Issuer != pending.Spec.Issuer {
+		return nil, fmt.Errorf("the grant kept is not the one built")
+	}
+	for k, want := range pending.Spec.Claims {
+		if !sameJSONValue(acdc.A[k], want) {
+			return nil, fmt.Errorf("the grant kept says other than it was built to (%s)", k)
+		}
+	}
+	return shown, nil
+}
+
+func sameJSONValue(a, b interface{}) bool {
+	x, _ := json.Marshal(a)
+	y, _ := json.Marshal(b)
+	return string(x) == string(y)
+}
+
+// stillWhatItGrants checks that the machine or AI agent a waiting grant is
+// for is still there, is still what the grant says, and has not been granted
+// anything meanwhile.
+func (s *CoreServer) stillWhatItGrants(kind *schemas.AssetGrant, shown *authorisation.ToSign) error {
+	switch kind {
+	case schemas.ControllerGrant:
+		g, had, err := s.controllers().Get(shown.Holder)
+		if err != nil || !had {
+			return fmt.Errorf("the machine has been removed")
+		}
+		if live, why := g.Live(time.Now()); !live {
+			return fmt.Errorf("the machine's authorisation no longer stands: %s", why)
+		}
+		if g.CredentialSAID != "" {
+			return fmt.Errorf("the machine has been granted meanwhile")
+		}
+		if strings.TrimSpace(g.PublicKey) != shown.PublicKey || strings.TrimSpace(g.Label) != shown.Name ||
+			string(g.Grade) != shown.Grade || g.Signer != shown.Signer || !sameMoment(shown.ValidUntil, g.ExpiresAt) {
+			return fmt.Errorf("the machine is no longer what the grant says")
+		}
+	case schemas.AIAgentGrant:
+		ref := s.findAgentAssetByAID(shown.Holder)
+		if ref == nil || s.agentStatus(ref.PairwiseAID) == "revoked" || s.assetHandler == nil {
+			return fmt.Errorf("the AI agent has been removed")
+		}
+		a, ok := s.assetHandler.Store.GetAsset(ref.ID)
+		if !ok {
+			return fmt.Errorf("the AI agent has been removed")
+		}
+		if s.findCapabilityGrant(a.PairwiseAID) != nil {
+			return fmt.Errorf("the AI agent has been granted meanwhile")
+		}
+		caps := append([]string{}, a.Capabilities...)
+		granted := append([]string{}, shown.Capabilities...)
+		sort.Strings(caps)
+		sort.Strings(granted)
+		if strings.Join(caps, "\n") != strings.Join(granted, "\n") {
+			return fmt.Errorf("the AI agent's capabilities have changed since")
+		}
+		var limits interface{}
+		if len(shown.Limits) > 0 {
+			_ = json.Unmarshal(shown.Limits, &limits)
+		}
+		if len(a.GrantConstraints) > 0 || limits != nil {
+			if !sameJSONValue(a.GrantConstraints, limits) {
+				return fmt.Errorf("the AI agent's limits have changed since")
+			}
+		}
+	}
+	return nil
+}
+
+func (s *CoreServer) completeGrant(requestID string, pending pendingIssuance, signature string) error {
+	kind := grantKindNamed(pending.Spec.Schema)
+	if kind == nil {
+		return fmt.Errorf("the waiting grant is of no kind this agent issues")
+	}
+	shown, err := sameAsBuilt(pending)
+	if err != nil {
+		return err
+	}
+	if err := s.stillWhatItGrants(kind, shown); err != nil {
+		s.withdrawWaitingFor(pending.Spec.Holder)
+		return fmt.Errorf("the grant was not issued: %w", err)
 	}
 	preparer, can := s.KeriDriver.(drivers.PreparedIssuer)
 	if !can {
@@ -155,21 +363,23 @@ func (s *CoreServer) completeWaitingGrant(requestID, signature string) error {
 	}
 	// Checked again against the request: the grant it rests on may have been
 	// withdrawn meanwhile.
-	by := pending.by()
-	if err := s.checkAuthorisationOf(pending.Prepared.AcdcRaw, pending.Prepared.Issuer, "", "", by); err != nil {
+	by := pending.Spec.by()
+	if err := s.checkAuthorisationOf(pending.Prepared.AcdcRaw, pending.Spec.Issuer, "", "", by); err != nil {
 		return fmt.Errorf("the waiting grant no longer rests on its request: %w", err)
 	}
 	s.engineKeepsCredentialLogs()
-	s.signedElsewhere.Store(base64.StdEncoding.EncodeToString(pending.Prepared.IxnRaw), signature)
-	defer s.signedElsewhere.Delete(base64.StdEncoding.EncodeToString(pending.Prepared.IxnRaw))
-	result, err := preparer.AppendPreparedIssuance(pending.Prepared.Issuer, &pending.Prepared)
+	ixnB64 := base64.StdEncoding.EncodeToString(pending.Prepared.IxnRaw)
+	s.signedElsewhere.Store(ixnB64, signature)
+	defer s.signedElsewhere.Delete(ixnB64)
+	result, err := preparer.AppendPreparedIssuance(pending.Spec.Issuer, pending.Prepared)
 	if errors.Is(err, drivers.ErrStalePreparation) {
-		// Built on a key log that has moved on: built again and asked afresh.
+		// Built on a key log that has moved on: built again and asked afresh,
+		// since nothing was granted it meanwhile (checked above).
 		_ = s.DataStore.DeletePendingIssuance(requestID)
-		fresh, perr := preparer.PrepareCredentialInRegistry(pending.Prepared.Issuer, pending.Claims, pending.Schema, pending.Holder,
-			pending.Edges, pending.Prepared.Registry)
+		fresh, perr := preparer.PrepareCredentialInRegistry(pending.Spec.Issuer, pending.Spec.Claims, pending.Spec.Schema,
+			pending.Spec.Holder, pending.Spec.Edges, pending.Prepared.Registry)
 		if perr == nil {
-			if _, perr = s.awaitSignature(kind, fresh, pending.Claims, pending.Edges, pending.Holder, pending.Expiry, pending.RequestDigest, by); perr == nil {
+			if _, perr = s.awaitSignature(kind, fresh, pending.Spec); perr == nil {
 				return fmt.Errorf("%w; it has been built again and asked for afresh", err)
 			}
 		}
@@ -178,42 +388,124 @@ func (s *CoreServer) completeWaitingGrant(requestID, signature string) error {
 	if err != nil {
 		return fmt.Errorf("the waiting grant could not be appended: %w", err)
 	}
-	said, err := s.finishIssuance(kind, result, pending.Holder, pending.Prepared.Issuer, pending.Expiry,
-		pending.Prepared.Registry, pending.RequestDigest, by)
+	said, err := s.finishIssuance(kind, result, pending.Spec.Holder, pending.Spec.Issuer, pending.Spec.Expiry,
+		pending.Prepared.Registry, pending.Spec.RequestDigest, by)
 	if err != nil {
 		return err
 	}
 	_ = s.DataStore.DeletePendingIssuance(requestID)
-	s.grantArrived(kind, pending, said)
+	s.grantArrived(kind, pending.Spec, said)
+	s.witnessOwnLog()
+	return nil
+}
+
+func (s *CoreServer) completeRegistry(requestID string, pending pendingIssuance, signature string) error {
+	if _, err := authorisation.WhatSigningRegisters(pending.Registry.IxnRaw, pending.Registry.VcpRaw); err != nil {
+		return err
+	}
+	preparer, can := s.KeriDriver.(drivers.PreparedIssuer)
+	if !can {
+		return fmt.Errorf("this engine cannot append a prepared registry")
+	}
+	s.engineKeepsCredentialLogs()
+	ixnB64 := base64.StdEncoding.EncodeToString(pending.Registry.IxnRaw)
+	s.signedElsewhere.Store(ixnB64, signature)
+	defer s.signedElsewhere.Delete(ixnB64)
+	if _, err := preparer.AppendPreparedRegistry(pending.Spec.Issuer, pending.Registry); err != nil {
+		if errors.Is(err, drivers.ErrStalePreparation) {
+			_ = s.DataStore.DeletePendingIssuance(requestID)
+		}
+		return fmt.Errorf("the registry could not be appended: %w", err)
+	}
+	_ = s.DataStore.DeletePendingIssuance(requestID)
+	s.witnessOwnLog()
+	// The grant that waited behind it, built now on the registry and asked
+	// for in its turn.
+	kind := grantKindNamed(pending.Spec.Schema)
+	if kind == nil {
+		return nil
+	}
+	claims := map[string]interface{}{}
+	for k, v := range pending.Spec.Claims {
+		claims[k] = v
+	}
+	if _, err := s.issueAssetCredential(kind, pending.Spec.Holder, pending.Spec.Issuer, claims, pending.Spec.Expiry, pending.Spec.by()); err != nil && !errors.Is(err, errKeyElsewhere) {
+		return fmt.Errorf("the registry was made, and the grant waiting behind it could not be built: %w", err)
+	}
 	return nil
 }
 
 // grantArrived stops a machine or AI agent waiting for its grant.
-func (s *CoreServer) grantArrived(kind *schemas.AssetGrant, pending pendingIssuance, said string) {
+func (s *CoreServer) grantArrived(kind *schemas.AssetGrant, spec grantSpec, said string) {
 	switch kind {
 	case schemas.ControllerGrant:
 		s.grantsMu.Lock()
 		defer s.grantsMu.Unlock()
-		g, had, err := s.controllers().Get(pending.Holder)
+		g, had, err := s.controllers().Get(spec.Holder)
 		if err != nil || !had {
-			log.Printf("[grants] machine %s was granted %s and is no longer paired", pending.Holder, said)
+			log.Printf("[grants] machine %s was granted %s and is no longer paired", spec.Holder, said)
 			return
 		}
 		g.CredentialSAID, g.CredentialPending = said, false
 		if err := s.controllers().Put(g); err != nil {
-			log.Printf("[grants] machine %s was granted %s and could not be marked so: %v", pending.Holder, said, err)
+			log.Printf("[grants] machine %s was granted %s and could not be marked so: %v", spec.Holder, said, err)
 		}
 	case schemas.AIAgentGrant:
 		mcpTokensMu.Lock()
 		defer mcpTokensMu.Unlock()
 		toks := s.loadMCPTokens()
 		for i := range toks {
-			if toks[i].AgentAID == pending.Holder {
+			if toks[i].AgentAID == spec.Holder {
 				toks[i].GrantSAID, toks[i].GrantPending = said, false
 			}
 		}
 		if err := s.saveMCPTokens(toks); err != nil {
-			log.Printf("[grants] AI agent %s was granted %s and its token could not be marked so: %v", pending.Holder, said, err)
+			log.Printf("[grants] AI agent %s was granted %s and its token could not be marked so: %v", spec.Holder, said, err)
 		}
 	}
+}
+
+// waitingStateOf says what has become of what waits for holder on the device
+// that holds the key: waiting, refused or expired; "" when nothing does.
+func (s *CoreServer) waitingStateOf(holder string) string {
+	for _, row := range s.waitingRows() {
+		if row.Pending.Spec.Holder != holder {
+			continue
+		}
+		req, err := s.DataStore.GetSigningRequest(row.ID)
+		if err != nil || req == nil {
+			continue
+		}
+		if req.Status == SigningStatusPending && req.ExpiresAt != "" {
+			if exp, err := time.Parse(time.RFC3339, req.ExpiresAt); err == nil && exp.Before(time.Now()) {
+				return SigningStatusExpired
+			}
+		}
+		return req.Status
+	}
+	return ""
+}
+
+// queuedParts are the parts of a waiting grant the device that holds the key
+// checks before it signs: the credential and its issuance event, or the
+// registry's inception.
+func (s *CoreServer) queuedParts(id string) map[string]string {
+	body, ok, err := s.DataStore.GetPendingIssuance(id)
+	if err != nil || !ok {
+		return nil
+	}
+	var p pendingIssuance
+	if json.Unmarshal([]byte(body), &p) != nil {
+		return nil
+	}
+	switch {
+	case p.Prepared != nil:
+		return map[string]string{
+			"credential_b64": base64.StdEncoding.EncodeToString(p.Prepared.AcdcRaw),
+			"issuance_b64":   base64.StdEncoding.EncodeToString(p.Prepared.IssRaw),
+		}
+	case p.Registry != nil:
+		return map[string]string{"registry_b64": base64.StdEncoding.EncodeToString(p.Registry.VcpRaw)}
+	}
+	return nil
 }

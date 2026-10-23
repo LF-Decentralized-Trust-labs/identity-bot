@@ -618,6 +618,7 @@ type Store interface {
 	SavePendingIssuance(signingRequestID, body string) error
 	GetPendingIssuance(signingRequestID string) (string, bool, error)
 	DeletePendingIssuance(signingRequestID string) error
+	ListPendingIssuances() (map[string]string, error)
 	// A credential's transaction log, as published. Appending the same event
 	// twice keeps one copy; the log is read back in order.
 	AppendCredentialTELEvent(ev CredentialTELEvent) error
