@@ -42,6 +42,7 @@ func TestARevocationCanStillBeProvedAfterARestart(t *testing.T) {
 
 	// The restart: a new engine knows nothing, and the store is reopened from disk.
 	s.KeriDriver = keriengine.New()
+	s.engineSigns()
 	reopened, err := store.NewSQLiteStore(s.DataDir)
 	if err != nil {
 		t.Fatal(err)
@@ -361,6 +362,7 @@ func storedKELHoldsTogether(t *testing.T, s *CoreServer, aid string) {
 		t.Fatalf("the stored key log does not hold together: %v", err)
 	}
 	s.KeriDriver = keriengine.New()
+	s.engineSigns()
 	s.reloadIdentityIntoDriver()
 	kel, err := s.KeriDriver.GetKel(aid)
 	if err != nil || len(kel.KEL) != len(records) {

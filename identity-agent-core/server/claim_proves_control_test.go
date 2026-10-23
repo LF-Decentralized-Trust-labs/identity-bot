@@ -36,6 +36,7 @@ func pairableComputer(t *testing.T) (*CoreServer, *httptest.Server, string) {
 	eng := startedEngine(t)
 	machine.KeriDriver = eng
 	// A real agent wires this at startup, and the identity a machine founds
+	machine.engineSigns()
 	// designates its witnesses through it. A fixture without one founds
 	// something nothing can ever corroborate, which is the state this whole
 	// file exists to detect rather than to reproduce.

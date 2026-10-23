@@ -21,11 +21,11 @@ func servedIdentity(t *testing.T, claimAID string) (*httptest.Server, string) {
 
 	// The signer is kept rather than discarded, because the introduction has to
 	// be signed to be worth anything and only whoever holds the key can do it.
-	signer, err := keri.GenerateSigner(true)
+	signer, err := testSigner(true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	nextSigner, err := keri.GenerateSigner(true)
+	nextSigner, err := testSigner(true)
 	if err != nil {
 		t.Fatal(err)
 	}

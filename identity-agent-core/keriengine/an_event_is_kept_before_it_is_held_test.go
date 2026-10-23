@@ -16,7 +16,7 @@ import (
 
 func newKey(t *testing.T) string {
 	t.Helper()
-	s, err := keri.GenerateSigner(true)
+	s, err := testSigner(true)
 	if err != nil {
 		t.Fatal(err)
 	}

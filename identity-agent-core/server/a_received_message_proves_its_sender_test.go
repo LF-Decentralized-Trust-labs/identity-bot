@@ -751,10 +751,11 @@ func TestDelegationEvidenceMustBeThisAgentsAndThisRoot(t *testing.T) {
 
 	// A root and a delegate of somebody else's making, internally consistent.
 	other := keriengine.New()
-	_, k1 := signingPair(t, 61)
+	s1, k1 := signingPair(t, 61)
 	_, k2 := signingPair(t, 62)
 	_, k3 := signingPair(t, 63)
 	_, k4 := signingPair(t, 64)
+	signsWithSeeds(other, s1)
 	if _, err := other.CreateInceptionNamed(k1, k2, "elsewhere"); err != nil {
 		t.Fatal(err)
 	}

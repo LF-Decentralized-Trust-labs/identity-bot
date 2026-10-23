@@ -181,6 +181,10 @@ type CoreServer struct {
 	// signedElsewhere holds, while a waiting grant is appended, the signature
 	// the device holding the identity's key made over its interaction.
 	signedElsewhere sync.Map
+	// eventSigners holds, by identity, the seed of an identity other than
+	// this one whose key log this Identity Agent writes (its record
+	// identity's); see signEventFor.
+	eventSigners sync.Map
 	// fetchSignedEvent, when set, stands in for asking the identity's
 	// witnesses for an event the device that holds the key signed.
 	fetchSignedEvent func(aid string, sn int) []heldEvent
@@ -434,6 +438,7 @@ func New(cfg Config) (*CoreServer, error) {
 	// could perform no KERI operation through the core. The in-process engine
 	// removed both problems, and it is now the only implementation.
 	s.KeriDriver = keriengine.New()
+	s.engineSigns()
 	if err := s.KeriDriver.Start(); err != nil {
 		cancel()
 		dataStore.Close()
@@ -4623,6 +4628,7 @@ func (s *CoreServer) reloadIdentityIntoDriver() {
 	if s.KeriDriver == nil {
 		return
 	}
+	s.engineSigns()
 	identity, err := s.DataStore.GetIdentity()
 	if err != nil || identity == nil {
 		log.Printf("[identity-agent-core] KERI driver reload: no existing identity in DB")

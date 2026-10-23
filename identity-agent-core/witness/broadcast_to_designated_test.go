@@ -104,11 +104,7 @@ func TestARealDelegatedInceptionIsWitnessed(t *testing.T) {
 	}
 
 	// The delegated identity, made by the engine that ships.
-	e := keriengine.New()
-	key := func() (string, []byte) {
-		pub, priv, _ := ed25519.GenerateKey(rand.Reader)
-		return iacrypto.VerkeyQB64(pub), priv.Seed()
-	}
+	e, key, _ := signedEngine()
 	rootPub, _ := key()
 	rootNext, _ := key()
 	if _, err := e.CreateInceptionNamed(rootPub, rootNext, "org"); err != nil {
@@ -188,8 +184,9 @@ func TestAWitnessFollowsAKeyLogPastItsSixteenthEvent(t *testing.T) {
 		sig, err := login.SignString(said, wpriv.Seed())
 		return wkey, sig, err
 	}
-	e := keriengine.New()
+	e, _, remember := signedEngine()
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	remember(iacrypto.VerkeyQB64(pub), priv.Seed())
 	nextPub, _, _ := ed25519.GenerateKey(rand.Reader)
 	icp, err := e.CreateInceptionNamed(iacrypto.VerkeyQB64(pub), iacrypto.VerkeyQB64(nextPub), "id")
 	if err != nil {
@@ -229,11 +226,7 @@ func TestAWitnessTakesOnADelegateOnlyFromItsApproval(t *testing.T) {
 		sig, err := login.SignString(said, wpriv.Seed())
 		return wkey, sig, err
 	}
-	e := keriengine.New()
-	key := func() (string, []byte) {
-		pub, priv, _ := ed25519.GenerateKey(rand.Reader)
-		return iacrypto.VerkeyQB64(pub), priv.Seed()
-	}
+	e, key, _ := signedEngine()
 	orgPub, orgSeed := key()
 	orgNext, _ := key()
 	icp, err := e.CreateInceptionNamed(orgPub, orgNext, "org")
@@ -295,4 +288,32 @@ func signedRequestTo(w *Service, aid string, covers bool, seed []byte, at time.T
 	stamp := at.UTC().Format(time.RFC3339Nano)
 	sig, _ := login.SignString(RequestStatement(aid, w.Identity(), covers, stamp), seed)
 	return WitnessRequest{RequesterAID: aid, BackendType: BackendDesktop, CoversDelegates: covers, Stamp: stamp, Signature: sig}
+}
+
+// signedEngine is the engine that ships, having each event it appends signed
+// with the key of the identity it extends, from the keys a test made.
+func signedEngine() (*keriengine.Engine, func() (string, []byte), func(pub string, seed []byte)) {
+	e := keriengine.New()
+	var mu sync.Mutex
+	seeds := map[string][]byte{}
+	remember := func(pub string, seed []byte) {
+		mu.Lock()
+		seeds[pub] = seed
+		mu.Unlock()
+	}
+	key := func() (string, []byte) {
+		pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+		remember(iacrypto.VerkeyQB64(pub), priv.Seed())
+		return iacrypto.VerkeyQB64(pub), priv.Seed()
+	}
+	e.SetEventSignature(func(aid, k string, raw []byte) (string, error) {
+		mu.Lock()
+		seed, ok := seeds[k]
+		mu.Unlock()
+		if !ok {
+			return "", fmt.Errorf("no key %s", k)
+		}
+		return login.SignString(string(raw), seed)
+	})
+	return e, key, remember
 }

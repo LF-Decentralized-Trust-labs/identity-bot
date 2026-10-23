@@ -181,7 +181,7 @@ func (e *Engine) appendPreparedRegistry(id *identity, p *drivers.PreparedRegistr
 	if err != nil {
 		return nil, err
 	}
-	if err := e.commit(id.AID, ixnEvent.SN, ixn, vcp); err != nil {
+	if err := e.commit(id, ixnEvent.SN, ixn, vcp); err != nil {
 		return nil, err
 	}
 
@@ -383,7 +383,7 @@ func (e *Engine) appendPrepared(id *identity, p *drivers.PreparedIssuance) (*dri
 		if err != nil || issEvent.SAID != p.IssSAID || issEvent.Subject != p.AcdcSAID {
 			return nil, fmt.Errorf("the prepared issuance event is not this credential's")
 		}
-		if err := e.commit(id.AID, ixnEvent.SN, p.IxnRaw, p.IssRaw); err != nil {
+		if err := e.commit(id, ixnEvent.SN, p.IxnRaw, p.IssRaw); err != nil {
 			return nil, err
 		}
 	}
@@ -568,7 +568,7 @@ func (e *Engine) appendPreparedRevocation(id *identity, p *drivers.PreparedRevoc
 	if err != nil {
 		return nil, err
 	}
-	if err := e.commit(id.AID, ixnEvent.SN, p.IxnRaw, p.RevRaw); err != nil {
+	if err := e.commit(id, ixnEvent.SN, p.IxnRaw, p.RevRaw); err != nil {
 		return nil, err
 	}
 	e.state.mu.Lock()

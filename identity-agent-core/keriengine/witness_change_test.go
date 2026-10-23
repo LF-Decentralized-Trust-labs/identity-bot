@@ -11,7 +11,7 @@ import (
 
 func witnessKey(t *testing.T) string {
 	t.Helper()
-	s, err := keri.GenerateSigner(false)
+	s, err := testSigner(false)
 	if err != nil {
 		t.Fatal(err)
 	}

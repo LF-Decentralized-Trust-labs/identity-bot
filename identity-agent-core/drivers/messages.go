@@ -273,6 +273,9 @@ type TELCommit struct {
 	// KELRaw and TELRaw are the two events as published.
 	KELRaw []byte
 	TELRaw []byte
+	// Signature is the identity's signature over KELRaw, checked by the
+	// engine against the identity's current key.
+	Signature string
 }
 
 // PreparedIssuance is a credential issued into a registry, built but not yet
@@ -352,6 +355,9 @@ type KELKeep struct {
 	// Delegated is set for a delegated inception: the new identity's inception,
 	// which Raw, the delegator's interaction, approves.
 	Delegated []byte
+	// Signature is the identity's signature over Raw, checked by the engine
+	// against the identity's current key before the event is offered.
+	Signature string
 }
 
 // KELKeeper is an engine that offers an event to be kept before it appends it.

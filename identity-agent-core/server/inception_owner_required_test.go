@@ -38,6 +38,7 @@ func TestAnAgentThatServesSomebodyElseRefusesToFoundAnUnownedIdentity(t *testing
 	// Non-nil so the request reaches the owner check; never called, because the
 	// refusal happens before anything is minted.
 	s.KeriDriver = keriengine.New()
+	s.engineSigns()
 
 	w := inceptionRequest(t, s, map[string]any{
 		"public_key":      "Dpub",

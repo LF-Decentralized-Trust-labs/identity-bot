@@ -31,6 +31,7 @@ func foundedWith(t *testing.T, s *CoreServer, witnesses []string, toad int) (*Co
 	t.Helper()
 	e := keriengine.New()
 	s.KeriDriver = e
+	s.engineSigns()
 
 	owner, _ := s.DataStore.GetIdentity()
 	seed, err := s.identitySigningSeed()

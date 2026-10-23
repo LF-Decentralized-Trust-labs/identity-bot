@@ -626,11 +626,9 @@ func (s *CoreServer) anchorRecord() (bool, error) {
 	pub := iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey))
 	var kept store.EventRecord
 	var said string
+	s.eventSigners.Store(rec.AID, seed)
 	keep := func(k drivers.KELKeep) error {
-		sig, err := signEventBytes(k.Raw, seed)
-		if err != nil {
-			return err
-		}
+		sig := k.Signature
 		var ixn map[string]interface{}
 		if err := json.Unmarshal(k.Raw, &ixn); err != nil {
 			return err
@@ -647,6 +645,7 @@ func (s *CoreServer) anchorRecord() (bool, error) {
 	if !ok {
 		return false, fmt.Errorf("this Identity Agent cannot keep a key log, so it cannot anchor its record")
 	}
+	s.engineSigns()
 	if _, err := keeper.InteractKept(rec.AID, []interface{}{map[string]interface{}{"d": digest}}, keep); err != nil {
 		return false, fmt.Errorf("the record could not be anchored: %w", err)
 	}

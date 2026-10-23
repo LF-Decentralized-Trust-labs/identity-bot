@@ -143,6 +143,7 @@ func TestAnchoringCarriesOnAfterARestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.KeriDriver = keriengine.New()
+	s.engineSigns()
 	s.reloadKeyLogs()
 	writeRows(t, s, 2)
 	if anchored, err := s.anchorRecord(); err != nil || !anchored {

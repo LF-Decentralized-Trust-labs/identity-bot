@@ -66,6 +66,7 @@ func credentialEvent(registrySAID, acdcSAID, rawB64 string) (store.CredentialTEL
 // registry events before appending them, and reports whether it could. An
 // engine that cannot has each event kept after it returns.
 func (s *CoreServer) engineKeepsCredentialLogs() bool {
+	s.engineSigns()
 	c, ok := s.KeriDriver.(drivers.TELCommitter)
 	if ok {
 		c.SetTELCommit(s.keepTELCommit)
@@ -86,17 +87,13 @@ func (s *CoreServer) keepTELCommit(c drivers.TELCommit) error {
 	}
 	telB64, kelB64 := base64.StdEncoding.EncodeToString(c.TELRaw), base64.StdEncoding.EncodeToString(c.KELRaw)
 	if ev.Ilk != "vcp" {
-		return s.keepAnchoredCredentialEvent(ev.Registry, ev.Subject, telB64, c.AID, ixn, kelB64, c.SN)
+		return s.keepAnchoredCredentialEvent(ev.Registry, ev.Subject, telB64, c.AID, ixn, kelB64, c.SN, c.Signature)
 	}
 	if err := checkRegistryInception(telB64, ev.Subject, kelB64); err != nil {
 		return err
 	}
-	// Signed on the device that holds the key, when it was.
-	signature := ""
-	if v, ok := s.signedElsewhere.Load(kelB64); ok {
-		signature, _ = v.(string)
-	}
-	anchor, err := s.ownInteractionRecord(c.AID, ixn, kelB64, c.SN, signature)
+	// Signed by the identity's key, as the engine checked.
+	anchor, err := s.ownInteractionRecord(c.AID, ixn, kelB64, c.SN, c.Signature)
 	if err != nil {
 		return fmt.Errorf("the registry's anchor could not be kept: %w", err)
 	}
@@ -136,7 +133,7 @@ func (s *CoreServer) keepCredentialEvent(registrySAID, acdcSAID, rawB64 string) 
 // interaction must carry the seal of exactly this event, or the pair would be
 // kept as proof of each other when it is not.
 func (s *CoreServer) keepAnchoredCredentialEvent(
-	registrySAID, acdcSAID, rawB64, issuer string, ixn map[string]interface{}, ixnRawB64 string, sn int,
+	registrySAID, acdcSAID, rawB64, issuer string, ixn map[string]interface{}, ixnRawB64 string, sn int, signature string,
 ) error {
 	kept, ev, err := credentialEvent(registrySAID, acdcSAID, rawB64)
 	if err != nil {
@@ -144,12 +141,6 @@ func (s *CoreServer) keepAnchoredCredentialEvent(
 	}
 	if err := anchorsEvent(ixnRawB64, acdcSAID, ev); err != nil {
 		return err
-	}
-	// Signed on the device that holds the key, when it was: that signature,
-	// checked against the identity's current key before the append.
-	signature := ""
-	if v, ok := s.signedElsewhere.Load(ixnRawB64); ok {
-		signature, _ = v.(string)
 	}
 	anchor, err := s.ownInteractionRecord(issuer, ixn, ixnRawB64, sn, signature)
 	if err != nil {
@@ -351,4 +342,33 @@ func checkRegistryInception(vcpRawB64, registrySAID, ixnRawB64 string) error {
 func noteRegistryWithoutInception(reg *store.CredentialRegistry) {
 	log.Printf("[credential] registry %s was made before registry inceptions were kept, so nothing "+
 		"issued in it can be proved; new credentials go into a new registry", reg.RegistrySAID)
+}
+
+// engineSigns installs how the engine has the events it appends signed:
+// every interaction it appends to a key log is signed by that identity's
+// current key, which the engine checks, or it is not appended.
+func (s *CoreServer) engineSigns() {
+	if e, ok := s.KeriDriver.(interface {
+		SetEventSignature(func(aid, key string, raw []byte) (string, error))
+	}); ok {
+		e.SetEventSignature(s.signEventFor)
+	}
+}
+
+// signEventFor signs an event the engine is about to append to aid's key log:
+// with the signature the device holding the key made, when it was signed
+// there; with the record identity's key, for its log; with this identity's
+// key, where it is held here. Anything else is not signed, so not appended.
+func (s *CoreServer) signEventFor(aid, key string, raw []byte) (string, error) {
+	b64 := base64.StdEncoding.EncodeToString(raw)
+	if v, ok := s.signedElsewhere.Load(b64); ok {
+		return v.(string), nil
+	}
+	if v, ok := s.eventSigners.Load(aid); ok {
+		return signEventBytes(raw, v.([]byte))
+	}
+	if identity, err := s.DataStore.GetIdentity(); err == nil && identity != nil && identity.AID == aid {
+		return s.signOwnEventBytes(b64)
+	}
+	return "", fmt.Errorf("this Identity Agent holds no key for %s", aid)
 }

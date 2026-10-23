@@ -43,11 +43,7 @@ func newDelegation(t *testing.T) *delegation {
 	}
 	w.OurWitnessAID = func() (string, error) { return wkey, nil }
 	w.OurAID = func() string { return "E" + wkey[1:] }
-	e := keriengine.New()
-	key := func() (string, []byte) {
-		pub, priv, _ := ed25519.GenerateKey(rand.Reader)
-		return iacrypto.VerkeyQB64(pub), priv.Seed()
-	}
+	e, key, _ := signedEngine()
 	orgPub, orgSeed := key()
 	orgNext, _ := key()
 	icp, err := e.CreateInceptionNamed(orgPub, orgNext, "org")
