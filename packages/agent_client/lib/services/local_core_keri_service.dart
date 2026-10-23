@@ -7,6 +7,7 @@ import '../crypto/bip39.dart';
 import '../crypto/keys.dart';
 import 'keri_service.dart';
 import 'secure_key_store.dart';
+import 'the_key_is_not_held_by_the_core.dart';
 import 'the_agent_this_app_talks_to.dart';
 
 /// KERI against the Identity Agent core running on this machine.
@@ -22,7 +23,7 @@ class LocalCoreKeriService extends KeriService {
   final String _baseUrl;
   final http.Client _client;
 
-  LocalCoreKeriService({String? baseUrl})
+  LocalCoreKeriService({String? baseUrl, http.Client? client})
       // Where the KEYS are, which is not always this computer.
       //
       // Stateful KERI operations always run on the engine local to the keys —
@@ -30,7 +31,7 @@ class LocalCoreKeriService extends KeriService {
       // identity lives on a sealed machine, that machine's engine is the local
       // one and this installation is only the front end.
       : _baseUrl = baseUrl ?? TheAgentThisAppTalksTo.origin,
-        _client = TheAgentThisAppTalksTo.clientFor(baseUrl);
+        _client = client ?? TheAgentThisAppTalksTo.clientFor(baseUrl);
 
   /// Where this service sends, for a caller checking it is pointed at the
   /// identity rather than at whichever core happens to be on this machine.
@@ -188,8 +189,7 @@ class LocalCoreKeriService extends KeriService {
     );
 
     if (response.statusCode != 200) {
-      final body = jsonDecode(response.body);
-      throw Exception(body['error'] ?? 'Rotation failed: ${response.statusCode}');
+      refusedByTheCore(response, 'Rotation failed');
     }
 
     final json = jsonDecode(response.body);
@@ -230,8 +230,7 @@ class LocalCoreKeriService extends KeriService {
     );
 
     if (response.statusCode != 201 && response.statusCode != 200) {
-      final body = jsonDecode(response.body);
-      throw Exception(body['error'] ?? 'IXN failed: ${response.statusCode}');
+      refusedByTheCore(response, 'IXN failed');
     }
 
     final json = jsonDecode(response.body);
@@ -347,8 +346,7 @@ class LocalCoreKeriService extends KeriService {
     );
 
     if (response.statusCode != 201 && response.statusCode != 200) {
-      final body = jsonDecode(response.body);
-      throw Exception(body['error'] ?? 'Credential issuance failed: ${response.statusCode}');
+      refusedByTheCore(response, 'Credential issuance failed');
     }
 
     final json = jsonDecode(response.body);

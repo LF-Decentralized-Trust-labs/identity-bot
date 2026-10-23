@@ -216,7 +216,7 @@ func (s *CoreServer) handleRecoveryRotation(w http.ResponseWriter, r *http.Reque
 	}
 
 	if err := s.mayRotateHere(req.Name); err != nil {
-		writeError(w, http.StatusConflict, "Rotate on the device that holds the key", err.Error())
+		writeKeyNotHeldHere(w)
 		return
 	}
 	result, err := s.KeriDriver.RotateAid(req.Name, req.NewPublicKey, req.NewNextPublicKey)
@@ -338,7 +338,7 @@ func (s *CoreServer) handleRecoveryRootAIDRotation(w http.ResponseWriter, r *htt
 
 	if identity, err := s.DataStore.GetIdentity(); err == nil && identity != nil {
 		if err := s.mayRotateHere(identity.AID); err != nil {
-			writeError(w, http.StatusConflict, "Rotate on the device that holds the key", err.Error())
+			writeKeyNotHeldHere(w)
 			return
 		}
 	}

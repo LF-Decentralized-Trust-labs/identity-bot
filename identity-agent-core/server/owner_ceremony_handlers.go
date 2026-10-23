@@ -111,7 +111,7 @@ func (s *CoreServer) handleStartCeremony(w http.ResponseWriter, r *http.Request)
 	// Changing who owns it ends in a rotation, which is not made here where
 	// the identity's key is on another device.
 	if err := s.mayRotateHere(identity.AID); err != nil {
-		writeError(w, http.StatusConflict, "Change owners on the device that holds the key", err.Error())
+		writeKeyNotHeldHere(w)
 		return
 	}
 	existing, err := s.ownersOfOwnIdentity(identity.AID)

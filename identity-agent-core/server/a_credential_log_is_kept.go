@@ -370,5 +370,9 @@ func (s *CoreServer) signEventFor(aid, key string, raw []byte) (string, error) {
 	if identity, err := s.DataStore.GetIdentity(); err == nil && identity != nil && identity.AID == aid {
 		return s.signOwnEventBytes(b64)
 	}
+	// One of this identity's pairwise identities, whose keys it derives.
+	if seed, err := s.signingSeedForAID(aid); err == nil {
+		return signEventBytes(raw, seed)
+	}
 	return "", fmt.Errorf("this Identity Agent holds no key for %s", aid)
 }

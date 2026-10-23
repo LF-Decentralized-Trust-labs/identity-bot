@@ -138,7 +138,12 @@ unsigned, as before this decision, except that where the identity's key is on an
 device no rotation of it is made here at all (the rotation route, a recovery's rotation,
 or changing who owns it): it would be appended unsigned and the key logs would split.
 Break-glass root rotation, whose events are not signed by their keys either, is refused
-whole until they are. An Identity Agent whose key log holds events written by an earlier version
+whole until they are. The same holds where the identity's key is held by the app rather than
+the core, as the reference app holds it: the app signs an event only after the core has
+added it, which is too late, so through the core such an identity can be neither rotated
+nor extended (no interaction, no credential issued), and the core says so in those words.
+Before this the core appended those events unsigned, so the key logs they made were not
+valid. It changes once the app signs each event before it is added. An Identity Agent whose key log holds events written by an earlier version
 without the key, which the device never had, asks the device for nothing and says so. Only one
 interaction waits for the device at a time, as each extends the same tip; another is kept
 and built once the one before it is appended, refused or expired. When a signature comes back it must be over the request's own

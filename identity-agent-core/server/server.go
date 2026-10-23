@@ -1883,7 +1883,7 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 	// A commitment made once at founding would have no such second chance.
 	result, err := s.rotateCarryingTheCommitment(req.Name, req.NewPublicKey, req.NewNextPublicKey)
 	if errors.Is(err, errKeyElsewhere) {
-		writeError(w, http.StatusConflict, "Rotate on the device that holds the key", err.Error())
+		writeKeyNotHeldHere(w)
 		return
 	}
 	if err != nil {
@@ -1940,6 +1940,10 @@ func (s *CoreServer) handleInteract(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := s.KeriDriver.Interact(req.Name, req.Data)
+	if errors.Is(err, errKeyElsewhere) {
+		writeKeyNotHeldHere(w)
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "IXN event failed", err.Error())
 		return
@@ -2131,6 +2135,10 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
 	}
 
 	result, err := s.KeriDriver.IssueCredential(issuerAID, req.Claims, req.SchemaSaid, req.HolderAid, req.Edges)
+	if errors.Is(err, errKeyElsewhere) {
+		writeKeyNotHeldHere(w)
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Credential issuance failed", err.Error())
 		return
