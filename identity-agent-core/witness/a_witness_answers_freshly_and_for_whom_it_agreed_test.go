@@ -42,6 +42,7 @@ func newDelegation(t *testing.T) *delegation {
 		return wkey, sig, err
 	}
 	w.OurWitnessAID = func() (string, error) { return wkey, nil }
+	w.OurAID = func() string { return "E" + wkey[1:] }
 	e := keriengine.New()
 	key := func() (string, []byte) {
 		pub, priv, _ := ed25519.GenerateKey(rand.Reader)
@@ -330,16 +331,16 @@ func TestOnlyTheDelegatorChangesWhetherItsDelegatesAreCovered(t *testing.T) {
 	}()
 	for name, req := range map[string]WitnessRequest{
 		"unsigned":       {RequesterAID: d.org, BackendType: BackendDesktop, CoversDelegates: false},
-		"another key":    signedRequest(d.org, false, otherSeed, time.Now()),
-		"stale":          signedRequest(d.org, false, d.orgSeed, time.Now().Add(-time.Hour)),
-		"another's name": signedRequest(d.delegate, false, d.orgSeed, time.Now()),
+		"another key":    signedRequestTo(d.w, d.org, false, otherSeed, time.Now()),
+		"stale":          signedRequestTo(d.w, d.org, false, d.orgSeed, time.Now().Add(-time.Hour)),
+		"another's name": signedRequestTo(d.w, d.delegate, false, d.orgSeed, time.Now()),
 	} {
 		d.w.ProcessInboundRequest(context.Background(), req)
 		if !d.w.CoversDelegatesOf(d.org) {
 			t.Fatalf("a request %s cleared the coverage", name)
 		}
 	}
-	d.w.ProcessInboundRequest(context.Background(), signedRequest(d.org, false, d.orgSeed, time.Now()))
+	d.w.ProcessInboundRequest(context.Background(), signedRequestTo(d.w, d.org, false, d.orgSeed, time.Now()))
 	if d.w.CoversDelegatesOf(d.org) {
 		t.Fatal("the delegator's own signed request did not clear its coverage")
 	}
@@ -357,7 +358,35 @@ func TestAskingAgainTakesNoMoreCapacity(t *testing.T) {
 	for i := 0; i < MaxOutgoingWitnessing; i++ {
 		d.w.Store.SaveContactMeta(ContactMeta{ContactAID: fmt.Sprintf("EFull%d", i), WitnessingFor: true, BackendType: BackendDesktop})
 	}
-	if res := d.w.ProcessInboundRequest(context.Background(), signedRequest(d.org, true, d.orgSeed, time.Now())); !res.Accepted {
+	if res := d.w.ProcessInboundRequest(context.Background(), signedRequestTo(d.w, d.org, true, d.orgSeed, time.Now())); !res.Accepted {
 		t.Fatalf("an identity already witnessed for, asking again, was refused: %s", res.Reason)
+	}
+}
+
+// A signed request is not acted on twice, nor by a witness it was not meant
+// for: an older or equal stamp, or another witness named, changes nothing.
+func TestASignedRequestCannotBeReplayed(t *testing.T) {
+	d := newDelegation(t) // agreed, covering, at some stamp
+	old := signedRequestTo(d.w, d.org, false, d.orgSeed, time.Now().Add(-2*time.Minute))
+	d.w.ProcessInboundRequest(context.Background(), old)
+	if !d.w.CoversDelegatesOf(d.org) {
+		t.Fatal("a request older than the last acted on cleared the coverage")
+	}
+	other := newDelegation(t)
+	meant := signedRequestTo(other.w, d.org, false, d.orgSeed, time.Now().Add(time.Second))
+	d.w.ProcessInboundRequest(context.Background(), meant)
+	if !d.w.CoversDelegatesOf(d.org) {
+		t.Fatal("a request signed for another witness cleared the coverage")
+	}
+	fresh := signedRequestTo(d.w, d.org, false, d.orgSeed, time.Now().Add(2*time.Second))
+	d.w.ProcessInboundRequest(context.Background(), fresh)
+	if d.w.CoversDelegatesOf(d.org) {
+		t.Fatal("a fresh request did not clear the coverage")
+	}
+	d.w.ProcessInboundRequest(context.Background(), fresh)
+	d.w.agreeToDelegates(d.org, true)
+	d.w.ProcessInboundRequest(context.Background(), fresh)
+	if !d.w.CoversDelegatesOf(d.org) {
+		t.Fatal("the same request, replayed, was acted on again")
 	}
 }

@@ -128,12 +128,13 @@ delegator may have witnessed (`witness.delegates_max`). A request that does not 
 no delegate.
 
 The request route is open, so the request carries a `stamp` and the requester's
-`signature`, by its current key, over `witness-request/v1`, its identifier, whether it
-covers its delegates, and the stamp. A witness changes whether a requester's delegates are
+`signature`, by its current key, over `witness-request/v2`, its identifier, the identifier
+of the witness it asks, whether it covers its delegates, and the stamp, to the nanosecond. A witness changes whether a requester's delegates are
 covered, either way, only on a request whose signature verifies against the requester's
 current key (from the key log the witness holds, or else the key its contact resolved) and
-whose stamp is within five minutes; anything else may ask to be witnessed and changes no
-coverage. The answer says whether the requester's delegates are now covered
+whose stamp is within five minutes and newer than the last such request it acted on from
+that requester; anything else, a replay or a request meant for another witness included,
+may ask to be witnessed and changes no coverage. The answer says whether the requester's delegates are now covered
 (`covers_delegates`). An identity already witnessed for, asking again, takes no more
 capacity. An Identity Agent that anchors its record asks its witnesses when its record
 identity is made, and again once after each start, and reports the ones that will not

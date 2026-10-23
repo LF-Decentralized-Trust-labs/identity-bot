@@ -30,10 +30,16 @@ type WitnessRequest struct {
 	Signature string
 }
 
-// RequestStatement is what a requester signs in a witness request.
-func RequestStatement(requester string, covers bool, stamp string) string {
-	return fmt.Sprintf("witness-request/v1\n%s\n%v\n%s", requester, covers, stamp)
+// RequestStatement is what a requester signs in a witness request: who it
+// is, which witness it asks, whether it covers its delegates, and when. Naming
+// the witness keeps a request signed for one from being replayed to another.
+func RequestStatement(requester, witnessAID string, covers bool, stamp string) string {
+	return fmt.Sprintf("witness-request/v2\n%s\n%s\n%v\n%s", requester, witnessAID, covers, stamp)
 }
+
+// configRequestStamps is, by requester, the stamp of the last signed request
+// that changed its coverage: an older or equal one is a replay.
+const configRequestStamps = "witness.request_stamps"
 
 // requestFreshness is how far a signed witness request's stamp may be from
 // now.
@@ -46,7 +52,7 @@ func (s *Service) signedByRequester(req WitnessRequest) bool {
 	if req.Signature == "" || req.Stamp == "" {
 		return false
 	}
-	at, err := time.Parse(time.RFC3339, req.Stamp)
+	at, err := time.Parse(time.RFC3339Nano, req.Stamp)
 	if err != nil || time.Since(at) > requestFreshness || time.Until(at) > requestFreshness {
 		return false
 	}
@@ -77,8 +83,24 @@ func (s *Service) signedByRequester(req WitnessRequest) bool {
 	if err != nil {
 		return false
 	}
-	ok, err := login.VerifyString(RequestStatement(req.RequesterAID, req.CoversDelegates, req.Stamp), req.Signature, pub)
-	return err == nil && ok
+	ok, err := login.VerifyString(RequestStatement(req.RequesterAID, s.ourAID(), req.CoversDelegates, req.Stamp), req.Signature, pub)
+	if err != nil || !ok {
+		return false
+	}
+	// Newer than the last one acted on for this requester, or a replay.
+	s.delegatesMu.Lock()
+	defer s.delegatesMu.Unlock()
+	stamps := map[string]string{}
+	if raw, err := s.Store.GetConfig(configRequestStamps); err == nil && raw != "" {
+		_ = json.Unmarshal([]byte(raw), &stamps)
+	}
+	if last, err := time.Parse(time.RFC3339Nano, stamps[req.RequesterAID]); err == nil && !at.After(last) {
+		return false
+	}
+	stamps[req.RequesterAID] = req.Stamp
+	raw, _ := json.Marshal(stamps)
+	_ = s.Store.SetConfig(configRequestStamps, string(raw))
+	return true
 }
 
 // AcceptCallback is the accept POST-back body.

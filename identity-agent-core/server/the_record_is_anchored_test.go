@@ -964,7 +964,7 @@ func TestARealWitnessWitnessesTheRecord(t *testing.T) {
 	// The witness agrees to witness for the organisation, the ordinary way.
 	owner, _ := s.DataStore.GetIdentity()
 	peer.svc.Contacts.SaveContact(store.ContactRecord{AID: owner.AID, Status: "accepted", ContactCategory: "trusted", PublicKey: owner.PublicKey})
-	if res := peer.svc.ProcessInboundRequest(context.Background(), signedWitnessRequest(t, s, owner.AID, true)); !res.Accepted {
+	if res := peer.svc.ProcessInboundRequest(context.Background(), signedWitnessRequest(t, s, peer.svc, owner.AID, true)); !res.Accepted {
 		t.Fatalf("the witness did not agree to witness for the organisation: %s", res.Reason)
 	}
 
@@ -1062,7 +1062,7 @@ func TestAWitnessRequestCarriesWhetherItCoversDelegates(t *testing.T) {
 		// The requester is this identity, asking itself: what matters is
 		// that the flag is carried, signed, through the route.
 		s.DataStore.SaveContact(store.ContactRecord{AID: owner.AID, Status: "accepted", ContactCategory: "trusted", PublicKey: owner.PublicKey})
-		req := signedWitnessRequest(t, s, owner.AID, asks)
+		req := signedWitnessRequest(t, s, s.WitnessService, owner.AID, asks)
 		body := fmt.Sprintf(`{"requester_aid":%q,"backend_type":"desktop","covers_delegates":%v,"stamp":%q,"signature":%q}`,
 			owner.AID, asks, req.Stamp, req.Signature)
 		rec := httptest.NewRecorder()
@@ -1076,15 +1076,15 @@ func TestAWitnessRequestCarriesWhetherItCoversDelegates(t *testing.T) {
 	}
 }
 
-// signedWitnessRequest is a witness request signed as s's identity.
-func signedWitnessRequest(t *testing.T, s *CoreServer, aid string, covers bool) witness.WitnessRequest {
+// signedWitnessRequest is a witness request to to, signed as s's identity.
+func signedWitnessRequest(t *testing.T, s *CoreServer, to *witness.Service, aid string, covers bool) witness.WitnessRequest {
 	t.Helper()
 	seed, err := s.identitySigningSeed()
 	if err != nil {
 		t.Fatal(err)
 	}
-	stamp := time.Now().UTC().Format(time.RFC3339)
-	sig, _ := login.SignString(witness.RequestStatement(aid, covers, stamp), seed)
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	sig, _ := login.SignString(witness.RequestStatement(aid, to.Identity(), covers, stamp), seed)
 	return witness.WitnessRequest{RequesterAID: aid, BackendType: witness.BackendDesktop, CoversDelegates: covers, Stamp: stamp, Signature: sig}
 }
 
@@ -1117,11 +1117,13 @@ func TestEnrolledWitnessesAreAskedToCoverTheRecord(t *testing.T) {
 	s.WitnessService.OurAID = func() string { return owner.AID }
 	for i, p := range []*peerAgent{willing, unwilling} {
 		aid := fmt.Sprintf("EPeer%d00000000000000000000000000000000000000", i)
+		// The witness answers as the identity it is known by.
+		p.svc.OurAID = func() string { return aid }
 		s.DataStore.SaveContact(store.ContactRecord{AID: aid, OobiURL: p.base, Status: "accepted", ContactCategory: "trusted"})
 		s.WitnessService.Store.SaveContactMeta(witness.ContactMeta{ContactAID: aid, WitnessKey: p.witnessKey})
 		// Enrolled already, without delegates.
 		p.svc.Contacts.SaveContact(store.ContactRecord{AID: owner.AID, Status: "accepted", ContactCategory: "trusted", PublicKey: owner.PublicKey})
-		if res := p.svc.ProcessInboundRequest(context.Background(), signedWitnessRequest(t, s, owner.AID, false)); !res.Accepted {
+		if res := p.svc.ProcessInboundRequest(context.Background(), signedWitnessRequest(t, s, p.svc, owner.AID, false)); !res.Accepted {
 			t.Fatalf("enrolling: %s", res.Reason)
 		}
 	}
@@ -1147,7 +1149,7 @@ func TestEnrolledWitnessesAreAskedToCoverTheRecord(t *testing.T) {
 	// anchoring asks again, and it agrees.
 	unwilling.svc.Store.SetConfig(witness.ConfigDelegates, "")
 	// As enrolled before delegates were asked about: agreed, not covering.
-	unwilling.svc.ProcessInboundRequest(context.Background(), signedWitnessRequest(t, s, owner.AID, false))
+	unwilling.svc.ProcessInboundRequest(context.Background(), signedWitnessRequest(t, s, unwilling.svc, owner.AID, false))
 	if unwilling.svc.CoversDelegatesOf(owner.AID) {
 		t.Fatal("the coverage was not cleared")
 	}
@@ -1161,5 +1163,66 @@ func TestEnrolledWitnessesAreAskedToCoverTheRecord(t *testing.T) {
 	}
 	if !unwilling.svc.CoversDelegatesOf(owner.AID) {
 		t.Fatal("the next anchoring after a restart did not ask again")
+	}
+}
+
+// An Identity Agent that anchors no record still sends its own key log to its
+// witnesses: after it issues something, and on the tick, so no witness is left
+// with a gap.
+func TestEveryIdentityAgentKeepsItsWitnessesUpToDate(t *testing.T) {
+	for _, via := range []string{"issuing", "the tick"} {
+		t.Run(via, func(t *testing.T) {
+			pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+			name := iacrypto.NonTransferableAIDQB64(pub)
+			s, _ := foundedWith(t, agentWithDerivedIdentity(t), []string{name}, 1)
+			s.DeclaredEntityType = "individual"
+			if s.anchorsItsRecord() {
+				t.Fatal("this Identity Agent anchors its record")
+			}
+			sq := s.DataStore.(*store.SQLiteStore)
+			s.WitnessService = witness.NewService(witness.NewSQLiteStore(sq.DB()), sq, s.KeriDriver, witness.BackendDesktop)
+			s.DataStore.SaveContact(store.ContactRecord{AID: "EWitness0", OobiURL: "http://w0.test", Status: "accepted"})
+			s.WitnessService.Store.SaveContactMeta(witness.ContactMeta{ContactAID: "EWitness0", WitnessKey: name})
+			s.WitnessService.FetchTip = func(_ context.Context, url string) (witness.TipAnswer, error) {
+				return witnessTip(url, nil, priv, name), nil
+			}
+			owner, _ := s.DataStore.GetIdentity()
+			var mu sync.Mutex
+			sent := 0
+			s.WitnessService.PostEvent = func(_ context.Context, _ string, body []byte) (map[string]interface{}, error) {
+				var req struct {
+					AID string `json:"aid"`
+				}
+				json.Unmarshal(body, &req)
+				mu.Lock()
+				if req.AID == owner.AID {
+					sent++
+				}
+				mu.Unlock()
+				return nil, fmt.Errorf("offline")
+			}
+			if via == "issuing" {
+				if _, err := s.grantController(aGrant(GradeEnrolled), time.Now().UTC(), authority{}); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				was := anchorInterval
+				anchorInterval = 20 * time.Millisecond
+				t.Cleanup(func() { anchorInterval = was })
+				stop := make(chan struct{})
+				go s.keepAnchoring(stop)
+				defer close(stop)
+			}
+			for i := 0; i < 200; i++ {
+				mu.Lock()
+				n := sent
+				mu.Unlock()
+				if n > 0 {
+					return
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			t.Fatalf("its own key log did not reach its witnesses by %s", via)
+		})
 	}
 }

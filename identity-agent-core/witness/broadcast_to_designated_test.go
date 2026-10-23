@@ -285,14 +285,14 @@ func TestAWitnessTakesOnADelegateOnlyFromItsApproval(t *testing.T) {
 func agreeToWitness(t *testing.T, w *Service, mc *memContacts, aid string, coversDelegates bool, pub string, seed []byte) {
 	t.Helper()
 	_ = mc.SaveContact(store.ContactRecord{AID: aid, Status: "accepted", ContactCategory: "trusted", PublicKey: pub})
-	if res := w.ProcessInboundRequest(context.Background(), signedRequest(aid, coversDelegates, seed, time.Now())); !res.Accepted {
+	if res := w.ProcessInboundRequest(context.Background(), signedRequestTo(w, aid, coversDelegates, seed, time.Now())); !res.Accepted {
 		t.Fatalf("the witness did not agree: %s", res.Reason)
 	}
 }
 
-// signedRequest is a witness request as the requester signs it.
-func signedRequest(aid string, covers bool, seed []byte, at time.Time) WitnessRequest {
-	stamp := at.UTC().Format(time.RFC3339)
-	sig, _ := login.SignString(RequestStatement(aid, covers, stamp), seed)
+// signedRequestTo is a witness request to w, as the requester signs it.
+func signedRequestTo(w *Service, aid string, covers bool, seed []byte, at time.Time) WitnessRequest {
+	stamp := at.UTC().Format(time.RFC3339Nano)
+	sig, _ := login.SignString(RequestStatement(aid, w.Identity(), covers, stamp), seed)
 	return WitnessRequest{RequesterAID: aid, BackendType: BackendDesktop, CoversDelegates: covers, Stamp: stamp, Signature: sig}
 }

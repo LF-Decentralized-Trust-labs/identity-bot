@@ -216,6 +216,10 @@ asking, and must sign as themselves.
   closes. Each anchoring is kept with its interaction before the interaction is
   appended.
 
+  Every Identity Agent, whether or not it anchors a record, brings its witnesses up to date
+  with its own key log after it appends to it and on every tick, so no witness is left
+  holding back its events for want of one it never received.
+
   **What it proves depends on the witnesses.** The record identity names the
   organisation's witnesses and threshold. Each witness is brought up to date in order,
   by one worker at a time that always sends the newest: first with the organisation's

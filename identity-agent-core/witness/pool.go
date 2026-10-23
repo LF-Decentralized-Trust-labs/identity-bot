@@ -45,8 +45,10 @@ func (s *Service) postWitnessRequest(ctx context.Context, c *store.ContactRecord
 		"covers_delegates": covers,
 	}
 	if s.SignAsRequester != nil {
-		stamp := time.Now().UTC().Format(time.RFC3339)
-		if sig, err := s.SignAsRequester(RequestStatement(s.ourAID(), covers, stamp)); err == nil {
+		// To the nanosecond: a witness acts only on a stamp newer than the
+		// last, and two requests in one second are not a replay.
+		stamp := time.Now().UTC().Format(time.RFC3339Nano)
+		if sig, err := s.SignAsRequester(RequestStatement(s.ourAID(), c.AID, covers, stamp)); err == nil {
 			req["stamp"], req["signature"] = stamp, sig
 		}
 	}
@@ -118,3 +120,7 @@ func witnessRequestURL(oobi string) string {
 	}
 	return strings.TrimRight(base, "/") + "/api/witness/request"
 }
+
+// Identity is the identity this agent answers witness requests as, which a
+// requester names in what it signs.
+func (s *Service) Identity() string { return s.ourAID() }

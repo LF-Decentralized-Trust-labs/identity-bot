@@ -715,6 +715,7 @@ func (s *CoreServer) keepAnchoring(stop <-chan struct{}) {
 			if _, err := s.anchorRecord(); err != nil && !errors.Is(err, errKeyElsewhere) {
 				log.Printf("[record] anchoring: %v", err)
 			}
+			s.witnessOwnLog()
 		}
 	}
 }
@@ -1053,4 +1054,22 @@ func (s *CoreServer) witnessesDeclining() map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+// witnessOwnLog brings the identity's witnesses up to date with its own key
+// log: every Identity Agent, whether or not it anchors a record, after it
+// appends to its log and on every tick, so no witness is left with a gap it
+// would have to hold the next event back for.
+func (s *CoreServer) witnessOwnLog() {
+	keeper, ok := s.KeriDriver.(drivers.KELKeeper)
+	if !ok || s.DataStore == nil {
+		return
+	}
+	owner, err := s.DataStore.GetIdentity()
+	if err != nil || owner == nil {
+		return
+	}
+	if witnesses, toad, err := keeper.WitnessConfig(owner.AID); err == nil && len(witnesses) > 0 {
+		s.witnessRecord(owner.AID, "", witnesses, toad)
+	}
 }
