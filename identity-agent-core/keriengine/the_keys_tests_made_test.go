@@ -164,6 +164,11 @@ func TestAMultisigRotationKeepsTheCommitment(t *testing.T) {
 	if _, err := e.RotateToMultisig("root", []string{newKey(t), newKey(t)}, []string{d1, d2}, "1", "1", nil); err == nil {
 		t.Fatal("a rotation to keys the identity never committed to was appended")
 	}
+	// The committed key, but not first: the key held in force afterwards
+	// would be the other.
+	if _, err := e.RotateToMultisig("root", []string{newKey(t), next}, []string{d1, d2}, "1", "1", nil); err == nil {
+		t.Fatal("a rotation leading with a key nobody committed to was appended")
+	}
 	if _, err := e.RotateToMultisig("root", []string{next, newKey(t)}, []string{d1, d2}, "1", "1", nil); err != nil {
 		t.Fatalf("a rotation carrying the committed key: %v", err)
 	}

@@ -849,19 +849,14 @@ func (e *Engine) RotateToMultisig(name string, keys, nextKeyDigests []string, is
 	if err != nil {
 		return nil, fmt.Errorf("building the multisig rotation: %w", err)
 	}
-	// The keys must carry the one the previous event committed to, as a
-	// single-key rotation's must; the keys of owners joining ride along.
+	// The first key must be the one the previous event committed to, as a
+	// single-key rotation's must, since it is the key this engine holds in
+	// force afterwards; the keys of owners joining follow it.
 	e.state.mu.RLock()
 	committed := id.NextKeyDigest
 	e.state.mu.RUnlock()
-	met := false
-	for _, k := range normalised {
-		if d, err := keri.NextDigest(k); err == nil && d == committed {
-			met = true
-		}
-	}
-	if !met {
-		return nil, fmt.Errorf("none of the multisig rotation's keys is the one the identity committed to (%s)", committed)
+	if d, err := keri.NextDigest(normalised[0]); err != nil || d != committed {
+		return nil, fmt.Errorf("the multisig rotation's first key is not the one the identity committed to (%s)", committed)
 	}
 	ev, err := keri.ParseEvent(raw)
 	if err != nil {
