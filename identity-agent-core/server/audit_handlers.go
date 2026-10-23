@@ -285,6 +285,10 @@ func (s *CoreServer) handleVerifyAuditChain(w http.ResponseWriter, r *http.Reque
 		"unanchored_entries": anchors.UnanchoredEntries,
 		"anchoring_external": anchors.External, "witnessed_through": anchors.WitnessedThrough,
 		"awaiting_witnesses": anchors.AwaitingWitnesses,
+		"witnesses_answered": anchors.WitnessesAnswered,
+	}
+	if anchors.WitnessesAnswered > 0 {
+		resp["witness_confirmed_tip"] = anchors.WitnessTip
 	}
 	if anchors.Unavailable != "" {
 		resp["anchoring_unavailable"] = anchors.Unavailable

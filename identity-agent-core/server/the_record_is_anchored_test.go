@@ -1,15 +1,21 @@
 package server
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"identity-agent-core/witness"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -603,4 +609,196 @@ func TestAnchorsAreHeldOutsideOnceTheirWitnessesReceiptThem(t *testing.T) {
 	if got["awaiting_witnesses"] != float64(0) || got["witnessed_through"] != got["anchored_through"] {
 		t.Fatalf("an anchoring two of its witnesses receipted reads as %v", got)
 	}
+}
+
+// The reviewer's case: remove the record identity's file, the anchors and the
+// newest rows. The record is reported broken, never "nothing anchored", and no
+// second record identity is made to anchor the shortened log.
+func TestALostRecordIdentityIsNeverReplacedQuietly(t *testing.T) {
+	s, first := anchoredTwice(t)
+	owner, _ := s.DataStore.GetIdentity()
+	before, _ := s.DataStore.GetEvents(owner.AID)
+	if err := os.Remove(filepath.Join(s.DataDir, recordIdentityFile)); err != nil {
+		t.Fatal(err)
+	}
+	db := recordDB(t, s)
+	db.Exec(`DELETE FROM record_anchors`)
+	s.SandboxManager.Store().DB().Exec(`DELETE FROM invocation_log WHERE id > ?`, first)
+	mustBreak(t, s, "a lost record identity")
+	writeRows(t, s, 1)
+	if _, err := s.anchorRecord(); !errors.Is(err, errRecordGone) {
+		t.Fatalf("anchoring with the record identity's record gone: %v", err)
+	}
+	if after, _ := s.DataStore.GetEvents(owner.AID); len(after) != len(before) {
+		t.Fatal("a second record identity was approved")
+	}
+	if approved, _ := s.approvedRecordIdentities(owner.AID); len(approved) != 1 {
+		t.Fatalf("the organisation approves %d record identities", len(approved))
+	}
+	mustBreak(t, s, "a lost record identity, after trying to anchor again")
+}
+
+// With only the anchors gone and the file in place, the record identity's
+// key log still names statements that are gone.
+func TestAnchorsGoneWithTheFileInPlaceAreCaught(t *testing.T) {
+	s, _ := anchoredTwice(t)
+	recordDB(t, s).Exec(`DELETE FROM record_anchors`)
+	mustBreak(t, s, "the anchors removed")
+}
+
+// The tip kept outside the database cannot be lowered without the record
+// identity's key.
+func TestALoweredTipIsCaught(t *testing.T) {
+	s, _ := anchoredTwice(t)
+	rec, _ := s.loadRecordIdentity()
+	events, _ := s.DataStore.GetEvents(rec.AID)
+	var first map[string]interface{}
+	json.Unmarshal([]byte(events[1].EventJSON), &first)
+	rec.TipSN, rec.TipSAID = 1, first["d"].(string)
+	s.saveRecordIdentity(rec)
+	mustBreak(t, s, "a tip lowered without the record identity's key")
+}
+
+// With the record identity's file gone and its approval no longer found, the
+// anchors left behind still stop a new one being made over them.
+func TestNoRecordIdentityIsMadeOverAnchorsLeftBehind(t *testing.T) {
+	s, _ := anchoredTwice(t)
+	rec, _ := s.loadRecordIdentity()
+	owner, _ := s.DataStore.GetIdentity()
+	events, _ := s.DataStore.GetEvents(owner.AID)
+	db := recordDB(t, s)
+	for _, ev := range events {
+		if containsSealFor(t, ev.RawBytesB64, rec.AID) {
+			db.Exec(`DELETE FROM kel WHERE aid = ? AND seq_num = ?`, owner.AID, ev.SequenceNumber)
+		}
+	}
+	os.Remove(filepath.Join(s.DataDir, recordIdentityFile))
+	writeRows(t, s, 1)
+	if _, err := s.anchorRecord(); !errors.Is(err, errRecordGone) {
+		t.Fatalf("a record identity was made over anchors left behind: %v", err)
+	}
+}
+
+// Exactly one record identity: a second one this identity approved breaks the
+// record.
+func TestASecondRecordIdentityIsCaught(t *testing.T) {
+	s, _ := anchoredTwice(t)
+	rec, _ := s.loadRecordIdentity()
+	owner, _ := s.DataStore.GetIdentity()
+	seed, pub, nextPub, err := s.recordKeys(rec.Index + 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keeper := s.KeriDriver.(drivers.KELKeeper)
+	if _, err := keeper.CreateDelegatedInceptionKept(pub, nextPub, "", owner.AID, nil, 0, func(k drivers.KELKeep) error {
+		approval, dip, err := s.delegationRecords(owner.AID, k, pub, seed)
+		if err != nil {
+			return err
+		}
+		return s.DataStore.KeepEvents(approval, dip)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mustBreak(t, s, "a second record identity")
+}
+
+// The check asks the record identity's witnesses how far they hold its key
+// log. Where they confirm what is here, it says so; where one holds more, the
+// local log was trimmed, and the record is broken.
+func TestTheWitnessesAreAskedForTheRecordsTip(t *testing.T) {
+	keys := make([]ed25519.PrivateKey, 2)
+	names := make([]string, 2)
+	for i := range keys {
+		pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+		keys[i], names[i] = priv, iacrypto.NonTransferableAIDQB64(pub)
+	}
+	s, _ := foundedWith(t, agentWithDerivedIdentity(t), names, 1)
+	s.DeclaredEntityType = "organization"
+	m, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir, ManifestsDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(m.Stop)
+	s.SandboxManager = m
+	m.SetEventSigner(&invocationSigner{s: s})
+	sq := s.DataStore.(*store.SQLiteStore)
+	s.WitnessService = witness.NewService(witness.NewSQLiteStore(sq.DB()), sq, s.KeriDriver, witness.BackendDesktop)
+	for i, name := range names {
+		aid := fmt.Sprintf("EWitness%d", i)
+		s.DataStore.SaveContact(store.ContactRecord{AID: aid, OobiURL: "http://w" + fmt.Sprint(i) + ".test", Status: "active"})
+		s.WitnessService.Store.SaveContactMeta(witness.ContactMeta{ContactAID: aid, WitnessKey: name})
+	}
+	var held []map[string]interface{}
+	s.WitnessService.FetchKel = func(context.Context, string) ([]map[string]interface{}, error) {
+		return held, nil
+	}
+	var postedMu sync.Mutex
+	posted := map[string]bool{}
+	s.WitnessService.PostEvent = func(_ context.Context, _ string, body []byte) (map[string]interface{}, error) {
+		var req struct {
+			AID string `json:"aid"`
+		}
+		json.Unmarshal(body, &req)
+		postedMu.Lock()
+		posted[req.AID] = true
+		postedMu.Unlock()
+		return nil, fmt.Errorf("offline")
+	}
+	writeRows(t, s, 2)
+	if ok, err := s.anchorRecord(); err != nil || !ok {
+		t.Fatalf("anchoring: %v %v", ok, err)
+	}
+	rec, _ := s.loadRecordIdentity()
+	owner, _ := s.DataStore.GetIdentity()
+	for i := 0; i < 100; i++ {
+		postedMu.Lock()
+		both := posted[owner.AID] && posted[rec.AID]
+		postedMu.Unlock()
+		if both {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	postedMu.Lock()
+	if !posted[owner.AID] {
+		t.Fatal("the organisation's approval of the record identity was not sent to its witnesses")
+	}
+	postedMu.Unlock()
+	events, _ := s.DataStore.GetEvents(rec.AID)
+	asHeld := func(n int) []map[string]interface{} {
+		var out []map[string]interface{}
+		for _, ev := range events[:n] {
+			var m map[string]interface{}
+			json.Unmarshal([]byte(ev.EventJSON), &m)
+			out = append(out, m)
+		}
+		return out
+	}
+
+	// Nobody answers: local only.
+	got := chainSays(t, s)
+	if got["witnesses_answered"] != float64(0) || got["witness_confirmed_tip"] != nil {
+		t.Fatalf("with no witness answering the check reads %v", got)
+	}
+	// Both hold what is here.
+	held = asHeld(len(events))
+	got = chainSays(t, s)
+	if got["witnesses_answered"] != float64(2) || got["witness_confirmed_tip"] != float64(len(events)-1) || got["anchor_broken_at"] != nil {
+		t.Fatalf("with the witnesses confirming the tip the check reads %v", got)
+	}
+	// They hold one event more than is left here.
+	writeRows(t, s, 1)
+	if ok, err := s.anchorRecord(); err != nil || !ok {
+		t.Fatalf("anchoring again: %v %v", ok, err)
+	}
+	events, _ = s.DataStore.GetEvents(rec.AID)
+	held = asHeld(len(events))
+	last := events[len(events)-1]
+	recordDB(t, s).Exec(`DELETE FROM kel WHERE aid = ? AND seq_num = ?`, rec.AID, last.SequenceNumber)
+	recordDB(t, s).Exec(`DELETE FROM record_anchors WHERE seq = (SELECT MAX(seq) FROM record_anchors)`)
+	rec.TipSN, rec.TipSAID = last.SequenceNumber-1, asHeld(len(events) - 1)[len(events)-2]["d"].(string)
+	seed, _, _, _ := s.recordKeys(rec.Index)
+	signTip(&rec, seed)
+	s.saveRecordIdentity(rec)
+	mustBreak(t, s, "a key log the witnesses hold further than is left here")
 }

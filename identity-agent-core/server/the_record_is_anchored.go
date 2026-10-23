@@ -20,6 +20,8 @@ import (
 	"identity-agent-core/conversation"
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/keriengine"
+	"identity-agent-core/login"
 	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
 )
@@ -104,6 +106,104 @@ type recordIdentityRecord struct {
 	Pending bool   `json:"pending,omitempty"`
 	TipSN   int    `json:"tip_sn"`
 	TipSAID string `json:"tip_said"`
+	// TipSig is the record identity's signature over the tip, so the tip
+	// cannot be lowered by somebody who can write this file but does not hold
+	// the record identity's key. It sits beside the database and is exposed to
+	// whoever can write the data directory; against them, only the witnesses
+	// protect the record.
+	TipSig string `json:"tip_sig,omitempty"`
+}
+
+func tipMessage(rec recordIdentityRecord) string {
+	return fmt.Sprintf("record-tip\n%s\n%d\n%s", rec.AID, rec.TipSN, rec.TipSAID)
+}
+
+// signTip signs the record identity's tip with its own key.
+func signTip(rec *recordIdentityRecord, seed []byte) error {
+	sig, err := login.SignString(tipMessage(*rec), seed)
+	if err != nil {
+		return err
+	}
+	rec.TipSig = sig
+	return nil
+}
+
+// recordScan is how many places in the record pool are searched for record
+// identities this identity approved.
+const recordScan = 32
+
+// errRecordGone is a record identity this identity approved whose record here
+// is gone. A second one is never made in its place.
+var errRecordGone = errors.New("this identity approved a record identity whose record here is gone; a second one is not made")
+
+// approvedRecordIdentities are the record identities this identity's key log
+// approves. Each is recognised from its keys, derived from the record pool,
+// under each set of witnesses this identity has named: so they are found from
+// the key log itself, whatever has happened to the files that name them.
+func (s *CoreServer) approvedRecordIdentities(owner string) ([]string, error) {
+	events, err := s.DataStore.GetEvents(owner)
+	if err != nil {
+		return nil, err
+	}
+	sealed := map[string]string{}
+	type config struct {
+		witnesses []string
+		toad      int
+	}
+	configs := []config{{nil, 0}}
+	var current []string
+	for _, ev := range events {
+		raw, _ := base64.StdEncoding.DecodeString(ev.RawBytesB64)
+		var parsed map[string]interface{}
+		if json.Unmarshal(raw, &parsed) != nil {
+			continue
+		}
+		switch parsed["t"] {
+		case "icp":
+			current = stringsOf(parsed["b"])
+			configs = append(configs, config{current, thresholdOf(parsed["bt"])})
+		case "rot":
+			cut := map[string]bool{}
+			for _, w := range stringsOf(parsed["br"]) {
+				cut[w] = true
+			}
+			var next []string
+			for _, w := range current {
+				if !cut[w] {
+					next = append(next, w)
+				}
+			}
+			current = append(next, stringsOf(parsed["ba"])...)
+			configs = append(configs, config{current, thresholdOf(parsed["bt"])})
+		}
+		seals, _ := parsed["a"].([]interface{})
+		for _, x := range seals {
+			if seal, ok := x.(map[string]interface{}); ok && seal["s"] == "0" {
+				i, _ := seal["i"].(string)
+				d, _ := seal["d"].(string)
+				sealed[i] = d
+			}
+		}
+	}
+	base, err := store.PoolBase("record")
+	if err != nil {
+		return nil, err
+	}
+	var found []string
+	for index := base; index < base+recordScan; index++ {
+		_, pub, nextPub, err := s.recordKeys(index)
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range configs {
+			aid, said, err := keriengine.DelegatedInceptionOf(pub, nextPub, owner, c.witnesses, c.toad)
+			if err == nil && sealed[aid] == said {
+				found = append(found, aid)
+				break
+			}
+		}
+	}
+	return found, nil
 }
 
 // anchorStatement is what one anchoring fixes. Its digest is the seal.
@@ -226,6 +326,14 @@ func (s *CoreServer) recordIdentity() (recordIdentityRecord, []byte, error) {
 	if _, err := s.identitySigningSeed(); err != nil {
 		return recordIdentityRecord{}, nil, errKeyElsewhere
 	}
+	if found, err := s.approvedRecordIdentities(owner.AID); err != nil {
+		return recordIdentityRecord{}, nil, err
+	} else if len(found) > 0 {
+		return recordIdentityRecord{}, nil, errRecordGone
+	}
+	if latest, err := s.DataStore.GetLatestRecordAnchor(); err != nil || latest != nil {
+		return recordIdentityRecord{}, nil, errRecordGone
+	}
 	witnesses, toad, err := keeper.WitnessConfig(owner.AID)
 	if err != nil {
 		return recordIdentityRecord{}, nil, fmt.Errorf("this identity's witnesses: %w", err)
@@ -239,17 +347,20 @@ func (s *CoreServer) recordIdentity() (recordIdentityRecord, []byte, error) {
 		return recordIdentityRecord{}, nil, err
 	}
 	var rec recordIdentityRecord
-	var dipRecord store.EventRecord
+	var dipRecord, approvalRecord store.EventRecord
 	keep := func(k drivers.KELKeep) error {
 		approval, dip, err := s.delegationRecords(owner.AID, k, pub, seed)
 		if err != nil {
 			return err
 		}
-		dipRecord = dip
+		dipRecord, approvalRecord = dip, approval
 		var parsed map[string]interface{}
 		_ = json.Unmarshal(k.Delegated, &parsed)
 		said, _ := parsed["d"].(string)
 		rec = recordIdentityRecord{AID: dip.AID, Index: index, Pending: true, TipSN: 0, TipSAID: said}
+		if err := signTip(&rec, seed); err != nil {
+			return err
+		}
 		// Marked pending before the inception is kept, and cleared after, so a
 		// stop in between is finished or undone at the next start.
 		if err := s.saveRecordIdentity(rec); err != nil {
@@ -268,6 +379,10 @@ func (s *CoreServer) recordIdentity() (recordIdentityRecord, []byte, error) {
 	if err := s.saveRecordIdentity(rec); err != nil {
 		log.Printf("[record] the record identity %s was made but could not be marked so: %v", rec.AID, err)
 	}
+	// The approval goes to this identity's witnesses, and the inception to the
+	// same ones, so a witness that checks a delegation against its approval
+	// finds it.
+	s.witness(owner.AID, approvalRecord, witnesses, toad)
 	s.witness(rec.AID, dipRecord, witnesses, toad)
 	log.Printf("[record] record identity %s made, approved in %s's key log, witnessed by %d", rec.AID, owner.AID, len(witnesses))
 	return rec, seed, nil
@@ -451,6 +566,9 @@ func (s *CoreServer) anchorRecord() (bool, error) {
 		anchored[c.ID] = c.Seq
 	}
 	rec.TipSN, rec.TipSAID = kept.SequenceNumber, said
+	if err := signTip(&rec, seed); err != nil {
+		log.Printf("[record] the record identity's tip could not be signed: %v", err)
+	}
 	if err := s.saveRecordIdentity(rec); err != nil {
 		log.Printf("[record] the record identity's tip could not be kept outside the database: %v", err)
 	}
@@ -499,6 +617,7 @@ func (s *CoreServer) keepAnchoring(stop <-chan struct{}) {
 		case <-stop:
 			return
 		case <-t.C:
+			s.backfillControllerGrants()
 			if _, err := s.anchorRecord(); err != nil && !errors.Is(err, errKeyElsewhere) {
 				log.Printf("[record] anchoring: %v", err)
 			}
@@ -523,6 +642,12 @@ type anchorCheck struct {
 	External          bool
 	WitnessedThrough  int64
 	AwaitingWitnesses int
+	// WitnessTip is the newest event of the record identity's key log that a
+	// witness, asked now, confirms holding; WitnessesAnswered how many did.
+	// Where none answers, what the check found is this Identity Agent's word
+	// alone.
+	WitnessTip        int
+	WitnessesAnswered int
 	// BrokenAt is the place in the record identity's key log where the record
 	// first stops holding, and Why says what failed. Zero when it holds.
 	BrokenAt int
@@ -553,8 +678,24 @@ func (s *CoreServer) checkAnchors() (anchorCheck, error) {
 		return out, err
 	}
 
+	owner, err := s.DataStore.GetIdentity()
+	if err != nil || owner == nil {
+		return out, nil
+	}
+	approved, err := s.approvedRecordIdentities(owner.AID)
+	if err != nil {
+		return out, err
+	}
 	rec, made := s.loadRecordIdentity()
 	if !made || rec.Pending {
+		latest, err := s.DataStore.GetLatestRecordAnchor()
+		if err != nil {
+			return out, err
+		}
+		if len(approved) > 0 || latest != nil {
+			out.BrokenAt, out.Why = -1, "this identity approved a record identity, or anchored its record, and the record identity's record here is gone"
+			return unanchored(0, map[string]int{})
+		}
 		switch {
 		case !s.anchorsItsRecord():
 			out.Unavailable = "this Identity Agent anchors its record once it is an organisation's or holds an AI agent"
@@ -595,9 +736,8 @@ func (s *CoreServer) checkAnchors() (anchorCheck, error) {
 	if got, err := drivers.ValidateKELFromBytes(in); err != nil || !got.KelVerified {
 		return broken(0, "the record identity's key log does not verify")
 	}
-	owner, err := s.DataStore.GetIdentity()
-	if err != nil || owner == nil {
-		return out, fmt.Errorf("no identity to check the record identity against")
+	if len(approved) != 1 || approved[0] != rec.AID {
+		return broken(0, fmt.Sprintf("this identity approved %d record identities, where there must be exactly this one", len(approved)))
 	}
 	dip := kel[0]
 	dipSAID, _ := dip["d"].(string)
@@ -609,8 +749,36 @@ func (s *CoreServer) checkAnchors() (anchorCheck, error) {
 	}
 	// The tip kept outside the database must still be in the key log: the
 	// newest anchors cannot be emptied out of the database unnoticed.
+	keys := stringsOf(dip["k"])
+	if len(keys) == 0 {
+		return broken(0, "the record identity names no key")
+	}
+	if pub, err := login.DecodeVerkey(keys[0]); err != nil {
+		return broken(0, "the record identity's key is unreadable")
+	} else if ok, err := login.VerifyString(tipMessage(rec), rec.TipSig, pub); err != nil || !ok {
+		return broken(rec.TipSN, "the tip kept outside the database is not signed by the record identity")
+	}
 	if rec.TipSN >= len(kel) || kel[rec.TipSN]["d"] != rec.TipSAID {
 		return broken(rec.TipSN, "the record identity's key log is shorter than the tip last anchored")
+	}
+
+	// Ask the witnesses how far they hold the record identity's key log. One
+	// holding more than this Identity Agent has, or something else at the same
+	// place, is the record trimmed or rewritten.
+	out.WitnessTip = -1
+	if ws := stringsOf(dip["b"]); len(ws) > 0 && s.WitnessService != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		held := s.WitnessService.KelHeldBy(ctx, rec.AID, ws)
+		cancel()
+		for _, tip := range held {
+			out.WitnessesAnswered++
+			if tip.SN >= len(kel) || kel[tip.SN]["d"] != tip.SAID {
+				return broken(tip.SN, "a witness holds the record identity's key log further, or otherwise, than this Identity Agent does")
+			}
+			if tip.SN > out.WitnessTip {
+				out.WitnessTip = tip.SN
+			}
+		}
 	}
 
 	anchors, err := s.DataStore.GetRecordAnchors()

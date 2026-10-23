@@ -202,9 +202,13 @@ asking, and must sign as themselves.
   of every conversation that grew since it was last anchored, by sequence. The record
   identity's key log is the authority: each of its interactions must have its statement,
   each statement must be sealed there, and each row and entry a statement names must
-  still be there, unchanged. Its tip is also kept outside the database. Anchoring runs for
-  an organisation and for any Identity Agent holding AI agents, at most every five minutes,
-  sooner after twenty recorded messages, and within half the time a quiet conversation
+  still be there, unchanged. Its tip is also kept outside the database, signed by the record
+  identity's key, so it cannot be lowered without that key. The organisation's key log is
+  searched for the record identities it approved: there must be exactly one, and it must be
+  the one named. Where the record identity's file is missing but the organisation approved
+  one, or anchors exist, the record is broken, and no second record identity is made in its
+  place. Anchoring runs for an organisation and for any Identity Agent holding AI agents,
+  every five minutes, sooner after twenty recorded messages, and within half the time a quiet conversation
   takes to close, so its last entry is anchored before it closes. Each anchoring is kept
   with its interaction before the interaction is appended.
 
@@ -214,7 +218,14 @@ asking, and must sign as themselves.
   anybody can check by asking them. An organisation that names no witnesses has nobody
   outside to contradict it: the anchors then hold against someone who can edit the
   record's rows but has neither the record identity's key nor the tip kept outside the
-  database, and not against someone who controls the Identity Agent entirely. The check
+  database, and not against someone who controls the Identity Agent entirely. The tip file
+  sits beside the database, in the same data directory, with the same exposure: against
+  someone who can write that directory, the only protection is the witnesses. The
+  organisation's approval of the record identity goes to its witnesses too, so one that
+  checks a delegation finds it. The check asks the record identity's witnesses how far they
+  hold its key log, and reports whether its tip is confirmed by witnesses or rests on this
+  Identity Agent's word alone; a witness holding more than is here, or something else, is
+  the record trimmed or rewritten, and the record is broken. The check also
   reports which applies, how far the witnesses have receipted, and how many rows and
   entries no anchor fixes yet; nothing anchored is reported as unavailable, never as
   checked.

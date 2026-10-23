@@ -35,11 +35,14 @@ type EventPoster func(ctx context.Context, witnessURL string, body []byte) (map[
 
 // Service is the IA-side witness engine.
 type Service struct {
-	Store       Store
-	Contacts    ContactStore
-	Driver      drivers.KeriEngine
-	HTTPClient  *http.Client
-	PostEvent   EventPoster
+	Store      Store
+	Contacts   ContactStore
+	Driver     drivers.KeriEngine
+	HTTPClient *http.Client
+	PostEvent  EventPoster
+	// FetchKel reads the key log a witness holds for an identity. Replaceable
+	// so a test needs no network.
+	FetchKel    func(ctx context.Context, url string) ([]map[string]interface{}, error)
 	OurAID      func() string
 	OurOOBI     func() string
 	BackendType string
@@ -96,7 +99,84 @@ func NewService(st Store, contacts ContactStore, driver drivers.KeriEngine, back
 		finalizeWg:  make(map[string]chan struct{}),
 	}
 	s.PostEvent = s.defaultPostEvent
+	s.FetchKel = s.defaultFetchKel
 	return s
+}
+
+func (s *Service) defaultFetchKel(ctx context.Context, url string) ([]map[string]interface{}, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("witness GET %d", resp.StatusCode)
+	}
+	var out struct {
+		KEL []map[string]interface{} `json:"kel"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out.KEL, nil
+}
+
+// KelHeldBy asks each designated witness how far the key log it holds for aid
+// goes, and returns, by witness key, the sequence number and digest of the
+// newest event each holds. A witness that cannot be reached, or holds
+// nothing, is left out.
+func (s *Service) KelHeldBy(ctx context.Context, aid string, designated []string) map[string]HeldTip {
+	known := s.designatedTargets(designated)
+	out := map[string]HeldTip{}
+	for _, key := range designated {
+		w, ok := known[key]
+		if !ok {
+			continue
+		}
+		url := witnessBase(w.URL) + witnessPathPrefix(w.Commercial) + "/witness/kel/" + aid
+		kel, err := s.FetchKel(ctx, url)
+		if err != nil || len(kel) == 0 {
+			continue
+		}
+		// Each entry is the event as the witness holds it.
+		last := kel[len(kel)-1]
+		said, _ := last["d"].(string)
+		sn, err := eventSeq(last)
+		if err != nil {
+			continue
+		}
+		out[key] = HeldTip{SN: sn, SAID: said}
+	}
+	return out
+}
+
+// HeldTip is the newest event a witness holds for an identity.
+type HeldTip struct {
+	SN   int
+	SAID string
+}
+
+// designatedTargets finds, by witness key, where each witness is reached:
+// among this agent's witnesses and the bootstrap pool.
+func (s *Service) designatedTargets(designated []string) map[string]witnessTarget {
+	known := map[string]witnessTarget{}
+	if contacts, err := s.Contacts.GetContacts(); err == nil {
+		for _, c := range contacts {
+			if meta, _ := s.Store.GetContactMeta(c.AID); meta != nil && meta.WitnessKey != "" {
+				known[meta.WitnessKey] = witnessTarget{AID: c.AID, URL: c.OobiURL, WitnessKey: meta.WitnessKey}
+			}
+		}
+	}
+	for _, b := range BootstrapPool() {
+		if _, ok := known[b.WitnessKey]; !ok {
+			known[b.WitnessKey] = witnessTarget{AID: b.AID, WitnessKey: b.WitnessKey, URL: b.URL, Commercial: true}
+		}
+	}
+	return known
 }
 
 func (s *Service) defaultPostEvent(ctx context.Context, witnessURL string, body []byte) (map[string]interface{}, error) {
@@ -388,19 +468,7 @@ func (s *Service) BroadcastToDesignated(ctx context.Context, signerAID string, r
 	if cesrSig == "" {
 		return fmt.Errorf("refusing to broadcast an unsigned event for %s", signerAID)
 	}
-	known := map[string]witnessTarget{}
-	if contacts, err := s.Contacts.GetContacts(); err == nil {
-		for _, c := range contacts {
-			if meta, _ := s.Store.GetContactMeta(c.AID); meta != nil && meta.WitnessKey != "" {
-				known[meta.WitnessKey] = witnessTarget{AID: c.AID, URL: c.OobiURL, WitnessKey: meta.WitnessKey}
-			}
-		}
-	}
-	for _, b := range BootstrapPool() {
-		if _, ok := known[b.WitnessKey]; !ok {
-			known[b.WitnessKey] = witnessTarget{AID: b.AID, WitnessKey: b.WitnessKey, URL: b.URL, Commercial: true}
-		}
-	}
+	known := s.designatedTargets(designated)
 	said := eventSAID(event)
 	seq, _ := eventSeq(event)
 	now := NowRFC3339()

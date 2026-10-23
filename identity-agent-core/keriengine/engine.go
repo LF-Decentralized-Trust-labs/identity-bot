@@ -484,6 +484,18 @@ func (e *Engine) ReinstateDelegatedIdentity(publicKey, nextPublicKey, name, dele
 
 // delegatedInceptionOver builds the inception of an identity delegated by the
 // given identifier, over the given keys.
+// DelegatedInceptionOf is the identifier and digest the delegated inception
+// of these keys by delegator, naming these witnesses, would have: the same
+// construction CreateDelegatedInceptionKept uses, so an identity made from
+// derived keys can be recognised later from the keys alone.
+func DelegatedInceptionOf(publicKey, nextPublicKey, delegatorAID string, witnesses []string, toad int) (aid, said string, err error) {
+	_, _, _, ev, err := delegatedInceptionOver(publicKey, nextPublicKey, delegatorAID, witnesses, toad)
+	if err != nil {
+		return "", "", err
+	}
+	return ev.Identifier, ev.SAID, nil
+}
+
 // witnesses and toad, when witnesses is not empty, are the witnesses the
 // delegated identity names and how many must receipt each of its events.
 func delegatedInceptionOver(publicKey, nextPublicKey, delegatorAID string, witnesses []string, toad int) (
