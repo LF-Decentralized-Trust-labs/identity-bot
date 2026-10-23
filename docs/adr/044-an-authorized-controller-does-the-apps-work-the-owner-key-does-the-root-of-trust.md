@@ -129,7 +129,12 @@ removed, or it is revoked directly, is withdrawn the same way: marked withdrawin
 never in force, and its revocation signed on the device; a machine re-granted there has
 its old grant's withdrawal asked for ahead of the new grant. The engine itself appends no
 interaction to a key log unless that identity's current key signed it, checked in one
-place, so no path can leave an unsigned event there. An Identity Agent whose key log holds events written by an earlier version
+place, so no path can leave an unsigned event there. Rotations are not yet held to this: a rotation is signed by its
+new keys, which this Identity Agent does not hold (the owner's device, a recovering
+client, or each owner in a multi-owner change), and today each of those signs it only
+after it is appended. Guarding rotations needs the rotation built, signed by the new keys
+and only then appended, which changes those apps; until then a rotation is appended
+unsigned, as before this decision. An Identity Agent whose key log holds events written by an earlier version
 without the key, which the device never had, asks the device for nothing and says so. Only one
 interaction waits for the device at a time, as each extends the same tip; another is kept
 and built once the one before it is appended, refused or expired. When a signature comes back it must be over the request's own
