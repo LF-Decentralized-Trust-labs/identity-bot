@@ -908,7 +908,7 @@ ALTER TABLE notifications ADD COLUMN sender_kel        TEXT    NOT NULL DEFAULT 
 `},
 	{
 		Version:     41,
-		Description: "Keep each anchoring of the record, and the request each credential was issued on",
+		Description: "Keep each anchoring of the record",
 		SQL: `
 -- One row per interaction in the record identity's key log. The statement is
 -- what was digested, so a verifier recomputes the seal from it; seq is the
@@ -920,6 +920,11 @@ CREATE TABLE IF NOT EXISTS record_anchors (
     digest     TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT ''
 );
+`},
+	{
+		Version:     42,
+		Description: "Keep the request each credential was issued on",
+		SQL: `
 -- The request each AI agent grant or body credential was issued on, with its
 -- body: kept here, not in the credential, which is public, because a body can
 -- hold what is nobody else's business. One request authorises one credential,

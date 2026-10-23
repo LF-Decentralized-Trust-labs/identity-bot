@@ -73,6 +73,11 @@ func (s *CoreServer) authorityOf(r *http.Request) (authority, func(), error) {
 		return authority{}, release, err
 	}
 	if grant, ok := TheControllerThatAsked(r); ok {
+		// A machine paired before machines were given grants is given its
+		// grant now, rather than refused until a back-fill reaches it.
+		if err := s.grantIfMissing(grant.ControllerAID); err != nil {
+			return authority{}, release, err
+		}
 		s.grantsMu.RLock()
 		release = s.grantsMu.RUnlock
 		current, had, err := s.controllers().Get(grant.ControllerAID)
@@ -446,12 +451,13 @@ func (s *CoreServer) withdrawOrSay(said string) {
 
 // backfillControllerGrants issues a Controller Grant for every machine paired
 // before machines were given one, so none goes on authorising credentials that
-// cannot name it. Where the identity's key is not held here they are marked
-// pending on the device that holds it. It runs where AI agents act, as
-// anchoring does: an individual's phone with none writes nothing. Run at start
-// and on every anchoring tick, so one that fails is tried again.
+// cannot name it, and a grant for every AI agent provisioned before every AI
+// agent was given one. Where the identity's key is not held here a machine's is
+// marked pending on the device that holds it. Only an Identity Agent with
+// paired machines or AI agents writes anything. Run at start and on every
+// anchoring tick, so one that fails is tried again.
 func (s *CoreServer) backfillControllerGrants() {
-	if s.DataStore == nil || s.KeriDriver == nil || !s.anchorsItsRecord() {
+	if s.DataStore == nil || s.KeriDriver == nil {
 		return
 	}
 	all, err := s.controllers().All()
@@ -463,24 +469,84 @@ func (s *CoreServer) backfillControllerGrants() {
 		if g.CredentialSAID != "" || g.CredentialPending {
 			continue
 		}
-		if live, _ := g.Live(time.Now()); !live {
-			continue
-		}
-		s.grantsMu.Lock()
-		said, err := s.issueControllerGrant(g)
-		switch {
-		case errors.Is(err, errKeyElsewhere):
-			g.CredentialPending = true
-			err = s.controllers().Put(g)
-		case err == nil:
-			g.CredentialSAID = said
-			if err = s.controllers().Put(g); err != nil {
-				s.withdrawOrSay(said)
-			}
-		}
-		s.grantsMu.Unlock()
-		if err != nil {
+		if err := s.grantIfMissing(g.ControllerAID); err != nil {
 			log.Printf("[controller] machine %s paired earlier could not be given a grant: %v", g.ControllerAID, err)
 		}
+	}
+	s.backfillAgentGrants()
+}
+
+// grantIfMissing gives a live machine with no grant credential its grant, or
+// marks it pending where the identity's key is held elsewhere.
+func (s *CoreServer) grantIfMissing(controllerAID string) error {
+	s.grantsMu.Lock()
+	defer s.grantsMu.Unlock()
+	g, had, err := s.controllers().Get(controllerAID)
+	if err != nil || !had || g.CredentialSAID != "" || g.CredentialPending {
+		return err
+	}
+	if live, _ := g.Live(time.Now()); !live {
+		return nil
+	}
+	said, err := s.issueControllerGrant(g)
+	switch {
+	case errors.Is(err, errKeyElsewhere):
+		g.CredentialPending = true
+		return s.controllers().Put(g)
+	case err != nil:
+		return err
+	}
+	g.CredentialSAID = said
+	if err := s.controllers().Put(g); err != nil {
+		s.withdrawOrSay(said)
+		return err
+	}
+	return nil
+}
+
+// backfillAgentGrants gives every AI agent provisioned before every AI agent
+// was given a grant one, issued on this Identity Agent's own authority, so its
+// token is not left with nothing it may do.
+func (s *CoreServer) backfillAgentGrants() {
+	if s.assetHandler == nil || s.assetHandler.Store == nil {
+		return
+	}
+	mcpTokensMu.Lock()
+	var missing []mcpToken
+	for _, t := range s.loadMCPTokens() {
+		if t.AgentAID != "" && t.GrantSAID == "" && t.AssetID != "" {
+			missing = append(missing, t)
+		}
+	}
+	mcpTokensMu.Unlock()
+	for _, t := range missing {
+		s.backfillAgentGrant(t.AssetID)
+	}
+}
+
+func (s *CoreServer) backfillAgentGrant(assetID string) {
+	unlock := lockAgentGrant(assetID)
+	defer unlock()
+	agent, ok := s.assetHandler.Store.GetAsset(assetID)
+	if !ok {
+		return
+	}
+	said, err := s.issueCapabilityGrant(&agent, authority{About: assetID})
+	if err != nil {
+		if !errors.Is(err, errKeyElsewhere) {
+			log.Printf("[mcp] AI agent %s provisioned earlier could not be given a grant: %v", agent.PairwiseAID, err)
+		}
+		return
+	}
+	mcpTokensMu.Lock()
+	defer mcpTokensMu.Unlock()
+	toks := s.loadMCPTokens()
+	for i := range toks {
+		if toks[i].AssetID == assetID && toks[i].GrantSAID == "" {
+			toks[i].GrantSAID = said
+		}
+	}
+	if err := s.saveMCPTokens(toks); err != nil {
+		log.Printf("[mcp] AI agent %s was given grant %s, but its token could not be updated: %v", agent.PairwiseAID, said, err)
 	}
 }

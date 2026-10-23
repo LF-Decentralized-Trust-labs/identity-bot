@@ -132,25 +132,34 @@ func (s *Service) defaultFetchKel(ctx context.Context, url string) ([]map[string
 func (s *Service) KelHeldBy(ctx context.Context, aid string, designated []string) map[string]HeldTip {
 	known := s.designatedTargets(designated)
 	out := map[string]HeldTip{}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
 	for _, key := range designated {
 		w, ok := known[key]
 		if !ok {
 			continue
 		}
-		url := witnessBase(w.URL) + witnessPathPrefix(w.Commercial) + "/witness/kel/" + aid
-		kel, err := s.FetchKel(ctx, url)
-		if err != nil || len(kel) == 0 {
-			continue
-		}
-		// Each entry is the event as the witness holds it.
-		last := kel[len(kel)-1]
-		said, _ := last["d"].(string)
-		sn, err := eventSeq(last)
-		if err != nil {
-			continue
-		}
-		out[key] = HeldTip{SN: sn, SAID: said}
+		wg.Add(1)
+		go func(key string, w witnessTarget) {
+			defer wg.Done()
+			url := witnessBase(w.URL) + witnessPathPrefix(w.Commercial) + "/witness/kel/" + aid
+			kel, err := s.FetchKel(ctx, url)
+			if err != nil || len(kel) == 0 {
+				return
+			}
+			// Each entry is the event as the witness holds it.
+			last := kel[len(kel)-1]
+			said, _ := last["d"].(string)
+			sn, err := eventSeq(last)
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			out[key] = HeldTip{SN: sn, SAID: said}
+			mu.Unlock()
+		}(key, w)
 	}
+	wg.Wait()
 	return out
 }
 

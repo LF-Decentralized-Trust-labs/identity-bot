@@ -679,18 +679,19 @@ func TestNoRecordIdentityIsMadeOverAnchorsLeftBehind(t *testing.T) {
 	}
 }
 
-// Exactly one record identity: a second one this identity approved breaks the
-// record.
+// Exactly one record identity: a second one this identity approved, on the
+// record key but naming other witnesses, breaks the record.
 func TestASecondRecordIdentityIsCaught(t *testing.T) {
 	s, _ := anchoredTwice(t)
 	rec, _ := s.loadRecordIdentity()
 	owner, _ := s.DataStore.GetIdentity()
-	seed, pub, nextPub, err := s.recordKeys(rec.Index + 1)
+	seed, pub, nextPub, err := s.recordKeys(rec.Index)
 	if err != nil {
 		t.Fatal(err)
 	}
+	wpub, _, _ := ed25519.GenerateKey(rand.Reader)
 	keeper := s.KeriDriver.(drivers.KELKeeper)
-	if _, err := keeper.CreateDelegatedInceptionKept(pub, nextPub, "", owner.AID, nil, 0, func(k drivers.KELKeep) error {
+	if _, err := keeper.CreateDelegatedInceptionKept(pub, nextPub, "second", owner.AID, []string{iacrypto.NonTransferableAIDQB64(wpub)}, 1, func(k drivers.KELKeep) error {
 		approval, dip, err := s.delegationRecords(owner.AID, k, pub, seed)
 		if err != nil {
 			return err
@@ -801,4 +802,91 @@ func TestTheWitnessesAreAskedForTheRecordsTip(t *testing.T) {
 	signTip(&rec, seed)
 	s.saveRecordIdentity(rec)
 	mustBreak(t, s, "a key log the witnesses hold further than is left here")
+}
+
+// The check never compares the witnesses with a key log an anchoring is part
+// way through extending: anchoring and checking at once, with witnesses that
+// hold exactly what has been appended, never reads as tampering.
+func TestCheckingWhileAnchoringRaisesNoFalseAlarm(t *testing.T) {
+	keys := make([]ed25519.PrivateKey, 1)
+	names := make([]string, 1)
+	for i := range keys {
+		pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+		keys[i], names[i] = priv, iacrypto.NonTransferableAIDQB64(pub)
+	}
+	s, _ := foundedWith(t, agentWithDerivedIdentity(t), names, 1)
+	s.DeclaredEntityType = "organization"
+	m, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir, ManifestsDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(m.Stop)
+	s.SandboxManager = m
+	m.SetEventSigner(&invocationSigner{s: s})
+	sq := s.DataStore.(*store.SQLiteStore)
+	s.WitnessService = witness.NewService(witness.NewSQLiteStore(sq.DB()), sq, s.KeriDriver, witness.BackendDesktop)
+	s.DataStore.SaveContact(store.ContactRecord{AID: "EWitness0", OobiURL: "http://w0.test", Status: "active"})
+	s.WitnessService.Store.SaveContactMeta(witness.ContactMeta{ContactAID: "EWitness0", WitnessKey: names[0]})
+	s.WitnessService.PostEvent = func(context.Context, string, []byte) (map[string]interface{}, error) {
+		return nil, fmt.Errorf("offline")
+	}
+	writeRows(t, s, 2)
+	if ok, err := s.anchorRecord(); err != nil || !ok {
+		t.Fatalf("anchoring: %v %v", ok, err)
+	}
+	rec, _ := s.loadRecordIdentity()
+	// The witness is slow to answer, and answers with whatever has been
+	// appended by then, so an anchoring may land while the check waits.
+	s.WitnessService.FetchKel = func(context.Context, string) ([]map[string]interface{}, error) {
+		time.Sleep(5 * time.Millisecond)
+		events, _ := s.DataStore.GetEvents(rec.AID)
+		var out []map[string]interface{}
+		for _, ev := range events {
+			var m map[string]interface{}
+			json.Unmarshal([]byte(ev.EventJSON), &m)
+			out = append(out, m)
+		}
+		return out, nil
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 15; i++ {
+			writeRows(t, s, 1)
+			s.anchorRecord()
+			time.Sleep(15 * time.Millisecond)
+		}
+	}()
+	for {
+		select {
+		case <-done:
+			return
+		default:
+		}
+		c, err := s.checkAnchors()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.BrokenAt != 0 || c.Why != "" {
+			t.Fatalf("checking while anchoring read as tampering: %d %s", c.BrokenAt, c.Why)
+		}
+	}
+}
+
+// Places taken in the record pool by attempts that failed do not move the
+// record identity: it is found, and the record checks, however many there were.
+func TestFailedAttemptsDoNotMoveTheRecordIdentity(t *testing.T) {
+	s := recordWorld(t)
+	for i := 0; i < 40; i++ {
+		if _, err := s.DataStore.AllocateNextRelationshipIndex("record"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeRows(t, s, 2)
+	if ok, err := s.anchorRecord(); err != nil || !ok {
+		t.Fatalf("anchoring: %v %v", ok, err)
+	}
+	if got := chainSays(t, s); got["anchor_broken_at"] != nil {
+		t.Fatalf("the record identity was not found after failed attempts: %v", got)
+	}
 }

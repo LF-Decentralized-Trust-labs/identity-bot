@@ -447,8 +447,8 @@ func TestAMachineIsGrantedWithItsCredentialPendingWhereTheKeyIsElsewhere(t *test
 	}
 }
 
-// A machine whose grant has been withdrawn, or is not yet anchored,
-// authorises nothing.
+// A machine whose grant has been withdrawn authorises nothing; one paired
+// before machines were given grants is given its grant when it asks.
 func TestAMachineWithoutAGrantInForceAuthorisesNothing(t *testing.T) {
 	w := newTalkWorld(t)
 	asked := 0
@@ -466,8 +466,11 @@ func TestAMachineWithoutAGrantInForceAuthorisesNothing(t *testing.T) {
 	unanchored := ctl
 	unanchored.CredentialSAID = ""
 	w.s.controllers().Put(unanchored)
-	if code := put(); code != http.StatusForbidden {
-		t.Fatalf("a machine whose grant is not anchored was answered %d", code)
+	if code := put(); code != http.StatusOK {
+		t.Fatalf("a machine paired before grants was answered %d", code)
+	}
+	if got, _, _ := w.s.controllers().Get(w.ctlAID); got.CredentialSAID == "" {
+		t.Fatal("the machine was answered without being given its grant")
 	}
 	w.s.controllers().Put(ctl)
 	if err := w.s.withdrawControllerGrant(ctl.CredentialSAID); err != nil {
@@ -659,16 +662,72 @@ func TestAnAIAgentWithNoGrantMayDoNothing(t *testing.T) {
 	}
 }
 
-// An individual's Identity Agent holding no AI agent gives earlier machines no
-// grants, so writes nothing into its key log at start.
-func TestAnIndividualWithNoAIAgentIsNotBackFilled(t *testing.T) {
+// An individual whose desktop was paired before machines were given grants,
+// and who holds no AI agent yet, can create one from that desktop.
+func TestAnIndividualsEarlierDesktopCanCreateAnAIAgent(t *testing.T) {
+	w := newTalkWorld(t)
+	w.s.DeclaredEntityType = "individual"
+	w.s.assetHandler.Store.DeleteAsset(w.a.ID)
+	ctl, _, _ := w.s.controllers().Get(w.ctlAID)
+	ctl.CredentialSAID = ""
+	w.s.controllers().Put(ctl)
+	w.s.prepareKeyLogs()
+	body := `{"name":"First","capabilities":["` + capabilityMessageAgent + `"]}`
+	rec := httptest.NewRecorder()
+	w.s.router.ServeHTTP(rec, asThatMachine(t, w.ctlAID, "POST", "/api/mcp/agents", body, w.ctlSeed, authprovider.LevelVerified, time.Now()))
+	if rec.Code != http.StatusOK && rec.Code != http.StatusCreated {
+		t.Fatalf("the desktop could not create the first AI agent: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// An Identity Agent with no machines and no AI agents writes nothing into its
+// key log at start.
+func TestNothingIsBackFilledWhereNothingIsPaired(t *testing.T) {
 	s, _ := grantWorld(t)
-	s.DeclaredEntityType = "individual"
-	g := aGrant(GradeEnrolled)
-	s.controllers().Grant(g, time.Now().UTC())
+	owner, _ := s.DataStore.GetIdentity()
+	before, _ := s.DataStore.GetEvents(owner.AID)
 	s.prepareKeyLogs()
-	if got, _, _ := s.controllers().Get(g.ControllerAID); got.CredentialSAID != "" {
-		t.Fatal("an individual with no AI agent was given a grant credential at start")
+	if after, _ := s.DataStore.GetEvents(owner.AID); len(after) != len(before) {
+		t.Fatal("an Identity Agent with nothing paired wrote into its key log at start")
+	}
+}
+
+// An AI agent provisioned before every AI agent was given a grant is given
+// one, so its token is not left able to do nothing.
+func TestAnAIAgentProvisionedEarlierIsGivenAGrant(t *testing.T) {
+	w := newTalkWorld(t)
+	rec := httptest.NewRecorder()
+	w.s.router.ServeHTTP(rec, local("POST", "/api/mcp/agents", `{"name":"Earlier","capabilities":["`+capabilityMessageAgent+`"]}`))
+	var made map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &made)
+	id, _ := made["asset_id"].(string)
+	if id == "" {
+		t.Fatalf("provisioning: %d %s", rec.Code, rec.Body.String())
+	}
+	mcpTokensMu.Lock()
+	toks := w.s.loadMCPTokens()
+	n := 0
+	for i := range toks {
+		if toks[i].AssetID == id {
+			toks[i].GrantSAID = ""
+			n++
+		}
+	}
+	w.s.saveMCPTokens(toks)
+	mcpTokensMu.Unlock()
+	if n == 0 {
+		t.Fatal("the AI agent has no token")
+	}
+	w.s.backfillControllerGrants()
+	for _, tok := range w.s.loadMCPTokens() {
+		if tok.AssetID != id {
+			continue
+		}
+		cc := sandbox.CallerContext{Scopes: []string{capabilityMessageAgent}}
+		w.s.applyGrantScopes(tok, &cc)
+		if tok.GrantSAID == "" || len(cc.Scopes) == 0 {
+			t.Fatalf("the AI agent provisioned earlier was not given a usable grant: %+v %v", tok.GrantSAID, cc.Scopes)
+		}
 	}
 }
 

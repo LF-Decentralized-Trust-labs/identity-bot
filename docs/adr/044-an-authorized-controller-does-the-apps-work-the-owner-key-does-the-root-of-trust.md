@@ -88,10 +88,12 @@ written into the key log here. Re-granting a machine, or settling which signer i
 as, issues a new credential and withdraws the old one first; if the old one cannot be
 withdrawn nothing changes, so a machine never has two grants in force. Removing the
 machine revokes its credential; the machine stops at once even when that revocation cannot
-be written. Machines paired before this are given grants at start, by an
-organisation or any Identity Agent holding AI agents (the same ones that anchor their
-record, ADR-047); one that fails is tried again on the next anchoring, every five minutes.
-An individual's phone with no AI agent writes nothing for them. A credential is issued
+be written. Machines paired before this are given grants at start,
+and again on every anchoring, every five minutes, so one that fails is tried again; a
+machine with none is given its grant when it next asks for something, so it is never
+refused for want of one. AI agents provisioned before every AI agent was given a grant
+are given one the same way, on this Identity Agent's own authority. An Identity Agent
+with no paired machine and no AI agent writes nothing for them. A credential is issued
 on a machine's grant only while the grant is in force in the registry, and the grant
 cannot be revoked while one is being issued on it.
 

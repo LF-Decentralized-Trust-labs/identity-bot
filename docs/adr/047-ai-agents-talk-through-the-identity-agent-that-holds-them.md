@@ -203,9 +203,10 @@ asking, and must sign as themselves.
   identity's key log is the authority: each of its interactions must have its statement,
   each statement must be sealed there, and each row and entry a statement names must
   still be there, unchanged. Its tip is also kept outside the database, signed by the record
-  identity's key, so it cannot be lowered without that key. The organisation's key log is
-  searched for the record identities it approved: there must be exactly one, and it must be
-  the one named. Where the record identity's file is missing but the organisation approved
+  identity's key, so it cannot be lowered without that key. The record identity's keys come
+  from one fixed place in the record pool, so an attempt that fails never moves it. The
+  organisation's key log is searched for the record identities it approved, recognised by
+  that key: there must be exactly one, and it must be the one named. Where the record identity's file is missing but the organisation approved
   one, or anchors exist, the record is broken, and no second record identity is made in its
   place. Anchoring runs for an organisation and for any Identity Agent holding AI agents,
   every five minutes, sooner after twenty recorded messages, and within half the time a quiet conversation
@@ -222,8 +223,8 @@ asking, and must sign as themselves.
   sits beside the database, in the same data directory, with the same exposure: against
   someone who can write that directory, the only protection is the witnesses. The
   organisation's approval of the record identity goes to its witnesses too, so one that
-  checks a delegation finds it. The check asks the record identity's witnesses how far they
-  hold its key log, and reports whether its tip is confirmed by witnesses or rests on this
+  checks a delegation finds it. The check asks the record identity's witnesses, all at once and
+  for at most two seconds, how far they hold its key log, while no anchoring can extend it, and reports whether its tip is confirmed by witnesses or rests on this
   Identity Agent's word alone; a witness holding more than is here, or something else, is
   the record trimmed or rewritten, and the record is broken. The check also
   reports which applies, how far the witnesses have receipted, and how many rows and

@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -128,18 +129,17 @@ func signTip(rec *recordIdentityRecord, seed []byte) error {
 	return nil
 }
 
-// recordScan is how many places in the record pool are searched for record
-// identities this identity approved.
-const recordScan = 32
-
 // errRecordGone is a record identity this identity approved whose record here
 // is gone. A second one is never made in its place.
 var errRecordGone = errors.New("this identity approved a record identity whose record here is gone; a second one is not made")
 
 // approvedRecordIdentities are the record identities this identity's key log
-// approves. Each is recognised from its keys, derived from the record pool,
-// under each set of witnesses this identity has named: so they are found from
-// the key log itself, whatever has happened to the files that name them.
+// approves. The record identity's keys are derived from the first place in the
+// record pool, always the same one, so an attempt that failed never moves it.
+// An approved identity is a record identity when its inception, kept here,
+// names that key, or when the inception of that key under any set of
+// witnesses this identity has named is the one approved: so they are found
+// from the key log itself, whatever has happened to the files that name them.
 func (s *CoreServer) approvedRecordIdentities(owner string) ([]string, error) {
 	events, err := s.DataStore.GetEvents(owner)
 	if err != nil {
@@ -185,25 +185,44 @@ func (s *CoreServer) approvedRecordIdentities(owner string) ([]string, error) {
 			}
 		}
 	}
-	base, err := store.PoolBase("record")
+	index, err := recordIndex()
 	if err != nil {
 		return nil, err
 	}
-	var found []string
-	for index := base; index < base+recordScan; index++ {
-		_, pub, nextPub, err := s.recordKeys(index)
-		if err != nil {
-			return nil, err
-		}
-		for _, c := range configs {
-			aid, said, err := keriengine.DelegatedInceptionOf(pub, nextPub, owner, c.witnesses, c.toad)
-			if err == nil && sealed[aid] == said {
-				found = append(found, aid)
-				break
+	_, pub, nextPub, err := s.recordKeys(index)
+	if err != nil {
+		return nil, err
+	}
+	isRecord := map[string]bool{}
+	for aid, said := range sealed {
+		if delegate, err := s.DataStore.GetEvents(aid); err == nil && len(delegate) > 0 {
+			var dip map[string]interface{}
+			raw, _ := base64.StdEncoding.DecodeString(delegate[0].RawBytesB64)
+			if json.Unmarshal(raw, &dip) == nil && dip["d"] == said {
+				if keys := stringsOf(dip["k"]); len(keys) > 0 && keys[0] == pub {
+					isRecord[aid] = true
+				}
 			}
 		}
 	}
+	for _, c := range configs {
+		aid, said, err := keriengine.DelegatedInceptionOf(pub, nextPub, owner, c.witnesses, c.toad)
+		if err == nil && sealed[aid] == said {
+			isRecord[aid] = true
+		}
+	}
+	var found []string
+	for aid := range isRecord {
+		found = append(found, aid)
+	}
+	sort.Strings(found)
 	return found, nil
+}
+
+// recordIndex is the record identity's place in the record pool: the first,
+// and the only one used.
+func recordIndex() (int, error) {
+	return store.PoolBase("record")
 }
 
 // anchorStatement is what one anchoring fixes. Its digest is the seal.
@@ -338,7 +357,7 @@ func (s *CoreServer) recordIdentity() (recordIdentityRecord, []byte, error) {
 	if err != nil {
 		return recordIdentityRecord{}, nil, fmt.Errorf("this identity's witnesses: %w", err)
 	}
-	index, err := s.DataStore.AllocateNextRelationshipIndex("record")
+	index, err := recordIndex()
 	if err != nil {
 		return recordIdentityRecord{}, nil, err
 	}
@@ -598,6 +617,10 @@ func (s *CoreServer) noteRecorded() {
 	}
 }
 
+// witnessAskTimeout bounds how long the check waits for the witnesses, all
+// asked at once.
+const witnessAskTimeout = 2 * time.Second
+
 // anchorTick is how often the record is anchored: the interval, or half the
 // time a quiet conversation takes to close if that is sooner, so the last
 // entry of a conversation is anchored before it closes.
@@ -657,6 +680,11 @@ type anchorCheck struct {
 // checkAnchors checks the record against its anchors, with the record
 // identity's key log as the authority.
 func (s *CoreServer) checkAnchors() (anchorCheck, error) {
+	// Held throughout, so the key log, the tip and the anchors are read as one
+	// anchoring left them, and a witness is never compared with a key log an
+	// anchoring is part way through extending.
+	s.record.mu.Lock()
+	defer s.record.mu.Unlock()
 	var out anchorCheck
 	if s.DataStore == nil || s.SandboxManager == nil || s.SandboxManager.Store() == nil {
 		return out, nil
@@ -767,7 +795,7 @@ func (s *CoreServer) checkAnchors() (anchorCheck, error) {
 	// place, is the record trimmed or rewritten.
 	out.WitnessTip = -1
 	if ws := stringsOf(dip["b"]); len(ws) > 0 && s.WitnessService != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), witnessAskTimeout)
 		held := s.WitnessService.KelHeldBy(ctx, rec.AID, ws)
 		cancel()
 		for _, tip := range held {
