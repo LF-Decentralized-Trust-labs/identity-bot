@@ -18,11 +18,13 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
 
 	"identity-agent-core/drivers"
+	"identity-agent-core/store"
 
 	keri "github.com/grapeid/keri-go"
 )
@@ -40,17 +42,21 @@ func (s *CoreServer) handleSignForAnother(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusForbidden, "owner only", "only this agent's owner signs for it")
 		return
 	}
-	var body struct {
-		PayloadB64    string `json:"payload_b64"`
-		CredentialB64 string `json:"credential_b64"`
-		IssuanceB64   string `json:"issuance_b64"`
-		RegistryB64   string `json:"registry_b64"`
-	}
+	var body map[string]string
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid body", err.Error())
 		return
 	}
-	sig, err := s.signForAnother(body.PayloadB64, body.CredentialB64, body.IssuanceB64, body.RegistryB64)
+	sig, err := s.signForAnother(body["payload_b64"], body)
+	var filled *errPlaceFilled
+	if errors.As(err, &filled) {
+		// What this device holds there, for the Identity Agent that asked to
+		// take up at once (POST /api/signing-requests/adopt there).
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "this place is filled", "detail": err.Error(), "held": filled.Held})
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, "this is not signed here", err.Error())
 		return
@@ -62,7 +68,7 @@ func (s *CoreServer) handleSignForAnother(w http.ResponseWriter, r *http.Request
 // interaction another Identity Agent asks it to sign. The same interaction
 // asked for again is answered with the signature already given; a different
 // one at a place already filled is refused.
-func (s *CoreServer) signForAnother(payloadB64, credentialB64, issuanceB64, registryB64 string) (string, error) {
+func (s *CoreServer) signForAnother(payloadB64 string, parts map[string]string) (string, error) {
 	signForAnotherMu.Lock()
 	defer signForAnotherMu.Unlock()
 	payload, err := base64.StdEncoding.DecodeString(payloadB64)
@@ -91,9 +97,9 @@ func (s *CoreServer) signForAnother(payloadB64, credentialB64, issuanceB64, regi
 		if bytes.Equal(held, payload) && ev.CesrSignature != "" {
 			return ev.CesrSignature, nil
 		}
-		return "", fmt.Errorf("this device has already signed another event at place %d of this identity's key log, and signs no second one there", ixn.SN)
+		return "", &errPlaceFilled{SN: int(ixn.SN), Held: s.heldAt(ev)}
 	}
-	if _, err := s.whatIsToBeSigned(payloadB64, credentialB64, issuanceB64, registryB64); err != nil {
+	if _, err := s.whatIsToBeSigned(payloadB64, parts); err != nil {
 		return "", err
 	}
 	seed, err := s.identitySigningSeed()
@@ -136,6 +142,9 @@ func (s *CoreServer) signForAnother(payloadB64, credentialB64, issuanceB64, regi
 		if err := s.DataStore.SaveEvent(rec); err != nil {
 			return err
 		}
+		if kept, err := json.Marshal(shownParts(parts)); err == nil {
+			_ = s.DataStore.KeepSignedForAnother(ixn.SAID, string(kept))
+		}
 		signature = sig
 		return nil
 	}
@@ -144,4 +153,48 @@ func (s *CoreServer) signForAnother(payloadB64, credentialB64, issuanceB64, regi
 	}
 	s.witnessOwnLog()
 	return signature, nil
+}
+
+// errPlaceFilled is a request to sign a second, different event at a place in
+// the key log this device has already filled. It carries the event held
+// there, which the Identity Agent that asked takes up instead.
+type errPlaceFilled struct {
+	SN   int
+	Held heldEvent
+}
+
+func (e *errPlaceFilled) Error() string {
+	return fmt.Sprintf("this device has already signed another event at place %d of this identity's key log, and signs no second one there", e.SN)
+}
+
+// heldEvent is a key event as this device holds it, with its signature and
+// the parts it was shown with when it signed it for another Identity Agent.
+type heldEvent struct {
+	RawB64    string            `json:"raw_b64"`
+	Signature string            `json:"signature"`
+	Parts     map[string]string `json:"parts,omitempty"`
+}
+
+func (s *CoreServer) heldAt(ev store.EventRecord) heldEvent {
+	h := heldEvent{RawB64: ev.RawBytesB64, Signature: ev.CesrSignature}
+	var body struct {
+		D string `json:"d"`
+	}
+	_ = json.Unmarshal([]byte(ev.EventJSON), &body)
+	if kept, ok, err := s.DataStore.SignedForAnother(body.D); err == nil && ok {
+		_ = json.Unmarshal([]byte(kept), &h.Parts)
+	}
+	return h
+}
+
+// shownParts are the parts of a signing request that say what an interaction
+// anchors, and nothing else from it.
+func shownParts(in map[string]string) map[string]string {
+	out := map[string]string{}
+	for _, k := range []string{"credential_b64", "issuance_b64", "registry_b64", "revocation_b64"} {
+		if in[k] != "" {
+			out[k] = in[k]
+		}
+	}
+	return out
 }

@@ -577,7 +577,11 @@ func (s *CoreServer) handleGrantsAwaitingApproval(w http.ResponseWriter, r *http
 			})
 		}
 	}
-	writeJSON(w, map[string]any{"machines": machines, "agents": agents})
+	out := map[string]any{"machines": machines, "agents": agents}
+	for k, v := range s.keyLogReport() {
+		out[k] = v
+	}
+	writeJSON(w, out)
 }
 
 // awaitingWhat says what a grant is waiting for: the owner's approval, or,

@@ -619,6 +619,11 @@ type Store interface {
 	GetPendingIssuance(signingRequestID string) (string, bool, error)
 	DeletePendingIssuance(signingRequestID string) error
 	ListPendingIssuances() (map[string]string, error)
+	// KeepSignedForAnother and SignedForAnother keep, on the device that
+	// holds the key, the parts shown with an interaction it signed for
+	// another Identity Agent, by the interaction's identifier.
+	KeepSignedForAnother(ixnSAID, parts string) error
+	SignedForAnother(ixnSAID string) (string, bool, error)
 	// A credential's transaction log, as published. Appending the same event
 	// twice keeps one copy; the log is read back in order.
 	AppendCredentialTELEvent(ev CredentialTELEvent) error

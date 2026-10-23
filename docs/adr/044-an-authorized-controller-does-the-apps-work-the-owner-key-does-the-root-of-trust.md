@@ -105,7 +105,19 @@ once signed. The device checks what it is asked to sign itself and is shown only
 credential says (ADR-045). The device signs through its own core, never by signing the
 bytes alone: in one step its core checks the interaction, records it as the next event
 of its own key log, and signs it, and it signs no second, different event at a place it
-has already filled, since two signed events at one place would be duplicity. Only one
+has already filled, since two signed events at one place would be duplicity. The device's key log
+is then the identity's, and the Identity Agent takes up whatever the device has signed at
+its next place, from the device's reply, from what the device answers when asked to sign
+at a place already filled, or from the identity's witnesses, verified against the
+identity's current key. It does so whether the request still waits, was refused or
+expired, or was withdrawn, before it builds any grant and on every tick, so the two key
+logs never diverge; signing is never split into a prepare and a commit, which would
+reopen the duplicity it prevents. A grant taken up that is no longer wanted (its machine
+removed, its request withdrawn or changed) is kept so the registry's log is whole, is
+never in force, and is withdrawn at once by a revocation the device signs on the same
+queue, ahead of anything else; the device signs a revocation only of a grant its own key
+log issued. An Identity Agent whose key log holds events written by an earlier version
+without the key, which the device never had, asks the device for nothing and says so. Only one
 interaction waits for the device at a time, as each extends the same tip; another is kept
 and built once the one before it is appended, refused or expired. When a signature comes back it must be over the request's own
 payload, which must be the interaction kept; the grant is derived again from what was kept

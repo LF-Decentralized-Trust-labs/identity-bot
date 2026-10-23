@@ -306,6 +306,28 @@ type PreparedRegistry struct {
 	Prior    string `json:"prior"`
 }
 
+// PreparedRevocation is a credential's revocation, built but not yet appended,
+// with the interaction in the issuer's key log that anchors it.
+type PreparedRevocation struct {
+	Issuer   string `json:"issuer"`
+	Registry string `json:"registry"`
+	AcdcSAID string `json:"acdc_said"`
+	IssSAID  string `json:"iss_said"`
+	RevRaw   []byte `json:"rev_raw"`
+	RevSAID  string `json:"rev_said"`
+	IxnRaw   []byte `json:"ixn_raw"`
+	IxnSAID  string `json:"ixn_said"`
+	SN       int    `json:"sn"`
+	Prior    string `json:"prior"`
+}
+
+// PreparedRevoker is an engine that can build a revocation and append it
+// later, exactly as built, so it can be signed elsewhere in between.
+type PreparedRevoker interface {
+	PrepareRevocation(name, acdcSaid, registrySaid string) (*PreparedRevocation, error)
+	AppendPreparedRevocation(name string, p *PreparedRevocation) (*DriverRevokeCredentialResponse, error)
+}
+
 // ErrStalePreparation is a prepared issuance whose key log has moved on since
 // it was built: its interaction no longer extends the tip.
 var ErrStalePreparation = errors.New("the key log has moved on since this issuance was prepared")

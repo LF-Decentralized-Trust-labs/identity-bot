@@ -3,12 +3,16 @@ package server
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
+	keri "github.com/grapeid/keri-go"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"identity-agent-core/drivers"
 	"identity-agent-core/keriengine"
@@ -22,6 +26,10 @@ import (
 type twoCores struct {
 	device    *CoreServer
 	requester *elsewhere
+	dir       string
+	// noWitnesses leaves the requester nowhere to find what the device
+	// signed but the device's own answers.
+	noWitnesses bool
 }
 
 func newTwoCores(t *testing.T) *twoCores {
@@ -46,24 +54,46 @@ func newTwoCores(t *testing.T) *twoCores {
 			t.Fatal(err)
 		}
 	}
-	rds, err := store.NewSQLiteStore(dir)
+	c := &twoCores{device: device, dir: dir}
+	c.requester = &elsewhere{s: c.openRequester(t)}
+	if err := device.keyCanSign(); err != nil {
+		t.Fatalf("the device cannot sign: %v", err)
+	}
+	return c
+}
+
+// openRequester starts the requester's core over its data directory, as it
+// starts after a restart. The identity's witnesses, which hold what the device
+// signed, are stood in for by the device's own key log unless noWitnesses.
+func (c *twoCores) openRequester(t *testing.T) *CoreServer {
+	t.Helper()
+	rds, err := store.NewSQLiteStore(c.dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, DataStore: rds, EventHub: NewEventHub()}
+	r := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: c.dir, DataStore: rds, EventHub: NewEventHub()}
 	r.KeriDriver = keriengine.New()
 	r.reloadIdentityIntoDriver()
 	if err := r.initAssetHandler(); err != nil {
 		t.Fatal(err)
 	}
 	r.router = r.buildRouter("")
+	r.fetchSignedEvent = func(aid string, sn int) []heldEvent {
+		if c.noWitnesses {
+			return nil
+		}
+		events, _ := c.device.DataStore.GetEvents(aid)
+		for _, ev := range events {
+			if ev.SequenceNumber == sn {
+				return []heldEvent{{RawB64: ev.RawBytesB64, Signature: ev.CesrSignature}}
+			}
+		}
+		return nil
+	}
 	if !r.keyIsElsewhere() {
 		t.Fatalf("the requester can sign as the identity: %v", r.keyCanSign())
 	}
-	if err := device.keyCanSign(); err != nil {
-		t.Fatalf("the device cannot sign: %v", err)
-	}
-	return &twoCores{device: device, requester: &elsewhere{s: r}}
+	return r
 }
 
 // sign is the device signing, on its own core, what the requester queued.
@@ -75,7 +105,7 @@ func (c *twoCores) sign(t *testing.T, id string) (string, error) {
 			continue
 		}
 		parts := c.requester.s.queuedParts(id)
-		return c.device.signForAnother(req.PayloadB64, parts["credential_b64"], parts["issuance_b64"], parts["registry_b64"])
+		return c.device.signForAnother(req.PayloadB64, parts)
 	}
 	t.Fatalf("no request %s", id)
 	return "", nil
@@ -149,20 +179,20 @@ func TestTheDeviceSignsOneEventAtAPlace(t *testing.T) {
 	}
 	b64 := base64.StdEncoding.EncodeToString
 	before, _ := c.device.DataStore.GetEvents(owner.AID)
-	if _, err := c.device.signForAnother(b64(one.IxnRaw), b64(two.AcdcRaw), b64(two.IssRaw), ""); err == nil {
+	if _, err := c.device.signForAnother(b64(one.IxnRaw), map[string]string{"credential_b64": b64(two.AcdcRaw), "issuance_b64": b64(two.IssRaw)}); err == nil {
 		t.Fatal("the device signed an interaction shown with another credential")
 	}
 	if now, _ := c.device.DataStore.GetEvents(owner.AID); len(now) != len(before) {
 		t.Fatal("the device recorded what it refused to sign")
 	}
-	sig, err := c.device.signForAnother(b64(one.IxnRaw), b64(one.AcdcRaw), b64(one.IssRaw), "")
+	sig, err := c.device.signForAnother(b64(one.IxnRaw), map[string]string{"credential_b64": b64(one.AcdcRaw), "issuance_b64": b64(one.IssRaw)})
 	if err != nil {
 		t.Fatalf("the first: %v", err)
 	}
-	if _, err := c.device.signForAnother(b64(two.IxnRaw), b64(two.AcdcRaw), b64(two.IssRaw), ""); err == nil || !strings.Contains(err.Error(), "already signed another event") {
+	if _, err := c.device.signForAnother(b64(two.IxnRaw), map[string]string{"credential_b64": b64(two.AcdcRaw), "issuance_b64": b64(two.IssRaw)}); err == nil || !strings.Contains(err.Error(), "already signed another event") {
 		t.Fatal("the device signed a second event at a place it had filled")
 	}
-	again, err := c.device.signForAnother(b64(one.IxnRaw), b64(one.AcdcRaw), b64(one.IssRaw), "")
+	again, err := c.device.signForAnother(b64(one.IxnRaw), map[string]string{"credential_b64": b64(one.AcdcRaw), "issuance_b64": b64(one.IssRaw)})
 	if err != nil || again != sig {
 		t.Fatalf("the same event asked for again: %v", err)
 	}
@@ -224,4 +254,277 @@ func httptestRefuse(t *testing.T, s *CoreServer, id string) int {
 	rec := httptest.NewRecorder()
 	s.handleRefuseSigningRequest(rec, withID(ownerRequest("POST", "/api/signing-requests/"+id+"/refuse", strings.NewReader(`{}`), s), id))
 	return rec.Code
+}
+
+// lostReply signs on the device, and the reply never reaches the requester.
+func (c *twoCores) lostReply(t *testing.T) (store.SigningRequest, string) {
+	t.Helper()
+	reqs := waiting(t, c.requester.s)
+	if len(reqs) != 1 {
+		t.Fatalf("%d wait for the device", len(reqs))
+	}
+	sig, err := c.sign(t, reqs[0].ID)
+	if err != nil {
+		t.Fatalf("the device would not sign: %v", err)
+	}
+	return reqs[0], sig
+}
+
+// signAll has the device sign whatever waits, one at a time, until nothing
+// does.
+func (c *twoCores) signAll(t *testing.T) {
+	t.Helper()
+	for i := 0; i < 8; i++ {
+		reqs := waiting(t, c.requester.s)
+		if len(reqs) == 0 {
+			return
+		}
+		sig, err := c.sign(t, reqs[0].ID)
+		if err != nil {
+			t.Fatalf("the device would not sign %s: %v", reqs[0].Kind, err)
+		}
+		if rec := fulfilWith(t, c.requester.s, reqs[0].ID, sig); rec.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", reqs[0].Kind, rec.Code, rec.Body.String())
+		}
+	}
+	t.Fatal("something still waits after eight signatures")
+}
+
+func (c *twoCores) machineGranted(t *testing.T, g ControllerGrant) bool {
+	t.Helper()
+	got, had, _ := c.requester.s.controllers().Get(g.ControllerAID)
+	return had && got.CredentialSAID != ""
+}
+
+// signedAndWithdrawn checks a grant to holder is in the key log, revoked, and
+// not in force.
+func (c *twoCores) signedAndWithdrawn(t *testing.T, holder string) {
+	t.Helper()
+	creds, _ := c.requester.s.DataStore.GetCredentials()
+	for _, cr := range creds {
+		if cr.HolderAID == holder {
+			if cr.Status != "revoked" {
+				t.Fatalf("the grant to %s the device signed is %q, not revoked", holder, cr.Status)
+			}
+			return
+		}
+	}
+	t.Fatalf("the grant to %s the device signed was not taken up", holder)
+}
+
+// The reviewer's sequence: the device signs machine a's grant and the reply is
+// lost; the owner removes a and pairs b. The requester takes up a's grant
+// from the witnesses, withdraws it, and grants b; both logs agree.
+func TestReviewLostReplyThenRemoval(t *testing.T) {
+	c := newTwoCores(t)
+	a, b := grantFor(5, GradeEnrolled), grantFor(6, GradeEnrolled)
+	if rec := c.requester.pairMachine(t, a); rec.Code != http.StatusOK {
+		t.Fatalf("pairing: %d %s", rec.Code, rec.Body.String())
+	}
+	c.lostReply(t)
+	if err := c.requester.s.revokeController(a.ControllerAID); err != nil {
+		t.Fatal(err)
+	}
+	if rec := c.requester.pairMachine(t, b); rec.Code != http.StatusOK {
+		t.Fatalf("pairing b: %d %s", rec.Code, rec.Body.String())
+	}
+	c.signAll(t)
+	c.logsAgree(t)
+	c.signedAndWithdrawn(t, a.ControllerAID)
+	if !c.machineGranted(t, b) {
+		t.Fatal("b was not granted")
+	}
+	if c.machineGranted(t, a) {
+		t.Fatal("a removed machine is granted")
+	}
+}
+
+// The same, with no witness holding what the device signed: the device
+// answers the next request with the event it holds there, and the requester
+// takes it up from that.
+func TestAFilledPlaceIsAnsweredWithWhatIsHeld(t *testing.T) {
+	c := newTwoCores(t)
+	c.noWitnesses = true
+	a, b := grantFor(5, GradeEnrolled), grantFor(6, GradeEnrolled)
+	c.requester.pairMachine(t, a)
+	c.lostReply(t)
+	c.requester.s.revokeController(a.ControllerAID)
+	c.requester.pairMachine(t, b)
+	req := waiting(t, c.requester.s)[0]
+	parts := c.requester.s.queuedParts(req.ID)
+	parts["payload_b64"] = req.PayloadB64
+	body, _ := json.Marshal(parts)
+	rec := httptest.NewRecorder()
+	c.device.router.ServeHTTP(rec, local("POST", "/api/signing-requests/sign-for-another", string(body)))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("a second event at a filled place was answered %d %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Held heldEvent `json:"held"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &out)
+	if out.Held.Signature == "" || out.Held.Parts["credential_b64"] == "" {
+		t.Fatalf("the device did not say what it holds: %s", rec.Body.String())
+	}
+	held, _ := json.Marshal(out.Held)
+	rec = httptest.NewRecorder()
+	c.requester.s.router.ServeHTTP(rec, local("POST", "/api/signing-requests/adopt", string(held)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("taking up what the device holds: %d %s", rec.Code, rec.Body.String())
+	}
+	c.signAll(t)
+	c.logsAgree(t)
+	c.signedAndWithdrawn(t, a.ControllerAID)
+	if !c.machineGranted(t, b) {
+		t.Fatal("b was not granted")
+	}
+}
+
+// Signed on the device, then expired here before the reply came: taken up,
+// never in force, withdrawn.
+func TestAGrantSignedThenExpiredHereIsWithdrawn(t *testing.T) {
+	c := newTwoCores(t)
+	a := grantFor(5, GradeEnrolled)
+	c.requester.pairMachine(t, a)
+	req, _ := c.lostReply(t)
+	recordDB(t, c.requester.s).Exec(`UPDATE signing_requests SET expires_at = ? WHERE id = ?`,
+		time.Now().Add(-time.Minute).UTC().Format(time.RFC3339), req.ID)
+	c.requester.s.tick()
+	if c.machineGranted(t, a) {
+		t.Fatal("a grant expired here is in force")
+	}
+	c.signAll(t)
+	c.logsAgree(t)
+	c.signedAndWithdrawn(t, a.ControllerAID)
+}
+
+// Signed on the device, then refused here before the reply came: the reply,
+// when it does come, is taken up and the grant withdrawn.
+func TestAGrantSignedThenRefusedHereIsWithdrawn(t *testing.T) {
+	c := newTwoCores(t)
+	c.noWitnesses = true
+	a := grantFor(5, GradeEnrolled)
+	c.requester.pairMachine(t, a)
+	req, sig := c.lostReply(t)
+	if code := httptestRefuse(t, c.requester.s, req.ID); code != http.StatusOK {
+		t.Fatalf("refusing: %d", code)
+	}
+	if rec := fulfilWith(t, c.requester.s, req.ID, sig); !strings.Contains(rec.Body.String(), `"in_force":false`) {
+		t.Fatalf("the late reply: %d %s", rec.Code, rec.Body.String())
+	}
+	if c.machineGranted(t, a) {
+		t.Fatal("a grant refused here is in force")
+	}
+	c.signAll(t)
+	c.logsAgree(t)
+	c.signedAndWithdrawn(t, a.ControllerAID)
+}
+
+// The requester stops after the device signed and before the reply: started
+// again, it takes the grant up on its tick, in force, since it is still asked
+// for.
+func TestARequesterRestartedAfterTheDeviceSignedTakesItUp(t *testing.T) {
+	c := newTwoCores(t)
+	a := grantFor(5, GradeEnrolled)
+	c.requester.pairMachine(t, a)
+	c.lostReply(t)
+	c.requester.s.DataStore.Close()
+	c.requester.s = c.openRequester(t)
+	c.requester.s.tick()
+	if !c.machineGranted(t, a) {
+		t.Fatal("the grant the device signed is not in force after a restart")
+	}
+	if len(waiting(t, c.requester.s)) != 0 {
+		t.Fatal("something still waits")
+	}
+	c.logsAgree(t)
+}
+
+// An event not signed by the identity's key, or not extending the key log
+// here, is not taken up.
+func TestOnlyWhatTheKeySignedAtTheNextPlaceIsTakenUp(t *testing.T) {
+	c := newTwoCores(t)
+	c.noWitnesses = true
+	c.requester.pairMachine(t, grantFor(5, GradeEnrolled))
+	req := waiting(t, c.requester.s)[0]
+	other := make([]byte, 32)
+	other[0] = 9
+	forged, _ := signEventBytes(mustB64(t, req.PayloadB64), other)
+	if n, _ := c.requester.s.adoptWhatTheDeviceSigned(&heldEvent{RawB64: req.PayloadB64, Signature: forged}); n != 0 {
+		t.Fatal("an event signed by another key was taken up")
+	}
+	// Signed by the key, at the next place, but after another event: not
+	// this key log's next event, and passed over without harm.
+	owner, _ := c.requester.s.DataStore.GetIdentity()
+	tipSN, _, _ := c.requester.s.ownTip(owner.AID)
+	elsewhereRaw, _ := keri.BuildInteraction(keri.InteractionInput{Prefix: owner.AID, PriorSAID: "Eanother-prior", SN: tipSN + 1,
+		Data: []json.RawMessage{json.RawMessage(`{"d":"Esomething"}`)}})
+	seed, _ := c.device.identitySigningSeed()
+	elsewhereSig, _ := signEventBytes(elsewhereRaw, seed)
+	if n, err := c.requester.s.adoptWhatTheDeviceSigned(&heldEvent{RawB64: base64.StdEncoding.EncodeToString(elsewhereRaw), Signature: elsewhereSig}); n != 0 || err != nil {
+		t.Fatalf("an event after another prior was taken up: %d %v", n, err)
+	}
+	sig, _ := c.sign(t, req.ID)
+	c.requester.s.adoptWhatTheDeviceSigned(&heldEvent{RawB64: req.PayloadB64, Signature: sig})
+	if n, _ := c.requester.s.adoptWhatTheDeviceSigned(&heldEvent{RawB64: req.PayloadB64, Signature: sig}); n != 0 {
+		t.Fatal("an event at a place already filled here was taken up again")
+	}
+	c.logsAgree(t)
+}
+
+func mustB64(t *testing.T, v string) []byte {
+	t.Helper()
+	b, err := base64.StdEncoding.DecodeString(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// An Identity Agent upgraded with events the device never signed says so in
+// the waiting list and the log check, and asks the device for nothing.
+func TestUnsignedEventsHereAreReportedNotSentToTheDevice(t *testing.T) {
+	e := keyElsewhere(t)
+	owner, _ := e.s.DataStore.GetIdentity()
+	events, _ := e.s.DataStore.GetEvents(owner.AID)
+	last := events[len(events)-1].SequenceNumber
+	recordDB(t, e.s).Exec(`UPDATE kel SET cesr_signature = '' WHERE aid = ? AND seq_num = ?`, owner.AID, last)
+	rec := e.pairMachine(t, grantFor(5, GradeEnrolled))
+	if rec.Code < 400 || !strings.Contains(rec.Body.String(), "never had") {
+		t.Fatalf("a grant was asked for over an unsigned key log: %d %s", rec.Code, rec.Body.String())
+	}
+	if len(waiting(t, e.s)) != 0 {
+		t.Fatal("the device was asked to extend a key log it never had")
+	}
+	for _, path := range []string{"/api/grants/awaiting-approval", "/api/activity/chain"} {
+		rec := httptest.NewRecorder()
+		e.s.router.ServeHTTP(rec, local("GET", path, ""))
+		if !strings.Contains(rec.Body.String(), `"key_log_unsigned_events":[`+strconv.Itoa(last)+`]`) {
+			t.Fatalf("%s does not report the unsigned event: %s", path, rec.Body.String())
+		}
+	}
+}
+
+// The device withdraws only a grant its own key log issued.
+func TestTheDeviceWithdrawsOnlyWhatItIssued(t *testing.T) {
+	c := newTwoCores(t)
+	owner, _ := c.device.DataStore.GetIdentity()
+	reg, _ := c.device.DataStore.GetRegistryByIssuer(owner.AID)
+	g := grantFor(5, GradeEnrolled)
+	never, err := c.device.KeriDriver.(drivers.PreparedIssuer).PrepareCredentialInRegistry(owner.AID, map[string]interface{}{
+		"name": g.Label, "label": g.Label, "public_key": g.PublicKey, "grade": string(g.Grade), "i": g.ControllerAID,
+		"asset_type": schemas.ControllerGrant.AssetType}, schemas.ControllerGrant.Schema.SAID, g.ControllerAID, nil, reg.RegistrySAID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rev, _ := keri.BuildRevocation(keri.RevocationInput{CredentialSAID: never.AcdcSAID, Registry: reg.RegistrySAID, PriorISSSAID: never.IssSAID, DT: "2026-10-23T00:00:00.000000+00:00"})
+	revEvent, _ := keri.VerifyTELEvent(rev)
+	tipSN, tipSAID, _ := c.device.ownTip(owner.AID)
+	ixn, _ := keri.BuildInteraction(keri.InteractionInput{Prefix: owner.AID, PriorSAID: tipSAID, SN: tipSN + 1,
+		Data: []json.RawMessage{json.RawMessage(`{"i":"` + never.AcdcSAID + `","s":"1","d":"` + revEvent.SAID + `"}`)}})
+	b64 := base64.StdEncoding.EncodeToString
+	_, err = c.device.signForAnother(b64(ixn), map[string]string{"credential_b64": b64(never.AcdcRaw), "revocation_b64": b64(rev)})
+	if err == nil || !strings.Contains(err.Error(), "never issued") {
+		t.Fatalf("the device withdrew a grant it never issued: %v", err)
+	}
 }

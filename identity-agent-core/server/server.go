@@ -181,6 +181,9 @@ type CoreServer struct {
 	// signedElsewhere holds, while a waiting grant is appended, the signature
 	// the device holding the identity's key made over its interaction.
 	signedElsewhere sync.Map
+	// fetchSignedEvent, when set, stands in for asking the identity's
+	// witnesses for an event the device that holds the key signed.
+	fetchSignedEvent func(aid string, sn int) []heldEvent
 	// grantsMu holds machines' grants still while a credential is issued on
 	// one: revoking, re-issuing or replacing a grant takes it exclusively.
 	grantsMu sync.RWMutex

@@ -712,12 +712,21 @@ func (s *CoreServer) keepAnchoring(stop <-chan struct{}) {
 		case <-stop:
 			return
 		case <-t.C:
-			if _, err := s.anchorRecord(); err != nil && !errors.Is(err, errKeyElsewhere) {
-				log.Printf("[record] anchoring: %v", err)
-			}
-			s.witnessOwnLog()
+			s.tick()
 		}
 	}
+}
+
+// tick is what runs every anchorTick.
+func (s *CoreServer) tick() {
+	if _, err := s.anchorRecord(); err != nil && !errors.Is(err, errKeyElsewhere) {
+		log.Printf("[record] anchoring: %v", err)
+	}
+	// What the device that holds the key signed and is not here yet.
+	if _, err := s.adoptWhatTheDeviceSigned(nil); err != nil {
+		log.Printf("[grants] %v", err)
+	}
+	s.witnessOwnLog()
 }
 
 // anchorCheck is what the anchors show about the record.

@@ -296,6 +296,9 @@ func (s *CoreServer) handleVerifyAuditChain(w http.ResponseWriter, r *http.Reque
 	if anchors.Unavailable != "" {
 		resp["anchoring_unavailable"] = anchors.Unavailable
 	}
+	for k, v := range s.keyLogReport() {
+		resp[k] = v
+	}
 	if len(faults) > 0 {
 		resp["broken_at"] = faults[0].ID
 		resp["faults"] = faults

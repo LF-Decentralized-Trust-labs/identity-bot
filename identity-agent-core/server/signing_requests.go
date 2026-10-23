@@ -161,6 +161,7 @@ func (s *CoreServer) mountSigningRequestRoutes(r chi.Router) {
 	r.Post("/signing-requests/{id}/refuse", s.handleRefuseSigningRequest)
 	r.Post("/signing-requests/check", s.handleCheckWhatIsToBeSigned)
 	r.Post("/signing-requests/sign-for-another", s.handleSignForAnother)
+	r.Post("/signing-requests/adopt", s.handleAdoptSigned)
 }
 
 // handleListSigningRequests returns what is waiting for the controller device.
@@ -188,7 +189,7 @@ func (s *CoreServer) handleListSigningRequests(w http.ResponseWriter, r *http.Re
 				req.Status = SigningStatusExpired
 				req.ResolvedAt = now.Format(time.RFC3339)
 				_ = s.DataStore.SaveSigningRequest(req)
-				if req.Kind == signingKindGrant || req.Kind == signingKindRegistry {
+				if isGrantKind(req.Kind) {
 					defer s.buildNextBehind()
 				}
 				continue
@@ -205,7 +206,7 @@ func (s *CoreServer) handleListSigningRequests(w http.ResponseWriter, r *http.Re
 		raw, _ := json.Marshal(req)
 		var m map[string]any
 		_ = json.Unmarshal(raw, &m)
-		if req.Kind == signingKindGrant || req.Kind == signingKindRegistry {
+		if isGrantKind(req.Kind) {
 			for k, v := range s.queuedParts(req.ID) {
 				m[k] = v
 			}
@@ -249,6 +250,19 @@ func (s *CoreServer) handleFulfilSigningRequest(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusNotFound, "no such signing request", "")
 		return
 	}
+	if req.Status != SigningStatusPending && isGrantKind(req.Kind) {
+		// Answered or withdrawn here, and signed there all the same: the
+		// device's key log is the identity's, so what it signed is taken up
+		// (and a grant not wanted here withdrawn), never left to diverge.
+		n, err := s.adoptWhatTheDeviceSigned(&heldEvent{RawB64: req.PayloadB64, Signature: body.Signature})
+		if err != nil || n == 0 {
+			writeError(w, http.StatusConflict, "already resolved", "this request was "+req.Status)
+			return
+		}
+		writeJSON(w, map[string]any{"adopted": n, "id": id, "in_force": false,
+			"detail": "This request was " + req.Status + " here. What the device signed is taken up so the key logs agree, and nothing it grants is in force."})
+		return
+	}
 	if req.Status != SigningStatusPending {
 		// Refused rather than overwritten. A request that has already been
 		// answered should not be answerable again, or a stale client could
@@ -261,7 +275,7 @@ func (s *CoreServer) handleFulfilSigningRequest(w http.ResponseWriter, r *http.R
 	// A grant waiting for this signature is appended with it first, so a
 	// signature that does not hold, or a grant that no longer can be, leaves
 	// the request as it was rather than marking it signed.
-	if req.Kind == signingKindGrant || req.Kind == signingKindRegistry {
+	if isGrantKind(req.Kind) {
 		if err := s.completeWaiting(*req, body.Signature); err != nil {
 			status := http.StatusConflict
 			if errors.Is(err, errGrantSignature) {
@@ -318,7 +332,7 @@ func (s *CoreServer) handleRefuseSigningRequest(w http.ResponseWriter, r *http.R
 	}
 	w.Header().Set("Content-Type", "application/json")
 	// A grant refused frees its place: the one kept behind it is built.
-	if req.Kind == signingKindGrant || req.Kind == signingKindRegistry {
+	if isGrantKind(req.Kind) {
 		s.buildNextBehind()
 	}
 	json.NewEncoder(w).Encode(map[string]any{"refused": true, "id": id})
@@ -335,17 +349,12 @@ func (s *CoreServer) handleCheckWhatIsToBeSigned(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusForbidden, "owner only", "only this agent's owner checks what it is asked to sign")
 		return
 	}
-	var body struct {
-		PayloadB64    string `json:"payload_b64"`
-		CredentialB64 string `json:"credential_b64"`
-		IssuanceB64   string `json:"issuance_b64"`
-		RegistryB64   string `json:"registry_b64"`
-	}
+	var body map[string]string
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid body", err.Error())
 		return
 	}
-	shown, err := s.whatIsToBeSigned(body.PayloadB64, body.CredentialB64, body.IssuanceB64, body.RegistryB64)
+	shown, err := s.whatIsToBeSigned(body["payload_b64"], body)
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, "this is not safe to sign", err.Error())
 		return
@@ -355,14 +364,17 @@ func (s *CoreServer) handleCheckWhatIsToBeSigned(w http.ResponseWriter, r *http.
 
 // whatIsToBeSigned is what signing payload grants, checked as described at
 // handleCheckWhatIsToBeSigned.
-func (s *CoreServer) whatIsToBeSigned(payloadB64, credentialB64, issuanceB64, registryB64 string) (*authorisation.ToSign, error) {
+func (s *CoreServer) whatIsToBeSigned(payloadB64 string, parts map[string]string) (*authorisation.ToSign, error) {
 	dec := func(v string) []byte { b, _ := base64.StdEncoding.DecodeString(v); return b }
 	var shown *authorisation.ToSign
 	var err error
-	if registryB64 != "" {
-		shown, err = authorisation.WhatSigningRegisters(dec(payloadB64), dec(registryB64))
-	} else {
-		shown, err = authorisation.WhatSigningGrants(dec(payloadB64), dec(issuanceB64), dec(credentialB64))
+	switch {
+	case parts["registry_b64"] != "":
+		shown, err = authorisation.WhatSigningRegisters(dec(payloadB64), dec(parts["registry_b64"]))
+	case parts["revocation_b64"] != "":
+		shown, err = authorisation.WhatSigningRevokes(dec(payloadB64), dec(parts["revocation_b64"]), dec(parts["credential_b64"]))
+	default:
+		shown, err = authorisation.WhatSigningGrants(dec(payloadB64), dec(parts["issuance_b64"]), dec(parts["credential_b64"]))
 	}
 	if err != nil {
 		return nil, err
@@ -381,5 +393,35 @@ func (s *CoreServer) whatIsToBeSigned(payloadB64, credentialB64, issuanceB64, re
 	if tipSAID, _ := tip["d"].(string); tipSAID != shown.Prior || last.SequenceNumber+1 != shown.SN {
 		return nil, fmt.Errorf("the interaction does not extend this identity's key log as this device holds it")
 	}
+	// A grant is withdrawn only where this device's own key log anchors its
+	// issuance.
+	if shown.Revokes && !anchorsIssuanceOf(events, shown.Credential) {
+		return nil, fmt.Errorf("this identity's key log as this device holds it never issued the grant it is asked to withdraw")
+	}
 	return shown, nil
+}
+
+// anchorsIssuanceOf reports whether a key log anchors the issuance of the
+// credential said.
+func anchorsIssuanceOf(events []store.EventRecord, said string) bool {
+	for _, ev := range events {
+		var body struct {
+			A []map[string]interface{} `json:"a"`
+		}
+		if json.Unmarshal([]byte(ev.EventJSON), &body) != nil {
+			continue
+		}
+		for _, seal := range body.A {
+			if seal["i"] == said && seal["s"] == "0" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// isGrantKind is a signing request whose interaction extends the identity's
+// key log for a grant: its issuance, its registry, or its withdrawal.
+func isGrantKind(kind string) bool {
+	return kind == signingKindGrant || kind == signingKindRegistry || kind == signingKindRevocation
 }

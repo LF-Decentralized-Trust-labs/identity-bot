@@ -44,6 +44,9 @@ import (
 const (
 	signingKindGrant    = "grant-issuance"
 	signingKindRegistry = "registry-inception"
+	// signingKindRevocation withdraws a grant the device signed that is not
+	// wanted here (the_device_log_is_adopted.go).
+	signingKindRevocation = "grant-revocation"
 	// waitingBehind is a grant kept behind the interaction already waiting:
 	// only one interaction waits at a time, since each extends the same tip.
 	waitingBehind = "behind"
@@ -75,6 +78,28 @@ type pendingIssuance struct {
 	Spec     grantSpec                 `json:"spec"`
 	Prepared *drivers.PreparedIssuance `json:"prepared,omitempty"`
 	Registry *drivers.PreparedRegistry `json:"registry,omitempty"`
+	// Revocation, with the credential it withdraws, is a grant the device
+	// signed that is not wanted here. Revokes names that credential.
+	Revocation  *drivers.PreparedRevocation `json:"revocation,omitempty"`
+	Revokes     string                      `json:"revokes,omitempty"`
+	RevokedAcdc []byte                      `json:"revoked_acdc,omitempty"`
+	// Closed says why an interaction no longer waits here (withdrawn): it is
+	// kept, since the device may already have signed it, until the key log
+	// moves past its place.
+	Closed string `json:"closed,omitempty"`
+}
+
+// interaction is what a row asks the device to sign, if anything.
+func (p pendingIssuance) interaction() []byte {
+	switch {
+	case p.Prepared != nil:
+		return p.Prepared.IxnRaw
+	case p.Registry != nil:
+		return p.Registry.IxnRaw
+	case p.Revocation != nil:
+		return p.Revocation.IxnRaw
+	}
+	return nil
 }
 
 func grantKindNamed(schema string) *schemas.AssetGrant {
@@ -120,6 +145,9 @@ func (s *CoreServer) awaitRegistry(p *drivers.PreparedRegistry, spec grantSpec) 
 }
 
 func (s *CoreServer) queueForTheKey(kind string, pending pendingIssuance, payload []byte, summary string) (string, error) {
+	if len(s.unsignedOwnEvents()) > 0 {
+		return "", errUnsignedKeyLog
+	}
 	s.withdrawWaitingFor(pending.Spec.Holder)
 	// One interaction waits for the device at a time: each extends the
 	// identity's key log at its tip, and two built on one tip would ask the
@@ -152,6 +180,9 @@ func (s *CoreServer) queueForTheKey(kind string, pending pendingIssuance, payloa
 
 // summaryOf is the one line shown, made from what the credential says.
 func summaryOf(t *authorisation.ToSign) string {
+	if t.Revokes {
+		return fmt.Sprintf("Withdraw the grant to %q, signed earlier and not wanted", t.Name)
+	}
 	switch t.Kind {
 	case "machine":
 		return fmt.Sprintf("Let the machine %q (key %s) act for you", t.Name, t.KeyFingerprint)
@@ -195,10 +226,19 @@ func (s *CoreServer) withdrawWaitingFor(holder string) {
 		return
 	}
 	for _, row := range s.waitingRows() {
-		if row.Pending.Spec.Holder != holder {
+		if row.Pending.Spec.Holder != holder || row.Pending.Closed != "" {
 			continue
 		}
-		_ = s.DataStore.DeletePendingIssuance(row.ID)
+		if row.Pending.interaction() == nil {
+			_ = s.DataStore.DeletePendingIssuance(row.ID)
+		} else {
+			// Kept: the device may have signed it already, and if it has its
+			// key log is this identity's, and is taken up here.
+			row.Pending.Closed = "withdrawn"
+			if body, err := json.Marshal(row.Pending); err == nil {
+				_ = s.DataStore.SavePendingIssuance(row.ID, string(body))
+			}
+		}
 		if req, err := s.DataStore.GetSigningRequest(row.ID); err == nil && req != nil && req.Status == SigningStatusPending {
 			req.Status = SigningStatusRefused
 			req.ResolvedAt = time.Now().UTC().Format(time.RFC3339)
@@ -238,7 +278,7 @@ func (s *CoreServer) completeWaiting(req store.SigningRequest, signature string)
 	if err := json.Unmarshal([]byte(body), &pending); err != nil {
 		return err
 	}
-	if pending.Spec.Request == nil {
+	if pending.Spec.Request == nil && pending.Kind != signingKindRevocation {
 		return errNeedsSignedRequest
 	}
 	// The signature is over the request's own payload, which is the
@@ -253,6 +293,8 @@ func (s *CoreServer) completeWaiting(req store.SigningRequest, signature string)
 		kept = pending.Prepared.IxnRaw
 	case pending.Kind == signingKindRegistry && pending.Registry != nil:
 		kept = pending.Registry.IxnRaw
+	case pending.Kind == signingKindRevocation && pending.Revocation != nil:
+		kept = pending.Revocation.IxnRaw
 	default:
 		return fmt.Errorf("what waits is of no kind this agent completes")
 	}
@@ -272,6 +314,9 @@ func (s *CoreServer) completeWaiting(req store.SigningRequest, signature string)
 	}
 	if pending.Kind == signingKindRegistry {
 		return s.completeRegistry(req.ID, pending, signature)
+	}
+	if pending.Kind == signingKindRevocation {
+		return s.completeRevocation(req.ID, pending, signature)
 	}
 	return s.completeGrant(req.ID, pending, signature)
 }
@@ -365,32 +410,13 @@ func (s *CoreServer) completeGrant(requestID string, pending pendingIssuance, si
 	if kind == nil {
 		return fmt.Errorf("the waiting grant is of no kind this agent issues")
 	}
-	shown, err := sameAsBuilt(pending)
-	if err != nil {
-		return err
-	}
-	if err := s.stillWhatItGrants(kind, shown); err != nil {
-		s.withdrawWaitingFor(pending.Spec.Holder)
-		return fmt.Errorf("the grant was not issued: %w", err)
-	}
-	preparer, can := s.KeriDriver.(drivers.PreparedIssuer)
-	if !can {
-		return fmt.Errorf("this engine cannot append a prepared grant")
-	}
-	// Checked again against the request: the grant it rests on may have been
-	// withdrawn meanwhile.
-	by := pending.Spec.by()
-	if err := s.checkAuthorisationOf(pending.Prepared.AcdcRaw, pending.Spec.Issuer, "", "", by); err != nil {
-		return fmt.Errorf("the waiting grant no longer rests on its request: %w", err)
-	}
-	s.engineKeepsCredentialLogs()
-	ixnB64 := base64.StdEncoding.EncodeToString(pending.Prepared.IxnRaw)
-	s.signedElsewhere.Store(ixnB64, signature)
-	defer s.signedElsewhere.Delete(ixnB64)
-	result, err := preparer.AppendPreparedIssuance(pending.Spec.Issuer, pending.Prepared)
+	// Signed by the device that holds the key, it is in that device's key log
+	// already, so it is taken up here whatever has changed since it was
+	// asked for: in force if it still stands, otherwise withdrawn.
+	err := s.adoptGrant(waitingRow{ID: requestID, Pending: pending}, signature)
 	if errors.Is(err, drivers.ErrStalePreparation) {
-		// Built on a key log that has moved on: built again and asked afresh,
-		// since nothing was granted it meanwhile (checked above).
+		// Built on a key log that has moved on: built again and asked afresh.
+		preparer, _ := s.KeriDriver.(drivers.PreparedIssuer)
 		_ = s.DataStore.DeletePendingIssuance(requestID)
 		fresh, perr := preparer.PrepareCredentialInRegistry(pending.Spec.Issuer, pending.Spec.Claims, pending.Spec.Schema,
 			pending.Spec.Holder, pending.Spec.Edges, pending.Prepared.Registry)
@@ -402,15 +428,11 @@ func (s *CoreServer) completeGrant(requestID string, pending pendingIssuance, si
 		return fmt.Errorf("%w, and it could not be built again: %v", err, perr)
 	}
 	if err != nil {
-		return fmt.Errorf("the waiting grant could not be appended: %w", err)
+		if errors.Is(err, errSignedNotWanted) {
+			s.witnessOwnLog()
+		}
+		return fmt.Errorf("the grant was not issued: %w", err)
 	}
-	said, err := s.finishIssuance(kind, result, pending.Spec.Holder, pending.Spec.Issuer, pending.Spec.Expiry,
-		pending.Prepared.Registry, pending.Spec.RequestDigest, by)
-	if err != nil {
-		return err
-	}
-	_ = s.DataStore.DeletePendingIssuance(requestID)
-	s.grantArrived(kind, pending.Spec, said)
 	s.witnessOwnLog()
 	s.buildNextBehind()
 	return nil
@@ -499,7 +521,7 @@ func (s *CoreServer) grantArrived(kind *schemas.AssetGrant, spec grantSpec, said
 // that holds the key: waiting, refused or expired; "" when nothing does.
 func (s *CoreServer) waitingStateOf(holder string) string {
 	for _, row := range s.waitingRows() {
-		if row.Pending.Spec.Holder != holder {
+		if row.Pending.Spec.Holder != holder || row.Pending.Closed != "" {
 			continue
 		}
 		req, err := s.DataStore.GetSigningRequest(row.ID)
@@ -536,6 +558,11 @@ func (s *CoreServer) queuedParts(id string) map[string]string {
 		}
 	case p.Registry != nil:
 		return map[string]string{"registry_b64": base64.StdEncoding.EncodeToString(p.Registry.VcpRaw)}
+	case p.Revocation != nil:
+		return map[string]string{
+			"credential_b64": base64.StdEncoding.EncodeToString(p.RevokedAcdc),
+			"revocation_b64": base64.StdEncoding.EncodeToString(p.Revocation.RevRaw),
+		}
 	}
 	return nil
 }
@@ -565,8 +592,21 @@ func (s *CoreServer) buildNextBehind() {
 	if s.anInteractionWaits() {
 		return
 	}
+	// A grant to be withdrawn goes first: until it is, the key log holds a
+	// grant this Identity Agent does not stand behind.
+	for _, row := range s.waitingRows() {
+		if row.Pending.Kind != waitingBehind || row.Pending.Revokes == "" {
+			continue
+		}
+		_ = s.DataStore.DeletePendingIssuance(row.ID)
+		if err := s.queueRevocation(row.Pending.Revokes); err != nil {
+			log.Printf("[grants] the withdrawal of %s could not be asked for: %v", row.Pending.Revokes, err)
+			continue
+		}
+		return
+	}
 	for _, row := range s.waitingRows() { // in the order they were kept
-		if row.Pending.Kind != waitingBehind {
+		if row.Pending.Kind != waitingBehind || row.Pending.Revokes != "" {
 			continue
 		}
 		_ = s.DataStore.DeletePendingIssuance(row.ID)

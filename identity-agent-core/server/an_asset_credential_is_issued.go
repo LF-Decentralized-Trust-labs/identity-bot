@@ -42,6 +42,11 @@ func (s *CoreServer) issueAssetCredential(
 		switch err := s.keyCanSign(); {
 		case errors.Is(err, errKeyElsewhere):
 			keyHere = false
+			// Built on the key log as the device that holds the key has it:
+			// whatever it signed that is not here yet is taken up first.
+			if _, err := s.adoptWhatTheDeviceSigned(nil); err != nil {
+				log.Printf("[grants] %v", err)
+			}
 		case err != nil:
 			// Held here and unreadable right now: reported, and nothing is
 			// asked of another device, since there is none.

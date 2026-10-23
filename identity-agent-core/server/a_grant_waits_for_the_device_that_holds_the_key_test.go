@@ -103,7 +103,7 @@ func waiting(t *testing.T, s *CoreServer) []store.SigningRequest {
 	}
 	var out []store.SigningRequest
 	for _, r := range all {
-		if (r.Kind == signingKindGrant || r.Kind == signingKindRegistry) && r.Status == SigningStatusPending {
+		if isGrantKind(r.Kind) && r.Status == SigningStatusPending {
 			out = append(out, r)
 		}
 	}
@@ -134,7 +134,7 @@ func fulfil(t *testing.T, s *CoreServer, req store.SigningRequest, seed []byte) 
 func checkAsTheDevice(t *testing.T, s *CoreServer, req store.SigningRequest) (map[string]interface{}, error) {
 	t.Helper()
 	parts := s.queuedParts(req.ID)
-	shown, err := s.whatIsToBeSigned(req.PayloadB64, parts["credential_b64"], parts["issuance_b64"], parts["registry_b64"])
+	shown, err := s.whatIsToBeSigned(req.PayloadB64, parts)
 	if err != nil {
 		return nil, err
 	}
@@ -296,13 +296,15 @@ func TestAMachineRemovedWhileItsGrantWaitsIsGrantedNothing(t *testing.T) {
 	if len(waiting(t, e.s)) != 0 {
 		t.Fatal("the removed machine's grant still waits")
 	}
-	before, _ := e.s.DataStore.GetCredentials()
-	if rec := fulfil(t, e.s, reqs[0], e.seed); rec.Code < 400 {
-		t.Fatalf("signing the removed machine's grant was answered %d", rec.Code)
+	// Signed all the same, it is in the device's key log: taken up here so
+	// the logs agree, never in force, and withdrawn.
+	if rec := fulfil(t, e.s, reqs[0], e.seed); !strings.Contains(rec.Body.String(), `"in_force":false`) {
+		t.Fatalf("signing the removed machine's grant was answered %d %s", rec.Code, rec.Body.String())
 	}
-	if after, _ := e.s.DataStore.GetCredentials(); len(after) != len(before) {
-		t.Fatal("a grant was issued to a machine removed while it waited")
+	if len(e.s.credentialsHeldBy(laptop.ControllerAID, schemas.ControllerGrant.Schema.SAID, e.s.OwnerRootAID(), true)) != 0 {
+		t.Fatal("a grant is in force for a machine removed while it waited")
 	}
+	withdrawIt(t, e)
 	// Removed underneath, with its request still standing, it is refused
 	// when signed as well.
 	again := grantFor(6, GradeEnrolled)
@@ -315,6 +317,7 @@ func TestAMachineRemovedWhileItsGrantWaitsIsGrantedNothing(t *testing.T) {
 	if got, _, _ := e.s.controllers().Get(again.ControllerAID); got.CredentialSAID != "" {
 		t.Fatal("a machine removed underneath was granted")
 	}
+	withdrawIt(t, e)
 	// Changed underneath, renamed in the file while it waited.
 	changed := grantFor(7, GradeEnrolled)
 	if rec := e.pairMachine(t, changed); rec.Code != http.StatusOK {
@@ -329,6 +332,27 @@ func TestAMachineRemovedWhileItsGrantWaitsIsGrantedNothing(t *testing.T) {
 	}
 	if got, _, _ := e.s.controllers().Get(changed.ControllerAID); got.CredentialSAID != "" {
 		t.Fatal("a machine changed underneath was granted")
+	}
+	withdrawIt(t, e)
+	keyLogVerifies(t, e.s)
+}
+
+// withdrawIt signs the one revocation that waits, of a grant signed and not
+// wanted, and checks that grant is revoked.
+func withdrawIt(t *testing.T, e *elsewhere) {
+	t.Helper()
+	reqs := waiting(t, e.s)
+	if len(reqs) != 1 || reqs[0].Kind != signingKindRevocation {
+		t.Fatalf("no withdrawal waits: %+v", reqs)
+	}
+	body, _, _ := e.s.DataStore.GetPendingIssuance(reqs[0].ID)
+	var p pendingIssuance
+	json.Unmarshal([]byte(body), &p)
+	if rec := fulfil(t, e.s, reqs[0], e.seed); rec.Code != http.StatusOK {
+		t.Fatalf("withdrawing: %d %s", rec.Code, rec.Body.String())
+	}
+	if c, _ := e.s.DataStore.GetCredential(p.Revokes); c == nil || c.Status != "revoked" {
+		t.Fatalf("the grant signed and not wanted is not revoked: %+v", c)
 	}
 }
 
@@ -348,9 +372,16 @@ func TestOnlyTheNewestGrantWaitsForAnAIAgent(t *testing.T) {
 	if len(first) != 1 || len(now) != 1 || now[0].ID == first[0].ID {
 		t.Fatalf("waiting before %d, after %d", len(first), len(now))
 	}
-	if rec := fulfil(t, e.s, first[0], e.seed); rec.Code < 400 {
-		t.Fatalf("signing the withdrawn grant was answered %d", rec.Code)
+	if rec := fulfil(t, e.s, first[0], e.seed); !strings.Contains(rec.Body.String(), `"in_force":false`) {
+		t.Fatalf("signing the withdrawn grant was answered %d %s", rec.Code, rec.Body.String())
 	}
+	if held, _ := e.s.assetHandler.Store.GetAsset(id); e.s.findCapabilityGrant(held.PairwiseAID) != nil {
+		t.Fatal("the withdrawn grant is in force")
+	}
+	// Taken up at the place the newer grant was built for, which is built
+	// again behind the withdrawal.
+	withdrawIt(t, e)
+	now = waiting(t, e.s)
 	// Changed underneath, in its files, after the grant was asked for.
 	a, _ := e.s.assetHandler.Store.GetAsset(id)
 	a.Capabilities = []string{capabilityMessageAgent}
@@ -361,6 +392,8 @@ func TestOnlyTheNewestGrantWaitsForAnAIAgent(t *testing.T) {
 	if e.s.findCapabilityGrant(a.PairwiseAID) != nil {
 		t.Fatal("an AI agent changed since was granted what it was")
 	}
+	withdrawIt(t, e)
+	keyLogVerifies(t, e.s)
 }
 
 // Two signatures for one request at once: one is acted on.
@@ -459,10 +492,10 @@ func TestTheDeviceDetectsASwappedCredential(t *testing.T) {
 	}
 	b64 := base64.StdEncoding.EncodeToString
 	b := map[string]string{"credential_b64": b64(other.AcdcRaw), "issuance_b64": b64(other.IssRaw)}
-	if _, err := e.s.whatIsToBeSigned(reqs[0].PayloadB64, b["credential_b64"], b["issuance_b64"], ""); err == nil {
+	if _, err := e.s.whatIsToBeSigned(reqs[0].PayloadB64, map[string]string{"credential_b64": b["credential_b64"], "issuance_b64": b["issuance_b64"]}); err == nil {
 		t.Fatal("a credential swapped behind the interaction passed the device's check")
 	}
-	if _, err := e.s.whatIsToBeSigned(reqs[0].PayloadB64, a["credential_b64"], b["issuance_b64"], ""); err == nil {
+	if _, err := e.s.whatIsToBeSigned(reqs[0].PayloadB64, map[string]string{"credential_b64": a["credential_b64"], "issuance_b64": b["issuance_b64"]}); err == nil {
 		t.Fatal("an issuance event of another credential passed the device's check")
 	}
 	// An interaction built to seal one credential with another's issuance.
@@ -476,13 +509,13 @@ func TestTheDeviceDetectsASwappedCredential(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.s.whatIsToBeSigned(b64(mixed), a["credential_b64"], b["issuance_b64"], ""); err == nil {
+	if _, err := e.s.whatIsToBeSigned(b64(mixed), map[string]string{"credential_b64": a["credential_b64"], "issuance_b64": b["issuance_b64"]}); err == nil {
 		t.Fatal("an interaction sealing a credential with another's issuance passed the device's check")
 	}
 	if rec := fulfil(t, e.s, reqs[0], e.seed); rec.Code != http.StatusOK {
 		t.Fatalf("the first: %d", rec.Code)
 	}
-	if _, err := e.s.whatIsToBeSigned(b64(other.IxnRaw), b["credential_b64"], b["issuance_b64"], ""); err == nil {
+	if _, err := e.s.whatIsToBeSigned(b64(other.IxnRaw), map[string]string{"credential_b64": b["credential_b64"], "issuance_b64": b["issuance_b64"]}); err == nil {
 		t.Fatal("an interaction that no longer extends the key log passed the device's check")
 	}
 }

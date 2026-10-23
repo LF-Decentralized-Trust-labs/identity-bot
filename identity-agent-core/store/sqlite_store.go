@@ -1851,9 +1851,25 @@ func PoolBase(namespace string) (int, error) {
 }
 
 func (s *SQLiteStore) SavePendingIssuance(signingRequestID, body string) error {
-	_, err := s.db.Exec(`INSERT INTO pending_issuances (signing_request_id, body, created_at) VALUES (?, ?, ?)`,
+	_, err := s.db.Exec(`INSERT INTO pending_issuances (signing_request_id, body, created_at) VALUES (?, ?, ?)
+		ON CONFLICT(signing_request_id) DO UPDATE SET body = excluded.body`,
 		signingRequestID, body, time.Now().UTC().Format(time.RFC3339))
 	return err
+}
+
+func (s *SQLiteStore) KeepSignedForAnother(ixnSAID, parts string) error {
+	_, err := s.db.Exec(`INSERT OR IGNORE INTO signed_for_others (ixn_said, parts, created_at) VALUES (?, ?, ?)`,
+		ixnSAID, parts, time.Now().UTC().Format(time.RFC3339))
+	return err
+}
+
+func (s *SQLiteStore) SignedForAnother(ixnSAID string) (string, bool, error) {
+	var parts string
+	err := s.db.QueryRow(`SELECT parts FROM signed_for_others WHERE ixn_said = ?`, ixnSAID).Scan(&parts)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	return parts, err == nil, err
 }
 
 func (s *SQLiteStore) GetPendingIssuance(signingRequestID string) (string, bool, error) {

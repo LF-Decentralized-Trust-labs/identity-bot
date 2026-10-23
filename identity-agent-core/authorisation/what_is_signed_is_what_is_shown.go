@@ -51,6 +51,9 @@ type ToSign struct {
 	ValidUntil     string          `json:"valid_until,omitempty"`
 	Capabilities   []string        `json:"capabilities,omitempty"`
 	Limits         json.RawMessage `json:"resource_constraints,omitempty"`
+	// Revokes is set where signing withdraws the grant shown, rather than
+	// issuing it.
+	Revokes bool `json:"revokes,omitempty"`
 }
 
 // KeyFingerprint is a machine key's short form: eight characters of its
@@ -66,7 +69,7 @@ func KeyFingerprint(key string) string {
 
 // anchoringSeal checks that ixn is a well-formed interaction of issuer whose
 // one seal names subject at place 0 with digest tel, and returns it parsed.
-func anchoringSeal(ixnRaw []byte, issuer, subject, tel string) (*keri.Event, error) {
+func anchoringSeal(ixnRaw []byte, issuer, subject, sn, tel string) (*keri.Event, error) {
 	if err := keri.ValidateEvent(ixnRaw); err != nil {
 		return nil, fmt.Errorf("the interaction is not what it says it is: %w", err)
 	}
@@ -87,7 +90,7 @@ func anchoringSeal(ixnRaw []byte, issuer, subject, tel string) (*keri.Event, err
 		return nil, fmt.Errorf("the interaction anchors %d things, where it must anchor exactly what is shown", len(body.A))
 	}
 	seal := body.A[0]
-	if seal["i"] != subject || seal["s"] != "0" || seal["d"] != tel || len(seal) != 3 {
+	if seal["i"] != subject || seal["s"] != sn || seal["d"] != tel || len(seal) != 3 {
 		return nil, fmt.Errorf("the interaction does not anchor what is shown")
 	}
 	return ixn, nil
@@ -107,10 +110,42 @@ func WhatSigningGrants(ixnRaw, issRaw, acdcRaw []byte) (*ToSign, error) {
 	if iss.Ilk != "iss" || iss.Subject != cred.SAID || iss.Registry != cred.Registry {
 		return nil, fmt.Errorf("the issuance event is not of this credential")
 	}
-	ixn, err := anchoringSeal(ixnRaw, cred.Issuer, cred.SAID, iss.SAID)
+	ixn, err := anchoringSeal(ixnRaw, cred.Issuer, cred.SAID, "0", iss.SAID)
 	if err != nil {
 		return nil, err
 	}
+	return grantShown(cred, ixn)
+}
+
+// WhatSigningRevokes checks that ixn anchors exactly the revocation rev of the
+// credential acdc, and says what signing it withdraws, read from the
+// credential.
+func WhatSigningRevokes(ixnRaw, revRaw, acdcRaw []byte) (*ToSign, error) {
+	cred, err := keri.VerifyCredential(acdcRaw)
+	if err != nil {
+		return nil, fmt.Errorf("the credential does not verify against its own identifier: %w", err)
+	}
+	rev, err := keri.VerifyTELEvent(revRaw)
+	if err != nil {
+		return nil, fmt.Errorf("the revocation does not verify: %w", err)
+	}
+	if rev.Ilk != "rev" || rev.Subject != cred.SAID || rev.Registry != cred.Registry {
+		return nil, fmt.Errorf("the revocation is not of this credential")
+	}
+	ixn, err := anchoringSeal(ixnRaw, cred.Issuer, cred.SAID, "1", rev.SAID)
+	if err != nil {
+		return nil, err
+	}
+	out, err := grantShown(cred, ixn)
+	if err != nil {
+		return nil, err
+	}
+	out.Revokes = true
+	return out, nil
+}
+
+// grantShown is what a grant says, read from the credential.
+func grantShown(cred *keri.Credential, ixn *keri.Event) (*ToSign, error) {
 	out := &ToSign{Issuer: cred.Issuer, SN: int(ixn.SN), Prior: ixn.PriorSAID, Credential: cred.SAID, Registry: cred.Registry}
 	var a map[string]json.RawMessage
 	if err := json.Unmarshal(cred.Attributes, &a); err != nil {
@@ -170,7 +205,7 @@ func WhatSigningRegisters(ixnRaw, vcpRaw []byte) (*ToSign, error) {
 	if body.II == "" {
 		return nil, fmt.Errorf("the registry inception names no issuer")
 	}
-	ixn, err := anchoringSeal(ixnRaw, body.II, registry, vcp.SAID)
+	ixn, err := anchoringSeal(ixnRaw, body.II, registry, "0", vcp.SAID)
 	if err != nil {
 		return nil, err
 	}

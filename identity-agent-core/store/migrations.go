@@ -948,6 +948,20 @@ CREATE TABLE IF NOT EXISTS pending_issuances (
     created_at         TEXT NOT NULL DEFAULT ''
 );
 `},
+	{
+		Version:     44,
+		Description: "Keep what the device signed for another Identity Agent",
+		SQL: `
+-- On the device that holds the identity's key: the parts it was shown with
+-- each interaction it signed for another Identity Agent (the credential and
+-- its issuance or revocation, or a registry's inception), so that Identity
+-- Agent can be given them again if it lost the reply.
+CREATE TABLE IF NOT EXISTS signed_for_others (
+    ixn_said   TEXT PRIMARY KEY,
+    parts      TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT ''
+);
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.
