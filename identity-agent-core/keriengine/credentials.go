@@ -485,6 +485,17 @@ func (e *Engine) prepareRevocation(id *identity, acdcSaid, registrySaid, issSaid
 		return nil, fmt.Errorf("no issuance event is known for %s in registry %s; a revocation "+
 			"has to name the issuance it revokes", acdcSaid, registrySaid)
 	}
+	e.state.mu.RLock()
+	var tel [][]byte
+	if reg := id.Registries[registrySaid]; reg != nil {
+		tel = reg.TEL[acdcSaid]
+	}
+	e.state.mu.RUnlock()
+	for _, raw := range tel {
+		if ev, err := keri.VerifyTELEvent(raw); err == nil && ev.Ilk == "rev" {
+			return nil, fmt.Errorf("%s is already revoked", acdcSaid)
+		}
+	}
 	rev, err := keri.BuildRevocation(keri.RevocationInput{
 		CredentialSAID: acdcSaid,
 		Registry:       registrySaid,

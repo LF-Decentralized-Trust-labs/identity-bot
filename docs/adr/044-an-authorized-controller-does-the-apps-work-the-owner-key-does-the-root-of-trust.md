@@ -119,7 +119,11 @@ queue, ahead of anything else; the device signs a revocation only of a grant its
 log issued. A withdrawal that expires is asked for again; one the device refuses, which may be
 the owner's choice, is not, and the grant is listed, in the waiting list and the log
 check, as removed but still authorised in the published record, with the way to ask
-again. An Identity Agent whose key log holds events written by an earlier version
+again. Nothing already asked of the device, or already done, is asked of it again: a
+second withdrawal of one grant is refused before it is built, the engine builds no
+revocation of a revoked credential, and the device signs none its own log already made.
+An event the device signed is taken up even where what it anchors cannot be kept here,
+so the two key logs never diverge. An Identity Agent whose key log holds events written by an earlier version
 without the key, which the device never had, asks the device for nothing and says so. Only one
 interaction waits for the device at a time, as each extends the same tip; another is kept
 and built once the one before it is appended, refused or expired. When a signature comes back it must be over the request's own

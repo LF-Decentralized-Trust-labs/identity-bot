@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	keri "github.com/grapeid/keri-go"
 	"identity-agent-core/sandbox"
 	"net/http"
@@ -623,4 +624,138 @@ func TestARefusedWithdrawalIsListedAndCanBeAskedAgain(t *testing.T) {
 	c.logsAgree(t)
 	c.signedAndWithdrawn(t, a.ControllerAID)
 	withdrawingListed(t, c.requester.s, a.ControllerAID, "")
+}
+
+func withdrawingSAID(t *testing.T, s *CoreServer, holder string) string {
+	t.Helper()
+	creds, _ := s.DataStore.GetCredentials()
+	for _, cr := range creds {
+		if cr.HolderAID == holder {
+			return cr.SAID
+		}
+	}
+	t.Fatalf("no grant to %s", holder)
+	return ""
+}
+
+func askAgain(t *testing.T, s *CoreServer, said string) int {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	s.router.ServeHTTP(rec, local("POST", "/api/grants/withdrawing/"+said+"/ask", ""))
+	if rec.Code == http.StatusConflict && !strings.Contains(rec.Body.String(), "already waiting") && !strings.Contains(rec.Body.String(), "not waiting to be withdrawn") {
+		t.Fatalf("refused without saying why: %s", rec.Body.String())
+	}
+	return rec.Code
+}
+
+// The reviewer's probe: asking again three times while a withdrawal waits
+// asks the device for nothing more. The device signs the one withdrawal, the
+// logs agree, and nothing is left waiting; asking again after it is done is
+// refused too.
+func TestAskingAgainWhileAWithdrawalWaitsAsksNothingMore(t *testing.T) {
+	c := newTwoCores(t)
+	a, _ := c.withdrawalAsked(t)
+	said := withdrawingSAID(t, c.requester.s, a.ControllerAID)
+	for i := 0; i < 3; i++ {
+		if code := askAgain(t, c.requester.s, said); code != http.StatusConflict {
+			t.Fatalf("asking again while it waits was answered %d", code)
+		}
+	}
+	if n := len(waiting(t, c.requester.s)); n != 1 {
+		t.Fatalf("%d wait for the device after asking again", n)
+	}
+	c.signAll(t)
+	c.logsAgree(t)
+	c.signedAndWithdrawn(t, a.ControllerAID)
+	if code := askAgain(t, c.requester.s, said); code != http.StatusConflict {
+		t.Fatalf("asking again once revoked was answered %d", code)
+	}
+	if n := len(waiting(t, c.requester.s)); n != 0 {
+		t.Fatalf("%d left waiting", n)
+	}
+	// And a grant asked for after it is issued: the queue is not jammed.
+	b := grantFor(6, GradeEnrolled)
+	c.requester.pairMachine(t, b)
+	c.signAll(t)
+	c.logsAgree(t)
+	if !c.machineGranted(t, b) {
+		t.Fatal("a grant after the withdrawal was not issued")
+	}
+}
+
+// A revoked grant is not revoked again: the engine refuses to build it, and
+// the device refuses to sign one its own key log has already made.
+func TestARevokedGrantIsNotRevokedAgain(t *testing.T) {
+	c := newTwoCores(t)
+	a, _ := c.withdrawalAsked(t)
+	said := withdrawingSAID(t, c.requester.s, a.ControllerAID)
+	rec, _ := c.requester.s.DataStore.GetCredential(said)
+	revoker := c.requester.s.KeriDriver.(drivers.PreparedRevoker)
+	second, err := revoker.PrepareRevocation(rec.IssuerAID, said, rec.RegistrySAID) // built before the first lands
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.signAll(t)
+	if _, err := revoker.PrepareRevocation(rec.IssuerAID, said, rec.RegistrySAID); err == nil {
+		t.Fatal("the engine built a second revocation of a revoked grant")
+	}
+	// The second, rebuilt on the device's tip, is refused by the device.
+	owner, _ := c.device.DataStore.GetIdentity()
+	tipSN, tipSAID, _ := c.device.ownTip(owner.AID)
+	ixn, _ := keri.BuildInteraction(keri.InteractionInput{Prefix: owner.AID, PriorSAID: tipSAID, SN: tipSN + 1,
+		Data: []json.RawMessage{json.RawMessage(`{"i":"` + said + `","s":"1","d":"` + second.RevSAID + `"}`)}})
+	b64 := base64.StdEncoding.EncodeToString
+	acdc, _ := base64.StdEncoding.DecodeString(rec.AcdcJson)
+	_, err = c.device.signForAnother(b64(ixn), map[string]string{"credential_b64": b64(acdc), "revocation_b64": b64(second.RevRaw)})
+	if err == nil || !strings.Contains(err.Error(), "already withdrawn") {
+		t.Fatalf("the device signed a second withdrawal: %v", err)
+	}
+}
+
+// An event the device signed whose anchored event the credential log here
+// refuses is still taken up, so the key logs never diverge; what it anchors
+// is reported.
+func TestAnEventIsTakenUpEvenWhenWhatItAnchorsIsRefused(t *testing.T) {
+	c := newTwoCores(t)
+	a, _ := c.withdrawalAsked(t)
+	c.noWitnesses = true
+	said := withdrawingSAID(t, c.requester.s, a.ControllerAID)
+	rec, _ := c.requester.s.DataStore.GetCredential(said)
+	second, _ := c.requester.s.KeriDriver.(drivers.PreparedRevoker).PrepareRevocation(rec.IssuerAID, said, rec.RegistrySAID)
+	c.signAll(t)
+	// As a device without the check above would have: a second revocation,
+	// signed with the key at the next place.
+	owner, _ := c.requester.s.DataStore.GetIdentity()
+	tipSN, tipSAID, _ := c.requester.s.ownTip(owner.AID)
+	ixn, _ := keri.BuildInteraction(keri.InteractionInput{Prefix: owner.AID, PriorSAID: tipSAID, SN: tipSN + 1,
+		Data: []json.RawMessage{json.RawMessage(`{"i":"` + said + `","s":"1","d":"` + second.RevSAID + `"}`)}})
+	seed, _ := c.device.identitySigningSeed()
+	sig, _ := signEventBytes(ixn, seed)
+	acdc, _ := base64.StdEncoding.DecodeString(rec.AcdcJson)
+	b64 := base64.StdEncoding.EncodeToString
+	n, err := c.requester.s.adoptWhatTheDeviceSigned(&heldEvent{RawB64: b64(ixn), Signature: sig,
+		Parts: map[string]string{"credential_b64": b64(acdc), "revocation_b64": b64(second.RevRaw)}})
+	if err != nil || n != 1 {
+		t.Fatalf("took up %d: %v", n, err)
+	}
+	if now, _, _ := c.requester.s.ownTip(owner.AID); now != tipSN+1 {
+		t.Fatal("the key-log event was not taken up")
+	}
+	if notHeld := c.requester.s.anchoredNotHeld(); len(notHeld) != 1 {
+		t.Fatalf("what it anchors is not reported: %v", notHeld)
+	}
+}
+
+// Nothing already waiting for the device is asked of it again, whatever asks.
+func TestTheSameThingIsNeverQueuedTwice(t *testing.T) {
+	c := newTwoCores(t)
+	a, req := c.withdrawalAsked(t)
+	said := withdrawingSAID(t, c.requester.s, a.ControllerAID)
+	body, _, _ := c.requester.s.DataStore.GetPendingIssuance(req.ID)
+	var p pendingIssuance
+	json.Unmarshal([]byte(body), &p)
+	if _, err := c.requester.s.queueForTheKey(signingKindRevocation, p, p.Revocation.IxnRaw, "again"); !errors.Is(err, errAlreadyAsked) {
+		t.Fatalf("the same withdrawal was queued twice: %v", err)
+	}
+	_ = said
 }

@@ -149,6 +149,16 @@ func (s *CoreServer) queueForTheKey(kind string, pending pendingIssuance, payloa
 		return "", errUnsignedKeyLog
 	}
 	s.withdrawWaitingFor(pending.Spec.Holder)
+	// The same thing is never asked of the device twice: what is already
+	// waiting or kept behind for it stands.
+	for _, row := range s.waitingRows() {
+		if !sameSubject(row.Pending, pending) {
+			continue
+		}
+		if row.Pending.Kind == waitingBehind || s.stillAsked(row) {
+			return "", fmt.Errorf("%w (%s)", errAlreadyAsked, row.ID)
+		}
+	}
 	// One interaction waits for the device at a time: each extends the
 	// identity's key log at its tip, and two built on one tip would ask the
 	// device for two events at one place. Another is kept behind it and built
@@ -625,4 +635,16 @@ func (s *CoreServer) buildNextBehind() {
 		}
 		return
 	}
+}
+
+// sameSubject reports whether two things kept for the device are about the
+// same thing: the withdrawal of one credential, or a grant to one holder.
+func sameSubject(a, b pendingIssuance) bool {
+	if a.Kind == withdrawalRefusedKind || b.Kind == withdrawalRefusedKind {
+		return false
+	}
+	if a.Revokes != "" || b.Revokes != "" {
+		return a.Revokes == b.Revokes
+	}
+	return a.Spec.Holder != "" && a.Spec.Holder == b.Spec.Holder
 }

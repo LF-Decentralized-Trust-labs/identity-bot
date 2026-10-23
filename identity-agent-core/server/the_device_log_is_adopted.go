@@ -205,17 +205,38 @@ func (s *CoreServer) markSigned(id string) {
 }
 
 func (s *CoreServer) adoptOne(aid string, raw []byte, held heldEvent) error {
+	var err error
 	if row, ok := s.rowAsking(raw); ok {
 		switch {
 		case row.Pending.Prepared != nil:
-			return s.adoptGrant(row, held.Signature)
+			err = s.adoptGrant(row, held.Signature)
 		case row.Pending.Registry != nil:
-			return s.adoptRegistry(row, held.Signature)
+			err = s.adoptRegistry(row, held.Signature)
 		case row.Pending.Revocation != nil:
-			return s.adoptRevocation(row.ID, row.Pending.Revocation, held.Signature)
+			err = s.adoptRevocation(row.ID, row.Pending.Revocation, held.Signature)
 		}
+		if row.Pending.interaction() != nil {
+			_ = s.DataStore.DeletePendingIssuance(row.ID)
+		}
+	} else {
+		err = s.adoptFromParts(aid, raw, held)
 	}
-	return s.adoptFromParts(aid, raw, held)
+	if err == nil || errors.Is(err, errSignedNotWanted) {
+		return err
+	}
+	// What it anchors could not be kept here (a credential's log refused
+	// it, say): the key-log event is taken up all the same, since the key
+	// logs must never diverge, and what it anchors is reported.
+	log.Printf("[grants] what event %s of %s anchors is not kept here: %v", saidOf(raw), aid, err)
+	return s.adoptBare(aid, raw, held.Signature)
+}
+
+func saidOf(raw []byte) string {
+	var b struct {
+		D string `json:"d"`
+	}
+	_ = json.Unmarshal(raw, &b)
+	return b.D
 }
 
 // withSignature runs append with the device's signature over raw to hand.
@@ -557,6 +578,12 @@ func (s *CoreServer) queueRevocation(said string) error {
 	if err != nil || rec == nil {
 		return fmt.Errorf("no credential %s to withdraw", said)
 	}
+	if rec.Status != credentialStatusWithdrawing {
+		return fmt.Errorf("%w: the grant is %q, not waiting to be withdrawn", errAlreadyAsked, rec.Status)
+	}
+	if state := s.withdrawalState(said); state == "waiting" || state == "queued" {
+		return fmt.Errorf("%w: its withdrawal is already %s", errAlreadyAsked, state)
+	}
 	// Asked for afresh: whatever was asked before, refused or expired, is
 	// done with.
 	for _, row := range s.waitingRows() {
@@ -783,13 +810,18 @@ func (s *CoreServer) handleAskAgainToWithdraw(w http.ResponseWriter, r *http.Req
 	}
 	said := chi.URLParam(r, "said")
 	c, err := s.DataStore.GetCredential(said)
-	if err != nil || c == nil || c.Status != credentialStatusWithdrawing {
-		writeError(w, http.StatusNotFound, "nothing to withdraw", "no grant here waits to be withdrawn under that identifier")
+	if err != nil || c == nil {
+		writeError(w, http.StatusNotFound, "nothing to withdraw", "no grant here has that identifier")
 		return
 	}
 	if err := s.queueRevocation(said); err != nil {
-		writeError(w, http.StatusConflict, "not asked", err.Error())
+		writeError(w, http.StatusConflict, "not asked again", err.Error())
 		return
 	}
 	writeJSON(w, map[string]string{"withdrawal": s.withdrawalState(said)})
 }
+
+// errAlreadyAsked is something asked of the device that holds the key that is
+// already asked for, or already done: asked twice, the device would sign it
+// twice, and the second could not be kept.
+var errAlreadyAsked = errors.New("this is already asked of the device that holds the key, or done")

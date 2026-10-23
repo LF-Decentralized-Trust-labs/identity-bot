@@ -401,12 +401,21 @@ func (s *CoreServer) whatIsToBeSigned(payloadB64 string, parts map[string]string
 	if shown.Revokes && !anchorsIssuanceOf(events, shown.Credential) {
 		return nil, fmt.Errorf("this identity's key log as this device holds it never issued the grant it is asked to withdraw")
 	}
+	if shown.Revokes && anchorsSealOf(events, shown.Credential, "1") {
+		return nil, fmt.Errorf("this identity's key log as this device holds it has already withdrawn this grant")
+	}
 	return shown, nil
 }
 
 // anchorsIssuanceOf reports whether a key log anchors the issuance of the
 // credential said.
 func anchorsIssuanceOf(events []store.EventRecord, said string) bool {
+	return anchorsSealOf(events, said, "0")
+}
+
+// anchorsSealOf reports whether a key log anchors the event at place sn of
+// the credential said's log.
+func anchorsSealOf(events []store.EventRecord, said, sn string) bool {
 	for _, ev := range events {
 		var body struct {
 			A []map[string]interface{} `json:"a"`
@@ -415,7 +424,7 @@ func anchorsIssuanceOf(events []store.EventRecord, said string) bool {
 			continue
 		}
 		for _, seal := range body.A {
-			if seal["i"] == said && seal["s"] == "0" {
+			if seal["i"] == said && seal["s"] == sn {
 				return true
 			}
 		}
