@@ -77,6 +77,104 @@ checks on application operations are removed. This makes the handlers consistent
 the gate and removes a second copy of the authority policy that would otherwise drift
 from the one the gate enforces.
 
+*Amended 2026-10-22.* **A controller's grant is a credential as well as a record.** When a
+machine is granted, the identity issues it a Controller Grant (ADR-045) into its own
+registry: the machine's key, label, grade, the signer it acts as, and its expiry. The
+issuance is anchored in the identity's key log. The grant is recorded only once its
+credential is, so nothing the machine asks for meanwhile is issued without naming it. A
+grant that cannot be anchored is not made. Where the identity's key is held on another
+device the grant is recorded with its credential pending on that device, and nothing is
+written into the key log here. Re-granting a machine, or settling which signer it acts
+as, issues a new credential and withdraws the old one first; if the old one cannot be
+withdrawn nothing changes, so a machine never has two grants in force. Removing the
+machine revokes its credential; the machine stops at once even when that revocation cannot
+be written. **Upgrading.** Machines paired, and AI agents provisioned, before machines and AI agents
+were given grants have none, and are never given one from what is on disk: not at start,
+not on a timer, not by asking. Every attempt to do that automatically turned a write to a
+file into a grant the identity signed. Each waits for the owner's approval, given the
+ordinary way: a machine is approved by granting it again (`POST /api/controllers`, which
+no machine may call), an AI agent by setting its capabilities. The owner's request is
+carried into the grant and checked against it like any other (ADR-045). Until then a
+machine's requests that would issue a credential are refused, and an AI agent may do
+nothing. `GET /api/grants/awaiting-approval` lists what waits, and for what. Where the identity's key is held on another device, a grant (a machine's, or an AI
+agent's) asked for by a signed request is built here exactly as it will be issued, checked
+against that request, and asked of that device on the signing-request queue, with the
+credential, its issuance event and the interaction that anchors it; where the identity has
+no registry yet, the registry's inception is asked for first and the grant built on it
+once signed. The device checks what it is asked to sign itself and is shown only what the
+credential says (ADR-045). The device signs through its own core, never by signing the
+bytes alone: in one step its core checks the interaction, records it as the next event
+of its own key log, and signs it, and it signs no second, different event at a place it
+has already filled, since two signed events at one place would be duplicity. The device's key log
+is then the identity's, and the Identity Agent takes up whatever the device has signed at
+its next place, from the device's reply, from what the device answers when asked to sign
+at a place already filled, or from the identity's witnesses, verified against the
+identity's current key. It does so whether the request still waits, was refused or
+expired, or was withdrawn, before it builds any grant and on every tick, so the two key
+logs never diverge; signing is never split into a prepare and a commit, which would
+reopen the duplicity it prevents. A grant taken up that is no longer wanted (its machine
+removed, its request withdrawn or changed) is kept so the registry's log is whole, is
+never in force, and is withdrawn at once by a revocation the device signs on the same
+queue, ahead of anything else; the device signs a revocation only of a grant its own key
+log issued. A withdrawal that expires is asked for again; one the device refuses, which may be
+the owner's choice, is not, and the grant is listed, in the waiting list and the log
+check, as removed but still authorised in the published record, with the way to ask
+again. Nothing already asked of the device, or already done, is asked of it again: a
+second withdrawal of one grant is refused before it is built, the engine builds no
+revocation of a revoked credential, and the device signs none its own log already made.
+An event the device signed is taken up even where what it anchors cannot be kept here,
+so the two key logs never diverge. Every grant revoked where the key is elsewhere, whether its
+machine is removed, it is re-granted, an AI agent's grant is replaced or its body
+removed, or it is revoked directly, is withdrawn the same way: marked withdrawing here,
+never in force, and its revocation signed on the device; a machine re-granted there has
+its old grant's withdrawal asked for ahead of the new grant. The engine itself appends no
+interaction to a key log unless that identity's current key signed it, checked in one
+place, so no path can leave an unsigned event there. Rotations are not yet held to this: a rotation is signed by its
+new keys, which this Identity Agent does not hold (the owner's device, a recovering
+client, or each owner in a multi-owner change), and today each of those signs it only
+after it is appended. Guarding rotations needs the rotation built, signed by the new keys
+and only then appended, which changes those apps; until then a rotation is appended
+unsigned, as before this decision, except that where the identity's key is on another
+device no rotation of it is made here at all (the rotation route, a recovery's rotation,
+or changing who owns it): it would be appended unsigned and the key logs would split.
+Break-glass root rotation, whose events are not signed by their keys either, is refused
+whole until they are. The same holds where the identity's key is held by the app rather than
+the core, as the reference app holds it: the app signs an event only after the core has
+added it, which is too late, so through the core such an identity can be neither rotated
+nor extended (no interaction, no credential issued), and the core says so in those words.
+Before this the core appended those events unsigned, so the key logs they made were not
+valid. It changes once the app signs each event before it is added. An Identity Agent whose key log holds events written by an earlier version
+without the key, which the device never had, asks the device for nothing and says so. Only one
+interaction waits for the device at a time, as each extends the same tip; another is kept
+and built once the one before it is appended, refused or expired. When a signature comes back it must be over the request's own
+payload, which must be the interaction kept; the grant is derived again from what was kept
+and compared; the machine or AI agent must still be there, still be what the grant says,
+and not have been granted anything meanwhile; and the request is checked again. Only then
+is the grant appended with that signature, so both key logs hold the same event and both
+send it to the witnesses; one built on a key log that has moved on, a registry's inception
+included, is refused and built again. At most one grant waits for each machine or AI agent: asking
+again, or removing the machine, withdraws the one waiting, and a grant the device refused
+or let expire is listed so, for the owner to ask again. Until a grant is appended, the
+machine or AI agent may do nothing it would allow, and nothing is written unsigned. A
+machine or AI agent that already holds a grant is not re-granted from there, since its
+grant could not be withdrawn there; approving an AI agent's body, and making any identity
+delegated from this one (an AI agent, an enrolled machine, any delegated asset) need the
+key and are refused there with that reason. The key is elsewhere only where a seed is held
+here and derives another key; a seed held here that cannot be read is a fault, answered as
+unavailable, and nothing waits on it. A mark that a grant waits for another device is
+believed only where the key really is elsewhere. A machine's signer is one of the identity's active signers. A machine
+whose row no longer says what its grant credential says (machine, key, label, grade,
+signer, end) is neither acted on, nor re-issued from, nor taken as saying who is speaking
+from it. A credential is issued
+on a machine's grant only while the grant is in force in the registry, and the grant
+cannot be revoked while one is being issued on it.
+
+What a Controller Grant shows: that this Identity Agent, at that time, recorded the machine
+as authorised and as whom, in a log anybody can check. It is issued on the word of the
+device that paired the machine, so an Identity Agent whose operator controls it could issue
+one to a key of its own. What cannot be made up afterwards is the machine's own signature
+over each request, which every credential issued on it carries (ADR-045).
+
 ## Consequences
 
 - The owner's authorized controller can do the application's work without the owner

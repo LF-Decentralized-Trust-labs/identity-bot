@@ -108,6 +108,12 @@ func (s *CoreServer) handleStartCeremony(w http.ResponseWriter, r *http.Request)
 			"an identity must exist before who controls it can change")
 		return
 	}
+	// Changing who owns it ends in a rotation, which is not made here where
+	// the identity's key is on another device.
+	if err := s.mayRotateHere(identity.AID); err != nil {
+		writeKeyNotHeldHere(w)
+		return
+	}
 	existing, err := s.ownersOfOwnIdentity(identity.AID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not read the current owners", err.Error())
@@ -277,6 +283,10 @@ func (s *CoreServer) completeCeremonyIfReady(c *OwnerCeremony) {
 	}
 	if s.KeriDriver == nil {
 		_ = s.finishCeremony(ceremonyFailed, "no KERI engine to rotate with", "")
+		return
+	}
+	if err := s.mayRotateHere(identity.AID); err != nil {
+		_ = s.finishCeremony(ceremonyFailed, err.Error(), "")
 		return
 	}
 

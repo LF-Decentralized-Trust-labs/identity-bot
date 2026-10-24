@@ -906,6 +906,62 @@ ALTER TABLE notifications ADD COLUMN sender_kel_events INTEGER NOT NULL DEFAULT 
 -- when the contact is removed; the proof must not go with it.
 ALTER TABLE notifications ADD COLUMN sender_kel        TEXT    NOT NULL DEFAULT '';
 `},
+	{
+		Version:     41,
+		Description: "Keep each anchoring of the record",
+		SQL: `
+-- One row per interaction in the record identity's key log. The statement is
+-- what was digested, so a verifier recomputes the seal from it; seq is the
+-- interaction's place in that key log.
+CREATE TABLE IF NOT EXISTS record_anchors (
+    seq        INTEGER PRIMARY KEY,
+    said       TEXT NOT NULL,
+    statement  TEXT NOT NULL,
+    digest     TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT ''
+);
+`},
+	{
+		Version:     42,
+		Description: "Keep the request each credential was issued on",
+		SQL: `
+-- The request each AI agent grant or body credential was issued on, with its
+-- body: kept here, not in the credential, which is public, because a body can
+-- hold what is nobody else's business. One request authorises one credential,
+-- so its digest is unique.
+CREATE TABLE IF NOT EXISTS credential_requests (
+    credential_said TEXT PRIMARY KEY,
+    request_digest  TEXT NOT NULL UNIQUE,
+    body            TEXT NOT NULL
+);
+`},
+	{
+		Version:     43,
+		Description: "Keep each issuance prepared for the device that holds the identity's key",
+		SQL: `
+-- An issuance built where the identity's key is not held, waiting for the
+-- device that holds it to sign its anchoring interaction. Keyed by the
+-- signing request that asks for that signature.
+CREATE TABLE IF NOT EXISTS pending_issuances (
+    signing_request_id TEXT PRIMARY KEY,
+    body               TEXT NOT NULL,
+    created_at         TEXT NOT NULL DEFAULT ''
+);
+`},
+	{
+		Version:     44,
+		Description: "Keep what the device signed for another Identity Agent",
+		SQL: `
+-- On the device that holds the identity's key: the parts it was shown with
+-- each interaction it signed for another Identity Agent (the credential and
+-- its issuance or revocation, or a registry's inception), so that Identity
+-- Agent can be given them again if it lost the reply.
+CREATE TABLE IF NOT EXISTS signed_for_others (
+    ixn_said   TEXT PRIMARY KEY,
+    parts      TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT ''
+);
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

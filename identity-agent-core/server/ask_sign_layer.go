@@ -3,10 +3,8 @@ package server
 import (
 	"context"
 	"crypto/ed25519"
-	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"identity-agent-core/drivers"
 	"identity-agent-core/store"
@@ -162,14 +160,17 @@ func (s *CoreServer) mintPairwiseIn(pool, name string) (aid, oobi string, seed [
 			// they arrive; an identity whose receipts have not landed yet is
 			// correctly reported as uncorroborated rather than as invalid.
 			if s.WitnessService != nil && len(witnesses) > 0 {
-				go func(aid string, raw []byte, sig string) {
+				// To exactly the witnesses the event names: choosing again here
+				// by another digest sent it, most of the time, to a witness it
+				// does not name.
+				go func(aid string, raw []byte, sig string, named []string, toad int) {
 					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 					defer cancel()
-					if berr := s.WitnessService.BroadcastEvent(ctx, aid, raw, sig); berr != nil {
+					if berr := s.WitnessService.BroadcastToDesignated(ctx, aid, raw, sig, named, toad); berr != nil {
 						log.Printf("[pairwise] %s designated witnesses but its inception was not "+
 							"accepted by them (%v) — its history is uncorroborated until it is", aid, berr)
 					}
-				}(icp.AID, raw, sig)
+				}(icp.AID, raw, sig, witnesses, toad)
 			}
 		}
 	}
@@ -194,46 +195,7 @@ func (s *CoreServer) mintPairwiseIn(pool, name string) (aid, oobi string, seed [
 // on the device they carry. A device-local seed has no phrase; it is recovered
 // from this machine's own backup archive.
 func ensureRootSeed(dataDir string) ([]byte, error) {
-	seed, err := secureenclave.LoadRootSeed(dataDir)
-	if err == nil {
-		return seed, nil
-	}
-	// Only a machine that has never held a seed gets one here. A seed that is
-	// there and cannot be read (a damaged file, a wrapping this build cannot
-	// open) is refused rather than replaced: replacing it would destroy the
-	// only copy of every key derived from it.
-	if !errors.Is(err, secureenclave.ErrNoRootSeed) {
-		return nil, fmt.Errorf("this machine's root seed is stored but cannot be read, and is not replaced: %w", err)
-	}
-	// Said plainly, and no longer as a warning about something missing.
-	//
-	// For a computer that answers to somebody this IS the arrangement, not a
-	// fallback waiting for a handoff: it holds its own key, its owner's root
-	// stays on the device its owner carries, and there is no phrase for this
-	// seed because it is not anybody's identity. It is in this machine's backup
-	// archive, which is what recovers it.
-	//
-	// Calling that a warning for the rest of the machine's life would train
-	// whoever reads the log to ignore the line — and it is the line that says
-	// where recovery comes from.
-	log.Printf("[keystore] this machine holds a device-local root seed of its own. Its keys " +
-		"are recoverable from this machine's backup archive, and not from a seed phrase — " +
-		"there is no phrase for it")
-	seed = make([]byte, 64)
-	if _, err := rand.Read(seed); err != nil {
-		return nil, err
-	}
-	if err := secureenclave.StoreRootSeed(dataDir, seed); err != nil {
-		return nil, fmt.Errorf("bootstrap root seed: %w", err)
-	}
-	// Written down, because nothing else can tell afterwards. This seed is
-	// random and belongs to no identity, so an archive marked as though the
-	// owner's words had written it is one they can never restore.
-	if err := secureenclave.RecordSeedOrigin(dataDir, secureenclave.SeedIsDeviceLocal); err != nil {
-		log.Printf("[keystore] could not record where this machine's root seed came from, "+
-			"so its backups will be signed as this machine's rather than its owner's: %v", err)
-	}
-	return seed, nil
+	return secureenclave.EnsureRootSeed(dataDir)
 }
 
 // injectSig adds a "sig" field to an Ask JSON object.

@@ -155,6 +155,11 @@ func (h *Handler) HandleEnrol(w http.ResponseWriter, r *http.Request) {
 	// Delegate over the key the MACHINE generated. Nothing here derives a key,
 	// which is the difference between this and every other asset: the private
 	// half stays where it was made and never reaches this agent.
+	if err := h.mayDelegate(); err != nil {
+		release()
+		h.writeJSON(w, map[string]string{"error": err.Error()}, delegationRefusalStatus(err))
+		return
+	}
 	resp, err := h.KeriDriver.CreateDelegatedInception(
 		body.PublicKey, body.NextPublicKey, enrolment.DisplayName, rootAID)
 	if err != nil {

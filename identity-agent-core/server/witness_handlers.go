@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"identity-agent-core/store"
@@ -20,6 +21,8 @@ func (s *CoreServer) mountWitnessRoutes(r chi.Router) {
 	}
 	r.Post("/witness/event", s.handleWitnessEvent)
 	r.Get("/witness/kel/{signer_aid}", s.handleWitnessKel)
+	r.Get("/witness/kel/{signer_aid}/tip", s.handleWitnessKelTip)
+	r.Get("/witness/kel/{signer_aid}/event/{sn}", s.handleWitnessKelEvent)
 	r.Get("/witness/status", s.handleWitnessStatus)
 	r.Post("/witness/endpoint", s.handleWitnessEndpointRecord)
 	r.Get("/witness/endpoint/{controller_aid}", s.handleWitnessEndpointLookup)
@@ -97,6 +100,24 @@ func (s *CoreServer) handleWitnessKel(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleWitnessKelTip answers how far this witness holds an identity's key log,
+// signed with its key together with the asker's nonce, so the answer is fresh
+// and its own.
+func (s *CoreServer) handleWitnessKelTip(w http.ResponseWriter, r *http.Request) {
+	nonce := r.URL.Query().Get("nonce")
+	if nonce == "" || len(nonce) > 128 {
+		writeError(w, http.StatusBadRequest, "a nonce is required", "")
+		return
+	}
+	tip, err := s.WitnessService.KelTip(chi.URLParam(r, "signer_aid"), nonce)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "the tip could not be signed", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(tip)
+}
+
 func (s *CoreServer) handleWitnessStatus(w http.ResponseWriter, r *http.Request) {
 	if !s.isOwner(r) {
 		writeError(w, http.StatusForbidden, "owner only", "internal route")
@@ -125,6 +146,11 @@ func (s *CoreServer) handleWitnessRequest(w http.ResponseWriter, r *http.Request
 		RequesterOOBI string `json:"requester_oobi"`
 		BackendType   string `json:"backend_type"`
 		EventJSON     string `json:"event_json"`
+		// CoversDelegates asks for the identities the requester delegates to
+		// be witnessed too.
+		CoversDelegates bool   `json:"covers_delegates"`
+		Stamp           string `json:"stamp"`
+		Signature       string `json:"signature"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid witness request body", err.Error())
@@ -144,14 +170,18 @@ func (s *CoreServer) handleWitnessRequest(w http.ResponseWriter, r *http.Request
 	}
 	result := s.WitnessService.ProcessInboundRequest(ctx, witness.WitnessRequest{
 		RequesterAID: req.RequesterAID, RequesterOOBI: req.RequesterOOBI, BackendType: req.BackendType,
+		CoversDelegates: req.CoversDelegates, Stamp: req.Stamp, Signature: req.Signature,
 	})
 	status := "declined"
 	if result.Accepted {
 		status = "accepted"
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status": status, "reason": result.Reason, "task_id": result.TaskID,
+		// Whether, after this, the identities the requester delegates are
+		// witnessed too.
+		"covers_delegates": result.Accepted && s.WitnessService.DelegatesWitnessedFor(req.RequesterAID),
 	})
 }
 
@@ -288,4 +318,21 @@ func (s *CoreServer) handleWitnessEndpointLookup(w http.ResponseWriter, r *http.
 		"records":        records,
 		"count":          len(records),
 	})
+}
+
+// handleWitnessKelEvent answers one event of a key log this witness holds,
+// as its controller published and signed it.
+func (s *CoreServer) handleWitnessKelEvent(w http.ResponseWriter, r *http.Request) {
+	sn, err := strconv.Atoi(chi.URLParam(r, "sn"))
+	if err != nil || sn < 0 {
+		writeError(w, http.StatusBadRequest, "a place in the key log is a number", "")
+		return
+	}
+	ev, err := s.WitnessService.EventAt(chi.URLParam(r, "signer_aid"), sn)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not held", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ev)
 }

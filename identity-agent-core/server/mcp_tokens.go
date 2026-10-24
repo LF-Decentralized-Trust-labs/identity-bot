@@ -51,6 +51,9 @@ type mcpToken struct {
 	// credential-proven at invoke time; otherwise the resolver falls back to
 	// the Scopes list above (the stored ceiling).
 	GrantSAID string `json:"grant_said,omitempty"`
+	// GrantPending is a grant that only the device holding the identity's key
+	// can issue. Until it is issued the token may do nothing.
+	GrantPending bool `json:"grant_pending,omitempty"`
 }
 
 var mcpTokensMu sync.Mutex
@@ -269,8 +272,18 @@ func (s *CoreServer) handleRevokeMCPToken(w http.ResponseWriter, r *http.Request
 // leaves the stored ceiling (already set by the caller) untouched — driverless
 // builds keep working on the increment-1 behaviour.
 func (s *CoreServer) applyGrantScopes(entry mcpToken, cc *sandbox.CallerContext) {
-	if entry.GrantSAID == "" || s.KeriDriver == nil {
-		return // no credential / no driver → the stored ceiling governs
+	if s.KeriDriver == nil {
+		return // a build with no engine has no grants: the stored ceiling governs
+	}
+	if entry.GrantSAID == "" {
+		// An AI agent's token with no grant, where grants can be issued, is
+		// one whose grant was never issued: it may do nothing.
+		if entry.AgentAID != "" {
+			log.Printf("[mcp] agent %s holds no grant — denying", entry.AgentAID)
+			cc.Scopes = nil
+			cc.NoScopesBecause = "this AI agent is " + awaitingPhrase(entry.GrantPending)
+		}
+		return
 	}
 	rec, err := s.DataStore.GetCredential(entry.GrantSAID)
 	if err != nil || rec == nil {
@@ -283,6 +296,9 @@ func (s *CoreServer) applyGrantScopes(entry mcpToken, cc *sandbox.CallerContext)
 		// The owner revoked (or expired) the grant — hard deny.
 		log.Printf("[mcp] agent %s grant %s status=%q — denying", entry.AgentAID, entry.GrantSAID, rec.Status)
 		cc.Scopes = nil
+		if grantLapsed(*rec) {
+			cc.NoScopesBecause = "this AI agent's grant has expired"
+		}
 		return
 	}
 	if !s.grantCredentialValid(rec, entry) {
@@ -293,6 +309,9 @@ func (s *CoreServer) applyGrantScopes(entry mcpToken, cc *sandbox.CallerContext)
 		// anchor is persisted at provisioning); a failure here is a real problem
 		// that must surface as a denial, not a silent fallback.
 		cc.Scopes = nil
+		if grantLapsed(*rec) {
+			cc.NoScopesBecause = "this AI agent's grant has expired"
+		}
 		return
 	}
 	// Credential-proven: derive the ceiling and any resource constraints from the
@@ -342,6 +361,10 @@ func resourceConstraintsFromACDC(acdcJsonB64 string) map[string]interface{} {
 // withdraw it; revocation is checked separately. The issuer must be the AI
 // agent's delegator, and the holder the AI agent. Returns false on any failure.
 func (s *CoreServer) grantCredentialValid(rec *store.CredentialRecord, entry mcpToken) bool {
+	if s.issuedUnderFirstVersionTooLate(rec) {
+		log.Printf("[mcp] grant %s names nobody who authorised it, though it was issued after grants began to — denying", rec.SAID)
+		return false
+	}
 	issuer := entry.DelegatorAID
 	if issuer == "" || rec.IssuerAID != issuer {
 		// A grant counts only from the identity that delegated the AI agent.
@@ -370,7 +393,7 @@ func (s *CoreServer) grantCredentialValid(rec *store.CredentialRecord, entry mcp
 		AcdcJson:           rec.AcdcJson,
 		IssuerKelEvents:    kel,
 		HolderAid:          entry.AgentAID,
-		TrustedSchemaSaids: []string{capabilityGrantSchemaSAID},
+		TrustedSchemaSaids: capabilityGrantSchemaSAIDs,
 	})
 	if err != nil || result == nil {
 		reason := "not verified"
@@ -503,4 +526,32 @@ func capabilitiesFromACDC(acdcJsonB64 string) []string {
 		}
 	}
 	return out
+}
+
+// grantLapsed reports whether a grant ended by lapsing rather than being
+// withdrawn: marked expired, or past the end it states.
+func grantLapsed(rec store.CredentialRecord) bool {
+	if rec.Status == "expired" {
+		return true
+	}
+	if rec.ExpiryDate == "" {
+		return false
+	}
+	end, err := time.Parse(time.RFC3339, rec.ExpiryDate)
+	return err == nil && !end.After(time.Now())
+}
+
+// agentGrantLapsed reports whether an AI agent's newest grant has lapsed.
+func (s *CoreServer) agentGrantLapsed(aid string) bool {
+	held := s.grantsHeldBy(aid, false)
+	if len(held) == 0 {
+		return false
+	}
+	newest := held[0]
+	for _, c := range held[1:] {
+		if issuedAt(c).After(issuedAt(newest)) {
+			newest = c
+		}
+	}
+	return grantLapsed(newest)
 }

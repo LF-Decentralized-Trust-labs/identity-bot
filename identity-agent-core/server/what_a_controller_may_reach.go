@@ -298,6 +298,8 @@ var controllerNeedsLevel = map[string]controllerRequirement{
 	// not leave with it.
 	"GET /api/controllers": {alsoRaised, authprovider.LevelAuthenticated,
 		"this lists every machine that may act for you, and the key each one uses"},
+	"GET /api/grants/awaiting-approval": {alsoRaised, authprovider.LevelAuthenticated,
+		"this lists machines and AI agents waiting for your approval, and the key each machine uses"},
 }
 
 // controllerRequirement is what one of those actions asks for.

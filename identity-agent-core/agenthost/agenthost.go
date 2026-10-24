@@ -53,6 +53,9 @@ type Host struct {
 	HTTP *http.Client
 	// Out receives what a person at the machine should read.
 	Out io.Writer
+	// PollEvery is how often the machine asks whether the owner has decided;
+	// two seconds when zero.
+	PollEvery time.Duration
 	// WorkItem and Reason are the stated purpose sent, signed, with each call.
 	WorkItem string
 	Reason   string
@@ -430,7 +433,11 @@ func (h *Host) waitForDecision(wait time.Duration) error {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("no decision yet; run `agent-host status` to check again")
 		}
-		time.Sleep(2 * time.Second)
+		every := h.PollEvery
+		if every <= 0 {
+			every = 2 * time.Second
+		}
+		time.Sleep(every)
 	}
 }
 

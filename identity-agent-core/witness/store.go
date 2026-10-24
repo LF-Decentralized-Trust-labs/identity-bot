@@ -15,6 +15,8 @@ type Store interface {
 	CountKelEvents(signerAID string) (int, error)
 
 	SaveIssuedReceipt(r IssuedReceipt) error
+	// GetIssuedReceipt is the receipt this agent issued for an event, or nil.
+	GetIssuedReceipt(signerAID, eventSAID string) (*IssuedReceipt, error)
 	GetFinalization(eventSAID string) (*FinalizationState, error)
 	SaveFinalization(f FinalizationState) error
 

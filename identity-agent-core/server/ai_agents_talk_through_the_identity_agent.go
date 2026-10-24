@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -108,19 +107,32 @@ func (s *CoreServer) thePersonAsking(r *http.Request) (agentmessage.PersonRef, *
 	if !ok {
 		return agentmessage.PersonRef{}, nil, errNoProvablePerson
 	}
+	// The person is read from the machine's record only where that record is
+	// what its grant says: a signer or an expiry written into the file is
+	// refused, not attributed. A machine with no grant awaits the owner's
+	// approval; one whose grant waits for another device is believed only
+	// where the key really is elsewhere.
+	if current, had, err := s.controllers().Get(grant.ControllerAID); err == nil && had {
+		switch {
+		case current.CredentialSAID != "":
+			if err := s.rowIsItsGrant(current); err != nil {
+				return agentmessage.PersonRef{}, nil, err
+			}
+		case !current.CredentialPending || !s.keyIsElsewhere():
+			return agentmessage.PersonRef{}, nil, fmt.Errorf("this machine was paired before machines were given grants, and awaits the owner's approval")
+		}
+		grant = current
+	}
 	person, err := s.signerOf(grant)
 	if err != nil {
 		return agentmessage.PersonRef{}, nil, err
 	}
-	// The string the middleware verified, rebuilt as of the moment it was
-	// signed — so what is kept is exactly what the signature covers, whatever
-	// has expired since.
-	stamp := strings.TrimSpace(r.Header.Get(headerControllerTimestamp))
-	at, err := time.Parse(time.RFC3339, stamp)
-	if err != nil {
-		return agentmessage.PersonRef{}, nil, err
+	// Settling the signer re-issues the machine's grant, so the grant named is
+	// read again rather than taken from before.
+	if g, ok, err := s.controllers().Get(grant.ControllerAID); err == nil && ok {
+		grant.CredentialSAID = g.CredentialSAID
 	}
-	signed, _, err := s.theStringThisMachineSigned(r, grant.ControllerAID, stamp, at.UTC())
+	signed, sig, err := s.theRequestAsSigned(r, grant)
 	if err != nil {
 		return agentmessage.PersonRef{}, nil, err
 	}
@@ -130,7 +142,7 @@ func (s *CoreServer) thePersonAsking(r *http.Request) (agentmessage.PersonRef, *
 	}
 	return person, &agentmessage.ControllerProof{
 		Controller: grant.ControllerAID, PublicKey: grant.PublicKey, SignedString: signed,
-		Signature: strings.TrimSpace(r.Header.Get(headerControllerSig)), Request: body,
+		Signature: sig, Request: body, ControllerGrant: grant.CredentialSAID,
 	}, nil
 }
 
@@ -193,7 +205,7 @@ func (s *CoreServer) signerOf(g ControllerGrant) (agentmessage.PersonRef, error)
 		return agentmessage.PersonRef{}, fmt.Errorf("this organisation has no signer on its roster and names no owner, " +
 			"so nobody it can prove is asking. A signer joins by accepting the organisation's signer invitation from their own identity")
 	case 1:
-		if _, err := s.controllers().BindSigner(g.ControllerAID, signers[0].AID); err != nil {
+		if _, err := s.bindSigner(g.ControllerAID, signers[0].AID); err != nil {
 			return agentmessage.PersonRef{}, fmt.Errorf("which signer this app belongs to could not be recorded: %w", err)
 		}
 		return signers[0], nil
@@ -318,6 +330,7 @@ func (s *CoreServer) recordMessage(cc sandbox.CallerContext, e conversation.Entr
 	cc.WorkItem = e.Conversation
 	cc.Reason = clampWhy(fmt.Sprintf("%s %s in %s, from %s to %s", e.Kind, e.MessageID, e.Conversation, e.From, e.To))
 	s.SandboxManager.RecordGovernanceEvent(cc, "agent.message."+e.Kind, "ok")
+	s.noteRecorded()
 }
 
 // ── A person speaks ──────────────────────────────────────────────────────────

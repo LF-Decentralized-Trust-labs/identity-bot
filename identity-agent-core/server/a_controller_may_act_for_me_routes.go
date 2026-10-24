@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -35,6 +36,14 @@ import (
 // and derived a pairwise owner identity for this machine. The agent is the
 // register here, never the decider.
 func (s *CoreServer) handleGrantController(w http.ResponseWriter, r *http.Request) {
+	// Who asked, read before the body is: the owner's signed request, kept as
+	// it was signed, is the authority the grant names.
+	by, release, err := s.authorityOf(r)
+	if err != nil {
+		writeError(w, http.StatusForbidden, "who asked for this grant: "+err.Error(), "")
+		return
+	}
+	defer release()
 	var req struct {
 		ControllerAID string `json:"controller_aid"`
 		PublicKey     string `json:"public_key"`
@@ -72,7 +81,11 @@ func (s *CoreServer) handleGrantController(w http.ResponseWriter, r *http.Reques
 	}
 
 	now := time.Now().UTC()
-	granted, err := s.controllers().Grant(g, now)
+	granted, err := s.grantController(g, now, by)
+	if errors.Is(err, errKeyUnavailable) {
+		writeError(w, http.StatusServiceUnavailable, err.Error(), "")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error(), "")
 		return
@@ -108,6 +121,12 @@ func onTheWire(g ControllerGrant, now time.Time) map[string]any {
 	}
 	if g.Signer != "" {
 		out["signer"] = g.Signer
+	}
+	if g.CredentialSAID != "" {
+		out["credential"] = g.CredentialSAID
+	}
+	if g.CredentialPending {
+		out["credential"] = "pending on the device that holds the identity's key"
 	}
 	if !live {
 		out["why_not"] = why
@@ -153,7 +172,7 @@ func (s *CoreServer) handleRevokeController(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "which controller", "")
 		return
 	}
-	if err := s.controllers().Revoke(aid); err != nil {
+	if err := s.revokeController(aid); err != nil {
 		writeError(w, http.StatusInternalServerError,
 			fmt.Sprintf("could not revoke %s", aid), err.Error())
 		return

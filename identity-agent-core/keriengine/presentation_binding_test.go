@@ -30,11 +30,11 @@ type holder struct {
 
 func newHolder(t *testing.T, e *Engine, name string) holder {
 	t.Helper()
-	signer, err := keri.GenerateSigner(true)
+	signer, err := testSigner(true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	nextSigner, err := keri.GenerateSigner(true)
+	nextSigner, err := testSigner(true)
 	if err != nil {
 		t.Fatal(err)
 	}

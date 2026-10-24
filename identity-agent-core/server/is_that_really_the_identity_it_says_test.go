@@ -33,6 +33,7 @@ func TestAnIdentityElsewhereIsCheckedAgainstItsPublishedHistory(t *testing.T) {
 	t.Run("an address publishing nothing is not verified", func(t *testing.T) {
 		s := agentWithNoIdentity(t)
 		s.KeriDriver = keriengine.New()
+		s.engineSigns()
 		empty := httptest.NewServer(http.HandlerFunc(
 			func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`[]`)) }))
 		defer empty.Close()
@@ -49,6 +50,7 @@ func TestAnIdentityElsewhereIsCheckedAgainstItsPublishedHistory(t *testing.T) {
 	t.Run("an address nothing answers at is not verified", func(t *testing.T) {
 		s := agentWithNoIdentity(t)
 		s.KeriDriver = keriengine.New()
+		s.engineSigns()
 		out := ask(t, s, `{"aid":"ESOMEBODY","oobi_url":"http://127.0.0.1:9/nope"}`)
 		if out.Verified {
 			t.Fatal("an unreachable address was accepted")
@@ -76,6 +78,7 @@ func TestAnIdentityElsewhereIsCheckedAgainstItsPublishedHistory(t *testing.T) {
 	t.Run("naming no identity or no address is refused", func(t *testing.T) {
 		s := agentWithNoIdentity(t)
 		s.KeriDriver = keriengine.New()
+		s.engineSigns()
 		for _, body := range []string{
 			`{"aid":"","oobi_url":"https://x.test/oobi"}`,
 			`{"aid":"ESOMEBODY","oobi_url":""}`,

@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"identity-agent-core/sqlitedb"
 	"os"
 	"path/filepath"
 	"strings"
@@ -103,7 +104,7 @@ func OpenStore(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", filepath.Join(dir, "conversations.db")+"?_journal_mode=WAL&_busy_timeout=5000")
+	db, err := sqlitedb.Open(filepath.Join(dir, "conversations.db"), sqlitedb.Settings{})
 	if err != nil {
 		return nil, err
 	}
@@ -332,6 +333,33 @@ func (s *Store) List(party string, limit int) ([]Conversation, error) {
 		out = append(out, c)
 	}
 	return out, nil
+}
+
+// Heads returns every conversation's newest entry: its sequence and hash.
+func (s *Store) Heads() (map[string]Conversation, error) {
+	rows, err := s.db.Query(`SELECT id, seq, head_hash FROM conversations`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]Conversation{}
+	for rows.Next() {
+		var c Conversation
+		if err := rows.Scan(&c.ID, &c.Seq, &c.HeadHash); err != nil {
+			return nil, err
+		}
+		out[c.ID] = c
+	}
+	return out, rows.Err()
+}
+
+// EntryAt returns a conversation's entry at seq.
+func (s *Store) EntryAt(conv string, seq int) (Entry, error) {
+	e, err := scanEntry(s.db.QueryRow(`SELECT `+entryColumns+` FROM entries WHERE conversation = ? AND seq = ?`, conv, seq))
+	if errors.Is(err, sql.ErrNoRows) {
+		return e, ErrNotFound
+	}
+	return e, err
 }
 
 // IsParty reports whether party has been brought into a conversation: it

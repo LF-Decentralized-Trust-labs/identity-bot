@@ -215,6 +215,10 @@ func (s *CoreServer) handleRecoveryRotation(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	if err := s.mayRotateHere(req.Name); err != nil {
+		writeKeyNotHeldHere(w)
+		return
+	}
 	result, err := s.KeriDriver.RotateAid(req.Name, req.NewPublicKey, req.NewNextPublicKey)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Rotation failed", err.Error())
@@ -306,6 +310,12 @@ func (s *CoreServer) handleRecoveryRootAIDRotation(w http.ResponseWriter, r *htt
 			"Break-glass root-AID rotation is gated pending security review of the signed old-root delegation anchor")
 		return
 	}
+	if !recovery.RootAIDRotationSigned {
+		writeError(w, http.StatusServiceUnavailable, "Root-AID rotation not available",
+			"Break-glass root-AID rotation rotates the old root and writes the new root's first interaction, "+
+				"and neither is yet signed by its key here, so it is refused before anything is made")
+		return
+	}
 	var req recovery.RootAIDRotationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
@@ -326,6 +336,12 @@ func (s *CoreServer) handleRecoveryRootAIDRotation(w http.ResponseWriter, r *htt
 		watcherHints = s.WatcherService.WatcherHints()
 	}
 
+	if identity, err := s.DataStore.GetIdentity(); err == nil && identity != nil {
+		if err := s.mayRotateHere(identity.AID); err != nil {
+			writeKeyNotHeldHere(w)
+			return
+		}
+	}
 	adapter := &recovery.KeriDriverAdapter{Driver: s.KeriDriver}
 	result, err := recovery.RotateRootAID(req, adapter, s.DataStore, s.DataDir, watcherHints)
 	if err != nil {

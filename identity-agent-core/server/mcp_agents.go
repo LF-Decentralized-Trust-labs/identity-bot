@@ -24,6 +24,11 @@ import (
 // invoke time.
 var capabilityGrantSchemaSAID = schemas.AIAgentGrant.Schema.SAID
 
+// capabilityGrantSchemaSAIDs are every version of the grant schema still
+// honoured: the current one, and the first, which grants issued before edges
+// carry.
+var capabilityGrantSchemaSAIDs = []string{capabilityGrantSchemaSAID, schemas.AIAgentGrantV1.Schema.SAID}
+
 // Provisioning an AI-agent identity (the IA-mediated model). One
 // local-owner call: mint a delegated agent AID chained to the owner root, bind
 // an MCP token to it, and set the token's capability ceiling. The agent then
@@ -43,6 +48,13 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		jsonError(w, "asset handler not initialized", http.StatusServiceUnavailable)
 		return
 	}
+	// Who asked, read before the body is: the request is kept as it was signed.
+	by, release, err := s.authorityOf(r)
+	if err != nil {
+		jsonError(w, "who asked for this AI agent: "+err.Error(), http.StatusForbidden)
+		return
+	}
+	defer release()
 	var req struct {
 		Name         string   `json:"name"`
 		Capabilities []string `json:"capabilities"`
@@ -94,8 +106,12 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		return
 	}
 	agent, err := s.assetHandler.ProvisionAgentAsset(req.Name, req.Capabilities, cfg, req.ValidUntil, req.ResourceConstraints)
-	if errors.Is(err, asset.ErrAgentNameTaken) {
+	if errors.Is(err, asset.ErrAgentNameTaken) || errors.Is(err, asset.ErrKeyElsewhere) {
 		jsonError(w, err.Error(), http.StatusConflict)
+		return
+	}
+	if errors.Is(err, asset.ErrKeyUnavailable) {
+		jsonError(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
 	if err != nil {
@@ -107,9 +123,27 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 	// to the agent's AID that formalizes the ceiling. The endpoint verifies it at
 	// invoke time, so authority is credential-proven rather than a server-side list.
 	// Non-fatal: on a driverless build the stored ceiling still governs.
-	grantSAID, err := s.issueCapabilityGrant(agent)
+	grantSAID, err := s.issueCapabilityGrant(agent, by)
+	grantPending := false
+	if errors.Is(err, errKeyElsewhere) {
+		// The identity's key is on another device, which alone can issue the
+		// grant. The AI agent is made, may do nothing, and says its grant is
+		// waiting for that device, as a machine's does.
+		grantPending, err = true, nil
+	}
 	if err != nil {
-		log.Printf("[mcp] agent %s provisioned without a capability grant (%v) — falling back to the stored ceiling", agent.PairwiseAID, err)
+		// With an engine, a grant that cannot be issued, or does not rest on
+		// the request that asked for it, ends the provisioning: an AI agent
+		// with no grant would otherwise act on a ceiling nobody can show was
+		// authorised. Only a build with no engine has no grants at all.
+		if s.KeriDriver != nil {
+			if derr := s.assetHandler.Store.DeleteAsset(agent.ID); derr != nil {
+				log.Printf("[mcp] agent %s was not granted and could not be removed: %v", agent.PairwiseAID, derr)
+			}
+			jsonError(w, "the AI agent was not created: its grant could not be issued: "+err.Error(), http.StatusForbidden)
+			return
+		}
+		log.Printf("[mcp] agent %s provisioned on a build with no engine, so with no grant: the stored ceiling governs", agent.PairwiseAID)
 	}
 
 	// Bind an MCP token to the agent identity. Token name = the agent's asset id
@@ -133,6 +167,7 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		DelegatorAID: agent.DelegatorAID,
 		AssetID:      agent.ID,
 		GrantSAID:    grantSAID,
+		GrantPending: grantPending,
 	})
 	if err := s.saveMCPTokens(toks); err != nil {
 		jsonError(w, "failed to persist agent token", http.StatusInternalServerError)
@@ -150,6 +185,7 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		"agent_config":  cfg,
 		"grant_said":    grantSAID,
 		"grant_issued":  grantSAID != "",
+		"grant_pending": grantPending,
 		"token":         plaintext,
 		"note":          "store this token now; only its hash is kept. Every call it makes is recorded as this agent AID, chained to the owner root.",
 	})
@@ -185,6 +221,9 @@ type agentView struct {
 	Config              *asset.AgentConfig     `json:"agent_config,omitempty"`
 	Status              string                 `json:"status"` // active | revoked
 	CreatedAt           time.Time              `json:"created_at"`
+	// GrantPending says the AI agent may do nothing yet: its grant waits for
+	// the device that holds the identity's key.
+	GrantPending bool `json:"grant_pending,omitempty"`
 }
 
 // handleListAgents lists the org's ai_agent assets — the workforce roster.
@@ -197,6 +236,14 @@ func (s *CoreServer) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	}
 	// Map asset id → grant status via the credential store (revoked grants show as revoked).
 	agents := s.assetHandler.ListAgents()
+	pending := map[string]bool{}
+	mcpTokensMu.Lock()
+	for _, t := range s.loadMCPTokens() {
+		if t.GrantPending && t.GrantSAID == "" {
+			pending[t.AssetID] = true
+		}
+	}
+	mcpTokensMu.Unlock()
 	out := make([]agentView, 0, len(agents))
 	for _, a := range agents {
 		out = append(out, agentView{
@@ -209,6 +256,7 @@ func (s *CoreServer) handleListAgents(w http.ResponseWriter, r *http.Request) {
 			Config:              a.AgentConfig,
 			Status:              s.agentStatus(a.PairwiseAID),
 			CreatedAt:           a.CreatedAt,
+			GrantPending:        pending[a.ID],
 		})
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -276,7 +324,15 @@ func (s *CoreServer) handleSetAgentCapabilities(w http.ResponseWriter, r *http.R
 		jsonError(w, "asset handler not initialized", http.StatusServiceUnavailable)
 		return
 	}
+	// Who asked, read before the body is: the request is kept as it was signed.
+	by, release, err := s.authorityOf(r)
+	if err != nil {
+		jsonError(w, "who asked for this change: "+err.Error(), http.StatusForbidden)
+		return
+	}
+	defer release()
 	id := chi.URLParam(r, "id")
+	by.About = id
 	var req struct {
 		Capabilities []string `json:"capabilities"`
 		// Absent keeps the constraints the grant already has; present, even
@@ -319,8 +375,27 @@ func (s *CoreServer) handleSetAgentCapabilities(w http.ResponseWriter, r *http.R
 	// narrowing an AI agent's ceiling silently left it with the wider one. Only a
 	// build with no engine, which has no grants at all, changes the record alone.
 	grantSAID := ""
+	grantPending := false
 	if s.KeriDriver != nil {
-		g, err := s.issueCapabilityGrant(&candidate)
+		// Where the key is on another device, an AI agent whose grant is
+		// already issued is not re-granted: the grant it replaces could not be
+		// withdrawn here, and both would stand. Refused before anything is
+		// built or asked for.
+		if kerr := s.keyCanSign(); kerr != nil && s.agentHasIssuedGrant(id) {
+			jsonError(w, "the grant could not be re-issued, so nothing was changed: "+kerr.Error()+
+				", and this AI agent's current grant could not be withdrawn here", keyErrorStatus(kerr))
+			return
+		}
+		g, err := s.issueCapabilityGrant(&candidate, by)
+		if errors.Is(err, errKeyElsewhere) {
+			// Its grant waits for the device that holds the key, which has
+			// been asked to sign it; the change is recorded and waits with it.
+			err, grantPending = nil, true
+		}
+		if errors.Is(err, errKeyUnavailable) {
+			jsonError(w, "the grant could not be re-issued, so nothing was changed: "+err.Error(), http.StatusServiceUnavailable)
+			return
+		}
 		if err != nil {
 			jsonError(w, "the grant could not be re-issued, so nothing was changed: "+err.Error(),
 				http.StatusBadGateway)
@@ -347,6 +422,9 @@ func (s *CoreServer) handleSetAgentCapabilities(w http.ResponseWriter, r *http.R
 			toks[i].Scopes = updated.Capabilities
 			if grantSAID != "" {
 				toks[i].GrantSAID = grantSAID
+			}
+			if grantPending {
+				toks[i].GrantPending = true
 			}
 			touched++
 		}
@@ -410,7 +488,7 @@ func (s *CoreServer) ensureRegistry(issuerRootAID string) (string, error) {
 // agent's AID, persists the credential and its anchoring KEL event (so a verifier
 // can resolve the issuer KEL), and returns the grant SAID. Requires the KERI
 // driver; on any failure the caller falls back to the stored ceiling.
-func (s *CoreServer) issueCapabilityGrant(agent *asset.Asset) (string, error) {
+func (s *CoreServer) issueCapabilityGrant(agent *asset.Asset, by authority) (string, error) {
 	agentAID, issuerRootAID := agent.PairwiseAID, agent.DelegatorAID
 	capabilities := agent.Capabilities
 	if capabilities == nil {
@@ -428,7 +506,7 @@ func (s *CoreServer) issueCapabilityGrant(agent *asset.Asset) (string, error) {
 		expiry = agent.GrantValidUntil.UTC().Format(time.RFC3339)
 	}
 	superseded := s.grantsHeldBy(agentAID, true)
-	grantSAID, err := s.issueAssetCredential(schemas.AIAgentGrant, agentAID, issuerRootAID, claims, expiry)
+	grantSAID, err := s.issueAssetCredential(schemas.AIAgentGrant, agentAID, issuerRootAID, claims, expiry, by)
 	if err != nil {
 		return "", err
 	}
@@ -442,14 +520,12 @@ func (s *CoreServer) issueCapabilityGrant(agent *asset.Asset) (string, error) {
 	// what its gateway reads — and the failure is reported, never skipped.
 	for i := range superseded {
 		old := superseded[i]
-		status := "revoked"
-		if _, err := s.revokeIssuedCredential(&old); err != nil {
+		if _, _, err := s.withdrawCredential(&old); err != nil {
 			log.Printf("[mcp] grant %s superseded by %s: its revocation was not recorded in the registry (%v); "+
 				"it is marked superseded and no longer admits anything here", old.SAID, grantSAID, err)
-			status = "superseded"
-		}
-		if err := s.DataStore.UpdateCredentialStatus(old.SAID, status); err != nil {
-			log.Printf("[mcp] grant %s superseded by %s but not marked %s: %v", old.SAID, grantSAID, status, err)
+			if err := s.DataStore.UpdateCredentialStatus(old.SAID, "superseded"); err != nil {
+				log.Printf("[mcp] grant %s superseded by %s but not marked so: %v", old.SAID, grantSAID, err)
+			}
 		}
 	}
 	log.Printf("[mcp] issued capability grant %s to agent %s (%d capabilities)", grantSAID, agentAID, len(capabilities))
@@ -505,4 +581,47 @@ func nonNilConstraints(c map[string]interface{}) map[string]interface{} {
 		return map[string]interface{}{}
 	}
 	return c
+}
+
+// agentHasIssuedGrant reports whether an AI agent holds a grant already
+// issued.
+func (s *CoreServer) agentHasIssuedGrant(assetID string) bool {
+	mcpTokensMu.Lock()
+	defer mcpTokensMu.Unlock()
+	for _, t := range s.loadMCPTokens() {
+		if t.AssetID == assetID && t.GrantSAID != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// identityKeyHeldHere reports whether this Identity Agent holds the
+// identity's key, so can sign what it writes into the identity's key log.
+func (s *CoreServer) identityKeyHeldHere() bool {
+	_, err := s.identitySigningSeed()
+	return err == nil
+}
+
+// agentGrantPendingFor reports whether an AI agent's grant waits for the
+// device that holds the identity's key.
+func (s *CoreServer) agentGrantPendingFor(assetID string) bool {
+	mcpTokensMu.Lock()
+	defer mcpTokensMu.Unlock()
+	for _, t := range s.loadMCPTokens() {
+		if t.AssetID == assetID && t.GrantSAID == "" && t.GrantPending {
+			return true
+		}
+	}
+	return false
+}
+
+// keyErrorStatus is how a failure to sign as the identity is answered: the
+// key held elsewhere is a conflict to resolve there; a key held here and
+// unreadable right now is this machine's fault, and temporary.
+func keyErrorStatus(err error) int {
+	if errors.Is(err, errKeyUnavailable) {
+		return http.StatusServiceUnavailable
+	}
+	return http.StatusConflict
 }

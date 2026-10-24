@@ -201,7 +201,14 @@ func (s *CoreServer) handleApproveBody(w http.ResponseWriter, r *http.Request) {
 		"keys_digest": b.KeysDigest(), "grade": b.Grade, "claimed_grade": b.ClaimedGrade,
 		"platform": b.Platform, "placement": b.Placement,
 	}
-	credSAID, err := s.issueAssetCredential(schemas.AIAgentBody, a.PairwiseAID, a.DelegatorAID, claims, "")
+	by, release, err := s.authorityOf(r)
+	if err != nil {
+		jsonError(w, "who approved this machine: "+err.Error(), http.StatusForbidden)
+		return
+	}
+	defer release()
+	by.About = b.ID
+	credSAID, err := s.issueAssetCredential(schemas.AIAgentBody, a.PairwiseAID, a.DelegatorAID, claims, "", by)
 	if err != nil {
 		jsonError(w, "the body credential could not be issued, so the body was not approved: "+err.Error(),
 			http.StatusBadGateway)
@@ -213,10 +220,10 @@ func (s *CoreServer) handleApproveBody(w http.ResponseWriter, r *http.Request) {
 		// expired, or the record could not be written. Withdraw the credential,
 		// or the registry would show a live body the owner never got.
 		if rec, _ := s.DataStore.GetCredential(credSAID); rec != nil {
-			if _, rerr := s.revokeIssuedCredential(rec); rerr != nil {
+			if _, _, rerr := s.withdrawCredential(rec); rerr != nil {
 				log.Printf("[body] credential %s issued for a body that did not become live, and its revocation failed: %v", credSAID, rerr)
+				_ = s.DataStore.UpdateCredentialStatus(credSAID, "revoked")
 			}
-			_ = s.DataStore.UpdateCredentialStatus(credSAID, "revoked")
 		}
 		jsonError(w, err.Error(), http.StatusConflict)
 		return
@@ -284,16 +291,14 @@ func (s *CoreServer) handleRevokeBody(w http.ResponseWriter, r *http.Request) {
 		writeJSONStatus(w, http.StatusOK, map[string]any{"revoked": b, "tel_revoked": rec != nil})
 		return
 	}
-	if _, err := s.revokeIssuedCredential(rec); err != nil {
+	telRevoked, status, err := s.withdrawCredential(rec)
+	if err != nil {
 		jsonError(w, "the machine can no longer speak as the AI agent, but the revocation could not be "+
 			"written to the registry, so others checking it would still see it live — try again: "+err.Error(),
 			http.StatusBadGateway)
 		return
 	}
-	if err := s.DataStore.UpdateCredentialStatus(rec.SAID, "revoked"); err != nil {
-		log.Printf("[body] %s revoked in the registry, but not marked revoked here: %v", b.Host, err)
-	}
-	writeJSONStatus(w, http.StatusOK, map[string]any{"revoked": b, "tel_revoked": true})
+	writeJSONStatus(w, http.StatusOK, map[string]any{"revoked": b, "tel_revoked": telRevoked, "status": status})
 }
 
 // bodyEnrolRequest is what a machine sends to ask to become a body.
@@ -471,7 +476,7 @@ func (s *CoreServer) identifyBody(r *http.Request) (agentbody.Binding, bool, err
 	}
 	// The binding is live only while its credential is: a body revoked in the
 	// registry but somehow still marked active here is refused.
-	if rec, _ := s.DataStore.GetCredential(b.CredentialSAID); rec == nil || !isUsableStatus(rec.Status) {
+	if rec, _ := s.DataStore.GetCredential(b.CredentialSAID); rec == nil || !isUsableStatus(rec.Status) || s.issuedUnderFirstVersionTooLate(rec) {
 		return agentbody.Binding{}, true, fmt.Errorf("this body's credential is not in force")
 	}
 	if err := verifyBodySignature(r, b); err != nil {

@@ -83,6 +83,12 @@ it. A refusal is filed under the conversation it names only when the caller's
 signature has been checked and the caller is a party to that conversation; otherwise
 it is filed under none, so nobody can write rows into a conversation they are not in.
 
+*Amended 2026-10-22.* A person's message keeps, beside the controller's signed request,
+the identifier of that controller's Controller Grant (ADR-044, ADR-045), inside what the
+Identity Agent countersigns. The grant names the signer, and is anchored in the
+organisation's key log, so who opened a conversation is shown by a credential anybody can
+check.
+
 **Every message is signed twice, for two different claims:**
 1. **The sender's own statement.** A body signs it with its machine key over a
    fixed, line-separated string. The string covers the conversation, the kind of
@@ -175,8 +181,12 @@ asking, and must sign as themselves.
   statement made with a key it never held, nor a controller's signature. The sender's
   own signature is therefore the strong evidence of who said what. A compromised
   Identity Agent could still invent a controller grant or issue a body credential to a
-  key of its own, and sign as that. Controller grants are not yet anchored anywhere a
-  verifier could check.
+  key of its own, and sign as that. *(Amended 2026-10-22: controller grants are now
+  issued as credentials anchored in the organisation's key log, ADR-044. That records
+  when the organisation said a machine was authorised and as whom; it does not stop an
+  Identity Agent whose operator controls it from issuing one to its own key. Each
+  credential issued on a machine's grant carries the machine's own signature over the
+  request, which cannot be made up afterwards, ADR-045.)*
 - A reply sent with the body's `reply` tool names the brain's session but carries no
   digest of the run, because the run has not finished when it is sent. Only an answer
   given by ending the turn carries the digest.
@@ -186,8 +196,51 @@ asking, and must sign as themselves.
   conversations.
 - A person's own requests are signed but not sealed, so a relay where TLS ends can read
   the question and the answer. The bodies' legs are sealed.
-- Anchoring a conversation's head in a key event log is not part of this decision. Until
-  it is anchored, deleting the last entries of a conversation is not detectable from
-  the record alone.
+- *Amended 2026-10-22.* **The record is anchored.** A record identity, delegated from the
+  organisation and approved in its key log, writes interactions sealing the digest of a
+  statement that names the governance log's newest row and its hash, and the newest entry
+  of every conversation that grew since it was last anchored, by sequence. The record
+  identity's key log is the authority: each of its interactions must have its statement,
+  each statement must be sealed there, and each row and entry a statement names must
+  still be there, unchanged. Its tip is also kept outside the database, signed by the
+  record identity's key: that stops a tip being forged or edited without the key, but
+  not an older signed tip being restored, which only the witnesses catch. The record
+  identity's keys come from one fixed place in the record pool, so an attempt that fails
+  never moves it. The organisation's key log is searched for the record identities it
+  approved, recognised by that key: there must be exactly one, and it must be the one
+  named. Where the record identity's file is missing but the organisation approved one,
+  or anchors exist, the record is broken, and no second record identity is made in its
+  place. Anchoring runs for an organisation and for any Identity Agent holding AI
+  agents, every five minutes, sooner after twenty recorded messages, and within half the
+  time a quiet conversation takes to close, so its last entry is anchored before it
+  closes. Each anchoring is kept with its interaction before the interaction is
+  appended.
+
+  Every Identity Agent, whether or not it anchors a record, brings its witnesses up to date
+  with its own key log after it appends to it and on every tick, so no witness is left
+  holding back its events for want of one it never received.
+
+  **What it proves depends on the witnesses.** The record identity names the
+  organisation's witnesses and threshold. Each witness is brought up to date in order,
+  by one worker at a time that always sends the newest: first with the organisation's
+  own key log, which carries its approval of the record identity, then with the record
+  identity's, each from where the witness says it stopped. A witness that witnesses for the
+  organisation, by the ordinary agreement, takes the record identity on from that
+  approval, and from no other. Once an anchoring is receipted, removing it or anything
+  it fixes, or restoring an older tip, contradicts what the witnesses hold. The check
+  asks the record identity's witnesses, all at once and for at most two seconds, how far
+  they hold its key log, while no anchoring can extend it. It believes an answer only
+  when it is signed by that witness's own key together with the nonce it was asked
+  with, so a replayed or forwarded answer counts for nothing; a bootstrap witness is
+  asked at its pinned address, whatever a contact says; a witness that does not answer
+  so is treated as not answering. It
+  reports whether the tip is confirmed by witnesses or rests on this Identity Agent's
+  word alone; a witness holding more than is here, or something else, is the record
+  trimmed or rewritten, and the record is broken. An organisation that names no
+  witnesses, or whose witnesses do not answer, has nobody outside to contradict it. The
+  tip file sits beside the database, in the same data directory, with the same exposure,
+  so against someone who can write that directory the anchors then prove nothing. The
+  check also reports how far the witnesses have receipted, and how many rows and entries
+  no anchor fixes yet; nothing anchored is reported as unavailable, never as checked.
 - Running the brain as a separate Windows user is not available yet. On a Windows
   machine a person also uses, the brain runs as that person's user.

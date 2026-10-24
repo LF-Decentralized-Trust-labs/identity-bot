@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -92,5 +93,15 @@ func TestRequireSignedRequestEnforced(t *testing.T) {
 	plain := ProvidedCapability{ID: "infra.zone.list"}
 	if err := az.AuthorizeIngress(context.Background(), bearer, plain); err != nil {
 		t.Fatalf("a normal capability should still accept a scoped bearer caller, got %v", err)
+	}
+}
+
+// A caller with no scopes for a reason its owner can act on is told it.
+func TestADenialSaysWhyTheCallerHasNoScopes(t *testing.T) {
+	err := structuralAuthorizer{}.AuthorizeIngress(context.Background(),
+		CallerContext{Remote: true, NoScopesBecause: "this AI agent is awaiting the owner's approval"},
+		ProvidedCapability{ID: "system.info.read"})
+	if err == nil || !strings.Contains(err.Error(), "awaiting the owner's approval") {
+		t.Fatalf("the denial says %v", err)
 	}
 }

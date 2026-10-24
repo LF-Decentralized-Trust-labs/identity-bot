@@ -58,7 +58,36 @@ func (e *Engine) InceptRegistry(name string) (*drivers.DriverRegistryInceptRespo
 		return nil, err
 	}
 	defer release()
+	p, err := e.prepareRegistry(id)
+	if err != nil {
+		return nil, err
+	}
+	return e.appendPreparedRegistry(id, p)
+}
 
+// PrepareRegistryInception builds a registry's inception and the interaction
+// that anchors it, on the key log as it stands now, without appending them.
+func (e *Engine) PrepareRegistryInception(name string) (*drivers.PreparedRegistry, error) {
+	id, release, err := e.holdForWriting(name)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return e.prepareRegistry(id)
+}
+
+// AppendPreparedRegistry appends a registry's inception exactly as it was
+// prepared, while its interaction still extends the key log's tip.
+func (e *Engine) AppendPreparedRegistry(name string, p *drivers.PreparedRegistry) (*drivers.DriverRegistryInceptResponse, error) {
+	id, release, err := e.holdForWriting(name)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return e.appendPreparedRegistry(id, p)
+}
+
+func (e *Engine) prepareRegistry(id *identity) (*drivers.PreparedRegistry, error) {
 	// A registry needs a nonce, or two registries founded by the same issuer
 	// would have the same identifier — and an issuance into one would read as
 	// an issuance into the other.
@@ -82,15 +111,17 @@ func (e *Engine) InceptRegistry(name string) (*drivers.DriverRegistryInceptRespo
 	if registrySAID == "" {
 		registrySAID = vcpEvent.SAID
 	}
-
 	seal, err := eventSeal(registrySAID, "0", vcpEvent.SAID)
 	if err != nil {
 		return nil, err
 	}
+	e.state.mu.RLock()
+	prior, sn := id.LastSAID, id.SN+1
+	e.state.mu.RUnlock()
 	ixn, err := keri.BuildInteraction(keri.InteractionInput{
 		Prefix:    id.AID,
-		PriorSAID: id.LastSAID,
-		SN:        id.SN + 1,
+		PriorSAID: prior,
+		SN:        sn,
 		Data:      []json.RawMessage{seal},
 	})
 	if err != nil {
@@ -100,31 +131,68 @@ func (e *Engine) InceptRegistry(name string) (*drivers.DriverRegistryInceptRespo
 	if err != nil {
 		return nil, err
 	}
+	return &drivers.PreparedRegistry{Issuer: id.AID, Registry: registrySAID, VcpRaw: vcp, VcpSAID: vcpEvent.SAID,
+		IxnRaw: ixn, IxnSAID: ixnEvent.SAID, SN: int(ixnEvent.SN), Prior: prior}, nil
+}
+
+func (e *Engine) appendPreparedRegistry(id *identity, p *drivers.PreparedRegistry) (*drivers.DriverRegistryInceptResponse, error) {
+	if p == nil || p.Issuer != id.AID {
+		return nil, fmt.Errorf("the prepared registry is not this identity's")
+	}
+	e.state.mu.RLock()
+	tipSAID, tipSN := id.LastSAID, id.SN
+	e.state.mu.RUnlock()
+	if p.Prior != tipSAID || p.SN != tipSN+1 {
+		return nil, drivers.ErrStalePreparation
+	}
+	vcpEvent, err := keri.VerifyTELEvent(p.VcpRaw)
+	if err != nil || vcpEvent.SAID != p.VcpSAID {
+		return nil, fmt.Errorf("the prepared registry inception does not verify")
+	}
+	vcpBody, err := eventMap(p.VcpRaw)
+	if err != nil {
+		return nil, err
+	}
+	registrySAID, _ := vcpBody["i"].(string)
+	if registrySAID == "" {
+		registrySAID = vcpEvent.SAID
+	}
+	if registrySAID != p.Registry {
+		return nil, fmt.Errorf("the prepared registry inception is of another registry")
+	}
+	seal, err := eventSeal(registrySAID, "0", vcpEvent.SAID)
+	if err != nil {
+		return nil, err
+	}
+	want, err := keri.BuildInteraction(keri.InteractionInput{Prefix: id.AID, PriorSAID: p.Prior, SN: p.SN, Data: []json.RawMessage{seal}})
+	if err != nil || string(want) != string(p.IxnRaw) {
+		return nil, fmt.Errorf("the prepared interaction does not anchor the prepared registry")
+	}
+	vcp, ixn := p.VcpRaw, p.IxnRaw
+	ixnEvent, err := keri.ParseEvent(ixn)
+	if err != nil {
+		return nil, err
+	}
 	ixnBody, err := eventMap(ixn)
 	if err != nil {
 		return nil, err
 	}
-	ixnEntry, err := entry(ixn)
+	sig, err := e.commit(id, ixnEvent.SN, ixn, vcp)
 	if err != nil {
 		return nil, err
 	}
-	if err := e.commit(id.AID, ixnEvent.SN, ixn, vcp); err != nil {
+	if err := e.extend(id, ixn, sig, func() {
+		if id.Registries == nil {
+			id.Registries = map[string]*registry{}
+		}
+		id.Registries[registrySAID] = &registry{
+			SAID:         registrySAID,
+			TEL:          map[string][][]byte{},
+			IssuanceSAID: map[string]string{},
+		}
+	}); err != nil {
 		return nil, err
 	}
-
-	e.state.mu.Lock()
-	if id.Registries == nil {
-		id.Registries = map[string]*registry{}
-	}
-	id.Registries[registrySAID] = &registry{
-		SAID:         registrySAID,
-		TEL:          map[string][][]byte{},
-		IssuanceSAID: map[string]string{},
-	}
-	id.SN = int(ixnEvent.SN)
-	id.LastSAID = ixnEvent.SAID
-	id.KEL = append(id.KEL, ixnEntry)
-	e.state.mu.Unlock()
 
 	return &drivers.DriverRegistryInceptResponse{
 		RegistrySaid:   registrySAID,
@@ -164,6 +232,40 @@ func (e *Engine) issue(name string, claims map[string]interface{}, schemaSaid, h
 		return nil, err
 	}
 	defer release()
+	p, err := e.prepare(id, claims, schemaSaid, holderAid, edges, registrySaid)
+	if err != nil {
+		return nil, err
+	}
+	return e.appendPrepared(id, p)
+}
+
+// PrepareCredentialInRegistry builds an issuance into a registry without
+// appending it: the credential, its issuance event, and the interaction that
+// anchors it, on the key log as it stands now.
+func (e *Engine) PrepareCredentialInRegistry(name string, claims map[string]interface{}, schemaSaid, holderAid string, edges map[string]interface{}, registrySaid string) (*drivers.PreparedIssuance, error) {
+	if registrySaid == "" {
+		return nil, fmt.Errorf("a prepared issuance is into a registry")
+	}
+	id, release, err := e.holdForWriting(name)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return e.prepare(id, claims, schemaSaid, holderAid, edges, registrySaid)
+}
+
+// AppendPreparedIssuance appends an issuance exactly as it was prepared, while
+// its interaction still extends the key log's tip.
+func (e *Engine) AppendPreparedIssuance(name string, p *drivers.PreparedIssuance) (*drivers.DriverIssueCredentialResponse, error) {
+	id, release, err := e.holdForWriting(name)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return e.appendPrepared(id, p)
+}
+
+func (e *Engine) prepare(id *identity, claims map[string]interface{}, schemaSaid, holderAid string, edges map[string]interface{}, registrySaid string) (*drivers.PreparedIssuance, error) {
 	if schemaSaid == "" {
 		return nil, fmt.Errorf("a credential needs the identifier of the schema it satisfies")
 	}
@@ -171,7 +273,6 @@ func (e *Engine) issue(name string, claims map[string]interface{}, schemaSaid, h
 	if err != nil {
 		return nil, err
 	}
-
 	in := keri.CredentialInput{
 		SchemaSAID: schemaSaid,
 		Issuer:     id.AID,
@@ -189,7 +290,6 @@ func (e *Engine) issue(name string, claims map[string]interface{}, schemaSaid, h
 		}
 		in.Source = src
 	}
-
 	acdc, err := keri.BuildCredential(in)
 	if err != nil {
 		return nil, fmt.Errorf("building the credential: %w", err)
@@ -198,24 +298,14 @@ func (e *Engine) issue(name string, claims map[string]interface{}, schemaSaid, h
 	if err != nil {
 		return nil, fmt.Errorf("the credential this engine built does not verify: %w", err)
 	}
-	acdcBody, err := eventMap(acdc)
-	if err != nil {
-		return nil, err
-	}
-
 	// What gets anchored depends on whether there is a registry. With one, the
 	// issuance event is anchored and the credential's status is readable from
 	// the registry. Without one, the credential itself is anchored, which
 	// records that it was issued and leaves no place to record that it was not
 	// revoked.
-	var (
-		issRaw  []byte
-		issSAID string
-		sealID  = cred.SAID
-		sealSN  = "0"
-	)
+	p := &drivers.PreparedIssuance{Issuer: id.AID, Registry: registrySaid, AcdcRaw: acdc, AcdcSAID: cred.SAID}
 	if registrySaid != "" {
-		issRaw, err = keri.BuildIssuance(keri.IssuanceInput{
+		issRaw, err := keri.BuildIssuance(keri.IssuanceInput{
 			CredentialSAID: cred.SAID,
 			Registry:       registrySaid,
 			DT:             time.Now().UTC().Format("2006-01-02T15:04:05.000000-07:00"),
@@ -227,18 +317,19 @@ func (e *Engine) issue(name string, claims map[string]interface{}, schemaSaid, h
 		if err != nil {
 			return nil, fmt.Errorf("the issuance event does not verify: %w", err)
 		}
-		issSAID = issEvent.SAID
-		sealID = cred.SAID
+		p.IssRaw, p.IssSAID = issRaw, issEvent.SAID
 	}
-
-	seal, err := eventSeal(sealID, sealSN, firstNonEmpty(issSAID, cred.SAID))
+	seal, err := eventSeal(cred.SAID, "0", firstNonEmpty(p.IssSAID, cred.SAID))
 	if err != nil {
 		return nil, err
 	}
+	e.state.mu.RLock()
+	prior, sn := id.LastSAID, id.SN+1
+	e.state.mu.RUnlock()
 	ixn, err := keri.BuildInteraction(keri.InteractionInput{
 		Prefix:    id.AID,
-		PriorSAID: id.LastSAID,
-		SN:        id.SN + 1,
+		PriorSAID: prior,
+		SN:        sn,
 		Data:      []json.RawMessage{seal},
 	})
 	if err != nil {
@@ -248,49 +339,89 @@ func (e *Engine) issue(name string, claims map[string]interface{}, schemaSaid, h
 	if err != nil {
 		return nil, err
 	}
-	ixnBody, err := eventMap(ixn)
+	p.IxnRaw, p.IxnSAID, p.SN, p.Prior = ixn, ixnEvent.SAID, int(ixnEvent.SN), prior
+	return p, nil
+}
+
+// appendPrepared appends a prepared issuance, checked to be what it says and
+// to extend the tip. The caller holds id for writing.
+func (e *Engine) appendPrepared(id *identity, p *drivers.PreparedIssuance) (*drivers.DriverIssueCredentialResponse, error) {
+	if p == nil || p.Issuer != id.AID {
+		return nil, fmt.Errorf("the prepared issuance is not this identity's")
+	}
+	e.state.mu.RLock()
+	tipSAID, tipSN := id.LastSAID, id.SN
+	e.state.mu.RUnlock()
+	if p.Prior != tipSAID || p.SN != tipSN+1 {
+		return nil, drivers.ErrStalePreparation
+	}
+	cred, err := keri.VerifyCredential(p.AcdcRaw)
+	if err != nil || cred.SAID != p.AcdcSAID {
+		return nil, fmt.Errorf("the prepared credential does not verify")
+	}
+	ixnEvent, err := keri.ParseEvent(p.IxnRaw)
+	if err != nil || ixnEvent.SAID != p.IxnSAID || int(ixnEvent.SN) != p.SN {
+		return nil, fmt.Errorf("the prepared interaction is not what was prepared")
+	}
+	// The interaction must anchor exactly this issuance, or the pair would be
+	// appended as proof of each other when it is not.
+	seal, err := eventSeal(p.AcdcSAID, "0", firstNonEmpty(p.IssSAID, p.AcdcSAID))
 	if err != nil {
 		return nil, err
 	}
-	ixnEntry, err := entry(ixn)
-	if err != nil {
-		return nil, err
+	want, err := keri.BuildInteraction(keri.InteractionInput{Prefix: id.AID, PriorSAID: p.Prior, SN: p.SN, Data: []json.RawMessage{seal}})
+	if err != nil || string(want) != string(p.IxnRaw) {
+		return nil, fmt.Errorf("the prepared interaction does not anchor the prepared issuance")
 	}
-	if registrySaid != "" {
-		if err := e.commit(id.AID, ixnEvent.SN, ixn, issRaw); err != nil {
+	var sig string
+	if p.Registry != "" {
+		issEvent, err := keri.VerifyTELEvent(p.IssRaw)
+		if err != nil || issEvent.SAID != p.IssSAID || issEvent.Subject != p.AcdcSAID {
+			return nil, fmt.Errorf("the prepared issuance event is not this credential's")
+		}
+		if sig, err = e.commit(id, ixnEvent.SN, p.IxnRaw, p.IssRaw); err != nil {
 			return nil, err
 		}
+	} else if sig, err = e.signed(id, p.IxnRaw); err != nil {
+		return nil, err
 	}
-
-	e.state.mu.Lock()
-	if registrySaid != "" {
+	acdcBody, err := eventMap(p.AcdcRaw)
+	if err != nil {
+		return nil, err
+	}
+	ixnBody, err := eventMap(p.IxnRaw)
+	if err != nil {
+		return nil, err
+	}
+	if err := e.extend(id, p.IxnRaw, sig, func() {
+		if p.Registry == "" {
+			return
+		}
 		if id.Registries == nil {
 			id.Registries = map[string]*registry{}
 		}
-		reg := id.Registries[registrySaid]
+		reg := id.Registries[p.Registry]
 		if reg == nil {
-			reg = &registry{SAID: registrySaid, TEL: map[string][][]byte{}, IssuanceSAID: map[string]string{}}
-			id.Registries[registrySaid] = reg
+			reg = &registry{SAID: p.Registry, TEL: map[string][][]byte{}, IssuanceSAID: map[string]string{}}
+			id.Registries[p.Registry] = reg
 		}
-		reg.TEL[cred.SAID] = append(reg.TEL[cred.SAID], issRaw)
-		reg.IssuanceSAID[cred.SAID] = issSAID
+		reg.TEL[p.AcdcSAID] = append(reg.TEL[p.AcdcSAID], p.IssRaw)
+		reg.IssuanceSAID[p.AcdcSAID] = p.IssSAID
+	}); err != nil {
+		return nil, err
 	}
-	id.SN = int(ixnEvent.SN)
-	id.LastSAID = ixnEvent.SAID
-	id.KEL = append(id.KEL, ixnEntry)
-	e.state.mu.Unlock()
 
 	return &drivers.DriverIssueCredentialResponse{
 		AID:            id.AID,
-		AcdcSaid:       cred.SAID,
-		AcdcJsonB64:    b64(acdc),
+		AcdcSaid:       p.AcdcSAID,
+		AcdcJsonB64:    b64(p.AcdcRaw),
 		AcdcBody:       acdcBody,
-		IxnRawBytesB64: b64(ixn),
+		IxnRawBytesB64: b64(p.IxnRaw),
 		IxnSaid:        ixnEvent.SAID,
 		IxnEvent:       ixnBody,
 		SequenceNumber: int(ixnEvent.SN),
-		IssSaid:        issSAID,
-		IssRawBytesB64: b64(issRaw),
+		IssSaid:        p.IssSAID,
+		IssRawBytesB64: b64(p.IssRaw),
 	}, nil
 }
 
@@ -301,6 +432,36 @@ func (e *Engine) RevokeCredential(name, acdcSaid, registrySaid, issSaid string) 
 		return nil, err
 	}
 	defer release()
+	p, err := e.prepareRevocation(id, acdcSaid, registrySaid, issSaid)
+	if err != nil {
+		return nil, err
+	}
+	return e.appendPreparedRevocation(id, p)
+}
+
+// PrepareRevocation builds a credential's revocation and the interaction that
+// anchors it, without appending either.
+func (e *Engine) PrepareRevocation(name, acdcSaid, registrySaid string) (*drivers.PreparedRevocation, error) {
+	id, release, err := e.holdForWriting(name)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return e.prepareRevocation(id, acdcSaid, registrySaid, "")
+}
+
+// AppendPreparedRevocation appends a revocation exactly as it was prepared,
+// while its interaction still extends the key log's tip.
+func (e *Engine) AppendPreparedRevocation(name string, p *drivers.PreparedRevocation) (*drivers.DriverRevokeCredentialResponse, error) {
+	id, release, err := e.holdForWriting(name)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return e.appendPreparedRevocation(id, p)
+}
+
+func (e *Engine) prepareRevocation(id *identity, acdcSaid, registrySaid, issSaid string) (*drivers.PreparedRevocation, error) {
 	if acdcSaid == "" || registrySaid == "" {
 		return nil, fmt.Errorf("revoking needs both the credential and the registry it was issued into")
 	}
@@ -318,7 +479,17 @@ func (e *Engine) RevokeCredential(name, acdcSaid, registrySaid, issSaid string) 
 		return nil, fmt.Errorf("no issuance event is known for %s in registry %s; a revocation "+
 			"has to name the issuance it revokes", acdcSaid, registrySaid)
 	}
-
+	e.state.mu.RLock()
+	var tel [][]byte
+	if reg := id.Registries[registrySaid]; reg != nil {
+		tel = reg.TEL[acdcSaid]
+	}
+	e.state.mu.RUnlock()
+	for _, raw := range tel {
+		if ev, err := keri.VerifyTELEvent(raw); err == nil && ev.Ilk == "rev" {
+			return nil, fmt.Errorf("%s is already revoked", acdcSaid)
+		}
+	}
 	rev, err := keri.BuildRevocation(keri.RevocationInput{
 		CredentialSAID: acdcSaid,
 		Registry:       registrySaid,
@@ -332,21 +503,14 @@ func (e *Engine) RevokeCredential(name, acdcSaid, registrySaid, issSaid string) 
 	if err != nil {
 		return nil, fmt.Errorf("the revocation does not verify: %w", err)
 	}
-	revBody, err := eventMap(rev)
-	if err != nil {
-		return nil, err
-	}
-
 	seal, err := eventSeal(acdcSaid, "1", revEvent.SAID)
 	if err != nil {
 		return nil, err
 	}
-	ixn, err := keri.BuildInteraction(keri.InteractionInput{
-		Prefix:    id.AID,
-		PriorSAID: id.LastSAID,
-		SN:        id.SN + 1,
-		Data:      []json.RawMessage{seal},
-	})
+	e.state.mu.RLock()
+	prior, sn := id.LastSAID, id.SN+1
+	e.state.mu.RUnlock()
+	ixn, err := keri.BuildInteraction(keri.InteractionInput{Prefix: id.AID, PriorSAID: prior, SN: sn, Data: []json.RawMessage{seal}})
 	if err != nil {
 		return nil, fmt.Errorf("anchoring the revocation: %w", err)
 	}
@@ -354,37 +518,67 @@ func (e *Engine) RevokeCredential(name, acdcSaid, registrySaid, issSaid string) 
 	if err != nil {
 		return nil, err
 	}
-	ixnBody, err := eventMap(ixn)
+	return &drivers.PreparedRevocation{Issuer: id.AID, Registry: registrySaid, AcdcSAID: acdcSaid, IssSAID: issSaid,
+		RevRaw: rev, RevSAID: revEvent.SAID, IxnRaw: ixn, IxnSAID: ixnEvent.SAID, SN: int(ixnEvent.SN), Prior: prior}, nil
+}
+
+// appendPreparedRevocation appends a prepared revocation, checked to be what
+// it says and to extend the tip. The caller holds id for writing.
+func (e *Engine) appendPreparedRevocation(id *identity, p *drivers.PreparedRevocation) (*drivers.DriverRevokeCredentialResponse, error) {
+	if p == nil || p.Issuer != id.AID {
+		return nil, fmt.Errorf("the prepared revocation is not this identity's")
+	}
+	e.state.mu.RLock()
+	tipSAID, tipSN := id.LastSAID, id.SN
+	e.state.mu.RUnlock()
+	if p.Prior != tipSAID || p.SN != tipSN+1 {
+		return nil, drivers.ErrStalePreparation
+	}
+	revEvent, err := keri.VerifyTELEvent(p.RevRaw)
+	if err != nil || revEvent.SAID != p.RevSAID || revEvent.Subject != p.AcdcSAID {
+		return nil, fmt.Errorf("the prepared revocation is not this credential's")
+	}
+	seal, err := eventSeal(p.AcdcSAID, "1", p.RevSAID)
 	if err != nil {
 		return nil, err
 	}
-	ixnEntry, err := entry(ixn)
+	want, err := keri.BuildInteraction(keri.InteractionInput{Prefix: id.AID, PriorSAID: p.Prior, SN: p.SN, Data: []json.RawMessage{seal}})
+	if err != nil || string(want) != string(p.IxnRaw) {
+		return nil, fmt.Errorf("the prepared interaction does not anchor the prepared revocation")
+	}
+	ixnEvent, err := keri.ParseEvent(p.IxnRaw)
+	if err != nil || ixnEvent.SAID != p.IxnSAID {
+		return nil, fmt.Errorf("the prepared interaction is not what was prepared")
+	}
+	revBody, err := eventMap(p.RevRaw)
 	if err != nil {
 		return nil, err
 	}
-	if err := e.commit(id.AID, ixnEvent.SN, ixn, rev); err != nil {
+	ixnBody, err := eventMap(p.IxnRaw)
+	if err != nil {
 		return nil, err
 	}
-
-	e.state.mu.Lock()
-	if reg := id.Registries[registrySaid]; reg != nil {
-		reg.TEL[acdcSaid] = append(reg.TEL[acdcSaid], rev)
+	sig, err := e.commit(id, ixnEvent.SN, p.IxnRaw, p.RevRaw)
+	if err != nil {
+		return nil, err
 	}
-	id.SN = int(ixnEvent.SN)
-	id.LastSAID = ixnEvent.SAID
-	id.KEL = append(id.KEL, ixnEntry)
-	e.state.mu.Unlock()
-
+	if err := e.extend(id, p.IxnRaw, sig, func() {
+		if reg := id.Registries[p.Registry]; reg != nil {
+			reg.TEL[p.AcdcSAID] = append(reg.TEL[p.AcdcSAID], p.RevRaw)
+		}
+	}); err != nil {
+		return nil, err
+	}
 	return &drivers.DriverRevokeCredentialResponse{
-		RevSaid:        revEvent.SAID,
+		RevSaid:        p.RevSAID,
 		RevEvent:       revBody,
-		RevRawBytesB64: b64(rev),
+		RevRawBytesB64: b64(p.RevRaw),
 		IxnSaid:        ixnEvent.SAID,
 		IxnEvent:       ixnBody,
 		// The anchoring bytes, which this had a documented field for and did
 		// not fill in. An anchor stored without them cannot have its signature
 		// or its own digest checked against anything.
-		IxnRawBytesB64: b64(ixn),
+		IxnRawBytesB64: b64(p.IxnRaw),
 		SequenceNumber: int(ixnEvent.SN),
 	}, nil
 }

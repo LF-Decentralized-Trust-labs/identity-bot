@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 
@@ -160,6 +161,9 @@ func (s *CoreServer) recordPostQuantumCommitment(pq *iacrypto.PostQuantumNextKey
 // is a far smaller harm than refusing a rotation somebody may be performing
 // because they have just been compromised.
 func (s *CoreServer) rotateCarryingTheCommitment(name, newPublicKey, newNextPublicKey string) (*drivers.DriverRotationResponse, error) {
+	if err := s.mayRotateHere(name); err != nil {
+		return nil, err
+	}
 	// The generation the identity is rotating INTO, so the commitment made here
 	// is not the one the founding event already made.
 	generation := 1
@@ -174,4 +178,43 @@ func (s *CoreServer) rotateCarryingTheCommitment(name, newPublicKey, newNextPubl
 	// and the next threshold is one. Two would mean an unusable post-quantum
 	// commitment leaves the identity unable to rotate again at all.
 	return s.KeriDriver.RotateToMultisig(name, []string{newPublicKey}, digests, "1", "1", nil)
+}
+
+// errRotationElsewhere is a rotation of this identity asked for where its key
+// is on another device.
+var errRotationElsewhere = fmt.Errorf("%w: a rotation of this identity is not made here", errKeyElsewhere)
+
+// mayRotateHere refuses a rotation of this identity where its key is on
+// another device. The rotation would be appended here unsigned and the key
+// logs would no longer agree; a rotation there is made on that device.
+func (s *CoreServer) mayRotateHere(name string) error {
+	if s.DataStore == nil || s.KeriDriver == nil {
+		return nil
+	}
+	identity, err := s.DataStore.GetIdentity()
+	if err != nil || identity == nil {
+		return nil
+	}
+	if name != identity.AID {
+		if kel, err := s.KeriDriver.GetKel(name); err != nil || kel == nil || kel.AID != identity.AID {
+			return nil
+		}
+	}
+	if s.keyIsElsewhere() {
+		return errRotationElsewhere
+	}
+	return nil
+}
+
+// keyNotHeldHere is what a person is told when an event of their identity is
+// asked of this Identity Agent and its key is not held here: on another
+// device, or in the app itself, which signs only after an event is added.
+const keyNotHeldHere = "This identity's key is not held by this Identity Agent: it is on your device or in your app. " +
+	"Its key log can't be extended here (no rotation, interaction or credential issued) until the app " +
+	"signs each event before it is added."
+
+// writeKeyNotHeldHere answers a request that would extend the key log of an
+// identity whose key is not held here.
+func writeKeyNotHeldHere(w http.ResponseWriter) {
+	writeError(w, http.StatusConflict, "key_not_held_here", keyNotHeldHere)
 }

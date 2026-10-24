@@ -15,11 +15,11 @@ import (
 // the first, so tests can exercise both forms the wire uses.
 func keys(t *testing.T) (pub, next, pubRawB64 string) {
 	t.Helper()
-	a, err := keri.GenerateSigner(true)
+	a, err := testSigner(true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := keri.GenerateSigner(true)
+	b, err := testSigner(true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -615,11 +615,11 @@ func TestAnIdentityIsFoundedNamingItsWitnesses(t *testing.T) {
 	e := New()
 	pub, next, _ := keys(t)
 
-	w1, err := keri.GenerateSigner(false) // non-transferable, as a witness must be
+	w1, err := testSigner(false) // non-transferable, as a witness must be
 	if err != nil {
 		t.Fatal(err)
 	}
-	w2, err := keri.GenerateSigner(false)
+	w2, err := testSigner(false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -196,6 +196,12 @@ type ControllerProof struct {
 	Signature    string `json:"signature"`
 	// Request is the request body the controller signed.
 	Request json.RawMessage `json:"request"`
+	// ControllerGrant is the controller's Controller Grant credential: anchored
+	// in the organisation's key log, it names the signer the controller acts as,
+	// so the person behind a message is shown by a credential anybody can check
+	// rather than by this Identity Agent's word. Empty for a controller granted
+	// before machines were given one.
+	ControllerGrant string `json:"controller_grant,omitempty"`
 }
 
 // Verify checks the controller signed this request.

@@ -2,6 +2,7 @@ package server
 
 import (
 	"crypto/ed25519"
+	"fmt"
 	"testing"
 
 	"identity-agent-core/backup"
@@ -67,4 +68,22 @@ func startedEngine(t *testing.T) *keriengine.Engine {
 		t.Skipf("KERI engine unavailable: %v", err)
 	}
 	return eng
+}
+
+// signsWithSeeds has an engine built for a test sign each event it appends
+// with the seed whose key the identity holds.
+func signsWithSeeds(e interface {
+	SetEventSignature(func(aid, key string, raw []byte) (string, error))
+}, seeds ...[]byte) {
+	byKey := map[string][]byte{}
+	for _, seed := range seeds {
+		byKey[iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey))] = seed
+	}
+	e.SetEventSignature(func(aid, key string, raw []byte) (string, error) {
+		seed, ok := byKey[key]
+		if !ok {
+			return "", fmt.Errorf("no key %s", key)
+		}
+		return signEventBytes(raw, seed)
+	})
 }

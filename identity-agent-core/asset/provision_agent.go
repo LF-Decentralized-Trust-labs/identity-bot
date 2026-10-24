@@ -44,6 +44,9 @@ func (h *Handler) ProvisionAgentAsset(displayName string, capabilities []string,
 		return nil, fmt.Errorf("keri driver required to mint the delegated agent AID")
 	}
 
+	if err := h.mayDelegate(); err != nil {
+		return nil, err
+	}
 	id := genID()
 	signingIndex := signingIndexForID(id)
 	pub, nextPub, err := deriveAssetKeypair(h.dataDir, signingIndex)

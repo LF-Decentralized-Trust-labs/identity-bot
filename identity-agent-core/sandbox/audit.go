@@ -598,6 +598,41 @@ type ChainFault struct {
 	Reason string `json:"reason"`
 }
 
+// Head is the newest row of the log and the link the next row will name: its
+// id, and the hash of it as stored. Zero and empty when the log is empty.
+func (s *SandboxStore) Head() (int64, string, error) {
+	var id int64
+	var stored string
+	err := s.db.QueryRow(`SELECT id, event_json FROM invocation_log ORDER BY id DESC LIMIT 1`).Scan(&id, &stored)
+	if err == sql.ErrNoRows {
+		return 0, "", nil
+	}
+	if err != nil {
+		return 0, "", err
+	}
+	return id, HashRecord([]byte(stored)), nil
+}
+
+// RowHash is the hash of one row as stored, and whether the row is there.
+func (s *SandboxStore) RowHash(id int64) (string, bool, error) {
+	var stored string
+	err := s.db.QueryRow(`SELECT event_json FROM invocation_log WHERE id = ?`, id).Scan(&stored)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return HashRecord([]byte(stored)), true, nil
+}
+
+// RowsAfter counts the rows written after id.
+func (s *SandboxStore) RowsAfter(id int64) (int64, error) {
+	var n int64
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM invocation_log WHERE id > ?`, id).Scan(&n)
+	return n, err
+}
+
 // VerifyChain walks the log oldest-first and reports every row that does not
 // hold, with why. An empty result means every row holds. Every row is
 // reported, not only the first, so one damaged row cannot hide a forged one

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/sqlitedb"
 	"log"
 	"os"
 	"path/filepath"
@@ -28,23 +29,10 @@ func NewSQLiteStore(dir string) (*SQLiteStore, error) {
 	}
 
 	dbPath := filepath.Join(dir, "identity.db")
-	db, err := sql.Open("sqlite", dbPath)
+	// Every setting on every connection the pool opens (sqlitedb).
+	db, err := sqlitedb.Open(dbPath, sqlitedb.Settings{ForeignKeys: true})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open identity.db: %w", err)
-	}
-
-	// WAL mode + settings — same pattern as sandbox/store.go
-	pragmas := []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA busy_timeout=5000",
-		"PRAGMA foreign_keys=ON",
-		"PRAGMA synchronous=NORMAL",
-	}
-	for _, p := range pragmas {
-		if _, err := db.Exec(p); err != nil {
-			db.Close()
-			return nil, fmt.Errorf("failed to set pragma (%s): %w", p, err)
-		}
 	}
 
 	s := &SQLiteStore{db: db, dir: dir}
@@ -921,6 +909,101 @@ func (s *SQLiteStore) KeepRegistry(r CredentialRegistry, anchor *EventRecord) er
 	return nil
 }
 
+// KeepEvents keeps several events in one transaction: a delegation's approval
+// and the inception it approves are either both kept or neither is.
+func (s *SQLiteStore) KeepEvents(events ...EventRecord) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to keep events: %w", err)
+	}
+	defer tx.Rollback()
+	for _, ev := range events {
+		if err := saveEvent(tx, ev); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// KeepRecordAnchor keeps an anchoring interaction and what it anchors in one
+// transaction.
+func (s *SQLiteStore) KeepRecordAnchor(ev EventRecord, a RecordAnchor) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to keep the anchor: %w", err)
+	}
+	defer tx.Rollback()
+	if err := saveEvent(tx, ev); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO record_anchors (seq, said, statement, digest, created_at) VALUES (?, ?, ?, ?, ?)`,
+		a.Seq, a.SAID, a.Statement, a.Digest, a.CreatedAt); err != nil {
+		return fmt.Errorf("failed to keep the anchor: %w", err)
+	}
+	return tx.Commit()
+}
+
+// GetLatestRecordAnchor returns the newest anchoring, or nil.
+func (s *SQLiteStore) GetLatestRecordAnchor() (*RecordAnchor, error) {
+	var a RecordAnchor
+	err := s.db.QueryRow(`SELECT seq, said, statement, digest, created_at FROM record_anchors ORDER BY seq DESC LIMIT 1`).
+		Scan(&a.Seq, &a.SAID, &a.Statement, &a.Digest, &a.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the record's newest anchor: %w", err)
+	}
+	return &a, nil
+}
+
+// KeepCredentialRequest keeps the request a credential was issued on. A
+// request already used for another credential is refused.
+func (s *SQLiteStore) KeepCredentialRequest(credentialSAID, requestDigest, body string) error {
+	if _, err := s.db.Exec(`INSERT INTO credential_requests (credential_said, request_digest, body) VALUES (?, ?, ?)`,
+		credentialSAID, requestDigest, body); err != nil {
+		return fmt.Errorf("the request could not be kept, or already authorised another credential: %w", err)
+	}
+	return nil
+}
+
+// CredentialRequestUsed reports whether a request already authorised a
+// credential.
+func (s *SQLiteStore) CredentialRequestUsed(requestDigest string) (bool, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM credential_requests WHERE request_digest = ?`, requestDigest).Scan(&n)
+	return n > 0, err
+}
+
+// GetCredentialRequestBody returns the body of the request a credential was
+// issued on.
+func (s *SQLiteStore) GetCredentialRequestBody(credentialSAID string) (string, bool, error) {
+	var body string
+	err := s.db.QueryRow(`SELECT body FROM credential_requests WHERE credential_said = ?`, credentialSAID).Scan(&body)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	return body, err == nil, err
+}
+
+// GetRecordAnchors returns every anchoring of the record, oldest first.
+func (s *SQLiteStore) GetRecordAnchors() ([]RecordAnchor, error) {
+	rows, err := s.db.Query(`SELECT seq, said, statement, digest, created_at FROM record_anchors ORDER BY seq`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the record's anchors: %w", err)
+	}
+	defer rows.Close()
+	var out []RecordAnchor
+	for rows.Next() {
+		var a RecordAnchor
+		if err := rows.Scan(&a.Seq, &a.SAID, &a.Statement, &a.Digest, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 // GetCredentialTEL returns a credential's transaction log in order. An empty
 // result means nothing was kept, which is not the same as "never revoked".
 func (s *SQLiteStore) GetCredentialTEL(registrySAID, acdcSAID string) ([]CredentialTELEvent, error) {
@@ -1759,7 +1842,63 @@ func PoolBase(namespace string) (int, error) {
 		return 8000001, nil
 	case "relay-public-enrollment":
 		return 9000001, nil
+	case "record":
+		// The identity that anchors the record, delegated from this one.
+		return 10000001, nil
 	}
 	return 0, fmt.Errorf("pairwise pool %q has no range of its own — give it one in "+
 		"PoolBase, because a pool without one shares keys with another", namespace)
+}
+
+func (s *SQLiteStore) SavePendingIssuance(signingRequestID, body string) error {
+	_, err := s.db.Exec(`INSERT INTO pending_issuances (signing_request_id, body, created_at) VALUES (?, ?, ?)
+		ON CONFLICT(signing_request_id) DO UPDATE SET body = excluded.body`,
+		signingRequestID, body, time.Now().UTC().Format(time.RFC3339))
+	return err
+}
+
+func (s *SQLiteStore) KeepSignedForAnother(ixnSAID, parts string) error {
+	_, err := s.db.Exec(`INSERT OR IGNORE INTO signed_for_others (ixn_said, parts, created_at) VALUES (?, ?, ?)`,
+		ixnSAID, parts, time.Now().UTC().Format(time.RFC3339))
+	return err
+}
+
+func (s *SQLiteStore) SignedForAnother(ixnSAID string) (string, bool, error) {
+	var parts string
+	err := s.db.QueryRow(`SELECT parts FROM signed_for_others WHERE ixn_said = ?`, ixnSAID).Scan(&parts)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	return parts, err == nil, err
+}
+
+func (s *SQLiteStore) GetPendingIssuance(signingRequestID string) (string, bool, error) {
+	var body string
+	err := s.db.QueryRow(`SELECT body FROM pending_issuances WHERE signing_request_id = ?`, signingRequestID).Scan(&body)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	return body, err == nil, err
+}
+
+func (s *SQLiteStore) DeletePendingIssuance(signingRequestID string) error {
+	_, err := s.db.Exec(`DELETE FROM pending_issuances WHERE signing_request_id = ?`, signingRequestID)
+	return err
+}
+
+func (s *SQLiteStore) ListPendingIssuances() (map[string]string, error) {
+	rows, err := s.db.Query(`SELECT signing_request_id, body FROM pending_issuances`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id, body string
+		if err := rows.Scan(&id, &body); err != nil {
+			return nil, err
+		}
+		out[id] = body
+	}
+	return out, rows.Err()
 }

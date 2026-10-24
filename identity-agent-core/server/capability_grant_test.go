@@ -82,6 +82,7 @@ func TestAgentGrantFallsBackWithoutDriver(t *testing.T) {
 func TestRevokedGrantDenies(t *testing.T) {
 	s := newGrantTestServer(t)
 	s.KeriDriver = keriengine.New() // non-nil, not called on this path
+	s.engineSigns()
 	if err := s.DataStore.SaveCredential(store.CredentialRecord{
 		SAID: "EGrantRevoked", Status: "revoked", Format: "acdc",
 		SchemaSAID: capabilityGrantSchemaSAID, HolderAID: "EAgent", IssuerAID: "ERoot",
@@ -162,6 +163,7 @@ func TestVerifiedGrantDerivesScopesFromCredential(t *testing.T) {
 func TestMissingGrantDenies(t *testing.T) {
 	s := newGrantTestServer(t)
 	s.KeriDriver = keriengine.New()
+	s.engineSigns()
 	plaintext := "iamcp_missing"
 	seedAgentToken(t, s, plaintext, mcpToken{
 		Name: "a3", Scopes: []string{"infra.zone.list"},

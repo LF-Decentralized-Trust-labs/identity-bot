@@ -2,6 +2,7 @@ package server
 
 import (
 	"crypto/ed25519"
+	"errors"
 	"fmt"
 
 	"identity-agent-core/backup"
@@ -31,17 +32,49 @@ func (s *CoreServer) identitySigningSeed() ([]byte, error) {
 	if err != nil || identity == nil {
 		return nil, fmt.Errorf("this agent has no identity to sign as")
 	}
+	// Two different failures, told apart because they call for different
+	// things. A seed stored here that cannot be read right now (a keychain or
+	// enclave not available to this process) is a fault to report, and the
+	// key is still this machine's. A seed that derives some other key than the
+	// one this identity published, such as a machine's own device-local seed,
+	// means the key is held on another device.
 	rootSeed, err := ensureRootSeed(s.DataDir)
 	if err != nil {
-		return nil, fmt.Errorf("no key material to sign with: %w", err)
+		return nil, fmt.Errorf("%w: %v", errKeyUnavailable, err)
 	}
 	seed, err := backup.DerivePairwiseSeed(rootSeed, identity.DerivationIndex, identity.KeyGeneration)
 	if err != nil {
-		return nil, fmt.Errorf("could not derive this identity's signing key: %w", err)
+		return nil, fmt.Errorf("%w: could not derive this identity's signing key: %v", errKeyUnavailable, err)
 	}
 	derived := iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey))
 	if identity.PublicKey != "" && derived != identity.PublicKey {
-		return nil, fmt.Errorf("the derived key is not the one this identity published, so it was not used")
+		return nil, errKeyElsewhere
 	}
 	return seed, nil
+}
+
+// errKeyUnavailable is the identity's key held here and not readable right
+// now. Nothing waits for another device on it: there is none.
+var errKeyUnavailable = errors.New("this machine holds the identity's key and cannot read it right now")
+
+// keyCanSign says whether this Identity Agent can sign as its identity now:
+// nil, errKeyElsewhere where the key is held on another device, or
+// errKeyUnavailable where it is held here and cannot be read.
+func (s *CoreServer) keyCanSign() error {
+	_, err := s.identitySigningSeed()
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, errKeyElsewhere):
+		return errKeyElsewhere
+	case errors.Is(err, errKeyUnavailable):
+		return err
+	}
+	return fmt.Errorf("%w: %v", errKeyUnavailable, err)
+}
+
+// keyIsElsewhere reports whether the identity's key is genuinely held on
+// another device.
+func (s *CoreServer) keyIsElsewhere() bool {
+	return errors.Is(s.keyCanSign(), errKeyElsewhere)
 }

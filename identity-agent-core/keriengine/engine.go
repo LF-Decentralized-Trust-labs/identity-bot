@@ -40,6 +40,46 @@ type Engine struct {
 	// appends them; see drivers.TELCommitter.
 	commitMu  sync.Mutex
 	telCommit func(drivers.TELCommit) error
+	// eventSignature signs an interaction about to be appended to an
+	// identity's own key log; see SetEventSignature.
+	eventSignature func(aid, key string, raw []byte) (string, error)
+}
+
+// SetEventSignature installs how this engine obtains an identity's signature
+// over an interaction it is about to append to that identity's key log.
+//
+// Every interaction this engine appends to a key log is signed by that
+// identity's current key, checked here, or it is not appended: in one place,
+// so no path that writes into a key log can leave there an event the key
+// never signed. With nothing installed, nothing is appended.
+func (e *Engine) SetEventSignature(f func(aid, key string, raw []byte) (string, error)) {
+	e.commitMu.Lock()
+	e.eventSignature = f
+	e.commitMu.Unlock()
+}
+
+// signed is id's signature over raw, checked against its current key.
+func (e *Engine) signed(id *identity, raw []byte) (string, error) {
+	e.commitMu.Lock()
+	f := e.eventSignature
+	e.commitMu.Unlock()
+	if f == nil {
+		return "", fmt.Errorf("this engine has no way to have events of %s signed, so it appends none", id.AID)
+	}
+	e.state.mu.RLock()
+	key := id.PublicKey
+	e.state.mu.RUnlock()
+	if key == "" {
+		return "", verifiedBy(id.AID, key, raw, "")
+	}
+	sig, err := f(id.AID, key, raw)
+	if err != nil {
+		return "", fmt.Errorf("the event was not signed by %s, so it is not appended: %w", id.AID, err)
+	}
+	if err := verifiedBy(id.AID, key, raw, sig); err != nil {
+		return "", err
+	}
+	return sig, nil
 }
 
 // SetHTTPClient replaces how this engine fetches introductions.
@@ -51,17 +91,24 @@ func (e *Engine) SetHTTPClient(c HTTPClient) { e.http = c }
 // An engine built this way refuses to create a real hybrid identity, because it
 // has nowhere to put the private half. Everything else works.
 func New() *Engine {
-	return &Engine{state: newState()}
+	return &Engine{state: newState(), eventSignature: testEventSignature}
 }
 
 // NewWithSecretStore returns an engine that can create hybrid identities,
 // writing their private material to the supplied store.
 func NewWithSecretStore(secrets keri.SecretStore) *Engine {
-	return &Engine{state: newState(), secrets: secrets}
+	return &Engine{state: newState(), secrets: secrets, eventSignature: testEventSignature}
 }
+
+// testEventSignature is nil outside this package's own tests, which set it to
+// sign with the keys they made.
+var testEventSignature func(aid, key string, raw []byte) (string, error)
 
 // The engine is one of the implementations the core selects between.
 var _ drivers.KeriEngine = (*Engine)(nil)
+
+// It keeps an event before appending it when asked to.
+var _ drivers.KELKeeper = (*Engine)(nil)
 
 // Start records that the engine is running.
 //
@@ -79,14 +126,75 @@ func (e *Engine) SetTELCommit(f func(drivers.TELCommit) error) {
 
 // commit offers a registry event and its anchor for keeping. With nothing
 // installed there is nothing to offer them to.
-func (e *Engine) commit(aid string, sn uint64, kel, tel []byte) error {
+func (e *Engine) commit(id *identity, sn uint64, kel, tel []byte) (string, error) {
+	sig, err := e.signed(id, kel)
+	if err != nil {
+		return "", err
+	}
 	e.commitMu.Lock()
 	f := e.telCommit
 	e.commitMu.Unlock()
 	if f == nil {
-		return nil
+		return sig, nil
 	}
-	return f(drivers.TELCommit{AID: aid, SN: int(sn), KELRaw: kel, TELRaw: tel})
+	return sig, f(drivers.TELCommit{AID: id.AID, SN: int(sn), KELRaw: kel, TELRaw: tel, Signature: sig})
+}
+
+// extend appends raw to id's key log: the one place an event other than a
+// rotation joins a key log, and it does so only with a signature by id's
+// current key over exactly raw, checked here whatever the caller checked.
+// also runs, under the same lock, for what else the event changes.
+func (e *Engine) extend(id *identity, raw []byte, sig string, also func()) error {
+	e.state.mu.RLock()
+	key := id.PublicKey
+	e.state.mu.RUnlock()
+	if err := verifiedBy(id.AID, key, raw, sig); err != nil {
+		return err
+	}
+	return e.appendEvent(id, raw, also)
+}
+
+// extendByRotation appends a rotation to id's key log. A rotation is signed
+// by its new keys, which the callers of this engine do not yet hand it, so
+// it is the one event appended without a signature checked here.
+func (e *Engine) extendByRotation(id *identity, raw []byte, also func()) error {
+	return e.appendEvent(id, raw, also)
+}
+
+func (e *Engine) appendEvent(id *identity, raw []byte, also func()) error {
+	ev, err := keri.ParseEvent(raw)
+	if err != nil {
+		return err
+	}
+	next, err := entry(raw)
+	if err != nil {
+		return err
+	}
+	e.state.mu.Lock()
+	defer e.state.mu.Unlock()
+	if also != nil {
+		also()
+	}
+	id.SN = int(ev.SN)
+	id.LastSAID = ev.SAID
+	id.KEL = append(id.KEL, next)
+	return nil
+}
+
+// verifiedBy checks sig is aid's current key's signature over raw.
+func verifiedBy(aid, key string, raw []byte, sig string) error {
+	if key == "" {
+		return fmt.Errorf("the key in force for %s is not known here (its log was restored without the "+
+			"bytes it was published as, and no key was given with it), so nothing is appended to it", aid)
+	}
+	sigRaw, err := keri.MatterRaw(keri.CodeEd25519Sig, sig, 64)
+	if err != nil {
+		return fmt.Errorf("the signature over an event of %s is unreadable, so it is not appended: %w", aid, err)
+	}
+	if err := keri.VerifySignature(key, raw, sigRaw); err != nil {
+		return fmt.Errorf("an event of %s not signed by its current key is not appended: %w", aid, err)
+	}
+	return nil
 }
 
 // holdForWriting returns the identity named and holds it against every other
@@ -326,12 +434,35 @@ func (e *Engine) inceptWith(publicKey, nextPublicKey, name string, data []json.R
 // approved it — and returning one alone would let a caller publish an identity
 // claiming an authority that was never granted.
 func (e *Engine) CreateDelegatedInception(publicKey, nextPublicKey, name, delegatorName string) (*drivers.DriverDelegatedInceptionResponse, error) {
+	return e.CreateDelegatedInceptionKept(publicKey, nextPublicKey, name, delegatorName, nil, 0, nil)
+}
+
+// WitnessConfig is the witnesses an identity names now and how many must
+// receipt each of its events.
+func (e *Engine) WitnessConfig(name string) ([]string, int, error) {
+	id, err := e.state.get(name)
+	if err != nil {
+		return nil, 0, err
+	}
+	e.state.mu.RLock()
+	defer e.state.mu.RUnlock()
+	return append([]string(nil), id.Witnesses...), id.Toad, nil
+}
+
+// CreateDelegatedInceptionKept is CreateDelegatedInception, offering the
+// delegator's approval and the new inception to keep before either is held. A
+// keep that fails leaves both logs as they were.
+//
+// witnesses and toad, when witnesses is not empty, are written into the
+// delegated inception: the witnesses it names and how many must receipt each of
+// its events.
+func (e *Engine) CreateDelegatedInceptionKept(publicKey, nextPublicKey, name, delegatorName string, witnesses []string, toad int, keep func(drivers.KELKeep) error) (*drivers.DriverDelegatedInceptionResponse, error) {
 	delegator, release, err := e.holdForWriting(delegatorName)
 	if err != nil {
 		return nil, fmt.Errorf("the delegator: %w", err)
 	}
 	defer release()
-	pub, nextDigest, dip, dipEvent, err := delegatedInceptionOver(publicKey, nextPublicKey, delegator.AID)
+	pub, nextDigest, dip, dipEvent, err := delegatedInceptionOver(publicKey, nextPublicKey, delegator.AID, witnesses, toad)
 	if err != nil {
 		return nil, err
 	}
@@ -366,20 +497,31 @@ func (e *Engine) CreateDelegatedInception(publicKey, nextPublicKey, name, delega
 		return nil, err
 	}
 
-	if err := e.holdDelegatedIdentity(name, pub, nextDigest, dip, dipEvent); err != nil {
-		return nil, err
-	}
-
-	ixnEntry, err := entry(ixn)
+	approvalSig, err := e.signed(delegator, ixn)
 	if err != nil {
 		return nil, err
 	}
+	if keep != nil {
+		// The name must be free before anything is kept, or the store would
+		// hold a delegation the engine then refuses to.
+		heldAs := name
+		if heldAs == "" {
+			heldAs = dipEvent.Identifier
+		}
+		if held, err := e.state.get(heldAs); err == nil && held.AID != dipEvent.Identifier {
+			return nil, fmt.Errorf("the name %q already holds %s", heldAs, held.AID)
+		}
+		if err := keep(drivers.KELKeep{AID: delegator.AID, SN: int(ixnEvent.SN), Raw: ixn, Delegated: dip, Signature: approvalSig}); err != nil {
+			return nil, fmt.Errorf("the delegation was not kept, so it was not made: %w", err)
+		}
+	}
+	if err := e.holdDelegatedIdentity(name, pub, nextDigest, dip, dipEvent); err != nil {
+		return nil, err
+	}
 	// The delegator's log only advances once its approval is recorded.
-	e.state.mu.Lock()
-	delegator.SN = int(ixnEvent.SN)
-	delegator.LastSAID = ixnEvent.SAID
-	delegator.KEL = append(delegator.KEL, ixnEntry)
-	e.state.mu.Unlock()
+	if err := e.extend(delegator, ixn, approvalSig, nil); err != nil {
+		return nil, err
+	}
 
 	return &drivers.DriverDelegatedInceptionResponse{
 		AID:          dipEvent.Identifier,
@@ -413,7 +555,7 @@ func (e *Engine) ReinstateDelegatedIdentity(publicKey, nextPublicKey, name, dele
 	if err != nil {
 		return nil, fmt.Errorf("the delegator: %w", err)
 	}
-	pub, nextDigest, dip, dipEvent, err := delegatedInceptionOver(publicKey, nextPublicKey, delegator.AID)
+	pub, nextDigest, dip, dipEvent, err := delegatedInceptionOver(publicKey, nextPublicKey, delegator.AID, nil, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -445,7 +587,21 @@ func (e *Engine) ReinstateDelegatedIdentity(publicKey, nextPublicKey, name, dele
 
 // delegatedInceptionOver builds the inception of an identity delegated by the
 // given identifier, over the given keys.
-func delegatedInceptionOver(publicKey, nextPublicKey, delegatorAID string) (
+// DelegatedInceptionOf is the identifier and digest the delegated inception
+// of these keys by delegator, naming these witnesses, would have: the same
+// construction CreateDelegatedInceptionKept uses, so an identity made from
+// derived keys can be recognised later from the keys alone.
+func DelegatedInceptionOf(publicKey, nextPublicKey, delegatorAID string, witnesses []string, toad int) (aid, said string, err error) {
+	_, _, _, ev, err := delegatedInceptionOver(publicKey, nextPublicKey, delegatorAID, witnesses, toad)
+	if err != nil {
+		return "", "", err
+	}
+	return ev.Identifier, ev.SAID, nil
+}
+
+// witnesses and toad, when witnesses is not empty, are the witnesses the
+// delegated identity names and how many must receipt each of its events.
+func delegatedInceptionOver(publicKey, nextPublicKey, delegatorAID string, witnesses []string, toad int) (
 	pub, nextDigest string, dip []byte, dipEvent *keri.Event, err error,
 ) {
 	pub, err = normaliseKey(publicKey, true)
@@ -460,11 +616,16 @@ func delegatedInceptionOver(publicKey, nextPublicKey, delegatorAID string) (
 	if err != nil {
 		return "", "", nil, nil, err
 	}
-	dip, err = keri.BuildDelegatedInception(keri.DelegationInput{
+	in := keri.DelegationInput{
 		Keys:        []string{pub},
 		NextDigests: []string{nextDigest},
 		Delegator:   delegatorAID,
-	})
+	}
+	if len(witnesses) > 0 {
+		in.Witnesses = witnesses
+		in.Toad = &toad
+	}
+	dip, err = keri.BuildDelegatedInception(in)
 	if err != nil {
 		return "", "", nil, nil, fmt.Errorf("building the delegated inception: %w", err)
 	}
@@ -612,22 +773,17 @@ func (e *Engine) Rotate(req drivers.RotationRequest) (*drivers.DriverRotationRes
 		return nil, err
 	}
 
-	next, err := entry(raw)
-	if err != nil {
+	if err := e.extendByRotation(id, raw, func() {
+		id.PublicKey = newPub
+		id.NextKeyDigest = newNextDigest
+		// The witness set now in force, read back off the event rather than
+		// recomputed here. The event is what everyone else will read, so
+		// anything this engine believes that the event does not say is wrong.
+		id.Witnesses = witnessesAfter(id.Witnesses, ev)
+		id.Toad = witnessThreshold(ev)
+	}); err != nil {
 		return nil, err
 	}
-	e.state.mu.Lock()
-	id.PublicKey = newPub
-	id.NextKeyDigest = newNextDigest
-	id.SN = int(ev.SN)
-	id.LastSAID = ev.SAID
-	id.KEL = append(id.KEL, next)
-	// The witness set now in force, read back off the event rather than
-	// recomputed here. The event is what everyone else will read, so anything
-	// this engine believes that the event does not say is simply wrong.
-	id.Witnesses = witnessesAfter(id.Witnesses, ev)
-	id.Toad = witnessThreshold(ev)
-	e.state.mu.Unlock()
 
 	return &drivers.DriverRotationResponse{
 		AID:              id.AID,
@@ -693,6 +849,15 @@ func (e *Engine) RotateToMultisig(name string, keys, nextKeyDigests []string, is
 	if err != nil {
 		return nil, fmt.Errorf("building the multisig rotation: %w", err)
 	}
+	// The first key must be the one the previous event committed to, as a
+	// single-key rotation's must, since it is the key this engine holds in
+	// force afterwards; the keys of owners joining follow it.
+	e.state.mu.RLock()
+	committed := id.NextKeyDigest
+	e.state.mu.RUnlock()
+	if d, err := keri.NextDigest(normalised[0]); err != nil || d != committed {
+		return nil, fmt.Errorf("the multisig rotation's first key is not the one the identity committed to (%s)", committed)
+	}
 	ev, err := keri.ParseEvent(raw)
 	if err != nil {
 		return nil, err
@@ -702,17 +867,12 @@ func (e *Engine) RotateToMultisig(name string, keys, nextKeyDigests []string, is
 		return nil, err
 	}
 
-	next, err := entry(raw)
-	if err != nil {
+	if err := e.extendByRotation(id, raw, func() {
+		id.PublicKey = normalised[0]
+		id.NextKeyDigest = nextKeyDigests[0]
+	}); err != nil {
 		return nil, err
 	}
-	e.state.mu.Lock()
-	id.PublicKey = normalised[0]
-	id.NextKeyDigest = nextKeyDigests[0]
-	id.SN = int(ev.SN)
-	id.LastSAID = ev.SAID
-	id.KEL = append(id.KEL, next)
-	e.state.mu.Unlock()
 
 	return &drivers.DriverRotationResponse{
 		AID:              id.AID,
@@ -731,6 +891,12 @@ func (e *Engine) RotateToMultisig(name string, keys, nextKeyDigests []string, is
 
 // Interact anchors data in an identity's key log.
 func (e *Engine) Interact(name string, data []interface{}) (*drivers.DriverInteractResponse, error) {
+	return e.InteractKept(name, data, nil)
+}
+
+// InteractKept is Interact, offering the event to keep before it is appended.
+// A keep that fails leaves the log as it was.
+func (e *Engine) InteractKept(name string, data []interface{}, keep func(drivers.KELKeep) error) (*drivers.DriverInteractResponse, error) {
 	id, release, err := e.holdForWriting(name)
 	if err != nil {
 		return nil, err
@@ -762,15 +928,18 @@ func (e *Engine) Interact(name string, data []interface{}) (*drivers.DriverInter
 		return nil, err
 	}
 
-	next, err := entry(raw)
+	sig, err := e.signed(id, raw)
 	if err != nil {
 		return nil, err
 	}
-	e.state.mu.Lock()
-	id.SN = int(ev.SN)
-	id.LastSAID = ev.SAID
-	id.KEL = append(id.KEL, next)
-	e.state.mu.Unlock()
+	if keep != nil {
+		if err := keep(drivers.KELKeep{AID: id.AID, SN: int(ev.SN), Raw: raw, Signature: sig}); err != nil {
+			return nil, fmt.Errorf("the interaction was not kept, so it was not made: %w", err)
+		}
+	}
+	if err := e.extend(id, raw, sig, nil); err != nil {
+		return nil, err
+	}
 
 	return &drivers.DriverInteractResponse{
 		AID:            id.AID,
@@ -907,20 +1076,52 @@ func (e *Engine) ReloadIdentity(req *drivers.DriverReloadIdentityRequest) (*driv
 	sn, lastSAID := req.SequenceNumber, req.LastSAID
 	var witnesses []string
 	toad := 0
+	keyInForce := ""
 	if last := entries[len(entries)-1]; last.Raw != nil {
 		ev, err := keri.ParseEvent(last.Raw)
 		if err != nil {
 			return nil, err
 		}
 		sn, lastSAID = int(ev.SN), ev.SAID
-		witnesses, toad = ev.Witnesses, witnessThreshold(ev)
 	}
+	// The witnesses in force are what the establishment events say, read in
+	// order: an inception names them, a rotation amends them. An interaction
+	// names none, so reading them off the last event alone forgot an
+	// identity's witnesses whenever its last event was an interaction.
+	for _, e := range entries {
+		if e.Raw == nil {
+			continue
+		}
+		ev, err := keri.ParseEvent(e.Raw)
+		if err != nil {
+			return nil, err
+		}
+		switch ev.Ilk {
+		case "icp", "dip":
+			witnesses, toad = ev.Witnesses, witnessThreshold(ev)
+		case "rot", "drt":
+			witnesses, toad = witnessesAfter(witnesses, ev), witnessThreshold(ev)
+		}
+		// The key in force is the one the last establishment event names,
+		// whatever the caller says: every event appended from here must be
+		// signed by it.
+		if (ev.Ilk == "icp" || ev.Ilk == "dip" || ev.Ilk == "rot" || ev.Ilk == "drt") && len(ev.Keys) > 0 {
+			keyInForce = ev.Keys[0]
+		}
+	}
+
 	if lastSAID == "" {
 		return nil, fmt.Errorf("reloading %s needs the digest of its most recent event; "+
 			"without it the next event cannot name its predecessor", req.AID)
 	}
 
+	// Taken from the log only where the whole log was checked; a log handed
+	// over without the bytes it was published as says nothing reliable about
+	// its keys, and the key the caller holds for it is used instead.
 	pub := req.PublicKey
+	if complete && keyInForce != "" {
+		pub = keyInForce
+	}
 	if pub != "" {
 		var err error
 		if pub, err = normaliseKey(pub, true); err != nil {

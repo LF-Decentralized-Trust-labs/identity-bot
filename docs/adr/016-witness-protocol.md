@@ -113,6 +113,50 @@ Receives the accept/decline response from a remote Identity Agent to a witness r
 3. If `decision == "declined"`: update task to `failed` with `detail = reason`.
 4. Emit a WebSocket event to notify connected UI.
 
+### Identities a witnessed identity delegated (amended 2026-10-22)
+
+Witnessing an identity's delegates is consented to, not assumed. A witness request says
+whether it covers the identities the requester delegates (`covers_delegates`); an Identity
+Agent that anchors its record through a delegated identity asks for it. A witness that
+accepted such a request, and whose operator allows it, witnesses an identity that
+requester delegated, from its delegated inception, when the key log it holds for the
+delegator approves exactly that inception, and only once the inception's own signature
+holds. It witnesses the delegate only while it still witnesses the delegator: when it
+stops, by withdrawal or otherwise, it stops witnessing the delegates too. The operator can
+switch delegate witnessing off (`witness.delegates` = `off`) or cap how many delegates one
+delegator may have witnessed (`witness.delegates_max`). A request that does not ask covers
+no delegate.
+
+The request route is open, so the request carries a `stamp` and the requester's
+`signature`, by its current key, over `witness-request/v2`, its identifier, the identifier
+of the witness it asks, whether it covers its delegates, and the stamp, to the nanosecond. A witness changes whether a requester's delegates are
+covered, either way, only on a request whose signature verifies against the requester's
+current key (from the key log the witness holds, or else the key its contact resolved) and
+whose stamp is within five minutes and newer than the last such request it acted on from
+that requester; anything else, a replay or a request meant for another witness included,
+may ask to be witnessed and changes no coverage. The answer says whether the requester's delegates are now covered
+(`covers_delegates`). An identity already witnessed for, asking again, takes no more
+capacity. An Identity Agent that anchors its record asks its witnesses when its record
+identity is made, and again once after each start, and reports the ones that will not
+cover it.
+
+An event the witness already holds is answered with the receipt it gave, so a controller
+sending its key log from where it thinks the witness stopped carries on; something else at
+the same place is refused as a conflicting history. Sequence numbers are read as KERI
+writes them, in hexadecimal.
+
+`GET /witness/kel/{aid}/tip?nonce=…` answers how far the witness holds an identity's key
+log: the newest event's place and digest, signed by the witness's own key together with
+the asker's nonce, so the answer is fresh and the witness's own. A controller asks this
+before sending, and sends only what the witness lacks; a witness that has confirmed holding
+the log as far as it goes, by its tip or its receipts, is not asked again until there is
+more to send, or until an hour has passed, so a witness that has fallen behind is noticed
+and filled again; a witness's signed tip is believed as it stands, lower than before too. `GET /witness/kel/{aid}/event/{sn}` hands back one event of a key log
+exactly as its controller published and signed it; the asker checks it extends its own
+key log and is signed by the identity's key before believing it. An event is sent to
+exactly the witnesses it names, and a send that runs in the background is not cut short
+by its caller returning.
+
 ### Task Types
 
 | `type` | Created by | Resolved by |

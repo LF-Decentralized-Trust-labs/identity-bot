@@ -22,6 +22,8 @@ func TestAnAgentsPublishedLogCarriesItsOwnSignature(t *testing.T) {
 	}
 	e := keriengine.New()
 	rootPub, rootNext, _ := asset.DeriveAssetKeypair(s.DataDir, 99)
+	rootSeed, _ := asset.AssetSigningSeed(s.DataDir, 99)
+	signsWithSeeds(e, rootSeed)
 	if _, err := e.CreateInceptionNamed(iacrypto.VerkeyQB64(rootPub), iacrypto.VerkeyQB64(rootNext), "owner"); err != nil {
 		t.Fatal(err)
 	}

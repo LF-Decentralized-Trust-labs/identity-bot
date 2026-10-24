@@ -80,6 +80,7 @@ func adoptingOwner(t *testing.T) *CoreServer {
 	}
 	s.KeriDriver = eng
 	// Minting an identity composes an OOBI from the public URL, so the service
+	s.engineSigns()
 	// has to exist even though nothing here is reachable.
 	s.EndpointService = endpoint.New(nil, 0)
 	// A pairwise identity designates a witness at inception, which is the only

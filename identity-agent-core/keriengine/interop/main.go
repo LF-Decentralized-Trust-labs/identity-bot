@@ -68,15 +68,37 @@ func pub(s keri.Signer) string {
 
 func main() {
 	e := keriengine.New()
+	// Every interaction the engine appends is signed by the identity's key:
+	// with the keys made below.
+	var made []keri.Signer
+	gen := func() (keri.Signer, error) {
+		s, err := keri.GenerateSigner(true)
+		if err == nil {
+			made = append(made, s)
+		}
+		return s, err
+	}
+	e.SetEventSignature(func(aid, key string, raw []byte) (string, error) {
+		for _, s := range made {
+			if pub(s) == key {
+				sig, err := s.Sign(raw)
+				if err != nil {
+					return "", err
+				}
+				return keri.MatterQB64(keri.CodeEd25519Sig, sig)
+			}
+		}
+		return "", fmt.Errorf("no key %s was made here", key)
+	})
 
 	// One identity taken through its whole life: founded, rotated to the key it
 	// committed to, then used to anchor something. Each event is signed by the
 	// key that event declares, which is what keriox checks.
-	a, err := keri.GenerateSigner(true)
+	a, err := gen()
 	must(err)
-	b, err := keri.GenerateSigner(true)
+	b, err := gen()
 	must(err)
-	c, err := keri.GenerateSigner(true)
+	c, err := gen()
 	must(err)
 
 	icp, err := e.CreateInceptionNamed(pub(a), pub(b), "subject")
@@ -95,9 +117,9 @@ func main() {
 	// Control: is it the seal, or is it anything at all after a rotation?
 	// A second identity, interacting straight after inception with no rotation
 	// in between, isolates the two.
-	g, err := keri.GenerateSigner(true)
+	g, err := gen()
 	must(err)
-	h, err := keri.GenerateSigner(true)
+	h, err := gen()
 	must(err)
 	plain, err := e.CreateInceptionNamed(pub(g), pub(h), "plain")
 	must(err)
@@ -111,9 +133,9 @@ func main() {
 	emit("control/ixn-no-rotation", "the same seal, but with no rotation before it", plainIxn.RawBytesB64, g)
 
 	// An identity that records its owner in its own inception event.
-	d, err := keri.GenerateSigner(true)
+	d, err := gen()
 	must(err)
-	f, err := keri.GenerateSigner(true)
+	f, err := gen()
 	must(err)
 	owned, err := e.CreateOwnedInception(pub(d), pub(f), "owned", icp.AID)
 	must(err)

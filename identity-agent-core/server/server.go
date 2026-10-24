@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -16,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
@@ -173,6 +175,28 @@ type CoreServer struct {
 	CallerResolver     CallerResolver // resolves endpoint caller identity/scopes; nil = loopback default (delegated-identity injects the real one)
 	mu                 sync.Mutex
 	running            bool
+	// anchorStop ends the record's anchoring when the server stops.
+	anchorStop chan struct{}
+	// anchorStopMu guards anchorStop, which Stop closes while workers read it.
+	anchorStopMu sync.Mutex
+	// signedElsewhere holds, while a waiting grant is appended, the signature
+	// the device holding the identity's key made over its interaction.
+	signedElsewhere sync.Map
+	// eventSigners holds, by identity, the seed of an identity other than
+	// this one whose key log this Identity Agent writes (its record
+	// identity's); see signEventFor.
+	eventSigners sync.Map
+	// fetchSignedEvent, when set, stands in for asking the identity's
+	// witnesses for an event the device that holds the key signed.
+	fetchSignedEvent func(aid string, sn int) []heldEvent
+	// grantsMu holds machines' grants still while a credential is issued on
+	// one: revoking, re-issuing or replacing a grant takes it exclusively.
+	grantsMu sync.RWMutex
+	// record is the state of the record's anchoring.
+	record recordState
+	// edgesSince is when the first credential naming who authorised it was
+	// issued here; see issuedUnderFirstVersionTooLate.
+	edgesSince atomic.Value
 }
 
 type Config struct {
@@ -389,6 +413,16 @@ func New(cfg Config) (*CoreServer, error) {
 		s.EventHub.Broadcast(AgentEvent{Type: eventType, Payload: payload})
 	}
 	wsvc.SignReceipt = s.signWitnessReceipt
+	// An Identity Agent that anchors its record through a delegated record
+	// identity asks its witnesses to witness that identity too.
+	wsvc.AskToCoverDelegates = s.anchorsItsRecord
+	wsvc.SignAsRequester = func(statement string) (string, error) {
+		seed, err := s.identitySigningSeed()
+		if err != nil {
+			return "", err
+		}
+		return login.SignString(statement, seed)
+	}
 	wsvc.OurWitnessAID = func() (string, error) {
 		_, aid, err := s.witnessSigningKey()
 		return aid, err
@@ -405,6 +439,7 @@ func New(cfg Config) (*CoreServer, error) {
 	// could perform no KERI operation through the core. The in-process engine
 	// removed both problems, and it is now the only implementation.
 	s.KeriDriver = keriengine.New()
+	s.engineSigns()
 	if err := s.KeriDriver.Start(); err != nil {
 		cancel()
 		dataStore.Close()
@@ -413,7 +448,7 @@ func New(cfg Config) (*CoreServer, error) {
 	// Seed the engine from what was persisted, so issuing and anchoring work
 	// after a restart without a fresh inception. Both implementations start
 	// empty, so both need this.
-	s.reloadIdentityIntoDriver()
+	s.prepareKeyLogs()
 
 	if s.WitnessService != nil {
 		s.WitnessService.Driver = s.KeriDriver
@@ -681,6 +716,11 @@ func (s *CoreServer) Start() error {
 	// EndpointService ranks it above the ephemeral tunnel. Absent a configured
 	// relay this returns immediately, leaving the tunnel/direct path in place.
 	go s.startRelay()
+	s.anchorStopMu.Lock()
+	s.anchorStop = make(chan struct{})
+	stop := s.anchorStop
+	s.anchorStopMu.Unlock()
+	go s.keepAnchoring(stop)
 
 	s.httpSrv = s.httpServer()
 	go func() {
@@ -718,6 +758,12 @@ func (s *CoreServer) Stop() {
 		s.TunnelManager.Disconnect()
 	}
 
+	s.anchorStopMu.Lock()
+	if s.anchorStop != nil {
+		close(s.anchorStop)
+		s.anchorStop = nil
+	}
+	s.anchorStopMu.Unlock()
 	if s.RelayManager != nil {
 		s.RelayManager.Stop()
 	}
@@ -879,6 +925,8 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		r.Post("/controllers", s.handleGrantController)
 		r.Get("/controllers", s.handleListControllers)
 		r.Delete("/controllers/{aid}", s.handleRevokeController)
+		r.Get("/grants/awaiting-approval", s.handleGrantsAwaitingApproval)
+		r.Post("/grants/withdrawing/{said}/ask", s.handleAskAgainToWithdraw)
 
 		r.Post("/keystore/root-seed", s.handleSetRootSeed)
 		r.Get("/keystore/root-seed", s.handleRootSeedStatus)
@@ -1834,6 +1882,10 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 	// differs, every rotation re-commits under whatever the code is by then.
 	// A commitment made once at founding would have no such second chance.
 	result, err := s.rotateCarryingTheCommitment(req.Name, req.NewPublicKey, req.NewNextPublicKey)
+	if errors.Is(err, errKeyElsewhere) {
+		writeKeyNotHeldHere(w)
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Rotation failed", err.Error())
 		return
@@ -1888,6 +1940,10 @@ func (s *CoreServer) handleInteract(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := s.KeriDriver.Interact(req.Name, req.Data)
+	if errors.Is(err, errKeyElsewhere) {
+		writeKeyNotHeldHere(w)
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "IXN event failed", err.Error())
 		return
@@ -2079,6 +2135,10 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
 	}
 
 	result, err := s.KeriDriver.IssueCredential(issuerAID, req.Claims, req.SchemaSaid, req.HolderAid, req.Edges)
+	if errors.Is(err, errKeyElsewhere) {
+		writeKeyNotHeldHere(w)
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Credential issuance failed", err.Error())
 		return
@@ -4563,10 +4623,25 @@ func (s *CoreServer) handleDeletePendingRequest(w http.ResponseWriter, r *http.R
 // state from the persisted DB state. Called once on startup after the engine is
 // ready. This makes IssueCredential and Interact work across server restarts
 // without requiring a fresh inception event each session.
+// prepareKeyLogs is what start-up does with the key logs: hand them back to
+// the engine, then give any machine paired before machines were given grants
+// its grant.
+func (s *CoreServer) prepareKeyLogs() {
+	s.reloadKeyLogs()
+}
+
+// reloadKeyLogs hands the engine every key log this Identity Agent writes to:
+// its identity's, then the record identity's, which its identity approved.
+func (s *CoreServer) reloadKeyLogs() {
+	s.reloadIdentityIntoDriver()
+	s.reloadRecordIdentity()
+}
+
 func (s *CoreServer) reloadIdentityIntoDriver() {
 	if s.KeriDriver == nil {
 		return
 	}
+	s.engineSigns()
 	identity, err := s.DataStore.GetIdentity()
 	if err != nil || identity == nil {
 		log.Printf("[identity-agent-core] KERI driver reload: no existing identity in DB")
@@ -4581,29 +4656,7 @@ func (s *CoreServer) reloadIdentityIntoDriver() {
 
 	warnAboutUnprovableEvents(identity.AID, events)
 
-	// Parse each stored event_json into a KED dict and track the last SAID
-	kel := make([]map[string]interface{}, 0, len(events))
-	// Carried alongside the parsed events so an engine can verify the history
-	// rather than only continue it. Entries are empty for events stored before
-	// the canonical bytes were kept.
-	rawEvents := make([]string, 0, len(events))
-	lastSAID := ""
-	lastSN := 0
-	for _, ev := range events {
-		var ked map[string]interface{}
-		if err := json.Unmarshal([]byte(ev.EventJSON), &ked); err != nil {
-			log.Printf("[identity-agent-core] KERI driver reload: failed to parse event sn=%d: %v", ev.SequenceNumber, err)
-			continue
-		}
-		kel = append(kel, ked)
-		rawEvents = append(rawEvents, ev.RawBytesB64)
-		if d, ok := ked["d"].(string); ok && d != "" {
-			lastSAID = d
-		}
-		if ev.SequenceNumber > lastSN {
-			lastSN = ev.SequenceNumber
-		}
-	}
+	kel, rawEvents, lastSAID, lastSN := kelFromEvents(events)
 
 	req := &drivers.DriverReloadIdentityRequest{
 		AID:            identity.AID,
@@ -4622,6 +4675,32 @@ func (s *CoreServer) reloadIdentityIntoDriver() {
 	}
 	log.Printf("[identity-agent-core] KERI driver: reloaded identity %s (sn=%d, %d KEL events)",
 		result.AID, result.SequenceNumber, result.KelEvents)
+}
+
+// kelFromEvents is a stored key log in the form an engine reloads: each event
+// parsed, the bytes it was published as beside it, and the tip. Bytes are
+// carried so an engine can verify the history rather than only continue it;
+// they are empty for events stored before the canonical bytes were kept.
+func kelFromEvents(events []store.EventRecord) ([]map[string]interface{}, []string, string, int) {
+	kel := make([]map[string]interface{}, 0, len(events))
+	raws := make([]string, 0, len(events))
+	lastSAID, lastSN := "", 0
+	for _, ev := range events {
+		var ked map[string]interface{}
+		if err := json.Unmarshal([]byte(ev.EventJSON), &ked); err != nil {
+			log.Printf("[identity-agent-core] KERI driver reload: failed to parse event %d of %s: %v", ev.SequenceNumber, ev.AID, err)
+			continue
+		}
+		kel = append(kel, ked)
+		raws = append(raws, ev.RawBytesB64)
+		if d, ok := ked["d"].(string); ok && d != "" {
+			lastSAID = d
+		}
+		if ev.SequenceNumber > lastSN {
+			lastSN = ev.SequenceNumber
+		}
+	}
+	return kel, raws, lastSAID, lastSN
 }
 
 // reviveAssetIdentity re-creates an asset's identity in the KERI driver after a

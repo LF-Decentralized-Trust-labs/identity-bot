@@ -1,5 +1,7 @@
 package drivers
 
+import "errors"
+
 // Message types exchanged with a KERI engine.
 //
 // These are the shapes the engine returns and the few request shapes the core
@@ -271,6 +273,104 @@ type TELCommit struct {
 	// KELRaw and TELRaw are the two events as published.
 	KELRaw []byte
 	TELRaw []byte
+	// Signature is the identity's signature over KELRaw, checked by the
+	// engine against the identity's current key.
+	Signature string
+}
+
+// PreparedIssuance is a credential issued into a registry, built but not yet
+// appended: the credential, its issuance event, and the interaction in the
+// issuer's key log that anchors it, which whoever holds the issuer's key
+// signs. Prior and SN are where the interaction extends the key log; it can
+// be appended only while that is still the tip.
+type PreparedIssuance struct {
+	Issuer   string `json:"issuer"`
+	Registry string `json:"registry"`
+	AcdcRaw  []byte `json:"acdc_raw"`
+	AcdcSAID string `json:"acdc_said"`
+	IssRaw   []byte `json:"iss_raw"`
+	IssSAID  string `json:"iss_said"`
+	IxnRaw   []byte `json:"ixn_raw"`
+	IxnSAID  string `json:"ixn_said"`
+	SN       int    `json:"sn"`
+	Prior    string `json:"prior"`
+}
+
+// PreparedRegistry is a registry's inception, built but not yet appended,
+// with the interaction in the issuer's key log that anchors it.
+type PreparedRegistry struct {
+	Issuer   string `json:"issuer"`
+	Registry string `json:"registry"`
+	VcpRaw   []byte `json:"vcp_raw"`
+	VcpSAID  string `json:"vcp_said"`
+	IxnRaw   []byte `json:"ixn_raw"`
+	IxnSAID  string `json:"ixn_said"`
+	SN       int    `json:"sn"`
+	Prior    string `json:"prior"`
+}
+
+// PreparedRevocation is a credential's revocation, built but not yet appended,
+// with the interaction in the issuer's key log that anchors it.
+type PreparedRevocation struct {
+	Issuer   string `json:"issuer"`
+	Registry string `json:"registry"`
+	AcdcSAID string `json:"acdc_said"`
+	IssSAID  string `json:"iss_said"`
+	RevRaw   []byte `json:"rev_raw"`
+	RevSAID  string `json:"rev_said"`
+	IxnRaw   []byte `json:"ixn_raw"`
+	IxnSAID  string `json:"ixn_said"`
+	SN       int    `json:"sn"`
+	Prior    string `json:"prior"`
+}
+
+// PreparedRevoker is an engine that can build a revocation and append it
+// later, exactly as built, so it can be signed elsewhere in between.
+type PreparedRevoker interface {
+	PrepareRevocation(name, acdcSaid, registrySaid string) (*PreparedRevocation, error)
+	AppendPreparedRevocation(name string, p *PreparedRevocation) (*DriverRevokeCredentialResponse, error)
+}
+
+// ErrStalePreparation is a prepared issuance whose key log has moved on since
+// it was built: its interaction no longer extends the tip.
+var ErrStalePreparation = errors.New("the key log has moved on since this issuance was prepared")
+
+// PreparedIssuer is an engine that can build an issuance and append it later,
+// exactly as built, so it can be checked, or signed elsewhere, in between.
+type PreparedIssuer interface {
+	PrepareCredentialInRegistry(name string, claims map[string]interface{}, schemaSaid, holderAid string, edges map[string]interface{}, registrySaid string) (*PreparedIssuance, error)
+	AppendPreparedIssuance(name string, p *PreparedIssuance) (*DriverIssueCredentialResponse, error)
+	PrepareRegistryInception(name string) (*PreparedRegistry, error)
+	AppendPreparedRegistry(name string, p *PreparedRegistry) (*DriverRegistryInceptResponse, error)
+}
+
+// KELKeep is an event an engine is about to append to an identity's key log,
+// offered to be kept first.
+type KELKeep struct {
+	// AID is the identity whose key log the event extends, SN its place there.
+	AID string
+	SN  int
+	// Raw is the event as published.
+	Raw []byte
+	// Delegated is set for a delegated inception: the new identity's inception,
+	// which Raw, the delegator's interaction, approves.
+	Delegated []byte
+	// Signature is the identity's signature over Raw, checked by the engine
+	// against the identity's current key before the event is offered.
+	Signature string
+}
+
+// KELKeeper is an engine that offers an event to be kept before it appends it.
+// The keep is the caller's, per call; a keep that fails leaves the engine as it
+// was, so it never holds an event the store does not and the next event cannot
+// chain to one that was never kept.
+type KELKeeper interface {
+	InteractKept(name string, data []interface{}, keep func(KELKeep) error) (*DriverInteractResponse, error)
+	// CreateDelegatedInceptionKept makes a delegated identity naming witnesses,
+	// when given, and how many must receipt each of its events.
+	CreateDelegatedInceptionKept(publicKey, nextPublicKey, name, delegatorName string, witnesses []string, toad int, keep func(KELKeep) error) (*DriverDelegatedInceptionResponse, error)
+	// WitnessConfig is the witnesses an identity names now and its threshold.
+	WitnessConfig(name string) ([]string, int, error)
 }
 
 // TELCommitter is an engine that offers each registry event to be kept before

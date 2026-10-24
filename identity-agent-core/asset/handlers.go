@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -44,6 +45,12 @@ type Handler struct {
 	// stored event must carry the bytes it was serialised as: those are what the
 	// delegator signs, and an approval nobody signed approves nothing.
 	PersistDelegationAnchor func(rootAID string, approval *drivers.DriverDelegatedInceptionResponse) error
+	// KeyHeldHere reports whether this Identity Agent holds the identity's
+	// key. A delegated identity is approved by an interaction in the
+	// identity's key log, which only that key may sign; where it is on
+	// another device nothing is delegated here, rather than an approval
+	// written unsigned.
+	KeyCheck func() error
 }
 
 func NewHandler(dataDir string, keri drivers.KeriEngine) (*Handler, error) {
@@ -58,6 +65,31 @@ func NewHandler(dataDir string, keri drivers.KeriEngine) (*Handler, error) {
 // delegated inception. A missing DelegatorIxn or an unwired callback is a hard
 // error for a delegated asset — silently skipping it is precisely what produced
 // the root-KEL sequence gap that broke delegation verification.
+// ErrKeyElsewhere is a delegation asked for where the identity's key is held
+// on another device.
+var ErrKeyElsewhere = errors.New("the identity's key is held on another device, which alone can approve an identity delegated from it; do this there")
+
+// ErrKeyUnavailable is a delegation asked for where the identity's key is
+// held here and cannot be read right now.
+var ErrKeyUnavailable = errors.New("this machine holds the identity's key and cannot read it right now")
+
+// mayDelegate reports why a delegated identity cannot be made here, if it
+// cannot: ErrKeyElsewhere or ErrKeyUnavailable.
+func (h *Handler) mayDelegate() error {
+	if h.KeyCheck == nil {
+		return nil
+	}
+	return h.KeyCheck()
+}
+
+// delegationRefusalStatus answers a refused delegation.
+func delegationRefusalStatus(err error) int {
+	if errors.Is(err, ErrKeyUnavailable) {
+		return http.StatusServiceUnavailable
+	}
+	return http.StatusConflict
+}
+
 func (h *Handler) persistDelegationAnchor(rootAID string, approval *drivers.DriverDelegatedInceptionResponse) error {
 	if approval == nil || approval.DelegatorIxn == nil {
 		return fmt.Errorf("driver returned no delegator anchoring event")
@@ -163,6 +195,10 @@ func (h *Handler) HandleCreateAsset(w http.ResponseWriter, r *http.Request) {
 	var delegator string
 
 	if model == "delegated" {
+		if err := h.mayDelegate(); err != nil {
+			h.writeJSON(w, map[string]string{"error": err.Error()}, delegationRefusalStatus(err))
+			return
+		}
 		resp, err := h.KeriDriver.CreateDelegatedInception(pubB64, nextB64, body.DisplayName, rootAID)
 		if err != nil {
 			h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusInternalServerError)

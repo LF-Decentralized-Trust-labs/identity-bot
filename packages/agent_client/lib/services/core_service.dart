@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
+import 'package:agent_client/services/the_key_is_not_held_by_the_core.dart';
 
 import 'package:crypto/crypto.dart';
 import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
@@ -1667,10 +1668,8 @@ class CoreService {
     );
     if (response.statusCode == 201) {
       return jsonDecode(response.body) as Map<String, dynamic>;
-    } else {
-      final err = jsonDecode(response.body) as Map<String, dynamic>;
-      throw Exception(err['error'] ?? 'Credential issuance failed: ${response.statusCode}');
     }
+    refusedByTheCore(response, 'Credential issuance failed');
   }
 
   /// Verify a credential and walk its ACDC edges chain.

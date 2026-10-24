@@ -267,13 +267,48 @@ func (s *CoreServer) handleVerifyAuditChain(w http.ResponseWriter, r *http.Reque
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	resp := map[string]any{"intact": len(faults) == 0, "chain_start_kept": start != nil}
+	// The links catch a row changed in the middle. The anchors fix what links
+	// cannot: the newest rows, which nothing after them names. What an anchor
+	// proves depends on who else holds it. Receipted by the witnesses this
+	// identity names, removing it contradicts them; with no witnesses it holds
+	// against someone who can edit the record's rows but not against someone
+	// who controls this Identity Agent entirely. Rows and entries no anchor
+	// fixes yet are counted, never reported as checked.
+	anchors, err := s.checkAnchors()
+	if err != nil {
+		jsonError(w, "The log's anchors cannot be checked right now: "+err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	resp := map[string]any{
+		"intact": len(faults) == 0 && anchors.BrokenAt == 0, "chain_start_kept": start != nil,
+		"anchored_through": anchors.AnchoredThrough, "unanchored_rows": anchors.Unanchored,
+		"unanchored_entries": anchors.UnanchoredEntries,
+		"anchoring_external": anchors.External, "witnessed_through": anchors.WitnessedThrough,
+		"awaiting_witnesses": anchors.AwaitingWitnesses,
+		"witnesses_answered": anchors.WitnessesAnswered,
+	}
+	if declining := s.witnessesDeclining(); len(declining) > 0 {
+		resp["witnesses_declining_record"] = declining
+	}
+	if anchors.WitnessesAnswered > 0 {
+		resp["witness_confirmed_tip"] = anchors.WitnessTip
+	}
+	if anchors.Unavailable != "" {
+		resp["anchoring_unavailable"] = anchors.Unavailable
+	}
+	for k, v := range s.keyLogReport() {
+		resp[k] = v
+	}
 	if len(faults) > 0 {
 		resp["broken_at"] = faults[0].ID
 		resp["faults"] = faults
 		resp["detail"] = fmt.Sprintf("%d record(s) do not hold, the first at id %d: %s. "+
 			"A record has been deleted, reordered, edited or forged since it was written.",
 			len(faults), faults[0].ID, faults[0].Reason)
+	}
+	if anchors.BrokenAt != 0 {
+		resp["anchor_broken_at"] = anchors.BrokenAt
+		resp["anchor_detail"] = "An anchor no longer holds: " + anchors.Why + "."
 	}
 	writeJSON(w, resp)
 }

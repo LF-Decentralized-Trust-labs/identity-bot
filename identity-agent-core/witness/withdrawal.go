@@ -225,6 +225,8 @@ func (s *Service) ReceiveWithdrawalConfirmation(c WithdrawalConfirmation, stillD
 	if err := s.Store.SaveContactMeta(*meta); err != nil {
 		return err
 	}
+	// The identities it delegated were witnessed because it was.
+	s.dropDelegatesOf(c.ControllerAID)
 	log.Printf("[witness] stopped witnessing for %s; the rotation cutting this witness has "+
 		"been checked", c.ControllerAID)
 	if s.OnEvent != nil {
