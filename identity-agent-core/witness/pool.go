@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"identity-agent-core/store"
@@ -114,11 +113,7 @@ func (s *Service) HandleInboundRequest(reqAID, reqOOBI, reqBackend string) (bool
 }
 
 func witnessRequestURL(oobi string) string {
-	base := oobi
-	if idx := strings.Index(oobi, "/public/oobi/"); idx != -1 {
-		base = oobi[:idx]
-	}
-	return strings.TrimRight(base, "/") + "/api/witness/request"
+	return witnessBase(oobi) + "/api/witness/request"
 }
 
 // Identity is the identity this agent answers witness requests as, which a

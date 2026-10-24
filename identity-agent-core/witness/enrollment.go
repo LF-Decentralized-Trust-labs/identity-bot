@@ -373,9 +373,5 @@ func (s *Service) maybeReciprocalRequest(ctx context.Context, req WitnessRequest
 }
 
 func witnessAcceptURL(oobi string) string {
-	base := oobi
-	if idx := strings.Index(oobi, "/public/oobi/"); idx != -1 {
-		base = oobi[:idx]
-	}
-	return strings.TrimRight(base, "/") + "/api/witness/accept"
+	return witnessBase(oobi) + "/api/witness/accept"
 }
