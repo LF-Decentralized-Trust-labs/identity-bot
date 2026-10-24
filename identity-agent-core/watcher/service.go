@@ -108,7 +108,13 @@ func (s *Service) DetectDuplicity(aid string, seq int, digest string) (bool, *Fi
 func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelResult, error) {
 	seq, err := witnessproto.CurrentSeq(in.KEL)
 	if err != nil {
-		return nil, err
+		// Refused rather than passed over. An error here reaches callers as
+		// "nothing to say", so a log that could not be placed would skip every
+		// check below, and one malformed event is all it would take.
+		return &VerifyKelResult{
+			OK: false, Blocked: true, AID: in.AID, SequenceNum: -1,
+			Reason: "the key log has an unreadable sequence number: " + err.Error(), OverallOutcome: "unreadable",
+		}, nil
 	}
 	if seq < 0 {
 		return &VerifyKelResult{OK: false, Reason: "empty KEL"}, nil

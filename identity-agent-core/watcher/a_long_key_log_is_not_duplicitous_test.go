@@ -13,7 +13,7 @@ import (
 )
 
 // migratedWatcher is a watcher over a fully migrated identity database whose
-// standing watcher cannot be reached, so only this agent's own memory decides.
+// standing watcher cannot be reached, so only this Identity Agent's own memory decides.
 func migratedWatcher(t *testing.T) (*Service, *sql.DB) {
 	t.Helper()
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "identity.db"))
@@ -134,5 +134,20 @@ func TestAnObservationRecordedWithADecimalSequenceIsForgotten(t *testing.T) {
 	}
 	if len(alerts) != 1 || !alerts[0].Resolved || alerts[0].ResolutionNote == "" {
 		t.Fatalf("the alert the stale observation raised is not closed with a reason: %+v", alerts)
+	}
+}
+
+// A log the watcher cannot place is refused, not waved through unchecked.
+func TestAnUnreadableSequenceNumberIsRefused(t *testing.T) {
+	ws, _ := migratedWatcher(t)
+	aid := "EUnreadable000000000000000000000000000000000"
+	kel := keyLog(aid, 3)
+	kel[1]["s"] = "zz"
+	res, err := ws.VerifyKel(context.Background(), VerifyKelInput{AID: aid, KEL: kel, SourceType: SourceOOBI})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Blocked || res.OK {
+		t.Fatalf("a log with an unreadable sequence number was not refused: %+v", res)
 	}
 }
