@@ -19,6 +19,7 @@ import (
 
 	"identity-agent-core/backup"
 	"identity-agent-core/conversation"
+	"identity-agent-core/conversationbundle"
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/keriengine"
@@ -247,23 +248,14 @@ func recordIndex() (int, error) {
 	return store.PoolBase("record")
 }
 
-// anchorStatement is what one anchoring fixes. Its digest is the seal.
-type anchorStatement struct {
-	Log           anchoredLog            `json:"log"`
-	Conversations []anchoredConversation `json:"conversations,omitempty"`
-	At            string                 `json:"at"`
-}
-
-type anchoredLog struct {
-	Row  int64  `json:"row"`
-	Head string `json:"head"`
-}
-
-type anchoredConversation struct {
-	ID   string `json:"id"`
-	Seq  int    `json:"seq"`
-	Head string `json:"head"`
-}
+// anchorStatement is what one anchoring fixes. Its digest is the seal. The
+// format is the bundle's, so an exported record is read exactly as it was
+// written.
+type (
+	anchorStatement      = conversationbundle.AnchorStatement
+	anchoredLog          = conversationbundle.AnchoredLog
+	anchoredConversation = conversationbundle.AnchoredConversation
+)
 
 func (s *CoreServer) recordIdentityPath() string {
 	return filepath.Join(s.DataDir, recordIdentityFile)
@@ -595,6 +587,11 @@ func (s *CoreServer) anchorRecord() (bool, error) {
 		return false, err
 	}
 	st := anchorStatement{Log: anchoredLog{Row: row, Head: head}, At: time.Now().UTC().Format(time.RFC3339Nano)}
+	// The log's signer is named, so the rows it signs are tied to this
+	// identity through the record identity it delegated.
+	if signer, found, err := readInvocationSignerRecord(s.DataDir); err == nil && found {
+		st.Signer = signer.AID
+	}
 	if convs, err := s.conversations(); err == nil {
 		heads, err := convs.Heads()
 		if err != nil {
