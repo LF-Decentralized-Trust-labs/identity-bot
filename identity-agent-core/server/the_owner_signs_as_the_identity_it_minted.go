@@ -42,6 +42,12 @@ type signAsMachineOwnerRequest struct {
 	// Timestamp, when the caller pins one. Normally left out: it is inside the
 	// signature, so the moment this side signs is the moment that must travel.
 	Timestamp string `json:"timestamp"`
+	// For is the identifier of the Identity Agent the request is meant for,
+	// signed so no other Identity Agent accepts a copy. Left out, it is the
+	// identity the machine this owner adopted signs as, from this device's own
+	// record of the adoption. Given empty, the request names nobody, which only
+	// a machine with no identity yet accepts.
+	For *string `json:"for"`
 }
 
 type signAsMachineOwnerResponse struct {
@@ -51,6 +57,25 @@ type signAsMachineOwnerResponse struct {
 	// second formatting that differs by a millisecond or a zone would produce a
 	// signature over a string the machine never sees.
 	Timestamp string `json:"timestamp"`
+	// For is echoed: it is inside the signature, and the caller sends it in
+	// X-IA-Owner-For.
+	For string `json:"for"`
+}
+
+// theMachineThisOwnerAdopted is the identity the machine adopted by ownerAID
+// signs as, from this device's record of the adoption, or "" when none is
+// recorded.
+func (s *CoreServer) theMachineThisOwnerAdopted(ownerAID string) string {
+	agents, err := s.DataStore.ListAdoptedAgents()
+	if err != nil {
+		return ""
+	}
+	for _, a := range agents {
+		if a.OwnerAID == ownerAID {
+			return a.SignsAsAID
+		}
+	}
+	return ""
 }
 
 func (s *CoreServer) handleSignAsAMachineOwner(w http.ResponseWriter, r *http.Request) {
@@ -127,7 +152,14 @@ func (s *CoreServer) handleSignAsAMachineOwner(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	sig, err := SignOwnerRequest(method, path, stamp, body, seed)
+	target := ""
+	if req.For != nil {
+		target = strings.TrimSpace(*req.For)
+	} else {
+		target = s.theMachineThisOwnerAdopted(ownerAID)
+	}
+
+	sig, err := SignOwnerRequest(target, method, path, stamp, body, seed)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not sign", err.Error())
 		return
@@ -138,5 +170,6 @@ func (s *CoreServer) handleSignAsAMachineOwner(w http.ResponseWriter, r *http.Re
 		OwnerAID:  ownerAID,
 		Signature: sig,
 		Timestamp: stamp,
+		For:       target,
 	})
 }

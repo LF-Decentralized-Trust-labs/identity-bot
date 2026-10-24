@@ -32,6 +32,7 @@ class OwnerSigningClient extends http.BaseClient {
     required this.agentOrigin,
     required this.ownerSeed,
     this.ownerAid,
+    this.agentAid = '',
     http.Client? inner,
   })  : _inner = ProvingThisComputer.over(inner),
         _ownsInner = inner == null;
@@ -54,6 +55,12 @@ class OwnerSigningClient extends http.BaseClient {
   /// which key it accepts, so this only lets it say "that is a different
   /// identity" instead of "that signature does not verify".
   final String? ownerAid;
+
+  /// The identifier of the Identity Agent at [agentOrigin], signed into every
+  /// request so no other Identity Agent the same key administers accepts a
+  /// copy. Empty names nobody, which only an Identity Agent with no identity
+  /// yet accepts.
+  final String agentAid;
 
   final http.Client _inner;
 
@@ -100,6 +107,7 @@ class OwnerSigningClient extends http.BaseClient {
       body: request.bodyBytes,
       ownerSeed: seed,
       ownerAid: ownerAid,
+      targetAid: agentAid,
     ));
 
     return _inner.send(signed);

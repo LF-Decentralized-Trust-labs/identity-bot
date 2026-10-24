@@ -58,7 +58,10 @@ type CouldNotAsk struct {
 // agree. The rest come back in couldNotAsk saying so, because a holder
 // silently missing from a backup is discovered during a recovery and not
 // before.
-type SignAsOwner func(method, path, timestamp string, body []byte) (signature string, err error)
+//
+// target is the identifier of the Identity Agent the request is for, which the
+// signature must cover; it is sent in X-IA-Owner-For.
+type SignAsOwner func(target, method, path, timestamp string, body []byte) (signature string, err error)
 
 func HoldersFromPairedMachines(machines []store.AdoptedAgent, identityAID string,
 	policy HoldingPolicy, client *http.Client, sign SignAsOwner) ([]backup.ShareHolder, []CouldNotAsk) {
@@ -75,7 +78,7 @@ func HoldersFromPairedMachines(machines []store.AdoptedAgent, identityAID string
 				AID: m.AID, Why: "this machine has no address to reach it at"})
 			continue
 		}
-		agreed, err := askAMachineToHold(client, m.URL, sign, AgreeToHold{
+		agreed, err := askAMachineToHold(client, m.URL, m.SignsAsAID, sign, AgreeToHold{
 			// One of the owner's own machines files under the identity's own
 			// AID: it already knows whose it is, so a pairwise identifier
 			// would hide nothing from it. A witness belonging to somebody else
@@ -125,7 +128,7 @@ func AskForMorePeople(holders []backup.ShareHolder) string {
 	return ""
 }
 
-func askAMachineToHold(client *http.Client, url string, sign SignAsOwner,
+func askAMachineToHold(client *http.Client, url, target string, sign SignAsOwner,
 	req AgreeToHold) (*AgreedToHold, error) {
 
 	body, err := json.Marshal(req)
@@ -142,11 +145,14 @@ func askAMachineToHold(client *http.Client, url string, sign SignAsOwner,
 
 	if sign != nil {
 		stamp := time.Now().UTC().Format(time.RFC3339)
-		sig, serr := sign(http.MethodPost, path, stamp, body)
+		sig, serr := sign(target, http.MethodPost, path, stamp, body)
 		if serr != nil {
 			return nil, fmt.Errorf("this request could not be signed as the owner")
 		}
 		httpReq.Header.Set("X-IA-Owner-Sig", sig)
+		if target != "" {
+			httpReq.Header.Set("X-IA-Owner-For", target)
+		}
 		httpReq.Header.Set("X-IA-Owner-Timestamp", stamp)
 	}
 

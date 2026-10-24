@@ -34,6 +34,26 @@ class _Watcher {
 Future<String?> Function() _owner(String? aid) => () async => aid;
 
 void main() {
+  test('the request names the Identity Agent the core signed it for', () async {
+    final w = _Watcher()
+      ..signature = const {
+        'owner_aid': 'EMINTEDHERE',
+        'signature': '0BSIG',
+        'timestamp': '2026-09-01T00:00:00Z',
+        'for': 'ETHEMACHINE',
+      };
+    final c = SigningAsTheIdentityThatOwnsAMachine(
+      machineOrigin: _machine,
+      localCoreOrigin: _core,
+      ownerAid: _owner('EMINTEDHERE'),
+      inner: w.client,
+    );
+    await c.get(Uri.parse('$_machine/api/identity'));
+    expect(w.requests.last.headers['X-IA-Owner-For'], 'ETHEMACHINE',
+        reason: 'the name inside the signature was not sent, so the machine '
+            'checks a different string and refuses every request');
+  });
+
   test('a request to the machine carries a signature made for it', () async {
     final w = _Watcher();
     final c = SigningAsTheIdentityThatOwnsAMachine(

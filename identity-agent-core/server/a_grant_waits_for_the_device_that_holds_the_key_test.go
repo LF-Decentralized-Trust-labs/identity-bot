@@ -81,7 +81,7 @@ func (e *elsewhere) pairMachine(t *testing.T, g ControllerGrant) *httptest.Respo
 	t.Helper()
 	body := `{"controller_aid":"` + g.ControllerAID + `","public_key":"` + g.PublicKey + `","label":"` + g.Label + `","grade":"` + string(g.Grade) + `"}`
 	rec := httptest.NewRecorder()
-	e.s.router.ServeHTTP(rec, signed(t, "POST", "/api/controllers", body, testOwnerSeed(), time.Now()))
+	e.s.router.ServeHTTP(rec, signedFor(t, e.s.thisIdentityAgentsIdentifier(), "POST", "/api/controllers", body, testOwnerSeed(), time.Now()))
 	return rec
 }
 
@@ -90,7 +90,7 @@ func (e *elsewhere) setCapabilities(t *testing.T, id string, caps ...string) *ht
 	t.Helper()
 	list, _ := json.Marshal(caps)
 	rec := httptest.NewRecorder()
-	e.s.router.ServeHTTP(rec, signed(t, "PUT", "/api/mcp/agents/"+id+"/capabilities", `{"capabilities":`+string(list)+`}`, testOwnerSeed(), time.Now()))
+	e.s.router.ServeHTTP(rec, signedFor(t, e.s.thisIdentityAgentsIdentifier(), "PUT", "/api/mcp/agents/"+id+"/capabilities", `{"capabilities":`+string(list)+`}`, testOwnerSeed(), time.Now()))
 	return rec
 }
 
@@ -650,7 +650,7 @@ func TestAnAIAgentIsNotMadeWhereTheKeyIsElsewhere(t *testing.T) {
 	owner, _ := e.s.DataStore.GetIdentity()
 	before, _ := e.s.DataStore.GetEvents(owner.AID)
 	rec := httptest.NewRecorder()
-	e.s.router.ServeHTTP(rec, signed(t, "POST", "/api/mcp/agents", `{"name":"Here","capabilities":["`+capabilityMessageAgent+`"]}`, testOwnerSeed(), time.Now()))
+	e.s.router.ServeHTTP(rec, signedFor(t, e.s.thisIdentityAgentsIdentifier(), "POST", "/api/mcp/agents", `{"name":"Here","capabilities":["`+capabilityMessageAgent+`"]}`, testOwnerSeed(), time.Now()))
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "another device") {
 		t.Fatalf("making an AI agent where the key is elsewhere was answered %d %s", rec.Code, rec.Body.String())
 	}
@@ -684,7 +684,7 @@ func TestAnUnreadableKeyIsNotAKeyElsewhere(t *testing.T) {
 	g := grantFor(5, GradeEnrolled)
 	body := `{"controller_aid":"` + g.ControllerAID + `","public_key":"` + g.PublicKey + `","label":"` + g.Label + `","grade":"` + string(g.Grade) + `"}`
 	rec := httptest.NewRecorder()
-	w.s.router.ServeHTTP(rec, signed(t, "POST", "/api/controllers", body, testOwnerSeed(), time.Now()))
+	w.s.router.ServeHTTP(rec, signedFor(t, w.s.thisIdentityAgentsIdentifier(), "POST", "/api/controllers", body, testOwnerSeed(), time.Now()))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("granting with the key unreadable was answered %d %s", rec.Code, rec.Body.String())
 	}
@@ -695,7 +695,7 @@ func TestAnUnreadableKeyIsNotAKeyElsewhere(t *testing.T) {
 		t.Fatal("the machine was marked as waiting for another device")
 	}
 	rec = httptest.NewRecorder()
-	w.s.router.ServeHTTP(rec, signed(t, "POST", "/api/mcp/agents", `{"name":"Later","capabilities":["`+capabilityMessageAgent+`"]}`, testOwnerSeed(), time.Now().Add(time.Second)))
+	w.s.router.ServeHTTP(rec, signedFor(t, w.s.thisIdentityAgentsIdentifier(), "POST", "/api/mcp/agents", `{"name":"Later","capabilities":["`+capabilityMessageAgent+`"]}`, testOwnerSeed(), time.Now().Add(time.Second)))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("making an AI agent with the key unreadable was answered %d %s", rec.Code, rec.Body.String())
 	}

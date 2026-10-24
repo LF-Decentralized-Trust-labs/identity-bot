@@ -125,6 +125,9 @@ class SigningAsTheIdentityThatOwnsAMachine extends http.BaseClient {
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       final sig = (body['signature'] ?? '').toString();
       final stamp = (body['timestamp'] ?? '').toString();
+      // The Identity Agent the core signed this for — the machine this owner
+      // adopted. Echoed, because it is inside the signature.
+      final signedFor = (body['for'] ?? '').toString();
       if (sig.isEmpty || stamp.isEmpty) return null;
 
       return {
@@ -134,6 +137,7 @@ class SigningAsTheIdentityThatOwnsAMachine extends http.BaseClient {
         // millisecond or a zone signs a string the machine never sees.
         'X-IA-Owner-Timestamp': stamp,
         'X-IA-Owner-AID': (body['owner_aid'] ?? aid).toString(),
+        if (signedFor.isNotEmpty) 'X-IA-Owner-For': signedFor,
       };
     } catch (_) {
       // Unreachable local core. Same answer as a refusal: unsigned, and let the

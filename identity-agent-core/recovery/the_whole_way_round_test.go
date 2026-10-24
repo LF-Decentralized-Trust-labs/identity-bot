@@ -880,7 +880,7 @@ func TestAskingAMachineToHoldCarriesTheOwnersSignature(t *testing.T) {
 	}
 
 	// With something that can sign, it agrees.
-	signed := func(method, path, timestamp string, body []byte) (string, error) {
+	signed := func(_, method, path, timestamp string, body []byte) (string, error) {
 		if method != http.MethodPost || path != "/api/recovery/holdings" {
 			t.Fatalf("signed the wrong thing: %s %s", method, path)
 		}

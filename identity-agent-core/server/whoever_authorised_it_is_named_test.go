@@ -255,7 +255,7 @@ func testOwnerSeed() []byte {
 func TestAnOwnersSignedRequestIsKeptAsTheAuthority(t *testing.T) {
 	w := newTalkWorld(t)
 	resetSeenSignatures(t)
-	req := signed(t, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities", `{"capabilities":["`+capabilityMessageAgent+`"]}`, testOwnerSeed(), time.Now())
+	req := signedFor(t, w.s.thisIdentityAgentsIdentifier(), "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities", `{"capabilities":["`+capabilityMessageAgent+`"]}`, testOwnerSeed(), time.Now())
 	rec := httptest.NewRecorder()
 	w.s.router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -549,9 +549,10 @@ func TestARequestAuthorisesOneCredential(t *testing.T) {
 	body := `{"capabilities":["` + capabilityMessageAgent + `"]}`
 	stamp := time.Now().UTC().Format(time.RFC3339)
 	path := "/api/mcp/agents/" + w.a.ID + "/capabilities"
-	sig, _ := SignOwnerRequest("PUT", path, stamp, []byte(body), testOwnerSeed())
+	ia := w.s.thisIdentityAgentsIdentifier()
+	sig, _ := SignOwnerRequest(ia, "PUT", path, stamp, []byte(body), testOwnerSeed())
 	by := authority{About: w.a.ID, Request: &signedRequest{Kind: "owner", Signer: "EOWNERTESTAID", Body: body,
-		Signed: canonicalRequestString("PUT", path, stamp, []byte(body)), Signature: sig}}
+		Signed: canonicalOwnerRequest(ia, "PUT", path, stamp, []byte(body)), Signature: sig}}
 	if _, err := w.s.issueCapabilityGrant(w.a, by); err != nil {
 		t.Fatalf("the first credential on the request: %v", err)
 	}
@@ -573,8 +574,8 @@ func TestAnAIAgentWhoseGrantCannotBeIssuedIsNotCreated(t *testing.T) {
 	// the grant it asks for is refused while everything before it succeeds.
 	body := `{"name":"Ungranted","capabilities":["` + capabilityMessageAgent + `"]}`
 	at := time.Now()
-	req := signed(t, "POST", "/api/mcp/agents", body, testOwnerSeed(), at)
-	spent := canonicalRequestString("POST", "/api/mcp/agents", at.UTC().Format(time.RFC3339), []byte(body))
+	req := signedFor(t, w.s.thisIdentityAgentsIdentifier(), "POST", "/api/mcp/agents", body, testOwnerSeed(), at)
+	spent := canonicalOwnerRequest(w.s.thisIdentityAgentsIdentifier(), "POST", "/api/mcp/agents", at.UTC().Format(time.RFC3339), []byte(body))
 	if err := w.s.DataStore.KeepCredentialRequest("Eanother-credential", iacrypto.Blake3QB64Must([]byte(spent)), body); err != nil {
 		t.Fatal(err)
 	}
@@ -813,7 +814,7 @@ func TestTheOwnerApprovesAnEarlierMachine(t *testing.T) {
 	w.s.controllers().Put(earlier)
 	body := `{"controller_aid":"` + ctl.ControllerAID + `","public_key":"` + ctl.PublicKey + `","label":"` + ctl.Label + `","grade":"` + string(ctl.Grade) + `"}`
 	rec := httptest.NewRecorder()
-	w.s.router.ServeHTTP(rec, signed(t, "POST", "/api/controllers", body, testOwnerSeed(), time.Now()))
+	w.s.router.ServeHTTP(rec, signedFor(t, w.s.thisIdentityAgentsIdentifier(), "POST", "/api/controllers", body, testOwnerSeed(), time.Now()))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("the owner's approval: %d %s", rec.Code, rec.Body.String())
 	}
@@ -850,7 +851,7 @@ func TestTheOwnerApprovesAnEarlierAIAgent(t *testing.T) {
 	mcpTokensMu.Unlock()
 	body := `{"capabilities":["` + capabilityMessageAgent + `"]}`
 	rec = httptest.NewRecorder()
-	w.s.router.ServeHTTP(rec, signed(t, "PUT", "/api/mcp/agents/"+id+"/capabilities", body, testOwnerSeed(), time.Now()))
+	w.s.router.ServeHTTP(rec, signedFor(t, w.s.thisIdentityAgentsIdentifier(), "PUT", "/api/mcp/agents/"+id+"/capabilities", body, testOwnerSeed(), time.Now()))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("the owner's approval: %d %s", rec.Code, rec.Body.String())
 	}

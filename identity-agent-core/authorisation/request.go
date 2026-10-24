@@ -194,7 +194,17 @@ func Check(in Input) error {
 		}
 	case "owner":
 		lines := strings.Split(req.Signed, "\n")
-		if len(lines) != 5 || lines[0] != "IA-REQ-V1" {
+		switch {
+		case len(lines) == 6 && lines[0] == "IA-REQ-V2":
+			// Names the Identity Agent it was for, which must be the issuer.
+			if lines[1] != cred.Issuer {
+				return fmt.Errorf("the request was signed for %s, not for the issuer %s", lines[1], cred.Issuer)
+			}
+			lines = append(lines[:1], lines[2:]...)
+		case len(lines) == 5 && lines[0] == "IA-REQ-V1":
+			// The first form, kept so a credential issued before owner
+			// requests named their Identity Agent still checks.
+		default:
 			return fmt.Errorf("the signed string is not an owner's request")
 		}
 		method, path, stamp, digest = lines[1], lines[2], lines[3], lines[4]

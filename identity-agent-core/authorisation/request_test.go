@@ -557,3 +557,28 @@ func TestARequestMustNameTheIdentityAgentThatIssued(t *testing.T) {
 		t.Fatal("a request signed for another Identity Agent was taken as authorising this one's credential")
 	}
 }
+
+// An owner's request in the current form names the Identity Agent it was for,
+// which must be the credential's issuer.
+func TestAnOwnersRequestMustNameTheIssuer(t *testing.T) {
+	w := newWorld(t)
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	grantFor := func(target string) []byte {
+		signed := strings.Join([]string{"IA-REQ-V2", target, "PUT", "/api/mcp/agents/agent-1/capabilities",
+			ago(time.Minute).Format(time.RFC3339), iacrypto.Blake3QB64Must([]byte(capBody))}, "\n")
+		sig, _ := login.SignString(signed, priv.Seed())
+		asked, _ := Asked(capBody)
+		req := map[string]interface{}{"kind": "owner", "signer": org, "signed": signed, "signature": sig, "asked": asked}
+		acdc, _ := w.build(schemas.AIAgentGrant.Schema.SAID, agentAID, time.Now().UTC(), map[string]interface{}{
+			"asset_type": "ai_agent", "name": "Research assistant", "capabilities": []string{"system.info.read"}, "request": req, "about": "agent-1",
+		}, nil)
+		return acdc
+	}
+	if err := Check(Input{Credential: grantFor(org), OwnerKey: iacrypto.VerkeyQB64(pub), Body: capBody, HaveBody: true}); err != nil {
+		t.Fatalf("an owner's request naming the issuer was refused: %v", err)
+	}
+	if err := Check(Input{Credential: grantFor("EAnotherIdentityAgent0123456789ABCDEFGHIJKLM"), OwnerKey: iacrypto.VerkeyQB64(pub),
+		Body: capBody, HaveBody: true}); err == nil {
+		t.Fatal("an owner's request signed for another Identity Agent was taken as authorising this one's credential")
+	}
+}

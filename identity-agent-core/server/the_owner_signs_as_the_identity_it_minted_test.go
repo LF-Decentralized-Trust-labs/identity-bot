@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"identity-agent-core/store"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -65,7 +66,7 @@ func TestSigningForAMachineUsesTheIdentityThatAdoptedIt(t *testing.T) {
 
 	// The method is upper-cased in the canonical string, so a caller that sent
 	// "get" must still produce the signature the machine checks for "GET".
-	signed := canonicalRequestString("GET", "/api/identity", out.Timestamp, nil)
+	signed := canonicalOwnerRequest(out.For, "GET", "/api/identity", out.Timestamp, nil)
 
 	idx, known, err := s.DataStore.MachineOwnerIndex(owner)
 	if err != nil || !known {
@@ -145,5 +146,29 @@ func TestAControllerCannotAskThisDeviceToSignAsTheOwner(t *testing.T) {
 	}
 	if strings.TrimSpace(req.Why) == "" {
 		t.Fatal("a refusal with no reason leaves somebody unable to act on it")
+	}
+}
+
+// The signature names the Identity Agent of the machine this owner adopted,
+// from this device's own record of the adoption, so no other Identity Agent
+// the same key could sign for will take a copy.
+func TestSigningForAMachineNamesThatMachine(t *testing.T) {
+	s := adoptingOwner(t)
+	owner := mintedToOwnAMachine(t, s)
+	if err := s.DataStore.SaveAdoptedAgent(store.AdoptedAgent{AID: "EThePairingAID",
+		SignsAsAID: "EWhatTheMachineSignsAs", URL: "https://machine.example", OwnerAID: owner}); err != nil {
+		t.Fatal(err)
+	}
+	rec := askToSignAs(t, s, `{"owner_aid":"`+owner+`","method":"GET","path":"/api/identity"}`)
+	var out signAsMachineOwnerResponse
+	json.NewDecoder(rec.Body).Decode(&out)
+	if out.For != "EWhatTheMachineSignsAs" {
+		t.Fatalf("the request was signed for %q, not the machine this owner adopted", out.For)
+	}
+	rec = askToSignAs(t, s, `{"owner_aid":"`+owner+`","method":"GET","path":"/api/identity","for":""}`)
+	out = signAsMachineOwnerResponse{}
+	json.NewDecoder(rec.Body).Decode(&out)
+	if out.For != "" {
+		t.Fatalf("a request asked to name nobody named %q", out.For)
 	}
 }

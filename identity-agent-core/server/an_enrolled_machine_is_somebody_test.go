@@ -29,7 +29,7 @@ import (
 func signedAs(t *testing.T, key ed25519.PrivateKey, aid, method, path string) *http.Request {
 	t.Helper()
 	stamp := time.Now().UTC().Format(time.RFC3339)
-	sig, err := SignOwnerRequest(method, path, stamp, nil, key.Seed())
+	sig, err := signMachineRequest(method, path, stamp, nil, key.Seed())
 	if err != nil {
 		t.Fatal(err)
 	}

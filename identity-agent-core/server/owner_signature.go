@@ -36,6 +36,9 @@ const (
 	headerOwnerSig       = "X-IA-Owner-Sig"       // CESR qb64 Ed25519 signature
 	headerOwnerTimestamp = "X-IA-Owner-Timestamp" // RFC3339, inside signedRequestWindow
 	headerOwnerAID       = "X-IA-Owner-AID"       // optional: which owner key signed
+	// headerOwnerFor names the Identity Agent the request is meant for. It is
+	// inside the signature, and any other Identity Agent refuses the request.
+	headerOwnerFor = "X-IA-Owner-For"
 )
 
 // ownerAuthorityFile records whose signature counts as the owner's. It is
@@ -292,9 +295,29 @@ func verifyOwnerString(body, sig string, pub []byte) (bool, error) {
 	return login.VerifyString(body, sig, pub)
 }
 
-// canonicalRequestString is the exact text an owner signs. Method, path,
-// timestamp and a digest of the body — so a captured signature cannot be moved
-// to a different endpoint, replayed later, or reused with a different body.
+// canonicalOwnerRequest is the exact text an owner signs: the Identity Agent it
+// is for, method, path, timestamp and a digest of the body — so a captured
+// signature cannot be presented to a different Identity Agent, moved to a
+// different endpoint, replayed later, or reused with a different body.
+//
+// The Identity Agent is named because one owner key can own more than one, and
+// each keeps its own memory of spent signatures: without the name, a request
+// captured on its way to one could be presented to another within the window.
+func canonicalOwnerRequest(target, method, path, timestamp string, body []byte) string {
+	return strings.Join([]string{
+		"IA-REQ-V2",
+		target,
+		strings.ToUpper(method),
+		path,
+		timestamp,
+		iacrypto.Blake3QB64Must(body),
+	}, "\n")
+}
+
+// canonicalRequestString is the first form of that string, with no Identity
+// Agent named. An owner's request is no longer accepted in it. It remains the
+// form a machine an identity owns signs its notifications in (asset_notify.go),
+// whose signer has its own key per machine.
 func canonicalRequestString(method, path, timestamp string, body []byte) string {
 	return strings.Join([]string{
 		"IA-REQ-V1",
@@ -305,11 +328,12 @@ func canonicalRequestString(method, path, timestamp string, body []byte) string 
 	}, "\n")
 }
 
-// SignOwnerRequest produces the signature a client sends in X-IA-Owner-Sig.
+// SignOwnerRequest produces the signature a client sends in X-IA-Owner-Sig, for
+// the Identity Agent whose identifier is target (sent in X-IA-Owner-For).
 // Exported so the desktop app, the CLI and the tests all sign the same bytes
 // rather than each inventing a format.
-func SignOwnerRequest(method, path, timestamp string, body, seed []byte) (string, error) {
-	return login.SignString(canonicalRequestString(method, path, timestamp, body), seed)
+func SignOwnerRequest(target, method, path, timestamp string, body, seed []byte) (string, error) {
+	return login.SignString(canonicalOwnerRequest(target, method, path, timestamp, body), seed)
 }
 
 // verifyOwnerSignature returns nil when the request carries a valid, unexpired,
@@ -354,7 +378,11 @@ func (s *CoreServer) verifyOwnerSignature(r *http.Request) error {
 		r.Body = io.NopCloser(bytes.NewReader(body))
 	}
 
-	ok, err := login.VerifyString(canonicalRequestString(r.Method, r.URL.Path, stamp, body), sig, pub)
+	target, err := s.theIdentityAgentAnOwnerNames(r)
+	if err != nil {
+		return err
+	}
+	ok, err := login.VerifyString(canonicalOwnerRequest(target, r.Method, r.URL.Path, stamp, body), sig, pub)
 	if err != nil {
 		return fmt.Errorf("signature: %w", err)
 	}
@@ -402,4 +430,20 @@ func (s *CoreServer) ownerKeyFromAVerifiedLog(aid string) (string, error) {
 		return "", fmt.Errorf("the verified log for %s names no current key", aid)
 	}
 	return record.CurrentPublicKey, nil
+}
+
+// theIdentityAgentAnOwnerNames is the Identity Agent an owner-signed request is
+// meant for, refused unless it is this one. An Identity Agent with no
+// identifier yet — a machine not yet founded, being claimed — is named by
+// nobody, so it accepts only a request that names nobody, and refuses those
+// the moment it has one.
+func (s *CoreServer) theIdentityAgentAnOwnerNames(r *http.Request) (string, error) {
+	named := strings.TrimSpace(r.Header.Get(headerOwnerFor))
+	if me := s.thisIdentityAgentsIdentifier(); named != me {
+		if named == "" {
+			return "", fmt.Errorf("a signed request must name the Identity Agent it is for in %s", headerOwnerFor)
+		}
+		return "", fmt.Errorf("this request was signed for a different Identity Agent")
+	}
+	return named, nil
 }

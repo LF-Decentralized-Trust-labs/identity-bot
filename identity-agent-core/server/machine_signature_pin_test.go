@@ -75,7 +75,7 @@ func TestAPinnedSignatureStillVerifies(t *testing.T) {
 	seed := pinnedMachineSeed()
 	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
 
-	produced, err := SignOwnerRequest(http.MethodPost, pinnedMachinePath, pinnedMachineStamp,
+	produced, err := signMachineRequest(http.MethodPost, pinnedMachinePath, pinnedMachineStamp,
 		pinnedMachineBody, seed)
 	if err != nil {
 		t.Fatal(err)
@@ -93,4 +93,11 @@ func TestAPinnedSignatureStillVerifies(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("a signature a machine produced no longer verifies: ok=%v err=%v", ok, err)
 	}
+}
+
+// signMachineRequest signs as a machine the identity owns signs its
+// notifications: the first form of the request string, which names no
+// Identity Agent.
+func signMachineRequest(method, path, timestamp string, body, seed []byte) (string, error) {
+	return login.SignString(canonicalRequestString(method, path, timestamp, body), seed)
 }

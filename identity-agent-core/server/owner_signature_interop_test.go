@@ -36,8 +36,10 @@ func TestAcceptsASignatureProducedByTheDartClient(t *testing.T) {
 	}
 
 	const (
-		dartSignature = "0BDLE6J20nXw-Cf5q6cM0PPIJnCqtlSZYjoUMwfsVX8P2UrFxponlBjrXO68JBTLshkqPpiHW3oIYBJX-UJS32IH"
+		dartSignature = "0BDuezD3LBmx9DEFugOkyMZtZOfPETxsToamKGnFoF2Z8y7d8bVsrmsLpsrvRKPLgSpvIeMwaDQFGtfEkwauEUsK"
 		dartTimestamp = "2026-07-27T12:00:00Z"
+		// The Identity Agent the Dart client's vector names.
+		dartTarget = "EGOLDENIDENTITYAGENT"
 	)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/profile", nil)
@@ -51,7 +53,7 @@ func TestAcceptsASignatureProducedByTheDartClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("timestamp: %v", err)
 	}
-	body := canonicalRequestString(http.MethodGet, "/api/profile", dartTimestamp, nil)
+	body := canonicalOwnerRequest(dartTarget, http.MethodGet, "/api/profile", dartTimestamp, nil)
 
 	authority, err := s.ownerAuthority()
 	if err != nil {

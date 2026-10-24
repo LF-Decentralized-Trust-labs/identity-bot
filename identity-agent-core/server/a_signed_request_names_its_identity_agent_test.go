@@ -132,3 +132,45 @@ func bindingFor(t *testing.T, m testMachine) agentbody.Binding {
 	}
 	return agentbody.Binding{Keys: agentbody.Keys{Host: host, Verkey: verkey}}
 }
+
+// An owner's request for one Identity Agent is refused by another the same
+// owner key administers, inside the window and before either has seen it.
+func TestAnOwnerRequestForOneIdentityAgentIsRefusedByAnother(t *testing.T) {
+	named := func(aid string) *CoreServer {
+		s := newAuthTestServer(t)
+		ds, err := store.NewSQLiteStore(s.DataDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.DataStore = ds
+		if err := ds.SaveIdentity(store.IdentityState{AID: aid}); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	a, b := named(agentA), named(agentB)
+	seed, _ := sealTestOwner(t, a)
+	if again, _ := sealTestOwner(t, b); string(again) != string(seed) {
+		t.Fatal("the two Identity Agents do not share an owner key, so this proves nothing")
+	}
+
+	captured := signedFor(t, agentA, "GET", "/api/profile", "", seed, time.Now())
+	copyForB := remote("GET", "/api/profile", "")
+	copyForB.Header = captured.Header.Clone()
+	if err := b.verifyOwnerSignature(copyForB); err == nil {
+		t.Fatal("Identity Agent B admitted an owner request signed for A")
+	}
+	renamed := remote("GET", "/api/profile", "")
+	renamed.Header = captured.Header.Clone()
+	renamed.Header.Set(headerOwnerFor, agentB)
+	if err := b.verifyOwnerSignature(renamed); err == nil {
+		t.Fatal("an owner request re-addressed in flight was admitted")
+	}
+	unnamed := signed(t, "GET", "/api/profile", "", seed, time.Now())
+	if err := a.verifyOwnerSignature(unnamed); err == nil {
+		t.Fatal("a named Identity Agent admitted an owner request naming nobody")
+	}
+	if err := a.verifyOwnerSignature(captured); err != nil {
+		t.Fatalf("the Identity Agent it was signed for refused it: %v", err)
+	}
+}

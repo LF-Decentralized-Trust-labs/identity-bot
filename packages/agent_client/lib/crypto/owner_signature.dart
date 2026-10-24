@@ -17,7 +17,7 @@ import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 /// of one newline rejects every request and nothing says why.
 class OwnerSignature {
   /// Version prefix of the canonical string. Changing it is a wire change.
-  static const version = 'IA-REQ-V1';
+  static const version = 'IA-REQ-V2';
 
   /// Header carrying the signature.
   static const sigHeader = 'X-IA-Owner-Sig';
@@ -28,14 +28,21 @@ class OwnerSignature {
   /// Header naming which owner key signed, when the caller knows it.
   static const aidHeader = 'X-IA-Owner-AID';
 
-  /// The exact text the owner signs: method, path, timestamp, and a digest of
-  /// the body.
+  /// Header naming the Identity Agent the request is for. It is inside the
+  /// signature, and any other Identity Agent refuses the request.
+  static const forHeader = 'X-IA-Owner-For';
+
+  /// The exact text the owner signs: the Identity Agent it is for, method,
+  /// path, timestamp, and a digest of the body.
   ///
-  /// Every part is load-bearing. Without the method and path a captured
+  /// Every part is load-bearing. Without the Identity Agent named, a request
+  /// captured on its way to one could be presented to another the same owner
+  /// key administers. Without the method and path a captured
   /// signature could be pointed at a different endpoint; without the body
   /// digest it could be reused with different contents; without the timestamp
   /// it would be valid forever.
   static String canonicalString({
+    String target = '',
     required String method,
     required String path,
     required String timestamp,
@@ -43,6 +50,7 @@ class OwnerSignature {
   }) {
     return [
       version,
+      target,
       method.toUpperCase(),
       path,
       timestamp,
@@ -61,10 +69,12 @@ class OwnerSignature {
     required List<int> body,
     required Uint8List ownerSeed,
     String? ownerAid,
+    String targetAid = '',
     DateTime? now,
   }) {
     final timestamp = rfc3339Seconds(now ?? DateTime.now().toUtc());
     final message = canonicalString(
+      target: targetAid,
       method: method,
       path: path,
       timestamp: timestamp,
@@ -79,6 +89,7 @@ class OwnerSignature {
       sigHeader: sigQB64(Uint8List.fromList(signature)),
       timestampHeader: timestamp,
       if (ownerAid != null && ownerAid.isNotEmpty) aidHeader: ownerAid,
+      if (targetAid.isNotEmpty) forHeader: targetAid,
     };
   }
 
