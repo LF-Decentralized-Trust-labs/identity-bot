@@ -72,9 +72,9 @@ func TestTheControllerKeyCannotBeAskedToSignSomethingElse(t *testing.T) {
 		{"", "", ""},
 		{"B\nIA-REQ-V1", "POST\nIA-REQ-V1", "/x\nIA-REQ-V1"},
 	} {
-		got := canonicalControllerRequest(in.aid, in.method, in.path, "2026-01-01T00:00:00Z",
+		got := canonicalControllerRequest(in.aid, "", in.method, in.path, "2026-01-01T00:00:00Z",
 			authprovider.Unmeasured(""), nil)
-		if !strings.HasPrefix(got, "IA-CONTROLLER-REQ-V1\n") {
+		if !strings.HasPrefix(got, "IA-CONTROLLER-REQ-V2\n") {
 			t.Fatalf("a controller signed something that is not a controller request: %q", got)
 		}
 		if strings.HasPrefix(got, "IA-REQ-V1") {
@@ -91,7 +91,7 @@ func TestTheControllerKeyCannotBeAskedToSignSomethingElse(t *testing.T) {
 // than the only thing standing there — but the prefixes are one edit apart, and
 // an edit that made them agree would be silent.
 func TestAControllerRequestIsNeverAnOwnerRequest(t *testing.T) {
-	controller := canonicalControllerRequest("BMachine", "POST", "/api/rotation",
+	controller := canonicalControllerRequest("BMachine", "", "POST", "/api/rotation",
 		"2026-01-01T00:00:00Z", authprovider.Unmeasured(""), []byte(`{}`))
 	owner := canonicalRequestString("POST", "/api/rotation", "2026-01-01T00:00:00Z", []byte(`{}`))
 	if controller == owner {

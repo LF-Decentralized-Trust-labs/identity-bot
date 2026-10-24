@@ -525,3 +525,35 @@ func TestARegistryWithBackersIsNotSigned(t *testing.T) {
 		t.Fatalf("a registry with backers: %v", err)
 	}
 }
+
+// signsFor is signs in the form every Identity Agent now admits, which names
+// the Identity Agent the request was for.
+func (w *world) signsFor(target, method, path, body string, at time.Time) map[string]interface{} {
+	signed := strings.Join([]string{"IA-CONTROLLER-REQ-V2", w.machine, target, method, path, at.Format(time.RFC3339),
+		"", "", "0", iacrypto.Blake3QB64Must([]byte(body))}, "\n")
+	sig, err := login.SignString(signed, w.seed)
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	asked, err := Asked(body)
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	w.body = body
+	return map[string]interface{}{"kind": "controller", "signer": w.machine, "signed": signed, "signature": sig, "asked": asked}
+}
+
+// A request that names the issuer holds; one signed for another Identity Agent
+// authorised nothing at this one, however valid its signature.
+func TestARequestMustNameTheIdentityAgentThatIssued(t *testing.T) {
+	w := newWorld(t)
+	req := w.signsFor(org, "PUT", "/api/mcp/agents/agent-1/capabilities", capBody, ago(time.Minute))
+	if err := w.check(w.aGrant(req, []string{"system.info.read"}, "agent-1")); err != nil {
+		t.Fatalf("a request naming the issuer was refused: %v", err)
+	}
+	other := w.signsFor("EAnotherIdentityAgent0123456789ABCDEFGHIJKLM", "PUT",
+		"/api/mcp/agents/agent-1/capabilities", capBody, ago(time.Minute))
+	if err := w.check(w.aGrant(other, []string{"system.info.read"}, "agent-1")); err == nil {
+		t.Fatal("a request signed for another Identity Agent was taken as authorising this one's credential")
+	}
+}

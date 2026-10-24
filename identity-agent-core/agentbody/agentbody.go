@@ -192,6 +192,16 @@ const (
 	// rewrite what the record says the AI agent was doing.
 	HeaderWorkItem = "X-Work-Item"
 	HeaderReason   = "X-Reason"
+	// HeaderFor names the Identity Agent the request is meant for, by its
+	// identifier — the one the enrolment named. Signed, so a request captured
+	// on its way to one Identity Agent is refused by any other that has the
+	// same machine enrolled.
+	HeaderFor = "X-IA-Body-For"
+	// HeaderSession is the caller's own session, when it has one: which of its
+	// runs made the request. It decides nothing at the Identity Agent and is
+	// passed to the app a call reaches, so it is signed for the same reason
+	// the stated purpose is.
+	HeaderSession = "X-IA-Session"
 )
 
 // RequestWindow is how far a body's timestamp may be from the Identity Agent's
@@ -201,6 +211,8 @@ const RequestWindow = 2 * time.Minute
 
 // SignedRequest is everything about one request that K's signature covers.
 type SignedRequest struct {
+	// For is the identifier of the Identity Agent the request is meant for.
+	For    string
 	Host   string
 	Method string
 	// Target is the request target exactly as sent — the escaped path and the
@@ -212,12 +224,14 @@ type SignedRequest struct {
 	Body      []byte
 	WorkItem  string
 	Reason    string
+	Session   string
 }
 
 // Bytes is the string K signs.
 func (r SignedRequest) Bytes() []byte {
 	return []byte(strings.Join([]string{
-		"IA-BODY-REQ-V2",
+		"IA-BODY-REQ-V3",
+		r.For,
 		r.Host,
 		strings.ToUpper(r.Method),
 		r.Target,
@@ -226,6 +240,7 @@ func (r SignedRequest) Bytes() []byte {
 		iacrypto.Blake3QB64Must(r.Body),
 		r.WorkItem,
 		r.Reason,
+		r.Session,
 	}, "\n"))
 }
 

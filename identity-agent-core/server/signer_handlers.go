@@ -371,7 +371,7 @@ func (s *CoreServer) AcceptFoundingSigner(a SignerAcceptance) (SignerAccepted, e
 	//
 	// So the anchored owner is asked too, and a founding invite may only seal
 	// the identity the inception already named.
-	if identity := s.identityAIDForVouching(); identity != "" {
+	if identity := s.thisAgentsIdentifier(); identity != "" {
 		anchored, aerr := s.ownerFromOwnIdentity(identity)
 		if aerr != nil {
 			// Not readable is not the same as absent, and treating it as absent

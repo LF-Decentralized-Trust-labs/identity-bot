@@ -106,14 +106,15 @@ func sealedEnrolment(t *testing.T, s *CoreServer, signer, offered testMachine, e
 	return b
 }
 
-// signed is a request the machine signs with its key.
-func (m testMachine) signed(t *testing.T, method, target string, body []byte) *http.Request {
+// signed is a request the machine signs with its key, for the Identity Agent s.
+func (m testMachine) signed(t *testing.T, s *CoreServer, method, target string, body []byte) *http.Request {
 	t.Helper()
 	host, _, _ := agentbody.Identity(m)
 	ts := time.Now().UTC().Format(time.RFC3339)
 	nonce := "nonce-" + base64.RawURLEncoding.EncodeToString([]byte(time.Now().String()))
 	r := httptest.NewRequest(method, target, bytes.NewReader(body))
-	sig, err := agentbody.Sign(m, agentbody.SignedRequest{Host: host, Method: method, Target: r.URL.RequestURI(),
+	ia := s.thisAgentsIdentifier()
+	sig, err := agentbody.Sign(m, agentbody.SignedRequest{For: ia, Host: host, Method: method, Target: r.URL.RequestURI(),
 		Timestamp: ts, Nonce: nonce, Body: body}.Bytes())
 	if err != nil {
 		t.Fatal(err)
@@ -123,6 +124,7 @@ func (m testMachine) signed(t *testing.T, method, target string, body []byte) *h
 	r.Header.Set(agentbody.HeaderSignature, sig)
 	r.Header.Set(agentbody.HeaderTimestamp, ts)
 	r.Header.Set(agentbody.HeaderNonce, nonce)
+	r.Header.Set(agentbody.HeaderFor, ia)
 	return r
 }
 
@@ -214,7 +216,7 @@ func TestAMachineBecomesAnAIAgentsBody(t *testing.T) {
 		t.Fatalf("no body credential was issued: %+v", rec)
 	}
 
-	r := m.signed(t, "POST", "/api/mcp", []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+	r := m.signed(t, s, "POST", "/api/mcp", []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
 	cc := s.resolveCaller(r)
 	agent, _ := s.aiAgentAsset(agentID)
 	if cc.CallerAID != agent.PairwiseAID || cc.BodyHost != host || cc.BodyGrade != agentbody.GradeHardwareAsserted {
@@ -301,7 +303,7 @@ func TestRejectingABodyGivesAFreshString(t *testing.T) {
 	if code != http.StatusOK || rej["enrolment"] == "" || rej["enrolment"] == old {
 		t.Fatalf("rejecting: %d %v", code, rej)
 	}
-	if r := s.resolveCaller(m.signed(t, "POST", "/api/mcp", []byte("{}"))); len(r.Scopes) != 0 {
+	if r := s.resolveCaller(m.signed(t, s, "POST", "/api/mcp", []byte("{}"))); len(r.Scopes) != 0 {
 		t.Fatal("a rejected machine was admitted")
 	}
 	// The rejected machine's key may try again with the fresh string.
@@ -325,7 +327,7 @@ func TestARevokedBodyIsRefused(t *testing.T) {
 	if rec, _ := s.DataStore.GetCredential(approved["credential_said"].(string)); rec == nil || rec.Status != "revoked" {
 		t.Fatalf("the body credential is %+v", rec)
 	}
-	if r := s.resolveCaller(m.signed(t, "POST", "/api/mcp", []byte("{}"))); len(r.Scopes) != 0 || r.BodyHost != "" {
+	if r := s.resolveCaller(m.signed(t, s, "POST", "/api/mcp", []byte("{}"))); len(r.Scopes) != 0 || r.BodyHost != "" {
 		t.Fatal("a revoked body was admitted")
 	}
 }
@@ -341,7 +343,7 @@ func TestABodySignedRequestPassesTheGateOnce(t *testing.T) {
 
 	router := s.buildRouter("")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, m.signed(t, "POST", "/api/mcp", []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)))
+	router.ServeHTTP(w, m.signed(t, s, "POST", "/api/mcp", []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)))
 	// The capabilities offered depend on the caller the handler sees. An
 	// anonymous caller — what a second, refused resolution would leave — is
 	// offered none of the AI agent's.
@@ -351,7 +353,7 @@ func TestABodySignedRequestPassesTheGateOnce(t *testing.T) {
 
 	// And the machine can ask whether it was approved, signed by its own key.
 	w = httptest.NewRecorder()
-	router.ServeHTTP(w, m.signed(t, "GET", "/api/agent-host/binding", nil))
+	router.ServeHTTP(w, m.signed(t, s, "GET", "/api/agent-host/binding", nil))
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"state":"active"`) {
 		t.Fatalf("the machine's status check: %d %s", w.Code, w.Body.String())
 	}
@@ -370,13 +372,13 @@ func TestARelayCannotChangeWhatABodySigned(t *testing.T) {
 		"the purpose": func(r *http.Request) { r.Header.Set(agentbody.HeaderReason, "something else") },
 		"the path":    func(r *http.Request) { r.URL.Path, r.URL.RawPath = "/api/mcp/x", "" },
 	} {
-		r := m.signed(t, "POST", "/api/mcp?limit=1", []byte(`{}`))
+		r := m.signed(t, s, "POST", "/api/mcp?limit=1", []byte(`{}`))
 		tamper(r)
 		if cc := s.resolveCaller(r); len(cc.Scopes) != 0 {
 			t.Fatalf("changing %s after signing was not noticed", name)
 		}
 	}
-	if cc := s.resolveCaller(m.signed(t, "POST", "/api/mcp?limit=1", []byte(`{}`))); len(cc.Scopes) == 0 {
+	if cc := s.resolveCaller(m.signed(t, s, "POST", "/api/mcp?limit=1", []byte(`{}`))); len(cc.Scopes) == 0 {
 		t.Fatal("an untouched signed request with a query was refused")
 	}
 }

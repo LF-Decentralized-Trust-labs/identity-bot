@@ -61,6 +61,14 @@ func anAuthorisedMachine(t *testing.T, s *CoreServer, grade ControllerGrade) (st
 func asThatMachine(t *testing.T, aid, method, path, body string, seed []byte,
 	level authprovider.Level, measuredAt time.Time) *http.Request {
 	t.Helper()
+	return asThatMachineTo(t, "", aid, method, path, body, seed, level, measuredAt)
+}
+
+// asThatMachineTo is asThatMachine for a request naming the Identity Agent
+// target, as every request to a named Identity Agent must.
+func asThatMachineTo(t *testing.T, target, aid, method, path, body string, seed []byte,
+	level authprovider.Level, measuredAt time.Time) *http.Request {
+	t.Helper()
 	req := remote(method, path, body)
 	stamp := time.Now().UTC().Format(time.RFC3339)
 
@@ -80,9 +88,12 @@ func asThatMachine(t *testing.T, aid, method, path, body string, seed []byte,
 	}
 
 	sig, err := login.SignString(
-		canonicalControllerRequest(aid, method, path, stamp, asserted, []byte(body)), seed)
+		canonicalControllerRequest(aid, target, method, path, stamp, asserted, []byte(body)), seed)
 	if err != nil {
 		t.Fatalf("signing: %v", err)
+	}
+	if target != "" {
+		req.Header.Set(headerControllerFor, target)
 	}
 	req.Header.Set(headerControllerAID, aid)
 	req.Header.Set(headerControllerSig, sig)
@@ -633,7 +644,7 @@ func TestAMachineMayNotScoreItself(t *testing.T) {
 	req.Header.Del(headerAuthLevelVouchedBy)
 	// Re-sign, so this fails on the missing voucher rather than on the signature.
 	stamp := req.Header.Get(headerControllerTimestamp)
-	sig, err := login.SignString(canonicalControllerRequest(aid, "POST", "/api/rotation", stamp,
+	sig, err := login.SignString(canonicalControllerRequest(aid, "", "POST", "/api/rotation", stamp,
 		authprovider.Result{Level: authprovider.LevelHigh, Measured: true,
 			At: time.Now().UTC(), Score: 80}, []byte(`{}`)), seed)
 	if err != nil {
@@ -873,7 +884,7 @@ func asThatMachineAt(t *testing.T, aid, method, path, body string, seed []byte,
 	req := remote(method, path, body)
 	stamp := stampAt.UTC().Format(time.RFC3339)
 	sig, err := login.SignString(
-		canonicalControllerRequest(aid, method, path, stamp,
+		canonicalControllerRequest(aid, "", method, path, stamp,
 			authprovider.Unmeasured(""), []byte(body)), seed)
 	if err != nil {
 		t.Fatalf("signing: %v", err)

@@ -428,9 +428,21 @@ func checkSealingKeys(k agentbody.Keys) error {
 }
 
 // verifyBodySignature checks a request a body signed, against a given binding:
-// the signature over the request as sent — target, nonce, body and stated
-// purpose — the timestamp window, and that the signature has not been spent.
-func verifyBodySignature(r *http.Request, b agentbody.Binding) error {
+// the signature over the request as sent — the Identity Agent it names, target,
+// nonce, body, stated purpose and session — the timestamp window, and that the
+// signature has not been spent.
+//
+// me is this Identity Agent's identifier. A request naming any other is
+// refused before its signature is looked at: a copy of a request made to a
+// different Identity Agent that has the same machine enrolled is worth nothing
+// here, though each keeps its own memory of spent signatures.
+func verifyBodySignature(r *http.Request, b agentbody.Binding, me string) error {
+	if named := r.Header.Get(agentbody.HeaderFor); named != me {
+		if named == "" {
+			return fmt.Errorf("the request does not name the Identity Agent it is for")
+		}
+		return fmt.Errorf("the request was signed for a different Identity Agent")
+	}
 	ts := r.Header.Get(agentbody.HeaderTimestamp)
 	when, err := time.Parse(time.RFC3339, ts)
 	if err != nil {
@@ -450,8 +462,9 @@ func verifyBodySignature(r *http.Request, b agentbody.Binding) error {
 	}
 	sig := r.Header.Get(agentbody.HeaderSignature)
 	msg := agentbody.SignedRequest{
-		Host: b.Host, Method: r.Method, Target: r.URL.RequestURI(), Timestamp: ts, Nonce: nonce,
+		For: me, Host: b.Host, Method: r.Method, Target: r.URL.RequestURI(), Timestamp: ts, Nonce: nonce,
 		Body: body, WorkItem: r.Header.Get(agentbody.HeaderWorkItem), Reason: r.Header.Get(agentbody.HeaderReason),
+		Session: r.Header.Get(agentbody.HeaderSession),
 	}.Bytes()
 	if err := agentbody.Verify(b.Host, b.Verkey, sig, msg); err != nil {
 		return err
@@ -479,7 +492,7 @@ func (s *CoreServer) identifyBody(r *http.Request) (agentbody.Binding, bool, err
 	if rec, _ := s.DataStore.GetCredential(b.CredentialSAID); rec == nil || !isUsableStatus(rec.Status) || s.issuedUnderFirstVersionTooLate(rec) {
 		return agentbody.Binding{}, true, fmt.Errorf("this body's credential is not in force")
 	}
-	if err := verifyBodySignature(r, b); err != nil {
+	if err := verifyBodySignature(r, b, s.thisAgentsIdentifier()); err != nil {
 		return agentbody.Binding{}, true, err
 	}
 	return b, true, nil
@@ -494,7 +507,7 @@ func (s *CoreServer) handleBodyStatus(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "this machine key has not enrolled here", http.StatusNotFound)
 		return
 	}
-	if err := verifyBodySignature(r, b); err != nil {
+	if err := verifyBodySignature(r, b, s.thisAgentsIdentifier()); err != nil {
 		jsonError(w, err.Error(), http.StatusForbidden)
 		return
 	}

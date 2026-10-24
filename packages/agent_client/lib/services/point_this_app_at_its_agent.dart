@@ -37,6 +37,7 @@ Future<void> pointThisAppAtItsAgent({http.Client? using}) async {
     return;
   }
   AgentConfig.agentOrigin = half.agentOrigin;
+  AgentConfig.agentAid = half.isAController ? half.agentAid : '';
   if (half.isAController) {
     debugPrint('[controller] this app is the front end for ${half.agentAid} '
         'at ${half.agentOrigin}');
@@ -106,6 +107,7 @@ Future<void> tellThisComputerWhichHalfItIsRunning({
 /// calling the wrong one would silently unpair a working controller.
 void stopPointingThisProcessAnywhere() {
   AgentConfig.agentOrigin = '';
+  AgentConfig.agentAid = '';
 }
 
 /// Tries for a few seconds, because a core that has just been asked to start is

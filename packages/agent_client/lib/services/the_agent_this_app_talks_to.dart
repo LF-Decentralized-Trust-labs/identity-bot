@@ -82,6 +82,9 @@ class TheAgentThisAppTalksTo {
           // Always this machine, never the agent: the key that signs lives here
           // and the agent cannot reach it.
           localCoreOrigin: AgentConfig.coreBaseUrl,
+          // Named in every signature, so a copy is refused by any other
+          // Identity Agent. Unknown leaves it to the core, which was told.
+          agentAid: AgentConfig.agentAid.isEmpty ? null : AgentConfig.agentAid,
           inner: inner,
         ),
         null,

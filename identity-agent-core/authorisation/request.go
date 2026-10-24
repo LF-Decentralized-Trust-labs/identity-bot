@@ -169,7 +169,20 @@ func Check(in Input) error {
 	switch req.Kind {
 	case "controller":
 		lines := strings.Split(req.Signed, "\n")
-		if len(lines) != 9 || lines[0] != "IA-CONTROLLER-REQ-V1" {
+		switch {
+		case len(lines) == 10 && lines[0] == "IA-CONTROLLER-REQ-V2":
+			// The second form names the Identity Agent the request was for,
+			// which is the one that issued on it: a request signed for another
+			// Identity Agent authorised nothing here.
+			if lines[2] != cred.Issuer {
+				return fmt.Errorf("the request was signed for %s, not for the issuer %s", lines[2], cred.Issuer)
+			}
+			lines = append(lines[:2], lines[3:]...)
+		case len(lines) == 9 && lines[0] == "IA-CONTROLLER-REQ-V1":
+			// The first form, kept so a credential issued before requests named
+			// their Identity Agent still checks. No Identity Agent admits a
+			// request in this form any more.
+		default:
 			return fmt.Errorf("the signed string is not a machine's request")
 		}
 		if lines[1] != req.Signer {

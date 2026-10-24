@@ -31,11 +31,15 @@ class _Split extends http.BaseClient {
       if (!w.coreWillSign) {
         return _reply('{"error":"no hardware"}', 501);
       }
+      final asked = w.askedToSign.last;
       return _reply(
         jsonEncode({
           'controller_aid': 'BThisMachine',
           'signature': '0BSignatureOverWhatWasAsked',
           'timestamp': '2026-08-31T12:00:00Z',
+          // The core echoes the Identity Agent it signed for: the one asked
+          // for, or the one it was told this app is a front end for.
+          'for': asked.containsKey('for') ? asked['for'] : 'EToldToTheCore',
         }),
         200,
       );
@@ -89,6 +93,40 @@ void main() {
     // agent is reached by another name, which is what a relay does.
     expect(asked['path'], '/api/rotation');
     expect(utf8.decode(base64.decode(asked['body_b64'] as String)), '{"a":1}');
+  });
+
+  test('every request names the Identity Agent it is for, so no other '
+      'Identity Agent accepts a copy', () async {
+    final w = _Watched();
+    final c = ControllerSigningClient(
+      agentOrigin: _agent,
+      localCoreOrigin: _localCore,
+      agentAid: 'EThatIdentity',
+      inner: w.client,
+    );
+
+    await c.get(Uri.parse('$_agent/api/profile'));
+
+    expect(w.askedToSign.single['for'], 'EThatIdentity',
+        reason: 'the core was not told which Identity Agent to sign for');
+    expect(w.toTheAgent.single.headers['X-IA-Controller-For'], 'EThatIdentity',
+        reason: 'the name inside the signature was not sent, so the agent '
+            'checks a different string and refuses every request');
+  });
+
+  test('left unnamed, the core names the agent it was told about, and the '
+      'header carries what the core signed', () async {
+    final w = _Watched();
+    final c = ControllerSigningClient(
+      agentOrigin: _agent,
+      localCoreOrigin: _localCore,
+      inner: w.client,
+    );
+
+    await c.get(Uri.parse('$_agent/api/profile'));
+
+    expect(w.askedToSign.single.containsKey('for'), isFalse);
+    expect(w.toTheAgent.single.headers['X-IA-Controller-For'], 'EToldToTheCore');
   });
 
   test('requests anywhere else are not signed, so this machine is not '

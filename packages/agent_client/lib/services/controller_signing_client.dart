@@ -35,6 +35,7 @@ class ControllerSigningClient extends http.BaseClient {
   ControllerSigningClient({
     required this.agentOrigin,
     required this.localCoreOrigin,
+    this.agentAid,
     this.authentication,
     http.Client? inner,
   })  : _inner = ProvingThisComputer.over(inner),
@@ -46,6 +47,15 @@ class ControllerSigningClient extends http.BaseClient {
 
   /// This machine's own core, which holds the enclave key and does the signing.
   final String localCoreOrigin;
+
+  /// The identifier of the Identity Agent at [agentOrigin], signed into every
+  /// request so no other Identity Agent will accept a copy.
+  ///
+  /// Null leaves it to the local core, which uses the agent it was told this
+  /// app is a front end for. Empty names nobody, which an Identity Agent accepts
+  /// only when a machine asks which identity it acts for — the one request made
+  /// before the identifier is known.
+  final String? agentAid;
 
   /// What the device holding the root key last said about the person, when
   /// anything did.
@@ -117,6 +127,7 @@ class ControllerSigningClient extends http.BaseClient {
           if (vouched != null) 'auth_level': vouched.level,
           if (vouched != null) 'auth_at': vouched.at.toUtc().toIso8601String(),
           if (vouched != null) 'auth_score': vouched.score,
+          if (agentAid != null) 'for': agentAid,
         }),
       );
       if (res.statusCode != 200) return null;
@@ -125,6 +136,9 @@ class ControllerSigningClient extends http.BaseClient {
       final aid = (body['controller_aid'] ?? '').toString();
       final sig = (body['signature'] ?? '').toString();
       final stamp = (body['timestamp'] ?? '').toString();
+      // Which Identity Agent the core signed this for. Echoed rather than
+      // filled in here, because it is inside the signature.
+      final signedFor = (body['for'] ?? '').toString();
       if (aid.isEmpty || sig.isEmpty || stamp.isEmpty) return null;
 
       return {
@@ -135,6 +149,7 @@ class ControllerSigningClient extends http.BaseClient {
         // by a millisecond or a timezone produces a signature over a string the
         // agent never sees.
         'X-IA-Controller-Timestamp': stamp,
+        if (signedFor.isNotEmpty) 'X-IA-Controller-For': signedFor,
         for (final e in {
           'X-IA-Controller-Auth-Level': (body['auth_level'] ?? '').toString(),
           'X-IA-Controller-Auth-At': (body['auth_at'] ?? '').toString(),

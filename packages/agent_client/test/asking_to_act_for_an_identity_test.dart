@@ -216,6 +216,13 @@ void main() {
 
       await asking.whatTheAgentSays(agent);
 
+      final signRequest = sent.firstWhere(
+          (r) => r.url.path == '/api/controller/sign') as http.Request;
+      expect((jsonDecode(signRequest.body) as Map)['for'], '',
+          reason: 'asking which identity this machine acts for must name '
+              'nobody: the core would otherwise name whichever Identity Agent '
+              'it was told about before, and this one would refuse it');
+
       expect(askedToSign, isTrue,
           reason: 'nothing asked this machine to sign, so the request went to '
               'the Identity Agent unsigned and would be refused for ever');

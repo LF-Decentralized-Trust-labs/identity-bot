@@ -32,6 +32,10 @@ const (
 	headerControllerAID       = "X-IA-Controller-AID"
 	headerControllerSig       = "X-IA-Controller-Sig"
 	headerControllerTimestamp = "X-IA-Controller-Timestamp"
+	// headerControllerFor names the Identity Agent the request is meant for, by
+	// its identifier. It is inside the signature, and an Identity Agent refuses
+	// a request that names anybody but itself — see theIdentityAgentItNames.
+	headerControllerFor = "X-IA-Controller-For"
 
 	// How well the person was authenticated, and who says so.
 	//
@@ -273,11 +277,54 @@ func (s *CoreServer) theStringThisMachineSigned(
 	if err != nil {
 		return "", authprovider.Result{}, err
 	}
+	target, err := s.theIdentityAgentItNames(r)
+	if err != nil {
+		return "", authprovider.Result{}, err
+	}
 
 	asserted := s.theAuthenticationSomebodyVouchedFor(r, aid, now)
 	return canonicalControllerRequest(
-		aid, r.Method, r.URL.Path, stamp, asserted, body), asserted, nil
+		aid, target, r.Method, r.URL.Path, stamp, asserted, body), asserted, nil
 }
+
+// theIdentityAgentItNames is the Identity Agent a controller's request is meant
+// for, refused unless it is this one.
+//
+// A REQUEST IS SIGNED FOR ONE IDENTITY AGENT. Without that, a request captured
+// on its way to one Identity Agent could be presented, within the window, to a
+// second that also holds a grant for the same machine: each keeps its own
+// memory of spent signatures, so neither would know it had been used. Naming
+// the target inside the signature makes the copy worthless anywhere else.
+//
+// One request is allowed to name nobody: a machine asking which identity it
+// acts for, which is how it learns the identifier it will name from then on.
+// That request changes nothing and answers the machine only with what its own
+// grant there says, so a copy presented elsewhere tells the presenter what that
+// other Identity Agent would tell the machine itself.
+//
+// An Identity Agent that has no identifier yet is named by nobody, so it
+// accepts only a request that names nobody — and refuses those the moment it
+// has one, which is what makes them worthless at a named Identity Agent.
+func (s *CoreServer) theIdentityAgentItNames(r *http.Request) (string, error) {
+	named := strings.TrimSpace(r.Header.Get(headerControllerFor))
+	me := s.thisAgentsIdentifier()
+	switch {
+	case named == me:
+		return named, nil
+	case named == "" && r.Method == http.MethodGet && r.URL.Path == controllerLearnsWhoItActsFor:
+		return "", nil
+	case named == "":
+		return "", fmt.Errorf(
+			"a signed request must name the Identity Agent it is for in %s", headerControllerFor)
+	default:
+		return "", fmt.Errorf("this request was signed for a different Identity Agent")
+	}
+}
+
+// controllerLearnsWhoItActsFor is the one route a controller may sign for
+// without naming the Identity Agent, because it is how the controller learns
+// the name.
+const controllerLearnsWhoItActsFor = "/api/controller/agent"
 
 // theAuthenticationSomebodyVouchedFor reads how well the person was
 // authenticated, and accepts it only from somebody entitled to say.
@@ -377,13 +424,17 @@ func (s *CoreServer) theAuthenticationSomebodyVouchedFor(
 // unauthenticated header on an authenticated request, and anything in the middle
 // could raise it.
 //
+// So is the Identity Agent it is meant for, so a copy is refused by every
+// other one (theIdentityAgentItNames). Empty only on the request a machine
+// makes to learn that identifier.
+//
 // So is the machine's own identifier. The signature is already checked against
 // the key recorded for that identifier, so this is not what stops an imposter —
 // it stops one machine's signature from being presented under another's name,
 // and it keeps two machines from ever producing identical signed bytes for the
 // same request, which the replay guard would otherwise treat as a reused one.
 func canonicalControllerRequest(
-	controllerAID, method, path, timestamp string,
+	controllerAID, target, method, path, timestamp string,
 	authenticated authprovider.Result,
 	body []byte,
 ) string {
@@ -396,8 +447,9 @@ func canonicalControllerRequest(
 		level = string(authenticated.Level)
 	}
 	return strings.Join([]string{
-		"IA-CONTROLLER-REQ-V1",
+		"IA-CONTROLLER-REQ-V2",
 		controllerAID,
+		target,
 		strings.ToUpper(method),
 		path,
 		timestamp,
@@ -445,7 +497,7 @@ func (s *CoreServer) theKeyEntitledToVouch() (string, error) {
 	// holding an unredeemed invite could install the key that vouches for every
 	// raised action on the agent — rotation, seed install, signing, archive
 	// retrieval — without ever becoming the owner.
-	if owner, oerr := s.ownerFromOwnIdentity(s.identityAIDForVouching()); oerr == nil &&
+	if owner, oerr := s.ownerFromOwnIdentity(s.thisAgentsIdentifier()); oerr == nil &&
 		owner != "" {
 		// The verified log first, so a rotation is followed. Nothing rewrites
 		// the sealed record when an owner rotates, so asking it first would go
@@ -473,9 +525,9 @@ func (s *CoreServer) theKeyEntitledToVouch() (string, error) {
 	return "", fmt.Errorf("nothing is sealed and this identity names no owner")
 }
 
-// identityAIDForVouching is this agent's own identifier, or empty when it has
+// thisAgentsIdentifier is this agent's own identifier, or empty when it has
 // none. Separated only so the caller above reads as one thought.
-func (s *CoreServer) identityAIDForVouching() string {
+func (s *CoreServer) thisAgentsIdentifier() string {
 	if s.DataStore == nil {
 		return ""
 	}
