@@ -1,6 +1,7 @@
 package server
 
 import (
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -93,31 +94,34 @@ func TestADevelopmentBuildReachableFromOutsideTakesNothingAsMeasured(t *testing.
 	}
 }
 
-// Every way this agent can be reached from elsewhere counts, including the
+// Every way this Identity Agent can be reached from elsewhere counts, including the
 // ones that are only intended so far — a relay configured but not connected,
 // a tunnel still starting — and only loopback with nothing published does not.
 func TestWhatCountsAsReachableFromOutside(t *testing.T) {
 	cases := []struct {
 		name string
-		h    howThisAgentIsReached
+		h    howThisIdentityAgentIsReached
 		want bool
 	}{
-		{"loopback only, nothing published", howThisAgentIsReached{PublishedSource: "localhost"}, false},
-		{"not yet started", howThisAgentIsReached{}, false},
-		{"listening on loopback explicitly", howThisAgentIsReached{ListensOn: "127.0.0.1"}, false},
-		{"a sealed instance", howThisAgentIsReached{SealedInstance: true}, true},
-		{"listening on every interface", howThisAgentIsReached{ListensOn: "0.0.0.0"}, true},
-		{"listening on a LAN address", howThisAgentIsReached{ListensOn: "192.168.0.10"}, true},
-		{"holding a relay address while disconnected", howThisAgentIsReached{HoldsRelay: true}, true},
-		{"a relay configured, not yet up", howThisAgentIsReached{RelayConfigured: true}, true},
-		{"a tunnel", howThisAgentIsReached{Tunnel: true}, true},
-		{"PUBLIC_URL set", howThisAgentIsReached{PublicURL: "https://agent.example"}, true},
-		{"an override address", howThisAgentIsReached{PublishedSource: "override"}, true},
-		{"an address a proxy reported", howThisAgentIsReached{PublishedSource: "observed:proxy"}, true},
-		{"a relay address published", howThisAgentIsReached{PublishedSource: "relay:example"}, true},
+		{"loopback only, nothing published", howThisIdentityAgentIsReached{PublishedSource: "localhost", ThisRequestIsLocal: true}, false},
+		{"not yet started", howThisIdentityAgentIsReached{ThisRequestIsLocal: true}, false},
+		{"listening on loopback explicitly", howThisIdentityAgentIsReached{ListensOn: "127.0.0.1", ThisRequestIsLocal: true}, false},
+		{"a request from elsewhere, nothing else telling", howThisIdentityAgentIsReached{}, true},
+		{"behind a proxy it was told about", howThisIdentityAgentIsReached{ThisRequestIsLocal: true, BehindAProxy: true}, true},
+		{"in tunnel mode with no tunnel up yet", howThisIdentityAgentIsReached{ThisRequestIsLocal: true, TunnelMode: true}, true},
+		{"a sealed instance", howThisIdentityAgentIsReached{SealedInstance: true}, true},
+		{"listening on every interface", howThisIdentityAgentIsReached{ListensOn: "0.0.0.0"}, true},
+		{"listening on a LAN address", howThisIdentityAgentIsReached{ListensOn: "192.168.0.10"}, true},
+		{"holding a relay address while disconnected", howThisIdentityAgentIsReached{HoldsRelay: true}, true},
+		{"a relay configured, not yet up", howThisIdentityAgentIsReached{RelayConfigured: true}, true},
+		{"a tunnel", howThisIdentityAgentIsReached{Tunnel: true}, true},
+		{"PUBLIC_URL set", howThisIdentityAgentIsReached{PublicURL: "https://identity-agent.example"}, true},
+		{"an override address", howThisIdentityAgentIsReached{PublishedSource: "override"}, true},
+		{"an address a proxy reported", howThisIdentityAgentIsReached{PublishedSource: "observed:proxy"}, true},
+		{"a relay address published", howThisIdentityAgentIsReached{PublishedSource: "relay:example"}, true},
 	}
 	for _, c := range cases {
-		got, why := whoCanReachThisAgent(c.h)
+		got, why := whoCanReachThisIdentityAgent(c.h)
 		if got != c.want {
 			t.Errorf("%s: reachable = %v, want %v", c.name, got, c.want)
 		}
@@ -127,15 +131,58 @@ func TestWhatCountsAsReachableFromOutside(t *testing.T) {
 	}
 }
 
-// The facts are read from the running agent, not assumed: a configured relay
-// operator or a PUBLIC_URL on a real server makes it reachable.
-func TestTheRunningAgentReportsHowItIsReached(t *testing.T) {
+// The facts are read from the running Identity Agent and the request, not
+// assumed: a PUBLIC_URL, or a request arriving from elsewhere or through a
+// proxy, makes it reachable.
+func TestTheRunningIdentityAgentReportsHowItIsReached(t *testing.T) {
 	s := &CoreServer{}
-	if got, _ := whoCanReachThisAgent(s.howThisAgentIsReachedNow()); got {
-		t.Fatal("a bare agent with nothing configured was taken as reachable from outside")
+	t.Setenv("RELAY_BASE_URL", "")
+	t.Setenv("PUBLIC_RELAY_BASE_URL", "")
+	here := httptest.NewRequest("GET", "/api/profile", nil)
+	here.RemoteAddr = "127.0.0.1:50000"
+	if got, why := whoCanReachThisIdentityAgent(s.howThisIdentityAgentIsReachedNow(here)); got {
+		t.Fatalf("an Identity Agent with nothing configured, asked from this computer, was taken as reachable: %s", why)
 	}
-	t.Setenv("PUBLIC_URL", "https://agent.example")
-	if got, _ := whoCanReachThisAgent(s.howThisAgentIsReachedNow()); !got {
-		t.Fatal("an agent publishing PUBLIC_URL was taken as reachable only from this computer")
+	far := httptest.NewRequest("GET", "/api/profile", nil)
+	far.RemoteAddr = "203.0.113.9:50000"
+	if got, _ := whoCanReachThisIdentityAgent(s.howThisIdentityAgentIsReachedNow(far)); !got {
+		t.Fatal("a request from another machine was taken as local")
+	}
+	proxied := httptest.NewRequest("GET", "/api/profile", nil)
+	proxied.RemoteAddr = "127.0.0.1:50000"
+	proxied.Header.Set("X-Forwarded-For", "203.0.113.9")
+	if got, _ := whoCanReachThisIdentityAgent(s.howThisIdentityAgentIsReachedNow(proxied)); !got {
+		t.Fatal("a request a proxy forwarded over loopback was taken as local")
+	}
+	t.Setenv("PUBLIC_URL", "https://identity-agent.example")
+	if got, _ := whoCanReachThisIdentityAgent(s.howThisIdentityAgentIsReachedNow(here)); !got {
+		t.Fatal("an Identity Agent publishing PUBLIC_URL was taken as reachable only from this computer")
+	}
+}
+
+// The decision as the controller path makes it, from a real request: on a
+// development build, a controller asking from this computer of an Identity
+// Agent nothing else can reach is stood in for, and one asking from anywhere
+// else is not.
+func TestTheStandInIsDecidedFromTheRequestItself(t *testing.T) {
+	s := &CoreServer{}
+	t.Setenv("RELAY_BASE_URL", "")
+	t.Setenv("PUBLIC_RELAY_BASE_URL", "")
+	now := time.Now().UTC()
+	nothing := authprovider.Unmeasured("nothing vouched")
+
+	here := httptest.NewRequest("POST", "/api/mcp/agents", nil)
+	here.RemoteAddr = "127.0.0.1:50000"
+	if got := s.whatThisRequestTakesAsMeasured(here, nothing, false, true, now); !got.Measured {
+		t.Fatal("a development build did not stand in for a controller on this computer")
+	}
+	far := httptest.NewRequest("POST", "/api/mcp/agents", nil)
+	far.RemoteAddr = "203.0.113.9:50000"
+	if got := s.whatThisRequestTakesAsMeasured(far, nothing, false, true, now); got.Measured {
+		t.Fatalf("a development build stood in for a controller asking from elsewhere: %+v", got)
+	}
+	t.Setenv("RELAY_BASE_URL", "https://relay.example")
+	if got := s.whatThisRequestTakesAsMeasured(here, nothing, false, true, now); got.Measured {
+		t.Fatalf("a development build set to be reached through a relay stood in for a controller: %+v", got)
 	}
 }

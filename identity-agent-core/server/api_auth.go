@@ -1,8 +1,6 @@
 package server
 
 import (
-	"identity-agent-core/sandbox"
-
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -10,6 +8,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"identity-agent-core/sandbox"
 )
 
 // Who is allowed to call what.
@@ -338,10 +338,10 @@ func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handle
 			case accessScoped:
 				if how := s.howThisIsTheOwner(r); how != "" {
 					// The owner at this computer is recognised again by the
-					// handler, which is how it always was. An owner proving it
-					// remotely is not: the signature is spent here, so the
-					// handler would find a remote caller with no scopes and
-					// refuse the person who grants them. So the gate says.
+					// handler. An owner proving it remotely cannot be: the
+					// signature is spent here, so the handler would find a
+					// remote caller with no scopes and refuse the person who
+					// grants them. So the gate says who it admitted.
 					if how == ownerAtThisComputer {
 						next.ServeHTTP(w, r)
 						return

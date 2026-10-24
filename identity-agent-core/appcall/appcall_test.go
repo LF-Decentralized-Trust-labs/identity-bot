@@ -9,7 +9,7 @@ import (
 )
 
 var anAIAgent = Caller{
-	Kind: KindAIAgent, Agent: "EAgent", Machine: "BBody", AuthLevel: "body_signed",
+	Kind: KindAIAgent, Identifier: "EAgent", Machine: "BBody", AuthLevel: "body_signed",
 	Grant: "EGrant", Session: "run-7",
 }
 
@@ -38,8 +38,8 @@ func stamped(t *testing.T, k []byte, capability string, body []byte, c Caller) h
 // The app learns exactly who the Identity Agent admitted.
 func TestAStampedCallNamesItsCaller(t *testing.T) {
 	k, v := keyAndVerifier(t)
-	body := []byte(`{"task":"T-1"}`)
-	got, err := v.Verify(stamped(t, k, "tracker.lease", body, anAIAgent), "tracker.lease", body)
+	body := []byte(`{"task":"n-1"}`)
+	got, err := v.Verify(stamped(t, k, "notes.write", body, anAIAgent), "notes.write", body)
 	if err != nil {
 		t.Fatalf("a call the Identity Agent stamped was refused: %v", err)
 	}
@@ -52,20 +52,20 @@ func TestAStampedCallNamesItsCaller(t *testing.T) {
 // makes the call worthless.
 func TestNothingInAStampedCallCanBeChanged(t *testing.T) {
 	k, v := keyAndVerifier(t)
-	body := []byte(`{"task":"T-1"}`)
-	for _, name := range []string{HeaderKind, HeaderAgent, HeaderMachine, HeaderAuthLevel,
+	body := []byte(`{"task":"n-1"}`)
+	for _, name := range []string{HeaderKind, HeaderIdentifier, HeaderMachine, HeaderAuthLevel,
 		HeaderGrant, HeaderSession, HeaderNonce} {
-		h := stamped(t, k, "tracker.lease", body, anAIAgent)
+		h := stamped(t, k, "notes.write", body, anAIAgent)
 		h.Set(name, "changed")
-		if _, err := v.Verify(h, "tracker.lease", body); err == nil {
+		if _, err := v.Verify(h, "notes.write", body); err == nil {
 			t.Errorf("a call with %s changed was accepted", name)
 		}
 	}
-	if _, err := v.Verify(stamped(t, k, "tracker.lease", body, anAIAgent), "tracker.lease",
-		[]byte(`{"task":"T-2"}`)); err == nil {
+	if _, err := v.Verify(stamped(t, k, "notes.write", body, anAIAgent), "notes.write",
+		[]byte(`{"task":"n-2"}`)); err == nil {
 		t.Error("a call with its body changed was accepted")
 	}
-	if _, err := v.Verify(stamped(t, k, "tracker.read", body, anAIAgent), "tracker.lease", body); err == nil {
+	if _, err := v.Verify(stamped(t, k, "notes.read", body, anAIAgent), "notes.write", body); err == nil {
 		t.Error("a call stamped for one capability was accepted for another")
 	}
 }
@@ -76,15 +76,15 @@ func TestACallerCannotNameItself(t *testing.T) {
 	_, v := keyAndVerifier(t)
 	body := []byte(`{}`)
 	h := http.Header{}
-	h.Set(HeaderCapability, "tracker.lease")
+	h.Set(HeaderCapability, "notes.write")
 	h.Set(HeaderKind, KindOwner)
 	h.Set(HeaderTime, time.Now().UTC().Format(time.RFC3339))
 	h.Set(HeaderNonce, "aaaaaaaaaaaaaaaaaaaaaaaa")
-	if _, err := v.Verify(h, "tracker.lease", body); err == nil {
+	if _, err := v.Verify(h, "notes.write", body); err == nil {
 		t.Fatal("a call with no MAC was accepted")
 	}
 	other, _ := NewKey()
-	if _, err := v.Verify(stamped(t, other, "tracker.lease", body, Caller{Kind: KindOwner}), "tracker.lease", body); err == nil {
+	if _, err := v.Verify(stamped(t, other, "notes.write", body, Caller{Kind: KindOwner}), "notes.write", body); err == nil {
 		t.Fatal("a call stamped under another app's key was accepted")
 	}
 }
@@ -93,18 +93,18 @@ func TestACallerCannotNameItself(t *testing.T) {
 func TestACallIsReceivedOnceAndOnlyWhileFresh(t *testing.T) {
 	k, v := keyAndVerifier(t)
 	body := []byte(`{}`)
-	h := stamped(t, k, "tracker.lease", body, anAIAgent)
-	if _, err := v.Verify(h, "tracker.lease", body); err != nil {
+	h := stamped(t, k, "notes.write", body, anAIAgent)
+	if _, err := v.Verify(h, "notes.write", body); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := v.Verify(h, "tracker.lease", body); err == nil {
+	if _, err := v.Verify(h, "notes.write", body); err == nil {
 		t.Fatal("the same call was received twice")
 	}
 	old := http.Header{}
-	if err := Stamp(old, k, "tracker.lease", body, anAIAgent, time.Now().Add(-3*Window)); err != nil {
+	if err := Stamp(old, k, "notes.write", body, anAIAgent, time.Now().Add(-3*Window)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := v.Verify(old, "tracker.lease", body); err == nil {
+	if _, err := v.Verify(old, "notes.write", body); err == nil {
 		t.Fatal("a stale call was accepted")
 	}
 }
@@ -115,13 +115,13 @@ func TestStampingReplacesWhatACallerSent(t *testing.T) {
 	h := http.Header{}
 	h.Set(HeaderKind, KindOwner)
 	h.Set("X-Ia-Call-Something-New", "planted")
-	if err := Stamp(h, k, "tracker.lease", nil, anAIAgent, time.Now()); err != nil {
+	if err := Stamp(h, k, "notes.write", nil, anAIAgent, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if h.Get("X-Ia-Call-Something-New") != "" {
 		t.Fatal("a planted call header survived stamping")
 	}
-	got, err := v.Verify(h, "tracker.lease", nil)
+	got, err := v.Verify(h, "notes.write", nil)
 	if err != nil || got.Kind != KindAIAgent {
 		t.Fatalf("the stamp did not replace the planted kind: %+v %v", got, err)
 	}
@@ -137,8 +137,8 @@ func TestRequireServesOnlyStampedCalls(t *testing.T) {
 	defer srv.Close()
 
 	body := []byte(`{"a":1}`)
-	req, _ := http.NewRequest("POST", srv.URL+"/v1/capability/tracker.lease", bytes.NewReader(body))
-	if err := Stamp(req.Header, k, "tracker.lease", body, anAIAgent, time.Now()); err != nil {
+	req, _ := http.NewRequest("POST", srv.URL+"/v1/capability/notes.write", bytes.NewReader(body))
+	if err := Stamp(req.Header, k, "notes.write", body, anAIAgent, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	res, err := http.DefaultClient.Do(req)
@@ -151,7 +151,7 @@ func TestRequireServesOnlyStampedCalls(t *testing.T) {
 	}
 
 	seen = Caller{}
-	res, err = http.Post(srv.URL+"/v1/capability/tracker.lease", "application/json", bytes.NewReader(body))
+	res, err = http.Post(srv.URL+"/v1/capability/notes.write", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestAnAppWithNoKeyHasNoVerifier(t *testing.T) {
 // A line break cannot be used to move one field into another.
 func TestAFieldCannotCarryALineBreak(t *testing.T) {
 	k, _ := NewKey()
-	if err := Stamp(http.Header{}, k, "tracker.lease", nil, Caller{Kind: KindAIAgent, Agent: "E\nowner"}, time.Now()); err == nil {
+	if err := Stamp(http.Header{}, k, "notes.write", nil, Caller{Kind: KindAIAgent, Identifier: "E\nowner"}, time.Now()); err == nil {
 		t.Fatal("a field with a line break was stamped")
 	}
 }

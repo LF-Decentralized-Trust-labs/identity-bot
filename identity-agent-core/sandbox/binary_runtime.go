@@ -1,12 +1,9 @@
 package sandbox
 
 import (
-	"identity-agent-core/appcall"
-
 	"bufio"
 	"context"
 	"fmt"
-	"identity-agent-core/childenv"
 	"io"
 	"log"
 	"os"
@@ -15,6 +12,9 @@ import (
 	"runtime"
 	"sync"
 	"time"
+
+	"identity-agent-core/appcall"
+	"identity-agent-core/childenv"
 )
 
 type BinaryRuntime struct {

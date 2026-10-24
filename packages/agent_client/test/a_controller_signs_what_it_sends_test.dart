@@ -110,11 +110,11 @@ void main() {
     expect(w.askedToSign.single['for'], 'EThatIdentity',
         reason: 'the core was not told which Identity Agent to sign for');
     expect(w.toTheAgent.single.headers['X-IA-Controller-For'], 'EThatIdentity',
-        reason: 'the name inside the signature was not sent, so the agent '
+        reason: 'the name inside the signature was not sent, so the Identity Agent '
             'checks a different string and refuses every request');
   });
 
-  test('left unnamed, the core names the agent it was told about, and the '
+  test('left unnamed, the core names the Identity Agent it was told about, and the '
       'header carries what the core signed', () async {
     final w = _Watched();
     final c = ControllerSigningClient(

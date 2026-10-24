@@ -35,7 +35,7 @@ const (
 
 // A request a machine signed for one Identity Agent is refused by another that
 // holds a grant for the same machine, inside the window and before either has
-// seen it. Before requests named their Identity Agent, B admitted this copy.
+// seen it.
 func TestAControllerRequestForOneIdentityAgentIsRefusedByAnother(t *testing.T) {
 	a, machine, seed := namedAgent(t, agentA)
 	b, machineAtB, _ := namedAgent(t, agentB)

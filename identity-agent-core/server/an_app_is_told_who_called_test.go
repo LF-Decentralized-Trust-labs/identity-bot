@@ -16,10 +16,10 @@ import (
 	"identity-agent-core/sandbox"
 )
 
-// trackerApp is an app providing two capabilities, running as one would: its
+// notesApp is an app providing two capabilities, running as one would: its
 // capability API refuses anything the Identity Agent did not stamp, and its
 // display serves everything else and records what it was sent.
-type trackerApp struct {
+type notesApp struct {
 	mu    sync.Mutex
 	calls []appcall.Caller
 	// reached counts every request that arrived at the capability API at
@@ -29,7 +29,7 @@ type trackerApp struct {
 	displayed []http.Header
 }
 
-func (a *trackerApp) lastCall() (appcall.Caller, int) {
+func (a *notesApp) lastCall() (appcall.Caller, int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if len(a.calls) == 0 {
@@ -38,17 +38,17 @@ func (a *trackerApp) lastCall() (appcall.Caller, int) {
 	return a.calls[len(a.calls)-1], len(a.calls)
 }
 
-// withTrackerApp gives s a sandbox with the tracker app installed and running.
-func withTrackerApp(t *testing.T, s *CoreServer) *trackerApp {
+// withNotesApp gives s a sandbox with the notes app installed and running.
+func withNotesApp(t *testing.T, s *CoreServer) *notesApp {
 	t.Helper()
 	manifests := t.TempDir()
 	b, _ := json.Marshal(map[string]any{
-		"id": "tracker", "name": "Tracker", "execution_type": "compiled", "binary": map[string]string{"path": "/bin/true"},
+		"id": "notes", "name": "Notes", "execution_type": "compiled", "binary": map[string]string{"path": "/bin/true"},
 		"display_method": "webview", "network_mode": "local_only", "network": map[string]string{"tls_mode": "mitm"},
 		"log_level": "none", "resources": map[string]int{"memory_mb": 64},
-		"provides": []map[string]string{{"id": "tracker.lease"}, {"id": "tracker.read"}},
+		"provides": []map[string]string{{"id": "notes.write"}, {"id": "notes.read"}},
 	})
-	if err := os.WriteFile(filepath.Join(manifests, "tracker.json"), b, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(manifests, "notes.json"), b, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	m, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir, ManifestsDir: manifests})
@@ -61,7 +61,7 @@ func withTrackerApp(t *testing.T, s *CoreServer) *trackerApp {
 	}
 	s.SandboxManager = m
 
-	key, err := m.AppCallKey("tracker")
+	key, err := m.AppCallKey("notes")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func withTrackerApp(t *testing.T, s *CoreServer) *trackerApp {
 	if err != nil {
 		t.Fatal(err)
 	}
-	app := &trackerApp{}
+	app := &notesApp{}
 	mux := http.NewServeMux()
 	verified := v.Require(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, _ := appcall.FromContext(r.Context())
@@ -99,7 +99,7 @@ func withTrackerApp(t *testing.T, s *CoreServer) *trackerApp {
 	srv.Start()
 	t.Cleanup(srv.Close)
 	port := ln.Addr().(*net.TCPAddr).Port
-	if err := m.Store().SaveInstance(sandbox.Instance{ID: "tracker-1", AppID: "tracker", Status: "running",
+	if err := m.Store().SaveInstance(sandbox.Instance{ID: "notes-1", AppID: "notes", Status: "running",
 		DisplayPort: &port, TLSMode: "mitm", LogLevel: "none"}); err != nil {
 		t.Fatal(err)
 	}
@@ -127,12 +127,12 @@ func invoke(capability, body, token string) *http.Request {
 // about itself. A caller setting the call headers itself gets them replaced.
 func TestAnAppIsToldWhichAIAgentCalled(t *testing.T) {
 	s := newGrantTestServer(t)
-	app := withTrackerApp(t, s)
-	tok := anAIAgentHolding(t, s, "tracker.lease")
+	app := withNotesApp(t, s)
+	tok := anAIAgentHolding(t, s, "notes.write")
 
-	req := invoke("tracker.lease", `{"task":"T-1"}`, tok)
+	req := invoke("notes.write", `{"task":"n-1"}`, tok)
 	req.Header.Set(appcall.HeaderKind, appcall.KindOwner)
-	req.Header.Set(appcall.HeaderAgent, "EThePersonInCharge")
+	req.Header.Set(appcall.HeaderIdentifier, "EThePersonInCharge")
 	req.Header.Set("X-IA-Session", "run-7")
 	w := httptest.NewRecorder()
 	s.buildRouter("").ServeHTTP(w, req)
@@ -143,27 +143,27 @@ func TestAnAppIsToldWhichAIAgentCalled(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("the app received %d calls, not one", n)
 	}
-	if got.Kind != appcall.KindAIAgent || got.Agent != "EAgentAID" || got.Session != "run-7" {
+	if got.Kind != appcall.KindAIAgent || got.Identifier != "EAgentAID" || got.Session != "run-7" {
 		t.Fatalf("the app was told %+v, not the AI agent the Identity Agent admitted", got)
 	}
 }
 
 // An owner proving it remotely with the identity's key reaches a capability.
-// Before, the gate admitted the owner and the handler then saw a remote caller
-// with no scopes, and refused.
+// The gate spends the owner's signature, so the handler must be told the
+// caller is the owner rather than find a remote caller with no scopes.
 func TestARemoteOwnerCanInvokeACapability(t *testing.T) {
 	s := newGrantTestServer(t)
-	app := withTrackerApp(t, s)
+	app := withNotesApp(t, s)
 	seed, ownerAID := sealTestOwner(t, s)
 
-	req := signed(t, "POST", "/api/capabilities/tracker.lease/invoke", `{"task":"T-1"}`, seed, time.Now())
+	req := signed(t, "POST", "/api/capabilities/notes.write/invoke", `{"task":"n-1"}`, seed, time.Now())
 	w := httptest.NewRecorder()
 	s.buildRouter("").ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("a remote owner was refused a capability: %d %s", w.Code, w.Body.String())
 	}
 	got, _ := app.lastCall()
-	if got.Kind != appcall.KindOwner || got.Agent != ownerAID || got.AuthLevel != ownerSigned {
+	if got.Kind != appcall.KindOwner || got.Identifier != ownerAID || got.AuthLevel != ownerSigned {
 		t.Fatalf("the app was told %+v, not the owner", got)
 	}
 }
@@ -172,19 +172,19 @@ func TestARemoteOwnerCanInvokeACapability(t *testing.T) {
 // so an AI agent granted one capability cannot call another through it.
 func TestTheDisplayProxyNeverForwardsACapabilityCall(t *testing.T) {
 	s := newGrantTestServer(t)
-	app := withTrackerApp(t, s)
-	tok := anAIAgentHolding(t, s, "tracker.read")
+	app := withNotesApp(t, s)
+	tok := anAIAgentHolding(t, s, "notes.read")
 	r := s.buildRouter("")
 
 	for _, path := range []string{
-		"/apps/tracker/v1/capability/tracker.lease",
-		"/apps/tracker/V1/Capability/tracker.lease",
-		"/apps/tracker//v1/capability/tracker.lease",
-		"/apps/tracker/x/../v1/capability/tracker.lease",
-		"/apps/tracker/v1/capability/",
-		"/apps/tracker/v1%2Fcapability%2Ftracker.lease",
+		"/apps/notes/v1/capability/notes.write",
+		"/apps/notes/V1/Capability/notes.write",
+		"/apps/notes//v1/capability/notes.write",
+		"/apps/notes/x/../v1/capability/notes.write",
+		"/apps/notes/v1/capability/",
+		"/apps/notes/v1%2Fcapability%2Fnotes.write",
 	} {
-		req := remote("POST", path, `{"task":"T-1"}`)
+		req := remote("POST", path, `{"task":"n-1"}`)
 		req.Header.Set("Authorization", "Bearer "+tok)
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
@@ -207,10 +207,10 @@ func TestTheDisplayProxyNeverForwardsACapabilityCall(t *testing.T) {
 // the display proxy, and neither does a caller the app would believe.
 func TestTheDisplayProxyStripsWhatOnlyTheIdentityAgentReads(t *testing.T) {
 	s := newGrantTestServer(t)
-	app := withTrackerApp(t, s)
-	tok := anAIAgentHolding(t, s, "tracker.read")
+	app := withNotesApp(t, s)
+	tok := anAIAgentHolding(t, s, "notes.read")
 
-	req := remote("GET", "/apps/tracker/board", "")
+	req := remote("GET", "/apps/notes/page", "")
 	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set(appcall.HeaderKind, appcall.KindOwner)
 	req.Header.Set(appcall.HeaderMAC, "forged")
@@ -244,9 +244,9 @@ func TestTheDisplayProxyStripsWhatOnlyTheIdentityAgentReads(t *testing.T) {
 // An Authorization header that is the app's own login is left for the app.
 func TestTheDisplayProxyLeavesTheAppsOwnLogin(t *testing.T) {
 	s := newGrantTestServer(t)
-	app := withTrackerApp(t, s)
+	app := withNotesApp(t, s)
 
-	req := local("GET", "/apps/tracker/board", "")
+	req := local("GET", "/apps/notes/page", "")
 	req.Header.Set("Authorization", "Bearer the-apps-own-session")
 	w := httptest.NewRecorder()
 	s.buildRouter("").ServeHTTP(w, req)
@@ -260,5 +260,42 @@ func TestTheDisplayProxyLeavesTheAppsOwnLogin(t *testing.T) {
 	}
 	if app.displayed[0].Get(LocalOwnerSecretHeader) != "" {
 		t.Fatal("the local owner's secret was passed on")
+	}
+}
+
+// A browser session written as the Identity Agent itself accepts it, in any
+// case and with extra spaces, is still stripped.
+func TestTheDisplayProxyStripsASessionHoweverItIsWritten(t *testing.T) {
+	s := newGrantTestServer(t)
+	app := withNotesApp(t, s)
+	s.BrowserSessions = newBrowserSessions()
+	id, code, _, err := s.BrowserSessions.newChallenge(hashSecret("the browser's secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.BrowserSessions.grant(code); err != nil {
+		t.Fatal(err)
+	}
+	tok, _, err := s.BrowserSessions.claim(id, "the browser's secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := local("GET", "/apps/notes/page", "")
+	req.Header.Set("Authorization", "bearer   "+tok)
+	req.Header.Set("X_IA_Call_Kind", "owner")
+	w := httptest.NewRecorder()
+	s.buildRouter("").ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("the display was not served: %d %s", w.Code, w.Body.String())
+	}
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	h := app.displayed[0]
+	if h.Get("Authorization") != "" {
+		t.Error("a browser session reached the app")
+	}
+	if len(h.Values("X_IA_Call_Kind")) != 0 {
+		t.Error("a call header spelled with underscores reached the app")
 	}
 }

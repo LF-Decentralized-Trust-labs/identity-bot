@@ -40,10 +40,9 @@ func (s *CoreServer) handleAppDisplayProxy(w http.ResponseWriter, r *http.Reques
 
 	// Strip the /apps/{app_id} prefix to get the path the container expects.
 	prefix := fmt.Sprintf("/apps/%s", appID)
-	containerPath := strings.TrimPrefix(r.URL.Path, prefix)
-	if containerPath == "" {
-		containerPath = "/"
-	}
+	// Cleaned once, here, so the intercepts below, the capability check and
+	// the path forwarded all read the same path.
+	containerPath := cleanedKeepingTheSlash(strings.TrimPrefix(r.URL.Path, prefix))
 
 	// ── Intercept: Open WebUI chat data API ──────────────────────────────
 	// These paths are normally served by Open WebUI's internal database.
@@ -99,7 +98,7 @@ func (s *CoreServer) handleAppDisplayProxy(w http.ResponseWriter, r *http.Reques
 	// Rewrite the request URL to the container's expected path — the cleaned,
 	// decoded path that was checked above, re-encoded, and never the raw form,
 	// so the app cannot be sent a spelling of a path that was never checked.
-	r.URL.Path = cleanedKeepingTheSlash(containerPath)
+	r.URL.Path = containerPath
 	r.URL.RawPath = ""
 	r.URL.Host = target.Host
 	r.Host = target.Host
@@ -118,6 +117,9 @@ func isACapabilityCall(p string) bool {
 // cleanedKeepingTheSlash is path.Clean, keeping a trailing slash, which a web
 // app may route on.
 func cleanedKeepingTheSlash(p string) string {
+	if p == "" {
+		return "/"
+	}
 	c := path.Clean("/" + p)
 	if strings.HasSuffix(p, "/") && c != "/" {
 		c += "/"
@@ -138,15 +140,22 @@ func cleanedKeepingTheSlash(p string) string {
 // An Authorization header that is not an Identity Agent credential is the
 // app's own login and is left alone.
 func (s *CoreServer) stripWhatOnlyTheIdentityAgentReads(r *http.Request) {
-	appcall.Strip(r.Header)
+	// Compared with underscores read as hyphens: some servers an app runs
+	// behind treat X_IA_Call_Kind and X-IA-Call-Kind as one header.
+	secret := http.CanonicalHeaderKey(LocalOwnerSecretHeader)
 	for name := range r.Header {
-		if strings.HasPrefix(http.CanonicalHeaderKey(name), "X-Ia-") {
+		n := http.CanonicalHeaderKey(strings.ReplaceAll(name, "_", "-"))
+		if strings.HasPrefix(n, "X-Ia-") || appcall.IsCallHeader(n) || n == secret {
 			delete(r.Header, name)
 		}
 	}
-	r.Header.Del(LocalOwnerSecretHeader)
-	if tok := bearerFrom(r); tok != "" && s.isAnIdentityAgentCredential(tok) {
-		r.Header.Del("Authorization")
+	// Both readings the Identity Agent itself uses: a token, and a browser
+	// session, whose prefix is matched without case.
+	for _, tok := range []string{bearerFrom(r), bearerToken(r)} {
+		if tok != "" && s.isAnIdentityAgentCredential(strings.TrimSpace(tok)) {
+			r.Header.Del("Authorization")
+			break
+		}
 	}
 }
 

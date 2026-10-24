@@ -84,14 +84,14 @@ func theCallerAnAppIsTold(c CallerContext) appcall.Caller {
 	case c.Owner || c.CallerAID == "local-owner":
 		out.Kind = appcall.KindOwner
 		if c.CallerAID != "local-owner" {
-			out.Agent = c.CallerAID
+			out.Identifier = c.CallerAID
 		}
 		if out.AuthLevel == "" {
 			out.AuthLevel = "local"
 		}
 	case len(c.DelegationChain) > 0 || c.BodyHost != "":
 		out.Kind = appcall.KindAIAgent
-		out.Agent = c.CallerAID
+		out.Identifier = c.CallerAID
 		if c.AuthLevel == "signed_headers" {
 			// A machine the identity owns, identified by its signature and
 			// granted nothing for it.
@@ -99,10 +99,10 @@ func theCallerAnAppIsTold(c CallerContext) appcall.Caller {
 		}
 	case strings.HasPrefix(c.CallerAID, "token:"):
 		out.Kind = appcall.KindToken
-		out.Agent = strings.TrimPrefix(c.CallerAID, "token:")
+		out.Identifier = strings.TrimPrefix(c.CallerAID, "token:")
 	default:
 		out.Kind = appcall.KindToken
-		out.Agent = c.CallerAID
+		out.Identifier = c.CallerAID
 	}
 	return out
 }

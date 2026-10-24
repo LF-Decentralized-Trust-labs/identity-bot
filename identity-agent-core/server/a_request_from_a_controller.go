@@ -138,11 +138,7 @@ func (s *CoreServer) controllerActsForTheOwner(
 	now := time.Now().UTC()
 	offered := strings.TrimSpace(r.Header.Get(headerControllerAuthLevel)) != "" ||
 		strings.TrimSpace(r.Header.Get(headerAuthLevelVouchedBy)) != ""
-	outside := false
-	if buildmode.IsDev() {
-		outside, _ = whoCanReachThisAgent(s.howThisAgentIsReachedNow())
-	}
-	authenticated = whatThisBuildTakesAsMeasured(authenticated, offered, buildmode.IsDev(), outside, now)
+	authenticated = s.whatThisRequestTakesAsMeasured(r, authenticated, offered, buildmode.IsDev(), now)
 	if ok, why := mayThisControllerDoThis(
 		r.Method, pattern, authenticated, now); !ok {
 		denyAuthorization(w, "this machine may act for you, but "+why)
@@ -307,7 +303,7 @@ func (s *CoreServer) theStringThisMachineSigned(
 // has one, which is what makes them worthless at a named Identity Agent.
 func (s *CoreServer) theIdentityAgentItNames(r *http.Request) (string, error) {
 	named := strings.TrimSpace(r.Header.Get(headerControllerFor))
-	me := s.thisAgentsIdentifier()
+	me := s.thisIdentityAgentsIdentifier()
 	switch {
 	case named == me:
 		return named, nil
@@ -497,7 +493,7 @@ func (s *CoreServer) theKeyEntitledToVouch() (string, error) {
 	// holding an unredeemed invite could install the key that vouches for every
 	// raised action on the agent — rotation, seed install, signing, archive
 	// retrieval — without ever becoming the owner.
-	if owner, oerr := s.ownerFromOwnIdentity(s.thisAgentsIdentifier()); oerr == nil &&
+	if owner, oerr := s.ownerFromOwnIdentity(s.thisIdentityAgentsIdentifier()); oerr == nil &&
 		owner != "" {
 		// The verified log first, so a rotation is followed. Nothing rewrites
 		// the sealed record when an owner rotates, so asking it first would go
@@ -525,9 +521,9 @@ func (s *CoreServer) theKeyEntitledToVouch() (string, error) {
 	return "", fmt.Errorf("nothing is sealed and this identity names no owner")
 }
 
-// thisAgentsIdentifier is this agent's own identifier, or empty when it has
+// thisIdentityAgentsIdentifier is this Identity Agent's own identifier, or empty when it has
 // none. Separated only so the caller above reads as one thought.
-func (s *CoreServer) thisAgentsIdentifier() string {
+func (s *CoreServer) thisIdentityAgentsIdentifier() string {
 	if s.DataStore == nil {
 		return ""
 	}

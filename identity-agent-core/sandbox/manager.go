@@ -1,9 +1,6 @@
 package sandbox
 
 import (
-	"identity-agent-core/appcall"
-	"sort"
-
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,10 +8,13 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"identity-agent-core/appcall"
 )
 
 // BackendLLMInstanceID and BackendLLMAppID identify the Identity Agent's own
@@ -233,6 +233,19 @@ func (m *Manager) manifestsDeclaringATakenCapability(incoming []*AppManifest) ma
 		}
 		declaredBy[capID][appID] = true
 	}
+	refused := map[string]string{}
+	// Two files claiming one app id are both refused: otherwise the later
+	// in the listing silently replaces the other, taking its capabilities'
+	// callers and its call key.
+	files := map[string]int{}
+	for _, mf := range incoming {
+		files[mf.ID]++
+	}
+	for id, n := range files {
+		if n > 1 {
+			refused[id] = fmt.Sprintf("%d manifests claim the app id %q", n, id)
+		}
+	}
 	reloaded := map[string]bool{}
 	for _, mf := range incoming {
 		reloaded[mf.ID] = true
@@ -248,8 +261,10 @@ func (m *Manager) manifestsDeclaringATakenCapability(incoming []*AppManifest) ma
 			note(p.ID, id)
 		}
 	}
-	refused := map[string]string{}
 	for _, mf := range incoming {
+		if _, already := refused[mf.ID]; already {
+			continue
+		}
 		for _, p := range mf.Provides {
 			others := []string{}
 			for appID := range declaredBy[p.ID] {

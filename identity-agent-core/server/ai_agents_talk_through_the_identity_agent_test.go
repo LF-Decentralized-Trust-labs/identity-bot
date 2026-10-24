@@ -114,7 +114,7 @@ func (w *talkWorld) personSays(t *testing.T, a *asset.Asset, conv, text string) 
 		Conversation: conv, To: a.PairwiseAID, Body: text, Nonce: conversation.NewID("n_"),
 	})
 	path := "/api/mcp/agents/" + a.ID + "/conversations"
-	req := asThatMachineTo(t, w.s.thisAgentsIdentifier(), w.ctlAID, "POST", path, string(body), w.ctlSeed, "", time.Time{})
+	req := asThatMachineTo(t, w.s.thisIdentityAgentsIdentifier(), w.ctlAID, "POST", path, string(body), w.ctlSeed, "", time.Time{})
 	rec := httptest.NewRecorder()
 	w.s.router.ServeHTTP(rec, req)
 	var out map[string]any

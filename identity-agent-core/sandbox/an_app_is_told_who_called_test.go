@@ -50,20 +50,20 @@ func managerWith(t *testing.T, manifests map[string][]byte) *Manager {
 }
 
 // Two apps declaring one capability are both refused, so neither receives the
-// other's callers. Before, whichever the map iterated to first got the call.
+// other's callers.
 func TestTwoAppsCannotProvideOneCapability(t *testing.T) {
 	m := managerWith(t, map[string][]byte{
-		"tracker":   manifestJSON("tracker", "tracker.lease", "tracker.read"),
-		"impostor":  manifestJSON("impostor", "tracker.lease"),
-		"bystander": manifestJSON("bystander", "notes.read"),
+		"notes":   manifestJSON("notes", "notes.write", "notes.read"),
+		"impostor":  manifestJSON("impostor", "notes.write"),
+		"bystander": manifestJSON("bystander", "calendar.read"),
 	})
-	if _, _, ok := m.findProvider("tracker.lease"); ok {
+	if _, _, ok := m.findProvider("notes.write"); ok {
 		t.Fatal("a capability two apps declare was given a provider")
 	}
-	if _, _, ok := m.findProvider("tracker.read"); ok {
+	if _, _, ok := m.findProvider("notes.read"); ok {
 		t.Fatal("an app in a collision was loaded anyway")
 	}
-	if p, _, ok := m.findProvider("notes.read"); !ok || p.ID != "bystander" {
+	if p, _, ok := m.findProvider("calendar.read"); !ok || p.ID != "bystander" {
 		t.Fatal("an app with nothing in common with the collision was refused")
 	}
 }
@@ -72,10 +72,10 @@ func TestTwoAppsCannotProvideOneCapability(t *testing.T) {
 func TestAnInvocationWithTwoProvidersIsRefusedNotRouted(t *testing.T) {
 	f := &fakeInvoker{result: &InvokeResult{Status: 200}}
 	m := &Manager{invoker: f, manifests: map[string]*AppManifest{
-		"tracker":  {ID: "tracker", Provides: []ProvidedCapability{{ID: "tracker.lease"}}},
-		"impostor": {ID: "impostor", Provides: []ProvidedCapability{{ID: "tracker.lease"}}},
+		"notes":  {ID: "notes", Provides: []ProvidedCapability{{ID: "notes.write"}}},
+		"impostor": {ID: "impostor", Provides: []ProvidedCapability{{ID: "notes.write"}}},
 	}}
-	_, err := m.InvokeCapability(context.Background(), CallerContext{Remote: false}, "tracker.lease", nil)
+	_, err := m.InvokeCapability(context.Background(), CallerContext{Remote: false}, "notes.write", nil)
 	if !errors.Is(err, ErrDenied) || f.called {
 		t.Fatalf("an ambiguous capability was routed (called=%v): %v", f.called, err)
 	}
@@ -137,18 +137,18 @@ func runningApp(t *testing.T, m *Manager, appID string, seen *appcall.Caller) {
 
 // The app is told who the Identity Agent admitted, under its own key.
 func TestAnAppIsToldWhoCalled(t *testing.T) {
-	m := managerWith(t, map[string][]byte{"tracker": manifestJSON("tracker", "tracker.lease")})
+	m := managerWith(t, map[string][]byte{"notes": manifestJSON("notes", "notes.write")})
 	var seen appcall.Caller
-	runningApp(t, m, "tracker", &seen)
+	runningApp(t, m, "notes", &seen)
 
-	caller := CallerContext{Remote: true, Scopes: []string{"tracker.lease"}, CallerAID: "EAgent",
+	caller := CallerContext{Remote: true, Scopes: []string{"notes.write"}, CallerAID: "EAgent",
 		DelegationChain: []string{"EAgent", "EOrg"}, AuthLevel: "body_signed", BodyHost: "BBody",
 		GrantSAID: "EGrant", Session: "run-7"}
-	res, err := m.InvokeCapability(context.Background(), caller, "tracker.lease", []byte(`{"task":"T-1"}`))
+	res, err := m.InvokeCapability(context.Background(), caller, "notes.write", []byte(`{"task":"n-1"}`))
 	if err != nil || res.Status != 200 {
 		t.Fatalf("the call did not reach the app: %v %+v", err, res)
 	}
-	want := appcall.Caller{Kind: appcall.KindAIAgent, Agent: "EAgent", Machine: "BBody",
+	want := appcall.Caller{Kind: appcall.KindAIAgent, Identifier: "EAgent", Machine: "BBody",
 		AuthLevel: "body_signed", Grant: "EGrant", Session: "run-7"}
 	if seen != want {
 		t.Fatalf("the app was told %+v, not %+v", seen, want)
@@ -156,16 +156,16 @@ func TestAnAppIsToldWhoCalled(t *testing.T) {
 }
 
 // The same app refuses a call that did not come stamped from the Identity
-// Agent, which is the path problem #379 described: straight to its port.
+// Agent, sent straight to its port.
 func TestAnAppRefusesACallTheIdentityAgentDidNotStamp(t *testing.T) {
-	m := managerWith(t, map[string][]byte{"tracker": manifestJSON("tracker", "tracker.lease")})
+	m := managerWith(t, map[string][]byte{"notes": manifestJSON("notes", "notes.write")})
 	var seen appcall.Caller
-	runningApp(t, m, "tracker", &seen)
-	url, err := m.GetDisplayURL("tracker")
+	runningApp(t, m, "notes", &seen)
+	url, err := m.GetDisplayURL("notes")
 	if err != nil {
 		t.Fatal(err)
 	}
-	req, _ := http.NewRequest("POST", url+"/v1/capability/tracker.lease", nil)
+	req, _ := http.NewRequest("POST", url+"/v1/capability/notes.write", nil)
 	req.Header.Set(appcall.HeaderKind, appcall.KindOwner)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -181,12 +181,12 @@ func TestAnAppRefusesACallTheIdentityAgentDidNotStamp(t *testing.T) {
 // app still running with the old one; and two apps never share one.
 func TestAnAppsCallKeyIsItsOwnAndKept(t *testing.T) {
 	m := &Manager{dataDir: t.TempDir()}
-	a1, err := m.AppCallKey("tracker")
+	a1, err := m.AppCallKey("notes")
 	if err != nil {
 		t.Fatal(err)
 	}
-	a2, _ := m.AppCallKey("tracker")
-	b, _ := m.AppCallKey("notes")
+	a2, _ := m.AppCallKey("notes")
+	b, _ := m.AppCallKey("calendar")
 	if string(a1) != string(a2) {
 		t.Fatal("an app's key changed between two asks")
 	}
@@ -196,7 +196,7 @@ func TestAnAppsCallKeyIsItsOwnAndKept(t *testing.T) {
 	if _, err := m.AppCallKey("../escape"); err == nil {
 		t.Fatal("an app id naming another directory was given a key")
 	}
-	fi, err := os.Stat(filepath.Join(m.dataDir, appCallKeysDir, "tracker.key"))
+	fi, err := os.Stat(filepath.Join(m.dataDir, appCallKeysDir, "notes.key"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,13 +214,25 @@ func TestTheCallerAnAppIsToldByKind(t *testing.T) {
 	}{
 		{CallerContext{CallerAID: "local-owner"}, appcall.Caller{Kind: appcall.KindOwner, AuthLevel: "local"}},
 		{CallerContext{Remote: true, Owner: true, CallerAID: "EOwner", AuthLevel: "owner_signed"},
-			appcall.Caller{Kind: appcall.KindOwner, Agent: "EOwner", AuthLevel: "owner_signed"}},
-		{CallerContext{CallerAID: "token:ci"}, appcall.Caller{Kind: appcall.KindToken, Agent: "ci"}},
+			appcall.Caller{Kind: appcall.KindOwner, Identifier: "EOwner", AuthLevel: "owner_signed"}},
+		{CallerContext{CallerAID: "token:ci"}, appcall.Caller{Kind: appcall.KindToken, Identifier: "ci"}},
 		{CallerContext{CallerAID: "EMachine", DelegationChain: []string{"EMachine"}, AuthLevel: "signed_headers"},
-			appcall.Caller{Kind: appcall.KindMachine, Agent: "EMachine", AuthLevel: "signed_headers"}},
+			appcall.Caller{Kind: appcall.KindMachine, Identifier: "EMachine", AuthLevel: "signed_headers"}},
 	} {
 		if got := theCallerAnAppIsTold(c.in); got != c.want {
 			t.Errorf("%+v was told as %+v, not %+v", c.in, got, c.want)
 		}
+	}
+}
+
+// Two manifests claiming one app id are both refused, so the later file in the
+// listing cannot take over the other's capabilities and its call key.
+func TestTwoManifestsCannotClaimOneApp(t *testing.T) {
+	m := managerWith(t, map[string][]byte{
+		"a-notes": manifestJSON("notes", "notes.read"),
+		"z-notes": manifestJSON("notes", "notes.read", "notes.write"),
+	})
+	if _, ok := m.manifests["notes"]; ok {
+		t.Fatal("an app id two manifests claim was loaded")
 	}
 }

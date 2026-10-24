@@ -113,7 +113,7 @@ func (m testMachine) signed(t *testing.T, s *CoreServer, method, target string, 
 	ts := time.Now().UTC().Format(time.RFC3339)
 	nonce := "nonce-" + base64.RawURLEncoding.EncodeToString([]byte(time.Now().String()))
 	r := httptest.NewRequest(method, target, bytes.NewReader(body))
-	ia := s.thisAgentsIdentifier()
+	ia := s.thisIdentityAgentsIdentifier()
 	sig, err := agentbody.Sign(m, agentbody.SignedRequest{For: ia, Host: host, Method: method, Target: r.URL.RequestURI(),
 		Timestamp: ts, Nonce: nonce, Body: body}.Bytes())
 	if err != nil {

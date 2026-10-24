@@ -39,7 +39,7 @@ import (
 const (
 	HeaderCapability = "X-IA-Call-Capability"
 	HeaderKind       = "X-IA-Call-Kind"
-	HeaderAgent      = "X-IA-Call-Agent"
+	HeaderIdentifier = "X-IA-Call-Identifier"
 	HeaderMachine    = "X-IA-Call-Machine"
 	HeaderAuthLevel  = "X-IA-Call-Auth-Level"
 	HeaderGrant      = "X-IA-Call-Grant"
@@ -82,11 +82,19 @@ type Caller struct {
 	Kind string
 	// Agent is the caller's identifier: the AI agent's, the owner's when it
 	// is known, the token's name for a bare token.
-	Agent string
+	Identifier string
 	// Machine is the machine the call came from, when the caller proved one:
 	// an AI agent's body.
 	Machine string
-	// AuthLevel is how the caller proved itself to the Identity Agent.
+	// AuthLevel is how the caller proved itself to the Identity Agent:
+	// "local" (the owner at the Identity Agent's own computer),
+	// "owner_signed" or "owner_sealed" (the owner, remotely, by the identity's
+	// key or inside an envelope only it could seal), "body_signed" (an AI
+	// agent's enrolled machine signed the request), "signed_request" (a token
+	// plus a per-request signature), "bearer" (a token alone), or
+	// "signed_headers" (a machine the identity owns, which is granted nothing
+	// for it). An app deciding who may write should require one of the first
+	// four.
 	AuthLevel string
 	// Grant is the credential the caller's authority came from, when there
 	// is one.
@@ -102,7 +110,7 @@ func Canonical(capabilityID, bodyDigest string, c Caller, at, nonce string) stri
 		capabilityID,
 		bodyDigest,
 		c.Kind,
-		c.Agent,
+		c.Identifier,
 		c.Machine,
 		c.AuthLevel,
 		c.Grant,
@@ -175,7 +183,7 @@ func Stamp(h http.Header, key []byte, capabilityID string, body []byte, c Caller
 		}
 	}
 	set(HeaderKind, c.Kind)
-	set(HeaderAgent, c.Agent)
+	set(HeaderIdentifier, c.Identifier)
 	set(HeaderMachine, c.Machine)
 	set(HeaderAuthLevel, c.AuthLevel)
 	set(HeaderGrant, c.Grant)
@@ -188,7 +196,7 @@ func Stamp(h http.Header, key []byte, capabilityID string, body []byte, c Caller
 
 // plain refuses a value that could move a field in the canonical string.
 func plain(capabilityID string, c Caller) error {
-	for _, v := range []string{capabilityID, c.Kind, c.Agent, c.Machine, c.AuthLevel, c.Grant, c.Session} {
+	for _, v := range []string{capabilityID, c.Kind, c.Identifier, c.Machine, c.AuthLevel, c.Grant, c.Session} {
 		if strings.ContainsAny(v, "\r\n") {
 			return errors.New("a call field may not contain a line break")
 		}
@@ -247,7 +255,7 @@ func (v *Verifier) Verify(h http.Header, capabilityID string, body []byte) (Call
 		return none, errors.New("the call was stamped for a different capability")
 	}
 	c := Caller{
-		Kind: h.Get(HeaderKind), Agent: h.Get(HeaderAgent), Machine: h.Get(HeaderMachine),
+		Kind: h.Get(HeaderKind), Identifier: h.Get(HeaderIdentifier), Machine: h.Get(HeaderMachine),
 		AuthLevel: h.Get(HeaderAuthLevel), Grant: h.Get(HeaderGrant), Session: h.Get(HeaderSession),
 	}
 	at, nonce := h.Get(HeaderTime), h.Get(HeaderNonce)

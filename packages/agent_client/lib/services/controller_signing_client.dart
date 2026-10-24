@@ -51,7 +51,7 @@ class ControllerSigningClient extends http.BaseClient {
   /// The identifier of the Identity Agent at [agentOrigin], signed into every
   /// request so no other Identity Agent will accept a copy.
   ///
-  /// Null leaves it to the local core, which uses the agent it was told this
+  /// Null leaves it to the local core, which uses the Identity Agent it was told this
   /// app is a front end for. Empty names nobody, which an Identity Agent accepts
   /// only when a machine asks which identity it acts for — the one request made
   /// before the identifier is known.
