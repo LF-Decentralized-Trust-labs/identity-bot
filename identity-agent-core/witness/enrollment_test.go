@@ -2,12 +2,16 @@ package witness
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"identity-agent-core/iacrypto"
+	"identity-agent-core/login"
 	"identity-agent-core/store"
 )
 
@@ -102,11 +106,32 @@ func (c *capturePoster) lastAccept() AcceptCallback {
 
 func agentService(t *testing.T, aid string, mc *memContacts) *Service {
 	t.Helper()
+	s, _, _ := signingAgent(t, aid, mc)
+	return s
+}
+
+// signingAgent is an agent that can sign as its identity, and the key it signs
+// with, as a contact of it would have resolved it.
+func signingAgent(t *testing.T, aid string, mc *memContacts) (*Service, string, []byte) {
+	t.Helper()
 	st := setupTestSQLite(t)
 	s := NewService(st, mc, nil, BackendDesktop)
 	s.OurAID = func() string { return aid }
 	s.OurOOBI = func() string { return "http://127.0.0.1:5050/public/oobi/" + aid }
-	return s
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	seed := priv.Seed()
+	s.SignAsRequester = func(statement string) (string, error) { return login.SignString(statement, seed) }
+	return s, iacrypto.VerkeyQB64(pub), seed
+}
+
+// answerFrom is a witness's answer to aidA, signed with seed.
+func answerFrom(responder, requester, decision string, seed []byte, at time.Time) AcceptCallback {
+	cb := AcceptCallback{
+		RequesterAID: requester, ResponderAID: responder, Decision: decision,
+		BackendType: BackendDesktop, Stamp: at.UTC().Format(time.RFC3339Nano),
+	}
+	cb.Signature, _ = login.SignString(AcceptStatement(cb.RequesterAID, cb.ResponderAID, cb.Decision, cb.BackendType, cb.Stamp), seed)
+	return cb
 }
 
 func TestMutualEnrollmentPostBack(t *testing.T) {
@@ -129,8 +154,11 @@ func TestMutualEnrollmentPostBack(t *testing.T) {
 	}
 
 	cap := &capturePoster{}
-	sA := agentService(t, aidA, mcA)
-	sB := agentService(t, aidB, mcB)
+	sA, pubA, _ := signingAgent(t, aidA, mcA)
+	sB, pubB, _ := signingAgent(t, aidB, mcB)
+	cA, cB0 := mcB.contacts[aidA], mcA.contacts[aidB]
+	cA.PublicKey, cB0.PublicKey = pubA, pubB
+	mcB.contacts[aidA], mcA.contacts[aidB] = cA, cB0
 	sA.PostEvent = cap.post
 	sB.PostEvent = cap.post
 
@@ -208,9 +236,11 @@ func TestApplyAcceptCallbackCompletesTask(t *testing.T) {
 		}},
 	}
 	sA := agentService(t, aidA, mcA)
-	if err := sA.ApplyAcceptCallback(AcceptCallback{
-		RequesterAID: aidA, ResponderAID: aidB, Decision: "accepted", BackendType: BackendDesktop,
-	}); err != nil {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	c := mcA.contacts[aidB]
+	c.PublicKey = iacrypto.VerkeyQB64(pub)
+	mcA.contacts[aidB] = c
+	if err := sA.ApplyAcceptCallback(answerFrom(aidB, aidA, "accepted", priv.Seed(), time.Now())); err != nil {
 		t.Fatal(err)
 	}
 	tasks, _ := mcA.GetTasks()

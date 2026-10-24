@@ -49,9 +49,13 @@ type Service struct {
 	// AskToCoverDelegates says whether this agent's witness requests ask for
 	// the identities it delegates to be witnessed too.
 	AskToCoverDelegates func() bool
-	// SignAsRequester signs a witness request as this agent's identity, with
-	// its current key, where this agent holds it.
+	// SignAsRequester signs as this agent's identity, with its current key,
+	// where this agent holds it: the witness requests it sends, and its
+	// answers to the ones it receives.
 	SignAsRequester func(statement string) (string, error)
+	// acceptMu serialises acting on answers to witness requests, so one answer
+	// is not acted on twice.
+	acceptMu sync.Mutex
 	// FetchTip asks a witness how far it holds an identity's key log. Replaceable
 	// so a test needs no network.
 	FetchTip func(ctx context.Context, url string) (TipAnswer, error)

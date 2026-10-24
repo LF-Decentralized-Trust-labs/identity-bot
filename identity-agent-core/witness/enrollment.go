@@ -56,35 +56,7 @@ func (s *Service) signedByRequester(req WitnessRequest) bool {
 	if err != nil || time.Since(at) > requestFreshness || time.Until(at) > requestFreshness {
 		return false
 	}
-	key := ""
-	if held, err := s.Store.GetKelEvents(req.RequesterAID); err == nil {
-		for _, e := range held {
-			var ev map[string]interface{}
-			if json.Unmarshal([]byte(e.EventJSON), &ev) != nil {
-				continue
-			}
-			switch ev["t"] {
-			case "icp", "rot", "dip", "drt":
-				if keys, ok := ev["k"].([]interface{}); ok && len(keys) > 0 {
-					key, _ = keys[0].(string)
-				}
-			}
-		}
-	}
-	if key == "" {
-		if c, _ := s.Contacts.GetContact(req.RequesterAID); c != nil {
-			key = c.PublicKey
-		}
-	}
-	if key == "" {
-		return false
-	}
-	pub, err := login.DecodeVerkey(key)
-	if err != nil {
-		return false
-	}
-	ok, err := login.VerifyString(RequestStatement(req.RequesterAID, s.ourAID(), req.CoversDelegates, req.Stamp), req.Signature, pub)
-	if err != nil || !ok {
+	if !s.signedBy(req.RequesterAID, RequestStatement(req.RequesterAID, s.ourAID(), req.CoversDelegates, req.Stamp), req.Signature) {
 		return false
 	}
 	// Newer than the last one acted on for this requester, or a replay.
@@ -103,7 +75,57 @@ func (s *Service) signedByRequester(req WitnessRequest) bool {
 	return true
 }
 
-// AcceptCallback is the accept POST-back body.
+// currentKeyOf is the key aid signs with now: the newest establishment event
+// this agent holds for it, or else the key its contact record resolved.
+func (s *Service) currentKeyOf(aid string) string {
+	key := ""
+	if held, err := s.Store.GetKelEvents(aid); err == nil {
+		for _, e := range held {
+			var ev map[string]interface{}
+			if json.Unmarshal([]byte(e.EventJSON), &ev) != nil {
+				continue
+			}
+			switch ev["t"] {
+			case "icp", "rot", "dip", "drt":
+				if keys, ok := ev["k"].([]interface{}); ok && len(keys) > 0 {
+					key, _ = keys[0].(string)
+				}
+			}
+		}
+	}
+	if key == "" {
+		if c, _ := s.Contacts.GetContact(aid); c != nil {
+			key = c.PublicKey
+		}
+	}
+	return key
+}
+
+// signedBy reports whether signature is aid's, by its current key, over
+// statement.
+func (s *Service) signedBy(aid, statement, signature string) bool {
+	if signature == "" {
+		return false
+	}
+	key := s.currentKeyOf(aid)
+	if key == "" {
+		return false
+	}
+	pub, err := login.DecodeVerkey(key)
+	if err != nil {
+		return false
+	}
+	ok, err := login.VerifyString(statement, signature, pub)
+	return err == nil && ok
+}
+
+// AcceptCallback is the accept POST-back body: a witness's answer to a
+// request to witness for the requester.
+//
+// It is signed by the responder, with its current key, over who asked, who
+// answers, the answer and when (AcceptStatement). The route it arrives on is
+// open, and acting on it makes the responder a witness for the requester, so
+// an answer nobody can show the responder gave changes nothing.
 type AcceptCallback struct {
 	RequesterAID string `json:"requester_aid"`
 	ResponderAID string `json:"responder_aid"`
@@ -111,7 +133,21 @@ type AcceptCallback struct {
 	Reason       string `json:"reason,omitempty"`
 	BackendType  string `json:"backend_type,omitempty"`
 	TaskID       string `json:"task_id,omitempty"`
+	Stamp        string `json:"stamp,omitempty"`
+	Signature    string `json:"signature,omitempty"`
 }
+
+// AcceptStatement is what a responder signs in its answer to a witness
+// request: who asked, who answers, the answer, the backend it answers from,
+// and when. Naming the requester keeps an answer to one from being replayed to
+// another.
+func AcceptStatement(requester, responder, decision, backendType, stamp string) string {
+	return fmt.Sprintf("witness-accept/v1\n%s\n%s\n%s\n%s\n%s", requester, responder, decision, backendType, stamp)
+}
+
+// configAcceptStamps is, by responder, the stamp of the last signed answer
+// acted on: an older or equal one is a replay.
+const configAcceptStamps = "witness.accept_stamps"
 
 // InboundResult is the outcome of evaluating an inbound enrollment request.
 type InboundResult struct {
@@ -252,6 +288,17 @@ func (s *Service) SendAcceptCallback(ctx context.Context, requesterOOBI string, 
 	if cb.ResponderAID == "" {
 		cb.ResponderAID = s.ourAID()
 	}
+	// An unsigned answer is refused by the requester, so one that cannot be
+	// signed here is not sent.
+	if s.SignAsRequester == nil {
+		return fmt.Errorf("this agent cannot sign as its identity, so it cannot answer")
+	}
+	cb.Stamp = time.Now().UTC().Format(time.RFC3339Nano)
+	sig, err := s.SignAsRequester(AcceptStatement(cb.RequesterAID, cb.ResponderAID, cb.Decision, cb.BackendType, cb.Stamp))
+	if err != nil {
+		return fmt.Errorf("sign the answer: %w", err)
+	}
+	cb.Signature = sig
 	body, err := json.Marshal(cb)
 	if err != nil {
 		return err
@@ -261,35 +308,75 @@ func (s *Service) SendAcceptCallback(ctx context.Context, requesterOOBI string, 
 	return err
 }
 
-// ApplyAcceptCallback handles the accept POST-back on the original requester after the remote POST-back.
+// ApplyAcceptCallback acts on a witness's answer to a request this agent sent.
+//
+// Before anything is written, the answer must be signed by the responder's
+// current key, fresh, newer than the last answer acted on from it, and answer
+// a request still pending to that responder. An answer nobody asked for, or
+// one that cannot be shown to be the responder's, changes nothing: acting on
+// it would make whoever sent it a witness this identity never chose.
 func (s *Service) ApplyAcceptCallback(cb AcceptCallback) error {
 	if cb.RequesterAID == "" || cb.ResponderAID == "" {
 		return fmt.Errorf("missing aids")
 	}
-	ourAID := s.ourAID()
-	if cb.RequesterAID != ourAID {
+	if cb.RequesterAID != s.ourAID() {
 		return fmt.Errorf("requester_aid mismatch")
 	}
-	accepted := cb.Decision == "accepted"
-	now := NowRFC3339()
+	if cb.Decision != "accepted" && cb.Decision != "declined" {
+		return fmt.Errorf("an answer is accepted or declined, not %q", cb.Decision)
+	}
+	at, err := time.Parse(time.RFC3339Nano, cb.Stamp)
+	if err != nil || time.Since(at) > requestFreshness || time.Until(at) > requestFreshness {
+		return fmt.Errorf("the answer carries no fresh stamp")
+	}
+	if !s.signedBy(cb.ResponderAID, AcceptStatement(cb.RequesterAID, cb.ResponderAID, cb.Decision, cb.BackendType, cb.Stamp), cb.Signature) {
+		return fmt.Errorf("the answer is not signed by %s", cb.ResponderAID)
+	}
 
+	s.acceptMu.Lock()
+	defer s.acceptMu.Unlock()
+	stamps := map[string]string{}
+	if raw, err := s.Store.GetConfig(configAcceptStamps); err == nil && raw != "" {
+		_ = json.Unmarshal([]byte(raw), &stamps)
+	}
+	if last, err := time.Parse(time.RFC3339Nano, stamps[cb.ResponderAID]); err == nil && !at.After(last) {
+		return fmt.Errorf("the answer has already been acted on")
+	}
+	task, err := s.pendingSentTask(cb.ResponderAID)
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		return fmt.Errorf("no witness request to %s is waiting for an answer", cb.ResponderAID)
+	}
+
+	accepted := cb.Decision == "accepted"
 	if accepted {
 		if err := s.enrollWitnessForUs(cb.ResponderAID, cb.BackendType); err != nil {
 			return err
 		}
-		_ = s.completePendingSentTask(cb.ResponderAID, "completed",
-			fmt.Sprintf("Witness enrollment accepted by %s", cb.ResponderAID[:12]))
+	}
+	stamps[cb.ResponderAID] = cb.Stamp
+	raw, _ := json.Marshal(stamps)
+	if err := s.Store.SetConfig(configAcceptStamps, string(raw)); err != nil {
+		return err
+	}
+	if accepted {
+		if err := s.completeTask(*task, "completed",
+			fmt.Sprintf("Witness enrollment accepted by %s", cb.ResponderAID[:12])); err != nil {
+			return err
+		}
 		_ = s.refreshMutual(cb.ResponderAID)
 	} else {
-		_ = s.completePendingSentTask(cb.ResponderAID, "failed",
-			fmt.Sprintf("Declined: %s", cb.Reason))
+		if err := s.completeTask(*task, "failed", fmt.Sprintf("Declined: %s", cb.Reason)); err != nil {
+			return err
+		}
 	}
 	if s.OnEvent != nil {
 		s.OnEvent("witness_accept_received", map[string]interface{}{
 			"responder_aid": cb.ResponderAID, "decision": cb.Decision, "reason": cb.Reason,
 		})
 	}
-	_ = now
 	return nil
 }
 
@@ -299,11 +386,10 @@ func (s *Service) enrollWitnessForUs(responderAID, backendType string) error {
 	if err != nil {
 		return err
 	}
+	// A request is only ever sent to a contact, so an answer from anybody
+	// else is not one to act on, and is never a reason to make them a contact.
 	if c == nil {
-		c = &store.ContactRecord{
-			AID: responderAID, Alias: responderAID[:12] + "…", Status: "accepted",
-			ContactCategory: "trusted", ContactSource: ContactSourceManual,
-		}
+		return fmt.Errorf("%s is not a contact", responderAID)
 	}
 	c.IsWitness = true
 	if err := s.Contacts.SaveContact(*c); err != nil {
@@ -324,22 +410,27 @@ func (s *Service) enrollWitnessForUs(responderAID, backendType string) error {
 	return s.Store.SaveContactMeta(*meta)
 }
 
-func (s *Service) completePendingSentTask(contactAID, status, detail string) error {
+// pendingSentTask is the witness request to contactAID still waiting for an
+// answer, or nil.
+func (s *Service) pendingSentTask(contactAID string) (*store.TaskRecord, error) {
 	tasks, err := s.Contacts.GetTasks()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for i := range tasks {
 		t := tasks[i]
-		if t.Type != "witness_request_sent" || t.ContactAID != contactAID || t.Status != "pending" {
-			continue
+		if t.Type == "witness_request_sent" && t.ContactAID == contactAID && t.Status == "pending" {
+			return &t, nil
 		}
-		t.Status = status
-		t.Detail = detail
-		t.UpdatedAt = NowRFC3339()
-		return s.Contacts.SaveTask(t)
 	}
-	return nil
+	return nil, nil
+}
+
+func (s *Service) completeTask(t store.TaskRecord, status, detail string) error {
+	t.Status = status
+	t.Detail = detail
+	t.UpdatedAt = NowRFC3339()
+	return s.Contacts.SaveTask(t)
 }
 
 func (s *Service) refreshMutual(contactAID string) error {
