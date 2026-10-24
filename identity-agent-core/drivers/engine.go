@@ -79,9 +79,6 @@ type KeriEngine interface {
 	VerifyCredential(req *DriverVerifyCredentialRequest) (*DriverVerifyCredentialResponse, error)
 	PresentCredential(acdcSaid, holderAid, issuerAid, schemaSaid string) (*DriverPresentCredentialResponse, error)
 
-	// Witness receipts.
-	SubmitReceipt(req *DriverSubmitReceiptRequest) (*DriverSubmitReceiptResponse, error)
-
 	// Discovery. Not part of the event layer, and the one area a Go
 	// implementation does not yet answer — see EngineCapabilities.
 	ResolveOobi(url string) (*DriverResolveOobiResponse, error)

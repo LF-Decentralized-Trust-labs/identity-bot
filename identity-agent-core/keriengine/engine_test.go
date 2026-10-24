@@ -420,51 +420,6 @@ func TestATamperedCredentialIsRefused(t *testing.T) {
 	}
 }
 
-// A witness that is not designated must not contribute to a threshold, and one
-// witness must not meet a threshold by submitting twice.
-func TestReceiptsAreCountedOnlyFromDesignatedWitnessesAndOnlyOnce(t *testing.T) {
-	e := New()
-
-	stranger, err := e.SubmitReceipt(&drivers.DriverSubmitReceiptRequest{
-		EventSAID:        "EAAAtest",
-		WitnessAID:       "Bstranger",
-		TrustedWitnesses: []string{"Bdesignated"},
-		Threshold:        1,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stranger.Accepted || stranger.ThresholdMet {
-		t.Fatalf("a receipt from an undesignated witness was counted: %+v", stranger)
-	}
-
-	first, err := e.SubmitReceipt(&drivers.DriverSubmitReceiptRequest{
-		EventSAID:        "EAAAtest",
-		WitnessAID:       "Bdesignated",
-		TrustedWitnesses: []string{"Bdesignated", "Bother"},
-		Threshold:        2,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !first.Accepted || first.ReceiptCount != 1 {
-		t.Fatalf("a designated witness's receipt was not recorded: %+v", first)
-	}
-
-	repeat, err := e.SubmitReceipt(&drivers.DriverSubmitReceiptRequest{
-		EventSAID:        "EAAAtest",
-		WitnessAID:       "Bdesignated",
-		TrustedWitnesses: []string{"Bdesignated", "Bother"},
-		Threshold:        2,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if repeat.ReceiptCount != 1 || repeat.ThresholdMet {
-		t.Fatalf("one witness met a threshold of two by submitting twice: %+v", repeat)
-	}
-}
-
 // A group whose threshold exceeds its membership can never act. Refusing at
 // construction beats discovering it when the group first tries to sign.
 func TestAGroupThatCouldNeverActIsRefused(t *testing.T) {

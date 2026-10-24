@@ -1227,14 +1227,21 @@ func (s *SQLiteStore) SaveEndpoint(url, source string) error {
 
 // ── Witness Receipts (KERL Phase 7) ───────────────────────────────────────────
 
+// SaveWitnessReceipt keeps a receipt that verifies, replacing whatever was held
+// for that event and witness. See a_receipt_is_kept_only_if_it_verifies.go.
 func (s *SQLiteStore) SaveWitnessReceipt(record WitnessReceiptRecord) error {
+	if err := checkReceipt(record); err != nil {
+		return err
+	}
 	if record.ReceivedAt == "" {
 		record.ReceivedAt = time.Now().UTC().Format(time.RFC3339)
 	}
 	_, err := s.db.Exec(`
 		INSERT INTO witness_receipts (event_said, witness_aid, cesr_signature, received_at)
 		VALUES (?, ?, ?, ?)
-		ON CONFLICT(event_said, witness_aid) DO NOTHING`,
+		ON CONFLICT(event_said, witness_aid) DO UPDATE SET
+			cesr_signature = excluded.cesr_signature,
+			received_at    = excluded.received_at`,
 		record.EventSAID, record.WitnessAID, record.CesrSignature, record.ReceivedAt,
 	)
 	return err
@@ -1257,10 +1264,10 @@ func (s *SQLiteStore) GetWitnessReceipts(eventSAID string) ([]WitnessReceiptReco
 		}
 		receipts = append(receipts, r)
 	}
-	if receipts == nil {
-		receipts = []WitnessReceiptRecord{}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
-	return receipts, nil
+	return verifiedReceipts(receipts), nil
 }
 
 // ── Guardianship ────────────────────────────────────────────────────────────

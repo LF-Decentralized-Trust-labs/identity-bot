@@ -45,7 +45,6 @@ type Engine struct {
 	RevokeCredentialFunc           func(name, acdcSaid, registrySaid, issSaid string) (*drivers.DriverRevokeCredentialResponse, error)
 	VerifyCredentialFunc           func(req *drivers.DriverVerifyCredentialRequest) (*drivers.DriverVerifyCredentialResponse, error)
 	PresentCredentialFunc          func(acdcSaid, holderAid, issuerAid, schemaSaid string) (*drivers.DriverPresentCredentialResponse, error)
-	SubmitReceiptFunc              func(req *drivers.DriverSubmitReceiptRequest) (*drivers.DriverSubmitReceiptResponse, error)
 	ResolveOobiFunc                func(url string) (*drivers.DriverResolveOobiResponse, error)
 	EndpointLocationFunc           func(req *drivers.DriverEndpointLocationRequest) (*drivers.DriverEndpointResponse, error)
 	StartFunc                      func() error
@@ -240,13 +239,6 @@ func (e *Engine) PresentCredential(acdcSaid, holderAid, issuerAid, schemaSaid st
 		return nil, unset("PresentCredential")
 	}
 	return e.PresentCredentialFunc(acdcSaid, holderAid, issuerAid, schemaSaid)
-}
-
-func (e *Engine) SubmitReceipt(req *drivers.DriverSubmitReceiptRequest) (*drivers.DriverSubmitReceiptResponse, error) {
-	if e.SubmitReceiptFunc == nil {
-		return nil, unset("SubmitReceipt")
-	}
-	return e.SubmitReceiptFunc(req)
 }
 
 func (e *Engine) ResolveOobi(url string) (*drivers.DriverResolveOobiResponse, error) {

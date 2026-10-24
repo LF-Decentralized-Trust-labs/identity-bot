@@ -253,6 +253,12 @@ resolution at a private address for no gain.
 identity and its witnesses, run at the identity's public or witness address. It is
 not run at a per-relationship address handed to a counterparty.
 
+**Amended 2026-10-24: `/api/receipt/submit` is no longer a public route.** A witness
+returns its receipt in its answer to the identity's own request, so no witness posts
+one there, and the open route let anybody store a receipt under a witness's name.
+It is now the owner's, and keeps only a receipt that verifies against the witness
+identifier for an event in the identity's own key log. `/api/witness/*` is unchanged.
+
 **Allocation labels are 128 random bits**, written as a 26-character lowercase
 base32 DNS label. They are never derived from an identifier.
 

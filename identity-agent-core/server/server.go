@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -2812,14 +2813,20 @@ func (s *CoreServer) handleVerifyCredentialChain(w http.ResponseWriter, r *http.
 	})
 }
 
+// handleSubmitReceipt keeps a witness receipt for one of this identity's own
+// events, and reports how far that event is now witnessed.
+//
+// Owner only: a witness hands its receipt back in its answer to this agent's
+// own request, so nobody else has a receipt to deliver here. Nothing the
+// caller says about keys, trusted witnesses or thresholds is used. The
+// verifying key is the witness identifier itself, which is non-transferable,
+// and who was designated and how many receipts are needed are read from this
+// identity's own key log.
 func (s *CoreServer) handleSubmitReceipt(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		EventSAID        string   `json:"event_said"`
-		WitnessAID       string   `json:"witness_aid"`
-		WitnessPublicKey string   `json:"witness_public_key"`
-		CesrSignature    string   `json:"cesr_signature"`
-		TrustedWitnesses []string `json:"trusted_witnesses"`
-		Threshold        int      `json:"threshold"`
+		EventSAID     string `json:"event_said"`
+		WitnessAID    string `json:"witness_aid"`
+		CesrSignature string `json:"cesr_signature"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
@@ -2829,33 +2836,68 @@ func (s *CoreServer) handleSubmitReceipt(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "Missing required fields", "event_said, witness_aid, cesr_signature are required")
 		return
 	}
-
-	driverReq := &drivers.DriverSubmitReceiptRequest{
-		EventSAID:        req.EventSAID,
-		WitnessAID:       req.WitnessAID,
-		WitnessPublicKey: req.WitnessPublicKey,
-		CesrSignature:    req.CesrSignature,
-		TrustedWitnesses: req.TrustedWitnesses,
-		Threshold:        req.Threshold,
-	}
-
-	result, err := s.KeriDriver.SubmitReceipt(driverReq)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Receipt submission failed", err.Error())
+	if err := drivers.VerifyReceipt(req.WitnessAID, req.EventSAID, req.CesrSignature); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "The receipt does not verify", err.Error())
 		return
 	}
-
-	// Persist accepted receipts to durable store.
-	if result.Accepted {
-		_ = s.DataStore.SaveWitnessReceipt(store.WitnessReceiptRecord{
-			EventSAID:     req.EventSAID,
-			WitnessAID:    req.WitnessAID,
-			CesrSignature: req.CesrSignature,
-		})
+	in, ok := s.ownLogWithReceipts(req.EventSAID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "Not an event of this identity",
+			"a receipt is kept here only for an event in this identity's own key log")
+		return
 	}
-
+	if err := s.DataStore.SaveWitnessReceipt(store.WitnessReceiptRecord{
+		EventSAID:     req.EventSAID,
+		WitnessAID:    req.WitnessAID,
+		CesrSignature: req.CesrSignature,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to store receipt", err.Error())
+		return
+	}
+	held, _ := s.DataStore.GetWitnessReceipts(req.EventSAID)
+	in.Receipts = map[string][]drivers.WitnessReceipt{}
+	for _, h := range held {
+		in.Receipts[req.EventSAID] = append(in.Receipts[req.EventSAID],
+			drivers.WitnessReceipt{WitnessAID: h.WitnessAID, CesrSignature: h.CesrSignature})
+	}
+	resp := drivers.DriverSubmitReceiptResponse{Accepted: true, Errors: []string{}}
+	if row, found := drivers.WitnessingOf(in, req.EventSAID); found {
+		resp.ReceiptCount = row.Verified
+		resp.ThresholdMet = row.Met
+		if !slices.Contains(row.Designated, req.WitnessAID) {
+			resp.Errors = append(resp.Errors, fmt.Sprintf(
+				"%s is not a designated witness for this event, so its receipt is kept and not counted",
+				req.WitnessAID))
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	json.NewEncoder(w).Encode(resp)
+}
+
+// ownLogWithReceipts is this identity's key log, as published, when it holds
+// the event eventSAID.
+func (s *CoreServer) ownLogWithReceipts(eventSAID string) (drivers.ValidateKELInput, bool) {
+	identity, err := s.DataStore.GetIdentity()
+	if err != nil || identity == nil || identity.AID == "" {
+		return drivers.ValidateKELInput{}, false
+	}
+	events, err := s.DataStore.GetEvents(identity.AID)
+	if err != nil {
+		return drivers.ValidateKELInput{}, false
+	}
+	in := drivers.ValidateKELInput{AID: identity.AID}
+	found := false
+	for _, ev := range events {
+		raw, err := base64.StdEncoding.DecodeString(ev.RawBytesB64)
+		if err != nil || len(raw) == 0 {
+			return drivers.ValidateKELInput{}, false
+		}
+		in.RawEvents = append(in.RawEvents, raw)
+		if saidOfEventRecord(ev) == eventSAID {
+			found = true
+		}
+	}
+	return in, found
 }
 
 func (s *CoreServer) handleGetKERL(w http.ResponseWriter, r *http.Request) {
