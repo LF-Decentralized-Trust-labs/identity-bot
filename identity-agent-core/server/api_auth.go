@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -342,6 +343,7 @@ func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handle
 					// signature is spent here, so the handler would find a
 					// remote caller with no scopes and refuse the person who
 					// grants them. So the gate says who it admitted.
+					r = r.WithContext(context.WithValue(r.Context(), theGateAdmittedTheOwnerKey{}, how))
 					if how == ownerAtThisComputer {
 						next.ServeHTTP(w, r)
 						return
@@ -459,6 +461,19 @@ func (s *CoreServer) howThisIsTheOwner(r *http.Request) string {
 		return ownerSigned
 	}
 	return ""
+}
+
+// theGateAdmittedTheOwnerKey marks a request the gate admitted on a route open
+// to scoped callers because it is the owner's, and says how it was proved.
+type theGateAdmittedTheOwnerKey struct{}
+
+// theGateAdmittedTheOwner reports whether the gate admitted r as the owner's.
+// For a handler on a route any scoped caller reaches that must still serve
+// only the owner, and cannot ask again: an owner signature is spent at the
+// gate.
+func theGateAdmittedTheOwner(r *http.Request) bool {
+	how, _ := r.Context().Value(theGateAdmittedTheOwnerKey{}).(string)
+	return how != ""
 }
 
 // theOwnerAsACaller is the caller a remote owner is, for a route that asks who

@@ -47,6 +47,15 @@ func (s *CoreServer) handleAppDisplayProxy(w http.ResponseWriter, r *http.Reques
 	// ── Intercept: Open WebUI chat data API ──────────────────────────────
 	// These paths are normally served by Open WebUI's internal database.
 	// We intercept them and serve from ai-memory.db instead.
+	//
+	// They are the owner's conversations, read under the same rule as
+	// /api/ai/conversations: the owner, or a machine acting for them. This
+	// route admits any caller holding any scope, so the rule is applied here —
+	// an AI agent granted one capability must not read every conversation.
+	if s.isAConversationRead(r.Method, containerPath) && !s.mayReadTheOwnersConversations(r) {
+		http.Error(w, "only the owner, or a machine acting for them, reads these conversations", http.StatusForbidden)
+		return
+	}
 
 	if r.Method == http.MethodGet && (containerPath == "/api/v1/chats" || containerPath == "/api/v1/chats/") {
 		s.serveConversationList(w, r)
@@ -104,6 +113,26 @@ func (s *CoreServer) handleAppDisplayProxy(w http.ResponseWriter, r *http.Reques
 	r.Host = target.Host
 
 	proxy.ServeHTTP(w, r)
+}
+
+// isAConversationRead reports whether method and path are one of the
+// intercepted reads of ai-memory conversations.
+func (s *CoreServer) isAConversationRead(method, p string) bool {
+	if method != http.MethodGet {
+		return false
+	}
+	return p == "/api/v1/chats" || p == "/api/v1/chats/" || strings.HasPrefix(p, "/api/v1/chats/")
+}
+
+// mayReadTheOwnersConversations is the conversation read rule for this route:
+// the gate admitted the request as the owner's, or as a controller's acting
+// for them. A caller admitted only for holding a scope is neither.
+func (s *CoreServer) mayReadTheOwnersConversations(r *http.Request) bool {
+	if theGateAdmittedTheOwner(r) {
+		return true
+	}
+	_, isAController := TheControllerThatAsked(r)
+	return isAController
 }
 
 // isACapabilityCall reports whether path, as an app's server would read it,

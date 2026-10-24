@@ -14,6 +14,7 @@ import (
 
 	"identity-agent-core/appcall"
 	"identity-agent-core/sandbox"
+	"identity-agent-core/store"
 )
 
 // notesApp is an app providing two capabilities, running as one would: its
@@ -297,5 +298,51 @@ func TestTheDisplayProxyStripsASessionHoweverItIsWritten(t *testing.T) {
 	}
 	if len(h.Values("X_IA_Call_Kind")) != 0 {
 		t.Error("a call header spelled with underscores reached the app")
+	}
+}
+
+// The owner's AI conversations, served through the display proxy, are read
+// only by the owner or a machine acting for them — never by a caller admitted
+// for holding some unrelated scope.
+func TestOnlyTheOwnerReadsConversationsThroughTheDisplayProxy(t *testing.T) {
+	s := newGrantTestServer(t)
+	withNotesApp(t, s)
+	mem, err := store.NewAIMemoryStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.AIMemory = mem
+	if err := mem.SaveConversation(store.Conversation{ID: "c1", Title: "private"}); err != nil {
+		t.Fatal(err)
+	}
+	tok := anAIAgentHolding(t, s, "notes.read")
+	r := s.buildRouter("")
+
+	for _, path := range []string{"/apps/notes/api/v1/chats", "/apps/notes/api/v1/chats/c1", "/apps/notes/api/v1//chats"} {
+		req := remote("GET", path, "")
+		req.Header.Set("Authorization", "Bearer "+tok)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden || strings.Contains(w.Body.String(), "private") {
+			t.Fatalf("an AI agent holding an unrelated scope read %s: %d %s", path, w.Code, w.Body.String())
+		}
+	}
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, local("GET", "/apps/notes/api/v1/chats", ""))
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "private") {
+		t.Fatalf("the owner could not read their conversations: %d %s", w.Code, w.Body.String())
+	}
+	machine, mseed := anAuthorisedMachine(t, s, GradeEnrolled)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, asThatMachine(t, machine, "GET", "/apps/notes/api/v1/chats", "", mseed, "", time.Time{}))
+	if w.Code != http.StatusOK {
+		t.Fatalf("a machine acting for the owner could not read their conversations: %d %s", w.Code, w.Body.String())
+	}
+	// The owner sealed while authorising the machine.
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, signed(t, "GET", "/apps/notes/api/v1/chats/c1", "", testOwnerSeed(), time.Now()))
+	if w.Code != http.StatusOK {
+		t.Fatalf("the owner, signing remotely, could not read a conversation: %d %s", w.Code, w.Body.String())
 	}
 }
