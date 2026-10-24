@@ -962,6 +962,33 @@ CREATE TABLE IF NOT EXISTS signed_for_others (
     created_at TEXT NOT NULL DEFAULT ''
 );
 `},
+	{
+		Version:     45,
+		Description: "Forget key log observations recorded with the sequence number read as decimal",
+		SQL: `
+-- The watcher read a key event's sequence number as decimal, where KERI writes
+-- it in hexadecimal. A log of up to ten events (0 to 9) reads the same either
+-- way, so what was recorded below position 9 is sound. From the eleventh event
+-- on, "a" to "f" read as 0, so a log of 11 to 16 events was recorded at
+-- position 9 with a digest over all of them, and every later event changed that
+-- digest at the same position. "10" onwards read as the decimal number, so
+-- every position from 10 up was recorded for the wrong event. Kept, those
+-- observations make each identity they cover look as if it had published two
+-- histories, and it is refused as duplicitous.
+--
+-- They cannot be told apart from sound ones at position 9, and a digest cannot
+-- be recomputed without the log it was taken over, so every observation at
+-- position 9 or above is forgotten. The identity is then met as it is next
+-- seen, as at first contact, and checked against the standing watcher.
+DELETE FROM kel_first_seen WHERE sequence_num >= 9;
+
+-- The alerts those observations raised are kept, as a record that they were
+-- raised, and closed with the reason.
+UPDATE duplicity_alerts
+   SET resolved = 1,
+       resolution_note = 'raised by a sequence number read as decimal; the observation it compared against has been discarded'
+ WHERE resolved = 0 AND sequence_num >= 9;
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.
