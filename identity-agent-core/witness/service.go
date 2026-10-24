@@ -16,8 +16,6 @@ import (
 	"time"
 
 	"identity-agent-core/drivers"
-	"identity-agent-core/iacrypto"
-	"identity-agent-core/login"
 	"identity-agent-core/store"
 )
 
@@ -49,8 +47,8 @@ type Service struct {
 	// AskToCoverDelegates says whether this agent's witness requests ask for
 	// the identities it delegates to be witnessed too.
 	AskToCoverDelegates func() bool
-	// SignAsRequester signs as this agent's identity, with its current key,
-	// where this agent holds it: the witness requests it sends, and its
+	// SignAsRequester signs as this Identity Agent's identity, with its
+	// current key, where it holds it: the witness requests it sends, and its
 	// answers to the ones it receives.
 	SignAsRequester func(statement string) (string, error)
 	// acceptMu serialises acting on answers to witness requests, so one answer
@@ -934,13 +932,8 @@ func receiptFromResponse(resp map[string]interface{}, eventSAID string) (sig, wi
 	if sig == "" || witnessAID == "" {
 		return "", "", fmt.Errorf("the reply carries no signed receipt")
 	}
-	pub, derr := iacrypto.KeyFromNonTransferableAID(witnessAID)
-	if derr != nil {
-		return "", "", fmt.Errorf("the witness is not named by a key anyone can check against: %w", derr)
-	}
-	ok, verr := login.VerifyString(eventSAID, sig, pub)
-	if verr != nil || !ok {
-		return "", "", fmt.Errorf("the signature does not cover this event")
+	if err := drivers.VerifyReceipt(witnessAID, eventSAID, sig); err != nil {
+		return "", "", err
 	}
 	return sig, witnessAID, nil
 }
@@ -948,6 +941,14 @@ func receiptFromResponse(resp map[string]interface{}, eventSAID string) (sig, wi
 func (s *Service) onReceipt(eventSAID, witnessAID, cesrSig string) {
 	f, _ := s.Store.GetFinalization(eventSAID)
 	if f == nil {
+		return
+	}
+	// Counted only once it is kept, so the count never runs ahead of the
+	// receipts anyone can be shown.
+	if err := s.Contacts.SaveWitnessReceipt(store.WitnessReceiptRecord{
+		EventSAID: eventSAID, WitnessAID: witnessAID, CesrSignature: cesrSig,
+	}); err != nil {
+		log.Printf("[witness] receipt from %s for %s not kept: %v", witnessAID, eventSAID, err)
 		return
 	}
 	f.ReceiptCount++
@@ -958,9 +959,6 @@ func (s *Service) onReceipt(eventSAID, witnessAID, cesrSig string) {
 		f.State = FinalizePartial
 	}
 	_ = s.Store.SaveFinalization(*f)
-	_ = s.Contacts.SaveWitnessReceipt(store.WitnessReceiptRecord{
-		EventSAID: eventSAID, WitnessAID: witnessAID, CesrSignature: cesrSig,
-	})
 }
 
 func (s *Service) finalizeLoop(eventSAID string, threshold int) {

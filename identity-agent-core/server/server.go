@@ -2816,7 +2816,7 @@ func (s *CoreServer) handleVerifyCredentialChain(w http.ResponseWriter, r *http.
 // handleSubmitReceipt keeps a witness receipt for one of this identity's own
 // events, and reports how far that event is now witnessed.
 //
-// Owner only: a witness hands its receipt back in its answer to this agent's
+// Owner only: a witness hands its receipt back in its answer to this Identity Agent's
 // own request, so nobody else has a receipt to deliver here. Nothing the
 // caller says about keys, trusted witnesses or thresholds is used. The
 // verifying key is the witness identifier itself, which is non-transferable,

@@ -5,6 +5,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -45,7 +46,11 @@ func (s *CoreServer) handleStoreReceipt(w http.ResponseWriter, r *http.Request) 
 		ReceivedAt:    time.Now().UTC().Format(time.RFC3339),
 	}
 	if err := s.DataStore.SaveWitnessReceipt(record); err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to store receipt", err.Error())
+		status := http.StatusInternalServerError
+		if errors.Is(err, store.ErrReceiptDoesNotVerify) {
+			status = http.StatusUnprocessableEntity
+		}
+		writeError(w, status, "Failed to store receipt", err.Error())
 		return
 	}
 

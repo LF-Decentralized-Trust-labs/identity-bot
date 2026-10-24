@@ -257,7 +257,8 @@ not run at a per-relationship address handed to a counterparty.
 returns its receipt in its answer to the identity's own request, so no witness posts
 one there, and the open route let anybody store a receipt under a witness's name.
 It is now the owner's, and keeps only a receipt that verifies against the witness
-identifier for an event in the identity's own key log. `/api/witness/*` is unchanged.
+identifier for an event in the identity's own key log. `/api/witness/*` stays public;
+its accept answer is now signed (ADR-016).
 
 **Allocation labels are 128 random bits**, written as a 26-character lowercase
 base32 DNS label. They are never derived from an identifier.

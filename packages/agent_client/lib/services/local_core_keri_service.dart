@@ -434,10 +434,7 @@ class LocalCoreKeriService extends KeriService {
   Future<WitnessReceiptResult> submitWitnessReceipt({
     required String eventSaid,
     required String witnessAid,
-    required String witnessPublicKey,
     required String cesrSignature,
-    List<String> trustedWitnesses = const [],
-    int threshold = 0,
   }) async {
     final response = await _client.post(
       Uri.parse('$_baseUrl/api/receipt/submit'),
@@ -445,10 +442,7 @@ class LocalCoreKeriService extends KeriService {
       body: jsonEncode({
         'event_said': eventSaid,
         'witness_aid': witnessAid,
-        'witness_public_key': witnessPublicKey,
         'cesr_signature': cesrSignature,
-        'trusted_witnesses': trustedWitnesses,
-        'threshold': threshold,
       }),
     );
 
