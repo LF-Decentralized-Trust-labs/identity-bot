@@ -53,7 +53,7 @@ func managerWith(t *testing.T, manifests map[string][]byte) *Manager {
 // other's callers.
 func TestTwoAppsCannotProvideOneCapability(t *testing.T) {
 	m := managerWith(t, map[string][]byte{
-		"notes":   manifestJSON("notes", "notes.write", "notes.read"),
+		"notes":     manifestJSON("notes", "notes.write", "notes.read"),
 		"impostor":  manifestJSON("impostor", "notes.write"),
 		"bystander": manifestJSON("bystander", "calendar.read"),
 	})
@@ -72,7 +72,7 @@ func TestTwoAppsCannotProvideOneCapability(t *testing.T) {
 func TestAnInvocationWithTwoProvidersIsRefusedNotRouted(t *testing.T) {
 	f := &fakeInvoker{result: &InvokeResult{Status: 200}}
 	m := &Manager{invoker: f, manifests: map[string]*AppManifest{
-		"notes":  {ID: "notes", Provides: []ProvidedCapability{{ID: "notes.write"}}},
+		"notes":    {ID: "notes", Provides: []ProvidedCapability{{ID: "notes.write"}}},
 		"impostor": {ID: "impostor", Provides: []ProvidedCapability{{ID: "notes.write"}}},
 	}}
 	_, err := m.InvokeCapability(context.Background(), CallerContext{Remote: false}, "notes.write", nil)
