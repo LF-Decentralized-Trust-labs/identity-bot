@@ -47,9 +47,9 @@ type Service struct {
 	// AskToCoverDelegates says whether this agent's witness requests ask for
 	// the identities it delegates to be witnessed too.
 	AskToCoverDelegates func() bool
-	// SignAsRequester signs as this Identity Agent's identity, with its
-	// current key, where it holds it: the witness requests it sends, and its
-	// answers to the ones it receives.
+	// SignAsRequester signs a witness request as this Identity Agent's
+	// identity, with its current key, where it holds it. Answers to requests
+	// are signed with the witness key instead (SignReceipt).
 	SignAsRequester func(statement string) (string, error)
 	// acceptMu serialises acting on answers to witness requests, so one answer
 	// is not acted on twice.

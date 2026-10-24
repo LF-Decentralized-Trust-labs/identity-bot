@@ -110,27 +110,37 @@ func agentService(t *testing.T, aid string, mc *memContacts) *Service {
 	return s
 }
 
-// signingAgent is an agent that can sign as its identity, and the key it signs
-// with, as a contact of it would have resolved it.
+// signingAgent is an Identity Agent that holds a witness key, and that key's
+// identifier and seed, as it publishes the identifier with its OOBI.
 func signingAgent(t *testing.T, aid string, mc *memContacts) (*Service, string, []byte) {
 	t.Helper()
 	st := setupTestSQLite(t)
 	s := NewService(st, mc, nil, BackendDesktop)
 	s.OurAID = func() string { return aid }
 	s.OurOOBI = func() string { return "http://127.0.0.1:5050/public/oobi/" + aid }
-	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
-	seed := priv.Seed()
-	s.SignAsRequester = func(statement string) (string, error) { return login.SignString(statement, seed) }
-	return s, iacrypto.VerkeyQB64(pub), seed
+	key, seed := witnessKey()
+	s.SignReceipt = func(statement string) (string, string, error) {
+		sig, err := login.SignString(statement, seed)
+		return key, sig, err
+	}
+	s.OurWitnessAID = func() (string, error) { return key, nil }
+	return s, key, seed
 }
 
-// answerFrom is a witness's answer to aidA, signed with seed.
-func answerFrom(responder, requester, decision string, seed []byte, at time.Time) AcceptCallback {
+// witnessKey is a new non-transferable witness identifier and its seed.
+func witnessKey() (string, []byte) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	return iacrypto.NonTransferableAIDQB64(pub), priv.Seed()
+}
+
+// answerFrom is a witness's answer to requester, signed with the seed of the
+// witness key it names.
+func answerFrom(responder, requester, key, decision string, seed []byte, at time.Time) AcceptCallback {
 	cb := AcceptCallback{
 		RequesterAID: requester, ResponderAID: responder, Decision: decision,
-		BackendType: BackendDesktop, Stamp: at.UTC().Format(time.RFC3339Nano),
+		BackendType: BackendDesktop, WitnessKey: key, Stamp: at.UTC().Format(time.RFC3339Nano),
 	}
-	cb.Signature, _ = login.SignString(AcceptStatement(cb.RequesterAID, cb.ResponderAID, cb.Decision, cb.BackendType, cb.Stamp), seed)
+	cb.Signature, _ = login.SignString(AcceptStatement(cb.RequesterAID, cb.ResponderAID, cb.WitnessKey, cb.Decision, cb.BackendType, cb.Stamp), seed)
 	return cb
 }
 
@@ -154,11 +164,11 @@ func TestMutualEnrollmentPostBack(t *testing.T) {
 	}
 
 	cap := &capturePoster{}
-	sA, pubA, _ := signingAgent(t, aidA, mcA)
-	sB, pubB, _ := signingAgent(t, aidB, mcB)
-	cA, cB0 := mcB.contacts[aidA], mcA.contacts[aidB]
-	cA.PublicKey, cB0.PublicKey = pubA, pubB
-	mcB.contacts[aidA], mcA.contacts[aidB] = cA, cB0
+	sA, keyA, _ := signingAgent(t, aidA, mcA)
+	sB, keyB, _ := signingAgent(t, aidB, mcB)
+	// Each resolved the other's OOBI, which publishes its witness key.
+	sA.RecordContactCapability(aidB, BackendDesktop, keyB, "")
+	sB.RecordContactCapability(aidA, BackendDesktop, keyA, "")
 	sA.PostEvent = cap.post
 	sB.PostEvent = cap.post
 
@@ -236,11 +246,9 @@ func TestApplyAcceptCallbackCompletesTask(t *testing.T) {
 		}},
 	}
 	sA := agentService(t, aidA, mcA)
-	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
-	c := mcA.contacts[aidB]
-	c.PublicKey = iacrypto.VerkeyQB64(pub)
-	mcA.contacts[aidB] = c
-	if err := sA.ApplyAcceptCallback(answerFrom(aidB, aidA, "accepted", priv.Seed(), time.Now())); err != nil {
+	key, seed := witnessKey()
+	sA.RecordContactCapability(aidB, BackendDesktop, key, "")
+	if err := sA.ApplyAcceptCallback(answerFrom(aidB, aidA, key, "accepted", seed, time.Now())); err != nil {
 		t.Fatal(err)
 	}
 	tasks, _ := mcA.GetTasks()

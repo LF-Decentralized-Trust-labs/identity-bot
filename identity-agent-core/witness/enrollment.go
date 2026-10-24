@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
 	"identity-agent-core/store"
 )
@@ -76,7 +77,7 @@ func (s *Service) signedByRequester(req WitnessRequest) bool {
 }
 
 // currentKeyOf is the key aid signs with now: the newest establishment event
-// this agent holds for it, or else the key its contact record resolved.
+// this Identity Agent holds for it, or else the key its contact record resolved.
 func (s *Service) currentKeyOf(aid string) string {
 	key := ""
 	if held, err := s.Store.GetKelEvents(aid); err == nil {
@@ -119,13 +120,31 @@ func (s *Service) signedBy(aid, statement, signature string) bool {
 	return err == nil && ok
 }
 
+// signedByWitnessKey reports whether signature is over statement by the key a
+// non-transferable witness identifier names.
+func signedByWitnessKey(witnessKey, statement, signature string) bool {
+	if signature == "" {
+		return false
+	}
+	pub, err := iacrypto.KeyFromNonTransferableAID(witnessKey)
+	if err != nil {
+		return false
+	}
+	ok, err := login.VerifyString(statement, signature, pub)
+	return err == nil && ok
+}
+
 // AcceptCallback is the accept POST-back body: a witness's answer to a
 // request to witness for the requester.
 //
-// It is signed by the responder, with its current key, over who asked, who
-// answers, the answer and when (AcceptStatement). The route it arrives on is
-// open, and acting on it makes the responder a witness for the requester, so
-// an answer nobody can show the responder gave changes nothing.
+// It is signed with the responder's witness key, the non-transferable
+// identifier it receipts under and published with its OOBI, over who asked,
+// who answers, the answer and when (AcceptStatement). That is the key the
+// requester will rely on for this witness's receipts, every witness holds it,
+// and it is checked from the identifier alone, so nothing has to be looked up
+// and no rotation of the responder's identity leaves it stale. The route it
+// arrives on is open, and acting on it makes the responder a witness for the
+// requester, so an answer nobody can show the responder gave changes nothing.
 type AcceptCallback struct {
 	RequesterAID string `json:"requester_aid"`
 	ResponderAID string `json:"responder_aid"`
@@ -133,16 +152,17 @@ type AcceptCallback struct {
 	Reason       string `json:"reason,omitempty"`
 	BackendType  string `json:"backend_type,omitempty"`
 	TaskID       string `json:"task_id,omitempty"`
+	WitnessKey   string `json:"witness_key,omitempty"`
 	Stamp        string `json:"stamp,omitempty"`
 	Signature    string `json:"signature,omitempty"`
 }
 
 // AcceptStatement is what a responder signs in its answer to a witness
-// request: who asked, who answers, the answer, the backend it answers from,
-// and when. Naming the requester keeps an answer to one from being replayed to
-// another.
-func AcceptStatement(requester, responder, decision, backendType, stamp string) string {
-	return fmt.Sprintf("witness-accept/v1\n%s\n%s\n%s\n%s\n%s", requester, responder, decision, backendType, stamp)
+// request: who asked, who answers and under which witness key, the answer, the
+// backend it answers from, and when. Naming the requester keeps an answer to
+// one from being replayed to another.
+func AcceptStatement(requester, responder, witnessKey, decision, backendType, stamp string) string {
+	return fmt.Sprintf("witness-accept/v1\n%s\n%s\n%s\n%s\n%s\n%s", requester, responder, witnessKey, decision, backendType, stamp)
 }
 
 // configAcceptStamps is, by responder, the stamp of the last signed answer
@@ -290,13 +310,21 @@ func (s *Service) SendAcceptCallback(ctx context.Context, requesterOOBI string, 
 	}
 	// An unsigned answer is refused by the requester, so one that cannot be
 	// signed here is not sent.
-	if s.SignAsRequester == nil {
-		return fmt.Errorf("this agent cannot sign as its identity, so it cannot answer")
+	if s.SignReceipt == nil || s.OurWitnessAID == nil {
+		return fmt.Errorf("this Identity Agent holds no witness key, so it cannot answer")
 	}
+	key, err := s.OurWitnessAID()
+	if err != nil {
+		return fmt.Errorf("the witness key: %w", err)
+	}
+	cb.WitnessKey = key
 	cb.Stamp = time.Now().UTC().Format(time.RFC3339Nano)
-	sig, err := s.SignAsRequester(AcceptStatement(cb.RequesterAID, cb.ResponderAID, cb.Decision, cb.BackendType, cb.Stamp))
+	signer, sig, err := s.SignReceipt(AcceptStatement(cb.RequesterAID, cb.ResponderAID, cb.WitnessKey, cb.Decision, cb.BackendType, cb.Stamp))
 	if err != nil {
 		return fmt.Errorf("sign the answer: %w", err)
+	}
+	if signer != key {
+		return fmt.Errorf("the answer was signed as %s, not the witness key %s", signer, key)
 	}
 	cb.Signature = sig
 	body, err := json.Marshal(cb)
@@ -308,7 +336,7 @@ func (s *Service) SendAcceptCallback(ctx context.Context, requesterOOBI string, 
 	return err
 }
 
-// ApplyAcceptCallback acts on a witness's answer to a request this agent sent.
+// ApplyAcceptCallback acts on a witness's answer to a request this Identity Agent sent.
 //
 // Before anything is written, the answer must be signed by the responder's
 // current key, fresh, newer than the last answer acted on from it, and answer
@@ -329,8 +357,17 @@ func (s *Service) ApplyAcceptCallback(cb AcceptCallback) error {
 	if err != nil || time.Since(at) > requestFreshness || time.Until(at) > requestFreshness {
 		return fmt.Errorf("the answer carries no fresh stamp")
 	}
-	if !s.signedBy(cb.ResponderAID, AcceptStatement(cb.RequesterAID, cb.ResponderAID, cb.Decision, cb.BackendType, cb.Stamp), cb.Signature) {
-		return fmt.Errorf("the answer is not signed by %s", cb.ResponderAID)
+	// The witness key the responder published with its OOBI, and nothing the
+	// answer says about itself.
+	meta, _ := s.Store.GetContactMeta(cb.ResponderAID)
+	if meta == nil || meta.WitnessKey == "" {
+		return fmt.Errorf("%s has published no witness key, so its answer cannot be checked", cb.ResponderAID)
+	}
+	if cb.WitnessKey != meta.WitnessKey {
+		return fmt.Errorf("the answer names witness key %q, and %s published %q", cb.WitnessKey, cb.ResponderAID, meta.WitnessKey)
+	}
+	if !signedByWitnessKey(meta.WitnessKey, AcceptStatement(cb.RequesterAID, cb.ResponderAID, cb.WitnessKey, cb.Decision, cb.BackendType, cb.Stamp), cb.Signature) {
+		return fmt.Errorf("the answer is not signed by %s's witness key", cb.ResponderAID)
 	}
 
 	s.acceptMu.Lock()
