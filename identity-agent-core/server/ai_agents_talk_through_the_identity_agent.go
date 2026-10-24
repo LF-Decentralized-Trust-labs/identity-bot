@@ -85,6 +85,7 @@ func (s *CoreServer) mountConversationRoutes(r chi.Router) {
 	r.Post("/mcp/agents/{id}/conversations", s.handlePersonSays)
 	r.Get("/mcp/agents/{id}/conversations", s.handleListAgentConversations)
 	r.Get("/mcp/conversations/{cid}", s.handleReadConversation)
+	r.Get("/mcp/conversations/{cid}/export", s.handleExportConversation)
 	r.Get("/mcp/conversation-record", s.handleConversationRecordSetting)
 	// A body, signed by its machine key and sealed to this Identity Agent.
 	r.Post("/agent-host/messages", s.handleBodySays)
