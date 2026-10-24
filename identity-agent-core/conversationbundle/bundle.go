@@ -24,6 +24,10 @@ import (
 	"identity-agent-core/sandbox"
 )
 
+// CapabilityRecordAnchoring is the governance log's row for an anchoring of
+// the record, written just before the anchor that fixes it.
+const CapabilityRecordAnchoring = "record.anchoring"
+
 // Format names this version of the bundle.
 const Format = "IA-CONVERSATION-BUNDLE-V1"
 

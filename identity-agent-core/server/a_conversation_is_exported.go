@@ -67,20 +67,27 @@ func (s *CoreServer) handleExportConversation(w http.ResponseWriter, r *http.Req
 		jsonError(w, "no such conversation", http.StatusNotFound)
 		return
 	}
+	// The owner is named by their identity where the organisation knows it.
 	who := "owner"
+	if oa, err := s.ownerAuthority(); err == nil && oa != nil && oa.AID != "" {
+		who = oa.AID
+	}
 	if g, ok := TheControllerThatAsked(r); ok {
 		who = g.ControllerAID
 	}
 	cc := sandbox.CallerContext{Remote: true, CorrelationID: requestCorrelationID(r), Transport: "controller",
 		CallerAID: who, WorkItem: c.ID, Reason: "export conversation " + c.ID}
+	// Anchored first, so the anchoring's own row is in the stretch the bundle
+	// carries, ahead of the export's row: a bundle cannot then be handed out
+	// with its anchors stripped and the log still read as whole.
+	if _, err := s.anchorRecord(); err != nil && !errors.Is(err, errKeyElsewhere) {
+		log.Printf("[record] anchoring before exporting %s: %v", c.ID, err)
+	}
 	row := s.SandboxManager.RecordGovernanceEvent(cc, "agent.conversation.export", "ok")
 	exportedAt, err := rowTime(s.SandboxManager.Store(), row)
 	if row == 0 || err != nil {
 		jsonError(w, "the export could not be written to the governance log, so it was not made", http.StatusServiceUnavailable)
 		return
-	}
-	if _, err := s.anchorRecord(); err != nil && !errors.Is(err, errKeyElsewhere) {
-		log.Printf("[record] anchoring before exporting %s: %v", c.ID, err)
 	}
 	b, err := s.exportConversation(r.Context(), store, c, who, exportedAt)
 	if err != nil {
@@ -106,6 +113,13 @@ func (s *CoreServer) exportConversation(ctx context.Context, store *conversation
 	b := &conversationbundle.Bundle{
 		Format: conversationbundle.Format, Conversation: c.ID, Root: identity.AID,
 		ExportedAt: at, ExportedBy: who,
+	}
+
+	// The anchors first: an entry added and anchored while the bundle is
+	// gathered is then simply after the newest anchor carried, never fixed by
+	// an anchor whose entry the bundle lacks.
+	if err := s.exportAnchors(b); err != nil {
+		return nil, err
 	}
 
 	// The entries, each with its words, checked against the digest the record
@@ -183,10 +197,6 @@ func (s *CoreServer) exportConversation(ctx context.Context, store *conversation
 		}
 		b.KeyLogs = append(b.KeyLogs, kl)
 	}
-	if err := s.exportAnchors(b); err != nil {
-		return nil, err
-	}
-
 	// The stretch of the governance log, and its signer's key log.
 	logStore := s.SandboxManager.Store()
 	first, ok, err := logStore.FirstRowFor(c.ID)

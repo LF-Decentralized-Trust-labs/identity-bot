@@ -38,12 +38,13 @@ func canonicalURL(s string) bool {
 	return err == nil && base64.RawURLEncoding.EncodeToString(raw) == s
 }
 
-// capabilityMessageAgent is the grant entry that lets an AI agent ask another.
-const capabilityMessageAgent = "agent.message.send"
-
 // Report is what Verify found.
 type Report struct {
 	Conversation string `json:"conversation"`
+	// Root is the organisation the bundle was checked against. A bundle can
+	// name any root, so it means something only if it is the organisation
+	// the reader expected (VerifyAgainst).
+	Root string `json:"root"`
 	// Verified is true when every check held. Entries and rows no anchor
 	// fixes yet do not stop it; they are listed, never reported as anchored.
 	Verified bool    `json:"verified"`
@@ -157,6 +158,9 @@ type verifier struct {
 	entries map[string]agentmessage.Record
 	hashes  map[int]string
 	notes   map[string]bool
+	// signedOnce is every sender's signature seen, by the entry it is in: a
+	// signed statement or request stands for one entry, never two.
+	signedOnce map[string]int
 }
 
 func (v *verifier) fault(where, format string, args ...any) {
@@ -170,6 +174,24 @@ func (v *verifier) cannotRuleOut(s string) {
 	}
 }
 
+// VerifyAgainst checks a bundle and that it is the organisation root's the
+// reader expects. Without an expected root, the result says that the root was
+// taken from the bundle itself: a bundle made up from nothing, with its own
+// root, holds together as well as a genuine one.
+func VerifyAgainst(b *Bundle, root string) Report {
+	r := Verify(b)
+	switch {
+	case b == nil:
+	case root == "":
+		r.CannotRuleOut = append([]string{"That this is the organisation you think it is: the root identity " + b.Root +
+			" was taken from the bundle, not checked against one you named."}, r.CannotRuleOut...)
+	case root != b.Root:
+		r.Faults = append(r.Faults, Fault{Where: "root", Why: "the bundle is checked against root identity " + b.Root + ", not " + root + ", the organisation expected"})
+		r.Verified = false
+	}
+	return r
+}
+
 // Verify checks a bundle with nothing but what is in it.
 func Verify(b *Bundle) Report {
 	r := Report{}
@@ -177,9 +199,9 @@ func Verify(b *Bundle) Report {
 		r.Faults = []Fault{{Where: "bundle", Why: "there is no bundle"}}
 		return r
 	}
-	r.Conversation = b.Conversation
+	r.Conversation, r.Root = b.Conversation, b.Root
 	v := &verifier{b: b, r: &r, kels: map[string]*keyLog{}, regs: map[string]bool{}, creds: map[string]*credential{},
-		dids: map[string]*didcomm.DID{}, entries: map[string]agentmessage.Record{}, hashes: map[int]string{}, notes: map[string]bool{}}
+		dids: map[string]*didcomm.DID{}, entries: map[string]agentmessage.Record{}, hashes: map[int]string{}, notes: map[string]bool{}, signedOnce: map[string]int{}}
 	r.Trusts = []string{
 		"The organisation's root key log, as the bundle gives it: its inception and every key it puts in force. Every other identity, credential and anchor is checked back to it.",
 		"The times the Identity Agent stamped on each message and on each credential's issuance and revocation, which decide whether a credential was in force when a message was sent. A body's own signed time must agree with the stamp to within " + agentbody.RequestWindow.String() + ", and a person's signed request to within " + authorisation.Skew.String() + ".",
@@ -199,7 +221,7 @@ func Verify(b *Bundle) Report {
 	v.checkEntries()
 	rows := v.checkLog()
 	v.checkAnchors(rows)
-	v.cannotRuleOut("The Identity Agent holds every AI agent's identity key, so a compromised Identity Agent could countersign words nobody sent. It cannot make a body's or a controller's own signature: an entry whose sender's signature holds is the strong claim, and every entry here is checked for one.")
+	v.cannotRuleOut("The Identity Agent holds every AI agent's identity key, so a compromised Identity Agent could countersign words nobody sent. It cannot make the signature of a machine key it does not hold. An entry whose sender's own signature holds is the strong claim, and every entry here is checked for one, but that claim rests on the body credential or Controller Grant naming that key having been issued honestly: whoever holds the root key can issue one to a key of its own.")
 	// An entry holds when nothing found anywhere in the bundle is about it.
 	for i := range r.Messages {
 		where := fmt.Sprintf("entry %d", r.Messages[i].Seq)
@@ -462,6 +484,22 @@ func (v *verifier) readCredential(bc Credential, c *credential) string {
 			c.issued = at
 		}
 	}
+	// Every event of its log the root's key log anchors must be carried: a
+	// revocation left out would read as a credential never revoked.
+	if root, ok := v.kels[v.b.Root]; ok {
+		for _, raw := range root.raws {
+			ev, err := keri.ParseEvent(raw)
+			if err != nil {
+				continue
+			}
+			seals, _ := ev.Seals()
+			for _, seal := range seals {
+				if seal.Identifier == bc.SAID && seal.SN >= uint64(len(c.log)) {
+					return fmt.Sprintf("the root identity's key log anchors event %d of its log, which the bundle does not carry", seal.SN)
+				}
+			}
+		}
+	}
 	return ""
 }
 
@@ -651,6 +689,19 @@ func (v *verifier) checkEntry(where string, seq int, prev string, e Entry, m *Me
 		v.fault(where, "the sender's own signature does not hold: %v", err)
 		return rec, true
 	}
+	once := []string{}
+	if rec.Statement != nil {
+		once = append(once, "signature "+rec.HostSignature, "nonce "+rec.Statement.Host+" "+rec.Statement.HostNonce)
+	} else {
+		once = append(once, "signature "+rec.ControllerProof.Signature)
+	}
+	for _, k := range once {
+		if first, seen := v.signedOnce[k]; seen {
+			v.fault(where, "it carries the same signed %s as entry %d: one signed message was recorded twice", strings.SplitN(k, " ", 2)[0], first)
+		} else {
+			v.signedOnce[k] = seq
+		}
+	}
 	at, err := time.Parse(time.RFC3339Nano, rec.IATime)
 	if err != nil {
 		v.fault(where, "the time the Identity Agent stamped on it is unreadable")
@@ -727,7 +778,7 @@ func (v *verifier) checkAskAllowed(where string, grant *credential, rec agentmes
 	_ = json.Unmarshal(grant.attrs["capabilities"], &caps)
 	allowed := false
 	for _, c := range caps {
-		allowed = allowed || c == capabilityMessageAgent
+		allowed = allowed || c == agentmessage.CapabilityMessageAgent
 	}
 	if !allowed {
 		v.fault(where, "the AI agent's grant does not let it ask another AI agent")
@@ -737,8 +788,8 @@ func (v *verifier) checkAskAllowed(where string, grant *credential, rec agentmes
 	if raw, ok := grant.attrs["resource_constraints"]; ok {
 		_ = json.Unmarshal(raw, &limits)
 	}
-	args, _ := json.Marshal(map[string]string{"to": rec.To, "text": string(body)})
-	if err := sandbox.CheckResourceConstraints(limits, capabilityMessageAgent, args); err != nil {
+	args := agentmessage.AskArgs(rec.To, string(body))
+	if err := sandbox.CheckResourceConstraints(limits, agentmessage.CapabilityMessageAgent, args); err != nil {
 		v.fault(where, "the AI agent's grant does not let it ask %s: %v", rec.To, err)
 	}
 }
@@ -783,12 +834,25 @@ func (v *verifier) checkPersonSpoke(where string, rec agentmessage.Record, at ti
 		return
 	}
 	m.Person = aid
-	lines := strings.Split(p.SignedString, "\n")
-	if len(lines) != 9 || lines[0] != "IA-CONTROLLER-REQ-V1" || lines[2] != "POST" || !strings.HasSuffix(lines[3], "/conversations") {
+	// What the person signed names the conversation it speaks in, once there
+	// is one, and the message it answers, which must have been addressed to
+	// them: so a request signed for one place cannot be recorded in another.
+	var req agentmessage.PersonMessage
+	_ = json.Unmarshal(p.Request, &req)
+	if rec.Seq > 1 && req.Conversation != rec.Conversation {
+		v.fault(where, "the person's signed request does not name this conversation")
+	}
+	if rec.InReplyTo != "" {
+		if prompt, ok := v.entries[rec.InReplyTo]; !ok || prompt.MessageID == rec.MessageID || prompt.To != rec.From {
+			v.fault(where, "it answers message %s, which is not an earlier message addressed to this person", rec.InReplyTo)
+		}
+	}
+	cr, err := authorisation.ReadControllerRequest(p.SignedString)
+	if err != nil || cr.Controller != p.Controller || cr.Method != "POST" || !strings.HasSuffix(cr.Path, "/conversations") {
 		v.fault(where, "what the app signed is not a request to speak in a conversation")
 		return
 	}
-	signedAt, err := time.Parse(time.RFC3339, lines[4])
+	signedAt, err := time.Parse(time.RFC3339, cr.Stamp)
 	if err != nil || absDuration(at.Sub(signedAt)) > authorisation.Skew {
 		v.fault(where, "the request was not signed within %s of when the Identity Agent took it", authorisation.Skew)
 	}
@@ -810,7 +874,11 @@ func (v *verifier) checkPersonSpoke(where string, rec agentmessage.Record, at ti
 		// acts for: the grant may be issued up to authorisation.Skew after the
 		// request was signed, as authorisation.Check allows. It must not have
 		// been revoked by the time the Identity Agent took the request.
-		if why := g.liveBetween(signedAt.Add(authorisation.Skew), at); why != "" {
+		issuedBy := signedAt.Add(authorisation.Skew)
+		if at.Before(issuedBy) {
+			issuedBy = at
+		}
+		if why := g.liveBetween(issuedBy, at); why != "" {
 			v.fault(where, "the app's Controller Grant was not in force when the request was signed: %s", why)
 		}
 		switch signer := g.attr("signer"); {
@@ -876,6 +944,9 @@ func (v *verifier) checkLog() map[int64]string {
 			}
 		}
 		hashes[row.ID] = sandbox.HashRecord([]byte(row.Record))
+		if ev.CapabilityID == CapabilityRecordAnchoring && len(v.b.Anchors) == 0 {
+			v.fault(where, "it records that the record was anchored, and the bundle carries no anchors")
+		}
 		if ev.WorkItem == v.b.Conversation && ev.ResultStatus == "ok" {
 			if ev.CapabilityID == "agent.conversation.export" && ev.CallerAID == v.b.ExportedBy && ev.TS == v.b.ExportedAt {
 				exported = true
@@ -926,7 +997,8 @@ func (v *verifier) checkAnchors(rowHashes map[int64]string) {
 		if len(v.b.Anchors) > 0 {
 			v.fault("anchors", "the bundle carries anchors and names no record identity")
 		}
-		v.cannotRuleOut("Nothing is anchored yet, so entries or rows at the end of the record could have been removed without trace.")
+		v.cannotRuleOut("The bundle carries no anchors. Either nothing was anchored or they were removed, so entries or rows at the end of the record could have been removed without trace.")
+		v.cannotRuleOut("Nothing ties the governance log's signer to the organisation, so the log rows carried rest on a signer anybody could have made.")
 		return
 	}
 	where := "record identity " + v.b.RecordIdentity
@@ -1015,7 +1087,7 @@ func (v *verifier) checkAnchors(rowHashes map[int64]string) {
 	case signerNamed:
 		v.r.Trusts = append(v.r.Trusts, "The governance log's signer, which the record identity's anchors name.")
 	case len(v.b.Log.Rows) > 0:
-		v.cannotRuleOut("No anchor names the governance log's signer, so the log's rows are tied to the organisation only through the row hashes anchors fix.")
+		v.cannotRuleOut("No anchor names the governance log's signer, so only the rows an anchor fixes are tied to the organisation; the rest rest on a signer anybody could have made.")
 	}
 	extra := make([]int, 0, len(statements))
 	for sn := range statements {
@@ -1048,6 +1120,7 @@ func (r Report) Text() string {
 	} else {
 		fmt.Fprintf(&b, "NOT VERIFIED: conversation %s — %d check(s) failed\n", r.Conversation, len(r.Faults))
 	}
+	fmt.Fprintf(&b, "Organisation root identity: %s\n", r.Root)
 	for _, f := range r.Faults {
 		fmt.Fprintf(&b, "  FAILED  %s: %s\n", f.Where, f.Why)
 	}

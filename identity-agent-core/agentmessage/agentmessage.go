@@ -51,6 +51,19 @@ const (
 	KindFailure = "failure"
 )
 
+// CapabilityMessageAgent is the grant entry that lets an AI agent ask
+// another.
+const CapabilityMessageAgent = "agent.message.send"
+
+// AskArgs is what an ask is checked against in the asker's grant: the
+// arguments its limits on CapabilityMessageAgent are applied to. One encoding,
+// so the Identity Agent admitting an ask and a verifier checking it later
+// apply the grant to the same thing.
+func AskArgs(to, text string) []byte {
+	b, _ := json.Marshal(map[string]string{"to": to, "text": text})
+	return b
+}
+
 // PersonPrefix marks a party that is a person rather than an AI agent: the
 // identifier after it is the person's identity on the organisation's roster.
 const PersonPrefix = "person:"

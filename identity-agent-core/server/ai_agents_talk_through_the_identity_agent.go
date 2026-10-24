@@ -52,7 +52,7 @@ import (
 // what was attempted as well as what was said.
 
 // capabilityMessageAgent is the grant entry that lets an AI agent ask another.
-const capabilityMessageAgent = "agent.message.send"
+const capabilityMessageAgent = agentmessage.CapabilityMessageAgent
 
 // conversationWait bounds one long-poll, well inside the shortest relay limit
 // on any path to an Identity Agent.
@@ -733,7 +733,7 @@ func (s *CoreServer) handleBodySays(w http.ResponseWriter, r *http.Request) {
 			refuse("this AI agent's grant does not let it message other AI agents", http.StatusForbidden)
 			return
 		}
-		args, _ := json.Marshal(map[string]string{"to": st.To, "text": req.Body})
+		args := agentmessage.AskArgs(st.To, req.Body)
 		if err := sandbox.CheckResourceConstraints(cc.ResourceConstraints, capabilityMessageAgent, args); err != nil {
 			refuse("this AI agent's grant does not let it message that AI agent: "+err.Error(), http.StatusForbidden)
 			return
@@ -963,7 +963,7 @@ func (s *CoreServer) handleBodyListAgents(w http.ResponseWriter, r *http.Request
 			if a.AssetType != "ai_agent" || a.PairwiseAID == b.Agent || a.PairwiseAID == "" {
 				continue
 			}
-			args, _ := json.Marshal(map[string]string{"to": a.PairwiseAID, "text": ""})
+			args := agentmessage.AskArgs(a.PairwiseAID, "")
 			if sandbox.CheckResourceConstraints(cc.ResourceConstraints, capabilityMessageAgent, args) != nil {
 				continue
 			}

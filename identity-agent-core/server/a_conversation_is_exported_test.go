@@ -217,7 +217,11 @@ func TestAOneByteEditFailsVerification(t *testing.T) {
 		{"a body credential", func(b *conversationbundle.Bundle) { b.Credentials[0].Raw = flipB64(b.Credentials[0].Raw, 60) }},
 		{"a credential's log", func(b *conversationbundle.Bundle) { b.Credentials[1].Log[0] = flipB64(b.Credentials[1].Log[0], 40) }},
 		{"the root's key log", func(b *conversationbundle.Bundle) {
-			b.KeyLogs[0].Events[1].Raw = flipB64(b.KeyLogs[0].Events[1].Raw, 30)
+			for i := range b.KeyLogs {
+				if b.KeyLogs[i].AID == b.Root {
+					b.KeyLogs[i].Events[1].Raw = flipB64(b.KeyLogs[i].Events[1].Raw, 30)
+				}
+			}
 		}},
 		{"an anchor statement", func(b *conversationbundle.Bundle) {
 			b.Anchors[len(b.Anchors)-1].Statement = flip(b.Anchors[len(b.Anchors)-1].Statement, 20)
@@ -346,13 +350,37 @@ func TestARevokedBindingsLaterMessageFails(t *testing.T) {
 	first, _ := store.EntryAt(conv, 1)
 	w.sayAsBody(t, conv, w.machineA, w.a.PairwiseAID, w.b.PairwiseAID, first.MessageID, "one more thing")
 
-	r := conversationbundle.Verify(w.bundle(t, conv))
+	b2 := w.bundle(t, conv)
+	r := conversationbundle.Verify(b2)
 	failsWith(t, r, "entry 8", "body credential was not in force when it was sent: it was revoked")
 	for _, m := range r.Messages[:7] {
 		if !m.Holds {
 			t.Fatalf("message %d, sent while the binding was live, no longer holds:\n%s", m.Seq, faultsOf(r))
 		}
 	}
+
+	// Leaving the revocation out of the bundle does not hide it: the root's
+	// key log anchors it.
+	withheld := copyOf(t, b2)
+	for i := range withheld.Credentials {
+		if withheld.Credentials[i].SAID == b.CredentialSAID {
+			withheld.Credentials[i].Log = withheld.Credentials[i].Log[:1]
+		}
+	}
+	failsWith(t, conversationbundle.Verify(withheld), "credential "+b.CredentialSAID, "does not carry")
+
+	// Nor does stripping the anchors make the bundle pass.
+	stripped := copyOf(t, b2)
+	stripped.Entries = stripped.Entries[:7]
+	stripped.RecordIdentity, stripped.Anchors = "", nil
+	var keep []conversationbundle.KeyLog
+	for _, kl := range stripped.KeyLogs {
+		if kl.AID != b2.RecordIdentity {
+			keep = append(keep, kl)
+		}
+	}
+	stripped.KeyLogs = keep
+	failsWith(t, conversationbundle.Verify(stripped), "log row", "the bundle carries no anchors")
 }
 
 // aSecondMachine is another app paired to the organisation, with its own key.
@@ -518,7 +546,9 @@ func TestTheVerifierCommandChecksABundleFile(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", bin, "identity-agent-core/cmd/verify-conversation").CombinedOutput(); err != nil {
 		t.Fatalf("building the command: %v\n%s", err, out)
 	}
-	out, err := exec.Command(bin, good).CombinedOutput()
+	var genuine conversationbundle.Bundle
+	_ = json.Unmarshal(raw, &genuine)
+	out, err := exec.Command(bin, "--root", genuine.Root, good).CombinedOutput()
 	if err != nil || !strings.HasPrefix(string(out), "VERIFIED") || !strings.Contains(string(out), "This result trusts") {
 		t.Fatalf("the genuine bundle: %v\n%s", err, out)
 	}
@@ -575,4 +605,47 @@ func TestChangingAnyByteOfTheFileFails(t *testing.T) {
 	if checked < positions/3 {
 		t.Fatalf("only %d of the changed files were readable bundles, too few to show anything", checked)
 	}
+}
+
+// A bundle is checked against the organisation the reader expects: one naming
+// another root fails, and one checked without naming any says so.
+func TestABundleIsCheckedAgainstTheOrganisationExpected(t *testing.T) {
+	w := exportWorld(t)
+	b := w.bundle(t, w.talkEndToEnd(t))
+	if r := conversationbundle.VerifyAgainst(b, b.Root); !r.Verified || r.Root != b.Root {
+		t.Fatalf("checked against its own organisation, the bundle does not verify:\n%s", faultsOf(r))
+	}
+	failsWith(t, conversationbundle.VerifyAgainst(b, "EAnotherOrganisationAltogether"), "root", "not EAnotherOrganisationAltogether")
+	r := conversationbundle.VerifyAgainst(b, "")
+	if !r.Verified || !strings.Contains(r.CannotRuleOut[0], "taken from the bundle") {
+		t.Fatalf("checked against no organisation, the report does not say the root came from the bundle: %v", r.CannotRuleOut)
+	}
+}
+
+// A body's signed statement stands for one entry: recorded a second time, even
+// countersigned in its proper place in the chain, it fails.
+func TestASignedStatementRecordedTwiceFails(t *testing.T) {
+	w := exportWorld(t)
+	conv := w.talkEndToEnd(t)
+	store, _ := w.s.conversations()
+	ask, _ := store.EntryAt(conv, 3)
+	orig, err := agentmessage.Read(ask.Envelope)
+	if err != nil || orig.Statement == nil {
+		t.Fatalf("entry 3 is not a body's ask: %v", err)
+	}
+	body, _ := store.Contents().Get(context.Background(), ask.ContentRef)
+	ks, _, _ := w.s.messagingKeys(orig.From)
+	id := conversation.NewID("m_")
+	e, err := store.Append(context.Background(), conv, nil, body, nil, nil,
+		func(seq int, prev string) (*didcomm.Envelope, agentmessage.Record, error) {
+			rec := orig
+			rec.MessageID, rec.Seq, rec.PrevHash, rec.IATime = id, seq, prev, time.Now().UTC().Format(time.RFC3339Nano)
+			env, err := agentmessage.Countersign(ks, rec)
+			return env, rec, err
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.s.recordMessage(sandbox.CallerContext{CallerAID: orig.From, Transport: "body"}, e)
+	failsWith(t, conversationbundle.Verify(w.bundle(t, conv)), "entry 8", "same signed signature as entry 3")
 }
