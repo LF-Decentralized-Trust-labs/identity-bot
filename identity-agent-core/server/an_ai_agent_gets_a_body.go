@@ -492,7 +492,11 @@ func (s *CoreServer) identifyBody(r *http.Request) (agentbody.Binding, bool, err
 	if rec, _ := s.DataStore.GetCredential(b.CredentialSAID); rec == nil || !isUsableStatus(rec.Status) || s.issuedUnderFirstVersionTooLate(rec) {
 		return agentbody.Binding{}, true, fmt.Errorf("this body's credential is not in force")
 	}
-	if err := verifyBodySignature(r, b, s.thisIdentityAgentsIdentifier()); err != nil {
+	me, err := s.whoThisIdentityAgentIs()
+	if err != nil {
+		return agentbody.Binding{}, true, err
+	}
+	if err := verifyBodySignature(r, b, me); err != nil {
 		return agentbody.Binding{}, true, err
 	}
 	return b, true, nil
@@ -507,7 +511,12 @@ func (s *CoreServer) handleBodyStatus(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "this machine key has not enrolled here", http.StatusNotFound)
 		return
 	}
-	if err := verifyBodySignature(r, b, s.thisIdentityAgentsIdentifier()); err != nil {
+	me, err := s.whoThisIdentityAgentIs()
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusForbidden)
+		return
+	}
+	if err := verifyBodySignature(r, b, me); err != nil {
 		jsonError(w, err.Error(), http.StatusForbidden)
 		return
 	}

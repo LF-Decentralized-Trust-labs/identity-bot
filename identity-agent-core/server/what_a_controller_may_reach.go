@@ -216,6 +216,9 @@ var controllerNeedsLevel = map[string]controllerRequirement{
 	"POST /api/machines/owner/sign": {neverByAController, authprovider.LevelHigh,
 		"signing as the identity that owns a machine is the owner's own key, and a " +
 			"machine acting for somebody is not that person"},
+	"POST /api/machines/owner-identity": {neverByAController, authprovider.LevelHigh,
+		"minting the identity that owns a machine makes a key that signs as its owner, and " +
+			"a machine acting for somebody is not that person"},
 
 	// --- the state that decides WHO THE OWNER IS ---
 	//

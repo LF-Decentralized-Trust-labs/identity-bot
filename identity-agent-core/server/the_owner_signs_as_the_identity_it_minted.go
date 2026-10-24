@@ -121,11 +121,8 @@ func (s *CoreServer) handleSignAsAMachineOwner(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	stamp := strings.TrimSpace(req.Timestamp)
-	if stamp == "" {
-		stamp = time.Now().UTC().Format(time.RFC3339)
-	} else if _, err := time.Parse(time.RFC3339, stamp); err != nil {
-		writeError(w, http.StatusBadRequest, "timestamp must be RFC3339", err.Error())
+	stamp, ok := aStampThatIsNow(w, req.Timestamp)
+	if !ok {
 		return
 	}
 
@@ -155,8 +152,15 @@ func (s *CoreServer) handleSignAsAMachineOwner(w http.ResponseWriter, r *http.Re
 	target := ""
 	if req.For != nil {
 		target = strings.TrimSpace(*req.For)
-	} else {
-		target = s.theMachineThisOwnerAdopted(ownerAID)
+	} else if target = s.theMachineThisOwnerAdopted(ownerAID); target == "" {
+		// No record of which machine this identity owns, so nothing to name.
+		// Signing for nobody would make a signature any unfounded machine
+		// holding this key accepts; the caller names one, or asks for nobody
+		// explicitly.
+		writeError(w, http.StatusConflict,
+			"this device has no record of the machine that identity owns, so it cannot say which Identity Agent the request is for",
+			"give \"for\": the identifier of the Identity Agent the request is for")
+		return
 	}
 
 	sig, err := SignOwnerRequest(target, method, path, stamp, body, seed)
@@ -172,4 +176,26 @@ func (s *CoreServer) handleSignAsAMachineOwner(w http.ResponseWriter, r *http.Re
 		Timestamp: stamp,
 		For:       target,
 	})
+}
+
+// aStampThatIsNow is the moment to sign for: now, or a pinned time within the
+// window a signature is accepted in. A time further off is refused, because a
+// signature made for later outlives whatever let the caller ask for it.
+func aStampThatIsNow(w http.ResponseWriter, pinned string) (string, bool) {
+	stamp := strings.TrimSpace(pinned)
+	now := time.Now().UTC()
+	if stamp == "" {
+		return now.Format(time.RFC3339), true
+	}
+	at, err := time.Parse(time.RFC3339, stamp)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "timestamp must be RFC3339", err.Error())
+		return "", false
+	}
+	if d := at.Sub(now); d > signedRequestWindow || d < -signedRequestWindow {
+		writeError(w, http.StatusBadRequest,
+			"a pinned timestamp must be within the window a signature is accepted in", "")
+		return "", false
+	}
+	return stamp, true
 }

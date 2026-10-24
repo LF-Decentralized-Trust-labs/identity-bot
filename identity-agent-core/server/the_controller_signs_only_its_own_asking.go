@@ -99,11 +99,8 @@ func (s *CoreServer) handleSignAsThisController(w http.ResponseWriter, r *http.R
 
 	// The timestamp is this machine's unless the caller pinned one, so an app
 	// cannot accidentally sign for a moment that has passed.
-	stamp := strings.TrimSpace(req.Timestamp)
-	if stamp == "" {
-		stamp = time.Now().UTC().Format(time.RFC3339)
-	} else if _, err := time.Parse(time.RFC3339, stamp); err != nil {
-		writeError(w, http.StatusBadRequest, "timestamp must be RFC3339", err.Error())
+	stamp, ok := aStampThatIsNow(w, req.Timestamp)
+	if !ok {
 		return
 	}
 

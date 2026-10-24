@@ -5,7 +5,7 @@
 **Amended:** 2026-03-10 — Replaced Docker Desktop with Podman as the container runtime (see §Amendment)
 **Amended:** 2026-03-12 — Replaced Caddy with Go-native MITM proxy; documented agent.internal bypass pattern (see §Amendment 2)
 **Amended:** 2026-03-13 — URL namespace convention established; LLM proxy moved to `/sandbox/llm/v1/`; display reverse proxy added (see §Amendment 3)
-**Amended:** 2026-10-24 — The display proxy no longer forwards capability calls or the caller's credentials; a forwarded capability call tells the app who called (see §Amendment 4)
+**Amended:** 2026-10-24 — The display proxy no longer forwards capability calls or the caller's credentials, and serves the owner's conversations only to the owner; a forwarded capability call tells the app who called (see §Amendment 4)
 
 ## Context
 
@@ -114,7 +114,7 @@ This makes container data fully ephemeral. The container's own database is empty
 
 ---
 
-## Amendment 4: The display proxy is not a way to a capability, and an app is told who called (2026-10-24)
+## Amendment 4: The display proxy is not a way to a capability or to the owner's conversations, and an app is told who called (2026-10-24)
 
 The "forward everything else" in Amendment 3 no longer holds in full.
 
@@ -122,7 +122,7 @@ The "forward everything else" in Amendment 3 no longer holds in full.
 - **It forwards no credential of the Identity Agent's.** Every `X-IA-*` header, the local owner secret, and an `Authorization` header holding an Identity Agent token or browser session are removed. An `Authorization` header that is the app's own login is passed on.
 - **A forwarded capability call says who called.** The Identity Agent adds the caller it admitted — owner or AI agent, its identifier, the machine it spoke from, how it proved itself, its grant, and its session — as `X-IA-Call-*` headers, with an HMAC-SHA256 over the capability, a digest of the body, those fields, the time and a nonce, under a key the Identity Agent keeps for that app alone. A launched app finds its key in `IDENTITY_AGENT_CALL_KEY`, which a manifest cannot set. The app refuses a call without a valid, fresh, unseen MAC. The canonical string and a Go verifier are in `identity-agent-core/appcall`.
 - **One provider per capability.** Two apps declaring one capability id, two manifests claiming one app id, or an app declaring a capability the registry already provides, are refused at load, and an ambiguous capability is refused at invocation rather than routed to whichever is found first.
-- **The intercepted conversation reads follow the conversation read rule.** `GET /apps/{app_id}/api/v1/chats` and the reads below it serve the owner's AI conversations from ai-memory.db, so they are served only to the owner or a machine acting for them, as `/api/ai/conversations` is. A caller admitted to `/apps/` only for holding some scope is refused them.
+- **The intercepted conversation reads follow the conversation read rule.** `GET /apps/{app_id}/api/v1/chats` and the reads below it serve the owner's AI conversations from ai-memory.db, so they are served only to the owner or a machine acting for them. A caller admitted to `/apps/` only for holding some scope is refused them.
 - **A container's ports are published on loopback only.**
 
 ---

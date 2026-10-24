@@ -149,7 +149,10 @@ through an ingress is remote and must present an owner or controller signature â
 the sealed-envelope path or an owner-key signature (`isOwner` in
 `server/api_auth.go`); a remote caller otherwise gets only the capability scopes a
 positive credential (an MCP access token or a verified capability-grant ACDC)
-grants it. An owner proved remotely, by signature or sealed envelope, reaches a
+grants it. A signature made with the owner key, like a controller's or an AI
+agent body's, names the Identity Agent it is for (`X-IA-Owner-For`, inside the
+signed string), and every other Identity Agent refuses it; one with no identity
+yet accepts only a signature naming nobody. An owner proved remotely, by signature or sealed envelope, reaches a
 route open to scoped callers as the owner: the scope check, which bounds what
 somebody other than the owner may do, does not apply to them, and everything
 else that holds for a remote caller does, so a capability that drives this

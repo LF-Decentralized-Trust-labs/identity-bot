@@ -439,7 +439,11 @@ func (s *CoreServer) ownerKeyFromAVerifiedLog(aid string) (string, error) {
 // the moment it has one.
 func (s *CoreServer) theIdentityAgentAnOwnerNames(r *http.Request) (string, error) {
 	named := strings.TrimSpace(r.Header.Get(headerOwnerFor))
-	if me := s.thisIdentityAgentsIdentifier(); named != me {
+	me, err := s.whoThisIdentityAgentIs()
+	if err != nil {
+		return "", err
+	}
+	if named != me {
 		if named == "" {
 			return "", fmt.Errorf("a signed request must name the Identity Agent it is for in %s", headerOwnerFor)
 		}

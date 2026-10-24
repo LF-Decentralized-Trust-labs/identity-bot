@@ -303,7 +303,10 @@ func (s *CoreServer) theStringThisMachineSigned(
 // has one, which is what makes them worthless at a named Identity Agent.
 func (s *CoreServer) theIdentityAgentItNames(r *http.Request) (string, error) {
 	named := strings.TrimSpace(r.Header.Get(headerControllerFor))
-	me := s.thisIdentityAgentsIdentifier()
+	me, err := s.whoThisIdentityAgentIs()
+	if err != nil {
+		return "", err
+	}
 	switch {
 	case named == me:
 		return named, nil
@@ -521,8 +524,26 @@ func (s *CoreServer) theKeyEntitledToVouch() (string, error) {
 	return "", fmt.Errorf("nothing is sealed and this identity names no owner")
 }
 
+// whoThisIdentityAgentIs is this Identity Agent's own identifier, "" when it
+// genuinely has none, and an error when that cannot be read. A signed request
+// naming nobody is accepted only in the second case: a store that failed to
+// answer must not make a founded Identity Agent look unfounded.
+func (s *CoreServer) whoThisIdentityAgentIs() (string, error) {
+	if s.DataStore == nil {
+		return "", nil
+	}
+	identity, err := s.DataStore.GetIdentity()
+	if err != nil {
+		return "", fmt.Errorf("which identity this Identity Agent holds could not be read, so no signed request was admitted: %w", err)
+	}
+	if identity == nil {
+		return "", nil
+	}
+	return identity.AID, nil
+}
+
 // thisIdentityAgentsIdentifier is this Identity Agent's own identifier, or empty when it has
-// none. Separated only so the caller above reads as one thought.
+// none or it cannot be read. Separated only so the caller above reads as one thought.
 func (s *CoreServer) thisIdentityAgentsIdentifier() string {
 	if s.DataStore == nil {
 		return ""

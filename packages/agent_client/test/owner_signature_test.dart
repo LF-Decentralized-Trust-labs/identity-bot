@@ -17,7 +17,7 @@ void main() {
       timestamp: '2026-07-27T12:00:00Z',
       body: const [],
     );
-    // Six lines, in this order, uppercase method. The agent splits on the
+    // Six lines, in this order, uppercase method. The Identity Agent splits on the
     // same newlines; a difference of one rejects every request.
     expect(s.split('\n').length, 6);
     expect(s.split('\n')[0], 'IA-REQ-V2');

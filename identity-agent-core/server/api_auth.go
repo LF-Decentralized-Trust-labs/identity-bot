@@ -598,6 +598,11 @@ var sessionForbidden = map[string]string{
 	// archive plus later possession of the phrase, is the identity.
 	"POST /api/recovery/retrieve":          "retrieval hands back an archive, and an archive is the identity to anyone who can open it",
 	"POST /api/recovery/root-aid-rotation": "rotating the root AID replaces the identity's controlling key",
+	// The keys this device holds for the machines it owns. A session that
+	// could ask for a signature, or for a new owning identity, would hold the
+	// owner's authority over every machine this device adopted.
+	"POST /api/machines/owner/sign":     "a signature as a machine's owner is the owner's authority over that machine",
+	"POST /api/machines/owner-identity": "minting the identity that owns a machine is the owner's to do",
 	// Everything that starts, finishes, stops or weakens a recovery.
 	//
 	// A recovery replaces this identity's key material and everything it held,
