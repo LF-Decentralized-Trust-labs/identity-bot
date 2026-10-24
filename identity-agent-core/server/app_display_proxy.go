@@ -1,14 +1,19 @@
 package server
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
-	"github.com/go-chi/chi/v5"
 	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"path"
 	"strings"
+
+	"github.com/go-chi/chi/v5"
+
+	"identity-agent-core/appcall"
 )
 
 // handleAppDisplayProxy reverse-proxies browser requests to the container's
@@ -59,6 +64,19 @@ func (s *CoreServer) handleAppDisplayProxy(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
+	// ── Never a capability call ──────────────────────────────────────────
+	// The display port is the same port capability calls are posted to, and
+	// this route admits any caller holding any scope. Forwarded, a call here
+	// would reach a capability with no scope check and no audit record — an
+	// AI agent granted one capability could call every other one the app
+	// provides. Capability calls go through /api/capabilities/{id}/invoke,
+	// which governs them.
+	if isACapabilityCall(containerPath) {
+		http.Error(w, "capability calls go through /api/capabilities/{id}/invoke", http.StatusForbidden)
+		return
+	}
+	s.stripWhatOnlyTheIdentityAgentReads(r)
+
 	// ── Forward everything else to the container ─────────────────────────
 	displayURL, err := s.SandboxManager.GetDisplayURL(appID)
 	if err != nil {
@@ -78,12 +96,76 @@ func (s *CoreServer) handleAppDisplayProxy(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "Container unreachable", http.StatusBadGateway)
 	}
 
-	// Rewrite the request URL to the container's expected path.
-	r.URL.Path = containerPath
+	// Rewrite the request URL to the container's expected path — the cleaned,
+	// decoded path that was checked above, re-encoded, and never the raw form,
+	// so the app cannot be sent a spelling of a path that was never checked.
+	r.URL.Path = cleanedKeepingTheSlash(containerPath)
+	r.URL.RawPath = ""
 	r.URL.Host = target.Host
 	r.Host = target.Host
 
 	proxy.ServeHTTP(w, r)
+}
+
+// isACapabilityCall reports whether path, as an app's server would read it,
+// reaches its capability API. Cleaned and compared without case, so neither
+// doubled slashes, dot segments nor capitals spell a way past it.
+func isACapabilityCall(p string) bool {
+	c := strings.ToLower(path.Clean("/" + p))
+	return c == "/v1/capability" || strings.HasPrefix(c, "/v1/capability/")
+}
+
+// cleanedKeepingTheSlash is path.Clean, keeping a trailing slash, which a web
+// app may route on.
+func cleanedKeepingTheSlash(p string) string {
+	c := path.Clean("/" + p)
+	if strings.HasSuffix(p, "/") && c != "/" {
+		c += "/"
+	}
+	return c
+}
+
+// stripWhatOnlyTheIdentityAgentReads removes from a request bound for an app
+// everything that proves who the caller is to the Identity Agent, and every
+// header that would tell the app who called.
+//
+// The first is the caller's own credential: an Identity Agent token, a browser
+// session, a signature, the local owner's secret. Forwarded, the app would hold
+// it and could replay it to the Identity Agent as the caller. The second is a
+// forged caller: only a call the Identity Agent stamped itself may say who
+// called (package appcall), and this route stamps nothing.
+//
+// An Authorization header that is not an Identity Agent credential is the
+// app's own login and is left alone.
+func (s *CoreServer) stripWhatOnlyTheIdentityAgentReads(r *http.Request) {
+	appcall.Strip(r.Header)
+	for name := range r.Header {
+		if strings.HasPrefix(http.CanonicalHeaderKey(name), "X-Ia-") {
+			delete(r.Header, name)
+		}
+	}
+	r.Header.Del(LocalOwnerSecretHeader)
+	if tok := bearerFrom(r); tok != "" && s.isAnIdentityAgentCredential(tok) {
+		r.Header.Del("Authorization")
+	}
+}
+
+// isAnIdentityAgentCredential reports whether tok is a token this Identity
+// Agent issued, or a live browser session.
+func (s *CoreServer) isAnIdentityAgentCredential(tok string) bool {
+	if s.BrowserSessions != nil && s.BrowserSessions.valid(tok) {
+		return true
+	}
+	presented := hashMCPToken(tok)
+	mcpTokensMu.Lock()
+	toks := s.loadMCPTokens()
+	mcpTokensMu.Unlock()
+	for _, entry := range toks {
+		if subtle.ConstantTimeCompare([]byte(entry.Hash), []byte(presented)) == 1 {
+			return true
+		}
+	}
+	return false
 }
 
 // ── Open WebUI API format translators ─────────────────────────────────────────

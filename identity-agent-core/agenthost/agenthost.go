@@ -61,7 +61,7 @@ type Host struct {
 	// Session names which of the caller's runs is asking, when it has more
 	// than one. Signed with each call and passed on to the app a call reaches.
 	Session string
-	Reason   string
+	Reason  string
 
 	// brainName and brainModel are the running brain's, for what the host
 	// reports with each message.

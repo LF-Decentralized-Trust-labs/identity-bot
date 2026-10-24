@@ -2,12 +2,12 @@ package server
 
 import (
 	"bytes"
-	"encoding/base64"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"

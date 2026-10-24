@@ -1,6 +1,8 @@
 package sandbox
 
 import (
+	"identity-agent-core/appcall"
+
 	"bufio"
 	"context"
 	"fmt"
@@ -128,6 +130,7 @@ pathFound:
 		"HTTP_PROXY": true, "HTTPS_PROXY": true,
 		"http_proxy": true, "https_proxy": true,
 		"IDENTITY_AGENT_API": true, "DISPLAY_PORT": true,
+		appcall.KeyEnv: true,
 	}
 
 	env := childenv.Environ()

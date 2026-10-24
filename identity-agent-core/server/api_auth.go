@@ -1,6 +1,8 @@
 package server
 
 import (
+	"identity-agent-core/sandbox"
+
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -334,8 +336,17 @@ func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handle
 			case accessPublic:
 				next.ServeHTTP(w, r)
 			case accessScoped:
-				if s.isOwner(r) {
-					next.ServeHTTP(w, r)
+				if how := s.howThisIsTheOwner(r); how != "" {
+					// The owner at this computer is recognised again by the
+					// handler, which is how it always was. An owner proving it
+					// remotely is not: the signature is spent here, so the
+					// handler would find a remote caller with no scopes and
+					// refuse the person who grants them. So the gate says.
+					if how == ownerAtThisComputer {
+						next.ServeHTTP(w, r)
+						return
+					}
+					next.ServeHTTP(w, withResolvedCaller(r, s.theOwnerAsACaller(r, how)))
 					return
 				}
 				if cc := s.resolveCaller(r); len(cc.Scopes) > 0 {
@@ -425,13 +436,48 @@ func denyAuthorization(w http.ResponseWriter, detail string) {
 // provisioning, or by sending it inside an envelope only the owner's identity
 // could have sealed.
 func (s *CoreServer) isOwner(r *http.Request) bool {
+	return s.howThisIsTheOwner(r) != ""
+}
+
+// How a request proved it is the owner's.
+const (
+	ownerAtThisComputer = "local"
+	ownerSealed         = "owner_sealed"
+	ownerSigned         = "owner_signed"
+)
+
+// howThisIsTheOwner is isOwner, saying which proof held, or "" when none did.
+// Asked once per request: an owner signature is spent when it verifies.
+func (s *CoreServer) howThisIsTheOwner(r *http.Request) string {
 	if s.isLocalOwnerRequest(r) {
-		return true
+		return ownerAtThisComputer
 	}
 	if s.isSealedOwnerRequest(r) {
-		return true
+		return ownerSealed
 	}
-	return s.verifyOwnerSignature(r) == nil
+	if s.verifyOwnerSignature(r) == nil {
+		return ownerSigned
+	}
+	return ""
+}
+
+// theOwnerAsACaller is the caller a remote owner is, for a route that asks who
+// is calling rather than only whether they may.
+//
+// Remote, because the request came over the network and every rule that holds
+// for a remote caller still holds — a capability that drives this computer's
+// screen stays local-only. Owner, because the scope check exists to bound what
+// somebody other than the owner may do, and the owner is who grants scopes.
+func (s *CoreServer) theOwnerAsACaller(r *http.Request, how string) sandbox.CallerContext {
+	cc := sandbox.CallerContext{
+		Remote: true, Owner: true, AuthLevel: how,
+		CorrelationID: requestCorrelationID(r), Transport: "owner",
+	}
+	if oa, err := s.ownerAuthority(); err == nil && oa != nil {
+		cc.CallerAID = oa.AID
+	}
+	applyCallerWhy(r, &cc)
+	return cc
 }
 
 // isSealedOwnerRequest reports whether this request arrived inside an envelope

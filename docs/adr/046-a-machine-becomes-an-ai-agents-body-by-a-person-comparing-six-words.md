@@ -53,10 +53,12 @@ body only decides *where* a request may come from, and how strongly that is prov
    from the owner's registry. It says K is the body of this AI agent, at a grade.
    Revoking it is an event in the registry's log.
 
-**Every request the body makes is signed by K** over the method, the request target
-exactly as sent (escaped path and query), a timestamp, a nonce, a digest of the body,
-and the purpose it states for the record. Each signature is accepted once, within two
-minutes either side, and remembered for twice that. The gate
+**Every request the body makes is signed by K** over the Identity Agent it is for (by
+identifier), the method, the request target exactly as sent (escaped path and query), a
+timestamp, a nonce, a digest of the body, the purpose it states for the record, and the
+session it names, if any. An Identity Agent refuses a request naming any other, so a copy
+is worthless at a second Identity Agent that has the same key enrolled. Each signature is
+accepted once, within two minutes either side, and remembered for twice that. The gate
 resolves the caller once and hands it to the handler, because a spent signature
 cannot be checked twice. A body-signed request is the AI agent's: its grant decides
 what it may do, and every recorded invocation names the body, its grade and its

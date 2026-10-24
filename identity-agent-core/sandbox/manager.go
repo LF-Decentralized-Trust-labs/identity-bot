@@ -1,6 +1,9 @@
 package sandbox
 
 import (
+	"identity-agent-core/appcall"
+	"sort"
+
 	"context"
 	"encoding/json"
 	"fmt"
@@ -176,7 +179,12 @@ func (m *Manager) LoadManifests() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	refused := m.manifestsDeclaringATakenCapability(manifests)
 	for _, manifest := range manifests {
+		if why, no := refused[manifest.ID]; no {
+			log.Printf("[sandbox-manager] REFUSED manifest %s (%s): %s", manifest.Name, manifest.ID, why)
+			continue
+		}
 		m.manifests[manifest.ID] = manifest
 		m.policy.RegisterManifest(manifest)
 
@@ -204,6 +212,63 @@ func (m *Manager) LoadManifests() error {
 	}
 
 	return nil
+}
+
+// manifestsDeclaringATakenCapability names each incoming manifest that declares
+// a capability id another app also declares — one already loaded, another in
+// the same batch, or a registry-native capability — and why.
+//
+// Every app in a collision is refused, not only the later one. Within one
+// directory there is no "first": the order is a file listing, and keeping
+// whichever sorted earlier would let a file named to sort first take over a
+// capability. Refusing both leaves the capability unprovided until somebody
+// removes the copy, which is a visible failure rather than a silent one.
+//
+// Called with m.mu held.
+func (m *Manager) manifestsDeclaringATakenCapability(incoming []*AppManifest) map[string]string {
+	declaredBy := map[string]map[string]bool{}
+	note := func(capID, appID string) {
+		if declaredBy[capID] == nil {
+			declaredBy[capID] = map[string]bool{}
+		}
+		declaredBy[capID][appID] = true
+	}
+	reloaded := map[string]bool{}
+	for _, mf := range incoming {
+		reloaded[mf.ID] = true
+		for _, p := range mf.Provides {
+			note(p.ID, mf.ID)
+		}
+	}
+	for id, mf := range m.manifests {
+		if reloaded[id] {
+			continue // replaced by its incoming copy
+		}
+		for _, p := range mf.Provides {
+			note(p.ID, id)
+		}
+	}
+	refused := map[string]string{}
+	for _, mf := range incoming {
+		for _, p := range mf.Provides {
+			others := []string{}
+			for appID := range declaredBy[p.ID] {
+				if appID != mf.ID {
+					others = append(others, appID)
+				}
+			}
+			if len(others) > 0 {
+				sort.Strings(others)
+				refused[mf.ID] = fmt.Sprintf("capability %q is also declared by %s", p.ID, strings.Join(others, ", "))
+				break
+			}
+			if m.registryRecord(p.ID) != nil {
+				refused[mf.ID] = fmt.Sprintf("capability %q is already provided by this Identity Agent's registry", p.ID)
+				break
+			}
+		}
+	}
+	return refused
 }
 
 func (m *Manager) ListApps() ([]App, error) {
@@ -368,6 +433,20 @@ func (m *Manager) LaunchApp(ctx context.Context, id string) (*Instance, error) {
 	}
 
 	netCfg := rt.NetworkConfig()
+
+	// The key the app checks every call from this Identity Agent with. Given
+	// in the environment, which the manifest cannot set (it is reserved), and
+	// refused outright when it cannot be had: an app started without one
+	// would refuse every call, or worse, be written to accept them unchecked.
+	callKey, err := m.AppCallKey(id)
+	if err != nil {
+		m.store.UpdateInstanceStatus(instanceID, "error")
+		return nil, fmt.Errorf("failed to prepare the app's call key: %w", err)
+	}
+	if netCfg.EnvVars == nil {
+		netCfg.EnvVars = map[string]string{}
+	}
+	netCfg.EnvVars[appcall.KeyEnv] = appcall.EncodeKey(callKey)
 
 	if manifest.IsContainer() {
 		ni := NewNetworkIsolation(instanceID, id, netCfg.ProxyPort, 0, netCfg.NetworkName)

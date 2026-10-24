@@ -1,6 +1,8 @@
 package sandbox
 
 import (
+	"identity-agent-core/appcall"
+
 	"bufio"
 	"context"
 	"encoding/json"
@@ -403,6 +405,7 @@ func (d *ContainerRuntime) createContainer(ctx context.Context) error {
 		"http_proxy": true, "https_proxy": true,
 		"NO_PROXY": true, "no_proxy": true,
 		"IDENTITY_AGENT_API": true,
+		appcall.KeyEnv:       true,
 	}
 
 	if d.manifest.Container != nil {
