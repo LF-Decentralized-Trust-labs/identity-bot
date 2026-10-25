@@ -408,12 +408,18 @@ func aSecondMachine(t *testing.T, s *CoreServer) (ControllerGrant, []byte) {
 // signed, as though it had admitted it, recording it in the log.
 func (w *talkWorld) openAs(t *testing.T, g ControllerGrant, seed []byte, signedAt time.Time, text string) string {
 	t.Helper()
+	return w.openAsFor(t, w.s.thisIdentityAgentsIdentifier(), g, seed, signedAt, text)
+}
+
+// openAsFor is openAs on a request the app signed for the Identity Agent named.
+func (w *talkWorld) openAsFor(t *testing.T, target string, g ControllerGrant, seed []byte, signedAt time.Time, text string) string {
+	t.Helper()
 	conv := conversation.NewID("c_")
 	body, _ := json.Marshal(agentmessage.PersonMessage{To: w.a.PairwiseAID, Body: text, Nonce: conversation.NewID("n_")})
 	path := "/api/mcp/agents/" + w.a.ID + "/conversations"
 	stamp := signedAt.UTC().Format(time.RFC3339)
 	identity, _ := w.s.DataStore.GetIdentity()
-	signed := canonicalControllerRequest(g.ControllerAID, w.s.thisIdentityAgentsIdentifier(), "POST", path, stamp, authprovider.Unmeasured(""), body)
+	signed := canonicalControllerRequest(g.ControllerAID, target, "POST", path, stamp, authprovider.Unmeasured(""), body)
 	sig, err := login.SignString(signed, seed)
 	if err != nil {
 		t.Fatal(err)
@@ -475,6 +481,11 @@ func TestAnOpeningSignedByAnUnauthorisedControllerIsRejected(t *testing.T) {
 	if r := conversationbundle.Verify(w.bundle(t, conv)); !r.Verified {
 		t.Fatalf("an opening from an app in force does not verify:\n%s", faultsOf(r))
 	}
+
+	// Signed by that same app in force, but for another Identity Agent: a
+	// request for one authorises nothing at another.
+	conv = w.openAsFor(t, "EAnotherIdentityAgentAltogether", g2, seed2, time.Now(), "what time is it?")
+	failsWith(t, conversationbundle.Verify(w.bundle(t, conv)), "entry 1", "for EAnotherIdentityAgentAltogether")
 }
 
 // An export whose words cannot be had from the record store fails, and says
