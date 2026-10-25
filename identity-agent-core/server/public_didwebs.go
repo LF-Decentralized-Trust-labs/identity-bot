@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
@@ -12,10 +13,12 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"identity-agent-core/asset"
 	"identity-agent-core/login"
 
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
 	"github.com/go-chi/chi/v5"
 	keri "github.com/grapeid/keri-go"
 )
@@ -93,43 +96,100 @@ func (s *CoreServer) mountPublicDidWebsRoutes(r chi.Router) {
 	r.Post("/public/login/key", keyLogs.guard(s.handleKeyFromKeyLog))
 }
 
-// Checking a key log costs this agent time, and these routes are open to
-// anybody, so each caller gets a share and only a few checks run at once.
+// Checking a key log costs this Identity Agent time, and these routes are open
+// to anybody, so each caller gets a share and only a few checks run at once.
+//
+// Requests that came through the URL relay all arrive from the relay's own
+// address, so a per-address share would make one stranger's burst everyone's
+// limit. They draw on one larger budget of their own instead, so a burst
+// through the relay cannot use up direct callers' shares and the reverse.
+// Telling relayed callers apart needs the relay to pass on an address it has
+// authenticated, which it does not yet do.
 const (
-	keyLogChecksPerMinute = 60
-	keyLogChecksAtOnce    = 4
+	keyLogChecksPerMinute        = 60
+	keyLogChecksPerMinuteRelayed = 600
+	keyLogChecksAtOnce           = 4
+	// keyLogReadWithin bounds how long a caller may take to send its request.
+	// The body is read before a checking slot is taken, so a caller that never
+	// finishes sending holds nothing but its own connection, and loses that.
+	keyLogReadWithin = 10 * time.Second
 )
 
 // keyLogGate bounds the open routes that check a key log: per caller, by the
 // rate limiter the attestation route already uses, and in all, by how many
 // run at once. A caller over either is told to come back, not queued.
 type keyLogGate struct {
-	perCaller *attestationRateLimiter
-	running   chan struct{}
+	perCaller  *attestationRateLimiter
+	relayed    *attestationRateLimiter
+	running    chan struct{}
+	readWithin time.Duration
 }
 
 func newKeyLogGate() *keyLogGate {
 	return &keyLogGate{
-		perCaller: newAttestationRateLimiter(keyLogChecksPerMinute),
-		running:   make(chan struct{}, keyLogChecksAtOnce),
+		perCaller:  newAttestationRateLimiter(keyLogChecksPerMinute),
+		relayed:    newAttestationRateLimiter(keyLogChecksPerMinuteRelayed),
+		running:    make(chan struct{}, keyLogChecksAtOnce),
+		readWithin: keyLogReadWithin,
 	}
 }
 
 func (g *keyLogGate) guard(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !g.perCaller.allow(callerIP(r)) {
+		limiter, caller := g.perCaller, callerIP(r)
+		if _, relayed := relayproto.PreambleFrom(r.Context()); relayed {
+			limiter, caller = g.relayed, "through the relay"
+		}
+		if !limiter.allow(caller) {
 			http.Error(w, "too many key logs from this address; try again in a minute", http.StatusTooManyRequests)
 			return
 		}
+		body, status, err := readWithin(w, r, g.readWithin, maxKeyLogBody)
+		if err != nil {
+			http.Error(w, err.Error(), status)
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body))
 		select {
 		case g.running <- struct{}{}:
 			defer func() { <-g.running }()
 		default:
-			http.Error(w, "this agent is checking as many key logs as it does at once; try again shortly",
+			http.Error(w, "this Identity Agent is checking as many key logs as it does at once; try again shortly",
 				http.StatusServiceUnavailable)
 			return
 		}
 		next(w, r)
+	}
+}
+
+// readWithin reads at most max bytes of r's body, and gives up after d. The
+// connection's read deadline is set too, through the response controller,
+// which reaches a relayed stream as well as a direct connection, so the read
+// it starts ends rather than waiting on a caller that never sends.
+func readWithin(w http.ResponseWriter, r *http.Request, d time.Duration, max int64) ([]byte, int, error) {
+	rc := http.NewResponseController(w)
+	_ = rc.SetReadDeadline(time.Now().Add(d))
+	defer func() { _ = rc.SetReadDeadline(time.Time{}) }()
+	type read struct {
+		b   []byte
+		err error
+	}
+	done := make(chan read, 1)
+	go func() {
+		b, err := io.ReadAll(io.LimitReader(r.Body, max+1))
+		done <- read{b, err}
+	}()
+	select {
+	case got := <-done:
+		if got.err != nil {
+			return nil, http.StatusRequestTimeout, fmt.Errorf("the request did not arrive in full within %s", d)
+		}
+		if int64(len(got.b)) > max {
+			return nil, http.StatusRequestEntityTooLarge, fmt.Errorf("the request is larger than a key log can be")
+		}
+		return got.b, 0, nil
+	case <-time.After(d):
+		return nil, http.StatusRequestTimeout, fmt.Errorf("the request did not arrive in full within %s", d)
 	}
 }
 
@@ -217,9 +277,35 @@ func (reg *keyRegistry) load() {
 			reg.unreadable[aid] = true
 			continue
 		}
+		// A file is named for the identity it holds, but the name is only where
+		// it was put. Whoever can write this directory could put one identity's
+		// entry under another's name, so each entry is proved again, against the
+		// identity its file names, before it is answered for. (On a filesystem
+		// that ignores letter case two identifiers differing only in case would
+		// share a file; producing such a pair is not feasible for a derived
+		// identifier, and the proof below would refuse the one that does not fit.)
+		if err := k.provesItIsFor(aid); err != nil {
+			log.Printf("[keys] ERROR: the published key filed as %s in %s does not belong to it, so it is "+
+				"neither answered for nor replaced until somebody looks: %v", aid, reg.dir, err)
+			reg.unreadable[aid] = true
+			continue
+		}
 		reg.m[aid] = k
 		reg.bytes += k.size()
 	}
+}
+
+// provesItIsFor checks that k's key log derives aid and puts in force the key
+// k records.
+func (k registeredKey) provesItIsFor(aid string) error {
+	pub, err := login.KeyFromKeyLog(aid, k.KeyLog)
+	if err != nil {
+		return err
+	}
+	if base64.RawURLEncoding.EncodeToString(pub) != k.PublicKeyB64 {
+		return fmt.Errorf("the key recorded is not the one its key log puts in force")
+	}
+	return nil
 }
 
 func (reg *keyRegistry) get(aid string) (registeredKey, bool) {

@@ -125,10 +125,15 @@ func ValidateKELFromBytes(in ValidateKELInput) (*DriverValidateKELResponse, erro
 		// and is signed by whatever is currently in force.
 		signing := current
 		// One signature travels with each event here, so only an identity
-		// with one key can be shown to have signed. A multi-key identity's
-		// threshold cannot be met by one member's signature, and checking
-		// that member's alone would let any one of them sign for all of
-		// them. Refused rather than half-checked.
+		// with one key can be shown to have signed. Whether one member's
+		// signature meets a multi-key identity's threshold depends on that
+		// threshold and on which key the signature is indexed to: with kt "2"
+		// it never does, and with kt "1" (a hybrid Ed25519 + ML-DSA key set,
+		// say) any one listed key's signature does. This check does not read
+		// thresholds or index signatures to keys yet, and checking only the
+		// first key's would let one member sign for all of them under kt "2".
+		// So every multi-key identity is refused rather than half-checked,
+		// kt "1" included, until thresholds are read.
 		if ev.Establishment() && len(ev.Keys) > 1 {
 			problems = append(problems, fmt.Sprintf(
 				"event %d declares %d keys; this check verifies identities with one key, "+
