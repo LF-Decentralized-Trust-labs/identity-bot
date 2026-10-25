@@ -319,17 +319,20 @@ func (e *Engine) incept(publicKey, nextPublicKey, name string, data []json.RawMe
 	return e.inceptWith(publicKey, nextPublicKey, name, data, nil, 0, nil, "")
 }
 
-func (e *Engine) inceptWith(publicKey, nextPublicKey, name string, data []json.RawMessage, witnesses []string, toad int, nextDigests []string, nextThreshold string) (*drivers.DriverInceptionResponse, error) {
-	pub, err := normaliseKey(publicKey, true)
+// inceptionOver builds the inception event of these keys: the one construction
+// every inception this engine makes uses, so an identity made from derived keys
+// can be built again from the keys alone (InceptionOf).
+func inceptionOver(publicKey, nextPublicKey string, data []json.RawMessage, witnesses []string, toad int, nextDigests []string, nextThreshold string) (pub, nextDigest string, raw []byte, err error) {
+	pub, err = normaliseKey(publicKey, true)
 	if err != nil {
-		return nil, fmt.Errorf("the signing key: %w", err)
+		return "", "", nil, fmt.Errorf("the signing key: %w", err)
 	}
 	nextPub, err := normaliseKey(nextPublicKey, true)
 	if err != nil {
-		return nil, fmt.Errorf("the next signing key: %w", err)
+		return "", "", nil, fmt.Errorf("the next signing key: %w", err)
 	}
 	if pub == nextPub {
-		return nil, fmt.Errorf("the next key is the same as the current one; pre-rotation " +
+		return "", "", nil, fmt.Errorf("the next key is the same as the current one; pre-rotation " +
 			"would commit to the key already in use, so a compromise of it would also " +
 			"carry the right to rotate")
 	}
@@ -337,9 +340,9 @@ func (e *Engine) inceptWith(publicKey, nextPublicKey, name string, data []json.R
 	// bytes and not the key itself. Committing to anything else produces a
 	// rotation that every conformant implementation refuses, at the point where
 	// the identity most needs to rotate.
-	nextDigest, err := keri.NextDigest(nextPub)
+	nextDigest, err = keri.NextDigest(nextPub)
 	if err != nil {
-		return nil, fmt.Errorf("committing to the next key: %w", err)
+		return "", "", nil, fmt.Errorf("committing to the next key: %w", err)
 	}
 
 	// A witness a caller cannot name properly is refused rather than written
@@ -347,7 +350,7 @@ func (e *Engine) inceptWith(publicKey, nextPublicKey, name string, data []json.R
 	// a mistake with no way back.
 	for i, w := range witnesses {
 		if len(w) != 44 || w[0] != 'B' {
-			return nil, fmt.Errorf("witness %d is %q, which is not a non-transferable "+
+			return "", "", nil, fmt.Errorf("witness %d is %q, which is not a non-transferable "+
 				"identifier; its receipts could not be checked without resolving a key log", i, w)
 		}
 	}
@@ -383,9 +386,26 @@ func (e *Engine) inceptWith(publicKey, nextPublicKey, name string, data []json.R
 	if nextThreshold != "" {
 		in.Nsith = json.RawMessage(strconv.Quote(nextThreshold))
 	}
-	raw, err := keri.BuildInception(in)
+	raw, err = keri.BuildInception(in)
 	if err != nil {
-		return nil, fmt.Errorf("building the inception event: %w", err)
+		return "", "", nil, fmt.Errorf("building the inception event: %w", err)
+	}
+	return pub, nextDigest, raw, nil
+}
+
+// InceptionOf is the inception event of these keys with no witnesses and
+// nothing anchored, exactly as CreateInceptionNamed makes it, so the key log of
+// an identity made that way can be shown again from its keys after the engine
+// that made it has stopped holding it.
+func InceptionOf(publicKey, nextPublicKey string) ([]byte, error) {
+	_, _, raw, err := inceptionOver(publicKey, nextPublicKey, nil, nil, 0, nil, "")
+	return raw, err
+}
+
+func (e *Engine) inceptWith(publicKey, nextPublicKey, name string, data []json.RawMessage, witnesses []string, toad int, nextDigests []string, nextThreshold string) (*drivers.DriverInceptionResponse, error) {
+	pub, nextDigest, raw, err := inceptionOver(publicKey, nextPublicKey, data, witnesses, toad, nextDigests, nextThreshold)
+	if err != nil {
+		return nil, err
 	}
 	ev, err := keri.ParseEvent(raw)
 	if err != nil {

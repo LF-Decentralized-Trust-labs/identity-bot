@@ -441,6 +441,35 @@ func TestABodyRefusesAMessageWhoseWordsWereChanged(t *testing.T) {
 	}
 }
 
+// A person's words are countersigned by the Identity Agent, never by an AI
+// agent it delegated, though that AI agent's keys are genuinely its own: a
+// body refuses one countersigned by anyone else.
+func TestABodyRefusesAPersonsMessageCountersignedByAnAIAgent(t *testing.T) {
+	w := newTalkWorld(t)
+	w.openedWith(t)
+	ds, err := w.hostA.Inbox(context.Background(), false)
+	if err != nil || len(ds) != 1 {
+		t.Fatalf("collecting: %v %d", err, len(ds))
+	}
+	rec, err := agentmessage.Read(ds[0].Entry.Envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ks, did, err := w.s.messagingKeys(w.b.PairwiseAID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := agentmessage.Countersign(ks, rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ds[0].Entry.Envelope, ds[0].Entry.Hash, ds[0].Countersigner = env, agentmessage.Hash(env), did
+	err = w.hostA.Check(&ds[0])
+	if err == nil || !strings.Contains(err.Error(), "countersigned by the Identity Agent") {
+		t.Fatalf("a person's message countersigned by an AI agent was accepted: %v", err)
+	}
+}
+
 // Two AI agents asking each other cannot go on forever: a chain of asks stops
 // at its depth, and the brain is told why.
 func TestAChainOfAsksStopsAtItsDepth(t *testing.T) {

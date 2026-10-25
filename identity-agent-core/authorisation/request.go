@@ -145,7 +145,8 @@ type acdc struct {
 func Check(in Input) error {
 	// The credential is the one issued: its identifier is the digest of what
 	// it says, so nothing in it, the request included, was changed since.
-	if _, err := keri.VerifyCredential(in.Credential); err != nil {
+	verified, err := keri.VerifyCredential(in.Credential)
+	if err != nil {
 		return fmt.Errorf("the credential does not verify: %w", err)
 	}
 	var cred acdc
@@ -168,28 +169,27 @@ func Check(in Input) error {
 	var method, path, stamp, digest string
 	switch req.Kind {
 	case "controller":
-		lines := strings.Split(req.Signed, "\n")
-		switch {
-		case len(lines) == 10 && lines[0] == "IA-CONTROLLER-REQ-V2":
-			// The second form names the Identity Agent the request was for,
-			// which is the one that issued on it: a request signed for another
-			// Identity Agent authorised nothing here.
-			if lines[2] != cred.Issuer {
-				return fmt.Errorf("the request was signed for %s, not for the issuer %s", lines[2], cred.Issuer)
-			}
-			lines = append(lines[:2], lines[3:]...)
-		case len(lines) == 9 && lines[0] == "IA-CONTROLLER-REQ-V1":
-			// The first form, kept so a credential issued before requests named
-			// their Identity Agent still checks. No Identity Agent admits a
-			// request in this form any more.
-		default:
-			return fmt.Errorf("the signed string is not a machine's request")
+		cr, err := ReadControllerRequest(req.Signed)
+		if err != nil {
+			return err
 		}
-		if lines[1] != req.Signer {
-			return fmt.Errorf("the request was signed by %s, not %s", lines[1], req.Signer)
+		// The second form names the Identity Agent the request was for, which
+		// is the one that issued on it: a request signed for another Identity
+		// Agent authorised nothing here. The first form names none and is kept
+		// so a credential issued before requests named their Identity Agent
+		// still checks. No Identity Agent admits a request in that form any more.
+		if cr.NamesIdentityAgent && cr.IdentityAgent != cred.Issuer {
+			return fmt.Errorf("the request was signed for %q, not for the issuer %s", cr.IdentityAgent, cred.Issuer)
 		}
-		method, path, stamp, digest = lines[2], lines[3], lines[4], lines[8]
-		if err := checkGrant(in, cred, req, stamp, issuedAt); err != nil {
+		if cr.Controller != req.Signer {
+			return fmt.Errorf("the request was signed by %s, not %s", cr.Controller, req.Signer)
+		}
+		method, path, stamp, digest = cr.Method, cr.Path, cr.Stamp, cr.BodyDigest
+		rests, err := WhatItRestsOn(verified)
+		if err != nil {
+			return err
+		}
+		if err := checkGrant(in, cred, rests, req, stamp, issuedAt); err != nil {
 			return err
 		}
 	case "owner":
@@ -253,27 +253,19 @@ func Check(in Input) error {
 }
 
 // checkGrant checks a machine's request against its Controller Grant.
-func checkGrant(in Input, cred acdc, req request, stamp string, issuedAt time.Time) error {
-	edgeRaw, ok := cred.E["authorised_by"]
-	if !ok {
+func checkGrant(in Input, cred acdc, rests RestsOn, req request, stamp string, issuedAt time.Time) error {
+	if rests.Grant == "" && rests.GrantSchema == "" {
 		return fmt.Errorf("a machine's request with no edge to its grant")
 	}
-	var edge struct {
-		N string `json:"n"`
-		S string `json:"s"`
-	}
-	if err := json.Unmarshal(edgeRaw, &edge); err != nil {
-		return fmt.Errorf("the edge is unreadable: %w", err)
-	}
-	if edge.S != schemas.ControllerGrant.Schema.SAID {
+	if rests.GrantSchema != schemas.ControllerGrant.Schema.SAID {
 		return fmt.Errorf("the edge names a credential that is not a Controller Grant")
 	}
 	g, err := keri.VerifyCredential(in.Grant)
 	if err != nil {
 		return fmt.Errorf("the Controller Grant does not verify: %w", err)
 	}
-	if g.SAID != edge.N {
-		return fmt.Errorf("the grant given is %s, not the %s the edge names", g.SAID, edge.N)
+	if g.SAID != rests.Grant {
+		return fmt.Errorf("the grant given is %s, not the %s the edge names", g.SAID, rests.Grant)
 	}
 	var grant acdc
 	if err := json.Unmarshal(in.Grant, &grant); err != nil {
@@ -500,4 +492,31 @@ func sameInstant(a, b string) bool {
 	ta, errA := time.Parse(time.RFC3339, a)
 	tb, errB := time.Parse(time.RFC3339, b)
 	return errA == nil && errB == nil && ta.Equal(tb)
+}
+
+// ControllerRequest is what a machine's signed request string says.
+type ControllerRequest struct {
+	Controller, Method, Path, Stamp string
+	// IdentityAgent is the Identity Agent the request was signed for.
+	IdentityAgent string
+	// NamesIdentityAgent says the request is in the second form, which names
+	// the Identity Agent it was for. The first form names none, and is read
+	// only so a record or credential made before requests named their
+	// Identity Agent still checks.
+	NamesIdentityAgent bool
+	// BodyDigest is the digest of the request's body.
+	BodyDigest string
+}
+
+// ReadControllerRequest reads the string a machine signed for a request: the
+// one reading of it for every check of a machine's request.
+func ReadControllerRequest(signed string) (ControllerRequest, error) {
+	lines := strings.Split(signed, "\n")
+	switch {
+	case len(lines) == 10 && lines[0] == "IA-CONTROLLER-REQ-V2":
+		return ControllerRequest{Controller: lines[1], IdentityAgent: lines[2], NamesIdentityAgent: true, Method: lines[3], Path: lines[4], Stamp: lines[5], BodyDigest: lines[9]}, nil
+	case len(lines) == 9 && lines[0] == "IA-CONTROLLER-REQ-V1":
+		return ControllerRequest{Controller: lines[1], Method: lines[2], Path: lines[3], Stamp: lines[4], BodyDigest: lines[8]}, nil
+	}
+	return ControllerRequest{}, fmt.Errorf("the signed string is not a machine's request")
 }

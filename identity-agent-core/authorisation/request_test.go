@@ -351,6 +351,42 @@ func TestTheEdgeMustNameAControllerGrant(t *testing.T) {
 	}
 }
 
+// A credential issued on a machine's request that names no grant at all rests
+// on nothing a machine was given.
+func TestAMachinesRequestWithNoEdgeIsRefused(t *testing.T) {
+	w := newWorld(t)
+	req := w.signs("PUT", "/api/mcp/agents/agent-1/capabilities", capBody, ago(time.Minute))
+	attrs := map[string]interface{}{"asset_type": "ai_agent", "name": "Research assistant", "capabilities": []string{"system.info.read"}, "request": req, "about": "agent-1"}
+	cred, _ := w.build(schemas.AIAgentGrant.Schema.SAID, agentAID, time.Now().UTC(), attrs, nil)
+	if err := w.check(cred); err == nil || !strings.Contains(err.Error(), "no edge") {
+		t.Fatalf("a machine's request naming no grant was accepted: %v", err)
+	}
+}
+
+// What a credential rests on is read from what verified: the grant its edge
+// names, and whether the owner signed its request.
+func TestWhatACredentialRestsOnIsReadFromIt(t *testing.T) {
+	w := newWorld(t)
+	req := w.signs("PUT", "/api/mcp/agents/agent-1/capabilities", capBody, ago(time.Minute))
+	verified, err := keri.VerifyCredential(w.aGrant(req, []string{"system.info.read"}, "agent-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := WhatItRestsOn(verified)
+	if err != nil || r.Grant != w.said || r.GrantSchema != schemas.ControllerGrant.Schema.SAID || r.OwnerSigned {
+		t.Fatalf("a machine's grant read as %+v, %v", r, err)
+	}
+	owned, _ := w.build(schemas.AIAgentGrant.Schema.SAID, agentAID, time.Now().UTC(),
+		map[string]interface{}{"request": map[string]interface{}{"kind": "owner"}}, nil)
+	verified, err = keri.VerifyCredential(owned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, err := WhatItRestsOn(verified); err != nil || !r.OwnerSigned || r.Grant != "" {
+		t.Fatalf("an owner-signed credential read as %+v, %v", r, err)
+	}
+}
+
 // A request made after the machine's grant lapsed authorises nothing.
 func TestARequestAfterTheGrantLapsedAuthorisesNothing(t *testing.T) {
 	w := newWorld(t)
@@ -555,6 +591,16 @@ func TestARequestMustNameTheIdentityAgentThatIssued(t *testing.T) {
 		"/api/mcp/agents/agent-1/capabilities", capBody, ago(time.Minute))
 	if err := w.check(w.aGrant(other, []string{"system.info.read"}, "agent-1")); err == nil {
 		t.Fatal("a request signed for another Identity Agent was taken as authorising this one's credential")
+	}
+}
+
+// A request in the form that names an Identity Agent but names none was for no
+// Identity Agent, and authorises nothing at this one.
+func TestARequestNamingNoIdentityAgentInTheSecondFormIsRefused(t *testing.T) {
+	w := newWorld(t)
+	req := w.signsFor("", "PUT", "/api/mcp/agents/agent-1/capabilities", capBody, ago(time.Minute))
+	if err := w.check(w.aGrant(req, []string{"system.info.read"}, "agent-1")); err == nil {
+		t.Fatal("a second-form request naming no Identity Agent was taken as authorising this one's credential")
 	}
 }
 

@@ -52,7 +52,7 @@ import (
 // what was attempted as well as what was said.
 
 // capabilityMessageAgent is the grant entry that lets an AI agent ask another.
-const capabilityMessageAgent = "agent.message.send"
+const capabilityMessageAgent = agentmessage.CapabilityMessageAgent
 
 // conversationWait bounds one long-poll, well inside the shortest relay limit
 // on any path to an Identity Agent.
@@ -85,6 +85,7 @@ func (s *CoreServer) mountConversationRoutes(r chi.Router) {
 	r.Post("/mcp/agents/{id}/conversations", s.handlePersonSays)
 	r.Get("/mcp/agents/{id}/conversations", s.handleListAgentConversations)
 	r.Get("/mcp/conversations/{cid}", s.handleReadConversation)
+	r.Get("/mcp/conversations/{cid}/export", s.handleExportConversation)
 	r.Get("/mcp/conversation-record", s.handleConversationRecordSetting)
 	// A body, signed by its machine key and sealed to this Identity Agent.
 	r.Post("/agent-host/messages", s.handleBodySays)
@@ -732,7 +733,7 @@ func (s *CoreServer) handleBodySays(w http.ResponseWriter, r *http.Request) {
 			refuse("this AI agent's grant does not let it message other AI agents", http.StatusForbidden)
 			return
 		}
-		args, _ := json.Marshal(map[string]string{"to": st.To, "text": req.Body})
+		args := agentmessage.AskArgs(st.To, req.Body)
 		if err := sandbox.CheckResourceConstraints(cc.ResourceConstraints, capabilityMessageAgent, args); err != nil {
 			refuse("this AI agent's grant does not let it message that AI agent: "+err.Error(), http.StatusForbidden)
 			return
@@ -851,7 +852,7 @@ func (s *CoreServer) deliveriesFor(ctx context.Context, store *conversation.Stor
 	if err != nil {
 		return nil, err
 	}
-	identity, _ := s.DataStore.GetIdentity()
+	thisIdentityAgent := s.thisIdentityAgentsIdentifier()
 	out := []delivery{}
 	for _, e := range waiting {
 		body, err := store.Contents().Get(ctx, e.ContentRef)
@@ -859,10 +860,11 @@ func (s *CoreServer) deliveriesFor(ctx context.Context, store *conversation.Stor
 			log.Printf("[conversation] the words of %s are missing or altered; not delivered", e.MessageID)
 			continue
 		}
-		signer := e.From
+		// The keys the body is told to expect are the countersigner's, asked
+		// the one way the body, the export and the verifier ask it.
+		signer := agentmessage.Countersigner(e.From, thisIdentityAgent)
 		name := e.From
-		if _, person := agentmessage.IsPerson(e.From); person && identity != nil {
-			signer = identity.AID
+		if _, person := agentmessage.IsPerson(e.From); person {
 			if rec, err := agentmessage.Read(e.Envelope); err == nil && rec.Person != nil && rec.Person.Name != "" {
 				name = rec.Person.Name
 			}
@@ -962,7 +964,7 @@ func (s *CoreServer) handleBodyListAgents(w http.ResponseWriter, r *http.Request
 			if a.AssetType != "ai_agent" || a.PairwiseAID == b.Agent || a.PairwiseAID == "" {
 				continue
 			}
-			args, _ := json.Marshal(map[string]string{"to": a.PairwiseAID, "text": ""})
+			args := agentmessage.AskArgs(a.PairwiseAID, "")
 			if sandbox.CheckResourceConstraints(cc.ResourceConstraints, capabilityMessageAgent, args) != nil {
 				continue
 			}

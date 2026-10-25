@@ -51,6 +51,19 @@ const (
 	KindFailure = "failure"
 )
 
+// CapabilityMessageAgent is the grant entry that lets an AI agent ask
+// another.
+const CapabilityMessageAgent = "agent.message.send"
+
+// AskArgs is what an ask is checked against in the asker's grant: the
+// arguments its limits on CapabilityMessageAgent are applied to. One encoding,
+// so the Identity Agent admitting an ask and a verifier checking it later
+// apply the grant to the same thing.
+func AskArgs(to, text string) []byte {
+	b, _ := json.Marshal(map[string]string{"to": to, "text": text})
+	return b
+}
+
 // PersonPrefix marks a party that is a person rather than an AI agent: the
 // identifier after it is the person's identity on the organisation's roster.
 const PersonPrefix = "person:"
@@ -64,6 +77,17 @@ func IsPerson(party string) (string, bool) {
 		return strings.TrimPrefix(party, PersonPrefix), true
 	}
 	return "", false
+}
+
+// Countersigner is the identity that countersigns a message sent by from: the
+// Identity Agent, on a person's behalf, for a person's words; the AI agent
+// itself for its own. The body that receives a message, the export that
+// gathers its keys and the verifier that checks it all ask this one question.
+func Countersigner(from, identityAgent string) string {
+	if _, person := IsPerson(from); person {
+		return identityAgent
+	}
+	return from
 }
 
 // MaxBody bounds the words in one message.
