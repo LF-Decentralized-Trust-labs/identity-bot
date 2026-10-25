@@ -72,7 +72,7 @@ func (w *talkWorld) talkEndToEnd(t *testing.T) string {
 // export asks for the bundle as the person's paired app does.
 func (w *talkWorld) export(t *testing.T, conv string) (int, []byte) {
 	t.Helper()
-	req := asThatMachine(t, w.ctlAID, "GET", "/api/mcp/conversations/"+conv+"/export", "", w.ctlSeed, "", time.Time{})
+	req := asThatMachineTo(t, w.s.thisIdentityAgentsIdentifier(), w.ctlAID, "GET", "/api/mcp/conversations/"+conv+"/export", "", w.ctlSeed, "", time.Time{})
 	rec := httptest.NewRecorder()
 	w.s.router.ServeHTTP(rec, req)
 	return rec.Code, rec.Body.Bytes()
@@ -411,7 +411,8 @@ func (w *talkWorld) openAs(t *testing.T, g ControllerGrant, seed []byte, signedA
 	body, _ := json.Marshal(agentmessage.PersonMessage{To: w.a.PairwiseAID, Body: text, Nonce: conversation.NewID("n_")})
 	path := "/api/mcp/agents/" + w.a.ID + "/conversations"
 	stamp := signedAt.UTC().Format(time.RFC3339)
-	signed := canonicalControllerRequest(g.ControllerAID, "POST", path, stamp, authprovider.Unmeasured(""), body)
+	identity, _ := w.s.DataStore.GetIdentity()
+	signed := canonicalControllerRequest(g.ControllerAID, w.s.thisIdentityAgentsIdentifier(), "POST", path, stamp, authprovider.Unmeasured(""), body)
 	sig, err := login.SignString(signed, seed)
 	if err != nil {
 		t.Fatal(err)
@@ -420,7 +421,6 @@ func (w *talkWorld) openAs(t *testing.T, g ControllerGrant, seed []byte, signedA
 		Controller: g.ControllerAID, PublicKey: g.PublicKey, SignedString: signed, Signature: sig,
 		Request: body, ControllerGrant: g.CredentialSAID,
 	}
-	identity, _ := w.s.DataStore.GetIdentity()
 	ks, _, err := w.s.messagingKeys(identity.AID)
 	if err != nil {
 		t.Fatal(err)
