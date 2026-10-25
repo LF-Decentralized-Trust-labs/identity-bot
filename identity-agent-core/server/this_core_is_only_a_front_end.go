@@ -242,6 +242,12 @@ var whatAFrontEndAnswersFor = map[string]string{
 	"POST /api/controller/sign":        "signing this computer's own asking with its enclave key",
 	"GET /api/controller/agent":        "which identity this computer is a front end for",
 
+	// The app that started this core asks it to prove it holds the secret the
+	// app gave it before sending that secret anywhere. A front end is started
+	// by that app the same way, so it is asked the same question, and a core
+	// that refused it was stopped by its own app on every launch.
+	"GET /api/local-owner/proof": "proving this computer's own core holds the secret its app gave it",
+
 	// Saying what this installation is, and undoing it.
 	"GET /api/controller/front-end-for":    "reading whether this computer is only a front end",
 	"POST /api/controller/front-end-for":   "recording that this computer is only a front end",

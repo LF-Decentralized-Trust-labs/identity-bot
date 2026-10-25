@@ -394,6 +394,34 @@ func TestTheRealRouterRefusesWhatBelongsToTheAgent(t *testing.T) {
 	}
 }
 
+// The app that starts a core asks it to prove it holds the start secret before
+// trusting it, and a front end is started by that app exactly as any other core
+// is. Refusing the question there made the app stop its own core on every
+// launch, so a computer that was only a controller could not open at all.
+func TestAFrontEndStillProvesItHoldsTheStartSecret(t *testing.T) {
+	s := agentWithNoIdentity(t)
+	s.Port = 5050
+	real := s.buildRouter("")
+	if err := s.beAFrontEndFor(AFrontEndFor{
+		AgentAID: "EAGENT", AgentURL: "https://box.example.test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	nonce := "a-fresh-nonce-0123456789"
+	req := httptest.NewRequest(http.MethodGet, "/api/local-owner/proof?nonce="+nonce, nil)
+	req.RemoteAddr = "127.0.0.1:1234"
+	rec := httptest.NewRecorder()
+	real.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("a front end answered %d to its own app's start check: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), LocalOwnerProof(s.localOwnerSecret, nonce, 5050)) {
+		t.Fatalf("not the proof for this core: %s", rec.Body)
+	}
+}
+
 // A machine that could never sign is not allowed to become a front end.
 //
 // Everything a front end does afterwards is signed with this machine's own key,
