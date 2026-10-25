@@ -35,6 +35,8 @@ async function main() {
     dt: v.dt,
     disclosures: v.disclosures,
     presented_acdcs: v.presented_acdcs,
+    p_kel: v.p_kel,
+    site_aid: v.site_aid,
   });
   if (recomputedD !== v.said) fail(`SAID mismatch: ${recomputedD} !== ${v.said}`);
 
@@ -49,22 +51,30 @@ async function main() {
   const result = await verifyLoginAssertion(v.assertion, {
     expectedAudience: v.expected_verify.audience,
     expectedNonce: v.expected_verify.nonce,
+    expectedSiteAid: v.expected_verify.site_aid,
     signingPublicKey: pub,
     skipDtCheck: true,
-    // The golden vectors predate site_aid.
-    skipSiteCheck: true,
   });
   if (!result.valid) fail(`verify golden: ${result.reason}`);
+
+  const otherSite = await verifyLoginAssertion(v.assertion, {
+    expectedAudience: v.expected_verify.audience,
+    expectedNonce: v.expected_verify.nonce,
+    expectedSiteAid: v.negative_vectors.wrong_site_aid,
+    signingPublicKey: pub,
+    skipDtCheck: true,
+  });
+  if (otherSite.valid) fail("an assertion for another site should reject");
 
   const badSig = { ...v.assertion, sig: v.negative_vectors.corrupt_sig_last_char };
   const bad = await verifyLoginAssertion(badSig, {
     expectedAudience: v.expected_verify.audience,
     expectedNonce: v.expected_verify.nonce,
+    expectedSiteAid: v.expected_verify.site_aid,
     signingPublicKey: pub,
     skipDtCheck: true,
-    skipSiteCheck: true,
   });
-  if (bad.ok) fail("corrupt sig should reject");
+  if (bad.valid) fail("corrupt sig should reject");
 
   console.log("✅ login golden harness passed");
   console.log(`   canonical_body_len=${v.canonical_body_len}`);

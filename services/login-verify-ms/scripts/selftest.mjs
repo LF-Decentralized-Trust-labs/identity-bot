@@ -4,33 +4,14 @@ import { spawn } from "node:child_process";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as crypto from "node:crypto";
-import http from "node:http";
 import { assertionDigest, canonicalAssertionBody, signCanonical } from "@identity-agent/login-verify";
 import { loadGoldenVectors, runGoldenSelfTest } from "../dist/golden.js";
 
-// What a stand-in organisation Identity Agent answers for the one key log it
-// knows: the key it establishes. Anything else establishes nothing.
-const known = new Map();
-async function aStandInIdentityAgent() {
-  const server = http.createServer((req, res) => {
-    let body = "";
-    req.on("data", (d) => (body += d));
-    req.on("end", () => {
-      const { aid, key_log } = JSON.parse(body || "{}");
-      const pub = known.get(`${aid}|${key_log}`);
-      res.setHeader("content-type", "application/json");
-      if (!pub) {
-        res.writeHead(422).end(JSON.stringify({ error: "the key log establishes no key" }));
-        return;
-      }
-      res.end(JSON.stringify({ aid, public_key_b64: pub }));
-    });
-  });
-  await new Promise((r) => server.listen(0, "127.0.0.1", r));
-  return { server, url: `http://127.0.0.1:${server.address().port}` };
-}
+// The stand-in organisation Identity Agent is the package's own, so the two
+// test suites check the same wire and cannot drift apart.
+import { anIdentityAgentStandIn } from "../../../packages/login-verify/src/an-identity-agent-stand-in.mjs";
 
-async function aFreshAssertion() {
+async function aFreshAssertion(ia) {
   const { privateKey, publicKey } = crypto.generateKeyPairSync("ed25519");
   const seed = new Uint8Array(Buffer.from(privateKey.export({ format: "jwk" }).d, "base64url"));
   const pub = publicKey.export({ format: "jwk" }).x;
@@ -42,7 +23,7 @@ async function aFreshAssertion() {
     dt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
     disclosures: {}, presented_acdcs: [], p_kel: "its-signed-key-log", site_aid: "EThisSite",
   };
-  known.set(`${aid}|${assertion.p_kel}`, pub);
+  ia.knows(aid, assertion.p_kel, Buffer.from(pub, "base64url"));
   assertion.d = assertionDigest(assertion);
   assertion.sig = await signCanonical(canonicalAssertionBody(assertion), seed);
   return { assertion };
@@ -78,7 +59,7 @@ async function main() {
   if (!golden.ok) fail(golden.reason);
 
   const g = loadGoldenVectors().login_assertion;
-  const ia = await aStandInIdentityAgent();
+  const ia = await anIdentityAgentStandIn();
   const server = spawn("node", ["dist/server.js"], {
     cwd: MS_ROOT,
     env: { ...process.env, PORT: String(PORT), HOST: "127.0.0.1", IDENTITY_AGENT_URL: ia.url },
@@ -114,7 +95,7 @@ async function main() {
     if (callerKeyRes.status !== 400) fail(`a caller-supplied key was not refused (${callerKeyRes.status})`);
 
     // A fresh assertion, its key established by the stand-in Identity Agent.
-    const fresh = await aFreshAssertion();
+    const fresh = await aFreshAssertion(ia);
     const passRes = await fetch(`${baseUrl}/verify`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -146,7 +127,7 @@ async function main() {
     console.log(`   canonical_body_len=${g.canonical_body_len}`);
     console.log(`   HTTP POST /verify: key from the key log, caller's key and another site refused`);
   } finally {
-    ia.server.close();
+    await ia.close();
     server.kill("SIGTERM");
     await new Promise((r) => server.on("exit", r));
     if (server.exitCode && server.exitCode !== 0 && !server.signalCode) {

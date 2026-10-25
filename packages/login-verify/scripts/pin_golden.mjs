@@ -35,7 +35,7 @@ async function main() {
       version: "IALOGIN10JSON",
       seed_hex: Buffer.from(M29_GOLDEN_SIGNING_SEED).toString("hex"),
       field_order:
-        "v,t,d,i,relationship_aid_oobi,audience,nonce,dt,disclosures,presented_acdcs",
+        "v,t,d,i,relationship_aid_oobi,audience,nonce,dt,disclosures,presented_acdcs,p_kel,site_aid",
       canonical_rules: {
         json: "compact, no insignificant whitespace, no trailing newline",
         strings: "NFC-normalized UTF-8",
@@ -53,6 +53,8 @@ async function main() {
       dt: base.dt,
       disclosures: base.disclosures,
       presented_acdcs: base.presented_acdcs,
+      p_kel: base.p_kel,
+      site_aid: base.site_aid,
       said: d,
       sig,
       canonical_body: canonicalBody,
@@ -62,6 +64,7 @@ async function main() {
       expected_verify: {
         audience: base.audience,
         nonce: base.nonce,
+        site_aid: base.site_aid,
         max_skew_seconds: 300,
         reference_now_rfc3339: "2026-06-17T12:00:00Z",
       },
@@ -69,6 +72,7 @@ async function main() {
         corrupt_sig_last_char: sig.slice(0, -1) + (sig.endsWith("A") ? "B" : "A"),
         wrong_nonce: "m29GoldenNonce0123456789ABCDEFG0",
         wrong_audience: "https://evil.example.com",
+        wrong_site_aid: "EAnotherSiteAID0123456789ABCDEFGHIJKLMNOPQR",
       },
     },
   };
