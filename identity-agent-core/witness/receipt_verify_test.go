@@ -72,7 +72,7 @@ func TestAWitnessNotNamedByAKeyIsRefused(t *testing.T) {
 	if err == nil {
 		t.Fatal("a witness whose name is not a key was accepted")
 	}
-	if !strings.Contains(err.Error(), "check against") {
+	if !strings.Contains(err.Error(), "cannot be checked") {
 		t.Errorf("the reason should say the name is not checkable, got: %v", err)
 	}
 }

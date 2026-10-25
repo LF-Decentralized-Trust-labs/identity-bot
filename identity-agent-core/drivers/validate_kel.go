@@ -348,6 +348,19 @@ func VerifyReceipt(witnessAID, eventSAID, cesrSig string) error {
 	return nil
 }
 
+// WitnessingOf reports, for one event of a key log, who was designated to
+// witness it, how many receipts it needs, and how many verified receipts from
+// those witnesses it has. False when the event is not in the log.
+func WitnessingOf(in ValidateKELInput, eventSAID string) (EventWitnessing, bool) {
+	report, _ := witnessingReport(in)
+	for _, row := range report {
+		if row.EventSAID == eventSAID {
+			return row, true
+		}
+	}
+	return EventWitnessing{}, false
+}
+
 // witnessingReport works out, for each event, who was designated to witness it
 // and how many of those actually did.
 //

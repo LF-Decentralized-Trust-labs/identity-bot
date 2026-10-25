@@ -23,14 +23,22 @@ func (s *Service) SendWitnessRequest(ctx context.Context, contactAID string) err
 		return fmt.Errorf("witness pool full")
 	}
 	covers := s.AskToCoverDelegates != nil && s.AskToCoverDelegates()
-	if _, err := s.postWitnessRequest(ctx, c, covers); err != nil {
-		return err
-	}
-	return s.Contacts.SaveTask(store.TaskRecord{
-		ID:   fmt.Sprintf("witness-req-%s-%d", contactAID, time.Now().Unix()),
+	// Recorded before the request goes out: the witness answers on a separate
+	// connection, and an answer that arrives before the request it answers is
+	// recorded is refused as one nobody asked for.
+	task := store.TaskRecord{
+		ID:   fmt.Sprintf("witness-req-%s-%d", contactAID, time.Now().UnixNano()),
 		Type: "witness_request_sent", Status: "pending", ContactAID: contactAID,
 		Detail: "Witness enrollment request sent", CreatedAt: NowRFC3339(), UpdatedAt: NowRFC3339(),
-	})
+	}
+	if err := s.Contacts.SaveTask(task); err != nil {
+		return err
+	}
+	if _, err := s.postWitnessRequest(ctx, c, covers); err != nil {
+		_ = s.completeTask(task, "failed", fmt.Sprintf("The request could not be sent: %v", err))
+		return err
+	}
+	return nil
 }
 
 // postWitnessRequest sends a witness request, signed by this agent's

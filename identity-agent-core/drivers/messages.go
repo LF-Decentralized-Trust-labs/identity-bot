@@ -408,15 +408,6 @@ type DriverPresentCredentialResponse struct {
 	PresSaidB64 string `json:"pres_said_b64"`
 }
 
-type DriverSubmitReceiptRequest struct {
-	EventSAID        string   `json:"event_said"`
-	WitnessAID       string   `json:"witness_aid"`
-	WitnessPublicKey string   `json:"witness_public_key"`
-	CesrSignature    string   `json:"cesr_signature"`
-	TrustedWitnesses []string `json:"trusted_witnesses,omitempty"`
-	Threshold        int      `json:"threshold,omitempty"`
-}
-
 type DriverSubmitReceiptResponse struct {
 	Accepted     bool     `json:"accepted"`
 	ThresholdMet bool     `json:"threshold_met"`

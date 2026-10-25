@@ -193,15 +193,15 @@ abstract class KeriService {
     String schemaSaid = '',
   });
 
-  /// Submit a witness receipt for a KERI event. The receipt is a CESR-encoded
-  /// Ed25519 signature from a witness over the event SAID (UTF-8 bytes).
+  /// Submit a witness receipt for one of this identity's own KERI events. The
+  /// receipt is a CESR-encoded Ed25519 signature from a witness over the event
+  /// SAID (UTF-8 bytes). It is checked against the witness identifier, which is
+  /// the witness's key, and counted against the designated witnesses and
+  /// threshold in this identity's own key log.
   Future<WitnessReceiptResult> submitWitnessReceipt({
     required String eventSaid,
     required String witnessAid,
-    required String witnessPublicKey,
     required String cesrSignature,
-    List<String> trustedWitnesses = const [],
-    int threshold = 0,
   });
 
   /// Retrieve the KERL entry for an event: the event SAID plus all

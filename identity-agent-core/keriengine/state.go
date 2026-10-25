@@ -121,20 +121,11 @@ type registry struct {
 type state struct {
 	mu         sync.RWMutex
 	identities map[string]*identity
-	// receipts maps an event SAID to the witness receipts seen for it.
-	receipts map[string][]receipt
-}
-
-type receipt struct {
-	WitnessAID string
-	PublicKey  string
-	CesrSig    string
 }
 
 func newState() *state {
 	return &state{
 		identities: map[string]*identity{},
-		receipts:   map[string][]receipt{},
 	}
 }
 

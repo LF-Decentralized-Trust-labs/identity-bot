@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"strconv"
 	"time"
 
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto"
 	"identity-agent-core/asset"
 	"identity-agent-core/login"
 	"identity-agent-core/store"
@@ -105,12 +105,11 @@ func signEventBytes(raw, seed []byte) (string, error) {
 }
 
 func sequenceOf(ev map[string]interface{}) int {
-	if str, ok := ev["s"].(string); ok {
-		if n, err := strconv.ParseInt(str, 16, 64); err == nil {
-			return int(n)
-		}
+	n, err := witnessproto.SequenceNumber(ev)
+	if err != nil {
+		return 0
 	}
-	return 0
+	return n
 }
 
 // storedKelForVerifying is an identity's key log as it is stored — each event

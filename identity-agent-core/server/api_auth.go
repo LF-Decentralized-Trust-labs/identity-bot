@@ -224,8 +224,7 @@ var publicRoutes = map[string]string{
 	// already a peer gets no further than the first of those.
 	"POST /didcomm":                                         "an agent we know posts an encrypted envelope, authenticated by what it carries",
 	"POST /api/witness/request":                             "witnessing protocol — a controller asks us to witness",
-	"POST /api/witness/accept":                              "witnessing protocol — a receipt comes back",
-	"POST /api/receipt/submit":                              "a witness submits a receipt for an event",
+	"POST /api/witness/accept":                              "witnessing protocol — a witness answers our request, signed by its key",
 	"POST /api/backup/receive":                              "a peer pushes an opaque, already-encrypted archive",
 	"GET /api/backup/receive/{identityAID}":                 "the owning agent lists its own archives during recovery",
 	"GET /api/backup/receive/{identityAID}/download/{name}": "the owning agent retrieves an opaque archive during recovery",

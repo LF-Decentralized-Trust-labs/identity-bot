@@ -7,6 +7,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto"
 	"identity-agent-core/iacrypto"
 )
 
@@ -105,11 +106,20 @@ func (s *Service) DetectDuplicity(aid string, seq int, digest string) (bool, *Fi
 
 // VerifyKel runs the L1 + L2-standing verification pipeline for a KEL encounter.
 func (s *Service) VerifyKel(ctx context.Context, in VerifyKelInput) (*VerifyKelResult, error) {
-	seq := CurrentSeq(in.KEL)
+	seq, err := witnessproto.CurrentSeq(in.KEL)
+	if err != nil {
+		// Refused rather than passed over. An error here reaches callers as
+		// "nothing to say", so a log that could not be placed would skip every
+		// check below, and one malformed event is all it would take.
+		return &VerifyKelResult{
+			OK: false, Blocked: true, AID: in.AID, SequenceNum: -1,
+			Reason: "the key log has an unreadable sequence number: " + err.Error(), OverallOutcome: "unreadable",
+		}, nil
+	}
 	if seq < 0 {
 		return &VerifyKelResult{OK: false, Reason: "empty KEL"}, nil
 	}
-	digest, err := KelDigestAtSeq(in.KEL, seq)
+	digest, err := witnessproto.KelDigestAtSeq(in.KEL, seq)
 	if err != nil {
 		return nil, err
 	}

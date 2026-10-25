@@ -2,12 +2,16 @@ package witness
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"identity-agent-core/iacrypto"
+	"identity-agent-core/login"
 	"identity-agent-core/store"
 )
 
@@ -102,11 +106,42 @@ func (c *capturePoster) lastAccept() AcceptCallback {
 
 func agentService(t *testing.T, aid string, mc *memContacts) *Service {
 	t.Helper()
+	s, _, _ := signingAgent(t, aid, mc)
+	return s
+}
+
+// signingAgent is an Identity Agent that holds a witness key, and that key's
+// identifier and seed, as it publishes the identifier with its OOBI.
+func signingAgent(t *testing.T, aid string, mc *memContacts) (*Service, string, []byte) {
+	t.Helper()
 	st := setupTestSQLite(t)
 	s := NewService(st, mc, nil, BackendDesktop)
 	s.OurAID = func() string { return aid }
 	s.OurOOBI = func() string { return "http://127.0.0.1:5050/public/oobi/" + aid }
-	return s
+	key, seed := witnessKey()
+	s.SignReceipt = func(statement string) (string, string, error) {
+		sig, err := login.SignString(statement, seed)
+		return key, sig, err
+	}
+	s.OurWitnessAID = func() (string, error) { return key, nil }
+	return s, key, seed
+}
+
+// witnessKey is a new non-transferable witness identifier and its seed.
+func witnessKey() (string, []byte) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	return iacrypto.NonTransferableAIDQB64(pub), priv.Seed()
+}
+
+// answerFrom is a witness's answer to requester, signed with the seed of the
+// witness key it names.
+func answerFrom(responder, requester, key, decision string, seed []byte, at time.Time) AcceptCallback {
+	cb := AcceptCallback{
+		RequesterAID: requester, ResponderAID: responder, Decision: decision,
+		BackendType: BackendDesktop, WitnessKey: key, Stamp: at.UTC().Format(time.RFC3339Nano),
+	}
+	cb.Signature, _ = login.SignString(AcceptStatement(cb.RequesterAID, cb.ResponderAID, cb.WitnessKey, cb.Decision, cb.BackendType, cb.Stamp), seed)
+	return cb
 }
 
 func TestMutualEnrollmentPostBack(t *testing.T) {
@@ -129,8 +164,11 @@ func TestMutualEnrollmentPostBack(t *testing.T) {
 	}
 
 	cap := &capturePoster{}
-	sA := agentService(t, aidA, mcA)
-	sB := agentService(t, aidB, mcB)
+	sA, keyA, _ := signingAgent(t, aidA, mcA)
+	sB, keyB, _ := signingAgent(t, aidB, mcB)
+	// Each resolved the other's OOBI, which publishes its witness key.
+	sA.RecordContactCapability(aidB, BackendDesktop, keyB, "")
+	sB.RecordContactCapability(aidA, BackendDesktop, keyA, "")
 	sA.PostEvent = cap.post
 	sB.PostEvent = cap.post
 
@@ -208,9 +246,9 @@ func TestApplyAcceptCallbackCompletesTask(t *testing.T) {
 		}},
 	}
 	sA := agentService(t, aidA, mcA)
-	if err := sA.ApplyAcceptCallback(AcceptCallback{
-		RequesterAID: aidA, ResponderAID: aidB, Decision: "accepted", BackendType: BackendDesktop,
-	}); err != nil {
+	key, seed := witnessKey()
+	sA.RecordContactCapability(aidB, BackendDesktop, key, "")
+	if err := sA.ApplyAcceptCallback(answerFrom(aidB, aidA, key, "accepted", seed, time.Now())); err != nil {
 		t.Fatal(err)
 	}
 	tasks, _ := mcA.GetTasks()

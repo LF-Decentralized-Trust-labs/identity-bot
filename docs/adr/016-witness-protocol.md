@@ -113,6 +113,39 @@ Receives the accept/decline response from a remote Identity Agent to a witness r
 3. If `decision == "declined"`: update task to `failed` with `detail = reason`.
 4. Emit a WebSocket event to notify connected UI.
 
+**Amended 2026-10-24: the answer is signed, and acted on only when it was asked for.**
+The route is public, and acting on an answer makes its sender a witness, so an
+unsigned answer added a stranger as a trusted contact and enrolled it. The body now
+names the responder and its witness key, and carries `stamp` and `signature`:
+
+```json
+{
+  "requester_aid": "E...",
+  "responder_aid": "E...",
+  "witness_key": "B...",
+  "decision": "accepted",
+  "reason": "",
+  "backend_type": "desktop",
+  "task_id": "...",
+  "stamp": "2026-10-24T18:00:00.123456789Z",
+  "signature": "0B..."
+}
+```
+
+The signature is by the responder's witness key, the non-transferable identifier it
+receipts under and publishes with its OOBI, over the statement
+`witness-accept/v1\n<requester_aid>\n<responder_aid>\n<witness_key>\n<decision>\n<backend_type>\n<stamp>`.
+That key is checked from the identifier alone, every witness holds it, and it is the
+key the requester will rely on for that witness's receipts. Before anything is
+written, the requester checks that `witness_key` is the one the responder published,
+that the signature verifies against it, that the stamp is within five minutes and
+newer than the last answer it acted on from that responder, and that a request to
+that contact is still pending. The requester records its request as pending before
+sending it, because the answer arrives on a separate connection and can come first.
+A decline is held to the same rule. An answer never creates a contact. An unsigned
+answer from an older version is refused, so a request to an Identity Agent that has
+not been updated stays pending until it is.
+
 ### Identities a witnessed identity delegated (amended 2026-10-22)
 
 Witnessing an identity's delegates is consented to, not assumed. A witness request says

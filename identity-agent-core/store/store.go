@@ -481,7 +481,7 @@ type ShareAction struct {
 }
 
 // WitnessReceiptRecord stores one witness receipt for a specific event SAID.
-// Receipts are deduplicated by (EventSAID, WitnessAID).
+// One is kept per (EventSAID, WitnessAID), and only one that verifies.
 type WitnessReceiptRecord struct {
 	EventSAID     string `json:"event_said"`
 	WitnessAID    string `json:"witness_aid"`
@@ -1335,7 +1335,12 @@ func (s *FileStore) loadContactKELs() (map[string]ContactKELRecord, error) {
 	return kels, nil
 }
 
+// SaveWitnessReceipt keeps a receipt that verifies, replacing whatever was held
+// for that event and witness. See a_receipt_is_kept_only_if_it_verifies.go.
 func (s *FileStore) SaveWitnessReceipt(record WitnessReceiptRecord) error {
+	if err := checkReceipt(record); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1345,12 +1350,18 @@ func (s *FileStore) SaveWitnessReceipt(record WitnessReceiptRecord) error {
 	}
 	key := record.EventSAID
 	existing := receipts[key]
-	for _, r := range existing {
+	replaced := false
+	for i, r := range existing {
 		if r.WitnessAID == record.WitnessAID {
-			return nil // already stored, deduplicate
+			existing[i] = record
+			replaced = true
+			break
 		}
 	}
-	receipts[key] = append(existing, record)
+	if !replaced {
+		existing = append(existing, record)
+	}
+	receipts[key] = existing
 	return s.writeJSON(filepath.Join(s.dir, "witness_receipts.json"), receipts)
 }
 
@@ -1362,7 +1373,7 @@ func (s *FileStore) GetWitnessReceipts(eventSAID string) ([]WitnessReceiptRecord
 	if err != nil {
 		return nil, err
 	}
-	return receipts[eventSAID], nil
+	return verifiedReceipts(receipts[eventSAID]), nil
 }
 
 func (s *FileStore) loadWitnessReceipts() (map[string][]WitnessReceiptRecord, error) {

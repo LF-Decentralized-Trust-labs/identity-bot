@@ -3,7 +3,8 @@ package witness
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
+
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto"
 )
 
 func eventAID(ev map[string]interface{}) string {
@@ -13,23 +14,10 @@ func eventAID(ev map[string]interface{}) string {
 	return ""
 }
 
+// eventSeq is an event's sequence number, read by the rule every witness and
+// watcher shares.
 func eventSeq(ev map[string]interface{}) (int, error) {
-	switch v := ev["s"].(type) {
-	case string:
-		// A key event's sequence number is hexadecimal: the eleventh event
-		// is "a", the seventeenth "10".
-		n, err := strconv.ParseInt(v, 16, 64)
-		if err != nil || n < 0 {
-			return -1, fmt.Errorf("invalid sequence %q", v)
-		}
-		return int(n), nil
-	case float64:
-		return int(v), nil
-	case int:
-		return v, nil
-	default:
-		return -1, fmt.Errorf("missing sequence")
-	}
+	return witnessproto.SequenceNumber(ev)
 }
 
 func eventSAID(ev map[string]interface{}) string {

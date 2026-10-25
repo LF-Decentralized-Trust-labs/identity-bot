@@ -27,6 +27,7 @@ require (
 
 require (
 	github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto v0.0.0
+	github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto v0.0.0
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/geoffgarside/ber v1.1.0 // indirect
 	github.com/go-stack/stack v1.8.1 // indirect
@@ -57,3 +58,5 @@ require (
 tool golang.org/x/mobile/cmd/gobind
 
 replace github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto => ./relayproto
+
+replace github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto => ./witnessproto

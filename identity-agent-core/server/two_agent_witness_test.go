@@ -75,6 +75,7 @@ func startPeer(t *testing.T, name string) *peerAgent {
 	r.Route("/api", func(r chi.Router) {
 		core.mountWitnessRoutes(r)
 		r.Post("/witness/request", core.handleWitnessRequest)
+		r.Post("/witness/accept", core.handleWitnessAccept)
 	})
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)
