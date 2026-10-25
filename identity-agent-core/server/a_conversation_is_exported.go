@@ -96,24 +96,38 @@ func (s *CoreServer) handleExportConversation(w http.ResponseWriter, r *http.Req
 
 // exportConversation gathers the bundle for one conversation, exported by who
 // at the time the governance log recorded it. What a bundle carries is decided
-// in conversationbundle.Build; this Identity Agent only hands over the record
-// it holds today, and the key logs and credentials only it can show. The
-// record half goes with the record when the record is kept elsewhere.
+// in conversationbundle.Build. This Identity Agent hands over the entries and
+// words it holds today (the Record, which goes with the record when the record
+// is kept elsewhere), and what only it can show: the anchors and governance
+// log, the key logs, and the credentials.
+//
+// The adapters below return plain errors; Build says the bundle is incomplete.
 func (s *CoreServer) exportConversation(ctx context.Context, store *conversation.Store, c conversation.Conversation, who, at string) (*conversationbundle.Bundle, error) {
 	identity, err := s.DataStore.GetIdentity()
 	if err != nil || identity == nil {
 		return nil, fmt.Errorf("%w: this Identity Agent has no identity", conversationbundle.ErrIncomplete)
 	}
+	// The governance log's signer, read once: the log and its signer's key
+	// log are both asked for, and a failed read must say so rather than read
+	// as an identity this Identity Agent does not hold.
+	signer, found, err := readInvocationSignerRecord(s.DataDir)
+	if err != nil {
+		return nil, fmt.Errorf("%w: the governance log's signer cannot be read: %v", conversationbundle.ErrIncomplete, err)
+	}
+	if !found {
+		return nil, fmt.Errorf("%w: this Identity Agent has no log signer on record", conversationbundle.ErrIncomplete)
+	}
 	return conversationbundle.Build(ctx, conversationbundle.Sources{
-		Record:      exportedRecord{s: s, store: store},
-		Identities:  exportedIdentities{s: s, root: identity.AID},
+		Record:      exportedRecord{store: store},
+		Ledger:      exportedLedger{s: s, signer: signer.AID},
+		Identities:  exportedIdentities{s: s, root: identity.AID, signer: signer},
 		Credentials: exportedCredentials{s: s},
 	}, c.ID, identity.AID, who, at)
 }
 
-// exportedRecord is the conversation record as this Identity Agent holds it.
+// exportedRecord is the conversation's entries and words as this Identity
+// Agent holds them today.
 type exportedRecord struct {
-	s     *CoreServer
 	store *conversation.Store
 }
 
@@ -139,11 +153,18 @@ func (r exportedRecord) Words(ctx context.Context, e conversationbundle.Recorded
 	return body, nil
 }
 
+// exportedLedger is this Identity Agent's account of the conversation: the
+// anchors that fix the record and the governance log it was written to.
+type exportedLedger struct {
+	s      *CoreServer
+	signer string
+}
+
 // Anchors reads the record identity's key log and every statement its
 // interactions seal under the anchoring lock, so the two agree: an anchoring
 // part way through would leave an interaction without its statement.
-func (r exportedRecord) Anchors() (conversationbundle.KeyLog, []conversationbundle.Anchor, bool, error) {
-	s := r.s
+func (l exportedLedger) Anchors(context.Context) (conversationbundle.KeyLog, []conversationbundle.Anchor, bool, error) {
+	s := l.s
 	s.record.mu.Lock()
 	defer s.record.mu.Unlock()
 	rec, ok := s.loadRecordIdentity()
@@ -165,37 +186,34 @@ func (r exportedRecord) Anchors() (conversationbundle.KeyLog, []conversationbund
 	return kl, anchors, true, nil
 }
 
-func (r exportedRecord) Log(conv string) (conversationbundle.Log, error) {
-	signer, found, err := readInvocationSignerRecord(r.s.DataDir)
-	if err != nil || !found {
-		return conversationbundle.Log{}, errors.New("this Identity Agent has no log signer on record")
-	}
-	logStore := r.s.SandboxManager.Store()
+func (l exportedLedger) Log(_ context.Context, conv string) (conversationbundle.Log, error) {
+	logStore := l.s.SandboxManager.Store()
 	first, ok, err := logStore.FirstRowFor(conv)
 	if err != nil || !ok {
-		return conversationbundle.Log{Signer: signer.AID}, err
+		return conversationbundle.Log{Signer: l.signer}, err
 	}
 	head, _, err := logStore.Head()
 	if err != nil {
 		return conversationbundle.Log{}, err
 	}
 	rows, err := logStore.StoredRows(first, head)
-	return conversationbundle.Log{Signer: signer.AID, Rows: rows}, err
+	return conversationbundle.Log{Signer: l.signer, Rows: rows}, err
 }
 
 // exportedIdentities are the key logs this Identity Agent holds: its own, its
 // AI agents', and its governance log signer's.
 type exportedIdentities struct {
-	s    *CoreServer
-	root string
+	s      *CoreServer
+	root   string
+	signer invocationSignerRecord
 }
 
-func (x exportedIdentities) KeyLog(aid string) (conversationbundle.KeyLog, error) {
+func (x exportedIdentities) KeyLog(_ context.Context, aid string) (conversationbundle.KeyLog, error) {
 	if aid == x.root {
 		return x.s.exportKeyLog(aid, nil)
 	}
-	if signer, found, err := readInvocationSignerRecord(x.s.DataDir); err == nil && found && signer.AID == aid {
-		return x.s.exportLogSigner()
+	if aid == x.signer.AID {
+		return x.s.exportLogSigner(x.signer)
 	}
 	seed, err := x.s.agentSeed(aid)
 	if err != nil {
@@ -204,7 +222,7 @@ func (x exportedIdentities) KeyLog(aid string) (conversationbundle.KeyLog, error
 	return x.s.exportKeyLog(aid, seed)
 }
 
-func (x exportedIdentities) MessagingKeys(aid string) (didcomm.DID, error) {
+func (x exportedIdentities) MessagingKeys(_ context.Context, aid string) (didcomm.DID, error) {
 	_, did, err := x.s.messagingKeys(aid)
 	if err != nil {
 		return didcomm.DID{}, err
@@ -215,7 +233,7 @@ func (x exportedIdentities) MessagingKeys(aid string) (didcomm.DID, error) {
 // exportedCredentials are the credentials this Identity Agent issued.
 type exportedCredentials struct{ s *CoreServer }
 
-func (x exportedCredentials) Credential(said string) (conversationbundle.Credential, string, error) {
+func (x exportedCredentials) Credential(_ context.Context, said string) (conversationbundle.Credential, string, error) {
 	rec, err := x.s.DataStore.GetCredential(said)
 	if err != nil || rec == nil {
 		return conversationbundle.Credential{}, "", errors.New("not on record")
@@ -231,7 +249,7 @@ func (x exportedCredentials) Credential(said string) (conversationbundle.Credent
 	return c, rec.RegistrySAID, nil
 }
 
-func (x exportedCredentials) Registry(said string) (conversationbundle.Registry, error) {
+func (x exportedCredentials) Registry(_ context.Context, said string) (conversationbundle.Registry, error) {
 	reg, err := x.s.DataStore.GetRegistry(said)
 	if err != nil || reg == nil || reg.VcpRawB64 == "" {
 		return conversationbundle.Registry{}, errors.New("its inception was not kept")
@@ -239,7 +257,7 @@ func (x exportedCredentials) Registry(said string) (conversationbundle.Registry,
 	return conversationbundle.Registry{SAID: said, Inception: reg.VcpRawB64}, nil
 }
 
-func (x exportedCredentials) Owner() (*conversationbundle.Owner, error) {
+func (x exportedCredentials) Owner(context.Context) (*conversationbundle.Owner, error) {
 	oa, err := x.s.ownerAuthority()
 	if err != nil || oa == nil {
 		return nil, errors.New("the owner is not known")
@@ -260,7 +278,7 @@ func (s *CoreServer) exportKeyLog(aid string, seed []byte) (conversationbundle.K
 		for _, ev := range events {
 			raw, err := base64.StdEncoding.DecodeString(ev.RawBytesB64)
 			if err != nil || len(raw) == 0 {
-				return kl, fmt.Errorf("%w: event %d of %s was not kept as published", conversationbundle.ErrIncomplete, ev.SequenceNumber, aid)
+				return kl, fmt.Errorf("event %d of %s was not kept as published", ev.SequenceNumber, aid)
 			}
 			raws = append(raws, raw)
 			sigs = append(sigs, ev.CesrSignature)
@@ -268,18 +286,18 @@ func (s *CoreServer) exportKeyLog(aid string, seed []byte) (conversationbundle.K
 	} else if engine, ok := s.KeriDriver.(kelHolder); ok {
 		held, err := engine.GetKelByAID(aid)
 		if err != nil || len(held.RawEventsB64) == 0 {
-			return kl, fmt.Errorf("%w: the key log of %s is not held here", conversationbundle.ErrIncomplete, aid)
+			return kl, fmt.Errorf("the key log of %s is not held here", aid)
 		}
 		for _, r := range held.RawEventsB64 {
 			raw, err := base64.StdEncoding.DecodeString(r)
 			if err != nil || len(raw) == 0 {
-				return kl, fmt.Errorf("%w: the key log of %s is not held as published", conversationbundle.ErrIncomplete, aid)
+				return kl, fmt.Errorf("the key log of %s is not held as published", aid)
 			}
 			raws = append(raws, raw)
 			sigs = append(sigs, "")
 		}
 	} else {
-		return kl, fmt.Errorf("%w: the key log of %s is not held here", conversationbundle.ErrIncomplete, aid)
+		return kl, fmt.Errorf("the key log of %s is not held here", aid)
 	}
 	if err := signWhereUnsigned(aid, raws, sigs, seed); err != nil {
 		return kl, err
@@ -309,7 +327,7 @@ func signWhereUnsigned(aid string, raws [][]byte, sigs []string, seed []byte) er
 	for i, raw := range raws {
 		ev, err := keri.ParseEvent(raw)
 		if err != nil {
-			return fmt.Errorf("%w: event %d of %s does not parse", conversationbundle.ErrIncomplete, i, aid)
+			return fmt.Errorf("event %d of %s does not parse", i, aid)
 		}
 		if ev.Establishment() && len(ev.Keys) > 0 {
 			current = ev.Keys[0]
@@ -318,7 +336,7 @@ func signWhereUnsigned(aid string, raws [][]byte, sigs []string, seed []byte) er
 			continue
 		}
 		if pub == "" || current != pub {
-			return fmt.Errorf("%w: event %d of %s carries no signature, and its key is not held here to sign it", conversationbundle.ErrIncomplete, i, aid)
+			return fmt.Errorf("event %d of %s carries no signature, and its key is not held here to sign it", i, aid)
 		}
 		if sigs[i], err = signEventBytes(raw, seed); err != nil {
 			return err
@@ -345,14 +363,10 @@ func (s *CoreServer) agentSeed(aid string) ([]byte, error) {
 // log. Where the engine no longer holds it, it is made again from the keys the
 // signer was made from: its inception names nothing but them, so the same
 // keys give the same identifier, which is checked.
-func (s *CoreServer) exportLogSigner() (conversationbundle.KeyLog, error) {
-	rec, found, err := readInvocationSignerRecord(s.DataDir)
-	if err != nil || !found {
-		return conversationbundle.KeyLog{}, fmt.Errorf("%w: this Identity Agent has no log signer on record", conversationbundle.ErrIncomplete)
-	}
+func (s *CoreServer) exportLogSigner(rec invocationSignerRecord) (conversationbundle.KeyLog, error) {
 	rootSeed, err := secureenclave.LoadRootSeed(s.DataDir)
 	if err != nil {
-		return conversationbundle.KeyLog{}, fmt.Errorf("%w: the log signer's key cannot be had: %v", conversationbundle.ErrIncomplete, err)
+		return conversationbundle.KeyLog{}, fmt.Errorf("the log signer's key cannot be had: %v", err)
 	}
 	seed, err := backup.DerivePairwiseSeed(rootSeed, rec.Index, 0)
 	if err != nil {
@@ -374,7 +388,7 @@ func (s *CoreServer) exportLogSigner() (conversationbundle.KeyLog, error) {
 		return conversationbundle.KeyLog{}, err
 	}
 	if ev, err := keri.ParseEvent(raw); err != nil || ev.Identifier != rec.AID {
-		return conversationbundle.KeyLog{}, fmt.Errorf("%w: the log signer's keys do not make the identity on record", conversationbundle.ErrIncomplete)
+		return conversationbundle.KeyLog{}, fmt.Errorf("the log signer's keys do not make the identity on record")
 	}
 	sig, err := signEventBytes(raw, seed)
 	if err != nil {

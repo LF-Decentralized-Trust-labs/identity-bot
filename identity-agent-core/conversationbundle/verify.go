@@ -513,26 +513,15 @@ func (v *verifier) checkAuthority(bc Credential, c *credential) string {
 	if bc.RequestBody != nil {
 		in.Body, in.HaveBody = *bc.RequestBody, true
 	}
-	var edge struct {
-		AuthorisedBy struct {
-			N string `json:"n"`
-		} `json:"authorised_by"`
-	}
-	if cred, err := keri.VerifyCredential(c.raw); err == nil && len(cred.Edges) > 0 {
-		_ = json.Unmarshal(cred.Edges, &edge)
-	}
-	if g := edge.AuthorisedBy.N; g != "" {
+	g, ownerSigned := restsOn(c.raw)
+	if g != "" {
 		grant, ok := v.creds[g]
 		if !ok || grant.raw == nil {
 			return "it names the machine grant " + g + " as having authorised it, and the bundle does not carry that grant"
 		}
 		in.Grant, in.GrantLog = grant.raw, grant.log
 	}
-	var req struct {
-		Kind string `json:"kind"`
-	}
-	_ = json.Unmarshal(c.attrs["request"], &req)
-	if req.Kind == "owner" {
+	if ownerSigned {
 		if why := v.ownerKey(&in); why != "" {
 			return why
 		}
@@ -644,10 +633,7 @@ func (v *verifier) checkEntry(where string, seq int, prev string, e Entry, m *Me
 		v.fault(where, "it is unreadable")
 		return agentmessage.Record{}, false
 	}
-	signer := claimed.From
-	if _, person := agentmessage.IsPerson(claimed.From); person {
-		signer = v.b.Root
-	}
+	signer := agentmessage.Countersigner(claimed.From, v.b.Root)
 	did, ok := v.dids[signer]
 	if !ok {
 		v.fault(where, "the bundle carries no messaging keys tied to %s, who countersigned it", signer)

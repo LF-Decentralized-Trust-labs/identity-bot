@@ -79,6 +79,17 @@ func IsPerson(party string) (string, bool) {
 	return "", false
 }
 
+// Countersigner is the identity that countersigns a message sent by from: the
+// Identity Agent, on a person's behalf, for a person's words; the AI agent
+// itself for its own. The body that receives a message, the export that
+// gathers its keys and the verifier that checks it all ask this one question.
+func Countersigner(from, identityAgent string) string {
+	if _, person := IsPerson(from); person {
+		return identityAgent
+	}
+	return from
+}
+
 // MaxBody bounds the words in one message.
 const MaxBody = 64 << 10
 

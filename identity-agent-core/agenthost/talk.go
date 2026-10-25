@@ -100,11 +100,10 @@ func (h *Host) Check(d *Delivery) error {
 	}
 	// The countersigner speaks for the sender: the Identity Agent for a
 	// person, the AI agent itself otherwise.
-	if _, person := agentmessage.IsPerson(rec.From); person {
-		if d.Countersigner.AID != st.IdentityAgent {
+	if d.Countersigner.AID != agentmessage.Countersigner(rec.From, st.IdentityAgent) {
+		if _, person := agentmessage.IsPerson(rec.From); person {
 			return errors.New("a person's message must be countersigned by the Identity Agent")
 		}
-	} else if d.Countersigner.AID != rec.From {
 		return errors.New("an AI agent's message must be countersigned as that AI agent")
 	}
 	if err := rec.CheckSenderProof(); err != nil {
