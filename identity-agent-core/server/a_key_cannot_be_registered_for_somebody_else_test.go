@@ -115,7 +115,7 @@ func TestNobodyCanSignInAsAnEmployeeByPublishingAKeyForThem(t *testing.T) {
 		Audience:            bundle.Audience, Nonce: bundle.Nonce,
 		Dt:          time.Now().UTC().Format(time.RFC3339),
 		Disclosures: map[string]string{}, PresentedACDCs: []interface{}{},
-		PKEL: attackerLog,
+		PKEL: attackerLog, SiteAID: bundle.SiteAID,
 	}
 	if err := login.SignAssertion(&forged, theirSeed(t, 1000102)); err != nil {
 		t.Fatal(err)
