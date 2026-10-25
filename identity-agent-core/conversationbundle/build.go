@@ -3,12 +3,12 @@ package conversationbundle
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
 
 	"identity-agent-core/agentmessage"
+	"identity-agent-core/authorisation"
 	"identity-agent-core/didcomm"
 
 	keri "github.com/grapeid/keri-go"
@@ -218,14 +218,27 @@ func gatherCredentials(ctx context.Context, b *Bundle, src Credentials, named ma
 		if err != nil {
 			return incomplete("credential %s is unreadable", said)
 		}
+		// Verified once, here: a credential that does not verify would fail
+		// the bundle anyway, and what it rests on can be read only from one
+		// that does, so handing it out would leave out what it rests on.
+		verified, err := keri.VerifyCredential(raw)
+		if err != nil {
+			return incomplete("credential %s does not verify: %v", said, err)
+		}
+		if verified.SAID != said {
+			return incomplete("the store gave %s when asked for credential %s", verified.SAID, said)
+		}
+		rests, err := authorisation.WhatItRestsOn(verified)
+		if err != nil {
+			return incomplete("credential %s: %v", said, err)
+		}
 		c.SAID = said
 		b.Credentials = append(b.Credentials, c)
 		registries[registry] = true
-		grant, owner := restsOn(raw)
-		if grant != "" {
-			queue = append(queue, grant)
+		if rests.Grant != "" {
+			queue = append(queue, rests.Grant)
 		}
-		ownerSigned = ownerSigned || owner
+		ownerSigned = ownerSigned || rests.OwnerSigned
 	}
 	for _, said := range sortedKeys(registries) {
 		reg, err := src.Registry(ctx, said)
@@ -243,35 +256,6 @@ func gatherCredentials(ctx context.Context, b *Bundle, src Credentials, named ma
 		b.Owner = owner
 	}
 	return nil
-}
-
-// restsOn reads, from a credential that verifies, the Controller Grant it names
-// as having authorised it and whether it rests on the owner's signed request.
-// Build follows what it names and Verify checks against it, so both read it
-// here. A credential that does not verify rests on nothing that can be read:
-// Verify refuses it, so nothing gathered for it would be checked.
-func restsOn(raw []byte) (grant string, ownerSigned bool) {
-	cred, err := keri.VerifyCredential(raw)
-	if err != nil {
-		return "", false
-	}
-	var e struct {
-		AuthorisedBy struct {
-			N string `json:"n"`
-		} `json:"authorised_by"`
-	}
-	if len(cred.Edges) > 0 {
-		_ = json.Unmarshal(cred.Edges, &e)
-	}
-	var a struct {
-		Request struct {
-			Kind string `json:"kind"`
-		} `json:"request"`
-	}
-	if len(cred.Attributes) > 0 {
-		_ = json.Unmarshal(cred.Attributes, &a)
-	}
-	return e.AuthorisedBy.N, a.Request.Kind == "owner"
 }
 
 func incomplete(format string, args ...any) error {

@@ -331,6 +331,35 @@ func TestACredentialThatCannotBeShownFailsTheBundle(t *testing.T) {
 	}
 }
 
+// A credential that does not verify fails the bundle rather than being handed
+// out without what it rests on: what it names cannot be read from it.
+func TestACredentialThatDoesNotVerifyFailsTheBundle(t *testing.T) {
+	s := newStore(t)
+	c := s.credentials[s.bodyA]
+	raw, _ := base64.StdEncoding.DecodeString(c.Raw)
+	changed := strings.Replace(string(raw), "2026-10-24T00:00:00Z", "2026-10-25T00:00:00Z", 1)
+	if changed == string(raw) {
+		t.Fatal("the test did not change the credential")
+	}
+	c.Raw = base64.StdEncoding.EncodeToString([]byte(changed))
+	s.credentials[s.bodyA] = c
+	_, err := build(t, s)
+	if !errors.Is(err, ErrIncomplete) || !strings.Contains(err.Error(), s.bodyA) || !strings.Contains(err.Error(), "does not verify") {
+		t.Fatalf("a credential that does not verify was handed out: %v", err)
+	}
+}
+
+// A store handing over some other credential than the one asked for fails the
+// bundle, so what is followed from it is what the entry named.
+func TestACredentialHandedOverForAnotherFailsTheBundle(t *testing.T) {
+	s := newStore(t)
+	s.credentials[s.bodyA] = s.credentials[s.grantB]
+	_, err := build(t, s)
+	if !errors.Is(err, ErrIncomplete) || !strings.Contains(err.Error(), s.bodyA) {
+		t.Fatalf("another credential was carried in place of the one asked for: %v", err)
+	}
+}
+
 func TestAnOwnerSignedGrantWithNoKnownOwnerFailsTheBundle(t *testing.T) {
 	s := newStore(t)
 	s.owner = nil

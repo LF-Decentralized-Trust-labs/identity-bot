@@ -110,6 +110,7 @@ type credential struct {
 	issuer  string
 	holder  string
 	attrs   map[string]json.RawMessage
+	rests   authorisation.RestsOn
 	issued  time.Time
 	revoked *time.Time
 	// why is set when the credential itself does not hold; nothing resting
@@ -456,6 +457,9 @@ func (v *verifier) readCredential(bc Credential, c *credential) string {
 	if err := json.Unmarshal(cred.Attributes, &c.attrs); err != nil {
 		return "its attributes are unreadable"
 	}
+	if c.rests, err = authorisation.WhatItRestsOn(cred); err != nil {
+		return "what it rests on cannot be read: " + err.Error()
+	}
 	for i, e := range bc.Log {
 		b, err := decode(e)
 		if err != nil {
@@ -513,7 +517,7 @@ func (v *verifier) checkAuthority(bc Credential, c *credential) string {
 	if bc.RequestBody != nil {
 		in.Body, in.HaveBody = *bc.RequestBody, true
 	}
-	g, ownerSigned := restsOn(c.raw)
+	g, ownerSigned := c.rests.Grant, c.rests.OwnerSigned
 	if g != "" {
 		grant, ok := v.creds[g]
 		if !ok || grant.raw == nil {

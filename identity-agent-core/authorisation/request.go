@@ -145,7 +145,8 @@ type acdc struct {
 func Check(in Input) error {
 	// The credential is the one issued: its identifier is the digest of what
 	// it says, so nothing in it, the request included, was changed since.
-	if _, err := keri.VerifyCredential(in.Credential); err != nil {
+	verified, err := keri.VerifyCredential(in.Credential)
+	if err != nil {
 		return fmt.Errorf("the credential does not verify: %w", err)
 	}
 	var cred acdc
@@ -184,7 +185,11 @@ func Check(in Input) error {
 			return fmt.Errorf("the request was signed by %s, not %s", cr.Controller, req.Signer)
 		}
 		method, path, stamp, digest = cr.Method, cr.Path, cr.Stamp, cr.BodyDigest
-		if err := checkGrant(in, cred, req, stamp, issuedAt); err != nil {
+		rests, err := WhatItRestsOn(verified)
+		if err != nil {
+			return err
+		}
+		if err := checkGrant(in, cred, rests, req, stamp, issuedAt); err != nil {
 			return err
 		}
 	case "owner":
@@ -248,27 +253,19 @@ func Check(in Input) error {
 }
 
 // checkGrant checks a machine's request against its Controller Grant.
-func checkGrant(in Input, cred acdc, req request, stamp string, issuedAt time.Time) error {
-	edgeRaw, ok := cred.E["authorised_by"]
-	if !ok {
+func checkGrant(in Input, cred acdc, rests RestsOn, req request, stamp string, issuedAt time.Time) error {
+	if rests.Grant == "" && rests.GrantSchema == "" {
 		return fmt.Errorf("a machine's request with no edge to its grant")
 	}
-	var edge struct {
-		N string `json:"n"`
-		S string `json:"s"`
-	}
-	if err := json.Unmarshal(edgeRaw, &edge); err != nil {
-		return fmt.Errorf("the edge is unreadable: %w", err)
-	}
-	if edge.S != schemas.ControllerGrant.Schema.SAID {
+	if rests.GrantSchema != schemas.ControllerGrant.Schema.SAID {
 		return fmt.Errorf("the edge names a credential that is not a Controller Grant")
 	}
 	g, err := keri.VerifyCredential(in.Grant)
 	if err != nil {
 		return fmt.Errorf("the Controller Grant does not verify: %w", err)
 	}
-	if g.SAID != edge.N {
-		return fmt.Errorf("the grant given is %s, not the %s the edge names", g.SAID, edge.N)
+	if g.SAID != rests.Grant {
+		return fmt.Errorf("the grant given is %s, not the %s the edge names", g.SAID, rests.Grant)
 	}
 	var grant acdc
 	if err := json.Unmarshal(in.Grant, &grant); err != nil {
