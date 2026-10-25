@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -495,11 +496,90 @@ func TestAnExportMissingItsWordsFailsLoudly(t *testing.T) {
 	if code == http.StatusOK || !strings.Contains(string(raw), e.MessageID) {
 		t.Fatalf("an export missing the words of %s answered %d %s", e.MessageID, code, raw)
 	}
+	if n := strings.Count(string(raw), conversationbundle.ErrIncomplete.Error()); n != 1 {
+		t.Fatalf("the refusal says it is incomplete %d times: %s", n, raw)
+	}
 	rows, _ := w.s.SandboxManager.Store().QueryInvocationEvents(sandbox.InvocationEventFilter{
 		CapabilityID: "agent.conversation.export", WorkItem: conv, ResultStatus: "error",
 	})
 	if len(rows) != 1 {
 		t.Fatalf("the failed export was not recorded: %+v", rows)
+	}
+}
+
+// What the Identity Agent hands Build fails plainly: Build alone says the bundle
+// is incomplete, so a refusal says it once rather than once per layer.
+func TestTheIdentityAgentsSideFailsPlainly(t *testing.T) {
+	w := exportWorld(t)
+	w.talkEndToEnd(t)
+	identity, _ := w.s.DataStore.GetIdentity()
+	signer, found, err := readInvocationSignerRecord(w.s.DataDir)
+	if err != nil || !found {
+		t.Fatalf("no log signer: %v", err)
+	}
+	ctx := context.Background()
+	ids := exportedIdentities{s: w.s, root: identity.AID, signer: signer}
+	creds := exportedCredentials{s: w.s}
+	wrongSeed := make([]byte, 32)
+	agentLog, err := w.s.KeriDriver.(kelHolder).GetKelByAID(w.b.PairwiseAID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raws [][]byte
+	for _, r := range agentLog.RawEventsB64 {
+		b, _ := base64.StdEncoding.DecodeString(r)
+		raws = append(raws, b)
+	}
+	for name, fails := range map[string]func() error{
+		"a key log not held here": func() error {
+			_, err := w.s.exportKeyLog("EUnknownIdentityAltogether", nil)
+			return err
+		},
+		"an unsigned event whose key is not held": func() error {
+			return signWhereUnsigned(w.b.PairwiseAID, raws, make([]string, len(raws)), wrongSeed)
+		},
+		"a log signer the keys do not make": func() error {
+			_, err := w.s.exportLogSigner(invocationSignerRecord{AID: "EUnknownIdentityAltogether", Index: signer.Index + 1000})
+			return err
+		},
+		"an identity that is no AI agent here": func() error {
+			_, err := ids.KeyLog(ctx, "EUnknownIdentityAltogether")
+			return err
+		},
+		"messaging keys not held": func() error {
+			_, err := ids.MessagingKeys(ctx, "EUnknownIdentityAltogether")
+			return err
+		},
+		"a credential not on record": func() error {
+			_, _, err := creds.Credential(ctx, "EUnknownCredential")
+			return err
+		},
+		"a registry not kept": func() error {
+			_, err := creds.Registry(ctx, "EUnknownRegistry")
+			return err
+		},
+	} {
+		err := fails()
+		if err == nil {
+			t.Fatalf("%s did not fail", name)
+		}
+		if errors.Is(err, conversationbundle.ErrIncomplete) {
+			t.Fatalf("%s says the bundle is incomplete itself, so the refusal would say it twice: %v", name, err)
+		}
+	}
+}
+
+// An Identity Agent with no governance log signer on record exports nothing,
+// and says that is why, rather than reading the signer as an unknown identity.
+func TestAnExportWithNoLogSignerOnRecordSaysSo(t *testing.T) {
+	w := exportWorld(t)
+	conv := w.talkEndToEnd(t)
+	if err := os.Remove(filepath.Join(w.s.DataDir, "invocation_signer.json")); err != nil {
+		t.Fatal(err)
+	}
+	code, raw := w.export(t, conv)
+	if code == http.StatusOK || !strings.Contains(string(raw), "no log signer on record") {
+		t.Fatalf("an export with no log signer on record answered %d %s", code, raw)
 	}
 }
 

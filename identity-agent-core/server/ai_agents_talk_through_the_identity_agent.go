@@ -852,7 +852,7 @@ func (s *CoreServer) deliveriesFor(ctx context.Context, store *conversation.Stor
 	if err != nil {
 		return nil, err
 	}
-	identity, _ := s.DataStore.GetIdentity()
+	thisIdentityAgent := s.thisIdentityAgentsIdentifier()
 	out := []delivery{}
 	for _, e := range waiting {
 		body, err := store.Contents().Get(ctx, e.ContentRef)
@@ -860,10 +860,11 @@ func (s *CoreServer) deliveriesFor(ctx context.Context, store *conversation.Stor
 			log.Printf("[conversation] the words of %s are missing or altered; not delivered", e.MessageID)
 			continue
 		}
-		signer := e.From
+		// The keys the body is told to expect are the countersigner's, asked
+		// the one way the body, the export and the verifier ask it.
+		signer := agentmessage.Countersigner(e.From, thisIdentityAgent)
 		name := e.From
-		if _, person := agentmessage.IsPerson(e.From); person && identity != nil {
-			signer = identity.AID
+		if _, person := agentmessage.IsPerson(e.From); person {
 			if rec, err := agentmessage.Read(e.Envelope); err == nil && rec.Person != nil && rec.Person.Name != "" {
 				name = rec.Person.Name
 			}
