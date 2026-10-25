@@ -594,6 +594,16 @@ func TestARequestMustNameTheIdentityAgentThatIssued(t *testing.T) {
 	}
 }
 
+// A request in the form that names an Identity Agent but names none was for no
+// Identity Agent, and authorises nothing at this one.
+func TestARequestNamingNoIdentityAgentInTheSecondFormIsRefused(t *testing.T) {
+	w := newWorld(t)
+	req := w.signsFor("", "PUT", "/api/mcp/agents/agent-1/capabilities", capBody, ago(time.Minute))
+	if err := w.check(w.aGrant(req, []string{"system.info.read"}, "agent-1")); err == nil {
+		t.Fatal("a second-form request naming no Identity Agent was taken as authorising this one's credential")
+	}
+}
+
 // An owner's request in the current form names the Identity Agent it was for,
 // which must be the credential's issuer.
 func TestAnOwnersRequestMustNameTheIssuer(t *testing.T) {

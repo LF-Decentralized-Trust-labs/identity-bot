@@ -418,8 +418,15 @@ func (w *talkWorld) openAsFor(t *testing.T, target string, g ControllerGrant, se
 	body, _ := json.Marshal(agentmessage.PersonMessage{To: w.a.PairwiseAID, Body: text, Nonce: conversation.NewID("n_")})
 	path := "/api/mcp/agents/" + w.a.ID + "/conversations"
 	stamp := signedAt.UTC().Format(time.RFC3339)
+	return w.openSigned(t, g, seed, conv, body, text,
+		canonicalControllerRequest(g.ControllerAID, target, "POST", path, stamp, authprovider.Unmeasured(""), body))
+}
+
+// openSigned records an opening on exactly the string given, signed by the
+// machine's seed, so a test can open a conversation on a request in any form.
+func (w *talkWorld) openSigned(t *testing.T, g ControllerGrant, seed []byte, conv string, body []byte, text, signed string) string {
+	t.Helper()
 	identity, _ := w.s.DataStore.GetIdentity()
-	signed := canonicalControllerRequest(g.ControllerAID, target, "POST", path, stamp, authprovider.Unmeasured(""), body)
 	sig, err := login.SignString(signed, seed)
 	if err != nil {
 		t.Fatal(err)
@@ -485,7 +492,38 @@ func TestAnOpeningSignedByAnUnauthorisedControllerIsRejected(t *testing.T) {
 	// Signed by that same app in force, but for another Identity Agent: a
 	// request for one authorises nothing at another.
 	conv = w.openAsFor(t, "EAnotherIdentityAgentAltogether", g2, seed2, time.Now(), "what time is it?")
-	failsWith(t, conversationbundle.Verify(w.bundle(t, conv)), "entry 1", "for EAnotherIdentityAgentAltogether")
+	failsWith(t, conversationbundle.Verify(w.bundle(t, conv)), "entry 1", "for \"EAnotherIdentityAgentAltogether\"")
+
+	// Signed in the form that names an Identity Agent, but naming none: that
+	// is a request for no Identity Agent, not one for any.
+	conv = w.openAsFor(t, "", g2, seed2, time.Now(), "what time is it?")
+	failsWith(t, conversationbundle.Verify(w.bundle(t, conv)), "entry 1", "for \"\"")
+}
+
+// An opening signed in the first form, which names no Identity Agent, is read
+// so a record made before requests named one still checks, and the bundle
+// says that which Identity Agent the app meant is the Identity Agent's word.
+func TestAnOpeningInTheFirstFormSaysItsTargetIsTheIdentityAgentsWord(t *testing.T) {
+	w := exportWorld(t)
+	g, seed := aSecondMachine(t, w.s)
+	conv := conversation.NewID("c_")
+	body, _ := json.Marshal(agentmessage.PersonMessage{To: w.a.PairwiseAID, Body: "what time is it?", Nonce: conversation.NewID("n_")})
+	v2 := canonicalControllerRequest(g.ControllerAID, "", "POST", "/api/mcp/agents/"+w.a.ID+"/conversations",
+		time.Now().UTC().Format(time.RFC3339), authprovider.Unmeasured(""), body)
+	lines := strings.Split(v2, "\n")
+	v1 := strings.Join(append([]string{"IA-CONTROLLER-REQ-V1", lines[1]}, lines[3:]...), "\n")
+	conv = w.openSigned(t, g, seed, conv, body, "what time is it?", v1)
+	r := conversationbundle.Verify(w.bundle(t, conv))
+	if !r.Verified {
+		t.Fatalf("an opening in the first form does not verify:\n%s", faultsOf(r))
+	}
+	said := false
+	for _, c := range r.CannotRuleOut {
+		said = said || strings.Contains(c, "first form")
+	}
+	if !said {
+		t.Fatalf("the bundle does not say the first form's target is the Identity Agent's word: %v", r.CannotRuleOut)
+	}
 }
 
 // An export whose words cannot be had from the record store fails, and says

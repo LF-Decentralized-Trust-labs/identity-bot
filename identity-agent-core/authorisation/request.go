@@ -178,8 +178,8 @@ func Check(in Input) error {
 		// Agent authorised nothing here. The first form names none and is kept
 		// so a credential issued before requests named their Identity Agent
 		// still checks. No Identity Agent admits a request in that form any more.
-		if cr.IdentityAgent != "" && cr.IdentityAgent != cred.Issuer {
-			return fmt.Errorf("the request was signed for %s, not for the issuer %s", cr.IdentityAgent, cred.Issuer)
+		if cr.NamesIdentityAgent && cr.IdentityAgent != cred.Issuer {
+			return fmt.Errorf("the request was signed for %q, not for the issuer %s", cr.IdentityAgent, cred.Issuer)
 		}
 		if cr.Controller != req.Signer {
 			return fmt.Errorf("the request was signed by %s, not %s", cr.Controller, req.Signer)
@@ -497,9 +497,13 @@ func sameInstant(a, b string) bool {
 // ControllerRequest is what a machine's signed request string says.
 type ControllerRequest struct {
 	Controller, Method, Path, Stamp string
-	// IdentityAgent is the Identity Agent the request was signed for, empty
-	// in the first form, which named none.
+	// IdentityAgent is the Identity Agent the request was signed for.
 	IdentityAgent string
+	// NamesIdentityAgent says the request is in the second form, which names
+	// the Identity Agent it was for. The first form names none, and is read
+	// only so a record or credential made before requests named their
+	// Identity Agent still checks.
+	NamesIdentityAgent bool
 	// BodyDigest is the digest of the request's body.
 	BodyDigest string
 }
@@ -510,7 +514,7 @@ func ReadControllerRequest(signed string) (ControllerRequest, error) {
 	lines := strings.Split(signed, "\n")
 	switch {
 	case len(lines) == 10 && lines[0] == "IA-CONTROLLER-REQ-V2":
-		return ControllerRequest{Controller: lines[1], IdentityAgent: lines[2], Method: lines[3], Path: lines[4], Stamp: lines[5], BodyDigest: lines[9]}, nil
+		return ControllerRequest{Controller: lines[1], IdentityAgent: lines[2], NamesIdentityAgent: true, Method: lines[3], Path: lines[4], Stamp: lines[5], BodyDigest: lines[9]}, nil
 	case len(lines) == 9 && lines[0] == "IA-CONTROLLER-REQ-V1":
 		return ControllerRequest{Controller: lines[1], Method: lines[2], Path: lines[3], Stamp: lines[4], BodyDigest: lines[8]}, nil
 	}

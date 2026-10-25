@@ -842,8 +842,11 @@ func (v *verifier) checkPersonSpoke(where string, rec agentmessage.Record, at ti
 		v.fault(where, "what the app signed is not a request to speak in a conversation")
 		return
 	}
-	if cr.IdentityAgent != "" && cr.IdentityAgent != v.b.Root {
-		v.fault(where, "the app signed its request for %s, not for this organisation %s", cr.IdentityAgent, v.b.Root)
+	switch {
+	case cr.NamesIdentityAgent && cr.IdentityAgent != v.b.Root:
+		v.fault(where, "the app signed its request for %q, not for this organisation %s", cr.IdentityAgent, v.b.Root)
+	case !cr.NamesIdentityAgent:
+		v.cannotRuleOut("Some openings were signed in the first form, which names no Identity Agent, so which Identity Agent the app meant them for is the Identity Agent's word.")
 	}
 	signedAt, err := time.Parse(time.RFC3339, cr.Stamp)
 	if err != nil || absDuration(at.Sub(signedAt)) > authorisation.Skew {
