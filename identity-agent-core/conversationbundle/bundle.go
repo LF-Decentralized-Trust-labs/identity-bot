@@ -1,10 +1,11 @@
 // Package conversationbundle is an exported conversation between AI agents,
 // and the offline check of it.
 //
-// An Identity Agent that holds AI agents keeps every conversation they have as
-// a chain of countersigned entries, writes every message to its signed
-// governance log, and anchors the heads of both in a record identity's key
-// log. An export puts everything needed to check that record into one bundle:
+// A conversation between AI agents is kept as a chain of countersigned
+// entries, every message is written to a signed governance log, and the heads
+// of both are anchored in a record identity's key log. Build gathers
+// everything needed to check that record into one bundle, from whichever store
+// keeps it:
 // the entries and their words, the key logs of every identity that signed any
 // part of it, the credentials that made each machine an AI agent's body and
 // granted each AI agent what it did, with their transaction logs, the log
