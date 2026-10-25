@@ -103,7 +103,7 @@ type slowInvoker struct {
 	max      int
 }
 
-func (s *slowInvoker) Invoke(ctx context.Context, appID, capabilityID string, body []byte) (*InvokeResult, error) {
+func (s *slowInvoker) Invoke(ctx context.Context, _ CallerContext, appID, capabilityID string, body []byte) (*InvokeResult, error) {
 	s.mu.Lock()
 	s.inFlight++
 	if s.inFlight > s.max {

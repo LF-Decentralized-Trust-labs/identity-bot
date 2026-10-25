@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"identity-agent-core/childenv"
 	"io"
 	"log"
 	"os"
@@ -13,6 +12,9 @@ import (
 	"runtime"
 	"sync"
 	"time"
+
+	"identity-agent-core/appcall"
+	"identity-agent-core/childenv"
 )
 
 type BinaryRuntime struct {
@@ -128,6 +130,7 @@ pathFound:
 		"HTTP_PROXY": true, "HTTPS_PROXY": true,
 		"http_proxy": true, "https_proxy": true,
 		"IDENTITY_AGENT_API": true, "DISPLAY_PORT": true,
+		appcall.KeyEnv: true,
 	}
 
 	env := childenv.Environ()

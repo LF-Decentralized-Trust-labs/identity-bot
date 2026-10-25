@@ -5,13 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"identity-agent-core/childenv"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"identity-agent-core/appcall"
+	"identity-agent-core/childenv"
 )
 
 type ContainerRuntime struct {
@@ -403,6 +405,7 @@ func (d *ContainerRuntime) createContainer(ctx context.Context) error {
 		"http_proxy": true, "https_proxy": true,
 		"NO_PROXY": true, "no_proxy": true,
 		"IDENTITY_AGENT_API": true,
+		appcall.KeyEnv:       true,
 	}
 
 	if d.manifest.Container != nil {
@@ -415,7 +418,29 @@ func (d *ContainerRuntime) createContainer(ctx context.Context) error {
 		}
 	}
 	for k, v := range d.netCfg.EnvVars {
+		if k == appcall.KeyEnv {
+			continue // passed in a file below, never on a command line
+		}
 		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
+	}
+	// The app's call key goes in an env file readable only by this user and
+	// removed once the container exists. On a command line it would be visible
+	// to every process listing them while podman runs.
+	if key := d.netCfg.EnvVars[appcall.KeyEnv]; key != "" {
+		envFile, err := os.CreateTemp(d.dataDir, "call-key-*.env")
+		if err != nil {
+			return fmt.Errorf("could not write the app's call key for podman: %w", err)
+		}
+		defer os.Remove(envFile.Name())
+		_ = envFile.Chmod(0o600)
+		if _, err := fmt.Fprintf(envFile, "%s=%s\n", appcall.KeyEnv, key); err != nil {
+			envFile.Close()
+			return fmt.Errorf("could not write the app's call key for podman: %w", err)
+		}
+		if err := envFile.Close(); err != nil {
+			return err
+		}
+		args = append(args, "--env-file", envFile.Name())
 	}
 
 	if d.manifest.Container != nil {
@@ -428,7 +453,10 @@ func (d *ContainerRuntime) createContainer(ctx context.Context) error {
 				}
 				hostPort = p
 			}
-			args = append(args, "-p", fmt.Sprintf("%d:%s", hostPort, containerPort))
+			// Published on loopback only. Without a host address podman binds
+			// every interface, and the app's capability API would be reachable
+			// from the network without passing through the Identity Agent.
+			args = append(args, "-p", fmt.Sprintf("127.0.0.1:%d:%s", hostPort, containerPort))
 		}
 	}
 

@@ -42,6 +42,12 @@ type signAsMachineOwnerRequest struct {
 	// Timestamp, when the caller pins one. Normally left out: it is inside the
 	// signature, so the moment this side signs is the moment that must travel.
 	Timestamp string `json:"timestamp"`
+	// For is the identifier of the Identity Agent the request is meant for,
+	// signed so no other Identity Agent accepts a copy. Left out, it is the
+	// identity the machine this owner adopted signs as, from this device's own
+	// record of the adoption. Given empty, the request names nobody, which only
+	// a machine with no identity yet accepts.
+	For *string `json:"for"`
 }
 
 type signAsMachineOwnerResponse struct {
@@ -51,6 +57,25 @@ type signAsMachineOwnerResponse struct {
 	// second formatting that differs by a millisecond or a zone would produce a
 	// signature over a string the machine never sees.
 	Timestamp string `json:"timestamp"`
+	// For is echoed: it is inside the signature, and the caller sends it in
+	// X-IA-Owner-For.
+	For string `json:"for"`
+}
+
+// theMachineThisOwnerAdopted is the identity the machine adopted by ownerAID
+// signs as, from this device's record of the adoption, or "" when none is
+// recorded.
+func (s *CoreServer) theMachineThisOwnerAdopted(ownerAID string) string {
+	agents, err := s.DataStore.ListAdoptedAgents()
+	if err != nil {
+		return ""
+	}
+	for _, a := range agents {
+		if a.OwnerAID == ownerAID {
+			return a.SignsAsAID
+		}
+	}
+	return ""
 }
 
 func (s *CoreServer) handleSignAsAMachineOwner(w http.ResponseWriter, r *http.Request) {
@@ -96,11 +121,8 @@ func (s *CoreServer) handleSignAsAMachineOwner(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	stamp := strings.TrimSpace(req.Timestamp)
-	if stamp == "" {
-		stamp = time.Now().UTC().Format(time.RFC3339)
-	} else if _, err := time.Parse(time.RFC3339, stamp); err != nil {
-		writeError(w, http.StatusBadRequest, "timestamp must be RFC3339", err.Error())
+	stamp, ok := aStampThatIsNow(w, req.Timestamp)
+	if !ok {
 		return
 	}
 
@@ -127,7 +149,21 @@ func (s *CoreServer) handleSignAsAMachineOwner(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	sig, err := SignOwnerRequest(method, path, stamp, body, seed)
+	target := ""
+	if req.For != nil {
+		target = strings.TrimSpace(*req.For)
+	} else if target = s.theMachineThisOwnerAdopted(ownerAID); target == "" {
+		// No record of which machine this identity owns, so nothing to name.
+		// Signing for nobody would make a signature any unfounded machine
+		// holding this key accepts; the caller names one, or asks for nobody
+		// explicitly.
+		writeError(w, http.StatusConflict,
+			"this device has no record of the machine that identity owns, so it cannot say which Identity Agent the request is for",
+			"give \"for\": the identifier of the Identity Agent the request is for")
+		return
+	}
+
+	sig, err := SignOwnerRequest(target, method, path, stamp, body, seed)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not sign", err.Error())
 		return
@@ -138,5 +174,28 @@ func (s *CoreServer) handleSignAsAMachineOwner(w http.ResponseWriter, r *http.Re
 		OwnerAID:  ownerAID,
 		Signature: sig,
 		Timestamp: stamp,
+		For:       target,
 	})
+}
+
+// aStampThatIsNow is the moment to sign for: now, or a pinned time within the
+// window a signature is accepted in. A time further off is refused, because a
+// signature made for later outlives whatever let the caller ask for it.
+func aStampThatIsNow(w http.ResponseWriter, pinned string) (string, bool) {
+	stamp := strings.TrimSpace(pinned)
+	now := time.Now().UTC()
+	if stamp == "" {
+		return now.Format(time.RFC3339), true
+	}
+	at, err := time.Parse(time.RFC3339, stamp)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "timestamp must be RFC3339", err.Error())
+		return "", false
+	}
+	if d := at.Sub(now); d > signedRequestWindow || d < -signedRequestWindow {
+		writeError(w, http.StatusBadRequest,
+			"a pinned timestamp must be within the window a signature is accepted in", "")
+		return "", false
+	}
+	return stamp, true
 }

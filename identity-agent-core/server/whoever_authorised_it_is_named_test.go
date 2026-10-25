@@ -133,7 +133,7 @@ func authorisedBy(t *testing.T, w *talkWorld, said string) {
 // they asked from, and the request as that machine signed it.
 func TestAnAIAgentsGrantNamesWhoAskedForIt(t *testing.T) {
 	w := newTalkWorld(t)
-	req := asThatMachine(t, w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
+	req := asThatMachineTo(t, w.s.thisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
 		`{"capabilities":["`+capabilityMessageAgent+`"]}`, w.ctlSeed, authprovider.LevelVerified, time.Now())
 	rec := httptest.NewRecorder()
 	w.s.router.ServeHTTP(rec, req)
@@ -161,7 +161,7 @@ func TestABodyCredentialNamesWhoApprovedIt(t *testing.T) {
 		for i := 0; i < 200; i++ {
 			for _, b := range w.s.bodies().ForAgent(w.b.ID) {
 				if b.State == agentbody.StatePending && b.Host == host {
-					req := asThatMachine(t, w.ctlAID, "POST", "/api/mcp/agents/"+w.b.ID+"/bodies/"+b.ID+"/approve",
+					req := asThatMachineTo(t, w.s.thisIdentityAgentsIdentifier(), w.ctlAID, "POST", "/api/mcp/agents/"+w.b.ID+"/bodies/"+b.ID+"/approve",
 						"", w.ctlSeed, authprovider.LevelVerified, time.Now())
 					rec := httptest.NewRecorder()
 					w.s.router.ServeHTTP(rec, req)
@@ -255,7 +255,7 @@ func testOwnerSeed() []byte {
 func TestAnOwnersSignedRequestIsKeptAsTheAuthority(t *testing.T) {
 	w := newTalkWorld(t)
 	resetSeenSignatures(t)
-	req := signed(t, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities", `{"capabilities":["`+capabilityMessageAgent+`"]}`, testOwnerSeed(), time.Now())
+	req := signedFor(t, w.s.thisIdentityAgentsIdentifier(), "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities", `{"capabilities":["`+capabilityMessageAgent+`"]}`, testOwnerSeed(), time.Now())
 	rec := httptest.NewRecorder()
 	w.s.router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -418,7 +418,7 @@ func TestAMachineWithoutAGrantInForceAuthorisesNothing(t *testing.T) {
 	put := func() int {
 		// Each request its own, so none is refused as one already used.
 		asked++
-		req := asThatMachine(t, w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
+		req := asThatMachineTo(t, w.s.thisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
 			`{"capabilities":["`+capabilityMessageAgent+`"]}`, w.ctlSeed, authprovider.LevelVerified,
 			time.Now().Add(-time.Duration(asked)*time.Second))
 		rec := httptest.NewRecorder()
@@ -448,7 +448,7 @@ func TestAMachineWithoutAGrantInForceAuthorisesNothing(t *testing.T) {
 // be revoked under it.
 func TestAGrantIsHeldWhileACredentialIsIssuedOnIt(t *testing.T) {
 	w := newTalkWorld(t)
-	req := asThatMachine(t, w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
+	req := asThatMachineTo(t, w.s.thisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
 		`{"capabilities":[]}`, w.ctlSeed, authprovider.LevelVerified, time.Now())
 	grant, _, _ := w.s.controllers().Get(w.ctlAID)
 	req = req.WithContext(context.WithValue(req.Context(), controllerContextKey{}, grant))
@@ -508,7 +508,7 @@ func TestAPublishedGrantCarriesNoPrivateConfiguration(t *testing.T) {
 	w := newTalkWorld(t)
 	body := `{"name":"Ledger clerk","capabilities":["` + capabilityMessageAgent + `"],"system_prompt":"SECRET-PROMPT",` +
 		`"brain":{"kind":"local","model":"m","endpoint":"http://10.0.0.9:1234","credential_ref":"vault-key-7"},"nonce":"n-1"}`
-	req := asThatMachine(t, w.ctlAID, "POST", "/api/mcp/agents", body, w.ctlSeed, authprovider.LevelVerified, time.Now())
+	req := asThatMachineTo(t, w.s.thisIdentityAgentsIdentifier(), w.ctlAID, "POST", "/api/mcp/agents", body, w.ctlSeed, authprovider.LevelVerified, time.Now())
 	rec := httptest.NewRecorder()
 	w.s.router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK && rec.Code != http.StatusCreated {
@@ -549,9 +549,10 @@ func TestARequestAuthorisesOneCredential(t *testing.T) {
 	body := `{"capabilities":["` + capabilityMessageAgent + `"]}`
 	stamp := time.Now().UTC().Format(time.RFC3339)
 	path := "/api/mcp/agents/" + w.a.ID + "/capabilities"
-	sig, _ := SignOwnerRequest("PUT", path, stamp, []byte(body), testOwnerSeed())
+	ia := w.s.thisIdentityAgentsIdentifier()
+	sig, _ := SignOwnerRequest(ia, "PUT", path, stamp, []byte(body), testOwnerSeed())
 	by := authority{About: w.a.ID, Request: &signedRequest{Kind: "owner", Signer: "EOWNERTESTAID", Body: body,
-		Signed: canonicalRequestString("PUT", path, stamp, []byte(body)), Signature: sig}}
+		Signed: canonicalOwnerRequest(ia, "PUT", path, stamp, []byte(body)), Signature: sig}}
 	if _, err := w.s.issueCapabilityGrant(w.a, by); err != nil {
 		t.Fatalf("the first credential on the request: %v", err)
 	}
@@ -573,8 +574,8 @@ func TestAnAIAgentWhoseGrantCannotBeIssuedIsNotCreated(t *testing.T) {
 	// the grant it asks for is refused while everything before it succeeds.
 	body := `{"name":"Ungranted","capabilities":["` + capabilityMessageAgent + `"]}`
 	at := time.Now()
-	req := signed(t, "POST", "/api/mcp/agents", body, testOwnerSeed(), at)
-	spent := canonicalRequestString("POST", "/api/mcp/agents", at.UTC().Format(time.RFC3339), []byte(body))
+	req := signedFor(t, w.s.thisIdentityAgentsIdentifier(), "POST", "/api/mcp/agents", body, testOwnerSeed(), at)
+	spent := canonicalOwnerRequest(w.s.thisIdentityAgentsIdentifier(), "POST", "/api/mcp/agents", at.UTC().Format(time.RFC3339), []byte(body))
 	if err := w.s.DataStore.KeepCredentialRequest("Eanother-credential", iacrypto.Blake3QB64Must([]byte(spent)), body); err != nil {
 		t.Fatal(err)
 	}
@@ -639,7 +640,7 @@ func TestAGrantedMachinesRowEditedSinceIsRefused(t *testing.T) {
 	edited := ctl
 	edited.Label = "renamed in the file"
 	w.s.controllers().Put(edited)
-	req := asThatMachine(t, w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
+	req := asThatMachineTo(t, w.s.thisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
 		`{"capabilities":["`+capabilityMessageAgent+`"]}`, w.ctlSeed, authprovider.LevelVerified, time.Now())
 	rec := httptest.NewRecorder()
 	w.s.router.ServeHTTP(rec, req)
@@ -729,7 +730,7 @@ func TestARestoredMachineRowIsNeverGrantedWithoutTheOwner(t *testing.T) {
 	restored.CredentialSAID = ""
 	w.s.controllers().Put(restored)
 	everythingRuns(w.s)
-	req := asThatMachine(t, w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
+	req := asThatMachineTo(t, w.s.thisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
 		`{"capabilities":["`+capabilityMessageAgent+`"]}`, w.ctlSeed, authprovider.LevelVerified, time.Now())
 	rec := httptest.NewRecorder()
 	w.s.router.ServeHTTP(rec, req)
@@ -813,7 +814,7 @@ func TestTheOwnerApprovesAnEarlierMachine(t *testing.T) {
 	w.s.controllers().Put(earlier)
 	body := `{"controller_aid":"` + ctl.ControllerAID + `","public_key":"` + ctl.PublicKey + `","label":"` + ctl.Label + `","grade":"` + string(ctl.Grade) + `"}`
 	rec := httptest.NewRecorder()
-	w.s.router.ServeHTTP(rec, signed(t, "POST", "/api/controllers", body, testOwnerSeed(), time.Now()))
+	w.s.router.ServeHTTP(rec, signedFor(t, w.s.thisIdentityAgentsIdentifier(), "POST", "/api/controllers", body, testOwnerSeed(), time.Now()))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("the owner's approval: %d %s", rec.Code, rec.Body.String())
 	}
@@ -850,7 +851,7 @@ func TestTheOwnerApprovesAnEarlierAIAgent(t *testing.T) {
 	mcpTokensMu.Unlock()
 	body := `{"capabilities":["` + capabilityMessageAgent + `"]}`
 	rec = httptest.NewRecorder()
-	w.s.router.ServeHTTP(rec, signed(t, "PUT", "/api/mcp/agents/"+id+"/capabilities", body, testOwnerSeed(), time.Now()))
+	w.s.router.ServeHTTP(rec, signedFor(t, w.s.thisIdentityAgentsIdentifier(), "PUT", "/api/mcp/agents/"+id+"/capabilities", body, testOwnerSeed(), time.Now()))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("the owner's approval: %d %s", rec.Code, rec.Body.String())
 	}
@@ -918,7 +919,7 @@ func TestAMachinesFileEditedSignerOrEndIsRefused(t *testing.T) {
 			if err := w.s.rowIsItsGrant(edited); err == nil {
 				t.Fatal("the edited row was taken for its grant")
 			}
-			req := asThatMachine(t, w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
+			req := asThatMachineTo(t, w.s.thisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
 				`{"capabilities":["`+capabilityMessageAgent+`"]}`, w.ctlSeed, authprovider.LevelVerified, time.Now())
 			if _, _, err := w.s.thePersonAsking(withController(req, edited)); err == nil || !strings.Contains(err.Error(), "no longer says") {
 				t.Fatalf("a person was attributed from an edited row: %v", err)
@@ -936,7 +937,7 @@ func TestAPendingMarkIsNotBelievedWhereTheKeyIsHere(t *testing.T) {
 	marked := ctl
 	marked.CredentialSAID, marked.CredentialPending = "", true
 	w.s.controllers().Put(marked)
-	req := asThatMachine(t, w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
+	req := asThatMachineTo(t, w.s.thisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
 		`{"capabilities":["`+capabilityMessageAgent+`"]}`, w.ctlSeed, authprovider.LevelVerified, time.Now())
 	rec := httptest.NewRecorder()
 	w.s.router.ServeHTTP(rec, req)

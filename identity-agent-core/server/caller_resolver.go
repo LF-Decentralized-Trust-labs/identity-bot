@@ -79,6 +79,10 @@ const maxWhyLen = 512
 func applyCallerWhy(r *http.Request, cc *sandbox.CallerContext) {
 	cc.WorkItem = clampWhy(r.Header.Get(HeaderWorkItem))
 	cc.Reason = clampWhy(r.Header.Get(HeaderReason))
+	// Which of the caller's runs is asking. The same standing as the two
+	// above — recorded and passed to the app, never consulted here — and
+	// signed with the request where the caller is a body.
+	cc.Session = clampWhy(r.Header.Get(agentbody.HeaderSession))
 }
 
 func clampWhy(v string) string {

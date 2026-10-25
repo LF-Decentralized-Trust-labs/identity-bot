@@ -17,6 +17,12 @@ class AgentConfig {
   /// would send the signing call to the agent and nothing would ever be signed.
   static String agentOrigin = '';
 
+  /// The identifier of the identity at [agentOrigin], when this installation is
+  /// its front end. Every request this machine signs for it names it, so a
+  /// copy is refused by any other Identity Agent. Set and cleared with
+  /// [agentOrigin].
+  static String agentAid = '';
+
   /// Where a request about the identity should go.
   ///
   /// This is what almost every caller wants. [coreBaseUrl] is the core on this

@@ -216,11 +216,21 @@ func sealTestOwner(t *testing.T, s *CoreServer) (seed []byte, aid string) {
 
 func signed(t *testing.T, method, path, body string, seed []byte, at time.Time) *http.Request {
 	t.Helper()
+	return signedFor(t, "", method, path, body, seed, at)
+}
+
+// signedFor is signed, naming the Identity Agent target, as every owner request
+// to an Identity Agent with an identifier must.
+func signedFor(t *testing.T, target, method, path, body string, seed []byte, at time.Time) *http.Request {
+	t.Helper()
 	req := remote(method, path, body)
 	stamp := at.UTC().Format(time.RFC3339)
-	sig, err := SignOwnerRequest(method, path, stamp, []byte(body), seed)
+	sig, err := SignOwnerRequest(target, method, path, stamp, []byte(body), seed)
 	if err != nil {
 		t.Fatalf("sign: %v", err)
+	}
+	if target != "" {
+		req.Header.Set(headerOwnerFor, target)
 	}
 	req.Header.Set(headerOwnerSig, sig)
 	req.Header.Set(headerOwnerTimestamp, stamp)
@@ -263,7 +273,7 @@ func TestSignatureIsBoundToTheRequest(t *testing.T) {
 	seed, _ := sealTestOwner(t, s)
 
 	stamp := time.Now().UTC().Format(time.RFC3339)
-	sig, err := SignOwnerRequest("GET", "/api/profile", stamp, nil, seed)
+	sig, err := SignOwnerRequest("", "GET", "/api/profile", stamp, nil, seed)
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
@@ -354,7 +364,7 @@ func TestUnsealedAgentFallsBackToItsOwnIdentity(t *testing.T) {
 	if authority.AID != "ESELFOWNED" {
 		t.Errorf("expected the agent's own identity as authority, got %q", authority.AID)
 	}
-	if err := s.verifyOwnerSignature(signed(t, "GET", "/api/profile", "", seed, time.Now())); err != nil {
+	if err := s.verifyOwnerSignature(signedFor(t, "ESELFOWNED", "GET", "/api/profile", "", seed, time.Now())); err != nil {
 		t.Errorf("self-owned agent rejected its own owner: %v", err)
 	}
 }
@@ -446,6 +456,22 @@ func TestNoHandlerUsesLoopbackAsTheOwnerTest(t *testing.T) {
 		//
 		// Narrow, and checked rather than trusted: one gate in that file, and
 		// anything else there must use s.isOwner(r).
+		// The development build's stand-in asks whether a request is local to
+		// take something AWAY: a controller asking from anywhere else is not
+		// stood in for. Being local grants nothing there, so it is not standing
+		// in for the owner. One use, checked.
+		if name == "a_development_build_vouches_for_a_controller.go" {
+			src, err := os.ReadFile(name)
+			if err != nil {
+				t.Fatalf("read %s: %v", name, err)
+			}
+			if n := strings.Count(string(src), "isLocalConnection(r)"); n != 1 ||
+				strings.Contains(string(src), "isLocalOwnerRequest(r)") {
+				t.Errorf("%s may ask whether a request is local exactly once, to withhold "+
+					"the stand-in, and never whether it is the owner's", name)
+			}
+			continue
+		}
 		if name == "offer_this_computer.go" {
 			src, err := os.ReadFile(name)
 			if err != nil {

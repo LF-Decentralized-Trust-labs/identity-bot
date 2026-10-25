@@ -2,10 +2,12 @@ package server
 
 import (
 	"encoding/json"
+	"identity-agent-core/store"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"identity-agent-core/login"
 )
@@ -50,7 +52,7 @@ func TestSigningForAMachineUsesTheIdentityThatAdoptedIt(t *testing.T) {
 	s := adoptingOwner(t)
 	owner := mintedToOwnAMachine(t, s)
 
-	rec := askToSignAs(t, s, `{"owner_aid":"`+owner+`","method":"get","path":"/api/identity"}`)
+	rec := askToSignAs(t, s, `{"owner_aid":"`+owner+`","method":"get","path":"/api/identity","for":"EThatMachine"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("signing refused: %d %s", rec.Code, rec.Body.String())
 	}
@@ -65,7 +67,7 @@ func TestSigningForAMachineUsesTheIdentityThatAdoptedIt(t *testing.T) {
 
 	// The method is upper-cased in the canonical string, so a caller that sent
 	// "get" must still produce the signature the machine checks for "GET".
-	signed := canonicalRequestString("GET", "/api/identity", out.Timestamp, nil)
+	signed := canonicalOwnerRequest(out.For, "GET", "/api/identity", out.Timestamp, nil)
 
 	idx, known, err := s.DataStore.MachineOwnerIndex(owner)
 	if err != nil || !known {
@@ -145,5 +147,61 @@ func TestAControllerCannotAskThisDeviceToSignAsTheOwner(t *testing.T) {
 	}
 	if strings.TrimSpace(req.Why) == "" {
 		t.Fatal("a refusal with no reason leaves somebody unable to act on it")
+	}
+}
+
+// The signature names the Identity Agent of the machine this owner adopted,
+// from this device's own record of the adoption, so no other Identity Agent
+// the same key could sign for will take a copy.
+func TestSigningForAMachineNamesThatMachine(t *testing.T) {
+	s := adoptingOwner(t)
+	owner := mintedToOwnAMachine(t, s)
+	if err := s.DataStore.SaveAdoptedAgent(store.AdoptedAgent{AID: "EThePairingAID",
+		SignsAsAID: "EWhatTheMachineSignsAs", URL: "https://machine.example", OwnerAID: owner}); err != nil {
+		t.Fatal(err)
+	}
+	rec := askToSignAs(t, s, `{"owner_aid":"`+owner+`","method":"GET","path":"/api/identity"}`)
+	var out signAsMachineOwnerResponse
+	json.NewDecoder(rec.Body).Decode(&out)
+	if out.For != "EWhatTheMachineSignsAs" {
+		t.Fatalf("the request was signed for %q, not the machine this owner adopted", out.For)
+	}
+	rec = askToSignAs(t, s, `{"owner_aid":"`+owner+`","method":"GET","path":"/api/identity","for":""}`)
+	out = signAsMachineOwnerResponse{}
+	json.NewDecoder(rec.Body).Decode(&out)
+	if out.For != "" {
+		t.Fatalf("a request asked to name nobody named %q", out.For)
+	}
+}
+
+// With no record of the machine and no target given, nothing is signed: a
+// signature naming nobody would serve at any unfounded machine holding the key.
+func TestSigningForAnUnrecordedMachineNamesItOrRefuses(t *testing.T) {
+	s := adoptingOwner(t)
+	owner := mintedToOwnAMachine(t, s)
+	if rec := askToSignAs(t, s, `{"owner_aid":"`+owner+`","method":"GET","path":"/api/identity"}`); rec.Code == http.StatusOK {
+		t.Fatalf("signed for nobody with no record of the machine: %s", rec.Body.String())
+	}
+}
+
+// A pinned time outside the window is refused, so a signature cannot be made
+// now to use later.
+func TestASignatureCannotBeMadeForLater(t *testing.T) {
+	s := adoptingOwner(t)
+	owner := mintedToOwnAMachine(t, s)
+	later := time.Now().Add(72 * time.Hour).UTC().Format(time.RFC3339)
+	rec := askToSignAs(t, s, `{"owner_aid":"`+owner+`","method":"GET","path":"/api/identity","for":"EThatMachine","timestamp":"`+later+`"}`)
+	if rec.Code == http.StatusOK {
+		t.Fatalf("a signature for three days from now was made: %s", rec.Body.String())
+	}
+}
+
+// A browser session cannot ask for a machine owner's signature, nor mint the
+// identity that owns a machine.
+func TestABrowserSessionCannotSignAsAMachinesOwner(t *testing.T) {
+	for _, route := range []string{"/api/machines/owner/sign", "/api/machines/owner-identity"} {
+		if reason, forbidden := requiresTheKeyItself("POST", route); !forbidden || reason == "" {
+			t.Errorf("a browser session may POST %s", route)
+		}
 	}
 }

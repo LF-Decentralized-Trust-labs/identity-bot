@@ -61,7 +61,7 @@ func enrolledMachine(t *testing.T, s *CoreServer, aid string) ed25519.PrivateKey
 func signedNotify(t *testing.T, key ed25519.PrivateKey, aid string, body []byte) *http.Request {
 	t.Helper()
 	stamp := time.Now().UTC().Format(time.RFC3339)
-	sig, err := SignOwnerRequest(http.MethodPost, "/api/notify", stamp, body, key.Seed())
+	sig, err := signMachineRequest(http.MethodPost, "/api/notify", stamp, body, key.Seed())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestAnOldSignatureIsRefused(t *testing.T) {
 
 	body := notifyBody(t)
 	stamp := time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339)
-	sig, err := SignOwnerRequest(http.MethodPost, "/api/notify", stamp, body, key.Seed())
+	sig, err := signMachineRequest(http.MethodPost, "/api/notify", stamp, body, key.Seed())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestAMachinesSignatureIsNotAnOwnersSignature(t *testing.T) {
 
 	body := notifyBody(t)
 	stamp := time.Now().UTC().Format(time.RFC3339)
-	sig, err := SignOwnerRequest(http.MethodPost, "/api/profile", stamp, body, key.Seed())
+	sig, err := signMachineRequest(http.MethodPost, "/api/profile", stamp, body, key.Seed())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestTheMachineAndTheAgentSignTheSameBytes(t *testing.T) {
 	body := []byte(`{"to_aid":"EPERSON"}`)
 	stamp := "2026-07-31T12:00:00Z"
 
-	sig, err := SignOwnerRequest(http.MethodPost, "/api/notify", stamp, body, key.Seed())
+	sig, err := signMachineRequest(http.MethodPost, "/api/notify", stamp, body, key.Seed())
 	if err != nil {
 		t.Fatal(err)
 	}

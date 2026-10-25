@@ -11,7 +11,7 @@ type fakeInvoker struct {
 	result *InvokeResult
 }
 
-func (f *fakeInvoker) Invoke(ctx context.Context, appID, capabilityID string, body []byte) (*InvokeResult, error) {
+func (f *fakeInvoker) Invoke(ctx context.Context, _ CallerContext, appID, capabilityID string, body []byte) (*InvokeResult, error) {
 	f.called = true
 	return f.result, nil
 }

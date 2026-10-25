@@ -816,7 +816,7 @@ func corsPolicy() func(http.Handler) http.Handler {
 		AllowedMethods:  []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders: []string{
 			"Accept", "Authorization", "Content-Type", "X-CSRF-Token",
-			headerOwnerSig, headerOwnerTimestamp, headerOwnerAID,
+			headerOwnerSig, headerOwnerTimestamp, headerOwnerAID, headerOwnerFor,
 		},
 		ExposedHeaders:   []string{"Link"},
 		AllowCredentials: false,

@@ -55,6 +55,15 @@ func (s *CoreServer) handleSignAsThisController(w http.ResponseWriter, r *http.R
 		AuthLevel string `json:"auth_level"`
 		AuthAt    string `json:"auth_at"`
 		AuthScore int    `json:"auth_score"`
+
+		// For is the identifier of the Identity Agent the request is meant for.
+		// Signed, so a copy is refused by any other Identity Agent. Left out,
+		// the one this computer was told it is a front end for is used. Given
+		// empty, the request names nobody, which an Identity Agent accepts only
+		// when a machine asks which identity it acts for — the one request a
+		// machine makes before it knows, and one that must not name whichever
+		// Identity Agent this computer happened to be pointed at before.
+		For *string `json:"for"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxSignedBodyBytes+1024)).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "body must be JSON", err.Error())
@@ -90,11 +99,8 @@ func (s *CoreServer) handleSignAsThisController(w http.ResponseWriter, r *http.R
 
 	// The timestamp is this machine's unless the caller pinned one, so an app
 	// cannot accidentally sign for a moment that has passed.
-	stamp := strings.TrimSpace(req.Timestamp)
-	if stamp == "" {
-		stamp = time.Now().UTC().Format(time.RFC3339)
-	} else if _, err := time.Parse(time.RFC3339, stamp); err != nil {
-		writeError(w, http.StatusBadRequest, "timestamp must be RFC3339", err.Error())
+	stamp, ok := aStampThatIsNow(w, req.Timestamp)
+	if !ok {
 		return
 	}
 
@@ -129,10 +135,17 @@ func (s *CoreServer) handleSignAsThisController(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	target := ""
+	if req.For != nil {
+		target = strings.TrimSpace(*req.For)
+	} else if front, ferr := s.whatThisCoreIsAFrontEndFor(); ferr == nil && front != nil {
+		target = front.AgentAID
+	}
+
 	// Built here, from the parts, so the only string this key ever signs is a
 	// controller asking an agent for something.
 	sig, err := signer.Sign([]byte(
-		canonicalControllerRequest(me.AID, method, path, stamp, asserted, body)))
+		canonicalControllerRequest(me.AID, target, method, path, stamp, asserted, body)))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError,
 			"this computer's secure hardware would not sign", err.Error())
@@ -161,6 +174,9 @@ func (s *CoreServer) handleSignAsThisController(w http.ResponseWriter, r *http.R
 		"controller_aid": me.AID,
 		"signature":      sigQB64,
 		"timestamp":      stamp,
+		// Echoed for the same reason: it is inside the signature, and the
+		// Identity Agent reads it from the header the caller sets from this.
+		"for": target,
 		// Echoed so the caller sends exactly what was signed rather than
 		// reformatting a time and breaking its own signature.
 		"auth_level": headerValueFor(asserted, func(a authprovider.Result) string {

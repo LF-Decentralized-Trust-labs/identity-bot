@@ -762,6 +762,9 @@ class RecoveryHolderSetup {
           // else's machine is the case that needs one.
           identityAid: identityAid,
           holderId: aid,
+          // The identity that machine signs as, which is the Identity Agent
+          // the request is for.
+          targetAid: (m['signs_as_aid'] ?? '') as String,
           waitHours: waitHours,
           requireApproval: requireApproval,
         );
@@ -797,6 +800,7 @@ class RecoveryHolderSetup {
     required Uint8List ownerSeed,
     required String identityAid,
     required String holderId,
+    String targetAid = '',
     required int waitHours,
     required bool requireApproval,
   }) async {
@@ -824,6 +828,7 @@ class RecoveryHolderSetup {
           path: path,
           body: body,
           ownerSeed: ownerSeed,
+          targetAid: targetAid,
         ),
       },
       body: body,

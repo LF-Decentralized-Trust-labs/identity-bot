@@ -58,7 +58,10 @@ type Host struct {
 	PollEvery time.Duration
 	// WorkItem and Reason are the stated purpose sent, signed, with each call.
 	WorkItem string
-	Reason   string
+	// Session names which of the caller's runs is asking, when it has more
+	// than one. Signed with each call and passed on to the app a call reaches.
+	Session string
+	Reason  string
 
 	// brainName and brainModel are the running brain's, for what the host
 	// reports with each message.
@@ -473,6 +476,12 @@ func (h *Host) callDirect(method, path string, body []byte) (int, []byte, error)
 // identifier, and its signature over the request target exactly as sent, a
 // timestamp, a fresh nonce, the body and the stated purpose.
 func (h *Host) signedHeaders(method, target string, body []byte) (map[string]string, error) {
+	// The Identity Agent this machine enrolled with, named inside the signature
+	// so no other Identity Agent will take a copy.
+	st, err := h.loadState()
+	if err != nil {
+		return nil, fmt.Errorf("this machine has not enrolled: %w", err)
+	}
 	signer, _ := h.signer()
 	host, _, err := agentbody.Identity(signer)
 	if err != nil {
@@ -485,8 +494,8 @@ func (h *Host) signedHeaders(method, target string, body []byte) (map[string]str
 	}
 	nonce := base64.RawURLEncoding.EncodeToString(nonceBytes)
 	sig, err := agentbody.Sign(signer, agentbody.SignedRequest{
-		Host: host, Method: method, Target: target, Timestamp: ts, Nonce: nonce, Body: body,
-		WorkItem: h.WorkItem, Reason: h.Reason,
+		For: st.IdentityAgent, Host: host, Method: method, Target: target, Timestamp: ts, Nonce: nonce, Body: body,
+		WorkItem: h.WorkItem, Reason: h.Reason, Session: h.Session,
 	}.Bytes())
 	if err != nil {
 		return nil, err
@@ -494,6 +503,10 @@ func (h *Host) signedHeaders(method, target string, body []byte) (map[string]str
 	out := map[string]string{
 		agentbody.HeaderHost: host, agentbody.HeaderSignature: sig,
 		agentbody.HeaderTimestamp: ts, agentbody.HeaderNonce: nonce,
+		agentbody.HeaderFor: st.IdentityAgent,
+	}
+	if h.Session != "" {
+		out[agentbody.HeaderSession] = h.Session
 	}
 	if h.WorkItem != "" {
 		out[agentbody.HeaderWorkItem] = h.WorkItem

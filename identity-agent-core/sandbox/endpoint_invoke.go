@@ -9,8 +9,11 @@ import (
 	"io"
 	"log"
 	"net/http"
+	neturl "net/url"
 	"strings"
 	"time"
+
+	"identity-agent-core/appcall"
 )
 
 // enforceResourceConstraints denies an invocation whose arguments fall outside the
@@ -118,6 +121,20 @@ type CallerContext struct {
 	BodyHost       string
 	BodyGrade      string
 	BodyCredential string
+	// Owner is true when the gate established that this caller is the owner,
+	// by any of the ways an owner proves it: at this computer, by the
+	// identity's signature, or inside an envelope only the identity could
+	// seal. Remote still says whether the request came over the network, so a
+	// remote owner keeps every rule that holds for remote callers — a
+	// host_control capability stays local-only — and is let past only the
+	// scope check, which exists to bound what somebody OTHER than the owner
+	// may do.
+	Owner bool
+	// Session is which of the caller's runs made the call, when it said.
+	// Caller-supplied like WorkItem (signed with the request where the caller
+	// signs its requests) and never a governance input; it is passed to the
+	// app so the app can tell one run of an AI agent from another.
+	Session string
 	// OrchestratedBy is the AID of the master orchestrator that dispatched this call,
 	// when the invocation is one step of an orchestration. The step still executes
 	// under the worker's OWN authority (CallerAID + grant); OrchestratedBy records who
@@ -155,8 +172,11 @@ type InvokeResult struct {
 
 // CapabilityInvoker routes a governed request to the running plug-in that provides a
 // capability. Split out so the governance pipeline is testable without a live plug-in.
+//
+// caller is who the Identity Agent admitted, which the invoker passes on to the
+// app in a form the app can verify (package appcall).
 type CapabilityInvoker interface {
-	Invoke(ctx context.Context, appID, capabilityID string, body []byte) (*InvokeResult, error)
+	Invoke(ctx context.Context, caller CallerContext, appID, capabilityID string, body []byte) (*InvokeResult, error)
 }
 
 // InvokeCapability is the governed invoke path. The gateway governs BOTH directions;
@@ -170,7 +190,13 @@ type CapabilityInvoker interface {
 func (m *Manager) InvokeCapability(ctx context.Context, caller CallerContext, capabilityID string, body []byte) (*InvokeResult, error) {
 	start := time.Now()
 	executorType := "plugin"
-	provider, capDef, ok := m.findProvider(capabilityID)
+	provider, capDef, perr := m.theOneProvider(capabilityID)
+	if perr != nil {
+		m.recordInvocationDetail(caller, capabilityID, executorType, body, "denied", start,
+			EventDetail{StatusReason: "provider: " + perr.Error()})
+		return nil, fmt.Errorf("%w: %s", ErrDenied, perr.Error())
+	}
+	ok := provider != nil
 	var rec *CapabilityRecord
 	if !ok {
 		rec = m.registryRecord(capabilityID)
@@ -224,7 +250,7 @@ func (m *Manager) InvokeCapability(ctx context.Context, caller CallerContext, ca
 		if inv == nil {
 			inv = &httpInvoker{mgr: m}
 		}
-		res, err = inv.Invoke(ctx, provider.ID, capabilityID, body)
+		res, err = inv.Invoke(ctx, caller, provider.ID, capabilityID, body)
 	}
 	if err != nil {
 		m.recordInvocationDetail(caller, capabilityID, executorType, body, "error", start,
@@ -252,24 +278,56 @@ func (m *Manager) InvokeCapability(ctx context.Context, caller CallerContext, ca
 }
 
 // findProvider resolves which installed plug-in offers a capability.
+//
+// ONE PROVIDER OR NONE. Loading refuses a second app declaring an id already
+// provided (LoadManifests), and this refuses again rather than choosing: the
+// manifests are a map, so "the first one found" is whichever the runtime
+// happens to iterate to, and an app that answered a capability it had copied
+// would receive that capability's callers, stamped as genuine. A plug-in id
+// that a registry-native capability also has is refused the same way, since
+// the plug-in would otherwise silently shadow it.
 func (m *Manager) findProvider(capabilityID string) (*AppManifest, ProvidedCapability, bool) {
+	manifest, capDef, err := m.theOneProvider(capabilityID)
+	if err != nil || manifest == nil {
+		return nil, ProvidedCapability{}, false
+	}
+	return manifest, capDef, true
+}
+
+// ErrAmbiguousProvider is a capability id declared by more than one provider.
+var ErrAmbiguousProvider = errors.New("more than one provider declares this capability")
+
+// theOneProvider is findProvider saying why it found none: nil and no error
+// when nothing provides it, ErrAmbiguousProvider when more than one does.
+func (m *Manager) theOneProvider(capabilityID string) (*AppManifest, ProvidedCapability, error) {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	var found *AppManifest
+	var capDef ProvidedCapability
+	count := 0
 	for _, manifest := range m.manifests {
 		for _, p := range manifest.Provides {
 			if p.ID == capabilityID {
-				return manifest, p, true
+				found, capDef = manifest, p
+				count++
 			}
 		}
 	}
-	return nil, ProvidedCapability{}, false
+	m.mu.RUnlock()
+	if count == 0 {
+		return nil, ProvidedCapability{}, nil
+	}
+	if count > 1 || m.registryRecord(capabilityID) != nil {
+		return nil, ProvidedCapability{}, fmt.Errorf("%w: %q", ErrAmbiguousProvider, capabilityID)
+	}
+	return found, capDef, nil
 }
 
 // httpInvoker routes to the running plug-in's local capability API (the plug-in SDK's
-// POST /v1/capability/{id} on the instance's display port).
+// POST /v1/capability/{id} on the instance's display port), stamped with who
+// called under the app's own key.
 type httpInvoker struct{ mgr *Manager }
 
-func (h *httpInvoker) Invoke(ctx context.Context, appID, capabilityID string, body []byte) (*InvokeResult, error) {
+func (h *httpInvoker) Invoke(ctx context.Context, caller CallerContext, appID, capabilityID string, body []byte) (*InvokeResult, error) {
 	inst, err := h.mgr.GetRunningInstance(appID)
 	if err != nil {
 		return nil, fmt.Errorf("plug-in %q is not running: %w", appID, err)
@@ -280,12 +338,22 @@ func (h *httpInvoker) Invoke(ctx context.Context, appID, capabilityID string, bo
 	if inst.DisplayPort == nil {
 		return nil, fmt.Errorf("plug-in %q has no reachable capability port", appID)
 	}
-	url := fmt.Sprintf("http://127.0.0.1:%d/v1/capability/%s", *inst.DisplayPort, capabilityID)
+	url := fmt.Sprintf("http://127.0.0.1:%d/v1/capability/%s", *inst.DisplayPort, neturl.PathEscape(capabilityID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// No call leaves without saying who made it. An app that cannot be told
+	// would have to trust whatever reached its port, so a key that cannot be
+	// had stops the call rather than sending it unstamped.
+	key, err := h.mgr.AppCallKey(appID)
+	if err != nil {
+		return nil, fmt.Errorf("the call to %q could not be stamped: %w", appID, err)
+	}
+	if err := appcall.Stamp(req.Header, key, capabilityID, body, theCallerAnAppIsTold(caller), time.Now()); err != nil {
+		return nil, fmt.Errorf("the call to %q could not be stamped: %w", appID, err)
+	}
 	resp, err := (&http.Client{Timeout: 120 * time.Second}).Do(req)
 	if err != nil {
 		return nil, err

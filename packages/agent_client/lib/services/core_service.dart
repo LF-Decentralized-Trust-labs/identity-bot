@@ -712,6 +712,7 @@ class CoreService {
     String? baseUrl,
     Future<Uint8List?> Function()? ownerSeed,
     String? ownerAid,
+    String agentAid = '',
     http.Client? inner,
   }) {
     // The agent, which is this machine's core in the ordinary case and a
@@ -740,6 +741,7 @@ class CoreService {
           agentOrigin: origin,
           ownerSeed: ownerSeed,
           ownerAid: ownerAid,
+          agentAid: agentAid,
           inner: inner),
       null,
     );

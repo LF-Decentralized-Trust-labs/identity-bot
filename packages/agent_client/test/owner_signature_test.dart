@@ -17,14 +17,15 @@ void main() {
       timestamp: '2026-07-27T12:00:00Z',
       body: const [],
     );
-    // Five lines, in this order, uppercase method. The agent splits on the
+    // Six lines, in this order, uppercase method. The Identity Agent splits on the
     // same newlines; a difference of one rejects every request.
-    expect(s.split('\n').length, 5);
-    expect(s.split('\n')[0], 'IA-REQ-V1');
-    expect(s.split('\n')[1], 'GET');
-    expect(s.split('\n')[2], '/api/profile');
-    expect(s.split('\n')[3], '2026-07-27T12:00:00Z');
-    expect(s.split('\n')[4].startsWith('E'), isTrue);
+    expect(s.split('\n').length, 6);
+    expect(s.split('\n')[0], 'IA-REQ-V2');
+    expect(s.split('\n')[1], '', reason: 'no Identity Agent was named');
+    expect(s.split('\n')[2], 'GET');
+    expect(s.split('\n')[3], '/api/profile');
+    expect(s.split('\n')[4], '2026-07-27T12:00:00Z');
+    expect(s.split('\n')[5].startsWith('E'), isTrue);
   });
 
   test('blake3 qb64 matches the agent, byte for byte', () {
@@ -94,6 +95,19 @@ void main() {
     expect(with_[OwnerSignature.aidHeader], 'EOWNER');
   });
 
+  test('the Identity Agent named is signed and sent', () {
+    String sig(String target) => OwnerSignature.headers(
+          method: 'GET', path: '/x', body: const [], ownerSeed: fixedSeed(),
+          targetAid: target, now: DateTime.utc(2026, 7, 27, 12, 0, 0),
+        )[OwnerSignature.sigHeader]!;
+    expect(sig('EAGENTA'), isNot(sig('EAGENTB')),
+        reason: 'a signature for one Identity Agent would serve for another');
+    final h = OwnerSignature.headers(
+        method: 'GET', path: '/x', body: const [], ownerSeed: fixedSeed(),
+        targetAid: 'EAGENTA');
+    expect(h[OwnerSignature.forHeader], 'EAGENTA');
+  });
+
   /// The vector the agent's test pins from the other side. If either
   /// implementation changes, one of the two fails rather than every request
   /// failing silently in production.
@@ -103,9 +117,11 @@ void main() {
       path: '/api/profile',
       body: const [],
       ownerSeed: fixedSeed(),
+      targetAid: 'EGOLDENIDENTITYAGENT',
       now: DateTime.utc(2026, 7, 27, 12, 0, 0),
     )[OwnerSignature.sigHeader]!;
-    print('GOLDEN_SIGNATURE=$sig');
-    expect(sig.startsWith('0B'), isTrue);
+    expect(sig,
+        '0BDuezD3LBmx9DEFugOkyMZtZOfPETxsToamKGnFoF2Z8y7d8bVsrmsLpsrvRKPLgSpvIeMwaDQFGtfEkwauEUsK',
+        reason: 'owner_signature_interop_test.go pins this same value; change both or neither');
   });
 }

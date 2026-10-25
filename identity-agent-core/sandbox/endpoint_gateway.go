@@ -24,7 +24,8 @@ type Authorizer interface {
 // structuralAuthorizer is the default Authorizer until the gateway is implemented. It
 // enforces the two rules that hold regardless of per-asker policy:
 //   - a host_control capability is never invocable by a remote caller, and
-//   - a remote caller is default-denied without the capability in its granted scope.
+//   - a remote caller is default-denied without the capability in its granted scope,
+//     unless it is the owner, who grants scopes rather than holding them.
 //
 // Egress is pass-through for now. Full per-asker ACDC-scope authorization and egress
 // disclosure/filtering arrive with the gateway implementation.
@@ -34,7 +35,7 @@ func (structuralAuthorizer) AuthorizeIngress(ctx context.Context, caller CallerC
 	if capDef.HostControl && caller.Remote {
 		return fmt.Errorf("%w: host_control capability %q is not invocable by a remote caller", ErrDenied, capDef.ID)
 	}
-	if caller.Remote && !containsStr(caller.Scopes, capDef.ID) {
+	if caller.Remote && !caller.Owner && !containsStr(caller.Scopes, capDef.ID) {
 		if caller.NoScopesBecause != "" {
 			return fmt.Errorf("%w: caller lacks scope for capability %q: %s", ErrDenied, capDef.ID, caller.NoScopesBecause)
 		}

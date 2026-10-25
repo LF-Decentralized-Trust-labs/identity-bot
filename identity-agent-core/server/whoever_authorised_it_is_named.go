@@ -119,7 +119,8 @@ func (s *CoreServer) authorityOf(r *http.Request) (authority, func(), error) {
 		stamp := strings.TrimSpace(r.Header.Get(headerOwnerTimestamp))
 		return authority{Request: &signedRequest{
 			Kind: "owner", Signer: owner, Signature: sig, Body: string(body),
-			Signed: canonicalRequestString(r.Method, r.URL.Path, stamp, body),
+			Signed: canonicalOwnerRequest(strings.TrimSpace(r.Header.Get(headerOwnerFor)),
+				r.Method, r.URL.Path, stamp, body),
 		}}, release, nil
 	}
 	return authority{}, release, nil

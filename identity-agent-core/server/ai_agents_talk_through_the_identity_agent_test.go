@@ -114,7 +114,7 @@ func (w *talkWorld) personSays(t *testing.T, a *asset.Asset, conv, text string) 
 		Conversation: conv, To: a.PairwiseAID, Body: text, Nonce: conversation.NewID("n_"),
 	})
 	path := "/api/mcp/agents/" + a.ID + "/conversations"
-	req := asThatMachine(t, w.ctlAID, "POST", path, string(body), w.ctlSeed, "", time.Time{})
+	req := asThatMachineTo(t, w.s.thisIdentityAgentsIdentifier(), w.ctlAID, "POST", path, string(body), w.ctlSeed, "", time.Time{})
 	rec := httptest.NewRecorder()
 	w.s.router.ServeHTTP(rec, req)
 	var out map[string]any
@@ -345,7 +345,7 @@ func TestAReplyGoesOnlyToWhoAsked(t *testing.T) {
 func TestAnUnsealedMessageIsRefused(t *testing.T) {
 	w := newTalkWorld(t)
 	// The live body itself, signing correctly, but not sealing.
-	req := w.machineA.signed(t, "GET", "/api/agent-host/inbox", nil)
+	req := w.machineA.signed(t, w.s, "GET", "/api/agent-host/inbox", nil)
 	rec := httptest.NewRecorder()
 	w.s.router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "sealed") {
