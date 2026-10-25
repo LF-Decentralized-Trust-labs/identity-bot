@@ -7,11 +7,14 @@ import {
   signCanonical,
   verifyCanonical,
   createDevRelayServer,
+  keyFromIdentityAgent,
 } from "../dist/index.js";
+import { anIdentityAgentStandIn } from "./an-identity-agent-stand-in.mjs";
 
 async function run() {
   const relay = createDevRelayServer({ port: 0, host: "127.0.0.1" });
   const { url: relayUrl, server: relayServer } = await relay.start();
+  const ia = await anIdentityAgentStandIn();
 
   const site = await generateDevSiteIdentity(relayUrl);
   relay.registerIdentity(site);
@@ -19,6 +22,7 @@ async function run() {
   const verifier = new IdentityAgentVerifier({
     siteIdentity: site,
     devRelayBaseUrl: relayUrl,
+    resolveKey: keyFromIdentityAgent(ia.url),
   });
 
   const { session_token, bundle } = await verifier.createChallenge({
@@ -48,7 +52,9 @@ async function run() {
     dt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
     disclosures: { display_name: "Alice", email: "alice@example.com" },
     presented_acdcs: [],
+    p_kel: "alices-signed-key-log",
   };
+  ia.knows(pairwiseAid, assertion.p_kel, pairwisePub);
   assertion.d = assertionDigest(assertion);
   const body = canonicalAssertionBody(assertion);
   assertion.sig = await signCanonical(body, pairwiseSeed);
@@ -65,7 +71,13 @@ async function run() {
   const state = verifier.getSessionState(session_token);
   if (state?.state !== "verified") throw new Error(`expected verified, got ${state?.state}`);
 
+  // The key was established from the log the assertion carried.
+  if (!ia.asked.some((q) => q.aid === pairwiseAid && q.key_log === assertion.p_kel)) {
+    throw new Error("the verifier did not ask the Identity Agent about the assertion's key log");
+  }
+
   console.log("steel-thread: challenge → assertion → verify → session verified");
+  await ia.close();
   await new Promise((resolve, reject) => relayServer.close((err) => (err ? reject(err) : resolve())));
 }
 

@@ -14,6 +14,7 @@ import {
   generateDevSiteIdentity,
   createDevRelayServer,
   mountIdentityAgentLoginRoutes,
+  keyFromIdentityAgent,
 } from "../dist/index.js";
 
 const IA_BASE = process.env.IA_BASE ?? "http://127.0.0.1:5050";
@@ -42,6 +43,7 @@ async function startRp() {
   const verifier = new IdentityAgentVerifier({
     siteIdentity: site,
     devRelayBaseUrl: relayUrl,
+    resolveKey: keyFromIdentityAgent(IA_BASE),
   });
 
   const app = express();

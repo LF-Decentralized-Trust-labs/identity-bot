@@ -2,7 +2,7 @@ import * as ed from "@noble/ed25519";
 import { CLAIM_NAMESPACE } from "./profile.js";
 import type { IDTokenVerifyResult } from "./types.js";
 import type { LoginAssertion } from "../types.js";
-import { resolveFromDidWebs } from "../resolver.js";
+import { NO_KEY_RESOLVER, type KeyResolver } from "../resolver.js";
 
 const CLAIM_SEAM8_ASSERTION = `${CLAIM_NAMESPACE}/seam8_assertion`;
 
@@ -15,10 +15,11 @@ export function parseJWT(token: string): { header: Record<string, unknown>; payl
   return { header, payload };
 }
 
-/** Verify EdDSA JWT signature using did:webs-resolved key. */
+/** Verify the EdDSA JWT signature with the issuer's key, established from the
+ *  key log the embedded login assertion carries. */
 export async function verifyIDTokenSignature(
   token: string,
-  fetchFn: typeof fetch = fetch,
+  resolveKey?: KeyResolver,
 ): Promise<{ ok: boolean; reason?: string; publicKey?: Uint8Array }> {
   const jwtParts = token.split(".");
   if (jwtParts.length !== 3) return { ok: false, reason: "invalid JWT" };
@@ -28,17 +29,12 @@ export async function verifyIDTokenSignature(
   if (!kid || !iss?.startsWith("did:webs:")) {
     return { ok: false, reason: "missing kid or did:webs iss" };
   }
-  const rest = iss.slice("did:webs:".length);
-  const didParts = rest.split(":");
+  const didParts = iss.slice("did:webs:".length).split(":");
   const aid = didParts[didParts.length - 1]!;
-  const host = didParts.slice(0, -1).join(":");
-  const relayBase = host.includes("/")
-    ? `http://${host.replace(/:/g, "/")}`
-    : `http://${host}`;
+  if (!resolveKey) return { ok: false, reason: NO_KEY_RESOLVER };
   let publicKey: Uint8Array;
   try {
-    const resolved = await resolveFromDidWebs(`${relayBase}/oobi/${aid}`, aid, fetchFn);
-    publicKey = resolved.publicKey;
+    publicKey = await resolveKey(aid, assertionFromIDToken(payload)?.p_kel);
   } catch (err) {
     return { ok: false, reason: `key resolve failed: ${(err as Error).message}` };
   }
@@ -73,11 +69,14 @@ export interface VerifyIDTokenOptions {
   expectedAudience: string;
   expectedNonce: string;
   maxSkewSeconds?: number;
-  fetchFn?: typeof fetch;
+  /** Establishes the issuer's key from the embedded assertion's key log.
+   *  Without one every token is refused; see `keyFromIdentityAgent`. */
+  resolveKey?: KeyResolver;
 }
 
 /**
- * Verify OIDC ID token: JWT sig via did:webs, then delegate login checks to verifyAssertion.
+ * Verify OIDC ID token: JWT sig by the key the issuer's own key log holds, then
+ * delegate login checks to verifyAssertion.
  */
 export async function verifyIDToken(
   token: string,
@@ -94,7 +93,7 @@ export async function verifyIDToken(
     assertion: LoginAssertion,
   ) => Promise<{ allowed: boolean; reason?: string }>,
 ): Promise<IDTokenVerifyResult> {
-  const sig = await verifyIDTokenSignature(token, opts.fetchFn);
+  const sig = await verifyIDTokenSignature(token, opts.resolveKey);
   if (!sig.ok) return { ok: false, reason: sig.reason };
 
   const { payload } = parseJWT(token);

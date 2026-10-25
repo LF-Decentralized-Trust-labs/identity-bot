@@ -9,7 +9,7 @@ import {
   signCanonical,
   verifyCanonical,
 } from "./canonical.js";
-import { resolveFromDidWebs } from "./resolver.js";
+import { NO_KEY_RESOLVER, type KeyResolver } from "./resolver.js";
 import { InMemorySessionStore } from "./session-store.js";
 import { buildLoginQrUrl } from "./qr-url.js";
 import { AskAction } from "./types.js";
@@ -27,6 +27,9 @@ export interface VerifierConfig {
   sessionStore?: InMemorySessionStore;
   challengeTtlSeconds?: number;
   devRelayBaseUrl?: string;
+  /** Establishes an asserter's key from the key log its assertion carries.
+   *  Without one every assertion is refused; see `keyFromIdentityAgent`. */
+  resolveKey?: KeyResolver;
 }
 
 export class IdentityAgentVerifier {
@@ -34,12 +37,14 @@ export class IdentityAgentVerifier {
   private store: InMemorySessionStore;
   private challengeTtl: number;
   private devRelayBaseUrl?: string;
+  private resolveKey?: KeyResolver;
 
   constructor(config: VerifierConfig) {
     this.site = config.siteIdentity;
     this.store = config.sessionStore ?? new InMemorySessionStore();
     this.challengeTtl = config.challengeTtlSeconds ?? 300;
     this.devRelayBaseUrl = config.devRelayBaseUrl;
+    this.resolveKey = config.resolveKey;
   }
 
   get sessionStore(): InMemorySessionStore {
@@ -130,13 +135,12 @@ export class IdentityAgentVerifier {
       return { valid: false, reason: "missing sig" };
     }
 
+    if (!this.resolveKey) {
+      return { valid: false, reason: NO_KEY_RESOLVER };
+    }
     let publicKey: Uint8Array;
     try {
-      const resolved = await resolveFromDidWebs(
-        assertion.relationship_aid_oobi,
-        assertion.i,
-      );
-      publicKey = resolved.publicKey;
+      publicKey = await this.resolveKey(assertion.i, assertion.p_kel);
     } catch (err) {
       return { valid: false, reason: `key resolve failed: ${(err as Error).message}` };
     }

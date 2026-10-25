@@ -1,5 +1,3 @@
-import { ed25519VerkeyQb64 } from "./canonical.js";
-
 export interface DidWebsDocument {
   id: string;
   verificationMethod: Array<{
@@ -11,31 +9,56 @@ export interface DidWebsDocument {
   }>;
 }
 
-export interface ResolvedKey {
-  aid: string;
-  publicKey: Uint8Array;
-  verkeyQb64: string;
-}
+/**
+ * Establishes an identity's current signing key from its key log.
+ *
+ * `keyLog` is the signed key log a login assertion carries (`p_kel`). A key is
+ * tied to an identifier only by a log whose inception derives that identifier
+ * and whose events are signed by the keys they declare; a key read from a
+ * did.json at an address the assertion names is not, because whoever wrote the
+ * assertion also chose the address. A resolver must refuse (throw) when the log
+ * does not establish a key for `aid`.
+ */
+export type KeyResolver = (aid: string, keyLog: string | undefined) => Promise<Uint8Array>;
 
-/** Path 2: resolve signing key from did:webs document at relay URL. */
-export async function resolveFromDidWebs(
-  relayOobiUrl: string,
-  aid: string,
+/**
+ * The reason a verifier with no way to check a key log refuses, rather than
+ * falling back to reading a key from wherever an assertion says it lives.
+ */
+export const NO_KEY_RESOLVER =
+  "no way to check this identity's key log: give the verifier a resolveKey, such as " +
+  "keyFromIdentityAgent(<an Identity Agent you trust>)";
+
+/**
+ * A resolver that asks an Identity Agent to check the key log.
+ *
+ * Checking a key log means re-deriving an identifier from the exact bytes of
+ * its inception and verifying every event's signature. That check already
+ * exists, once, in the Identity Agent; this asks it (`POST /public/login/key`)
+ * instead of keeping a second implementation here that could drift from it on
+ * the one question that decides whether a stranger is who they claim. The
+ * Identity Agent fetches nothing and stores nothing to answer.
+ */
+export function keyFromIdentityAgent(
+  identityAgentUrl: string,
   fetchFn: typeof fetch = fetch,
-): Promise<ResolvedKey> {
-  const base = relayOobiUrl.replace(/\/oobi\/.*$/, "").replace(/\/$/, "");
-  const didUrl = `${base}/${aid}/did.json`;
-  const resp = await fetchFn(didUrl);
-  if (!resp.ok) {
-    throw new Error(`did:webs resolve failed: ${resp.status} ${didUrl}`);
-  }
-  const doc = (await resp.json()) as DidWebsDocument;
-  const vm = doc.verificationMethod?.[0];
-  if (!vm?.publicKeyJwk?.x) {
-    throw new Error("did.json missing Ed25519 publicKeyJwk");
-  }
-  const pub = Buffer.from(vm.publicKeyJwk.x, "base64url");
-  return { aid, publicKey: pub, verkeyQb64: ed25519VerkeyQb64(pub) };
+): KeyResolver {
+  const url = `${identityAgentUrl.replace(/\/$/, "")}/public/login/key`;
+  return async (aid, keyLog) => {
+    if (!keyLog) {
+      throw new Error(`no key log came with this, so nothing ties a key to ${aid}`);
+    }
+    const resp = await fetchFn(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ aid, key_log: keyLog }),
+    });
+    const out = (await resp.json().catch(() => ({}))) as { public_key_b64?: string; error?: string };
+    if (!resp.ok || !out.public_key_b64) {
+      throw new Error(out.error ?? `the Identity Agent at ${identityAgentUrl} answered ${resp.status}`);
+    }
+    return new Uint8Array(Buffer.from(out.public_key_b64, "base64url"));
+  };
 }
 
 /** Build a minimal did:webs document for dev relay stub. */

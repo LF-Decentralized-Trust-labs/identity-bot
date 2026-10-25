@@ -105,7 +105,7 @@ The adapter (`identity-agent-core/oidc/`, mirrored in `packages/login-verify/src
 - OIDC adapter: `identity-agent-core/oidc/` (adapter, auth, idtoken, vp, discovery, conformance, profile), mirrored in `packages/login-verify/src/oidc/`.
 - Golden vectors: `packages/login-verify/golden_vectors.json` + `golden-seed.ts`, self-tested by `services/login-verify-ms/src/golden.ts`.
 - Score AuthProvider: `authproviders/identity-levels/main.go` (contract `ap-1`).
-- Pairwise public keys resolve via `did:webs` documents served at `{relayBase}/{aid}/did.json` — see ADR-024 for the publishing side.
+- A pairwise public key is taken from the identity's own key log, which every assertion carries signed in `p_kel`: the key counts only when the log validates and its inception derives the identifier named (`login.KeyFromKeyLog`). Site and signer keys come from the key log at their OOBI under the same check (`login.KeyFromOOBI`). A key read from a `did.json` at an address the assertion names is not used, because the assertion's author chose that address. Verifiers in other languages ask an Identity Agent to check a log (`POST /public/login/key`, `keyFromIdentityAgent` in `packages/login-verify`) rather than keeping a second implementation. The `did:webs` documents of ADR-024 are still served, from keys proved this way. *(Amended 2026-10-24; until then keys were read from `{relayBase}/{aid}/did.json`.)*
 
 ---
 

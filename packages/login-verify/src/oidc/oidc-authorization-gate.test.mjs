@@ -16,6 +16,7 @@ async function run() {
   const assertion = {
     v: "IALOGIN10JSON", t: "login-assertion", i: aid,
     audience: "https://portal.example", nonce: "a-nonce", sig: "unused-here",
+    p_kel: "its-signed-key-log",
   };
   const header = { alg: "EdDSA", kid: `${iss}#0`, typ: "JWT" };
   const payload = { iss, sub: aid, aud: "https://portal.example",
@@ -26,15 +27,13 @@ async function run() {
   const sig = await ed.signAsync(new TextEncoder().encode(signing), priv);
   const token = `${signing}.${Buffer.from(sig).toString("base64url")}`;
 
-  // The relay that publishes this identifier's key.
-  const fetchFn = async () => ({
-    ok: true,
-    json: async () => ({
-      verificationMethod: [{ publicKeyJwk: { x: Buffer.from(pub).toString("base64url") } }],
-    }),
-  });
+  // What the identifier's key log establishes, as an Identity Agent would answer.
+  const resolveKey = async (a, keyLog) => {
+    if (a === aid && keyLog === assertion.p_kel) return pub;
+    throw new Error("no key established");
+  };
 
-  const opts = { expectedAudience: "https://portal.example", expectedNonce: "a-nonce", fetchFn };
+  const opts = { expectedAudience: "https://portal.example", expectedNonce: "a-nonce", resolveKey };
   const substrateOk = async () => ({ valid: true });
 
   // Guard: if the signature path breaks, everything below would pass vacuously.
