@@ -124,6 +124,17 @@ func ValidateKELFromBytes(in ValidateKELInput) (*DriverValidateKELResponse, erro
 		// commitment mean anything. A non-establishment event declares no keys
 		// and is signed by whatever is currently in force.
 		signing := current
+		// One signature travels with each event here, so only an identity
+		// with one key can be shown to have signed. A multi-key identity's
+		// threshold cannot be met by one member's signature, and checking
+		// that member's alone would let any one of them sign for all of
+		// them. Refused rather than half-checked.
+		if ev.Establishment() && len(ev.Keys) > 1 {
+			problems = append(problems, fmt.Sprintf(
+				"event %d declares %d keys; this check verifies identities with one key, "+
+					"so a multi-key identity's signing threshold is not taken as met", i, len(ev.Keys)))
+			continue
+		}
 		if ev.Establishment() && len(ev.Keys) > 0 {
 			signing = ev.Keys[0]
 			current = ev.Keys[0]
@@ -224,8 +235,12 @@ func decodeCesrSignature(sig string) ([]byte, error) {
 		return raw, nil
 	case len(sig) == 88 && sig[0] == 'A':
 		// Indexed: a one-character code, one character of index, then payload.
-		// The index selects a key; only single-key logs are checked here, so it
-		// is decoded and the payload taken.
+		// The index selects a key; only single-key logs are checked here, so
+		// the only index that names a key that exists is the first.
+		if sig[1] != 'A' {
+			return nil, fmt.Errorf("the signature is indexed to key %q, and only the first key "+
+				"exists in a single-key log", sig[1:2])
+		}
 		raw, err := base64.RawURLEncoding.DecodeString("AA" + sig[2:])
 		if err != nil {
 			return nil, fmt.Errorf("the signature looks indexed and does not decode: %w", err)
