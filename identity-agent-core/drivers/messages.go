@@ -160,6 +160,11 @@ type DriverResolveOobiResponse struct {
 	CurrentPublicKey string                   `json:"current_public_key,omitempty"`
 	EventsValidated  int                      `json:"events_validated"`
 	ValidationErrors []string                 `json:"validation_errors,omitempty"`
+	// RawEvents are the canonical bytes the log was validated from, for a
+	// caller that must read an event itself (a delegated inception's
+	// delegator, say) and has to read the bytes that were checked rather
+	// than a second, unchecked copy.
+	RawEvents [][]byte `json:"-"`
 }
 
 type DriverValidateKELResponse struct {

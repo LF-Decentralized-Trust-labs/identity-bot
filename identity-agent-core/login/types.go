@@ -79,7 +79,13 @@ type Assertion struct {
 	PresentedACDCs      []interface{}          `json:"presented_acdcs"`
 	CustomData          map[string]interface{} `json:"custom_data,omitempty"`
 	PKEL                string                 `json:"p_kel,omitempty"`
-	Sig                 string                 `json:"sig,omitempty"`
+	// SiteAID is the site whose signed challenge the person approved. The
+	// audience, nonce and callback a site puts in its challenge are only text
+	// it chose, so a site can copy them from another's live challenge; the
+	// identity whose key signed the challenge is the one thing it cannot copy.
+	// A relying party refuses an assertion that names any site but its own.
+	SiteAID string `json:"site_aid,omitempty"`
+	Sig     string `json:"sig,omitempty"`
 }
 
 type SiteRelationship struct {

@@ -22,7 +22,11 @@ type AssertionVerifyResult struct {
 // the key it declares (KeyFromKeyLog). Nothing is fetched, so nothing about
 // where the assertion says its key lives is trusted. An assertion without a
 // key log is refused, because nothing else ties a key to an identifier.
-func VerifyAssertion(a Assertion, expectedNonce, expectedAudience string, maxSkewSeconds int) AssertionVerifyResult {
+//
+// expectedSiteAID is the site whose challenge this answers. The assertion must
+// name it: an assertion naming another site was approved for that site's
+// challenge, carrying this one's nonce and audience copied into it.
+func VerifyAssertion(a Assertion, expectedNonce, expectedAudience, expectedSiteAID string, maxSkewSeconds int) AssertionVerifyResult {
 	if maxSkewSeconds <= 0 {
 		maxSkewSeconds = 300
 	}
@@ -39,6 +43,9 @@ func VerifyAssertion(a Assertion, expectedNonce, expectedAudience string, maxSke
 	}
 	if a.Audience != expectedAudience {
 		return AssertionVerifyResult{Reason: "audience mismatch"}
+	}
+	if expectedSiteAID == "" || a.SiteAID != expectedSiteAID {
+		return AssertionVerifyResult{Reason: "site mismatch: the assertion answers another site's challenge"}
 	}
 	if a.Sig == "" {
 		return AssertionVerifyResult{Reason: "missing sig"}

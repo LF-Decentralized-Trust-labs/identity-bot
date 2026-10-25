@@ -147,6 +147,7 @@ func ResolveOobiWith(client HTTPClient, oobiURL string) (*drivers.DriverResolveO
 		return nil, err
 	}
 	out.KelVerified = res.KelVerified
+	out.RawEvents = in.RawEvents
 	out.EventsValidated = res.EventsValidated
 	out.ValidationErrors = res.ValidationErrors
 	if res.CurrentPublicKey != "" {

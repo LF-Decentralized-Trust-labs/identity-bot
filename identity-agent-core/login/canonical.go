@@ -75,6 +75,9 @@ func canonicalAssertionBody(a Assertion) string {
 	if a.PKEL != "" {
 		parts = append(parts, jsonField("p_kel", a.PKEL))
 	}
+	if a.SiteAID != "" {
+		parts = append(parts, jsonField("site_aid", nfc(a.SiteAID)))
+	}
 	return "{" + strings.Join(filterEmpty(parts), ",") + "}"
 }
 

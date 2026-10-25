@@ -105,8 +105,8 @@ func (s *CoreServer) mintPairwiseIn(pool, name string) (aid, oobi string, seed [
 	if ierr != nil || icp.AID == "" {
 		return "", "", nil, 0, fmt.Errorf("mint pairwise inception: %w", ierr)
 	}
-	// Publish the key (did.json, for signature verification) and the KEL (OOBI, so a peer can
-	// resolve this pairwise AID when adding us as a contact).
+	// Publish the key (did.json, for did:webs resolvers) and the KEL (OOBI, which is what a
+	// verifier takes the key from, and how a peer resolves this pairwise AID as a contact).
 	pairwiseKeys.Lock()
 	pairwiseKeys.m[icp.AID] = base64.RawURLEncoding.EncodeToString(pub)
 	pairwiseKeys.Unlock()

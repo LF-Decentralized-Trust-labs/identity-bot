@@ -38,7 +38,7 @@ func TestARegistryThatCannotBeReachedIsAnError(t *testing.T) {
 	dead.Close() // nothing answers there now
 
 	h, rel := aRelationshipFor(t, url+"/oobi/ESite")
-	err := h.registerPairwiseOnDevRelay(rel)
+	err := h.registerPairwiseOnDevRelay(rel, nil)
 	if err == nil {
 		t.Fatal("a registration nobody received was reported as done")
 	}
@@ -57,7 +57,7 @@ func TestARegistrationCarriesItsProvingKeyLog(t *testing.T) {
 	defer registry.Close()
 
 	h, rel := aRelationshipFor(t, registry.URL+"/oobi/ESite")
-	if err := h.registerPairwiseOnDevRelay(rel); err != nil {
+	if err := h.registerPairwiseOnDevRelay(rel, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got["aid"] != rel.PairwiseAID {

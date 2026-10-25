@@ -10,6 +10,8 @@ import (
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/keriengine"
+
+	keri "github.com/grapeid/keri-go"
 )
 
 // The key a sign-in is checked against comes from the identity's key log, and
@@ -65,18 +67,37 @@ func DecodeKeyLog(encoded string) (KeyLog, error) {
 	return kl, nil
 }
 
+// A key log carried with a sign-in, or published to a registry, is a pairwise
+// identity's: an inception, and at most a little after it. The bounds keep
+// anybody from making this agent hold or check a long one on their behalf.
+const (
+	MaxKeyLogEvents = 8
+	MaxKeyLogBytes  = 64 << 10
+)
+
 // KeyFromKeyLog returns aid's current signing key from a key log carried with
 // a sign-in, or says why the log does not establish one.
 //
 // It reaches out to nothing: everything it needs is in the log, and the log
 // proves itself or it does not.
 func KeyFromKeyLog(aid, encoded string) ([]byte, error) {
+	if aid == "" {
+		return nil, fmt.Errorf("no identifier was named, so there is nothing for a key log to belong to")
+	}
 	if encoded == "" {
 		return nil, fmt.Errorf("no key log came with this, so nothing ties a key to %s", aid)
+	}
+	if len(encoded) > MaxKeyLogBytes {
+		return nil, fmt.Errorf("the key log of %s is longer than a sign-in carries (%d bytes, at most %d)",
+			aid, len(encoded), MaxKeyLogBytes)
 	}
 	kl, err := DecodeKeyLog(encoded)
 	if err != nil {
 		return nil, err
+	}
+	if len(kl.RawEventsB64) > MaxKeyLogEvents {
+		return nil, fmt.Errorf("the key log of %s has %d events; a sign-in carries at most %d",
+			aid, len(kl.RawEventsB64), MaxKeyLogEvents)
 	}
 	raws, err := drivers.DecodeRawEvents(kl.RawEventsB64)
 	if err != nil {
@@ -90,7 +111,26 @@ func KeyFromKeyLog(aid, encoded string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := unprovableRotation(aid, raws); err != nil {
+		return nil, err
+	}
+	// A key log carried this way comes without its delegator's, so a
+	// delegated inception in it claims an approval nothing here can see. A
+	// sign-in's pairwise identity is never delegated; one that says it is
+	// was not made by an Identity Agent's sign-in.
+	if icp, err := keri.ParseEvent(raws[0]); err == nil && (icp.Ilk == "dip" || icp.Delegator != "") {
+		return nil, fmt.Errorf("the key log of %s opens with a delegated inception, and no delegator's "+
+			"log comes with it to show the delegation was approved", aid)
+	}
 	return currentKey(aid, res.KelVerified, res.ValidationErrors, res.CurrentPublicKey)
+}
+
+// VerifiedIdentity is what an identity's introduction proved: its current key,
+// and the canonical bytes of the log that proved it, for a caller that has to
+// read an event (a delegated inception, say) from the bytes that were checked.
+type VerifiedIdentity struct {
+	Key       []byte
+	RawEvents [][]byte
 }
 
 // KeyFromOOBI resolves aid's introduction and returns its current signing key,
@@ -100,18 +140,91 @@ func KeyFromKeyLog(aid, encoded string) ([]byte, error) {
 // address is no part of the trust: a log that derives aid proves itself from
 // anywhere, and one that does not proves nothing from anywhere.
 func KeyFromOOBI(client *http.Client, oobiURL, aid string) ([]byte, error) {
+	id, err := IdentityFromOOBI(client, oobiURL, aid)
+	if err != nil {
+		return nil, err
+	}
+	return id.Key, nil
+}
+
+// IdentityFromOOBI is KeyFromOOBI with the verified log kept.
+//
+// A delegated inception is accepted as the identity's own log without its
+// delegator's approval being checked: the key is the identity's whoever
+// delegated it. Anything that relies on the delegation itself checks it
+// (verifyDelegationAnchor).
+func IdentityFromOOBI(client *http.Client, oobiURL, aid string) (VerifiedIdentity, error) {
+	return identityFromOOBI(client, oobiURL, aid, true)
+}
+
+// identityFromOOBI resolves and validates aid's introduction. mustBeCurrent
+// says the caller will use the key now in force, so a rotation nothing can
+// prove the newest is refused; a caller reading only what the log once
+// signed, such as a delegator's approval, does not need that.
+func identityFromOOBI(client *http.Client, oobiURL, aid string, mustBeCurrent bool) (VerifiedIdentity, error) {
+	if aid == "" {
+		return VerifiedIdentity{}, fmt.Errorf("no identifier was named, so there is nothing for an introduction to belong to")
+	}
 	var c keriengine.HTTPClient
 	if client != nil {
 		c = client
 	}
 	res, err := keriengine.ResolveOobiWith(c, oobiURL)
 	if err != nil {
-		return nil, err
+		return VerifiedIdentity{}, err
 	}
 	if res.CID != aid {
-		return nil, fmt.Errorf("the introduction at %s is for %s, not %s", oobiURL, res.CID, aid)
+		return VerifiedIdentity{}, fmt.Errorf("the introduction at %s is for %s, not %s", oobiURL, res.CID, aid)
 	}
-	return currentKey(aid, res.KelVerified, res.ValidationErrors, res.CurrentPublicKey)
+	key, err := currentKey(aid, res.KelVerified, res.ValidationErrors, res.CurrentPublicKey)
+	if err != nil {
+		return VerifiedIdentity{}, err
+	}
+	if mustBeCurrent {
+		if err := unprovableRotation(aid, res.RawEvents); err != nil {
+			return VerifiedIdentity{}, err
+		}
+	}
+	return VerifiedIdentity{Key: key, RawEvents: res.RawEvents}, nil
+}
+
+// unprovableRotation refuses a rotated log from an identity that names no
+// witnesses.
+//
+// A log proves who signed it, never that it is the newest. Whoever still holds
+// a key a rotation retired can present the log as it stood before the
+// rotation, and nothing in that shorter log says otherwise; only witnesses
+// who saw the rotation can. An identity with none has nobody to ask, so its
+// rotation could never retire a key, and a log that shows one is claiming
+// something nothing here can prove. Such an identity is never rotated: its key
+// is retired by ending the relationship it was made for.
+//
+// An identity that names witnesses is accepted as its log stands. Asking its
+// witnesses for their newest event, so a shortened log is caught, is not done
+// here yet.
+func unprovableRotation(aid string, raws [][]byte) error {
+	if len(raws) < 2 {
+		return nil
+	}
+	icp, err := keri.ParseEvent(raws[0])
+	if err != nil {
+		return fmt.Errorf("the inception of %s does not parse: %w", aid, err)
+	}
+	if len(icp.Witnesses) > 0 {
+		return nil
+	}
+	for i, raw := range raws[1:] {
+		ev, err := keri.ParseEvent(raw)
+		if err != nil {
+			return fmt.Errorf("event %d of %s does not parse: %w", i+1, aid, err)
+		}
+		if ev.Establishment() {
+			return fmt.Errorf("%s names no witnesses, so nothing can show its rotation is the newest; "+
+				"an identity without witnesses is never rotated, and its key is retired by ending "+
+				"the relationship it was made for", aid)
+		}
+	}
+	return nil
 }
 
 // OOBIFor is where aid's introduction is published under base, the form every

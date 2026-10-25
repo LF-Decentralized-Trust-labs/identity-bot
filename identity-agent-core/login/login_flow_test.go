@@ -99,7 +99,7 @@ func TestLoginPairwiseAndDisclosures(t *testing.T) {
 		t.Fatal("assertion not signed")
 	}
 	// And the site can check it from the assertion alone.
-	if res := VerifyAssertion(*asrt, bundleA.Nonce, bundleA.Audience, 300); !res.Valid {
+	if res := VerifyAssertion(*asrt, bundleA.Nonce, bundleA.Audience, bundleA.SiteAID, 300); !res.Valid {
 		t.Fatalf("the site could not verify a genuine assertion: %s", res.Reason)
 	}
 
@@ -111,7 +111,7 @@ func TestLoginPairwiseAndDisclosures(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a relationship without its kept inception could not sign: %v", err)
 	}
-	if res := VerifyAssertion(*asrt2, bundleA.Nonce, bundleA.Audience, 300); !res.Valid {
+	if res := VerifyAssertion(*asrt2, bundleA.Nonce, bundleA.Audience, bundleA.SiteAID, 300); !res.Valid {
 		t.Fatalf("a rebuilt inception did not verify: %s", res.Reason)
 	}
 }

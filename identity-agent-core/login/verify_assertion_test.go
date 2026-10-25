@@ -42,6 +42,9 @@ func aRealIdentity(t *testing.T) (aid string, seed []byte, keyLog string) {
 	return icp.AID, seed, keyLog
 }
 
+// testSite is the site whose challenge the test assertions answer.
+const testSite = "ESiteWhoseChallengeThisAnswers"
+
 func anAssertion(t *testing.T, aid, keyLog string, seed []byte, nonce, aud string) Assertion {
 	t.Helper()
 	a := Assertion{
@@ -55,6 +58,7 @@ func anAssertion(t *testing.T, aid, keyLog string, seed []byte, nonce, aud strin
 		Disclosures:         map[string]string{"display_name": "Test User"},
 		PresentedACDCs:      []interface{}{},
 		PKEL:                keyLog,
+		SiteAID:             testSite,
 	}
 	if err := SignAssertion(&a, seed); err != nil {
 		t.Fatal(err)
@@ -71,21 +75,21 @@ func TestVerifyAssertionRoundTrip(t *testing.T) {
 	const aud = "Example RP"
 	a := anAssertion(t, aid, keyLog, seed, nonce, aud)
 
-	if res := VerifyAssertion(a, nonce, aud, 300); !res.Valid {
+	if res := VerifyAssertion(a, nonce, aud, testSite, 300); !res.Valid {
 		t.Fatalf("expected valid, got reason=%q", res.Reason)
 	} else if res.PairwiseAID != aid {
 		t.Fatalf("pairwiseAID = %q, want %q", res.PairwiseAID, aid)
 	}
 
-	if VerifyAssertion(a, "wrong-nonce", aud, 300).Valid {
+	if VerifyAssertion(a, "wrong-nonce", aud, testSite, 300).Valid {
 		t.Fatal("nonce mismatch must fail")
 	}
-	if VerifyAssertion(a, nonce, "Evil RP", 300).Valid {
+	if VerifyAssertion(a, nonce, "Evil RP", testSite, 300).Valid {
 		t.Fatal("audience mismatch must fail")
 	}
 	tampered := a
 	tampered.Disclosures = map[string]string{"display_name": "Hacker"}
-	if VerifyAssertion(tampered, nonce, aud, 300).Valid {
+	if VerifyAssertion(tampered, nonce, aud, testSite, 300).Valid {
 		t.Fatal("tampered body must fail")
 	}
 }
@@ -98,7 +102,7 @@ func TestAnAssertionNamingSomebodyElsesIdentifierIsRefused(t *testing.T) {
 	_, attackerSeed, attackerLog := aRealIdentity(t)
 
 	a := anAssertion(t, victim, attackerLog, attackerSeed, "n", "aud")
-	res := VerifyAssertion(a, "n", "aud", 300)
+	res := VerifyAssertion(a, "n", "aud", testSite, 300)
 	if res.Valid {
 		t.Fatal("an assertion naming another identity was accepted")
 	}
@@ -112,7 +116,7 @@ func TestAnAssertionNamingSomebodyElsesIdentifierIsRefused(t *testing.T) {
 func TestAnAssertionWithNoKeyLogIsRefused(t *testing.T) {
 	aid, seed, _ := aRealIdentity(t)
 	a := anAssertion(t, aid, "", seed, "n", "aud")
-	if res := VerifyAssertion(a, "n", "aud", 300); res.Valid {
+	if res := VerifyAssertion(a, "n", "aud", testSite, 300); res.Valid {
 		t.Fatal("an assertion with no key log was accepted")
 	}
 }
@@ -123,7 +127,7 @@ func TestTheRightLogWithTheWrongKeyIsRefused(t *testing.T) {
 	victim, _, victimLog := aRealIdentity(t)
 	_, attackerSeed, _ := aRealIdentity(t)
 	a := anAssertion(t, victim, victimLog, attackerSeed, "n", "aud")
-	if res := VerifyAssertion(a, "n", "aud", 300); res.Valid || res.Reason != "invalid signature" {
+	if res := VerifyAssertion(a, "n", "aud", testSite, 300); res.Valid || res.Reason != "invalid signature" {
 		t.Fatalf("expected invalid signature, got valid=%v reason=%q", res.Valid, res.Reason)
 	}
 }
