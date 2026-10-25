@@ -56,7 +56,14 @@ func (s *CoreServer) saveDelegationAnchor(rootAID string, approval *drivers.Driv
 	if approval == nil || approval.DelegatorIxn == nil {
 		return nil
 	}
-	return s.saveOwnInteraction(rootAID, approval.DelegatorIxn, approval.DelegatorIxnRawBytesB64, -1, "")
+	if err := s.saveOwnInteraction(rootAID, approval.DelegatorIxn, approval.DelegatorIxnRawBytesB64, -1, ""); err != nil {
+		return err
+	}
+	// The approval goes to the identity's witnesses now, not on the next tick:
+	// a site's approval is honoured only with their receipts, so until they
+	// hold it every member would be refused.
+	s.witnessOwnLog()
+	return nil
 }
 
 func (s *CoreServer) mountAssetRoutes(r chi.Router) {
