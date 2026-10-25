@@ -3,17 +3,19 @@ import {
   parseRfc3339,
   verifyCanonical,
 } from "./canonical.js";
-import { resolveFromDidWebs } from "./resolver.js";
+import { NO_KEY_RESOLVER, type KeyResolver } from "./resolver.js";
 import type { LoginAssertion, VerifyAssertionOptions, VerifyAssertionResult } from "./types.js";
 
 export interface StandaloneVerifyOptions extends VerifyAssertionOptions {
-  /** Bypass relay/did:webs fetch — used for golden vector conformance. */
+  /** Establishes the asserter's key from the key log the assertion carries.
+   *  Required unless `signingPublicKey` is given; see `keyFromIdentityAgent`. */
+  resolveKey?: KeyResolver;
+  /** A key already known for this identity — used for golden vector conformance. */
   signingPublicKey?: Uint8Array;
   /** Skip dt freshness (golden harness supplies fixed dt). */
   skipDtCheck?: boolean;
   /** Override clock for dt skew checks. */
   nowMs?: number;
-  fetchFn?: typeof fetch;
   /** Burns the assertion so it cannot be verified a second time.
    *
    *  The nonce makes a captured assertion useless against a DIFFERENT sign-in.
@@ -57,6 +59,9 @@ export async function verifyLoginAssertion(
   if (assertion.audience !== opts.expectedAudience) {
     return { valid: false, reason: "audience mismatch" };
   }
+  if (!opts.expectedSiteAid || assertion.site_aid !== opts.expectedSiteAid) {
+    return { valid: false, reason: "site mismatch: the assertion answers another site's challenge" };
+  }
 
   if (!opts.skipDtCheck) {
     const maxSkew = opts.maxSkewSeconds ?? 300;
@@ -69,13 +74,11 @@ export async function verifyLoginAssertion(
 
   let publicKey = opts.signingPublicKey;
   if (!publicKey) {
+    if (!opts.resolveKey) {
+      return { valid: false, reason: NO_KEY_RESOLVER };
+    }
     try {
-      const resolved = await resolveFromDidWebs(
-        assertion.relationship_aid_oobi,
-        assertion.i,
-        opts.fetchFn,
-      );
-      publicKey = resolved.publicKey;
+      publicKey = await opts.resolveKey(assertion.i, assertion.p_kel);
     } catch (err) {
       return { valid: false, reason: `key resolve failed: ${(err as Error).message}` };
     }

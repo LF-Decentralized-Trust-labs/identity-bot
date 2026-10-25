@@ -89,6 +89,9 @@ export function canonicalAssertionBody(assertion: LoginAssertion): string {
   if (assertion.p_kel !== undefined) {
     parts.push(jsonField("p_kel", assertion.p_kel));
   }
+  if (assertion.site_aid) {
+    parts.push(jsonField("site_aid", nfc(assertion.site_aid)));
+  }
   return `{${parts.filter(Boolean).join(",")}}`;
 }
 

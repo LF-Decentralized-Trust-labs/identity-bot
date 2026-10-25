@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"crypto/ed25519"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"github.com/go-chi/chi/v5"
@@ -14,6 +13,7 @@ import (
 
 	"identity-agent-core/asset"
 	"identity-agent-core/backup"
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
 	"identity-agent-core/secureenclave"
 )
@@ -28,7 +28,7 @@ import (
 //	  → a pairwise key derived from it at the relationship's index
 //	  → an assertion signed with that key over the canonical body
 //	  → the site posts it to the Identity Agent
-//	  → the IA resolves the key from the identifier's own did.json
+//	  → the IA takes the key from the identifier's own key log, carried in the assertion
 //	  → the IA checks the signature, the nonce, the audience, the freshness
 //	  → the IA asks the membership resolver whether this identifier is an employee
 //	  → admitted, with the roster's own answer for who they are
@@ -70,6 +70,18 @@ func theirAgent(t *testing.T, index int) (*login.Handler, *login.SiteRelationshi
 	}
 	priv := ed25519.NewKeyFromSeed(seed[:ed25519.SeedSize])
 	pub := priv.Public().(ed25519.PublicKey)
+	next, err := backup.DerivePairwiseSeed(root, index, 1)
+	if err != nil {
+		t.Fatalf("derive next seed: %v", err)
+	}
+	nextPub := ed25519.NewKeyFromSeed(next[:ed25519.SeedSize]).Public().(ed25519.PublicKey)
+
+	// A genuine identity: its identifier is the digest of its own inception,
+	// which is what lets a site tie the key to it.
+	icp, err := iacrypto.BuildEd25519Inception(pub, nextPub)
+	if err != nil {
+		t.Fatalf("mint inception: %v", err)
+	}
 
 	h, err := login.NewHandler(dir, nil)
 	if err != nil {
@@ -77,30 +89,49 @@ func theirAgent(t *testing.T, index int) (*login.Handler, *login.SiteRelationshi
 	}
 	rel := &login.SiteRelationship{
 		SiteAID:           "ESiteAID",
-		PairwiseAID:       "E" + base64.RawURLEncoding.EncodeToString(pub)[:43],
+		PairwiseAID:       icp.AID,
 		RelationshipIndex: index,
 		DisplayName:       "Alice",
 		Email:             "alice@example.com",
+		InceptionB64:      icp.RawBytesB64,
 	}
 	return h, rel, pub
 }
 
-// theirKeyPublished stands in for the relay that serves an identifier's did.json.
-// The verifier resolves the signing key from there rather than being handed it.
-func theirKeyPublished(t *testing.T, aid string, pub ed25519.PublicKey) *httptest.Server {
+// theirSeed is the pairwise signing seed theirAgent(t, index) signs with.
+func theirSeed(t *testing.T, index int) []byte {
+	t.Helper()
+	root := make([]byte, 64)
+	for i := range root {
+		root[i] = byte(i + 7)
+	}
+	seed, err := backup.DerivePairwiseSeed(root, index, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return seed[:ed25519.SeedSize]
+}
+
+// postAssertion posts a, as written, to the organisation's sign-in callback for
+// the challenge token, and returns the answer.
+func postAssertion(t *testing.T, s *CoreServer, token string, a *login.Assertion) (int, string) {
+	t.Helper()
+	body, _ := json.Marshal(a)
+	req := httptest.NewRequest(http.MethodPost,
+		fmt.Sprintf("/api/login/callback?session=%s", token), strings.NewReader(string(body)))
+	w := httptest.NewRecorder()
+	s.handleLoginCallback(w, req)
+	return w.Code, w.Body.String()
+}
+
+// nothingIsFetched stands where the assertion says its key lives, and fails the
+// test if checking a sign-in reads anything from it. The key comes from the key
+// log inside the assertion, so the address it names is never consulted.
+func nothingIsFetched(t *testing.T) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/did.json") {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"verificationMethod": []map[string]any{{
-				"publicKeyJwk": map[string]string{
-					"x": base64.RawURLEncoding.EncodeToString(pub),
-				},
-			}},
-		})
+		t.Errorf("checking a sign-in fetched %s from the address the assertion named", r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
 	}))
 	t.Cleanup(srv.Close)
 	return srv
@@ -152,13 +183,7 @@ func signIn(t *testing.T, s *CoreServer, h *login.Handler, rel *login.SiteRelati
 	if err != nil {
 		t.Fatalf("build assertion: %v", err)
 	}
-
-	body, _ := json.Marshal(a)
-	req := httptest.NewRequest(http.MethodPost,
-		fmt.Sprintf("/api/login/callback?session=%s", token), strings.NewReader(string(body)))
-	w := httptest.NewRecorder()
-	s.handleLoginCallback(w, req)
-	return w.Code, w.Body.String()
+	return postAssertion(t, s, token, a)
 }
 
 // signInReusingSession posts another assertion against a session that already
@@ -176,17 +201,12 @@ func signInReusingSession(t *testing.T, s *CoreServer, h *login.Handler,
 	if err != nil {
 		t.Fatalf("build assertion: %v", err)
 	}
-	body, _ := json.Marshal(a)
-	req := httptest.NewRequest(http.MethodPost,
-		fmt.Sprintf("/api/login/callback?session=%s", token), strings.NewReader(string(body)))
-	w := httptest.NewRecorder()
-	s.handleLoginCallback(w, req)
-	return w.Code, w.Body.String()
+	return postAssertion(t, s, token, a)
 }
 
 func TestAnActiveEmployeeSignsIn(t *testing.T) {
-	h, rel, pub := theirAgent(t, 1000001)
-	relay := theirKeyPublished(t, rel.PairwiseAID, pub)
+	h, rel, _ := theirAgent(t, 1000001)
+	relay := nothingIsFetched(t)
 	s := theirOrganisation(t, map[string]bool{rel.PairwiseAID: true})
 
 	code, body := signIn(t, s, h, rel, relay.URL)
@@ -210,8 +230,8 @@ func TestAnActiveEmployeeSignsIn(t *testing.T) {
 // The whole point of the gate: a correctly signed assertion from somebody who
 // is not an employee proves who they are and does not get them in.
 func TestSomebodyWhoIsNotAnEmployeeIsRefused(t *testing.T) {
-	h, rel, pub := theirAgent(t, 1000002)
-	relay := theirKeyPublished(t, rel.PairwiseAID, pub)
+	h, rel, _ := theirAgent(t, 1000002)
+	relay := nothingIsFetched(t)
 	s := theirOrganisation(t, map[string]bool{}) // nobody on the roster
 
 	code, body := signIn(t, s, h, rel, relay.URL)
@@ -226,8 +246,8 @@ func TestSomebodyWhoIsNotAnEmployeeIsRefused(t *testing.T) {
 // Removing somebody takes effect on their next sign-in. This is the property
 // that decides whether the roster is the authority or merely a record.
 func TestRemovingSomebodyStopsThemSigningIn(t *testing.T) {
-	h, rel, pub := theirAgent(t, 1000003)
-	relay := theirKeyPublished(t, rel.PairwiseAID, pub)
+	h, rel, _ := theirAgent(t, 1000003)
+	relay := nothingIsFetched(t)
 	roster := map[string]bool{rel.PairwiseAID: true}
 	s := theirOrganisation(t, roster)
 
@@ -242,19 +262,30 @@ func TestRemovingSomebodyStopsThemSigningIn(t *testing.T) {
 	}
 }
 
-// A signature that does not match the key the identifier publishes is refused
+// A signature that is not by the key the identifier's own log holds is refused
 // before any policy is consulted — authentication precedes authorisation.
 func TestAForgedSignatureNeverReachesTheGate(t *testing.T) {
 	h, rel, _ := theirAgent(t, 1000004)
-	// Publish somebody else's key for this identifier.
-	otherPub, _, err := ed25519.GenerateKey(nil)
+	s := theirOrganisation(t, map[string]bool{rel.PairwiseAID: true}) // on the roster!
+
+	// The employee's genuine assertion, then the same words signed by somebody
+	// else: the employee's own key log, a stranger's signature.
+	const token = "session-1"
+	bundle := login.ChallengeBundle{SiteAID: "ESiteAID", Audience: "https://portal.example",
+		Nonce: "a-nonce", SessionToken: token}
+	s.challengeMu.Lock()
+	s.challenges[token] = bundle
+	s.challengeMu.Unlock()
+	genuine, err := h.BuildAssertion(rel, &bundle, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	relay := theirKeyPublished(t, rel.PairwiseAID, otherPub)
-	s := theirOrganisation(t, map[string]bool{rel.PairwiseAID: true}) // on the roster!
+	forged := *genuine
+	if err := login.SignAssertion(&forged, theirSeed(t, 1000044)); err != nil {
+		t.Fatal(err)
+	}
 
-	code, _ := signIn(t, s, h, rel, relay.URL)
+	code, _ := postAssertion(t, s, token, &forged)
 	if code == http.StatusOK {
 		t.Fatal("an assertion signed by the wrong key was admitted")
 	}
@@ -271,8 +302,8 @@ func TestAForgedSignatureNeverReachesTheGate(t *testing.T) {
 // organisation still needs the specific reason, so it goes to the challenge
 // status its own app reads.
 func TestARefusalTellsTheCallerNothingAndTheOrganisationEverything(t *testing.T) {
-	h, rel, pub := theirAgent(t, 1000005)
-	relay := theirKeyPublished(t, rel.PairwiseAID, pub)
+	h, rel, _ := theirAgent(t, 1000005)
+	relay := nothingIsFetched(t)
 	s := theirOrganisation(t, map[string]bool{})
 
 	_, body := signIn(t, s, h, rel, relay.URL)
@@ -350,8 +381,8 @@ func TestTheQrCodeIsNotEnoughToCollectTheResult(t *testing.T) {
 // a policy that had since changed, and an admission could be re-established
 // after the organisation revoked it.
 func TestAnAssertionCannotBePostedTwice(t *testing.T) {
-	h, rel, pub := theirAgent(t, 1000006)
-	relay := theirKeyPublished(t, rel.PairwiseAID, pub)
+	h, rel, _ := theirAgent(t, 1000006)
+	relay := nothingIsFetched(t)
 	s := theirOrganisation(t, map[string]bool{rel.PairwiseAID: true})
 
 	if code, body := signIn(t, s, h, rel, relay.URL); code != http.StatusOK {
@@ -370,8 +401,8 @@ func TestAnAssertionCannotBePostedTwice(t *testing.T) {
 // A refusal is also an answer, so it cannot be retried either — otherwise
 // somebody refused now could keep posting until a policy change let them in.
 func TestARefusedSignInCannotBeRetried(t *testing.T) {
-	h, rel, pub := theirAgent(t, 1000007)
-	relay := theirKeyPublished(t, rel.PairwiseAID, pub)
+	h, rel, _ := theirAgent(t, 1000007)
+	relay := nothingIsFetched(t)
 	roster := map[string]bool{}
 	s := theirOrganisation(t, roster)
 

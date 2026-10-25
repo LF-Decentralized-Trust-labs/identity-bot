@@ -51,7 +51,7 @@ export function getInviteTokenFromUrl() {
 
 // browser global for <script src="...">
 if (typeof window !== 'undefined') {
-  (window as any)['@grapeid/login-sdk'] = {
+  (window as any)['@identity-agent/login-web'] = {
     createLoginButton,
     validateInviteToken,
     submitAccessRequest,

@@ -9,7 +9,7 @@ import {
   signCanonical,
   verifyCanonical,
 } from "./canonical.js";
-import { resolveFromDidWebs } from "./resolver.js";
+import { NO_KEY_RESOLVER, type KeyResolver } from "./resolver.js";
 import { InMemorySessionStore } from "./session-store.js";
 import { buildLoginQrUrl } from "./qr-url.js";
 import { AskAction } from "./types.js";
@@ -27,6 +27,9 @@ export interface VerifierConfig {
   sessionStore?: InMemorySessionStore;
   challengeTtlSeconds?: number;
   devRelayBaseUrl?: string;
+  /** Establishes an asserter's key from the key log its assertion carries.
+   *  Without one every assertion is refused; see `keyFromIdentityAgent`. */
+  resolveKey?: KeyResolver;
 }
 
 export class IdentityAgentVerifier {
@@ -34,12 +37,14 @@ export class IdentityAgentVerifier {
   private store: InMemorySessionStore;
   private challengeTtl: number;
   private devRelayBaseUrl?: string;
+  private resolveKey?: KeyResolver;
 
   constructor(config: VerifierConfig) {
     this.site = config.siteIdentity;
     this.store = config.sessionStore ?? new InMemorySessionStore();
     this.challengeTtl = config.challengeTtlSeconds ?? 300;
     this.devRelayBaseUrl = config.devRelayBaseUrl;
+    this.resolveKey = config.resolveKey;
   }
 
   get sessionStore(): InMemorySessionStore {
@@ -126,17 +131,19 @@ export class IdentityAgentVerifier {
     if (assertion.audience !== opts.expectedAudience) {
       return { valid: false, reason: "audience mismatch" };
     }
+    if (!opts.expectedSiteAid || assertion.site_aid !== opts.expectedSiteAid) {
+      return { valid: false, reason: "site mismatch: the assertion answers another site's challenge" };
+    }
     if (!assertion.sig) {
       return { valid: false, reason: "missing sig" };
     }
 
+    if (!this.resolveKey) {
+      return { valid: false, reason: NO_KEY_RESOLVER };
+    }
     let publicKey: Uint8Array;
     try {
-      const resolved = await resolveFromDidWebs(
-        assertion.relationship_aid_oobi,
-        assertion.i,
-      );
-      publicKey = resolved.publicKey;
+      publicKey = await this.resolveKey(assertion.i, assertion.p_kel);
     } catch (err) {
       return { valid: false, reason: `key resolve failed: ${(err as Error).message}` };
     }
@@ -176,6 +183,7 @@ export class IdentityAgentVerifier {
     const result = await this.verifyAssertion(assertion, {
       expectedAudience: rec.challenge.audience,
       expectedNonce: rec.challenge.nonce,
+      expectedSiteAid: rec.challenge.site_aid,
     });
     if (!result.valid || !result.pairwiseAID) {
       return { ok: false, reason: result.reason };
@@ -187,7 +195,16 @@ export class IdentityAgentVerifier {
   }
 }
 
-/** Generate a dev site identity (Ed25519 keypair + synthetic AID prefix). */
+/**
+ * Generate a development site identity: an Ed25519 keypair under a made-up
+ * identifier, with no key log behind it.
+ *
+ * Development only. Nothing derives this identifier, so an Identity Agent
+ * built with key-log checking refuses every challenge it signs. A real site
+ * signs in people through its organisation's Identity Agent: its sign-in
+ * identity is an asset of that agent, which serves the site's key log and
+ * checks people's key logs (`keyFromIdentityAgent`).
+ */
 export async function generateDevSiteIdentity(relayBaseUrl: string): Promise<SiteIdentity> {
   const privateKey = ed.utils.randomPrivateKey();
   const publicKey = await ed.getPublicKeyAsync(privateKey);

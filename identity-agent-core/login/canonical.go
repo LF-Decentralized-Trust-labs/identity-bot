@@ -57,10 +57,18 @@ func canonicalChallengeBody(c ChallengeBundle) string {
 }
 
 func canonicalAssertionBody(a Assertion) string {
+	// d is left out while it is being computed, as the login contract and the
+	// TypeScript package do ("body minus d and sig"). Writing it as "d":""
+	// gave a digest no other implementation reproduces; the golden vectors
+	// shared with the TypeScript package now catch that.
+	d := ""
+	if a.D != "" {
+		d = jsonField("d", a.D)
+	}
 	parts := []string{
 		jsonField("v", a.V),
 		jsonField("t", a.T),
-		jsonField("d", a.D),
+		d,
 		jsonField("i", nfc(a.I)),
 		jsonField("relationship_aid_oobi", nfc(a.RelationshipAIDOOBI)),
 		jsonField("audience", nfc(a.Audience)),
@@ -74,6 +82,9 @@ func canonicalAssertionBody(a Assertion) string {
 	}
 	if a.PKEL != "" {
 		parts = append(parts, jsonField("p_kel", a.PKEL))
+	}
+	if a.SiteAID != "" {
+		parts = append(parts, jsonField("site_aid", nfc(a.SiteAID)))
 	}
 	return "{" + strings.Join(filterEmpty(parts), ",") + "}"
 }

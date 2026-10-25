@@ -19,6 +19,7 @@ export interface GoldenVectorFile {
     expected_verify: {
       audience: string;
       nonce: string;
+      site_aid: string;
       max_skew_seconds: number;
       reference_now_rfc3339: string;
     };
@@ -49,6 +50,8 @@ export async function runGoldenSelfTest(): Promise<{ ok: boolean; reason?: strin
     dt: g.assertion.dt,
     disclosures: g.assertion.disclosures,
     presented_acdcs: g.assertion.presented_acdcs,
+    p_kel: g.assertion.p_kel,
+    site_aid: g.assertion.site_aid,
   });
   if (recomputed !== g.said) {
     return { ok: false, reason: `golden: SAID mismatch ${recomputed} !== ${g.said}` };
@@ -62,19 +65,22 @@ export async function runGoldenSelfTest(): Promise<{ ok: boolean; reason?: strin
   const pass = await verifyLoginAssertion(g.assertion, {
     expectedAudience: g.expected_verify.audience,
     expectedNonce: g.expected_verify.nonce,
+    expectedSiteAid: g.expected_verify.site_aid,
+    // The key comes from the vectors, never from a caller.
     signingPublicKey: pub,
     skipDtCheck: true,
   });
-  if (!pass.ok) return { ok: false, reason: `golden: verify failed: ${pass.reason}` };
+  if (!pass.valid) return { ok: false, reason: `golden: verify failed: ${pass.reason}` };
 
   const corrupt = { ...g.assertion, sig: g.negative_vectors.corrupt_sig_last_char };
   const reject = await verifyLoginAssertion(corrupt, {
     expectedAudience: g.expected_verify.audience,
     expectedNonce: g.expected_verify.nonce,
+    expectedSiteAid: g.expected_verify.site_aid,
     signingPublicKey: pub,
     skipDtCheck: true,
   });
-  if (reject.ok) return { ok: false, reason: "golden: corrupt sig should reject" };
+  if (reject.valid) return { ok: false, reason: "golden: corrupt sig should reject" };
 
   return { ok: true };
 }

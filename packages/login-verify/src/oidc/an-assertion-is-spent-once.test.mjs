@@ -21,7 +21,7 @@ async function run() {
     relationship_aid_oobi: "http://relay.test/oobi/" + aid,
     audience: "https://portal.example", nonce: "one-question",
     dt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
-    disclosures: {}, presented_acdcs: [],
+    disclosures: {}, presented_acdcs: [], site_aid: "EThePortal",
   };
   assertion.d = assertionDigest(assertion);
   assertion.sig = await signCanonical(canonicalAssertionBody(assertion), priv);
@@ -29,6 +29,7 @@ async function run() {
   const opts = {
     expectedAudience: assertion.audience,
     expectedNonce: assertion.nonce,
+    expectedSiteAid: "EThePortal",
     signingPublicKey: pub,
   };
 

@@ -7,11 +7,14 @@ import {
   signCanonical,
   verifyCanonical,
   createDevRelayServer,
+  keyFromIdentityAgent,
 } from "../dist/index.js";
+import { anIdentityAgentStandIn } from "./an-identity-agent-stand-in.mjs";
 
 async function run() {
   const relay = createDevRelayServer({ port: 0, host: "127.0.0.1" });
   const { url: relayUrl, server: relayServer } = await relay.start();
+  const ia = await anIdentityAgentStandIn();
 
   const site = await generateDevSiteIdentity(relayUrl);
   relay.registerIdentity(site);
@@ -19,6 +22,7 @@ async function run() {
   const verifier = new IdentityAgentVerifier({
     siteIdentity: site,
     devRelayBaseUrl: relayUrl,
+    resolveKey: keyFromIdentityAgent(ia.url),
   });
 
   const { session_token, bundle } = await verifier.createChallenge({
@@ -48,7 +52,10 @@ async function run() {
     dt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
     disclosures: { display_name: "Alice", email: "alice@example.com" },
     presented_acdcs: [],
+    p_kel: "alices-signed-key-log",
+    site_aid: bundle.site_aid,
   };
+  ia.knows(pairwiseAid, assertion.p_kel, pairwisePub);
   assertion.d = assertionDigest(assertion);
   const body = canonicalAssertionBody(assertion);
   assertion.sig = await signCanonical(body, pairwiseSeed);
@@ -56,8 +63,24 @@ async function run() {
   const result = await verifier.verifyAssertion(assertion, {
     expectedAudience: bundle.audience,
     expectedNonce: bundle.nonce,
+    expectedSiteAid: site.aid,
   });
   if (!result.valid) throw new Error(`verify failed: ${result.reason}`);
+
+  // The same person's genuine assertion, approved for another site's challenge
+  // that copied this one's audience and nonce, does not sign in here.
+  const relayed = { ...assertion, site_aid: "EAnotherSiteThatCopiedTheChallenge" };
+  delete relayed.sig;
+  relayed.d = assertionDigest(relayed);
+  relayed.sig = await signCanonical(canonicalAssertionBody(relayed), pairwiseSeed);
+  const refused = await verifier.verifyAssertion(relayed, {
+    expectedAudience: bundle.audience,
+    expectedNonce: bundle.nonce,
+    expectedSiteAid: site.aid,
+  });
+  if (refused.valid || !refused.reason?.startsWith("site mismatch")) {
+    throw new Error(`an assertion approved for another site's challenge verified here: ${refused.reason}`);
+  }
 
   const callback = await verifier.handleCallback(assertion, session_token, (aid) => `tok-${aid.slice(0, 8)}`);
   if (!callback.ok) throw new Error(`callback failed: ${callback.reason}`);
@@ -65,7 +88,13 @@ async function run() {
   const state = verifier.getSessionState(session_token);
   if (state?.state !== "verified") throw new Error(`expected verified, got ${state?.state}`);
 
+  // The key was established from the log the assertion carried.
+  if (!ia.asked.some((q) => q.aid === pairwiseAid && q.key_log === assertion.p_kel)) {
+    throw new Error("the verifier did not ask the Identity Agent about the assertion's key log");
+  }
+
   console.log("steel-thread: challenge → assertion → verify → session verified");
+  await ia.close();
   await new Promise((resolve, reject) => relayServer.close((err) => (err ? reject(err) : resolve())));
 }
 

@@ -3,7 +3,7 @@
     "description": "Frozen login contract — deterministic login assertion (seed 0x29..0x48)",
     "version": "IALOGIN10JSON",
     "seed_hex": "292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748",
-    "field_order": "v,t,d,i,relationship_aid_oobi,audience,nonce,dt,disclosures,presented_acdcs",
+    "field_order": "v,t,d,i,relationship_aid_oobi,audience,nonce,dt,disclosures,presented_acdcs,p_kel,site_aid",
     "canonical_rules": {
       "json": "compact, no insignificant whitespace, no trailing newline",
       "strings": "NFC-normalized UTF-8",
@@ -12,9 +12,9 @@
       "said_algorithm": "Blake3-256 Matter qb64 code E over body minus d and sig",
       "signature": "Ed25519 over UTF-8 canonical body including d, excluding sig; CESR 0B qb64"
     },
-    "pairwise_aid": "Em29GoldenPairwiseAID0123456789ABCDEFGHIJK",
+    "pairwise_aid": "EIQ1ViYdMzEwjQFL0L6iwx32TOOJpqtAgFndcOwny4jN",
     "signing_verkey_qb64": "DMeqSmzk9eaEKz3sm_edMYm2gEgqQi2dqDX-m_-mfy7x",
-    "relationship_aid_oobi": "https://k7f2p.relay.grapeid.org/oobi/Em29GoldenPairwiseAID0123456789ABCDEFGHIJK",
+    "relationship_aid_oobi": "https://k7f2p.relay.grapeid.org/oobi/EIQ1ViYdMzEwjQFL0L6iwx32TOOJpqtAgFndcOwny4jN",
     "audience": "https://app.example.com",
     "nonce": "m29GoldenNonce0123456789ABCDEFGH",
     "dt": "2026-06-17T12:00:00Z",
@@ -23,16 +23,18 @@
       "email": "alice@example.com"
     },
     "presented_acdcs": [],
-    "said": "EH40V_99-zmaIJ1E5pc8fAYGqOFJlpYED3cnYyk9RaON",
-    "sig": "0BDZMOUyAYbzvD1jcGF3YjdvWMF-jIgN3t5Gs7E9ihT9NsgeJGJ_cruAODgaInt11f_5MBWFS5fRlG9OJ-hmH5wD",
-    "canonical_body": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EH40V_99-zmaIJ1E5pc8fAYGqOFJlpYED3cnYyk9RaON\",\"i\":\"Em29GoldenPairwiseAID0123456789ABCDEFGHIJK\",\"relationship_aid_oobi\":\"https://k7f2p.relay.grapeid.org/oobi/Em29GoldenPairwiseAID0123456789ABCDEFGHIJK\",\"audience\":\"https://app.example.com\",\"nonce\":\"m29GoldenNonce0123456789ABCDEFGH\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\",\"email\":\"alice@example.com\"},\"presented_acdcs\":[]}",
-    "canonical_body_len": 445,
-    "canonical_body_sha256_hex": "1dd75bd95e5b96adf83895ad9d593a48f2afac097c2e204f8c3fb91d66b3fa3b",
+    "p_kel": "eyJyYXdfZXZlbnRzX2I2NCI6WyJleUoySWpvaVMwVlNTVEV3U2xOUFRqQXdNREV5WWw4aUxDSjBJam9pYVdOd0lpd2laQ0k2SWtWSlVURldhVmxrVFhwRmQycFJSa3d3VERacGQzZ3pNbFJQVDBwd2NYUkJaMFp1WkdOUGQyNTVOR3BPSWl3aWFTSTZJa1ZKVVRGV2FWbGtUWHBGZDJwUlJrd3dURFpwZDNnek1sUlBUMHB3Y1hSQlowWnVaR05QZDI1NU5HcE9JaXdpY3lJNklqQWlMQ0pyZENJNklqRWlMQ0pySWpwYklrUk5aWEZUYlhwck9XVmhSVXQ2TTNOdFgyVmtUVmx0TW1kRlozRlJhVEprY1VSWUxXMWZMVzFtZVRkNElsMHNJbTUwSWpvaU1TSXNJbTRpT2xzaVJVNHhSRTVKVTJrMmQxcE9RbHBIZFcxTk5uWlZWWEZUY0ZCbllqVXRaV2Q1YkdkcVMwMUViSGhXVERraVhTd2lZblFpT2lJd0lpd2lZaUk2VzEwc0ltTWlPbHRkTENKaElqcGJYWDA9Il0sImNlc3Jfc2lnbmF0dXJlcyI6WyIwQkNEczduZ0VyVEJGX2RfV3JLZ1Y4UlBIVXpMcmF2Y3hzb0hNempVMkw0QjF2ekhKR1E0RkxaOE1rQkhQYnFBVXNzZG5hdGk4VlcwUjE2Y0dPLTd3Z2tKIl19",
+    "site_aid": "EM29GoldenSiteAID0123456789ABCDEFGHIJKLMNOPQ",
+    "said": "EEZPldPIh2BckpwKNf435i274pFQJgL5DkqZENVZAhvB",
+    "sig": "0BBiAJL58uvf7bn0ES2RJONCWQS4iJxpFw-lsS0PGI6jufbK4FhlNSavMLT_ZBwiGlAtn05jVYImn36NRyFSDYQA",
+    "canonical_body": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EEZPldPIh2BckpwKNf435i274pFQJgL5DkqZENVZAhvB\",\"i\":\"EIQ1ViYdMzEwjQFL0L6iwx32TOOJpqtAgFndcOwny4jN\",\"relationship_aid_oobi\":\"https://k7f2p.relay.grapeid.org/oobi/EIQ1ViYdMzEwjQFL0L6iwx32TOOJpqtAgFndcOwny4jN\",\"audience\":\"https://app.example.com\",\"nonce\":\"m29GoldenNonce0123456789ABCDEFGH\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\",\"email\":\"alice@example.com\"},\"presented_acdcs\":[],\"p_kel\":\"eyJyYXdfZXZlbnRzX2I2NCI6WyJleUoySWpvaVMwVlNTVEV3U2xOUFRqQXdNREV5WWw4aUxDSjBJam9pYVdOd0lpd2laQ0k2SWtWSlVURldhVmxrVFhwRmQycFJSa3d3VERacGQzZ3pNbFJQVDBwd2NYUkJaMFp1WkdOUGQyNTVOR3BPSWl3aWFTSTZJa1ZKVVRGV2FWbGtUWHBGZDJwUlJrd3dURFpwZDNnek1sUlBUMHB3Y1hSQlowWnVaR05QZDI1NU5HcE9JaXdpY3lJNklqQWlMQ0pyZENJNklqRWlMQ0pySWpwYklrUk5aWEZUYlhwck9XVmhSVXQ2TTNOdFgyVmtUVmx0TW1kRlozRlJhVEprY1VSWUxXMWZMVzFtZVRkNElsMHNJbTUwSWpvaU1TSXNJbTRpT2xzaVJVNHhSRTVKVTJrMmQxcE9RbHBIZFcxTk5uWlZWWEZUY0ZCbllqVXRaV2Q1YkdkcVMwMUViSGhXVERraVhTd2lZblFpT2lJd0lpd2lZaUk2VzEwc0ltTWlPbHRkTENKaElqcGJYWDA9Il0sImNlc3Jfc2lnbmF0dXJlcyI6WyIwQkNEczduZ0VyVEJGX2RfV3JLZ1Y4UlBIVXpMcmF2Y3hzb0hNempVMkw0QjF2ekhKR1E0RkxaOE1rQkhQYnFBVXNzZG5hdGk4VlcwUjE2Y0dPLTd3Z2tKIl19\",\"site_aid\":\"EM29GoldenSiteAID0123456789ABCDEFGHIJKLMNOPQ\"}",
+    "canonical_body_len": 1230,
+    "canonical_body_sha256_hex": "8670f98a309bb1f5d6093ffc74f341a6d2e2db381f988f60795acea6115c4d18",
     "assertion": {
       "v": "IALOGIN10JSON",
       "t": "login-assertion",
-      "i": "Em29GoldenPairwiseAID0123456789ABCDEFGHIJK",
-      "relationship_aid_oobi": "https://k7f2p.relay.grapeid.org/oobi/Em29GoldenPairwiseAID0123456789ABCDEFGHIJK",
+      "i": "EIQ1ViYdMzEwjQFL0L6iwx32TOOJpqtAgFndcOwny4jN",
+      "relationship_aid_oobi": "https://k7f2p.relay.grapeid.org/oobi/EIQ1ViYdMzEwjQFL0L6iwx32TOOJpqtAgFndcOwny4jN",
       "audience": "https://app.example.com",
       "nonce": "m29GoldenNonce0123456789ABCDEFGH",
       "dt": "2026-06-17T12:00:00Z",
@@ -41,19 +43,23 @@
         "email": "alice@example.com"
       },
       "presented_acdcs": [],
-      "d": "EH40V_99-zmaIJ1E5pc8fAYGqOFJlpYED3cnYyk9RaON",
-      "sig": "0BDZMOUyAYbzvD1jcGF3YjdvWMF-jIgN3t5Gs7E9ihT9NsgeJGJ_cruAODgaInt11f_5MBWFS5fRlG9OJ-hmH5wD"
+      "p_kel": "eyJyYXdfZXZlbnRzX2I2NCI6WyJleUoySWpvaVMwVlNTVEV3U2xOUFRqQXdNREV5WWw4aUxDSjBJam9pYVdOd0lpd2laQ0k2SWtWSlVURldhVmxrVFhwRmQycFJSa3d3VERacGQzZ3pNbFJQVDBwd2NYUkJaMFp1WkdOUGQyNTVOR3BPSWl3aWFTSTZJa1ZKVVRGV2FWbGtUWHBGZDJwUlJrd3dURFpwZDNnek1sUlBUMHB3Y1hSQlowWnVaR05QZDI1NU5HcE9JaXdpY3lJNklqQWlMQ0pyZENJNklqRWlMQ0pySWpwYklrUk5aWEZUYlhwck9XVmhSVXQ2TTNOdFgyVmtUVmx0TW1kRlozRlJhVEprY1VSWUxXMWZMVzFtZVRkNElsMHNJbTUwSWpvaU1TSXNJbTRpT2xzaVJVNHhSRTVKVTJrMmQxcE9RbHBIZFcxTk5uWlZWWEZUY0ZCbllqVXRaV2Q1YkdkcVMwMUViSGhXVERraVhTd2lZblFpT2lJd0lpd2lZaUk2VzEwc0ltTWlPbHRkTENKaElqcGJYWDA9Il0sImNlc3Jfc2lnbmF0dXJlcyI6WyIwQkNEczduZ0VyVEJGX2RfV3JLZ1Y4UlBIVXpMcmF2Y3hzb0hNempVMkw0QjF2ekhKR1E0RkxaOE1rQkhQYnFBVXNzZG5hdGk4VlcwUjE2Y0dPLTd3Z2tKIl19",
+      "site_aid": "EM29GoldenSiteAID0123456789ABCDEFGHIJKLMNOPQ",
+      "d": "EEZPldPIh2BckpwKNf435i274pFQJgL5DkqZENVZAhvB",
+      "sig": "0BBiAJL58uvf7bn0ES2RJONCWQS4iJxpFw-lsS0PGI6jufbK4FhlNSavMLT_ZBwiGlAtn05jVYImn36NRyFSDYQA"
     },
     "expected_verify": {
       "audience": "https://app.example.com",
       "nonce": "m29GoldenNonce0123456789ABCDEFGH",
+      "site_aid": "EM29GoldenSiteAID0123456789ABCDEFGHIJKLMNOPQ",
       "max_skew_seconds": 300,
       "reference_now_rfc3339": "2026-06-17T12:00:00Z"
     },
     "negative_vectors": {
-      "corrupt_sig_last_char": "0BDZMOUyAYbzvD1jcGF3YjdvWMF-jIgN3t5Gs7E9ihT9NsgeJGJ_cruAODgaInt11f_5MBWFS5fRlG9OJ-hmH5wA",
+      "corrupt_sig_last_char": "0BBiAJL58uvf7bn0ES2RJONCWQS4iJxpFw-lsS0PGI6jufbK4FhlNSavMLT_ZBwiGlAtn05jVYImn36NRyFSDYQB",
       "wrong_nonce": "m29GoldenNonce0123456789ABCDEFG0",
-      "wrong_audience": "https://evil.example.com"
+      "wrong_audience": "https://evil.example.com",
+      "wrong_site_aid": "EAnotherSiteAID0123456789ABCDEFGHIJKLMNOPQR"
     }
   }
 }

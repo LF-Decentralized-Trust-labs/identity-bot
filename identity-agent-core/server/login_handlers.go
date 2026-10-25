@@ -183,14 +183,14 @@ func (s *CoreServer) mountAssetLoginChallenge(r chi.Router) {
 	})
 }
 
-// POST /api/login/callback — the user's agent posts the signed assertion here. The
-// assertion is the raw body; the session token is the ?session= query param.
+// POST /api/login/callback — the person's Identity Agent posts the signed assertion
+// here. The assertion is the raw body; the session token is the ?session= query param.
 //
 // This VERIFIES the assertion before completing the session: the signature must check
-// out against the asserter's key (resolved from its KERI AID/OOBI), bound to the
-// challenge's nonce + audience and fresh, and the asserter must satisfy the asset's
-// enrollment policy. (Previously this endpoint trusted the post blindly and just flipped
-// the status — no verification, no authorization.)
+// out against the key the assertion's own key log puts in force (p_kel, which must
+// derive the asserter's identifier; nothing is fetched), it must name this site's
+// challenge (site_aid) and its nonce and audience, it must be fresh, and the asserter
+// must satisfy the asset's enrollment policy.
 func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request) {
 	var a login.Assertion
 	if err := json.NewDecoder(r.Body).Decode(&a); err != nil {
@@ -223,7 +223,7 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 	}
 
 	// 1) Authenticate: verify the assertion signature + binding to this challenge.
-	res := login.VerifyAssertion(a, bundle.Nonce, bundle.Audience, 300, &http.Client{Timeout: 15 * time.Second})
+	res := login.VerifyAssertion(a, bundle.Nonce, bundle.Audience, bundle.SiteAID, 300)
 	if !res.Valid {
 		s.setChallengeStatus(token, map[string]interface{}{"status": "denied", "reason": res.Reason})
 		http.Error(w, "assertion verification failed: "+res.Reason, http.StatusUnauthorized)

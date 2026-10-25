@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -16,6 +17,8 @@ import (
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/secureenclave"
+
+	keri "github.com/grapeid/keri-go"
 )
 
 // loadRelationshipSeed re-derives the seed on demand from protected root + persisted RelationshipIndex.
@@ -118,93 +121,94 @@ func (h *Handler) fetchChallengeBundle(rpBase, sessionToken string) (*ChallengeB
 	return &bundle, nil
 }
 
-// verifyDelegationAnchor checks that the challenge's site AID is genuinely
-// DELEGATED by the claimed relationship-anchor controller: its served KEL must
-// open with a delegated inception (dip) for that exact AID naming the anchor as
-// delegator (`di`). The delegator commitment is inside the signed inception
-// event whose SAID *is* the site AID, so a site cannot claim a controller it does not
-// belong to without changing its own identity.
-func (h *Handler) verifyDelegationAnchor(bundle *ChallengeBundle) error {
-	if bundle.SiteOOBI == "" {
-		return fmt.Errorf("anchor requires a site OOBI")
+// verifyDelegationAnchor checks that the challenge's site is genuinely
+// DELEGATED by the identity it names as the relationship's anchor, from the
+// site's own verified log and the delegator's.
+//
+// The site's log must open with a delegated inception for exactly this site
+// naming the anchor as delegator, read from the bytes that were verified
+// (site), not from a second fetch nobody checked. And the anchor's own log,
+// verified the same way, must carry the seal approving that inception
+// (keri.ValidateDelegation). A delegated inception only claims a delegator;
+// the delegator's seal is the approval. Without it, any site could write
+// "delegated by" the organisation into its own inception and be handed the
+// organisation's members' identities.
+func (h *Handler) verifyDelegationAnchor(bundle *ChallengeBundle, site VerifiedIdentity) error {
+	if len(site.RawEvents) == 0 {
+		return fmt.Errorf("the site's log was not verified, so its delegation cannot be read")
 	}
-	resp, err := h.HTTPClient.Get(bundle.SiteOOBI)
+	icp, err := keri.ParseEvent(site.RawEvents[0])
 	if err != nil {
-		return fmt.Errorf("site OOBI fetch: %w", err)
+		return fmt.Errorf("the site's inception does not parse: %w", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("site OOBI fetch: HTTP %d", resp.StatusCode)
+	if icp.Ilk != "dip" {
+		return fmt.Errorf("site inception is %q, not a delegated inception", icp.Ilk)
 	}
-	var oobi struct {
-		AID string                   `json:"aid"`
-		KEL []map[string]interface{} `json:"kel"`
+	if icp.Identifier != bundle.SiteAID {
+		return fmt.Errorf("inception AID %q does not match site AID", icp.Identifier)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&oobi); err != nil {
-		return fmt.Errorf("site OOBI parse: %w", err)
+	if icp.Delegator != bundle.RelationshipAnchorAID {
+		return fmt.Errorf("site is delegated by %q, not the claimed anchor %q", icp.Delegator, bundle.RelationshipAnchorAID)
 	}
-	if oobi.AID != bundle.SiteAID {
-		return fmt.Errorf("site OOBI serves %s, challenge names %s", oobi.AID, bundle.SiteAID)
+	if bundle.RelationshipAnchorOOBI == "" {
+		return fmt.Errorf("the challenge names no introduction for %s, so its approval of the site cannot be checked",
+			bundle.RelationshipAnchorAID)
 	}
-	if len(oobi.KEL) == 0 {
-		return fmt.Errorf("site OOBI has no KEL")
+	// Read as the key now in force, not only as "what the log once signed".
+	// A key the delegator has since rotated away can still sign a NEW approval
+	// on a branch made from the shorter log, and that branch validates. What
+	// stops it is the witnesses: they saw the rotation and will not receipt a
+	// second event at the same place. So a delegator that names witnesses must
+	// show their receipts on every event, the approving seal included. One
+	// that names none cannot rotate at all (unprovableRotation).
+	delegator, err := identityFromOOBI(h.HTTPClient, bundle.RelationshipAnchorOOBI, bundle.RelationshipAnchorAID, true)
+	if err != nil {
+		return fmt.Errorf("the delegator's log does not establish it: %w", err)
 	}
-	icp := oobi.KEL[0]
-	if t, _ := icp["t"].(string); t != "dip" {
-		return fmt.Errorf("site inception is %q, not a delegated inception", icp["t"])
+	if delegator.NamesWitnesses && !delegator.Witnessed {
+		return fmt.Errorf("%s names witnesses, but its introduction does not show their receipts on every "+
+			"event, so its approval of this site could have been signed by a key it has since retired",
+			bundle.RelationshipAnchorAID)
 	}
-	if i, _ := icp["i"].(string); i != bundle.SiteAID {
-		return fmt.Errorf("inception AID %q does not match site AID", i)
-	}
-	if di, _ := icp["di"].(string); di != bundle.RelationshipAnchorAID {
-		return fmt.Errorf("site is delegated by %q, not the claimed anchor %q", icp["di"], bundle.RelationshipAnchorAID)
+	if err := keri.ValidateDelegation(site.RawEvents[0], delegator.RawEvents); err != nil {
+		return fmt.Errorf("the delegator never approved this site: %w", err)
 	}
 	return nil
 }
 
-func (h *Handler) verifyChallengeSig(bundle *ChallengeBundle) (bool, []byte, error) {
+// verifyChallengeSig checks the challenge against the site's key from its own
+// verified log, and returns that verified identity so nothing about the site
+// is fetched and read a second time.
+func (h *Handler) verifyChallengeSig(bundle *ChallengeBundle) (bool, VerifiedIdentity, error) {
 	if bundle.Sig == "" {
-		return false, nil, fmt.Errorf("challenge missing sig")
+		return false, VerifiedIdentity{}, fmt.Errorf("challenge missing sig")
 	}
 	body := canonicalChallengeBody(*bundle)
-	// Dev steel thread: resolve site key from dev relay did.json
-	pub, err := h.resolveSiteKey(bundle.SiteOOBI, bundle.SiteAID)
+	site, err := h.resolveSite(bundle.SiteOOBI, bundle.SiteAID)
 	if err != nil {
-		return false, nil, err
+		return false, VerifiedIdentity{}, err
 	}
-	ok, err := verifyUTF8(body, bundle.Sig, pub)
-	return ok, pub, err
+	ok, err := verifyUTF8(body, bundle.Sig, site.Key)
+	return ok, site, err
 }
 
+// resolveSiteKey is the site's signing key, taken from the site's own key log
+// at its introduction, which must validate and derive the site's identifier
+// (KeyFromOOBI). With no introduction named, the development relay's is used.
 func (h *Handler) resolveSiteKey(siteOOBI, siteAID string) ([]byte, error) {
-	// Match login-verify resolver: strip /oobi/{aid} suffix, keep path prefix (RP-hosted did.json).
-	relayBase := h.DevRelay
-	if siteOOBI != "" {
-		relayBase = siteOOBI
-		if i := strings.Index(relayBase, "/oobi/"); i >= 0 {
-			relayBase = relayBase[:i]
-		}
-	}
-	url := fmt.Sprintf("%s/%s/did.json", trimSlash(relayBase), siteAID)
-	resp, err := h.HTTPClient.Get(url)
+	site, err := h.resolveSite(siteOOBI, siteAID)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	var doc struct {
-		VerificationMethod []struct {
-			PublicKeyJwk struct {
-				X string `json:"x"`
-			} `json:"publicKeyJwk"`
-		} `json:"verificationMethod"`
+	return site.Key, nil
+}
+
+func (h *Handler) resolveSite(siteOOBI, siteAID string) (VerifiedIdentity, error) {
+	oobi := siteOOBI
+	if oobi == "" {
+		oobi = OOBIFor(h.DevRelay, siteAID)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
-		return nil, err
-	}
-	if len(doc.VerificationMethod) == 0 || doc.VerificationMethod[0].PublicKeyJwk.X == "" {
-		return nil, fmt.Errorf("did.json missing key")
-	}
-	return base64.RawURLEncoding.DecodeString(doc.VerificationMethod[0].PublicKeyJwk.X)
+	return IdentityFromOOBI(h.HTTPClient, oobi, siteAID)
 }
 
 // GetOrCreateRelationship resolves or creates a per-RP pairwise relationship.
@@ -239,7 +243,7 @@ func (h *Handler) getOrCreateRelationship(siteAID string, bundle *ChallengeBundl
 	// Mint through a local KERI engine — never fabricate. Desktop: the Python
 	// keripy driver. Driverless (mobile): the keri-go native builder, which uses
 	// the same keri-1.1.17 SerderKERI makify (Blake3 self-addressing) mechanics.
-	var pairwiseAID string
+	var pairwiseAID, inceptionB64 string
 	if h.KeriDriver != nil {
 		resp, err := h.KeriDriver.CreateInceptionNamed(
 			iacrypto.VerkeyQB64(pub),
@@ -249,13 +253,13 @@ func (h *Handler) getOrCreateRelationship(siteAID string, bundle *ChallengeBundl
 		if err != nil || resp.AID == "" {
 			return nil, fmt.Errorf("failed to mint real relationship AID via local engine: %w", err)
 		}
-		pairwiseAID = resp.AID
+		pairwiseAID, inceptionB64 = resp.AID, resp.RawBytesB64
 	} else {
 		res, err := iacrypto.BuildEd25519Inception(pub, nextPub)
 		if err != nil || res.AID == "" {
 			return nil, fmt.Errorf("failed to mint relationship AID via keri-go: %w", err)
 		}
-		pairwiseAID = res.AID
+		pairwiseAID, inceptionB64 = res.AID, res.RawBytesB64
 	}
 	// Do NOT persist derived seed per-rel. Re-derive from root + RelationshipIndex on demand.
 	// Only root seed protected in enclave; index persisted with the rel record.
@@ -273,6 +277,7 @@ func (h *Handler) getOrCreateRelationship(siteAID string, bundle *ChallengeBundl
 		DisplayName:       "IA User",
 		Email:             "user@identity.agent",
 		RelationshipIndex: loginIdx, // stable persisted index for HD re-derive from root
+		InceptionB64:      inceptionB64,
 	}
 	if err := h.Store.Put(rel); err != nil {
 		return nil, err
@@ -302,6 +307,10 @@ func (h *Handler) buildAssertion(rel *SiteRelationship, bundle *ChallengeBundle,
 			disclosures[field] = "granted"
 		}
 	}
+	keyLog, err := h.relationshipKeyLog(rel, seed)
+	if err != nil {
+		return nil, err
+	}
 	a := Assertion{
 		V:                   "IALOGIN10JSON",
 		T:                   "login-assertion",
@@ -313,19 +322,80 @@ func (h *Handler) buildAssertion(rel *SiteRelationship, bundle *ChallengeBundle,
 		Disclosures:         disclosures,
 		PresentedACDCs:      h.presentCredentials(bundle),
 		CustomData:          customData,
+		PKEL:                keyLog,
+		SiteAID:             bundle.SiteAID,
 	}
-	d, err := assertionDigest(a)
-	if err != nil {
+	if err := SignAssertion(&a, seed); err != nil {
 		return nil, err
+	}
+	return &a, nil
+}
+
+// SignAssertion fills in an assertion's digest and signs its canonical body
+// with seed.
+func SignAssertion(a *Assertion, seed []byte) error {
+	d, err := assertionDigest(*a)
+	if err != nil {
+		return err
 	}
 	a.D = d
-	body := canonicalAssertionBody(a)
-	sig, _, err := signUTF8(body, seed)
+	sig, _, err := signUTF8(canonicalAssertionBody(*a), seed)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	a.Sig = sig
-	return &a, nil
+	return nil
+}
+
+// relationshipKeyLog is the pairwise identity's key log, signed with its key,
+// in the form an assertion and a key registration carry.
+//
+// A relationship made before its inception was kept has the inception rebuilt
+// from the same keys it was minted with. Either way the log is checked here
+// before it leaves, so a relationship that cannot prove its own identifier
+// fails now, with a reason, rather than at the site as a refused sign-in.
+func (h *Handler) relationshipKeyLog(rel *SiteRelationship, seed []byte) (string, error) {
+	var raw []byte
+	if rel.InceptionB64 != "" {
+		b, err := base64.StdEncoding.DecodeString(rel.InceptionB64)
+		if err != nil {
+			return "", fmt.Errorf("the inception kept for %s is not readable: %w", rel.PairwiseAID, err)
+		}
+		raw = b
+	} else {
+		if h.dataDir == "" || rel.RelationshipIndex <= 0 {
+			return "", fmt.Errorf("the inception of %s was not kept and cannot be rebuilt here", rel.PairwiseAID)
+		}
+		root, err := secureenclave.LoadRootSeed(h.dataDir)
+		if err != nil {
+			return "", err
+		}
+		next, err := backup.DerivePairwiseSeed(root, rel.RelationshipIndex, 1)
+		if err != nil {
+			return "", err
+		}
+		pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
+		nextPub := ed25519.NewKeyFromSeed(next).Public().(ed25519.PublicKey)
+		res, err := iacrypto.BuildEd25519Inception(pub, nextPub)
+		if err != nil {
+			return "", err
+		}
+		if raw, err = base64.StdEncoding.DecodeString(res.RawBytesB64); err != nil {
+			return "", err
+		}
+	}
+	sig, err := SignString(string(raw), seed)
+	if err != nil {
+		return "", err
+	}
+	encoded, err := EncodeKeyLog([][]byte{raw}, []string{sig})
+	if err != nil {
+		return "", err
+	}
+	if _, err := KeyFromKeyLog(rel.PairwiseAID, encoded); err != nil {
+		return "", fmt.Errorf("this relationship cannot prove its identifier: %w", err)
+	}
+	return encoded, nil
 }
 
 func (h *Handler) postAssertion(callbackURL, sessionToken string, assertion *Assertion) error {
@@ -401,7 +471,7 @@ func (h *Handler) prepareLogin(req StartLoginRequest) (*ChallengeBundle, *SiteRe
 		return nil, nil, nil, err
 	}
 
-	ok, _, err := h.verifyChallengeSig(bundle)
+	ok, site, err := h.verifyChallengeSig(bundle)
 	if err != nil || !ok {
 		return nil, nil, nil, fmt.Errorf("challenge verification failed")
 	}
@@ -417,7 +487,7 @@ func (h *Handler) prepareLogin(req StartLoginRequest) (*ChallengeBundle, *SiteRe
 	// per-site identity.
 	relKey := bundle.SiteAID
 	if bundle.RelationshipAnchorAID != "" {
-		if err := h.verifyDelegationAnchor(bundle); err != nil {
+		if err := h.verifyDelegationAnchor(bundle, site); err != nil {
 			return nil, nil, nil, fmt.Errorf("relationship anchor rejected: %w", err)
 		}
 		relKey = bundle.RelationshipAnchorAID
@@ -427,9 +497,20 @@ func (h *Handler) prepareLogin(req StartLoginRequest) (*ChallengeBundle, *SiteRe
 		return nil, nil, nil, err
 	}
 
-	if err := h.registerPairwiseOnDevRelay(rel); err != nil {
-		return nil, nil, nil, err
-	}
+	// Publishing the pairwise key is a courtesy to whoever resolves it later
+	// by identifier. The site itself takes the key from the key log inside
+	// the assertion, so a registry that is down, full, or at an address that
+	// has since moved does not stop the sign-in, and one that hangs does not
+	// hold up the person's consent screen: it runs beside the sign-in, on
+	// copies, and a failure is said, not swallowed.
+	relCopy, bundleCopy := *rel, *bundle
+	go func() {
+		if err := h.registerPairwiseOnDevRelay(&relCopy, &bundleCopy); err != nil {
+			log.Printf("[login] the pairwise key for %s was not published: %v "+
+				"(the sign-in goes ahead: the site reads the key from the assertion's key log)",
+				relCopy.PairwiseAID, err)
+		}
+	}()
 
 	preview := &LoginPreviewResponse{
 		Pending:               true,
@@ -527,8 +608,18 @@ func (h *Handler) relayBaseFromOOBI(oobi string) string {
 	return fmt.Sprintf("%s://%s", req.URL.Scheme, req.URL.Host)
 }
 
-func (h *Handler) registerPairwiseOnDevRelay(rel *SiteRelationship) error {
-	relayBase := h.relayBaseFromOOBI(rel.RelayOOBI)
+// registerPairwiseOnDevRelay publishes the pairwise key, with its key log, to
+// the site's registry. The site's current address, from the challenge just
+// verified, is used when there is one, so a relationship made when the site
+// lived elsewhere does not keep posting to an address that has gone.
+func (h *Handler) registerPairwiseOnDevRelay(rel *SiteRelationship, bundle *ChallengeBundle) error {
+	relayBase := ""
+	if bundle != nil {
+		relayBase = h.relayBaseFromOOBI(bundle.SiteOOBI)
+	}
+	if relayBase == "" {
+		relayBase = h.relayBaseFromOOBI(rel.RelayOOBI)
+	}
 	if relayBase == "" {
 		relayBase = h.DevRelay
 	}
@@ -537,9 +628,16 @@ func (h *Handler) registerPairwiseOnDevRelay(rel *SiteRelationship) error {
 		return err
 	}
 	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
+	// The key log goes with the key: a registry checks that it derives the
+	// identifier before it will answer for it, so the key alone is refused.
+	keyLog, err := h.relationshipKeyLog(rel, seed)
+	if err != nil {
+		return err
+	}
 	body, _ := json.Marshal(map[string]string{
 		"aid":            rel.PairwiseAID,
 		"public_key_b64": base64.RawURLEncoding.EncodeToString(pub),
+		"key_log":        keyLog,
 	})
 
 	registerPath := "/_dev/register"
@@ -550,7 +648,9 @@ func (h *Handler) registerPairwiseOnDevRelay(rel *SiteRelationship) error {
 	url := trimSlash(relayBase) + registerPath
 	resp, err := h.HTTPClient.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
-		return nil // non-fatal when relay stub is absent
+		// Said now, with the address, rather than left to surface later at
+		// the site as a sign-in that fails for no reason anybody can see.
+		return fmt.Errorf("the site's key registry at %s could not be reached: %w", url, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {

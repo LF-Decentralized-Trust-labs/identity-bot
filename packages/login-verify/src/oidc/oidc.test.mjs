@@ -6,7 +6,9 @@ import {
   assertionDigest,
   signCanonical,
   createDevRelayServer,
+  keyFromIdentityAgent,
 } from "../../dist/index.js";
+import { anIdentityAgentStandIn } from "../an-identity-agent-stand-in.mjs";
 import {
   validateDiscoveryConformance,
   verifyIDToken,
@@ -75,9 +77,12 @@ async function run() {
   const site = await generateDevSiteIdentity(relayUrl);
   relay.registerIdentity(site);
 
+  const ia = await anIdentityAgentStandIn();
+  const resolveKey = keyFromIdentityAgent(ia.url);
   const verifier = new IdentityAgentVerifier({
     siteIdentity: site,
     devRelayBaseUrl: relayUrl,
+    resolveKey,
   });
 
   const { bundle } = await verifier.createChallenge({
@@ -106,7 +111,10 @@ async function run() {
     dt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
     disclosures: { display_name: "Alice", email: "alice@example.com" },
     presented_acdcs: [],
+    p_kel: "alices-signed-key-log",
+    site_aid: bundle.site_aid,
   };
+  ia.knows(pairwiseAid, assertion.p_kel, pairwisePub);
   assertion.d = assertionDigest(assertion);
   const body = canonicalAssertionBody(assertion);
   assertion.sig = await signCanonical(body, pairwiseSeed);
@@ -122,7 +130,7 @@ async function run() {
 
   const result = await verifyIDToken(
     idToken,
-    { expectedAudience: bundle.audience, expectedNonce: bundle.nonce },
+    { expectedAudience: bundle.audience, expectedNonce: bundle.nonce, expectedSiteAid: site.aid, resolveKey },
     (a, o) => verifier.verifyAssertion(a, o),
   );
   if (!result.ok) throw new Error(`id_token verify failed: ${result.reason}`);
@@ -131,6 +139,7 @@ async function run() {
   }
 
   console.log("oidc-steel-thread: discovery conformance + id_token → verifyAssertion OK");
+  await ia.close();
   await new Promise((resolve, reject) => relayServer.close((err) => (err ? reject(err) : resolve())));
 }
 

@@ -112,6 +112,8 @@ func TestCounterpartyRoutesStayPublic(t *testing.T) {
 		// which is where an introduction arrives with its own proof.
 		{"POST", "/didcomm"},
 		{"POST", "/api/login/callback"},
+		// A relying party in another language checks a key log here.
+		{"POST", "/public/login/key"},
 		{"GET", "/api/health"},
 		{"GET", "/*"},
 	} {

@@ -45,6 +45,13 @@ const maxOOBIBody = 8 << 20
 
 // ResolveOobi fetches an introduction and reports what it could establish.
 func (e *Engine) ResolveOobi(oobiURL string) (*drivers.DriverResolveOobiResponse, error) {
+	return ResolveOobiWith(e.http, oobiURL)
+}
+
+// ResolveOobiWith is ResolveOobi for a caller that holds no engine: the same
+// fetch, the same bounds and the same validation, over the given client (nil
+// means a default with this package's timeout).
+func ResolveOobiWith(client HTTPClient, oobiURL string) (*drivers.DriverResolveOobiResponse, error) {
 	if oobiURL == "" {
 		return nil, fmt.Errorf("no OOBI URL was given")
 	}
@@ -57,7 +64,6 @@ func (e *Engine) ResolveOobi(oobiURL string) (*drivers.DriverResolveOobiResponse
 			"HTTP", parsed.Scheme)
 	}
 
-	client := e.http
 	if client == nil {
 		client = &http.Client{Timeout: oobiTimeout}
 	}
@@ -91,6 +97,11 @@ func (e *Engine) ResolveOobi(oobiURL string) (*drivers.DriverResolveOobiResponse
 		// to have authorised, and a stranger's unsigned log is exactly the thing
 		// a forger can produce at will.
 		CesrSignatures []string `json:"cesr_signatures"`
+		// Receipts are the witness receipts the publisher holds for its
+		// events. Every one is checked against the witness that issued it, so
+		// serving them grants nothing; withholding them only leaves the log
+		// unwitnessed as far as this caller can tell.
+		Receipts map[string][]map[string]interface{} `json:"receipts"`
 	}
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return nil, fmt.Errorf("what %s served is not a readable introduction: %w", oobiURL, err)
@@ -123,6 +134,9 @@ func (e *Engine) ResolveOobi(oobiURL string) (*drivers.DriverResolveOobiResponse
 	if ok && len(doc.CesrSignatures) == len(in.RawEvents) {
 		in.CesrSignatures = doc.CesrSignatures
 	}
+	if ok && len(doc.Receipts) > 0 {
+		in.Receipts = drivers.WitnessReceiptsFromWire(doc.Receipts)
+	}
 	if !ok {
 		// Served without the bytes it was published as, so its signatures
 		// cannot be checked and neither can the claim that this log derives
@@ -141,8 +155,10 @@ func (e *Engine) ResolveOobi(oobiURL string) (*drivers.DriverResolveOobiResponse
 		return nil, err
 	}
 	out.KelVerified = res.KelVerified
+	out.RawEvents = in.RawEvents
 	out.EventsValidated = res.EventsValidated
 	out.ValidationErrors = res.ValidationErrors
+	out.Witnessed = res.Witnessed
 	if res.CurrentPublicKey != "" {
 		out.CurrentPublicKey = res.CurrentPublicKey
 	}
