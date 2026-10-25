@@ -271,35 +271,13 @@ func (s *CoreServer) verifyAskSignature(askBytes []byte) error {
 	return nil
 }
 
-// resolveSignerKey fetches the signer's current Ed25519 key from its did.json (resolved from
-// the signer OOBI: strip /oobi/{aid}, fetch /{aid}/did.json). Mirrors the login resolver.
+// resolveSignerKey is the signer's current Ed25519 key, from the key log at the
+// signer's OOBI, which must validate and derive the identifier the OOBI names
+// (login.KeyFromOOBI). The same check the login resolvers use.
 func (s *CoreServer) resolveSignerKey(signerOOBI string) ([]byte, error) {
-	base := signerOOBI
-	if i := strings.Index(base, "/oobi/"); i >= 0 {
-		base = base[:i]
-	}
-	aid := signerOOBI
+	aid := strings.TrimRight(signerOOBI, "/")
 	if i := strings.LastIndex(aid, "/"); i >= 0 {
 		aid = aid[i+1:]
 	}
-	url := strings.TrimRight(base, "/") + "/" + aid + "/did.json"
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	var doc struct {
-		VerificationMethod []struct {
-			PublicKeyJwk struct {
-				X string `json:"x"`
-			} `json:"publicKeyJwk"`
-		} `json:"verificationMethod"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
-		return nil, err
-	}
-	if len(doc.VerificationMethod) == 0 || doc.VerificationMethod[0].PublicKeyJwk.X == "" {
-		return nil, fmt.Errorf("did.json missing key")
-	}
-	return base64.RawURLEncoding.DecodeString(doc.VerificationMethod[0].PublicKeyJwk.X)
+	return login.KeyFromOOBI(&http.Client{Timeout: 15 * time.Second}, signerOOBI, aid)
 }

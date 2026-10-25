@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
 )
 
@@ -31,7 +32,17 @@ func TestClaimsMappingAndIDTokenWrapsAssertion(t *testing.T) {
 		seed[i] = byte(i + 0x29)
 	}
 	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
-	aid := "E" + base64.RawURLEncoding.EncodeToString(pub)[:43]
+	next := make([]byte, ed25519.SeedSize)
+	for i := range next {
+		next[i] = byte(i + 0x51)
+	}
+	// A genuine identity, whose identifier is the digest of its own inception:
+	// an assertion carries that inception so a site can tie the key to it.
+	icp, err := iacrypto.BuildEd25519Inception(pub, ed25519.NewKeyFromSeed(next).Public().(ed25519.PublicKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	aid := icp.AID
 
 	bundle := login.ChallengeBundle{
 		V: "ASK1", T: 1,
@@ -40,7 +51,7 @@ func TestClaimsMappingAndIDTokenWrapsAssertion(t *testing.T) {
 	}
 	rel := login.SiteRelationship{
 		SiteAID: "Esite", PairwiseAID: aid, SeedB64: base64.StdEncoding.EncodeToString(seed),
-		DisplayName: "Alice", Email: "alice@example.com",
+		DisplayName: "Alice", Email: "alice@example.com", InceptionB64: icp.RawBytesB64,
 	}
 	h, err := login.NewHandler(t.TempDir(), nil)
 	if err != nil {

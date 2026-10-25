@@ -45,6 +45,13 @@ const maxOOBIBody = 8 << 20
 
 // ResolveOobi fetches an introduction and reports what it could establish.
 func (e *Engine) ResolveOobi(oobiURL string) (*drivers.DriverResolveOobiResponse, error) {
+	return ResolveOobiWith(e.http, oobiURL)
+}
+
+// ResolveOobiWith is ResolveOobi for a caller that holds no engine: the same
+// fetch, the same bounds and the same validation, over the given client (nil
+// means a default with this package's timeout).
+func ResolveOobiWith(client HTTPClient, oobiURL string) (*drivers.DriverResolveOobiResponse, error) {
 	if oobiURL == "" {
 		return nil, fmt.Errorf("no OOBI URL was given")
 	}
@@ -57,7 +64,6 @@ func (e *Engine) ResolveOobi(oobiURL string) (*drivers.DriverResolveOobiResponse
 			"HTTP", parsed.Scheme)
 	}
 
-	client := e.http
 	if client == nil {
 		client = &http.Client{Timeout: oobiTimeout}
 	}

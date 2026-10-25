@@ -1,11 +1,6 @@
 package login
 
 import (
-	"encoding/base64"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"strings"
 	"time"
 )
 
@@ -18,17 +13,16 @@ type AssertionVerifyResult struct {
 }
 
 // VerifyAssertion verifies a login assertion on the relying-party side: it binds the
-// assertion to the original challenge (nonce, audience, freshness), resolves the
-// asserter's current signing key from its KERI AID/OOBI (did.json), and verifies the
-// Ed25519 signature over the canonical assertion body. This is the inverse of the
-// per-user flow's challenge verification — the same KERI primitives, RP side.
+// assertion to the original challenge (nonce, audience, freshness), takes the
+// asserter's current signing key from the key log the assertion carries (p_kel),
+// and verifies the Ed25519 signature over the canonical assertion body.
 //
-// The resolved key comes from the asserter's KEL (published at its OOBI), so a valid
-// result traces back to the KERI identity, not a self-asserted key.
-func VerifyAssertion(a Assertion, expectedNonce, expectedAudience string, maxSkewSeconds int, client *http.Client) AssertionVerifyResult {
-	if client == nil {
-		client = http.DefaultClient
-	}
+// The key log is inside the signed body and proves itself: its inception must
+// derive the identifier the assertion names, and every event must be signed by
+// the key it declares (KeyFromKeyLog). Nothing is fetched, so nothing about
+// where the assertion says its key lives is trusted. An assertion without a
+// key log is refused, because nothing else ties a key to an identifier.
+func VerifyAssertion(a Assertion, expectedNonce, expectedAudience string, maxSkewSeconds int) AssertionVerifyResult {
 	if maxSkewSeconds <= 0 {
 		maxSkewSeconds = 300
 	}
@@ -50,7 +44,7 @@ func VerifyAssertion(a Assertion, expectedNonce, expectedAudience string, maxSke
 		return AssertionVerifyResult{Reason: "missing sig"}
 	}
 
-	pub, err := resolveAIDKey(client, a.RelationshipAIDOOBI, a.I)
+	pub, err := KeyFromKeyLog(a.I, a.PKEL)
 	if err != nil {
 		return AssertionVerifyResult{Reason: "key resolve failed: " + err.Error()}
 	}
@@ -59,33 +53,4 @@ func VerifyAssertion(a Assertion, expectedNonce, expectedAudience string, maxSke
 		return AssertionVerifyResult{Reason: "invalid signature"}
 	}
 	return AssertionVerifyResult{Valid: true, PairwiseAID: a.I, Disclosures: a.Disclosures}
-}
-
-// resolveAIDKey fetches an AID's current Ed25519 signing key from its KERI did.json
-// (resolved from the AID's OOBI). Mirrors resolveSiteKey; works for any AID.
-func resolveAIDKey(client *http.Client, oobi, aid string) ([]byte, error) {
-	relayBase := oobi
-	if i := strings.Index(relayBase, "/oobi/"); i >= 0 {
-		relayBase = relayBase[:i]
-	}
-	url := fmt.Sprintf("%s/%s/did.json", trimSlash(relayBase), aid)
-	resp, err := client.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	var doc struct {
-		VerificationMethod []struct {
-			PublicKeyJwk struct {
-				X string `json:"x"`
-			} `json:"publicKeyJwk"`
-		} `json:"verificationMethod"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
-		return nil, err
-	}
-	if len(doc.VerificationMethod) == 0 || doc.VerificationMethod[0].PublicKeyJwk.X == "" {
-		return nil, fmt.Errorf("did.json missing key")
-	}
-	return base64.RawURLEncoding.DecodeString(doc.VerificationMethod[0].PublicKeyJwk.X)
 }

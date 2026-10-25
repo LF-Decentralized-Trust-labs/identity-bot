@@ -85,6 +85,10 @@ type CoreServer struct {
 	StartTime       time.Time
 	Port            int
 	DataDir         string
+	// registeredKeys answers for identities that published their key here
+	// through /_register, each one proved by its key log. See public_didwebs.go.
+	registeredKeysOnce sync.Once
+	registeredKeys     *keyRegistry
 	// DeclaredEntityType is what the build said it serves — see Config.
 	DeclaredEntityType string
 	// DefaultIngressMode, when set by a product built on the core, is its
@@ -3296,8 +3300,7 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 		// registered KEL so a peer can resolve + add it.
 		if kel, ok := getPairwiseKEL(requestedAID); ok {
 			publicURL := s.getPublicURL(r)
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			doc := map[string]interface{}{
 				"aid":  requestedAID,
 				"oobi": fmt.Sprintf("%s/public/oobi/%s", publicURL, requestedAID),
 				"kel":  kel,
@@ -3305,7 +3308,17 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 				// Which realm this agent runs in, so a resolver keeps a
 				// development peer and a production peer apart.
 				"realm": buildmode.Mode(),
-			})
+			}
+			// The bytes each event was signed over and the signatures, so a
+			// peer can prove this log derives this identifier and was
+			// authorised by its key. Without them the log can be read and not
+			// verified, and anything that checks a signature by it refuses.
+			if raws, sigs, ok := s.fullySignedLogOf(requestedAID); ok {
+				doc["raw_events_b64"] = raws
+				doc["cesr_signatures"] = sigs
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(doc)
 			return
 		}
 		writeError(w, http.StatusNotFound, "AID not found", fmt.Sprintf("No identity found for AID: %s", requestedAID))

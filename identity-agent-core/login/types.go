@@ -91,6 +91,11 @@ type SiteRelationship struct {
 	DisplayName       string `json:"display_name,omitempty"`
 	Email             string `json:"email,omitempty"`
 	RelationshipIndex int    `json:"relationship_index,omitempty"` // stable index for HD derivation (do not hash AID)
+	// InceptionB64 is the pairwise identity's inception exactly as it was
+	// serialised (standard base64). It travels in every assertion's key log,
+	// which is the only thing that ties the pairwise key to the identifier.
+	// Empty for relationships made before it was kept; those are rebuilt.
+	InceptionB64 string `json:"inception_b64,omitempty"`
 }
 
 type StartLoginRequest struct {

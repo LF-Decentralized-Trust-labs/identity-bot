@@ -30,12 +30,33 @@ func TestLoginPairwiseAndDisclosures(t *testing.T) {
 		Nonce:                "nonceA",
 		RequestedDisclosures: []string{"display_name", "email"},
 	}
-	// bundleB not needed for direct rel construction in this headless contract test.
+	bundleB := &ChallengeBundle{
+		V: "ASK1", T: 1, SiteAID: "EsiteBBB",
+		SiteOOBI: "https://b.example/auth/ia/site/oobi/EsiteBBB",
+		Audience: "https://b.example",
+		Nonce:    "nonceB",
+	}
 
-	// Direct construction for headless test (production uses driver + stable index).
-	relA := &SiteRelationship{SiteAID: "EsiteAAA", PairwiseAID: "EtestpairwiseAIDforA00000000000000000001", RelayOOBI: "https://a.example/auth/ia/site/oobi/EtestpairwiseAIDforA00000000000000000001", RelationshipIndex: 1}
-	relA2 := relA
-	relB := &SiteRelationship{SiteAID: "EsiteBBB", PairwiseAID: "EtestpairwiseAIDforB00000000000000000002", RelayOOBI: "https://b.example/auth/ia/site/oobi/EtestpairwiseAIDforB00000000000000000002", RelationshipIndex: 2}
+	// Real relationships, minted the way production mints them (keri-go, as on
+	// a device with no driver), from a root seed and a stable index. A made-up
+	// identifier could not sign in: nothing would derive it.
+	dummyRoot := make([]byte, 64)
+	copy(dummyRoot, "testrootseedforhdderivationtestonly0000000000000000000000000000")
+	if err := secureenclave.StoreRootSeed(h.dataDir, dummyRoot); err != nil {
+		t.Fatal(err)
+	}
+	relA, err := h.getOrCreateRelationship("EsiteAAA", bundleA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relA2, err := h.getOrCreateRelationship("EsiteAAA", bundleA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relB, err := h.getOrCreateRelationship("EsiteBBB", bundleB)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Pairwise AID present and well-formed (E-prefixed), never empty/root.
 	if len(relA.PairwiseAID) == 0 || relA.PairwiseAID[0] != 'E' {
@@ -53,11 +74,6 @@ func TestLoginPairwiseAndDisclosures(t *testing.T) {
 	if !strings.Contains(relA.RelayOOBI, "/auth/ia/site/oobi/") {
 		t.Fatalf("relationship OOBI dropped the RP-hosted path: %q", relA.RelayOOBI)
 	}
-
-	// Bootstrap dummy root seed so load re-derives using index (new model: root + persisted index).
-	dummyRoot := make([]byte, 64)
-	copy(dummyRoot, "testrootseedforhdderivationtestonly0000000000000000000000000000")
-	_ = secureenclave.StoreRootSeed(h.dataDir, dummyRoot)
 
 	// The signed Grant carries the pairwise AID as `i` and only requested fields.
 	asrt, err := h.buildAssertion(relA, bundleA, nil)
@@ -81,5 +97,21 @@ func TestLoginPairwiseAndDisclosures(t *testing.T) {
 	}
 	if asrt.Sig == "" {
 		t.Fatal("assertion not signed")
+	}
+	// And the site can check it from the assertion alone.
+	if res := VerifyAssertion(*asrt, bundleA.Nonce, bundleA.Audience, 300); !res.Valid {
+		t.Fatalf("the site could not verify a genuine assertion: %s", res.Reason)
+	}
+
+	// A relationship made before its inception was kept still signs in: the
+	// inception is rebuilt from the keys it was minted with.
+	old := *relA
+	old.InceptionB64 = ""
+	asrt2, err := h.buildAssertion(&old, bundleA, nil)
+	if err != nil {
+		t.Fatalf("a relationship without its kept inception could not sign: %v", err)
+	}
+	if res := VerifyAssertion(*asrt2, bundleA.Nonce, bundleA.Audience, 300); !res.Valid {
+		t.Fatalf("a rebuilt inception did not verify: %s", res.Reason)
 	}
 }
