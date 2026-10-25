@@ -93,6 +93,9 @@ func (s *CoreServer) mountPublicDidWebsRoutes(r chi.Router) {
 // log is an event or two; this leaves room for a long one and no more.
 const maxKeyLogBody = 1 << 20
 
+// maxRegisteredKeys bounds how many identities may publish a key here.
+const maxRegisteredKeys = 100000
+
 // A key registry anybody can write to, that cannot be written wrongly.
 //
 // Publishing here stays unauthenticated, because a counterparty we have never
@@ -153,6 +156,12 @@ func (reg *keyRegistry) put(aid string, next registeredKey) (int, error) {
 		}
 	}
 	prev, had := reg.m[aid]
+	// Anybody can mint identities and register them, so the registry is
+	// bounded: a stranger filling it costs them a refusal, not this agent its
+	// disk. Identities already held can always be carried forward.
+	if !had && len(reg.m) >= maxRegisteredKeys {
+		return http.StatusInsufficientStorage, fmt.Errorf("this agent holds as many published keys as it keeps")
+	}
 	reg.m[aid] = next
 	if reg.path != "" {
 		b, _ := json.MarshalIndent(reg.m, "", "  ")

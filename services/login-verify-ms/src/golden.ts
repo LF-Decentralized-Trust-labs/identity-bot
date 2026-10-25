@@ -65,7 +65,7 @@ export async function runGoldenSelfTest(): Promise<{ ok: boolean; reason?: strin
     signingPublicKey: pub,
     skipDtCheck: true,
   });
-  if (!pass.ok) return { ok: false, reason: `golden: verify failed: ${pass.reason}` };
+  if (!pass.valid) return { ok: false, reason: `golden: verify failed: ${pass.reason}` };
 
   const corrupt = { ...g.assertion, sig: g.negative_vectors.corrupt_sig_last_char };
   const reject = await verifyLoginAssertion(corrupt, {
@@ -74,7 +74,7 @@ export async function runGoldenSelfTest(): Promise<{ ok: boolean; reason?: strin
     signingPublicKey: pub,
     skipDtCheck: true,
   });
-  if (reject.ok) return { ok: false, reason: "golden: corrupt sig should reject" };
+  if (reject.valid) return { ok: false, reason: "golden: corrupt sig should reject" };
 
   return { ok: true };
 }

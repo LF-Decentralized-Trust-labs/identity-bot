@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -183,6 +184,27 @@ func TestAHeldKeyLogIsOnlyEverCarriedForward(t *testing.T) {
 		if (err == nil) != c.ok {
 			t.Errorf("case %d: replace allowed=%v, want %v (%v)", i, err == nil, c.ok, err)
 		}
+	}
+}
+
+// A full registry refuses a new identity and still carries a held one forward,
+// so strangers minting identities cannot spend this agent's disk.
+func TestAFullRegistryRefusesNewcomersButNotThoseItHolds(t *testing.T) {
+	reg := &keyRegistry{m: map[string]registeredKey{}}
+	for i := 0; i < maxRegisteredKeys; i++ {
+		reg.m[fmt.Sprintf("E%d", i)] = registeredKey{}
+	}
+	held, _, _ := theirKeyLog(t, 1000107)
+	_, log, pub := theirKeyLog(t, 1000107)
+	delete(reg.m, "E0")
+	if _, err := reg.put(held, registeredKey{KeyLog: log, PublicKeyB64: pub}); err != nil {
+		t.Fatalf("filling the last place was refused: %v", err)
+	}
+	if code, err := reg.put("ENewcomer", registeredKey{KeyLog: log}); err == nil || code != http.StatusInsufficientStorage {
+		t.Fatalf("a full registry accepted a newcomer (%d, %v)", code, err)
+	}
+	if _, err := reg.put(held, registeredKey{KeyLog: log, PublicKeyB64: pub}); err != nil {
+		t.Fatalf("a held identity could not be carried forward in a full registry: %v", err)
 	}
 }
 

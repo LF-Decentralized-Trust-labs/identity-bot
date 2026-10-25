@@ -1,6 +1,7 @@
 import express from "express";
 import {
   decodeVerkeyQb64,
+  keyFromIdentityAgent,
   parseRfc3339,
   verifyLoginAssertion,
   type LoginAssertion,
@@ -9,6 +10,10 @@ import { runGoldenSelfTest } from "./golden.js";
 
 const PORT = parseInt(process.env.PORT ?? "8091", 10);
 const HOST = process.env.HOST ?? "0.0.0.0";
+// The Identity Agent asked to check each assertion's key log. Without one, an
+// assertion verifies only against a signing_verkey_qb64 the caller supplies.
+const IDENTITY_AGENT_URL = process.env.IDENTITY_AGENT_URL;
+const resolveKey = IDENTITY_AGENT_URL ? keyFromIdentityAgent(IDENTITY_AGENT_URL) : undefined;
 
 let goldenOk = false;
 let goldenReason = "not run";
@@ -49,6 +54,7 @@ app.post("/verify", async (req, res) => {
       expectedAudience,
       expectedNonce,
       maxSkewSeconds,
+      resolveKey,
     };
 
     if (signingVerkeyQb64) {
@@ -63,13 +69,13 @@ app.post("/verify", async (req, res) => {
 
     const result = await verifyLoginAssertion(assertion, verifyOpts);
 
-    if (!result.ok) {
+    if (!result.valid) {
       return res.status(401).json(result);
     }
 
     res.json({
       ok: true,
-      i: result.i,
+      i: result.pairwiseAID,
       disclosures: result.disclosures,
       presented_acdcs: result.presentedAcdcs,
       custom_data: result.customData,
