@@ -47,16 +47,20 @@ var publicRoutes = map[string]string{
 	// These answer "who is this AID and how do I verify it". They carry no
 	// personal data (see handleOobiServe), and requiring auth would defeat the
 	// purpose: a stranger must be able to verify us before any relationship.
-	"GET /oobi/{aid}":               "OOBI discovery record",
-	"GET /public/oobi/{aid}":        "OOBI discovery record",
-	"GET /{aid}/oobi":               "OOBI discovery record (did:webs layout)",
-	"GET /{aid}/did.json":           "did:webs document — public key material",
-	"GET /public/{aid}/did.json":    "did:webs document — public key material",
-	"GET /{aid}/kel":                "key event log — public and self-verifying",
-	"GET /{aid}/keri.cesr":          "key event log as a CESR stream",
-	"GET /api/kerl":                 "key event log — public and self-verifying",
-	"POST /_register":               "a pairwise signer registers its key so counterparties can resolve it",
-	"POST /public/_register":        "a pairwise signer registers its key so counterparties can resolve it",
+	"GET /oobi/{aid}":            "OOBI discovery record",
+	"GET /public/oobi/{aid}":     "OOBI discovery record",
+	"GET /{aid}/oobi":            "OOBI discovery record (did:webs layout)",
+	"GET /{aid}/did.json":        "did:webs document — public key material",
+	"GET /public/{aid}/did.json": "did:webs document — public key material",
+	"GET /{aid}/kel":             "key event log — public and self-verifying",
+	"GET /{aid}/keri.cesr":       "key event log as a CESR stream",
+	"GET /api/kerl":              "key event log — public and self-verifying",
+	"POST /_register":            "a pairwise signer registers its key, proved by its own key log, so counterparties can resolve it",
+	"POST /public/_register":     "a pairwise signer registers its key, proved by its own key log, so counterparties can resolve it",
+	// A relying party in another language asks what key a key log establishes,
+	// instead of keeping a second implementation of the check. Pure
+	// computation over what it is sent: nothing fetched, nothing stored.
+	"POST /public/login/key":        "a verifier asking what key an identity's own key log establishes",
 	"GET /public/credential/{said}": "a credential the user chose to publish at a shareable link",
 	// A credential names its schema by digest; a verifier fetches the document to
 	// confirm what the credential claims. Schemas are public by nature.
