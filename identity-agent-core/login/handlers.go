@@ -154,9 +154,21 @@ func (h *Handler) verifyDelegationAnchor(bundle *ChallengeBundle, site VerifiedI
 		return fmt.Errorf("the challenge names no introduction for %s, so its approval of the site cannot be checked",
 			bundle.RelationshipAnchorAID)
 	}
-	delegator, err := identityFromOOBI(h.HTTPClient, bundle.RelationshipAnchorOOBI, bundle.RelationshipAnchorAID, false)
+	// Read as the key now in force, not only as "what the log once signed".
+	// A key the delegator has since rotated away can still sign a NEW approval
+	// on a branch made from the shorter log, and that branch validates. What
+	// stops it is the witnesses: they saw the rotation and will not receipt a
+	// second event at the same place. So a delegator that names witnesses must
+	// show their receipts on every event, the approving seal included. One
+	// that names none cannot rotate at all (unprovableRotation).
+	delegator, err := identityFromOOBI(h.HTTPClient, bundle.RelationshipAnchorOOBI, bundle.RelationshipAnchorAID, true)
 	if err != nil {
 		return fmt.Errorf("the delegator's log does not establish it: %w", err)
+	}
+	if delegator.NamesWitnesses && !delegator.Witnessed {
+		return fmt.Errorf("%s names witnesses, but its introduction does not show their receipts on every "+
+			"event, so its approval of this site could have been signed by a key it has since retired",
+			bundle.RelationshipAnchorAID)
 	}
 	if err := keri.ValidateDelegation(site.RawEvents[0], delegator.RawEvents); err != nil {
 		return fmt.Errorf("the delegator never approved this site: %w", err)
@@ -488,12 +500,17 @@ func (h *Handler) prepareLogin(req StartLoginRequest) (*ChallengeBundle, *SiteRe
 	// Publishing the pairwise key is a courtesy to whoever resolves it later
 	// by identifier. The site itself takes the key from the key log inside
 	// the assertion, so a registry that is down, full, or at an address that
-	// has since moved does not stop the sign-in. It is said, not swallowed.
-	if err := h.registerPairwiseOnDevRelay(rel, bundle); err != nil {
-		log.Printf("[login] the pairwise key for %s was not published: %v "+
-			"(the sign-in goes ahead: the site reads the key from the assertion's key log)",
-			rel.PairwiseAID, err)
-	}
+	// has since moved does not stop the sign-in, and one that hangs does not
+	// hold up the person's consent screen: it runs beside the sign-in, on
+	// copies, and a failure is said, not swallowed.
+	relCopy, bundleCopy := *rel, *bundle
+	go func() {
+		if err := h.registerPairwiseOnDevRelay(&relCopy, &bundleCopy); err != nil {
+			log.Printf("[login] the pairwise key for %s was not published: %v "+
+				"(the sign-in goes ahead: the site reads the key from the assertion's key log)",
+				relCopy.PairwiseAID, err)
+		}
+	}()
 
 	preview := &LoginPreviewResponse{
 		Pending:               true,

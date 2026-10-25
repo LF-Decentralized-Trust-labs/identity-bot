@@ -97,6 +97,11 @@ func ResolveOobiWith(client HTTPClient, oobiURL string) (*drivers.DriverResolveO
 		// to have authorised, and a stranger's unsigned log is exactly the thing
 		// a forger can produce at will.
 		CesrSignatures []string `json:"cesr_signatures"`
+		// Receipts are the witness receipts the publisher holds for its
+		// events. Every one is checked against the witness that issued it, so
+		// serving them grants nothing; withholding them only leaves the log
+		// unwitnessed as far as this caller can tell.
+		Receipts map[string][]map[string]interface{} `json:"receipts"`
 	}
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return nil, fmt.Errorf("what %s served is not a readable introduction: %w", oobiURL, err)
@@ -129,6 +134,9 @@ func ResolveOobiWith(client HTTPClient, oobiURL string) (*drivers.DriverResolveO
 	if ok && len(doc.CesrSignatures) == len(in.RawEvents) {
 		in.CesrSignatures = doc.CesrSignatures
 	}
+	if ok && len(doc.Receipts) > 0 {
+		in.Receipts = drivers.WitnessReceiptsFromWire(doc.Receipts)
+	}
 	if !ok {
 		// Served without the bytes it was published as, so its signatures
 		// cannot be checked and neither can the claim that this log derives
@@ -150,6 +158,7 @@ func ResolveOobiWith(client HTTPClient, oobiURL string) (*drivers.DriverResolveO
 	out.RawEvents = in.RawEvents
 	out.EventsValidated = res.EventsValidated
 	out.ValidationErrors = res.ValidationErrors
+	out.Witnessed = res.Witnessed
 	if res.CurrentPublicKey != "" {
 		out.CurrentPublicKey = res.CurrentPublicKey
 	}

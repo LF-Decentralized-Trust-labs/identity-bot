@@ -131,6 +131,10 @@ func KeyFromKeyLog(aid, encoded string) ([]byte, error) {
 type VerifiedIdentity struct {
 	Key       []byte
 	RawEvents [][]byte
+	// NamesWitnesses says the identity's inception designates witnesses, and
+	// Witnessed that every event the introduction served carried enough of
+	// their receipts.
+	NamesWitnesses, Witnessed bool
 }
 
 // KeyFromOOBI resolves aid's introduction and returns its current signing key,
@@ -158,9 +162,11 @@ func IdentityFromOOBI(client *http.Client, oobiURL, aid string) (VerifiedIdentit
 }
 
 // identityFromOOBI resolves and validates aid's introduction. mustBeCurrent
-// says the caller will use the key now in force, so a rotation nothing can
-// prove the newest is refused; a caller reading only what the log once
-// signed, such as a delegator's approval, does not need that.
+// says the caller relies on the identity's present authority, so a rotation
+// nothing can prove the newest is refused. Every caller does today, a
+// delegator's approval included: a retired key can sign a new approval on a
+// branch made from the shorter log, so "what the log once signed" is not a
+// weaker question (verifyDelegationAnchor).
 func identityFromOOBI(client *http.Client, oobiURL, aid string, mustBeCurrent bool) (VerifiedIdentity, error) {
 	if aid == "" {
 		return VerifiedIdentity{}, fmt.Errorf("no identifier was named, so there is nothing for an introduction to belong to")
@@ -185,7 +191,23 @@ func identityFromOOBI(client *http.Client, oobiURL, aid string, mustBeCurrent bo
 			return VerifiedIdentity{}, err
 		}
 	}
-	return VerifiedIdentity{Key: key, RawEvents: res.RawEvents}, nil
+	names, err := namesWitnesses(aid, res.RawEvents)
+	if err != nil {
+		return VerifiedIdentity{}, err
+	}
+	return VerifiedIdentity{Key: key, RawEvents: res.RawEvents, NamesWitnesses: names, Witnessed: res.Witnessed}, nil
+}
+
+// namesWitnesses reports whether aid's inception designates witnesses.
+func namesWitnesses(aid string, raws [][]byte) (bool, error) {
+	if len(raws) == 0 {
+		return false, nil
+	}
+	icp, err := keri.ParseEvent(raws[0])
+	if err != nil {
+		return false, fmt.Errorf("the inception of %s does not parse: %w", aid, err)
+	}
+	return len(icp.Witnesses) > 0, nil
 }
 
 // unprovableRotation refuses a rotated log from an identity that names no

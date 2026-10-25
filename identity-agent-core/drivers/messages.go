@@ -165,6 +165,11 @@ type DriverResolveOobiResponse struct {
 	// delegator, say) and has to read the bytes that were checked rather
 	// than a second, unchecked copy.
 	RawEvents [][]byte `json:"-"`
+	// Witnessed reports that every event carried receipts from enough of the
+	// witnesses designated for it, from the receipts the introduction served.
+	// An identity that names no witnesses has nothing to meet and reads true;
+	// a caller that needs witnessing checks NamesWitnesses as well.
+	Witnessed bool `json:"witnessed"`
 }
 
 type DriverValidateKELResponse struct {
