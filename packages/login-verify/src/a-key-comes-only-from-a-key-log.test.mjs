@@ -20,6 +20,7 @@ import { anIdentityAgentStandIn } from "./an-identity-agent-stand-in.mjs";
 // one that has a way asks it about the log the assertion carries.
 
 let lureUrl = "";
+const SITE = "EThePortalWhoseChallengeThisAnswers00000000";
 
 async function anAssertion(aid, seed, keyLog) {
   const a = {
@@ -27,7 +28,7 @@ async function anAssertion(aid, seed, keyLog) {
     relationship_aid_oobi: `${lureUrl}/oobi/${aid}`,
     audience: "https://portal.example", nonce: "a-nonce",
     dt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
-    disclosures: {}, presented_acdcs: [],
+    disclosures: {}, presented_acdcs: [], site_aid: SITE,
   };
   if (keyLog !== undefined) a.p_kel = keyLog;
   a.d = assertionDigest(a);
@@ -39,7 +40,7 @@ async function run() {
   const seed = ed.utils.randomPrivateKey();
   const pub = await ed.getPublicKeyAsync(seed);
   const aid = "EAliceTheEmployee000000000000000000000000000";
-  const opts = { expectedAudience: "https://portal.example", expectedNonce: "a-nonce" };
+  const opts = { expectedAudience: "https://portal.example", expectedNonce: "a-nonce", expectedSiteAid: SITE };
 
   // Anything at the address the assertion names would be a key the attacker
   // chose. Nothing may be read from it.
@@ -92,6 +93,12 @@ async function run() {
   const none = await verifyLoginAssertion(await anAssertion(aid, seed, undefined), { ...opts, resolveKey });
   if (none.valid) throw new Error("an assertion with no key log was accepted");
   if (ia.asked.length !== before) throw new Error("an assertion with no key log was still sent to be checked");
+
+  // 5. An Identity Agent asked over plain HTTP elsewhere could be answered by
+  // anybody on the path, so it is not asked at all.
+  let refusedPlainHttp = false;
+  try { keyFromIdentityAgent("http://identity-agent.example"); } catch { refusedPlainHttp = true; }
+  if (!refusedPlainHttp) throw new Error("an Identity Agent was to be asked for keys over plain HTTP");
 
   if (fetched !== 0) throw new Error(`a key was read from the address an assertion named (${fetched} requests)`);
 

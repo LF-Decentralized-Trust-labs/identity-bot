@@ -68,6 +68,8 @@ export function disclosuresFromIDToken(payload: Record<string, unknown>): Record
 export interface VerifyIDTokenOptions {
   expectedAudience: string;
   expectedNonce: string;
+  /** This site's own identifier: the embedded assertion must name it. */
+  expectedSiteAid: string;
   maxSkewSeconds?: number;
   /** Establishes the issuer's key from the embedded assertion's key log.
    *  Without one every token is refused; see `keyFromIdentityAgent`. */
@@ -83,7 +85,7 @@ export async function verifyIDToken(
   opts: VerifyIDTokenOptions,
   verifyAssertion: (
     assertion: LoginAssertion,
-    vopts: { expectedAudience: string; expectedNonce: string; maxSkewSeconds?: number },
+    vopts: { expectedAudience: string; expectedNonce: string; expectedSiteAid: string; maxSkewSeconds?: number },
   ) => Promise<{ valid: boolean; reason?: string }>,
   // Optional policy check — whether this person is allowed in, which is a
   // different question from whether they are who they say. Omitting it admits
@@ -116,6 +118,7 @@ export async function verifyIDToken(
   const substrate = await verifyAssertion(assertion, {
     expectedAudience: opts.expectedAudience,
     expectedNonce: opts.expectedNonce,
+    expectedSiteAid: opts.expectedSiteAid,
     maxSkewSeconds: opts.maxSkewSeconds,
   });
   if (!substrate.valid) return { ok: false, reason: `login: ${substrate.reason}` };

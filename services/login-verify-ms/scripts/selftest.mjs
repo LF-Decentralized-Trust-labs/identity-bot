@@ -3,7 +3,50 @@
 import { spawn } from "node:child_process";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import * as crypto from "node:crypto";
+import http from "node:http";
+import { assertionDigest, canonicalAssertionBody, signCanonical } from "@identity-agent/login-verify";
 import { loadGoldenVectors, runGoldenSelfTest } from "../dist/golden.js";
+
+// What a stand-in organisation Identity Agent answers for the one key log it
+// knows: the key it establishes. Anything else establishes nothing.
+const known = new Map();
+async function aStandInIdentityAgent() {
+  const server = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (d) => (body += d));
+    req.on("end", () => {
+      const { aid, key_log } = JSON.parse(body || "{}");
+      const pub = known.get(`${aid}|${key_log}`);
+      res.setHeader("content-type", "application/json");
+      if (!pub) {
+        res.writeHead(422).end(JSON.stringify({ error: "the key log establishes no key" }));
+        return;
+      }
+      res.end(JSON.stringify({ aid, public_key_b64: pub }));
+    });
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  return { server, url: `http://127.0.0.1:${server.address().port}` };
+}
+
+async function aFreshAssertion() {
+  const { privateKey, publicKey } = crypto.generateKeyPairSync("ed25519");
+  const seed = new Uint8Array(Buffer.from(privateKey.export({ format: "jwk" }).d, "base64url"));
+  const pub = publicKey.export({ format: "jwk" }).x;
+  const aid = "EAFreshPairwiseIdentity0000000000000000000000";
+  const assertion = {
+    v: "IALOGIN10JSON", t: "login-assertion", i: aid,
+    relationship_aid_oobi: "https://site.example/oobi/" + aid,
+    audience: "https://site.example", nonce: "n-" + Date.now(),
+    dt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+    disclosures: {}, presented_acdcs: [], p_kel: "its-signed-key-log", site_aid: "EThisSite",
+  };
+  known.set(`${aid}|${assertion.p_kel}`, pub);
+  assertion.d = assertionDigest(assertion);
+  assertion.sig = await signCanonical(canonicalAssertionBody(assertion), seed);
+  return { assertion };
+}
 
 const MS_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = 18091 + Math.floor(Math.random() * 1000);
@@ -35,9 +78,10 @@ async function main() {
   if (!golden.ok) fail(golden.reason);
 
   const g = loadGoldenVectors().login_assertion;
+  const ia = await aStandInIdentityAgent();
   const server = spawn("node", ["dist/server.js"], {
     cwd: MS_ROOT,
-    env: { ...process.env, PORT: String(PORT), HOST: "127.0.0.1" },
+    env: { ...process.env, PORT: String(PORT), HOST: "127.0.0.1", IDENTITY_AGENT_URL: ia.url },
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -54,45 +98,55 @@ async function main() {
     const health = await waitForHealth(baseUrl);
     if (health.status !== "active") fail(`health status=${health.status}`);
 
-    const passRes = await fetch(`${baseUrl}/verify`, {
+    // A key the caller supplies is refused: the key comes from the
+    // assertion's key log, checked by the organisation's Identity Agent.
+    const callerKeyRes = await fetch(`${baseUrl}/verify`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         assertion: g.assertion,
         expected_audience: g.expected_verify.audience,
         expected_nonce: g.expected_verify.nonce,
+        expected_site_aid: "ESite",
         signing_verkey_qb64: g.signing_verkey_qb64,
-        skip_dt_check: true,
       }),
     });
-    const passBody = await passRes.json();
-    if (!passRes.ok || !passBody.ok) {
-      fail(`golden POST /verify: ${JSON.stringify(passBody)}`);
-    }
-    if (passBody.i !== g.assertion.i) fail("verify i mismatch");
+    if (callerKeyRes.status !== 400) fail(`a caller-supplied key was not refused (${callerKeyRes.status})`);
 
-    const corrupt = { ...g.assertion, sig: g.negative_vectors.corrupt_sig_last_char };
-    const rejectRes = await fetch(`${baseUrl}/verify`, {
+    // A fresh assertion, its key established by the stand-in Identity Agent.
+    const fresh = await aFreshAssertion();
+    const passRes = await fetch(`${baseUrl}/verify`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        assertion: corrupt,
-        expected_audience: g.expected_verify.audience,
-        expected_nonce: g.expected_verify.nonce,
-        signing_verkey_qb64: g.signing_verkey_qb64,
-        skip_dt_check: true,
+        assertion: fresh.assertion,
+        expected_audience: fresh.assertion.audience,
+        expected_nonce: fresh.assertion.nonce,
+        expected_site_aid: fresh.assertion.site_aid,
       }),
     });
-    const rejectBody = await rejectRes.json();
-    if (rejectRes.status !== 401 || rejectBody.ok) {
-      fail("corrupt sig should return 401 with ok:false");
-    }
+    const passBody = await passRes.json();
+    if (!passRes.ok || !passBody.ok) fail(`POST /verify: ${JSON.stringify(passBody)}`);
+    if (passBody.i !== fresh.assertion.i) fail("verify i mismatch");
+
+    const otherSiteRes = await fetch(`${baseUrl}/verify`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        assertion: fresh.assertion,
+        expected_audience: fresh.assertion.audience,
+        expected_nonce: fresh.assertion.nonce,
+        expected_site_aid: "ESomeOtherSite",
+      }),
+    });
+    if (otherSiteRes.status !== 401) fail("an assertion for another site was accepted");
 
     console.log("✅ login-verify-ms selftest passed");
     console.log(`   golden said=${g.said}`);
     console.log(`   canonical_body_len=${g.canonical_body_len}`);
-    console.log(`   HTTP POST /verify golden + negative vectors OK`);
+    console.log(`   HTTP POST /verify: key from the key log, caller's key and another site refused`);
   } finally {
+    ia.server.close();
     server.kill("SIGTERM");
     await new Promise((r) => server.on("exit", r));
     if (server.exitCode && server.exitCode !== 0 && !server.signalCode) {

@@ -53,6 +53,7 @@ async function run() {
     disclosures: { display_name: "Alice", email: "alice@example.com" },
     presented_acdcs: [],
     p_kel: "alices-signed-key-log",
+    site_aid: bundle.site_aid,
   };
   ia.knows(pairwiseAid, assertion.p_kel, pairwisePub);
   assertion.d = assertionDigest(assertion);
@@ -62,8 +63,24 @@ async function run() {
   const result = await verifier.verifyAssertion(assertion, {
     expectedAudience: bundle.audience,
     expectedNonce: bundle.nonce,
+    expectedSiteAid: site.aid,
   });
   if (!result.valid) throw new Error(`verify failed: ${result.reason}`);
+
+  // The same person's genuine assertion, approved for another site's challenge
+  // that copied this one's audience and nonce, does not sign in here.
+  const relayed = { ...assertion, site_aid: "EAnotherSiteThatCopiedTheChallenge" };
+  delete relayed.sig;
+  relayed.d = assertionDigest(relayed);
+  relayed.sig = await signCanonical(canonicalAssertionBody(relayed), pairwiseSeed);
+  const refused = await verifier.verifyAssertion(relayed, {
+    expectedAudience: bundle.audience,
+    expectedNonce: bundle.nonce,
+    expectedSiteAid: site.aid,
+  });
+  if (refused.valid || !refused.reason?.startsWith("site mismatch")) {
+    throw new Error(`an assertion approved for another site's challenge verified here: ${refused.reason}`);
+  }
 
   const callback = await verifier.handleCallback(assertion, session_token, (aid) => `tok-${aid.slice(0, 8)}`);
   if (!callback.ok) throw new Error(`callback failed: ${callback.reason}`);

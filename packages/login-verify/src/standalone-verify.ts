@@ -14,6 +14,9 @@ export interface StandaloneVerifyOptions extends VerifyAssertionOptions {
   signingPublicKey?: Uint8Array;
   /** Skip dt freshness (golden harness supplies fixed dt). */
   skipDtCheck?: boolean;
+  /** Skip the site check, for the golden vectors, which predate `site_aid`.
+   *  Honoured only with `signingPublicKey`, so no live verification can skip it. */
+  skipSiteCheck?: boolean;
   /** Override clock for dt skew checks. */
   nowMs?: number;
   /** Burns the assertion so it cannot be verified a second time.
@@ -58,6 +61,10 @@ export async function verifyLoginAssertion(
   }
   if (assertion.audience !== opts.expectedAudience) {
     return { valid: false, reason: "audience mismatch" };
+  }
+  const goldenOnly = opts.skipSiteCheck === true && opts.signingPublicKey !== undefined;
+  if (!goldenOnly && (!opts.expectedSiteAid || assertion.site_aid !== opts.expectedSiteAid)) {
+    return { valid: false, reason: "site mismatch: the assertion answers another site's challenge" };
   }
 
   if (!opts.skipDtCheck) {

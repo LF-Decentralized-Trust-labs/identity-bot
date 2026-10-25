@@ -62,8 +62,12 @@ export async function runGoldenSelfTest(): Promise<{ ok: boolean; reason?: strin
   const pass = await verifyLoginAssertion(g.assertion, {
     expectedAudience: g.expected_verify.audience,
     expectedNonce: g.expected_verify.nonce,
+    expectedSiteAid: "",
     signingPublicKey: pub,
     skipDtCheck: true,
+    // The golden vectors predate site_aid; this checks the canonical body and
+    // signature only, with a key from the vectors, never from a caller.
+    skipSiteCheck: true,
   });
   if (!pass.valid) return { ok: false, reason: `golden: verify failed: ${pass.reason}` };
 
@@ -71,8 +75,12 @@ export async function runGoldenSelfTest(): Promise<{ ok: boolean; reason?: strin
   const reject = await verifyLoginAssertion(corrupt, {
     expectedAudience: g.expected_verify.audience,
     expectedNonce: g.expected_verify.nonce,
+    expectedSiteAid: "",
     signingPublicKey: pub,
     skipDtCheck: true,
+    // The golden vectors predate site_aid; this checks the canonical body and
+    // signature only, with a key from the vectors, never from a caller.
+    skipSiteCheck: true,
   });
   if (reject.valid) return { ok: false, reason: "golden: corrupt sig should reject" };
 

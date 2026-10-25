@@ -81,6 +81,11 @@ export interface LoginAssertion {
   presented_acdcs: unknown[];
   custom_data?: Record<string, unknown>;
   p_kel?: string;
+  /** The site whose signed challenge the person approved. A relying party
+   *  refuses an assertion naming any site but its own: a site's audience and
+   *  nonce are text another site can copy, the key that signed its challenge
+   *  is not. */
+  site_aid?: string;
   sig?: string;
 }
 
@@ -96,6 +101,8 @@ export interface CreateChallengeOptions {
 export interface VerifyAssertionOptions {
   expectedAudience: string;
   expectedNonce: string;
+  /** This site's own identifier: the assertion must name it (`site_aid`). */
+  expectedSiteAid: string;
   maxSkewSeconds?: number;
 }
 

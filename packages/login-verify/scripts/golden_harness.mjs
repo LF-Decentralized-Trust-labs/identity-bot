@@ -51,6 +51,8 @@ async function main() {
     expectedNonce: v.expected_verify.nonce,
     signingPublicKey: pub,
     skipDtCheck: true,
+    // The golden vectors predate site_aid.
+    skipSiteCheck: true,
   });
   if (!result.valid) fail(`verify golden: ${result.reason}`);
 
@@ -60,6 +62,7 @@ async function main() {
     expectedNonce: v.expected_verify.nonce,
     signingPublicKey: pub,
     skipDtCheck: true,
+    skipSiteCheck: true,
   });
   if (bad.ok) fail("corrupt sig should reject");
 

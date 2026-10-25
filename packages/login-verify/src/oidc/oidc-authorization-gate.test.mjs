@@ -33,7 +33,7 @@ async function run() {
     throw new Error("no key established");
   };
 
-  const opts = { expectedAudience: "https://portal.example", expectedNonce: "a-nonce", resolveKey };
+  const opts = { expectedAudience: "https://portal.example", expectedNonce: "a-nonce", expectedSiteAid: "EThePortal", resolveKey };
   const substrateOk = async () => ({ valid: true });
 
   // Guard: if the signature path breaks, everything below would pass vacuously.

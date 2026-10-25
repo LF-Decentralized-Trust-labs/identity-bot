@@ -43,6 +43,17 @@ export function keyFromIdentityAgent(
   identityAgentUrl: string,
   fetchFn: typeof fetch = fetch,
 ): KeyResolver {
+  // The answer is a key this verifier will trust, so it is fetched over TLS:
+  // over plain HTTP anybody on the path could answer with a key of their own.
+  // Only an Identity Agent on this same machine is reached without it.
+  const parsed = new URL(identityAgentUrl);
+  const local = ["localhost", "127.0.0.1", "[::1]", "::1"].includes(parsed.hostname);
+  if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && local)) {
+    throw new Error(
+      `${identityAgentUrl} is not an https address; an Identity Agent is asked for keys over TLS ` +
+        "unless it is on this machine",
+    );
+  }
   const url = `${identityAgentUrl.replace(/\/$/, "")}/public/login/key`;
   return async (aid, keyLog) => {
     if (!keyLog) {

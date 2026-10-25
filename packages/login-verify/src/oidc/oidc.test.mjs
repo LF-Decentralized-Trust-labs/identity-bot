@@ -112,6 +112,7 @@ async function run() {
     disclosures: { display_name: "Alice", email: "alice@example.com" },
     presented_acdcs: [],
     p_kel: "alices-signed-key-log",
+    site_aid: bundle.site_aid,
   };
   ia.knows(pairwiseAid, assertion.p_kel, pairwisePub);
   assertion.d = assertionDigest(assertion);
@@ -129,7 +130,7 @@ async function run() {
 
   const result = await verifyIDToken(
     idToken,
-    { expectedAudience: bundle.audience, expectedNonce: bundle.nonce, resolveKey },
+    { expectedAudience: bundle.audience, expectedNonce: bundle.nonce, expectedSiteAid: site.aid, resolveKey },
     (a, o) => verifier.verifyAssertion(a, o),
   );
   if (!result.ok) throw new Error(`id_token verify failed: ${result.reason}`);

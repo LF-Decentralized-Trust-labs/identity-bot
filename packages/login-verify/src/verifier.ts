@@ -131,6 +131,9 @@ export class IdentityAgentVerifier {
     if (assertion.audience !== opts.expectedAudience) {
       return { valid: false, reason: "audience mismatch" };
     }
+    if (!opts.expectedSiteAid || assertion.site_aid !== opts.expectedSiteAid) {
+      return { valid: false, reason: "site mismatch: the assertion answers another site's challenge" };
+    }
     if (!assertion.sig) {
       return { valid: false, reason: "missing sig" };
     }
@@ -180,6 +183,7 @@ export class IdentityAgentVerifier {
     const result = await this.verifyAssertion(assertion, {
       expectedAudience: rec.challenge.audience,
       expectedNonce: rec.challenge.nonce,
+      expectedSiteAid: rec.challenge.site_aid,
     });
     if (!result.valid || !result.pairwiseAID) {
       return { ok: false, reason: result.reason };
@@ -191,7 +195,16 @@ export class IdentityAgentVerifier {
   }
 }
 
-/** Generate a dev site identity (Ed25519 keypair + synthetic AID prefix). */
+/**
+ * Generate a development site identity: an Ed25519 keypair under a made-up
+ * identifier, with no key log behind it.
+ *
+ * Development only. Nothing derives this identifier, so an Identity Agent
+ * built with key-log checking refuses every challenge it signs. A real site
+ * signs in people through its organisation's Identity Agent: its sign-in
+ * identity is an asset of that agent, which serves the site's key log and
+ * checks people's key logs (`keyFromIdentityAgent`).
+ */
 export async function generateDevSiteIdentity(relayBaseUrl: string): Promise<SiteIdentity> {
   const privateKey = ed.utils.randomPrivateKey();
   const publicKey = await ed.getPublicKeyAsync(privateKey);
