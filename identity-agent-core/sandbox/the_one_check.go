@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"fmt"
+	"time"
 
 	"identity-agent-core/authprovider"
 )
@@ -9,8 +10,7 @@ import (
 // The one check every governed action passes.
 //
 // A person acting through a controller and an AI agent invoking a capability
-// are judged by this one function. Before it existed they were judged in two
-// places by two different rules, and a rule written twice drifts.
+// are judged by this one function (ADR-050), so the rule is written once.
 //
 // It asks two questions, in order:
 //
@@ -85,4 +85,15 @@ func MayThisPersonDoThis(action Action, who Person) (bool, string) {
 // are not built yet. When they are, this is the one function that changes.
 func whatThisPersonMayDo(Action, Person) (bool, string) {
 	return true, ""
+}
+
+// passesTheOneCheck is MayThisPersonDoThis for a capability invocation: the
+// caller's score, from the placeholder until human authentication is built,
+// against the capability's minimum. Invoking, listing and describing all ask
+// it, so discovery never offers a capability the caller would be refused.
+func passesTheOneCheck(caller CallerContext, capDef ProvidedCapability, now time.Time) (bool, string) {
+	return MayThisPersonDoThis(
+		Action{Name: capDef.ID, MinimumScore: capDef.MinimumScore},
+		Person{AID: caller.CallerAID, Authenticated: authprovider.UntilHumanAuthenticationIsBuilt(now)},
+	)
 }

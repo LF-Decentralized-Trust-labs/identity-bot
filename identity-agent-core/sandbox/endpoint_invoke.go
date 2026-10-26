@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"identity-agent-core/appcall"
-	"identity-agent-core/authprovider"
 )
 
 // enforceResourceConstraints denies an invocation whose arguments fall outside the
@@ -218,10 +217,7 @@ func (m *Manager) InvokeCapability(ctx context.Context, caller CallerContext, ca
 	// they may do it at all. An AI agent's score comes from the same
 	// placeholder as a person's until human authentication is built, so today
 	// this refuses only a capability whose minimum is set above 80.
-	if ok, why := MayThisPersonDoThis(
-		Action{Name: capabilityID, MinimumScore: capDef.MinimumScore},
-		Person{AID: caller.CallerAID, Authenticated: authprovider.UntilHumanAuthenticationIsBuilt(start)},
-	); !ok {
+	if ok, why := passesTheOneCheck(caller, capDef, start); !ok {
 		m.recordInvocationDetail(caller, capabilityID, executorType, body, "denied", start,
 			EventDetail{StatusReason: "the one check: " + why})
 		return nil, fmt.Errorf("%w: %s", ErrDenied, why)

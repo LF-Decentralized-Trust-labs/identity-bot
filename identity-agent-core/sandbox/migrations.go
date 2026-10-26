@@ -252,8 +252,8 @@ ALTER TABLE invocation_log ADD COLUMN signed_payload TEXT NOT NULL DEFAULT '';
 	{
 		Version:     7,
 		Description: "Capability registry: the identity score a caller needs",
-		// Zero means the default minimum (80), so every existing record keeps
-		// the requirement it effectively had.
+		// Zero means DefaultMinimumScore, so every existing record keeps the
+		// requirement it effectively had.
 		SQL: `
 ALTER TABLE capability_registry ADD COLUMN minimum_score INTEGER NOT NULL DEFAULT 0;
 `,

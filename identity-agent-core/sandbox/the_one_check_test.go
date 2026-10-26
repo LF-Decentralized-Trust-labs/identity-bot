@@ -102,13 +102,14 @@ func TestACapabilityNeedingNinetyIsRefusedAtTheGateway(t *testing.T) {
 }
 
 // A record that sets no minimum keeps the content address it had before the
-// field existed, so no capability's SAID moved.
+// field existed, so no capability's SAID moved. The value is pinned from the
+// code before minimum_score was added.
 func TestNoMinimumLeavesTheContentAddressAlone(t *testing.T) {
-	rec := CapabilityRecord{ID: "x", Name: "X", ExecutorType: "external_api", Impact: "read"}
-	before := computeCapabilitySAID(rec)
-	rec.MinimumScore = 0
-	if computeCapabilitySAID(rec) != before {
-		t.Fatal("an unset minimum changed the content address")
+	const before = "blake3:06b432e629b78f257a3313631db57da091ef71f82c7a9f9fd1eb320fe843c6e0"
+	rec := CapabilityRecord{ID: "demo.pinned", Name: "Pinned", Domain: "demo",
+		ExecutorType: "external_api", Impact: "read", Provider: "registry-native", Enabled: true}
+	if got := computeCapabilitySAID(rec); got != before {
+		t.Fatalf("a record with no minimum changed its content address: %s, was %s", got, before)
 	}
 	rec.MinimumScore = 90
 	if computeCapabilitySAID(rec) == before {

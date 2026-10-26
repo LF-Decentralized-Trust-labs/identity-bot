@@ -60,7 +60,7 @@ type CapabilityRecord struct {
 	Provider       string          `json:"provider"` // "registry-native" | plug-in id | agent AID
 	Enabled        bool            `json:"enabled"`
 	// MinimumScore is the identity score a caller needs to invoke this
-	// capability. Zero means the default, 80 (DefaultMinimumScore). Omitted
+	// capability. Zero means DefaultMinimumScore. Omitted
 	// from the record when zero, so a record that sets nothing has the same
 	// content address it had before this field existed.
 	MinimumScore int `json:"minimum_score,omitempty"`

@@ -71,7 +71,7 @@ type ProvidedCapability struct {
 	// default-false; set on high-assurance capabilities. Enforced at AuthorizeIngress.
 	RequireSignedRequest bool `json:"require_signed_request,omitempty"`
 	// MinimumScore is the identity score a caller needs to invoke this
-	// capability. Zero means the default, 80 (DefaultMinimumScore).
+	// capability. Zero means DefaultMinimumScore.
 	MinimumScore int `json:"minimum_score,omitempty"`
 }
 
