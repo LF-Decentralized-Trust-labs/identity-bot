@@ -217,7 +217,7 @@ func (h *Handler) HandleEnrol(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := map[string]interface{}{
-		"asset":         a.ForDisplay(),
+		"asset":         a.ForDisplay(h.VaultHas),
 		"aid":           resp.AID,
 		"delegator_aid": resp.DelegatorAID,
 		// The machine needs its own inception event to serve its KEL and be

@@ -264,9 +264,11 @@ func (h *Host) handle(ctx context.Context, tools *toolServer, brain Brain, p age
 	if err == nil {
 		token := tools.open(turn)
 		tctx, cancel := context.WithTimeout(ctx, turnTimeout)
-		stop := make(chan struct{})
+		stop, kept := make(chan struct{}), make(chan struct{})
 		if borrowed != nil {
-			go h.keep(borrowed, stop, logf)
+			go h.keep(borrowed, stop, kept, logf)
+		} else {
+			close(kept)
 		}
 		logf("[agent-host] %s: %s from %s, to the brain", rec.Conversation, rec.Kind, d.FromName)
 		out, err = brain.Run(tctx, Turn{
@@ -275,6 +277,7 @@ func (h *Host) handle(ctx context.Context, tools *toolServer, brain Brain, p age
 			Credentials: creds,
 		})
 		close(stop)
+		<-kept
 		cancel()
 		tools.shut(token)
 		if borrowed != nil {

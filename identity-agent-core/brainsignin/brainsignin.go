@@ -43,8 +43,9 @@ const (
 	Local      = "local"
 )
 
-// Harnesses are the programs that run an AI agent's loop. A raw model API has
-// no agent loop, so a sign-in is always used through one of these.
+// Harnesses are the programs that run an AI agent's brain. A model's API does
+// not run the program's own loop of thinking and using tools, so a sign-in is
+// always used through one of these.
 const (
 	HarnessClaudeCode = "claude-code"
 	HarnessGrok       = "grok"

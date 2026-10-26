@@ -174,3 +174,31 @@ func TestASignedRequestToCreateAnAIAgentCarriesNoKey(t *testing.T) {
 	}
 	noFileHolds(t, w.s.DataDir, key)
 }
+
+// A browser session cannot sign an AI agent's brain in or remove its sign-in:
+// either outlives the session, as changing the brain's configuration does.
+func TestABrowserSessionCannotChangeABrainsSignIn(t *testing.T) {
+	for _, route := range []string{"PUT /api/mcp/agents/{id}/brain-sign-in", "DELETE /api/mcp/agents/{id}/brain-sign-in"} {
+		if _, ok := sessionForbidden[route]; !ok {
+			t.Errorf("%s is open to a browser session", route)
+		}
+	}
+}
+
+// With the vault locked, a configuration change carrying a key changes
+// nothing, rather than storing the brain without its key.
+func TestALockedVaultChangesNothing(t *testing.T) {
+	w := newTalkWorld(t)
+	w.s.localOwnerSecret = testOwnerSecret
+	before, _ := w.s.assetHandler.Store.GetAsset(w.a.ID)
+	code, _, raw := w.asOwner(t, "PATCH", "/api/mcp/agents/"+w.a.ID,
+		`{"role":"changed","brain":{"kind":"remote","provider":"anthropic","credential_ref":"sk-ant-api03-LOCKED"}}`)
+	if code != http.StatusServiceUnavailable {
+		t.Fatalf("a key with the vault locked: %d %s", code, raw)
+	}
+	after, _ := w.s.assetHandler.Store.GetAsset(w.a.ID)
+	if after.AgentConfig.Role != before.AgentConfig.Role {
+		t.Fatal("the configuration changed though the key could not be kept")
+	}
+	noFileHolds(t, w.s.DataDir, "sk-ant-api03-LOCKED")
+}

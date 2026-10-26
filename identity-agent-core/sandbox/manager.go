@@ -838,6 +838,12 @@ func (m *Manager) RemoveServiceCredential(service string) error {
 	return m.credentials.RemoveCredential(service)
 }
 
+// VaultWritable reports why the credential vault cannot be written now, or
+// nil when it can.
+func (m *Manager) VaultWritable() error {
+	return m.credentials.Writable()
+}
+
 // HasServiceCredential reports whether the vault holds an entry of this name.
 func (m *Manager) HasServiceCredential(service string) bool {
 	return m.credentials.HasService(service)

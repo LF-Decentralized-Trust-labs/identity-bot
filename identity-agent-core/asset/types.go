@@ -159,33 +159,30 @@ func (b BrainConfig) HoldsASecret(isVaultEntry func(string) bool) bool {
 }
 
 // ForDisplay is the asset as it may be shown to anybody: a brain's credential
-// reference survives only when it names a brain sign-in, so a key an older
+// reference survives only when it is a reference — to a brain sign-in, or to
+// an entry the vault holds (vaultHas; nil knows of none) — so a key an older
 // version stored in its place is never returned.
-func (a Asset) ForDisplay() Asset {
-	if a.AgentConfig != nil {
-		cfg := *a.AgentConfig
-		cfg.Brain = cfg.Brain.ForDisplay()
-		a.AgentConfig = &cfg
-	}
+func (a Asset) ForDisplay(vaultHas func(string) bool) Asset {
+	a.AgentConfig = a.AgentConfig.ForDisplay(vaultHas)
 	return a
 }
 
 // ForDisplay is the brain configuration without anything that could be a
 // secret.
-func (b BrainConfig) ForDisplay() BrainConfig {
-	if !brainsignin.IsRef(b.CredentialRef) {
+func (b BrainConfig) ForDisplay(vaultHas func(string) bool) BrainConfig {
+	if b.HoldsASecret(vaultHas) {
 		b.CredentialRef = ""
 	}
 	return b
 }
 
 // ForDisplay is the AI agent's configuration as it may be shown.
-func (c *AgentConfig) ForDisplay() *AgentConfig {
+func (c *AgentConfig) ForDisplay(vaultHas func(string) bool) *AgentConfig {
 	if c == nil {
 		return nil
 	}
 	out := *c
-	out.Brain = out.Brain.ForDisplay()
+	out.Brain = out.Brain.ForDisplay(vaultHas)
 	return &out
 }
 

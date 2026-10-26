@@ -437,6 +437,20 @@ func (cv *CredentialVault) ListServices() []string {
 	return services
 }
 
+// Writable reports why the vault cannot be written now, or nil when it can.
+func (cv *CredentialVault) Writable() error {
+	cv.mu.Lock()
+	defer cv.mu.Unlock()
+	cv.ensureLoadedLocked()
+	if cv.loadErr != nil {
+		return cv.loadErr
+	}
+	if _, err := cv.vaultKeyLocked(); err != nil {
+		return fmt.Errorf("credential vault is locked — complete identity setup first (vault key unavailable): %w", err)
+	}
+	return nil
+}
+
 // HasService reports whether the vault holds an entry of this name, of any
 // kind.
 func (cv *CredentialVault) HasService(service string) bool {

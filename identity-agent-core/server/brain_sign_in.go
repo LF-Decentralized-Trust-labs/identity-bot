@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"identity-agent-core/agentbody"
@@ -58,6 +59,50 @@ func (s *CoreServer) brainVault() (*sandbox.Manager, error) {
 }
 
 func (s *CoreServer) brainLeases() *brainsignin.Leases { return brainsignin.LeasesIn(s.DataDir) }
+
+// brainVaultWritable is the vault, when a sign-in can be kept in it now.
+// Asked before anything else is written, so a locked vault changes nothing.
+func (s *CoreServer) brainVaultWritable() (*sandbox.Manager, error) {
+	vault, err := s.brainVault()
+	if err != nil {
+		return nil, err
+	}
+	if err := vault.VaultWritable(); err != nil {
+		return nil, err
+	}
+	return vault, nil
+}
+
+// recordLapsedLeases writes every lease that lapsed unrenewed into the
+// record, once each.
+func (s *CoreServer) recordLapsedLeases() {
+	lapsed, err := s.brainLeases().Lapsed(time.Now().UTC())
+	if err != nil {
+		log.Printf("[brain] %v", err)
+	}
+	for _, x := range lapsed {
+		if xa, ok := s.aiAgentAsset(x.Agent); ok {
+			s.recordBrainEvent(xa, sandbox.CallerContext{Transport: "body", BodyHost: x.Host},
+				"lapsed", "ok", "lease "+x.ID+" was not renewed, so its run's place was freed")
+		}
+	}
+}
+
+// mayBorrow says why an AI agent's body may not be lent its sign-in: an AI
+// agent whose grant is revoked or lapsed is lent nothing, though its body
+// still stands.
+func (s *CoreServer) mayBorrow(a asset.Asset, cc sandbox.CallerContext) error {
+	if s.agentStatus(a.PairwiseAID) == "revoked" {
+		return errors.New("this AI agent's grant is revoked, so its sign-in is not lent")
+	}
+	if s.agentGrantLapsed(a.PairwiseAID) {
+		return errors.New("this AI agent's grant has lapsed, so its sign-in is not lent")
+	}
+	if cc.NoScopesBecause != "" {
+		return errors.New("this AI agent may do nothing now (" + cc.NoScopesBecause + "), so its sign-in is not lent")
+	}
+	return nil
+}
 
 // brainSignInRequest is a sign-in as a screen sends it.
 type brainSignInRequest struct {
@@ -204,6 +249,17 @@ func (s *CoreServer) removeBrainSignInOf(assetID string) error {
 	return vault.RemoveBrainSignIn(brainsignin.Ref(assetID))
 }
 
+// forgetBrainSignInOf removes the sign-in kept for an AI agent whose making
+// was undone, so the vault holds nothing for an AI agent that does not exist.
+func (s *CoreServer) forgetBrainSignInOf(assetID string, kept bool) {
+	if !kept {
+		return
+	}
+	if err := s.removeBrainSignInOf(assetID); err != nil {
+		log.Printf("[brain] the sign-in kept for an AI agent that was not made could not be removed: %v", err)
+	}
+}
+
 func firstNonEmptyString(v ...string) string {
 	for _, s := range v {
 		if s != "" {
@@ -251,7 +307,7 @@ func (s *CoreServer) handleSetBrainSignIn(w http.ResponseWriter, r *http.Request
 		jsonError(w, "the sign-in is unreadable", http.StatusBadRequest)
 		return
 	}
-	vault, err := s.brainVault()
+	vault, err := s.brainVaultWritable()
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusServiceUnavailable)
 		return
@@ -275,7 +331,7 @@ func (s *CoreServer) handleSetBrainSignIn(w http.ResponseWriter, r *http.Request
 	}
 	writeJSONStatus(w, http.StatusOK, map[string]any{
 		"asset_id": updated.ID, "sign_in": s.brainSignInView(updated.ID, rec),
-		"agent_config": updated.AgentConfig.ForDisplay(),
+		"agent_config": updated.AgentConfig.ForDisplay(s.isVaultEntry),
 	})
 }
 
@@ -335,8 +391,17 @@ func (s *CoreServer) isVaultEntry(name string) bool {
 	return s.SandboxManager != nil && s.SandboxManager.HasServiceCredential(name)
 }
 
+// brainSecretsMoved holds, by data directory, whether every key on an AI
+// agent's record has been moved, so the check stops once it has.
+var (
+	brainSecretsMoved    sync.Map
+	brainSecretsMovingMu sync.Mutex
+)
+
 // moveBrainSecretsIntoTheVault moves any key an earlier version stored on an
-// AI agent's record into the vault, once, at start. Moving a secret already
+// AI agent's record into the vault: at start, and again each time AI agents
+// are listed or a body borrows, until none is left — the vault's key may only
+// be here after setup, or after the device holding it unlocks it. Moving a secret already
 // held here into the vault grants nothing to anybody, so it needs no decision
 // by the owner. A secret that cannot be moved yet — the vault is locked — is
 // left, said so, and never shown: every view of an AI agent hides it.
@@ -344,6 +409,17 @@ func (s *CoreServer) moveBrainSecretsIntoTheVault() {
 	if s.assetHandler == nil || s.SandboxManager == nil {
 		return
 	}
+	if done, _ := brainSecretsMoved.Load(s.DataDir); done == true {
+		return
+	}
+	brainSecretsMovingMu.Lock()
+	defer brainSecretsMovingMu.Unlock()
+	left := 0
+	defer func() {
+		if left == 0 {
+			brainSecretsMoved.Store(s.DataDir, true)
+		}
+	}()
 	for _, a := range s.assetHandler.ListAgents() {
 		if a.AgentConfig == nil {
 			continue
@@ -361,6 +437,7 @@ func (s *CoreServer) moveBrainSecretsIntoTheVault() {
 		cfg.Brain = brain
 		a.AgentConfig = &cfg
 		if _, err := s.keepBrainSignIn(a, *rec, "moving a key off the AI agent's record"); err != nil {
+			left++
 			log.Printf("[brain] AI agent %s: a key stored on its record could not be moved into the vault yet: %v", a.PairwiseAID, err)
 			continue
 		}
@@ -396,6 +473,13 @@ func (s *CoreServer) theBodyAndItsAgent(w http.ResponseWriter, r *http.Request) 
 func (s *CoreServer) handleBodyBorrowsSignIn(w http.ResponseWriter, r *http.Request) {
 	cc, b, a, ok := s.theBodyAndItsAgent(w, r)
 	if !ok {
+		return
+	}
+	s.moveBrainSecretsIntoTheVault()
+	s.recordLapsedLeases()
+	if err := s.mayBorrow(a, cc); err != nil {
+		s.recordBrainEvent(a, cc, "lend", "denied", err.Error())
+		jsonError(w, err.Error(), http.StatusForbidden)
 		return
 	}
 	// Whether a sign-in was ever kept for this AI agent is on its record, so a
@@ -436,8 +520,8 @@ func (s *CoreServer) handleBodyBorrowsSignIn(w http.ResponseWriter, r *http.Requ
 			"lapsed", "ok", "lease "+x.ID+" was not renewed, so its run's place was freed")
 	}
 	if errors.Is(err, brainsignin.ErrInUse) {
-		s.recordBrainEvent(a, cc, "lend", "denied", fmt.Sprintf("%s: %d of %d in use",
-			brainsignin.ErrInUse, rec.MaxConcurrentRuns, rec.MaxConcurrentRuns))
+		s.recordBrainEvent(a, cc, "lend", "denied", fmt.Sprintf("%s: all %d in use",
+			brainsignin.ErrInUse, rec.MaxConcurrentRuns))
 		writeJSONStatus(w, http.StatusConflict, map[string]any{
 			"error": brainsignin.ErrInUse.Error(), "in_use": true,
 			"max_concurrent_runs": rec.MaxConcurrentRuns, "retry_after_seconds": 30})
@@ -461,7 +545,7 @@ func (s *CoreServer) handleBodyBorrowsSignIn(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *CoreServer) handleBodyRenewsSignIn(w http.ResponseWriter, r *http.Request) {
-	_, b, a, ok := s.theBodyAndItsAgent(w, r)
+	cc, b, a, ok := s.theBodyAndItsAgent(w, r)
 	if !ok {
 		return
 	}
@@ -470,8 +554,15 @@ func (s *CoreServer) handleBodyRenewsSignIn(w http.ResponseWriter, r *http.Reque
 		jsonError(w, "name the lease to renew", http.StatusBadRequest)
 		return
 	}
-	lease, err := s.brainLeases().Renew(q.LeaseID, b.Host, time.Now().UTC())
-	if err != nil || lease.Agent != a.ID {
+	s.recordLapsedLeases()
+	if err := s.mayBorrow(a, cc); err != nil {
+		// The run keeps what it holds until it ends; its place is not kept.
+		s.recordBrainEvent(a, cc, "renew", "denied", err.Error())
+		jsonError(w, err.Error(), http.StatusForbidden)
+		return
+	}
+	lease, err := s.brainLeases().Renew(q.LeaseID, b.Host, a.ID, time.Now().UTC())
+	if err != nil {
 		writeJSONStatus(w, http.StatusNotFound, map[string]any{"error": brainsignin.ErrNoLease.Error(), "no_lease": true})
 		return
 	}
@@ -488,9 +579,10 @@ func (s *CoreServer) handleBodyReturnsSignIn(w http.ResponseWriter, r *http.Requ
 		jsonError(w, "name the lease to return", http.StatusBadRequest)
 		return
 	}
-	lease, err := s.brainLeases().Return(q.LeaseID, b.Host, time.Now().UTC())
+	s.recordLapsedLeases()
+	lease, err := s.brainLeases().Return(q.LeaseID, b.Host, a.ID, time.Now().UTC())
 	switch {
-	case lease.ID != "" && lease.Agent == a.ID:
+	case lease.ID != "":
 		why := "lease " + lease.ID + " returned"
 		if err != nil {
 			why += ", after it had lapsed"

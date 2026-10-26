@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-10-26
-**Relates to:** ADR-046 (A machine becomes an AI agent's body by a person comparing six words), ADR-047 (AI agents talk through the Identity Agent that holds them), ADR-050 (One check for a controller's actions and an AI agent's capability calls)
+**Relates to:** ADR-045 (Every asset gets an identity and a grant from one schema template), ADR-046 (A machine becomes an AI agent's body by a person comparing six words), ADR-047 (AI agents talk through the Identity Agent that holds them), ADR-050 (One check for a controller's actions and an AI agent's capability calls)
 
 ## Context
 
@@ -42,8 +42,10 @@ the application's work, open to the owner and to an authorised controller (ADR-0
 **A key sent where the reference belongs is moved into the vault.** Creating an AI
 agent or changing its configuration with a key in the brain's reference field keeps the
 key in the vault and stores the reference in its place. If the vault cannot be
-written, nothing is created rather than the key being stored elsewhere. At start, any
-key an earlier version stored on an AI agent's record is moved into the vault. Moving a
+written, nothing is created or changed rather than the key being stored elsewhere. Any
+key an earlier version stored on an AI agent's record is moved into the vault at start,
+and again whenever AI agents are listed or a body borrows, until none is left, because
+the vault's key may only be present after setup. Until then such a key is never shown. Moving a
 secret the Identity Agent already holds into its vault grants nothing to anybody, so it
 needs no decision by the owner.
 
@@ -62,7 +64,11 @@ fails, the body returns it.
 
 **A lease lapses unless renewed.** It holds for five minutes and the body renews it
 while the run goes on, so a machine that crashed mid-run frees its place without
-anybody returning it.
+anybody returning it. A run whose lease lapsed anyway takes a place again.
+
+**Only an AI agent that may act is lent its sign-in.** An AI agent whose grant is
+revoked or has lapsed is lent nothing, and its lease is not renewed, though its body
+still stands.
 
 **Each sign-in has a cap on simultaneous runs, across every machine.** The default
 is:
@@ -75,7 +81,8 @@ The owner may set another number. A body asking past the cap is told the sign-in
 are in use, and waits.
 
 **Every lend, refusal, return and lapse is written to the signed governance record**,
-as the AI agent, naming the body, and never with the secret.
+as the AI agent, naming the body, and never with the secret. A lapse is written when
+the Identity Agent next lends, renews or takes back a sign-in.
 
 **The brain's name is the program that runs it.** A configuration's kind and provider
 are normalised when stored, and a body accepts the names a screen shows as well. The
@@ -105,11 +112,13 @@ brain was signed in with by hand, and the body logs that it did.
   would break the signature the request is kept to prove, so it is left; the key itself
   should be replaced at its provider.
 - A cap counts runs of one AI agent's sign-in. The same account signed in for two AI
-  agents is two sign-ins, each with its own cap.
+  agents is two sign-ins, each with its own cap, so the runs on one account can exceed
+  any one cap.
+- A borrowed sign-in replaces every sign-in in the machine's environment, but not one
+  in the brain user's own configuration: a key helper in Claude Code's settings, or a
+  session from Grok's own sign-in, outranks it.
 - Not yet lent to a body: a Codex sign-in, a Grok subscription, and OpenAI, Google or
   OpenRouter keys. The programs that run them need either a sign-in file rather than an
-  environment variable, or configuration not yet written. Grok also prefers a session
-  its user signed in with by hand over a key in its environment, so on a machine where
-  the brain's user ran Grok's own sign-in, that session is used.
+  environment variable, or configuration not yet written.
 - Signing a subscription in from a front end, without a terminal, and checking a
   sign-in works with a test call when it is made, are not yet built.

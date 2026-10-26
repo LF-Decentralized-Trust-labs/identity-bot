@@ -2,6 +2,8 @@ package brainsignin
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -19,7 +21,7 @@ func TestACappedSignInFreesAPlaceWhenALeaseLapses(t *testing.T) {
 		t.Fatalf("a second run was lent a sign-in capped at one: %v", err)
 	}
 	// Renewed, it holds past its first expiry.
-	if _, err := l.Renew(first.ID, "host-1", now.Add(LeaseTTL-time.Second)); err != nil {
+	if _, err := l.Renew(first.ID, "host-1", "agent", now.Add(LeaseTTL-time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := l.Lend("agent", "host-2", 1, now.Add(LeaseTTL+time.Second)); !errors.Is(err, ErrInUse) {
@@ -35,10 +37,10 @@ func TestACappedSignInFreesAPlaceWhenALeaseLapses(t *testing.T) {
 		t.Fatalf("the lapsed lease was not reported: %v", lapsed)
 	}
 	// Only the body holding a lease returns it.
-	if _, err := l.Return(second.ID, "host-1", later); !errors.Is(err, ErrNoLease) {
+	if _, err := l.Return(second.ID, "host-1", "agent", later); !errors.Is(err, ErrNoLease) {
 		t.Fatalf("another body returned a lease it does not hold: %v", err)
 	}
-	if _, err := l.Return(second.ID, "host-2", later); err != nil {
+	if _, err := l.Return(second.ID, "host-2", "agent", later); err != nil {
 		t.Fatal(err)
 	}
 	if n := l.InUse("agent", later); n != 0 {
@@ -94,5 +96,18 @@ func TestARecordThatCannotBeUsedIsRefused(t *testing.T) {
 	}
 	if (Record{Kind: KindLocal, Provider: Local, Endpoint: "http://127.0.0.1:11434"}).Check() != nil {
 		t.Error("a local model with no key was refused")
+	}
+}
+
+// A lease record that cannot be read lends nothing, rather than counting no
+// runs in use.
+func TestAnUnreadableLeaseRecordLendsNothing(t *testing.T) {
+	dir := t.TempDir()
+	l := LeasesIn(dir)
+	if err := os.WriteFile(filepath.Join(dir, "brain_sign_in_leases.json"), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := l.Lend("agent", "h", 1, time.Now()); !errors.Is(err, ErrLeasesUnreadable) {
+		t.Fatalf("lent past an unreadable record: %v", err)
 	}
 }

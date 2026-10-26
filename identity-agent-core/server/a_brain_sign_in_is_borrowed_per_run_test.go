@@ -14,6 +14,8 @@ import (
 
 	"identity-agent-core/agenthost"
 	"identity-agent-core/brainsignin"
+
+	"github.com/go-chi/chi/v5"
 )
 
 // A display label names the program that runs: "Claude Code" is stored as
@@ -191,5 +193,56 @@ func TestABorrowedSignInReachesTheBrainOnlyThroughItsEnvironment(t *testing.T) {
 				t.Fatalf("the failed run was not answered with why: %q", last.Body)
 			}
 		}
+	}
+}
+
+// An Identity Agent from before sign-ins were lent refuses the route as not
+// authorised. A body of it runs as it did, on the machine's own sign-in,
+// rather than failing every run.
+func TestABodyOfAnOlderIdentityAgentRunsAsBefore(t *testing.T) {
+	w := signInWorld(t)
+	current := w.s.router
+	older := chi.NewRouter()
+	older.Post("/api/agent-host/brain-sign-in", func(rw http.ResponseWriter, _ *http.Request) {
+		denyAuthorization(rw, "a route nobody classified")
+	})
+	older.NotFound(current.ServeHTTP)
+	w.s.router = older
+	t.Cleanup(func() { w.s.router = current })
+	if _, err := w.hostA.Borrow(context.Background()); !errors.Is(err, agenthost.ErrIdentityAgentLendsNoSignIns) {
+		t.Fatalf("an older Identity Agent: %v", err)
+	}
+	conv, _ := w.openedWith(t)
+	ran := false
+	brain := scripted{name: "claude-code", act: func(Turn) (string, error) { ran = true; return "fine", nil }}
+	if err := w.hostA.Run(context.Background(), agenthost.RunOptions{Brain: brain, Once: true, Workspace: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	entries := w.read(t, conv)
+	if !ran || entries[len(entries)-1].Body != "fine" {
+		t.Fatalf("the run did not go ahead: ran=%v last=%q", ran, entries[len(entries)-1].Body)
+	}
+}
+
+// An AI agent whose grant is revoked is lent nothing, though its body still
+// stands.
+func TestARevokedAIAgentIsLentNothing(t *testing.T) {
+	w := signInWorld(t)
+	if code, _, raw := w.asOwner(t, "PUT", "/api/mcp/agents/"+w.a.ID+"/brain-sign-in",
+		`{"kind":"api_key","provider":"anthropic","secret":"sk-ant-api03-K"}`); code != http.StatusOK {
+		t.Fatalf("signing in: %d %s", code, raw)
+	}
+	held := w.s.grantsHeldBy(w.a.PairwiseAID, false)
+	if len(held) == 0 {
+		t.Fatal("the AI agent holds no grant")
+	}
+	if err := w.s.DataStore.UpdateCredentialStatus(held[0].SAID, "revoked"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.hostA.Borrow(context.Background()); err == nil || errors.Is(err, agenthost.ErrNoSignIn) {
+		t.Fatalf("a revoked AI agent was lent its sign-in, or told it had none: %v", err)
+	}
+	if n := len(governanceRows(t, w, "agent.brain.sign_in.lent")); n != 0 {
+		t.Fatalf("%d lends recorded for a revoked AI agent", n)
 	}
 }

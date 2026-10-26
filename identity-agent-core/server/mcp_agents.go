@@ -117,8 +117,8 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if signIn != nil {
-		if _, err := s.brainVault(); err != nil {
-			jsonError(w, "the AI agent was not created: "+err.Error(), http.StatusServiceUnavailable)
+		if _, err := s.brainVaultWritable(); err != nil {
+			jsonError(w, "the AI agent was not created: its sign-in could not be kept: "+err.Error(), http.StatusServiceUnavailable)
 			return
 		}
 	}
@@ -200,6 +200,7 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 			if derr := s.assetHandler.Store.DeleteAsset(agent.ID); derr != nil {
 				log.Printf("[mcp] agent %s was not granted and could not be removed: %v", agent.PairwiseAID, derr)
 			}
+			s.forgetBrainSignInOf(agent.ID, signIn != nil)
 			jsonError(w, "the AI agent was not created: its grant could not be issued: "+err.Error(), http.StatusForbidden)
 			return
 		}
@@ -244,7 +245,7 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		"agent_aid":       agent.PairwiseAID,
 		"delegator_aid":   agent.DelegatorAID,
 		"capabilities":    req.Capabilities,
-		"agent_config":    cfg.ForDisplay(),
+		"agent_config":    cfg.ForDisplay(s.isVaultEntry),
 		"brain_signed_in": signIn != nil,
 		"grant_said":      grantSAID,
 		"grant_issued":    grantSAID != "",
@@ -301,6 +302,7 @@ func (s *CoreServer) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "asset handler not initialized", http.StatusServiceUnavailable)
 		return
 	}
+	s.moveBrainSecretsIntoTheVault()
 	// Map asset id → grant status via the credential store (revoked grants show as revoked).
 	agents := s.assetHandler.ListAgents()
 	pending := map[string]bool{}
@@ -320,7 +322,7 @@ func (s *CoreServer) handleListAgents(w http.ResponseWriter, r *http.Request) {
 			DelegatorAID:        a.DelegatorAID,
 			Capabilities:        a.Capabilities,
 			ResourceConstraints: nonNilConstraints(a.GrantConstraints),
-			Config:              a.AgentConfig.ForDisplay(),
+			Config:              a.AgentConfig.ForDisplay(s.isVaultEntry),
 			SignIn:              s.brainSignInShown(a),
 			Status:              s.agentStatus(a.PairwiseAID),
 			CreatedAt:           a.CreatedAt,
@@ -374,8 +376,8 @@ func (s *CoreServer) handleUpdateAgentConfig(w http.ResponseWriter, r *http.Requ
 	}
 	cfg.Brain = brain
 	if signIn != nil {
-		if _, err := s.brainVault(); err != nil {
-			jsonError(w, "nothing was changed: "+err.Error(), http.StatusServiceUnavailable)
+		if _, err := s.brainVaultWritable(); err != nil {
+			jsonError(w, "nothing was changed: the sign-in could not be kept: "+err.Error(), http.StatusServiceUnavailable)
 			return
 		}
 	}
@@ -395,7 +397,7 @@ func (s *CoreServer) handleUpdateAgentConfig(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
 		"asset_id":     updated.ID,
-		"agent_config": updated.AgentConfig.ForDisplay(),
+		"agent_config": updated.AgentConfig.ForDisplay(s.isVaultEntry),
 	})
 }
 

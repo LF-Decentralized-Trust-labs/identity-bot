@@ -37,6 +37,10 @@ var ErrSignInBusy = errors.New("this sign-in already has its runs in use")
 // ErrNoSignIn is an AI agent whose Identity Agent keeps no sign-in for it.
 var ErrNoSignIn = errors.New("no sign-in is kept for this AI agent")
 
+// ErrIdentityAgentLendsNoSignIns is an Identity Agent from before sign-ins
+// were lent to bodies.
+var ErrIdentityAgentLendsNoSignIns = errors.New("this AI agent's Identity Agent does not lend sign-ins yet")
+
 // Borrow asks the Identity Agent for this AI agent's sign-in, for one run.
 // It returns ErrNoSignIn when none is kept, and ErrSignInBusy when its cap on
 // simultaneous runs is reached.
@@ -47,6 +51,7 @@ func (h *Host) Borrow(ctx context.Context) (*Borrowed, error) {
 	}
 	var out struct {
 		Error         string `json:"error"`
+		NoSignIn      bool   `json:"no_sign_in"`
 		LeaseID       string `json:"lease_id"`
 		RenewEverySec int    `json:"renew_every_seconds"`
 		Kind          string `json:"kind"`
@@ -58,9 +63,17 @@ func (h *Host) Borrow(ctx context.Context) (*Borrowed, error) {
 	_ = json.Unmarshal(b, &out)
 	switch code {
 	case http.StatusOK:
-	case http.StatusNotFound, http.StatusMethodNotAllowed:
-		// None kept — or an Identity Agent from before sign-ins were lent.
-		return nil, ErrNoSignIn
+	case http.StatusNotFound, http.StatusForbidden, http.StatusMethodNotAllowed:
+		if out.NoSignIn {
+			return nil, ErrNoSignIn
+		}
+		// An Identity Agent from before sign-ins were lent does not know the
+		// route: its gate refuses it as not authorised, or nothing answers.
+		if code == http.StatusMethodNotAllowed || out.Error == "not_authorized" ||
+			(code == http.StatusNotFound && out.Error == "") {
+			return nil, ErrIdentityAgentLendsNoSignIns
+		}
+		return nil, fmt.Errorf("the AI agent's sign-in could not be borrowed (%d): %s", code, firstNonEmpty(out.Error, string(b)))
 	case http.StatusConflict:
 		return nil, ErrSignInBusy
 	default:
@@ -84,6 +97,9 @@ func (h *Host) Renew(ctx context.Context, b *Borrowed) error {
 	if err != nil {
 		return err
 	}
+	if code == http.StatusNotFound && strings.Contains(string(out), "no_lease") {
+		return &leaseLapsed{status: code}
+	}
 	if code != http.StatusOK {
 		return fmt.Errorf("the sign-in's lease could not be renewed (%d): %s", code, out)
 	}
@@ -104,12 +120,22 @@ func (h *Host) Return(ctx context.Context, b *Borrowed) error {
 	return nil
 }
 
-// credentialVars are every variable a brain reads a sign-in from. When a run
-// is given a borrowed sign-in, none of these is passed on from this machine's
-// own environment, so the brain uses that sign-in and no other.
+// credentialVars are the variables a brain reads a sign-in from, or that turn
+// a borrowed one off: Claude Code's cloud-provider switches outrank every
+// token, and its simple mode is bare mode, which ignores a subscription token.
+// When a run is given a borrowed sign-in, none of these is passed on from this
+// machine's own environment.
+//
+// That keeps the machine's environment out of it, not the brain user's own
+// configuration: an apiKeyHelper in Claude Code's settings outranks a
+// subscription token, and a session from Grok's own sign-in outranks
+// XAI_API_KEY. A machine whose brain user was signed in by hand keeps using
+// that sign-in.
 var credentialVars = []string{
 	"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
-	"XAI_API_KEY", "GROK_CODE_XAI_API_KEY",
+	"CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_SIMPLE",
+	"XAI_API_KEY", "GROK_CODE_XAI_API_KEY", "GROK_AUTH_PROVIDER_COMMAND", "GROK_OIDC_ISSUER",
+	"GROK_OIDC_CLIENT_ID", "GROK_MODELS_BASE_URL",
 	"CODEX_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL",
 }
 
@@ -186,6 +212,9 @@ func (h *Host) signInForRun(ctx context.Context, wait time.Duration, logf func(s
 			return b, nil
 		case errors.Is(err, ErrNoSignIn):
 			return nil, nil
+		case errors.Is(err, ErrIdentityAgentLendsNoSignIns):
+			logf("[agent-host] %v", err)
+			return nil, nil
 		case !errors.Is(err, ErrSignInBusy):
 			return nil, err
 		}
@@ -204,8 +233,12 @@ func (h *Host) signInForRun(ctx context.Context, wait time.Duration, logf func(s
 	}
 }
 
-// keep renews a borrowed sign-in until stop is closed.
-func (h *Host) keep(b *Borrowed, stop <-chan struct{}, logf func(string, ...any)) {
+// keep renews a borrowed sign-in until stop is closed, then closes done. A
+// lease that lapsed anyway — the Identity Agent was out of reach for longer
+// than it holds — no longer counts against the cap, so the run takes a place
+// again, and says so when it cannot.
+func (h *Host) keep(b *Borrowed, stop <-chan struct{}, done chan<- struct{}, logf func(string, ...any)) {
+	defer close(done)
 	t := time.NewTicker(b.renewEvery)
 	defer t.Stop()
 	for {
@@ -214,12 +247,31 @@ func (h *Host) keep(b *Borrowed, stop <-chan struct{}, logf func(string, ...any)
 			return
 		case <-t.C:
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			if err := h.Renew(ctx, b); err != nil {
+			err := h.Renew(ctx, b)
+			var lapsed *leaseLapsed
+			if errors.As(err, &lapsed) {
+				if again, berr := h.Borrow(ctx); berr == nil {
+					b.LeaseID = again.LeaseID
+					again.secret = ""
+					err = nil
+				} else {
+					err = fmt.Errorf("this run's lease on its sign-in lapsed and no place could be taken again "+
+						"(%v); the run goes on outside the sign-in's cap", berr)
+				}
+			}
+			if err != nil {
 				logf("[agent-host] %v", err)
 			}
 			cancel()
 		}
 	}
+}
+
+// leaseLapsed is a lease the Identity Agent no longer holds.
+type leaseLapsed struct{ status int }
+
+func (e *leaseLapsed) Error() string {
+	return fmt.Sprintf("the sign-in's lease has lapsed (%d)", e.status)
 }
 
 // giveBack returns a borrowed sign-in, whatever became of the run: with its

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -59,16 +60,23 @@ func LeasesIn(dir string) *Leases {
 	return v.(*Leases)
 }
 
-func (l *Leases) load() []Lease {
+// ErrLeasesUnreadable is a lease record that cannot be read. Nothing is lent
+// while it is: an empty count would let a sign-in past its cap.
+var ErrLeasesUnreadable = errors.New("the record of runs holding sign-ins cannot be read")
+
+func (l *Leases) load() ([]Lease, error) {
 	b, err := os.ReadFile(l.path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("%w: %v", ErrLeasesUnreadable, err)
 	}
 	var out []Lease
-	if json.Unmarshal(b, &out) != nil {
-		return nil
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrLeasesUnreadable, err)
 	}
-	return out
+	return out, nil
 }
 
 func (l *Leases) save(all []Lease) error {
@@ -104,7 +112,11 @@ func live(all []Lease, now time.Time) (held, expired []Lease) {
 func (l *Leases) Lend(agent, host string, maxRuns int, now time.Time) (Lease, []Lease, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	held, expired := live(l.load(), now)
+	all, err := l.load()
+	if err != nil {
+		return Lease{}, nil, err
+	}
+	held, expired := live(all, now)
 	if maxRuns > 0 {
 		n := 0
 		for _, x := range held {
@@ -131,13 +143,33 @@ func (l *Leases) Lend(agent, host string, maxRuns int, now time.Time) (Lease, []
 	return lease, expired, nil
 }
 
-// Renew extends a lease host holds.
-func (l *Leases) Renew(id, host string, now time.Time) (Lease, error) {
+// Lapsed removes and returns every lease that expired unrenewed by now, so
+// each can be recorded once.
+func (l *Leases) Lapsed(now time.Time) ([]Lease, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	held, _ := live(l.load(), now)
+	all, err := l.load()
+	if err != nil {
+		return nil, err
+	}
+	held, expired := live(all, now)
+	if len(expired) == 0 {
+		return nil, nil
+	}
+	return expired, l.save(held)
+}
+
+// Renew extends a lease host holds on agent's sign-in.
+func (l *Leases) Renew(id, host, agent string, now time.Time) (Lease, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	all, err := l.load()
+	if err != nil {
+		return Lease{}, err
+	}
+	held, _ := live(all, now)
 	for i := range held {
-		if held[i].ID == id && held[i].Host == host {
+		if held[i].ID == id && held[i].Host == host && held[i].Agent == agent {
 			held[i].Expires = now.Add(LeaseTTL)
 			if err := l.save(held); err != nil {
 				return Lease{}, err
@@ -148,13 +180,16 @@ func (l *Leases) Renew(id, host string, now time.Time) (Lease, error) {
 	return Lease{}, ErrNoLease
 }
 
-// Return gives back a lease host holds.
-func (l *Leases) Return(id, host string, now time.Time) (Lease, error) {
+// Return gives back a lease host holds on agent's sign-in.
+func (l *Leases) Return(id, host, agent string, now time.Time) (Lease, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	all := l.load()
+	all, err := l.load()
+	if err != nil {
+		return Lease{}, err
+	}
 	for i, x := range all {
-		if x.ID == id && x.Host == host {
+		if x.ID == id && x.Host == host && x.Agent == agent {
 			rest := append(append([]Lease{}, all[:i]...), all[i+1:]...)
 			held, _ := live(rest, now)
 			if err := l.save(held); err != nil {
@@ -173,7 +208,8 @@ func (l *Leases) Return(id, host string, now time.Time) (Lease, error) {
 func (l *Leases) InUse(agent string, now time.Time) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	held, _ := live(l.load(), now)
+	all, _ := l.load()
+	held, _ := live(all, now)
 	n := 0
 	for _, x := range held {
 		if x.Agent == agent {
@@ -189,7 +225,10 @@ func (l *Leases) InUse(agent string, now time.Time) int {
 func (l *Leases) Forget(agent string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	all := l.load()
+	all, err := l.load()
+	if err != nil {
+		return err
+	}
 	kept := all[:0]
 	for _, x := range all {
 		if x.Agent != agent {
