@@ -887,9 +887,6 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		r.Get("/attestation", s.handlePublicAttestation)
 		r.Get("/keri/selftest", s.handleKeriSelfTest)
 
-		// Which machines may act for this identity. Owner-only by being
-		// unlisted, and that is load-bearing: an agent that could authorise its
-		// own controllers could be talked into authorising somebody else's.
 		// What THIS computer would offer if it were to act for an identity.
 		// Read by the app on this machine so it can show the person what they
 		// are approving.
@@ -927,6 +924,10 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		// would be asking the thing under question to answer for itself.
 		r.Post("/verify/identity-elsewhere", s.handleVerifyAnIdentityElsewhere)
 
+		// Which machines may act for this identity. Unlisted, so the public and
+		// capability holders cannot reach them; granting and removing a machine
+		// are owner-only for a controller too (controllerOwnerOnly), and listing
+		// passes the one check (ADR-050).
 		r.Post("/controllers", s.handleGrantController)
 		r.Get("/controllers", s.handleListControllers)
 		r.Delete("/controllers/{aid}", s.handleRevokeController)

@@ -458,22 +458,6 @@ func TestNoHandlerUsesLoopbackAsTheOwnerTest(t *testing.T) {
 		//
 		// Narrow, and checked rather than trusted: one gate in that file, and
 		// anything else there must use s.isOwner(r).
-		// The development build's stand-in asks whether a request is local to
-		// take something AWAY: a controller asking from anywhere else is not
-		// stood in for. Being local grants nothing there, so it is not standing
-		// in for the owner. One use, checked.
-		if name == "a_development_build_vouches_for_a_controller.go" {
-			src, err := os.ReadFile(name)
-			if err != nil {
-				t.Fatalf("read %s: %v", name, err)
-			}
-			if n := strings.Count(string(src), "isLocalConnection(r)"); n != 1 ||
-				strings.Contains(string(src), "isLocalOwnerRequest(r)") {
-				t.Errorf("%s may ask whether a request is local exactly once, to withhold "+
-					"the stand-in, and never whether it is the owner's", name)
-			}
-			continue
-		}
 		if name == "offer_this_computer.go" {
 			src, err := os.ReadFile(name)
 			if err != nil {

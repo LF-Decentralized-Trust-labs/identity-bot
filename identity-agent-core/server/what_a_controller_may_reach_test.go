@@ -266,9 +266,10 @@ func TestNoLevelLetsAControllerEnrolAnotherController(t *testing.T) {
 	}
 }
 
-// Superseded by TestNoLevelLetsAControllerEnrolAnotherController, kept only to
-// show a weak level is refused too.
-func TestAuthorisingAnotherMachineIsItselfRaised(t *testing.T) {
+// Enrolling another machine is refused with a middling statement too, not only
+// at the strongest; TestNoLevelLetsAControllerEnrolAnotherController covers the
+// rest.
+func TestAuthorisingAnotherMachineIsOwnerOnly(t *testing.T) {
 	s := newAuthTestServer(t)
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
 	r := s.buildRouter("")
@@ -278,8 +279,8 @@ func TestAuthorisingAnotherMachineIsItselfRaised(t *testing.T) {
 		`{"controller_aid":"ESecond","public_key":"DSecond","label":"another","grade":"enrolled"}`,
 		seed, authprovider.LevelAuthenticated, time.Now()))
 	if w.Code != http.StatusForbidden {
-		t.Fatalf("an authorised machine authorised another one without the "+
-			"strongest check: %d %s", w.Code, w.Body.String())
+		t.Fatalf("an authorised machine authorised another one, which is owner-only: %d %s",
+			w.Code, w.Body.String())
 	}
 }
 
@@ -395,6 +396,10 @@ func theRootDeviceVouches(t *testing.T, controllerAID string, level authprovider
 // the answer, whoever runs modified software there reports whatever they like,
 // and every threshold here becomes a number the attacker chooses — because
 // nobody is auditing what build is running on that machine.
+//
+// What this proves: a request whose signed authentication has no voucher from
+// the key device is refused outright, as a signature that does not match what
+// was vouched, rather than quietly judged on the placeholder score.
 func TestAMachineMayNotScoreItself(t *testing.T) {
 	s := newAuthTestServer(t)
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
@@ -422,7 +427,9 @@ func TestAMachineMayNotScoreItself(t *testing.T) {
 }
 
 // A statement the root device made about ONE machine cannot be relayed by
-// another, or an authorised laptop could borrow the level granted to a phone.
+// another, or an authorised laptop could borrow the score given to a phone.
+// The relayed statement does not verify, so the request is refused outright
+// rather than judged on the placeholder score.
 func TestOneMachinesLevelCannotBeRelayedByAnother(t *testing.T) {
 	s := newAuthTestServer(t)
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
@@ -464,7 +471,7 @@ func TestWithNoRootDeviceNobodyCanVouch(t *testing.T) {
 // /api/store/identity was named nowhere, and ownerAuthority() falls back to the
 // agent's own identity record when nothing is anchored or sealed. So the machine
 // wrote its own key in as the owner, signed a statement vouching for itself at
-// the strongest level, and every raised gate opened — and it was then the owner
+// the strongest level, and every gate a statement could open opened — and it was then the owner
 // for isOwner on every route, which survives revoking the grant.
 //
 // Two locks now. The route is closed, and the voucher is checked only against
@@ -501,7 +508,8 @@ func TestAControllerCannotInstallTheKeyThatVouchesForIt(t *testing.T) {
 // added and nobody remembers to close it.
 //
 // An agent whose owner is only its own identity record has no device entitled to
-// speak for it, so no voucher is accepted and every raised action stays shut.
+// speak for it, so no voucher is accepted and no controller is scored above the
+// placeholder.
 // Before this, that fallback key was what the voucher was checked against.
 func TestAVoucherIsOnlyBelievedFromTheSealedRecord(t *testing.T) {
 	// An agent with a real store, so the identity record below is genuinely the
@@ -543,7 +551,8 @@ func TestAVoucherIsOnlyBelievedFromTheSealedRecord(t *testing.T) {
 }
 
 // The reverse of the walk above: every owner-class route this agent serves has
-// had a DECISION made about it — permitted, raised, or closed.
+// had a DECISION made about it — open to a controller under the one check, or
+// owner-only (ADR-050).
 //
 // Permitted-by-default is only safe where somebody looked at what is being
 // permitted. Two routes nobody had looked at were an unauthenticated privilege
@@ -551,8 +560,8 @@ func TestAVoucherIsOnlyBelievedFromTheSealedRecord(t *testing.T) {
 // vouched for itself. Neither looked dangerous by name, which is exactly why
 // reading the list is not a substitute for walking it.
 //
-// New owner-class routes land in `deliberatelyOrdinary` with a reason, or they
-// get raised. Either is a decision; silence is not.
+// What must hold is checked by name below: nothing feeding the authorisation
+// decision is open to a controller.
 func TestEveryOwnerRouteHasHadADecisionMadeAboutIt(t *testing.T) {
 	s := newAuthTestServer(t)
 
@@ -650,7 +659,7 @@ func TestTheLessObviousDoorsToAContactRecordAreClosedToo(t *testing.T) {
 // That route is declared public and reached from a token in a link or a QR, and
 // the sealed record is now the only thing a controller's authentication level is
 // checked against — so without this, an unredeemed founding token is an
-// unauthenticated rewrite of the key that vouches for every raised action.
+// unauthenticated rewrite of the key that vouches for a controller's score.
 func TestAFoundingInviteCannotReplaceAnOwnerWhoAlreadyExists(t *testing.T) {
 	s := agentWithNoIdentity(t)
 	if err := s.SealOwnerAuthority(OwnerAuthority{
@@ -852,8 +861,7 @@ func TestAnOwnerWhoRotatesIsNotLockedOutOfTheirOwnMachine(t *testing.T) {
 // owner" and accepted for "whose statement about an authentication level do I
 // believe". The founding-signer redeem route is public and writes that record,
 // so anybody holding an unredeemed invite could install the key that vouches for
-// every raised action — rotation, seed install, signing, archive retrieval —
-// without ever becoming the owner.
+// a controller's score without ever becoming the owner.
 func TestASealedRecordTheLogNeverNamedCannotVouch(t *testing.T) {
 	s := serverWithIdentity(t, "EMACHINE")
 
@@ -882,7 +890,7 @@ func TestASealedRecordTheLogNeverNamedCannotVouch(t *testing.T) {
 	if err == nil && key == attacker.PublicKey {
 		t.Fatal("a sealed record naming an identity the log never anchored was " +
 			"accepted as the thing that may vouch, so anybody who can write that " +
-			"record grants themselves every raised action")
+			"record vouches for any controller's score")
 	}
 	if err == nil {
 		t.Fatalf("expected nobody to be entitled to vouch, got key %q", key)
