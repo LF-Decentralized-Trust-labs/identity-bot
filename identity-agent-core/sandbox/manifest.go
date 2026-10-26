@@ -70,6 +70,9 @@ type ProvidedCapability struct {
 	// (per-request signature + anti-replay), not just a bearer token. Additive and
 	// default-false; set on high-assurance capabilities. Enforced at AuthorizeIngress.
 	RequireSignedRequest bool `json:"require_signed_request,omitempty"`
+	// MinimumScore is the identity score a caller needs to invoke this
+	// capability. Zero means the default, 80 (DefaultMinimumScore).
+	MinimumScore int `json:"minimum_score,omitempty"`
 }
 
 // HostControlSpec declares the host-OS grants a host_control capability needs before

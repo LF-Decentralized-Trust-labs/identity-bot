@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"identity-agent-core/appcall"
+	"identity-agent-core/authprovider"
 )
 
 // enforceResourceConstraints denies an invocation whose arguments fall outside the
@@ -211,6 +212,19 @@ func (m *Manager) InvokeCapability(ctx context.Context, caller CallerContext, ca
 		m.recordInvocationDetail(caller, capabilityID, executorType, body, "denied", start,
 			EventDetail{StatusReason: "ingress: " + err.Error()})
 		return nil, err
+	}
+	// The one check, the same function a person at a controller passes: the
+	// caller's identity score against this capability's minimum, then whether
+	// they may do it at all. An AI agent's score comes from the same
+	// placeholder as a person's until human authentication is built, so today
+	// this refuses only a capability whose minimum is set above 80.
+	if ok, why := MayThisPersonDoThis(
+		Action{Name: capabilityID, MinimumScore: capDef.MinimumScore},
+		Person{AID: caller.CallerAID, Authenticated: authprovider.UntilHumanAuthenticationIsBuilt(start)},
+	); !ok {
+		m.recordInvocationDetail(caller, capabilityID, executorType, body, "denied", start,
+			EventDetail{StatusReason: "the one check: " + why})
+		return nil, fmt.Errorf("%w: %s", ErrDenied, why)
 	}
 	// Per-capability resource constraints from the caller's grant (e.g. a zone
 	// allowlist) are enforced against the request arguments here, where the body
