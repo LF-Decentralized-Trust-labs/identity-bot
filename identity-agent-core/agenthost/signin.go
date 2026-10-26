@@ -29,6 +29,9 @@ type Borrowed struct {
 	Endpoint   string
 	secret     string
 	renewEvery time.Duration
+	// refreshed is the sign-in file the run's program renewed, given back
+	// with the lease.
+	refreshed string
 }
 
 // ErrSignInBusy is a sign-in whose runs are all in use; the run waits.
@@ -106,10 +109,16 @@ func (h *Host) Renew(ctx context.Context, b *Borrowed) error {
 	return nil
 }
 
-// Return gives a borrowed sign-in back, and forgets it here.
+// Return gives a borrowed sign-in back, and forgets it here. A sign-in file
+// the run's program renewed goes back with it, sealed like everything a body
+// sends, so the Identity Agent keeps the renewed one.
 func (h *Host) Return(ctx context.Context, b *Borrowed) error {
-	body, _ := json.Marshal(map[string]string{"lease_id": b.LeaseID})
-	b.secret = ""
+	q := map[string]string{"lease_id": b.LeaseID}
+	if b.refreshed != "" {
+		q["sign_in"] = b.refreshed
+	}
+	body, _ := json.Marshal(q)
+	b.secret, b.refreshed = "", ""
 	code, out, err := h.CallContext(ctx, "POST", "/api/agent-host/brain-sign-in/return", body)
 	if err != nil {
 		return err
@@ -136,8 +145,17 @@ var credentialVars = []string{
 	"CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_SIMPLE",
 	"XAI_API_KEY", "GROK_CODE_XAI_API_KEY", "GROK_AUTH_PROVIDER_COMMAND", "GROK_OIDC_ISSUER",
 	"GROK_OIDC_CLIENT_ID", "GROK_MODELS_BASE_URL",
-	"CODEX_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL",
+	"CODEX_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "CODEX_HOME", "GROK_HOME",
+	"OPENROUTER_API_KEY", envModelKey, envBrainHome,
 }
+
+// envModelKey carries the key for a model Grok reaches at an address of the
+// sign-in's (OpenRouter, or a server that speaks OpenAI's format). Grok's
+// settings name the variable, never the key.
+const envModelKey = "AGENT_HOST_MODEL_KEY"
+
+// openRouterAPI is OpenRouter's OpenAI-shaped address.
+const openRouterAPI = "https://openrouter.ai/api/v1"
 
 // localModelNoKey stands in for a key a local model server does not need.
 // Without some value Claude Code would send this machine's own sign-in to
@@ -145,7 +163,12 @@ var credentialVars = []string{
 const localModelNoKey = "no-key"
 
 // Env is the borrowed sign-in as the environment of the brain that runs it,
-// named by the brain's program: "claude-code" or "grok".
+// named by the brain's program: "claude-code", "codex" or "grok". A program
+// that reads its sign-in from a file — Codex and Grok — is given the file in
+// its home for the run (brainHome), which travels in the environment to the
+// wrapper that writes it; a key is given as a variable, and the program still
+// runs in a home of the host's making, so neither its own sign-in nor its own
+// settings outrank the one lent.
 func (b *Borrowed) Env(brain string) ([]string, error) {
 	harness := brainsignin.Harness(b.Provider)
 	if harness != NormaliseBrain(brain) {
@@ -165,9 +188,50 @@ func (b *Borrowed) Env(brain string) ([]string, error) {
 		key := firstNonEmpty(b.secret, localModelNoKey)
 		return []string{"ANTHROPIC_BASE_URL=" + strings.TrimRight(b.Endpoint, "/"), "ANTHROPIC_AUTH_TOKEN=" + key}, nil
 	case harness == brainsignin.HarnessGrok && b.Kind == brainsignin.KindAPIKey && b.Provider == brainsignin.XAI:
-		return []string{"XAI_API_KEY=" + b.secret}, nil
+		return []string{"XAI_API_KEY=" + b.secret, homeEnv(brainHome{Var: "GROK_HOME", Name: "grok"})}, nil
+	case harness == brainsignin.HarnessGrok && b.Kind == brainsignin.KindSubscription:
+		return []string{homeEnv(brainHome{Var: "GROK_HOME", Name: "grok",
+			Files: map[string]string{"auth.json": b.secret}, Return: "auth.json"})}, nil
+	case harness == brainsignin.HarnessGrok && b.Provider == brainsignin.OpenRouter:
+		return []string{envModelKey + "=" + b.secret, homeEnv(brainHome{Var: "GROK_HOME", Name: "grok",
+			ModelBaseURL: openRouterAPI})}, nil
+	case harness == brainsignin.HarnessGrok && b.Provider == brainsignin.OpenAICompatible:
+		if b.Endpoint == "" {
+			return nil, errors.New("this AI agent's model server has no address")
+		}
+		return []string{envModelKey + "=" + firstNonEmpty(b.secret, localModelNoKey), homeEnv(brainHome{
+			Var: "GROK_HOME", Name: "grok", ModelBaseURL: strings.TrimRight(b.Endpoint, "/")})}, nil
+	case harness == brainsignin.HarnessCodex && b.Kind == brainsignin.KindSubscription:
+		return []string{homeEnv(brainHome{Var: "CODEX_HOME", Name: "codex",
+			Files: map[string]string{"auth.json": b.secret}, Return: "auth.json"})}, nil
+	case harness == brainsignin.HarnessCodex && b.Kind == brainsignin.KindAPIKey:
+		return []string{"CODEX_API_KEY=" + b.secret, homeEnv(brainHome{Var: "CODEX_HOME", Name: "codex"})}, nil
 	}
 	return nil, fmt.Errorf("this machine cannot yet run a %s sign-in for %s borrowed from the Identity Agent", b.Kind, b.Provider)
+}
+
+// homeEnv is a brainHome as the variable that carries it.
+func homeEnv(h brainHome) string {
+	b, _ := json.Marshal(h)
+	return envBrainHome + "=" + string(b)
+}
+
+// homeIn takes the brainHome out of a run's sign-in variables, if one is
+// there, and returns the rest.
+func homeIn(creds []string) (*brainHome, []string) {
+	var home *brainHome
+	rest := make([]string, 0, len(creds))
+	for _, kv := range creds {
+		if v, ok := strings.CutPrefix(kv, envBrainHome+"="); ok {
+			var h brainHome
+			if json.Unmarshal([]byte(v), &h) == nil {
+				home = &h
+			}
+			continue
+		}
+		rest = append(rest, kv)
+	}
+	return home, rest
 }
 
 // withCredentials is the environment a brain's process is started with: this

@@ -1108,6 +1108,18 @@ func cleanupOrphanContainers() {
 // own LLM proxy, running it through the same policy, credential-injection, and
 // logging infrastructure used for container-originated traffic.
 func (m *Manager) MakeTrackedRequest(ctx context.Context, req *http.Request) (*http.Response, error) {
+	return m.trackedRequest(ctx, req, true, nil)
+}
+
+// MakeTrackedRequestAsGiven is MakeTrackedRequest for a request that already
+// carries the credential it is about: the same policy check, log and trace,
+// and the vault adds nothing, so checking a key that is not kept yet is not
+// quietly answered with a key that is. client, when not nil, sends it.
+func (m *Manager) MakeTrackedRequestAsGiven(ctx context.Context, req *http.Request, client *http.Client) (*http.Response, error) {
+	return m.trackedRequest(ctx, req, false, client)
+}
+
+func (m *Manager) trackedRequest(ctx context.Context, req *http.Request, inject bool, client *http.Client) (*http.Response, error) {
 	domain := req.URL.Hostname()
 	urlStr := req.URL.String()
 
@@ -1132,7 +1144,9 @@ func (m *Manager) MakeTrackedRequest(ctx context.Context, req *http.Request) (*h
 		return nil, fmt.Errorf("request %s to %s: %s (rule: %s)", req.Method, domain, action, rule)
 	}
 
-	m.credentials.InjectCredentials(req)
+	if inject {
+		m.credentials.InjectCredentials(req)
+	}
 
 	if m.tracer != nil && m.tracer.IsEnabled() {
 		m.tracer.Emit("proxy", "upstream_send", "egress", BackendLLMAppID, BackendLLMInstanceID,
@@ -1140,7 +1154,10 @@ func (m *Manager) MakeTrackedRequest(ctx context.Context, req *http.Request) (*h
 			map[string]interface{}{"domain": domain, "url": urlStr})
 	}
 
-	resp, err := (&http.Client{}).Do(req.WithContext(ctx))
+	if client == nil {
+		client = &http.Client{}
+	}
+	resp, err := client.Do(req.WithContext(ctx))
 
 	statusCode := 0
 	if resp != nil {

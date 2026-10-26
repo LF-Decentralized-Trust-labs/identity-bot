@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,6 +54,9 @@ type Outcome struct {
 	Text string
 	// Brain is what the host reports, signed, about what produced the words.
 	Brain agentmessage.Brain
+	// refreshed is the sign-in file the brain's program renewed during the
+	// turn, if it did — set also when the turn failed.
+	refreshed string
 }
 
 // Brain runs turns.
@@ -280,7 +284,7 @@ func (g GrokCLI) Run(ctx context.Context, t Turn) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, err
 	}
-	if _, err := runCLI(ctx, g.runner(), t.Workspace, nil, "", g.path(), "mcp", "add", "--scope", "project",
+	if _, err = runCLI(ctx, g.runner(), t.Workspace, nil, "", g.path(), "mcp", "add", "--scope", "project",
 		mcpServerName, self, "--", "mcp"); err != nil {
 		return Outcome{}, fmt.Errorf("the host's tools could not be given to Grok: %w", err)
 	}
@@ -294,21 +298,51 @@ func (g GrokCLI) Run(ctx context.Context, t Turn) (Outcome, error) {
 	} else {
 		args = append(args, "--session-id", t.Session)
 	}
-	if t.Model != "" {
-		args = append(args, "--model", t.Model)
+	home, creds := homeIn(t.Credentials)
+	model := t.Model
+	if home != nil && home.ModelBaseURL != "" {
+		// A model at the sign-in's own address: Grok's settings for it name the
+		// variable that holds the key, never the key.
+		if t.Model == "" {
+			return Outcome{}, errors.New("this AI agent's model server needs the name of the model to use; set it on the AI agent")
+		}
+		home.Config = grokModelConfig(home.ModelBaseURL, t.Model)
+		model = grokModelName
 	}
-	out, err := runCLI(ctx, g.runner(), t.Workspace, brainEnv(t), prompt, g.path(), args...)
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+	var out []byte
+	var refreshed string
+	if home != nil {
+		out, refreshed, err = runInHome(ctx, g.runner(), t.Workspace, append(toolsEnv(t), creds...), *home, prompt,
+			g.path(), args...)
+	} else {
+		out, err = runCLI(ctx, g.runner(), t.Workspace, brainEnv(t), prompt, g.path(), args...)
+	}
 	if err != nil {
-		return Outcome{}, err
+		return Outcome{refreshed: refreshed}, err
 	}
-	text, model, session := readGrokOutput(out)
+	text, reported, session := readGrokOutput(out)
 	if text == "" {
-		return Outcome{}, errors.New("the brain gave no answer")
+		return Outcome{refreshed: refreshed}, errors.New("the brain gave no answer")
 	}
-	return Outcome{Text: text, Brain: agentmessage.Brain{
-		Provider: g.Name(), Model: firstNonEmpty(model, t.Model), Session: firstNonEmpty(session, t.Session),
+	return Outcome{Text: text, refreshed: refreshed, Brain: agentmessage.Brain{
+		Provider: g.Name(), Model: firstNonEmpty(reported, t.Model), Session: firstNonEmpty(session, t.Session),
 		RunHash: runHash([]byte(prompt), out),
 	}}, nil
+}
+
+// grokModelName is what Grok's settings call a model reached at the sign-in's
+// own address.
+const grokModelName = "agent-host"
+
+// grokModelConfig is Grok's settings for a model at baseURL — OpenRouter, or a
+// server that speaks OpenAI's format — whose key is in envModelKey.
+func grokModelConfig(baseURL, model string) string {
+	return fmt.Sprintf("[model.%s]\nmodel = %s\nbase_url = %s\nenv_key = %s\napi_backend = \"chat_completions\"\n\n"+
+		"[models]\ndefault = %s\n", grokModelName, strconv.Quote(model), strconv.Quote(baseURL),
+		strconv.Quote(envModelKey), strconv.Quote(grokModelName))
 }
 
 // readGrokOutput reads `grok --output-format json`: the final words under
@@ -376,9 +410,12 @@ func BrainFor(provider string, r Runner) (Brain, error) {
 		return ClaudeCode{Runner: r}, nil
 	case brainsignin.HarnessGrok:
 		return GrokCLI{Runner: r}, nil
+	case brainsignin.HarnessCodex:
+		return Codex{Runner: r}, nil
 	}
 	return nil, fmt.Errorf("this host does not run %q as a brain; it runs Claude Code (an Anthropic key, a Claude "+
-		"subscription or a local model) and Grok (an xAI key)", provider)
+		"subscription or a model server that speaks Claude's format), Codex (a ChatGPT plan or an OpenAI key) and "+
+		"Grok (an xAI key or plan, OpenRouter, or a server that speaks OpenAI's format)", provider)
 }
 
 // turnTimeout bounds one turn of the brain.

@@ -1,0 +1,17 @@
+package server
+
+import (
+	"os"
+	"testing"
+
+	"identity-agent-core/agenthost"
+)
+
+// TestMain lets this test program stand in for agent-host when a body's brain
+// runs through `agent-host brain-home`, which names the program running.
+func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == "brain-home" {
+		os.Exit(agenthost.ServeBrainHome(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
+	}
+	os.Exit(m.Run())
+}

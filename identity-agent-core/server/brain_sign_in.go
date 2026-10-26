@@ -30,8 +30,10 @@ import (
 // environment for that run alone and returns it when the run ends.
 //
 // A subscription is one person's, so a sign-in carries a cap on how many runs
-// may hold it at once across every machine. A run holds its place by a lease
-// that lapses unless renewed, so a machine that crashed mid-run frees it.
+// may hold it at once across every machine — counted for its account, so every
+// AI agent signed in to one subscription shares one count. A run holds its
+// place by a lease that lapses unless renewed, so a machine that crashed
+// mid-run frees it.
 //
 // Every lend, return and refusal is written to the signed governance record,
 // without the secret.
@@ -41,6 +43,10 @@ func (s *CoreServer) mountBrainSignInRoutes(r chi.Router) {
 	r.Get("/mcp/agents/{id}/brain-sign-in", s.handleGetBrainSignIn)
 	r.Put("/mcp/agents/{id}/brain-sign-in", s.handleSetBrainSignIn)
 	r.Delete("/mcp/agents/{id}/brain-sign-in", s.handleRemoveBrainSignIn)
+	r.Post("/mcp/agents/{id}/brain-sign-in/test", s.handleTestKeptBrainSignIn)
+	r.Post("/mcp/brain-sign-in/test", s.handleTestBrainSignIn)
+	r.Get("/mcp/brain-sign-in/choices", s.handleBrainChoices)
+	r.Get("/mcp/brain-sign-ins", s.handleListBrainSignIns)
 	// The body's side: signed by its machine key, and taken only sealed.
 	r.Post("/agent-host/brain-sign-in", s.handleBodyBorrowsSignIn)
 	r.Post("/agent-host/brain-sign-in/renew", s.handleBodyRenewsSignIn)
@@ -116,6 +122,9 @@ type brainSignInRequest struct {
 	// MaxConcurrentRuns is the cap on simultaneous runs; absent keeps the
 	// current one, or the default for the kind, and 0 is no cap.
 	MaxConcurrentRuns *int `json:"max_concurrent_runs,omitempty"`
+	// SameAs names another AI agent whose sign-in this one uses as well. The
+	// secret is copied here, never sent back, and both count against one cap.
+	SameAs string `json:"same_as,omitempty"`
 }
 
 // record is the sign-in to keep, given the one kept now, if any. A field left
@@ -155,19 +164,105 @@ func (q brainSignInRequest) record(prev *brainsignin.Record, now time.Time) (bra
 	if q.MaxConcurrentRuns != nil {
 		rec.MaxConcurrentRuns = *q.MaxConcurrentRuns
 	}
-	return rec, rec.Check()
+	if err := rec.Check(); err != nil {
+		return rec, err
+	}
+	rec.Identify()
+	return rec, nil
 }
 
-// brainSignInView is a sign-in as it may be shown: never its secret.
+// signInAsked is the sign-in a request names: the one it sends, or a copy of
+// another AI agent's when it names one in same_as. For an AI agent that has a
+// sign-in already, prev is it.
+func (s *CoreServer) signInAsked(q brainSignInRequest, prev *brainsignin.Record, now time.Time) (brainsignin.Record, int, error) {
+	if q.SameAs == "" {
+		rec, err := q.record(prev, now)
+		if err != nil {
+			return rec, http.StatusBadRequest, err
+		}
+		return rec, 0, nil
+	}
+	other, ok := s.aiAgentAsset(q.SameAs)
+	if !ok {
+		return brainsignin.Record{}, http.StatusNotFound, errors.New("the AI agent whose sign-in was named is not found")
+	}
+	vault, err := s.brainVault()
+	if err != nil {
+		return brainsignin.Record{}, http.StatusServiceUnavailable, err
+	}
+	rec, had, err := vault.BrainSignIn(brainsignin.Ref(other.ID))
+	if err != nil {
+		return rec, http.StatusServiceUnavailable, err
+	}
+	if !had {
+		return rec, http.StatusNotFound, errors.New(firstNonEmptyString(other.DisplayName, "That AI agent") + " has no sign-in to share")
+	}
+	rec.SetAt = now
+	if a := strings.TrimSpace(q.Account); a != "" {
+		rec.Account = a
+	}
+	if q.MaxConcurrentRuns != nil {
+		rec.MaxConcurrentRuns = *q.MaxConcurrentRuns
+	}
+	if err := rec.Check(); err != nil {
+		return rec, http.StatusBadRequest, err
+	}
+	rec.Identify()
+	return rec, 0, nil
+}
+
+// brainSignInView is a sign-in as it may be shown: never its secret. Its
+// account is shown by an opaque name, and with the other AI agents signed in to
+// it, whose runs count against the same cap.
 func (s *CoreServer) brainSignInView(assetID string, rec brainsignin.Record) map[string]any {
+	return s.brainSignInViewAmong(assetID, rec, s.keptBrainSignIns())
+}
+
+// brainSignInViewAmong is brainSignInView, given every sign-in kept.
+func (s *CoreServer) brainSignInViewAmong(assetID string, rec brainsignin.Record, kept []keptSignIn) map[string]any {
 	now := time.Now()
+	pool := rec.Pool()
+	shared := []map[string]string{}
+	if pool != "" {
+		for _, o := range kept {
+			if o.asset.ID != assetID && o.rec.Pool() == pool {
+				shared = append(shared, map[string]string{"id": o.asset.ID, "name": o.asset.DisplayName})
+			}
+		}
+	}
+	accountID := ""
+	if pool != "" {
+		accountID = brainsignin.Fingerprint("account", pool)
+	}
 	return map[string]any{
 		"kind": rec.Kind, "provider": rec.Provider, "account": rec.Account,
 		"endpoint": rec.Endpoint, "expires_at": rec.ExpiresAt, "expired": rec.Expired(now),
 		"max_concurrent_runs": rec.MaxConcurrentRuns, "has_secret": rec.HasSecret(),
 		"set_at": rec.SetAt, "runs_in_use": s.brainLeases().InUse(assetID, now),
-		"harness": brainsignin.Harness(rec.Provider),
+		"account_id": accountID, "account_runs_in_use": s.brainLeases().InUseByAccount(pool, assetID, now),
+		"shared_with": shared, "harness": brainsignin.Harness(rec.Provider),
 	}
+}
+
+// keptSignIn is an AI agent and the sign-in kept for it.
+type keptSignIn struct {
+	asset asset.Asset
+	rec   brainsignin.Record
+}
+
+// keptBrainSignIns are the sign-ins kept for every AI agent, as the vault
+// holds them.
+func (s *CoreServer) keptBrainSignIns() []keptSignIn {
+	if s.SandboxManager == nil || s.assetHandler == nil {
+		return nil
+	}
+	var out []keptSignIn
+	for _, a := range s.assetHandler.ListAgents() {
+		if rec, had, err := s.SandboxManager.BrainSignIn(brainsignin.Ref(a.ID)); err == nil && had {
+			out = append(out, keptSignIn{asset: a, rec: rec})
+		}
+	}
+	return out
 }
 
 // keepBrainSignIn keeps an AI agent's sign-in in the vault and points the AI
@@ -319,9 +414,13 @@ func (s *CoreServer) handleSetBrainSignIn(w http.ResponseWriter, r *http.Request
 	} else if had {
 		prev = &p
 	}
-	rec, err := q.record(prev, time.Now().UTC())
+	if q.SameAs == a.ID {
+		jsonError(w, "an AI agent cannot share its own sign-in with itself", http.StatusBadRequest)
+		return
+	}
+	rec, status, err := s.signInAsked(q, prev, time.Now().UTC())
 	if err != nil {
-		jsonError(w, err.Error(), http.StatusBadRequest)
+		jsonError(w, err.Error(), status)
 		return
 	}
 	updated, err := s.keepBrainSignIn(a, rec, madeByController(r))
@@ -447,9 +546,11 @@ func (s *CoreServer) moveBrainSecretsIntoTheVault() {
 
 // ── The body's side ──────────────────────────────────────────────────────────
 
-// leaseRequest names a lease a body holds.
+// leaseRequest names a lease a body holds. Giving it back, the body sends the
+// sign-in file its brain's program refreshed during the run, if it did.
 type leaseRequest struct {
 	LeaseID string `json:"lease_id"`
+	SignIn  string `json:"sign_in,omitempty"`
 }
 
 // theBodyAndItsAgent is the live body a sealed, signed request comes from,
@@ -510,7 +611,8 @@ func (s *CoreServer) handleBodyBorrowsSignIn(w http.ResponseWriter, r *http.Requ
 			"error": "this AI agent's sign-in has expired; sign it in again", "expired": true})
 		return
 	}
-	lease, lapsed, err := s.brainLeases().Lend(a.ID, b.Host, rec.MaxConcurrentRuns, now)
+	lease, lapsed, err := s.brainLeases().Lend(a.ID, rec.Pool(), brainsignin.Fingerprint(rec.Provider, rec.Secret),
+		b.Host, rec.MaxConcurrentRuns, now)
 	for _, x := range lapsed {
 		xa, ok := s.aiAgentAsset(x.Agent)
 		if !ok {
@@ -523,7 +625,7 @@ func (s *CoreServer) handleBodyBorrowsSignIn(w http.ResponseWriter, r *http.Requ
 		s.recordBrainEvent(a, cc, "lend", "denied", fmt.Sprintf("%s: all %d in use",
 			brainsignin.ErrInUse, rec.MaxConcurrentRuns))
 		writeJSONStatus(w, http.StatusConflict, map[string]any{
-			"error": brainsignin.ErrInUse.Error(), "in_use": true,
+			"error": brainsignin.ErrInUse.Error() + ", counting every AI agent signed in to the same account", "in_use": true,
 			"max_concurrent_runs": rec.MaxConcurrentRuns, "retry_after_seconds": 30})
 		return
 	}
@@ -575,7 +677,7 @@ func (s *CoreServer) handleBodyReturnsSignIn(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var q leaseRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, 4<<10)).Decode(&q); err != nil || q.LeaseID == "" {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&q); err != nil || q.LeaseID == "" {
 		jsonError(w, "name the lease to return", http.StatusBadRequest)
 		return
 	}
@@ -586,6 +688,9 @@ func (s *CoreServer) handleBodyReturnsSignIn(w http.ResponseWriter, r *http.Requ
 		why := "lease " + lease.ID + " returned"
 		if err != nil {
 			why += ", after it had lapsed"
+		}
+		if q.SignIn != "" {
+			why += "; " + s.keepRefreshedSignIn(a, lease, q.SignIn)
 		}
 		s.recordBrainEvent(a, cc, "returned", "ok", why)
 		writeJSONStatus(w, http.StatusOK, map[string]any{"returned": true})

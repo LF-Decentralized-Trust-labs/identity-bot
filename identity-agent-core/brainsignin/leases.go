@@ -35,7 +35,14 @@ type Lease struct {
 	// Agent is the AI agent's asset id: whose sign-in is held.
 	Agent string `json:"agent"`
 	// Host is the body holding it, by its machine key's identifier.
-	Host    string    `json:"host"`
+	Host string `json:"host"`
+	// Pool is the account whose runs the lease counts against (Record.Pool).
+	// Empty on a lease from before caps counted accounts, which counts against
+	// its AI agent alone.
+	Pool string `json:"pool,omitempty"`
+	// Lent is a fingerprint of the sign-in this run was lent, so a sign-in the
+	// run's program refreshed is kept only while it is still the one lent.
+	Lent    string    `json:"lent,omitempty"`
 	LentAt  time.Time `json:"lent_at"`
 	Expires time.Time `json:"expires"`
 }
@@ -106,10 +113,24 @@ func live(all []Lease, now time.Time) (held, expired []Lease) {
 	return held, expired
 }
 
+// pool is the account a lease counts against.
+func (x Lease) pool() string { return poolOr(x.Pool, x.Agent) }
+
+// poolOr is pool, or for a sign-in that names no account, its AI agent alone.
+func poolOr(pool, agent string) string {
+	if pool != "" {
+		return pool
+	}
+	return "agent/" + agent
+}
+
 // Lend takes a place for one run of agent's sign-in on host, if the cap allows
-// (0 is no cap). It returns the lease, and any leases that had expired and were
-// let go, so the caller can record them.
-func (l *Leases) Lend(agent, host string, maxRuns int, now time.Time) (Lease, []Lease, error) {
+// (0 is no cap). The cap counts every run holding a sign-in of the same
+// account (pool), whichever AI agent it is for, so ten AI agents signed in to
+// one subscription cannot run more at once than one could. lent is a
+// fingerprint of the sign-in lent. It returns the lease, and any leases that
+// had expired and were let go, so the caller can record them.
+func (l *Leases) Lend(agent, pool, lent, host string, maxRuns int, now time.Time) (Lease, []Lease, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	all, err := l.load()
@@ -117,10 +138,11 @@ func (l *Leases) Lend(agent, host string, maxRuns int, now time.Time) (Lease, []
 		return Lease{}, nil, err
 	}
 	held, expired := live(all, now)
+	pool = poolOr(pool, agent)
 	if maxRuns > 0 {
 		n := 0
 		for _, x := range held {
-			if x.Agent == agent {
+			if x.pool() == pool {
 				n++
 			}
 		}
@@ -136,7 +158,7 @@ func (l *Leases) Lend(agent, host string, maxRuns int, now time.Time) (Lease, []
 		return Lease{}, expired, err
 	}
 	lease := Lease{ID: "bl_" + base64.RawURLEncoding.EncodeToString(id), Agent: agent, Host: host,
-		LentAt: now, Expires: now.Add(LeaseTTL)}
+		Pool: pool, Lent: lent, LentAt: now, Expires: now.Add(LeaseTTL)}
 	if err := l.save(append(held, lease)); err != nil {
 		return Lease{}, expired, err
 	}
@@ -206,13 +228,24 @@ func (l *Leases) Return(id, host, agent string, now time.Time) (Lease, error) {
 
 // InUse is how many runs hold agent's sign-in at now.
 func (l *Leases) InUse(agent string, now time.Time) int {
+	return l.count(func(x Lease) bool { return x.Agent == agent }, now)
+}
+
+// InUseByAccount is how many runs hold a sign-in of the account pool at now,
+// for every AI agent signed in to it.
+func (l *Leases) InUseByAccount(pool, agent string, now time.Time) int {
+	pool = poolOr(pool, agent)
+	return l.count(func(x Lease) bool { return x.pool() == pool }, now)
+}
+
+func (l *Leases) count(match func(Lease) bool, now time.Time) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	all, _ := l.load()
 	held, _ := live(all, now)
 	n := 0
 	for _, x := range held {
-		if x.Agent == agent {
+		if match(x) {
 			n++
 		}
 	}

@@ -2,11 +2,12 @@
 //
 //	agent-host enrol <enrolment string> [--placement computer|vm|cloud|device]
 //	agent-host status
-//	agent-host run [--brain claude-code|grok] [--brain-path PATH] [--brain-user USER] [--workspace DIR]
+//	agent-host run [--brain claude-code|codex|grok] [--brain-path PATH] [--brain-user USER] [--workspace DIR]
 //	agent-host move <new address of the same Identity Agent>
 //	agent-host call <METHOD> <path> [json body]
 //	agent-host brain-user [USER]
 //	agent-host mcp
+//	agent-host brain-home -- <brain> <args>
 //
 // Every command accepts --data-dir; the default is per operating system.
 package main
@@ -32,11 +33,17 @@ func main() {
 		usage()
 	}
 	cmd := os.Args[1]
+	// Started by the host, as the brain's user, around one run of a brain that
+	// keeps its sign-in in a file: its arguments are the brain's, not this
+	// program's.
+	if cmd == "brain-home" {
+		os.Exit(agenthost.ServeBrainHome(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
+	}
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
 	dataDir := fs.String("data-dir", agenthost.DefaultDataDir(), "where this machine's key and state are kept")
 	placement := fs.String("placement", "computer", "where this machine is: computer, vm, cloud or device")
 	wait := fs.Duration("wait", 15*time.Minute, "how long to wait for the owner to approve")
-	brainName := fs.String("brain", "", "the brain to run, instead of the one the AI agent was created with: claude-code or grok")
+	brainName := fs.String("brain", "", "the brain to run, instead of the one the AI agent was created with: claude-code, codex or grok")
 	brainPath := fs.String("brain-path", "", "the full path of the brain's program")
 	brainUser := fs.String("brain-user", "", "the operating-system user the brain runs as")
 	workspace := fs.String("workspace", "", "the brain's working directory")
@@ -95,6 +102,9 @@ func main() {
 				v.Path = path
 				b = v
 			case agenthost.GrokCLI:
+				v.Path = path
+				b = v
+			case agenthost.Codex:
 				v.Path = path
 				b = v
 			}
@@ -162,16 +172,19 @@ One-time setup, as an administrator (each sudo asks for your password):
   2. Install the brain for that user, and sign it in:
        Claude Code:  sudo -u %[1]s -H sh -c 'curl -fsSL https://claude.ai/install.sh | bash'
                      sudo -u %[1]s -H /Users/%[1]s/.local/bin/claude      (then type /login)
-       Grok CLI:     install it for %[1]s the same way, sign it in, and name its path in step 4 too.
+       Grok CLI:     install it for %[1]s the same way, and name its path in step 4 too.
                      Grok runs only this way: it has no flag to ignore the MCP servers of whoever runs it.
+       Codex:        install it for %[1]s (npm install -g @openai/codex), and name its path in step 4 too.
+       A brain signed in from your organization's app needs no sign-in here: it is lent for each run.
 
   3. Make its workspace. Mode 711 lets the host start the brain there without
      being able to list or read what the brain keeps in it:
        sudo -u %[1]s -H mkdir -m 711 /Users/%[1]s/workspace
 
-  4. Let %[2]s start that program as %[1]s, and nothing else. SETENV lets the host pass
-     each turn's tool token in the environment rather than on the command line:
-       echo '%[2]s ALL=(%[1]s) NOPASSWD:SETENV: /Users/%[1]s/.local/bin/claude' | sudo tee /etc/sudoers.d/agent-host
+  4. Let %[2]s start that program as %[1]s, and this one, which puts a lent sign-in in place for
+     one run and takes it away after. SETENV lets the host pass each turn's tool token and
+     sign-in in the environment rather than on the command line:
+       echo '%[2]s ALL=(%[1]s) NOPASSWD:SETENV: /Users/%[1]s/.local/bin/claude, /usr/local/bin/agent-host' | sudo tee /etc/sudoers.d/agent-host
        sudo chmod 440 /etc/sudoers.d/agent-host
 
   5. Install this program where %[1]s can run it. The brain starts it for its tools, and
@@ -189,7 +202,7 @@ One-time setup, as an administrator:
        sudo -u %[1]s -H sh -c 'curl -fsSL https://claude.ai/install.sh | bash'
        sudo -u %[1]s -H /home/%[1]s/.local/bin/claude      (then type /login)
   3. sudo -u %[1]s -H mkdir -m 711 /home/%[1]s/workspace
-  4. echo '%[2]s ALL=(%[1]s) NOPASSWD:SETENV: /home/%[1]s/.local/bin/claude' | sudo tee /etc/sudoers.d/agent-host
+  4. echo '%[2]s ALL=(%[1]s) NOPASSWD:SETENV: /home/%[1]s/.local/bin/claude, /usr/local/bin/agent-host' | sudo tee /etc/sudoers.d/agent-host
      sudo chmod 440 /etc/sudoers.d/agent-host
   5. Install this program where %[1]s can run it (the brain starts it for its tools), and run the host from there:
        sudo install -m 755 %[3]s /usr/local/bin/agent-host
@@ -209,11 +222,12 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "usage:\n"+
 		"  agent-host enrol <enrolment string> [--placement computer|vm|cloud|device]\n"+
 		"  agent-host status\n"+
-		"  agent-host run [--brain claude-code|grok] [--brain-path PATH] [--brain-user USER] [--workspace DIR]\n"+
+		"  agent-host run [--brain claude-code|codex|grok] [--brain-path PATH] [--brain-user USER] [--workspace DIR]\n"+
 		"  agent-host move <new address of the same Identity Agent>\n"+
 		"  agent-host call <METHOD> <path> [json body]\n"+
 		"  agent-host brain-user [USER]\n"+
-		"  agent-host mcp      (started by the brain, never by hand)")
+		"  agent-host mcp      (started by the brain, never by hand)\n"+
+		"  agent-host brain-home -- <brain> <args>      (started by the host, never by hand)")
 	os.Exit(2)
 }
 

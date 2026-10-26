@@ -41,6 +41,9 @@ const (
 	Codex      = "codex"
 	Grok       = "grok"
 	Local      = "local"
+	// OpenAICompatible is a model server that speaks OpenAI's format, such as
+	// vLLM or a hosted endpoint, run by Grok's program.
+	OpenAICompatible = "openai-compatible"
 )
 
 // Harnesses are the programs that run an AI agent's brain. A model's API does
@@ -83,8 +86,8 @@ var labels = map[string]string{
 	"local api":            Local,
 	"self-hosted":          Local,
 	"self hosted":          Local,
-	"openai-compatible":    Local,
-	"openai compatible":    Local,
+	"openai-compatible":    OpenAICompatible,
+	"openai compatible":    OpenAICompatible,
 	"anthropic-compatible": Local,
 }
 
@@ -123,7 +126,7 @@ func KindOf(provider string) string {
 	switch provider {
 	case ClaudeCode, Codex, Grok:
 		return KindSubscription
-	case Local:
+	case Local, OpenAICompatible:
 		return KindLocal
 	case Anthropic, OpenAI, Google, XAI, OpenRouter:
 		return KindAPIKey
@@ -133,13 +136,14 @@ func KindOf(provider string) string {
 
 // Harness is the program that runs an AI agent whose brain is signed in with
 // this provider. Claude Code speaks Anthropic's API, so it runs Anthropic
-// keys, its own subscription and local model servers; Grok's program runs
-// xAI and other OpenAI-shaped endpoints; Codex runs OpenAI.
+// keys, its own subscription and model servers that speak Anthropic's format;
+// Grok's program runs xAI, OpenRouter and any server that speaks OpenAI's
+// format; Codex runs OpenAI.
 func Harness(provider string) string {
 	switch NormaliseProvider(provider) {
 	case "", ClaudeCode, Anthropic, Local:
 		return HarnessClaudeCode
-	case Grok, XAI, OpenRouter:
+	case Grok, XAI, OpenRouter, OpenAICompatible:
 		return HarnessGrok
 	case Codex, OpenAI:
 		return HarnessCodex
@@ -174,8 +178,12 @@ type Record struct {
 	Endpoint string `json:"endpoint,omitempty"`
 	// ExpiresAt is when the sign-in stops working, where that is known.
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
-	// MaxConcurrentRuns is how many runs may hold it at once across every
-	// machine; 0 is no cap.
+	// AccountID is the account the sign-in itself names, where it names one: a
+	// ChatGPT account in a Codex sign-in, an xAI user in a Grok sign-in. Every
+	// sign-in of one account shares one cap, whichever AI agents hold it.
+	AccountID string `json:"account_id,omitempty"`
+	// MaxConcurrentRuns is how many runs of the account may hold it at once
+	// across every machine; 0 is no cap.
 	MaxConcurrentRuns int `json:"max_concurrent_runs"`
 	// Secret is the key or sign-in token. It leaves the vault only sealed to a
 	// body, for one run.
@@ -218,9 +226,14 @@ func (r Record) Check() error {
 		if r.Secret == "" {
 			return errors.New("a subscription sign-in needs the sign-in token the provider gave")
 		}
+		if r.Provider == Codex || r.Provider == Grok {
+			if _, err := ReadSignInFile(r.Provider, r.Secret); err != nil {
+				return err
+			}
+		}
 	case KindLocal:
-		if r.Provider != Local {
-			return fmt.Errorf("a local model's provider is %q, not %q", Local, r.Provider)
+		if r.Provider != Local && r.Provider != OpenAICompatible {
+			return fmt.Errorf("a model server's provider is %q or %q, not %q", Local, OpenAICompatible, r.Provider)
 		}
 		if strings.TrimSpace(r.Endpoint) == "" {
 			return errors.New("a local model needs the address of its server")
@@ -245,3 +258,31 @@ func Ref(assetID string) string { return refPrefix + assetID }
 // IsRef reports whether s names a brain sign-in in the vault, rather than
 // being anything else — a key typed where a reference belongs, for one.
 func IsRef(s string) bool { return strings.HasPrefix(s, refPrefix) && len(s) > len(refPrefix) }
+
+// Choice is a brain a sign-in can be made for, by its provider and kind.
+type Choice struct {
+	Provider string `json:"provider"`
+	Kind     string `json:"kind"`
+	Harness  string `json:"harness"`
+	// DefaultMaxConcurrentRuns is the cap a sign-in gets unless its owner
+	// sets another; 0 is no cap.
+	DefaultMaxConcurrentRuns int `json:"default_max_concurrent_runs"`
+}
+
+// Runnable are the brains a body can run from a sign-in it borrows, and so
+// the only ones a screen offers. A Google key is kept if sent, but not
+// offered: no program a body runs takes it yet.
+func Runnable() []Choice {
+	out := []Choice{
+		{Provider: ClaudeCode, Kind: KindSubscription}, {Provider: Codex, Kind: KindSubscription},
+		{Provider: Grok, Kind: KindSubscription},
+		{Provider: Anthropic, Kind: KindAPIKey}, {Provider: OpenAI, Kind: KindAPIKey},
+		{Provider: XAI, Kind: KindAPIKey}, {Provider: OpenRouter, Kind: KindAPIKey},
+		{Provider: Local, Kind: KindLocal}, {Provider: OpenAICompatible, Kind: KindLocal},
+	}
+	for i := range out {
+		out[i].Harness = Harness(out[i].Provider)
+		out[i].DefaultMaxConcurrentRuns = DefaultMaxConcurrentRuns(out[i].Kind, out[i].Provider)
+	}
+	return out
+}
