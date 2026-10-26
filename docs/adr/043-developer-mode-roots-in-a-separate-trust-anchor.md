@@ -119,6 +119,10 @@ The core mechanism this ADR decides is now implemented in the core. Shipped:
   (`secureenclave/snp_dev_attestation.go`): a dev build generates a structurally-real SNP report with the
   debug bit set, signed by a development attestation key the dev verifier trusts and a production verifier
   rejects (round-trip and prod-rejects-dev tests in `server/snp_dev_adopt_test.go`).
+- **Authorisation does not differ by mode.** Who may do what — a controller's
+  requests, an AI agent's capability calls — is decided identically in a dev and a
+  prod build (ADR-050). The mode relaxes attestation and the gates that rest on it,
+  never authorisation.
 - **Peer non-interoperability (§4, peer layer).** A dev and a prod Identity Agent refuse each other as
   peers: OOBIs and contact handshakes carry a self-reported realm tag, and a cross-realm peer or contact is
   refused (`server/cross_realm.go`, the contact/pairing/first-contact gates). The tag rides the handshake

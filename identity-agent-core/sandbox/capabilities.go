@@ -13,6 +13,9 @@ type CapabilityInfo struct {
 	RequestContract string `json:"request_contract,omitempty"`
 	ProvidedBy      string `json:"provided_by"` // the plug-in (app) id that offers it
 	HostControl     bool   `json:"host_control"`
+	// MinimumScore is the identity score a caller needs to invoke it; zero
+	// means DefaultMinimumScore.
+	MinimumScore int `json:"minimum_score,omitempty"`
 }
 
 // ProvidedCapabilities returns every functional capability offered by a loaded
@@ -32,6 +35,7 @@ func (m *Manager) ProvidedCapabilities() []CapabilityInfo {
 				RequestContract: p.RequestContract,
 				ProvidedBy:      appID,
 				HostControl:     p.HostControl,
+				MinimumScore:    p.MinimumScore,
 			})
 		}
 	}

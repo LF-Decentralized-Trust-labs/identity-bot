@@ -172,7 +172,7 @@ func (s *CoreServer) handleRedeemEmployeeInvite(w http.ResponseWriter, r *http.R
 
 func (s *CoreServer) handleApproveEmployee(w http.ResponseWriter, r *http.Request) {
 	aid := chi.URLParam(r, "aid")
-	emp, ok, err := s.assetHandler.Store.SetEmployeeStatus(aid, "active", "")
+	emp, ok, err := s.assetHandler.Store.ApproveEmployee(aid, madeByController(r))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

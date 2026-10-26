@@ -39,6 +39,10 @@ type mcpToken struct {
 	Hash      string    `json:"hash"` // sha256 hex of the plaintext token
 	Scopes    []string  `json:"scopes"`
 	CreatedAt time.Time `json:"created_at"`
+	// MadeByController is the machine that minted this token, when one did
+	// rather than the owner. Recorded so revoking that machine can list what
+	// it made: a token outlives the grant of the controller that minted it.
+	MadeByController string `json:"made_by_controller,omitempty"`
 	// AgentAID + DelegatorAID bind a token to a provisioned ai_agent asset's
 	// delegated identity. When set, the caller resolves to the agent's
 	// real KERI AID and its lineage to the owner root, instead of "token:<name>".
@@ -208,6 +212,8 @@ func (s *CoreServer) handleMintMCPToken(w http.ResponseWriter, r *http.Request) 
 		Hash:      hashMCPToken(plaintext),
 		Scopes:    req.Scopes,
 		CreatedAt: time.Now().UTC(),
+
+		MadeByController: madeByController(r),
 	})
 	if err := s.saveMCPTokens(toks); err != nil {
 		jsonError(w, "failed to persist token", http.StatusInternalServerError)
@@ -230,7 +236,11 @@ func (s *CoreServer) handleListMCPTokens(w http.ResponseWriter, r *http.Request)
 	mcpTokensMu.Unlock()
 	out := make([]map[string]any, 0, len(toks))
 	for _, t := range toks {
-		out = append(out, map[string]any{"name": t.Name, "scopes": t.Scopes, "created_at": t.CreatedAt})
+		entry := map[string]any{"name": t.Name, "scopes": t.Scopes, "created_at": t.CreatedAt}
+		if t.MadeByController != "" {
+			entry["made_by_controller"] = t.MadeByController
+		}
+		out = append(out, entry)
 	}
 	jsonResponse(w, map[string]any{"tokens": out})
 }
@@ -554,4 +564,15 @@ func (s *CoreServer) agentGrantLapsed(aid string) bool {
 		}
 	}
 	return grantLapsed(newest)
+}
+
+// madeByController is the machine that asked for this request, when a
+// controller did, or "" for the owner. Whatever a controller creates keeps
+// working after the controller's grant is revoked or expires, so it is
+// recorded against the controller that made it (ADR-050).
+func madeByController(r *http.Request) string {
+	if g, ok := TheControllerThatAsked(r); ok {
+		return g.ControllerAID
+	}
+	return ""
 }

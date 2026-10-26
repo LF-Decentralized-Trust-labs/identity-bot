@@ -335,11 +335,11 @@ func (s *CoreServer) AcceptFoundingSigner(a SignerAcceptance) (SignerAccepted, e
 	// replace an owner who already exists.
 	//
 	// It matters more than it did. The sealed record is one of the two things a
-	// controller's authentication level is checked against — a verified key
+	// controller's authentication statement is checked against — a verified key
 	// event log answers first, and this answers when it names the same identity
 	// — so an unredeemed founding-signer token would otherwise be an
-	// unauthenticated way to install the key that vouches for every raised
-	// action on this agent.
+	// unauthenticated way to install the key that vouches for a controller's
+	// score on this agent.
 	//
 	// ANYTHING ALREADY SEALED STOPS THIS, not merely a different identity.
 	//

@@ -118,6 +118,16 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if by := madeByController(r); by != "" {
+		agent.MadeByController = by
+		if err := s.assetHandler.Store.UpsertAsset(*agent); err != nil {
+			if derr := s.assetHandler.Store.DeleteAsset(agent.ID); derr != nil {
+				log.Printf("[mcp] agent %s: which machine made it could not be recorded, and it could not be removed: %v", agent.PairwiseAID, derr)
+			}
+			jsonError(w, "the AI agent was not created: which machine made it could not be recorded: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
 
 	// Endow the agent with a capability-grant credential: an ACDC the owner issues
 	// to the agent's AID that formalizes the ceiling. The endpoint verifies it at
@@ -168,6 +178,8 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		AssetID:      agent.ID,
 		GrantSAID:    grantSAID,
 		GrantPending: grantPending,
+
+		MadeByController: agent.MadeByController,
 	})
 	if err := s.saveMCPTokens(toks); err != nil {
 		jsonError(w, "failed to persist agent token", http.StatusInternalServerError)
@@ -314,9 +326,9 @@ func (s *CoreServer) handleUpdateAgentConfig(w http.ResponseWriter, r *http.Requ
 // a point in time. Editing one in place would make the audit trail claim the owner
 // granted something they had not yet decided to grant.
 func (s *CoreServer) handleSetAgentCapabilities(w http.ResponseWriter, r *http.Request) {
-	// App operation — authorized by the router-wide authorize gate (owner or the
-	// owner's authorized controller), at the verified level since it re-issues the
-	// agent's capability grant. The ceiling only ever limits: a capability the owner
+	// App operation — authorized by the router-wide authorize gate (owner, or the
+	// owner's authorized controller after the one score-and-permission check).
+	// The ceiling only ever limits: a capability the owner
 	// has not imported and enabled is refused at invoke regardless (defining new
 	// capabilities via pack import stays owner-only), so this grants no authority the
 	// owner has not already approved.

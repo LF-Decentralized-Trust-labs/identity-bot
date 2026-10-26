@@ -7,6 +7,7 @@ import (
 	"log"
 	"sort"
 	"strings"
+	"time"
 )
 
 // The search/describe meta-tools keep a caller's context cost constant as the
@@ -99,6 +100,9 @@ func (m *Manager) SearchCapabilities(ctx context.Context, caller CallerContext, 
 		if err := auth.AuthorizeIngress(ctx, caller, c.capDef); err != nil {
 			continue
 		}
+		if ok, _ := passesTheOneCheck(caller, c.capDef, time.Now()); !ok {
+			continue
+		}
 		matched = append(matched, c)
 	}
 
@@ -129,6 +133,9 @@ func (m *Manager) DescribeCapability(ctx context.Context, caller CallerContext, 
 		if err := auth.AuthorizeIngress(ctx, caller, capDef); err != nil {
 			return nil, ErrCapabilityNotFound
 		}
+		if ok, _ := passesTheOneCheck(caller, capDef, time.Now()); !ok {
+			return nil, ErrCapabilityNotFound
+		}
 		return &CapabilityDetail{
 			CapabilityID:       capDef.ID,
 			Name:               capDef.Name,
@@ -148,6 +155,9 @@ func (m *Manager) DescribeCapability(ctx context.Context, caller CallerContext, 
 		return nil, ErrCapabilityNotFound
 	}
 	if err := auth.AuthorizeIngress(ctx, caller, rec.asProvidedCapability()); err != nil {
+		return nil, ErrCapabilityNotFound
+	}
+	if ok, _ := passesTheOneCheck(caller, rec.asProvidedCapability(), time.Now()); !ok {
 		return nil, ErrCapabilityNotFound
 	}
 	return &CapabilityDetail{

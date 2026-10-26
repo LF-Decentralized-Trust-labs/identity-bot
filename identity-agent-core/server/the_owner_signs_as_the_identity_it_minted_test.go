@@ -131,21 +131,16 @@ func TestSigningRefusesAPathTheMachineWouldNotSee(t *testing.T) {
 
 // A machine acting for somebody must never obtain the OWNER's signature.
 //
-// The controller gate raises high-risk actions rather than closing them, which
-// is right for actions. This is not an action: it is the key that satisfies
-// every owner route on every machine this device owns. A controller holding one
-// of these is the owner, and the gate is decorative.
+// This is not an ordinary action: it is the key that satisfies every owner
+// route on every machine this device owns. A controller holding one of these is
+// the owner, and the gate is decorative, so it is owner-only.
 func TestAControllerCannotAskThisDeviceToSignAsTheOwner(t *testing.T) {
-	req, ok := controllerNeedsLevel["POST /api/machines/owner/sign"]
+	why, ok := isOwnerOnly("POST", "/api/machines/owner/sign")
 	if !ok {
-		t.Fatal("the route that signs as a machine's owner is not named in the " +
-			"controller rules, so a controller reaches it by default")
+		t.Fatal("the route that signs as a machine's owner is not owner-only, so a " +
+			"controller reaches it after the one check")
 	}
-	if !req.Closed {
-		t.Fatalf("a controller may reach the owner's signing route at level %q — "+
-			"no authentication level makes this safe", req.Level)
-	}
-	if strings.TrimSpace(req.Why) == "" {
+	if strings.TrimSpace(why) == "" {
 		t.Fatal("a refusal with no reason leaves somebody unable to act on it")
 	}
 }

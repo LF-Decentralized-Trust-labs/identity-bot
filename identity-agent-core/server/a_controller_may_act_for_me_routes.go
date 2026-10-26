@@ -21,14 +21,13 @@ import (
 // UNLISTED IS NOT THE WHOLE STORY, and saying only that used to make this
 // comment wrong. An authorised controller also reaches unlisted routes, because
 // a controller acts for the owner — so what actually governs these three is
-// controllerNeedsLevel:
+// controllerOwnerOnly and the one check (what_a_controller_may_reach.go):
 //
-//   - Granting is CLOSED to a controller at any level. A controller that could
-//     enrol another one could make its own access outlive the revocation of the
-//     grant the owner knows about.
-//   - Revoking is raised, and open: somebody whose laptop was stolen should be
-//     able to remove it from their desktop.
-//   - Listing is raised, because it hands over every machine's label and key.
+//   - Granting is owner-only. A controller that could enrol another one could
+//     make its own access outlive the revocation of the grant the owner knows
+//     about.
+//   - Revoking is owner-only too, done from the device holding the key.
+//   - Listing is open to a controller, subject to the one check.
 
 // handleGrantController records that a machine may act for this identity.
 //

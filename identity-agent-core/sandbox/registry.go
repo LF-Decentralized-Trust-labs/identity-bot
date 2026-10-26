@@ -59,17 +59,23 @@ type CapabilityRecord struct {
 	ExecutorConfig json.RawMessage `json:"executor_config,omitempty"`
 	Provider       string          `json:"provider"` // "registry-native" | plug-in id | agent AID
 	Enabled        bool            `json:"enabled"`
+	// MinimumScore is the identity score a caller needs to invoke this
+	// capability. Zero means DefaultMinimumScore. Omitted
+	// from the record when zero, so a record that sets nothing has the same
+	// content address it had before this field existed.
+	MinimumScore int `json:"minimum_score,omitempty"`
 }
 
 // asProvidedCapability projects a registry record into the manifest capability shape so
 // the Authorizer seam governs both kinds of capability through one interface.
 func (r *CapabilityRecord) asProvidedCapability() ProvidedCapability {
 	return ProvidedCapability{
-		ID:          r.ID,
-		Name:        r.Name,
-		Description: r.Description,
-		ACDCScope:   r.RequiredCredSchema,
-		HostControl: r.ExecutorType == "host_control",
+		ID:           r.ID,
+		Name:         r.Name,
+		Description:  r.Description,
+		ACDCScope:    r.RequiredCredSchema,
+		HostControl:  r.ExecutorType == "host_control",
+		MinimumScore: r.MinimumScore,
 	}
 }
 
@@ -96,17 +102,18 @@ func (s *SandboxStore) UpsertCapabilityRecord(r CapabilityRecord) error {
 	_, err := s.db.Exec(`
 		INSERT INTO capability_registry (id, said, name, description, domain, executor_type,
 			input_schema, impact, required_cred_schema, required_cred_issuer, egress_json,
-			executor_config_json, provider, enabled, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+			executor_config_json, provider, enabled, minimum_score, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(id) DO UPDATE SET said=excluded.said, name=excluded.name,
 			description=excluded.description, domain=excluded.domain,
 			executor_type=excluded.executor_type, input_schema=excluded.input_schema,
 			impact=excluded.impact, required_cred_schema=excluded.required_cred_schema,
 			required_cred_issuer=excluded.required_cred_issuer, egress_json=excluded.egress_json,
-			executor_config_json=excluded.executor_config_json, provider=excluded.provider, enabled=excluded.enabled, updated_at=CURRENT_TIMESTAMP`,
+			executor_config_json=excluded.executor_config_json, provider=excluded.provider, enabled=excluded.enabled,
+			minimum_score=excluded.minimum_score, updated_at=CURRENT_TIMESTAMP`,
 		r.ID, r.SAID, r.Name, r.Description, r.Domain, r.ExecutorType,
 		string(r.InputSchema), r.Impact, r.RequiredCredSchema, r.RequiredCredIssuer,
-		string(egressJSON), string(r.ExecutorConfig), r.Provider, boolToInt(r.Enabled))
+		string(egressJSON), string(r.ExecutorConfig), r.Provider, boolToInt(r.Enabled), r.MinimumScore)
 	return err
 }
 
@@ -114,7 +121,7 @@ func (s *SandboxStore) UpsertCapabilityRecord(r CapabilityRecord) error {
 func (s *SandboxStore) GetCapabilityRecord(id string) (*CapabilityRecord, error) {
 	row := s.db.QueryRow(`SELECT id, said, name, description, domain, executor_type,
 		input_schema, impact, required_cred_schema, required_cred_issuer, egress_json,
-		executor_config_json, provider, enabled FROM capability_registry WHERE id = ?`, id)
+		executor_config_json, provider, enabled, minimum_score FROM capability_registry WHERE id = ?`, id)
 	return scanCapabilityRecord(row)
 }
 
@@ -122,7 +129,7 @@ func (s *SandboxStore) GetCapabilityRecord(id string) (*CapabilityRecord, error)
 func (s *SandboxStore) ListCapabilityRecords() ([]CapabilityRecord, error) {
 	rows, err := s.db.Query(`SELECT id, said, name, description, domain, executor_type,
 		input_schema, impact, required_cred_schema, required_cred_issuer, egress_json,
-		executor_config_json, provider, enabled FROM capability_registry WHERE enabled = 1 ORDER BY id`)
+		executor_config_json, provider, enabled, minimum_score FROM capability_registry WHERE enabled = 1 ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +152,7 @@ func (s *SandboxStore) ListCapabilityRecords() ([]CapabilityRecord, error) {
 func (s *SandboxStore) ListAllCapabilityRecords() ([]CapabilityRecord, error) {
 	rows, err := s.db.Query(`SELECT id, said, name, description, domain, executor_type,
 		input_schema, impact, required_cred_schema, required_cred_issuer, egress_json,
-		executor_config_json, provider, enabled FROM capability_registry ORDER BY id`)
+		executor_config_json, provider, enabled, minimum_score FROM capability_registry ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +202,7 @@ func scanCapabilityRecord(row rowScanner) (*CapabilityRecord, error) {
 	var enabled int
 	err := row.Scan(&r.ID, &r.SAID, &r.Name, &r.Description, &r.Domain, &r.ExecutorType,
 		&inputSchema, &r.Impact, &r.RequiredCredSchema, &r.RequiredCredIssuer, &egressJSON,
-		&execConfig, &r.Provider, &enabled)
+		&execConfig, &r.Provider, &enabled, &r.MinimumScore)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

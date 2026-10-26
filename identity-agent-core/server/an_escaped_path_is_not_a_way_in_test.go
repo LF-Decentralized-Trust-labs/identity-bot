@@ -21,8 +21,9 @@ import (
 //	POST   /api/credentials/a%2Fb/revoke   -> 500 (the handler ran)
 //
 // This was already true before controllers existed. It matters more now,
-// because the same matched pattern is what decides whether an action is raised
-// — so every gate keyed on a pattern with a {param} had the same way past it.
+// because the same matched pattern is what decides whether an action is
+// owner-only for a controller — so every gate keyed on a pattern with a
+// {param} had the same way past it.
 func TestAnEscapedPathCannotSkipTheGate(t *testing.T) {
 	s := newAuthTestServer(t)
 	r := s.buildRouter("")
