@@ -278,8 +278,14 @@ func (s *CoreServer) theStringThisMachineSigned(
 	}
 
 	asserted := s.theAuthenticationSomebodyVouchedFor(r, aid, now)
+	// The signature covers the level as the machine sent it; what is acted on
+	// carries the level derived from the score.
+	signedAs := asserted
+	if asserted.Measured {
+		signedAs.Level = authprovider.Level(strings.TrimSpace(r.Header.Get(headerControllerAuthLevel)))
+	}
 	return canonicalControllerRequest(
-		aid, target, r.Method, r.URL.Path, stamp, asserted, body), asserted, nil
+		aid, target, r.Method, r.URL.Path, stamp, signedAs, body), asserted, nil
 }
 
 // theIdentityAgentItNames is the Identity Agent a controller's request is meant
@@ -402,8 +408,10 @@ func (s *CoreServer) theAuthenticationSomebodyVouchedFor(
 			"the authentication level was not vouched for by the device that holds this identity's key")
 	}
 
+	// The level shown is derived from the score, so the two cannot disagree;
+	// the level named in the statement only had to be one this build defines.
 	return authprovider.Result{
-		Level:    level,
+		Level:    authprovider.LevelForScore(score),
 		Score:    score,
 		Measured: true,
 		At:       when.UTC(),
