@@ -507,7 +507,7 @@ func TestSettlingASignerNeverLeavesTwoGrantsInForce(t *testing.T) {
 func TestAPublishedGrantCarriesNoPrivateConfiguration(t *testing.T) {
 	w := newTalkWorld(t)
 	body := `{"name":"Ledger clerk","capabilities":["` + capabilityMessageAgent + `"],"system_prompt":"SECRET-PROMPT",` +
-		`"brain":{"kind":"local","model":"m","endpoint":"http://10.0.0.9:1234","credential_ref":"vault-key-7"},"nonce":"n-1"}`
+		`"brain":{"kind":"local","model":"m","endpoint":"http://10.0.0.9:1234","credential_ref":"ai-agent-brain:vault-key-7"},"nonce":"n-1"}`
 	req := asThatMachineTo(t, w.s.thisIdentityAgentsIdentifier(), w.ctlAID, "POST", "/api/mcp/agents", body, w.ctlSeed, authprovider.LevelVerified, time.Now())
 	rec := httptest.NewRecorder()
 	w.s.router.ServeHTTP(rec, req)

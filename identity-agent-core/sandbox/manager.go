@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"identity-agent-core/appcall"
+	"identity-agent-core/brainsignin"
 )
 
 // BackendLLMInstanceID and BackendLLMAppID identify the Identity Agent's own
@@ -835,6 +836,26 @@ func (m *Manager) SetServiceCredential(service string, matchDomains []string, he
 // RemoveServiceCredential deletes one service credential from the vault.
 func (m *Manager) RemoveServiceCredential(service string) error {
 	return m.credentials.RemoveCredential(service)
+}
+
+// HasServiceCredential reports whether the vault holds an entry of this name.
+func (m *Manager) HasServiceCredential(service string) bool {
+	return m.credentials.HasService(service)
+}
+
+// SetBrainSignIn keeps an AI agent's brain sign-in in the vault.
+func (m *Manager) SetBrainSignIn(ref string, rec brainsignin.Record) error {
+	return m.credentials.SetBrainSignIn(ref, rec)
+}
+
+// BrainSignIn reads an AI agent's brain sign-in from the vault, secret and all.
+func (m *Manager) BrainSignIn(ref string) (brainsignin.Record, bool, error) {
+	return m.credentials.BrainSignIn(ref)
+}
+
+// RemoveBrainSignIn deletes an AI agent's brain sign-in from the vault.
+func (m *Manager) RemoveBrainSignIn(ref string) error {
+	return m.credentials.RemoveBrainSignIn(ref)
 }
 
 // ListServiceCredentials lists configured service names (never key material).

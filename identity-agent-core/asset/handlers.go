@@ -123,7 +123,7 @@ func (h *Handler) HandleListAssets(w http.ResponseWriter, r *http.Request) {
 				pending++
 			}
 		}
-		out = append(out, item{Asset: a, MemberCount: len(mems), PendingCount: pending})
+		out = append(out, item{Asset: a.ForDisplay(), MemberCount: len(mems), PendingCount: pending})
 	}
 	h.writeJSON(w, map[string]interface{}{"assets": out}, http.StatusOK)
 }
@@ -260,7 +260,7 @@ func (h *Handler) HandleGetAsset(w http.ResponseWriter, r *http.Request) {
 		"ASSET_ID":          a.ID,
 		"ENROLLMENT_MODE":   string(a.Policy.Mode),
 	}
-	h.writeJSON(w, map[string]interface{}{"asset": a, "sdk_config": sdk}, http.StatusOK)
+	h.writeJSON(w, map[string]interface{}{"asset": a.ForDisplay(), "sdk_config": sdk}, http.StatusOK)
 }
 
 func (h *Handler) HandleUpdatePolicy(w http.ResponseWriter, r *http.Request) {
@@ -275,7 +275,7 @@ func (h *Handler) HandleUpdatePolicy(w http.ResponseWriter, r *http.Request) {
 	a.Policy = pol
 	a.UpdatedAt = time.Now().UTC()
 	h.Store.UpsertAsset(a)
-	h.writeJSON(w, a, http.StatusOK)
+	h.writeJSON(w, a.ForDisplay(), http.StatusOK)
 }
 
 func (h *Handler) HandleCreateInvite(w http.ResponseWriter, r *http.Request) {

@@ -1,6 +1,10 @@
 package asset
 
-import "time"
+import (
+	"time"
+
+	"identity-agent-core/brainsignin"
+)
 
 type EnrollmentMode string
 
@@ -109,20 +113,80 @@ type AgentConfig struct {
 // BrainConfig is how an agent connects to its LLM (its probabilistic brain). Kept
 // entirely separate from where the Identity Agent itself runs (its deterministic host).
 type BrainConfig struct {
-	// Kind: "cli" (a subscription CLI like Claude Code), "remote" (a hosted model over
-	// an API), or "local" (a model on a local endpoint).
+	// Kind: how the brain is signed in — see Provider.
 	Kind string `json:"kind,omitempty"`
-	// Provider: cli → "claude-code"|"codex"|"grok"; remote → "anthropic"|"openrouter"|"xai".
+	// Kind and Provider are kept as brainsignin normalises them: kind
+	// "api_key"|"subscription"|"local", provider "anthropic"|"openai"|"google"|
+	// "xai"|"openrouter"|"claude-code"|"codex"|"grok"|"local". Older records may
+	// still say "cli" or "remote", or carry a display label; read them through
+	// brainsignin's normalising functions.
 	Provider string `json:"provider,omitempty"`
 	Model    string `json:"model,omitempty"`
 	// Endpoint is the base URL for a local (or self-hosted) model API.
 	Endpoint string `json:"endpoint,omitempty"`
-	// CredentialRef names the encrypted-vault entry holding the model API key. The key
-	// itself is NEVER stored on the asset — only this reference.
+	// CredentialRef names the vault entry holding the brain's sign-in
+	// (brainsignin.Ref). The key or token itself is never stored on the asset:
+	// one sent here is moved into the vault and replaced by its reference.
 	CredentialRef string `json:"credential_ref,omitempty"`
 	// TEEAttestedOnly is a governance restriction: only a TEE-attested model may wear
 	// this identity (brain-topology enforcement).
 	TEEAttestedOnly bool `json:"tee_attested_only,omitempty"`
+}
+
+// Normalised is the brain configuration with its kind and provider as the
+// record keeps them, whatever names a screen sent.
+func (b BrainConfig) Normalised() BrainConfig {
+	b.Provider = brainsignin.NormaliseProvider(b.Provider)
+	if b.Provider == "" && brainsignin.NormaliseKind(b.Kind, "") == brainsignin.KindLocal {
+		b.Provider = brainsignin.Local
+	}
+	if b.Kind != "" || b.Provider != "" {
+		b.Kind = brainsignin.NormaliseKind(b.Kind, b.Provider)
+	}
+	return b
+}
+
+// HoldsASecret reports whether CredentialRef carries something other than a
+// reference to a brain sign-in — a key typed where the reference belongs.
+// isVaultEntry says whether a name is an entry the vault already holds, which
+// is a reference too.
+func (b BrainConfig) HoldsASecret(isVaultEntry func(string) bool) bool {
+	ref := b.CredentialRef
+	if ref == "" || brainsignin.IsRef(ref) {
+		return false
+	}
+	return isVaultEntry == nil || !isVaultEntry(ref)
+}
+
+// ForDisplay is the asset as it may be shown to anybody: a brain's credential
+// reference survives only when it names a brain sign-in, so a key an older
+// version stored in its place is never returned.
+func (a Asset) ForDisplay() Asset {
+	if a.AgentConfig != nil {
+		cfg := *a.AgentConfig
+		cfg.Brain = cfg.Brain.ForDisplay()
+		a.AgentConfig = &cfg
+	}
+	return a
+}
+
+// ForDisplay is the brain configuration without anything that could be a
+// secret.
+func (b BrainConfig) ForDisplay() BrainConfig {
+	if !brainsignin.IsRef(b.CredentialRef) {
+		b.CredentialRef = ""
+	}
+	return b
+}
+
+// ForDisplay is the AI agent's configuration as it may be shown.
+func (c *AgentConfig) ForDisplay() *AgentConfig {
+	if c == nil {
+		return nil
+	}
+	out := *c
+	out.Brain = out.Brain.ForDisplay()
+	return &out
 }
 
 // Exposure is how an agent's capabilities are reached by tools and other agents.

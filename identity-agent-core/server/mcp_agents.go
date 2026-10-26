@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"identity-agent-core/asset"
+	"identity-agent-core/brainsignin"
 	"identity-agent-core/schemas"
 
 	"github.com/go-chi/chi/v5"
@@ -68,6 +69,9 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		// ValidUntil is when the agent's grant lapses (RFC 3339); absent, it
 		// holds until revoked.
 		ValidUntil *time.Time `json:"valid_until,omitempty"`
+		// BrainSignIn signs the brain in as the AI agent is made, so it is
+		// never created half set up. Kept in the vault, never on the record.
+		BrainSignIn *brainSignInRequest `json:"brain_sign_in,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
 		jsonError(w, "name is required", http.StatusBadRequest)
@@ -86,12 +90,45 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// The brain's sign-in. A key sent where the reference belongs is taken out
+	// of the brain before anything is stored, and kept in the vault instead.
+	brain, signIn := s.brainSecretFrom(req.Brain)
+	// An AI agent not yet made has no sign-in of its own, so a reference to
+	// one names somebody else's, and is not kept.
+	if brainsignin.IsRef(brain.CredentialRef) {
+		brain.CredentialRef = ""
+	}
+	if req.BrainSignIn != nil {
+		rec, err := req.BrainSignIn.record(nil, time.Now().UTC())
+		if err != nil {
+			jsonError(w, "the brain's sign-in: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		signIn = &rec
+	}
+	if signIn != nil && signIn.HasSecret() && by.Request != nil {
+		// A signed request is kept as it was signed, with the grant it
+		// authorises, and goes with that grant wherever the grant is shown or
+		// exported. A key in it would be kept and exported with it, so it is
+		// refused, and the key is sent on its own instead.
+		jsonError(w, "the AI agent was not created: a key or sign-in token is never sent in the request that "+
+			"creates an AI agent, because that request is kept as it was signed. Create the AI agent without it, "+
+			"then send the sign-in to PUT /api/mcp/agents/{id}/brain-sign-in", http.StatusBadRequest)
+		return
+	}
+	if signIn != nil {
+		if _, err := s.brainVault(); err != nil {
+			jsonError(w, "the AI agent was not created: "+err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+	}
+
 	// Its operational config — role, prompt, LLM brain, exposure. Exposure defaults
 	// to the MCP server unless the caller says otherwise.
 	cfg := &asset.AgentConfig{
 		Role:         req.Role,
 		SystemPrompt: req.SystemPrompt,
-		Brain:        req.Brain,
+		Brain:        brain,
 		Exposure:     asset.Exposure{MCP: true},
 	}
 	if req.Exposure != nil {
@@ -127,6 +164,19 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 			jsonError(w, "the AI agent was not created: which machine made it could not be recorded: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+	}
+	if signIn != nil {
+		kept, err := s.keepBrainSignIn(*agent, *signIn, madeByController(r))
+		if err != nil {
+			if derr := s.assetHandler.Store.DeleteAsset(agent.ID); derr != nil {
+				log.Printf("[mcp] agent %s: its sign-in could not be kept, and it could not be removed: %v", agent.PairwiseAID, derr)
+			}
+			_ = s.removeBrainSignInOf(agent.ID)
+			jsonError(w, "the AI agent was not created: its sign-in could not be kept: "+err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		*agent = kept
+		cfg = agent.AgentConfig
 	}
 
 	// Endow the agent with a capability-grant credential: an ACDC the owner issues
@@ -189,17 +239,18 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]any{
-		"agent_name":    req.Name,
-		"asset_id":      agent.ID,
-		"agent_aid":     agent.PairwiseAID,
-		"delegator_aid": agent.DelegatorAID,
-		"capabilities":  req.Capabilities,
-		"agent_config":  cfg,
-		"grant_said":    grantSAID,
-		"grant_issued":  grantSAID != "",
-		"grant_pending": grantPending,
-		"token":         plaintext,
-		"note":          "store this token now; only its hash is kept. Every call it makes is recorded as this agent AID, chained to the owner root.",
+		"agent_name":      req.Name,
+		"asset_id":        agent.ID,
+		"agent_aid":       agent.PairwiseAID,
+		"delegator_aid":   agent.DelegatorAID,
+		"capabilities":    req.Capabilities,
+		"agent_config":    cfg.ForDisplay(),
+		"brain_signed_in": signIn != nil,
+		"grant_said":      grantSAID,
+		"grant_issued":    grantSAID != "",
+		"grant_pending":   grantPending,
+		"token":           plaintext,
+		"note":            "store this token now; only its hash is kept. Every call it makes is recorded as this agent AID, chained to the owner root.",
 	})
 }
 
@@ -231,8 +282,12 @@ type agentView struct {
 	// as an Identity Agent too old to report them, and then leaves them alone.
 	ResourceConstraints map[string]interface{} `json:"resource_constraints"`
 	Config              *asset.AgentConfig     `json:"agent_config,omitempty"`
-	Status              string                 `json:"status"` // active | revoked
-	CreatedAt           time.Time              `json:"created_at"`
+	// SignIn is the brain's sign-in as it may be shown — kind, provider,
+	// account, expiry, cap and runs in use — never its secret. Absent when
+	// the brain is not signed in here.
+	SignIn    map[string]any `json:"brain_sign_in,omitempty"`
+	Status    string         `json:"status"` // active | revoked
+	CreatedAt time.Time      `json:"created_at"`
 	// GrantPending says the AI agent may do nothing yet: its grant waits for
 	// the device that holds the identity's key.
 	GrantPending bool `json:"grant_pending,omitempty"`
@@ -265,7 +320,8 @@ func (s *CoreServer) handleListAgents(w http.ResponseWriter, r *http.Request) {
 			DelegatorAID:        a.DelegatorAID,
 			Capabilities:        a.Capabilities,
 			ResourceConstraints: nonNilConstraints(a.GrantConstraints),
-			Config:              a.AgentConfig,
+			Config:              a.AgentConfig.ForDisplay(),
+			SignIn:              s.brainSignInShown(a),
 			Status:              s.agentStatus(a.PairwiseAID),
 			CreatedAt:           a.CreatedAt,
 			GrantPending:        pending[a.ID],
@@ -301,15 +357,45 @@ func (s *CoreServer) handleUpdateAgentConfig(w http.ResponseWriter, r *http.Requ
 		jsonError(w, "invalid agent config", http.StatusBadRequest)
 		return
 	}
+	before, ok := s.aiAgentAsset(id)
+	if !ok {
+		jsonError(w, "agent not found", http.StatusBadRequest)
+		return
+	}
+	// A key sent where the reference belongs goes into the vault. A change
+	// that does not mention the sign-in keeps the one the brain has.
+	brain, signIn := s.brainSecretFrom(cfg.Brain)
+	// The only sign-in an AI agent's brain may name is its own.
+	if brainsignin.IsRef(brain.CredentialRef) || (brain.CredentialRef == "" && signIn == nil) {
+		brain.CredentialRef = ""
+		if before.AgentConfig != nil && before.AgentConfig.Brain.CredentialRef == brainsignin.Ref(id) {
+			brain.CredentialRef = brainsignin.Ref(id)
+		}
+	}
+	cfg.Brain = brain
+	if signIn != nil {
+		if _, err := s.brainVault(); err != nil {
+			jsonError(w, "nothing was changed: "+err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+	}
 	updated, err := s.assetHandler.UpdateAgentConfig(id, &cfg)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if signIn != nil {
+		kept, err := s.keepBrainSignIn(*updated, *signIn, madeByController(r))
+		if err != nil {
+			jsonError(w, "the configuration changed, but the sign-in was not kept: "+err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		updated = &kept
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
 		"asset_id":     updated.ID,
-		"agent_config": updated.AgentConfig,
+		"agent_config": updated.AgentConfig.ForDisplay(),
 	})
 }
 
