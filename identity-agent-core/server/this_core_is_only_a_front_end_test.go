@@ -410,15 +410,21 @@ func TestAFrontEndStillProvesItHoldsTheStartSecret(t *testing.T) {
 
 	nonce := "a-fresh-nonce-0123456789"
 	req := httptest.NewRequest(http.MethodGet, "/api/local-owner/proof?nonce="+nonce, nil)
-	req.RemoteAddr = "127.0.0.1:1234"
+	// From another machine and with no secret, as the proof is answered to
+	// anyone: a front end gives a stranger no more than any other core does.
+	req.RemoteAddr = "203.0.113.9:51000"
 	rec := httptest.NewRecorder()
 	real.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("a front end answered %d to its own app's start check: %s", rec.Code, rec.Body)
 	}
-	if !strings.Contains(rec.Body.String(), LocalOwnerProof(s.localOwnerSecret, nonce, 5050)) {
-		t.Fatalf("not the proof for this core: %s", rec.Body)
+	body := rec.Body.String()
+	if !strings.Contains(body, LocalOwnerProof(s.localOwnerSecret, nonce, 5050)) {
+		t.Fatalf("not the proof for this core: %s", body)
+	}
+	if strings.Contains(body, "EAGENT") || strings.Contains(body, "box.example.test") {
+		t.Fatalf("the answer named the identity this computer fronts for: %s", body)
 	}
 }
 
