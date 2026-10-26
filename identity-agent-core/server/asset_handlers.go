@@ -16,6 +16,7 @@ func (s *CoreServer) initAssetHandler() error {
 	if err != nil {
 		return err
 	}
+	h.VaultHas = s.isVaultEntry
 	// The delegator for per-asset delegated inception is the agent's root identity AID.
 	h.RootAID = func() string {
 		if id, _ := s.DataStore.GetIdentity(); id != nil {

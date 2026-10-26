@@ -511,6 +511,9 @@ func New(cfg Config) (*CoreServer, error) {
 	if err := s.initAssetHandler(); err != nil {
 		log.Printf("[identity-agent-core] asset handler init failed (non-fatal): %v", err)
 	}
+	// A key an earlier version kept on an AI agent's record moves into the
+	// vault, where every other sign-in is kept.
+	s.moveBrainSecretsIntoTheVault()
 	if err := s.initOIDCHandler(); err != nil {
 		log.Printf("[identity-agent-core] OIDC adapter init failed (non-fatal): %v", err)
 	}

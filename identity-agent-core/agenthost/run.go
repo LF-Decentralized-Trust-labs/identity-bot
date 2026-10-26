@@ -30,6 +30,9 @@ type RunOptions struct {
 	Once bool
 	// Log receives a line per thing the host does; nil is the standard logger.
 	Log *log.Logger
+	// SignInWait is how long a run waits for its AI agent's sign-in when every
+	// run that sign-in allows is in use; ten minutes when zero.
+	SignInWait time.Duration
 }
 
 // agentProfile is how the AI agent is meant to operate, as its Identity Agent
@@ -107,6 +110,10 @@ func (h *Host) Run(ctx context.Context, o RunOptions) error {
 		}
 	}
 	h.brainName, h.brainModel = brain.Name(), p.Model
+	h.signInWait = o.SignInWait
+	if h.signInWait <= 0 {
+		h.signInWait = turnTimeout
+	}
 	workspace := o.Workspace
 	if r, separate := o.Runner.(Isolated); separate && r.Isolated() {
 		// The brain's own user owns its workspace, which this user may not
@@ -252,15 +259,31 @@ func (h *Host) handle(ctx context.Context, tools *toolServer, brain Brain, p age
 
 	turn := &toolTurn{Conversation: rec.Conversation, ActingOn: id, Serving: cs.Serving, AskedBy: cs.AskedBy,
 		Brain: func() string { return cs.Session }}
-	token := tools.open(turn)
-	tctx, cancel := context.WithTimeout(ctx, turnTimeout)
-	logf("[agent-host] %s: %s from %s, to the brain", rec.Conversation, rec.Kind, d.FromName)
-	out, err := brain.Run(tctx, Turn{
-		Session: cs.Session, Resume: cs.Started, Prompt: prompt, Instructions: p.instructions(),
-		Workspace: workspace, ToolsURL: tools.url(), ToolsToken: token, Model: p.Model,
-	})
-	cancel()
-	tools.shut(token)
+	var out Outcome
+	creds, borrowed, err := h.lendForTurn(ctx, brain, logf)
+	if err == nil {
+		token := tools.open(turn)
+		tctx, cancel := context.WithTimeout(ctx, turnTimeout)
+		stop, kept := make(chan struct{}), make(chan struct{})
+		if borrowed != nil {
+			go h.keep(borrowed, stop, kept, logf)
+		} else {
+			close(kept)
+		}
+		logf("[agent-host] %s: %s from %s, to the brain", rec.Conversation, rec.Kind, d.FromName)
+		out, err = brain.Run(tctx, Turn{
+			Session: cs.Session, Resume: cs.Started, Prompt: prompt, Instructions: p.instructions(),
+			Workspace: workspace, ToolsURL: tools.url(), ToolsToken: token, Model: p.Model,
+			Credentials: creds,
+		})
+		close(stop)
+		<-kept
+		cancel()
+		tools.shut(token)
+		if borrowed != nil {
+			h.giveBack(borrowed, logf)
+		}
+	}
 
 	mem = h.loadMemory()
 	cs2 := mem.Conversations[rec.Conversation]

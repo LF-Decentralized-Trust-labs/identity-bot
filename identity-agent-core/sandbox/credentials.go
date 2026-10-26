@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/brainsignin"
 )
 
 // vaultFileName is the encrypted-at-rest credential store. It deliberately does
@@ -38,6 +39,10 @@ type CredentialEntry struct {
 	Service      string            `json:"service"`
 	MatchDomains []string          `json:"match_domains"`
 	Headers      map[string]string `json:"headers"`
+	// BrainSignIn is an AI agent's brain sign-in, kept under the service name
+	// brainsignin.Ref gives. It has no match domains, so it is never injected
+	// into a request: it leaves the vault only when lent, sealed, to a body.
+	BrainSignIn *brainsignin.Record `json:"brain_sign_in,omitempty"`
 }
 
 type CredentialVault struct {
@@ -347,6 +352,9 @@ func (cv *CredentialVault) injectMatching(req *http.Request, eligible func(Crede
 }
 
 func (cv *CredentialVault) SetCredential(service string, domains []string, headers map[string]string) error {
+	if brainsignin.IsRef(service) {
+		return fmt.Errorf("%q names an AI agent's brain sign-in, which is kept through that AI agent", service)
+	}
 	cv.mu.Lock()
 	defer cv.mu.Unlock()
 	cv.ensureLoadedLocked()
@@ -404,7 +412,7 @@ func (cv *CredentialVault) GetAPIKey(service string) string {
 	cv.ensureLoadedLocked()
 
 	for _, e := range cv.effectiveEntriesLocked() {
-		if e.Service == service {
+		if e.Service == service && e.BrainSignIn == nil {
 			if auth, ok := e.Headers["Authorization"]; ok {
 				return strings.TrimPrefix(auth, "Bearer ")
 			}
@@ -420,9 +428,94 @@ func (cv *CredentialVault) ListServices() []string {
 
 	var services []string
 	for _, e := range cv.effectiveEntriesLocked() {
+		// A brain sign-in is managed through its AI agent, and listed there.
+		if e.BrainSignIn != nil {
+			continue
+		}
 		services = append(services, e.Service)
 	}
 	return services
+}
+
+// Writable reports why the vault cannot be written now, or nil when it can.
+func (cv *CredentialVault) Writable() error {
+	cv.mu.Lock()
+	defer cv.mu.Unlock()
+	cv.ensureLoadedLocked()
+	if cv.loadErr != nil {
+		return cv.loadErr
+	}
+	if _, err := cv.vaultKeyLocked(); err != nil {
+		return fmt.Errorf("credential vault is locked — complete identity setup first (vault key unavailable): %w", err)
+	}
+	return nil
+}
+
+// HasService reports whether the vault holds an entry of this name, of any
+// kind.
+func (cv *CredentialVault) HasService(service string) bool {
+	cv.mu.Lock()
+	defer cv.mu.Unlock()
+	cv.ensureLoadedLocked()
+	for _, e := range cv.effectiveEntriesLocked() {
+		if e.Service == service {
+			return true
+		}
+	}
+	return false
+}
+
+// SetBrainSignIn keeps an AI agent's brain sign-in under ref, replacing any
+// there. It is refused while the vault cannot be written, rather than kept
+// anywhere else.
+func (cv *CredentialVault) SetBrainSignIn(ref string, rec brainsignin.Record) error {
+	if !brainsignin.IsRef(ref) {
+		return fmt.Errorf("%q is not a brain sign-in reference", ref)
+	}
+	cv.mu.Lock()
+	defer cv.mu.Unlock()
+	cv.ensureLoadedLocked()
+	if cv.loadErr != nil {
+		return cv.loadErr
+	}
+	key, err := cv.vaultKeyLocked()
+	if err != nil {
+		return fmt.Errorf("credential vault is locked — complete identity setup first (vault key unavailable): %w", err)
+	}
+	r := rec
+	entry := CredentialEntry{Service: ref, MatchDomains: []string{}, Headers: map[string]string{}, BrainSignIn: &r}
+	for i, e := range cv.entries {
+		if e.Service == ref {
+			cv.entries[i] = entry
+			return cv.persistLocked(key)
+		}
+	}
+	cv.entries = append(cv.entries, entry)
+	return cv.persistLocked(key)
+}
+
+// BrainSignIn is the sign-in kept under ref, with its secret.
+func (cv *CredentialVault) BrainSignIn(ref string) (brainsignin.Record, bool, error) {
+	cv.mu.Lock()
+	defer cv.mu.Unlock()
+	cv.ensureLoadedLocked()
+	if cv.loadErr != nil {
+		return brainsignin.Record{}, false, cv.loadErr
+	}
+	for _, e := range cv.entries {
+		if e.Service == ref && e.BrainSignIn != nil {
+			return *e.BrainSignIn, true, nil
+		}
+	}
+	return brainsignin.Record{}, false, nil
+}
+
+// RemoveBrainSignIn deletes the sign-in kept under ref.
+func (cv *CredentialVault) RemoveBrainSignIn(ref string) error {
+	if !brainsignin.IsRef(ref) {
+		return fmt.Errorf("%q is not a brain sign-in reference", ref)
+	}
+	return cv.RemoveCredential(ref)
 }
 
 // persistLocked seals the entries with AES-256-GCM and writes the envelope.

@@ -79,6 +79,12 @@ var publicRoutes = map[string]string{
 	"GET /api/agent-host/inbox":               "an AI agent's body collecting its messages, sealed and signed by its key",
 	"GET /api/agent-host/agents":              "an AI agent's body asking which AI agents it may message, sealed and signed",
 	"GET /api/agent-host/conversations/{cid}": "an AI agent's body reading a conversation it is in, sealed and signed",
+	// A body borrowing its AI agent's brain sign-in for one run, renewing it
+	// and giving it back. Each handler admits only a sealed request a live
+	// body signed, and the sign-in travels back sealed to that body's keys.
+	"POST /api/agent-host/brain-sign-in":        "an AI agent's body borrowing its brain's sign-in for one run, sealed and signed",
+	"POST /api/agent-host/brain-sign-in/renew":  "an AI agent's body keeping a borrowed sign-in while its run goes on, sealed and signed",
+	"POST /api/agent-host/brain-sign-in/return": "an AI agent's body giving back a borrowed sign-in, sealed and signed",
 
 	// --- carrying a request nothing in the middle can read ---
 	// Open in the same sense the message endpoint is open: what arrives is an
@@ -678,6 +684,10 @@ var sessionForbidden = map[string]string{
 	// could point the AI agent at an endpoint it controls, and the change would
 	// outlive the session.
 	"PATCH /api/mcp/agents/{id}": "changing where an AI agent's model is reached, and with which key, outlives the session that changed it",
+	// The same, by the brain's sign-in: its key, its account, and a local
+	// model server's address.
+	"PUT /api/mcp/agents/{id}/brain-sign-in":    "signing an AI agent's brain in, with which key and at which address, outlives the session that did it",
+	"DELETE /api/mcp/agents/{id}/brain-sign-in": "removing an AI agent's sign-in outlives the session that removed it",
 	// An enrolment string, and approving a body, let a machine speak as an AI
 	// agent from then on — standing access that outlives the session.
 	"POST /api/mcp/agents/{id}/body-enrolment":       "an enrolment string lets a machine ask to speak as an AI agent, after the session that made it ends",

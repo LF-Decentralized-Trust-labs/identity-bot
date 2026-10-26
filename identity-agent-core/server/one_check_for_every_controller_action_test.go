@@ -303,6 +303,8 @@ func TestEveryActionClosedToASessionWasDecidedForAControllerToo(t *testing.T) {
 	deliberatelyOpen := map[string]string{
 		"POST /api/mcp/agents":                           "creating an AI agent is the application's work, recorded against the controller",
 		"PATCH /api/mcp/agents/{id}":                     "configuring an AI agent is the application's work",
+		"PUT /api/mcp/agents/{id}/brain-sign-in":         "signing an AI agent's brain in is the application's work (ADR-051)",
+		"DELETE /api/mcp/agents/{id}/brain-sign-in":      "removing an AI agent's sign-in is the application's work (ADR-051)",
 		"PUT /api/mcp/agents/{id}/capabilities":          "setting an AI agent's capabilities is the application's work",
 		"POST /api/mcp/agents/{id}/body-enrolment":       "an enrolment string is the first step of a body the person still approves",
 		"POST /api/mcp/agents/{id}/bodies/{bid}/approve": "approving a body is recorded against the machine that decided",
