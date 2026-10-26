@@ -30,19 +30,16 @@ import (
 //     first, so nothing about the person can reach it.
 //  2. The one check, shared with AI agents' capability calls in the governance
 //     gateway (sandbox.MayThisPersonDoThis): is the person's identity score at
-//     least the action's minimum (80 unless set below), and may this person do
-//     this action (always yes until roles are built).
+//     least the action's minimum (80 unless set in controllerMinimumScore),
+//     and may this person do this action (always yes until roles are built).
 //
 // THE OWNER-ONLY LIST IS NOT A VERY HIGH SCORE, and is kept apart from the
 // minimums for that reason. A minimum says "prove more"; the list says "not
 // from here, whatever you prove". Written as a score it would silently become
 // reachable the day somebody scored high enough.
 //
-// An earlier version of this file raised rotation, recovery and backup export
-// to a named authentication level rather than closing them, so a stolen key
-// device would not leave the identity unrotatable. Nothing could produce that
-// level, so those actions were never reachable from a controller in practice;
-// the owner-only list now says so plainly.
+// The owner-only list, and why rotation and recovery are on it, are recorded
+// in ADR-050.
 
 // controllerOwnerOnly names the actions closed to a controller at any score,
 // each with the reason a person stopped by it is told.
@@ -56,6 +53,10 @@ var controllerOwnerOnly = map[string]string{
 	"POST /api/rotation":                   "rotating keys replaces what signs for this identity",
 	"POST /api/reset":                      "resetting destroys this identity",
 	"POST /api/inception":                  "this creates the identity itself",
+	"POST /api/hybrid-inception":           "this creates the identity itself",
+	"POST /api/messaging-keys/prepare":     "this derives the keys an identity commits to from the root seed, before it is founded",
+	"POST /api/owners/ceremony":            "bringing new owners in decides who the owner is",
+	"DELETE /api/owners/ceremony":          "abandoning a ceremony decides who the owner is",
 
 	// --- material an identity can be rebuilt from ---
 	// An archive plus a passphrase is the identity to whoever holds both, so
@@ -72,9 +73,15 @@ var controllerOwnerOnly = map[string]string{
 	// controller never signs as the identity: it asks the Identity Agent to act,
 	// and these are the points where asking would become the identity having
 	// said something.
-	"POST /api/sign":                         "this signs as the identity, and anything it signs cannot be unsaid",
-	"POST /api/events/signature":             "this attaches this identity's signature to an event",
-	"POST /api/signing-requests/{id}/fulfil": "this signs as the identity, and what is signed cannot be unsaid",
+	"POST /api/sign":                              "this signs as the identity, and anything it signs cannot be unsaid",
+	"POST /api/events/signature":                  "this attaches this identity's signature to an event",
+	"POST /api/signing-requests/{id}/fulfil":      "this signs as the identity, and what is signed cannot be unsaid",
+	"POST /api/signing-requests/sign-for-another": "this signs with the identity's key and records it in its key log",
+	"POST /api/signing-requests/adopt":            "this takes events into the identity's key log",
+	"POST /api/interact":                          "this signs an interaction event with the identity's key, and key events are the owner's",
+	// Approving a browser login lets a session act for the owner; the handler
+	// already refuses anybody but the owner, and the gate says so too.
+	"POST /api/session/grant": "approving a login lets a browser act for the owner",
 
 	// --- what it takes to get back in, and taking the identity over ---
 	// The duress policy is the sharpest of these: it says what must happen if
@@ -86,6 +93,13 @@ var controllerOwnerOnly = map[string]string{
 	"POST /api/recovery/sessions/{id}/activate": "activating a recovery replaces this identity and everything it held",
 	"POST /api/recovery/sessions/{id}/rotation": "this rotates the identity's keys",
 	"POST /api/recovery/sessions/{id}/cancel":   "stopping a recovery decides whether it happens",
+	"POST /api/recovery/verify":                 "this opens a recovery archive, the first step of replacing this identity",
+	// Holding part of somebody else's recovery: agreeing to hold a share,
+	// approving the recovery it serves, and giving it up. Each is a recovery
+	// decision the owner makes from the device holding the key.
+	"POST /api/recovery/holdings":         "agreeing to hold part of somebody's recovery is a commitment the owner makes",
+	"POST /api/recovery/holdings/approve": "approving a recovery is the whole of what a human gate decides",
+	"POST /api/recovery/holdings/stop":    "giving up a share makes somebody else's backups unopenable by this machine",
 
 	// --- who may sign for this identity ---
 	"POST /api/signer/invites":                "inviting a signer decides who else may sign for this identity",
@@ -119,6 +133,11 @@ var controllerOwnerOnly = map[string]string{
 	"POST /api/machines/owner/sign": "signing as the identity that owns a machine is the owner's own key, and a " +
 		"machine acting for somebody is not that person",
 	"POST /api/machines/owner-identity": "minting the identity that owns a machine makes a key that signs as its owner, and " +
+		"a machine acting for somebody is not that person",
+	// Adopting a machine mints its owner identity, signs a claim with it, and
+	// accepts the measurements the caller says the machine may run: the same
+	// door as the two above.
+	"POST /api/pairing/adopt": "adopting a machine mints the identity that owns it and signs as that owner, and " +
 		"a machine acting for somebody is not that person",
 
 	// --- the state that decides WHO THE OWNER IS ---

@@ -106,9 +106,14 @@ func TestAControllerActionNeedingNinetyIsRefusedAtThePlaceholder(t *testing.T) {
 	}
 }
 
-// A vouched score below 80 is used as it is: somebody checked and fell short,
-// which is not the same as nobody having checked.
-func TestAVouchedScoreBelowEightyIsRefused(t *testing.T) {
+// A vouched statement is judged by its own score, not by the placeholder.
+//
+// Not a protection yet: while the placeholder stands, a controller that sends
+// no statement at all is judged at 80, so it can avoid a low vouched score by
+// leaving the statement out. A vouched score means something only once real
+// human authentication replaces the placeholder and a missing statement counts
+// as nothing measured (ADR-050).
+func TestAVouchedStatementIsJudgedByItsOwnScore(t *testing.T) {
 	s := newAuthTestServer(t)
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
 	r := s.buildRouter("")
@@ -135,16 +140,16 @@ func TestTheDecisionReadsTheScoreNotTheLevel(t *testing.T) {
 	}
 }
 
-// The owner-only list is exactly the ruling: nothing more is closed, and
-// nothing on it was dropped.
-func TestTheOwnerOnlyListIsTheRuling(t *testing.T) {
+// The owner-only list is exactly the one ADR-050 records: nothing more is
+// closed, and nothing on it was dropped.
+func TestTheOwnerOnlyListIsTheOneTheADRRecords(t *testing.T) {
 	want := []string{
-		// closed before the ruling
 		"POST /api/controller/sign",
 		"POST /api/controller/front-end-for",
 		"DELETE /api/controller/front-end-for",
 		"POST /api/machines/owner/sign",
 		"POST /api/machines/owner-identity",
+		"POST /api/pairing/adopt",
 		"POST /api/store/event",
 		"POST /api/store/identity",
 		"POST /api/contacts",
@@ -154,27 +159,38 @@ func TestTheOwnerOnlyListIsTheRuling(t *testing.T) {
 		"POST /api/ask/create",
 		"DELETE /api/contacts/{aid}",
 		"POST /api/controllers",
-		// added by the ruling
+		"DELETE /api/controllers/{aid}",
 		"POST /api/rotation",
 		"POST /api/recovery/root-aid-rotation",
 		"POST /api/keystore/root-seed",
 		"POST /api/reset",
 		"POST /api/inception",
+		"POST /api/hybrid-inception",
+		"POST /api/messaging-keys/prepare",
+		"POST /api/owners/ceremony",
+		"DELETE /api/owners/ceremony",
+		"POST /api/interact",
+		"POST /api/session/grant",
+		"POST /api/recovery/verify",
 		"POST /api/recovery/start",
 		"POST /api/recovery/sessions/{id}/activate",
 		"POST /api/recovery/sessions/{id}/rotation",
 		"POST /api/recovery/sessions/{id}/cancel",
 		"PUT /api/recovery/who-holds-this",
 		"PUT /api/recovery/duress-policy",
+		"POST /api/recovery/holdings",
+		"POST /api/recovery/holdings/approve",
+		"POST /api/recovery/holdings/stop",
 		"POST /api/signer/invites",
 		"POST /api/signer/invites/{token}/redeem",
-		"DELETE /api/controllers/{aid}",
 		"POST /api/recovery/retrieve",
 		"POST /api/backup/export",
 		"POST /api/backup/pull/{destID}",
 		"POST /api/sign",
 		"POST /api/events/signature",
 		"POST /api/signing-requests/{id}/fulfil",
+		"POST /api/signing-requests/sign-for-another",
+		"POST /api/signing-requests/adopt",
 	}
 	have := make([]string, 0, len(controllerOwnerOnly))
 	for route, why := range controllerOwnerOnly {
@@ -186,7 +202,7 @@ func TestTheOwnerOnlyListIsTheRuling(t *testing.T) {
 	sort.Strings(want)
 	sort.Strings(have)
 	if strings.Join(want, "\n") != strings.Join(have, "\n") {
-		t.Fatalf("the owner-only list is not the ruling.\nwant:\n%s\nhave:\n%s",
+		t.Fatalf("the owner-only list is not the one ADR-050 records.\nwant:\n%s\nhave:\n%s",
 			strings.Join(want, "\n"), strings.Join(have, "\n"))
 	}
 }
@@ -273,5 +289,69 @@ func TestWhatAControllerMakesIsRecordedAgainstIt(t *testing.T) {
 	}
 	if e, _ := w.s.assetHandler.Store.GetEmployee("EMember"); e.ApprovedByController != w.ctlAID {
 		t.Fatalf("a member's approval does not record the machine that gave it: %+v", e)
+	}
+}
+
+// Every action closed to a browser session has had a decision made about it
+// for a controller too: owner-only, or named here as deliberately open with the
+// reason. Adding a route to sessionForbidden and to neither fails here, which
+// is the only thing that would catch it.
+func TestEveryActionClosedToASessionWasDecidedForAControllerToo(t *testing.T) {
+	// Closed to a session because what they make outlives the session; a
+	// controller is hardware the owner authorised, and what it makes is
+	// recorded against it (ADR-050).
+	deliberatelyOpen := map[string]string{
+		"POST /api/mcp/agents":                           "creating an AI agent is the application's work, recorded against the controller",
+		"PATCH /api/mcp/agents/{id}":                     "configuring an AI agent is the application's work",
+		"PUT /api/mcp/agents/{id}/capabilities":          "setting an AI agent's capabilities is the application's work",
+		"POST /api/mcp/agents/{id}/body-enrolment":       "an enrolment string is the first step of a body the person still approves",
+		"POST /api/mcp/agents/{id}/bodies/{bid}/approve": "approving a body is recorded against the machine that decided",
+		"POST /api/mcp/agents/{id}/bodies/{bid}/reject":  "rejecting a body grants nothing",
+		"POST /api/mcp/tokens":                           "minting a token is the application's work, recorded against the controller",
+		"POST /api/employees/{aid}/approve":              "approving a member is the organisation's work, recorded against the controller",
+		"POST /api/employees/{aid}/revoke":               "revoking a member is the organisation's work",
+		// The owner's own front end must be able to show them a recovery of
+		// their identity is running; that is who the warning is for.
+		"GET /api/recovery/sessions":      "the owner is told a recovery of their identity is running",
+		"GET /api/recovery/sessions/{id}": "the owner is told about a recovery of their identity",
+	}
+	for route := range sessionForbidden {
+		_, closed := controllerOwnerOnly[route]
+		_, open := deliberatelyOpen[route]
+		switch {
+		case closed && open:
+			t.Errorf("%s is both owner-only and named as open to a controller", route)
+		case !closed && !open:
+			t.Errorf("%s is closed to a browser session and has no decision for a controller: "+
+				"make it owner-only, or name it here as deliberately open and say why", route)
+		}
+	}
+	for route := range deliberatelyOpen {
+		if _, ok := sessionForbidden[route]; !ok {
+			t.Errorf("%s is named as deliberately open but is no longer closed to a session, "+
+				"so this entry decides nothing", route)
+		}
+	}
+}
+
+// A vouched statement's level is derived from its score, so the two cannot
+// disagree: a statement naming the strongest level with a score of 50 is
+// recorded at the level 50 falls in.
+func TestAVouchedLevelIsDerivedFromItsScore(t *testing.T) {
+	s := newAuthTestServer(t)
+	aid, _ := anAuthorisedMachine(t, s, GradeEnrolled)
+	at := time.Now().UTC()
+	req := remote("GET", "/api/profile", "")
+	req.Header.Set(headerControllerAuthLevel, string(authprovider.LevelHigh))
+	req.Header.Set(headerControllerAuthAt, at.Format(time.RFC3339))
+	req.Header.Set(headerControllerAuthScore, "50")
+	req.Header.Set(headerAuthLevelVouchedBy, theRootDeviceVouches(t, aid, authprovider.LevelHigh, at, 50))
+
+	got := s.theAuthenticationSomebodyVouchedFor(req, aid, at)
+	if !got.Measured || got.Score != 50 {
+		t.Fatalf("the vouched statement was not read: %+v", got)
+	}
+	if got.Level != authprovider.LevelForScore(50) {
+		t.Fatalf("the statement's level %q disagrees with its score of 50", got.Level)
 	}
 }
