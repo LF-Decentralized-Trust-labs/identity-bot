@@ -145,7 +145,7 @@ carries a per-application list, so a different binary running as the same person
 is prompted or refused; a file has no such gate. The key still cannot be carried
 to another machine — it is useless off that processor — but its use can be
 borrowed by code already running as that person. Local misuse is governed by the
-authentication level a controller must reach, not by key custody.
+check a controller's request passes (ADR-050), not by key custody.
 
 **P-256 is the machine's key, not a gate in front of an Ed25519 one.** This ADR
 frames P-256 as a hardware gate protecting an Ed25519 identity. For a machine's

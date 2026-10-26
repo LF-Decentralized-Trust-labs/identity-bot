@@ -1,7 +1,8 @@
 # ADR-044 — An authorized controller does the application's work; the owner key does the root of trust
 
-**Status:** Accepted
+**Status:** Accepted, amended by ADR-050
 **Date:** 2026-10-18
+**Amended by:** ADR-050 (One check for every action a controller or an AI agent takes, 2026-10-26)
 **Relates to:** ADR-042 (How an agent is reached, and who may manage it), ADR-038 (Who claims a machine is not who owns what it founds), ADR-027 (Hardware-gated signing-key custody)
 
 ## Context
@@ -59,6 +60,12 @@ capabilities — importing a capability pack — remains owner-only**, because a
 declares the host-control and egress properties the gateway reads when it authorizes
 an invocation; importing one writes authorization-decision state, so it belongs with
 the root of trust.
+
+*Amended by ADR-050 (2026-10-26):* the paragraph below no longer holds. No action
+is raised to a named level. A controller may do every action except an owner-only
+list, and every other action passes one score-based check (default minimum 80)
+shared with AI agents' capability calls; development and production authorise
+identically.
 
 **Minting a durable credential is raised to the verified level.** A few of these
 application operations create a credential that outlives the request that made it:
