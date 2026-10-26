@@ -118,6 +118,16 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if by := madeByController(r); by != "" {
+		agent.MadeByController = by
+		if err := s.assetHandler.Store.UpsertAsset(*agent); err != nil {
+			if derr := s.assetHandler.Store.DeleteAsset(agent.ID); derr != nil {
+				log.Printf("[mcp] agent %s: which machine made it could not be recorded, and it could not be removed: %v", agent.PairwiseAID, derr)
+			}
+			jsonError(w, "the AI agent was not created: which machine made it could not be recorded: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
 
 	// Endow the agent with a capability-grant credential: an ACDC the owner issues
 	// to the agent's AID that formalizes the ceiling. The endpoint verifies it at
@@ -168,6 +178,8 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		AssetID:      agent.ID,
 		GrantSAID:    grantSAID,
 		GrantPending: grantPending,
+
+		MadeByController: agent.MadeByController,
 	})
 	if err := s.saveMCPTokens(toks); err != nil {
 		jsonError(w, "failed to persist agent token", http.StatusInternalServerError)

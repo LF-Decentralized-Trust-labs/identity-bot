@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -220,5 +221,57 @@ func TestEveryControllerRuleNamesARouteThisAgentServes(t *testing.T) {
 		if !served[route] {
 			t.Errorf("%s has a minimum score but this Identity Agent serves no such route", route)
 		}
+	}
+}
+
+// What a controller makes is recorded against it, because it keeps working
+// after the controller's grant is revoked or expires: an AI agent and its
+// token, a token minted on its own, and a member's approval.
+func TestWhatAControllerMakesIsRecordedAgainstIt(t *testing.T) {
+	w := newTalkWorld(t)
+	me := w.s.thisIdentityAgentsIdentifier()
+	send := func(method, path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := asThatMachineTo(t, me, w.ctlAID, method, path, body, w.ctlSeed, "", time.Time{})
+		rec := httptest.NewRecorder()
+		w.s.router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	rec := send("POST", "/api/mcp/agents", `{"name":"Made by a machine","capabilities":["`+capabilityMessageAgent+`"]}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("provisioning: %d %s", rec.Code, rec.Body.String())
+	}
+	var made struct {
+		AssetID string `json:"asset_id"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &made)
+	if a, ok := w.s.assetHandler.Store.GetAsset(made.AssetID); !ok || a.MadeByController != w.ctlAID {
+		t.Fatalf("the AI agent does not record the machine that made it: %+v", a)
+	}
+
+	rec = send("POST", "/api/mcp/tokens", `{"name":"machine-token","scopes":["`+capabilityMessageAgent+`"]}`)
+	if rec.Code != http.StatusOK && rec.Code != http.StatusCreated {
+		t.Fatalf("minting: %d %s", rec.Code, rec.Body.String())
+	}
+	byName := map[string]string{}
+	for _, tok := range w.s.loadMCPTokens() {
+		byName[tok.Name] = tok.MadeByController
+	}
+	if byName["machine-token"] != w.ctlAID || byName["Made by a machine"] != w.ctlAID {
+		t.Fatalf("a token does not record the machine that minted it: %v", byName)
+	}
+
+	if err := w.s.assetHandler.Store.UpsertEmployee(asset.Employee{
+		PairwiseAID: "EMember", Name: "Sam", Role: "Staff", Status: "pending",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rec = send("POST", "/api/employees/EMember/approve", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("approving: %d %s", rec.Code, rec.Body.String())
+	}
+	if e, _ := w.s.assetHandler.Store.GetEmployee("EMember"); e.ApprovedByController != w.ctlAID {
+		t.Fatalf("a member's approval does not record the machine that gave it: %+v", e)
 	}
 }

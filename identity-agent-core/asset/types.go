@@ -89,8 +89,12 @@ type Asset struct {
 	// grant, kept for the same reason: re-issuing the grant must carry them
 	// forward, because a grant re-issued without them is a wider grant.
 	GrantConstraints map[string]interface{} `json:"grant_constraints,omitempty"`
-	CreatedAt        time.Time              `json:"created_at"`
-	UpdatedAt        time.Time              `json:"updated_at"`
+	// MadeByController is the machine that created this asset, when a
+	// controller did rather than the owner. The asset keeps working after that
+	// machine's grant ends, so it is recorded here for whoever revokes it.
+	MadeByController string    `json:"made_by_controller,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // AgentConfig captures what an ai_agent is and how it operates. The identity + grant
@@ -198,6 +202,10 @@ type Employee struct {
 	InviteToken     string `json:"invite_token,omitempty"`
 	CredentialSAID  string `json:"credential_said,omitempty"`
 	OOBI            string `json:"oobi,omitempty"`
+	// ApprovedByController is the machine that approved this member, when a
+	// controller did rather than the owner. The approval outlives that
+	// machine's grant, so it is recorded for whoever revokes the machine.
+	ApprovedByController string `json:"approved_by_controller,omitempty"`
 	// IsSigner and the vouch: set when this member is a founding signer of the
 	// organisation.
 	// VouchSig is the individual's signature over {signer_aid, org_aid} — the

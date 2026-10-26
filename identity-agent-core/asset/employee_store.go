@@ -86,6 +86,16 @@ func (s *Store) ListEmployees() []Employee {
 // SetEmployeeStatus transitions an employee's lifecycle and optionally records
 // the issued credential SAID (on approval). Returns the updated Employee.
 func (s *Store) SetEmployeeStatus(pairwiseAID, status, credentialSAID string) (Employee, bool, error) {
+	return s.setEmployeeStatus(pairwiseAID, status, credentialSAID, nil)
+}
+
+// ApproveEmployee makes a member active and records which machine approved
+// them: a controller's identifier, or "" for the owner.
+func (s *Store) ApproveEmployee(pairwiseAID, byController string) (Employee, bool, error) {
+	return s.setEmployeeStatus(pairwiseAID, "active", "", &byController)
+}
+
+func (s *Store) setEmployeeStatus(pairwiseAID, status, credentialSAID string, approvedBy *string) (Employee, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e, ok := s.employees[pairwiseAID]
@@ -95,6 +105,9 @@ func (s *Store) SetEmployeeStatus(pairwiseAID, status, credentialSAID string) (E
 	e.Status = status
 	if credentialSAID != "" {
 		e.CredentialSAID = credentialSAID
+	}
+	if approvedBy != nil {
+		e.ApprovedByController = *approvedBy
 	}
 	e.UpdatedAt = time.Now().UTC()
 	s.employees[pairwiseAID] = e
