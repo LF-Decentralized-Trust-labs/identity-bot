@@ -66,6 +66,9 @@ type Host struct {
 	// brainName and brainModel are the running brain's, for what the host
 	// reports with each message.
 	brainName, brainModel string
+	// signInWait is how long a run waits for a sign-in whose runs are all in
+	// use.
+	signInWait time.Duration
 	// bodyCredential is this body's credential, once read, for the statements
 	// it signs.
 	bodyCredential string

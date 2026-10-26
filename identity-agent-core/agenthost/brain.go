@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"identity-agent-core/agentmessage"
+	"identity-agent-core/brainsignin"
 	"identity-agent-core/iacrypto"
 )
 
@@ -40,6 +41,10 @@ type Turn struct {
 	ToolsURL, ToolsToken string
 	// Model, when set, names the model to use.
 	Model string
+	// Credentials are the brain's sign-in for this run, borrowed from the
+	// Identity Agent, as variables for the brain's environment and nowhere
+	// else. Empty, the brain uses whatever this machine is signed in with.
+	Credentials []string
 }
 
 // Outcome is what a turn produced.
@@ -85,7 +90,7 @@ type SameUser struct{}
 func (SameUser) Command(ctx context.Context, dir string, env []string, name string, args ...string) (*exec.Cmd, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
-	cmd.Env = append(childenv.Environ(), env...)
+	cmd.Env = withCredentials(childenv.Environ(), env)
 	return cmd, nil
 }
 
@@ -171,6 +176,9 @@ func (ClaudeCode) Name() string { return "claude-code" }
 // Run runs one turn. The prompt goes on stdin, led on the first turn by the
 // instructions — the session keeps them for the turns after — and the tool
 // token reaches the host's MCP server through the environment it inherits.
+//
+// It never passes --bare: bare mode ignores a subscription's sign-in token,
+// which a borrowed Claude sign-in is.
 func (c ClaudeCode) Run(ctx context.Context, t Turn) (Outcome, error) {
 	self, err := executable()
 	if err != nil {
@@ -191,7 +199,7 @@ func (c ClaudeCode) Run(ctx context.Context, t Turn) (Outcome, error) {
 		args = append(args, "--model", t.Model)
 	}
 	prompt := withInstructions(t)
-	out, err := runCLI(ctx, c.runner(), t.Workspace, toolsEnv(t), prompt, c.path(), args...)
+	out, err := runCLI(ctx, c.runner(), t.Workspace, brainEnv(t), prompt, c.path(), args...)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -289,7 +297,7 @@ func (g GrokCLI) Run(ctx context.Context, t Turn) (Outcome, error) {
 	if t.Model != "" {
 		args = append(args, "--model", t.Model)
 	}
-	out, err := runCLI(ctx, g.runner(), t.Workspace, toolsEnv(t), prompt, g.path(), args...)
+	out, err := runCLI(ctx, g.runner(), t.Workspace, brainEnv(t), prompt, g.path(), args...)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -347,15 +355,30 @@ func toolsEnv(t Turn) []string {
 	return []string{envToolsURL + "=" + t.ToolsURL, envToolsToken + "=" + t.ToolsToken}
 }
 
+// brainEnv is a turn's environment for the brain: the host's tools, and the
+// sign-in borrowed for this run, if any.
+func brainEnv(t Turn) []string {
+	return append(toolsEnv(t), t.Credentials...)
+}
+
+// NormaliseBrain is the program that runs a brain, from what the AI agent was
+// created with: a program's own name ("claude-code", "grok"), the name a
+// screen shows ("Claude Code", "Grok CLI"), or the provider its sign-in is for
+// ("anthropic" runs on Claude Code, "xai" on Grok).
+func NormaliseBrain(provider string) string {
+	return brainsignin.Harness(provider)
+}
+
 // BrainFor is the brain an AI agent was created with, by its provider.
 func BrainFor(provider string, r Runner) (Brain, error) {
-	switch provider {
-	case "", "claude-code":
+	switch NormaliseBrain(provider) {
+	case brainsignin.HarnessClaudeCode:
 		return ClaudeCode{Runner: r}, nil
-	case "grok":
+	case brainsignin.HarnessGrok:
 		return GrokCLI{Runner: r}, nil
 	}
-	return nil, fmt.Errorf("this host does not run %q as a brain; it runs claude-code and grok", provider)
+	return nil, fmt.Errorf("this host does not run %q as a brain; it runs Claude Code (an Anthropic key, a Claude "+
+		"subscription or a local model) and Grok (an xAI key)", provider)
 }
 
 // turnTimeout bounds one turn of the brain.
