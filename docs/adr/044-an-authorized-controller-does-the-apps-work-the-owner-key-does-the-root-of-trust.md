@@ -2,7 +2,7 @@
 
 **Status:** Accepted, amended by ADR-050
 **Date:** 2026-10-18
-**Amended by:** ADR-050 (One check for every action a controller or an AI agent takes, 2026-10-26)
+**Amended by:** ADR-050 (One check for a controller's actions and an AI agent's capability calls, 2026-10-26)
 **Relates to:** ADR-042 (How an agent is reached, and who may manage it), ADR-038 (Who claims a machine is not who owns what it founds), ADR-027 (Hardware-gated signing-key custody)
 
 ## Context

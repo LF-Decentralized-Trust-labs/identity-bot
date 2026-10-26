@@ -1,4 +1,4 @@
-# ADR-050 — One check for every action a controller or an AI agent takes
+# ADR-050 — One check for a controller's actions and an AI agent's capability calls
 
 **Status:** Accepted
 **Date:** 2026-10-26
@@ -30,37 +30,54 @@ question: may this person do this action.
 
 **A controller may do every action except an owner-only list.** The owner-only
 actions are done with the owner's keys, on the device holding them, and no score
-opens them to a controller. They are: rotating the identity's keys (directly, as
-a root rotation, or within a recovery), installing a root seed, resetting,
-founding the identity, starting, activating or cancelling a recovery, setting who
-holds a recovery and the duress policy, inviting and redeeming signers, adding or
-removing a controller, retrieving, exporting or pulling back a backup archive,
-signing arbitrary data or an event as the identity, fulfilling a signing
-request, and every write that decides who the owner is (the identity record, key
-events, contact records and the routes that write them, the machine-owner
-identity and its signatures, this computer's enclave signing and which half it
-runs). The list lives in one place, `controllerOwnerOnly` in
+opens them to a controller. They are:
+
+- the root of trust: rotating the identity's keys (directly, as a root rotation,
+  or within a recovery), installing a root seed, resetting, founding the identity
+  (by inception or hybrid inception), preparing the messaging keys an identity
+  commits to, and bringing new owners in;
+- the identity's key log: signing an interaction event, signing for the identity
+  or taking up what its key device signed, fulfilling a signing request, and
+  signing arbitrary data or an event as the identity;
+- recovery: verifying a recovery archive, starting, activating or cancelling a
+  recovery, setting who holds a recovery and the duress policy, and agreeing to
+  hold, approving or giving up a share of somebody else's recovery;
+- backups: retrieving, exporting or pulling back an archive;
+- who may act: inviting and redeeming signers, adding or removing a controller,
+  and approving a browser login;
+- who the owner is: the identity record, key events, contact records and the
+  routes that write them, the machine-owner identity, its signatures and
+  adopting a machine, this computer's enclave signing, and which half this
+  computer runs.
+
+The list lives in one place, `controllerOwnerOnly` in
 `identity-agent-core/server/what_a_controller_may_reach.go`, with a one-line
 reason for each.
 
-**Every other action passes one check, the same for a person at a controller and
-for an AI agent.** `sandbox.MayThisPersonDoThis` asks two questions in order:
+**Every other action a controller takes, and every capability an AI agent
+invokes, passes one check.** `sandbox.MayThisPersonDoThis` asks two questions in
+order:
 
 1. Is this person's identity score (0-100) at least the action's minimum? The
-   minimum is 80 unless the action sets another: a capability by `minimum_score`
-   in its registry record or manifest entry, a controller route in
-   `controllerMinimumScore`. None is set today.
+   minimum is `DefaultMinimumScore` (80) unless the action sets another: a
+   capability by `minimum_score` in its registry record or manifest entry, a
+   controller route in `controllerMinimumScore`. None is set today.
 2. May this person do this action? A placeholder that always says yes until roles
    (owner, admin, employee) are built.
 
 The controller path calls it for every route not on the owner-only list. The
 governance gateway calls it where it authorises a capability invocation, after
-ingress authorisation and before the action is recorded and run.
+ingress authorisation and before the action is recorded and run, and capability
+discovery (the MCP tool list, search and describe) asks it too, so a capability
+the caller would be refused is not offered. An AI agent's other requests — the
+scoped HTTP routes it reaches with its token — are governed by its grant's scopes
+as before and do not pass this check.
 
 **The check compares scores, never named levels.** A badge (green at 80 and
 above, amber 40-79, red below 40) and a level are derived from the score for
 display, and never the other way round, because a badge cannot be turned back
-into a score.
+into a score. A vouched statement's level is derived from its score in the same
+way.
 
 **Until human authentication is built, every person scores 80.** One function,
 `authprovider.UntilHumanAuthenticationIsBuilt`, returns a measured result with
@@ -83,6 +100,18 @@ to it, so start-up grants nothing.
 - A controller can create and manage AI agents, mint their tokens, issue and
   revoke credentials, manage stored keys and backup destinations, and approve
   employees, without a statement nothing can yet produce.
+- A controller can create tokens, AI agents, AI agent bodies and member approvals
+  that keep working after the controller's grant is revoked or expires. Each is
+  recorded against the controller that made it (`made_by_controller` on a token
+  and an AI agent, `approved_by_controller` on a member, `decided_by` on a body).
+  Removing them when the controller is revoked is future work.
+- While the placeholder stands, a controller can avoid a low vouched score by
+  sending no statement at all, and is then judged at 80. A vouched score is
+  meaningful only once real human authentication replaces the placeholder; then
+  a missing statement must count as nothing measured.
+- Removing a machine (`DELETE /api/controllers/{aid}`) is owner-only, so a stolen
+  laptop is removed from the device holding the identity's key, not from another
+  computer.
 - An action can be made harder to reach by setting its minimum above 80; with
   the placeholder in place, that action is closed to everybody without a vouched
   statement that meets it.
