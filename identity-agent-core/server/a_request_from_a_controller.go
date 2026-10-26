@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"identity-agent-core/authprovider"
-	"identity-agent-core/buildmode"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
 )
@@ -110,10 +109,10 @@ func TheControllerThatAsked(r *http.Request) (ControllerGrant, bool) {
 // no machine signed this, and the caller should carry on trying whatever else
 // might stand in for the owner.
 //
-// A machine the owner authorised acts for them on everything except the actions
-// that change who this identity IS. Those are not shut to it — a controller is
-// hardware the owner approved, operated by a person who can be measured — they
-// are RAISED, and the person has to authenticate to the level that action needs.
+// A machine the owner authorised acts for them on everything except the
+// owner-only list, and every action it may do passes the one check shared with
+// AI agents' capability calls: the person's identity score against the action's
+// minimum, then whether they may do it (what_a_controller_may_reach.go).
 func (s *CoreServer) controllerActsForTheOwner(
 	w http.ResponseWriter, r *http.Request, pattern string, next http.Handler,
 ) bool {
@@ -135,12 +134,12 @@ func (s *CoreServer) controllerActsForTheOwner(
 		denyAuthorization(w, err.Error())
 		return true
 	}
-	now := time.Now().UTC()
-	offered := strings.TrimSpace(r.Header.Get(headerControllerAuthLevel)) != "" ||
-		strings.TrimSpace(r.Header.Get(headerAuthLevelVouchedBy)) != ""
-	authenticated = s.whatThisRequestTakesAsMeasured(r, authenticated, offered, buildmode.IsDev(), now)
+	// The same in every build: a vouched statement where a recent one verified,
+	// otherwise the placeholder score every person has until human
+	// authentication is built.
+	authenticated = howSureWeAreItIsThem(authenticated, time.Now().UTC())
 	if ok, why := mayThisControllerDoThis(
-		r.Method, pattern, authenticated, now); !ok {
+		r.Method, pattern, grant.ControllerAID, authenticated); !ok {
 		denyAuthorization(w, "this machine may act for you, but "+why)
 		return true
 	}
@@ -477,13 +476,15 @@ func canonicalControllerRequest(
 //   - the owner's current key as this agent verified it against a key event log,
 //     which is evidence rather than an assertion.
 //
-// Neither present means nobody may speak for this identity, and every raised
-// action stays shut. That is a real configuration rather than a test shape — an
-// identity founded through inception names an owner but seals no key for them,
-// because inception is given the owner's identifier and not their key — so on
-// that agent a controller cannot perform a raised action until the owner's log
-// has been verified. Shut is the right answer while nothing trustworthy says
-// otherwise; the way to open it is to verify the owner's log, not to lower this.
+// Neither present means nobody may speak for this identity: no statement is
+// believed, and every controller is judged on the placeholder score alone. That
+// is a real configuration rather than a test shape — an identity founded
+// through inception names an owner but seals no key for them, because inception
+// is given the owner's identifier and not their key — so on that agent no
+// controller can be vouched above the placeholder until the owner's log has
+// been verified. That is the right answer while nothing trustworthy says
+// otherwise; the way to change it is to verify the owner's log, not to lower
+// this.
 func (s *CoreServer) theKeyEntitledToVouch() (string, error) {
 	// THE LOG DECIDES WHO, AND THE SEALED RECORD ONLY SUPPLIES A KEY FOR THAT
 	// SOMEBODY. Exactly as ownerAuthority does it, and for the same reason.
@@ -493,9 +494,8 @@ func (s *CoreServer) theKeyEntitledToVouch() (string, error) {
 	// inception never anchored was REFUSED for "who is the owner" and ACCEPTED
 	// for "whose statement about an authentication level do I believe". Since
 	// the founding-signer redeem route is public and writes that record, anyone
-	// holding an unredeemed invite could install the key that vouches for every
-	// raised action on the agent — rotation, seed install, signing, archive
-	// retrieval — without ever becoming the owner.
+	// holding an unredeemed invite could install the key that vouches for a
+	// controller's score on the agent without ever becoming the owner.
 	if owner, oerr := s.ownerFromOwnIdentity(s.thisIdentityAgentsIdentifier()); oerr == nil &&
 		owner != "" {
 		// The verified log first, so a rotation is followed. Nothing rewrites

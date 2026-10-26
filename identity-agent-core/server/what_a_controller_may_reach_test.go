@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"identity-agent-core/asset"
 	"identity-agent-core/authprovider"
 	"identity-agent-core/drivers"
 	"identity-agent-core/drivers/driverfake"
@@ -69,20 +68,28 @@ func asThatMachine(t *testing.T, aid, method, path, body string, seed []byte,
 func asThatMachineTo(t *testing.T, target, aid, method, path, body string, seed []byte,
 	level authprovider.Level, measuredAt time.Time) *http.Request {
 	t.Helper()
+	return asThatMachineScored(t, target, aid, method, path, body, seed, level, measuredAt, 80)
+}
+
+// asThatMachineScored is asThatMachineTo with the score the root device
+// vouches for chosen.
+func asThatMachineScored(t *testing.T, target, aid, method, path, body string, seed []byte,
+	level authprovider.Level, measuredAt time.Time, score int) *http.Request {
+	t.Helper()
 	req := remote(method, path, body)
 	stamp := time.Now().UTC().Format(time.RFC3339)
 
 	asserted := authprovider.Unmeasured("")
 	if level != "" {
 		asserted = authprovider.Result{
-			Level: level, Measured: true, At: measuredAt.UTC(), Score: 80,
+			Level: level, Measured: true, At: measuredAt.UTC(), Score: score,
 		}
 		req.Header.Set(headerControllerAuthLevel, string(level))
 		req.Header.Set(headerControllerAuthAt, measuredAt.UTC().Format(time.RFC3339))
-		req.Header.Set(headerControllerAuthScore, "80")
+		req.Header.Set(headerControllerAuthScore, fmt.Sprint(score))
 		// Vouched for by the root-identity device. Without this the level is the
 		// machine scoring itself, which the agent refuses.
-		if vouch := theRootDeviceVouches(t, aid, level, measuredAt, 80); vouch != "" {
+		if vouch := theRootDeviceVouches(t, aid, level, measuredAt, score); vouch != "" {
 			req.Header.Set(headerAuthLevelVouchedBy, vouch)
 		}
 	}
@@ -124,85 +131,16 @@ func TestARouteNobodyNamedIsStillReachable(t *testing.T) {
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
 	r := s.buildRouter("")
 
-	// A route with no entry in controllerNeedsLevel.
+	// A route that is not owner-only.
 	const ordinary = "GET /api/contacts"
-	if _, raised := theLevelThisActionNeeds("GET", "/api/contacts"); raised {
-		t.Skip("this route has since been raised; the property is covered elsewhere")
+	if _, closed := isOwnerOnly("GET", "/api/contacts"); closed {
+		t.Skip("this route has since been made owner-only; the property is covered elsewhere")
 	}
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, asThatMachine(t, aid, "GET", "/api/contacts", "", seed, "", time.Time{}))
 	if w.Code == http.StatusForbidden {
 		t.Fatalf("%s was refused, so the class is a permit-list rather than a deny-list: %s",
 			ordinary, w.Body.String())
-	}
-}
-
-// A raised action is not reachable on the grant alone. Nothing measured means
-// nothing measured — it must not fall through as a weak-but-present level.
-func TestARaisedActionNeedsThePersonMeasured(t *testing.T) {
-	s := newAuthTestServer(t)
-	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
-	r := s.buildRouter("")
-
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, asThatMachine(t, aid, "POST", "/api/rotation", `{}`, seed, "", time.Time{}))
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("rotating keys was allowed on the authorisation alone: %d %s",
-			w.Code, w.Body.String())
-	}
-	if !strings.Contains(w.Body.String(), "authenticated") {
-		t.Errorf("the refusal does not say what would let them through: %s", w.Body.String())
-	}
-}
-
-// The point of Rob's ruling: rotation IS reachable from a controller, at a
-// higher level. If it were simply forbidden, an owner whose key-holding device
-// was stolen could never rotate, and the thief would keep the identity.
-func TestRotationIsReachableWhenThePersonIsStronglyAuthenticated(t *testing.T) {
-	s := newAuthTestServer(t)
-	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
-	r := s.buildRouter("")
-
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, asThatMachine(t, aid, "POST", "/api/rotation", `{}`, seed,
-		authprovider.LevelHigh, time.Now()))
-	if w.Code == http.StatusForbidden {
-		t.Fatalf("a strongly authenticated person could not rotate from their own "+
-			"machine, so a stolen key device would mean the identity can never be "+
-			"rotated: %s", w.Body.String())
-	}
-}
-
-// A weak level does not clear a strong requirement.
-func TestAWeakLevelDoesNotClearARaisedAction(t *testing.T) {
-	s := newAuthTestServer(t)
-	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
-	r := s.buildRouter("")
-
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, asThatMachine(t, aid, "POST", "/api/rotation", `{}`, seed,
-		authprovider.LevelBasic, time.Now()))
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("a self-asserted identity cleared a gate needing the strongest check: %d", w.Code)
-	}
-}
-
-// An authentication is a statement about a moment. A machine authorised for
-// months would otherwise carry one measurement forever.
-func TestAStaleMeasurementDoesNotClearARaisedAction(t *testing.T) {
-	s := newAuthTestServer(t)
-	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
-	r := s.buildRouter("")
-
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, asThatMachine(t, aid, "POST", "/api/rotation", `{}`, seed,
-		authprovider.LevelHigh, time.Now().Add(-2*controllerAuthenticationFreshness)))
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("a measurement from %s ago cleared a raised action: %d",
-			2*controllerAuthenticationFreshness, w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "too old") {
-		t.Errorf("the refusal does not say the check was stale: %s", w.Body.String())
 	}
 }
 
@@ -214,7 +152,7 @@ func TestRaisingTheLevelInFlightIsRefused(t *testing.T) {
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
 	r := s.buildRouter("")
 
-	req := asThatMachine(t, aid, "POST", "/api/rotation", `{}`, seed,
+	req := asThatMachine(t, aid, "GET", "/api/profile", "", seed,
 		authprovider.LevelBasic, time.Now())
 	req.Header.Set(headerControllerAuthLevel, string(authprovider.LevelHigh))
 
@@ -291,58 +229,6 @@ func TestASignatureFromAnotherKeyIsNotThatMachine(t *testing.T) {
 	}
 }
 
-// A typo in the table must not silently open a gate. An entry naming a level
-// this package does not define is treated as the strongest, not as absent.
-func TestAnUnknownRequirementBecomesTheStrongest(t *testing.T) {
-	req, raised := theLevelThisActionNeeds("POST", "/api/rotation")
-	if !raised || req.Level != authprovider.LevelHigh {
-		t.Fatalf("rotation is not raised to the strongest level: %+v", req)
-	}
-
-	// Simulate the typo directly, since the table itself is correct.
-	const typo = "POST /api/some-raised-thing"
-	controllerNeedsLevel[typo] = controllerRequirement{Level: "hgih", Why: "a typo"}
-	t.Cleanup(func() { delete(controllerNeedsLevel, typo) })
-
-	got, raised := theLevelThisActionNeeds("POST", "/api/some-raised-thing")
-	if !raised {
-		t.Fatal("a mistyped requirement stopped being a requirement at all")
-	}
-	if got.Level != authprovider.LevelHigh {
-		t.Fatalf("a mistyped requirement became %q, so the gate is weaker than "+
-			"intended rather than louder", got.Level)
-	}
-}
-
-// Every action this identity's shape depends on is raised. Named explicitly so
-// that adding a route which replaces keys, hands back an archive, or decides who
-// may act, and forgetting to raise it, fails here rather than in the field.
-func TestTheActionsThatChangeTheIdentityAreAllRaised(t *testing.T) {
-	for _, route := range []string{
-		"POST /api/keystore/root-seed",
-		"POST /api/rotation",
-		"POST /api/reset",
-		"POST /api/recovery/root-aid-rotation",
-		"POST /api/recovery/retrieve",
-		"PUT /api/recovery/duress-policy",
-		"POST /api/controllers",
-	} {
-		parts := strings.SplitN(route, " ", 2)
-		req, raised := theLevelThisActionNeeds(parts[0], parts[1])
-		if !raised {
-			t.Errorf("%s is reachable by any authorised machine", route)
-			continue
-		}
-		if !req.Level.AtLeast(authprovider.LevelHigh) {
-			t.Errorf("%s needs only %q", route, req.Level)
-		}
-		if req.Why == "" {
-			t.Errorf("%s is raised without saying why, so somebody stopped by it "+
-				"learns nothing", route)
-		}
-	}
-}
-
 // A controller cannot enrol another controller AT ANY LEVEL, including the
 // strongest one it could ever present.
 //
@@ -374,47 +260,9 @@ func TestNoLevelLetsAControllerEnrolAnotherController(t *testing.T) {
 		}
 	}
 
-	// And it is closed rather than merely very high, so adding a stronger level
-	// later cannot open it by accident.
-	req, raised := theLevelThisActionNeeds("POST", "/api/controllers")
-	if !raised || !req.Closed {
-		t.Fatalf("enrolling is not closed to controllers: %+v", req)
-	}
-}
-
-// Reading the list is raised: it hands over every machine that may act for this
-// identity, its label and its key — a map of the owner's devices that a machine
-// somebody borrowed for an afternoon should not leave with.
-func TestListingEveryMachineIsRaised(t *testing.T) {
-	s := newAuthTestServer(t)
-	aid, seed := anAuthorisedMachine(t, s, GradeScoped)
-	r := s.buildRouter("")
-
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, asThatMachine(t, aid, "GET", "/api/controllers", "", seed, "", time.Time{}))
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("a borrowed machine with nothing measured listed every controller, "+
-			"its label and its key: %d %s", w.Code, w.Body.String())
-	}
-}
-
-// A closed action stays closed even if its level entry is mistyped, because the
-// two are independent — a typo must not turn "never from here" into "prove more".
-func TestAMistypedLevelDoesNotOpenAClosedAction(t *testing.T) {
-	const typo = "POST /api/some-closed-thing"
-	controllerNeedsLevel[typo] = controllerRequirement{
-		Closed: neverByAController, Level: "hgih", Why: "a typo",
-	}
-	t.Cleanup(func() { delete(controllerNeedsLevel, typo) })
-
-	req, raised := theLevelThisActionNeeds("POST", "/api/some-closed-thing")
-	if !raised || !req.Closed {
-		t.Fatalf("a mistyped level reopened a closed action: %+v", req)
-	}
-	if ok, _ := mayThisControllerDoThis("POST", "/api/some-closed-thing",
-		authprovider.Result{Level: authprovider.LevelHigh, Measured: true,
-			At: time.Now().UTC()}, time.Now().UTC()); ok {
-		t.Fatal("a closed action was performed by presenting the strongest level")
+	// And it is owner-only rather than a very high minimum, so no score opens it.
+	if _, closed := isOwnerOnly("POST", "/api/controllers"); !closed {
+		t.Fatal("enrolling is not owner-only")
 	}
 }
 
@@ -468,60 +316,6 @@ func TestWhatTheMachineDidIsAttributableToIt(t *testing.T) {
 	}
 }
 
-// The two lists must not drift apart.
-//
-// sessionForbidden already names the actions a browser session may not perform.
-// A controller is trusted further, so it is not the same list — but an action
-// dangerous enough to be closed to a session is one somebody should have made a
-// DECISION about here, rather than left reachable by forgetting.
-//
-// So every entry there is either raised here, or named below as deliberately
-// left at the default. Adding a route to sessionForbidden and not to one of
-// those two fails this test, which is the only thing that would catch it.
-func TestEveryActionClosedToASessionWasDecidedForAControllerToo(t *testing.T) {
-	// Reachable by any authorised machine, on purpose. These are the owner's own
-	// decisions about their own machine, or things their front end must be able
-	// to show them — a controller that could not do them would not be a front
-	// end.
-	deliberatelyOrdinary := map[string]string{
-		"POST /api/recovery/holdings": "agreeing to hold part of somebody else's recovery " +
-			"is this owner's decision about their own machine, and changes nothing about this identity",
-		"POST /api/recovery/holdings/approve": "approving somebody else's recovery is a decision " +
-			"this owner makes for other people, not a change to their own identity",
-		"POST /api/recovery/holdings/stop": "giving up a share somebody else relies on is this " +
-			"owner's decision about their own machine",
-		"GET /api/recovery/sessions": "the owner's own front end must be able to show them that " +
-			"a recovery of their identity is running — that is who the warning is for",
-		"GET /api/recovery/sessions/{id}": "the same: this is the owner being told about their own identity",
-	}
-
-	for route := range sessionForbidden {
-		parts := strings.SplitN(route, " ", 2)
-		if len(parts) != 2 {
-			t.Errorf("%q is not a METHOD /pattern key", route)
-			continue
-		}
-		if _, raised := theLevelThisActionNeeds(parts[0], parts[1]); raised {
-			continue
-		}
-		if _, deliberate := deliberatelyOrdinary[route]; deliberate {
-			continue
-		}
-		t.Errorf("%s is closed to a browser session but reachable by any authorised "+
-			"machine with no extra check. Either raise it in controllerNeedsLevel, or "+
-			"name it in this test as deliberately ordinary and say why", route)
-	}
-
-	// The reverse: an entry here that no longer names a real route is a rule
-	// guarding nothing, and it would sit looking like protection.
-	for route := range deliberatelyOrdinary {
-		if _, ok := sessionForbidden[route]; !ok {
-			t.Errorf("%s is named as deliberately ordinary but is no longer closed to "+
-				"a session, so this exemption guards nothing", route)
-		}
-	}
-}
-
 // Being admitted is not being granted capability scopes.
 //
 // A controller reaches capability routes because it acts for the owner, but it
@@ -559,38 +353,6 @@ func TestAnOversizedBodyIsRefusedRatherThanTruncated(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "larger than") {
 		t.Fatalf("refused for the wrong reason: %v", err)
-	}
-}
-
-// The routes that hand out or redirect this identity's archives are raised.
-//
-// Found by walking the router rather than by reading the list: three doors led
-// to the same room and only the one with "recovery" in its name had been raised.
-func TestEveryDoorToAnArchiveIsRaised(t *testing.T) {
-	for _, route := range []string{
-		"POST /api/recovery/retrieve",
-		"POST /api/backup/export",
-		"POST /api/backup/pull/{destID}",
-		"POST /api/sign",
-	} {
-		parts := strings.SplitN(route, " ", 2)
-		req, raised := theLevelThisActionNeeds(parts[0], parts[1])
-		if !raised || !req.Level.AtLeast(authprovider.LevelHigh) {
-			t.Errorf("%s is reachable without the strongest check (raised=%v level=%q)",
-				route, raised, req.Level)
-		}
-	}
-	// Where archives are SENT is raised too — redirecting it is a quiet way to
-	// be handed every future copy.
-	for _, route := range []string{
-		"PUT /api/backup/config",
-		"POST /api/backup/destinations",
-		"POST /api/backup/credentials",
-	} {
-		parts := strings.SplitN(route, " ", 2)
-		if _, raised := theLevelThisActionNeeds(parts[0], parts[1]); !raised {
-			t.Errorf("%s is reachable by any authorised machine", route)
-		}
 	}
 }
 
@@ -638,15 +400,15 @@ func TestAMachineMayNotScoreItself(t *testing.T) {
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
 	r := s.buildRouter("")
 
-	req := asThatMachine(t, aid, "POST", "/api/rotation", `{}`, seed,
+	req := asThatMachine(t, aid, "GET", "/api/profile", "", seed,
 		authprovider.LevelHigh, time.Now())
 	// Strip what the root-identity device said, leaving the machine's own claim.
 	req.Header.Del(headerAuthLevelVouchedBy)
 	// Re-sign, so this fails on the missing voucher rather than on the signature.
 	stamp := req.Header.Get(headerControllerTimestamp)
-	sig, err := login.SignString(canonicalControllerRequest(aid, "", "POST", "/api/rotation", stamp,
+	sig, err := login.SignString(canonicalControllerRequest(aid, "", "GET", "/api/profile", stamp,
 		authprovider.Result{Level: authprovider.LevelHigh, Measured: true,
-			At: time.Now().UTC(), Score: 80}, []byte(`{}`)), seed)
+			At: time.Now().UTC(), Score: 80}, []byte("")), seed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -666,7 +428,7 @@ func TestOneMachinesLevelCannotBeRelayedByAnother(t *testing.T) {
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
 	r := s.buildRouter("")
 
-	req := asThatMachine(t, aid, "POST", "/api/rotation", `{}`, seed,
+	req := asThatMachine(t, aid, "GET", "/api/profile", "", seed,
 		authprovider.LevelHigh, time.Now())
 	// A perfectly good statement — about a different machine.
 	req.Header.Set(headerAuthLevelVouchedBy,
@@ -720,10 +482,9 @@ func TestAControllerCannotInstallTheKeyThatVouchesForIt(t *testing.T) {
 		{"POST", "/api/contacts/resolve", "/api/contacts/resolve"},
 		{"DELETE", "/api/contacts/BSomebody", "/api/contacts/{aid}"},
 	} {
-		req, raised := theLevelThisActionNeeds(route.method, route.pattern)
-		if !raised || !req.Closed {
-			t.Errorf("%s %s is not closed to a controller, so it can rewrite who the "+
-				"owner is: %+v", route.method, route.pattern, req)
+		if _, closed := isOwnerOnly(route.method, route.pattern); !closed {
+			t.Errorf("%s %s is not owner-only, so a controller can rewrite who the "+
+				"owner is", route.method, route.pattern)
 		}
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, asThatMachine(t, aid, route.method, route.path,
@@ -781,46 +542,6 @@ func TestAVoucherIsOnlyBelievedFromTheSealedRecord(t *testing.T) {
 	}
 }
 
-// Every raised gate names a route this agent actually serves.
-//
-// The map is keyed by hand-typed strings, and a key that matches no route
-// guards nothing while looking exactly like protection. Four did: the employee
-// and signer-invite entries name routes this router does not mount.
-//
-// This is the discipline already written for the controller routes themselves —
-// "a hand-typed string that does not match it would pass while proving nothing"
-// — applied to the other thirty-odd, which had been keyed by hand with no walk.
-// The tests that check specific entries compare the map against literals copied
-// out of the map, so a typo passes every one of them.
-func TestEveryRaisedGateNamesARouteThisAgentServes(t *testing.T) {
-	s := newAuthTestServer(t)
-	// mountEmployeeRoutes and mountSignerRoutes return early on a nil handler,
-	// so a bare server does not mount the very routes some of these gates guard.
-	// Without this the test reports four gates as dead that are real — which is
-	// what a reviewer concluded from the bare fixture.
-	ah, err := asset.NewHandler(s.DataDir, nil)
-	if err != nil {
-		t.Fatalf("asset handler: %v", err)
-	}
-	s.assetHandler = ah
-
-	served := map[string]bool{}
-	if werr := chi.Walk(s.buildRouter(""),
-		func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
-			served[method+" "+route] = true
-			return nil
-		}); werr != nil {
-		t.Fatalf("walking the router: %v", werr)
-	}
-
-	for gate := range controllerNeedsLevel {
-		if !served[gate] {
-			t.Errorf("%s is raised but this agent serves no such route, so the gate "+
-				"guards nothing while reading as protection", gate)
-		}
-	}
-}
-
 // The reverse of the walk above: every owner-class route this agent serves has
 // had a DECISION made about it — permitted, raised, or closed.
 //
@@ -869,9 +590,8 @@ func TestEveryOwnerRouteHasHadADecisionMadeAboutIt(t *testing.T) {
 		"POST /api/controller/sign",
 	} {
 		parts := strings.SplitN(mustBeClosed, " ", 2)
-		req, raised := theLevelThisActionNeeds(parts[0], parts[1])
-		if !raised || !req.Closed {
-			t.Errorf("%s is not closed to a controller: %+v", mustBeClosed, req)
+		if _, closed := isOwnerOnly(parts[0], parts[1]); !closed {
+			t.Errorf("%s is not owner-only", mustBeClosed)
 		}
 	}
 }
@@ -912,10 +632,9 @@ func TestTheLessObviousDoorsToAContactRecordAreClosedToo(t *testing.T) {
 	r := s.buildRouter("")
 
 	for _, path := range []string{"/api/scan/execute", "/api/ask/create"} {
-		req, raised := theLevelThisActionNeeds("POST", path)
-		if !raised || !req.Closed {
-			t.Errorf("POST %s is not closed, and it can write the record the owner's "+
-				"key is read from: %+v", path, req)
+		if _, closed := isOwnerOnly("POST", path); !closed {
+			t.Errorf("POST %s is not owner-only, and it can write the record the "+
+				"owner's key is read from", path)
 		}
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, asThatMachine(t, aid, "POST", path, `{}`, seed,

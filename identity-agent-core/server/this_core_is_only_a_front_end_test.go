@@ -342,8 +342,7 @@ func TestSettingWhichHalfAComputerRunsIsNotReachableFromElsewhere(t *testing.T) 
 		"POST /api/controller/front-end-for",
 		"DELETE /api/controller/front-end-for",
 	} {
-		req, ok := controllerNeedsLevel[route]
-		if !ok || !req.Closed {
+		if _, ok := isOwnerOnly(strings.SplitN(route, " ", 2)[0], strings.SplitN(route, " ", 2)[1]); !ok {
 			t.Errorf("%s is reachable by a machine acting for somebody, so it could "+
 				"flip that gate on a computer it is not sitting at", route)
 		}
@@ -353,11 +352,10 @@ func TestSettingWhichHalfAComputerRunsIsNotReachableFromElsewhere(t *testing.T) 
 		}
 	}
 
-	// Reading it is deliberately open at a level, not closed: a machine acting
-	// for somebody may reasonably ask which half it is talking to.
-	if req, ok := controllerNeedsLevel["GET /api/controller/front-end-for"]; !ok || req.Closed {
-		t.Error("reading which half this computer runs should be raised rather than " +
-			"closed, and should not be silent")
+	// Reading it is deliberately open: a machine acting for somebody may
+	// reasonably ask which half it is talking to.
+	if _, closed := isOwnerOnly("GET", "/api/controller/front-end-for"); closed {
+		t.Error("reading which half this computer runs should be open to a controller")
 	}
 }
 

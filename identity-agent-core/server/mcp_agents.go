@@ -314,9 +314,9 @@ func (s *CoreServer) handleUpdateAgentConfig(w http.ResponseWriter, r *http.Requ
 // a point in time. Editing one in place would make the audit trail claim the owner
 // granted something they had not yet decided to grant.
 func (s *CoreServer) handleSetAgentCapabilities(w http.ResponseWriter, r *http.Request) {
-	// App operation — authorized by the router-wide authorize gate (owner or the
-	// owner's authorized controller), at the verified level since it re-issues the
-	// agent's capability grant. The ceiling only ever limits: a capability the owner
+	// App operation — authorized by the router-wide authorize gate (owner, or the
+	// owner's authorized controller after the one score-and-permission check).
+	// The ceiling only ever limits: a capability the owner
 	// has not imported and enabled is refused at invoke regardless (defining new
 	// capabilities via pack import stays owner-only), so this grants no authority the
 	// owner has not already approved.

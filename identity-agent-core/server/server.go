@@ -4679,8 +4679,10 @@ func (s *CoreServer) handleDeletePendingRequest(w http.ResponseWriter, r *http.R
 // ready. This makes IssueCredential and Interact work across server restarts
 // without requiring a fresh inception event each session.
 // prepareKeyLogs is what start-up does with the key logs: hand them back to
-// the engine, then give any machine paired before machines were given grants
-// its grant.
+// the engine. It grants nothing. A machine paired before machines were given
+// grants is re-granted by the owner, never automatically (ADR-044, amended
+// 2026-10-22): nothing in the grants file tells such a machine apart from a row
+// somebody added to it.
 func (s *CoreServer) prepareKeyLogs() {
 	s.reloadKeyLogs()
 }
