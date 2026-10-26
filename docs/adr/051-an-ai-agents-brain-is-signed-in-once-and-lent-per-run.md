@@ -1,6 +1,6 @@
 # ADR-051 — An AI agent's brain is signed in once, and lent to a body per run
 
-**Status:** Accepted
+**Status:** Accepted; amended by ADR-052 (2026-10-26): the cap counts an account, a sign-in can be checked before it is kept, and Codex, a Grok subscription, OpenAI and OpenRouter keys and servers that speak OpenAI's format are lent to a body
 **Date:** 2026-10-26
 **Relates to:** ADR-045 (Every asset gets an identity and a grant from one schema template), ADR-046 (A machine becomes an AI agent's body by a person comparing six words), ADR-047 (AI agents talk through the Identity Agent that holds them), ADR-050 (One check for a controller's actions and an AI agent's capability calls)
 
@@ -80,6 +80,9 @@ is:
 The owner may set another number. A body asking past the cap is told the sign-in's runs
 are in use, and waits.
 
+*Amended by ADR-052:* the cap counts every run on the sign-in's account, across
+every AI agent signed in to it.
+
 **Every lend, refusal, return and lapse is written to the signed governance record**,
 as the AI agent, naming the body, and never with the secret. A lapse is written when
 the Identity Agent next lends, renews or takes back a sign-in.
@@ -91,6 +94,9 @@ provider decides the program:
 - Claude Code runs a Claude subscription, an Anthropic key and a local model server;
 - Grok's program runs an xAI key;
 - Codex would run OpenAI.
+
+*Amended by ADR-052:* Codex runs an OpenAI key and a ChatGPT plan, and Grok's
+program also runs an xAI plan, OpenRouter and servers that speak OpenAI's format.
 
 **An AI agent with no sign-in in the vault runs as before**, with whatever its machine's
 brain was signed in with by hand, and the body logs that it did.
@@ -111,14 +117,14 @@ brain was signed in with by hand, and the body logs that it did.
   that kept request, and goes with its grant when the grant is exported. Taking it out
   would break the signature the request is kept to prove, so it is left; the key itself
   should be replaced at its provider.
-- A cap counts runs of one AI agent's sign-in. The same account signed in for two AI
-  agents is two sign-ins, each with its own cap, so the runs on one account can exceed
-  any one cap.
+- ~~A cap counts runs of one AI agent's sign-in.~~ *Amended by ADR-052: a cap
+  counts every run on the sign-in's account, whichever AI agent holds it.*
 - A borrowed sign-in replaces every sign-in in the machine's environment, but not one
-  in the brain user's own configuration: a key helper in Claude Code's settings, or a
-  session from Grok's own sign-in, outranks it.
-- Not yet lent to a body: a Codex sign-in, a Grok subscription, and OpenAI, Google or
-  OpenRouter keys. The programs that run them need either a sign-in file rather than an
-  environment variable, or configuration not yet written.
-- Signing a subscription in from a front end, without a terminal, and checking a
-  sign-in works with a test call when it is made, are not yet built.
+  in the brain user's own configuration: a key helper in Claude Code's settings
+  outranks it. *Amended by ADR-052: Grok and Codex run in a home of the body's
+  making, so their own sign-in and settings no longer do.*
+- ~~Not yet lent to a body: a Codex sign-in, a Grok subscription, and OpenAI, Google or
+  OpenRouter keys.~~ *Amended by ADR-052: all but a Google key are lent.*
+- ~~Checking a sign-in works with a test call when it is made is not yet built.~~
+  *Amended by ADR-052.* Signing a subscription in without a terminal is a front
+  end's work, using the provider's own program on the person's computer.
