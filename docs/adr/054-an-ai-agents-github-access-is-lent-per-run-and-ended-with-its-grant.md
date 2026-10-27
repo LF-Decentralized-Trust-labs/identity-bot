@@ -1,7 +1,7 @@
 # ADR-054 — An AI agent's GitHub access is lent per run, and ended with its grant
 
 **Status:** Accepted
-**Date:** 2026-10-27
+**Date:** 2026-10-26
 **Relates to:** ADR-045 (Every asset gets an identity and a grant from one schema template), ADR-046 (A machine becomes an AI agent's body by a person comparing six words), ADR-050 (One check for a controller's actions and an AI agent's capability calls), ADR-051 (An AI agent's brain is signed in once, and lent to a body per run), ADR-052 (A brain's sign-in is checked before it is kept, and capped per account)
 
 ## Context
@@ -88,8 +88,10 @@ Agent:
    access's permissions — `contents: write`, `pull_requests: write` and
    `metadata: read` for write; `contents: read` and `metadata: read` for read. One
    token has one set of permissions for all its repositories, so a grant that writes
-   some repositories and only reads others is two tokens: one that writes those it
-   may write, and one that reads every repository it may use;
+   any repository is two tokens: one that writes those it may write, and one that
+   reads every repository it may use. The read token is made even when it may write
+   every one, so turning write into read withdraws only the write token and the run
+   keeps reading. The `workflows` permission is never asked for;
 4. checks GitHub's answer is no wider than it asked — a selection, not every
    repository; at least one repository, and only those asked for, by number; and
    exactly the permissions asked — and withdraws a token that is not;
@@ -152,6 +154,9 @@ is withdrawn the same way, at once:
 - when the body borrows again, or starts again;
 - and every minute, which covers a grant that lapses by time.
 
+A sweep that cannot read the organisation's GitHub App connection ends every GitHub
+lend: what cannot be checked is not left lent.
+
 A withdrawal GitHub cannot be reached for is tried again, each minute, until the token
 would have lapsed. A token that has lapsed is let go.
 
@@ -178,6 +183,10 @@ would have lapsed. A token that has lapsed is let go.
   when, and on which machine.
 - The organisation creates its GitHub App on GitHub's own site; the Identity Agent
   cannot create one or its key. The App needs the permissions above at least.
+- An AI agent cannot change a file in `.github/workflows`. GitHub refuses a push that
+  does without the `workflows` permission, which is deliberately not asked for: a
+  workflow runs with the repository's own secrets, so changing one is more than
+  changing code.
 - A brain's sign-in and a service's access are lent by two routes into one record of
   everything lent, kept in the vault. They share the checks that decide whether
   anything may be lent, the way a lend is held, given back, lapsed and recorded, and the

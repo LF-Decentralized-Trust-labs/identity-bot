@@ -183,6 +183,16 @@ func (g *gitHub) wasRevoked(tok string) bool {
 	return false
 }
 
+// allRevoked is every one of these tokens withdrawn at GitHub.
+func (g *gitHub) allRevoked(made ...minted) bool {
+	for _, m := range made {
+		if !g.wasRevoked(m.Token) {
+			return false
+		}
+	}
+	return len(made) > 0
+}
+
 // tokenFor is the token made for exactly these repositories, at this access.
 func (g *gitHub) tokenFor(t *testing.T, access string, repos ...string) string {
 	t.Helper()
@@ -461,6 +471,23 @@ func TestRevokingTheAIAgentWithdrawsWhatItWasLent(t *testing.T) {
 			t.Fatal("the token for a repository taken away was not withdrawn")
 		}
 	})
+	t.Run("write on every repository becomes read", func(t *testing.T) {
+		w, g := githubWorld(t)
+		w.grantRepos(t, w.a.ID, [2]string{"acme/sandbox", "write"})
+		if _, err := w.hostA.BorrowGitHub(ctx); err != nil {
+			t.Fatal(err)
+		}
+		// A read token is made beside the write one even when it may write
+		// every repository, so narrowing withdraws only the write token.
+		write, read := g.tokenFor(t, "write", "acme/sandbox"), g.tokenFor(t, "read", "acme/sandbox")
+		w.grantRepos(t, w.a.ID, [2]string{"acme/sandbox", "read"})
+		if !g.wasRevoked(write) || g.wasRevoked(read) {
+			t.Fatalf("narrowing write to read: write withdrawn %v, read withdrawn %v", g.wasRevoked(write), g.wasRevoked(read))
+		}
+		if l := githubLends(t, w); len(l) != 1 || !l[0].IsOpen(time.Now()) {
+			t.Fatalf("the run lost its read access: %+v", l)
+		}
+	})
 	t.Run("an unrelated change keeps what was lent", func(t *testing.T) {
 		w, g := githubWorld(t)
 		w.grantRepos(t, w.a.ID, [2]string{"acme/sandbox", "write"})
@@ -520,12 +547,12 @@ func TestAWithdrawalGitHubDidNotAnswerIsTriedAgain(t *testing.T) {
 	if err := w.hostA.ReturnGitHub(context.Background(), lent); err != nil {
 		t.Fatal(err)
 	}
-	if l := githubLends(t, w); len(l) != 1 || !l[0].Returned || len(l[0].Withdrawing) != 1 {
+	if l := githubLends(t, w); len(l) != 1 || !l[0].Returned || len(l[0].Withdrawing) != 2 {
 		t.Fatalf("a token GitHub was not reached to withdraw was forgotten: %+v", l)
 	}
 	w.s.githubAPI = g.srv.URL
 	w.s.endLendsNoLongerGranted("test")
-	if !g.wasRevoked(g.lentTokens()[0].Token) || len(githubLends(t, w)) != 0 {
+	if !g.allRevoked(g.lentTokens()...) || len(githubLends(t, w)) != 0 {
 		t.Fatal("the withdrawal was not tried again")
 	}
 }
@@ -644,8 +671,8 @@ func TestAGrantThatChangesWhileGitHubMintsIsNotLent(t *testing.T) {
 		t.Fatal("access the grant no longer gives was handed over")
 	}
 	made := g.lentTokens()
-	if len(made) != 1 || !g.wasRevoked(made[0].Token) {
-		t.Fatalf("the token made while the grant changed was not withdrawn: %+v", made)
+	if len(made) != 2 || !g.allRevoked(made...) {
+		t.Fatalf("the tokens made while the grant changed were not withdrawn: %+v", made)
 	}
 	if n := len(githubLends(t, w)); n != 0 {
 		t.Fatalf("%d lend(s) left", n)
@@ -673,7 +700,7 @@ func TestALendThatCannotBeCheckedIsWithdrawn(t *testing.T) {
 	if _, err := w.hostA.BorrowGitHub(context.Background()); err == nil {
 		t.Fatal("access was handed over though the App could not be read to check it")
 	}
-	if made := g.lentTokens(); len(made) != 1 || !g.wasRevoked(made[0].Token) {
+	if made := g.lentTokens(); len(made) != 2 || !g.allRevoked(made...) {
 		t.Fatalf("not withdrawn: %+v", made)
 	}
 	// Later: lent while the App could be read, then it cannot.
@@ -685,7 +712,7 @@ func TestALendThatCannotBeCheckedIsWithdrawn(t *testing.T) {
 	}
 	unreadable()
 	w.s.endLendsNoLongerGranted("test")
-	if made := g.lentTokens(); !g.wasRevoked(made[len(made)-1].Token) {
+	if made := g.lentTokens(); !g.allRevoked(made[len(made)-2:]...) {
 		t.Fatal("a lend whose App cannot be read was left standing")
 	}
 }
@@ -702,14 +729,15 @@ func TestABodyHoldsOneGitHubLendAtATime(t *testing.T) {
 	if _, err := w.hostA.BorrowGitHub(ctx); err != nil {
 		t.Fatal(err)
 	}
+	// Each lend holds two tokens: one that writes, one that reads.
 	made := g.lentTokens()
-	if len(made) != 2 || !g.wasRevoked(made[0].Token) || g.wasRevoked(made[1].Token) {
-		t.Fatalf("borrowing again: first withdrawn %v, second withdrawn %v", g.wasRevoked(made[0].Token), g.wasRevoked(made[1].Token))
+	if len(made) != 4 || !g.allRevoked(made[:2]...) || g.wasRevoked(made[2].Token) || g.wasRevoked(made[3].Token) {
+		t.Fatalf("borrowing again: first withdrawn %v, second withdrawn %v", g.allRevoked(made[:2]...), g.allRevoked(made[2:]...))
 	}
 	if err := w.hostA.ReturnEveryGitHub(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if !g.wasRevoked(made[1].Token) || len(githubLends(t, w)) != 0 {
+	if !g.allRevoked(made[2:]...) || len(githubLends(t, w)) != 0 {
 		t.Fatal("what a body held before it started again was not withdrawn")
 	}
 	// Nothing held: nothing to give back, and no error.

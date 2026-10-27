@@ -160,8 +160,9 @@ var githubVarPrefixes = []string{"GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"}
 //
 // gh reads GH_TOKEN, one token for every repository: the write token when the
 // AI agent may write every repository it uses; otherwise the read token, which
-// the Identity Agent makes for every repository it may use, so gh can read all
-// of them. In that case gh cannot push or open a pull request; git pushes
+// the Identity Agent makes for every repository it may use — whether or not it
+// may write them all — so gh can read all of them. In that case gh cannot push
+// or open a pull request; git pushes
 // with the write token, and a brain that must open a pull request with gh
 // gives it AGENT_HOST_GITHUB_WRITE_TOKEN for that one command.
 //
@@ -175,17 +176,32 @@ var githubVarPrefixes = []string{"GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"}
 func (g *LentGitHub) Env(self string) []string {
 	var env []string
 	write, read := "", ""
+	writable := map[string]bool{}
+	var readable []string
 	for _, t := range g.tokens {
 		switch t.Access {
 		case "write":
 			env = append(env, envGitHubWriteToken+"="+t.Token, envGitHubWriteRepos+"="+strings.Join(t.Repositories, ","))
 			write = t.Token
+			for _, r := range t.Repositories {
+				writable[r] = true
+			}
 		case "read":
 			env = append(env, envGitHubReadToken+"="+t.Token, envGitHubReadRepos+"="+strings.Join(t.Repositories, ","))
 			read = t.Token
+			readable = t.Repositories
 		}
 	}
 	gh := firstNonEmpty(read, write)
+	if write != "" {
+		writesAll := true
+		for _, r := range readable {
+			writesAll = writesAll && writable[r]
+		}
+		if writesAll {
+			gh = write
+		}
+	}
 	host := g.GitHost
 	https := "https://" + host + "/"
 	config := [][2]string{

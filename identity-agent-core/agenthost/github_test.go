@@ -67,10 +67,17 @@ func TestTheBrainsEnvironmentCarriesGitHubAccessAndNothingElseDoes(t *testing.T)
 	if env["GH_TOKEN"] != "ghs_READ" {
 		t.Fatalf("gh is given %q", env["GH_TOKEN"])
 	}
+	// The read token is lent beside the write one even when every repository
+	// may be written; gh is still given the write token then.
+	writesAll := lent()
+	writesAll.tokens[1].Repositories = []string{"acme/sandbox"}
+	if gh := envOf(writesAll.Env("/x"))["GH_TOKEN"]; gh != "ghs_WRITE" {
+		t.Fatalf("gh, for an AI agent that may write everything it uses, is given %q", gh)
+	}
 	writeOnly := lent()
 	writeOnly.tokens = writeOnly.tokens[:1]
 	if gh := envOf(writeOnly.Env("/x"))["GH_TOKEN"]; gh != "ghs_WRITE" {
-		t.Fatalf("gh, for an AI agent that may write everything it uses, is given %q", gh)
+		t.Fatalf("gh, given only a write token, is given %q", gh)
 	}
 	if env["GIT_CONFIG_KEY_0"] != "credential.helper" || env["GIT_CONFIG_VALUE_0"] != "" {
 		t.Fatal("the helpers configured before are not set aside")

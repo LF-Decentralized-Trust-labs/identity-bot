@@ -680,9 +680,11 @@ func (s *CoreServer) recordGitHubLendEvent(a asset.Asset, cc sandbox.CallerConte
 // ── The body's side ──────────────────────────────────────────────────────────
 
 // handleBodyBorrowsGitHub lends a body GitHub access for one run, each token
-// limited to exactly the repositories its AI agent's grant gives it: one for
-// those it may write, and, when it may only read some, one that reads every
-// repository it may use, so gh can read them all. A body may name fewer.
+// limited to exactly the repositories its AI agent's grant gives it: one that
+// reads every repository it may use, and, when it may write some, one for
+// those it may write. The read token is made even when it may write every
+// one, so a grant narrowed from write to read withdraws only the write token
+// and the run keeps reading. A body may name fewer.
 //
 // A body holds one such lend at a time: whatever it held before is withdrawn.
 func (s *CoreServer) handleBodyBorrowsGitHub(w http.ResponseWriter, r *http.Request) {
@@ -775,9 +777,7 @@ func (s *CoreServer) handleBodyBorrowsGitHub(w http.ResponseWriter, r *http.Requ
 	if len(writable) > 0 {
 		plan[githubapp.Write] = writable
 	}
-	if len(writable) < len(every) {
-		plan[githubapp.Read] = every
-	}
+	plan[githubapp.Read] = every
 	data := githubLendData{AppID: conn.AppID, InstallationID: conn.InstallationID, Key: conn.KeyFingerprint()}
 	for _, access := range []githubapp.Access{githubapp.Write, githubapp.Read} {
 		repos := plan[access]
