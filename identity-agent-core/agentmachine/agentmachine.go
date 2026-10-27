@@ -119,9 +119,12 @@ type Job struct {
 	// EnrolmentGivenAt is when its provider was given the enrolment string:
 	// once per request.
 	EnrolmentGivenAt time.Time `json:"enrolment_given_at,omitempty"`
-	RequestedBy      string    `json:"requested_by"`
-	RequestedAt      time.Time `json:"requested_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	// EnrolmentDigest is the digest of the enrolment secret it was given, so
+	// ending the request can void exactly that string.
+	EnrolmentDigest string    `json:"enrolment_digest,omitempty"`
+	RequestedBy     string    `json:"requested_by"`
+	RequestedAt     time.Time `json:"requested_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // Done says the job has nothing left for its provider to do.
@@ -392,6 +395,19 @@ func (s *Store) Unfinished() []Job {
 	return s.where(func(j Job) bool {
 		return j.State == StateWaiting || j.State == StateMaking || j.State == StateEnrolling || j.State == StateReady
 	})
+}
+
+// Ended lists requests whose machine is being or was destroyed.
+func (s *Store) Ended() []Job {
+	return s.where(func(j Job) bool { return j.State == StateRemoving || j.State == StateRemoved })
+}
+
+// SetEnrolmentDigest records which enrolment string a request was given.
+func (s *Store) SetEnrolmentDigest(id, digest string, now time.Time) (Job, error) {
+	return s.update(id, func(j *Job) error {
+		j.EnrolmentDigest = digest
+		return nil
+	}, now)
 }
 
 // ForBody finds the job that made a machine, by the binding it enrolled as.

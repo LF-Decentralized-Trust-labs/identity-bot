@@ -80,7 +80,7 @@ func providerOf(t *testing.T, w *talkWorld, makerID string, h *agenthost.Host) s
 
 // Revoking an AI agent destroys the machines made for it: its body ends, its
 // body credential is withdrawn, and its provider is told to destroy the
-// machine, at once rather than at the next sweep.
+// machine, as soon as the revocation is written rather than at the next sweep.
 func TestRevokingAnAIAgentDestroysItsMachines(t *testing.T) {
 	w, maker, providerHost := machineWorld(t)
 	pb := providerOf(t, w, maker.ID, providerHost)
@@ -99,9 +99,11 @@ func TestRevokingAnAIAgentDestroysItsMachines(t *testing.T) {
 	if code, _, raw := w.asOwner(t, "POST", "/api/credentials/"+grant.SAID+"/revoke", ""); code != http.StatusOK {
 		t.Fatalf("revoking: %d %s", code, raw)
 	}
-	if j, _ := w.s.machines().Get(id); j.State != agentmachine.StateRemoving {
-		t.Fatalf("after revoking the AI agent, its machine request is %s", j.State)
-	}
+	// In the background, right after the revocation: not a minute later.
+	waitFor(t, "the machine to be ended", func() bool {
+		j, _ := w.s.machines().Get(id)
+		return j.State == agentmachine.StateRemoving
+	})
 	b, _ := w.s.bodies().Get(bid)
 	if b.State != agentbody.StateRevoked {
 		t.Fatalf("after revoking the AI agent, its machine's body is %s", b.State)
@@ -188,5 +190,55 @@ func backdate(t *testing.T, path, list, key, id, field string, when time.Time) {
 	out, _ := json.Marshal(f)
 	if err := os.WriteFile(path, out, 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Removing one machine while another request of the same AI agent is due to
+// be ended does not hang (the sweep runs outside the removing request), and
+// when the AI agent is revoked a machine still waiting for approval is
+// refused rather than left approvable.
+func TestEndingMachinesNeverWaitsOnTheRemovingRequest(t *testing.T) {
+	w, maker, providerHost := machineWorld(t)
+	pb := providerOf(t, w, maker.ID, providerHost)
+	id, _, enrolment := machineFor(t, w, providerHost, pb, w.b.ID)
+	bid := enrolGuest(t, w, providerHost, w.b.ID, id, enrolment)
+	if code, _, raw := w.asOwner(t, "POST", "/api/mcp/agents/"+w.b.ID+"/bodies/"+bid+"/approve", ""); code != http.StatusOK {
+		t.Fatalf("approving: %d %s", code, raw)
+	}
+	// A second request whose machine nobody approved in time: due to be ended
+	// by the sweep the removal below starts.
+	id2, _, enrolment2 := machineFor(t, w, providerHost, pb, w.b.ID)
+	late := enrolGuest(t, w, providerHost, w.b.ID, id2, enrolment2)
+	backdate(t, filepath.Join(w.s.DataDir, "agent_bodies.json"), "bindings", "id", late, "pending_until", time.Now().Add(-time.Second))
+	done := make(chan int, 1)
+	go func() {
+		code, _, _ := w.asOwner(t, "DELETE", "/api/mcp/agents/"+w.b.ID+"/bodies/"+bid, "")
+		done <- code
+	}()
+	select {
+	case code := <-done:
+		if code != http.StatusOK {
+			t.Fatalf("removing: %d", code)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("removing a machine hung")
+	}
+	waitFor(t, "the late machine to be ended", func() bool {
+		j, _ := w.s.machines().Get(id2)
+		return j.State == agentmachine.StateRemoving
+	})
+
+	id3, _, enrolment3 := machineFor(t, w, providerHost, pb, w.b.ID)
+	pending := enrolGuest(t, w, providerHost, w.b.ID, id3, enrolment3)
+	grant := w.s.findCapabilityGrant(w.b.PairwiseAID)
+	if code, _, raw := w.asOwner(t, "POST", "/api/credentials/"+grant.SAID+"/revoke", ""); code != http.StatusOK {
+		t.Fatalf("revoking: %d %s", code, raw)
+	}
+	waitFor(t, "the waiting machine to be ended", func() bool {
+		j, _ := w.s.machines().Get(id3)
+		return j.State == agentmachine.StateRemoving
+	})
+	if b, _ := w.s.bodies().Get(pending); b.State != agentbody.StateRejected {
+		t.Fatalf("a machine of a revoked AI agent is still %s", b.State)
 	}
 }
