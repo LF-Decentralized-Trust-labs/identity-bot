@@ -645,9 +645,9 @@ func (s *CoreServer) handleBodyBorrowsSignIn(w http.ResponseWriter, r *http.Requ
 	s.recordEnded(lapsed, "")
 	if errors.Is(err, lending.ErrInUse) {
 		s.recordBrainEvent(a, cc, "lend", "denied", fmt.Sprintf("%s: all %d in use",
-			brainsignin.ErrInUse, limit))
+			lending.ErrInUse, limit))
 		writeJSONStatus(w, http.StatusConflict, map[string]any{
-			"error": brainsignin.ErrInUse.Error() + ", counting every AI agent signed in to the same account", "in_use": true,
+			"error": lending.ErrInUse.Error() + ", counting every AI agent signed in to the same account", "in_use": true,
 			"max_concurrent_runs": limit, "retry_after_seconds": 30})
 		return
 	}
@@ -687,7 +687,7 @@ func (s *CoreServer) handleBodyRenewsSignIn(w http.ResponseWriter, r *http.Reque
 	}
 	lease, err := s.lends().Renew(lendBrainSignIn, q.LeaseID, b.Host, a.ID, brainsignin.LeaseTTL, time.Now().UTC())
 	if err != nil {
-		writeJSONStatus(w, http.StatusNotFound, map[string]any{"error": brainsignin.ErrNoLease.Error(), "no_lease": true})
+		writeJSONStatus(w, http.StatusNotFound, map[string]any{"error": lending.ErrNoLend.Error(), "no_lease": true})
 		return
 	}
 	writeJSONStatus(w, http.StatusOK, map[string]any{"lease_id": lease.ID, "lease_expires_at": lease.Expires})
@@ -735,6 +735,6 @@ func (s *CoreServer) handleBodyReturnsSignIn(w http.ResponseWriter, r *http.Requ
 		s.recordBrainEvent(a, cc, "returned", "ok", why)
 		writeJSONStatus(w, http.StatusOK, map[string]any{"returned": true})
 	default:
-		writeJSONStatus(w, http.StatusNotFound, map[string]any{"error": brainsignin.ErrNoLease.Error(), "no_lease": true})
+		writeJSONStatus(w, http.StatusNotFound, map[string]any{"error": lending.ErrNoLend.Error(), "no_lease": true})
 	}
 }

@@ -28,13 +28,6 @@ const RenewEvery = LeaseTTL / 3
 // with a sign-in its program refreshed, which would otherwise be lost.
 const LapsedKept = 7 * 24 * time.Hour
 
-// ErrInUse is a sign-in whose cap on simultaneous runs is reached.
-var ErrInUse = errors.New("this sign-in already has its runs in use")
-
-// ErrNoLease is a lease this body does not hold: never lent, already
-// returned, or expired.
-var ErrNoLease = errors.New("this body holds no such lease")
-
 // PoolOr is the account a lease counts against: pool, or for a sign-in that
 // names no account, its AI agent alone.
 func PoolOr(pool, agent string) string {
