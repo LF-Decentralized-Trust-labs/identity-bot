@@ -282,3 +282,86 @@ func TestWhatAMachineMustProvideIsKeptOnTheAIAgent(t *testing.T) {
 		t.Fatalf("an unknown need was taken: %d %s", code, raw)
 	}
 }
+
+// A person may approve the new machine from its own request before its
+// provider's report arrives: the report is still matched, and the request is
+// ready rather than the machine destroyed. A machine whose words a person
+// rejects is destroyed.
+func TestAMachineApprovedEarlyIsKeptAndOneRejectedIsDestroyed(t *testing.T) {
+	w, maker, providerHost := machineWorld(t)
+	pb := w.s.bodies().ForAgent(maker.ID)[0].ID
+	if _, _, err := providerHost.Call("GET", "/api/agent-host/machine-requests?offers=toolchain", nil); err != nil {
+		t.Fatal(err)
+	}
+	base := "/api/mcp/agents/" + w.b.ID
+	if code, _, raw := w.asOwner(t, "PUT", base+"/machine", `{"provides":["toolchain"]}`); code != http.StatusOK {
+		t.Fatalf("%d %s", code, raw)
+	}
+	// One machine made and enrolled; returns its request id, binding and words.
+	makeOne := func() (string, string, []string) {
+		t.Helper()
+		code, out, raw := w.asOwner(t, "POST", base+"/machine-requests", `{"provider":"`+pb+`"}`)
+		if code != http.StatusCreated {
+			t.Fatalf("%d %s", code, raw)
+		}
+		id := out["id"].(string)
+		body, _ := json.Marshal(map[string]any{"state": agentmachine.StateMaking})
+		if code, b, _ := providerHost.Call("POST", "/api/agent-host/machine-requests/"+id, body); code != http.StatusOK {
+			t.Fatalf("making: %d %s", code, b)
+		}
+		code, b, err := providerHost.Call("POST", "/api/agent-host/machine-requests/"+id+"/enrolment", []byte("{}"))
+		if err != nil || code != http.StatusCreated {
+			t.Fatalf("enrolment: %d %s %v", code, b, err)
+		}
+		var en struct {
+			Enrolment string `json:"enrolment"`
+		}
+		_ = json.Unmarshal(b, &en)
+		e, _ := agentbody.ParseEnrolment(en.Enrolment)
+		e.URL = w.srv.URL
+		str, _ := e.Encode()
+		guest := newTestMachine(t)
+		h := &agenthost.Host{DataDir: t.TempDir(), Signer: guest, Hardware: true, PollEvery: 20 * time.Millisecond}
+		go func() { _, _ = h.Enrol(str, "vm", 5*time.Second) }()
+		host, _, _ := agentbody.Identity(guest)
+		words := agentbody.Words(host)
+		var bid string
+		waitFor(t, "the machine to ask", func() bool {
+			for _, b := range w.s.bodies().ForAgent(w.b.ID) {
+				if b.State == agentbody.StatePending && strings.Join(b.Words, " ") == strings.Join(words, " ") {
+					bid = b.ID
+				}
+			}
+			return bid != ""
+		})
+		return id, bid, words
+	}
+	enrolling := func(id string, words []string) map[string]any {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{"state": agentmachine.StateEnrolling, "words": words})
+		code, b, _ := providerHost.Call("POST", "/api/agent-host/machine-requests/"+id, body)
+		var out map[string]any
+		_ = json.Unmarshal(b, &out)
+		if code != http.StatusOK {
+			t.Fatalf("enrolling: %d %s", code, b)
+		}
+		return out
+	}
+
+	id, bid, words := makeOne()
+	if code, _, raw := w.asOwner(t, "POST", base+"/bodies/"+bid+"/approve", ""); code != http.StatusOK {
+		t.Fatalf("approving early: %d %s", code, raw)
+	}
+	if out := enrolling(id, words); out["state"] != agentmachine.StateReady || out["body"] != bid {
+		t.Fatalf("a machine approved before its provider reported: %v", out)
+	}
+
+	id, bid, words = makeOne()
+	enrolling(id, words)
+	if code, _, raw := w.asOwner(t, "POST", base+"/bodies/"+bid+"/reject", ""); code != http.StatusOK {
+		t.Fatalf("rejecting: %d %s", code, raw)
+	}
+	if j, _ := w.s.machines().Get(id); j.State != agentmachine.StateRemoving {
+		t.Fatalf("a rejected machine is %s, not being destroyed", j.State)
+	}
+}

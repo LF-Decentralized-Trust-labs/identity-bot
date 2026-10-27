@@ -260,6 +260,8 @@ func (s *CoreServer) handleRejectBody(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.recordBodyEvent(a, decided, "rejected", "denied", "the words did not match, according to "+decided.DecidedBy)
+	// A machine a provider made whose words did not match is destroyed.
+	s.machineGone(decided)
 	str, expires, err := s.enrolmentFor(r, a)
 	if err != nil {
 		jsonError(w, "rejected, but a fresh enrolment string could not be made: "+err.Error(), http.StatusServiceUnavailable)

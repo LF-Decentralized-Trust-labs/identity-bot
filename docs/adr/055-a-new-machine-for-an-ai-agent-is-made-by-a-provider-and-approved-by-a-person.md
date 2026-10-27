@@ -61,16 +61,19 @@ person would be given: good once, for that AI agent, within the enrolment window
 it travels sealed to the provider's keys. The program hands it to the new machine,
 whose `agent-host enrol -` reads it from standard input so that it never appears on
 a command line, and prints the six words the machine shows. The provider reports
-them, and the Identity Agent matches them to the machine waiting for approval as that
-AI agent; words no waiting machine shows are refused. The person then compares the
+them, and the Identity Agent matches them to the machine that asked to become that AI
+agent's body — waiting for approval, or already approved by a person who compared the
+words before the report arrived; words no such machine shows are refused. The person then compares the
 words and approves as for any machine. A provider can report a machine made,
 enrolling or failed, and never ready: a request is ready only when a person has
 approved its machine.
 
 **Removing the machine destroys it.** Removing a body that a provider made ends the
 body first, as any removal does, then asks its provider to destroy the machine; the
-provider reports it removed, and retries a removal that failed. Cancelling a request
-whose machine was never made simply ends it. A provider that fails part way destroys
+provider reports it removed, and retries a removal that failed. A machine whose words a
+person rejects is destroyed the same way. Cancelling a request whose machine was never
+made simply ends it; cancelling one still being made, or waiting for approval, has it
+destroyed. A provider that fails part way destroys
 what it made and reports why, and one that restarts while making a machine destroys
 that machine rather than leaving it half made.
 

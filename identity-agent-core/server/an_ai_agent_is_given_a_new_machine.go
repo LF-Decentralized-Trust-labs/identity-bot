@@ -374,14 +374,19 @@ func (s *CoreServer) handleProviderReports(w http.ResponseWriter, r *http.Reques
 		jsonError(w, "the AI agent this machine was for is gone", http.StatusGone)
 		return
 	}
-	// The machine that shows these words must already be asking to become
-	// this AI agent's body.
+	// The machine that shows these words must already have asked to become
+	// this AI agent's body. A person may have approved it already, from the
+	// words on its own request, before the provider's report arrived.
 	var bound string
+	boundActive := false
 	if req.State == agentmachine.StateEnrolling {
 		want := strings.Join(req.Words, " ")
 		for _, c := range s.bodies().ForAgent(a.ID) {
-			if c.State == agentbody.StatePending && strings.Join(c.Words, " ") == want {
-				bound = c.ID
+			if (c.State == agentbody.StatePending || c.State == agentbody.StateActive) && strings.Join(c.Words, " ") == want {
+				if other, ok := s.machines().ForBody(c.ID); ok && other.ID != id {
+					continue
+				}
+				bound, boundActive = c.ID, c.State == agentbody.StateActive
 			}
 		}
 		if bound == "" {
@@ -398,6 +403,10 @@ func (s *CoreServer) handleProviderReports(w http.ResponseWriter, r *http.Reques
 		if j, err = s.machines().Bound(id, bound, time.Now()); err != nil {
 			jsonError(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+		if boundActive {
+			s.machines().Approved(bound, time.Now())
+			j, _ = s.machines().Get(id)
 		}
 	}
 	if j.State != before.State {
