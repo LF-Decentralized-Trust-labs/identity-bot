@@ -314,6 +314,10 @@ func TestEveryActionClosedToASessionWasDecidedForAControllerToo(t *testing.T) {
 		"POST /api/mcp/tokens":                           "minting a token is the application's work, recorded against the controller",
 		"POST /api/employees/{aid}/approve":              "approving a member is the organisation's work, recorded against the controller",
 		"POST /api/employees/{aid}/revoke":               "revoking a member is the organisation's work",
+		// A controller is where a person takes control of an AI agent's screen
+		// from, and the one check asks more for it than for watching.
+		routeScreenControl: "taking control of an AI agent's screen needs a higher score in the one check (ADR-053)",
+		routeScreenInput:   "clicks and keys on an AI agent's screen need a higher score in the one check (ADR-053)",
 		// The owner's own front end must be able to show them a recovery of
 		// their identity is running; that is who the warning is for.
 		"GET /api/recovery/sessions":      "the owner is told a recovery of their identity is running",
