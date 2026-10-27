@@ -40,23 +40,16 @@ import (
 // lapses within the hour on its own. The one long-lived secret, the App's key,
 // is used only to ask GitHub for those.
 
-// The capabilities that grant repositories.
+// The capabilities that grant repositories, and the arguments their grants
+// limit, as githubapp defines them.
 const (
-	capabilityRepoRead  = "code.repository.read"
-	capabilityRepoWrite = "code.repository.write"
-	// repoArgument and repoIDArgument are the arguments their grants limit:
-	// each repository by owner/name, and by GitHub's number for it, in the
-	// same place in each list.
-	repoArgument   = "repository"
-	repoIDArgument = "repository_id"
+	capabilityRepoRead  = githubapp.CapabilityRead
+	capabilityRepoWrite = githubapp.CapabilityWrite
+	repoArgument        = githubapp.RepositoryArgument
+	repoIDArgument      = githubapp.RepositoryIDArgument
 )
 
-func capabilityFor(a githubapp.Access) string {
-	if a == githubapp.Write {
-		return capabilityRepoWrite
-	}
-	return capabilityRepoRead
-}
+func capabilityFor(a githubapp.Access) string { return a.Capability() }
 
 var githubAppRef = sandbox.KeptRef("github-app")
 
