@@ -55,10 +55,10 @@ func OpenScreen(display string, allowNetwork bool) (Screen, error) {
 // not written out yet.
 var errDisplayUnreachable = errors.New("the display could not be reached")
 
-// unreachable says an error opening a display is not reaching it at all. xgb
+// displayUnreachable says an error opening a display is not reaching it at all. xgb
 // says a failed dial only in words ("cannot connect to …"); a connection that
 // ends during the handshake is the error itself.
-func unreachable(err error) bool {
+func displayUnreachable(err error) bool {
 	var op *net.OpError
 	return strings.HasPrefix(err.Error(), "cannot connect to ") || displayGone(err) || errors.As(err, &op)
 }
@@ -67,7 +67,7 @@ func unreachable(err error) bool {
 func openX11(display string) (Screen, error) {
 	conn, err := xgb.NewConnDisplay(display)
 	if err != nil {
-		if unreachable(err) {
+		if displayUnreachable(err) {
 			return nil, fmt.Errorf("%w: the display %s could not be opened: %w: %v", ErrNoScreen, display, errDisplayUnreachable, err)
 		}
 		return nil, fmt.Errorf("%w: the display %s could not be opened: %v", ErrNoScreen, display, err)
