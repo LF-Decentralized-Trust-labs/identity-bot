@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"identity-agent-core/agenthost"
+	"identity-agent-core/authprovider"
 	"identity-agent-core/brainsignin"
 	"identity-agent-core/brainsignin/brainsignintest"
 	"identity-agent-core/sandbox"
@@ -216,6 +217,14 @@ func TestASignInIsCheckedBeforeItIsKept(t *testing.T) {
 	}
 	if n := len(governanceRows(t, w, "agent.brain.sign_in.checked")); n != 1 {
 		t.Fatalf("%d checks recorded, want 1", n)
+	}
+	// A machine the owner authorised checks it the same way: the Identity
+	// Agent's call goes out as it does for the owner.
+	rec := httptest.NewRecorder()
+	w.s.router.ServeHTTP(rec, asThatMachineTo(t, w.s.thisIdentityAgentsIdentifier(), w.ctlAID, "POST",
+		"/api/mcp/agents/"+w.a.ID+"/brain-sign-in/test", "", w.ctlSeed, authprovider.LevelVerified, time.Now()))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ok":true`) {
+		t.Fatalf("a controller checking the kept sign-in: %d %s", rec.Code, rec.Body.String())
 	}
 	// The screen is told which brains a body can run.
 	_, out, _ := w.asOwner(t, "GET", "/api/mcp/brain-sign-in/choices", "")

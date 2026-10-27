@@ -49,6 +49,25 @@ const (
 	Write Access = "write"
 )
 
+// The capabilities that grant repositories, each limited to the repositories
+// its grant names: by owner/name under RepositoryArgument and by GitHub's
+// number under RepositoryIDArgument, in the same place in each list. The one
+// definition the Identity Agent grants with and a verifier checks against.
+const (
+	CapabilityRead       = "code.repository.read"
+	CapabilityWrite      = "code.repository.write"
+	RepositoryArgument   = "repository"
+	RepositoryIDArgument = "repository_id"
+)
+
+// Capability is the capability that grants an access.
+func (a Access) Capability() string {
+	if a == Write {
+		return CapabilityWrite
+	}
+	return CapabilityRead
+}
+
 // Permissions are what a token for an access asks GitHub for. A GitHub App
 // must have been given at least these when it was made, or GitHub refuses the
 // token.

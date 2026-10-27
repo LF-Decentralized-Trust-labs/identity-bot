@@ -74,7 +74,7 @@ var ErrBodyWithheld = errors.New("the request's body was not given, so what it a
 // askedFields are what a credential keeps of its request's body: what was
 // asked for, and nothing else the body may carry.
 var askedFields = []string{"name", "capabilities", "resource_constraints", "nonce",
-	"controller_aid", "public_key", "grade", "label", "signer", "expires_at"}
+	"controller_aid", "public_key", "grade", "label", "signer", "expires_at", "repositories"}
 
 // Asked is what a request's body asked for, as a credential keeps it. The one
 // definition the issuer uses to write it and a verifier uses to check it.
@@ -398,6 +398,11 @@ func checkAskedFor(cred acdc, method, path string, asked map[string]json.RawMess
 			if segments[3] != about {
 				return fmt.Errorf("the request was about %s, the credential about %s", segments[3], about)
 			}
+		case method == "PUT" && len(segments) == 5 && segments[2] == "agents" && segments[4] == "github":
+			if segments[3] != about {
+				return fmt.Errorf("the request was about %s, the credential about %s", segments[3], about)
+			}
+			return checkRepositoriesAsked(cred, asked["repositories"])
 		default:
 			return fmt.Errorf("%s %s is not a request that grants an AI agent anything", method, path)
 		}
