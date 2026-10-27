@@ -237,6 +237,7 @@ func (s *CoreServer) handleApproveBody(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.recordBodyEvent(a, decided, "approved", "ok", "approved by "+decided.DecidedBy)
+	s.machines().Approved(decided.ID, time.Now())
 	writeJSONStatus(w, http.StatusOK, bodyView{Binding: decided, WordsLine: strings.Join(decided.Words, " ")})
 }
 
@@ -296,6 +297,8 @@ func (s *CoreServer) handleRevokeBody(w http.ResponseWriter, r *http.Request) {
 		// Whoever was watching it is no longer watching this AI agent.
 		s.screens().EndBody(b.Host, screenview.EndedBodyRemoved)
 		s.endLendsNoLongerGranted("a machine was removed as an AI agent's body")
+		// A machine a provider made for it is destroyed; a provider makes no more.
+		s.machineGone(b)
 	}
 	rec, _ := s.DataStore.GetCredential(b.CredentialSAID)
 	if rec == nil || rec.Status == "revoked" {

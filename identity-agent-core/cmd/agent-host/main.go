@@ -1,12 +1,13 @@
 // Command agent-host makes this machine the body of an AI agent.
 //
-//	agent-host enrol <enrolment string> [--placement computer|vm|cloud|device]
+//	agent-host enrol <enrolment string, or - to read it from standard input> [--placement computer|vm|cloud|device]
 //	agent-host status
 //	agent-host run [--brain claude-code|codex|grok] [--brain-path PATH] [--brain-user USER] [--workspace DIR]
 //	               [--screen control|watch|off] [--display :0] [--display-allow-network]
 //	agent-host move <new address of the same Identity Agent>
 //	agent-host call <METHOD> <path> [json body]
 //	agent-host brain-user [USER]
+//	agent-host provide --program PATH [--offers screen,toolchain,xcode]
 //	agent-host mcp
 //	agent-host brain-home -- <brain> <args>
 //	agent-host github-credential get
@@ -22,6 +23,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -32,6 +34,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -62,6 +65,8 @@ func main() {
 	brainPath := fs.String("brain-path", "", "the full path of the brain's program")
 	brainUser := fs.String("brain-user", "", "the operating-system user the brain runs as")
 	workspace := fs.String("workspace", "", "the brain's working directory")
+	program := fs.String("program", "", "provide: the program that makes, enrols and removes machines")
+	offers := fs.String("offers", "", "provide: what the machines it makes can provide, comma-separated: screen, toolchain, xcode")
 	screenMode := fs.String("screen", "control", "what people allowed to may do with this machine's screen: "+
 		"control (watch it, and take control when the Identity Agent lets them, with any key combination), "+
 		"watch (only watch it: this machine is watch-only and ignores every click and key) or off")
@@ -85,6 +90,15 @@ func main() {
 	case "enrol", "enroll":
 		if len(args) != 1 {
 			usage()
+		}
+		// "-" reads the string from standard input, so a program handing it
+		// to a machine need not put a one-time secret on a command line.
+		if args[0] == "-" {
+			line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+			if line = strings.TrimSpace(line); line == "" {
+				fail(fmt.Errorf("no enrolment string on standard input: %v", err))
+			}
+			args[0] = line
 		}
 		if _, err := h.Enrol(args[0], *placement, *wait); err != nil {
 			fail(err)
@@ -178,6 +192,16 @@ func main() {
 			fail(err)
 		}
 		fmt.Printf("%d\n%s\n", code, out)
+	case "provide":
+		var list []string
+		if *offers != "" {
+			list = strings.Split(*offers, ",")
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		if err := h.Provide(ctx, agenthost.ProvideOptions{Program: *program, Offers: list}); err != nil {
+			fail(err)
+		}
 	case "mcp":
 		if err := agenthost.ServeMCP(os.Stdin, os.Stdout); err != nil {
 			fail(err)
@@ -273,7 +297,7 @@ One-time setup, as an administrator:
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage:\n"+
-		"  agent-host enrol <enrolment string> [--placement computer|vm|cloud|device]\n"+
+		"  agent-host enrol <enrolment string, or -> [--placement computer|vm|cloud|device]\n"+
 		"  agent-host status\n"+
 		"  agent-host run [--brain claude-code|codex|grok] [--brain-path PATH] [--brain-user USER] [--workspace DIR]\n"+
 		"                 [--screen control|watch|off] [--display :0] [--display-allow-network]\n"+
@@ -282,6 +306,7 @@ func usage() {
 		"  agent-host move <new address of the same Identity Agent>\n"+
 		"  agent-host call <METHOD> <path> [json body]\n"+
 		"  agent-host brain-user [USER]\n"+
+		"  agent-host provide --program PATH [--offers screen,toolchain,xcode]\n"+
 		"  agent-host mcp      (started by the brain, never by hand)\n"+
 		"  agent-host brain-home -- <brain> <args>      (started by the host, never by hand)")
 	os.Exit(2)

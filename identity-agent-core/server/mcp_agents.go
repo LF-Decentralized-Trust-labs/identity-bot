@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"identity-agent-core/agentmachine"
 	"identity-agent-core/asset"
 	"identity-agent-core/brainsignin"
 	"identity-agent-core/schemas"
@@ -72,6 +73,8 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		// BrainSignIn signs the brain in as the AI agent is made, so it is
 		// never created half set up. Kept in the vault, never on the record.
 		BrainSignIn *brainSignInRequest `json:"brain_sign_in,omitempty"`
+		// Machine is what the machine it runs on must provide.
+		Machine *asset.MachineNeeds `json:"machine,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
 		jsonError(w, "name is required", http.StatusBadRequest)
@@ -80,6 +83,14 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 	if len(req.Capabilities) == 0 {
 		jsonError(w, "capabilities is required (the capability ceiling this agent may invoke)", http.StatusBadRequest)
 		return
+	}
+	if req.Machine != nil {
+		provides, err := agentmachine.Needs(req.Machine.Provides)
+		if err != nil {
+			jsonError(w, "what its machine must provide: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		req.Machine = &asset.MachineNeeds{Provides: provides}
 	}
 	if req.ValidUntil != nil && !req.ValidUntil.After(time.Now()) {
 		jsonError(w, "valid_until is in the past, so the grant would never be in force", http.StatusBadRequest)
@@ -130,6 +141,7 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		SystemPrompt: req.SystemPrompt,
 		Brain:        brain,
 		Exposure:     asset.Exposure{MCP: true},
+		Machine:      req.Machine,
 	}
 	if req.Exposure != nil {
 		cfg.Exposure = *req.Exposure
@@ -376,6 +388,17 @@ func (s *CoreServer) handleUpdateAgentConfig(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	cfg.Brain = brain
+	// A change that does not mention the machine keeps what it needs.
+	if cfg.Machine == nil && before.AgentConfig != nil {
+		cfg.Machine = before.AgentConfig.Machine
+	} else if cfg.Machine != nil {
+		provides, err := agentmachine.Needs(cfg.Machine.Provides)
+		if err != nil {
+			jsonError(w, "nothing was changed: what its machine must provide: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		cfg.Machine = &asset.MachineNeeds{Provides: provides}
+	}
 	if signIn != nil {
 		if _, err := s.brainVaultWritable(); err != nil {
 			jsonError(w, "nothing was changed: the sign-in could not be kept: "+err.Error(), http.StatusServiceUnavailable)
