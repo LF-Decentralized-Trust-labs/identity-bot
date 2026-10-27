@@ -2,6 +2,7 @@ package agenthost
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -127,6 +128,48 @@ func TestClaudeCodeIsStartedWithOnlyTheHostsTools(t *testing.T) {
 	}
 	if contains(first, "--append-system-prompt-file") || contains(first, "--append-system-prompt") {
 		t.Fatal("the instructions were given some way other than stdin")
+	}
+}
+
+// Claude Code is told, on every run, to add no credit line of its own to what
+// the brain commits or opens: no Co-Authored-By trailer, no "Generated with"
+// line in a pull request, no session link.
+func TestClaudeCodeAddsNoAttributionToCommitsOrPullRequests(t *testing.T) {
+	path, record := fakeCLI(t, `{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"s-1"}`)
+	brain := ClaudeCode{Path: path}
+	turn := Turn{Session: "s-1", Prompt: "commit the fix", Workspace: t.TempDir(),
+		ToolsURL: "http://127.0.0.1:1", ToolsToken: "turn-token"}
+	if _, err := brain.Run(context.Background(), turn); err != nil {
+		t.Fatal(err)
+	}
+	turn.Resume = true
+	if _, err := brain.Run(context.Background(), turn); err != nil {
+		t.Fatal(err)
+	}
+	for i, run := range runs(t, record) {
+		raw, ok := flagValue(run, "--settings")
+		if !ok {
+			t.Fatalf("run %d was not given settings, so Claude Code adds its own attribution: %v", i+1, run)
+		}
+		var settings struct {
+			Attribution *struct {
+				Commit     *string `json:"commit"`
+				PR         *string `json:"pr"`
+				SessionURL *bool   `json:"sessionUrl"`
+			} `json:"attribution"`
+			IncludeCoAuthoredBy *bool `json:"includeCoAuthoredBy"`
+		}
+		if err := json.Unmarshal([]byte(raw), &settings); err != nil {
+			t.Fatalf("run %d: the settings are not JSON Claude Code can read: %v", i+1, err)
+		}
+		a := settings.Attribution
+		if a == nil || a.Commit == nil || *a.Commit != "" || a.PR == nil || *a.PR != "" ||
+			a.SessionURL == nil || *a.SessionURL {
+			t.Fatalf("run %d: commit, pull-request and session-link attribution are not all off: %s", i+1, raw)
+		}
+		if settings.IncludeCoAuthoredBy == nil || *settings.IncludeCoAuthoredBy {
+			t.Fatalf("run %d: the older setting an earlier Claude Code reads is not off: %s", i+1, raw)
+		}
 	}
 }
 

@@ -26,6 +26,12 @@ import (
 //
 // Codex names its own sessions, so the first turn of a conversation reports
 // the session Codex started and later turns resume that one.
+//
+// Unlike Claude Code, Codex has no local setting for the credit line it asks
+// its model to add to commits ("Co-authored-by: Codex") and pull requests: it
+// reads the signed-in ChatGPT account's commit-attribution preference from
+// OpenAI on each session, and asks for none under an API key. So the host
+// cannot turn it off per run; the account's own preference does.
 type Codex struct {
 	Path   string
 	Runner Runner
