@@ -85,7 +85,7 @@ func (h *Host) Provide(ctx context.Context, opts ProvideOptions) error {
 		logf = opts.Logger.Printf
 	}
 	logf("[agent-host] making machines that provide %v, with %s", describeNeeds(offers), opts.Program)
-	p := &provider{h: h, opts: opts, logf: logf, busy: map[string]bool{}, failedAt: map[string]time.Time{}}
+	p := &provider{h: h, opts: opts, logf: logf, busy: map[string]bool{}, failedAt: map[string]time.Time{}, made: map[string]bool{}}
 	backoff := time.Second
 	for ctx.Err() == nil {
 		jobs, err := p.collect(ctx)
@@ -137,6 +137,10 @@ type provider struct {
 	mu       sync.Mutex
 	busy     map[string]bool
 	failedAt map[string]time.Time
+	// made are the requests this run of the provider started making. One of
+	// them still shown as being made is a report on its way, not a machine
+	// abandoned by an earlier run.
+	made map[string]bool
 }
 
 func (p *provider) collect(ctx context.Context) ([]machineRequest, error) {
@@ -165,8 +169,12 @@ const retryRemoveAfter = time.Minute
 func (p *provider) start(ctx context.Context, j machineRequest) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.busy[j.ID] || time.Since(p.failedAt[j.ID]) < retryRemoveAfter {
+	if p.busy[j.ID] || time.Since(p.failedAt[j.ID]) < retryRemoveAfter ||
+		(j.State == agentmachine.StateMaking && p.made[j.ID]) {
 		return
+	}
+	if j.State == agentmachine.StateWaiting {
+		p.made[j.ID] = true
 	}
 	p.busy[j.ID] = true
 	p.wg.Add(1)
