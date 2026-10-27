@@ -17,7 +17,7 @@ func (s *CoreServer) mountVerificationRoutes(r interface {
 }
 
 func (s *CoreServer) handleVerificationBadge(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
+	if !s.isOwnerOrItsController(r) {
 		writeError(w, http.StatusForbidden, "owner only", "loopback route")
 		return
 	}

@@ -226,10 +226,10 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleRootSeedStatus reports whether a root seed is established (never the
-// seed itself). Local owner only. Lets the client decide whether a handoff is
+// seed itself). The owner and its controllers only. Lets the client decide whether a handoff is
 // still needed.
 func (s *CoreServer) handleRootSeedStatus(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
+	if !s.isOwnerOrItsController(r) {
 		jsonError(w, "keystore management is for the owner of this agent", http.StatusForbidden)
 		return
 	}

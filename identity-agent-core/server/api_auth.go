@@ -484,6 +484,32 @@ func (s *CoreServer) isOwner(r *http.Request) bool {
 	return s.howThisIsTheOwner(r) != ""
 }
 
+// isOwnerOrItsController is the check a handler makes when it needs to know the
+// caller acts for the owner: the owner, or a machine the owner authorised that
+// the gate admitted.
+//
+// HANDLERS DO NOT RE-CHECK OWNERSHIP FOR WHAT THE GATE OPENED TO CONTROLLERS
+// (ADR-050). The gate opens every owner-class route to an authorised controller
+// except the owner-only list, so a handler that asks isOwner alone closes the
+// route again, and nothing reports it: the org app on a controller was refused
+// its own stored keys that way. A route that must stay closed to a controller
+// belongs on controllerOwnerOnly, where the gate refuses it with the reason.
+//
+// No to a browser session and to a caller holding a scoped token, which the
+// gate admits too but which are not the owner acting.
+//
+// Where a handler records WHO acted, it names the controller rather than the
+// owner (TheControllerThatAsked, as whoDecided does).
+func (s *CoreServer) isOwnerOrItsController(r *http.Request) bool {
+	if theGateAdmittedTheOwner(r) {
+		return true
+	}
+	if _, ok := TheControllerThatAsked(r); ok {
+		return true
+	}
+	return s.isOwner(r)
+}
+
 // How a request proved it is the owner's.
 const (
 	ownerAtThisComputer = "local"
@@ -573,6 +599,10 @@ func (s *CoreServer) isSealedOwnerRequest(r *http.Request) bool {
 
 // IsOwner is the exported owner check for overlays (owner-only management routes).
 func (s *CoreServer) IsOwner(r *http.Request) bool { return s.isOwner(r) }
+
+// IsOwnerOrItsController is isOwnerOrItsController for overlays: the check an
+// overlay route that is not owner-only by ADR-050 makes instead of IsOwner.
+func (s *CoreServer) IsOwnerOrItsController(r *http.Request) bool { return s.isOwnerOrItsController(r) }
 
 // --- replay window ---
 
@@ -690,6 +720,7 @@ var sessionForbidden = map[string]string{
 
 	// --- answering for the key ---
 	"POST /api/signing-requests/{id}/fulfil": "these exist precisely because only the key-holding device can answer them",
+	"POST /api/signing-requests/{id}/refuse": "refusing is the key-holding device's answer, and a refused withdrawal is never asked for again",
 
 	// --- destruction ---
 	"POST /api/reset": "resetting destroys the identity, and a session should never be enough for that",

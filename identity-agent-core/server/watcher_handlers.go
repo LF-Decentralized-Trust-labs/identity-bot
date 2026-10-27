@@ -118,7 +118,7 @@ func (s *CoreServer) mountWatcherPublicRoutes(r chi.Router) {
 }
 
 func (s *CoreServer) handleDebugWatcherFirstSeen(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
+	if !s.isOwnerOrItsController(r) {
 		writeError(w, http.StatusForbidden, "owner only", "")
 		return
 	}
@@ -137,7 +137,7 @@ func (s *CoreServer) handleDebugWatcherFirstSeen(w http.ResponseWriter, r *http.
 }
 
 func (s *CoreServer) handleDebugWatcherCoverage(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
+	if !s.isOwnerOrItsController(r) {
 		writeError(w, http.StatusForbidden, "owner only", "")
 		return
 	}

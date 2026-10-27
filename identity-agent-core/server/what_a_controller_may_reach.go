@@ -76,6 +76,10 @@ var controllerOwnerOnly = map[string]string{
 	"POST /api/sign":                              "this signs as the identity, and anything it signs cannot be unsaid",
 	"POST /api/events/signature":                  "this attaches this identity's signature to an event",
 	"POST /api/signing-requests/{id}/fulfil":      "this signs as the identity, and what is signed cannot be unsaid",
+	// Refusing is the key device's answer too, and a refused withdrawal is left
+	// to the owner for good: one controller could keep another's revoked grant
+	// valid in the key log by refusing its withdrawal.
+	"POST /api/signing-requests/{id}/refuse": "refusing is the key device's answer, and a refused withdrawal is never asked for again",
 	"POST /api/signing-requests/sign-for-another": "this signs with the identity's key and records it in its key log",
 	"POST /api/signing-requests/adopt":            "this takes events into the identity's key log",
 	"POST /api/interact":                          "this signs an interaction event with the identity's key, and key events are the owner's",
@@ -172,6 +176,31 @@ var controllerOwnerOnly = map[string]string{
 	"POST /api/scan/execute":     "performing a scanned request can write a contact record, and the owner's key is resolved from those",
 	"POST /api/ask/create":       "creating a request can write a contact record, and the owner's key is resolved from those",
 	"DELETE /api/contacts/{aid}": "removing the owner's contact record changes how the owner's key is resolved",
+	// A sealed request is served as coming from whoever the envelope says sent
+	// it, and the sender's keys are read from this peers file. A peer written
+	// under the owner's identifier with the writer's own keys would make the
+	// writer's sealed requests the owner's (isSealedOwnerRequest).
+	"POST /api/didcomm/peers": "a sealed request is believed to be from whoever the peer record says, so writing one can name the owner",
+	// Which witnesses and watchers this agent relies on: they receipt and
+	// cross-check the key log every other check is read against.
+	"POST /api/providers": "which operators witness and watch this identity's key log decides what its history is checked against",
+	// Capabilities are what an AI agent's grant can reach and what the gateway
+	// trusts at invoke time, minimum scores included. Defining or arming one
+	// writes what an authorisation decision reads.
+	"POST /api/capability-registry/packs":        "importing a capability defines what the gateway trusts and what an AI agent may be granted",
+	"POST /api/capability-registry/{id}/enabled": "arming a capability changes what the gateway trusts and what an AI agent may be granted",
+	"DELETE /api/capability-registry/{id}":       "removing a capability changes what the gateway trusts and what an AI agent may be granted",
+
+	// --- speaking as the identity to another Identity Agent ---
+	//
+	// A sealed request is served by the agent it reaches as coming from the
+	// identity that sealed it, and from the identity that owns a machine it is
+	// the owner's own request. This sends one as any identity this agent holds
+	// keys for, so it is the owner's signature by another door.
+	"POST /api/sealed/send": "this speaks as the identity to another Identity Agent, which serves it as that identity's own request",
+
+	// --- this computer itself ---
+	"POST /api/sandbox/podman/setup": "installing software on a computer is done by the app running on it",
 
 	// --- who else may act for this identity ---
 	//
