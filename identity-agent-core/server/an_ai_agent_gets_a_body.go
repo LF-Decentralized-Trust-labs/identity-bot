@@ -148,6 +148,8 @@ type bodyView struct {
 	agentbody.Binding
 	// WordsLine is the six words as one line, for showing beside the machine's.
 	WordsLine string `json:"words_line"`
+	// Screen is the machine's screen, when it has one that can be watched now.
+	Screen *screenOf `json:"screen,omitempty"`
 }
 
 func (s *CoreServer) handleListBodies(w http.ResponseWriter, r *http.Request) {
@@ -158,7 +160,7 @@ func (s *CoreServer) handleListBodies(w http.ResponseWriter, r *http.Request) {
 	}
 	out := []bodyView{}
 	for _, b := range s.bodies().ForAgent(a.ID) {
-		out = append(out, bodyView{Binding: b, WordsLine: strings.Join(b.Words, " ")})
+		out = append(out, bodyView{Binding: b, WordsLine: strings.Join(b.Words, " "), Screen: s.screenOfBody(b)})
 	}
 	writeJSONStatus(w, http.StatusOK, map[string]any{"agent_aid": a.PairwiseAID, "bodies": out})
 }
@@ -285,6 +287,8 @@ func (s *CoreServer) handleRevokeBody(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.recordBodyEvent(a, b, "removed", "ok", "removed by "+whoDecided(r))
+		// Whoever was watching it is no longer watching this AI agent.
+		s.screens().EndBody(b.Host, "the machine was removed as this AI agent's body")
 	}
 	rec, _ := s.DataStore.GetCredential(b.CredentialSAID)
 	if rec == nil || rec.Status == "revoked" {

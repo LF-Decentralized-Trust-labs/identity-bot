@@ -85,6 +85,12 @@ var publicRoutes = map[string]string{
 	"POST /api/agent-host/brain-sign-in":        "an AI agent's body borrowing its brain's sign-in for one run, sealed and signed",
 	"POST /api/agent-host/brain-sign-in/renew":  "an AI agent's body keeping a borrowed sign-in while its run goes on, sealed and signed",
 	"POST /api/agent-host/brain-sign-in/return": "an AI agent's body giving back a borrowed sign-in, sealed and signed",
+	// A body saying whether it has a screen and waiting to be watched, and
+	// sending pictures of it while somebody does. Each handler admits only a
+	// sealed request a live body signed, and a picture is kept only for a
+	// viewing of that body.
+	"POST /api/agent-host/screen":       "an AI agent's body saying what screen it has and waiting to be watched, sealed and signed",
+	"POST /api/agent-host/screen/frame": "an AI agent's body sending a picture of its screen while watched, sealed and signed",
 
 	// --- carrying a request nothing in the middle can read ---
 	// Open in the same sense the message endpoint is open: what arrives is an
@@ -698,6 +704,12 @@ var sessionForbidden = map[string]string{
 	"POST /api/mcp/agents/{id}/body-enrolment":       "an enrolment string lets a machine ask to speak as an AI agent, after the session that made it ends",
 	"POST /api/mcp/agents/{id}/bodies/{bid}/approve": "approving a body lets a machine speak as an AI agent, after the session that approved it ends",
 	"POST /api/mcp/agents/{id}/bodies/{bid}/reject":  "rejecting a body hands back a fresh enrolment string, which outlives the session that asked for it",
+	// Watching an AI agent's screen is open to a session; taking control of it
+	// is not. Whoever clicks and types on the AI agent's machine can do what
+	// that machine can, which is more than a convenience granted for a while
+	// should carry.
+	routeScreenControl: "taking control of an AI agent's screen lets whoever holds the session click and type on its machine",
+	routeScreenInput:   "clicking and typing on an AI agent's machine is done from a device that can take control, not a session",
 }
 
 // requiresTheKeyItself reports whether a route is one a browser session must

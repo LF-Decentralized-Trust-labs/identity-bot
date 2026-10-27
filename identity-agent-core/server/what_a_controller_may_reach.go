@@ -188,10 +188,15 @@ var controllerOwnerOnly = map[string]string{
 }
 
 // controllerMinimumScore names the actions that need a score other than the
-// default of 80, keyed the same way. Empty today: every action open to a
-// controller needs 80. Kept so an action can be set higher, or lower, without
-// changing how the decision is made.
-var controllerMinimumScore = map[string]int{}
+// default of 80, keyed the same way, so an action can be set higher, or lower,
+// without changing how the decision is made.
+//
+// Taking control of an AI agent's screen needs more than watching it: the
+// person can then do whatever that AI agent's machine can.
+var controllerMinimumScore = map[string]int{
+	routeScreenControl: takeControlMinimumScore,
+	routeScreenInput:   takeControlMinimumScore,
+}
 
 // isOwnerOnly reports whether this route is closed to a controller at any
 // score, and why.

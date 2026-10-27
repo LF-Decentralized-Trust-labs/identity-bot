@@ -3,6 +3,7 @@
 //	agent-host enrol <enrolment string> [--placement computer|vm|cloud|device]
 //	agent-host status
 //	agent-host run [--brain claude-code|codex|grok] [--brain-path PATH] [--brain-user USER] [--workspace DIR]
+//	               [--screen control|watch|off] [--display :0]
 //	agent-host move <new address of the same Identity Agent>
 //	agent-host call <METHOD> <path> [json body]
 //	agent-host brain-user [USER]
@@ -47,6 +48,9 @@ func main() {
 	brainPath := fs.String("brain-path", "", "the full path of the brain's program")
 	brainUser := fs.String("brain-user", "", "the operating-system user the brain runs as")
 	workspace := fs.String("workspace", "", "the brain's working directory")
+	screenMode := fs.String("screen", "control", "what people allowed to may do with this machine's screen: "+
+		"control (watch it, and take control when the Identity Agent lets them), watch (only watch it) or off")
+	display := fs.String("display", "", "the X display to show, when it is not $DISPLAY")
 	// Flags may come before or after the arguments, as people type them.
 	var args []string
 	rest := os.Args[2:]
@@ -112,9 +116,23 @@ func main() {
 		} else if *brainUser != "" {
 			fail(fmt.Errorf("--brain-user needs --brain and --brain-path: the brain's program, installed for that user"))
 		}
+		mode, err := agenthost.ParseScreenMode(*screenMode)
+		if err != nil {
+			fail(err)
+		}
+		var scr agenthost.Screen
+		if mode != agenthost.ScreenOff {
+			if scr, err = agenthost.OpenScreen(*display); err != nil {
+				fmt.Fprintf(os.Stderr, "agent-host: not offering a screen: %v\n", err)
+				scr = nil
+			} else {
+				defer scr.Close()
+			}
+		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		if err := h.Run(ctx, agenthost.RunOptions{Brain: brain, Runner: runner, Workspace: *workspace}); err != nil {
+		if err := h.Run(ctx, agenthost.RunOptions{Brain: brain, Runner: runner, Workspace: *workspace,
+			Screen: scr, ScreenMode: mode}); err != nil {
 			fail(err)
 		}
 	case "move":
@@ -232,6 +250,7 @@ func usage() {
 		"  agent-host enrol <enrolment string> [--placement computer|vm|cloud|device]\n"+
 		"  agent-host status\n"+
 		"  agent-host run [--brain claude-code|codex|grok] [--brain-path PATH] [--brain-user USER] [--workspace DIR]\n"+
+		"                 [--screen control|watch|off] [--display :0]\n"+
 		"  agent-host move <new address of the same Identity Agent>\n"+
 		"  agent-host call <METHOD> <path> [json body]\n"+
 		"  agent-host brain-user [USER]\n"+

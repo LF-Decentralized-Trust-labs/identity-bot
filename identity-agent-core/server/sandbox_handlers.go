@@ -55,6 +55,7 @@ func (s *CoreServer) sandboxRoutes(r chi.Router) {
 	s.mountBodyRoutes(r)
 	s.mountConversationRoutes(r)
 	s.mountBrainSignInRoutes(r)
+	s.mountScreenRoutes(r)
 	r.Post("/mcp/tokens", s.handleMintMCPToken)
 	r.Get("/mcp/tokens", s.handleListMCPTokens)
 	r.Delete("/mcp/tokens/{name}", s.handleRevokeMCPToken)
