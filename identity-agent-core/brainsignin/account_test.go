@@ -1,41 +1,12 @@
 package brainsignin_test
 
 import (
-	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	"identity-agent-core/brainsignin"
 	"identity-agent-core/brainsignin/brainsignintest"
 )
-
-// The cap counts the account, not the AI agent: two AI agents signed in to
-// one subscription share its places. Before, each AI agent's sign-in had a cap
-// of its own, so ten AI agents on one plan could hold fifty runs at once.
-func TestTwoAIAgentsOnOneAccountShareOneCap(t *testing.T) {
-	l := brainsignin.LeasesIn(t.TempDir())
-	now := time.Now()
-	const pool = "claude-code/secret/abc"
-	if _, _, err := l.Lend("agent-a", pool, "fp", "h1", 2, now); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := l.Lend("agent-b", pool, "fp", "h2", 2, now); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := l.Lend("agent-c", pool, "fp", "h3", 2, now); !errors.Is(err, brainsignin.ErrInUse) {
-		t.Fatalf("a third AI agent on the same account ran past its cap of 2: %v", err)
-	}
-	if _, _, err := l.Lend("agent-c", "claude-code/secret/other", "fp2", "h3", 2, now); err != nil {
-		t.Fatalf("another account's runs counted against this one: %v", err)
-	}
-	if n := l.InUseByAccount(pool, "agent-a", now); n != 2 {
-		t.Fatalf("%d runs of the account in use, want 2", n)
-	}
-	if n := l.InUse("agent-a", now); n != 1 {
-		t.Fatalf("%d runs of agent-a in use, want 1", n)
-	}
-}
 
 // A brainsignin.Codex or brainsignin.Grok sign-in names its account, so two sign-ins of one account
 // pool together even when their tokens differ; a Claude token or a key pools by
@@ -145,46 +116,9 @@ func TestASubscriptionIsAlwaysCapped(t *testing.T) {
 	}
 }
 
-// A lapsed lease holds no place, but can still be given back, so what its run
-// sends back with it is not lost. Before, a lease that lapsed was forgotten at
-// once, and a body that had been out of reach could not return it.
-func TestALapsedLeaseCanStillBeGivenBack(t *testing.T) {
-	l := brainsignin.LeasesIn(t.TempDir())
-	now := time.Now()
-	lease, _, err := l.Lend("agent-a", "pool", "fp", "h1", 1, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	later := now.Add(brainsignin.LeaseTTL + time.Minute)
-	if lapsed, err := l.Lapsed(later); err != nil || len(lapsed) != 1 {
-		t.Fatalf("lapsed: %v %v", lapsed, err)
-	}
-	if lapsed, _ := l.Lapsed(later); len(lapsed) != 0 {
-		t.Fatal("a lapse was reported twice")
-	}
-	if _, _, err := l.Lend("agent-b", "pool", "fp", "h2", 1, later); err != nil {
-		t.Fatalf("a lapsed lease still held its place: %v", err)
-	}
-	if _, err := l.Renew(lease.ID, "h1", "agent-a", later); !errors.Is(err, brainsignin.ErrNoLease) {
-		t.Fatalf("a lapsed lease was renewed: %v", err)
-	}
-	got, err := l.Return(lease.ID, "h1", "agent-a", later)
-	if got.ID != lease.ID || got.Lent != "fp" || !errors.Is(err, brainsignin.ErrNoLease) {
-		t.Fatalf("returning a lapsed lease: %+v %v", got, err)
-	}
-	if got, _ := l.Return(lease.ID, "h1", "agent-a", later); got.ID != "" {
-		t.Fatal("a lease was returned twice")
-	}
-	old, _, _ := l.Lend("agent-c", "pool-c", "fp", "h3", 0, now)
-	_, _ = l.Lapsed(later)
-	if got, _ := l.Return(old.ID, "h3", "agent-c", later.Add(brainsignin.LapsedKept)); got.ID != "" {
-		t.Fatal("a lease that lapsed long ago was still remembered")
-	}
-}
-
 // An account's cap is one number, whichever of its AI agents set it.
 func TestAnAccountHasOneCap(t *testing.T) {
-	l := brainsignin.LeasesIn(t.TempDir())
+	l := brainsignin.CapsIn(t.TempDir())
 	if _, ok := l.Cap("codex/account/a", "agent-a"); ok {
 		t.Fatal("a cap before any was set")
 	}

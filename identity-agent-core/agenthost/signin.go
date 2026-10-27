@@ -404,27 +404,34 @@ func (e *leaseLapsed) Error() string {
 	return fmt.Sprintf("the sign-in's lease has lapsed (%d)", e.status)
 }
 
-// returnBackoff is how long giveBack waits before each further try.
+// returnBackoff is how long a return waits before each further try.
 var returnBackoff = []time.Duration{2 * time.Second, 5 * time.Second, 10 * time.Second}
 
-// giveBack returns a borrowed sign-in, whatever became of the run: with its
-// own time limit, so a run cancelled or timed out still gives it back. It
-// tries again, waiting longer each time, while the Identity Agent cannot be
-// reached. A sign-in the run's program renewed that still could not be given
+// retryReturn gives something lent back, whatever became of the run: each try
+// with its own time limit, so a run cancelled or timed out still gives it
+// back, and tried again, waiting longer each time, while the Identity Agent
+// cannot be reached. It returns the last try's outcome. Every kind of lend is
+// given back this way.
+func retryReturn(give func(ctx context.Context) error) error {
+	var err error
+	for i := 0; ; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		err = give(ctx)
+		cancel()
+		if returnIsFinal(err) || i >= len(returnBackoff) {
+			return err
+		}
+		time.Sleep(returnBackoff[i])
+	}
+}
+
+// giveBack returns a borrowed sign-in, whatever became of the run
+// (retryReturn). A sign-in the run's program renewed that still could not be given
 // back is kept on this machine for the next time it reaches the Identity
 // Agent (pendingReturn): the one lent may no longer work, so it must not be
 // lost with the run.
 func (h *Host) giveBack(b *Borrowed, logf func(string, ...any)) {
-	var err error
-	for i := 0; ; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		err = h.Return(ctx, b)
-		cancel()
-		if returnIsFinal(err) || i >= len(returnBackoff) {
-			break
-		}
-		time.Sleep(returnBackoff[i])
-	}
+	err := retryReturn(func(ctx context.Context) error { return h.Return(ctx, b) })
 	switch {
 	case err != nil && returnIsFinal(err):
 		logf("[agent-host] %v; nothing more to give back", err)

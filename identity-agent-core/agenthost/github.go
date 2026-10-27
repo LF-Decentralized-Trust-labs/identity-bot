@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // An AI agent granted GitHub repositories is lent, for each run, a token that
@@ -83,7 +82,24 @@ func (h *Host) ReturnGitHub(ctx context.Context, g *LentGitHub) error {
 	for i := range g.tokens {
 		g.tokens[i].Token = ""
 	}
-	body, _ := json.Marshal(map[string]string{"lend_id": g.LendID})
+	return h.returnGitHub(ctx, map[string]any{"lend_id": g.LendID})
+}
+
+// ReturnEveryGitHub gives back whatever GitHub access this body still holds
+// from before it started — a run it was in when it stopped — so the Identity
+// Agent withdraws it at once rather than when it lapses. An Identity Agent
+// that lends no GitHub access, or holds nothing for this body, has nothing to
+// take back.
+func (h *Host) ReturnEveryGitHub(ctx context.Context) error {
+	err := h.returnGitHub(ctx, map[string]any{"every": true})
+	if errors.Is(err, ErrLeaseUnknown) || errors.Is(err, errReturnRefused) {
+		return nil
+	}
+	return err
+}
+
+func (h *Host) returnGitHub(ctx context.Context, q map[string]any) error {
+	body, _ := json.Marshal(q)
 	code, out, err := h.CallContext(ctx, "POST", "/api/agent-host/github/return", body)
 	if err != nil {
 		return err
@@ -103,18 +119,13 @@ func (h *Host) ReturnGitHub(ctx context.Context, g *LentGitHub) error {
 // giveGitHubBack returns GitHub access whatever became of the run, trying
 // again while the Identity Agent cannot be reached. If it still cannot be,
 // the tokens lapse at GitHub within the hour on their own.
+//
+// Nothing is kept on this machine to give back later: a GitHub return carries
+// nothing but the lend's name, and the Identity Agent withdraws what is not
+// returned when its grant ends, when this body starts again, or when the
+// tokens lapse.
 func (h *Host) giveGitHubBack(g *LentGitHub, logf func(string, ...any)) {
-	var err error
-	for i := 0; ; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		err = h.ReturnGitHub(ctx, g)
-		cancel()
-		if returnIsFinal(err) || i >= len(returnBackoff) {
-			break
-		}
-		time.Sleep(returnBackoff[i])
-	}
-	if err != nil {
+	if err := retryReturn(func(ctx context.Context) error { return h.ReturnGitHub(ctx, g) }); err != nil {
 		logf("[agent-host] the run's GitHub access could not be returned: %v; it lapses at GitHub within the hour", err)
 	}
 }
@@ -147,33 +158,47 @@ var githubVarPrefixes = []string{"GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"}
 // Env is the lent access as the brain's environment. self is this program,
 // which git runs as its credential helper.
 //
-// gh reads GH_TOKEN: the write token when the AI agent may write somewhere,
-// otherwise the read one. git asks this program for a token per repository, so
-// a repository it may only read gets the read token. Every credential helper
-// the machine or the brain's user configured is set aside for the run, for
-// every host, so git uses nothing else. Commits name the AI agent as author and
-// committer, at the GitHub App's address, so GitHub shows them as the App's.
+// gh reads GH_TOKEN, one token for every repository: the write token when the
+// AI agent may write every repository it uses; otherwise the read token, which
+// the Identity Agent makes for every repository it may use, so gh can read all
+// of them. In that case gh cannot push or open a pull request; git pushes
+// with the write token, and a brain that must open a pull request with gh
+// gives it AGENT_HOST_GITHUB_WRITE_TOKEN for that one command.
+//
+// git asks this program for a token per repository: the write token for one
+// it may write, the read token for one it may only read. Every credential
+// helper the machine or the brain's user configured is set aside for the run,
+// for every host, so git uses nothing else; and an SSH address on GitHub is
+// rewritten to HTTPS, so a key in ~/.ssh is not used for GitHub instead of
+// what was lent. Commits name the AI agent as author and committer, at the
+// GitHub App's address, so GitHub shows them as the App's.
 func (g *LentGitHub) Env(self string) []string {
 	var env []string
-	gh := ""
+	write, read := "", ""
 	for _, t := range g.tokens {
 		switch t.Access {
 		case "write":
 			env = append(env, envGitHubWriteToken+"="+t.Token, envGitHubWriteRepos+"="+strings.Join(t.Repositories, ","))
-			gh = t.Token
+			write = t.Token
 		case "read":
 			env = append(env, envGitHubReadToken+"="+t.Token, envGitHubReadRepos+"="+strings.Join(t.Repositories, ","))
-			if gh == "" {
-				gh = t.Token
-			}
+			read = t.Token
 		}
 	}
+	gh := firstNonEmpty(read, write)
 	host := g.GitHost
+	https := "https://" + host + "/"
 	config := [][2]string{
 		// An empty helper sets aside every helper configured before it.
 		{"credential.helper", ""},
 		{"credential.https://" + host + ".helper", gitHelper(self)},
 		{"credential.https://" + host + ".useHttpPath", "true"},
+		// SSH addresses on GitHub, for fetching and for pushing, go over
+		// HTTPS instead, with what was lent.
+		{"url." + https + ".insteadOf", "git@" + host + ":"},
+		{"url." + https + ".insteadOf", "ssh://git@" + host + "/"},
+		{"url." + https + ".pushInsteadOf", "git@" + host + ":"},
+		{"url." + https + ".pushInsteadOf", "ssh://git@" + host + "/"},
 	}
 	env = append(env, "GH_TOKEN="+gh, envGitHubHost+"="+host, "GIT_TERMINAL_PROMPT=0",
 		"GIT_CONFIG_COUNT="+strconv.Itoa(len(config)))

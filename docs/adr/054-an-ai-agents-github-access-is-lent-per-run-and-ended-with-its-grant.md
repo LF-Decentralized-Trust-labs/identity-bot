@@ -37,11 +37,16 @@ brain's key.
 
 Each is lent, never invoked, so its executor type is `lent_credential`, which the
 gateway reserves and does not offer as a tool. A grant of either names its
-repositories in its resource constraints, as `repository`: a list of `owner/name`. A
-grant that names none gives none. Write includes read. The repositories an AI agent
-may use are set in one call, which re-issues its grant and keeps its other
+repositories in its resource constraints, as `repository`: a list of `owner/name`,
+and as `repository_id`: GitHub's number for each, in the same place. The number is
+what is granted. A repository deleted and made again under the same name has another
+number, so it is not covered, and a name with no number gives nothing. A grant that
+names none gives none. Write includes read, so a repository it may write is named
+under read as well: a run refused write by the one check still reads it. The
+repositories an AI agent may use are set in one call, which looks each one's number
+up through the App's installation, re-issues its grant and keeps its other
 capabilities and limits as they are. A repository the organisation's GitHub App cannot
-reach is refused.
+reach is refused. Every repository the App reaches is listed, however many there are.
 
 **The organisation connects a GitHub App once.** A person creates the App and installs
 it on the repositories the organisation lets AI agents use; GitHub asks them to
@@ -52,6 +57,11 @@ Otherwise the three are kept in the vault, with the App's name, its bot account 
 the account it is installed on. The private key is never returned by any route, never
 logged, and never leaves the vault: it is used only to sign the short statement
 (RS256, valid nine minutes) with which the Identity Agent asks GitHub for a token.
+
+Replacing the App — another App, another installation, or the same one with a new
+key — withdraws everything lent under the one it replaces. Each lend records the App,
+installation and key that made it, so a lend made under one that is no longer
+connected is withdrawn too.
 
 Connecting, replacing and disconnecting the App, listing the repositories it reaches,
 and granting an AI agent repositories are the application's work: open to the owner
@@ -73,16 +83,30 @@ Agent:
 2. runs the one check (ADR-050) for each capability it would lend: the capability is
    offered as a lent credential and enabled, the AI agent's grant gives it, and the
    AI agent passes its minimum score;
-3. asks GitHub for an installation token limited to exactly the repositories the grant
-   gives for that access, with exactly that access's permissions — `contents: write`,
-   `pull_requests: write` and `metadata: read` for write; `contents: read` and
-   `metadata: read` for read. A grant with both is two tokens, since one token has one
-   set of permissions for all its repositories;
-4. checks GitHub's answer is no wider than it asked, and withdraws a token that is;
-5. records the lend in the vault, with its tokens, so it can withdraw them early, and
-   writes the lend to the signed governance record as the AI agent, naming the body,
+3. asks GitHub for installation tokens limited to exactly the repositories the grant
+   gives, by GitHub's numbers for them (`repository_ids`), each with exactly one
+   access's permissions — `contents: write`, `pull_requests: write` and
+   `metadata: read` for write; `contents: read` and `metadata: read` for read. One
+   token has one set of permissions for all its repositories, so a grant that writes
+   some repositories and only reads others is two tokens: one that writes those it
+   may write, and one that reads every repository it may use;
+4. checks GitHub's answer is no wider than it asked — a selection, not every
+   repository; at least one repository, and only those asked for, by number; and
+   exactly the permissions asked — and withdraws a token that is not;
+5. records the lend in the vault, in the one record of everything it lends (with
+   brains' sign-ins), with its tokens, so it can withdraw them early, and the App,
+   installation and key that made them;
+6. checks the lend again now it is recorded, so a grant, body or App that changed
+   while GitHub was making the tokens is withdrawn, not handed over. A lend that
+   cannot be checked — what is lent, or the App, cannot be read — is withdrawn and
+   refused too;
+7. writes the lend to the signed governance record as the AI agent, naming the body,
    the repositories and the access, never a token;
-6. answers sealed to the keys the body enrolled with.
+8. answers sealed to the keys the body enrolled with.
+
+A body holds one GitHub lend at a time. Borrowing again withdraws what it held, and a
+body that starts again gives back whatever it held before, so nothing from a run it
+stopped in stays lent until it lapses.
 
 A body may name fewer repositories than its grant gives. One its grant does not give
 is refused. An AI agent with no repositories is told so, and runs as before.
@@ -91,14 +115,24 @@ GitHub makes each token last an hour at most. A run is shorter, so a token is ne
 renewed.
 
 **The body gives it to the brain's environment, and nowhere else.** `GH_TOKEN` carries
-the write token for `gh`, or the read token when the AI agent may only read. git is
-pointed, through `GIT_CONFIG_*` variables, at the body's own program as its credential
-helper. The helper reads the tokens from the environment and answers git with the
-write token for a repository the AI agent may write, the read token for one it may
-only read, and nothing for any other. Every credential helper configured before is set
-aside for the run, and every GitHub token or git setting in the machine's own
-environment is withheld, so neither program falls back on access somebody set up by
-hand. Nothing is written to disk, and no token goes on a command line.
+one token for `gh`: the write token when the AI agent may write every repository it
+uses, otherwise the token that reads all of them. git is pointed, through
+`GIT_CONFIG_*` variables, at the body's own program as its credential helper. The
+helper reads the tokens from the environment and answers git with the write token for
+a repository the AI agent may write, the read token for one it may only read, and
+nothing for any other. Every credential helper configured before is set aside for the
+run, and every GitHub token or git setting in the machine's own environment is
+withheld, so neither program falls back on access somebody set up by hand. An SSH
+address on GitHub (`git@github.com:` or `ssh://git@github.com/`) is rewritten to
+HTTPS, for fetching and pushing, so it uses what was lent rather than a key in
+`~/.ssh`. Nothing is written to disk, and no token goes on a command line. A brain run
+as its own user is passed all of it through sudo's `--preserve-env`, which its sudoers
+rule allows (`SETENV`).
+
+The brain holds the tokens in its environment for the run. It can read them, and could
+put them in what it writes — its output, a file, a commit. What it could leak is
+short-lived and narrow: each token works only for the repositories lent, for an hour at
+most, and is withdrawn at GitHub when the run gives it back.
 
 Commits name the AI agent as their author and committer, at the address of the App's
 bot account, so GitHub shows them as the App's and each names the AI agent.
@@ -110,9 +144,12 @@ is withdrawn the same way, at once:
 
 - when any credential is revoked or withdrawn — the AI agent's grant, or a body's;
 - when an AI agent's grant is re-issued, so taking a repository away, or turning write
-  into read, withdraws the tokens that gave it;
+  into read, withdraws the tokens that gave it — only those: turning write into read
+  withdraws the write token, and the run keeps the token that reads;
 - when a machine is removed as an AI agent's body;
-- when the App is disconnected or replaced, which withdraws them all;
+- when the App is disconnected or replaced, including a new key for the same App,
+  which withdraws them all;
+- when the body borrows again, or starts again;
 - and every minute, which covers a grant that lapses by time.
 
 A withdrawal GitHub cannot be reached for is tried again, each minute, until the token
@@ -128,14 +165,27 @@ would have lapsed. A token that has lapsed is let go.
   what it holds during that run, for as long as the token lasts or until it is
   withdrawn, whichever comes first: an hour at most.
 - `gh` is given one token. An AI agent that may write to some repositories and only
-  read others reaches the read-only ones through git, but not through `gh`.
+  read others is given the one that reads them all, so `gh` reads every repository it
+  may use but cannot push or open a pull request; git pushes with the write token, and
+  a brain opens a pull request with `gh` by giving it `AGENT_HOST_GITHUB_WRITE_TOKEN`
+  for that command.
+- git's own way to GitHub is the token lent. A key in `~/.ssh` still works for a host
+  name that is not `github.com` — an alias in `~/.ssh/config` — and a person's own
+  `pushInsteadOf` rule that sends an HTTPS address over SSH still applies. A body
+  lent GitHub access should hold no GitHub key of its own.
 - Commits appear on GitHub as the App's, not a person's. The author line names the AI
   agent, and the governance record says which AI agent was lent which repository,
   when, and on which machine.
 - The organisation creates its GitHub App on GitHub's own site; the Identity Agent
   cannot create one or its key. The App needs the permissions above at least.
-- A brain's sign-in and a service's access are lent by two routes with one shape. They
-  share the checks that decide whether anything may be lent, and the way the lend is
-  recorded; what is lent, and how it is ended, differs by service.
+- A brain's sign-in and a service's access are lent by two routes into one record of
+  everything lent, kept in the vault. They share the checks that decide whether
+  anything may be lent, the way a lend is held, given back, lapsed and recorded, and the
+  one sweep that ends what a grant no longer covers. What is lent, and how it is
+  withdrawn, differs by service. So revoking an AI agent ends its brain's lease at once
+  too: the lease holds no place and cannot be renewed, though the run keeps the sign-in
+  it was given until it ends (ADR-051), and can still give back one its program
+  refreshed. Leases an earlier version kept in a file of their own are moved into the
+  record when the vault can take them.
 - Not yet proven against GitHub itself: the tests use a stand-in that checks the App's
   signature and records the tokens made and withdrawn.

@@ -94,7 +94,7 @@ func (s *CoreServer) withdrawCredential(rec *store.CredentialRecord) (bool, stri
 		if err := s.queueRevocation(rec.SAID); err != nil && !errors.Is(err, errAlreadyAsked) {
 			return false, credentialStatusWithdrawing, fmt.Errorf("it is no longer in force here, and its withdrawal could not be asked for: %w", err)
 		}
-		s.withdrawLentGitHubAccessNoLongerGranted("a credential is being withdrawn")
+		s.endLendsNoLongerGranted("a credential is being withdrawn")
 		return false, credentialStatusWithdrawing, nil
 	}
 	revoked, err := s.revokeIssuedCredential(rec)
@@ -105,7 +105,7 @@ func (s *CoreServer) withdrawCredential(rec *store.CredentialRecord) (bool, stri
 	// What was lent on the strength of a grant or a body's credential is
 	// withdrawn once the credential is: revoking an AI agent ends its access at
 	// once, not when what it was lent lapses.
-	s.withdrawLentGitHubAccessNoLongerGranted("a credential was revoked")
+	s.endLendsNoLongerGranted("a credential was revoked")
 	return revoked, "revoked", err
 }
 

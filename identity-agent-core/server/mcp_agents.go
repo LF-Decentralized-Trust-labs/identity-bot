@@ -568,7 +568,7 @@ func (s *CoreServer) regrantAgent(id string, by authority, change func(candidate
 
 	log.Printf("[mcp] agent %s ceiling: %v -> %v (%d token(s) updated)",
 		updated.PairwiseAID, before.Capabilities, updated.Capabilities, touched)
-	s.withdrawLentGitHubAccessNoLongerGranted("the AI agent's grant changed")
+	s.endLendsNoLongerGranted("the AI agent's grant changed")
 	return regranted{before: before, updated: *updated, grantSAID: grantSAID, touched: touched}, 0, nil
 }
 

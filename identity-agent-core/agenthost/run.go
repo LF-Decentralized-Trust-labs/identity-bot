@@ -148,6 +148,15 @@ func (h *Host) Run(ctx context.Context, o RunOptions) error {
 		defer stopScreen()
 		go h.ShowScreen(screenCtx, o.Screen, o.ScreenMode, o.Log)
 	}
+	// A body that stopped mid-run may still hold GitHub access from it: given
+	// back now, so it is withdrawn at once rather than when it lapses. Tried
+	// once, so an Identity Agent out of reach does not hold up the start; the
+	// next run's borrowing withdraws it as well.
+	gctx, gcancel := context.WithTimeout(ctx, 30*time.Second)
+	if err := h.ReturnEveryGitHub(gctx); err != nil {
+		logf("[agent-host] GitHub access from before this start could not be given back yet: %v", err)
+	}
+	gcancel()
 
 	backoff := time.Second
 	for {

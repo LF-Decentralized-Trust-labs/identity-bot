@@ -11,6 +11,7 @@ import (
 
 	"identity-agent-core/asset"
 	"identity-agent-core/brainsignin"
+	"identity-agent-core/lending"
 	"identity-agent-core/sandbox"
 
 	"github.com/go-chi/chi/v5"
@@ -140,7 +141,7 @@ var refreshMu sync.Mutex
 // borrowing AI agent (same_as) is a copy of it — since the refresh retired
 // that one for all of them. Another sign-in of the same account, made
 // separately, is left alone. It says what it did, for the record.
-func (s *CoreServer) keepRefreshedSignIn(a asset.Asset, lease brainsignin.Lease, content string) (why string, tryAgain bool) {
+func (s *CoreServer) keepRefreshedSignIn(a asset.Asset, lease lending.Lend, content string) (why string, tryAgain bool) {
 	refreshMu.Lock()
 	defer refreshMu.Unlock()
 	vault, err := s.brainVaultWritable()

@@ -221,7 +221,8 @@ One-time setup, as an administrator (each sudo asks for your password):
        sudo -u %[1]s -H mkdir -m 711 /Users/%[1]s/workspace
 
   4. Let %[2]s start the brain's program as %[1]s, and nothing else. SETENV lets the host pass
-     each turn's tool token and sign-in in the environment rather than on the command line.
+     each turn's tool token, sign-in and GitHub access in the environment rather than on the
+     command line.
      Codex and Grok keep their sign-in in a file, so the host starts them through this program,
      which puts a lent sign-in in place for one run and takes it away after. The rule is written
      to a file, checked by visudo, and only then installed, so a mistake cannot lock sudo:
@@ -230,8 +231,9 @@ One-time setup, as an administrator (each sudo asks for your password):
        [ -n "$BRAIN" ] && printf '%%s\n' "%[2]s ALL=(%[1]s) NOPASSWD:SETENV: $BRAIN, /usr/local/bin/agent-host brain-home -- $BRAIN *" >> /tmp/agent-host.sudoers
        sudo visudo -cf /tmp/agent-host.sudoers && sudo install -m 440 /tmp/agent-host.sudoers /etc/sudoers.d/agent-host
 
-  5. Install this program where %[1]s can run it. The brain starts it for its tools, and
-     your own folders are closed to other users. Then run the host from there:
+  5. Install this program where %[1]s can run it. The brain starts it for its tools, git starts
+     it for the GitHub access a run is lent, and your own folders are closed to other users.
+     Then run the host from there:
        sudo mkdir -p /usr/local/bin && sudo install -m 755 %[3]s /usr/local/bin/agent-host
        /usr/local/bin/agent-host run --brain claude-code --brain-path /Users/%[1]s/.local/bin/claude --brain-user %[1]s \
          --workspace /Users/%[1]s/workspace
@@ -245,14 +247,17 @@ One-time setup, as an administrator:
        sudo -u %[1]s -H sh -c 'curl -fsSL https://claude.ai/install.sh | bash'
        sudo -u %[1]s -H /home/%[1]s/.local/bin/claude      (then type /login)
   3. sudo -u %[1]s -H mkdir -m 711 /home/%[1]s/workspace
-  4. Let %[2]s start the brain's program as %[1]s, and nothing else. The rule is checked by visudo
-     before it is installed, so a mistake cannot lock sudo. For Codex or Grok, which the host starts
-     through this program, BRAIN names the program's full path:
+  4. Let %[2]s start the brain's program as %[1]s, and nothing else. SETENV lets the host pass
+     each turn's tool token, sign-in and GitHub access in the environment rather than on the
+     command line. The rule is checked by visudo before it is installed, so a mistake cannot lock
+     sudo. For Codex or Grok, which the host starts through this program, BRAIN names the
+     program's full path:
        BRAIN="$(sudo -u %[1]s -H sh -lc 'command -v codex || command -v grok')"   # leave empty for Claude Code only
        printf '%%s\n' '%[2]s ALL=(%[1]s) NOPASSWD:SETENV: /home/%[1]s/.local/bin/claude' > /tmp/agent-host.sudoers
        [ -n "$BRAIN" ] && printf '%%s\n' "%[2]s ALL=(%[1]s) NOPASSWD:SETENV: $BRAIN, /usr/local/bin/agent-host brain-home -- $BRAIN *" >> /tmp/agent-host.sudoers
        sudo visudo -cf /tmp/agent-host.sudoers && sudo install -m 440 /tmp/agent-host.sudoers /etc/sudoers.d/agent-host
-  5. Install this program where %[1]s can run it (the brain starts it for its tools), and run the host from there:
+  5. Install this program where %[1]s can run it (the brain starts it for its tools, and git for the
+     GitHub access a run is lent), and run the host from there:
        sudo install -m 755 %[3]s /usr/local/bin/agent-host
        /usr/local/bin/agent-host run --brain claude-code --brain-path /home/%[1]s/.local/bin/claude --brain-user %[1]s \
          --workspace /home/%[1]s/workspace

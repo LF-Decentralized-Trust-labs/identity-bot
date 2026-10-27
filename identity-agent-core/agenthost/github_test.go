@@ -2,6 +2,8 @@ package agenthost
 
 import (
 	"bytes"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,7 +13,7 @@ func lent() *LentGitHub {
 	return &LentGitHub{LendID: "gl_1", GitHost: "github.com", AuthorName: "Dev worker",
 		AuthorEmail: "9+acme-agents[bot]@users.noreply.github.com", tokens: []lentToken{
 			{Access: "write", Repositories: []string{"acme/sandbox"}, Token: "ghs_WRITE"},
-			{Access: "read", Repositories: []string{"acme/docs"}, Token: "ghs_READ"},
+			{Access: "read", Repositories: []string{"acme/docs", "acme/sandbox"}, Token: "ghs_READ"},
 		}}
 }
 
@@ -55,14 +57,20 @@ func TestGitIsGivenTheTokenForEachRepository(t *testing.T) {
 	}
 }
 
-// The helper git runs names this program and no token; gh is given the write
-// token; every helper configured before is set aside; commits name the AI
-// agent.
+// The helper git runs names this program and no token; gh is given the token
+// that reads every repository — or, when every repository may be written, the
+// write token; every helper configured before is set aside; commits name the
+// AI agent.
 func TestTheBrainsEnvironmentCarriesGitHubAccessAndNothingElseDoes(t *testing.T) {
 	list := lent().Env(filepath.FromSlash("/opt/it's/agent-host"))
 	env := envOf(list)
-	if env["GH_TOKEN"] != "ghs_WRITE" {
+	if env["GH_TOKEN"] != "ghs_READ" {
 		t.Fatalf("gh is given %q", env["GH_TOKEN"])
+	}
+	writeOnly := lent()
+	writeOnly.tokens = writeOnly.tokens[:1]
+	if gh := envOf(writeOnly.Env("/x"))["GH_TOKEN"]; gh != "ghs_WRITE" {
+		t.Fatalf("gh, for an AI agent that may write everything it uses, is given %q", gh)
 	}
 	if env["GIT_CONFIG_KEY_0"] != "credential.helper" || env["GIT_CONFIG_VALUE_0"] != "" {
 		t.Fatal("the helpers configured before are not set aside")
@@ -93,5 +101,43 @@ func TestTheBrainsEnvironmentCarriesGitHubAccessAndNothingElseDoes(t *testing.T)
 	// Without GitHub access, the machine's own is left as it was.
 	if got := withCredentials(base, []string{"ANTHROPIC_API_KEY=k"}); !strings.Contains(strings.Join(got, "\n"), "GH_TOKEN=a-machine-token") {
 		t.Fatal("a run lent no GitHub access lost the machine's own")
+	}
+}
+
+// An SSH address on GitHub is used over HTTPS, with what was lent, for
+// fetching and for pushing: a key in ~/.ssh is not used for GitHub instead.
+func TestAnSSHAddressOnGitHubUsesWhatWasLent(t *testing.T) {
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git is not installed")
+	}
+	dir := t.TempDir()
+	env := append(withCredentials(os.Environ(), lent().Env("/usr/local/bin/agent-host")), "HOME="+dir)
+	run := func(args ...string) string {
+		cmd := exec.Command(git, args...)
+		cmd.Dir, cmd.Env = dir, env
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	run("init", "-q")
+	for remote, url := range map[string]string{"a": "git@github.com:acme/sandbox.git", "b": "ssh://git@github.com/acme/docs.git",
+		"c": "git@gitlab.example:acme/other.git"} {
+		run("remote", "add", remote, url)
+	}
+	for _, c := range []struct{ remote, push, want string }{
+		{"a", "", "https://github.com/acme/sandbox.git"}, {"a", "--push", "https://github.com/acme/sandbox.git"},
+		{"b", "", "https://github.com/acme/docs.git"}, {"b", "--push", "https://github.com/acme/docs.git"},
+		{"c", "", "git@gitlab.example:acme/other.git"},
+	} {
+		args := []string{"remote", "get-url"}
+		if c.push != "" {
+			args = append(args, c.push)
+		}
+		if got := run(append(args, c.remote)...); got != c.want {
+			t.Errorf("%s %s: %s, want %s", c.remote, c.push, got, c.want)
+		}
 	}
 }

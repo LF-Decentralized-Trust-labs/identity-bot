@@ -14,6 +14,7 @@ import (
 	"identity-agent-core/agentbody"
 	"identity-agent-core/asset"
 	"identity-agent-core/brainsignin"
+	"identity-agent-core/lending"
 	"identity-agent-core/sandbox"
 
 	"github.com/go-chi/chi/v5"
@@ -64,7 +65,13 @@ func (s *CoreServer) brainVault() (*sandbox.Manager, error) {
 	return s.SandboxManager, nil
 }
 
-func (s *CoreServer) brainLeases() *brainsignin.Leases { return brainsignin.LeasesIn(s.DataDir) }
+// brainCaps are the caps on each account's simultaneous runs.
+func (s *CoreServer) brainCaps() *brainsignin.Caps { return brainsignin.CapsIn(s.DataDir) }
+
+// brainRunsInUse is how many runs hold a sign-in now that match.
+func (s *CoreServer) brainRunsInUse(match func(lending.Lend) bool) int {
+	return s.lends().Count(func(x lending.Lend) bool { return x.Kind == lendBrainSignIn && match(x) }, time.Now().UTC())
+}
 
 // brainVaultWritable is the vault, when a sign-in can be kept in it now.
 // Asked before anything else is written, so a locked vault changes nothing.
@@ -77,21 +84,6 @@ func (s *CoreServer) brainVaultWritable() (*sandbox.Manager, error) {
 		return nil, err
 	}
 	return vault, nil
-}
-
-// recordLapsedLeases writes every lease that lapsed unrenewed into the
-// record, once each.
-func (s *CoreServer) recordLapsedLeases() {
-	lapsed, err := s.brainLeases().Lapsed(time.Now().UTC())
-	if err != nil {
-		log.Printf("[brain] %v", err)
-	}
-	for _, x := range lapsed {
-		if xa, ok := s.aiAgentAsset(x.Agent); ok {
-			s.recordBrainEvent(xa, sandbox.CallerContext{Transport: "body", BodyHost: x.Host},
-				"lapsed", "ok", "lease "+x.ID+" was not renewed, so its run's place was freed")
-		}
-	}
 }
 
 // mayBorrow says why an AI agent's body may not be lent its sign-in.
@@ -244,8 +236,10 @@ func (s *CoreServer) brainSignInViewAmong(assetID string, rec brainsignin.Record
 		"kind": rec.Kind, "provider": rec.Provider, "account": rec.Account,
 		"endpoint": rec.Endpoint, "expires_at": rec.ExpiresAt, "expired": rec.Expired(now),
 		"max_concurrent_runs": s.accountCap(assetID, rec), "has_secret": rec.HasSecret(),
-		"set_at": rec.SetAt, "runs_in_use": s.brainLeases().InUse(assetID, now),
-		"account_id": accountID, "account_runs_in_use": s.brainLeases().InUseByAccount(pool, assetID, now),
+		"set_at": rec.SetAt, "runs_in_use": s.brainRunsInUse(func(x lending.Lend) bool { return x.Agent == assetID }),
+		"account_id": accountID, "account_runs_in_use": s.brainRunsInUse(func(x lending.Lend) bool {
+			return x.Pool == brainsignin.PoolOr(pool, assetID)
+		}),
 		"shared_with": shared, "harness": brainsignin.Harness(rec.Provider),
 	}
 }
@@ -275,7 +269,7 @@ func (s *CoreServer) keptBrainSignIns() []keptSignIn {
 // every AI agent signed in to it, as its owner last set it, or else the one on
 // the sign-in.
 func (s *CoreServer) accountCap(agentID string, rec brainsignin.Record) int {
-	if n, ok := s.brainLeases().Cap(rec.Pool(), agentID); ok {
+	if n, ok := s.brainCaps().Cap(rec.Pool(), agentID); ok {
 		return n
 	}
 	return rec.MaxConcurrentRuns
@@ -293,7 +287,7 @@ func (s *CoreServer) keepBrainSignIn(a asset.Asset, rec brainsignin.Record, by s
 	if err != nil {
 		return a, err
 	}
-	if n, ok := s.brainLeases().Cap(rec.Pool(), a.ID); ok && !capChosen {
+	if n, ok := s.brainCaps().Cap(rec.Pool(), a.ID); ok && !capChosen {
 		rec.MaxConcurrentRuns = n
 	}
 	ref := brainsignin.Ref(a.ID)
@@ -304,13 +298,13 @@ func (s *CoreServer) keepBrainSignIn(a asset.Asset, rec brainsignin.Record, by s
 	if err := vault.SetBrainSignIn(ref, rec); err != nil {
 		return a, err
 	}
-	if err := s.brainLeases().SetCap(rec.Pool(), a.ID, rec.MaxConcurrentRuns); err != nil {
+	if err := s.brainCaps().SetCap(rec.Pool(), a.ID, rec.MaxConcurrentRuns); err != nil {
 		log.Printf("[brain] AI agent %s: the account's cap could not be kept: %v", a.PairwiseAID, err)
 	}
 	// A different secret is a different sign-in: the places runs hold on the
 	// old one are not places on the new one.
 	if had && prev.Secret != rec.Secret {
-		if err := s.brainLeases().Forget(a.ID); err != nil {
+		if err := s.lends().Forget(lendBrainSignIn, a.ID); err != nil {
 			log.Printf("[brain] AI agent %s: the runs holding its previous sign-in could not be forgotten: %v", a.PairwiseAID, err)
 		}
 	}
@@ -373,7 +367,7 @@ func (s *CoreServer) removeBrainSignInOf(assetID string) error {
 	if err != nil {
 		return err
 	}
-	_ = s.brainLeases().Forget(assetID)
+	_ = s.lends().Forget(lendBrainSignIn, assetID)
 	return vault.RemoveBrainSignIn(brainsignin.Ref(assetID))
 }
 
@@ -482,7 +476,7 @@ func (s *CoreServer) handleRemoveBrainSignIn(w http.ResponseWriter, r *http.Requ
 		jsonError(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	_ = s.brainLeases().Forget(a.ID)
+	_ = s.lends().Forget(lendBrainSignIn, a.ID)
 	if a.AgentConfig != nil && brainsignin.IsRef(a.AgentConfig.Brain.CredentialRef) {
 		cfg := *a.AgentConfig
 		cfg.Brain.CredentialRef = ""
@@ -610,7 +604,7 @@ func (s *CoreServer) handleBodyBorrowsSignIn(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	s.moveBrainSecretsIntoTheVault()
-	s.recordLapsedLeases()
+	s.recordLapsedLends()
 	if err := s.mayBorrow(a, cc); err != nil {
 		s.recordBrainEvent(a, cc, "lend", "denied", err.Error())
 		jsonError(w, err.Error(), http.StatusForbidden)
@@ -645,17 +639,11 @@ func (s *CoreServer) handleBodyBorrowsSignIn(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	limit := s.accountCap(a.ID, rec)
-	lease, lapsed, err := s.brainLeases().Lend(a.ID, rec.Pool(), brainsignin.Fingerprint(rec.Provider, rec.Secret),
-		b.Host, limit, now)
-	for _, x := range lapsed {
-		xa, ok := s.aiAgentAsset(x.Agent)
-		if !ok {
-			continue
-		}
-		s.recordBrainEvent(xa, sandbox.CallerContext{Transport: "body", BodyHost: x.Host},
-			"lapsed", "ok", "lease "+x.ID+" was not renewed, so its run's place was freed")
-	}
-	if errors.Is(err, brainsignin.ErrInUse) {
+	lease, lapsed, err := s.lends().Lend(r.Context(), lending.Lend{Kind: lendBrainSignIn, Agent: a.ID, Host: b.Host,
+		Pool: brainsignin.PoolOr(rec.Pool(), a.ID), Lent: brainsignin.Fingerprint(rec.Provider, rec.Secret),
+		Expires: now.Add(brainsignin.LeaseTTL)}, lending.Limit{MaxInPool: limit}, now)
+	s.recordEnded(lapsed, "")
+	if errors.Is(err, lending.ErrInUse) {
 		s.recordBrainEvent(a, cc, "lend", "denied", fmt.Sprintf("%s: all %d in use",
 			brainsignin.ErrInUse, limit))
 		writeJSONStatus(w, http.StatusConflict, map[string]any{
@@ -690,14 +678,14 @@ func (s *CoreServer) handleBodyRenewsSignIn(w http.ResponseWriter, r *http.Reque
 		jsonError(w, "name the lease to renew", http.StatusBadRequest)
 		return
 	}
-	s.recordLapsedLeases()
+	s.recordLapsedLends()
 	if err := s.mayBorrow(a, cc); err != nil {
 		// The run keeps what it holds until it ends; its place is not kept.
 		s.recordBrainEvent(a, cc, "renew", "denied", err.Error())
 		jsonError(w, err.Error(), http.StatusForbidden)
 		return
 	}
-	lease, err := s.brainLeases().Renew(q.LeaseID, b.Host, a.ID, time.Now().UTC())
+	lease, err := s.lends().Renew(lendBrainSignIn, q.LeaseID, b.Host, a.ID, brainsignin.LeaseTTL, time.Now().UTC())
 	if err != nil {
 		writeJSONStatus(w, http.StatusNotFound, map[string]any{"error": brainsignin.ErrNoLease.Error(), "no_lease": true})
 		return
@@ -715,14 +703,14 @@ func (s *CoreServer) handleBodyReturnsSignIn(w http.ResponseWriter, r *http.Requ
 		jsonError(w, "name the lease to return", http.StatusBadRequest)
 		return
 	}
-	s.recordLapsedLeases()
+	s.recordLapsedLends()
 	// A sign-in the run's program refreshed is kept before the lease is
 	// given back. If it cannot be kept now, the lease stays and the run is
 	// told to try again: answering "returned" would have the machine drop
 	// the only copy of a sign-in whose old refresh token is already spent.
 	kept := ""
 	if q.SignIn != "" {
-		if held, ok, _ := s.brainLeases().Find(q.LeaseID, b.Host, a.ID, time.Now().UTC()); ok {
+		if held, ok, _ := s.lends().Find(lendBrainSignIn, q.LeaseID, b.Host, a.ID, time.Now().UTC()); ok {
 			why, tryAgain := s.keepRefreshedSignIn(a, held, q.SignIn)
 			if tryAgain {
 				s.recordBrainEvent(a, cc, "returned", "denied", "lease "+held.ID+" kept for now; "+why)
@@ -732,12 +720,14 @@ func (s *CoreServer) handleBodyReturnsSignIn(w http.ResponseWriter, r *http.Requ
 			kept = why
 		}
 	}
-	lease, err := s.brainLeases().Return(q.LeaseID, b.Host, a.ID, time.Now().UTC())
+	got, err := s.lends().Return(r.Context(), lendBrainSignIn, q.LeaseID, b.Host, a.ID, time.Now().UTC())
 	switch {
-	case lease.ID != "":
-		why := "lease " + lease.ID + " returned"
-		if err != nil {
+	case err == nil:
+		why := "lease " + got.Lend.ID + " returned"
+		if !got.WasOpen && got.Lend.Ended == "lapsed" {
 			why += ", after it had lapsed"
+		} else if !got.WasOpen {
+			why += ", after it had ended because " + got.Lend.Ended
 		}
 		if kept != "" {
 			why += "; " + kept

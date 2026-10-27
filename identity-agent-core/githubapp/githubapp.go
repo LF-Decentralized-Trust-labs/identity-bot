@@ -174,8 +174,14 @@ func AppJWT(key *rsa.PrivateKey, appID int64, now time.Time) (string, error) {
 	return signing + "." + enc.EncodeToString(sig), nil
 }
 
-// repoName is what GitHub allows in an owner's or a repository's name.
-var repoName = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,99})$`)
+// ownerName is what GitHub allows in an account's name: letters, digits and
+// hyphens, not starting with a hyphen — and, for an enterprise's managed
+// users, an underscore before its short code.
+var ownerName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$`)
+
+// repoName is what GitHub allows in a repository's name: letters, digits, '.',
+// '_' and '-', in any place, so ".github" and "_site" are names.
+var repoName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)
 
 // NormaliseRepository is a repository as "owner/name", lower-cased, since
 // GitHub's names are not case-sensitive. A name that is not one is refused.
@@ -183,7 +189,7 @@ func NormaliseRepository(s string) (string, error) {
 	s = strings.TrimSpace(s)
 	s = strings.TrimSuffix(strings.TrimPrefix(s, "https://github.com/"), ".git")
 	owner, name, ok := strings.Cut(s, "/")
-	if !ok || !repoName.MatchString(owner) || !repoName.MatchString(name) || name == "." || name == ".." {
+	if !ok || !ownerName.MatchString(owner) || !repoName.MatchString(name) || name == "." || name == ".." {
 		return "", fmt.Errorf("%q is not a GitHub repository; name it as owner/name", s)
 	}
 	return strings.ToLower(owner + "/" + name), nil
@@ -360,31 +366,46 @@ func (c Client) Describe(ctx context.Context, conn Connection) (Connection, erro
 
 // Token is an installation token GitHub made.
 type Token struct {
-	Token        string
-	ExpiresAt    time.Time
-	Repositories []string
-	Access       Access
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expires_at"`
+	// Repositories are the repositories GitHub says it works for, as
+	// owner/name, and RepositoryIDs the same by GitHub's own numbers, which a
+	// repository deleted and made again under the same name does not keep.
+	Repositories  []string `json:"repositories"`
+	RepositoryIDs []int64  `json:"repository_ids"`
+	Access        Access   `json:"access"`
 }
 
-// Mint asks GitHub for an installation token that works only for repos (as
-// owner/name, all the installation's account's), with access's permissions.
-// GitHub's answer is checked to be no wider than asked: a token for more
-// repositories than were named is withdrawn and refused.
-func (c Client) Mint(ctx context.Context, conn Connection, repos []string, access Access) (Token, error) {
+// RepoRef is a repository by GitHub's number for it, and its name.
+type RepoRef struct {
+	ID   int64
+	Name string
+}
+
+// Mint asks GitHub for an installation token that works only for repos — by
+// GitHub's numbers for them, so a repository deleted and made again under the
+// same name is not one of them — with access's permissions. GitHub's answer is
+// checked to be no wider than asked: it must name only those repositories, as
+// a selection, and grant exactly the permissions asked. A token that is wider
+// is withdrawn and refused.
+func (c Client) Mint(ctx context.Context, conn Connection, repos []RepoRef, access Access) (Token, error) {
 	if len(repos) == 0 {
 		return Token{}, errors.New("a token is asked for at least one repository")
 	}
-	names := make([]string, 0, len(repos))
-	want := map[string]bool{}
+	ids := make([]int64, 0, len(repos))
+	want := map[int64]bool{}
 	for _, r := range repos {
-		owner, name, _ := strings.Cut(r, "/")
-		if conn.Account != "" && !strings.EqualFold(owner, conn.Account) {
-			return Token{}, fmt.Errorf("%s is not %s's, where the GitHub App is installed", r, conn.Account)
+		if r.ID <= 0 {
+			return Token{}, fmt.Errorf("%s is not named by GitHub's number for it", r.Name)
 		}
-		names = append(names, name)
-		want[strings.ToLower(r)] = true
+		owner, _, _ := strings.Cut(r.Name, "/")
+		if conn.Account != "" && !strings.EqualFold(owner, conn.Account) {
+			return Token{}, fmt.Errorf("%s is not %s's, where the GitHub App is installed", r.Name, conn.Account)
+		}
+		ids = append(ids, r.ID)
+		want[r.ID] = true
 	}
-	sort.Strings(names)
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	auth, err := c.asApp(conn)
 	if err != nil {
 		return Token{}, err
@@ -392,37 +413,46 @@ func (c Client) Mint(ctx context.Context, conn Connection, repos []string, acces
 	var out struct {
 		Token        string    `json:"token"`
 		ExpiresAt    time.Time `json:"expires_at"`
+		Selection    string    `json:"repository_selection"`
 		Repositories []struct {
+			ID       int64  `json:"id"`
 			FullName string `json:"full_name"`
 		} `json:"repositories"`
 		Permissions map[string]string `json:"permissions"`
 	}
-	body := map[string]any{"repositories": names, "permissions": access.Permissions()}
+	body := map[string]any{"repository_ids": ids, "permissions": access.Permissions()}
 	if err := c.call(ctx, "POST", fmt.Sprintf("/app/installations/%d/access_tokens", conn.InstallationID),
 		auth, body, http.StatusCreated, &out); err != nil {
 		return Token{}, err
 	}
 	tok := Token{Token: out.Token, ExpiresAt: out.ExpiresAt, Access: access}
-	wider := out.Token == ""
+	why := ""
+	switch {
+	case out.Token == "":
+		why = "GitHub made no token"
+	case out.Selection != "selected":
+		why = "GitHub made a token for every repository the App can reach, not the ones asked for"
+	case len(out.Repositories) == 0:
+		why = "GitHub's answer names no repository the token works for"
+	}
 	for _, r := range out.Repositories {
-		if !want[strings.ToLower(r.FullName)] {
-			wider = true
+		if !want[r.ID] {
+			why = "GitHub made a token for more repositories than were asked for"
 		}
 		tok.Repositories = append(tok.Repositories, strings.ToLower(r.FullName))
+		tok.RepositoryIDs = append(tok.RepositoryIDs, r.ID)
 	}
+	asked := access.Permissions()
 	for p, level := range out.Permissions {
-		if asked, ok := access.Permissions()[p]; !ok || (asked == "read" && level != "read") {
-			wider = true
+		if asked[p] != level {
+			why = fmt.Sprintf("GitHub gave the token %s %q, where %q was asked for", p, level, asked[p])
 		}
 	}
-	if wider {
+	if why != "" {
 		if out.Token != "" {
 			_ = c.Revoke(ctx, out.Token)
 		}
-		return Token{}, errors.New("GitHub made a token wider than was asked for, so it was withdrawn")
-	}
-	if len(tok.Repositories) == 0 {
-		tok.Repositories = append([]string(nil), repos...)
+		return Token{}, errors.New(why + ", so it was withdrawn")
 	}
 	if tok.ExpiresAt.IsZero() {
 		tok.ExpiresAt = c.now().Add(time.Hour)
@@ -443,6 +473,7 @@ func (c Client) Revoke(ctx context.Context, token string) error {
 
 // Repository is one repository the App can reach, as a screen shows it.
 type Repository struct {
+	ID       int64  `json:"id"`
 	FullName string `json:"full_name"`
 	Private  bool   `json:"private"`
 }
@@ -462,8 +493,11 @@ func (c Client) Repositories(ctx context.Context, conn Connection) ([]Repository
 		return nil, err
 	}
 	defer func() { _ = c.Revoke(context.WithoutCancel(ctx), tok.Token) }()
+	// Every page, however many there are: a repository left off would be one
+	// nobody could grant. An answer with no repositories ends it, so a GitHub
+	// that miscounts cannot keep this asking.
 	var out []Repository
-	for page := 1; page <= 50; page++ {
+	for page := 1; ; page++ {
 		var res struct {
 			TotalCount   int          `json:"total_count"`
 			Repositories []Repository `json:"repositories"`
@@ -476,7 +510,8 @@ func (c Client) Repositories(ctx context.Context, conn Connection) ([]Repository
 			r.FullName = strings.ToLower(r.FullName)
 			out = append(out, r)
 		}
-		if len(res.Repositories) < 100 || len(out) >= res.TotalCount {
+		if len(res.Repositories) == 0 || (res.TotalCount > 0 && len(out) >= res.TotalCount) ||
+			(res.TotalCount == 0 && len(res.Repositories) < 100) {
 			break
 		}
 	}

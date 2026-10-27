@@ -29,6 +29,9 @@ import (
 	"time"
 
 	"identity-agent-core/agenthost"
+	"identity-agent-core/brainsignin"
+	"identity-agent-core/githubapp"
+	"identity-agent-core/lending"
 )
 
 // gitHub is a stand-in for GitHub's API: one App (42, "acme-agents"), one
@@ -44,6 +47,9 @@ type gitHub struct {
 	// revoked are the tokens withdrawn, in order.
 	revoked []string
 	n       int
+	// duringMint, when set, runs while GitHub is making a token, before it
+	// answers: something changing meanwhile.
+	duringMint func()
 }
 
 type minted struct {
@@ -51,6 +57,9 @@ type minted struct {
 	Repositories []string
 	Permissions  map[string]string
 }
+
+// repoIDs are GitHub's numbers for the stand-in's repositories.
+var repoIDs = map[string]int64{"acme/docs": 101, "acme/sandbox": 102, "acme/site": 103}
 
 func newGitHub(t *testing.T) *gitHub {
 	t.Helper()
@@ -97,28 +106,43 @@ func newGitHub(t *testing.T) *gitHub {
 				return
 			}
 			var q struct {
-				Repositories []string          `json:"repositories"`
-				Permissions  map[string]string `json:"permissions"`
+				RepositoryIDs []int64           `json:"repository_ids"`
+				Permissions   map[string]string `json:"permissions"`
 			}
 			b, _ := io.ReadAll(r.Body)
 			_ = json.Unmarshal(b, &q)
 			g.mu.Lock()
+			hook := g.duringMint
+			g.mu.Unlock()
+			if hook != nil && len(q.RepositoryIDs) > 0 {
+				hook()
+			}
+			g.mu.Lock()
 			g.n++
 			tok := fmt.Sprintf("ghs_LENT_TOKEN_%03d", g.n)
-			full := []map[string]string{}
+			full := []map[string]any{}
 			var names []string
-			for _, name := range q.Repositories {
-				full = append(full, map[string]string{"full_name": "acme/" + name})
-				names = append(names, "acme/"+name)
+			for _, id := range q.RepositoryIDs {
+				for name, n := range repoIDs {
+					if n == id {
+						full = append(full, map[string]any{"id": id, "full_name": name})
+						names = append(names, name)
+					}
+				}
 			}
+			sort.Strings(names)
 			g.made = append(g.made, minted{Token: tok, Repositories: names, Permissions: q.Permissions})
 			g.mu.Unlock()
+			selection := "selected"
+			if len(q.RepositoryIDs) == 0 {
+				selection = "all"
+			}
 			reply(201, map[string]any{"token": tok, "expires_at": time.Now().Add(time.Hour).UTC(),
-				"permissions": q.Permissions, "repositories": full})
+				"permissions": q.Permissions, "repositories": full, "repository_selection": selection})
 		case r.Method == "GET" && r.URL.Path == "/installation/repositories":
 			var out []map[string]any
 			for _, x := range reachable {
-				out = append(out, map[string]any{"full_name": x, "private": true})
+				out = append(out, map[string]any{"id": repoIDs[x], "full_name": x, "private": true})
 			}
 			reply(200, map[string]any{"total_count": len(out), "repositories": out})
 		case r.Method == "DELETE" && r.URL.Path == "/installation/token":
@@ -157,6 +181,36 @@ func (g *gitHub) wasRevoked(tok string) bool {
 		}
 	}
 	return false
+}
+
+// tokenFor is the token made for exactly these repositories, at this access.
+func (g *gitHub) tokenFor(t *testing.T, access string, repos ...string) string {
+	t.Helper()
+	sort.Strings(repos)
+	for _, m := range g.lentTokens() {
+		if reflect.DeepEqual(m.Repositories, repos) && (m.Permissions["contents"] == access) {
+			return m.Token
+		}
+	}
+	t.Fatalf("no %s token was made for %v: %+v", access, repos, g.lentTokens())
+	return ""
+}
+
+// githubLends are the GitHub lends the ledger remembers, open or still to
+// withdraw.
+func githubLends(t *testing.T, w *talkWorld) []lending.Lend {
+	t.Helper()
+	all, err := w.s.lends().All()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []lending.Lend
+	for _, l := range all {
+		if l.Kind == lendGitHub {
+			out = append(out, l)
+		}
+	}
+	return out
 }
 
 // githubWorld is a signed-in world whose Identity Agent talks to a stand-in
@@ -205,15 +259,16 @@ func TestAnAIAgentWithNoRepositoryGrantIsLentNothing(t *testing.T) {
 }
 
 // The token is asked of GitHub for exactly the repositories the grant gives,
-// with exactly that access's permissions: one token for what it may write,
-// one for what it may only read. A repository it was not granted is refused,
-// and so is one the App cannot reach.
+// by GitHub's numbers for them, with exactly that access's permissions: one
+// token for what it may write, and one that reads every repository it may use,
+// since it may only read some. A repository it was not granted is refused, and
+// so is one the App cannot reach.
 func TestATokenIsLimitedToExactlyTheGrantedRepositories(t *testing.T) {
 	w, g := githubWorld(t)
 	w.grantRepos(t, w.a.ID, [2]string{"acme/sandbox", "write"}, [2]string{"Acme/Docs", "read"})
 	code, out, raw := w.asOwner(t, "GET", "/api/mcp/agents/"+w.a.ID+"/github", "")
-	if code != http.StatusOK || !strings.Contains(raw, `{"repository":"acme/docs","access":"read"}`) ||
-		!strings.Contains(raw, `{"repository":"acme/sandbox","access":"write"}`) {
+	if code != http.StatusOK || !strings.Contains(raw, `{"repository":"acme/docs","id":101,"access":"read"}`) ||
+		!strings.Contains(raw, `{"repository":"acme/sandbox","id":102,"access":"write"}`) {
 		t.Fatalf("the grant is not as set: %d %s", code, raw)
 	}
 	_ = out
@@ -222,9 +277,9 @@ func TestATokenIsLimitedToExactlyTheGrantedRepositories(t *testing.T) {
 		t.Fatal(err)
 	}
 	made := g.lentTokens()
-	sort.Slice(made, func(i, j int) bool { return made[i].Repositories[0] < made[j].Repositories[0] })
+	sort.Slice(made, func(i, j int) bool { return len(made[i].Repositories) > len(made[j].Repositories) })
 	if len(made) != 2 ||
-		!reflect.DeepEqual(made[0].Repositories, []string{"acme/docs"}) ||
+		!reflect.DeepEqual(made[0].Repositories, []string{"acme/docs", "acme/sandbox"}) ||
 		!reflect.DeepEqual(made[0].Permissions, map[string]string{"contents": "read", "metadata": "read"}) ||
 		!reflect.DeepEqual(made[1].Repositories, []string{"acme/sandbox"}) ||
 		!reflect.DeepEqual(made[1].Permissions, map[string]string{"contents": "write", "pull_requests": "write", "metadata": "read"}) {
@@ -294,10 +349,11 @@ func fakeBrainUsingGit(t *testing.T, fail bool) (path, record string) {
 	return path, record
 }
 
-// The token reaches the brain through its environment only: gh's GH_TOKEN,
-// and git's credential helper reading it from there — the write token for the
-// repository it may write, the read token for the one it may read, nothing for
-// any other. Not its arguments, not a file, and not a token somebody exported
+// The token reaches the brain through its environment only: gh's GH_TOKEN —
+// the token that reads every repository it may use, since it may only read
+// some — and git's credential helper reading them from there: the write token
+// for the repository it may write, the read token for the one it may read,
+// nothing for any other. Not its arguments, not a file, and not a token somebody exported
 // on the machine. It is returned when the run ends, and when the run fails,
 // and withdrawn at GitHub.
 func TestGitHubAccessReachesTheBrainOnlyThroughItsEnvironment(t *testing.T) {
@@ -321,14 +377,11 @@ func TestGitHubAccessReachesTheBrainOnlyThroughItsEnvironment(t *testing.T) {
 		if len(made) != 2 {
 			t.Fatalf("fail=%v: %d tokens made", fail, len(made))
 		}
-		tokenFor := map[string]string{}
-		for _, m := range made {
-			tokenFor[m.Repositories[0]] = m.Token
-		}
+		write, read := g.tokenFor(t, "write", "acme/sandbox"), g.tokenFor(t, "read", "acme/docs", "acme/sandbox")
 		for _, want := range []string{
-			"GH:" + tokenFor["acme/sandbox"] + "\n",
-			"acme_sandbox:password=" + tokenFor["acme/sandbox"] + "\n",
-			"acme_docs:password=" + tokenFor["acme/docs"] + "\n",
+			"GH:" + read + "\n",
+			"acme_sandbox:password=" + write + "\n",
+			"acme_docs:password=" + read + "\n",
 			"AUTHOR:Desk assistant <9+acme-agents[bot]@users.noreply.github.com>\n",
 		} {
 			if !strings.Contains(got, want) {
@@ -351,15 +404,17 @@ func TestGitHubAccessReachesTheBrainOnlyThroughItsEnvironment(t *testing.T) {
 				t.Fatalf("fail=%v: the token for %s was not withdrawn at GitHub when the run ended", fail, m.Repositories)
 			}
 		}
-		if n := len(w.s.githubLends()); n != 0 {
+		if n := len(githubLends(t, w)); n != 0 {
 			t.Fatalf("fail=%v: %d lend(s) still held after the run", fail, n)
 		}
 	}
 }
 
 // Revoking the AI agent withdraws, at GitHub, every token it was lent that
-// has not lapsed — at once, not when it would expire. So does taking a
-// repository out of its grant, and removing the machine as its body.
+// has not lapsed — at once, not when it would expire. So do removing the
+// machine as its body and disconnecting the App. Narrowing its grant
+// withdraws only the token that gave what was taken away; a change that takes
+// nothing away withdraws nothing.
 func TestRevokingTheAIAgentWithdrawsWhatItWasLent(t *testing.T) {
 	ctx := context.Background()
 	t.Run("the AI agent is revoked", func(t *testing.T) {
@@ -391,12 +446,19 @@ func TestRevokingTheAIAgentWithdrawsWhatItWasLent(t *testing.T) {
 		if _, err := w.hostA.BorrowGitHub(ctx); err != nil {
 			t.Fatal(err)
 		}
+		write, read := g.tokenFor(t, "write", "acme/sandbox"), g.tokenFor(t, "read", "acme/docs", "acme/sandbox")
 		// Write becomes read: the write token goes, the read one stays.
 		w.grantRepos(t, w.a.ID, [2]string{"acme/sandbox", "read"}, [2]string{"acme/docs", "read"})
-		for _, m := range g.lentTokens() {
-			if !g.wasRevoked(m.Token) {
-				t.Fatalf("the token for %s was not withdrawn when the grant narrowed", m.Repositories)
-			}
+		if !g.wasRevoked(write) || g.wasRevoked(read) {
+			t.Fatalf("narrowing write to read: write withdrawn %v, read withdrawn %v", g.wasRevoked(write), g.wasRevoked(read))
+		}
+		if l := githubLends(t, w); len(l) != 1 || !l[0].IsOpen(time.Now()) {
+			t.Fatalf("the run lost its read access: %+v", l)
+		}
+		// A repository taken away: the token that reads it goes too.
+		w.grantRepos(t, w.a.ID, [2]string{"acme/sandbox", "read"})
+		if !g.wasRevoked(read) {
+			t.Fatal("the token for a repository taken away was not withdrawn")
 		}
 	})
 	t.Run("an unrelated change keeps what was lent", func(t *testing.T) {
@@ -416,7 +478,7 @@ func TestRevokingTheAIAgentWithdrawsWhatItWasLent(t *testing.T) {
 		if _, err := w.hostA.BorrowGitHub(ctx); err != nil {
 			t.Fatal(err)
 		}
-		b, ok := w.s.bodies().ActiveByHost(w.s.githubLends()[0].Host)
+		b, ok := w.s.bodies().ActiveByHost(githubLends(t, w)[0].Host)
 		if !ok {
 			t.Fatal("no body")
 		}
@@ -458,39 +520,69 @@ func TestAWithdrawalGitHubDidNotAnswerIsTriedAgain(t *testing.T) {
 	if err := w.hostA.ReturnGitHub(context.Background(), lent); err != nil {
 		t.Fatal(err)
 	}
-	if l := w.s.githubLends(); len(l) != 1 || !l[0].Returned {
+	if l := githubLends(t, w); len(l) != 1 || !l[0].Returned || len(l[0].Withdrawing) != 1 {
 		t.Fatalf("a token GitHub was not reached to withdraw was forgotten: %+v", l)
 	}
 	w.s.githubAPI = g.srv.URL
-	w.s.withdrawLentGitHubAccessNoLongerGranted("test")
-	if !g.wasRevoked(g.lentTokens()[0].Token) || len(w.s.githubLends()) != 0 {
+	w.s.endLendsNoLongerGranted("test")
+	if !g.wasRevoked(g.lentTokens()[0].Token) || len(githubLends(t, w)) != 0 {
 		t.Fatal("the withdrawal was not tried again")
 	}
 }
 
 // A browser session can neither connect nor disconnect the App, list what it
 // reaches, nor grant an AI agent repositories: the App's key makes tokens for
-// the organisation's repositories, and a grant outlives the session.
+// the organisation's repositories, and a grant outlives the session. Each is
+// asked with a live session the owner granted, which reaches what a session
+// may — and is refused these. A request that is no one's connects nothing.
 func TestABrowserSessionCannotConnectTheGitHubApp(t *testing.T) {
-	for _, route := range []string{"PUT /api/github", "DELETE /api/github", "GET /api/github/repositories",
-		"PUT /api/mcp/agents/{id}/github"} {
-		method, pattern, _ := strings.Cut(route, " ")
-		if _, forbidden := requiresTheKeyItself(method, pattern); !forbidden {
-			t.Errorf("a browser session can reach %s", route)
-		}
-	}
-	// And a request that is not the owner's connects nothing.
 	w := signInWorld(t)
 	g := newGitHub(t)
 	w.s.githubAPI = g.srv.URL
-	body, _ := json.Marshal(map[string]any{"app_id": 42, "installation_id": 7, "private_key": g.pem})
+	w.s.BrowserSessions = newBrowserSessions()
+	const secret = "a-secret-only-the-browser-has"
+	id, code, _, err := w.s.BrowserSessions.newChallenge(hashSecret(secret))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.s.BrowserSessions.grant(code); err != nil {
+		t.Fatal(err)
+	}
+	session, _, err := w.s.BrowserSessions.claim(id, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	asSession := func(method, path, body string) int {
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer "+session)
+		rec := httptest.NewRecorder()
+		w.s.router.ServeHTTP(rec, r)
+		return rec.Code
+	}
+	if c := asSession("GET", "/api/github", ""); c != http.StatusOK {
+		t.Fatalf("the session is not one the Identity Agent takes: %d", c)
+	}
+	connect, _ := json.Marshal(map[string]any{"app_id": 42, "installation_id": 7, "private_key": g.pem})
+	for _, q := range [][3]string{
+		{"PUT", "/api/github", string(connect)},
+		{"DELETE", "/api/github", ""},
+		{"GET", "/api/github/repositories", ""},
+		{"PUT", "/api/mcp/agents/" + w.a.ID + "/github", `{"repositories":[{"repository":"acme/sandbox","access":"write"}]}`},
+	} {
+		if c := asSession(q[0], q[1], q[2]); c != http.StatusForbidden {
+			t.Errorf("a browser session reached %s %s: %d", q[0], q[1], c)
+		}
+	}
 	rec := httptest.NewRecorder()
-	w.s.router.ServeHTTP(rec, httptest.NewRequest("PUT", "/api/github", bytes.NewReader(body)))
+	w.s.router.ServeHTTP(rec, httptest.NewRequest("PUT", "/api/github", bytes.NewReader(connect)))
 	if rec.Code == http.StatusOK {
 		t.Fatal("a request that is not the owner's connected the App")
 	}
 	if _, had, _ := w.s.githubConnection(); had {
 		t.Fatal("the App was kept")
+	}
+	if len(g.lentTokens()) != 0 {
+		t.Fatal("a token was made")
 	}
 }
 
@@ -531,5 +623,219 @@ func TestNothingSecretIsShownOrLogged(t *testing.T) {
 	// managed where they are used, and cannot be removed around it.
 	if code, _, _ := w.asOwner(t, "DELETE", "/api/vault/credentials/kept:github-app", ""); code == http.StatusOK {
 		t.Fatal("the App's key was removed around the route that withdraws what it lent")
+	}
+}
+
+// A grant that changes while GitHub is making the tokens — before anything
+// is recorded for the sweep to find — does not get them handed over: the lend
+// is checked again once recorded, refused, and its tokens withdrawn.
+func TestAGrantThatChangesWhileGitHubMintsIsNotLent(t *testing.T) {
+	w, g := githubWorld(t)
+	w.grantRepos(t, w.a.ID, [2]string{"acme/sandbox", "write"})
+	g.mu.Lock()
+	g.duringMint = func() {
+		g.mu.Lock()
+		g.duringMint = nil
+		g.mu.Unlock()
+		w.grantRepos(t, w.a.ID)
+	}
+	g.mu.Unlock()
+	if _, err := w.hostA.BorrowGitHub(context.Background()); err == nil {
+		t.Fatal("access the grant no longer gives was handed over")
+	}
+	made := g.lentTokens()
+	if len(made) != 1 || !g.wasRevoked(made[0].Token) {
+		t.Fatalf("the token made while the grant changed was not withdrawn: %+v", made)
+	}
+	if n := len(githubLends(t, w)); n != 0 {
+		t.Fatalf("%d lend(s) left", n)
+	}
+}
+
+// What cannot be checked is not lent: when the organisation's App cannot be
+// read once the lend is recorded, it is withdrawn and refused. And a lend
+// whose App cannot be read later is withdrawn by the next sweep.
+func TestALendThatCannotBeCheckedIsWithdrawn(t *testing.T) {
+	w, g := githubWorld(t)
+	w.grantRepos(t, w.a.ID, [2]string{"acme/sandbox", "write"})
+	var conn githubapp.Connection
+	if _, err := w.s.SandboxManager.Kept(githubAppRef, keptGitHubApp, &conn); err != nil {
+		t.Fatal(err)
+	}
+	unreadable := func() {
+		if err := w.s.SandboxManager.SetKept(githubAppRef, "not-a-github-app", map[string]int{"x": 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g.mu.Lock()
+	g.duringMint = func() { g.mu.Lock(); g.duringMint = nil; g.mu.Unlock(); unreadable() }
+	g.mu.Unlock()
+	if _, err := w.hostA.BorrowGitHub(context.Background()); err == nil {
+		t.Fatal("access was handed over though the App could not be read to check it")
+	}
+	if made := g.lentTokens(); len(made) != 1 || !g.wasRevoked(made[0].Token) {
+		t.Fatalf("not withdrawn: %+v", made)
+	}
+	// Later: lent while the App could be read, then it cannot.
+	if err := w.s.SandboxManager.SetKept(githubAppRef, keptGitHubApp, conn); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.hostA.BorrowGitHub(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	unreadable()
+	w.s.endLendsNoLongerGranted("test")
+	if made := g.lentTokens(); !g.wasRevoked(made[len(made)-1].Token) {
+		t.Fatal("a lend whose App cannot be read was left standing")
+	}
+}
+
+// A body holds one GitHub lend at a time: borrowing again withdraws what it
+// held, and a body that starts again gives back whatever it held before.
+func TestABodyHoldsOneGitHubLendAtATime(t *testing.T) {
+	w, g := githubWorld(t)
+	w.grantRepos(t, w.a.ID, [2]string{"acme/sandbox", "write"})
+	ctx := context.Background()
+	if _, err := w.hostA.BorrowGitHub(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.hostA.BorrowGitHub(ctx); err != nil {
+		t.Fatal(err)
+	}
+	made := g.lentTokens()
+	if len(made) != 2 || !g.wasRevoked(made[0].Token) || g.wasRevoked(made[1].Token) {
+		t.Fatalf("borrowing again: first withdrawn %v, second withdrawn %v", g.wasRevoked(made[0].Token), g.wasRevoked(made[1].Token))
+	}
+	if err := w.hostA.ReturnEveryGitHub(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !g.wasRevoked(made[1].Token) || len(githubLends(t, w)) != 0 {
+		t.Fatal("what a body held before it started again was not withdrawn")
+	}
+	// Nothing held: nothing to give back, and no error.
+	if err := w.hostA.ReturnEveryGitHub(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Replacing the App — even with the same App and installation, only a new
+// key — withdraws everything lent under the one it replaces; and a lend names
+// the App that made it, so one made by an App no longer connected is
+// withdrawn by the next sweep.
+func TestReplacingTheAppWithdrawsWhatItLent(t *testing.T) {
+	w, g := githubWorld(t)
+	w.grantRepos(t, w.a.ID, [2]string{"acme/sandbox", "write"})
+	if _, err := w.hostA.BorrowGitHub(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]any{"app_id": 42, "installation_id": 7, "private_key": g.pem})
+	if code, _, raw := w.asOwner(t, "PUT", "/api/github", string(body)); code != http.StatusOK {
+		t.Fatalf("replacing the key: %d %s", code, raw)
+	}
+	if !g.wasRevoked(g.lentTokens()[0].Token) {
+		t.Fatal("replacing the App's key left what it lent standing")
+	}
+	if _, err := w.hostA.BorrowGitHub(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var conn githubapp.Connection
+	if _, err := w.s.SandboxManager.Kept(githubAppRef, keptGitHubApp, &conn); err != nil {
+		t.Fatal(err)
+	}
+	conn.InstallationID = 8
+	if err := w.s.SandboxManager.SetKept(githubAppRef, keptGitHubApp, conn); err != nil {
+		t.Fatal(err)
+	}
+	w.s.endLendsNoLongerGranted("test")
+	if made := g.lentTokens(); !g.wasRevoked(made[len(made)-1].Token) {
+		t.Fatal("a lend made under another installation was left standing")
+	}
+}
+
+// Write refused by the one check — the capability turned off here — leaves
+// the AI agent the read access its grant gives, for the same repositories.
+func TestARefusedWriteKeepsRead(t *testing.T) {
+	w, g := githubWorld(t)
+	w.grantRepos(t, w.a.ID, [2]string{"acme/sandbox", "write"}, [2]string{"acme/docs", "read"})
+	rec, err := w.s.SandboxManager.Store().GetCapabilityRecord(capabilityRepoWrite)
+	if err != nil || rec == nil {
+		t.Fatalf("the write capability: %v %v", rec, err)
+	}
+	rec.Enabled = false
+	if err := w.s.SandboxManager.Store().UpsertCapabilityRecord(*rec); err != nil {
+		t.Fatal(err)
+	}
+	lent, err := w.hostA.BorrowGitHub(context.Background())
+	if err != nil {
+		t.Fatalf("read access was lost with write: %v", err)
+	}
+	made := g.lentTokens()
+	if len(made) != 1 || made[0].Permissions["contents"] != "read" ||
+		!reflect.DeepEqual(made[0].Repositories, []string{"acme/docs", "acme/sandbox"}) {
+		t.Fatalf("GitHub was asked for: %+v", made)
+	}
+	_ = w.hostA.ReturnGitHub(context.Background(), lent)
+}
+
+// Revoking an AI agent ends every kind of lend at once: its brain's lease
+// stops holding a place and cannot be renewed, as well as its GitHub tokens
+// being withdrawn.
+func TestRevokingAnAIAgentEndsItsBrainLeaseAtOnce(t *testing.T) {
+	w, _ := githubWorld(t)
+	w.grantRepos(t, w.a.ID, [2]string{"acme/sandbox", "write"})
+	if code, _, raw := w.asOwner(t, "PUT", "/api/mcp/agents/"+w.a.ID+"/brain-sign-in",
+		`{"kind":"api_key","provider":"anthropic","secret":"sk-ant-api03-A-KEY","max_concurrent_runs":1}`); code != http.StatusOK {
+		t.Fatalf("signing in: %d %s", code, raw)
+	}
+	b, err := w.hostA.Borrow(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	inUse := func() int { return w.s.brainRunsInUse(func(x lending.Lend) bool { return x.Agent == w.a.ID }) }
+	if inUse() != 1 {
+		t.Fatal("the lease does not hold")
+	}
+	// A sweep leaves a lease its grant still covers.
+	w.s.endLendsNoLongerGranted("test")
+	if inUse() != 1 {
+		t.Fatal("a sweep ended a lease the AI agent's grant still covers")
+	}
+	grant := w.s.findCapabilityGrant(w.a.PairwiseAID)
+	if code, _, raw := w.asOwner(t, "POST", "/api/credentials/"+grant.SAID+"/revoke", ""); code != http.StatusOK {
+		t.Fatalf("revoking: %d %s", code, raw)
+	}
+	if n := inUse(); n != 0 {
+		t.Fatalf("a revoked AI agent's lease still holds %d place(s)", n)
+	}
+	if err := w.hostA.Renew(context.Background(), b); err == nil {
+		t.Fatal("a revoked AI agent's lease was renewed")
+	}
+	if n := len(governanceRows(t, w, "agent.brain.sign_in.ended")); n != 1 {
+		t.Fatalf("%d endings recorded", n)
+	}
+}
+
+// Leases kept in their own file by a version before this one are moved into
+// the one record, once, and their file removed.
+func TestLeasesKeptBeforeAreMovedIntoTheOneRecord(t *testing.T) {
+	w := signInWorld(t)
+	now := time.Now().UTC()
+	lapsed := now.Add(-time.Hour)
+	old, _ := json.Marshal([]brainsignin.LegacyLease{
+		{ID: "bl_held", Agent: w.a.ID, Host: "h1", Pool: "acct", Lent: "fp", LentAt: now, Expires: now.Add(time.Minute)},
+		{ID: "bl_lapsed", Agent: w.a.ID, Host: "h2", LentAt: lapsed, Expires: lapsed, LapsedAt: &lapsed},
+	})
+	file := filepath.Join(w.s.DataDir, "brain_sign_in_leases.json")
+	if err := os.WriteFile(file, old, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if n := w.s.brainRunsInUse(func(x lending.Lend) bool { return x.Pool == "acct" }); n != 1 {
+		t.Fatalf("%d runs of the account in use after moving, want 1", n)
+	}
+	if _, ok, _ := w.s.lends().Find(lendBrainSignIn, "bl_lapsed", "h2", w.a.ID, now); !ok {
+		t.Fatal("a lapsed lease kept to be given back was not moved")
+	}
+	if _, err := os.Stat(file); !os.IsNotExist(err) {
+		t.Fatal("the old file was left")
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -84,12 +85,13 @@ func TestAnAppKeyIsReadInEitherForm(t *testing.T) {
 func TestARepositoryIsNamedAsOwnerAndName(t *testing.T) {
 	for in, want := range map[string]string{
 		"Acme/Sandbox": "acme/sandbox", "https://github.com/acme/site.git": "acme/site", " acme/a.b-c_d ": "acme/a.b-c_d",
+		"acme/.github": "acme/.github", "acme/_site": "acme/_site", "acme/-x": "acme/-x", "acme/...x": "acme/...x",
 	} {
 		if got, err := NormaliseRepository(in); err != nil || got != want {
 			t.Errorf("%q: %q %v", in, got, err)
 		}
 	}
-	for _, bad := range []string{"acme", "acme/", "/x", "acme/x/y", "acme/..", "ac me/x", "acme/x?y"} {
+	for _, bad := range []string{"acme", "acme/", "/x", "acme/x/y", "acme/..", "acme/.", "ac me/x", "acme/x?y", "-acme/x", ".acme/x"} {
 		if _, err := NormaliseRepository(bad); err == nil {
 			t.Errorf("%q was taken as a repository", bad)
 		}
@@ -122,56 +124,102 @@ func fakeGitHub(t *testing.T, answer func(body map[string]any) (int, any)) (*htt
 	return srv, &asked, &revoked
 }
 
-// A token is asked for exactly the repositories named, by name within the
-// installation's account, with the access's permissions and no others.
+// A token is asked for exactly the repositories named, by GitHub's numbers
+// for them, with the access's permissions and no others.
 func TestATokenIsAskedForExactlyTheRepositoriesAndAccessNamed(t *testing.T) {
 	_, key := testKey(t)
 	srv, asked, _ := fakeGitHub(t, func(map[string]any) (int, any) {
-		return 201, map[string]any{"token": "ghs_write", "expires_at": time.Now().Add(time.Hour),
-			"repositories": []map[string]string{{"full_name": "acme/sandbox"}, {"full_name": "acme/site"}},
+		return 201, map[string]any{"token": "ghs_write", "expires_at": time.Now().Add(time.Hour), "repository_selection": "selected",
+			"repositories": []map[string]any{{"id": 11, "full_name": "acme/sandbox"}, {"id": 12, "full_name": "Acme/Site"}},
 			"permissions":  map[string]string{"contents": "write", "pull_requests": "write", "metadata": "read"}}
 	})
 	c := Client{API: srv.URL}
 	conn := Connection{AppID: 1, InstallationID: 2, PrivateKey: key, Account: "acme"}
-	tok, err := c.Mint(context.Background(), conn, []string{"acme/site", "acme/sandbox"}, Write)
+	tok, err := c.Mint(context.Background(), conn, []RepoRef{{12, "acme/site"}, {11, "acme/sandbox"}}, Write)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tok.Token != "ghs_write" || !reflect.DeepEqual(tok.Repositories, []string{"acme/sandbox", "acme/site"}) {
+	if tok.Token != "ghs_write" || !reflect.DeepEqual(tok.Repositories, []string{"acme/sandbox", "acme/site"}) ||
+		!reflect.DeepEqual(tok.RepositoryIDs, []int64{11, 12}) {
 		t.Fatalf("token %+v", tok)
 	}
 	got := (*asked)[0]
-	if !reflect.DeepEqual(got["repositories"], []any{"sandbox", "site"}) {
-		t.Fatalf("repositories asked for: %v", got["repositories"])
+	if !reflect.DeepEqual(got["repository_ids"], []any{float64(11), float64(12)}) || got["repositories"] != nil {
+		t.Fatalf("repositories asked for: %v", got)
 	}
 	if !reflect.DeepEqual(got["permissions"], map[string]any{"contents": "write", "pull_requests": "write", "metadata": "read"}) {
 		t.Fatalf("permissions asked for: %v", got["permissions"])
 	}
-	if _, err := c.Mint(context.Background(), conn, []string{"other/repo"}, Read); err == nil {
+	if _, err := c.Mint(context.Background(), conn, []RepoRef{{13, "other/repo"}}, Read); err == nil {
 		t.Fatal("a token was asked for a repository outside the installation's account")
+	}
+	if _, err := c.Mint(context.Background(), conn, []RepoRef{{0, "acme/sandbox"}}, Read); err == nil {
+		t.Fatal("a token was asked for a repository by name alone")
 	}
 }
 
-// A token GitHub made wider than asked — more repositories, or more
-// permission — is withdrawn at once and not used.
+// A token GitHub made wider than asked — another repository, a repository by
+// the same name that is not the one asked for, every repository, none named,
+// or more permission or less than asked — is withdrawn at once and not used.
 func TestATokenWiderThanAskedIsWithdrawn(t *testing.T) {
 	_, key := testKey(t)
+	read := map[string]string{"contents": "read", "metadata": "read"}
+	sandbox := []map[string]any{{"id": 11, "full_name": "acme/sandbox"}}
 	for name, answer := range map[string]map[string]any{
-		"more repositories": {"token": "ghs_wide", "repositories": []map[string]string{{"full_name": "acme/sandbox"}, {"full_name": "acme/secret"}},
-			"permissions": map[string]string{"contents": "read", "metadata": "read"}},
-		"more permission": {"token": "ghs_wide", "repositories": []map[string]string{{"full_name": "acme/sandbox"}},
+		"more repositories": {"token": "ghs_wide", "repository_selection": "selected", "permissions": read,
+			"repositories": []map[string]any{{"id": 11, "full_name": "acme/sandbox"}, {"id": 99, "full_name": "acme/secret"}}},
+		"a repository made again under the same name": {"token": "ghs_wide", "repository_selection": "selected", "permissions": read,
+			"repositories": []map[string]any{{"id": 77, "full_name": "acme/sandbox"}}},
+		"every repository":    {"token": "ghs_wide", "repository_selection": "all", "permissions": read, "repositories": sandbox},
+		"no repository named": {"token": "ghs_wide", "repository_selection": "selected", "permissions": read},
+		"more permission": {"token": "ghs_wide", "repository_selection": "selected", "repositories": sandbox,
 			"permissions": map[string]string{"contents": "write", "metadata": "read"}},
+		"another permission": {"token": "ghs_wide", "repository_selection": "selected", "repositories": sandbox,
+			"permissions": map[string]string{"contents": "read", "metadata": "read", "issues": "read"}},
+		"an access it does not know": {"token": "ghs_wide", "repository_selection": "selected", "repositories": sandbox,
+			"permissions": map[string]string{"contents": "admin", "metadata": "read"}},
 	} {
 		srv, _, revoked := fakeGitHub(t, func(map[string]any) (int, any) { return 201, answer })
 		c := Client{API: srv.URL}
 		_, err := c.Mint(context.Background(), Connection{AppID: 1, InstallationID: 2, PrivateKey: key, Account: "acme"},
-			[]string{"acme/sandbox"}, Read)
+			[]RepoRef{{11, "acme/sandbox"}}, Read)
 		if err == nil {
 			t.Fatalf("%s: a wider token was taken", name)
 		}
 		if len(*revoked) != 1 || (*revoked)[0] != "ghs_wide" {
 			t.Fatalf("%s: the wider token was not withdrawn: %v", name, *revoked)
 		}
+	}
+}
+
+// Every page of repositories is read, however many there are.
+func TestEveryRepositoryTheAppReachesIsListed(t *testing.T) {
+	_, key := testKey(t)
+	const total = 5234
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "POST":
+			w.WriteHeader(201)
+			_ = json.NewEncoder(w).Encode(map[string]any{"token": "ghs_list"})
+		case r.Method == "DELETE":
+			w.WriteHeader(204)
+		default:
+			var page int
+			_, _ = fmt.Sscanf(r.URL.Query().Get("page"), "%d", &page)
+			var repos []map[string]any
+			for i := (page - 1) * 100; i < page*100 && i < total; i++ {
+				repos = append(repos, map[string]any{"id": i + 1, "full_name": fmt.Sprintf("acme/r%05d", i)})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"total_count": total, "repositories": repos})
+		}
+	}))
+	defer srv.Close()
+	got, err := (Client{API: srv.URL}).Repositories(context.Background(), Connection{AppID: 1, InstallationID: 2, PrivateKey: key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != total || got[total-1].ID == 0 {
+		t.Fatalf("%d of %d repositories listed", len(got), total)
 	}
 }
 
