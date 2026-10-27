@@ -1,6 +1,6 @@
 {
   "pack": "ai_agents",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publisher": "identity-agent",
   "capabilities": [
     {
@@ -17,6 +17,22 @@
           "text": { "type": "string", "description": "what to ask" }
         },
         "required": ["to", "text"]
+      },
+      "provider": "registry-native",
+      "enabled": true
+    },
+    {
+      "id": "agent.machine.provide",
+      "name": "Make machines for other AI agents",
+      "description": "Make a new machine for another AI agent of this organisation when a person asks, providing what that AI agent's work needs, and destroy it when a person removes it. The new machine still enrols with a one-time string, and a person approves its six words before it speaks as that AI agent.",
+      "domain": "agent",
+      "executor_type": "body_service",
+      "impact": "mutating",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "provides": { "type": "array", "items": { "type": "string", "enum": ["screen", "toolchain", "xcode"] }, "description": "what the machines it makes can provide" }
+        }
       },
       "provider": "registry-native",
       "enabled": true

@@ -96,6 +96,13 @@ var publicRoutes = map[string]string{
 	// travels back sealed to that body's keys.
 	"POST /api/agent-host/github":        "an AI agent's body borrowing GitHub access for one run, sealed and signed",
 	"POST /api/agent-host/github/return": "an AI agent's body giving back the GitHub access it borrowed, sealed and signed",
+	// A body that makes machines for other AI agents collecting that work and
+	// reporting on it. Each handler admits only a sealed request a live body
+	// signed, whose AI agent's grant lets it make machines; an enrolment
+	// string travels back sealed to that body's keys.
+	"GET /api/agent-host/machine-requests":                  "a body that makes machines collecting the machines it is asked for, sealed and signed",
+	"POST /api/agent-host/machine-requests/{rid}":           "a body that makes machines saying how one is going, sealed and signed",
+	"POST /api/agent-host/machine-requests/{rid}/enrolment": "a body that makes machines asking for the enrolment string of one it is making, sealed and signed",
 
 	// --- carrying a request nothing in the middle can read ---
 	// Open in the same sense the message endpoint is open: what arrives is an

@@ -50,6 +50,9 @@ var builtinExecutorTypes = map[string]bool{
 	// a code repository. It is never invoked: the grant decides what the
 	// Identity Agent lends, and the body uses what it was lent itself.
 	ExecutorLentCredential: true,
+	// Work an AI agent's body does for the Identity Agent, such as making
+	// machines for other AI agents. Never invoked through the gateway either.
+	ExecutorBodyService: true,
 }
 
 // ExecutorLentCredential is the executor type of a capability that is a

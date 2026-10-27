@@ -108,6 +108,16 @@ type AgentConfig struct {
 	SystemPrompt string      `json:"system_prompt,omitempty"` // the agent's instructions
 	Brain        BrainConfig `json:"brain"`                   // how it reaches its LLM
 	Exposure     Exposure    `json:"exposure"`                // how tools reach it
+	// Machine is what the machine it runs on must provide. What services it
+	// may use is its grant's to say, the same on any machine.
+	Machine *MachineNeeds `json:"machine,omitempty"`
+}
+
+// MachineNeeds is what an AI agent's machine must provide — a screen, a code
+// toolchain, Xcode — as agentmachine names them. Empty is a machine that only
+// carries messages.
+type MachineNeeds struct {
+	Provides []string `json:"provides"`
 }
 
 // BrainConfig is how an agent connects to its LLM (its probabilistic brain). Kept
