@@ -47,12 +47,14 @@ the last viewing of that body ends. Pictures are never written to disk.
 
 **Watching and taking control are two actions in the one check.** Opening,
 fetching and ending a viewing, and taking control and sending clicks and keys,
-each need the default minimum score (ADR-050) unless the owner sets another for
-that action. They are separate actions so that the owner can raise the score
-for taking control without changing watching: a person who can click and type
-on the AI agent's machine can do whatever that machine can. Both are open to
-the owner and to an authorised controller. A browser session may watch and may
-never take control.
+each need the default minimum score (ADR-050) unless another is set for that
+action. They are separate actions so that taking control can be set to need a
+higher score than watching without changing it: a person who can click and
+type on the AI agent's machine can do whatever that machine can. The
+per-action minimums are a table in the code today (`controllerMinimumScore`),
+with nothing set for either; a setting the owner can change is future work.
+Both are open to the owner and to an authorised controller. A browser session
+may watch and may never take control.
 
 **A viewing belongs to whoever opened it and to one body of one AI agent.**
 Only its viewer can fetch its pictures, take control through it or end it. A
@@ -64,15 +66,40 @@ a person in control sent, checked and bounded, and hands it to the body with its
 next picture. The body checks each event again and passes it to the screen. On a
 machine running an X display the body reads the screen and passes clicks and
 keys over the X protocol itself, with its XTEST extension, so no screenshot or
-input program is needed on the machine.
+input program is needed on the machine. A character no key on the machine's
+keyboard types is typed by lending it, for a moment, a key that types nothing at
+any level, and giving that key back exactly as it was. When control is given
+back, or nobody is watching any more, the body lets go of any button or key
+still held down.
+
+**Whoever is in control can press any key combination**, as a person at the
+machine could. That includes switching to another virtual terminal and ending
+the machine's graphical session. Taking control is decided with that in mind.
 
 **The body decides what it allows.** It runs with its screen offered for
-control, for watching only, or not at all. A body offered for watching only says
-it cannot be controlled, and ignores any click or key it is sent.
+control, for watching only, or not at all. Offering it for control
+(`agent-host run --screen control`) is the default; `--screen watch` makes the
+machine watch-only, and `--screen off` offers no screen. A body offered for
+watching only says it cannot be controlled, and ignores any click or key it is
+sent. A body shows only an X display on its own machine; a display reached over
+the network (`host:0`), whose pictures and keys would cross it unencrypted, is
+refused unless `--display-allow-network` is given, and a warning is printed when
+it is.
 
 **Every viewing is recorded.** The start and end of watching, and of control,
 are written to the signed governance record, naming who watched, which AI agent,
-which body and for how long, and a refusal is recorded with its reason.
+which body and for how long, and each refusal by a viewing's handler — no
+screen, a viewing that is not the caller's or has ended, control not taken, a
+machine that cannot be controlled, too many viewings, clicks the machine has not
+caught up with, an unreadable request — is recorded with its reason. Opening
+viewings too often is refused and not recorded, so a loop of attempts cannot
+fill the record. A start or end of control is recorded only when control
+actually changed.
+
+**The app is told codes, not sentences.** Every refusal carries a `reason` code,
+and an ended viewing says why as a code, which the app turns into its own words.
+The app is sent, when a viewing opens, the limits on what it may send and the
+names of the keys it may press, from the one place they are set.
 
 ## Consequences
 
@@ -86,12 +113,18 @@ which body and for how long, and a refusal is recorded with its reason.
   connection, as everything else the app reads does.
 - Clicks arrive with the next picture, so they lag by up to a quarter of a second
   while somebody is in control.
+- Viewings are bounded: how many can be open at once, per viewer, per body and in
+  all; how often a viewer (ten a minute) or a body (thirty a minute) can be
+  opened; one fetch waiting per viewing, a newer one sending the older back at
+  once; and how many ended viewings are remembered.
 - A controller signs the path, the second and the body of a request, and a
   signed request is taken once. Each request about a viewing carries a fresh
   value in its body, so two identical requests in one second are not refused as
   one request sent twice.
 - Only a body on a machine running an X display can show its screen today. A
   Mac or Windows body says it has none until reading and driving those screens
-  is built.
+  is built; `agent-host` there says watching is not available yet, and the app
+  shows the button disabled with the same sentence.
 - A refusal by the one check happens before a viewing's handler runs, and is
-  answered with its reason but not written to the governance record.
+  answered with its reason and a code (`score_too_low`, `browser_session`) but
+  not written to the governance record.

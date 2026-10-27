@@ -140,7 +140,8 @@ func (s *CoreServer) controllerActsForTheOwner(
 	authenticated = howSureWeAreItIsThem(authenticated, time.Now().UTC())
 	if ok, why := mayThisControllerDoThis(
 		r.Method, pattern, grant.ControllerAID, authenticated); !ok {
-		denyAuthorization(w, "this machine may act for you, but "+why)
+		denyAuthorizationBecause(w, whyAControllerWasRefused(r.Method, pattern, authenticated),
+			"this machine may act for you, but "+why)
 		return true
 	}
 	// Carried forward so what this machine did is attributable to it rather than

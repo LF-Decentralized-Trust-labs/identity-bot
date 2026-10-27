@@ -29,6 +29,7 @@ type aScreen struct {
 	shade    uint8
 	captures int
 	applied  []screenview.Event
+	released int
 }
 
 func (s *aScreen) Describe() (screenview.Screen, error) {
@@ -53,7 +54,16 @@ func (s *aScreen) Apply(e screenview.Event) error {
 	return nil
 }
 
+func (s *aScreen) Release() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.released++
+	return nil
+}
+
 func (s *aScreen) Close() error { return nil }
+
+func (s *aScreen) letGo() int { s.mu.Lock(); defer s.mu.Unlock(); return s.released }
 
 func (s *aScreen) looked() int { s.mu.Lock(); defer s.mu.Unlock(); return s.captures }
 func (s *aScreen) got() []screenview.Event {
@@ -117,6 +127,12 @@ func (w *screenWorld) agentsWithScreens(t *testing.T) map[string]any {
 	return m
 }
 
+// hasScreen says the app is offered the button for this AI agent.
+func (w *screenWorld) hasScreen(t *testing.T, agentID string) bool {
+	m, _ := w.agentsWithScreens(t)[agentID].(map[string]any)
+	return m["has_screen"] == true
+}
+
 // eventually waits for cond, failing with what after a few seconds.
 func eventually(t *testing.T, what string, cond func() bool) {
 	t.Helper()
@@ -158,9 +174,9 @@ func (w *screenWorld) watch(t *testing.T) (string, map[string]any) {
 func TestABodyWithAScreenSaysSoAndOneWithoutDoesNot(t *testing.T) {
 	w := newScreenWorld(t)
 	eventually(t, "the AI agent with a screen was never offered", func() bool {
-		return w.agentsWithScreens(t)[w.a.ID] != nil
+		return w.hasScreen(t, w.a.ID)
 	})
-	if w.agentsWithScreens(t)[w.b.ID] != nil {
+	if w.hasScreen(t, w.b.ID) {
 		t.Fatal("an AI agent whose machine has no screen was offered as having one")
 	}
 	_, out, _ := w.asApp(t, "GET", "/api/mcp/agents/"+w.a.ID+"/bodies", "", 0)
@@ -180,7 +196,7 @@ func TestABodyWithAScreenSaysSoAndOneWithoutDoesNot(t *testing.T) {
 // body stops looking at its screen and the viewing's end is recorded.
 func TestPicturesFlowOnlyWhileSomebodyWatches(t *testing.T) {
 	w := newScreenWorld(t)
-	eventually(t, "the screen was never offered", func() bool { return w.agentsWithScreens(t)[w.a.ID] != nil })
+	eventually(t, "the screen was never offered", func() bool { return w.hasScreen(t, w.a.ID) })
 	time.Sleep(300 * time.Millisecond)
 	if n := w.scr.looked(); n != 0 {
 		t.Fatalf("the body looked at its screen %d times with nobody watching", n)
@@ -232,7 +248,7 @@ func jsonNumber(f float64) string { b, _ := json.Marshal(f); return string(b) }
 // clicked. Taking and giving back control are recorded.
 func TestAClickNeedsTheTakeControlPermission(t *testing.T) {
 	w := newScreenWorld(t)
-	eventually(t, "the screen was never offered", func() bool { return w.agentsWithScreens(t)[w.a.ID] != nil })
+	eventually(t, "the screen was never offered", func() bool { return w.hasScreen(t, w.a.ID) })
 	sid, _ := w.watch(t)
 	base := "/api/mcp/agents/" + w.a.ID + "/screen/" + sid
 	click := `{"events":[{"type":"click","x":640,"y":360,"button":1}]}`
@@ -247,7 +263,7 @@ func TestAClickNeedsTheTakeControlPermission(t *testing.T) {
 	})
 	// At the score every person has until human authentication is built.
 	if code, out, raw := w.asApp(t, "POST", base+"/control", `{"on":true}`, 0); code != http.StatusForbidden ||
-		!strings.Contains(out["detail"].(string), "score of at least 90") {
+		out["reason"] != "score_too_low" {
 		t.Fatalf("control was given at the watching score: %d %s", code, raw)
 	}
 	if code, _, raw := w.asApp(t, "POST", base+"/input", click, 0); code != http.StatusForbidden {
@@ -278,6 +294,14 @@ func TestAClickNeedsTheTakeControlPermission(t *testing.T) {
 	if code, _, raw := w.asApp(t, "POST", base+"/control", `{"on":false}`, 90); code != http.StatusOK {
 		t.Fatalf("giving control back: %d %s", code, raw)
 	}
+	// The machine lets go of anything held down once control is given back.
+	eventually(t, "the machine never let go of what was held when control was given back", func() bool {
+		if w.scr.letGo() > 0 {
+			return true
+		}
+		w.picture(t, w.a.ID, sid, 1000)
+		return false
+	})
 	if n := len(governanceRows(t, w.talkWorld, "agent.screen.control.started")); n != 1 {
 		t.Fatalf("%d control starts recorded, want 1", n)
 	}
@@ -289,7 +313,7 @@ func TestAClickNeedsTheTakeControlPermission(t *testing.T) {
 // A browser session may watch, and may never take control or click.
 func TestABrowserSessionCannotTakeControl(t *testing.T) {
 	w := newScreenWorld(t)
-	eventually(t, "the screen was never offered", func() bool { return w.agentsWithScreens(t)[w.a.ID] != nil })
+	eventually(t, "the screen was never offered", func() bool { return w.hasScreen(t, w.a.ID) })
 	w.s.BrowserSessions = newBrowserSessions()
 	const secret = "the-browser-keeps-this"
 	id, code, _, _ := w.s.BrowserSessions.newChallenge(hashSecret(secret))
@@ -319,7 +343,7 @@ func TestABrowserSessionCannotTakeControl(t *testing.T) {
 		{base + "/input", `{"events":[{"type":"click","x":1,"y":1,"button":1}]}`},
 	} {
 		st, out := asBrowser("POST", tc.path, tc.body)
-		if st != http.StatusForbidden || !strings.Contains(out["detail"].(string), "browser session") {
+		if st != http.StatusForbidden || out["reason"] != "browser_session" {
 			t.Fatalf("a browser session reached %s: %d %v", tc.path, st, out)
 		}
 	}
@@ -333,7 +357,7 @@ func TestABrowserSessionCannotTakeControl(t *testing.T) {
 // and the body of another AI agent never receives the first one's clicks.
 func TestAViewingIsOfOneAIAgent(t *testing.T) {
 	w := newScreenWorld(t)
-	eventually(t, "the screen was never offered", func() bool { return w.agentsWithScreens(t)[w.a.ID] != nil })
+	eventually(t, "the screen was never offered", func() bool { return w.hasScreen(t, w.a.ID) })
 	sid, _ := w.watch(t)
 	if st, _, _ := w.picture(t, w.b.ID, sid, 0); st != http.StatusNotFound {
 		t.Fatalf("a viewing of one AI agent was fetched under another: %d", st)
@@ -361,7 +385,7 @@ func TestAViewingIsOfOneAIAgent(t *testing.T) {
 // authorised controller can take control at the score everyone has today.
 func TestControlNeedsOnlyTheDefaultUnlessRaised(t *testing.T) {
 	w := newScreenWorld(t)
-	eventually(t, "the screen was never offered", func() bool { return w.agentsWithScreens(t)[w.a.ID] != nil })
+	eventually(t, "the screen was never offered", func() bool { return w.hasScreen(t, w.a.ID) })
 	sid, _ := w.watch(t)
 	base := "/api/mcp/agents/" + w.a.ID + "/screen/" + sid
 	if code, out, raw := w.asApp(t, "POST", base+"/control", `{"on":true}`, 0); code != http.StatusOK || out["control"] != true {
@@ -370,5 +394,111 @@ func TestControlNeedsOnlyTheDefaultUnlessRaised(t *testing.T) {
 	click := `{"events":[{"type":"click","x":10,"y":10,"button":1}]}`
 	if code, _, raw := w.asApp(t, "POST", base+"/input", click, 0); code != http.StatusAccepted {
 		t.Fatalf("clicking at the default score: %d %s", code, raw)
+	}
+}
+
+// The window is told what it may send — the limits and key names — from the
+// one place they are set, and why its viewing ended, as a code.
+func TestTheAppIsToldTheLimitsAndWhyAViewingEnded(t *testing.T) {
+	w := newScreenWorld(t)
+	eventually(t, "the screen was never offered", func() bool { return w.hasScreen(t, w.a.ID) })
+	code, out, raw := w.asApp(t, "POST", "/api/mcp/agents/"+w.a.ID+"/screen", `{}`, 0)
+	if code != http.StatusCreated {
+		t.Fatalf("opening: %d %s", code, raw)
+	}
+	limits, _ := out["limits"].(map[string]any)
+	if limits["events_per_send"].(float64) != screenview.MaxEventsPerSend || limits["text"].(float64) != screenview.MaxText {
+		t.Fatalf("the limits are not sent: %s", raw)
+	}
+	keys, _ := out["keys"].([]any)
+	if len(keys) != len(screenview.Keys) {
+		t.Fatalf("the key names are not sent: %s", raw)
+	}
+	sid := out["session"].(string)
+	if st, _, raw := w.asApp(t, "DELETE", "/api/mcp/agents/"+w.a.ID+"/screen/"+sid, "", 0); st != http.StatusOK {
+		t.Fatalf("ending: %d %s", st, raw)
+	}
+	_, got, raw := w.picture(t, w.a.ID, sid, 0)
+	if got["state"] != "ended" || got["ended_because"] != screenview.EndedClosed {
+		t.Fatalf("the window was not told why its viewing ended: %s", raw)
+	}
+	if st, got, raw := w.asApp(t, "POST", "/api/mcp/agents/"+w.a.ID+"/screen/"+sid+"/control", `{"on":true}`, 0); st != http.StatusConflict ||
+		got["reason"] != "ended" || got["ended_because"] != screenview.EndedClosed {
+		t.Fatalf("taking control of an ended viewing: %d %s", st, raw)
+	}
+}
+
+// Every refusal a handler here makes is recorded with its reason: a viewing
+// that is not yours, clicks sent while not in control.
+func TestRefusalsAreRecordedWithTheirReason(t *testing.T) {
+	w := newScreenWorld(t)
+	eventually(t, "the screen was never offered", func() bool { return w.hasScreen(t, w.a.ID) })
+	sid, _ := w.watch(t)
+	base := "/api/mcp/agents/" + w.a.ID + "/screen/"
+	click := `{"events":[{"type":"click","x":1,"y":1,"button":1}]}`
+	if st, out, raw := w.asApp(t, "POST", base+sid+"/input", click, 0); st != http.StatusConflict || out["reason"] != "not_in_control" {
+		t.Fatalf("a click before taking control: %d %s", st, raw)
+	}
+	if st, out, raw := w.asApp(t, "POST", base+"sv_nobodys/control", `{"on":true}`, 0); st != http.StatusNotFound || out["reason"] != "not_yours" {
+		t.Fatalf("control of a viewing that is not yours: %d %s", st, raw)
+	}
+	var denied []string
+	for _, row := range governanceRows(t, w.talkWorld, "agent.screen.control") {
+		if row.ResultStatus == "denied" {
+			denied = append(denied, row.Reason)
+		}
+	}
+	if len(denied) != 2 || !strings.HasPrefix(denied[0], "not_in_control") && !strings.HasPrefix(denied[1], "not_in_control") ||
+		!strings.HasPrefix(denied[0], "not_yours") && !strings.HasPrefix(denied[1], "not_yours") {
+		t.Fatalf("the refusals were not recorded with their reasons: %q", denied)
+	}
+}
+
+// Two requests to take control at once record one start.
+func TestTakingControlTwiceAtOnceIsRecordedOnce(t *testing.T) {
+	w := newScreenWorld(t)
+	eventually(t, "the screen was never offered", func() bool { return w.hasScreen(t, w.a.ID) })
+	sid, _ := w.watch(t)
+	path := "/api/mcp/agents/" + w.a.ID + "/screen/" + sid + "/control"
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			w.asApp(t, "POST", path, `{"on":true}`, 0)
+		}()
+	}
+	wg.Wait()
+	if n := len(governanceRows(t, w.talkWorld, "agent.screen.control.started")); n != 1 {
+		t.Fatalf("%d control starts recorded for one start, want 1", n)
+	}
+}
+
+// The record names the caller the gate admitted. The owner at this computer
+// who also holds a browser session is the owner, as the gate admitted them.
+func TestTheRecordNamesWhoTheGateAdmitted(t *testing.T) {
+	w := newScreenWorld(t)
+	w.s.localOwnerSecret = testOwnerSecret
+	eventually(t, "the screen was never offered", func() bool { return w.hasScreen(t, w.a.ID) })
+	w.s.BrowserSessions = newBrowserSessions()
+	const secret = "the-browser-keeps-this"
+	id, code, _, _ := w.s.BrowserSessions.newChallenge(hashSecret(secret))
+	if err := w.s.BrowserSessions.grant(code); err != nil {
+		t.Fatal(err)
+	}
+	token, _, err := w.s.BrowserSessions.claim(id, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := local("POST", "/api/mcp/agents/"+w.a.ID+"/screen", `{}`)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	w.s.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("the owner could not watch: %d %s", rec.Code, rec.Body.String())
+	}
+	started := governanceRows(t, w.talkWorld, "agent.screen.watch.started")
+	if len(started) != 1 || started[0].Transport != "owner" {
+		t.Fatalf("the owner's viewing was recorded as somebody else's: %+v", started)
 	}
 }

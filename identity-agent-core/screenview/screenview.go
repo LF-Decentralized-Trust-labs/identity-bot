@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -59,7 +60,42 @@ const (
 	MaxViewings          = 64
 	MaxViewingsPerViewer = 4
 	MaxViewingsPerBody   = 8
+	// OpensPerViewerPerMinute and OpensPerBodyPerMinute bound how often
+	// viewings can be opened, so opening and closing in a loop cannot fill the
+	// record or keep a body starting and stopping.
+	OpensPerViewerPerMinute = 10
+	OpensPerBodyPerMinute   = 30
+	// MaxRemembered bounds how many ended viewings are remembered at once.
+	MaxRemembered = 256
 )
+
+// Why a viewing ended, as a code the app turns into words. EndedSentence is
+// the same in words, for the record.
+const (
+	EndedClosed         = "closed"
+	EndedIdle           = "idle"
+	EndedBodyRemoved    = "body_removed"
+	EndedBodyReassigned = "body_reassigned"
+	EndedNoScreen       = "no_screen"
+	EndedBodyInactive   = "body_inactive"
+)
+
+var endedSentences = map[string]string{
+	EndedClosed:         "the person closed the window",
+	EndedIdle:           "nobody was watching any more",
+	EndedBodyRemoved:    "the machine was removed as this AI agent's body",
+	EndedBodyReassigned: "the machine became another AI agent's body",
+	EndedNoScreen:       "the machine no longer has a screen",
+	EndedBodyInactive:   "the machine is no longer this AI agent's body",
+}
+
+// EndedSentence is why a viewing ended, in words.
+func EndedSentence(code string) string {
+	if s, ok := endedSentences[code]; ok {
+		return s
+	}
+	return code
+}
 
 // Screen is what a body says about its screen.
 type Screen struct {
@@ -92,16 +128,38 @@ type Event struct {
 	Text   string   `json:"text,omitempty"`
 }
 
-// Keys a person may press, by their X keysym names, besides the characters
-// they type. A key event may also name one printable character, pressed with
+// Keys a person may press, besides the characters they type, by the names
+// keyboards are given in web browsers and app toolkits ("Enter", "ArrowLeft",
+// "PageUp"), each with the X keysym it presses. This is the one list: the app
+// is sent the names when it opens a viewing, and a body presses what they
+// stand for. A key event may also name one printable character, pressed with
 // the keys held.
+//
+// Whoever is in control can press any combination of these with the held
+// keys, as a person at the machine could: that includes switching to another
+// virtual terminal or ending the machine's graphical session.
 var Keys = map[string]uint32{
-	"Return": 0xff0d, "BackSpace": 0xff08, "Tab": 0xff09, "Escape": 0xff1b, "Delete": 0xffff,
-	"Home": 0xff50, "Left": 0xff51, "Up": 0xff52, "Right": 0xff53, "Down": 0xff54,
-	"Page_Up": 0xff55, "Page_Down": 0xff56, "End": 0xff57, "Insert": 0xff63,
+	"Enter": 0xff0d, "NumpadEnter": 0xff0d, "Backspace": 0xff08, "Tab": 0xff09, "Escape": 0xff1b,
+	"Delete": 0xffff, "Insert": 0xff63, "Home": 0xff50, "End": 0xff57, "PageUp": 0xff55, "PageDown": 0xff56,
+	"ArrowLeft": 0xff51, "ArrowUp": 0xff52, "ArrowRight": 0xff53, "ArrowDown": 0xff54,
 	"F1": 0xffbe, "F2": 0xffbf, "F3": 0xffc0, "F4": 0xffc1, "F5": 0xffc2, "F6": 0xffc3,
 	"F7": 0xffc4, "F8": 0xffc5, "F9": 0xffc6, "F10": 0xffc7, "F11": 0xffc8, "F12": 0xffc9,
-	"space": 0x0020,
+	"Space": 0x0020,
+}
+
+// KeyNames is every name in Keys, in order, as the app is sent them.
+func KeyNames() []string { return sortedNames(Keys) }
+
+// ModNames is every name in Mods, in order, as the app is sent them.
+func ModNames() []string { return sortedNames(Mods) }
+
+func sortedNames(m map[string]uint32) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Mods are the keys a person may hold while pressing another.
@@ -147,7 +205,7 @@ func (e Event) Check(width, height int) error {
 	case "key":
 		// A named key, or one printable character pressed with held keys —
 		// a shortcut such as ctrl and c.
-		if _, ok := Keys[e.Key]; !ok && !(len(e.Key) == 1 && e.Key[0] > 0x20 && e.Key[0] < 0x7f) {
+		if _, ok := Keys[e.Key]; !ok && !(len(e.Key) == 1 && e.Key[0] >= 0x20 && e.Key[0] < 0x7f) {
 			return fmt.Errorf("%q is not a key that can be pressed", e.Key)
 		}
 		return nil
@@ -188,7 +246,8 @@ type Viewing struct {
 	// Control is whether the viewer has taken control, and since when.
 	Control      bool
 	ControlSince time.Time
-	// Ended and EndedBecause say the viewing is over and why.
+	// Ended and EndedBecause say the viewing is over and why, as one of the
+	// Ended codes.
 	Ended        time.Time
 	EndedBecause string
 
@@ -196,7 +255,10 @@ type Viewing struct {
 	// fetching counts fetches waiting for a picture now: a viewer waiting is
 	// a viewer watching.
 	fetching int
-	events   []Event
+	// waiter is closed to send back at once the fetch waiting now, when a
+	// newer fetch of the same viewing arrives: one fetch waits per viewing.
+	waiter chan struct{}
+	events []Event
 }
 
 // Errors a route turns into an answer.
@@ -204,11 +266,45 @@ var (
 	ErrNoScreen      = errors.New("this AI agent's machine has no screen to watch")
 	ErrNotYours      = errors.New("no such viewing")
 	ErrEnded         = errors.New("this viewing has ended")
+	ErrTooFast       = errors.New("viewings are being opened too often; wait a minute and try again")
 	ErrNotInControl  = errors.New("take control before sending clicks and keys")
 	ErrCannotControl = errors.New("this AI agent's machine cannot be controlled: it shows its screen but takes no clicks and keys")
 	ErrTooMany       = errors.New("too many viewings are open; close one and try again")
 	ErrQueueFull     = errors.New("the machine has not caught up with what was sent; wait a moment")
+	ErrNoPictureYet  = errors.New("wait for the screen to appear before clicking on it")
 )
+
+// NotYetReason and NotYetSentence say why a Mac's or a Windows computer's
+// screen cannot be watched: reading and driving those screens is not built
+// yet. The reason is the code the app is sent; the sentence is what a body
+// on such a computer prints.
+const (
+	NotYetReason   = "mac_or_windows"
+	NotYetSentence = "Watching is not available yet for AI agents on a Mac or Windows computer."
+)
+
+// NotYetOn says a body's platform, as it reported it when it enrolled
+// ("darwin/arm64", "windows/amd64"), is one whose screen cannot be watched
+// yet.
+func NotYetOn(platform string) bool {
+	p := strings.ToLower(platform)
+	return strings.HasPrefix(p, "darwin") || strings.HasPrefix(p, "macos") || strings.HasPrefix(p, "windows")
+}
+
+// EndedError is ErrEnded, saying why the viewing ended.
+type EndedError struct{ Because string }
+
+func (e *EndedError) Error() string        { return ErrEnded.Error() + ": " + EndedSentence(e.Because) }
+func (e *EndedError) Is(target error) bool { return target == ErrEnded }
+
+// EndedBecause is why a viewing ended, when err says it did.
+func EndedBecause(err error) string {
+	var e *EndedError
+	if errors.As(err, &e) {
+		return e.Because
+	}
+	return ""
+}
 
 // body is what is known about one body's screen.
 type body struct {
@@ -235,8 +331,12 @@ type Hub struct {
 	mu       sync.Mutex
 	bodies   map[string]*body
 	viewings map[string]*Viewing
-	// ended remembers viewings that ended in the last RememberEnded.
-	ended    map[string]Viewing
+	// ended remembers viewings that ended in the last RememberEnded, at most
+	// MaxRemembered of them.
+	ended map[string]Viewing
+	// opens are when viewings were opened in the last minute, by viewer and
+	// by body.
+	opens    map[string][]time.Time
 	sweeping bool
 }
 
@@ -259,6 +359,7 @@ func (h *Hub) bodyLocked(host string) *body {
 		h.bodies = map[string]*body{}
 		h.viewings = map[string]*Viewing{}
 		h.ended = map[string]Viewing{}
+		h.opens = map[string][]time.Time{}
 	}
 	b, ok := h.bodies[host]
 	if !ok {
@@ -271,14 +372,16 @@ func (h *Hub) bodyLocked(host string) *body {
 // Advertise records what a body says about its screen: nil for none.
 func (h *Hub) Advertise(host, agent string, s *Screen) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
+	var ended []Viewing
 	b := h.bodyLocked(host)
 	if b.agent != "" && b.agent != agent {
 		// A machine key is one AI agent's body. A different AI agent for the
 		// same key is a new body; what was being watched of the old one ends.
-		h.endHostLocked(host, "the machine became another AI agent's body")
+		ended = h.endHostLocked(host, EndedBodyReassigned)
 	}
 	b.agent, b.screen, b.seenAt = agent, s, h.now()
+	h.mu.Unlock()
+	h.told(ended)
 }
 
 // Available says whether a body's screen can be watched now, and what it is.
@@ -322,6 +425,14 @@ func (h *Hub) Open(agent, bodyID, host, viewer string) (Viewing, error) {
 		return Viewing{}, ErrTooMany
 	}
 	now := h.now()
+	byViewer, byBody := "viewer:"+viewer, "body:"+host
+	if !h.mayOpenLocked(byViewer, OpensPerViewerPerMinute, now) || !h.mayOpenLocked(byBody, OpensPerBodyPerMinute, now) {
+		h.mu.Unlock()
+		h.told(ended)
+		return Viewing{}, ErrTooFast
+	}
+	h.opens[byViewer] = append(h.opens[byViewer], now)
+	h.opens[byBody] = append(h.opens[byBody], now)
 	v := &Viewing{ID: newID(), Agent: agent, Body: bodyID, Host: host, Viewer: viewer, Started: now, lastFetch: now}
 	h.viewings[v.ID] = v
 	close(b.watched)
@@ -333,6 +444,26 @@ func (h *Hub) Open(agent, bodyID, host, viewer string) (Viewing, error) {
 	return out, nil
 }
 
+// mayOpenLocked reports whether fewer than limit viewings were opened under
+// key in the last minute, forgetting the older ones.
+func (h *Hub) mayOpenLocked(key string, limit int, now time.Time) bool {
+	recent := pruneOpens(h.opens[key], now)
+	if len(recent) == 0 {
+		delete(h.opens, key)
+	} else {
+		h.opens[key] = recent
+	}
+	return len(recent) < limit
+}
+
+func pruneOpens(at []time.Time, now time.Time) []time.Time {
+	i := 0
+	for i < len(at) && now.Sub(at[i]) >= time.Minute {
+		i++
+	}
+	return at[i:]
+}
+
 // mine is the viewing id, if it is the viewer's and of this AI agent. Anything
 // else — somebody else's viewing, another AI agent's — is no such viewing.
 func (h *Hub) mineLocked(id, viewer, agent string) (*Viewing, error) {
@@ -341,7 +472,7 @@ func (h *Hub) mineLocked(id, viewer, agent string) (*Viewing, error) {
 		// A viewing that ended a moment ago is reported as ended, to its own
 		// viewer, so their window can say so rather than that it never was.
 		if e, was := h.ended[id]; was && e.Viewer == viewer && e.Agent == agent {
-			return nil, ErrEnded
+			return nil, &EndedError{Because: e.EndedBecause}
 		}
 		return nil, ErrNotYours
 	}
@@ -361,7 +492,9 @@ type Seen struct {
 }
 
 // Fetch is a viewer asking for the screen. It keeps the viewing open, and
-// waits up to wait for a picture newer than after.
+// waits up to wait for a picture newer than after. Only one fetch of a
+// viewing waits at a time: a newer one sends the one waiting back at once,
+// with what there is.
 func (h *Hub) Fetch(ctx context.Context, id, viewer, agent string, after int, wait time.Duration) (Seen, error) {
 	h.mu.Lock()
 	ended := h.sweepLocked()
@@ -370,6 +503,11 @@ func (h *Hub) Fetch(ctx context.Context, id, viewer, agent string, after int, wa
 		v.lastFetch = h.now()
 		if b := h.bodyLocked(v.Host); b.frame.Seq <= after && wait > 0 {
 			fresh := b.fresh
+			if v.waiter != nil {
+				close(v.waiter)
+			}
+			mine := make(chan struct{})
+			v.waiter = mine
 			v.fetching++
 			h.mu.Unlock()
 			h.told(ended)
@@ -377,12 +515,16 @@ func (h *Hub) Fetch(ctx context.Context, id, viewer, agent string, after int, wa
 			t := time.NewTimer(wait)
 			select {
 			case <-fresh:
+			case <-mine:
 			case <-t.C:
 			case <-ctx.Done():
 			}
 			t.Stop()
 			h.mu.Lock()
 			v.fetching--
+			if v.waiter == mine {
+				v.waiter = nil
+			}
 			v, err = h.mineLocked(id, viewer, agent)
 		}
 	}
@@ -416,17 +558,20 @@ func (h *Hub) Get(id, viewer, agent string) (Viewing, error) {
 	return *v, nil
 }
 
-// Control turns a viewer's control of the screen on or off.
-func (h *Hub) Control(id, viewer, agent string, on bool) (Viewing, error) {
+// Control turns a viewer's control of the screen on or off, and says whether
+// it was on before, read under the same lock, so of two requests at once only
+// the one that changed it sees a change.
+func (h *Hub) Control(id, viewer, agent string, on bool) (was bool, _ Viewing, _ error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	v, err := h.mineLocked(id, viewer, agent)
 	if err != nil {
-		return Viewing{}, err
+		return false, Viewing{}, err
 	}
+	was = v.Control
 	b := h.bodyLocked(v.Host)
 	if on && (b.screen == nil || !b.screen.CanControl) {
-		return Viewing{}, ErrCannotControl
+		return was, Viewing{}, ErrCannotControl
 	}
 	if on && !v.Control {
 		v.ControlSince = h.now()
@@ -436,7 +581,7 @@ func (h *Hub) Control(id, viewer, agent string, on bool) (Viewing, error) {
 	}
 	v.Control = on
 	v.lastFetch = h.now()
-	return *v, nil
+	return was, *v, nil
 }
 
 // Send queues clicks and keys from a viewer in control, for the body to take
@@ -456,7 +601,7 @@ func (h *Hub) Send(id, viewer, agent string, events []Event) (int, error) {
 	}
 	b := h.bodyLocked(v.Host)
 	if b.frame.Seq == 0 {
-		return 0, fmt.Errorf("wait for the screen to appear before clicking on it")
+		return 0, ErrNoPictureYet
 	}
 	for _, e := range events {
 		if err := e.Check(b.frame.Width, b.frame.Height); err != nil {
@@ -471,7 +616,7 @@ func (h *Hub) Send(id, viewer, agent string, events []Event) (int, error) {
 	return len(events), nil
 }
 
-// End closes a viewing at its viewer's request.
+// End closes a viewing at its viewer's request. why is one of the Ended codes.
 func (h *Hub) End(id, viewer, agent, why string) (Viewing, error) {
 	h.mu.Lock()
 	v, err := h.mineLocked(id, viewer, agent)
@@ -486,7 +631,7 @@ func (h *Hub) End(id, viewer, agent, why string) (Viewing, error) {
 }
 
 // EndBody closes every viewing of a body: it stopped being a body, or another
-// AI agent's.
+// AI agent's. why is one of the Ended codes.
 func (h *Hub) EndBody(host, why string) {
 	h.mu.Lock()
 	ended := h.endHostLocked(host, why)
@@ -606,6 +751,21 @@ func (h *Hub) endLocked(v *Viewing, why string) Viewing {
 	v.Ended, v.EndedBecause = h.now(), why
 	delete(h.viewings, v.ID)
 	v.events = nil
+	if v.waiter != nil {
+		close(v.waiter)
+		v.waiter = nil
+	}
+	if len(h.ended) >= MaxRemembered {
+		// The oldest is forgotten first: its viewer is then told there is
+		// no such viewing rather than that it ended.
+		oldest := ""
+		for id, e := range h.ended {
+			if oldest == "" || e.Ended.Before(h.ended[oldest].Ended) {
+				oldest = id
+			}
+		}
+		delete(h.ended, oldest)
+	}
 	h.ended[v.ID] = *v
 	if !h.watchedLocked(v.Host) {
 		// The last viewer left: the picture is forgotten.
@@ -637,9 +797,16 @@ func (h *Hub) sweepLocked() []Viewing {
 			delete(h.ended, id)
 		}
 	}
+	for key, at := range h.opens {
+		if recent := pruneOpens(at, now); len(recent) == 0 {
+			delete(h.opens, key)
+		} else {
+			h.opens[key] = recent
+		}
+	}
 	for _, v := range h.viewings {
 		if v.fetching == 0 && now.Sub(v.lastFetch) > h.idle() {
-			ended = append(ended, h.endLocked(v, "nobody was watching any more"))
+			ended = append(ended, h.endLocked(v, EndedIdle))
 		}
 	}
 	return ended

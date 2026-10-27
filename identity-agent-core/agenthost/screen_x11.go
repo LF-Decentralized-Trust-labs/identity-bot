@@ -7,6 +7,7 @@ import (
 	"image"
 	"os"
 	"sync"
+	"time"
 
 	"identity-agent-core/screenview"
 
@@ -20,13 +21,18 @@ import (
 // clicks and keys. No screenshot or input program is needed on the machine.
 
 // OpenScreen opens the X display named, or $DISPLAY when display is empty.
-// A machine with neither has no screen this program can show.
-func OpenScreen(display string) (Screen, error) {
+// A machine with neither has no screen this program can show. A display on
+// another machine, reached over the network, is refused unless allowNetwork
+// says it was asked for (see checkDisplay).
+func OpenScreen(display string, allowNetwork bool) (Screen, error) {
 	if display == "" {
 		display = os.Getenv("DISPLAY")
 	}
 	if display == "" {
 		return nil, ErrNoScreen
+	}
+	if err := checkDisplay(display, allowNetwork); err != nil {
+		return nil, err
 	}
 	conn, err := xgb.NewConnDisplay(display)
 	if err != nil {
@@ -34,7 +40,9 @@ func OpenScreen(display string) (Screen, error) {
 	}
 	setup := xproto.Setup(conn)
 	root := setup.DefaultScreen(conn)
-	s := &x11Screen{conn: conn, root: root.Root, minKey: setup.MinKeycode, maxKey: setup.MaxKeycode}
+	s := &x11Screen{conn: conn, root: root.Root, minKey: setup.MinKeycode, maxKey: setup.MaxKeycode,
+		buttons: map[byte]bool{}, keysDown: map[byte]bool{}}
+	s.lender = newKeyLender(x11Keys{s}, nil)
 	if err := s.checkFormat(setup, root); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("%w: %v", ErrNoScreen, err)
@@ -55,14 +63,84 @@ type x11Screen struct {
 	canControl bool
 	minKey     xproto.Keycode
 	maxKey     xproto.Keycode
-	// keys maps a keysym to the key that types it, and whether shift is
-	// needed, read once.
-	keys map[xproto.Keysym]keyAt
+	// kb is the keyboard's mapping as last read, or nil once it may have
+	// changed: the display says so with a MappingNotify, which every program
+	// is sent whether it asked or not.
+	kb *keyboardMap
+	// lender lends spare keys to characters no key types.
+	lender *keyLender
+	// giveBackAt is when a lent key is next due back, with a timer set for
+	// it.
+	giveBackAt time.Time
+	// buttons and keysDown are what this program is holding down on the
+	// display now, so they can be let go when control ends.
+	buttons  map[byte]bool
+	keysDown map[byte]bool
 }
 
-type keyAt struct {
-	code  xproto.Keycode
-	shift bool
+// x11Keys reads and writes the display's keyboard mapping for the lender.
+type x11Keys struct{ s *x11Screen }
+
+func (k x11Keys) readKey(code byte) (keyboardMap, error) {
+	rep, err := xproto.GetKeyboardMapping(k.s.conn, xproto.Keycode(code), 1).Reply()
+	if err != nil {
+		return keyboardMap{}, err
+	}
+	return keyboardMap{Min: code, Per: int(rep.KeysymsPerKeycode), Syms: keysyms(rep.Keysyms)}, nil
+}
+
+func (k x11Keys) writeKey(code byte, per int, syms []uint32) error {
+	out := make([]xproto.Keysym, len(syms))
+	for i, s := range syms {
+		out[i] = xproto.Keysym(s)
+	}
+	k.s.kb = nil
+	return xproto.ChangeKeyboardMappingChecked(k.s.conn, 1, xproto.Keycode(code), byte(per), out).Check()
+}
+
+func keysyms(in []xproto.Keysym) []uint32 {
+	out := make([]uint32, len(in))
+	for i, s := range in {
+		out[i] = uint32(s)
+	}
+	return out
+}
+
+// drain reads what the display sent unasked. A MappingNotify means the
+// keyboard changed, so the copy is read again before it is used. Read on
+// every call, because an X connection whose events nobody reads stops
+// answering once enough have queued.
+func (s *x11Screen) drain() {
+	for {
+		ev, err := s.conn.PollForEvent()
+		if ev == nil && err == nil {
+			return
+		}
+		if _, ok := ev.(xproto.MappingNotifyEvent); ok {
+			s.kb = nil
+		}
+	}
+}
+
+// giveBackDue gives back the lent keys whose time is up, and sets a timer for
+// the next, so a key is given back even when nothing else is typed.
+func (s *x11Screen) giveBackDue() {
+	next, err := s.lender.giveBackDue()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "agent-host: a key lent to a character could not be given back: %v\n", err)
+	}
+	if next.IsZero() || (!s.giveBackAt.IsZero() && !next.Before(s.giveBackAt)) {
+		return
+	}
+	s.giveBackAt = next
+	time.AfterFunc(time.Until(next)+10*time.Millisecond, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.giveBackAt = time.Time{}
+		if s.conn != nil {
+			s.giveBackDue()
+		}
+	})
 }
 
 // checkFormat accepts the one pixel layout the picture is read in: 32 bits a
@@ -105,6 +183,7 @@ func (s *x11Screen) size() (int, int, error) {
 func (s *x11Screen) Describe() (screenview.Screen, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.drain()
 	w, h, err := s.size()
 	if err != nil {
 		return screenview.Screen{}, err
@@ -115,6 +194,7 @@ func (s *x11Screen) Describe() (screenview.Screen, error) {
 func (s *x11Screen) Capture() (*image.RGBA, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.drain()
 	w, h, err := s.size()
 	if err != nil {
 		return nil, err
@@ -148,8 +228,48 @@ func (s *x11Screen) Capture() (*image.RGBA, error) {
 	return img, nil
 }
 
+// fake passes one press, release or move to the display, keeping account of
+// what is held down.
 func (s *x11Screen) fake(kind byte, detail byte, x, y int16) error {
-	return xtest.FakeInputChecked(s.conn, kind, detail, 0, s.root, x, y, 0).Check()
+	if err := xtest.FakeInputChecked(s.conn, kind, detail, 0, s.root, x, y, 0).Check(); err != nil {
+		return err
+	}
+	switch kind {
+	case xproto.ButtonPress:
+		s.buttons[detail] = true
+	case xproto.ButtonRelease:
+		delete(s.buttons, detail)
+	case xproto.KeyPress:
+		s.keysDown[detail] = true
+	case xproto.KeyRelease:
+		delete(s.keysDown, detail)
+	}
+	return nil
+}
+
+// Release lets go of every button and key this program is holding down, so a
+// person who gave back control, or stopped watching, mid-drag or mid-shortcut
+// leaves nothing held.
+func (s *x11Screen) Release() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.canControl {
+		return nil
+	}
+	var first error
+	for b := range s.buttons {
+		if err := s.fake(xproto.ButtonRelease, b, 0, 0); err != nil && first == nil {
+			first = err
+		}
+	}
+	for k := range s.keysDown {
+		if err := s.fake(xproto.KeyRelease, k, 0, 0); err != nil && first == nil {
+			first = err
+		}
+	}
+	// A key that could not be let go is forgotten rather than tried forever.
+	s.buttons, s.keysDown = map[byte]bool{}, map[byte]bool{}
+	return first
 }
 
 func (s *x11Screen) Apply(e screenview.Event) error {
@@ -158,6 +278,8 @@ func (s *x11Screen) Apply(e screenview.Event) error {
 	if !s.canControl {
 		return fmt.Errorf("this display cannot take clicks and keys")
 	}
+	s.drain()
+	defer s.giveBackDue()
 	x, y := int16(e.X), int16(e.Y)
 	move := func() error { return s.fake(xproto.MotionNotify, 0, x, y) }
 	press := func(button byte) error {
@@ -227,66 +349,59 @@ func runeKeysym(r rune) xproto.Keysym {
 	return xproto.Keysym(0x01000000 | uint32(r))
 }
 
-func (s *x11Screen) keymap() (map[xproto.Keysym]keyAt, error) {
-	if s.keys != nil {
-		return s.keys, nil
+// keymap is the keyboard's whole mapping, every level of every key, read
+// again whenever it may have changed.
+func (s *x11Screen) keymap() (keyboardMap, error) {
+	if s.kb != nil {
+		return *s.kb, nil
 	}
 	n := byte(s.maxKey - s.minKey + 1)
 	rep, err := xproto.GetKeyboardMapping(s.conn, s.minKey, n).Reply()
 	if err != nil {
-		return nil, err
+		return keyboardMap{}, err
 	}
-	per := int(rep.KeysymsPerKeycode)
-	keys := map[xproto.Keysym]keyAt{}
-	for i := 0; i < int(n); i++ {
-		code := xproto.Keycode(int(s.minKey) + i)
-		for j := 0; j < per && j < 2; j++ {
-			sym := rep.Keysyms[i*per+j]
-			if sym == 0 {
-				continue
-			}
-			if _, ok := keys[sym]; !ok {
-				keys[sym] = keyAt{code: code, shift: j == 1}
-			}
-		}
-	}
-	s.keys = keys
-	return keys, nil
+	kb := keyboardMap{Min: byte(s.minKey), Per: int(rep.KeysymsPerKeycode), Syms: keysyms(rep.Keysyms)}
+	s.kb = &kb
+	return kb, nil
 }
 
 // typeKeysym presses and releases the key for a keysym, holding the keys
 // named and shift where the keysym needs it. A keysym no key types — a
-// character not on this keyboard — is typed by lending it a spare key for the
-// moment, as the X protocol allows, and giving the key back after.
+// character not on this keyboard — is typed by lending it a key that types
+// nothing at any level, as the X protocol allows; the key is given back
+// exactly as it was a moment later (keyLender).
 func (s *x11Screen) typeKeysym(sym xproto.Keysym, mods []string) error {
-	keys, err := s.keymap()
+	kb, err := s.keymap()
 	if err != nil {
 		return err
 	}
-	k, ok := keys[sym]
-	restore := func() error { return nil }
-	if !ok {
-		spare, found := s.spareKey(keys)
-		if !found {
-			return fmt.Errorf("no key on this keyboard can type that character")
-		}
-		if err := xproto.ChangeKeyboardMappingChecked(s.conn, 1, spare, 1, []xproto.Keysym{sym}).Check(); err != nil {
+	type keyAt struct {
+		code  xproto.Keycode
+		shift bool
+	}
+	var k keyAt
+	if code, shift, ok := kb.find(uint32(sym)); ok {
+		k = keyAt{xproto.Keycode(code), shift}
+		// A key lent a moment ago keeps its character while it is in use.
+		s.lender.touch(code)
+	} else {
+		code, err := s.lender.borrow(uint32(sym), kb)
+		if err != nil {
 			return err
 		}
-		k = keyAt{code: spare}
-		restore = func() error {
-			return xproto.ChangeKeyboardMappingChecked(s.conn, 1, spare, 1, []xproto.Keysym{0}).Check()
+		k = keyAt{code: xproto.Keycode(code)}
+		if kb, err = s.keymap(); err != nil {
+			return err
 		}
 	}
-	defer func() { _ = restore() }()
 	var held []xproto.Keycode
 	hold := func(sym xproto.Keysym) error {
-		m, ok := keys[sym]
+		code, _, ok := kb.find(uint32(sym))
 		if !ok {
 			return fmt.Errorf("this keyboard has no key for a held key")
 		}
-		held = append(held, m.code)
-		return s.fake(xproto.KeyPress, byte(m.code), 0, 0)
+		held = append(held, xproto.Keycode(code))
+		return s.fake(xproto.KeyPress, code, 0, 0)
 	}
 	defer func() {
 		for i := len(held) - 1; i >= 0; i-- {
@@ -309,23 +424,19 @@ func (s *x11Screen) typeKeysym(sym xproto.Keysym, mods []string) error {
 	return s.fake(xproto.KeyRelease, byte(k.code), 0, 0)
 }
 
-// spareKey is a key that types nothing, which can be lent a keysym.
-func (s *x11Screen) spareKey(keys map[xproto.Keysym]keyAt) (xproto.Keycode, bool) {
-	used := map[xproto.Keycode]bool{}
-	for _, k := range keys {
-		used[k.code] = true
-	}
-	for c := int(s.maxKey); c >= int(s.minKey); c-- {
-		if !used[xproto.Keycode(c)] {
-			return xproto.Keycode(c), true
-		}
-	}
-	return 0, false
-}
-
 func (s *x11Screen) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.canControl {
+		for b := range s.buttons {
+			_ = s.fake(xproto.ButtonRelease, b, 0, 0)
+		}
+		for k := range s.keysDown {
+			_ = s.fake(xproto.KeyRelease, k, 0, 0)
+		}
+		_ = s.lender.giveBackAll()
+	}
 	s.conn.Close()
+	s.conn = nil
 	return nil
 }

@@ -110,10 +110,10 @@ func TestAViewingIsOnlyItsViewers(t *testing.T) {
 		if _, err := h.Fetch(context.Background(), v.ID, tc.viewer, tc.agent, 0, 0); !errors.Is(err, ErrNotYours) {
 			t.Errorf("%s fetched %s's viewing under %s: %v", tc.viewer, "alice", tc.agent, err)
 		}
-		if _, err := h.Control(v.ID, tc.viewer, tc.agent, true); !errors.Is(err, ErrNotYours) {
+		if _, _, err := h.Control(v.ID, tc.viewer, tc.agent, true); !errors.Is(err, ErrNotYours) {
 			t.Errorf("%s took control of another's viewing: %v", tc.viewer, err)
 		}
-		if _, err := h.End(v.ID, tc.viewer, tc.agent, "x"); !errors.Is(err, ErrNotYours) {
+		if _, err := h.End(v.ID, tc.viewer, tc.agent, EndedClosed); !errors.Is(err, ErrNotYours) {
 			t.Errorf("%s ended another's viewing: %v", tc.viewer, err)
 		}
 	}
@@ -125,7 +125,7 @@ func TestClicksAndKeysNeedControlAndStayOnThePicture(t *testing.T) {
 	h, _, _ := newHub()
 	h.Advertise("host-a", "agent-a", &Screen{Width: 100, Height: 100})
 	v, _ := h.Open("agent-a", "b1", "host-a", "alice")
-	if _, err := h.Control(v.ID, "alice", "agent-a", true); !errors.Is(err, ErrCannotControl) {
+	if _, _, err := h.Control(v.ID, "alice", "agent-a", true); !errors.Is(err, ErrCannotControl) {
 		t.Fatalf("control was taken of a body that cannot be controlled: %v", err)
 	}
 	h.Advertise("host-a", "agent-a", &Screen{Width: 100, Height: 100, CanControl: true})
@@ -134,7 +134,7 @@ func TestClicksAndKeysNeedControlAndStayOnThePicture(t *testing.T) {
 	if _, err := h.Send(v.ID, "alice", "agent-a", []Event{click}); !errors.Is(err, ErrNotInControl) {
 		t.Fatalf("a click was taken from a viewer not in control: %v", err)
 	}
-	if _, err := h.Control(v.ID, "alice", "agent-a", true); err != nil {
+	if _, _, err := h.Control(v.ID, "alice", "agent-a", true); err != nil {
 		t.Fatal(err)
 	}
 	for _, bad := range []Event{
@@ -144,7 +144,8 @@ func TestClicksAndKeysNeedControlAndStayOnThePicture(t *testing.T) {
 		{Type: "key", Key: "XF86PowerOff"},
 		{Type: "key", Key: "cc"},
 		{Type: "key", Key: "\x00"},
-		{Type: "key", Key: "Return", Mods: []string{"hyper"}},
+		{Type: "key", Key: "Enter", Mods: []string{"hyper"}},
+		{Type: "key", Key: "Return"}, // an X name, not one of the names the app is sent
 		{Type: "text", Text: strings.Repeat("a", MaxText+1)},
 		{Type: "text", Text: "\x1b[2J"},
 		{Type: "exec", Text: "rm -rf /"},
@@ -213,11 +214,216 @@ func TestEndingABodyEndsItsViewings(t *testing.T) {
 	h.Advertise("host-a", "agent-a", screen)
 	v, _ := h.Open("agent-a", "b1", "host-a", "alice")
 	h.Control(v.ID, "alice", "agent-a", true)
-	h.EndBody("host-a", "the machine was removed")
+	h.EndBody("host-a", EndedBodyRemoved)
 	if len(*ended) != 1 || !(*ended)[0].Control {
 		t.Fatalf("the viewing, with its control, was not reported ended: %+v", *ended)
 	}
 	if h.WaitForViewer(context.Background(), "host-a", 0) {
 		t.Fatal("a removed body was still watched")
+	}
+}
+
+// A viewing that ended says why to its viewer, as a code.
+func TestAnEndedViewingSaysWhy(t *testing.T) {
+	h, _, _ := newHub()
+	h.Advertise("host-a", "agent-a", screen)
+	v, _ := h.Open("agent-a", "b1", "host-a", "alice")
+	h.EndBody("host-a", EndedBodyRemoved)
+	_, err := h.Fetch(context.Background(), v.ID, "alice", "agent-a", 0, 0)
+	if !errors.Is(err, ErrEnded) || EndedBecause(err) != EndedBodyRemoved {
+		t.Fatalf("the viewer was not told why the viewing ended: %v", err)
+	}
+	// A machine that becomes another AI agent's body ends its viewings, and
+	// says so to whoever records it.
+	h2, _, ended := newHub()
+	h2.Advertise("host-a", "agent-a", screen)
+	h2.Open("agent-a", "b1", "host-a", "alice")
+	h2.Advertise("host-a", "agent-b", screen)
+	if len(*ended) != 1 || (*ended)[0].EndedBecause != EndedBodyReassigned {
+		t.Fatalf("a viewing of a machine that changed AI agent was not reported ended: %+v", *ended)
+	}
+}
+
+// Opening is limited per viewer and per body in any minute, so a loop of
+// opening and closing is refused rather than recorded without end.
+func TestOpeningIsRateLimited(t *testing.T) {
+	h, c, _ := newHub()
+	h.Advertise("host-a", "agent-a", screen)
+	for i := 0; i < OpensPerViewerPerMinute; i++ {
+		v, err := h.Open("agent-a", "b1", "host-a", "alice")
+		if err != nil {
+			t.Fatalf("open %d: %v", i, err)
+		}
+		h.End(v.ID, "alice", "agent-a", EndedClosed)
+	}
+	if _, err := h.Open("agent-a", "b1", "host-a", "alice"); !errors.Is(err, ErrTooFast) {
+		t.Fatalf("a viewer opened more viewings in a minute than allowed: %v", err)
+	}
+	// Somebody else may still open, until the body's own limit.
+	n := OpensPerViewerPerMinute
+	for i := 0; n < OpensPerBodyPerMinute; i++ {
+		v, err := h.Open("agent-a", "b1", "host-a", "viewer-"+string(rune('a'+i/OpensPerViewerPerMinute)))
+		if err != nil {
+			t.Fatalf("open %d: %v", n, err)
+		}
+		h.End(v.ID, v.Viewer, "agent-a", EndedClosed)
+		n++
+	}
+	if _, err := h.Open("agent-a", "b1", "host-a", "zed"); !errors.Is(err, ErrTooFast) {
+		t.Fatalf("a body was opened more often in a minute than allowed: %v", err)
+	}
+	c.add(time.Minute)
+	if _, err := h.Open("agent-a", "b1", "host-a", "alice"); err != nil {
+		t.Fatalf("a minute later the viewer still could not open: %v", err)
+	}
+	h.Sweep()
+	h.mu.Lock()
+	kept := len(h.opens)
+	h.mu.Unlock()
+	if kept > 2 {
+		t.Fatalf("%d open records kept after a minute, want only the new one's", kept)
+	}
+}
+
+// How many ended viewings are remembered is bounded.
+func TestEndedViewingsAreBounded(t *testing.T) {
+	h, c, _ := newHub()
+	h.Advertise("host-a", "agent-a", screen)
+	for i := 0; i < MaxRemembered+20; i++ {
+		v, err := h.Open("agent-a", "b1", "host-a", "alice")
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.End(v.ID, "alice", "agent-a", EndedClosed)
+		// Well inside RememberEnded; the rate limits are cleared by hand.
+		c.add(time.Millisecond)
+		h.mu.Lock()
+		h.opens = map[string][]time.Time{}
+		h.mu.Unlock()
+	}
+	h.mu.Lock()
+	n := len(h.ended)
+	h.mu.Unlock()
+	if n > MaxRemembered {
+		t.Fatalf("%d ended viewings remembered, more than %d", n, MaxRemembered)
+	}
+}
+
+// Only one fetch of a viewing waits at a time: a newer one sends the one
+// waiting back at once.
+func TestOneFetchWaitsPerViewing(t *testing.T) {
+	h, _, _ := newHub()
+	h.Advertise("host-a", "agent-a", screen)
+	v, _ := h.Open("agent-a", "b1", "host-a", "alice")
+	first := make(chan error, 1)
+	go func() {
+		_, err := h.Fetch(context.Background(), v.ID, "alice", "agent-a", 0, time.Minute)
+		first <- err
+	}()
+	waitFor(t, func() bool { h.mu.Lock(); defer h.mu.Unlock(); return h.viewings[v.ID].fetching == 1 })
+	second := make(chan error, 1)
+	go func() {
+		_, err := h.Fetch(context.Background(), v.ID, "alice", "agent-a", 0, time.Minute)
+		second <- err
+	}()
+	select {
+	case err := <-first:
+		if err != nil {
+			t.Fatalf("the replaced fetch failed: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a second fetch did not send the first back")
+	}
+	h.mu.Lock()
+	waiting := h.viewings[v.ID].fetching
+	h.mu.Unlock()
+	if waiting != 1 {
+		t.Fatalf("%d fetches waiting, want 1", waiting)
+	}
+	h.End(v.ID, "alice", "agent-a", EndedClosed)
+	select {
+	case err := <-second:
+		if !errors.Is(err, ErrEnded) {
+			t.Fatalf("the waiting fetch of an ended viewing was told %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ending the viewing did not send the waiting fetch back")
+	}
+}
+
+// Of two requests to take control at once, only one finds it was off; of a
+// take and a give-back at once, each sees the state the other left.
+func TestControlChangesAreSeenOnce(t *testing.T) {
+	for round := 0; round < 200; round++ {
+		h, _, _ := newHub()
+		h.Advertise("host-a", "agent-a", screen)
+		v, _ := h.Open("agent-a", "b1", "host-a", "alice")
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+		started := 0
+		for i := 0; i < 2; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				was, now, err := h.Control(v.ID, "alice", "agent-a", true)
+				if err == nil && now.Control && !was {
+					mu.Lock()
+					started++
+					mu.Unlock()
+				}
+			}()
+		}
+		wg.Wait()
+		if started != 1 {
+			t.Fatalf("round %d: %d starts of control seen, want 1", round, started)
+		}
+		changes := 0
+		for _, on := range []bool{false, true} {
+			wg.Add(1)
+			go func(on bool) {
+				defer wg.Done()
+				was, now, err := h.Control(v.ID, "alice", "agent-a", on)
+				if err == nil && was != now.Control {
+					mu.Lock()
+					changes++
+					mu.Unlock()
+				}
+			}(on)
+		}
+		wg.Wait()
+		final, _ := h.Get(v.ID, "alice", "agent-a")
+		// From on: an off then an on is two changes and leaves it on; an on
+		// then an off is one and leaves it off. Anything else is a change
+		// recorded that did not happen, or one that did and was not.
+		want := 1
+		if final.Control {
+			want = 2
+		}
+		if changes != want {
+			t.Fatalf("round %d: %d changes seen, ending with control %v", round, changes, final.Control)
+		}
+	}
+}
+
+func waitFor(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// A body on a Mac or a Windows computer is one whose screen cannot be watched
+// yet; any other is judged by what it says.
+func TestMacAndWindowsBodiesAreNotYet(t *testing.T) {
+	for p, notYet := range map[string]bool{
+		"darwin/arm64": true, "windows/amd64": true, "linux/amd64": false, "freebsd/amd64": false, "": false,
+	} {
+		if NotYetOn(p) != notYet {
+			t.Errorf("%q: not yet %v, want %v", p, !notYet, notYet)
+		}
 	}
 }

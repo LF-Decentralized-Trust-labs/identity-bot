@@ -18,6 +18,7 @@ import (
 	"identity-agent-core/didcomm"
 	"identity-agent-core/sandbox"
 	"identity-agent-core/schemas"
+	"identity-agent-core/screenview"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -150,6 +151,9 @@ type bodyView struct {
 	WordsLine string `json:"words_line"`
 	// Screen is the machine's screen, when it has one that can be watched now.
 	Screen *screenOf `json:"screen,omitempty"`
+	// ScreenNotAvailableYet says the machine is a Mac or a Windows computer,
+	// whose screen cannot be watched yet.
+	ScreenNotAvailableYet bool `json:"screen_not_available_yet,omitempty"`
 }
 
 func (s *CoreServer) handleListBodies(w http.ResponseWriter, r *http.Request) {
@@ -160,7 +164,9 @@ func (s *CoreServer) handleListBodies(w http.ResponseWriter, r *http.Request) {
 	}
 	out := []bodyView{}
 	for _, b := range s.bodies().ForAgent(a.ID) {
-		out = append(out, bodyView{Binding: b, WordsLine: strings.Join(b.Words, " "), Screen: s.screenOfBody(b)})
+		sc := s.screenOfBody(b)
+		out = append(out, bodyView{Binding: b, WordsLine: strings.Join(b.Words, " "), Screen: sc,
+			ScreenNotAvailableYet: sc == nil && screenNotYet(b)})
 	}
 	writeJSONStatus(w, http.StatusOK, map[string]any{"agent_aid": a.PairwiseAID, "bodies": out})
 }
@@ -288,7 +294,7 @@ func (s *CoreServer) handleRevokeBody(w http.ResponseWriter, r *http.Request) {
 		}
 		s.recordBodyEvent(a, b, "removed", "ok", "removed by "+whoDecided(r))
 		// Whoever was watching it is no longer watching this AI agent.
-		s.screens().EndBody(b.Host, "the machine was removed as this AI agent's body")
+		s.screens().EndBody(b.Host, screenview.EndedBodyRemoved)
 	}
 	rec, _ := s.DataStore.GetCredential(b.CredentialSAID)
 	if rec == nil || rec.Status == "revoked" {

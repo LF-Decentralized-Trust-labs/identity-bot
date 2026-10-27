@@ -13,6 +13,8 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"identity-agent-core/screenview"
@@ -36,11 +38,60 @@ type Screen interface {
 	Capture() (*image.RGBA, error)
 	// Apply does what a person did, with its coordinates on the screen itself.
 	Apply(screenview.Event) error
+	// Release lets go of every button and key Apply left held down: called
+	// when control is given back and when nobody is watching any more.
+	Release() error
 	Close() error
 }
 
 // ErrNoScreen is a machine with no screen this body can show.
 var ErrNoScreen = errors.New("this machine has no screen this program can show")
+
+// ErrScreenNotYet is a Mac or a Windows computer, whose screen this program
+// cannot read or drive yet. It is ErrNoScreen, saying why in the words the
+// app uses too.
+var ErrScreenNotYet = fmt.Errorf("%w: %s", ErrNoScreen, screenview.NotYetSentence)
+
+// ErrNetworkDisplay is an X display on another machine, asked for without
+// --display-allow-network.
+var ErrNetworkDisplay = errors.New("the display is on another machine, reached over the network")
+
+// isNetworkDisplay says an X display name reaches a display over the network:
+// "host:0" or "host/tcp:0", rather than ":0", "unix:0" or a socket's path.
+func isNetworkDisplay(display string) bool {
+	if strings.HasPrefix(display, "/") {
+		return false
+	}
+	colon := strings.LastIndex(display, ":")
+	if colon < 0 {
+		return false
+	}
+	host := display[:colon]
+	if i := strings.Index(host, "/"); i >= 0 {
+		// "host/protocol": only a Unix socket stays on this machine.
+		return host[i+1:] != "unix"
+	}
+	return host != "" && host != "unix"
+}
+
+// checkDisplay refuses an X display reached over the network unless it was
+// asked for. The X protocol over a network is not encrypted and not
+// authenticated beyond a cookie sent in the clear: anyone on the way sees
+// every picture of the screen and every key typed, and can type their own.
+// When it is allowed, it is said, every time.
+func checkDisplay(display string, allowNetwork bool) error {
+	if !isNetworkDisplay(display) {
+		return nil
+	}
+	if !allowNetwork {
+		return fmt.Errorf("%w: %s. The screen and every key would cross the network unencrypted, "+
+			"so it is not offered; run agent-host on the machine with the display, or give "+
+			"--display-allow-network to accept that", ErrNetworkDisplay, display)
+	}
+	fmt.Fprintf(os.Stderr, "agent-host: warning: the display %s is on another machine. Its pictures and every "+
+		"click and key cross the network unencrypted, readable and changeable by anyone on the way.\n", display)
+	return nil
+}
 
 // ScreenMode says what a body lets people do with its screen.
 type ScreenMode string
@@ -157,6 +208,9 @@ func (h *Host) streamScreen(ctx context.Context, scr Screen, mode ScreenMode, fp
 	var last uint64
 	var lastPost time.Time
 	control := false
+	// Nothing is left held down once this stops: a drag or a shortcut cut off
+	// by the viewer leaving would otherwise stay pressed on the machine.
+	defer func() { _ = scr.Release() }()
 	for {
 		img, err := scr.Capture()
 		if err != nil {
@@ -198,7 +252,13 @@ func (h *Host) streamScreen(ctx context.Context, scr Screen, mode ScreenMode, fp
 				last = sum.Sum64()
 			}
 			lastPost = time.Now()
+			wasControl := control
 			control = got.Control && mode == ScreenControl
+			if wasControl && !control {
+				if err := scr.Release(); err != nil {
+					log.Printf("[agent-host] could not let go of what was held down: %v", err)
+				}
+			}
 			if len(got.Events) > 0 {
 				if mode != ScreenControl {
 					log.Printf("[agent-host] ignored %d clicks and keys: this machine shows its screen but does not take control", len(got.Events))

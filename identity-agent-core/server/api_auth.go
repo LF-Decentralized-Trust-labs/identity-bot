@@ -89,8 +89,8 @@ var publicRoutes = map[string]string{
 	// sending pictures of it while somebody does. Each handler admits only a
 	// sealed request a live body signed, and a picture is kept only for a
 	// viewing of that body.
-	"POST /api/agent-host/screen":       "an AI agent's body saying what screen it has and waiting to be watched, sealed and signed",
-	"POST /api/agent-host/screen/frame": "an AI agent's body sending a picture of its screen while watched, sealed and signed",
+	routeBodyScreen:      "an AI agent's body saying what screen it has and waiting to be watched, sealed and signed",
+	routeBodyScreenFrame: "an AI agent's body sending a picture of its screen while watched, sealed and signed",
 
 	// --- carrying a request nothing in the middle can read ---
 	// Open in the same sense the message endpoint is open: what arrives is an
@@ -379,8 +379,11 @@ func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handle
 				}
 				denyAuthorization(w, "this endpoint needs a token carrying the capability scope for it")
 			default:
-				if s.isOwner(r) {
-					next.ServeHTTP(w, r)
+				if how := s.howThisIsTheOwner(r); how != "" {
+					// Said, as on the scoped routes, so a handler that names
+					// its caller names the owner the gate admitted: an owner
+					// signature is spent here and cannot be checked again.
+					next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), theGateAdmittedTheOwnerKey{}, how)))
 					return
 				}
 				// Tried before the browser session because a request can carry
@@ -396,7 +399,7 @@ func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handle
 				// be able to give the identity away.
 				if s.hasBrowserSession(r) {
 					if reason, forbidden := requiresTheKeyItself(r.Method, pattern); forbidden {
-						denyAuthorization(w, "a browser session cannot do this: "+reason+
+						denyAuthorizationBecause(w, reasonBrowserSession, "a browser session cannot do this: "+reason+
 							". Use the device that holds this identity's key")
 						return
 					}
@@ -434,12 +437,32 @@ func matchedRoutePattern(routes chi.Routes, r *http.Request) string {
 }
 
 func denyAuthorization(w http.ResponseWriter, detail string) {
+	denyAuthorizationBecause(w, "", detail)
+}
+
+// The reason codes a refusal at the gate can carry, for an app to turn into
+// its own words rather than read the detail.
+const (
+	// reasonBrowserSession is a route a browser session may not reach.
+	reasonBrowserSession = "browser_session"
+	// reasonScoreTooLow is a controller whose person has not proved enough
+	// for the action.
+	reasonScoreTooLow = "score_too_low"
+	// reasonOwnerOnly is an action only the owner's keys may do.
+	reasonOwnerOnly = "owner_only"
+	// reasonNotAllowed is any other refusal by the one check.
+	reasonNotAllowed = "not_allowed"
+)
+
+// denyAuthorizationBecause is denyAuthorization with a reason code.
+func denyAuthorizationBecause(w http.ResponseWriter, reason, detail string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusForbidden)
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"error":  "not_authorized",
-		"detail": detail,
-	})
+	body := map[string]string{"error": "not_authorized", "detail": detail}
+	if reason != "" {
+		body["reason"] = reason
+	}
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 // isOwner answers the only question the default class asks: is this the person
@@ -484,8 +507,8 @@ type theGateAdmittedTheOwnerKey struct{}
 
 // theGateAdmittedTheOwner reports whether the gate admitted r as the owner's.
 // For a handler on a route any scoped caller reaches that must still serve
-// only the owner, and cannot ask again: an owner signature is spent at the
-// gate.
+// only the owner, or one that names its caller, and cannot ask again: an owner
+// signature is spent at the gate.
 func theGateAdmittedTheOwner(r *http.Request) bool {
 	how, _ := r.Context().Value(theGateAdmittedTheOwnerKey{}).(string)
 	return how != ""

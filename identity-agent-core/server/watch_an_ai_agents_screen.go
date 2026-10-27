@@ -36,17 +36,61 @@ import (
 //   - watching: opening a viewing, fetching its pictures and ending it, at the
 //     default minimum score;
 //   - taking control: turning control on or off and sending clicks and keys,
-//     at the score set for taking control (the default unless the owner raises it),
-//     and never from a browser session.
+//     at the default minimum score unless it is raised for these routes in
+//     controllerMinimumScore, and never from a browser session.
+//
+// They are separate actions so that taking control can be set to need a
+// higher score than watching without changing it. The minimums are a table in
+// the code today; a setting the owner can change is future work.
 //
 // A viewing belongs to whoever opened it and to one body of one AI agent. Each
 // start and end of watching, and of control, is written to the signed
-// governance record.
+// governance record, and so is every refusal a handler here makes, with its
+// reason. A refusal by the one check happens at the router, before these
+// handlers, and is answered with its reason but not recorded.
+//
+// Every refusal here carries a "reason" code the app turns into words, as do
+// the router gate's refusals for too low a score and for a browser session, so
+// the app never reads this program's sentences.
 
-// The routes, keyed as the router gate keys them.
+// The routes: the paths as mounted under /api, and the method and full path
+// as the router gate keys them, both from the one spelling.
 const (
-	routeScreenControl = "POST /api/mcp/agents/{id}/screen/{sid}/control"
-	routeScreenInput   = "POST /api/mcp/agents/{id}/screen/{sid}/input"
+	screensPath         = "/mcp/agent-screens"
+	screenPath          = "/mcp/agents/{id}/screen"
+	screenViewingPath   = screenPath + "/{sid}"
+	screenPicturePath   = screenViewingPath + "/picture"
+	screenControlPath   = screenViewingPath + "/control"
+	screenInputPath     = screenViewingPath + "/input"
+	bodyScreenPath      = "/agent-host/screen"
+	bodyScreenFramePath = bodyScreenPath + "/frame"
+
+	routeScreenControl   = "POST /api" + screenControlPath
+	routeScreenInput     = "POST /api" + screenInputPath
+	routeBodyScreen      = "POST /api" + bodyScreenPath
+	routeBodyScreenFrame = "POST /api" + bodyScreenFramePath
+)
+
+// The reason codes a refusal here carries, besides the ones the router gate
+// gives (score_too_low, browser_session).
+const (
+	reasonNoScreen      = "no_screen"
+	reasonTooMany       = "too_many"
+	reasonTooFast       = "too_fast"
+	reasonNotYours      = "not_yours"
+	reasonEnded         = "ended"
+	reasonNotInControl  = "not_in_control"
+	reasonCannotControl = "cannot_control"
+	reasonQueueFull     = "queue_full"
+	reasonNoPictureYet  = "no_picture_yet"
+	reasonBadRequest    = "bad_request"
+	reasonUnknownCaller = "unknown_caller"
+)
+
+// The record's names for the two actions.
+const (
+	eventWatch   = "agent.screen.watch"
+	eventControl = "agent.screen.control"
 )
 
 // Every request from the app here carries a "nonce" in its body, which nothing
@@ -79,41 +123,56 @@ func (s *CoreServer) screens() *screenview.Hub {
 
 func (s *CoreServer) mountScreenRoutes(r chi.Router) {
 	// A person, from a paired app.
-	r.Get("/mcp/agent-screens", s.handleListAgentScreens)
-	r.Post("/mcp/agents/{id}/screen", s.handleOpenViewing)
-	r.Post("/mcp/agents/{id}/screen/{sid}/picture", s.handleFetchScreen)
-	r.Delete("/mcp/agents/{id}/screen/{sid}", s.handleEndViewing)
-	r.Post("/mcp/agents/{id}/screen/{sid}/control", s.handleTakeControl)
-	r.Post("/mcp/agents/{id}/screen/{sid}/input", s.handleSendInput)
+	r.Get(screensPath, s.handleListAgentScreens)
+	r.Post(screenPath, s.handleOpenViewing)
+	r.Post(screenPicturePath, s.handleFetchScreen)
+	r.Delete(screenViewingPath, s.handleEndViewing)
+	r.Post(screenControlPath, s.handleTakeControl)
+	r.Post(screenInputPath, s.handleSendInput)
 	// A body, signed by its machine key and sealed to this Identity Agent.
-	r.Post("/agent-host/screen", s.handleBodyAwaitsViewer)
-	r.Post("/agent-host/screen/frame", s.handleBodySendsFrame)
+	r.Post(bodyScreenPath, s.handleBodyAwaitsViewer)
+	r.Post(bodyScreenFramePath, s.handleBodySendsFrame)
 }
 
 // ── Who is watching ──────────────────────────────────────────────────────────
 
 // theViewer is who is asking, as a viewing is tied to them and as the record
-// names them: the authorised machine that signed the request, a browser
-// session, or the owner.
-func (s *CoreServer) theViewer(r *http.Request) (string, sandbox.CallerContext) {
+// names them: the owner, the authorised machine that signed the request, or a
+// browser session — asked in the order the router gate admits them, so the
+// viewer is whoever the gate let in. False when the gate admitted none of
+// them, which only a request that did not come through the gate can be.
+func (s *CoreServer) theViewer(r *http.Request) (string, sandbox.CallerContext, bool) {
 	cc := sandbox.CallerContext{Remote: true, CorrelationID: requestCorrelationID(r)}
+	if theGateAdmittedTheOwner(r) {
+		cc.Transport, cc.CallerAID, cc.Owner = "owner", "owner", true
+		if owner, ok := s.theOwner(); ok {
+			cc.CallerAID = owner
+		}
+		return "owner", cc, true
+	}
 	if g, ok := TheControllerThatAsked(r); ok {
 		cc.CallerAID, cc.Transport = g.ControllerAID, "controller"
-		return "controller:" + g.ControllerAID, cc
+		return "controller:" + g.ControllerAID, cc, true
 	}
 	if s.hasBrowserSession(r) {
 		// Named by a digest of the session, never the session itself, which
 		// is a bearer secret.
 		sum := sha256.Sum256([]byte(bearerToken(r)))
 		cc.CallerAID, cc.Transport = "browser-session:"+hex.EncodeToString(sum[:8]), "browser_session"
-		return cc.CallerAID, cc
+		return cc.CallerAID, cc, true
 	}
-	cc.Transport = "owner"
-	cc.CallerAID = "owner"
-	if owner, ok := s.theOwner(); ok {
-		cc.CallerAID = owner
+	return "", cc, false
+}
+
+// theViewerOrRefuse is theViewer, answering for the handler when there is
+// none.
+func (s *CoreServer) theViewerOrRefuse(w http.ResponseWriter, r *http.Request, event string) (string, sandbox.CallerContext, bool) {
+	viewer, cc, ok := s.theViewer(r)
+	if !ok {
+		cc.CallerAID = "unknown"
+		s.refuseViewing(w, cc, event, "who is asking could not be told", reasonUnknownCaller, http.StatusForbidden)
 	}
-	return "owner", cc
+	return viewer, cc, ok
 }
 
 // screenOf is what the app is told about a body's screen, or nil when it has
@@ -136,8 +195,15 @@ func (s *CoreServer) screenOfBody(b agentbody.Binding) *screenOf {
 	return &screenOf{Available: true, CanControl: sc.CanControl, Width: sc.Width, Height: sc.Height}
 }
 
+// screenNotYet says a body is on a Mac or a Windows computer, whose screen
+// cannot be shown yet: the app shows the button there, disabled, and says so.
+func screenNotYet(b agentbody.Binding) bool {
+	return b.State == agentbody.StateActive && screenview.NotYetOn(b.Platform)
+}
+
 // handleListAgentScreens says which AI agents have a machine whose screen can
-// be watched now, so the app offers the button only on those.
+// be watched now, so the app offers the button only on those, and which have
+// only machines whose screens cannot be watched yet.
 func (s *CoreServer) handleListAgentScreens(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{}
 	if s.assetHandler != nil {
@@ -145,11 +211,17 @@ func (s *CoreServer) handleListAgentScreens(w http.ResponseWriter, r *http.Reque
 			if a.AssetType != "ai_agent" {
 				continue
 			}
+			notYet := false
 			for _, b := range s.bodies().ForAgent(a.ID) {
 				if sc := s.screenOfBody(b); sc != nil {
 					out[a.ID] = map[string]any{"has_screen": true, "can_control": sc.CanControl}
+					notYet = false
 					break
 				}
+				notYet = notYet || screenNotYet(b)
+			}
+			if notYet {
+				out[a.ID] = map[string]any{"has_screen": false, "not_available_yet": screenview.NotYetReason}
 			}
 		}
 	}
@@ -158,25 +230,81 @@ func (s *CoreServer) handleListAgentScreens(w http.ResponseWriter, r *http.Reque
 
 // ── Watching ────────────────────────────────────────────────────────────────
 
-// refuseViewing writes a refusal to the record and answers with it.
+// refuseViewing writes a refusal to the record, with its reason, and answers
+// with it: the sentence as "error", and the code the app turns into words as
+// "reason".
 func (s *CoreServer) refuseViewing(w http.ResponseWriter, cc sandbox.CallerContext, event, why, reason string, status int) {
-	log.Printf("[screen] refused %s to %s: %s", event, cc.CallerAID, why)
+	s.refuseViewingWith(w, cc, event, why, reason, status, nil)
+}
+
+func (s *CoreServer) refuseViewingWith(w http.ResponseWriter, cc sandbox.CallerContext, event, why, reason string,
+	status int, extra map[string]string) {
+	log.Printf("[screen] refused %s to %s: %s (%s)", event, cc.CallerAID, why, reason)
 	if s.SandboxManager != nil {
-		cc.Reason = clampWhy(why)
+		cc.Reason = clampWhy(reason + ": " + why)
 		s.SandboxManager.RecordGovernanceEvent(cc, event, "denied")
 	}
-	body := map[string]string{"error": why}
-	if reason != "" {
-		body["reason"] = reason
+	body := map[string]string{"error": why, "reason": reason}
+	for k, v := range extra {
+		body[k] = v
 	}
 	writeJSONStatus(w, status, body)
 }
 
+// refuseFromHub answers a refusal from the hub, with its reason code, and
+// records it. Opening too often is answered and not recorded, so a caller
+// opening in a loop cannot fill the record by being refused.
+func (s *CoreServer) refuseFromHub(w http.ResponseWriter, cc sandbox.CallerContext, event, sid string, err error) {
+	cc.WorkItem = sid
+	switch {
+	case errors.Is(err, screenview.ErrEnded):
+		s.refuseViewingWith(w, cc, event, err.Error(), reasonEnded, http.StatusConflict,
+			map[string]string{"ended_because": screenview.EndedBecause(err)})
+	case errors.Is(err, screenview.ErrNotYours):
+		s.refuseViewing(w, cc, event, err.Error(), reasonNotYours, http.StatusNotFound)
+	case errors.Is(err, screenview.ErrNotInControl):
+		s.refuseViewing(w, cc, event, err.Error(), reasonNotInControl, http.StatusConflict)
+	case errors.Is(err, screenview.ErrCannotControl):
+		s.refuseViewing(w, cc, event, err.Error(), reasonCannotControl, http.StatusConflict)
+	case errors.Is(err, screenview.ErrQueueFull):
+		s.refuseViewing(w, cc, event, err.Error(), reasonQueueFull, http.StatusTooManyRequests)
+	case errors.Is(err, screenview.ErrNoPictureYet):
+		s.refuseViewing(w, cc, event, err.Error(), reasonNoPictureYet, http.StatusConflict)
+	case errors.Is(err, screenview.ErrTooMany):
+		s.refuseViewing(w, cc, event, err.Error(), reasonTooMany, http.StatusTooManyRequests)
+	case errors.Is(err, screenview.ErrTooFast):
+		log.Printf("[screen] refused %s to %s: %v", event, cc.CallerAID, err)
+		writeJSONStatus(w, http.StatusTooManyRequests, map[string]string{"error": err.Error(), "reason": reasonTooFast})
+	case errors.Is(err, screenview.ErrNoScreen):
+		s.refuseViewing(w, cc, event, err.Error(), reasonNoScreen, http.StatusConflict)
+	default:
+		s.refuseViewing(w, cc, event, err.Error(), reasonBadRequest, http.StatusBadRequest)
+	}
+}
+
+// openAnswer is what the app is told when its viewing opens: the viewing, and
+// the limits and key names it sends clicks and keys within, from the one
+// place they are set.
+func openAnswer(v screenview.Viewing) map[string]any {
+	return map[string]any{
+		"session": v.ID, "body": v.Body, "state": "waiting",
+		"limits": map[string]any{
+			"events_per_send": screenview.MaxEventsPerSend,
+			"text":            screenview.MaxText,
+		},
+		"keys": screenview.KeyNames(),
+		"mods": screenview.ModNames(),
+	}
+}
+
 func (s *CoreServer) handleOpenViewing(w http.ResponseWriter, r *http.Request) {
-	viewer, cc := s.theViewer(r)
+	viewer, cc, ok := s.theViewerOrRefuse(w, r, eventWatch)
+	if !ok {
+		return
+	}
 	a, ok := s.aiAgentAsset(chi.URLParam(r, "id"))
 	if !ok {
-		s.refuseViewing(w, cc, "agent.screen.watch", "AI agent not found", "", http.StatusNotFound)
+		s.refuseViewing(w, cc, eventWatch, "AI agent not found", reasonNotYours, http.StatusNotFound)
 		return
 	}
 	var req struct {
@@ -184,7 +312,7 @@ func (s *CoreServer) handleOpenViewing(w http.ResponseWriter, r *http.Request) {
 	}
 	if raw, err := readSignedBody(r); err == nil && len(raw) > 0 {
 		if json.Unmarshal(raw, &req) != nil {
-			jsonError(w, "the request must be JSON", http.StatusBadRequest)
+			s.refuseViewing(w, cc, eventWatch, "the request must be JSON", reasonBadRequest, http.StatusBadRequest)
 			return
 		}
 	}
@@ -204,63 +332,57 @@ func (s *CoreServer) handleOpenViewing(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if chosen == nil {
-		s.refuseViewing(w, cc, "agent.screen.watch", a.DisplayName+"'s machine has no screen that can be watched now",
-			"no_screen", http.StatusConflict)
+		s.refuseViewing(w, cc, eventWatch, a.DisplayName+"'s machine has no screen that can be watched now",
+			reasonNoScreen, http.StatusConflict)
 		return
 	}
 	v, err := s.screens().Open(a.ID, chosen.ID, chosen.Host, viewer)
-	switch {
-	case errors.Is(err, screenview.ErrTooMany):
-		s.refuseViewing(w, cc, "agent.screen.watch", err.Error(), "too_many", http.StatusTooManyRequests)
-		return
-	case err != nil:
-		s.refuseViewing(w, cc, "agent.screen.watch", a.DisplayName+"'s machine has no screen that can be watched now",
-			"no_screen", http.StatusConflict)
+	if err != nil {
+		s.refuseFromHub(w, cc, eventWatch, "", err)
 		return
 	}
 	s.recordViewing(cc, v, "agent.screen.watch.started",
 		fmt.Sprintf("started watching the screen of %s (%s) on its body %s", a.DisplayName, a.PairwiseAID, v.Host))
-	writeJSONStatus(w, http.StatusCreated, map[string]any{"session": v.ID, "body": v.Body, "state": "waiting"})
+	writeJSONStatus(w, http.StatusCreated, openAnswer(v))
 }
 
-// viewingAnswer is a refusal from the hub as the app is told it.
-func viewingAnswer(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, screenview.ErrEnded):
-		writeJSONStatus(w, http.StatusOK, map[string]any{"state": "ended"})
-	case errors.Is(err, screenview.ErrNotYours):
-		jsonError(w, err.Error(), http.StatusNotFound)
-	case errors.Is(err, screenview.ErrNotInControl), errors.Is(err, screenview.ErrCannotControl):
-		jsonError(w, err.Error(), http.StatusConflict)
-	case errors.Is(err, screenview.ErrQueueFull):
-		jsonError(w, err.Error(), http.StatusTooManyRequests)
-	default:
-		jsonError(w, err.Error(), http.StatusBadRequest)
-	}
+// endedAnswer tells the app its viewing ended, and why, as a code.
+func endedAnswer(w http.ResponseWriter, because string) {
+	writeJSONStatus(w, http.StatusOK, map[string]any{"state": "ended", "reason": reasonEnded, "ended_because": because})
 }
 
 func (s *CoreServer) handleFetchScreen(w http.ResponseWriter, r *http.Request) {
-	viewer, _ := s.theViewer(r)
+	viewer, cc, ok := s.theViewerOrRefuse(w, r, eventWatch)
+	if !ok {
+		return
+	}
 	agent, sid := chi.URLParam(r, "id"), chi.URLParam(r, "sid")
 	var req struct {
 		After int `json:"after"`
 	}
 	if raw, err := readSignedBody(r); err != nil || (len(raw) > 0 && json.Unmarshal(raw, &req) != nil) {
-		jsonError(w, `ask as {"after": the number of the picture you have}`, http.StatusBadRequest)
+		cc.WorkItem = sid
+		s.refuseViewing(w, cc, eventWatch, `ask as {"after": the number of the picture you have}`,
+			reasonBadRequest, http.StatusBadRequest)
 		return
 	}
 	after := req.After
 	hub := s.screens()
 	seen, err := hub.Fetch(r.Context(), sid, viewer, agent, after, fetchWait)
+	if errors.Is(err, screenview.ErrEnded) {
+		// Not a refusal: the window is told, and says so.
+		endedAnswer(w, screenview.EndedBecause(err))
+		return
+	}
 	if err != nil {
-		viewingAnswer(w, err)
+		s.refuseFromHub(w, cc, eventWatch, sid, err)
 		return
 	}
 	// A body revoked mid-viewing is no longer the AI agent's: what it shows is
 	// not the AI agent's screen any more.
 	if b, ok := s.bodies().Get(seen.Viewing.Body); !ok || b.State != agentbody.StateActive {
-		hub.EndBody(seen.Viewing.Host, "the machine is no longer this AI agent's body")
-		writeJSONStatus(w, http.StatusOK, map[string]any{"state": "ended"})
+		hub.EndBody(seen.Viewing.Host, screenview.EndedBodyInactive)
+		endedAnswer(w, screenview.EndedBodyInactive)
 		return
 	}
 	out := map[string]any{
@@ -279,10 +401,14 @@ func (s *CoreServer) handleFetchScreen(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *CoreServer) handleEndViewing(w http.ResponseWriter, r *http.Request) {
-	viewer, _ := s.theViewer(r)
-	_, err := s.screens().End(chi.URLParam(r, "sid"), viewer, chi.URLParam(r, "id"), "the person closed the window")
+	viewer, cc, ok := s.theViewerOrRefuse(w, r, eventWatch)
+	if !ok {
+		return
+	}
+	sid := chi.URLParam(r, "sid")
+	_, err := s.screens().End(sid, viewer, chi.URLParam(r, "id"), screenview.EndedClosed)
 	if err != nil && !errors.Is(err, screenview.ErrEnded) {
-		viewingAnswer(w, err)
+		s.refuseFromHub(w, cc, eventWatch, sid, err)
 		return
 	}
 	writeJSONStatus(w, http.StatusOK, map[string]any{"ended": true})
@@ -291,30 +417,26 @@ func (s *CoreServer) handleEndViewing(w http.ResponseWriter, r *http.Request) {
 // ── Taking control ──────────────────────────────────────────────────────────
 
 func (s *CoreServer) handleTakeControl(w http.ResponseWriter, r *http.Request) {
-	viewer, cc := s.theViewer(r)
+	viewer, cc, ok := s.theViewerOrRefuse(w, r, eventControl)
+	if !ok {
+		return
+	}
+	agent, sid := chi.URLParam(r, "id"), chi.URLParam(r, "sid")
 	var req struct {
 		On *bool `json:"on"`
 	}
 	raw, err := readSignedBody(r)
 	if err != nil || json.Unmarshal(raw, &req) != nil || req.On == nil {
-		jsonError(w, `say {"on": true} to take control, or {"on": false} to give it back`, http.StatusBadRequest)
+		cc.WorkItem = sid
+		s.refuseViewing(w, cc, eventControl, `say {"on": true} to take control, or {"on": false} to give it back`,
+			reasonBadRequest, http.StatusBadRequest)
 		return
 	}
-	agent, sid := chi.URLParam(r, "id"), chi.URLParam(r, "sid")
-	hub := s.screens()
-	before, err := hub.Get(sid, viewer, agent)
+	// Whether control was on before is read with the change, under one lock,
+	// so two requests at once record one start or one end, never two.
+	was, v, err := s.screens().Control(sid, viewer, agent, *req.On)
 	if err != nil {
-		viewingAnswer(w, err)
-		return
-	}
-	v, err := hub.Control(sid, viewer, agent, *req.On)
-	if err != nil {
-		if errors.Is(err, screenview.ErrCannotControl) {
-			cc.WorkItem = sid
-			s.refuseViewing(w, cc, "agent.screen.control", err.Error(), "cannot_control", http.StatusConflict)
-			return
-		}
-		viewingAnswer(w, err)
+		s.refuseFromHub(w, cc, eventControl, sid, err)
 		return
 	}
 	name := agent
@@ -322,10 +444,10 @@ func (s *CoreServer) handleTakeControl(w http.ResponseWriter, r *http.Request) {
 		name = a.DisplayName + " (" + a.PairwiseAID + ")"
 	}
 	switch {
-	case v.Control && !before.Control:
+	case v.Control && !was:
 		s.recordViewing(cc, v, "agent.screen.control.started",
 			fmt.Sprintf("took control of the screen of %s on its body %s", name, v.Host))
-	case !v.Control && before.Control:
+	case !v.Control && was:
 		s.recordViewing(cc, v, "agent.screen.control.ended",
 			fmt.Sprintf("gave back control of the screen of %s on its body %s", name, v.Host))
 	}
@@ -333,18 +455,23 @@ func (s *CoreServer) handleTakeControl(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *CoreServer) handleSendInput(w http.ResponseWriter, r *http.Request) {
-	viewer, _ := s.theViewer(r)
+	viewer, cc, ok := s.theViewerOrRefuse(w, r, eventControl)
+	if !ok {
+		return
+	}
+	sid := chi.URLParam(r, "sid")
 	var req struct {
 		Events []screenview.Event `json:"events"`
 	}
 	raw, err := readSignedBody(r)
 	if err != nil || json.Unmarshal(raw, &req) != nil {
-		jsonError(w, "the clicks and keys are unreadable", http.StatusBadRequest)
+		cc.WorkItem = sid
+		s.refuseViewing(w, cc, eventControl, "the clicks and keys are unreadable", reasonBadRequest, http.StatusBadRequest)
 		return
 	}
-	n, err := s.screens().Send(chi.URLParam(r, "sid"), viewer, chi.URLParam(r, "id"), req.Events)
+	n, err := s.screens().Send(sid, viewer, chi.URLParam(r, "id"), req.Events)
 	if err != nil {
-		viewingAnswer(w, err)
+		s.refuseFromHub(w, cc, eventControl, sid, err)
 		return
 	}
 	writeJSONStatus(w, http.StatusAccepted, map[string]any{"queued": n})
@@ -384,10 +511,12 @@ func (s *CoreServer) recordViewingEnded(v screenview.Viewing) {
 	took := v.Ended.Sub(v.Started).Round(time.Second)
 	if v.Control {
 		s.recordViewing(cc, v, "agent.screen.control.ended",
-			fmt.Sprintf("control of the screen of %s on its body %s ended with the viewing: %s", name, v.Host, v.EndedBecause))
+			fmt.Sprintf("control of the screen of %s on its body %s ended with the viewing: %s",
+				name, v.Host, screenview.EndedSentence(v.EndedBecause)))
 	}
 	s.recordViewing(cc, v, "agent.screen.watch.ended",
-		fmt.Sprintf("stopped watching the screen of %s on its body %s after %s: %s", name, v.Host, took, v.EndedBecause))
+		fmt.Sprintf("stopped watching the screen of %s on its body %s after %s: %s",
+			name, v.Host, took, screenview.EndedSentence(v.EndedBecause)))
 }
 
 // ── A body ──────────────────────────────────────────────────────────────────
@@ -417,7 +546,7 @@ func (s *CoreServer) handleBodyAwaitsViewer(w http.ResponseWriter, r *http.Reque
 	hub.Advertise(b.Host, b.AgentAssetID, req.Screen)
 	watched := req.Screen != nil && hub.WaitForViewer(r.Context(), b.Host, screenview.WaitLimit)
 	if req.Screen == nil {
-		hub.EndBody(b.Host, "the machine no longer has a screen")
+		hub.EndBody(b.Host, screenview.EndedNoScreen)
 	}
 	writeJSONStatus(w, http.StatusOK, map[string]any{"watch": watched, "fps": screenview.FramesPerSecond})
 }
