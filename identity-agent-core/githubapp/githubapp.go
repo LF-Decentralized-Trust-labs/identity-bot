@@ -412,7 +412,10 @@ func (c Client) Mint(ctx context.Context, conn Connection, repos []RepoRef, acce
 		return Token{}, errors.New("a token is asked for at least one repository")
 	}
 	ids := make([]int64, 0, len(repos))
-	want := map[int64]bool{}
+	// want is the name the grant gives each number: GitHub's answer must name
+	// each repository it made the token for by that same name, so a grant that
+	// pairs one repository's name with another's number lends neither.
+	want := map[int64]string{}
 	for _, r := range repos {
 		if r.ID <= 0 {
 			return Token{}, fmt.Errorf("%s is not named by GitHub's number for it", r.Name)
@@ -421,8 +424,11 @@ func (c Client) Mint(ctx context.Context, conn Connection, repos []RepoRef, acce
 		if conn.Account != "" && !strings.EqualFold(owner, conn.Account) {
 			return Token{}, fmt.Errorf("%s is not %s's, where the GitHub App is installed", r.Name, conn.Account)
 		}
+		if _, twice := want[r.ID]; twice {
+			return Token{}, fmt.Errorf("GitHub's number %d is given for more than one repository", r.ID)
+		}
 		ids = append(ids, r.ID)
-		want[r.ID] = true
+		want[r.ID] = strings.ToLower(r.Name)
 	}
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	auth, err := c.asApp(conn)
@@ -455,8 +461,12 @@ func (c Client) Mint(ctx context.Context, conn Connection, repos []RepoRef, acce
 		why = "GitHub's answer names no repository the token works for"
 	}
 	for _, r := range out.Repositories {
-		if !want[r.ID] {
+		name, asked := want[r.ID]
+		switch {
+		case !asked:
 			why = "GitHub made a token for more repositories than were asked for"
+		case !strings.EqualFold(r.FullName, name):
+			why = fmt.Sprintf("GitHub's repository %d is %s, not the %s it was granted as", r.ID, strings.ToLower(r.FullName), name)
 		}
 		tok.Repositories = append(tok.Repositories, strings.ToLower(r.FullName))
 		tok.RepositoryIDs = append(tok.RepositoryIDs, r.ID)

@@ -92,6 +92,17 @@ func Asked(body string) (map[string]json.RawMessage, error) {
 			out[f] = v
 		}
 	}
+	// A list of repositories is kept as what each item asked for, its
+	// repository and access, and nothing else a client put beside them.
+	if v, ok := out["repositories"]; ok {
+		var items []struct {
+			Repository string `json:"repository"`
+			Access     string `json:"access"`
+		}
+		if err := json.Unmarshal(v, &items); err == nil && items != nil {
+			out["repositories"], _ = json.Marshal(items)
+		}
+	}
 	return out, nil
 }
 

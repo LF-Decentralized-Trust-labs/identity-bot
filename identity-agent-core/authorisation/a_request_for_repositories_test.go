@@ -64,10 +64,16 @@ func TestARepositoryGrantMustBeWhatWasAskedFor(t *testing.T) {
 			[]string{"code.repository.read"}, map[string]interface{}{"code.repository.read": read}),
 		"a repository without its number": w.repoGrant(w.signs("PUT", "/api/mcp/agents/agent-1/github", reposBody, ago(time.Minute)), "agent-1", both,
 			map[string]interface{}{"code.repository.read": map[string]interface{}{"repository": []interface{}{"acme/docs", "acme/site"}, "repository_id": []interface{}{"101"}}, "code.repository.write": write}),
+		"one number for two repositories": w.repoGrant(w.signs("PUT", "/api/mcp/agents/agent-1/github", reposBody, ago(time.Minute)), "agent-1", both,
+			map[string]interface{}{"code.repository.read": repoLimit("acme/docs", "101", "acme/site", "101"), "code.repository.write": write}),
 		"another AI agent": w.repoGrant(w.signs("PUT", "/api/mcp/agents/agent-1/github", reposBody, ago(time.Minute)), "agent-2", both,
 			map[string]interface{}{"code.repository.read": read, "code.repository.write": write}),
 		"repositories when none were asked": w.repoGrant(w.signs("PUT", "/api/mcp/agents/agent-1/github", `{"repositories":[]}`, ago(time.Minute)), "agent-1",
 			[]string{"code.repository.read"}, map[string]interface{}{"code.repository.read": read}),
+	}
+	// Whatever else a client puts beside a repository is not kept.
+	if asked, _ := Asked(`{"repositories":[{"repository":"acme/docs","access":"read","note":"private"}]}`); string(asked["repositories"]) != `[{"repository":"acme/docs","access":"read"}]` {
+		t.Errorf("a request's repositories are kept with more than was asked: %s", asked["repositories"])
 	}
 	for name, cred := range cases {
 		// Each was built on the body it was signed over; check against that one.

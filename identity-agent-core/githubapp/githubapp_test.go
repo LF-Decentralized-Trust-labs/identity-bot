@@ -156,6 +156,9 @@ func TestATokenIsAskedForExactlyTheRepositoriesAndAccessNamed(t *testing.T) {
 	if _, err := c.Mint(context.Background(), conn, []RepoRef{{0, "acme/sandbox"}}, Read); err == nil {
 		t.Fatal("a token was asked for a repository by name alone")
 	}
+	if _, err := c.Mint(context.Background(), conn, []RepoRef{{11, "acme/sandbox"}, {11, "acme/site"}}, Read); err == nil {
+		t.Fatal("a token was asked for two repositories at one number")
+	}
 }
 
 // A token GitHub made wider than asked — another repository, a repository by
@@ -170,6 +173,9 @@ func TestATokenWiderThanAskedIsWithdrawn(t *testing.T) {
 			"repositories": []map[string]any{{"id": 11, "full_name": "acme/sandbox"}, {"id": 99, "full_name": "acme/secret"}}},
 		"a repository made again under the same name": {"token": "ghs_wide", "repository_selection": "selected", "permissions": read,
 			"repositories": []map[string]any{{"id": 77, "full_name": "acme/sandbox"}}},
+		// The grant named acme/sandbox with acme/secret's number.
+		"another repository at the number granted": {"token": "ghs_wide", "repository_selection": "selected", "permissions": read,
+			"repositories": []map[string]any{{"id": 11, "full_name": "acme/secret"}}},
 		"every repository":    {"token": "ghs_wide", "repository_selection": "all", "permissions": read, "repositories": sandbox},
 		"no repository named": {"token": "ghs_wide", "repository_selection": "selected", "permissions": read},
 		"more permission": {"token": "ghs_wide", "repository_selection": "selected", "repositories": sandbox,

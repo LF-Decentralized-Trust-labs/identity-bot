@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strconv"
 
 	"identity-agent-core/githubapp"
 )
@@ -25,6 +26,13 @@ import (
 // the one it replaces, and which rest on whatever request issued that one. Nor
 // does it vouch for GitHub's number for each repository: the Identity Agent
 // asks GitHub for it, and the request names repositories only by owner/name.
+// Each must be a distinct positive number, and a token is made for a number
+// only when GitHub names its repository as the grant does (githubapp's Mint),
+// so a name paired with another repository's number lends nothing.
+//
+// Closing the first gap would need a grant to name the grant it replaces, so a
+// verifier could require everything else to be carried over unchanged. Until
+// then, "rests on the request" covers the repositories, not the whole grant.
 
 // checkRepositoriesAsked checks the repositories a grant gives against those a
 // request asked for.
@@ -98,8 +106,17 @@ func checkRepositoriesAsked(cred acdc, raw json.RawMessage) error {
 		// Each repository is also named by GitHub's number for it, in the same
 		// place: a grant naming it without its number gives nothing, so one
 		// whose lists differ in length does not give what was asked.
-		if len(limit[githubapp.RepositoryIDArgument]) != len(got) {
+		numbers := limit[githubapp.RepositoryIDArgument]
+		if len(numbers) != len(got) {
 			return fmt.Errorf("the grant does not name each repository the request asked for by GitHub's number")
+		}
+		seen := map[int64]bool{}
+		for _, n := range numbers {
+			id, err := strconv.ParseInt(n, 10, 64)
+			if err != nil || id <= 0 || seen[id] {
+				return fmt.Errorf("the grant names a repository by %q, which is not one of GitHub's numbers it gives once", n)
+			}
+			seen[id] = true
 		}
 	}
 	return nil
