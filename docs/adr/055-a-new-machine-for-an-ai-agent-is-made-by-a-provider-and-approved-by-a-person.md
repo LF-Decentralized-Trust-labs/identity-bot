@@ -64,11 +64,13 @@ After `make`, the provider asks for the enrolment string for that request
 the same string a person would be given: good once, for that AI agent, within the enrolment window, and
 it travels sealed to the provider's keys. The program hands it to the new machine,
 whose `agent-host enrol -` reads it from standard input so that it never appears on
-a command line, and prints the six words the machine shows. The provider reports
-them, and the Identity Agent matches them to the machine that asked to become that AI
-agent's body — waiting for approval, or already approved by a person who compared the
-words before the report arrived; words no such machine shows are refused. The person then compares the
-words and approves as for any machine. A provider can report a machine made,
+a command line. `agent-host enrol` waits for a person's decision, so the program
+starts it in the background on the new machine and prints the six words it shows
+once the machine has asked. The provider reports them, and the Identity Agent matches
+them to the machine that asked to become that AI agent's body since that enrolment
+string was given — waiting for approval, or already approved by a person before the
+report arrived; a provider cannot claim a machine that was already there, and words
+no such machine shows are refused. The person then approves, as for any machine. A provider can report a machine made,
 enrolling or failed, and never ready: a request is ready only when a person has
 approved its machine.
 
@@ -89,8 +91,13 @@ the AI agent the machine is for.
 
 - An AI agent gets a machine of its own, with only what its work needs, from one
   choice in a front end. No person copies an enrolment string or logs into the host.
-- The six-word comparison is unchanged and still the only thing that makes a machine
-  speak as an AI agent. A provider that misbehaves can make machines, never bodies.
+- Only a person's approval makes a machine speak as an AI agent; a provider that
+  misbehaves can make machines, never bodies. What the approval rests on changes. A
+  person setting up a machine compares the words on its screen with the words in the
+  front end. For a machine a provider made, nobody reads its screen: the provider's
+  report, sent over its own signed and sealed channel, is what ties the waiting
+  request to the machine it made, and a front end should say so rather than ask the
+  person to compare two copies of the same words.
 - What a provider can build is the operator's program, not this repository's: the
   same mechanism serves a virtual-machine host, a container host or a cloud account.
 - A brain the new machine needs must be installed by that program. Its sign-in is

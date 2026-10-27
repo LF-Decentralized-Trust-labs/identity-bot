@@ -188,7 +188,14 @@ func (p *provider) start(ctx context.Context, j machineRequest) {
 		ok := true
 		switch j.State {
 		case agentmachine.StateWaiting:
-			p.make(ctx, j)
+			// A request whose machine was not handed over is not this run's
+			// to remember: if it is still shown as being made, the next
+			// collection destroys what is left of it.
+			if !p.make(ctx, j) {
+				p.mu.Lock()
+				delete(p.made, j.ID)
+				p.mu.Unlock()
+			}
 		case agentmachine.StateMaking:
 			// Being made, but not by this run of the provider: it stopped
 			// part way, so what it made is destroyed and the request ends.
@@ -223,14 +230,17 @@ func (p *provider) check(j machineRequest) error {
 	return nil
 }
 
-func (p *provider) make(ctx context.Context, j machineRequest) {
+// make makes one machine and hands it over: reported as asking to become the
+// AI agent's body. It says whether it did; a machine it made and could not
+// hand over is destroyed.
+func (p *provider) make(ctx context.Context, j machineRequest) bool {
 	if err := p.check(j); err != nil {
 		p.report(ctx, j, agentmachine.StateFailed, err.Error(), nil)
-		return
+		return false
 	}
 	p.logf("[agent-host] making %s for %s, providing %s", j.MachineName, j.AgentName, describeNeeds(j.Needs))
 	if !p.report(ctx, j, agentmachine.StateMaking, "making the machine", nil) {
-		return
+		return false
 	}
 	fail := func(why string) {
 		p.logf("[agent-host] %s failed: %s; destroying what was made", j.MachineName, why)
@@ -244,7 +254,7 @@ func (p *provider) make(ctx context.Context, j machineRequest) {
 	cancel()
 	if err != nil {
 		fail("making it: " + err.Error())
-		return
+		return false
 	}
 	p.report(ctx, j, agentmachine.StateMaking, "made; enrolling it", nil)
 	code, b, err := p.h.CallContext(ctx, "POST", "/api/agent-host/machine-requests/"+j.ID+"/enrolment", []byte("{}"))
@@ -259,22 +269,30 @@ func (p *provider) make(ctx context.Context, j machineRequest) {
 	}
 	if err != nil || e.Enrolment == "" {
 		fail(fmt.Sprintf("no enrolment string: %v", err))
-		return
+		return false
 	}
-	out, err := p.runWithSecret(ctx, "enrol", j, e.Enrolment)
+	ectx, cancel := context.WithTimeout(ctx, stepTimeout)
+	out, err := p.runWithSecret(ectx, "enrol", j, e.Enrolment)
+	cancel()
 	if err != nil {
 		fail("enrolling it: " + err.Error())
-		return
+		return false
 	}
 	words := wordsIn(out)
 	if len(words) != 6 {
 		fail("the program did not print the machine's six words")
-		return
+		return false
 	}
-	if p.report(ctx, j, agentmachine.StateEnrolling, "waiting for a person to compare its six words", words) {
-		p.logf("[agent-host] %s asked to become the body of %s; its words are %s", j.MachineName, j.AgentName, strings.Join(words, " "))
+	if !p.report(ctx, j, agentmachine.StateEnrolling, "waiting for a person to compare its six words", words) {
+		fail("the Identity Agent did not take its six words")
+		return false
 	}
+	p.logf("[agent-host] %s asked to become the body of %s; its words are %s", j.MachineName, j.AgentName, strings.Join(words, " "))
+	return true
 }
+
+// stepTimeout bounds enrolling or destroying one machine.
+const stepTimeout = 15 * time.Minute
 
 func (p *provider) abandon(ctx context.Context, j machineRequest) {
 	why := "the provider stopped while making it"
@@ -293,7 +311,9 @@ func (p *provider) remove(ctx context.Context, j machineRequest) bool {
 		return false
 	}
 	p.logf("[agent-host] destroying %s", j.MachineName)
-	if _, err := p.run(ctx, "remove", j, nil); err != nil {
+	rctx, cancel := context.WithTimeout(ctx, stepTimeout)
+	defer cancel()
+	if _, err := p.run(rctx, "remove", j, nil); err != nil {
 		p.report(ctx, j, agentmachine.StateRemoving, "destroying it failed, trying again: "+err.Error(), nil)
 		return false
 	}

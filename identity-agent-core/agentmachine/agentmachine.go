@@ -293,6 +293,11 @@ func randomHex(n int) (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// ErrOneAtATime is a second new machine asked for an AI agent while one is
+// still being made or waits for its words to be approved: almost always a
+// double click.
+var ErrOneAtATime = errors.New("a new machine is already on its way for this AI agent")
+
 // ErrNotOffered is a provider asked for something it does not provide.
 var ErrNotOffered = errors.New("that provider does not offer everything this AI agent's machine needs")
 
@@ -317,13 +322,28 @@ func (s *Store) Ask(agentAssetID, agentName, provider string, needs []string, by
 	if m := Missing(needs, p.Offers); len(m) > 0 {
 		return Job{}, fmt.Errorf("%w (it does not provide %s)", ErrNotOffered, strings.Join(m, ", "))
 	}
+	for _, o := range f.Jobs {
+		if o.AgentAssetID == agentAssetID && (o.State == StateWaiting || o.State == StateMaking || o.State == StateEnrolling) {
+			return Job{}, ErrOneAtATime
+		}
+	}
 	id, err := randomHex(8)
 	if err != nil {
 		return Job{}, err
 	}
-	name, err := machineName(agentName)
-	if err != nil {
-		return Job{}, err
+	// A name no request has used, so a provider never mistakes one machine
+	// for another.
+	var name string
+	for tries := 0; ; tries++ {
+		if name, err = machineName(agentName); err != nil {
+			return Job{}, err
+		}
+		if !slices.ContainsFunc(f.Jobs, func(o Job) bool { return o.MachineName == name }) {
+			break
+		}
+		if tries > 20 {
+			return Job{}, errors.New("no unused machine name could be made")
+		}
 	}
 	j := Job{
 		ID: id, AgentAssetID: agentAssetID, AgentName: agentName, Provider: provider, ProviderName: p.Name,

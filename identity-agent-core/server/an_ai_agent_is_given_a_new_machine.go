@@ -164,9 +164,10 @@ func (s *CoreServer) handleMachinesThatFit(w http.ResponseWriter, r *http.Reques
 	now := time.Now()
 	out := []machineProviderView{}
 	for _, p := range ps {
-		// Only a provider that is still a live body is offered.
-		b, ok := s.bodies().Get(p.Body)
-		if !ok || b.State != agentbody.StateActive {
+		// Only a provider that is still a live body, whose AI agent may still
+		// make machines, is offered.
+		b, ok := s.providerStillGranted(p.Body)
+		if !ok {
 			continue
 		}
 		missing := agentmachine.Missing(needs, p.Offers)
@@ -212,20 +213,15 @@ func (s *CoreServer) handleAskForMachine(w http.ResponseWriter, r *http.Request)
 		jsonError(w, "this AI agent's grant is revoked, so no machine is made for it", http.StatusConflict)
 		return
 	}
-	if b, ok := s.bodies().Get(req.Provider); !ok || b.State != agentbody.StateActive {
-		jsonError(w, "that provider is no longer a live machine here", http.StatusNotFound)
+	if _, ok := s.providerStillGranted(req.Provider); !ok {
+		jsonError(w, "that provider is no longer a live machine here that may make machines", http.StatusNotFound)
 		return
-	}
-	// One machine at a time per AI agent from this path: a second while the
-	// first is still being made is almost always a double click.
-	for _, j := range s.machines().ForAgent(a.ID) {
-		if j.State == agentmachine.StateWaiting || j.State == agentmachine.StateMaking || j.State == agentmachine.StateEnrolling {
-			jsonError(w, "a machine is already being made for "+a.DisplayName+", or waits for its six words to be approved; finish or cancel it first", http.StatusConflict)
-			return
-		}
 	}
 	j, err := s.machines().Ask(a.ID, a.DisplayName, req.Provider, needsOf(a), whoDecided(r), time.Now())
 	switch {
+	case errors.Is(err, agentmachine.ErrOneAtATime):
+		jsonError(w, "a machine is already being made for "+a.DisplayName+", or waits for its six words to be approved; finish or cancel it first", http.StatusConflict)
+		return
 	case errors.Is(err, agentmachine.ErrNotOffered):
 		jsonError(w, err.Error(), http.StatusConflict)
 		return
@@ -246,14 +242,25 @@ func (s *CoreServer) handleCancelMachineRequest(w http.ResponseWriter, r *http.R
 		jsonError(w, "AI agent not found", http.StatusNotFound)
 		return
 	}
+	// Under the same lock as approving, so a cancellation and an approval of
+	// the same machine cannot both go through.
+	unlock := lockAgentGrant(a.ID)
+	defer unlock()
 	j, ok := s.machines().Get(chi.URLParam(r, "rid"))
 	if !ok || j.AgentAssetID != a.ID {
 		jsonError(w, "no such machine request for this AI agent", http.StatusNotFound)
 		return
 	}
-	if b, ok := s.bodies().Get(j.Body); ok && b.State == agentbody.StateActive {
+	b, hasBody := s.bodies().Get(j.Body)
+	if hasBody && b.State == agentbody.StateActive {
 		jsonError(w, "this machine is "+a.DisplayName+"'s live body; remove the machine, which also destroys it", http.StatusConflict)
 		return
+	}
+	// A machine still waiting for its words to be approved can no longer be.
+	if hasBody && b.State == agentbody.StatePending {
+		if rejected, err := s.bodies().Decide(b.ID, a.ID, agentbody.StateRejected, whoDecided(r), "", time.Now()); err == nil {
+			s.recordBodyEvent(a, rejected, "rejected", "denied", "its machine request was cancelled by "+whoDecided(r))
+		}
 	}
 	j, err := s.machines().Remove(j.ID, time.Now())
 	if err != nil {
@@ -262,6 +269,21 @@ func (s *CoreServer) handleCancelMachineRequest(w http.ResponseWriter, r *http.R
 	}
 	s.recordMachineEvent(a, j, "cancelled", "ok", "cancelled by "+whoDecided(r))
 	writeJSONStatus(w, http.StatusOK, j)
+}
+
+// providerStillGranted is a provider's body, if it is still live and its AI
+// agent still holds an unrevoked grant to make machines.
+func (s *CoreServer) providerStillGranted(body string) (agentbody.Binding, bool) {
+	b, ok := s.bodies().Get(body)
+	if !ok || b.State != agentbody.StateActive {
+		return b, false
+	}
+	pa, ok := s.aiAgentAsset(b.AgentAssetID)
+	if !ok || s.agentStatus(pa.PairwiseAID) == "revoked" || s.agentGrantLapsed(pa.PairwiseAID) ||
+		!slices.Contains(pa.Capabilities, capabilityProvideMachines) {
+		return b, false
+	}
+	return b, true
 }
 
 // machineGone is called when a body ends: a machine a provider made for it is
@@ -374,14 +396,18 @@ func (s *CoreServer) handleProviderReports(w http.ResponseWriter, r *http.Reques
 		jsonError(w, "the AI agent this machine was for is gone", http.StatusGone)
 		return
 	}
-	// The machine that shows these words must already have asked to become
-	// this AI agent's body. A person may have approved it already, from the
-	// words on its own request, before the provider's report arrived.
+	// The machine that shows these words must have asked to become this AI
+	// agent's body since its enrolment string was given for this request, so
+	// a provider cannot claim a machine that was already there. A person may
+	// have approved it already, before the provider's report arrived.
 	var bound string
 	boundActive := false
 	if req.State == agentmachine.StateEnrolling {
 		want := strings.Join(req.Words, " ")
 		for _, c := range s.bodies().ForAgent(a.ID) {
+			if before.EnrolmentGivenAt.IsZero() || c.EnrolledAt.Before(before.EnrolmentGivenAt) {
+				continue
+			}
 			if (c.State == agentbody.StatePending || c.State == agentbody.StateActive) && strings.Join(c.Words, " ") == want {
 				if other, ok := s.machines().ForBody(c.ID); ok && other.ID != id {
 					continue
@@ -404,10 +430,6 @@ func (s *CoreServer) handleProviderReports(w http.ResponseWriter, r *http.Reques
 			jsonError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		if boundActive {
-			s.machines().Approved(bound, time.Now())
-			j, _ = s.machines().Get(id)
-		}
 	}
 	if j.State != before.State {
 		status := "ok"
@@ -415,6 +437,11 @@ func (s *CoreServer) handleProviderReports(w http.ResponseWriter, r *http.Reques
 			status = "error"
 		}
 		s.recordMachineEvent(a, j, j.State, status, firstNonEmptyString(j.Detail, "reported by "+j.ProviderName))
+	}
+	if boundActive {
+		s.machines().Approved(bound, time.Now())
+		j, _ = s.machines().Get(id)
+		s.recordMachineEvent(a, j, j.State, "ok", "a person had already approved its six words")
 	}
 	writeJSONStatus(w, http.StatusOK, j)
 }
@@ -437,6 +464,10 @@ func (s *CoreServer) handleProviderEnrolment(w http.ResponseWriter, r *http.Requ
 	a, ok := s.aiAgentAsset(j.AgentAssetID)
 	if !ok {
 		jsonError(w, "the AI agent this machine was for is gone", http.StatusGone)
+		return
+	}
+	if s.agentStatus(a.PairwiseAID) == "revoked" {
+		jsonError(w, "the AI agent this machine was for is revoked", http.StatusConflict)
 		return
 	}
 	// Recorded before it is made, under the store's lock, so a second ask —

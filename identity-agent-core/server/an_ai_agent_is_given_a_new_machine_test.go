@@ -376,3 +376,74 @@ func TestAMachineApprovedEarlyIsKeptAndOneRejectedIsDestroyed(t *testing.T) {
 		t.Fatalf("a rejected machine is %s, not being destroyed", j.State)
 	}
 }
+
+// A provider cannot claim a machine that was there before its request's
+// enrolment string was given; cancelling a request whose machine waits for
+// approval refuses that machine; and a provider whose AI agent no longer may
+// make machines is not offered.
+func TestAProviderClaimsOnlyTheMachineItMade(t *testing.T) {
+	w, maker, providerHost := machineWorld(t)
+	pb := w.s.bodies().ForAgent(maker.ID)[0].ID
+	if _, _, err := providerHost.Call("GET", "/api/agent-host/machine-requests?offers=toolchain", nil); err != nil {
+		t.Fatal(err)
+	}
+	base := "/api/mcp/agents/" + w.a.ID
+	code, out, raw := w.asOwner(t, "POST", base+"/machine-requests", `{"provider":"`+pb+`"}`)
+	if code != http.StatusCreated {
+		t.Fatalf("%d %s", code, raw)
+	}
+	id := out["id"].(string)
+	report := func(state string, words ...string) int {
+		body, _ := json.Marshal(map[string]any{"state": state, "words": words})
+		code, _, _ := providerHost.Call("POST", "/api/agent-host/machine-requests/"+id, body)
+		return code
+	}
+	if c := report(agentmachine.StateMaking); c != http.StatusOK {
+		t.Fatalf("making: %d", c)
+	}
+	if c, b, _ := providerHost.Call("POST", "/api/agent-host/machine-requests/"+id+"/enrolment", []byte("{}")); c != http.StatusCreated {
+		t.Fatalf("enrolment: %d %s", c, b)
+	}
+	// Desk assistant's existing body: its words are no secret.
+	existing := w.s.bodies().ForAgent(w.a.ID)[0]
+	if c := report(agentmachine.StateEnrolling, existing.Words...); c != http.StatusConflict {
+		t.Fatalf("a provider claimed a machine that was already there: %d", c)
+	}
+
+	// A machine that did ask, then the request is cancelled: it is refused.
+	guest := newTestMachine(t)
+	gh := &agenthost.Host{DataDir: t.TempDir(), Signer: guest, Hardware: true, PollEvery: 20 * time.Millisecond}
+	str := enrolmentVia(t, w.s, w.srv.URL, w.a.ID)
+	go func() { _, _ = gh.Enrol(str, "vm", 3*time.Second) }()
+	host, _, _ := agentbody.Identity(guest)
+	waitFor(t, "the machine to ask", func() bool {
+		for _, b := range w.s.bodies().ForAgent(w.a.ID) {
+			if b.Host == host && b.State == agentbody.StatePending {
+				return true
+			}
+		}
+		return false
+	})
+	if c := report(agentmachine.StateEnrolling, agentbody.Words(host)...); c != http.StatusOK {
+		t.Fatalf("enrolling: %d", c)
+	}
+	if code, _, raw := w.asOwner(t, "DELETE", base+"/machine-requests/"+id, ""); code != http.StatusOK {
+		t.Fatalf("cancelling: %d %s", code, raw)
+	}
+	for _, b := range w.s.bodies().ForAgent(w.a.ID) {
+		if b.Host == host && b.State != agentbody.StateRejected {
+			t.Fatalf("the cancelled machine is %s, still approvable", b.State)
+		}
+	}
+
+	// Its AI agent may no longer make machines: it is not offered or asked.
+	if _, err := w.s.assetHandler.SetAgentCapabilities(maker.ID, []string{capabilityMessageAgent}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, raw := w.asOwner(t, "GET", base+"/machines-that-fit", ""); strings.Contains(raw, pb) {
+		t.Fatalf("a provider no longer granted was offered: %s", raw)
+	}
+	if code, _, _ := w.asOwner(t, "POST", base+"/machine-requests", `{"provider":"`+pb+`"}`); code != http.StatusNotFound {
+		t.Fatalf("a provider no longer granted was asked: %d", code)
+	}
+}
