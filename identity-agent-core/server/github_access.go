@@ -816,6 +816,16 @@ func (s *CoreServer) handleBodyBorrowsGitHub(w http.ResponseWriter, r *http.Requ
 		jsonError(w, "the lend could not be recorded, so nothing was lent: "+err.Error(), http.StatusServiceUnavailable)
 		return
 	}
+	// A grant or body revoked while GitHub was making the tokens found nothing
+	// lent yet to withdraw. Checked again now the lend is recorded, so such a
+	// lend is withdrawn rather than handed over.
+	s.withdrawLentGitHubAccessNoLongerGranted("GitHub access was just lent")
+	if !s.stillLent(lend.ID) {
+		why := "this AI agent's grant changed while GitHub access was being lent, so it was withdrawn"
+		s.recordGitHubLendEvent(a, cc, "lend", "denied", why)
+		jsonError(w, why, http.StatusForbidden)
+		return
+	}
 	var parts []string
 	tokens := make([]map[string]any, 0, len(lend.Tokens))
 	for _, t := range lend.Tokens {
@@ -883,6 +893,16 @@ func (s *CoreServer) handleBodyReturnsGitHub(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	writeJSONStatus(w, http.StatusNotFound, map[string]any{"error": "this body holds no such lend", "no_lend": true})
+}
+
+// stillLent reports whether a lend is held and not given back or withdrawn.
+func (s *CoreServer) stillLent(id string) bool {
+	for _, l := range s.githubLends() {
+		if l.ID == id && !l.Returned {
+			return true
+		}
+	}
+	return false
 }
 
 func newGitHubLendID() string {
