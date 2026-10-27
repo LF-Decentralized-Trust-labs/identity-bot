@@ -36,16 +36,12 @@ import (
 //   - watching: opening a viewing, fetching its pictures and ending it, at the
 //     default minimum score;
 //   - taking control: turning control on or off and sending clicks and keys,
-//     at takeControlMinimumScore, and never from a browser session.
+//     at the score set for taking control (the default unless the owner raises it),
+//     and never from a browser session.
 //
 // A viewing belongs to whoever opened it and to one body of one AI agent. Each
 // start and end of watching, and of control, is written to the signed
 // governance record.
-
-// takeControlMinimumScore is the identity score taking control of an AI
-// agent's screen needs, above the default for watching it: a person who can
-// click and type on the AI agent's machine can do whatever that machine can.
-const takeControlMinimumScore = 90
 
 // The routes, keyed as the router gate keys them.
 const (

@@ -237,6 +237,14 @@ func TestAClickNeedsTheTakeControlPermission(t *testing.T) {
 	base := "/api/mcp/agents/" + w.a.ID + "/screen/" + sid
 	click := `{"events":[{"type":"click","x":640,"y":360,"button":1}]}`
 
+	// Taking control is its own action, so it can need more than watching.
+	// Set here to 90 to show the two are judged apart; by default it needs
+	// the same as everything else (TestControlNeedsOnlyTheDefaultUnlessRaised).
+	controllerMinimumScore[routeScreenControl], controllerMinimumScore[routeScreenInput] = 90, 90
+	t.Cleanup(func() {
+		delete(controllerMinimumScore, routeScreenControl)
+		delete(controllerMinimumScore, routeScreenInput)
+	})
 	// At the score every person has until human authentication is built.
 	if code, out, raw := w.asApp(t, "POST", base+"/control", `{"on":true}`, 0); code != http.StatusForbidden ||
 		!strings.Contains(out["detail"].(string), "score of at least 90") {
@@ -346,5 +354,21 @@ func TestAViewingIsOfOneAIAgent(t *testing.T) {
 		strings.NewReader(`{"width":1,"height":1,"image":"AA=="}`)))
 	if rec.Code == http.StatusOK {
 		t.Fatal("a picture was taken from a request that is not a body's")
+	}
+}
+
+// By default taking control needs what every action needs: the person at an
+// authorised controller can take control at the score everyone has today.
+func TestControlNeedsOnlyTheDefaultUnlessRaised(t *testing.T) {
+	w := newScreenWorld(t)
+	eventually(t, "the screen was never offered", func() bool { return w.agentsWithScreens(t)[w.a.ID] != nil })
+	sid, _ := w.watch(t)
+	base := "/api/mcp/agents/" + w.a.ID + "/screen/" + sid
+	if code, out, raw := w.asApp(t, "POST", base+"/control", `{"on":true}`, 0); code != http.StatusOK || out["control"] != true {
+		t.Fatalf("taking control at the default score: %d %s", code, raw)
+	}
+	click := `{"events":[{"type":"click","x":10,"y":10,"button":1}]}`
+	if code, _, raw := w.asApp(t, "POST", base+"/input", click, 0); code != http.StatusAccepted {
+		t.Fatalf("clicking at the default score: %d %s", code, raw)
 	}
 }

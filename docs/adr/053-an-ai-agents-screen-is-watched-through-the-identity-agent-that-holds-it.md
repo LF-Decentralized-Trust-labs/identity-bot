@@ -46,14 +46,13 @@ Agent keeps only the latest picture of each body, in memory, and forgets it when
 the last viewing of that body ends. Pictures are never written to disk.
 
 **Watching and taking control are two actions in the one check.** Opening,
-fetching and ending a viewing need the default minimum score (ADR-050). Taking
-control, and sending clicks and keys, need a score of at least 90: a person who
-can click and type on the AI agent's machine can do whatever that machine can.
-Both are open to the owner and to an authorised controller. A browser session
-may watch and may never take control. While nothing measures people, every
-person scores 80, so taking control is open to the owner on the device holding
-the identity's key, and to a controller only with a statement that device
-vouched for at 90 or more.
+fetching and ending a viewing, and taking control and sending clicks and keys,
+each need the default minimum score (ADR-050) unless the owner sets another for
+that action. They are separate actions so that the owner can raise the score
+for taking control without changing watching: a person who can click and type
+on the AI agent's machine can do whatever that machine can. Both are open to
+the owner and to an authorised controller. A browser session may watch and may
+never take control.
 
 **A viewing belongs to whoever opened it and to one body of one AI agent.**
 Only its viewer can fetch its pictures, take control through it or end it. A
