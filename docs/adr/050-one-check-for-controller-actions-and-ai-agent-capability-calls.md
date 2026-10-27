@@ -37,7 +37,7 @@ opens them to a controller. They are:
   (by inception or hybrid inception), preparing the messaging keys an identity
   commits to, and bringing new owners in;
 - the identity's key log: signing an interaction event, signing for the identity
-  or taking up what its key device signed, fulfilling a signing request, and
+  or taking up what its key device signed, fulfilling or refusing a signing request, and
   signing arbitrary data or an event as the identity;
 - recovery: verifying a recovery archive, starting, activating or cancelling a
   recovery, setting who holds a recovery and the duress policy, and agreeing to
@@ -116,6 +116,9 @@ to it, so start-up grants nothing.
   sending no statement at all, and is then judged at 80. A vouched score is
   meaningful only once real human authentication replaces the placeholder; then
   a missing statement must count as nothing measured.
+- A controller can publish or withdraw where one of the identity's pairwise
+  identities is reached, so a compromised one can stop messages arriving on
+  that relationship until the owner publishes again.
 - Removing a machine (`DELETE /api/controllers/{aid}`) is owner-only, so a stolen
   laptop is removed from the device holding the identity's key, not from another
   computer.

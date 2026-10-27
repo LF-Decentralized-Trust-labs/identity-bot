@@ -168,7 +168,8 @@ func (s *CoreServer) mountSigningRequestRoutes(r chi.Router) {
 //
 // The owner and its controllers only. The list says what this identity is
 // about to assert and why, which is not something to hand to anybody who asks.
-// Answering one (fulfil) stays owner-only: that is the signing itself.
+// Answering one (fulfil or refuse) stays owner-only: that is the key device's
+// answer, and a refused withdrawal is never asked for again.
 func (s *CoreServer) handleListSigningRequests(w http.ResponseWriter, r *http.Request) {
 	if !s.isOwnerOrItsController(r) {
 		writeError(w, http.StatusForbidden, "owner only", "internal route")
@@ -311,7 +312,7 @@ func (s *CoreServer) handleFulfilSigningRequest(w http.ResponseWriter, r *http.R
 // state from "you were never asked", and only the first should stop the agent
 // asking again about the same thing.
 func (s *CoreServer) handleRefuseSigningRequest(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwnerOrItsController(r) {
+	if !s.isOwner(r) {
 		writeError(w, http.StatusForbidden, "owner only", "internal route")
 		return
 	}

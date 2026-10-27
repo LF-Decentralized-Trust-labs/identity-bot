@@ -189,6 +189,7 @@ func TestTheOwnerOnlyListIsTheOneTheADRRecords(t *testing.T) {
 		"POST /api/sign",
 		"POST /api/events/signature",
 		"POST /api/signing-requests/{id}/fulfil",
+		"POST /api/signing-requests/{id}/refuse",
 		"POST /api/signing-requests/sign-for-another",
 		"POST /api/signing-requests/adopt",
 		"POST /api/didcomm/peers",

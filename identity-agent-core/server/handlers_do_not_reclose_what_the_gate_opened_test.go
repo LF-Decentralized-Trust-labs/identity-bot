@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"identity-agent-core/sandbox"
+	"identity-agent-core/store"
 )
 
 // The gate decides what a controller may reach, and a handler does not decide
@@ -73,7 +74,9 @@ func TestHandlersDoNotRecloseWhatTheGateOpenedToAController(t *testing.T) {
 			}
 			return nil
 		}
-		if w.Code == http.StatusForbidden {
+		said := strings.ToLower(w.Body.String())
+		if w.Code == http.StatusForbidden || (w.Code >= 400 &&
+			(strings.Contains(said, "owner only") || strings.Contains(said, "for the owner"))) {
 			t.Errorf("%s %s is open to a controller by ADR-050, but was refused: %s — "+
 				"a handler re-checked ownership after the gate admitted the controller",
 				method, route, strings.TrimSpace(w.Body.String()))
@@ -119,5 +122,47 @@ func TestOwnerOrItsControllerAdmitsNobodyElse(t *testing.T) {
 	}
 	if s.isOwnerOrItsController(remote("GET", "/api/vault/credentials", "")) {
 		t.Error("a stranger was treated as the owner or its controller")
+	}
+}
+
+// Opening DIDComm sending to a controller does not open speaking as the owner:
+// a sealed request cannot be built here by anybody, and a controller cannot
+// send as the identity itself or as an identity that owns a machine.
+func TestAControllerCannotSendAsTheOwnerByDIDComm(t *testing.T) {
+	s := newAuthTestServer(t)
+	ds, err := store.NewSQLiteStore(s.DataDir)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	s.DataStore = ds
+	if err := ds.SaveIdentity(store.IdentityState{AID: "Etheidentity", PublicKey: "Dkey"}); err != nil {
+		t.Fatalf("identity: %v", err)
+	}
+	if err := ds.RememberMachineOwnerIdentity("Eowner-of-a-machine", 3); err != nil {
+		t.Fatalf("machine owner: %v", err)
+	}
+	asController := func(body string) *httptest.ResponseRecorder {
+		r := remote("POST", "/api/didcomm/send", body)
+		r = r.WithContext(context.WithValue(r.Context(), controllerContextKey{}, ControllerGrant{ControllerAID: "Bcontroller"}))
+		w := httptest.NewRecorder()
+		s.handleSendDIDCommMessage(w, r)
+		return w
+	}
+	for _, typ := range []string{"sealed-request", "sealed-response", "body-enrolment"} {
+		w := asController(`{"from_aid":"Ean-ai-agent","to_aid":"Epeer","type":"` + typ + `"}`)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("%s was not refused: %d %s", typ, w.Code, w.Body.String())
+		}
+	}
+	for _, from := range []string{"Etheidentity", "Eowner-of-a-machine"} {
+		w := asController(`{"from_aid":"` + from + `","to_aid":"Epeer","type":"direct-message"}`)
+		if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), reasonOwnerOnly) {
+			t.Errorf("a controller sending as %s was not refused as owner-only: %d %s", from, w.Code, w.Body.String())
+		}
+	}
+	// An AI agent's identity is the controller's to send as; it fails later, at
+	// delivery, because there is no such peer — not at the door.
+	if w := asController(`{"from_aid":"Ean-ai-agent","to_aid":"Epeer","type":"agent-message"}`); w.Code == http.StatusForbidden {
+		t.Errorf("a controller was refused sending as an AI agent: %s", w.Body.String())
 	}
 }

@@ -271,7 +271,7 @@ func (s *CoreServer) handleGetDIDCommDID(w http.ResponseWriter, r *http.Request)
 		jsonError(w, "aid is required", http.StatusBadRequest)
 		return
 	}
-	if !s.hasKeySet(aid) && !s.isOwnerOrItsController(r) {
+	if !s.hasKeySet(aid) && !s.isOwner(r) {
 		// A stranger cannot make this agent generate keys for an arbitrary
 		// identifier — that is unbounded work on demand. But refusing outright
 		// broke the case this endpoint exists for: an agent that has never sent
@@ -370,6 +370,21 @@ func (s *CoreServer) handleSendDIDCommMessage(w http.ResponseWriter, r *http.Req
 		jsonError(w, "unknown_message_type", http.StatusBadRequest)
 		return
 	}
+	// These types are made only by their own code paths. A sealed request is
+	// served by the agent it reaches as its sender's own request, so one built
+	// here would be POST /api/sealed/send by another door — and that is
+	// owner-only (controllerOwnerOnly).
+	switch req.Type {
+	case didcomm.TypeSealedRequest, didcomm.TypeSealedResponse, didcomm.TypeBodyEnrolment:
+		jsonError(w, req.Type+" is not sent from here", http.StatusBadRequest)
+		return
+	}
+	if _, fromAController := TheControllerThatAsked(r); fromAController {
+		if why := s.whyAControllerMayNotSendAs(req.FromAID); why != "" {
+			denyAuthorizationBecause(w, reasonOwnerOnly, "this machine may act for you, but "+why)
+			return
+		}
+	}
 	msgID, status, err := s.SendDIDCommMessage(req.FromAID, req.ToAID, req.Type, req.Body)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusBadGateway)
@@ -380,6 +395,27 @@ func (s *CoreServer) handleSendDIDCommMessage(w http.ResponseWriter, r *http.Req
 		"message_id":  msgID,
 		"peer_status": status,
 	})
+}
+
+// whyAControllerMayNotSendAs says why a controller may not send a message as
+// aid, or "" when it may. Speaking as the identity itself, or as an identity
+// that owns a machine, is the owner speaking (ADR-050); a controller sends as
+// the identities that act for the owner, such as its AI agents.
+func (s *CoreServer) whyAControllerMayNotSendAs(aid string) string {
+	if s.DataStore == nil {
+		return "who this would be sent as cannot be checked"
+	}
+	if id, err := s.DataStore.GetIdentity(); err != nil {
+		return "who this would be sent as cannot be checked"
+	} else if id != nil && id.AID == aid {
+		return "a message from the identity itself is the owner speaking, so it is sent from the device holding its key"
+	}
+	if _, owns, err := s.DataStore.MachineOwnerIndex(aid); err != nil {
+		return "who this would be sent as cannot be checked"
+	} else if owns {
+		return "a message from the identity that owns a machine is the owner speaking to it, so it is sent from the device holding the key"
+	}
+	return ""
 }
 
 // handleDIDCommInbound is the PUBLIC inbound endpoint (POST {PUBLIC_URL}/didcomm). It
