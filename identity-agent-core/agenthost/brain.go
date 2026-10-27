@@ -193,7 +193,8 @@ func (c ClaudeCode) Run(ctx context.Context, t Turn) (Outcome, error) {
 	}})
 	args := []string{"-p", "--output-format", "json",
 		"--mcp-config", string(mcp), "--strict-mcp-config",
-		"--permission-mode", "bypassPermissions"}
+		"--permission-mode", "bypassPermissions",
+		"--settings", claudeNoAttribution}
 	if t.Resume {
 		args = append(args, "--resume", t.Session)
 	} else {
@@ -230,6 +231,24 @@ func (c ClaudeCode) Run(ctx context.Context, t Turn) (Outcome, error) {
 		RunHash: runHash([]byte(prompt), out),
 	}}, nil
 }
+
+// claudeNoAttribution is the setting, passed on every run, that stops Claude
+// Code signing what the brain writes: no Co-Authored-By trailer on its
+// commits, no "Generated with Claude Code" line in its pull requests, and no
+// session link on either. The work is the AI agent's, and the record of who
+// did it is the AI agent's own signature, not a credit line naming the
+// model's vendor.
+//
+// It goes with the run rather than into the brain's settings files, so it
+// holds on every machine, whatever those files say, and the person's own
+// files are never touched. Settings passed this way outrank the user's and the
+// project's; only an organisation's managed settings outrank them. The
+// "attribution" key is the current one; "includeCoAuthoredBy" is the one it
+// replaced, which older versions read and newer ones ignore once
+// "attribution" is set. The empty strings, rather than "attribution": false,
+// are the form older versions also accept.
+// See https://code.claude.com/docs/en/settings-reference#attribution.
+const claudeNoAttribution = `{"attribution":{"commit":"","pr":"","sessionUrl":false},"includeCoAuthoredBy":false}`
 
 // withInstructions is the turn's prompt, led on a session's first turn by the
 // instructions. Neither CLI can be given its system prompt from stdin, and a
