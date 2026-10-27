@@ -170,7 +170,10 @@ seven days, so a body that was out of reach can still give it back with what its
 renewed. A body tries a return again, waiting longer each time, while the Identity
 Agent cannot be reached. If it still cannot, it keeps the renewed file in its own
 directory, readable only by the host, and gives it back the next time it reaches the
-Identity Agent, before it borrows again.
+Identity Agent, before it borrows again. The Identity Agent keeps a renewed file before it
+takes the lease back: if its vault cannot be written at that moment, it answers that the
+return should be tried again and keeps the lease, rather than saying "returned" and having
+the body drop the only copy of a sign-in whose old refresh token is already spent.
 
 **A brain that names its own sessions reports the one it started.** Codex does
 this, and the next turn of the conversation resumes it.

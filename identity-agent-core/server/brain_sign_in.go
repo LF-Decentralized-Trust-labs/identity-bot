@@ -703,6 +703,22 @@ func (s *CoreServer) handleBodyReturnsSignIn(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	s.recordLapsedLeases()
+	// A sign-in the run's program refreshed is kept before the lease is
+	// given back. If it cannot be kept now, the lease stays and the run is
+	// told to try again: answering "returned" would have the machine drop
+	// the only copy of a sign-in whose old refresh token is already spent.
+	kept := ""
+	if q.SignIn != "" {
+		if held, ok, _ := s.brainLeases().Find(q.LeaseID, b.Host, a.ID, time.Now().UTC()); ok {
+			why, tryAgain := s.keepRefreshedSignIn(a, held, q.SignIn)
+			if tryAgain {
+				s.recordBrainEvent(a, cc, "returned", "denied", "lease "+held.ID+" kept for now; "+why)
+				writeJSONStatus(w, http.StatusServiceUnavailable, map[string]any{"error": why, "try_again": true})
+				return
+			}
+			kept = why
+		}
+	}
 	lease, err := s.brainLeases().Return(q.LeaseID, b.Host, a.ID, time.Now().UTC())
 	switch {
 	case lease.ID != "":
@@ -710,8 +726,8 @@ func (s *CoreServer) handleBodyReturnsSignIn(w http.ResponseWriter, r *http.Requ
 		if err != nil {
 			why += ", after it had lapsed"
 		}
-		if q.SignIn != "" {
-			why += "; " + s.keepRefreshedSignIn(a, lease, q.SignIn)
+		if kept != "" {
+			why += "; " + kept
 		}
 		s.recordBrainEvent(a, cc, "returned", "ok", why)
 		writeJSONStatus(w, http.StatusOK, map[string]any{"returned": true})

@@ -178,7 +178,11 @@ func TestASignedRequestToCreateAnAIAgentCarriesNoKey(t *testing.T) {
 // A browser session cannot sign an AI agent's brain in or remove its sign-in:
 // either outlives the session, as changing the brain's configuration does.
 func TestABrowserSessionCannotChangeABrainsSignIn(t *testing.T) {
-	for _, route := range []string{"PUT /api/mcp/agents/{id}/brain-sign-in", "DELETE /api/mcp/agents/{id}/brain-sign-in"} {
+	for _, route := range []string{
+		"PUT /api/mcp/agents/{id}/brain-sign-in", "DELETE /api/mcp/agents/{id}/brain-sign-in",
+		// A check makes the Identity Agent reach an address the caller names.
+		"POST /api/mcp/brain-sign-in/test", "POST /api/mcp/agents/{id}/brain-sign-in/test",
+	} {
 		if _, ok := sessionForbidden[route]; !ok {
 			t.Errorf("%s is open to a browser session", route)
 		}

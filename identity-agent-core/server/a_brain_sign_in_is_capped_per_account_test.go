@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -392,7 +393,7 @@ func TestARenewedCodexSignInIsKept(t *testing.T) {
 		t.Fatal(err)
 	}
 	other := brainsignintest.CodexSignIn("acct-OTHER", "eve@example.org", "R")
-	got := w.s.keepRefreshedSignIn(*w.a, brainsignin.Lease{Lent: brainsignin.Fingerprint("codex", renewed)}, other)
+	got, _ := w.s.keepRefreshedSignIn(*w.a, brainsignin.Lease{Lent: brainsignin.Fingerprint("codex", renewed)}, other)
 	if !strings.Contains(got, "another account") {
 		t.Fatalf("a sign-in for another account was kept: %s", got)
 	}
@@ -516,15 +517,68 @@ func TestARefreshIsWrittenOnlyWhereTheLentSignInIsKept(t *testing.T) {
 		t.Fatalf("sharing: %d %s", code, raw)
 	}
 	lease := brainsignin.Lease{Lent: brainsignin.Fingerprint("codex", first)}
-	if got := w.s.keepRefreshedSignIn(*w.a, lease, brainsignintest.CodexSignIn("acct-1", "eve@example.org", "R")); !strings.Contains(got, "not kept") {
+	if got, _ := w.s.keepRefreshedSignIn(*w.a, lease, brainsignintest.CodexSignIn("acct-1", "eve@example.org", "R")); !strings.Contains(got, "not kept") {
 		t.Fatalf("a refresh for another person on the account: %s", got)
 	}
-	if got := w.s.keepRefreshedSignIn(*w.a, lease, renewed); !strings.Contains(got, "every AI agent sharing it") {
+	if got, _ := w.s.keepRefreshedSignIn(*w.a, lease, renewed); !strings.Contains(got, "every AI agent sharing it") {
 		t.Fatalf("keeping the refresh: %s", got)
 	}
 	for id, want := range map[string]string{w.a.ID: renewed, w.b.ID: renewed, third.ID: separate} {
 		if rec, _, _ := w.s.SandboxManager.BrainSignIn(brainsignin.Ref(id)); rec.Secret != want {
 			t.Errorf("%s holds the wrong sign-in after the refresh", id)
 		}
+	}
+}
+
+// A refreshed sign-in that reaches the Identity Agent while its vault cannot
+// be written is not taken as returned: the lease stays, the run is told to
+// try again, and the next try keeps it. Answering "returned" would have the
+// machine drop the only copy of a sign-in whose old refresh token is spent.
+func TestARefreshTheVaultCannotKeepYetIsNotTakenAsReturned(t *testing.T) {
+	w := signInWorld(t)
+	first := brainsignintest.CodexSignIn("acct-1", "alex@example.org", "REFRESH-ONE")
+	renewed := brainsignintest.CodexSignIn("acct-1", "alex@example.org", "REFRESH-TWO")
+	body, _ := json.Marshal(map[string]any{"kind": "subscription", "provider": "codex", "secret": first})
+	if code, _, raw := w.asOwner(t, "PUT", "/api/mcp/agents/"+w.a.ID+"/brain-sign-in", string(body)); code != http.StatusOK {
+		t.Fatalf("signing in: %d %s", code, raw)
+	}
+	held, err := w.hostA.Borrow(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("a read-only file does not stop root")
+	}
+	var vaultFile string
+	_ = filepath.WalkDir(w.s.DataDir, func(p string, d fs.DirEntry, _ error) error {
+		if d != nil && d.Name() == "service_credentials.enc" {
+			vaultFile = p
+		}
+		return nil
+	})
+	if vaultFile == "" {
+		t.Fatal("no vault file to make unwritable")
+	}
+	if err := os.Chmod(vaultFile, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(vaultFile, 0o600) })
+	ret, _ := json.Marshal(map[string]string{"lease_id": held.LeaseID, "sign_in": renewed})
+	code, out, _ := w.hostA.CallContext(context.Background(), "POST", "/api/agent-host/brain-sign-in/return", ret)
+	if code != http.StatusServiceUnavailable {
+		t.Fatalf("a refresh the vault could not keep was answered %d %s", code, out)
+	}
+	if w.s.brainLeases().InUse(w.a.ID, time.Now()) != 1 {
+		t.Fatal("the lease was given back though its refresh was not kept")
+	}
+	if err := os.Chmod(vaultFile, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ = w.hostA.CallContext(context.Background(), "POST", "/api/agent-host/brain-sign-in/return", ret)
+	if code != http.StatusOK {
+		t.Fatalf("trying again once the vault opened: %d %s", code, out)
+	}
+	if rec, _, _ := w.s.SandboxManager.BrainSignIn(brainsignin.Ref(w.a.ID)); rec.Secret != renewed {
+		t.Fatal("the refresh was lost")
 	}
 }

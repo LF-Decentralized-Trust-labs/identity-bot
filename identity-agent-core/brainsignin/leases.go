@@ -249,6 +249,26 @@ func (l *Leases) Return(id, host, agent string, now time.Time) (Lease, error) {
 	return Lease{}, ErrNoLease
 }
 
+// Find is the lease host holds on agent's sign-in, live or lapsed but still
+// kept, without giving it back. A return that carries a refreshed sign-in
+// keeps that first, and gives the lease back only once it is kept, so a
+// failure to keep it leaves the run something to try again with.
+func (l *Leases) Find(id, host, agent string, now time.Time) (Lease, bool, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	all, err := l.load()
+	if err != nil {
+		return Lease{}, false, err
+	}
+	_, _, keep := live(all, now)
+	for _, x := range keep {
+		if x.ID == id && x.Host == host && x.Agent == agent {
+			return x, true, nil
+		}
+	}
+	return Lease{}, false, nil
+}
+
 // InUse is how many runs hold agent's sign-in at now.
 func (l *Leases) InUse(agent string, now time.Time) int {
 	return l.count(func(x Lease) bool { return x.Agent == agent }, now)
