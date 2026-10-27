@@ -217,3 +217,9 @@ func (l *keyLender) giveBackAll() error {
 	}
 	return first
 }
+
+// forget drops every loan without giving any key back: the display the keys
+// were lent on has gone.
+func (l *keyLender) forget() {
+	l.lent = map[byte]*loan{}
+}

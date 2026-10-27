@@ -151,3 +151,21 @@ func TestADisplayOverTheNetworkIsRefusedUnlessAskedFor(t *testing.T) {
 		t.Fatalf("this machine's display was refused: %v", err)
 	}
 }
+
+// Keys lent on a display that has gone are forgotten, not given back on it:
+// the next display starts with nothing lent.
+func TestLentKeysAreForgottenWhenTheirDisplayGoes(t *testing.T) {
+	srv := newKeyboard([]uint32{'a', 'A', 0, 0}, []uint32{0, 0, 0, 0})
+	l := newKeyLender(srv, nil)
+	if _, err := l.borrow(0x20ac, srv.kb); err != nil {
+		t.Fatal(err)
+	}
+	writes := len(srv.writes)
+	l.forget()
+	if len(l.lent) != 0 {
+		t.Fatalf("%d keys still lent after their display went", len(l.lent))
+	}
+	if err := l.giveBackAll(); err != nil || len(srv.writes) != writes {
+		t.Fatalf("a forgotten key was given back on a display that had gone (%v)", err)
+	}
+}

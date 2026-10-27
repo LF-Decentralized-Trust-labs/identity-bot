@@ -140,16 +140,27 @@ func (h *Host) ShowScreen(ctx context.Context, scr Screen, mode ScreenMode, logg
 	backoff := time.Second
 	for ctx.Err() == nil {
 		var desc *screenview.Screen
+		// restarting is a display that went away and is being opened again:
+		// a viewing of it ends saying so, and the screen is offered again the
+		// moment it opens (back).
+		restarting := false
+		var back <-chan struct{}
+		if r, ok := scr.(reopener); ok {
+			back = r.reopened()
+		}
 		if scr != nil && mode != ScreenOff {
 			d, err := scr.Describe()
-			if err != nil {
+			switch {
+			case errors.Is(err, ErrScreenRestarting):
+				restarting = true
+			case err != nil:
 				logf("[agent-host] the screen cannot be read (%v); saying there is none", err)
-			} else {
+			default:
 				d.CanControl = d.CanControl && mode == ScreenControl
 				desc = &d
 			}
 		}
-		body, _ := json.Marshal(map[string]any{"screen": desc})
+		body, _ := json.Marshal(map[string]any{"screen": desc, "restarting": restarting})
 		code, b, err := h.CallContext(ctx, "POST", "/api/agent-host/screen", body)
 		var answer struct {
 			Watch bool `json:"watch"`
@@ -178,9 +189,11 @@ func (h *Host) ShowScreen(ctx context.Context, scr Screen, mode ScreenMode, logg
 		}
 		backoff = time.Second
 		if desc == nil {
-			// Nothing to show: say so again before the word runs out.
+			// Nothing to show: say so again before the word runs out, or as
+			// soon as a display that went away opens again.
 			select {
 			case <-time.After(screenview.AdvertisedFor / 2):
+			case <-back:
 			case <-ctx.Done():
 				return
 			}

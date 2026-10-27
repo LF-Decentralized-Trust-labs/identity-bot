@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/color"
 	"image/jpeg"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -30,6 +32,7 @@ type aScreen struct {
 	captures int
 	applied  []screenview.Event
 	released int
+	gone     bool
 }
 
 func (s *aScreen) Describe() (screenview.Screen, error) {
@@ -500,5 +503,100 @@ func TestTheRecordNamesWhoTheGateAdmitted(t *testing.T) {
 	started := governanceRows(t, w.talkWorld, "agent.screen.watch.started")
 	if len(started) != 1 || started[0].Transport != "owner" {
 		t.Fatalf("the owner's viewing was recorded as somebody else's: %+v", started)
+	}
+}
+
+// aRestartingDisplay is a display that can go away and come back, as one does
+// when an update restarts its service. A screen opened on it before it went
+// away answers EOF, as an X connection to a restarted display does.
+type aRestartingDisplay struct {
+	mu  sync.Mutex
+	up  bool
+	cur *aScreen
+}
+
+func (d *aRestartingDisplay) open() (agenthost.Screen, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !d.up {
+		return nil, errors.New("no display yet")
+	}
+	d.cur = &aScreen{w: 1280, h: 720, shade: 1}
+	return &onADisplay{aScreen: d.cur}, nil
+}
+
+func (d *aRestartingDisplay) restart() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.up = false
+	d.cur.mu.Lock()
+	d.cur.gone = true
+	d.cur.mu.Unlock()
+}
+
+func (d *aRestartingDisplay) comeBack() { d.mu.Lock(); d.up = true; d.mu.Unlock() }
+
+// onADisplay is aScreen answering EOF once its display has gone.
+type onADisplay struct{ *aScreen }
+
+func (s *onADisplay) Describe() (screenview.Screen, error) {
+	s.mu.Lock()
+	gone := s.gone
+	s.mu.Unlock()
+	if gone {
+		return screenview.Screen{}, io.EOF
+	}
+	return s.aScreen.Describe()
+}
+
+func (s *onADisplay) Capture() (*image.RGBA, error) {
+	s.mu.Lock()
+	gone := s.gone
+	s.mu.Unlock()
+	if gone {
+		return nil, io.EOF
+	}
+	return s.aScreen.Capture()
+}
+
+// A display that restarts under a body ends the viewing of it saying so, and
+// the screen is offered again once the display is back, without the body
+// being restarted.
+func TestAScreenIsOfferedAgainAfterItsDisplayRestarts(t *testing.T) {
+	w := &screenWorld{talkWorld: newTalkWorld(t)}
+	w.s.screens().Idle = 2 * time.Second
+	d := &aRestartingDisplay{up: true}
+	scr, err := agenthost.KeepScreenOpen(d.open, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = scr.Close() })
+	w.scr = d.cur
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go w.hostA.ShowScreen(ctx, scr, agenthost.ScreenControl, nil)
+
+	eventually(t, "the screen was never offered", func() bool { return w.hasScreen(t, w.a.ID) })
+	sid, _ := w.watch(t)
+	d.restart()
+	eventually(t, "the viewing did not end when the display went away", func() bool {
+		_, out, _ := w.picture(t, w.a.ID, sid, 1000)
+		if out["state"] != "ended" {
+			return false
+		}
+		if out["ended_because"] != screenview.EndedScreenRestarted {
+			t.Fatalf("the viewing ended for another reason: %v", out)
+		}
+		return true
+	})
+	if w.hasScreen(t, w.a.ID) {
+		t.Fatal("a screen whose display is gone is still offered")
+	}
+	d.comeBack()
+	eventually(t, "the screen was not offered again once its display came back", func() bool {
+		return w.hasScreen(t, w.a.ID)
+	})
+	if _, frame := w.watch(t); frame["image"] == nil {
+		t.Fatal("the screen offered again shows nothing")
 	}
 }
