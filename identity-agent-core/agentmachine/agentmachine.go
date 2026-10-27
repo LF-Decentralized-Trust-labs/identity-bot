@@ -115,7 +115,10 @@ type Job struct {
 	Words []string `json:"words,omitempty"`
 	// Body is the binding the new machine enrolled as, once its words are
 	// matched to a request waiting for approval.
-	Body        string    `json:"body,omitempty"`
+	Body string `json:"body,omitempty"`
+	// EnrolmentGivenAt is when its provider was given the enrolment string:
+	// once per request.
+	EnrolmentGivenAt time.Time `json:"enrolment_given_at,omitempty"`
 	RequestedBy string    `json:"requested_by"`
 	RequestedAt time.Time `json:"requested_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -430,6 +433,27 @@ func (s *Store) Report(id, provider, state, detail string, words []string, now t
 func (s *Store) Bound(id, body string, now time.Time) (Job, error) {
 	return s.update(id, func(j *Job) error {
 		j.Body = body
+		return nil
+	}, now)
+}
+
+// ErrEnrolmentGiven is a second enrolment string asked for one request.
+var ErrEnrolmentGiven = errors.New("the enrolment string for this machine was already given")
+
+// GiveEnrolment records that a request's provider is being given its
+// enrolment string, which happens once, and only while the machine is being
+// made by that provider.
+func (s *Store) GiveEnrolment(id, provider string, now time.Time) (Job, error) {
+	return s.update(id, func(j *Job) error {
+		switch {
+		case j.Provider != provider:
+			return errors.New("that machine is not one this provider was asked to make")
+		case j.State != StateMaking:
+			return fmt.Errorf("an enrolment string is given only while the machine is being made, and this one is %s", j.State)
+		case !j.EnrolmentGivenAt.IsZero():
+			return ErrEnrolmentGiven
+		}
+		j.EnrolmentGivenAt = now.UTC()
 		return nil
 	}, now)
 }

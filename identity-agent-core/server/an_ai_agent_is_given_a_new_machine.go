@@ -219,8 +219,8 @@ func (s *CoreServer) handleAskForMachine(w http.ResponseWriter, r *http.Request)
 	// One machine at a time per AI agent from this path: a second while the
 	// first is still being made is almost always a double click.
 	for _, j := range s.machines().ForAgent(a.ID) {
-		if j.State == agentmachine.StateWaiting || j.State == agentmachine.StateMaking {
-			jsonError(w, "a machine is already being made for "+a.DisplayName+"; wait for it, or cancel it", http.StatusConflict)
+		if j.State == agentmachine.StateWaiting || j.State == agentmachine.StateMaking || j.State == agentmachine.StateEnrolling {
+			jsonError(w, "a machine is already being made for "+a.DisplayName+", or waits for its six words to be approved; finish or cancel it first", http.StatusConflict)
 			return
 		}
 	}
@@ -434,13 +434,16 @@ func (s *CoreServer) handleProviderEnrolment(w http.ResponseWriter, r *http.Requ
 		jsonError(w, "that machine is not one this provider was asked to make", http.StatusNotFound)
 		return
 	}
-	if j.State != agentmachine.StateMaking {
-		jsonError(w, "an enrolment string is given only while the machine is being made, and this one is "+j.State, http.StatusConflict)
-		return
-	}
 	a, ok := s.aiAgentAsset(j.AgentAssetID)
 	if !ok {
 		jsonError(w, "the AI agent this machine was for is gone", http.StatusGone)
+		return
+	}
+	// Recorded before it is made, under the store's lock, so a second ask —
+	// or one racing a cancellation — gets nothing.
+	j, err := s.machines().GiveEnrolment(j.ID, b.ID, time.Now())
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusConflict)
 		return
 	}
 	str, expires, err := s.enrolmentFor(r, a)

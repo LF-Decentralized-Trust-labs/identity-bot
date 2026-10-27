@@ -321,6 +321,9 @@ func TestAMachineApprovedEarlyIsKeptAndOneRejectedIsDestroyed(t *testing.T) {
 		if err != nil || code != http.StatusCreated {
 			t.Fatalf("enrolment: %d %s %v", code, b, err)
 		}
+		if code, _, _ := providerHost.Call("POST", "/api/agent-host/machine-requests/"+id+"/enrolment", []byte("{}")); code != http.StatusConflict {
+			t.Fatalf("a second enrolment string for one machine: %d", code)
+		}
 		var en struct {
 			Enrolment string `json:"enrolment"`
 		}
