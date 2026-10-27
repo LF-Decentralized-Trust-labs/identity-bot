@@ -275,6 +275,10 @@ func (h *Host) handle(ctx context.Context, tools *toolServer, brain Brain, p age
 	var out Outcome
 	creds, borrowed, err := h.lendForTurn(ctx, brain, logf)
 	if err == nil {
+		// GitHub access, when the AI agent's grant gives it repositories, is
+		// lent for the turn alongside the sign-in, and given back with it.
+		githubEnv, github := h.lendGitHubForTurn(ctx, logf)
+		creds = append(creds, githubEnv...)
 		token := tools.open(turn)
 		tctx, cancel := context.WithTimeout(ctx, turnTimeout)
 		stop, kept := make(chan struct{}), make(chan struct{})
@@ -298,6 +302,9 @@ func (h *Host) handle(ctx context.Context, tools *toolServer, brain Brain, p age
 			// failed turn: the one it was lent may no longer work.
 			borrowed.refreshed = out.refreshed
 			h.giveBack(borrowed, logf)
+		}
+		if github != nil {
+			h.giveGitHubBack(github, logf)
 		}
 	}
 

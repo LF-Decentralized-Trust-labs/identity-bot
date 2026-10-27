@@ -451,6 +451,44 @@ func (s *CoreServer) handleSetAgentCapabilities(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	res, status, err := s.regrantAgent(id, by, func(candidate *asset.Asset) error {
+		candidate.Capabilities = asset.NormaliseCapabilities(req.Capabilities)
+		if req.ResourceConstraints != nil {
+			candidate.GrantConstraints = *req.ResourceConstraints
+		}
+		return nil
+	})
+	if err != nil {
+		jsonError(w, err.Error(), status)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"asset_id":       res.updated.ID,
+		"agent_aid":      res.updated.PairwiseAID,
+		"previous":       res.before.Capabilities,
+		"capabilities":   res.updated.Capabilities,
+		"tokens_updated": res.touched,
+		"grant_said":     res.grantSAID,
+		"grant_issued":   res.grantSAID != "",
+	})
+}
+
+// regranted is an AI agent's grant as regrantAgent changed it.
+type regranted struct {
+	before, updated asset.Asset
+	grantSAID       string
+	touched         int
+}
+
+// regrantAgent changes what an AI agent's grant gives, as change says, and
+// re-issues the grant: the one way its ceiling and limits change once it
+// exists. On failure it says what status to answer with.
+//
+// Whatever was lent to the AI agent's bodies that the new grant no longer
+// gives is withdrawn once it stands.
+func (s *CoreServer) regrantAgent(id string, by authority, change func(candidate *asset.Asset) error) (regranted, int, error) {
 	// One change to an AI agent's grant at a time. Two at once would each find
 	// the same grant to replace, both issue, and leave two usable grants.
 	unlock := lockAgentGrant(id)
@@ -458,17 +496,14 @@ func (s *CoreServer) handleSetAgentCapabilities(w http.ResponseWriter, r *http.R
 
 	before, ok := s.assetHandler.Store.GetAsset(id)
 	if !ok {
-		jsonError(w, "agent not found", http.StatusNotFound)
-		return
+		return regranted{}, http.StatusNotFound, errors.New("agent not found")
 	}
 	candidate := before
-	candidate.Capabilities = asset.NormaliseCapabilities(req.Capabilities)
-	if req.ResourceConstraints != nil {
-		candidate.GrantConstraints = *req.ResourceConstraints
+	if err := change(&candidate); err != nil {
+		return regranted{}, http.StatusBadRequest, err
 	}
 	if err := checkResourceConstraints(candidate.GrantConstraints, candidate.Capabilities); err != nil {
-		jsonError(w, err.Error(), http.StatusBadRequest)
-		return
+		return regranted{}, http.StatusBadRequest, err
 	}
 
 	// The grant is re-issued FIRST, and nothing is changed unless it is. Updating
@@ -483,9 +518,8 @@ func (s *CoreServer) handleSetAgentCapabilities(w http.ResponseWriter, r *http.R
 		// withdrawn here, and both would stand. Refused before anything is
 		// built or asked for.
 		if kerr := s.keyCanSign(); kerr != nil && s.agentHasIssuedGrant(id) {
-			jsonError(w, "the grant could not be re-issued, so nothing was changed: "+kerr.Error()+
-				", and this AI agent's current grant could not be withdrawn here", keyErrorStatus(kerr))
-			return
+			return regranted{}, keyErrorStatus(kerr), errors.New("the grant could not be re-issued, so nothing was changed: " +
+				kerr.Error() + ", and this AI agent's current grant could not be withdrawn here")
 		}
 		g, err := s.issueCapabilityGrant(&candidate, by)
 		if errors.Is(err, errKeyElsewhere) {
@@ -494,13 +528,10 @@ func (s *CoreServer) handleSetAgentCapabilities(w http.ResponseWriter, r *http.R
 			err, grantPending = nil, true
 		}
 		if errors.Is(err, errKeyUnavailable) {
-			jsonError(w, "the grant could not be re-issued, so nothing was changed: "+err.Error(), http.StatusServiceUnavailable)
-			return
+			return regranted{}, http.StatusServiceUnavailable, errors.New("the grant could not be re-issued, so nothing was changed: " + err.Error())
 		}
 		if err != nil {
-			jsonError(w, "the grant could not be re-issued, so nothing was changed: "+err.Error(),
-				http.StatusBadGateway)
-			return
+			return regranted{}, http.StatusBadGateway, errors.New("the grant could not be re-issued, so nothing was changed: " + err.Error())
 		}
 		grantSAID = g
 	}
@@ -509,9 +540,7 @@ func (s *CoreServer) handleSetAgentCapabilities(w http.ResponseWriter, r *http.R
 		updated, err = s.assetHandler.SetAgentGrantConstraints(id, candidate.GrantConstraints)
 	}
 	if err != nil {
-		jsonError(w, "the grant was re-issued, but the agent record was not updated: "+err.Error(),
-			http.StatusInternalServerError)
-		return
+		return regranted{}, http.StatusInternalServerError, errors.New("the grant was re-issued, but the agent record was not updated: " + err.Error())
 	}
 
 	// The token carries its own copy of the scopes, consulted on every call.
@@ -534,24 +563,13 @@ func (s *CoreServer) handleSetAgentCapabilities(w http.ResponseWriter, r *http.R
 	mcpTokensMu.Unlock()
 	if saveErr != nil {
 		// The record and grant already moved, so say plainly that the token did not.
-		jsonError(w, "ceiling and grant updated, but the agent token still carries the old scopes: "+saveErr.Error(),
-			http.StatusInternalServerError)
-		return
+		return regranted{}, http.StatusInternalServerError, errors.New("ceiling and grant updated, but the agent token still carries the old scopes: " + saveErr.Error())
 	}
 
 	log.Printf("[mcp] agent %s ceiling: %v -> %v (%d token(s) updated)",
 		updated.PairwiseAID, before.Capabilities, updated.Capabilities, touched)
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
-		"asset_id":       updated.ID,
-		"agent_aid":      updated.PairwiseAID,
-		"previous":       before.Capabilities,
-		"capabilities":   updated.Capabilities,
-		"tokens_updated": touched,
-		"grant_said":     grantSAID,
-		"grant_issued":   grantSAID != "",
-	})
+	s.withdrawLentGitHubAccessNoLongerGranted("the AI agent's grant changed")
+	return regranted{before: before, updated: *updated, grantSAID: grantSAID, touched: touched}, 0, nil
 }
 
 // ensureRegistry returns the issuer's TEL registry SAID, incepting one (backerless,

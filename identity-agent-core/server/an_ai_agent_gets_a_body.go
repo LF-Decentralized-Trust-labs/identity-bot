@@ -295,6 +295,7 @@ func (s *CoreServer) handleRevokeBody(w http.ResponseWriter, r *http.Request) {
 		s.recordBodyEvent(a, b, "removed", "ok", "removed by "+whoDecided(r))
 		// Whoever was watching it is no longer watching this AI agent.
 		s.screens().EndBody(b.Host, screenview.EndedBodyRemoved)
+		s.withdrawLentGitHubAccessNoLongerGranted("a machine was removed as an AI agent's body")
 	}
 	rec, _ := s.DataStore.GetCredential(b.CredentialSAID)
 	if rec == nil || rec.Status == "revoked" {

@@ -282,24 +282,45 @@ func homeIn(creds []string) (*brainHome, []string) {
 // withCredentials is the environment a brain's process is started with: this
 // machine's own, then env on top. When env carries a sign-in, every other
 // sign-in in this machine's environment is withheld, so the brain cannot fall
-// back on one somebody exported by hand.
+// back on one somebody exported by hand; and when it carries GitHub access,
+// every other way git and gh might find GitHub access is withheld the same way.
 func withCredentials(base, env []string) []string {
-	given := false
-	for _, kv := range env {
-		for _, name := range credentialVars {
+	groups := []struct {
+		names, prefixes []string
+	}{
+		{names: credentialVars},
+		{names: githubVars, prefixes: githubVarPrefixes},
+	}
+	in := func(kv string, names, prefixes []string) bool {
+		for _, name := range names {
 			if strings.HasPrefix(kv, name+"=") {
-				given = true
+				return true
+			}
+		}
+		for _, p := range prefixes {
+			if strings.HasPrefix(kv, p) {
+				return true
+			}
+		}
+		return false
+	}
+	var withheld [][2][]string
+	for _, g := range groups {
+		for _, kv := range env {
+			if in(kv, g.names, g.prefixes) {
+				withheld = append(withheld, [2][]string{g.names, g.prefixes})
+				break
 			}
 		}
 	}
-	if !given {
+	if len(withheld) == 0 {
 		return append(base, env...)
 	}
 	out := make([]string, 0, len(base)+len(env))
 next:
 	for _, kv := range base {
-		for _, name := range credentialVars {
-			if strings.HasPrefix(kv, name+"=") {
+		for _, g := range withheld {
+			if in(kv, g[0], g[1]) {
 				continue next
 			}
 		}

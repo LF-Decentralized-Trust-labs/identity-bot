@@ -9,6 +9,7 @@
 //	agent-host brain-user [USER]
 //	agent-host mcp
 //	agent-host brain-home -- <brain> <args>
+//	agent-host github-credential get
 //
 // Every command accepts --data-dir; the default is per operating system.
 //
@@ -47,6 +48,11 @@ func main() {
 	// program's.
 	if cmd == "brain-home" {
 		os.Exit(agenthost.ServeBrainHome(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
+	}
+	// Run by git as its credential helper, during a run lent GitHub access:
+	// the token comes from the brain's environment, never a file.
+	if cmd == "github-credential" {
+		os.Exit(agenthost.ServeGitHubCredential(os.Args[2:], os.Stdin, os.Stdout, os.Getenv))
 	}
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
 	dataDir := fs.String("data-dir", agenthost.DefaultDataDir(), "where this machine's key and state are kept")

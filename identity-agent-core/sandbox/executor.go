@@ -46,7 +46,16 @@ var builtinExecutorTypes = map[string]bool{
 	"ai_agent":     true,
 	"host_control": true,
 	"plugin":       true,
+	// A credential lent to an AI agent's body for one run, such as access to
+	// a code repository. It is never invoked: the grant decides what the
+	// Identity Agent lends, and the body uses what it was lent itself.
+	ExecutorLentCredential: true,
 }
+
+// ExecutorLentCredential is the executor type of a capability that is a
+// credential lent to an AI agent's body per run rather than an action
+// invoked through the gateway.
+const ExecutorLentCredential = "lent_credential"
 
 var (
 	executorMu       sync.RWMutex

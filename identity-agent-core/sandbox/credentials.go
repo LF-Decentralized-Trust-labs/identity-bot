@@ -43,7 +43,30 @@ type CredentialEntry struct {
 	// brainsignin.Ref gives. It has no match domains, so it is never injected
 	// into a request: it leaves the vault only when lent, sealed, to a body.
 	BrainSignIn *brainsignin.Record `json:"brain_sign_in,omitempty"`
+	// Kept is a secret the Identity Agent keeps for its own use, under a name
+	// KeptRef gives: what a service connected once gave it, or a short
+	// credential it lent and may have to withdraw. It has no match domains,
+	// so it is never injected into a request either.
+	Kept *KeptSecret `json:"kept,omitempty"`
 }
+
+// KeptSecret is a secret kept for the Identity Agent's own use, as its owner
+// wrote it: Kind says what it is, and Data is it.
+type KeptSecret struct {
+	Kind string          `json:"kind"`
+	Data json.RawMessage `json:"data"`
+}
+
+// keptPrefix begins the name of every secret the Identity Agent keeps for its
+// own use, so none can be confused with a service credential a person stored.
+const keptPrefix = "kept:"
+
+// KeptRef is the vault name of a secret the Identity Agent keeps for its own
+// use, by what it is for ("github-app").
+func KeptRef(name string) string { return keptPrefix + name }
+
+// IsKeptRef reports whether a vault name is one KeptRef gives.
+func IsKeptRef(s string) bool { return strings.HasPrefix(s, keptPrefix) && len(s) > len(keptPrefix) }
 
 type CredentialVault struct {
 	dataDir     string
@@ -355,6 +378,9 @@ func (cv *CredentialVault) SetCredential(service string, domains []string, heade
 	if brainsignin.IsRef(service) {
 		return fmt.Errorf("%q names an AI agent's brain sign-in, which is kept through that AI agent", service)
 	}
+	if IsKeptRef(service) {
+		return fmt.Errorf("%q names a secret this Identity Agent keeps for its own use", service)
+	}
 	cv.mu.Lock()
 	defer cv.mu.Unlock()
 	cv.ensureLoadedLocked()
@@ -412,7 +438,7 @@ func (cv *CredentialVault) GetAPIKey(service string) string {
 	cv.ensureLoadedLocked()
 
 	for _, e := range cv.effectiveEntriesLocked() {
-		if e.Service == service && e.BrainSignIn == nil {
+		if e.Service == service && e.BrainSignIn == nil && e.Kept == nil {
 			if auth, ok := e.Headers["Authorization"]; ok {
 				return strings.TrimPrefix(auth, "Bearer ")
 			}
@@ -428,8 +454,10 @@ func (cv *CredentialVault) ListServices() []string {
 
 	var services []string
 	for _, e := range cv.effectiveEntriesLocked() {
-		// A brain sign-in is managed through its AI agent, and listed there.
-		if e.BrainSignIn != nil {
+		// A brain sign-in is managed through its AI agent, and listed there;
+		// a secret kept for the Identity Agent's own use is managed where it
+		// is used.
+		if e.BrainSignIn != nil || e.Kept != nil {
 			continue
 		}
 		services = append(services, e.Service)
@@ -514,6 +542,67 @@ func (cv *CredentialVault) BrainSignIn(ref string) (brainsignin.Record, bool, er
 func (cv *CredentialVault) RemoveBrainSignIn(ref string) error {
 	if !brainsignin.IsRef(ref) {
 		return fmt.Errorf("%q is not a brain sign-in reference", ref)
+	}
+	return cv.RemoveCredential(ref)
+}
+
+// SetKept keeps v, as JSON, under ref (KeptRef), replacing whatever is there.
+// It is refused while the vault cannot be written, rather than kept anywhere
+// else.
+func (cv *CredentialVault) SetKept(ref, kind string, v any) error {
+	if !IsKeptRef(ref) {
+		return fmt.Errorf("%q is not the name of a secret kept for this Identity Agent's own use", ref)
+	}
+	data, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	cv.mu.Lock()
+	defer cv.mu.Unlock()
+	cv.ensureLoadedLocked()
+	if cv.loadErr != nil {
+		return cv.loadErr
+	}
+	key, err := cv.vaultKeyLocked()
+	if err != nil {
+		return fmt.Errorf("credential vault is locked — complete identity setup first (vault key unavailable): %w", err)
+	}
+	entry := CredentialEntry{Service: ref, MatchDomains: []string{}, Headers: map[string]string{},
+		Kept: &KeptSecret{Kind: kind, Data: data}}
+	for i, e := range cv.entries {
+		if e.Service == ref {
+			cv.entries[i] = entry
+			return cv.persistLocked(key)
+		}
+	}
+	cv.entries = append(cv.entries, entry)
+	return cv.persistLocked(key)
+}
+
+// Kept reads the secret kept under ref into out, and reports whether one of
+// that kind is there.
+func (cv *CredentialVault) Kept(ref, kind string, out any) (bool, error) {
+	cv.mu.Lock()
+	defer cv.mu.Unlock()
+	cv.ensureLoadedLocked()
+	if cv.loadErr != nil {
+		return false, cv.loadErr
+	}
+	for _, e := range cv.entries {
+		if e.Service == ref && e.Kept != nil {
+			if e.Kept.Kind != kind {
+				return false, fmt.Errorf("%q holds a %s, not a %s", ref, e.Kept.Kind, kind)
+			}
+			return true, json.Unmarshal(e.Kept.Data, out)
+		}
+	}
+	return false, nil
+}
+
+// RemoveKept deletes the secret kept under ref.
+func (cv *CredentialVault) RemoveKept(ref string) error {
+	if !IsKeptRef(ref) {
+		return fmt.Errorf("%q is not the name of a secret kept for this Identity Agent's own use", ref)
 	}
 	return cv.RemoveCredential(ref)
 }

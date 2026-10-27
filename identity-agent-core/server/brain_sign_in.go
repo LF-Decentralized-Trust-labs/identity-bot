@@ -94,18 +94,24 @@ func (s *CoreServer) recordLapsedLeases() {
 	}
 }
 
-// mayBorrow says why an AI agent's body may not be lent its sign-in: an AI
+// mayBorrow says why an AI agent's body may not be lent its sign-in.
+func (s *CoreServer) mayBorrow(a asset.Asset, cc sandbox.CallerContext) error {
+	return s.mayBeLent(a, cc, "its sign-in")
+}
+
+// mayBeLent says why an AI agent's body may not be lent anything for a run —
+// its brain's sign-in, or access to a service such as GitHub (what): an AI
 // agent whose grant is revoked or lapsed is lent nothing, though its body
 // still stands.
-func (s *CoreServer) mayBorrow(a asset.Asset, cc sandbox.CallerContext) error {
+func (s *CoreServer) mayBeLent(a asset.Asset, cc sandbox.CallerContext, what string) error {
 	if s.agentStatus(a.PairwiseAID) == "revoked" {
-		return errors.New("this AI agent's grant is revoked, so its sign-in is not lent")
+		return errors.New("this AI agent's grant is revoked, so " + what + " is not lent")
 	}
 	if s.agentGrantLapsed(a.PairwiseAID) {
-		return errors.New("this AI agent's grant has lapsed, so its sign-in is not lent")
+		return errors.New("this AI agent's grant has lapsed, so " + what + " is not lent")
 	}
 	if cc.NoScopesBecause != "" {
-		return errors.New("this AI agent may do nothing now (" + cc.NoScopesBecause + "), so its sign-in is not lent")
+		return errors.New("this AI agent may do nothing now (" + cc.NoScopesBecause + "), so " + what + " is not lent")
 	}
 	return nil
 }
@@ -329,7 +335,14 @@ func (s *CoreServer) keepBrainSignIn(a asset.Asset, rec brainsignin.Record, by s
 // recordBrainEvent writes what happened to an AI agent's sign-in into the
 // signed record, as the AI agent, never with the secret.
 func (s *CoreServer) recordBrainEvent(a asset.Asset, cc sandbox.CallerContext, event, status, why string) {
-	log.Printf("[brain] %s for AI agent %s: %s (%s)", event, a.PairwiseAID, why, status)
+	s.recordLentEvent(a, cc, "agent.brain.sign_in."+event, status, why)
+}
+
+// recordLentEvent writes what happened to something lent to an AI agent's
+// body — its brain's sign-in, or access to a service — into the signed record,
+// as the AI agent, naming the body, and never with the secret.
+func (s *CoreServer) recordLentEvent(a asset.Asset, cc sandbox.CallerContext, event, status, why string) {
+	log.Printf("[lent] %s for AI agent %s: %s (%s)", event, a.PairwiseAID, why, status)
 	if s.SandboxManager == nil {
 		return
 	}
@@ -338,7 +351,7 @@ func (s *CoreServer) recordBrainEvent(a asset.Asset, cc sandbox.CallerContext, e
 		cc.DelegationChain = []string{a.PairwiseAID, a.DelegatorAID}
 	}
 	cc.Reason = why
-	s.SandboxManager.RecordGovernanceEvent(cc, "agent.brain.sign_in."+event, status)
+	s.SandboxManager.RecordGovernanceEvent(cc, event, status)
 }
 
 // brainSignInShown is an AI agent's sign-in as a list of AI agents shows it,

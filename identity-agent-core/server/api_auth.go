@@ -91,6 +91,11 @@ var publicRoutes = map[string]string{
 	// viewing of that body.
 	routeBodyScreen:      "an AI agent's body saying what screen it has and waiting to be watched, sealed and signed",
 	routeBodyScreenFrame: "an AI agent's body sending a picture of its screen while watched, sealed and signed",
+	// A body borrowing GitHub access for one run, and giving it back. Each
+	// handler admits only a sealed request a live body signed; the token
+	// travels back sealed to that body's keys.
+	"POST /api/agent-host/github":        "an AI agent's body borrowing GitHub access for one run, sealed and signed",
+	"POST /api/agent-host/github/return": "an AI agent's body giving back the GitHub access it borrowed, sealed and signed",
 
 	// --- carrying a request nothing in the middle can read ---
 	// Open in the same sense the message endpoint is open: what arrives is an
@@ -722,6 +727,14 @@ var sessionForbidden = map[string]string{
 	// cannot use this Identity Agent to reach into the network it sits on.
 	"POST /api/mcp/brain-sign-in/test":             "checking a sign-in makes this Identity Agent reach an address the caller names",
 	"POST /api/mcp/agents/{id}/brain-sign-in/test": "checking a sign-in makes this Identity Agent reach the address it names",
+	// The organisation's GitHub App: its private key lets this Identity Agent
+	// make tokens for the organisation's repositories, so connecting one,
+	// disconnecting it and using it are for the owner's own app. Granting an
+	// AI agent repositories re-issues its grant, which outlives the session.
+	"PUT /api/github":                 "connecting a GitHub App keeps a key that makes tokens for the organisation's repositories, after the session ends",
+	"DELETE /api/github":              "disconnecting the GitHub App ends every AI agent's access to the organisation's repositories",
+	"GET /api/github/repositories":    "listing the repositories makes this Identity Agent use the GitHub App's key",
+	"PUT /api/mcp/agents/{id}/github": "granting an AI agent repositories re-issues its grant, which outlives the session that changed it",
 	// An enrolment string, and approving a body, let a machine speak as an AI
 	// agent from then on — standing access that outlives the session.
 	"POST /api/mcp/agents/{id}/body-enrolment":       "an enrolment string lets a machine ask to speak as an AI agent, after the session that made it ends",
