@@ -106,7 +106,7 @@ func (s *CoreServer) storeInboundAsNotification(fromAID, toAID string, jwm *didc
 
 // handleGetNotifications lists what has arrived, newest first.
 func (s *CoreServer) handleGetNotifications(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
+	if !s.isOwnerOrItsController(r) {
 		jsonError(w, "notifications are owner only", http.StatusForbidden)
 		return
 	}
@@ -136,7 +136,7 @@ func (s *CoreServer) handleGetNotifications(w http.ResponseWriter, r *http.Reque
 
 // handleSetNotificationStatus marks one read or dismissed.
 func (s *CoreServer) handleSetNotificationStatus(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
+	if !s.isOwnerOrItsController(r) {
 		jsonError(w, "notifications are owner only", http.StatusForbidden)
 		return
 	}

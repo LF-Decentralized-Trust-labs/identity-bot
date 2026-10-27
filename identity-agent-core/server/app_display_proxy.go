@@ -128,11 +128,7 @@ func (s *CoreServer) isAConversationRead(method, p string) bool {
 // the gate admitted the request as the owner's, or as a controller's acting
 // for them. A caller admitted only for holding a scope is neither.
 func (s *CoreServer) mayReadTheOwnersConversations(r *http.Request) bool {
-	if theGateAdmittedTheOwner(r) {
-		return true
-	}
-	_, isAController := TheControllerThatAsked(r)
-	return isAController
+	return s.isOwnerOrItsController(r)
 }
 
 // isACapabilityCall reports whether path, as an app's server would read it,

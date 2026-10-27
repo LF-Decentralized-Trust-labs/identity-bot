@@ -222,9 +222,10 @@ func (s *CoreServer) askWitnessForEndpoint(base, contactAID string) (*recoveredE
 
 // mountEndpointRoutes exposes publication and recovery.
 //
-// Both are owner-only. Publication moves where this agent claims to be, and
-// recovery discloses which contacts this agent is trying to reach — the second
-// is the quieter of the two and the easier to leave open by accident.
+// Both are for the owner and the machines the owner authorised, and nobody
+// else. Publication moves where one of this agent's pairwise identities claims
+// to be, and recovery discloses which contacts this agent is trying to reach —
+// the second is the quieter of the two and the easier to leave open by accident.
 func (s *CoreServer) mountEndpointRoutes(r chi.Router) {
 	r.Post("/endpoint/publish", s.handlePublishEndpoint)
 	r.Get("/endpoint/recover/{contact_aid}", s.handleRecoverEndpoint)
@@ -233,7 +234,7 @@ func (s *CoreServer) mountEndpointRoutes(r chi.Router) {
 // handlePublishEndpoint signs and publishes where one of this agent's own
 // pairwise identities can currently be reached.
 func (s *CoreServer) handlePublishEndpoint(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
+	if !s.isOwnerOrItsController(r) {
 		writeError(w, http.StatusForbidden, "owner only", "publishing an address is the owner's decision")
 		return
 	}
@@ -262,7 +263,7 @@ func (s *CoreServer) handlePublishEndpoint(w http.ResponseWriter, r *http.Reques
 // handleRecoverEndpoint asks a contact's witnesses where that contact is now,
 // for use when the address on file has stopped working.
 func (s *CoreServer) handleRecoverEndpoint(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
+	if !s.isOwnerOrItsController(r) {
 		writeError(w, http.StatusForbidden, "owner only",
 			"which contacts this agent is looking for is the owner's business")
 		return

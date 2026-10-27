@@ -687,7 +687,9 @@ func (s *CoreServer) handlePodmanSetup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *CoreServer) handlePodmanSetupStatus(w http.ResponseWriter, r *http.Request) {
-	if !isLocalRequest(r) {
+	// Reading how far setup got is open to the owner's own machines; starting
+	// it is not (controllerOwnerOnly).
+	if !isLocalRequest(r) && !s.isOwnerOrItsController(r) {
 		jsonError(w, "Podman setup status is only available from the local machine", http.StatusForbidden)
 		return
 	}

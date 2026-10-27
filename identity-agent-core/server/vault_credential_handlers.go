@@ -9,8 +9,9 @@ import (
 
 // Vault credential management: store a provider credential ONCE per service with
 // its egress match domains; every capability whose egress names that service then
-// uses it, injected at egress only — callers never see it. Local owner only, like
-// all keystore management. The generic LLM-key endpoint cannot set match domains,
+// uses it, injected at egress only — callers never see it. The owner, or a machine
+// the owner authorised (ADR-050: storing and removing a service key is open to
+// a controller). The generic LLM-key endpoint cannot set match domains,
 // which left non-LLM providers (e.g. Cloudflare) uninjectable; this endpoint is
 // the complete form.
 
@@ -24,7 +25,7 @@ type vaultCredentialRequest struct {
 // handleSetVaultCredential stores/replaces one service credential in the
 // encrypted vault.
 func (s *CoreServer) handleSetVaultCredential(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
+	if !s.isOwnerOrItsController(r) {
 		jsonError(w, "credential management is for the owner of this agent", http.StatusForbidden)
 		return
 	}
@@ -58,7 +59,7 @@ func (s *CoreServer) handleSetVaultCredential(w http.ResponseWriter, r *http.Req
 
 // handleListVaultCredentials lists configured service names only — never keys.
 func (s *CoreServer) handleListVaultCredentials(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
+	if !s.isOwnerOrItsController(r) {
 		jsonError(w, "credential management is for the owner of this agent", http.StatusForbidden)
 		return
 	}
@@ -75,7 +76,7 @@ func (s *CoreServer) handleListVaultCredentials(w http.ResponseWriter, r *http.R
 
 // handleDeleteVaultCredential removes one service credential.
 func (s *CoreServer) handleDeleteVaultCredential(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
+	if !s.isOwnerOrItsController(r) {
 		jsonError(w, "credential management is for the owner of this agent", http.StatusForbidden)
 		return
 	}

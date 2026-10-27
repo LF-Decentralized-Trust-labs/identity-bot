@@ -119,7 +119,7 @@ func (s *CoreServer) handleWitnessKelTip(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *CoreServer) handleWitnessStatus(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
+	if !s.isOwnerOrItsController(r) {
 		writeError(w, http.StatusForbidden, "owner only", "internal route")
 		return
 	}

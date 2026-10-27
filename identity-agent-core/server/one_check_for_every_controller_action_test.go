@@ -191,6 +191,13 @@ func TestTheOwnerOnlyListIsTheOneTheADRRecords(t *testing.T) {
 		"POST /api/signing-requests/{id}/fulfil",
 		"POST /api/signing-requests/sign-for-another",
 		"POST /api/signing-requests/adopt",
+		"POST /api/didcomm/peers",
+		"POST /api/providers",
+		"POST /api/capability-registry/packs",
+		"POST /api/capability-registry/{id}/enabled",
+		"DELETE /api/capability-registry/{id}",
+		"POST /api/sealed/send",
+		"POST /api/sandbox/podman/setup",
 	}
 	have := make([]string, 0, len(controllerOwnerOnly))
 	for route, why := range controllerOwnerOnly {

@@ -246,9 +246,9 @@ func (s *CoreServer) ensureLocalPeer(aid string) (peerRecord, error) {
 	return rec, err
 }
 
-// handleListDIDCommPeers lists the registered DIDComm peers (owner only).
+// handleListDIDCommPeers lists the registered DIDComm peers (the owner and its controllers).
 func (s *CoreServer) handleListDIDCommPeers(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
+	if !s.isOwnerOrItsController(r) {
 		jsonError(w, "peers are owner only", http.StatusForbidden)
 		return
 	}
@@ -271,7 +271,7 @@ func (s *CoreServer) handleGetDIDCommDID(w http.ResponseWriter, r *http.Request)
 		jsonError(w, "aid is required", http.StatusBadRequest)
 		return
 	}
-	if !s.hasKeySet(aid) && !s.isOwner(r) {
+	if !s.hasKeySet(aid) && !s.isOwnerOrItsController(r) {
 		// A stranger cannot make this agent generate keys for an arbitrary
 		// identifier — that is unbounded work on demand. But refusing outright
 		// broke the case this endpoint exists for: an agent that has never sent
@@ -350,9 +350,9 @@ func (s *CoreServer) handleRegisterDIDCommPeer(w http.ResponseWriter, r *http.Re
 }
 
 // handleSendDIDCommMessage packs an authcrypt envelope from a local AID to a registered
-// peer and delivers it over direct HTTPS to the peer's endpoint (owner only).
+// peer and delivers it over direct HTTPS to the peer's endpoint (the owner and its controllers).
 func (s *CoreServer) handleSendDIDCommMessage(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
+	if !s.isOwnerOrItsController(r) {
 		jsonError(w, "sending is owner only", http.StatusForbidden)
 		return
 	}
@@ -542,11 +542,11 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(map[string]any{"status": "accepted", "message_id": jwm.ID, "type": jwm.Type})
 }
 
-// handleGetDIDCommInbox returns received messages (owner only).
+// handleGetDIDCommInbox returns received messages (the owner and its controllers).
 func (s *CoreServer) handleGetDIDCommInbox(w http.ResponseWriter, r *http.Request) {
 	// The owner, or a machine the owner authorised, which signed this request with
 	// the key it was granted and reads the inbox on the owner's behalf.
-	if _, ok := TheControllerThatAsked(r); !ok && !s.isOwner(r) {
+	if !s.isOwnerOrItsController(r) {
 		jsonError(w, "inbox is owner only", http.StatusForbidden)
 		return
 	}

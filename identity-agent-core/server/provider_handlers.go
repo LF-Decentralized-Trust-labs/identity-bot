@@ -31,11 +31,11 @@ type providerView struct {
 
 // handleListProviders reports every known operator and what it offers.
 //
-// Owner-only. The list itself is not secret — it ships with the binary — but
+// The owner and its controllers only. The list itself is not secret — it ships with the binary — but
 // which operators an agent knows about is a hint at what it uses, and there is
 // no reason to volunteer it.
 func (s *CoreServer) handleListProviders(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
+	if !s.isOwnerOrItsController(r) {
 		writeError(w, http.StatusForbidden, "owner only", "internal route")
 		return
 	}

@@ -46,13 +46,20 @@ opens them to a controller. They are:
 - who may act: inviting and redeeming signers, adding or removing a controller,
   and approving a browser login;
 - who the owner is: the identity record, key events, contact records and the
-  routes that write them, the machine-owner identity, its signatures and
-  adopting a machine, this computer's enclave signing, and which half this
-  computer runs.
+  routes that write them, the peer records a sealed request's sender is read
+  from, the machine-owner identity, its signatures and adopting a machine, this
+  computer's enclave signing, and which half this computer runs;
+- what the key log is checked against and what the gateway trusts: adding a
+  witness or watcher provider, and importing, enabling or deleting a capability;
+- speaking as the identity to another Identity Agent by a sealed request, and
+  installing software on this computer.
 
 The list lives in one place, `controllerOwnerOnly` in
 `identity-agent-core/server/what_a_controller_may_reach.go`, with a one-line
-reason for each.
+reason for each. Handlers do not re-check ownership for actions the gate opened
+to controllers: a handler that needs to know its caller acts for the owner asks
+`isOwnerOrItsController`, and an action that must stay closed to a controller
+goes on this list instead.
 
 **Every other action a controller takes, and every capability an AI agent
 invokes, passes one check.** `sandbox.MayThisPersonDoThis` asks two questions in

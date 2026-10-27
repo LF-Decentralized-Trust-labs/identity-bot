@@ -880,7 +880,7 @@ func (s *CoreServer) askAgainForWithdrawals() {
 // handleAskAgainToWithdraw asks the device again to withdraw a grant that is
 // not wanted here, after it refused.
 func (s *CoreServer) handleAskAgainToWithdraw(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
+	if !s.isOwnerOrItsController(r) {
 		writeError(w, http.StatusForbidden, "owner only", "only this agent's owner asks for a withdrawal")
 		return
 	}
