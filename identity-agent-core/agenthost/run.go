@@ -33,6 +33,11 @@ type RunOptions struct {
 	// SignInWait is how long a run waits for its AI agent's sign-in when every
 	// run that sign-in allows is in use; ten minutes when zero.
 	SignInWait time.Duration
+	// Screen is this machine's screen, offered to the people allowed to
+	// watch it, and ScreenMode what they may do with it. A nil Screen says
+	// the machine has none.
+	Screen     Screen
+	ScreenMode ScreenMode
 }
 
 // agentProfile is how the AI agent is meant to operate, as its Identity Agent
@@ -135,6 +140,14 @@ func (h *Host) Run(ctx context.Context, o RunOptions) error {
 	}
 	defer tools.close()
 	logf("[agent-host] %s is listening, with %s as its brain", firstNonEmpty(p.Name, "this AI agent"), brain.Name())
+	if !o.Once {
+		// The screen is offered on its own wait, beside the inbox: a brain's
+		// run can hold the inbox for minutes, and watching it work is the
+		// point.
+		screenCtx, stopScreen := context.WithCancel(ctx)
+		defer stopScreen()
+		go h.ShowScreen(screenCtx, o.Screen, o.ScreenMode, o.Log)
+	}
 
 	backoff := time.Second
 	for {

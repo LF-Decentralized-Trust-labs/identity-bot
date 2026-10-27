@@ -188,9 +188,14 @@ var controllerOwnerOnly = map[string]string{
 }
 
 // controllerMinimumScore names the actions that need a score other than the
-// default of 80, keyed the same way. Empty today: every action open to a
-// controller needs 80. Kept so an action can be set higher, or lower, without
-// changing how the decision is made.
+// default of 80, keyed the same way, so an action can be set higher, or lower,
+// without changing how the decision is made.
+//
+// Taking control of an AI agent's screen (routeScreenControl, routeScreenInput)
+// is its own action so that it can be set to need a higher score than watching
+// without changing watching; it is not set here, so it needs the default like
+// everything else (ADR-053). This table is the only place a minimum is set
+// today; a setting the owner can change is future work.
 var controllerMinimumScore = map[string]int{}
 
 // isOwnerOnly reports whether this route is closed to a controller at any
@@ -228,6 +233,19 @@ func mayThisControllerDoThis(
 		sandbox.Action{Name: method + " " + pattern, MinimumScore: controllerMinimumScore[method+" "+pattern]},
 		sandbox.Person{AID: who, Authenticated: authenticated},
 	)
+}
+
+// whyAControllerWasRefused is the reason code for a refusal by
+// mayThisControllerDoThis, so an app can say it in its own words.
+func whyAControllerWasRefused(method, pattern string, authenticated authprovider.Result) string {
+	if _, closed := isOwnerOnly(method, pattern); closed {
+		return reasonOwnerOnly
+	}
+	a := sandbox.Action{Name: method + " " + pattern, MinimumScore: controllerMinimumScore[method+" "+pattern]}
+	if a.MinimumScore >= 0 && (!authenticated.Measured || authenticated.Score < a.TheScoreItNeeds()) {
+		return reasonScoreTooLow
+	}
+	return reasonNotAllowed
 }
 
 // howSureWeAreItIsThem is the authentication the one check is given for a

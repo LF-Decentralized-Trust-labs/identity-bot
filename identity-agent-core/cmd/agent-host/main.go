@@ -3,6 +3,7 @@
 //	agent-host enrol <enrolment string> [--placement computer|vm|cloud|device]
 //	agent-host status
 //	agent-host run [--brain claude-code|codex|grok] [--brain-path PATH] [--brain-user USER] [--workspace DIR]
+//	               [--screen control|watch|off] [--display :0] [--display-allow-network]
 //	agent-host move <new address of the same Identity Agent>
 //	agent-host call <METHOD> <path> [json body]
 //	agent-host brain-user [USER]
@@ -10,11 +11,19 @@
 //	agent-host brain-home -- <brain> <args>
 //
 // Every command accepts --data-dir; the default is per operating system.
+//
+// --screen says what the people the Identity Agent allows may do with this
+// machine's screen. control, the default, lets them watch it and take control
+// of it; watch makes the machine watch-only, ignoring any click or key it is
+// sent; off offers no screen at all. Whoever is in control can press any key
+// combination a person at the machine could, including switching to another
+// virtual terminal or ending the graphical session.
 package main
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -47,6 +56,12 @@ func main() {
 	brainPath := fs.String("brain-path", "", "the full path of the brain's program")
 	brainUser := fs.String("brain-user", "", "the operating-system user the brain runs as")
 	workspace := fs.String("workspace", "", "the brain's working directory")
+	screenMode := fs.String("screen", "control", "what people allowed to may do with this machine's screen: "+
+		"control (watch it, and take control when the Identity Agent lets them, with any key combination), "+
+		"watch (only watch it: this machine is watch-only and ignores every click and key) or off")
+	display := fs.String("display", "", "the X display to show, when it is not $DISPLAY")
+	displayAllowNetwork := fs.Bool("display-allow-network", false, "show an X display on another machine (host:N), "+
+		"whose pictures and keys cross the network unencrypted")
 	// Flags may come before or after the arguments, as people type them.
 	var args []string
 	rest := os.Args[2:]
@@ -112,9 +127,27 @@ func main() {
 		} else if *brainUser != "" {
 			fail(fmt.Errorf("--brain-user needs --brain and --brain-path: the brain's program, installed for that user"))
 		}
+		mode, err := agenthost.ParseScreenMode(*screenMode)
+		if err != nil {
+			fail(err)
+		}
+		var scr agenthost.Screen
+		if mode != agenthost.ScreenOff {
+			if scr, err = agenthost.OpenScreen(*display, *displayAllowNetwork); err != nil {
+				if errors.Is(err, agenthost.ErrScreenNotYet) {
+					fmt.Fprintln(os.Stderr, "agent-host: "+agenthost.ErrScreenNotYet.Error())
+				} else {
+					fmt.Fprintf(os.Stderr, "agent-host: not offering a screen: %v\n", err)
+				}
+				scr = nil
+			} else {
+				defer scr.Close()
+			}
+		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		if err := h.Run(ctx, agenthost.RunOptions{Brain: brain, Runner: runner, Workspace: *workspace}); err != nil {
+		if err := h.Run(ctx, agenthost.RunOptions{Brain: brain, Runner: runner, Workspace: *workspace,
+			Screen: scr, ScreenMode: mode}); err != nil {
 			fail(err)
 		}
 	case "move":
@@ -232,6 +265,9 @@ func usage() {
 		"  agent-host enrol <enrolment string> [--placement computer|vm|cloud|device]\n"+
 		"  agent-host status\n"+
 		"  agent-host run [--brain claude-code|codex|grok] [--brain-path PATH] [--brain-user USER] [--workspace DIR]\n"+
+		"                 [--screen control|watch|off] [--display :0] [--display-allow-network]\n"+
+		"                 --screen control (the default) lets people allowed to watch and take control;\n"+
+		"                 --screen watch makes this machine watch-only; --screen off offers no screen\n"+
 		"  agent-host move <new address of the same Identity Agent>\n"+
 		"  agent-host call <METHOD> <path> [json body]\n"+
 		"  agent-host brain-user [USER]\n"+
