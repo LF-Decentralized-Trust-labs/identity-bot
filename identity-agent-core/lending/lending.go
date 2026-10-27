@@ -215,12 +215,13 @@ func pending(all []Lend) []part {
 // withdraw tries each part at its service, without the ledger locked: a
 // service out of reach must not hold up a lend of another kind. What was
 // withdrawn is then taken off the ledger. It reports, by lend, whether every
-// part of it tried was withdrawn.
-func (l *Ledger) withdraw(ctx context.Context, parts []part, now time.Time) map[string]bool {
+// part of it tried was withdrawn, and, by kind, how many parts were not.
+func (l *Ledger) withdraw(ctx context.Context, parts []part, now time.Time) (map[string]bool, map[string]int) {
 	if len(parts) == 0 {
-		return nil
+		return nil, nil
 	}
 	all := map[string]bool{}
+	failed := map[string]int{}
 	var done []part
 	for _, p := range parts {
 		svc, ok := l.services[p.kind]
@@ -233,19 +234,20 @@ func (l *Ledger) withdraw(ctx context.Context, parts []part, now time.Time) map[
 		}
 		if err := svc.Withdraw(ctx, p.data); err != nil {
 			all[p.lend] = false
+			failed[p.kind]++
 			continue
 		}
 		done = append(done, p)
 	}
 	if len(done) == 0 {
-		return all
+		return all, failed
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	lends, err := l.load()
 	if err != nil {
 		// Left to withdraw again: the next sweep finds them still queued.
-		return all
+		return all, failed
 	}
 	for i := range lends {
 		var left []json.RawMessage
@@ -265,7 +267,7 @@ func (l *Ledger) withdraw(ctx context.Context, parts []part, now time.Time) map[
 	}
 	lends, _, _ = l.tidy(lends, now)
 	_ = l.save(lends)
-	return all
+	return all, failed
 }
 
 // settle marks each ended lend withdrawn or not, from what withdraw reported.
@@ -345,7 +347,8 @@ func (l *Ledger) Lend(ctx context.Context, x Lend, lim Limit, now time.Time) (Le
 		return Lend{}, ended, err
 	}
 	l.mu.Unlock()
-	return x, settle(ended, l.withdraw(ctx, queued, now)), nil
+	withdrawn, _ := l.withdraw(ctx, queued, now)
+	return x, settle(ended, withdrawn), nil
 }
 
 // Renew extends an open lend host holds for agent until now+ttl.
@@ -458,7 +461,7 @@ func (l *Ledger) returnWhere(ctx context.Context, match func(Lend) bool, now tim
 		return nil, err
 	}
 	l.mu.Unlock()
-	withdrawn := l.withdraw(ctx, queued, now)
+	withdrawn, _ := l.withdraw(ctx, queued, now)
 	for i := range got {
 		if ok, tried := withdrawn[got[i].Lend.ID]; tried {
 			got[i].Withdrawn = ok
@@ -560,38 +563,22 @@ func (l *Ledger) Sweep(ctx context.Context, now time.Time) ([]Ended, error) {
 }
 
 // EndAll ends every open lend of kind, why, and withdraws it. It returns what
-// ended, and how many lends of kind still hold something their service could
-// not be reached to withdraw yet.
+// ended, and how many parts of kind — a lend can hold more than one — its
+// service could not be reached to withdraw yet.
 func (l *Ledger) EndAll(ctx context.Context, kind, why string, now time.Time) ([]Ended, int, error) {
-	ended, withdrawn, err := l.endWhere(ctx, func(x Lend) *Narrowed {
+	ended, failed, err := l.endWhere(ctx, func(x Lend) *Narrowed {
 		if x.Kind != kind {
 			return nil
 		}
 		return &Narrowed{Why: why}
 	}, now)
-	left := 0
-	for id, ok := range withdrawn {
-		if !ok && withdrawnKind(ended, id, kind) {
-			left++
-		}
-	}
-	return ended, left, err
-}
-
-func withdrawnKind(ended []Ended, id, kind string) bool {
-	for _, e := range ended {
-		if e.Lend.ID == id {
-			return e.Lend.Kind == kind
-		}
-	}
-	// A lend that had ended before, and was only tried again.
-	return true
+	return ended, failed[kind], err
 }
 
 // endWhere ends or narrows each open lend check says to, then withdraws
-// everything waiting to be. It also says, by lend, whether what was tried was
-// withdrawn.
-func (l *Ledger) endWhere(ctx context.Context, check func(Lend) *Narrowed, now time.Time) ([]Ended, map[string]bool, error) {
+// everything waiting to be. It also says, by kind, how many parts tried were
+// not withdrawn.
+func (l *Ledger) endWhere(ctx context.Context, check func(Lend) *Narrowed, now time.Time) ([]Ended, map[string]int, error) {
 	l.mu.Lock()
 	all, err := l.load()
 	if err != nil {
@@ -627,8 +614,8 @@ func (l *Ledger) endWhere(ctx context.Context, check func(Lend) *Narrowed, now t
 		}
 	}
 	l.mu.Unlock()
-	withdrawn := l.withdraw(ctx, queued, now)
-	return settle(ended, withdrawn), withdrawn, nil
+	withdrawn, failed := l.withdraw(ctx, queued, now)
+	return settle(ended, withdrawn), failed, nil
 }
 
 // Import adds lends kept elsewhere before this ledger, each once: a lend

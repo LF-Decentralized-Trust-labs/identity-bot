@@ -582,14 +582,10 @@ func (s *CoreServer) githubLendService() lending.Service {
 		},
 		Withdraw: func(ctx context.Context, part json.RawMessage) error {
 			var t githubapp.Token
-			if err := json.Unmarshal(part, &t); err != nil || !time.Now().Before(t.ExpiresAt) {
+			if err := json.Unmarshal(part, &t); err != nil {
 				return nil
 			}
-			gh, err := s.githubClient()
-			if err != nil {
-				return err
-			}
-			if err := gh.Revoke(ctx, t.Token); err != nil {
+			if err := s.revokeToken(ctx, t); err != nil {
 				log.Printf("[github] a token could not be withdrawn at GitHub yet: %v", err)
 				return err
 			}
@@ -657,14 +653,23 @@ func (s *CoreServer) githubLendCheck(x lending.Lend) *lending.Narrowed {
 	return &lending.Narrowed{Why: why, Keep: b, Withdraw: gone}
 }
 
-// revokeTokens withdraws tokens at GitHub that were never handed over.
-func (s *CoreServer) revokeTokens(ctx context.Context, toks []githubapp.Token) {
+// revokeToken withdraws one token at GitHub. One that has lapsed already is
+// let go: there is nothing left to withdraw.
+func (s *CoreServer) revokeToken(ctx context.Context, t githubapp.Token) error {
+	if !time.Now().Before(t.ExpiresAt) {
+		return nil
+	}
 	gh, err := s.githubClient()
 	if err != nil {
-		return
+		return err
 	}
+	return gh.Revoke(ctx, t.Token)
+}
+
+// revokeTokens withdraws tokens at GitHub that were never handed over.
+func (s *CoreServer) revokeTokens(ctx context.Context, toks []githubapp.Token) {
 	for _, t := range toks {
-		if err := gh.Revoke(ctx, t.Token); err != nil {
+		if err := s.revokeToken(ctx, t); err != nil {
 			log.Printf("[github] a token never handed over could not be withdrawn at GitHub; it lapses within the hour: %v", err)
 		}
 	}

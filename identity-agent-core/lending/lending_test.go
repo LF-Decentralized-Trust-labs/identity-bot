@@ -283,18 +283,19 @@ func TestABodyHoldsOneTokenLendAtATime(t *testing.T) {
 	}
 }
 
-// EndAll ends every lend of one kind and says how many could not be
-// withdrawn yet.
+// EndAll ends every lend of one kind and says how many of its parts could not
+// be withdrawn yet: parts, not lends, as one lend can hold two tokens.
 func TestEndingEveryLendOfAKind(t *testing.T) {
 	var withdrawn []string
 	unreachable := true
-	l := New(&memStore{}, signIns, tokenService(map[string]bool{"t": true}, &withdrawn, &unreachable))
+	l := New(&memStore{}, signIns, tokenService(map[string]bool{"t": true, "u": true, "v": true}, &withdrawn, &unreachable))
 	now := time.Now()
-	lendTokens(t, l, "h", now, "t")
+	lendTokens(t, l, "h", now, "t", "u")
+	lendTokens(t, l, "h2", now, "v")
 	_, _, _ = lendSignIn(t, l, "a", "p", "h", 0, now)
 	_, left, err := l.EndAll(context.Background(), "tokens", "disconnected", now)
-	if err != nil || left != 1 {
-		t.Fatalf("left %d %v", left, err)
+	if err != nil || left != 3 {
+		t.Fatalf("left %d, want 3 tokens: %v", left, err)
 	}
 	if n := l.Count(func(x Lend) bool { return x.Kind == "sign_in" }, now); n != 1 {
 		t.Fatal("ending one kind ended another")
