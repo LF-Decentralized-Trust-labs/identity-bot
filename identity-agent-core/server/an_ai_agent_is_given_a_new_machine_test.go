@@ -41,6 +41,8 @@ func fakeMaker(t *testing.T) (path, dir string) {
 	script := "#!/bin/sh\necho \"$@ for=$AGENT_MACHINE_FOR\" >> " + dir + "/calls\n" +
 		"if [ \"$1\" = enrol ]; then\n" +
 		"  cat > " + dir + "/enrolment.tmp && mv " + dir + "/enrolment.tmp " + dir + "/enrolment\n" +
+		// A careless program echoes what it was given.
+		"  echo \"received $(cat " + dir + "/enrolment)\"\n" +
 		"  i=0; while [ ! -f " + dir + "/words ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i+1)); done\n" +
 		"  echo \"words: $(cat " + dir + "/words)\"\n" +
 		"fi\n"
@@ -183,6 +185,12 @@ func TestANewMachineIsMadeEnrolledApprovedAndDestroyed(t *testing.T) {
 	want := "make " + j.MachineName + " screen for=Designer\nenrol " + j.MachineName + " for=Designer\nremove " + j.MachineName + " for=Designer\n"
 	if string(calls) != want {
 		t.Fatalf("the program was called:\n%s\nwant:\n%s", calls, want)
+	}
+	// The enrolment string the program echoed is not kept in the provider's log.
+	logged, err := os.ReadFile(filepath.Join(providerHost.DataDir, "machines", j.MachineName+".log"))
+	if err != nil || strings.Contains(string(logged), strings.TrimSpace(string(str))) ||
+		!strings.Contains(string(logged), "received [the enrolment string]") {
+		t.Fatalf("the provider's log (%v):\n%s", err, logged)
 	}
 	for _, e := range []string{"agent.machine.requested", "agent.machine.enrolment", "agent.machine.enrolling", "agent.machine.removing", "agent.machine.removed"} {
 		if len(governanceRows(t, w, e)) != 1 {

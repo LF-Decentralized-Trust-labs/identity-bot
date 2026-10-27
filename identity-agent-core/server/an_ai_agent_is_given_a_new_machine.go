@@ -422,7 +422,8 @@ func (s *CoreServer) handleProviderReports(w http.ResponseWriter, r *http.Reques
 // handleProviderEnrolment gives a provider the one-time enrolment string for a
 // machine it is making: the same string a person would be given, good once,
 // for that AI agent only. The machine still waits for a person to approve its
-// words.
+// words. theProvider admits only a request the sealed transport opened, and
+// its answer goes back sealed to the same body's keys, as a lent token does.
 func (s *CoreServer) handleProviderEnrolment(w http.ResponseWriter, r *http.Request) {
 	b, _, ok := s.theProvider(w, r)
 	if !ok {

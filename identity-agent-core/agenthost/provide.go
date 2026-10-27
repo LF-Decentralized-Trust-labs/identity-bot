@@ -40,6 +40,11 @@ import (
 //	PROGRAM remove NAME       destroy the machine. Exit 0 when it is gone,
 //	                          including when it never existed.
 //
+// AGENT_MACHINE_FOR in the program's environment is the AI agent's display
+// name, which a person typed: the program must treat it as text, never put it
+// into a shell command. NAME and NEEDS are only ever letters, digits, dashes
+// and commas, checked on both sides.
+//
 // How a machine is made — a virtual machine, a container, a cloud instance —
 // is the program's business. This side only carries the work, and never makes
 // a machine a body: a person still compares its six words and approves it.
@@ -256,7 +261,7 @@ func (p *provider) make(ctx context.Context, j machineRequest) {
 		fail(fmt.Sprintf("no enrolment string: %v", err))
 		return
 	}
-	out, err := p.run(ctx, "enrol", j, strings.NewReader(e.Enrolment+"\n"))
+	out, err := p.runWithSecret(ctx, "enrol", j, e.Enrolment)
 	if err != nil {
 		fail("enrolling it: " + err.Error())
 		return
@@ -334,9 +339,20 @@ func (p *provider) report(ctx context.Context, j machineRequest, state, detail s
 	return false
 }
 
+// runWithSecret calls the program with a secret on its standard input. The
+// secret is taken out of whatever the program prints before that is kept or
+// reported, in case the program echoes it.
+func (p *provider) runWithSecret(ctx context.Context, verb string, j machineRequest, secret string) (string, error) {
+	return p.runRedacting(ctx, verb, j, strings.NewReader(secret+"\n"), secret)
+}
+
 // run calls the program, keeping what it printed in a log beside this
 // machine's state, and returns it. A failure carries the program's last line.
 func (p *provider) run(ctx context.Context, verb string, j machineRequest, stdin io.Reader, extra ...string) (string, error) {
+	return p.runRedacting(ctx, verb, j, stdin, "", extra...)
+}
+
+func (p *provider) runRedacting(ctx context.Context, verb string, j machineRequest, stdin io.Reader, secret string, extra ...string) (string, error) {
 	args := append([]string{verb, j.MachineName}, extra...)
 	cmd := exec.CommandContext(ctx, p.opts.Program, args...)
 	cmd.Stdin = stdin
@@ -344,18 +360,22 @@ func (p *provider) run(ctx context.Context, verb string, j machineRequest, stdin
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err := cmd.Run()
+	printed := out.String()
+	if secret != "" {
+		printed = strings.ReplaceAll(printed, secret, "[the enrolment string]")
+	}
 	dir := filepath.Join(p.h.DataDir, "machines")
 	if mkErr := os.MkdirAll(dir, 0o700); mkErr == nil {
 		f, ferr := os.OpenFile(filepath.Join(dir, j.MachineName+".log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 		if ferr == nil {
-			fmt.Fprintf(f, "== %s %s at %s\n%s\n", verb, j.MachineName, time.Now().UTC().Format(time.RFC3339), out.String())
+			fmt.Fprintf(f, "== %s %s at %s\n%s\n", verb, j.MachineName, time.Now().UTC().Format(time.RFC3339), printed)
 			f.Close()
 		}
 	}
 	if err != nil {
-		return out.String(), fmt.Errorf("%v: %s", err, lastLine(out.String()))
+		return printed, fmt.Errorf("%v: %s", err, lastLine(printed))
 	}
-	return out.String(), nil
+	return printed, nil
 }
 
 func lastLine(s string) string {
