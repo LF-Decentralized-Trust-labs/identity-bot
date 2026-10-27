@@ -49,15 +49,19 @@ it lacks, and what a machine set up by hand must have. Asking a provider for a m
 (`POST …/machine-requests`) records a request naming the AI agent, the provider, the
 needs at that moment, and a machine name made from the AI agent's name — lowercase
 letters, digits and dashes, with a random suffix — so that it is safe to hand to a
-program. A provider is never asked for what it does not offer.
+program. A provider is never asked for what it does not offer, and an AI agent has
+one new machine on its way at a time, until its words are approved or it is cancelled.
 
 **The provider makes the machine, and only a person makes it a body.** The provider
 calls the operator's program three ways: `make NAME NEEDS`, `enrol NAME` with a
 one-time enrolment string on standard input, and `remove NAME`. How the machine is
 made — a virtual machine, a container, a cloud instance — is that program's business.
+Its environment carries the AI agent's display name as `AGENT_MACHINE_FOR`, which a
+person typed, so the program must treat it as text and never put it into a shell
+command; `NAME` and `NEEDS` are only letters, digits, dashes and commas.
 After `make`, the provider asks for the enrolment string for that request
-(`POST /api/agent-host/machine-requests/{id}/enrolment`). It is the same string a
-person would be given: good once, for that AI agent, within the enrolment window, and
+(`POST /api/agent-host/machine-requests/{id}/enrolment`), once per request. It is
+the same string a person would be given: good once, for that AI agent, within the enrolment window, and
 it travels sealed to the provider's keys. The program hands it to the new machine,
 whose `agent-host enrol -` reads it from standard input so that it never appears on
 a command line, and prints the six words the machine shows. The provider reports

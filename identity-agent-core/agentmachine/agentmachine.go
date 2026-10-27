@@ -119,9 +119,9 @@ type Job struct {
 	// EnrolmentGivenAt is when its provider was given the enrolment string:
 	// once per request.
 	EnrolmentGivenAt time.Time `json:"enrolment_given_at,omitempty"`
-	RequestedBy string    `json:"requested_by"`
-	RequestedAt time.Time `json:"requested_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	RequestedBy      string    `json:"requested_by"`
+	RequestedAt      time.Time `json:"requested_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // Done says the job has nothing left for its provider to do.
