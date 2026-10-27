@@ -20,7 +20,7 @@ func CodexSignIn(account, email, refresh string) string {
 	b, _ := json.Marshal(map[string]any{
 		"OPENAI_API_KEY": nil,
 		"tokens": map[string]any{
-			"id_token": jwt(map[string]any{"email": email,
+			"id_token": jwt(map[string]any{"email": email, "sub": "user-" + email,
 				"https://api.openai.com/auth": map[string]any{"chatgpt_account_id": account}}),
 			"access_token":  jwt(map[string]any{"exp": time.Now().Add(time.Hour).Unix()}),
 			"refresh_token": refresh,

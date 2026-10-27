@@ -3,10 +3,14 @@ package brainsignin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -48,8 +52,10 @@ type CheckResult struct {
 	Why string `json:"why,omitempty"`
 }
 
-// Sender sends one request through the Identity Agent's governed way out.
-type Sender func(ctx context.Context, req *http.Request) (*http.Response, error)
+// Sender sends one request through the Identity Agent's governed way out, with
+// client: one that follows no redirect, and for a model server, one that
+// reaches only the address that was checked.
+type Sender func(ctx context.Context, req *http.Request, client *http.Client) (*http.Response, error)
 
 // Checker checks sign-ins. The provider addresses are fields so a test can
 // stand a provider up locally.
@@ -57,6 +63,12 @@ type Checker struct {
 	Send Sender
 	// Base addresses, without a trailing slash.
 	Anthropic, OpenAI, XAI, OpenRouter, Google string
+	// Resolve finds a model server's addresses; nil is the system's resolver.
+	Resolve func(ctx context.Context, host string) ([]netip.Addr, error)
+	// AddressRule says why a model server's address is not tried; nil is
+	// ModelServerAddress. A test stands its server up on this computer, which
+	// the rule refuses, and so replaces it.
+	AddressRule func(netip.Addr) error
 }
 
 // NewChecker is a checker of the real providers, sending through send.
@@ -68,6 +80,25 @@ func NewChecker(send Sender) Checker {
 
 // CheckTimeout bounds one check.
 const CheckTimeout = 15 * time.Second
+
+// The reasons a check gives. They are fixed sentences: nothing the server
+// answered — not its status, not its words — is passed back, so the check
+// cannot be used to read what is at an address.
+const (
+	whyBadAddress = "The server's address must start with http:// or https:// and name a server."
+	whyUserInfo   = "The server's address must not carry a user name or password. Give the key on its own instead."
+	whyReserved   = "The Identity Agent does not try a server on its own computer or at a reserved address, " +
+		"so this was not tried. The machines the agent runs on will use it there."
+	whyUnreachable = "The Identity Agent could not reach the server. If only the machines the agent runs on can " +
+		"reach it, that may be fine: they will use it there."
+	whyNotAccepted = "The server did not accept this key."
+	whyRedirected  = "The server sent the check somewhere else, so the key was not sent on. Check the address."
+	whyNotYes      = "The server did not say yes. Check the address."
+)
+
+// modelServerPath is the one question a model server is asked: which models it
+// has. Whatever path or query its address carries is not used.
+const modelServerPath = "/v1/models"
 
 // Check makes the one request that says whether r works. r must already have
 // passed Record.Check.
@@ -89,6 +120,7 @@ func (c Checker) Check(ctx context.Context, r Record) CheckResult {
 		u      string
 		header = http.Header{}
 		name   = providerName(r.Provider)
+		client = NoRedirects()
 	)
 	switch r.Provider {
 	case Anthropic:
@@ -108,17 +140,11 @@ func (c Checker) Check(ctx context.Context, r Record) CheckResult {
 		u = c.Google + "/v1beta/models?pageSize=1"
 		header.Set("x-goog-api-key", r.Secret)
 	case Local, OpenAICompatible:
-		base := strings.TrimRight(strings.TrimSpace(r.Endpoint), "/")
-		p, err := url.Parse(base)
-		if err != nil || (p.Scheme != "http" && p.Scheme != "https") || p.Host == "" {
-			return CheckResult{Checked: CheckedByProvider, Why: "The server's address must start with http:// or https://."}
+		target, pinned, why := c.modelServer(ctx, r.Endpoint)
+		if why != "" {
+			return CheckResult{Checked: CheckedByProvider, Why: why}
 		}
-		// A server that speaks Claude's format is given without /v1; one
-		// that speaks OpenAI's usually ends in it.
-		if r.Provider == Local || !strings.HasSuffix(base, "/v1") {
-			base += "/v1"
-		}
-		u = base + "/models"
+		u, client = target, pinned
 		if r.Secret != "" {
 			header.Set("Authorization", "Bearer "+r.Secret)
 			if r.Provider == Local {
@@ -130,31 +156,39 @@ func (c Checker) Check(ctx context.Context, r Record) CheckResult {
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return CheckResult{Checked: CheckedByProvider, Why: "The address could not be used."}
+		return CheckResult{Checked: CheckedByProvider, Why: whyBadAddress}
 	}
 	req.Header = header
-	resp, err := c.Send(ctx, req)
+	resp, err := c.Send(ctx, req, client)
 	if err != nil {
-		why := fmt.Sprintf("The Identity Agent could not reach %s.", name)
 		if r.Kind == KindLocal {
-			why = "The Identity Agent could not reach the server at " + r.Endpoint + ". If only the machines the " +
-				"agent runs on can reach it, that may be fine: they will use it there."
+			return CheckResult{Checked: CheckedByProvider, Why: whyUnreachable}
 		}
-		return CheckResult{Checked: CheckedByProvider, Why: why}
+		return CheckResult{Checked: CheckedByProvider, Why: fmt.Sprintf("The Identity Agent could not reach %s.", name)}
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	who := upper(name)
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		return CheckResult{Checked: CheckedByProvider, Why: fmt.Sprintf("%s did not accept this key.", upper(name))}
+		if r.Kind == KindLocal {
+			return CheckResult{Checked: CheckedByProvider, Why: whyNotAccepted}
+		}
+		return CheckResult{Checked: CheckedByProvider, Why: fmt.Sprintf("%s did not accept this key.", who)}
 	case resp.StatusCode == http.StatusTooManyRequests:
 		return CheckResult{OK: true, Checked: CheckedByProvider, Account: accountFrom(r.Provider, resp, body),
-			Why: fmt.Sprintf("%s accepted the key, but is limiting it right now.", upper(name))}
+			Why: fmt.Sprintf("%s accepted the key, but is limiting it right now.", who)}
 	case resp.StatusCode >= 300 && resp.StatusCode < 400:
-		return CheckResult{Checked: CheckedByProvider, Why: fmt.Sprintf("%s sent the check somewhere else (%d), "+
-			"so the key was not sent on. Check the address.", upper(name), resp.StatusCode)}
+		if r.Kind == KindLocal {
+			return CheckResult{Checked: CheckedByProvider, Why: whyRedirected}
+		}
+		return CheckResult{Checked: CheckedByProvider, Why: fmt.Sprintf("%s sent the check somewhere else, "+
+			"so the key was not sent on.", who)}
 	case resp.StatusCode != http.StatusOK:
-		return CheckResult{Checked: CheckedByProvider, Why: fmt.Sprintf("%s answered %d, not yes.", upper(name), resp.StatusCode)}
+		if r.Kind == KindLocal {
+			return CheckResult{Checked: CheckedByProvider, Why: whyNotYes}
+		}
+		return CheckResult{Checked: CheckedByProvider, Why: fmt.Sprintf("%s did not say yes. Try again later.", who)}
 	}
 	if r.Provider == XAI {
 		var k struct {
@@ -166,6 +200,125 @@ func (c Checker) Check(ctx context.Context, r Record) CheckResult {
 		}
 	}
 	return CheckResult{OK: true, Checked: CheckedByProvider, Account: accountFrom(r.Provider, resp, body)}
+}
+
+// modelServer is the one address a model server is checked at — its scheme
+// and host, and the fixed path that asks for its models — and a client that
+// reaches only the addresses that name was found to have when it was
+// checked, so a name that changes its answer between the check and the call
+// still reaches nowhere else. It refuses an address that carries a user name
+// or password, and one any of whose addresses is this computer, a link-local
+// or cloud metadata address, or otherwise reserved (ModelServerAddress).
+func (c Checker) modelServer(ctx context.Context, endpoint string) (string, *http.Client, string) {
+	p, err := url.Parse(strings.TrimSpace(endpoint))
+	if err != nil || (p.Scheme != "http" && p.Scheme != "https") || p.Hostname() == "" || p.Opaque != "" {
+		return "", nil, whyBadAddress
+	}
+	if p.User != nil {
+		return "", nil, whyUserInfo
+	}
+	host, port := p.Hostname(), p.Port()
+	if port == "" {
+		port = "80"
+		if p.Scheme == "https" {
+			port = "443"
+		}
+	}
+	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+		return "", nil, whyBadAddress
+	}
+	var addrs []netip.Addr
+	if a, err := netip.ParseAddr(host); err == nil {
+		addrs = []netip.Addr{a}
+	} else {
+		resolve := c.Resolve
+		if resolve == nil {
+			resolve = func(ctx context.Context, host string) ([]netip.Addr, error) {
+				return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+			}
+		}
+		if addrs, err = resolve(ctx, host); err != nil || len(addrs) == 0 {
+			return "", nil, whyUnreachable
+		}
+	}
+	rule := c.AddressRule
+	if rule == nil {
+		rule = ModelServerAddress
+	}
+	for _, a := range addrs {
+		if rule(a) != nil {
+			return "", nil, whyReserved
+		}
+	}
+	target := (&url.URL{Scheme: p.Scheme, Host: p.Host, Path: modelServerPath}).String()
+	dialer := &net.Dialer{Timeout: CheckTimeout}
+	transport := &http.Transport{
+		Proxy: nil,
+		// Whatever address the request names, only the ones checked are dialled.
+		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			var last error
+			for _, a := range addrs {
+				conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(a.Unmap().String(), port))
+				if err == nil {
+					return conn, nil
+				}
+				last = err
+			}
+			return nil, last
+		},
+		TLSHandshakeTimeout: CheckTimeout,
+		DisableKeepAlives:   true,
+	}
+	client := &http.Client{Timeout: CheckTimeout, Transport: transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	return target, client, ""
+}
+
+// ErrReservedAddress is an address a model server is never checked at.
+var ErrReservedAddress = errors.New("a reserved address")
+
+// metadataAddresses are cloud providers' instance metadata services outside
+// the link-local range, which hand out the machine's own credentials.
+var metadataAddresses = []netip.Prefix{
+	netip.MustParsePrefix("100.100.100.200/32"), // Alibaba Cloud
+	netip.MustParsePrefix("168.63.129.16/32"),   // Azure
+	netip.MustParsePrefix("fd00:ec2::254/128"),  // AWS, over IPv6
+}
+
+// reservedRanges are never a model server's.
+var reservedRanges = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("240.0.0.0/4"), // includes 255.255.255.255
+	netip.MustParsePrefix("100::/64"),    // discard
+}
+
+// nat64 carries an IPv4 address inside an IPv6 one.
+var nat64 = netip.MustParsePrefix("64:ff9b::/96")
+
+// ModelServerAddress says whether a model server may be checked at a. The rule:
+// a model server may be on the public internet or on a private network — a
+// server on the office network is an ordinary place to run one, and only the
+// owner's own app may ask for a check (a browser session may not) — but never
+// on the Identity Agent's own computer, at a link-local or cloud metadata
+// address, or at an unspecified, multicast or otherwise reserved one.
+func ModelServerAddress(a netip.Addr) error {
+	a = a.Unmap()
+	if a.Is6() && nat64.Contains(a) {
+		b := a.As16()
+		return ModelServerAddress(netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]}))
+	}
+	if !a.IsValid() || a.IsUnspecified() || a.IsLoopback() || a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() ||
+		a.IsInterfaceLocalMulticast() || a.IsMulticast() {
+		return ErrReservedAddress
+	}
+	for _, list := range [][]netip.Prefix{metadataAddresses, reservedRanges} {
+		for _, p := range list {
+			if p.Contains(a) {
+				return ErrReservedAddress
+			}
+		}
+	}
+	return nil
 }
 
 // accountFrom is what the provider says the key is: its name, or the

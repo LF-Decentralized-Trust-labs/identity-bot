@@ -237,7 +237,7 @@ func (s *CoreServer) brainSignInViewAmong(assetID string, rec brainsignin.Record
 	return map[string]any{
 		"kind": rec.Kind, "provider": rec.Provider, "account": rec.Account,
 		"endpoint": rec.Endpoint, "expires_at": rec.ExpiresAt, "expired": rec.Expired(now),
-		"max_concurrent_runs": rec.MaxConcurrentRuns, "has_secret": rec.HasSecret(),
+		"max_concurrent_runs": s.accountCap(assetID, rec), "has_secret": rec.HasSecret(),
 		"set_at": rec.SetAt, "runs_in_use": s.brainLeases().InUse(assetID, now),
 		"account_id": accountID, "account_runs_in_use": s.brainLeases().InUseByAccount(pool, assetID, now),
 		"shared_with": shared, "harness": brainsignin.Harness(rec.Provider),
@@ -265,13 +265,30 @@ func (s *CoreServer) keptBrainSignIns() []keptSignIn {
 	return out
 }
 
+// accountCap is the cap on simultaneous runs of rec's account: one number for
+// every AI agent signed in to it, as its owner last set it, or else the one on
+// the sign-in.
+func (s *CoreServer) accountCap(agentID string, rec brainsignin.Record) int {
+	if n, ok := s.brainLeases().Cap(rec.Pool(), agentID); ok {
+		return n
+	}
+	return rec.MaxConcurrentRuns
+}
+
 // keepBrainSignIn keeps an AI agent's sign-in in the vault and points the AI
 // agent's brain at it. The vault is written first: an AI agent never names a
 // sign-in that is not kept.
-func (s *CoreServer) keepBrainSignIn(a asset.Asset, rec brainsignin.Record, by string) (asset.Asset, error) {
+//
+// The cap is the account's (accountCap). When the owner chose one (capChosen)
+// it becomes the account's, for every AI agent signed in to it; otherwise a
+// sign-in joining an account takes the cap the account already has.
+func (s *CoreServer) keepBrainSignIn(a asset.Asset, rec brainsignin.Record, by string, capChosen bool) (asset.Asset, error) {
 	vault, err := s.brainVault()
 	if err != nil {
 		return a, err
+	}
+	if n, ok := s.brainLeases().Cap(rec.Pool(), a.ID); ok && !capChosen {
+		rec.MaxConcurrentRuns = n
 	}
 	ref := brainsignin.Ref(a.ID)
 	prev, had, err := vault.BrainSignIn(ref)
@@ -280,6 +297,9 @@ func (s *CoreServer) keepBrainSignIn(a asset.Asset, rec brainsignin.Record, by s
 	}
 	if err := vault.SetBrainSignIn(ref, rec); err != nil {
 		return a, err
+	}
+	if err := s.brainLeases().SetCap(rec.Pool(), a.ID, rec.MaxConcurrentRuns); err != nil {
+		log.Printf("[brain] AI agent %s: the account's cap could not be kept: %v", a.PairwiseAID, err)
 	}
 	// A different secret is a different sign-in: the places runs hold on the
 	// old one are not places on the new one.
@@ -423,7 +443,7 @@ func (s *CoreServer) handleSetBrainSignIn(w http.ResponseWriter, r *http.Request
 		jsonError(w, err.Error(), status)
 		return
 	}
-	updated, err := s.keepBrainSignIn(a, rec, madeByController(r))
+	updated, err := s.keepBrainSignIn(a, rec, madeByController(r), q.MaxConcurrentRuns != nil)
 	if err != nil {
 		jsonError(w, "the sign-in was not kept: "+err.Error(), http.StatusServiceUnavailable)
 		return
@@ -535,7 +555,7 @@ func (s *CoreServer) moveBrainSecretsIntoTheVault() {
 		cfg := *a.AgentConfig
 		cfg.Brain = brain
 		a.AgentConfig = &cfg
-		if _, err := s.keepBrainSignIn(a, *rec, "moving a key off the AI agent's record"); err != nil {
+		if _, err := s.keepBrainSignIn(a, *rec, "moving a key off the AI agent's record", false); err != nil {
 			left++
 			log.Printf("[brain] AI agent %s: a key stored on its record could not be moved into the vault yet: %v", a.PairwiseAID, err)
 			continue
@@ -611,8 +631,9 @@ func (s *CoreServer) handleBodyBorrowsSignIn(w http.ResponseWriter, r *http.Requ
 			"error": "this AI agent's sign-in has expired; sign it in again", "expired": true})
 		return
 	}
+	limit := s.accountCap(a.ID, rec)
 	lease, lapsed, err := s.brainLeases().Lend(a.ID, rec.Pool(), brainsignin.Fingerprint(rec.Provider, rec.Secret),
-		b.Host, rec.MaxConcurrentRuns, now)
+		b.Host, limit, now)
 	for _, x := range lapsed {
 		xa, ok := s.aiAgentAsset(x.Agent)
 		if !ok {
@@ -623,10 +644,10 @@ func (s *CoreServer) handleBodyBorrowsSignIn(w http.ResponseWriter, r *http.Requ
 	}
 	if errors.Is(err, brainsignin.ErrInUse) {
 		s.recordBrainEvent(a, cc, "lend", "denied", fmt.Sprintf("%s: all %d in use",
-			brainsignin.ErrInUse, rec.MaxConcurrentRuns))
+			brainsignin.ErrInUse, limit))
 		writeJSONStatus(w, http.StatusConflict, map[string]any{
 			"error": brainsignin.ErrInUse.Error() + ", counting every AI agent signed in to the same account", "in_use": true,
-			"max_concurrent_runs": rec.MaxConcurrentRuns, "retry_after_seconds": 30})
+			"max_concurrent_runs": limit, "retry_after_seconds": 30})
 		return
 	}
 	if err != nil {

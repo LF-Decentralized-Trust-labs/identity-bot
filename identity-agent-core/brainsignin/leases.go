@@ -45,7 +45,15 @@ type Lease struct {
 	Lent    string    `json:"lent,omitempty"`
 	LentAt  time.Time `json:"lent_at"`
 	Expires time.Time `json:"expires"`
+	// LapsedAt is when the lease was found expired unrenewed. A lapsed lease
+	// holds no place, but is remembered for LapsedKept, so a body that was
+	// out of reach can still give it back — with a sign-in its program
+	// refreshed, which would otherwise be lost.
+	LapsedAt *time.Time `json:"lapsed_at,omitempty"`
 }
+
+// LapsedKept is how long a lapsed lease is remembered for its body to give back.
+const LapsedKept = 7 * 24 * time.Hour
 
 // Leases are the runs holding sign-ins, kept beside the vault so a restart of
 // the Identity Agent does not forget runs still going and let a sign-in be
@@ -101,16 +109,27 @@ func (l *Leases) save(all []Lease) error {
 	return os.Rename(tmp, l.path)
 }
 
-// live splits leases into those still held at now and those expired.
-func live(all []Lease, now time.Time) (held, expired []Lease) {
+// live splits leases into those still held at now, those that lapsed since
+// last looked at (now marked), and every lease to keep: the held ones and the
+// lapsed ones still remembered.
+func live(all []Lease, now time.Time) (held, lapsed, keep []Lease) {
 	for _, x := range all {
-		if now.Before(x.Expires) {
+		switch {
+		case x.LapsedAt != nil:
+			if now.Sub(*x.LapsedAt) < LapsedKept {
+				keep = append(keep, x)
+			}
+		case now.Before(x.Expires):
 			held = append(held, x)
-		} else {
-			expired = append(expired, x)
+			keep = append(keep, x)
+		default:
+			t := now
+			x.LapsedAt = &t
+			lapsed = append(lapsed, x)
+			keep = append(keep, x)
 		}
 	}
-	return held, expired
+	return held, lapsed, keep
 }
 
 // pool is the account a lease counts against.
@@ -137,7 +156,7 @@ func (l *Leases) Lend(agent, pool, lent, host string, maxRuns int, now time.Time
 	if err != nil {
 		return Lease{}, nil, err
 	}
-	held, expired := live(all, now)
+	held, expired, keep := live(all, now)
 	pool = poolOr(pool, agent)
 	if maxRuns > 0 {
 		n := 0
@@ -148,7 +167,7 @@ func (l *Leases) Lend(agent, pool, lent, host string, maxRuns int, now time.Time
 		}
 		if n >= maxRuns {
 			if len(expired) > 0 {
-				_ = l.save(held)
+				_ = l.save(keep)
 			}
 			return Lease{}, expired, ErrInUse
 		}
@@ -159,14 +178,15 @@ func (l *Leases) Lend(agent, pool, lent, host string, maxRuns int, now time.Time
 	}
 	lease := Lease{ID: "bl_" + base64.RawURLEncoding.EncodeToString(id), Agent: agent, Host: host,
 		Pool: pool, Lent: lent, LentAt: now, Expires: now.Add(LeaseTTL)}
-	if err := l.save(append(held, lease)); err != nil {
+	if err := l.save(append(keep, lease)); err != nil {
 		return Lease{}, expired, err
 	}
 	return lease, expired, nil
 }
 
-// Lapsed removes and returns every lease that expired unrenewed by now, so
-// each can be recorded once.
+// Lapsed marks and returns every lease that expired unrenewed by now, so each
+// can be recorded once. A lapsed lease holds no place, but can still be given
+// back (Return) for LapsedKept.
 func (l *Leases) Lapsed(now time.Time) ([]Lease, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -174,11 +194,11 @@ func (l *Leases) Lapsed(now time.Time) ([]Lease, error) {
 	if err != nil {
 		return nil, err
 	}
-	held, expired := live(all, now)
+	_, expired, keep := live(all, now)
 	if len(expired) == 0 {
 		return nil, nil
 	}
-	return expired, l.save(held)
+	return expired, l.save(keep)
 }
 
 // Renew extends a lease host holds on agent's sign-in.
@@ -189,20 +209,23 @@ func (l *Leases) Renew(id, host, agent string, now time.Time) (Lease, error) {
 	if err != nil {
 		return Lease{}, err
 	}
-	held, _ := live(all, now)
-	for i := range held {
-		if held[i].ID == id && held[i].Host == host && held[i].Agent == agent {
-			held[i].Expires = now.Add(LeaseTTL)
-			if err := l.save(held); err != nil {
+	_, _, keep := live(all, now)
+	for i := range keep {
+		if keep[i].ID == id && keep[i].Host == host && keep[i].Agent == agent && keep[i].LapsedAt == nil {
+			keep[i].Expires = now.Add(LeaseTTL)
+			if err := l.save(keep); err != nil {
 				return Lease{}, err
 			}
-			return held[i], nil
+			return keep[i], nil
 		}
 	}
 	return Lease{}, ErrNoLease
 }
 
-// Return gives back a lease host holds on agent's sign-in.
+// Return gives back a lease host holds on agent's sign-in. A lease that
+// lapsed is still found, for LapsedKept, and returned with ErrNoLease: it held
+// no place by then, but what the run sends back with it — a sign-in its
+// program refreshed — is still the run's.
 func (l *Leases) Return(id, host, agent string, now time.Time) (Lease, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -210,14 +233,14 @@ func (l *Leases) Return(id, host, agent string, now time.Time) (Lease, error) {
 	if err != nil {
 		return Lease{}, err
 	}
-	for i, x := range all {
+	_, _, keep := live(all, now)
+	for i, x := range keep {
 		if x.ID == id && x.Host == host && x.Agent == agent {
-			rest := append(append([]Lease{}, all[:i]...), all[i+1:]...)
-			held, _ := live(rest, now)
-			if err := l.save(held); err != nil {
+			rest := append(append([]Lease{}, keep[:i]...), keep[i+1:]...)
+			if err := l.save(rest); err != nil {
 				return Lease{}, err
 			}
-			if !now.Before(x.Expires) {
+			if x.LapsedAt != nil {
 				return x, ErrNoLease
 			}
 			return x, nil
@@ -242,7 +265,7 @@ func (l *Leases) count(match func(Lease) bool, now time.Time) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	all, _ := l.load()
-	held, _ := live(all, now)
+	held, _, _ := live(all, now)
 	n := 0
 	for _, x := range held {
 		if match(x) {
@@ -269,4 +292,63 @@ func (l *Leases) Forget(agent string) error {
 		}
 	}
 	return l.save(kept)
+}
+
+// An account's cap is one number, shared by every AI agent signed in to it:
+// kept here, by the account (Record.Pool), not on each AI agent's sign-in, so
+// AI agents on one account cannot hold different caps. A sign-in that names
+// no account — a model server with no key — has a cap of its own, by its AI
+// agent.
+
+func (l *Leases) capsPath() string {
+	return filepath.Join(filepath.Dir(l.path), "brain_sign_in_caps.json")
+}
+
+func (l *Leases) loadCaps() (map[string]int, error) {
+	b, err := os.ReadFile(l.capsPath())
+	if errors.Is(err, os.ErrNotExist) {
+		return map[string]int{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]int{}
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// Cap is the cap on simultaneous runs of the account pool, as its owner set it,
+// and whether one is set.
+func (l *Leases) Cap(pool, agent string) (int, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	caps, err := l.loadCaps()
+	if err != nil {
+		return 0, false
+	}
+	n, ok := caps[poolOr(pool, agent)]
+	return n, ok
+}
+
+// SetCap sets the cap on simultaneous runs of the account pool, for every AI
+// agent signed in to it.
+func (l *Leases) SetCap(pool, agent string, n int) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	caps, err := l.loadCaps()
+	if err != nil {
+		return err
+	}
+	caps[poolOr(pool, agent)] = n
+	b, err := json.MarshalIndent(caps, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := l.capsPath() + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, l.capsPath())
 }

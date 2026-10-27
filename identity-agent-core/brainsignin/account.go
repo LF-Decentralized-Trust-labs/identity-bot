@@ -29,6 +29,9 @@ type SignInFile struct {
 	Account string
 	// AccountID is the provider's identifier of the account.
 	AccountID string
+	// Subject is who signed in, as the provider names them: the subject of
+	// Codex's identity token, or Grok's user.
+	Subject string
 	// AccessExpires is when the access token in it lapses. The program
 	// refreshes it, so this is not when the sign-in stops working.
 	AccessExpires *time.Time
@@ -64,13 +67,14 @@ func readCodexSignIn(content string) (SignInFile, error) {
 	}
 	out := SignInFile{AccountID: f.Tokens.AccountID}
 	var id struct {
-		Email string `json:"email"`
-		Auth  struct {
+		Subject string `json:"sub"`
+		Email   string `json:"email"`
+		Auth    struct {
 			AccountID string `json:"chatgpt_account_id"`
 		} `json:"https://api.openai.com/auth"`
 	}
 	if jwtClaims(f.Tokens.IDToken, &id) {
-		out.Account = id.Email
+		out.Account, out.Subject = id.Email, id.Subject
 		if out.AccountID == "" {
 			out.AccountID = id.Auth.AccountID
 		}
@@ -85,29 +89,77 @@ func readCodexSignIn(content string) (SignInFile, error) {
 	return out, nil
 }
 
+// readGrokSignIn reads Grok's auth.json, which holds a sign-in per issuer.
+// The one that holds a token is the account in use. A file holding tokens for
+// more than one account is refused rather than one picked from it, so which
+// account runs never depends on the order a file was read in.
 func readGrokSignIn(content string) (SignInFile, error) {
-	var f map[string]struct {
+	var f map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(content), &f); err != nil || len(f) == 0 {
+		return SignInFile{}, errors.New("a Grok sign-in is the auth.json Grok writes when you sign in, and this is not one")
+	}
+	type entry struct {
 		Key          string `json:"key"`
 		RefreshToken string `json:"refresh_token"`
 		UserID       string `json:"user_id"`
 		Email        string `json:"email"`
 		ExpiresAt    string `json:"expires_at"`
 	}
-	if err := json.Unmarshal([]byte(content), &f); err != nil || len(f) == 0 {
-		return SignInFile{}, errors.New("a Grok sign-in is the auth.json Grok writes when you sign in, and this is not one")
-	}
-	for _, e := range f {
-		if e.Key == "" && e.RefreshToken == "" {
+	var found []entry
+	for _, raw := range f {
+		var e entry
+		if json.Unmarshal(raw, &e) != nil || (e.Key == "" && e.RefreshToken == "") {
 			continue
 		}
-		out := SignInFile{Account: e.Email, AccountID: e.UserID}
-		if t, err := time.Parse(time.RFC3339, e.ExpiresAt); err == nil {
-			t = t.UTC()
-			out.AccessExpires = &t
-		}
-		return out, nil
+		found = append(found, e)
 	}
-	return SignInFile{}, errors.New("this Grok sign-in holds no token; sign in again")
+	switch {
+	case len(found) == 0:
+		return SignInFile{}, errors.New("this Grok sign-in holds no token; sign in again")
+	case len(found) > 1:
+		for _, e := range found[1:] {
+			if e.UserID != found[0].UserID || e.Email != found[0].Email {
+				return SignInFile{}, errors.New("this Grok sign-in holds more than one account; sign out of Grok, " +
+					"sign in with the one account the agent should use, and try again")
+			}
+		}
+		return SignInFile{}, errors.New("this Grok sign-in holds more than one token for its account; sign out of " +
+			"Grok, sign in again, and try again")
+	}
+	e := found[0]
+	out := SignInFile{Account: e.Email, AccountID: e.UserID, Subject: e.UserID}
+	if t, err := time.Parse(time.RFC3339, e.ExpiresAt); err == nil {
+		t = t.UTC()
+		out.AccessExpires = &t
+	}
+	return out, nil
+}
+
+// SameSignInAs says why a sign-in file a program refreshed is not for the
+// same person and account as the one it was lent, or nil when it is: the
+// account and the subject it names must both match, and the lent one must
+// name an account. The tokens' signatures are not verified — the Identity
+// Agent does not fetch the providers' keys to check them — so this stops a
+// mistaken or substituted file for another account, not one forged to name
+// this one.
+func SameSignInAs(provider, lent, refreshed string) error {
+	was, err := ReadSignInFile(provider, lent)
+	if err != nil {
+		return err
+	}
+	now, err := ReadSignInFile(provider, refreshed)
+	if err != nil {
+		return err
+	}
+	switch {
+	case was.AccountID == "":
+		return errors.New("the sign-in lent names no account, so a refreshed one cannot be matched to it")
+	case now.AccountID != was.AccountID:
+		return errors.New("it is for another account")
+	case now.Subject != was.Subject:
+		return errors.New("it is for another person on the account")
+	}
+	return nil
 }
 
 // jwtClaims reads a JSON Web Token's claims without checking its signature:

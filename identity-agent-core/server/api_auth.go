@@ -688,6 +688,11 @@ var sessionForbidden = map[string]string{
 	// model server's address.
 	"PUT /api/mcp/agents/{id}/brain-sign-in":    "signing an AI agent's brain in, with which key and at which address, outlives the session that did it",
 	"DELETE /api/mcp/agents/{id}/brain-sign-in": "removing an AI agent's sign-in outlives the session that removed it",
+	// Checking a sign-in sends a request from this Identity Agent to an address
+	// the caller names. Only the owner's own app may ask for that, so a session
+	// cannot use this Identity Agent to reach into the network it sits on.
+	"POST /api/mcp/brain-sign-in/test":             "checking a sign-in makes this Identity Agent reach an address the caller names",
+	"POST /api/mcp/agents/{id}/brain-sign-in/test": "checking a sign-in makes this Identity Agent reach the address it names",
 	// An enrolment string, and approving a body, let a machine speak as an AI
 	// agent from then on — standing access that outlives the session.
 	"POST /api/mcp/agents/{id}/body-enrolment":       "an enrolment string lets a machine ask to speak as an AI agent, after the session that made it ends",

@@ -42,8 +42,13 @@ func (pe *PolicyEngine) CheckDomain(instanceID, appID, domain, method, urlStr st
 		return "auto_approved", "agent_internal_bypass"
 	}
 
-	// agent-llm-proxy is the Identity Agent's own LLM proxy -- auto-approve as a system actor.
+	// agent-llm-proxy is the Identity Agent's own LLM proxy -- auto-approve as a system actor,
+	// except where the owner has blocked the domain: a block the owner set is never skipped.
 	if instanceID == BackendLLMInstanceID {
+		if target, blocked := pe.userBlocks(appID, domain); blocked {
+			pe.recordDecision(instanceID, appID, "proxy_request", "denied", domain, "user_block_rule: "+target, "user")
+			return "auto_blocked", "user_block:" + target
+		}
 		return "auto_approved", "system-actor"
 	}
 
@@ -125,6 +130,23 @@ func (pe *PolicyEngine) CheckDomain(instanceID, appID, domain, method, urlStr st
 			map[string]interface{}{"action": "held", "domain": domain, "reason": "unknown_domain"})
 	}
 	return "held", "unknown_domain"
+}
+
+// userBlocks reports the owner's rule, if any, that blocks domain for appID.
+func (pe *PolicyEngine) userBlocks(appID, domain string) (string, bool) {
+	if pe.store == nil {
+		return "", false
+	}
+	rules, err := pe.store.GetPolicyRules(appID)
+	if err != nil {
+		log.Printf("[policy] Failed to load user rules for app %s: %v", appID, err)
+	}
+	for _, r := range rules {
+		if r.RuleType == "domain_block" && MatchDomain(r.Target, domain) {
+			return r.Target, true
+		}
+	}
+	return "", false
 }
 
 func (pe *PolicyEngine) CheckCapability(instanceID, appID, capability string) (allowed bool, rule string) {

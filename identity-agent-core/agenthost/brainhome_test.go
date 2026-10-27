@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeHomeBrain is a stand-in for Codex or Grok that writes down its
@@ -73,7 +74,7 @@ func TestACodexSignInIsAFileForOneRun(t *testing.T) {
 		}
 		got, _ := os.ReadFile(record)
 		rec := string(got)
-		brainHome := filepath.Join(home, ".agent-host-brain", "codex")
+		brainHome := filepath.Join(home, ".agent-host-brain", homeName("codex", ""))
 		if !strings.Contains(rec, "HOME:"+brainHome+"\n") || !strings.Contains(rec, "FILE:"+signIn+"\n") {
 			t.Fatalf("Codex did not find the sign-in in its home:\n%s", rec)
 		}
@@ -166,7 +167,7 @@ func TestGrokReachesOpenRouterWithTheKeyOnlyInItsEnvironment(t *testing.T) {
 func TestASignInLeftByACrashIsRemoved(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	dir := filepath.Join(home, ".agent-host-brain", "grok")
+	dir := filepath.Join(home, ".agent-host-brain", homeName("grok", ""))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -197,4 +198,80 @@ func noFileUnder(t *testing.T, dir, secret string) {
 		}
 		return nil
 	})
+}
+
+// Each AI agent's brain has a home of its own, which only the brain's user can
+// open, so one AI agent's run does not find another's sessions there. A
+// sign-in a killed run left in the home every AI agent once shared is removed.
+// Before, every AI agent running Codex on a machine shared one home.
+func TestEachAIAgentHasAHomeOfItsOwn(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	legacy := filepath.Join(home, ".agent-host-brain", "codex")
+	if err := os.MkdirAll(legacy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacy, "auth.json"), []byte("LEFT-IN-THE-SHARED-HOME"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var homes []string
+	for _, agent := range []string{"EAgentOne", "EAgentTwo"} {
+		path, record := fakeHomeBrain(t, "CODEX_HOME", codexAnswer, false, false)
+		env, err := (&Borrowed{Kind: "subscription", Provider: "codex", secret: `{"tokens":{"refresh_token":"R"}}`,
+			agent: agent}).Env("codex")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := (Codex{Path: path}).Run(context.Background(), Turn{Session: "s", Prompt: "hi",
+			Workspace: t.TempDir(), Credentials: env}); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := os.ReadFile(record)
+		for _, l := range strings.Split(string(got), "\n") {
+			if h, ok := strings.CutPrefix(l, "HOME:"); ok {
+				homes = append(homes, h)
+			}
+		}
+	}
+	if len(homes) != 2 || homes[0] == homes[1] || homes[0] == legacy {
+		t.Fatalf("two AI agents' homes: %v", homes)
+	}
+	for _, h := range append(homes, filepath.Dir(homes[0])) {
+		if st, err := os.Stat(h); err != nil || st.Mode().Perm() != 0o700 {
+			t.Errorf("%s is not the brain user's alone: %v %v", h, st.Mode(), err)
+		}
+	}
+	noFileUnder(t, home, "LEFT-IN-THE-SHARED-HOME")
+}
+
+// A renewed sign-in that cannot be given back stays with the borrowed one
+// until it can; once every try has failed it is kept on this machine, in the
+// host's own directory and readable by it alone, for the next time the
+// Identity Agent can be reached.
+func TestARenewedSignInThatCannotBeGivenBackIsKept(t *testing.T) {
+	saved := returnBackoff
+	returnBackoff = []time.Duration{time.Millisecond, time.Millisecond}
+	t.Cleanup(func() { returnBackoff = saved })
+	h := &Host{DataDir: t.TempDir()} // never enrolled: nothing can be returned
+	b := &Borrowed{LeaseID: "bl_1", secret: "S", refreshed: "RENEWED-SIGN-IN"}
+	if err := h.Return(context.Background(), b); err == nil || b.refreshed != "RENEWED-SIGN-IN" || b.secret != "" {
+		t.Fatalf("a failed return: %v, refreshed %q", err, b.refreshed)
+	}
+	h.giveBack(b, func(string, ...any) {})
+	if b.refreshed != "" {
+		t.Fatal("the renewed sign-in is still held by the run")
+	}
+	p := filepath.Join(h.DataDir, "sign-ins-to-give-back.json")
+	st, err := os.Stat(p)
+	if err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("the renewed sign-in was not kept to give back: %v %v", st, err)
+	}
+	if got := h.loadPendingReturns(); len(got) != 1 || got[0].LeaseID != "bl_1" || got[0].SignIn != "RENEWED-SIGN-IN" {
+		t.Fatalf("kept to give back: %+v", got)
+	}
+	// Still out of reach: it stays.
+	h.givePendingBack(context.Background(), func(string, ...any) {})
+	if len(h.loadPendingReturns()) != 1 {
+		t.Fatal("a renewed sign-in was dropped while the Identity Agent could not be reached")
+	}
 }

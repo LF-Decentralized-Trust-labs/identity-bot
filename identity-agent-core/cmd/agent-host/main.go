@@ -175,16 +175,19 @@ One-time setup, as an administrator (each sudo asks for your password):
        Grok CLI:     install it for %[1]s the same way, and name its path in step 4 too.
                      Grok runs only this way: it has no flag to ignore the MCP servers of whoever runs it.
        Codex:        install it for %[1]s (npm install -g @openai/codex), and name its path in step 4 too.
-       A brain signed in from your organization's app needs no sign-in here: it is lent for each run.
+       A brain signed in through the Identity Agent needs no sign-in here: it is lent for each run.
 
   3. Make its workspace. Mode 711 lets the host start the brain there without
      being able to list or read what the brain keeps in it:
        sudo -u %[1]s -H mkdir -m 711 /Users/%[1]s/workspace
 
-  4. Let %[2]s start that program as %[1]s, and this one, which puts a lent sign-in in place for
-     one run and takes it away after. SETENV lets the host pass each turn's tool token and
-     sign-in in the environment rather than on the command line:
-       echo '%[2]s ALL=(%[1]s) NOPASSWD:SETENV: /Users/%[1]s/.local/bin/claude, /usr/local/bin/agent-host' | sudo tee /etc/sudoers.d/agent-host
+  4. Let %[2]s start the brain's program as %[1]s, and nothing else. SETENV lets the host pass
+     each turn's tool token and sign-in in the environment rather than on the command line:
+       echo '%[2]s ALL=(%[1]s) NOPASSWD:SETENV: /Users/%[1]s/.local/bin/claude' | sudo tee /etc/sudoers.d/agent-host
+     Codex and Grok keep their sign-in in a file, so the host starts them through this program,
+     which puts a lent sign-in in place for one run and takes it away after. Allow it around
+     that one program alone, with the program's full path for PATH:
+       echo '%[2]s ALL=(%[1]s) NOPASSWD:SETENV: PATH, /usr/local/bin/agent-host brain-home -- PATH *' | sudo tee -a /etc/sudoers.d/agent-host
        sudo chmod 440 /etc/sudoers.d/agent-host
 
   5. Install this program where %[1]s can run it. The brain starts it for its tools, and
@@ -202,7 +205,9 @@ One-time setup, as an administrator:
        sudo -u %[1]s -H sh -c 'curl -fsSL https://claude.ai/install.sh | bash'
        sudo -u %[1]s -H /home/%[1]s/.local/bin/claude      (then type /login)
   3. sudo -u %[1]s -H mkdir -m 711 /home/%[1]s/workspace
-  4. echo '%[2]s ALL=(%[1]s) NOPASSWD:SETENV: /home/%[1]s/.local/bin/claude, /usr/local/bin/agent-host' | sudo tee /etc/sudoers.d/agent-host
+  4. echo '%[2]s ALL=(%[1]s) NOPASSWD:SETENV: /home/%[1]s/.local/bin/claude' | sudo tee /etc/sudoers.d/agent-host
+     For Codex or Grok, which the host starts through this program, with the program's full path for PATH:
+     echo '%[2]s ALL=(%[1]s) NOPASSWD:SETENV: PATH, /usr/local/bin/agent-host brain-home -- PATH *' | sudo tee -a /etc/sudoers.d/agent-host
      sudo chmod 440 /etc/sudoers.d/agent-host
   5. Install this program where %[1]s can run it (the brain starts it for its tools), and run the host from there:
        sudo install -m 755 %[3]s /usr/local/bin/agent-host

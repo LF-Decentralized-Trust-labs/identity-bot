@@ -166,7 +166,8 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 		}
 	}
 	if signIn != nil {
-		kept, err := s.keepBrainSignIn(*agent, *signIn, madeByController(r))
+		kept, err := s.keepBrainSignIn(*agent, *signIn, madeByController(r),
+			req.BrainSignIn != nil && req.BrainSignIn.MaxConcurrentRuns != nil)
 		if err != nil {
 			if derr := s.assetHandler.Store.DeleteAsset(agent.ID); derr != nil {
 				log.Printf("[mcp] agent %s: its sign-in could not be kept, and it could not be removed: %v", agent.PairwiseAID, derr)
@@ -387,7 +388,7 @@ func (s *CoreServer) handleUpdateAgentConfig(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if signIn != nil {
-		kept, err := s.keepBrainSignIn(*updated, *signIn, madeByController(r))
+		kept, err := s.keepBrainSignIn(*updated, *signIn, madeByController(r), false)
 		if err != nil {
 			jsonError(w, "the configuration changed, but the sign-in was not kept: "+err.Error(), http.StatusServiceUnavailable)
 			return

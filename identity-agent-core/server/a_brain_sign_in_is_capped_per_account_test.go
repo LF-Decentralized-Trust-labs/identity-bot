@@ -6,16 +6,20 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"identity-agent-core/agenthost"
 	"identity-agent-core/brainsignin"
 	"identity-agent-core/brainsignin/brainsignintest"
+	"identity-agent-core/sandbox"
 )
 
 // Two AI agents using one Claude sign-in share its cap: the second cannot
@@ -128,6 +132,16 @@ func (p *providerStub) serve(t *testing.T) *httptest.Server {
 	return srv
 }
 
+// loopbackAllowed is the rule for which addresses a model server is checked
+// at, with this computer allowed, so a test server can stand in for one on the
+// network.
+func loopbackAllowed(a netip.Addr) error {
+	if a.IsLoopback() {
+		return nil
+	}
+	return brainsignin.ModelServerAddress(a)
+}
+
 // A sign-in is checked before it is kept, by one request to its provider, and
 // nothing is kept by checking. A Claude subscription is never sent anywhere by
 // the Identity Agent; a Codex sign-in file is read for its account.
@@ -136,7 +150,19 @@ func TestASignInIsCheckedBeforeItIsKept(t *testing.T) {
 	stub := &providerStub{}
 	srv := stub.serve(t)
 	w.s.brainChecker = &brainsignin.Checker{Anthropic: srv.URL + "/a", OpenAI: srv.URL + "/oa", XAI: srv.URL + "/x",
-		OpenRouter: srv.URL + "/or", Google: srv.URL + "/g"}
+		OpenRouter: srv.URL + "/or", Google: srv.URL + "/g", AddressRule: loopbackAllowed}
+	// A model server that sends the check on to another: the key must not
+	// follow it there.
+	var elsewhereHit atomic.Bool
+	elsewhere := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		elsewhereHit.Store(true)
+		_, _ = rw.Write([]byte(`{"data":[]}`))
+	}))
+	t.Cleanup(elsewhere.Close)
+	redirector := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		http.Redirect(rw, r, elsewhere.URL+"/v1/models", http.StatusFound)
+	}))
+	t.Cleanup(redirector.Close)
 	for _, c := range []struct {
 		body, account, checked string
 		ok                     bool
@@ -147,7 +173,7 @@ func TestASignInIsCheckedBeforeItIsKept(t *testing.T) {
 		{`{"kind":"api_key","provider":"xai","secret":"xai-GOOD"}`, "Support team key", "provider", true},
 		{`{"kind":"api_key","provider":"openrouter","secret":"sk-or-GOOD"}`, "Research", "provider", true},
 		{`{"kind":"local","provider":"local","endpoint":"` + srv.URL + `","secret":"GOOD"}`, "", "provider", true},
-		{`{"kind":"local","provider":"openai-compatible","endpoint":"` + srv.URL + `/redirect/v1","secret":"GOOD"}`, "", "provider", false},
+		{`{"kind":"local","provider":"openai-compatible","endpoint":"` + redirector.URL + `/v1","secret":"GOOD"}`, "", "provider", false},
 		{`{"kind":"subscription","provider":"claude-code","secret":"sk-ant-oat01-NEVER-SENT"}`, "", "not_here", false},
 	} {
 		code, out, raw := w.asOwner(t, "POST", "/api/mcp/brain-sign-in/test", c.body)
@@ -157,6 +183,9 @@ func TestASignInIsCheckedBeforeItIsKept(t *testing.T) {
 		if strings.Contains(raw, "GOOD") || strings.Contains(raw, "BAD") {
 			t.Errorf("the check's answer carries the key: %s", raw)
 		}
+	}
+	if elsewhereHit.Load() {
+		t.Fatal("the check followed a redirect, and the key went to another server")
 	}
 	codex, _ := json.Marshal(map[string]any{"kind": "subscription", "provider": "codex",
 		"secret": brainsignintest.CodexSignIn("acct-1", "alex@example.org", "r")})
@@ -190,6 +219,121 @@ func TestASignInIsCheckedBeforeItIsKept(t *testing.T) {
 	_, out, _ := w.asOwner(t, "GET", "/api/mcp/brain-sign-in/choices", "")
 	if n := len(out["choices"].([]any)); n != len(brainsignin.Runnable()) {
 		t.Fatalf("%d choices", n)
+	}
+}
+
+// A check carries only the key it is checking: the vault adds none of its
+// own, even for an address the vault holds a key for. Otherwise a wrong key
+// would be answered with the right one, and look as if it worked.
+func TestTheVaultAddsNoKeyToACheck(t *testing.T) {
+	w := signInWorld(t)
+	stub := &providerStub{}
+	srv := stub.serve(t)
+	w.s.brainChecker = &brainsignin.Checker{Anthropic: srv.URL + "/a", AddressRule: loopbackAllowed}
+	if err := w.s.SandboxManager.SetServiceCredential("a-kept-key", []string{"127.0.0.1"},
+		map[string]string{"Authorization": "Bearer VAULT-KEY-GOOD", "x-api-key": "VAULT-KEY-GOOD"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{
+		`{"kind":"api_key","provider":"anthropic","secret":"sk-ant-api03-BAD"}`,
+		`{"kind":"local","provider":"local","endpoint":"` + srv.URL + `"}`,
+	} {
+		if code, out, raw := w.asOwner(t, "POST", "/api/mcp/brain-sign-in/test", body); code != http.StatusOK || out["ok"] != false {
+			t.Errorf("%s was answered with the vault's key: %d %s", body, code, raw)
+		}
+	}
+	for _, s := range stub.seen {
+		if strings.Contains(s, "VAULT-KEY") {
+			t.Fatalf("the vault added its own key to a check: %s", s)
+		}
+	}
+	if len(stub.seen) != 2 {
+		t.Fatalf("the checks did not reach the server: %v", stub.seen)
+	}
+}
+
+// A check goes only where the owner lets this Identity Agent go: a domain the
+// owner blocked is not reached by a check either. Before, the Identity Agent's
+// own requests were approved without looking at the owner's blocks.
+func TestACheckKeepsToTheOwnersBlocks(t *testing.T) {
+	w := signInWorld(t)
+	stub := &providerStub{}
+	srv := stub.serve(t)
+	w.s.brainChecker = &brainsignin.Checker{AddressRule: loopbackAllowed}
+	// No screen sets the owner's blocks for this Identity Agent's own requests
+	// yet; a rule kept for them is still applied.
+	if err := w.s.SandboxManager.Store().SaveApp(sandbox.App{ID: sandbox.BackendLLMAppID, Name: "this Identity Agent",
+		ExecutionType: "native", DisplayMethod: "none", ManifestJSON: "{}", InstallStatus: "installed"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.s.SandboxManager.Store().SavePolicyRule(sandbox.PolicyRule{AppID: sandbox.BackendLLMAppID,
+		RuleType: "domain_block", Target: "127.0.0.1", Source: "user"}); err != nil {
+		t.Fatal(err)
+	}
+	code, out, raw := w.asOwner(t, "POST", "/api/mcp/brain-sign-in/test",
+		`{"kind":"local","provider":"local","endpoint":"http://someone:pw@`+strings.TrimPrefix(srv.URL, "http://")+`"}`)
+	if code != http.StatusOK || out["ok"] != false || !strings.Contains(raw, "user name or password") {
+		t.Fatalf("an address with a password: %d %s", code, raw)
+	}
+	code, out, raw = w.asOwner(t, "POST", "/api/mcp/brain-sign-in/test",
+		`{"kind":"local","provider":"local","endpoint":"`+srv.URL+`"}`)
+	if code != http.StatusOK || out["ok"] != false || len(stub.seen) != 0 {
+		t.Fatalf("a blocked domain was reached: %d %s, %v", code, raw, stub.seen)
+	}
+}
+
+// One account has one cap, whichever of its AI agents set it, and a
+// subscription's cannot be lifted to none.
+func TestAnAccountsCapIsOneNumber(t *testing.T) {
+	w := signInWorld(t)
+	put := func(id string, body map[string]any) (int, map[string]any, string) {
+		b, _ := json.Marshal(body)
+		return w.asOwner(t, "PUT", "/api/mcp/agents/"+id+"/brain-sign-in", string(b))
+	}
+	if code, _, raw := put(w.a.ID, map[string]any{"kind": "subscription", "provider": "codex", "max_concurrent_runs": 2,
+		"secret": brainsignintest.CodexSignIn("acct-1", "alex@example.org", "RA")}); code != http.StatusOK {
+		t.Fatalf("%d %s", code, raw)
+	}
+	// Signed in separately for the same account, with no cap given: it takes
+	// the account's.
+	code, out, raw := put(w.b.ID, map[string]any{"kind": "subscription", "provider": "codex",
+		"secret": brainsignintest.CodexSignIn("acct-1", "alex@example.org", "RB")})
+	if code != http.StatusOK || out["sign_in"].(map[string]any)["max_concurrent_runs"].(float64) != 2 {
+		t.Fatalf("a second sign-in of the account did not take its cap: %d %s", code, raw)
+	}
+	// Either AI agent changing it changes it for both.
+	if code, _, raw := put(w.b.ID, map[string]any{"max_concurrent_runs": 3}); code != http.StatusOK {
+		t.Fatalf("%d %s", code, raw)
+	}
+	_, out, _ = w.asOwner(t, "GET", "/api/mcp/agents/"+w.a.ID+"/brain-sign-in", "")
+	if n := out["sign_in"].(map[string]any)["max_concurrent_runs"].(float64); n != 3 {
+		t.Fatalf("the other AI agent on the account has cap %v, want 3", n)
+	}
+	ctx := context.Background()
+	var held []*agenthost.Borrowed
+	for _, h := range []*agenthost.Host{w.hostA, w.hostA, w.hostB} {
+		b, err := h.Borrow(ctx)
+		if err != nil {
+			t.Fatalf("run %d of 3: %v", len(held)+1, err)
+		}
+		held = append(held, b)
+	}
+	if _, err := w.hostA.Borrow(ctx); !errors.Is(err, agenthost.ErrSignInBusy) {
+		t.Fatalf("a fourth run on an account capped at three: %v", err)
+	}
+	for i, b := range held {
+		h := w.hostA
+		if i == 2 {
+			h = w.hostB
+		}
+		_ = h.Return(ctx, b)
+	}
+	if code, _, raw := put(w.a.ID, map[string]any{"max_concurrent_runs": 0}); code != http.StatusBadRequest {
+		t.Fatalf("a subscription's cap was lifted to none: %d %s", code, raw)
+	}
+	if code, _, raw := put(w.a.ID, map[string]any{"kind": "api_key", "provider": "openai", "secret": "sk-X",
+		"max_concurrent_runs": 0}); code != http.StatusOK {
+		t.Fatalf("a key could not be left uncapped: %d %s", code, raw)
 	}
 }
 
@@ -253,4 +397,134 @@ func TestARenewedCodexSignInIsKept(t *testing.T) {
 		t.Fatalf("a sign-in for another account was kept: %s", got)
 	}
 	_ = w.hostA.Return(context.Background(), held)
+}
+
+// A run whose lease lapsed — its body was out of reach for longer than a
+// lease holds — still gives back the sign-in its program refreshed, and it is
+// kept. Before, the lapsed lease was forgotten before the return was read, so
+// the refresh was lost and the next run was lent a token Codex had replaced.
+func TestARefreshReturnedAfterTheLeaseLapsedIsKept(t *testing.T) {
+	w := signInWorld(t)
+	first := brainsignintest.CodexSignIn("acct-1", "alex@example.org", "REFRESH-ONE")
+	renewed := brainsignintest.CodexSignIn("acct-1", "alex@example.org", "REFRESH-TWO")
+	body, _ := json.Marshal(map[string]any{"kind": "subscription", "provider": "codex", "secret": first})
+	if code, _, raw := w.asOwner(t, "PUT", "/api/mcp/agents/"+w.a.ID+"/brain-sign-in", string(body)); code != http.StatusOK {
+		t.Fatalf("signing in: %d %s", code, raw)
+	}
+	held, err := w.hostA.Borrow(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.s.brainLeases().Lapsed(time.Now().Add(brainsignin.LeaseTTL + time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	// Another run takes the place the lapsed lease held.
+	other, err := w.hostA.Borrow(context.Background())
+	if err != nil {
+		t.Fatalf("the lapsed lease still held its place: %v", err)
+	}
+	ret, _ := json.Marshal(map[string]string{"lease_id": held.LeaseID, "sign_in": renewed})
+	code, out, err := w.hostA.CallContext(context.Background(), "POST", "/api/agent-host/brain-sign-in/return", ret)
+	if err != nil || code != http.StatusOK {
+		t.Fatalf("returning a lapsed lease: %d %s %v", code, out, err)
+	}
+	if rec, _, _ := w.s.SandboxManager.BrainSignIn(brainsignin.Ref(w.a.ID)); rec.Secret != renewed {
+		t.Fatal("the sign-in refreshed during a run whose lease lapsed was lost")
+	}
+	_ = w.hostA.Return(context.Background(), other)
+}
+
+// A refreshed sign-in that could not be given back when its run ended is
+// given back the next time the body reaches the Identity Agent, before it
+// borrows again: the next run is lent the refreshed one.
+func TestARefreshKeptOnTheMachineIsGivenBackOnTheNextRun(t *testing.T) {
+	w := signInWorld(t)
+	t.Setenv("HOME", t.TempDir())
+	first := brainsignintest.CodexSignIn("acct-1", "alex@example.org", "REFRESH-ONE")
+	renewed := brainsignintest.CodexSignIn("acct-1", "alex@example.org", "REFRESH-TWO")
+	body, _ := json.Marshal(map[string]any{"kind": "subscription", "provider": "codex", "secret": first})
+	if code, _, raw := w.asOwner(t, "PUT", "/api/mcp/agents/"+w.a.ID+"/brain-sign-in", string(body)); code != http.StatusOK {
+		t.Fatalf("signing in: %d %s", code, raw)
+	}
+	held, err := w.hostA.Borrow(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// What a run that could not reach the Identity Agent left on its machine.
+	pending, _ := json.Marshal([]map[string]string{{"lease_id": held.LeaseID, "sign_in": renewed}})
+	if err := os.WriteFile(filepath.Join(w.hostA.DataDir, "sign-ins-to-give-back.json"), pending, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.s.brainLeases().Lapsed(time.Now().Add(brainsignin.LeaseTTL + time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	w.openedWith(t)
+	if err := w.hostA.Run(context.Background(), agenthost.RunOptions{
+		Brain: agenthost.Codex{Path: fakeCodexLentOnly(t, renewed)}, Once: true, Workspace: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(w.hostA.DataDir, "sign-ins-to-give-back.json")); !os.IsNotExist(err) {
+		t.Fatalf("the refresh given back is still kept on the machine: %v", err)
+	}
+	if rec, _, _ := w.s.SandboxManager.BrainSignIn(brainsignin.Ref(w.a.ID)); rec.Secret != renewed {
+		t.Fatal("the refresh kept on the machine was not given back")
+	}
+}
+
+// fakeCodexLentOnly is a stand-in for Codex that answers only when it is lent
+// want, and renews nothing.
+func fakeCodexLentOnly(t *testing.T, want string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in program is a shell script")
+	}
+	path := filepath.Join(t.TempDir(), "codex")
+	wantFile := filepath.Join(t.TempDir(), "want")
+	if err := os.WriteFile(wantFile, []byte(want), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\ncat >/dev/null\n" +
+		"cmp -s \"$CODEX_HOME/auth.json\" " + wantFile + " || { echo 'lent the wrong sign-in' >&2; exit 1; }\n" +
+		`echo '{"type":"thread.started","thread_id":"t-1"}'` + "\n" +
+		`echo '{"type":"item.completed","item":{"type":"agent_message","text":"done"}}'` + "\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// A refreshed sign-in is written only where the very sign-in lent is kept: the
+// borrowing AI agent's, and one shared from it. Another AI agent's sign-in of
+// the same account, made separately, is its own and is left alone; and a
+// refreshed file for another person on the account is not kept at all.
+func TestARefreshIsWrittenOnlyWhereTheLentSignInIsKept(t *testing.T) {
+	w := signInWorld(t)
+	third := w.provision(t, "Third", []string{capabilityMessageAgent})
+	first := brainsignintest.CodexSignIn("acct-1", "alex@example.org", "REFRESH-ONE")
+	separate := brainsignintest.CodexSignIn("acct-1", "alex@example.org", "REFRESH-SEPARATE")
+	renewed := brainsignintest.CodexSignIn("acct-1", "alex@example.org", "REFRESH-TWO")
+	for id, body := range map[string]map[string]any{
+		w.a.ID:   {"kind": "subscription", "provider": "codex", "secret": first},
+		third.ID: {"kind": "subscription", "provider": "codex", "secret": separate},
+	} {
+		b, _ := json.Marshal(body)
+		if code, _, raw := w.asOwner(t, "PUT", "/api/mcp/agents/"+id+"/brain-sign-in", string(b)); code != http.StatusOK {
+			t.Fatalf("signing in: %d %s", code, raw)
+		}
+	}
+	if code, _, raw := w.asOwner(t, "PUT", "/api/mcp/agents/"+w.b.ID+"/brain-sign-in", `{"same_as":"`+w.a.ID+`"}`); code != http.StatusOK {
+		t.Fatalf("sharing: %d %s", code, raw)
+	}
+	lease := brainsignin.Lease{Lent: brainsignin.Fingerprint("codex", first)}
+	if got := w.s.keepRefreshedSignIn(*w.a, lease, brainsignintest.CodexSignIn("acct-1", "eve@example.org", "R")); !strings.Contains(got, "not kept") {
+		t.Fatalf("a refresh for another person on the account: %s", got)
+	}
+	if got := w.s.keepRefreshedSignIn(*w.a, lease, renewed); !strings.Contains(got, "every AI agent sharing it") {
+		t.Fatalf("keeping the refresh: %s", got)
+	}
+	for id, want := range map[string]string{w.a.ID: renewed, w.b.ID: renewed, third.ID: separate} {
+		if rec, _, _ := w.s.SandboxManager.BrainSignIn(brainsignin.Ref(id)); rec.Secret != want {
+			t.Errorf("%s holds the wrong sign-in after the refresh", id)
+		}
+	}
 }

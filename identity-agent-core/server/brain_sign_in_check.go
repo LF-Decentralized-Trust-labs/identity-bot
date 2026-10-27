@@ -20,15 +20,16 @@ import (
 // keeping a sign-in its program refreshed during a run.
 
 // brainCheck is the checker of sign-ins: one request to the provider, through
-// this Identity Agent's governed way out — the same policy check, proxy log
-// and trace as its own model calls — without the vault adding a key of its
-// own, and following no redirect, so the key goes only where it is checked.
+// this Identity Agent's governed way out — the same policy check, including
+// any domain the owner blocked, proxy log and trace as its own model calls —
+// without the vault adding a key of its own, and following no redirect, so
+// the key goes only where it is checked. A model server is reached only at the
+// addresses its name had when checked (brainsignin.ModelServerAddress).
 func (s *CoreServer) brainCheck() (brainsignin.Checker, error) {
 	if s.SandboxManager == nil {
 		return brainsignin.Checker{}, errNoVault
 	}
-	client := brainsignin.NoRedirects()
-	send := func(ctx context.Context, req *http.Request) (*http.Response, error) {
+	send := func(ctx context.Context, req *http.Request, client *http.Client) (*http.Response, error) {
 		return s.SandboxManager.MakeTrackedRequestAsGiven(ctx, req, client)
 	}
 	if s.brainChecker != nil {
@@ -128,11 +129,17 @@ var refreshMu sync.Mutex
 
 // keepRefreshedSignIn keeps the sign-in file a run's program refreshed — Codex
 // and Grok renew their own tokens while they run, and the token they were lent
-// may stop working once they have — in place of the one lent, and of every copy
-// of it another AI agent shares. It is kept only while the sign-in is still the
-// one lent and still the same account, so a sign-in replaced during the run, or
-// a body sending some other account's, changes nothing. It says what it did,
-// for the record.
+// may stop working once they have — in place of the one lent.
+//
+// It is kept only while the borrowing AI agent's sign-in is still the one
+// lent, and only when the refreshed file names the same account and the same
+// person as the lent one (brainsignin.SameSignInAs), so a sign-in replaced
+// during the run, or a body sending some other account's, changes nothing.
+// It is written to the borrowing AI agent's sign-in, and to every other AI
+// agent's that holds the very sign-in lent — one shared by naming the
+// borrowing AI agent (same_as) is a copy of it — since the refresh retired
+// that one for all of them. Another sign-in of the same account, made
+// separately, is left alone. It says what it did, for the record.
 func (s *CoreServer) keepRefreshedSignIn(a asset.Asset, lease brainsignin.Lease, content string) string {
 	refreshMu.Lock()
 	defer refreshMu.Unlock()
@@ -146,12 +153,15 @@ func (s *CoreServer) keepRefreshedSignIn(a asset.Asset, lease brainsignin.Lease,
 		return "the refreshed sign-in was not kept: " + err.Error()
 	case !had:
 		return "the refreshed sign-in was not kept: the sign-in was removed during the run"
-	case rec.Kind != brainsignin.KindSubscription || (rec.Provider != brainsignin.Codex && rec.Provider != brainsignin.Grok):
+	case !brainsignin.RefreshesItself(rec.Kind, rec.Provider):
 		return "the refreshed sign-in was not kept: this kind of sign-in is not refreshed by its program"
 	case lease.Lent == "" || brainsignin.Fingerprint(rec.Provider, rec.Secret) != lease.Lent:
 		return "the refreshed sign-in was not kept: the sign-in was replaced during the run"
 	case rec.Secret == content:
 		return "the sign-in was unchanged"
+	}
+	if err := brainsignin.SameSignInAs(rec.Provider, rec.Secret, content); err != nil {
+		return "the refreshed sign-in was not kept: " + err.Error()
 	}
 	fresh := rec
 	fresh.Secret = content
@@ -159,12 +169,14 @@ func (s *CoreServer) keepRefreshedSignIn(a asset.Asset, lease brainsignin.Lease,
 		return "the refreshed sign-in was not kept: " + err.Error()
 	}
 	fresh.Identify()
-	if fresh.AccountID != rec.AccountID {
-		return "the refreshed sign-in was not kept: it is for another account"
+	// The borrowing AI agent's own sign-in first: if that cannot be written,
+	// nothing else is.
+	if err := vault.SetBrainSignIn(brainsignin.Ref(a.ID), fresh); err != nil {
+		return "the refreshed sign-in could not be kept: " + err.Error()
 	}
 	n := 0
 	for _, k := range s.keptBrainSignIns() {
-		if k.rec.Provider != rec.Provider || brainsignin.Fingerprint(k.rec.Provider, k.rec.Secret) != lease.Lent {
+		if k.asset.ID == a.ID || k.rec.Provider != rec.Provider || brainsignin.Fingerprint(k.rec.Provider, k.rec.Secret) != lease.Lent {
 			continue
 		}
 		upd := k.rec
@@ -176,9 +188,6 @@ func (s *CoreServer) keepRefreshedSignIn(a asset.Asset, lease brainsignin.Lease,
 		n++
 	}
 	if n == 0 {
-		return "the refreshed sign-in could not be kept"
-	}
-	if n == 1 {
 		return "the sign-in its program refreshed was kept"
 	}
 	return "the sign-in its program refreshed was kept, for every AI agent sharing it"

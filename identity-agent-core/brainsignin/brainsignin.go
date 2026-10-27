@@ -154,17 +154,25 @@ func Harness(provider string) string {
 }
 
 // DefaultMaxConcurrentRuns is a sign-in's cap on simultaneous runs when its
-// owner sets none: a subscription is shared by at most five runs, Codex's by
-// one because its sign-in cannot be shared between runs, and an API key or a
-// local model server has no cap (0).
+// owner sets none: a Claude subscription is shared by at most five runs; a
+// sign-in that renews itself while it runs — Codex's, and Grok's on a
+// subscription — by one, because two runs renewing one sign-in may sign each
+// other out; and an API key or a model server has no cap (0).
 func DefaultMaxConcurrentRuns(kind, provider string) int {
 	if kind != KindSubscription {
 		return 0
 	}
-	if provider == Codex {
+	if RefreshesItself(kind, provider) {
 		return 1
 	}
 	return DefaultSubscriptionRuns
+}
+
+// RefreshesItself reports whether a sign-in's program renews it while it
+// runs, so that two runs at once on it may sign each other out: Codex's, and
+// Grok's on a subscription. Its owner may still raise its cap, warned.
+func RefreshesItself(kind, provider string) bool {
+	return kind == KindSubscription && (provider == Codex || provider == Grok)
 }
 
 // Record is one AI agent's brain sign-in, as the vault keeps it.
@@ -244,6 +252,11 @@ func (r Record) Check() error {
 	if r.MaxConcurrentRuns < 0 {
 		return errors.New("the cap on simultaneous runs cannot be below 0 (0 is no cap)")
 	}
+	// A subscription is one person's, and always capped: 0 means no cap only
+	// for a key or a model server.
+	if r.Kind == KindSubscription && r.MaxConcurrentRuns < 1 {
+		return errors.New("a subscription's runs are always capped: at least 1 at a time")
+	}
 	return nil
 }
 
@@ -267,6 +280,10 @@ type Choice struct {
 	// DefaultMaxConcurrentRuns is the cap a sign-in gets unless its owner
 	// sets another; 0 is no cap.
 	DefaultMaxConcurrentRuns int `json:"default_max_concurrent_runs"`
+	// RefreshesItself is a sign-in its program renews while it runs: two runs
+	// at once on it may sign each other out, so a screen warns before its cap
+	// is raised past one.
+	RefreshesItself bool `json:"refreshes_itself"`
 }
 
 // Runnable are the brains a body can run from a sign-in it borrows, and so
@@ -283,6 +300,7 @@ func Runnable() []Choice {
 	for i := range out {
 		out[i].Harness = Harness(out[i].Provider)
 		out[i].DefaultMaxConcurrentRuns = DefaultMaxConcurrentRuns(out[i].Kind, out[i].Provider)
+		out[i].RefreshesItself = RefreshesItself(out[i].Kind, out[i].Provider)
 	}
 	return out
 }

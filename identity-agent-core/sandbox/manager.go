@@ -1121,7 +1121,11 @@ func (m *Manager) MakeTrackedRequestAsGiven(ctx context.Context, req *http.Reque
 
 func (m *Manager) trackedRequest(ctx context.Context, req *http.Request, inject bool, client *http.Client) (*http.Response, error) {
 	domain := req.URL.Hostname()
-	urlStr := req.URL.String()
+	// What is logged and traced never carries a user name or password the
+	// address held.
+	logged := *req.URL
+	logged.User = nil
+	urlStr := logged.String()
 
 	action, rule := m.policy.CheckDomain(BackendLLMInstanceID, BackendLLMAppID, domain, req.Method, urlStr)
 

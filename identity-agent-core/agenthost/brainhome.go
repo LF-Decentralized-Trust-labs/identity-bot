@@ -3,6 +3,8 @@ package agenthost
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,6 +36,12 @@ import (
 // program does the writing, runs the brain, and reports back on its standard
 // output alone: never its error output, which becomes a failure notice.
 
+// Each AI agent has a home of its own for each program, named for the AI agent
+// (homeName), with mode 700, so a session or a sign-in of one AI agent's is
+// not where another AI agent's run looks. AI agents whose brains run as one
+// operating-system user can still read each other's files; a brain user per
+// AI agent separates them fully.
+
 // signInFile is where Codex and Grok keep their sign-in in their home.
 const signInFile = "auth.json"
 
@@ -45,8 +53,13 @@ type brainHome struct {
 	// Var is the variable the program reads its home from: CODEX_HOME or
 	// GROK_HOME.
 	Var string `json:"var"`
-	// Name is the home's directory under ~/.agent-host-brain.
+	// Name is the home's directory under ~/.agent-host-brain: one per AI agent
+	// and program (homeName).
 	Name string `json:"name"`
+	// Legacy is a home from before homes were per AI agent, shared by every AI
+	// agent running the program. Its sign-in file, if a killed run left one,
+	// is removed; the home itself is left.
+	Legacy string `json:"legacy,omitempty"`
 	// Files are written for the run and removed after: the sign-in file.
 	Files map[string]string `json:"files,omitempty"`
 	// Config is the program's config.toml for the run. It holds no secret: a
@@ -69,8 +82,15 @@ type brainHomeOutcome struct {
 	SignIn string `json:"sign_in,omitempty"`
 }
 
-// homeOf is the brain's home: one per program, under the brain user's own
-// home directory.
+// homeName is the name of agent's home for program: the program, and a short
+// fingerprint of the AI agent's identifier, so two AI agents on one machine
+// never share a home.
+func homeName(program, agent string) string {
+	h := sha256.Sum256([]byte("agent-host brain home\x00" + agent))
+	return program + "-" + hex.EncodeToString(h[:8])
+}
+
+// homeOf is the brain's home, under the brain user's own home directory.
 func homeOf(name string) (string, error) {
 	if name == "" || strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
 		return "", fmt.Errorf("not a brain home: %q", name)
@@ -128,6 +148,13 @@ func ServeBrainHome(args []string, stdin io.Reader, stdout, stderr io.Writer) in
 	}
 	home, err := homeOf(spec.Name)
 	if err == nil {
+		// The directory holding every home is the brain user's alone too.
+		err = os.MkdirAll(filepath.Dir(home), 0o700)
+	}
+	if err == nil {
+		err = os.Chmod(filepath.Dir(home), 0o700)
+	}
+	if err == nil {
 		err = os.MkdirAll(home, 0o700)
 	}
 	if err == nil {
@@ -151,6 +178,11 @@ func ServeBrainHome(args []string, stdin io.Reader, stdout, stderr io.Writer) in
 	// programs keep theirs in auth.json, which is removed whatever this run
 	// was lent: one left by a run that crashed must not sign this one in.
 	secrets := []string{filepath.Join(home, signInFile)}
+	if spec.Legacy != "" && spec.Legacy != spec.Name {
+		if old, err := homeOf(spec.Legacy); err == nil {
+			_ = os.Remove(filepath.Join(old, signInFile))
+		}
+	}
 	for name := range spec.Files {
 		if strings.ContainsAny(name, `/\`) || name == "" {
 			fmt.Fprintf(stderr, "agent-host brain-home: not a file name: %q\n", name)

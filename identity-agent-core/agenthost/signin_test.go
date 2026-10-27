@@ -27,6 +27,8 @@ func TestBrainForTakesDisplayNamesAndProviders(t *testing.T) {
 
 // Each sign-in reaches its brain as the variable that brain reads.
 func TestABorrowedSignInIsTheVariableItsBrainReads(t *testing.T) {
+	// The home is the AI agent's own: these sign-ins name no AI agent.
+	H := homeName("x", "")[2:]
 	for _, c := range []struct {
 		b     Borrowed
 		brain string
@@ -41,17 +43,17 @@ func TestABorrowedSignInIsTheVariableItsBrainReads(t *testing.T) {
 		// Grok runs in a home of the host's making, so a session from its own
 		// sign-in on this machine does not outrank the key.
 		{Borrowed{Kind: brainsignin.KindAPIKey, Provider: brainsignin.XAI, secret: "xk"}, "grok",
-			[]string{"XAI_API_KEY=xk", envBrainHome + `={"var":"GROK_HOME","name":"grok"}`}},
+			[]string{"XAI_API_KEY=xk", envBrainHome + `={"var":"GROK_HOME","name":"grok-` + H + `","legacy":"grok"}`}},
 		{Borrowed{Kind: brainsignin.KindAPIKey, Provider: brainsignin.OpenAI, secret: "ok"}, "codex",
-			[]string{"CODEX_API_KEY=ok", envBrainHome + `={"var":"CODEX_HOME","name":"codex"}`}},
+			[]string{"CODEX_API_KEY=ok", envBrainHome + `={"var":"CODEX_HOME","name":"codex-` + H + `","legacy":"codex"}`}},
 		{Borrowed{Kind: brainsignin.KindSubscription, Provider: brainsignin.Codex, secret: "{}"}, "codex",
-			[]string{envBrainHome + `={"var":"CODEX_HOME","name":"codex","files":{"auth.json":"{}"},"return":"auth.json"}`}},
+			[]string{envBrainHome + `={"var":"CODEX_HOME","name":"codex-` + H + `","legacy":"codex","files":{"auth.json":"{}"},"return":"auth.json"}`}},
 		{Borrowed{Kind: brainsignin.KindSubscription, Provider: brainsignin.Grok, secret: "{}"}, "grok",
-			[]string{envBrainHome + `={"var":"GROK_HOME","name":"grok","files":{"auth.json":"{}"},"return":"auth.json"}`}},
+			[]string{envBrainHome + `={"var":"GROK_HOME","name":"grok-` + H + `","legacy":"grok","files":{"auth.json":"{}"},"return":"auth.json"}`}},
 		{Borrowed{Kind: brainsignin.KindAPIKey, Provider: brainsignin.OpenRouter, secret: "or"}, "grok",
-			[]string{envModelKey + "=or", envBrainHome + `={"var":"GROK_HOME","name":"grok","model_base_url":"https://openrouter.ai/api/v1"}`}},
+			[]string{envModelKey + "=or", envBrainHome + `={"var":"GROK_HOME","name":"grok-` + H + `","legacy":"grok","model_base_url":"https://openrouter.ai/api/v1"}`}},
 		{Borrowed{Kind: brainsignin.KindLocal, Provider: brainsignin.OpenAICompatible, Endpoint: "https://vllm.example/v1/"}, "grok",
-			[]string{envModelKey + "=" + localModelNoKey, envBrainHome + `={"var":"GROK_HOME","name":"grok","model_base_url":"https://vllm.example/v1"}`}},
+			[]string{envModelKey + "=" + localModelNoKey, envBrainHome + `={"var":"GROK_HOME","name":"grok-` + H + `","legacy":"grok","model_base_url":"https://vllm.example/v1"}`}},
 	} {
 		got, err := c.b.Env(c.brain)
 		if err != nil || strings.Join(got, " ") != strings.Join(c.want, " ") {
