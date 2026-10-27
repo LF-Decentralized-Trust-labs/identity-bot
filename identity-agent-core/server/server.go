@@ -31,6 +31,7 @@ import (
 	"identity-agent-core/endpoint"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/keriengine"
+	"identity-agent-core/lending"
 	"identity-agent-core/linkverifier"
 	"identity-agent-core/login"
 	"identity-agent-core/oidc"
@@ -59,6 +60,15 @@ type CoreServer struct {
 	// brainChecker, when set, replaces the providers a brain's sign-in is
 	// checked against (brain_sign_in_check.go); tests stand them up locally.
 	brainChecker *brainsignin.Checker
+	// githubAPI, when set, replaces GitHub's API address (github_access.go);
+	// tests stand GitHub up locally. Nothing a request sends can set it.
+	githubAPI string
+	// lendLedger is the one record of everything lent to AI agents' bodies —
+	// brains' sign-ins and services' access alike (lends.go), made once.
+	lendsOnce         sync.Once
+	lendLedger        *lending.Ledger
+	legacyLeasesMu    sync.Mutex
+	legacyLeasesMoved atomic.Bool
 	// Providers is the registry of operators this agent can draw services from.
 	// Loaded once at startup; the owner may add to it at runtime.
 	Providers *provider.Registry
@@ -733,6 +743,7 @@ func (s *CoreServer) Start() error {
 	stop := s.anchorStop
 	s.anchorStopMu.Unlock()
 	go s.keepAnchoring(stop)
+	go s.keepSweepingLends(stop)
 
 	s.httpSrv = s.httpServer()
 	go func() {

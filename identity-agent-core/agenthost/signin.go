@@ -282,24 +282,45 @@ func homeIn(creds []string) (*brainHome, []string) {
 // withCredentials is the environment a brain's process is started with: this
 // machine's own, then env on top. When env carries a sign-in, every other
 // sign-in in this machine's environment is withheld, so the brain cannot fall
-// back on one somebody exported by hand.
+// back on one somebody exported by hand; and when it carries GitHub access,
+// every other way git and gh might find GitHub access is withheld the same way.
 func withCredentials(base, env []string) []string {
-	given := false
-	for _, kv := range env {
-		for _, name := range credentialVars {
+	groups := []struct {
+		names, prefixes []string
+	}{
+		{names: credentialVars},
+		{names: githubVars, prefixes: githubVarPrefixes},
+	}
+	in := func(kv string, names, prefixes []string) bool {
+		for _, name := range names {
 			if strings.HasPrefix(kv, name+"=") {
-				given = true
+				return true
+			}
+		}
+		for _, p := range prefixes {
+			if strings.HasPrefix(kv, p) {
+				return true
+			}
+		}
+		return false
+	}
+	var withheld [][2][]string
+	for _, g := range groups {
+		for _, kv := range env {
+			if in(kv, g.names, g.prefixes) {
+				withheld = append(withheld, [2][]string{g.names, g.prefixes})
+				break
 			}
 		}
 	}
-	if !given {
+	if len(withheld) == 0 {
 		return append(base, env...)
 	}
 	out := make([]string, 0, len(base)+len(env))
 next:
 	for _, kv := range base {
-		for _, name := range credentialVars {
-			if strings.HasPrefix(kv, name+"=") {
+		for _, g := range withheld {
+			if in(kv, g[0], g[1]) {
 				continue next
 			}
 		}
@@ -383,27 +404,34 @@ func (e *leaseLapsed) Error() string {
 	return fmt.Sprintf("the sign-in's lease has lapsed (%d)", e.status)
 }
 
-// returnBackoff is how long giveBack waits before each further try.
+// returnBackoff is how long a return waits before each further try.
 var returnBackoff = []time.Duration{2 * time.Second, 5 * time.Second, 10 * time.Second}
 
-// giveBack returns a borrowed sign-in, whatever became of the run: with its
-// own time limit, so a run cancelled or timed out still gives it back. It
-// tries again, waiting longer each time, while the Identity Agent cannot be
-// reached. A sign-in the run's program renewed that still could not be given
+// retryReturn gives something lent back, whatever became of the run: each try
+// with its own time limit, so a run cancelled or timed out still gives it
+// back, and tried again, waiting longer each time, while the Identity Agent
+// cannot be reached. It returns the last try's outcome. Every kind of lend is
+// given back this way.
+func retryReturn(give func(ctx context.Context) error) error {
+	var err error
+	for i := 0; ; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		err = give(ctx)
+		cancel()
+		if returnIsFinal(err) || i >= len(returnBackoff) {
+			return err
+		}
+		time.Sleep(returnBackoff[i])
+	}
+}
+
+// giveBack returns a borrowed sign-in, whatever became of the run
+// (retryReturn). A sign-in the run's program renewed that still could not be given
 // back is kept on this machine for the next time it reaches the Identity
 // Agent (pendingReturn): the one lent may no longer work, so it must not be
 // lost with the run.
 func (h *Host) giveBack(b *Borrowed, logf func(string, ...any)) {
-	var err error
-	for i := 0; ; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		err = h.Return(ctx, b)
-		cancel()
-		if returnIsFinal(err) || i >= len(returnBackoff) {
-			break
-		}
-		time.Sleep(returnBackoff[i])
-	}
+	err := retryReturn(func(ctx context.Context) error { return h.Return(ctx, b) })
 	switch {
 	case err != nil && returnIsFinal(err):
 		logf("[agent-host] %v; nothing more to give back", err)

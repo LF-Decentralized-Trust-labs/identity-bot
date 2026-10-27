@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"identity-agent-core/lending"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -393,7 +394,7 @@ func TestARenewedCodexSignInIsKept(t *testing.T) {
 		t.Fatal(err)
 	}
 	other := brainsignintest.CodexSignIn("acct-OTHER", "eve@example.org", "R")
-	got, _ := w.s.keepRefreshedSignIn(*w.a, brainsignin.Lease{Lent: brainsignin.Fingerprint("codex", renewed)}, other)
+	got, _ := w.s.keepRefreshedSignIn(*w.a, lending.Lend{Lent: brainsignin.Fingerprint("codex", renewed)}, other)
 	if !strings.Contains(got, "another account") {
 		t.Fatalf("a sign-in for another account was kept: %s", got)
 	}
@@ -416,7 +417,7 @@ func TestARefreshReturnedAfterTheLeaseLapsedIsKept(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w.s.brainLeases().Lapsed(time.Now().Add(brainsignin.LeaseTTL + time.Minute)); err != nil {
+	if _, err := w.s.lends().Lapse(time.Now().Add(brainsignin.LeaseTTL + time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	// Another run takes the place the lapsed lease held.
@@ -456,7 +457,7 @@ func TestARefreshKeptOnTheMachineIsGivenBackOnTheNextRun(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(w.hostA.DataDir, "sign-ins-to-give-back.json"), pending, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w.s.brainLeases().Lapsed(time.Now().Add(brainsignin.LeaseTTL + time.Minute)); err != nil {
+	if _, err := w.s.lends().Lapse(time.Now().Add(brainsignin.LeaseTTL + time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	w.openedWith(t)
@@ -516,7 +517,7 @@ func TestARefreshIsWrittenOnlyWhereTheLentSignInIsKept(t *testing.T) {
 	if code, _, raw := w.asOwner(t, "PUT", "/api/mcp/agents/"+w.b.ID+"/brain-sign-in", `{"same_as":"`+w.a.ID+`"}`); code != http.StatusOK {
 		t.Fatalf("sharing: %d %s", code, raw)
 	}
-	lease := brainsignin.Lease{Lent: brainsignin.Fingerprint("codex", first)}
+	lease := lending.Lend{Lent: brainsignin.Fingerprint("codex", first)}
 	if got, _ := w.s.keepRefreshedSignIn(*w.a, lease, brainsignintest.CodexSignIn("acct-1", "eve@example.org", "R")); !strings.Contains(got, "not kept") {
 		t.Fatalf("a refresh for another person on the account: %s", got)
 	}
@@ -568,7 +569,7 @@ func TestARefreshTheVaultCannotKeepYetIsNotTakenAsReturned(t *testing.T) {
 	if code != http.StatusServiceUnavailable {
 		t.Fatalf("a refresh the vault could not keep was answered %d %s", code, out)
 	}
-	if w.s.brainLeases().InUse(w.a.ID, time.Now()) != 1 {
+	if w.s.brainRunsInUse(func(x lending.Lend) bool { return x.Agent == w.a.ID }) != 1 {
 		t.Fatal("the lease was given back though its refresh was not kept")
 	}
 	if err := os.Chmod(vaultFile, 0o600); err != nil {

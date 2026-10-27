@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"identity-agent-core/lending"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,7 +11,6 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 
 	"identity-agent-core/agenthost"
 	"identity-agent-core/brainsignin"
@@ -181,7 +181,7 @@ func TestABorrowedSignInReachesTheBrainOnlyThroughItsEnvironment(t *testing.T) {
 		}
 		noFileHolds(t, workspace, token)
 		noFileHolds(t, w.hostA.DataDir, token)
-		if n := w.s.brainLeases().InUse(w.a.ID, time.Now()); n != 0 {
+		if n := w.s.brainRunsInUse(func(x lending.Lend) bool { return x.Agent == w.a.ID }); n != 0 {
 			t.Fatalf("fail=%v: %d run(s) still hold the sign-in after the run ended", fail, n)
 		}
 		if n := len(governanceRows(t, w, "agent.brain.sign_in.returned")); n != 1 {

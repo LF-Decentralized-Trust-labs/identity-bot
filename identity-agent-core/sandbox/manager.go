@@ -833,10 +833,26 @@ func (m *Manager) SetServiceCredential(service string, matchDomains []string, he
 	return m.credentials.SetCredential(service, matchDomains, headers)
 }
 
-// RemoveServiceCredential deletes one service credential from the vault.
+// RemoveServiceCredential deletes one service credential from the vault. A
+// secret kept for the Identity Agent's own use is removed where it is used,
+// which also withdraws what was lent from it, never here.
 func (m *Manager) RemoveServiceCredential(service string) error {
+	if IsKeptRef(service) {
+		return fmt.Errorf("%q names a secret this Identity Agent keeps for its own use", service)
+	}
 	return m.credentials.RemoveCredential(service)
 }
+
+// SetKept keeps a secret for the Identity Agent's own use (KeptRef).
+func (m *Manager) SetKept(ref, kind string, v any) error { return m.credentials.SetKept(ref, kind, v) }
+
+// Kept reads a secret kept for the Identity Agent's own use into out.
+func (m *Manager) Kept(ref, kind string, out any) (bool, error) {
+	return m.credentials.Kept(ref, kind, out)
+}
+
+// RemoveKept deletes a secret kept for the Identity Agent's own use.
+func (m *Manager) RemoveKept(ref string) error { return m.credentials.RemoveKept(ref) }
 
 // VaultWritable reports why the credential vault cannot be written now, or
 // nil when it can.

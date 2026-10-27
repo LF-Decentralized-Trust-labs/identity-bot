@@ -148,6 +148,15 @@ func (h *Host) Run(ctx context.Context, o RunOptions) error {
 		defer stopScreen()
 		go h.ShowScreen(screenCtx, o.Screen, o.ScreenMode, o.Log)
 	}
+	// A body that stopped mid-run may still hold GitHub access from it: given
+	// back now, so it is withdrawn at once rather than when it lapses. Tried
+	// once, so an Identity Agent out of reach does not hold up the start; the
+	// next run's borrowing withdraws it as well.
+	gctx, gcancel := context.WithTimeout(ctx, 30*time.Second)
+	if err := h.ReturnEveryGitHub(gctx); err != nil {
+		logf("[agent-host] GitHub access from before this start could not be given back yet: %v", err)
+	}
+	gcancel()
 
 	backoff := time.Second
 	for {
@@ -275,6 +284,10 @@ func (h *Host) handle(ctx context.Context, tools *toolServer, brain Brain, p age
 	var out Outcome
 	creds, borrowed, err := h.lendForTurn(ctx, brain, logf)
 	if err == nil {
+		// GitHub access, when the AI agent's grant gives it repositories, is
+		// lent for the turn alongside the sign-in, and given back with it.
+		githubEnv, github := h.lendGitHubForTurn(ctx, logf)
+		creds = append(creds, githubEnv...)
 		token := tools.open(turn)
 		tctx, cancel := context.WithTimeout(ctx, turnTimeout)
 		stop, kept := make(chan struct{}), make(chan struct{})
@@ -298,6 +311,9 @@ func (h *Host) handle(ctx context.Context, tools *toolServer, brain Brain, p age
 			// failed turn: the one it was lent may no longer work.
 			borrowed.refreshed = out.refreshed
 			h.giveBack(borrowed, logf)
+		}
+		if github != nil {
+			h.giveGitHubBack(github, logf)
 		}
 	}
 

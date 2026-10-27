@@ -11,5 +11,8 @@ func TestMain(m *testing.M) {
 	if len(os.Args) > 1 && os.Args[1] == "brain-home" {
 		os.Exit(ServeBrainHome(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "github-credential" {
+		os.Exit(ServeGitHubCredential(os.Args[2:], os.Stdin, os.Stdout, os.Getenv))
+	}
 	os.Exit(m.Run())
 }
