@@ -11,13 +11,14 @@ import (
 // program that runs them.
 func TestBrainForTakesDisplayNamesAndProviders(t *testing.T) {
 	for name, want := range map[string]string{"Claude Code": "claude-code", "claude-code": "claude-code", "": "claude-code",
-		"anthropic": "claude-code", "local": "claude-code", "Grok CLI": "grok", "grok": "grok", "xai": "grok"} {
+		"anthropic": "claude-code", "local": "claude-code", "Grok CLI": "grok", "grok": "grok", "xai": "grok",
+		"codex": "codex", "openai": "codex", "openrouter": "grok", "openai-compatible": "grok"} {
 		b, err := BrainFor(name, nil)
 		if err != nil || b.Name() != want {
 			t.Errorf("%q: %v %v, want %s", name, b, err, want)
 		}
 	}
-	for _, name := range []string{"codex", "openai", "google", "something"} {
+	for _, name := range []string{"google", "something"} {
 		if _, err := BrainFor(name, nil); err == nil {
 			t.Errorf("%q: a brain this host cannot run was accepted", name)
 		}
@@ -26,6 +27,8 @@ func TestBrainForTakesDisplayNamesAndProviders(t *testing.T) {
 
 // Each sign-in reaches its brain as the variable that brain reads.
 func TestABorrowedSignInIsTheVariableItsBrainReads(t *testing.T) {
+	// The home is the AI agent's own: these sign-ins name no AI agent.
+	H := homeName("x", "")[2:]
 	for _, c := range []struct {
 		b     Borrowed
 		brain string
@@ -37,7 +40,20 @@ func TestABorrowedSignInIsTheVariableItsBrainReads(t *testing.T) {
 			[]string{"ANTHROPIC_API_KEY=key"}},
 		{Borrowed{Kind: brainsignin.KindLocal, Provider: brainsignin.Local, Endpoint: "http://127.0.0.1:11434/"}, "claude-code",
 			[]string{"ANTHROPIC_BASE_URL=http://127.0.0.1:11434", "ANTHROPIC_AUTH_TOKEN=" + localModelNoKey}},
-		{Borrowed{Kind: brainsignin.KindAPIKey, Provider: brainsignin.XAI, secret: "xk"}, "grok", []string{"XAI_API_KEY=xk"}},
+		// Grok runs in a home of the host's making, so a session from its own
+		// sign-in on this machine does not outrank the key.
+		{Borrowed{Kind: brainsignin.KindAPIKey, Provider: brainsignin.XAI, secret: "xk"}, "grok",
+			[]string{"XAI_API_KEY=xk", envBrainHome + `={"var":"GROK_HOME","name":"grok-` + H + `","legacy":"grok"}`}},
+		{Borrowed{Kind: brainsignin.KindAPIKey, Provider: brainsignin.OpenAI, secret: "ok"}, "codex",
+			[]string{"CODEX_API_KEY=ok", envBrainHome + `={"var":"CODEX_HOME","name":"codex-` + H + `","legacy":"codex"}`}},
+		{Borrowed{Kind: brainsignin.KindSubscription, Provider: brainsignin.Codex, secret: "{}"}, "codex",
+			[]string{envBrainHome + `={"var":"CODEX_HOME","name":"codex-` + H + `","legacy":"codex","files":{"auth.json":"{}"},"return":"auth.json"}`}},
+		{Borrowed{Kind: brainsignin.KindSubscription, Provider: brainsignin.Grok, secret: "{}"}, "grok",
+			[]string{envBrainHome + `={"var":"GROK_HOME","name":"grok-` + H + `","legacy":"grok","files":{"auth.json":"{}"},"return":"auth.json"}`}},
+		{Borrowed{Kind: brainsignin.KindAPIKey, Provider: brainsignin.OpenRouter, secret: "or"}, "grok",
+			[]string{envModelKey + "=or", envBrainHome + `={"var":"GROK_HOME","name":"grok-` + H + `","legacy":"grok","model_base_url":"https://openrouter.ai/api/v1"}`}},
+		{Borrowed{Kind: brainsignin.KindLocal, Provider: brainsignin.OpenAICompatible, Endpoint: "https://vllm.example/v1/"}, "grok",
+			[]string{envModelKey + "=" + localModelNoKey, envBrainHome + `={"var":"GROK_HOME","name":"grok-` + H + `","legacy":"grok","model_base_url":"https://vllm.example/v1"}`}},
 	} {
 		got, err := c.b.Env(c.brain)
 		if err != nil || strings.Join(got, " ") != strings.Join(c.want, " ") {
@@ -48,8 +64,23 @@ func TestABorrowedSignInIsTheVariableItsBrainReads(t *testing.T) {
 	if _, err := (&Borrowed{Kind: brainsignin.KindAPIKey, Provider: brainsignin.XAI, secret: "x"}).Env("claude-code"); err == nil {
 		t.Error("an xAI key was given to Claude Code")
 	}
-	if _, err := (&Borrowed{Kind: brainsignin.KindSubscription, Provider: brainsignin.Grok, secret: "x"}).Env("grok"); err == nil {
-		t.Error("a Grok subscription, which this host cannot yet run from a borrowed sign-in, was handed over")
+	if _, err := (&Borrowed{Kind: brainsignin.KindSubscription, Provider: brainsignin.Codex, secret: "x"}).Env("claude-code"); err == nil {
+		t.Error("a Codex sign-in was given to Claude Code")
+	}
+}
+
+// Every brain a screen may offer is one a body can run from a borrowed
+// sign-in. Before, a Codex sign-in, a Grok subscription and OpenAI and
+// OpenRouter keys were kept but could not be lent to any brain.
+func TestEveryBrainOfferedCanBeRunFromABorrowedSignIn(t *testing.T) {
+	for _, c := range brainsignin.Runnable() {
+		b := Borrowed{Kind: c.Kind, Provider: c.Provider, secret: "s", Endpoint: "http://127.0.0.1:1"}
+		if _, err := b.Env(c.Harness); err != nil {
+			t.Errorf("%s/%s on %s: %v", c.Kind, c.Provider, c.Harness, err)
+		}
+		if _, err := BrainFor(c.Provider, nil); err != nil {
+			t.Errorf("%s: %v", c.Provider, err)
+		}
 	}
 }
 

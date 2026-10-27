@@ -13,23 +13,23 @@ import (
 func TestACappedSignInFreesAPlaceWhenALeaseLapses(t *testing.T) {
 	l := LeasesIn(t.TempDir())
 	now := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
-	first, _, err := l.Lend("agent", "host-1", 1, now)
+	first, _, err := l.Lend("agent", "", "", "host-1", 1, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := l.Lend("agent", "host-2", 1, now.Add(time.Minute)); !errors.Is(err, ErrInUse) {
+	if _, _, err := l.Lend("agent", "", "", "host-2", 1, now.Add(time.Minute)); !errors.Is(err, ErrInUse) {
 		t.Fatalf("a second run was lent a sign-in capped at one: %v", err)
 	}
 	// Renewed, it holds past its first expiry.
 	if _, err := l.Renew(first.ID, "host-1", "agent", now.Add(LeaseTTL-time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := l.Lend("agent", "host-2", 1, now.Add(LeaseTTL+time.Second)); !errors.Is(err, ErrInUse) {
+	if _, _, err := l.Lend("agent", "", "", "host-2", 1, now.Add(LeaseTTL+time.Second)); !errors.Is(err, ErrInUse) {
 		t.Fatalf("a renewed lease was let go: %v", err)
 	}
 	// Not renewed again: the machine is gone, and its place comes free.
 	later := now.Add(2*LeaseTTL + time.Second)
-	second, lapsed, err := l.Lend("agent", "host-2", 1, later)
+	second, lapsed, err := l.Lend("agent", "", "", "host-2", 1, later)
 	if err != nil {
 		t.Fatalf("the lapsed lease still holds its place: %v", err)
 	}
@@ -53,11 +53,11 @@ func TestAnUncappedSignInLendsToEveryRun(t *testing.T) {
 	l := LeasesIn(t.TempDir())
 	now := time.Now()
 	for i := 0; i < 20; i++ {
-		if _, _, err := l.Lend("keyed", "h", 0, now); err != nil {
+		if _, _, err := l.Lend("keyed", "", "", "h", 0, now); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, _, err := l.Lend("other", "h", 1, now); err != nil {
+	if _, _, err := l.Lend("other", "", "", "h", 1, now); err != nil {
 		t.Fatalf("another AI agent's runs counted against this one: %v", err)
 	}
 }
@@ -107,7 +107,7 @@ func TestAnUnreadableLeaseRecordLendsNothing(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "brain_sign_in_leases.json"), []byte("{not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := l.Lend("agent", "h", 1, time.Now()); !errors.Is(err, ErrLeasesUnreadable) {
+	if _, _, err := l.Lend("agent", "", "", "h", 1, time.Now()); !errors.Is(err, ErrLeasesUnreadable) {
 		t.Fatalf("lent past an unreadable record: %v", err)
 	}
 }

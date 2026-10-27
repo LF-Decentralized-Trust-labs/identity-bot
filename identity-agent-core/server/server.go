@@ -25,6 +25,7 @@ import (
 	"identity-agent-core/asset"
 	"identity-agent-core/avatar"
 	"identity-agent-core/backup"
+	"identity-agent-core/brainsignin"
 	"identity-agent-core/buildmode"
 	"identity-agent-core/drivers"
 	"identity-agent-core/endpoint"
@@ -55,6 +56,9 @@ type CoreServer struct {
 	// localOwnerSecret is what a request from this computer must carry to be
 	// the owner's (the_owner_at_this_computer.go).
 	localOwnerSecret string
+	// brainChecker, when set, replaces the providers a brain's sign-in is
+	// checked against (brain_sign_in_check.go); tests stand them up locally.
+	brainChecker *brainsignin.Checker
 	// Providers is the registry of operators this agent can draw services from.
 	// Loaded once at startup; the owner may add to it at runtime.
 	Providers *provider.Registry

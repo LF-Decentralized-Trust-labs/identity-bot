@@ -281,6 +281,9 @@ func (h *Host) handle(ctx context.Context, tools *toolServer, brain Brain, p age
 		cancel()
 		tools.shut(token)
 		if borrowed != nil {
+			// A sign-in the brain's program renewed goes back, even from a
+			// failed turn: the one it was lent may no longer work.
+			borrowed.refreshed = out.refreshed
 			h.giveBack(borrowed, logf)
 		}
 	}
@@ -312,6 +315,11 @@ func (h *Host) handle(ctx context.Context, tools *toolServer, brain Brain, p age
 		}
 	default:
 		cs2.Started = true
+		// A brain that names its own sessions (Codex) said which one it
+		// started; the next turn resumes that one.
+		if out.Brain.Session != "" {
+			cs2.Session = out.Brain.Session
+		}
 		switch {
 		case replied:
 			cs2.Answered = true
