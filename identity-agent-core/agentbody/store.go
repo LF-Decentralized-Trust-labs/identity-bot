@@ -174,6 +174,26 @@ func (s *Store) Invite(agentAssetID string, now time.Time) (secret string, expir
 	return secret, expires, s.save(f)
 }
 
+// VoidIssuedAt voids an AI agent's unused invitation issued at a given time
+// (to the second), leaving any other: the string handed out for one purpose
+// stops working when that purpose ends, and a person's own string does not.
+func (s *Store) VoidIssuedAt(agentAssetID string, issued time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, err := s.load()
+	if err != nil {
+		return err
+	}
+	want := issued.Add(EnrolmentWindow)
+	for i := range f.Invitations {
+		inv := &f.Invitations[i]
+		if inv.AgentAssetID == agentAssetID && inv.UsedAt.IsZero() && inv.Expires.Sub(want).Abs() < 2*time.Second {
+			inv.Voided = true
+		}
+	}
+	return s.save(f)
+}
+
 // ErrInvitation is every reason a secret cannot be used, given as one answer:
 // a caller probing secrets learns nothing from which one it was.
 var ErrInvitation = errors.New("this enrolment string cannot be used: it is unknown, expired, already used, or replaced by a newer one")

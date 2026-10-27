@@ -291,16 +291,10 @@ func (s *CoreServer) handleRevokeBody(w http.ResponseWriter, r *http.Request) {
 	// says so, and asking again retries it.
 	if b.State == agentbody.StateActive {
 		var err error
-		if b, err = s.bodies().Revoke(b.ID, a.ID, time.Now()); err != nil {
+		if b, err = s.endBinding(a, b, "removed by "+whoDecided(r)); err != nil {
 			jsonError(w, err.Error(), http.StatusConflict)
 			return
 		}
-		s.recordBodyEvent(a, b, "removed", "ok", "removed by "+whoDecided(r))
-		// Whoever was watching it is no longer watching this AI agent.
-		s.screens().EndBody(b.Host, screenview.EndedBodyRemoved)
-		s.endLendsNoLongerGranted("a machine was removed as an AI agent's body")
-		// A machine a provider made for it is destroyed; a provider makes no more.
-		s.machineGone(b)
 	}
 	rec, _ := s.DataStore.GetCredential(b.CredentialSAID)
 	if rec == nil || rec.Status == "revoked" {
@@ -315,6 +309,23 @@ func (s *CoreServer) handleRevokeBody(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSONStatus(w, http.StatusOK, map[string]any{"revoked": b, "tel_revoked": telRevoked, "status": status})
+}
+
+// endBinding ends a live body: it stops being admitted at once, whoever was
+// watching it stops, what was lent to it is withdrawn, and a machine a
+// provider made for it is destroyed. The caller holds the AI agent's lock.
+func (s *CoreServer) endBinding(a asset.Asset, b agentbody.Binding, why string) (agentbody.Binding, error) {
+	b, err := s.bodies().Revoke(b.ID, a.ID, time.Now())
+	if err != nil {
+		return b, err
+	}
+	s.recordBodyEvent(a, b, "removed", "ok", why)
+	// Whoever was watching it is no longer watching this AI agent.
+	s.screens().EndBody(b.Host, screenview.EndedBodyRemoved)
+	s.endLendsNoLongerGranted("a machine was removed as an AI agent's body")
+	// A machine a provider made for it is destroyed; a provider makes no more.
+	s.machineGone(b)
+	return b, nil
 }
 
 // bodyEnrolRequest is what a machine sends to ask to become a body.

@@ -106,6 +106,8 @@ func (s *CoreServer) withdrawCredential(rec *store.CredentialRecord) (bool, stri
 	// withdrawn once the credential is: revoking an AI agent ends its access at
 	// once, not when what it was lent lapses.
 	s.endLendsNoLongerGranted("a credential was revoked")
+	// And a machine made for an AI agent that may no longer act is destroyed.
+	s.endMachinesNoLongerWanted("a credential was revoked")
 	return revoked, "revoked", err
 }
 

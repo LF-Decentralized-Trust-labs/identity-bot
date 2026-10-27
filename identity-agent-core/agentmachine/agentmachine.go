@@ -386,6 +386,14 @@ func (s *Store) ForProvider(provider string) []Job {
 	})
 }
 
+// Unfinished lists every request whose machine may exist or still be made:
+// what a sweep looks at to end machines nobody may use any more.
+func (s *Store) Unfinished() []Job {
+	return s.where(func(j Job) bool {
+		return j.State == StateWaiting || j.State == StateMaking || j.State == StateEnrolling || j.State == StateReady
+	})
+}
+
 // ForBody finds the job that made a machine, by the binding it enrolled as.
 func (s *Store) ForBody(body string) (Job, bool) {
 	js := s.where(func(j Job) bool { return j.Body == body })

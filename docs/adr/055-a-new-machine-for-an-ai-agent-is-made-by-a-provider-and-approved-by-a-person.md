@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-10-27
+**Amended:** 2026-10-27 — a machine nobody may use any more is destroyed without anybody asking
 **Relates to:** ADR-046 (A machine becomes an AI agent's body by a person comparing six words), ADR-050 (One check for a controller's actions and an AI agent's capability calls), ADR-051 (An AI agent's brain is signed in once, and lent to a body per run), ADR-054 (An AI agent's GitHub access is lent per run, and ended with its grant)
 
 ## Context
@@ -83,6 +84,15 @@ destroyed. A provider that fails part way destroys
 what it made and reports why, and one that restarts while making a machine destroys
 that machine rather than leaving it half made.
 
+**A machine nobody may use any more is destroyed without anybody asking.** When an AI
+agent's grant is revoked, lapses, or the AI agent is gone, every machine made for it is
+ended: its body first, with its body credential withdrawn, then its provider is told to
+destroy it. This happens when the credential is revoked, and a sweep every minute
+catches the rest. The same sweep destroys a machine whose six words nobody approved
+before its enrolment window ran out, and one whose enrolment string ran out before it
+asked at all. Ending a request whose string was given but never used voids that string,
+so no machine can use it afterwards.
+
 **Everything is recorded.** Each step — requested, enrolment string given, making,
 enrolling, failed, removing, removed, cancelled — is written to the signed record as
 the AI agent the machine is for.
@@ -105,5 +115,3 @@ the AI agent the machine is for.
 - An AI agent may install tools inside its own machine as it works; that changes
   nothing outside it, and the machine is destroyed when the AI agent's body is
   removed. Reaching an outside service is still a grant (ADR-054).
-- Revoking an AI agent's grant does not by itself destroy its machines; removing its
-  machines does.

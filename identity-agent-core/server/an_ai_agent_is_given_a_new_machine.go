@@ -262,13 +262,105 @@ func (s *CoreServer) handleCancelMachineRequest(w http.ResponseWriter, r *http.R
 			s.recordBodyEvent(a, rejected, "rejected", "denied", "its machine request was cancelled by "+whoDecided(r))
 		}
 	}
-	j, err := s.machines().Remove(j.ID, time.Now())
+	j, err := s.forgetMachine(j)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusConflict)
 		return
 	}
 	s.recordMachineEvent(a, j, "cancelled", "ok", "cancelled by "+whoDecided(r))
 	writeJSONStatus(w, http.StatusOK, j)
+}
+
+// endMachinesNoLongerWanted destroys machines nobody may use any more:
+//
+//   - every machine made for an AI agent whose grant is revoked or has
+//     lapsed, or that is gone — its body ended first, and its body credential
+//     withdrawn;
+//   - a machine whose six words nobody approved before its enrolment window
+//     ran out, or that was rejected or removed meanwhile;
+//   - a machine whose enrolment string ran out before it asked at all.
+//
+// It runs every minute and whenever a credential is revoked. Revoking a body
+// credential below revokes a credential again, so a sweep already running is
+// left to finish rather than started twice.
+func (s *CoreServer) endMachinesNoLongerWanted(why string) {
+	if s.assetHandler == nil || !machineSweep.TryLock() {
+		return
+	}
+	defer machineSweep.Unlock()
+	now := time.Now()
+	for _, j := range s.machines().Unfinished() {
+		a, ok := s.aiAgentAsset(j.AgentAssetID)
+		var reason string
+		switch {
+		case !ok:
+			reason = "the AI agent it was made for is gone"
+		case s.agentStatus(a.PairwiseAID) == "revoked":
+			reason = "the AI agent it was made for is revoked"
+		case s.agentGrantLapsed(a.PairwiseAID):
+			reason = "the AI agent it was made for has a grant that lapsed"
+		case j.State == agentmachine.StateEnrolling:
+			if b, ok := s.bodies().Get(j.Body); !ok || (b.State != agentbody.StatePending && b.State != agentbody.StateActive) {
+				reason = "nobody approved its six words in time"
+			}
+		case j.State == agentmachine.StateMaking:
+			if !j.EnrolmentGivenAt.IsZero() && now.Sub(j.EnrolmentGivenAt) > agentbody.EnrolmentWindow+time.Minute {
+				reason = "its enrolment string ran out before it asked to become a body"
+			}
+		}
+		if reason == "" {
+			continue
+		}
+		s.endMachine(a, ok, j, reason+" ("+why+")")
+	}
+}
+
+var machineSweep sync.Mutex
+
+// endMachine ends one request's machine: its live body first, then the request,
+// which has its provider destroy the machine.
+func (s *CoreServer) endMachine(a asset.Asset, haveAgent bool, j agentmachine.Job, why string) {
+	if haveAgent {
+		unlock := lockAgentGrant(a.ID)
+		defer unlock()
+		if b, ok := s.bodies().Get(j.Body); ok && b.State == agentbody.StateActive {
+			ended, err := s.endBinding(a, b, why)
+			if err != nil {
+				log.Printf("[machine] %s: its body could not be ended: %v", j.MachineName, err)
+				return
+			}
+			if rec, _ := s.DataStore.GetCredential(ended.CredentialSAID); rec != nil && rec.Status != "revoked" {
+				if _, _, err := s.withdrawCredential(rec); err != nil {
+					log.Printf("[machine] %s: its body's credential could not be withdrawn yet: %v", j.MachineName, err)
+				}
+			}
+		}
+	}
+	// Ending its body already had its provider told to destroy it.
+	if cur, ok := s.machines().Get(j.ID); ok && cur.State == agentmachine.StateRemoving {
+		return
+	}
+	j, err := s.forgetMachine(j)
+	if err != nil {
+		log.Printf("[machine] %s could not be ended: %v", j.MachineName, err)
+		return
+	}
+	if haveAgent {
+		s.recordMachineEvent(a, j, "removing", "ok", why)
+	} else {
+		log.Printf("[machine] %s: its provider is to destroy it: %s", j.MachineName, why)
+	}
+}
+
+// forgetMachine has a request's provider destroy its machine, and voids the
+// enrolment string it was given if no machine used it.
+func (s *CoreServer) forgetMachine(j agentmachine.Job) (agentmachine.Job, error) {
+	if j.Body == "" && !j.EnrolmentGivenAt.IsZero() {
+		if err := s.bodies().VoidIssuedAt(j.AgentAssetID, j.EnrolmentGivenAt); err != nil {
+			log.Printf("[machine] %s: its unused enrolment string could not be voided: %v", j.MachineName, err)
+		}
+	}
+	return s.machines().Remove(j.ID, time.Now())
 }
 
 // providerStillGranted is a provider's body, if it is still live and its AI
