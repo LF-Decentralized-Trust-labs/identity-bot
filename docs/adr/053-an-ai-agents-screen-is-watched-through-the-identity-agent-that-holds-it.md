@@ -85,10 +85,11 @@ sent. A body shows only an X display on its own machine; a display reached over
 the network (`host:0`), whose pictures and keys would cross it unencrypted, is
 refused unless `--display-allow-network` is given, and a warning is printed when
 it is. A display that goes away — restarted by an update, or not up yet — is
-opened again for as long as the body runs, after a second and then up to every
-thirty: meanwhile the body says it has no screen and a viewing of it ends with
-the reason `screen_restarted`, and once the display opens the screen is offered
-again, with nothing held down or lent on the old display carried over.
+opened again for as long as the body runs, waiting a second and doubling to
+thirty between attempts: meanwhile the body says it has no screen, marked as
+restarting, so a viewing of it ends with the reason `screen_restarted`; once the
+display opens the screen is offered again at once, with nothing held down or
+lent on the old display carried over.
 
 **Every viewing is recorded.** The start and end of watching, and of control,
 are written to the signed governance record, naming who watched, which AI agent,

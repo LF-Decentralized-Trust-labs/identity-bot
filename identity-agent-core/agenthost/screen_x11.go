@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -46,14 +48,29 @@ func OpenScreen(display string, allowNetwork bool) (Screen, error) {
 }
 
 // errDisplayUnreachable is a display that could not be connected to: not up
-// yet, or restarting.
+// yet, or restarting. Only this is waited for when agent-host starts; a
+// display that refuses this program, or whose name cannot be read, is said at
+// once. Once a display has been shown, every failure to open it again is
+// tried again, since a restarting display can briefly refuse a cookie it has
+// not written out yet.
 var errDisplayUnreachable = errors.New("the display could not be reached")
+
+// unreachable says an error opening a display is not reaching it at all. xgb
+// says a failed dial only in words ("cannot connect to …"); a connection that
+// ends during the handshake is the error itself.
+func unreachable(err error) bool {
+	var op *net.OpError
+	return strings.HasPrefix(err.Error(), "cannot connect to ") || displayGone(err) || errors.As(err, &op)
+}
 
 // openX11 connects to an X display and reads what it is.
 func openX11(display string) (Screen, error) {
 	conn, err := xgb.NewConnDisplay(display)
 	if err != nil {
-		return nil, fmt.Errorf("%w: the display %s could not be opened: %w: %v", ErrNoScreen, display, errDisplayUnreachable, err)
+		if unreachable(err) {
+			return nil, fmt.Errorf("%w: the display %s could not be opened: %w: %v", ErrNoScreen, display, errDisplayUnreachable, err)
+		}
+		return nil, fmt.Errorf("%w: the display %s could not be opened: %v", ErrNoScreen, display, err)
 	}
 	setup := xproto.Setup(conn)
 	root := setup.DefaultScreen(conn)
