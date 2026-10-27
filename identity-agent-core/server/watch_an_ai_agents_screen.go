@@ -531,6 +531,9 @@ func (s *CoreServer) handleBodyAwaitsViewer(w http.ResponseWriter, r *http.Reque
 	}
 	var req struct {
 		Screen *screenview.Screen `json:"screen"`
+		// Restarting says the body's display went away and is being opened
+		// again, so a viewing of it ends saying that.
+		Restarting bool `json:"restarting"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&req); err != nil {
 		jsonError(w, "the screen's description is unreadable", http.StatusBadRequest)
@@ -546,7 +549,11 @@ func (s *CoreServer) handleBodyAwaitsViewer(w http.ResponseWriter, r *http.Reque
 	hub.Advertise(b.Host, b.AgentAssetID, req.Screen)
 	watched := req.Screen != nil && hub.WaitForViewer(r.Context(), b.Host, screenview.WaitLimit)
 	if req.Screen == nil {
-		hub.EndBody(b.Host, screenview.EndedNoScreen)
+		why := screenview.EndedNoScreen
+		if req.Restarting {
+			why = screenview.EndedScreenRestarted
+		}
+		hub.EndBody(b.Host, why)
 	}
 	writeJSONStatus(w, http.StatusOK, map[string]any{"watch": watched, "fps": screenview.FramesPerSecond})
 }

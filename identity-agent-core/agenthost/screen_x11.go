@@ -3,6 +3,7 @@
 package agenthost
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"os"
@@ -34,9 +35,25 @@ func OpenScreen(display string, allowNetwork bool) (Screen, error) {
 	if err := checkDisplay(display, allowNetwork); err != nil {
 		return nil, err
 	}
+	// The display can restart under the body, or not be up yet when the body
+	// starts: it is opened again whenever it goes (ReopeningScreen).
+	scr, err := KeepScreenOpen(func() (Screen, error) { return openX11(display) },
+		func(err error) bool { return errors.Is(err, errDisplayUnreachable) })
+	if err != nil {
+		return nil, err
+	}
+	return scr, nil
+}
+
+// errDisplayUnreachable is a display that could not be connected to: not up
+// yet, or restarting.
+var errDisplayUnreachable = errors.New("the display could not be reached")
+
+// openX11 connects to an X display and reads what it is.
+func openX11(display string) (Screen, error) {
 	conn, err := xgb.NewConnDisplay(display)
 	if err != nil {
-		return nil, fmt.Errorf("%w: the display %s could not be opened: %v", ErrNoScreen, display, err)
+		return nil, fmt.Errorf("%w: the display %s could not be opened: %w: %v", ErrNoScreen, display, errDisplayUnreachable, err)
 	}
 	setup := xproto.Setup(conn)
 	root := setup.DefaultScreen(conn)
@@ -424,9 +441,30 @@ func (s *x11Screen) typeKeysym(sym xproto.Keysym, mods []string) error {
 	return s.fake(xproto.KeyRelease, byte(k.code), 0, 0)
 }
 
+// abandon closes the connection to a display that has gone. Nothing held
+// down or lent on it is let go of or given back: the display that held them
+// is gone, and the next one starts with nothing pressed and its own keyboard.
+func (s *x11Screen) abandon() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.conn == nil {
+		return
+	}
+	// Close ends xgb's goroutines for this connection; they have already
+	// stopped reading once the display went.
+	s.conn.Close()
+	s.conn = nil
+	s.buttons, s.keysDown = map[byte]bool{}, map[byte]bool{}
+	s.lender.forget()
+	s.kb = nil
+}
+
 func (s *x11Screen) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.conn == nil {
+		return nil
+	}
 	if s.canControl {
 		for b := range s.buttons {
 			_ = s.fake(xproto.ButtonRelease, b, 0, 0)

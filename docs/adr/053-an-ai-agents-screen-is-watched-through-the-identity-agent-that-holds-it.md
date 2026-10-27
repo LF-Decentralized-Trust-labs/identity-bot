@@ -84,7 +84,11 @@ watching only says it cannot be controlled, and ignores any click or key it is
 sent. A body shows only an X display on its own machine; a display reached over
 the network (`host:0`), whose pictures and keys would cross it unencrypted, is
 refused unless `--display-allow-network` is given, and a warning is printed when
-it is.
+it is. A display that goes away — restarted by an update, or not up yet — is
+opened again for as long as the body runs, after a second and then up to every
+thirty: meanwhile the body says it has no screen and a viewing of it ends with
+the reason `screen_restarted`, and once the display opens the screen is offered
+again, with nothing held down or lent on the old display carried over.
 
 **Every viewing is recorded.** The start and end of watching, and of control,
 are written to the signed governance record, naming who watched, which AI agent,

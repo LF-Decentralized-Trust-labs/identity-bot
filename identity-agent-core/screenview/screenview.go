@@ -78,15 +78,19 @@ const (
 	EndedBodyReassigned = "body_reassigned"
 	EndedNoScreen       = "no_screen"
 	EndedBodyInactive   = "body_inactive"
+	// EndedScreenRestarted is a body whose display went away; the body
+	// offers the screen again once the display opens again.
+	EndedScreenRestarted = "screen_restarted"
 )
 
 var endedSentences = map[string]string{
-	EndedClosed:         "the person closed the window",
-	EndedIdle:           "nobody was watching any more",
-	EndedBodyRemoved:    "the machine was removed as this AI agent's body",
-	EndedBodyReassigned: "the machine became another AI agent's body",
-	EndedNoScreen:       "the machine no longer has a screen",
-	EndedBodyInactive:   "the machine is no longer this AI agent's body",
+	EndedClosed:          "the person closed the window",
+	EndedIdle:            "nobody was watching any more",
+	EndedBodyRemoved:     "the machine was removed as this AI agent's body",
+	EndedBodyReassigned:  "the machine became another AI agent's body",
+	EndedNoScreen:        "the machine no longer has a screen",
+	EndedBodyInactive:    "the machine is no longer this AI agent's body",
+	EndedScreenRestarted: "the machine's screen restarted",
 }
 
 // EndedSentence is why a viewing ended, in words.
