@@ -10,6 +10,7 @@
 //	agent-host provide --program PATH [--offers screen,toolchain,xcode]
 //	agent-host mcp
 //	agent-host brain-home -- <brain> <args>
+//	agent-host brain-env -- <brain> <args>
 //	agent-host github-credential get
 //
 // Every command accepts --data-dir; the default is per operating system.
@@ -51,6 +52,12 @@ func main() {
 	// program's.
 	if cmd == "brain-home" {
 		os.Exit(agenthost.ServeBrainHome(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
+	}
+	// Started by the host through sudo, as the brain's user, around every run
+	// of a brain that runs as its own user: the run's variables come on stdin,
+	// never through sudo, which writes what it passes on to the system log.
+	if cmd == "brain-env" {
+		os.Exit(agenthost.ServeBrainEnv(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
 	}
 	// Run by git as its credential helper, during a run lent GitHub access:
 	// the token comes from the brain's environment, never a file.
@@ -267,15 +274,18 @@ One-time setup, as an administrator (each sudo asks for your password):
      being able to list or read what the brain keeps in it:
        sudo -u %[1]s -H mkdir -m 711 /Users/%[1]s/workspace
 
-  4. Let %[2]s start the brain's program as %[1]s, and nothing else. SETENV lets the host pass
-     each turn's tool token, sign-in and GitHub access in the environment rather than on the
-     command line.
-     Codex and Grok keep their sign-in in a file, so the host starts them through this program,
-     which puts a lent sign-in in place for one run and takes it away after. The rule is written
-     to a file, checked by visudo, and only then installed, so a mistake cannot lock sudo:
-       BRAIN="$(sudo -u %[1]s -H sh -lc 'command -v codex || command -v grok')"   # leave empty for Claude Code only
-       printf '%%s\n' '%[2]s ALL=(%[1]s) NOPASSWD:SETENV: /Users/%[1]s/.local/bin/claude' > /tmp/agent-host.sudoers
-       [ -n "$BRAIN" ] && printf '%%s\n' "%[2]s ALL=(%[1]s) NOPASSWD:SETENV: $BRAIN, /usr/local/bin/agent-host brain-home -- $BRAIN *" >> /tmp/agent-host.sudoers
+  4. Let %[2]s start the brain's program as %[1]s, and nothing else. The host starts every brain
+     through this program (brain-env), which takes each turn's tool token, sign-in and GitHub
+     access on its input: sudo writes its command line and any variable it passes on to the
+     system log, so none of them goes through sudo. Codex and Grok keep their sign-in in a file,
+     so this program also puts a lent sign-in in place for one run and takes it away after
+     (brain-home). Input and output logging stay off for %[2]s, since the input holds the
+     sign-in. The rule is written to a file, checked by visudo, and only then installed, so a
+     mistake cannot lock sudo:
+       BRAINS="/Users/%[1]s/.local/bin/claude $(sudo -u %[1]s -H sh -lc 'command -v codex; command -v grok')"
+       { printf '%%s\n' 'Defaults:%[2]s !log_input, !log_output'
+         for b in $BRAINS; do printf '%%s\n' "%[2]s ALL=(%[1]s) NOPASSWD: /usr/local/bin/agent-host brain-env -- $b *, /usr/local/bin/agent-host brain-env -- /usr/local/bin/agent-host brain-home -- $b *"; done
+       } > /tmp/agent-host.sudoers
        sudo visudo -cf /tmp/agent-host.sudoers && sudo install -m 440 /tmp/agent-host.sudoers /etc/sudoers.d/agent-host
 
   5. Install this program where %[1]s can run it. The brain starts it for its tools, git starts
@@ -299,14 +309,16 @@ One-time setup, as an administrator:
        sudo -u %[1]s -H sh -c 'curl -fsSL https://claude.ai/install.sh | bash'
        sudo -u %[1]s -H /home/%[1]s/.local/bin/claude      (then type /login)
   3. sudo -u %[1]s -H mkdir -m 711 /home/%[1]s/workspace
-  4. Let %[2]s start the brain's program as %[1]s, and nothing else. SETENV lets the host pass
-     each turn's tool token, sign-in and GitHub access in the environment rather than on the
-     command line. The rule is checked by visudo before it is installed, so a mistake cannot lock
-     sudo. For Codex or Grok, which the host starts through this program, BRAIN names the
-     program's full path:
-       BRAIN="$(sudo -u %[1]s -H sh -lc 'command -v codex || command -v grok')"   # leave empty for Claude Code only
-       printf '%%s\n' '%[2]s ALL=(%[1]s) NOPASSWD:SETENV: /home/%[1]s/.local/bin/claude' > /tmp/agent-host.sudoers
-       [ -n "$BRAIN" ] && printf '%%s\n' "%[2]s ALL=(%[1]s) NOPASSWD:SETENV: $BRAIN, /usr/local/bin/agent-host brain-home -- $BRAIN *" >> /tmp/agent-host.sudoers
+  4. Let %[2]s start the brain's program as %[1]s, and nothing else. The host starts every brain
+     through this program (brain-env), which takes each turn's tool token, sign-in and GitHub
+     access on its input: sudo writes its command line and any variable it passes on to the
+     system log, so none of them goes through sudo. Input and output logging stay off for %[2]s,
+     since the input holds the sign-in. The rule is checked by visudo before it is installed, so
+     a mistake cannot lock sudo. BRAINS lists each brain's full path:
+       BRAINS="/home/%[1]s/.local/bin/claude $(sudo -u %[1]s -H sh -lc 'command -v codex; command -v grok')"
+       { printf '%%s\n' 'Defaults:%[2]s !log_input, !log_output'
+         for b in $BRAINS; do printf '%%s\n' "%[2]s ALL=(%[1]s) NOPASSWD: /usr/local/bin/agent-host brain-env -- $b *, /usr/local/bin/agent-host brain-env -- /usr/local/bin/agent-host brain-home -- $b *"; done
+       } > /tmp/agent-host.sudoers
        sudo visudo -cf /tmp/agent-host.sudoers && sudo install -m 440 /tmp/agent-host.sudoers /etc/sudoers.d/agent-host
   5. Install this program where %[1]s can run it (the brain starts it for its tools, and git for the
      GitHub access a run is lent), and run the host from there:
@@ -341,7 +353,8 @@ func usage() {
 		"  agent-host brain-user [USER]\n"+
 		"  agent-host provide --program PATH [--offers screen,toolchain,xcode]\n"+
 		"  agent-host mcp      (started by the brain, never by hand)\n"+
-		"  agent-host brain-home -- <brain> <args>      (started by the host, never by hand)")
+		"  agent-host brain-home -- <brain> <args>      (started by the host, never by hand)\n"+
+		"  agent-host brain-env -- <brain> <args>       (started by the host, never by hand)")
 	os.Exit(2)
 }
 

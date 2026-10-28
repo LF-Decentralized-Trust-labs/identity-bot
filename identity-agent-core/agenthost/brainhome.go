@@ -275,14 +275,13 @@ func runInHome(ctx context.Context, r Runner, dir string, env []string, home bra
 		return nil, "", err
 	}
 	env = append(append([]string{}, env...), envBrainHome+"="+string(spec))
-	cmd, err := r.Command(ctx, dir, env, self, append([]string{"brain-home", "--", name}, args...)...)
+	cmd, err := r.Command(ctx, dir, env, strings.NewReader(stdin), self, append([]string{"brain-home", "--", name}, args...)...)
 	if err != nil {
 		return nil, "", err
 	}
 	stopGently(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	cmd.Stdin = strings.NewReader(stdin)
 	runErr := cmd.Run()
 	var res brainHomeOutcome
 	if jerr := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &res); jerr != nil {

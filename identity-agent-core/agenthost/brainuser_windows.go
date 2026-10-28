@@ -5,6 +5,7 @@ package agenthost
 import (
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 )
 
@@ -17,7 +18,7 @@ type AsUser struct {
 }
 
 // Command refuses, saying why.
-func (u AsUser) Command(ctx context.Context, dir string, env []string, name string, args ...string) (*exec.Cmd, error) {
+func (u AsUser) Command(ctx context.Context, dir string, env []string, stdin io.Reader, name string, args ...string) (*exec.Cmd, error) {
 	return nil, fmt.Errorf("running the brain as a separate Windows user is not available yet; run without --brain-user")
 }
 
