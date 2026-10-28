@@ -242,13 +242,13 @@ func TestNotKnowingIsNotAReasonToProceed(t *testing.T) {
 	// simply succeeded and the assertions below never ran. A test whose
 	// precondition is our own missing code stops testing the day that code is
 	// written, and stops silently.
+	s := rootSeedServer(t)
 	prev := detectKeyProtection
 	detectKeyProtection = func() secureenclave.Capability {
 		return secureenclave.NotImplemented("a platform nobody has taught this software to inspect")
 	}
 	t.Cleanup(func() { detectKeyProtection = prev })
 
-	s := rootSeedServer(t)
 	w := postSeed(s, b64, false)
 	if w.Code == http.StatusOK {
 		t.Fatal("a root seed was installed on a machine this build cannot inspect")
