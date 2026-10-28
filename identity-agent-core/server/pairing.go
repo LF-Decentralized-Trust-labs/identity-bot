@@ -582,14 +582,15 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 	if foundedWitnessed && s.WitnessService != nil && foundedSig != "" {
 		if raw, derr := base64.StdEncoding.DecodeString(foundedRaw); derr == nil {
 			// To exactly the witnesses the event names.
-			go func(aid string, body []byte, sig string) {
-				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			aid, body, sig := identityAID, raw, foundedSig
+			s.inBackground(func(ctx context.Context) {
+				ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 				defer cancel()
 				if berr := s.WitnessService.BroadcastToDesignated(ctx, aid, body, sig, foundedNamed, foundedToad); berr != nil {
 					log.Printf("[pairing] %s named witnesses but they did not accept its "+
 						"inception (%v) — its history is uncorroborated until they do", aid, berr)
 				}
-			}(identityAID, raw, foundedSig)
+			})
 		}
 	}
 	if err := s.DataStore.SaveIdentity(store.IdentityState{

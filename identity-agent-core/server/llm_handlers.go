@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -280,7 +281,7 @@ func (s *CoreServer) handleLLMProxy(w http.ResponseWriter, r *http.Request) {
 	// Capture the conversation asynchronously — never delay the client response.
 	if isChatCompletion && resp.StatusCode == http.StatusOK && s.AIMemory != nil && len(chatReq.Messages) > 0 {
 		captured := captureBuffer.Bytes()
-		go s.captureConversation(chatReq, captured)
+		s.inBackground(func(context.Context) { s.captureConversation(chatReq, captured) })
 	}
 }
 

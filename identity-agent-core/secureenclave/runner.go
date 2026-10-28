@@ -21,6 +21,9 @@ type Runner struct {
 	statePath string
 	record    *AttestationRecord
 	lastErr   string
+	// running is the attestation loop Start launched, so whoever stops the
+	// context can wait for it to stop writing to the data directory.
+	running sync.WaitGroup
 }
 
 type RunnerConfig struct {
@@ -142,10 +145,13 @@ func (r *Runner) RunOnce(ctx context.Context) error {
 	return nil
 }
 
-// Start launches periodic self-attestation on the configured cadence.
+// Start launches periodic self-attestation on the configured cadence, until
+// ctx is done. Wait returns once it has stopped.
 func (r *Runner) Start(ctx context.Context) {
 	r.Load()
+	r.running.Add(1)
 	go func() {
+		defer r.running.Done()
 		_ = r.RunOnce(ctx)
 		ticker := time.NewTicker(r.cadence)
 		defer ticker.Stop()
@@ -158,6 +164,14 @@ func (r *Runner) Start(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+// Wait returns once the loop Start launched has stopped, which it does after
+// its context is done. Each attestation writes its record into the data
+// directory, so a caller that is about to close or remove that directory
+// cancels the context and then waits.
+func (r *Runner) Wait() {
+	r.running.Wait()
 }
 
 func (r *Runner) Record() *AttestationRecord {

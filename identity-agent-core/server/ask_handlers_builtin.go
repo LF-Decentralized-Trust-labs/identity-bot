@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -197,7 +198,7 @@ func (addContactAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map
 		}
 	}
 	// Tell the asker we accepted, so they record us too (best-effort).
-	go s.sendIntroduction(contact.AID, p.AskerOOBI, 2)
+	s.inBackground(func(context.Context) { s.sendIntroduction(contact.AID, p.AskerOOBI, 2) })
 	return map[string]interface{}{"ok": true, "contact_aid": contact.AID, "tier": contact.ContactCategory}, nil
 }
 

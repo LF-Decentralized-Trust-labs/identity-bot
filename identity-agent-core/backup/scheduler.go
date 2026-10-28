@@ -20,6 +20,10 @@ type Scheduler struct {
 	mnemonicFunc     func() (string, error)
 	seedFunc         func() ([]byte, error) // injected — never persisted
 	afterRunHook     func(reason string)    // tests only
+	// stopped refuses any backup after Stop, and working is every timer loop
+	// and backup under way, so Wait can return once nothing is writing.
+	stopped bool
+	working sync.WaitGroup
 }
 
 func NewScheduler(svc *Service) *Scheduler {
@@ -85,6 +89,10 @@ func (sch *Scheduler) TriggerEvent(reason string) {
 		interval = 5 * time.Minute
 	}
 	sch.debounce = time.AfterFunc(interval, func() {
+		if !sch.begin() {
+			return
+		}
+		defer sch.working.Done()
 		sch.runBackup(reason)
 	})
 }
@@ -93,11 +101,13 @@ func (sch *Scheduler) TriggerEvent(reason string) {
 func (sch *Scheduler) StartDaily() {
 	sch.mu.Lock()
 	defer sch.mu.Unlock()
-	if sch.dailyTicker != nil {
+	if sch.dailyTicker != nil || sch.stopped {
 		return
 	}
 	sch.dailyTicker = time.NewTicker(24 * time.Hour)
+	sch.working.Add(1)
 	go func() {
+		defer sch.working.Done()
 		for {
 			select {
 			case <-sch.dailyTicker.C:
@@ -112,6 +122,7 @@ func (sch *Scheduler) StartDaily() {
 func (sch *Scheduler) Stop() {
 	sch.mu.Lock()
 	defer sch.mu.Unlock()
+	sch.stopped = true
 	if sch.dailyTicker != nil {
 		sch.dailyTicker.Stop()
 	}
@@ -123,6 +134,24 @@ func (sch *Scheduler) Stop() {
 	default:
 		close(sch.stopCh)
 	}
+}
+
+// begin counts a timed backup as under way, unless the scheduler has stopped.
+func (sch *Scheduler) begin() bool {
+	sch.mu.Lock()
+	defer sch.mu.Unlock()
+	if sch.stopped {
+		return false
+	}
+	sch.working.Add(1)
+	return true
+}
+
+// Wait returns once the daily loop has ended and no backup is being written.
+// A backup writes its archive into the data directory, so a caller about to
+// close or remove that directory stops the scheduler and then waits.
+func (sch *Scheduler) Wait() {
+	sch.working.Wait()
 }
 
 // SetAfterRunHook observes debounced scheduler invocations (tests only).

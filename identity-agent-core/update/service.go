@@ -135,6 +135,11 @@ func (s *Service) Stop() {
 	s.poller.Stop()
 }
 
+// Wait returns once the poller has stopped writing what it fetches.
+func (s *Service) Wait() {
+	s.poller.Wait()
+}
+
 func (s *Service) CheckNow() {
 	s.poller.CheckNow()
 }

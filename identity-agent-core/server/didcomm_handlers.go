@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -646,7 +647,7 @@ func (s *CoreServer) routeInboundDIDComm(toAID, fromAID string, jwm *didcomm.JWM
 	// its own handling, and otherwise the message is already stored and this
 	// says so.
 	if s.inboundDIDComm != nil {
-		go s.inboundDIDComm(toAID, fromAID, jwm.Type, jwm.Body, jwm.ID)
+		s.inBackground(func(context.Context) { s.inboundDIDComm(toAID, fromAID, jwm.Type, jwm.Body, jwm.ID) })
 		return
 	}
 	log.Printf("[didcomm] received %s %s for %s (stored in inbox)", jwm.Type, jwm.ID, toAID)

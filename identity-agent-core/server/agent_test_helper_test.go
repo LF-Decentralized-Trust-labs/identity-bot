@@ -26,6 +26,7 @@ func agentWithDerivedIdentity(t *testing.T) *CoreServer {
 		t.Skipf("data store unavailable: %v", err)
 	}
 	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, DataStore: ds, EventHub: NewEventHub()}
+	endsItsBackgroundWork(t, s)
 
 	rootSeed, err := ensureRootSeed(dir)
 	if err != nil {
@@ -57,7 +58,23 @@ func agentWithNoIdentity(t *testing.T) *CoreServer {
 	if err != nil {
 		t.Skipf("data store unavailable: %v", err)
 	}
-	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, DataStore: ds, EventHub: NewEventHub()}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, DataStore: ds, EventHub: NewEventHub()}
+	endsItsBackgroundWork(t, s)
+	return s
+}
+
+// endsItsBackgroundWork stops the background work a test's server started and
+// waits for it, when the test ends, the way Stop does for a running server.
+// These servers are never started, so nothing else would: work still writing
+// into the data directory when the test ends is what made removing that
+// directory fail at random.
+func endsItsBackgroundWork(t *testing.T, s *CoreServer) {
+	t.Helper()
+	t.Cleanup(func() {
+		if !s.endBackground(backgroundStopWait) {
+			t.Error("background work was still running when the test ended")
+		}
+	})
 }
 
 // startedEngine returns a running KERI engine, skipping if none is available.

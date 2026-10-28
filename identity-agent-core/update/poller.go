@@ -28,6 +28,8 @@ type Poller struct {
 	running bool
 	cancel  context.CancelFunc
 	pushCh  chan struct{}
+	// looping is the loop Start launched, so Wait can return once it stops.
+	looping sync.WaitGroup
 }
 
 func NewPoller(manifestURL string) *Poller {
@@ -68,9 +70,13 @@ func (p *Poller) Start(ctx context.Context) {
 	runCtx, cancel := context.WithCancel(ctx)
 	p.cancel = cancel
 	p.running = true
+	p.looping.Add(1)
 	p.mu.Unlock()
 
-	go p.loop(runCtx)
+	go func() {
+		defer p.looping.Done()
+		p.loop(runCtx)
+	}()
 }
 
 func (p *Poller) Stop() {
@@ -83,6 +89,14 @@ func (p *Poller) Stop() {
 	p.running = false
 }
 
+// Wait returns once the loop has stopped, which it does after Stop or after
+// the context given to Start is done. A manifest that arrives is written into
+// the data directory, so a caller about to close or remove that directory
+// stops the poller and then waits.
+func (p *Poller) Wait() {
+	p.looping.Wait()
+}
+
 // CheckNow triggers a contentless re-poll (UM-9: no payload, no injected manifest).
 func (p *Poller) CheckNow() {
 	select {
@@ -92,7 +106,7 @@ func (p *Poller) CheckNow() {
 }
 
 func (p *Poller) loop(ctx context.Context) {
-	p.pollOnce()
+	p.pollOnce(ctx)
 
 	for {
 		jitter := time.Duration(rand.Int63n(int64(pollJitter*2))) - pollJitter
@@ -106,16 +120,19 @@ func (p *Poller) loop(ctx context.Context) {
 			timer.Stop()
 			return
 		case <-timer.C:
-			p.pollOnce()
+			p.pollOnce(ctx)
 		case <-p.pushCh:
 			timer.Stop()
-			p.pollOnce()
+			p.pollOnce(ctx)
 		}
 	}
 }
 
-func (p *Poller) pollOnce() {
-	raw, err := p.fetchAnonymous()
+func (p *Poller) pollOnce(ctx context.Context) {
+	raw, err := p.fetchAnonymous(ctx)
+	if ctx.Err() != nil {
+		return // stopped: what was fetched is not acted on
+	}
 	if err != nil {
 		log.Printf("[update] poll failed: %v", err)
 		if p.onError != nil {
@@ -128,8 +145,8 @@ func (p *Poller) pollOnce() {
 	}
 }
 
-func (p *Poller) fetchAnonymous() ([]byte, error) {
-	req, err := http.NewRequest(http.MethodGet, p.manifestURL, nil)
+func (p *Poller) fetchAnonymous(ctx context.Context) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.manifestURL, nil)
 	if err != nil {
 		return nil, err
 	}
