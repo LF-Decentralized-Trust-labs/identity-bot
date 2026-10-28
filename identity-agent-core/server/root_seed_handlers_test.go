@@ -15,8 +15,18 @@ import (
 	"identity-agent-core/secureenclave"
 )
 
+// rootSeedServer is a server on a machine that can protect a root key. The
+// machine is MADE to answer so, rather than the test relying on the host it
+// runs on: a build machine or a session with no access to the key hardware
+// answers otherwise, and the install is then refused before anything these
+// tests check is reached. Tests of the refusal set their own answer.
 func rootSeedServer(t *testing.T) *CoreServer {
 	t.Helper()
+	prev := detectKeyProtection
+	detectKeyProtection = func() secureenclave.Capability {
+		return secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindTPM2}
+	}
+	t.Cleanup(func() { detectKeyProtection = prev })
 	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 }
 
