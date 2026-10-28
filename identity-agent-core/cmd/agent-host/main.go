@@ -2,7 +2,7 @@
 //
 //	agent-host enrol <enrolment string, or - to read it from standard input> [--placement computer|vm|cloud|device]
 //	agent-host status
-//	agent-host run [--brain claude-code|codex|grok] [--brain-path PATH] [--brain-user USER] [--workspace DIR]
+//	agent-host run [--brain claude-code|codex|grok] [--brain-path PATH] [--brain-user USER [--brain-dir DIR]] [--workspace DIR]
 //	               [--screen control|watch|off] [--display :0] [--display-allow-network]
 //	agent-host move <new address of the same Identity Agent>
 //	agent-host call <METHOD> <path> [json body]
@@ -64,6 +64,8 @@ func main() {
 	brainName := fs.String("brain", "", "the brain to run, instead of the one the AI agent was created with: claude-code, codex or grok")
 	brainPath := fs.String("brain-path", "", "the full path of the brain's program")
 	brainUser := fs.String("brain-user", "", "the operating-system user the brain runs as")
+	brainDir := fs.String("brain-dir", "", "with --brain-user and no --brain: the directory holding the brains' programs "+
+		"(claude, codex, grok); the one the AI agent was created with is run from it")
 	workspace := fs.String("workspace", "", "the brain's working directory")
 	program := fs.String("program", "", "provide: the program that makes, enrols and removes machines")
 	offers := fs.String("offers", "", "provide: what the machines it makes can provide, comma-separated: screen, toolchain, xcode")
@@ -123,6 +125,12 @@ func main() {
 			runner = agenthost.AsUser{User: *brainUser}
 		}
 		var brain agenthost.Brain
+		if *brainDir != "" && (*brainName != "" || *brainPath != "") {
+			fail(fmt.Errorf("--brain-dir runs the brain the AI agent was created with; it does not go with --brain or --brain-path"))
+		}
+		if *brainDir != "" && !filepath.IsAbs(*brainDir) {
+			fail(fmt.Errorf("--brain-dir must be a full path"))
+		}
 		if *brainName != "" || *brainPath != "" {
 			path := *brainPath
 			if path == "" && *brainUser != "" {
@@ -144,8 +152,8 @@ func main() {
 				b = v
 			}
 			brain = b
-		} else if *brainUser != "" {
-			fail(fmt.Errorf("--brain-user needs --brain and --brain-path: the brain's program, installed for that user"))
+		} else if *brainUser != "" && *brainDir == "" {
+			fail(fmt.Errorf("--brain-user needs --brain and --brain-path, or --brain-dir: the brains' programs, installed for that user"))
 		}
 		mode, err := agenthost.ParseScreenMode(*screenMode)
 		if err != nil {
@@ -167,7 +175,7 @@ func main() {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		if err := h.Run(ctx, agenthost.RunOptions{Brain: brain, Runner: runner, Workspace: *workspace,
-			Screen: scr, ScreenMode: mode}); err != nil {
+			BrainDir: *brainDir, Screen: scr, ScreenMode: mode}); err != nil {
 			fail(err)
 		}
 	case "move":
@@ -299,7 +307,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "usage:\n"+
 		"  agent-host enrol <enrolment string, or -> [--placement computer|vm|cloud|device]\n"+
 		"  agent-host status\n"+
-		"  agent-host run [--brain claude-code|codex|grok] [--brain-path PATH] [--brain-user USER] [--workspace DIR]\n"+
+		"  agent-host run [--brain claude-code|codex|grok] [--brain-path PATH] [--brain-user USER [--brain-dir DIR]] [--workspace DIR]\n"+
 		"                 [--screen control|watch|off] [--display :0] [--display-allow-network]\n"+
 		"                 --screen control (the default) lets people allowed to watch and take control;\n"+
 		"                 --screen watch makes this machine watch-only; --screen off offers no screen\n"+

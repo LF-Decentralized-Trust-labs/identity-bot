@@ -26,6 +26,11 @@ type RunOptions struct {
 	Runner Runner
 	// Workspace is the brain's working directory.
 	Workspace string
+	// BrainDir, when Brain is not set, is the directory holding the brains'
+	// programs (claude, codex, grok), so the brain the AI agent was created
+	// with is run by its full path: what a brain run as its own user needs,
+	// on a machine that has more than one brain installed.
+	BrainDir string
 	// Once processes what is waiting and returns, rather than waiting for more.
 	Once bool
 	// Log receives a line per thing the host does; nil is the standard logger.
@@ -112,6 +117,9 @@ func (h *Host) Run(ctx context.Context, o RunOptions) error {
 	if brain == nil {
 		if brain, err = BrainFor(p.Provider, o.Runner); err != nil {
 			return err
+		}
+		if o.BrainDir != "" {
+			brain = programIn(brain, o.BrainDir)
 		}
 	}
 	h.brainName, h.brainModel = brain.Name(), p.Model
