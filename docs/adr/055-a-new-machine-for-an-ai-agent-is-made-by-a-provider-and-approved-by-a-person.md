@@ -48,9 +48,11 @@ two minutes is shown as offline.
 lists each live provider, whether it provides everything the AI agent needs and what
 it lacks, and what a machine set up by hand must have. Asking a provider for a machine
 (`POST …/machine-requests`) records a request naming the AI agent, the provider, the
-needs at that moment, and a machine name made from the AI agent's name — lowercase
-letters, digits and dashes, with a random suffix — so that it is safe to hand to a
-program. A provider is never asked for what it does not offer, and an AI agent has
+needs at that moment, and a machine name made from the AI agent's name — `agent-`,
+lowercase letters and digits joined by single dashes, and four random hex digits — so
+that it is safe to hand to a program. Both the Identity Agent and the provider accept
+only names of exactly that shape, so a name can never be that of anything else on the
+host, such as an Identity Agent's own virtual machine. A provider is never asked for what it does not offer, and an AI agent has
 one new machine on its way at a time, until its words are approved or it is cancelled.
 
 **The provider makes the machine, and only a person makes it a body.** The provider
@@ -60,6 +62,17 @@ made — a virtual machine, a container, a cloud instance — is that program's 
 Its environment carries the AI agent's display name as `AGENT_MACHINE_FOR`, which a
 person typed, so the program must treat it as text and never put it into a shell
 command; `NAME` and `NEEDS` are only letters, digits, dashes and commas.
+
+**A provider touches only the machines it made.** The name comes from the Identity
+Agent, so a name alone is never enough to destroy anything. The environment also
+carries the request's id as `AGENT_MACHINE_REQUEST` and the provider's own binding as
+`AGENT_MACHINE_PROVIDER`. `make` records both with the machine; `enrol` and `remove`
+refuse a machine that does not carry the same two, and `remove` of a name that has no
+machine at all succeeds without doing anything. `make` exits 3, having touched
+nothing, when something of that name already exists on the host, and the provider
+then reports the request failed and never asks for that machine to be removed. A
+machine made by hand, by another tool, for another request, or by a provider that has
+since enrolled again, is therefore left alone, and the operator removes it.
 After `make`, the provider asks for the enrolment string for that request
 (`POST /api/agent-host/machine-requests/{id}/enrolment`), once per request. It is
 the same string a person would be given: good once, for that AI agent, within the enrolment window, and

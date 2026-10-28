@@ -252,7 +252,11 @@ func (s *Store) Providers() ([]Provider, error) {
 	return f.Providers, nil
 }
 
-var machineNameRule = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
+// machineNameRule is exactly the shape machineName makes: "agent-", an
+// optional slug of letters and digits joined by single dashes, and four hex
+// digits. Anything else on a host, such as an Identity Agent's own virtual
+// machine, can never match it.
+var machineNameRule = regexp.MustCompile(`^agent-(?:[a-z0-9]+(?:-[a-z0-9]+)*-)?[0-9a-f]{4}$`)
 
 // ValidMachineName says whether a name is one this package would give a
 // machine: what a provider passes on to a command that makes it.
