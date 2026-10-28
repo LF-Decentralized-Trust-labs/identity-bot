@@ -22,10 +22,12 @@ jobs:
       BUILD_NUMBER: ${{ github.run_number }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.24.0"
+          go-version-file: identity-agent-core/go.mod
 
       # Latest stable Flutter: 3.27.3 fell back to the "Visual Studio 16 2019"
       # generator and couldn't find VS on the VS-2022 windows-latest runner.

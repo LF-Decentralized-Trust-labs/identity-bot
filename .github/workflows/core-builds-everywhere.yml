@@ -114,8 +114,9 @@ jobs:
           GOOS: ios
           GOARCH: arm64
           CGO_ENABLED: "1"
-          # The runner's default clang targets the macOS SDK.
-          CC: xcrun -sdk iphoneos clang
+          # The runner's default clang targets the macOS SDK. Go passes no -arch
+          # for ios, so name it rather than rely on the runner's own architecture.
+          CC: xcrun -sdk iphoneos clang -arch arm64
         run: go vet ./...
 
   test:

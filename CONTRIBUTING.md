@@ -1,8 +1,8 @@
 # Contributing to the Identity Agent
 
-Thank you for helping. This page says how a change reaches `main`. Some of these
-requirements are enforced by GitHub; the rest are the project's own, and maintainers
-hold every pull request to all of them.
+Thank you for helping. This page says how a change reaches `main`. GitHub enforces
+only the sign-off. The other requirements are the project's own: GitHub does not
+block a merge without them, so maintainers check them before merging.
 
 ## How a change reaches `main`
 

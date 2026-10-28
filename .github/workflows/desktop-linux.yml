@@ -22,6 +22,8 @@ jobs:
       BUILD_NUMBER: ${{ github.run_number }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Install Linux desktop build dependencies
         run: |
@@ -32,7 +34,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.24.0"
+          go-version-file: identity-agent-core/go.mod
 
       - uses: actions/setup-python@v7
         with:
