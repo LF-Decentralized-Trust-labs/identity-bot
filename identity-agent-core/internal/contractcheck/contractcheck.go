@@ -185,22 +185,36 @@ func Writing(t Fataler) bool {
 type Tester interface {
 	Helper()
 	Skip(args ...any)
+	Fatal(args ...any)
 	Fatalf(format string, args ...any)
+}
+
+// Unavailable skips an independent check whose tools are not installed, or
+// fails it when IA_REQUIRE_INDEPENDENT_CHECK=1: a runner that sets it has
+// promised the tools, so a check that did not run is a check that failed.
+func Unavailable(t Tester, why string) {
+	t.Helper()
+	if os.Getenv("IA_REQUIRE_INDEPENDENT_CHECK") == "1" {
+		t.Fatal(why + ", and IA_REQUIRE_INDEPENDENT_CHECK=1 requires the independent check to run")
+	}
+	t.Skip(why)
 }
 
 // Independently runs contracts/check_ai_agent_vectors.py, an implementation
 // written from the schemas' prose in Python rather than from this code, over a
 // vector file. If it and the Go code disagree, the prose no longer says what
-// the code does. Skipped where Python, or the blake3 module it needs, is not
-// installed.
+// the code does. Where Python, or the blake3 module it needs, is not
+// installed, see Unavailable.
 func Independently(t Tester, contracts, vectors string) {
 	t.Helper()
 	py, err := exec.LookPath("python3")
 	if err != nil {
-		t.Skip("python3 is not installed")
+		Unavailable(t, "python3 is not installed")
+		return
 	}
 	if exec.Command(py, "-c", "import blake3").Run() != nil {
-		t.Skip("the python blake3 module is not installed (pip install blake3)")
+		Unavailable(t, "the python blake3 module is not installed (pip install blake3)")
+		return
 	}
 	out, err := exec.Command(py, "-I", filepath.Join(contracts, "check_ai_agent_vectors.py"), vectors).CombinedOutput()
 	if err != nil {

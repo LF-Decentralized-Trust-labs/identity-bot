@@ -32,7 +32,9 @@ randomness and are published as given.
 `check_ai_agent_vectors.py` is a second implementation, in Python, written from
 the schemas' prose rather than from the Go code. The Go tests run it over both
 vector files where Python and its `blake3` module are installed, so prose that
-stops describing the code fails a test.
+stops describing the code fails a test. Where they are not installed the check
+is skipped, unless `IA_REQUIRE_INDEPENDENT_CHECK=1` is set: then a check that
+cannot run fails. The relay protocol's Python check follows the same rule.
 
 When a format changes on purpose, regenerate the files with
 `IA_WRITE_CONTRACTS=1 go test ./schemas ./agentbody ./agentmessage` (refused

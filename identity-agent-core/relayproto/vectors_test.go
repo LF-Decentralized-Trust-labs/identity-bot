@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/hex"
+	"os"
 	"os/exec"
 	"testing"
 )
@@ -51,10 +52,14 @@ func TestThePublishedSigningVectorsHold(t *testing.T) {
 }
 
 // An implementation written from the ADR's text, in another language, agrees
-// with the vector file. Skipped where Python is not installed.
+// with the vector file. Skipped where Python is not installed, unless
+// IA_REQUIRE_INDEPENDENT_CHECK=1.
 func TestAnIndependentImplementationAgreesWithTheVectors(t *testing.T) {
 	py, err := exec.LookPath("python3")
 	if err != nil {
+		if os.Getenv("IA_REQUIRE_INDEPENDENT_CHECK") == "1" {
+			t.Fatal("python3 is not installed, and IA_REQUIRE_INDEPENDENT_CHECK=1 requires the independent check to run")
+		}
 		t.Skip("python3 is not installed")
 	}
 	out, err := exec.Command(py, "check_signing_vectors.py", "signing-vectors.json").CombinedOutput()

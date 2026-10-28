@@ -21,6 +21,7 @@ import (
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/internal/contractcheck"
 	"identity-agent-core/internal/fixedkeys"
+	"identity-agent-core/internal/vectorseeds"
 )
 
 // Every published vector is what this package produces from its inputs: the
@@ -36,7 +37,7 @@ func TestThePublishedBodyVectorsHold(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(set.Enrolments) == 0 || len(set.RefusedEnrolments) == 0 || len(set.EnrolRequests) == 0 ||
-		len(set.SignedRequests) == 0 || len(set.RefusedNonces) == 0 || len(set.Words) == 0 || len(set.Grades) == 0 {
+		len(set.SignedRequests) == 0 || len(set.RefusedKeys) == 0 || len(set.RefusedNonces) == 0 || len(set.Words) == 0 || len(set.Grades) == 0 {
 		t.Fatal("the vector file is missing a section")
 	}
 	// Recomputed into a second copy read from the file, so nothing the
@@ -83,6 +84,14 @@ func TestThePublishedBodyVectorsHold(t *testing.T) {
 		}
 		if err := Verify(set.Host, set.Verkey, r.Headers[HeaderSignature], []byte(r.Signed)); err != nil {
 			t.Fatalf("%s: %v", r.Name, err)
+		}
+	}
+	if len(set.RefusedKeys) != 4 {
+		t.Fatalf("%d refused keys; one per sealing key is published", len(set.RefusedKeys))
+	}
+	for _, r := range set.RefusedKeys {
+		if r.Keys.CheckSealingKeys() == nil {
+			t.Fatalf("%s was accepted; it must be refused", r.Name)
 		}
 	}
 	for _, n := range set.RefusedNonces {
@@ -178,6 +187,27 @@ func fillBodyVectors(set *BodyVectorSet) error {
 		return err
 	}
 	set.KeysDigest = set.Keys.KeysDigest()
+	short := func(key string) string {
+		raw, _ := base64.RawURLEncoding.DecodeString(key)
+		return base64.RawURLEncoding.EncodeToString(raw[:len(raw)-1])
+	}
+	set.RefusedKeys = nil
+	for _, r := range []struct {
+		name string
+		cut  func(*Keys)
+	}{
+		{"an X25519 key a byte short", func(k *Keys) { k.X25519 = short(k.X25519) }},
+		{"an ML-KEM-768 key a byte short", func(k *Keys) { k.MLKEM768 = short(k.MLKEM768) }},
+		{"an Ed25519 key a byte short", func(k *Keys) { k.Ed25519 = short(k.Ed25519) }},
+		{"an ML-DSA-65 key a byte short", func(k *Keys) { k.MLDSA65 = short(k.MLDSA65) }},
+	} {
+		k := set.Keys
+		r.cut(&k)
+		set.RefusedKeys = append(set.RefusedKeys, struct {
+			Name string `json:"name"`
+			Keys Keys   `json:"keys"`
+		}{r.name, k})
+	}
 	if len(set.Enrolments) == 0 {
 		return fmt.Errorf("no enrolment")
 	}
@@ -392,7 +422,7 @@ func writeBodyVectors(t *testing.T) {
 
 // seeds are a keyset's seeds: each key's seed is its own run of bytes,
 // counting up from start.
-func seeds(start byte) fixedkeys.Seeds {
+func seeds(start byte) vectorseeds.Seeds {
 	run := func(from byte, n int) string {
 		b := make([]byte, n)
 		for i := range b {
@@ -400,7 +430,7 @@ func seeds(start byte) fixedkeys.Seeds {
 		}
 		return hex.EncodeToString(b)
 	}
-	return fixedkeys.Seeds{Ed25519: run(start, 32), MLDSA65: run(start+1, 32), X25519: run(start+2, 32), MLKEM768: run(start+3, 64)}
+	return vectorseeds.Seeds{Ed25519: run(start, 32), MLDSA65: run(start+1, 32), X25519: run(start+2, 32), MLKEM768: run(start+3, 64)}
 }
 
 func b64json(v any) string {

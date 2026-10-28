@@ -65,7 +65,7 @@
           "items": {
             "$ref": "../agent-message/agent-message.schema.json#/$defs/messaging_keys"
           },
-          "description": "the messaging keys of every identity that countersigned an entry, each signed by that identity's current key"
+          "description": "the messaging keys of every identity that countersigned an entry, each tied to its identity's key log as messaging_keys describes"
         },
         "key_logs": {
           "type": [

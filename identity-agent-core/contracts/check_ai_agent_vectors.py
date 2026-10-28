@@ -62,8 +62,15 @@ def check_body(v):
     same("keys host", k["host"], v["host"])
     same("keys verkey", k["verkey"], v["verkey"])
     same("host and verkey are the same key", v["host"][1:], v["verkey"][1:])
-    for name, size in (("x25519", 32), ("mlkem768", 1184), ("ed25519", 32), ("mldsa65", 1952)):
+    sizes = (("x25519", 32), ("mlkem768", 1184), ("ed25519", 32), ("mldsa65", 1952))
+    for name, size in sizes:
         same("%s size" % name, len(unb64url(k[name])), size)
+    refused_keys = v["refused_keys"]
+    same("refused key count", len(refused_keys), len(sizes))
+    for r in refused_keys:
+        wrong = [name for name, size in sizes if len(unb64url(r["keys"][name])) != size]
+        if len(wrong) != 1:
+            fail("%s has %d keys of the wrong size, not one" % (r["name"], len(wrong)))
     keys_digest = digest(lines("IA-BODY-KEYS-V1", k["host"], k["verkey"], k["x25519"], k["mlkem768"],
                                k["ed25519"], k["mldsa65"]).encode())
     same("keys_digest", keys_digest, v["keys_digest"])

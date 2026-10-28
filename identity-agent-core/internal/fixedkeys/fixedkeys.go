@@ -16,22 +16,15 @@ import (
 	"fmt"
 
 	"identity-agent-core/didcomm"
+	"identity-agent-core/internal/vectorseeds"
 
 	"github.com/cloudflare/circl/kem/mlkem/mlkem768"
 	"github.com/cloudflare/circl/sign/mldsa/mldsa65"
 	"golang.org/x/crypto/curve25519"
 )
 
-// Seeds are a keyset's seeds, hex, as a vector file publishes them.
-type Seeds struct {
-	Ed25519  string `json:"ed25519"`
-	MLDSA65  string `json:"mldsa65"`
-	X25519   string `json:"x25519"`
-	MLKEM768 string `json:"mlkem768"`
-}
-
 // KeySet is the keyset these seeds make, for aid.
-func KeySet(aid string, s Seeds) (*didcomm.KeySet, error) {
+func KeySet(aid string, s vectorseeds.Seeds) (*didcomm.KeySet, error) {
 	ed, err := seed(s.Ed25519, ed25519.SeedSize, "ed25519")
 	if err != nil {
 		return nil, err

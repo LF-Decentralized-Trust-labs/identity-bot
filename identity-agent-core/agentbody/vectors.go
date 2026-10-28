@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 
 	"identity-agent-core/didcomm"
-	"identity-agent-core/internal/fixedkeys"
+	"identity-agent-core/internal/vectorseeds"
 )
 
 // bodyVectors are the enrolment strings, the enrolment request, the strings a
@@ -29,15 +29,15 @@ type BodyVectorSet struct {
 
 	// The body's sealing keys come from these seeds, and Keys is the whole of
 	// its public key material, with the digest that binds the sealing keys to K.
-	SealingSeeds fixedkeys.Seeds `json:"sealing_seeds"`
-	Keys         Keys            `json:"keys"`
-	KeysDigest   string          `json:"keys_digest"`
+	SealingSeeds vectorseeds.Seeds `json:"sealing_seeds"`
+	Keys         Keys              `json:"keys"`
+	KeysDigest   string            `json:"keys_digest"`
 
 	// The Identity Agent the body enrols with: its identifier is the one the
 	// enrolments name, and its messaging keys, from these seeds, are the keys
 	// the enrolment is sealed to.
-	IdentityAgentSeeds fixedkeys.Seeds `json:"identity_agent_seeds"`
-	IdentityAgentKeys  didcomm.DID     `json:"identity_agent_keys"`
+	IdentityAgentSeeds vectorseeds.Seeds `json:"identity_agent_seeds"`
+	IdentityAgentKeys  didcomm.DID       `json:"identity_agent_keys"`
 
 	Enrolments []struct {
 		Name    string    `json:"name"`
@@ -77,6 +77,13 @@ type BodyVectorSet struct {
 		Body    string            `json:"body"`
 		Signed  string            `json:"signed"`
 	} `json:"signed_requests"`
+
+	// RefusedKeys are the body's keys with one sealing key a byte short, one
+	// per algorithm: each is refused at enrolment.
+	RefusedKeys []struct {
+		Name string `json:"name"`
+		Keys Keys   `json:"keys"`
+	} `json:"refused_keys"`
 
 	// RefusedNonces are too short for an enrolment or a signed request.
 	RefusedNonces []string `json:"refused_nonces"`

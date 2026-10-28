@@ -150,10 +150,10 @@ func (k Keys) CheckSealingKeys() error {
 		name, value string
 		size        int
 	}{
-		{"X25519 sealing key", k.X25519, 32},
-		{"ML-KEM-768 sealing key", k.MLKEM768, 1184},
-		{"Ed25519 sealing signature key", k.Ed25519, 32},
-		{"ML-DSA-65 sealing signature key", k.MLDSA65, 1952},
+		{"X25519 sealing key", k.X25519, iacrypto.X25519PubkeyBytes},
+		{"ML-KEM-768 sealing key", k.MLKEM768, iacrypto.MLKEM768EncapBytes},
+		{"Ed25519 sealing signature key", k.Ed25519, iacrypto.Ed25519PubkeyBytes},
+		{"ML-DSA-65 sealing signature key", k.MLDSA65, iacrypto.MLDSA65VerkeyBytes},
 	} {
 		b, err := base64.RawURLEncoding.DecodeString(key.value)
 		if err != nil || len(b) != key.size {

@@ -14,6 +14,7 @@ import (
 	"identity-agent-core/didcomm"
 	"identity-agent-core/internal/contractcheck"
 	"identity-agent-core/internal/fixedkeys"
+	"identity-agent-core/internal/vectorseeds"
 )
 
 // Every published vector is what this package produces: the string a body
@@ -200,7 +201,7 @@ func writeMessageVectors(t *testing.T) {
 		"seed_hex. The countersigner's keys come from countersigner_seeds as contracts/README.md describes, and " +
 		"every envelope reproduces exactly."
 	set.SeedHex = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
-	set.CountersignerSeeds = fixedkeys.Seeds{
+	set.CountersignerSeeds = vectorseeds.Seeds{
 		Ed25519:  run(0x30, 32),
 		MLDSA65:  run(0x31, 32),
 		X25519:   run(0x32, 32),

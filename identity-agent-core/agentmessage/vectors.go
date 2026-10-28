@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 
 	"identity-agent-core/didcomm"
-	"identity-agent-core/internal/fixedkeys"
+	"identity-agent-core/internal/vectorseeds"
 )
 
 // messageVectors are statements a body signs, and a short conversation as the
@@ -41,8 +41,8 @@ type MessageVectorSet struct {
 
 	// Countersigner is the messaging keys, from these seeds, of the AI agent
 	// every entry below is from, which countersigns them.
-	CountersignerSeeds fixedkeys.Seeds `json:"countersigner_seeds"`
-	Countersigner      didcomm.DID     `json:"countersigner"`
+	CountersignerSeeds vectorseeds.Seeds `json:"countersigner_seeds"`
+	Countersigner      didcomm.DID       `json:"countersigner"`
 
 	// Conversation is entries in order. Every value is reproducible: the
 	// body's statement and signature, the record, the countersigned envelope
