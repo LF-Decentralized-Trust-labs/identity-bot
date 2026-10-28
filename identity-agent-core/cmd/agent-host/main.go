@@ -125,6 +125,9 @@ func main() {
 			runner = agenthost.AsUser{User: *brainUser}
 		}
 		var brain agenthost.Brain
+		if *brainDir != "" && *brainUser == "" {
+			fail(fmt.Errorf("--brain-dir needs --brain-user: the brains in it run as that user, never as this one"))
+		}
 		if *brainDir != "" && (*brainName != "" || *brainPath != "") {
 			fail(fmt.Errorf("--brain-dir runs the brain the AI agent was created with; it does not go with --brain or --brain-path"))
 		}
