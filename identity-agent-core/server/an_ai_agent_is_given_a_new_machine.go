@@ -374,7 +374,7 @@ func (s *CoreServer) endMachine(a asset.Asset, haveAgent bool, j agentmachine.Jo
 				log.Printf("[machine] %s: its body could not be ended: %v", cur.MachineName, err)
 				return
 			}
-			s.withdrawBodyCredential(b)
+			_ = s.withdrawBodyCredential(b)
 		case agentbody.StatePending:
 			if rejected, err := s.bodies().Decide(b.ID, cur.AgentAssetID, agentbody.StateRejected, "the Identity Agent", "", time.Now()); err == nil && haveAgent {
 				s.recordBodyEvent(a, rejected, "rejected", "denied", why)
@@ -399,14 +399,16 @@ func (s *CoreServer) endMachine(a asset.Asset, haveAgent bool, j agentmachine.Jo
 
 // withdrawBodyCredential writes a body's revocation to the registry. A failure
 // is left for the next sweep, which tries again.
-func (s *CoreServer) withdrawBodyCredential(b agentbody.Binding) {
+func (s *CoreServer) withdrawBodyCredential(b agentbody.Binding) error {
 	rec, _ := s.DataStore.GetCredential(b.CredentialSAID)
 	if rec == nil || rec.Status == "revoked" || rec.Status == credentialStatusWithdrawing {
-		return
+		return nil
 	}
 	if _, _, err := s.withdrawCredential(rec); err != nil {
 		log.Printf("[machine] the credential of body %s could not be withdrawn yet, the next sweep tries again: %v", b.ID, err)
+		return err
 	}
+	return nil
 }
 
 // withdrawEndedBodies retries the withdrawal of the credential of every body a
@@ -414,7 +416,7 @@ func (s *CoreServer) withdrawBodyCredential(b agentbody.Binding) {
 func (s *CoreServer) withdrawEndedBodies() {
 	for _, j := range s.machines().Ended() {
 		if b, ok := s.bodies().Get(j.Body); ok && b.State == agentbody.StateRevoked {
-			s.withdrawBodyCredential(b)
+			_ = s.withdrawBodyCredential(b)
 		}
 	}
 }
