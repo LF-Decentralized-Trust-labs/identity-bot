@@ -174,6 +174,27 @@ func (s *Store) Invite(agentAssetID string, now time.Time) (secret string, expir
 	return secret, expires, s.save(f)
 }
 
+// SecretDigest is how an enrolment secret is kept: never the secret itself.
+func SecretDigest(secret string) string { return digestSecret(secret) }
+
+// VoidDigest voids the unused invitation whose secret has this digest, and no
+// other: the string handed out for one purpose stops working when that
+// purpose ends, while a person's own string keeps working.
+func (s *Store) VoidDigest(digest string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, err := s.load()
+	if err != nil {
+		return err
+	}
+	for i := range f.Invitations {
+		if f.Invitations[i].SecretDigest == digest && f.Invitations[i].UsedAt.IsZero() {
+			f.Invitations[i].Voided = true
+		}
+	}
+	return s.save(f)
+}
+
 // ErrInvitation is every reason a secret cannot be used, given as one answer:
 // a caller probing secrets learns nothing from which one it was.
 var ErrInvitation = errors.New("this enrolment string cannot be used: it is unknown, expired, already used, or replaced by a newer one")

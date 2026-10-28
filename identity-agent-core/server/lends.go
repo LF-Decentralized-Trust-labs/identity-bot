@@ -213,6 +213,7 @@ func (s *CoreServer) keepSweepingLends(stop <-chan struct{}) {
 			return
 		case <-t.C:
 			s.endLendsNoLongerGranted("checked every minute")
+			s.endMachinesNoLongerWanted("checked every minute")
 		}
 	}
 }

@@ -11,12 +11,14 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"identity-agent-core/agentbody"
 	"identity-agent-core/agentmachine"
 	"identity-agent-core/asset"
 	"identity-agent-core/sandbox"
+	"identity-agent-core/screenview"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -209,8 +211,8 @@ func (s *CoreServer) handleAskForMachine(w http.ResponseWriter, r *http.Request)
 		jsonError(w, "say which provider makes the machine", http.StatusBadRequest)
 		return
 	}
-	if s.agentStatus(a.PairwiseAID) == "revoked" {
-		jsonError(w, "this AI agent's grant is revoked, so no machine is made for it", http.StatusConflict)
+	if s.agentStatus(a.PairwiseAID) == "revoked" || s.agentGrantLapsed(a.PairwiseAID) {
+		jsonError(w, "this AI agent's grant is revoked or has lapsed, so no machine is made for it", http.StatusConflict)
 		return
 	}
 	if _, ok := s.providerStillGranted(req.Provider); !ok {
@@ -262,13 +264,170 @@ func (s *CoreServer) handleCancelMachineRequest(w http.ResponseWriter, r *http.R
 			s.recordBodyEvent(a, rejected, "rejected", "denied", "its machine request was cancelled by "+whoDecided(r))
 		}
 	}
-	j, err := s.machines().Remove(j.ID, time.Now())
+	j, err := s.forgetMachine(j)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusConflict)
 		return
 	}
 	s.recordMachineEvent(a, j, "cancelled", "ok", "cancelled by "+whoDecided(r))
 	writeJSONStatus(w, http.StatusOK, j)
+}
+
+// endMachinesNoLongerWanted destroys machines nobody may use any more:
+//
+//   - every machine made for an AI agent whose grant is revoked or has
+//     lapsed, or that is gone — its body ended first, and its body credential
+//     withdrawn;
+//   - a machine whose six words nobody approved before its enrolment window
+//     ran out, or that was rejected or removed meanwhile;
+//   - a machine whose enrolment string ran out before it asked at all.
+//
+// It also withdraws the credential of a body ended this way whose withdrawal
+// could not be written before. It runs every minute, and in the background
+// whenever a credential is revoked: never in the revoking request itself, which
+// may hold an AI agent's lock this takes. One sweep runs at a time; one asked
+// for while another runs runs again after it.
+func (s *CoreServer) endMachinesNoLongerWanted(why string) {
+	if s.assetHandler == nil {
+		return
+	}
+	machineSweepAgain.Store(true)
+	if !machineSweep.TryLock() {
+		return
+	}
+	defer machineSweep.Unlock()
+	for machineSweepAgain.Swap(false) {
+		for _, j := range s.machines().Unfinished() {
+			a, ok := s.aiAgentAsset(j.AgentAssetID)
+			if s.whyEndMachine(a, ok, j, time.Now()) != "" {
+				s.endMachine(a, ok, j, why)
+			}
+		}
+		s.withdrawEndedBodies()
+	}
+}
+
+var (
+	machineSweep      sync.Mutex
+	machineSweepAgain atomic.Bool
+)
+
+// sweepMachinesSoon runs the sweep in the background, for a caller that may
+// hold an AI agent's lock.
+func (s *CoreServer) sweepMachinesSoon(why string) {
+	go s.endMachinesNoLongerWanted(why)
+}
+
+// whyEndMachine says why a request's machine should be destroyed now, or
+// nothing if it should not.
+func (s *CoreServer) whyEndMachine(a asset.Asset, haveAgent bool, j agentmachine.Job, now time.Time) string {
+	switch {
+	case !haveAgent:
+		return "the AI agent it was made for is gone"
+	case s.agentStatus(a.PairwiseAID) == "revoked":
+		return "the AI agent it was made for is revoked"
+	case s.agentGrantLapsed(a.PairwiseAID):
+		return "the AI agent it was made for has a grant that lapsed"
+	case j.State == agentmachine.StateEnrolling:
+		// A request waiting for approval past its window was expired when the
+		// body store was read.
+		if b, ok := s.bodies().Get(j.Body); !ok || (b.State != agentbody.StatePending && b.State != agentbody.StateActive) {
+			return "nobody approved its six words in time"
+		}
+	case j.State == agentmachine.StateMaking:
+		if !j.EnrolmentGivenAt.IsZero() && now.Sub(j.EnrolmentGivenAt) > agentbody.EnrolmentWindow+time.Minute {
+			return "its enrolment string ran out before it asked to become a body"
+		}
+	}
+	return ""
+}
+
+// endMachine ends one request's machine: its body first — a live one ended and
+// its credential withdrawn, one still waiting refused — then the request, which
+// has its provider destroy the machine. The reason is decided again under the
+// AI agent's lock, from the request and body as they are then, so an approval
+// or a report that landed meanwhile is not undone.
+func (s *CoreServer) endMachine(a asset.Asset, haveAgent bool, j agentmachine.Job, prompted string) {
+	lockID := j.AgentAssetID
+	unlock := lockAgentGrant(lockID)
+	defer unlock()
+	cur, ok := s.machines().Get(j.ID)
+	if !ok {
+		return
+	}
+	why := s.whyEndMachine(a, haveAgent, cur, time.Now())
+	if why == "" || cur.Done() || cur.State == agentmachine.StateRemoving {
+		return
+	}
+	why += " (" + prompted + ")"
+	if b, ok := s.bodies().Get(cur.Body); ok {
+		switch b.State {
+		case agentbody.StateActive:
+			var err error
+			if haveAgent {
+				b, err = s.endBinding(a, b, why)
+			} else {
+				b, err = s.bodies().Revoke(b.ID, cur.AgentAssetID, time.Now())
+				s.screens().EndBody(b.Host, screenview.EndedBodyRemoved)
+			}
+			if err != nil {
+				log.Printf("[machine] %s: its body could not be ended: %v", cur.MachineName, err)
+				return
+			}
+			s.withdrawBodyCredential(b)
+		case agentbody.StatePending:
+			if rejected, err := s.bodies().Decide(b.ID, cur.AgentAssetID, agentbody.StateRejected, "the Identity Agent", "", time.Now()); err == nil && haveAgent {
+				s.recordBodyEvent(a, rejected, "rejected", "denied", why)
+			}
+		}
+	}
+	// Ending its body may already have had its provider told to destroy it.
+	if again, ok := s.machines().Get(cur.ID); ok && again.State == agentmachine.StateRemoving {
+		return
+	}
+	cur, err := s.forgetMachine(cur)
+	if err != nil {
+		log.Printf("[machine] %s could not be ended: %v", cur.MachineName, err)
+		return
+	}
+	if haveAgent {
+		s.recordMachineEvent(a, cur, "removing", "ok", why)
+	} else {
+		log.Printf("[machine] %s: its provider is to destroy it: %s", cur.MachineName, why)
+	}
+}
+
+// withdrawBodyCredential writes a body's revocation to the registry. A failure
+// is left for the next sweep, which tries again.
+func (s *CoreServer) withdrawBodyCredential(b agentbody.Binding) {
+	rec, _ := s.DataStore.GetCredential(b.CredentialSAID)
+	if rec == nil || rec.Status == "revoked" || rec.Status == credentialStatusWithdrawing {
+		return
+	}
+	if _, _, err := s.withdrawCredential(rec); err != nil {
+		log.Printf("[machine] the credential of body %s could not be withdrawn yet, the next sweep tries again: %v", b.ID, err)
+	}
+}
+
+// withdrawEndedBodies retries the withdrawal of the credential of every body a
+// machine request ended whose withdrawal did not go through.
+func (s *CoreServer) withdrawEndedBodies() {
+	for _, j := range s.machines().Ended() {
+		if b, ok := s.bodies().Get(j.Body); ok && b.State == agentbody.StateRevoked {
+			s.withdrawBodyCredential(b)
+		}
+	}
+}
+
+// forgetMachine has a request's provider destroy its machine, and voids the
+// enrolment string it was given if no machine used it.
+func (s *CoreServer) forgetMachine(j agentmachine.Job) (agentmachine.Job, error) {
+	if j.Body == "" && j.EnrolmentDigest != "" {
+		if err := s.bodies().VoidDigest(j.EnrolmentDigest); err != nil {
+			log.Printf("[machine] %s: its unused enrolment string could not be voided: %v", j.MachineName, err)
+		}
+	}
+	return s.machines().Remove(j.ID, time.Now())
 }
 
 // providerStillGranted is a provider's body, if it is still live and its AI
@@ -466,8 +625,8 @@ func (s *CoreServer) handleProviderEnrolment(w http.ResponseWriter, r *http.Requ
 		jsonError(w, "the AI agent this machine was for is gone", http.StatusGone)
 		return
 	}
-	if s.agentStatus(a.PairwiseAID) == "revoked" {
-		jsonError(w, "the AI agent this machine was for is revoked", http.StatusConflict)
+	if s.agentStatus(a.PairwiseAID) == "revoked" || s.agentGrantLapsed(a.PairwiseAID) {
+		jsonError(w, "the AI agent this machine was for is revoked, or its grant has lapsed", http.StatusConflict)
 		return
 	}
 	// Recorded before it is made, under the store's lock, so a second ask —
@@ -481,6 +640,13 @@ func (s *CoreServer) handleProviderEnrolment(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusServiceUnavailable)
 		return
+	}
+	// Which string it was, kept only as a digest, so ending the request can
+	// void exactly that string and no other.
+	if e, perr := agentbody.ParseEnrolment(str); perr == nil {
+		if j, err = s.machines().SetEnrolmentDigest(j.ID, agentbody.SecretDigest(e.Secret), time.Now()); err != nil {
+			log.Printf("[machine] %s: which enrolment string it was given could not be kept: %v", j.MachineName, err)
+		}
 	}
 	s.recordMachineEvent(a, j, "enrolment", "ok", "a one-time enrolment string was given to "+j.ProviderName+" for "+j.MachineName)
 	writeJSONStatus(w, http.StatusCreated, map[string]any{"enrolment": str, "expires_at": expires})
