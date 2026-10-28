@@ -124,7 +124,9 @@ func TestRootSeedStatus(t *testing.T) {
 	if got := get(); got["established"] != false {
 		t.Fatalf("expected not established, got %v", got)
 	}
-	postSeed(s, base64.StdEncoding.EncodeToString(make([]byte, 64)), false)
+	if w := postSeed(s, base64.StdEncoding.EncodeToString(make([]byte, 64)), false); w.Code != http.StatusCreated {
+		t.Fatalf("installing the seed: %d %s", w.Code, w.Body)
+	}
 	got := get()
 	if got["established"] != true {
 		t.Fatalf("expected established, got %v", got)
@@ -142,7 +144,9 @@ func TestPhraseAloneRederivesHDKeys(t *testing.T) {
 	b64 := base64.StdEncoding.EncodeToString(seed)
 
 	deviceA := rootSeedServer(t)
-	postSeed(deviceA, b64, false)
+	if w := postSeed(deviceA, b64, false); w.Code != http.StatusCreated {
+		t.Fatalf("installing the seed: %d %s", w.Code, w.Body)
+	}
 	seedA, _ := secureenclave.LoadRootSeed(deviceA.DataDir)
 	keyA, err := backup.DerivePairwiseSeed(seedA, 7, 0)
 	if err != nil {
@@ -151,7 +155,9 @@ func TestPhraseAloneRederivesHDKeys(t *testing.T) {
 
 	// "Wiped device": a brand-new data dir, only the phrase survives.
 	deviceB := rootSeedServer(t)
-	postSeed(deviceB, b64, false)
+	if w := postSeed(deviceB, b64, false); w.Code != http.StatusCreated {
+		t.Fatalf("installing the seed: %d %s", w.Code, w.Body)
+	}
 	seedB, _ := secureenclave.LoadRootSeed(deviceB.DataDir)
 	keyB, err := backup.DerivePairwiseSeed(seedB, 7, 0)
 	if err != nil {
