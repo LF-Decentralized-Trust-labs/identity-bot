@@ -9,7 +9,7 @@ name: Core — builds everywhere
 # - Linux, macOS and Windows on amd64 and arm64: cross-compiled from one Linux
 #   runner with cgo off, and vetted. Linux is built for the server targets (the
 #   sealed server image, and agent-host on AI agent machines), not for a
-#   desktop app: a Linux desktop app is deferred (see CLAUDE.md).
+#   desktop app: a Linux desktop app is deferred (see CONTRIBUTING.md).
 # - Android: vetted from the Linux runner with cgo off (its key-hardware files
 #   are pure Go).
 # - macOS with cgo: built and vetted natively on amd64 and arm64, because the
