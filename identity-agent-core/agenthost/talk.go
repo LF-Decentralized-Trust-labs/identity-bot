@@ -246,6 +246,9 @@ type convState struct {
 	Session string `json:"session"`
 	// Started is whether the brain has run in this session yet.
 	Started bool `json:"started"`
+	// Brain is the brain the session belongs to. A session is one brain's, so
+	// when the AI agent's brain changes the conversation starts a new one.
+	Brain string `json:"brain,omitempty"`
 	// Serving is the ask this AI agent was given and owes an answer to, and
 	// AskedBy who gave it.
 	Serving string `json:"serving"`

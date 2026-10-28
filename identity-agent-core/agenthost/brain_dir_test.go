@@ -34,3 +34,24 @@ func TestTheAIAgentsBrainIsFoundInTheBrainDirectory(t *testing.T) {
 		}
 	}
 }
+
+// A conversation's session belongs to one brain: when the AI agent's brain
+// changes, the conversation starts a new session rather than asking the new
+// brain to resume one it never had. A session from before brains were
+// recorded is kept.
+func TestASessionIsNotResumedByAnotherBrain(t *testing.T) {
+	cs := &convState{Session: "claude-session", Started: true, Brain: "claude-code"}
+	freshIfBrainChanged(cs, ClaudeCode{})
+	if cs.Session != "claude-session" || !cs.Started {
+		t.Fatalf("the same brain lost its session: %+v", cs)
+	}
+	freshIfBrainChanged(cs, Codex{})
+	if cs.Session == "claude-session" || cs.Started || cs.Brain != "" {
+		t.Fatalf("another brain was handed Claude's session: %+v", cs)
+	}
+	old := &convState{Session: "s", Started: true}
+	freshIfBrainChanged(old, Codex{})
+	if old.Session != "s" || !old.Started {
+		t.Fatalf("a session from before brains were recorded was dropped: %+v", old)
+	}
+}
