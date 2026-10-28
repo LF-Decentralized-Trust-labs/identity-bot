@@ -116,7 +116,8 @@ type CoreServer struct {
 	background backgroundWork
 	// lifecycle is held for the whole of Start and of Stop, so neither can
 	// begin while the other is under way. Stop cannot hold mu while it waits,
-	// because the work it waits for takes mu.
+	// because the work it waits for takes mu. Taken before mu, never after
+	// it, and never by background work.
 	lifecycle sync.Mutex
 	listener  net.Listener
 	// The http.Servers are held so Stop can shut them down. Serving without a
