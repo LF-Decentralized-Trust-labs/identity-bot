@@ -22,12 +22,17 @@ import (
 // tests check is reached. Tests of the refusal set their own answer.
 func rootSeedServer(t *testing.T) *CoreServer {
 	t.Helper()
-	prev := detectKeyProtection
-	detectKeyProtection = func() secureenclave.Capability {
-		return secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindTPM2}
-	}
-	t.Cleanup(func() { detectKeyProtection = prev })
+	keyProtectionAnswers(t, secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindTPM2})
 	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
+}
+
+// keyProtectionAnswers makes this machine's key-protection check answer c
+// for the rest of the test.
+func keyProtectionAnswers(t *testing.T, c secureenclave.Capability) {
+	t.Helper()
+	prev := detectKeyProtection
+	detectKeyProtection = func() secureenclave.Capability { return c }
+	t.Cleanup(func() { detectKeyProtection = prev })
 }
 
 func postSeed(s *CoreServer, seedB64 string, remote bool) *httptest.ResponseRecorder {
@@ -205,6 +210,7 @@ func TestAPairedComputerRefusesARootSeed(t *testing.T) {
 // no second device.
 func TestAComputerThatIsTheIdentityStillTakesItsOwnSeed(t *testing.T) {
 	s := agentWithNoIdentity(t)
+	keyProtectionAnswers(t, secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindTPM2})
 
 	body := []byte(`{"seed_b64":"` + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{4}, 64)) + `"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/keystore/root-seed", bytes.NewReader(body))
@@ -213,9 +219,9 @@ func TestAComputerThatIsTheIdentityStillTakesItsOwnSeed(t *testing.T) {
 	rec := httptest.NewRecorder()
 	s.handleSetRootSeed(rec, req)
 
-	if rec.Code == http.StatusConflict {
+	if rec.Code != http.StatusCreated {
 		t.Fatalf("a computer that answers to nobody was refused its own seed, so a setup "+
-			"with no second device cannot be completed: %s", rec.Body.String())
+			"with no second device cannot be completed: %d %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -243,11 +249,7 @@ func TestNotKnowingIsNotAReasonToProceed(t *testing.T) {
 	// precondition is our own missing code stops testing the day that code is
 	// written, and stops silently.
 	s := rootSeedServer(t)
-	prev := detectKeyProtection
-	detectKeyProtection = func() secureenclave.Capability {
-		return secureenclave.NotImplemented("a platform nobody has taught this software to inspect")
-	}
-	t.Cleanup(func() { detectKeyProtection = prev })
+	keyProtectionAnswers(t, secureenclave.NotImplemented("a platform nobody has taught this software to inspect"))
 
 	w := postSeed(s, b64, false)
 	if w.Code == http.StatusOK {

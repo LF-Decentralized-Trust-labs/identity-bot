@@ -20,12 +20,14 @@ permissions:
 
 concurrency:
   group: core-builds-${{ github.ref }}
-  cancel-in-progress: true
+  # A newer push to a pull request replaces its run; every push to main is checked.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
     name: build ${{ matrix.goos }}/${{ matrix.goarch }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -52,6 +54,7 @@ jobs:
   build-macos-cgo:
     name: build darwin/arm64 (cgo)
     runs-on: macos-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: identity-agent-core
@@ -69,6 +72,7 @@ jobs:
   test:
     name: test linux
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: identity-agent-core
@@ -80,3 +84,10 @@ jobs:
           cache-dependency-path: identity-agent-core/go.sum
       - name: go test
         run: go test -count=1 -timeout 20m ./...
+      # The wire-protocol modules nested inside the core are modules of their own,
+      # which ./... does not reach.
+      - name: go vet and test the nested modules
+        run: |
+          for m in relayproto witnessproto; do
+            (cd "$m" && go vet ./... && go test -count=1 ./...)
+          done
