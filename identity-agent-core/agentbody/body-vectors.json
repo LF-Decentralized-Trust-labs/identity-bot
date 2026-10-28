@@ -1,0 +1,170 @@
+{
+  "about": "AI agent body enrolment and signed requests, worked through. Every string a body signs is the lines shown joined with a newline (0x0a), no trailing newline. Signatures are the machine key's, CESR-encoded; the Ed25519 ones are reproducible from seed_hex. Digests are Blake3-256, CESR code E. The enrolment string is iabody1. followed by the base64url (no padding) of the JSON fields.",
+  "seed_hex": "a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0",
+  "host": "BAtHgj5xCV3Vm-eKwnHFdu84n4e2RWGrB8-aTrzQLSBB",
+  "verkey": "DAtHgj5xCV3Vm-eKwnHFdu84n4e2RWGrB8-aTrzQLSBB",
+  "keys": {
+    "host": "BAtHgj5xCV3Vm-eKwnHFdu84n4e2RWGrB8-aTrzQLSBB",
+    "verkey": "DAtHgj5xCV3Vm-eKwnHFdu84n4e2RWGrB8-aTrzQLSBB",
+    "x25519": "x25519-public-key-base64url",
+    "mlkem768": "mlkem768-public-key-base64url",
+    "ed25519": "ed25519-public-key-base64url",
+    "mldsa65": "mldsa65-public-key-base64url"
+  },
+  "keys_digest": "EFPPwqlSI-3Eqpp1CJ_oG1iswV2N7YIUeWVrU1FvbYKK",
+  "enrolments": [
+    {
+      "name": "an enrolment",
+      "fields": {
+        "v": 1,
+        "url": "https://ia.example",
+        "ia": "EIdentityAgent0000000000000000000000000000000",
+        "sn": 3,
+        "d": "EKeyState00000000000000000000000000000000000",
+        "agent": "EAIAgent000000000000000000000000000000000000",
+        "name": "Research assistant",
+        "secret": "one-time-secret-0001",
+        "exp": "2026-10-28T12:15:00Z"
+      },
+      "encoded": "iabody1.eyJ2IjoxLCJ1cmwiOiJodHRwczovL2lhLmV4YW1wbGUiLCJpYSI6IkVJZGVudGl0eUFnZW50MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInNuIjozLCJkIjoiRUtleVN0YXRlMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAiLCJhZ2VudCI6IkVBSUFnZW50MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwIiwibmFtZSI6IlJlc2VhcmNoIGFzc2lzdGFudCIsInNlY3JldCI6Im9uZS10aW1lLXNlY3JldC0wMDAxIiwiZXhwIjoiMjAyNi0xMC0yOFQxMjoxNTowMFoifQ"
+    }
+  ],
+  "refused_enrolments": [
+    {
+      "name": "another prefix",
+      "encoded": "iabody2.eyJ2IjoxfQ"
+    },
+    {
+      "name": "not base64url",
+      "encoded": "iabody1.***"
+    },
+    {
+      "name": "not JSON",
+      "encoded": "iabody1.bm90IGpzb24"
+    },
+    {
+      "name": "version 2",
+      "encoded": "iabody1.eyJhZ2VudCI6IkUiLCJkIjoiRSIsImlhIjoiRSIsInNlY3JldCI6InMiLCJ1cmwiOiJ1IiwidiI6Mn0"
+    },
+    {
+      "name": "no secret",
+      "encoded": "iabody1.eyJhZ2VudCI6IkUiLCJkIjoiRSIsImlhIjoiRSIsInVybCI6InUiLCJ2IjoxfQ"
+    }
+  ],
+  "enrol_proofs": [
+    {
+      "name": "a software key",
+      "nonce": "enrol-nonce-0001",
+      "claimed_grade": "software",
+      "platform": "linux/amd64",
+      "placement": "vm",
+      "signed": "IA-BODY-ENROL-V1\nEIdentityAgent0000000000000000000000000000000\nEAIAgent000000000000000000000000000000000000\none-time-secret-0001\nenrol-nonce-0001\nBAtHgj5xCV3Vm-eKwnHFdu84n4e2RWGrB8-aTrzQLSBB\nDAtHgj5xCV3Vm-eKwnHFdu84n4e2RWGrB8-aTrzQLSBB\nEFPPwqlSI-3Eqpp1CJ_oG1iswV2N7YIUeWVrU1FvbYKK\nsoftware\nlinux/amd64\nvm",
+      "signature": "0BAnrvjQ85zNYajHovONodpdZ8CfYuv5cg3HraLa2stylvUBIKjW6YWA-f4TLDiXO8eXXbDFDj97MTN26jnQQNcE"
+    },
+    {
+      "name": "a key the machine says is in hardware",
+      "nonce": "enrol-nonce-0001",
+      "claimed_grade": "hardware-asserted",
+      "platform": "macos/arm64",
+      "placement": "computer",
+      "signed": "IA-BODY-ENROL-V1\nEIdentityAgent0000000000000000000000000000000\nEAIAgent000000000000000000000000000000000000\none-time-secret-0001\nenrol-nonce-0001\nBAtHgj5xCV3Vm-eKwnHFdu84n4e2RWGrB8-aTrzQLSBB\nDAtHgj5xCV3Vm-eKwnHFdu84n4e2RWGrB8-aTrzQLSBB\nEFPPwqlSI-3Eqpp1CJ_oG1iswV2N7YIUeWVrU1FvbYKK\nhardware-asserted\nmacos/arm64\ncomputer",
+      "signature": "0BDq1HlVuXvROgf_xLxlKhA7saJg4tTOEgccUsVtRh9hcoPNdGTllprbH4LULn3gitge_1VcXxJU0yrjea9PM9gK"
+    }
+  ],
+  "signed_requests": [
+    {
+      "name": "a GET with no body",
+      "headers": {
+        "X-IA-Body-For": "EIdentityAgent0000000000000000000000000000000",
+        "X-IA-Body-Host": "BAtHgj5xCV3Vm-eKwnHFdu84n4e2RWGrB8-aTrzQLSBB",
+        "X-IA-Body-Nonce": "request-nonce-0001",
+        "X-IA-Body-Sig": "0BDsnz3ntRlRjD2AXBNeLK5Pn_S0UiKvj9qU_24KPsOuGgc8O4RsADeaK00TDLT648-VyUE5l29DfEVv9y5pONMN",
+        "X-IA-Body-Timestamp": "2026-10-28T12:00:00Z"
+      },
+      "method": "GET",
+      "target": "/api/agent-host/inbox?wait=30",
+      "body": "",
+      "signed": "IA-BODY-REQ-V3\nEIdentityAgent0000000000000000000000000000000\nBAtHgj5xCV3Vm-eKwnHFdu84n4e2RWGrB8-aTrzQLSBB\nGET\n/api/agent-host/inbox?wait=30\n2026-10-28T12:00:00Z\nrequest-nonce-0001\nEK8TSbn1-aGmoEBN6jbcyUmbyyXJrcESt8yak8rkHzJi\n\n\n"
+    },
+    {
+      "name": "a POST with a stated purpose and a session",
+      "headers": {
+        "X-IA-Body-For": "EIdentityAgent0000000000000000000000000000000",
+        "X-IA-Body-Host": "BAtHgj5xCV3Vm-eKwnHFdu84n4e2RWGrB8-aTrzQLSBB",
+        "X-IA-Body-Nonce": "request-nonce-0002",
+        "X-IA-Body-Sig": "0BBlyGX9FE4_6htqsHk_Zy_B3xsOQB6h-W3VNqE5mKQilPo1504MSbw9C7A6RJqWWnLD00_FuDlwqd3IQ3VDCQMD",
+        "X-IA-Body-Timestamp": "2026-10-28T12:00:01Z",
+        "X-IA-Session": "run-7",
+        "X-Reason": "report the result",
+        "X-Work-Item": "issue-42"
+      },
+      "method": "post",
+      "target": "/api/agent-host/messages",
+      "body": "{\"conversation\":\"c_1\",\"text\":\"done\"}",
+      "signed": "IA-BODY-REQ-V3\nEIdentityAgent0000000000000000000000000000000\nBAtHgj5xCV3Vm-eKwnHFdu84n4e2RWGrB8-aTrzQLSBB\nPOST\n/api/agent-host/messages\n2026-10-28T12:00:01Z\nrequest-nonce-0002\nEM7akeDG_Erbou3o948WkEBDGgeWE8pjHFHyrsGUoHIk\nissue-42\nreport the result\nrun-7"
+    }
+  ],
+  "words": [
+    {
+      "host": "BAtHgj5xCV3Vm-eKwnHFdu84n4e2RWGrB8-aTrzQLSBB",
+      "words": [
+        "prefer",
+        "wish",
+        "pair",
+        "swap",
+        "execute",
+        "mix"
+      ]
+    },
+    {
+      "host": "1AAIAtzkysVOrUt0qUoLK39vKrGYuBbLRQ8wF1pjUz__rAab",
+      "words": [
+        "hurdle",
+        "copper",
+        "second",
+        "blast",
+        "galaxy",
+        "retire"
+      ]
+    }
+  ],
+  "grades": [
+    {
+      "claimed": "software",
+      "grade": "software",
+      "clamped": false
+    },
+    {
+      "claimed": "hardware-asserted",
+      "grade": "hardware-asserted",
+      "clamped": false
+    },
+    {
+      "claimed": "hardware-attested",
+      "grade": "hardware-asserted",
+      "clamped": true
+    },
+    {
+      "claimed": "attested-runtime",
+      "grade": "hardware-asserted",
+      "clamped": true
+    },
+    {
+      "claimed": "",
+      "grade": "software",
+      "clamped": false
+    },
+    {
+      "claimed": "root",
+      "grade": "software",
+      "clamped": true
+    }
+  ],
+  "p256": {
+    "host": "1AAIA2D-1LolWp0xyWHrdMY1bWjASbiSO2H6bOZpYi5g8p-2",
+    "verkey": "1AAJA2D-1LolWp0xyWHrdMY1bWjASbiSO2H6bOZpYi5g8p-2",
+    "signed": "IA-BODY-REQ-V3\nEIdentityAgent0000000000000000000000000000000\n1AAIA2D-1LolWp0xyWHrdMY1bWjASbiSO2H6bOZpYi5g8p-2\nGET\n/api/agent-host/binding\n2026-10-28T12:00:02Z\nrequest-nonce-0003\nEK8TSbn1-aGmoEBN6jbcyUmbyyXJrcESt8yak8rkHzJi\n\n\n",
+    "signature": "0IDsUuWhEx5HYdbvjn5yKLZhU6BELUtUa23TMHuwhKOBMhvDAeIVTpb_sPJyV8k_usm88cf-f2JRnQfiCA90hkiN",
+    "refused_signature": "0IDsUuWhEx5HYdbvjn5yKLZhU6BELUtUa23TMHuwhKOBMuQ8_hzqsWkBTw2NqDbARTX_9TKvJ7VM5-vXwrOH3NzE"
+  }
+}

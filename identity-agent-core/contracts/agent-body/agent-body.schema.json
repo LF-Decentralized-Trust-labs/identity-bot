@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "identity-agent-core/contracts/agent-body/agent-body.schema.json",
+  "title": "AI agent body enrolment (ADR-046)",
+  "description": "How a machine becomes the body of an AI agent, and how it signs every request after. Worked examples, with signatures, are in identity-agent-core/agentbody/body-vectors.json.",
+  "$defs": {
+    "enrolment_string": {
+      "description": "Handed to the machine out of band: the text iabody1. followed by the base64url (no padding) of an enrolment object. A reader refuses any other prefix, any version but 1, and an enrolment missing url, ia, d, agent or secret.",
+      "type": "string",
+      "pattern": "^iabody1\\.[A-Za-z0-9_-]+$"
+    },
+    "enrolment": {
+      "description": "The fields of an enrolment string. The machine accepts the Identity Agent's key log only if it is ia's and holds the event sn/d, so whoever wrote the string decided which Identity Agent the machine will believe.",
+      "type": "object",
+      "required": ["v", "url", "ia", "sn", "d", "agent", "name", "secret", "exp"],
+      "additionalProperties": false,
+      "properties": {
+        "v": {"const": 1},
+        "url": {"type": "string", "minLength": 1, "description": "where the Identity Agent is reached"},
+        "ia": {"type": "string", "minLength": 1, "description": "the Identity Agent's identifier"},
+        "sn": {"type": "integer", "minimum": 0, "description": "sequence number of an event in the Identity Agent's key log"},
+        "d": {"type": "string", "minLength": 1, "description": "that event's digest"},
+        "agent": {"type": "string", "minLength": 1, "description": "the AI agent the machine will become the body of"},
+        "name": {"type": "string", "description": "the AI agent's name, for the person at the machine"},
+        "secret": {"type": "string", "minLength": 1, "description": "single use; lets the machine ask, grants nothing"},
+        "exp": {"type": "string", "format": "date-time", "description": "when the string stops working, 15 minutes after it is made"}
+      }
+    },
+    "keys": {
+      "description": "The body's public keys. host is its identifier, derived from its signing key: 1AAI + compressed P-256 point for a key in secure hardware, B + Ed25519 key for a software key. verkey is the same key in verification form (1AAJ or D). The four sealing keys are base64url; keys_digest = Blake3-256 (CESR code E) over the lines IA-BODY-KEYS-V1, host, verkey, x25519, mlkem768, ed25519, mldsa65 joined with a newline.",
+      "type": "object",
+      "required": ["host", "verkey", "x25519", "mlkem768", "ed25519", "mldsa65"],
+      "additionalProperties": false,
+      "properties": {
+        "host": {"type": "string", "pattern": "^(1AAI[A-Za-z0-9_-]{44}|B[A-Za-z0-9_-]{43})$"},
+        "verkey": {"type": "string", "pattern": "^(1AAJ[A-Za-z0-9_-]{44}|D[A-Za-z0-9_-]{43})$"},
+        "x25519": {"type": "string"},
+        "mlkem768": {"type": "string"},
+        "ed25519": {"type": "string"},
+        "mldsa65": {"type": "string"}
+      }
+    },
+    "enrol_proof": {
+      "description": "The string the body's key signs to ask to be enrolled: the lines IA-BODY-ENROL-V1, ia, agent, secret, a fresh nonce, host, verkey, keys_digest, the claimed grade, platform (e.g. macos/arm64) and placement (computer, vm, cloud or device), joined with a newline, no trailing newline.",
+      "type": "string"
+    },
+    "six_words": {
+      "description": "Shown on both screens so a person can compare them: Blake3-256 of IA-BODY-WORDS-V1, a newline, then host. Words 1-5 are the first 55 bits in 11-bit groups, word 6 the next 11 bits, each an index into the BIP-39 English list.",
+      "type": "array",
+      "items": {"type": "string"},
+      "minItems": 6,
+      "maxItems": 6
+    },
+    "signed_request": {
+      "description": "Every request a body makes is signed over the lines IA-BODY-REQ-V3, the Identity Agent's identifier (X-IA-Body-For), host (X-IA-Body-Host), the method upper-cased, the request target exactly as sent (escaped path and query), X-IA-Body-Timestamp, X-IA-Body-Nonce, Blake3-256 (CESR) of the body bytes, X-Work-Item, X-Reason and X-IA-Session, joined with a newline; an absent header is an empty line. The signature travels in X-IA-Body-Sig. The timestamp must be within 2 minutes of the Identity Agent's clock, and a signature is accepted once.",
+      "type": "object",
+      "required": ["X-IA-Body-Host", "X-IA-Body-Sig", "X-IA-Body-Timestamp", "X-IA-Body-Nonce", "X-IA-Body-For"],
+      "properties": {
+        "X-IA-Body-Host": {"type": "string"},
+        "X-IA-Body-Sig": {"type": "string", "description": "0B + Ed25519 signature, or 0I + P-256 r||s in low-s form; a high-s P-256 signature is refused"},
+        "X-IA-Body-Timestamp": {"type": "string", "format": "date-time"},
+        "X-IA-Body-Nonce": {"type": "string", "minLength": 1},
+        "X-IA-Body-For": {"type": "string"},
+        "X-Work-Item": {"type": "string"},
+        "X-Reason": {"type": "string"},
+        "X-IA-Session": {"type": "string"}
+      }
+    },
+    "grade": {
+      "description": "How strongly the body's key is held, weakest first. A claim above hardware-asserted is recorded as hardware-asserted until its evidence can be checked; any other claim is recorded as software.",
+      "enum": ["software", "hardware-asserted", "hardware-attested", "attested-runtime"]
+    }
+  }
+}

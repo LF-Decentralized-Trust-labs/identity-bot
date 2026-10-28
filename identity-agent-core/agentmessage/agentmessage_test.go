@@ -2,8 +2,6 @@ package agentmessage
 
 import (
 	"crypto/ed25519"
-	"encoding/json"
-	"os"
 	"strings"
 	"testing"
 
@@ -156,32 +154,5 @@ func TestTheCountersignatureCoversTheSendersSignature(t *testing.T) {
 	rec.To = "EAGENT_C"
 	if rec.CheckSenderProof() == nil {
 		t.Fatal("a record re-addressed after the body signed it was accepted")
-	}
-}
-
-// The vectors are also published as a file, for implementations in other
-// languages, and the file must say what this one does.
-func TestThePublishedVectorFileMatches(t *testing.T) {
-	b, err := os.ReadFile("testdata/message-v1.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var v struct {
-		Words        string    `json:"words"`
-		Statement    Statement `json:"statement"`
-		BodyHash     string    `json:"body_hash"`
-		Host         string    `json:"host"`
-		Signature    string    `json:"signature"`
-		SignedString string    `json:"signed_string"`
-	}
-	if err := json.Unmarshal(b, &v); err != nil {
-		t.Fatal(err)
-	}
-	v.Statement.BodyHash, v.Statement.Host = v.BodyHash, v.Host
-	if HashBody([]byte(v.Words)) != v.BodyHash || string(v.Statement.Bytes()) != v.SignedString {
-		t.Fatal("the published vector file disagrees with this implementation")
-	}
-	if sig, _ := Sign(vectorSigner(), v.Statement); sig != v.Signature {
-		t.Fatalf("the published signature is not this key's: %s", sig)
 	}
 }

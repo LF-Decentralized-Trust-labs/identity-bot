@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "identity-agent-core/contracts/agent-message/agent-message.schema.json",
+  "title": "Messages between AI agents, as the Identity Agent that holds them records them (ADR-047)",
+  "description": "Every message is signed twice. The sender signs a statement (a body, with its machine key) or a request (a person, from a paired controller). The Identity Agent then countersigns a record of it, as the AI agent the message is from, in a signed DIDComm envelope whose body is the record. Worked examples, with signatures, are in identity-agent-core/agentmessage/message-vectors.json.",
+  "$defs": {
+    "statement_bytes": {
+      "description": "What a body signs: the lines IA-AGENT-MSG-V1, conversation, kind, from, to, in_reply_to, body_hash, brain.provider, brain.model, brain.session, brain.run_hash, host, host_nonce, host_time, body_credential, joined with a newline (0x0a), no trailing newline. An absent field is an empty line. The signature is made with the body's machine key and encoded as for a signed request (see contracts/agent-body).",
+      "type": "string"
+    },
+    "statement": {
+      "description": "A body's statement. Refused unless every required field is non-empty, no field holds a carriage return or newline, kind is one of the four, in_reply_to is present (a body only ever speaks about a message it was given, so even an ask names the message it was handling), host_nonce is at least 16 characters and host_time is RFC 3339.",
+      "type": "object",
+      "required": ["conversation", "kind", "from", "to", "body_hash", "brain", "host", "host_nonce", "host_time", "body_credential"],
+      "additionalProperties": false,
+      "properties": {
+        "conversation": {"type": "string", "minLength": 1},
+        "kind": {"$ref": "#/$defs/kind"},
+        "from": {"type": "string", "minLength": 1, "description": "the AI agent speaking"},
+        "to": {"$ref": "#/$defs/party"},
+        "in_reply_to": {"type": "string", "description": "the message this one acts on; required by the check although the field may be left out of the JSON"},
+        "body_hash": {"$ref": "#/$defs/digest"},
+        "brain": {"$ref": "#/$defs/brain"},
+        "host": {"type": "string", "minLength": 1, "description": "the body's identifier"},
+        "host_nonce": {"type": "string", "minLength": 16},
+        "host_time": {"type": "string", "format": "date-time"},
+        "body_credential": {"type": "string", "minLength": 1, "description": "the AI Agent Body credential that made host this AI agent's body"}
+      }
+    },
+    "brain": {
+      "description": "What produced the words, as the body reports it. The body's word, not the model provider's.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {"type": "string"},
+        "model": {"type": "string"},
+        "session": {"type": "string"},
+        "run_hash": {"type": "string", "description": "a digest of everything the brain was sent and returned in the run"}
+      }
+    },
+    "kind": {
+      "enum": ["ask", "reply", "receipt", "failure"]
+    },
+    "party": {
+      "description": "An AI agent's identifier, or person: followed by a person's identifier.",
+      "type": "string",
+      "minLength": 1
+    },
+    "digest": {
+      "description": "Blake3-256 of the words, CESR qb64 with code E.",
+      "type": "string",
+      "pattern": "^E[A-Za-z0-9_-]{43}$"
+    },
+    "person_message": {
+      "description": "What a person's controller signs to say something to an AI agent: the words themselves, so the signature covers them.",
+      "type": "object",
+      "required": ["to", "body", "nonce"],
+      "additionalProperties": false,
+      "properties": {
+        "conversation": {"type": "string", "description": "absent to open a new conversation"},
+        "to": {"$ref": "#/$defs/party"},
+        "in_reply_to": {"type": "string"},
+        "body": {"type": "string"},
+        "nonce": {"type": "string"}
+      }
+    },
+    "controller_proof": {
+      "description": "A person's own statement: the request their controller signed, kept as the exact string signed. Its second line is the controller and its last line the Blake3-256 (CESR) of request.",
+      "type": "object",
+      "required": ["controller", "public_key", "signed_string", "signature", "request"],
+      "additionalProperties": false,
+      "properties": {
+        "controller": {"type": "string"},
+        "public_key": {"type": "string", "description": "the controller's key, as its Controller Grant records it"},
+        "signed_string": {"type": "string"},
+        "signature": {"type": "string"},
+        "request": {"$ref": "#/$defs/person_message"},
+        "controller_grant": {"type": "string", "description": "the controller's Controller Grant credential, when it has one"}
+      }
+    },
+    "person_ref": {
+      "description": "The person a controller acts for, as the Identity Agent established it.",
+      "type": "object",
+      "required": ["aid", "standing"],
+      "additionalProperties": false,
+      "properties": {
+        "aid": {"type": "string"},
+        "standing": {"enum": ["owner", "signer", "employee"]},
+        "credential": {"type": "string"},
+        "name": {"type": "string"}
+      }
+    },
+    "record": {
+      "description": "One entry in a conversation, as the Identity Agent countersigns it. It carries exactly one sender's proof: statement with host_signature and host_verkey, or controller_proof. What the record says must be what the sender signed. prev_hash is the hash of the entry before it in the conversation (see entry_hash), empty for the first.",
+      "type": "object",
+      "required": ["message_id", "conversation", "seq", "prev_hash", "ia_time", "kind", "from", "to", "body_hash", "depth", "opened_by"],
+      "additionalProperties": false,
+      "properties": {
+        "message_id": {"type": "string"},
+        "conversation": {"type": "string"},
+        "seq": {"type": "integer"},
+        "prev_hash": {"type": "string"},
+        "ia_time": {"type": "string", "format": "date-time"},
+        "kind": {"$ref": "#/$defs/kind"},
+        "from": {"$ref": "#/$defs/party"},
+        "to": {"$ref": "#/$defs/party"},
+        "in_reply_to": {"type": "string"},
+        "body_hash": {"$ref": "#/$defs/digest"},
+        "depth": {"type": "integer", "minimum": 0, "description": "how far down a chain of asks: a person's message is 0"},
+        "statement": {"$ref": "#/$defs/statement"},
+        "host_signature": {"type": "string"},
+        "host_verkey": {"type": "string"},
+        "controller_proof": {"$ref": "#/$defs/controller_proof"},
+        "grant_said": {"type": "string", "description": "the grant that allowed it"},
+        "body_grade": {"type": "string", "description": "the grade of the body it came from, stamped by the Identity Agent"},
+        "body_credential": {"type": "string"},
+        "person": {"$ref": "#/$defs/person_ref"},
+        "opened_by": {"$ref": "#/$defs/party"}
+      }
+    },
+    "jwm": {
+      "description": "The countersigned message: id is the record's message_id, type is agent-message, from is did:keri: and the countersigner, to is did:keri: and the recipient (a person's identifier without person:), created_time is the record's ia_time and body is the record.",
+      "type": "object",
+      "required": ["id", "type", "from", "to", "created_time", "expires_time", "body"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string"},
+        "type": {"const": "agent-message"},
+        "from": {"type": "string", "pattern": "^did:keri:"},
+        "to": {"type": "array", "items": {"type": "string", "pattern": "^did:keri:"}},
+        "created_time": {"type": "string"},
+        "expires_time": {"type": "string"},
+        "body": {"$ref": "#/$defs/record"}
+      }
+    },
+    "envelope": {
+      "description": "A signed DIDComm envelope (mode signed). plaintext is the base64url (no padding) of the JWM's JSON. ed_sig and mldsa_sig are base64url Ed25519 and ML-DSA-65 signatures by the countersigner's messaging keys over those JSON bytes followed directly by E and the base64url (no padding) of the Blake3-256 of the JWM's body bytes. Both must verify. The countersigner is the AI agent the message is from, or the Identity Agent itself for a person's message.",
+      "type": "object",
+      "required": ["mode", "ciphertext", "protected", "recipients", "iv"],
+      "additionalProperties": false,
+      "properties": {
+        "mode": {"const": "signed"},
+        "ciphertext": {"const": ""},
+        "protected": {
+          "type": "object",
+          "properties": {
+            "alg": {"const": "none"},
+            "enc": {"const": "none"},
+            "skid": {"type": "string", "description": "the countersigner"}
+          }
+        },
+        "recipients": {"type": "null"},
+        "iv": {"const": ""},
+        "sender_kel": {"type": "array"},
+        "ed_sig": {"type": "string"},
+        "mldsa_sig": {"type": "string"},
+        "plaintext": {"type": "string"}
+      }
+    },
+    "entry_hash": {
+      "description": "An entry's place in its conversation's chain: Blake3-256 (CESR qb64, code E) of plaintext, a newline, ed_sig, a newline, mldsa_sig, all as they appear in the envelope.",
+      "type": "string"
+    },
+    "messaging_keys": {
+      "description": "A countersigner's public messaging keys, base64url. kel_sig, when present, is a signature by the identifier's current key over these keys.",
+      "type": "object",
+      "required": ["aid", "ed25519", "mldsa65", "x25519", "mlkem768", "cipher_suite"],
+      "additionalProperties": false,
+      "properties": {
+        "aid": {"type": "string"},
+        "ed25519": {"type": "string"},
+        "mldsa65": {"type": "string"},
+        "x25519": {"type": "string"},
+        "mlkem768": {"type": "string"},
+        "cipher_suite": {"type": "string"},
+        "kel_sig": {"type": "string"}
+      }
+    }
+  }
+}
