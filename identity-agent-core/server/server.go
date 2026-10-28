@@ -111,7 +111,15 @@ type CoreServer struct {
 	DefaultIngressMode func(entityType string) IngressMode
 	AppCtx             context.Context
 	cancel             context.CancelFunc
-	listener           net.Listener
+	// background is the work started and not waited for inline; Stop
+	// cancels it and waits for it before closing the store.
+	background backgroundWork
+	// lifecycle is held for the whole of Start and of Stop, so neither can
+	// begin while the other is under way. Stop cannot hold mu while it waits,
+	// because the work it waits for takes mu. Taken before mu, never after
+	// it, and never by background work.
+	lifecycle sync.Mutex
+	listener  net.Listener
 	// The http.Servers are held so Stop can shut them down. Serving without a
 	// reference leaks the server and its keep-alive connections on every
 	// stop/restart — invisible on a desktop that stops once, but it accrues on
@@ -447,7 +455,7 @@ func New(cfg Config) (*CoreServer, error) {
 		return aid, err
 	}
 	s.WitnessService = wsvc
-	go witness.StartHeartbeatLoop(wsvc, ctx.Done())
+	s.inBackground(func(ctx context.Context) { witness.StartHeartbeatLoop(wsvc, ctx.Done()) })
 
 	// Start the KERI engine.
 	//
@@ -566,6 +574,8 @@ func New(cfg Config) (*CoreServer, error) {
 }
 
 func (s *CoreServer) Start() error {
+	s.lifecycle.Lock()
+	defer s.lifecycle.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -707,7 +717,7 @@ func (s *CoreServer) Start() error {
 		log.Printf("[identity-agent-core] KERI engine: none configured — KERI operations will be refused")
 	}
 
-	go func() {
+	s.inBackground(func(ctx context.Context) {
 		if tunnelCfg.Provider == tunnel.ProviderNone {
 			log.Println("[identity-agent-core] No tunnel configured.")
 			s.EndpointService.Refresh()
@@ -722,28 +732,37 @@ func (s *CoreServer) Start() error {
 		if s.TunnelManager.URL() != "" {
 			log.Printf("[identity-agent-core] OOBI public URL: %s", s.EndpointService.CurrentURL())
 			provider := s.TunnelManager.Provider()
-			if provider != nil && provider.Listener() != nil {
-				s.tunnelSrv = s.httpServer()
+			if provider != nil && provider.Listener() != nil && ctx.Err() == nil {
+				srv := s.httpServer()
+				// Only while running: a server Stop has already taken the
+				// servers from would never shut this one down.
+				s.mu.Lock()
+				if !s.running {
+					s.mu.Unlock()
+					return
+				}
+				s.tunnelSrv = srv
+				s.mu.Unlock()
 				go func() {
-					if err := s.tunnelSrv.Serve(provider.Listener()); err != nil {
+					if err := srv.Serve(provider.Listener()); err != nil {
 						log.Printf("[identity-agent-core] Tunnel server stopped: %v", err)
 					}
 				}()
 			}
 		}
-	}()
+	})
 
 	// Bring up the URL relay when one is configured. It is the single URL
 	// manager: a live relay allocation is a durable, provably-ours address, so
 	// EndpointService ranks it above the ephemeral tunnel. Absent a configured
 	// relay this returns immediately, leaving the tunnel/direct path in place.
-	go s.startRelay()
+	s.inBackground(func(context.Context) { s.startRelay() })
 	s.anchorStopMu.Lock()
 	s.anchorStop = make(chan struct{})
 	stop := s.anchorStop
 	s.anchorStopMu.Unlock()
-	go s.keepAnchoring(stop)
-	go s.keepSweepingLends(stop)
+	s.inBackground(func(context.Context) { s.keepAnchoring(stop) })
+	s.inBackground(func(context.Context) { s.keepSweepingLends(stop) })
 
 	s.httpSrv = s.httpServer()
 	go func() {
@@ -756,18 +775,43 @@ func (s *CoreServer) Start() error {
 }
 
 func (s *CoreServer) Stop() {
+	s.lifecycle.Lock()
+	defer s.lifecycle.Unlock()
+	// Only the claim to stop is made under mu. The work below waits for
+	// background work, some of which takes mu itself, so waiting while
+	// holding it would hold up the stop until every wait timed out.
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if !s.running {
+		s.mu.Unlock()
 		return
 	}
+	s.running = false
+	httpSrv, tunnelSrv, listener := s.httpSrv, s.tunnelSrv, s.listener
+	s.httpSrv, s.tunnelSrv, s.listener = nil, nil, nil
+	s.mu.Unlock()
 
 	log.Println("[identity-agent-core] Shutting down...")
 
 	// Clean up .port file
 	portFilePath := filepath.Join(s.DataDir, ".port")
 	os.Remove(portFilePath)
+
+	// Tell everything that runs on its own to stop, before anything waits,
+	// and start no more background work: a request finishing while the
+	// servers drain below would otherwise start work after this point.
+	s.closeBackground()
+	if s.cancel != nil {
+		s.cancel()
+	}
+	s.anchorStopMu.Lock()
+	if s.anchorStop != nil {
+		close(s.anchorStop)
+		s.anchorStop = nil
+	}
+	s.anchorStopMu.Unlock()
+	if s.BackupService != nil && s.BackupService.Scheduler != nil {
+		s.BackupService.Scheduler.Stop()
+	}
 
 	if s.UpdateService != nil {
 		s.UpdateService.Stop()
@@ -781,32 +825,44 @@ func (s *CoreServer) Stop() {
 		s.TunnelManager.Disconnect()
 	}
 
-	s.anchorStopMu.Lock()
-	if s.anchorStop != nil {
-		close(s.anchorStop)
-		s.anchorStop = nil
-	}
-	s.anchorStopMu.Unlock()
 	if s.RelayManager != nil {
 		s.RelayManager.Stop()
 	}
 
-	// Close the HTTP servers, which closes their listeners and in-flight
-	// connections. Serving without holding a reference stranded the server and
-	// its connection goroutines on every restart — harmless on a desktop that
-	// stops once, but it accrued on mobile where the core is restarted on each
-	// resume. The bare listener close stays for the case where Serve was never
-	// reached (bind succeeded, goroutine not yet scheduled).
-	if s.httpSrv != nil {
-		s.httpSrv.Close()
-		s.httpSrv = nil
+	// Stop taking requests, and let those under way finish, since a request
+	// is as likely as anything else to be writing. Closing alone ends the
+	// connections without waiting for their handlers. Serving without holding
+	// a reference stranded the server and its connection goroutines on every
+	// restart — harmless on a desktop that stops once, but it accrued on
+	// mobile where the core is restarted on each resume. The bare listener
+	// close stays for the case where Serve was never reached (bind succeeded,
+	// goroutine not yet scheduled).
+	for _, srv := range []*http.Server{httpSrv, tunnelSrv} {
+		if srv == nil {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := srv.Shutdown(ctx); err != nil {
+			srv.Close()
+		}
+		cancel()
 	}
-	if s.tunnelSrv != nil {
-		s.tunnelSrv.Close()
-		s.tunnelSrv = nil
+	if listener != nil {
+		listener.Close()
 	}
-	if s.listener != nil {
-		s.listener.Close()
+
+	// Wait for what was started and is still writing to the data directory,
+	// before the store closes under it and before whoever stopped the server
+	// moves or removes that directory.
+	s.waitForBackground(backgroundStopWait)
+	if s.AttestationRunner != nil {
+		waitWithin(s.AttestationRunner.Wait, backgroundStopWait, "self-attestation")
+	}
+	if s.UpdateService != nil {
+		waitWithin(s.UpdateService.Wait, backgroundStopWait, "the update check")
+	}
+	if s.BackupService != nil && s.BackupService.Scheduler != nil {
+		waitWithin(s.BackupService.Scheduler.Wait, backgroundStopWait, "a backup")
 	}
 
 	if s.KeriDriver != nil {
@@ -817,11 +873,6 @@ func (s *CoreServer) Stop() {
 		s.DataStore.Close()
 	}
 
-	if s.cancel != nil {
-		s.cancel()
-	}
-
-	s.running = false
 	log.Println("[identity-agent-core] Shutdown complete")
 }
 
@@ -2203,7 +2254,7 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
 
 	// Attempt automatic push delivery to the holder if they are a known contact
 	if contact, err := s.DataStore.GetContact(req.HolderAid); err == nil && contact != nil && contact.OobiURL != "" {
-		go s.deliverCredentialToContact(contact, record)
+		s.inBackground(func(context.Context) { s.deliverCredentialToContact(contact, record) })
 	}
 
 	// Persist the IXN event in the KEL (use the relationship AID when issuing via pairwise context)
@@ -4033,7 +4084,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[identity-agent-core] CONTACT: Added %s (AID: %s) status=%s kel_verified=%v", alias, oobiData.AID, contactStatus, kelVerified)
 
 	publicURL := s.getPublicURL(r)
-	go func() {
+	s.inBackground(func(context.Context) {
 		ourIdentity, err := s.DataStore.GetIdentity()
 		if err != nil || ourIdentity == nil {
 			log.Printf("[identity-agent-core] EXCHANGE: Cannot send introduction — no identity available")
@@ -4072,7 +4123,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 				oobiData.AID, err)
 			return
 		}
-	}()
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -4162,7 +4213,7 @@ func (s *CoreServer) handleAcceptContact(w http.ResponseWriter, r *http.Request)
 	s.onContactAccepted(aid)
 	log.Printf("[identity-agent-core] CONTACT: Accepted %s (AID: %s) — status=accepted, category=%s", contact.Alias, aid, contact.ContactCategory)
 
-	go func() {
+	s.inBackground(func(context.Context) {
 		// They are already a peer by now: agreeing to them established one from
 		// the key history they proved themselves with. So the answer goes back
 		// the same way everything else does, and carries no claim about who
@@ -4171,12 +4222,12 @@ func (s *CoreServer) handleAcceptContact(w http.ResponseWriter, r *http.Request)
 			log.Printf("[identity-agent-core] CONTACT-ACCEPT: could not tell %s they were accepted: %v",
 				aid, err)
 		}
-	}()
+	})
 
 	if s.WitnessService != nil && contact.ContactCategory == "trusted" {
-		go func(contactAID string) {
-			_ = s.WitnessService.SendWitnessRequest(context.Background(), contactAID)
-		}(aid)
+		s.inBackground(func(ctx context.Context) {
+			_ = s.WitnessService.SendWitnessRequest(ctx, aid)
+		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -4975,11 +5026,7 @@ func (s *CoreServer) onContactAccepted(aid string) {
 	if s.WitnessService == nil || aid == "" {
 		return
 	}
-	ctx := s.AppCtx
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	go s.WitnessService.ConsiderContactAsWitness(ctx, aid)
+	s.inBackground(func(ctx context.Context) { s.WitnessService.ConsiderContactAsWitness(ctx, aid) })
 }
 
 // ourEntityType reports whether this agent belongs to a person or an

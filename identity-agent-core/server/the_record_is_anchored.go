@@ -443,7 +443,7 @@ func (s *CoreServer) witnessRecord(ownerAID, recordAID string, witnesses []strin
 		s.anchorStopMu.Lock()
 		stop := s.anchorStop
 		s.anchorStopMu.Unlock()
-		go s.keepWitnessing(stop)
+		s.inBackground(func(ctx context.Context) { s.keepWitnessing(ctx, stop) })
 	})
 	select {
 	case s.record.witnessKick <- struct{}{}:
@@ -452,17 +452,22 @@ func (s *CoreServer) witnessRecord(ownerAID, recordAID string, witnesses []strin
 }
 
 // keepWitnessing runs one witnessing pass per request, one at a time.
-func (s *CoreServer) keepWitnessing(stop <-chan struct{}) {
+func (s *CoreServer) keepWitnessing(running context.Context, stop <-chan struct{}) {
 	for {
+		// stop is nil when the worker was started after the anchoring loop
+		// stopped, and a nil channel never closes, so it also ends with the
+		// server's background work.
 		select {
 		case <-stop:
+			return
+		case <-running.Done():
 			return
 		case <-s.record.witnessKick:
 		}
 		s.record.witnessMu.Lock()
 		job := s.record.witnessJob
 		s.record.witnessMu.Unlock()
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		ctx, cancel := context.WithTimeout(running, time.Minute)
 		s.WitnessService.BringUpToDate(ctx, job.owner, s.signedEventsOf(job.owner), job.witnesses, job.toad)
 		if job.record != "" {
 			s.WitnessService.BringUpToDate(ctx, job.record, s.signedEventsOf(job.record), job.witnesses, job.toad)
@@ -691,11 +696,11 @@ func sortConversations(cs []anchoredConversation) {
 func (s *CoreServer) noteRecorded() {
 	if s.record.recorded.Add(1) >= int64(anchorEvery) {
 		s.record.recorded.Store(0)
-		go func() {
+		s.inBackground(func(context.Context) {
 			if _, err := s.anchorRecord(); err != nil {
 				log.Printf("[record] anchoring: %v", err)
 			}
-		}()
+		})
 	}
 }
 
@@ -1053,8 +1058,8 @@ func (s *CoreServer) askWitnessesToCoverTheRecord(witnesses []string, made bool)
 		return
 	}
 	s.record.coverAsked.Store(true)
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	s.inBackground(func(ctx context.Context) {
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		declined := s.WitnessService.AskToCoverDelegatesOf(ctx, witnesses)
 		for key, why := range declined {
@@ -1063,7 +1068,7 @@ func (s *CoreServer) askWitnessesToCoverTheRecord(witnesses []string, made bool)
 		s.record.declinedMu.Lock()
 		s.record.declined = declined
 		s.record.declinedMu.Unlock()
-	}()
+	})
 }
 
 // witnessesDeclining are the identity's witnesses that would not witness the

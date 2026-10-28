@@ -257,11 +257,7 @@ type relayFailure struct {
 // begins a new generation with its own context. Anything the old generation
 // is still doing is cancelled, and it can install nothing.
 func (s *CoreServer) nextRelayGeneration() (context.Context, int) {
-	parent := s.AppCtx
-	if parent == nil {
-		parent = context.Background()
-	}
-	ctx, cancel := context.WithCancel(parent)
+	ctx, cancel := context.WithCancel(s.backgroundContext())
 	s.mu.Lock()
 	if s.relayCancel != nil {
 		s.relayCancel()

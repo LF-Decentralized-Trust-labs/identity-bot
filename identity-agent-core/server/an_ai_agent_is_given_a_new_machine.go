@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -315,7 +316,7 @@ var (
 // sweepMachinesSoon runs the sweep in the background, for a caller that may
 // hold an AI agent's lock.
 func (s *CoreServer) sweepMachinesSoon(why string) {
-	go s.endMachinesNoLongerWanted(why)
+	s.inBackground(func(context.Context) { s.endMachinesNoLongerWanted(why) })
 }
 
 // whyEndMachine says why a request's machine should be destroyed now, or

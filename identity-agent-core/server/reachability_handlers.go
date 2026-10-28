@@ -138,7 +138,7 @@ func (s *CoreServer) applyReachability(previous IngressMode) {
 			log.Printf("[tunnel] restart after a reachability change: %v", err)
 		}
 	}
-	go s.runRelay(ctx, gen)
+	s.inBackground(func(context.Context) { s.runRelay(ctx, gen) })
 }
 
 // handleRelayStatus reports how this Identity Agent is reached through its

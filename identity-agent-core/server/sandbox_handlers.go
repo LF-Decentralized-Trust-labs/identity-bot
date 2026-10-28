@@ -186,15 +186,14 @@ func (s *CoreServer) handleInstallApp(w http.ResponseWriter, r *http.Request) {
 
 	id := chi.URLParam(r, "id")
 
-	go func() {
-		ctx := context.Background()
+	s.inBackground(func(ctx context.Context) {
 		err := s.SandboxManager.InstallApp(ctx, id, func(progress sandbox.PullProgress) {
 			log.Printf("[sandbox-api] Pull progress for %s: %s %.1f%%", id, progress.Status, progress.Progress)
 		})
 		if err != nil {
 			log.Printf("[sandbox-api] Install failed for %s: %v", id, err)
 		}
-	}()
+	})
 
 	jsonResponse(w, map[string]string{
 		"status":  "installing",
