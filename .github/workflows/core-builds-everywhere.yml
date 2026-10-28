@@ -6,9 +6,9 @@ name: Core — builds everywhere
 # built and tested on one system can leave another one broken without anything
 # saying so.
 #
-# Cross-compiled from one Linux runner with cgo off: that compiles every file
-# each system would, which is what the check is for. The desktop release
-# workflows build natively with cgo for shipping.
+# Cross-compiled from one Linux runner with cgo off, for every system and
+# architecture; and built natively on macOS with cgo on, because the files that
+# talk to the Secure Enclave are cgo and a cgo-off build leaves them out.
 on:
   pull_request:
   push:
@@ -38,6 +38,23 @@ jobs:
       CGO_ENABLED: "0"
       GOOS: ${{ matrix.goos }}
       GOARCH: ${{ matrix.goarch }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: identity-agent-core/go.mod
+          cache-dependency-path: identity-agent-core/go.sum
+      - name: go build
+        run: go build ./...
+      - name: go vet
+        run: go vet ./...
+
+  build-macos-cgo:
+    name: build darwin/arm64 (cgo)
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: identity-agent-core
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
