@@ -26,6 +26,12 @@ type RunOptions struct {
 	Runner Runner
 	// Workspace is the brain's working directory.
 	Workspace string
+	// BrainDir, when Brain is not set, is the directory holding the brains'
+	// programs (claude, codex, grok), so the brain the AI agent was created
+	// with is run by its full path: what a brain run as its own user needs,
+	// on a machine that has more than one brain installed. Only with a Runner
+	// that runs the brain as its own user.
+	BrainDir string
 	// Once processes what is waiting and returns, rather than waiting for more.
 	Once bool
 	// Log receives a line per thing the host does; nil is the standard logger.
@@ -104,13 +110,21 @@ func (h *Host) Run(ctx context.Context, o RunOptions) error {
 	if o.Log != nil {
 		logf = o.Log.Printf
 	}
+	if o.BrainDir != "" {
+		if r, ok := o.Runner.(Isolated); !ok || !r.Isolated() {
+			return errors.New("a directory of brains is only for a brain run as its own user (--brain-user)")
+		}
+		if o.Brain != nil {
+			return errors.New("a directory of brains runs the brain the AI agent was created with, not a named one")
+		}
+	}
 	p, err := h.profile()
 	if err != nil {
 		return err
 	}
 	brain := o.Brain
 	if brain == nil {
-		if brain, err = BrainFor(p.Provider, o.Runner); err != nil {
+		if brain, err = o.brainOf(p); err != nil {
 			return err
 		}
 	}
@@ -185,6 +199,23 @@ func (h *Host) Run(ctx context.Context, o RunOptions) error {
 			}
 			continue
 		}
+		// A brain that follows the AI agent's is read again before work, so a
+		// change of brain made in the app reaches a body that is already running.
+		if o.Brain == nil && len(deliveries) > 0 {
+			if np, err := h.profile(); err != nil {
+				logf("[agent-host] the AI agent's settings could not be read again (%v); working as before", err)
+			} else if np != p {
+				if nb, err := o.brainOf(np); err != nil {
+					logf("[agent-host] the AI agent's brain is now %q, which this machine cannot run (%v); working as before", np.Provider, err)
+				} else {
+					if nb.Name() != brain.Name() {
+						logf("[agent-host] the AI agent's brain is now %s", nb.Name())
+					}
+					p, brain = np, nb
+					h.brainName, h.brainModel = brain.Name(), p.Model
+				}
+			}
+		}
 		acted := false
 		for i := range deliveries {
 			if h.handle(ctx, tools, brain, p, workspace, &deliveries[i], logf) {
@@ -208,6 +239,27 @@ func (h *Host) Run(ctx context.Context, o RunOptions) error {
 			continue
 		}
 		backoff = time.Second
+	}
+}
+
+// brainOf is the brain to run for an AI agent with this profile: the one it
+// was created with, from the directory of brains when there is one.
+func (o RunOptions) brainOf(p agentProfile) (Brain, error) {
+	b, err := BrainFor(p.Provider, o.Runner)
+	if err != nil {
+		return nil, err
+	}
+	if o.BrainDir != "" {
+		b = programIn(b, o.BrainDir)
+	}
+	return b, nil
+}
+
+// freshIfBrainChanged starts a new session for a conversation whose session
+// belongs to another brain: one brain cannot resume another's.
+func freshIfBrainChanged(cs *convState, brain Brain) {
+	if cs.Brain != "" && cs.Brain != brain.Name() {
+		cs.Session, cs.Started, cs.Brain = NewSession(), false, ""
 	}
 }
 
@@ -257,6 +309,7 @@ func (h *Host) handle(ctx context.Context, tools *toolServer, brain Brain, p age
 			mem.Conversations[rec.Conversation] = cs
 		}
 		cs.Serving, cs.AskedBy, cs.Answered, cs.Awaiting = id, rec.From, false, 0
+		freshIfBrainChanged(cs, brain)
 		prompt = fmt.Sprintf("%s asks you:\n\n%s", d.FromName, d.Body)
 	case agentmessage.KindReply, agentmessage.KindFailure:
 		if cs == nil || cs.Serving == "" {
@@ -267,6 +320,7 @@ func (h *Host) handle(ctx context.Context, tools *toolServer, brain Brain, p age
 		if cs.Awaiting > 0 {
 			cs.Awaiting--
 		}
+		freshIfBrainChanged(cs, brain)
 		if rec.Kind == agentmessage.KindReply {
 			prompt = fmt.Sprintf("%s answered you:\n\n%s\n\nIf you now have what you need, answer the one who asked you, using reply.", d.FromName, d.Body)
 		} else {
@@ -343,7 +397,7 @@ func (h *Host) handle(ctx context.Context, tools *toolServer, brain Brain, p age
 			cs2.Answered = true
 		}
 	default:
-		cs2.Started = true
+		cs2.Started, cs2.Brain = true, brain.Name()
 		// A brain that names its own sessions (Codex) said which one it
 		// started; the next turn resumes that one.
 		if out.Brain.Session != "" {

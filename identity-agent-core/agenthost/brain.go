@@ -437,6 +437,22 @@ func BrainFor(provider string, r Runner) (Brain, error) {
 		"Grok (an xAI key or plan, OpenRouter, or a server that speaks OpenAI's format)", provider)
 }
 
+// programIn is a brain whose program is the one of its name in dir.
+func programIn(b Brain, dir string) Brain {
+	switch v := b.(type) {
+	case ClaudeCode:
+		v.Path = filepath.Join(dir, "claude")
+		return v
+	case Codex:
+		v.Path = filepath.Join(dir, "codex")
+		return v
+	case GrokCLI:
+		v.Path = filepath.Join(dir, "grok")
+		return v
+	}
+	return b
+}
+
 // turnTimeout bounds one turn of the brain.
 const turnTimeout = 10 * time.Minute
 
