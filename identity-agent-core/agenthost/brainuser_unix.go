@@ -49,7 +49,7 @@ func (u AsUser) Command(ctx context.Context, dir string, env []string, stdin io.
 	// but not list, so the host can start it there without reading it.
 	cmd := exec.CommandContext(ctx, "sudo", full...)
 	cmd.Dir = dir
-	cmd.Env = childenv.Environ()
+	cmd.Env = withoutLent(childenv.Environ())
 	cmd.Stdin = in
 	return cmd, nil
 }

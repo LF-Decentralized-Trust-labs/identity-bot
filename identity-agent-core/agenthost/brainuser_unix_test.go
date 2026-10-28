@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/iotest"
 )
 
 // sudo writes its command line, and the value of every variable it is told to
@@ -51,6 +53,21 @@ func TestNothingARunIsLentCrossesSudo(t *testing.T) {
 			if strings.Contains(e, v) {
 				t.Fatalf("a lent value is in the environment sudo is started with: %s", strings.SplitN(e, "=", 2)[0])
 			}
+		}
+	}
+	// Nor is any variable of a kind a run is lent, even one exported on the host.
+	t.Setenv("GH_TOKEN", "exported-by-hand")
+	t.Setenv("GIT_CONFIG_KEY_0", "credential.helper")
+	t.Setenv("XAI_API_KEY", "exported-by-hand")
+	again, err := AsUser{User: "agent"}.Command(context.Background(), t.TempDir(), env, nil, "/usr/local/bin/claude", "-p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range again.Env {
+		name, _, _ := strings.Cut(e, "=")
+		if slices.Contains(credentialVars, name) || slices.Contains(githubVars, name) ||
+			strings.HasPrefix(name, "GIT_CONFIG_KEY_") || name == envToolsToken {
+			t.Fatalf("sudo is started with %s in its environment", name)
 		}
 	}
 	// What it was lent is on stdin, every variable of it, and then the words.
@@ -179,5 +196,33 @@ func TestBrainEnvRefusesWhatItWasNotMeantToBeGiven(t *testing.T) {
 	if code := ServeBrainEnv([]string{"--", "/bin/sh", "-c", "exit 4"}, strings.NewReader("{\"env\":[]}\n"),
 		io.Discard, io.Discard); code != 4 {
 		t.Errorf("the program's exit status was not passed on: %d", code)
+	}
+	if code := ServeBrainEnv([]string{"--", "/bin/sh", "-c", "kill -TERM $$"}, strings.NewReader("{\"env\":[]}\n"),
+		io.Discard, io.Discard); code != 128+15 {
+		t.Errorf("a program ended by a signal did not exit as a shell reports it: %d", code)
+	}
+	// A line of variables longer than the bound is refused, before anything runs.
+	long := "{\"env\":[\"K=" + strings.Repeat("x", brainEnvMax) + "\"]}\n"
+	if code := ServeBrainEnv([]string{"--", "/bin/sh", "-c", "exit 0"}, strings.NewReader(long), io.Discard, io.Discard); code != 2 {
+		t.Errorf("a line of variables over the bound was not refused: %d", code)
+	}
+}
+
+// The line of variables may arrive a byte at a time, and longer than the
+// buffer that reads it; the brain gets every variable, and its input intact.
+func TestBrainEnvReadsItsVariablesHoweverTheyArrive(t *testing.T) {
+	big := strings.Repeat("v", 100<<10) // over the 64 KiB buffer, under Linux's 128 KiB for one variable
+	in, err := brainEnvInput([]string{"BIG=" + big, envToolsToken + "=turn-token"}, strings.NewReader(secretWords))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	code := ServeBrainEnv([]string{"--", "/bin/sh", "-c",
+		`printf '%s|%s|' "${#BIG}" "$` + envToolsToken + `"; cat`}, iotest.OneByteReader(in), &out, io.Discard)
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if want := fmt.Sprintf("%d|turn-token|%s", len(big), secretWords); out.String() != want {
+		t.Fatalf("the brain got %q, not %q", out.String(), want)
 	}
 }

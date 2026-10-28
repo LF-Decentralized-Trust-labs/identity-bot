@@ -279,11 +279,11 @@ One-time setup, as an administrator (each sudo asks for your password):
      access on its input: sudo writes its command line and any variable it passes on to the
      system log, so none of them goes through sudo. Codex and Grok keep their sign-in in a file,
      so this program also puts a lent sign-in in place for one run and takes it away after
-     (brain-home). Input and output logging stay off for %[2]s, since the input holds the
-     sign-in. The rule is written to a file, checked by visudo, and only then installed, so a
+     (brain-home). sudo's input and output logging stay off for this program, whose input
+     holds the sign-in. The rule is written to a file, checked by visudo, and only then installed, so a
      mistake cannot lock sudo:
        BRAINS="/Users/%[1]s/.local/bin/claude $(sudo -u %[1]s -H sh -lc 'command -v codex; command -v grok')"
-       { printf '%%s\n' 'Defaults:%[2]s !log_input, !log_output'
+       { printf '%%s\n' 'Defaults!/usr/local/bin/agent-host !log_input, !log_output'
          for b in $BRAINS; do printf '%%s\n' "%[2]s ALL=(%[1]s) NOPASSWD: /usr/local/bin/agent-host brain-env -- $b *, /usr/local/bin/agent-host brain-env -- /usr/local/bin/agent-host brain-home -- $b *"; done
        } > /tmp/agent-host.sudoers
        sudo visudo -cf /tmp/agent-host.sudoers && sudo install -m 440 /tmp/agent-host.sudoers /etc/sudoers.d/agent-host
@@ -312,11 +312,11 @@ One-time setup, as an administrator:
   4. Let %[2]s start the brain's program as %[1]s, and nothing else. The host starts every brain
      through this program (brain-env), which takes each turn's tool token, sign-in and GitHub
      access on its input: sudo writes its command line and any variable it passes on to the
-     system log, so none of them goes through sudo. Input and output logging stay off for %[2]s,
-     since the input holds the sign-in. The rule is checked by visudo before it is installed, so
+     system log, so none of them goes through sudo. sudo's input and output logging stay off
+     for this program, whose input holds the sign-in. The rule is checked by visudo before it is installed, so
      a mistake cannot lock sudo. BRAINS lists each brain's full path:
        BRAINS="/home/%[1]s/.local/bin/claude $(sudo -u %[1]s -H sh -lc 'command -v codex; command -v grok')"
-       { printf '%%s\n' 'Defaults:%[2]s !log_input, !log_output'
+       { printf '%%s\n' 'Defaults!/usr/local/bin/agent-host !log_input, !log_output'
          for b in $BRAINS; do printf '%%s\n' "%[2]s ALL=(%[1]s) NOPASSWD: /usr/local/bin/agent-host brain-env -- $b *, /usr/local/bin/agent-host brain-env -- /usr/local/bin/agent-host brain-home -- $b *"; done
        } > /tmp/agent-host.sudoers
        sudo visudo -cf /tmp/agent-host.sudoers && sudo install -m 440 /tmp/agent-host.sudoers /etc/sudoers.d/agent-host

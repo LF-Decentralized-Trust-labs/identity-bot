@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"identity-agent-core/childenv"
 )
@@ -47,7 +48,7 @@ func brainEnvInput(env []string, stdin io.Reader) (io.Reader, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(h) >= brainEnvMax {
+	if len(h)+1 > brainEnvMax {
 		return nil, errors.New("a run's variables are too large to hand to its brain")
 	}
 	if stdin == nil {
@@ -56,7 +57,34 @@ func brainEnvInput(env []string, stdin io.Reader) (io.Reader, error) {
 	return io.MultiReader(bytes.NewReader(append(h, '\n')), stdin), nil
 }
 
-// readBrainEnvLine reads the first line of in, up to max bytes.
+// withoutLent is env without any variable a run could be lent — a sign-in,
+// GitHub access, the git settings that point git at this program, the tool
+// address and token — so sudo is never handed one, even one somebody exported
+// by hand on the host. sudo would not pass it on, but nor does it need it.
+func withoutLent(env []string) []string {
+	names := append(append(append([]string{}, credentialVars...), githubVars...), envToolsURL, envToolsToken)
+	out := make([]string, 0, len(env))
+next:
+	for _, kv := range env {
+		for _, n := range names {
+			if strings.HasPrefix(kv, n+"=") {
+				continue next
+			}
+		}
+		for _, p := range githubVarPrefixes {
+			if strings.HasPrefix(kv, p) {
+				continue next
+			}
+		}
+		out = append(out, kv)
+	}
+	return out
+}
+
+// readBrainEnvLine reads the first line of in, up to max bytes with its
+// newline. ReadSlice returns what the buffer holds when it fills before a
+// newline, so the line is gathered in parts, and refused once it is longer
+// than max.
 func readBrainEnvLine(in *bufio.Reader, max int) ([]byte, error) {
 	var line []byte
 	for {
@@ -106,32 +134,56 @@ func ServeBrainEnv(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 		}
 	}
 
+	// The program's input is a pipe made here, by the brain's user, so the
+	// program may open it again by name. It must never be this program's own
+	// stdin, which the host made: the brain's user may not open that one, and
+	// what was read ahead past the line of variables would be lost.
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		fmt.Fprintf(stderr, "agent-host brain-env: %v\n", err)
+		return 1
+	}
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Env = withCredentials(childenv.Environ(), h.Env)
-	// Not a file, so the program gets a pipe this user made, which it may
-	// open again by name.
-	cmd.Stdin = in
+	cmd.Stdin = pr
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, interruptSignals()...)
 	defer signal.Stop(sigs)
-	if err := cmd.Start(); err != nil {
+	err = cmd.Start()
+	_ = pr.Close()
+	if err != nil {
+		_ = pw.Close()
 		fmt.Fprintf(stderr, "agent-host brain-env: the brain could not be started: %v\n", err)
 		return 1
 	}
+	// A program that stops reading ends the copy (the pipe breaks); the rest
+	// of its input is dropped, as it would be had it read stdin directly.
+	go func() {
+		_, _ = io.Copy(pw, in)
+		_ = pw.Close()
+	}()
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	for {
 		select {
 		case s := <-sigs:
+			// To the program alone, as sudo passes a signal to the program
+			// it started; the program ends what it started itself.
 			_ = cmd.Process.Signal(s)
 		case err := <-done:
 			if err == nil {
 				return 0
 			}
 			var ee *exec.ExitError
-			if errors.As(err, &ee) && ee.ExitCode() > 0 {
-				return ee.ExitCode()
+			if errors.As(err, &ee) {
+				if ee.ExitCode() > 0 {
+					return ee.ExitCode()
+				}
+				// Ended by a signal: exit as a shell reports it.
+				if ws, ok := ee.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+					return 128 + int(ws.Signal())
+				}
 			}
 			return 1
 		}
