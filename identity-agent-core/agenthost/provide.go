@@ -32,6 +32,9 @@ import (
 //	PROGRAM make NAME NEEDS   make the machine, with agent-host on it; NEEDS is
 //	                          a comma-separated list of what it must provide,
 //	                          possibly empty. Exit 0 once it is ready to enrol.
+//	                          Exit 3, having touched nothing, when a machine of
+//	                          that name already exists: it is not this
+//	                          request's, so it is never destroyed.
 //	PROGRAM enrol NAME        the one-time enrolment string is on standard
 //	                          input; start `agent-host enrol` on the machine
 //	                          and print its six words as one line,
@@ -44,6 +47,13 @@ import (
 // name, which a person typed: the program must treat it as text, never put it
 // into a shell command. NAME and NEEDS are only ever letters, digits, dashes
 // and commas, checked on both sides.
+//
+// AGENT_MACHINE_REQUEST and AGENT_MACHINE_PROVIDER are the request's id and
+// this provider's own binding. The program records both with a machine it
+// makes, and refuses to enrol or remove a machine unless they match: a name
+// alone, which comes from the Identity Agent, is never enough to destroy
+// anything, so a machine made another way or for another request is safe
+// from this one.
 //
 // How a machine is made — a virtual machine, a container, a cloud instance —
 // is the program's business. This side only carries the work, and never makes
@@ -90,7 +100,14 @@ func (h *Host) Provide(ctx context.Context, opts ProvideOptions) error {
 		logf = opts.Logger.Printf
 	}
 	logf("[agent-host] making machines that provide %v, with %s", describeNeeds(offers), opts.Program)
-	p := &provider{h: h, opts: opts, logf: logf, busy: map[string]bool{}, failedAt: map[string]time.Time{}, made: map[string]bool{}}
+	st, err := h.loadState()
+	if err != nil {
+		return err
+	}
+	if st.BindingID == "" {
+		return errors.New("this machine is not enrolled, so it cannot make machines")
+	}
+	p := &provider{h: h, opts: opts, logf: logf, binding: st.BindingID, busy: map[string]bool{}, failedAt: map[string]time.Time{}, made: map[string]bool{}}
 	backoff := time.Second
 	for ctx.Err() == nil {
 		jobs, err := p.collect(ctx)
@@ -138,6 +155,9 @@ type provider struct {
 	opts ProvideOptions
 	logf func(string, ...any)
 	wg   sync.WaitGroup
+	// binding is this provider's own binding, which the program records with
+	// every machine it makes.
+	binding string
 
 	mu       sync.Mutex
 	busy     map[string]bool
@@ -252,6 +272,14 @@ func (p *provider) make(ctx context.Context, j machineRequest) bool {
 	mctx, cancel := context.WithTimeout(ctx, p.opts.MakeTimeout)
 	_, err := p.run(mctx, "make", j, nil, strings.Join(j.Needs, ","))
 	cancel()
+	if errors.Is(err, errNameTaken) {
+		// Another machine has this name. It is not this request's, so nothing
+		// is destroyed.
+		why := "a machine named " + j.MachineName + " already exists on this host; it was left alone"
+		p.logf("[agent-host] %s", why)
+		p.report(ctx, j, agentmachine.StateFailed, why, nil)
+		return false
+	}
 	if err != nil {
 		fail("making it: " + err.Error())
 		return false
@@ -376,7 +404,8 @@ func (p *provider) runRedacting(ctx context.Context, verb string, j machineReque
 	args := append([]string{verb, j.MachineName}, extra...)
 	cmd := exec.CommandContext(ctx, p.opts.Program, args...)
 	cmd.Stdin = stdin
-	cmd.Env = append(os.Environ(), "AGENT_MACHINE_FOR="+j.AgentName)
+	cmd.Env = append(os.Environ(), "AGENT_MACHINE_FOR="+j.AgentName,
+		"AGENT_MACHINE_REQUEST="+j.ID, "AGENT_MACHINE_PROVIDER="+p.binding)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err := cmd.Run()
@@ -393,10 +422,20 @@ func (p *provider) runRedacting(ctx context.Context, verb string, j machineReque
 		}
 	}
 	if err != nil {
+		var exit *exec.ExitError
+		if verb == "make" && errors.As(err, &exit) && exit.ExitCode() == nameTakenExit {
+			return printed, fmt.Errorf("%w: %s", errNameTaken, lastLine(printed))
+		}
 		return printed, fmt.Errorf("%v: %s", err, lastLine(printed))
 	}
 	return printed, nil
 }
+
+// nameTakenExit is the program's exit code for "a machine of that name already
+// exists", which this side must never answer by destroying it.
+const nameTakenExit = 3
+
+var errNameTaken = errors.New("a machine of that name already exists")
 
 func lastLine(s string) string {
 	lines := strings.Split(strings.TrimSpace(s), "\n")
