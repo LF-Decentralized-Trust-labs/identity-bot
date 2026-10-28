@@ -6,6 +6,8 @@ import (
 	"sort"
 	"testing"
 
+	"identity-agent-core/internal/contractcheck"
+
 	keri "github.com/grapeid/keri-go"
 )
 
@@ -28,7 +30,7 @@ var publishedGrantFiles = map[*AssetGrant]string{
 }
 
 func TestThePublishedGrantSchemasAreTheOnesBuilt(t *testing.T) {
-	if os.Getenv("IA_WRITE_CONTRACTS") == "1" {
+	if contractcheck.Writing(t) {
 		for g, name := range publishedGrantFiles {
 			if err := os.WriteFile(filepath.Join(grantContracts, name), []byte(g.Schema.JSON), 0o644); err != nil {
 				t.Fatal(err)

@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -334,30 +333,8 @@ func (s *CoreServer) endBinding(a asset.Asset, b agentbody.Binding, why string) 
 	return b, nil
 }
 
-// bodyEnrolRequest is what a machine sends to ask to become a body.
-type bodyEnrolRequest struct {
-	Secret       string         `json:"secret"`
-	Agent        string         `json:"agent"`
-	Keys         agentbody.Keys `json:"keys"`
-	Nonce        string         `json:"nonce"`
-	ClaimedGrade string         `json:"claimed_grade"`
-	Platform     string         `json:"platform"`
-	Placement    string         `json:"placement"`
-	Signature    string         `json:"signature"`
-}
-
-// sealedBodyEnrolment is how the enrolment arrives: sealed to this Identity
-// Agent's keys, which the machine first checked are this identity's, so a relay
-// between them reads neither the secret nor the machine's keys.
-type sealedBodyEnrolment struct {
-	// Sender is the machine's public keys, which the envelope is sealed from.
-	// The same keys are inside the envelope, signed by K.
-	Sender   agentbody.Keys    `json:"sender"`
-	Envelope *didcomm.Envelope `json:"envelope"`
-}
-
 func (s *CoreServer) handleBodyEnrol(w http.ResponseWriter, r *http.Request) {
-	var sealed sealedBodyEnrolment
+	var sealed agentbody.SealedEnrolment
 	if err := json.NewDecoder(io.LimitReader(r.Body, 128<<10)).Decode(&sealed); err != nil || sealed.Envelope == nil {
 		jsonError(w, "the enrolment must arrive sealed to this Identity Agent", http.StatusBadRequest)
 		return
@@ -367,7 +344,7 @@ func (s *CoreServer) handleBodyEnrol(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "this Identity Agent has no identity yet", http.StatusServiceUnavailable)
 		return
 	}
-	if err := checkSealingKeys(sealed.Sender); err != nil {
+	if err := sealed.Sender.CheckSealingKeys(); err != nil {
 		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -381,7 +358,7 @@ func (s *CoreServer) handleBodyEnrol(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "the enrolment could not be opened as one sealed to this Identity Agent by the keys it names", http.StatusForbidden)
 		return
 	}
-	var req bodyEnrolRequest
+	var req agentbody.EnrolRequest
 	if err := json.Unmarshal(msg.Body, &req); err != nil {
 		jsonError(w, "the sealed enrolment is unreadable", http.StatusBadRequest)
 		return
@@ -400,7 +377,7 @@ func (s *CoreServer) handleBodyEnrol(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, agentbody.ErrInvitation.Error(), http.StatusForbidden)
 		return
 	}
-	if len(req.Nonce) < 16 {
+	if agentbody.CheckNonce(req.Nonce) != nil {
 		jsonError(w, "the enrolment needs a fresh nonce", http.StatusBadRequest)
 		return
 	}
@@ -441,29 +418,6 @@ func (s *CoreServer) handleBodyEnrol(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// checkSealingKeys refuses sealing keys of the wrong size: they are stored and
-// later used to seal messages to the machine, so a malformed one is refused now
-// rather than discovered then.
-func checkSealingKeys(k agentbody.Keys) error {
-	x, err := base64.RawURLEncoding.DecodeString(k.X25519)
-	if err != nil || len(x) != 32 {
-		return fmt.Errorf("the X25519 sealing key must be 32 bytes, base64url")
-	}
-	m, err := base64.RawURLEncoding.DecodeString(k.MLKEM768)
-	if err != nil || len(m) != 1184 {
-		return fmt.Errorf("the ML-KEM-768 sealing key must be 1184 bytes, base64url")
-	}
-	e, err := base64.RawURLEncoding.DecodeString(k.Ed25519)
-	if err != nil || len(e) != 32 {
-		return fmt.Errorf("the Ed25519 sealing signature key must be 32 bytes, base64url")
-	}
-	d, err := base64.RawURLEncoding.DecodeString(k.MLDSA65)
-	if err != nil || len(d) != 1952 {
-		return fmt.Errorf("the ML-DSA-65 sealing signature key must be 1952 bytes, base64url")
-	}
-	return nil
-}
-
 // verifyBodySignature checks a request a body signed, against a given binding:
 // the signature over the request as sent — the Identity Agent it names, target,
 // nonce, body, stated purpose and session — the timestamp window, and that the
@@ -490,7 +444,7 @@ func verifyBodySignature(r *http.Request, b agentbody.Binding, me string) error 
 		return fmt.Errorf("the request's timestamp is outside the window this Identity Agent accepts")
 	}
 	nonce := r.Header.Get(agentbody.HeaderNonce)
-	if len(nonce) < 16 {
+	if agentbody.CheckNonce(nonce) != nil {
 		return fmt.Errorf("the request carries no nonce")
 	}
 	body, err := readSignedBody(r)

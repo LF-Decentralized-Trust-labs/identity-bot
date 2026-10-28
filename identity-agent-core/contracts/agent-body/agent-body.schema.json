@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "identity-agent-core/contracts/agent-body/agent-body.schema.json",
   "title": "AI agent body enrolment (ADR-046)",
-  "description": "How a machine becomes the body of an AI agent, and how it signs every request after. Worked examples, with signatures, are in identity-agent-core/agentbody/body-vectors.json.",
+  "description": "How a machine becomes the body of an AI agent, and how it signs every request after. Signatures by the body's key K: an Ed25519 key signs with Ed25519 (RFC 8032) and its signature is CESR 0B; a P-256 key, as secure hardware holds, signs with ECDSA over SHA-256 of the bytes and its signature is CESR 0I over r||s (32 bytes each, never DER) in low-s form (s <= n/2); a high-s signature is refused. Digests are Blake3-256 as CESR qb64 with code E. Worked examples, with signatures and keys from published seeds, are in identity-agent-core/agentbody/body-vectors.json; contracts/check_ai_agent_vectors.py recomputes them from this prose.",
   "$defs": {
     "enrolment_string": {
       "description": "Handed to the machine out of band: the text iabody1. followed by the base64url (no padding) of an enrolment object. A reader refuses any other prefix, any version but 1, and an enrolment missing url, ia, d, agent or secret.",
@@ -12,63 +12,229 @@
     "enrolment": {
       "description": "The fields of an enrolment string. The machine accepts the Identity Agent's key log only if it is ia's and holds the event sn/d, so whoever wrote the string decided which Identity Agent the machine will believe.",
       "type": "object",
-      "required": ["v", "url", "ia", "sn", "d", "agent", "name", "secret", "exp"],
+      "required": [
+        "v",
+        "url",
+        "ia",
+        "sn",
+        "d",
+        "agent",
+        "name",
+        "secret",
+        "exp"
+      ],
       "additionalProperties": false,
       "properties": {
-        "v": {"const": 1},
-        "url": {"type": "string", "minLength": 1, "description": "where the Identity Agent is reached"},
-        "ia": {"type": "string", "minLength": 1, "description": "the Identity Agent's identifier"},
-        "sn": {"type": "integer", "minimum": 0, "description": "sequence number of an event in the Identity Agent's key log"},
-        "d": {"type": "string", "minLength": 1, "description": "that event's digest"},
-        "agent": {"type": "string", "minLength": 1, "description": "the AI agent the machine will become the body of"},
-        "name": {"type": "string", "description": "the AI agent's name, for the person at the machine"},
-        "secret": {"type": "string", "minLength": 1, "description": "single use; lets the machine ask, grants nothing"},
-        "exp": {"type": "string", "format": "date-time", "description": "when the string stops working, 15 minutes after it is made"}
+        "v": {
+          "const": 1
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "description": "where the Identity Agent is reached"
+        },
+        "ia": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the Identity Agent's identifier"
+        },
+        "sn": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "sequence number of an event in the Identity Agent's key log"
+        },
+        "d": {
+          "type": "string",
+          "minLength": 1,
+          "description": "that event's digest"
+        },
+        "agent": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the AI agent the machine will become the body of"
+        },
+        "name": {
+          "type": "string",
+          "description": "the AI agent's name, for the person at the machine"
+        },
+        "secret": {
+          "type": "string",
+          "minLength": 1,
+          "description": "single use; lets the machine ask, grants nothing"
+        },
+        "exp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "when the string stops working, 15 minutes after it is made"
+        }
       }
     },
     "keys": {
-      "description": "The body's public keys. host is its identifier, derived from its signing key: 1AAI + compressed P-256 point for a key in secure hardware, B + Ed25519 key for a software key. verkey is the same key in verification form (1AAJ or D). The four sealing keys are base64url; keys_digest = Blake3-256 (CESR code E) over the lines IA-BODY-KEYS-V1, host, verkey, x25519, mlkem768, ed25519, mldsa65 joined with a newline.",
+      "description": "The body's public keys. host is its identifier, derived from K: 1AAI + the compressed P-256 point for a key in secure hardware, B + the Ed25519 key for a software key. verkey is the same key in verification form (1AAJ or D). The four sealing keys are the body's DIDComm keys, base64url without padding: x25519 (32 bytes) and mlkem768 (an ML-KEM-768 encapsulation key, 1184 bytes) to seal to it, ed25519 (32 bytes) and mldsa65 (an ML-DSA-65 public key, 1952 bytes) to check what it seals; a key of any other size is refused. keys_digest = Blake3-256 over the lines IA-BODY-KEYS-V1, host, verkey, x25519, mlkem768, ed25519, mldsa65 joined with a newline.",
       "type": "object",
-      "required": ["host", "verkey", "x25519", "mlkem768", "ed25519", "mldsa65"],
+      "required": [
+        "host",
+        "verkey",
+        "x25519",
+        "mlkem768",
+        "ed25519",
+        "mldsa65"
+      ],
       "additionalProperties": false,
       "properties": {
-        "host": {"type": "string", "pattern": "^(1AAI[A-Za-z0-9_-]{44}|B[A-Za-z0-9_-]{43})$"},
-        "verkey": {"type": "string", "pattern": "^(1AAJ[A-Za-z0-9_-]{44}|D[A-Za-z0-9_-]{43})$"},
-        "x25519": {"type": "string"},
-        "mlkem768": {"type": "string"},
-        "ed25519": {"type": "string"},
-        "mldsa65": {"type": "string"}
+        "host": {
+          "type": "string",
+          "pattern": "^(1AAI[A-Za-z0-9_-]{44}|B[A-Za-z0-9_-]{43})$"
+        },
+        "verkey": {
+          "type": "string",
+          "pattern": "^(1AAJ[A-Za-z0-9_-]{44}|D[A-Za-z0-9_-]{43})$"
+        },
+        "x25519": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "description": "32 bytes, base64url without padding"
+        },
+        "mlkem768": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "description": "1184 bytes, base64url without padding"
+        },
+        "ed25519": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "description": "32 bytes, base64url without padding"
+        },
+        "mldsa65": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "description": "1952 bytes, base64url without padding"
+        }
       }
     },
     "enrol_proof": {
-      "description": "The string the body's key signs to ask to be enrolled: the lines IA-BODY-ENROL-V1, ia, agent, secret, a fresh nonce, host, verkey, keys_digest, the claimed grade, platform (e.g. macos/arm64) and placement (computer, vm, cloud or device), joined with a newline, no trailing newline.",
+      "description": "The string K signs to ask to be enrolled: the lines IA-BODY-ENROL-V1, the enrolment's ia, agent and secret, the request's nonce (at least 16 characters, fresh), host, verkey, keys_digest, the claimed grade, platform (e.g. macos/arm64) and placement (computer, vm, cloud or device), joined with a newline, no trailing newline.",
       "type": "string"
+    },
+    "enrol_request": {
+      "description": "What the machine sends to ask to become the body, sealed (see sealed_enrolment). keys must be the keys it is sealed from, and signature is K's over enrol_proof.",
+      "type": "object",
+      "required": [
+        "secret",
+        "agent",
+        "keys",
+        "nonce",
+        "claimed_grade",
+        "platform",
+        "placement",
+        "signature"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "secret": {
+          "type": "string",
+          "description": "the enrolment's secret"
+        },
+        "agent": {
+          "type": "string",
+          "description": "the enrolment's agent"
+        },
+        "keys": {
+          "$ref": "#/$defs/keys"
+        },
+        "nonce": {
+          "type": "string",
+          "minLength": 16
+        },
+        "claimed_grade": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "placement": {
+          "type": "string"
+        },
+        "signature": {
+          "type": "string"
+        }
+      }
+    },
+    "sealed_enrolment": {
+      "description": "How an enrol_request travels: POSTed as JSON to /api/agent-host/enrol at the enrolment's url. envelope is a DIDComm authcrypt envelope from the body's sealing keys (sender) to the Identity Agent's, which the machine fetched and checked against the Identity Agent's key log first. Its message has type body-enrolment, id the request's nonce, from did:keri: + host, to [did:keri: + ia], and the enrol_request as body. Inside, the message is signed with both the sender's ed25519 key (Ed25519) and its mldsa65 key (ML-DSA-65, empty context, deterministic signing) over the message's JSON followed by E and the base64url of the Blake3-256 of its body; the content key is HKDF-SHA256 over an ephemeral-static X25519 secret, a static-static X25519 secret and an ML-KEM-768 shared secret, and the content is sealed with XChaCha20-Poly1305 with additional data sender-identifier|recipient-identifier. The Identity Agent refuses an envelope it cannot open with the keys sender names, a message of another type, and keys inside other than sender.",
+      "type": "object",
+      "required": [
+        "sender",
+        "envelope"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "sender": {
+          "$ref": "#/$defs/keys"
+        },
+        "envelope": {
+          "type": "object",
+          "description": "a DIDComm authcrypt envelope (mode authcrypt)"
+        }
+      }
     },
     "six_words": {
       "description": "Shown on both screens so a person can compare them: Blake3-256 of IA-BODY-WORDS-V1, a newline, then host. Words 1-5 are the first 55 bits in 11-bit groups, word 6 the next 11 bits, each an index into the BIP-39 English list.",
       "type": "array",
-      "items": {"type": "string"},
+      "items": {
+        "type": "string"
+      },
       "minItems": 6,
       "maxItems": 6
     },
     "signed_request": {
-      "description": "Every request a body makes is signed over the lines IA-BODY-REQ-V3, the Identity Agent's identifier (X-IA-Body-For), host (X-IA-Body-Host), the method upper-cased, the request target exactly as sent (escaped path and query), X-IA-Body-Timestamp, X-IA-Body-Nonce, Blake3-256 (CESR) of the body bytes, X-Work-Item, X-Reason and X-IA-Session, joined with a newline; an absent header is an empty line. The signature travels in X-IA-Body-Sig. The timestamp must be within 2 minutes of the Identity Agent's clock, and a signature is accepted once.",
+      "description": "Every request a body makes is signed over the lines IA-BODY-REQ-V3, the Identity Agent's identifier (X-IA-Body-For), host (X-IA-Body-Host), the method upper-cased, the request target exactly as sent (escaped path and query), X-IA-Body-Timestamp, X-IA-Body-Nonce (at least 16 characters), Blake3-256 (CESR) of the body bytes, X-Work-Item, X-Reason and X-IA-Session, joined with a newline; an absent header is an empty line. The signature travels in X-IA-Body-Sig. The timestamp must be within 2 minutes of the Identity Agent's clock, and a signature is accepted once. X-IA-Body-For must be the identifier of the Identity Agent receiving the request; a request naming another is refused.",
       "type": "object",
-      "required": ["X-IA-Body-Host", "X-IA-Body-Sig", "X-IA-Body-Timestamp", "X-IA-Body-Nonce", "X-IA-Body-For"],
+      "required": [
+        "X-IA-Body-Host",
+        "X-IA-Body-Sig",
+        "X-IA-Body-Timestamp",
+        "X-IA-Body-Nonce",
+        "X-IA-Body-For"
+      ],
       "properties": {
-        "X-IA-Body-Host": {"type": "string"},
-        "X-IA-Body-Sig": {"type": "string", "description": "0B + Ed25519 signature, or 0I + P-256 r||s in low-s form; a high-s P-256 signature is refused"},
-        "X-IA-Body-Timestamp": {"type": "string", "format": "date-time"},
-        "X-IA-Body-Nonce": {"type": "string", "minLength": 1},
-        "X-IA-Body-For": {"type": "string"},
-        "X-Work-Item": {"type": "string"},
-        "X-Reason": {"type": "string"},
-        "X-IA-Session": {"type": "string"}
+        "X-IA-Body-Host": {
+          "type": "string"
+        },
+        "X-IA-Body-Sig": {
+          "type": "string",
+          "description": "K's signature, encoded as described at the top of this schema"
+        },
+        "X-IA-Body-Timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "X-IA-Body-Nonce": {
+          "type": "string",
+          "minLength": 16
+        },
+        "X-IA-Body-For": {
+          "type": "string"
+        },
+        "X-Work-Item": {
+          "type": "string"
+        },
+        "X-Reason": {
+          "type": "string"
+        },
+        "X-IA-Session": {
+          "type": "string"
+        }
       }
     },
     "grade": {
-      "description": "How strongly the body's key is held, weakest first. A claim above hardware-asserted is recorded as hardware-asserted until its evidence can be checked; any other claim is recorded as software.",
-      "enum": ["software", "hardware-asserted", "hardware-attested", "attested-runtime"]
+      "description": "How strongly the body's key is held, weakest first. A claim of software or hardware-asserted is recorded as claimed. A claim above hardware-asserted is recorded as hardware-asserted until its evidence can be checked, and marked clamped. Any other claim is recorded as software, marked clamped unless the claim was empty.",
+      "enum": [
+        "software",
+        "hardware-asserted",
+        "hardware-attested",
+        "attested-runtime"
+      ]
     }
   }
 }

@@ -17,8 +17,7 @@ func TestThePublishedSchemaDescribesTheBundle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var faults []string
-	for def, v := range map[string]any{
+	held := map[string]any{
 		"bundle":                Bundle{},
 		"entry":                 Entry{},
 		"key_log":               KeyLog{},
@@ -29,25 +28,20 @@ func TestThePublishedSchemaDescribesTheBundle(t *testing.T) {
 		"owner":                 Owner{},
 		"log":                   Log{},
 		"stored_row":            sandbox.StoredRow{},
+		"log_record":            sandbox.InvocationEvent{},
+		"cost":                  sandbox.Cost{},
 		"anchor":                Anchor{},
 		"anchor_statement":      AnchorStatement{},
 		"anchored_log":          AnchoredLog{},
 		"anchored_conversation": AnchoredConversation{},
-	} {
+	}
+	var faults []string
+	for def, v := range held {
 		faults = append(faults, s.Matches(def, v)...)
 	}
+	faults = append(faults, s.Unheld(held)...)
 	for _, f := range faults {
 		t.Error(f)
-	}
-	// Every object the format defines is checked above: a definition added to
-	// the schema without a Go type to hold it to would drift unseen.
-	for def := range s.Defs {
-		switch def {
-		case "bundle", "entry", "key_log", "event", "receipt", "registry", "credential", "owner", "log",
-			"stored_row", "anchor", "anchor_statement", "anchored_log", "anchored_conversation":
-		default:
-			t.Errorf("$defs/%s is not held to a Go type", def)
-		}
 	}
 }
 

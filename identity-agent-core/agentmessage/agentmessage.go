@@ -183,8 +183,8 @@ func (s Statement) Check() error {
 	if s.InReplyTo == "" {
 		return fmt.Errorf("a %s from a body must name the message it acts on", s.Kind)
 	}
-	if len(s.HostNonce) < 16 {
-		return errors.New("the message needs a nonce of at least 16 characters")
+	if agentbody.CheckNonce(s.HostNonce) != nil {
+		return fmt.Errorf("the message needs a nonce of at least %d characters", agentbody.MinNonce)
 	}
 	if _, err := time.Parse(time.RFC3339, s.HostTime); err != nil {
 		return errors.New("the message's time must be RFC 3339")

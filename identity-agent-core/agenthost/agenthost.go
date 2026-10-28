@@ -359,9 +359,9 @@ func (h *Host) Enrol(enrolment string, placement string, wait time.Duration) (St
 	if err != nil {
 		return State{}, err
 	}
-	inner, _ := json.Marshal(map[string]any{
-		"secret": e.Secret, "agent": e.Agent, "keys": keys, "nonce": nonce,
-		"claimed_grade": grade, "platform": platform, "placement": placement, "signature": sig,
+	inner, _ := json.Marshal(agentbody.EnrolRequest{
+		Secret: e.Secret, Agent: e.Agent, Keys: keys, Nonce: nonce,
+		ClaimedGrade: grade, Platform: platform, Placement: placement, Signature: sig,
 	})
 	env, err := didcomm.PackAuthcrypt(ks, iaKeys, &didcomm.JWM{
 		ID: nonce, Type: didcomm.TypeBodyEnrolment,
@@ -373,7 +373,7 @@ func (h *Host) Enrol(enrolment string, placement string, wait time.Duration) (St
 	}
 	words := agentbody.Words(host)
 	fmt.Fprintf(h.out(), "\nThis machine's six words are:\n\n    %s\n\n", strings.Join(words, " "))
-	body, _ := json.Marshal(map[string]any{"sender": keys, "envelope": env})
+	body, _ := json.Marshal(agentbody.SealedEnrolment{Sender: keys, Envelope: env})
 	resp, err := h.client().Post(strings.TrimRight(e.URL, "/")+"/api/agent-host/enrol", "application/json", bytes.NewReader(body))
 	if err != nil {
 		return State{}, err

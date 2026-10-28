@@ -142,6 +142,27 @@ func (k Keys) KeysDigest() string {
 	}, "\n")))
 }
 
+// CheckSealingKeys refuses sealing keys of the wrong size: they are stored and
+// later used to seal messages to the machine, so a malformed one is refused at
+// enrolment rather than discovered then.
+func (k Keys) CheckSealingKeys() error {
+	for _, key := range []struct {
+		name, value string
+		size        int
+	}{
+		{"X25519 sealing key", k.X25519, 32},
+		{"ML-KEM-768 sealing key", k.MLKEM768, 1184},
+		{"Ed25519 sealing signature key", k.Ed25519, 32},
+		{"ML-DSA-65 sealing signature key", k.MLDSA65, 1952},
+	} {
+		b, err := base64.RawURLEncoding.DecodeString(key.value)
+		if err != nil || len(b) != key.size {
+			return fmt.Errorf("the %s must be %d bytes, base64url", key.name, key.size)
+		}
+	}
+	return nil
+}
+
 // DID is the body's sealing keys as the DIDComm layer takes them.
 func (k Keys) DID() *didcomm.DID {
 	return &didcomm.DID{AID: k.Host, Ed: k.Ed25519, Dsa: k.MLDSA65,
@@ -176,6 +197,42 @@ func EnrolProof(e Enrolment, nonce string, k Keys, claimedGrade, platform, place
 		platform,
 		placement,
 	}, "\n"))
+}
+
+// MinNonce is the shortest nonce an enrolment or a signed request may carry.
+const MinNonce = 16
+
+// CheckNonce refuses a nonce shorter than MinNonce.
+func CheckNonce(nonce string) error {
+	if len(nonce) < MinNonce {
+		return fmt.Errorf("a nonce of at least %d characters is needed", MinNonce)
+	}
+	return nil
+}
+
+// EnrolRequest is what a machine sends to ask to become a body: the proof that
+// it holds K, and what that proof covers.
+type EnrolRequest struct {
+	Secret       string `json:"secret"`
+	Agent        string `json:"agent"`
+	Keys         Keys   `json:"keys"`
+	Nonce        string `json:"nonce"`
+	ClaimedGrade string `json:"claimed_grade"`
+	Platform     string `json:"platform"`
+	Placement    string `json:"placement"`
+	// Signature is K's signature over EnrolProof.
+	Signature string `json:"signature"`
+}
+
+// SealedEnrolment is how an EnrolRequest travels: as the body of a DIDComm
+// message of type body-enrolment, sealed to the Identity Agent's keys from the
+// machine's sealing keys, which the machine first checked are that identity's.
+// A relay between them reads neither the secret nor the machine's keys.
+type SealedEnrolment struct {
+	// Sender is the machine's public keys, which the envelope is sealed from.
+	// The same keys are inside the envelope, signed by K.
+	Sender   Keys              `json:"sender"`
+	Envelope *didcomm.Envelope `json:"envelope"`
 }
 
 // Request headers a body signs a request with.

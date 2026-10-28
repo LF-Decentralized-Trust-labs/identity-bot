@@ -3,13 +3,16 @@ package agentbody
 import (
 	_ "embed"
 	"encoding/json"
+
+	"identity-agent-core/didcomm"
+	"identity-agent-core/internal/fixedkeys"
 )
 
-// bodyVectors are the enrolment strings, the strings a body signs, the six
-// words and the grades, worked through from fixed inputs and fixed keys: the
-// file another implementation of a body, or of the Identity Agent's side of
-// one, tests itself against. It ships inside this module so a Go
-// implementation reads the same file instead of keeping a copy.
+// bodyVectors are the enrolment strings, the enrolment request, the strings a
+// body signs, the six words and the grades, worked through from fixed inputs
+// and fixed keys: the file another implementation of a body, or of the
+// Identity Agent's side of one, tests itself against. It ships inside this
+// module so a Go implementation reads the same file instead of keeping a copy.
 //
 //go:embed body-vectors.json
 var bodyVectors []byte
@@ -18,17 +21,23 @@ var bodyVectors []byte
 type BodyVectorSet struct {
 	About string `json:"about"`
 
-	// An Ed25519 machine key from a fixed seed, so every signature below is
-	// exactly reproducible.
+	// The body's signing key K, an Ed25519 key from a fixed seed, so every
+	// signature by it below is exactly reproducible.
 	SeedHex string `json:"seed_hex"`
 	Host    string `json:"host"`
 	Verkey  string `json:"verkey"`
 
-	// The body's public keys, and the digest that binds its sealing keys to
-	// its signing key. The sealing keys are opaque to the digest: it covers
-	// the strings as given.
-	Keys       Keys   `json:"keys"`
-	KeysDigest string `json:"keys_digest"`
+	// The body's sealing keys come from these seeds, and Keys is the whole of
+	// its public key material, with the digest that binds the sealing keys to K.
+	SealingSeeds fixedkeys.Seeds `json:"sealing_seeds"`
+	Keys         Keys            `json:"keys"`
+	KeysDigest   string          `json:"keys_digest"`
+
+	// The Identity Agent the body enrols with: its identifier is the one the
+	// enrolments name, and its messaging keys, from these seeds, are the keys
+	// the enrolment is sealed to.
+	IdentityAgentSeeds fixedkeys.Seeds `json:"identity_agent_seeds"`
+	IdentityAgentKeys  didcomm.DID     `json:"identity_agent_keys"`
 
 	Enrolments []struct {
 		Name    string    `json:"name"`
@@ -40,16 +49,24 @@ type BodyVectorSet struct {
 		Encoded string `json:"encoded"`
 	} `json:"refused_enrolments"`
 
-	// EnrolProofs are made over the first enrolment and Keys.
-	EnrolProofs []struct {
-		Name         string `json:"name"`
-		Nonce        string `json:"nonce"`
-		ClaimedGrade string `json:"claimed_grade"`
-		Platform     string `json:"platform"`
-		Placement    string `json:"placement"`
-		Signed       string `json:"signed"`
-		Signature    string `json:"signature"`
-	} `json:"enrol_proofs"`
+	// EnrolRequests answer the first enrolment: the string K signs, and the
+	// request the machine sends, carrying K's signature over it.
+	EnrolRequests []struct {
+		Name         string       `json:"name"`
+		Nonce        string       `json:"nonce"`
+		ClaimedGrade string       `json:"claimed_grade"`
+		Platform     string       `json:"platform"`
+		Placement    string       `json:"placement"`
+		Signed       string       `json:"signed"`
+		Request      EnrolRequest `json:"request"`
+	} `json:"enrol_requests"`
+
+	// SealedEnrolment is the first enrol request as it is sent, sealed to the
+	// Identity Agent from the body's sealing keys. Sealing draws fresh
+	// randomness, so this one is given: it opens with the Identity Agent's
+	// keys to a body-enrolment message whose id is the request's nonce and
+	// whose body is the request.
+	SealedEnrolment SealedEnrolment `json:"sealed_enrolment"`
 
 	SignedRequests []struct {
 		Name string `json:"name"`
@@ -60,6 +77,9 @@ type BodyVectorSet struct {
 		Body    string            `json:"body"`
 		Signed  string            `json:"signed"`
 	} `json:"signed_requests"`
+
+	// RefusedNonces are too short for an enrolment or a signed request.
+	RefusedNonces []string `json:"refused_nonces"`
 
 	Words []struct {
 		Host  string   `json:"host"`

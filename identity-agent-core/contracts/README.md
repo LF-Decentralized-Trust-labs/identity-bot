@@ -8,8 +8,8 @@ here before it reaches anybody else.
 
 | File | What it is |
 |---|---|
-| `asset-grants/*.schema.json` | The credential schemas an AI agent's authority rests on (ADR-045): the AI Agent Grant (what it may do), the AI Agent Body (which machine key speaks as it) and the Controller Grant (which machine may act for an identity). Each file is the schema byte for byte, so its Blake3 digest is the `$id` it carries and the `s` a credential names. Both versions of each are published, because credentials issued under either can be presented. |
-| `agent-body/agent-body.schema.json` | How a machine becomes an AI agent's body and signs as it (ADR-046): the enrolment string, the strings the machine's key signs, the six words a person compares, and the grades. Worked examples: `../agentbody/body-vectors.json`. |
+| `asset-grants/*.schema.json` | The credential schemas an AI agent's authority rests on (ADR-045): the AI Agent Grant (what it may do), the AI Agent Body (which machine key speaks as it) and the Controller Grant (which machine may act for an identity). Each file is the schema byte for byte, so its Blake3 digest is the `$id` it carries and the `s` a credential names. Every version this code builds is published (1.0.0 and 1.1.0 of the grant and the body, 1.1.0 of the Controller Grant), because a credential issued under any of them can be presented. |
+| `agent-body/agent-body.schema.json` | How a machine becomes an AI agent's body and signs as it (ADR-046): the enrolment string, the sealed enrolment request, the strings the machine's key signs, the six words a person compares, and the grades. Worked examples: `../agentbody/body-vectors.json`. |
 | `agent-message/agent-message.schema.json` | A message between AI agents (ADR-047): what a body signs, the record the Identity Agent countersigns, and how entries chain. Worked examples, including a countersigned two-entry conversation: `../agentmessage/message-vectors.json`. |
 | `conversation-bundle/conversation-bundle.schema.json` | An exported conversation, `IA-CONVERSATION-BUNDLE-V1`, which anybody can check offline. The reference checker is `../cmd/verify-conversation`. |
 
@@ -21,10 +21,23 @@ was issued, and the grant was in force and unrevoked when the request was made
 and before the credential was issued. The check is `authorisation.Check`.
 
 The vector files ship inside the Go module, beside the code that produces
-them, so a Go implementation reads the same file rather than a copy. When a
-format changes on purpose, regenerate them with
-`IA_WRITE_CONTRACTS=1 go test ./schemas ./agentbody ./agentmessage` and review
-the diff: every changed line is a change another implementation has to make.
+them, so a Go implementation reads the same file rather than a copy. Keys the
+vectors need beyond a body's signing key come from published seeds, each key
+from its own: Ed25519 from its 32-byte seed (RFC 8032), ML-DSA-65 from its
+32-byte seed (FIPS 204), ML-KEM-768 from its 64-byte seed (FIPS 203), and
+X25519 with the 32-byte seed as its private key (RFC 7748). Everything is then
+reproducible except a sealed enrolment and a P-256 signature, which draw fresh
+randomness and are published as given.
+
+`check_ai_agent_vectors.py` is a second implementation, in Python, written from
+the schemas' prose rather than from the Go code. The Go tests run it over both
+vector files where Python and its `blake3` module are installed, so prose that
+stops describing the code fails a test.
+
+When a format changes on purpose, regenerate the files with
+`IA_WRITE_CONTRACTS=1 go test ./schemas ./agentbody ./agentmessage` (refused
+when `CI` is set) and review the diff: every changed line is a change another
+implementation has to make.
 
 ## Elsewhere
 

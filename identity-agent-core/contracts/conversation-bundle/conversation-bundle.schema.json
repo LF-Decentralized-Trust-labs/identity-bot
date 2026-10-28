@@ -2,162 +2,516 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "identity-agent-core/contracts/conversation-bundle/conversation-bundle.schema.json",
   "title": "An exported conversation between AI agents, IA-CONVERSATION-BUNDLE-V1 (ADR-047)",
-  "description": "Everything needed to check a conversation with nothing else: its countersigned entries and their words, the key logs of every identity that signed any part of it, the credentials each entry rests on with their transaction logs, the governance log rows, and the anchors that fix the record in a key log. A reader refuses a field the format does not have, and more than one bundle. The reference verifier is identity-agent-core/cmd/verify-conversation. Every base64 value in a bundle is standard base64 with padding, decoded strictly.",
+  "description": "Everything needed to check a conversation with nothing else: its countersigned entries and their words, the key logs of every identity that signed any part of it, the credentials each entry rests on with their transaction logs, the governance log rows, and the anchors that fix the record in a key log. A reader refuses a field the format does not have, and more than one bundle. Every base64 value in a bundle is standard base64 with padding, decoded strictly. Key logs, key events, credentials (ACDC) and their transaction events follow KERI; what this format adds on top is said under each definition. The reference checker is identity-agent-core/cmd/verify-conversation.",
   "$ref": "#/$defs/bundle",
   "$defs": {
     "bundle": {
       "type": "object",
-      "required": ["format", "conversation", "exported_at", "exported_by", "root", "entries", "countersigners", "key_logs", "registries", "credentials", "log", "anchors"],
+      "required": [
+        "format",
+        "conversation",
+        "exported_at",
+        "exported_by",
+        "root",
+        "entries",
+        "countersigners",
+        "key_logs",
+        "registries",
+        "credentials",
+        "log",
+        "anchors"
+      ],
       "additionalProperties": false,
       "properties": {
-        "format": {"const": "IA-CONVERSATION-BUNDLE-V1"},
-        "conversation": {"type": "string", "minLength": 1},
-        "exported_at": {"type": "string", "format": "date-time"},
-        "exported_by": {"type": "string", "description": "who exported it; the export is itself a row in log"},
-        "root": {"type": "string", "minLength": 1, "description": "the organisation's own identity: every other identity in the bundle is delegated from it, and it issued every credential in it"},
-        "record_identity": {"type": "string", "description": "the identity whose key log anchors the record; absent when nothing has been anchored yet"},
-        "entries": {"type": ["array", "null"], "items": {"$ref": "#/$defs/entry"}, "description": "in order; each entry's record names the hash of the one before it"},
-        "countersigners": {"type": ["array", "null"], "items": {"$ref": "../agent-message/agent-message.schema.json#/$defs/messaging_keys"}, "description": "the messaging keys of every identity that countersigned an entry, each signed by that identity's current key"},
-        "key_logs": {"type": ["array", "null"], "items": {"$ref": "#/$defs/key_log"}},
-        "registries": {"type": ["array", "null"], "items": {"$ref": "#/$defs/registry"}},
-        "credentials": {"type": ["array", "null"], "items": {"$ref": "#/$defs/credential"}},
-        "owner": {"$ref": "#/$defs/owner"},
-        "log": {"$ref": "#/$defs/log"},
-        "anchors": {"type": ["array", "null"], "items": {"$ref": "#/$defs/anchor"}}
+        "format": {
+          "const": "IA-CONVERSATION-BUNDLE-V1"
+        },
+        "conversation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "exported_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "exported_by": {
+          "type": "string",
+          "description": "who exported it; the export is itself a row in log"
+        },
+        "root": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the organisation's own identity: every other identity in the bundle is delegated from it, and it issued every credential in it"
+        },
+        "record_identity": {
+          "type": "string",
+          "description": "the identity whose key log anchors the record; absent when nothing has been anchored yet"
+        },
+        "entries": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/entry"
+          },
+          "description": "in order; each entry's record names the hash of the one before it"
+        },
+        "countersigners": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "../agent-message/agent-message.schema.json#/$defs/messaging_keys"
+          },
+          "description": "the messaging keys of every identity that countersigned an entry, each signed by that identity's current key"
+        },
+        "key_logs": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/key_log"
+          }
+        },
+        "registries": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/registry"
+          }
+        },
+        "credentials": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/credential"
+          }
+        },
+        "owner": {
+          "$ref": "#/$defs/owner"
+        },
+        "log": {
+          "$ref": "#/$defs/log"
+        },
+        "anchors": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/anchor"
+          }
+        }
       }
     },
     "entry": {
       "description": "One conversation entry: the envelope the Identity Agent countersigned (see contracts/agent-message), and the words whose digest its record carries.",
       "type": "object",
-      "required": ["envelope", "body"],
+      "required": [
+        "envelope",
+        "body"
+      ],
       "additionalProperties": false,
       "properties": {
-        "envelope": {"$ref": "../agent-message/agent-message.schema.json#/$defs/envelope"},
-        "body": {"type": "string", "description": "the words, base64"}
+        "envelope": {
+          "$ref": "../agent-message/agent-message.schema.json#/$defs/envelope"
+        },
+        "body": {
+          "type": "string",
+          "description": "the words, base64"
+        }
       }
     },
     "key_log": {
       "type": "object",
-      "required": ["aid", "events"],
+      "required": [
+        "aid",
+        "events"
+      ],
       "additionalProperties": false,
       "properties": {
-        "aid": {"type": "string"},
-        "events": {"type": ["array", "null"], "items": {"$ref": "#/$defs/event"}}
-      }
+        "aid": {
+          "type": "string"
+        },
+        "events": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/event"
+          }
+        }
+      },
+      "description": "One identity's key log. It verifies when every event is signed by the key in force (an establishment event by the key it declares) and the log is that identity's. The root identity's log opens with its inception (icp); every other identity in the bundle is delegated from the root (its first event a dip naming the root, approved in the root's log, as is each drt). Only single-key identities are checked: an event declaring more than one key is refused."
     },
     "event": {
       "description": "One KERI key event exactly as published.",
       "type": "object",
-      "required": ["raw", "signature"],
+      "required": [
+        "raw",
+        "signature"
+      ],
       "additionalProperties": false,
       "properties": {
-        "raw": {"type": "string", "description": "the event's bytes, base64"},
-        "signature": {"type": "string", "description": "the controller's signature over raw, CESR"},
-        "receipts": {"type": "array", "items": {"$ref": "#/$defs/receipt"}}
+        "raw": {
+          "type": "string",
+          "description": "the event's bytes, base64"
+        },
+        "signature": {
+          "type": "string",
+          "description": "The controller's Ed25519 signature over raw, CESR: 0B + signature (88 characters), or indexed AA + signature (88 characters, index 0)."
+        },
+        "receipts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/receipt"
+          }
+        }
       }
     },
     "receipt": {
-      "description": "One witness's signature over an event's identifier.",
+      "description": "One witness's receipt for an event: witness is the witness's non-transferable identifier (B + its Ed25519 key, 44 characters), and signature is CESR 0B, its Ed25519 signature over the UTF-8 bytes of the event's own identifier (its d field). A receipt that does not verify is a fault, not a missing receipt.",
       "type": "object",
-      "required": ["witness", "signature"],
+      "required": [
+        "witness",
+        "signature"
+      ],
       "additionalProperties": false,
       "properties": {
-        "witness": {"type": "string"},
-        "signature": {"type": "string"}
+        "witness": {
+          "type": "string"
+        },
+        "signature": {
+          "type": "string"
+        }
       }
     },
     "registry": {
       "type": "object",
-      "required": ["said", "inception"],
+      "required": [
+        "said",
+        "inception"
+      ],
       "additionalProperties": false,
       "properties": {
-        "said": {"type": "string"},
-        "inception": {"type": "string", "description": "the registry's inception event, base64"}
-      }
+        "said": {
+          "type": "string"
+        },
+        "inception": {
+          "type": "string",
+          "description": "the registry's inception event, base64"
+        }
+      },
+      "description": "A credential registry's inception (vcp) as published. Its issuer (ii) is the root identity, and the root's key log anchors it: some event's a list holds the seal {i: the registry's identifier, s: 0, d: the inception's digest}."
     },
     "credential": {
-      "description": "A credential an entry rests on (an AI Agent Body, an AI Agent Grant, a Controller Grant; see contracts/asset-grants), or one those name as having authorised them.",
+      "description": "A credential an entry rests on (an AI Agent Body, an AI Agent Grant, a Controller Grant; see contracts/asset-grants), or one those name as having authorised them. It is issued by the root, in a registry the bundle shows is the root's, and every event of its log is anchored in the root's key log by a seal {i: the credential's identifier, s: the event's sequence number, d: the event's digest}. Every event the root anchors for it must be carried: a revocation left out would read as a credential never revoked. A credential that carries the request that authorised it is checked by the rule in contracts/README.md.",
       "type": "object",
-      "required": ["said", "raw", "log"],
+      "required": [
+        "said",
+        "raw",
+        "log"
+      ],
       "additionalProperties": false,
       "properties": {
-        "said": {"type": "string"},
-        "raw": {"type": "string", "description": "the credential as issued, base64"},
-        "log": {"type": ["array", "null"], "items": {"type": "string"}, "description": "its transaction log in order, each event base64: its issuance, and its revocation if any"},
-        "request_body": {"type": "string", "description": "the body of the request that authorised it, when kept; the credential carries that request's signature and digest"}
+        "said": {
+          "type": "string"
+        },
+        "raw": {
+          "type": "string",
+          "description": "the credential as issued, base64"
+        },
+        "log": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "its transaction log in order, each event base64: its issuance, and its revocation if any"
+        },
+        "request_body": {
+          "type": "string",
+          "description": "the body of the request that authorised it, when kept; the credential carries that request's signature and digest"
+        }
       }
     },
     "owner": {
       "description": "The owner the root names, with the key the Identity Agent holds for them. Present when a credential rests on a request the owner signed.",
       "type": "object",
-      "required": ["aid", "key"],
+      "required": [
+        "aid",
+        "key"
+      ],
       "additionalProperties": false,
       "properties": {
-        "aid": {"type": "string"},
-        "key": {"type": "string"}
+        "aid": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        }
       }
     },
     "log": {
-      "description": "The stretch of the governance log from the conversation's first row to the newest row when it was exported, with no gap.",
+      "description": "The stretch of the governance log from the conversation's first row to the newest row when it was exported, rows consecutive by id with no gap. signer's current key, from its key log, signs every row.",
       "type": "object",
-      "required": ["signer", "rows"],
+      "required": [
+        "signer",
+        "rows"
+      ],
       "additionalProperties": false,
       "properties": {
-        "signer": {"type": "string", "description": "the identity that signs the log's rows"},
-        "rows": {"type": ["array", "null"], "items": {"$ref": "#/$defs/stored_row"}}
+        "signer": {
+          "type": "string",
+          "description": "the identity that signs the log's rows"
+        },
+        "rows": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/stored_row"
+          }
+        }
       }
     },
     "stored_row": {
-      "description": "One governance log row as kept: record is the row's JSON as stored, and each row names the hash of the one before it.",
+      "description": "One governance log row as kept. record is a log_record as JSON, exactly the bytes stored. signed_payload is the exact bytes the row's signature covers: the same log_record with signer_aid and signature left out, and it must decode to the same record. signature (in record) is the base64url (no padding) Ed25519 signature by the log signer over signed_payload. The row's hash is the text blake3: followed by the lowercase hex of the Blake3-256 of record's bytes, and each row's prev_hash is the hash of the row before it.",
       "type": "object",
-      "required": ["id", "record"],
+      "required": [
+        "id",
+        "record"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": {"type": "integer"},
-        "record": {"type": "string"},
-        "signed_payload": {"type": "string"}
+        "id": {
+          "type": "integer"
+        },
+        "record": {
+          "type": "string",
+          "description": "a log_record as JSON"
+        },
+        "signed_payload": {
+          "type": "string"
+        }
       }
     },
     "anchor": {
-      "description": "What one interaction event in the record identity's key log seals: one for every interaction, so none can be withheld. statement is an anchor_statement as JSON, exactly the bytes digested.",
+      "description": "What one interaction event (ixn) of the record identity seals. The record identity is delegated from the root, and after its inception its key log holds only interactions, one anchor each: event sn's a list holds a seal {d: Blake3-256 of statement's bytes, CESR qb64 code E}. statement is an anchor_statement as JSON, exactly the bytes digested. The bundle carries one statement for every interaction, so none can be withheld, and no statement no interaction seals.",
       "type": "object",
-      "required": ["seq", "statement"],
+      "required": [
+        "seq",
+        "statement"
+      ],
       "additionalProperties": false,
       "properties": {
-        "seq": {"type": "integer"},
-        "statement": {"type": "string"}
+        "seq": {
+          "type": "integer"
+        },
+        "statement": {
+          "type": "string"
+        }
       }
     },
     "anchor_statement": {
       "description": "What an anchor fixes: the governance log's newest row and its hash, and the newest entry of every conversation that grew since the anchor before.",
       "type": "object",
-      "required": ["log", "at"],
+      "required": [
+        "log",
+        "at"
+      ],
       "additionalProperties": false,
       "properties": {
-        "log": {"$ref": "#/$defs/anchored_log"},
-        "conversations": {"type": "array", "items": {"$ref": "#/$defs/anchored_conversation"}},
-        "at": {"type": "string", "format": "date-time"},
-        "signer": {"type": "string", "description": "the identity that signs the governance log; absent from anchors made before it was named"}
+        "log": {
+          "$ref": "#/$defs/anchored_log"
+        },
+        "conversations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/anchored_conversation"
+          }
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "signer": {
+          "type": "string",
+          "description": "the identity that signs the governance log; absent from anchors made before it was named"
+        }
       }
     },
     "anchored_log": {
       "type": "object",
-      "required": ["row", "head"],
+      "required": [
+        "row",
+        "head"
+      ],
       "additionalProperties": false,
       "properties": {
-        "row": {"type": "integer"},
-        "head": {"type": "string"}
+        "row": {
+          "type": "integer"
+        },
+        "head": {
+          "type": "string",
+          "description": "the anchored row's hash: blake3: + lowercase hex of the Blake3-256 of its record"
+        }
       }
     },
     "anchored_conversation": {
       "type": "object",
-      "required": ["id", "seq", "head"],
+      "required": [
+        "id",
+        "seq",
+        "head"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": {"type": "string"},
-        "seq": {"type": "integer"},
-        "head": {"type": "string", "description": "the newest entry's hash"}
+        "id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "head": {
+          "type": "string",
+          "description": "the newest entry's hash, as contracts/agent-message defines it"
+        }
       }
+    },
+    "log_record": {
+      "description": "A governance log row's record: what was invoked, by whom, under what grant, and how it ended. agent.message.<kind> rows with result_status ok record each entry, by message id in reason; an agent.conversation.export row by exported_by at exported_at records the export; a record.anchoring row precedes each anchor. A record with a key not listed here, or a key given twice, is refused.",
+      "type": "object",
+      "required": [
+        "ts",
+        "capability_id",
+        "result_status",
+        "duration_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "ts": {
+          "type": "string"
+        },
+        "caller_aid": {
+          "type": "string"
+        },
+        "delegation_chain": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "grant_said": {
+          "type": "string"
+        },
+        "capability_id": {
+          "type": "string"
+        },
+        "args_hash": {
+          "type": "string"
+        },
+        "result_status": {
+          "type": "string"
+        },
+        "duration_ms": {
+          "type": "integer"
+        },
+        "transport": {
+          "type": "string"
+        },
+        "executor_type": {
+          "type": "string"
+        },
+        "correlation_id": {
+          "type": "string"
+        },
+        "auth_level": {
+          "type": "string"
+        },
+        "parent_event_id": {
+          "type": "string"
+        },
+        "orchestrated_by": {
+          "type": "string"
+        },
+        "body_host": {
+          "type": "string"
+        },
+        "body_grade": {
+          "type": "string"
+        },
+        "body_credential": {
+          "type": "string"
+        },
+        "work_item": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "status_reason": {
+          "type": "string"
+        },
+        "cost": {
+          "$ref": "#/$defs/cost"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "args_preview": {
+          "type": "string"
+        },
+        "result_hash": {
+          "type": "string"
+        },
+        "prev_hash": {
+          "type": "string"
+        },
+        "signer_aid": {
+          "type": "string"
+        },
+        "signature": {
+          "type": "string"
+        },
+        "intent_event_id": {
+          "type": "integer"
+        }
+      }
+    },
+    "cost": {
+      "type": "object",
+      "required": [
+        "amount",
+        "unit"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "amount": {
+          "type": "number"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "basis": {
+          "type": "string"
+        }
+      },
+      "description": "What an invocation consumed, in the unit named."
     }
   }
 }
