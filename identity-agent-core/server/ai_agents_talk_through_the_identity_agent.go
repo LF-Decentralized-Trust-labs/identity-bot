@@ -376,6 +376,10 @@ func (s *CoreServer) handlePersonSays(w http.ResponseWriter, r *http.Request) {
 		s.refuseMessage(w, cc, agentmessage.KindAsk, "this person may not use "+a.DisplayName, http.StatusForbidden)
 		return
 	}
+	if s.agentStatus(a.PairwiseAID) == "revoked" {
+		s.refuseMessage(w, cc, agentmessage.KindAsk, a.DisplayName+" was revoked, so it can be asked nothing", http.StatusConflict)
+		return
+	}
 	store, err := s.conversations()
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusServiceUnavailable)
@@ -746,6 +750,10 @@ func (s *CoreServer) handleBodySays(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		ta, _ := s.aiAgentAsset(target.ID)
+		if s.agentStatus(ta.PairwiseAID) == "revoked" {
+			refuse(ta.DisplayName+" was revoked, so it can be asked nothing", http.StatusConflict)
+			return
+		}
 		if !personMayUse(opener, ta) {
 			refuse("the person who opened this conversation may not reach "+ta.DisplayName, http.StatusForbidden)
 			return

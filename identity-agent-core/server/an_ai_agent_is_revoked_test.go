@@ -48,6 +48,10 @@ func TestARevokedAIAgentStaysRevoked(t *testing.T) {
 	if n := len(governanceRows(t, w, "agent.revoked")); n != 1 {
 		t.Fatalf("revocation recorded %d times", n)
 	}
+	// It can be asked nothing.
+	if code, out := w.personSays(t, w.b, "", "are you there?"); code != http.StatusConflict {
+		t.Fatalf("a person asked a revoked AI agent: %d %v", code, out)
+	}
 	// The other AI agent is untouched.
 	if st := w.s.agentStatus(w.a.PairwiseAID); st != "active" {
 		t.Fatalf("Desk assistant is %s", st)
