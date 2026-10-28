@@ -114,7 +114,11 @@ type CoreServer struct {
 	// background is the work started and not waited for inline; Stop
 	// cancels it and waits for it before closing the store.
 	background backgroundWork
-	listener   net.Listener
+	// lifecycle is held for the whole of Start and of Stop, so neither can
+	// begin while the other is under way. Stop cannot hold mu while it waits,
+	// because the work it waits for takes mu.
+	lifecycle sync.Mutex
+	listener  net.Listener
 	// The http.Servers are held so Stop can shut them down. Serving without a
 	// reference leaks the server and its keep-alive connections on every
 	// stop/restart — invisible on a desktop that stops once, but it accrues on
@@ -569,6 +573,8 @@ func New(cfg Config) (*CoreServer, error) {
 }
 
 func (s *CoreServer) Start() error {
+	s.lifecycle.Lock()
+	defer s.lifecycle.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -727,7 +733,13 @@ func (s *CoreServer) Start() error {
 			provider := s.TunnelManager.Provider()
 			if provider != nil && provider.Listener() != nil && ctx.Err() == nil {
 				srv := s.httpServer()
+				// Only while running: a server Stop has already taken the
+				// servers from would never shut this one down.
 				s.mu.Lock()
+				if !s.running {
+					s.mu.Unlock()
+					return
+				}
 				s.tunnelSrv = srv
 				s.mu.Unlock()
 				go func() {
@@ -762,8 +774,10 @@ func (s *CoreServer) Start() error {
 }
 
 func (s *CoreServer) Stop() {
-	// Only the claim to stop is made under the lock. The work below waits for
-	// background work, some of which takes this lock itself, so waiting while
+	s.lifecycle.Lock()
+	defer s.lifecycle.Unlock()
+	// Only the claim to stop is made under mu. The work below waits for
+	// background work, some of which takes mu itself, so waiting while
 	// holding it would hold up the stop until every wait timed out.
 	s.mu.Lock()
 	if !s.running {
@@ -772,7 +786,7 @@ func (s *CoreServer) Stop() {
 	}
 	s.running = false
 	httpSrv, tunnelSrv, listener := s.httpSrv, s.tunnelSrv, s.listener
-	s.httpSrv, s.tunnelSrv = nil, nil
+	s.httpSrv, s.tunnelSrv, s.listener = nil, nil, nil
 	s.mu.Unlock()
 
 	log.Println("[identity-agent-core] Shutting down...")
@@ -781,7 +795,10 @@ func (s *CoreServer) Stop() {
 	portFilePath := filepath.Join(s.DataDir, ".port")
 	os.Remove(portFilePath)
 
-	// Tell everything that runs on its own to stop, before anything waits.
+	// Tell everything that runs on its own to stop, before anything waits,
+	// and start no more background work: a request finishing while the
+	// servers drain below would otherwise start work after this point.
+	s.closeBackground()
 	if s.cancel != nil {
 		s.cancel()
 	}
@@ -836,7 +853,7 @@ func (s *CoreServer) Stop() {
 	// Wait for what was started and is still writing to the data directory,
 	// before the store closes under it and before whoever stopped the server
 	// moves or removes that directory.
-	s.endBackground(backgroundStopWait)
+	s.waitForBackground(backgroundStopWait)
 	if s.AttestationRunner != nil {
 		waitWithin(s.AttestationRunner.Wait, backgroundStopWait, "self-attestation")
 	}

@@ -73,6 +73,12 @@ func (s *CoreServer) inBackground(fn func(ctx context.Context)) {
 // endBackground cancels the background work, refuses any more, and waits up
 // to within for what is running to finish. It reports whether everything did.
 func (s *CoreServer) endBackground(within time.Duration) bool {
+	s.closeBackground()
+	return s.waitForBackground(within)
+}
+
+// closeBackground cancels the background work and refuses any more.
+func (s *CoreServer) closeBackground() {
 	b := &s.background
 	b.mu.Lock()
 	b.ended = true
@@ -80,7 +86,12 @@ func (s *CoreServer) endBackground(within time.Duration) bool {
 		b.cancel()
 	}
 	b.mu.Unlock()
-	return waitWithin(b.wg.Wait, within, "background work")
+}
+
+// waitForBackground waits up to within for the background work to finish,
+// once closeBackground has refused any more. It reports whether it did.
+func (s *CoreServer) waitForBackground(within time.Duration) bool {
+	return waitWithin(s.background.wg.Wait, within, "background work")
 }
 
 // waitWithin calls wait and returns true once it returns, or false after
