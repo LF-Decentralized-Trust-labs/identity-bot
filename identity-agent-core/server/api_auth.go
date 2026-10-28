@@ -40,6 +40,11 @@ const (
 	accessScoped accessClass = "scoped"
 )
 
+// unknownRouteRefusal is how a request under /api that matches no route is
+// answered. A route that is mounted but switched off gives the same refusal.
+const unknownRouteRefusal = "this request could not be resolved to a known route, " +
+	"so it was refused rather than served without a check"
+
 // publicRoutes are unauthenticated by design. Keyed by "METHOD /chi/pattern".
 // Each entry states why, because a public route is a decision, not an accident.
 var publicRoutes = map[string]string{
@@ -352,8 +357,7 @@ func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handle
 				// served without a check is not.
 				if strings.HasPrefix(r.URL.Path, "/api/") ||
 					strings.HasPrefix(r.URL.EscapedPath(), "/api/") {
-					denyAuthorization(w, "this request could not be resolved to a known route, "+
-						"so it was refused rather than served without a check")
+					denyAuthorization(w, unknownRouteRefusal)
 					return
 				}
 				next.ServeHTTP(w, r)

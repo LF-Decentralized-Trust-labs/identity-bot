@@ -102,6 +102,19 @@ func (s *Store) ListAssets() []Asset {
 	return out
 }
 
+// HasAssetOfType reports whether any asset of the given type is held, without
+// copying the store.
+func (s *Store) HasAssetOfType(assetType string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, a := range s.assets {
+		if a.AssetType == assetType {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Store) GetAsset(id string) (Asset, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
