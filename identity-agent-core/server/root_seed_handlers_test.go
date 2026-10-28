@@ -15,9 +15,24 @@ import (
 	"identity-agent-core/secureenclave"
 )
 
+// rootSeedServer is a server on a machine that can protect a root key. The
+// machine is MADE to answer so, rather than the test relying on the host it
+// runs on: a build machine or a session with no access to the key hardware
+// answers otherwise, and the install is then refused before anything these
+// tests check is reached. Tests of the refusal set their own answer.
 func rootSeedServer(t *testing.T) *CoreServer {
 	t.Helper()
+	keyProtectionAnswers(t, secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindTPM2})
 	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
+}
+
+// keyProtectionAnswers makes this machine's key-protection check answer c
+// for the rest of the test.
+func keyProtectionAnswers(t *testing.T, c secureenclave.Capability) {
+	t.Helper()
+	prev := detectKeyProtection
+	detectKeyProtection = func() secureenclave.Capability { return c }
+	t.Cleanup(func() { detectKeyProtection = prev })
 }
 
 func postSeed(s *CoreServer, seedB64 string, remote bool) *httptest.ResponseRecorder {
@@ -109,7 +124,9 @@ func TestRootSeedStatus(t *testing.T) {
 	if got := get(); got["established"] != false {
 		t.Fatalf("expected not established, got %v", got)
 	}
-	postSeed(s, base64.StdEncoding.EncodeToString(make([]byte, 64)), false)
+	if w := postSeed(s, base64.StdEncoding.EncodeToString(make([]byte, 64)), false); w.Code != http.StatusCreated {
+		t.Fatalf("installing the seed: %d %s", w.Code, w.Body)
+	}
 	got := get()
 	if got["established"] != true {
 		t.Fatalf("expected established, got %v", got)
@@ -127,7 +144,9 @@ func TestPhraseAloneRederivesHDKeys(t *testing.T) {
 	b64 := base64.StdEncoding.EncodeToString(seed)
 
 	deviceA := rootSeedServer(t)
-	postSeed(deviceA, b64, false)
+	if w := postSeed(deviceA, b64, false); w.Code != http.StatusCreated {
+		t.Fatalf("installing the seed: %d %s", w.Code, w.Body)
+	}
 	seedA, _ := secureenclave.LoadRootSeed(deviceA.DataDir)
 	keyA, err := backup.DerivePairwiseSeed(seedA, 7, 0)
 	if err != nil {
@@ -136,7 +155,9 @@ func TestPhraseAloneRederivesHDKeys(t *testing.T) {
 
 	// "Wiped device": a brand-new data dir, only the phrase survives.
 	deviceB := rootSeedServer(t)
-	postSeed(deviceB, b64, false)
+	if w := postSeed(deviceB, b64, false); w.Code != http.StatusCreated {
+		t.Fatalf("installing the seed: %d %s", w.Code, w.Body)
+	}
 	seedB, _ := secureenclave.LoadRootSeed(deviceB.DataDir)
 	keyB, err := backup.DerivePairwiseSeed(seedB, 7, 0)
 	if err != nil {
@@ -195,6 +216,7 @@ func TestAPairedComputerRefusesARootSeed(t *testing.T) {
 // no second device.
 func TestAComputerThatIsTheIdentityStillTakesItsOwnSeed(t *testing.T) {
 	s := agentWithNoIdentity(t)
+	keyProtectionAnswers(t, secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindTPM2})
 
 	body := []byte(`{"seed_b64":"` + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{4}, 64)) + `"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/keystore/root-seed", bytes.NewReader(body))
@@ -203,9 +225,9 @@ func TestAComputerThatIsTheIdentityStillTakesItsOwnSeed(t *testing.T) {
 	rec := httptest.NewRecorder()
 	s.handleSetRootSeed(rec, req)
 
-	if rec.Code == http.StatusConflict {
+	if rec.Code != http.StatusCreated {
 		t.Fatalf("a computer that answers to nobody was refused its own seed, so a setup "+
-			"with no second device cannot be completed: %s", rec.Body.String())
+			"with no second device cannot be completed: %d %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -232,13 +254,9 @@ func TestNotKnowingIsNotAReasonToProceed(t *testing.T) {
 	// simply succeeded and the assertions below never ran. A test whose
 	// precondition is our own missing code stops testing the day that code is
 	// written, and stops silently.
-	prev := detectKeyProtection
-	detectKeyProtection = func() secureenclave.Capability {
-		return secureenclave.NotImplemented("a platform nobody has taught this software to inspect")
-	}
-	t.Cleanup(func() { detectKeyProtection = prev })
-
 	s := rootSeedServer(t)
+	keyProtectionAnswers(t, secureenclave.NotImplemented("a platform nobody has taught this software to inspect"))
+
 	w := postSeed(s, b64, false)
 	if w.Code == http.StatusOK {
 		t.Fatal("a root seed was installed on a machine this build cannot inspect")
