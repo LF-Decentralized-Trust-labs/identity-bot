@@ -7,15 +7,17 @@ name: Core — builds everywhere
 # another one broken without anything saying so.
 #
 # - Linux, macOS and Windows on amd64 and arm64: cross-compiled from one Linux
-#   runner with cgo off, and vetted.
+#   runner with cgo off, and vetted. Linux is built for the server targets (the
+#   sealed server image, and agent-host on AI agent machines), not for a
+#   desktop app: a Linux desktop app is deferred (see CLAUDE.md).
 # - Android: vetted from the Linux runner with cgo off (its key-hardware files
 #   are pure Go).
 # - macOS with cgo: built and vetted natively on amd64 and arm64, because the
 #   Secure Enclave files are cgo and a cgo-off build leaves them out; and
 #   vetted with -tags sepblob, the shipping build's Secure Enclave signer,
 #   whose library vet does not need since it does not link.
-# - iOS: vetted on the macOS runner with cgo on. Vet type-checks; nothing is
-#   linked for iOS.
+# - iOS: vetted on the macOS runner with cgo on, compiling C against the
+#   iPhone SDK. Vet type-checks; nothing is linked for iOS.
 on:
   pull_request:
   push:
@@ -49,10 +51,10 @@ jobs:
       GOOS: ${{ matrix.goos }}
       GOARCH: ${{ matrix.goarch }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: identity-agent-core/go.mod
           cache-dependency-path: identity-agent-core/**/go.sum
@@ -73,10 +75,10 @@ jobs:
       GOOS: android
       GOARCH: arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: identity-agent-core/go.mod
           cache-dependency-path: identity-agent-core/**/go.sum
@@ -91,10 +93,10 @@ jobs:
       run:
         working-directory: identity-agent-core
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: identity-agent-core/go.mod
           cache-dependency-path: identity-agent-core/**/go.sum
@@ -112,6 +114,8 @@ jobs:
           GOOS: ios
           GOARCH: arm64
           CGO_ENABLED: "1"
+          # The runner's default clang targets the macOS SDK.
+          CC: xcrun -sdk iphoneos clang
         run: go vet ./...
 
   test:
@@ -122,10 +126,10 @@ jobs:
       run:
         working-directory: identity-agent-core
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: identity-agent-core/go.mod
           cache-dependency-path: identity-agent-core/**/go.sum
