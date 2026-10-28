@@ -320,6 +320,7 @@ func TestEveryActionClosedToASessionWasDecidedForAControllerToo(t *testing.T) {
 		"GET /api/github/repositories":                   "listing the App's repositories is the application's work (ADR-054)",
 		"PUT /api/mcp/agents/{id}/github":                "granting an AI agent repositories is the application's work (ADR-054)",
 		"PUT /api/mcp/agents/{id}/capabilities":          "setting an AI agent's capabilities is the application's work",
+		"POST /api/mcp/agents/{id}/revoke":               "revoking an AI agent is the organisation's work, recorded against the machine that did it",
 		"POST /api/mcp/agents/{id}/body-enrolment":       "an enrolment string is the first step of a body the person still approves",
 		"POST /api/mcp/agents/{id}/bodies/{bid}/approve": "approving a body is recorded against the machine that decided",
 		"POST /api/mcp/agents/{id}/bodies/{bid}/reject":  "rejecting a body grants nothing",

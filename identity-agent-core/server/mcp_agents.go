@@ -305,6 +305,8 @@ type agentView struct {
 	// GrantPending says the AI agent may do nothing yet: its grant waits for
 	// the device that holds the identity's key.
 	GrantPending bool `json:"grant_pending,omitempty"`
+	// RevokedAt is when the AI agent was revoked, if it was.
+	RevokedAt *time.Time `json:"revoked_at,omitempty"`
 }
 
 // handleListAgents lists the org's ai_agent assets — the workforce roster.
@@ -340,6 +342,7 @@ func (s *CoreServer) handleListAgents(w http.ResponseWriter, r *http.Request) {
 			Status:              s.agentStatus(a.PairwiseAID),
 			CreatedAt:           a.CreatedAt,
 			GrantPending:        pending[a.ID],
+			RevokedAt:           a.RevokedAt,
 		})
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -350,6 +353,11 @@ func (s *CoreServer) handleListAgents(w http.ResponseWriter, r *http.Request) {
 // capability-grant credential status. Only the newest counts: a grant replaced
 // when the ceiling changed is revoked, and that says nothing about the agent.
 func (s *CoreServer) agentStatus(agentAID string) string {
+	if ref := s.findAgentAssetByAID(agentAID); ref != nil {
+		if a, ok := s.aiAgentAsset(ref.ID); ok && a.RevokedAt != nil {
+			return "revoked"
+		}
+	}
 	held := s.grantsHeldBy(agentAID, false)
 	if len(held) > 0 && !isUsableStatus(held[0].Status) {
 		return "revoked"
@@ -520,6 +528,9 @@ func (s *CoreServer) regrantAgent(id string, by authority, change func(candidate
 	before, ok := s.assetHandler.Store.GetAsset(id)
 	if !ok {
 		return regranted{}, http.StatusNotFound, errors.New("agent not found")
+	}
+	if before.RevokedAt != nil {
+		return regranted{}, http.StatusConflict, errAgentRevoked
 	}
 	candidate := before
 	if err := change(&candidate); err != nil {
