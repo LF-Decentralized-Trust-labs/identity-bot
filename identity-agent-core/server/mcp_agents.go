@@ -305,8 +305,11 @@ type agentView struct {
 	// GrantPending says the AI agent may do nothing yet: its grant waits for
 	// the device that holds the identity's key.
 	GrantPending bool `json:"grant_pending,omitempty"`
-	// RevokedAt is when the AI agent was revoked, if it was.
+	// RevokedAt is when the AI agent was revoked for good, and RevokedBy who
+	// did it (ADR-056). Status can say "revoked" without them: a grant that
+	// was withdrawn, which a new grant can replace.
 	RevokedAt *time.Time `json:"revoked_at,omitempty"`
+	RevokedBy string     `json:"revoked_by,omitempty"`
 }
 
 // handleListAgents lists the org's ai_agent assets — the workforce roster.
@@ -342,8 +345,11 @@ func (s *CoreServer) handleListAgents(w http.ResponseWriter, r *http.Request) {
 			Status:              s.agentStatus(a.PairwiseAID),
 			CreatedAt:           a.CreatedAt,
 			GrantPending:        pending[a.ID],
-			RevokedAt:           a.RevokedAt,
 		})
+		if m, revoked := s.revokedAIAgents().Get(a.ID); revoked {
+			at := m.At
+			out[len(out)-1].RevokedAt, out[len(out)-1].RevokedBy = &at, m.By
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"agents": out})
@@ -354,7 +360,7 @@ func (s *CoreServer) handleListAgents(w http.ResponseWriter, r *http.Request) {
 // when the ceiling changed is revoked, and that says nothing about the agent.
 func (s *CoreServer) agentStatus(agentAID string) string {
 	if ref := s.findAgentAssetByAID(agentAID); ref != nil {
-		if a, ok := s.aiAgentAsset(ref.ID); ok && a.RevokedAt != nil {
+		if _, revoked := s.revokedAIAgents().Get(ref.ID); revoked {
 			return "revoked"
 		}
 	}
@@ -375,6 +381,9 @@ func (s *CoreServer) handleUpdateAgentConfig(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	id := chi.URLParam(r, "id")
+	if s.refuseIfRevoked(w, id) {
+		return
+	}
 	var cfg asset.AgentConfig
 	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
 		jsonError(w, "invalid agent config", http.StatusBadRequest)
@@ -529,7 +538,7 @@ func (s *CoreServer) regrantAgent(id string, by authority, change func(candidate
 	if !ok {
 		return regranted{}, http.StatusNotFound, errors.New("agent not found")
 	}
-	if before.RevokedAt != nil {
+	if _, revoked := s.revokedAIAgents().Get(id); revoked {
 		return regranted{}, http.StatusConflict, errAgentRevoked
 	}
 	candidate := before

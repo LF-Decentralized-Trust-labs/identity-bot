@@ -28,9 +28,23 @@ The mark comes first, so a change arriving while the grants are being withdrawn
 cannot issue a new one. A step that cannot be written yet is reported, and asking
 again retries it.
 
-**A revoked AI agent is never granted anything again.** Any change that would
-re-issue its grant is refused with 409: what it may do, and which repositories it
-may use. Its status is "revoked" from the mark onward, whatever its credentials say.
+**The mark is what refuses it.** From the mark onward the AI agent is resolved with no
+scopes, whether it calls with its token, by its own signature or through a machine, so
+it can do nothing even while a grant's withdrawal is still being written, or if a grant
+that was waiting for another device is signed later. Its status is "revoked". The mark
+is kept in a record of its own, not on the AI agent's record, so a change to that
+record that was read before the revocation and written after it cannot remove it.
+Nothing removes a mark.
+
+**A revoked AI agent is never granted anything again, or set up again.** These are
+refused with 409:
+
+- any change that would re-issue its grant: what it may do, which repositories it may
+  use;
+- changing its configuration or its brain's sign-in;
+- a new enrolment string, approving a machine, and a machine enrolling;
+- a person's or another AI agent's message to it.
+
 Its identity, its record and the signed history of what it did are kept, so all of it
 can still be checked.
 
@@ -45,7 +59,11 @@ the session.
 ## Consequences
 
 - Revoking an AI agent is one action a front end can offer, behind a confirmation.
-- Lists of AI agents carry `revoked_at`, so a front end can show a revoked AI agent
-  as revoked and offer nothing that would act for it.
+- Lists of AI agents carry `revoked_at` and `revoked_by`. A front end can show a
+  revoked AI agent as revoked and offer nothing that would act for it. Status
+  "revoked" without `revoked_at` means its grant was withdrawn, which a new grant can
+  replace; that is not this.
+- Revoking holds the AI agent's lock while it writes to the registry, so other changes
+  to that AI agent wait for it.
 - There is no un-revoke. Undoing a mistaken revocation means creating a new AI agent
   and granting it what the old one had.

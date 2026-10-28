@@ -96,14 +96,9 @@ type Asset struct {
 	// MadeByController is the machine that created this asset, when a
 	// controller did rather than the owner. The asset keeps working after that
 	// machine's grant ends, so it is recorded here for whoever revokes it.
-	MadeByController string `json:"made_by_controller,omitempty"`
-	// RevokedAt is when an AI agent was revoked, and RevokedBy who revoked
-	// it. A revoked AI agent is never granted anything again: changing what it
-	// may do would issue it a new grant, so that is refused.
-	RevokedAt *time.Time `json:"revoked_at,omitempty"`
-	RevokedBy string     `json:"revoked_by,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	MadeByController string    `json:"made_by_controller,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // AgentConfig captures what an ai_agent is and how it operates. The identity + grant

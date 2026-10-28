@@ -424,6 +424,9 @@ func (s *CoreServer) handleSetBrainSignIn(w http.ResponseWriter, r *http.Request
 		jsonError(w, "AI agent not found", http.StatusNotFound)
 		return
 	}
+	if s.refuseIfRevoked(w, a.ID) {
+		return
+	}
 	var q brainSignInRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&q); err != nil {
 		jsonError(w, "the sign-in is unreadable", http.StatusBadRequest)

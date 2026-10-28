@@ -43,7 +43,10 @@ func (s *CoreServer) ResolveAgentCaller(aid string) (sandbox.CallerContext, bool
 	if agent.DelegatorAID != "" {
 		cc.DelegationChain = append(cc.DelegationChain, agent.DelegatorAID)
 	}
-	if grant := s.findCapabilityGrant(aid); grant != nil {
+	if _, revoked := s.revokedAIAgents().Get(agent.ID); revoked {
+		cc.Scopes = nil
+		cc.NoScopesBecause = "this AI agent was revoked"
+	} else if grant := s.findCapabilityGrant(aid); grant != nil {
 		s.applyGrantScopes(mcpToken{
 			AgentAID:     agent.PairwiseAID,
 			DelegatorAID: agent.DelegatorAID,

@@ -282,6 +282,15 @@ func (s *CoreServer) handleRevokeMCPToken(w http.ResponseWriter, r *http.Request
 // leaves the stored ceiling (already set by the caller) untouched — driverless
 // builds keep working on the increment-1 behaviour.
 func (s *CoreServer) applyGrantScopes(entry mcpToken, cc *sandbox.CallerContext) {
+	// A revoked AI agent may do nothing, whatever its grant credential still
+	// says while its withdrawal is being written (ADR-056).
+	if entry.AssetID != "" {
+		if _, revoked := s.revokedAIAgents().Get(entry.AssetID); revoked {
+			cc.Scopes = nil
+			cc.NoScopesBecause = "this AI agent was revoked"
+			return
+		}
+	}
 	if s.KeriDriver == nil {
 		return // a build with no engine has no grants: the stored ceiling governs
 	}

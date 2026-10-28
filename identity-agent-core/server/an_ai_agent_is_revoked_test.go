@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"identity-agent-core/agentbody"
 )
@@ -39,7 +40,7 @@ func TestARevokedAIAgentStaysRevoked(t *testing.T) {
 		t.Fatalf("after a refused change, status %s", st)
 	}
 	// Shown as revoked, and revoking again is harmless.
-	if _, _, raw := w.asOwner(t, "GET", "/api/mcp/agents", ""); !strings.Contains(raw, `"revoked_at"`) {
+	if _, _, raw := w.asOwner(t, "GET", "/api/mcp/agents", ""); !strings.Contains(raw, `"revoked_at"`) || !strings.Contains(raw, `"revoked_by":"owner"`) {
 		t.Fatalf("the list does not say it was revoked: %s", raw)
 	}
 	if code, _, raw := w.asOwner(t, "POST", "/api/mcp/agents/"+w.b.ID+"/revoke", ""); code != http.StatusOK {
@@ -48,6 +49,16 @@ func TestARevokedAIAgentStaysRevoked(t *testing.T) {
 	if n := len(governanceRows(t, w, "agent.revoked")); n != 1 {
 		t.Fatalf("revocation recorded %d times", n)
 	}
+	// Nothing that would act for it, configure it or give it a machine works.
+	for _, c := range []struct{ method, path, body string }{
+		{"PATCH", "/api/mcp/agents/" + w.b.ID, `{"role":"back again"}`},
+		{"PUT", "/api/mcp/agents/" + w.b.ID + "/brain-sign-in", `{"kind":"api_key","provider":"anthropic","secret":"sk-ant-x"}`},
+		{"POST", "/api/mcp/agents/" + w.b.ID + "/body-enrolment", ""},
+	} {
+		if code, _, raw := w.asOwner(t, c.method, c.path, c.body); code != http.StatusConflict {
+			t.Fatalf("%s %s on a revoked AI agent: %d %s", c.method, c.path, code, raw)
+		}
+	}
 	// It can be asked nothing.
 	if code, out := w.personSays(t, w.b, "", "are you there?"); code != http.StatusConflict {
 		t.Fatalf("a person asked a revoked AI agent: %d %v", code, out)
@@ -55,5 +66,24 @@ func TestARevokedAIAgentStaysRevoked(t *testing.T) {
 	// The other AI agent is untouched.
 	if st := w.s.agentStatus(w.a.PairwiseAID); st != "active" {
 		t.Fatalf("Desk assistant is %s", st)
+	}
+}
+
+// The mark alone refuses the AI agent everything, even while a grant
+// credential is still usable: the scopes it is resolved with are empty.
+func TestTheMarkAloneRefusesARevokedAIAgent(t *testing.T) {
+	w := newTalkWorld(t)
+	if _, _, err := w.s.revokedAIAgents().Mark(w.b.ID, "test", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if g := w.s.findCapabilityGrant(w.b.PairwiseAID); g == nil {
+		t.Fatal("the grant should still be usable for this test")
+	}
+	cc, ok := w.s.ResolveAgentCaller(w.b.PairwiseAID)
+	if !ok || len(cc.Scopes) != 0 || cc.NoScopesBecause != "this AI agent was revoked" {
+		t.Fatalf("a marked AI agent resolved as %+v", cc)
+	}
+	if code, b, _ := w.hostB.Call("POST", "/api/agent-host/brain-sign-in", []byte("{}")); code == http.StatusOK {
+		t.Fatalf("a marked AI agent's machine was lent its sign-in: %s", b)
 	}
 }

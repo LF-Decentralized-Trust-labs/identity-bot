@@ -131,6 +131,9 @@ func (s *CoreServer) handleCreateBodyEnrolment(w http.ResponseWriter, r *http.Re
 		jsonError(w, "AI agent not found", http.StatusNotFound)
 		return
 	}
+	if s.refuseIfRevoked(w, a.ID) {
+		return
+	}
 	str, expires, err := s.enrolmentFor(r, a)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusServiceUnavailable)
@@ -190,6 +193,9 @@ func (s *CoreServer) handleApproveBody(w http.ResponseWriter, r *http.Request) {
 	}
 	unlock := lockAgentGrant(a.ID)
 	defer unlock()
+	if s.refuseIfRevoked(w, a.ID) {
+		return
+	}
 	b, ok := s.bodies().Get(chi.URLParam(r, "bid"))
 	if !ok || b.AgentAssetID != a.ID {
 		jsonError(w, "no such body for this AI agent", http.StatusNotFound)
@@ -387,6 +393,10 @@ func (s *CoreServer) handleBodyEnrol(w http.ResponseWriter, r *http.Request) {
 	}
 	ref := s.findAgentAssetByAID(req.Agent)
 	if ref == nil {
+		jsonError(w, agentbody.ErrInvitation.Error(), http.StatusForbidden)
+		return
+	}
+	if _, revoked := s.revokedAIAgents().Get(ref.ID); revoked {
 		jsonError(w, agentbody.ErrInvitation.Error(), http.StatusForbidden)
 		return
 	}
