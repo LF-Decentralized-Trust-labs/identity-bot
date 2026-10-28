@@ -242,3 +242,25 @@ func TestEndingMachinesNeverWaitsOnTheRemovingRequest(t *testing.T) {
 		t.Fatalf("a machine of a revoked AI agent is still %s", b.State)
 	}
 }
+
+// A machine whose AI agent is gone is ended too: its body revoked, and its
+// provider told to destroy it.
+func TestAMachineOfAnAIAgentThatIsGoneIsDestroyed(t *testing.T) {
+	w, maker, providerHost := machineWorld(t)
+	pb := providerOf(t, w, maker.ID, providerHost)
+	id, _, enrolment := machineFor(t, w, providerHost, pb, w.b.ID)
+	bid := enrolGuest(t, w, providerHost, w.b.ID, id, enrolment)
+	if code, _, raw := w.asOwner(t, "POST", "/api/mcp/agents/"+w.b.ID+"/bodies/"+bid+"/approve", ""); code != http.StatusOK {
+		t.Fatalf("approving: %d %s", code, raw)
+	}
+	if err := w.s.assetHandler.Store.DeleteAsset(w.b.ID); err != nil {
+		t.Fatal(err)
+	}
+	w.s.endMachinesNoLongerWanted("test")
+	if j, _ := w.s.machines().Get(id); j.State != agentmachine.StateRemoving {
+		t.Fatalf("the machine of an AI agent that is gone is %s", j.State)
+	}
+	if b, _ := w.s.bodies().Get(bid); b.State != agentbody.StateRevoked {
+		t.Fatalf("its body is %s", b.State)
+	}
+}

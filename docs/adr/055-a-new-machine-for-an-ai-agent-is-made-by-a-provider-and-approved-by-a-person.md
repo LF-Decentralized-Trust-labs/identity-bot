@@ -86,9 +86,10 @@ that machine rather than leaving it half made.
 
 **A machine nobody may use any more is destroyed without anybody asking.** When an AI
 agent's grant is revoked, lapses, or the AI agent is gone, every machine made for it is
-ended: its body first, with its body credential withdrawn, then its provider is told to
-destroy it. This happens when the credential is revoked, and a sweep every minute
-catches the rest. The same sweep destroys a machine whose six words nobody approved
+ended: its body stops being admitted first, its provider is told to destroy the
+machine, and its body credential is withdrawn in the registry; a withdrawal that cannot
+be written yet is tried again by the next sweep. This happens as soon as the credential
+is revoked, in the background, and a sweep every minute catches the rest. The same sweep destroys a machine whose six words nobody approved
 before its enrolment window ran out, and one whose enrolment string ran out before it
 asked at all. Ending a request whose string was given but never used voids that string,
 so no machine can use it afterwards.
