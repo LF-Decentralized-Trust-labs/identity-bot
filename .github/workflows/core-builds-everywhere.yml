@@ -1,0 +1,65 @@
+name: Core — builds everywhere
+
+# Every pull request must build the Identity Agent core, agent-host included,
+# for Linux, macOS and Windows, pass go vet on each, and pass its tests. Code
+# behind a build constraint compiles only on the systems it names, so a change
+# built and tested on one system can leave another one broken without anything
+# saying so.
+#
+# Cross-compiled from one Linux runner with cgo off: that compiles every file
+# each system would, which is what the check is for. The desktop release
+# workflows build natively with cgo for shipping.
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-builds-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [ linux, darwin, windows ]
+        goarch: [ amd64, arm64 ]
+    defaults:
+      run:
+        working-directory: identity-agent-core
+    env:
+      CGO_ENABLED: "0"
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: identity-agent-core/go.mod
+          cache-dependency-path: identity-agent-core/go.sum
+      - name: go build
+        run: go build ./...
+      - name: go vet
+        run: go vet ./...
+
+  test:
+    name: test linux
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: identity-agent-core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: identity-agent-core/go.mod
+          cache-dependency-path: identity-agent-core/go.sum
+      - name: go test
+        run: go test -count=1 -timeout 20m ./...
