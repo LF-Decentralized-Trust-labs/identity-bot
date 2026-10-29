@@ -50,6 +50,10 @@ const (
 	modelCallLongest = 30 * time.Minute
 	// modelCallUnread bounds what is held of an answer not yet collected.
 	modelCallUnread = 16 << 20
+	// modelCallLetGoLargest bounds how much more of an answer is read once its
+	// brain let it go, so finishing it can cost no more than an answer that
+	// long; one longer is cut, and recorded as cut.
+	modelCallLetGoLargest = 16 << 20
 	// modelRequestLargest bounds a model call's request, and modelCallChunk
 	// what one collection carries of an answer. Both travel in a sealed
 	// envelope of at most didcomm.SealedMaxBody (8 MB), base64-encoded three
@@ -134,8 +138,8 @@ func printable(s string, n int) string {
 }
 
 // modelCallIdle is how long a call goes on with nobody collecting it before
-// it is stopped and forgotten: its body is gone or gave up. Held so a test
-// may shorten it while calls are being swept.
+// it is let go, or, once its answer has ended, forgotten: its body is gone or
+// gave up. Held so a test may shorten it while calls are being swept.
 var modelCallIdle atomicDuration
 
 func init() { modelCallIdle.Store(90 * time.Second) }
@@ -223,6 +227,13 @@ type modelCall struct {
 	stopOnce        sync.Once
 	stopCh          chan struct{}
 
+	// letGo is closed once the brain has let the call go — it gave up on it,
+	// or nobody collects it — and lettingGo says so. Its answer is then read to
+	// its end and passed on to nobody, so what it cost is recorded.
+	letGoOnce sync.Once
+	letGoCh   chan struct{}
+	lettingGo atomic.Bool
+
 	// buffered counts what every call holds of answers not yet collected.
 	buffered *atomic.Int64
 
@@ -242,6 +253,27 @@ type modelCall struct {
 }
 
 func (c *modelCall) stop() { c.stopOnce.Do(func() { close(c.stopCh) }) }
+
+// letGo is the brain giving the call up: nothing more of its answer is held
+// for it, and the answer is read to its end for what it cost.
+//
+// lettingGo is set under c.mu, with what is held let go in the same hold, so
+// add — which checks it under c.mu too — never holds a part after it. letGoCh
+// only wakes the watcher; lettingGo is what says the call was let go.
+func (c *modelCall) letGo() {
+	c.letGoOnce.Do(func() {
+		c.mu.Lock()
+		c.lettingGo.Store(true)
+		c.held(-int64(len(c.buf)))
+		c.base += int64(len(c.buf))
+		c.buf = nil
+		c.changedLocked()
+		c.mu.Unlock()
+		if c.letGoCh != nil {
+			close(c.letGoCh)
+		}
+	})
+}
 
 func (c *modelCall) currentLease() string {
 	c.mu.Lock()
@@ -264,9 +296,15 @@ func (c *modelCall) head(status int, h map[string]string) {
 
 // add appends part of the answer, and says whether the body is keeping up and
 // there is room for it among every answer held here.
+//
+// Once the call is let go nothing is held, and the answer is read on to its
+// end for what it cost: add holds nothing and never asks for it to be cut.
 func (c *modelCall) add(b []byte) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.lettingGo.Load() {
+		return true
+	}
 	c.buf = append(c.buf, b...)
 	total := c.held(int64(len(b)))
 	c.changedLocked()
@@ -301,10 +339,14 @@ func (c *modelCall) finish(why string) {
 	c.changedLocked()
 }
 
-// idle reports whether nobody has collected the call for modelCallIdle.
+// idle reports whether nobody has collected the call for modelCallIdle. A call
+// let go waits for nobody, so it is idle only once it has ended.
 func (c *modelCall) idle(now time.Time) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.lettingGo.Load() {
+		return c.done
+	}
 	return now.Sub(c.collected) > modelCallIdle.Load()
 }
 
@@ -418,14 +460,24 @@ func (t *modelCallTable) remove(id string) {
 	}
 }
 
-// sweep stops and forgets every call nobody has collected for modelCallIdle.
+// sweep forgets every finished call nobody has collected for modelCallIdle,
+// and lets go of every unfinished one, which is forgotten once it ends: it
+// counts against its body until then.
 func (t *modelCallTable) sweep(now time.Time) {
 	t.mu.Lock()
-	var gone []*modelCall
+	var gone, letGo []*modelCall
 	for id, c := range t.calls {
-		if c.idle(now) {
+		if !c.idle(now) {
+			continue
+		}
+		c.mu.Lock()
+		done := c.done
+		c.mu.Unlock()
+		if done {
 			delete(t.calls, id)
 			gone = append(gone, c)
+		} else {
+			letGo = append(letGo, c)
 		}
 	}
 	for h, d := range t.denied {
@@ -437,6 +489,9 @@ func (t *modelCallTable) sweep(now time.Time) {
 	for _, c := range gone {
 		c.stop()
 		c.release()
+	}
+	for _, c := range letGo {
+		c.letGo()
 	}
 }
 
@@ -629,6 +684,10 @@ func (s *CoreServer) handleBodyStartsModelCall(w http.ResponseWriter, r *http.Re
 		refuse(http.StatusForbidden, err.Error())
 		return
 	}
+	if err := callsTheChosenModel(a, method, body); err != nil {
+		refuse(http.StatusForbidden, err.Error())
+		return
+	}
 	checker, base, err := s.modelAPIBase(rec.Provider)
 	if err != nil {
 		modelCallError(w, http.StatusServiceUnavailable, err.Error(), nil)
@@ -639,7 +698,7 @@ func (s *CoreServer) handleBodyStartsModelCall(w http.ResponseWriter, r *http.Re
 		target += "?" + query
 	}
 	c := &modelCall{id: newCallID(), agent: a.ID, host: b.Host, lease: q.LeaseID, stopCh: make(chan struct{}),
-		changed: make(chan struct{}), collected: now}
+		letGoCh: make(chan struct{}), changed: make(chan struct{}), collected: now}
 	if !s.modelCalls.add(c) {
 		why := fmt.Sprintf("this machine already holds %d model calls for this AI agent; collect their answers first",
 			modelCallsPerBody)
@@ -651,7 +710,7 @@ func (s *CoreServer) handleBodyStartsModelCall(w http.ResponseWriter, r *http.Re
 	s.inBackground(func(ctx context.Context) {
 		ctx, cancel := context.WithTimeout(ctx, modelCallLongest)
 		defer cancel()
-		go s.watchModelCall(ctx, cancel, c, a, cc)
+		go s.watchModelCall(ctx, cancel, c, a, cc, rec)
 		s.runModelCall(ctx, c, checker, rec, method, target, q, body, requested, a, cc)
 	})
 	s.answerCollection(w, r, c, 0, false)
@@ -680,13 +739,16 @@ func (s *CoreServer) standingNow(a asset.Asset, started sandbox.CallerContext) s
 // watchModelCall stops a call under way, and with it the provider's answer and
 // what it costs, once the run may no longer make it — the AI agent revoked,
 // its grant lapsed or not in force, the sign-in removed or replaced, the
-// run's lease ended — or once nobody collects it. It checks every
-// modelCallRecheck, whether or not the body collects, and asks afresh what the
-// AI agent may do each time.
+// run's lease ended. A call nobody collects is let go instead, and a call let
+// go is stopped only once the AI agent may no longer act or its key is gone:
+// its run has ended, and its answer is read to the end for what it cost. It
+// checks every modelCallRecheck, whether or not the body collects, and asks
+// afresh what the AI agent may do each time.
 func (s *CoreServer) watchModelCall(ctx context.Context, cancel context.CancelFunc, c *modelCall, a asset.Asset,
-	cc sandbox.CallerContext) {
+	cc sandbox.CallerContext, rec brainsignin.Record) {
 	t := time.NewTicker(modelCallRecheck)
 	defer t.Stop()
+	letGo := c.letGoCh
 	for {
 		select {
 		case <-c.stopCh:
@@ -694,12 +756,27 @@ func (s *CoreServer) watchModelCall(ctx context.Context, cancel context.CancelFu
 			return
 		case <-ctx.Done():
 			return
+		case <-letGo:
+			// Its run may have ended and returned its lease: a call let go is
+			// read to its end all the same, while the AI agent may still act and
+			// the key it was made with is still the one kept — checked now, and
+			// at every tick after. The channel only wakes this; lettingGo is the
+			// state.
+			letGo = nil
 		case <-t.C:
 		}
 		now := time.Now().UTC()
 		why := ""
-		if c.idle(now) {
-			why = "nobody collected its answer"
+		if c.lettingGo.Load() {
+			if err := s.mayBeLent(a, s.standingNow(a, cc), "its brain's model calls"); err != nil {
+				why = err.Error()
+			} else if err := s.stillTheKey(a, rec, now); err != nil {
+				why = err.Error()
+			}
+		} else if c.idle(now) {
+			// Nobody collects it: let go, and read to its end for what it cost.
+			c.letGo()
+			continue
 		} else if err := s.mayBeLent(a, s.standingNow(a, cc), "its brain's model calls"); err != nil {
 			why = err.Error()
 		} else if _, _, err := s.heldSignInForCall(a, c.host, c.currentLease(), now); err != nil {
@@ -816,8 +893,15 @@ func (s *CoreServer) runModelCall(ctx context.Context, c *modelCall, checker bra
 	watch := keyWatch{key: []byte(rec.Secret)}
 	buf := make([]byte, 32<<10)
 	why := ""
+	var afterLetGo int64
 	for {
 		n, rerr := resp.Body.Read(buf)
+		if n > 0 && c.lettingGo.Load() {
+			if afterLetGo += int64(n); afterLetGo > modelCallLetGoLargest {
+				why = "its brain let it go, and its answer ran longer than one let go is read; what it cost is not all known"
+				break
+			}
+		}
 		if n > 0 {
 			use.feed(buf[:n])
 			out, kerr := watch.next(buf[:n])
@@ -848,6 +932,10 @@ func (s *CoreServer) runModelCall(ctx context.Context, c *modelCall, checker bra
 	}
 	use.end()
 	c.finish(why)
+	letGo := c.lettingGo.Load()
+	if letGo {
+		s.modelCalls.remove(c.id)
+	}
 	status := "ok"
 	if resp.StatusCode >= 400 || why != "" {
 		status = "failed"
@@ -855,6 +943,9 @@ func (s *CoreServer) runModelCall(ctx context.Context, c *modelCall, checker bra
 	said := fmt.Sprintf("%s %s for %s, model %s, answered %d in %s%s", method, q.Path, rec.Provider,
 		firstNonEmptyString(printable(use.model, 128), "not named"), resp.StatusCode,
 		time.Since(started).Round(time.Millisecond), use.String())
+	if letGo {
+		said += "; its brain let it go, and its answer was read to the end for what it cost"
+	}
 	if why != "" {
 		said += "; " + why
 	}
@@ -912,14 +1003,22 @@ func (s *CoreServer) handleBodyReadsModelCall(w http.ResponseWriter, r *http.Req
 	s.answerCollection(w, r, c, from, r.URL.Query().Get("head") == "1")
 }
 
-// handleBodyStopsModelCall stops a call whose brain gave up on it.
+// handleBodyStopsModelCall lets go of a call whose brain gave up on it: none
+// of the rest of its answer is passed on, but the answer is read to its end, so
+// what the call cost is recorded. The call counts against its body until then.
 func (s *CoreServer) handleBodyStopsModelCall(w http.ResponseWriter, r *http.Request) {
 	c, _, _, ok := s.theCallAsked(w, r)
 	if !ok {
 		return
 	}
-	c.stop()
-	s.modelCalls.remove(c.id)
+	c.mu.Lock()
+	done := c.done
+	c.mu.Unlock()
+	if done {
+		s.modelCalls.remove(c.id)
+	} else {
+		c.letGo()
+	}
 	writeJSONStatus(w, http.StatusOK, map[string]any{"stopped": true})
 }
 
@@ -930,6 +1029,97 @@ func requestedModel(body []byte) string {
 	}
 	_ = json.Unmarshal(body, &q)
 	return q.Model
+}
+
+// callsTheChosenModel refuses a model call that names a model other than the
+// one chosen for the AI agent, or none, or more than one: a program's own
+// default or helper model would otherwise be called, and paid for, unasked.
+// An AI agent with no model chosen makes whatever calls its program does.
+// Only a POST is a model call; a list of models, or one model asked about by
+// name, costs nothing.
+func callsTheChosenModel(a asset.Asset, method string, body []byte) error {
+	if a.AgentConfig == nil || method != http.MethodPost {
+		return nil
+	}
+	chosen := strings.TrimSpace(a.AgentConfig.Brain.Model)
+	if chosen == "" {
+		return nil
+	}
+	named, err := theModelNamed(body)
+	if err != nil {
+		return fmt.Errorf("this AI agent calls only its chosen model, %s; %s", printable(chosen, 128), err.Error())
+	}
+	if named != chosen {
+		return fmt.Errorf("this AI agent calls only its chosen model, %s; this call named %s",
+			printable(chosen, 128), printable(firstNonEmptyString(named, "no model"), 128))
+	}
+	return nil
+}
+
+// theModelNamed is the one model a call's request names, read the way a
+// provider reads it: the request must be one JSON object naming its model once,
+// as "model" exactly. A provider's parser and this one could otherwise read a
+// different model from the same bytes — a second "model", or one spelt
+// "Model", which Go would read case-blind and a provider would not — and what
+// is checked would not be what is sent. A list of models to fall back on is
+// refused outright.
+func theModelNamed(body []byte) (string, error) {
+	d := json.NewDecoder(bytes.NewReader(body))
+	if t, err := d.Token(); err != nil || t != json.Delim('{') {
+		return "", errors.New("this call is not one JSON object, so which model it calls is not known")
+	}
+	named, seen := "", false
+	for d.More() {
+		t, err := d.Token()
+		if err != nil {
+			return "", errors.New("this call could not be read, so which model it calls is not known")
+		}
+		k, _ := t.(string)
+		var v json.RawMessage
+		if err := d.Decode(&v); err != nil {
+			return "", errors.New("this call could not be read, so which model it calls is not known")
+		}
+		switch {
+		case strings.EqualFold(k, "models"):
+			return "", errors.New("this call names a list of models to fall back on")
+		case !strings.EqualFold(k, "model"):
+			continue
+		case k != "model" || seen:
+			return "", errors.New("this call names its model more than once, or not as \"model\"")
+		}
+		seen = true
+		if err := json.Unmarshal(v, &named); err != nil {
+			return "", errors.New("this call's model is not a name")
+		}
+	}
+	if _, err := d.Token(); err != nil {
+		return "", errors.New("this call could not be read, so which model it calls is not known")
+	}
+	if _, err := d.Token(); err != io.EOF {
+		return "", errors.New("this call is not one JSON object, so which model it calls is not known")
+	}
+	return named, nil
+}
+
+// stillTheKey says whether the key a call was made with is still the AI
+// agent's sign-in, kept here and in force.
+func (s *CoreServer) stillTheKey(a asset.Asset, made brainsignin.Record, now time.Time) error {
+	vault, err := s.brainVault()
+	if err != nil {
+		return errors.New("the AI agent's sign-in cannot be read now")
+	}
+	rec, had, err := vault.BrainSignIn(brainsignin.Ref(a.ID))
+	switch {
+	case err != nil:
+		return errors.New("the AI agent's sign-in cannot be read now")
+	case !had:
+		return errors.New("this AI agent's sign-in was removed")
+	case rec.Secret != made.Secret || !rec.StaysInVault():
+		return errors.New("this AI agent's sign-in was replaced")
+	case rec.Expired(now):
+		return errors.New("this AI agent's sign-in has expired")
+	}
+	return nil
 }
 
 // modelUsage is what the provider says a call used, read from its answer as
