@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"identity-agent-core/childenv"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -76,7 +77,7 @@ const mcpServerName = "agenthost"
 // user, so that a brain talked into misusing a tool still cannot reach the
 // person's own files.
 type Runner interface {
-	Command(ctx context.Context, dir string, env []string, name string, args ...string) (*exec.Cmd, error)
+	Command(ctx context.Context, dir string, env []string, stdin io.Reader, name string, args ...string) (*exec.Cmd, error)
 }
 
 // Isolated is a Runner that starts the brain as a user of its own, so the
@@ -91,10 +92,11 @@ type Isolated interface {
 type SameUser struct{}
 
 // Command builds the command.
-func (SameUser) Command(ctx context.Context, dir string, env []string, name string, args ...string) (*exec.Cmd, error) {
+func (SameUser) Command(ctx context.Context, dir string, env []string, stdin io.Reader, name string, args ...string) (*exec.Cmd, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	cmd.Env = withCredentials(childenv.Environ(), env)
+	cmd.Stdin = stdin
 	return cmd, nil
 }
 
@@ -132,15 +134,15 @@ func NewSession() string {
 // Nothing secret goes on the command line, which any user on the machine can
 // read while it runs and sudo writes to the system log, and nothing goes in a
 // file another user might find: the words and instructions travel on stdin,
-// and the tool token in the environment.
+// and the tool token in the brain's environment, which reaches a brain run as
+// its own user without passing through sudo (AsUser).
 func runCLI(ctx context.Context, r Runner, dir string, env []string, stdin string, name string, args ...string) ([]byte, error) {
-	cmd, err := r.Command(ctx, dir, env, name, args...)
+	cmd, err := r.Command(ctx, dir, env, strings.NewReader(stdin), name, args...)
 	if err != nil {
 		return nil, err
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	cmd.Stdin = strings.NewReader(stdin)
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("the brain did not finish in time")
@@ -309,7 +311,8 @@ func (g GrokCLI) Run(ctx context.Context, t Turn) (Outcome, error) {
 	}
 	prompt := withInstructions(t)
 	// The prompt is read from the brain's own stdin: no file, and nothing on
-	// the command line.
+	// the command line. Grok opens /dev/stdin again by name, which works
+	// because the pipe it is given was made by its own user (ServeBrainEnv).
 	args := []string{"--prompt-file", "/dev/stdin", "--output-format", "json",
 		"--always-approve"}
 	if t.Resume {

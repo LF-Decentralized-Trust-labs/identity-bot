@@ -128,8 +128,18 @@ withheld, so neither program falls back on access somebody set up by hand. An SS
 address on GitHub (`git@github.com:` or `ssh://git@github.com/`) is rewritten to
 HTTPS, for fetching and pushing, so it uses what was lent rather than a key in
 `~/.ssh`. Nothing is written to disk, and no token goes on a command line. A brain run
-as its own user is passed all of it through sudo's `--preserve-env`, which its sudoers
-rule allows (`SETENV`).
+as its own user is started through sudo, and none of it passes through sudo: it goes on
+the standard input of `agent-host brain-env`, which sudo starts as the brain's user and
+which puts it in the brain's environment.
+
+*Changed 2026-10-28:* the tokens were passed through sudo's `--preserve-env`, which the
+sudoers rule allowed (`SETENV`). sudo writes the value of every variable it passes on to
+the system log, so a lent token, and a lent brain sign-in with it, outlived its lend
+there. They now travel on standard input instead, which sudo does not log while input
+logging is off, and the sudoers rule keeps it off for `agent-host` itself. A machine set
+up before this change keeps the old rule and leaks the same way until its `agent-host`
+and its sudoers rule are replaced together; either one alone stops the brain from
+starting, since each refuses what the other expects.
 
 The brain holds the tokens in its environment for the run. It can read them, and could
 put them in what it writes — its output, a file, a commit. What it could leak is

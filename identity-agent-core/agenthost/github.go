@@ -143,9 +143,13 @@ const (
 // githubVars are the variables that carry GitHub access or would change how
 // git and gh find it. When a run is lent GitHub access, none of these is
 // passed on from this machine's own environment, so neither program falls back
-// on a token or a helper somebody set up by hand.
+// on a token or a helper somebody set up by hand. That includes the addresses
+// tools read to find GitHub (GITHUB_API_URL and its kin, which a CI runner
+// sets) and gh's default repository: what was lent says which GitHub and which
+// repositories, and nothing on the machine points a tool elsewhere.
 var githubVars = []string{
 	"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "GH_HOST", "GH_CONFIG_DIR",
+	"GH_REPO", "GITHUB_API_URL", "GITHUB_SERVER_URL", "GITHUB_GRAPHQL_URL",
 	"GIT_ASKPASS", "SSH_ASKPASS", "GIT_TERMINAL_PROMPT", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS",
 	"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL",
 	envGitHubWriteToken, envGitHubWriteRepos, envGitHubReadToken, envGitHubReadRepos, envGitHubHost,

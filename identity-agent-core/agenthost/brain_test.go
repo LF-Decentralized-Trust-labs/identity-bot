@@ -3,6 +3,7 @@ package agenthost
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -177,8 +178,8 @@ func TestClaudeCodeAddsNoAttributionToCommitsOrPullRequests(t *testing.T) {
 type isolatedRunner struct{}
 
 func (isolatedRunner) Isolated() bool { return true }
-func (isolatedRunner) Command(ctx context.Context, dir string, env []string, name string, args ...string) (*exec.Cmd, error) {
-	return SameUser{}.Command(ctx, dir, env, name, args...)
+func (isolatedRunner) Command(ctx context.Context, dir string, env []string, stdin io.Reader, name string, args ...string) (*exec.Cmd, error) {
+	return SameUser{}.Command(ctx, dir, env, stdin, name, args...)
 }
 
 // Grok CLI runs only as the brain's own user — it loads the MCP servers of

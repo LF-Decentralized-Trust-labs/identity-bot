@@ -198,8 +198,11 @@ this, and the next turn of the conversation resumes it.
   homes. A brain user per AI agent separates them fully.
 - On a machine where the brain runs as a user of its own, the host must also be
   allowed to start this program as that user, around the brain's program alone
-  (`agent-host brain-home -- <program> *` in the sudoers rule). The wrapper runs
-  there.
+  (`agent-host brain-env -- agent-host brain-home -- <program> *` in the sudoers
+  rule). The wrapper runs there, and finds the sign-in in its environment, put there
+  by `agent-host brain-env` from what it read on its own standard input; the sign-in
+  never passes through sudo, which writes what it passes on to the system log
+  (ADR-054).
 - Grok renews its own sign-in, and whether that renewal retires the previous token
   is not documented, so it runs one at a time like Codex unless the owner raises it.
   When two runs on one account both renew it, the first renewal returned is kept and
