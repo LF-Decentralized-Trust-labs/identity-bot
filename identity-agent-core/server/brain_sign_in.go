@@ -46,6 +46,9 @@ func (s *CoreServer) mountBrainSignInRoutes(r chi.Router) {
 	r.Delete("/mcp/agents/{id}/brain-sign-in", s.handleRemoveBrainSignIn)
 	r.Post("/mcp/agents/{id}/brain-sign-in/test", s.handleTestKeptBrainSignIn)
 	r.Post("/mcp/brain-sign-in/test", s.handleTestBrainSignIn)
+	r.Post("/mcp/agents/{id}/brain-sign-in/models", s.handleKeptBrainSignInModels)
+	r.Post("/mcp/brain-sign-in/models", s.handleBrainSignInModels)
+	r.Put("/mcp/agents/{id}/brain", s.handleChooseBrain)
 	r.Get("/mcp/brain-sign-in/choices", s.handleBrainChoices)
 	r.Get("/mcp/brain-sign-ins", s.handleListBrainSignIns)
 	// The body's side: signed by its machine key, and taken only sealed.
