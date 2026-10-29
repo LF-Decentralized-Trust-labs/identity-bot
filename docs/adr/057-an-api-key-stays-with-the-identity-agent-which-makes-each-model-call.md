@@ -63,6 +63,19 @@ nothing that cleaning it would change — so what is checked is what is sent. A 
 may carry only the parameters a model call uses: `beta=true`, as Claude Code sends,
 and the paging of a list of models. Nothing else the key could do is passed on.
 
+*Amended 2026-10-29.* **Only the chosen model is called.** When a model is chosen for
+the AI agent, a model call must name exactly that model: one naming another, or none,
+or a list of models to fall back on, is refused before it reaches the provider, and
+recorded. The call must be one JSON object naming its model once, as `model` exactly,
+so the provider cannot read another model from the same bytes than the one checked.
+It is refused rather than rewritten to the chosen model, because the
+Identity Agent passes on what the brain sent and checks what it sends: rewriting a
+call would answer a request the brain never made, at a price nobody chose, and hide
+the program that made it. So whatever program runs the brain, it can spend the key
+only on the model chosen. Listing models, or asking about one by name, costs nothing
+and is not held to the chosen model. An AI agent with no model chosen makes the calls its
+program makes.
+
 One machine may hold at most eight calls here for its AI agent, whichever leases they
 cite: a call counts from when it starts until its whole answer is collected or it is
 swept away. What every answer holds before it is collected is bounded across all
@@ -88,9 +101,17 @@ collection waiting up to twenty seconds for more, and writes it straight on to t
 brain. While a call is under way, the Identity Agent checks every fifteen seconds,
 whether or not the body is collecting, that the run may still make it, asking afresh
 each time what the AI agent may do. When it may
-not, it stops the call, and with it the provider's answer and what that costs. A
-call nobody collects for ninety seconds is stopped the same way. No call runs longer
-than thirty minutes.
+not, it stops the call, and with it the provider's answer and what that costs. No
+call runs longer than thirty minutes.
+
+*Amended 2026-10-29.* **A call let go is read to its end.** A call its brain gives up
+on, a call still under way when its run ends, and one nobody collects for ninety
+seconds are let go: nothing more of the answer is held or passed on, but the answer is
+read to its end, so what the provider says the call used and cost is recorded. A call
+let go counts against its body until it ends, and is still stopped at once when the AI
+agent may no longer act or its key is removed or replaced. Finishing it costs no more
+than the answer the brain itself asked for; an answer that runs past 16 MB more once
+let go is cut, and recorded as cut.
 
 **A renewed lease carries the call.** A run whose lease lapsed takes another
 (ADR-051). A call under way goes on under the new one, so long as the same body
@@ -146,7 +167,9 @@ sign-in such an AI agent cannot run with is refused when it is set.
   with an Anthropic key, Grok's program (1.0) with an xAI key and with an OpenRouter
   key, and Codex (0.162) with an OpenAI key. Not yet proven against the providers
   themselves.
-- Grok's program sends one of its own calls with its default model's name rather
-  than the model it is set to. OpenRouter names models differently, so that call is
-  expected to fail there; this is not yet seen against OpenRouter itself. The AI
-  agent's own answers use the model it is set to.
+- *Amended 2026-10-29.* Grok's program sent one of its own calls under its default
+  model rather than the one it was set to, and against OpenRouter that call was
+  answered and paid for. A call naming any model but the chosen one is now refused
+  here; a program that makes such calls sees them fail.
+- A call let go is paid for in full, where cutting it off would have saved the rest of
+  its answer: knowing what every call cost is worth more than that.
