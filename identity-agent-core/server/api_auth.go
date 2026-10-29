@@ -766,7 +766,8 @@ var sessionForbidden = map[string]string{
 	// stored key, and whether it must run attested. A session that changed those
 	// could point the AI agent at an endpoint it controls, and the change would
 	// outlive the session.
-	"PATCH /api/mcp/agents/{id}": "changing where an AI agent's model is reached, and with which key, outlives the session that changed it",
+	"PATCH /api/mcp/agents/{id}":     "changing where an AI agent's model is reached, and with which key, outlives the session that changed it",
+	"PUT /api/mcp/agents/{id}/brain": "changing which model an AI agent uses, and what runs it, outlives the session that changed it",
 	// The same, by the brain's sign-in: its key, its account, and a local
 	// model server's address.
 	"PUT /api/mcp/agents/{id}/brain-sign-in":    "signing an AI agent's brain in, with which key and at which address, outlives the session that did it",
@@ -777,8 +778,10 @@ var sessionForbidden = map[string]string{
 	// Checking a sign-in sends a request from this Identity Agent to an address
 	// the caller names. Only the owner's own app may ask for that, so a session
 	// cannot use this Identity Agent to reach into the network it sits on.
-	"POST /api/mcp/brain-sign-in/test":             "checking a sign-in makes this Identity Agent reach an address the caller names",
-	"POST /api/mcp/agents/{id}/brain-sign-in/test": "checking a sign-in makes this Identity Agent reach the address it names",
+	"POST /api/mcp/brain-sign-in/test":               "checking a sign-in makes this Identity Agent reach an address the caller names",
+	"POST /api/mcp/agents/{id}/brain-sign-in/test":   "checking a sign-in makes this Identity Agent reach the address it names",
+	"POST /api/mcp/brain-sign-in/models":             "listing a sign-in's models makes this Identity Agent reach an address the caller names",
+	"POST /api/mcp/agents/{id}/brain-sign-in/models": "listing a sign-in's models makes this Identity Agent reach the address it names",
 	// The organisation's GitHub App: its private key lets this Identity Agent
 	// make tokens for the organisation's repositories, so connecting one,
 	// disconnecting it and using it are for the owner's own app. Granting an

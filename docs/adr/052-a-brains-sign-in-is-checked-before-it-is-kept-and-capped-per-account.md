@@ -90,6 +90,21 @@ the governance record.
 
 A kept sign-in can be checked again later. That check is recorded.
 
+*Amended 2026-10-29.* **A key's models can be listed, to choose one from.** Asked the
+same way as a check — one request to the provider's own address with the key, no
+redirect, the vault adding nothing — the Identity Agent lists the models an Anthropic,
+OpenAI, xAI or OpenRouter key is offered (OpenRouter's whole catalogue): each model's
+id and name, and where the provider says them, its context length and its prices per
+token. A key not yet kept can be listed, and so can the one kept for an AI agent. Only
+the owner's own app may ask. A model server is never asked for its list: its address is the caller's, and
+nothing such a server answers is passed back, so its model is named instead. A
+subscription has no list here: its own program chooses among its models.
+
+The model an AI agent uses, and what runs it, can then be changed on their own,
+without signing in again and without touching the rest of its configuration. What
+runs it must fit the sign-in it has, and the AI it is said to think with must be the
+one it is signed in with. Each change is recorded.
+
 **Two kinds of sign-in are never sent anywhere by the Identity Agent.**
 
 - **A Claude subscription's token is for Claude Code alone.** Anthropic does not

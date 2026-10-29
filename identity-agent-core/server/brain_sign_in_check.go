@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -192,4 +194,149 @@ func (s *CoreServer) keepRefreshedSignIn(a asset.Asset, lease lending.Lend, cont
 		return "the sign-in its program refreshed was kept", false
 	}
 	return "the sign-in its program refreshed was kept, for every AI agent sharing it", false
+}
+
+// handleBrainSignInModels lists the models a sign-in may call, before it is
+// kept, and keeps nothing.
+func (s *CoreServer) handleBrainSignInModels(w http.ResponseWriter, r *http.Request) {
+	var q brainSignInRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&q); err != nil {
+		jsonError(w, "the sign-in is unreadable", http.StatusBadRequest)
+		return
+	}
+	rec, status, err := s.signInAsked(q, nil, time.Now().UTC())
+	if err != nil {
+		jsonError(w, err.Error(), status)
+		return
+	}
+	s.answerModels(w, r.Context(), rec)
+}
+
+// handleKeptBrainSignInModels lists the models the sign-in kept for an AI
+// agent may call.
+func (s *CoreServer) handleKeptBrainSignInModels(w http.ResponseWriter, r *http.Request) {
+	a, ok := s.aiAgentAsset(chi.URLParam(r, "id"))
+	if !ok {
+		jsonError(w, "AI agent not found", http.StatusNotFound)
+		return
+	}
+	vault, err := s.brainVault()
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	rec, had, err := vault.BrainSignIn(brainsignin.Ref(a.ID))
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	if !had {
+		jsonError(w, "this AI agent has no sign-in to list models for", http.StatusNotFound)
+		return
+	}
+	s.answerModels(w, r.Context(), rec)
+}
+
+func (s *CoreServer) answerModels(w http.ResponseWriter, ctx context.Context, rec brainsignin.Record) {
+	c, err := s.brainCheck()
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	writeJSONStatus(w, http.StatusOK, c.Models(ctx, rec))
+}
+
+// brainChoice is a change to which AI an AI agent thinks with: any field left
+// out keeps what it is.
+type brainChoice struct {
+	Kind     *string `json:"kind"`
+	Provider *string `json:"provider"`
+	Model    *string `json:"model"`
+	Program  *string `json:"program"`
+}
+
+// handleChooseBrain changes which model an AI agent uses, and what runs it,
+// and nothing else of its configuration: not its sign-in, which is kept
+// apart, nor its role, instructions or machine. The program must fit the
+// sign-in it has.
+func (s *CoreServer) handleChooseBrain(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if s.refuseIfRevoked(w, id) {
+		return
+	}
+	a, ok := s.aiAgentAsset(id)
+	if !ok || a.AgentConfig == nil {
+		jsonError(w, "AI agent not found", http.StatusNotFound)
+		return
+	}
+	var q brainChoice
+	if err := json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&q); err != nil {
+		jsonError(w, "the choice is unreadable", http.StatusBadRequest)
+		return
+	}
+	cfg := *a.AgentConfig
+	b := cfg.Brain
+	if q.Provider != nil {
+		b.Provider = brainsignin.NormaliseProvider(*q.Provider)
+	}
+	if q.Kind != nil {
+		b.Kind = brainsignin.NormaliseKind(*q.Kind, b.Provider)
+	}
+	if q.Model != nil {
+		m := strings.TrimSpace(*q.Model)
+		if len(m) > 200 || !printableName(m) && m != "" {
+			jsonError(w, "nothing was changed: a model's name is one short line", http.StatusBadRequest)
+			return
+		}
+		b.Model = m
+	}
+	if q.Program != nil {
+		b.Program = strings.TrimSpace(*q.Program)
+		if len(b.Program) > 40 || !printableName(b.Program) {
+			jsonError(w, "nothing was changed: that is not a program a brain is run by", http.StatusBadRequest)
+			return
+		}
+	}
+	if err := brainProgramFits(b); err != nil {
+		jsonError(w, "nothing was changed: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	vault, err := s.brainVault()
+	if err != nil {
+		jsonError(w, "nothing was changed: the AI agent's sign-in cannot be read now", http.StatusServiceUnavailable)
+		return
+	}
+	kept, had, err := vault.BrainSignIn(brainsignin.Ref(id))
+	if err != nil {
+		jsonError(w, "nothing was changed: the AI agent's sign-in cannot be read now", http.StatusServiceUnavailable)
+		return
+	}
+	{
+		if had {
+			// The AI it thinks with is the one it is signed in with: a choice
+			// naming another would point the kept key at the wrong provider.
+			if (q.Kind != nil || q.Provider != nil) && (b.Provider != kept.Provider || b.Kind != kept.Kind) {
+				jsonError(w, fmt.Sprintf("nothing was changed: this AI agent is signed in with %s %s; sign it in with "+
+					"the other AI first", kept.Kind, kept.Provider), http.StatusBadRequest)
+				return
+			}
+			if err := brainsignin.ProgramFits(b.Program, kept.Kind, kept.Provider); err != nil {
+				jsonError(w, "nothing was changed: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+	}
+	cfg.Brain = b
+	updated, err := s.assetHandler.UpdateAgentConfig(id, &cfg)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.recordLentEvent(*updated, sandbox.CallerContext{}, "agent.brain.chosen", "ok", fmt.Sprintf("%s %s, model %s, run by %s, chosen by %s",
+		b.Kind, b.Provider, firstNonEmptyString(printable(b.Model, 128), "its program's own"),
+		firstNonEmptyString(b.Program, "its provider's program"), firstNonEmptyString(madeByController(r), "the owner")))
+	writeJSONStatus(w, http.StatusOK, map[string]any{
+		"asset_id":     updated.ID,
+		"agent_config": updated.AgentConfig.ForDisplay(s.isVaultEntry),
+	})
 }
