@@ -19,7 +19,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"identity-agent-core/drivers"
-	"identity-agent-core/sandbox"
+	"identity-agent-core/permission"
 	"identity-agent-core/store"
 )
 
@@ -147,7 +147,7 @@ func isBrowserOriginated(r *http.Request) bool {
 // (CoreServer.isLocalOwnerRequest).
 func isLocalConnection(r *http.Request) bool {
 	host, _, _ := net.SplitHostPort(r.RemoteAddr)
-	return sandbox.IsLoopbackHost(host) &&
+	return permission.IsLoopbackHost(host) &&
 		!hasForwardingHeaders(r) &&
 		!isBrowserOriginated(r)
 }
@@ -281,7 +281,7 @@ func (s *CoreServer) handleRevokeMCPToken(w http.ResponseWriter, r *http.Request
 // is cleared so the gateway default-denies. With no grant or no KERI driver it
 // leaves the stored ceiling (already set by the caller) untouched — driverless
 // builds keep working on the increment-1 behaviour.
-func (s *CoreServer) applyGrantScopes(entry mcpToken, cc *sandbox.CallerContext) {
+func (s *CoreServer) applyGrantScopes(entry mcpToken, cc *permission.CallerContext) {
 	// A revoked AI agent may do nothing, whatever its grant credential still
 	// says while its withdrawal is being written (ADR-056).
 	if entry.AssetID != "" {

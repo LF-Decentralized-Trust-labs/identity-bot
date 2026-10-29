@@ -26,6 +26,7 @@ import (
 	"identity-agent-core/didcomm"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
+	"identity-agent-core/permission"
 	"identity-agent-core/sandbox"
 
 	_ "modernc.org/sqlite"
@@ -325,7 +326,7 @@ func (w *talkWorld) sayAsBody(t *testing.T, conv string, m testMachine, from, to
 	if err != nil {
 		t.Fatal(err)
 	}
-	w.s.recordMessage(sandbox.CallerContext{CallerAID: from, Transport: "body"}, e)
+	w.s.recordMessage(permission.CallerContext{CallerAID: from, Transport: "body"}, e)
 }
 
 // A message a body sends after its binding was revoked fails verification,
@@ -458,7 +459,7 @@ func (w *talkWorld) openSigned(t *testing.T, g ControllerGrant, seed []byte, con
 	if err != nil {
 		t.Fatal(err)
 	}
-	w.s.recordMessage(sandbox.CallerContext{CallerAID: opener, Transport: "controller"}, e)
+	w.s.recordMessage(permission.CallerContext{CallerAID: opener, Transport: "controller"}, e)
 	return conv
 }
 
@@ -775,6 +776,6 @@ func TestASignedStatementRecordedTwiceFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w.s.recordMessage(sandbox.CallerContext{CallerAID: orig.From, Transport: "body"}, e)
+	w.s.recordMessage(permission.CallerContext{CallerAID: orig.From, Transport: "body"}, e)
 	failsWith(t, conversationbundle.Verify(w.bundle(t, conv)), "entry 8", "same signed signature as entry 3")
 }

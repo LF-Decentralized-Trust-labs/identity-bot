@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"identity-agent-core/asset"
-	"identity-agent-core/sandbox"
+	"identity-agent-core/permission"
 )
 
 // Agent identity resolution — the foundational primitives for treating a provisioned
@@ -16,7 +16,7 @@ import (
 // signed-request envelope), enriching an envelope-proven agent with its lineage +
 // capability ceiling. Returns an error only when a present envelope is invalid.
 // Exported so an overlay handler can authenticate a caller the same way the core does.
-func (s *CoreServer) ResolveEndpointCaller(r *http.Request, method string, body []byte) (sandbox.CallerContext, error) {
+func (s *CoreServer) ResolveEndpointCaller(r *http.Request, method string, body []byte) (permission.CallerContext, error) {
 	caller := s.resolveCaller(r)
 	if err := s.verifyRequestEnvelope(r, method, body, &caller); err != nil {
 		return caller, err
@@ -29,12 +29,12 @@ func (s *CoreServer) ResolveEndpointCaller(r *http.Request, method string, body 
 // delegated AID, delegation lineage to the owner root, and credential-proven capability
 // ceiling (from its capability-grant ACDC, falling back to the stored ceiling). Returns
 // false if aid is not a provisioned agent. Exported so an overlay can act as an agent.
-func (s *CoreServer) ResolveAgentCaller(aid string) (sandbox.CallerContext, bool) {
+func (s *CoreServer) ResolveAgentCaller(aid string) (permission.CallerContext, bool) {
 	agent := s.findAgentAssetByAID(aid)
 	if agent == nil {
-		return sandbox.CallerContext{}, false
+		return permission.CallerContext{}, false
 	}
-	cc := sandbox.CallerContext{
+	cc := permission.CallerContext{
 		Remote:          true,
 		CallerAID:       aid,
 		DelegationChain: []string{agent.PairwiseAID},
@@ -111,7 +111,7 @@ func (s *CoreServer) HoldsValidCredential(aid, schema, issuer string) bool {
 // capability ceiling from its provisioned agent asset — so an agent that authenticates
 // by AID alone (no bearer token) carries the same governance context as a token-bound
 // one. No-op unless the caller proved an AID by envelope and has no chain yet.
-func (s *CoreServer) enrichCallerFromIdentity(caller *sandbox.CallerContext) {
+func (s *CoreServer) enrichCallerFromIdentity(caller *permission.CallerContext) {
 	if !caller.EnvelopeVerified || caller.CallerAID == "" || len(caller.DelegationChain) > 0 {
 		return
 	}

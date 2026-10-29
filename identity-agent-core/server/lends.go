@@ -9,6 +9,7 @@ import (
 	"identity-agent-core/asset"
 	"identity-agent-core/brainsignin"
 	"identity-agent-core/lending"
+	"identity-agent-core/permission"
 	"identity-agent-core/sandbox"
 )
 
@@ -105,13 +106,13 @@ func (s *CoreServer) moveLegacyLeases() {
 // covered — the AI agent gone, revoked or lapsed, may do nothing now, or the
 // machine no longer its body — or "" when it still is, with the AI agent and
 // its caller context.
-func (s *CoreServer) lentStillCovered(agentID, host, what string) (asset.Asset, sandbox.CallerContext, string) {
+func (s *CoreServer) lentStillCovered(agentID, host, what string) (asset.Asset, permission.CallerContext, string) {
 	a, ok := s.aiAgentAsset(agentID)
 	if !ok {
-		return a, sandbox.CallerContext{}, "the AI agent is gone"
+		return a, permission.CallerContext{}, "the AI agent is gone"
 	}
 	if b, ok := s.bodies().ActiveByHost(host); !ok || b.AgentAssetID != a.ID {
-		return a, sandbox.CallerContext{}, "the machine is no longer this AI agent's body"
+		return a, permission.CallerContext{}, "the machine is no longer this AI agent's body"
 	}
 	cc, ok := s.ResolveAgentCaller(a.PairwiseAID)
 	if !ok {
@@ -172,7 +173,7 @@ func (s *CoreServer) recordEnded(ended []lending.Ended, prompted string) {
 		if !ok {
 			continue
 		}
-		cc := sandbox.CallerContext{Transport: "body", BodyHost: e.Lend.Host}
+		cc := permission.CallerContext{Transport: "body", BodyHost: e.Lend.Host}
 		why := e.Why
 		if prompted != "" {
 			why += " (" + prompted + ")"

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"identity-agent-core/keriengine"
+	"identity-agent-core/permission"
 	"identity-agent-core/sandbox"
 )
 
@@ -45,7 +46,7 @@ func askChain(t *testing.T, s *CoreServer) map[string]any {
 // re-made does not.
 func TestTheLogIsCheckedOnItsSignatures(t *testing.T) {
 	s := logWorld(t)
-	caller := sandbox.CallerContext{CallerAID: "EAgent", Reason: "test"}
+	caller := permission.CallerContext{CallerAID: "EAgent", Reason: "test"}
 	for _, id := range []string{"ai_agent.body.requested", "ai_agent.body.approved"} {
 		if s.SandboxManager.RecordGovernanceEvent(caller, id, "ok") == 0 {
 			t.Fatal("event not written")
@@ -93,7 +94,7 @@ func TestCheckingTheLogNeverMintsASigner(t *testing.T) {
 // database the log lives in, from the first event this agent signs.
 func TestTheChainStartIsKeptOutsideTheDatabase(t *testing.T) {
 	s := logWorld(t)
-	if s.SandboxManager.RecordGovernanceEvent(sandbox.CallerContext{CallerAID: "EAgent"}, "ai_agent.body.requested", "ok") == 0 {
+	if s.SandboxManager.RecordGovernanceEvent(permission.CallerContext{CallerAID: "EAgent"}, "ai_agent.body.requested", "ok") == 0 {
 		t.Fatal("event not written")
 	}
 	rec, found, err := readInvocationSignerRecord(s.DataDir)
@@ -108,7 +109,7 @@ func TestTheChainStartIsKeptOutsideTheDatabase(t *testing.T) {
 // A log that cannot be checked is reported as that, never as forged.
 func TestALogThatCannotBeCheckedIsNotCalledForged(t *testing.T) {
 	s := logWorld(t)
-	if s.SandboxManager.RecordGovernanceEvent(sandbox.CallerContext{CallerAID: "EAgent"}, "ai_agent.body.requested", "ok") == 0 {
+	if s.SandboxManager.RecordGovernanceEvent(permission.CallerContext{CallerAID: "EAgent"}, "ai_agent.body.requested", "ok") == 0 {
 		t.Fatal("event not written")
 	}
 	// The key cannot be derived without the root seed.
@@ -148,7 +149,7 @@ func TestANewSignerStampsWhereItsChainBegins(t *testing.T) {
 // The stamped start's hash is filled in from the first row the signer writes.
 func TestTheStampedStartIsFilledInByTheFirstRow(t *testing.T) {
 	s := logWorld(t)
-	if s.SandboxManager.RecordGovernanceEvent(sandbox.CallerContext{CallerAID: "EAgent"}, "ai_agent.body.requested", "ok") == 0 {
+	if s.SandboxManager.RecordGovernanceEvent(permission.CallerContext{CallerAID: "EAgent"}, "ai_agent.body.requested", "ok") == 0 {
 		t.Fatal("event not written")
 	}
 	rec, _, _ := readInvocationSignerRecord(s.DataDir)

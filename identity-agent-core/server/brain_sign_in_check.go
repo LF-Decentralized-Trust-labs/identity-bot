@@ -14,7 +14,7 @@ import (
 	"identity-agent-core/asset"
 	"identity-agent-core/brainsignin"
 	"identity-agent-core/lending"
-	"identity-agent-core/sandbox"
+	"identity-agent-core/permission"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -84,7 +84,7 @@ func (s *CoreServer) handleTestKeptBrainSignIn(w http.ResponseWriter, r *http.Re
 	if !res.OK {
 		status = "failed"
 	}
-	s.recordBrainEvent(a, sandbox.CallerContext{}, "checked", status, "checked by "+
+	s.recordBrainEvent(a, permission.CallerContext{}, "checked", status, "checked by "+
 		firstNonEmptyString(madeByController(r), "the owner")+": "+firstNonEmptyString(res.Why, "it works"))
 }
 
@@ -332,7 +332,7 @@ func (s *CoreServer) handleChooseBrain(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	s.recordLentEvent(*updated, sandbox.CallerContext{}, "agent.brain.chosen", "ok", fmt.Sprintf("%s %s, model %s, run by %s, chosen by %s",
+	s.recordLentEvent(*updated, permission.CallerContext{}, "agent.brain.chosen", "ok", fmt.Sprintf("%s %s, model %s, run by %s, chosen by %s",
 		b.Kind, b.Provider, firstNonEmptyString(printable(b.Model, 128), "its program's own"),
 		firstNonEmptyString(b.Program, "its provider's program"), firstNonEmptyString(madeByController(r), "the owner")))
 	writeJSONStatus(w, http.StatusOK, map[string]any{

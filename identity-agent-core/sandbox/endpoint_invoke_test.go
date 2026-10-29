@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"identity-agent-core/permission"
 )
 
 type fakeInvoker struct {
@@ -11,7 +13,7 @@ type fakeInvoker struct {
 	result *InvokeResult
 }
 
-func (f *fakeInvoker) Invoke(ctx context.Context, _ CallerContext, appID, capabilityID string, body []byte) (*InvokeResult, error) {
+func (f *fakeInvoker) Invoke(ctx context.Context, _ permission.CallerContext, appID, capabilityID string, body []byte) (*InvokeResult, error) {
 	f.called = true
 	return f.result, nil
 }
@@ -36,7 +38,7 @@ func invokeTestManager(inv CapabilityInvoker) *Manager {
 func TestInvokeHostControlRemoteDenied(t *testing.T) {
 	f := &fakeInvoker{}
 	m := invokeTestManager(f)
-	_, err := m.InvokeCapability(context.Background(), CallerContext{Remote: true}, "native-computer-use", nil)
+	_, err := m.InvokeCapability(context.Background(), permission.CallerContext{Remote: true}, "native-computer-use", nil)
 	if !errors.Is(err, ErrDenied) {
 		t.Fatalf("expected ErrDenied, got %v", err)
 	}
@@ -49,7 +51,7 @@ func TestInvokeHostControlRemoteDenied(t *testing.T) {
 func TestInvokeRemoteWithoutScopeDenied(t *testing.T) {
 	f := &fakeInvoker{}
 	m := invokeTestManager(f)
-	_, err := m.InvokeCapability(context.Background(), CallerContext{Remote: true}, "headless-browser", nil)
+	_, err := m.InvokeCapability(context.Background(), permission.CallerContext{Remote: true}, "headless-browser", nil)
 	if !errors.Is(err, ErrDenied) {
 		t.Fatalf("expected ErrDenied, got %v", err)
 	}
@@ -63,7 +65,7 @@ func TestInvokeRemoteWithScopeRoutes(t *testing.T) {
 	f := &fakeInvoker{result: &InvokeResult{CapabilityID: "headless-browser", Status: 200, Body: []byte(`{"ok":true}`)}}
 	m := invokeTestManager(f)
 	res, err := m.InvokeCapability(context.Background(),
-		CallerContext{Remote: true, Scopes: []string{"headless-browser"}}, "headless-browser", []byte("{}"))
+		permission.CallerContext{Remote: true, Scopes: []string{"headless-browser"}}, "headless-browser", []byte("{}"))
 	if err != nil {
 		t.Fatalf("expected allow, got %v", err)
 	}
@@ -76,7 +78,7 @@ func TestInvokeRemoteWithScopeRoutes(t *testing.T) {
 func TestInvokeLocalOwnerRoutesHostControl(t *testing.T) {
 	f := &fakeInvoker{result: &InvokeResult{Status: 200}}
 	m := invokeTestManager(f)
-	_, err := m.InvokeCapability(context.Background(), CallerContext{Remote: false}, "native-computer-use", nil)
+	_, err := m.InvokeCapability(context.Background(), permission.CallerContext{Remote: false}, "native-computer-use", nil)
 	if err != nil || !f.called {
 		t.Fatalf("local owner should invoke host_control: err=%v called=%v", err, f.called)
 	}
@@ -86,7 +88,7 @@ func TestInvokeLocalOwnerRoutesHostControl(t *testing.T) {
 func TestInvokeUnknownCapability(t *testing.T) {
 	f := &fakeInvoker{}
 	m := invokeTestManager(f)
-	_, err := m.InvokeCapability(context.Background(), CallerContext{}, "does-not-exist", nil)
+	_, err := m.InvokeCapability(context.Background(), permission.CallerContext{}, "does-not-exist", nil)
 	if !errors.Is(err, ErrCapabilityNotFound) {
 		t.Fatalf("expected ErrCapabilityNotFound, got %v", err)
 	}

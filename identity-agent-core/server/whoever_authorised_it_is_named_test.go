@@ -16,7 +16,7 @@ import (
 	"identity-agent-core/agenthost"
 	"identity-agent-core/authprovider"
 	"identity-agent-core/iacrypto"
-	"identity-agent-core/sandbox"
+	"identity-agent-core/permission"
 	"identity-agent-core/schemas"
 	"identity-agent-core/store"
 
@@ -619,7 +619,7 @@ func TestABadlySignedRequestCreatesNoAIAgent(t *testing.T) {
 // Where grants can be issued, an AI agent's token with no grant may do nothing.
 func TestAnAIAgentWithNoGrantMayDoNothing(t *testing.T) {
 	s, agent := grantWorld(t)
-	cc := sandbox.CallerContext{Scopes: []string{"system.info.read"}}
+	cc := permission.CallerContext{Scopes: []string{"system.info.read"}}
 	s.applyGrantScopes(mcpToken{AgentAID: agent.PairwiseAID, DelegatorAID: agent.DelegatorAID}, &cc)
 	if len(cc.Scopes) != 0 {
 		t.Fatalf("an AI agent with no grant kept %v", cc.Scopes)
@@ -792,7 +792,7 @@ func TestAnAIAgentWithNoGrantIsNeverGrantedFromItsFiles(t *testing.T) {
 		if tok.AssetID != id {
 			continue
 		}
-		cc := sandbox.CallerContext{Scopes: tok.Scopes}
+		cc := permission.CallerContext{Scopes: tok.Scopes}
 		w.s.applyGrantScopes(tok, &cc)
 		if len(cc.Scopes) != 0 {
 			t.Fatalf("the AI agent may do %v without a grant", cc.Scopes)
@@ -859,7 +859,7 @@ func TestTheOwnerApprovesAnEarlierAIAgent(t *testing.T) {
 		if tok.AssetID != id {
 			continue
 		}
-		cc := sandbox.CallerContext{Scopes: tok.Scopes}
+		cc := permission.CallerContext{Scopes: tok.Scopes}
 		w.s.applyGrantScopes(tok, &cc)
 		if tok.GrantSAID == "" || len(cc.Scopes) == 0 {
 			t.Fatal("the approved AI agent may still do nothing")
@@ -894,7 +894,7 @@ func TestAnAIAgentWithNoTokenAndNoGrantAwaitsTheOwner(t *testing.T) {
 		t.Fatalf("the AI agent is not listed as waiting: %v", ag)
 	}
 	tok := mcpToken{AgentAID: w.a.PairwiseAID, AssetID: w.a.ID}
-	cc = sandbox.CallerContext{Scopes: []string{capabilityMessageAgent}}
+	cc = permission.CallerContext{Scopes: []string{capabilityMessageAgent}}
 	w.s.applyGrantScopes(tok, &cc)
 	if !strings.Contains(cc.NoScopesBecause, "awaiting the owner's approval") {
 		t.Fatalf("a token with no grant is denied without saying why: %q", cc.NoScopesBecause)
@@ -994,7 +994,7 @@ func TestAnAIAgentWithALapsedGrantIsToldItExpired(t *testing.T) {
 		t.Fatalf("an AI agent with a lapsed grant is told %q", cc.NoScopesBecause)
 	}
 	tok := mcpToken{AgentAID: w.a.PairwiseAID, AssetID: w.a.ID, GrantSAID: held[0].SAID}
-	cc = sandbox.CallerContext{Scopes: []string{capabilityMessageAgent}}
+	cc = permission.CallerContext{Scopes: []string{capabilityMessageAgent}}
 	w.s.applyGrantScopes(tok, &cc)
 	if !strings.Contains(cc.NoScopesBecause, "expired") {
 		t.Fatalf("a token whose grant lapsed is told %q", cc.NoScopesBecause)

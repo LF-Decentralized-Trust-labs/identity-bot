@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"identity-agent-core/agentbody"
-	"identity-agent-core/sandbox"
+	"identity-agent-core/permission"
 	"identity-agent-core/screenview"
 
 	"github.com/go-chi/chi/v5"
@@ -141,8 +141,8 @@ func (s *CoreServer) mountScreenRoutes(r chi.Router) {
 // browser session — asked in the order the router gate admits them, so the
 // viewer is whoever the gate let in. False when the gate admitted none of
 // them, which only a request that did not come through the gate can be.
-func (s *CoreServer) theViewer(r *http.Request) (string, sandbox.CallerContext, bool) {
-	cc := sandbox.CallerContext{Remote: true, CorrelationID: requestCorrelationID(r)}
+func (s *CoreServer) theViewer(r *http.Request) (string, permission.CallerContext, bool) {
+	cc := permission.CallerContext{Remote: true, CorrelationID: requestCorrelationID(r)}
 	if theGateAdmittedTheOwner(r) {
 		cc.Transport, cc.CallerAID, cc.Owner = "owner", "owner", true
 		if owner, ok := s.theOwner(); ok {
@@ -166,7 +166,7 @@ func (s *CoreServer) theViewer(r *http.Request) (string, sandbox.CallerContext, 
 
 // theViewerOrRefuse is theViewer, answering for the handler when there is
 // none.
-func (s *CoreServer) theViewerOrRefuse(w http.ResponseWriter, r *http.Request, event string) (string, sandbox.CallerContext, bool) {
+func (s *CoreServer) theViewerOrRefuse(w http.ResponseWriter, r *http.Request, event string) (string, permission.CallerContext, bool) {
 	viewer, cc, ok := s.theViewer(r)
 	if !ok {
 		cc.CallerAID = "unknown"
@@ -233,11 +233,11 @@ func (s *CoreServer) handleListAgentScreens(w http.ResponseWriter, r *http.Reque
 // refuseViewing writes a refusal to the record, with its reason, and answers
 // with it: the sentence as "error", and the code the app turns into words as
 // "reason".
-func (s *CoreServer) refuseViewing(w http.ResponseWriter, cc sandbox.CallerContext, event, why, reason string, status int) {
+func (s *CoreServer) refuseViewing(w http.ResponseWriter, cc permission.CallerContext, event, why, reason string, status int) {
 	s.refuseViewingWith(w, cc, event, why, reason, status, nil)
 }
 
-func (s *CoreServer) refuseViewingWith(w http.ResponseWriter, cc sandbox.CallerContext, event, why, reason string,
+func (s *CoreServer) refuseViewingWith(w http.ResponseWriter, cc permission.CallerContext, event, why, reason string,
 	status int, extra map[string]string) {
 	log.Printf("[screen] refused %s to %s: %s (%s)", event, cc.CallerAID, why, reason)
 	if s.SandboxManager != nil {
@@ -254,7 +254,7 @@ func (s *CoreServer) refuseViewingWith(w http.ResponseWriter, cc sandbox.CallerC
 // refuseFromHub answers a refusal from the hub, with its reason code, and
 // records it. Opening too often is answered and not recorded, so a caller
 // opening in a loop cannot fill the record by being refused.
-func (s *CoreServer) refuseFromHub(w http.ResponseWriter, cc sandbox.CallerContext, event, sid string, err error) {
+func (s *CoreServer) refuseFromHub(w http.ResponseWriter, cc permission.CallerContext, event, sid string, err error) {
 	cc.WorkItem = sid
 	switch {
 	case errors.Is(err, screenview.ErrEnded):
@@ -479,7 +479,7 @@ func (s *CoreServer) handleSendInput(w http.ResponseWriter, r *http.Request) {
 
 // ── The record ──────────────────────────────────────────────────────────────
 
-func (s *CoreServer) recordViewing(cc sandbox.CallerContext, v screenview.Viewing, event, why string) {
+func (s *CoreServer) recordViewing(cc permission.CallerContext, v screenview.Viewing, event, why string) {
 	log.Printf("[screen] %s: %s", cc.CallerAID, why)
 	if s.SandboxManager == nil {
 		return
@@ -492,7 +492,7 @@ func (s *CoreServer) recordViewing(cc sandbox.CallerContext, v screenview.Viewin
 // recordViewingEnded records a viewing that ended, and the control given up
 // with it, under the viewer who opened it.
 func (s *CoreServer) recordViewingEnded(v screenview.Viewing) {
-	cc := sandbox.CallerContext{Remote: true, CallerAID: v.Viewer}
+	cc := permission.CallerContext{Remote: true, CallerAID: v.Viewer}
 	switch {
 	case len(v.Viewer) > len("controller:") && v.Viewer[:len("controller:")] == "controller:":
 		cc.CallerAID, cc.Transport = v.Viewer[len("controller:"):], "controller"

@@ -16,7 +16,7 @@ import (
 
 	"identity-agent-core/drivers"
 	"identity-agent-core/login"
-	"identity-agent-core/sandbox"
+	"identity-agent-core/permission"
 	"identity-agent-core/schemas"
 	"identity-agent-core/store"
 )
@@ -210,7 +210,7 @@ func TestAnAIAgentIsGrantedOnceTheDeviceWithTheKeySigns(t *testing.T) {
 	scopes := func() []string {
 		for _, tok := range e.s.loadMCPTokens() {
 			if tok.AssetID == id {
-				cc := sandbox.CallerContext{Scopes: tok.Scopes}
+				cc := permission.CallerContext{Scopes: tok.Scopes}
 				e.s.applyGrantScopes(tok, &cc)
 				return cc.Scopes
 			}

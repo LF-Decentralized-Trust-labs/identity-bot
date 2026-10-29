@@ -5,16 +5,18 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"identity-agent-core/permission"
 )
 
 // denyAllAuthorizer is a stand-in for an injected governance gateway: it denies every
 // ingress and tags every egress, proving the seam is honored (drop-in for the gateway).
 type denyAllAuthorizer struct{ egressTagged bool }
 
-func (a *denyAllAuthorizer) AuthorizeIngress(ctx context.Context, caller CallerContext, capDef ProvidedCapability) error {
+func (a *denyAllAuthorizer) AuthorizeIngress(ctx context.Context, caller permission.CallerContext, capDef ProvidedCapability) error {
 	return errors.New("policy: denied by injected gateway")
 }
-func (a *denyAllAuthorizer) FilterEgress(ctx context.Context, caller CallerContext, capDef ProvidedCapability, res *InvokeResult) *InvokeResult {
+func (a *denyAllAuthorizer) FilterEgress(ctx context.Context, caller permission.CallerContext, capDef ProvidedCapability, res *InvokeResult) *InvokeResult {
 	a.egressTagged = true
 	return res
 }
@@ -26,7 +28,7 @@ func TestInjectedAuthorizerOverridesIngress(t *testing.T) {
 	m.authorizer = &denyAllAuthorizer{}
 
 	// Local owner would pass the structural default, but the injected gateway denies.
-	_, err := m.InvokeCapability(context.Background(), CallerContext{Remote: false}, "headless-browser", nil)
+	_, err := m.InvokeCapability(context.Background(), permission.CallerContext{Remote: false}, "headless-browser", nil)
 	if err == nil {
 		t.Fatal("injected authorizer should have denied the request")
 	}
@@ -42,7 +44,7 @@ func TestInjectedAuthorizerEgressRuns(t *testing.T) {
 	m := invokeTestManager(f)
 	m.authorizer = allowEgress
 
-	_, err := m.InvokeCapability(context.Background(), CallerContext{Remote: false}, "headless-browser", nil)
+	_, err := m.InvokeCapability(context.Background(), permission.CallerContext{Remote: false}, "headless-browser", nil)
 	if err != nil {
 		t.Fatalf("expected allow, got %v", err)
 	}
@@ -53,10 +55,10 @@ func TestInjectedAuthorizerEgressRuns(t *testing.T) {
 
 type recordingAuthorizer struct{ egressRan bool }
 
-func (recordingAuthorizer) AuthorizeIngress(ctx context.Context, caller CallerContext, capDef ProvidedCapability) error {
+func (recordingAuthorizer) AuthorizeIngress(ctx context.Context, caller permission.CallerContext, capDef ProvidedCapability) error {
 	return nil // allow
 }
-func (a *recordingAuthorizer) FilterEgress(ctx context.Context, caller CallerContext, capDef ProvidedCapability, res *InvokeResult) *InvokeResult {
+func (a *recordingAuthorizer) FilterEgress(ctx context.Context, caller permission.CallerContext, capDef ProvidedCapability, res *InvokeResult) *InvokeResult {
 	a.egressRan = true
 	return res
 }
@@ -65,7 +67,7 @@ func (a *recordingAuthorizer) FilterEgress(ctx context.Context, caller CallerCon
 func TestDefaultAuthorizerStillStructural(t *testing.T) {
 	f := &fakeInvoker{}
 	m := invokeTestManager(f) // no m.authorizer set
-	_, err := m.InvokeCapability(context.Background(), CallerContext{Remote: true}, "native-computer-use", nil)
+	_, err := m.InvokeCapability(context.Background(), permission.CallerContext{Remote: true}, "native-computer-use", nil)
 	if !errors.Is(err, ErrDenied) {
 		t.Fatalf("default structural authorizer should deny remote host_control, got %v", err)
 	}
@@ -78,13 +80,13 @@ func TestRequireSignedRequestEnforced(t *testing.T) {
 	az := structuralAuthorizer{}
 
 	// Scoped bearer caller, no envelope → denied.
-	bearer := CallerContext{Remote: true, Scopes: []string{"infra.zone.list"}}
+	bearer := permission.CallerContext{Remote: true, Scopes: []string{"infra.zone.list"}}
 	if err := az.AuthorizeIngress(context.Background(), bearer, cap); err == nil {
 		t.Fatal("RequireSignedRequest must deny a caller with no verified envelope")
 	}
 
 	// Same caller, envelope verified → allowed.
-	signed := CallerContext{Remote: true, Scopes: []string{"infra.zone.list"}, EnvelopeVerified: true}
+	signed := permission.CallerContext{Remote: true, Scopes: []string{"infra.zone.list"}, EnvelopeVerified: true}
 	if err := az.AuthorizeIngress(context.Background(), signed, cap); err != nil {
 		t.Fatalf("a verified signed request should be allowed, got %v", err)
 	}
@@ -99,7 +101,7 @@ func TestRequireSignedRequestEnforced(t *testing.T) {
 // A caller with no scopes for a reason its owner can act on is told it.
 func TestADenialSaysWhyTheCallerHasNoScopes(t *testing.T) {
 	err := structuralAuthorizer{}.AuthorizeIngress(context.Background(),
-		CallerContext{Remote: true, NoScopesBecause: "this AI agent is awaiting the owner's approval"},
+		permission.CallerContext{Remote: true, NoScopesBecause: "this AI agent is awaiting the owner's approval"},
 		ProvidedCapability{ID: "system.info.read"})
 	if err == nil || !strings.Contains(err.Error(), "awaiting the owner's approval") {
 		t.Fatalf("the denial says %v", err)

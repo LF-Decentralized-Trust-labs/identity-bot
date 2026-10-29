@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"identity-agent-core/permission"
 )
 
 // The template renderer substitutes on the decoded JSON tree: whole-string
@@ -110,7 +112,7 @@ func TestTemplatedCapabilityEndToEnd(t *testing.T) {
 		t.Fatalf("credential: %v", err)
 	}
 
-	caller := CallerContext{Remote: false, CallerAID: "local-owner", CorrelationID: "corr-img", Transport: "mcp"}
+	caller := permission.CallerContext{Remote: false, CallerAID: "local-owner", CorrelationID: "corr-img", Transport: "mcp"}
 	res, err := m.InvokeCapability(context.Background(), caller, "imagesvc.image.create", []byte(`{"prompt":"a lighthouse at dusk"}`))
 	if err != nil {
 		t.Fatalf("invoke: %v", err)

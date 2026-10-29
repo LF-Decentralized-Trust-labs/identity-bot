@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"identity-agent-core/sandbox"
+	"identity-agent-core/permission"
 )
 
 func reqWithBearer(token string) *http.Request {
@@ -80,7 +80,7 @@ func TestPlainTokenUnchanged(t *testing.T) {
 
 // The audit event carries the delegation chain from the caller context.
 func TestDelegationChainReachesAuditEvent(t *testing.T) {
-	cc := sandbox.CallerContext{
+	cc := permission.CallerContext{
 		CallerAID:       "EAgentDelegatedAID",
 		DelegationChain: []string{"EAgentDelegatedAID", "ERootOwnerAID"},
 	}

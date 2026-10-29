@@ -3,12 +3,14 @@ package sandbox
 import (
 	"context"
 	"testing"
+
+	"identity-agent-core/permission"
 )
 
 func TestMCPToolsList(t *testing.T) {
 	m := invokeTestManager(&fakeInvoker{})
 	// Local owner (Remote false) sees the flat capabilities + the meta-tools.
-	tools := m.MCPToolsList(CallerContext{})
+	tools := m.MCPToolsList(permission.CallerContext{})
 	// Plug-in capabilities plus the trailing execute/search/describe meta-tools.
 	if len(tools) != 5 {
 		t.Fatalf("expected 5 tools, got %d", len(tools))
@@ -34,7 +36,7 @@ func TestMCPToolsList(t *testing.T) {
 // capability names leak through tools/list, matching search/describe filtering.
 func TestMCPToolsListRemoteHidesCapabilities(t *testing.T) {
 	m := invokeTestManager(&fakeInvoker{})
-	tools := m.MCPToolsList(CallerContext{Remote: true, CallerAID: "token:anon"})
+	tools := m.MCPToolsList(permission.CallerContext{Remote: true, CallerAID: "token:anon"})
 	names := map[string]bool{}
 	for _, tl := range tools {
 		names[tl.Name] = true
@@ -49,7 +51,7 @@ func TestMCPToolsListRemoteHidesCapabilities(t *testing.T) {
 	}
 
 	// A remote caller granted one capability sees exactly that one, plus meta-tools.
-	scoped := m.MCPToolsList(CallerContext{Remote: true, CallerAID: "token:ci", Scopes: []string{"headless-browser"}})
+	scoped := m.MCPToolsList(permission.CallerContext{Remote: true, CallerAID: "token:ci", Scopes: []string{"headless-browser"}})
 	sn := map[string]bool{}
 	for _, tl := range scoped {
 		sn[tl.Name] = true
@@ -64,7 +66,7 @@ func TestMCPToolsListRemoteHidesCapabilities(t *testing.T) {
 func TestMCPToolsCallDeniedRemote(t *testing.T) {
 	f := &fakeInvoker{}
 	m := invokeTestManager(f)
-	tr := m.MCPToolsCall(context.Background(), CallerContext{Remote: true}, "native-computer-use", []byte("{}"))
+	tr := m.MCPToolsCall(context.Background(), permission.CallerContext{Remote: true}, "native-computer-use", []byte("{}"))
 	if !tr.IsError {
 		t.Fatalf("remote host_control call should be an error result")
 	}
@@ -78,7 +80,7 @@ func TestMCPToolsCallRoutes(t *testing.T) {
 	f := &fakeInvoker{result: &InvokeResult{Status: 200, Body: []byte(`{"ok":true}`)}}
 	m := invokeTestManager(f)
 	tr := m.MCPToolsCall(context.Background(),
-		CallerContext{Remote: true, Scopes: []string{"headless-browser"}}, "headless-browser", []byte("{}"))
+		permission.CallerContext{Remote: true, Scopes: []string{"headless-browser"}}, "headless-browser", []byte("{}"))
 	if tr.IsError {
 		t.Fatalf("expected success, got error: %s", tr.Text)
 	}

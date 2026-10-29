@@ -17,6 +17,7 @@ import (
 	"identity-agent-core/asset"
 	"identity-agent-core/githubapp"
 	"identity-agent-core/lending"
+	"identity-agent-core/permission"
 	"identity-agent-core/sandbox"
 
 	"github.com/go-chi/chi/v5"
@@ -115,7 +116,7 @@ func (s *CoreServer) recordGitHubEvent(r *http.Request, event, status, why strin
 	if s.SandboxManager == nil {
 		return
 	}
-	cc := sandbox.CallerContext{CallerAID: firstNonEmptyString(madeByController(r), s.OwnerRootAID()), Reason: why}
+	cc := permission.CallerContext{CallerAID: firstNonEmptyString(madeByController(r), s.OwnerRootAID()), Reason: why}
 	s.SandboxManager.RecordGovernanceEvent(cc, "github."+event, status)
 }
 
@@ -543,7 +544,7 @@ func (d githubLendData) grants() []repoGrant {
 // lendableRepos is what may be lent to cc now: the repositories each
 // capability's grant names, for each capability that passes the one check.
 // Write refused leaves read as its grant gives it.
-func (s *CoreServer) lendableRepos(cc sandbox.CallerContext) map[int64]repoGrant {
+func (s *CoreServer) lendableRepos(cc permission.CallerContext) map[int64]repoGrant {
 	out := map[int64]repoGrant{}
 	for _, access := range []githubapp.Access{githubapp.Read, githubapp.Write} {
 		capID := capabilityFor(access)
@@ -670,7 +671,7 @@ func (s *CoreServer) revokeTokens(ctx context.Context, toks []githubapp.Token) {
 
 // recordGitHubLendEvent writes what happened to an AI agent's GitHub access
 // into the signed record, as the AI agent, naming the body. Never a token.
-func (s *CoreServer) recordGitHubLendEvent(a asset.Asset, cc sandbox.CallerContext, event, status, why string) {
+func (s *CoreServer) recordGitHubLendEvent(a asset.Asset, cc permission.CallerContext, event, status, why string) {
 	cc.Transport = firstNonEmptyString(cc.Transport, "body")
 	s.recordLentEvent(a, cc, "agent.github."+event, status, why)
 }

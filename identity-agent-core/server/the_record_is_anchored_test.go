@@ -24,6 +24,7 @@ import (
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/keriengine"
 	"identity-agent-core/login"
+	"identity-agent-core/permission"
 	"identity-agent-core/sandbox"
 	"identity-agent-core/store"
 
@@ -48,7 +49,7 @@ func recordWorld(t *testing.T) *CoreServer {
 func writeRows(t *testing.T, s *CoreServer, n int) {
 	t.Helper()
 	for i := 0; i < n; i++ {
-		if s.SandboxManager.RecordGovernanceEvent(sandbox.CallerContext{CallerAID: "EAgent", Reason: "test"}, "test.event", "ok") == 0 {
+		if s.SandboxManager.RecordGovernanceEvent(permission.CallerContext{CallerAID: "EAgent", Reason: "test"}, "test.event", "ok") == 0 {
 			t.Fatal("a row was not written")
 		}
 	}

@@ -19,6 +19,7 @@ import (
 	"identity-agent-core/conversation"
 	"identity-agent-core/didcomm"
 	"identity-agent-core/login"
+	"identity-agent-core/permission"
 	"identity-agent-core/sandbox"
 
 	"github.com/go-chi/chi/v5"
@@ -306,7 +307,7 @@ func (s *CoreServer) messagingKeys(aid string) (*didcomm.KeySet, *didcomm.DID, e
 }
 
 // refuse writes a refusal to the governance record and answers with it.
-func (s *CoreServer) refuseMessage(w http.ResponseWriter, cc sandbox.CallerContext, kind, why string, status int) {
+func (s *CoreServer) refuseMessage(w http.ResponseWriter, cc permission.CallerContext, kind, why string, status int) {
 	// The event is named from the kind only when it is one; a sender does not
 	// get to name events in the record.
 	switch kind {
@@ -322,7 +323,7 @@ func (s *CoreServer) refuseMessage(w http.ResponseWriter, cc sandbox.CallerConte
 	jsonError(w, why, status)
 }
 
-func (s *CoreServer) recordMessage(cc sandbox.CallerContext, e conversation.Entry) {
+func (s *CoreServer) recordMessage(cc permission.CallerContext, e conversation.Entry) {
 	if s.SandboxManager == nil {
 		return
 	}
@@ -337,7 +338,7 @@ func (s *CoreServer) recordMessage(cc sandbox.CallerContext, e conversation.Entr
 // ── A person speaks ──────────────────────────────────────────────────────────
 
 func (s *CoreServer) handlePersonSays(w http.ResponseWriter, r *http.Request) {
-	cc := sandbox.CallerContext{Remote: true, CorrelationID: requestCorrelationID(r), Transport: "controller"}
+	cc := permission.CallerContext{Remote: true, CorrelationID: requestCorrelationID(r), Transport: "controller"}
 	if g, ok := TheControllerThatAsked(r); ok {
 		cc.CallerAID = g.ControllerAID
 	}
@@ -472,7 +473,7 @@ func stillOpen(counts bool) conversation.Check {
 
 // refuseAppend answers an entry the record would not take, recording the
 // refusal when it is one of the conversation's rules rather than a fault.
-func (s *CoreServer) refuseAppend(w http.ResponseWriter, cc sandbox.CallerContext, kind string, err error) {
+func (s *CoreServer) refuseAppend(w http.ResponseWriter, cc permission.CallerContext, kind string, err error) {
 	switch {
 	case errors.Is(err, errClosed), errors.Is(err, errNoTurnsLeft), errors.Is(err, conversation.ErrAlreadyAnswered):
 		s.refuseMessage(w, cc, kind, err.Error(), http.StatusConflict)
@@ -543,7 +544,7 @@ func (s *CoreServer) handleReadConversation(w http.ResponseWriter, r *http.Reque
 	// Reading the record is itself recorded — once per opening of it, not on
 	// every wait for news.
 	if after == 0 && s.SandboxManager != nil {
-		reader := sandbox.CallerContext{Remote: true, CorrelationID: requestCorrelationID(r), Transport: "controller",
+		reader := permission.CallerContext{Remote: true, CorrelationID: requestCorrelationID(r), Transport: "controller",
 			Reason: "read conversation " + c.ID}
 		if g, ok := TheControllerThatAsked(r); ok {
 			reader.CallerAID = g.ControllerAID
@@ -589,10 +590,10 @@ type bodySays struct {
 // theBodyAsking is the AI agent a sealed, body-signed request comes from.
 // Messages between AI agents are only ever taken sealed: their words would
 // otherwise be readable wherever TLS ends on the way here.
-func (s *CoreServer) theBodyAsking(r *http.Request) (sandbox.CallerContext, agentbody.Binding, error) {
+func (s *CoreServer) theBodyAsking(r *http.Request) (permission.CallerContext, agentbody.Binding, error) {
 	host := r.Header.Get(agentbody.HeaderHost)
 	if host == "" || s.sealedSender(r) != host {
-		return sandbox.CallerContext{}, agentbody.Binding{}, errors.New("a body sends and collects messages sealed to this " +
+		return permission.CallerContext{}, agentbody.Binding{}, errors.New("a body sends and collects messages sealed to this " +
 			"Identity Agent, signed by its own key")
 	}
 	cc := s.resolveCaller(r)
@@ -608,9 +609,9 @@ func (s *CoreServer) theBodyAsking(r *http.Request) (sandbox.CallerContext, agen
 
 // refuseBody answers a request that is not from a live body, recording the
 // refusal under whatever the request claimed to be.
-func (s *CoreServer) refuseBody(w http.ResponseWriter, r *http.Request, cc sandbox.CallerContext, err error) {
+func (s *CoreServer) refuseBody(w http.ResponseWriter, r *http.Request, cc permission.CallerContext, err error) {
 	if cc.CallerAID == "" {
-		cc = sandbox.CallerContext{Remote: true, CorrelationID: requestCorrelationID(r), Transport: "body",
+		cc = permission.CallerContext{Remote: true, CorrelationID: requestCorrelationID(r), Transport: "body",
 			CallerAID: "body:" + clampWhy(r.Header.Get(agentbody.HeaderHost))}
 	}
 	s.refuseMessage(w, cc, "", err.Error(), http.StatusForbidden)

@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"identity-agent-core/agentbody"
-	"identity-agent-core/sandbox"
+	"identity-agent-core/permission"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -142,7 +142,7 @@ func (s *CoreServer) handleRevokeAIAgent(w http.ResponseWriter, r *http.Request)
 	}
 	if first {
 		if s.SandboxManager != nil {
-			s.SandboxManager.RecordGovernanceEvent(sandbox.CallerContext{
+			s.SandboxManager.RecordGovernanceEvent(permission.CallerContext{
 				CallerAID: a.PairwiseAID, DelegationChain: []string{a.PairwiseAID, a.DelegatorAID},
 				Reason: "revoked by " + by,
 			}, "agent.revoked", "ok")

@@ -15,6 +15,7 @@ import (
 	"identity-agent-core/asset"
 	"identity-agent-core/brainsignin"
 	"identity-agent-core/lending"
+	"identity-agent-core/permission"
 	"identity-agent-core/sandbox"
 
 	"github.com/go-chi/chi/v5"
@@ -94,7 +95,7 @@ func (s *CoreServer) brainVaultWritable() (*sandbox.Manager, error) {
 }
 
 // mayBorrow says why an AI agent's body may not be lent its sign-in.
-func (s *CoreServer) mayBorrow(a asset.Asset, cc sandbox.CallerContext) error {
+func (s *CoreServer) mayBorrow(a asset.Asset, cc permission.CallerContext) error {
 	return s.mayBeLent(a, cc, "its sign-in")
 }
 
@@ -102,7 +103,7 @@ func (s *CoreServer) mayBorrow(a asset.Asset, cc sandbox.CallerContext) error {
 // its brain's sign-in, or access to a service such as GitHub (what): an AI
 // agent whose grant is revoked or lapsed is lent nothing, though its body
 // still stands.
-func (s *CoreServer) mayBeLent(a asset.Asset, cc sandbox.CallerContext, what string) error {
+func (s *CoreServer) mayBeLent(a asset.Asset, cc permission.CallerContext, what string) error {
 	if s.agentStatus(a.PairwiseAID) == "revoked" {
 		return errors.New("this AI agent's grant is revoked, so " + what + " is not lent")
 	}
@@ -333,21 +334,21 @@ func (s *CoreServer) keepBrainSignIn(a asset.Asset, rec brainsignin.Record, by s
 	if err := s.assetHandler.Store.UpsertAsset(a); err != nil {
 		return a, fmt.Errorf("the sign-in is kept, but the AI agent could not be pointed at it: %w", err)
 	}
-	s.recordBrainEvent(a, sandbox.CallerContext{}, "set", "ok", fmt.Sprintf("%s sign-in for %s set by %s",
+	s.recordBrainEvent(a, permission.CallerContext{}, "set", "ok", fmt.Sprintf("%s sign-in for %s set by %s",
 		rec.Kind, rec.Provider, firstNonEmptyString(by, "the owner")))
 	return a, nil
 }
 
 // recordBrainEvent writes what happened to an AI agent's sign-in into the
 // signed record, as the AI agent, never with the secret.
-func (s *CoreServer) recordBrainEvent(a asset.Asset, cc sandbox.CallerContext, event, status, why string) {
+func (s *CoreServer) recordBrainEvent(a asset.Asset, cc permission.CallerContext, event, status, why string) {
 	s.recordLentEvent(a, cc, "agent.brain.sign_in."+event, status, why)
 }
 
 // recordLentEvent writes what happened to something lent to an AI agent's
 // body — its brain's sign-in, or access to a service — into the signed record,
 // as the AI agent, naming the body, and never with the secret.
-func (s *CoreServer) recordLentEvent(a asset.Asset, cc sandbox.CallerContext, event, status, why string) {
+func (s *CoreServer) recordLentEvent(a asset.Asset, cc permission.CallerContext, event, status, why string) {
 	log.Printf("[lent] %s for AI agent %s: %s (%s)", event, a.PairwiseAID, why, status)
 	if s.SandboxManager == nil {
 		return
@@ -508,7 +509,7 @@ func (s *CoreServer) handleRemoveBrainSignIn(w http.ResponseWriter, r *http.Requ
 			return
 		}
 	}
-	s.recordBrainEvent(a, sandbox.CallerContext{}, "removed", "ok",
+	s.recordBrainEvent(a, permission.CallerContext{}, "removed", "ok",
 		"sign-in removed by "+firstNonEmptyString(madeByController(r), "the owner"))
 	writeJSONStatus(w, http.StatusOK, map[string]any{"removed": true})
 }
@@ -603,7 +604,7 @@ type leaseRequest struct {
 
 // theBodyAndItsAgent is the live body a sealed, signed request comes from,
 // and its AI agent.
-func (s *CoreServer) theBodyAndItsAgent(w http.ResponseWriter, r *http.Request) (sandbox.CallerContext, agentbody.Binding, asset.Asset, bool) {
+func (s *CoreServer) theBodyAndItsAgent(w http.ResponseWriter, r *http.Request) (permission.CallerContext, agentbody.Binding, asset.Asset, bool) {
 	cc, b, err := s.theBodyAsking(r)
 	if err != nil {
 		jsonError(w, "a body borrows its AI agent's sign-in sealed to this Identity Agent, signed by its own key: "+

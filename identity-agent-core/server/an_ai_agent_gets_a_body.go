@@ -15,7 +15,7 @@ import (
 	"identity-agent-core/agentbody"
 	"identity-agent-core/asset"
 	"identity-agent-core/didcomm"
-	"identity-agent-core/sandbox"
+	"identity-agent-core/permission"
 	"identity-agent-core/schemas"
 	"identity-agent-core/screenview"
 
@@ -60,7 +60,7 @@ func (s *CoreServer) recordBodyEvent(a asset.Asset, b agentbody.Binding, event, 
 	if s.SandboxManager == nil {
 		return
 	}
-	s.SandboxManager.RecordGovernanceEvent(sandbox.CallerContext{
+	s.SandboxManager.RecordGovernanceEvent(permission.CallerContext{
 		CallerAID: a.PairwiseAID, DelegationChain: []string{a.PairwiseAID, a.DelegatorAID},
 		Transport: "body", BodyHost: b.Host, BodyGrade: b.Grade, BodyCredential: b.CredentialSAID,
 		Reason: why,

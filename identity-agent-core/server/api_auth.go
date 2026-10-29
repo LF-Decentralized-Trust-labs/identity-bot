@@ -10,7 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"identity-agent-core/sandbox"
+	"identity-agent-core/permission"
 )
 
 // Who is allowed to call what.
@@ -570,8 +570,8 @@ func theGateAdmittedTheOwner(r *http.Request) bool {
 // for a remote caller still holds — a capability that drives this computer's
 // screen stays local-only. Owner, because the scope check exists to bound what
 // somebody other than the owner may do, and the owner is who grants scopes.
-func (s *CoreServer) theOwnerAsACaller(r *http.Request, how string) sandbox.CallerContext {
-	cc := sandbox.CallerContext{
+func (s *CoreServer) theOwnerAsACaller(r *http.Request, how string) permission.CallerContext {
+	cc := permission.CallerContext{
 		Remote: true, Owner: true, AuthLevel: how,
 		CorrelationID: requestCorrelationID(r), Transport: "owner",
 	}

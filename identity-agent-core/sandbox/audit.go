@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/zeebo/blake3"
+
+	"identity-agent-core/permission"
 )
 
 // The signed invocation log is the gateway's answer to "who did what, under whose
@@ -364,7 +366,7 @@ func truncate(s string) string {
 // recordInvocation writes one signed audit event and returns its row id (0 when the
 // write failed or no store is wired). An audit-write failure never fails the
 // invocation itself, but is logged loudly — the log is the governance record.
-func (m *Manager) recordInvocation(caller CallerContext, capabilityID, executorType string, args []byte, status string, start time.Time) int64 {
+func (m *Manager) recordInvocation(caller permission.CallerContext, capabilityID, executorType string, args []byte, status string, start time.Time) int64 {
 	return m.recordInvocationDetail(caller, capabilityID, executorType, args, status, start, EventDetail{})
 }
 
@@ -373,7 +375,7 @@ func (m *Manager) recordInvocation(caller CallerContext, capabilityID, executorT
 // Writes serialize on auditMu. That is not incidental: PrevHash is read from the
 // last row and must still be the last row when this one lands, or two concurrent
 // invocations both chain onto the same predecessor and the chain silently forks.
-func (m *Manager) recordInvocationDetail(caller CallerContext, capabilityID, executorType string, args []byte, status string, start time.Time, d EventDetail) int64 {
+func (m *Manager) recordInvocationDetail(caller permission.CallerContext, capabilityID, executorType string, args []byte, status string, start time.Time, d EventDetail) int64 {
 	id, err := m.writeEvent(newEvent(caller, capabilityID, executorType, args, status, start, d), false)
 	if err != nil {
 		log.Printf("[audit] EVENT NOT WRITTEN for %s (caller %s, status %s): %v",
@@ -389,13 +391,13 @@ func (m *Manager) recordInvocationDetail(caller CallerContext, capabilityID, exe
 // Recording only afterwards would let an action happen with no record at all
 // whenever writing the record failed, and somebody able to break the log
 // could then act unrecorded.
-func (m *Manager) recordIntent(caller CallerContext, capabilityID, executorType string, args []byte, start time.Time) (int64, error) {
+func (m *Manager) recordIntent(caller permission.CallerContext, capabilityID, executorType string, args []byte, start time.Time) (int64, error) {
 	ev := newEvent(caller, capabilityID, executorType, args, "started", start, EventDetail{StatusReason: "about to run"})
 	ev.DurationMs = 0
 	return m.writeEvent(ev, true)
 }
 
-func newEvent(caller CallerContext, capabilityID, executorType string, args []byte, status string, start time.Time, d EventDetail) InvocationEvent {
+func newEvent(caller permission.CallerContext, capabilityID, executorType string, args []byte, status string, start time.Time, d EventDetail) InvocationEvent {
 	return InvocationEvent{
 		TS:              start.UTC().Format(time.RFC3339Nano),
 		CallerAID:       caller.CallerAID,
@@ -500,7 +502,7 @@ func (m *Manager) writeEvent(ev InvocationEvent, strict bool) (int64, error) {
 // ("agent.orchestrate"), which anchors the worker steps that follow it (they carry its
 // id as ParentEventID). Returns the event's row id (0 if unwritten). Exposed for the
 // server layer; the same signing + chokepoint as a capability invocation.
-func (m *Manager) RecordGovernedEvent(caller CallerContext, capabilityID, status string) int64 {
+func (m *Manager) RecordGovernedEvent(caller permission.CallerContext, capabilityID, status string) int64 {
 	return m.recordInvocation(caller, capabilityID, "orchestrator", nil, status, time.Now())
 }
 
@@ -508,7 +510,7 @@ func (m *Manager) RecordGovernedEvent(caller CallerContext, capabilityID, status
 // an AI agent rather than an action it took — a machine asking to become its
 // body, approved, rejected, removed. Same signing and chain as an invocation;
 // the caller's Reason says why.
-func (m *Manager) RecordGovernanceEvent(caller CallerContext, eventID, status string) int64 {
+func (m *Manager) RecordGovernanceEvent(caller permission.CallerContext, eventID, status string) int64 {
 	return m.recordInvocation(caller, eventID, "governance", nil, status, time.Now())
 }
 
@@ -516,7 +518,7 @@ func (m *Manager) RecordGovernanceEvent(caller CallerContext, eventID, status st
 // about committed in the signed row's argument digest (HashArgs), so anything
 // kept elsewhere about it can later be checked against the log: changing it
 // after the fact no longer matches the row that was signed when it happened.
-func (m *Manager) RecordGovernanceEventAbout(caller CallerContext, eventID, status string, about []byte) int64 {
+func (m *Manager) RecordGovernanceEventAbout(caller permission.CallerContext, eventID, status string, about []byte) int64 {
 	return m.recordInvocation(caller, eventID, "governance", about, status, time.Now())
 }
 

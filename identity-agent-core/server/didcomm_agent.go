@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"identity-agent-core/didcomm"
-	"identity-agent-core/sandbox"
+	"identity-agent-core/permission"
 )
 
 // SendDIDCommMessage packs an authcrypt envelope from a local AID to a registered peer
@@ -98,7 +98,7 @@ func (s *CoreServer) recordTraffic(caller, messageID, conversation, event, statu
 	if s.SandboxManager == nil {
 		return
 	}
-	s.SandboxManager.RecordGovernanceEventAbout(sandbox.CallerContext{
+	s.SandboxManager.RecordGovernanceEventAbout(permission.CallerContext{
 		CallerAID: caller, CorrelationID: messageID, WorkItem: conversation, Transport: "didcomm", Reason: clampWhy(why),
 	}, event, status, about)
 }

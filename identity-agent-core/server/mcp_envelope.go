@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"identity-agent-core/login"
-	"identity-agent-core/sandbox"
+	"identity-agent-core/permission"
 )
 
 // Signed-request-envelope authentication — the strongest caller proof at the
@@ -36,7 +36,7 @@ const (
 // error only when an envelope IS present but invalid (missing fields, bad
 // signature, stale, or replayed) — a missing envelope is not an error. On success
 // it sets caller.EnvelopeVerified and upgrades caller.AuthLevel.
-func (s *CoreServer) verifyRequestEnvelope(r *http.Request, method string, params []byte, caller *sandbox.CallerContext) error {
+func (s *CoreServer) verifyRequestEnvelope(r *http.Request, method string, params []byte, caller *permission.CallerContext) error {
 	sig := r.Header.Get(envSigHeader)
 	if sig == "" {
 		return nil // no envelope — leave EnvelopeVerified=false

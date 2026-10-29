@@ -17,6 +17,7 @@ import (
 	"identity-agent-core/didcomm"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/keriengine"
+	"identity-agent-core/permission"
 	"identity-agent-core/sandbox"
 	"identity-agent-core/secureenclave"
 
@@ -69,7 +70,7 @@ func (s *CoreServer) handleExportConversation(w http.ResponseWriter, r *http.Req
 	if g, ok := TheControllerThatAsked(r); ok {
 		who = g.ControllerAID
 	}
-	cc := sandbox.CallerContext{Remote: true, CorrelationID: requestCorrelationID(r), Transport: "controller",
+	cc := permission.CallerContext{Remote: true, CorrelationID: requestCorrelationID(r), Transport: "controller",
 		CallerAID: who, WorkItem: c.ID, Reason: "export conversation " + c.ID}
 	// Anchored first, so the anchoring's own row is in the stretch the bundle
 	// carries, ahead of the export's row: a bundle cannot then be handed out

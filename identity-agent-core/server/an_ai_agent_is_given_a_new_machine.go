@@ -18,7 +18,7 @@ import (
 	"identity-agent-core/agentbody"
 	"identity-agent-core/agentmachine"
 	"identity-agent-core/asset"
-	"identity-agent-core/sandbox"
+	"identity-agent-core/permission"
 	"identity-agent-core/screenview"
 
 	"github.com/go-chi/chi/v5"
@@ -76,7 +76,7 @@ func (s *CoreServer) recordMachineEvent(a asset.Asset, j agentmachine.Job, event
 	if s.SandboxManager == nil {
 		return
 	}
-	s.SandboxManager.RecordGovernanceEvent(sandbox.CallerContext{
+	s.SandboxManager.RecordGovernanceEvent(permission.CallerContext{
 		CallerAID: a.PairwiseAID, DelegationChain: []string{a.PairwiseAID, a.DelegatorAID},
 		Transport: "machine", WorkItem: j.ID, Reason: clampWhy(why),
 	}, "agent.machine."+event, status)

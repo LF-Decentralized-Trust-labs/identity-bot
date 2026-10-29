@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"slices"
 	"time"
+
+	"identity-agent-core/permission"
 )
 
 // A capability can be a service an AI agent's body performs for this
@@ -21,7 +23,7 @@ const ExecutorBodyService = "body_service"
 // Identity Agent offers as a body service and has enabled, the caller's grant
 // gives it, and the caller passes MayThisPersonDoThis against its minimum. It
 // says why when it refuses.
-func (m *Manager) MayServe(caller CallerContext, capabilityID string) (bool, string) {
+func (m *Manager) MayServe(caller permission.CallerContext, capabilityID string) (bool, string) {
 	rec := m.registryRecord(capabilityID)
 	switch {
 	case rec == nil:

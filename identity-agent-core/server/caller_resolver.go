@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"identity-agent-core/agentbody"
-	"identity-agent-core/sandbox"
+	"identity-agent-core/permission"
 )
 
 // CallerResolver resolves WHO is calling the endpoint and WHAT capability scopes they
@@ -18,7 +18,7 @@ import (
 // when delegated-identity resolution is implemented it is injected via
 // CoreServer.CallerResolver and fills the AID + granted scopes, with no handler change.
 type CallerResolver interface {
-	Resolve(r *http.Request) sandbox.CallerContext
+	Resolve(r *http.Request) permission.CallerContext
 }
 
 // loopbackCallerResolver derives only local-vs-remote from the connection. It is no
@@ -26,22 +26,22 @@ type CallerResolver interface {
 // not imply the owner. Kept for callers that explicitly want the structural check.
 type loopbackCallerResolver struct{}
 
-func (loopbackCallerResolver) Resolve(r *http.Request) sandbox.CallerContext {
+func (loopbackCallerResolver) Resolve(r *http.Request) permission.CallerContext {
 	host, _, _ := net.SplitHostPort(r.RemoteAddr)
-	return sandbox.CallerContext{Remote: !sandbox.IsLoopbackHost(host)}
+	return permission.CallerContext{Remote: !permission.IsLoopbackHost(host)}
 }
 
 // resolveCaller returns the configured CallerResolver's result, or the token-aware
 // default: a positive credential (MCP token today, ACDC presentation when delegated
 // identity lands) grants scopes; a genuinely local request (loopback AND no forwarding
 // headers) is the owner; everything else is remote with no scopes.
-func (s *CoreServer) resolveCaller(r *http.Request) sandbox.CallerContext {
+func (s *CoreServer) resolveCaller(r *http.Request) permission.CallerContext {
 	// Resolved once per request. The gate resolves the caller to decide whether
 	// to admit it, and hands the answer on; the handler reads that rather than
 	// resolving again. Resolving twice was only wasteful while every proof could
 	// be checked twice, and a body's signature is spent the first time it is
 	// checked — a second resolution would refuse the request it just admitted.
-	if cc, ok := r.Context().Value(resolvedCallerKey{}).(sandbox.CallerContext); ok {
+	if cc, ok := r.Context().Value(resolvedCallerKey{}).(permission.CallerContext); ok {
 		return cc
 	}
 	if s.CallerResolver != nil {
@@ -54,7 +54,7 @@ func (s *CoreServer) resolveCaller(r *http.Request) sandbox.CallerContext {
 type resolvedCallerKey struct{}
 
 // withResolvedCaller is r carrying the caller already resolved for it.
-func withResolvedCaller(r *http.Request, cc sandbox.CallerContext) *http.Request {
+func withResolvedCaller(r *http.Request, cc permission.CallerContext) *http.Request {
 	return r.WithContext(context.WithValue(r.Context(), resolvedCallerKey{}, cc))
 }
 
@@ -76,7 +76,7 @@ const maxWhyLen = 512
 // are caller-supplied and never consulted for authorization — a caller can misstate its
 // work item exactly as it can misstate a commit message. The fields that decide what is
 // permitted (CallerAID, GrantSAID, DelegationChain) are proven elsewhere.
-func applyCallerWhy(r *http.Request, cc *sandbox.CallerContext) {
+func applyCallerWhy(r *http.Request, cc *permission.CallerContext) {
 	cc.WorkItem = clampWhy(r.Header.Get(HeaderWorkItem))
 	cc.Reason = clampWhy(r.Header.Get(HeaderReason))
 	// Which of the caller's runs is asking. The same standing as the two
@@ -112,8 +112,8 @@ func clampWhy(v string) string {
 // else is remote with no scopes (default-deny at the gateway).
 type tokenAwareResolver struct{ s *CoreServer }
 
-func (t tokenAwareResolver) Resolve(r *http.Request) sandbox.CallerContext {
-	cc := sandbox.CallerContext{
+func (t tokenAwareResolver) Resolve(r *http.Request) permission.CallerContext {
+	cc := permission.CallerContext{
 		Remote:        true,
 		CorrelationID: requestCorrelationID(r),
 		Transport:     "mcp",

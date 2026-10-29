@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"identity-agent-core/permission"
 )
 
 func searchTestManager(t *testing.T) *Manager {
@@ -35,7 +37,7 @@ func searchTestManager(t *testing.T) *Manager {
 	return m
 }
 
-var localCaller = CallerContext{Remote: false, CallerAID: "local-owner", Transport: "mcp"}
+var localCaller = permission.CallerContext{Remote: false, CallerAID: "local-owner", Transport: "mcp"}
 
 // Ranked deterministic search: exact id first, then prefix, then substring; summaries
 // carry no schemas.
@@ -79,7 +81,7 @@ func TestSearchRankingAndFilters(t *testing.T) {
 // its granted scopes, and host_control never surfaces remotely.
 func TestSearchFiltersToEntitlements(t *testing.T) {
 	m := searchTestManager(t)
-	remote := CallerContext{Remote: true, CallerAID: "token:ci", Scopes: []string{"cloudflare.dns.list"}}
+	remote := permission.CallerContext{Remote: true, CallerAID: "token:ci", Scopes: []string{"cloudflare.dns.list"}}
 
 	got := m.SearchCapabilities(context.Background(), remote, SearchQuery{})
 	if len(got) != 1 || got[0].CapabilityID != "cloudflare.dns.list" {
@@ -124,7 +126,7 @@ func TestDescribeCapability(t *testing.T) {
 	if _, err := m.DescribeCapability(context.Background(), localCaller, "nope.missing"); !errors.Is(err, ErrCapabilityNotFound) {
 		t.Fatalf("missing capability: %v", err)
 	}
-	remote := CallerContext{Remote: true, CallerAID: "token:ci"}
+	remote := permission.CallerContext{Remote: true, CallerAID: "token:ci"}
 	if _, err := m.DescribeCapability(context.Background(), remote, "cloudflare.dns.list"); !errors.Is(err, ErrCapabilityNotFound) {
 		t.Fatalf("unentitled describe must read as not found, got %v", err)
 	}

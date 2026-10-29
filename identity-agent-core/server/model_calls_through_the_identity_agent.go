@@ -20,7 +20,7 @@ import (
 
 	"identity-agent-core/asset"
 	"identity-agent-core/brainsignin"
-	"identity-agent-core/sandbox"
+	"identity-agent-core/permission"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -718,7 +718,7 @@ func (s *CoreServer) handleBodyStartsModelCall(w http.ResponseWriter, r *http.Re
 
 // recordModelCallDenied records a refused model call, at most
 // modelDenialsRecorded a minute for one body; the rest are refused unrecorded.
-func (s *CoreServer) recordModelCallDenied(a asset.Asset, cc sandbox.CallerContext, host, why string, now time.Time) {
+func (s *CoreServer) recordModelCallDenied(a asset.Asset, cc permission.CallerContext, host, why string, now time.Time) {
 	if s.modelCalls.mayRecordDenial(host, now) {
 		s.recordLentEvent(a, cc, "agent.model.call", "denied", why)
 	}
@@ -726,7 +726,7 @@ func (s *CoreServer) recordModelCallDenied(a asset.Asset, cc sandbox.CallerConte
 
 // standingNow is what the AI agent may do now, as a body asking now would be
 // told: started stands for the caller as it was when the call began.
-func (s *CoreServer) standingNow(a asset.Asset, started sandbox.CallerContext) sandbox.CallerContext {
+func (s *CoreServer) standingNow(a asset.Asset, started permission.CallerContext) permission.CallerContext {
 	now, ok := s.ResolveAgentCaller(a.PairwiseAID)
 	if !ok {
 		started.NoScopesBecause = "this AI agent is gone"
@@ -745,7 +745,7 @@ func (s *CoreServer) standingNow(a asset.Asset, started sandbox.CallerContext) s
 // checks every modelCallRecheck, whether or not the body collects, and asks
 // afresh what the AI agent may do each time.
 func (s *CoreServer) watchModelCall(ctx context.Context, cancel context.CancelFunc, c *modelCall, a asset.Asset,
-	cc sandbox.CallerContext, rec brainsignin.Record) {
+	cc permission.CallerContext, rec brainsignin.Record) {
 	t := time.NewTicker(modelCallRecheck)
 	defer t.Stop()
 	letGo := c.letGoCh
@@ -851,7 +851,7 @@ func (k *keyWatch) rest() []byte { return k.held }
 // runModelCall sends the call to the provider and keeps its answer for the
 // body to collect, then records the call.
 func (s *CoreServer) runModelCall(ctx context.Context, c *modelCall, checker brainsignin.Checker, rec brainsignin.Record,
-	method, target string, q modelCallRequest, body []byte, requested string, a asset.Asset, cc sandbox.CallerContext) {
+	method, target string, q modelCallRequest, body []byte, requested string, a asset.Asset, cc permission.CallerContext) {
 	var rd io.Reader
 	if len(body) > 0 {
 		rd = bytes.NewReader(body)
@@ -956,7 +956,7 @@ func (s *CoreServer) runModelCall(ctx context.Context, c *modelCall, checker bra
 // call this Identity Agent does not know — it was restarted, or the call was
 // stopped — is answered as gone, which the body tells its brain as a failed
 // call to try again.
-func (s *CoreServer) theCallAsked(w http.ResponseWriter, r *http.Request) (*modelCall, sandbox.CallerContext, asset.Asset, bool) {
+func (s *CoreServer) theCallAsked(w http.ResponseWriter, r *http.Request) (*modelCall, permission.CallerContext, asset.Asset, bool) {
 	cc, b, a, ok := s.theBodyAndItsAgent(w, r)
 	if !ok {
 		return nil, cc, a, false

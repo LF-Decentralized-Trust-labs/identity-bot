@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"identity-agent-core/authprovider"
-	"identity-agent-core/sandbox"
+	"identity-agent-core/permission"
 )
 
 // What a machine acting for this identity may do once it is authorised.
@@ -29,7 +29,7 @@ import (
 //     the device holding them, and no score opens it to a controller. Checked
 //     first, so nothing about the person can reach it.
 //  2. The one check, shared with AI agents' capability calls in the governance
-//     gateway (sandbox.MayThisPersonDoThis): is the person's identity score at
+//     gateway (permission.MayThisPersonDoThis): is the person's identity score at
 //     least the action's minimum (80 unless set in controllerMinimumScore),
 //     and may this person do this action (always yes until roles are built).
 //
@@ -73,13 +73,13 @@ var controllerOwnerOnly = map[string]string{
 	// controller never signs as the identity: it asks the Identity Agent to act,
 	// and these are the points where asking would become the identity having
 	// said something.
-	"POST /api/sign":                              "this signs as the identity, and anything it signs cannot be unsaid",
-	"POST /api/events/signature":                  "this attaches this identity's signature to an event",
-	"POST /api/signing-requests/{id}/fulfil":      "this signs as the identity, and what is signed cannot be unsaid",
+	"POST /api/sign":                         "this signs as the identity, and anything it signs cannot be unsaid",
+	"POST /api/events/signature":             "this attaches this identity's signature to an event",
+	"POST /api/signing-requests/{id}/fulfil": "this signs as the identity, and what is signed cannot be unsaid",
 	// Refusing is the key device's answer too, and a refused withdrawal is left
 	// to the owner for good: one controller could keep another's revoked grant
 	// valid in the key log by refusing its withdrawal.
-	"POST /api/signing-requests/{id}/refuse": "refusing is the key device's answer, and a refused withdrawal is never asked for again",
+	"POST /api/signing-requests/{id}/refuse":      "refusing is the key device's answer, and a refused withdrawal is never asked for again",
 	"POST /api/signing-requests/sign-for-another": "this signs with the identity's key and records it in its key log",
 	"POST /api/signing-requests/adopt":            "this takes events into the identity's key log",
 	"POST /api/interact":                          "this signs an interaction event with the identity's key, and key events are the owner's",
@@ -258,9 +258,9 @@ func mayThisControllerDoThis(
 	if why, closed := isOwnerOnly(method, pattern); closed {
 		return false, why + ", so it is done with the owner's keys on the device holding them"
 	}
-	return sandbox.MayThisPersonDoThis(
-		sandbox.Action{Name: method + " " + pattern, MinimumScore: controllerMinimumScore[method+" "+pattern]},
-		sandbox.Person{AID: who, Authenticated: authenticated},
+	return permission.MayThisPersonDoThis(
+		permission.Action{Name: method + " " + pattern, MinimumScore: controllerMinimumScore[method+" "+pattern]},
+		permission.Person{AID: who, Authenticated: authenticated},
 	)
 }
 
@@ -270,7 +270,7 @@ func whyAControllerWasRefused(method, pattern string, authenticated authprovider
 	if _, closed := isOwnerOnly(method, pattern); closed {
 		return reasonOwnerOnly
 	}
-	a := sandbox.Action{Name: method + " " + pattern, MinimumScore: controllerMinimumScore[method+" "+pattern]}
+	a := permission.Action{Name: method + " " + pattern, MinimumScore: controllerMinimumScore[method+" "+pattern]}
 	if a.MinimumScore >= 0 && (!authenticated.Measured || authenticated.Score < a.TheScoreItNeeds()) {
 		return reasonScoreTooLow
 	}

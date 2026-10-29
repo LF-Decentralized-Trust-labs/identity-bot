@@ -14,6 +14,7 @@ import (
 
 	"identity-agent-core/didcomm"
 	"identity-agent-core/drivers"
+	"identity-agent-core/permission"
 	"identity-agent-core/sandbox"
 	"identity-agent-core/store"
 )
@@ -444,7 +445,7 @@ var deliveryRecordMu sync.Mutex
 // a machine. A message still waiting is handed out again on every collection
 // until its receipt comes back, and recording each would let a machine that
 // never answers fill the log by asking.
-func (s *CoreServer) recordDeliveryOnce(cc sandbox.CallerContext, messageID, host string) {
+func (s *CoreServer) recordDeliveryOnce(cc permission.CallerContext, messageID, host string) {
 	if s.SandboxManager == nil {
 		return
 	}

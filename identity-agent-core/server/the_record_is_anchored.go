@@ -24,7 +24,7 @@ import (
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/keriengine"
 	"identity-agent-core/login"
-	"identity-agent-core/sandbox"
+	"identity-agent-core/permission"
 	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
 	"identity-agent-core/witness"
@@ -624,7 +624,7 @@ func (s *CoreServer) anchorRecord() (bool, error) {
 	// The anchoring is written to the log first, and the anchor fixes that
 	// row: a log that says the record was anchored cannot be handed out
 	// without the anchors, and the next tick finds nothing new to anchor.
-	if s.SandboxManager.RecordGovernanceEvent(sandbox.CallerContext{CallerAID: rec.AID,
+	if s.SandboxManager.RecordGovernanceEvent(permission.CallerContext{CallerAID: rec.AID,
 		Reason: "anchoring the record in the key log of " + rec.AID}, capabilityRecordAnchoring, "ok") != 0 {
 		if row, head, err = s.SandboxManager.Store().Head(); err != nil {
 			return false, err

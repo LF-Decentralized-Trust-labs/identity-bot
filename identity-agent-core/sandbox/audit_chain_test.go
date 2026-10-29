@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"identity-agent-core/permission"
 )
 
 func newTestSandboxStore(t *testing.T) *SandboxStore {
@@ -456,7 +458,7 @@ func newLoggingManager(t *testing.T) (*Manager, *keepingSigner) {
 func logEvents(t *testing.T, m *Manager, ids ...string) {
 	t.Helper()
 	for _, id := range ids {
-		if m.RecordGovernanceEvent(CallerContext{CallerAID: "EAgent", Reason: "test"}, id, "ok") == 0 {
+		if m.RecordGovernanceEvent(permission.CallerContext{CallerAID: "EAgent", Reason: "test"}, id, "ok") == 0 {
 			t.Fatalf("event %s not written", id)
 		}
 	}
@@ -519,7 +521,7 @@ func TestNoUnsignedRowIsWrittenOnceTheChainHasBegun(t *testing.T) {
 	m, k := newLoggingManager(t)
 	logEvents(t, m, "h.one")
 	k.fail = true
-	if id := m.RecordGovernanceEvent(CallerContext{CallerAID: "EAgent"}, "h.two", "ok"); id != 0 {
+	if id := m.RecordGovernanceEvent(permission.CallerContext{CallerAID: "EAgent"}, "h.two", "ok"); id != 0 {
 		t.Fatalf("an unsigned row %d was written after the chain began", id)
 	}
 	var n int
@@ -651,7 +653,7 @@ func actingManager(t *testing.T) (*Manager, *keepingSigner, *fakeInvoker) {
 }
 
 func act(m *Manager) error {
-	_, err := m.InvokeCapability(context.Background(), CallerContext{CallerAID: "local-owner"}, "act.now", []byte(`{}`))
+	_, err := m.InvokeCapability(context.Background(), permission.CallerContext{CallerAID: "local-owner"}, "act.now", []byte(`{}`))
 	return err
 }
 
