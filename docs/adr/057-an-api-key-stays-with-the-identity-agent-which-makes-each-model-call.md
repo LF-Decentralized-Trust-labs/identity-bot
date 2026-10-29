@@ -65,7 +65,8 @@ and the paging of a list of models. Nothing else the key could do is passed on.
 One machine may hold at most eight calls here for its AI agent, whichever leases they
 cite: a call counts from when it starts until its whole answer is collected or it is
 swept away. What every answer holds before it is collected is bounded across all
-calls, and a call that would pass the bound is stopped.
+calls, and a call that would pass the bound is stopped; so is how many calls are kept
+at once across every machine.
 
 **The key never travels back.** A provider can quote what it was sent, in an error
 above all. Every answer is read for the key as it arrives, holding back the last few
