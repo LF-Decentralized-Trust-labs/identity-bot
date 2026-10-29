@@ -62,7 +62,9 @@ type chatRequest struct {
 	MaxTokens int
 }
 
-// chatMaxTokens is how long an answer may be, where the API needs to be told.
+// chatMaxTokens is how long an answer may be, unless the call says otherwise.
+// Every call says it, so an Identity Agent capping what a run spends can bound
+// each call (ADR-057).
 const chatMaxTokens = 8192
 
 // chatAnswer is what the model answered: its words, the tools it asked for,
@@ -160,6 +162,13 @@ func (c chatClient) body(r chatRequest) []byte {
 			msgs = append(msgs, openAIMessage(m))
 		}
 		req["messages"] = msgs
+		// OpenAI's own API names it max_completion_tokens, which its reasoning
+		// models require; xAI and OpenRouter name it max_tokens.
+		if c.API == "openai" {
+			req["max_completion_tokens"] = max
+		} else {
+			req["max_tokens"] = max
+		}
 		if len(r.Tools) > 0 {
 			var tools []map[string]any
 			for _, t := range r.Tools {

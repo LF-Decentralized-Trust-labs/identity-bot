@@ -318,6 +318,7 @@ func TestEveryActionClosedToASessionWasDecidedForAControllerToo(t *testing.T) {
 		"POST /api/mcp/brain-sign-in/models":             "listing a key's models to choose one is the application's work (ADR-052)",
 		"POST /api/mcp/agents/{id}/brain-sign-in/models": "listing a kept key's models is the application's work (ADR-052)",
 		"PUT /api/mcp/agents/{id}/brain":                 "choosing an AI agent's model is the application's work, recorded (ADR-052)",
+		"PUT /api/mcp/agents/{id}/model-allowance":       "capping what an AI agent's model calls spend is the application's work, recorded (ADR-057)",
 		"PUT /api/github":                                "connecting the organisation's GitHub App is the application's work (ADR-054)",
 		"DELETE /api/github":                             "disconnecting the organisation's GitHub App is the application's work (ADR-054)",
 		"GET /api/github/repositories":                   "listing the App's repositories is the application's work (ADR-054)",

@@ -184,6 +184,8 @@ func TestABrowserSessionCannotChangeABrainsSignIn(t *testing.T) {
 		"POST /api/mcp/brain-sign-in/test", "POST /api/mcp/agents/{id}/brain-sign-in/test",
 		"POST /api/mcp/brain-sign-in/models", "POST /api/mcp/agents/{id}/brain-sign-in/models",
 		"PUT /api/mcp/agents/{id}/brain",
+		// An allowance lets an AI agent spend from the organisation's key.
+		"PUT /api/mcp/agents/{id}/model-allowance",
 	} {
 		if _, ok := sessionForbidden[route]; !ok {
 			t.Errorf("%s is open to a browser session", route)

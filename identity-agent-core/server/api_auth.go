@@ -768,6 +768,9 @@ var sessionForbidden = map[string]string{
 	// outlive the session.
 	"PATCH /api/mcp/agents/{id}":     "changing where an AI agent's model is reached, and with which key, outlives the session that changed it",
 	"PUT /api/mcp/agents/{id}/brain": "changing which model an AI agent uses, and what runs it, outlives the session that changed it",
+	// An allowance says how much an AI agent's model calls may spend from the
+	// organisation's key, which outlives the session that set it.
+	"PUT /api/mcp/agents/{id}/model-allowance": "an allowance lets an AI agent spend from the organisation's key, after the session that set it ends",
 	// The same, by the brain's sign-in: its key, its account, and a local
 	// model server's address.
 	"PUT /api/mcp/agents/{id}/brain-sign-in":    "signing an AI agent's brain in, with which key and at which address, outlives the session that did it",

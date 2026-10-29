@@ -681,3 +681,32 @@ func TestToolCallIdsAreMadeFitForAnthropicWithoutColliding(t *testing.T) {
 		t.Fatalf("%q %q", a, b)
 	}
 }
+
+// Every call agent-host makes says how long an answer it wants, as each API
+// names it, so an Identity Agent capping what a run spends can bound each
+// call (ADR-057): OpenAI's own API as max_completion_tokens, which its
+// reasoning models require, xAI and OpenRouter as max_tokens, Anthropic as
+// max_tokens.
+func TestEveryModelCallSaysHowLongAnAnswerItWants(t *testing.T) {
+	for api, key := range map[string]string{"openai": "max_completion_tokens", "openrouter": "max_tokens",
+		"xai": "max_tokens", "anthropic": "max_tokens"} {
+		for _, asked := range []int{0, loopAnswerLongest} {
+			var req map[string]any
+			if err := json.Unmarshal(chatClient{API: api}.body(chatRequest{Model: "m", MaxTokens: asked}), &req); err != nil {
+				t.Fatal(err)
+			}
+			want := float64(asked)
+			if asked == 0 {
+				want = chatMaxTokens
+			}
+			if req[key] != want {
+				t.Fatalf("%s, asking %d: %s is %v in %v", api, asked, key, req[key], req)
+			}
+			for _, other := range []string{"max_tokens", "max_completion_tokens"} {
+				if other != key && req[other] != nil {
+					t.Fatalf("%s names the answer's length twice: %v", api, req)
+				}
+			}
+		}
+	}
+}

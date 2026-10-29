@@ -25,8 +25,8 @@ func provider(t *testing.T) (*httptest.Server, *[]string) {
 			rw.WriteHeader(http.StatusUnauthorized)
 		case r.URL.Path == "/or/v1/models":
 			_, _ = rw.Write([]byte(`{"data":[
-				{"id":"z-ai/glm-5","name":"Z.ai: GLM 5","context_length":200000,"pricing":{"prompt":"0.0000006","completion":"0.0000022"}},
-				{"id":"anthropic/claude-haiku-4.5","name":"Anthropic: Claude Haiku 4.5\n","context_length":200000,"pricing":{"prompt":"0.000001","completion":"0.000005"}},
+				{"id":"z-ai/glm-5","name":"Z.ai: GLM 5","context_length":200000,"pricing":{"prompt":"0.0000006","completion":"0.0000022"},"supported_parameters":["tools","temperature"]},
+				{"id":"anthropic/claude-haiku-4.5","name":"Anthropic: Claude Haiku 4.5\n","context_length":200000,"pricing":{"prompt":"0.000001","completion":"0.000005"},"supported_parameters":["temperature"]},
 				{"id":"anthropic/claude-haiku-4.5","name":"listed twice"},
 				{"id":"","name":"no id"},
 				{"id":"odd/pricing","name":"Odd","context_length":"8192","pricing":{"prompt":"free","completion":0.5}}]}`))
@@ -47,8 +47,8 @@ func checkerOf(srv *httptest.Server) brainsignin.Checker {
 		Send: func(ctx context.Context, req *http.Request, c *http.Client) (*http.Response, error) { return c.Do(req) }}
 }
 
-// OpenRouter's models are listed with their names, context lengths and prices
-// per token, once each, sorted by name, every field one printable line; the
+// OpenRouter's models are listed with their names, context lengths, prices
+// per token and whether they can use tools, once each, sorted by name, every field one printable line; the
 // key goes only to OpenRouter's own address.
 func TestOpenRoutersModelsAreListedWithTheirPrices(t *testing.T) {
 	srv, seen := provider(t)
@@ -64,6 +64,16 @@ func TestOpenRoutersModelsAreListedWithTheirPrices(t *testing.T) {
 	}
 	if o := got.Models[1]; o.ID != "odd/pricing" || o.ContextLength != 8192 || o.PromptPrice != "" || o.CompletionPrice != "0.5" {
 		t.Fatalf("a model with odd pricing: %+v", o)
+	}
+	// Whether each can use tools, where OpenRouter says; nothing where it does not.
+	if g := got.Models[2]; g.UsesTools == nil || !*g.UsesTools {
+		t.Fatalf("a model that uses tools: %+v", g)
+	}
+	if h.UsesTools == nil || *h.UsesTools {
+		t.Fatalf("a model that does not use tools: %+v", h)
+	}
+	if got.Models[1].UsesTools != nil {
+		t.Fatalf("a model OpenRouter said nothing of: %+v", got.Models[1])
 	}
 	if len(*seen) != 1 || (*seen)[0] != "/or/v1/models Bearer sk-or-v1-key" {
 		t.Fatalf("OpenRouter was asked: %v", *seen)

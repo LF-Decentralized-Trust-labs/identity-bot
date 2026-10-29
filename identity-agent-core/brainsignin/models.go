@@ -31,6 +31,9 @@ type Model struct {
 	ContextLength   int    `json:"context_length,omitempty"`
 	PromptPrice     string `json:"prompt_price,omitempty"`
 	CompletionPrice string `json:"completion_price,omitempty"`
+	// UsesTools says whether the model can be asked to use tools, where the
+	// provider says (OpenRouter does); nil where it does not.
+	UsesTools *bool `json:"uses_tools,omitempty"`
 }
 
 // ModelsResult is what listing a sign-in's models found. It never holds the
@@ -128,6 +131,7 @@ func readModels(provider string, body []byte) ([]Model, string, bool) {
 				Prompt     any `json:"prompt"`
 				Completion any `json:"completion"`
 			} `json:"pricing"`
+			SupportedParameters []any `json:"supported_parameters"`
 		} `json:"data"`
 		HasMore bool   `json:"has_more"`
 		LastID  string `json:"last_id"`
@@ -140,6 +144,15 @@ func readModels(provider string, body []byte) ([]Model, string, bool) {
 		m := Model{ID: d.ID, Name: firstOf(d.Name, d.DisplayName), ContextLength: number(d.ContextLength)}
 		if provider == OpenRouter {
 			m.PromptPrice, m.CompletionPrice = price(d.Pricing.Prompt), price(d.Pricing.Completion)
+			if d.SupportedParameters != nil {
+				tools := false
+				for _, p := range d.SupportedParameters {
+					if p == "tools" {
+						tools = true
+					}
+				}
+				m.UsesTools = &tools
+			}
 		}
 		out = append(out, m)
 	}

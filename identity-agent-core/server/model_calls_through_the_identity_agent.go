@@ -237,6 +237,10 @@ type modelCall struct {
 	// buffered counts what every call holds of answers not yet collected.
 	buffered *atomic.Int64
 
+	// counted says the call has ended and what it cost has been counted
+	// against its AI agent's allowance, where it has one.
+	counted atomic.Bool
+
 	mu sync.Mutex
 	// lease is the lease the run cites now: a run whose lease lapsed takes
 	// another, and its next collection says so.
@@ -425,23 +429,40 @@ type denials struct {
 //
 // No more than modelCallsHeld calls are kept at once across every machine.
 func (t *modelCallTable) add(c *modelCall) bool {
+	added, _ := t.addIf(c, nil)
+	return added
+}
+
+// addIf is add, asking mayStart last, with the table held, how many of the
+// AI agent's calls on any machine are still under way, and with a way to ask
+// whether the table holds a call; an error from it refuses the call.
+func (t *modelCallTable) addIf(c *modelCall, mayStart func(underWay int, known func(string) bool) error) (bool, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.calls == nil {
 		t.calls = map[string]*modelCall{}
 	}
-	n := 0
+	n, underWay := 0, 0
 	for _, o := range t.calls {
 		if o.host == c.host && o.agent == c.agent {
 			n++
 		}
+		if o.agent == c.agent && !o.counted.Load() {
+			underWay++
+		}
 	}
 	if n >= modelCallsPerBody || len(t.calls) >= modelCallsHeld {
-		return false
+		return false, nil
+	}
+	if mayStart != nil {
+		known := func(id string) bool { _, ok := t.calls[id]; return ok }
+		if err := mayStart(underWay, known); err != nil {
+			return false, err
+		}
 	}
 	c.buffered = &t.buffered
 	t.calls[c.id] = c
-	return true
+	return true, nil
 }
 
 func (t *modelCallTable) get(id string) *modelCall {
@@ -699,12 +720,41 @@ func (s *CoreServer) handleBodyStartsModelCall(w http.ResponseWriter, r *http.Re
 	}
 	c := &modelCall{id: newCallID(), agent: a.ID, host: b.Host, lease: q.LeaseID, stopCh: make(chan struct{}),
 		letGoCh: make(chan struct{}), changed: make(chan struct{}), collected: now}
-	if !s.modelCalls.add(c) {
+	bound := -1
+	if method == http.MethodPost {
+		if bound, err = theAnswerBound(body); err != nil {
+			bound = 0
+		}
+	}
+	capped := false
+	added, err := s.modelCalls.addIf(c, func(underWay int, known func(string) bool) error {
+		var err error
+		capped, err = s.allowanceRefuses(a, rec.Provider, bound, underWay, known)
+		return err
+	})
+	if err != nil {
+		code := http.StatusForbidden
+		if errors.Is(err, errAllowanceUnreadable) {
+			code = http.StatusServiceUnavailable
+		} else if errors.Is(err, errOneCallAtATime) {
+			code = http.StatusTooManyRequests
+		}
+		refuse(code, err.Error())
+		return
+	}
+	if !added {
 		why := fmt.Sprintf("this machine already holds %d model calls for this AI agent; collect their answers first",
 			modelCallsPerBody)
 		s.recordModelCallDenied(a, cc, b.Host, why, now)
 		modelCallError(w, http.StatusTooManyRequests, why, nil)
 		return
+	}
+	if capped {
+		if err := s.openAllowanceCall(a, c.id); err != nil {
+			s.modelCalls.remove(c.id)
+			modelCallError(w, http.StatusServiceUnavailable, "this AI agent's allowance cannot be kept now, so the call was not made", nil)
+			return
+		}
 	}
 	requested := printable(requestedModel(body), 128)
 	s.inBackground(func(ctx context.Context) {
@@ -852,6 +902,14 @@ func (k *keyWatch) rest() []byte { return k.held }
 // body to collect, then records the call.
 func (s *CoreServer) runModelCall(ctx context.Context, c *modelCall, checker brainsignin.Checker, rec brainsignin.Record,
 	method, target string, q modelCallRequest, body []byte, requested string, a asset.Asset, cc sandbox.CallerContext) {
+	// Until it is counted the call holds its AI agent's place while it has an
+	// allowance, whichever way it ends. One the provider never answered is
+	// counted as costing nothing: providers charge for what they answer.
+	var ended allowanceCall
+	defer func() {
+		s.chargeAllowance(a, c.id, ended)
+		c.counted.Store(true)
+	}()
 	var rd io.Reader
 	if len(body) > 0 {
 		rd = bytes.NewReader(body)
@@ -950,6 +1008,9 @@ func (s *CoreServer) runModelCall(ctx context.Context, c *modelCall, checker bra
 		said += "; " + why
 	}
 	s.recordLentEvent(a, cc, "agent.model.call", status, said)
+	ended = allowanceCall{At: time.Now().UTC().Format(time.RFC3339Nano), ProviderID: printable(use.id, 128),
+		Model: printable(use.model, 128), Status: resp.StatusCode, TokensIn: use.in, TokensOut: use.out,
+		Cost: use.cost, CostSaid: use.costSaid}
 }
 
 // theCallAsked is the model call a body names, if it is that body's own. A
@@ -1128,9 +1189,10 @@ func (s *CoreServer) stillTheKey(a asset.Asset, made brainsignin.Record, now tim
 // "usage" object's counts, keeping the largest seen of each — because an
 // answer that streams reports them across several events.
 type modelUsage struct {
-	model             string
+	model, id         string
 	in, out, cacheIn  int64
 	cost              float64
+	costSaid          bool
 	line, whole       []byte
 	sse               bool
 	sawData, tooLarge bool
@@ -1203,6 +1265,9 @@ func (u *modelUsage) walk(v any, depth int) {
 		if m, ok := t["model"].(string); ok && m != "" {
 			u.model = m
 		}
+		if id, ok := t["id"].(string); ok && depth == 0 && u.id == "" {
+			u.id = id
+		}
 		if use, ok := t["usage"].(map[string]any); ok {
 			u.counts(use)
 		}
@@ -1229,8 +1294,11 @@ func (u *modelUsage) counts(use map[string]any) {
 	most(&u.in, "prompt_tokens", "input_tokens")
 	most(&u.out, "completion_tokens", "output_tokens")
 	most(&u.cacheIn, "cache_read_input_tokens")
-	if f, ok := use["cost"].(float64); ok && f > u.cost {
-		u.cost = f
+	if f, ok := use["cost"].(float64); ok {
+		u.costSaid = true
+		if f > u.cost {
+			u.cost = f
+		}
 	}
 }
 

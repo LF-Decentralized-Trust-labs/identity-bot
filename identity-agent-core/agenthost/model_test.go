@@ -28,7 +28,7 @@ func TestABrainWhoseKeyStaysHereIsGivenItsBodysModelAddress(t *testing.T) {
 		{brainsignin.XAI, "grok", []string{"XAI_API_KEY=" + tok, "GROK_XAI_API_BASE_URL=" + url + "/v1",
 			envBrainHome + `={"var":"GROK_HOME","name":"` + H + `","legacy":"grok"}`}},
 		{brainsignin.OpenRouter, "built-in", []string{envDirectURL + "=" + url, envDirectToken + "=" + tok,
-			envDirectAPI + "=openai"}},
+			envDirectAPI + "=openrouter"}},
 		{brainsignin.Anthropic, "built-in", []string{envDirectURL + "=" + url, envDirectToken + "=" + tok,
 			envDirectAPI + "=anthropic"}},
 		{brainsignin.OpenAI, "codex", []string{"CODEX_API_KEY=" + tok, "OPENAI_BASE_URL=" + url + "/v1",

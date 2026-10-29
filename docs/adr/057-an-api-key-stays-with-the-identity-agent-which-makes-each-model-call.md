@@ -129,6 +129,39 @@ stopped under way, are recorded with why. The key is never in the record. What a
 sends is recorded only as one short printable line, and at most twenty of one body's
 refusals are recorded a minute, so a body cannot fill or forge the record.
 
+*Amended 2026-10-29.* **An AI agent's model calls may be given an allowance.** The
+owner's app, or a controller, may give an AI agent an amount, in its provider's
+currency, that its model calls may cost (`PUT /api/mcp/agents/{id}/model-allowance`).
+It is how a person caps what a run spends, such as a benchmark or a worker left on its
+own, so that nothing on the AI agent's machine can spend past it.
+
+- **Counting:** each call's cost is counted against the allowance once its answer ends,
+  as the provider says it.
+- **One call at a time:** a call's cost is known only at its end, so while an allowance
+  is set the AI agent makes one model call at a time, across every machine. A call is
+  refused while another is under way or not yet counted.
+- **Refusal:** once what is spent reaches the amount, the next call is refused, and
+  recorded. What is spent can pass the amount by at most the one call that crossed it.
+- **A bounded call:** under an allowance a model call must say how long an answer it
+  wants, at most 32,768 tokens, each way of saying it at most once, so that one call
+  is bounded too: what it reads is bounded by how large a call may be. agent-host's own
+  calls always say it.
+- **A lost call:** the call under way is written down before it is sent. One still
+  written down that the Identity Agent no longer knows was lost when it restarted, and
+  what it cost is not known, so every call after it is refused until a person sets the
+  allowance again.
+- **Changing it:** a new amount keeps what was spent, unless the person starts over. An
+  amount of nothing stops the next call. Removing the allowance lifts the cap.
+- **When the cost is not said:** a call the provider answered without saying what it
+  cost leaves what is left unknown, so every call after it is refused until a person
+  sets the allowance again.
+- **Where it can be set:** only on a key kept here, from a provider that says what each
+  call costs (OpenRouter does). Elsewhere it is refused rather than pretended.
+- **Where it is kept:** in the vault, with each counted call (its model, the provider's
+  id for it, its tokens and cost), so a restart forgets nothing.
+- **What is recorded:** setting, changing, spending and removing it, with who set it
+  and what it was before. A session may not set it, because it outlives the session.
+
 **A body from before this cannot run such a brain.** A body says, when it borrows,
 that it makes its brain's model calls through the Identity Agent. One that does not
 say so is refused and told to update. It is never lent the key.
@@ -171,5 +204,8 @@ sign-in such an AI agent cannot run with is refused when it is set.
   model rather than the one it was set to, and against OpenRouter that call was
   answered and paid for. A call naming any model but the chosen one is now refused
   here; a program that makes such calls sees them fail.
+- *Amended 2026-10-29.* While an allowance is set an AI agent's model calls run one at
+  a time, so a program that makes calls side by side sees the extra ones refused and
+  makes them again. That is the price of a cap that holds to within one call.
 - A call let go is paid for in full, where cutting it off would have saved the rest of
   its answer: knowing what every call cost is worth more than that.

@@ -148,7 +148,9 @@ func (b *Borrowed) envForDirect() ([]string, error) {
 	if b.modelURL == "" || b.modelToken == "" {
 		return nil, errors.New("this machine gave the run no model address")
 	}
-	api := "openai"
+	// OpenAI, xAI and OpenRouter all take OpenAI's chat; which of them it is
+	// decides only how the answer's length is named.
+	api := b.Provider
 	switch b.Provider {
 	case brainsignin.Anthropic:
 		api = "anthropic"

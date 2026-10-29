@@ -94,8 +94,8 @@ A kept sign-in can be checked again later. That check is recorded.
 same way as a check — one request to the provider's own address with the key, no
 redirect, the vault adding nothing — the Identity Agent lists the models an Anthropic,
 OpenAI, xAI or OpenRouter key is offered (OpenRouter's whole catalogue): each model's
-id and name, and where the provider says them, its context length and its prices per
-token. A key not yet kept can be listed, and so can the one kept for an AI agent. Only
+id and name, and where the provider says them, its context length, its prices per
+token and whether it can be asked to use tools. A key not yet kept can be listed, and so can the one kept for an AI agent. Only
 the owner's own app may ask. A model server is never asked for its list: its address is the caller's, and
 nothing such a server answers is passed back, so its model is named instead. A
 subscription has no list here: its own program chooses among its models.
