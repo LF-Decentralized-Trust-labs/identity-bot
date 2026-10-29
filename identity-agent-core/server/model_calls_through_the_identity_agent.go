@@ -63,8 +63,10 @@ const (
 	// leases they cite.
 	modelCallsPerBody = 8
 	// modelCallsBuffered bounds what is held of every answer not yet
-	// collected, across all calls.
+	// collected, across all calls, and modelCallsHeld how many calls are kept
+	// at once across every machine.
 	modelCallsBuffered = 128 << 20
+	modelCallsHeld     = 1024
 	// modelPathLongest bounds a call's path.
 	modelPathLongest = 256
 	// modelDenialsRecorded bounds the refusals recorded for one body each
@@ -132,9 +134,17 @@ func printable(s string, n int) string {
 }
 
 // modelCallIdle is how long a call goes on with nobody collecting it before
-// it is stopped and forgotten: its body is gone or gave up. A variable so a
-// test need not wait for it.
-var modelCallIdle = 90 * time.Second
+// it is stopped and forgotten: its body is gone or gave up. Held so a test
+// may shorten it while calls are being swept.
+var modelCallIdle atomicDuration
+
+func init() { modelCallIdle.Store(90 * time.Second) }
+
+// atomicDuration is a duration read and set from more than one goroutine.
+type atomicDuration struct{ n atomic.Int64 }
+
+func (d *atomicDuration) Load() time.Duration   { return time.Duration(d.n.Load()) }
+func (d *atomicDuration) Store(v time.Duration) { d.n.Store(int64(v)) }
 
 // modelCallWait is how long one collection waits for more of an answer. A
 // variable, like modelCallRecheck, so a test need not wait for it.
@@ -295,7 +305,7 @@ func (c *modelCall) finish(why string) {
 func (c *modelCall) idle(now time.Time) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return now.Sub(c.collected) > modelCallIdle
+	return now.Sub(c.collected) > modelCallIdle.Load()
 }
 
 // errCollectedAlready is a collection from before what the body already
@@ -370,6 +380,8 @@ type denials struct {
 // add keeps c, unless its body already holds modelCallsPerBody calls here for
 // its AI agent: every call still kept counts, finished or not, until its
 // answer is collected or it is swept.
+//
+// No more than modelCallsHeld calls are kept at once across every machine.
 func (t *modelCallTable) add(c *modelCall) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -382,7 +394,7 @@ func (t *modelCallTable) add(c *modelCall) bool {
 			n++
 		}
 	}
-	if n >= modelCallsPerBody {
+	if n >= modelCallsPerBody || len(t.calls) >= modelCallsHeld {
 		return false
 	}
 	c.buffered = &t.buffered
@@ -414,6 +426,11 @@ func (t *modelCallTable) sweep(now time.Time) {
 		if c.idle(now) {
 			delete(t.calls, id)
 			gone = append(gone, c)
+		}
+	}
+	for h, d := range t.denied {
+		if now.Sub(d.since) > time.Minute {
+			delete(t.denied, h)
 		}
 	}
 	t.mu.Unlock()

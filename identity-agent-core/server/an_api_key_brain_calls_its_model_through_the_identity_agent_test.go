@@ -532,9 +532,9 @@ func TestOnlyAKeyKeptHereRunsWithNoProgram(t *testing.T) {
 // wait only a moment, for the length of a test.
 func quickRecheck(t *testing.T) {
 	t.Helper()
-	was, wait, idle := modelCallRecheck, modelCallWait, modelCallIdle
+	was, wait, idle := modelCallRecheck, modelCallWait, modelCallIdle.Load()
 	modelCallRecheck, modelCallWait = 50*time.Millisecond, 2*time.Second
-	t.Cleanup(func() { modelCallRecheck, modelCallWait, modelCallIdle = was, wait, idle })
+	t.Cleanup(func() { modelCallRecheck, modelCallWait = was, wait; modelCallIdle.Store(idle) })
 }
 
 // startModelCallWith is startModelCall with the headers and body a body sends.
@@ -756,7 +756,7 @@ func TestUncollectedAnswersCountUntilTheyAreSwept(t *testing.T) {
 	if code, a := startModelCall(t, w.hostA, held.LeaseID, "/v1/messages"); code != http.StatusTooManyRequests {
 		t.Fatalf("finished, uncollected answers did not count: %d %v", code, a)
 	}
-	modelCallIdle = 100 * time.Millisecond
+	modelCallIdle.Store(100 * time.Millisecond)
 	deadline = time.Now().Add(5 * time.Second)
 	for {
 		w.s.modelCalls.mu.Lock()
@@ -983,5 +983,28 @@ func TestAnAnswerOnlyAIAgentIsNotGivenASubscription(t *testing.T) {
 	if code, _, raw := w.asOwner(t, "PUT", "/api/mcp/agents/"+w.a.ID+"/brain-sign-in",
 		`{"kind":"subscription","provider":"claude-code","secret":"sk-ant-oat01-T"}`); code != http.StatusBadRequest {
 		t.Fatalf("a subscription for an AI agent that only answers: %d %s", code, raw)
+	}
+}
+
+// However many machines ask, only so many calls are kept at once, and the
+// count of each machine's refusals is let go once its minute is over.
+func TestTheCallTableIsBoundedAcrossMachines(t *testing.T) {
+	var tb modelCallTable
+	for i := 0; i < modelCallsHeld; i++ {
+		if !tb.add(&modelCall{id: fmt.Sprint(i), host: fmt.Sprint("h", i), agent: "x", changed: make(chan struct{}),
+			collected: time.Now()}) {
+			t.Fatalf("call %d of %d was not kept", i, modelCallsHeld)
+		}
+	}
+	if tb.add(&modelCall{id: "one-more", host: "another", agent: "x", changed: make(chan struct{})}) {
+		t.Fatal("a call past the bound across every machine was kept")
+	}
+	long := time.Now().Add(-2 * time.Minute)
+	for i := 0; i < 50; i++ {
+		tb.mayRecordDenial(fmt.Sprint("h", i), long)
+	}
+	tb.sweep(time.Now())
+	if len(tb.denied) != 0 {
+		t.Fatalf("%d machines' refusal counts kept after their minute", len(tb.denied))
 	}
 }
