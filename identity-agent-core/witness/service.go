@@ -1177,10 +1177,30 @@ func (s *Service) ServeTELStub(issuerAID string) map[string]interface{} {
 // answered 404 and no receipt ever came back. Nothing reported it, because a
 // witness that does not answer is indistinguishable from one that is down, and
 // the broadcast is deliberately tolerant of that.
+// witnessBase reduces any address we hold for a witness to its origin.
+//
+// It used to strip only at "/public/oobi/", which is not a path a witness
+// service actually publishes: those advertise themselves at <base>/witness/event
+// and <base>/public/kel-digest. So the base was left untrimmed and everything
+// derived from it — the heartbeat's health probe above all — was appended to a
+// full endpoint path instead of an origin, asking for
+// <host>/witness/event/api/health.
+//
+// Every known service path is stripped, whichever arrives.
 func witnessBase(oobi string) string {
 	base := oobi
-	if idx := strings.Index(oobi, "/public/oobi/"); idx != -1 {
-		base = oobi[:idx]
+	for _, marker := range []string{
+		"/public/oobi/",
+		"/api/witness/",
+		"/witness/",
+		"/api/public/",
+		"/public/",
+		"/oobi/",
+	} {
+		if idx := strings.Index(base, marker); idx != -1 {
+			base = base[:idx]
+			break
+		}
 	}
 	return strings.TrimRight(base, "/")
 }
