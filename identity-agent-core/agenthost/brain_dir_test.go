@@ -14,7 +14,7 @@ func TestTheAIAgentsBrainIsFoundInTheBrainDirectory(t *testing.T) {
 	for provider, want := range map[string]string{
 		"claude-code": "claude", "anthropic": "claude",
 		"codex": "codex", "openai": "codex",
-		"grok": "grok", "xai": "grok", "openrouter": "grok",
+		"grok": "grok", "xai": "grok",
 	} {
 		b, err := BrainFor(provider, runner)
 		if err != nil {
@@ -32,6 +32,14 @@ func TestTheAIAgentsBrainIsFoundInTheBrainDirectory(t *testing.T) {
 		if got != filepath.Join(dir, want) {
 			t.Fatalf("%s runs %q, want %q", provider, got, filepath.Join(dir, want))
 		}
+	}
+	// agent-host's own loop is this program, wherever the others are.
+	b, err := BrainFor("openrouter", runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := programIn(b, dir).(BuiltIn); !ok || v.Path != "" {
+		t.Fatalf("an OpenRouter key runs %#v, not agent-host's own loop", programIn(b, dir))
 	}
 }
 

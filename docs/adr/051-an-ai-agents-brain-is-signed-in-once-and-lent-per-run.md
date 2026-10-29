@@ -107,6 +107,9 @@ provider decides the program:
 *Amended by ADR-052:* Codex runs an OpenAI key and a ChatGPT plan, and Grok's program
 also runs a Grok plan, OpenRouter and servers that speak OpenAI's format.
 
+*Amended by ADR-058:* an OpenRouter key is run by agent-host's own loop, not Grok's
+program.
+
 **An AI agent with no sign-in in the vault runs as before**, with whatever its machine's
 brain was signed in with by hand, and the body logs that it did.
 

@@ -119,7 +119,7 @@ accepted it.
 | A ChatGPT plan (Codex) | Codex |
 | An OpenAI key | Codex |
 | An xAI key or Grok plan | Grok |
-| An OpenRouter key | Grok |
+| An OpenRouter key | ~~Grok~~ agent-host's own loop (*amended by ADR-058*) |
 | A server that speaks OpenAI's format | Grok |
 
 A Google key is still kept if sent, but is not offered: no program a body runs

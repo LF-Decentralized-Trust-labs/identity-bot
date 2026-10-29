@@ -18,5 +18,8 @@ func TestMain(m *testing.M) {
 	if len(os.Args) > 1 && os.Args[1] == "github-credential" {
 		os.Exit(ServeGitHubCredential(os.Args[2:], os.Stdin, os.Stdout, os.Getenv))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "loop" {
+		os.Exit(ServeLoop(os.Stdin, os.Stdout, os.Stderr))
+	}
 	os.Exit(m.Run())
 }

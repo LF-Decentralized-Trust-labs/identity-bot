@@ -52,7 +52,8 @@ type RunOptions struct {
 type agentProfile struct {
 	Name, Role, Instructions, Provider, Model string
 	// Program is brainsignin.ProgramNone for an AI agent that only reads and
-	// answers (DirectModel).
+	// answers (DirectModel), and brainsignin.ProgramBuiltIn for one run by
+	// agent-host's own loop (BuiltIn).
 	Program string
 }
 
@@ -275,7 +276,11 @@ func (o RunOptions) brainOf(p agentProfile) (Brain, error) {
 	if p.Program == brainsignin.ProgramNone {
 		return DirectModel{}, nil
 	}
-	b, err := BrainFor(p.Provider, o.Runner)
+	provider := p.Provider
+	if p.Program == brainsignin.ProgramBuiltIn {
+		provider = brainsignin.HarnessBuiltIn
+	}
+	b, err := BrainFor(provider, o.Runner)
 	if err != nil {
 		return nil, err
 	}

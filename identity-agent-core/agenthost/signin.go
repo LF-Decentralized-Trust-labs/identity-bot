@@ -216,23 +216,23 @@ var credentialVars = []string{
 // settings name the variable, never the key.
 const envModelKey = "AGENT_HOST_MODEL_KEY"
 
-// openRouterAPI is OpenRouter's OpenAI-shaped address.
-const openRouterAPI = "https://openrouter.ai/api/v1"
-
 // localModelNoKey stands in for a key a local model server does not need.
 // Without some value Claude Code would send this machine's own sign-in to
 // whatever address the model server has.
 const localModelNoKey = "no-key"
 
 // Env is the borrowed sign-in as the environment of the brain that runs it,
-// named by the brain's program: "claude-code", "codex" or "grok". A program
+// named by the brain's program: "claude-code", "codex", "grok", or the host's
+// own ("model", "built-in"). A program
 // that reads its sign-in from a file — Codex and Grok — is given the file in
 // its home for the run (brainHome), which travels in the environment to the
 // wrapper that writes it; a key is given as a variable, and the program still
 // runs in a home of the host's making, so neither its own sign-in nor its own
 // settings outrank the one lent.
 func (b *Borrowed) Env(brain string) ([]string, error) {
-	if brain == directBrain {
+	if brain == directBrain || brain == builtInBrain {
+		// The host's own model calls, or its own loop's: the model address,
+		// for any key the Identity Agent keeps.
 		return b.envForDirect()
 	}
 	harness := brainsignin.Harness(b.Provider)
@@ -260,9 +260,6 @@ func (b *Borrowed) Env(brain string) ([]string, error) {
 	case harness == brainsignin.HarnessGrok && b.Kind == brainsignin.KindSubscription:
 		return []string{b.homeEnv(brainHome{Var: "GROK_HOME",
 			Files: map[string]string{"auth.json": b.secret}, Return: "auth.json"})}, nil
-	case harness == brainsignin.HarnessGrok && b.Provider == brainsignin.OpenRouter:
-		return []string{envModelKey + "=" + b.secret, b.homeEnv(brainHome{Var: "GROK_HOME",
-			ModelBaseURL: openRouterAPI})}, nil
 	case harness == brainsignin.HarnessGrok && b.Provider == brainsignin.OpenAICompatible:
 		if b.Endpoint == "" {
 			return nil, errors.New("this AI agent's model server has no address")

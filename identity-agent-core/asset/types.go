@@ -142,9 +142,10 @@ type BrainConfig struct {
 	// this identity (brain-topology enforcement).
 	TEEAttestedOnly bool `json:"tee_attested_only,omitempty"`
 	// Program is what runs the brain on its body: empty for the program its
-	// provider is run by (brainsignin.Harness), or brainsignin.ProgramNone for
+	// provider is run by (brainsignin.Harness); brainsignin.ProgramNone for
 	// an AI agent that only reads and answers, whose body calls the model
-	// itself, through the Identity Agent, with no program of its own.
+	// itself, through the Identity Agent, with no program of its own; or
+	// brainsignin.ProgramBuiltIn for agent-host's own loop (ADR-058).
 	Program string `json:"program,omitempty"`
 }
 

@@ -12,7 +12,7 @@ import (
 func TestBrainForTakesDisplayNamesAndProviders(t *testing.T) {
 	for name, want := range map[string]string{"Claude Code": "claude-code", "claude-code": "claude-code", "": "claude-code",
 		"anthropic": "claude-code", "local": "claude-code", "Grok CLI": "grok", "grok": "grok", "xai": "grok",
-		"codex": "codex", "openai": "codex", "openrouter": "grok", "openai-compatible": "grok"} {
+		"codex": "codex", "openai": "codex", "openrouter": "built-in", "built-in": "built-in", "openai-compatible": "grok"} {
 		b, err := BrainFor(name, nil)
 		if err != nil || b.Name() != want {
 			t.Errorf("%q: %v %v, want %s", name, b, err, want)
@@ -50,8 +50,6 @@ func TestABorrowedSignInIsTheVariableItsBrainReads(t *testing.T) {
 			[]string{envBrainHome + `={"var":"CODEX_HOME","name":"codex-` + H + `","legacy":"codex","files":{"auth.json":"{}"},"return":"auth.json"}`}},
 		{Borrowed{Kind: brainsignin.KindSubscription, Provider: brainsignin.Grok, secret: "{}"}, "grok",
 			[]string{envBrainHome + `={"var":"GROK_HOME","name":"grok-` + H + `","legacy":"grok","files":{"auth.json":"{}"},"return":"auth.json"}`}},
-		{Borrowed{Kind: brainsignin.KindAPIKey, Provider: brainsignin.OpenRouter, secret: "or"}, "grok",
-			[]string{envModelKey + "=or", envBrainHome + `={"var":"GROK_HOME","name":"grok-` + H + `","legacy":"grok","model_base_url":"https://openrouter.ai/api/v1"}`}},
 		{Borrowed{Kind: brainsignin.KindLocal, Provider: brainsignin.OpenAICompatible, Endpoint: "https://vllm.example/v1/"}, "grok",
 			[]string{envModelKey + "=" + localModelNoKey, envBrainHome + `={"var":"GROK_HOME","name":"grok-` + H + `","legacy":"grok","model_base_url":"https://vllm.example/v1"}`}},
 	} {
@@ -67,6 +65,11 @@ func TestABorrowedSignInIsTheVariableItsBrainReads(t *testing.T) {
 	if _, err := (&Borrowed{Kind: brainsignin.KindSubscription, Provider: brainsignin.Codex, secret: "x"}).Env("claude-code"); err == nil {
 		t.Error("a Codex sign-in was given to Claude Code")
 	}
+	// agent-host's own loop is never handed a key: it calls through the
+	// Identity Agent, or not at all.
+	if env, err := (&Borrowed{Kind: brainsignin.KindAPIKey, Provider: brainsignin.OpenRouter, secret: "or"}).Env("built-in"); err == nil {
+		t.Errorf("an OpenRouter key was lent to agent-host's own loop: %v", env)
+	}
 }
 
 // Every brain a screen may offer is one a body can run from a borrowed
@@ -75,6 +78,10 @@ func TestABorrowedSignInIsTheVariableItsBrainReads(t *testing.T) {
 func TestEveryBrainOfferedCanBeRunFromABorrowedSignIn(t *testing.T) {
 	for _, c := range brainsignin.Runnable() {
 		b := Borrowed{Kind: c.Kind, Provider: c.Provider, secret: "s", Endpoint: "http://127.0.0.1:1"}
+		if c.StaysWithIdentityAgent {
+			b = Borrowed{Kind: c.Kind, Provider: c.Provider, throughIdentityAgent: true,
+				modelURL: "http://127.0.0.1:2/model", modelToken: "ahm-t"}
+		}
 		if _, err := b.Env(c.Harness); err != nil {
 			t.Errorf("%s/%s on %s: %v", c.Kind, c.Provider, c.Harness, err)
 		}
