@@ -131,7 +131,8 @@ type brainSignInRequest struct {
 
 // record is the sign-in to keep, given the one kept now, if any. A field left
 // out keeps its current value while the sign-in stays the same kind for the
-// same provider, so changing only the cap does not ask for the key again.
+// same provider, so changing only the cap does not ask for the key again. The
+// account's name and the expiry are kept only while the secret is too.
 func (q brainSignInRequest) record(prev *brainsignin.Record, now time.Time) (brainsignin.Record, error) {
 	provider := brainsignin.NormaliseProvider(q.Provider)
 	kind := brainsignin.NormaliseKind(q.Kind, provider)
@@ -149,16 +150,19 @@ func (q brainSignInRequest) record(prev *brainsignin.Record, now time.Time) (bra
 		MaxConcurrentRuns: brainsignin.DefaultMaxConcurrentRuns(kind, provider),
 	}
 	if same {
+		// The account's name and the expiry belong to the secret they were
+		// given with, so they carry over only while that secret is kept.
+		keptSecret := rec.Secret == "" || rec.Secret == prev.Secret
 		if rec.Secret == "" {
 			rec.Secret = prev.Secret
 		}
-		if rec.Account == "" {
+		if rec.Account == "" && keptSecret {
 			rec.Account = prev.Account
 		}
 		if rec.Endpoint == "" {
 			rec.Endpoint = prev.Endpoint
 		}
-		if rec.ExpiresAt == nil {
+		if rec.ExpiresAt == nil && keptSecret {
 			rec.ExpiresAt = prev.ExpiresAt
 		}
 		rec.MaxConcurrentRuns = prev.MaxConcurrentRuns
