@@ -16,6 +16,7 @@ import (
 
 	"identity-agent-core/asset"
 	"identity-agent-core/githubapp"
+	"identity-agent-core/githubrepo"
 	"identity-agent-core/lending"
 	"identity-agent-core/permission"
 	"identity-agent-core/vault"
@@ -44,13 +45,13 @@ import (
 // The capabilities that grant repositories, and the arguments their grants
 // limit, as githubapp defines them.
 const (
-	capabilityRepoRead  = githubapp.CapabilityRead
-	capabilityRepoWrite = githubapp.CapabilityWrite
-	repoArgument        = githubapp.RepositoryArgument
-	repoIDArgument      = githubapp.RepositoryIDArgument
+	capabilityRepoRead  = githubrepo.CapabilityRead
+	capabilityRepoWrite = githubrepo.CapabilityWrite
+	repoArgument        = githubrepo.RepositoryArgument
+	repoIDArgument      = githubrepo.RepositoryIDArgument
 )
 
-func capabilityFor(a githubapp.Access) string { return a.Capability() }
+func capabilityFor(a githubrepo.Access) string { return a.Capability() }
 
 var githubAppRef = vault.KeptRef("github-app")
 
@@ -262,9 +263,9 @@ func (s *CoreServer) handleGitHubRepositories(w http.ResponseWriter, r *http.Req
 // number for the repository: a grant gives that repository, so one deleted and
 // made again under the same name is not given.
 type repoGrant struct {
-	Repository string           `json:"repository"`
-	ID         int64            `json:"id"`
-	Access     githubapp.Access `json:"access"`
+	Repository string            `json:"repository"`
+	ID         int64             `json:"id"`
+	Access     githubrepo.Access `json:"access"`
 }
 
 // stringsIn reads a constraint's list of values.
@@ -292,7 +293,7 @@ func namedIn(constraints map[string]interface{}, capID string) map[int64]string 
 	names, ids := stringsIn(args[repoArgument]), stringsIn(args[repoIDArgument])
 	out := map[int64]string{}
 	for i, name := range names {
-		repo, err := githubapp.NormaliseRepository(name)
+		repo, err := githubrepo.NormaliseRepository(name)
 		if err != nil || i >= len(ids) {
 			continue
 		}
@@ -310,7 +311,7 @@ func namedIn(constraints map[string]interface{}, capID string) map[int64]string 
 // repositories gives none.
 func reposIn(scopes []string, constraints map[string]interface{}) map[int64]repoGrant {
 	out := map[int64]repoGrant{}
-	for _, access := range []githubapp.Access{githubapp.Read, githubapp.Write} {
+	for _, access := range []githubrepo.Access{githubrepo.Read, githubrepo.Write} {
 		capID := capabilityFor(access)
 		if !containsString(scopes, capID) {
 			continue
@@ -403,19 +404,19 @@ func (s *CoreServer) handleSetAgentGitHub(w http.ResponseWriter, r *http.Request
 		jsonError(w, "name the repositories it may use (send [] for none)", http.StatusBadRequest)
 		return
 	}
-	want := map[string]githubapp.Access{}
+	want := map[string]githubrepo.Access{}
 	for _, x := range q.Repositories {
-		repo, err := githubapp.NormaliseRepository(x.Repository)
+		repo, err := githubrepo.NormaliseRepository(x.Repository)
 		if err != nil {
 			jsonError(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		access, err := githubapp.ParseAccess(x.Access)
+		access, err := githubrepo.ParseAccess(x.Access)
 		if err != nil {
 			jsonError(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if access == githubapp.Write || want[repo] == "" {
+		if access == githubrepo.Write || want[repo] == "" {
 			want[repo] = access
 		}
 	}
@@ -469,10 +470,10 @@ func (s *CoreServer) handleSetAgentGitHub(w http.ResponseWriter, r *http.Request
 				limits[k] = v
 			}
 		}
-		for _, access := range []githubapp.Access{githubapp.Read, githubapp.Write} {
+		for _, access := range []githubrepo.Access{githubrepo.Read, githubrepo.Write} {
 			var names, ids []interface{}
 			for _, g := range sortedGrants(grants) {
-				if access == githubapp.Read || g.Access == githubapp.Write {
+				if access == githubrepo.Read || g.Access == githubrepo.Write {
 					names = append(names, g.Repository)
 					ids = append(ids, strconv.FormatInt(g.ID, 10))
 				}
@@ -528,7 +529,7 @@ func (d githubLendData) grants() []repoGrant {
 	m := map[int64]repoGrant{}
 	for _, t := range d.Tokens {
 		for i, id := range t.RepositoryIDs {
-			if g, ok := m[id]; ok && g.Access == githubapp.Write {
+			if g, ok := m[id]; ok && g.Access == githubrepo.Write {
 				continue
 			}
 			name := ""
@@ -546,7 +547,7 @@ func (d githubLendData) grants() []repoGrant {
 // Write refused leaves read as its grant gives it.
 func (s *CoreServer) lendableRepos(cc permission.CallerContext) map[int64]repoGrant {
 	out := map[int64]repoGrant{}
-	for _, access := range []githubapp.Access{githubapp.Read, githubapp.Write} {
+	for _, access := range []githubrepo.Access{githubrepo.Read, githubrepo.Write} {
 		capID := capabilityFor(access)
 		if ok, _ := s.SandboxManager.MayBeLent(cc, capID); !ok {
 			continue
@@ -619,7 +620,7 @@ func (s *CoreServer) githubLendCheck(x lending.Lend) *lending.Narrowed {
 		covered := len(t.RepositoryIDs) > 0
 		for i, id := range t.RepositoryIDs {
 			g, ok := granted[id]
-			if !ok || (t.Access == githubapp.Write && g.Access != githubapp.Write) {
+			if !ok || (t.Access == githubrepo.Write && g.Access != githubrepo.Write) {
 				covered = false
 				name := fmt.Sprint(id)
 				if i < len(t.Repositories) {
@@ -736,7 +737,7 @@ func (s *CoreServer) handleBodyBorrowsGitHub(w http.ResponseWriter, r *http.Requ
 		}
 		narrowed := map[int64]repoGrant{}
 		for _, name := range q.Repositories {
-			repo, err := githubapp.NormaliseRepository(name)
+			repo, err := githubrepo.NormaliseRepository(name)
 			if err != nil {
 				jsonError(w, err.Error(), http.StatusBadRequest)
 				return
@@ -754,7 +755,7 @@ func (s *CoreServer) handleBodyBorrowsGitHub(w http.ResponseWriter, r *http.Requ
 	}
 	if len(lendable) == 0 {
 		why := "the one check refused every repository this AI agent's grant names"
-		for _, access := range []githubapp.Access{githubapp.Write, githubapp.Read} {
+		for _, access := range []githubrepo.Access{githubrepo.Write, githubrepo.Read} {
 			if ok, reason := s.SandboxManager.MayBeLent(cc, capabilityFor(access)); !ok && reason != "" {
 				why = reason
 			}
@@ -774,17 +775,17 @@ func (s *CoreServer) handleBodyBorrowsGitHub(w http.ResponseWriter, r *http.Requ
 	for _, g := range sortedGrants(lendable) {
 		ref := githubapp.RepoRef{ID: g.ID, Name: g.Repository}
 		every = append(every, ref)
-		if g.Access == githubapp.Write {
+		if g.Access == githubrepo.Write {
 			writable = append(writable, ref)
 		}
 	}
-	plan := map[githubapp.Access][]githubapp.RepoRef{}
+	plan := map[githubrepo.Access][]githubapp.RepoRef{}
 	if len(writable) > 0 {
-		plan[githubapp.Write] = writable
+		plan[githubrepo.Write] = writable
 	}
-	plan[githubapp.Read] = every
+	plan[githubrepo.Read] = every
 	data := githubLendData{AppID: conn.AppID, InstallationID: conn.InstallationID, Key: conn.KeyFingerprint()}
-	for _, access := range []githubapp.Access{githubapp.Write, githubapp.Read} {
+	for _, access := range []githubrepo.Access{githubrepo.Write, githubrepo.Read} {
 		repos := plan[access]
 		if len(repos) == 0 {
 			continue

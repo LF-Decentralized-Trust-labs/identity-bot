@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strconv"
 
-	"identity-agent-core/githubapp"
+	"identity-agent-core/githubrepo"
 )
 
 // A request can change only which GitHub repositories an AI agent may use:
@@ -44,17 +44,17 @@ func checkRepositoriesAsked(cred acdc, raw json.RawMessage) error {
 	if len(raw) == 0 || json.Unmarshal(raw, &asked) != nil || asked == nil {
 		return fmt.Errorf("the request names no list of repositories")
 	}
-	want := map[string]githubapp.Access{}
+	want := map[string]githubrepo.Access{}
 	for _, x := range asked {
-		name, err := githubapp.NormaliseRepository(x.Repository)
+		name, err := githubrepo.NormaliseRepository(x.Repository)
 		if err != nil {
 			return fmt.Errorf("the request names a repository that is not one: %w", err)
 		}
-		access, err := githubapp.ParseAccess(x.Access)
+		access, err := githubrepo.ParseAccess(x.Access)
 		if err != nil {
 			return fmt.Errorf("the request names an access that is not one: %w", err)
 		}
-		if access == githubapp.Write || want[name] == "" {
+		if access == githubrepo.Write || want[name] == "" {
 			want[name] = access
 		}
 	}
@@ -68,11 +68,11 @@ func checkRepositoriesAsked(cred acdc, raw json.RawMessage) error {
 			return fmt.Errorf("the grant's limits are unreadable")
 		}
 	}
-	for _, access := range []githubapp.Access{githubapp.Read, githubapp.Write} {
+	for _, access := range []githubrepo.Access{githubrepo.Read, githubrepo.Write} {
 		capID := access.Capability()
 		var expected []string
 		for name, a := range want {
-			if access == githubapp.Read || a == githubapp.Write {
+			if access == githubrepo.Read || a == githubrepo.Write {
 				expected = append(expected, name)
 			}
 		}
@@ -92,8 +92,8 @@ func checkRepositoriesAsked(cred acdc, raw json.RawMessage) error {
 			return fmt.Errorf("the grant does not give %s on the repositories the request asked for", capID)
 		}
 		var got []string
-		for _, n := range limit[githubapp.RepositoryArgument] {
-			name, err := githubapp.NormaliseRepository(n)
+		for _, n := range limit[githubrepo.RepositoryArgument] {
+			name, err := githubrepo.NormaliseRepository(n)
 			if err != nil {
 				return fmt.Errorf("the grant names a repository that is not one: %w", err)
 			}
@@ -106,7 +106,7 @@ func checkRepositoriesAsked(cred acdc, raw json.RawMessage) error {
 		// Each repository is also named by GitHub's number for it, in the same
 		// place: a grant naming it without its number gives nothing, so one
 		// whose lists differ in length does not give what was asked.
-		numbers := limit[githubapp.RepositoryIDArgument]
+		numbers := limit[githubrepo.RepositoryIDArgument]
 		if len(numbers) != len(got) {
 			return fmt.Errorf("the grant does not name each repository the request asked for by GitHub's number")
 		}

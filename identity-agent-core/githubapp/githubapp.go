@@ -24,11 +24,12 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"identity-agent-core/githubrepo"
 )
 
 // DefaultAPI is GitHub's API. An Identity Agent reaches no other: the address
@@ -38,56 +39,6 @@ const DefaultAPI = "https://api.github.com"
 
 // DefaultGitHost is where git reaches GitHub's repositories.
 const DefaultGitHost = "github.com"
-
-// Access is what an AI agent may do in a repository.
-type Access string
-
-const (
-	// Read is cloning and reading.
-	Read Access = "read"
-	// Write is also committing, pushing and opening pull requests.
-	Write Access = "write"
-)
-
-// The capabilities that grant repositories, each limited to the repositories
-// its grant names: by owner/name under RepositoryArgument and by GitHub's
-// number under RepositoryIDArgument, in the same place in each list. The one
-// definition the Identity Agent grants with and a verifier checks against.
-const (
-	CapabilityRead       = "code.repository.read"
-	CapabilityWrite      = "code.repository.write"
-	RepositoryArgument   = "repository"
-	RepositoryIDArgument = "repository_id"
-)
-
-// Capability is the capability that grants an access.
-func (a Access) Capability() string {
-	if a == Write {
-		return CapabilityWrite
-	}
-	return CapabilityRead
-}
-
-// Permissions are what a token for an access asks GitHub for. A GitHub App
-// must have been given at least these when it was made, or GitHub refuses the
-// token.
-func (a Access) Permissions() map[string]string {
-	if a == Write {
-		return map[string]string{"contents": "write", "pull_requests": "write", "metadata": "read"}
-	}
-	return map[string]string{"contents": "read", "metadata": "read"}
-}
-
-// ParseAccess is an access as a person or a screen named it.
-func ParseAccess(s string) (Access, error) {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "read", "read only", "read-only":
-		return Read, nil
-	case "write", "read and write", "read-write":
-		return Write, nil
-	}
-	return "", fmt.Errorf("access must be read or write, not %q", s)
-}
 
 // Connection is what an organisation's GitHub App is, as the vault keeps it.
 // PrivateKey is the App's key, as GitHub gave it; it is never returned.
@@ -191,27 +142,6 @@ func AppJWT(key *rsa.PrivateKey, appID int64, now time.Time) (string, error) {
 		return "", err
 	}
 	return signing + "." + enc.EncodeToString(sig), nil
-}
-
-// ownerName is what GitHub allows in an account's name: letters, digits and
-// hyphens, not starting with a hyphen — and, for an enterprise's managed
-// users, an underscore before its short code.
-var ownerName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$`)
-
-// repoName is what GitHub allows in a repository's name: letters, digits, '.',
-// '_' and '-', in any place, so ".github" and "_site" are names.
-var repoName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)
-
-// NormaliseRepository is a repository as "owner/name", lower-cased, since
-// GitHub's names are not case-sensitive. A name that is not one is refused.
-func NormaliseRepository(s string) (string, error) {
-	s = strings.TrimSpace(s)
-	s = strings.TrimSuffix(strings.TrimPrefix(s, "https://github.com/"), ".git")
-	owner, name, ok := strings.Cut(s, "/")
-	if !ok || !ownerName.MatchString(owner) || !repoName.MatchString(name) || name == "." || name == ".." {
-		return "", fmt.Errorf("%q is not a GitHub repository; name it as owner/name", s)
-	}
-	return strings.ToLower(owner + "/" + name), nil
 }
 
 // Sender sends a request to GitHub. The Identity Agent sends it through its
@@ -390,9 +320,9 @@ type Token struct {
 	// Repositories are the repositories GitHub says it works for, as
 	// owner/name, and RepositoryIDs the same by GitHub's own numbers, which a
 	// repository deleted and made again under the same name does not keep.
-	Repositories  []string `json:"repositories"`
-	RepositoryIDs []int64  `json:"repository_ids"`
-	Access        Access   `json:"access"`
+	Repositories  []string          `json:"repositories"`
+	RepositoryIDs []int64           `json:"repository_ids"`
+	Access        githubrepo.Access `json:"access"`
 }
 
 // RepoRef is a repository by GitHub's number for it, and its name.
@@ -407,7 +337,7 @@ type RepoRef struct {
 // checked to be no wider than asked: it must name only those repositories, as
 // a selection, and grant exactly the permissions asked. A token that is wider
 // is withdrawn and refused.
-func (c Client) Mint(ctx context.Context, conn Connection, repos []RepoRef, access Access) (Token, error) {
+func (c Client) Mint(ctx context.Context, conn Connection, repos []RepoRef, access githubrepo.Access) (Token, error) {
 	if len(repos) == 0 {
 		return Token{}, errors.New("a token is asked for at least one repository")
 	}
