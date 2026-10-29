@@ -1,12 +1,10 @@
 package agenthost
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -43,19 +41,10 @@ const (
 	envDirectAPI   = "AGENT_HOST_MODEL_API"
 )
 
-// directAnswerLargest bounds the words of an answer.
-const directAnswerLargest = 2 << 20
-
 // directHistoryLargest bounds the conversation sent with each turn, and kept:
 // the oldest turns are let go first. It is well under what one model call
 // may carry to the Identity Agent.
 const directHistoryLargest = 1 << 20
-
-// directMessage is one message of the conversation, as both APIs take it.
-type directMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
 
 func credential(creds []string, name string) string {
 	for _, kv := range creds {
@@ -89,7 +78,7 @@ func (d DirectModel) Run(ctx context.Context, t Turn) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, err
 	}
-	var history []directMessage
+	var history []chatMessage
 	if t.Resume {
 		b, err := os.ReadFile(path)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -99,49 +88,18 @@ func (d DirectModel) Run(ctx context.Context, t Turn) (Outcome, error) {
 			return Outcome{}, errors.New("the conversation so far is unreadable")
 		}
 	}
-	history = trimHistory(append(history, directMessage{Role: "user", Content: t.Prompt}))
+	history = trimHistory(append(history, chatMessage{Role: "user", Content: t.Prompt}))
 
-	var req []byte
-	var endpoint string
-	if api == "anthropic" {
-		endpoint = url + "/v1/messages"
-		req, _ = json.Marshal(map[string]any{"model": t.Model, "max_tokens": 8192, "system": t.Instructions,
-			"messages": history})
-	} else {
-		endpoint = url + "/v1/chat/completions"
-		msgs := append([]directMessage{{Role: "system", Content: t.Instructions}}, history...)
-		req, _ = json.Marshal(map[string]any{"model": t.Model, "messages": msgs})
-	}
-	hr, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(req))
+	c := chatClient{URL: url, Token: token, API: api, HTTP: d.HTTP}
+	a, err := c.Call(ctx, chatRequest{Model: t.Model, Instructions: t.Instructions, Messages: history})
 	if err != nil {
 		return Outcome{}, err
 	}
-	hr.Header.Set("Content-Type", "application/json")
-	hr.Header.Set("Authorization", "Bearer "+token)
-	if api == "anthropic" {
-		hr.Header.Set("Anthropic-Version", "2023-06-01")
-	}
-	client := d.HTTP
-	if client == nil {
-		client = &http.Client{}
-	}
-	resp, err := client.Do(hr)
-	if err != nil {
-		return Outcome{}, fmt.Errorf("the model could not be reached: %w", err)
-	}
-	defer resp.Body.Close()
-	out, err := io.ReadAll(io.LimitReader(resp.Body, directAnswerLargest))
-	if err != nil {
-		return Outcome{}, fmt.Errorf("the model's answer was cut off: %w", err)
-	}
-	text, model, why := readDirectAnswer(api, out)
-	if resp.StatusCode != http.StatusOK {
-		return Outcome{}, fmt.Errorf("the model refused the call (%d): %s", resp.StatusCode, firstNonEmpty(why, "no reason given"))
-	}
+	text := a.Message.Content
 	if text == "" {
 		return Outcome{}, errors.New("the model gave no answer")
 	}
-	history = trimHistory(append(history, directMessage{Role: "assistant", Content: text}))
+	history = trimHistory(append(history, chatMessage{Role: "assistant", Content: text}))
 	b, _ := json.Marshal(history)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return Outcome{}, fmt.Errorf("the conversation could not be kept for its next turn: %w", err)
@@ -149,15 +107,24 @@ func (d DirectModel) Run(ctx context.Context, t Turn) (Outcome, error) {
 	if err := os.WriteFile(path, b, 0o600); err != nil {
 		return Outcome{}, fmt.Errorf("the conversation could not be kept for its next turn: %w", err)
 	}
+	answer, _ := json.Marshal(a.Message)
 	return Outcome{Text: strings.TrimSpace(text), Brain: agentmessage.Brain{
-		Provider: directBrain, Model: firstNonEmpty(model, t.Model), Session: t.Session,
-		RunHash: runHash(req, out),
+		Provider: directBrain, Model: firstNonEmpty(a.Model, t.Model), Session: t.Session,
+		RunHash: runHash(a.Sent, answer),
 	}}, nil
 }
 
 // trimHistory lets the oldest turns go until the conversation is within
-// directHistoryLargest, keeping at least the newest message.
-func trimHistory(h []directMessage) []directMessage {
+// directHistoryLargest, keeping at least the newest message. Only words are
+// kept here: an AI agent that only answers uses no tools.
+func trimHistory(h []chatMessage) []chatMessage {
+	words := h[:0:0]
+	for _, m := range h {
+		if (m.Role == "user" || m.Role == "assistant") && m.Content != "" {
+			words = append(words, chatMessage{Role: m.Role, Content: m.Content})
+		}
+	}
+	h = words
 	size := 0
 	for _, m := range h {
 		size += len(m.Content) + 32
@@ -170,51 +137,12 @@ func trimHistory(h []directMessage) []directMessage {
 	return h
 }
 
-// readDirectAnswer is the words of a model's answer, the model it names, and
-// the reason it gives for refusing, in Anthropic's shape or OpenAI's.
-func readDirectAnswer(api string, out []byte) (text, model, why string) {
-	var a struct {
-		Model   string `json:"model"`
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-		Choices []struct {
-			Message directMessage `json:"message"`
-		} `json:"choices"`
-		Error json.RawMessage `json:"error"`
-	}
-	if json.Unmarshal(out, &a) != nil {
-		return "", "", ""
-	}
-	if len(a.Error) > 0 {
-		var e struct {
-			Message string `json:"message"`
-		}
-		if json.Unmarshal(a.Error, &e) == nil && e.Message != "" {
-			why = e.Message
-		} else {
-			why = strings.Trim(string(a.Error), `"`)
-		}
-	}
-	var b strings.Builder
-	if api == "anthropic" {
-		for _, c := range a.Content {
-			if c.Type == "text" {
-				b.WriteString(c.Text)
-			}
-		}
-	} else if len(a.Choices) > 0 {
-		b.WriteString(a.Choices[0].Message.Content)
-	}
-	return b.String(), a.Model, why
-}
-
-// envForDirect is the environment of a DirectModel: its body's model address,
-// the run's token for it, and which API its provider speaks.
+// envForDirect is the environment of a model call agent-host makes itself — a
+// DirectModel's, or its own loop's (BuiltIn): its body's model address, the
+// run's token for it, and which API its provider speaks.
 func (b *Borrowed) envForDirect() ([]string, error) {
 	if !b.throughIdentityAgent {
-		return nil, fmt.Errorf("an AI agent that only reads and answers needs an API key its Identity Agent uses "+
+		return nil, fmt.Errorf("agent-host calls a model itself only with an API key its Identity Agent uses "+
 			"for it, not a %s for %s", b.Kind, b.Provider)
 	}
 	if b.modelURL == "" || b.modelToken == "" {
@@ -226,7 +154,7 @@ func (b *Borrowed) envForDirect() ([]string, error) {
 		api = "anthropic"
 	case brainsignin.OpenAI, brainsignin.XAI, brainsignin.OpenRouter:
 	default:
-		return nil, fmt.Errorf("an AI agent that only reads and answers cannot call %s", b.Provider)
+		return nil, fmt.Errorf("agent-host cannot call %s itself", b.Provider)
 	}
 	return []string{envDirectURL + "=" + b.modelURL, envDirectToken + "=" + b.modelToken, envDirectAPI + "=" + api}, nil
 }

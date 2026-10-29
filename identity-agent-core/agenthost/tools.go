@@ -284,7 +284,7 @@ func ServeMCP(in io.Reader, out io.Writer) error {
 	if url == "" || token == "" {
 		return errors.New("agent-host mcp is started by the brain during a turn, never by hand")
 	}
-	client := &http.Client{Timeout: 2 * time.Minute}
+	host := hostTools{URL: url, Token: token}
 	enc := json.NewEncoder(out)
 	sc := bufio.NewScanner(in)
 	sc.Buffer(make([]byte, 1<<20), 8<<20)
@@ -324,26 +324,7 @@ func ServeMCP(in io.Reader, out io.Writer) error {
 		case "tools/call":
 			var p toolCall
 			_ = json.Unmarshal(req.Params, &p)
-			body, _ := json.Marshal(p)
-			hr, _ := http.NewRequest("POST", url, bytes.NewReader(body))
-			hr.Header.Set("Authorization", "Bearer "+token)
-			hr.Header.Set("Content-Type", "application/json")
-			text, isErr := "", false
-			if resp, err := client.Do(hr); err != nil {
-				text, isErr = "the host could not be reached: "+err.Error(), true
-			} else {
-				var r struct {
-					Text    string `json:"text"`
-					IsError bool   `json:"is_error"`
-				}
-				b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-				resp.Body.Close()
-				if resp.StatusCode != http.StatusOK || json.Unmarshal(b, &r) != nil {
-					text, isErr = strings.TrimSpace(string(b)), true
-				} else {
-					text, isErr = r.Text, r.IsError
-				}
-			}
+			text, isErr := host.call(context.Background(), p.Name, p.Args)
 			result = map[string]any{"content": []map[string]any{{"type": "text", "text": text}}, "isError": isErr}
 		default:
 			rpcErr = map[string]any{"code": -32601, "message": "method not found"}
@@ -359,4 +340,44 @@ func ServeMCP(in io.Reader, out io.Writer) error {
 		}
 	}
 	return sc.Err()
+}
+
+// hostTools reaches the host's tools for a turn: from `agent-host mcp`, which
+// a brain's program starts, or from agent-host's own loop.
+type hostTools struct {
+	URL, Token string
+	HTTP       *http.Client
+}
+
+// hostToolAnswerLargest bounds what one of the host's tools gives back.
+const hostToolAnswerLargest = 1 << 20
+
+// call forwards one call of the host's tools to the host, with the turn's
+// token, and says what it gave and whether it failed.
+func (h hostTools) call(ctx context.Context, name string, args json.RawMessage) (string, bool) {
+	body, _ := json.Marshal(toolCall{Name: name, Args: args})
+	hr, err := http.NewRequestWithContext(ctx, "POST", h.URL, bytes.NewReader(body))
+	if err != nil {
+		return err.Error(), true
+	}
+	hr.Header.Set("Authorization", "Bearer "+h.Token)
+	hr.Header.Set("Content-Type", "application/json")
+	client := h.HTTP
+	if client == nil {
+		client = &http.Client{Timeout: 2 * time.Minute}
+	}
+	resp, err := client.Do(hr)
+	if err != nil {
+		return "the host could not be reached: " + err.Error(), true
+	}
+	defer resp.Body.Close()
+	var r struct {
+		Text    string `json:"text"`
+		IsError bool   `json:"is_error"`
+	}
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, hostToolAnswerLargest))
+	if resp.StatusCode != http.StatusOK || json.Unmarshal(b, &r) != nil {
+		return strings.TrimSpace(string(b)), true
+	}
+	return r.Text, r.IsError
 }
