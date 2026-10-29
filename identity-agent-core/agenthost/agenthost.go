@@ -371,8 +371,11 @@ func (h *Host) Enrol(enrolment string, placement string, wait time.Duration) (St
 	if err != nil {
 		return State{}, fmt.Errorf("the enrolment could not be sealed: %w", err)
 	}
+	// The words are shown only once the Identity Agent has taken the request,
+	// never before: whoever reads them, a person or a provider's program
+	// (ADR-055), may go straight on to report or approve them, and words for a
+	// request the Identity Agent does not have yet are refused.
 	words := agentbody.Words(host)
-	fmt.Fprintf(h.out(), "\nThis machine's six words are:\n\n    %s\n\n", strings.Join(words, " "))
 	body, _ := json.Marshal(agentbody.SealedEnrolment{Sender: keys, Envelope: env})
 	resp, err := h.client().Post(strings.TrimRight(e.URL, "/")+"/api/agent-host/enrol", "application/json", bytes.NewReader(body))
 	if err != nil {
@@ -388,11 +391,13 @@ func (h *Host) Enrol(enrolment string, placement string, wait time.Duration) (St
 	if resp.StatusCode != http.StatusAccepted {
 		return State{}, fmt.Errorf("the Identity Agent refused this enrolment: %s\n"+
 			"If the string was already used, another machine may have used it. Tell the owner NOT to approve "+
-			"any machine waiting for %q unless it shows the words above, and to ask for a new string", answer.Error, e.AgentName)
+			"any machine waiting for %q unless it shows this machine's words, %s, and to ask for a new string",
+			answer.Error, e.AgentName, strings.Join(words, " "))
 	}
 	if strings.Join(words, " ") != strings.Join(answer.Words, " ") {
 		return State{}, fmt.Errorf("the Identity Agent shows different words for this machine's key — do not approve it")
 	}
+	fmt.Fprintf(h.out(), "\nThis machine's six words are:\n\n    %s\n\n", strings.Join(words, " "))
 	st := State{IdentityAgentURL: strings.TrimRight(e.URL, "/"), IdentityAgent: e.IdentityAgent,
 		Agent: e.Agent, AgentName: e.AgentName, BindingID: answer.BindingID, EnrolledAt: time.Now().UTC(),
 		IdentityAgentKeys: iaKeys, KeyStateSN: e.KeyStateSN, KeyStateSAID: e.KeyStateSAID}

@@ -42,9 +42,12 @@ body only decides *where* a request may come from, and how strongly that is prov
    keys. It then seals the whole enrolment to the Identity Agent. The Identity Agent
    accepts only a sealed enrolment whose inner keys are the keys it was sealed from.
 4. **Six words, compared by a person.** Both sides derive six words from K's identifier
-   (66 bits of a Blake3 digest, BIP-39 English list). The machine shows its words
-   before it sends anything, so its person has them even if the string was used first
-   by someone else; on a refusal it tells them not to approve whatever is waiting. The
+   (66 bits of a Blake3 digest, BIP-39 English list). *Amended 2026-10-29.* The machine
+   shows its words once the Identity Agent has taken its request, never before: whoever
+   reads them, a person or a provider's program (ADR-055), may go straight on to report
+   or approve them, and words for a request not yet taken are refused. On a refusal it
+   shows them with the refusal, so its person still has them if the string was used
+   first by someone else, and tells them not to approve whatever is waiting. The
    owner compares the words in their app with the words on the machine and approves or
    rejects. A secret used by another machine shows other words. Rejecting returns a
    fresh string. A request nobody decides on before the string's 15 minutes run out

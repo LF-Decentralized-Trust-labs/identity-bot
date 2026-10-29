@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -81,6 +82,79 @@ func TestAnAgentHostEnrolsAgainstARunningIdentityAgent(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "already the body") || strings.Contains(out.String(), "six words") {
 		t.Fatalf("re-running on the enrolled machine said: %q", out.String())
+	}
+}
+
+// lockedOutput is a machine's screen, read while it is still being written.
+type lockedOutput struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (o *lockedOutput) Write(p []byte) (int, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.b.Write(p)
+}
+
+func (o *lockedOutput) String() string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.b.String()
+}
+
+// shownWhenAsked notes what the machine had shown at the moment its request
+// left for the Identity Agent.
+type shownWhenAsked struct {
+	out  *lockedOutput
+	mu   sync.Mutex
+	seen []string
+}
+
+func (s *shownWhenAsked) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/api/agent-host/enrol") {
+		s.mu.Lock()
+		s.seen = append(s.seen, s.out.String())
+		s.mu.Unlock()
+	}
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+// A machine shows its six words only once the Identity Agent has its request.
+// Whoever reads them, a person or a provider's program, may report or approve
+// them straight away, and words for a request not yet taken are refused, so a
+// provider that read them early destroyed a machine about to enrol (#430).
+func TestAMachineShowsItsWordsOnlyOnceTheIdentityAgentHasItsRequest(t *testing.T) {
+	s, agentID := bodyWorld(t)
+	s.router = s.buildRouter("")
+	srv := httptest.NewServer(s.router)
+	defer srv.Close()
+	t.Setenv("PUBLIC_URL", srv.URL)
+
+	m := newTestMachine(t)
+	host, _, _ := agentbody.Identity(m)
+	words := strings.Join(agentbody.Words(host), " ")
+	out := &lockedOutput{}
+	asked := &shownWhenAsked{out: out}
+	h := &agenthost.Host{DataDir: t.TempDir(), Signer: m, Hardware: true, PollEvery: 20 * time.Millisecond,
+		Out: out, HTTP: &http.Client{Transport: asked, Timeout: 30 * time.Second}}
+
+	done := make(chan error, 1)
+	approveWhenAsked(t, s, agentID, words, done)
+	if _, err := h.Enrol(enrolmentVia(t, s, srv.URL, agentID), "computer", 20*time.Second); err != nil {
+		t.Fatalf("enrolling: %v", err)
+	}
+	<-done
+	asked.mu.Lock()
+	defer asked.mu.Unlock()
+	if len(asked.seen) != 1 {
+		t.Fatalf("the machine asked %d times", len(asked.seen))
+	}
+	if strings.Contains(asked.seen[0], words) {
+		t.Fatalf("the machine showed its words before the Identity Agent had its request:\n%s", asked.seen[0])
+	}
+	if !strings.Contains(out.String(), words) {
+		t.Fatalf("the machine never showed its words:\n%s", out.String())
 	}
 }
 
