@@ -5,7 +5,7 @@
 # Signs and notarizes with plain `security` + `xcrun notarytool`, which are
 # present on any macOS runner and need no vendor-specific CLI.
 #
-# Required env (GitHub Actions secrets — see .github/CI_MACOS_SIGNING_SETUP.md):
+# Required env, from whoever distributes the build under their own Apple Developer ID:
 #   CM_CERTIFICATE                     base64 of the Developer ID Application .p12
 #   CM_CERTIFICATE_PASSWORD            password for that .p12
 #   APP_STORE_CONNECT_PRIVATE_KEY      contents of the ASC API key .p8 (for notarytool)

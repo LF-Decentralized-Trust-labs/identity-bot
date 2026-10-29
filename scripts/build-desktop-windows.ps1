@@ -1,10 +1,9 @@
 <#
   Build + bundle the Identity Agent Windows desktop release.
 
-  The build steps for a Windows release, kept as a script so CI and a developer
-  run the same logic. The CALLER is responsible for installing the toolchain
-  first:
-    - Go 1.24.0
+  The build steps for a Windows release. The CALLER is responsible for
+  installing the toolchain first:
+    - Go, the release named in identity-agent-core/go.mod
     - Flutter 3.27.3
 
   Env:
