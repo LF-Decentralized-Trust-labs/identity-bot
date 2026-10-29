@@ -3,6 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-10-26
 **Amends:** ADR-051 (An AI agent's brain is signed in once, and lent to a body per run): the cap counts an account rather than one AI agent's sign-in and is one number for it, a Grok subscription runs one at a time by default as Codex does, and the brains a body can run from a lent sign-in now include Codex, a Grok subscription, OpenAI and OpenRouter keys, and servers that speak OpenAI's format
+**Amended by:** ADR-057 (An API key stays with the Identity Agent, which makes each model call), 2026-10-28: an API key is no longer lent to a body, so no program on a body is given one
 **Relates to:** ADR-047 (AI agents talk through the Identity Agent that holds them), ADR-050 (One check for a controller's actions and an AI agent's capability calls)
 
 ## Context
@@ -138,7 +139,9 @@ agent shared before this is removed.
 - **The wrapper reports on its standard output alone.** Its error output becomes a
   failure notice, so the sign-in never goes there.
 - **The program's own settings and sign-in are not read.** A key reaches the
-  program as an environment variable.
+  program as an environment variable. *Amended by ADR-057:* an API key no longer
+  reaches the program at all; the variable holds a token for the run, and the
+  program's model address is its body's.
 - **A model at a sign-in's own address is described in the program's settings for
   the run.** That covers OpenRouter and servers that speak OpenAI's format. The
   settings name the variable that holds the key, never the key.

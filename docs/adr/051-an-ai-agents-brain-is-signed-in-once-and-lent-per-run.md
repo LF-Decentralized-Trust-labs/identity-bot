@@ -1,7 +1,7 @@
 # ADR-051 — An AI agent's brain is signed in once, and lent to a body per run
 
 **Status:** Accepted
-**Amended by:** ADR-052 (A brain's sign-in is checked before it is kept, and capped per account), 2026-10-26
+**Amended by:** ADR-052 (A brain's sign-in is checked before it is kept, and capped per account), 2026-10-26; ADR-057 (An API key stays with the Identity Agent, which makes each model call), 2026-10-28
 **Date:** 2026-10-26
 **Relates to:** ADR-045 (Every asset gets an identity and a grant from one schema template), ADR-046 (A machine becomes an AI agent's body by a person comparing six words), ADR-047 (AI agents talk through the Identity Agent that holds them), ADR-050 (One check for a controller's actions and an AI agent's capability calls)
 
@@ -63,6 +63,10 @@ carries the sign-in and a lease. The body puts the sign-in in the brain's enviro
 for that run alone: never on a command line, never in a file. When the run ends, or
 fails, the body returns it.
 
+*Amended by ADR-057:* an API key for Anthropic, OpenAI, xAI or OpenRouter is not lent.
+The body is lent the lease alone, and its brain makes its model calls through the
+Identity Agent, which adds the key to each.
+
 **A lease lapses unless renewed.** It holds for five minutes and the body renews it
 while the run goes on, so a machine that crashed mid-run frees its place without
 anybody returning it. A run whose lease lapsed anyway takes a place again.
@@ -113,7 +117,8 @@ brain was signed in with by hand, and the body logs that it did.
 - The record shows which body held which AI agent's sign-in, and when.
 - A body may hold a sign-in for as long as a run takes. A compromised body could copy
   what it was lent during that run; the lease limits when it can borrow, not what it
-  does with what it holds.
+  does with what it holds. *Amended by ADR-057:* this no longer holds for an API key,
+  which a body is never lent.
 - Claude Code reads a subscription token only when it is not run in its bare mode, so
   the body never asks for that mode.
 - A local model server is given a stand-in key when it needs none, so the brain never
