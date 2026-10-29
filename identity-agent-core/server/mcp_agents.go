@@ -104,6 +104,10 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 	// The brain's sign-in. A key sent where the reference belongs is taken out
 	// of the brain before anything is stored, and kept in the vault instead.
 	brain, signIn := s.brainSecretFrom(req.Brain)
+	if err := brainProgramFits(brain); err != nil {
+		jsonError(w, "the AI agent was not created: "+err.Error(), http.StatusBadRequest)
+		return
+	}
 	// An AI agent not yet made has no sign-in of its own, so a reference to
 	// one names somebody else's, and is not kept.
 	if brainsignin.IsRef(brain.CredentialRef) {
@@ -397,6 +401,21 @@ func (s *CoreServer) handleUpdateAgentConfig(w http.ResponseWriter, r *http.Requ
 	// A key sent where the reference belongs goes into the vault. A change
 	// that does not mention the sign-in keeps the one the brain has.
 	brain, signIn := s.brainSecretFrom(cfg.Brain)
+	if err := brainProgramFits(brain); err != nil {
+		jsonError(w, "nothing was changed: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if brain.Program != "" && brain.Kind == "" && brain.Provider == "" {
+		// The program is checked against the sign-in the AI agent has.
+		if vault, err := s.brainVault(); err == nil {
+			if kept, had, _ := vault.BrainSignIn(brainsignin.Ref(id)); had {
+				if err := brainsignin.ProgramFits(brain.Program, kept.Kind, kept.Provider); err != nil {
+					jsonError(w, "nothing was changed: "+err.Error(), http.StatusBadRequest)
+					return
+				}
+			}
+		}
+	}
 	// The only sign-in an AI agent's brain may name is its own.
 	if brainsignin.IsRef(brain.CredentialRef) || (brain.CredentialRef == "" && signIn == nil) {
 		brain.CredentialRef = ""
@@ -786,4 +805,13 @@ func keyErrorStatus(err error) int {
 		return http.StatusServiceUnavailable
 	}
 	return http.StatusConflict
+}
+
+// brainProgramFits says why a brain cannot be run by the program it names. A
+// brain that names no provider yet is checked when its body runs it.
+func brainProgramFits(b asset.BrainConfig) error {
+	if b.Program == "" || (b.Program == brainsignin.ProgramNone && b.Kind == "" && b.Provider == "") {
+		return nil
+	}
+	return brainsignin.ProgramFits(b.Program, b.Kind, b.Provider)
 }

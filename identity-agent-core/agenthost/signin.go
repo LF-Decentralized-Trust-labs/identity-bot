@@ -37,6 +37,29 @@ type Borrowed struct {
 	refreshed string
 	// agent is the AI agent the sign-in is for, which names its brain's home.
 	agent string
+	// throughIdentityAgent is a key that stays with the Identity Agent: the
+	// brain makes its model calls to this body's model address (modelURL),
+	// with a token good for this run alone (modelToken), and the body passes
+	// each call to the Identity Agent, which adds the key.
+	throughIdentityAgent bool
+	modelURL, modelToken string
+}
+
+// leaseMu guards a Borrowed's LeaseID, which a lease that lapsed is replaced
+// in while the run's model calls cite it.
+var leaseMu sync.Mutex
+
+// lease is the lease the run holds now.
+func (b *Borrowed) lease() string {
+	leaseMu.Lock()
+	defer leaseMu.Unlock()
+	return b.LeaseID
+}
+
+func (b *Borrowed) setLease(id string) {
+	leaseMu.Lock()
+	b.LeaseID = id
+	leaseMu.Unlock()
 }
 
 // ErrSignInBusy is a sign-in whose runs are all in use; the run waits.
@@ -53,7 +76,10 @@ var ErrIdentityAgentLendsNoSignIns = errors.New("this AI agent's Identity Agent 
 // It returns ErrNoSignIn when none is kept, and ErrSignInBusy when its cap on
 // simultaneous runs is reached.
 func (h *Host) Borrow(ctx context.Context) (*Borrowed, error) {
-	code, b, err := h.CallContext(ctx, "POST", "/api/agent-host/brain-sign-in", []byte("{}"))
+	// This body makes its brain's model calls through the Identity Agent, so
+	// may run a brain whose key stays there.
+	code, b, err := h.CallContext(ctx, "POST", "/api/agent-host/brain-sign-in",
+		[]byte(`{"model_calls":"`+modelCallsThroughIdentityAgent+`"}`))
 	if err != nil {
 		return nil, err
 	}
@@ -67,6 +93,7 @@ func (h *Host) Borrow(ctx context.Context) (*Borrowed, error) {
 		Account       string `json:"account"`
 		Endpoint      string `json:"endpoint"`
 		Secret        string `json:"secret"`
+		ModelCalls    string `json:"model_calls"`
 	}
 	_ = json.Unmarshal(b, &out)
 	switch code {
@@ -95,12 +122,13 @@ func (h *Host) Borrow(ctx context.Context) (*Borrowed, error) {
 		every = brainsignin.RenewEvery
 	}
 	return &Borrowed{LeaseID: out.LeaseID, Kind: out.Kind, Provider: out.Provider, Account: out.Account,
-		Endpoint: out.Endpoint, secret: out.Secret, renewEvery: every}, nil
+		Endpoint: out.Endpoint, secret: out.Secret, renewEvery: every,
+		throughIdentityAgent: out.ModelCalls == modelCallsThroughIdentityAgent}, nil
 }
 
 // Renew keeps a borrowed sign-in while its run goes on.
 func (h *Host) Renew(ctx context.Context, b *Borrowed) error {
-	body, _ := json.Marshal(map[string]string{"lease_id": b.LeaseID})
+	body, _ := json.Marshal(map[string]string{"lease_id": b.lease()})
 	code, out, err := h.CallContext(ctx, "POST", "/api/agent-host/brain-sign-in/renew", body)
 	if err != nil {
 		return err
@@ -120,7 +148,7 @@ func (h *Host) Renew(ctx context.Context, b *Borrowed) error {
 // Identity Agent has answered, so a return that fails can be tried again.
 func (h *Host) Return(ctx context.Context, b *Borrowed) error {
 	b.secret = ""
-	err := h.returnLease(ctx, b.LeaseID, b.refreshed)
+	err := h.returnLease(ctx, b.lease(), b.refreshed)
 	if returnIsFinal(err) {
 		b.refreshed = ""
 	}
@@ -180,7 +208,7 @@ var credentialVars = []string{
 	"XAI_API_KEY", "GROK_CODE_XAI_API_KEY", "GROK_AUTH_PROVIDER_COMMAND", "GROK_OIDC_ISSUER",
 	"GROK_OIDC_CLIENT_ID", "GROK_MODELS_BASE_URL",
 	"CODEX_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "CODEX_HOME", "GROK_HOME",
-	"OPENROUTER_API_KEY", envModelKey, envBrainHome,
+	"OPENROUTER_API_KEY", envModelKey, envBrainHome, "GROK_XAI_API_BASE_URL", "GROK_CLI_CHAT_PROXY_BASE_URL",
 }
 
 // envModelKey carries the key for a model Grok reaches at an address of the
@@ -204,9 +232,15 @@ const localModelNoKey = "no-key"
 // runs in a home of the host's making, so neither its own sign-in nor its own
 // settings outrank the one lent.
 func (b *Borrowed) Env(brain string) ([]string, error) {
+	if brain == directBrain {
+		return b.envForDirect()
+	}
 	harness := brainsignin.Harness(b.Provider)
 	if harness != NormaliseBrain(brain) {
 		return nil, fmt.Errorf("this AI agent is signed in for %s, which its brain %s cannot use", b.Provider, brain)
+	}
+	if b.throughIdentityAgent {
+		return b.envThroughIdentityAgent(harness)
 	}
 	switch {
 	case harness == brainsignin.HarnessClaudeCode && b.Kind == brainsignin.KindSubscription:
@@ -381,7 +415,7 @@ func (h *Host) keep(b *Borrowed, stop <-chan struct{}, done chan<- struct{}, log
 			var lapsed *leaseLapsed
 			if errors.As(err, &lapsed) {
 				if again, berr := h.Borrow(ctx); berr == nil {
-					b.LeaseID = again.LeaseID
+					b.setLease(again.LeaseID)
 					again.secret = ""
 					err = nil
 				} else {
@@ -436,7 +470,7 @@ func (h *Host) giveBack(b *Borrowed, logf func(string, ...any)) {
 	case err != nil && returnIsFinal(err):
 		logf("[agent-host] %v; nothing more to give back", err)
 	case err != nil && b.refreshed != "":
-		if perr := h.keepPendingReturn(b.LeaseID, b.refreshed); perr != nil {
+		if perr := h.keepPendingReturn(b.lease(), b.refreshed); perr != nil {
 			logf("[agent-host] %v; the sign-in its brain renewed could not be kept to give back later either: %v", err, perr)
 		} else {
 			logf("[agent-host] %v; the sign-in its brain renewed is kept on this machine, readable only by this "+
@@ -541,7 +575,11 @@ func (h *Host) givePendingBack(ctx context.Context, logf func(string, ...any)) {
 // lendForTurn is the sign-in a turn runs with: borrowed from the Identity
 // Agent, as the brain's environment. Nil with no error when the Identity Agent
 // keeps none for this AI agent, and the brain uses this machine's own.
-func (h *Host) lendForTurn(ctx context.Context, brain Brain, logf func(string, ...any)) ([]string, *Borrowed, error) {
+//
+// A sign-in whose key stays with the Identity Agent is given this body's model
+// address on models, with a token for the run, which the caller withdraws when
+// the run ends (toolServer.shutModel).
+func (h *Host) lendForTurn(ctx context.Context, brain Brain, models *toolServer, logf func(string, ...any)) ([]string, *Borrowed, error) {
 	wait := h.signInWait
 	if wait <= 0 {
 		wait = turnTimeout
@@ -561,8 +599,14 @@ func (h *Host) lendForTurn(ctx context.Context, brain Brain, logf func(string, .
 	if st, err := h.loadState(); err == nil {
 		b.agent = st.Agent
 	}
+	if b.throughIdentityAgent && models != nil {
+		models.openModel(b)
+	}
 	env, err := b.Env(brain.Name())
 	if err != nil {
+		if models != nil {
+			models.shutModel(b)
+		}
 		h.giveBack(b, logf)
 		return nil, nil, err
 	}

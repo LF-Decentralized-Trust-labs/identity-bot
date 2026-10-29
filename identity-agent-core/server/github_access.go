@@ -703,6 +703,12 @@ func (s *CoreServer) handleBodyBorrowsGitHub(w http.ResponseWriter, r *http.Requ
 		jsonError(w, err.Error(), http.StatusForbidden)
 		return
 	}
+	if answersOnly(a) {
+		why := "this AI agent only reads and answers, and runs nothing that could use GitHub, so none is lent"
+		s.recordGitHubLendEvent(a, cc, "lend", "denied", why)
+		jsonError(w, why, http.StatusForbidden)
+		return
+	}
 	if len(reposIn(cc.Scopes, cc.ResourceConstraints)) == 0 {
 		// Not a refusal: this AI agent uses no repositories.
 		writeJSONStatus(w, http.StatusNotFound, map[string]any{

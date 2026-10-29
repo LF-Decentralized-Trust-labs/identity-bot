@@ -208,6 +208,68 @@ func (r Record) Public() Record {
 // HasSecret reports whether the record holds a key or token.
 func (r Record) HasSecret() bool { return r.Secret != "" }
 
+// ModelCallHeaders are the headers of a brain's model call that travel on to
+// its provider when the Identity Agent makes the call: what describes the
+// call, and never how the brain proved itself, which the Identity Agent
+// replaces with the key. The body and the Identity Agent both pass only these.
+var ModelCallHeaders = []string{"Content-Type", "Accept", "Anthropic-Version", "Anthropic-Beta", "Openai-Beta"}
+
+// ProgramNone is the program of an AI agent that only reads and answers: its
+// body calls the model itself, through the Identity Agent, with no program
+// that could use the machine.
+const ProgramNone = "none"
+
+// NormaliseProgram is a brain's program as the record keeps it: empty for the
+// program its provider is run by, or ProgramNone, from the names a screen may
+// send for it. Anything else is returned lower-cased, and refused by
+// ProgramFits.
+func NormaliseProgram(p string) string {
+	switch n := strings.ToLower(strings.TrimSpace(p)); n {
+	case "", "default", "harness":
+		return ""
+	case ProgramNone, "direct", "model", "answers only", "read and answer":
+		return ProgramNone
+	default:
+		return n
+	}
+}
+
+// ProgramFits says why a brain cannot be run by program. Only a key the
+// Identity Agent calls its provider with itself can be used with no program:
+// a subscription is for its provider's own program, and a model server's key
+// is lent to the machine rather than used here.
+func ProgramFits(program, kind, provider string) error {
+	switch program {
+	case "":
+		return nil
+	case ProgramNone:
+		if (Record{Kind: kind, Provider: provider}).StaysInVault() && provider != Google {
+			return nil
+		}
+		return fmt.Errorf("an AI agent that only reads and answers needs an API key for Anthropic, OpenAI, xAI or "+
+			"OpenRouter, which its Identity Agent uses for it; %s %s is run by its own program", kind, provider)
+	}
+	return fmt.Errorf("%q is not a program a brain is run by", program)
+}
+
+// StaysInVault reports whether this sign-in is never lent to a body: an API
+// key for a provider the Identity Agent calls itself. Its body's brain is
+// pointed at the Identity Agent instead, which adds the key to each model call
+// and records it, so taking the key away ends its use at the next call. A
+// subscription is still lent, because its program must hold it, and so is a
+// model server's key, because the server may be reachable only from the
+// machines that run the AI agent.
+func (r Record) StaysInVault() bool {
+	if r.Kind != KindAPIKey {
+		return false
+	}
+	switch r.Provider {
+	case Anthropic, OpenAI, XAI, OpenRouter, Google:
+		return true
+	}
+	return false
+}
+
 // Expired reports whether the sign-in has stopped working by now.
 func (r Record) Expired(now time.Time) bool {
 	return r.ExpiresAt != nil && !now.Before(*r.ExpiresAt)
@@ -284,6 +346,12 @@ type Choice struct {
 	// at once on it may sign each other out, so a screen warns before its cap
 	// is raised past one.
 	RefreshesItself bool `json:"refreshes_itself"`
+	// StaysWithIdentityAgent is a key never lent to a machine: the Identity
+	// Agent adds it to each of the brain's model calls (Record.StaysInVault).
+	StaysWithIdentityAgent bool `json:"stays_with_identity_agent"`
+	// CanAnswerOnly is a sign-in an AI agent that only reads and answers can
+	// run with, with no program (ProgramNone).
+	CanAnswerOnly bool `json:"can_answer_only"`
 }
 
 // Runnable are the brains a body can run from a sign-in it borrows, and so
@@ -301,6 +369,8 @@ func Runnable() []Choice {
 		out[i].Harness = Harness(out[i].Provider)
 		out[i].DefaultMaxConcurrentRuns = DefaultMaxConcurrentRuns(out[i].Kind, out[i].Provider)
 		out[i].RefreshesItself = RefreshesItself(out[i].Kind, out[i].Provider)
+		out[i].StaysWithIdentityAgent = Record{Kind: out[i].Kind, Provider: out[i].Provider}.StaysInVault()
+		out[i].CanAnswerOnly = ProgramFits(ProgramNone, out[i].Kind, out[i].Provider) == nil
 	}
 	return out
 }
