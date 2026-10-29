@@ -70,6 +70,7 @@ func (s *CoreServer) recordBodyEvent(a asset.Asset, b agentbody.Binding, event, 
 func (s *CoreServer) mountBodyRoutes(r chi.Router) {
 	r.Post("/mcp/agents/{id}/body-enrolment", s.handleCreateBodyEnrolment)
 	r.Get("/mcp/agents/{id}/bodies", s.handleListBodies)
+	r.Post("/mcp/agents/{id}/bodies/decode-request", s.handleDecodeBodyRequest)
 	r.Post("/mcp/agents/{id}/bodies/{bid}/approve", s.handleApproveBody)
 	r.Post("/mcp/agents/{id}/bodies/{bid}/reject", s.handleRejectBody)
 	r.Delete("/mcp/agents/{id}/bodies/{bid}", s.handleRevokeBody)
@@ -171,6 +172,59 @@ func (s *CoreServer) handleListBodies(w http.ResponseWriter, r *http.Request) {
 			ScreenNotAvailableYet: sc == nil && screenNotYet(b)})
 	}
 	writeJSONStatus(w, http.StatusOK, map[string]any{"agent_aid": a.PairwiseAID, "bodies": out})
+}
+
+// handleDecodeBodyRequest takes the self-verifying approval request a machine
+// showed — pasted or scanned by a person — checks it was made by the key it
+// names, and finds the pending binding that key is waiting on, so the app can
+// show what is being approved. It decides nothing: approving is still
+// handleApproveBody, on the binding id this returns.
+func (s *CoreServer) handleDecodeBodyRequest(w http.ResponseWriter, r *http.Request) {
+	a, ok := s.aiAgentAsset(chi.URLParam(r, "id"))
+	if !ok {
+		jsonError(w, "AI agent not found", http.StatusNotFound)
+		return
+	}
+	var in struct {
+		Request string `json:"request"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&in); err != nil || in.Request == "" {
+		jsonError(w, "paste or scan the request the machine shows", http.StatusBadRequest)
+		return
+	}
+	req, err := agentbody.ParseApprovalRequest(in.Request)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	me, err := s.whoThisIdentityAgentIs()
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	// The request proves itself: it is signed by the key it names, for this
+	// Identity Agent. A tampered copy fails here.
+	if err := req.Check(me); err != nil {
+		jsonError(w, "this is not a request this Identity Agent can approve: "+err.Error(), http.StatusForbidden)
+		return
+	}
+	// The key must be one waiting to become THIS AI agent's body. A request for
+	// a key with no pending binding here — a machine that never asked, or whose
+	// enrolment the person captured from the wrong screen — matches nothing.
+	b, ok := s.bodies().LatestByHost(req.Host)
+	if !ok || b.AgentAssetID != a.ID || b.Verkey != req.Verkey {
+		jsonError(w, "no machine is waiting to become this AI agent's body with that key", http.StatusNotFound)
+		return
+	}
+	if b.State != agentbody.StatePending {
+		jsonError(w, "this machine is "+b.State+", not waiting for approval", http.StatusConflict)
+		return
+	}
+	writeJSONStatus(w, http.StatusOK, map[string]any{
+		"binding_id": b.ID, "agent_aid": a.PairwiseAID, "agent_name": a.DisplayName,
+		"host": b.Host, "grade": b.Grade, "grade_clamped": b.GradeClamped,
+		"platform": b.Platform, "placement": b.Placement,
+	})
 }
 
 // whoDecided names who approved or rejected a body, for the record.
