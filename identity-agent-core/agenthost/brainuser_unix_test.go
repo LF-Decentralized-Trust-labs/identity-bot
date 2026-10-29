@@ -39,11 +39,10 @@ func TestNothingARunIsLentCrossesSudo(t *testing.T) {
 	if !slices.Equal(cmd.Args, want) {
 		t.Fatalf("sudo was started as %q, not %q", cmd.Args, want)
 	}
-	for _, kv := range env {
-		_, v, _ := strings.Cut(kv, "=")
-		if len(v) < 6 {
-			continue
-		}
+	// No secret it was lent, by value. Names of the other things lent, which
+	// are not secret and may well appear in this machine's own variables (a
+	// CI runner's GITHUB_API_URL holds "github.com"), are checked below.
+	for _, v := range []string{"sk-test", "turn-token", "xai-SIGNIN", "ghs_WRITE", "ghs_READ"} {
 		for _, a := range cmd.Args {
 			if strings.Contains(a, v) {
 				t.Fatalf("a lent value went on sudo's command line: %q", a)
@@ -55,17 +54,23 @@ func TestNothingARunIsLentCrossesSudo(t *testing.T) {
 			}
 		}
 	}
-	// Nor is any variable of a kind a run is lent, even one exported on the host.
-	t.Setenv("GH_TOKEN", "exported-by-hand")
-	t.Setenv("GIT_CONFIG_KEY_0", "credential.helper")
-	t.Setenv("XAI_API_KEY", "exported-by-hand")
+	// Nor is any variable of a kind a run is lent, even one this machine has
+	// of its own, as a CI runner has GITHUB_API_URL.
+	var onHost []string
+	for _, kv := range []string{"GH_TOKEN=exported-by-hand", "GIT_CONFIG_KEY_0=credential.helper",
+		"XAI_API_KEY=exported-by-hand", "GITHUB_API_URL=https://api.github.com", "GITHUB_SERVER_URL=https://github.com",
+		"GITHUB_GRAPHQL_URL=https://api.github.com/graphql", "GH_REPO=acme/elsewhere"} {
+		name, v, _ := strings.Cut(kv, "=")
+		t.Setenv(name, v)
+		onHost = append(onHost, name)
+	}
 	again, err := AsUser{User: "agent"}.Command(context.Background(), t.TempDir(), env, nil, "/usr/local/bin/claude", "-p")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, e := range again.Env {
 		name, _, _ := strings.Cut(e, "=")
-		if slices.Contains(credentialVars, name) || slices.Contains(githubVars, name) ||
+		if slices.Contains(onHost, name) || slices.Contains(credentialVars, name) || slices.Contains(githubVars, name) ||
 			strings.HasPrefix(name, "GIT_CONFIG_KEY_") || name == envToolsToken {
 			t.Fatalf("sudo is started with %s in its environment", name)
 		}
