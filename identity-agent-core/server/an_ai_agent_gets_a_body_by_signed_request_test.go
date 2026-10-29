@@ -5,11 +5,16 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"identity-agent-core/agentbody"
+	"identity-agent-core/agenthost"
 )
 
 // approvalRequestString builds the self-verifying approval string a machine
@@ -87,5 +92,103 @@ func TestAMachineIsApprovedByItsSignedRequest(t *testing.T) {
 	str, _ := tampered.Encode()
 	if code, _ := decodeRequest(t, s, agentID, str); code == http.StatusOK {
 		t.Fatal("a tampered approval request was accepted")
+	}
+}
+
+// safeBuf is a concurrency-safe writer: agent-host writes to it on one goroutine
+// while the test reads it on another to capture what the program printed.
+type safeBuf struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *safeBuf) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *safeBuf) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+// extractApprovalRequest pulls the iaapprove1.… string out of what agent-host
+// printed, as a person copying it off the machine's screen would.
+func extractApprovalRequest(printed string) string {
+	i := strings.Index(printed, agentbody.ApprovalPrefix)
+	if i < 0 {
+		return ""
+	}
+	fields := strings.FieldsFunc(printed[i:], func(r rune) bool {
+		return r == ' ' || r == '\n' || r == '\t' || r == '\r'
+	})
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
+}
+
+// The whole new path with the real program over HTTP: agent-host enrols against
+// a running Identity Agent and prints a signed approval request; a person
+// captures it (here, read from what the program printed) and the Identity Agent
+// verifies it and approves — no six words compared by anyone.
+func TestAgentHostIsApprovedByItsSignedRequestEndToEnd(t *testing.T) {
+	s, agentID := bodyWorld(t)
+	s.router = s.buildRouter("")
+	srv := httptest.NewServer(s.router)
+	defer srv.Close()
+	t.Setenv("PUBLIC_URL", srv.URL)
+
+	m := newTestMachine(t)
+	out := &safeBuf{}
+	h := &agenthost.Host{DataDir: t.TempDir(), Signer: m, Hardware: true, PollEvery: 20 * time.Millisecond, Out: out}
+
+	enrolment := enrolmentVia(t, s, srv.URL, agentID)
+
+	// As a person would: take the request the machine printed, paste it in, and
+	// approve what it decodes to — all while agent-host waits for the decision.
+	done := make(chan error, 1)
+	go func() {
+		for i := 0; i < 300; i++ {
+			if req := extractApprovalRequest(out.String()); req != "" {
+				body, _ := json.Marshal(map[string]string{"request": req})
+				rec := httptest.NewRecorder()
+				s.handleDecodeBodyRequest(rec, withRoute(
+					httptest.NewRequest("POST", "/", bytes.NewReader(body)),
+					map[string]string{"id": agentID}))
+				var dec map[string]any
+				_ = json.Unmarshal(rec.Body.Bytes(), &dec)
+				bid, _ := dec["binding_id"].(string)
+				if bid == "" {
+					done <- fmt.Errorf("the printed request did not decode to a binding: %s", rec.Body.String())
+					return
+				}
+				s.handleApproveBody(httptest.NewRecorder(), withRoute(
+					httptest.NewRequest("POST", "/", nil),
+					map[string]string{"id": agentID, "bid": bid}))
+				done <- nil
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		done <- fmt.Errorf("agent-host never printed an approval request: %q", out.String())
+	}()
+
+	st, err := h.Enrol(enrolment, "computer", 20*time.Second)
+	if derr := <-done; derr != nil {
+		t.Fatal(derr)
+	}
+	if err != nil {
+		t.Fatalf("enrolling: %v", err)
+	}
+	if st.BindingID == "" {
+		t.Fatal("no binding was recorded")
+	}
+
+	status, err := h.Status()
+	if err != nil || status["state"] != agentbody.StateActive {
+		t.Fatalf("after approval by its signed request, status: %v %v", status, err)
 	}
 }
