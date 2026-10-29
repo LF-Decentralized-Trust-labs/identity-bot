@@ -405,6 +405,17 @@ func (s *CoreServer) handleUpdateAgentConfig(w http.ResponseWriter, r *http.Requ
 		jsonError(w, "nothing was changed: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	if brain.Program != "" && brain.Kind == "" && brain.Provider == "" {
+		// The program is checked against the sign-in the AI agent has.
+		if vault, err := s.brainVault(); err == nil {
+			if kept, had, _ := vault.BrainSignIn(brainsignin.Ref(id)); had {
+				if err := brainsignin.ProgramFits(brain.Program, kept.Kind, kept.Provider); err != nil {
+					jsonError(w, "nothing was changed: "+err.Error(), http.StatusBadRequest)
+					return
+				}
+			}
+		}
+	}
 	// The only sign-in an AI agent's brain may name is its own.
 	if brainsignin.IsRef(brain.CredentialRef) || (brain.CredentialRef == "" && signIn == nil) {
 		brain.CredentialRef = ""

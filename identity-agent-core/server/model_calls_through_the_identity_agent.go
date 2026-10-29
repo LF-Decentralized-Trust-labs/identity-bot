@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -42,8 +43,6 @@ import (
 const modelCallsThroughHere = "through_identity_agent"
 
 const (
-	// modelCallWait is how long one collection waits for more of an answer.
-	modelCallWait = 20 * time.Second
 	// modelCallIdle is how long a call goes on with nobody collecting it
 	// before it is stopped: its body is gone or gave up.
 	modelCallIdle = 90 * time.Second
@@ -51,14 +50,26 @@ const (
 	modelCallLongest = 30 * time.Minute
 	// modelCallUnread bounds what is held of an answer not yet collected.
 	modelCallUnread = 16 << 20
-	// modelRequestLargest bounds a model call's request. A sealed envelope
-	// carries at most didcomm.SealedMaxBody, and the request travels in it as
-	// base64.
-	modelRequestLargest = 4 << 20
-	// modelCallRecheck is how often a call under way checks again that its
-	// run's lease is still open.
-	modelCallRecheck = 15 * time.Second
+	// modelRequestLargest bounds a model call's request, and modelCallChunk
+	// what one collection carries of an answer. Both travel in a sealed
+	// envelope of at most didcomm.SealedMaxBody (8 MB), base64-encoded three
+	// times on the way: in the call, in the sealed request, and in the
+	// envelope, about 2.4 times their size in all. 3 MB comes to a little over
+	// 7 MB; 2 MB to under 5.
+	modelRequestLargest = 3 << 20
+	modelCallChunk      = 2 << 20
+	// modelCallsPerLease bounds the calls one run may have under way at once.
+	modelCallsPerLease = 8
 )
+
+// modelCallWait is how long one collection waits for more of an answer. A
+// variable, like modelCallRecheck, so a test need not wait for it.
+var modelCallWait = 20 * time.Second
+
+// modelCallRecheck is how often a call under way checks again that its run
+// may still make it, and that somebody is collecting it. A variable so a test
+// need not wait for it.
+var modelCallRecheck = 15 * time.Second
 
 // modelRoutes are the calls a brain may make with its key, by provider: the
 // model calls and the list of models, and nothing else the key could do.
@@ -73,24 +84,31 @@ var modelRoutes = map[string][]string{
 }
 
 // modelRouteAllowed reports whether a brain signed in with provider may make
-// this call.
-func modelRouteAllowed(provider, method, path string) bool {
+// this call. The path must be plain: nothing escaped, no query or fragment in
+// it, and nothing that cleaning it would change, so what is checked is what is
+// sent. Beyond the routes themselves, only one model may be asked about by
+// name (GET /v1/models/{model}, whose name may hold a slash, as OpenRouter's
+// do).
+func modelRouteAllowed(provider, method, p string) bool {
+	if !strings.HasPrefix(p, "/") || strings.ContainsAny(p, "%?#\\") || path.Clean(p) != p {
+		return false
+	}
 	for _, r := range modelRoutes[provider] {
-		m, p, _ := strings.Cut(r, " ")
+		m, route, _ := strings.Cut(r, " ")
 		if m != method {
 			continue
 		}
-		if path == p || (m == http.MethodGet && strings.HasPrefix(path, p+"/") && !strings.Contains(path[len(p)+1:], "/")) {
+		if p == route || (m == http.MethodGet && route == "/v1/models" && strings.HasPrefix(p, route+"/")) {
 			return true
 		}
 	}
 	return false
 }
 
-// modelRequestHeaders are the headers of a brain's request that travel on to
-// the provider. Whatever the brain authenticated itself to its body with never
-// does: the key is added here.
-var modelRequestHeaders = []string{"Content-Type", "Accept", "Anthropic-Version", "Anthropic-Beta", "Openai-Beta"}
+// keyAnswers are the calls whose answer is about the key itself, not a
+// model's words. Their answer is read whole here and refused if it carries the
+// key, so a provider that one day echoes it does not hand it to the brain.
+var keyAnswers = map[string]bool{"/v1/api-key": true}
 
 // modelResponseHeaders are the headers of the provider's answer that travel
 // back to the brain.
@@ -122,11 +140,14 @@ type modelCallAnswer struct {
 
 // modelCall is one model call under way.
 type modelCall struct {
-	id, agent, host, lease string
-	stopOnce               sync.Once
-	stopCh                 chan struct{}
+	id, agent, host string
+	stopOnce        sync.Once
+	stopCh          chan struct{}
 
 	mu sync.Mutex
+	// lease is the lease the run cites now: a run whose lease lapsed takes
+	// another, and its next collection says so.
+	lease string
 	// changed is closed, and replaced, whenever something arrives.
 	changed   chan struct{}
 	status    int
@@ -136,10 +157,15 @@ type modelCall struct {
 	done      bool
 	err       string
 	collected time.Time
-	checked   time.Time
 }
 
 func (c *modelCall) stop() { c.stopOnce.Do(func() { close(c.stopCh) }) }
+
+func (c *modelCall) currentLease() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lease
+}
 
 // changedLocked wakes whoever waits for more, with c.mu held.
 func (c *modelCall) changedLocked() {
@@ -173,18 +199,33 @@ func (c *modelCall) finish(why string) {
 	c.changedLocked()
 }
 
-// collect is what the body has not yet collected from offset from, waiting up
-// to wait for something to arrive when nothing new has: the provider's status,
-// when the body does not have it yet (haveHead), or more of the answer.
-// Whatever is before from was collected, and is let go.
-func (c *modelCall) collect(ctx context.Context, from int64, haveHead bool, wait time.Duration) modelCallAnswer {
+// idle reports whether nobody has collected the call for modelCallIdle.
+func (c *modelCall) idle(now time.Time) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return now.Sub(c.collected) > modelCallIdle
+}
+
+// errCollectedAlready is a collection from before what the body already
+// collected: that part was let go, so the answer cannot be given again.
+var errCollectedAlready = errors.New("that part of the answer was collected already, and is gone")
+
+// collect is what the body has not yet collected from offset from, at most
+// modelCallChunk of it, waiting up to wait for something to arrive when
+// nothing new has: the provider's status, when the body does not have it yet
+// (haveHead), or more of the answer. Whatever is before from was collected,
+// and is let go. The answer is done only once all of it has been collected.
+func (c *modelCall) collect(ctx context.Context, from int64, haveHead bool, wait time.Duration) (modelCallAnswer, error) {
 	deadline := time.NewTimer(wait)
 	defer deadline.Stop()
 	for {
 		c.mu.Lock()
 		c.collected = time.Now()
-		if from > c.base {
-			drop := from - c.base
+		if from < c.base {
+			c.mu.Unlock()
+			return modelCallAnswer{}, errCollectedAlready
+		}
+		if drop := from - c.base; drop > 0 {
 			if drop > int64(len(c.buf)) {
 				drop = int64(len(c.buf))
 			}
@@ -193,13 +234,17 @@ func (c *modelCall) collect(ctx context.Context, from int64, haveHead bool, wait
 		}
 		ready := c.done || (c.status != 0 && (len(c.buf) > 0 || !haveHead))
 		if ready || wait <= 0 {
+			part := c.buf
+			if len(part) > modelCallChunk {
+				part = part[:modelCallChunk]
+			}
 			a := modelCallAnswer{CallID: c.id, Status: c.status, Header: c.header,
-				Next: c.base + int64(len(c.buf)), Done: c.done, Error: c.err}
-			if len(c.buf) > 0 {
-				a.DataB64 = base64.StdEncoding.EncodeToString(c.buf)
+				Next: c.base + int64(len(part)), Done: c.done && len(part) == len(c.buf), Error: c.err}
+			if len(part) > 0 {
+				a.DataB64 = base64.StdEncoding.EncodeToString(part)
 			}
 			c.mu.Unlock()
-			return a
+			return a, nil
 		}
 		changed := c.changed
 		c.mu.Unlock()
@@ -219,13 +264,26 @@ type modelCallTable struct {
 	calls map[string]*modelCall
 }
 
-func (t *modelCallTable) add(c *modelCall) {
+// add keeps c, unless its run already has modelCallsPerLease calls under way.
+func (t *modelCallTable) add(c *modelCall) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.calls == nil {
 		t.calls = map[string]*modelCall{}
 	}
+	n := 0
+	for _, o := range t.calls {
+		o.mu.Lock()
+		if o.lease == c.lease && o.host == c.host && !o.done {
+			n++
+		}
+		o.mu.Unlock()
+	}
+	if n >= modelCallsPerLease {
+		return false
+	}
 	t.calls[c.id] = c
+	return true
 }
 
 func (t *modelCallTable) get(id string) *modelCall {
@@ -245,10 +303,7 @@ func (t *modelCallTable) sweep(now time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for id, c := range t.calls {
-		c.mu.Lock()
-		idle := now.Sub(c.collected) > modelCallIdle
-		c.mu.Unlock()
-		if idle {
+		if c.idle(now) {
 			c.stop()
 			delete(t.calls, id)
 		}
@@ -294,6 +349,20 @@ func (s *CoreServer) heldSignInForCall(a asset.Asset, host, lease string, now ti
 		return brainsignin.Record{}, http.StatusForbidden, errors.New("this AI agent's sign-in has expired")
 	}
 	return rec, 0, nil
+}
+
+// openLeaseOf is the open lease host holds on a's sign-in, if it holds one.
+func (s *CoreServer) openLeaseOf(a asset.Asset, host string, now time.Time) (string, bool) {
+	open, err := s.lends().Open(lendBrainSignIn, now)
+	if err != nil {
+		return "", false
+	}
+	for _, x := range open {
+		if x.Host == host && x.Agent == a.ID && x.IsOpen(now) {
+			return x.ID, true
+		}
+	}
+	return "", false
 }
 
 // modelAPIBase is where provider's model calls go, without a trailing slash:
@@ -381,7 +450,7 @@ func (s *CoreServer) handleBodyStartsModelCall(w http.ResponseWriter, r *http.Re
 		return
 	}
 	method := strings.ToUpper(q.Method)
-	if !strings.HasPrefix(q.Path, "/") || strings.Contains(q.Path, "..") || !modelRouteAllowed(rec.Provider, method, q.Path) {
+	if !modelRouteAllowed(rec.Provider, method, q.Path) {
 		why := fmt.Sprintf("%s %s is not a model call a brain signed in with %s may make", method, q.Path, rec.Provider)
 		s.recordLentEvent(a, cc, "agent.model.call", "denied", why)
 		modelCallError(w, http.StatusForbidden, why, map[string]any{"refused": true})
@@ -397,22 +466,80 @@ func (s *CoreServer) handleBodyStartsModelCall(w http.ResponseWriter, r *http.Re
 		target += "?" + q.Query
 	}
 	c := &modelCall{id: newCallID(), agent: a.ID, host: b.Host, lease: q.LeaseID, stopCh: make(chan struct{}),
-		changed: make(chan struct{}), collected: now, checked: now}
-	s.modelCalls.add(c)
+		changed: make(chan struct{}), collected: now}
+	if !s.modelCalls.add(c) {
+		why := fmt.Sprintf("this run already has %d model calls under way", modelCallsPerLease)
+		s.recordLentEvent(a, cc, "agent.model.call", "denied", why)
+		modelCallError(w, http.StatusTooManyRequests, why, nil)
+		return
+	}
 	requested := requestedModel(body)
 	s.inBackground(func(ctx context.Context) {
 		ctx, cancel := context.WithTimeout(ctx, modelCallLongest)
 		defer cancel()
-		go func() {
-			select {
-			case <-c.stopCh:
-				cancel()
-			case <-ctx.Done():
-			}
-		}()
+		go s.watchModelCall(ctx, cancel, c, a, cc)
 		s.runModelCall(ctx, c, checker, rec, method, target, q, body, requested, a, cc)
 	})
-	writeJSONStatus(w, http.StatusOK, c.collect(r.Context(), 0, false, modelCallWait))
+	s.answerCollection(w, r, c, 0, false)
+}
+
+// watchModelCall stops a call under way, and with it the provider's answer and
+// what it costs, once the run may no longer make it — the AI agent revoked or
+// its grant lapsed, the sign-in removed or replaced, the run's lease ended —
+// or once nobody collects it. It checks every modelCallRecheck, whether or
+// not the body collects.
+func (s *CoreServer) watchModelCall(ctx context.Context, cancel context.CancelFunc, c *modelCall, a asset.Asset,
+	cc sandbox.CallerContext) {
+	t := time.NewTicker(modelCallRecheck)
+	defer t.Stop()
+	for {
+		select {
+		case <-c.stopCh:
+			cancel()
+			return
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		now := time.Now().UTC()
+		why := ""
+		if c.idle(now) {
+			why = "nobody collected its answer"
+		} else if err := s.mayBeLent(a, cc, "its brain's model calls"); err != nil {
+			why = err.Error()
+		} else if _, _, err := s.heldSignInForCall(a, c.host, c.currentLease(), now); err != nil {
+			// A run whose lease lapsed takes another; the call goes on under
+			// it, so long as this body holds one.
+			if lease, ok := s.openLeaseOf(a, c.host, now); ok {
+				c.mu.Lock()
+				c.lease = lease
+				c.mu.Unlock()
+			} else {
+				why = err.Error()
+			}
+		}
+		if why != "" {
+			c.finish(why)
+			c.stop()
+			cancel()
+			s.recordLentEvent(a, cc, "agent.model.call", "denied", "an answer under way was stopped: "+why)
+			return
+		}
+	}
+}
+
+// answerCollection answers a body with what it has not yet collected of c,
+// and forgets c once all of its answer is collected.
+func (s *CoreServer) answerCollection(w http.ResponseWriter, r *http.Request, c *modelCall, from int64, haveHead bool) {
+	ans, err := c.collect(r.Context(), from, haveHead, modelCallWait)
+	if err != nil {
+		modelCallError(w, http.StatusConflict, err.Error(), nil)
+		return
+	}
+	if ans.Done {
+		s.modelCalls.remove(c.id)
+	}
+	writeJSONStatus(w, http.StatusOK, ans)
 }
 
 // runModelCall sends the call to the provider and keeps its answer for the
@@ -428,7 +555,7 @@ func (s *CoreServer) runModelCall(ctx context.Context, c *modelCall, checker bra
 		c.finish("the model call could not be made")
 		return
 	}
-	for _, name := range modelRequestHeaders {
+	for _, name := range brainsignin.ModelCallHeaders {
 		for k, v := range q.Header {
 			if strings.EqualFold(k, name) && v != "" {
 				req.Header.Set(name, v)
@@ -453,6 +580,18 @@ func (s *CoreServer) runModelCall(ctx context.Context, c *modelCall, checker bra
 		if v := resp.Header.Get(name); v != "" {
 			h[name] = v
 		}
+	}
+	if keyAnswers[q.Path] {
+		// An answer about the key is read whole, and refused if it carries
+		// the key.
+		whole, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		if strings.Contains(string(whole), rec.Secret) {
+			why := "the provider's answer carried the key, so it was not passed on"
+			c.finish(why)
+			s.recordLentEvent(a, cc, "agent.model.call", "failed", fmt.Sprintf("%s %s for %s: %s", method, q.Path, rec.Provider, why))
+			return
+		}
+		resp.Body = io.NopCloser(bytes.NewReader(whole))
 	}
 	c.head(resp.StatusCode, h)
 	var use modelUsage
@@ -495,7 +634,10 @@ func (s *CoreServer) runModelCall(ctx context.Context, c *modelCall, checker bra
 	s.recordLentEvent(a, cc, "agent.model.call", status, said)
 }
 
-// theCallAsked is the model call a body names, if it is that body's own.
+// theCallAsked is the model call a body names, if it is that body's own. A
+// call this Identity Agent does not know — it was restarted, or the call was
+// stopped — is answered as gone, which the body tells its brain as a failed
+// call to try again.
 func (s *CoreServer) theCallAsked(w http.ResponseWriter, r *http.Request) (*modelCall, sandbox.CallerContext, asset.Asset, bool) {
 	cc, b, a, ok := s.theBodyAndItsAgent(w, r)
 	if !ok {
@@ -503,14 +645,16 @@ func (s *CoreServer) theCallAsked(w http.ResponseWriter, r *http.Request) (*mode
 	}
 	c := s.modelCalls.get(chi.URLParam(r, "call"))
 	if c == nil || c.agent != a.ID || c.host != b.Host {
-		modelCallError(w, http.StatusNotFound, "this body has no such model call", map[string]any{"no_call": true})
+		modelCallError(w, http.StatusGone, "this model call is no longer under way here; make it again",
+			map[string]any{"no_call": true})
 		return nil, cc, a, false
 	}
 	return c, cc, a, true
 }
 
 // handleBodyReadsModelCall answers with what has arrived of a call's answer
-// since what the body last collected, waiting a while for more.
+// since what the body last collected, waiting a while for more. A body whose
+// run took a new lease, after its first lapsed, names it.
 func (s *CoreServer) handleBodyReadsModelCall(w http.ResponseWriter, r *http.Request) {
 	c, cc, a, ok := s.theCallAsked(w, r)
 	if !ok {
@@ -522,32 +666,23 @@ func (s *CoreServer) handleBodyReadsModelCall(w http.ResponseWriter, r *http.Req
 	}
 	now := time.Now().UTC()
 	s.modelCalls.sweep(now)
-	// An answer under way ends when the AI agent may no longer act, or its
-	// run's lease has ended — not only at its next call.
-	refused := s.mayBeLent(a, cc, "its brain's model calls")
-	c.mu.Lock()
-	recheck := now.Sub(c.checked) >= modelCallRecheck
-	if recheck {
-		c.checked = now
-	}
-	c.mu.Unlock()
-	if refused == nil && recheck {
-		if _, _, err := s.heldSignInForCall(a, c.host, c.lease, now); err != nil {
-			refused = err
+	if lease := r.URL.Query().Get("lease"); lease != "" && lease != c.currentLease() {
+		if _, _, err := s.heldSignInForCall(a, c.host, lease, now); err != nil {
+			modelCallError(w, http.StatusForbidden, err.Error(), map[string]any{"refused": true})
+			return
 		}
+		c.mu.Lock()
+		c.lease = lease
+		c.mu.Unlock()
 	}
-	if refused != nil {
+	if err := s.mayBeLent(a, cc, "its brain's model calls"); err != nil {
+		c.finish(err.Error())
 		c.stop()
 		s.modelCalls.remove(c.id)
-		s.recordLentEvent(a, cc, "agent.model.call", "denied", "an answer under way was stopped: "+refused.Error())
-		modelCallError(w, http.StatusForbidden, refused.Error(), map[string]any{"refused": true})
+		modelCallError(w, http.StatusForbidden, err.Error(), map[string]any{"refused": true})
 		return
 	}
-	ans := c.collect(r.Context(), from, r.URL.Query().Get("head") == "1", modelCallWait)
-	if ans.Done && ans.DataB64 == "" {
-		s.modelCalls.remove(c.id)
-	}
-	writeJSONStatus(w, http.StatusOK, ans)
+	s.answerCollection(w, r, c, from, r.URL.Query().Get("head") == "1")
 }
 
 // handleBodyStopsModelCall stops a call whose brain gave up on it.

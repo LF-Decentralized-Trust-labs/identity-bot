@@ -44,7 +44,12 @@ const (
 )
 
 // directAnswerLargest bounds the words of an answer.
-const directAnswerLargest = 8 << 20
+const directAnswerLargest = 2 << 20
+
+// directHistoryLargest bounds the conversation sent with each turn, and kept:
+// the oldest turns are let go first. It is well under what one model call
+// may carry to the Identity Agent.
+const directHistoryLargest = 1 << 20
 
 // directMessage is one message of the conversation, as both APIs take it.
 type directMessage struct {
@@ -63,7 +68,7 @@ func credential(creds []string, name string) string {
 
 // directHistory is where a session's conversation is kept.
 func directHistory(workspace, session string) (string, error) {
-	if session == "" || strings.ContainsAny(session, `/\`) || session == "." || session == ".." {
+	if session == "" || len(session) > 128 || strings.Trim(session, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") != "" {
 		return "", fmt.Errorf("not a session: %q", session)
 	}
 	return filepath.Join(workspace, ".agent-host-model", session+".json"), nil
@@ -86,11 +91,15 @@ func (d DirectModel) Run(ctx context.Context, t Turn) (Outcome, error) {
 	}
 	var history []directMessage
 	if t.Resume {
-		if b, err := os.ReadFile(path); err == nil {
-			_ = json.Unmarshal(b, &history)
+		b, err := os.ReadFile(path)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return Outcome{}, fmt.Errorf("the conversation so far could not be read: %w", err)
+		}
+		if err == nil && json.Unmarshal(b, &history) != nil {
+			return Outcome{}, errors.New("the conversation so far is unreadable")
 		}
 	}
-	history = append(history, directMessage{Role: "user", Content: t.Prompt})
+	history = trimHistory(append(history, directMessage{Role: "user", Content: t.Prompt}))
 
 	var req []byte
 	var endpoint string
@@ -132,16 +141,33 @@ func (d DirectModel) Run(ctx context.Context, t Turn) (Outcome, error) {
 	if text == "" {
 		return Outcome{}, errors.New("the model gave no answer")
 	}
-	history = append(history, directMessage{Role: "assistant", Content: text})
-	if b, err := json.Marshal(history); err == nil {
-		if err := os.MkdirAll(filepath.Dir(path), 0o700); err == nil {
-			_ = os.WriteFile(path, b, 0o600)
-		}
+	history = trimHistory(append(history, directMessage{Role: "assistant", Content: text}))
+	b, _ := json.Marshal(history)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return Outcome{}, fmt.Errorf("the conversation could not be kept for its next turn: %w", err)
+	}
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		return Outcome{}, fmt.Errorf("the conversation could not be kept for its next turn: %w", err)
 	}
 	return Outcome{Text: strings.TrimSpace(text), Brain: agentmessage.Brain{
 		Provider: directBrain, Model: firstNonEmpty(model, t.Model), Session: t.Session,
 		RunHash: runHash(req, out),
 	}}, nil
+}
+
+// trimHistory lets the oldest turns go until the conversation is within
+// directHistoryLargest, keeping at least the newest message.
+func trimHistory(h []directMessage) []directMessage {
+	size := 0
+	for _, m := range h {
+		size += len(m.Content) + 32
+	}
+	for len(h) > 1 && (size > directHistoryLargest || h[0].Role != "user") {
+		// A conversation starts with what was asked: both APIs require it.
+		size -= len(h[0].Content) + 32
+		h = h[1:]
+	}
+	return h
 }
 
 // readDirectAnswer is the words of a model's answer, the model it names, and

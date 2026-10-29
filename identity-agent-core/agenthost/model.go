@@ -35,12 +35,9 @@ const modelCallsThroughIdentityAgent = "through_identity_agent"
 const modelPath = "/model"
 
 // modelRequestLargest bounds one model call's request: it travels to the
-// Identity Agent sealed, as base64, in an envelope of bounded size.
-const modelRequestLargest = 4 << 20
-
-// modelRequestHeaders are the headers of the brain's request passed on. What
-// the brain authenticated itself to this body with never is.
-var modelRequestHeaders = []string{"Content-Type", "Accept", "Anthropic-Version", "Anthropic-Beta", "Openai-Beta"}
+// Identity Agent sealed, base64-encoded three times over, in an envelope of
+// at most 8 MB, which the Identity Agent holds it to as well.
+const modelRequestLargest = 3 << 20
 
 // openModel gives a borrowed sign-in whose key stays with the Identity Agent
 // this body's model address, and a token good for its run.
@@ -73,8 +70,8 @@ func (ts *toolServer) shutModel(b *Borrowed) {
 // as Claude Code and OpenAI's clients send it, or as Anthropic's key header.
 func (ts *toolServer) modelFor(r *http.Request) *Borrowed {
 	tok := r.Header.Get("X-Api-Key")
-	if v, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
-		tok = v
+	if v, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok && strings.TrimSpace(v) != "" {
+		tok = strings.TrimSpace(v)
 	}
 	if tok == "" {
 		return nil
@@ -132,7 +129,7 @@ func (ts *toolServer) serveModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	header := map[string]string{}
-	for _, name := range modelRequestHeaders {
+	for _, name := range brainsignin.ModelCallHeaders {
 		if v := r.Header.Get(name); v != "" {
 			header[name] = v
 		}
@@ -172,6 +169,7 @@ func (ts *toolServer) serveModel(w http.ResponseWriter, r *http.Request) {
 		if a.DataB64 != "" && wrote {
 			data, derr := base64.StdEncoding.DecodeString(a.DataB64)
 			if derr != nil {
+				ts.stopModelCall(a.CallID)
 				return
 			}
 			if _, werr := w.Write(data); werr != nil {
@@ -189,7 +187,10 @@ func (ts *toolServer) serveModel(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		next := a.Next
-		u := "/api/agent-host/model-calls/" + url.PathEscape(a.CallID) + "?from=" + strconv.FormatInt(next, 10)
+		// The run's lease is named each time: one that lapsed is replaced
+		// while the call goes on.
+		u := "/api/agent-host/model-calls/" + url.PathEscape(a.CallID) + "?from=" + strconv.FormatInt(next, 10) +
+			"&lease=" + url.QueryEscape(b.lease())
 		if wrote {
 			u += "&head=1"
 		}
@@ -209,8 +210,11 @@ func (ts *toolServer) serveModel(w http.ResponseWriter, r *http.Request) {
 				why = e.Error
 			}
 			if !wrote {
+				// The call is gone or could not be collected: to the brain that
+				// is a failed call to make again, never a missing address.
 				status := code
-				if err != nil || status == http.StatusOK || status == 0 {
+				if err != nil || status == http.StatusOK || status == 0 || status == http.StatusGone ||
+					status == http.StatusNotFound || status == http.StatusConflict {
 					status = http.StatusBadGateway
 				}
 				modelError(w, path, status, why)

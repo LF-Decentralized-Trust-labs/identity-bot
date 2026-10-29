@@ -369,9 +369,15 @@ func (h *Host) handle(ctx context.Context, tools *toolServer, brain Brain, p age
 	creds, borrowed, err := h.lendForTurn(ctx, brain, tools, logf)
 	if err == nil {
 		// GitHub access, when the AI agent's grant gives it repositories, is
-		// lent for the turn alongside the sign-in, and given back with it.
-		githubEnv, github := h.lendGitHubForTurn(ctx, logf)
-		creds = append(creds, githubEnv...)
+		// lent for the turn alongside the sign-in, and given back with it —
+		// not to an AI agent that only reads and answers, which runs nothing
+		// that could use it.
+		var github *LentGitHub
+		if _, answersOnly := brain.(DirectModel); !answersOnly {
+			var githubEnv []string
+			githubEnv, github = h.lendGitHubForTurn(ctx, logf)
+			creds = append(creds, githubEnv...)
+		}
 		token := tools.open(turn)
 		tctx, cancel := context.WithTimeout(ctx, turnTimeout)
 		stop, kept := make(chan struct{}), make(chan struct{})

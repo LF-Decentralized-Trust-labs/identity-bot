@@ -55,23 +55,38 @@ Agent makes the call only when:
 - the AI agent may still act: not revoked, its grant not lapsed;
 - its sign-in is still a key kept here.
 
-It also makes only the calls a model key is for: the provider's model calls and its
-list of models. Grok's program also asks xAI what its key is, which is answered too.
-Nothing else the key could do is passed on.
+It also makes only the calls a model key is for: the provider's model calls, its list
+of models, and one model by name. Grok's program also asks xAI what its key is, which
+is answered too, unless the answer carries the key. The path must be plain — nothing
+escaped, no query or fragment, nothing that cleaning it would change — so what is
+checked is what is sent. Nothing else the key could do is passed on. One run may
+have at most eight calls under way at once.
 
 The Identity Agent adds the key in the provider's own header. It sends the call the
 way it sends its own model calls, with the same policy check, the owner's blocks on
-where it may go, the proxy log and the trace. It follows no redirect. Of the brain's
-headers, only those that describe the call travel on, and never how the brain proved
-itself to its body.
+where it may go, the proxy log and the trace. It follows no redirect. Only the headers
+that describe the call travel on — its content type, what it accepts, and the
+providers' version and feature headers — whatever the body sent, and never how the
+brain proved itself to its body. The body and the Identity Agent pass the same list.
 
 **The answer streams.** Coding programs read a model's answer as it is written. A
 sealed request is answered whole, so the Identity Agent runs the call in the
-background. The body collects what has arrived, each collection waiting up to
-twenty seconds for more, and writes it straight on to the brain. While a call is
-under way, the Identity Agent checks at least every fifteen seconds that the run may
-still make it, and stops it when it may not. A call nobody collects for ninety
-seconds is stopped. No call runs longer than thirty minutes.
+background. The body collects what has arrived, at most 2 MB at a time, each
+collection waiting up to twenty seconds for more, and writes it straight on to the
+brain. While a call is under way, the Identity Agent checks every fifteen seconds,
+whether or not the body is collecting, that the run may still make it. When it may
+not, it stops the call, and with it the provider's answer and what that costs. A
+call nobody collects for ninety seconds is stopped the same way. No call runs longer
+than thirty minutes.
+
+**A renewed lease carries the call.** A run whose lease lapsed takes another
+(ADR-051). A call under way goes on under the new one, so long as the same body
+holds it.
+
+**A call the Identity Agent no longer knows is a failed call.** The calls under way
+are held in memory. If the Identity Agent restarts, a call it was making is lost: the
+body tells its brain the call failed, and the brain's program makes it again, as it
+does for any failed call.
 
 **Each call is recorded** in the signed governance record, as the AI agent, naming
 the body: the call, the model, the provider's answer, how long it took, and the
@@ -84,10 +99,13 @@ say so is refused and told to update. It is never lent the key.
 
 **An AI agent may run with no program.** Its brain's program is "none": it only
 reads and answers. Its body calls the model itself, through the same address and so
-through the Identity Agent. It has no tools and no use of the machine, and its words
-are its answer. The conversation so far is kept in its workspace, one file per
-session, so the next turn carries on from it. Only a key kept here can run this way.
-A subscription is for its provider's program, and a model server's key is lent.
+through the Identity Agent. It has no tools and no use of the machine, is lent no
+GitHub access, and its words are its answer. The conversation so far is kept in its
+workspace, one file per session and at most 1 MB, the oldest turns let go first, so
+the next turn carries on from it. A turn whose conversation cannot be read or kept
+fails rather than carrying on without it. Only a key kept here can run this way: a
+subscription is for its provider's program, and a model server's key is lent. A
+sign-in such an AI agent cannot run with is refused when it is set.
 
 ## Consequences
 
@@ -101,8 +119,11 @@ A subscription is for its provider's program, and a model server's key is lent.
 - Every model call crosses the Identity Agent, so a slow or unreachable Identity
   Agent slows or stops the AI agents that use keys kept there. A subscription or a
   model server is unaffected.
-- One model call's request is at most 4 MB, because it travels sealed. A brain's
-  conversation larger than that is refused by its body.
+- One model call's request is at most 3 MB, because it travels sealed, base64-encoded
+  three times over, in an envelope of at most 8 MB. A brain's conversation larger
+  than that is refused.
+- Calls under way are lost when the Identity Agent restarts. The brain sees each as a
+  failed call and makes it again.
 - A program that calls a provider at a fixed address, ignoring the one it is given,
   sends its run's token there. The token works nowhere else, and the call fails.
 - Proven against the real programs, with a stand-in provider: Claude Code (2.1)

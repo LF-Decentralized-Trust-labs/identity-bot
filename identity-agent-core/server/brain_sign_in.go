@@ -245,6 +245,7 @@ func (s *CoreServer) brainSignInViewAmong(assetID string, rec brainsignin.Record
 			return x.Pool == brainsignin.PoolOr(pool, assetID)
 		}),
 		"shared_with": shared, "harness": brainsignin.Harness(rec.Provider),
+		"stays_with_identity_agent": rec.StaysInVault(),
 	}
 }
 
@@ -456,6 +457,12 @@ func (s *CoreServer) handleSetBrainSignIn(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		jsonError(w, err.Error(), status)
 		return
+	}
+	if a.AgentConfig != nil {
+		if err := brainsignin.ProgramFits(a.AgentConfig.Brain.Program, rec.Kind, rec.Provider); err != nil {
+			jsonError(w, "the sign-in was not kept: "+err.Error(), http.StatusBadRequest)
+			return
+		}
 	}
 	updated, err := s.keepBrainSignIn(a, rec, madeByController(r), q.MaxConcurrentRuns != nil)
 	if err != nil {

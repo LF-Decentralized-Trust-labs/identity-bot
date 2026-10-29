@@ -208,6 +208,12 @@ func (r Record) Public() Record {
 // HasSecret reports whether the record holds a key or token.
 func (r Record) HasSecret() bool { return r.Secret != "" }
 
+// ModelCallHeaders are the headers of a brain's model call that travel on to
+// its provider when the Identity Agent makes the call: what describes the
+// call, and never how the brain proved itself, which the Identity Agent
+// replaces with the key. The body and the Identity Agent both pass only these.
+var ModelCallHeaders = []string{"Content-Type", "Accept", "Anthropic-Version", "Anthropic-Beta", "Openai-Beta"}
+
 // ProgramNone is the program of an AI agent that only reads and answers: its
 // body calls the model itself, through the Identity Agent, with no program
 // that could use the machine.

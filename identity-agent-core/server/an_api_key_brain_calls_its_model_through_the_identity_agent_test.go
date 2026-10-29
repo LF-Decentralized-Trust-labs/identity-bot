@@ -32,6 +32,12 @@ type modelProvider struct {
 	// hold, when set, keeps the answer open after its first part until it is
 	// closed.
 	hold chan struct{}
+	// cancelled is closed when a held answer's call is given up by the
+	// Identity Agent.
+	cancelled     chan struct{}
+	cancelledOnce sync.Once
+	// keyAnswer is what it says the key is.
+	keyAnswer string
 }
 
 func (p *modelProvider) serve(t *testing.T) *httptest.Server {
@@ -40,6 +46,10 @@ func (p *modelProvider) serve(t *testing.T) *httptest.Server {
 		p.seen = append(p.seen, r.Header.Clone())
 		hold := p.hold
 		p.mu.Unlock()
+		if r.URL.Path == "/x/v1/api-key" && r.Header.Get("Authorization") == "Bearer "+theOrganisationsKey {
+			_, _ = io.WriteString(rw, p.keyAnswer)
+			return
+		}
 		if r.Header.Get("x-api-key") != theOrganisationsKey {
 			rw.WriteHeader(http.StatusUnauthorized)
 			_, _ = rw.Write([]byte(`{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}`))
@@ -77,6 +87,7 @@ func (p *modelProvider) serve(t *testing.T) *httptest.Server {
 				select {
 				case <-hold:
 				case <-r.Context().Done():
+					p.cancelledOnce.Do(func() { close(p.cancelled) })
 					return
 				}
 			}
@@ -97,12 +108,13 @@ func (p *modelProvider) calls() []http.Header {
 func keyWorld(t *testing.T) (*talkWorld, *modelProvider) {
 	t.Helper()
 	w := signInWorld(t)
-	p := &modelProvider{}
+	p := &modelProvider{cancelled: make(chan struct{})}
 	srv := p.serve(t)
 	w.s.brainChecker = &brainsignin.Checker{Anthropic: srv.URL + "/a", OpenAI: srv.URL + "/oa", XAI: srv.URL + "/x",
 		OpenRouter: srv.URL + "/or", AddressRule: loopbackAllowed}
-	if code, _, raw := w.asOwner(t, "PUT", "/api/mcp/agents/"+w.a.ID+"/brain-sign-in",
-		`{"kind":"api_key","provider":"anthropic","account":"Engineering key","secret":"`+theOrganisationsKey+`"}`); code != http.StatusOK {
+	if code, out, raw := w.asOwner(t, "PUT", "/api/mcp/agents/"+w.a.ID+"/brain-sign-in",
+		`{"kind":"api_key","provider":"anthropic","account":"Engineering key","secret":"`+theOrganisationsKey+`"}`); code != http.StatusOK ||
+		out["sign_in"].(map[string]any)["stays_with_identity_agent"] != true {
 		t.Fatalf("signing in: %d %s", code, raw)
 	}
 	return w, p
@@ -369,6 +381,7 @@ func TestAModelCallIsMadeOnlyWhileTheRunMayMakeIt(t *testing.T) {
 // while the provider is still answering, not once it has finished. An answer
 // under way ends when the AI agent's sign-in is removed.
 func TestAModelsAnswerArrivesAsItStreams(t *testing.T) {
+	quickRecheck(t)
 	w, p := keyWorld(t)
 	hold := make(chan struct{})
 	p.hold = hold
@@ -432,13 +445,16 @@ func TestAModelsAnswerArrivesAsItStreams(t *testing.T) {
 	if code, _, raw := w.asOwner(t, "DELETE", "/api/mcp/agents/"+w.a.ID+"/brain-sign-in", ""); code != http.StatusOK {
 		t.Fatalf("removing the sign-in: %d %s", code, raw)
 	}
-	c := w.s.modelCalls.get(a["call_id"].(string))
-	c.mu.Lock()
-	c.checked = time.Time{}
-	c.mu.Unlock()
+	// Nobody collects it: the call is stopped all the same, and so is the
+	// provider's answer, which is what costs.
+	select {
+	case <-p.cancelled:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the provider kept answering a call whose sign-in was removed")
+	}
 	code, out, err := w.hostA.CallContext(ctx, "GET", fmt.Sprintf("/api/agent-host/model-calls/%s?from=%d&head=1",
 		a["call_id"], int64(a["next"].(float64))), nil)
-	if err != nil || code != http.StatusForbidden {
+	if err != nil || code == http.StatusOK && !strings.Contains(string(out), `"done":true`) {
 		t.Fatalf("collecting an answer whose sign-in was removed: %d %s %v", code, out, err)
 	}
 }
@@ -508,5 +524,195 @@ func TestOnlyAKeyKeptHereRunsWithNoProgram(t *testing.T) {
 		if (code == http.StatusOK) != c.ok {
 			t.Errorf("%s: %d %s", c.brain, code, raw)
 		}
+	}
+}
+
+// quickRecheck makes calls under way check again at once, and collections
+// wait only a moment, for the length of a test.
+func quickRecheck(t *testing.T) {
+	t.Helper()
+	was, wait := modelCallRecheck, modelCallWait
+	modelCallRecheck, modelCallWait = 50*time.Millisecond, 2*time.Second
+	t.Cleanup(func() { modelCallRecheck, modelCallWait = was, wait })
+}
+
+// startModelCallWith is startModelCall with the headers and body a body sends.
+func startModelCallWith(t *testing.T, h *agenthost.Host, lease, method, path string, header map[string]string,
+	body []byte) (int, map[string]any) {
+	t.Helper()
+	q, _ := json.Marshal(map[string]any{"lease_id": lease, "method": method, "path": path, "header": header,
+		"body_b64": base64.StdEncoding.EncodeToString(body)})
+	code, out, err := h.CallContext(context.Background(), "POST", "/api/agent-host/model-calls", q)
+	if err != nil {
+		return http.StatusForbidden, map[string]any{"error": err.Error()}
+	}
+	var a map[string]any
+	_ = json.Unmarshal(out, &a)
+	return code, a
+}
+
+// What a body sends is checked here again, whatever the body did: only a
+// plain model path, only the headers that describe the call, never one the
+// brain authenticated with, and never an answer that carries the key.
+func TestTheIdentityAgentChecksEveryCallItIsSent(t *testing.T) {
+	w, p := keyWorld(t)
+	ctx := context.Background()
+	held, err := w.hostA.Borrow(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ method, path string }{
+		{"GET", "/v1/models/../organizations"}, {"GET", "/v1/models/%2e%2e/organizations"},
+		{"GET", "/v1/models/a%2fb"}, {"POST", "/v1/messages?beta=1"}, {"POST", "/v1/messages#x"},
+		{"POST", "/v1//messages"}, {"POST", "/v1/messages/"}, {"GET", "/v1/api-key"},
+	} {
+		if code, a := startModelCallWith(t, w.hostA, held.LeaseID, c.method, c.path, nil, nil); code != http.StatusForbidden {
+			t.Errorf("%s %s was made: %d %v", c.method, c.path, code, a)
+		}
+	}
+	if len(p.calls()) != 0 {
+		t.Fatal("a refused call reached the provider")
+	}
+	// A body that sends its own authentication: the provider sees only the key.
+	code, a := startModelCallWith(t, w.hostA, held.LeaseID, "POST", "/v1/messages", map[string]string{
+		"Authorization": "Bearer ahm-THE-RUNS-TOKEN", "X-Api-Key": "ahm-THE-RUNS-TOKEN", "Cookie": "c=1",
+		"Content-Type": "application/json", "X-Forwarded-For": "10.0.0.1"},
+		[]byte(`{"model":"m","stream":true,"messages":[]}`))
+	if code != http.StatusOK {
+		t.Fatalf("a call: %d %v", code, a)
+	}
+	collectAll(t, w.hostA, a)
+	h := p.calls()[0]
+	if h.Get("x-api-key") != theOrganisationsKey || h.Get("Authorization") != "" || h.Get("Cookie") != "" ||
+		h.Get("X-Forwarded-For") != "" || h.Get("Content-Type") != "application/json" {
+		t.Fatalf("the provider was sent what the body sent: %v", h)
+	}
+
+	// An xAI key's answer about itself is passed on, unless it carries the key.
+	wx, px := keyWorld(t)
+	if code, _, raw := wx.asOwner(t, "PUT", "/api/mcp/agents/"+wx.a.ID+"/brain-sign-in",
+		`{"kind":"api_key","provider":"xai","secret":"`+theOrganisationsKey+`"}`); code != http.StatusOK {
+		t.Fatalf("signing in: %d %s", code, raw)
+	}
+	heldX, err := wx.hostA.Borrow(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	px.keyAnswer = `{"name":"Support team key","acls":["api-key:model:*"]}`
+	code, a = startModelCallWith(t, wx.hostA, heldX.LeaseID, "GET", "/v1/api-key", nil, nil)
+	if got := collectAll(t, wx.hostA, a); code != http.StatusOK || !strings.Contains(got, "Support team key") {
+		t.Fatalf("the key's own answer: %d %q", code, got)
+	}
+	px.keyAnswer = `{"name":"k","api_key":"` + theOrganisationsKey + `"}`
+	code, a = startModelCallWith(t, wx.hostA, heldX.LeaseID, "GET", "/v1/api-key", nil, nil)
+	if got := collectAll(t, wx.hostA, a); strings.Contains(got, theOrganisationsKey) || a["status"] != nil {
+		t.Fatalf("an answer carrying the key was passed on: %d %q %v", code, got, a)
+	}
+}
+
+// The largest call a body may make travels whole; a larger one is refused by
+// the Identity Agent too. A long answer comes in parts no larger than one
+// sealed envelope can carry.
+func TestTheLargestModelCallTravelsSealed(t *testing.T) {
+	w, p := keyWorld(t)
+	ctx := context.Background()
+	held, err := w.hostA.Borrow(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	big := []byte(`{"model":"m","stream":true,"messages":[{"role":"user","content":"` +
+		strings.Repeat("x", modelRequestLargest-200) + `"}]}`)
+	code, a := startModelCallWith(t, w.hostA, held.LeaseID, "POST", "/v1/messages",
+		map[string]string{"Content-Type": "application/json"}, big)
+	if code != http.StatusOK {
+		t.Fatalf("the largest call: %d %v", code, a)
+	}
+	collectAll(t, w.hostA, a)
+	p.mu.Lock()
+	got := len(p.bodies[len(p.bodies)-1])
+	p.mu.Unlock()
+	if got != len(big) {
+		t.Fatalf("the provider was sent %d bytes of %d", got, len(big))
+	}
+	if code, _ := startModelCallWith(t, w.hostA, held.LeaseID, "POST", "/v1/messages", nil,
+		make([]byte, modelRequestLargest+1)); code == http.StatusOK {
+		t.Fatal("a call larger than one may be was made")
+	}
+	c := &modelCall{changed: make(chan struct{}), status: 200, buf: make([]byte, 3*modelCallChunk), done: true}
+	first, err := c.collect(ctx, 0, false, 0)
+	if err != nil || first.Done || first.Next != modelCallChunk {
+		t.Fatalf("a long answer came at once: next %d done %v %v", first.Next, first.Done, err)
+	}
+	if _, err := c.collect(ctx, 0, true, 0); err == nil {
+		// What was collected and let go is not given again.
+	}
+	second, _ := c.collect(ctx, first.Next, true, 0)
+	if second.Next != 2*modelCallChunk {
+		t.Fatalf("the second part: %d", second.Next)
+	}
+	if _, err := c.collect(ctx, 0, true, 0); err == nil {
+		t.Fatal("a part collected and let go was given again")
+	}
+}
+
+// One run may have only so many calls under way at once, and a run whose
+// lease lapsed and was taken again carries on the call it was making.
+func TestARunsCallsAreBoundedAndOutliveARenewedLease(t *testing.T) {
+	quickRecheck(t)
+	w, p := keyWorld(t)
+	hold := make(chan struct{})
+	p.hold = hold
+	defer close(hold)
+	ctx := context.Background()
+	held, err := w.hostA.Borrow(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first map[string]any
+	for i := 0; i < modelCallsPerLease; i++ {
+		code, a := startModelCall(t, w.hostA, held.LeaseID, "/v1/messages")
+		if code != http.StatusOK {
+			t.Fatalf("call %d: %d %v", i, code, a)
+		}
+		if first == nil {
+			first = a
+		}
+	}
+	if code, a := startModelCall(t, w.hostA, held.LeaseID, "/v1/messages"); code != http.StatusTooManyRequests {
+		t.Fatalf("a call past the limit: %d %v", code, a)
+	}
+	// The run takes another lease and the first ends, as when its lease
+	// lapsed; the call carries on under the new one.
+	again, err := w.hostA.Borrow(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.hostA.Return(ctx, held); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(4 * modelCallRecheck)
+	code, out, err := w.hostA.CallContext(ctx, "GET", fmt.Sprintf("/api/agent-host/model-calls/%s?from=%d&head=1&lease=%s",
+		first["call_id"], int64(first["next"].(float64)), again.LeaseID), nil)
+	if err != nil || code != http.StatusOK {
+		t.Fatalf("collecting under the new lease: %d %s %v", code, out, err)
+	}
+	// A lease that is not this body's is not taken.
+	code, _, _ = w.hostA.CallContext(ctx, "GET", fmt.Sprintf("/api/agent-host/model-calls/%s?from=%d&head=1&lease=bl_not_this_run",
+		first["call_id"], int64(first["next"].(float64))), nil)
+	if code != http.StatusForbidden {
+		t.Fatalf("collecting under a lease it does not hold: %d", code)
+	}
+}
+
+// An AI agent that only reads and answers keeps a sign-in it can run with:
+// one it cannot is refused rather than kept.
+func TestAnAnswerOnlyAIAgentIsNotGivenASubscription(t *testing.T) {
+	w, _ := keyWorld(t)
+	if code, _, raw := w.asOwner(t, "PATCH", "/api/mcp/agents/"+w.a.ID, `{"brain":{"program":"none","model":"m"}}`); code != http.StatusOK {
+		t.Fatalf("making it answer only: %d %s", code, raw)
+	}
+	if code, _, raw := w.asOwner(t, "PUT", "/api/mcp/agents/"+w.a.ID+"/brain-sign-in",
+		`{"kind":"subscription","provider":"claude-code","secret":"sk-ant-oat01-T"}`); code != http.StatusBadRequest {
+		t.Fatalf("a subscription for an AI agent that only answers: %d %s", code, raw)
 	}
 }
