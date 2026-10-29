@@ -2,8 +2,6 @@ package agentmessage
 
 import (
 	"crypto/ed25519"
-	"encoding/json"
-	"os"
 	"strings"
 	"testing"
 
@@ -16,8 +14,7 @@ type ed25519Signer struct{ priv ed25519.PrivateKey }
 func (s ed25519Signer) PublicKey() ([]byte, error)    { return s.priv.Public().(ed25519.PublicKey), nil }
 func (s ed25519Signer) Sign(d []byte) ([]byte, error) { return ed25519.Sign(s.priv, d), nil }
 
-// vectorSigner is a fixed key, so the vectors below are reproducible by any
-// implementation: seed bytes 0x01..0x20.
+// vectorSigner is a fixed key: seed bytes 0x01..0x20.
 func vectorSigner() ed25519Signer {
 	seed := make([]byte, ed25519.SeedSize)
 	for i := range seed {
@@ -34,50 +31,11 @@ func vectorStatement(t *testing.T) Statement {
 	return Statement{
 		Conversation: "c_vector", Kind: KindReply, From: "EAGENT_B", To: "EAGENT_A", InReplyTo: "m_ask",
 		BodyHash: HashBody([]byte("I run macOS 26.1 on a MacBook Pro.")),
-		Brain:    Brain{Provider: "claude-code", Model: "claude-opus-5-5", Session: "s-1", RunHash: "Erun"},
+		Brain:    Brain{Provider: "example-harness", Model: "example-model", Session: "s-1", RunHash: "Erun"},
 		Host:     host, HostNonce: "nonce-0123456789abcdef", HostTime: "2026-10-20T12:00:00Z",
 		BodyCredential: "EBODYCRED",
 	}
 }
-
-// The published test vectors: the exact string a body signs, the digest of a
-// message's words, and the signature the fixed key makes over it. An Agent
-// Host, an Identity Agent and an offline verifier must all produce these.
-func TestTheMessageFormatVectors(t *testing.T) {
-	st := vectorStatement(t)
-	wantBytes := strings.Join([]string{
-		"IA-AGENT-MSG-V1", "c_vector", "reply", "EAGENT_B", "EAGENT_A", "m_ask",
-		HashBody([]byte("I run macOS 26.1 on a MacBook Pro.")),
-		"claude-code", "claude-opus-5-5", "s-1", "Erun",
-		st.Host, "nonce-0123456789abcdef", "2026-10-20T12:00:00Z", "EBODYCRED",
-	}, "\n")
-	if string(st.Bytes()) != wantBytes {
-		t.Fatalf("the signed string changed:\n%s", st.Bytes())
-	}
-	if got := HashBody([]byte("I run macOS 26.1 on a MacBook Pro.")); got != vectorBodyHash {
-		t.Fatalf("the words' digest changed: %s", got)
-	}
-	if st.Host != vectorHost {
-		t.Fatalf("the body's identifier changed: %s", st.Host)
-	}
-	sig, err := Sign(vectorSigner(), st)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if sig != vectorSignature {
-		t.Fatalf("the signature changed: %s", sig)
-	}
-	_, verkey, _ := agentbody.Identity(vectorSigner())
-	if err := Verify(st, verkey, sig); err != nil {
-		t.Fatalf("the vector does not verify: %v", err)
-	}
-}
-
-const (
-	vectorBodyHash  = "EDXyvxf9u_04aoMO0NTqpfrS5RZlVGjmguuOQ4jQNmJQ"
-	vectorHost      = "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk"
-	vectorSignature = "0BD3LvzasdVNi6ctmuRlsjPaGI-kqIxFVKtm1M4SDtj84FXbBCKaPFK8QSbDxJEENwzgolk_20uV8X5-sAQAY0oB"
-)
 
 // Every field the body signs is bound: changing any one breaks the signature.
 func TestEveryFieldABodySignsIsBound(t *testing.T) {
@@ -156,32 +114,5 @@ func TestTheCountersignatureCoversTheSendersSignature(t *testing.T) {
 	rec.To = "EAGENT_C"
 	if rec.CheckSenderProof() == nil {
 		t.Fatal("a record re-addressed after the body signed it was accepted")
-	}
-}
-
-// The vectors are also published as a file, for implementations in other
-// languages, and the file must say what this one does.
-func TestThePublishedVectorFileMatches(t *testing.T) {
-	b, err := os.ReadFile("testdata/message-v1.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var v struct {
-		Words        string    `json:"words"`
-		Statement    Statement `json:"statement"`
-		BodyHash     string    `json:"body_hash"`
-		Host         string    `json:"host"`
-		Signature    string    `json:"signature"`
-		SignedString string    `json:"signed_string"`
-	}
-	if err := json.Unmarshal(b, &v); err != nil {
-		t.Fatal(err)
-	}
-	v.Statement.BodyHash, v.Statement.Host = v.BodyHash, v.Host
-	if HashBody([]byte(v.Words)) != v.BodyHash || string(v.Statement.Bytes()) != v.SignedString {
-		t.Fatal("the published vector file disagrees with this implementation")
-	}
-	if sig, _ := Sign(vectorSigner(), v.Statement); sig != v.Signature {
-		t.Fatalf("the published signature is not this key's: %s", sig)
 	}
 }

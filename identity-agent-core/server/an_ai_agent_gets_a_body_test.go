@@ -90,7 +90,7 @@ func sealedEnrolment(t *testing.T, s *CoreServer, signer, offered testMachine, e
 	if err != nil {
 		t.Fatal(err)
 	}
-	inner, _ := json.Marshal(bodyEnrolRequest{Secret: e.Secret, Agent: e.Agent, Keys: k, Nonce: nonce,
+	inner, _ := json.Marshal(agentbody.EnrolRequest{Secret: e.Secret, Agent: e.Agent, Keys: k, Nonce: nonce,
 		ClaimedGrade: claimed, Platform: "macos/arm64", Placement: "computer", Signature: sig})
 	iaKS, err := s.keySetFor(e.IdentityAgent)
 	if err != nil {
@@ -102,7 +102,7 @@ func sealedEnrolment(t *testing.T, s *CoreServer, signer, offered testMachine, e
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _ := json.Marshal(sealedBodyEnrolment{Sender: k, Envelope: env})
+	b, _ := json.Marshal(agentbody.SealedEnrolment{Sender: k, Envelope: env})
 	return b
 }
 
