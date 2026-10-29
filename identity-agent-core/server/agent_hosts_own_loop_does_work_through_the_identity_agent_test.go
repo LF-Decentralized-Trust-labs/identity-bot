@@ -41,6 +41,9 @@ func (o *openRouterStandIn) serve(t *testing.T) *httptest.Server {
 		case "/or/v1/key":
 			_, _ = io.WriteString(w, `{"data":{"label":"sk-or-v1-the...here"}}`)
 			return
+		case "/or/v1/models":
+			_, _ = io.WriteString(w, `{"data":[{"id":"vendor/model-a"}]}`)
+			return
 		case "/or/v1/chat/completions":
 		default:
 			w.WriteHeader(http.StatusNotFound)

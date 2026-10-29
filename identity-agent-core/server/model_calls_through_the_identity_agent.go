@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"path"
@@ -238,8 +239,10 @@ type modelCall struct {
 	buffered *atomic.Int64
 
 	// counted says the call has ended and what it cost has been counted
-	// against its AI agent's allowance, where it has one.
+	// against its AI agent's allowance, where it has one; free says it costs
+	// nothing (not a model call), and so is counted from the start.
 	counted atomic.Bool
+	free    bool
 
 	mu sync.Mutex
 	// lease is the lease the run cites now: a run whose lease lapsed takes
@@ -720,16 +723,20 @@ func (s *CoreServer) handleBodyStartsModelCall(w http.ResponseWriter, r *http.Re
 	}
 	c := &modelCall{id: newCallID(), agent: a.ID, host: b.Host, lease: q.LeaseID, stopCh: make(chan struct{}),
 		letGoCh: make(chan struct{}), changed: make(chan struct{}), collected: now}
-	bound := -1
+	bound, boundErr := -1, error(nil)
 	if method == http.MethodPost {
-		if bound, err = theAnswerBound(body); err != nil {
+		if bound, boundErr = theAnswerBound(body); boundErr != nil {
 			bound = 0
 		}
+	} else {
+		// Costs nothing, so it never holds its AI agent's place.
+		c.free = true
+		c.counted.Store(true)
 	}
 	capped := false
 	added, err := s.modelCalls.addIf(c, func(underWay int, known func(string) bool) error {
 		var err error
-		capped, err = s.allowanceRefuses(a, rec.Provider, bound, underWay, known)
+		capped, err = s.allowanceRefuses(a, rec.Provider, bound, boundErr, underWay, known)
 		return err
 	})
 	if err != nil {
@@ -907,8 +914,9 @@ func (s *CoreServer) runModelCall(ctx context.Context, c *modelCall, checker bra
 	// counted as costing nothing: providers charge for what they answer.
 	var ended allowanceCall
 	defer func() {
-		s.chargeAllowance(a, c.id, ended)
-		c.counted.Store(true)
+		if !c.free && s.chargeAllowance(a, c.id, ended) {
+			c.counted.Store(true)
+		}
 	}()
 	var rd io.Reader
 	if len(body) > 0 {
@@ -1010,7 +1018,7 @@ func (s *CoreServer) runModelCall(ctx context.Context, c *modelCall, checker bra
 	s.recordLentEvent(a, cc, "agent.model.call", status, said)
 	ended = allowanceCall{At: time.Now().UTC().Format(time.RFC3339Nano), ProviderID: printable(use.id, 128),
 		Model: printable(use.model, 128), Status: resp.StatusCode, TokensIn: use.in, TokensOut: use.out,
-		Cost: use.cost, CostSaid: use.costSaid}
+		Cost: use.cost, CostSaid: use.costSaid && !use.badCost}
 }
 
 // theCallAsked is the model call a body names, if it is that body's own. A
@@ -1192,7 +1200,7 @@ type modelUsage struct {
 	model, id         string
 	in, out, cacheIn  int64
 	cost              float64
-	costSaid          bool
+	costSaid, badCost bool
 	line, whole       []byte
 	sse               bool
 	sawData, tooLarge bool
@@ -1295,6 +1303,11 @@ func (u *modelUsage) counts(use map[string]any) {
 	most(&u.out, "completion_tokens", "output_tokens")
 	most(&u.cacheIn, "cache_read_input_tokens")
 	if f, ok := use["cost"].(float64); ok {
+		if f < 0 || math.IsNaN(f) || math.IsInf(f, 0) {
+			// A cost that is no cost is not one said: an allowance stops.
+			u.badCost = true
+			return
+		}
 		u.costSaid = true
 		if f > u.cost {
 			u.cost = f

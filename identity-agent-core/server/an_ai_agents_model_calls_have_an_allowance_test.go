@@ -210,6 +210,12 @@ func TestAnAllowanceRefusesModelCallsOnceItIsSpent(t *testing.T) {
 // the first is under way is refused, and never reaches the provider.
 func TestAnAllowanceLetsOneModelCallRunAtATime(t *testing.T) {
 	release := make(chan struct{})
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			close(release)
+		}
+	})
 	slow := func(c map[string]any) string { <-release; return costStep(0.001)(c) }
 	w, o := allowanceWorld(t, slow, costStep(0.001))
 	if code, _, raw := w.asOwner(t, "PUT", "/api/mcp/agents/"+w.a.ID+"/model-allowance", `{"amount":1}`); code != http.StatusOK {
@@ -234,6 +240,7 @@ func TestAnAllowanceLetsOneModelCallRunAtATime(t *testing.T) {
 		t.Fatalf("a second call while the first was under way: %d %v", code, second)
 	}
 	close(release)
+	released = true
 	collectAll(t, w.hostA, first)
 	waitCounted(t, w)
 	if code, a := callOnce(t, w, held.LeaseID); code != http.StatusOK {
@@ -263,7 +270,11 @@ func TestAnAllowanceLetsOneModelCallRunAtATime(t *testing.T) {
 // allowance unknown, so every call after it is refused until the allowance is
 // set again. A call the provider refused costs nothing and is not that.
 func TestACallWhoseCostIsNotSaidStopsTheAllowance(t *testing.T) {
-	w, o := allowanceWorld(t, costStep(-1), costStep(0.001))
+	negative := func(map[string]any) string {
+		return `data: {"model":"vendor/model-a","choices":[{"delta":{"content":"ok"}}]}` + "\n\n" +
+			`data: {"choices":[],"usage":{"prompt_tokens":9,"completion_tokens":3,"cost":-0.5}}` + "\n\n" + "data: [DONE]\n\n"
+	}
+	w, o := allowanceWorld(t, costStep(-1), costStep(0.001), negative)
 	if code, _, raw := w.asOwner(t, "PUT", "/api/mcp/agents/"+w.a.ID+"/model-allowance", `{"amount":1}`); code != http.StatusOK {
 		t.Fatalf("setting the allowance: %d %s", code, raw)
 	}
@@ -289,6 +300,17 @@ func TestACallWhoseCostIsNotSaidStopsTheAllowance(t *testing.T) {
 	}
 	if n := len(o.calls); n != 2 {
 		t.Fatalf("the provider was called %d times, not 2", n)
+	}
+
+	// A cost below nothing is no cost said: it cannot credit the allowance.
+	if code, a := callOnce(t, w, held.LeaseID); code != http.StatusOK {
+		t.Fatalf("a call answered with a cost below nothing: %d %v", code, a)
+	}
+	if m := allowanceOf(t, w); m["uncosted"] != 1.0 || fmt.Sprintf("%.3f", m["spent"]) != "0.001" {
+		t.Fatalf("a cost below nothing was counted: %v", m)
+	}
+	if code, _, raw := w.asOwner(t, "PUT", "/api/mcp/agents/"+w.a.ID+"/model-allowance", `{"amount":1}`); code != http.StatusOK {
+		t.Fatalf("setting it again: %d %s", code, raw)
 	}
 
 	// A call the provider refuses (it has no more steps) is not uncosted.
@@ -402,6 +424,9 @@ func TestACallUnderAnAllowanceBoundsItsAnswer(t *testing.T) {
 		`{"model":"vendor/model-a","stream":true,"MAX_TOKENS":100,"messages":[]}`,
 		`{"model":"vendor/model-a","stream":true,"max_tokens":"100","messages":[]}`,
 		`{"model":"vendor/model-a","stream":true,"max_tokens":0.5,"messages":[]}`,
+		// Several answers in one call would cost several bounded calls.
+		`{"model":"vendor/model-a","stream":true,"max_tokens":100,"n":5,"messages":[]}`,
+		`{"model":"vendor/model-a","stream":true,"max_tokens":100,"best_of":3,"messages":[]}`,
 	} {
 		code, a := startModelCallWith(t, w.hostA, held.LeaseID, "POST", "/v1/chat/completions", openAIHeader, []byte(body))
 		if code != http.StatusForbidden {
@@ -413,7 +438,7 @@ func TestACallUnderAnAllowanceBoundsItsAnswer(t *testing.T) {
 	}
 	for _, body := range []string{
 		`{"model":"vendor/model-a","stream":true,"max_tokens":32768,"messages":[]}`,
-		`{"model":"vendor/model-a","stream":true,"max_output_tokens":100,"messages":[]}`,
+		`{"model":"vendor/model-a","stream":true,"max_output_tokens":100,"n":1,"messages":[]}`,
 	} {
 		code, a := startModelCallWith(t, w.hostA, held.LeaseID, "POST", "/v1/chat/completions", openAIHeader, []byte(body))
 		if code != http.StatusOK {
@@ -464,5 +489,61 @@ func TestACallTheProviderNeverAnsweredIsNotLost(t *testing.T) {
 	w.s.modelCalls.mu.Unlock()
 	if m := allowanceOf(t, w); m["lost_call"] != false {
 		t.Fatalf("a call never answered was taken for a lost one: %v", m)
+	}
+}
+
+// A list of models costs nothing, so under an allowance it is neither made to
+// wait, nor holds the AI agent's place, nor counted: a model call made beside
+// it goes ahead, and the allowance is not stopped by an answer that, rightly,
+// says no cost.
+func TestAListOfModelsIsNotCountedAgainstAnAllowance(t *testing.T) {
+	release := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	})
+	slow := func(c map[string]any) string { <-release; return costStep(0.001)(c) }
+	w, _ := allowanceWorld(t, slow, costStep(0.001))
+	if code, _, raw := w.asOwner(t, "PUT", "/api/mcp/agents/"+w.a.ID+"/model-allowance", `{"amount":1}`); code != http.StatusOK {
+		t.Fatalf("setting the allowance: %d %s", code, raw)
+	}
+	held, err := w.hostA.Borrow(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Listed while a model call is under way: not made to wait.
+	code, first := startModelCallWith(t, w.hostA, held.LeaseID, "POST", "/v1/chat/completions", openAIHeader, []byte(chosenModelCall))
+	if code != http.StatusOK {
+		t.Fatalf("the model call: %d %v", code, first)
+	}
+	code, list := startModelCallWith(t, w.hostA, held.LeaseID, "GET", "/v1/models", nil, nil)
+	if code != http.StatusOK {
+		t.Fatalf("listing the models while a call was under way: %d %v", code, list)
+	}
+	collectAll(t, w.hostA, list)
+	close(release)
+	collectAll(t, w.hostA, first)
+	waitCounted(t, w)
+	// Listed again with nothing under way: it does not hold the place either.
+	_, list = startModelCallWith(t, w.hostA, held.LeaseID, "GET", "/v1/models", nil, nil)
+	if code, a := startModelCallWith(t, w.hostA, held.LeaseID, "POST", "/v1/chat/completions", openAIHeader, []byte(chosenModelCall)); code != http.StatusOK {
+		t.Fatalf("a model call beside a list of models: %d %v", code, a)
+	} else {
+		collectAll(t, w.hostA, a)
+	}
+	collectAll(t, w.hostA, list)
+	waitCounted(t, w)
+	m := allowanceOf(t, w)
+	if m["uncosted"] != 0.0 || len(m["calls"].([]any)) != 2 {
+		t.Fatalf("a list of models was counted against the allowance: %v", m)
+	}
+	// A call whose answer length cannot be read says why.
+	code, a := startModelCallWith(t, w.hostA, held.LeaseID, "POST", "/v1/chat/completions", openAIHeader,
+		[]byte(`{"model":"vendor/model-a","max_tokens":1,"max_tokens":2,"messages":[]}`))
+	if code != http.StatusForbidden || !strings.Contains(fmt.Sprint(a["error"]), "more than once") {
+		t.Fatalf("a call saying its answer length twice: %d %v", code, a)
 	}
 }

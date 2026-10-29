@@ -46,6 +46,9 @@ import (
 const allowanceCalls = 200
 
 // allowanceLargest bounds an allowance, as a check on a mistyped amount.
+// Amounts are float64: providers state a call's cost to a few millionths, and
+// a sum of thousands of them stays exact far beyond that, so whether what is
+// spent has reached the amount is never decided by rounding.
 const allowanceLargest = 100000.0
 
 // allowanceAnswerLongest bounds how long an answer a call under an allowance
@@ -134,6 +137,16 @@ func theAnswerBound(body []byte) (int, error) {
 		if err := d.Decode(&v); err != nil {
 			return 0, errors.New("this call could not be read")
 		}
+		for _, m := range answerMultipliers {
+			if strings.EqualFold(k, m) {
+				// One call asking for several answers would cost several
+				// bounded calls.
+				var n float64
+				if err := json.Unmarshal(v, &n); err != nil || n != 1 {
+					return 0, fmt.Errorf("this call asks for more than one answer (%s)", m)
+				}
+			}
+		}
 		name := ""
 		for _, n := range answerBoundNames {
 			if strings.EqualFold(k, n) {
@@ -162,10 +175,14 @@ func theAnswerBound(body []byte) (int, error) {
 // answer may be.
 var answerBoundNames = []string{"max_tokens", "max_completion_tokens", "max_output_tokens"}
 
+// answerMultipliers are the ways a call asks for several answers at once.
+var answerMultipliers = []string{"n", "best_of"}
+
 // errLostCall is a call that was under way when this Identity Agent last
 // stopped: what it cost is not known.
-var errLostCall = errors.New("a call under this AI agent's allowance was under way when its Identity Agent " +
-	"restarted, so what it cost is not known; set the allowance again to go on")
+var errLostCall = errors.New("a call under this AI agent's allowance ended without what it cost being kept — " +
+	"its Identity Agent restarted, or could not write it down — so what is left is not known; set the allowance " +
+	"again to go on")
 
 // allowanceRefuses says why a call may not start under a's allowance, or
 // nothing, and whether it has one. It is asked with the call table held, so
@@ -174,13 +191,22 @@ var errLostCall = errors.New("a call under this AI agent's allowance was under w
 //
 // bound is how long an answer the call asks for, in tokens: 0 where it names
 // none, and -1 where it is not a model call (a list of models costs nothing).
-func (s *CoreServer) allowanceRefuses(a asset.Asset, provider string, bound, underWay int, known func(string) bool) (bool, error) {
+func (s *CoreServer) allowanceRefuses(a asset.Asset, provider string, bound int, boundErr error, underWay int,
+	known func(string) bool) (bool, error) {
+	if bound < 0 {
+		// A list of models, or one model asked about, costs nothing: it is not
+		// capped, counted, or made to wait.
+		return false, nil
+	}
 	m, had, err := s.allowanceOf(a.ID)
 	if err != nil {
 		return false, errAllowanceUnreadable
 	}
 	if !had {
 		return false, nil
+	}
+	if bound == 0 && boundErr != nil {
+		return true, fmt.Errorf("while an allowance is set, a model call names how long an answer it wants: %w", boundErr)
 	}
 	return true, m.refuses(provider, bound, underWay, known)
 }
@@ -205,13 +231,23 @@ func (m modelAllowance) refuses(provider string, bound, underWay int, known func
 	return nil
 }
 
-// chargeAllowance counts one ended call against a's allowance, if it has one.
-func (s *CoreServer) chargeAllowance(a asset.Asset, id string, call allowanceCall) {
+// chargeAllowance counts one ended call against a's allowance, if it has one,
+// and says whether it was counted. A call that could not be written down is
+// not counted: it holds its AI agent's place while it is kept, and once it is
+// forgotten it is a lost call, which stops the allowance — never a call whose
+// cost slipped by.
+func (s *CoreServer) chargeAllowance(a asset.Asset, id string, call allowanceCall) bool {
 	allowanceMu.Lock()
 	defer allowanceMu.Unlock()
 	m, had, err := s.allowanceOf(a.ID)
-	if err != nil || !had {
-		return
+	if err != nil {
+		return false
+	}
+	if !had {
+		return true
+	}
+	if call.Cost < 0 {
+		call.Cost = 0
 	}
 	if m.Open == id {
 		m.Open = ""
@@ -228,21 +264,26 @@ func (s *CoreServer) chargeAllowance(a asset.Asset, id string, call allowanceCal
 			m.Calls = m.Calls[len(m.Calls)-allowanceCalls:]
 		}
 	}
-	vault, err := s.brainVaultWritable()
-	if err == nil {
-		err = vault.SetKept(allowanceRef(a.ID), keptAllowance, m)
-	}
-	if err != nil {
-		// The call has ended and cannot be undone; what is left is no longer
-		// known, so nothing more is spent until it is set again.
-		s.recordLentEvent(a, sandbox.CallerContext{}, "agent.model.allowance", "failed",
-			"a call's cost could not be counted against the allowance: "+err.Error())
-		return
+	for try := 0; ; try++ {
+		vault, err := s.brainVaultWritable()
+		if err == nil {
+			err = vault.SetKept(allowanceRef(a.ID), keptAllowance, m)
+		}
+		if err == nil {
+			break
+		}
+		if try == 2 {
+			s.recordLentEvent(a, sandbox.CallerContext{}, "agent.model.allowance", "failed",
+				"a call's cost could not be written down, so the allowance stops until it is set again: "+err.Error())
+			return false
+		}
+		time.Sleep(time.Duration(try+1) * 100 * time.Millisecond)
 	}
 	if call.Status > 0 && m.Spent >= m.Amount {
 		s.recordLentEvent(a, sandbox.CallerContext{}, "agent.model.allowance", "spent",
 			fmt.Sprintf("its allowance of %s is spent (%s); its next model call is refused", money(m.Amount), money(m.Spent)))
 	}
+	return true
 }
 
 // openAllowanceCall writes, before a call is sent, that it is under way, so a

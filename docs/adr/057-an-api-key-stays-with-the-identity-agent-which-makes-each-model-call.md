@@ -139,22 +139,27 @@ own, so that nothing on the AI agent's machine can spend past it.
   as the provider says it.
 - **One call at a time:** a call's cost is known only at its end, so while an allowance
   is set the AI agent makes one model call at a time, across every machine. A call is
-  refused while another is under way or not yet counted.
+  refused while another is under way or not yet counted. A list of models, or one model
+  asked about, costs nothing: it is not capped, counted or made to wait.
 - **Refusal:** once what is spent reaches the amount, the next call is refused, and
   recorded. What is spent can pass the amount by at most the one call that crossed it.
 - **A bounded call:** under an allowance a model call must say how long an answer it
-  wants, at most 32,768 tokens, each way of saying it at most once, so that one call
-  is bounded too: what it reads is bounded by how large a call may be. agent-host's own
-  calls always say it.
-- **A lost call:** the call under way is written down before it is sent. One still
-  written down that the Identity Agent no longer knows was lost when it restarted, and
-  what it cost is not known, so every call after it is refused until a person sets the
-  allowance again.
+  wants, at most 32,768 tokens, each way of saying it at most once, and ask for one
+  answer only (no `n` or `best_of` above 1), so that one call is bounded too: what it
+  reads is bounded by how large a call may be. agent-host's own calls always say it.
+  A cost below nothing, or not a number, is no cost said.
+- **A lost call:** the call under way is written down before it is sent, and cleared
+  when its cost is. One still written down that the Identity Agent no longer knows ended
+  without its cost being kept — the Identity Agent restarted, or could not write it down
+  after trying again — so every call after it is refused until a person sets the
+  allowance again. A call whose cost could not be written down holds the AI agent's
+  place until then, so no call slips by uncounted.
 - **Changing it:** a new amount keeps what was spent, unless the person starts over. An
   amount of nothing stops the next call. Removing the allowance lifts the cap.
-- **When the cost is not said:** a call the provider answered without saying what it
-  cost leaves what is left unknown, so every call after it is refused until a person
-  sets the allowance again.
+- **When the cost is not said:** a call the provider answered successfully without
+  saying what it cost leaves what is left unknown, so every call after it is refused
+  until a person sets the allowance again. A call the provider refused (an error status)
+  is counted at what it says it cost, or nothing; one it never answered costs nothing.
 - **Where it can be set:** only on a key kept here, from a provider that says what each
   call costs (OpenRouter does). Elsewhere it is refused rather than pretended.
 - **Where it is kept:** in the vault, with each counted call (its model, the provider's
