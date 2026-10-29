@@ -379,7 +379,11 @@ func (h *Host) Enrol(enrolment string, placement string, wait time.Duration) (St
 	body, _ := json.Marshal(agentbody.SealedEnrolment{Sender: keys, Envelope: env})
 	resp, err := h.client().Post(strings.TrimRight(e.URL, "/")+"/api/agent-host/enrol", "application/json", bytes.NewReader(body))
 	if err != nil {
-		return State{}, err
+		// The Identity Agent may have taken the request before the answer was
+		// lost, so the person still needs the words to decide on what waits.
+		return State{}, fmt.Errorf("the enrolment could not be sent, or its answer was lost: %w\n"+
+			"If a machine is waiting for %q, approve it only if it shows this machine's words, %s",
+			err, e.AgentName, strings.Join(words, " "))
 	}
 	defer resp.Body.Close()
 	var answer struct {

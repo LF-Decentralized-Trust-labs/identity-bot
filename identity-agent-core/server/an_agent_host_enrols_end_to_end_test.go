@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -155,6 +156,53 @@ func TestAMachineShowsItsWordsOnlyOnceTheIdentityAgentHasItsRequest(t *testing.T
 	}
 	if !strings.Contains(out.String(), words) {
 		t.Fatalf("the machine never showed its words:\n%s", out.String())
+	}
+}
+
+// lostAnswer sends the enrolment and then loses the Identity Agent's answer.
+type lostAnswer struct{}
+
+func (lostAnswer) RoundTrip(r *http.Request) (*http.Response, error) {
+	resp, err := http.DefaultTransport.RoundTrip(r)
+	if err == nil && r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/api/agent-host/enrol") {
+		resp.Body.Close()
+		return nil, errors.New("the connection dropped")
+	}
+	return resp, err
+}
+
+// A machine that is refused, or whose answer is lost, still gives its person
+// its six words, so they can tell whether what waits in their app is theirs.
+func TestAMachineStillShowsItsWordsWhenItsRequestIsRefusedOrLost(t *testing.T) {
+	s, agentID := bodyWorld(t)
+	s.router = s.buildRouter("")
+	srv := httptest.NewServer(s.router)
+	defer srv.Close()
+	t.Setenv("PUBLIC_URL", srv.URL)
+
+	// The answer is lost after the Identity Agent took the request.
+	enrolment := enrolmentVia(t, s, srv.URL, agentID)
+	first := newTestMachine(t)
+	firstHost, _, _ := agentbody.Identity(first)
+	firstWords := strings.Join(agentbody.Words(firstHost), " ")
+	h := &agenthost.Host{DataDir: t.TempDir(), Signer: first, Hardware: true, PollEvery: 20 * time.Millisecond,
+		HTTP: &http.Client{Transport: lostAnswer{}, Timeout: 30 * time.Second}}
+	if _, err := h.Enrol(enrolment, "computer", time.Second); err == nil || !strings.Contains(err.Error(), firstWords) {
+		t.Fatalf("a lost answer did not give the machine's words: %v", err)
+	}
+
+	// Another machine with the same string, already used, is refused.
+	second := newTestMachine(t)
+	secondHost, _, _ := agentbody.Identity(second)
+	secondWords := strings.Join(agentbody.Words(secondHost), " ")
+	var out strings.Builder
+	h2 := &agenthost.Host{DataDir: t.TempDir(), Signer: second, Hardware: true, PollEvery: 20 * time.Millisecond, Out: &out}
+	_, err := h2.Enrol(enrolment, "computer", time.Second)
+	if err == nil || !strings.Contains(err.Error(), "refused") || !strings.Contains(err.Error(), secondWords) {
+		t.Fatalf("a refused machine did not give its words: %v", err)
+	}
+	if strings.Contains(out.String(), secondWords) {
+		t.Fatalf("a refused machine showed its words as if it had asked:\n%s", out.String())
 	}
 }
 

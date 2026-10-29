@@ -80,7 +80,11 @@ it travels sealed to the provider's keys. The program hands it to the new machin
 whose `agent-host enrol -` reads it from standard input so that it never appears on
 a command line. `agent-host enrol` waits for a person's decision, so the program
 starts it in the background on the new machine and prints the six words it shows
-once the machine has asked. The provider reports them, and the Identity Agent matches
+once the machine has asked. *(Amended 2026-10-29.)* `agent-host enrol` shows them only
+once the Identity Agent has taken the request (ADR-046). A program that may meet an
+older agent-host, which showed them first, waits for the line saying the machine has
+asked: words reported before the request is taken are refused, and the machine is
+destroyed. The provider reports them, and the Identity Agent matches
 them to the machine that asked to become that AI agent's body since that enrolment
 string was given — waiting for approval, or already approved by a person before the
 report arrived; a provider cannot claim a machine that was already there, and words
