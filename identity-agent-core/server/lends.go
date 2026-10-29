@@ -10,7 +10,7 @@ import (
 	"identity-agent-core/brainsignin"
 	"identity-agent-core/lending"
 	"identity-agent-core/permission"
-	"identity-agent-core/sandbox"
+	"identity-agent-core/vault"
 )
 
 // Everything this Identity Agent lends to an AI agent's bodies — a brain's
@@ -27,7 +27,7 @@ const (
 	lendGitHub      = "github"
 )
 
-var lendsRef = sandbox.KeptRef("lends")
+var lendsRef = vault.KeptRef("lends")
 
 const keptLends = "lends"
 
@@ -35,19 +35,19 @@ const keptLends = "lends"
 type vaultLends struct{ s *CoreServer }
 
 func (v vaultLends) Read(out any) (bool, error) {
-	vault, err := v.s.brainVault()
+	theVault, err := v.s.brainVault()
 	if err != nil {
 		return false, err
 	}
-	return vault.Kept(lendsRef, keptLends, out)
+	return theVault.Kept(lendsRef, keptLends, out)
 }
 
 func (v vaultLends) Write(x any) error {
-	vault, err := v.s.brainVault()
+	theVault, err := v.s.brainVault()
 	if err != nil {
 		return err
 	}
-	return vault.SetKept(lendsRef, keptLends, x)
+	return theVault.SetKept(lendsRef, keptLends, x)
 }
 
 // lends is the record of everything lent. Leases a version before this one

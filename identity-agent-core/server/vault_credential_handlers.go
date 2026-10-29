@@ -29,7 +29,7 @@ func (s *CoreServer) handleSetVaultCredential(w http.ResponseWriter, r *http.Req
 		jsonError(w, "credential management is for the owner of this agent", http.StatusForbidden)
 		return
 	}
-	if s.SandboxManager == nil {
+	if s.Vault == nil {
 		jsonError(w, "sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
@@ -50,7 +50,7 @@ func (s *CoreServer) handleSetVaultCredential(w http.ResponseWriter, r *http.Req
 		}
 		headers = map[string]string{"Authorization": "Bearer " + req.APIKey}
 	}
-	if err := s.SandboxManager.SetServiceCredential(req.Service, req.MatchDomains, headers); err != nil {
+	if err := s.Vault.SetCredential(req.Service, req.MatchDomains, headers); err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -63,11 +63,11 @@ func (s *CoreServer) handleListVaultCredentials(w http.ResponseWriter, r *http.R
 		jsonError(w, "credential management is for the owner of this agent", http.StatusForbidden)
 		return
 	}
-	if s.SandboxManager == nil {
+	if s.Vault == nil {
 		jsonError(w, "sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
-	services := s.SandboxManager.ListServiceCredentials()
+	services := s.Vault.ListServices()
 	if services == nil {
 		services = []string{}
 	}
@@ -80,14 +80,20 @@ func (s *CoreServer) handleDeleteVaultCredential(w http.ResponseWriter, r *http.
 		jsonError(w, "credential management is for the owner of this agent", http.StatusForbidden)
 		return
 	}
-	if s.SandboxManager == nil {
+	if s.Vault == nil {
 		jsonError(w, "sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
 	service := chi.URLParam(r, "service")
-	if err := s.SandboxManager.RemoveServiceCredential(service); err != nil {
+	if err := s.Vault.RemoveServiceCredential(service); err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	jsonResponse(w, map[string]any{"deleted": service})
+}
+
+// isVaultEntry says whether name is an entry the vault holds — a reference to
+// one, not a secret, wherever a name is shown that might hold either.
+func (s *CoreServer) isVaultEntry(name string) bool {
+	return s.Vault != nil && s.Vault.HasService(name)
 }

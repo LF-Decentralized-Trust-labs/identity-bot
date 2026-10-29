@@ -36,7 +36,7 @@ func recordWorld(t *testing.T) *CoreServer {
 	t.Helper()
 	s, _ := grantWorld(t)
 	s.DeclaredEntityType = "organization"
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir, ManifestsDir: t.TempDir()})
+	m, err := sandbox.NewManager(sandbox.ManagerConfig{Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -575,7 +575,7 @@ func TestAnchorsAreHeldOutsideOnceTheirWitnessesReceiptThem(t *testing.T) {
 	}
 	s, _ := foundedWith(t, agentWithDerivedIdentity(t), names, 2)
 	s.DeclaredEntityType = "organization"
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir, ManifestsDir: t.TempDir()})
+	m, err := sandbox.NewManager(sandbox.ManagerConfig{Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -717,7 +717,7 @@ func TestTheWitnessesAreAskedForTheRecordsTip(t *testing.T) {
 	}
 	s, _ := foundedWith(t, agentWithDerivedIdentity(t), names, 1)
 	s.DeclaredEntityType = "organization"
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir, ManifestsDir: t.TempDir()})
+	m, err := sandbox.NewManager(sandbox.ManagerConfig{Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -855,7 +855,7 @@ func TestCheckingWhileAnchoringRaisesNoFalseAlarm(t *testing.T) {
 	}
 	s, _ := foundedWith(t, agentWithDerivedIdentity(t), names, 1)
 	s.DeclaredEntityType = "organization"
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir, ManifestsDir: t.TempDir()})
+	m, err := sandbox.NewManager(sandbox.ManagerConfig{Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -951,7 +951,7 @@ func TestARealWitnessWitnessesTheRecord(t *testing.T) {
 	peer := startPeer(t, "witness")
 	s, _ := foundedWith(t, agentWithDerivedIdentity(t), []string{peer.witnessKey}, 1)
 	s.DeclaredEntityType = "organization"
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir, ManifestsDir: t.TempDir()})
+	m, err := sandbox.NewManager(sandbox.ManagerConfig{Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1103,7 +1103,7 @@ func TestEnrolledWitnessesAreAskedToCoverTheRecord(t *testing.T) {
 	unwilling.svc.Store.SetConfig(witness.ConfigDelegates, "off")
 	s, _ := foundedWith(t, agentWithDerivedIdentity(t), []string{willing.witnessKey, unwilling.witnessKey}, 1)
 	s.DeclaredEntityType = "organization"
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir, ManifestsDir: t.TempDir()})
+	m, err := sandbox.NewManager(sandbox.ManagerConfig{Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}

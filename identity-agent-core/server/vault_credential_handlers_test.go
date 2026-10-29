@@ -11,20 +11,22 @@ import (
 	"testing"
 
 	"identity-agent-core/sandbox"
+	"identity-agent-core/vault"
 )
 
 func vaultTestServer(t *testing.T) *CoreServer {
 	t.Helper()
 	dir := t.TempDir()
-	mgr, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: dir})
+	v := vault.NewCredentialVault(dir)
+	v.SetKeyProvider(func() ([]byte, error) {
+		return []byte("0123456789abcdef0123456789abcdef"), nil
+	})
+	mgr, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: dir, Vault: v})
 	if err != nil {
 		t.Fatalf("manager: %v", err)
 	}
 	t.Cleanup(mgr.Stop)
-	mgr.SetVaultKeyProvider(func() ([]byte, error) {
-		return []byte("0123456789abcdef0123456789abcdef"), nil
-	})
-	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, SandboxManager: mgr}
+	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, Vault: v, SandboxManager: mgr}
 }
 
 func postCredential(s *CoreServer, body map[string]any, remote bool) *httptest.ResponseRecorder {
@@ -53,7 +55,7 @@ func TestSetVaultCredentialWithDomains(t *testing.T) {
 		t.Fatalf("set: %d %s", w.Code, w.Body)
 	}
 
-	if got := s.SandboxManager.GetLLMAPIKey("cloudflare"); got != "cf-token-xyz" {
+	if got := s.Vault.GetAPIKey("cloudflare"); got != "cf-token-xyz" {
 		t.Fatalf("stored key mismatch: %q", got)
 	}
 	// Encrypted at rest: the token must not appear on disk, and no plaintext
@@ -100,4 +102,14 @@ func TestVaultCredentialRemoteDenied(t *testing.T) {
 	}, true); w.Code != http.StatusForbidden {
 		t.Fatalf("forwarded request must be denied: %d", w.Code)
 	}
+}
+
+// vaultForTest is s's credential vault, made over dir when s has none yet, so
+// a sandbox manager a test makes adds credentials from the vault the server
+// keeps them in, as it does when the server makes both.
+func (s *CoreServer) vaultForTest(dir string) *vault.CredentialVault {
+	if s.Vault == nil {
+		s.Vault = vault.NewCredentialVault(dir)
+	}
+	return s.Vault
 }

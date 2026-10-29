@@ -44,6 +44,7 @@ import (
 	"identity-agent-core/store"
 	"identity-agent-core/tunnel"
 	"identity-agent-core/update"
+	"identity-agent-core/vault"
 	"identity-agent-core/watcher"
 	"identity-agent-core/witness"
 
@@ -97,11 +98,14 @@ type CoreServer struct {
 	// record, which the relay manager and the owner's routes both change.
 	relayRecordMu   sync.Mutex
 	EndpointService *endpoint.EndpointService
-	SandboxManager  *sandbox.Manager
-	EventHub        *EventHub
-	StartTime       time.Time
-	Port            int
-	DataDir         string
+	// Vault is the credential vault: what this Identity Agent keeps for
+	// services, sealed under a key derived from the identity's root seed.
+	Vault          *vault.CredentialVault
+	SandboxManager *sandbox.Manager
+	EventHub       *EventHub
+	StartTime      time.Time
+	Port           int
+	DataDir        string
 	// registeredKeys answers for identities that published their key here
 	// through /_register, each one proved by its key log. See public_didwebs.go.
 	registeredKeysOnce sync.Once
@@ -501,9 +505,20 @@ func New(cfg Config) (*CoreServer, error) {
 	if d := os.Getenv("MANIFESTS_DIR"); d != "" {
 		manifestsDir = d
 	}
+	// The credential vault stays encrypted at rest and unlocks lazily, once
+	// the identity's root seed is there to derive its key from.
+	s.Vault = vault.NewCredentialVault(cfg.DataDir)
+	s.Vault.SetKeyProvider(func() ([]byte, error) {
+		rootSeed, rerr := secureenclave.LoadRootSeed(cfg.DataDir)
+		if rerr != nil {
+			return nil, rerr
+		}
+		return backup.DeriveVaultKEK(rootSeed)
+	})
 	sbxMgr, err := sandbox.NewManager(sandbox.ManagerConfig{
 		DataDir:      cfg.DataDir,
 		ManifestsDir: manifestsDir,
+		Vault:        s.Vault,
 	})
 	if err != nil {
 		log.Printf("[identity-agent-core] Sandbox manager init failed (non-fatal): %v", err)
@@ -518,13 +533,6 @@ func New(cfg Config) (*CoreServer, error) {
 		// The endpoint uses the structural authorizer by default (host-control never
 		// remote; a remote caller must hold the capability in its grant). An overlay
 		// may inject a richer authorizer via SetAuthorizer.
-		s.SandboxManager.SetVaultKeyProvider(func() ([]byte, error) {
-			rootSeed, rerr := secureenclave.LoadRootSeed(cfg.DataDir)
-			if rerr != nil {
-				return nil, rerr
-			}
-			return backup.DeriveVaultKEK(rootSeed)
-		})
 		if startErr := s.SandboxManager.Start(); startErr != nil {
 			log.Printf("[identity-agent-core] Sandbox manager start failed (non-fatal): %v", startErr)
 		}

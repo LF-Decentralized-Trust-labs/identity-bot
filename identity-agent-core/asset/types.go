@@ -3,7 +3,7 @@ package asset
 import (
 	"time"
 
-	"identity-agent-core/brainsignin"
+	"identity-agent-core/vault"
 )
 
 type EnrollmentMode string
@@ -135,7 +135,7 @@ type BrainConfig struct {
 	// Endpoint is the base URL for a local (or self-hosted) model API.
 	Endpoint string `json:"endpoint,omitempty"`
 	// CredentialRef names the vault entry holding the brain's sign-in
-	// (brainsignin.Ref). The key or token itself is never stored on the asset:
+	// (vault.BrainSignInRef). The key or token itself is never stored on the asset:
 	// one sent here is moved into the vault and replaced by its reference.
 	CredentialRef string `json:"credential_ref,omitempty"`
 	// TEEAttestedOnly is a governance restriction: only a TEE-attested model may wear
@@ -149,27 +149,13 @@ type BrainConfig struct {
 	Program string `json:"program,omitempty"`
 }
 
-// Normalised is the brain configuration with its kind and provider as the
-// record keeps them, whatever names a screen sent.
-func (b BrainConfig) Normalised() BrainConfig {
-	b.Provider = brainsignin.NormaliseProvider(b.Provider)
-	if b.Provider == "" && brainsignin.NormaliseKind(b.Kind, "") == brainsignin.KindLocal {
-		b.Provider = brainsignin.Local
-	}
-	if b.Kind != "" || b.Provider != "" {
-		b.Kind = brainsignin.NormaliseKind(b.Kind, b.Provider)
-	}
-	b.Program = brainsignin.NormaliseProgram(b.Program)
-	return b
-}
-
 // HoldsASecret reports whether CredentialRef carries something other than a
 // reference to a brain sign-in — a key typed where the reference belongs.
 // isVaultEntry says whether a name is an entry the vault already holds, which
 // is a reference too.
 func (b BrainConfig) HoldsASecret(isVaultEntry func(string) bool) bool {
 	ref := b.CredentialRef
-	if ref == "" || brainsignin.IsRef(ref) {
+	if ref == "" || vault.IsBrainSignInRef(ref) {
 		return false
 	}
 	return isVaultEntry == nil || !isVaultEntry(ref)

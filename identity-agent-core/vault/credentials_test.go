@@ -1,4 +1,4 @@
-package sandbox
+package vault
 
 import (
 	"bytes"
@@ -230,4 +230,9 @@ func TestVaultUnlocksWhenKeyBecomesAvailable(t *testing.T) {
 	if got := cv.GetAPIKey("svc"); got != "x" {
 		t.Fatalf("got %q", got)
 	}
+}
+
+// testVaultKeyProvider supplies a fixed 32-byte vault key for tests.
+func testVaultKeyProvider() ([]byte, error) {
+	return []byte("0123456789abcdef0123456789abcdef"), nil
 }

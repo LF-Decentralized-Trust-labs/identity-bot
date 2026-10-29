@@ -16,6 +16,7 @@ import (
 	"identity-agent-core/authprovider"
 	"identity-agent-core/brainsignin"
 	"identity-agent-core/sandbox"
+	"identity-agent-core/vault"
 )
 
 // signInWorld is the talk world with an unlocked vault, and the owner at this
@@ -25,7 +26,7 @@ func signInWorld(t *testing.T) *talkWorld {
 	w := newTalkWorld(t)
 	w.s.localOwnerSecret = testOwnerSecret
 	key := bytes.Repeat([]byte{7}, 32)
-	w.s.SandboxManager.SetVaultKeyProvider(func() ([]byte, error) { return key, nil })
+	w.s.Vault.SetKeyProvider(func() ([]byte, error) { return key, nil })
 	return w
 }
 
@@ -78,11 +79,11 @@ func TestAKeySentAsTheBrainsReferenceIsKeptOnlyInTheVault(t *testing.T) {
 	}
 	id := out["asset_id"].(string)
 	a, _ := w.s.assetHandler.Store.GetAsset(id)
-	if got := a.AgentConfig.Brain; got.CredentialRef != brainsignin.Ref(id) || got.Provider != brainsignin.Anthropic ||
+	if got := a.AgentConfig.Brain; got.CredentialRef != vault.BrainSignInRef(id) || got.Provider != brainsignin.Anthropic ||
 		got.Kind != brainsignin.KindAPIKey {
 		t.Fatalf("the brain does not name its sign-in, normalised: %+v", got)
 	}
-	rec, had, err := w.s.SandboxManager.BrainSignIn(brainsignin.Ref(id))
+	rec, had, err := (signInVault{w.s.Vault}).BrainSignIn(vault.BrainSignInRef(id))
 	if err != nil || !had || rec.Secret != key || rec.Provider != brainsignin.Anthropic || rec.MaxConcurrentRuns != 0 {
 		t.Fatalf("the vault does not hold the key as a sign-in: %+v %v %v", rec.Public(), had, err)
 	}
@@ -103,7 +104,7 @@ func TestAKeySentAsTheBrainsReferenceIsKeptOnlyInTheVault(t *testing.T) {
 	if code != http.StatusOK || strings.Contains(raw, second) {
 		t.Fatalf("changing the configuration: %d %s", code, raw)
 	}
-	if rec, _, _ := w.s.SandboxManager.BrainSignIn(brainsignin.Ref(id)); rec.Secret != second {
+	if rec, _, _ := (signInVault{w.s.Vault}).BrainSignIn(vault.BrainSignInRef(id)); rec.Secret != second {
 		t.Fatal("the second key is not the one kept")
 	}
 	// And one that does not mention the sign-in keeps it.
@@ -111,7 +112,7 @@ func TestAKeySentAsTheBrainsReferenceIsKeptOnlyInTheVault(t *testing.T) {
 		t.Fatalf("changing the role: %d %s", code, raw)
 	}
 	a, _ = w.s.assetHandler.Store.GetAsset(id)
-	if a.AgentConfig.Brain.CredentialRef != brainsignin.Ref(id) {
+	if a.AgentConfig.Brain.CredentialRef != vault.BrainSignInRef(id) {
 		t.Fatal("a change that did not mention the sign-in dropped it")
 	}
 	noFileHolds(t, w.s.DataDir, second)
@@ -129,10 +130,10 @@ func TestAKeyStoredOnARecordMovesIntoTheVault(t *testing.T) {
 	}
 	w.s.moveBrainSecretsIntoTheVault()
 	got, _ := w.s.assetHandler.Store.GetAsset(a.ID)
-	if got.AgentConfig.Brain.CredentialRef != brainsignin.Ref(a.ID) {
+	if got.AgentConfig.Brain.CredentialRef != vault.BrainSignInRef(a.ID) {
 		t.Fatalf("the record still holds what it held: %+v", got.AgentConfig.Brain)
 	}
-	rec, had, _ := w.s.SandboxManager.BrainSignIn(brainsignin.Ref(a.ID))
+	rec, had, _ := (signInVault{w.s.Vault}).BrainSignIn(vault.BrainSignInRef(a.ID))
 	if !had || rec.Secret != key || rec.Provider != brainsignin.XAI {
 		t.Fatalf("the vault does not hold the moved key: %+v", rec.Public())
 	}

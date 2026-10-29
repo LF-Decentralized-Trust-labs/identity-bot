@@ -21,6 +21,7 @@ import (
 	"identity-agent-core/asset"
 	"identity-agent-core/brainsignin"
 	"identity-agent-core/permission"
+	"identity-agent-core/vault"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -551,11 +552,11 @@ func (s *CoreServer) heldSignInForCall(a asset.Asset, host, lease string, now ti
 	if !ok || !held.IsOpen(now) {
 		return brainsignin.Record{}, http.StatusForbidden, errors.New("this run holds no open lease on its AI agent's sign-in")
 	}
-	vault, err := s.brainVault()
+	theVault, err := s.brainVault()
 	if err != nil {
 		return brainsignin.Record{}, http.StatusServiceUnavailable, errors.New("the AI agent's sign-in cannot be read now")
 	}
-	rec, had, err := vault.BrainSignIn(brainsignin.Ref(a.ID))
+	rec, had, err := theVault.BrainSignIn(vault.BrainSignInRef(a.ID))
 	if err != nil {
 		return brainsignin.Record{}, http.StatusServiceUnavailable, errors.New("the AI agent's sign-in cannot be read now")
 	}
@@ -1104,11 +1105,11 @@ func theModelNamed(body []byte) (string, error) {
 // stillTheKey says whether the key a call was made with is still the AI
 // agent's sign-in, kept here and in force.
 func (s *CoreServer) stillTheKey(a asset.Asset, made brainsignin.Record, now time.Time) error {
-	vault, err := s.brainVault()
+	theVault, err := s.brainVault()
 	if err != nil {
 		return errors.New("the AI agent's sign-in cannot be read now")
 	}
-	rec, had, err := vault.BrainSignIn(brainsignin.Ref(a.ID))
+	rec, had, err := theVault.BrainSignIn(vault.BrainSignInRef(a.ID))
 	switch {
 	case err != nil:
 		return errors.New("the AI agent's sign-in cannot be read now")

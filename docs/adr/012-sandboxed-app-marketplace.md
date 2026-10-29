@@ -724,7 +724,7 @@ V1 supports four resource types in the resource request channel. Future work ext
 - `identity-agent-core/sandbox/container_runtime.go` — OCI container lifecycle (Podman)
 - `identity-agent-core/sandbox/binary_runtime.go` — Compiled binary lifecycle
 - `identity-agent-core/sandbox/resource_monitor.go` — Resource usage monitoring
-- `identity-agent-core/sandbox/credentials.go` — Credential vault and injection
+- `identity-agent-core/vault/credentials.go` — Credential vault and injection (part of the core; the sandbox adds credentials from it)
 - `identity-agent-core/server/sandbox_handlers.go` — API handlers
 - `manifests/chromium.json` — Chromium demo manifest
 - `manifests/openclaw.json` — OpenClaw demo manifest

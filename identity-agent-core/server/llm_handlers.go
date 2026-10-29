@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"identity-agent-core/store"
+	"identity-agent-core/vault"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -80,17 +81,17 @@ func (s *CoreServer) llmRoutes(r chi.Router) {
 }
 
 func (s *CoreServer) handleGetLLMSettings(w http.ResponseWriter, r *http.Request) {
-	if s.SandboxManager == nil {
+	if s.Vault == nil {
 		writeJSON(w, map[string]interface{}{"services": []string{}, "available": false})
 		return
 	}
-	services := s.SandboxManager.ListLLMServices()
+	services := s.Vault.ListServices()
 	if services == nil {
 		services = []string{}
 	}
 	serviceStatus := make(map[string]bool)
 	for _, svc := range services {
-		serviceStatus[svc] = s.SandboxManager.GetLLMAPIKey(svc) != ""
+		serviceStatus[svc] = s.Vault.GetAPIKey(svc) != ""
 	}
 	models := make([]string, len(llmModelCatalog))
 	for i, m := range llmModelCatalog {
@@ -105,7 +106,7 @@ func (s *CoreServer) handleGetLLMSettings(w http.ResponseWriter, r *http.Request
 }
 
 func (s *CoreServer) handleSaveLLMKey(w http.ResponseWriter, r *http.Request) {
-	if s.SandboxManager == nil {
+	if s.Vault == nil {
 		writeError(w, http.StatusServiceUnavailable, "Sandbox not available", "")
 		return
 	}
@@ -121,7 +122,7 @@ func (s *CoreServer) handleSaveLLMKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "service and api_key are required", "")
 		return
 	}
-	if err := s.SandboxManager.SetLLMAPIKey(req.Service, req.APIKey); err != nil {
+	if err := setLLMAPIKey(s.Vault, req.Service, req.APIKey); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to save key", err.Error())
 		return
 	}
@@ -130,16 +131,33 @@ func (s *CoreServer) handleSaveLLMKey(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *CoreServer) handleDeleteLLMKey(w http.ResponseWriter, r *http.Request) {
-	if s.SandboxManager == nil {
+	if s.Vault == nil {
 		writeError(w, http.StatusServiceUnavailable, "Sandbox not available", "")
 		return
 	}
 	service := chi.URLParam(r, "service")
-	if err := s.SandboxManager.DeleteLLMAPIKey(service); err != nil {
+	if err := s.Vault.RemoveCredential(service); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to delete key", err.Error())
 		return
 	}
 	writeJSON(w, map[string]interface{}{"deleted": true, "service": service})
+}
+
+// setLLMAPIKey keeps a model provider's API key in the vault, for the
+// provider's own domains.
+func setLLMAPIKey(v *vault.CredentialVault, service, apiKey string) error {
+	var domains []string
+	switch service {
+	case "openrouter":
+		domains = []string{"*.openrouter.ai", "openrouter.ai"}
+	case "openai":
+		domains = []string{"*.openai.com", "api.openai.com"}
+	default:
+		domains = []string{}
+	}
+	return v.SetCredential(service, domains, map[string]string{
+		"Authorization": "Bearer " + apiKey,
+	})
 }
 
 func llmCORSHeaders(w http.ResponseWriter) {
@@ -185,7 +203,7 @@ func (s *CoreServer) handleLLMProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	apiKey := s.SandboxManager.GetLLMAPIKey("openrouter")
+	apiKey := s.Vault.GetAPIKey("openrouter")
 	if apiKey == "" {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)

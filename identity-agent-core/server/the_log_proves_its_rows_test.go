@@ -19,7 +19,7 @@ func logWorld(t *testing.T) *CoreServer {
 	s := agentWithDerivedIdentity(t)
 	s.KeriDriver = keriengine.New()
 	s.engineSigns()
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir, ManifestsDir: t.TempDir()})
+	m, err := sandbox.NewManager(sandbox.ManagerConfig{Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
 	if err != nil {
 		t.Skipf("sandbox manager unavailable: %v", err)
 	}

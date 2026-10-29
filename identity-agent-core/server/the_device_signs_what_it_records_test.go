@@ -83,7 +83,7 @@ func (c *twoCores) openRequester(t *testing.T) *CoreServer {
 	if err := r.initAssetHandler(); err != nil {
 		t.Fatal(err)
 	}
-	mgr, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: c.dir})
+	mgr, err := sandbox.NewManager(sandbox.ManagerConfig{Vault: r.vaultForTest(c.dir), DataDir: c.dir})
 	if err != nil {
 		t.Fatal(err)
 	}

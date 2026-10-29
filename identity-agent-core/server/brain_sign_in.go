@@ -16,7 +16,7 @@ import (
 	"identity-agent-core/brainsignin"
 	"identity-agent-core/lending"
 	"identity-agent-core/permission"
-	"identity-agent-core/sandbox"
+	"identity-agent-core/vault"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -66,11 +66,38 @@ func (s *CoreServer) mountBrainSignInRoutes(r chi.Router) {
 var errNoVault = errors.New("this Identity Agent has no credential vault, so it cannot keep a sign-in safely")
 
 // brainVault is where sign-ins are kept.
-func (s *CoreServer) brainVault() (*sandbox.Manager, error) {
-	if s.SandboxManager == nil {
-		return nil, errNoVault
+func (s *CoreServer) brainVault() (signInVault, error) {
+	if s.Vault == nil {
+		return signInVault{}, errNoVault
 	}
-	return s.SandboxManager, nil
+	return signInVault{s.Vault}, nil
+}
+
+// signInVault is the credential vault as AI agents' sign-ins are kept in it:
+// each one a brainsignin.Record, which the vault keeps sealed as it is given
+// and never reads.
+type signInVault struct{ *vault.CredentialVault }
+
+// SetBrainSignIn keeps rec under ref, replacing any there.
+func (v signInVault) SetBrainSignIn(ref string, rec brainsignin.Record) error {
+	data, err := json.Marshal(rec)
+	if err != nil {
+		return err
+	}
+	return v.CredentialVault.SetBrainSignIn(ref, data)
+}
+
+// BrainSignIn is the sign-in kept under ref, with its secret.
+func (v signInVault) BrainSignIn(ref string) (brainsignin.Record, bool, error) {
+	data, had, err := v.CredentialVault.BrainSignIn(ref)
+	if err != nil || !had {
+		return brainsignin.Record{}, had, err
+	}
+	var rec brainsignin.Record
+	if err := json.Unmarshal(data, &rec); err != nil {
+		return brainsignin.Record{}, false, fmt.Errorf("the sign-in kept under %q cannot be read: %w", ref, err)
+	}
+	return rec, true, nil
 }
 
 // brainCaps are the caps on each account's simultaneous runs.
@@ -83,15 +110,15 @@ func (s *CoreServer) brainRunsInUse(match func(lending.Lend) bool) int {
 
 // brainVaultWritable is the vault, when a sign-in can be kept in it now.
 // Asked before anything else is written, so a locked vault changes nothing.
-func (s *CoreServer) brainVaultWritable() (*sandbox.Manager, error) {
-	vault, err := s.brainVault()
+func (s *CoreServer) brainVaultWritable() (signInVault, error) {
+	theVault, err := s.brainVault()
 	if err != nil {
-		return nil, err
+		return signInVault{}, err
 	}
-	if err := vault.VaultWritable(); err != nil {
-		return nil, err
+	if err := theVault.Writable(); err != nil {
+		return signInVault{}, err
 	}
-	return vault, nil
+	return theVault, nil
 }
 
 // mayBorrow says why an AI agent's body may not be lent its sign-in.
@@ -196,11 +223,11 @@ func (s *CoreServer) signInAsked(q brainSignInRequest, prev *brainsignin.Record,
 	if !ok {
 		return brainsignin.Record{}, http.StatusNotFound, errors.New("the AI agent whose sign-in was named is not found")
 	}
-	vault, err := s.brainVault()
+	theVault, err := s.brainVault()
 	if err != nil {
 		return brainsignin.Record{}, http.StatusServiceUnavailable, err
 	}
-	rec, had, err := vault.BrainSignIn(brainsignin.Ref(other.ID))
+	rec, had, err := theVault.BrainSignIn(vault.BrainSignInRef(other.ID))
 	if err != nil {
 		return rec, http.StatusServiceUnavailable, err
 	}
@@ -266,12 +293,13 @@ type keptSignIn struct {
 // keptBrainSignIns are the sign-ins kept for every AI agent, as the vault
 // holds them.
 func (s *CoreServer) keptBrainSignIns() []keptSignIn {
-	if s.SandboxManager == nil || s.assetHandler == nil {
+	theVault, err := s.brainVault()
+	if err != nil || s.assetHandler == nil {
 		return nil
 	}
 	var out []keptSignIn
 	for _, a := range s.assetHandler.ListAgents() {
-		if rec, had, err := s.SandboxManager.BrainSignIn(brainsignin.Ref(a.ID)); err == nil && had {
+		if rec, had, err := theVault.BrainSignIn(vault.BrainSignInRef(a.ID)); err == nil && had {
 			out = append(out, keptSignIn{asset: a, rec: rec})
 		}
 	}
@@ -296,19 +324,19 @@ func (s *CoreServer) accountCap(agentID string, rec brainsignin.Record) int {
 // it becomes the account's, for every AI agent signed in to it; otherwise a
 // sign-in joining an account takes the cap the account already has.
 func (s *CoreServer) keepBrainSignIn(a asset.Asset, rec brainsignin.Record, by string, capChosen bool) (asset.Asset, error) {
-	vault, err := s.brainVault()
+	theVault, err := s.brainVault()
 	if err != nil {
 		return a, err
 	}
 	if n, ok := s.brainCaps().Cap(rec.Pool(), a.ID); ok && !capChosen {
 		rec.MaxConcurrentRuns = n
 	}
-	ref := brainsignin.Ref(a.ID)
-	prev, had, err := vault.BrainSignIn(ref)
+	ref := vault.BrainSignInRef(a.ID)
+	prev, had, err := theVault.BrainSignIn(ref)
 	if err != nil {
 		return a, err
 	}
-	if err := vault.SetBrainSignIn(ref, rec); err != nil {
+	if err := theVault.SetBrainSignIn(ref, rec); err != nil {
 		return a, err
 	}
 	if err := s.brainCaps().SetCap(rec.Pool(), a.ID, rec.MaxConcurrentRuns); err != nil {
@@ -364,10 +392,11 @@ func (s *CoreServer) recordLentEvent(a asset.Asset, cc permission.CallerContext,
 // brainSignInShown is an AI agent's sign-in as a list of AI agents shows it,
 // or nil where it has none here or the vault cannot be read.
 func (s *CoreServer) brainSignInShown(a asset.Asset) map[string]any {
-	if s.SandboxManager == nil {
+	theVault, err := s.brainVault()
+	if err != nil {
 		return nil
 	}
-	rec, had, err := s.SandboxManager.BrainSignIn(brainsignin.Ref(a.ID))
+	rec, had, err := theVault.BrainSignIn(vault.BrainSignInRef(a.ID))
 	if err != nil || !had {
 		return nil
 	}
@@ -376,12 +405,12 @@ func (s *CoreServer) brainSignInShown(a asset.Asset) map[string]any {
 
 // removeBrainSignInOf deletes an AI agent's sign-in and the runs holding it.
 func (s *CoreServer) removeBrainSignInOf(assetID string) error {
-	vault, err := s.brainVault()
+	theVault, err := s.brainVault()
 	if err != nil {
 		return err
 	}
 	_ = s.lends().Forget(lendBrainSignIn, assetID)
-	return vault.RemoveBrainSignIn(brainsignin.Ref(assetID))
+	return theVault.RemoveBrainSignIn(vault.BrainSignInRef(assetID))
 }
 
 // forgetBrainSignInOf removes the sign-in kept for an AI agent whose making
@@ -412,12 +441,12 @@ func (s *CoreServer) handleGetBrainSignIn(w http.ResponseWriter, r *http.Request
 		jsonError(w, "AI agent not found", http.StatusNotFound)
 		return
 	}
-	vault, err := s.brainVault()
+	theVault, err := s.brainVault()
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	rec, had, err := vault.BrainSignIn(brainsignin.Ref(a.ID))
+	rec, had, err := theVault.BrainSignIn(vault.BrainSignInRef(a.ID))
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusServiceUnavailable)
 		return
@@ -445,13 +474,13 @@ func (s *CoreServer) handleSetBrainSignIn(w http.ResponseWriter, r *http.Request
 		jsonError(w, "the sign-in is unreadable", http.StatusBadRequest)
 		return
 	}
-	vault, err := s.brainVaultWritable()
+	theVault, err := s.brainVaultWritable()
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
 	var prev *brainsignin.Record
-	if p, had, err := vault.BrainSignIn(brainsignin.Ref(a.ID)); err != nil {
+	if p, had, err := theVault.BrainSignIn(vault.BrainSignInRef(a.ID)); err != nil {
 		jsonError(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	} else if had {
@@ -489,17 +518,17 @@ func (s *CoreServer) handleRemoveBrainSignIn(w http.ResponseWriter, r *http.Requ
 		jsonError(w, "AI agent not found", http.StatusNotFound)
 		return
 	}
-	vault, err := s.brainVault()
+	theVault, err := s.brainVault()
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	if err := vault.RemoveBrainSignIn(brainsignin.Ref(a.ID)); err != nil {
+	if err := theVault.RemoveBrainSignIn(vault.BrainSignInRef(a.ID)); err != nil {
 		jsonError(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
 	_ = s.lends().Forget(lendBrainSignIn, a.ID)
-	if a.AgentConfig != nil && brainsignin.IsRef(a.AgentConfig.Brain.CredentialRef) {
+	if a.AgentConfig != nil && vault.IsBrainSignInRef(a.AgentConfig.Brain.CredentialRef) {
 		cfg := *a.AgentConfig
 		cfg.Brain.CredentialRef = ""
 		a.AgentConfig = &cfg
@@ -518,7 +547,7 @@ func (s *CoreServer) handleRemoveBrainSignIn(w http.ResponseWriter, r *http.Requ
 // sign-in, and returns the brain with the secret taken out. A reference to a
 // sign-in, or to an entry the vault already holds, is not a secret and is left.
 func (s *CoreServer) brainSecretFrom(b asset.BrainConfig) (asset.BrainConfig, *brainsignin.Record) {
-	b = b.Normalised()
+	b = normalisedBrain(b)
 	if !b.HoldsASecret(s.isVaultEntry) {
 		return b, nil
 	}
@@ -535,8 +564,18 @@ func (s *CoreServer) brainSecretFrom(b asset.BrainConfig) (asset.BrainConfig, *b
 	}
 }
 
-func (s *CoreServer) isVaultEntry(name string) bool {
-	return s.SandboxManager != nil && s.SandboxManager.HasServiceCredential(name)
+// normalisedBrain is the brain configuration with its kind and provider as
+// the record keeps them, whatever names a screen sent.
+func normalisedBrain(b asset.BrainConfig) asset.BrainConfig {
+	b.Provider = brainsignin.NormaliseProvider(b.Provider)
+	if b.Provider == "" && brainsignin.NormaliseKind(b.Kind, "") == brainsignin.KindLocal {
+		b.Provider = brainsignin.Local
+	}
+	if b.Kind != "" || b.Provider != "" {
+		b.Kind = brainsignin.NormaliseKind(b.Kind, b.Provider)
+	}
+	b.Program = brainsignin.NormaliseProgram(b.Program)
+	return b
 }
 
 // brainSecretsMoved holds, by data directory, whether every key on an AI
@@ -554,7 +593,7 @@ var (
 // by the owner. A secret that cannot be moved yet — the vault is locked — is
 // left, said so, and never shown: every view of an AI agent hides it.
 func (s *CoreServer) moveBrainSecretsIntoTheVault() {
-	if s.assetHandler == nil || s.SandboxManager == nil {
+	if s.assetHandler == nil || s.Vault == nil {
 		return
 	}
 	if done, _ := brainSecretsMoved.Load(s.DataDir); done == true {
@@ -637,12 +676,12 @@ func (s *CoreServer) handleBodyBorrowsSignIn(w http.ResponseWriter, r *http.Requ
 	// Whether a sign-in was ever kept for this AI agent is on its record, so a
 	// vault that cannot be read does not stop the bodies of AI agents that
 	// never had one.
-	named := a.AgentConfig != nil && brainsignin.IsRef(a.AgentConfig.Brain.CredentialRef)
+	named := a.AgentConfig != nil && vault.IsBrainSignInRef(a.AgentConfig.Brain.CredentialRef)
 	var rec brainsignin.Record
 	had := false
-	vault, err := s.brainVault()
+	theVault, err := s.brainVault()
 	if err == nil {
-		rec, had, err = vault.BrainSignIn(brainsignin.Ref(a.ID))
+		rec, had, err = theVault.BrainSignIn(vault.BrainSignInRef(a.ID))
 	}
 	if err != nil && named {
 		jsonError(w, "this AI agent's sign-in cannot be read: "+err.Error(), http.StatusServiceUnavailable)

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"sync"
+
+	"identity-agent-core/vault"
 )
 
 type PolicyEngine struct {
@@ -78,7 +80,7 @@ func (pe *PolicyEngine) CheckDomain(instanceID, appID, domain, method, urlStr st
 	}
 
 	for _, r := range userRules {
-		if r.RuleType == "domain_block" && MatchDomain(r.Target, domain) {
+		if r.RuleType == "domain_block" && vault.MatchDomain(r.Target, domain) {
 			pe.recordDecision(instanceID, appID, "proxy_request", "denied", domain, "user_block_rule: "+r.Target, "user")
 			if pe.tracer != nil && pe.tracer.IsEnabled() {
 				pe.tracer.Emit("policy", "decision", "egress", appID, instanceID,
@@ -90,7 +92,7 @@ func (pe *PolicyEngine) CheckDomain(instanceID, appID, domain, method, urlStr st
 	}
 
 	for _, r := range userRules {
-		if r.RuleType == "domain_allow" && MatchDomain(r.Target, domain) {
+		if r.RuleType == "domain_allow" && vault.MatchDomain(r.Target, domain) {
 			pe.recordDecision(instanceID, appID, "proxy_request", "approved", domain, "user_allow_rule: "+r.Target, "user")
 			if pe.tracer != nil && pe.tracer.IsEnabled() {
 				pe.tracer.Emit("policy", "decision", "egress", appID, instanceID,
@@ -142,7 +144,7 @@ func (pe *PolicyEngine) userBlocks(appID, domain string) (string, bool) {
 		log.Printf("[policy] Failed to load user rules for app %s: %v", appID, err)
 	}
 	for _, r := range rules {
-		if r.RuleType == "domain_block" && MatchDomain(r.Target, domain) {
+		if r.RuleType == "domain_block" && vault.MatchDomain(r.Target, domain) {
 			return r.Target, true
 		}
 	}

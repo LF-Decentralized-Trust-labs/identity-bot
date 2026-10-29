@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"identity-agent-core/permission"
+	"identity-agent-core/vault"
 )
 
 func registryTestManager(t *testing.T) *Manager {
@@ -20,7 +21,7 @@ func registryTestManager(t *testing.T) *Manager {
 		t.Fatalf("store: %v", err)
 	}
 	t.Cleanup(func() { st.Close() })
-	cv := NewCredentialVault(dir)
+	cv := vault.NewCredentialVault(dir)
 	cv.SetKeyProvider(testVaultKeyProvider)
 	return &Manager{
 		store:       st,

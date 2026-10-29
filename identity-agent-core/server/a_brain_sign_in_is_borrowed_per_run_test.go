@@ -104,10 +104,10 @@ func TestABodyWithNoSignInRunsAsBefore(t *testing.T) {
 		t.Fatalf("an AI agent with no sign-in: %v", err)
 	}
 	// Nor does an Identity Agent with no vault stop a body that never had one.
-	mgr := w.s.SandboxManager
-	w.s.SandboxManager = nil
+	v, mgr := w.s.Vault, w.s.SandboxManager
+	w.s.Vault, w.s.SandboxManager = nil, nil
 	_, err := w.hostB.Borrow(context.Background())
-	w.s.SandboxManager = mgr
+	w.s.Vault, w.s.SandboxManager = v, mgr
 	if !errors.Is(err, agenthost.ErrNoSignIn) {
 		t.Fatalf("an Identity Agent with no vault: %v", err)
 	}

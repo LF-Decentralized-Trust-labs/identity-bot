@@ -16,6 +16,7 @@ import (
 	"identity-agent-core/asset"
 	"identity-agent-core/brainsignin"
 	"identity-agent-core/schemas"
+	"identity-agent-core/vault"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -110,7 +111,7 @@ func (s *CoreServer) handleProvisionAgent(w http.ResponseWriter, r *http.Request
 	}
 	// An AI agent not yet made has no sign-in of its own, so a reference to
 	// one names somebody else's, and is not kept.
-	if brainsignin.IsRef(brain.CredentialRef) {
+	if vault.IsBrainSignInRef(brain.CredentialRef) {
 		brain.CredentialRef = ""
 	}
 	if req.BrainSignIn != nil {
@@ -407,8 +408,8 @@ func (s *CoreServer) handleUpdateAgentConfig(w http.ResponseWriter, r *http.Requ
 	}
 	if brain.Program != "" && brain.Kind == "" && brain.Provider == "" {
 		// The program is checked against the sign-in the AI agent has.
-		if vault, err := s.brainVault(); err == nil {
-			if kept, had, _ := vault.BrainSignIn(brainsignin.Ref(id)); had {
+		if theVault, err := s.brainVault(); err == nil {
+			if kept, had, _ := theVault.BrainSignIn(vault.BrainSignInRef(id)); had {
 				if err := brainsignin.ProgramFits(brain.Program, kept.Kind, kept.Provider); err != nil {
 					jsonError(w, "nothing was changed: "+err.Error(), http.StatusBadRequest)
 					return
@@ -417,10 +418,10 @@ func (s *CoreServer) handleUpdateAgentConfig(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	// The only sign-in an AI agent's brain may name is its own.
-	if brainsignin.IsRef(brain.CredentialRef) || (brain.CredentialRef == "" && signIn == nil) {
+	if vault.IsBrainSignInRef(brain.CredentialRef) || (brain.CredentialRef == "" && signIn == nil) {
 		brain.CredentialRef = ""
-		if before.AgentConfig != nil && before.AgentConfig.Brain.CredentialRef == brainsignin.Ref(id) {
-			brain.CredentialRef = brainsignin.Ref(id)
+		if before.AgentConfig != nil && before.AgentConfig.Brain.CredentialRef == vault.BrainSignInRef(id) {
+			brain.CredentialRef = vault.BrainSignInRef(id)
 		}
 	}
 	cfg.Brain = brain

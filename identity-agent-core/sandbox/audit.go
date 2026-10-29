@@ -251,12 +251,6 @@ func (m *Manager) SetEventSigner(s EventSigner) {
 	m.eventSigner = s
 }
 
-// SetVaultKeyProvider injects the credential-vault key source (server layer,
-// at startup) — the vault stays encrypted at rest and unlocks lazily.
-func (m *Manager) SetVaultKeyProvider(p VaultKeyProvider) {
-	m.credentials.SetKeyProvider(p)
-}
-
 // SetAuthorizer injects the real governance-gateway ingress/egress decision (server
 // layer, at startup), replacing the structural default. Nil leaves the structural
 // authorizer in place.

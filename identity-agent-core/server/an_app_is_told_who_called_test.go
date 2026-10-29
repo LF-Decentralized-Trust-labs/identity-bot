@@ -52,7 +52,7 @@ func withNotesApp(t *testing.T, s *CoreServer) *notesApp {
 	if err := os.WriteFile(filepath.Join(manifests, "notes.json"), b, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir, ManifestsDir: manifests})
+	m, err := sandbox.NewManager(sandbox.ManagerConfig{Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: manifests})
 	if err != nil {
 		t.Fatal(err)
 	}

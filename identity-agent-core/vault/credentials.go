@@ -1,4 +1,8 @@
-package sandbox
+// Package vault is the Identity Agent's credential vault: the secrets it keeps
+// for services, sealed at rest under a key derived from the identity's root
+// seed, and added to outgoing requests only for the services they belong to.
+// It is part of the core, not of any add-on that uses it.
+package vault
 
 import (
 	"encoding/base64"
@@ -13,7 +17,6 @@ import (
 	"sync"
 
 	"identity-agent-core/backup"
-	"identity-agent-core/brainsignin"
 )
 
 // vaultFileName is the encrypted-at-rest credential store. It deliberately does
@@ -40,9 +43,10 @@ type CredentialEntry struct {
 	MatchDomains []string          `json:"match_domains"`
 	Headers      map[string]string `json:"headers"`
 	// BrainSignIn is an AI agent's brain sign-in, kept under the service name
-	// brainsignin.Ref gives. It has no match domains, so it is never injected
-	// into a request: it leaves the vault only when lent, sealed, to a body.
-	BrainSignIn *brainsignin.Record `json:"brain_sign_in,omitempty"`
+	// BrainSignInRef gives, as the AI-agent add-on encoded it. It has no match
+	// domains, so it is never injected into a request: it leaves the vault
+	// only when lent, sealed, to a body.
+	BrainSignIn json.RawMessage `json:"brain_sign_in,omitempty"`
 	// Kept is a secret the Identity Agent keeps for its own use, under a name
 	// KeptRef gives: what a service connected once gave it, or a short
 	// credential it lent and may have to withdraw. It has no match domains,
@@ -68,6 +72,21 @@ func KeptRef(name string) string { return keptPrefix + name }
 // IsKeptRef reports whether a vault name is one KeptRef gives.
 func IsKeptRef(s string) bool { return strings.HasPrefix(s, keptPrefix) && len(s) > len(keptPrefix) }
 
+// brainSignInPrefix marks a brain configuration's credential reference as
+// naming a brain sign-in this vault keeps.
+const brainSignInPrefix = "ai-agent-brain:"
+
+// BrainSignInRef is the vault reference for an AI agent's sign-in, by the AI
+// agent's asset id.
+func BrainSignInRef(assetID string) string { return brainSignInPrefix + assetID }
+
+// IsBrainSignInRef reports whether s names a brain sign-in in the vault,
+// rather than being anything else — a key typed where a reference belongs,
+// for one.
+func IsBrainSignInRef(s string) bool {
+	return strings.HasPrefix(s, brainSignInPrefix) && len(s) > len(brainSignInPrefix)
+}
+
 type CredentialVault struct {
 	dataDir     string
 	entries     []CredentialEntry // decrypted vault entries (authoritative)
@@ -76,8 +95,22 @@ type CredentialVault struct {
 	key         []byte // cached vault key once successfully provided
 	loaded      bool
 	loadErr     error // set when the vault exists but cannot be opened — fail closed
-	tracer      *Tracer
+	tracer      Tracer
 	mu          sync.Mutex
+}
+
+// Tracer is where the vault reports what it injected, or refused to, for
+// whatever shows request traffic as it happens. Nil reports nothing.
+type Tracer interface {
+	IsEnabled() bool
+	Emit(module, stage, direction, appID, instanceID, summary string, detail map[string]interface{})
+}
+
+// SetTracer installs where injections are reported.
+func (cv *CredentialVault) SetTracer(t Tracer) {
+	cv.mu.Lock()
+	defer cv.mu.Unlock()
+	cv.tracer = t
 }
 
 func NewCredentialVault(dataDir string) *CredentialVault {
@@ -375,7 +408,7 @@ func (cv *CredentialVault) injectMatching(req *http.Request, eligible func(Crede
 }
 
 func (cv *CredentialVault) SetCredential(service string, domains []string, headers map[string]string) error {
-	if brainsignin.IsRef(service) {
+	if IsBrainSignInRef(service) {
 		return fmt.Errorf("%q names an AI agent's brain sign-in, which is kept through that AI agent", service)
 	}
 	if IsKeptRef(service) {
@@ -432,13 +465,23 @@ func (cv *CredentialVault) RemoveCredential(service string) error {
 	return nil
 }
 
+// RemoveServiceCredential deletes one service credential. A secret kept for
+// the Identity Agent's own use is removed where it is used, which also
+// withdraws what was lent from it, never here.
+func (cv *CredentialVault) RemoveServiceCredential(service string) error {
+	if IsKeptRef(service) {
+		return fmt.Errorf("%q names a secret this Identity Agent keeps for its own use", service)
+	}
+	return cv.RemoveCredential(service)
+}
+
 func (cv *CredentialVault) GetAPIKey(service string) string {
 	cv.mu.Lock()
 	defer cv.mu.Unlock()
 	cv.ensureLoadedLocked()
 
 	for _, e := range cv.effectiveEntriesLocked() {
-		if e.Service == service && e.BrainSignIn == nil && e.Kept == nil {
+		if e.Service == service && !e.holdsBrainSignIn() && e.Kept == nil {
 			if auth, ok := e.Headers["Authorization"]; ok {
 				return strings.TrimPrefix(auth, "Bearer ")
 			}
@@ -457,7 +500,7 @@ func (cv *CredentialVault) ListServices() []string {
 		// A brain sign-in is managed through its AI agent, and listed there;
 		// a secret kept for the Identity Agent's own use is managed where it
 		// is used.
-		if e.BrainSignIn != nil || e.Kept != nil {
+		if e.holdsBrainSignIn() || e.Kept != nil {
 			continue
 		}
 		services = append(services, e.Service)
@@ -494,10 +537,11 @@ func (cv *CredentialVault) HasService(service string) bool {
 }
 
 // SetBrainSignIn keeps an AI agent's brain sign-in under ref, replacing any
-// there. It is refused while the vault cannot be written, rather than kept
-// anywhere else.
-func (cv *CredentialVault) SetBrainSignIn(ref string, rec brainsignin.Record) error {
-	if !brainsignin.IsRef(ref) {
+// there. The sign-in is as the AI-agent add-on encoded it: the vault keeps it
+// sealed and never reads it. It is refused while the vault cannot be written,
+// rather than kept anywhere else.
+func (cv *CredentialVault) SetBrainSignIn(ref string, rec json.RawMessage) error {
+	if !IsBrainSignInRef(ref) {
 		return fmt.Errorf("%q is not a brain sign-in reference", ref)
 	}
 	cv.mu.Lock()
@@ -510,8 +554,7 @@ func (cv *CredentialVault) SetBrainSignIn(ref string, rec brainsignin.Record) er
 	if err != nil {
 		return fmt.Errorf("credential vault is locked — complete identity setup first (vault key unavailable): %w", err)
 	}
-	r := rec
-	entry := CredentialEntry{Service: ref, MatchDomains: []string{}, Headers: map[string]string{}, BrainSignIn: &r}
+	entry := CredentialEntry{Service: ref, MatchDomains: []string{}, Headers: map[string]string{}, BrainSignIn: rec}
 	for i, e := range cv.entries {
 		if e.Service == ref {
 			cv.entries[i] = entry
@@ -522,28 +565,35 @@ func (cv *CredentialVault) SetBrainSignIn(ref string, rec brainsignin.Record) er
 	return cv.persistLocked(key)
 }
 
-// BrainSignIn is the sign-in kept under ref, with its secret.
-func (cv *CredentialVault) BrainSignIn(ref string) (brainsignin.Record, bool, error) {
+// BrainSignIn is the sign-in kept under ref, with its secret, as it was
+// encoded.
+func (cv *CredentialVault) BrainSignIn(ref string) (json.RawMessage, bool, error) {
 	cv.mu.Lock()
 	defer cv.mu.Unlock()
 	cv.ensureLoadedLocked()
 	if cv.loadErr != nil {
-		return brainsignin.Record{}, false, cv.loadErr
+		return nil, false, cv.loadErr
 	}
 	for _, e := range cv.entries {
-		if e.Service == ref && e.BrainSignIn != nil {
-			return *e.BrainSignIn, true, nil
+		if e.Service == ref && e.holdsBrainSignIn() {
+			return e.BrainSignIn, true, nil
 		}
 	}
-	return brainsignin.Record{}, false, nil
+	return nil, false, nil
 }
 
 // RemoveBrainSignIn deletes the sign-in kept under ref.
 func (cv *CredentialVault) RemoveBrainSignIn(ref string) error {
-	if !brainsignin.IsRef(ref) {
+	if !IsBrainSignInRef(ref) {
 		return fmt.Errorf("%q is not a brain sign-in reference", ref)
 	}
 	return cv.RemoveCredential(ref)
+}
+
+// holdsBrainSignIn reports whether the entry is a brain sign-in. An explicit
+// JSON null is none, as it was while the entry was decoded into a pointer.
+func (e CredentialEntry) holdsBrainSignIn() bool {
+	return len(e.BrainSignIn) > 0 && string(e.BrainSignIn) != "null"
 }
 
 // SetKept keeps v, as JSON, under ref (KeptRef), replacing whatever is there.

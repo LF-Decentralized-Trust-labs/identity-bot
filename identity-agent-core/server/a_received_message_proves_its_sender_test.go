@@ -30,7 +30,7 @@ func withLog(t *testing.T, s *CoreServer) {
 		t.Fatal(err)
 	}
 	s.DataStore = ds
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir, ManifestsDir: t.TempDir()})
+	m, err := sandbox.NewManager(sandbox.ManagerConfig{Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}

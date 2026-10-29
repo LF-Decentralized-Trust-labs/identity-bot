@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"identity-agent-core/vault"
 )
 
 type AppManifest struct {
@@ -372,39 +374,14 @@ func (m *AppManifest) DisplayPort() string {
 	return ""
 }
 
-func MatchDomain(pattern, domain string) bool {
-	pattern = strings.ToLower(pattern)
-	domain = strings.ToLower(domain)
-
-	if pattern == domain {
-		return true
-	}
-
-	if strings.HasPrefix(pattern, "**.") {
-		suffix := pattern[2:]
-		return strings.HasSuffix(domain, suffix)
-	}
-
-	if strings.HasPrefix(pattern, "*.") {
-		suffix := pattern[1:]
-		if !strings.HasSuffix(domain, suffix) {
-			return false
-		}
-		prefix := strings.TrimSuffix(domain, suffix)
-		return !strings.Contains(prefix, ".")
-	}
-
-	return false
-}
-
 func (m *AppManifest) IsDomainAllowed(domain string) (allowed bool, explicitRule bool) {
 	for _, d := range m.Network.BlockedDomains {
-		if MatchDomain(d, domain) {
+		if vault.MatchDomain(d, domain) {
 			return false, true
 		}
 	}
 	for _, d := range m.Network.AllowedDomains {
-		if MatchDomain(d, domain) {
+		if vault.MatchDomain(d, domain) {
 			return true, true
 		}
 	}

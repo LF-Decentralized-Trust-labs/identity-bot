@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"identity-agent-core/lending"
+	"identity-agent-core/vault"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -241,7 +242,7 @@ func TestTheVaultAddsNoKeyToACheck(t *testing.T) {
 	stub := &providerStub{}
 	srv := stub.serve(t)
 	w.s.brainChecker = &brainsignin.Checker{Anthropic: srv.URL + "/a", AddressRule: loopbackAllowed}
-	if err := w.s.SandboxManager.SetServiceCredential("a-kept-key", []string{"127.0.0.1"},
+	if err := w.s.Vault.SetCredential("a-kept-key", []string{"127.0.0.1"},
 		map[string]string{"Authorization": "Bearer VAULT-KEY-GOOD", "x-api-key": "VAULT-KEY-GOOD"}); err != nil {
 		t.Fatal(err)
 	}
@@ -388,7 +389,7 @@ func TestARenewedCodexSignInIsKept(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{w.a.ID, w.b.ID} {
-		rec, _, err := w.s.SandboxManager.BrainSignIn(brainsignin.Ref(id))
+		rec, _, err := (signInVault{w.s.Vault}).BrainSignIn(vault.BrainSignInRef(id))
 		if err != nil || rec.Secret != renewed {
 			t.Fatalf("the renewed sign-in was not kept for %s: %v", id, err)
 		}
@@ -439,7 +440,7 @@ func TestARefreshReturnedAfterTheLeaseLapsedIsKept(t *testing.T) {
 	if err != nil || code != http.StatusOK {
 		t.Fatalf("returning a lapsed lease: %d %s %v", code, out, err)
 	}
-	if rec, _, _ := w.s.SandboxManager.BrainSignIn(brainsignin.Ref(w.a.ID)); rec.Secret != renewed {
+	if rec, _, _ := (signInVault{w.s.Vault}).BrainSignIn(vault.BrainSignInRef(w.a.ID)); rec.Secret != renewed {
 		t.Fatal("the sign-in refreshed during a run whose lease lapsed was lost")
 	}
 	_ = w.hostA.Return(context.Background(), other)
@@ -477,7 +478,7 @@ func TestARefreshKeptOnTheMachineIsGivenBackOnTheNextRun(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(w.hostA.DataDir, "sign-ins-to-give-back.json")); !os.IsNotExist(err) {
 		t.Fatalf("the refresh given back is still kept on the machine: %v", err)
 	}
-	if rec, _, _ := w.s.SandboxManager.BrainSignIn(brainsignin.Ref(w.a.ID)); rec.Secret != renewed {
+	if rec, _, _ := (signInVault{w.s.Vault}).BrainSignIn(vault.BrainSignInRef(w.a.ID)); rec.Secret != renewed {
 		t.Fatal("the refresh kept on the machine was not given back")
 	}
 }
@@ -534,7 +535,7 @@ func TestARefreshIsWrittenOnlyWhereTheLentSignInIsKept(t *testing.T) {
 		t.Fatalf("keeping the refresh: %s", got)
 	}
 	for id, want := range map[string]string{w.a.ID: renewed, w.b.ID: renewed, third.ID: separate} {
-		if rec, _, _ := w.s.SandboxManager.BrainSignIn(brainsignin.Ref(id)); rec.Secret != want {
+		if rec, _, _ := (signInVault{w.s.Vault}).BrainSignIn(vault.BrainSignInRef(id)); rec.Secret != want {
 			t.Errorf("%s holds the wrong sign-in after the refresh", id)
 		}
 	}
@@ -588,7 +589,7 @@ func TestARefreshTheVaultCannotKeepYetIsNotTakenAsReturned(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("trying again once the vault opened: %d %s", code, out)
 	}
-	if rec, _, _ := w.s.SandboxManager.BrainSignIn(brainsignin.Ref(w.a.ID)); rec.Secret != renewed {
+	if rec, _, _ := (signInVault{w.s.Vault}).BrainSignIn(vault.BrainSignInRef(w.a.ID)); rec.Secret != renewed {
 		t.Fatal("the refresh was lost")
 	}
 }

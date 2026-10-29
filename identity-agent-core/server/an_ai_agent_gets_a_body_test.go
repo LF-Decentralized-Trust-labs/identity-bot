@@ -159,7 +159,7 @@ func bodyWorld(t *testing.T) (*CoreServer, string) {
 	if _, err := s.issueCapabilityGrant(agent, authority{}); err != nil {
 		t.Fatal(err)
 	}
-	mgr, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir})
+	mgr, err := sandbox.NewManager(sandbox.ManagerConfig{Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -15,6 +15,7 @@ import (
 	"identity-agent-core/brainsignin"
 	"identity-agent-core/lending"
 	"identity-agent-core/permission"
+	"identity-agent-core/vault"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -65,12 +66,12 @@ func (s *CoreServer) handleTestKeptBrainSignIn(w http.ResponseWriter, r *http.Re
 		jsonError(w, "AI agent not found", http.StatusNotFound)
 		return
 	}
-	vault, err := s.brainVault()
+	theVault, err := s.brainVault()
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	rec, had, err := vault.BrainSignIn(brainsignin.Ref(a.ID))
+	rec, had, err := theVault.BrainSignIn(vault.BrainSignInRef(a.ID))
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusServiceUnavailable)
 		return
@@ -146,11 +147,11 @@ var refreshMu sync.Mutex
 func (s *CoreServer) keepRefreshedSignIn(a asset.Asset, lease lending.Lend, content string) (why string, tryAgain bool) {
 	refreshMu.Lock()
 	defer refreshMu.Unlock()
-	vault, err := s.brainVaultWritable()
+	theVault, err := s.brainVaultWritable()
 	if err != nil {
 		return "the refreshed sign-in could not be kept yet: " + err.Error(), true
 	}
-	rec, had, err := vault.BrainSignIn(brainsignin.Ref(a.ID))
+	rec, had, err := theVault.BrainSignIn(vault.BrainSignInRef(a.ID))
 	switch {
 	case err != nil:
 		return "the refreshed sign-in could not be kept yet: " + err.Error(), true
@@ -174,7 +175,7 @@ func (s *CoreServer) keepRefreshedSignIn(a asset.Asset, lease lending.Lend, cont
 	fresh.Identify()
 	// The borrowing AI agent's own sign-in first: if that cannot be written,
 	// nothing else is.
-	if err := vault.SetBrainSignIn(brainsignin.Ref(a.ID), fresh); err != nil {
+	if err := theVault.SetBrainSignIn(vault.BrainSignInRef(a.ID), fresh); err != nil {
 		return "the refreshed sign-in could not be kept yet: " + err.Error(), true
 	}
 	n := 0
@@ -184,7 +185,7 @@ func (s *CoreServer) keepRefreshedSignIn(a asset.Asset, lease lending.Lend, cont
 		}
 		upd := k.rec
 		upd.Secret, upd.AccountID = fresh.Secret, fresh.AccountID
-		if err := vault.SetBrainSignIn(brainsignin.Ref(k.asset.ID), upd); err != nil {
+		if err := theVault.SetBrainSignIn(vault.BrainSignInRef(k.asset.ID), upd); err != nil {
 			log.Printf("[brain] AI agent %s: the refreshed sign-in could not be kept: %v", k.asset.PairwiseAID, err)
 			continue
 		}
@@ -220,12 +221,12 @@ func (s *CoreServer) handleKeptBrainSignInModels(w http.ResponseWriter, r *http.
 		jsonError(w, "AI agent not found", http.StatusNotFound)
 		return
 	}
-	vault, err := s.brainVault()
+	theVault, err := s.brainVault()
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	rec, had, err := vault.BrainSignIn(brainsignin.Ref(a.ID))
+	rec, had, err := theVault.BrainSignIn(vault.BrainSignInRef(a.ID))
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusServiceUnavailable)
 		return
@@ -301,12 +302,12 @@ func (s *CoreServer) handleChooseBrain(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "nothing was changed: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	vault, err := s.brainVault()
+	theVault, err := s.brainVault()
 	if err != nil {
 		jsonError(w, "nothing was changed: the AI agent's sign-in cannot be read now", http.StatusServiceUnavailable)
 		return
 	}
-	kept, had, err := vault.BrainSignIn(brainsignin.Ref(id))
+	kept, had, err := theVault.BrainSignIn(vault.BrainSignInRef(id))
 	if err != nil {
 		jsonError(w, "nothing was changed: the AI agent's sign-in cannot be read now", http.StatusServiceUnavailable)
 		return

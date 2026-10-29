@@ -46,7 +46,7 @@ func newTalkWorld(t *testing.T, caps ...string) *talkWorld {
 	if err := s.initAssetHandler(); err != nil {
 		t.Fatal(err)
 	}
-	mgr, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir})
+	mgr, err := sandbox.NewManager(sandbox.ManagerConfig{Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir})
 	if err != nil {
 		t.Fatal(err)
 	}

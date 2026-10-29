@@ -686,11 +686,11 @@ func TestALendThatCannotBeCheckedIsWithdrawn(t *testing.T) {
 	w, g := githubWorld(t)
 	w.grantRepos(t, w.a.ID, [2]string{"acme/sandbox", "write"})
 	var conn githubapp.Connection
-	if _, err := w.s.SandboxManager.Kept(githubAppRef, keptGitHubApp, &conn); err != nil {
+	if _, err := w.s.Vault.Kept(githubAppRef, keptGitHubApp, &conn); err != nil {
 		t.Fatal(err)
 	}
 	unreadable := func() {
-		if err := w.s.SandboxManager.SetKept(githubAppRef, "not-a-github-app", map[string]int{"x": 1}); err != nil {
+		if err := w.s.Vault.SetKept(githubAppRef, "not-a-github-app", map[string]int{"x": 1}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -704,7 +704,7 @@ func TestALendThatCannotBeCheckedIsWithdrawn(t *testing.T) {
 		t.Fatalf("not withdrawn: %+v", made)
 	}
 	// Later: lent while the App could be read, then it cannot.
-	if err := w.s.SandboxManager.SetKept(githubAppRef, keptGitHubApp, conn); err != nil {
+	if err := w.s.Vault.SetKept(githubAppRef, keptGitHubApp, conn); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := w.hostA.BorrowGitHub(context.Background()); err != nil {
@@ -767,11 +767,11 @@ func TestReplacingTheAppWithdrawsWhatItLent(t *testing.T) {
 		t.Fatal(err)
 	}
 	var conn githubapp.Connection
-	if _, err := w.s.SandboxManager.Kept(githubAppRef, keptGitHubApp, &conn); err != nil {
+	if _, err := w.s.Vault.Kept(githubAppRef, keptGitHubApp, &conn); err != nil {
 		t.Fatal(err)
 	}
 	conn.InstallationID = 8
-	if err := w.s.SandboxManager.SetKept(githubAppRef, keptGitHubApp, conn); err != nil {
+	if err := w.s.Vault.SetKept(githubAppRef, keptGitHubApp, conn); err != nil {
 		t.Fatal(err)
 	}
 	w.s.endLendsNoLongerGranted("test")

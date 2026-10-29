@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"identity-agent-core/vault"
 )
 
 // A credential is only ever handed to a caller that proved who it is AND was
@@ -132,7 +134,7 @@ func TestProxyTokensAreDistinctAndLongEnough(t *testing.T) {
 func TestEmptyServiceListInjectsNothing(t *testing.T) {
 	// Empty must not mean "unrestricted": that would hand a caller every stored
 	// secret exactly when nobody remembered to restrict it.
-	cv := &CredentialVault{}
+	cv := &vault.CredentialVault{}
 	r := httptest.NewRequest(http.MethodGet, "https://api.example.com/x", nil)
 	if cv.InjectCredentialsScoped(r, nil) {
 		t.Fatal("an empty service list must inject nothing")

@@ -18,7 +18,7 @@ import (
 	"identity-agent-core/githubapp"
 	"identity-agent-core/lending"
 	"identity-agent-core/permission"
-	"identity-agent-core/sandbox"
+	"identity-agent-core/vault"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -52,7 +52,7 @@ const (
 
 func capabilityFor(a githubapp.Access) string { return a.Capability() }
 
-var githubAppRef = sandbox.KeptRef("github-app")
+var githubAppRef = vault.KeptRef("github-app")
 
 const keptGitHubApp = "github-app"
 
@@ -87,11 +87,11 @@ func (s *CoreServer) githubClient() (githubapp.Client, error) {
 // connected.
 func (s *CoreServer) githubConnection() (githubapp.Connection, bool, error) {
 	var c githubapp.Connection
-	vault, err := s.brainVault()
+	theVault, err := s.brainVault()
 	if err != nil {
 		return c, false, err
 	}
-	had, err := vault.Kept(githubAppRef, keptGitHubApp, &c)
+	had, err := theVault.Kept(githubAppRef, keptGitHubApp, &c)
 	return c, had, err
 }
 
@@ -153,7 +153,7 @@ func (s *CoreServer) handleConnectGitHub(w http.ResponseWriter, r *http.Request)
 		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	vault, err := s.brainVaultWritable()
+	theVault, err := s.brainVaultWritable()
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusServiceUnavailable)
 		return
@@ -174,7 +174,7 @@ func (s *CoreServer) handleConnectGitHub(w http.ResponseWriter, r *http.Request)
 	}
 	conn.ConnectedAt = time.Now().UTC()
 	_, had, _ := s.githubConnection()
-	if err := vault.SetKept(githubAppRef, keptGitHubApp, conn); err != nil {
+	if err := theVault.SetKept(githubAppRef, keptGitHubApp, conn); err != nil {
 		jsonError(w, "the GitHub App was not kept: "+err.Error(), http.StatusServiceUnavailable)
 		return
 	}
@@ -202,7 +202,7 @@ func (s *CoreServer) endAllGitHubLends(ctx context.Context, why string) (int, er
 // The AI agents' grants still name their repositories, and lend nothing until
 // an App is connected again.
 func (s *CoreServer) handleDisconnectGitHub(w http.ResponseWriter, r *http.Request) {
-	vault, err := s.brainVaultWritable()
+	theVault, err := s.brainVaultWritable()
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusServiceUnavailable)
 		return
@@ -214,7 +214,7 @@ func (s *CoreServer) handleDisconnectGitHub(w http.ResponseWriter, r *http.Reque
 		jsonError(w, "what was lent cannot be read, so the App was not disconnected: "+err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	if err := vault.RemoveKept(githubAppRef); err != nil {
+	if err := theVault.RemoveKept(githubAppRef); err != nil {
 		jsonError(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
