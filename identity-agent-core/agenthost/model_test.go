@@ -14,7 +14,8 @@ import (
 // A brain whose key stays with the Identity Agent is given this body's model
 // address and its run's token, in the variables its program reads, and no
 // key: Claude Code an Anthropic base address and auth token, Grok its xAI
-// address or a model at the body's address, Codex OpenAI's base address.
+// address, Codex OpenAI's base address, and agent-host's own loop the body's
+// model address itself, for any key kept here.
 func TestABrainWhoseKeyStaysHereIsGivenItsBodysModelAddress(t *testing.T) {
 	const url, tok = "http://127.0.0.1:4000/model", "ahm-RUN-TOKEN"
 	H := homeName("grok", "agent-1")
@@ -26,8 +27,10 @@ func TestABrainWhoseKeyStaysHereIsGivenItsBodysModelAddress(t *testing.T) {
 		{brainsignin.Anthropic, "claude-code", []string{"ANTHROPIC_BASE_URL=" + url, "ANTHROPIC_AUTH_TOKEN=" + tok}},
 		{brainsignin.XAI, "grok", []string{"XAI_API_KEY=" + tok, "GROK_XAI_API_BASE_URL=" + url + "/v1",
 			envBrainHome + `={"var":"GROK_HOME","name":"` + H + `","legacy":"grok"}`}},
-		{brainsignin.OpenRouter, "grok", []string{envModelKey + "=" + tok,
-			envBrainHome + `={"var":"GROK_HOME","name":"` + H + `","legacy":"grok","model_base_url":"` + url + `/v1"}`}},
+		{brainsignin.OpenRouter, "built-in", []string{envDirectURL + "=" + url, envDirectToken + "=" + tok,
+			envDirectAPI + "=openai"}},
+		{brainsignin.Anthropic, "built-in", []string{envDirectURL + "=" + url, envDirectToken + "=" + tok,
+			envDirectAPI + "=anthropic"}},
 		{brainsignin.OpenAI, "codex", []string{"CODEX_API_KEY=" + tok, "OPENAI_BASE_URL=" + url + "/v1",
 			envBrainHome + `={"var":"CODEX_HOME","name":"` + C + `","legacy":"codex"}`}},
 	} {

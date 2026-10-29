@@ -253,8 +253,6 @@ func (b *Borrowed) envThroughIdentityAgent(harness string) ([]string, error) {
 		// Grok's own models, at the address its xAI API is reached at.
 		return []string{"XAI_API_KEY=" + b.modelToken, "GROK_XAI_API_BASE_URL=" + v1,
 			b.homeEnv(brainHome{Var: "GROK_HOME"})}, nil
-	case harness == brainsignin.HarnessGrok && b.Provider == brainsignin.OpenRouter:
-		return []string{envModelKey + "=" + b.modelToken, b.homeEnv(brainHome{Var: "GROK_HOME", ModelBaseURL: v1})}, nil
 	case harness == brainsignin.HarnessCodex && b.Provider == brainsignin.OpenAI:
 		return []string{"CODEX_API_KEY=" + b.modelToken, "OPENAI_BASE_URL=" + v1,
 			b.homeEnv(brainHome{Var: "CODEX_HOME"})}, nil

@@ -11,7 +11,8 @@ import (
 // The setup printed for a brain run as its own user allows sudo to start
 // only agent-host brain-env around a brain, never the brain itself, never
 // with the right to pass variables on (SETENV), and keeps sudo's input and
-// output logging off for agent-host, whose input holds the sign-in.
+// output logging off for agent-host, whose input holds the sign-in. Its own
+// loop is allowed with no other arguments.
 func TestTheBrainUserSetupKeepsTheSignInOutOfSudo(t *testing.T) {
 	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
 		t.Skip("the setup is printed for macOS and Linux")
@@ -32,6 +33,8 @@ func TestTheBrainUserSetupKeepsTheSignInOutOfSudo(t *testing.T) {
 		"NOPASSWD: /usr/local/bin/agent-host brain-env -- $b *, " +
 			"/usr/local/bin/agent-host brain-env -- /usr/local/bin/agent-host brain-home -- $b *",
 		"sudo visudo -cf /tmp/agent-host.sudoers",
+		// agent-host's own loop, exactly, with nothing more on its line.
+		`NOPASSWD: /usr/local/bin/agent-host brain-env -- /usr/local/bin/agent-host loop"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the setup does not say %q", want)

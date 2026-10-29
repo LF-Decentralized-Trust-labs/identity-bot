@@ -117,6 +117,13 @@ func ServeBrainEnv(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 		fmt.Fprintln(stderr, "agent-host brain-env: the brain's program must be named by its full path")
 		return 2
 	}
+	// The run's variables are read into this process: nothing else running as
+	// this user may read it or trace it. The program it starts is not marked
+	// so; it is its own (agent-host's own loop marks itself).
+	if err := notReadable(); err != nil {
+		fmt.Fprintf(stderr, "agent-host brain-env: this process could not be kept from other processes: %v\n", err)
+		return 1
+	}
 	in := bufio.NewReaderSize(stdin, 64<<10)
 	line, err := readBrainEnvLine(in, brainEnvMax)
 	var h brainEnvHeader

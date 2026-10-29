@@ -2,7 +2,7 @@
 //
 //	agent-host enrol <enrolment string, or - to read it from standard input> [--placement computer|vm|cloud|device]
 //	agent-host status
-//	agent-host run [--brain claude-code|codex|grok] [--brain-path PATH] [--brain-user USER [--brain-dir DIR]] [--workspace DIR]
+//	agent-host run [--brain claude-code|codex|grok|built-in] [--brain-path PATH] [--brain-user USER [--brain-dir DIR]] [--workspace DIR]
 //	               [--screen control|watch|off] [--display :0] [--display-allow-network]
 //	agent-host move <new address of the same Identity Agent>
 //	agent-host call <METHOD> <path> [json body]
@@ -11,6 +11,7 @@
 //	agent-host mcp
 //	agent-host brain-home -- <brain> <args>
 //	agent-host brain-env -- <brain> <args>
+//	agent-host loop
 //	agent-host github-credential get
 //
 // Every command accepts --data-dir; the default is per operating system.
@@ -59,6 +60,11 @@ func main() {
 	if cmd == "brain-env" {
 		os.Exit(agenthost.ServeBrainEnv(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
 	}
+	// Started by the host, as the brain's user, for a turn of agent-host's own
+	// loop: the turn comes on stdin, and its answer goes to stdout.
+	if cmd == "loop" {
+		os.Exit(agenthost.ServeLoop(os.Stdin, os.Stdout, os.Stderr))
+	}
 	// Run by git as its credential helper, during a run lent GitHub access:
 	// the token comes from the brain's environment, never a file.
 	if cmd == "github-credential" {
@@ -68,7 +74,7 @@ func main() {
 	dataDir := fs.String("data-dir", agenthost.DefaultDataDir(), "where this machine's key and state are kept")
 	placement := fs.String("placement", "computer", "where this machine is: computer, vm, cloud or device")
 	wait := fs.Duration("wait", 15*time.Minute, "how long to wait for the owner to approve")
-	brainName := fs.String("brain", "", "the brain to run, instead of the one the AI agent was created with: claude-code, codex or grok")
+	brainName := fs.String("brain", "", "the brain to run, instead of the one the AI agent was created with: claude-code, codex, grok or built-in")
 	brainPath := fs.String("brain-path", "", "the full path of the brain's program")
 	brainUser := fs.String("brain-user", "", "the operating-system user the brain runs as")
 	brainDir := fs.String("brain-dir", "", "with --brain-user and no --brain: the directory holding the brains' programs "+
@@ -280,11 +286,13 @@ One-time setup, as an administrator (each sudo asks for your password):
      system log, so none of them goes through sudo. Codex and Grok keep their sign-in in a file,
      so this program also puts a lent sign-in in place for one run and takes it away after
      (brain-home). sudo's input and output logging stay off for this program, whose input
-     holds the sign-in. The rule is written to a file, checked by visudo, and only then installed, so a
+     holds the sign-in. Its last line lets it start this program's own loop, for an AI agent run by
+     agent-host itself. The rule is written to a file, checked by visudo, and only then installed, so a
      mistake cannot lock sudo:
        BRAINS="/Users/%[1]s/.local/bin/claude $(sudo -u %[1]s -H sh -lc 'command -v codex; command -v grok')"
        { printf '%%s\n' 'Defaults!/usr/local/bin/agent-host !log_input, !log_output'
          for b in $BRAINS; do printf '%%s\n' "%[2]s ALL=(%[1]s) NOPASSWD: /usr/local/bin/agent-host brain-env -- $b *, /usr/local/bin/agent-host brain-env -- /usr/local/bin/agent-host brain-home -- $b *"; done
+         printf '%%s\n' "%[2]s ALL=(%[1]s) NOPASSWD: /usr/local/bin/agent-host brain-env -- /usr/local/bin/agent-host loop"
        } > /tmp/agent-host.sudoers
        sudo visudo -cf /tmp/agent-host.sudoers && sudo install -m 440 /tmp/agent-host.sudoers /etc/sudoers.d/agent-host
 
@@ -313,11 +321,13 @@ One-time setup, as an administrator:
      through this program (brain-env), which takes each turn's tool token, sign-in and GitHub
      access on its input: sudo writes its command line and any variable it passes on to the
      system log, so none of them goes through sudo. sudo's input and output logging stay off
-     for this program, whose input holds the sign-in. The rule is checked by visudo before it is installed, so
-     a mistake cannot lock sudo. BRAINS lists each brain's full path:
+     for this program, whose input holds the sign-in. Its last line lets it start this program's own loop, for
+     an AI agent run by agent-host itself. The rule is checked by visudo before it is installed, so a mistake
+     cannot lock sudo. BRAINS lists each brain's full path:
        BRAINS="/home/%[1]s/.local/bin/claude $(sudo -u %[1]s -H sh -lc 'command -v codex; command -v grok')"
        { printf '%%s\n' 'Defaults!/usr/local/bin/agent-host !log_input, !log_output'
          for b in $BRAINS; do printf '%%s\n' "%[2]s ALL=(%[1]s) NOPASSWD: /usr/local/bin/agent-host brain-env -- $b *, /usr/local/bin/agent-host brain-env -- /usr/local/bin/agent-host brain-home -- $b *"; done
+         printf '%%s\n' "%[2]s ALL=(%[1]s) NOPASSWD: /usr/local/bin/agent-host brain-env -- /usr/local/bin/agent-host loop"
        } > /tmp/agent-host.sudoers
        sudo visudo -cf /tmp/agent-host.sudoers && sudo install -m 440 /tmp/agent-host.sudoers /etc/sudoers.d/agent-host
   5. Install this program where %[1]s can run it (the brain starts it for its tools, and git for the

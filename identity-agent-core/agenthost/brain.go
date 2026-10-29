@@ -137,9 +137,19 @@ func NewSession() string {
 // and the tool token in the brain's environment, which reaches a brain run as
 // its own user without passing through sudo (AsUser).
 func runCLI(ctx context.Context, r Runner, dir string, env []string, stdin string, name string, args ...string) ([]byte, error) {
+	return runCLIStopping(ctx, r, dir, env, stdin, false, name, args...)
+}
+
+// runCLIStopping is runCLI, and when gently is set, a run that is cancelled
+// is first asked to stop, so it can end what it started, before it is killed.
+func runCLIStopping(ctx context.Context, r Runner, dir string, env []string, stdin string, gently bool, name string,
+	args ...string) ([]byte, error) {
 	cmd, err := r.Command(ctx, dir, env, strings.NewReader(stdin), name, args...)
 	if err != nil {
 		return nil, err
+	}
+	if gently {
+		stopGently(cmd)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -434,10 +444,13 @@ func BrainFor(provider string, r Runner) (Brain, error) {
 		return GrokCLI{Runner: r}, nil
 	case brainsignin.HarnessCodex:
 		return Codex{Runner: r}, nil
+	case brainsignin.HarnessBuiltIn:
+		return BuiltIn{Runner: r}, nil
 	}
 	return nil, fmt.Errorf("this host does not run %q as a brain; it runs Claude Code (an Anthropic key, a Claude "+
-		"subscription or a model server that speaks Claude's format), Codex (a ChatGPT plan or an OpenAI key) and "+
-		"Grok (an xAI key or plan, OpenRouter, or a server that speaks OpenAI's format)", provider)
+		"subscription or a model server that speaks Claude's format), Codex (a ChatGPT plan or an OpenAI key), "+
+		"Grok (an xAI key or plan, or a server that speaks OpenAI's format) and its own program (an OpenRouter key, "+
+		"or any API key its Identity Agent keeps)", provider)
 }
 
 // programIn is a brain whose program is the one of its name in dir.

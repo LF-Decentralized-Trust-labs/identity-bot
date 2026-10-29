@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -209,7 +211,8 @@ func anthropicMessages(ms []chatMessage) []map[string]any {
 		switch {
 		case m.Role == "tool":
 			role = "user"
-			blocks = append(blocks, map[string]any{"type": "tool_result", "tool_use_id": m.ToolCallID, "content": m.Content})
+			blocks = append(blocks, map[string]any{"type": "tool_result", "tool_use_id": anthropicID(m.ToolCallID),
+				"content": m.Content})
 		default:
 			if m.Content != "" {
 				blocks = append(blocks, map[string]any{"type": "text", "text": m.Content})
@@ -222,7 +225,8 @@ func anthropicMessages(ms []chatMessage) []map[string]any {
 						input = v
 					}
 				}
-				blocks = append(blocks, map[string]any{"type": "tool_use", "id": tc.ID, "name": tc.Name, "input": input})
+				blocks = append(blocks, map[string]any{"type": "tool_use", "id": anthropicID(tc.ID), "name": tc.Name,
+					"input": input})
 			}
 		}
 		if len(blocks) == 0 {
@@ -235,6 +239,20 @@ func anthropicMessages(ms []chatMessage) []map[string]any {
 		out = append(out, map[string]any{"role": role, "content": blocks})
 	}
 	return out
+}
+
+// anthropicID is a tool call's id as Anthropic takes one: letters, digits,
+// underscores and hyphens. Another provider's ids, from earlier in the
+// conversation, may hold other characters; such an id is replaced by a digest
+// of it, so two ids that differ only in those characters stay apart.
+func anthropicID(id string) string {
+	for _, r := range id {
+		if !(r == '_' || r == '-' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+			sum := sha256.Sum256([]byte(id))
+			return "id_" + hex.EncodeToString(sum[:12])
+		}
+	}
+	return id
 }
 
 // Call makes one model call, and reads its answer whole, as it streams when
@@ -270,8 +288,12 @@ func (c chatClient) Call(ctx context.Context, r chatRequest) (chatAnswer, error)
 	if resp.StatusCode != http.StatusOK {
 		out, _ := io.ReadAll(body)
 		e := &chatError{Status: resp.StatusCode, Why: errorIn(out)}
-		if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && s > 0 {
-			e.RetryAfter = time.Duration(s) * time.Second
+		if v := resp.Header.Get("Retry-After"); v != "" {
+			if s, err := strconv.Atoi(v); err == nil && s > 0 {
+				e.RetryAfter = time.Duration(s) * time.Second
+			} else if at, err := http.ParseTime(v); err == nil && time.Until(at) > 0 {
+				e.RetryAfter = time.Until(at)
+			}
 		}
 		return chatAnswer{}, e
 	}

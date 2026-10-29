@@ -54,6 +54,9 @@ const (
 	HarnessGrok       = "grok"
 	HarnessCodex      = "codex"
 	HarnessGemini     = "gemini"
+	// HarnessBuiltIn is agent-host's own loop (ADR-058), which runs any key
+	// the Identity Agent keeps, with no program from anybody else.
+	HarnessBuiltIn = "built-in"
 )
 
 // DefaultSubscriptionRuns is how many runs may hold one subscription sign-in
@@ -135,16 +138,19 @@ func KindOf(provider string) string {
 }
 
 // Harness is the program that runs an AI agent whose brain is signed in with
-// this provider. Claude Code speaks Anthropic's API, so it runs Anthropic
-// keys, its own subscription and model servers that speak Anthropic's format;
-// Grok's program runs xAI, OpenRouter and any server that speaks OpenAI's
-// format; Codex runs OpenAI.
+// this provider, unless the AI agent names another. Claude Code speaks
+// Anthropic's API, so it runs Anthropic keys, its own subscription and model
+// servers that speak Anthropic's format; Grok's program runs xAI and any
+// server that speaks OpenAI's format; Codex runs OpenAI; and agent-host's own
+// loop runs OpenRouter (ADR-058).
 func Harness(provider string) string {
 	switch NormaliseProvider(provider) {
 	case "", ClaudeCode, Anthropic, Local:
 		return HarnessClaudeCode
-	case Grok, XAI, OpenRouter, OpenAICompatible:
+	case Grok, XAI, OpenAICompatible:
 		return HarnessGrok
+	case OpenRouter, HarnessBuiltIn, "builtin":
+		return HarnessBuiltIn
 	case Codex, OpenAI:
 		return HarnessCodex
 	case Google:
@@ -219,16 +225,23 @@ var ModelCallHeaders = []string{"Content-Type", "Accept", "Anthropic-Version", "
 // that could use the machine.
 const ProgramNone = "none"
 
+// ProgramBuiltIn is agent-host's own loop, named as an AI agent's program: it
+// runs a key the Identity Agent keeps for any provider whose model calls it
+// makes, in place of that provider's own program (ADR-058).
+const ProgramBuiltIn = HarnessBuiltIn
+
 // NormaliseProgram is a brain's program as the record keeps it: empty for the
-// program its provider is run by, or ProgramNone, from the names a screen may
-// send for it. Anything else is returned lower-cased, and refused by
-// ProgramFits.
+// program its provider is run by, ProgramNone or ProgramBuiltIn, from the
+// names a screen may send for it. Anything else is returned lower-cased, and
+// refused by ProgramFits.
 func NormaliseProgram(p string) string {
 	switch n := strings.ToLower(strings.TrimSpace(p)); n {
 	case "", "default", "harness":
 		return ""
 	case ProgramNone, "direct", "model", "answers only", "read and answer":
 		return ProgramNone
+	case ProgramBuiltIn, "builtin", "built in", "agent-host", "own", "its own":
+		return ProgramBuiltIn
 	default:
 		return n
 	}
@@ -248,6 +261,12 @@ func ProgramFits(program, kind, provider string) error {
 		}
 		return fmt.Errorf("an AI agent that only reads and answers needs an API key for Anthropic, OpenAI, xAI or "+
 			"OpenRouter, which its Identity Agent uses for it; %s %s is run by its own program", kind, provider)
+	case ProgramBuiltIn:
+		if (Record{Kind: kind, Provider: provider}).StaysInVault() && provider != Google {
+			return nil
+		}
+		return fmt.Errorf("agent-host's own program needs an API key for Anthropic, OpenAI, xAI or OpenRouter, "+
+			"which its Identity Agent uses for it; %s %s is run by its own program", kind, provider)
 	}
 	return fmt.Errorf("%q is not a program a brain is run by", program)
 }
@@ -352,6 +371,9 @@ type Choice struct {
 	// CanAnswerOnly is a sign-in an AI agent that only reads and answers can
 	// run with, with no program (ProgramNone).
 	CanAnswerOnly bool `json:"can_answer_only"`
+	// CanRunBuiltIn is a sign-in agent-host's own loop can run
+	// (ProgramBuiltIn), whichever program runs it unless the AI agent says.
+	CanRunBuiltIn bool `json:"can_run_built_in"`
 }
 
 // Runnable are the brains a body can run from a sign-in it borrows, and so
@@ -371,6 +393,7 @@ func Runnable() []Choice {
 		out[i].RefreshesItself = RefreshesItself(out[i].Kind, out[i].Provider)
 		out[i].StaysWithIdentityAgent = Record{Kind: out[i].Kind, Provider: out[i].Provider}.StaysInVault()
 		out[i].CanAnswerOnly = ProgramFits(ProgramNone, out[i].Kind, out[i].Provider) == nil
+		out[i].CanRunBuiltIn = ProgramFits(ProgramBuiltIn, out[i].Kind, out[i].Provider) == nil
 	}
 	return out
 }

@@ -126,14 +126,15 @@ type isolatedSameUser struct{ SameUser }
 
 func (isolatedSameUser) Isolated() bool { return true }
 
-// A model at OpenRouter's address is reached through Grok's settings in the
-// run's home, which name the variable holding the key and never the key.
-func TestGrokReachesOpenRouterWithTheKeyOnlyInItsEnvironment(t *testing.T) {
+// A model server that speaks OpenAI's format is reached through Grok's
+// settings in the run's home, which name the variable holding the key and
+// never the key.
+func TestGrokReachesAModelServerWithTheKeyOnlyInItsEnvironment(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	const key = "sk-or-v1-AN-OPENROUTER-KEY"
+	const key = "sk-A-MODEL-SERVER-KEY"
 	path, record := fakeHomeBrain(t, "GROK_HOME", `{"text":"hi","sessionId":"ours","modelUsage":{}}`, false, false)
-	b := Borrowed{Kind: "api_key", Provider: "openrouter", secret: key}
+	b := Borrowed{Kind: "local", Provider: "openai-compatible", Endpoint: "https://vllm.example/v1/", secret: key}
 	env, err := b.Env("grok")
 	if err != nil {
 		t.Fatal(err)
@@ -152,9 +153,9 @@ func TestGrokReachesOpenRouterWithTheKeyOnlyInItsEnvironment(t *testing.T) {
 	if !strings.Contains(rec, "MODELKEY:"+key+"\n") {
 		t.Fatalf("Grok was not given the key:\n%s", rec)
 	}
-	if !strings.Contains(rec, `base_url = "https://openrouter.ai/api/v1"`) || !strings.Contains(rec, `env_key = "`+envModelKey+`"`) ||
+	if !strings.Contains(rec, `base_url = "https://vllm.example/v1"`) || !strings.Contains(rec, `env_key = "`+envModelKey+`"`) ||
 		!strings.Contains(rec, `model = "anthropic/claude-sonnet-4.5"`) || !strings.Contains(rec, "ARG:"+grokModelName+"\n") {
-		t.Fatalf("Grok's settings do not name the model at OpenRouter:\n%s", rec)
+		t.Fatalf("Grok's settings do not name the model at the server:\n%s", rec)
 	}
 	noFileUnder(t, home, key)
 	if out.Text != "hi" {

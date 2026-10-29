@@ -44,7 +44,8 @@ and key:
 |---|---|---|
 | Claude Code, an Anthropic key | `ANTHROPIC_BASE_URL` | `ANTHROPIC_AUTH_TOKEN` |
 | Grok, an xAI key | `GROK_XAI_API_BASE_URL` | `XAI_API_KEY` |
-| Grok, an OpenRouter key | its model settings for the run | the variable those settings name |
+| ~~Grok, an OpenRouter key~~ | ~~its model settings for the run~~ | ~~the variable those settings name~~ |
+| agent-host's own loop, any key kept here (*amended by ADR-058*) | `AGENT_HOST_MODEL_URL` | `AGENT_HOST_MODEL_TOKEN` |
 | Codex, an OpenAI key | its model provider, set on its command line | `CODEX_API_KEY` |
 
 **The body passes each call on.** It sends the call to the Identity Agent sealed
