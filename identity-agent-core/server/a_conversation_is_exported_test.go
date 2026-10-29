@@ -433,7 +433,7 @@ func (w *talkWorld) openSigned(t *testing.T, g ControllerGrant, seed []byte, con
 	}
 	proof := &agentmessage.ControllerProof{
 		Controller: g.ControllerAID, PublicKey: g.PublicKey, SignedString: signed, Signature: sig,
-		Request: body, ControllerGrant: g.CredentialSAID,
+		RequestBytes: body, ControllerGrant: g.CredentialSAID,
 	}
 	ks, _, err := w.s.messagingKeys(identity.AID)
 	if err != nil {

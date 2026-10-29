@@ -218,8 +218,16 @@ type ControllerProof struct {
 	PublicKey    string `json:"public_key"`
 	SignedString string `json:"signed_string"`
 	Signature    string `json:"signature"`
-	// Request is the request body the controller signed.
-	Request json.RawMessage `json:"request"`
+	// RequestBytes is the request body the controller signed, byte for byte.
+	// It is carried as bytes, not as JSON inside the record, because the
+	// signed string commits to a digest of these exact bytes and any JSON
+	// encoder that re-writes the record would re-write a nested value too:
+	// Go's compacts it and escapes < > & as \u003c \u003e \u0026.
+	RequestBytes []byte `json:"request_bytes,omitempty"`
+	// Request is the same body nested as JSON, the form a record took before
+	// RequestBytes existed. It is read so those records still check, never
+	// written: see SignedRequest.
+	Request json.RawMessage `json:"request,omitempty"`
 	// ControllerGrant is the controller's Controller Grant credential: anchored
 	// in the organisation's key log, it names the signer the controller acts as,
 	// so the person behind a message is shown by a credential anybody can check
@@ -238,10 +246,68 @@ func (p ControllerProof) Verify() error {
 	if len(lines) < 2 || lines[1] != p.Controller {
 		return errors.New("the signed request names a different controller")
 	}
-	if lines[len(lines)-1] != iacrypto.Blake3QB64Must(p.Request) {
-		return errors.New("the signed request is not this request")
+	_, err = p.SignedRequest()
+	return err
+}
+
+// SignedRequest is the request body exactly as the controller signed it: the
+// bytes whose digest is the signed string's last line, and so the only bytes
+// anything may read the person's words from.
+//
+// A record written before RequestBytes existed nests the body as JSON, which
+// the Identity Agent's own encoder compacted and HTML-escaped when it
+// countersigned the record. Such a body is taken as it stands, or else with
+// that escaping undone; either is accepted only when its digest is the one the
+// controller signed, so undoing the escaping can recover the signed bytes but
+// can never make other bytes pass for them.
+func (p ControllerProof) SignedRequest() ([]byte, error) {
+	lines := strings.Split(p.SignedString, "\n")
+	signed := lines[len(lines)-1]
+	switch {
+	case len(p.RequestBytes) > 0 && len(p.Request) > 0:
+		return nil, errors.New("the proof carries the request twice")
+	case len(p.RequestBytes) > 0:
+		if iacrypto.Blake3QB64Must(p.RequestBytes) == signed {
+			return p.RequestBytes, nil
+		}
+	case len(p.Request) > 0:
+		for _, b := range [][]byte{p.Request, unescapeHTML(p.Request)} {
+			if iacrypto.Blake3QB64Must(b) == signed {
+				return b, nil
+			}
+		}
 	}
-	return nil
+	return nil, errors.New("the signed request is not this request")
+}
+
+// unescapeHTML undoes the escaping Go's JSON encoder applies by default:
+// \u003c, \u003e, \u0026, \u2028 and \u2029 back to the characters they
+// stand for. Only an escape is undone, never the same six characters after an
+// escaped backslash, which are text.
+func unescapeHTML(b []byte) []byte {
+	repl := map[string]string{`\u003c`: "<", `\u003e`: ">", `\u0026`: "&", `\u2028`: "\u2028", `\u2029`: "\u2029"}
+	out := make([]byte, 0, len(b))
+	for i := 0; i < len(b); i++ {
+		if b[i] != '\\' {
+			out = append(out, b[i])
+			continue
+		}
+		if i+6 <= len(b) {
+			if r, ok := repl[string(b[i:i+6])]; ok {
+				out = append(out, r...)
+				i += 5
+				continue
+			}
+		}
+		// Any other escape is kept whole, so the character after the
+		// backslash is never read as the start of an escape.
+		out = append(out, b[i])
+		if i+1 < len(b) {
+			out = append(out, b[i+1])
+			i++
+		}
+	}
+	return out
 }
 
 // PersonRef is the person a controller acts for, as the Identity Agent
@@ -309,8 +375,12 @@ func (r Record) CheckSenderProof() error {
 		if err := r.ControllerProof.Verify(); err != nil {
 			return err
 		}
+		signed, err := r.ControllerProof.SignedRequest()
+		if err != nil {
+			return err
+		}
 		var req PersonMessage
-		if err := json.Unmarshal(r.ControllerProof.Request, &req); err != nil {
+		if err := json.Unmarshal(signed, &req); err != nil {
 			return errors.New("the signed request is unreadable")
 		}
 		// The person's controller signed the words themselves, so their digest

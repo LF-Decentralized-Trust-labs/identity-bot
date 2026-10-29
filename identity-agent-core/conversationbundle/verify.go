@@ -828,7 +828,9 @@ func (v *verifier) checkPersonSpoke(where string, rec agentmessage.Record, at ti
 	// is one, and the message it answers, which must have been addressed to
 	// them: so a request signed for one place cannot be recorded in another.
 	var req agentmessage.PersonMessage
-	_ = json.Unmarshal(p.Request, &req)
+	if signed, err := p.SignedRequest(); err == nil {
+		_ = json.Unmarshal(signed, &req)
+	}
 	if rec.Seq > 1 && req.Conversation != rec.Conversation {
 		v.fault(where, "the person's signed request does not name this conversation")
 	}

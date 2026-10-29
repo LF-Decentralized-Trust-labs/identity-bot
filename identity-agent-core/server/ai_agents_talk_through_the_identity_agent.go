@@ -143,7 +143,7 @@ func (s *CoreServer) thePersonAsking(r *http.Request) (agentmessage.PersonRef, *
 	}
 	return person, &agentmessage.ControllerProof{
 		Controller: grant.ControllerAID, PublicKey: grant.PublicKey, SignedString: signed,
-		Signature: sig, Request: body, ControllerGrant: grant.CredentialSAID,
+		Signature: sig, RequestBytes: body, ControllerGrant: grant.CredentialSAID,
 	}, nil
 }
 
@@ -353,7 +353,7 @@ func (s *CoreServer) handlePersonSays(w http.ResponseWriter, r *http.Request) {
 	}
 	cc.CallerAID = agentmessage.Person(person.AID)
 	var req agentmessage.PersonMessage
-	if err := json.Unmarshal(proof.Request, &req); err != nil {
+	if err := json.Unmarshal(proof.RequestBytes, &req); err != nil {
 		s.refuseMessage(w, cc, agentmessage.KindAsk, "the message must be JSON", http.StatusBadRequest)
 		return
 	}

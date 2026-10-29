@@ -55,6 +55,32 @@ type MessageVectorSet struct {
 		Hash     string            `json:"hash"`
 	} `json:"conversation"`
 
+	// Person is a person's message: the request a paired app signed, and the
+	// entry the organisation countersigns for it. The request holds characters
+	// a JSON encoder escapes and is laid out with spaces, so a reader that
+	// takes it from anywhere but request_bytes gets other bytes than were
+	// signed.
+	Person struct {
+		// The app's Ed25519 machine key, from a fixed seed.
+		ControllerSeedHex string `json:"controller_seed_hex"`
+		// Request is the JSON the app signed, as text.
+		Request string `json:"request"`
+		// Body is the words; BodyHash in the record is their digest.
+		Body string `json:"body"`
+		// The organisation's messaging keys, from these seeds.
+		CountersignerSeeds vectorseeds.Seeds `json:"countersigner_seeds"`
+		Countersigner      didcomm.DID       `json:"countersigner"`
+		Record             Record            `json:"record"`
+		Envelope           *didcomm.Envelope `json:"envelope"`
+		Hash               string            `json:"hash"`
+		// NestedEnvelope is an entry as written before request_bytes: the
+		// request nested as JSON, compacted and HTML-escaped by the
+		// countersigning encoder. A reader still accepts it, by undoing that
+		// escaping and holding the result to the signed digest.
+		NestedRequest  string            `json:"nested_request"`
+		NestedEnvelope *didcomm.Envelope `json:"nested_envelope"`
+	} `json:"person"`
+
 	// RefusedEntries are countersigned by the right keys and still refused.
 	RefusedEntries []struct {
 		Name     string            `json:"name"`

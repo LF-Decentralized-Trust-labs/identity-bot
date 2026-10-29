@@ -137,14 +137,25 @@
       }
     },
     "controller_proof": {
-      "description": "A person's own statement: the request their controller signed, kept as the exact string signed. Its second line is the controller and its last line the Blake3-256 (CESR) of the bytes of request. The signature is the controller's machine key's, encoded as for a body (see contracts/agent-body).",
+      "description": "A person's own statement: the request their controller signed, kept as the exact string signed. Its second line is the controller and its last line the Blake3-256 (CESR) of the request's bytes, which request_bytes carries. The signature is the controller's machine key's, encoded as for a body (see contracts/agent-body). A proof carries exactly one of request_bytes and request.",
       "type": "object",
       "required": [
         "controller",
         "public_key",
         "signed_string",
-        "signature",
-        "request"
+        "signature"
+      ],
+      "oneOf": [
+        {
+          "required": [
+            "request_bytes"
+          ]
+        },
+        {
+          "required": [
+            "request"
+          ]
+        }
       ],
       "additionalProperties": false,
       "properties": {
@@ -161,8 +172,14 @@
         "signature": {
           "type": "string"
         },
+        "request_bytes": {
+          "description": "The exact bytes of the JSON request the controller signed (a person_message), in standard base64 with padding. The signed string's last line is the Blake3-256 of the decoded bytes. They are carried as a string, not nested as JSON, so a JSON encoder that re-writes the record cannot change them; read the person's words only from these decoded bytes.",
+          "type": "string",
+          "contentEncoding": "base64",
+          "contentMediaType": "application/json"
+        },
         "request": {
-          "description": "The exact bytes of the JSON request the controller signed (a person_message), carried as they were signed. The signed string's last line is the Blake3-256 of these bytes, so nothing may re-encode them: not reorder keys, change whitespace, or escape characters differently. A JSON library that re-serialises this value instead of passing it through will break the proof.",
+          "description": "Read only, never written: the request nested as JSON (a person_message), the form records took before request_bytes. The Identity Agent that wrote such a record compacted it and escaped <, > and & as \\u003c, \\u003e and \\u0026 (and U+2028, U+2029 likewise), so a reader takes its bytes as they stand or with exactly those escapes undone, and accepts whichever has the digest the signed string names; neither is accepted otherwise.",
           "$ref": "#/$defs/person_message"
         },
         "controller_grant": {

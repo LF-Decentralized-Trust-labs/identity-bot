@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"identity-agent-core/agentbody"
 	"identity-agent-core/didcomm"
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/internal/contractcheck"
 	"identity-agent-core/internal/fixedkeys"
 	"identity-agent-core/internal/vectorseeds"
@@ -78,6 +80,22 @@ func TestThePublishedMessageVectorsHold(t *testing.T) {
 		if _, err := Open(&set.Countersigner, r.Envelope); err == nil {
 			t.Fatalf("%s was opened; it must be refused", r.Name)
 		}
+	}
+	p := set.Person
+	if p.Record.ControllerProof == nil || len(p.Record.ControllerProof.RequestBytes) == 0 {
+		t.Fatal("the person's entry carries no request bytes")
+	}
+	for name, env := range map[string]*didcomm.Envelope{"the person's entry": p.Envelope, "the nested entry": p.NestedEnvelope} {
+		rec, err := Open(&p.Countersigner, env)
+		if err != nil {
+			t.Fatalf("%s does not open: %v", name, err)
+		}
+		if err := rec.CheckSenderProof(); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	if rec, _ := Open(&p.Countersigner, p.Envelope); !reflect.DeepEqual(rec, p.Record) {
+		t.Fatalf("the person's entry opens to another record: %+v", rec)
 	}
 }
 
@@ -168,6 +186,10 @@ func fillMessageVectors(set *MessageVectorSet) error {
 		prev = e.Hash
 	}
 
+	if err := fillPersonVector(set); err != nil {
+		return err
+	}
+
 	// Countersigned with the right keys, but the message's id is not the
 	// record's: the countersignature then vouches for a different entry.
 	first := set.Conversation[0].Record
@@ -188,6 +210,58 @@ func fillMessageVectors(set *MessageVectorSet) error {
 		Envelope *didcomm.Envelope `json:"envelope"`
 	}{{Name: "a message id that is not the record's", Envelope: mismatched}}
 	return nil
+}
+
+// fillPersonVector computes the person's entry from its inputs: the app's
+// signature on the request, the record and its countersigned envelope, and
+// the same entry in the nested form records took before request_bytes.
+func fillPersonVector(set *MessageVectorSet) error {
+	p := &set.Person
+	seed, err := hex.DecodeString(p.ControllerSeedHex)
+	if err != nil {
+		return err
+	}
+	app := ed25519Signer{ed25519.NewKeyFromSeed(seed)}
+	sign := func(request string) (ControllerProof, error) {
+		controller, verkey, err := agentbody.Identity(app)
+		if err != nil {
+			return ControllerProof{}, err
+		}
+		signed := strings.Join([]string{"IA-CONTROLLER-REQ-V2", controller, "EORGANISATION",
+			"POST", "/api/conversations", "2026-10-20T11:59:00Z", "", "", "0", iacrypto.Blake3QB64Must([]byte(request))}, "\n")
+		sig, err := agentbody.Sign(app, []byte(signed))
+		return ControllerProof{Controller: controller, PublicKey: verkey, SignedString: signed, Signature: sig}, err
+	}
+	ks, err := fixedkeys.KeySet("EORGANISATION", p.CountersignerSeeds)
+	if err != nil {
+		return err
+	}
+	did, err := ks.DID()
+	if err != nil {
+		return err
+	}
+	p.Countersigner = *did
+	proof, err := sign(p.Request)
+	if err != nil {
+		return err
+	}
+	proof.RequestBytes = []byte(p.Request)
+	p.Record.BodyHash = HashBody([]byte(p.Body))
+	p.Record.ControllerProof = &proof
+	if p.Envelope, err = Countersign(ks, p.Record); err != nil {
+		return err
+	}
+	p.Hash = Hash(p.Envelope)
+
+	nested, err := sign(p.NestedRequest)
+	if err != nil {
+		return err
+	}
+	nested.Request = json.RawMessage(p.NestedRequest)
+	old := p.Record
+	old.ControllerProof = &nested
+	p.NestedEnvelope, err = Countersign(ks, old)
+	return err
 }
 
 // writeMessageVectors writes message-vectors.json from the inputs below. Run
@@ -273,6 +347,19 @@ func writeMessageVectors(t *testing.T) {
 			Statement: &st, GrantSAID: "EGRANT", BodyGrade: agentbody.GradeSoftware, BodyCredential: st.BodyCredential,
 			OpenedBy: Person("EPERSON")}})
 	}
+	set.Person.ControllerSeedHex = run(0x50, 32)
+	set.Person.Request = "{\"to\": \"EAGENT_A\",\n  \"body\": \"Is 2 < 3 && 5 > 4?\", \"nonce\": \"nonce-person-0001\"}"
+	set.Person.Body = "Is 2 < 3 && 5 > 4?"
+	set.Person.NestedRequest = `{"to":"EAGENT_A","body":"Is 2 < 3 && 5 > 4?","nonce":"nonce-person-0002"}`
+	set.Person.CountersignerSeeds = vectorseeds.Seeds{
+		Ed25519:  run(0x60, 32),
+		MLDSA65:  run(0x61, 32),
+		X25519:   run(0x62, 32),
+		MLKEM768: run(0x63, 64),
+	}
+	set.Person.Record = Record{MessageID: "m_person", Conversation: "c_vector", Seq: 1, IATime: "2026-10-20T11:59:01Z",
+		Kind: KindAsk, From: Person("EPERSON"), To: "EAGENT_A",
+		Person: &PersonRef{AID: "EPERSON", Standing: "signer"}, OpenedBy: Person("EPERSON")}
 	if err := fillMessageVectors(&set); err != nil {
 		t.Fatal(err)
 	}
