@@ -563,3 +563,14 @@ func (s *CoreServer) thisIdentityAgentsIdentifier() string {
 	}
 	return identity.AID
 }
+
+// madeByController is the machine that asked for this request, when a
+// controller did, or "" for the owner. Whatever a controller creates keeps
+// working after the controller's grant is revoked or expires, so it is
+// recorded against the controller that made it (ADR-050).
+func madeByController(r *http.Request) string {
+	if g, ok := TheControllerThatAsked(r); ok {
+		return g.ControllerAID
+	}
+	return ""
+}

@@ -8,11 +8,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -89,88 +87,6 @@ func (s *CoreServer) saveMCPTokens(toks []mcpToken) error {
 func hashMCPToken(tok string) string {
 	sum := sha256.Sum256([]byte(tok))
 	return hex.EncodeToString(sum[:])
-}
-
-// hasForwardingHeaders reports whether a request arrived through a tunnel/proxy —
-// in which case a loopback RemoteAddr must NOT be trusted as the local owner.
-//
-// X-IA-Via-Ingress is the relay marker the Identity Agent sets itself on every
-// request it serves from a relay stream (relayproto.AgentSession.Serve), so a
-// relay-forwarded request is never mistaken for the genuinely-local owner. The others are added by the
-// standard proxies/tunnels (Cloudflare, ngrok, an HTTP reverse proxy). Presence
-// of any of these means the request came from outside, so the owner must prove
-// it with a signature rather than being trusted for arriving on loopback.
-func hasForwardingHeaders(r *http.Request) bool {
-	for _, h := range []string{"X-Forwarded-For", "X-Real-Ip", "Cf-Connecting-Ip", "True-Client-Ip", "Forwarded", "X-IA-Via-Ingress"} {
-		if r.Header.Get(h) != "" {
-			return true
-		}
-	}
-	return false
-}
-
-// isBrowserOriginated reports whether this request was issued by a web page
-// rather than by a program running on this machine.
-//
-// A page loaded from anywhere reaches 127.0.0.1 as a loopback connection with
-// no forwarding headers, so by the old test every website in the world was the
-// owner of this Identity Agent. Visiting a page was enough to read the roster, the
-// invitation secrets and the identity.
-//
-// What separates the two is that a browser describes itself and cannot be
-// talked out of it. Origin and the Sec-Fetch-* family are forbidden header
-// names: they are set by the browser, and page script cannot change or remove
-// them. A native client on this machine sends none of them.
-//
-// This does not defend against another program on the machine — that program
-// already has the user's files and does not need the API. The browser is the
-// caller this closes.
-func isBrowserOriginated(r *http.Request) bool {
-	if r.Header.Get("Origin") != "" {
-		return true
-	}
-	// Sec-Fetch-Site is "none" for a request the user typed into the address
-	// bar; anything else is a page acting on its own initiative.
-	if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "none" {
-		return true
-	}
-	if mode := r.Header.Get("Sec-Fetch-Mode"); mode == "cors" || mode == "no-cors" {
-		return true
-	}
-	return r.Header.Get("Sec-Fetch-Dest") != ""
-}
-
-// isLocalConnection reports whether r was made by a program on this computer:
-// a loopback connection, no forwarding headers, and not issued by a web page.
-// That says where the request came from and nothing about who sent it; being
-// the owner also takes the secret the core was started with
-// (CoreServer.isLocalOwnerRequest).
-func isLocalConnection(r *http.Request) bool {
-	host, _, _ := net.SplitHostPort(r.RemoteAddr)
-	return permission.IsLoopbackHost(host) &&
-		!hasForwardingHeaders(r) &&
-		!isBrowserOriginated(r)
-}
-
-// requestCorrelationID propagates the caller's correlation id, or mints one at this
-// origin — minted at the origin request, carried through every hop.
-func requestCorrelationID(r *http.Request) string {
-	if cid := r.Header.Get("X-Correlation-Id"); cid != "" {
-		return cid
-	}
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		return ""
-	}
-	return hex.EncodeToString(b)
-}
-
-// bearerFrom extracts the presented token (Authorization: Bearer ... or X-IA-Token).
-func bearerFrom(r *http.Request) string {
-	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
-		return strings.TrimPrefix(h, "Bearer ")
-	}
-	return r.Header.Get("X-IA-Token")
 }
 
 // handleMintMCPToken mints a token. Scopes are capability ids the
@@ -573,15 +489,4 @@ func (s *CoreServer) agentGrantLapsed(aid string) bool {
 		}
 	}
 	return grantLapsed(newest)
-}
-
-// madeByController is the machine that asked for this request, when a
-// controller did, or "" for the owner. Whatever a controller creates keeps
-// working after the controller's grant is revoked or expires, so it is
-// recorded against the controller that made it (ADR-050).
-func madeByController(r *http.Request) string {
-	if g, ok := TheControllerThatAsked(r); ok {
-		return g.ControllerAID
-	}
-	return ""
 }

@@ -197,9 +197,3 @@ func (s *CoreServer) handleRevokeEmployee(w http.ResponseWriter, r *http.Request
 	}
 	scanWriteJSON(w, emp)
 }
-
-func genInviteToken() string {
-	tb := make([]byte, 16)
-	_, _ = rand.Read(tb)
-	return hex.EncodeToString(tb)
-}

@@ -228,6 +228,8 @@ type CoreServer struct {
 	grantsMu sync.RWMutex
 	// record is the state of the record's anchoring.
 	record recordState
+	// witnessing is the worker that keeps the witnesses up to date.
+	witnessing witnessState
 	// edgesSince is when the first credential naming who authorised it was
 	// issued here; see issuedUnderFirstVersionTooLate.
 	edgesSince atomic.Value

@@ -199,3 +199,34 @@ func (s *CoreServer) withdrawIssued(said string) {
 		}
 	}
 }
+
+// ensureRegistry returns the issuer's TEL registry SAID, incepting one (backerless,
+// anchored in the issuer KEL) on first use and persisting it. One registry per issuer.
+func (s *CoreServer) ensureRegistry(issuerRootAID string) (string, error) {
+	if reg, err := s.DataStore.GetRegistryByIssuer(issuerRootAID); err == nil && reg != nil {
+		if reg.VcpRawB64 != "" {
+			return reg.RegistrySAID, nil
+		}
+		noteRegistryWithoutInception(reg)
+	}
+	if s.KeriDriver == nil {
+		return "", fmt.Errorf("keri driver unavailable")
+	}
+	identity, err := s.DataStore.GetIdentity()
+	if err != nil || identity == nil {
+		return "", fmt.Errorf("no owner identity")
+	}
+	// The inception is checked before it is kept: it has to verify and be the
+	// registry it says it is. It is kept with its anchor in the issuer's key
+	// log, together or not at all, and a registry that cannot be kept is not
+	// used: nothing issued into it could be proved.
+	keptInside := s.engineKeepsCredentialLogs()
+	resp, err := s.KeriDriver.InceptRegistry(issuerRootAID)
+	if err == nil && !keptInside {
+		err = s.keepAfter(issuerRootAID, resp.SequenceNumber, resp.IxnRawBytesB64, resp.VcpJsonB64)
+	}
+	if err != nil {
+		return "", fmt.Errorf("no registry was made: %w", err)
+	}
+	return resp.RegistrySaid, nil
+}

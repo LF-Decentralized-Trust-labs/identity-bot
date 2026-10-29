@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
+	"encoding/hex"
 	"log"
 	"net"
 	"net/http"
@@ -249,4 +251,25 @@ func (t tokenAwareResolver) Resolve(r *http.Request) permission.CallerContext {
 		cc.CallerAID = "local-owner"
 	}
 	return cc
+}
+
+// requestCorrelationID propagates the caller's correlation id, or mints one at this
+// origin — minted at the origin request, carried through every hop.
+func requestCorrelationID(r *http.Request) string {
+	if cid := r.Header.Get("X-Correlation-Id"); cid != "" {
+		return cid
+	}
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(b)
+}
+
+// bearerFrom extracts the presented token (Authorization: Bearer ... or X-IA-Token).
+func bearerFrom(r *http.Request) string {
+	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+		return strings.TrimPrefix(h, "Bearer ")
+	}
+	return r.Header.Get("X-IA-Token")
 }

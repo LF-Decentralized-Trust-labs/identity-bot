@@ -21,17 +21,6 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// capabilityGrantSchemaSAID identifies the AI agent grant schema (see the schema
-// package's asset grants). The owner issues an ACDC of this schema to a
-// provisioned agent; the endpoint verifies it to prove the agent's authority at
-// invoke time.
-var capabilityGrantSchemaSAID = schemas.AIAgentGrant.Schema.SAID
-
-// capabilityGrantSchemaSAIDs are every version of the grant schema still
-// honoured: the current one, and the first, which grants issued before edges
-// carry.
-var capabilityGrantSchemaSAIDs = []string{capabilityGrantSchemaSAID, schemas.AIAgentGrantV1.Schema.SAID}
-
 // Provisioning an AI-agent identity (the IA-mediated model). One
 // local-owner call: mint a delegated agent AID chained to the owner root, bind
 // an MCP token to it, and set the token's capability ceiling. The agent then
@@ -635,37 +624,6 @@ func (s *CoreServer) regrantAgent(id string, by authority, change func(candidate
 	return regranted{before: before, updated: *updated, grantSAID: grantSAID, touched: touched}, 0, nil
 }
 
-// ensureRegistry returns the issuer's TEL registry SAID, incepting one (backerless,
-// anchored in the issuer KEL) on first use and persisting it. One registry per issuer.
-func (s *CoreServer) ensureRegistry(issuerRootAID string) (string, error) {
-	if reg, err := s.DataStore.GetRegistryByIssuer(issuerRootAID); err == nil && reg != nil {
-		if reg.VcpRawB64 != "" {
-			return reg.RegistrySAID, nil
-		}
-		noteRegistryWithoutInception(reg)
-	}
-	if s.KeriDriver == nil {
-		return "", fmt.Errorf("keri driver unavailable")
-	}
-	identity, err := s.DataStore.GetIdentity()
-	if err != nil || identity == nil {
-		return "", fmt.Errorf("no owner identity")
-	}
-	// The inception is checked before it is kept: it has to verify and be the
-	// registry it says it is. It is kept with its anchor in the issuer's key
-	// log, together or not at all, and a registry that cannot be kept is not
-	// used: nothing issued into it could be proved.
-	keptInside := s.engineKeepsCredentialLogs()
-	resp, err := s.KeriDriver.InceptRegistry(issuerRootAID)
-	if err == nil && !keptInside {
-		err = s.keepAfter(issuerRootAID, resp.SequenceNumber, resp.IxnRawBytesB64, resp.VcpJsonB64)
-	}
-	if err != nil {
-		return "", fmt.Errorf("no registry was made: %w", err)
-	}
-	return resp.RegistrySaid, nil
-}
-
 // issueCapabilityGrant issues a capability-grant ACDC from the owner root to the
 // agent's AID, persists the credential and its anchoring KEL event (so a verifier
 // can resolve the issuer KEL), and returns the grant SAID. Requires the KERI
@@ -756,13 +714,6 @@ func lockAgentGrant(assetID string) (unlock func()) {
 	mu := m.(*sync.Mutex)
 	mu.Lock()
 	return mu.Unlock
-}
-
-func nonNilConstraints(c map[string]interface{}) map[string]interface{} {
-	if c == nil {
-		return map[string]interface{}{}
-	}
-	return c
 }
 
 // agentHasIssuedGrant reports whether an AI agent holds a grant already

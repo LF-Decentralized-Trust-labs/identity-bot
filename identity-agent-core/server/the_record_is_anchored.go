@@ -27,7 +27,6 @@ import (
 	"identity-agent-core/permission"
 	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
-	"identity-agent-core/witness"
 )
 
 // The record is anchored in a key log.
@@ -101,26 +100,12 @@ type recordState struct {
 	// steps, or an entry stamped before it is committed, cannot hide one.
 	anchoredSeq map[string]int
 
-	// One witnessing worker at a time: a request while it runs is coalesced
-	// into one more pass, which reads the key logs as they are then, so the
-	// newest anchoring is always sent and never overtaken by an older one.
-	witnessOnce sync.Once
-	witnessKick chan struct{}
-	witnessMu   sync.Mutex
-	witnessJob  witnessJob
-
 	// coverAsked is whether this run has asked the identity's witnesses to
 	// witness the record identity, by consent; declined, the ones that would
 	// not and why.
 	coverAsked atomic.Bool
 	declinedMu sync.Mutex
 	declined   map[string]string
-}
-
-type witnessJob struct {
-	owner, record string
-	witnesses     []string
-	toad          int
 }
 
 // recordIdentityRecord is where the record identity's keys come from, and the
@@ -420,75 +405,6 @@ func (s *CoreServer) recordIdentity() (recordIdentityRecord, []byte, error) {
 	return rec, seed, nil
 }
 
-// witnessRecord brings the record identity's witnesses up to date: first with
-// this identity's own key log, so they hold its approval of the record
-// identity, in order, then with the record identity's. A witness that holds
-// the approval witnesses the record identity from its inception. Nothing to
-// do where it names none.
-func (s *CoreServer) witnessRecord(ownerAID, recordAID string, witnesses []string, toad int) {
-	if len(witnesses) == 0 || s.WitnessService == nil {
-		return
-	}
-	s.record.witnessMu.Lock()
-	job := witnessJob{owner: ownerAID, record: recordAID, witnesses: witnesses, toad: toad}
-	// A request for the identity's own log alone does not drop a record
-	// identity a pass is already due to send.
-	if job.record == "" {
-		job.record = s.record.witnessJob.record
-	}
-	s.record.witnessJob = job
-	s.record.witnessMu.Unlock()
-	s.record.witnessOnce.Do(func() {
-		s.record.witnessKick = make(chan struct{}, 1)
-		s.anchorStopMu.Lock()
-		stop := s.anchorStop
-		s.anchorStopMu.Unlock()
-		s.inBackground(func(ctx context.Context) { s.keepWitnessing(ctx, stop) })
-	})
-	select {
-	case s.record.witnessKick <- struct{}{}:
-	default: // a pass is already due, and will read the newest
-	}
-}
-
-// keepWitnessing runs one witnessing pass per request, one at a time.
-func (s *CoreServer) keepWitnessing(running context.Context, stop <-chan struct{}) {
-	for {
-		// stop is nil when the worker was started after the anchoring loop
-		// stopped, and a nil channel never closes, so it also ends with the
-		// server's background work.
-		select {
-		case <-stop:
-			return
-		case <-running.Done():
-			return
-		case <-s.record.witnessKick:
-		}
-		s.record.witnessMu.Lock()
-		job := s.record.witnessJob
-		s.record.witnessMu.Unlock()
-		ctx, cancel := context.WithTimeout(running, time.Minute)
-		s.WitnessService.BringUpToDate(ctx, job.owner, s.signedEventsOf(job.owner), job.witnesses, job.toad)
-		if job.record != "" {
-			s.WitnessService.BringUpToDate(ctx, job.record, s.signedEventsOf(job.record), job.witnesses, job.toad)
-		}
-		cancel()
-	}
-}
-
-// signedEventsOf is an identity's key log as published and signed.
-func (s *CoreServer) signedEventsOf(aid string) []witness.SignedEvent {
-	events, err := s.DataStore.GetEvents(aid)
-	if err != nil {
-		return nil
-	}
-	out := make([]witness.SignedEvent, 0, len(events))
-	for _, ev := range events {
-		out = append(out, witness.SignedEvent{RawBytesB64: ev.RawBytesB64, CesrSignature: ev.CesrSignature})
-	}
-	return out
-}
-
 // delegationRecords are the stored forms of a delegation: the delegator's
 // approval, signed by this identity, and the delegated inception, signed by its
 // own key.
@@ -716,33 +632,6 @@ func anchorTick() time.Duration {
 		return half
 	}
 	return anchorInterval
-}
-
-// keepAnchoring anchors the record every anchorTick until stop closes.
-func (s *CoreServer) keepAnchoring(stop <-chan struct{}) {
-	t := time.NewTicker(anchorTick())
-	defer t.Stop()
-	for {
-		select {
-		case <-stop:
-			return
-		case <-t.C:
-			s.tick()
-		}
-	}
-}
-
-// tick is what runs every anchorTick.
-func (s *CoreServer) tick() {
-	if _, err := s.anchorRecord(); err != nil && !errors.Is(err, errKeyElsewhere) {
-		log.Printf("[record] anchoring: %v", err)
-	}
-	// What the device that holds the key signed and is not here yet.
-	if _, err := s.adoptWhatTheDeviceSigned(nil); err != nil {
-		log.Printf("[grants] %v", err)
-	}
-	s.askAgainForWithdrawals()
-	s.witnessOwnLog()
 }
 
 // anchorCheck is what the anchors show about the record.
@@ -1081,22 +970,4 @@ func (s *CoreServer) witnessesDeclining() map[string]string {
 		out[k] = v
 	}
 	return out
-}
-
-// witnessOwnLog brings the identity's witnesses up to date with its own key
-// log: every Identity Agent, whether or not it anchors a record, after it
-// appends to its log and on every tick, so no witness is left with a gap it
-// would have to hold the next event back for.
-func (s *CoreServer) witnessOwnLog() {
-	keeper, ok := s.KeriDriver.(drivers.KELKeeper)
-	if !ok || s.DataStore == nil {
-		return
-	}
-	owner, err := s.DataStore.GetIdentity()
-	if err != nil || owner == nil {
-		return
-	}
-	if witnesses, toad, err := keeper.WitnessConfig(owner.AID); err == nil && len(witnesses) > 0 {
-		s.witnessRecord(owner.AID, "", witnesses, toad)
-	}
 }

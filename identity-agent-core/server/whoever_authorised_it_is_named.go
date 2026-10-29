@@ -650,3 +650,10 @@ func (s *CoreServer) isActiveSigner(aid string) bool {
 	}
 	return false
 }
+
+func nonNilConstraints(c map[string]interface{}) map[string]interface{} {
+	if c == nil {
+		return map[string]interface{}{}
+	}
+	return c
+}

@@ -314,11 +314,6 @@ func (s *CoreServer) handleLLMModels(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func writeJSON(w http.ResponseWriter, v interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(v)
-}
-
 // ── Conversation capture ──────────────────────────────────────────────────────
 
 // captureConversation extracts the new user message and the assistant response

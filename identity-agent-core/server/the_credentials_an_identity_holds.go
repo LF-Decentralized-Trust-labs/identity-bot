@@ -4,6 +4,7 @@ import (
 	"sort"
 	"time"
 
+	"identity-agent-core/schemas"
 	"identity-agent-core/store"
 )
 
@@ -70,3 +71,14 @@ func issuedAt(c store.CredentialRecord) time.Time {
 	}
 	return t
 }
+
+// capabilityGrantSchemaSAID identifies the AI agent grant schema (see the schema
+// package's asset grants). The owner issues an ACDC of this schema to a
+// provisioned agent; the endpoint verifies it to prove the agent's authority at
+// invoke time.
+var capabilityGrantSchemaSAID = schemas.AIAgentGrant.Schema.SAID
+
+// capabilityGrantSchemaSAIDs are every version of the grant schema still
+// honoured: the current one, and the first, which grants issued before edges
+// carry.
+var capabilityGrantSchemaSAIDs = []string{capabilityGrantSchemaSAID, schemas.AIAgentGrantV1.Schema.SAID}
