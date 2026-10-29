@@ -89,6 +89,21 @@ Identity Agent countersigns. The grant names the signer, and is anchored in the
 organisation's key log, so who opened a conversation is shown by a credential anybody can
 check.
 
+*Amended 2026-10-29.* The controller's signed request is kept as the exact bytes the
+controller signed (`request_bytes`, standard base64 with padding), not as JSON nested in
+the record. The controller signs a digest of those bytes, and the encoder that writes the
+record re-wrote a nested request: it compacted the JSON and escaped `<`, `>` and `&`. A
+person's message holding any of them, or sent as JSON with spaces, then failed its own
+check. A record written in the nested form is still read: its request is taken as it
+stands, or with exactly that escaping undone (`\u003c`, `\u003e`, `\u0026`, `\u2028` and
+`\u2029`, lowercase as the encoder writes them, back to their characters, never where the
+backslash is itself escaped), and accepted only when its digest is the one the controller
+signed, so nothing but the signed bytes can pass. Escapes the app wrote itself are kept by
+the encoder and so survive. A nested request sent as compact JSON, as Dart's `jsonEncode`
+writes it, is recovered this way. One sent with spaces is not, because the encoder removed
+them, and nor is one that held both one of those five characters and the app's own
+lowercase escape for one of them; such a record stays unverifiable.
+
 **Every message is signed twice, for two different claims:**
 1. **The sender's own statement.** A body signs it with its machine key over a
    fixed, line-separated string. The string covers the conversation, the kind of

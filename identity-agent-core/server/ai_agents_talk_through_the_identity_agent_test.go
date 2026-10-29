@@ -113,8 +113,15 @@ func (w *talkWorld) personSays(t *testing.T, a *asset.Asset, conv, text string) 
 	body, _ := json.Marshal(agentmessage.PersonMessage{
 		Conversation: conv, To: a.PairwiseAID, Body: text, Nonce: conversation.NewID("n_"),
 	})
+	return w.personSends(t, a, string(body))
+}
+
+// personSends is the person's app sending this exact request body, signed as
+// the app signs it.
+func (w *talkWorld) personSends(t *testing.T, a *asset.Asset, body string) (int, map[string]any) {
+	t.Helper()
 	path := "/api/mcp/agents/" + a.ID + "/conversations"
-	req := asThatMachineTo(t, w.s.thisIdentityAgentsIdentifier(), w.ctlAID, "POST", path, string(body), w.ctlSeed, "", time.Time{})
+	req := asThatMachineTo(t, w.s.thisIdentityAgentsIdentifier(), w.ctlAID, "POST", path, body, w.ctlSeed, "", time.Time{})
 	rec := httptest.NewRecorder()
 	w.s.router.ServeHTTP(rec, req)
 	var out map[string]any

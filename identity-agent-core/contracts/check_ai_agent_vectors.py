@@ -219,7 +219,137 @@ def check_message(v):
         jwm = dict(jwm_of(r["envelope"]))
         if jwm["id"] == dict_deep(jwm["body"])["message_id"]:
             fail(r["name"] + " is not refused by the prose's rules")
-    return len(v["statements"]) + len(v["conversation"])
+    return len(v["statements"]) + len(v["conversation"]) + check_person(v["person"])
+
+
+def check_controller_proof(where, proof, request, rec):
+    """A controller_proof's request bytes are the ones whose digest the signed
+    string's last line names, its second line is the controller, and the
+    person_message they hold says what the record says."""
+    signed = proof["signed_string"].split("\n")
+    same(where + " controller", signed[1], proof["controller"])
+    same(where + " request digest", digest(request), signed[-1])
+    msg = json.loads(request)
+    same(where + " to", msg["to"], rec["to"])
+    same(where + " body_hash", digest(msg["body"].encode()), rec["body_hash"])
+    same(where + " in_reply_to", msg.get("in_reply_to", ""), rec.get("in_reply_to", ""))
+    if msg.get("conversation") and msg["conversation"] != rec["conversation"]:
+        fail(where + " names another conversation than the record")
+
+
+def check_person(p):
+    rec, env = p["record"], p["envelope"]
+    proof = rec["controller_proof"]
+    if "request" in proof or "request_bytes" not in proof:
+        fail("person entry: a proof is written with request_bytes, and only that")
+    request = base64.b64decode(proof["request_bytes"])
+    same("person request_bytes", request, p["request"].encode())
+    same("person body_hash", digest(p["body"].encode()), rec["body_hash"])
+    check_controller_proof("person", proof, request, rec)
+    pairs = jwm_of(env)
+    same("person field order", [k for k, _ in pairs], ["id", "type", "from", "to", "created_time", "expires_time", "body"])
+    jwm = dict(pairs)
+    same("person from", jwm["from"], "did:keri:" + p["countersigner"]["aid"])
+    same("person to", jwm["to"], ["did:keri:" + rec["to"]])
+    same("person body", json.loads(json.dumps(dict_deep(jwm["body"]))), rec)
+    same("person hash", digest(lines(env["plaintext"], env["ed_sig"], env["mldsa_sig"]).encode()), p["hash"])
+
+    # The older form: the request nested as JSON. Read as the prose says: its
+    # bytes as they stand in the record, or with the five escapes undone, and
+    # whichever has the digest the signed string names.
+    jwm_raw = unb64url(p["nested_envelope"]["plaintext"])
+    body_raw = json.loads(jwm_raw)["body"]
+    if isinstance(body_raw, str):
+        body_raw = base64.b64decode(body_raw)
+    else:
+        body_raw = raw_value(jwm_raw, ["body"])
+    nested_raw = raw_value(body_raw, ["controller_proof", "request"])
+    nested = json.loads(body_raw)
+    signed_digest = nested["controller_proof"]["signed_string"].split("\n")[-1]
+    found = [c for c in (nested_raw, unescape_html(nested_raw)) if digest(c) == signed_digest]
+    if not found:
+        fail("nested entry: neither the request nor it with the escapes undone has the signed digest")
+    else:
+        same("nested request, as signed", found[0], p["nested_request"].encode())
+        check_controller_proof("nested", nested["controller_proof"], found[0], nested)
+    return 2
+
+
+ESCAPES = {b"\\u003c": "<".encode(), b"\\u003e": ">".encode(), b"\\u0026": "&".encode(),
+           b"\\u2028": "\u2028".encode(), b"\\u2029": "\u2029".encode()}
+
+
+def unescape_html(b):
+    """The five escapes the prose names, lowercase as the countersigning
+    encoder writes them, back to their characters; any other escape, an
+    escaped backslash or one the app wrote itself included, is kept whole.
+    The Go reader is unescapeHTML in agentmessage/agentmessage.go."""
+    out, i = bytearray(), 0
+    while i < len(b):
+        if b[i:i + 1] != b"\\":
+            out += b[i:i + 1]
+            i += 1
+        elif b[i:i + 6] in ESCAPES:
+            out += ESCAPES[b[i:i + 6]]
+            i += 6
+        else:
+            out += b[i:i + 2]
+            i += 2
+    return bytes(out)
+
+
+def raw_value(doc, path):
+    """The exact bytes of the value at path (object keys) in a JSON document,
+    found by scanning it rather than by parsing and re-writing it."""
+    def skip_ws(i):
+        while doc[i:i + 1] in (b" ", b"\t", b"\n", b"\r"):
+            i += 1
+        return i
+
+    def end_of(i):
+        c = doc[i:i + 1]
+        if c == b'"':
+            i += 1
+            while doc[i:i + 1] != b'"':
+                i += 2 if doc[i:i + 1] == b"\\" else 1
+            return i + 1
+        if c in (b"{", b"["):
+            depth = 0
+            while True:
+                c = doc[i:i + 1]
+                if c == b'"':
+                    i = end_of(i)
+                    continue
+                if c in (b"{", b"["):
+                    depth += 1
+                elif c in (b"}", b"]"):
+                    depth -= 1
+                    if depth == 0:
+                        return i + 1
+                i += 1
+        while doc[i:i + 1] not in (b",", b"}", b"]", b" ", b"\n", b"\r", b"\t"):
+            i += 1
+        return i
+
+    start = skip_ws(0)
+    for key in path:
+        if doc[start:start + 1] != b"{":
+            return b""
+        i = skip_ws(start + 1)
+        while doc[i:i + 1] == b'"':
+            k_end = end_of(i)
+            k = json.loads(doc[i:k_end])
+            i = skip_ws(skip_ws(k_end) + 1)
+            v_end = end_of(i)
+            if k == key:
+                start = i
+                break
+            i = skip_ws(v_end)
+            if doc[i:i + 1] == b",":
+                i = skip_ws(i + 1)
+        else:
+            return b""
+    return doc[start:end_of(start)]
 
 
 def dict_deep(x):
