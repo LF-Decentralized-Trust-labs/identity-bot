@@ -57,10 +57,20 @@ Agent makes the call only when:
 
 It also makes only the calls a model key is for: the provider's model calls, its list
 of models, and one model by name. Grok's program also asks xAI what its key is, which
-is answered too, unless the answer carries the key. The path must be plain — nothing
-escaped, no query or fragment, nothing that cleaning it would change — so what is
-checked is what is sent. Nothing else the key could do is passed on. One run may
-have at most eight calls under way at once.
+is answered too. The path must be plain and short — nothing escaped, no fragment,
+nothing that cleaning it would change — so what is checked is what is sent. A query
+may carry only the parameters a model call uses: `beta=true`, as Claude Code sends,
+and the paging of a list of models. Nothing else the key could do is passed on.
+
+One machine may hold at most eight calls here for its AI agent, whichever leases they
+cite: a call counts from when it starts until its whole answer is collected or it is
+swept away. What every answer holds before it is collected is bounded across all
+calls, and a call that would pass the bound is stopped.
+
+**The key never travels back.** A provider can quote what it was sent, in an error
+above all. Every answer is read for the key as it arrives, holding back the last few
+bytes until more comes so a key split across two parts is still seen whole, and a call
+whose answer carries the key is stopped before any of it is passed on.
 
 The Identity Agent adds the key in the provider's own header. It sends the call the
 way it sends its own model calls, with the same policy check, the owner's blocks on
@@ -74,7 +84,8 @@ sealed request is answered whole, so the Identity Agent runs the call in the
 background. The body collects what has arrived, at most 2 MB at a time, each
 collection waiting up to twenty seconds for more, and writes it straight on to the
 brain. While a call is under way, the Identity Agent checks every fifteen seconds,
-whether or not the body is collecting, that the run may still make it. When it may
+whether or not the body is collecting, that the run may still make it, asking afresh
+each time what the AI agent may do. When it may
 not, it stops the call, and with it the provider's answer and what that costs. A
 call nobody collects for ninety seconds is stopped the same way. No call runs longer
 than thirty minutes.
@@ -91,7 +102,9 @@ does for any failed call.
 **Each call is recorded** in the signed governance record, as the AI agent, naming
 the body: the call, the model, the provider's answer, how long it took, and the
 tokens and cost where the provider reports them. A call refused, and an answer
-stopped under way, are recorded with why. The key is never in the record.
+stopped under way, are recorded with why. The key is never in the record. What a body
+sends is recorded only as one short printable line, and at most twenty of one body's
+refusals are recorded a minute, so a body cannot fill or forge the record.
 
 **A body from before this cannot run such a brain.** A body says, when it borrows,
 that it makes its brain's model calls through the Identity Agent. One that does not
@@ -99,8 +112,9 @@ say so is refused and told to update. It is never lent the key.
 
 **An AI agent may run with no program.** Its brain's program is "none": it only
 reads and answers. Its body calls the model itself, through the same address and so
-through the Identity Agent. It has no tools and no use of the machine, is lent no
-GitHub access, and its words are its answer. The conversation so far is kept in its
+through the Identity Agent. It has no tools and no use of the machine, and its words
+are its answer. The Identity Agent holds it to that as well as its body: it lends it
+no GitHub access, and refuses its asking another AI agent. The conversation so far is kept in its
 workspace, one file per session and at most 1 MB, the oldest turns let go first, so
 the next turn carries on from it. A turn whose conversation cannot be read or kept
 fails rather than carrying on without it. Only a key kept here can run this way: a

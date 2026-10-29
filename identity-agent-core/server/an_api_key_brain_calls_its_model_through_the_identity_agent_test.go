@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"identity-agent-core/agenthost"
+	"identity-agent-core/agentmessage"
 	"identity-agent-core/brainsignin"
 )
 
@@ -531,9 +532,9 @@ func TestOnlyAKeyKeptHereRunsWithNoProgram(t *testing.T) {
 // wait only a moment, for the length of a test.
 func quickRecheck(t *testing.T) {
 	t.Helper()
-	was, wait := modelCallRecheck, modelCallWait
+	was, wait, idle := modelCallRecheck, modelCallWait, modelCallIdle
 	modelCallRecheck, modelCallWait = 50*time.Millisecond, 2*time.Second
-	t.Cleanup(func() { modelCallRecheck, modelCallWait = was, wait })
+	t.Cleanup(func() { modelCallRecheck, modelCallWait, modelCallIdle = was, wait, idle })
 }
 
 // startModelCallWith is startModelCall with the headers and body a body sends.
@@ -605,7 +606,7 @@ func TestTheIdentityAgentChecksEveryCallItIsSent(t *testing.T) {
 	}
 	px.keyAnswer = `{"name":"k","api_key":"` + theOrganisationsKey + `"}`
 	code, a = startModelCallWith(t, wx.hostA, heldX.LeaseID, "GET", "/v1/api-key", nil, nil)
-	if got := collectAll(t, wx.hostA, a); strings.Contains(got, theOrganisationsKey) || a["status"] != nil {
+	if got := collectAll(t, wx.hostA, a); strings.Contains(got, theOrganisationsKey) {
 		t.Fatalf("an answer carrying the key was passed on: %d %q %v", code, got, a)
 	}
 }
@@ -655,9 +656,11 @@ func TestTheLargestModelCallTravelsSealed(t *testing.T) {
 	}
 }
 
-// One run may have only so many calls under way at once, and a run whose
-// lease lapsed and was taken again carries on the call it was making.
-func TestARunsCallsAreBoundedAndOutliveARenewedLease(t *testing.T) {
+// One body may hold only so many calls at once for its AI agent, whichever
+// leases they cite and whether or not they have finished, until their answers
+// are collected or swept; and a run whose lease lapsed and was taken again
+// carries on the call it was making.
+func TestABodysCallsAreBoundedAndOutliveARenewedLease(t *testing.T) {
 	quickRecheck(t)
 	w, p := keyWorld(t)
 	hold := make(chan struct{})
@@ -668,8 +671,12 @@ func TestARunsCallsAreBoundedAndOutliveARenewedLease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	second, err := w.hostA.Borrow(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var first map[string]any
-	for i := 0; i < modelCallsPerLease; i++ {
+	for i := 0; i < modelCallsPerBody; i++ {
 		code, a := startModelCall(t, w.hostA, held.LeaseID, "/v1/messages")
 		if code != http.StatusOK {
 			t.Fatalf("call %d: %d %v", i, code, a)
@@ -678,21 +685,18 @@ func TestARunsCallsAreBoundedAndOutliveARenewedLease(t *testing.T) {
 			first = a
 		}
 	}
-	if code, a := startModelCall(t, w.hostA, held.LeaseID, "/v1/messages"); code != http.StatusTooManyRequests {
-		t.Fatalf("a call past the limit: %d %v", code, a)
+	// Another lease of the same body's is no way round the bound.
+	if code, a := startModelCall(t, w.hostA, second.LeaseID, "/v1/messages"); code != http.StatusTooManyRequests {
+		t.Fatalf("a call past the bound, under a second lease: %d %v", code, a)
 	}
 	// The run takes another lease and the first ends, as when its lease
 	// lapsed; the call carries on under the new one.
-	again, err := w.hostA.Borrow(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if err := w.hostA.Return(ctx, held); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(4 * modelCallRecheck)
 	code, out, err := w.hostA.CallContext(ctx, "GET", fmt.Sprintf("/api/agent-host/model-calls/%s?from=%d&head=1&lease=%s",
-		first["call_id"], int64(first["next"].(float64)), again.LeaseID), nil)
+		first["call_id"], int64(first["next"].(float64)), second.LeaseID), nil)
 	if err != nil || code != http.StatusOK {
 		t.Fatalf("collecting under the new lease: %d %s %v", code, out, err)
 	}
@@ -701,6 +705,271 @@ func TestARunsCallsAreBoundedAndOutliveARenewedLease(t *testing.T) {
 		first["call_id"], int64(first["next"].(float64))), nil)
 	if code != http.StatusForbidden {
 		t.Fatalf("collecting under a lease it does not hold: %d", code)
+	}
+}
+
+// Answers finished but never collected still count against a body's bound,
+// and are swept on a timer, not only when the body next asks.
+func TestUncollectedAnswersCountUntilTheyAreSwept(t *testing.T) {
+	quickRecheck(t)
+	w, p := keyWorld(t)
+	hold := make(chan struct{})
+	p.hold = hold
+	ctx := context.Background()
+	held, err := w.hostA.Borrow(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < modelCallsPerBody; i++ {
+		// Started, and its first part collected; then nothing collects the
+		// rest once the provider finishes.
+		if code, a := startModelCallWith(t, w.hostA, held.LeaseID, "POST", "/v1/messages",
+			map[string]string{"Content-Type": "application/json"}, []byte(`{"model":"m","stream":true}`)); code != http.StatusOK {
+			t.Fatalf("call %d: %d %v", i, code, a)
+		}
+	}
+	close(hold)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		n := 0
+		w.s.modelCalls.mu.Lock()
+		for _, c := range w.s.modelCalls.calls {
+			c.mu.Lock()
+			if c.done {
+				n++
+			}
+			c.mu.Unlock()
+		}
+		total := len(w.s.modelCalls.calls)
+		w.s.modelCalls.mu.Unlock()
+		if total != modelCallsPerBody {
+			t.Fatalf("%d calls kept, not %d", total, modelCallsPerBody)
+		}
+		if n == total {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the answers never finished")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if code, a := startModelCall(t, w.hostA, held.LeaseID, "/v1/messages"); code != http.StatusTooManyRequests {
+		t.Fatalf("finished, uncollected answers did not count: %d %v", code, a)
+	}
+	modelCallIdle = 100 * time.Millisecond
+	deadline = time.Now().Add(5 * time.Second)
+	for {
+		w.s.modelCalls.mu.Lock()
+		left := len(w.s.modelCalls.calls)
+		w.s.modelCalls.mu.Unlock()
+		if left == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d uncollected answers were never swept", left)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if b := w.s.modelCalls.buffered.Load(); b != 0 {
+		t.Fatalf("%d bytes still counted as held after every call was swept", b)
+	}
+}
+
+// What every answer holds here is bounded across all calls: a call whose
+// answer would pass the bound is stopped.
+func TestWhatAllAnswersHoldIsBounded(t *testing.T) {
+	var tb modelCallTable
+	c := &modelCall{id: "a", host: "h", agent: "x", changed: make(chan struct{})}
+	if !tb.add(c) {
+		t.Fatal("not kept")
+	}
+	tb.buffered.Store(modelCallsBuffered - 10)
+	if c.add(make([]byte, 5)) != true {
+		t.Fatal("an answer within the bound was stopped")
+	}
+	if c.add(make([]byte, 10)) {
+		t.Fatal("an answer past the bound across all calls was kept going")
+	}
+	tb.remove("a")
+	if got := tb.buffered.Load(); got != modelCallsBuffered-10 {
+		t.Fatalf("forgetting a call let go of %d bytes, not what it held", modelCallsBuffered+5-got)
+	}
+}
+
+// The key is never passed on in an answer, however the provider sends it:
+// in an error the provider quotes it in, or split across the parts of an
+// answer.
+func TestTheKeyIsNeverPassedOnInAnAnswer(t *testing.T) {
+	w, _ := keyWorld(t)
+	echo := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		rw.Header().Set("Content-Type", "application/json")
+		rw.WriteHeader(http.StatusBadRequest)
+		f := rw.(http.Flusher)
+		// Quoted, and split across two writes.
+		k := r.Header.Get("x-api-key")
+		_, _ = io.WriteString(rw, `{"type":"error","error":{"message":"bad request for key `+k[:10])
+		f.Flush()
+		time.Sleep(20 * time.Millisecond)
+		_, _ = io.WriteString(rw, k[10:]+`"}}`)
+	}))
+	t.Cleanup(echo.Close)
+	w.s.brainChecker.Anthropic = echo.URL
+	ctx := context.Background()
+	held, err := w.hostA.Borrow(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, a := startModelCall(t, w.hostA, held.LeaseID, "/v1/messages")
+	if code != http.StatusOK {
+		t.Fatalf("a call: %d %v", code, a)
+	}
+	got := collectAll(t, w.hostA, a)
+	if strings.Contains(got, theOrganisationsKey) || strings.Contains(got, theOrganisationsKey[:10]) {
+		t.Fatalf("the brain was given the key, or part of it: %q", got)
+	}
+	for _, c := range []struct {
+		key   string
+		parts []string
+	}{
+		{"SECRET", []string{"abcSEC", "RETdef"}},
+		{"SECRET", []string{"S", "E", "C", "R", "E", "T"}},
+		{"SECRET", []string{"no key here", " at all"}},
+	} {
+		k := keyWatch{key: []byte(c.key)}
+		var passed strings.Builder
+		var failed bool
+		for _, p := range c.parts {
+			out, err := k.next([]byte(p))
+			if err != nil {
+				failed = true
+				break
+			}
+			passed.Write(out)
+		}
+		if !failed {
+			passed.Write(k.rest())
+		}
+		if strings.Contains(passed.String(), "SEC") && strings.Contains(strings.Join(c.parts, ""), c.key) {
+			t.Fatalf("%q: passed on %q", c.parts, passed.String())
+		}
+		if !strings.Contains(strings.Join(c.parts, ""), c.key) && passed.String() != strings.Join(c.parts, "") {
+			t.Fatalf("%q: an answer with no key was changed: %q", c.parts, passed.String())
+		}
+	}
+}
+
+// What a body sends cannot fill or forge the record: a long path is refused,
+// a model's name is kept to one short line, a query carries only what a model
+// call may, and refusals are recorded at most so many a minute.
+func TestWhatABodySendsCannotFillOrForgeTheRecord(t *testing.T) {
+	w, p := keyWorld(t)
+	ctx := context.Background()
+	held, err := w.hostA.Borrow(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := startModelCallWith(t, w.hostA, held.LeaseID, "GET", "/v1/models/"+strings.Repeat("a", 400), nil, nil); code != http.StatusForbidden {
+		t.Fatalf("a long path: %d", code)
+	}
+	// A call whose answer names no model is recorded under the model it asked
+	// for, which is the body's to say.
+	code, a := startModelCallWith(t, w.hostA, held.LeaseID, "POST", "/v1/messages/count_tokens",
+		map[string]string{"Content-Type": "application/json"},
+		[]byte(`{"model":"m\n2026/10/28 [lent] agent.model.call forged`+strings.Repeat("x", 500)+`"}`))
+	if code != http.StatusOK {
+		t.Fatalf("a call: %d %v", code, a)
+	}
+	collectAll(t, w.hostA, a)
+	for _, r := range governanceRows(t, w, "agent.model.call") {
+		if said := fmt.Sprintf("%+v", r); strings.Contains(said, "\n") || len(said) > 4000 {
+			t.Fatalf("the record carries what the body sent as it was: %.300q", said)
+		}
+	}
+	// A query: Claude Code's beta=true is passed on, anything else refused.
+	q, _ := json.Marshal(map[string]any{"lease_id": held.LeaseID, "method": "POST", "path": "/v1/messages",
+		"query": "beta=true", "header": map[string]string{"Content-Type": "application/json"},
+		"body_b64": base64.StdEncoding.EncodeToString([]byte(`{"model":"m","stream":true}`))})
+	code2, out, err := w.hostA.CallContext(ctx, "POST", "/api/agent-host/model-calls", q)
+	if err != nil || code2 != http.StatusOK {
+		t.Fatalf("beta=true: %d %s %v", code2, out, err)
+	}
+	var started map[string]any
+	_ = json.Unmarshal(out, &started)
+	collectAll(t, w.hostA, started)
+	for _, bad := range []string{"redirect=http://x", "beta=false", "beta=true&beta=true"} {
+		q, _ := json.Marshal(map[string]any{"lease_id": held.LeaseID, "method": "POST", "path": "/v1/messages",
+			"query": bad, "body_b64": ""})
+		if code, _, _ := w.hostA.CallContext(ctx, "POST", "/api/agent-host/model-calls", q); code != http.StatusForbidden {
+			t.Fatalf("query %q: %d", bad, code)
+		}
+	}
+	_ = p
+	// Many refusals: at most so many recorded.
+	before := len(governanceRows(t, w, "agent.model.call"))
+	for i := 0; i < 3*modelDenialsRecorded; i++ {
+		startModelCallWith(t, w.hostA, held.LeaseID, "POST", "/v1/files", nil, nil)
+	}
+	if n := len(governanceRows(t, w, "agent.model.call")) - before; n > modelDenialsRecorded {
+		t.Fatalf("%d refusals recorded in a minute", n)
+	}
+}
+
+// An answer under way is stopped, and with it the provider's answer, when
+// the AI agent's grant lapses or is no longer in force, even with nobody
+// collecting it: what the AI agent may do is asked afresh each time.
+func TestAnAnswerUnderWayEndsWhenTheGrantDoes(t *testing.T) {
+	for _, how := range []string{"lapsed", "no longer in force"} {
+		t.Run(how, func(t *testing.T) {
+			quickRecheck(t)
+			w, p := keyWorld(t)
+			hold := make(chan struct{})
+			p.hold = hold
+			defer close(hold)
+			held, err := w.hostA.Borrow(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if code, a := startModelCall(t, w.hostA, held.LeaseID, "/v1/messages"); code != http.StatusOK {
+				t.Fatalf("starting: %d %v", code, a)
+			}
+			grants := w.s.grantsHeldBy(w.a.PairwiseAID, true)
+			if len(grants) == 0 {
+				t.Fatal("the AI agent holds no grant")
+			}
+			for _, g := range grants {
+				if how == "lapsed" {
+					g.ExpiryDate = time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
+					if err := w.s.DataStore.SaveCredential(g); err != nil {
+						t.Fatal(err)
+					}
+				} else if err := w.s.DataStore.DeleteCredential(g.SAID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			select {
+			case <-p.cancelled:
+			case <-time.After(5 * time.Second):
+				t.Fatalf("the provider kept answering after the grant %s", how)
+			}
+		})
+	}
+}
+
+// An AI agent that only reads and answers is lent no GitHub access and asks
+// no other AI agent, whatever its body tries.
+func TestAnAnswerOnlyAIAgentIsHeldToItAtTheIdentityAgent(t *testing.T) {
+	w, _ := keyWorld(t)
+	if code, _, raw := w.asOwner(t, "PATCH", "/api/mcp/agents/"+w.a.ID, `{"brain":{"program":"none","model":"m"}}`); code != http.StatusOK {
+		t.Fatalf("making it answer only: %d %s", code, raw)
+	}
+	code, out, err := w.hostA.CallContext(context.Background(), "POST", "/api/agent-host/github", []byte("{}"))
+	if err != nil || code != http.StatusForbidden || !strings.Contains(string(out), "only reads and answers") {
+		t.Fatalf("GitHub for an AI agent that only answers: %d %s %v", code, out, err)
+	}
+	conv, msg := w.openedWith(t)
+	if _, err := w.hostA.Say(context.Background(), "ask", conv, w.b.PairwiseAID, msg, "what do you run?",
+		agentmessage.Brain{Provider: "model"}); err == nil || !strings.Contains(err.Error(), "only reads and answers") {
+		t.Fatalf("an AI agent that only answers asked another: %v", err)
 	}
 }
 

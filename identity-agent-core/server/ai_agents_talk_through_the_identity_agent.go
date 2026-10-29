@@ -648,6 +648,12 @@ func (s *CoreServer) handleBodySays(w http.ResponseWriter, r *http.Request) {
 		refuse("the statement is not signed by this body: "+err.Error(), http.StatusForbidden)
 		return
 	}
+	if kind == agentmessage.KindAsk {
+		if a, ok := s.aiAgentAsset(b.AgentAssetID); ok && answersOnly(a) {
+			refuse("this AI agent only reads and answers, so it does not ask other AI agents", http.StatusForbidden)
+			return
+		}
+	}
 	// Signed by this body: from here a refusal is filed under the conversation
 	// it names, if its AI agent is in it. Not before, and not otherwise, or a
 	// caller could put rows into a conversation it is not part of.
