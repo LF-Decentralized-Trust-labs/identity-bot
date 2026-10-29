@@ -59,6 +59,9 @@ type toolServer struct {
 	srv  *http.Server
 	mu   sync.Mutex
 	turn map[string]*toolTurn
+	// model are the runs whose brain makes its model calls through this
+	// body, by the token each run's brain was given (model.go).
+	model map[string]*Borrowed
 }
 
 func newToolServer(h *Host) (*toolServer, error) {
@@ -114,6 +117,10 @@ type toolCall struct {
 }
 
 func (ts *toolServer) serve(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == modelPath || strings.HasPrefix(r.URL.Path, modelPath+"/") {
+		ts.serveModel(w, r)
+		return
+	}
 	t := ts.turnFor(r)
 	if t == nil {
 		http.Error(w, "this turn has ended", http.StatusUnauthorized)

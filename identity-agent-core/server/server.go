@@ -69,6 +69,9 @@ type CoreServer struct {
 	lendLedger        *lending.Ledger
 	legacyLeasesMu    sync.Mutex
 	legacyLeasesMoved atomic.Bool
+	// modelCalls are the model calls under way for bodies whose brain's key
+	// stays here (model_calls_through_the_identity_agent.go).
+	modelCalls modelCallTable
 	// Providers is the registry of operators this agent can draw services from.
 	// Loaded once at startup; the owner may add to it at runtime.
 	Providers *provider.Registry

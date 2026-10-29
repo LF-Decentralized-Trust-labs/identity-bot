@@ -527,6 +527,7 @@ func (s *CoreServer) handleBodyStatus(w http.ResponseWriter, r *http.Request) {
 			out["system_prompt"] = a.AgentConfig.SystemPrompt
 			out["brain"] = map[string]string{
 				"kind": a.AgentConfig.Brain.Kind, "provider": a.AgentConfig.Brain.Provider, "model": a.AgentConfig.Brain.Model,
+				"program": a.AgentConfig.Brain.Program,
 			}
 		}
 	}

@@ -52,6 +52,10 @@ func (s *CoreServer) mountBrainSignInRoutes(r chi.Router) {
 	r.Post("/agent-host/brain-sign-in", s.handleBodyBorrowsSignIn)
 	r.Post("/agent-host/brain-sign-in/renew", s.handleBodyRenewsSignIn)
 	r.Post("/agent-host/brain-sign-in/return", s.handleBodyReturnsSignIn)
+	// A brain whose key stays here makes its model calls through here.
+	r.Post("/agent-host/model-calls", s.handleBodyStartsModelCall)
+	r.Get("/agent-host/model-calls/{call}", s.handleBodyReadsModelCall)
+	r.Delete("/agent-host/model-calls/{call}", s.handleBodyStopsModelCall)
 }
 
 // errNoVault is an Identity Agent with nowhere safe to keep a sign-in.
@@ -606,6 +610,8 @@ func (s *CoreServer) handleBodyBorrowsSignIn(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
+	var q borrowRequest
+	_ = json.NewDecoder(io.LimitReader(r.Body, 4<<10)).Decode(&q)
 	s.moveBrainSecretsIntoTheVault()
 	s.recordLapsedLends()
 	if err := s.mayBorrow(a, cc); err != nil {
@@ -641,6 +647,18 @@ func (s *CoreServer) handleBodyBorrowsSignIn(w http.ResponseWriter, r *http.Requ
 			"error": "this AI agent's sign-in has expired; sign it in again", "expired": true})
 		return
 	}
+	// An API key the Identity Agent calls its provider with itself is never
+	// lent: the body's brain makes its model calls through here instead. A body
+	// from before that cannot, and is told so rather than lent the key.
+	through := rec.StaysInVault()
+	if through && q.ModelCalls != modelCallsThroughHere {
+		s.recordBrainEvent(a, cc, "lend", "denied", "this body cannot make its model calls through the Identity Agent, "+
+			"and an API key is not lent")
+		writeJSONStatus(w, http.StatusConflict, map[string]any{
+			"error": "this AI agent's key stays with its Identity Agent, and this machine's agent-host is too old to " +
+				"make its model calls through it; update agent-host on this machine", "update_agent_host": true})
+		return
+	}
 	limit := s.accountCap(a.ID, rec)
 	lease, lapsed, err := s.lends().Lend(r.Context(), lending.Lend{Kind: lendBrainSignIn, Agent: a.ID, Host: b.Host,
 		Pool: brainsignin.PoolOr(rec.Pool(), a.ID), Lent: brainsignin.Fingerprint(rec.Provider, rec.Secret),
@@ -658,17 +676,33 @@ func (s *CoreServer) handleBodyBorrowsSignIn(w http.ResponseWriter, r *http.Requ
 		jsonError(w, "the sign-in could not be lent: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.recordBrainEvent(a, cc, "lent", "ok", fmt.Sprintf("lease %s of the %s sign-in for %s, until %s",
-		lease.ID, rec.Kind, rec.Provider, lease.Expires.Format(time.RFC3339)))
-	// This answer travels sealed to the keys the body enrolled with: the
-	// route is reached only through the sealed transport (theBodyAsking).
-	writeJSONStatus(w, http.StatusOK, map[string]any{
+	answer := map[string]any{
 		"lease_id": lease.ID, "lease_expires_at": lease.Expires,
 		"renew_every_seconds": int(brainsignin.RenewEvery / time.Second),
 		"kind":                rec.Kind, "provider": rec.Provider, "account": rec.Account,
-		"endpoint": rec.Endpoint, "expires_at": rec.ExpiresAt, "secret": rec.Secret,
+		"endpoint": rec.Endpoint, "expires_at": rec.ExpiresAt,
 		"harness": brainsignin.Harness(rec.Provider),
-	})
+	}
+	if through {
+		answer["model_calls"] = modelCallsThroughHere
+		s.recordBrainEvent(a, cc, "lent", "ok", fmt.Sprintf("lease %s of the %s sign-in for %s, until %s; "+
+			"the key stays here and the run's model calls come through this Identity Agent",
+			lease.ID, rec.Kind, rec.Provider, lease.Expires.Format(time.RFC3339)))
+	} else {
+		answer["secret"] = rec.Secret
+		s.recordBrainEvent(a, cc, "lent", "ok", fmt.Sprintf("lease %s of the %s sign-in for %s, until %s",
+			lease.ID, rec.Kind, rec.Provider, lease.Expires.Format(time.RFC3339)))
+	}
+	// This answer travels sealed to the keys the body enrolled with: the
+	// route is reached only through the sealed transport (theBodyAsking).
+	writeJSONStatus(w, http.StatusOK, answer)
+}
+
+// borrowRequest is what a body says when it borrows: ModelCalls is
+// modelCallsThroughHere from a body that makes its brain's model calls through
+// this Identity Agent, so may run a brain whose key stays here.
+type borrowRequest struct {
+	ModelCalls string `json:"model_calls,omitempty"`
 }
 
 func (s *CoreServer) handleBodyRenewsSignIn(w http.ResponseWriter, r *http.Request) {

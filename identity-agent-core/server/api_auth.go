@@ -90,6 +90,13 @@ var publicRoutes = map[string]string{
 	"POST /api/agent-host/brain-sign-in":        "an AI agent's body borrowing its brain's sign-in for one run, sealed and signed",
 	"POST /api/agent-host/brain-sign-in/renew":  "an AI agent's body keeping a borrowed sign-in while its run goes on, sealed and signed",
 	"POST /api/agent-host/brain-sign-in/return": "an AI agent's body giving back a borrowed sign-in, sealed and signed",
+	// A body whose brain's key stays here making that brain's model calls
+	// through here, reading each answer as it arrives and stopping one its
+	// brain gave up on. Each handler admits only a sealed request a live body
+	// signed, and only for a run that holds an open lease on the sign-in.
+	"POST /api/agent-host/model-calls":          "an AI agent's body making its brain's model call through the Identity Agent, which adds the key, sealed and signed",
+	"GET /api/agent-host/model-calls/{call}":    "an AI agent's body reading the answer to its brain's model call as it arrives, sealed and signed",
+	"DELETE /api/agent-host/model-calls/{call}": "an AI agent's body stopping a model call its brain gave up on, sealed and signed",
 	// A body saying whether it has a screen and waiting to be watched, and
 	// sending pictures of it while somebody does. Each handler admits only a
 	// sealed request a live body signed, and a picture is kept only for a

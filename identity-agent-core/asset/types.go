@@ -141,6 +141,11 @@ type BrainConfig struct {
 	// TEEAttestedOnly is a governance restriction: only a TEE-attested model may wear
 	// this identity (brain-topology enforcement).
 	TEEAttestedOnly bool `json:"tee_attested_only,omitempty"`
+	// Program is what runs the brain on its body: empty for the program its
+	// provider is run by (brainsignin.Harness), or brainsignin.ProgramNone for
+	// an AI agent that only reads and answers, whose body calls the model
+	// itself, through the Identity Agent, with no program of its own.
+	Program string `json:"program,omitempty"`
 }
 
 // Normalised is the brain configuration with its kind and provider as the
@@ -153,6 +158,7 @@ func (b BrainConfig) Normalised() BrainConfig {
 	if b.Kind != "" || b.Provider != "" {
 		b.Kind = brainsignin.NormaliseKind(b.Kind, b.Provider)
 	}
+	b.Program = brainsignin.NormaliseProgram(b.Program)
 	return b
 }
 

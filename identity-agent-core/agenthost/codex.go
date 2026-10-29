@@ -56,6 +56,17 @@ func (c Codex) Run(ctx context.Context, t Turn) (Outcome, error) {
 		// The lent sign-in is a file in the run's home, never the keyring.
 		flags = append(flags, "-c", `cli_auth_credentials_store="file"`)
 	}
+	if base := credential(creds, "OPENAI_BASE_URL"); base != "" {
+		// A key that stays with the Identity Agent: Codex's model is at this
+		// body's model address, with the run's token in the variable it names.
+		// Codex reads no base address from its environment once the user's own
+		// settings are ignored, so it is told here.
+		flags = append(flags, "-c", `model_provider="`+mcpServerName+`"`,
+			"-c", "model_providers."+mcpServerName+`.name="`+mcpServerName+`"`,
+			"-c", "model_providers."+mcpServerName+".base_url="+strconv.Quote(base),
+			"-c", "model_providers."+mcpServerName+`.env_key="CODEX_API_KEY"`,
+			"-c", "model_providers."+mcpServerName+`.wire_api="responses"`)
+	}
 	if t.Model != "" {
 		flags = append(flags, "--model", t.Model)
 	}
