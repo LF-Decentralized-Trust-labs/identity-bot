@@ -15,6 +15,7 @@ import (
 	"identity-agent-core/activitylog"
 	"identity-agent-core/didcomm"
 	"identity-agent-core/drivers"
+	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/permission"
 	"identity-agent-core/store"
 )
@@ -98,16 +99,6 @@ func (s *CoreServer) senderKeysAtReceipt(aid string, did *didcomm.DID) (trust, k
 	return string(t), said, len(rec.KEL), string(events)
 }
 
-// ownEvidence is what is kept with a message from one of this agent's own AI
-// agents: the agent's delegated inception and the root's key history as they
-// were when it arrived (the engine's original bytes, base64). With the keys
-// kept beside it (SenderDID), it is checked again from these alone, so the AI
-// agent being removed or rotated later does not break a genuine old proof.
-type ownEvidence struct {
-	Inception string   `json:"inception"`
-	RootKEL   []string `json:"root_kel"`
-}
-
 // ownAgentAtArrival reports whether did is the keyset this agent holds for one
 // of its own AI agents, and returns the evidence to keep if so. Neither an
 // asset row nor a keyset file is enough: both are files this agent writes, and
@@ -148,7 +139,7 @@ func (s *CoreServer) ownAgentAtArrival(aid string, did *didcomm.DID) (string, er
 	if err != nil {
 		return "", fmt.Errorf("the root identity's key history is not held here")
 	}
-	e := ownEvidence{Inception: kel.RawEventsB64[0], RootKEL: rootKEL.RawEventsB64}
+	e := coretypes.OwnEvidence{Inception: kel.RawEventsB64[0], RootKEL: rootKEL.RawEventsB64}
 	if err := s.delegatedFromHere(aid, e); err != nil {
 		return "", err
 	}
@@ -159,7 +150,7 @@ func (s *CoreServer) ownAgentAtArrival(aid string, did *didcomm.DID) (string, er
 // delegatedFromHere checks, with keri-go, that the evidence shows aid opening
 // with a delegated inception that this Identity Agent's root approved by a
 // seal in its own key history.
-func (s *CoreServer) delegatedFromHere(aid string, e ownEvidence) error {
+func (s *CoreServer) delegatedFromHere(aid string, e coretypes.OwnEvidence) error {
 	root := s.OwnerRootAID()
 	if root == "" {
 		return fmt.Errorf("this Identity Agent has no root identity to check with")
@@ -267,7 +258,7 @@ func (s *CoreServer) keysWereTied(n store.Notification, did *didcomm.DID) error 
 	case keysOwn:
 		// From what was kept: the keys were bound by the log row on arrival,
 		// and the delegation is checked again from the bytes kept with them.
-		var e ownEvidence
+		var e coretypes.OwnEvidence
 		if err := json.Unmarshal([]byte(n.SenderKEL), &e); err != nil {
 			return fmt.Errorf("the delegation evidence was not kept with the message")
 		}

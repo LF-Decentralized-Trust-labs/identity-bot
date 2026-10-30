@@ -269,18 +269,7 @@ func TestTheDisplayProxyLeavesTheAppsOwnLogin(t *testing.T) {
 func TestTheDisplayProxyStripsASessionHoweverItIsWritten(t *testing.T) {
 	s := newGrantTestServer(t)
 	app := withNotesApp(t, s)
-	s.BrowserSessions = newBrowserSessions()
-	id, code, _, err := s.BrowserSessions.newChallenge(hashSecret("the browser's secret"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.BrowserSessions.grant(code); err != nil {
-		t.Fatal(err)
-	}
-	tok, _, err := s.BrowserSessions.claim(id, "the browser's secret")
-	if err != nil {
-		t.Fatal(err)
-	}
+	tok := signInABrowser(t, s, "the browser's secret")
 
 	req := local("GET", "/apps/notes/page", "")
 	req.Header.Set("Authorization", "bearer   "+tok)

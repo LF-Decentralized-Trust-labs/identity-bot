@@ -156,9 +156,7 @@ func TestAnchoringCarriesOnAfterARestart(t *testing.T) {
 // Enough recorded messages anchor the record without waiting for the interval.
 func TestEnoughMessagesAnchorTheRecord(t *testing.T) {
 	s := recordWorld(t)
-	was := anchorEvery
-	anchorEvery = 3
-	t.Cleanup(func() { anchorEvery = was })
+	anchorAfter(t, 3)
 	writeRows(t, s, 1)
 	for i := 0; i < 3; i++ {
 		s.noteRecorded()

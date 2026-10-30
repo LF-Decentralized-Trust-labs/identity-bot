@@ -14,7 +14,7 @@ import (
 // caught.
 func TestAConversationsHeadIsAnchored(t *testing.T) {
 	w := newTalkWorld(t)
-	w.s.ActivityLog.SetEventSigner(&invocationSigner{s: w.s})
+	w.s.ActivityLog.SetEventSigner(logEventSigner(w.s))
 	conv, _ := w.openedWith(t)
 	if anchored, err := w.s.anchorRecord(); err != nil || !anchored {
 		t.Fatalf("anchoring: %v %v", anchored, err)
@@ -38,10 +38,8 @@ func TestAConversationsHeadIsAnchored(t *testing.T) {
 // Messages a conversation takes count towards the next anchoring.
 func TestAConversationsMessagesBringOnAnAnchoring(t *testing.T) {
 	w := newTalkWorld(t)
-	w.s.ActivityLog.SetEventSigner(&invocationSigner{s: w.s})
-	was := anchorEvery
-	anchorEvery = 1
-	t.Cleanup(func() { anchorEvery = was })
+	w.s.ActivityLog.SetEventSigner(logEventSigner(w.s))
+	anchorAfter(t, 1)
 	w.openedWith(t)
 	for i := 0; i < 100; i++ {
 		if anchors, _ := w.s.DataStore.GetRecordAnchors(); len(anchors) > 0 {
@@ -57,7 +55,7 @@ func TestAConversationsMessagesBringOnAnAnchoring(t *testing.T) {
 func TestConversationEntriesAreAnchoredBySequence(t *testing.T) {
 	w := newTalkWorld(t)
 	w.s.DeclaredEntityType = "organization"
-	w.s.ActivityLog.SetEventSigner(&invocationSigner{s: w.s})
+	w.s.ActivityLog.SetEventSigner(logEventSigner(w.s))
 	conv, _ := w.openedWith(t)
 	if ok, err := w.s.anchorRecord(); err != nil || !ok {
 		t.Fatalf("anchoring: %v %v", ok, err)

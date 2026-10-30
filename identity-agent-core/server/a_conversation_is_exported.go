@@ -18,6 +18,7 @@ import (
 	"identity-agent-core/didcomm"
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/keriengine"
 	"identity-agent-core/permission"
 	"identity-agent-core/secureenclave"
@@ -167,13 +168,12 @@ type exportedLedger struct {
 // part way through would leave an interaction without its statement.
 func (l exportedLedger) Anchors(context.Context) (conversationbundle.KeyLog, []conversationbundle.Anchor, bool, error) {
 	s := l.s
-	s.record.mu.Lock()
-	defer s.record.mu.Unlock()
-	rec, ok := s.loadRecordIdentity()
-	if !ok || rec.Pending {
+	aid, pending, ok, release := s.holdTheRecord()
+	defer release()
+	if !ok || pending {
 		return conversationbundle.KeyLog{}, nil, false, nil
 	}
-	kl, err := s.exportKeyLog(rec.AID, nil)
+	kl, err := s.exportKeyLog(aid, nil)
 	if err != nil {
 		return kl, nil, false, err
 	}
@@ -207,7 +207,7 @@ func (l exportedLedger) Log(_ context.Context, conv string) (conversationbundle.
 type exportedIdentities struct {
 	s      *CoreServer
 	root   string
-	signer invocationSignerRecord
+	signer coretypes.LogSignerRecord
 }
 
 func (x exportedIdentities) KeyLog(_ context.Context, aid string) (conversationbundle.KeyLog, error) {
@@ -365,7 +365,7 @@ func (s *CoreServer) agentSeed(aid string) ([]byte, error) {
 // log. Where the engine no longer holds it, it is made again from the keys the
 // signer was made from: its inception names nothing but them, so the same
 // keys give the same identifier, which is checked.
-func (s *CoreServer) exportLogSigner(rec invocationSignerRecord) (conversationbundle.KeyLog, error) {
+func (s *CoreServer) exportLogSigner(rec coretypes.LogSignerRecord) (conversationbundle.KeyLog, error) {
 	rootSeed, err := secureenclave.LoadRootSeed(s.DataDir)
 	if err != nil {
 		return conversationbundle.KeyLog{}, fmt.Errorf("the log signer's key cannot be had: %v", err)

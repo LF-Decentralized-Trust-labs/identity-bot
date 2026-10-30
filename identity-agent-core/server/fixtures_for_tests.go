@@ -16,6 +16,7 @@ import (
 	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/keriengine"
 	"identity-agent-core/login"
+	"identity-agent-core/permission"
 	"identity-agent-core/store"
 	"identity-agent-core/vault"
 	"io"
@@ -171,12 +172,6 @@ func refusedFor(t coretypes.TB, s *CoreServer, n store.Notification, why string)
 	if !strings.Contains(err.Error(), why) {
 		t.Fatalf("refused for the wrong reason: %v; want %q", err, why)
 	}
-}
-
-// writeCounting is the engine with every call that makes an identity counted.
-type writeCounting struct {
-	drivers.KeriEngine
-	writes int
 }
 
 func everyPublicRoute() map[string]string {
@@ -764,4 +759,89 @@ func withID(r *http.Request, id string) *http.Request {
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", id)
 	return r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
+}
+
+// The rows that say which controllers may act for this Identity Agent, as a
+// test reads and edits them directly.
+func controllerRow(s *CoreServer, aid string) (ControllerGrant, bool, error) {
+	return s.controllers().Get(aid)
+}
+func putControllerRow(s *CoreServer, g ControllerGrant) error { return s.controllers().Put(g) }
+func grantControllerRow(s *CoreServer, g ControllerGrant, now time.Time) (ControllerGrant, error) {
+	return s.controllers().Grant(g, now)
+}
+func revokeControllerRow(s *CoreServer, aid string) error { return s.controllers().Revoke(aid) }
+func liveControllerRow(s *CoreServer, aid string, now time.Time) (ControllerGrant, bool, error) {
+	return s.controllers().Live(aid, now)
+}
+
+// trustLocalPeer keeps aid as one of this Identity Agent's own peers.
+func trustLocalPeer(s *CoreServer, aid string) error {
+	_, err := s.ensureLocalPeer(aid)
+	return err
+}
+
+// resolveWithTokens is who the default caller resolver says r is from.
+func resolveWithTokens(s *CoreServer, r *http.Request) permission.CallerContext {
+	return tokenAwareResolver{s}.Resolve(r)
+}
+
+// logEventSigner is what signs s's governance log.
+func logEventSigner(s *CoreServer) activitylog.EventSigner { return &invocationSigner{s: s} }
+
+// signInABrowser gives s browser sessions of its own and signs one in with
+// secret, approved, returning that session's token.
+func signInABrowser(t coretypes.TB, s *CoreServer, secret string) string {
+	t.Helper()
+	s.BrowserSessions = newBrowserSessions()
+	id, code, _, err := s.BrowserSessions.newChallenge(hashSecret(secret))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.BrowserSessions.grant(code); err != nil {
+		t.Fatal(err)
+	}
+	token, _, err := s.BrowserSessions.claim(id, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
+}
+
+// withOwnerSecret sets what a request from this computer must carry to be the
+// owner's.
+func withOwnerSecret(s *CoreServer, secret string) *CoreServer {
+	s.localOwnerSecret = secret
+	return s
+}
+
+// rebuildRouter builds s's routes again, with every add-on's.
+func rebuildRouter(s *CoreServer) { s.router = s.buildRouter("") }
+
+// setRouter puts r in place of s's routes.
+func setRouter(s *CoreServer, r chi.Router) { s.router = r }
+
+// aControllerWorld is newControllerWorld, as its parts.
+func aControllerWorld(t coretypes.TB) (*CoreServer, *httptest.Server, string, []byte) {
+	w := newControllerWorld(t)
+	return w.s, w.srv, w.ctlAID, w.ctlSeed
+}
+
+// moveTheKeyAway is moveTheKeyElsewhere, returning the key the other device
+// holds.
+func moveTheKeyAway(t coretypes.TB, s *CoreServer) []byte {
+	return moveTheKeyElsewhere(t, s, nil).seed
+}
+
+// withdrawWith is withdrawIt, where seed is the key the other device holds.
+func withdrawWith(t coretypes.TB, s *CoreServer, seed []byte) {
+	withdrawIt(t, &elsewhere{s: s, seed: seed})
+}
+
+// anchorAfter makes the record anchored after every n messages for the rest
+// of t.
+func anchorAfter(t coretypes.TB, n int) {
+	was := anchorEvery
+	anchorEvery = n
+	t.Cleanup(func() { anchorEvery = was })
 }

@@ -20,7 +20,7 @@ func reqWithBearer(token string) *http.Request {
 // agent's real delegated AID with its lineage to the owner root — not
 // "token:<name>" — so the audit event proves owner -> agent.
 func TestAgentBoundTokenResolvesToDelegatedIdentity(t *testing.T) {
-	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
+	s := withOwnerSecret(&CoreServer{DataDir: t.TempDir()}, testOwnerSecret)
 
 	// Seed a bound token directly (provisioning itself needs the KERI driver;
 	// this isolates the resolver's identity binding).
@@ -40,7 +40,7 @@ func TestAgentBoundTokenResolvesToDelegatedIdentity(t *testing.T) {
 	mcpTokensMu.Unlock()
 
 	req := reqWithBearer(plaintext)
-	cc := tokenAwareResolver{s}.Resolve(req)
+	cc := resolveWithTokens(s, req)
 
 	if cc.CallerAID != "EAgentDelegatedAID" {
 		t.Fatalf("caller should be the agent's delegated AID, got %q", cc.CallerAID)
@@ -59,7 +59,7 @@ func TestAgentBoundTokenResolvesToDelegatedIdentity(t *testing.T) {
 // A plain (non-agent) token still resolves to token:<name> with no chain —
 // backward compatible.
 func TestPlainTokenUnchanged(t *testing.T) {
-	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
+	s := withOwnerSecret(&CoreServer{DataDir: t.TempDir()}, testOwnerSecret)
 	plaintext := "iamcp_plain"
 	mcpTokensMu.Lock()
 	s.saveMCPTokens([]mcpToken{{
@@ -69,7 +69,7 @@ func TestPlainTokenUnchanged(t *testing.T) {
 	}})
 	mcpTokensMu.Unlock()
 
-	cc := tokenAwareResolver{s}.Resolve(reqWithBearer(plaintext))
+	cc := resolveWithTokens(s, reqWithBearer(plaintext))
 	if cc.CallerAID != "token:ci-token" {
 		t.Fatalf("plain token should resolve to token:<name>, got %q", cc.CallerAID)
 	}

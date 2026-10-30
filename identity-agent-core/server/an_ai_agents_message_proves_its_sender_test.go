@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"identity-agent-core/asset"
 	"identity-agent-core/didcomm"
 	"identity-agent-core/drivers"
+	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/keriengine"
 	"identity-agent-core/store"
 )
@@ -156,7 +158,7 @@ func TestCheckingOwnNeverWrites(t *testing.T) {
 // after the AI agent is removed: the delegation evidence is kept with it.
 func TestOwnProofOutlivesTheAIAgent(t *testing.T) {
 	w := newTalkWorld(t)
-	if _, err := w.s.ensureLocalPeer(w.a.PairwiseAID); err != nil {
+	if err := trustLocalPeer(w.s, w.a.PairwiseAID); err != nil {
 		t.Fatal(err)
 	}
 	from, _ := w.s.keySetFor(w.a.PairwiseAID)
@@ -198,7 +200,7 @@ func TestOwnProofOutlivesTheAIAgent(t *testing.T) {
 func TestDelegationEvidenceMustBeThisAgentsAndThisRoot(t *testing.T) {
 	w := newTalkWorld(t)
 	engine := w.s.KeriDriver.(drivers.KELHolder)
-	evidence := func(aid string) ownEvidence {
+	evidence := func(aid string) coretypes.OwnEvidence {
 		kel, err := engine.GetKelByAID(aid)
 		if err != nil {
 			t.Fatal(err)
@@ -207,7 +209,7 @@ func TestDelegationEvidenceMustBeThisAgentsAndThisRoot(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return ownEvidence{Inception: kel.RawEventsB64[0], RootKEL: root.RawEventsB64}
+		return coretypes.OwnEvidence{Inception: kel.RawEventsB64[0], RootKEL: root.RawEventsB64}
 	}
 	if err := w.s.delegatedFromHere(w.a.PairwiseAID, evidence(w.a.PairwiseAID)); err != nil {
 		t.Fatalf("genuine evidence was refused: %v", err)
@@ -233,8 +235,33 @@ func TestDelegationEvidenceMustBeThisAgentsAndThisRoot(t *testing.T) {
 	}
 	dk, _ := other.GetKel("their-agent")
 	rk, _ := other.GetKel("elsewhere")
-	err = w.s.delegatedFromHere(d.AID, ownEvidence{Inception: dk.RawEventsB64[0], RootKEL: rk.RawEventsB64})
+	err = w.s.delegatedFromHere(d.AID, coretypes.OwnEvidence{Inception: dk.RawEventsB64[0], RootKEL: rk.RawEventsB64})
 	if err == nil || !strings.Contains(err.Error(), "not this Identity Agent's") {
 		t.Fatalf("a delegation from another root was taken as one from here: %v", err)
 	}
+}
+
+// writeCounting is the engine with every call that makes an identity counted.
+type writeCounting struct {
+	drivers.KeriEngine
+	writes int
+}
+
+func (e *writeCounting) GetKelByAID(string) (*drivers.DriverKelResponse, error) {
+	return nil, fmt.Errorf("not held")
+}
+
+func (e *writeCounting) CreateInceptionNamed(a, b, c string) (*drivers.DriverInceptionResponse, error) {
+	e.writes++
+	return e.KeriEngine.CreateInceptionNamed(a, b, c)
+}
+
+func (e *writeCounting) ReinstateDelegatedIdentity(a, b, c, d string) (*drivers.DriverDelegatedInceptionResponse, error) {
+	e.writes++
+	return e.KeriEngine.ReinstateDelegatedIdentity(a, b, c, d)
+}
+
+func (e *writeCounting) CreateDelegatedInception(a, b, c, d string) (*drivers.DriverDelegatedInceptionResponse, error) {
+	e.writes++
+	return e.KeriEngine.CreateDelegatedInception(a, b, c, d)
 }

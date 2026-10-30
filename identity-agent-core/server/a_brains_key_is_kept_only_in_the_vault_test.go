@@ -24,7 +24,7 @@ import (
 func signInWorld(t *testing.T) *talkWorld {
 	t.Helper()
 	w := newTalkWorld(t)
-	w.s.localOwnerSecret = testOwnerSecret
+	withOwnerSecret(w.s, testOwnerSecret)
 	key := bytes.Repeat([]byte{7}, 32)
 	w.s.Vault.SetKeyProvider(func() ([]byte, error) { return key, nil })
 	return w
@@ -196,7 +196,7 @@ func TestABrowserSessionCannotChangeABrainsSignIn(t *testing.T) {
 // nothing, rather than storing the brain without its key.
 func TestALockedVaultChangesNothing(t *testing.T) {
 	w := newTalkWorld(t)
-	w.s.localOwnerSecret = testOwnerSecret
+	withOwnerSecret(w.s, testOwnerSecret)
 	before, _ := w.s.assetHandler.Store.GetAsset(w.a.ID)
 	code, _, raw := w.asOwner(t, "PATCH", "/api/mcp/agents/"+w.a.ID,
 		`{"role":"changed","brain":{"kind":"remote","provider":"anthropic","credential_ref":"sk-ant-api03-LOCKED"}}`)

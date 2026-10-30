@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -25,7 +24,7 @@ import (
 // request the controller signed, which verifies against its key.
 func authorisedBy(t *testing.T, w *talkWorld, said string) {
 	t.Helper()
-	ctl, _, _ := w.s.controllers().Get(w.ctlAID)
+	ctl, _, _ := controllerRow(w.s, w.ctlAID)
 	cred := acdcOf(t, w.s, said)
 	edges, _ := cred["e"].(map[string]interface{})
 	by, _ := edges["authorised_by"].(map[string]interface{})
@@ -110,7 +109,7 @@ func TestAConversationNamesTheGrantItWasOpenedUnder(t *testing.T) {
 	w := newTalkWorld(t)
 	conv, _ := w.openedWith(t)
 	entries := w.read(t, conv)
-	ctl, _, _ := w.s.controllers().Get(w.ctlAID)
+	ctl, _, _ := controllerRow(w.s, w.ctlAID)
 	proof := entries[0].Record.ControllerProof
 	if proof == nil || ctl.CredentialSAID == "" || proof.ControllerGrant != ctl.CredentialSAID {
 		t.Fatalf("the opening does not name the grant it was opened under: %+v", proof)
@@ -216,17 +215,17 @@ func TestAMachineWithoutAGrantInForceAuthorisesNothing(t *testing.T) {
 		w.s.router.ServeHTTP(rec, req)
 		return rec.Code
 	}
-	ctl, _, _ := w.s.controllers().Get(w.ctlAID)
+	ctl, _, _ := controllerRow(w.s, w.ctlAID)
 	unanchored := ctl
 	unanchored.CredentialSAID = ""
-	w.s.controllers().Put(unanchored)
+	putControllerRow(w.s, unanchored)
 	if code := put(); code != http.StatusForbidden {
 		t.Fatalf("a machine paired before grants was answered %d", code)
 	}
-	if got, _, _ := w.s.controllers().Get(w.ctlAID); got.CredentialSAID != "" {
+	if got, _, _ := controllerRow(w.s, w.ctlAID); got.CredentialSAID != "" {
 		t.Fatal("the machine was given a grant by asking")
 	}
-	w.s.controllers().Put(ctl)
+	putControllerRow(w.s, ctl)
 	if err := w.s.withdrawControllerGrant(ctl.CredentialSAID); err != nil {
 		t.Fatal(err)
 	}
@@ -241,8 +240,8 @@ func TestAGrantIsHeldWhileACredentialIsIssuedOnIt(t *testing.T) {
 	w := newTalkWorld(t)
 	req := asThatMachineTo(t, w.s.thisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
 		`{"capabilities":[]}`, w.ctlSeed, authprovider.LevelVerified, time.Now())
-	grant, _, _ := w.s.controllers().Get(w.ctlAID)
-	req = req.WithContext(context.WithValue(req.Context(), controllerContextKey{}, grant))
+	grant, _, _ := controllerRow(w.s, w.ctlAID)
+	req = withController(req, grant)
 	_, held, err := w.s.authorityOf(req)
 	if err != nil {
 		t.Fatal(err)
@@ -388,10 +387,10 @@ func TestAnAIAgentWithNoGrantMayDoNothing(t *testing.T) {
 func TestAGrantedMachinesRowEditedSinceIsRefused(t *testing.T) {
 	w := newTalkWorld(t)
 	resetSeenSignatures(t)
-	ctl, _, _ := w.s.controllers().Get(w.ctlAID)
+	ctl, _, _ := controllerRow(w.s, w.ctlAID)
 	edited := ctl
 	edited.Label = "renamed in the file"
-	w.s.controllers().Put(edited)
+	putControllerRow(w.s, edited)
 	req := asThatMachineTo(t, w.s.thisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
 		`{"capabilities":["`+capabilityMessageAgent+`"]}`, w.ctlSeed, authprovider.LevelVerified, time.Now())
 	rec := httptest.NewRecorder()
@@ -399,11 +398,11 @@ func TestAGrantedMachinesRowEditedSinceIsRefused(t *testing.T) {
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("a machine whose row was changed since its grant was answered %d", rec.Code)
 	}
-	w.s.controllers().Put(ctl)
+	putControllerRow(w.s, ctl)
 	edited = ctl
 	edited.Grade = GradeScoped
 	edited.Signer = ""
-	w.s.controllers().Put(edited)
+	putControllerRow(w.s, edited)
 	if _, err := w.s.bindSigner(ctl.ControllerAID, "Esigner"); err == nil {
 		t.Fatal("a grant was re-issued from a row changed since")
 	}
@@ -415,13 +414,13 @@ func TestAGrantedMachinesRowEditedSinceIsRefused(t *testing.T) {
 func TestARestoredMachineRowIsNeverGrantedWithoutTheOwner(t *testing.T) {
 	w := newTalkWorld(t)
 	resetSeenSignatures(t)
-	ctl, _, _ := w.s.controllers().Get(w.ctlAID)
+	ctl, _, _ := controllerRow(w.s, w.ctlAID)
 	if err := w.s.revokeController(w.ctlAID); err != nil {
 		t.Fatal(err)
 	}
 	restored := ctl
 	restored.CredentialSAID = ""
-	w.s.controllers().Put(restored)
+	putControllerRow(w.s, restored)
 	everythingRuns(w.s)
 	req := asThatMachineTo(t, w.s.thisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
 		`{"capabilities":["`+capabilityMessageAgent+`"]}`, w.ctlSeed, authprovider.LevelVerified, time.Now())
@@ -431,7 +430,7 @@ func TestARestoredMachineRowIsNeverGrantedWithoutTheOwner(t *testing.T) {
 		t.Fatalf("a restored machine row was answered %d", rec.Code)
 	}
 	everythingRuns(w.s)
-	if got, _, _ := w.s.controllers().Get(w.ctlAID); got.CredentialSAID != "" || got.CredentialPending {
+	if got, _, _ := controllerRow(w.s, w.ctlAID); got.CredentialSAID != "" || got.CredentialPending {
 		t.Fatal("a restored machine row was given a grant")
 	}
 	if m, _ := awaiting(t, w.s); m[w.ctlAID] != "the owner's approval" {
@@ -548,14 +547,14 @@ func TestAMachinesFileEditedSignerOrEndIsRefused(t *testing.T) {
 		t.Run(edit, func(t *testing.T) {
 			w := newTalkWorld(t)
 			resetSeenSignatures(t)
-			ctl, _, _ := w.s.controllers().Get(w.ctlAID)
+			ctl, _, _ := controllerRow(w.s, w.ctlAID)
 			edited := ctl
 			if edit == "signer" {
 				edited.Signer = "EImpostorSigner"
 			} else {
 				edited.ExpiresAt = time.Now().UTC().Add(24 * 365 * time.Hour)
 			}
-			w.s.controllers().Put(edited)
+			putControllerRow(w.s, edited)
 			if err := w.s.rowIsItsGrant(edited); err == nil {
 				t.Fatal("the edited row was taken for its grant")
 			}
@@ -573,10 +572,10 @@ func TestAMachinesFileEditedSignerOrEndIsRefused(t *testing.T) {
 func TestAPendingMarkIsNotBelievedWhereTheKeyIsHere(t *testing.T) {
 	w := newTalkWorld(t)
 	resetSeenSignatures(t)
-	ctl, _, _ := w.s.controllers().Get(w.ctlAID)
+	ctl, _, _ := controllerRow(w.s, w.ctlAID)
 	marked := ctl
 	marked.CredentialSAID, marked.CredentialPending = "", true
-	w.s.controllers().Put(marked)
+	putControllerRow(w.s, marked)
 	req := asThatMachineTo(t, w.s.thisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
 		`{"capabilities":["`+capabilityMessageAgent+`"]}`, w.ctlSeed, authprovider.LevelVerified, time.Now())
 	rec := httptest.NewRecorder()

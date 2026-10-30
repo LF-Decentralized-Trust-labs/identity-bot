@@ -12,6 +12,7 @@ import (
 	"identity-agent-core/activitylog"
 	"identity-agent-core/backup"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/secureenclave"
 )
 
@@ -28,18 +29,9 @@ type invocationSigner struct {
 	done bool
 }
 
-type invocationSignerRecord struct {
-	AID   string `json:"aid"`
-	Index int    `json:"index"`
-	// ChainStart is where the log's signed chain begins. It lives here, outside
-	// the database the log is in, so somebody who can rewrite that database
-	// cannot move it (activitylog.ChainKeeper).
-	ChainStart *activitylog.ChainStart `json:"chain_start,omitempty"`
-}
-
 // readInvocationSignerRecord reads the signer's record; found is false when
 // there is none.
-func readInvocationSignerRecord(dataDir string) (rec invocationSignerRecord, found bool, err error) {
+func readInvocationSignerRecord(dataDir string) (rec coretypes.LogSignerRecord, found bool, err error) {
 	data, err := os.ReadFile(filepath.Join(dataDir, "invocation_signer.json"))
 	if os.IsNotExist(err) {
 		return rec, false, nil
@@ -55,7 +47,7 @@ func readInvocationSignerRecord(dataDir string) (rec invocationSignerRecord, fou
 
 // writeInvocationSignerRecord replaces the record in one step, so a crash
 // never leaves half a record.
-func writeInvocationSignerRecord(dataDir string, rec invocationSignerRecord) error {
+func writeInvocationSignerRecord(dataDir string, rec coretypes.LogSignerRecord) error {
 	data, err := json.Marshal(rec)
 	if err != nil {
 		return err
@@ -149,7 +141,7 @@ func (sg *invocationSigner) init() error {
 	// The chain begins with this signer: stamp where, before it signs anything,
 	// so no row it writes is ever outside the chain, even if the process stops
 	// between writing the first row and recording it.
-	rec := invocationSignerRecord{AID: icp.AID, Index: idx}
+	rec := coretypes.LogSignerRecord{AID: icp.AID, Index: idx}
 	if sg.s.ActivityLog != nil {
 		next, nerr := sg.s.ActivityLog.NextEventID()
 		if nerr != nil {

@@ -17,7 +17,7 @@ func newGrantTestServer(t *testing.T) *CoreServer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir(), DataStore: st}
+	return withOwnerSecret(&CoreServer{DataDir: t.TempDir(), DataStore: st}, testOwnerSecret)
 }
 
 func seedAgentToken(t *testing.T, s *CoreServer, plaintext string, tok mcpToken) {
@@ -64,7 +64,7 @@ func TestAgentGrantFallsBackWithoutDriver(t *testing.T) {
 		AgentAID: "EAgent", DelegatorAID: "ERoot", GrantSAID: "EGrant123",
 	})
 
-	cc := tokenAwareResolver{s}.Resolve(reqWithBearer(plaintext))
+	cc := resolveWithTokens(s, reqWithBearer(plaintext))
 	if cc.CallerAID != "EAgent" {
 		t.Fatalf("caller should be the agent AID, got %q", cc.CallerAID)
 	}
@@ -95,7 +95,7 @@ func TestRevokedGrantDenies(t *testing.T) {
 		AgentAID: "EAgent", DelegatorAID: "ERoot", GrantSAID: "EGrantRevoked",
 	})
 
-	cc := tokenAwareResolver{s}.Resolve(reqWithBearer(plaintext))
+	cc := resolveWithTokens(s, reqWithBearer(plaintext))
 	if len(cc.Scopes) != 0 {
 		t.Fatalf("a revoked grant must yield no scopes (deny), got %v", cc.Scopes)
 	}
@@ -150,7 +150,7 @@ func TestVerifiedGrantDerivesScopesFromCredential(t *testing.T) {
 		AgentAID: "EAgent", DelegatorAID: "ERoot", GrantSAID: "EGrantOK",
 	})
 
-	cc := tokenAwareResolver{s}.Resolve(reqWithBearer(plaintext))
+	cc := resolveWithTokens(s, reqWithBearer(plaintext))
 	if len(cc.Scopes) != 1 || cc.Scopes[0] != "infra.zone.list" {
 		t.Fatalf("scopes must come from the verified credential, got %v", cc.Scopes)
 	}
@@ -170,7 +170,7 @@ func TestMissingGrantDenies(t *testing.T) {
 		AgentAID: "EAgent", DelegatorAID: "ERoot", GrantSAID: "ENoSuchGrant",
 	})
 
-	cc := tokenAwareResolver{s}.Resolve(reqWithBearer(plaintext))
+	cc := resolveWithTokens(s, reqWithBearer(plaintext))
 	if len(cc.Scopes) != 0 {
 		t.Fatalf("a missing grant must yield no scopes (deny), got %v", cc.Scopes)
 	}

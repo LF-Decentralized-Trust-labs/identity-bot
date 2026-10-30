@@ -26,7 +26,10 @@ import (
 // to it, and two AI agents — "Desk assistant" and "Build server" — each allowed to
 // message the other, each enrolled with a body.
 type talkWorld struct {
-	*controllerWorld
+	s            *CoreServer
+	srv          *httptest.Server
+	ctlAID       string
+	ctlSeed      []byte
 	a, b         *asset.Asset
 	hostA, hostB *agenthost.Host
 	machineA     testMachine
@@ -37,15 +40,15 @@ func newTalkWorld(t *testing.T, caps ...string) *talkWorld {
 	if len(caps) == 0 {
 		caps = []string{capabilityMessageAgent}
 	}
-	cw := newControllerWorld(t)
-	s := cw.s
+	w := &talkWorld{}
+	w.s, w.srv, w.ctlAID, w.ctlSeed = aControllerWorld(t)
+	s := w.s
 	mgr, err := sandbox.NewManager(sandbox.ManagerConfig{Log: s.logForTest(t, s.DataDir), Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(mgr.Stop)
 	s.SandboxManager = mgr
-	w := &talkWorld{controllerWorld: cw}
 	w.a = w.provision(t, "Desk assistant", caps)
 	w.b = w.provision(t, "Build server", caps)
 	w.hostA, w.machineA = w.enrolBody(t, w.a)
@@ -507,7 +510,7 @@ func TestABodyMovesOnlyToItsOwnIdentityAgent(t *testing.T) {
 	}
 
 	other, _ := bodyWorld(t)
-	other.router = other.buildRouter("")
+	rebuildRouter(other)
 	elsewhere := httptest.NewServer(other.router)
 	defer elsewhere.Close()
 	if _, err := w.hostA.Move(elsewhere.URL); err == nil {
@@ -705,7 +708,7 @@ func mustStore(t *testing.T, w *talkWorld) (*conversation.Store, error) {
 func TestAMachinePairedWithOneSignerBelongsToThem(t *testing.T) {
 	w := newTalkWorld(t)
 	body := `{"controller_aid":"` + w.ctlAID + `","public_key":"` + mustGrant(t, w).PublicKey + `","label":"again","grade":"enrolled"}`
-	_ = w.s.controllers().Revoke(w.ctlAID)
+	_ = revokeControllerRow(w.s, w.ctlAID)
 	rec := httptest.NewRecorder()
 	w.s.handleGrantController(rec, httptest.NewRequest("POST", "/", strings.NewReader(body)))
 	if rec.Code != http.StatusOK {
@@ -718,7 +721,7 @@ func TestAMachinePairedWithOneSignerBelongsToThem(t *testing.T) {
 
 func mustGrant(t *testing.T, w *talkWorld) ControllerGrant {
 	t.Helper()
-	g, live, err := w.s.controllers().Live(w.ctlAID, time.Now())
+	g, live, err := liveControllerRow(w.s, w.ctlAID, time.Now())
 	if err != nil || !live {
 		t.Fatalf("no live grant: %v", err)
 	}

@@ -11,7 +11,7 @@ import (
 // person uses to make the first AI agent are not affected.
 func TestMachinesReachOnlyAnIdentityAgentThatHoldsAIAgents(t *testing.T) {
 	s, agentID := bodyWorld(t)
-	s.router = s.buildRouter("")
+	rebuildRouter(s)
 
 	answer := func(method, path string) (int, string) {
 		rec := httptest.NewRecorder()

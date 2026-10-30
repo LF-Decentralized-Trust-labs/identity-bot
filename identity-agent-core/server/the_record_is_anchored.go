@@ -118,6 +118,15 @@ type recordIdentityRecord struct {
 	TipSig string `json:"tip_sig,omitempty"`
 }
 
+// holdTheRecord holds the record's anchoring until release is called, so
+// nothing is anchored meanwhile, and gives the record identity as it stands:
+// found is false where there is none.
+func (s *CoreServer) holdTheRecord() (aid string, pending, found bool, release func()) {
+	s.record.mu.Lock()
+	rec, ok := s.loadRecordIdentity()
+	return rec.AID, rec.Pending, ok, s.record.mu.Unlock
+}
+
 func tipMessage(rec recordIdentityRecord) string {
 	return fmt.Sprintf("record-tip\n%s\n%d\n%s", rec.AID, rec.TipSN, rec.TipSAID)
 }

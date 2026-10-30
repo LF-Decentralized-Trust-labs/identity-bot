@@ -566,19 +566,8 @@ func TestABrowserSessionCannotConnectTheGitHubApp(t *testing.T) {
 	w := signInWorld(t)
 	g := newGitHub(t)
 	w.s.githubAPI = g.srv.URL
-	w.s.BrowserSessions = newBrowserSessions()
 	const secret = "a-secret-only-the-browser-has"
-	id, code, _, err := w.s.BrowserSessions.newChallenge(hashSecret(secret))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := w.s.BrowserSessions.grant(code); err != nil {
-		t.Fatal(err)
-	}
-	session, _, err := w.s.BrowserSessions.claim(id, secret)
-	if err != nil {
-		t.Fatal(err)
-	}
+	session := signInABrowser(t, w.s, secret)
 	asSession := func(method, path, body string) int {
 		r := httptest.NewRequest(method, path, strings.NewReader(body))
 		r.Header.Set("Authorization", "Bearer "+session)

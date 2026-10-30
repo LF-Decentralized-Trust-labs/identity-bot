@@ -44,7 +44,7 @@ func scopesFor(t *testing.T, s *CoreServer, a *asset.Asset, grantSAID, token str
 		Name: a.DisplayName, Scopes: []string{"infra.zone.list", "system.info.read"},
 		AgentAID: a.PairwiseAID, DelegatorAID: a.DelegatorAID, GrantSAID: grantSAID,
 	})
-	return tokenAwareResolver{s}.Resolve(reqWithBearer(token)).Scopes
+	return resolveWithTokens(s, reqWithBearer(token)).Scopes
 }
 
 // The defect this replaces: verification required check names only a retired

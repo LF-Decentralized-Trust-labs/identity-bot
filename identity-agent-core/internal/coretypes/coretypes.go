@@ -4,6 +4,8 @@
 // It imports nothing of the server's, so both sides can name them.
 package coretypes
 
+import "identity-agent-core/activitylog"
+
 // Authority is who authorised a credential.
 type Authority struct {
 	// ControllerGrant is the Controller Grant of the machine the request came
@@ -79,4 +81,26 @@ type TB interface {
 	Skip(args ...any)
 	Skipf(format string, args ...any)
 	Failed() bool
+}
+
+// LogSignerRecord is which identity signs the governance log, the index its
+// keys are derived at, and where the log's signed chain begins. It is kept
+// in the data directory as invocation_signer.json.
+type LogSignerRecord struct {
+	AID   string `json:"aid"`
+	Index int    `json:"index"`
+	// ChainStart is where the log's signed chain begins. It lives here, outside
+	// the database the log is in, so somebody who can rewrite that database
+	// cannot move it (activitylog.ChainKeeper).
+	ChainStart *activitylog.ChainStart `json:"chain_start,omitempty"`
+}
+
+// OwnEvidence is what is kept with a message from one of this agent's own AI
+// agents: the agent's delegated inception and the root's key history as they
+// were when it arrived (the engine's original bytes, base64). With the keys
+// kept beside it (SenderDID), it is checked again from these alone, so the AI
+// agent being removed or rotated later does not break a genuine old proof.
+type OwnEvidence struct {
+	Inception string   `json:"inception"`
+	RootKEL   []string `json:"root_kel"`
 }

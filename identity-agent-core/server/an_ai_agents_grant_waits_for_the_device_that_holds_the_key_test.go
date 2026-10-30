@@ -16,16 +16,23 @@ import (
 
 // An AI agent's grant, where the identity's key is held on another device.
 
-// elsewhere is an Identity Agent whose identity's key is held on another
+// keyHeldElsewhere is an Identity Agent whose identity's key is held on another
 // device: it publishes the same key and can no longer derive it. seed is that
-// other device's key.
+// other device's key. earlier are AI agents made while the key was here, whose
+// grants are gone, as before every AI agent was given one: by name, their ids.
+type keyHeldElsewhere struct {
+	s       *CoreServer
+	seed    []byte
+	earlier map[string]string
+}
+
 // keyElsewhereWithAIAgents is keyElsewhere, with AI agents made while the key
 // was here, whose grants are gone, as before every AI agent was given one.
-func keyElsewhereWithAIAgents(t *testing.T, earlier ...string) *elsewhere {
+func keyElsewhereWithAIAgents(t *testing.T, earlier ...string) *keyHeldElsewhere {
 	t.Helper()
 	w := newTalkWorld(t)
 	resetSeenSignatures(t)
-	w.s.localOwnerSecret = testOwnerSecret
+	withOwnerSecret(w.s, testOwnerSecret)
 	made := map[string]string{}
 	for _, name := range earlier {
 		rec := httptest.NewRecorder()
@@ -49,7 +56,7 @@ func keyElsewhereWithAIAgents(t *testing.T, earlier ...string) *elsewhere {
 		mcpTokensMu.Unlock()
 		made[name] = id
 	}
-	return moveTheKeyElsewhere(t, w.s, made)
+	return &keyHeldElsewhere{s: w.s, seed: moveTheKeyAway(t, w.s), earlier: made}
 }
 
 // An AI agent created where the key is elsewhere may do nothing until the
@@ -113,7 +120,7 @@ func TestOnlyTheNewestGrantWaitsForAnAIAgent(t *testing.T) {
 	}
 	// Taken up at the place the newer grant was built for, which is built
 	// again behind the withdrawal.
-	withdrawIt(t, e)
+	withdrawWith(t, e.s, e.seed)
 	now = waiting(t, e.s)
 	// Changed underneath, in its files, after the grant was asked for.
 	a, _ := e.s.assetHandler.Store.GetAsset(id)
@@ -125,7 +132,7 @@ func TestOnlyTheNewestGrantWaitsForAnAIAgent(t *testing.T) {
 	if e.s.findCapabilityGrant(a.PairwiseAID) != nil {
 		t.Fatal("an AI agent changed since was granted what it was")
 	}
-	withdrawIt(t, e)
+	withdrawWith(t, e.s, e.seed)
 	keyLogVerifies(t, e.s)
 }
 
@@ -161,7 +168,7 @@ func TestApprovingWhereTheKeyIsElsewhereWaitsOrRefuses(t *testing.T) {
 	owner, _ := w.s.DataStore.GetIdentity()
 	owner.DerivationIndex += 1000
 	w.s.DataStore.SaveIdentity(*owner)
-	e := &elsewhere{s: w.s}
+	e := &keyHeldElsewhere{s: w.s}
 	if rec := e.setCapabilities(t, earlier, capabilityMessageAgent); rec.Code != http.StatusOK {
 		t.Fatalf("approving an earlier AI agent where the key is elsewhere: %d %s", rec.Code, rec.Body.String())
 	}
@@ -225,7 +232,7 @@ func TestAnUnreadableKeyIsNotAKeyElsewhere(t *testing.T) {
 	if len(waiting(t, w.s)) != 0 {
 		t.Fatal("a grant was asked of another device, where there is none")
 	}
-	if got, _, _ := w.s.controllers().Get(g.ControllerAID); got.CredentialPending {
+	if got, _, _ := controllerRow(w.s, g.ControllerAID); got.CredentialPending {
 		t.Fatal("the machine was marked as waiting for another device")
 	}
 	rec = httptest.NewRecorder()
@@ -240,7 +247,7 @@ func TestAnUnreadableKeyIsNotAKeyElsewhere(t *testing.T) {
 }
 
 // setCapabilities asks, signed by the owner, for an AI agent's capabilities.
-func (e *elsewhere) setCapabilities(t *testing.T, id string, caps ...string) *httptest.ResponseRecorder {
+func (e *keyHeldElsewhere) setCapabilities(t *testing.T, id string, caps ...string) *httptest.ResponseRecorder {
 	t.Helper()
 	list, _ := json.Marshal(caps)
 	rec := httptest.NewRecorder()

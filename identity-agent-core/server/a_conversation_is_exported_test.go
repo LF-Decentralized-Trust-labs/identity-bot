@@ -39,7 +39,7 @@ import (
 func exportWorld(t *testing.T) *talkWorld {
 	t.Helper()
 	w := newTalkWorld(t)
-	w.s.ActivityLog.SetEventSigner(&invocationSigner{s: w.s})
+	w.s.ActivityLog.SetEventSigner(logEventSigner(w.s))
 	return w
 }
 
@@ -393,7 +393,7 @@ func aSecondMachine(t *testing.T, s *CoreServer) (ControllerGrant, []byte) {
 	seed := make([]byte, ed25519.SeedSize)
 	copy(seed, []byte("a second machine, granted then removed"))
 	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
-	g, err := s.controllers().Grant(ControllerGrant{
+	g, err := grantControllerRow(s, ControllerGrant{
 		ControllerAID: iacrypto.NonTransferableAIDQB64(pub), PublicKey: iacrypto.VerkeyQB64(pub),
 		Label: "the old laptop", Grade: GradeEnrolled, Signer: talkSigner,
 	}, time.Now().UTC())
@@ -591,7 +591,7 @@ func TestTheIdentityAgentsSideFailsPlainly(t *testing.T) {
 			return signWhereUnsigned(w.b.PairwiseAID, raws, make([]string, len(raws)), wrongSeed)
 		},
 		"a log signer the keys do not make": func() error {
-			_, err := w.s.exportLogSigner(invocationSignerRecord{AID: "EUnknownIdentityAltogether", Index: signer.Index + 1000})
+			_, err := w.s.exportLogSigner(coretypes.LogSignerRecord{AID: "EUnknownIdentityAltogether", Index: signer.Index + 1000})
 			return err
 		},
 		"an identity that is no AI agent here": func() error {

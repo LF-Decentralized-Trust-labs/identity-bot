@@ -317,16 +317,8 @@ func TestAClickNeedsTheTakeControlPermission(t *testing.T) {
 func TestABrowserSessionCannotTakeControl(t *testing.T) {
 	w := newScreenWorld(t)
 	eventually(t, "the screen was never offered", func() bool { return w.hasScreen(t, w.a.ID) })
-	w.s.BrowserSessions = newBrowserSessions()
 	const secret = "the-browser-keeps-this"
-	id, code, _, _ := w.s.BrowserSessions.newChallenge(hashSecret(secret))
-	if err := w.s.BrowserSessions.grant(code); err != nil {
-		t.Fatal(err)
-	}
-	token, _, err := w.s.BrowserSessions.claim(id, secret)
-	if err != nil {
-		t.Fatal(err)
-	}
+	token := signInABrowser(t, w.s, secret)
 	asBrowser := func(method, path, body string) (int, map[string]any) {
 		req := remote(method, path, body)
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -481,18 +473,10 @@ func TestTakingControlTwiceAtOnceIsRecordedOnce(t *testing.T) {
 // who also holds a browser session is the owner, as the gate admitted them.
 func TestTheRecordNamesWhoTheGateAdmitted(t *testing.T) {
 	w := newScreenWorld(t)
-	w.s.localOwnerSecret = testOwnerSecret
+	withOwnerSecret(w.s, testOwnerSecret)
 	eventually(t, "the screen was never offered", func() bool { return w.hasScreen(t, w.a.ID) })
-	w.s.BrowserSessions = newBrowserSessions()
 	const secret = "the-browser-keeps-this"
-	id, code, _, _ := w.s.BrowserSessions.newChallenge(hashSecret(secret))
-	if err := w.s.BrowserSessions.grant(code); err != nil {
-		t.Fatal(err)
-	}
-	token, _, err := w.s.BrowserSessions.claim(id, secret)
-	if err != nil {
-		t.Fatal(err)
-	}
+	token := signInABrowser(t, w.s, secret)
 	req := local("POST", "/api/mcp/agents/"+w.a.ID+"/screen", `{}`)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()

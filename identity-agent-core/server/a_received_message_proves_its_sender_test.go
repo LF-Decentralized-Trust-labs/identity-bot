@@ -516,19 +516,3 @@ func TestOneSendersFloodOfRefusalsSilencesOnlyItself(t *testing.T) {
 		t.Fatalf("another sender's refusal was not recorded while one sender flooded: %d", n)
 	}
 }
-
-func (e *writeCounting) GetKelByAID(string) (*drivers.DriverKelResponse, error) {
-	return nil, fmt.Errorf("not held")
-}
-func (e *writeCounting) CreateInceptionNamed(a, b, c string) (*drivers.DriverInceptionResponse, error) {
-	e.writes++
-	return e.KeriEngine.CreateInceptionNamed(a, b, c)
-}
-func (e *writeCounting) ReinstateDelegatedIdentity(a, b, c, d string) (*drivers.DriverDelegatedInceptionResponse, error) {
-	e.writes++
-	return e.KeriEngine.ReinstateDelegatedIdentity(a, b, c, d)
-}
-func (e *writeCounting) CreateDelegatedInception(a, b, c, d string) (*drivers.DriverDelegatedInceptionResponse, error) {
-	e.writes++
-	return e.KeriEngine.CreateDelegatedInception(a, b, c, d)
-}
