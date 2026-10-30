@@ -20,6 +20,7 @@ import (
 // none of its routes and recognises none of its tokens or bodies.
 func init() {
 	server.RegisterAddon(server.Addon{
+		ID:   "ai_agents",
 		Name: "AI agents",
 		Routes: func(s *server.CoreServer, r chi.Router) {
 			of(s).aiAgentRoutes(r)

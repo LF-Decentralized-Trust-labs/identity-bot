@@ -259,11 +259,8 @@ func TestAClickNeedsTheTakeControlPermission(t *testing.T) {
 	// Taking control is its own action, so it can need more than watching.
 	// Set here to 90 to show the two are judged apart; by default it needs
 	// the same as everything else (TestControlNeedsOnlyTheDefaultUnlessRaised).
-	helpers.ControllerMinimumScore()[routeScreenControl], helpers.ControllerMinimumScore()[routeScreenInput] = 90, 90
-	t.Cleanup(func() {
-		delete(helpers.ControllerMinimumScore(), routeScreenControl)
-		delete(helpers.ControllerMinimumScore(), routeScreenInput)
-	})
+	fixtures.ControllerNeedsScore(t, routeScreenControl, 90)
+	fixtures.ControllerNeedsScore(t, routeScreenInput, 90)
 	// At the score every person has until human authentication is built.
 	if code, out, raw := w.asApp(t, "POST", base+"/control", `{"on":true}`, 0); code != http.StatusForbidden ||
 		out["reason"] != "score_too_low" {

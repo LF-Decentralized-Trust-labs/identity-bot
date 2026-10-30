@@ -199,9 +199,6 @@ var controllerOwnerOnly = map[string]string{
 	// keys for, so it is the owner's signature by another door.
 	"POST /api/sealed/send": "this speaks as the identity to another Identity Agent, which serves it as that identity's own request",
 
-	// --- this computer itself ---
-	"POST /api/sandbox/podman/setup": "installing software on a computer is done by the app running on it",
-
 	// --- who else may act for this identity ---
 	//
 	// Enrolling a controller from a controller is how an attacker who briefly
@@ -229,9 +226,74 @@ var controllerMinimumScore = map[string]int{}
 
 // isOwnerOnly reports whether this route is closed to a controller at any
 // score, and why.
+//
+// The core's rules come first; an add-on's own (Addon.ControllerOwnerOnly)
+// close its routes the same way.
 func isOwnerOnly(method, pattern string) (string, bool) {
-	why, ok := controllerOwnerOnly[method+" "+pattern]
-	return why, ok
+	route := method + " " + pattern
+	if why, ok := controllerOwnerOnly[route]; ok {
+		return why, true
+	}
+	for _, a := range registeredAddons() {
+		if why, ok := a.ControllerOwnerOnly[route]; ok {
+			return why, true
+		}
+	}
+	return "", false
+}
+
+// minimumScoreFor is the score route needs from a controller: the core's,
+// raised by any add-on that asks for more. An add-on cannot lower it, and a
+// negative minimum from anyone refuses everybody (permission.Action).
+func minimumScoreFor(route string) int {
+	min := controllerMinimumScore[route]
+	if min < 0 {
+		return min
+	}
+	needs := permission.Action{MinimumScore: min}.TheScoreItNeeds()
+	for _, a := range registeredAddons() {
+		v, ok := a.ControllerMinimumScore[route]
+		if !ok {
+			continue
+		}
+		if v < 0 {
+			return v
+		}
+		if v > needs {
+			min, needs = v, v
+		}
+	}
+	return min
+}
+
+// everyControllerOwnerOnly is a copy of every rule closing a route to a
+// controller: the core's and every add-on's.
+func everyControllerOwnerOnly() map[string]string {
+	out := make(map[string]string, len(controllerOwnerOnly))
+	for _, a := range registeredAddons() {
+		for k, v := range a.ControllerOwnerOnly {
+			out[k] = v
+		}
+	}
+	for k, v := range controllerOwnerOnly {
+		out[k] = v
+	}
+	return out
+}
+
+// everyControllerMinimumScore is a copy of every route's minimum other than
+// the default, as minimumScoreFor decides it.
+func everyControllerMinimumScore() map[string]int {
+	out := map[string]int{}
+	for k := range controllerMinimumScore {
+		out[k] = minimumScoreFor(k)
+	}
+	for _, a := range registeredAddons() {
+		for k := range a.ControllerMinimumScore {
+			out[k] = minimumScoreFor(k)
+		}
+	}
+	return out
 }
 
 // controllerAuthenticationFreshness is how recently a vouched statement about
@@ -259,7 +321,7 @@ func mayThisControllerDoThis(
 		return false, why + ", so it is done with the owner's keys on the device holding them"
 	}
 	return permission.MayThisPersonDoThis(
-		permission.Action{Name: method + " " + pattern, MinimumScore: controllerMinimumScore[method+" "+pattern]},
+		permission.Action{Name: method + " " + pattern, MinimumScore: minimumScoreFor(method + " " + pattern)},
 		permission.Person{AID: who, Authenticated: authenticated},
 	)
 }
@@ -270,7 +332,7 @@ func whyAControllerWasRefused(method, pattern string, authenticated authprovider
 	if _, closed := isOwnerOnly(method, pattern); closed {
 		return reasonOwnerOnly
 	}
-	a := permission.Action{Name: method + " " + pattern, MinimumScore: controllerMinimumScore[method+" "+pattern]}
+	a := permission.Action{Name: method + " " + pattern, MinimumScore: minimumScoreFor(method + " " + pattern)}
 	if a.MinimumScore >= 0 && (!authenticated.Measured || authenticated.Score < a.TheScoreItNeeds()) {
 		return reasonScoreTooLow
 	}

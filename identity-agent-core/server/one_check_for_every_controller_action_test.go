@@ -173,7 +173,9 @@ func TestTheOwnerOnlyListIsTheOneTheADRRecords(t *testing.T) {
 		"POST /api/capability-registry/{id}/enabled",
 		"DELETE /api/capability-registry/{id}",
 		"POST /api/sealed/send",
-		"POST /api/sandbox/podman/setup",
+		// ADR-050 also records POST /api/sandbox/podman/setup. It is the
+		// sandboxed-apps add-on's route, so that add-on closes it with its
+		// own rule (Addon.ControllerOwnerOnly), tested with the add-on.
 	}
 	have := make([]string, 0, len(controllerOwnerOnly))
 	for route, why := range controllerOwnerOnly {

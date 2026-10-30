@@ -301,6 +301,8 @@ func DefaultConfig() Config {
 }
 
 func New(cfg Config) (*CoreServer, error) {
+	// The add-ons included are settled now: none joins once a server exists.
+	sealAddons()
 	ctx, cancel := context.WithCancel(context.Background())
 
 	dataStore, err := store.NewSQLiteStore(cfg.DataDir)
@@ -1300,13 +1302,16 @@ type HealthResponse struct {
 }
 
 type CoreInfoResponse struct {
-	Name         string      `json:"name"`
-	Description  string      `json:"description"`
-	Version      string      `json:"version"`
-	Phase        string      `json:"phase"`
-	Capabilities []string    `json:"capabilities"`
-	Backend      BackendInfo `json:"backend"`
-	Driver       DriverInfo  `json:"driver,omitempty"`
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	Version      string   `json:"version"`
+	Phase        string   `json:"phase"`
+	Capabilities []string `json:"capabilities"`
+	// AddOns are the IDs of the add-ons this Identity Agent includes
+	// (Addon.ID), so an app shows only what is there.
+	AddOns  []string    `json:"add_ons"`
+	Backend BackendInfo `json:"backend"`
+	Driver  DriverInfo  `json:"driver,omitempty"`
 }
 
 type BackendInfo struct {
@@ -1462,11 +1467,11 @@ func (s *CoreServer) handleInfo(w http.ResponseWriter, r *http.Request) {
 			"contacts",
 			"oobi",
 			"tunneling",
-			"sandbox_plugins",
 			"pairwise_aids",
 			// Transaction hash receipts (pointer/stub) — primitives (secureenclave + blake3) reused when built
 			// Governance policy config (pointer/stub) — LLM egress structurally denied until the governance gateway strip-gate
 		},
+		AddOns: addonIDs(),
 		Backend: BackendInfo{
 			Mode:      "primary_active",
 			Storage:   "file-based (badgerdb pending)",

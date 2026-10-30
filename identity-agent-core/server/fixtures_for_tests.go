@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -856,3 +857,94 @@ func anchorAtLeastEvery(t coretypes.TB, d time.Duration) {
 
 // useAssetHandler gives s the asset handler ah.
 func useAssetHandler(s *CoreServer, ah *asset.Handler) { s.assetHandler = ah }
+
+// entriesForRoutesNotItsOwn are the entries each add-on makes in the route
+// tables and the controller rules for a route it does not itself mount, as
+// "add-on: table: entry". An add-on may open, close or rate only its own
+// routes: an entry for a core route, or another add-on's, is one it must not
+// make.
+func entriesForRoutesNotItsOwn(s *CoreServer) []string {
+	var out []string
+	var served []string
+	chi.Walk(s.buildRouter(""), func(_, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		served = append(served, route)
+		return nil
+	})
+	for _, a := range registeredAddons() {
+		r := chi.NewRouter()
+		if a.Routes != nil {
+			r.Route("/api", func(r chi.Router) { a.Routes(s, r) })
+		}
+		if a.RootRoutes != nil {
+			a.RootRoutes(s, r)
+		}
+		own := map[string]bool{}
+		var patterns []string
+		chi.Walk(r, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+			own[method+" "+route] = true
+			patterns = append(patterns, route)
+			return nil
+		})
+		check := func(table string, keys []string) {
+			for _, k := range keys {
+				if !own[k] {
+					out = append(out, a.ID+": "+table+": "+k)
+				}
+			}
+		}
+		keysOf := func(m map[string]string) []string {
+			var ks []string
+			for k := range m {
+				ks = append(ks, k)
+			}
+			return ks
+		}
+		var mins []string
+		for k := range a.ControllerMinimumScore {
+			mins = append(mins, k)
+		}
+		check("PublicRoutes", keysOf(a.PublicRoutes))
+		check("ScopedRoutes", keysOf(a.ScopedRoutes))
+		check("SessionForbidden", keysOf(a.SessionForbidden))
+		check("ControllerOwnerOnly", keysOf(a.ControllerOwnerOnly))
+		check("ControllerMinimumScore", mins)
+		// A prefix opens every route under it, so each route the whole
+		// server serves under it must be one of the add-on's.
+		ownPattern := map[string]bool{}
+		for _, route := range patterns {
+			ownPattern[route] = true
+		}
+		for _, p := range a.ScopedPrefixes {
+			found, foreign := false, false
+			for _, route := range served {
+				if !strings.HasPrefix(route, p) && !strings.HasPrefix(route+"/", p) {
+					continue
+				}
+				if ownPattern[route] {
+					found = true
+				} else {
+					foreign = true
+				}
+			}
+			if !found || foreign {
+				out = append(out, a.ID+": ScopedPrefixes: "+p)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// controllerNeedsScore makes route need score from a controller for the rest
+// of t, then puts back what it needed.
+func controllerNeedsScore(t coretypes.TB, route string, score int) {
+	was, had := controllerMinimumScore[route]
+	controllerMinimumScore[route] = score
+	t.Cleanup(func() {
+		if had {
+			controllerMinimumScore[route] = was
+		} else {
+			delete(controllerMinimumScore, route)
+		}
+	})
+}

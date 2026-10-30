@@ -16,7 +16,13 @@ import (
 // import this package runs no sandbox manager and serves none of its routes.
 func init() {
 	server.RegisterAddon(server.Addon{
+		ID:   "sandboxed_apps",
 		Name: "sandboxed apps",
+		// Installing software on a computer is for the app running on it:
+		// no machine acting for the owner may do it, at any score.
+		ControllerOwnerOnly: map[string]string{
+			"POST /api/sandbox/podman/setup": "installing software on a computer is done by the app running on it",
+		},
 		// The sandbox manager is made with the server, once its activity
 		// log and vault are, and stopped before the log closes.
 		Prepare: func(s *server.CoreServer) { of(s).makeManager() },

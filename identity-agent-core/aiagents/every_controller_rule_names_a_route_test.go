@@ -3,6 +3,7 @@ package aiagents
 import (
 	"identity-agent-core/asset"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -40,5 +41,15 @@ func TestEveryControllerRuleNamesARouteThisAgentServes(t *testing.T) {
 		if !served[route] {
 			t.Errorf("%s has a minimum score but this Identity Agent serves no such route", route)
 		}
+	}
+}
+
+// Neither add-on in this module makes an entry in the route tables or the
+// controller rules for a route it does not itself mount: none opens, closes
+// or rates a core route, or the other's.
+func TestNoAddOnHereMakesRulesForRoutesNotItsOwn(t *testing.T) {
+	s := fixtures.NewAuthTestServer(t)
+	if got := fixtures.EntriesForRoutesNotItsOwn(s); len(got) != 0 {
+		t.Fatalf("add-ons here make entries for routes they do not mount:\n%s", strings.Join(got, "\n"))
 	}
 }

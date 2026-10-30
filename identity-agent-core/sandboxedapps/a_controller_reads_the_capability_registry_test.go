@@ -47,3 +47,11 @@ func TestCapabilityPackImportStaysOwnerOnly(t *testing.T) {
 			rec.Code)
 	}
 }
+
+// Installing software on this computer is closed to a machine acting for the
+// owner, at any score, by this add-on's own rule (ADR-050).
+func TestNoControllerInstallsSoftwareOnThisComputer(t *testing.T) {
+	if why := helpers.ControllerOwnerOnly()["POST /api/sandbox/podman/setup"]; why == "" {
+		t.Fatal("setting up the container runtime is open to a controller")
+	}
+}

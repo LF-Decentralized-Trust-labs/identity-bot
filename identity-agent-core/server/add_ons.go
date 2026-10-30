@@ -16,11 +16,11 @@ import (
 
 // Add-ons.
 //
-// An add-on is a part of the Identity Agent that not every Identity Agent
-// needs: AI agents, sandboxed apps, an organisation's own features. Whatever
-// the core links is carried by every app built on it, on every phone, so the
-// core holds only what every Identity Agent needs and the rest comes as
-// add-ons, each included only by an app that chooses it.
+// An add-on is a package an app may include alongside the core: AI agents,
+// sandboxed apps, an organisation's own features. Whatever the core links is
+// carried by every app built on it, on every phone, so the core holds only
+// what every Identity Agent needs and the rest comes as add-ons, each
+// included only by an app that imports it.
 //
 // An add-on is a package of its own that the core never imports. An app
 // includes it by importing that package, whose init calls RegisterAddon, and
@@ -34,6 +34,10 @@ import (
 
 // Addon is what an add-on gives the core. Every field is optional.
 type Addon struct {
+	// ID names the add-on to apps, in what /api/info says is included
+	// ("ai_agents", "sandboxed_apps"). It is required, never changes once an
+	// app relies on it, and no two add-ons share one.
+	ID string
 	// Name says which add-on, in logs.
 	Name string
 
@@ -105,6 +109,16 @@ type Addon struct {
 	ScopedPrefixes   []string
 	SessionForbidden map[string]string
 
+	// The add-on's rules for a machine acting for the owner (a controller),
+	// beside the core's (what_a_controller_may_reach.go), keyed the same way.
+	// ControllerOwnerOnly are its routes no controller may take, at any
+	// score, with why. ControllerMinimumScore are the scores its routes need
+	// other than the default. An add-on can only make an action harder to
+	// take: a minimum below what the core asks counts for nothing, and a
+	// negative one refuses everybody, as it does in the core.
+	ControllerOwnerOnly    map[string]string
+	ControllerMinimumScore map[string]int
+
 	// GrantKinds are the kinds of grant the add-on issues, by schema, with
 	// what the core's grant engine asks about each one. A grant of a kind no
 	// add-on here issues is not appended when its signature comes back.
@@ -143,16 +157,52 @@ type ChainHead struct {
 var (
 	addonsMu sync.Mutex
 	addons   []Addon
+	// addonsSealed is set once New first runs: the add-ons included are
+	// settled then, and none is added while a server runs.
+	addonsSealed bool
 )
 
 // RegisterAddon includes an add-on in every Identity Agent this process
 // starts. An add-on's package calls it from its init, so importing the
 // package is what includes it. Add-ons are asked in the order they were
 // registered.
+//
+// It panics once a server has been made, and for an add-on with no ID or
+// with an ID another already has: the list is fixed before anything runs, so
+// nothing can join it mid-run, and an app can tell which is which.
 func RegisterAddon(a Addon) {
 	addonsMu.Lock()
 	defer addonsMu.Unlock()
+	if addonsSealed {
+		panic("server.RegisterAddon(" + a.ID + ") after a server was made: an add-on registers from its package's init")
+	}
+	if a.ID == "" {
+		panic("server.RegisterAddon: an add-on needs an ID (" + a.Name + ")")
+	}
+	for _, b := range addons {
+		if b.ID == a.ID {
+			panic("server.RegisterAddon: two add-ons are both " + a.ID)
+		}
+	}
 	addons = append(addons, a)
+}
+
+// sealAddons settles the add-ons included: from now on RegisterAddon
+// refuses.
+func sealAddons() {
+	addonsMu.Lock()
+	defer addonsMu.Unlock()
+	addonsSealed = true
+}
+
+// addonIDs are the IDs of the add-ons included, in the order they
+// registered.
+func addonIDs() []string {
+	ids := []string{}
+	for _, a := range registeredAddons() {
+		ids = append(ids, a.ID)
+	}
+	return ids
 }
 
 // registeredAddons are the add-ons included, in the order they registered.
@@ -254,16 +304,22 @@ func (s *CoreServer) anchoredChains() ([]AnchoredChains, error) {
 	return out, nil
 }
 
-// resolveBearerToken asks the add-ons who presented token.
+// resolveBearerToken asks the add-ons who presented token. A token more than
+// one add-on claims is nobody's: it is refused as an unknown one is, since
+// which of them it is cannot be told.
 func (s *CoreServer) resolveBearerToken(r *http.Request, token string, cc permission.CallerContext) (permission.CallerContext, bool) {
+	var found []permission.CallerContext
 	for _, a := range registeredAddons() {
 		if a.ResolveBearerToken != nil {
 			if resolved, ok := a.ResolveBearerToken(s, r, token, cc); ok {
-				return resolved, true
+				found = append(found, resolved)
 			}
 		}
 	}
-	return cc, false
+	if len(found) != 1 {
+		return cc, false
+	}
+	return found[0], true
 }
 
 // resolveBodySignature asks the add-ons who signed r with a body's key.
@@ -292,31 +348,58 @@ func (s *CoreServer) enrichProvenCaller(caller *permission.CallerContext) {
 	}
 }
 
-// sealedSenderOfAnAddon asks the add-ons who a sealed envelope from kid comes from.
+// sealedSenderOfAnAddon asks the add-ons who a sealed envelope from kid
+// comes from. A kid more than one add-on claims is nobody's.
 func (s *CoreServer) sealedSenderOfAnAddon(kid string) (didcomm.DID, bool) {
+	var found []didcomm.DID
 	for _, a := range registeredAddons() {
 		if a.SealedSender != nil {
 			if did, ok := a.SealedSender(s, kid); ok {
-				return did, true
+				found = append(found, did)
 			}
 		}
 	}
-	return didcomm.DID{}, false
+	if len(found) != 1 {
+		return didcomm.DID{}, false
+	}
+	return found[0], true
 }
 
 // errNoConversations is an Identity Agent none of whose add-ons keeps
 // conversations.
 var errNoConversations = errors.New("no add-on here keeps conversations")
 
+// errConversationHeldTwice is a conversation more than one add-on says it
+// holds: whose it is cannot be told, so it is filed under neither.
+var errConversationHeldTwice = errors.New("more than one add-on says it holds this conversation")
+
 // conversationParty asks the add-ons about conversation id. With none that
-// keeps conversations it fails, as the conversations failing to open did.
+// keeps conversations it fails, as the conversations failing to open did; an
+// add-on that fails makes it fail; and a conversation more than one add-on
+// holds fails rather than being filed under one of them.
 func (s *CoreServer) conversationParty(id, party string) (held, isParty bool, err error) {
+	asked, holders := 0, 0
 	for _, a := range registeredAddons() {
-		if a.ConversationParty != nil {
-			return a.ConversationParty(s, id, party)
+		if a.ConversationParty == nil {
+			continue
+		}
+		asked++
+		h, p, err := a.ConversationParty(s, id, party)
+		if err != nil {
+			return false, false, err
+		}
+		if h {
+			holders++
+			held, isParty = true, p
 		}
 	}
-	return false, false, errNoConversations
+	switch {
+	case asked == 0:
+		return false, false, errNoConversations
+	case holders > 1:
+		return false, false, errConversationHeldTwice
+	}
+	return held, isParty, nil
 }
 
 // addonRouteEntry is an add-on's entry for key in one of the route tables.

@@ -166,8 +166,8 @@ func (hostWrapper) CapabilityGrantSchemaSAID() string      { return capabilityGr
 func (hostWrapper) CapabilityGrantSchemaSAIDs() []string   { return capabilityGrantSchemaSAIDs }
 func (hostWrapper) ClampWhy(v string) string               { return clampWhy(v) }
 func (hostWrapper) ControllerLearnsWhoItActsFor() string   { return controllerLearnsWhoItActsFor }
-func (hostWrapper) ControllerMinimumScore() map[string]int { return controllerMinimumScore }
-func (hostWrapper) ControllerOwnerOnly() map[string]string { return controllerOwnerOnly }
+func (hostWrapper) ControllerMinimumScore() map[string]int { return everyControllerMinimumScore() }
+func (hostWrapper) ControllerOwnerOnly() map[string]string { return everyControllerOwnerOnly() }
 func (hostWrapper) CredentialStatusWithdrawing() string    { return credentialStatusWithdrawing }
 func (hostWrapper) DenyAuthorization(w http.ResponseWriter, detail string) {
 	denyAuthorization(w, detail)

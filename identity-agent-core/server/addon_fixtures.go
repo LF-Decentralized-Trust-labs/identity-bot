@@ -146,3 +146,9 @@ func (fixtureWrapper) WithdrawWith(t coretypes.TB, s *CoreServer, seed []byte) {
 }
 func (fixtureWrapper) AnchorAtLeastEvery(t coretypes.TB, d time.Duration) { anchorAtLeastEvery(t, d) }
 func (fixtureWrapper) UseAssetHandler(s *CoreServer, ah *asset.Handler)   { useAssetHandler(s, ah) }
+func (fixtureWrapper) EntriesForRoutesNotItsOwn(s *CoreServer) []string {
+	return entriesForRoutesNotItsOwn(s)
+}
+func (fixtureWrapper) ControllerNeedsScore(t coretypes.TB, route string, score int) {
+	controllerNeedsScore(t, route, score)
+}

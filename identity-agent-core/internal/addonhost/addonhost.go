@@ -124,6 +124,9 @@ type Helpers interface {
 	CapabilityGrantSchemaSAIDs() []string
 	ClampWhy(v string) string
 	ControllerLearnsWhoItActsFor() string
+	// ControllerMinimumScore and ControllerOwnerOnly are copies of the rules
+	// for a controller in force, the core's and every add-on's: changing one
+	// changes nothing.
 	ControllerMinimumScore() map[string]int
 	ControllerOwnerOnly() map[string]string
 	CredentialStatusWithdrawing() string
@@ -179,6 +182,8 @@ type Fixtures interface {
 	CheckAsTheDevice(t coretypes.TB, s *server.CoreServer, req store.SigningRequest) (map[string]interface{}, error)
 	ControllerRow(s *server.CoreServer, aid string) (server.ControllerGrant, bool, error)
 	CredentialsOf(t coretypes.TB, s *server.CoreServer, holder string) []store.CredentialRecord
+	ControllerNeedsScore(t coretypes.TB, route string, score int)
+	EntriesForRoutesNotItsOwn(s *server.CoreServer) []string
 	EveryPublicRoute() map[string]string
 	EverySessionForbidden() map[string]string
 	EverythingRuns(s *server.CoreServer)
