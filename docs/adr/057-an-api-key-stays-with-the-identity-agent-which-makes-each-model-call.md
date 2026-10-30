@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-10-28
-**Amended:** 2026-10-30 — trimmed to the exchange a machine follows. How an Identity Agent that holds AI agents keeps the key, routes the call, caps a machine's calls and records what each call cost is that runtime's own decision, kept with it outside this repository.
+**Amended:** 2026-10-30 — trimmed to the exchange a machine follows. How an Identity Agent that holds AI agents keeps the key, routes the call, caps a machine's calls and records what each call cost is that runtime's own decision, kept with it outside this repository. Also 2026-10-30 — the exchange a machine sees when the Identity Agent holds the AI agent's model calls to an allowance.
 **Relates to:** ADR-046 (A machine becomes an AI agent's body by a person comparing six words), ADR-047 (AI agents talk through the Identity Agent that holds them), ADR-056 (Revoking an AI agent is final)
 
 ## Context
@@ -50,6 +50,16 @@ sends the Identity Agent is (ADR-047).
 - The request body is at most 3 MB. A model call is one JSON object naming its
   model once, as `model`. Where a model is chosen for the AI agent, it must name
   exactly that model.
+- Where the Identity Agent holds the AI agent's model calls to an allowance (a
+  limit on what they may cost), a model call must also say how long an answer
+  it wants, as `max_tokens`, `max_completion_tokens` or `max_output_tokens`,
+  each spelt exactly and given at most once, a whole number from 1 to 32,768;
+  where more than one is given, the largest counts. It asks for one answer:
+  `n` and `best_of`, where given, must be 1. While an allowance is set, the AI
+  agent makes one model call at a time, across all its machines. A request
+  that only reads, such as listing the provider's models or reading one model,
+  is not held to the allowance at all: it is not refused, counted or made to
+  wait.
 
 ### Reading the answer: `GET /api/agent-host/model-calls/{call}?from=N&lease=L`
 
@@ -91,11 +101,11 @@ body passes to its brain"}`:
 | Status | When |
 |---|---|
 | 400 | The request names no lease or no call to make |
-| 403 | The lease is not open for this body, the AI agent may no longer act (revoked, its grant lapsed), its sign-in is not a key kept here or has expired or was removed, or the path, query or model is not one allowed above. A start or a collection refused this way also says `"refused": true` |
+| 403 | The lease is not open for this body, the AI agent may no longer act (revoked, its grant lapsed), its sign-in is not a key kept here or has expired or was removed, or the path, query or model is not one allowed above. Under an allowance, also: the allowance is spent; an earlier call ended without its cost being known (the provider answered it without saying what it cost, it was lost in a restart, or its cost could not be written down), which stops the allowance until it is set again; the provider does not say what a call costs; or the call breaks the rules above on answer length or the number of answers, or is not one JSON object. A start or a collection refused this way also says `"refused": true` |
 | 409 | A collection asks for part of the answer from before `from` it already collected: that part was let go and cannot be given again |
 | 413 | The call is larger than 3 MB, or unreadable |
-| 429 | The machine already holds as many calls for this AI agent as it may; it collects their answers first |
-| 503 | The AI agent's sign-in, or what was lent to the run, cannot be read right now (a start refused this way also says `"refused": true`); or the provider the key is for cannot be reached from here right now |
+| 429 | The machine already holds as many calls for this AI agent as it may; it collects their answers first. Under an allowance, also: another of the AI agent's calls is under way or not yet counted, and this one says `"refused": true` |
+| 503 | The AI agent's sign-in, what was lent to the run, or its allowance cannot be read right now (a start refused this way also says `"refused": true`); the allowance cannot be written down before the call is sent, so the call was not made; or the provider the key is for cannot be reached from here right now |
 
 A call the Identity Agent no longer knows, for example after a restart, is
 answered 410. The body tells its brain the call failed, and the brain's
@@ -115,4 +125,7 @@ never lent the key.
 - Every model call crosses the Identity Agent, so a slow or unreachable Identity
   Agent slows or stops the AI agents whose keys it keeps.
 - A brain's conversation larger than 3 MB is refused.
+- Under an allowance, a brain whose program does not say how long an answer it
+  wants is refused until it does, and the AI agent's calls run one after
+  another rather than together.
 - Test vectors for this exchange are not published yet.
