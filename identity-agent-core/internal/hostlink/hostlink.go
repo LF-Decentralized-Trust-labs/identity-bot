@@ -1,16 +1,25 @@
 // Package hostlink holds the token server.AddonHost and server.AddonFixtures
-// ask for, so that only this module, which can make one, reaches the server's
-// side of the add-on handle (internal/addonhost).
+// ask for (internal/addonhost). It is a safeguard: it keeps the handle from
+// being reached by accident, and keeps it out of programs that include no
+// add-on. It is not a security boundary (see Token).
 package hostlink
 
 // Token is what server.AddonHost and server.AddonFixtures ask for.
 //
-// Only a token made by New is accepted. Code elsewhere cannot name the type,
-// so writes no value that converts to it; and what it can still conjure
-// without naming it, a zero Token (inferred from the function's own parameter
-// by a generic call, or made by reflect), is refused, because only New sets
-// the field that makes a token this module's. Nothing short of unsafe makes
-// one elsewhere.
+// Only a token made by New is accepted. Code that cannot import this package
+// cannot name the type, so writes no value that converts to it; and the zero
+// Token it can still conjure without naming it (inferred from the function's
+// own parameter by a generic call, or made by reflect) is refused, because
+// only New sets the field that makes a token this module's. That keeps the
+// handle from being used by mistake.
+//
+// What it is not: a boundary against code an app chooses to link. Go's
+// internal packages are kept by import path, and this module's path is the
+// bare identity-agent-core, so a module declaring itself
+// identity-agent-core/<anything> imports this package and internal/addonhost
+// directly; and code in the same process can always reach anything through
+// unsafe or its memory. An app's builder decides what is trusted, by choosing
+// the add-ons and other code it links.
 type Token struct{ key *sentinel }
 
 type sentinel struct{ _ byte }

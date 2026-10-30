@@ -7,10 +7,15 @@
 // server beyond its exported fields and methods is exactly this: Host, for
 // one server, and Helpers, for what needs none. The server implements both
 // with an unexported type it returns from server.AddonHost, which refuses
-// any token hostlink.New, inside this module, did not make; so nothing
-// outside this module reaches them, and a program that includes no add-on
+// any token hostlink.New did not make, and a program that includes no add-on
 // links none of it. Nothing here is a second copy: each method calls the
 // server's own.
+//
+// That keeps the handle from being used by mistake and out of programs that
+// do not need it. It is not a security boundary against code an app chooses
+// to link: a module whose path begins identity-agent-core/ can import this
+// package, and code in the same process can reach anything through unsafe.
+// An app's builder decides what is trusted, by choosing its add-ons.
 //
 // Fixtures are the worlds the core's own tests build, for the add-ons'
 // tests, from server.AddonFixtures. Only a test asks for them, so no program

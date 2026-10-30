@@ -9,12 +9,16 @@ import (
 	"testing"
 )
 
-// Code in another module cannot reach the server's add-on handle. It cannot
-// name hostlink.Token, so no value it writes converts to one; and the token
-// it can still conjure without naming it — a zero value, inferred from the
-// function's own parameter by a generic call or made by reflect — is refused
-// when it is used. This builds and runs a module of its own that depends on
-// this one, as an app built on the core would.
+// Code in another module does not reach the server's add-on handle by
+// mistake. It cannot name hostlink.Token, so no value it writes converts to
+// one; and the token it can still conjure without naming it — a zero value,
+// inferred from the function's own parameter by a generic call or made by
+// reflect — is refused when it is used. This builds and runs a module of its
+// own that depends on this one, as an app built on the core would.
+//
+// It also records the limit (hostlink.Token): the token is a safeguard, not a
+// boundary, and a module whose path begins identity-agent-core/ imports the
+// internal packages and reaches the handle directly.
 func TestAnotherModuleCannotMakeAToken(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module of its own")
@@ -32,10 +36,10 @@ func TestAnotherModuleCannotMakeAToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	// outsider runs go with args in a module of its own whose main.go is src.
-	outsider := func(t *testing.T, src string, args ...string) (string, error) {
+	outsiderNamed := func(t *testing.T, module, src string, args ...string) (string, error) {
 		t.Helper()
 		dir := t.TempDir()
-		mod := "module outsider\n\ngo 1.25.0\n\nrequire identity-agent-core v0.0.0\n\nreplace identity-agent-core => " + core + "\n"
+		mod := "module " + module + "\n\ngo 1.25.0\n\nrequire identity-agent-core v0.0.0\n\nreplace identity-agent-core => " + core + "\n"
 		for _, sub := range []string{"relayproto", "witnessproto"} {
 			mod += "replace github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/" + sub + " => " + filepath.Join(core, sub) + "\n"
 		}
@@ -49,6 +53,9 @@ func TestAnotherModuleCannotMakeAToken(t *testing.T) {
 		cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod", "GOPROXY=off")
 		out, err := cmd.CombinedOutput()
 		return string(out), err
+	}
+	outsider := func(t *testing.T, src string, args ...string) (string, error) {
+		return outsiderNamed(t, "outsider", src, args...)
 	}
 	program := func(body string) string {
 		return "package main\n\nimport \"identity-agent-core/server\"\n\nfunc main() {\n" + body + "\n}\n"
@@ -140,5 +147,32 @@ func main() {
 		if !strings.Contains(out, "not this module's") {
 			t.Errorf("%s failed for another reason than the token being refused:\n%s", name, out)
 		}
+	}
+
+	// The recorded limit: a module named under this one's path imports the
+	// internal packages, and reaches the handle with a token of its own
+	// making. If this ever stops reaching it, the docs saying it does are
+	// what to change.
+	out, err := outsiderNamed(t, "identity-agent-core/elsewhere", `package main
+
+import (
+	"fmt"
+
+	"identity-agent-core/internal/addonhost"
+	"identity-agent-core/internal/hostlink"
+	"identity-agent-core/server"
+)
+
+func main() {
+	_ = hostlink.New()
+	var s *server.CoreServer
+	if h := addonhost.Of(s); h != nil {
+		fmt.Println("REACHED the handle")
+	}
+}
+`, "run", ".")
+	if err != nil || !strings.Contains(out, "REACHED") {
+		t.Fatalf("a module named under identity-agent-core/ no longer reaches the handle; "+
+			"say so where hostlink.Token says it does: %v\n%s", err, out)
 	}
 }

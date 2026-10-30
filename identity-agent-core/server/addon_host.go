@@ -20,9 +20,10 @@ import (
 
 // AddonHost is the server's side of the handle the add-ons built in this
 // module have on s (internal/addonhost); s may be nil for the helpers that
-// need no server. It panics unless given a token hostlink.New made, which
-// nothing outside this module can call, so only this module reaches it. Each method of what it
-// returns calls the server's own; none is a second copy.
+// need no server. It panics unless given a token hostlink.New made, so it is
+// not reached by mistake. That is a safeguard, not a boundary against code an
+// app chooses to link: see hostlink.Token. Each method of what it returns
+// calls the server's own; none is a second copy.
 //
 // It is a function an add-on calls, rather than something the server
 // registers when it starts, so that a program that includes no add-on (the
