@@ -9,6 +9,7 @@ import (
 	"identity-agent-core/didcomm"
 	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/internal/hostlink"
+	"identity-agent-core/login"
 	"identity-agent-core/permission"
 	"identity-agent-core/schemas"
 	"identity-agent-core/store"
@@ -93,10 +94,16 @@ func (h hostWrapper) HandleGrantController(w http.ResponseWriter, r *http.Reques
 }
 func (h hostWrapper) HasBrowserSession(r *http.Request) bool      { return h.s.hasBrowserSession(r) }
 func (h hostWrapper) HoldTheRecord() (string, bool, bool, func()) { return h.s.holdTheRecord() }
-func (h hostWrapper) IdentitySigningSeed() ([]byte, error)        { return h.s.identitySigningSeed() }
-func (h hostWrapper) InBackground(fn func(ctx context.Context))   { h.s.inBackground(fn) }
-func (h hostWrapper) InitAssetHandler() error                     { return h.s.initAssetHandler() }
-func (h hostWrapper) IsVaultEntry(name string) bool               { return h.s.isVaultEntry(name) }
+func (h hostWrapper) SignAsTheIdentity(message []byte) (string, error) {
+	seed, err := h.s.identitySigningSeed()
+	if err != nil {
+		return "", err
+	}
+	return login.SignString(string(message), seed)
+}
+func (h hostWrapper) InBackground(fn func(ctx context.Context)) { h.s.inBackground(fn) }
+func (h hostWrapper) InitAssetHandler() error                   { return h.s.initAssetHandler() }
+func (h hostWrapper) IsVaultEntry(name string) bool             { return h.s.isVaultEntry(name) }
 func (h hostWrapper) IssueAssetCredential(kind *schemas.AssetGrant, holder string, issuer string, claims map[string]interface{}, expiry string, by coretypes.Authority) (string, error) {
 	return h.s.issueAssetCredential(kind, holder, issuer, claims, expiry, by)
 }

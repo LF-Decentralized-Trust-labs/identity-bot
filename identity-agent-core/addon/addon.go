@@ -101,7 +101,6 @@ type Host interface {
 	HandleGrantController(w http.ResponseWriter, r *http.Request)
 	HasBrowserSession(r *http.Request) bool
 	HoldTheRecord() (string, bool, bool, func())
-	IdentitySigningSeed() ([]byte, error)
 	InBackground(fn func(ctx context.Context))
 	InitAssetHandler() error
 	IsLiveBrowserSession(token string) bool
@@ -122,6 +121,10 @@ type Host interface {
 	RequireOwner(w http.ResponseWriter, r *http.Request) bool
 	ResolveBearerToken(r *http.Request, token string, cc permission.CallerContext) (permission.CallerContext, bool)
 	ResolveCaller(r *http.Request) permission.CallerContext
+	// SignAsTheIdentity signs message with this Identity Agent's own
+	// identity key, as login.SignString does, and returns the signature. The
+	// key stays in the core.
+	SignAsTheIdentity(message []byte) (string, error)
 	RevokeController(aid string) error
 	Router() chi.Router
 	RowIsItsGrant(g server.ControllerGrant) error
