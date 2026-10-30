@@ -230,6 +230,12 @@ func KeyFromVerkeyQB64(qb64 string) ([]byte, error) {
 	if len(qb64) != 44 || qb64[:1] != code {
 		return nil, fmt.Errorf("%q is not a CESR Ed25519 verifying key", qb64)
 	}
+	return rawOfOneCharCode(qb64)
+}
+
+// rawOfOneCharCode is the 32 raw bytes of a qb64 value with a one-character
+// code, which takes the place of one pad byte.
+func rawOfOneCharCode(qb64 string) ([]byte, error) {
 	raw, err := base64.RawURLEncoding.DecodeString("A" + qb64[1:])
 	if err != nil {
 		return nil, fmt.Errorf("verifying key is not valid base64url: %w", err)

@@ -2,6 +2,7 @@ package keriengine
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"testing"
 
 	keri "github.com/grapeid/keri-go"
@@ -39,5 +40,13 @@ func TestARawKeyIsNeverTakenForQB64(t *testing.T) {
 		if got, err := normaliseKey(want, true); err != nil || got != want {
 			t.Fatalf("qb64 %s read as %s (%v)", want, got, err)
 		}
+	}
+}
+
+// The engine reads raw keys in base64 only, as it always has: hex is refused.
+func TestTheEngineDoesNotReadAKeyInHex(t *testing.T) {
+	raw, _ := base64.StdEncoding.DecodeString("DDfja0BSaHyUzcmR5qSWupbddyc85Oe3PRRcFkiitao=")
+	if _, err := normaliseKey(hex.EncodeToString(raw), true); err == nil {
+		t.Fatal("a key in hex was read")
 	}
 }

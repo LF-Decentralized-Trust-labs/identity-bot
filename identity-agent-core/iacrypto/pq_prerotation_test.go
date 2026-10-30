@@ -197,3 +197,29 @@ func TestBothNextKeyFormsCommitIdentically(t *testing.T) {
 		t.Errorf("commitment is not over the canonical encoding")
 	}
 }
+
+// A next key is committed to in any spelling a caller holds it in. A raw key
+// in base64url that happened to start with D was taken for qb64 and refused.
+// A non-transferable qb64 key is still refused: the engine would commit to
+// its text with code B, and a commitment here over code D would disagree.
+func TestANextKeyIsCommittedToInAnySpelling(t *testing.T) {
+	raw, err := base64.StdEncoding.DecodeString("DDfja0BSaHyUzcmR5qSWupbddyc85Oe3PRRcFkiitao=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := VerkeyQB64(raw)
+	for _, spelling := range []string{
+		want,
+		base64.RawURLEncoding.EncodeToString(raw),
+		base64.StdEncoding.EncodeToString(raw),
+		base64.URLEncoding.EncodeToString(raw),
+	} {
+		got, err := CanonicalVerkeyQB64(spelling)
+		if err != nil || got != want {
+			t.Fatalf("%s committed as %s (%v), want %s", spelling, got, err, want)
+		}
+	}
+	if _, err := CanonicalVerkeyQB64(NonTransferableAIDQB64(raw)); err == nil {
+		t.Fatal("a non-transferable key was committed to under the transferable code")
+	}
+}

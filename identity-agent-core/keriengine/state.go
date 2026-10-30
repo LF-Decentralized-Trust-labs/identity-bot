@@ -24,6 +24,8 @@ import (
 	"sync"
 
 	keri "github.com/grapeid/keri-go"
+
+	"identity-agent-core/iacrypto"
 )
 
 // identity is what the engine remembers about one named identity.
@@ -192,63 +194,25 @@ func normaliseKey(key string, transferable bool) (string, error) {
 	if key == "" {
 		return "", fmt.Errorf("no public key was supplied")
 	}
-	// Already qb64: a one-character derivation code and 43 characters of
-	// payload. Both Ed25519 codes are accepted, and neither is rewritten —
-	// changing a non-transferable key into a transferable one would change the
-	// identifier of anything derived from it.
-	//
-	// Length and first character alone do not decide it. 32 raw bytes in
-	// padded base64 are 44 characters too, and one in 32 of them starts with D
-	// or B, so a genuine raw key was taken for qb64 and refused. The two
-	// cannot be confused by alphabet: qb64 is base64url and never padded,
-	// while padded base64 of 32 bytes always ends in "=".
-	if len(key) == 44 && (key[0] == 'D' || key[0] == 'B') && isBase64URLUnpadded(key) {
-		if _, err := keri.MatterRaw(string(key[0]), key, 32); err != nil {
+	// Already qb64. Both Ed25519 codes are accepted, and neither is
+	// rewritten — changing a non-transferable key into a transferable one would
+	// change the identifier of anything derived from it. How a qb64 key is told
+	// from a raw one is iacrypto.Ed25519KeyCode's to decide.
+	if code, ok := iacrypto.Ed25519KeyCode(key); ok {
+		if _, err := keri.MatterRaw(code, key, 32); err != nil {
 			return "", fmt.Errorf("%q looks like a qb64 key and does not decode as one: %w", key, err)
 		}
 		return key, nil
 	}
-	raw, err := decodeB64(key)
+	raw, err := iacrypto.DecodeSized(key, 32, false)
 	if err != nil {
-		return "", fmt.Errorf("the public key is neither qb64 nor base64 raw bytes: %w", err)
-	}
-	if len(raw) != 32 {
-		return "", fmt.Errorf("a public key decodes to %d bytes; Ed25519 keys are 32", len(raw))
+		return "", fmt.Errorf("the public key is neither qb64 nor 32 raw bytes in base64: %w", err)
 	}
 	code := keri.CodeEd25519
 	if !transferable {
 		code = keri.CodeEd25519N
 	}
 	return keri.MatterQB64(code, raw)
-}
-
-// isBase64URLUnpadded reports whether every character of s is in the
-// base64url alphabet, which is the only alphabet qb64 uses. Padding is not.
-func isBase64URLUnpadded(s string) bool {
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
-			return false
-		}
-	}
-	return true
-}
-
-// decodeB64 accepts base64 in any of the four spellings in use.
-//
-// The wire carries standard and URL-safe alphabets, padded and not, depending
-// on which language produced the value. Accepting one and rejecting the rest
-// would fail on input that is entirely well-formed.
-func decodeB64(s string) ([]byte, error) {
-	for _, enc := range []*base64.Encoding{
-		base64.RawURLEncoding, base64.URLEncoding,
-		base64.RawStdEncoding, base64.StdEncoding,
-	} {
-		if raw, err := enc.DecodeString(s); err == nil {
-			return raw, nil
-		}
-	}
-	return nil, fmt.Errorf("%q is not base64 in any of the standard alphabets", s)
 }
 
 // eventMap parses canonical event bytes into the map form the wire uses.

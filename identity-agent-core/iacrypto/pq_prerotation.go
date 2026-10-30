@@ -2,7 +2,6 @@ package iacrypto
 
 import (
 	"bytes"
-	"encoding/base64"
 	"fmt"
 
 	"github.com/cloudflare/circl/sign/mldsa/mldsa65"
@@ -163,29 +162,20 @@ func CanonicalVerkeyQB64(key string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// Always the transferable code, matching what the engine does with either
-	// input form. A non-transferable key normalises to the same commitment,
-	// because what is committed to is the key, not how it arrived.
+	// Always the transferable code, matching what the engine does with a raw
+	// key. A non-transferable qb64 key is refused (rawEd25519From): the engine
+	// commits to such a key's text as it is, code B and all, so a commitment
+	// taken here over code D would disagree with the engine's.
 	return VerkeyQB64(raw), nil
 }
 
 func rawEd25519From(key string) ([]byte, error) {
-	if len(key) > 1 && (key[0] == 'D' || key[0] == 'B') {
-		raw, err := KeyFromVerkeyQB64(key)
-		if err != nil {
-			return nil, fmt.Errorf("could not read the next key: %w", err)
-		}
-		if len(raw) != Ed25519PubkeyBytes {
-			return nil, fmt.Errorf("a next key is %d bytes, got %d", Ed25519PubkeyBytes, len(raw))
-		}
-		return raw, nil
-	}
-	raw, err := base64.RawURLEncoding.DecodeString(key)
+	raw, code, err := DecodeEd25519Key(key, false)
 	if err != nil {
-		return nil, fmt.Errorf("the next key is neither CESR-encoded nor base64: %w", err)
+		return nil, fmt.Errorf("could not read the next key: %w", err)
 	}
-	if len(raw) != Ed25519PubkeyBytes {
-		return nil, fmt.Errorf("a next key is %d bytes, got %d", Ed25519PubkeyBytes, len(raw))
+	if code == "B" {
+		return nil, fmt.Errorf("could not read the next key: %q is non-transferable, and a next key belongs to an identity that rotates", key)
 	}
 	return raw, nil
 }

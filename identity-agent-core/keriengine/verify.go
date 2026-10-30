@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"identity-agent-core/drivers"
+	"identity-agent-core/iacrypto"
 
 	keri "github.com/grapeid/keri-go"
 )
@@ -25,7 +26,7 @@ func (e *Engine) SignPayload(name, dataB64 string) (*drivers.DriverSignResponse,
 
 // VerifySignature checks a signature against a public key.
 func (e *Engine) VerifySignature(dataB64, signature, publicKey string) (*drivers.DriverVerifyResponse, error) {
-	data, err := decodeB64(dataB64)
+	data, err := iacrypto.DecodeBase64(dataB64)
 	if err != nil {
 		return nil, fmt.Errorf("the signed data is not base64: %w", err)
 	}
@@ -57,7 +58,7 @@ func signatureBytes(signature string) ([]byte, error) {
 		}
 		return raw, nil
 	}
-	raw, err := decodeB64(signature)
+	raw, err := iacrypto.DecodeBase64(signature)
 	if err != nil {
 		return nil, fmt.Errorf("the signature is neither CESR nor base64: %w", err)
 	}
@@ -69,7 +70,7 @@ func signatureBytes(signature string) ([]byte, error) {
 
 // CesrEncode wraps a raw signature in its CESR form.
 func (e *Engine) CesrEncode(rawSigB64 string) (*drivers.DriverCesrEncodeResponse, error) {
-	raw, err := decodeB64(rawSigB64)
+	raw, err := iacrypto.DecodeBase64(rawSigB64)
 	if err != nil {
 		return nil, fmt.Errorf("the signature is not base64: %w", err)
 	}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"identity-agent-core/drivers"
+	"identity-agent-core/iacrypto"
 
 	keri "github.com/grapeid/keri-go"
 )
@@ -1062,7 +1063,7 @@ func (e *Engine) ReloadIdentity(req *drivers.DriverReloadIdentityRequest) (*driv
 	for i, parsed := range req.KEL {
 		e := kelEntry{Parsed: parsed}
 		if i < len(req.RawEventsB64) && req.RawEventsB64[i] != "" {
-			raw, err := decodeB64(req.RawEventsB64[i])
+			raw, err := iacrypto.DecodeBase64(req.RawEventsB64[i])
 			if err != nil {
 				return nil, fmt.Errorf("event %d of %s has unreadable stored bytes: %w", i, req.AID, err)
 			}

@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"testing"
 )
 
@@ -74,6 +75,21 @@ func TestDecodeVerkeyReadsEveryBase64Spelling(t *testing.T) {
 		got, err := DecodeVerkey(enc.EncodeToString(raw))
 		if err != nil || !bytes.Equal(got, raw) {
 			t.Fatalf("%s read as %x (%v)", enc.EncodeToString(raw), got, err)
+		}
+	}
+}
+
+// Hex and both qb64 codes are read as they were, alongside every base64
+// spelling.
+func TestDecodeVerkeyReadsHexAndBothCodes(t *testing.T) {
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	for _, k := range []string{
+		canonicalVerkey("D", pub), canonicalVerkey("B", pub),
+		hex.EncodeToString(pub), " " + base64.StdEncoding.EncodeToString(pub) + " ",
+	} {
+		got, err := DecodeVerkey(k)
+		if err != nil || !bytes.Equal(got, pub) {
+			t.Fatalf("%q read as %x (%v)", k, got, err)
 		}
 	}
 }

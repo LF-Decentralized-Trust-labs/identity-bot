@@ -2,11 +2,10 @@ package asset
 
 import (
 	"crypto/ed25519"
-	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 	"strings"
 
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
 )
 
@@ -88,18 +87,10 @@ func errProofMismatch() error {
 }
 
 func decodeEnrolSig(s string) ([]byte, error) {
-	s = strings.TrimSpace(s)
-	for _, dec := range []func(string) ([]byte, error){
-		base64.RawURLEncoding.DecodeString,
-		base64.StdEncoding.DecodeString,
-		base64.RawStdEncoding.DecodeString,
-		base64.URLEncoding.DecodeString,
-		hex.DecodeString,
-	} {
-		if raw, err := dec(s); err == nil && len(raw) == ed25519.SignatureSize {
-			return raw, nil
-		}
+	raw, err := iacrypto.DecodeSized(strings.TrimSpace(s), ed25519.SignatureSize, true)
+	if err != nil {
+		return nil, fmt.Errorf("not a recognisable Ed25519 signature (want %d bytes, CESR-qualified, "+
+			"base64 or hex)", ed25519.SignatureSize)
 	}
-	return nil, fmt.Errorf("not a recognisable Ed25519 signature (want %d bytes, CESR-qualified, "+
-		"base64 or hex)", ed25519.SignatureSize)
+	return raw, nil
 }

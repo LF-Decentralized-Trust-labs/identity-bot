@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"identity-agent-core/drivers"
+	"identity-agent-core/iacrypto"
 
 	keri "github.com/grapeid/keri-go"
 )
@@ -631,7 +632,7 @@ func (e *Engine) VerifyCredential(req *drivers.DriverVerifyCredentialRequest) (*
 	if req == nil || req.AcdcJson == "" {
 		return nil, fmt.Errorf("there is no credential to verify")
 	}
-	raw, err := decodeB64(req.AcdcJson)
+	raw, err := iacrypto.DecodeBase64(req.AcdcJson)
 	if err != nil {
 		return nil, fmt.Errorf("the credential is not base64: %w", err)
 	}
@@ -699,7 +700,7 @@ func (e *Engine) VerifyCredential(req *drivers.DriverVerifyCredentialRequest) (*
 	if len(req.RegistryEventsB64) > 0 {
 		events := make([][]byte, 0, len(req.RegistryEventsB64))
 		for i, b := range req.RegistryEventsB64 {
-			raw, err := decodeB64(b)
+			raw, err := iacrypto.DecodeBase64(b)
 			if err != nil {
 				return nil, fmt.Errorf("transaction event %d is not base64: %w", i, err)
 			}
@@ -763,7 +764,7 @@ func (e *Engine) checkPresentation(
 	cred *keri.Credential,
 	out *drivers.DriverVerifyCredentialResponse,
 ) error {
-	signed, err := decodeB64(req.PresentationSaid)
+	signed, err := iacrypto.DecodeBase64(req.PresentationSaid)
 	if err != nil {
 		return fmt.Errorf("the presented bytes are not base64: %w", err)
 	}

@@ -1,9 +1,11 @@
 package recovery
 
 import (
+	"encoding/base64"
 	"testing"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/store"
 )
 
@@ -78,5 +80,20 @@ func TestVerifyEndpointRejectsPairwiseMismatch(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("verify must fail on pairwise mismatch")
+	}
+}
+
+// A key compares equal to itself in every spelling, including one whose
+// standard base64 begins with "B", which was stripped as if it were a code.
+func TestAKeyStartingWithBComparesEqualToItself(t *testing.T) {
+	raw, err := base64.StdEncoding.DecodeString("B/awzunMRvtYlgq21ZegG9MD5kNmLbPNspHGcryAbK4=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	std := NormalizePublicKeyB64(raw)
+	for _, other := range []string{std, base64.RawURLEncoding.EncodeToString(raw), iacrypto.VerkeyQB64(raw), iacrypto.NonTransferableAIDQB64(raw)} {
+		if ok, _, _, err := PublicKeysEqual(std, other); err != nil || !ok {
+			t.Fatalf("%s and %s did not compare equal (%v)", std, other, err)
+		}
 	}
 }

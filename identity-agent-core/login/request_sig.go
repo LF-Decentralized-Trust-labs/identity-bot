@@ -1,11 +1,10 @@
 package login
 
 import (
-	"crypto/ed25519"
-	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 	"strings"
+
+	"identity-agent-core/iacrypto"
 )
 
 // Signing over an arbitrary canonical string, for callers outside the Ask flow.
@@ -36,32 +35,12 @@ func DecodeVerkey(key string) ([]byte, error) {
 	if key == "" {
 		return nil, fmt.Errorf("empty public key")
 	}
-	if strings.HasPrefix(key, "D") && len(key) == 44 {
-		if raw, err := decodeMatterRaw(key, "D", ed25519.PublicKeySize); err == nil {
-			return raw, nil
-		}
+	// Both Ed25519 qb64 codes: "B" is Ed25519N, a non-transferable key, and the
+	// KERI driver mints one for an identity that will never rotate. Which
+	// spelling a key is in is iacrypto's to decide, in one place.
+	raw, _, err := iacrypto.DecodeEd25519Key(key, true)
+	if err != nil {
+		return nil, fmt.Errorf("public key is not a recognisable Ed25519 key")
 	}
-	// "B" is Ed25519N — a non-transferable Ed25519 key, same 32 raw bytes under a
-	// different code. The KERI driver mints one for an identity that will never
-	// rotate, so a decoder that claims to read "CESR qb64 from the KERI driver"
-	// has to take it. Without this branch a "B" key falls through to the base64
-	// fallbacks and decodes to the wrong 32 bytes (the pad byte is never
-	// stripped), which is a silent wrong answer rather than an error.
-	if strings.HasPrefix(key, "B") && len(key) == 44 {
-		if raw, err := decodeMatterRaw(key, "B", ed25519.PublicKeySize); err == nil {
-			return raw, nil
-		}
-	}
-	for _, dec := range []func(string) ([]byte, error){
-		base64.RawURLEncoding.DecodeString,
-		base64.URLEncoding.DecodeString,
-		base64.StdEncoding.DecodeString,
-		base64.RawStdEncoding.DecodeString,
-		hex.DecodeString,
-	} {
-		if raw, err := dec(key); err == nil && len(raw) == ed25519.PublicKeySize {
-			return raw, nil
-		}
-	}
-	return nil, fmt.Errorf("public key is not a recognisable Ed25519 key")
+	return raw, nil
 }
