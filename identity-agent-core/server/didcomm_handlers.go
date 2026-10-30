@@ -16,6 +16,8 @@ import (
 
 	"identity-agent-core/didcomm"
 	"identity-agent-core/login"
+
+	"github.com/go-chi/chi/v5"
 )
 
 // DIDComm wiring — the encrypted, mutually-authenticated IA-to-IA transport.
@@ -47,6 +49,16 @@ type inboxEntry struct {
 	Body       json.RawMessage `json:"body"`
 	Mode       string          `json:"mode"`
 	Verified   bool            `json:"verified"` // hybrid signature + both KA halves passed
+}
+
+// mountDIDCommRoutes serves the owner's side of DIDComm under /api: this
+// Identity Agent's DID, its peers, sending, and the inbox.
+func (s *CoreServer) mountDIDCommRoutes(r chi.Router) {
+	r.Get("/didcomm/did", s.handleGetDIDCommDID)
+	r.Post("/didcomm/peers", s.handleRegisterDIDCommPeer)
+	r.Get("/didcomm/peers", s.handleListDIDCommPeers)
+	r.Post("/didcomm/send", s.handleSendDIDCommMessage)
+	r.Get("/didcomm/inbox", s.handleGetDIDCommInbox)
 }
 
 func (s *CoreServer) didcommKeysPath() string  { return filepath.Join(s.DataDir, "didcomm_keys.json") }

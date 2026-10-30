@@ -451,7 +451,7 @@ func New(cfg Config) (*CoreServer, error) {
 	wsvc.SignReceipt = s.signWitnessReceipt
 	// An Identity Agent that anchors its record through a delegated record
 	// identity asks its witnesses to witness that identity too.
-	wsvc.AskToCoverDelegates = s.anchorsItsRecord
+	wsvc.AskToCoverDelegates = s.witnessesCoverDelegates
 	wsvc.SignAsRequester = func(statement string) (string, error) {
 		seed, err := s.identitySigningSeed()
 		if err != nil {
@@ -546,9 +546,9 @@ func New(cfg Config) (*CoreServer, error) {
 	if err := s.initAssetHandler(); err != nil {
 		log.Printf("[identity-agent-core] asset handler init failed (non-fatal): %v", err)
 	}
-	// A key an earlier version kept on an AI agent's record moves into the
-	// vault, where every other sign-in is kept.
-	s.moveBrainSecretsIntoTheVault()
+	// What each add-on readies once the core's stores, vault and asset
+	// handler are made.
+	s.prepareAddons()
 	if err := s.initOIDCHandler(); err != nil {
 		log.Printf("[identity-agent-core] OIDC adapter init failed (non-fatal): %v", err)
 	}
@@ -775,7 +775,7 @@ func (s *CoreServer) Start() error {
 	stop := s.anchorStop
 	s.anchorStopMu.Unlock()
 	s.inBackground(func(context.Context) { s.keepAnchoring(stop) })
-	s.inBackground(func(context.Context) { s.keepSweepingLends(stop) })
+	s.runAddons(stop)
 
 	s.httpSrv = s.httpServer()
 	go func() {
@@ -1144,10 +1144,10 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		r.Delete("/pending-requests/{aid}", s.handleDeletePendingRequest)
 		r.Post("/reset", s.handleReset)
 
-		s.sandboxRoutes(r)
+		s.mountVaultRoutes(r)
+		s.mountDIDCommRoutes(r)
 		s.guardianshipRoutes(r)
 		s.serviceProviderRoutes(r)
-		s.aiMemoryRoutes(r)
 		s.mountBackupRoutes(r)
 		s.mountRecoveryRoutes(r)
 		r.Get("/ws/events", s.handleWebSocketEvents)
@@ -1176,17 +1176,16 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		s.mountSigningRequestRoutes(r)
 		s.mountUpdateRoutes(r)
 
-		// Overlay-registered routes (MountExtraRoutes) mount last, under /api.
+		// Add-ons' routes, then overlay-registered routes (MountExtraRoutes)
+		// mount last, under /api.
+		s.mountAddonRoutes(r)
 		for _, fn := range s.extraRoutes {
 			fn(r)
 		}
 	})
 
-	s.traceRoutes(r)
-	s.llmRoutes(r)
-
-	// Display reverse proxy: intercepts container API calls to serve from ai-memory.db
-	r.HandleFunc("/apps/{app_id}/*", s.handleAppDisplayProxy)
+	// Add-ons' routes outside /api.
+	s.mountAddonRootRoutes(r)
 
 	// /public/oobi/{aid} — public namespace: KERI OOBI endpoint shared with external agents.
 	r.Get("/public/oobi/{aid}", s.handleOobiServe)
@@ -4771,10 +4770,11 @@ func (s *CoreServer) prepareKeyLogs() {
 }
 
 // reloadKeyLogs hands the engine every key log this Identity Agent writes to:
-// its identity's, then the record identity's, which its identity approved.
+// its identity's, then any an add-on writes to (the record identity's, which
+// its identity approved).
 func (s *CoreServer) reloadKeyLogs() {
 	s.reloadIdentityIntoDriver()
-	s.reloadRecordIdentity()
+	s.reloadAddonKeyLogs()
 }
 
 func (s *CoreServer) reloadIdentityIntoDriver() {

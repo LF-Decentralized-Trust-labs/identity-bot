@@ -15,6 +15,13 @@ import (
 // which left non-LLM providers (e.g. Cloudflare) uninjectable; this endpoint is
 // the complete form.
 
+// mountVaultRoutes serves the vault's service credentials under /api.
+func (s *CoreServer) mountVaultRoutes(r chi.Router) {
+	r.Post("/vault/credentials", s.handleSetVaultCredential)
+	r.Get("/vault/credentials", s.handleListVaultCredentials)
+	r.Delete("/vault/credentials/{service}", s.handleDeleteVaultCredential)
+}
+
 type vaultCredentialRequest struct {
 	Service      string            `json:"service"`
 	MatchDomains []string          `json:"match_domains"`

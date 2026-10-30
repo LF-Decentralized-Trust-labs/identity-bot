@@ -70,16 +70,8 @@ const recordIdentityFile = "record_identity.json"
 const capabilityRecordAnchoring = conversationbundle.CapabilityRecordAnchoring
 
 var (
-	anchorInterval = durationFromEnv("RECORD_ANCHOR_INTERVAL", 5*time.Minute)
-	anchorEvery    = intFromEnv("RECORD_ANCHOR_EVERY", 20)
+	anchorEvery = intFromEnv("RECORD_ANCHOR_EVERY", 20)
 )
-
-func durationFromEnv(name string, def time.Duration) time.Duration {
-	if d, err := time.ParseDuration(os.Getenv(name)); err == nil && d > 0 {
-		return d
-	}
-	return def
-}
 
 func intFromEnv(name string, def int) int {
 	if n, err := strconv.Atoi(os.Getenv(name)); err == nil && n > 0 {
@@ -623,16 +615,6 @@ func (s *CoreServer) noteRecorded() {
 // witnessAskTimeout bounds how long the check waits for the witnesses, all
 // asked at once.
 const witnessAskTimeout = 2 * time.Second
-
-// anchorTick is how often the record is anchored: the interval, or half the
-// time a quiet conversation takes to close if that is sooner, so the last
-// entry of a conversation is anchored before it closes.
-func anchorTick() time.Duration {
-	if half := conversation.IdleClose / 2; half < anchorInterval {
-		return half
-	}
-	return anchorInterval
-}
 
 // anchorCheck is what the anchors show about the record.
 type anchorCheck struct {
