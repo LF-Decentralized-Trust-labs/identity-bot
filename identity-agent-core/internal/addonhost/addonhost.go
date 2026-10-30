@@ -6,8 +6,8 @@
 // is handed the *server.CoreServer it runs on. What it may do with that
 // server beyond its exported fields and methods is exactly this: Host, for
 // one server, and Helpers, for what needs none. The server implements both
-// with an unexported type it returns from server.AddonHost, which asks for a
-// hostlink.Token that nothing outside this module can name; so nothing
+// with an unexported type it returns from server.AddonHost, which refuses
+// any token hostlink.New, inside this module, did not make; so nothing
 // outside this module reaches them, and a program that includes no add-on
 // links none of it. Nothing here is a second copy: each method calls the
 // server's own.
@@ -39,14 +39,14 @@ import (
 )
 
 // Of is the handle on s.
-func Of(s *server.CoreServer) Host { return server.AddonHost(s, hostlink.Token{}).(Host) }
+func Of(s *server.CoreServer) Host { return server.AddonHost(s, hostlink.New()).(Host) }
 
 // TestFixtures are the core's test fixtures, for the add-ons' tests. Only a
 // test calls it, so no program links them.
-func TestFixtures() Fixtures { return server.AddonFixtures(hostlink.Token{}).(Fixtures) }
+func TestFixtures() Fixtures { return server.AddonFixtures(hostlink.New()).(Fixtures) }
 
 // Shared is the handle on what needs no server.
-func Shared() Helpers { return server.AddonHost(nil, hostlink.Token{}).(Helpers) }
+func Shared() Helpers { return server.AddonHost(nil, hostlink.New()).(Helpers) }
 
 // Host is what an add-on may ask of the server it runs on.
 type Host interface {

@@ -19,9 +19,12 @@ import (
 
 // AddonFixtures are the core's test fixtures (fixtures_for_tests.go), for
 // the tests of the add-ons built in this module (addonhost.TestFixtures). It
-// asks for a hostlink.Token, which nothing outside this module can name. Only
+// panics unless given a token hostlink.New made, as AddonHost does. Only
 // a test calls it, so no program links it or the fixtures.
-func AddonFixtures(_ hostlink.Token) any { return fixtureWrapper{} }
+func AddonFixtures(t hostlink.Token) any {
+	hostlink.Refuse(t, "server.AddonFixtures")
+	return fixtureWrapper{}
+}
 
 type fixtureWrapper struct{}
 
