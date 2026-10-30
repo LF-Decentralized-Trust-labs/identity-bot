@@ -6,6 +6,7 @@ import (
 
 	"identity-agent-core/asset"
 	"identity-agent-core/backup"
+	"identity-agent-core/didcomm"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/login"
@@ -69,4 +70,55 @@ func (s *CoreServer) logSigner() (signer coretypes.KeySigner, nextPublicKey stri
 		return nil, "", rec, err
 	}
 	return heldKeyOf(seed), heldKeyOf(next).pub, rec, nil
+}
+
+// heldKeySet is the DIDComm keyset of aid, when aid is this Identity Agent's
+// own identity or an asset it holds. Its private keys stay in the core: an
+// add-on asks for what it needs done with them.
+func (s *CoreServer) heldKeySet(aid string) (*didcomm.KeySet, error) {
+	held := false
+	if s.DataStore == nil || aid == "" {
+		return nil, fmt.Errorf("this Identity Agent does not speak for %s", aid)
+	}
+	if id, err := s.DataStore.GetIdentity(); err == nil && id != nil && id.AID == aid && aid != "" {
+		held = true
+	} else if s.assetHandler != nil && aid != "" {
+		for _, a := range s.assetHandler.Store.ListAssets() {
+			if a.PairwiseAID == aid {
+				held = true
+				break
+			}
+		}
+	}
+	if !held {
+		return nil, fmt.Errorf("this Identity Agent does not speak for %s", aid)
+	}
+	return s.keySetFor(aid)
+}
+
+// messagingKeysOf are the public DIDComm keys of aid.
+func (s *CoreServer) messagingKeysOf(aid string) (*didcomm.DID, error) {
+	ks, err := s.heldKeySet(aid)
+	if err != nil {
+		return nil, err
+	}
+	return ks.DID()
+}
+
+// packSignedAs signs m as aid, with aid's DIDComm keys.
+func (s *CoreServer) packSignedAs(aid string, m *didcomm.JWM) (*didcomm.Envelope, error) {
+	ks, err := s.heldKeySet(aid)
+	if err != nil {
+		return nil, err
+	}
+	return didcomm.PackSigned(ks, m)
+}
+
+// openSealedTo opens env, sealed to aid by sender.
+func (s *CoreServer) openSealedTo(aid string, sender *didcomm.DID, env *didcomm.Envelope) (*didcomm.JWM, error) {
+	ks, err := s.heldKeySet(aid)
+	if err != nil {
+		return nil, err
+	}
+	return didcomm.UnpackAuthcrypt(ks, sender, env)
 }

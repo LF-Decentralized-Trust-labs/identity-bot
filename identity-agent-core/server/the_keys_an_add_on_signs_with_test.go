@@ -38,3 +38,19 @@ func TestNoSignerForWhatIsNotHeld(t *testing.T) {
 		t.Fatal("a signer was given for an asset not held here")
 	}
 }
+
+// Keys are packed and opened only for what this Identity Agent speaks for:
+// its own identity, and not an identifier it does not hold.
+func TestNoKeySetForWhatIsNotHeld(t *testing.T) {
+	s := agentWithDerivedIdentity(t)
+	id, err := s.DataStore.GetIdentity()
+	if err != nil || id == nil {
+		t.Fatalf("no identity: %v", err)
+	}
+	if _, err := s.messagingKeysOf(id.AID); err != nil {
+		t.Fatalf("its own identity's keys: %v", err)
+	}
+	if _, err := s.heldKeySet("Enothing"); err == nil {
+		t.Fatal("a keyset was used for an identifier this Identity Agent does not speak for")
+	}
+}

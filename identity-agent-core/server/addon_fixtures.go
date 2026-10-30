@@ -5,6 +5,7 @@ import (
 	"identity-agent-core/activitylog"
 	"identity-agent-core/asset"
 	"identity-agent-core/authprovider"
+	"identity-agent-core/didcomm"
 	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/internal/hostlink"
 	"identity-agent-core/permission"
@@ -141,7 +142,10 @@ func (fixtureWrapper) Router(s *CoreServer) chi.Router { return s.router }
 func (fixtureWrapper) BuildRouter(s *CoreServer, flutterWebDir string) chi.Router {
 	return s.buildRouter(flutterWebDir)
 }
-func (fixtureWrapper) KeySignerOf(seed []byte) coretypes.KeySigner    { return heldKeyOf(seed) }
+func (fixtureWrapper) KeySignerOf(seed []byte) coretypes.KeySigner { return heldKeyOf(seed) }
+func (fixtureWrapper) KeySetFor(s *CoreServer, aid string) (*didcomm.KeySet, error) {
+	return s.keySetFor(aid)
+}
 func (fixtureWrapper) TalkSigner() string                             { return talkSigner }
 func (fixtureWrapper) TestOwnerSecret() string                        { return testOwnerSecret }
 func (fixtureWrapper) TestOwnerSeed() []byte                          { return testOwnerSeed() }

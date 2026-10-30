@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"identity-agent-core/addon"
+	"identity-agent-core/didcomm"
 )
 
 // An add-on's routes are its own, opened or closed by its own entries in the
@@ -32,6 +33,26 @@ func TestTheHandleGivesNoCoreHandler(t *testing.T) {
 				out := ft.Out(o)
 				if out.Implements(handler) || (out.Kind() == reflect.Func && out.NumIn() == 2 && out.In(0) == w && out.In(1) == r) {
 					t.Errorf("%s.%s returns a handler or a router (%s)", iface.Name(), m.Name, out)
+				}
+			}
+		}
+	}
+}
+
+// Nor does the handle give out a key: the core signs, seals and opens with
+// the keys it holds, and an add-on asks it to. No method returns a DIDComm
+// keyset, whose private keys are in it.
+func TestTheHandleGivesNoKeySet(t *testing.T) {
+	keySet := reflect.TypeOf((*didcomm.KeySet)(nil))
+	for _, iface := range []reflect.Type{
+		reflect.TypeOf((*addon.Host)(nil)).Elem(),
+		reflect.TypeOf((*addon.Helpers)(nil)).Elem(),
+	} {
+		for i := 0; i < iface.NumMethod(); i++ {
+			m := iface.Method(i)
+			for o := 0; o < m.Type.NumOut(); o++ {
+				if m.Type.Out(o) == keySet || m.Type.Out(o) == keySet.Elem() {
+					t.Errorf("%s.%s gives out a DIDComm keyset", iface.Name(), m.Name)
 				}
 			}
 		}

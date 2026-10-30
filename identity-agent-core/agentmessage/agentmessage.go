@@ -413,6 +413,14 @@ const TypeRecord = didcomm.TypeAgentMessage
 // the AI agent's own keys for an AI agent's message, the organisation's for a
 // person's.
 func Countersign(as *didcomm.KeySet, r Record) (*didcomm.Envelope, error) {
+	return CountersignWith(as.AID, func(m *didcomm.JWM) (*didcomm.Envelope, error) {
+		return didcomm.PackSigned(as, m)
+	}, r)
+}
+
+// CountersignWith is Countersign where the keys of as are held by whatever
+// packs the message: pack signs m as as, as didcomm.PackSigned does.
+func CountersignWith(as string, pack func(m *didcomm.JWM) (*didcomm.Envelope, error), r Record) (*didcomm.Envelope, error) {
 	body, err := json.Marshal(r)
 	if err != nil {
 		return nil, err
@@ -421,9 +429,9 @@ func Countersign(as *didcomm.KeySet, r Record) (*didcomm.Envelope, error) {
 	if aid, ok := IsPerson(to); ok {
 		to = aid
 	}
-	return didcomm.PackSigned(as, &didcomm.JWM{
+	return pack(&didcomm.JWM{
 		ID: r.MessageID, Type: TypeRecord,
-		From: "did:keri:" + as.AID, To: []string{"did:keri:" + to},
+		From: "did:keri:" + as, To: []string{"did:keri:" + to},
 		CreatedTime: r.IATime, Body: body,
 	})
 }

@@ -16,6 +16,7 @@ import (
 	"identity-agent-core/activitylog"
 	"identity-agent-core/asset"
 	"identity-agent-core/authprovider"
+	"identity-agent-core/didcomm"
 	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/internal/hostlink"
 	"identity-agent-core/permission"
@@ -102,6 +103,9 @@ type Fixtures interface {
 	// KeySignerOf signs with seed, as the core's signers do, for a test that
 	// needs a key the core does not hold.
 	KeySignerOf(seed []byte) coretypes.KeySigner
+	// KeySetFor is the DIDComm keyset the core holds for aid, private keys
+	// included, for a test that forges or checks a message with them.
+	KeySetFor(s *server.CoreServer, aid string) (*didcomm.KeySet, error)
 	SignsWithSeeds(e interface {
 		SetEventSignature(func(aid string, key string, raw []byte) (string, error))
 	}, seeds ...[]byte)

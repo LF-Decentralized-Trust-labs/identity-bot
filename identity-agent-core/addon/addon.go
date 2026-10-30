@@ -109,7 +109,15 @@ type Host interface {
 	IssuedUnderFirstVersionTooLate(rec *store.CredentialRecord) bool
 	KeyCanSign() error
 	KeyIsElsewhere() bool
-	KeySetFor(aid string) (*didcomm.KeySet, error)
+	// MessagingKeysOf are the public DIDComm keys of aid, this Identity
+	// Agent's own identity or an asset it holds.
+	MessagingKeysOf(aid string) (*didcomm.DID, error)
+	// PackSignedAs signs m as aid, with aid's DIDComm keys
+	// (didcomm.PackSigned). The keys stay in the core.
+	PackSignedAs(aid string, m *didcomm.JWM) (*didcomm.Envelope, error)
+	// OpenSealedTo opens env, sealed to aid by sender
+	// (didcomm.UnpackAuthcrypt). The keys stay in the core.
+	OpenSealedTo(aid string, sender *didcomm.DID, env *didcomm.Envelope) (*didcomm.JWM, error)
 	NoteRecorded()
 	OwnAgentAtArrival(aid string, did *didcomm.DID) (string, error)
 	OwnerAuthority() (*server.OwnerAuthority, error)

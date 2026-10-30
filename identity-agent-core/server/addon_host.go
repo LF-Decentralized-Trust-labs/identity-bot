@@ -108,10 +108,18 @@ func (h hostWrapper) IssueCapabilityGrant(agent *asset.Asset, by coretypes.Autho
 func (h hostWrapper) IssuedUnderFirstVersionTooLate(rec *store.CredentialRecord) bool {
 	return h.s.issuedUnderFirstVersionTooLate(rec)
 }
-func (h hostWrapper) KeyCanSign() error                             { return h.s.keyCanSign() }
-func (h hostWrapper) KeyIsElsewhere() bool                          { return h.s.keyIsElsewhere() }
-func (h hostWrapper) KeySetFor(aid string) (*didcomm.KeySet, error) { return h.s.keySetFor(aid) }
-func (h hostWrapper) NoteRecorded()                                 { h.s.noteRecorded() }
+func (h hostWrapper) KeyCanSign() error    { return h.s.keyCanSign() }
+func (h hostWrapper) KeyIsElsewhere() bool { return h.s.keyIsElsewhere() }
+func (h hostWrapper) MessagingKeysOf(aid string) (*didcomm.DID, error) {
+	return h.s.messagingKeysOf(aid)
+}
+func (h hostWrapper) PackSignedAs(aid string, m *didcomm.JWM) (*didcomm.Envelope, error) {
+	return h.s.packSignedAs(aid, m)
+}
+func (h hostWrapper) OpenSealedTo(aid string, sender *didcomm.DID, env *didcomm.Envelope) (*didcomm.JWM, error) {
+	return h.s.openSealedTo(aid, sender, env)
+}
+func (h hostWrapper) NoteRecorded() { h.s.noteRecorded() }
 func (h hostWrapper) OwnAgentAtArrival(aid string, did *didcomm.DID) (string, error) {
 	return h.s.ownAgentAtArrival(aid, did)
 }
