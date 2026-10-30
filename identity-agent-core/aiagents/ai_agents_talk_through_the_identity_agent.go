@@ -21,7 +21,6 @@ import (
 	"identity-agent-core/didcomm"
 	"identity-agent-core/login"
 	"identity-agent-core/permission"
-	"identity-agent-core/sandbox"
 	"identity-agent-core/server"
 
 	"github.com/go-chi/chi/v5"
@@ -597,7 +596,7 @@ func (s *aiAgents) handleBodySays(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		args := agentmessage.AskArgs(st.To, req.Body)
-		if err := sandbox.CheckResourceConstraints(cc.ResourceConstraints, capabilityMessageAgent, args); err != nil {
+		if err := permission.CheckResourceConstraints(cc.ResourceConstraints, capabilityMessageAgent, args); err != nil {
 			refuse("this AI agent's grant does not let it message that AI agent: "+err.Error(), http.StatusForbidden)
 			return
 		}
@@ -832,7 +831,7 @@ func (s *aiAgents) handleBodyListAgents(w http.ResponseWriter, r *http.Request) 
 				continue
 			}
 			args := agentmessage.AskArgs(a.PairwiseAID, "")
-			if sandbox.CheckResourceConstraints(cc.ResourceConstraints, capabilityMessageAgent, args) != nil {
+			if permission.CheckResourceConstraints(cc.ResourceConstraints, capabilityMessageAgent, args) != nil {
 				continue
 			}
 			v := agentView{AID: a.PairwiseAID, Name: a.DisplayName}

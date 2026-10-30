@@ -3,7 +3,6 @@ package sandbox
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,55 +17,9 @@ import (
 )
 
 // enforceResourceConstraints denies an invocation whose arguments fall outside the
-// grant's per-capability resource constraints. A constraint maps a capability id to
-// {argKey: [allowedValues]}: for the invoked capability, every constrained argKey
-// must be present in the request and its value must equal one of the allowed values.
-// No constraints, or none for this capability, means unconstrained.
+// grant's per-capability resource constraints (permission.CheckResourceConstraints).
 func enforceResourceConstraints(constraints map[string]interface{}, capabilityID string, body []byte) error {
-	if len(constraints) == 0 {
-		return nil
-	}
-	raw, ok := constraints[capabilityID]
-	if !ok {
-		return nil
-	}
-	capC, ok := raw.(map[string]interface{})
-	if !ok || len(capC) == 0 {
-		return nil
-	}
-	var args map[string]interface{}
-	if len(body) > 0 {
-		_ = json.Unmarshal(body, &args)
-	}
-	for argKey, allowedRaw := range capC {
-		allowed, ok := allowedRaw.([]interface{})
-		if !ok || len(allowed) == 0 {
-			continue
-		}
-		val, present := args[argKey]
-		if !present {
-			return fmt.Errorf("capability %q requires constrained argument %q", capabilityID, argKey)
-		}
-		match := false
-		for _, a := range allowed {
-			if fmt.Sprint(a) == fmt.Sprint(val) {
-				match = true
-				break
-			}
-		}
-		if !match {
-			return fmt.Errorf("argument %q=%v is not permitted for capability %q", argKey, val, capabilityID)
-		}
-	}
-	return nil
-}
-
-// CheckResourceConstraints is enforceResourceConstraints for a governed action
-// that does not pass through capability invocation — a message between AI
-// agents, which travels as a signed message rather than as a call — so the
-// grant's limits are enforced by the same code either way.
-func CheckResourceConstraints(constraints map[string]interface{}, capabilityID string, args []byte) error {
-	return enforceResourceConstraints(constraints, capabilityID, args)
+	return permission.CheckResourceConstraints(constraints, capabilityID, body)
 }
 
 // Sentinel errors so the HTTP layer can map governance outcomes to status codes.
