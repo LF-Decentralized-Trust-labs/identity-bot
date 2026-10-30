@@ -7,10 +7,11 @@ one endpoint speaking the Model Context Protocol (MCP):
 POST <agent base URL>/api/mcp
 ```
 
-The endpoint belongs to the AI-agent add-on (`identity-agent-core/aiagents`),
-which needs the sandboxed-apps add-on (`identity-agent-core/sandboxedapps`)
-and includes it. An Identity Agent serves `/api/mcp` only when the app it runs
-in includes that add-on. The core's own programs include no add-on: neither
+The endpoint belongs to the AI-agent add-on, which needs the sandboxed-apps
+add-on and includes it. Both are kept outside this repository and plug into the
+core through package `addon`; this document is the contract they serve. An
+Identity Agent serves `/api/mcp` only when the app it runs in includes that
+add-on. The core's own programs include no add-on: neither
 the desktop program built from `identity-agent-core` nor the embedded mobile
 core serves it. `GET /api/info` lists the add-ons an Identity Agent includes,
 under `add_ons`; `ai_agents` is this one.

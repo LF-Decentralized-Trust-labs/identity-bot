@@ -21,7 +21,7 @@
 //
 // This package is what both sides need to agree on: the enrolment string, the
 // strings each signature covers, the six words, and the grades. The Identity
-// Agent uses it to issue and check; the agent-host program uses it to enrol
+// Agent uses it to issue and check; the program a machine runs uses it to enrol
 // and to sign. Keeping one copy is what keeps the two from disagreeing.
 package agentbody
 

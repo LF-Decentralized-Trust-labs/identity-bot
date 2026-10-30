@@ -6,8 +6,8 @@ import (
 )
 
 // The bundles a real Identity Agent exports, genuine and altered, are checked
-// in the server's tests (a_conversation_is_exported_test.go), which make them.
-// These cover what needs no Identity Agent at all.
+// against the published vectors in contracts/conversation-bundle. These cover
+// what needs no bundle at all.
 
 func TestNothingIsVerifiedWithoutABundle(t *testing.T) {
 	if r := Verify(nil); r.Verified || len(r.Faults) == 0 {
