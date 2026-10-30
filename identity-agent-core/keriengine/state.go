@@ -196,7 +196,13 @@ func normaliseKey(key string, transferable bool) (string, error) {
 	// payload. Both Ed25519 codes are accepted, and neither is rewritten —
 	// changing a non-transferable key into a transferable one would change the
 	// identifier of anything derived from it.
-	if len(key) == 44 && (key[0] == 'D' || key[0] == 'B') {
+	//
+	// Length and first character alone do not decide it. 32 raw bytes in
+	// padded base64 are 44 characters too, and one in 32 of them starts with D
+	// or B, so a genuine raw key was taken for qb64 and refused. The two
+	// cannot be confused by alphabet: qb64 is base64url and never padded,
+	// while padded base64 of 32 bytes always ends in "=".
+	if len(key) == 44 && (key[0] == 'D' || key[0] == 'B') && isBase64URLUnpadded(key) {
 		if _, err := keri.MatterRaw(string(key[0]), key, 32); err != nil {
 			return "", fmt.Errorf("%q looks like a qb64 key and does not decode as one: %w", key, err)
 		}
@@ -214,6 +220,18 @@ func normaliseKey(key string, transferable bool) (string, error) {
 		code = keri.CodeEd25519N
 	}
 	return keri.MatterQB64(code, raw)
+}
+
+// isBase64URLUnpadded reports whether every character of s is in the
+// base64url alphabet, which is the only alphabet qb64 uses. Padding is not.
+func isBase64URLUnpadded(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 // decodeB64 accepts base64 in any of the four spellings in use.
