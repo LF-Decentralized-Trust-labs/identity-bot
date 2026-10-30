@@ -845,3 +845,11 @@ func anchorAfter(t coretypes.TB, n int) {
 	anchorEvery = n
 	t.Cleanup(func() { anchorEvery = was })
 }
+
+// anchorAtLeastEvery makes the record anchored at least every d for the rest
+// of t.
+func anchorAtLeastEvery(t coretypes.TB, d time.Duration) {
+	was := anchorInterval
+	anchorInterval = d
+	t.Cleanup(func() { anchorInterval = was })
+}

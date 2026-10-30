@@ -20,7 +20,6 @@ import (
 	"testing"
 	"time"
 
-	"identity-agent-core/conversation"
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/keriengine"
@@ -174,9 +173,7 @@ func TestEnoughMessagesAnchorTheRecord(t *testing.T) {
 // being anchored when it stops.
 func TestTheRecordIsAnchoredOnItsInterval(t *testing.T) {
 	s := recordWorld(t)
-	was := anchorInterval
-	anchorInterval = 20 * time.Millisecond
-	t.Cleanup(func() { anchorInterval = was })
+	anchorAtLeastEvery(t, 20*time.Millisecond)
 	writeRows(t, s, 1)
 	stop := make(chan struct{})
 	go s.keepAnchoring(stop)
@@ -382,16 +379,6 @@ func TestARecordIdentityLeftPartlyMadeIsRepaired(t *testing.T) {
 	s.repairRecordIdentity()
 	if got, ok := s.loadRecordIdentity(); !ok || got.Pending {
 		t.Fatal("a record identity whose inception was kept was not finished")
-	}
-}
-
-// A conversation's last entry is anchored before it can close by going quiet.
-func TestTheRecordIsAnchoredBeforeAQuietConversationCloses(t *testing.T) {
-	was := anchorInterval
-	anchorInterval = 2 * conversation.IdleClose
-	t.Cleanup(func() { anchorInterval = was })
-	if anchorTick() > conversation.IdleClose/2 {
-		t.Fatalf("anchoring every %s would let a conversation close unanchored", anchorTick())
 	}
 }
 

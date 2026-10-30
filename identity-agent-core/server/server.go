@@ -21,18 +21,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
 	"identity-agent-core/activitylog"
 	"identity-agent-core/asset"
 	"identity-agent-core/avatar"
 	"identity-agent-core/backup"
-	"identity-agent-core/brainsignin"
 	"identity-agent-core/buildmode"
 	"identity-agent-core/drivers"
 	"identity-agent-core/endpoint"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/keriengine"
-	"identity-agent-core/lending"
 	"identity-agent-core/linkverifier"
 	"identity-agent-core/login"
 	"identity-agent-core/oidc"
@@ -49,6 +46,8 @@ import (
 	"identity-agent-core/watcher"
 	"identity-agent-core/witness"
 
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -59,21 +58,9 @@ type CoreServer struct {
 	// localOwnerSecret is what a request from this computer must carry to be
 	// the owner's (the_owner_at_this_computer.go).
 	localOwnerSecret string
-	// brainChecker, when set, replaces the providers a brain's sign-in is
-	// checked against (brain_sign_in_check.go); tests stand them up locally.
-	brainChecker *brainsignin.Checker
-	// githubAPI, when set, replaces GitHub's API address (github_access.go);
-	// tests stand GitHub up locally. Nothing a request sends can set it.
-	githubAPI string
-	// lendLedger is the one record of everything lent to AI agents' bodies —
-	// brains' sign-ins and services' access alike (lends.go), made once.
-	lendsOnce         sync.Once
-	lendLedger        *lending.Ledger
-	legacyLeasesMu    sync.Mutex
-	legacyLeasesMoved atomic.Bool
-	// modelCalls are the model calls under way for bodies whose brain's key
-	// stays here (model_calls_through_the_identity_agent.go).
-	modelCalls modelCallTable
+	// addonStates is what each add-on keeps for this server
+	// (addon_host.go).
+	addonStates addonStates
 	// Providers is the registry of operators this agent can draw services from.
 	// Loaded once at startup; the owner may add to it at runtime.
 	Providers *provider.Registry

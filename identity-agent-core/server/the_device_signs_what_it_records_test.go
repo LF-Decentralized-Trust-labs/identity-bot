@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	keri "github.com/grapeid/keri-go"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/recovery"
 	"identity-agent-core/sandbox"
@@ -18,6 +17,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	keri "github.com/grapeid/keri-go"
 
 	"identity-agent-core/drivers"
 	"identity-agent-core/keriengine"
