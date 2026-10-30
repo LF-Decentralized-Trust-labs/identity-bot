@@ -378,7 +378,7 @@ func (s *CoreServer) recordBrainEvent(a asset.Asset, cc permission.CallerContext
 // as the AI agent, naming the body, and never with the secret.
 func (s *CoreServer) recordLentEvent(a asset.Asset, cc permission.CallerContext, event, status, why string) {
 	log.Printf("[lent] %s for AI agent %s: %s (%s)", event, a.PairwiseAID, why, status)
-	if s.SandboxManager == nil {
+	if s.ActivityLog == nil {
 		return
 	}
 	cc.CallerAID = a.PairwiseAID
@@ -386,7 +386,7 @@ func (s *CoreServer) recordLentEvent(a asset.Asset, cc permission.CallerContext,
 		cc.DelegationChain = []string{a.PairwiseAID, a.DelegatorAID}
 	}
 	cc.Reason = why
-	s.SandboxManager.RecordGovernanceEvent(cc, event, status)
+	s.ActivityLog.RecordGovernanceEvent(cc, event, status)
 }
 
 // brainSignInShown is an AI agent's sign-in as a list of AI agents shows it,

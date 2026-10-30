@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"identity-agent-core/lending"
+	"identity-agent-core/sandbox"
 	"identity-agent-core/vault"
 	"io/fs"
 	"net/http"
@@ -23,7 +24,6 @@ import (
 	"identity-agent-core/authprovider"
 	"identity-agent-core/brainsignin"
 	"identity-agent-core/brainsignin/brainsignintest"
-	"identity-agent-core/sandbox"
 )
 
 // Two AI agents using one Claude sign-in share its cap: the second cannot

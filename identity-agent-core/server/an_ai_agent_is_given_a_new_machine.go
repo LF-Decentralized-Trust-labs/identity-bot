@@ -73,10 +73,10 @@ func (s *CoreServer) mountMachineRoutes(r chi.Router) {
 // signed record, as the AI agent the machine is for.
 func (s *CoreServer) recordMachineEvent(a asset.Asset, j agentmachine.Job, event, status, why string) {
 	log.Printf("[machine] %s: %s for AI agent %s by %s (%s): %s", event, j.MachineName, a.PairwiseAID, j.ProviderName, status, why)
-	if s.SandboxManager == nil {
+	if s.ActivityLog == nil {
 		return
 	}
-	s.SandboxManager.RecordGovernanceEvent(permission.CallerContext{
+	s.ActivityLog.RecordGovernanceEvent(permission.CallerContext{
 		CallerAID: a.PairwiseAID, DelegationChain: []string{a.PairwiseAID, a.DelegatorAID},
 		Transport: "machine", WorkItem: j.ID, Reason: clampWhy(why),
 	}, "agent.machine."+event, status)

@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"identity-agent-core/sandbox"
+	"identity-agent-core/activitylog"
 )
 
 // The audit log is the one endpoint where "who is asking" matters more than what they
@@ -132,7 +132,7 @@ func TestNormaliseStatusRejectsUnknownValues(t *testing.T) {
 
 func TestDescribeAuthorityLabelsTheChain(t *testing.T) {
 	s := auditTestServer(t)
-	steps := s.describeAuthority(sandbox.InvocationEvent{
+	steps := s.describeAuthority(activitylog.InvocationEvent{
 		CallerAID:       "AID-agent",
 		DelegationChain: []string{"AID-agent", "AID-team", "AID-root"},
 	})
@@ -151,7 +151,7 @@ func TestDescribeAuthorityFallsBackToTheCaller(t *testing.T) {
 	// A bare token caller has no delegation chain. It still has an identity, and
 	// showing nothing at all would read as "no authority" rather than "no lineage".
 	s := auditTestServer(t)
-	steps := s.describeAuthority(sandbox.InvocationEvent{CallerAID: "AID-solo"})
+	steps := s.describeAuthority(activitylog.InvocationEvent{CallerAID: "AID-solo"})
 	if len(steps) != 1 || steps[0].AID != "AID-solo" {
 		t.Fatalf("want the caller alone, got %+v", steps)
 	}
@@ -160,7 +160,7 @@ func TestDescribeAuthorityFallsBackToTheCaller(t *testing.T) {
 	if steps[0].Role != "caller" {
 		t.Fatalf("want role caller, got %q", steps[0].Role)
 	}
-	if len(s.describeAuthority(sandbox.InvocationEvent{})) != 0 {
+	if len(s.describeAuthority(activitylog.InvocationEvent{})) != 0 {
 		t.Fatal("an event with no identity at all should produce no steps")
 	}
 }

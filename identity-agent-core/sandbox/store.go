@@ -3,10 +3,8 @@ package sandbox
 import (
 	"database/sql"
 	"fmt"
-	"identity-agent-core/sqlitedb"
+	"identity-agent-core/activitylog"
 	"log"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -128,9 +126,13 @@ type ProxyLogFilter struct {
 	Offset       int
 }
 
+// SandboxStore keeps the sandboxed apps' own tables, in the database the
+// activity log is kept in.
 type SandboxStore struct {
-	db        *sql.DB
-	dbPath    string
+	db  *sql.DB
+	log *activitylog.Log
+	// ownsLog is set when the store opened the log itself, and closes it.
+	ownsLog   bool
 	pruneStop chan struct{}
 	pruneWg   sync.WaitGroup
 }
@@ -141,30 +143,27 @@ const (
 	pruneInterval        = 24 * time.Hour
 )
 
+// NewSandboxStore opens the store, and the activity log beside it, in
+// dataDir. The store closes the log when it is closed.
 func NewSandboxStore(dataDir string) (*SandboxStore, error) {
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create data directory: %w", err)
-	}
-
-	dbPath := filepath.Join(dataDir, "sandbox.db")
-	db, err := sqlitedb.Open(dbPath, sqlitedb.Settings{ForeignKeys: true})
+	l, err := activitylog.Open(dataDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open sandbox database: %w", err)
+		return nil, err
 	}
+	return newSandboxStore(l, true), nil
+}
 
-	if err := db.Ping(); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to ping sandbox database: %w", err)
-	}
+// NewSandboxStoreOn opens the store on an activity log that is already open,
+// and leaves the log open when it is closed.
+func NewSandboxStoreOn(l *activitylog.Log) *SandboxStore {
+	return newSandboxStore(l, false)
+}
 
-	if err := ApplyMigrations(db); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to apply migrations: %w", err)
-	}
-
+func newSandboxStore(l *activitylog.Log, owns bool) *SandboxStore {
 	s := &SandboxStore{
-		db:        db,
-		dbPath:    dbPath,
+		db:        l.DB(),
+		log:       l,
+		ownsLog:   owns,
 		pruneStop: make(chan struct{}),
 	}
 
@@ -174,14 +173,20 @@ func NewSandboxStore(dataDir string) (*SandboxStore, error) {
 
 	s.startPruneLoop()
 
-	log.Printf("[sandbox] Initialized sandbox store at: %s", dbPath)
-	return s, nil
+	log.Printf("[sandbox] Initialized sandbox store at: %s", l.Path())
+	return s
 }
+
+// Log is the activity log the store sits beside.
+func (s *SandboxStore) Log() *activitylog.Log { return s.log }
 
 func (s *SandboxStore) Close() error {
 	close(s.pruneStop)
 	s.pruneWg.Wait()
-	return s.db.Close()
+	if s.ownsLog {
+		return s.log.Close()
+	}
+	return nil
 }
 
 func NewInstanceID() string {

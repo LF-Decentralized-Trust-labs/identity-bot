@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"identity-agent-core/activitylog"
 	"identity-agent-core/appcall"
 	"identity-agent-core/vault"
 )
@@ -35,9 +36,8 @@ type InstallProgressInfo struct {
 
 type Manager struct {
 	store *SandboxStore
-	// auditMu serialises audit writes. The invocation log is a hash chain, so two
-	// concurrent writers reading the same predecessor would fork it silently.
-	auditMu            sync.Mutex
+	// log is the activity log every governed invocation is written to.
+	log                *activitylog.Log
 	policy             *PolicyEngine
 	eventBus           *EventBus
 	credentials        *vault.CredentialVault
@@ -54,12 +54,16 @@ type Manager struct {
 	installProgressMap sync.Map          // map[appID string]*InstallProgressInfo
 	invoker            CapabilityInvoker // governed capability routing; nil = default HTTP invoker
 	authorizer         Authorizer        // gateway decision seam; nil = structural default (governance gateway injects the real one)
-	eventSigner        EventSigner       // invocation-log signing identity; nil = events written unsigned (degraded)
 }
 
 type ManagerConfig struct {
 	DataDir      string
 	ManifestsDir string
+	// Log is the Identity Agent's activity log, which every governed
+	// invocation is written to, and whose database the manager keeps its own
+	// tables in. Nil opens the log kept in DataDir, as a manager made on its
+	// own needs.
+	Log *activitylog.Log
 	// Vault is the Identity Agent's credential vault, which the proxy adds
 	// credentials from. Nil opens the vault kept in DataDir, as a manager
 	// made on its own needs.
@@ -67,9 +71,14 @@ type ManagerConfig struct {
 }
 
 func NewManager(cfg ManagerConfig) (*Manager, error) {
-	store, err := NewSandboxStore(cfg.DataDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize sandbox store: %w", err)
+	var store *SandboxStore
+	if cfg.Log != nil {
+		store = NewSandboxStoreOn(cfg.Log)
+	} else {
+		var err error
+		if store, err = NewSandboxStore(cfg.DataDir); err != nil {
+			return nil, fmt.Errorf("failed to initialize sandbox store: %w", err)
+		}
 	}
 
 	eventBus := NewEventBus()
@@ -106,6 +115,7 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
 
 	m := &Manager{
 		store:        store,
+		log:          store.Log(),
 		policy:       policy,
 		eventBus:     eventBus,
 		credentials:  credentials,

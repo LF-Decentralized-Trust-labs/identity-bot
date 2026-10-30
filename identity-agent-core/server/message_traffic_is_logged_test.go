@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"identity-agent-core/activitylog"
 	"identity-agent-core/agenthost"
 	"identity-agent-core/agentmessage"
-	"identity-agent-core/sandbox"
 )
 
 // Every message of a conversation leaves a row in the signed log, filed under
@@ -27,7 +27,7 @@ func TestEveryMessageOfAConversationIsInTheSignedLog(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rows, err := w.s.SandboxManager.Store().QueryInvocationEvents(sandbox.InvocationEventFilter{WorkItem: conv})
+	rows, err := w.s.ActivityLog.QueryInvocationEvents(activitylog.InvocationEventFilter{WorkItem: conv})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestEveryMessageOfAConversationIsInTheSignedLog(t *testing.T) {
 	if code, _ := w.personSays(t, w.a, conv, ""); code < 400 {
 		t.Fatalf("a message with no words was taken: %d", code)
 	}
-	rows, _ = w.s.SandboxManager.Store().QueryInvocationEvents(sandbox.InvocationEventFilter{
+	rows, _ = w.s.ActivityLog.QueryInvocationEvents(activitylog.InvocationEventFilter{
 		WorkItem: conv, ResultStatus: "denied"})
 	if len(rows) == 0 {
 		t.Fatal("a refusal is not filed under the person's own conversation")
@@ -60,7 +60,7 @@ func TestEveryMessageOfAConversationIsInTheSignedLog(t *testing.T) {
 	if code, _ := w.personSays(t, w.a, "c_never-opened", "hello"); code < 400 {
 		t.Fatalf("a message into a conversation that does not exist was taken: %d", code)
 	}
-	rows, _ = w.s.SandboxManager.Store().QueryInvocationEvents(sandbox.InvocationEventFilter{
+	rows, _ = w.s.ActivityLog.QueryInvocationEvents(activitylog.InvocationEventFilter{
 		WorkItem: "c_never-opened"})
 	if len(rows) != 0 {
 		t.Fatalf("a refusal was filed under a conversation that does not exist: %d rows", len(rows))
@@ -84,7 +84,7 @@ func TestABodysRefusalIsFiledOnlyUnderAConversationItIsIn(t *testing.T) {
 	w := newTalkWorld(t)
 	conv, msg := w.openedWith(t)
 	denied := func() int {
-		rows, _ := w.s.SandboxManager.Store().QueryInvocationEvents(sandbox.InvocationEventFilter{WorkItem: conv, ResultStatus: "denied"})
+		rows, _ := w.s.ActivityLog.QueryInvocationEvents(activitylog.InvocationEventFilter{WorkItem: conv, ResultStatus: "denied"})
 		return len(rows)
 	}
 
@@ -112,7 +112,7 @@ func TestADeliveryIsRecordedOncePerMachine(t *testing.T) {
 			t.Fatalf("collection %d: %d messages, %v", i, len(got), err)
 		}
 	}
-	rows, _ := w.s.SandboxManager.Store().QueryInvocationEvents(sandbox.InvocationEventFilter{
+	rows, _ := w.s.ActivityLog.QueryInvocationEvents(activitylog.InvocationEventFilter{
 		CapabilityID: "agent.message.delivered", CorrelationID: msg})
 	if len(rows) != 1 {
 		t.Fatalf("a message collected three times is recorded as delivered %d times; want once", len(rows))

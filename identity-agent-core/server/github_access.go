@@ -114,11 +114,11 @@ func githubConnectionView(c githubapp.Connection, had bool) map[string]any {
 func (s *CoreServer) recordGitHubEvent(r *http.Request, event, status, why string) {
 	by := firstNonEmptyString(madeByController(r), "the owner")
 	log.Printf("[github] %s by %s: %s (%s)", event, by, why, status)
-	if s.SandboxManager == nil {
+	if s.ActivityLog == nil {
 		return
 	}
 	cc := permission.CallerContext{CallerAID: firstNonEmptyString(madeByController(r), s.OwnerRootAID()), Reason: why}
-	s.SandboxManager.RecordGovernanceEvent(cc, "github."+event, status)
+	s.ActivityLog.RecordGovernanceEvent(cc, "github."+event, status)
 }
 
 // ── Connecting the organisation's GitHub App ─────────────────────────────────

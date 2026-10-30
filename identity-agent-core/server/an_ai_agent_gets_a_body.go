@@ -57,10 +57,10 @@ func (s *CoreServer) bodies() *agentbody.Store {
 // and when, is provable rather than only logged.
 func (s *CoreServer) recordBodyEvent(a asset.Asset, b agentbody.Binding, event, status, why string) {
 	log.Printf("[body] %s: %s for AI agent %s (%s, words %q): %s", event, b.Host, a.PairwiseAID, b.Grade, strings.Join(b.Words, " "), why)
-	if s.SandboxManager == nil {
+	if s.ActivityLog == nil {
 		return
 	}
-	s.SandboxManager.RecordGovernanceEvent(permission.CallerContext{
+	s.ActivityLog.RecordGovernanceEvent(permission.CallerContext{
 		CallerAID: a.PairwiseAID, DelegationChain: []string{a.PairwiseAID, a.DelegatorAID},
 		Transport: "body", BodyHost: b.Host, BodyGrade: b.Grade, BodyCredential: b.CredentialSAID,
 		Reason: why,

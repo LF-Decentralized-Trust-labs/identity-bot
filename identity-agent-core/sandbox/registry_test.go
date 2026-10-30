@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"identity-agent-core/activitylog"
 	"identity-agent-core/permission"
 	"identity-agent-core/vault"
 )
@@ -25,6 +26,7 @@ func registryTestManager(t *testing.T) *Manager {
 	cv.SetKeyProvider(testVaultKeyProvider)
 	return &Manager{
 		store:       st,
+		log:         st.Log(),
 		policy:      NewPolicyEngine(st, NewEventBus()),
 		credentials: cv,
 		manifests:   map[string]*AppManifest{},
@@ -96,7 +98,7 @@ func TestRegistryNativeInvokeGovernedAndAudited(t *testing.T) {
 	}
 
 	// Two rows: what was about to run, then what happened.
-	events, err := m.store.QueryInvocationEvents(InvocationEventFilter{CapabilityID: "testsvc.dns.list"})
+	events, err := m.log.QueryInvocationEvents(activitylog.InvocationEventFilter{CapabilityID: "testsvc.dns.list"})
 	if err != nil || len(events) != 2 || events[1].ResultStatus != "started" || events[0].IntentEventID != events[1].ID {
 		t.Fatalf("expected an intent row and its result, got %+v (err %v)", events, err)
 	}
@@ -126,7 +128,7 @@ func TestRegistryNativeRemoteDeniedAndAudited(t *testing.T) {
 	if !errors.Is(err, ErrDenied) {
 		t.Fatalf("expected ErrDenied, got %v", err)
 	}
-	events, _ := m.store.QueryInvocationEvents(InvocationEventFilter{CapabilityID: "testsvc.dns.create"})
+	events, _ := m.log.QueryInvocationEvents(activitylog.InvocationEventFilter{CapabilityID: "testsvc.dns.create"})
 	if len(events) != 1 || events[0].ResultStatus != "denied" {
 		t.Fatalf("denial must be audited, got %+v", events)
 	}

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"identity-agent-core/activitylog"
 	"identity-agent-core/agentbody"
 	"identity-agent-core/agenthost"
 	"identity-agent-core/agentmessage"
@@ -46,7 +47,7 @@ func newTalkWorld(t *testing.T, caps ...string) *talkWorld {
 	if err := s.initAssetHandler(); err != nil {
 		t.Fatal(err)
 	}
-	mgr, err := sandbox.NewManager(sandbox.ManagerConfig{Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir})
+	mgr, err := sandbox.NewManager(sandbox.ManagerConfig{Log: s.logForTest(t, s.DataDir), Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +376,7 @@ func TestOnlyAPersonTheOrganisationCanProveOpensAConversation(t *testing.T) {
 	if code != http.StatusForbidden || !strings.Contains(out["error"].(string), "no signer") {
 		t.Fatalf("a conversation was opened with nobody provable asking: %d %v", code, out)
 	}
-	denied, _ := w.s.SandboxManager.Store().QueryInvocationEvents(sandbox.InvocationEventFilter{
+	denied, _ := w.s.ActivityLog.QueryInvocationEvents(activitylog.InvocationEventFilter{
 		CapabilityID: "agent.message.ask", ResultStatus: "denied"})
 	if len(denied) == 0 {
 		t.Fatal("the refusal is not in the governance record")

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"identity-agent-core/activitylog"
 	"identity-agent-core/permission"
 )
 
@@ -198,7 +199,7 @@ func TestExecuteReturnsAuditEventID(t *testing.T) {
 		t.Fatalf("execute must return the audit event id, got %s", out.Text)
 	}
 	// The action's result row, which follows the row written before it ran.
-	events, err := m.store.QueryInvocationEvents(InvocationEventFilter{CapabilityID: "svc.thing.get", ResultStatus: "ok"})
+	events, err := m.log.QueryInvocationEvents(activitylog.InvocationEventFilter{CapabilityID: "svc.thing.get", ResultStatus: "ok"})
 	if err != nil || len(events) != 1 || events[0].ID != wrapped.AuditEventID || events[0].IntentEventID == 0 {
 		t.Fatalf("audit_event_id must reference the written event: %v %+v", err, events)
 	}

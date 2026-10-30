@@ -9,7 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"identity-agent-core/sandbox"
+	"identity-agent-core/activitylog"
 )
 
 // The gateway has always written a signed record of every governed invocation, and
@@ -79,17 +79,12 @@ func (s *CoreServer) requireOwner(w http.ResponseWriter, r *http.Request) bool {
 	return false
 }
 
-func (s *CoreServer) auditStore(w http.ResponseWriter) *sandbox.SandboxStore {
-	if s.SandboxManager == nil {
+func (s *CoreServer) auditStore(w http.ResponseWriter) *activitylog.Log {
+	if s.ActivityLog == nil {
 		jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
 		return nil
 	}
-	st := s.SandboxManager.Store()
-	if st == nil {
-		jsonError(w, "audit store unavailable", http.StatusServiceUnavailable)
-		return nil
-	}
-	return st
+	return s.ActivityLog
 }
 
 // handleListInvocations returns the most recent events, newest first, narrowed by any
@@ -104,7 +99,7 @@ func (s *CoreServer) handleListInvocations(w http.ResponseWriter, r *http.Reques
 	}
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
-	f := sandbox.InvocationEventFilter{
+	f := activitylog.InvocationEventFilter{
 		CapabilityID:  q.Get("capability_id"),
 		CorrelationID: q.Get("correlation_id"),
 		CallerAID:     q.Get("caller_aid"),
@@ -172,7 +167,7 @@ type authorityStep struct {
 // Names are looked up locally and are best-effort: an unknown AID keeps its identifier
 // and gains no name, which is honest. The AIDs themselves are the record — a name is a
 // convenience layered on top and is never what anything is checked against.
-func (s *CoreServer) describeAuthority(ev sandbox.InvocationEvent) []authorityStep {
+func (s *CoreServer) describeAuthority(ev activitylog.InvocationEvent) []authorityStep {
 	chain := ev.DelegationChain
 	if len(chain) == 0 && ev.CallerAID != "" {
 		chain = []string{ev.CallerAID}
@@ -248,7 +243,7 @@ func (s *CoreServer) handleVerifyAuditChain(w http.ResponseWriter, r *http.Reque
 	if st == nil {
 		return
 	}
-	var start *sandbox.ChainStart
+	var start *activitylog.ChainStart
 	if kept, ok, kerr := (&invocationSigner{s: s}).ChainStart(); kerr != nil {
 		jsonError(w, "The log cannot be checked right now: where its signed chain begins cannot be read: "+kerr.Error(),
 			http.StatusServiceUnavailable)
@@ -257,7 +252,7 @@ func (s *CoreServer) handleVerifyAuditChain(w http.ResponseWriter, r *http.Reque
 		start = &kept
 	}
 	faults, err := st.VerifyChain(s.invocationSignerKey, start)
-	if errors.Is(err, sandbox.ErrCannotCheck) {
+	if errors.Is(err, activitylog.ErrCannotCheck) {
 		// Not checkable is not tampered: say which, so nobody is told their log
 		// was forged because a key was locked.
 		jsonError(w, "The log cannot be checked right now: "+err.Error(), http.StatusServiceUnavailable)

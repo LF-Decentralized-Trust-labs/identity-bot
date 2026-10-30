@@ -12,6 +12,7 @@ import (
 	neturl "net/url"
 	"time"
 
+	"identity-agent-core/activitylog"
 	"identity-agent-core/appcall"
 	"identity-agent-core/permission"
 )
@@ -108,8 +109,8 @@ func (m *Manager) InvokeCapability(ctx context.Context, caller permission.Caller
 	executorType := "plugin"
 	provider, capDef, perr := m.theOneProvider(capabilityID)
 	if perr != nil {
-		m.recordInvocationDetail(caller, capabilityID, executorType, body, "denied", start,
-			EventDetail{StatusReason: "provider: " + perr.Error()})
+		m.log.RecordInvocationDetail(caller, capabilityID, executorType, body, "denied", start,
+			activitylog.EventDetail{StatusReason: "provider: " + perr.Error()})
 		return nil, fmt.Errorf("%w: %s", ErrDenied, perr.Error())
 	}
 	ok := provider != nil
@@ -124,8 +125,8 @@ func (m *Manager) InvokeCapability(ctx context.Context, caller permission.Caller
 	}
 	auth := m.authz()
 	if err := auth.AuthorizeIngress(ctx, caller, capDef); err != nil {
-		m.recordInvocationDetail(caller, capabilityID, executorType, body, "denied", start,
-			EventDetail{StatusReason: "ingress: " + err.Error()})
+		m.log.RecordInvocationDetail(caller, capabilityID, executorType, body, "denied", start,
+			activitylog.EventDetail{StatusReason: "ingress: " + err.Error()})
 		return nil, err
 	}
 	// The one check, the same function a person at a controller passes: the
@@ -134,26 +135,26 @@ func (m *Manager) InvokeCapability(ctx context.Context, caller permission.Caller
 	// placeholder as a person's until human authentication is built, so today
 	// this refuses only a capability whose minimum is set above 80.
 	if ok, why := passesTheOneCheck(caller, capDef, start); !ok {
-		m.recordInvocationDetail(caller, capabilityID, executorType, body, "denied", start,
-			EventDetail{StatusReason: "the one check: " + why})
+		m.log.RecordInvocationDetail(caller, capabilityID, executorType, body, "denied", start,
+			activitylog.EventDetail{StatusReason: "the one check: " + why})
 		return nil, fmt.Errorf("%w: %s", ErrDenied, why)
 	}
 	// Per-capability resource constraints from the caller's grant (e.g. a zone
 	// allowlist) are enforced against the request arguments here, where the body
 	// is available.
 	if err := enforceResourceConstraints(caller.ResourceConstraints, capabilityID, body); err != nil {
-		m.recordInvocationDetail(caller, capabilityID, executorType, body, "denied", start,
-			EventDetail{StatusReason: "resource constraint: " + err.Error()})
+		m.log.RecordInvocationDetail(caller, capabilityID, executorType, body, "denied", start,
+			activitylog.EventDetail{StatusReason: "resource constraint: " + err.Error()})
 		return nil, fmt.Errorf("%w: %s", ErrDenied, err.Error())
 	}
 	// The action is recorded before it runs. If that record cannot be written
 	// (no signature, an unreadable previous row, the database refusing), the
 	// action does not run: an action the log cannot account for is the one
 	// thing the log exists to rule out.
-	intentID, err := m.recordIntent(caller, capabilityID, executorType, body, start)
+	intentID, err := m.log.RecordIntent(caller, capabilityID, executorType, body, start)
 	if err != nil {
 		log.Printf("[audit] REFUSED %s for %s: the record could not be written first: %v", capabilityID, caller.CallerAID, err)
-		return nil, fmt.Errorf("%w: %v", ErrNotRecorded, err)
+		return nil, fmt.Errorf("%w: %v", activitylog.ErrNotRecorded, err)
 	}
 	// One screen = one driver: host_control invocations serialize per capability
 	// so concurrent callers queue instead of interleaving primitives.
@@ -179,13 +180,13 @@ func (m *Manager) InvokeCapability(ctx context.Context, caller permission.Caller
 		res, err = inv.Invoke(ctx, caller, provider.ID, capabilityID, body)
 	}
 	if err != nil {
-		m.recordInvocationDetail(caller, capabilityID, executorType, body, "error", start,
-			EventDetail{IntentEventID: intentID, StatusReason: "executor: " + err.Error()})
+		m.log.RecordInvocationDetail(caller, capabilityID, executorType, body, "error", start,
+			activitylog.EventDetail{IntentEventID: intentID, StatusReason: "executor: " + err.Error()})
 		return nil, err
 	}
 	out := auth.FilterEgress(ctx, caller, capDef, res)
 	status := "ok"
-	detail := EventDetail{IntentEventID: intentID}
+	detail := activitylog.EventDetail{IntentEventID: intentID}
 	if out != nil {
 		// ResultHash is taken from the FILTERED body — the bytes the caller actually
 		// received. Hashing the pre-filter result would commit to something no party
@@ -196,7 +197,7 @@ func (m *Manager) InvokeCapability(ctx context.Context, caller permission.Caller
 			detail.StatusReason = fmt.Sprintf("capability returned HTTP %d", out.Status)
 		}
 	}
-	eventID := m.recordInvocationDetail(caller, capabilityID, executorType, body, status, start, detail)
+	eventID := m.log.RecordInvocationDetail(caller, capabilityID, executorType, body, status, start, detail)
 	if out != nil {
 		out.AuditEventID = eventID
 	}

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"identity-agent-core/activitylog"
 	"identity-agent-core/permission"
 )
 
@@ -44,7 +45,7 @@ func TestACapabilityNeedingNinetyIsRefusedAtTheGateway(t *testing.T) {
 	if ran {
 		t.Fatal("the capability ran")
 	}
-	events, _ := m.store.QueryInvocationEvents(InvocationEventFilter{CapabilityID: "testsvc.high"})
+	events, _ := m.log.QueryInvocationEvents(activitylog.InvocationEventFilter{CapabilityID: "testsvc.high"})
 	if len(events) != 1 || events[0].ResultStatus != "denied" {
 		t.Fatalf("the refusal was not audited: %+v", events)
 	}

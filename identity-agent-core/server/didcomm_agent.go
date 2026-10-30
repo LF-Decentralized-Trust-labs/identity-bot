@@ -95,10 +95,10 @@ func (s *CoreServer) SendDIDCommMessage(fromAID, toAID, typ string, body json.Ra
 // one, so what was sent and received can be shown later rather than only what
 // was done because of it. about, when given, is what the row commits to.
 func (s *CoreServer) recordTraffic(caller, messageID, conversation, event, status, why string, about []byte) {
-	if s.SandboxManager == nil {
+	if s.ActivityLog == nil {
 		return
 	}
-	s.SandboxManager.RecordGovernanceEventAbout(permission.CallerContext{
+	s.ActivityLog.RecordGovernanceEventAbout(permission.CallerContext{
 		CallerAID: caller, CorrelationID: messageID, WorkItem: conversation, Transport: "didcomm", Reason: clampWhy(why),
 	}, event, status, about)
 }

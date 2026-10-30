@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 
+	"identity-agent-core/activitylog"
 	"identity-agent-core/asset"
 	"identity-agent-core/backup"
 	"identity-agent-core/conversation"
@@ -18,7 +19,6 @@ import (
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/keriengine"
 	"identity-agent-core/permission"
-	"identity-agent-core/sandbox"
 	"identity-agent-core/secureenclave"
 
 	"github.com/go-chi/chi/v5"
@@ -48,7 +48,7 @@ func (s *CoreServer) handleExportConversation(w http.ResponseWriter, r *http.Req
 	if !s.requireOwner(w, r) {
 		return
 	}
-	if s.SandboxManager == nil || s.SandboxManager.Store() == nil {
+	if s.ActivityLog == nil {
 		jsonError(w, "an export is written to the governance log, and there is none here", http.StatusServiceUnavailable)
 		return
 	}
@@ -78,8 +78,8 @@ func (s *CoreServer) handleExportConversation(w http.ResponseWriter, r *http.Req
 	if _, err := s.anchorRecord(); err != nil && !errors.Is(err, errKeyElsewhere) {
 		log.Printf("[record] anchoring before exporting %s: %v", c.ID, err)
 	}
-	row := s.SandboxManager.RecordGovernanceEvent(cc, "agent.conversation.export", "ok")
-	exportedAt, err := rowTime(s.SandboxManager.Store(), row)
+	row := s.ActivityLog.RecordGovernanceEvent(cc, "agent.conversation.export", "ok")
+	exportedAt, err := rowTime(s.ActivityLog, row)
 	if row == 0 || err != nil {
 		jsonError(w, "the export could not be written to the governance log, so it was not made", http.StatusServiceUnavailable)
 		return
@@ -87,7 +87,7 @@ func (s *CoreServer) handleExportConversation(w http.ResponseWriter, r *http.Req
 	b, err := s.exportConversation(r.Context(), store, c, who, exportedAt)
 	if err != nil {
 		cc.Reason = clampWhy("export of " + c.ID + " failed: " + err.Error())
-		s.SandboxManager.RecordGovernanceEvent(cc, "agent.conversation.export", "error")
+		s.ActivityLog.RecordGovernanceEvent(cc, "agent.conversation.export", "error")
 		jsonError(w, err.Error(), http.StatusConflict)
 		return
 	}
@@ -188,7 +188,7 @@ func (l exportedLedger) Anchors(context.Context) (conversationbundle.KeyLog, []c
 }
 
 func (l exportedLedger) Log(_ context.Context, conv string) (conversationbundle.Log, error) {
-	logStore := l.s.SandboxManager.Store()
+	logStore := l.s.ActivityLog
 	first, ok, err := logStore.FirstRowFor(conv)
 	if err != nil || !ok {
 		return conversationbundle.Log{Signer: l.signer}, err
@@ -401,7 +401,7 @@ func (s *CoreServer) exportLogSigner(rec invocationSignerRecord) (conversationbu
 }
 
 // rowTime is the time the governance log recorded on one of its rows.
-func rowTime(log *sandbox.SandboxStore, id int64) (string, error) {
+func rowTime(log *activitylog.Log, id int64) (string, error) {
 	rows, err := log.StoredRows(id, id)
 	if err != nil || len(rows) != 1 {
 		return "", fmt.Errorf("row %d of the governance log cannot be read back", id)

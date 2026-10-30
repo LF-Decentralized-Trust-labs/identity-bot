@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"identity-agent-core/activitylog"
 	"identity-agent-core/asset"
 	"identity-agent-core/didcomm"
 	"identity-agent-core/drivers"
@@ -30,7 +31,7 @@ func withLog(t *testing.T, s *CoreServer) {
 		t.Fatal(err)
 	}
 	s.DataStore = ds
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
+	m, err := sandbox.NewManager(sandbox.ManagerConfig{Log: s.logForTest(t, s.DataDir), Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,9 +39,9 @@ func withLog(t *testing.T, s *CoreServer) {
 	s.SandboxManager = m
 }
 
-func logged(t *testing.T, s *CoreServer, event, messageID string) []sandbox.InvocationEvent {
+func logged(t *testing.T, s *CoreServer, event, messageID string) []activitylog.InvocationEvent {
 	t.Helper()
-	rows, err := s.SandboxManager.Store().QueryInvocationEvents(sandbox.InvocationEventFilter{
+	rows, err := s.ActivityLog.QueryInvocationEvents(activitylog.InvocationEventFilter{
 		CapabilityID: event, CorrelationID: messageID})
 	if err != nil {
 		t.Fatal(err)
@@ -511,7 +512,7 @@ func TestOneSendersFloodOfRefusalsSilencesOnlyItself(t *testing.T) {
 	}
 
 	count := func(event, caller string) int {
-		rows, err := m.receiver.SandboxManager.Store().QueryInvocationEvents(sandbox.InvocationEventFilter{
+		rows, err := m.receiver.ActivityLog.QueryInvocationEvents(activitylog.InvocationEventFilter{
 			CapabilityID: event, CallerAID: caller, Limit: 1000})
 		if err != nil {
 			t.Fatal(err)

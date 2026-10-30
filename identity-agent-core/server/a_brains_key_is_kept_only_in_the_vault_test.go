@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"identity-agent-core/activitylog"
 	"identity-agent-core/asset"
 	"identity-agent-core/authprovider"
 	"identity-agent-core/brainsignin"
-	"identity-agent-core/sandbox"
 	"identity-agent-core/vault"
 )
 
@@ -53,9 +53,9 @@ func noFileHolds(t *testing.T, dir, secret string) {
 	})
 }
 
-func governanceRows(t *testing.T, w *talkWorld, event string) []sandbox.InvocationEvent {
+func governanceRows(t *testing.T, w *talkWorld, event string) []activitylog.InvocationEvent {
 	t.Helper()
-	rows, err := w.s.SandboxManager.Store().QueryInvocationEvents(sandbox.InvocationEventFilter{CapabilityID: event})
+	rows, err := w.s.ActivityLog.QueryInvocationEvents(activitylog.InvocationEventFilter{CapabilityID: event})
 	if err != nil {
 		t.Fatal(err)
 	}

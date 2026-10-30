@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"identity-agent-core/sandbox"
 	"identity-agent-core/witness"
 	"net/http"
 	"net/http/httptest"
@@ -25,7 +26,6 @@ import (
 	"identity-agent-core/keriengine"
 	"identity-agent-core/login"
 	"identity-agent-core/permission"
-	"identity-agent-core/sandbox"
 	"identity-agent-core/store"
 
 	keri "github.com/grapeid/keri-go"
@@ -36,20 +36,20 @@ func recordWorld(t *testing.T) *CoreServer {
 	t.Helper()
 	s, _ := grantWorld(t)
 	s.DeclaredEntityType = "organization"
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
+	m, err := sandbox.NewManager(sandbox.ManagerConfig{Log: s.logForTest(t, s.DataDir), Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(m.Stop)
 	s.SandboxManager = m
-	m.SetEventSigner(&invocationSigner{s: s})
+	s.ActivityLog.SetEventSigner(&invocationSigner{s: s})
 	return s
 }
 
 func writeRows(t *testing.T, s *CoreServer, n int) {
 	t.Helper()
 	for i := 0; i < n; i++ {
-		if s.SandboxManager.RecordGovernanceEvent(permission.CallerContext{CallerAID: "EAgent", Reason: "test"}, "test.event", "ok") == 0 {
+		if s.ActivityLog.RecordGovernanceEvent(permission.CallerContext{CallerAID: "EAgent", Reason: "test"}, "test.event", "ok") == 0 {
 			t.Fatal("a row was not written")
 		}
 	}
@@ -99,7 +99,7 @@ func TestTheNewestRowsCannotBeQuietlyRemovedOnceAnchored(t *testing.T) {
 	}
 
 	got := chainSays(t, s)
-	row, _, _ := s.SandboxManager.Store().Head()
+	row, _, _ := s.ActivityLog.Head()
 	if got["intact"] != true || got["anchored_through"] != float64(row) || got["unanchored_rows"] != float64(0) {
 		t.Fatalf("after anchoring the log reads %v", got)
 	}
@@ -111,7 +111,7 @@ func TestTheNewestRowsCannotBeQuietlyRemovedOnceAnchored(t *testing.T) {
 
 	// Remove the newest rows, the anchored one among them. No row names them,
 	// so only the anchor can tell.
-	db := s.SandboxManager.Store().DB()
+	db := s.ActivityLog.DB()
 	if _, err := db.Exec(`DELETE FROM invocation_log WHERE id >= ?`, row); err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestAnchoringCarriesOnAfterARestart(t *testing.T) {
 // caught.
 func TestAConversationsHeadIsAnchored(t *testing.T) {
 	w := newTalkWorld(t)
-	w.s.SandboxManager.SetEventSigner(&invocationSigner{s: w.s})
+	w.s.ActivityLog.SetEventSigner(&invocationSigner{s: w.s})
 	conv, _ := w.openedWith(t)
 	if anchored, err := w.s.anchorRecord(); err != nil || !anchored {
 		t.Fatalf("anchoring: %v %v", anchored, err)
@@ -261,7 +261,7 @@ func TestNothingIsWrittenIntoALogWhoseKeyIsElsewhere(t *testing.T) {
 // Messages a conversation takes count towards the next anchoring.
 func TestAConversationsMessagesBringOnAnAnchoring(t *testing.T) {
 	w := newTalkWorld(t)
-	w.s.SandboxManager.SetEventSigner(&invocationSigner{s: w.s})
+	w.s.ActivityLog.SetEventSigner(&invocationSigner{s: w.s})
 	was := anchorEvery
 	anchorEvery = 1
 	t.Cleanup(func() { anchorEvery = was })
@@ -283,7 +283,7 @@ func anchoredTwice(t *testing.T) (*CoreServer, int64) {
 	if ok, err := s.anchorRecord(); err != nil || !ok {
 		t.Fatalf("first anchoring: %v %v", ok, err)
 	}
-	first, _, _ := s.SandboxManager.Store().Head()
+	first, _, _ := s.ActivityLog.Head()
 	writeRows(t, s, 2)
 	if ok, err := s.anchorRecord(); err != nil || !ok {
 		t.Fatalf("second anchoring: %v %v", ok, err)
@@ -319,7 +319,7 @@ func TestRemovingTheNewestAnchorAndItsRowsIsCaught(t *testing.T) {
 	if _, err := db.Exec(`DELETE FROM record_anchors WHERE seq = (SELECT MAX(seq) FROM record_anchors)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SandboxManager.Store().DB().Exec(`DELETE FROM invocation_log WHERE id > ?`, first); err != nil {
+	if _, err := s.ActivityLog.DB().Exec(`DELETE FROM invocation_log WHERE id > ?`, first); err != nil {
 		t.Fatal(err)
 	}
 	mustBreak(t, s, "removing the newest anchoring and the rows it fixed")
@@ -335,7 +335,7 @@ func TestTrimmingTheRecordIdentitysKeyLogIsCaught(t *testing.T) {
 	if _, err := db.Exec(`DELETE FROM kel WHERE aid = ? AND seq_num = (SELECT MAX(seq_num) FROM kel WHERE aid = ?)`, rec.AID, rec.AID); err != nil {
 		t.Fatal(err)
 	}
-	s.SandboxManager.Store().DB().Exec(`DELETE FROM invocation_log WHERE id > ?`, first)
+	s.ActivityLog.DB().Exec(`DELETE FROM invocation_log WHERE id > ?`, first)
 	mustBreak(t, s, "trimming the record identity's key log")
 }
 
@@ -457,7 +457,7 @@ func TestARecordIdentityLeftPartlyMadeIsRepaired(t *testing.T) {
 func TestConversationEntriesAreAnchoredBySequence(t *testing.T) {
 	w := newTalkWorld(t)
 	w.s.DeclaredEntityType = "organization"
-	w.s.SandboxManager.SetEventSigner(&invocationSigner{s: w.s})
+	w.s.ActivityLog.SetEventSigner(&invocationSigner{s: w.s})
 	conv, _ := w.openedWith(t)
 	if ok, err := w.s.anchorRecord(); err != nil || !ok {
 		t.Fatalf("anchoring: %v %v", ok, err)
@@ -575,13 +575,13 @@ func TestAnchorsAreHeldOutsideOnceTheirWitnessesReceiptThem(t *testing.T) {
 	}
 	s, _ := foundedWith(t, agentWithDerivedIdentity(t), names, 2)
 	s.DeclaredEntityType = "organization"
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
+	m, err := sandbox.NewManager(sandbox.ManagerConfig{Log: s.logForTest(t, s.DataDir), Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(m.Stop)
 	s.SandboxManager = m
-	m.SetEventSigner(&invocationSigner{s: s})
+	s.ActivityLog.SetEventSigner(&invocationSigner{s: s})
 	writeRows(t, s, 2)
 	if ok, err := s.anchorRecord(); err != nil || !ok {
 		t.Fatalf("anchoring: %v %v", ok, err)
@@ -625,7 +625,7 @@ func TestALostRecordIdentityIsNeverReplacedQuietly(t *testing.T) {
 	}
 	db := recordDB(t, s)
 	db.Exec(`DELETE FROM record_anchors`)
-	s.SandboxManager.Store().DB().Exec(`DELETE FROM invocation_log WHERE id > ?`, first)
+	s.ActivityLog.DB().Exec(`DELETE FROM invocation_log WHERE id > ?`, first)
 	mustBreak(t, s, "a lost record identity")
 	writeRows(t, s, 1)
 	if _, err := s.anchorRecord(); !errors.Is(err, errRecordGone) {
@@ -717,13 +717,13 @@ func TestTheWitnessesAreAskedForTheRecordsTip(t *testing.T) {
 	}
 	s, _ := foundedWith(t, agentWithDerivedIdentity(t), names, 1)
 	s.DeclaredEntityType = "organization"
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
+	m, err := sandbox.NewManager(sandbox.ManagerConfig{Log: s.logForTest(t, s.DataDir), Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(m.Stop)
 	s.SandboxManager = m
-	m.SetEventSigner(&invocationSigner{s: s})
+	s.ActivityLog.SetEventSigner(&invocationSigner{s: s})
 	sq := s.DataStore.(*store.SQLiteStore)
 	s.WitnessService = witness.NewService(witness.NewSQLiteStore(sq.DB()), sq, s.KeriDriver, witness.BackendDesktop)
 	for i, name := range names {
@@ -855,13 +855,13 @@ func TestCheckingWhileAnchoringRaisesNoFalseAlarm(t *testing.T) {
 	}
 	s, _ := foundedWith(t, agentWithDerivedIdentity(t), names, 1)
 	s.DeclaredEntityType = "organization"
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
+	m, err := sandbox.NewManager(sandbox.ManagerConfig{Log: s.logForTest(t, s.DataDir), Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(m.Stop)
 	s.SandboxManager = m
-	m.SetEventSigner(&invocationSigner{s: s})
+	s.ActivityLog.SetEventSigner(&invocationSigner{s: s})
 	sq := s.DataStore.(*store.SQLiteStore)
 	s.WitnessService = witness.NewService(witness.NewSQLiteStore(sq.DB()), sq, s.KeriDriver, witness.BackendDesktop)
 	s.DataStore.SaveContact(store.ContactRecord{AID: "EWitness0", OobiURL: "http://w0.test", Status: "active"})
@@ -951,13 +951,13 @@ func TestARealWitnessWitnessesTheRecord(t *testing.T) {
 	peer := startPeer(t, "witness")
 	s, _ := foundedWith(t, agentWithDerivedIdentity(t), []string{peer.witnessKey}, 1)
 	s.DeclaredEntityType = "organization"
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
+	m, err := sandbox.NewManager(sandbox.ManagerConfig{Log: s.logForTest(t, s.DataDir), Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(m.Stop)
 	s.SandboxManager = m
-	m.SetEventSigner(&invocationSigner{s: s})
+	s.ActivityLog.SetEventSigner(&invocationSigner{s: s})
 	sq := s.DataStore.(*store.SQLiteStore)
 	s.WitnessService = witness.NewService(witness.NewSQLiteStore(sq.DB()), sq, s.KeriDriver, witness.BackendDesktop)
 	s.DataStore.SaveContact(store.ContactRecord{AID: "EWitnessPeer", OobiURL: peer.base, Status: "accepted"})
@@ -1103,13 +1103,13 @@ func TestEnrolledWitnessesAreAskedToCoverTheRecord(t *testing.T) {
 	unwilling.svc.Store.SetConfig(witness.ConfigDelegates, "off")
 	s, _ := foundedWith(t, agentWithDerivedIdentity(t), []string{willing.witnessKey, unwilling.witnessKey}, 1)
 	s.DeclaredEntityType = "organization"
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
+	m, err := sandbox.NewManager(sandbox.ManagerConfig{Log: s.logForTest(t, s.DataDir), Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(m.Stop)
 	s.SandboxManager = m
-	m.SetEventSigner(&invocationSigner{s: s})
+	s.ActivityLog.SetEventSigner(&invocationSigner{s: s})
 	sq := s.DataStore.(*store.SQLiteStore)
 	s.WitnessService = witness.NewService(witness.NewSQLiteStore(sq.DB()), sq, s.KeriDriver, witness.BackendDesktop)
 	s.WitnessService.AskToCoverDelegates = s.anchorsItsRecord

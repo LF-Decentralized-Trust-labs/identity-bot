@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"time"
 
-	"identity-agent-core/sandbox"
-
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
+
+	"identity-agent-core/sandbox"
 )
 
 func (s *CoreServer) traceRoutes(r chi.Router) {

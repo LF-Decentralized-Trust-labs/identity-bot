@@ -1,4 +1,4 @@
-package sandbox
+package activitylog
 
 import (
 	"bytes"
@@ -186,8 +186,8 @@ var ErrNotRecorded = errors.New("the action was not run because it could not be 
 var ErrCannotCheck = errors.New("the log cannot be checked")
 
 // chainBegun reports whether this log's signed chain has begun.
-func (m *Manager) chainBegun() bool {
-	keeper, ok := m.getEventSigner().(ChainKeeper)
+func (l *Log) chainBegun() bool {
+	keeper, ok := l.getEventSigner().(ChainKeeper)
 	if !ok {
 		return false
 	}
@@ -204,9 +204,9 @@ func (m *Manager) chainBegun() bool {
 // trusts the database once, at the first start after upgrading; from then on
 // the start is fixed. Does nothing when the start is already kept or nothing
 // has been signed yet.
-func (m *Manager) EnsureChainStart() error {
-	keeper, ok := m.getEventSigner().(ChainKeeper)
-	if !ok || m.store == nil {
+func (l *Log) EnsureChainStart() error {
+	keeper, ok := l.getEventSigner().(ChainKeeper)
+	if !ok {
 		return nil
 	}
 	if _, kept, err := keeper.ChainStart(); err != nil || kept {
@@ -214,7 +214,7 @@ func (m *Manager) EnsureChainStart() error {
 	}
 	var id int64
 	var stored sql.NullString
-	err := m.store.db.QueryRow(`SELECT id, event_json FROM invocation_log
+	err := l.db.QueryRow(`SELECT id, event_json FROM invocation_log
 		WHERE signature IS NOT NULL AND signature != '' ORDER BY id ASC LIMIT 1`).Scan(&id, &stored)
 	if err == sql.ErrNoRows {
 		return nil
@@ -223,7 +223,7 @@ func (m *Manager) EnsureChainStart() error {
 		return err
 	}
 	// Rows written from now on keep their signed bytes; earlier ones never did.
-	next, err := m.store.NextEventID()
+	next, err := l.NextEventID()
 	if err != nil {
 		return err
 	}
@@ -232,38 +232,29 @@ func (m *Manager) EnsureChainStart() error {
 
 // NextEventID is the id the next row will be given, or one below it: ids are
 // never reused, so every row written from now on has at least this id.
-func (s *SandboxStore) NextEventID() (int64, error) {
+func (l *Log) NextEventID() (int64, error) {
 	var next int64
-	err := s.db.QueryRow(`SELECT MAX(
+	err := l.db.QueryRow(`SELECT MAX(
 		COALESCE((SELECT MAX(id) FROM invocation_log), 0),
 		COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'invocation_log'), 0)) + 1`).Scan(&next)
 	if err != nil {
 		// sqlite_sequence does not exist until the first row is written.
-		err = s.db.QueryRow(`SELECT COALESCE(MAX(id), 0) + 1 FROM invocation_log`).Scan(&next)
+		err = l.db.QueryRow(`SELECT COALESCE(MAX(id), 0) + 1 FROM invocation_log`).Scan(&next)
 	}
 	return next, err
 }
 
 // SetEventSigner injects the event-signing identity (server layer, at startup).
-func (m *Manager) SetEventSigner(s EventSigner) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.eventSigner = s
+func (l *Log) SetEventSigner(s EventSigner) {
+	l.signerMu.Lock()
+	defer l.signerMu.Unlock()
+	l.eventSigner = s
 }
 
-// SetAuthorizer injects the real governance-gateway ingress/egress decision (server
-// layer, at startup), replacing the structural default. Nil leaves the structural
-// authorizer in place.
-func (m *Manager) SetAuthorizer(a Authorizer) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.authorizer = a
-}
-
-func (m *Manager) getEventSigner() EventSigner {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.eventSigner
+func (l *Log) getEventSigner() EventSigner {
+	l.signerMu.RLock()
+	defer l.signerMu.RUnlock()
+	return l.eventSigner
 }
 
 // HashRecord is the link one event's PrevHash names: the hash of the record
@@ -357,20 +348,20 @@ func truncate(s string) string {
 	return s[:previewMaxValue] + "…"
 }
 
-// recordInvocation writes one signed audit event and returns its row id (0 when the
+// RecordInvocation writes one signed audit event and returns its row id (0 when the
 // write failed or no store is wired). An audit-write failure never fails the
 // invocation itself, but is logged loudly — the log is the governance record.
-func (m *Manager) recordInvocation(caller permission.CallerContext, capabilityID, executorType string, args []byte, status string, start time.Time) int64 {
-	return m.recordInvocationDetail(caller, capabilityID, executorType, args, status, start, EventDetail{})
+func (l *Log) RecordInvocation(caller permission.CallerContext, capabilityID, executorType string, args []byte, status string, start time.Time) int64 {
+	return l.RecordInvocationDetail(caller, capabilityID, executorType, args, status, start, EventDetail{})
 }
 
-// recordInvocationDetail is recordInvocation plus what the executing layer learned.
+// RecordInvocationDetail is RecordInvocation plus what the executing layer learned.
 //
 // Writes serialize on auditMu. That is not incidental: PrevHash is read from the
 // last row and must still be the last row when this one lands, or two concurrent
 // invocations both chain onto the same predecessor and the chain silently forks.
-func (m *Manager) recordInvocationDetail(caller permission.CallerContext, capabilityID, executorType string, args []byte, status string, start time.Time, d EventDetail) int64 {
-	id, err := m.writeEvent(newEvent(caller, capabilityID, executorType, args, status, start, d), false)
+func (l *Log) RecordInvocationDetail(caller permission.CallerContext, capabilityID, executorType string, args []byte, status string, start time.Time, d EventDetail) int64 {
+	id, err := l.writeEvent(newEvent(caller, capabilityID, executorType, args, status, start, d), false)
 	if err != nil {
 		log.Printf("[audit] EVENT NOT WRITTEN for %s (caller %s, status %s): %v",
 			capabilityID, caller.CallerAID, status, err)
@@ -378,17 +369,17 @@ func (m *Manager) recordInvocationDetail(caller permission.CallerContext, capabi
 	return id
 }
 
-// recordIntent writes the "about to run" row a governed action needs before it
+// RecordIntent writes the "about to run" row a governed action needs before it
 // runs: who asked, for what, with which arguments. Unlike a result row, it
 // fails rather than degrade: when a signer is configured the row must be
 // linked and signed, and when it cannot be written the action must not run.
 // Recording only afterwards would let an action happen with no record at all
 // whenever writing the record failed, and somebody able to break the log
 // could then act unrecorded.
-func (m *Manager) recordIntent(caller permission.CallerContext, capabilityID, executorType string, args []byte, start time.Time) (int64, error) {
+func (l *Log) RecordIntent(caller permission.CallerContext, capabilityID, executorType string, args []byte, start time.Time) (int64, error) {
 	ev := newEvent(caller, capabilityID, executorType, args, "started", start, EventDetail{StatusReason: "about to run"})
 	ev.DurationMs = 0
-	return m.writeEvent(ev, true)
+	return l.writeEvent(ev, true)
 }
 
 func newEvent(caller permission.CallerContext, capabilityID, executorType string, args []byte, status string, start time.Time, d EventDetail) InvocationEvent {
@@ -430,18 +421,18 @@ func newEvent(caller permission.CallerContext, capabilityID, executorType string
 // exactly the shape a rewrite would use to pass a forged row off as an old one,
 // so such a row is not written and the reason is returned. strict holds a row
 // to that whenever a signer is configured, even before the chain has begun.
-func (m *Manager) writeEvent(ev InvocationEvent, strict bool) (int64, error) {
-	if m.store == nil {
+func (l *Log) writeEvent(ev InvocationEvent, strict bool) (int64, error) {
+	if l == nil {
 		return 0, nil
 	}
-	m.auditMu.Lock()
-	defer m.auditMu.Unlock()
+	l.writeMu.Lock()
+	defer l.writeMu.Unlock()
 
-	signer := m.getEventSigner()
-	begun := m.chainBegun()
+	signer := l.getEventSigner()
+	begun := l.chainBegun()
 	must := begun || (strict && signer != nil)
 	// Chain to the previous record before signing, so the signature covers the link.
-	if prev, err := m.store.LastEventHash(); err == nil {
+	if prev, err := l.LastEventHash(); err == nil {
 		ev.PrevHash = prev
 	} else if must {
 		return 0, fmt.Errorf("could not read the previous record to link to: %w", err)
@@ -472,7 +463,7 @@ func (m *Manager) writeEvent(ev InvocationEvent, strict bool) (int64, error) {
 		}
 		ev.SignerAID, ev.Signature, ev.SignedPayload = aid, sig, string(payload)
 	}
-	id, err := m.store.InsertInvocationEvent(ev)
+	id, err := l.InsertInvocationEvent(ev)
 	if err != nil {
 		return 0, err
 	}
@@ -481,7 +472,7 @@ func (m *Manager) writeEvent(ev InvocationEvent, strict bool) (int64, error) {
 	// cannot be moved later.
 	if keeper, ok := signer.(ChainKeeper); ok && ev.Signature != "" {
 		if kept, has, cerr := keeper.ChainStart(); cerr == nil && (!has || kept.Hash == "") {
-			if stored, herr := m.store.eventJSON(id); herr != nil {
+			if stored, herr := l.eventJSON(id); herr != nil {
 				log.Printf("[audit] could not read back the first signed record to keep where the chain begins: %v", herr)
 			} else if kerr := keeper.KeepChainStart(ChainStart{ID: id, Hash: HashRecord(stored), Linked: true, PayloadFrom: id}); kerr != nil {
 				log.Printf("[audit] could not keep where the log's chain begins: %v", kerr)
@@ -496,24 +487,24 @@ func (m *Manager) writeEvent(ev InvocationEvent, strict bool) (int64, error) {
 // ("agent.orchestrate"), which anchors the worker steps that follow it (they carry its
 // id as ParentEventID). Returns the event's row id (0 if unwritten). Exposed for the
 // server layer; the same signing + chokepoint as a capability invocation.
-func (m *Manager) RecordGovernedEvent(caller permission.CallerContext, capabilityID, status string) int64 {
-	return m.recordInvocation(caller, capabilityID, "orchestrator", nil, status, time.Now())
+func (l *Log) RecordGovernedEvent(caller permission.CallerContext, capabilityID, status string) int64 {
+	return l.RecordInvocation(caller, capabilityID, "orchestrator", nil, status, time.Now())
 }
 
 // RecordGovernanceEvent writes one signed governance event for a decision about
 // an AI agent rather than an action it took — a machine asking to become its
 // body, approved, rejected, removed. Same signing and chain as an invocation;
 // the caller's Reason says why.
-func (m *Manager) RecordGovernanceEvent(caller permission.CallerContext, eventID, status string) int64 {
-	return m.recordInvocation(caller, eventID, "governance", nil, status, time.Now())
+func (l *Log) RecordGovernanceEvent(caller permission.CallerContext, eventID, status string) int64 {
+	return l.RecordInvocation(caller, eventID, "governance", nil, status, time.Now())
 }
 
 // RecordGovernanceEventAbout is RecordGovernanceEvent with what the event is
 // about committed in the signed row's argument digest (HashArgs), so anything
 // kept elsewhere about it can later be checked against the log: changing it
 // after the fact no longer matches the row that was signed when it happened.
-func (m *Manager) RecordGovernanceEventAbout(caller permission.CallerContext, eventID, status string, about []byte) int64 {
-	return m.recordInvocation(caller, eventID, "governance", about, status, time.Now())
+func (l *Log) RecordGovernanceEventAbout(caller permission.CallerContext, eventID, status string, about []byte) int64 {
+	return l.RecordInvocation(caller, eventID, "governance", about, status, time.Now())
 }
 
 // HashArgs is the digest the log keeps of an event's arguments, for a reader
@@ -521,7 +512,7 @@ func (m *Manager) RecordGovernanceEventAbout(caller permission.CallerContext, ev
 func HashArgs(args []byte) string { return hashArgs(args) }
 
 // InsertInvocationEvent persists one event; returns its row id.
-func (s *SandboxStore) InsertInvocationEvent(ev InvocationEvent) (int64, error) {
+func (l *Log) InsertInvocationEvent(ev InvocationEvent) (int64, error) {
 	chain, _ := json.Marshal(ev.DelegationChain)
 	full, _ := json.Marshal(ev)
 	var costAmount interface{}
@@ -529,7 +520,7 @@ func (s *SandboxStore) InsertInvocationEvent(ev InvocationEvent) (int64, error) 
 	if ev.Cost != nil {
 		costAmount, costUnit, costBasis = ev.Cost.Amount, ev.Cost.Unit, ev.Cost.Basis
 	}
-	res, err := s.db.Exec(`
+	res, err := l.db.Exec(`
 		INSERT INTO invocation_log (ts, caller_aid, delegation_chain, grant_said,
 			capability_id, args_hash, result_status, duration_ms, transport,
 			executor_type, correlation_id, parent_event_id, signer_aid, signature, event_json,
@@ -548,9 +539,9 @@ func (s *SandboxStore) InsertInvocationEvent(ev InvocationEvent) (int64, error) 
 }
 
 // eventJSON is one row's record exactly as stored.
-func (s *SandboxStore) eventJSON(id int64) ([]byte, error) {
+func (l *Log) eventJSON(id int64) ([]byte, error) {
 	var stored sql.NullString
-	if err := s.db.QueryRow(`SELECT event_json FROM invocation_log WHERE id = ?`, id).Scan(&stored); err != nil {
+	if err := l.db.QueryRow(`SELECT event_json FROM invocation_log WHERE id = ?`, id).Scan(&stored); err != nil {
 		return nil, err
 	}
 	if !stored.Valid {
@@ -571,9 +562,9 @@ func (s *SandboxStore) eventJSON(id int64) ([]byte, error) {
 // A row whose record is missing links on as missingRecordLink: the gap is
 // reported by VerifyChain at that row, and the log goes on rather than
 // stopping every later event at it.
-func (s *SandboxStore) LastEventHash() (string, error) {
+func (l *Log) LastEventHash() (string, error) {
 	var stored sql.NullString
-	err := s.db.QueryRow(`SELECT event_json FROM invocation_log ORDER BY id DESC LIMIT 1`).Scan(&stored)
+	err := l.db.QueryRow(`SELECT event_json FROM invocation_log ORDER BY id DESC LIMIT 1`).Scan(&stored)
 	if err == sql.ErrNoRows {
 		return "", nil
 	}
@@ -596,10 +587,10 @@ type ChainFault struct {
 
 // Head is the newest row of the log and the link the next row will name: its
 // id, and the hash of it as stored. Zero and empty when the log is empty.
-func (s *SandboxStore) Head() (int64, string, error) {
+func (l *Log) Head() (int64, string, error) {
 	var id int64
 	var stored string
-	err := s.db.QueryRow(`SELECT id, event_json FROM invocation_log ORDER BY id DESC LIMIT 1`).Scan(&id, &stored)
+	err := l.db.QueryRow(`SELECT id, event_json FROM invocation_log ORDER BY id DESC LIMIT 1`).Scan(&id, &stored)
 	if err == sql.ErrNoRows {
 		return 0, "", nil
 	}
@@ -610,9 +601,9 @@ func (s *SandboxStore) Head() (int64, string, error) {
 }
 
 // RowHash is the hash of one row as stored, and whether the row is there.
-func (s *SandboxStore) RowHash(id int64) (string, bool, error) {
+func (l *Log) RowHash(id int64) (string, bool, error) {
 	var stored string
-	err := s.db.QueryRow(`SELECT event_json FROM invocation_log WHERE id = ?`, id).Scan(&stored)
+	err := l.db.QueryRow(`SELECT event_json FROM invocation_log WHERE id = ?`, id).Scan(&stored)
 	if err == sql.ErrNoRows {
 		return "", false, nil
 	}
@@ -623,9 +614,9 @@ func (s *SandboxStore) RowHash(id int64) (string, bool, error) {
 }
 
 // RowsAfter counts the rows written after id.
-func (s *SandboxStore) RowsAfter(id int64) (int64, error) {
+func (l *Log) RowsAfter(id int64) (int64, error) {
 	var n int64
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM invocation_log WHERE id > ?`, id).Scan(&n)
+	err := l.db.QueryRow(`SELECT COUNT(*) FROM invocation_log WHERE id > ?`, id).Scan(&n)
 	return n, err
 }
 
@@ -652,8 +643,8 @@ func (s *SandboxStore) RowsAfter(id int64) (int64, error) {
 // the link is inside what was signed. The columns a reader filters and totals
 // on: they must say what the record says, or a filtered view could be changed
 // without touching the record.
-func (s *SandboxStore) VerifyChain(keys EventKeys, start *ChainStart) ([]ChainFault, error) {
-	rows, err := s.db.Query(`SELECT id, event_json, COALESCE(signed_payload, ''),
+func (l *Log) VerifyChain(keys EventKeys, start *ChainStart) ([]ChainFault, error) {
+	rows, err := l.db.Query(`SELECT id, event_json, COALESCE(signed_payload, ''),
 		COALESCE(ts, ''), COALESCE(caller_aid, ''), COALESCE(capability_id, ''),
 		COALESCE(correlation_id, ''), COALESCE(work_item, ''), COALESCE(result_status, ''),
 		COALESCE(executor_type, ''), COALESCE(duration_ms, 0), cost_amount, COALESCE(cost_unit, '')
@@ -865,7 +856,7 @@ func (c eventColumns) disagreeWith(ev InvocationEvent) string {
 // verifyEventSignature checks an event's signature. Where the signed bytes
 // were kept, it checks the signature over exactly those bytes and that they
 // say what the record says; otherwise over the event with its signer and
-// signature left empty, encoded as recordInvocation encodes it. Returns why
+// signature left empty, encoded as RecordInvocation encodes it. Returns why
 // it fails, or "", or an error wrapping ErrCannotCheck.
 //
 // mustKeep says the row was written after signed bytes were always kept, so
@@ -961,7 +952,7 @@ type InvocationSummary struct {
 }
 
 // QueryInvocationEvents reads the audit log, newest first (the Activity-view read).
-func (s *SandboxStore) QueryInvocationEvents(f InvocationEventFilter) ([]InvocationEvent, error) {
+func (l *Log) QueryInvocationEvents(f InvocationEventFilter) ([]InvocationEvent, error) {
 	q := `SELECT id, event_json FROM invocation_log WHERE 1=1`
 	var args []any
 	if f.CapabilityID != "" {
@@ -999,7 +990,7 @@ func (s *SandboxStore) QueryInvocationEvents(f InvocationEventFilter) ([]Invocat
 	q += " ORDER BY id DESC LIMIT ?"
 	args = append(args, f.EffectiveLimit())
 
-	rows, err := s.db.Query(q, args...)
+	rows, err := l.db.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1024,9 +1015,9 @@ func (s *SandboxStore) QueryInvocationEvents(f InvocationEventFilter) ([]Invocat
 }
 
 // GetInvocationEvent returns one event by row id.
-func (s *SandboxStore) GetInvocationEvent(id int64) (InvocationEvent, error) {
+func (l *Log) GetInvocationEvent(id int64) (InvocationEvent, error) {
 	var stored sql.NullString
-	err := s.db.QueryRow(`SELECT event_json FROM invocation_log WHERE id = ?`, id).Scan(&stored)
+	err := l.db.QueryRow(`SELECT event_json FROM invocation_log WHERE id = ?`, id).Scan(&stored)
 	if err == sql.ErrNoRows {
 		return InvocationEvent{}, fmt.Errorf("no invocation event with id %d", id)
 	}
@@ -1051,7 +1042,7 @@ func (s *SandboxStore) GetInvocationEvent(id int64) (InvocationEvent, error) {
 // meaningless. Rows with no cost are excluded from the totals and counted separately,
 // because "nothing reported a cost" and "this was free" are different facts and only
 // one of them is good news.
-func (s *SandboxStore) SummariseInvocations(since string) (InvocationSummary, error) {
+func (l *Log) SummariseInvocations(since string) (InvocationSummary, error) {
 	out := InvocationSummary{
 		ByStatus:   map[string]int64{},
 		ByExecutor: map[string]int64{},
@@ -1066,7 +1057,7 @@ func (s *SandboxStore) SummariseInvocations(since string) (InvocationSummary, er
 		args = append(args, since)
 	}
 
-	err := s.db.QueryRow(
+	err := l.db.QueryRow(
 		`SELECT COUNT(*), COALESCE(SUM(duration_ms),0), COALESCE(MIN(ts),''), COALESCE(MAX(ts),'')
 		 FROM invocation_log`+where, args...).
 		Scan(&out.Total, &out.TotalDuration, &out.FirstEvent, &out.LastEvent)
@@ -1074,11 +1065,11 @@ func (s *SandboxStore) SummariseInvocations(since string) (InvocationSummary, er
 		return out, err
 	}
 
-	if err := s.tally(`SELECT result_status, COUNT(*) FROM invocation_log`+where+
+	if err := l.tally(`SELECT result_status, COUNT(*) FROM invocation_log`+where+
 		` GROUP BY result_status`, args, out.ByStatus); err != nil {
 		return out, err
 	}
-	if err := s.tally(`SELECT COALESCE(executor_type,'unknown'), COUNT(*) FROM invocation_log`+where+
+	if err := l.tally(`SELECT COALESCE(executor_type,'unknown'), COUNT(*) FROM invocation_log`+where+
 		` GROUP BY executor_type`, args, out.ByExecutor); err != nil {
 		return out, err
 	}
@@ -1090,7 +1081,7 @@ func (s *SandboxStore) SummariseInvocations(since string) (InvocationSummary, er
 	} else {
 		costArgs = nil
 	}
-	rows, err := s.db.Query(`SELECT cost_unit, SUM(cost_amount), COUNT(*) FROM invocation_log`+
+	rows, err := l.db.Query(`SELECT cost_unit, SUM(cost_amount), COUNT(*) FROM invocation_log`+
 		costWhere+` GROUP BY cost_unit`, costArgs...)
 	if err != nil {
 		return out, err
@@ -1109,8 +1100,8 @@ func (s *SandboxStore) SummariseInvocations(since string) (InvocationSummary, er
 	return out, rows.Err()
 }
 
-func (s *SandboxStore) tally(query string, args []any, into map[string]int64) error {
-	rows, err := s.db.Query(query, args...)
+func (l *Log) tally(query string, args []any, into map[string]int64) error {
+	rows, err := l.db.Query(query, args...)
 	if err != nil {
 		return err
 	}

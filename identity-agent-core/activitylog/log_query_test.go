@@ -1,8 +1,10 @@
-package sandbox
+package activitylog
 
-import "testing"
+import (
+	"testing"
+)
 
-func seedEvents(t *testing.T, store *SandboxStore, evs ...InvocationEvent) {
+func seedEvents(t *testing.T, store *Log, evs ...InvocationEvent) {
 	t.Helper()
 	for _, ev := range evs {
 		if _, err := store.InsertInvocationEvent(ev); err != nil {
@@ -15,7 +17,7 @@ func TestFilterByWorkItemCrossesCallers(t *testing.T) {
 	// The question a reader usually has is not "what did this caller do" but "what
 	// was done for this task" — by whoever did it. So the work-item filter must not
 	// be implicitly narrowed by caller.
-	store := newTestSandboxStore(t)
+	store := newTestLog(t)
 	seedEvents(t, store,
 		InvocationEvent{TS: "2026-07-01T00:00:00Z", CapabilityID: "x.a", ResultStatus: "ok", WorkItem: "W-1", CallerAID: "AID-one"},
 		InvocationEvent{TS: "2026-07-02T00:00:00Z", CapabilityID: "x.b", ResultStatus: "ok", WorkItem: "W-1", CallerAID: "AID-two"},
@@ -38,7 +40,7 @@ func TestFilterByWorkItemCrossesCallers(t *testing.T) {
 }
 
 func TestFilterByStatusAndWindow(t *testing.T) {
-	store := newTestSandboxStore(t)
+	store := newTestLog(t)
 	seedEvents(t, store,
 		InvocationEvent{TS: "2026-07-01T00:00:00Z", CapabilityID: "y.a", ResultStatus: "ok"},
 		InvocationEvent{TS: "2026-07-05T00:00:00Z", CapabilityID: "y.b", ResultStatus: "denied"},
@@ -56,7 +58,7 @@ func TestFilterByStatusAndWindow(t *testing.T) {
 }
 
 func TestNewestFirst(t *testing.T) {
-	store := newTestSandboxStore(t)
+	store := newTestLog(t)
 	seedEvents(t, store,
 		InvocationEvent{TS: "2026-07-01T00:00:00Z", CapabilityID: "z.old", ResultStatus: "ok"},
 		InvocationEvent{TS: "2026-07-02T00:00:00Z", CapabilityID: "z.new", ResultStatus: "ok"},
@@ -84,7 +86,7 @@ func TestEffectiveLimitIsBounded(t *testing.T) {
 }
 
 func TestGetInvocationEventCarriesItsID(t *testing.T) {
-	store := newTestSandboxStore(t)
+	store := newTestLog(t)
 	id, err := store.InsertInvocationEvent(InvocationEvent{
 		TS: "2026-07-01T00:00:00Z", CapabilityID: "one.only", ResultStatus: "ok",
 		WorkItem: "W-9", Reason: "because",
@@ -111,7 +113,7 @@ func TestGetInvocationEventCarriesItsID(t *testing.T) {
 func TestSummaryNeverAddsUnlikeUnits(t *testing.T) {
 	// Summing dollars, tokens and requests into one number is arithmetically valid
 	// and completely meaningless. Costs stay grouped by unit.
-	store := newTestSandboxStore(t)
+	store := newTestLog(t)
 	seedEvents(t, store,
 		InvocationEvent{TS: "2026-07-01T00:00:00Z", CapabilityID: "s.a", ResultStatus: "ok",
 			ExecutorType: "local_cli", DurationMs: 100, Cost: &Cost{Amount: 1.50, Unit: "USD"}},
@@ -147,7 +149,7 @@ func TestSummaryNeverAddsUnlikeUnits(t *testing.T) {
 func TestSummaryDistinguishesUncostedFromFree(t *testing.T) {
 	// A total of zero must not be readable as "this was free" when it actually means
 	// "nothing reported a cost". Costed is what tells them apart.
-	store := newTestSandboxStore(t)
+	store := newTestLog(t)
 	seedEvents(t, store,
 		InvocationEvent{TS: "2026-07-01T00:00:00Z", CapabilityID: "u.a", ResultStatus: "ok"},
 		InvocationEvent{TS: "2026-07-02T00:00:00Z", CapabilityID: "u.b", ResultStatus: "ok"},
@@ -179,7 +181,7 @@ func TestSummaryDistinguishesUncostedFromFree(t *testing.T) {
 }
 
 func TestSummaryHonoursSince(t *testing.T) {
-	store := newTestSandboxStore(t)
+	store := newTestLog(t)
 	seedEvents(t, store,
 		InvocationEvent{TS: "2026-06-01T00:00:00Z", CapabilityID: "h.old", ResultStatus: "ok",
 			Cost: &Cost{Amount: 99, Unit: "USD"}},
@@ -201,7 +203,7 @@ func TestSummaryHonoursSince(t *testing.T) {
 }
 
 func TestSummaryOnEmptyLog(t *testing.T) {
-	sum, err := newTestSandboxStore(t).SummariseInvocations("")
+	sum, err := newTestLog(t).SummariseInvocations("")
 	if err != nil {
 		t.Fatalf("an empty log is not an error: %v", err)
 	}

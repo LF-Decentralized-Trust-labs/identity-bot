@@ -316,22 +316,22 @@ func (s *CoreServer) refuseMessage(w http.ResponseWriter, cc permission.CallerCo
 		kind = "unrecognised"
 	}
 	log.Printf("[conversation] refused %s from %s: %s", kind, cc.CallerAID, why)
-	if s.SandboxManager != nil {
+	if s.ActivityLog != nil {
 		cc.Reason = clampWhy(why)
-		s.SandboxManager.RecordGovernanceEvent(cc, "agent.message."+kind, "denied")
+		s.ActivityLog.RecordGovernanceEvent(cc, "agent.message."+kind, "denied")
 	}
 	jsonError(w, why, status)
 }
 
 func (s *CoreServer) recordMessage(cc permission.CallerContext, e conversation.Entry) {
-	if s.SandboxManager == nil {
+	if s.ActivityLog == nil {
 		return
 	}
 	// The conversation is the piece of work every one of its messages is for,
 	// so the log is read per conversation by asking for that.
 	cc.WorkItem = e.Conversation
 	cc.Reason = clampWhy(fmt.Sprintf("%s %s in %s, from %s to %s", e.Kind, e.MessageID, e.Conversation, e.From, e.To))
-	s.SandboxManager.RecordGovernanceEvent(cc, "agent.message."+e.Kind, "ok")
+	s.ActivityLog.RecordGovernanceEvent(cc, "agent.message."+e.Kind, "ok")
 	s.noteRecorded()
 }
 
@@ -543,7 +543,7 @@ func (s *CoreServer) handleReadConversation(w http.ResponseWriter, r *http.Reque
 	}
 	// Reading the record is itself recorded — once per opening of it, not on
 	// every wait for news.
-	if after == 0 && s.SandboxManager != nil {
+	if after == 0 && s.ActivityLog != nil {
 		reader := permission.CallerContext{Remote: true, CorrelationID: requestCorrelationID(r), Transport: "controller",
 			Reason: "read conversation " + c.ID}
 		if g, ok := TheControllerThatAsked(r); ok {
@@ -551,7 +551,7 @@ func (s *CoreServer) handleReadConversation(w http.ResponseWriter, r *http.Reque
 		} else {
 			reader.CallerAID = "owner"
 		}
-		s.SandboxManager.RecordGovernanceEvent(reader, "agent.conversation.read", "ok")
+		s.ActivityLog.RecordGovernanceEvent(reader, "agent.conversation.read", "ok")
 	}
 	writeJSONStatus(w, http.StatusOK, map[string]any{
 		"conversation": c, "open": c.Open(time.Now()), "entries": s.viewEntries(r.Context(), store, entries),
@@ -921,10 +921,10 @@ func (s *CoreServer) handleBodyConversationHistory(w http.ResponseWriter, r *htt
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if s.SandboxManager != nil {
+	if s.ActivityLog != nil {
 		reader := cc
 		reader.Reason = "read conversation " + cid
-		s.SandboxManager.RecordGovernanceEvent(reader, "agent.conversation.read", "ok")
+		s.ActivityLog.RecordGovernanceEvent(reader, "agent.conversation.read", "ok")
 	}
 	type said struct {
 		Seq  int    `json:"seq"`

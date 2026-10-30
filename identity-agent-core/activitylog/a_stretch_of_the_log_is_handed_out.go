@@ -1,4 +1,4 @@
-package sandbox
+package activitylog
 
 import (
 	"database/sql"
@@ -23,9 +23,9 @@ type StoredRow struct {
 
 // FirstRowFor is the oldest row filed under a piece of work, and whether there
 // is one.
-func (s *SandboxStore) FirstRowFor(workItem string) (int64, bool, error) {
+func (l *Log) FirstRowFor(workItem string) (int64, bool, error) {
 	var id sql.NullInt64
-	if err := s.db.QueryRow(`SELECT MIN(id) FROM invocation_log WHERE work_item = ?`, workItem).Scan(&id); err != nil {
+	if err := l.db.QueryRow(`SELECT MIN(id) FROM invocation_log WHERE work_item = ?`, workItem).Scan(&id); err != nil {
 		return 0, false, err
 	}
 	return id.Int64, id.Valid, nil
@@ -34,11 +34,11 @@ func (s *SandboxStore) FirstRowFor(workItem string) (int64, bool, error) {
 // StoredRows returns the rows from id from through id to, oldest first, as
 // kept. A row whose record is missing comes back with an empty record, so the
 // gap is seen by whoever checks it rather than closed up here.
-func (s *SandboxStore) StoredRows(from, to int64) ([]StoredRow, error) {
+func (l *Log) StoredRows(from, to int64) ([]StoredRow, error) {
 	if to < from {
 		return nil, errors.New("the stretch of the log asked for ends before it begins")
 	}
-	rows, err := s.db.Query(`SELECT id, COALESCE(event_json, ''), COALESCE(signed_payload, '')
+	rows, err := l.db.Query(`SELECT id, COALESCE(event_json, ''), COALESCE(signed_payload, '')
 		FROM invocation_log WHERE id >= ? AND id <= ? ORDER BY id ASC`, from, to)
 	if err != nil {
 		return nil, err

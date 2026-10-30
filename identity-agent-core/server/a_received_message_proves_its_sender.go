@@ -12,10 +12,10 @@ import (
 
 	keri "github.com/grapeid/keri-go"
 
+	"identity-agent-core/activitylog"
 	"identity-agent-core/didcomm"
 	"identity-agent-core/drivers"
 	"identity-agent-core/permission"
-	"identity-agent-core/sandbox"
 	"identity-agent-core/store"
 )
 
@@ -203,7 +203,7 @@ func (s *CoreServer) delegatedFromHere(aid string, e ownEvidence) error {
 // receiptBinding is what the log row for a received message commits to: the
 // message, digests of its kept signed form, of the sender's keys and of the
 // sender's key history then, and how those keys were tied to the sender. Recomputed from the kept message and
-// compared with the row (sandbox.HashArgs) when the sender is shown later.
+// compared with the row (activitylog.HashArgs) when the sender is shown later.
 func receiptBinding(messageID string, p receivedProof) []byte {
 	digest := func(v string) string {
 		sum := sha256.Sum256([]byte(v))
@@ -304,16 +304,16 @@ func (s *CoreServer) keysWereTied(n store.Notification, did *didcomm.DID) error 
 // receiptWasLogged finds the signed log row written when the message arrived
 // and checks it committed to the proof kept now.
 func (s *CoreServer) receiptWasLogged(n store.Notification) error {
-	if s.SandboxManager == nil {
+	if s.ActivityLog == nil {
 		return fmt.Errorf("there is no signed log here to check the kept proof against")
 	}
-	rows, err := s.SandboxManager.Store().QueryInvocationEvents(sandbox.InvocationEventFilter{
+	rows, err := s.ActivityLog.QueryInvocationEvents(activitylog.InvocationEventFilter{
 		CapabilityID: "didcomm.message.received", CorrelationID: n.ID, CallerAID: n.FromAID, ResultStatus: "ok",
 	})
 	if err != nil {
 		return fmt.Errorf("the signed log could not be read: %w", err)
 	}
-	want := sandbox.HashArgs(receiptBinding(n.ID, receivedProof{
+	want := activitylog.HashArgs(receiptBinding(n.ID, receivedProof{
 		Signed: n.SignedMessage, SenderDID: n.SenderDID, KeyTrust: n.SenderKeyTrust,
 		KELSaid: n.SenderKELSaid, KELEvents: n.SenderKELEvents, KEL: n.SenderKEL,
 	}))
@@ -446,12 +446,12 @@ var deliveryRecordMu sync.Mutex
 // until its receipt comes back, and recording each would let a machine that
 // never answers fill the log by asking.
 func (s *CoreServer) recordDeliveryOnce(cc permission.CallerContext, messageID, host string) {
-	if s.SandboxManager == nil {
+	if s.ActivityLog == nil {
 		return
 	}
 	deliveryRecordMu.Lock()
 	defer deliveryRecordMu.Unlock()
-	rows, err := s.SandboxManager.Store().QueryInvocationEvents(sandbox.InvocationEventFilter{
+	rows, err := s.ActivityLog.QueryInvocationEvents(activitylog.InvocationEventFilter{
 		CapabilityID: "agent.message.delivered", CorrelationID: messageID,
 	})
 	if err == nil {
@@ -462,5 +462,5 @@ func (s *CoreServer) recordDeliveryOnce(cc permission.CallerContext, messageID, 
 		}
 	}
 	cc.CorrelationID = messageID
-	s.SandboxManager.RecordGovernanceEvent(cc, "agent.message.delivered", "ok")
+	s.ActivityLog.RecordGovernanceEvent(cc, "agent.message.delivered", "ok")
 }

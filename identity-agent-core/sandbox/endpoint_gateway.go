@@ -61,3 +61,12 @@ func (m *Manager) authz() Authorizer {
 	}
 	return structuralAuthorizer{}
 }
+
+// SetAuthorizer injects the real governance-gateway ingress/egress decision (server
+// layer, at startup), replacing the structural default. Nil leaves the structural
+// authorizer in place.
+func (m *Manager) SetAuthorizer(a Authorizer) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.authorizer = a
+}

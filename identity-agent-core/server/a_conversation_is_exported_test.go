@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"identity-agent-core/activitylog"
 	"identity-agent-core/agentbody"
 	"identity-agent-core/agenthost"
 	"identity-agent-core/agentmessage"
@@ -27,7 +28,6 @@ import (
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
 	"identity-agent-core/permission"
-	"identity-agent-core/sandbox"
 
 	_ "modernc.org/sqlite"
 )
@@ -37,7 +37,7 @@ import (
 func exportWorld(t *testing.T) *talkWorld {
 	t.Helper()
 	w := newTalkWorld(t)
-	w.s.SandboxManager.SetEventSigner(&invocationSigner{s: w.s})
+	w.s.ActivityLog.SetEventSigner(&invocationSigner{s: w.s})
 	return w
 }
 
@@ -164,7 +164,7 @@ func TestAnExportedConversationVerifiesOffline(t *testing.T) {
 	}
 
 	// The export is itself in the governance log, and in the bundle.
-	rows, err := w.s.SandboxManager.Store().QueryInvocationEvents(sandbox.InvocationEventFilter{
+	rows, err := w.s.ActivityLog.QueryInvocationEvents(activitylog.InvocationEventFilter{
 		CapabilityID: "agent.conversation.export", WorkItem: conv,
 	})
 	if err != nil || len(rows) != 1 || rows[0].CallerAID != w.ctlAID {
@@ -549,7 +549,7 @@ func TestAnExportMissingItsWordsFailsLoudly(t *testing.T) {
 	if n := strings.Count(string(raw), conversationbundle.ErrIncomplete.Error()); n != 1 {
 		t.Fatalf("the refusal says it is incomplete %d times: %s", n, raw)
 	}
-	rows, _ := w.s.SandboxManager.Store().QueryInvocationEvents(sandbox.InvocationEventFilter{
+	rows, _ := w.s.ActivityLog.QueryInvocationEvents(activitylog.InvocationEventFilter{
 		CapabilityID: "agent.conversation.export", WorkItem: conv, ResultStatus: "error",
 	})
 	if len(rows) != 1 {

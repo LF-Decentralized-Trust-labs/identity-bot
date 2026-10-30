@@ -13,10 +13,10 @@ import (
 	"strconv"
 	"time"
 
-	"identity-agent-core/sandbox"
-
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
+
+	"identity-agent-core/sandbox"
 )
 
 var wsUpgrader = websocket.Upgrader{

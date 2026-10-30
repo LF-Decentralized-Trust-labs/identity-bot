@@ -21,8 +21,8 @@ import (
 	"encoding/json"
 	"errors"
 
+	"identity-agent-core/activitylog"
 	"identity-agent-core/didcomm"
-	"identity-agent-core/sandbox"
 )
 
 // CapabilityRecordAnchoring is the governance log's row for an anchoring of
@@ -139,7 +139,7 @@ type Log struct {
 	// Signer is the identity that signs the log's rows.
 	Signer string `json:"signer"`
 	// Rows are the rows, oldest first, with no gap.
-	Rows []sandbox.StoredRow `json:"rows"`
+	Rows []activitylog.StoredRow `json:"rows"`
 }
 
 // Anchor is what one interaction of the record identity seals.

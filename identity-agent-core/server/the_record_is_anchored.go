@@ -480,7 +480,7 @@ func (s *CoreServer) anchoredSeqs() (map[string]int, error) {
 // conversation that grew since it was last anchored. It reports whether it
 // anchored anything.
 func (s *CoreServer) anchorRecord() (bool, error) {
-	if s.SandboxManager == nil || s.SandboxManager.Store() == nil || s.DataStore == nil || !s.anchorsItsRecord() {
+	if s.ActivityLog == nil || s.DataStore == nil || !s.anchorsItsRecord() {
 		return false, nil
 	}
 	s.record.mu.Lock()
@@ -499,7 +499,7 @@ func (s *CoreServer) anchorRecord() (bool, error) {
 			return false, fmt.Errorf("the last anchoring is unreadable: %w", err)
 		}
 	}
-	row, head, err := s.SandboxManager.Store().Head()
+	row, head, err := s.ActivityLog.Head()
 	if err != nil {
 		return false, err
 	}
@@ -532,9 +532,9 @@ func (s *CoreServer) anchorRecord() (bool, error) {
 	// The anchoring is written to the log first, and the anchor fixes that
 	// row: a log that says the record was anchored cannot be handed out
 	// without the anchors, and the next tick finds nothing new to anchor.
-	if s.SandboxManager.RecordGovernanceEvent(permission.CallerContext{CallerAID: rec.AID,
+	if s.ActivityLog.RecordGovernanceEvent(permission.CallerContext{CallerAID: rec.AID,
 		Reason: "anchoring the record in the key log of " + rec.AID}, capabilityRecordAnchoring, "ok") != 0 {
-		if row, head, err = s.SandboxManager.Store().Head(); err != nil {
+		if row, head, err = s.ActivityLog.Head(); err != nil {
 			return false, err
 		}
 		st.Log = anchoredLog{Row: row, Head: head}
@@ -654,10 +654,10 @@ func (s *CoreServer) checkAnchors() (anchorCheck, error) {
 	s.record.mu.Lock()
 	defer s.record.mu.Unlock()
 	var out anchorCheck
-	if s.DataStore == nil || s.SandboxManager == nil || s.SandboxManager.Store() == nil {
+	if s.DataStore == nil || s.ActivityLog == nil {
 		return out, nil
 	}
-	rows := s.SandboxManager.Store()
+	rows := s.ActivityLog
 	heads := map[string]conversation.Conversation{}
 	convs, cerr := s.conversations()
 	if cerr == nil {

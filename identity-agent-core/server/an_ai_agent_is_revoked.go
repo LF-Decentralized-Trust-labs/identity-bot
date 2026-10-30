@@ -141,8 +141,8 @@ func (s *CoreServer) handleRevokeAIAgent(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if first {
-		if s.SandboxManager != nil {
-			s.SandboxManager.RecordGovernanceEvent(permission.CallerContext{
+		if s.ActivityLog != nil {
+			s.ActivityLog.RecordGovernanceEvent(permission.CallerContext{
 				CallerAID: a.PairwiseAID, DelegationChain: []string{a.PairwiseAID, a.DelegatorAID},
 				Reason: "revoked by " + by,
 			}, "agent.revoked", "ok")

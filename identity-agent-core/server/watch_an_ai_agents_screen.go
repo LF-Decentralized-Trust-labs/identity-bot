@@ -240,9 +240,9 @@ func (s *CoreServer) refuseViewing(w http.ResponseWriter, cc permission.CallerCo
 func (s *CoreServer) refuseViewingWith(w http.ResponseWriter, cc permission.CallerContext, event, why, reason string,
 	status int, extra map[string]string) {
 	log.Printf("[screen] refused %s to %s: %s (%s)", event, cc.CallerAID, why, reason)
-	if s.SandboxManager != nil {
+	if s.ActivityLog != nil {
 		cc.Reason = clampWhy(reason + ": " + why)
-		s.SandboxManager.RecordGovernanceEvent(cc, event, "denied")
+		s.ActivityLog.RecordGovernanceEvent(cc, event, "denied")
 	}
 	body := map[string]string{"error": why, "reason": reason}
 	for k, v := range extra {
@@ -481,12 +481,12 @@ func (s *CoreServer) handleSendInput(w http.ResponseWriter, r *http.Request) {
 
 func (s *CoreServer) recordViewing(cc permission.CallerContext, v screenview.Viewing, event, why string) {
 	log.Printf("[screen] %s: %s", cc.CallerAID, why)
-	if s.SandboxManager == nil {
+	if s.ActivityLog == nil {
 		return
 	}
 	cc.WorkItem = v.ID
 	cc.Reason = clampWhy(why)
-	s.SandboxManager.RecordGovernanceEvent(cc, event, "ok")
+	s.ActivityLog.RecordGovernanceEvent(cc, event, "ok")
 }
 
 // recordViewingEnded records a viewing that ended, and the control given up

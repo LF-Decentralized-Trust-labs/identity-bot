@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
+	"identity-agent-core/activitylog"
 	"identity-agent-core/asset"
 	"identity-agent-core/avatar"
 	"identity-agent-core/backup"
@@ -100,7 +101,10 @@ type CoreServer struct {
 	EndpointService *endpoint.EndpointService
 	// Vault is the credential vault: what this Identity Agent keeps for
 	// services, sealed under a key derived from the identity's root seed.
-	Vault          *vault.CredentialVault
+	Vault *vault.CredentialVault
+	// ActivityLog is the signed record of who did what, under whose
+	// authority, and of the governance decisions taken about them.
+	ActivityLog    *activitylog.Log
 	SandboxManager *sandbox.Manager
 	EventHub       *EventHub
 	StartTime      time.Time
@@ -517,21 +521,29 @@ func New(cfg Config) (*CoreServer, error) {
 		}
 		return backup.DeriveVaultKEK(rootSeed)
 	})
+	// The activity log, signed by this agent's log signer. Opened before
+	// anything that writes to it.
+	if al, err := activitylog.Open(cfg.DataDir); err != nil {
+		log.Printf("[identity-agent-core] Activity log init failed (non-fatal): %v", err)
+	} else {
+		s.ActivityLog = al
+		s.ActivityLog.SetEventSigner(&invocationSigner{s: s})
+		// A log signed before where its chain begins was kept outside the
+		// database gets that start now, once, from the first signed row.
+		if err := s.ActivityLog.EnsureChainStart(); err != nil {
+			log.Printf("[identity-agent-core] could not record where the log's signed chain begins: %v", err)
+		}
+	}
 	sbxMgr, err := sandbox.NewManager(sandbox.ManagerConfig{
 		DataDir:      cfg.DataDir,
 		ManifestsDir: manifestsDir,
+		Log:          s.ActivityLog,
 		Vault:        s.Vault,
 	})
 	if err != nil {
 		log.Printf("[identity-agent-core] Sandbox manager init failed (non-fatal): %v", err)
 	} else {
 		s.SandboxManager = sbxMgr
-		s.SandboxManager.SetEventSigner(&invocationSigner{s: s})
-		// A log signed before where its chain begins was kept outside the
-		// database gets that start now, once, from the first signed row.
-		if err := s.SandboxManager.EnsureChainStart(); err != nil {
-			log.Printf("[identity-agent-core] could not record where the log's signed chain begins: %v", err)
-		}
 		// The endpoint uses the structural authorizer by default (host-control never
 		// remote; a remote caller must hold the capability in its grant). An overlay
 		// may inject a richer authorizer via SetAuthorizer.
@@ -832,6 +844,9 @@ func (s *CoreServer) Stop() {
 
 	if s.SandboxManager != nil {
 		s.SandboxManager.Stop()
+	}
+	if s.ActivityLog != nil {
+		s.ActivityLog.Close()
 	}
 
 	if s.TunnelManager != nil {
