@@ -54,6 +54,7 @@ func DecodeVerkey(key string) ([]byte, error) {
 	}
 	for _, dec := range []func(string) ([]byte, error){
 		base64.RawURLEncoding.DecodeString,
+		base64.URLEncoding.DecodeString,
 		base64.StdEncoding.DecodeString,
 		base64.RawStdEncoding.DecodeString,
 		hex.DecodeString,
