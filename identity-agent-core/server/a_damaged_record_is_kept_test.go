@@ -122,6 +122,17 @@ func TestADamagedRecordIdentityIsNeverReplaced(t *testing.T) {
 		t.Fatalf("%v, want the record unreadable", err)
 	}
 	s.reloadRecordIdentity()
+	// An add-on holding the record is told it cannot be read, not that there
+	// is none, and the hold is let go either way.
+	_, _, found, release, err := s.holdTheRecord()
+	release()
+	if !errors.Is(err, errRecordUnreadable) || found {
+		t.Fatalf("holding the record: found=%v err=%v, want the record unreadable", found, err)
+	}
+	if !s.record.mu.TryLock() {
+		t.Fatal("the record is still held after refusing")
+	}
+	s.record.mu.Unlock()
 	leftAlone(t, s.recordIdentityPath(), damaged)
 }
 

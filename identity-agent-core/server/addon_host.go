@@ -81,8 +81,10 @@ func (h hostWrapper) GrantController(g ControllerGrant, now time.Time, by corety
 func (h hostWrapper) GrantsHeldBy(agentAID string, usableOnly bool) []store.CredentialRecord {
 	return h.s.grantsHeldBy(agentAID, usableOnly)
 }
-func (h hostWrapper) HasBrowserSession(r *http.Request) bool      { return h.s.hasBrowserSession(r) }
-func (h hostWrapper) HoldTheRecord() (string, bool, bool, func()) { return h.s.holdTheRecord() }
+func (h hostWrapper) HasBrowserSession(r *http.Request) bool { return h.s.hasBrowserSession(r) }
+func (h hostWrapper) HoldTheRecord() (string, bool, bool, func(), error) {
+	return h.s.holdTheRecord()
+}
 func (h hostWrapper) SignerForAsset(aid string) (coretypes.KeySigner, error) {
 	return h.s.assetSigner(aid)
 }

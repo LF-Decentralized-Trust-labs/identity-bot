@@ -104,7 +104,7 @@ type Host interface {
 	GrantController(g server.ControllerGrant, now time.Time, by Authority) (server.ControllerGrant, error)
 	GrantsHeldBy(agentAID string, usableOnly bool) []store.CredentialRecord
 	HasBrowserSession(r *http.Request) bool
-	HoldTheRecord() (string, bool, bool, func())
+	HoldTheRecord() (string, bool, bool, func(), error)
 	InBackground(fn func(ctx context.Context))
 	InitAssetHandler() error
 	IsLiveBrowserSession(token string) bool

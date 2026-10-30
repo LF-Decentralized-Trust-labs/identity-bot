@@ -120,13 +120,18 @@ type recordIdentityRecord struct {
 
 // holdTheRecord holds the record's anchoring until release is called, so
 // nothing is anchored meanwhile, and gives the record identity as it stands:
-// found is false where there is none.
-func (s *CoreServer) holdTheRecord() (aid string, pending, found bool, release func()) {
+// found is false where there is none. err is the record being there and
+// unreadable, which is not the same as there being none: a caller told
+// "none" would present a record that has anchors as one that never had any.
+// release is always safe to call.
+func (s *CoreServer) holdTheRecord() (aid string, pending, found bool, release func(), err error) {
 	s.record.mu.Lock()
-	// Read only, so an unreadable record is reported as none to the caller;
-	// readKeptRecord has said why in the log, and nothing is written here.
-	rec, ok, _ := s.loadRecordIdentity()
-	return rec.AID, rec.Pending, ok, s.record.mu.Unlock
+	rec, ok, err := s.loadRecordIdentity()
+	if err != nil {
+		s.record.mu.Unlock()
+		return "", false, false, func() {}, err
+	}
+	return rec.AID, rec.Pending, ok, s.record.mu.Unlock, nil
 }
 
 func tipMessage(rec recordIdentityRecord) string {
