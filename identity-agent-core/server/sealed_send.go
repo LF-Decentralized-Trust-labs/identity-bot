@@ -117,7 +117,7 @@ func (s *CoreServer) handleSealedSend(w http.ResponseWriter, r *http.Request) {
 		// that quietly works is one an attacker can force by breaking this
 		// path — which is the whole of the protection, undone by being helpful.
 		jsonError(w, fmt.Sprintf("this request was not sent, because it could not be sent "+
-			"privately: %v", err), http.StatusBadGateway)
+			"privately: %v", err), statusForKeyError(err, http.StatusBadGateway))
 		return
 	}
 

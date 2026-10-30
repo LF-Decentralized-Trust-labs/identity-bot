@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"identity-agent-core/didcomm"
+	"identity-agent-core/internal/coretypes"
 )
 
 // Carrying a request nobody in the middle can read.
@@ -74,7 +75,7 @@ func (s *CoreServer) handleSealedTransport(w http.ResponseWriter, r *http.Reques
 	// agent do expensive work on demand.
 	senderDID, keys, err := s.sealedParties(&env)
 	if err != nil {
-		writeSealedError(w, http.StatusForbidden, err.Error())
+		writeSealedError(w, statusForKeyError(err, http.StatusForbidden), err.Error())
 		return
 	}
 
@@ -273,12 +274,16 @@ func (s *CoreServer) sealedParties(env *didcomm.Envelope) (*didcomm.DID, *didcom
 		return nil, nil, fmt.Errorf("this envelope names no recipient")
 	}
 	kid := env.Recipients[0].Header.Kid
-	if !s.hasKeySet(kid) {
+	has, err := s.hasKeySet(kid)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: this agent could not load the keys to open it", coretypes.ErrKeysUnavailable)
+	}
+	if !has {
 		return nil, nil, fmt.Errorf("this envelope is addressed to an identity this agent does not hold")
 	}
 	keys, err := s.keySetFor(kid)
 	if err != nil {
-		return nil, nil, fmt.Errorf("this agent could not load the keys to open it")
+		return nil, nil, fmt.Errorf("%w: this agent could not load the keys to open it", coretypes.ErrKeysUnavailable)
 	}
 	return &peer.DID, keys, nil
 }

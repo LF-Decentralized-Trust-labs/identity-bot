@@ -698,6 +698,8 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 		if did, err := ks.DID(); err == nil {
 			response["agent_did"] = did
 		}
+	} else {
+		log.Printf("[pairing] adopted without this instance's own encryption keys: %v", err)
 	}
 	response["root_aid"] = identityAID
 	writeJSONResponse(w, response)

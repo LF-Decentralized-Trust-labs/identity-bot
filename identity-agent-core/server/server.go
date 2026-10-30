@@ -1693,7 +1693,7 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 	// it advertises a keyset nobody holds the private half of, permanently, and
 	// no later event can take the commitment back.
 	if err := s.storeKeySetFor(result.AID, messagingKeys); err != nil {
-		writeError(w, http.StatusInternalServerError,
+		writeError(w, statusForKeyError(err, http.StatusInternalServerError),
 			"The identity's messaging keys could not be saved", err.Error())
 		return
 	}

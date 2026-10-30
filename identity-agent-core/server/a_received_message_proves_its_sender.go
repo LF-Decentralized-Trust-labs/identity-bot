@@ -113,7 +113,11 @@ func (s *CoreServer) ownAgentAtArrival(aid string, did *didcomm.DID) (string, er
 		return "", fmt.Errorf("%s is not one of this Identity Agent's AI agents", aid)
 	}
 	// Before keySetFor, which makes a keyset for an identifier it has none for.
-	if !s.hasKeySet(aid) {
+	has, err := s.hasKeySet(aid)
+	if err != nil {
+		return "", err
+	}
+	if !has {
 		return "", fmt.Errorf("this Identity Agent holds no keys for %s", aid)
 	}
 	ks, err := s.keySetFor(aid)

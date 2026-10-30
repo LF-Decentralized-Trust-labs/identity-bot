@@ -250,7 +250,7 @@ func (s *CoreServer) handleAssetNotify(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// The device is told plainly, because it is the only party that knows
 		// this needed saying and it has to decide whether to try again.
-		writeError(w, http.StatusBadGateway, "The message was not delivered", err.Error())
+		writeError(w, statusForKeyError(err, http.StatusBadGateway), "The message was not delivered", err.Error())
 		return
 	}
 	if status < 200 || status > 299 {

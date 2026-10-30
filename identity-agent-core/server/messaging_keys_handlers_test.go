@@ -29,7 +29,7 @@ func TestAnIdentityFoundedElsewhereStillGetsItsMessagingKeys(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("storing the identity failed: %d %s", w.Code, w.Body.String())
 	}
-	if !s.hasKeySet(aid) {
+	if has, err := s.hasKeySet(aid); err != nil || !has {
 		t.Fatal("an identity founded elsewhere has no messaging keys, so nothing can be " +
 			"encrypted to it and a restore could never reproduce them")
 	}
