@@ -14,8 +14,8 @@ import (
 // It decides who may witness and watch for this agent: peers are of the same
 // kind, and an agent that does not know what it is enrols no peers at all.
 //
-// An app that genuinely serves both — the reference Identity Agent asks during
-// onboarding — declares nothing and the profile answers instead. That is a
+// An app that genuinely serves both — one that asks during onboarding —
+// declares nothing and the profile answers instead. That is a
 // supported arrangement rather than a missing call; what is not supported is an
 // app that knows and stays quiet.
 //

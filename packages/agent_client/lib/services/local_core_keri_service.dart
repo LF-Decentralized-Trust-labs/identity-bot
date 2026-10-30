@@ -81,13 +81,13 @@ class LocalCoreKeriService extends KeriService {
       // Step 3: CESR-encode the raw signature via the stateless /cesr/encode endpoint.
       cesrSignature = await _cesrEncode(base64Encode(rawSig));
 
-      // STEP 4, WHICH EVERY CALLER HAD TO REMEMBER AND ONE DID.
+      // STEP 4, WHICH EVERY CALLER HAD TO REMEMBER.
       //
       // The route that records this has existed since August and is correct.
       // What was missing is that nothing here called it: each screen was
-      // expected to, the reference application did, and the applications people
-      // actually run did not — so every identity they founded published a key
-      // history in which nothing had been authorised by anybody. A counterparty
+      // expected to, and the applications people actually ran did not — so
+      // every identity they founded published a key history in which nothing
+      // had been authorised by anybody. A counterparty
       // checking properly refuses such a log, so the identity works alone and
       // can convince nobody, and nothing said so at any point.
       //
