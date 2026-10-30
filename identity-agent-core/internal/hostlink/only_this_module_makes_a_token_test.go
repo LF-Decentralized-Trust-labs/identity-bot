@@ -168,7 +168,8 @@ func init() { server.RegisterAddon(server.Addon{ID: "outside", Name: "an add-on 
 func main() {
 	var a addon.Authority
 	_ = a
-	if addon.Shared().JSONError != nil && addontest.New() != nil {
+	// addontest.New is named, not called: outside a test it panics.
+	if addon.Shared().JSONError != nil && addontest.New != nil {
 		fmt.Println("REACHED the handle")
 	}
 }

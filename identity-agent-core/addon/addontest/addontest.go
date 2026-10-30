@@ -1,12 +1,14 @@
 // Package addontest is the core's own test fixtures, for an add-on's tests:
 // the worlds the core's tests build, handed to tests written outside the
-// core. Only a test imports it. A program that imports it links fixtures that
-// make test owners and move keys, so it is never imported by a program, and
-// the core's own programs are checked to link none of it.
+// core.
 //
-// Like the handle in package addon, it is reached only through this package
-// (server.AddonFixtures asks for the core's token), as a safeguard and not a
-// security boundary.
+// They include what no running Identity Agent may do: seal an owner whose key
+// is published (TestOwnerSeed), set the owner's secret, move the identity's
+// key away, and forget which signatures were seen. So New works only inside
+// a test binary (testing.Testing) and panics in any program, and the core's
+// own programs are checked to link none of it. server.AddonFixtures asks for
+// the core's token, so this package, with its check, is the only way to the
+// fixtures.
 package addontest
 
 import (
@@ -22,13 +24,19 @@ import (
 	"identity-agent-core/vault"
 	"net/http"
 	"net/http/httptest"
+	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 )
 
-// New is the core's test fixtures.
-func New() Fixtures { return server.AddonFixtures(hostlink.New()).(Fixtures) }
+// New is the core's test fixtures. It panics unless it runs in a test.
+func New() Fixtures {
+	if !testing.Testing() {
+		panic("addontest.New: the core's test fixtures are for tests, and this is not one")
+	}
+	return server.AddonFixtures(hostlink.New()).(Fixtures)
+}
 
 // TB is what a fixture asks of the test running it: what *testing.T gives.
 type TB = coretypes.TB
