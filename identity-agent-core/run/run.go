@@ -92,12 +92,20 @@ func start(o Options, args []string, wait func()) error {
 	}
 	var stopped func()
 	if o.Prepare != nil {
-		if stopped, err = o.Prepare(srv, cfg); err != nil {
+		stopped, err = o.Prepare(srv, cfg)
+		// What Prepare set up is ended whatever else happens, even when it
+		// also failed: it may have opened something before it did.
+		if stopped != nil {
+			defer stopped()
+		}
+		if err != nil {
+			// The server never started. Stop is asked all the same, so it
+			// ends whatever it would for a server that did; for one that
+			// never started it does nothing, and what New opened is released
+			// as the process ends.
+			srv.Stop()
 			return err
 		}
-	}
-	if stopped != nil {
-		defer stopped()
 	}
 
 	if err := srv.Start(); err != nil {

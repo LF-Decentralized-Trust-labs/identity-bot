@@ -97,3 +97,21 @@ func TestAnAppThatCannotPrepareDoesNotStart(t *testing.T) {
 		t.Fatalf("an app that failed to prepare started anyway: %v (served: %v)", err, waited)
 	}
 }
+
+// What an app's Prepare set up is ended even when Prepare also fails.
+func TestAFailedPrepareStillEndsWhatItStarted(t *testing.T) {
+	t.Setenv("AGENT_DATA_DIR", t.TempDir())
+	t.Setenv("PORT", fmt.Sprint(freePort(t)))
+	ended, waited := false, false
+	err := start(Options{
+		Prepare: func(*server.CoreServer, server.Config) (func(), error) {
+			return func() { ended = true }, errors.New("half done")
+		},
+	}, nil, func() { waited = true })
+	if err == nil || err.Error() != "half done" || waited {
+		t.Fatalf("a failed Prepare started the server: %v (served: %v)", err, waited)
+	}
+	if !ended {
+		t.Fatal("what a failed Prepare had started was never ended")
+	}
+}
