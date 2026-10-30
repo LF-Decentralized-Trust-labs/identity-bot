@@ -229,11 +229,11 @@ func TestAnAddOnThatOpensACoreRouteIsRefused(t *testing.T) {
 	unsealedAfter(t)
 	ok := func(w http.ResponseWriter, r *http.Request) {}
 	for name, rogue := range map[string]Addon{
-		"a core route made public": {ID: "rogue",
+		"a core route made public": {ID: "rogue", Prefixes: []string{"/api/rogue"},
 			Routes:       func(s *CoreServer, r chi.Router) { r.Get("/rogue", ok) },
 			PublicRoutes: map[string]string{"POST /api/reset": "taken over"}},
-		"a prefix over a core route": {ID: "rogue",
-			Routes:         func(s *CoreServer, r chi.Router) { r.Get("/controller", ok) },
+		"a prefix over a core route": {ID: "rogue", Prefixes: []string{"/api/rogue"},
+			Routes:         func(s *CoreServer, r chi.Router) { r.Get("/rogue", ok) },
 			ScopedPrefixes: []string{"/api/controller"}},
 		"a core route scoped": {ID: "rogue",
 			ScopedRoutes: map[string]string{"DELETE /api/controllers/{aid}": "taken over"}},
@@ -245,7 +245,7 @@ func TestAnAddOnThatOpensACoreRouteIsRefused(t *testing.T) {
 		}
 	}
 	// The same add-ons, opening only their own routes, are made.
-	onlyAddons(t, Addon{ID: "own",
+	onlyAddons(t, Addon{ID: "own", Prefixes: []string{"/api/its-own"},
 		Routes:         func(s *CoreServer, r chi.Router) { r.Get("/its-own/{x}", ok) },
 		PublicRoutes:   map[string]string{"GET /api/its-own/{x}": "its own"},
 		ScopedPrefixes: []string{"/api/its-own"}})
@@ -276,7 +276,7 @@ func TestAPrefixOpensOnlyWhatIsUnderIt(t *testing.T) {
 func TestAPrefixOverAnOverlaysRouteStopsTheStart(t *testing.T) {
 	unsealedAfter(t)
 	ok := func(w http.ResponseWriter, r *http.Request) {}
-	onlyAddons(t, Addon{ID: "prefix",
+	onlyAddons(t, Addon{ID: "prefix", Prefixes: []string{"/api/shared"},
 		Routes:         func(s *CoreServer, r chi.Router) { r.Get("/shared/mine", ok) },
 		ScopedPrefixes: []string{"/api/shared"}})
 	s, err := New(Config{DataDir: t.TempDir(), Port: 0})
@@ -426,7 +426,7 @@ func TestTheAnchorCheckNeitherIgnoresNorGuessesAtChains(t *testing.T) {
 func TestNoRouteIsTakenOverByMountingItAgain(t *testing.T) {
 	unsealedAfter(t)
 	ok := func(w http.ResponseWriter, r *http.Request) {}
-	b := Addon{ID: "b",
+	b := Addon{ID: "b", Prefixes: []string{"/api/bs-own"},
 		Routes:       func(s *CoreServer, r chi.Router) { r.Get("/bs-own", ok) },
 		PublicRoutes: map[string]string{"GET /api/bs-own": "b's own"}}
 	for name, takeover := range map[string][]Addon{
@@ -496,5 +496,108 @@ func TestAnAddOnsNestedChangesToACallerReachNothing(t *testing.T) {
 	}
 	if len(seen) != 2 || seen[0] != 10.0 || seen[1] != "api.example" {
 		t.Errorf("the next add-on saw another's changes: %v", seen)
+	}
+}
+
+// shadows are routes that take some or all of the requests the core's
+// DELETE /api/controllers/{aid} answers, spelled otherwise: another name for
+// its parameter, a regexp parameter chi tries first, and a static segment it
+// prefers, aimed at one controller.
+var shadows = map[string]string{
+	"another parameter name": "/controllers/{x}",
+	"a regexp parameter":     "/controllers/{aid:E.*}",
+	"a static segment":       "/controllers/Evictim",
+}
+
+// No add-on serves a request a core route would have, however the route is
+// spelled: it must serve under prefixes of its own, and none may cover a
+// path a core route matches.
+func TestAnAddOnCannotShadowACoreRoute(t *testing.T) {
+	unsealedAfter(t)
+	ok := func(w http.ResponseWriter, r *http.Request) {}
+	for name, pattern := range shadows {
+		for _, prefixes := range [][]string{nil, {"/api/controllers"}, {"/api" + pattern}, {"/api/elsewhere"}} {
+			onlyAddons(t, Addon{ID: "shadow", Prefixes: prefixes,
+				Routes:       func(s *CoreServer, r chi.Router) { r.Delete(pattern, ok) },
+				PublicRoutes: map[string]string{"DELETE /api" + pattern: "taken over"}})
+			if msg, refused := panics(func() { New(Config{DataDir: t.TempDir()}) }); !refused {
+				t.Errorf("a server was made with an add-on shadowing the core's controller revocation with %s, owning %v", name, prefixes)
+			} else if !strings.Contains(msg, "server.New") {
+				t.Errorf("%s was refused for another reason: %s", name, msg)
+			}
+		}
+	}
+}
+
+// No overlay route takes a request a core or add-on route answers, however
+// it is spelled. The server does not start.
+func TestAnOverlayCannotShadowARoute(t *testing.T) {
+	unsealedAfter(t)
+	ok := func(w http.ResponseWriter, r *http.Request) {}
+	onlyAddons(t)
+	for name, pattern := range shadows {
+		s, err := New(Config{DataDir: t.TempDir(), Port: 0})
+		if err != nil {
+			t.Skipf("making the server: %v", err)
+		}
+		s.MountExtraRoutes(func(r chi.Router) { r.Delete(pattern, ok) })
+		if err := s.Start(); err == nil {
+			s.Stop()
+			t.Errorf("a server started with an overlay shadowing the core's controller revocation with %s", name)
+		} else if !strings.Contains(err.Error(), "can take requests") {
+			t.Errorf("%s stopped the start for another reason: %v", name, err)
+		}
+	}
+	// An overlay route of its own, where nothing else answers, starts.
+	s, err := New(Config{DataDir: t.TempDir(), Port: 0})
+	if err != nil {
+		t.Skipf("making the server: %v", err)
+	}
+	s.MountExtraRoutes(func(r chi.Router) { r.Delete("/an-overlays-own/{x}", ok) })
+	if err := s.addonsOpeningOthersRoutes(s.buildRouter(""), s.extraRoutes); err != nil {
+		t.Fatalf("an overlay route nothing else answers would stop the start: %v", err)
+	}
+}
+
+// Two patterns meet where one request path matches both, probed with the
+// values a regexp parameter accepts and those it rejects.
+func TestWhenTwoPatternsMeet(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		meet bool
+	}{
+		{"/a/{x}", "/a/{y}", true},
+		{"/a/{x:E.*}", "/a/Evictim", true},
+		{"/a/{x:E.*}", "/a/Dvictim", false},
+		{"/a/{x:[0-9]+}", "/a/123", true},
+		{"/a/{x:[0-9]+}", "/a/12b", false},
+		{"/a/{x:E.*}", "/a/{y}", true},
+		{"/a/b", "/a/c", false},
+		{"/a/{x}", "/a", false},
+		{"/a/{x}/b", "/a/c/d", false},
+		{"/a/*", "/a/b/c", true},
+		{"/a/*", "/a", true},
+		{"/a/x.{ext}", "/a/x.json", true},
+	} {
+		if got := patternsMeet(c.a, c.b); got != c.meet {
+			t.Errorf("%s and %s meet: %v, want %v", c.a, c.b, got, c.meet)
+		}
+		if got := patternsMeet(c.b, c.a); got != c.meet {
+			t.Errorf("%s and %s meet: %v, want %v", c.b, c.a, got, c.meet)
+		}
+	}
+	for _, c := range []struct {
+		prefix, pattern string
+		meet            bool
+	}{
+		{"/api/controllers", "/api/controllers/{aid}", true},
+		{"/api/controllers/Evictim", "/api/controllers/{aid}", true},
+		{"/api/controller", "/api/controllers/{aid}", false},
+		{"/apps", "/{aid}/did.json", false},
+		{"/api/mcp", "/api/{x}/thing", true},
+	} {
+		if got := prefixMeetsTheCore(c.prefix, c.pattern); got != c.meet {
+			t.Errorf("prefix %s meets %s: %v, want %v", c.prefix, c.pattern, got, c.meet)
+		}
 	}
 }

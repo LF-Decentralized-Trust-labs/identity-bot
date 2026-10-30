@@ -22,6 +22,9 @@ func init() {
 	server.RegisterAddon(server.Addon{
 		ID:   "ai_agents",
 		Name: "AI agents",
+		// The paths it owns: AI agents and their tokens, the MCP endpoint
+		// they call, their bodies, GitHub access, and the endpoint's health.
+		Prefixes: []string{"/api/mcp", "/api/agent-host", "/api/github", "/api/endpoint/health"},
 		Routes: func(s *server.CoreServer, r chi.Router) {
 			of(s).aiAgentRoutes(r)
 		},

@@ -44,6 +44,13 @@ type Addon struct {
 	// Name says which add-on, in logs.
 	Name string
 
+	// Prefixes are the paths the add-on owns ("/api/mcp", "/apps"): static,
+	// and taken on a path segment's boundary. Every route it mounts must lie
+	// under one; no two add-ons' may overlap; and none may cover a path any
+	// route of the core's can match. New refuses an add-on that breaks any of
+	// these, so an add-on never serves a request a core route would have.
+	Prefixes []string
+
 	// Routes adds routes under /api, behind the same authorisation as the
 	// core's own. They are mounted after the core's own routes and before any
 	// an overlay adds with MountExtraRoutes.
@@ -531,6 +538,78 @@ func (s *CoreServer) routeTakeovers(extras []func(chi.Router)) []string {
 	return out
 }
 
+// prefixViolations are what breaks the add-ons' ownership of their path
+// prefixes (Addon.Prefixes): a route an add-on mounts outside its own, two
+// add-ons' that overlap, one that is not a static path, and one covering a
+// path a core route matches.
+func (s *CoreServer) prefixViolations() []string {
+	var out []string
+	core := routesIn(s.buildRouterOf("", nil, nil))
+	type owned struct{ id, prefix string }
+	var all []owned
+	for _, a := range registeredAddons() {
+		for _, p := range a.Prefixes {
+			if !strings.HasPrefix(p, "/") || strings.ContainsAny(p, "{}*") {
+				out = append(out, a.ID+": prefix "+p+" is not a static path")
+				continue
+			}
+			for _, o := range all {
+				if underPrefix(p, o.prefix) || underPrefix(o.prefix, p) {
+					out = append(out, a.ID+": prefix "+p+" overlaps "+o.id+"'s "+o.prefix)
+				}
+			}
+			all = append(all, owned{a.ID, p})
+			for k := range core {
+				pattern := k[strings.Index(k, " ")+1:]
+				if pattern != theWebUI && prefixMeetsTheCore(p, pattern) {
+					out = append(out, a.ID+": prefix "+p+" covers the core's "+k)
+				}
+			}
+		}
+		for k := range s.addonRoutes(a) {
+			pattern := k[strings.Index(k, " ")+1:]
+			inside := false
+			for _, p := range a.Prefixes {
+				if underPrefix(pattern, p) {
+					inside = true
+				}
+			}
+			if !inside {
+				out = append(out, a.ID+": mounts "+k+" outside its prefixes")
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// overlayShadows are the overlay routes (MountExtraRoutes) that can match a
+// request a route of the core's or an add-on's matches, with the same method.
+func (s *CoreServer) overlayShadows(extras []func(chi.Router)) []string {
+	if len(extras) == 0 {
+		return nil
+	}
+	without := routesIn(s.buildRouterOf("", registeredAddons(), nil))
+	r := chi.NewRouter()
+	r.Route("/api", func(r chi.Router) {
+		for _, fn := range extras {
+			fn(r)
+		}
+	})
+	var out []string
+	for o := range routesIn(r) {
+		om, op, _ := strings.Cut(o, " ")
+		for k := range without {
+			km, kp, _ := strings.Cut(k, " ")
+			if km == om && kp != theWebUI && patternsMeet(op, kp) {
+				out = append(out, "an overlay mounts "+o+", which can take requests "+k+" serves")
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // underPrefix reports whether route pattern is p or lies under it, on a path
 // segment's boundary: /api/controller covers /api/controller/x and not
 // /api/controllers.
@@ -632,6 +711,12 @@ func keysOf(m map[string]string) []string {
 func (s *CoreServer) addonsOpeningOthersRoutes(served chi.Routes, extras []func(chi.Router)) error {
 	if bad := s.routeTakeovers(extras); len(bad) > 0 {
 		return fmt.Errorf("a route is mounted twice, so one handler would take over another's: %s", strings.Join(bad, "; "))
+	}
+	if bad := s.prefixViolations(); len(bad) > 0 {
+		return fmt.Errorf("an add-on serves outside the paths it owns, or owns paths the core serves: %s", strings.Join(bad, "; "))
+	}
+	if bad := s.overlayShadows(extras); len(bad) > 0 {
+		return fmt.Errorf("an overlay route can take requests another route serves: %s", strings.Join(bad, "; "))
 	}
 	if bad := s.addonEntriesNotItsOwn(served, true); len(bad) > 0 {
 		return fmt.Errorf("an add-on opens routes it does not serve, which only their owner may open: %s", strings.Join(bad, "; "))

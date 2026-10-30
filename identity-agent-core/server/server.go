@@ -557,9 +557,12 @@ func New(cfg Config) (*CoreServer, error) {
 	s.flutterWebDir = cfg.FlutterWebDir
 	s.requireOwnerAtInception = cfg.RequireOwnerAtInception
 
-	// An add-on may open only routes it serves itself. One that would make a
-	// core route, or another add-on's, public or scoped is refused here, as
-	// the server is made, before anything is served.
+	// Checked as the server is made, before anything is served: no route is
+	// mounted twice; every add-on serves only under the path prefixes it
+	// owns, which overlap neither another add-on's nor any path a core route
+	// can match; and an add-on makes no public or scoped entry for a route
+	// that is not its own. A server breaking any of these is not made. The
+	// routes an overlay adds later are checked by Start.
 	if err := s.addonsOpeningOthersRoutes(s.buildRouter(""), nil); err != nil {
 		panic("server.New: " + err.Error())
 	}

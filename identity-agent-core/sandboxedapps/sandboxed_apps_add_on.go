@@ -18,6 +18,14 @@ func init() {
 	server.RegisterAddon(server.Addon{
 		ID:   "sandboxed_apps",
 		Name: "sandboxed apps",
+		// The paths it owns: apps and their sandbox, the capability gateway
+		// and registry, the trace viewer, the display proxy, the model
+		// proxy and keys, and the conversations apps keep.
+		Prefixes: []string{
+			"/api/apps", "/api/sandbox", "/api/capabilities", "/api/capability-registry",
+			"/api/trace", "/api/ws/sandbox", "/api/ws/terminal", "/api/settings/llm", "/api/ai",
+			"/apps", "/sandbox/llm", "/dev/trace", "/ws/trace",
+		},
 		// Installing software on a computer is for the app running on it:
 		// no machine acting for the owner may do it, at any score.
 		ControllerOwnerOnly: map[string]string{
