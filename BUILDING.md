@@ -143,9 +143,26 @@ gomobile bind -target=android/arm64 -androidapi 23 -o mobilecore.aar ./mobilecor
 ```
 
 Add more Android targets (`android/arm`, `android/amd64`) to `-target` for older
-devices or the emulator. The app starts the core with `StartServer(dataDir, port)`
-and stops it with `StopServer()`; the other exported functions are in
-`identity-agent-core/mobilecore/`.
+devices or the emulator.
+
+The app's native side starts the core through the library's exported functions
+(`identity-agent-core/mobilecore/`). Everything it declares is read once, when
+the server starts, so the order matters:
+
+1. `DeclareLocalOwnerSecret(secret)` — a secret of at least 32 characters that
+   only this app knows. Any app on a phone can reach `127.0.0.1`, so the core
+   treats a request from the device as the owner's only when it carries this.
+   Left undeclared, the core makes one up and nothing on the phone is the owner.
+2. `DeclareRelays(privateRelay, publicRelay)` — the relays the identity is
+   reached through, if your app has chosen any. Either may be empty.
+3. `DeclareEntityType("individual" | "organization")` — what the app serves.
+   An app that serves both declares nothing and lets the profile answer.
+4. `DeclareHardwareKeyProtection(status, kind, reason, detail)` — optional:
+   what the app found out about the phone's key hardware.
+5. `StartServer(dataDir, port)` — starts the core. `GetPort()` returns the port
+   it actually took, which may be the next free one.
+
+`StopServer()`, `IsRunning()` and `GetHealth()` are there once it runs.
 
 ## Build an app on the core
 
@@ -177,8 +194,16 @@ The places to start:
   in `Contents/Resources/backend/` inside a macOS `.app`.
 - `services/mobile_core_service.dart` — starts the core on a phone through the
   platform channel `com.identityagent/mobilecore`. Your app's native side
-  implements `startServer`, `stopServer`, `isRunning`, `getHealth`, `getPort` and
-  `getDataDir` by calling the `Mobilecore` library built above.
+  answers it with the `Mobilecore` library built above:
+  - `startServer` receives `dataDir`, `port`, `localOwnerSecret` and, when set,
+    `privateRelay` and `publicRelay`. Make the calls in the order listed under
+    [Build the core for a phone](#build-the-core-for-a-phone), then return
+    `{"port": GetPort()}`. The client proves the core holds the secret before it
+    sends anything else.
+  - `stopServer`, `isRunning`, `getHealth` and `getPort` call `StopServer`,
+    `IsRunning`, `GetHealth` and `GetPort`.
+  - `getDataDir` has no library function: answer with the directory your app
+    passed to `StartServer`.
 
 Run its tests with `flutter test` in `packages/agent_client`.
 
