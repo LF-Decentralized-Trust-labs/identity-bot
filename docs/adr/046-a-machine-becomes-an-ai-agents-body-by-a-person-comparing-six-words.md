@@ -82,12 +82,12 @@ and who decided.
 after the archive was made; a body is enrolled again after a restore.
 
 **The machine key is the platform signer the Identity Agent already uses** for its own
-controller key, with `agent-host`'s own data directory: the Secure Enclave on macOS
+controller key, with the machine program's own data directory: the Secure Enclave on macOS
 (P-256, a key per data directory), and a key file elsewhere (Ed25519). On Windows the
 TPM key has one fixed name per machine and is already the Identity Agent's own, so a
 body uses a key file there, at the software grade, until a per-body TPM key is built
-and tested. On macOS `agent-host` is built against the Secure Enclave shim, with each
-architecture's binary checked to contain it.
+and tested. On macOS the machine program is built against the Secure Enclave shim, with
+each architecture's binary checked to contain it.
 
 ## Consequences
 
@@ -95,11 +95,13 @@ architecture's binary checked to contain it.
   body stops that machine at once; the AI agent and its grant are untouched.
 - Anybody holding the published logs, the body credential and its schema can check
   which machine key spoke for which AI agent, under whose approval, and at what grade.
-- The bearer token remains for tools that cannot run `agent-host`, at the lowest grade.
-- Requests after enrolment are signed and sealed: `agent-host` carries each one inside
+- The bearer token remains for tools that cannot enrol a machine key, at the lowest grade.
+- Requests after enrolment are signed and sealed: the machine's program carries each one inside
   the sealed transport, from the keys the body enrolled with to the Identity Agent's,
   so nothing between them reads the request or its answer (ADR-047, 2026-10-20). Only
   the enrolment status a machine asks while it waits for approval travels signed and
   unsealed, because until approval the Identity Agent takes no sealed request from it.
 - A machine's key in software, or one whose hardware report is false, is labelled only
   by its grade. Attested grades need platform evidence and are not yet verified.
+
+*Note, 2026-10-30: the program a machine runs to enrol and act as a body (formerly `agent-host` in this repository) is an add-on kept outside this repository. What it must do is this decision, the formats in `agentbody` and the published vectors in `contracts/agent-body`; any program that follows them can be a body.*

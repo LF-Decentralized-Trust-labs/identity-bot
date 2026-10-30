@@ -4,6 +4,7 @@
 - **Date:** 2026-03-13
 - **Supersedes:** Nothing (extends ADR-026 and ADR-012)
 - **Related:** ADR-026 (Data Domain Architecture), ADR-012 (Sandboxed App Registry)
+- **Amended:** 2026-10-30 — the runtime that serves these routes is an add-on kept outside this repository; this record keeps what an app relies on (see §Note, 2026-10-30)
 
 ---
 
@@ -36,44 +37,21 @@ The Identity Agent's Go HTTP server handled requests on paths that had no consis
 
 ---
 
+## Note, 2026-10-30: the contract stays, the runtime is an add-on
+
+The code that serves `/sandbox/` and `/apps/`, captures conversations and translates them for a chat app is part of the sandboxed-apps add-on, which an app built on the core includes or not, and which is kept outside this repository. This record keeps what an app is written against: where it sends model calls, where it is loaded from, the namespaces by caller, and the API schema each app's manifest names (`api_schema`, a field of `appmanifest.AppManifest`). The descriptions of how the runtime does each of these are removed here.
+
+---
+
 ## Decisions
 
-### Decision 1: Capture conversations at the LLM proxy, not at the container
+### Decision 1: An app's model calls go through the Identity Agent, which keeps the conversation
 
-All LLM traffic from containers passes through `handleLLMProxy` in `server/llm_handlers.go`. This is the correct and only interception point:
+An app makes its model calls to `http://agent.internal:5050/sandbox/llm/v1/` with the OpenAI-compatible API (its `OPENAI_API_BASE_URL`). The Identity Agent adds the key the owner keeps, forwards the call, streams the answer back, and keeps the conversation in the owner's AI conversations, not in the app. An app needs no store of its own for them, and must not rely on keeping one.
 
-```
-Container → POST http://agent.internal:5050/sandbox/llm/v1/chat/completions
-          → Identity Agent LLM Proxy (handleLLMProxy)
-              → Parse request (model, messages[])
-              → Forward to OpenRouter (inject API key from vault)
-              → Stream SSE response back to container
-              → Async goroutine: save conversation to ai-memory.db
-```
+### Decision 2: An app's display is loaded through the Identity Agent
 
-**Conversation ID strategy:** The OpenAI API sends the full message history with every request. A stable conversation ID is derived by hashing the first system message and first user message: `sha256(system_msg + "|" + first_user_msg)[:16]`. This stays constant across all turns of the same conversation, allowing the Identity Agent to accumulate turns correctly regardless of how many turns have occurred.
-
-**Message deduplication:** Each message is identified by `sha256(conv_id + role + content + index)[:16]`. SQLite's `ON CONFLICT DO NOTHING` prevents duplicates if the same request is replayed.
-
-**Non-fatal capture:** Capture runs in a goroutine after the response streams. If capture fails, the user's LLM response is unaffected. Capture errors are logged, never surfaced to the client.
-
-### Decision 2: Serve conversation data back to the chat UI via a display reverse proxy
-
-When a chat app's browser frontend makes API calls to list conversations (`GET /api/v1/chats`), the Identity Agent intercepts those calls before they reach the container and serves from `ai-memory.db`. This is implemented as a reverse proxy at `/apps/{app_id}/*`:
-
-```
-Flutter WebView loads: http://127.0.0.1:5050/apps/openwebui/
-                                                     ↓
-                         Identity Agent display proxy (handleAppDisplayProxy)
-                                                     ↓
-           GET /api/v1/chats → serve from ai-memory.db (conversation list)
-           GET /api/v1/chats/{id} → serve from ai-memory.db (conversation + messages)
-           All other paths → forward to container's display port (HTML, JS, CSS, WebSocket)
-```
-
-The `GET /api/apps/{id}/display` handler now returns the Identity Agent's proxy URL (`http://127.0.0.1:5050/apps/{app_id}/`) instead of the container's raw port URL. The Flutter WebView loads this proxy URL, unaware of the interception layer.
-
-**Container data is intentionally ephemeral.** Container volumes for chat apps are empty (`"volumes": {}`). If a container is deleted and reinstalled, all conversation history reappears from `ai-memory.db`. The container's internal database never matters.
+An app's web display is loaded from `http://127.0.0.1:5050/apps/{app_id}/`, never from its container's own port. The Identity Agent answers the chat app's conversation reads (`GET /api/v1/chats` and below) from the owner's conversations, under the conversation read rule (ADR-012 Amendment 4), and passes everything else to the app's display port. So a container's own data is disposable: delete and reinstall it, and its conversations reappear.
 
 ### Decision 3: HTTP API URL namespace organized by caller identity
 
@@ -117,46 +95,6 @@ Each endpoint entry in the schema specifies:
 
 ---
 
-## Data Flow Summary
-
-### Outbound: LLM call (Open WebUI → OpenRouter)
-
-```
-Open WebUI frontend
-  → POST http://agent.internal:5050/sandbox/llm/v1/chat/completions
-    (direct — NO_PROXY bypasses MITM inspection proxy)
-  → Identity Agent LLM Proxy (handleLLMProxy)
-      → Inject API key from credential vault
-      → Forward to https://openrouter.ai/api/v1/chat/completions
-      → Stream SSE response back to Open WebUI
-      → [goroutine] Capture conversation to ai-memory.db
-```
-
-### Inbound: Conversation list (Open WebUI frontend → Identity Agent)
-
-```
-Open WebUI frontend (running in Flutter WebView at http://127.0.0.1:5050/apps/openwebui/)
-  → GET /api/v1/chats
-  → Identity Agent display proxy (handleAppDisplayProxy)
-      → Intercept: path matches /api/v1/chats
-      → Query ai-memory.db: GetConversations()
-      → Translate to Open WebUI JSON format
-      → Return conversation list
-```
-
-### Inbound: All other Open WebUI assets
-
-```
-Open WebUI frontend
-  → GET /static/js/app.js (or any other path)
-  → Identity Agent display proxy (handleAppDisplayProxy)
-      → Not intercepted
-      → httputil.ReverseProxy → container:8080/static/js/app.js
-      → Return response to browser
-```
-
----
-
 ## Consequences
 
 ### What this enables
@@ -171,7 +109,7 @@ Open WebUI frontend
 
 - **Display proxy adds latency for non-intercepted requests.** Every browser request to the container now passes through the Go reverse proxy. In practice this is negligible (same-host loopback, Go `net/http/httputil.ReverseProxy` is extremely fast), but it is a real hop.
 - **Open WebUI conversation CRUD writes are not captured.** The current interception captures conversations as they happen via the LLM proxy. Open WebUI write operations (rename conversation, delete conversation, add tag) that go to the container's own backend are not intercepted and will not be reflected in `ai-memory.db`. Capturing write operations is future work — it requires intercepting additional `/api/v1/chats` write paths in the display proxy.
-- **App-specific format translation.** Each chat app has its own expected JSON format for conversations and messages. The display proxy must translate between `ai-memory.db`'s canonical schema and whatever the app expects. The `openwebui_chat_list` and `openwebui_chat_detail` translators in `app_display_proxy.go` are Open WebUI-specific.
+- **App-specific format translation.** Each chat app has its own expected JSON format for conversations and messages, so a runtime translates the owner's conversations into the format each chat app expects.
 
 ---
 
@@ -179,19 +117,15 @@ Open WebUI frontend
 
 | File | Role |
 |------|------|
-| `server/llm_handlers.go` | LLM proxy + conversation capture. Route: `/sandbox/llm/v1/*` |
-| `server/app_display_proxy.go` | Display reverse proxy + chat API interception. Route: `/apps/{app_id}/*` |
-| `server/sandbox_handlers.go` | `handleAppDisplay` returns proxy URL (`/apps/{app_id}/`) instead of raw container port |
-| `server/server.go` | Route registration, OOBI URL generation, `oobiBase()` helper |
-| `store/ai_memory_store.go` | `SaveConversation`, `SaveMessage`, `GetConversations`, `GetMessages`, FTS5 search |
+| `identity-agent-core/appmanifest/manifest.go` | `api_schema` and the rest of the manifest |
 | `manifests/openwebui.json` | `OPENAI_API_BASE_URL` points to `/sandbox/llm/v1`; `api_schema` field set |
 | `manifests/schemas/openwebui-api.json` | Full API schema document for Open WebUI |
-| `sandbox/manifest.go` | `APISchema *string` field added to `AppManifest` |
+| `identity-agent-core/store/ai_memory_store.go` | The owner's AI conversations |
 
 ---
 
 ## References
 
 - [ADR-026](026-data-domain-architecture.md) — Data domain architecture (one SQLite DB per domain)
-- [ADR-012](012-sandboxed-app-marketplace.md) — Sandbox marketplace, MITM proxy, credential vault
+- [ADR-012](012-sandboxed-app-marketplace.md) — Sandboxed apps: the manifest and how an app is called
 - [ADR-007](007-external-http-routing-and-platform-ports.md) — Flutter only calls local Go backend

@@ -163,8 +163,8 @@ The Data Manager is a sandboxed app with a manifest that grants it full CRUD acr
 **Note:** AI conversations are **not** exported from container storage by the Data Manager. They are captured directly by the Identity Agent's LLM proxy as they happen — see ADR-013. Container data is intentionally ephemeral. The Data Manager manages bulk historical imports (e.g., importing ChatGPT export files into `ai-memory.db`), not real-time capture.
 
 **It is NOT responsible for:**
-- Policy enforcement (that is the policy engine in `sandbox/policy.go`)
-- Network access control (that is the proxy in `sandbox/proxy.go`)
+- Policy enforcement (that is the sandboxed-app runtime's policy engine)
+- Network access control (that is the sandboxed-app runtime's proxy)
 - Backups (a separate module, separate ADR)
 
 **Manifest spec:**
