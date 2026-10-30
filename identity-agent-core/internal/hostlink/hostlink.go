@@ -3,6 +3,10 @@
 // handle (internal/addonhost).
 package hostlink
 
-// Token is what server.AddonHost asks for. Nothing outside this module can
-// name it, so nothing outside this module can make one.
-type Token struct{}
+// Token is what server.AddonHost and server.AddonFixtures ask for. Nothing
+// outside this module can name it, so nothing outside can make one.
+//
+// It has an unexported field so that no value from elsewhere converts to it:
+// with none, an untyped struct{}{} would, and code in any module could reach
+// the handle. A struct rather than a pointer, which nil would satisfy.
+type Token struct{ _ byte }
