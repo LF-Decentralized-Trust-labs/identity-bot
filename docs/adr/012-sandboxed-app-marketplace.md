@@ -22,17 +22,9 @@ What stays is what an app's maker relies on, whichever runtime installs the app:
 
 ## Context
 
-The Identity Agent currently manages user-controlled identity (KERI AIDs, contacts, OOBIs, tunneling). It is a self-hosted identity agent server with a sandbox container system that allows sandbox plugins to run on it — enabling users to run third-party sandbox plugins inside sandboxed environments where the agent controls all network egress, enforces policy, and mediates resource access. The discovery surface for plugins is the App Registry (not a marketplace; separate from any paid marketplace milestone).
+An Identity Agent may let its owner run third-party apps beside it, each confined to what its manifest declares. The discovery surface for them is the App Registry (not a marketplace). An app is either an OCI container (a web or GUI application) or a compiled binary (a small tool), and its maker writes one manifest that any runtime for sandboxed apps reads the same way. "Sandbox plugin" names the software a manifest describes.
 
-This is a desktop-only feature (Phase 1). Mobile platforms lack container runtimes and the process isolation primitives required for meaningful sandboxing.
-
-The App Registry (sandbox plugin discovery surface) must support two fundamentally different plugin types: OCI containers (for web and GUI applications) and compiled binaries (for lightweight agent-native tools). Both must be network-sandboxed, policy-governed, and displayable in the Flutter UI. "sandbox plugin" terminology is used for the software adhering to the manifest; "sandbox" refers to the container runtime offered by the agent.
-
-Four demo apps prove the architecture works end-to-end:
-1. **Chromium** — GUI app streaming via KasmVNC (OCI container)
-2. **Open WebUI** — Web app proxying with credential injection (OCI container)
-3. **OpenClaw** — Complex containerized TypeScript/Node.js app (OCI container)
-4. **Go Demo App** — Agent API communication channel (compiled binary)
+The example manifests in `manifests/` cover the kinds of app: Chromium (a GUI app streamed to a web view), Open WebUI (a web chat app that makes model calls), OpenClaw (a larger container app), and the Go demo app (a compiled binary, `sandbox-apps/go-demo/`).
 
 
 ## Amendment 3: URL Namespace Convention + Display Reverse Proxy (2026-03-13)
@@ -56,21 +48,7 @@ The LLM proxy moved from `/llm/v1/*` to `/sandbox/llm/v1/*`. The OOBI endpoint m
 
 **Change 2 — Display reverse proxy:**
 
-Container web UIs previously loaded their display port URL directly in the Flutter WebView. The Identity Agent now serves as a reverse proxy for container display traffic:
-
-```
-Before: Flutter WebView → http://127.0.0.1:{container_port}/
-After:  Flutter WebView → http://127.0.0.1:5050/apps/{app_id}/
-                                    ↓
-                        Identity Agent display proxy
-                           ↓                    ↓
-                    Intercept              Forward everything
-                /api/v1/chats           else to container port
-                    ↓
-              Serve from ai-memory.db
-```
-
-This makes container data fully ephemeral. The container's own database is empty. Conversations are captured by the LLM proxy and served back via the display proxy — the container never needs to store any user data.
+An app's web display is loaded through the Identity Agent at `/apps/{app_id}/`, not from its own port. A chat app's conversation reads below `/api/v1/chats` are answered from the owner's AI conversations, and everything else reaches the app. So an app keeps no user data of its own that matters: deleting and reinstalling it loses nothing.
 
 ---
 
@@ -82,8 +60,7 @@ The "forward everything else" in Amendment 3 no longer holds in full.
 - **It forwards no credential of the Identity Agent's.** Every `X-IA-*` header, the local owner secret, and an `Authorization` header holding an Identity Agent token or browser session are removed. An `Authorization` header that is the app's own login is passed on.
 - **A forwarded capability call says who called.** The Identity Agent adds the caller it admitted — owner or AI agent, its identifier, the machine it spoke from, how it proved itself, its grant, and its session — as `X-IA-Call-*` headers, with an HMAC-SHA256 over the capability, a digest of the body, those fields, the time and a nonce, under a key the Identity Agent keeps for that app alone. A launched app finds its key in `IDENTITY_AGENT_CALL_KEY`, which a manifest cannot set. The app refuses a call without a valid, fresh, unseen MAC. The canonical string and a Go verifier are in `identity-agent-core/appcall`.
 - **One provider per capability.** Two apps declaring one capability id, two manifests claiming one app id, or an app declaring a capability the registry already provides, are refused at load, and an ambiguous capability is refused at invocation rather than routed to whichever is found first.
-- **The intercepted conversation reads follow the conversation read rule.** `GET /apps/{app_id}/api/v1/chats` and the reads below it serve the owner's AI conversations from ai-memory.db, so they are served only to the owner or a machine acting for them. A caller admitted to `/apps/` only for holding some scope is refused them.
-- **A container's ports are published on loopback only.**
+- **The intercepted conversation reads follow the conversation read rule.** `GET /apps/{app_id}/api/v1/chats` and the reads below it serve the owner's AI conversations from the owner's AI conversations, so they are served only to the owner or a machine acting for them. A caller admitted to `/apps/` only for holding some scope is refused them.
 
 ---
 
@@ -93,22 +70,20 @@ The "forward everything else" in Amendment 3 no longer holds in full.
 
 | Type | Examples | How It Runs | Display Method |
 |------|---------|-------------|---------------|
-| **Container (web UI)** | Open WebUI, OpenClaw | OCI container via Podman, agent reverse-proxies HTTP port | WebView in Flutter (via `flutter_inappwebview`) |
-| **Container (desktop GUI)** | Chromium (kasmweb) | OCI container with built-in VNC/web streaming via Podman | WebView in Flutter |
-| **Compiled binary** | Go Demo App | Binary executed by agent as child process, sandboxed via network namespace (Linux) or proxy env vars (macOS/Windows) | Native Flutter terminal widget |
+| **Container (web UI)** | Open WebUI, OpenClaw | An OCI image whose display is an HTTP port | A web view, loaded through `/apps/{app_id}/` |
+| **Container (desktop GUI)** | Chromium (kasmweb) | An OCI image that streams its desktop over HTTP | A web view |
+| **Compiled binary** | Go Demo App | A program run beside the Identity Agent | A terminal |
 
 
 ### 2. What an app can rely on about its network
 
-An app's traffic leaves only as its manifest says: `network_mode` chooses whether it must go through the Identity Agent's egress proxy, may, has no network, or reaches only `agent.internal`. With `tls_mode` `mitm` the proxy terminates TLS with a certificate authority the runtime gives the app; with `sni_only` it sees only the destination's name. `allowed_domains` and `blocked_domains` take `*.` wildcards. An app never holds an API key the owner keeps: where a call needs one, the proxy adds it on the way out.
+An app's manifest says how far its traffic may go: `network_mode` says whether it must go through the Identity Agent, may, has no network at all, or reaches only the Identity Agent. `tls_mode` says whether its encrypted traffic may be inspected (`mitm`, under a certificate authority the app is given) or only its destination's name read (`sni_only`). `allowed_domains` and `blocked_domains` take `*.` wildcards. An app is never given an API key the owner keeps.
 
 ### 5. Agent API Endpoint — Internal Service Alias
 
-Every sandbox instance accesses the agent via `http://agent.internal` (container internal DNS alias). This decouples the port from the app — we can change ports without breaking apps, and support future services (policy, identity, vault).
+An app reaches the Identity Agent at the address in `IDENTITY_AGENT_API`, which it is given when it starts and must not assume: `http://agent.internal:{port}` inside a container, where `agent.internal` names the computer the Identity Agent runs on, and `http://127.0.0.1:{port}` for a compiled binary. The port is chosen for each running app, so an app reads it from the environment.
 
-Environment variable: `IDENTITY_AGENT_API=http://agent.internal`
-
-Internally: `agent.internal` → `localhost:{dynamic_port}`
+The model calls and the conversation routes of ADR-013 are on the Identity Agent's own HTTP port, 5050 unless it was started on another; the example Open WebUI manifest names `http://agent.internal:5050/sandbox/llm/v1`.
 
 
 ### 9. App Manifest Format

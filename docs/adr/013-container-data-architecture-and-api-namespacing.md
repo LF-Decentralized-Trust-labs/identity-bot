@@ -16,7 +16,7 @@ Two specific problems needed solving:
 
 ### Problem 1: Container data is stored inside the container
 
-The naive approach — letting Open WebUI write conversations to its own `webui.db` inside the Podman container — violates the data domain principle:
+The naive approach — letting Open WebUI write conversations to its own `webui.db` inside its container — violates the data domain principle:
 
 - If a second AI chat app (LibreChat, OpenClaw) is installed, it gets its own separate database. The user's conversation history is fragmented across N databases, one per app.
 - The container's database is ephemeral. If the container is deleted (security incident, reinstall, upgrade), all conversation history is lost.
@@ -47,7 +47,7 @@ The code that serves `/sandbox/` and `/apps/`, captures conversations and transl
 
 ### Decision 1: An app's model calls go through the Identity Agent, which keeps the conversation
 
-An app makes its model calls to `http://agent.internal:5050/sandbox/llm/v1/` with the OpenAI-compatible API (its `OPENAI_API_BASE_URL`). The Identity Agent adds the key the owner keeps, forwards the call, streams the answer back, and keeps the conversation in the owner's AI conversations, not in the app. An app needs no store of its own for them, and must not rely on keeping one.
+An app makes its model calls to `/sandbox/llm/v1/` on the Identity Agent's own HTTP port, with the OpenAI-compatible API (its `OPENAI_API_BASE_URL`). From a container that is `http://agent.internal:5050/sandbox/llm/v1`, where 5050 is the Identity Agent's port unless it was started on another (ADR-012 §5). The Identity Agent adds the key the owner keeps, forwards the call, streams the answer back, and keeps the conversation in the owner's AI conversations, not in the app. An app needs no store of its own for them, and must not rely on keeping one.
 
 ### Decision 2: An app's display is loaded through the Identity Agent
 
@@ -60,7 +60,7 @@ Every route on the Identity Agent's HTTP server belongs to one of four namespace
 | Namespace | Caller | Trust Level | Examples |
 |-----------|--------|-------------|---------|
 | `/api/` | Flutter UI (local process) | Trusted, local | `/api/contacts`, `/api/settings/llm`, `/api/ai/conversations`, `/api/trace/*` |
-| `/sandbox/` | Sandboxed containers (Podman) | Semi-trusted, controlled | `/sandbox/llm/v1/*` |
+| `/sandbox/` | Sandboxed apps | Semi-trusted, controlled | `/sandbox/llm/v1/*` |
 | `/public/` | External KERI agents (internet) | Untrusted, public | `/public/oobi/{aid}` |
 | `/apps/` | Flutter WebView (display proxy) | Browser context | `/apps/{app_id}/*` |
 
@@ -99,17 +99,15 @@ Each endpoint entry in the schema specifies:
 
 ### What this enables
 
-- **One canonical store for all AI conversations** regardless of which chat app generated them. Open WebUI, LibreChat, or any future chat app all write to `ai-memory.db` automatically via the LLM proxy.
-- **True ephemeral containers.** Delete a container, reinstall it — all conversations reappear. Container compromise means deleting the container; data is safe in `ai-memory.db`.
-- **Cross-app search.** `GET /api/ai/search?q=query` searches all conversations from all AI apps via FTS5.
+- **One place for the owner's AI conversations**, whichever chat app had them.
+- **Disposable containers.** Delete a container and reinstall it, and its conversations reappear. A compromised container is deleted; the conversations are not in it.
 - **Zero app-side integration required.** A new chat app using the OpenAI-compatible API requires only: (1) pointing `OPENAI_API_BASE_URL` at `/sandbox/llm/v1`, and (2) loading through `/apps/{app_id}/`. No app code changes needed.
 - **Legible security model.** The namespace structure makes trust levels immediately visible in the route table.
 
 ### What this trades off
 
-- **Display proxy adds latency for non-intercepted requests.** Every browser request to the container now passes through the Go reverse proxy. In practice this is negligible (same-host loopback, Go `net/http/httputil.ReverseProxy` is extremely fast), but it is a real hop.
-- **Open WebUI conversation CRUD writes are not captured.** The current interception captures conversations as they happen via the LLM proxy. Open WebUI write operations (rename conversation, delete conversation, add tag) that go to the container's own backend are not intercepted and will not be reflected in `ai-memory.db`. Capturing write operations is future work — it requires intercepting additional `/api/v1/chats` write paths in the display proxy.
-- **App-specific format translation.** Each chat app has its own expected JSON format for conversations and messages, so a runtime translates the owner's conversations into the format each chat app expects.
+- **An app's display always crosses the Identity Agent**, which therefore has to be running for the app to be shown.
+- **A chat app is supported only in the conversation format it reads.** Each has its own, so each one supported is work on the Identity Agent's side.
 
 ---
 
@@ -120,7 +118,6 @@ Each endpoint entry in the schema specifies:
 | `identity-agent-core/appmanifest/manifest.go` | `api_schema` and the rest of the manifest |
 | `manifests/openwebui.json` | `OPENAI_API_BASE_URL` points to `/sandbox/llm/v1`; `api_schema` field set |
 | `manifests/schemas/openwebui-api.json` | Full API schema document for Open WebUI |
-| `identity-agent-core/store/ai_memory_store.go` | The owner's AI conversations |
 
 ---
 
