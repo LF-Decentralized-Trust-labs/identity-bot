@@ -42,7 +42,16 @@ func readKeptRecord(path, what, meanwhile string, kind error, v any) (found bool
 		log.Printf("[store] ERROR: %s (%s) cannot be read (%v). It has been left exactly as it "+
 			"is and nothing will be written over it. Restore it from a backup; until then %s.",
 			what, path, err, meanwhile)
-		return false, fmt.Errorf("%w: %s cannot be read (%v); restore it from a backup", kind, what, err)
+		// The error carries no path. It travels to callers that answer
+		// HTTP requests, some of them from anybody, and the data
+		// directory's path names the account it lives under. The log
+		// above has it.
+		cause := err
+		var pathErr *fs.PathError
+		if errors.As(err, &pathErr) {
+			cause = pathErr.Err
+		}
+		return false, fmt.Errorf("%w: %s cannot be read (%v); restore it from a backup", kind, what, cause)
 	}
 	return true, nil
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"time"
@@ -75,7 +76,14 @@ func (s *CoreServer) handleSealedTransport(w http.ResponseWriter, r *http.Reques
 	// agent do expensive work on demand.
 	senderDID, keys, err := s.sealedParties(&env)
 	if err != nil {
-		writeSealedError(w, statusForUnreadable(err, http.StatusForbidden), err.Error())
+		if status := statusForUnreadable(err, http.StatusForbidden); status != http.StatusForbidden {
+			// Answered to anybody, so nothing about where or how this
+			// Identity Agent keeps its data. The log has the detail.
+			log.Printf("[sealed] an envelope arrived and could not be opened here: %v", err)
+			writeSealedError(w, status, "this Identity Agent cannot open envelopes right now")
+			return
+		}
+		writeSealedError(w, http.StatusForbidden, err.Error())
 		return
 	}
 

@@ -378,7 +378,10 @@ func (s *CoreServer) handleGetDIDCommDID(w http.ResponseWriter, r *http.Request)
 	}
 	ks, err := s.keySetFor(aid)
 	if err != nil {
-		jsonError(w, "keyset error: "+err.Error(), statusForUnreadable(err, http.StatusInternalServerError))
+		// Answered to anybody: the detail goes to the log, not the reply.
+		log.Printf("[didcomm] the keys of %s could not be had: %v", aid, err)
+		jsonError(w, "this Identity Agent cannot give its messaging keys right now",
+			statusForUnreadable(err, http.StatusInternalServerError))
 		return
 	}
 	did, err := ks.DID()

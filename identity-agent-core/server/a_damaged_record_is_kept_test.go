@@ -151,3 +151,16 @@ func TestADamagedRecordSaysToRestoreIt(t *testing.T) {
 		t.Fatalf("answered %d, want 503", got)
 	}
 }
+
+// The error names no path, so it can travel to any reply. Where the data
+// lives, and so the account it runs under, is said only in the log.
+func TestAnUnreadableRecordsErrorNamesNoPath(t *testing.T) {
+	var v map[string]any
+	dir := t.TempDir()
+	path := filepath.Join(dir, "record.json")
+	breakRecord(t, path)
+	_, err := readKeptRecord(path, "a record", "nothing works", errRecordUnreadable, &v)
+	if err == nil || strings.Contains(err.Error(), dir) || strings.Contains(err.Error(), "record.json") {
+		t.Fatalf("the error names where the data lives: %v", err)
+	}
+}
