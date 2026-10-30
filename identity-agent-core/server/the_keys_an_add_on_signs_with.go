@@ -93,7 +93,11 @@ func (s *CoreServer) heldKeySet(aid string) (*didcomm.KeySet, error) {
 	if !held {
 		return nil, fmt.Errorf("this Identity Agent does not speak for %s", aid)
 	}
-	return s.keySetFor(aid)
+	ks, err := s.keySetFor(aid)
+	if err != nil {
+		return nil, fmt.Errorf("%w: the DIDComm keys of %s: %v", coretypes.ErrKeysUnavailable, aid, err)
+	}
+	return ks, nil
 }
 
 // messagingKeysOf are the public DIDComm keys of aid.
@@ -114,7 +118,9 @@ func (s *CoreServer) packSignedAs(aid string, m *didcomm.JWM) (*didcomm.Envelope
 	return didcomm.PackSigned(ks, m)
 }
 
-// openSealedTo opens env, sealed to aid by sender.
+// openSealedTo opens env, sealed to aid by sender. When aid's keys cannot be
+// read right now the error is coretypes.ErrKeysUnavailable; otherwise the
+// envelope is not one sealed to aid by sender.
 func (s *CoreServer) openSealedTo(aid string, sender *didcomm.DID, env *didcomm.Envelope) (*didcomm.JWM, error) {
 	ks, err := s.heldKeySet(aid)
 	if err != nil {

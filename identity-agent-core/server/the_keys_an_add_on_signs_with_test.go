@@ -2,9 +2,13 @@ package server
 
 import (
 	"crypto/ed25519"
+	"errors"
+	"os"
 	"testing"
 
+	"identity-agent-core/didcomm"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/login"
 )
 
@@ -52,5 +56,50 @@ func TestNoKeySetForWhatIsNotHeld(t *testing.T) {
 	}
 	if _, err := s.heldKeySet("Enothing"); err == nil {
 		t.Fatal("a keyset was used for an identifier this Identity Agent does not speak for")
+	}
+}
+
+// Opening an envelope sealed to this Identity Agent tells "its own keys
+// cannot be read right now", which is its fault, from "this envelope is not
+// one sealed to it", which is the sender's, so the caller can answer 503 for
+// the first and 403 for the second.
+func TestOpeningASealedEnvelopeSaysWhoseFaultItIs(t *testing.T) {
+	s := agentWithDerivedIdentity(t)
+	id, err := s.DataStore.GetIdentity()
+	if err != nil || id == nil {
+		t.Fatalf("no identity: %v", err)
+	}
+	to, err := s.messagingKeysOf(id.AID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender, err := didcomm.GenerateKeySet("Esender")
+	if err != nil {
+		t.Fatal(err)
+	}
+	from, err := sender.DID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := didcomm.PackAuthcrypt(sender, to, &didcomm.JWM{ID: "m1", Type: didcomm.TypeBodyEnrolment, Body: []byte(`{}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.openSealedTo(id.AID, from, env); err != nil {
+		t.Fatalf("a genuine envelope did not open: %v", err)
+	}
+
+	other, _ := didcomm.GenerateKeySet("Eother")
+	otherDID, _ := other.DID()
+	_, err = s.openSealedTo(id.AID, otherDID, env)
+	if err == nil || errors.Is(err, coretypes.ErrKeysUnavailable) {
+		t.Fatalf("an envelope not from the sender named was refused as the keys being unreadable: %v", err)
+	}
+
+	if err := os.WriteFile(s.didcommKeysPath(), []byte(`{"`+id.AID+`":"not a keyset"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.openSealedTo(id.AID, from, env); !errors.Is(err, coretypes.ErrKeysUnavailable) {
+		t.Fatalf("unreadable keys were not reported as such: %v", err)
 	}
 }

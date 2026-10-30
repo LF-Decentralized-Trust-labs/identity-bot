@@ -71,6 +71,11 @@ type (
 	KeySigner = coretypes.KeySigner
 )
 
+// ErrKeysUnavailable is a key the core holds and cannot read right now: the
+// Identity Agent's fault, not the caller's. MessagingKeysOf, PackSignedAs and
+// OpenSealedTo return it, wrapped, for that and for nothing else.
+var ErrKeysUnavailable = coretypes.ErrKeysUnavailable
+
 // Of is the handle on s.
 func Of(s *server.CoreServer) Host { return server.AddonHost(s, hostlink.New()).(Host) }
 
