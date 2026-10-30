@@ -141,6 +141,7 @@ func (fixtureWrapper) Router(s *CoreServer) chi.Router { return s.router }
 func (fixtureWrapper) BuildRouter(s *CoreServer, flutterWebDir string) chi.Router {
 	return s.buildRouter(flutterWebDir)
 }
+func (fixtureWrapper) KeySignerOf(seed []byte) coretypes.KeySigner    { return heldKeyOf(seed) }
 func (fixtureWrapper) TalkSigner() string                             { return talkSigner }
 func (fixtureWrapper) TestOwnerSecret() string                        { return testOwnerSecret }
 func (fixtureWrapper) TestOwnerSeed() []byte                          { return testOwnerSeed() }

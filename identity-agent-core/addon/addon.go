@@ -189,7 +189,6 @@ type Helpers interface {
 	RequiresTheKeyItself(method string, pattern string) (string, bool)
 	SameJSONValue(a interface{}, b interface{}) bool
 	SealedRemoteAddr() string
-	SignEventBytes(raw []byte, seed []byte) (string, error)
 	TheGateAdmittedTheOwner(r *http.Request) bool
 	UnknownRouteRefusal() string
 	WriteError(w http.ResponseWriter, status int, errMsg string, details string)

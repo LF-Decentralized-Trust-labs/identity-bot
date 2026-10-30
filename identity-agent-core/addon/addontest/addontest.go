@@ -99,6 +99,9 @@ type Fixtures interface {
 	Signed(t TB, method string, path string, body string, seed []byte, at time.Time) *http.Request
 	SignedFor(t TB, target string, method string, path string, body string, seed []byte, at time.Time) *http.Request
 	SigningPair(t TB, b byte) ([]byte, string)
+	// KeySignerOf signs with seed, as the core's signers do, for a test that
+	// needs a key the core does not hold.
+	KeySignerOf(seed []byte) coretypes.KeySigner
 	SignsWithSeeds(e interface {
 		SetEventSignature(func(aid string, key string, raw []byte) (string, error))
 	}, seeds ...[]byte)

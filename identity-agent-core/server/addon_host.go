@@ -210,11 +210,8 @@ func (hostWrapper) RequiresTheKeyItself(method string, pattern string) (string, 
 }
 func (hostWrapper) SameJSONValue(a interface{}, b interface{}) bool { return sameJSONValue(a, b) }
 func (hostWrapper) SealedRemoteAddr() string                        { return sealedRemoteAddr }
-func (hostWrapper) SignEventBytes(raw []byte, seed []byte) (string, error) {
-	return signEventBytes(raw, seed)
-}
-func (hostWrapper) TheGateAdmittedTheOwner(r *http.Request) bool { return theGateAdmittedTheOwner(r) }
-func (hostWrapper) UnknownRouteRefusal() string                  { return unknownRouteRefusal }
+func (hostWrapper) TheGateAdmittedTheOwner(r *http.Request) bool    { return theGateAdmittedTheOwner(r) }
+func (hostWrapper) UnknownRouteRefusal() string                     { return unknownRouteRefusal }
 func (hostWrapper) WriteError(w http.ResponseWriter, status int, errMsg string, details string) {
 	writeError(w, status, errMsg, details)
 }
