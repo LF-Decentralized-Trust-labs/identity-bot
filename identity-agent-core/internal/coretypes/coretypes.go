@@ -104,3 +104,12 @@ type OwnEvidence struct {
 	Inception string   `json:"inception"`
 	RootKEL   []string `json:"root_kel"`
 }
+
+// KeySigner signs with one key the core holds, which stays in the core: as a
+// string is signed (login.SignString) and as a key event is signed.
+type KeySigner interface {
+	// PublicKey is the key's public half, qb64.
+	PublicKey() string
+	SignString(message string) (string, error)
+	SignEvent(raw []byte) (string, error)
+}

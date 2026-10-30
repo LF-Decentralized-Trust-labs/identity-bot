@@ -67,6 +67,8 @@ type (
 	// LogSignerRecord is which identity signs the governance log, and where
 	// its signed chain begins.
 	LogSignerRecord = coretypes.LogSignerRecord
+	// KeySigner signs with one key the core holds, which stays in the core.
+	KeySigner = coretypes.KeySigner
 )
 
 // Of is the handle on s.
@@ -118,6 +120,13 @@ type Host interface {
 	RequireOwner(w http.ResponseWriter, r *http.Request) bool
 	ResolveBearerToken(r *http.Request, token string, cc permission.CallerContext) (permission.CallerContext, bool)
 	ResolveCaller(r *http.Request) permission.CallerContext
+	// SignerForAsset signs as the asset held here whose identifier is aid,
+	// such as an AI agent. The key stays in the core.
+	SignerForAsset(aid string) (KeySigner, error)
+	// LogSigner signs as the identity that signs the governance log, and
+	// gives the public half of its next key and its record. The key stays
+	// in the core.
+	LogSigner() (signer KeySigner, nextPublicKey string, rec LogSignerRecord, err error)
 	// SignAsTheIdentity signs message with this Identity Agent's own
 	// identity key, as login.SignString does, and returns the signature. The
 	// key stays in the core.

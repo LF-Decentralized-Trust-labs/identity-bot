@@ -83,6 +83,12 @@ func (h hostWrapper) GrantsHeldBy(agentAID string, usableOnly bool) []store.Cred
 }
 func (h hostWrapper) HasBrowserSession(r *http.Request) bool      { return h.s.hasBrowserSession(r) }
 func (h hostWrapper) HoldTheRecord() (string, bool, bool, func()) { return h.s.holdTheRecord() }
+func (h hostWrapper) SignerForAsset(aid string) (coretypes.KeySigner, error) {
+	return h.s.assetSigner(aid)
+}
+func (h hostWrapper) LogSigner() (coretypes.KeySigner, string, coretypes.LogSignerRecord, error) {
+	return h.s.logSigner()
+}
 func (h hostWrapper) SignAsTheIdentity(message []byte) (string, error) {
 	seed, err := h.s.identitySigningSeed()
 	if err != nil {
