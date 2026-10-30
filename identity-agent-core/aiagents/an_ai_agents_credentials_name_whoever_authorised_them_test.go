@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"identity-agent-core/addon"
 	"identity-agent-core/agentbody"
 	"identity-agent-core/agenthost"
 	"identity-agent-core/authprovider"
 	"identity-agent-core/iacrypto"
-	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/permission"
 	"identity-agent-core/schemas"
 	"identity-agent-core/server"
@@ -152,7 +152,7 @@ func TestACredentialThatDoesNotRestOnItsRequestIsNotIssued(t *testing.T) {
 		}
 	}
 	stamp := time.Now().UTC().Format(time.RFC3339)
-	bogus := coretypes.Authority{Request: &coretypes.SignedRequest{Kind: "owner", Signer: "EOWNERTESTAID", Body: `{"capabilities":[]}`,
+	bogus := addon.Authority{Request: &addon.SignedRequest{Kind: "owner", Signer: "EOWNERTESTAID", Body: `{"capabilities":[]}`,
 		Signed:    helpers.CanonicalRequestString("PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities", stamp, []byte(`{"capabilities":[]}`)),
 		Signature: "0Bnot-a-signature"}, About: w.a.ID}
 	if _, err := hostOf(w.s).IssueCapabilityGrant(w.a, bogus); err == nil {
@@ -175,15 +175,15 @@ func TestACredentialThatDoesNotRestOnItsRequestIsNotIssued(t *testing.T) {
 func TestAFirstVersionCredentialIssuedAfterwardsIsNotHonoured(t *testing.T) {
 	s, agent := fixtures.GrantWorld(t)
 	early, err := hostOf(s).IssueAssetCredential(schemas.AIAgentGrantV1, agent.PairwiseAID, agent.DelegatorAID,
-		map[string]interface{}{"name": "early", "capabilities": []string{}}, "", coretypes.Authority{})
+		map[string]interface{}{"name": "early", "capabilities": []string{}}, "", addon.Authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := hostOf(s).IssueCapabilityGrant(agent, coretypes.Authority{}); err != nil {
+	if _, err := hostOf(s).IssueCapabilityGrant(agent, addon.Authority{}); err != nil {
 		t.Fatal(err)
 	}
 	late, err := hostOf(s).IssueAssetCredential(schemas.AIAgentGrantV1, agent.PairwiseAID, agent.DelegatorAID,
-		map[string]interface{}{"name": "late", "capabilities": []string{}}, "", coretypes.Authority{})
+		map[string]interface{}{"name": "late", "capabilities": []string{}}, "", addon.Authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +308,7 @@ func TestARequestAuthorisesOneCredential(t *testing.T) {
 	path := "/api/mcp/agents/" + w.a.ID + "/capabilities"
 	ia := hostOf(w.s).ThisIdentityAgentsIdentifier()
 	sig, _ := server.SignOwnerRequest(ia, "PUT", path, stamp, []byte(body), fixtures.TestOwnerSeed())
-	by := coretypes.Authority{About: w.a.ID, Request: &coretypes.SignedRequest{Kind: "owner", Signer: "EOWNERTESTAID", Body: body,
+	by := addon.Authority{About: w.a.ID, Request: &addon.SignedRequest{Kind: "owner", Signer: "EOWNERTESTAID", Body: body,
 		Signed: helpers.CanonicalOwnerRequest(ia, "PUT", path, stamp, []byte(body)), Signature: sig}}
 	if _, err := hostOf(w.s).IssueCapabilityGrant(w.a, by); err != nil {
 		t.Fatalf("the first credential on the request: %v", err)

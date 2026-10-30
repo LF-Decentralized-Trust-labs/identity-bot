@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"identity-agent-core/addon"
 	"identity-agent-core/asset"
 	"identity-agent-core/drivers"
-	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/server"
 	"identity-agent-core/store"
 )
@@ -17,7 +17,7 @@ import (
 // to somebody who has only the log.
 func TestTheOrganisationsOwnEventsAreSigned(t *testing.T) {
 	s, agent := fixtures.GrantWorld(t)
-	if _, err := hostOf(s).IssueCapabilityGrant(agent, coretypes.Authority{}); err != nil {
+	if _, err := hostOf(s).IssueCapabilityGrant(agent, addon.Authority{}); err != nil {
 		t.Fatal(err)
 	}
 	events, _ := s.DataStore.GetEvents(agent.DelegatorAID)
@@ -53,7 +53,7 @@ func scopesFor(t *testing.T, s *server.CoreServer, a *asset.Asset, grantSAID, to
 // denied. Issued and verified for real, the grant now decides the agent's scopes.
 func TestAnAIAgentGrantIsIssuedAndVerifiedOnTheShippedEngine(t *testing.T) {
 	s, agent := fixtures.GrantWorld(t)
-	grant, err := hostOf(s).IssueCapabilityGrant(agent, coretypes.Authority{})
+	grant, err := hostOf(s).IssueCapabilityGrant(agent, addon.Authority{})
 	if err != nil {
 		t.Fatalf("issuing the grant: %v", err)
 	}
@@ -72,12 +72,12 @@ func TestAnAIAgentGrantIsIssuedAndVerifiedOnTheShippedEngine(t *testing.T) {
 // cannot be found and used beside the new.
 func TestReissuingAGrantRevokesTheOneItReplaces(t *testing.T) {
 	s, agent := fixtures.GrantWorld(t)
-	first, err := hostOf(s).IssueCapabilityGrant(agent, coretypes.Authority{})
+	first, err := hostOf(s).IssueCapabilityGrant(agent, addon.Authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	agent.Capabilities = []string{"system.info.read"}
-	second, err := hostOf(s).IssueCapabilityGrant(agent, coretypes.Authority{})
+	second, err := hostOf(s).IssueCapabilityGrant(agent, addon.Authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestALapsedGrantAdmitsNothing(t *testing.T) {
 	s, agent := fixtures.GrantWorld(t)
 	lapsed := mustParseTime(t, "2020-01-01T00:00:00Z")
 	agent.GrantValidUntil = &lapsed
-	grant, err := hostOf(s).IssueCapabilityGrant(agent, coretypes.Authority{})
+	grant, err := hostOf(s).IssueCapabilityGrant(agent, addon.Authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func mustParseTime(t *testing.T, s string) time.Time {
 // before this, one unsigned event anywhere in the log denied every AI agent.
 func TestALaterUnsignedEventDoesNotWithdrawAGrant(t *testing.T) {
 	s, agent := fixtures.GrantWorld(t)
-	grant, err := hostOf(s).IssueCapabilityGrant(agent, coretypes.Authority{})
+	grant, err := hostOf(s).IssueCapabilityGrant(agent, addon.Authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestALaterUnsignedEventDoesNotWithdrawAGrant(t *testing.T) {
 // A grant counts only from the identity that delegated the AI agent.
 func TestAGrantFromAnotherIssuerAdmitsNothing(t *testing.T) {
 	s, agent := fixtures.GrantWorld(t)
-	grant, err := hostOf(s).IssueCapabilityGrant(agent, coretypes.Authority{})
+	grant, err := hostOf(s).IssueCapabilityGrant(agent, addon.Authority{})
 	if err != nil {
 		t.Fatal(err)
 	}

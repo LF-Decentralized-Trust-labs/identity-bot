@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"identity-agent-core/activitylog"
+	"identity-agent-core/addon"
 	"identity-agent-core/agentbody"
 	"identity-agent-core/agenthost"
 	"identity-agent-core/agentmessage"
@@ -27,7 +28,6 @@ import (
 	"identity-agent-core/didcomm"
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
-	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/login"
 	"identity-agent-core/permission"
 	"identity-agent-core/server"
@@ -401,7 +401,7 @@ func aSecondMachine(t *testing.T, s *server.CoreServer) (server.ControllerGrant,
 	if err != nil {
 		t.Fatal(err)
 	}
-	granted, err := hostOf(s).GrantController(g, time.Now().UTC(), coretypes.Authority{})
+	granted, err := hostOf(s).GrantController(g, time.Now().UTC(), addon.Authority{})
 	if err != nil {
 		t.Fatalf("anchoring the second machine's grant: %v", err)
 	}
@@ -592,7 +592,7 @@ func TestTheIdentityAgentsSideFailsPlainly(t *testing.T) {
 			return signWhereUnsigned(w.b.PairwiseAID, raws, make([]string, len(raws)), wrongSeed)
 		},
 		"a log signer the keys do not make": func() error {
-			_, err := of(w.s).exportLogSigner(coretypes.LogSignerRecord{AID: "EUnknownIdentityAltogether", Index: signer.Index + 1000})
+			_, err := of(w.s).exportLogSigner(addon.LogSignerRecord{AID: "EUnknownIdentityAltogether", Index: signer.Index + 1000})
 			return err
 		},
 		"an identity that is no AI agent here": func() error {

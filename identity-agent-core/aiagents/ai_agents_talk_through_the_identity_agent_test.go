@@ -13,13 +13,13 @@ import (
 	"time"
 
 	"identity-agent-core/activitylog"
+	"identity-agent-core/addon"
 	"identity-agent-core/agentbody"
 	"identity-agent-core/agenthost"
 	"identity-agent-core/agentmessage"
 	"identity-agent-core/asset"
 	"identity-agent-core/conversation"
 	"identity-agent-core/internal/addontest"
-	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/sandbox"
 	"identity-agent-core/server"
 )
@@ -64,7 +64,7 @@ func (w *talkWorld) provision(t *testing.T, name string, caps []string) *asset.A
 	if err != nil {
 		t.Fatalf("provisioning %s: %v", name, err)
 	}
-	if _, err := hostOf(w.s).IssueCapabilityGrant(a, coretypes.Authority{}); err != nil {
+	if _, err := hostOf(w.s).IssueCapabilityGrant(a, addon.Authority{}); err != nil {
 		t.Fatalf("granting %s: %v", name, err)
 	}
 	return a
@@ -576,7 +576,7 @@ func TestAnAIAgentMessagesOnlyWhomItsGrantNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	a, _ := of(w.s).aiAgentAsset(w.a.ID)
-	if _, err := hostOf(w.s).IssueCapabilityGrant(&a, coretypes.Authority{}); err != nil {
+	if _, err := hostOf(w.s).IssueCapabilityGrant(&a, addon.Authority{}); err != nil {
 		t.Fatal(err)
 	}
 	w.openedWith(t)

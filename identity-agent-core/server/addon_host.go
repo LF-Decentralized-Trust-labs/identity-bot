@@ -18,8 +18,8 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// AddonHost is the server's side of the handle the add-ons built in this
-// module have on s (internal/addonhost); s may be nil for the helpers that
+// AddonHost is the server's side of the handle an add-on has on s (package
+// addon); s may be nil for the helpers that
 // need no server. It panics unless given a token hostlink.New made, so it is
 // not reached by mistake. That is a safeguard, not a boundary against code an
 // app chooses to link: see hostlink.Token. Each method of what it returns
@@ -37,7 +37,7 @@ func AddonHost(s *CoreServer, t hostlink.Token) any {
 type hostWrapper struct{ s *CoreServer }
 
 // addonStates is what each add-on keeps for one server
-// (addonhost.Host.AddonState).
+// (addon.Host.AddonState).
 type addonStates struct{ m sync.Map }
 
 func (h hostWrapper) AddonState(key any, make func() any) any {

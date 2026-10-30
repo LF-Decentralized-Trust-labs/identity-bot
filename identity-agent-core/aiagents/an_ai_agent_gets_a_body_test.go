@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
+	"identity-agent-core/addon"
 	"identity-agent-core/agentbody"
 	"identity-agent-core/didcomm"
 	"identity-agent-core/internal/addontest"
-	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/sandbox"
 	"identity-agent-core/schemas"
 	"identity-agent-core/server"
@@ -159,7 +159,7 @@ func bodyWorld(t *testing.T) (*server.CoreServer, string) {
 	if err := hostOf(s).AssetHandler().Store.UpsertAsset(*agent); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := hostOf(s).IssueCapabilityGrant(agent, coretypes.Authority{}); err != nil {
+	if _, err := hostOf(s).IssueCapabilityGrant(agent, addon.Authority{}); err != nil {
 		t.Fatal(err)
 	}
 	mgr, err := sandbox.NewManager(sandbox.ManagerConfig{Log: fixtures.LogForTest(s, t, s.DataDir), Vault: fixtures.VaultForTest(s, s.DataDir), DataDir: s.DataDir})

@@ -1,7 +1,7 @@
 package sandboxedapps
 
 import (
-	"identity-agent-core/internal/addonhost"
+	"identity-agent-core/addon/addontest"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,7 +9,7 @@ import (
 )
 
 // fixtures are the worlds the core's tests build, for these.
-var fixtures = addonhost.TestFixtures()
+var fixtures = addontest.New()
 
 // An authorized controller does the application's work (ADR-044), so reading
 // the capability registry no longer re-checks the owner inside the handler: the

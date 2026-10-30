@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"identity-agent-core/addon"
 	"identity-agent-core/asset"
 	"identity-agent-core/didcomm"
 	"identity-agent-core/drivers"
-	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/keriengine"
 	"identity-agent-core/store"
 )
@@ -200,7 +200,7 @@ func TestOwnProofOutlivesTheAIAgent(t *testing.T) {
 func TestDelegationEvidenceMustBeThisAgentsAndThisRoot(t *testing.T) {
 	w := newTalkWorld(t)
 	engine := w.s.KeriDriver.(drivers.KELHolder)
-	evidence := func(aid string) coretypes.OwnEvidence {
+	evidence := func(aid string) addon.OwnEvidence {
 		kel, err := engine.GetKelByAID(aid)
 		if err != nil {
 			t.Fatal(err)
@@ -209,7 +209,7 @@ func TestDelegationEvidenceMustBeThisAgentsAndThisRoot(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return coretypes.OwnEvidence{Inception: kel.RawEventsB64[0], RootKEL: root.RawEventsB64}
+		return addon.OwnEvidence{Inception: kel.RawEventsB64[0], RootKEL: root.RawEventsB64}
 	}
 	if err := hostOf(w.s).DelegatedFromHere(w.a.PairwiseAID, evidence(w.a.PairwiseAID)); err != nil {
 		t.Fatalf("genuine evidence was refused: %v", err)
@@ -235,7 +235,7 @@ func TestDelegationEvidenceMustBeThisAgentsAndThisRoot(t *testing.T) {
 	}
 	dk, _ := other.GetKel("their-agent")
 	rk, _ := other.GetKel("elsewhere")
-	err = hostOf(w.s).DelegatedFromHere(d.AID, coretypes.OwnEvidence{Inception: dk.RawEventsB64[0], RootKEL: rk.RawEventsB64})
+	err = hostOf(w.s).DelegatedFromHere(d.AID, addon.OwnEvidence{Inception: dk.RawEventsB64[0], RootKEL: rk.RawEventsB64})
 	if err == nil || !strings.Contains(err.Error(), "not this Identity Agent's") {
 		t.Fatalf("a delegation from another root was taken as one from here: %v", err)
 	}

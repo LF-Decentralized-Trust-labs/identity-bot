@@ -11,6 +11,7 @@ import (
 	"net/http"
 
 	"identity-agent-core/activitylog"
+	"identity-agent-core/addon"
 	"identity-agent-core/asset"
 	"identity-agent-core/backup"
 	"identity-agent-core/conversation"
@@ -18,7 +19,6 @@ import (
 	"identity-agent-core/didcomm"
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
-	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/keriengine"
 	"identity-agent-core/permission"
 	"identity-agent-core/secureenclave"
@@ -208,7 +208,7 @@ func (l exportedLedger) Log(_ context.Context, conv string) (conversationbundle.
 type exportedIdentities struct {
 	s      *server.CoreServer
 	root   string
-	signer coretypes.LogSignerRecord
+	signer addon.LogSignerRecord
 }
 
 func (x exportedIdentities) KeyLog(_ context.Context, aid string) (conversationbundle.KeyLog, error) {
@@ -366,7 +366,7 @@ func (s *aiAgents) agentSeed(aid string) ([]byte, error) {
 // log. Where the engine no longer holds it, it is made again from the keys the
 // signer was made from: its inception names nothing but them, so the same
 // keys give the same identifier, which is checked.
-func (s *aiAgents) exportLogSigner(rec coretypes.LogSignerRecord) (conversationbundle.KeyLog, error) {
+func (s *aiAgents) exportLogSigner(rec addon.LogSignerRecord) (conversationbundle.KeyLog, error) {
 	rootSeed, err := secureenclave.LoadRootSeed(s.DataDir)
 	if err != nil {
 		return conversationbundle.KeyLog{}, fmt.Errorf("the log signer's key cannot be had: %v", err)

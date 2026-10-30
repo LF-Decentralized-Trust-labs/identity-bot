@@ -13,7 +13,7 @@
 package sandboxedapps
 
 import (
-	"identity-agent-core/internal/addonhost"
+	"identity-agent-core/addon"
 	"identity-agent-core/internal/addontest"
 	"identity-agent-core/sandbox"
 	"identity-agent-core/server"
@@ -23,7 +23,7 @@ import (
 // parts of it that are not its public API, and what the add-on keeps for it.
 type sandboxedApps struct {
 	*server.CoreServer
-	addonhost.Host
+	addon.Host
 	*appsState
 }
 
@@ -39,13 +39,13 @@ type appsStateKey struct{}
 
 // of is the add-on on s.
 func of(s *server.CoreServer) *sandboxedApps {
-	h := addonhost.Of(s)
+	h := addon.Of(s)
 	st := h.AddonState(appsStateKey{}, func() any { return new(appsState) }).(*appsState)
 	return &sandboxedApps{CoreServer: s, Host: h, appsState: st}
 }
 
 // helpers are the core's helpers that need no server.
-var helpers = addonhost.Shared()
+var helpers = addon.Shared()
 
 // Manager is the sandbox manager on s: what runs its apps and the capability
 // gateway AI agents call through. Nil where s was made without this add-on,

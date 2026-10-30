@@ -15,9 +15,9 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"identity-agent-core/addon"
 	"identity-agent-core/asset"
 	"identity-agent-core/brainsignin"
-	"identity-agent-core/internal/addonhost"
 	"identity-agent-core/lending"
 	"identity-agent-core/sandbox"
 	"identity-agent-core/sandboxedapps"
@@ -28,7 +28,7 @@ import (
 // of it that are not its public API, and what the add-on keeps for it.
 type aiAgents struct {
 	*server.CoreServer
-	addonhost.Host
+	addon.Host
 	*aiState
 }
 
@@ -56,16 +56,16 @@ type aiStateKey struct{}
 
 // of is the add-on on s.
 func of(s *server.CoreServer) *aiAgents {
-	h := addonhost.Of(s)
+	h := addon.Of(s)
 	st := h.AddonState(aiStateKey{}, func() any { return new(aiState) }).(*aiState)
 	return &aiAgents{CoreServer: s, Host: h, aiState: st}
 }
 
 // hostOf is the handle on s.
-func hostOf(s *server.CoreServer) addonhost.Host { return addonhost.Of(s) }
+func hostOf(s *server.CoreServer) addon.Host { return addon.Of(s) }
 
 // helpers are the core's helpers that need no server.
-var helpers = addonhost.Shared()
+var helpers = addon.Shared()
 
 // AgentConfigByAID is a provisioned AI agent's stored configuration on s, or
 // nil where there is none (aiAgents.AgentConfigByAID).
