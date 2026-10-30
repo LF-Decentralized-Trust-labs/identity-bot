@@ -224,13 +224,11 @@ Sections come from `Collector.Collect` in `backup/collector.go`. Requesting `tie
 | Section | Contents |
 |---|---|
 | `sandbox_index` | A JSON object `{"entries": [<file names in the sandbox directory>]}`. Names only — no container images and no app data. |
-| `ai_memory_db` | Raw bytes of `ai_memory.db`. Written **only** when `LeanTier3` is false. In lean mode (the default) it becomes an external pointer instead. |
-| `log_<basename>` | Raw bytes of one log file newer than the retention window (default 30 days). Written **only** when `LeanTier3` is false. |
+| `file:<path>` | One file from the data directory, at `<path>` relative to it with forward slashes, restored to the same path. Every file is carried except a short list excluded by name, each with its reason, in `skipReason` in `backup/everything_this_device_holds.go`. A SQLite database, recognised by its header, is copied through SQLite rather than read as bytes, so the transactions still in its write-ahead log are not lost. The core names none of these files: a database an add-on keeps in the data directory, such as an AI memory store, is carried because it is there. |
+| `not_carried` | What the sweep deliberately left out, as JSON: each path, the reason, and its size. |
 
-Tier 3 in the default lean mode emits `external_pointers` rather than bytes: one for
-`ai_memory.db`, and one for each log file older than the window. Each pointer records
-`domain`, a `locator` that is a **local filesystem path**, a `key_ref`, `size_bytes` and
-`archived_at`. Nothing in the archive makes that data retrievable from another machine.
+Tier 3 is in the default tiers (`DefaultConfig` in `backup/config.go`). It writes no
+`external_pointers`.
 
 **Delta archives.** When the snapshot type is `delta`, `FilterDeltaBundle` in
 `backup/delta.go` keeps the four names in `tier1SectionNames` — `identity_state`,
@@ -346,7 +344,7 @@ Things the format defines or records but that no code path completes.
 - **Tier 2 and tier 3 sections are collected but not restored.** `applyPayload`
   (`recovery/service.go:294-339`) writes back identity, KEL events, contacts,
   `login_relationships`, `root_seed` and `sqlite_identity_db`. `credentials`, `settings`,
-  `pending_requests`, `sandbox_index`, `ai_memory_db` and `log_*` are decrypted and
+  `pending_requests` and `sandbox_index` are decrypted and
   integrity-checked but never applied.
 - **`DeltaStateHMAC` is dead code.** Defined at `backup/crypto.go:250`, called from nowhere.
   Its own comment describes it as a placeholder.
