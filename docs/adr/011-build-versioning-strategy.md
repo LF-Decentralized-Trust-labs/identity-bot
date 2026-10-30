@@ -126,3 +126,5 @@ Android enforces `versionCode` ordering strictly:
 | `codemagic.yaml` | All five platform workflows with `--build-number=$BUILD_NUMBER` |
 | `identity_agent_ui/pubspec.yaml` | Base version (`1.0.0+1`) — overridden at build time |
 | `identity_agent_ui/android/app/build.gradle` | Reads `flutterVersionCode` from local.properties (set by `--build-number`) |
+
+> **2026-10-30:** the reference app these paths name, `identity_agent_ui/`, has been removed from this repository; commit `ec5734b` still contains it. The client code it shared is in `packages/agent_client/`, and [BUILDING.md](../../BUILDING.md) covers building an app on the core.

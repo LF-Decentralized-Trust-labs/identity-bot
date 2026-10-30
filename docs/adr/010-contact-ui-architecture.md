@@ -153,7 +153,9 @@ All Flutter UI surfaces use a consistent avatar pattern:
 | `identity_agent_ui/lib/screens/mobile/share_menu.dart` | Inbound flow — uses `ContactActionPopup` for WebSocket-triggered popups, wires accept/reject |
 | `identity_agent_ui/lib/screens/mobile/mobile_dashboard.dart` | Dashboard with public `MobileDashboardState.refreshAlerts()` |
 | `identity_agent_ui/lib/screens/mobile/mobile_app.dart` | Parent — holds `GlobalKey<MobileDashboardState>`, triggers refresh on return from sub-screens |
-| `identity_agent_ui/lib/services/event_service.dart` | WebSocket client — connects to `/api/ws/events`, broadcasts events |
-| `identity_agent_ui/lib/services/core_service.dart` | `acceptContact()` and `rejectContact()` API methods |
+| `packages/agent_client/lib/services/event_service.dart` | WebSocket client — connects to `/api/ws/events`, broadcasts events |
+| `packages/agent_client/lib/services/core_service.dart` | `acceptContact()` and `rejectContact()` API methods |
 | `identity-agent-core/server/events.go` | WebSocket EventHub — broadcasts events to connected clients |
 | `identity-agent-core/store/store.go` | `ContactRecord.Photo` field for base64-encoded photos |
+
+> **2026-10-30:** the reference app these paths name, `identity_agent_ui/`, has been removed from this repository; commit `ec5734b` still contains it. The client code it shared is in `packages/agent_client/`, and [BUILDING.md](../../BUILDING.md) covers building an app on the core.

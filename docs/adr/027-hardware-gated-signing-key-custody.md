@@ -88,7 +88,7 @@ The decision of *whether to unwrap the mnemonic at all* for a given signing requ
 
 - [ADR-014](014-key-custody-migration-and-data-partitioning.md) — existing key custody, `SecureKeyStore`, software Ed25519 signing
 - [ADR-015](015-mobile-keri-service-architecture.md) — mobile KERI service architecture, Rust bridge
-- `identity_agent_ui/lib/services/secure_key_store.dart` — current mnemonic storage implementation
+- `packages/agent_client/lib/services/secure_key_store.dart` — current mnemonic storage implementation
 - `drivers/keri-core/` — pinned `keripy` version and its `MtrDex` derivation codes (`Ed25519`, `Ed25519_Seed`, `ECDSA_256k1`)
 
 ## What changed since this was written (2026-08-17)
