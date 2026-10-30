@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"identity-agent-core/activitylog"
 	"identity-agent-core/sandbox"
 	"identity-agent-core/vault"
 )
@@ -103,30 +102,4 @@ func TestVaultCredentialRemoteDenied(t *testing.T) {
 	}, true); w.Code != http.StatusForbidden {
 		t.Fatalf("forwarded request must be denied: %d", w.Code)
 	}
-}
-
-// vaultForTest is s's credential vault, made over dir when s has none yet, so
-// a sandbox manager a test makes adds credentials from the vault the server
-// keeps them in, as it does when the server makes both.
-func (s *CoreServer) vaultForTest(dir string) *vault.CredentialVault {
-	if s.Vault == nil {
-		s.Vault = vault.NewCredentialVault(dir)
-	}
-	return s.Vault
-}
-
-// logForTest is s's activity log, opened in dir when s has none yet and closed
-// when the test ends, so a sandbox manager a test makes writes to the log the
-// server reads, as it does when the server makes both.
-func (s *CoreServer) logForTest(t *testing.T, dir string) *activitylog.Log {
-	t.Helper()
-	if s.ActivityLog == nil {
-		l, err := activitylog.Open(dir)
-		if err != nil {
-			t.Fatalf("open the activity log: %v", err)
-		}
-		t.Cleanup(func() { l.Close() })
-		s.ActivityLog = l
-	}
-	return s.ActivityLog
 }

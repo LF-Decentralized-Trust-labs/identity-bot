@@ -1,7 +1,6 @@
 package server
 
 import (
-	"crypto/ed25519"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -22,15 +21,6 @@ func aDID(t *testing.T, aid string) *didcomm.DID {
 		t.Fatal(err)
 	}
 	return d
-}
-
-func signingPair(t *testing.T, b byte) ([]byte, string) {
-	t.Helper()
-	seed := make([]byte, ed25519.SeedSize)
-	for i := range seed {
-		seed[i] = b + byte(i)
-	}
-	return seed, iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey))
 }
 
 // THE ONE THAT MATTERS. Keys that nothing ties to an identifier could belong to

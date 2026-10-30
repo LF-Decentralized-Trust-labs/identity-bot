@@ -1,9 +1,6 @@
 package server
 
 import (
-	"context"
-	"crypto/ed25519"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -14,28 +11,9 @@ import (
 
 	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/schemas"
-	"identity-agent-core/store"
 
 	keri "github.com/grapeid/keri-go"
 )
-
-// acdcOf is a stored credential's body.
-func acdcOf(t *testing.T, s *CoreServer, said string) map[string]interface{} {
-	t.Helper()
-	rec, err := s.DataStore.GetCredential(said)
-	if err != nil || rec == nil {
-		t.Fatalf("credential %s is not on record: %v", said, err)
-	}
-	raw, err := base64.StdEncoding.DecodeString(rec.AcdcJson)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var body map[string]interface{}
-	if err := json.Unmarshal(raw, &body); err != nil {
-		t.Fatal(err)
-	}
-	return body
-}
 
 func statusOf(t *testing.T, s *CoreServer, said string) string {
 	t.Helper()
@@ -125,26 +103,6 @@ func TestTyingAMachineToItsSignerReissuesItsGrant(t *testing.T) {
 	if got := statusOf(t, w.s, granted.CredentialSAID); got != keri.StatusRevoked {
 		t.Fatalf("the grant that named nobody still stands: %q", got)
 	}
-}
-
-func credentialsOf(t *testing.T, s *CoreServer, holder string) []store.CredentialRecord {
-	t.Helper()
-	all, _ := s.DataStore.GetCredentials()
-	var out []store.CredentialRecord
-	for _, c := range all {
-		if c.HolderAID == holder {
-			out = append(out, c)
-		}
-	}
-	return out
-}
-
-func testOwnerSeed() []byte {
-	seed := make([]byte, ed25519.SeedSize)
-	for i := range seed {
-		seed[i] = byte(i + 1)
-	}
-	return seed
 }
 
 // Settling a machine's signer, when its grant cannot be re-issued, changes
@@ -295,35 +253,6 @@ func TestAGrantIsNotIssuedUnsignedWhereTheKeyIsElsewhere(t *testing.T) {
 	}
 }
 
-// awaiting is what the approval list says is waiting.
-func awaiting(t *testing.T, s *CoreServer) (machines, agents map[string]string) {
-	t.Helper()
-	rec := httptest.NewRecorder()
-	s.handleGrantsAwaitingApproval(rec, local("GET", "/api/grants/awaiting-approval", ""))
-	var out struct {
-		Machines []map[string]interface{} `json:"machines"`
-		Agents   []map[string]interface{} `json:"agents"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != http.StatusOK {
-		t.Fatalf("awaiting approval: %d %s", rec.Code, rec.Body.String())
-	}
-	machines, agents = map[string]string{}, map[string]string{}
-	for _, m := range out.Machines {
-		machines[m["controller_aid"].(string)], _ = m["awaiting"].(string)
-	}
-	for _, a := range out.Agents {
-		agents[a["asset_id"].(string)], _ = a["awaiting"].(string)
-	}
-	return machines, agents
-}
-
-// everythingRuns is every path that once gave a grant without being asked:
-// starting, and the anchoring tick.
-func everythingRuns(s *CoreServer) {
-	s.prepareKeyLogs()
-	s.anchorRecord()
-}
-
 // A machine row added to the file is never granted without the owner either.
 func TestAnAddedMachineRowIsNeverGrantedWithoutTheOwner(t *testing.T) {
 	s, _ := grantWorld(t)
@@ -375,11 +304,6 @@ func TestTheApprovalListIsServed(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"machines"`) {
 		t.Fatalf("the approval list: %d %s", rec.Code, rec.Body.String())
 	}
-}
-
-// withController is r as a machine's request reaches a handler.
-func withController(r *http.Request, g ControllerGrant) *http.Request {
-	return r.WithContext(context.WithValue(r.Context(), controllerContextKey{}, g))
 }
 
 // A machine is granted as speaking for an active signer of the identity, or

@@ -59,3 +59,24 @@ type AgentRef struct {
 
 // GrantRef is a grant an identity issued, by its SAID.
 type GrantRef struct{ SAID string }
+
+// TB is what a test fixture asks of the test running it: what *testing.T
+// gives. It is declared here so the fixtures the core shares with its
+// add-ons' tests can be written outside a _test.go file without importing
+// the testing package into the server.
+type TB interface {
+	Helper()
+	Name() string
+	TempDir() string
+	Cleanup(func())
+	Setenv(key, value string)
+	Log(args ...any)
+	Logf(format string, args ...any)
+	Error(args ...any)
+	Errorf(format string, args ...any)
+	Fatal(args ...any)
+	Fatalf(format string, args ...any)
+	Skip(args ...any)
+	Skipf(format string, args ...any)
+	Failed() bool
+}

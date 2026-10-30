@@ -20,94 +20,6 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// anAuthorisedMachine puts a controller on an agent and returns the machine's
-// identifier and the seed it signs with.
-//
-// Both are derived from the test's own name, so every test is a DIFFERENT
-// machine. That is how it works in life, and here it also keeps two tests from
-// producing byte-identical signed requests within the same second — which the
-// replay guard would correctly refuse as a reused signature, failing the second
-// test for a reason that has nothing to do with what it was checking.
-func anAuthorisedMachine(t *testing.T, s *CoreServer, grade ControllerGrade) (string, []byte) {
-	t.Helper()
-	// The device holding this identity's root key, because it is the only thing
-	// entitled to say how well somebody was authenticated.
-	ownerSeedForTest(t, s)
-	seed := make([]byte, ed25519.SeedSize)
-	for i, c := range []byte(t.Name()) {
-		seed[i%ed25519.SeedSize] ^= c + byte(i)
-	}
-	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
-	// A controller is named by its own key, so the identifier is derived rather
-	// than invented — the agent refuses a grant whose two halves disagree.
-	aid := iacrypto.NonTransferableAIDQB64(pub)
-	if _, err := s.controllers().Grant(ControllerGrant{
-		ControllerAID: aid,
-		PublicKey:     iacrypto.VerkeyQB64(pub),
-		Label:         "the laptop in the study",
-		Grade:         grade,
-	}, time.Now().UTC()); err != nil {
-		t.Fatalf("authorising the machine: %v", err)
-	}
-	return aid, seed
-}
-
-// asThatMachine builds a request signed by a controller, asserting an
-// authentication level measured at a given moment.
-//
-// Passing an empty level means the machine reported nothing, which is different
-// from reporting a weak one.
-func asThatMachine(t *testing.T, aid, method, path, body string, seed []byte,
-	level authprovider.Level, measuredAt time.Time) *http.Request {
-	t.Helper()
-	return asThatMachineTo(t, "", aid, method, path, body, seed, level, measuredAt)
-}
-
-// asThatMachineTo is asThatMachine for a request naming the Identity Agent
-// target, as every request to a named Identity Agent must.
-func asThatMachineTo(t *testing.T, target, aid, method, path, body string, seed []byte,
-	level authprovider.Level, measuredAt time.Time) *http.Request {
-	t.Helper()
-	return asThatMachineScored(t, target, aid, method, path, body, seed, level, measuredAt, 80)
-}
-
-// asThatMachineScored is asThatMachineTo with the score the root device
-// vouches for chosen.
-func asThatMachineScored(t *testing.T, target, aid, method, path, body string, seed []byte,
-	level authprovider.Level, measuredAt time.Time, score int) *http.Request {
-	t.Helper()
-	req := remote(method, path, body)
-	stamp := time.Now().UTC().Format(time.RFC3339)
-
-	asserted := authprovider.Unmeasured("")
-	if level != "" {
-		asserted = authprovider.Result{
-			Level: level, Measured: true, At: measuredAt.UTC(), Score: score,
-		}
-		req.Header.Set(headerControllerAuthLevel, string(level))
-		req.Header.Set(headerControllerAuthAt, measuredAt.UTC().Format(time.RFC3339))
-		req.Header.Set(headerControllerAuthScore, fmt.Sprint(score))
-		// Vouched for by the root-identity device. Without this the level is the
-		// machine scoring itself, which the agent refuses.
-		if vouch := theRootDeviceVouches(t, aid, level, measuredAt, score); vouch != "" {
-			req.Header.Set(headerAuthLevelVouchedBy, vouch)
-		}
-	}
-
-	sig, err := login.SignString(
-		canonicalControllerRequest(aid, target, method, path, stamp, asserted, []byte(body)), seed)
-	if err != nil {
-		t.Fatalf("signing: %v", err)
-	}
-	if target != "" {
-		req.Header.Set(headerControllerFor, target)
-	}
-	req.Header.Set(headerControllerAID, aid)
-	req.Header.Set(headerControllerSig, sig)
-	req.Header.Set(headerControllerTimestamp, stamp)
-	return req
-}
-
 // The ordinary case, and the reason the class exists: a machine the owner
 // authorised reaches an everyday route without anybody having granted it that
 // route specifically.
@@ -355,38 +267,6 @@ func TestAnOversizedBodyIsRefusedRatherThanTruncated(t *testing.T) {
 	if !strings.Contains(err.Error(), "larger than") {
 		t.Fatalf("refused for the wrong reason: %v", err)
 	}
-}
-
-// ownerSeedForTest gives the agent a root-identity device whose statements about
-// authentication it will accept, and returns that device's seed.
-//
-// Stored in a package-level map keyed by the test, because a controller request
-// is built by a helper that does not otherwise know the owner.
-func ownerSeedForTest(t *testing.T, s *CoreServer) []byte {
-	t.Helper()
-	seed, _ := sealTestOwner(t, s)
-	rootDeviceSeeds[t.Name()] = seed
-	t.Cleanup(func() { delete(rootDeviceSeeds, t.Name()) })
-	return seed
-}
-
-var rootDeviceSeeds = map[string][]byte{}
-
-// theRootDeviceVouches is the phone signing "this person reached this level, at
-// this moment, for this machine".
-func theRootDeviceVouches(t *testing.T, controllerAID string, level authprovider.Level,
-	at time.Time, score int) string {
-	t.Helper()
-	seed, ok := rootDeviceSeeds[t.Name()]
-	if !ok {
-		return ""
-	}
-	sig, err := login.SignString(
-		canonicalAuthLevelStatement(controllerAID, level, at, score), seed)
-	if err != nil {
-		t.Fatalf("the root device could not vouch: %v", err)
-	}
-	return sig
 }
 
 // A machine may not score itself.

@@ -2,7 +2,6 @@ package server
 
 import (
 	"bytes"
-	"crypto/ed25519"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -27,20 +26,6 @@ func aStore(t *testing.T) *controllerGrants {
 // because the identifier and the key have to agree or the grant is refused.
 func aGrant(grade ControllerGrade) ControllerGrant {
 	return grantFor(1, grade)
-}
-
-func grantFor(n byte, grade ControllerGrade) ControllerGrant {
-	seed := make([]byte, ed25519.SeedSize)
-	for i := range seed {
-		seed[i] = n + byte(i)
-	}
-	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
-	return ControllerGrant{
-		ControllerAID: iacrypto.NonTransferableAIDQB64(pub),
-		PublicKey:     iacrypto.VerkeyQB64(pub),
-		Label:         "the laptop in the study",
-		Grade:         grade,
-	}
 }
 
 // A machine somebody keeps has no expiry, and stands until it is removed.

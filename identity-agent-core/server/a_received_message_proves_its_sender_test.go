@@ -152,17 +152,6 @@ func (m *messaging) post(t *testing.T, raw []byte) int {
 	return resp.StatusCode
 }
 
-func refusedFor(t *testing.T, s *CoreServer, n store.Notification, why string) {
-	t.Helper()
-	_, _, err := s.provedSender(n)
-	if err == nil {
-		t.Fatalf("a message was taken as proved; want it refused because %q", why)
-	}
-	if !strings.Contains(err.Error(), why) {
-		t.Fatalf("refused for the wrong reason: %v; want %q", err, why)
-	}
-}
-
 // A message one agent sends another is kept with the sender's signature, so it
 // can be shown later to have come from the sender; and both ends write it to
 // their signed logs, the receiver's refusal of a replay included.
@@ -526,12 +515,6 @@ func TestOneSendersFloodOfRefusalsSilencesOnlyItself(t *testing.T) {
 	if n := count("didcomm.message.received", other); n != 1 {
 		t.Fatalf("another sender's refusal was not recorded while one sender flooded: %d", n)
 	}
-}
-
-// writeCounting is the engine with every call that makes an identity counted.
-type writeCounting struct {
-	drivers.KeriEngine
-	writes int
 }
 
 func (e *writeCounting) GetKelByAID(string) (*drivers.DriverKelResponse, error) {

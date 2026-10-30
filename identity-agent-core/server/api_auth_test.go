@@ -10,33 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"identity-agent-core/login"
 	"identity-agent-core/store"
 
+	"github.com/go-chi/chi/v5"
+
 	"identity-agent-core/asset"
 )
-
-func newAuthTestServer(t *testing.T) *CoreServer {
-	t.Helper()
-	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
-}
-
-// remote builds a request that did not originate on this machine — the shape a
-// tunnelled or forwarded caller has.
-func remote(method, path string, body string) *http.Request {
-	r := httptest.NewRequest(method, path, strings.NewReader(body))
-	r.RemoteAddr = "203.0.113.9:51000"
-	return r
-}
-
-// local builds a request from the machine the agent runs on.
-func local(method, path string, body string) *http.Request {
-	r := httptest.NewRequest(method, path, strings.NewReader(body))
-	r.RemoteAddr = "127.0.0.1:51000"
-	r.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
-	return r
-}
 
 // The whole point: a route nobody classified is private. This is the property
 // that has to hold for routes that do not exist yet.
@@ -186,58 +166,6 @@ func TestPreflightIsNotGated(t *testing.T) {
 }
 
 // --- the signed path: how a remote owner proves it ---
-
-// The replay cache is process-wide, which is right in production and awkward
-// across tests: two tests signing the same request at the same second produce
-// the same signature, and the second would look like a replay. Each signed test
-// starts from a clean cache.
-func resetSeenSignatures(t *testing.T) {
-	t.Helper()
-	seenSignaturesMu.Lock()
-	defer seenSignaturesMu.Unlock()
-	seenSignatures = map[string]time.Time{}
-}
-
-func sealTestOwner(t *testing.T, s *CoreServer) (seed []byte, aid string) {
-	t.Helper()
-	resetSeenSignatures(t)
-	seed = make([]byte, ed25519.SeedSize)
-	for i := range seed {
-		seed[i] = byte(i + 1)
-	}
-	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
-	aid = "EOWNERTESTAID"
-	if err := s.SealOwnerAuthority(OwnerAuthority{
-		AID:       aid,
-		PublicKey: base64.RawURLEncoding.EncodeToString(pub),
-	}); err != nil {
-		t.Fatalf("seal owner authority: %v", err)
-	}
-	return seed, aid
-}
-
-func signed(t *testing.T, method, path, body string, seed []byte, at time.Time) *http.Request {
-	t.Helper()
-	return signedFor(t, "", method, path, body, seed, at)
-}
-
-// signedFor is signed, naming the Identity Agent target, as every owner request
-// to an Identity Agent with an identifier must.
-func signedFor(t *testing.T, target, method, path, body string, seed []byte, at time.Time) *http.Request {
-	t.Helper()
-	req := remote(method, path, body)
-	stamp := at.UTC().Format(time.RFC3339)
-	sig, err := SignOwnerRequest(target, method, path, stamp, []byte(body), seed)
-	if err != nil {
-		t.Fatalf("sign: %v", err)
-	}
-	if target != "" {
-		req.Header.Set(headerOwnerFor, target)
-	}
-	req.Header.Set(headerOwnerSig, sig)
-	req.Header.Set(headerOwnerTimestamp, stamp)
-	return req
-}
 
 // The bootstrap fix: the owner is remote, and still gets in.
 func TestSignedRemoteOwnerIsAdmitted(t *testing.T) {

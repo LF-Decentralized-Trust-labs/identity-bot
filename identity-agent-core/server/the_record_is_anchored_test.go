@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -54,19 +53,6 @@ func writeRows(t *testing.T, s *CoreServer, n int) {
 			t.Fatal("a row was not written")
 		}
 	}
-}
-
-func chainSays(t *testing.T, s *CoreServer) map[string]any {
-	t.Helper()
-	req := local("GET", "/api/activity/chain", "")
-	rec := httptest.NewRecorder()
-	s.handleVerifyAuditChain(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("checking the log: %d %s", rec.Code, rec.Body.String())
-	}
-	var out map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &out)
-	return out
 }
 
 // The log's head is anchored in a record identity approved in the
@@ -251,16 +237,6 @@ func anchoredTwice(t *testing.T) (*CoreServer, int64) {
 		t.Fatalf("the record does not hold before anything is touched: %v", got)
 	}
 	return s, first
-}
-
-func recordDB(t *testing.T, s *CoreServer) *sql.DB {
-	t.Helper()
-	db, err := sql.Open("sqlite", filepath.Join(s.DataDir, "identity.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	return db
 }
 
 func mustBreak(t *testing.T, s *CoreServer, what string) {

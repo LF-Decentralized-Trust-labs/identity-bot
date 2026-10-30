@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	keri "github.com/grapeid/keri-go"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,86 +11,12 @@ import (
 	"testing"
 	"time"
 
+	keri "github.com/grapeid/keri-go"
+
 	"identity-agent-core/drivers"
 	"identity-agent-core/internal/coretypes"
-	"identity-agent-core/login"
 	"identity-agent-core/schemas"
-	"identity-agent-core/store"
 )
-
-// pairMachine asks, signed by the owner, for machine g to be granted.
-func (e *elsewhere) pairMachine(t *testing.T, g ControllerGrant) *httptest.ResponseRecorder {
-	t.Helper()
-	body := `{"controller_aid":"` + g.ControllerAID + `","public_key":"` + g.PublicKey + `","label":"` + g.Label + `","grade":"` + string(g.Grade) + `"}`
-	rec := httptest.NewRecorder()
-	e.s.router.ServeHTTP(rec, signedFor(t, e.s.thisIdentityAgentsIdentifier(), "POST", "/api/controllers", body, testOwnerSeed(), time.Now()))
-	return rec
-}
-
-// waiting is what waits for the device, of the kinds it is asked to sign.
-func waiting(t *testing.T, s *CoreServer) []store.SigningRequest {
-	t.Helper()
-	all, err := s.DataStore.GetPendingSigningRequests()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out []store.SigningRequest
-	for _, r := range all {
-		if isGrantKind(r.Kind) && r.Status == SigningStatusPending {
-			out = append(out, r)
-		}
-	}
-	return out
-}
-
-func signWith(req store.SigningRequest, seed []byte) string {
-	payload, _ := base64.StdEncoding.DecodeString(req.PayloadB64)
-	sig, _ := login.SignString(string(payload), seed)
-	return sig
-}
-
-func fulfilWith(t *testing.T, s *CoreServer, id, sig string) *httptest.ResponseRecorder {
-	t.Helper()
-	rec := httptest.NewRecorder()
-	s.handleFulfilSigningRequest(rec, withID(ownerRequest("POST", "/api/signing-requests/"+id+"/fulfil",
-		strings.NewReader(`{"signature":"`+sig+`"}`), s), id))
-	return rec
-}
-
-func fulfil(t *testing.T, s *CoreServer, req store.SigningRequest, seed []byte) *httptest.ResponseRecorder {
-	t.Helper()
-	return fulfilWith(t, s, req.ID, signWith(req, seed))
-}
-
-// checkAsTheDevice is what the device's own core says of a request, from
-// what the queue carries for it.
-func checkAsTheDevice(t *testing.T, s *CoreServer, req store.SigningRequest) (map[string]interface{}, error) {
-	t.Helper()
-	parts := s.queuedParts(req.ID)
-	shown, err := s.whatIsToBeSigned(req.PayloadB64, parts)
-	if err != nil {
-		return nil, err
-	}
-	raw, _ := json.Marshal(shown)
-	var out map[string]interface{}
-	json.Unmarshal(raw, &out)
-	return out, nil
-}
-
-func keyLogVerifies(t *testing.T, s *CoreServer) {
-	t.Helper()
-	owner, _ := s.DataStore.GetIdentity()
-	events, _ := s.DataStore.GetEvents(owner.AID)
-	in := drivers.ValidateKELInput{AID: owner.AID}
-	for _, ev := range events {
-		raw, _ := base64.StdEncoding.DecodeString(ev.RawBytesB64)
-		in.RawEvents = append(in.RawEvents, raw)
-		in.CesrSignatures = append(in.CesrSignatures, ev.CesrSignature)
-	}
-	if res, err := drivers.ValidateKELFromBytes(in); err != nil || !res.KelVerified {
-		t.Fatalf("the key log does not verify: %v %+v", err, res)
-	}
-}
 
 // A machine paired where the key is elsewhere waits; the device that holds the
 // key checks the grant on its own core and is shown what the credential says,
@@ -232,25 +157,6 @@ func TestAMachineRemovedWhileItsGrantWaitsIsGrantedNothing(t *testing.T) {
 	}
 	withdrawIt(t, e)
 	keyLogVerifies(t, e.s)
-}
-
-// withdrawIt signs the one revocation that waits, of a grant signed and not
-// wanted, and checks that grant is revoked.
-func withdrawIt(t *testing.T, e *elsewhere) {
-	t.Helper()
-	reqs := waiting(t, e.s)
-	if len(reqs) != 1 || reqs[0].Kind != signingKindRevocation {
-		t.Fatalf("no withdrawal waits: %+v", reqs)
-	}
-	body, _, _ := e.s.DataStore.GetPendingIssuance(reqs[0].ID)
-	var p pendingIssuance
-	json.Unmarshal([]byte(body), &p)
-	if rec := fulfil(t, e.s, reqs[0], e.seed); rec.Code != http.StatusOK {
-		t.Fatalf("withdrawing: %d %s", rec.Code, rec.Body.String())
-	}
-	if c, _ := e.s.DataStore.GetCredential(p.Revokes); c == nil || c.Status != "revoked" {
-		t.Fatalf("the grant signed and not wanted is not revoked: %+v", c)
-	}
 }
 
 // Two signatures for one request at once: one is acted on.
@@ -482,16 +388,6 @@ func TestAStaleRegistryIsBuiltAgain(t *testing.T) {
 	}
 }
 
-// elsewhere is an organisation whose key is held on another device: seed is
-// the key that device holds.
-type elsewhere struct {
-	s    *CoreServer
-	seed []byte
-	// earlier are AI agents made while the key was here, whose grants are
-	// gone, as before every AI agent was given one: by name, their ids.
-	earlier map[string]string
-}
-
 // keyElsewhere is the controller world with its key moved to another device.
 func keyElsewhere(t *testing.T) *elsewhere {
 	t.Helper()
@@ -499,23 +395,4 @@ func keyElsewhere(t *testing.T) *elsewhere {
 	resetSeenSignatures(t)
 	w.s.localOwnerSecret = testOwnerSecret
 	return moveTheKeyElsewhere(t, w.s, map[string]string{})
-}
-
-// moveTheKeyElsewhere makes s's key unreadable here, as it is where the device
-// that holds it is another one, and returns the key that device holds.
-func moveTheKeyElsewhere(t *testing.T, s *CoreServer, earlier map[string]string) *elsewhere {
-	t.Helper()
-	seed, err := s.identitySigningSeed()
-	if err != nil {
-		t.Fatal(err)
-	}
-	owner, _ := s.DataStore.GetIdentity()
-	owner.DerivationIndex += 1000
-	if err := s.DataStore.SaveIdentity(*owner); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.identitySigningSeed(); err == nil {
-		t.Fatal("the key still reads as held here")
-	}
-	return &elsewhere{s: s, seed: seed, earlier: earlier}
 }

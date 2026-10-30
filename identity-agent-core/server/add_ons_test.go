@@ -130,29 +130,6 @@ func (f fixedChains) EntryHash(id string, seq int) (string, error) {
 	return "", errors.New("no such entry")
 }
 
-// everyEntry is a route table as the gate reads it: the core's own entries
-// and those of every add-on registered.
-func everyEntry(core map[string]string, addons func(Addon) map[string]string) map[string]string {
-	out := map[string]string{}
-	for k, v := range core {
-		out[k] = v
-	}
-	for _, a := range registeredAddons() {
-		for k, v := range addons(a) {
-			out[k] = v
-		}
-	}
-	return out
-}
-
-func everyPublicRoute() map[string]string {
-	return everyEntry(publicRoutes, func(a Addon) map[string]string { return a.PublicRoutes })
-}
-
 func everyScopedRoute() map[string]string {
 	return everyEntry(scopedRoutes, func(a Addon) map[string]string { return a.ScopedRoutes })
-}
-
-func everySessionForbidden() map[string]string {
-	return everyEntry(sessionForbidden, func(a Addon) map[string]string { return a.SessionForbidden })
 }
