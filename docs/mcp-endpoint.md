@@ -7,11 +7,18 @@ one endpoint speaking the Model Context Protocol (MCP):
 POST <agent base URL>/api/mcp
 ```
 
-Locally that is `http://127.0.0.1:5050/api/mcp` (desktop) or
-`http://127.0.0.1:8642/api/mcp` (mobile embedded core). When the agent has an
-active tunnel, the same endpoint is reachable at
-`https://<your-tunnel-host>/api/mcp` — the public URL is shown by
-`GET /api/endpoint`.
+The endpoint belongs to the AI-agent add-on (`identity-agent-core/aiagents`),
+which needs the sandboxed-apps add-on (`identity-agent-core/sandboxedapps`)
+and includes it. An Identity Agent serves `/api/mcp` only when the app it runs
+in includes that add-on. The core's own programs include no add-on: neither
+the desktop program built from `identity-agent-core` nor the embedded mobile
+core serves it. `GET /api/info` lists the add-ons an Identity Agent includes,
+under `add_ons`; `ai_agents` is this one.
+
+In an app that includes it, the endpoint is reached locally at
+`http://127.0.0.1:5050/api/mcp` on desktop. When the agent has an active
+tunnel, the same endpoint is reachable at `https://<your-tunnel-host>/api/mcp`
+— the public URL is shown by `GET /api/endpoint`.
 
 The transport is standard JSON-RPC 2.0 over HTTP POST, implementing `initialize`,
 `ping`, `tools/list`, and `tools/call` — any MCP-capable client can connect. For

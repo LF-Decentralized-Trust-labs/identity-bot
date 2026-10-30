@@ -26,7 +26,7 @@ import (
 //
 // It is a function an add-on calls, rather than something the server
 // registers when it starts, so that a program that includes no add-on (the
-// phone core, the free desktop app) links none of it, nor the test fixtures
+// phone core, the core's own desktop program) links none of it, nor the test fixtures
 // it hands to the add-ons' tests.
 func AddonHost(s *CoreServer, _ hostlink.Token) any { return hostWrapper{s} }
 

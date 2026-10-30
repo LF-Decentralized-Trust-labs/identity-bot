@@ -4,6 +4,12 @@ A client for the Identity Agent's governed capability endpoint. It handles the
 bearer token and, optionally, **signed-request envelopes** — signing each call so
 the endpoint can prove the caller signed *this* request, on top of the token.
 
+The endpoint, and provisioning the agents that call it, belong to the AI-agent
+add-on (`identity-agent-core/aiagents`). Only an Identity Agent in an app that
+includes that add-on serves them; the core's own desktop program and the
+embedded mobile core do not. `GET /api/info` lists the add-ons included, under
+`add_ons`.
+
 ## Flow
 
 ```go
