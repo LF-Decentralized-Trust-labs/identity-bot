@@ -16,9 +16,8 @@ import (
 // one by importing its package, which registers it with the server
 // (server.RegisterAddon), and the phone core must never come to depend on one.
 //
-// Some add-ons are still linked, because the core consults them directly
-// where it decides who is calling. Each is listed in stillLinked with the
-// reason. The list only shrinks: the test fails if mobilecore depends on an
+// Some add-ons are still linked, because their code still sits in the server
+// package. Each is listed in stillLinked with the reason. The list only shrinks: the test fails if mobilecore depends on an
 // add-on that is not on it, and fails again once one on it is no longer
 // linked, so that it is taken off.
 
@@ -42,13 +41,14 @@ var stillLinked = map[string]string{
 	"githubapp":          aiAgentsInServer,
 	"lending":            aiAgentsInServer,
 	"screenview":         aiAgentsInServer,
-	"sandbox":            "the core makes the sandbox manager, which keeps the activity log the core writes to",
+	"sandbox":            "the server still makes the sandbox manager, which the AI-agent code calls capabilities through",
 	"appcall":            "the sandbox package imports it",
 }
 
 // aiAgentsInServer is why the AI-agent packages are still linked.
 const aiAgentsInServer = "the AI-agent add-on still registers from inside the server package " +
-	"(ai_agents_add_on.go), because the core's authorisation consults it directly"
+	"(ai_agents_add_on.go): the core asks it only through the add-on seam, but its code " +
+	"still uses core internals that are not exported"
 
 func TestThePhoneCoreLinksNoAddOn(t *testing.T) {
 	goBin, err := exec.LookPath("go")
