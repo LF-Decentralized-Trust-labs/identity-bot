@@ -276,10 +276,9 @@ func DefaultConfig() Config {
 		fmt.Sscanf(p, "%d", &port)
 	}
 
+	// A built web app to serve at "/", supplied by whichever application is
+	// built on the core. Unset, the core serves its API and a placeholder page.
 	webDir := os.Getenv("FLUTTER_WEB_DIR")
-	if webDir == "" {
-		webDir = filepath.Join("..", "identity_agent_ui", "build", "web")
-	}
 
 	// Off unless asked for. An agent that needs it sets it in code (the
 	// organisation backend does); the variable exists so a deployment can turn
@@ -1203,7 +1202,9 @@ func (s *CoreServer) buildRouterOf(flutterWebDir string, addons []Addon, extras 
 		absWebDir = flutterWebDir
 	}
 
-	if _, err := os.Stat(absWebDir); err == nil {
+	// An empty directory is checked by name, not by Stat: the absolute form of
+	// "" is the working directory, which exists and must never be served.
+	if _, err := os.Stat(absWebDir); flutterWebDir != "" && err == nil {
 		log.Printf("[identity-agent-core] Serving Flutter web from: %s", absWebDir)
 		fileServer := http.FileServer(http.Dir(absWebDir))
 		// WEB_NO_CACHE=1 opts into a maximally-aggressive dev/dogfood cache
@@ -1291,8 +1292,8 @@ func (s *CoreServer) buildRouterOf(flutterWebDir string, addons []Addon, extras 
 <html><head><title>Identity Agent</title>
 <style>body{background:#0A1628;color:#F0F4F8;font-family:monospace;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;}
 .c{text-align:center;}.t{color:#00E5A0;font-size:14px;margin-top:12px;}</style></head>
-<body><div class="c"><h1>IDENTITY AGENT CORE</h1><p style="color:#8B9DC3;">Go Core is running. Flutter web build not yet available.</p>
-<p class="t">Run the Start Frontend workflow to build Flutter web.</p></div></body></html>`)
+<body><div class="c"><h1>IDENTITY AGENT CORE</h1><p style="color:#8B9DC3;">Go Core is running. No web app is configured.</p>
+<p class="t">Set FLUTTER_WEB_DIR to a built web app to serve it here.</p></div></body></html>`)
 		})
 	}
 
