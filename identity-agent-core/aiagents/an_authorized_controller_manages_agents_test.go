@@ -18,7 +18,7 @@ import (
 // controller-reachability tests next door.)
 
 func TestProvisionAgentNoLongerOwnerGatedInHandler(t *testing.T) {
-	s := helpers.NewAuthTestServer(t)
+	s := fixtures.NewAuthTestServer(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/mcp/agents",
 		strings.NewReader(`{"name":"x","capabilities":["infra.zone.list"]}`))
 	rec := httptest.NewRecorder()

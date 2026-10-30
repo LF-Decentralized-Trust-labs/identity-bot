@@ -106,9 +106,9 @@ func (w *screenWorld) asApp(t *testing.T, method, path, body string, score int) 
 	}
 	var req *http.Request
 	if score == 0 {
-		req = helpers.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, method, path, body, w.ctlSeed, "", time.Time{})
+		req = fixtures.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, method, path, body, w.ctlSeed, "", time.Time{})
 	} else {
-		req = helpers.AsThatMachineScored(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, method, path, body, w.ctlSeed,
+		req = fixtures.AsThatMachineScored(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, method, path, body, w.ctlSeed,
 			authprovider.LevelHigh, time.Now().Add(-time.Minute), score)
 	}
 	rec := httptest.NewRecorder()
@@ -318,9 +318,9 @@ func TestABrowserSessionCannotTakeControl(t *testing.T) {
 	w := newScreenWorld(t)
 	eventually(t, "the screen was never offered", func() bool { return w.hasScreen(t, w.a.ID) })
 	const secret = "the-browser-keeps-this"
-	token := helpers.SignInABrowser(t, w.s, secret)
+	token := fixtures.SignInABrowser(t, w.s, secret)
 	asBrowser := func(method, path, body string) (int, map[string]any) {
-		req := helpers.Remote(method, path, body)
+		req := fixtures.Remote(method, path, body)
 		req.Header.Set("Authorization", "Bearer "+token)
 		rec := httptest.NewRecorder()
 		hostOf(w.s).Router().ServeHTTP(rec, req)
@@ -473,11 +473,11 @@ func TestTakingControlTwiceAtOnceIsRecordedOnce(t *testing.T) {
 // who also holds a browser session is the owner, as the gate admitted them.
 func TestTheRecordNamesWhoTheGateAdmitted(t *testing.T) {
 	w := newScreenWorld(t)
-	helpers.WithOwnerSecret(w.s, helpers.TestOwnerSecret())
+	fixtures.WithOwnerSecret(w.s, fixtures.TestOwnerSecret())
 	eventually(t, "the screen was never offered", func() bool { return w.hasScreen(t, w.a.ID) })
 	const secret = "the-browser-keeps-this"
-	token := helpers.SignInABrowser(t, w.s, secret)
-	req := helpers.Local("POST", "/api/mcp/agents/"+w.a.ID+"/screen", `{}`)
+	token := fixtures.SignInABrowser(t, w.s, secret)
+	req := fixtures.Local("POST", "/api/mcp/agents/"+w.a.ID+"/screen", `{}`)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	hostOf(w.s).Router().ServeHTTP(rec, req)

@@ -210,8 +210,8 @@ func TestABodyOfAnOlderIdentityAgentRunsAsBefore(t *testing.T) {
 		helpers.DenyAuthorization(rw, "a route nobody classified")
 	})
 	older.NotFound(current.ServeHTTP)
-	helpers.SetRouter(w.s, older)
-	t.Cleanup(func() { helpers.SetRouter(w.s, current) })
+	fixtures.SetRouter(w.s, older)
+	t.Cleanup(func() { fixtures.SetRouter(w.s, current) })
 	if _, err := w.hostA.Borrow(context.Background()); !errors.Is(err, agenthost.ErrIdentityAgentLendsNoSignIns) {
 		t.Fatalf("an older Identity Agent: %v", err)
 	}

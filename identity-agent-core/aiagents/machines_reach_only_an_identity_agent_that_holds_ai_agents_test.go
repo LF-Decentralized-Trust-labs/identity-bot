@@ -11,7 +11,7 @@ import (
 // person uses to make the first AI agent are not affected.
 func TestMachinesReachOnlyAnIdentityAgentThatHoldsAIAgents(t *testing.T) {
 	s, agentID := bodyWorld(t)
-	helpers.RebuildRouter(s)
+	fixtures.RebuildRouter(s)
 
 	answer := func(method, path string) (int, string) {
 		rec := httptest.NewRecorder()
@@ -28,7 +28,7 @@ func TestMachinesReachOnlyAnIdentityAgentThatHoldsAIAgents(t *testing.T) {
 	// Every route a body calls is declared public, so the declarations are the
 	// list: a body route added later is covered without editing this test.
 	var bodyRoutes [][2]string
-	for key := range helpers.EveryPublicRoute() {
+	for key := range fixtures.EveryPublicRoute() {
 		method, path, _ := strings.Cut(key, " ")
 		if strings.HasPrefix(path, bodyRoutePrefix) {
 			path = strings.NewReplacer("{rid}", "x", "{cid}", "x").Replace(path)

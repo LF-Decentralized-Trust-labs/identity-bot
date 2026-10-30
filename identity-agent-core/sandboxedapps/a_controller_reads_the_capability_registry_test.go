@@ -1,11 +1,15 @@
 package sandboxedapps
 
 import (
+	"identity-agent-core/internal/addonhost"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+// fixtures are the worlds the core's tests build, for these.
+var fixtures = addonhost.TestFixtures()
 
 // An authorized controller does the application's work (ADR-044), so reading
 // the capability registry no longer re-checks the owner inside the handler: the
@@ -15,7 +19,7 @@ import (
 // trusts at invoke time, stays owner-only.
 
 func TestCapabilityRegistryListNoLongerOwnerGatedInHandler(t *testing.T) {
-	s := helpers.NewAuthTestServer(t)
+	s := fixtures.NewAuthTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/capability-registry", nil)
 	rec := httptest.NewRecorder()
 
@@ -28,7 +32,7 @@ func TestCapabilityRegistryListNoLongerOwnerGatedInHandler(t *testing.T) {
 }
 
 func TestCapabilityPackImportStaysOwnerOnly(t *testing.T) {
-	s := helpers.NewAuthTestServer(t)
+	s := fixtures.NewAuthTestServer(t)
 	// A request that is not the owner: not from this machine, not sealed by the
 	// owner's identity, not owner-signed. isOwner is false, so import must refuse it.
 	req := httptest.NewRequest(http.MethodPost, "/api/capability-registry/packs",

@@ -5,7 +5,11 @@ import (
 	"testing"
 
 	"identity-agent-core/agenthost"
+	"identity-agent-core/internal/addonhost"
 )
+
+// fixtures are the worlds the core's tests build, for these.
+var fixtures = addonhost.TestFixtures()
 
 // TestMain lets this test program stand in for agent-host when a body's brain
 // runs through `agent-host brain-home`, which names the program running.

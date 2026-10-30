@@ -54,7 +54,7 @@ func withNotesApp(t *testing.T, s *server.CoreServer) *notesApp {
 	if err := os.WriteFile(filepath.Join(manifests, "notes.json"), b, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{Log: hostOf(s).LogForTest(t, s.DataDir), Vault: hostOf(s).VaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: manifests})
+	m, err := sandbox.NewManager(sandbox.ManagerConfig{Log: fixtures.LogForTest(s, t, s.DataDir), Vault: fixtures.VaultForTest(s, s.DataDir), DataDir: s.DataDir, ManifestsDir: manifests})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func anAIAgentHolding(t *testing.T, s *server.CoreServer, caps ...string) string
 }
 
 func invoke(capability, body, token string) *http.Request {
-	r := helpers.Remote("POST", "/api/capabilities/"+capability+"/invoke", body)
+	r := fixtures.Remote("POST", "/api/capabilities/"+capability+"/invoke", body)
 	if token != "" {
 		r.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -157,9 +157,9 @@ func TestAnAppIsToldWhichAIAgentCalled(t *testing.T) {
 func TestARemoteOwnerCanInvokeACapability(t *testing.T) {
 	s := newGrantTestServer(t)
 	app := withNotesApp(t, s)
-	seed, ownerAID := helpers.SealTestOwner(t, s)
+	seed, ownerAID := fixtures.SealTestOwner(t, s)
 
-	req := helpers.Signed(t, "POST", "/api/capabilities/notes.write/invoke", `{"task":"n-1"}`, seed, time.Now())
+	req := fixtures.Signed(t, "POST", "/api/capabilities/notes.write/invoke", `{"task":"n-1"}`, seed, time.Now())
 	w := httptest.NewRecorder()
 	hostOf(s).BuildRouter("").ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -187,7 +187,7 @@ func TestTheDisplayProxyNeverForwardsACapabilityCall(t *testing.T) {
 		"/apps/notes/v1/capability/",
 		"/apps/notes/v1%2Fcapability%2Fnotes.write",
 	} {
-		req := helpers.Remote("POST", path, `{"task":"n-1"}`)
+		req := fixtures.Remote("POST", path, `{"task":"n-1"}`)
 		req.Header.Set("Authorization", "Bearer "+tok)
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
@@ -213,7 +213,7 @@ func TestTheDisplayProxyStripsWhatOnlyTheIdentityAgentReads(t *testing.T) {
 	app := withNotesApp(t, s)
 	tok := anAIAgentHolding(t, s, "notes.read")
 
-	req := helpers.Remote("GET", "/apps/notes/page", "")
+	req := fixtures.Remote("GET", "/apps/notes/page", "")
 	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set(appcall.HeaderKind, appcall.KindOwner)
 	req.Header.Set(appcall.HeaderMAC, "forged")
@@ -249,7 +249,7 @@ func TestTheDisplayProxyLeavesTheAppsOwnLogin(t *testing.T) {
 	s := newGrantTestServer(t)
 	app := withNotesApp(t, s)
 
-	req := helpers.Local("GET", "/apps/notes/page", "")
+	req := fixtures.Local("GET", "/apps/notes/page", "")
 	req.Header.Set("Authorization", "Bearer the-apps-own-session")
 	w := httptest.NewRecorder()
 	hostOf(s).BuildRouter("").ServeHTTP(w, req)
@@ -271,9 +271,9 @@ func TestTheDisplayProxyLeavesTheAppsOwnLogin(t *testing.T) {
 func TestTheDisplayProxyStripsASessionHoweverItIsWritten(t *testing.T) {
 	s := newGrantTestServer(t)
 	app := withNotesApp(t, s)
-	tok := helpers.SignInABrowser(t, s, "the browser's secret")
+	tok := fixtures.SignInABrowser(t, s, "the browser's secret")
 
-	req := helpers.Local("GET", "/apps/notes/page", "")
+	req := fixtures.Local("GET", "/apps/notes/page", "")
 	req.Header.Set("Authorization", "bearer   "+tok)
 	req.Header.Set("X_IA_Call_Kind", "owner")
 	w := httptest.NewRecorder()
@@ -310,7 +310,7 @@ func TestOnlyTheOwnerReadsConversationsThroughTheDisplayProxy(t *testing.T) {
 	r := hostOf(s).BuildRouter("")
 
 	for _, path := range []string{"/apps/notes/api/v1/chats", "/apps/notes/api/v1/chats/c1", "/apps/notes/api/v1//chats"} {
-		req := helpers.Remote("GET", path, "")
+		req := fixtures.Remote("GET", path, "")
 		req.Header.Set("Authorization", "Bearer "+tok)
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
@@ -320,19 +320,19 @@ func TestOnlyTheOwnerReadsConversationsThroughTheDisplayProxy(t *testing.T) {
 	}
 
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, helpers.Local("GET", "/apps/notes/api/v1/chats", ""))
+	r.ServeHTTP(w, fixtures.Local("GET", "/apps/notes/api/v1/chats", ""))
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "private") {
 		t.Fatalf("the owner could not read their conversations: %d %s", w.Code, w.Body.String())
 	}
-	machine, mseed := helpers.AnAuthorisedMachine(t, s, server.GradeEnrolled)
+	machine, mseed := fixtures.AnAuthorisedMachine(t, s, server.GradeEnrolled)
 	w = httptest.NewRecorder()
-	r.ServeHTTP(w, helpers.AsThatMachine(t, machine, "GET", "/apps/notes/api/v1/chats", "", mseed, "", time.Time{}))
+	r.ServeHTTP(w, fixtures.AsThatMachine(t, machine, "GET", "/apps/notes/api/v1/chats", "", mseed, "", time.Time{}))
 	if w.Code != http.StatusOK {
 		t.Fatalf("a machine acting for the owner could not read their conversations: %d %s", w.Code, w.Body.String())
 	}
 	// The owner sealed while authorising the machine.
 	w = httptest.NewRecorder()
-	r.ServeHTTP(w, helpers.Signed(t, "GET", "/apps/notes/api/v1/chats/c1", "", helpers.TestOwnerSeed(), time.Now()))
+	r.ServeHTTP(w, fixtures.Signed(t, "GET", "/apps/notes/api/v1/chats/c1", "", fixtures.TestOwnerSeed(), time.Now()))
 	if w.Code != http.StatusOK {
 		t.Fatalf("the owner, signing remotely, could not read a conversation: %d %s", w.Code, w.Body.String())
 	}

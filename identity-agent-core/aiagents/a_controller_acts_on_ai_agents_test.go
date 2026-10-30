@@ -23,7 +23,7 @@ func TestAControllerCreatesAnAIAgentWithNothingVouchedInAProductionBuild(t *test
 	}
 	w := newTalkWorld(t)
 	body := `{"name":"Clerk","capabilities":["` + capabilityMessageAgent + `"]}`
-	req := helpers.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "POST", "/api/mcp/agents",
+	req := fixtures.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "POST", "/api/mcp/agents",
 		body, w.ctlSeed, "", time.Time{})
 	rec := httptest.NewRecorder()
 	hostOf(w.s).Router().ServeHTTP(rec, req)
@@ -41,7 +41,7 @@ func TestWhatAControllerMakesIsRecordedAgainstIt(t *testing.T) {
 	me := hostOf(w.s).ThisIdentityAgentsIdentifier()
 	send := func(method, path, body string) *httptest.ResponseRecorder {
 		t.Helper()
-		req := helpers.AsThatMachineTo(t, me, w.ctlAID, method, path, body, w.ctlSeed, "", time.Time{})
+		req := fixtures.AsThatMachineTo(t, me, w.ctlAID, method, path, body, w.ctlSeed, "", time.Time{})
 		rec := httptest.NewRecorder()
 		hostOf(w.s).Router().ServeHTTP(rec, req)
 		return rec
@@ -124,7 +124,7 @@ func TestEveryActionClosedToASessionWasDecidedForAControllerToo(t *testing.T) {
 		"GET /api/recovery/sessions":      "the owner is told a recovery of their identity is running",
 		"GET /api/recovery/sessions/{id}": "the owner is told about a recovery of their identity",
 	}
-	for route := range helpers.EverySessionForbidden() {
+	for route := range fixtures.EverySessionForbidden() {
 		_, closed := helpers.ControllerOwnerOnly()[route]
 		_, open := deliberatelyOpen[route]
 		switch {
@@ -136,7 +136,7 @@ func TestEveryActionClosedToASessionWasDecidedForAControllerToo(t *testing.T) {
 		}
 	}
 	for route := range deliberatelyOpen {
-		if _, ok := helpers.EverySessionForbidden()[route]; !ok {
+		if _, ok := fixtures.EverySessionForbidden()[route]; !ok {
 			t.Errorf("%s is named as deliberately open but is no longer closed to a session, "+
 				"so this entry decides nothing", route)
 		}

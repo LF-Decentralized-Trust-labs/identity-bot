@@ -152,7 +152,7 @@ func call(t *testing.T, h http.HandlerFunc, r *http.Request) (int, map[string]an
 // machine to become its body.
 func bodyWorld(t *testing.T) (*server.CoreServer, string) {
 	t.Helper()
-	s, agent := helpers.GrantWorld(t)
+	s, agent := fixtures.GrantWorld(t)
 	if err := hostOf(s).InitAssetHandler(); err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func bodyWorld(t *testing.T) (*server.CoreServer, string) {
 	if _, err := hostOf(s).IssueCapabilityGrant(agent, coretypes.Authority{}); err != nil {
 		t.Fatal(err)
 	}
-	mgr, err := sandbox.NewManager(sandbox.ManagerConfig{Log: hostOf(s).LogForTest(t, s.DataDir), Vault: hostOf(s).VaultForTest(s.DataDir), DataDir: s.DataDir})
+	mgr, err := sandbox.NewManager(sandbox.ManagerConfig{Log: fixtures.LogForTest(s, t, s.DataDir), Vault: fixtures.VaultForTest(s, s.DataDir), DataDir: s.DataDir})
 	if err != nil {
 		t.Fatal(err)
 	}

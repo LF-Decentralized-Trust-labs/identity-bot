@@ -43,9 +43,9 @@ func newTalkWorld(t *testing.T, caps ...string) *talkWorld {
 		caps = []string{capabilityMessageAgent}
 	}
 	w := &talkWorld{}
-	w.s, w.srv, w.ctlAID, w.ctlSeed = helpers.AControllerWorld(t)
+	w.s, w.srv, w.ctlAID, w.ctlSeed = fixtures.AControllerWorld(t)
 	s := w.s
-	mgr, err := sandbox.NewManager(sandbox.ManagerConfig{Log: hostOf(s).LogForTest(t, s.DataDir), Vault: hostOf(s).VaultForTest(s.DataDir), DataDir: s.DataDir})
+	mgr, err := sandbox.NewManager(sandbox.ManagerConfig{Log: fixtures.LogForTest(s, t, s.DataDir), Vault: fixtures.VaultForTest(s, s.DataDir), DataDir: s.DataDir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func (w *talkWorld) personSays(t *testing.T, a *asset.Asset, conv, text string) 
 func (w *talkWorld) personSends(t *testing.T, a *asset.Asset, body string) (int, map[string]any) {
 	t.Helper()
 	path := "/api/mcp/agents/" + a.ID + "/conversations"
-	req := helpers.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "POST", path, body, w.ctlSeed, "", time.Time{})
+	req := fixtures.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "POST", path, body, w.ctlSeed, "", time.Time{})
 	rec := httptest.NewRecorder()
 	hostOf(w.s).Router().ServeHTTP(rec, req)
 	var out map[string]any
@@ -244,7 +244,7 @@ func TestTwoAIAgentsTalkThroughTheIdentityAgent(t *testing.T) {
 			t.Fatalf("entry %d does not carry its body's grade, stamped by the Identity Agent: %q", e.Seq, e.Record.BodyGrade)
 		}
 	}
-	if p := entries[0].Record.Person; p == nil || p.AID != helpers.TalkSigner() || p.Standing != "signer" {
+	if p := entries[0].Record.Person; p == nil || p.AID != fixtures.TalkSigner() || p.Standing != "signer" {
 		t.Fatalf("the conversation does not name the person who opened it: %+v", p)
 	}
 	if !strings.Contains(entries[6].Body, `"architecture"`) {
@@ -343,7 +343,7 @@ func TestAnUnsealedMessageIsRefused(t *testing.T) {
 // refusal recorded.
 func TestOnlyAPersonTheOrganisationCanProveOpensAConversation(t *testing.T) {
 	w := newTalkWorld(t)
-	if _, _, err := hostOf(w.s).AssetHandler().Store.SetEmployeeStatus(helpers.TalkSigner(), "revoked", ""); err != nil {
+	if _, _, err := hostOf(w.s).AssetHandler().Store.SetEmployeeStatus(fixtures.TalkSigner(), "revoked", ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(filepath.Join(w.s.DataDir, helpers.OwnerAuthorityFile())); err != nil {
@@ -366,15 +366,15 @@ func TestOnlyAPersonTheOrganisationCanProveOpensAConversation(t *testing.T) {
 // agents can no longer ask in their name.
 func TestTheOwnerTheOrganisationNamesMayAsk(t *testing.T) {
 	w := newTalkWorld(t)
-	if _, _, err := hostOf(w.s).AssetHandler().Store.SetEmployeeStatus(helpers.TalkSigner(), "revoked", ""); err != nil {
+	if _, _, err := hostOf(w.s).AssetHandler().Store.SetEmployeeStatus(fixtures.TalkSigner(), "revoked", ""); err != nil {
 		t.Fatal(err)
 	}
 	conv, _ := w.openedWith(t)
 	entries := w.read(t, conv)
-	if p := entries[0].Record.Person; p == nil || p.AID != helpers.TalkSigner() || p.Standing != "owner" {
+	if p := entries[0].Record.Person; p == nil || p.AID != fixtures.TalkSigner() || p.Standing != "owner" {
 		t.Fatalf("the conversation was not opened by the owner: %+v", entries[0].Record.Person)
 	}
-	if g := mustGrant(t, w); g.Signer != helpers.TalkSigner() {
+	if g := mustGrant(t, w); g.Signer != fixtures.TalkSigner() {
 		t.Fatalf("the paired app was not tied to the owner: %q", g.Signer)
 	}
 
@@ -484,7 +484,7 @@ func TestAChainOfAsksStopsAtItsDepth(t *testing.T) {
 // Where the words are kept is reported, with the choice of keeping them
 // elsewhere listed and not yet available.
 func TestTheRecordSaysWhereItsWordsAreKept(t *testing.T) {
-	s := helpers.AgentWithDerivedIdentity(t)
+	s := fixtures.AgentWithDerivedIdentity(t)
 	rec := httptest.NewRecorder()
 	of(s).handleConversationRecordSetting(rec, httptest.NewRequest("GET", "/", nil))
 	var out struct {
@@ -512,7 +512,7 @@ func TestABodyMovesOnlyToItsOwnIdentityAgent(t *testing.T) {
 	}
 
 	other, _ := bodyWorld(t)
-	helpers.RebuildRouter(other)
+	fixtures.RebuildRouter(other)
 	elsewhere := httptest.NewServer(hostOf(other).Router())
 	defer elsewhere.Close()
 	if _, err := w.hostA.Move(elsewhere.URL); err == nil {
@@ -593,7 +593,7 @@ func TestAnAskStopsWhenTheOpenerNoLongerStands(t *testing.T) {
 	w := newTalkWorld(t)
 	w.openedWith(t)
 	d := sayTo(t, w.hostA)
-	if _, _, err := hostOf(w.s).AssetHandler().Store.SetEmployeeStatus(helpers.TalkSigner(), "revoked", ""); err != nil {
+	if _, _, err := hostOf(w.s).AssetHandler().Store.SetEmployeeStatus(fixtures.TalkSigner(), "revoked", ""); err != nil {
 		t.Fatal(err)
 	}
 	_, err := w.hostA.Say(context.Background(), agentmessage.KindAsk, d.Record.Conversation, w.b.PairwiseAID,
@@ -710,20 +710,20 @@ func mustStore(t *testing.T, w *talkWorld) (*conversation.Store, error) {
 func TestAMachinePairedWithOneSignerBelongsToThem(t *testing.T) {
 	w := newTalkWorld(t)
 	body := `{"controller_aid":"` + w.ctlAID + `","public_key":"` + mustGrant(t, w).PublicKey + `","label":"again","grade":"enrolled"}`
-	_ = helpers.RevokeControllerRow(w.s, w.ctlAID)
+	_ = fixtures.RevokeControllerRow(w.s, w.ctlAID)
 	rec := httptest.NewRecorder()
 	hostOf(w.s).HandleGrantController(rec, httptest.NewRequest("POST", "/", strings.NewReader(body)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("granting: %d %s", rec.Code, rec.Body.String())
 	}
-	if g := mustGrant(t, w); g.Signer != helpers.TalkSigner() {
+	if g := mustGrant(t, w); g.Signer != fixtures.TalkSigner() {
 		t.Fatalf("the machine was not bound to the only signer when paired: %q", g.Signer)
 	}
 }
 
 func mustGrant(t *testing.T, w *talkWorld) server.ControllerGrant {
 	t.Helper()
-	g, live, err := helpers.LiveControllerRow(w.s, w.ctlAID, time.Now())
+	g, live, err := fixtures.LiveControllerRow(w.s, w.ctlAID, time.Now())
 	if err != nil || !live {
 		t.Fatalf("no live grant: %v", err)
 	}

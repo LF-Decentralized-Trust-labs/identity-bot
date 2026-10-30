@@ -25,8 +25,8 @@ import (
 // request the controller signed, which verifies against its key.
 func authorisedBy(t *testing.T, w *talkWorld, said string) {
 	t.Helper()
-	ctl, _, _ := helpers.ControllerRow(w.s, w.ctlAID)
-	cred := helpers.AcdcOf(t, w.s, said)
+	ctl, _, _ := fixtures.ControllerRow(w.s, w.ctlAID)
+	cred := fixtures.AcdcOf(t, w.s, said)
 	edges, _ := cred["e"].(map[string]interface{})
 	by, _ := edges["authorised_by"].(map[string]interface{})
 	if by["n"] != ctl.CredentialSAID || by["s"] != schemas.ControllerGrant.Schema.SAID {
@@ -48,7 +48,7 @@ func authorisedBy(t *testing.T, w *talkWorld, said string) {
 // they asked from, and the request as that machine signed it.
 func TestAnAIAgentsGrantNamesWhoAskedForIt(t *testing.T) {
 	w := newTalkWorld(t)
-	req := helpers.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
+	req := fixtures.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
 		`{"capabilities":["`+capabilityMessageAgent+`"]}`, w.ctlSeed, authprovider.LevelVerified, time.Now())
 	rec := httptest.NewRecorder()
 	hostOf(w.s).Router().ServeHTTP(rec, req)
@@ -76,7 +76,7 @@ func TestABodyCredentialNamesWhoApprovedIt(t *testing.T) {
 		for i := 0; i < 200; i++ {
 			for _, b := range of(w.s).bodies().ForAgent(w.b.ID) {
 				if b.State == agentbody.StatePending && b.Host == host {
-					req := helpers.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "POST", "/api/mcp/agents/"+w.b.ID+"/bodies/"+b.ID+"/approve",
+					req := fixtures.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "POST", "/api/mcp/agents/"+w.b.ID+"/bodies/"+b.ID+"/approve",
 						"", w.ctlSeed, authprovider.LevelVerified, time.Now())
 					rec := httptest.NewRecorder()
 					hostOf(w.s).Router().ServeHTTP(rec, req)
@@ -110,7 +110,7 @@ func TestAConversationNamesTheGrantItWasOpenedUnder(t *testing.T) {
 	w := newTalkWorld(t)
 	conv, _ := w.openedWith(t)
 	entries := w.read(t, conv)
-	ctl, _, _ := helpers.ControllerRow(w.s, w.ctlAID)
+	ctl, _, _ := fixtures.ControllerRow(w.s, w.ctlAID)
 	proof := entries[0].Record.ControllerProof
 	if proof == nil || ctl.CredentialSAID == "" || proof.ControllerGrant != ctl.CredentialSAID {
 		t.Fatalf("the opening does not name the grant it was opened under: %+v", proof)
@@ -124,8 +124,8 @@ func TestAConversationNamesTheGrantItWasOpenedUnder(t *testing.T) {
 // credential rests on it.
 func TestAnOwnersSignedRequestIsKeptAsTheAuthority(t *testing.T) {
 	w := newTalkWorld(t)
-	helpers.ResetSeenSignatures(t)
-	req := helpers.SignedFor(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities", `{"capabilities":["`+capabilityMessageAgent+`"]}`, helpers.TestOwnerSeed(), time.Now())
+	fixtures.ResetSeenSignatures(t)
+	req := fixtures.SignedFor(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities", `{"capabilities":["`+capabilityMessageAgent+`"]}`, fixtures.TestOwnerSeed(), time.Now())
 	rec := httptest.NewRecorder()
 	hostOf(w.s).Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -135,7 +135,7 @@ func TestAnOwnersSignedRequestIsKeptAsTheAuthority(t *testing.T) {
 		GrantSAID string `json:"grant_said"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
-	attrs, _ := helpers.AcdcOf(t, w.s, out.GrantSAID)["a"].(map[string]interface{})
+	attrs, _ := fixtures.AcdcOf(t, w.s, out.GrantSAID)["a"].(map[string]interface{})
 	r, _ := attrs["request"].(map[string]interface{})
 	if r["kind"] != "owner" || r["body"] == "" {
 		t.Fatalf("the owner's request is not kept as the authority: %v", attrs["request"])
@@ -146,7 +146,7 @@ func TestAnOwnersSignedRequestIsKeptAsTheAuthority(t *testing.T) {
 func TestACredentialThatDoesNotRestOnItsRequestIsNotIssued(t *testing.T) {
 	w := newTalkWorld(t)
 	before := 0
-	for _, c := range helpers.CredentialsOf(t, w.s, w.a.PairwiseAID) {
+	for _, c := range fixtures.CredentialsOf(t, w.s, w.a.PairwiseAID) {
 		if helpers.IsUsableStatus(c.Status) {
 			before++
 		}
@@ -159,7 +159,7 @@ func TestACredentialThatDoesNotRestOnItsRequestIsNotIssued(t *testing.T) {
 		t.Fatal("a grant resting on a request nobody signed was issued")
 	}
 	after := 0
-	for _, c := range helpers.CredentialsOf(t, w.s, w.a.PairwiseAID) {
+	for _, c := range fixtures.CredentialsOf(t, w.s, w.a.PairwiseAID) {
 		if helpers.IsUsableStatus(c.Status) {
 			after++
 		}
@@ -173,7 +173,7 @@ func TestACredentialThatDoesNotRestOnItsRequestIsNotIssued(t *testing.T) {
 // Identity Agent began naming who authorised them is not honoured; one issued
 // before is.
 func TestAFirstVersionCredentialIssuedAfterwardsIsNotHonoured(t *testing.T) {
-	s, agent := helpers.GrantWorld(t)
+	s, agent := fixtures.GrantWorld(t)
 	early, err := hostOf(s).IssueAssetCredential(schemas.AIAgentGrantV1, agent.PairwiseAID, agent.DelegatorAID,
 		map[string]interface{}{"name": "early", "capabilities": []string{}}, "", coretypes.Authority{})
 	if err != nil {
@@ -209,24 +209,24 @@ func TestAMachineWithoutAGrantInForceAuthorisesNothing(t *testing.T) {
 	put := func() int {
 		// Each request its own, so none is refused as one already used.
 		asked++
-		req := helpers.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
+		req := fixtures.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
 			`{"capabilities":["`+capabilityMessageAgent+`"]}`, w.ctlSeed, authprovider.LevelVerified,
 			time.Now().Add(-time.Duration(asked)*time.Second))
 		rec := httptest.NewRecorder()
 		hostOf(w.s).Router().ServeHTTP(rec, req)
 		return rec.Code
 	}
-	ctl, _, _ := helpers.ControllerRow(w.s, w.ctlAID)
+	ctl, _, _ := fixtures.ControllerRow(w.s, w.ctlAID)
 	unanchored := ctl
 	unanchored.CredentialSAID = ""
-	helpers.PutControllerRow(w.s, unanchored)
+	fixtures.PutControllerRow(w.s, unanchored)
 	if code := put(); code != http.StatusForbidden {
 		t.Fatalf("a machine paired before grants was answered %d", code)
 	}
-	if got, _, _ := helpers.ControllerRow(w.s, w.ctlAID); got.CredentialSAID != "" {
+	if got, _, _ := fixtures.ControllerRow(w.s, w.ctlAID); got.CredentialSAID != "" {
 		t.Fatal("the machine was given a grant by asking")
 	}
-	helpers.PutControllerRow(w.s, ctl)
+	fixtures.PutControllerRow(w.s, ctl)
 	if err := hostOf(w.s).WithdrawControllerGrant(ctl.CredentialSAID); err != nil {
 		t.Fatal(err)
 	}
@@ -239,10 +239,10 @@ func TestAMachineWithoutAGrantInForceAuthorisesNothing(t *testing.T) {
 // be revoked under it.
 func TestAGrantIsHeldWhileACredentialIsIssuedOnIt(t *testing.T) {
 	w := newTalkWorld(t)
-	req := helpers.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
+	req := fixtures.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
 		`{"capabilities":[]}`, w.ctlSeed, authprovider.LevelVerified, time.Now())
-	grant, _, _ := helpers.ControllerRow(w.s, w.ctlAID)
-	req = helpers.WithController(req, grant)
+	grant, _, _ := fixtures.ControllerRow(w.s, w.ctlAID)
+	req = fixtures.WithController(req, grant)
 	_, held, err := hostOf(w.s).AuthorityOf(req)
 	if err != nil {
 		t.Fatal(err)
@@ -265,7 +265,7 @@ func TestAPublishedGrantCarriesNoPrivateConfiguration(t *testing.T) {
 	w := newTalkWorld(t)
 	body := `{"name":"Ledger clerk","capabilities":["` + capabilityMessageAgent + `"],"system_prompt":"SECRET-PROMPT",` +
 		`"brain":{"kind":"local","model":"m","endpoint":"http://10.0.0.9:1234","credential_ref":"ai-agent-brain:vault-key-7"},"nonce":"n-1"}`
-	req := helpers.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "POST", "/api/mcp/agents", body, w.ctlSeed, authprovider.LevelVerified, time.Now())
+	req := fixtures.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "POST", "/api/mcp/agents", body, w.ctlSeed, authprovider.LevelVerified, time.Now())
 	rec := httptest.NewRecorder()
 	hostOf(w.s).Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK && rec.Code != http.StatusCreated {
@@ -278,7 +278,7 @@ func TestAPublishedGrantCarriesNoPrivateConfiguration(t *testing.T) {
 		t.Fatalf("no grant was issued: %s", rec.Body.String())
 	}
 	pub := httptest.NewRecorder()
-	hostOf(w.s).Router().ServeHTTP(pub, helpers.Remote("GET", "/public/credential/"+said, ""))
+	hostOf(w.s).Router().ServeHTTP(pub, fixtures.Remote("GET", "/public/credential/"+said, ""))
 	served := pub.Body.String()
 	if c, _ := w.s.DataStore.GetCredential(said); c != nil {
 		raw, _ := base64.StdEncoding.DecodeString(c.AcdcJson)
@@ -289,7 +289,7 @@ func TestAPublishedGrantCarriesNoPrivateConfiguration(t *testing.T) {
 			t.Fatalf("the grant gives away %q", private)
 		}
 	}
-	attrs, _ := helpers.AcdcOf(t, w.s, said)["a"].(map[string]interface{})
+	attrs, _ := fixtures.AcdcOf(t, w.s, said)["a"].(map[string]interface{})
 	asked, _ := attrs["request"].(map[string]interface{})["asked"].(map[string]interface{})
 	if asked["nonce"] != "n-1" || asked["name"] != "Ledger clerk" {
 		t.Fatalf("the grant does not keep what was asked for: %v", asked)
@@ -302,22 +302,22 @@ func TestAPublishedGrantCarriesNoPrivateConfiguration(t *testing.T) {
 // One request authorises one credential.
 func TestARequestAuthorisesOneCredential(t *testing.T) {
 	w := newTalkWorld(t)
-	helpers.ResetSeenSignatures(t)
+	fixtures.ResetSeenSignatures(t)
 	body := `{"capabilities":["` + capabilityMessageAgent + `"]}`
 	stamp := time.Now().UTC().Format(time.RFC3339)
 	path := "/api/mcp/agents/" + w.a.ID + "/capabilities"
 	ia := hostOf(w.s).ThisIdentityAgentsIdentifier()
-	sig, _ := server.SignOwnerRequest(ia, "PUT", path, stamp, []byte(body), helpers.TestOwnerSeed())
+	sig, _ := server.SignOwnerRequest(ia, "PUT", path, stamp, []byte(body), fixtures.TestOwnerSeed())
 	by := coretypes.Authority{About: w.a.ID, Request: &coretypes.SignedRequest{Kind: "owner", Signer: "EOWNERTESTAID", Body: body,
 		Signed: helpers.CanonicalOwnerRequest(ia, "PUT", path, stamp, []byte(body)), Signature: sig}}
 	if _, err := hostOf(w.s).IssueCapabilityGrant(w.a, by); err != nil {
 		t.Fatalf("the first credential on the request: %v", err)
 	}
-	held := len(helpers.CredentialsOf(t, w.s, w.a.PairwiseAID))
+	held := len(fixtures.CredentialsOf(t, w.s, w.a.PairwiseAID))
 	if _, err := hostOf(w.s).IssueCapabilityGrant(w.a, by); err == nil {
 		t.Fatal("one request authorised a second credential")
 	}
-	if now := len(helpers.CredentialsOf(t, w.s, w.a.PairwiseAID)); now != held {
+	if now := len(fixtures.CredentialsOf(t, w.s, w.a.PairwiseAID)); now != held {
 		t.Fatal("a second credential was issued on the request before being refused")
 	}
 }
@@ -326,12 +326,12 @@ func TestARequestAuthorisesOneCredential(t *testing.T) {
 // created, and no token is minted for it.
 func TestAnAIAgentWhoseGrantCannotBeIssuedIsNotCreated(t *testing.T) {
 	w := newTalkWorld(t)
-	helpers.ResetSeenSignatures(t)
+	fixtures.ResetSeenSignatures(t)
 	// The owner's request, its digest already spent on another credential, so
 	// the grant it asks for is refused while everything before it succeeds.
 	body := `{"name":"Ungranted","capabilities":["` + capabilityMessageAgent + `"]}`
 	at := time.Now()
-	req := helpers.SignedFor(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), "POST", "/api/mcp/agents", body, helpers.TestOwnerSeed(), at)
+	req := fixtures.SignedFor(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), "POST", "/api/mcp/agents", body, fixtures.TestOwnerSeed(), at)
 	spent := helpers.CanonicalOwnerRequest(hostOf(w.s).ThisIdentityAgentsIdentifier(), "POST", "/api/mcp/agents", at.UTC().Format(time.RFC3339), []byte(body))
 	if err := w.s.DataStore.KeepCredentialRequest("Eanother-credential", iacrypto.Blake3QB64Must([]byte(spent)), body); err != nil {
 		t.Fatal(err)
@@ -355,7 +355,7 @@ func TestAnAIAgentWhoseGrantCannotBeIssuedIsNotCreated(t *testing.T) {
 // mints no token.
 func TestABadlySignedRequestCreatesNoAIAgent(t *testing.T) {
 	w := newTalkWorld(t)
-	req := helpers.Local("POST", "/api/mcp/agents", `{"name":"Unwanted","capabilities":[]}`)
+	req := fixtures.Local("POST", "/api/mcp/agents", `{"name":"Unwanted","capabilities":[]}`)
 	req.Header.Set(helpers.HeaderOwnerSig(), "0Bjunk")
 	req.Header.Set(helpers.HeaderOwnerTimestamp(), time.Now().UTC().Format(time.RFC3339))
 	rec := httptest.NewRecorder()
@@ -375,7 +375,7 @@ func TestABadlySignedRequestCreatesNoAIAgent(t *testing.T) {
 
 // Where grants can be issued, an AI agent's token with no grant may do nothing.
 func TestAnAIAgentWithNoGrantMayDoNothing(t *testing.T) {
-	s, agent := helpers.GrantWorld(t)
+	s, agent := fixtures.GrantWorld(t)
 	cc := permission.CallerContext{Scopes: []string{"system.info.read"}}
 	of(s).applyGrantScopes(mcpToken{AgentAID: agent.PairwiseAID, DelegatorAID: agent.DelegatorAID}, &cc)
 	if len(cc.Scopes) != 0 {
@@ -387,23 +387,23 @@ func TestAnAIAgentWithNoGrantMayDoNothing(t *testing.T) {
 // grant is re-issued from it.
 func TestAGrantedMachinesRowEditedSinceIsRefused(t *testing.T) {
 	w := newTalkWorld(t)
-	helpers.ResetSeenSignatures(t)
-	ctl, _, _ := helpers.ControllerRow(w.s, w.ctlAID)
+	fixtures.ResetSeenSignatures(t)
+	ctl, _, _ := fixtures.ControllerRow(w.s, w.ctlAID)
 	edited := ctl
 	edited.Label = "renamed in the file"
-	helpers.PutControllerRow(w.s, edited)
-	req := helpers.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
+	fixtures.PutControllerRow(w.s, edited)
+	req := fixtures.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
 		`{"capabilities":["`+capabilityMessageAgent+`"]}`, w.ctlSeed, authprovider.LevelVerified, time.Now())
 	rec := httptest.NewRecorder()
 	hostOf(w.s).Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("a machine whose row was changed since its grant was answered %d", rec.Code)
 	}
-	helpers.PutControllerRow(w.s, ctl)
+	fixtures.PutControllerRow(w.s, ctl)
 	edited = ctl
 	edited.Grade = server.GradeScoped
 	edited.Signer = ""
-	helpers.PutControllerRow(w.s, edited)
+	fixtures.PutControllerRow(w.s, edited)
 	if _, err := hostOf(w.s).BindSigner(ctl.ControllerAID, "Esigner"); err == nil {
 		t.Fatal("a grant was re-issued from a row changed since")
 	}
@@ -414,27 +414,27 @@ func TestAGrantedMachinesRowEditedSinceIsRefused(t *testing.T) {
 // start, not on the tick, not by asking, and it waits for approval.
 func TestARestoredMachineRowIsNeverGrantedWithoutTheOwner(t *testing.T) {
 	w := newTalkWorld(t)
-	helpers.ResetSeenSignatures(t)
-	ctl, _, _ := helpers.ControllerRow(w.s, w.ctlAID)
+	fixtures.ResetSeenSignatures(t)
+	ctl, _, _ := fixtures.ControllerRow(w.s, w.ctlAID)
 	if err := hostOf(w.s).RevokeController(w.ctlAID); err != nil {
 		t.Fatal(err)
 	}
 	restored := ctl
 	restored.CredentialSAID = ""
-	helpers.PutControllerRow(w.s, restored)
-	helpers.EverythingRuns(w.s)
-	req := helpers.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
+	fixtures.PutControllerRow(w.s, restored)
+	fixtures.EverythingRuns(w.s)
+	req := fixtures.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
 		`{"capabilities":["`+capabilityMessageAgent+`"]}`, w.ctlSeed, authprovider.LevelVerified, time.Now())
 	rec := httptest.NewRecorder()
 	hostOf(w.s).Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("a restored machine row was answered %d", rec.Code)
 	}
-	helpers.EverythingRuns(w.s)
-	if got, _, _ := helpers.ControllerRow(w.s, w.ctlAID); got.CredentialSAID != "" || got.CredentialPending {
+	fixtures.EverythingRuns(w.s)
+	if got, _, _ := fixtures.ControllerRow(w.s, w.ctlAID); got.CredentialSAID != "" || got.CredentialPending {
 		t.Fatal("a restored machine row was given a grant")
 	}
-	if m, _ := helpers.Awaiting(t, w.s); m[w.ctlAID] != "the owner's approval" {
+	if m, _ := fixtures.Awaiting(t, w.s); m[w.ctlAID] != "the owner's approval" {
 		t.Fatalf("the restored machine is not listed as awaiting the owner: %v", m)
 	}
 }
@@ -444,7 +444,7 @@ func TestARestoredMachineRowIsNeverGrantedWithoutTheOwner(t *testing.T) {
 func TestAnAIAgentWithNoGrantIsNeverGrantedFromItsFiles(t *testing.T) {
 	w := newTalkWorld(t)
 	rec := httptest.NewRecorder()
-	hostOf(w.s).Router().ServeHTTP(rec, helpers.Local("POST", "/api/mcp/agents", `{"name":"Earlier","capabilities":["`+capabilityMessageAgent+`"]}`))
+	hostOf(w.s).Router().ServeHTTP(rec, fixtures.Local("POST", "/api/mcp/agents", `{"name":"Earlier","capabilities":["`+capabilityMessageAgent+`"]}`))
 	var made map[string]interface{}
 	json.Unmarshal(rec.Body.Bytes(), &made)
 	id, _ := made["asset_id"].(string)
@@ -461,9 +461,9 @@ func TestAnAIAgentWithNoGrantIsNeverGrantedFromItsFiles(t *testing.T) {
 	}
 	of(w.s).saveMCPTokens(toks)
 	mcpTokensMu.Unlock()
-	held := len(helpers.CredentialsOf(t, w.s, a.PairwiseAID))
-	helpers.EverythingRuns(w.s)
-	if now := len(helpers.CredentialsOf(t, w.s, a.PairwiseAID)); now != held {
+	held := len(fixtures.CredentialsOf(t, w.s, a.PairwiseAID))
+	fixtures.EverythingRuns(w.s)
+	if now := len(fixtures.CredentialsOf(t, w.s, a.PairwiseAID)); now != held {
 		t.Fatal("a grant was issued from what the files say")
 	}
 	for _, tok := range of(w.s).loadMCPTokens() {
@@ -476,7 +476,7 @@ func TestAnAIAgentWithNoGrantIsNeverGrantedFromItsFiles(t *testing.T) {
 			t.Fatalf("the AI agent may do %v without a grant", cc.Scopes)
 		}
 	}
-	if _, ag := helpers.Awaiting(t, w.s); ag[id] != "the owner's approval" {
+	if _, ag := fixtures.Awaiting(t, w.s); ag[id] != "the owner's approval" {
 		t.Fatalf("the AI agent is not listed as awaiting the owner: %v", ag)
 	}
 }
@@ -484,9 +484,9 @@ func TestAnAIAgentWithNoGrantIsNeverGrantedFromItsFiles(t *testing.T) {
 // The owner approves an earlier AI agent by setting its capabilities, signed.
 func TestTheOwnerApprovesAnEarlierAIAgent(t *testing.T) {
 	w := newTalkWorld(t)
-	helpers.ResetSeenSignatures(t)
+	fixtures.ResetSeenSignatures(t)
 	rec := httptest.NewRecorder()
-	hostOf(w.s).Router().ServeHTTP(rec, helpers.Local("POST", "/api/mcp/agents", `{"name":"Earlier","capabilities":["`+capabilityMessageAgent+`"]}`))
+	hostOf(w.s).Router().ServeHTTP(rec, fixtures.Local("POST", "/api/mcp/agents", `{"name":"Earlier","capabilities":["`+capabilityMessageAgent+`"]}`))
 	var made map[string]interface{}
 	json.Unmarshal(rec.Body.Bytes(), &made)
 	id, _ := made["asset_id"].(string)
@@ -501,7 +501,7 @@ func TestTheOwnerApprovesAnEarlierAIAgent(t *testing.T) {
 	mcpTokensMu.Unlock()
 	body := `{"capabilities":["` + capabilityMessageAgent + `"]}`
 	rec = httptest.NewRecorder()
-	hostOf(w.s).Router().ServeHTTP(rec, helpers.SignedFor(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), "PUT", "/api/mcp/agents/"+id+"/capabilities", body, helpers.TestOwnerSeed(), time.Now()))
+	hostOf(w.s).Router().ServeHTTP(rec, fixtures.SignedFor(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), "PUT", "/api/mcp/agents/"+id+"/capabilities", body, fixtures.TestOwnerSeed(), time.Now()))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("the owner's approval: %d %s", rec.Code, rec.Body.String())
 	}
@@ -515,7 +515,7 @@ func TestTheOwnerApprovesAnEarlierAIAgent(t *testing.T) {
 			t.Fatal("the approved AI agent may still do nothing")
 		}
 	}
-	if _, ag := helpers.Awaiting(t, w.s); ag[id] != "" {
+	if _, ag := fixtures.Awaiting(t, w.s); ag[id] != "" {
 		t.Fatal("the approved AI agent is still listed as awaiting")
 	}
 }
@@ -525,12 +525,12 @@ func TestTheOwnerApprovesAnEarlierAIAgent(t *testing.T) {
 func TestAnAIAgentWithNoTokenAndNoGrantAwaitsTheOwner(t *testing.T) {
 	w := newTalkWorld(t)
 	// An AI agent from before grants has none at all.
-	helpers.RecordDB(t, w.s).Exec(`DELETE FROM credentials WHERE holder_aid = ?`, w.a.PairwiseAID)
+	fixtures.RecordDB(t, w.s).Exec(`DELETE FROM credentials WHERE holder_aid = ?`, w.a.PairwiseAID)
 	cc, ok := of(w.s).ResolveAgentCaller(w.a.PairwiseAID)
 	if !ok || len(cc.Scopes) != 0 || !strings.Contains(cc.NoScopesBecause, "awaiting the owner's approval") {
 		t.Fatalf("an AI agent with no grant resolves as %+v", cc)
 	}
-	if _, ag := helpers.Awaiting(t, w.s); ag[w.a.ID] != "the owner's approval" {
+	if _, ag := fixtures.Awaiting(t, w.s); ag[w.a.ID] != "the owner's approval" {
 		t.Fatalf("the AI agent is not listed as waiting: %v", ag)
 	}
 	tok := mcpToken{AgentAID: w.a.PairwiseAID, AssetID: w.a.ID}
@@ -547,21 +547,21 @@ func TestAMachinesFileEditedSignerOrEndIsRefused(t *testing.T) {
 	for _, edit := range []string{"signer", "end"} {
 		t.Run(edit, func(t *testing.T) {
 			w := newTalkWorld(t)
-			helpers.ResetSeenSignatures(t)
-			ctl, _, _ := helpers.ControllerRow(w.s, w.ctlAID)
+			fixtures.ResetSeenSignatures(t)
+			ctl, _, _ := fixtures.ControllerRow(w.s, w.ctlAID)
 			edited := ctl
 			if edit == "signer" {
 				edited.Signer = "EImpostorSigner"
 			} else {
 				edited.ExpiresAt = time.Now().UTC().Add(24 * 365 * time.Hour)
 			}
-			helpers.PutControllerRow(w.s, edited)
+			fixtures.PutControllerRow(w.s, edited)
 			if err := hostOf(w.s).RowIsItsGrant(edited); err == nil {
 				t.Fatal("the edited row was taken for its grant")
 			}
-			req := helpers.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
+			req := fixtures.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
 				`{"capabilities":["`+capabilityMessageAgent+`"]}`, w.ctlSeed, authprovider.LevelVerified, time.Now())
-			if _, _, err := hostOf(w.s).ThePersonAsking(helpers.WithController(req, edited)); err == nil || !strings.Contains(err.Error(), "no longer says") {
+			if _, _, err := hostOf(w.s).ThePersonAsking(fixtures.WithController(req, edited)); err == nil || !strings.Contains(err.Error(), "no longer says") {
 				t.Fatalf("a person was attributed from an edited row: %v", err)
 			}
 		})
@@ -572,19 +572,19 @@ func TestAMachinesFileEditedSignerOrEndIsRefused(t *testing.T) {
 // where the key is here.
 func TestAPendingMarkIsNotBelievedWhereTheKeyIsHere(t *testing.T) {
 	w := newTalkWorld(t)
-	helpers.ResetSeenSignatures(t)
-	ctl, _, _ := helpers.ControllerRow(w.s, w.ctlAID)
+	fixtures.ResetSeenSignatures(t)
+	ctl, _, _ := fixtures.ControllerRow(w.s, w.ctlAID)
 	marked := ctl
 	marked.CredentialSAID, marked.CredentialPending = "", true
-	helpers.PutControllerRow(w.s, marked)
-	req := helpers.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
+	fixtures.PutControllerRow(w.s, marked)
+	req := fixtures.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities",
 		`{"capabilities":["`+capabilityMessageAgent+`"]}`, w.ctlSeed, authprovider.LevelVerified, time.Now())
 	rec := httptest.NewRecorder()
 	hostOf(w.s).Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("a machine marked as waiting, where the key is here, was answered %d", rec.Code)
 	}
-	if m, _ := helpers.Awaiting(t, w.s); m[w.ctlAID] != "the owner's approval" {
+	if m, _ := fixtures.Awaiting(t, w.s); m[w.ctlAID] != "the owner's approval" {
 		t.Fatalf("a machine marked as waiting, where the key is here, is listed as %q", m[w.ctlAID])
 	}
 }
@@ -594,12 +594,12 @@ func TestAPendingMarkIsNotBelievedWhereTheKeyIsHere(t *testing.T) {
 func TestACredentialThatFailsItsCheckWritesNothing(t *testing.T) {
 	w := newTalkWorld(t)
 	rec := httptest.NewRecorder()
-	hostOf(w.s).Router().ServeHTTP(rec, helpers.Local("POST", "/api/mcp/agents", `{"name":"First","capabilities":["`+capabilityMessageAgent+`"]}`))
+	hostOf(w.s).Router().ServeHTTP(rec, fixtures.Local("POST", "/api/mcp/agents", `{"name":"First","capabilities":["`+capabilityMessageAgent+`"]}`))
 	if rec.Code >= 400 {
 		t.Fatalf("provisioning: %d %s", rec.Code, rec.Body.String())
 	}
 	before, _ := w.s.DataStore.GetCredentials()
-	req := helpers.Local("POST", "/api/mcp/agents", `{"name":"Unwanted","capabilities":["`+capabilityMessageAgent+`"]}`)
+	req := fixtures.Local("POST", "/api/mcp/agents", `{"name":"Unwanted","capabilities":["`+capabilityMessageAgent+`"]}`)
 	req.Header.Set(helpers.HeaderOwnerSig(), "0Bjunk")
 	req.Header.Set(helpers.HeaderOwnerTimestamp(), time.Now().UTC().Format(time.RFC3339))
 	rec = httptest.NewRecorder()
@@ -617,7 +617,7 @@ func TestACredentialThatFailsItsCheckWritesNothing(t *testing.T) {
 // awaits approval.
 func TestAnAIAgentWithALapsedGrantIsToldItExpired(t *testing.T) {
 	w := newTalkWorld(t)
-	held := helpers.CredentialsOf(t, w.s, w.a.PairwiseAID)
+	held := fixtures.CredentialsOf(t, w.s, w.a.PairwiseAID)
 	if len(held) == 0 {
 		t.Fatal("the AI agent holds no grant")
 	}
@@ -639,7 +639,7 @@ func TestAnAIAgentWithALapsedGrantIsToldItExpired(t *testing.T) {
 // A browser session can issue no authority over an AI agent.
 func TestASessionIssuesNoAuthority(t *testing.T) {
 	for _, route := range []string{"POST /api/mcp/agents", "PUT /api/mcp/agents/{id}/capabilities", "POST /api/mcp/agents/{id}/bodies/{bid}/approve"} {
-		if _, refused := helpers.EverySessionForbidden()[route]; !refused {
+		if _, refused := fixtures.EverySessionForbidden()[route]; !refused {
 			t.Fatalf("a browser session may reach %s", route)
 		}
 	}

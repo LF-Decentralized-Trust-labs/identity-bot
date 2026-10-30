@@ -24,7 +24,7 @@ import (
 func signInWorld(t *testing.T) *talkWorld {
 	t.Helper()
 	w := newTalkWorld(t)
-	helpers.WithOwnerSecret(w.s, helpers.TestOwnerSecret())
+	fixtures.WithOwnerSecret(w.s, fixtures.TestOwnerSecret())
 	key := bytes.Repeat([]byte{7}, 32)
 	w.s.Vault.SetKeyProvider(func() ([]byte, error) { return key, nil })
 	return w
@@ -33,7 +33,7 @@ func signInWorld(t *testing.T) *talkWorld {
 func (w *talkWorld) asOwner(t *testing.T, method, path, body string) (int, map[string]any, string) {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	hostOf(w.s).Router().ServeHTTP(rec, helpers.Local(method, path, body))
+	hostOf(w.s).Router().ServeHTTP(rec, fixtures.Local(method, path, body))
 	var out map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
 	return rec.Code, out, rec.Body.String()
@@ -153,7 +153,7 @@ func TestASignedRequestToCreateAnAIAgentCarriesNoKey(t *testing.T) {
 		`"brain":{"kind":"api_key","provider":"anthropic"},"brain_sign_in":{"kind":"api_key","provider":"anthropic","secret":"` + key + `"}`,
 	} {
 		body := `{"name":"Signed","capabilities":["` + capabilityMessageAgent + `"],` + brain + `}`
-		req := helpers.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "POST", "/api/mcp/agents", body, w.ctlSeed, authprovider.LevelVerified, time.Now())
+		req := fixtures.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "POST", "/api/mcp/agents", body, w.ctlSeed, authprovider.LevelVerified, time.Now())
 		rec := httptest.NewRecorder()
 		hostOf(w.s).Router().ServeHTTP(rec, req)
 		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "brain-sign-in") {
@@ -166,7 +166,7 @@ func TestASignedRequestToCreateAnAIAgentCarriesNoKey(t *testing.T) {
 		}
 	}
 	// The same machine signs the brain in on its own.
-	req := helpers.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/brain-sign-in",
+	req := fixtures.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/brain-sign-in",
 		`{"kind":"api_key","provider":"anthropic","secret":"`+key+`"}`, w.ctlSeed, authprovider.LevelVerified, time.Now())
 	rec := httptest.NewRecorder()
 	hostOf(w.s).Router().ServeHTTP(rec, req)
@@ -186,7 +186,7 @@ func TestABrowserSessionCannotChangeABrainsSignIn(t *testing.T) {
 		"POST /api/mcp/brain-sign-in/models", "POST /api/mcp/agents/{id}/brain-sign-in/models",
 		"PUT /api/mcp/agents/{id}/brain",
 	} {
-		if _, ok := helpers.EverySessionForbidden()[route]; !ok {
+		if _, ok := fixtures.EverySessionForbidden()[route]; !ok {
 			t.Errorf("%s is open to a browser session", route)
 		}
 	}
@@ -196,7 +196,7 @@ func TestABrowserSessionCannotChangeABrainsSignIn(t *testing.T) {
 // nothing, rather than storing the brain without its key.
 func TestALockedVaultChangesNothing(t *testing.T) {
 	w := newTalkWorld(t)
-	helpers.WithOwnerSecret(w.s, helpers.TestOwnerSecret())
+	fixtures.WithOwnerSecret(w.s, fixtures.TestOwnerSecret())
 	before, _ := hostOf(w.s).AssetHandler().Store.GetAsset(w.a.ID)
 	code, _, raw := w.asOwner(t, "PATCH", "/api/mcp/agents/"+w.a.ID,
 		`{"role":"changed","brain":{"kind":"remote","provider":"anthropic","credential_ref":"sk-ant-api03-LOCKED"}}`)

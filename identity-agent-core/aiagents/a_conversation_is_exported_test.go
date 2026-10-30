@@ -40,7 +40,7 @@ import (
 func exportWorld(t *testing.T) *talkWorld {
 	t.Helper()
 	w := newTalkWorld(t)
-	w.s.ActivityLog.SetEventSigner(helpers.LogEventSigner(w.s))
+	w.s.ActivityLog.SetEventSigner(fixtures.LogEventSigner(w.s))
 	return w
 }
 
@@ -77,7 +77,7 @@ func (w *talkWorld) talkEndToEnd(t *testing.T) string {
 // export asks for the bundle as the person's paired app does.
 func (w *talkWorld) export(t *testing.T, conv string) (int, []byte) {
 	t.Helper()
-	req := helpers.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "GET", "/api/mcp/conversations/"+conv+"/export", "", w.ctlSeed, "", time.Time{})
+	req := fixtures.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "GET", "/api/mcp/conversations/"+conv+"/export", "", w.ctlSeed, "", time.Time{})
 	rec := httptest.NewRecorder()
 	hostOf(w.s).Router().ServeHTTP(rec, req)
 	return rec.Code, rec.Body.Bytes()
@@ -153,7 +153,7 @@ func TestAnExportedConversationVerifiesOffline(t *testing.T) {
 			t.Fatalf("message %d: holds %v, anchored %v", m.Seq, m.Holds, m.Anchored)
 		}
 	}
-	if m := r.Messages[0]; m.Sender != "controller" || m.Person != helpers.TalkSigner() {
+	if m := r.Messages[0]; m.Sender != "controller" || m.Person != fixtures.TalkSigner() {
 		t.Fatalf("the opening is not shown as the signer's, from their app: %+v", m)
 	}
 	if m := r.Messages[2]; m.Sender != "body" || m.Grade != agentbody.GradeHardwareAsserted {
@@ -394,9 +394,9 @@ func aSecondMachine(t *testing.T, s *server.CoreServer) (server.ControllerGrant,
 	seed := make([]byte, ed25519.SeedSize)
 	copy(seed, []byte("a second machine, granted then removed"))
 	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
-	g, err := helpers.GrantControllerRow(s, server.ControllerGrant{
+	g, err := fixtures.GrantControllerRow(s, server.ControllerGrant{
 		ControllerAID: iacrypto.NonTransferableAIDQB64(pub), PublicKey: iacrypto.VerkeyQB64(pub),
-		Label: "the old laptop", Grade: server.GradeEnrolled, Signer: helpers.TalkSigner(),
+		Label: "the old laptop", Grade: server.GradeEnrolled, Signer: fixtures.TalkSigner(),
 	}, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
@@ -443,8 +443,8 @@ func (w *talkWorld) openSigned(t *testing.T, g server.ControllerGrant, seed []by
 	if err != nil {
 		t.Fatal(err)
 	}
-	opener := agentmessage.Person(helpers.TalkSigner())
-	person := agentmessage.PersonRef{AID: helpers.TalkSigner(), Standing: "signer", Name: "Alex"}
+	opener := agentmessage.Person(fixtures.TalkSigner())
+	person := agentmessage.PersonRef{AID: fixtures.TalkSigner(), Standing: "signer", Name: "Alex"}
 	store, _ := of(w.s).conversations()
 	id := conversation.NewID("m_")
 	e, err := store.Append(context.Background(), conv, &conversation.Conversation{OpenedBy: opener, FirstAgent: w.a.PairwiseAID},

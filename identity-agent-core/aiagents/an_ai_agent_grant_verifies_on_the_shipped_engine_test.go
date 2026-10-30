@@ -16,7 +16,7 @@ import (
 // opening the registry, issuing the grant — is signed, so the whole log verifies
 // to somebody who has only the log.
 func TestTheOrganisationsOwnEventsAreSigned(t *testing.T) {
-	s, agent := helpers.GrantWorld(t)
+	s, agent := fixtures.GrantWorld(t)
 	if _, err := hostOf(s).IssueCapabilityGrant(agent, coretypes.Authority{}); err != nil {
 		t.Fatal(err)
 	}
@@ -45,14 +45,14 @@ func scopesFor(t *testing.T, s *server.CoreServer, a *asset.Asset, grantSAID, to
 		Name: a.DisplayName, Scopes: []string{"infra.zone.list", "system.info.read"},
 		AgentAID: a.PairwiseAID, DelegatorAID: a.DelegatorAID, GrantSAID: grantSAID,
 	})
-	return helpers.ResolveWithTokens(s, reqWithBearer(token)).Scopes
+	return fixtures.ResolveWithTokens(s, reqWithBearer(token)).Scopes
 }
 
 // The defect this replaces: verification required check names only a retired
 // engine reported, so on the engine that ships every agent holding a grant was
 // denied. Issued and verified for real, the grant now decides the agent's scopes.
 func TestAnAIAgentGrantIsIssuedAndVerifiedOnTheShippedEngine(t *testing.T) {
-	s, agent := helpers.GrantWorld(t)
+	s, agent := fixtures.GrantWorld(t)
 	grant, err := hostOf(s).IssueCapabilityGrant(agent, coretypes.Authority{})
 	if err != nil {
 		t.Fatalf("issuing the grant: %v", err)
@@ -71,7 +71,7 @@ func TestAnAIAgentGrantIsIssuedAndVerifiedOnTheShippedEngine(t *testing.T) {
 // Narrowing a ceiling withdraws the wider grant it replaces, so the old one
 // cannot be found and used beside the new.
 func TestReissuingAGrantRevokesTheOneItReplaces(t *testing.T) {
-	s, agent := helpers.GrantWorld(t)
+	s, agent := fixtures.GrantWorld(t)
 	first, err := hostOf(s).IssueCapabilityGrant(agent, coretypes.Authority{})
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +101,7 @@ func TestReissuingAGrantRevokesTheOneItReplaces(t *testing.T) {
 
 // A grant past its valid_until admits nothing.
 func TestALapsedGrantAdmitsNothing(t *testing.T) {
-	s, agent := helpers.GrantWorld(t)
+	s, agent := fixtures.GrantWorld(t)
 	lapsed := mustParseTime(t, "2020-01-01T00:00:00Z")
 	agent.GrantValidUntil = &lapsed
 	grant, err := hostOf(s).IssueCapabilityGrant(agent, coretypes.Authority{})
@@ -148,7 +148,7 @@ func mustParseTime(t *testing.T, s string) time.Time {
 // An event written later that cannot be verified does not withdraw it — and
 // before this, one unsigned event anywhere in the log denied every AI agent.
 func TestALaterUnsignedEventDoesNotWithdrawAGrant(t *testing.T) {
-	s, agent := helpers.GrantWorld(t)
+	s, agent := fixtures.GrantWorld(t)
 	grant, err := hostOf(s).IssueCapabilityGrant(agent, coretypes.Authority{})
 	if err != nil {
 		t.Fatal(err)
@@ -167,7 +167,7 @@ func TestALaterUnsignedEventDoesNotWithdrawAGrant(t *testing.T) {
 
 // A grant counts only from the identity that delegated the AI agent.
 func TestAGrantFromAnotherIssuerAdmitsNothing(t *testing.T) {
-	s, agent := helpers.GrantWorld(t)
+	s, agent := fixtures.GrantWorld(t)
 	grant, err := hostOf(s).IssueCapabilityGrant(agent, coretypes.Authority{})
 	if err != nil {
 		t.Fatal(err)

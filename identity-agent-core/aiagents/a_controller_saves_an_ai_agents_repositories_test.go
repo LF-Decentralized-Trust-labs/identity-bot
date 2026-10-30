@@ -38,12 +38,12 @@ func TestAControllerChangesWhichRepositoriesAnAIAgentMayUse(t *testing.T) {
 	// the owner's does: connecting the App, which asks GitHub what it is, and
 	// the list of repositories the App can reach.
 	app, _ := json.Marshal(map[string]any{"app_id": 42, "installation_id": 7, "private_key": g.pem})
-	code, out, raw := send(helpers.AsThatMachineTo(t, ida, w.ctlAID, "PUT", "/api/github", string(app), w.ctlSeed,
+	code, out, raw := send(fixtures.AsThatMachineTo(t, ida, w.ctlAID, "PUT", "/api/github", string(app), w.ctlSeed,
 		authprovider.LevelVerified, time.Now()))
 	if code != http.StatusOK || out["account"] != "acme" {
 		t.Fatalf("a controller connecting the GitHub App: %d %s", code, raw)
 	}
-	code, out, raw = send(helpers.AsThatMachineTo(t, ida, w.ctlAID, "GET", "/api/github/repositories", "", w.ctlSeed, "", time.Time{}))
+	code, out, raw = send(fixtures.AsThatMachineTo(t, ida, w.ctlAID, "GET", "/api/github/repositories", "", w.ctlSeed, "", time.Time{}))
 	if code != http.StatusOK {
 		t.Fatalf("a controller listing the App's repositories: %d %s", code, raw)
 	}
@@ -54,7 +54,7 @@ func TestAControllerChangesWhichRepositoriesAnAIAgentMayUse(t *testing.T) {
 	// The controller grants one repository to write and one to read, at the
 	// default score, as the org app does.
 	body := `{"repositories":[{"repository":"acme/docs","access":"write"},{"repository":"Acme/Site","access":"read"}]}`
-	code, out, raw = send(helpers.AsThatMachineTo(t, ida, w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/github", body,
+	code, out, raw = send(fixtures.AsThatMachineTo(t, ida, w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/github", body,
 		w.ctlSeed, authprovider.LevelVerified, time.Now()))
 	if code != http.StatusOK {
 		t.Fatalf("a controller changing an AI agent's repositories: %d %s", code, raw)
@@ -79,16 +79,16 @@ func TestAControllerChangesWhichRepositoriesAnAIAgentMayUse(t *testing.T) {
 	}
 
 	// Taking them away again is a request too, and rests on the same check.
-	code, _, raw = send(helpers.AsThatMachineTo(t, ida, w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/github", `{"repositories":[]}`,
+	code, _, raw = send(fixtures.AsThatMachineTo(t, ida, w.ctlAID, "PUT", "/api/mcp/agents/"+w.a.ID+"/github", `{"repositories":[]}`,
 		w.ctlSeed, authprovider.LevelVerified, time.Now().Add(time.Second)))
 	if code != http.StatusOK {
 		t.Fatalf("a controller removing an AI agent's repositories: %d %s", code, raw)
 	}
 
 	// The owner, signing with the identity's key, is held to the same check.
-	helpers.ResetSeenSignatures(t)
-	code, out, raw = send(helpers.SignedFor(t, ida, "PUT", "/api/mcp/agents/"+w.a.ID+"/github",
-		`{"repositories":[{"repository":"acme/sandbox","access":"read"}]}`, helpers.TestOwnerSeed(), time.Now()))
+	fixtures.ResetSeenSignatures(t)
+	code, out, raw = send(fixtures.SignedFor(t, ida, "PUT", "/api/mcp/agents/"+w.a.ID+"/github",
+		`{"repositories":[{"repository":"acme/sandbox","access":"read"}]}`, fixtures.TestOwnerSeed(), time.Now()))
 	if code != http.StatusOK || out["grant_said"] == "" {
 		t.Fatalf("the owner's signed change of an AI agent's repositories: %d %s", code, raw)
 	}

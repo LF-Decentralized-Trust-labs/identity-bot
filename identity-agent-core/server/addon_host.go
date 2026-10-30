@@ -4,8 +4,6 @@ import (
 	"sync"
 
 	"context"
-	"database/sql"
-	"identity-agent-core/activitylog"
 	"identity-agent-core/asset"
 	"identity-agent-core/authprovider"
 	"identity-agent-core/didcomm"
@@ -14,25 +12,23 @@ import (
 	"identity-agent-core/permission"
 	"identity-agent-core/schemas"
 	"identity-agent-core/store"
-	"identity-agent-core/vault"
 	"net/http"
-	"net/http/httptest"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 )
 
-// The server's side of the handle add-ons built in this module have on it
-// (internal/addonhost). hostWrapper is unexported, and only addonhost asks
-// for it, so nothing outside this module reaches these. Each method calls the
-// server's own; none is a second copy.
-
-func init() {
-	hostlink.Of = func(core any) any {
-		s, _ := core.(*CoreServer)
-		return hostWrapper{s}
-	}
-}
+// AddonHost is the server's side of the handle the add-ons built in this
+// module have on s (internal/addonhost); s may be nil for the helpers that
+// need no server. It asks for a hostlink.Token, which nothing outside this
+// module can name, so only this module reaches it. Each method of what it
+// returns calls the server's own; none is a second copy.
+//
+// It is a function an add-on calls, rather than something the server
+// registers when it starts, so that a program that includes no add-on (the
+// phone core, the free desktop app) links none of it, nor the test fixtures
+// it hands to the add-ons' tests.
+func AddonHost(s *CoreServer, _ hostlink.Token) any { return hostWrapper{s} }
 
 type hostWrapper struct{ s *CoreServer }
 
@@ -152,10 +148,6 @@ func (h hostWrapper) WithdrawControllerGrant(said string) error {
 func (h hostWrapper) WithdrawCredential(rec *store.CredentialRecord) (bool, string, error) {
 	return h.s.withdrawCredential(rec)
 }
-func (h hostWrapper) LogForTest(t coretypes.TB, dir string) *activitylog.Log {
-	return h.s.logForTest(t, dir)
-}
-func (h hostWrapper) VaultForTest(dir string) *vault.CredentialVault { return h.s.vaultForTest(dir) }
 func (hostWrapper) ApplyCallerWhy(r *http.Request, cc *permission.CallerContext) {
 	applyCallerWhy(r, cc)
 }
@@ -225,118 +217,9 @@ func (hostWrapper) WriteJSON(w http.ResponseWriter, v interface{}) { writeJSON(w
 func (hostWrapper) WriteJSONStatus(w http.ResponseWriter, status int, v interface{}) {
 	writeJSONStatus(w, status, v)
 }
-func (hostWrapper) AControllerWorld(t coretypes.TB) (*CoreServer, *httptest.Server, string, []byte) {
-	return aControllerWorld(t)
-}
-func (hostWrapper) AcdcOf(t coretypes.TB, s *CoreServer, said string) map[string]interface{} {
-	return acdcOf(t, s, said)
-}
-func (hostWrapper) AgentWithDerivedIdentity(t coretypes.TB) *CoreServer {
-	return agentWithDerivedIdentity(t)
-}
-func (hostWrapper) AnAuthorisedMachine(t coretypes.TB, s *CoreServer, grade ControllerGrade) (string, []byte) {
-	return anAuthorisedMachine(t, s, grade)
-}
-func (hostWrapper) AnchorAfter(t coretypes.TB, n int) { anchorAfter(t, n) }
-func (hostWrapper) AsThatMachine(t coretypes.TB, aid string, method string, path string, body string, seed []byte, level authprovider.Level, measuredAt time.Time) *http.Request {
-	return asThatMachine(t, aid, method, path, body, seed, level, measuredAt)
-}
-func (hostWrapper) AsThatMachineScored(t coretypes.TB, target string, aid string, method string, path string, body string, seed []byte, level authprovider.Level, measuredAt time.Time, score int) *http.Request {
-	return asThatMachineScored(t, target, aid, method, path, body, seed, level, measuredAt, score)
-}
-func (hostWrapper) AsThatMachineTo(t coretypes.TB, target string, aid string, method string, path string, body string, seed []byte, level authprovider.Level, measuredAt time.Time) *http.Request {
-	return asThatMachineTo(t, target, aid, method, path, body, seed, level, measuredAt)
-}
-func (hostWrapper) Awaiting(t coretypes.TB, s *CoreServer) (map[string]string, map[string]string) {
-	return awaiting(t, s)
-}
-func (hostWrapper) ChainSays(t coretypes.TB, s *CoreServer) map[string]any { return chainSays(t, s) }
-func (hostWrapper) CheckAsTheDevice(t coretypes.TB, s *CoreServer, req store.SigningRequest) (map[string]interface{}, error) {
-	return checkAsTheDevice(t, s, req)
-}
-func (hostWrapper) ControllerRow(s *CoreServer, aid string) (ControllerGrant, bool, error) {
-	return controllerRow(s, aid)
-}
-func (hostWrapper) CredentialsOf(t coretypes.TB, s *CoreServer, holder string) []store.CredentialRecord {
-	return credentialsOf(t, s, holder)
-}
-func (hostWrapper) EveryPublicRoute() map[string]string      { return everyPublicRoute() }
-func (hostWrapper) EverySessionForbidden() map[string]string { return everySessionForbidden() }
-func (hostWrapper) EverythingRuns(s *CoreServer)             { everythingRuns(s) }
-func (hostWrapper) Fulfil(t coretypes.TB, s *CoreServer, req store.SigningRequest, seed []byte) *httptest.ResponseRecorder {
-	return fulfil(t, s, req, seed)
-}
-func (hostWrapper) GrantControllerRow(s *CoreServer, g ControllerGrant, now time.Time) (ControllerGrant, error) {
-	return grantControllerRow(s, g, now)
-}
-func (hostWrapper) GrantFor(n byte, grade ControllerGrade) ControllerGrant { return grantFor(n, grade) }
-func (hostWrapper) GrantWorld(t coretypes.TB) (*CoreServer, *asset.Asset)  { return grantWorld(t) }
-func (hostWrapper) KeyLogVerifies(t coretypes.TB, s *CoreServer)           { keyLogVerifies(t, s) }
-func (hostWrapper) LiveControllerRow(s *CoreServer, aid string, now time.Time) (ControllerGrant, bool, error) {
-	return liveControllerRow(s, aid, now)
-}
-func (hostWrapper) Local(method string, path string, body string) *http.Request {
-	return local(method, path, body)
-}
-func (hostWrapper) LogEventSigner(s *CoreServer) activitylog.EventSigner { return logEventSigner(s) }
-func (hostWrapper) MoveTheKeyAway(t coretypes.TB, s *CoreServer) []byte  { return moveTheKeyAway(t, s) }
-func (hostWrapper) NewAuthTestServer(t coretypes.TB) *CoreServer         { return newAuthTestServer(t) }
-func (hostWrapper) PutControllerRow(s *CoreServer, g ControllerGrant) error {
-	return putControllerRow(s, g)
-}
-func (hostWrapper) RebuildRouter(s *CoreServer)                    { rebuildRouter(s) }
-func (hostWrapper) RecordDB(t coretypes.TB, s *CoreServer) *sql.DB { return recordDB(t, s) }
-func (hostWrapper) RefusedFor(t coretypes.TB, s *CoreServer, n store.Notification, why string) {
-	refusedFor(t, s, n, why)
-}
-func (hostWrapper) Remote(method string, path string, body string) *http.Request {
-	return remote(method, path, body)
-}
-func (hostWrapper) ResetSeenSignatures(t coretypes.TB) { resetSeenSignatures(t) }
-func (hostWrapper) ResolveWithTokens(s *CoreServer, r *http.Request) permission.CallerContext {
-	return resolveWithTokens(s, r)
-}
-func (hostWrapper) RevokeControllerRow(s *CoreServer, aid string) error {
-	return revokeControllerRow(s, aid)
-}
-func (hostWrapper) SealTestOwner(t coretypes.TB, s *CoreServer) ([]byte, string) {
-	return sealTestOwner(t, s)
-}
-func (hostWrapper) SetRouter(s *CoreServer, r chi.Router) { setRouter(s, r) }
-func (hostWrapper) SignInABrowser(t coretypes.TB, s *CoreServer, secret string) string {
-	return signInABrowser(t, s, secret)
-}
-func (hostWrapper) Signed(t coretypes.TB, method string, path string, body string, seed []byte, at time.Time) *http.Request {
-	return signed(t, method, path, body, seed, at)
-}
-func (hostWrapper) SignedFor(t coretypes.TB, target string, method string, path string, body string, seed []byte, at time.Time) *http.Request {
-	return signedFor(t, target, method, path, body, seed, at)
-}
-func (hostWrapper) SigningPair(t coretypes.TB, b byte) ([]byte, string) { return signingPair(t, b) }
-func (hostWrapper) SignsWithSeeds(e interface {
-	SetEventSignature(func(aid string, key string, raw []byte) (string, error))
-}, seeds ...[]byte) {
-	signsWithSeeds(e, seeds...)
-}
-func (hostWrapper) TalkSigner() string                             { return talkSigner }
-func (hostWrapper) TestOwnerSecret() string                        { return testOwnerSecret }
-func (hostWrapper) TestOwnerSeed() []byte                          { return testOwnerSeed() }
-func (hostWrapper) TrustLocalPeer(s *CoreServer, aid string) error { return trustLocalPeer(s, aid) }
-func (hostWrapper) Waiting(t coretypes.TB, s *CoreServer) []store.SigningRequest {
-	return waiting(t, s)
-}
-func (hostWrapper) WithController(r *http.Request, g ControllerGrant) *http.Request {
-	return withController(r, g)
-}
-func (hostWrapper) WithOwnerSecret(s *CoreServer, secret string) *CoreServer {
-	return withOwnerSecret(s, secret)
-}
-func (hostWrapper) WithdrawWith(t coretypes.TB, s *CoreServer, seed []byte) { withdrawWith(t, s, seed) }
-func (hostWrapper) AnchorTick() time.Duration                               { return anchorTick() }
-func (hostWrapper) AnchorAtLeastEvery(t coretypes.TB, d time.Duration)      { anchorAtLeastEvery(t, d) }
-func (h hostWrapper) IsLiveBrowserSession(token string) bool                { return h.s.isLiveBrowserSession(token) }
+func (hostWrapper) AnchorTick() time.Duration                { return anchorTick() }
+func (h hostWrapper) IsLiveBrowserSession(token string) bool { return h.s.isLiveBrowserSession(token) }
 func (h hostWrapper) ResolveBearerToken(r *http.Request, token string, cc permission.CallerContext) (permission.CallerContext, bool) {
 	return h.s.resolveBearerToken(r, token, cc)
 }
-func (hostWrapper) BearerFrom(r *http.Request) string                { return bearerFrom(r) }
-func (hostWrapper) UseAssetHandler(s *CoreServer, ah *asset.Handler) { useAssetHandler(s, ah) }
+func (hostWrapper) BearerFrom(r *http.Request) string { return bearerFrom(r) }

@@ -43,7 +43,7 @@ func approveWhenAsked(t *testing.T, s *server.CoreServer, agentID string, words 
 func TestAnAgentHostEnrolsAgainstARunningIdentityAgent(t *testing.T) {
 	s, agentID := bodyWorld(t)
 	// Sealed requests are replayed through the server's own router, as in production.
-	helpers.RebuildRouter(s)
+	fixtures.RebuildRouter(s)
 	srv := httptest.NewServer(hostOf(s).Router())
 	defer srv.Close()
 	t.Setenv("PUBLIC_URL", srv.URL)
@@ -110,7 +110,7 @@ func enrolmentVia(t *testing.T, s *server.CoreServer, base, agentID string) stri
 func TestAnAgentHostRefusesAnIdentityAgentThatIsNotTheOneNamed(t *testing.T) {
 	s, agentID := bodyWorld(t)
 	// Sealed requests are replayed through the server's own router, as in production.
-	helpers.RebuildRouter(s)
+	fixtures.RebuildRouter(s)
 	srv := httptest.NewServer(hostOf(s).Router())
 	defer srv.Close()
 	good, _ := agentbody.ParseEnrolment(enrolmentVia(t, s, srv.URL, agentID))

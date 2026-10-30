@@ -223,7 +223,7 @@ func TestASignInIsCheckedBeforeItIsKept(t *testing.T) {
 	// A machine the owner authorised checks it the same way: the Identity
 	// Agent's call goes out as it does for the owner.
 	rec := httptest.NewRecorder()
-	hostOf(w.s).Router().ServeHTTP(rec, helpers.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "POST",
+	hostOf(w.s).Router().ServeHTTP(rec, fixtures.AsThatMachineTo(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), w.ctlAID, "POST",
 		"/api/mcp/agents/"+w.a.ID+"/brain-sign-in/test", "", w.ctlSeed, authprovider.LevelVerified, time.Now()))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ok":true`) {
 		t.Fatalf("a controller checking the kept sign-in: %d %s", rec.Code, rec.Body.String())

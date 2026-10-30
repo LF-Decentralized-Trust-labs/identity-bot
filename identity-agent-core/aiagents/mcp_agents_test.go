@@ -12,7 +12,7 @@ import (
 func reqWithBearer(token string) *http.Request {
 	r := httptest.NewRequest(http.MethodPost, "/api/mcp", nil)
 	r.RemoteAddr = "127.0.0.1:5000"
-	r.Header.Set(server.LocalOwnerSecretHeader, helpers.TestOwnerSecret())
+	r.Header.Set(server.LocalOwnerSecretHeader, fixtures.TestOwnerSecret())
 	r.Header.Set("Authorization", "Bearer "+token)
 	return r
 }
@@ -21,7 +21,7 @@ func reqWithBearer(token string) *http.Request {
 // agent's real delegated AID with its lineage to the owner root — not
 // "token:<name>" — so the audit event proves owner -> agent.
 func TestAgentBoundTokenResolvesToDelegatedIdentity(t *testing.T) {
-	s := helpers.WithOwnerSecret(&server.CoreServer{DataDir: t.TempDir()}, helpers.TestOwnerSecret())
+	s := fixtures.WithOwnerSecret(&server.CoreServer{DataDir: t.TempDir()}, fixtures.TestOwnerSecret())
 
 	// Seed a bound token directly (provisioning itself needs the KERI driver;
 	// this isolates the resolver's identity binding).
@@ -41,7 +41,7 @@ func TestAgentBoundTokenResolvesToDelegatedIdentity(t *testing.T) {
 	mcpTokensMu.Unlock()
 
 	req := reqWithBearer(plaintext)
-	cc := helpers.ResolveWithTokens(s, req)
+	cc := fixtures.ResolveWithTokens(s, req)
 
 	if cc.CallerAID != "EAgentDelegatedAID" {
 		t.Fatalf("caller should be the agent's delegated AID, got %q", cc.CallerAID)
@@ -60,7 +60,7 @@ func TestAgentBoundTokenResolvesToDelegatedIdentity(t *testing.T) {
 // A plain (non-agent) token still resolves to token:<name> with no chain —
 // backward compatible.
 func TestPlainTokenUnchanged(t *testing.T) {
-	s := helpers.WithOwnerSecret(&server.CoreServer{DataDir: t.TempDir()}, helpers.TestOwnerSecret())
+	s := fixtures.WithOwnerSecret(&server.CoreServer{DataDir: t.TempDir()}, fixtures.TestOwnerSecret())
 	plaintext := "iamcp_plain"
 	mcpTokensMu.Lock()
 	of(s).saveMCPTokens([]mcpToken{{
@@ -70,7 +70,7 @@ func TestPlainTokenUnchanged(t *testing.T) {
 	}})
 	mcpTokensMu.Unlock()
 
-	cc := helpers.ResolveWithTokens(s, reqWithBearer(plaintext))
+	cc := fixtures.ResolveWithTokens(s, reqWithBearer(plaintext))
 	if cc.CallerAID != "token:ci-token" {
 		t.Fatalf("plain token should resolve to token:<name>, got %q", cc.CallerAID)
 	}

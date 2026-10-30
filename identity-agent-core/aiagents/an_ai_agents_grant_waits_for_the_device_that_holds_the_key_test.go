@@ -32,12 +32,12 @@ type keyHeldElsewhere struct {
 func keyElsewhereWithAIAgents(t *testing.T, earlier ...string) *keyHeldElsewhere {
 	t.Helper()
 	w := newTalkWorld(t)
-	helpers.ResetSeenSignatures(t)
-	helpers.WithOwnerSecret(w.s, helpers.TestOwnerSecret())
+	fixtures.ResetSeenSignatures(t)
+	fixtures.WithOwnerSecret(w.s, fixtures.TestOwnerSecret())
 	made := map[string]string{}
 	for _, name := range earlier {
 		rec := httptest.NewRecorder()
-		hostOf(w.s).Router().ServeHTTP(rec, helpers.Local("POST", "/api/mcp/agents", `{"name":"`+name+`","capabilities":["`+capabilityMessageAgent+`"]}`))
+		hostOf(w.s).Router().ServeHTTP(rec, fixtures.Local("POST", "/api/mcp/agents", `{"name":"`+name+`","capabilities":["`+capabilityMessageAgent+`"]}`))
 		var out map[string]interface{}
 		json.Unmarshal(rec.Body.Bytes(), &out)
 		id, _ := out["asset_id"].(string)
@@ -45,7 +45,7 @@ func keyElsewhereWithAIAgents(t *testing.T, earlier ...string) *keyHeldElsewhere
 			t.Fatalf("provisioning %s: %d %s", name, rec.Code, rec.Body.String())
 		}
 		a, _ := hostOf(w.s).AssetHandler().Store.GetAsset(id)
-		helpers.RecordDB(t, w.s).Exec(`DELETE FROM credentials WHERE holder_aid = ?`, a.PairwiseAID)
+		fixtures.RecordDB(t, w.s).Exec(`DELETE FROM credentials WHERE holder_aid = ?`, a.PairwiseAID)
 		mcpTokensMu.Lock()
 		toks := of(w.s).loadMCPTokens()
 		for i := range toks {
@@ -57,7 +57,7 @@ func keyElsewhereWithAIAgents(t *testing.T, earlier ...string) *keyHeldElsewhere
 		mcpTokensMu.Unlock()
 		made[name] = id
 	}
-	return &keyHeldElsewhere{s: w.s, seed: helpers.MoveTheKeyAway(t, w.s), earlier: made}
+	return &keyHeldElsewhere{s: w.s, seed: fixtures.MoveTheKeyAway(t, w.s), earlier: made}
 }
 
 // An AI agent created where the key is elsewhere may do nothing until the
@@ -81,20 +81,20 @@ func TestAnAIAgentIsGrantedOnceTheDeviceWithTheKeySigns(t *testing.T) {
 	if len(scopes()) != 0 {
 		t.Fatal("an AI agent waiting for its grant may do something")
 	}
-	reqs := helpers.Waiting(t, e.s)
+	reqs := fixtures.Waiting(t, e.s)
 	if len(reqs) != 1 {
 		t.Fatalf("%d grants were asked for", len(reqs))
 	}
-	if shown, err := helpers.CheckAsTheDevice(t, e.s, reqs[0]); err != nil || shown["kind"] != "ai_agent" {
+	if shown, err := fixtures.CheckAsTheDevice(t, e.s, reqs[0]); err != nil || shown["kind"] != "ai_agent" {
 		t.Fatalf("the device's check: %v %v", shown, err)
 	}
-	if rec := helpers.Fulfil(t, e.s, reqs[0], e.seed); rec.Code != http.StatusOK {
+	if rec := fixtures.Fulfil(t, e.s, reqs[0], e.seed); rec.Code != http.StatusOK {
 		t.Fatalf("the device's signature: %d %s", rec.Code, rec.Body.String())
 	}
 	if len(scopes()) == 0 {
 		t.Fatal("the AI agent may still do nothing once its grant is signed")
 	}
-	helpers.KeyLogVerifies(t, e.s)
+	fixtures.KeyLogVerifies(t, e.s)
 }
 
 // At most one grant waits for an AI agent: asking again withdraws the one
@@ -105,15 +105,15 @@ func TestOnlyTheNewestGrantWaitsForAnAIAgent(t *testing.T) {
 	if rec := e.setCapabilities(t, id, capabilityMessageAgent); rec.Code != http.StatusOK {
 		t.Fatalf("approving: %d %s", rec.Code, rec.Body.String())
 	}
-	first := helpers.Waiting(t, e.s)
+	first := fixtures.Waiting(t, e.s)
 	if rec := e.setCapabilities(t, id, capabilityMessageAgent, "system.info.read"); rec.Code != http.StatusOK {
 		t.Fatalf("changing: %d %s", rec.Code, rec.Body.String())
 	}
-	now := helpers.Waiting(t, e.s)
+	now := fixtures.Waiting(t, e.s)
 	if len(first) != 1 || len(now) != 1 || now[0].ID == first[0].ID {
 		t.Fatalf("waiting before %d, after %d", len(first), len(now))
 	}
-	if rec := helpers.Fulfil(t, e.s, first[0], e.seed); !strings.Contains(rec.Body.String(), `"in_force":false`) {
+	if rec := fixtures.Fulfil(t, e.s, first[0], e.seed); !strings.Contains(rec.Body.String(), `"in_force":false`) {
 		t.Fatalf("signing the withdrawn grant was answered %d %s", rec.Code, rec.Body.String())
 	}
 	if held, _ := hostOf(e.s).AssetHandler().Store.GetAsset(id); hostOf(e.s).FindCapabilityGrant(held.PairwiseAID) != nil {
@@ -121,20 +121,20 @@ func TestOnlyTheNewestGrantWaitsForAnAIAgent(t *testing.T) {
 	}
 	// Taken up at the place the newer grant was built for, which is built
 	// again behind the withdrawal.
-	helpers.WithdrawWith(t, e.s, e.seed)
-	now = helpers.Waiting(t, e.s)
+	fixtures.WithdrawWith(t, e.s, e.seed)
+	now = fixtures.Waiting(t, e.s)
 	// Changed underneath, in its files, after the grant was asked for.
 	a, _ := hostOf(e.s).AssetHandler().Store.GetAsset(id)
 	a.Capabilities = []string{capabilityMessageAgent}
 	hostOf(e.s).AssetHandler().Store.UpsertAsset(a)
-	if rec := helpers.Fulfil(t, e.s, now[0], e.seed); rec.Code < 400 {
+	if rec := fixtures.Fulfil(t, e.s, now[0], e.seed); rec.Code < 400 {
 		t.Fatalf("signing a grant for an AI agent changed since was answered %d", rec.Code)
 	}
 	if hostOf(e.s).FindCapabilityGrant(a.PairwiseAID) != nil {
 		t.Fatal("an AI agent changed since was granted what it was")
 	}
-	helpers.WithdrawWith(t, e.s, e.seed)
-	helpers.KeyLogVerifies(t, e.s)
+	fixtures.WithdrawWith(t, e.s, e.seed)
+	fixtures.KeyLogVerifies(t, e.s)
 }
 
 // Where the key is elsewhere, an earlier AI agent approved by its owner
@@ -142,10 +142,10 @@ func TestOnlyTheNewestGrantWaitsForAnAIAgent(t *testing.T) {
 // before anything is asked for, since its grant could not be withdrawn here.
 func TestApprovingWhereTheKeyIsElsewhereWaitsOrRefuses(t *testing.T) {
 	w := newTalkWorld(t)
-	helpers.ResetSeenSignatures(t)
+	fixtures.ResetSeenSignatures(t)
 	provision := func(name string) string {
 		rec := httptest.NewRecorder()
-		hostOf(w.s).Router().ServeHTTP(rec, helpers.Local("POST", "/api/mcp/agents", `{"name":"`+name+`","capabilities":["`+capabilityMessageAgent+`"]}`))
+		hostOf(w.s).Router().ServeHTTP(rec, fixtures.Local("POST", "/api/mcp/agents", `{"name":"`+name+`","capabilities":["`+capabilityMessageAgent+`"]}`))
 		var made map[string]interface{}
 		json.Unmarshal(rec.Body.Bytes(), &made)
 		id, _ := made["asset_id"].(string)
@@ -156,7 +156,7 @@ func TestApprovingWhereTheKeyIsElsewhereWaitsOrRefuses(t *testing.T) {
 	}
 	earlier, granted := provision("Earlier"), provision("Granted")
 	ea, _ := hostOf(w.s).AssetHandler().Store.GetAsset(earlier)
-	helpers.RecordDB(t, w.s).Exec(`DELETE FROM credentials WHERE holder_aid = ?`, ea.PairwiseAID)
+	fixtures.RecordDB(t, w.s).Exec(`DELETE FROM credentials WHERE holder_aid = ?`, ea.PairwiseAID)
 	mcpTokensMu.Lock()
 	toks := of(w.s).loadMCPTokens()
 	for i := range toks {
@@ -173,13 +173,13 @@ func TestApprovingWhereTheKeyIsElsewhereWaitsOrRefuses(t *testing.T) {
 	if rec := e.setCapabilities(t, earlier, capabilityMessageAgent); rec.Code != http.StatusOK {
 		t.Fatalf("approving an earlier AI agent where the key is elsewhere: %d %s", rec.Code, rec.Body.String())
 	}
-	if !of(w.s).agentGrantPendingFor(earlier) || len(helpers.Waiting(t, w.s)) != 1 {
+	if !of(w.s).agentGrantPendingFor(earlier) || len(fixtures.Waiting(t, w.s)) != 1 {
 		t.Fatal("the approved AI agent is not waiting for the device")
 	}
 	if rec := e.setCapabilities(t, granted, capabilityMessageAgent); rec.Code != http.StatusConflict {
 		t.Fatalf("re-granting an AI agent already granted, where the key is elsewhere, was answered %d", rec.Code)
 	}
-	if len(helpers.Waiting(t, w.s)) != 1 {
+	if len(fixtures.Waiting(t, w.s)) != 1 {
 		t.Fatal("a grant was asked for before re-granting was refused")
 	}
 }
@@ -192,7 +192,7 @@ func TestAnAIAgentIsNotMadeWhereTheKeyIsElsewhere(t *testing.T) {
 	owner, _ := e.s.DataStore.GetIdentity()
 	before, _ := e.s.DataStore.GetEvents(owner.AID)
 	rec := httptest.NewRecorder()
-	hostOf(e.s).Router().ServeHTTP(rec, helpers.SignedFor(t, hostOf(e.s).ThisIdentityAgentsIdentifier(), "POST", "/api/mcp/agents", `{"name":"Here","capabilities":["`+capabilityMessageAgent+`"]}`, helpers.TestOwnerSeed(), time.Now()))
+	hostOf(e.s).Router().ServeHTTP(rec, fixtures.SignedFor(t, hostOf(e.s).ThisIdentityAgentsIdentifier(), "POST", "/api/mcp/agents", `{"name":"Here","capabilities":["`+capabilityMessageAgent+`"]}`, fixtures.TestOwnerSeed(), time.Now()))
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "another device") {
 		t.Fatalf("making an AI agent where the key is elsewhere was answered %d %s", rec.Code, rec.Body.String())
 	}
@@ -211,7 +211,7 @@ func TestAnAIAgentIsNotMadeWhereTheKeyIsElsewhere(t *testing.T) {
 // exist, and the stored seed is never replaced.
 func TestAnUnreadableKeyIsNotAKeyElsewhere(t *testing.T) {
 	w := newTalkWorld(t)
-	helpers.ResetSeenSignatures(t)
+	fixtures.ResetSeenSignatures(t)
 	path := filepath.Join(w.s.DataDir, "secureenclave", "root_seed.key")
 	if err := os.Chmod(path, 0); err != nil {
 		t.Fatal(err)
@@ -223,21 +223,21 @@ func TestAnUnreadableKeyIsNotAKeyElsewhere(t *testing.T) {
 	if hostOf(w.s).KeyIsElsewhere() {
 		t.Fatal("an unreadable key reads as held elsewhere")
 	}
-	g := helpers.GrantFor(5, server.GradeEnrolled)
+	g := fixtures.GrantFor(5, server.GradeEnrolled)
 	body := `{"controller_aid":"` + g.ControllerAID + `","public_key":"` + g.PublicKey + `","label":"` + g.Label + `","grade":"` + string(g.Grade) + `"}`
 	rec := httptest.NewRecorder()
-	hostOf(w.s).Router().ServeHTTP(rec, helpers.SignedFor(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), "POST", "/api/controllers", body, helpers.TestOwnerSeed(), time.Now()))
+	hostOf(w.s).Router().ServeHTTP(rec, fixtures.SignedFor(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), "POST", "/api/controllers", body, fixtures.TestOwnerSeed(), time.Now()))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("granting with the key unreadable was answered %d %s", rec.Code, rec.Body.String())
 	}
-	if len(helpers.Waiting(t, w.s)) != 0 {
+	if len(fixtures.Waiting(t, w.s)) != 0 {
 		t.Fatal("a grant was asked of another device, where there is none")
 	}
-	if got, _, _ := helpers.ControllerRow(w.s, g.ControllerAID); got.CredentialPending {
+	if got, _, _ := fixtures.ControllerRow(w.s, g.ControllerAID); got.CredentialPending {
 		t.Fatal("the machine was marked as waiting for another device")
 	}
 	rec = httptest.NewRecorder()
-	hostOf(w.s).Router().ServeHTTP(rec, helpers.SignedFor(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), "POST", "/api/mcp/agents", `{"name":"Later","capabilities":["`+capabilityMessageAgent+`"]}`, helpers.TestOwnerSeed(), time.Now().Add(time.Second)))
+	hostOf(w.s).Router().ServeHTTP(rec, fixtures.SignedFor(t, hostOf(w.s).ThisIdentityAgentsIdentifier(), "POST", "/api/mcp/agents", `{"name":"Later","capabilities":["`+capabilityMessageAgent+`"]}`, fixtures.TestOwnerSeed(), time.Now().Add(time.Second)))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("making an AI agent with the key unreadable was answered %d %s", rec.Code, rec.Body.String())
 	}
@@ -252,6 +252,6 @@ func (e *keyHeldElsewhere) setCapabilities(t *testing.T, id string, caps ...stri
 	t.Helper()
 	list, _ := json.Marshal(caps)
 	rec := httptest.NewRecorder()
-	hostOf(e.s).Router().ServeHTTP(rec, helpers.SignedFor(t, hostOf(e.s).ThisIdentityAgentsIdentifier(), "PUT", "/api/mcp/agents/"+id+"/capabilities", `{"capabilities":`+string(list)+`}`, helpers.TestOwnerSeed(), time.Now()))
+	hostOf(e.s).Router().ServeHTTP(rec, fixtures.SignedFor(t, hostOf(e.s).ThisIdentityAgentsIdentifier(), "PUT", "/api/mcp/agents/"+id+"/capabilities", `{"capabilities":`+string(list)+`}`, fixtures.TestOwnerSeed(), time.Now()))
 	return rec
 }

@@ -12,7 +12,7 @@ import (
 // caller to this agent.
 func TestTheModelProviderNeverSeesWhatProvesTheCaller(t *testing.T) {
 	in := http.Header{}
-	in.Set(server.LocalOwnerSecretHeader, helpers.TestOwnerSecret())
+	in.Set(server.LocalOwnerSecretHeader, fixtures.TestOwnerSecret())
 	in.Set("Authorization", "Bearer x")
 	in.Set("Cookie", "a=b")
 	in.Set("X-IA-Token", "t")

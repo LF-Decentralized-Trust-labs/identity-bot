@@ -97,7 +97,7 @@ func TestOwnIsOnlyAnAIAgentDelegatedFromHere(t *testing.T) {
 		t.Fatal(err)
 	}
 	keys, _ := json.Marshal(mdid)
-	helpers.RefusedFor(t, w.s, store.Notification{
+	fixtures.RefusedFor(t, w.s, store.Notification{
 		ID: jwm.ID, FromAID: victim, ToAID: identity.AID, Payload: string(jwm.Body),
 		SignedMessage: base64.StdEncoding.EncodeToString(signed), SenderDID: string(keys), SenderKeyTrust: helpers.KeysOwn(),
 	}, "were not tied")
@@ -158,7 +158,7 @@ func TestCheckingOwnNeverWrites(t *testing.T) {
 // after the AI agent is removed: the delegation evidence is kept with it.
 func TestOwnProofOutlivesTheAIAgent(t *testing.T) {
 	w := newTalkWorld(t)
-	if err := helpers.TrustLocalPeer(w.s, w.a.PairwiseAID); err != nil {
+	if err := fixtures.TrustLocalPeer(w.s, w.a.PairwiseAID); err != nil {
 		t.Fatal(err)
 	}
 	from, _ := hostOf(w.s).KeySetFor(w.a.PairwiseAID)
@@ -221,11 +221,11 @@ func TestDelegationEvidenceMustBeThisAgentsAndThisRoot(t *testing.T) {
 
 	// A root and a delegate of somebody else's making, internally consistent.
 	other := keriengine.New()
-	s1, k1 := helpers.SigningPair(t, 61)
-	_, k2 := helpers.SigningPair(t, 62)
-	_, k3 := helpers.SigningPair(t, 63)
-	_, k4 := helpers.SigningPair(t, 64)
-	helpers.SignsWithSeeds(other, s1)
+	s1, k1 := fixtures.SigningPair(t, 61)
+	_, k2 := fixtures.SigningPair(t, 62)
+	_, k3 := fixtures.SigningPair(t, 63)
+	_, k4 := fixtures.SigningPair(t, 64)
+	fixtures.SignsWithSeeds(other, s1)
 	if _, err := other.CreateInceptionNamed(k1, k2, "elsewhere"); err != nil {
 		t.Fatal(err)
 	}

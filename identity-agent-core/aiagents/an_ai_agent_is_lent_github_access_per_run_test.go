@@ -568,7 +568,7 @@ func TestABrowserSessionCannotConnectTheGitHubApp(t *testing.T) {
 	g := newGitHub(t)
 	of(w.s).githubAPI = g.srv.URL
 	const secret = "a-secret-only-the-browser-has"
-	session := helpers.SignInABrowser(t, w.s, secret)
+	session := fixtures.SignInABrowser(t, w.s, secret)
 	asSession := func(method, path, body string) int {
 		r := httptest.NewRequest(method, path, strings.NewReader(body))
 		r.Header.Set("Authorization", "Bearer "+session)

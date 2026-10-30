@@ -15,13 +15,13 @@ import (
 // a key that matches no route guards nothing while looking exactly like
 // protection.
 func TestEveryControllerRuleNamesARouteThisAgentServes(t *testing.T) {
-	s := helpers.NewAuthTestServer(t)
+	s := fixtures.NewAuthTestServer(t)
 	// The employee and signer routes are mounted only with an asset handler.
 	ah, err := asset.NewHandler(s.DataDir, nil)
 	if err != nil {
 		t.Fatalf("asset handler: %v", err)
 	}
-	helpers.UseAssetHandler(s, ah)
+	fixtures.UseAssetHandler(s, ah)
 
 	served := map[string]bool{}
 	if werr := chi.Walk(hostOf(s).BuildRouter(""),

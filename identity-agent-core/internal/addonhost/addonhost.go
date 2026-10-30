@@ -6,11 +6,15 @@
 // is handed the *server.CoreServer it runs on. What it may do with that
 // server beyond its exported fields and methods is exactly this: Host, for
 // one server, and Helpers, for what needs none. The server implements both
-// with an unexported type, so nothing outside this module reaches them, and
-// nothing here is a second copy: each method calls the server's own.
+// with an unexported type it returns from server.AddonHost, which asks for a
+// hostlink.Token that nothing outside this module can name; so nothing
+// outside this module reaches them, and a program that includes no add-on
+// links none of it. Nothing here is a second copy: each method calls the
+// server's own.
 //
-// HostFixtures and Fixtures are the worlds the core's own tests build, for
-// the add-ons' tests. No program calls them.
+// Fixtures are the worlds the core's own tests build, for the add-ons'
+// tests, from server.AddonFixtures. Only a test asks for them, so no program
+// links them.
 package addonhost
 
 import (
@@ -35,10 +39,14 @@ import (
 )
 
 // Of is the handle on s.
-func Of(s *server.CoreServer) Host { return hostlink.Of(s).(Host) }
+func Of(s *server.CoreServer) Host { return server.AddonHost(s, hostlink.Token{}).(Host) }
+
+// TestFixtures are the core's test fixtures, for the add-ons' tests. Only a
+// test calls it, so no program links them.
+func TestFixtures() Fixtures { return server.AddonFixtures(hostlink.Token{}).(Fixtures) }
 
 // Shared is the handle on what needs no server.
-func Shared() Helpers { return hostlink.Of((*server.CoreServer)(nil)).(Helpers) }
+func Shared() Helpers { return server.AddonHost(nil, hostlink.Token{}).(Helpers) }
 
 // Host is what an add-on may ask of the server it runs on.
 type Host interface {
@@ -99,14 +107,6 @@ type Host interface {
 	WhoThisIdentityAgentIs() (string, error)
 	WithdrawControllerGrant(said string) error
 	WithdrawCredential(rec *store.CredentialRecord) (bool, string, error)
-
-	HostFixtures
-}
-
-// HostFixtures are the parts of one server the add-ons' tests set up.
-type HostFixtures interface {
-	LogForTest(t coretypes.TB, dir string) *activitylog.Log
-	VaultForTest(dir string) *vault.CredentialVault
 }
 
 // Helpers are the core's own helpers an add-on uses: writing answers, the
@@ -157,14 +157,14 @@ type Helpers interface {
 	WriteError(w http.ResponseWriter, status int, errMsg string, details string)
 	WriteJSON(w http.ResponseWriter, v interface{})
 	WriteJSONStatus(w http.ResponseWriter, status int, v interface{})
-
-	Fixtures
 }
 
 // Fixtures are the worlds the core's tests build, for the add-ons' tests:
 // an organisation founded as startup finds it, a controller paired and
 // granted, a request signed as a machine signs it.
 type Fixtures interface {
+	LogForTest(s *server.CoreServer, t coretypes.TB, dir string) *activitylog.Log
+	VaultForTest(s *server.CoreServer, dir string) *vault.CredentialVault
 	AControllerWorld(t coretypes.TB) (*server.CoreServer, *httptest.Server, string, []byte)
 	AcdcOf(t coretypes.TB, s *server.CoreServer, said string) map[string]interface{}
 	AgentWithDerivedIdentity(t coretypes.TB) *server.CoreServer

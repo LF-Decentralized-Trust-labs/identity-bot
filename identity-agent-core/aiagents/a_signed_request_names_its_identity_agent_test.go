@@ -16,7 +16,7 @@ import (
 // key, which is the case a replay across Identity Agents needs.
 func namedAgent(t *testing.T, aid string) (*server.CoreServer, string, []byte) {
 	t.Helper()
-	s := helpers.NewAuthTestServer(t)
+	s := fixtures.NewAuthTestServer(t)
 	ds, err := store.NewSQLiteStore(s.DataDir)
 	if err != nil {
 		t.Fatal(err)
@@ -25,7 +25,7 @@ func namedAgent(t *testing.T, aid string) (*server.CoreServer, string, []byte) {
 	if err := ds.SaveIdentity(store.IdentityState{AID: aid}); err != nil {
 		t.Fatal(err)
 	}
-	machine, seed := helpers.AnAuthorisedMachine(t, s, server.GradeEnrolled)
+	machine, seed := fixtures.AnAuthorisedMachine(t, s, server.GradeEnrolled)
 	return s, machine, seed
 }
 
@@ -44,8 +44,8 @@ func TestAControllerRequestForOneIdentityAgentIsRefusedByAnother(t *testing.T) {
 		t.Fatal("the two Identity Agents do not hold a grant for the same machine, so this proves nothing")
 	}
 
-	captured := helpers.AsThatMachineTo(t, agentA, machine, "GET", "/api/profile", "", seed, "", time.Time{})
-	copyForB := helpers.Remote("GET", "/api/profile", "")
+	captured := fixtures.AsThatMachineTo(t, agentA, machine, "GET", "/api/profile", "", seed, "", time.Time{})
+	copyForB := fixtures.Remote("GET", "/api/profile", "")
 	copyForB.Header = captured.Header.Clone()
 
 	w := httptest.NewRecorder()
@@ -65,7 +65,7 @@ func TestAControllerRequestForOneIdentityAgentIsRefusedByAnother(t *testing.T) {
 // signature.
 func TestTheIdentityAgentNamedCannotBeChangedInFlight(t *testing.T) {
 	b, machine, seed := namedAgent(t, agentB)
-	req := helpers.AsThatMachineTo(t, agentA, machine, "GET", "/api/profile", "", seed, "", time.Time{})
+	req := fixtures.AsThatMachineTo(t, agentA, machine, "GET", "/api/profile", "", seed, "", time.Time{})
 	req.Header.Set(helpers.HeaderControllerFor(), agentB)
 	w := httptest.NewRecorder()
 	hostOf(b).BuildRouter("").ServeHTTP(w, req)
@@ -81,13 +81,13 @@ func TestARequestNamingNobodyIsOnlyForLearningTheName(t *testing.T) {
 	r := hostOf(s).BuildRouter("")
 
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, helpers.AsThatMachine(t, machine, "GET", "/api/profile", "", seed, "", time.Time{}))
+	r.ServeHTTP(w, fixtures.AsThatMachine(t, machine, "GET", "/api/profile", "", seed, "", time.Time{}))
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("a request naming no Identity Agent was admitted at a named one: %d", w.Code)
 	}
 
 	w = httptest.NewRecorder()
-	r.ServeHTTP(w, helpers.AsThatMachine(t, machine, "GET", helpers.ControllerLearnsWhoItActsFor(), "", seed, "", time.Time{}))
+	r.ServeHTTP(w, fixtures.AsThatMachine(t, machine, "GET", helpers.ControllerLearnsWhoItActsFor(), "", seed, "", time.Time{}))
 	if w.Code != http.StatusOK {
 		t.Fatalf("a machine could not learn which identity it acts for: %d %s", w.Code, w.Body.String())
 	}
@@ -138,7 +138,7 @@ func bindingFor(t *testing.T, m testMachine) agentbody.Binding {
 // owner key administers, inside the window and before either has seen it.
 func TestAnOwnerRequestForOneIdentityAgentIsRefusedByAnother(t *testing.T) {
 	named := func(aid string) *server.CoreServer {
-		s := helpers.NewAuthTestServer(t)
+		s := fixtures.NewAuthTestServer(t)
 		ds, err := store.NewSQLiteStore(s.DataDir)
 		if err != nil {
 			t.Fatal(err)
@@ -150,24 +150,24 @@ func TestAnOwnerRequestForOneIdentityAgentIsRefusedByAnother(t *testing.T) {
 		return s
 	}
 	a, b := named(agentA), named(agentB)
-	seed, _ := helpers.SealTestOwner(t, a)
-	if again, _ := helpers.SealTestOwner(t, b); string(again) != string(seed) {
+	seed, _ := fixtures.SealTestOwner(t, a)
+	if again, _ := fixtures.SealTestOwner(t, b); string(again) != string(seed) {
 		t.Fatal("the two Identity Agents do not share an owner key, so this proves nothing")
 	}
 
-	captured := helpers.SignedFor(t, agentA, "GET", "/api/profile", "", seed, time.Now())
-	copyForB := helpers.Remote("GET", "/api/profile", "")
+	captured := fixtures.SignedFor(t, agentA, "GET", "/api/profile", "", seed, time.Now())
+	copyForB := fixtures.Remote("GET", "/api/profile", "")
 	copyForB.Header = captured.Header.Clone()
 	if err := hostOf(b).VerifyOwnerSignature(copyForB); err == nil {
 		t.Fatal("Identity Agent B admitted an owner request signed for A")
 	}
-	renamed := helpers.Remote("GET", "/api/profile", "")
+	renamed := fixtures.Remote("GET", "/api/profile", "")
 	renamed.Header = captured.Header.Clone()
 	renamed.Header.Set(helpers.HeaderOwnerFor(), agentB)
 	if err := hostOf(b).VerifyOwnerSignature(renamed); err == nil {
 		t.Fatal("an owner request re-addressed in flight was admitted")
 	}
-	unnamed := helpers.Signed(t, "GET", "/api/profile", "", seed, time.Now())
+	unnamed := fixtures.Signed(t, "GET", "/api/profile", "", seed, time.Now())
 	if err := hostOf(a).VerifyOwnerSignature(unnamed); err == nil {
 		t.Fatal("a named Identity Agent admitted an owner request naming nobody")
 	}
