@@ -418,3 +418,45 @@ func TestTheAnchorCheckNeitherIgnoresNorGuessesAtChains(t *testing.T) {
 		t.Fatalf("an entry two chains answer for was checked against one of them: %+v", got)
 	}
 }
+
+// No route is mounted twice. The router keeps whichever handler mounted
+// last, so an add-on re-mounting a core route, or another add-on's, would
+// take it over while keeping its access class, or open it by naming it as its
+// own; an overlay re-mounting an add-on's route the same. Each is refused.
+func TestNoRouteIsTakenOverByMountingItAgain(t *testing.T) {
+	unsealedAfter(t)
+	ok := func(w http.ResponseWriter, r *http.Request) {}
+	b := Addon{ID: "b",
+		Routes:       func(s *CoreServer, r chi.Router) { r.Get("/bs-own", ok) },
+		PublicRoutes: map[string]string{"GET /api/bs-own": "b's own"}}
+	for name, takeover := range map[string][]Addon{
+		"a core route, with a handler of its own": {{ID: "a",
+			Routes:       func(s *CoreServer, r chi.Router) { r.Post("/reset", ok) },
+			PublicRoutes: map[string]string{"POST /api/reset": "taken over"}}},
+		"a core route, with the core's own handler": {{ID: "a",
+			Routes:       func(s *CoreServer, r chi.Router) { r.Post("/reset", s.handleReset) },
+			PublicRoutes: map[string]string{"POST /api/reset": "taken over"}}},
+		"another add-on's route": {b, {ID: "a",
+			Routes:       func(s *CoreServer, r chi.Router) { r.Get("/bs-own", ok) },
+			PublicRoutes: map[string]string{"GET /api/bs-own": "taken over"}}},
+	} {
+		onlyAddons(t, takeover...)
+		msg, refused := panics(func() { New(Config{DataDir: t.TempDir()}) })
+		if !refused || !strings.Contains(msg, "mounted twice") {
+			t.Errorf("a server was made with an add-on re-mounting %s (%q)", name, msg)
+		}
+	}
+
+	onlyAddons(t, b)
+	s, err := New(Config{DataDir: t.TempDir(), Port: 0})
+	if err != nil {
+		t.Skipf("making the server: %v", err)
+	}
+	s.MountExtraRoutes(func(r chi.Router) { r.Get("/bs-own", ok) })
+	if err := s.Start(); err == nil {
+		s.Stop()
+		t.Fatal("a server started with an overlay re-mounting an add-on's public route")
+	} else if !strings.Contains(err.Error(), "an overlay mounts GET /api/bs-own") {
+		t.Fatalf("the start failed for another reason: %v", err)
+	}
+}

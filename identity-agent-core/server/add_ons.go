@@ -215,18 +215,18 @@ func registeredAddons() []Addon {
 	return append([]Addon(nil), addons...)
 }
 
-// mountAddonRoutes adds every add-on's routes under /api.
-func (s *CoreServer) mountAddonRoutes(r chi.Router) {
-	for _, a := range registeredAddons() {
+// mountAddonRoutes adds addons' routes under /api.
+func (s *CoreServer) mountAddonRoutes(r chi.Router, addons []Addon) {
+	for _, a := range addons {
 		if a.Routes != nil {
 			a.Routes(s, r)
 		}
 	}
 }
 
-// mountAddonRootRoutes adds every add-on's routes outside /api.
-func (s *CoreServer) mountAddonRootRoutes(r chi.Router) {
-	for _, a := range registeredAddons() {
+// mountAddonRootRoutes adds addons' routes outside /api.
+func (s *CoreServer) mountAddonRootRoutes(r chi.Router, addons []Addon) {
+	for _, a := range addons {
 		if a.RootRoutes != nil {
 			a.RootRoutes(s, r)
 		}
@@ -447,6 +447,66 @@ func addonRouteEntry(table func(Addon) map[string]string, key string) (string, b
 	return "", false
 }
 
+// routesIn are the routes r serves, as "METHOD /pattern".
+func routesIn(r chi.Routes) map[string]bool {
+	out := map[string]bool{}
+	chi.Walk(r, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		out[method+" "+route] = true
+		return nil
+	})
+	return out
+}
+
+// addonRoutes are the routes add-on a mounts, alone.
+func (s *CoreServer) addonRoutes(a Addon) map[string]bool {
+	r := chi.NewRouter()
+	if a.Routes != nil {
+		r.Route("/api", func(r chi.Router) { a.Routes(s, r) })
+	}
+	if a.RootRoutes != nil {
+		a.RootRoutes(s, r)
+	}
+	return routesIn(r)
+}
+
+// routeTakeovers are the routes mounted twice: by an add-on and the core, by
+// two add-ons, or, among extras, by an overlay and the core or an add-on.
+// The router keeps whichever mounted last, so a route mounted twice is one
+// somebody else's handler can take over while it keeps the first owner's
+// access class. None is allowed.
+func (s *CoreServer) routeTakeovers(extras []func(chi.Router)) []string {
+	var out []string
+	core := routesIn(s.buildRouterOf("", nil, nil))
+	whose := map[string]string{}
+	for k := range core {
+		whose[k] = "the core"
+	}
+	for _, a := range registeredAddons() {
+		for k := range s.addonRoutes(a) {
+			if owner, taken := whose[k]; taken {
+				out = append(out, a.ID+" mounts "+k+", which "+owner+" serves")
+				continue
+			}
+			whose[k] = "add-on " + a.ID
+		}
+	}
+	if len(extras) > 0 {
+		r := chi.NewRouter()
+		r.Route("/api", func(r chi.Router) {
+			for _, fn := range extras {
+				fn(r)
+			}
+		})
+		for k := range routesIn(r) {
+			if owner, taken := whose[k]; taken {
+				out = append(out, "an overlay mounts "+k+", which "+owner+" serves")
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // underPrefix reports whether route pattern is p or lies under it, on a path
 // segment's boundary: /api/controller covers /api/controller/x and not
 // /api/controllers.
@@ -469,20 +529,30 @@ func (s *CoreServer) addonEntriesNotItsOwn(served chi.Routes, loosening bool) []
 		return nil
 	})
 	var out []string
+	core := routesIn(s.buildRouterOf("", nil, nil))
 	for _, a := range registeredAddons() {
-		r := chi.NewRouter()
-		if a.Routes != nil {
-			r.Route("/api", func(r chi.Router) { a.Routes(s, r) })
+		// An add-on's own routes are those it adds that the server built
+		// without it does not serve: re-mounting somebody else's route does
+		// not make it the add-on's.
+		without := map[string]bool{}
+		for k := range core {
+			without[k] = true
 		}
-		if a.RootRoutes != nil {
-			a.RootRoutes(s, r)
+		for _, b := range registeredAddons() {
+			if b.ID != a.ID {
+				for k := range s.addonRoutes(b) {
+					without[k] = true
+				}
+			}
 		}
 		own, ownPattern := map[string]bool{}, map[string]bool{}
-		chi.Walk(r, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
-			own[method+" "+route] = true
-			ownPattern[route] = true
-			return nil
-		})
+		for k := range s.addonRoutes(a) {
+			if without[k] {
+				continue
+			}
+			own[k] = true
+			ownPattern[k[strings.Index(k, " ")+1:]] = true
+		}
 		check := func(table string, keys []string) {
 			for _, k := range keys {
 				if !own[k] {
@@ -531,10 +601,14 @@ func keysOf(m map[string]string) []string {
 	return ks
 }
 
-// addonsOpeningOthersRoutes says which add-on opens a route it does not
-// mount, given served, everything the server serves. An add-on may open only its own routes; one that would make
+// addonsOpeningOthersRoutes says which route is mounted twice (among
+// extras too, an overlay's routes), or which add-on opens a route it does
+// not mount, given served, everything the server serves. An add-on may open only its own routes; one that would make
 // a core route, or another's, public or scoped is a server that must not run.
-func (s *CoreServer) addonsOpeningOthersRoutes(served chi.Routes) error {
+func (s *CoreServer) addonsOpeningOthersRoutes(served chi.Routes, extras []func(chi.Router)) error {
+	if bad := s.routeTakeovers(extras); len(bad) > 0 {
+		return fmt.Errorf("a route is mounted twice, so one handler would take over another's: %s", strings.Join(bad, "; "))
+	}
 	if bad := s.addonEntriesNotItsOwn(served, true); len(bad) > 0 {
 		return fmt.Errorf("an add-on opens routes it does not serve, which only their owner may open: %s", strings.Join(bad, "; "))
 	}

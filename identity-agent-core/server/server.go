@@ -560,7 +560,7 @@ func New(cfg Config) (*CoreServer, error) {
 	// An add-on may open only routes it serves itself. One that would make a
 	// core route, or another add-on's, public or scoped is refused here, as
 	// the server is made, before anything is served.
-	if err := s.addonsOpeningOthersRoutes(s.buildRouter("")); err != nil {
+	if err := s.addonsOpeningOthersRoutes(s.buildRouter(""), nil); err != nil {
 		panic("server.New: " + err.Error())
 	}
 	return s, nil
@@ -587,7 +587,7 @@ func (s *CoreServer) Start() error {
 	}
 	// Checked again with every route an overlay added since New: a prefix
 	// an add-on opens must not cover one of the overlay's either.
-	if err := s.addonsOpeningOthersRoutes(s.router); err != nil {
+	if err := s.addonsOpeningOthersRoutes(s.router, s.extraRoutes); err != nil {
 		return err
 	}
 
@@ -900,6 +900,12 @@ func corsPolicy() func(http.Handler) http.Handler {
 }
 
 func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
+	return s.buildRouterOf(flutterWebDir, registeredAddons(), s.extraRoutes)
+}
+
+// buildRouterOf is the router with only addons' routes and only the overlay
+// routes extras, for telling whose a route is (add_ons.go).
+func (s *CoreServer) buildRouterOf(flutterWebDir string, addons []Addon, extras []func(chi.Router)) chi.Router {
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
@@ -1168,14 +1174,14 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 
 		// Add-ons' routes, then overlay-registered routes (MountExtraRoutes)
 		// mount last, under /api.
-		s.mountAddonRoutes(r)
-		for _, fn := range s.extraRoutes {
+		s.mountAddonRoutes(r, addons)
+		for _, fn := range extras {
 			fn(r)
 		}
 	})
 
 	// Add-ons' routes outside /api.
-	s.mountAddonRootRoutes(r)
+	s.mountAddonRootRoutes(r, addons)
 
 	// /public/oobi/{aid} — public namespace: KERI OOBI endpoint shared with external agents.
 	r.Get("/public/oobi/{aid}", s.handleOobiServe)
