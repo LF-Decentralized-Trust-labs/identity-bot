@@ -8,6 +8,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"identity-agent-core/activitylog"
+	"identity-agent-core/permission"
+	"identity-agent-core/vault"
 )
 
 func registryTestManager(t *testing.T) *Manager {
@@ -18,10 +22,11 @@ func registryTestManager(t *testing.T) *Manager {
 		t.Fatalf("store: %v", err)
 	}
 	t.Cleanup(func() { st.Close() })
-	cv := NewCredentialVault(dir)
+	cv := vault.NewCredentialVault(dir)
 	cv.SetKeyProvider(testVaultKeyProvider)
 	return &Manager{
 		store:       st,
+		log:         st.Log(),
 		policy:      NewPolicyEngine(st, NewEventBus()),
 		credentials: cv,
 		manifests:   map[string]*AppManifest{},
@@ -80,7 +85,7 @@ func TestRegistryNativeInvokeGovernedAndAudited(t *testing.T) {
 		t.Fatalf("upsert: %v", err)
 	}
 
-	caller := CallerContext{Remote: false, CallerAID: "local-owner", CorrelationID: "corr-1", Transport: "mcp"}
+	caller := permission.CallerContext{Remote: false, CallerAID: "local-owner", CorrelationID: "corr-1", Transport: "mcp"}
 	res, err := m.InvokeCapability(context.Background(), caller, "testsvc.dns.list", []byte(`{"zone_id":"z1"}`))
 	if err != nil {
 		t.Fatalf("invoke: %v", err)
@@ -93,7 +98,7 @@ func TestRegistryNativeInvokeGovernedAndAudited(t *testing.T) {
 	}
 
 	// Two rows: what was about to run, then what happened.
-	events, err := m.store.QueryInvocationEvents(InvocationEventFilter{CapabilityID: "testsvc.dns.list"})
+	events, err := m.log.QueryInvocationEvents(activitylog.InvocationEventFilter{CapabilityID: "testsvc.dns.list"})
 	if err != nil || len(events) != 2 || events[1].ResultStatus != "started" || events[0].IntentEventID != events[1].ID {
 		t.Fatalf("expected an intent row and its result, got %+v (err %v)", events, err)
 	}
@@ -118,12 +123,12 @@ func TestRegistryNativeRemoteDeniedAndAudited(t *testing.T) {
 	if err := m.store.UpsertCapabilityRecord(rec); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	caller := CallerContext{Remote: true, CallerAID: "token:ci", CorrelationID: "corr-2"}
+	caller := permission.CallerContext{Remote: true, CallerAID: "token:ci", CorrelationID: "corr-2"}
 	_, err := m.InvokeCapability(context.Background(), caller, "testsvc.dns.create", []byte(`{}`))
 	if !errors.Is(err, ErrDenied) {
 		t.Fatalf("expected ErrDenied, got %v", err)
 	}
-	events, _ := m.store.QueryInvocationEvents(InvocationEventFilter{CapabilityID: "testsvc.dns.create"})
+	events, _ := m.log.QueryInvocationEvents(activitylog.InvocationEventFilter{CapabilityID: "testsvc.dns.create"})
 	if len(events) != 1 || events[0].ResultStatus != "denied" {
 		t.Fatalf("denial must be audited, got %+v", events)
 	}
@@ -159,7 +164,7 @@ func TestEmbeddedPackAndMCPProjection(t *testing.T) {
 			t.Fatalf("record %s missing cloudflare egress", r.ID)
 		}
 	}
-	tools := m.MCPToolsList(CallerContext{})
+	tools := m.MCPToolsList(permission.CallerContext{})
 	names := map[string]bool{}
 	for _, tl := range tools {
 		names[tl.Name] = true
@@ -180,7 +185,7 @@ func TestMessagingAnotherAIAgentIsGrantableButNotATool(t *testing.T) {
 	if err != nil || rec == nil || !rec.Enabled {
 		t.Fatalf("the messaging capability is not in the registry: %v %+v", err, rec)
 	}
-	for _, tl := range m.MCPToolsList(CallerContext{Scopes: []string{"agent.message.send"}, Remote: true}) {
+	for _, tl := range m.MCPToolsList(permission.CallerContext{Scopes: []string{"agent.message.send"}, Remote: true}) {
 		if tl.Name == "agent.message.send" {
 			t.Fatal("messaging another AI agent was offered as a tool")
 		}
@@ -202,7 +207,7 @@ func TestExecuteMetaTool(t *testing.T) {
 	if err := m.store.UpsertCapabilityRecord(rec); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	caller := CallerContext{Remote: false, CallerAID: "local-owner", CorrelationID: "corr-3"}
+	caller := permission.CallerContext{Remote: false, CallerAID: "local-owner", CorrelationID: "corr-3"}
 	out := m.MCPToolsCall(context.Background(), caller, ExecuteToolName, []byte(`{"capability_id":"svc.thing.get","args":{"id":"42"}}`))
 	if out.IsError {
 		t.Fatalf("execute failed: %s", out.Text)

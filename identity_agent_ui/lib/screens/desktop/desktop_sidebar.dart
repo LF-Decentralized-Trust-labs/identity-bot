@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 import '../../services/core_service.dart';
 import 'package:agent_client/config/agent_config.dart';
+import 'package:agent_client/services/agent_add_ons.dart';
 
 // ── Route enum ───────────────────────────────────────────────────────────────
 enum DesktopRoute {
@@ -97,11 +98,19 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
 
   late final CoreService _coreService;
 
+  /// What the agent includes: Apps and API Keys are the sandboxed-apps
+  /// add-on's, and are shown only where it is.
+  late AgentAddOns _addOns =
+      AgentAddOns.known(widget.serverUrl ?? AgentConfig.coreBaseUrl);
+
   @override
   void initState() {
     super.initState();
     _coreService = CoreService(baseUrl: widget.serverUrl ?? AgentConfig.coreBaseUrl);
     _loadProfile();
+    AgentAddOns.at(widget.serverUrl ?? AgentConfig.coreBaseUrl).then((a) {
+      if (mounted) setState(() => _addOns = a);
+    });
     _expandForRoute(widget.currentRoute);
   }
 
@@ -188,7 +197,8 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
                 _NavItem(icon: Icons.password_outlined,               label: 'Passwords',   route: DesktopRoute.passwords,   current: widget.currentRoute, onTap: _select, comingSoon: true),
                 _NavItem(icon: Icons.account_balance_wallet_outlined, label: 'Wallet',      route: DesktopRoute.wallet,      current: widget.currentRoute, onTap: _select, comingSoon: true),
                 _NavItem(icon: Icons.devices,                         label: 'My Devices',  route: DesktopRoute.myDevices,   current: widget.currentRoute, onTap: _select),
-                _NavItem(icon: Icons.apps,                            label: 'Apps',        route: DesktopRoute.apps,        current: widget.currentRoute, onTap: _select),
+                if (_addOns.hasSandboxedApps)
+                  _NavItem(icon: Icons.apps,                          label: 'Apps',        route: DesktopRoute.apps,        current: widget.currentRoute, onTap: _select),
                 _sectionDivider(),
 
                 // ── My Data ──────────────────────────────────────────────
@@ -262,7 +272,8 @@ class _DesktopSidebarState extends State<DesktopSidebar> {
                   _SubItem(icon: Icons.privacy_tip_outlined,     label: 'Privacy & Data',    route: DesktopRoute.settingsPrivacy,         current: widget.currentRoute, onTap: _select, comingSoon: true),
                   _SubItem(icon: Icons.palette_outlined,         label: 'Appearance',        route: DesktopRoute.settingsTheme,           current: widget.currentRoute, onTap: _select),
                   _SubItem(icon: Icons.notifications_outlined,   label: 'Notifications',     route: DesktopRoute.settingsNotifications,   current: widget.currentRoute, onTap: _select, comingSoon: true),
-                  _SubItem(icon: Icons.api_outlined,             label: 'API Keys',          route: DesktopRoute.settingsApiKeys,         current: widget.currentRoute, onTap: _select),
+                  if (_addOns.hasSandboxedApps)
+                    _SubItem(icon: Icons.api_outlined,           label: 'API Keys',          route: DesktopRoute.settingsApiKeys,         current: widget.currentRoute, onTap: _select),
                   _SubItem(icon: Icons.vpn_lock_outlined,        label: 'Tunneling',         route: DesktopRoute.settingsTunneling,       current: widget.currentRoute, onTap: _select),
                   _SubItem(icon: Icons.hub_outlined,             label: 'Endpoints',         route: DesktopRoute.settingsEndpoints,       current: widget.currentRoute, onTap: _select),
                   _SubItem(icon: Icons.cloud_outlined,           label: 'Service Providers', route: DesktopRoute.settingsServiceProviders, current: widget.currentRoute, onTap: _select),

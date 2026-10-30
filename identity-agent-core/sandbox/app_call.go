@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"identity-agent-core/appcall"
+	"identity-agent-core/permission"
 )
 
 // Telling an app who called it.
@@ -73,7 +74,7 @@ func (m *Manager) AppCallKey(appID string) ([]byte, error) {
 // theCallerAnAppIsTold is the caller as the app hears it: what the Identity
 // Agent established, and nothing a caller merely asserted except its session,
 // which decides nothing here.
-func theCallerAnAppIsTold(c CallerContext) appcall.Caller {
+func theCallerAnAppIsTold(c permission.CallerContext) appcall.Caller {
 	out := appcall.Caller{
 		Machine:   c.BodyHost,
 		AuthLevel: c.AuthLevel,

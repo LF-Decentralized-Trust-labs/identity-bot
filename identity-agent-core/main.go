@@ -1,43 +1,17 @@
 package main
 
 import (
-	"log"
-	"os"
-	"os/signal"
-	"syscall"
-
+	"identity-agent-core/run"
 	"identity-agent-core/server"
-	"identity-agent-core/volume"
 )
 
+// The core's own program: the Identity Agent for an individual, with no
+// add-on. An organization runs a program of its own, which says so.
 func main() {
-	// Volume commands run before the Identity Agent does, or instead of it. One
-	// dispatcher rather than a switch here, so that an overlay embedding this
-	// core wires up every one of them by wiring up one thing — see the note in
-	// the volume package for why.
-	if handled, err := volume.Handle(os.Args[1:]); handled {
-		if err != nil {
-			log.Fatalf("[identity-agent-core] %v", err)
-		}
-		return
-	}
-
-	cfg := server.DefaultConfig()
-
-	srv, err := server.New(cfg)
-	if err != nil {
-		log.Fatalf("[identity-agent-core] Failed to initialize: %v", err)
-	}
-
-	if err := srv.Start(); err != nil {
-		log.Fatalf("[identity-agent-core] Failed to start: %v", err)
-	}
-
-	log.Printf("[identity-agent-core] Server started on port %d", srv.Port)
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	<-sigChan
-
-	srv.Stop()
+	run.Main(run.Options{
+		// What this program serves, which only the program can know: the core
+		// is the same inside every app. It decides who may witness and watch
+		// for this agent, since peers are of the same kind.
+		Config: func(cfg *server.Config) { cfg.EntityType = "individual" },
+	})
 }

@@ -4,11 +4,11 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/witness"
 	"net/http"
 	"net/http/httptest"
@@ -19,12 +19,11 @@ import (
 	"testing"
 	"time"
 
-	"identity-agent-core/conversation"
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/keriengine"
 	"identity-agent-core/login"
-	"identity-agent-core/sandbox"
+	"identity-agent-core/permission"
 	"identity-agent-core/store"
 
 	keri "github.com/grapeid/keri-go"
@@ -35,36 +34,19 @@ func recordWorld(t *testing.T) *CoreServer {
 	t.Helper()
 	s, _ := grantWorld(t)
 	s.DeclaredEntityType = "organization"
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir, ManifestsDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(m.Stop)
-	s.SandboxManager = m
-	m.SetEventSigner(&invocationSigner{s: s})
+	s.logForTest(t, s.DataDir)
+	s.vaultForTest(s.DataDir)
+	s.ActivityLog.SetEventSigner(&invocationSigner{s: s})
 	return s
 }
 
 func writeRows(t *testing.T, s *CoreServer, n int) {
 	t.Helper()
 	for i := 0; i < n; i++ {
-		if s.SandboxManager.RecordGovernanceEvent(sandbox.CallerContext{CallerAID: "EAgent", Reason: "test"}, "test.event", "ok") == 0 {
+		if s.ActivityLog.RecordGovernanceEvent(permission.CallerContext{CallerAID: "EAgent", Reason: "test"}, "test.event", "ok") == 0 {
 			t.Fatal("a row was not written")
 		}
 	}
-}
-
-func chainSays(t *testing.T, s *CoreServer) map[string]any {
-	t.Helper()
-	req := local("GET", "/api/activity/chain", "")
-	rec := httptest.NewRecorder()
-	s.handleVerifyAuditChain(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("checking the log: %d %s", rec.Code, rec.Body.String())
-	}
-	var out map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &out)
-	return out
 }
 
 // The log's head is anchored in a record identity approved in the
@@ -98,7 +80,7 @@ func TestTheNewestRowsCannotBeQuietlyRemovedOnceAnchored(t *testing.T) {
 	}
 
 	got := chainSays(t, s)
-	row, _, _ := s.SandboxManager.Store().Head()
+	row, _, _ := s.ActivityLog.Head()
 	if got["intact"] != true || got["anchored_through"] != float64(row) || got["unanchored_rows"] != float64(0) {
 		t.Fatalf("after anchoring the log reads %v", got)
 	}
@@ -110,7 +92,7 @@ func TestTheNewestRowsCannotBeQuietlyRemovedOnceAnchored(t *testing.T) {
 
 	// Remove the newest rows, the anchored one among them. No row names them,
 	// so only the anchor can tell.
-	db := s.SandboxManager.Store().DB()
+	db := s.ActivityLog.DB()
 	if _, err := db.Exec(`DELETE FROM invocation_log WHERE id >= ?`, row); err != nil {
 		t.Fatal(err)
 	}
@@ -165,37 +147,10 @@ func TestAnchoringCarriesOnAfterARestart(t *testing.T) {
 	}
 }
 
-// A conversation's newest entry is anchored too: changing it afterwards is
-// caught.
-func TestAConversationsHeadIsAnchored(t *testing.T) {
-	w := newTalkWorld(t)
-	w.s.SandboxManager.SetEventSigner(&invocationSigner{s: w.s})
-	conv, _ := w.openedWith(t)
-	if anchored, err := w.s.anchorRecord(); err != nil || !anchored {
-		t.Fatalf("anchoring: %v %v", anchored, err)
-	}
-	if got := chainSays(t, w.s); got["intact"] != true {
-		t.Fatalf("the log does not hold after anchoring a conversation: %v", got)
-	}
-	db, err := sql.Open("sqlite", filepath.Join(w.s.DataDir, "conversations.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if _, err := db.Exec(`UPDATE entries SET hash = 'Echanged' WHERE conversation = ?`, conv); err != nil {
-		t.Fatal(err)
-	}
-	if got := chainSays(t, w.s); got["intact"] != false || got["anchor_broken_at"] == nil {
-		t.Fatalf("changing an anchored conversation entry went unnoticed: %v", got)
-	}
-}
-
 // Enough recorded messages anchor the record without waiting for the interval.
 func TestEnoughMessagesAnchorTheRecord(t *testing.T) {
 	s := recordWorld(t)
-	was := anchorEvery
-	anchorEvery = 3
-	t.Cleanup(func() { anchorEvery = was })
+	anchorAfter(t, 3)
 	writeRows(t, s, 1)
 	for i := 0; i < 3; i++ {
 		s.noteRecorded()
@@ -213,9 +168,7 @@ func TestEnoughMessagesAnchorTheRecord(t *testing.T) {
 // being anchored when it stops.
 func TestTheRecordIsAnchoredOnItsInterval(t *testing.T) {
 	s := recordWorld(t)
-	was := anchorInterval
-	anchorInterval = 20 * time.Millisecond
-	t.Cleanup(func() { anchorInterval = was })
+	anchorAtLeastEvery(t, 20*time.Millisecond)
 	writeRows(t, s, 1)
 	stop := make(chan struct{})
 	go s.keepAnchoring(stop)
@@ -257,23 +210,6 @@ func TestNothingIsWrittenIntoALogWhoseKeyIsElsewhere(t *testing.T) {
 	}
 }
 
-// Messages a conversation takes count towards the next anchoring.
-func TestAConversationsMessagesBringOnAnAnchoring(t *testing.T) {
-	w := newTalkWorld(t)
-	w.s.SandboxManager.SetEventSigner(&invocationSigner{s: w.s})
-	was := anchorEvery
-	anchorEvery = 1
-	t.Cleanup(func() { anchorEvery = was })
-	w.openedWith(t)
-	for i := 0; i < 100; i++ {
-		if anchors, _ := w.s.DataStore.GetRecordAnchors(); len(anchors) > 0 {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatal("a message the conversation took did not bring on an anchoring")
-}
-
 // anchoredTwice is a record anchored over rows 1-3, then over rows 4-5.
 func anchoredTwice(t *testing.T) (*CoreServer, int64) {
 	t.Helper()
@@ -282,7 +218,7 @@ func anchoredTwice(t *testing.T) (*CoreServer, int64) {
 	if ok, err := s.anchorRecord(); err != nil || !ok {
 		t.Fatalf("first anchoring: %v %v", ok, err)
 	}
-	first, _, _ := s.SandboxManager.Store().Head()
+	first, _, _ := s.ActivityLog.Head()
 	writeRows(t, s, 2)
 	if ok, err := s.anchorRecord(); err != nil || !ok {
 		t.Fatalf("second anchoring: %v %v", ok, err)
@@ -291,16 +227,6 @@ func anchoredTwice(t *testing.T) (*CoreServer, int64) {
 		t.Fatalf("the record does not hold before anything is touched: %v", got)
 	}
 	return s, first
-}
-
-func recordDB(t *testing.T, s *CoreServer) *sql.DB {
-	t.Helper()
-	db, err := sql.Open("sqlite", filepath.Join(s.DataDir, "identity.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	return db
 }
 
 func mustBreak(t *testing.T, s *CoreServer, what string) {
@@ -318,7 +244,7 @@ func TestRemovingTheNewestAnchorAndItsRowsIsCaught(t *testing.T) {
 	if _, err := db.Exec(`DELETE FROM record_anchors WHERE seq = (SELECT MAX(seq) FROM record_anchors)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SandboxManager.Store().DB().Exec(`DELETE FROM invocation_log WHERE id > ?`, first); err != nil {
+	if _, err := s.ActivityLog.DB().Exec(`DELETE FROM invocation_log WHERE id > ?`, first); err != nil {
 		t.Fatal(err)
 	}
 	mustBreak(t, s, "removing the newest anchoring and the rows it fixed")
@@ -334,7 +260,7 @@ func TestTrimmingTheRecordIdentitysKeyLogIsCaught(t *testing.T) {
 	if _, err := db.Exec(`DELETE FROM kel WHERE aid = ? AND seq_num = (SELECT MAX(seq_num) FROM kel WHERE aid = ?)`, rec.AID, rec.AID); err != nil {
 		t.Fatal(err)
 	}
-	s.SandboxManager.Store().DB().Exec(`DELETE FROM invocation_log WHERE id > ?`, first)
+	s.ActivityLog.DB().Exec(`DELETE FROM invocation_log WHERE id > ?`, first)
 	mustBreak(t, s, "trimming the record identity's key log")
 }
 
@@ -451,43 +377,6 @@ func TestARecordIdentityLeftPartlyMadeIsRepaired(t *testing.T) {
 	}
 }
 
-// A conversation entry is anchored by its sequence: entries added after an
-// anchoring are counted unanchored until the next.
-func TestConversationEntriesAreAnchoredBySequence(t *testing.T) {
-	w := newTalkWorld(t)
-	w.s.DeclaredEntityType = "organization"
-	w.s.SandboxManager.SetEventSigner(&invocationSigner{s: w.s})
-	conv, _ := w.openedWith(t)
-	if ok, err := w.s.anchorRecord(); err != nil || !ok {
-		t.Fatalf("anchoring: %v %v", ok, err)
-	}
-	if got := chainSays(t, w.s); got["unanchored_entries"] != float64(0) {
-		t.Fatalf("after anchoring: %v", got)
-	}
-	if code, out := w.personSays(t, w.a, conv, "and another"); code != http.StatusCreated {
-		t.Fatalf("second message: %d %v", code, out)
-	}
-	if got := chainSays(t, w.s); got["unanchored_entries"] != float64(1) {
-		t.Fatalf("a new entry is not counted unanchored: %v", got)
-	}
-	if ok, err := w.s.anchorRecord(); err != nil || !ok {
-		t.Fatalf("anchoring again: %v %v", ok, err)
-	}
-	if got := chainSays(t, w.s); got["unanchored_entries"] != float64(0) || got["intact"] != true {
-		t.Fatalf("the new entry was not anchored: %v", got)
-	}
-}
-
-// A conversation's last entry is anchored before it can close by going quiet.
-func TestTheRecordIsAnchoredBeforeAQuietConversationCloses(t *testing.T) {
-	was := anchorInterval
-	anchorInterval = 2 * conversation.IdleClose
-	t.Cleanup(func() { anchorInterval = was })
-	if anchorTick() > conversation.IdleClose/2 {
-		t.Fatalf("anchoring every %s would let a conversation close unanchored", anchorTick())
-	}
-}
-
 // With no witnesses named, the report says the anchors are not held outside.
 func TestAnchorsWithNoWitnessesSaySo(t *testing.T) {
 	s := recordWorld(t)
@@ -574,13 +463,9 @@ func TestAnchorsAreHeldOutsideOnceTheirWitnessesReceiptThem(t *testing.T) {
 	}
 	s, _ := foundedWith(t, agentWithDerivedIdentity(t), names, 2)
 	s.DeclaredEntityType = "organization"
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir, ManifestsDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(m.Stop)
-	s.SandboxManager = m
-	m.SetEventSigner(&invocationSigner{s: s})
+	s.logForTest(t, s.DataDir)
+	s.vaultForTest(s.DataDir)
+	s.ActivityLog.SetEventSigner(&invocationSigner{s: s})
 	writeRows(t, s, 2)
 	if ok, err := s.anchorRecord(); err != nil || !ok {
 		t.Fatalf("anchoring: %v %v", ok, err)
@@ -624,7 +509,7 @@ func TestALostRecordIdentityIsNeverReplacedQuietly(t *testing.T) {
 	}
 	db := recordDB(t, s)
 	db.Exec(`DELETE FROM record_anchors`)
-	s.SandboxManager.Store().DB().Exec(`DELETE FROM invocation_log WHERE id > ?`, first)
+	s.ActivityLog.DB().Exec(`DELETE FROM invocation_log WHERE id > ?`, first)
 	mustBreak(t, s, "a lost record identity")
 	writeRows(t, s, 1)
 	if _, err := s.anchorRecord(); !errors.Is(err, errRecordGone) {
@@ -716,13 +601,9 @@ func TestTheWitnessesAreAskedForTheRecordsTip(t *testing.T) {
 	}
 	s, _ := foundedWith(t, agentWithDerivedIdentity(t), names, 1)
 	s.DeclaredEntityType = "organization"
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir, ManifestsDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(m.Stop)
-	s.SandboxManager = m
-	m.SetEventSigner(&invocationSigner{s: s})
+	s.logForTest(t, s.DataDir)
+	s.vaultForTest(s.DataDir)
+	s.ActivityLog.SetEventSigner(&invocationSigner{s: s})
 	sq := s.DataStore.(*store.SQLiteStore)
 	s.WitnessService = witness.NewService(witness.NewSQLiteStore(sq.DB()), sq, s.KeriDriver, witness.BackendDesktop)
 	for i, name := range names {
@@ -854,13 +735,9 @@ func TestCheckingWhileAnchoringRaisesNoFalseAlarm(t *testing.T) {
 	}
 	s, _ := foundedWith(t, agentWithDerivedIdentity(t), names, 1)
 	s.DeclaredEntityType = "organization"
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir, ManifestsDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(m.Stop)
-	s.SandboxManager = m
-	m.SetEventSigner(&invocationSigner{s: s})
+	s.logForTest(t, s.DataDir)
+	s.vaultForTest(s.DataDir)
+	s.ActivityLog.SetEventSigner(&invocationSigner{s: s})
 	sq := s.DataStore.(*store.SQLiteStore)
 	s.WitnessService = witness.NewService(witness.NewSQLiteStore(sq.DB()), sq, s.KeriDriver, witness.BackendDesktop)
 	s.DataStore.SaveContact(store.ContactRecord{AID: "EWitness0", OobiURL: "http://w0.test", Status: "active"})
@@ -950,13 +827,9 @@ func TestARealWitnessWitnessesTheRecord(t *testing.T) {
 	peer := startPeer(t, "witness")
 	s, _ := foundedWith(t, agentWithDerivedIdentity(t), []string{peer.witnessKey}, 1)
 	s.DeclaredEntityType = "organization"
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir, ManifestsDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(m.Stop)
-	s.SandboxManager = m
-	m.SetEventSigner(&invocationSigner{s: s})
+	s.logForTest(t, s.DataDir)
+	s.vaultForTest(s.DataDir)
+	s.ActivityLog.SetEventSigner(&invocationSigner{s: s})
 	sq := s.DataStore.(*store.SQLiteStore)
 	s.WitnessService = witness.NewService(witness.NewSQLiteStore(sq.DB()), sq, s.KeriDriver, witness.BackendDesktop)
 	s.DataStore.SaveContact(store.ContactRecord{AID: "EWitnessPeer", OobiURL: peer.base, Status: "accepted"})
@@ -1050,9 +923,9 @@ func TestWitnessingTheOwnLogKeepsTheRecordDue(t *testing.T) {
 	}
 	s.witnessRecord("EOwner", "ERecord", []string{"BWitness"}, 1)
 	s.witnessRecord("EOwner", "", []string{"BWitness"}, 1)
-	s.record.witnessMu.Lock()
-	defer s.record.witnessMu.Unlock()
-	if s.record.witnessJob.record != "ERecord" {
+	s.witnessing.witnessMu.Lock()
+	defer s.witnessing.witnessMu.Unlock()
+	if s.witnessing.witnessJob.record != "ERecord" {
 		t.Fatal("the record identity due to be witnessed was dropped")
 	}
 }
@@ -1102,13 +975,9 @@ func TestEnrolledWitnessesAreAskedToCoverTheRecord(t *testing.T) {
 	unwilling.svc.Store.SetConfig(witness.ConfigDelegates, "off")
 	s, _ := foundedWith(t, agentWithDerivedIdentity(t), []string{willing.witnessKey, unwilling.witnessKey}, 1)
 	s.DeclaredEntityType = "organization"
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir, ManifestsDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(m.Stop)
-	s.SandboxManager = m
-	m.SetEventSigner(&invocationSigner{s: s})
+	s.logForTest(t, s.DataDir)
+	s.vaultForTest(s.DataDir)
+	s.ActivityLog.SetEventSigner(&invocationSigner{s: s})
 	sq := s.DataStore.(*store.SQLiteStore)
 	s.WitnessService = witness.NewService(witness.NewSQLiteStore(sq.DB()), sq, s.KeriDriver, witness.BackendDesktop)
 	s.WitnessService.AskToCoverDelegates = s.anchorsItsRecord
@@ -1208,7 +1077,7 @@ func TestEveryIdentityAgentKeepsItsWitnessesUpToDate(t *testing.T) {
 				return nil, fmt.Errorf("offline")
 			}
 			if via == "issuing" {
-				if _, err := s.grantController(aGrant(GradeEnrolled), time.Now().UTC(), authority{}); err != nil {
+				if _, err := s.grantController(aGrant(GradeEnrolled), time.Now().UTC(), coretypes.Authority{}); err != nil {
 					t.Fatal(err)
 				}
 			} else {
@@ -1230,5 +1099,34 @@ func TestEveryIdentityAgentKeepsItsWitnessesUpToDate(t *testing.T) {
 			}
 			t.Fatalf("its own key log did not reach its witnesses by %s", via)
 		})
+	}
+}
+
+// An anchor that fixes conversation entries, checked where no add-on keeps
+// conversations, says they cannot be checked here: not broken, not tampered,
+// and not a pass. The log's own rows are checked as ever.
+func TestConversationsNoAddOnKeepsAreSaidToBeUnchecked(t *testing.T) {
+	s := recordWorld(t)
+	chain := fixedChains{"c1": {Seq: 2, Hash: "Ehead"}}
+	onlyAddons(t, Addon{ID: "keeps conversations", AnchoredChains: func(*CoreServer) (AnchoredChains, error) { return chain, nil }})
+	writeRows(t, s, 1)
+	s.anchorRecord()
+	if got := chainSays(t, s); got["intact"] != true || got["anchored_conversations_unchecked"] != nil {
+		t.Fatalf("with the add-on that keeps them, the conversations were not checked: %v", got)
+	}
+
+	onlyAddons(t)
+	got := chainSays(t, s)
+	if got["anchor_broken_at"] != nil || got["broken_at"] != nil {
+		t.Fatalf("conversations this Identity Agent cannot read were reported broken: %v", got)
+	}
+	if got["intact"] != false {
+		t.Fatalf("conversations this Identity Agent cannot read read as checked: %v", got)
+	}
+	if why, _ := got["anchored_conversations_unchecked"].(string); why == "" {
+		t.Fatalf("the report does not say the conversations were not checked: %v", got)
+	}
+	if got["anchored_through"] == float64(0) {
+		t.Fatalf("the log's rows were not checked against the anchor: %v", got)
 	}
 }

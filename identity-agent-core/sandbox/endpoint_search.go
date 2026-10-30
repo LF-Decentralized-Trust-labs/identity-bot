@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"identity-agent-core/permission"
 )
 
 // The search/describe meta-tools keep a caller's context cost constant as the
@@ -71,7 +73,7 @@ type searchCandidate struct {
 // the full catalog (registry-native records + plug-in capabilities), filtered to what
 // the caller is entitled to invoke. The retrieval strategy is hidden behind this
 // contract, so a smarter ranking can replace it without a contract change.
-func (m *Manager) SearchCapabilities(ctx context.Context, caller CallerContext, q SearchQuery) []CapabilitySummary {
+func (m *Manager) SearchCapabilities(ctx context.Context, caller permission.CallerContext, q SearchQuery) []CapabilitySummary {
 	limit := q.Limit
 	if limit <= 0 {
 		limit = searchDefaultLimit
@@ -126,7 +128,7 @@ func (m *Manager) SearchCapabilities(ctx context.Context, caller CallerContext, 
 // gated by the same entitlement check as execute. Not-found and not-entitled are
 // deliberately the same answer, so the catalog is not enumerable past a caller's
 // entitlements.
-func (m *Manager) DescribeCapability(ctx context.Context, caller CallerContext, capabilityID string) (*CapabilityDetail, error) {
+func (m *Manager) DescribeCapability(ctx context.Context, caller permission.CallerContext, capabilityID string) (*CapabilityDetail, error) {
 	auth := m.authz()
 
 	if provider, capDef, ok := m.findProvider(capabilityID); ok {

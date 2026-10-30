@@ -12,7 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"identity-agent-core/sandbox"
+	"identity-agent-core/permission"
 	"identity-agent-core/store"
 )
 
@@ -116,7 +116,7 @@ func TestOwnerOrItsControllerAdmitsNobodyElse(t *testing.T) {
 	if s.isOwnerOrItsController(session) {
 		t.Error("a browser session was treated as the owner or its controller")
 	}
-	scoped := withResolvedCaller(remote("GET", "/api/vault/credentials", ""), sandbox.CallerContext{CallerAID: "an-ai-agent", Scopes: []string{"vault.read"}, Remote: true})
+	scoped := withResolvedCaller(remote("GET", "/api/vault/credentials", ""), permission.CallerContext{CallerAID: "an-ai-agent", Scopes: []string{"vault.read"}, Remote: true})
 	if s.isOwnerOrItsController(scoped) {
 		t.Error("a caller holding a scoped token was treated as the owner or its controller")
 	}

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"identity-agent-core/iacrypto"
-	"identity-agent-core/sandbox"
+	"identity-agent-core/permission"
 )
 
 // registerSigner mints an ed25519 keypair, registers its public key under aid so
@@ -43,7 +43,7 @@ func signedEnvelopeRequest(t *testing.T, priv ed25519.PrivateKey, aid, method st
 func TestEnvelopeAbsentIsNoOp(t *testing.T) {
 	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	r := httptest.NewRequest("POST", "/api/mcp", nil)
-	caller := sandbox.CallerContext{CallerAID: "EAgent", AuthLevel: "bearer"}
+	caller := permission.CallerContext{CallerAID: "EAgent", AuthLevel: "bearer"}
 	if err := s.verifyRequestEnvelope(r, "tools/call", []byte("{}"), &caller); err != nil {
 		t.Fatalf("absent envelope must be a no-op, got %v", err)
 	}
@@ -67,7 +67,7 @@ func TestEnvelopeValidVerifies(t *testing.T) {
 	r.Header.Set(envSigHeader, env[0])
 	r.Header.Set(envNonceHeader, env[1])
 	r.Header.Set(envTSHeader, env[2])
-	caller := sandbox.CallerContext{CallerAID: "EAgentValid", AuthLevel: "bearer"}
+	caller := permission.CallerContext{CallerAID: "EAgentValid", AuthLevel: "bearer"}
 	if err := s.verifyRequestEnvelope(r, "tools/call", params, &caller); err != nil {
 		t.Fatalf("valid envelope should verify, got %v", err)
 	}
@@ -87,7 +87,7 @@ func TestEnvelopeStaleRejected(t *testing.T) {
 	r.Header.Set(envSigHeader, env[0])
 	r.Header.Set(envNonceHeader, env[1])
 	r.Header.Set(envTSHeader, env[2])
-	caller := sandbox.CallerContext{CallerAID: "EAgentStale"}
+	caller := permission.CallerContext{CallerAID: "EAgentStale"}
 	if err := s.verifyRequestEnvelope(r, "tools/call", params, &caller); err == nil {
 		t.Fatal("a stale timestamp must be rejected")
 	}
@@ -100,12 +100,12 @@ func TestEnvelopeReplayRejected(t *testing.T) {
 	nonce := "nonce-replay-once"
 	ts := strconv.FormatInt(time.Now().Unix(), 10)
 	env := signedEnvelopeRequest(t, priv, "EAgentReplay", "tools/call", params, nonce, ts)
-	build := func() (*sandbox.CallerContext, error) {
+	build := func() (*permission.CallerContext, error) {
 		r := httptest.NewRequest("POST", "/api/mcp", nil)
 		r.Header.Set(envSigHeader, env[0])
 		r.Header.Set(envNonceHeader, env[1])
 		r.Header.Set(envTSHeader, env[2])
-		caller := sandbox.CallerContext{CallerAID: "EAgentReplay"}
+		caller := permission.CallerContext{CallerAID: "EAgentReplay"}
 		return &caller, s.verifyRequestEnvelope(r, "tools/call", params, &caller)
 	}
 	if _, err := build(); err != nil {
@@ -127,7 +127,7 @@ func TestEnvelopeTamperedRejected(t *testing.T) {
 	r.Header.Set(envSigHeader, env[0])
 	r.Header.Set(envNonceHeader, env[1])
 	r.Header.Set(envTSHeader, env[2])
-	caller := sandbox.CallerContext{CallerAID: "EAgentTamper"}
+	caller := permission.CallerContext{CallerAID: "EAgentTamper"}
 	// Verify against DIFFERENT params than were signed → signature must fail.
 	if err := s.verifyRequestEnvelope(r, "tools/call", []byte(`{"capability_id":"infra.dns_record.delete"}`), &caller); err == nil {
 		t.Fatal("a signature over different params must be rejected")
@@ -146,7 +146,7 @@ func TestEnvelopeSignerMismatchRejected(t *testing.T) {
 	r.Header.Set(envNonceHeader, env[1])
 	r.Header.Set(envTSHeader, env[2])
 	// Caller authenticated as a DIFFERENT AID than the signer → reject.
-	caller := sandbox.CallerContext{CallerAID: "EAgentOther"}
+	caller := permission.CallerContext{CallerAID: "EAgentOther"}
 	if err := s.verifyRequestEnvelope(r, "tools/call", params, &caller); err == nil {
 		t.Fatal("signer AID not matching the authenticated caller must be rejected")
 	}

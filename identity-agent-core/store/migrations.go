@@ -9,7 +9,7 @@ import (
 )
 
 // identityMigrations defines the schema evolution for identity.db (Identity Core domain).
-// Follow the same versioned migration pattern as sandbox/migrations.go.
+// Follow the same versioned migration pattern as activitylog/migrations.go.
 var identityMigrations = []struct {
 	Version     int
 	Description string

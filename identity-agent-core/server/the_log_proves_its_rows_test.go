@@ -9,8 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"identity-agent-core/activitylog"
 	"identity-agent-core/keriengine"
-	"identity-agent-core/sandbox"
+	"identity-agent-core/permission"
 )
 
 func logWorld(t *testing.T) *CoreServer {
@@ -18,12 +19,9 @@ func logWorld(t *testing.T) *CoreServer {
 	s := agentWithDerivedIdentity(t)
 	s.KeriDriver = keriengine.New()
 	s.engineSigns()
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: s.DataDir, ManifestsDir: t.TempDir()})
-	if err != nil {
-		t.Skipf("sandbox manager unavailable: %v", err)
-	}
-	s.SandboxManager = m
-	m.SetEventSigner(&invocationSigner{s: s})
+	s.logForTest(t, s.DataDir)
+	s.vaultForTest(s.DataDir)
+	s.ActivityLog.SetEventSigner(&invocationSigner{s: s})
 	return s
 }
 
@@ -45,9 +43,9 @@ func askChain(t *testing.T, s *CoreServer) map[string]any {
 // re-made does not.
 func TestTheLogIsCheckedOnItsSignatures(t *testing.T) {
 	s := logWorld(t)
-	caller := sandbox.CallerContext{CallerAID: "EAgent", Reason: "test"}
+	caller := permission.CallerContext{CallerAID: "EAgent", Reason: "test"}
 	for _, id := range []string{"ai_agent.body.requested", "ai_agent.body.approved"} {
-		if s.SandboxManager.RecordGovernanceEvent(caller, id, "ok") == 0 {
+		if s.ActivityLog.RecordGovernanceEvent(caller, id, "ok") == 0 {
 			t.Fatal("event not written")
 		}
 	}
@@ -57,17 +55,17 @@ func TestTheLogIsCheckedOnItsSignatures(t *testing.T) {
 
 	// Rewrite the first row and re-link the second, as somebody with the
 	// database but not the signer's key would.
-	db := s.SandboxManager.Store().DB()
+	db := s.ActivityLog.DB()
 	var id1, id2 int64
 	var j1, j2 string
 	db.QueryRow(`SELECT id, event_json FROM invocation_log ORDER BY id ASC LIMIT 1`).Scan(&id1, &j1)
 	db.QueryRow(`SELECT id, event_json FROM invocation_log ORDER BY id DESC LIMIT 1`).Scan(&id2, &j2)
-	var e1, e2 sandbox.InvocationEvent
+	var e1, e2 activitylog.InvocationEvent
 	json.Unmarshal([]byte(j1), &e1)
 	json.Unmarshal([]byte(j2), &e2)
 	e1.ResultStatus = "denied"
 	b1, _ := json.Marshal(e1)
-	e2.PrevHash = sandbox.HashRecord(b1)
+	e2.PrevHash = activitylog.HashRecord(b1)
 	b2, _ := json.Marshal(e2)
 	db.Exec(`UPDATE invocation_log SET event_json = ? WHERE id = ?`, string(b1), id1)
 	db.Exec(`UPDATE invocation_log SET event_json = ? WHERE id = ?`, string(b2), id2)
@@ -93,7 +91,7 @@ func TestCheckingTheLogNeverMintsASigner(t *testing.T) {
 // database the log lives in, from the first event this agent signs.
 func TestTheChainStartIsKeptOutsideTheDatabase(t *testing.T) {
 	s := logWorld(t)
-	if s.SandboxManager.RecordGovernanceEvent(sandbox.CallerContext{CallerAID: "EAgent"}, "ai_agent.body.requested", "ok") == 0 {
+	if s.ActivityLog.RecordGovernanceEvent(permission.CallerContext{CallerAID: "EAgent"}, "ai_agent.body.requested", "ok") == 0 {
 		t.Fatal("event not written")
 	}
 	rec, found, err := readInvocationSignerRecord(s.DataDir)
@@ -108,7 +106,7 @@ func TestTheChainStartIsKeptOutsideTheDatabase(t *testing.T) {
 // A log that cannot be checked is reported as that, never as forged.
 func TestALogThatCannotBeCheckedIsNotCalledForged(t *testing.T) {
 	s := logWorld(t)
-	if s.SandboxManager.RecordGovernanceEvent(sandbox.CallerContext{CallerAID: "EAgent"}, "ai_agent.body.requested", "ok") == 0 {
+	if s.ActivityLog.RecordGovernanceEvent(permission.CallerContext{CallerAID: "EAgent"}, "ai_agent.body.requested", "ok") == 0 {
 		t.Fatal("event not written")
 	}
 	// The key cannot be derived without the root seed.
@@ -136,7 +134,7 @@ func TestANewSignerStampsWhereItsChainBegins(t *testing.T) {
 		t.Fatalf("a new signer did not stamp where its chain begins: %+v", rec.ChainStart)
 	}
 	// Somebody writes a row before the signer's first, posing as an old one.
-	if _, err := s.SandboxManager.Store().InsertInvocationEvent(sandbox.InvocationEvent{
+	if _, err := s.ActivityLog.InsertInvocationEvent(activitylog.InvocationEvent{
 		TS: "2026-01-01T00:00:00Z", CapabilityID: "forged", ResultStatus: "ok"}); err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +146,7 @@ func TestANewSignerStampsWhereItsChainBegins(t *testing.T) {
 // The stamped start's hash is filled in from the first row the signer writes.
 func TestTheStampedStartIsFilledInByTheFirstRow(t *testing.T) {
 	s := logWorld(t)
-	if s.SandboxManager.RecordGovernanceEvent(sandbox.CallerContext{CallerAID: "EAgent"}, "ai_agent.body.requested", "ok") == 0 {
+	if s.ActivityLog.RecordGovernanceEvent(permission.CallerContext{CallerAID: "EAgent"}, "ai_agent.body.requested", "ok") == 0 {
 		t.Fatal("event not written")
 	}
 	rec, _, _ := readInvocationSignerRecord(s.DataDir)

@@ -346,7 +346,7 @@ func TestSettingWhichHalfAComputerRunsIsNotReachableFromElsewhere(t *testing.T) 
 			t.Errorf("%s is reachable by a machine acting for somebody, so it could "+
 				"flip that gate on a computer it is not sitting at", route)
 		}
-		if _, ok := sessionForbidden[route]; !ok {
+		if _, ok := everySessionForbidden()[route]; !ok {
 			t.Errorf("%s is reachable from a browser session, which is not the app "+
 				"on this machine", route)
 		}

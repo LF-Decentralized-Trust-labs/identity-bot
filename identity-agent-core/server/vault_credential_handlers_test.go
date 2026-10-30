@@ -10,21 +10,17 @@ import (
 	"strings"
 	"testing"
 
-	"identity-agent-core/sandbox"
+	"identity-agent-core/vault"
 )
 
 func vaultTestServer(t *testing.T) *CoreServer {
 	t.Helper()
 	dir := t.TempDir()
-	mgr, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: dir})
-	if err != nil {
-		t.Fatalf("manager: %v", err)
-	}
-	t.Cleanup(mgr.Stop)
-	mgr.SetVaultKeyProvider(func() ([]byte, error) {
+	v := vault.NewCredentialVault(dir)
+	v.SetKeyProvider(func() ([]byte, error) {
 		return []byte("0123456789abcdef0123456789abcdef"), nil
 	})
-	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, SandboxManager: mgr}
+	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, Vault: v}
 }
 
 func postCredential(s *CoreServer, body map[string]any, remote bool) *httptest.ResponseRecorder {
@@ -53,7 +49,7 @@ func TestSetVaultCredentialWithDomains(t *testing.T) {
 		t.Fatalf("set: %d %s", w.Code, w.Body)
 	}
 
-	if got := s.SandboxManager.GetLLMAPIKey("cloudflare"); got != "cf-token-xyz" {
+	if got := s.Vault.GetAPIKey("cloudflare"); got != "cf-token-xyz" {
 		t.Fatalf("stored key mismatch: %q", got)
 	}
 	// Encrypted at rest: the token must not appear on disk, and no plaintext

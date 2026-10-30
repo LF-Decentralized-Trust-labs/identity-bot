@@ -21,31 +21,31 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
+	"identity-agent-core/activitylog"
 	"identity-agent-core/asset"
 	"identity-agent-core/avatar"
 	"identity-agent-core/backup"
-	"identity-agent-core/brainsignin"
 	"identity-agent-core/buildmode"
 	"identity-agent-core/drivers"
 	"identity-agent-core/endpoint"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/keriengine"
-	"identity-agent-core/lending"
 	"identity-agent-core/linkverifier"
 	"identity-agent-core/login"
 	"identity-agent-core/oidc"
 	"identity-agent-core/provider"
 	"identity-agent-core/recovery"
 	"identity-agent-core/relay"
-	"identity-agent-core/sandbox"
 	"identity-agent-core/schemas"
 	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
 	"identity-agent-core/tunnel"
 	"identity-agent-core/update"
+	"identity-agent-core/vault"
 	"identity-agent-core/watcher"
 	"identity-agent-core/witness"
+
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -57,21 +57,9 @@ type CoreServer struct {
 	// localOwnerSecret is what a request from this computer must carry to be
 	// the owner's (the_owner_at_this_computer.go).
 	localOwnerSecret string
-	// brainChecker, when set, replaces the providers a brain's sign-in is
-	// checked against (brain_sign_in_check.go); tests stand them up locally.
-	brainChecker *brainsignin.Checker
-	// githubAPI, when set, replaces GitHub's API address (github_access.go);
-	// tests stand GitHub up locally. Nothing a request sends can set it.
-	githubAPI string
-	// lendLedger is the one record of everything lent to AI agents' bodies —
-	// brains' sign-ins and services' access alike (lends.go), made once.
-	lendsOnce         sync.Once
-	lendLedger        *lending.Ledger
-	legacyLeasesMu    sync.Mutex
-	legacyLeasesMoved atomic.Bool
-	// modelCalls are the model calls under way for bodies whose brain's key
-	// stays here (model_calls_through_the_identity_agent.go).
-	modelCalls modelCallTable
+	// addonStates is what each add-on keeps for this server
+	// (addon_host.go).
+	addonStates addonStates
 	// Providers is the registry of operators this agent can draw services from.
 	// Loaded once at startup; the owner may add to it at runtime.
 	Providers *provider.Registry
@@ -97,11 +85,16 @@ type CoreServer struct {
 	// record, which the relay manager and the owner's routes both change.
 	relayRecordMu   sync.Mutex
 	EndpointService *endpoint.EndpointService
-	SandboxManager  *sandbox.Manager
-	EventHub        *EventHub
-	StartTime       time.Time
-	Port            int
-	DataDir         string
+	// Vault is the credential vault: what this Identity Agent keeps for
+	// services, sealed under a key derived from the identity's root seed.
+	Vault *vault.CredentialVault
+	// ActivityLog is the signed record of who did what, under whose
+	// authority, and of the governance decisions taken about them.
+	ActivityLog *activitylog.Log
+	EventHub    *EventHub
+	StartTime   time.Time
+	Port        int
+	DataDir     string
 	// registeredKeys answers for identities that published their key here
 	// through /_register, each one proved by its key log. See public_didwebs.go.
 	registeredKeysOnce sync.Once
@@ -224,6 +217,8 @@ type CoreServer struct {
 	grantsMu sync.RWMutex
 	// record is the state of the record's anchoring.
 	record recordState
+	// witnessing is the worker that keeps the witnesses up to date.
+	witnessing witnessState
 	// edgesSince is when the first credential naming who authorised it was
 	// issued here; see issuedUnderFirstVersionTooLate.
 	edgesSince atomic.Value
@@ -306,6 +301,8 @@ func DefaultConfig() Config {
 }
 
 func New(cfg Config) (*CoreServer, error) {
+	// The add-ons included are settled now: none joins once a server exists.
+	sealAddons()
 	ctx, cancel := context.WithCancel(context.Background())
 
 	dataStore, err := store.NewSQLiteStore(cfg.DataDir)
@@ -494,51 +491,38 @@ func New(cfg Config) (*CoreServer, error) {
 		},
 	})
 
-	// Plug-in manifests directory. Defaults to ./manifests (relative to the
-	// working dir); MANIFESTS_DIR overrides it so a service-managed agent (whose
-	// working dir it doesn't control) can point at an absolute plug-in location.
-	manifestsDir := filepath.Join(".", "manifests")
-	if d := os.Getenv("MANIFESTS_DIR"); d != "" {
-		manifestsDir = d
-	}
-	sbxMgr, err := sandbox.NewManager(sandbox.ManagerConfig{
-		DataDir:      cfg.DataDir,
-		ManifestsDir: manifestsDir,
+	// The credential vault stays encrypted at rest and unlocks lazily, once
+	// the identity's root seed is there to derive its key from.
+	s.Vault = vault.NewCredentialVault(cfg.DataDir)
+	s.Vault.SetKeyProvider(func() ([]byte, error) {
+		rootSeed, rerr := secureenclave.LoadRootSeed(cfg.DataDir)
+		if rerr != nil {
+			return nil, rerr
+		}
+		return backup.DeriveVaultKEK(rootSeed)
 	})
-	if err != nil {
-		log.Printf("[identity-agent-core] Sandbox manager init failed (non-fatal): %v", err)
+	// The activity log, signed by this agent's log signer. Opened before
+	// anything that writes to it.
+	if al, err := activitylog.Open(cfg.DataDir); err != nil {
+		log.Printf("[identity-agent-core] Activity log init failed (non-fatal): %v", err)
 	} else {
-		s.SandboxManager = sbxMgr
-		s.SandboxManager.SetEventSigner(&invocationSigner{s: s})
+		s.ActivityLog = al
+		s.ActivityLog.SetEventSigner(&invocationSigner{s: s})
 		// A log signed before where its chain begins was kept outside the
 		// database gets that start now, once, from the first signed row.
-		if err := s.SandboxManager.EnsureChainStart(); err != nil {
+		if err := s.ActivityLog.EnsureChainStart(); err != nil {
 			log.Printf("[identity-agent-core] could not record where the log's signed chain begins: %v", err)
 		}
-		// The endpoint uses the structural authorizer by default (host-control never
-		// remote; a remote caller must hold the capability in its grant). An overlay
-		// may inject a richer authorizer via SetAuthorizer.
-		s.SandboxManager.SetVaultKeyProvider(func() ([]byte, error) {
-			rootSeed, rerr := secureenclave.LoadRootSeed(cfg.DataDir)
-			if rerr != nil {
-				return nil, rerr
-			}
-			return backup.DeriveVaultKEK(rootSeed)
-		})
-		if startErr := s.SandboxManager.Start(); startErr != nil {
-			log.Printf("[identity-agent-core] Sandbox manager start failed (non-fatal): %v", startErr)
-		}
 	}
-
 	if err := s.initLoginHandler(); err != nil {
 		log.Printf("[identity-agent-core] login handler init failed (non-fatal): %v", err)
 	}
 	if err := s.initAssetHandler(); err != nil {
 		log.Printf("[identity-agent-core] asset handler init failed (non-fatal): %v", err)
 	}
-	// A key an earlier version kept on an AI agent's record moves into the
-	// vault, where every other sign-in is kept.
-	s.moveBrainSecretsIntoTheVault()
+	// What each add-on readies once the core's stores, vault and asset
+	// handler are made.
+	s.prepareAddons()
 	if err := s.initOIDCHandler(); err != nil {
 		log.Printf("[identity-agent-core] OIDC adapter init failed (non-fatal): %v", err)
 	}
@@ -573,6 +557,15 @@ func New(cfg Config) (*CoreServer, error) {
 	s.flutterWebDir = cfg.FlutterWebDir
 	s.requireOwnerAtInception = cfg.RequireOwnerAtInception
 
+	// Checked as the server is made, before anything is served: no route is
+	// mounted twice; every add-on serves only under the path prefixes it
+	// owns, which overlap neither another add-on's nor any path a core route
+	// can match; and an add-on makes no public or scoped entry for a route
+	// that is not its own. A server breaking any of these is not made. The
+	// routes an overlay adds later are checked by Start.
+	if err := s.addonsOpeningOthersRoutes(s.buildRouter(""), nil); err != nil {
+		panic("server.New: " + err.Error())
+	}
 	return s, nil
 }
 
@@ -594,6 +587,11 @@ func (s *CoreServer) Start() error {
 	// registered. Idempotent-safe: Start guards against double-run above.
 	if s.router == nil {
 		s.router = s.buildRouter(s.flutterWebDir)
+	}
+	// Checked again with every route an overlay added since New: a prefix
+	// an add-on opens must not cover one of the overlay's either.
+	if err := s.addonsOpeningOthersRoutes(s.router, s.extraRoutes); err != nil {
+		return err
 	}
 
 	// Try the configured port first, then fallback to 5051–5059
@@ -765,7 +763,7 @@ func (s *CoreServer) Start() error {
 	stop := s.anchorStop
 	s.anchorStopMu.Unlock()
 	s.inBackground(func(context.Context) { s.keepAnchoring(stop) })
-	s.inBackground(func(context.Context) { s.keepSweepingLends(stop) })
+	s.runAddons(stop)
 
 	s.httpSrv = s.httpServer()
 	go func() {
@@ -820,8 +818,11 @@ func (s *CoreServer) Stop() {
 		s.UpdateService.Stop()
 	}
 
-	if s.SandboxManager != nil {
-		s.SandboxManager.Stop()
+	// What add-ons started when the server was made ends here, before the
+	// activity log they write to closes.
+	s.stopAddons()
+	if s.ActivityLog != nil {
+		s.ActivityLog.Close()
 	}
 
 	if s.TunnelManager != nil {
@@ -902,6 +903,12 @@ func corsPolicy() func(http.Handler) http.Handler {
 }
 
 func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
+	return s.buildRouterOf(flutterWebDir, registeredAddons(), s.extraRoutes)
+}
+
+// buildRouterOf is the router with only addons' routes and only the overlay
+// routes extras, for telling whose a route is (add_ons.go).
+func (s *CoreServer) buildRouterOf(flutterWebDir string, addons []Addon, extras []func(chi.Router)) chi.Router {
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
@@ -1134,10 +1141,10 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		r.Delete("/pending-requests/{aid}", s.handleDeletePendingRequest)
 		r.Post("/reset", s.handleReset)
 
-		s.sandboxRoutes(r)
+		s.mountVaultRoutes(r)
+		s.mountDIDCommRoutes(r)
 		s.guardianshipRoutes(r)
 		s.serviceProviderRoutes(r)
-		s.aiMemoryRoutes(r)
 		s.mountBackupRoutes(r)
 		s.mountRecoveryRoutes(r)
 		r.Get("/ws/events", s.handleWebSocketEvents)
@@ -1165,18 +1172,19 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		s.mountProviderRoutes(r)
 		s.mountSigningRequestRoutes(r)
 		s.mountUpdateRoutes(r)
+		// The activity log is the core's: every build serves it.
+		s.auditRoutes(r)
 
-		// Overlay-registered routes (MountExtraRoutes) mount last, under /api.
-		for _, fn := range s.extraRoutes {
+		// Add-ons' routes, then overlay-registered routes (MountExtraRoutes)
+		// mount last, under /api.
+		s.mountAddonRoutes(r, addons)
+		for _, fn := range extras {
 			fn(r)
 		}
 	})
 
-	s.traceRoutes(r)
-	s.llmRoutes(r)
-
-	// Display reverse proxy: intercepts container API calls to serve from ai-memory.db
-	r.HandleFunc("/apps/{app_id}/*", s.handleAppDisplayProxy)
+	// Add-ons' routes outside /api.
+	s.mountAddonRootRoutes(r, addons)
 
 	// /public/oobi/{aid} — public namespace: KERI OOBI endpoint shared with external agents.
 	r.Get("/public/oobi/{aid}", s.handleOobiServe)
@@ -1314,13 +1322,16 @@ type HealthResponse struct {
 }
 
 type CoreInfoResponse struct {
-	Name         string      `json:"name"`
-	Description  string      `json:"description"`
-	Version      string      `json:"version"`
-	Phase        string      `json:"phase"`
-	Capabilities []string    `json:"capabilities"`
-	Backend      BackendInfo `json:"backend"`
-	Driver       DriverInfo  `json:"driver,omitempty"`
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	Version      string   `json:"version"`
+	Phase        string   `json:"phase"`
+	Capabilities []string `json:"capabilities"`
+	// AddOns are the IDs of the add-ons this Identity Agent includes
+	// (Addon.ID), so an app shows only what is there.
+	AddOns  []string    `json:"add_ons"`
+	Backend BackendInfo `json:"backend"`
+	Driver  DriverInfo  `json:"driver,omitempty"`
 }
 
 type BackendInfo struct {
@@ -1476,11 +1487,11 @@ func (s *CoreServer) handleInfo(w http.ResponseWriter, r *http.Request) {
 			"contacts",
 			"oobi",
 			"tunneling",
-			"sandbox_plugins",
 			"pairwise_aids",
 			// Transaction hash receipts (pointer/stub) — primitives (secureenclave + blake3) reused when built
 			// Governance policy config (pointer/stub) — LLM egress structurally denied until the governance gateway strip-gate
 		},
+		AddOns: addonIDs(),
 		Backend: BackendInfo{
 			Mode:      "primary_active",
 			Storage:   "file-based (badgerdb pending)",

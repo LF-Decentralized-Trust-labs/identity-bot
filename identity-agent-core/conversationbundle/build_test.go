@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"identity-agent-core/activitylog"
 	"identity-agent-core/agentmessage"
 	"identity-agent-core/didcomm"
-	"identity-agent-core/sandbox"
 
 	keri "github.com/grapeid/keri-go"
 )
@@ -40,7 +40,7 @@ type aStore struct {
 	credentials map[string]Credential // SAID → the credential as issued
 	owner       *Owner
 	anchored    bool
-	logRows     []sandbox.StoredRow
+	logRows     []activitylog.StoredRow
 	asked       []string // the key logs asked for, in order
 	fail        map[string]error
 	// The credentials the conversation rests on, by role.
@@ -73,7 +73,7 @@ func newStore(t *testing.T) *aStore {
 		credentials: map[string]Credential{},
 		owner:       &Owner{AID: "EOWNER", Key: "DOWNER"},
 		anchored:    true,
-		logRows:     []sandbox.StoredRow{{ID: 7}, {ID: 8}},
+		logRows:     []activitylog.StoredRow{{ID: 7}, {ID: 8}},
 		fail:        map[string]error{},
 	}
 	const dt = `"dt":"2026-10-24T00:00:00Z"`

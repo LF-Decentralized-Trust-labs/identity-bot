@@ -6,10 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	keri "github.com/grapeid/keri-go"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/recovery"
-	"identity-agent-core/sandbox"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,6 +16,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	keri "github.com/grapeid/keri-go"
 
 	"identity-agent-core/drivers"
 	"identity-agent-core/keriengine"
@@ -39,7 +39,7 @@ type twoCores struct {
 
 func newTwoCores(t *testing.T) *twoCores {
 	t.Helper()
-	w := newTalkWorld(t)
+	w := newControllerWorld(t)
 	resetSeenSignatures(t)
 	device := w.s
 	device.localOwnerSecret = testOwnerSecret
@@ -83,12 +83,8 @@ func (c *twoCores) openRequester(t *testing.T) *CoreServer {
 	if err := r.initAssetHandler(); err != nil {
 		t.Fatal(err)
 	}
-	mgr, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: c.dir})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(mgr.Stop)
-	r.SandboxManager = mgr
+	r.logForTest(t, c.dir)
+	r.vaultForTest(c.dir)
 	r.router = r.buildRouter("")
 	r.fetchSignedEvent = func(aid string, sn int) []heldEvent {
 		if c.noWitnesses {

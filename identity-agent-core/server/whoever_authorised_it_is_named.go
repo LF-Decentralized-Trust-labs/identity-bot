@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"identity-agent-core/authorisation"
+	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/schemas"
 	"identity-agent-core/store"
 
@@ -40,37 +41,15 @@ import (
 // the issuer is the authority, and authorisation.Check says so rather than
 // reporting it checked.
 
-// authority is who authorised a credential.
-type authority struct {
-	// ControllerGrant is the Controller Grant of the machine the request came
-	// from. Empty for an owner-signed request, and for a machine whose grant
-	// is waiting for the device that holds the identity's key.
-	ControllerGrant string
-	// Request is the request as it was signed. Nil when the identity's own
-	// device asked without signing.
-	Request *signedRequest
-	// About is what the request named as the thing it acts on.
-	About string
-}
-
-// signedRequest is a request exactly as it was signed, with its body.
-type signedRequest struct {
-	Kind      string `json:"kind"`
-	Signer    string `json:"signer"`
-	Signed    string `json:"signed"`
-	Signature string `json:"signature"`
-	Body      string `json:"body"`
-}
-
 // authorityOf is who authorised r, read before the handler reads the body.
 // For a machine's request it also holds the machine's grant against being
 // revoked, re-issued or replaced until release is called, so a credential is
 // never issued on a grant withdrawn while it was being issued.
-func (s *CoreServer) authorityOf(r *http.Request) (authority, func(), error) {
+func (s *CoreServer) authorityOf(r *http.Request) (coretypes.Authority, func(), error) {
 	release := func() {}
 	body, err := readSignedBody(r)
 	if err != nil {
-		return authority{}, release, err
+		return coretypes.Authority{}, release, err
 	}
 	if grant, ok := TheControllerThatAsked(r); ok {
 		s.grantsMu.RLock()
@@ -79,35 +58,35 @@ func (s *CoreServer) authorityOf(r *http.Request) (authority, func(), error) {
 		switch {
 		case err != nil:
 			release()
-			return authority{}, func() {}, err
+			return coretypes.Authority{}, func() {}, err
 		case !had:
 			release()
-			return authority{}, func() {}, fmt.Errorf("this machine's grant has been removed")
+			return coretypes.Authority{}, func() {}, fmt.Errorf("this machine's grant has been removed")
 		}
 		// A mark that the grant waits for another device is believed only
 		// where the key really is elsewhere.
 		if current.CredentialSAID == "" && (!current.CredentialPending || !s.keyIsElsewhere()) {
 			release()
-			return authority{}, func() {}, fmt.Errorf("this machine was paired before machines were given grants, and needs the owner's approval before what it asks for can rest on it")
+			return coretypes.Authority{}, func() {}, fmt.Errorf("this machine was paired before machines were given grants, and needs the owner's approval before what it asks for can rest on it")
 		}
 		if current.CredentialSAID != "" {
 			if err := s.grantStillStands(current.CredentialSAID); err != nil {
 				release()
-				return authority{}, func() {}, err
+				return coretypes.Authority{}, func() {}, err
 			}
 			if err := s.rowIsItsGrant(current); err != nil {
 				release()
-				return authority{}, func() {}, err
+				return coretypes.Authority{}, func() {}, err
 			}
 		}
 		signed, sig, err := s.theRequestAsSigned(r, grant)
 		if err != nil {
 			release()
-			return authority{}, func() {}, err
+			return coretypes.Authority{}, func() {}, err
 		}
-		return authority{
+		return coretypes.Authority{
 			ControllerGrant: current.CredentialSAID,
-			Request:         &signedRequest{Kind: "controller", Signer: grant.ControllerAID, Signed: signed, Signature: sig, Body: string(body)},
+			Request:         &coretypes.SignedRequest{Kind: "controller", Signer: grant.ControllerAID, Signed: signed, Signature: sig, Body: string(body)},
 		}, release, nil
 	}
 	// Admitted by the identity's own key, the request kept as it was signed.
@@ -117,13 +96,13 @@ func (s *CoreServer) authorityOf(r *http.Request) (authority, func(), error) {
 			owner = oa.AID
 		}
 		stamp := strings.TrimSpace(r.Header.Get(headerOwnerTimestamp))
-		return authority{Request: &signedRequest{
+		return coretypes.Authority{Request: &coretypes.SignedRequest{
 			Kind: "owner", Signer: owner, Signature: sig, Body: string(body),
 			Signed: canonicalOwnerRequest(strings.TrimSpace(r.Header.Get(headerOwnerFor)),
 				r.Method, r.URL.Path, stamp, body),
 		}}, release, nil
 	}
-	return authority{}, release, nil
+	return coretypes.Authority{}, release, nil
 }
 
 // theRequestAsSigned is the string a controller signed for r and its
@@ -158,10 +137,10 @@ func (s *CoreServer) grantStillStands(said string) error {
 	return nil
 }
 
-// name writes the authority into a credential about to be issued: an edge to
+// nameAuthority writes the authority into a credential about to be issued: an edge to
 // the Controller Grant, and the signed request and what it named among its
 // attributes. A schema that admits neither is left as it is.
-func (a authority) name(kind *schemas.AssetGrant, claims map[string]interface{}) map[string]interface{} {
+func nameAuthority(a coretypes.Authority, kind *schemas.AssetGrant, claims map[string]interface{}) map[string]interface{} {
 	if !kind.HasEdges() {
 		return nil
 	}
@@ -190,7 +169,7 @@ func (a authority) name(kind *schemas.AssetGrant, claims map[string]interface{})
 }
 
 // checkAuthorisation applies authorisation.Check to a credential just issued.
-func (s *CoreServer) checkAuthorisation(said string, by authority) error {
+func (s *CoreServer) checkAuthorisation(said string, by coretypes.Authority) error {
 	if by.Request == nil {
 		return nil
 	}
@@ -210,7 +189,7 @@ func (s *CoreServer) checkAuthorisation(said string, by authority) error {
 // revocation is read from where each is anchored in the issuer's key log;
 // without them, for a credential built and not yet appended, from the times
 // the grant's log states.
-func (s *CoreServer) checkAuthorisationOf(acdc []byte, issuer, registry, said string, by authority) error {
+func (s *CoreServer) checkAuthorisationOf(acdc []byte, issuer, registry, said string, by coretypes.Authority) error {
 	if by.Request == nil {
 		return nil
 	}
@@ -326,7 +305,7 @@ var errKeyElsewhere = errors.New("the identity's key is held on another device")
 // Where the identity's key is held on another device, the grant is recorded
 // with its credential pending on that device, and nothing is written into the
 // key log here.
-func (s *CoreServer) grantController(g ControllerGrant, now time.Time, by authority) (ControllerGrant, error) {
+func (s *CoreServer) grantController(g ControllerGrant, now time.Time, by coretypes.Authority) (ControllerGrant, error) {
 	s.grantsMu.Lock()
 	defer s.grantsMu.Unlock()
 	checked, err := s.controllers().Check(g, now)
@@ -388,7 +367,7 @@ func (s *CoreServer) grantController(g ControllerGrant, now time.Time, by author
 }
 
 // issueControllerGrant issues the credential for a grant.
-func (s *CoreServer) issueControllerGrant(g ControllerGrant, by authority) (string, error) {
+func (s *CoreServer) issueControllerGrant(g ControllerGrant, by coretypes.Authority) (string, error) {
 	if s.DataStore == nil || s.KeriDriver == nil {
 		return "", fmt.Errorf("this Identity Agent has no key log to anchor the grant in")
 	}
@@ -464,7 +443,7 @@ func (s *CoreServer) bindSigner(aid, signer string) (ControllerGrant, error) {
 		if err := s.rowIsItsGrant(g); err != nil {
 			return g, err
 		}
-		said, err := s.issueControllerGrant(bound, authority{About: bound.ControllerAID})
+		said, err := s.issueControllerGrant(bound, coretypes.Authority{About: bound.ControllerAID})
 		if err != nil {
 			return g, fmt.Errorf("the machine's grant could not be re-issued to name its signer: %w", err)
 		}
@@ -565,33 +544,16 @@ func (s *CoreServer) handleGrantsAwaitingApproval(w http.ResponseWriter, r *http
 			machines = append(machines, m)
 		}
 	}
-	// Every AI agent with no usable grant, whether it holds a token or
-	// authenticates by its own signature.
-	agents := []map[string]any{}
-	if s.assetHandler != nil && s.KeriDriver != nil {
-		tokenWithout := map[string]bool{}
-		mcpTokensMu.Lock()
-		for _, t := range s.loadMCPTokens() {
-			if t.AgentAID != "" && t.GrantSAID == "" {
-				tokenWithout[t.AssetID] = true
+	// What waits for a grant an add-on issues, under its key. AI agents are
+	// always listed, as none where no add-on here makes them.
+	out := map[string]any{"machines": machines, "agents": []map[string]any{}}
+	for _, a := range registeredAddons() {
+		for _, g := range a.GrantKinds {
+			if g.Awaiting != nil && g.AwaitingKey != "" {
+				out[g.AwaitingKey] = g.Awaiting(s)
 			}
-		}
-		mcpTokensMu.Unlock()
-		for _, a := range s.assetHandler.ListAgents() {
-			if s.agentStatus(a.PairwiseAID) == "revoked" {
-				continue
-			}
-			if !tokenWithout[a.ID] && s.findCapabilityGrant(a.PairwiseAID) != nil {
-				continue
-			}
-			agents = append(agents, map[string]any{
-				"asset_id": a.ID, "name": a.DisplayName, "agent_aid": a.PairwiseAID,
-				"capabilities": a.Capabilities, "resource_constraints": nonNilConstraints(a.GrantConstraints),
-				"awaiting": s.awaitingFor(a.PairwiseAID, s.agentGrantPendingFor(a.ID)),
-			})
 		}
 	}
-	out := map[string]any{"machines": machines, "agents": agents}
 	for k, v := range s.keyLogReport() {
 		out[k] = v
 	}
@@ -645,6 +607,163 @@ func sameMoment(stated string, at time.Time) bool {
 func (s *CoreServer) isActiveSigner(aid string) bool {
 	for _, p := range s.signers() {
 		if p.AID == aid {
+			return true
+		}
+	}
+	return false
+}
+
+func nonNilConstraints(c map[string]interface{}) map[string]interface{} {
+	if c == nil {
+		return map[string]interface{}{}
+	}
+	return c
+}
+
+// signers are the people who sign for the organisation: every active signer
+// on its roster, and its owner. The owner counts whether or not founding put
+// them on the roster, because the organisation's own key log names them, which
+// is the strongest proof of a person it has. Their standing says which, so the
+// record shows what the proof is.
+func (s *CoreServer) signers() []coretypes.Signer {
+	var out []coretypes.Signer
+	seen := map[string]bool{}
+	if s.assetHandler != nil {
+		for _, e := range s.assetHandler.Store.ListEmployees() {
+			if e.IsSigner && e.Status == "active" {
+				out = append(out, coretypes.Signer{AID: e.PairwiseAID, Standing: "signer", Credential: e.VouchSig, Name: e.Name})
+				seen[e.PairwiseAID] = true
+			}
+		}
+	}
+	if owner, ok := s.theOwner(); ok && !seen[owner] {
+		out = append(out, coretypes.Signer{AID: owner, Standing: "owner", Name: "The owner"})
+	}
+	return out
+}
+
+// onlyActiveSigner is the organisation's signer when it has exactly one, and
+// empty otherwise.
+func (s *CoreServer) onlyActiveSigner() string {
+	if signers := s.signers(); len(signers) == 1 {
+		return signers[0].AID
+	}
+	return ""
+}
+
+// theOwner is the person this organisation answers to: the owner its own
+// inception event names, or, with no such anchor, the one sealed when it was
+// provisioned. Never the organisation itself, which is what ownerAuthority
+// falls back to when nobody was named.
+func (s *CoreServer) theOwner() (string, bool) {
+	oa, err := s.ownerAuthority()
+	if err != nil || oa == nil || oa.AID == "" {
+		return "", false
+	}
+	if s.DataStore != nil {
+		if id, _ := s.DataStore.GetIdentity(); id != nil && id.AID == oa.AID {
+			return "", false
+		}
+	}
+	return oa.AID, true
+}
+
+// errNoProvablePerson is a request that does not come from a person the
+// organisation can prove.
+var errNoProvablePerson = errors.New("a person speaks to an AI agent from an app paired to this " +
+	"organisation, so the record can show which person asked")
+
+// thePersonAsking is the person behind a request a controller signed, and the
+// controller's signature as proof of what they said.
+func (s *CoreServer) thePersonAsking(r *http.Request) (coretypes.Signer, *coretypes.ControllerProof, error) {
+	grant, ok := TheControllerThatAsked(r)
+	if !ok {
+		return coretypes.Signer{}, nil, errNoProvablePerson
+	}
+	// The person is read from the machine's record only where that record is
+	// what its grant says: a signer or an expiry written into the file is
+	// refused, not attributed. A machine with no grant awaits the owner's
+	// approval; one whose grant waits for another device is believed only
+	// where the key really is elsewhere.
+	if current, had, err := s.controllers().Get(grant.ControllerAID); err == nil && had {
+		switch {
+		case current.CredentialSAID != "":
+			if err := s.rowIsItsGrant(current); err != nil {
+				return coretypes.Signer{}, nil, err
+			}
+		case !current.CredentialPending || !s.keyIsElsewhere():
+			return coretypes.Signer{}, nil, fmt.Errorf("this machine was paired before machines were given grants, and awaits the owner's approval")
+		}
+		grant = current
+	}
+	person, err := s.signerOf(grant)
+	if err != nil {
+		return coretypes.Signer{}, nil, err
+	}
+	// Settling the signer re-issues the machine's grant, so the grant named is
+	// read again rather than taken from before.
+	if g, ok, err := s.controllers().Get(grant.ControllerAID); err == nil && ok {
+		grant.CredentialSAID = g.CredentialSAID
+	}
+	signed, sig, err := s.theRequestAsSigned(r, grant)
+	if err != nil {
+		return coretypes.Signer{}, nil, err
+	}
+	body, err := readSignedBody(r)
+	if err != nil {
+		return coretypes.Signer{}, nil, err
+	}
+	return person, &coretypes.ControllerProof{
+		Controller: grant.ControllerAID, PublicKey: grant.PublicKey, SignedString: signed,
+		Signature: sig, RequestBytes: body, ControllerGrant: grant.CredentialSAID,
+	}, nil
+}
+
+// signerOf is the signer a controller belongs to: the one its grant names.
+// A grant that names none is bound, the first time it is needed, to the
+// organisation's only signer — so the machine keeps speaking as that person
+// whoever joins later, rather than as whoever happens to be the only signer
+// at the time of each message.
+func (s *CoreServer) signerOf(g ControllerGrant) (coretypes.Signer, error) {
+	signers := s.signers()
+	if g.Signer != "" {
+		for _, p := range signers {
+			if p.AID == g.Signer {
+				return p, nil
+			}
+		}
+		return coretypes.Signer{}, fmt.Errorf("the signer this app belongs to is no longer an active signer of the organisation")
+	}
+	switch len(signers) {
+	case 0:
+		return coretypes.Signer{}, fmt.Errorf("this organisation has no signer on its roster and names no owner, " +
+			"so nobody it can prove is asking. A signer joins by accepting the organisation's signer invitation from their own identity")
+	case 1:
+		if _, err := s.bindSigner(g.ControllerAID, signers[0].AID); err != nil {
+			return coretypes.Signer{}, fmt.Errorf("which signer this app belongs to could not be recorded: %w", err)
+		}
+		return signers[0], nil
+	}
+	return coretypes.Signer{}, fmt.Errorf("this organisation has more than one signer, and this app has not " +
+		"been tied to one of them, so the record could not say which person asked")
+}
+
+// personStillStands reports whether the person who opened a conversation is
+// still someone the organisation can prove — checked on every ask made in
+// their name, not only when they opened it.
+func (s *CoreServer) personStillStands(p coretypes.Signer) bool {
+	if p.AID == "" {
+		return false
+	}
+	if p.Standing == "owner" {
+		owner, ok := s.theOwner()
+		return ok && owner == p.AID
+	}
+	if s.assetHandler == nil {
+		return false
+	}
+	for _, e := range s.assetHandler.Store.ListEmployees() {
+		if e.PairwiseAID == p.AID && e.Status == "active" && (p.Standing != "signer" || e.IsSigner) {
 			return true
 		}
 	}

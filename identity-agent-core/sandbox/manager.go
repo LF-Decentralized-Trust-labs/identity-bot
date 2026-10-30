@@ -14,8 +14,9 @@ import (
 	"syscall"
 	"time"
 
+	"identity-agent-core/activitylog"
 	"identity-agent-core/appcall"
-	"identity-agent-core/brainsignin"
+	"identity-agent-core/vault"
 )
 
 // BackendLLMInstanceID and BackendLLMAppID identify the Identity Agent's own
@@ -35,12 +36,11 @@ type InstallProgressInfo struct {
 
 type Manager struct {
 	store *SandboxStore
-	// auditMu serialises audit writes. The invocation log is a hash chain, so two
-	// concurrent writers reading the same predecessor would fork it silently.
-	auditMu            sync.Mutex
+	// log is the activity log every governed invocation is written to.
+	log                *activitylog.Log
 	policy             *PolicyEngine
 	eventBus           *EventBus
-	credentials        *CredentialVault
+	credentials        *vault.CredentialVault
 	proxy              *ProxyManager
 	tracer             *Tracer
 	manifests          map[string]*AppManifest
@@ -54,23 +54,39 @@ type Manager struct {
 	installProgressMap sync.Map          // map[appID string]*InstallProgressInfo
 	invoker            CapabilityInvoker // governed capability routing; nil = default HTTP invoker
 	authorizer         Authorizer        // gateway decision seam; nil = structural default (governance gateway injects the real one)
-	eventSigner        EventSigner       // invocation-log signing identity; nil = events written unsigned (degraded)
 }
 
 type ManagerConfig struct {
 	DataDir      string
 	ManifestsDir string
+	// Log is the Identity Agent's activity log, which every governed
+	// invocation is written to, and whose database the manager keeps its own
+	// tables in. Nil opens the log kept in DataDir, as a manager made on its
+	// own needs.
+	Log *activitylog.Log
+	// Vault is the Identity Agent's credential vault, which the proxy adds
+	// credentials from. Nil opens the vault kept in DataDir, as a manager
+	// made on its own needs.
+	Vault *vault.CredentialVault
 }
 
 func NewManager(cfg ManagerConfig) (*Manager, error) {
-	store, err := NewSandboxStore(cfg.DataDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize sandbox store: %w", err)
+	var store *SandboxStore
+	if cfg.Log != nil {
+		store = NewSandboxStoreOn(cfg.Log)
+	} else {
+		var err error
+		if store, err = NewSandboxStore(cfg.DataDir); err != nil {
+			return nil, fmt.Errorf("failed to initialize sandbox store: %w", err)
+		}
 	}
 
 	eventBus := NewEventBus()
 	policy := NewPolicyEngine(store, eventBus)
-	credentials := NewCredentialVault(cfg.DataDir)
+	credentials := cfg.Vault
+	if credentials == nil {
+		credentials = vault.NewCredentialVault(cfg.DataDir)
+	}
 	tracer := NewTracer(2000)
 
 	proxyMgr, err := NewProxyManager(ProxyManagerConfig{
@@ -95,10 +111,11 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
 	}
 
 	policy.tracer = tracer
-	credentials.tracer = tracer
+	credentials.SetTracer(tracer)
 
 	m := &Manager{
 		store:        store,
+		log:          store.Log(),
 		policy:       policy,
 		eventBus:     eventBus,
 		credentials:  credentials,
@@ -797,92 +814,6 @@ func (m *Manager) Tracer() *Tracer {
 
 func (m *Manager) Store() *SandboxStore {
 	return m.store
-}
-
-func (m *Manager) GetLLMAPIKey(service string) string {
-	return m.credentials.GetAPIKey(service)
-}
-
-func (m *Manager) SetLLMAPIKey(service, apiKey string) error {
-	var domains []string
-	switch service {
-	case "openrouter":
-		domains = []string{"*.openrouter.ai", "openrouter.ai"}
-	case "openai":
-		domains = []string{"*.openai.com", "api.openai.com"}
-	default:
-		domains = []string{}
-	}
-	return m.credentials.SetCredential(service, domains, map[string]string{
-		"Authorization": "Bearer " + apiKey,
-	})
-}
-
-func (m *Manager) DeleteLLMAPIKey(service string) error {
-	return m.credentials.RemoveCredential(service)
-}
-
-func (m *Manager) ListLLMServices() []string {
-	return m.credentials.ListServices()
-}
-
-// SetServiceCredential stores a provider credential with explicit egress match
-// domains — the complete form (the LLM helpers above only know LLM providers'
-// domains). One credential per service; injected at egress only.
-func (m *Manager) SetServiceCredential(service string, matchDomains []string, headers map[string]string) error {
-	return m.credentials.SetCredential(service, matchDomains, headers)
-}
-
-// RemoveServiceCredential deletes one service credential from the vault. A
-// secret kept for the Identity Agent's own use is removed where it is used,
-// which also withdraws what was lent from it, never here.
-func (m *Manager) RemoveServiceCredential(service string) error {
-	if IsKeptRef(service) {
-		return fmt.Errorf("%q names a secret this Identity Agent keeps for its own use", service)
-	}
-	return m.credentials.RemoveCredential(service)
-}
-
-// SetKept keeps a secret for the Identity Agent's own use (KeptRef).
-func (m *Manager) SetKept(ref, kind string, v any) error { return m.credentials.SetKept(ref, kind, v) }
-
-// Kept reads a secret kept for the Identity Agent's own use into out.
-func (m *Manager) Kept(ref, kind string, out any) (bool, error) {
-	return m.credentials.Kept(ref, kind, out)
-}
-
-// RemoveKept deletes a secret kept for the Identity Agent's own use.
-func (m *Manager) RemoveKept(ref string) error { return m.credentials.RemoveKept(ref) }
-
-// VaultWritable reports why the credential vault cannot be written now, or
-// nil when it can.
-func (m *Manager) VaultWritable() error {
-	return m.credentials.Writable()
-}
-
-// HasServiceCredential reports whether the vault holds an entry of this name.
-func (m *Manager) HasServiceCredential(service string) bool {
-	return m.credentials.HasService(service)
-}
-
-// SetBrainSignIn keeps an AI agent's brain sign-in in the vault.
-func (m *Manager) SetBrainSignIn(ref string, rec brainsignin.Record) error {
-	return m.credentials.SetBrainSignIn(ref, rec)
-}
-
-// BrainSignIn reads an AI agent's brain sign-in from the vault, secret and all.
-func (m *Manager) BrainSignIn(ref string) (brainsignin.Record, bool, error) {
-	return m.credentials.BrainSignIn(ref)
-}
-
-// RemoveBrainSignIn deletes an AI agent's brain sign-in from the vault.
-func (m *Manager) RemoveBrainSignIn(ref string) error {
-	return m.credentials.RemoveBrainSignIn(ref)
-}
-
-// ListServiceCredentials lists configured service names (never key material).
-func (m *Manager) ListServiceCredentials() []string {
-	return m.credentials.ListServices()
 }
 
 // RegisterEgressCaller lets something the Manager did not start send its traffic

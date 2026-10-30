@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"identity-agent-core/activitylog"
 	"identity-agent-core/internal/contractcheck"
-	"identity-agent-core/sandbox"
 )
 
 // The schema in contracts/conversation-bundle is what an export writes and
@@ -27,13 +27,13 @@ func TestThePublishedSchemaDescribesTheBundle(t *testing.T) {
 		"credential":            Credential{},
 		"owner":                 Owner{},
 		"log":                   Log{},
-		"stored_row":            sandbox.StoredRow{},
-		"log_record":            sandbox.InvocationEvent{},
-		"cost":                  sandbox.Cost{},
+		"stored_row":            activitylog.StoredRow{},
+		"log_record":            activitylog.InvocationEvent{},
+		"cost":                  activitylog.Cost{},
 		"anchor":                Anchor{},
-		"anchor_statement":      AnchorStatement{},
-		"anchored_log":          AnchoredLog{},
-		"anchored_conversation": AnchoredConversation{},
+		"anchor_statement":      activitylog.AnchorStatement{},
+		"anchored_log":          activitylog.AnchoredLog{},
+		"anchored_conversation": activitylog.AnchoredConversation{},
 	}
 	var faults []string
 	for def, v := range held {

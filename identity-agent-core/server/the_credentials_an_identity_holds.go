@@ -4,6 +4,8 @@ import (
 	"sort"
 	"time"
 
+	"identity-agent-core/internal/coretypes"
+	"identity-agent-core/schemas"
 	"identity-agent-core/store"
 )
 
@@ -69,4 +71,46 @@ func issuedAt(c store.CredentialRecord) time.Time {
 		return time.Time{}
 	}
 	return t
+}
+
+// capabilityGrantSchemaSAID identifies the AI agent grant schema (see the schema
+// package's asset grants). The owner issues an ACDC of this schema to a
+// provisioned agent; the endpoint verifies it to prove the agent's authority at
+// invoke time.
+var capabilityGrantSchemaSAID = schemas.AIAgentGrant.Schema.SAID
+
+// capabilityGrantSchemaSAIDs are every version of the grant schema still
+// honoured: the current one, and the first, which grants issued before edges
+// carry.
+var capabilityGrantSchemaSAIDs = []string{capabilityGrantSchemaSAID, schemas.AIAgentGrantV1.Schema.SAID}
+
+// OwnerRootAID returns the owner's root AID (the delegator every provisioned agent
+// chains to), or "" if no identity is established. Exported for overlay governance.
+func (s *CoreServer) OwnerRootAID() string {
+	if s.DataStore == nil {
+		return ""
+	}
+	id, err := s.DataStore.GetIdentity()
+	if err != nil || id == nil {
+		return ""
+	}
+	return id.AID
+}
+
+// HoldsValidCredential reports whether aid holds an unrevoked credential of the given
+// schema (and, when issuer != "", from that issuer). Exported so an overlay's
+// credential-gated access policy can consult it. Trusts the stored credential's status
+// (sound for credentials this agent issued; verifying a foreign-issuer presented
+// credential is a separate extension).
+func (s *CoreServer) HoldsValidCredential(aid, schema, issuer string) bool {
+	return len(s.credentialsHeldBy(aid, schema, issuer, true)) > 0
+}
+
+// findCapabilityGrant returns the newest usable capability-grant credential held by aid.
+func (s *CoreServer) findCapabilityGrant(aid string) *coretypes.GrantRef {
+	held := s.grantsHeldBy(aid, true)
+	if len(held) == 0 {
+		return nil
+	}
+	return &coretypes.GrantRef{SAID: held[0].SAID}
 }

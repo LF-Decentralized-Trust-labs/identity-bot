@@ -3,6 +3,8 @@ package sandbox
 import (
 	"context"
 	"fmt"
+
+	"identity-agent-core/permission"
 )
 
 // Authorizer is the governance gateway's decision surface — the seam the gateway
@@ -16,9 +18,9 @@ import (
 type Authorizer interface {
 	// AuthorizeIngress returns nil to allow, or an error wrapping ErrDenied to deny.
 	// (A future "hold" — request-authority/consent — is layered here too.)
-	AuthorizeIngress(ctx context.Context, caller CallerContext, capDef ProvidedCapability) error
+	AuthorizeIngress(ctx context.Context, caller permission.CallerContext, capDef ProvidedCapability) error
 	// FilterEgress re-checks / filters a result before it leaves the agent.
-	FilterEgress(ctx context.Context, caller CallerContext, capDef ProvidedCapability, res *InvokeResult) *InvokeResult
+	FilterEgress(ctx context.Context, caller permission.CallerContext, capDef ProvidedCapability, res *InvokeResult) *InvokeResult
 }
 
 // structuralAuthorizer is the default Authorizer until the gateway is implemented. It
@@ -31,7 +33,7 @@ type Authorizer interface {
 // disclosure/filtering arrive with the gateway implementation.
 type structuralAuthorizer struct{}
 
-func (structuralAuthorizer) AuthorizeIngress(ctx context.Context, caller CallerContext, capDef ProvidedCapability) error {
+func (structuralAuthorizer) AuthorizeIngress(ctx context.Context, caller permission.CallerContext, capDef ProvidedCapability) error {
 	if capDef.HostControl && caller.Remote {
 		return fmt.Errorf("%w: host_control capability %q is not invocable by a remote caller", ErrDenied, capDef.ID)
 	}
@@ -47,7 +49,7 @@ func (structuralAuthorizer) AuthorizeIngress(ctx context.Context, caller CallerC
 	return nil
 }
 
-func (structuralAuthorizer) FilterEgress(ctx context.Context, caller CallerContext, capDef ProvidedCapability, res *InvokeResult) *InvokeResult {
+func (structuralAuthorizer) FilterEgress(ctx context.Context, caller permission.CallerContext, capDef ProvidedCapability, res *InvokeResult) *InvokeResult {
 	// TODO(gateway): disclosure/filter rules + audit. Pass-through until implemented.
 	return res
 }
@@ -58,4 +60,13 @@ func (m *Manager) authz() Authorizer {
 		return m.authorizer
 	}
 	return structuralAuthorizer{}
+}
+
+// SetAuthorizer injects the real governance-gateway ingress/egress decision (server
+// layer, at startup), replacing the structural default. Nil leaves the structural
+// authorizer in place.
+func (m *Manager) SetAuthorizer(a Authorizer) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.authorizer = a
 }

@@ -42,7 +42,7 @@ func TestTheRoutesThatWereSilentlyUnreachableAreDeclared(t *testing.T) {
 		"GET /api/didcomm/did":                       "two agents establishing a relationship at all",
 		"POST /api/employees/invites/{token}/redeem": "employee onboarding",
 	} {
-		if _, ok := publicRoutes[route]; !ok {
+		if _, ok := everyPublicRoute()[route]; !ok {
 			t.Errorf("%s is not in publicRoutes, so %s does not work — "+
 				"the router refuses it with 403 before the handler runs", route, feature)
 		}
@@ -75,7 +75,7 @@ func TestEveryPathTheBrowserSDKCallsIsReachable(t *testing.T) {
 	// Declared paths, with their chi parameter names stripped, so a literal
 	// path in the SDK can be matched against the pattern that serves it.
 	declared := map[string]bool{}
-	for key := range publicRoutes {
+	for key := range everyPublicRoute() {
 		method, path, found := strings.Cut(key, " ")
 		if found {
 			declared[method+" "+shape(path)] = true

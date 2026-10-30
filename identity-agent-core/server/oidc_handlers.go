@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/oidc"
 )
 
@@ -29,9 +30,28 @@ func (s *CoreServer) mountOIDCRoutes(r chi.Router) {
 	if s.oidcAdapter == nil {
 		return
 	}
-	r.Get("/{aid}/.well-known/openid-configuration", s.handleOIDCDiscovery)
-	r.Get("/{aid}/oidc/authorize", s.handleOIDCAuthorize)
-	r.Post("/{aid}/oidc/complete", s.handleOIDCComplete)
+	r.Get("/{aid}/.well-known/openid-configuration", onlyForAnIdentifier(s.handleOIDCDiscovery))
+	r.Get("/{aid}/oidc/authorize", onlyForAnIdentifier(s.handleOIDCAuthorize))
+	r.Post("/{aid}/oidc/complete", onlyForAnIdentifier(s.handleOIDCComplete))
+}
+
+// onlyForAnIdentifier refuses, as not found, a request whose {aid} is not an
+// identifier (iacrypto.IsIdentifierQB64). An issuer is named by an
+// identifier, so nothing else is one; and the routes at the root that take
+// an identifier must answer nothing for a path that is not one, which is what
+// lets an add-on own a path such as /apps (whose_path_a_route_matches.go).
+//
+// An identifier this Identity Agent does not yet hold is still served: an
+// OIDC client is configured with its issuer before its first sign-in, and
+// that sign-in is what makes the relationship (handleOIDCAuthorize).
+func onlyForAnIdentifier(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !iacrypto.IsIdentifierQB64(chi.URLParam(r, "aid")) {
+			http.NotFound(w, r)
+			return
+		}
+		next(w, r)
+	}
 }
 
 func (s *CoreServer) handleOIDCDiscovery(w http.ResponseWriter, r *http.Request) {

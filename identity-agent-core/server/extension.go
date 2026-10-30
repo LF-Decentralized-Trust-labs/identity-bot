@@ -14,6 +14,10 @@ import (
 // resolver registry, a router-mount hook, and a couple of read/mint accessors.
 // The core ships no overlays; these are inert until something registers.
 //
+// Add-ons, the parts not every Identity Agent needs, plug into the same core
+// through RegisterAddon (add_ons.go): an app includes one by importing its
+// package, and an overlay registers its own the same way.
+//
 // These seams are opt-in: an overlay that registers nothing simply gets core
 // behaviour. There is one that is NOT optional and therefore does not live
 // here — identity-agent-core/volume.Handle, which an overlay must call before

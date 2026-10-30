@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"log"
 	"time"
+
+	"identity-agent-core/permission"
 )
 
 // MCPTool is the tool projection of a provided capability for an MCP tools/list.
@@ -35,7 +37,7 @@ const DescribeToolName = "describe"
 // SAME Authorizer and the same one check (ADR-050) that govern execute/search:
 // discovery never reveals a capability the caller could not invoke. The meta-tools (execute/search/describe) are always
 // listed — they are the discovery surface itself and each self-gates on invocation.
-func (m *Manager) MCPToolsList(caller CallerContext) []MCPTool {
+func (m *Manager) MCPToolsList(caller permission.CallerContext) []MCPTool {
 	auth := m.authz()
 	ctx := context.Background()
 	now := time.Now()
@@ -154,7 +156,7 @@ type MCPToolResult struct {
 // executor -> egress). A governance denial or capability error becomes an error
 // tool-result (IsError=true) rather than a transport failure — the MCP client sees it
 // as the tool's output, which is the protocol-correct shape for an execution error.
-func (m *Manager) MCPToolsCall(ctx context.Context, caller CallerContext, name string, args []byte) MCPToolResult {
+func (m *Manager) MCPToolsCall(ctx context.Context, caller permission.CallerContext, name string, args []byte) MCPToolResult {
 	if name == ExecuteToolName {
 		var p struct {
 			CapabilityID string          `json:"capability_id"`

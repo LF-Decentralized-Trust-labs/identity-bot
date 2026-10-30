@@ -6,8 +6,10 @@ import (
 	"log"
 	"time"
 
+	"identity-agent-core/asset"
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/schemas"
 	"identity-agent-core/store"
 )
@@ -24,7 +26,7 @@ import (
 // by is who authorised it, written into the credential where its schema admits
 // it: an edge to their machine's Controller Grant and the request they signed.
 func (s *CoreServer) issueAssetCredential(
-	kind *schemas.AssetGrant, holder, issuer string, claims map[string]interface{}, expiry string, by authority,
+	kind *schemas.AssetGrant, holder, issuer string, claims map[string]interface{}, expiry string, by coretypes.Authority,
 ) (string, error) {
 	if s.KeriDriver == nil {
 		return "", fmt.Errorf("keri driver unavailable")
@@ -67,7 +69,7 @@ func (s *CoreServer) issueAssetCredential(
 			return "", fmt.Errorf("this request already authorised a credential, and authorises no other")
 		}
 	}
-	edges := by.name(kind, claims)
+	edges := nameAuthority(by, kind, claims)
 	if err := kind.CheckAttributes(claims); err != nil {
 		return "", err
 	}
@@ -149,7 +151,7 @@ func (s *CoreServer) issueAssetCredential(
 // request it was issued on, and the check of it against that request with the
 // order of events read from the key log.
 func (s *CoreServer) finishIssuance(kind *schemas.AssetGrant, result *drivers.DriverIssueCredentialResponse,
-	holder, issuer, expiry, registrySAID, requestDigest string, by authority) (string, error) {
+	holder, issuer, expiry, registrySAID, requestDigest string, by coretypes.Authority) (string, error) {
 	// Fixed-width to the nanosecond, so two credentials issued in one second
 	// still order correctly as text, which is how the newest is picked.
 	now := time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z07:00")
@@ -198,4 +200,83 @@ func (s *CoreServer) withdrawIssued(said string) {
 			_ = s.DataStore.UpdateCredentialStatus(said, "revoked")
 		}
 	}
+}
+
+// ensureRegistry returns the issuer's TEL registry SAID, incepting one (backerless,
+// anchored in the issuer KEL) on first use and persisting it. One registry per issuer.
+func (s *CoreServer) ensureRegistry(issuerRootAID string) (string, error) {
+	if reg, err := s.DataStore.GetRegistryByIssuer(issuerRootAID); err == nil && reg != nil {
+		if reg.VcpRawB64 != "" {
+			return reg.RegistrySAID, nil
+		}
+		noteRegistryWithoutInception(reg)
+	}
+	if s.KeriDriver == nil {
+		return "", fmt.Errorf("keri driver unavailable")
+	}
+	identity, err := s.DataStore.GetIdentity()
+	if err != nil || identity == nil {
+		return "", fmt.Errorf("no owner identity")
+	}
+	// The inception is checked before it is kept: it has to verify and be the
+	// registry it says it is. It is kept with its anchor in the issuer's key
+	// log, together or not at all, and a registry that cannot be kept is not
+	// used: nothing issued into it could be proved.
+	keptInside := s.engineKeepsCredentialLogs()
+	resp, err := s.KeriDriver.InceptRegistry(issuerRootAID)
+	if err == nil && !keptInside {
+		err = s.keepAfter(issuerRootAID, resp.SequenceNumber, resp.IxnRawBytesB64, resp.VcpJsonB64)
+	}
+	if err != nil {
+		return "", fmt.Errorf("no registry was made: %w", err)
+	}
+	return resp.RegistrySaid, nil
+}
+
+// issueCapabilityGrant issues a capability-grant ACDC from the owner root to the
+// agent's AID, persists the credential and its anchoring KEL event (so a verifier
+// can resolve the issuer KEL), and returns the grant SAID. Requires the KERI
+// driver; on any failure the caller falls back to the stored ceiling.
+func (s *CoreServer) issueCapabilityGrant(agent *asset.Asset, by coretypes.Authority) (string, error) {
+	agentAID, issuerRootAID := agent.PairwiseAID, agent.DelegatorAID
+	capabilities := agent.Capabilities
+	if capabilities == nil {
+		capabilities = []string{}
+	}
+	claims := map[string]interface{}{
+		"name":         agent.DisplayName,
+		"capabilities": capabilities,
+	}
+	if len(agent.GrantConstraints) > 0 {
+		claims["resource_constraints"] = agent.GrantConstraints
+	}
+	expiry := ""
+	if agent.GrantValidUntil != nil {
+		expiry = agent.GrantValidUntil.UTC().Format(time.RFC3339)
+	}
+	superseded := s.grantsHeldBy(agentAID, true)
+	grantSAID, err := s.issueAssetCredential(schemas.AIAgentGrant, agentAID, issuerRootAID, claims, expiry, by)
+	if err != nil {
+		return "", err
+	}
+	// The grant this one replaces is withdrawn, not left standing. A re-issue
+	// that narrows a ceiling would otherwise leave the wider grant valid beside
+	// it, and anything checking "does this agent hold a valid grant" would find
+	// the old one as readily as the new.
+	//
+	// If the revocation cannot be written to the registry, the replaced grant is
+	// still marked unusable here — this identity issued it, and its own record is
+	// what its gateway reads — and the failure is reported, never skipped.
+	for i := range superseded {
+		old := superseded[i]
+		if _, _, err := s.withdrawCredential(&old); err != nil {
+			log.Printf("[mcp] grant %s superseded by %s: its revocation was not recorded in the registry (%v); "+
+				"it is marked superseded and no longer admits anything here", old.SAID, grantSAID, err)
+			if err := s.DataStore.UpdateCredentialStatus(old.SAID, "superseded"); err != nil {
+				log.Printf("[mcp] grant %s superseded by %s but not marked so: %v", old.SAID, grantSAID, err)
+			}
+		}
+	}
+	log.Printf("[mcp] issued capability grant %s to agent %s (%d capabilities)", grantSAID, agentAID, len(capabilities))
+	return grantSAID, nil
 }

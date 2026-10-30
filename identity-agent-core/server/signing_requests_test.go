@@ -2,18 +2,14 @@ package server
 
 import (
 	"bytes"
-	"context"
 	"encoding/base64"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"identity-agent-core/store"
-
-	"github.com/go-chi/chi/v5"
 )
 
 func signingServer(t *testing.T) *CoreServer {
@@ -24,24 +20,6 @@ func signingServer(t *testing.T) *CoreServer {
 		t.Skipf("data store unavailable: %v", err)
 	}
 	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, DataStore: ds}
-}
-
-// ownerRequest builds a request this agent will treat as its owner's.
-//
-// Ownership is loopback-without-forwarding-headers, so the test has to say
-// where it is coming from. httptest defaults to a non-loopback address, which
-// would make every owner-only test pass for the wrong reason.
-func ownerRequest(method, path string, body io.Reader, _ *CoreServer) *http.Request {
-	r := httptest.NewRequest(method, path, body)
-	r.RemoteAddr = "127.0.0.1:54321"
-	r.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
-	return r
-}
-
-func withID(r *http.Request, id string) *http.Request {
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", id)
-	return r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
 }
 
 // What is queued must be exactly what gets signed. Storing the payload rather

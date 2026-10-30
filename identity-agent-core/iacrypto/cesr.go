@@ -4,6 +4,7 @@ import (
 	"crypto/elliptic"
 	"encoding/base64"
 	"fmt"
+	"strings"
 )
 
 const (
@@ -343,4 +344,33 @@ func KeyFromMachineAID(aid string) ([]byte, error) {
 		return nil, fmt.Errorf("that identifier does not name a point on P-256")
 	}
 	return raw, nil
+}
+
+// identifierCodes are the CESR codes an identifier prefix the core names can
+// carry: self-addressing (E), transferable Ed25519 (D), non-transferable
+// Ed25519 (B), and a machine's non-transferable P-256 (1AAI).
+var identifierCodes = []string{"E", "D", "B", CodeP256N}
+
+// IsIdentifierQB64 reports whether s is, by its CESR code and the length
+// that code carries, an identifier prefix: one of identifierCodes, with
+// exactly the raw size the code is defined for, encoded canonically. It says
+// nothing about whether any identity is held under it.
+func IsIdentifierQB64(s string) bool {
+	for _, code := range identifierCodes {
+		if !strings.HasPrefix(s, code) {
+			continue
+		}
+		pad := len(code) % 4
+		decoded, err := base64.RawURLEncoding.DecodeString(strings.Repeat("A", pad) + s[len(code):])
+		if err != nil || len(decoded) < pad {
+			return false
+		}
+		raw := decoded[pad:]
+		if len(raw) != rawSizeForCode[code] {
+			return false
+		}
+		again, err := MatterFixedQB64(code, raw)
+		return err == nil && again == s
+	}
+	return false
 }

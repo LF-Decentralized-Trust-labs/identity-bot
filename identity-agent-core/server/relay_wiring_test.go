@@ -184,7 +184,7 @@ func TestAPrivateAddressReachesNothingElse(t *testing.T) {
 // relationship route is a public route.
 func TestEveryRelationshipRouteIsPublic(t *testing.T) {
 	for _, key := range relayproto.PrivateRoutes {
-		if _, ok := publicRoutes[key]; !ok {
+		if _, ok := everyPublicRoute()[key]; !ok {
 			t.Errorf("%s may be reached at a private address but is not a public route", key)
 		}
 	}

@@ -50,12 +50,18 @@ class CoreInfoResponse {
   final String phase;
   final List<String> capabilities;
 
+  /// The add-ons the agent includes (`add_ons`), such as `ai_agents` and
+  /// `sandboxed_apps`. Null when the agent does not say, as a core older than
+  /// add-ons does not: there, everything is present.
+  final List<String>? addOns;
+
   CoreInfoResponse({
     required this.name,
     required this.description,
     required this.version,
     required this.phase,
     required this.capabilities,
+    this.addOns,
   });
 
   factory CoreInfoResponse.fromJson(Map<String, dynamic> json) {
@@ -65,6 +71,7 @@ class CoreInfoResponse {
       version: json['version'] ?? '',
       phase: json['phase'] ?? '',
       capabilities: List<String>.from(json['capabilities'] ?? []),
+      addOns: json['add_ons'] is List ? List<String>.from(json['add_ons']) : null,
     );
   }
 }

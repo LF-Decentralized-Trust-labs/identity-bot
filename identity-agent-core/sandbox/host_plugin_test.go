@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/zeebo/blake3"
+
+	"identity-agent-core/permission"
 )
 
 func hostManifest(binPath, hash string) *AppManifest {
@@ -103,7 +105,7 @@ type slowInvoker struct {
 	max      int
 }
 
-func (s *slowInvoker) Invoke(ctx context.Context, _ CallerContext, appID, capabilityID string, body []byte) (*InvokeResult, error) {
+func (s *slowInvoker) Invoke(ctx context.Context, _ permission.CallerContext, appID, capabilityID string, body []byte) (*InvokeResult, error) {
 	s.mu.Lock()
 	s.inFlight++
 	if s.inFlight > s.max {
@@ -130,7 +132,7 @@ func TestHostControlSessionLockSerializes(t *testing.T) {
 			{ID: "dev.tool.run", Name: "Plain tool"},
 		},
 	}
-	caller := CallerContext{Remote: false, CallerAID: "local-owner"}
+	caller := permission.CallerContext{Remote: false, CallerAID: "local-owner"}
 
 	run := func(capID string, n int) int {
 		inv.mu.Lock()

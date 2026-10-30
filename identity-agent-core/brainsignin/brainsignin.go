@@ -341,18 +341,6 @@ func (r Record) Check() error {
 	return nil
 }
 
-// refPrefix marks a brain configuration's credential reference as naming a
-// sign-in this package keeps.
-const refPrefix = "ai-agent-brain:"
-
-// Ref is the vault reference for an AI agent's sign-in, by the AI agent's
-// asset id.
-func Ref(assetID string) string { return refPrefix + assetID }
-
-// IsRef reports whether s names a brain sign-in in the vault, rather than
-// being anything else — a key typed where a reference belongs, for one.
-func IsRef(s string) bool { return strings.HasPrefix(s, refPrefix) && len(s) > len(refPrefix) }
-
 // Choice is a brain a sign-in can be made for, by its provider and kind.
 type Choice struct {
 	Provider string `json:"provider"`

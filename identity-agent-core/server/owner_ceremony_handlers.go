@@ -1,6 +1,8 @@
 package server
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -413,4 +415,10 @@ func (s *CoreServer) handleOwnerAuthority(w http.ResponseWriter, r *http.Request
 			"public_key": owner.PublicKey,
 		},
 	})
+}
+
+func genInviteToken() string {
+	tb := make([]byte, 16)
+	_, _ = rand.Read(tb)
+	return hex.EncodeToString(tb)
 }

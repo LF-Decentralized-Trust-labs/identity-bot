@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"identity-agent-core/activitylog"
 	"identity-agent-core/agentbody"
 	"identity-agent-core/agentmessage"
 	"identity-agent-core/authorisation"
@@ -927,7 +928,7 @@ func (v *verifier) checkLog() map[int64]string {
 	exported := false
 	for i, row := range rows {
 		where := fmt.Sprintf("log row %d", row.ID)
-		ev, why, err := sandbox.CheckStoredRow(row, keys)
+		ev, why, err := activitylog.CheckStoredRow(row, keys)
 		if err != nil {
 			why = err.Error()
 		}
@@ -937,12 +938,12 @@ func (v *verifier) checkLog() map[int64]string {
 		if i > 0 {
 			if row.ID != rows[i-1].ID+1 {
 				v.fault(where, "the rows before it, from %d, are missing", rows[i-1].ID+1)
-			} else if ev.PrevHash != sandbox.HashRecord([]byte(rows[i-1].Record)) {
+			} else if ev.PrevHash != activitylog.HashRecord([]byte(rows[i-1].Record)) {
 				v.fault(where, "it does not follow from the row before it")
 			}
 		}
-		hashes[row.ID] = sandbox.HashRecord([]byte(row.Record))
-		if ev.CapabilityID == CapabilityRecordAnchoring && len(v.b.Anchors) == 0 {
+		hashes[row.ID] = activitylog.HashRecord([]byte(row.Record))
+		if ev.CapabilityID == activitylog.CapabilityRecordAnchoring && len(v.b.Anchors) == 0 {
 			v.fault(where, "it records that the record was anchored, and the bundle carries no anchors")
 		}
 		if ev.WorkItem == v.b.Conversation && ev.ResultStatus == "ok" {
@@ -1044,7 +1045,7 @@ func (v *verifier) checkAnchors(rowHashes map[int64]string) {
 			v.fault(aw, "the statement carried is not the one this anchor seals")
 			continue
 		}
-		var st AnchorStatement
+		var st activitylog.AnchorStatement
 		if err := json.Unmarshal([]byte(statement), &st); err != nil {
 			v.fault(aw, "the statement it seals is unreadable")
 			continue

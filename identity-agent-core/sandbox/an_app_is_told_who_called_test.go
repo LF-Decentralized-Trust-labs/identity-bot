@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"identity-agent-core/appcall"
+	"identity-agent-core/permission"
 )
 
 // manifestJSON is the least an app's manifest needs to load, providing caps.
@@ -75,7 +76,7 @@ func TestAnInvocationWithTwoProvidersIsRefusedNotRouted(t *testing.T) {
 		"notes":    {ID: "notes", Provides: []ProvidedCapability{{ID: "notes.write"}}},
 		"impostor": {ID: "impostor", Provides: []ProvidedCapability{{ID: "notes.write"}}},
 	}}
-	_, err := m.InvokeCapability(context.Background(), CallerContext{Remote: false}, "notes.write", nil)
+	_, err := m.InvokeCapability(context.Background(), permission.CallerContext{Remote: false}, "notes.write", nil)
 	if !errors.Is(err, ErrDenied) || f.called {
 		t.Fatalf("an ambiguous capability was routed (called=%v): %v", f.called, err)
 	}
@@ -141,7 +142,7 @@ func TestAnAppIsToldWhoCalled(t *testing.T) {
 	var seen appcall.Caller
 	runningApp(t, m, "notes", &seen)
 
-	caller := CallerContext{Remote: true, Scopes: []string{"notes.write"}, CallerAID: "EAgent",
+	caller := permission.CallerContext{Remote: true, Scopes: []string{"notes.write"}, CallerAID: "EAgent",
 		DelegationChain: []string{"EAgent", "EOrg"}, AuthLevel: "body_signed", BodyHost: "BBody",
 		GrantSAID: "EGrant", Session: "run-7"}
 	res, err := m.InvokeCapability(context.Background(), caller, "notes.write", []byte(`{"task":"n-1"}`))
@@ -209,14 +210,14 @@ func TestAnAppsCallKeyIsItsOwnAndKept(t *testing.T) {
 // knew it, and a host plug-in machine is not mistaken for an AI agent.
 func TestTheCallerAnAppIsToldByKind(t *testing.T) {
 	for _, c := range []struct {
-		in   CallerContext
+		in   permission.CallerContext
 		want appcall.Caller
 	}{
-		{CallerContext{CallerAID: "local-owner"}, appcall.Caller{Kind: appcall.KindOwner, AuthLevel: "local"}},
-		{CallerContext{Remote: true, Owner: true, CallerAID: "EOwner", AuthLevel: "owner_signed"},
+		{permission.CallerContext{CallerAID: "local-owner"}, appcall.Caller{Kind: appcall.KindOwner, AuthLevel: "local"}},
+		{permission.CallerContext{Remote: true, Owner: true, CallerAID: "EOwner", AuthLevel: "owner_signed"},
 			appcall.Caller{Kind: appcall.KindOwner, Identifier: "EOwner", AuthLevel: "owner_signed"}},
-		{CallerContext{CallerAID: "token:ci"}, appcall.Caller{Kind: appcall.KindToken, Identifier: "ci"}},
-		{CallerContext{CallerAID: "EMachine", DelegationChain: []string{"EMachine"}, AuthLevel: "signed_headers"},
+		{permission.CallerContext{CallerAID: "token:ci"}, appcall.Caller{Kind: appcall.KindToken, Identifier: "ci"}},
+		{permission.CallerContext{CallerAID: "EMachine", DelegationChain: []string{"EMachine"}, AuthLevel: "signed_headers"},
 			appcall.Caller{Kind: appcall.KindMachine, Identifier: "EMachine", AuthLevel: "signed_headers"}},
 	} {
 		if got := theCallerAnAppIsTold(c.in); got != c.want {

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"sync"
@@ -12,9 +13,11 @@ import (
 
 	keri "github.com/grapeid/keri-go"
 
+	"identity-agent-core/activitylog"
 	"identity-agent-core/didcomm"
 	"identity-agent-core/drivers"
-	"identity-agent-core/sandbox"
+	"identity-agent-core/internal/coretypes"
+	"identity-agent-core/permission"
 	"identity-agent-core/store"
 )
 
@@ -97,23 +100,6 @@ func (s *CoreServer) senderKeysAtReceipt(aid string, did *didcomm.DID) (trust, k
 	return string(t), said, len(rec.KEL), string(events)
 }
 
-// ownEvidence is what is kept with a message from one of this agent's own AI
-// agents: the agent's delegated inception and the root's key history as they
-// were when it arrived (the engine's original bytes, base64). With the keys
-// kept beside it (SenderDID), it is checked again from these alone, so the AI
-// agent being removed or rotated later does not break a genuine old proof.
-type ownEvidence struct {
-	Inception string   `json:"inception"`
-	RootKEL   []string `json:"root_kel"`
-}
-
-// kelHolder is an engine that can find a key history by identifier, not only
-// by the name it is held under. A name can be reused or renamed; the
-// identifier cannot.
-type kelHolder interface {
-	GetKelByAID(aid string) (*drivers.DriverKelResponse, error)
-}
-
 // ownAgentAtArrival reports whether did is the keyset this agent holds for one
 // of its own AI agents, and returns the evidence to keep if so. Neither an
 // asset row nor a keyset file is enough: both are files this agent writes, and
@@ -142,7 +128,7 @@ func (s *CoreServer) ownAgentAtArrival(aid string, did *didcomm.DID) (string, er
 		return "", fmt.Errorf("the keys are not the ones this Identity Agent holds for %s", aid)
 	}
 	root := s.OwnerRootAID()
-	engine, ok := s.KeriDriver.(kelHolder)
+	engine, ok := s.KeriDriver.(drivers.KELHolder)
 	if root == "" || !ok {
 		return "", fmt.Errorf("this Identity Agent has no root identity and key engine to check with")
 	}
@@ -154,7 +140,7 @@ func (s *CoreServer) ownAgentAtArrival(aid string, did *didcomm.DID) (string, er
 	if err != nil {
 		return "", fmt.Errorf("the root identity's key history is not held here")
 	}
-	e := ownEvidence{Inception: kel.RawEventsB64[0], RootKEL: rootKEL.RawEventsB64}
+	e := coretypes.OwnEvidence{Inception: kel.RawEventsB64[0], RootKEL: rootKEL.RawEventsB64}
 	if err := s.delegatedFromHere(aid, e); err != nil {
 		return "", err
 	}
@@ -165,7 +151,7 @@ func (s *CoreServer) ownAgentAtArrival(aid string, did *didcomm.DID) (string, er
 // delegatedFromHere checks, with keri-go, that the evidence shows aid opening
 // with a delegated inception that this Identity Agent's root approved by a
 // seal in its own key history.
-func (s *CoreServer) delegatedFromHere(aid string, e ownEvidence) error {
+func (s *CoreServer) delegatedFromHere(aid string, e coretypes.OwnEvidence) error {
 	root := s.OwnerRootAID()
 	if root == "" {
 		return fmt.Errorf("this Identity Agent has no root identity to check with")
@@ -202,7 +188,7 @@ func (s *CoreServer) delegatedFromHere(aid string, e ownEvidence) error {
 // receiptBinding is what the log row for a received message commits to: the
 // message, digests of its kept signed form, of the sender's keys and of the
 // sender's key history then, and how those keys were tied to the sender. Recomputed from the kept message and
-// compared with the row (sandbox.HashArgs) when the sender is shown later.
+// compared with the row (activitylog.HashArgs) when the sender is shown later.
 func receiptBinding(messageID string, p receivedProof) []byte {
 	digest := func(v string) string {
 		sum := sha256.Sum256([]byte(v))
@@ -273,7 +259,7 @@ func (s *CoreServer) keysWereTied(n store.Notification, did *didcomm.DID) error 
 	case keysOwn:
 		// From what was kept: the keys were bound by the log row on arrival,
 		// and the delegation is checked again from the bytes kept with them.
-		var e ownEvidence
+		var e coretypes.OwnEvidence
 		if err := json.Unmarshal([]byte(n.SenderKEL), &e); err != nil {
 			return fmt.Errorf("the delegation evidence was not kept with the message")
 		}
@@ -303,16 +289,16 @@ func (s *CoreServer) keysWereTied(n store.Notification, did *didcomm.DID) error 
 // receiptWasLogged finds the signed log row written when the message arrived
 // and checks it committed to the proof kept now.
 func (s *CoreServer) receiptWasLogged(n store.Notification) error {
-	if s.SandboxManager == nil {
+	if s.ActivityLog == nil {
 		return fmt.Errorf("there is no signed log here to check the kept proof against")
 	}
-	rows, err := s.SandboxManager.Store().QueryInvocationEvents(sandbox.InvocationEventFilter{
+	rows, err := s.ActivityLog.QueryInvocationEvents(activitylog.InvocationEventFilter{
 		CapabilityID: "didcomm.message.received", CorrelationID: n.ID, CallerAID: n.FromAID, ResultStatus: "ok",
 	})
 	if err != nil {
 		return fmt.Errorf("the signed log could not be read: %w", err)
 	}
-	want := sandbox.HashArgs(receiptBinding(n.ID, receivedProof{
+	want := activitylog.HashArgs(receiptBinding(n.ID, receivedProof{
 		Signed: n.SignedMessage, SenderDID: n.SenderDID, KeyTrust: n.SenderKeyTrust,
 		KELSaid: n.SenderKELSaid, KELEvents: n.SenderKELEvents, KEL: n.SenderKEL,
 	}))
@@ -392,15 +378,8 @@ func (s *CoreServer) partyConversation(convID, party string) string {
 	if !conversationIDPattern.MatchString(convID) {
 		return ""
 	}
-	store, err := s.conversations()
-	if err != nil {
-		return ""
-	}
-	c, err := store.Get(convID)
-	if err != nil {
-		return ""
-	}
-	if c.OpenedBy != party && !store.IsParty(convID, party) {
+	held, isParty, err := s.conversationParty(convID, party)
+	if err != nil || !held || !isParty {
 		return ""
 	}
 	return convID
@@ -420,17 +399,22 @@ func conversationOf(body json.RawMessage) string {
 
 // trafficConversation is the conversation a message from sender is filed
 // under. One held here is used only if the sender is a party to it; one this
-// agent does not hold is the sender's thread, filed as named.
+// agent does not hold is the sender's thread, filed as named, as it is where
+// no add-on keeps conversations. Where whether it is held cannot be told (an
+// add-on failed to say, or more than one holds it) the message is filed
+// under none, rather than under the conversation its sender named.
 func (s *CoreServer) trafficConversation(sender string, body json.RawMessage) string {
 	conv := conversationOf(body)
 	if conv == "" {
 		return ""
 	}
-	store, err := s.conversations()
-	if err != nil {
+	held, _, err := s.conversationParty(conv, sender)
+	switch {
+	case errors.Is(err, errNoConversations):
 		return conv
-	}
-	if _, err := store.Get(conv); err != nil {
+	case err != nil:
+		return ""
+	case !held:
 		return conv
 	}
 	return s.partyConversation(conv, sender)
@@ -444,13 +428,13 @@ var deliveryRecordMu sync.Mutex
 // a machine. A message still waiting is handed out again on every collection
 // until its receipt comes back, and recording each would let a machine that
 // never answers fill the log by asking.
-func (s *CoreServer) recordDeliveryOnce(cc sandbox.CallerContext, messageID, host string) {
-	if s.SandboxManager == nil {
+func (s *CoreServer) recordDeliveryOnce(cc permission.CallerContext, messageID, host string) {
+	if s.ActivityLog == nil {
 		return
 	}
 	deliveryRecordMu.Lock()
 	defer deliveryRecordMu.Unlock()
-	rows, err := s.SandboxManager.Store().QueryInvocationEvents(sandbox.InvocationEventFilter{
+	rows, err := s.ActivityLog.QueryInvocationEvents(activitylog.InvocationEventFilter{
 		CapabilityID: "agent.message.delivered", CorrelationID: messageID,
 	})
 	if err == nil {
@@ -461,5 +445,5 @@ func (s *CoreServer) recordDeliveryOnce(cc sandbox.CallerContext, messageID, hos
 		}
 	}
 	cc.CorrelationID = messageID
-	s.SandboxManager.RecordGovernanceEvent(cc, "agent.message.delivered", "ok")
+	s.ActivityLog.RecordGovernanceEvent(cc, "agent.message.delivered", "ok")
 }

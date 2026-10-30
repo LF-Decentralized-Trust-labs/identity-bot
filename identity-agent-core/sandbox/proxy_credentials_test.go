@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"identity-agent-core/vault"
 )
 
 // injector returns a CredentialInjectFunc that adds a header for one host, in the
@@ -137,7 +139,7 @@ func TestBothForwardPathsCallApplyCredentials(t *testing.T) {
 // InjectCredentials is the vault's real signature; this pins that the seam matches
 // it, so wiring the two together cannot drift into a compile error later.
 func TestCredentialInjectFuncMatchesVaultSignature(t *testing.T) {
-	vault := NewCredentialVault(t.TempDir())
+	vault := vault.NewCredentialVault(t.TempDir())
 	var f CredentialInjectFunc = vault.InjectCredentials
 	if f == nil {
 		t.Fatal("vault.InjectCredentials is not assignable to CredentialInjectFunc")

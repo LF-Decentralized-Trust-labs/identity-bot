@@ -18,6 +18,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"identity-agent-core/githubrepo"
 )
 
 func testKey(t *testing.T) (*rsa.PrivateKey, string) {
@@ -82,22 +84,6 @@ func TestAnAppKeyIsReadInEitherForm(t *testing.T) {
 	}
 }
 
-func TestARepositoryIsNamedAsOwnerAndName(t *testing.T) {
-	for in, want := range map[string]string{
-		"Acme/Sandbox": "acme/sandbox", "https://github.com/acme/site.git": "acme/site", " acme/a.b-c_d ": "acme/a.b-c_d",
-		"acme/.github": "acme/.github", "acme/_site": "acme/_site", "acme/-x": "acme/-x", "acme/...x": "acme/...x",
-	} {
-		if got, err := NormaliseRepository(in); err != nil || got != want {
-			t.Errorf("%q: %q %v", in, got, err)
-		}
-	}
-	for _, bad := range []string{"acme", "acme/", "/x", "acme/x/y", "acme/..", "acme/.", "ac me/x", "acme/x?y", "-acme/x", ".acme/x"} {
-		if _, err := NormaliseRepository(bad); err == nil {
-			t.Errorf("%q was taken as a repository", bad)
-		}
-	}
-}
-
 // fakeGitHub answers as GitHub's token route does, with what it is told to.
 func fakeGitHub(t *testing.T, answer func(body map[string]any) (int, any)) (*httptest.Server, *[]map[string]any, *[]string) {
 	t.Helper()
@@ -135,7 +121,7 @@ func TestATokenIsAskedForExactlyTheRepositoriesAndAccessNamed(t *testing.T) {
 	})
 	c := Client{API: srv.URL}
 	conn := Connection{AppID: 1, InstallationID: 2, PrivateKey: key, Account: "acme"}
-	tok, err := c.Mint(context.Background(), conn, []RepoRef{{12, "acme/site"}, {11, "acme/sandbox"}}, Write)
+	tok, err := c.Mint(context.Background(), conn, []RepoRef{{12, "acme/site"}, {11, "acme/sandbox"}}, githubrepo.Write)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,13 +136,13 @@ func TestATokenIsAskedForExactlyTheRepositoriesAndAccessNamed(t *testing.T) {
 	if !reflect.DeepEqual(got["permissions"], map[string]any{"contents": "write", "pull_requests": "write", "metadata": "read"}) {
 		t.Fatalf("permissions asked for: %v", got["permissions"])
 	}
-	if _, err := c.Mint(context.Background(), conn, []RepoRef{{13, "other/repo"}}, Read); err == nil {
+	if _, err := c.Mint(context.Background(), conn, []RepoRef{{13, "other/repo"}}, githubrepo.Read); err == nil {
 		t.Fatal("a token was asked for a repository outside the installation's account")
 	}
-	if _, err := c.Mint(context.Background(), conn, []RepoRef{{0, "acme/sandbox"}}, Read); err == nil {
+	if _, err := c.Mint(context.Background(), conn, []RepoRef{{0, "acme/sandbox"}}, githubrepo.Read); err == nil {
 		t.Fatal("a token was asked for a repository by name alone")
 	}
-	if _, err := c.Mint(context.Background(), conn, []RepoRef{{11, "acme/sandbox"}, {11, "acme/site"}}, Read); err == nil {
+	if _, err := c.Mint(context.Background(), conn, []RepoRef{{11, "acme/sandbox"}, {11, "acme/site"}}, githubrepo.Read); err == nil {
 		t.Fatal("a token was asked for two repositories at one number")
 	}
 }
@@ -188,7 +174,7 @@ func TestATokenWiderThanAskedIsWithdrawn(t *testing.T) {
 		srv, _, revoked := fakeGitHub(t, func(map[string]any) (int, any) { return 201, answer })
 		c := Client{API: srv.URL}
 		_, err := c.Mint(context.Background(), Connection{AppID: 1, InstallationID: 2, PrivateKey: key, Account: "acme"},
-			[]RepoRef{{11, "acme/sandbox"}}, Read)
+			[]RepoRef{{11, "acme/sandbox"}}, githubrepo.Read)
 		if err == nil {
 			t.Fatalf("%s: a wider token was taken", name)
 		}
