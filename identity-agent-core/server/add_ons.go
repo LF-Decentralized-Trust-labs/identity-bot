@@ -348,13 +348,37 @@ func copyCaller(cc permission.CallerContext) permission.CallerContext {
 	cc.Scopes = append([]string(nil), cc.Scopes...)
 	cc.DelegationChain = append([]string(nil), cc.DelegationChain...)
 	if cc.ResourceConstraints != nil {
-		rc := make(map[string]interface{}, len(cc.ResourceConstraints))
-		for k, v := range cc.ResourceConstraints {
-			rc[k] = v
-		}
-		cc.ResourceConstraints = rc
+		cc.ResourceConstraints = deepCopy(cc.ResourceConstraints).(map[string]interface{})
 	}
 	return cc
+}
+
+// deepCopy is v with every map and slice in it copied, at every depth, so
+// nothing in the copy is shared with v. Other values are kept as they are.
+func deepCopy(v interface{}) interface{} {
+	switch x := v.(type) {
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(x))
+		for k, e := range x {
+			out[k] = deepCopy(e)
+		}
+		return out
+	case []interface{}:
+		out := make([]interface{}, len(x))
+		for i, e := range x {
+			out[i] = deepCopy(e)
+		}
+		return out
+	case []string:
+		return append([]string(nil), x...)
+	case map[string]string:
+		out := make(map[string]string, len(x))
+		for k, e := range x {
+			out[k] = e
+		}
+		return out
+	}
+	return v
 }
 
 // enrichProvenCaller gives a caller that proved its identifier with a

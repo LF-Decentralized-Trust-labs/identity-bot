@@ -460,3 +460,41 @@ func TestNoRouteIsTakenOverByMountingItAgain(t *testing.T) {
 		t.Fatalf("the start failed for another reason: %v", err)
 	}
 }
+
+// What an add-on changes deep inside a caller's resource constraints, while
+// working on a caller it then declines, reaches neither the caller nor the
+// next add-on.
+func TestAnAddOnsNestedChangesToACallerReachNothing(t *testing.T) {
+	meddles := Addon{ID: "meddles", EnrichProvenCaller: func(s *CoreServer, c *permission.CallerContext) bool {
+		c.ResourceConstraints["limits"].(map[string]interface{})["max"] = 1e9
+		c.ResourceConstraints["hosts"].([]interface{})[0] = "evil.example"
+		c.ResourceConstraints["names"].([]string)[0] = "someone else"
+		return false
+	}}
+	var seen []interface{}
+	looks := Addon{ID: "looks", EnrichProvenCaller: func(s *CoreServer, c *permission.CallerContext) bool {
+		seen = append(seen, c.ResourceConstraints["limits"].(map[string]interface{})["max"],
+			c.ResourceConstraints["hosts"].([]interface{})[0])
+		return false
+	}}
+	onlyAddons(t, meddles, looks)
+	c := &permission.CallerContext{EnvelopeVerified: true, CallerAID: "Eproven",
+		ResourceConstraints: map[string]interface{}{
+			"limits": map[string]interface{}{"max": 10.0},
+			"hosts":  []interface{}{"api.example"},
+			"names":  []string{"the owner"},
+		}}
+	(&CoreServer{}).enrichProvenCaller(c)
+	if got := c.ResourceConstraints["limits"].(map[string]interface{})["max"]; got != 10.0 {
+		t.Errorf("a nested limit reached the caller: %v", got)
+	}
+	if got := c.ResourceConstraints["hosts"].([]interface{})[0]; got != "api.example" {
+		t.Errorf("a nested host reached the caller: %v", got)
+	}
+	if got := c.ResourceConstraints["names"].([]string)[0]; got != "the owner" {
+		t.Errorf("a nested name reached the caller: %v", got)
+	}
+	if len(seen) != 2 || seen[0] != 10.0 || seen[1] != "api.example" {
+		t.Errorf("the next add-on saw another's changes: %v", seen)
+	}
+}
