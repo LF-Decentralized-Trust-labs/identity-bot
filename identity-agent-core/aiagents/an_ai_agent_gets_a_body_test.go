@@ -17,9 +17,9 @@ import (
 
 	"identity-agent-core/agentbody"
 	"identity-agent-core/didcomm"
+	"identity-agent-core/internal/addontest"
 	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/sandbox"
-	"identity-agent-core/sandboxedapps"
 	"identity-agent-core/schemas"
 	"identity-agent-core/server"
 
@@ -167,7 +167,7 @@ func bodyWorld(t *testing.T) (*server.CoreServer, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(mgr.Stop)
-	sandboxedapps.UseManager(s, mgr)
+	addontest.UseSandboxManager(s, mgr)
 	if err := mgr.Store().UpsertCapabilityRecord(sandbox.CapabilityRecord{
 		ID: "system.info.read", Name: "Read system information", Domain: "system",
 		ExecutorType: "external_api", Provider: "registry-native", Enabled: true,

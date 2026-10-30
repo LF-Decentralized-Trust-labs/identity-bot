@@ -55,3 +55,13 @@ func TestNoControllerInstallsSoftwareOnThisComputer(t *testing.T) {
 		t.Fatal("setting up the container runtime is open to a controller")
 	}
 }
+
+// Without the server's activity log, no sandbox manager is made: it would
+// otherwise open a second handle on the log's database that nothing signs.
+func TestNoManagerWithoutTheActivityLog(t *testing.T) {
+	s := fixtures.NewAuthTestServer(t)
+	of(s).makeManager()
+	if Manager(s) != nil {
+		t.Fatal("a sandbox manager was made with no activity log to write to")
+	}
+}

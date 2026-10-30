@@ -60,6 +60,14 @@ func init() {
 // makeManager makes the sandbox manager and starts it. Failing to is not
 // fatal: the server runs without sandboxed apps.
 func (s *sandboxedApps) makeManager() {
+	// The manager writes to the server's activity log, signed. Without it,
+	// the manager would open a second handle on the same database that
+	// nothing signs, so no manager is made: the server runs without
+	// sandboxed apps, as when the manager cannot be made.
+	if s.ActivityLog == nil {
+		log.Printf("[identity-agent-core] Sandbox manager not made: the activity log is not open")
+		return
+	}
 	// Plug-in manifests directory. Defaults to ./manifests (relative to the
 	// working dir); MANIFESTS_DIR overrides it so a service-managed agent (whose
 	// working dir it doesn't control) can point at an absolute plug-in location.

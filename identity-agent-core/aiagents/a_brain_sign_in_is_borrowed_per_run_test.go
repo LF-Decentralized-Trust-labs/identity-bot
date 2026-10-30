@@ -3,6 +3,7 @@ package aiagents
 import (
 	"context"
 	"errors"
+	"identity-agent-core/internal/addontest"
 	"identity-agent-core/lending"
 	"identity-agent-core/sandboxedapps"
 	"net/http"
@@ -107,10 +108,10 @@ func TestABodyWithNoSignInRunsAsBefore(t *testing.T) {
 	// Nor does an Identity Agent with no vault stop a body that never had one.
 	v, mgr := w.s.Vault, sandboxedapps.Manager(w.s)
 	w.s.Vault = nil
-	sandboxedapps.UseManager(w.s, nil)
+	addontest.UseSandboxManager(w.s, nil)
 	_, err := w.hostB.Borrow(context.Background())
 	w.s.Vault = v
-	sandboxedapps.UseManager(w.s, mgr)
+	addontest.UseSandboxManager(w.s, mgr)
 	if !errors.Is(err, agenthost.ErrNoSignIn) {
 		t.Fatalf("an Identity Agent with no vault: %v", err)
 	}

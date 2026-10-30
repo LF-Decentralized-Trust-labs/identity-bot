@@ -683,13 +683,6 @@ func (s *aiAgents) agentHasIssuedGrant(assetID string) bool {
 	return false
 }
 
-// identityKeyHeldHere reports whether this Identity Agent holds the
-// identity's key, so can sign what it writes into the identity's key log.
-func (s *aiAgents) identityKeyHeldHere() bool {
-	_, err := s.IdentitySigningSeed()
-	return err == nil
-}
-
 // agentGrantPendingFor reports whether an AI agent's grant waits for the
 // device that holds the identity's key.
 func (s *aiAgents) agentGrantPendingFor(assetID string) bool {

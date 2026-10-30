@@ -394,5 +394,5 @@ func keyElsewhere(t *testing.T) *elsewhere {
 	w := newControllerWorld(t)
 	resetSeenSignatures(t)
 	w.s.localOwnerSecret = testOwnerSecret
-	return moveTheKeyElsewhere(t, w.s, map[string]string{})
+	return moveTheKeyElsewhere(t, w.s)
 }

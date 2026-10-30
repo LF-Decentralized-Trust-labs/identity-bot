@@ -140,14 +140,11 @@ func withdrawIt(t coretypes.TB, e *elsewhere) {
 type elsewhere struct {
 	s    *CoreServer
 	seed []byte
-	// earlier are AI agents made while the key was here, whose grants are
-	// gone, as before every AI agent was given one: by name, their ids.
-	earlier map[string]string
 }
 
 // moveTheKeyElsewhere makes s's key unreadable here, as it is where the device
 // that holds it is another one, and returns the key that device holds.
-func moveTheKeyElsewhere(t coretypes.TB, s *CoreServer, earlier map[string]string) *elsewhere {
+func moveTheKeyElsewhere(t coretypes.TB, s *CoreServer) *elsewhere {
 	t.Helper()
 	seed, err := s.identitySigningSeed()
 	if err != nil {
@@ -161,7 +158,7 @@ func moveTheKeyElsewhere(t coretypes.TB, s *CoreServer, earlier map[string]strin
 	if _, err := s.identitySigningSeed(); err == nil {
 		t.Fatal("the key still reads as held here")
 	}
-	return &elsewhere{s: s, seed: seed, earlier: earlier}
+	return &elsewhere{s: s, seed: seed}
 }
 
 func refusedFor(t coretypes.TB, s *CoreServer, n store.Notification, why string) {
@@ -831,7 +828,7 @@ func aControllerWorld(t coretypes.TB) (*CoreServer, *httptest.Server, string, []
 // moveTheKeyAway is moveTheKeyElsewhere, returning the key the other device
 // holds.
 func moveTheKeyAway(t coretypes.TB, s *CoreServer) []byte {
-	return moveTheKeyElsewhere(t, s, nil).seed
+	return moveTheKeyElsewhere(t, s).seed
 }
 
 // withdrawWith is withdrawIt, where seed is the key the other device holds.

@@ -14,6 +14,7 @@ package sandboxedapps
 
 import (
 	"identity-agent-core/internal/addonhost"
+	"identity-agent-core/internal/addontest"
 	"identity-agent-core/sandbox"
 	"identity-agent-core/server"
 )
@@ -43,9 +44,6 @@ func of(s *server.CoreServer) *sandboxedApps {
 	return &sandboxedApps{CoreServer: s, Host: h, appsState: st}
 }
 
-// hostOf is the handle on s.
-func hostOf(s *server.CoreServer) addonhost.Host { return addonhost.Of(s) }
-
 // helpers are the core's helpers that need no server.
 var helpers = addonhost.Shared()
 
@@ -54,6 +52,8 @@ var helpers = addonhost.Shared()
 // or the manager could not be made.
 func Manager(s *server.CoreServer) *sandbox.Manager { return of(s).SandboxManager }
 
-// UseManager makes m the sandbox manager on s, for a server not made by
-// server.New, as tests make one.
-func UseManager(s *server.CoreServer, m *sandbox.Manager) { of(s).SandboxManager = m }
+func init() {
+	// What the other add-ons' tests use to give a server they make by hand a
+	// sandbox manager of their own.
+	addontest.UseSandboxManager = func(s *server.CoreServer, m *sandbox.Manager) { of(s).SandboxManager = m }
+}
