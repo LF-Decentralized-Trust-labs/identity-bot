@@ -104,8 +104,10 @@ bash scripts/fetch-cloudflared.sh darwin universal <app>/bin/cloudflared   # or:
 ```
 
 The pinned release is in `scripts/cloudflared.version` and its checksums in
-`scripts/cloudflared.sha256`; a Windows build downloads
-`cloudflared-windows-amd64.exe` of the same release.
+`scripts/cloudflared.sha256`. That file also lists
+`cloudflared-windows-amd64.exe`, but nothing in this repository fetches it: a
+Windows build downloads that file of the pinned release and checks it against
+the listed checksum itself.
 
 ## Run it
 
