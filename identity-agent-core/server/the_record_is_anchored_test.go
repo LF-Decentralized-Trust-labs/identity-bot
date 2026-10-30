@@ -1101,3 +1101,32 @@ func TestEveryIdentityAgentKeepsItsWitnessesUpToDate(t *testing.T) {
 		})
 	}
 }
+
+// An anchor that fixes conversation entries, checked where no add-on keeps
+// conversations, says they cannot be checked here: not broken, not tampered,
+// and not a pass. The log's own rows are checked as ever.
+func TestConversationsNoAddOnKeepsAreSaidToBeUnchecked(t *testing.T) {
+	s := recordWorld(t)
+	chain := fixedChains{"c1": {Seq: 2, Hash: "Ehead"}}
+	onlyAddons(t, Addon{ID: "keeps conversations", AnchoredChains: func(*CoreServer) (AnchoredChains, error) { return chain, nil }})
+	writeRows(t, s, 1)
+	s.anchorRecord()
+	if got := chainSays(t, s); got["intact"] != true || got["anchored_conversations_unchecked"] != nil {
+		t.Fatalf("with the add-on that keeps them, the conversations were not checked: %v", got)
+	}
+
+	onlyAddons(t)
+	got := chainSays(t, s)
+	if got["anchor_broken_at"] != nil || got["broken_at"] != nil {
+		t.Fatalf("conversations this Identity Agent cannot read were reported broken: %v", got)
+	}
+	if got["intact"] != false {
+		t.Fatalf("conversations this Identity Agent cannot read read as checked: %v", got)
+	}
+	if why, _ := got["anchored_conversations_unchecked"].(string); why == "" {
+		t.Fatalf("the report does not say the conversations were not checked: %v", got)
+	}
+	if got["anchored_through"] == float64(0) {
+		t.Fatalf("the log's rows were not checked against the anchor: %v", got)
+	}
+}

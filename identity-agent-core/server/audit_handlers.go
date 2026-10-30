@@ -275,7 +275,11 @@ func (s *CoreServer) handleVerifyAuditChain(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	resp := map[string]any{
-		"intact": len(faults) == 0 && anchors.BrokenAt == 0, "chain_start_kept": start != nil,
+		// Intact only when everything an anchor fixes was checked and holds:
+		// conversation entries this Identity Agent cannot read are said so
+		// (anchored_conversations_unchecked), neither broken nor a pass.
+		"intact":           len(faults) == 0 && anchors.BrokenAt == 0 && anchors.ConversationsUnchecked == "",
+		"chain_start_kept": start != nil,
 		"anchored_through": anchors.AnchoredThrough, "unanchored_rows": anchors.Unanchored,
 		"unanchored_entries": anchors.UnanchoredEntries,
 		"anchoring_external": anchors.External, "witnessed_through": anchors.WitnessedThrough,
@@ -290,6 +294,9 @@ func (s *CoreServer) handleVerifyAuditChain(w http.ResponseWriter, r *http.Reque
 	}
 	if anchors.Unavailable != "" {
 		resp["anchoring_unavailable"] = anchors.Unavailable
+	}
+	if anchors.ConversationsUnchecked != "" {
+		resp["anchored_conversations_unchecked"] = anchors.ConversationsUnchecked
 	}
 	for k, v := range s.keyLogReport() {
 		resp[k] = v

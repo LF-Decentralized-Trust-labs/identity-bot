@@ -649,6 +649,11 @@ type anchorCheck struct {
 	// alone.
 	WitnessTip        int
 	WitnessesAnswered int
+	// ConversationsUnchecked says why conversation entries an anchor fixes
+	// were not checked: this Identity Agent includes no add-on that keeps
+	// conversations, so it cannot read them. Nothing is found broken by
+	// that, and nothing is checked either.
+	ConversationsUnchecked string
 	// BrokenAt is the place in the record identity's key log where the record
 	// first stops holding, and Why says what failed. Zero when it holds.
 	BrokenAt int
@@ -838,6 +843,11 @@ func (s *CoreServer) checkAnchors() (anchorCheck, error) {
 			return broken(sn, fmt.Sprintf("log row %d, which an anchor fixes, has been removed or changed", st.Log.Row))
 		}
 		for _, c := range st.Conversations {
+			if errors.Is(cerr, errNoAnchoredChains) {
+				out.ConversationsUnchecked = "the anchors fix conversation entries, and this Identity Agent " +
+					"includes no add-on that keeps conversations, so they cannot be checked here"
+				continue
+			}
 			if cerr != nil {
 				return broken(sn, "the conversations an anchor fixes cannot be read")
 			}
