@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"identity-agent-core/internal/atomicfile"
 )
 
 // Root-seed protection at rest.
@@ -171,11 +173,7 @@ func StoreRootSeed(dataDir string, seed []byte) error {
 	}
 	// Atomic replace so a crash mid-write can never leave a corrupt (or half
 	// plaintext) seed file.
-	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, p); err != nil {
+	if err := atomicfile.Write(p, data, 0600); err != nil {
 		return err
 	}
 

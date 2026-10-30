@@ -48,6 +48,8 @@ import (
 	"path/filepath"
 	"sync"
 	"unsafe"
+
+	"identity-agent-core/internal/atomicfile"
 )
 
 // sepEnvelope is how the wrapped key sits on disk.
@@ -158,30 +160,12 @@ func (s *sepSigner) ensure() error {
 	//
 	// The flush matters for the same reason: a rename that lands before the bytes
 	// do leaves an empty file, and the next start mints another identity.
-	tmp, err := os.CreateTemp(filepath.Dir(p), filepath.Base(p)+".*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
-		return err
-	}
+	//
 	// Create-or-fail, so a key minted concurrently is adopted rather than
 	// overwritten. Losing that race is an ordinary outcome, not an error: the
 	// other process's key is just as much this machine's key, and the one thing
 	// that must not happen is two of them.
-	if err := os.Link(tmp.Name(), p); err != nil {
+	if err := atomicfile.Create(p, data, 0o600); err != nil {
 		if existing, rerr := s.read(); rerr == nil {
 			s.blob, s.loaded = existing, true
 			return nil

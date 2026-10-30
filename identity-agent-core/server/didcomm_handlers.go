@@ -9,12 +9,12 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
 	"identity-agent-core/didcomm"
+	"identity-agent-core/internal/atomicfile"
 	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/login"
 
@@ -98,36 +98,12 @@ func (s *CoreServer) loadDIDCommKeys() (map[string]json.RawMessage, error) {
 const didcommKeysMeanwhile = "this Identity Agent cannot send, receive or open private messages, " +
 	"and making new keys instead would cut it off from every contact and AI agent that knows the old ones"
 
-// writeFileAtomic replaces a file in one step, or leaves the old one alone.
-//
-// These three files were each written with a bare os.WriteFile: truncate, then
-// write. A process that stopped in between left a half-written file, and the
-// readers discarded the unmarshal error and carried on with an empty map. So
-// an interrupted write did not fail loudly — it silently emptied the peers list,
-// the inbox, or the file holding this agent's DIDComm private keys. The key
-// file's reader now refuses a damaged file instead (loadDIDCommKeys).
-//
-// Writing beside the target and renaming means a reader sees either the old
-// file or the new one. Losing the newest change is recoverable; a truncated key
-// file is not.
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, perm); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return nil
-}
-
 func (s *CoreServer) saveDIDCommKeys(m map[string]json.RawMessage) error {
 	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(s.didcommKeysPath(), b, 0600)
+	return atomicfile.Write(s.didcommKeysPath(), b, 0600)
 }
 
 // keySetFor returns the DIDComm keyset for aid, minting + persisting one on first use.
@@ -237,7 +213,7 @@ func (s *CoreServer) savePeers(m map[string]peerRecord) error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(s.didcommPeersPath(), b, 0600)
+	return atomicfile.Write(s.didcommPeersPath(), b, 0600)
 }
 
 // --- replay: in-process seen-ID cache (id -> expiry) ---

@@ -38,6 +38,7 @@ import (
 
 	"identity-agent-core/authorisation"
 	"identity-agent-core/drivers"
+	"identity-agent-core/internal/atomicfile"
 	"identity-agent-core/login"
 	"identity-agent-core/schemas"
 	"identity-agent-core/store"
@@ -513,7 +514,7 @@ func (s *CoreServer) noteAnchoredNotHeld(said string, anchors []json.RawMessage)
 		// interaction it holds (readKeptRecord).
 		list = append(list, notHeldAnchor{Interaction: said, Anchors: anchors})
 		if b, merr := json.Marshal(list); merr == nil {
-			if werr := writeFileAtomic(filepath.Join(s.DataDir, anchoredNotHeldFile), b, 0o600); werr != nil {
+			if werr := atomicfile.Write(filepath.Join(s.DataDir, anchoredNotHeldFile), b, 0o600); werr != nil {
 				log.Printf("[grants] %s could not be added to the interactions whose anchors are not held: %v", said, werr)
 			}
 		}

@@ -8,6 +8,7 @@ import (
 
 	"identity-agent-core/didcomm"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/atomicfile"
 )
 
 // The identity a sealed machine makes for itself.
@@ -147,7 +148,7 @@ func (s *CoreServer) saveBoxIdentity(b *boxIdentity) error {
 	// 0600 and atomic, like every other file holding private keys here: a
 	// half-written one would be an identity that loads as corrupt, which is the
 	// same as losing it.
-	return writeFileAtomic(s.boxIdentityPath(), raw, 0600)
+	return atomicfile.Write(s.boxIdentityPath(), raw, 0600)
 }
 
 // loadBoxIdentity returns nil when this machine has never made one, which is

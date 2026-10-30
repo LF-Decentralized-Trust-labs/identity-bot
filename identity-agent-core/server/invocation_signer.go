@@ -12,6 +12,7 @@ import (
 	"identity-agent-core/activitylog"
 	"identity-agent-core/backup"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/atomicfile"
 	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/secureenclave"
 )
@@ -52,12 +53,7 @@ func writeInvocationSignerRecord(dataDir string, rec coretypes.LogSignerRecord) 
 	if err != nil {
 		return err
 	}
-	path := filepath.Join(dataDir, "invocation_signer.json")
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return atomicfile.Write(filepath.Join(dataDir, "invocation_signer.json"), data, 0600)
 }
 
 // ChainStart implements activitylog.ChainKeeper.

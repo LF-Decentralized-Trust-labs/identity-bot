@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"identity-agent-core/childenv"
+	"identity-agent-core/internal/atomicfile"
 	"identity-agent-core/permission"
 	"log"
 	"net"
@@ -72,15 +73,7 @@ func establishLocalOwnerSecret(dataDir, given string) (string, error) {
 			return "", err
 		}
 		path := filepath.Join(dataDir, LocalOwnerSecretFile)
-		tmp := path + ".tmp"
-		if err := os.WriteFile(tmp, []byte(secret+"\n"), 0o600); err != nil {
-			return "", fmt.Errorf("write the local owner secret: %w", err)
-		}
-		// WriteFile keeps an existing file's mode, so set it explicitly.
-		if err := os.Chmod(tmp, 0o600); err != nil {
-			return "", err
-		}
-		if err := os.Rename(tmp, path); err != nil {
+		if err := atomicfile.Write(path, []byte(secret+"\n"), 0o600); err != nil {
 			return "", fmt.Errorf("write the local owner secret: %w", err)
 		}
 		if msg := windowsSecretExposure(runtime.GOOS, dataDir, os.Getenv); msg != "" {

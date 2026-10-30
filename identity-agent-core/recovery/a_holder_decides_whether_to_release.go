@@ -12,6 +12,7 @@ import (
 
 	"identity-agent-core/authprovider"
 	"identity-agent-core/backup"
+	"identity-agent-core/internal/atomicfile"
 )
 
 // Holding somebody else's share, and deciding whether to hand it back.
@@ -507,23 +508,7 @@ func (h *Holder) save(r *AskRecord) error {
 	// Written aside and renamed, so a machine that loses power part-way
 	// through does not come back with a half-written clock.
 	path := h.pathFor(r.IdentityAID, r.HolderID)
-	tmp := path + ".writing"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(raw); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return atomicfile.Write(path, raw, 0o600)
 }
 
 // whoeverIsApproving refuses an approval from somebody this machine cannot

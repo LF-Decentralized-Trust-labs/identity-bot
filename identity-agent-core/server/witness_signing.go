@@ -9,6 +9,7 @@ import (
 
 	"identity-agent-core/backup"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/atomicfile"
 	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/login"
 	"identity-agent-core/secureenclave"
@@ -110,7 +111,7 @@ func (s *CoreServer) witnessSigningKey() (seed []byte, aid string, err error) {
 	}
 
 	data, _ := json.Marshal(witnessKeyRecord{AID: aid, Index: idx})
-	if werr := writeFileAtomic(s.witnessKeyPath(), data, 0600); werr != nil {
+	if werr := atomicfile.Write(s.witnessKeyPath(), data, 0600); werr != nil {
 		return nil, "", fmt.Errorf("could not record the witnessing key: %w", werr)
 	}
 	return seed, aid, nil

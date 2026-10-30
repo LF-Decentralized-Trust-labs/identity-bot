@@ -21,6 +21,7 @@ import (
 	"identity-agent-core/backup"
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/atomicfile"
 	"identity-agent-core/keriengine"
 	"identity-agent-core/login"
 	"identity-agent-core/permission"
@@ -278,11 +279,7 @@ func (s *CoreServer) loadRecordIdentity() (recordIdentityRecord, bool, error) {
 
 func (s *CoreServer) saveRecordIdentity(rec recordIdentityRecord) error {
 	b, _ := json.Marshal(rec)
-	tmp := s.recordIdentityPath() + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.recordIdentityPath())
+	return atomicfile.Write(s.recordIdentityPath(), b, 0o600)
 }
 
 // anchorsItsRecord reports whether this Identity Agent anchors its record: an

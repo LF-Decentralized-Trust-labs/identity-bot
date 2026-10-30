@@ -626,6 +626,13 @@ func (s *Service) ReceiveArchive(identityAID string, data []byte) (string, error
 		os.Remove(tmp)
 		return "", err
 	}
+	// Flushed before the rename, or a crash can leave an empty archive under
+	// the real name, which looks like a backup and restores nothing.
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return "", err
+	}
 	if err := f.Close(); err != nil {
 		os.Remove(tmp)
 		return "", err

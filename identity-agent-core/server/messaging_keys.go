@@ -8,6 +8,7 @@ import (
 
 	"identity-agent-core/backup"
 	"identity-agent-core/didcomm"
+	"identity-agent-core/internal/atomicfile"
 	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/secureenclave"
 )
@@ -103,7 +104,7 @@ func (s *CoreServer) keysAtIndex(rootSeed []byte, aid string, idx int) (*didcomm
 // practice, which is the same as lost.
 func (s *CoreServer) recordMessagingKeyIndex(aid string, idx int) error {
 	data, _ := json.Marshal(messagingKeyRecord{AID: aid, Index: idx})
-	if err := writeFileAtomic(s.messagingKeyPath(), data, 0600); err != nil {
+	if err := atomicfile.Write(s.messagingKeyPath(), data, 0600); err != nil {
 		return fmt.Errorf("could not record which branch the messaging keys came from: %w", err)
 	}
 	return nil

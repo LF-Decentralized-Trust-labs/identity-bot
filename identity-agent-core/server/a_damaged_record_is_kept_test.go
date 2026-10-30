@@ -35,8 +35,8 @@ func leftAlone(t *testing.T, path string, want []byte) {
 	if !bytes.Equal(got, want) {
 		t.Fatalf("the damaged %s was written over: %q", filepath.Base(path), got)
 	}
-	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
-		t.Fatalf("a replacement for %s was begun beside it: %v", filepath.Base(path), err)
+	if left, _ := filepath.Glob(path + ".tmp*"); len(left) > 0 {
+		t.Fatalf("a replacement for %s was begun beside it: %v", filepath.Base(path), left)
 	}
 }
 

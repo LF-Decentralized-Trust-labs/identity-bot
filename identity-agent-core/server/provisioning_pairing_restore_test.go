@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"identity-agent-core/endpoint"
+	"identity-agent-core/internal/atomicfile"
 	"identity-agent-core/store"
 )
 
@@ -169,7 +170,7 @@ func TestSavingLeavesNoDebrisBesideTheRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".tmp") {
+		if atomicfile.IsTemp(e.Name()) {
 			t.Errorf("left a temporary file behind: %s", e.Name())
 		}
 	}

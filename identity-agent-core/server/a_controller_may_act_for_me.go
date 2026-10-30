@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/atomicfile"
 	"os"
 	"path/filepath"
 	"strings"
@@ -217,11 +218,7 @@ func (c *controllerGrants) save(all map[string]ControllerGrant) error {
 	if err := os.MkdirAll(c.dataDir, 0o700); err != nil {
 		return err
 	}
-	tmp := c.path() + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, c.path())
+	return atomicfile.Write(c.path(), b, 0o600)
 }
 
 // Grant records that a machine may act for this identity.

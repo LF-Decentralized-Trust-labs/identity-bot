@@ -10,6 +10,7 @@ import (
 	"fmt"
 
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/atomicfile"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -153,12 +154,8 @@ func identityFrom(certPEM, keyPEM []byte) (*TransportIdentity, error) {
 
 // writePrivate writes a secret so that a crash cannot leave half of one.
 func writePrivate(path string, body []byte) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, body, 0o600); err != nil {
+	if err := atomicfile.Write(path, body, 0o600); err != nil {
 		return fmt.Errorf("could not write %s: %w", path, err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return fmt.Errorf("could not put %s in place: %w", path, err)
 	}
 	return nil
 }

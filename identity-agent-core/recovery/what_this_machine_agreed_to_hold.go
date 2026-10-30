@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/internal/atomicfile"
 )
 
 // What this machine agreed to hold for other identities.
@@ -187,21 +188,5 @@ func (h *Holdings) save(holding Holding) error {
 	// it was already written this way; this was not, which had it backwards:
 	// of the two, this is the one that cannot be reconstructed.
 	path := h.pathFor(holding.IdentityAID, holding.HolderID)
-	tmp := path + ".writing"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(raw); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return atomicfile.Write(path, raw, 0o600)
 }

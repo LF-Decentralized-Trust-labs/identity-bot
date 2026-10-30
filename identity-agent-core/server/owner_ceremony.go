@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"identity-agent-core/internal/atomicfile"
 )
 
 // Spreading control of an identity across more than one party.
@@ -146,16 +148,10 @@ func (s *CoreServer) saveCeremony(c *OwnerCeremony) error {
 	if err != nil {
 		return err
 	}
-	path := s.ceremonyPath()
-	tmp := path + ".tmp"
 	// Written beside and renamed. A half-written ceremony would read as one
 	// nobody had joined, and the people who had already accepted would have to
 	// do it again with no way to know they needed to.
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
+	if err := atomicfile.Write(s.ceremonyPath(), raw, 0o600); err != nil {
 		return err
 	}
 	return nil

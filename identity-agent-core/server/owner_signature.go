@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/atomicfile"
 	"identity-agent-core/login"
 	"identity-agent-core/store"
 )
@@ -264,26 +265,7 @@ func (s *CoreServer) ReSealOwnerAuthority(oa OwnerAuthority) error {
 	// A partial owner record is worse than none: it reads as unreadable, which
 	// is a different answer from unclaimed and sends a screen somewhere else.
 	dir := s.DataDir
-	tmp, err := os.CreateTemp(dir, ownerAuthorityFile+".*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(raw); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), filepath.Join(dir, ownerAuthorityFile))
+	return atomicfile.Write(filepath.Join(dir, ownerAuthorityFile), raw, 0o600)
 }
 
 // decodeOwnerKey and verifyOwnerString are the two steps of verification,

@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"identity-agent-core/internal/atomicfile"
 )
 
 // Obtaining the certificates that let somebody else check this machine's
@@ -204,11 +206,7 @@ func (c *snpCertificateChain) writeCache(key string, chain [][]byte) {
 	for _, der := range chain {
 		buf = append(buf, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})...)
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, buf, 0o600); err != nil {
-		return
-	}
-	_ = os.Rename(tmp, path)
+	_ = atomicfile.Write(path, buf, 0o600)
 }
 
 // readHandedDownChain reads certificates handed to the guest at launch.

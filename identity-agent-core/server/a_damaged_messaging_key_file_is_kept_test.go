@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -57,8 +58,8 @@ func TestADamagedMessagingKeyFileIsNeverReplaced(t *testing.T) {
 	if !bytes.Equal(after, damaged) {
 		t.Fatal("the damaged key file was written over")
 	}
-	if _, err := os.Stat(s.didcommKeysPath() + ".tmp"); !os.IsNotExist(err) {
-		t.Fatalf("a replacement was begun beside the damaged file: %v", err)
+	if left, _ := filepath.Glob(s.didcommKeysPath() + ".tmp*"); len(left) > 0 {
+		t.Fatalf("a replacement was begun beside the damaged file: %v", left)
 	}
 }
 
