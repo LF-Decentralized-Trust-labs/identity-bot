@@ -30,6 +30,7 @@ var removedRuntime = []string{
 	"identity-agent-core/brainsignin",
 	"identity-agent-core/githubapp",
 	"identity-agent-core/conversation",
+	"identity-agent-core/store/ai_memory_store.go",
 	"scripts/build-agent-host.sh",
 	"scripts/build-agent-host.ps1",
 }

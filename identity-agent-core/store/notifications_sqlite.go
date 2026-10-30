@@ -159,3 +159,11 @@ func (s *SQLiteStore) SetNotificationStatus(id, status string) error {
 	}
 	return nil
 }
+
+// boolToInt is b as SQLite keeps a boolean.
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
