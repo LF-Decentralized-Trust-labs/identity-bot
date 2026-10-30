@@ -20,7 +20,7 @@ import (
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
-	"identity-agent-core/sandbox"
+	"identity-agent-core/permission"
 	"identity-agent-core/schemas"
 
 	keri "github.com/grapeid/keri-go"
@@ -780,7 +780,7 @@ func (v *verifier) checkAskAllowed(where string, grant *credential, rec agentmes
 		_ = json.Unmarshal(raw, &limits)
 	}
 	args := agentmessage.AskArgs(rec.To, string(body))
-	if err := sandbox.CheckResourceConstraints(limits, agentmessage.CapabilityMessageAgent, args); err != nil {
+	if err := permission.CheckResourceConstraints(limits, agentmessage.CapabilityMessageAgent, args); err != nil {
 		v.fault(where, "the AI agent's grant does not let it ask %s: %v", rec.To, err)
 	}
 }

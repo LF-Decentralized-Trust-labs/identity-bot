@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-10-28
-**Relates to:** ADR-045 (Every asset gets an identity and a grant from one schema template), ADR-046 (A machine becomes an AI agent's body by a person comparing six words), ADR-050 (One check for a controller's actions and an AI agent's capability calls), ADR-055 (A new machine for an AI agent is made by a provider, and approved by a person)
+**Relates to:** ADR-045 (Every asset gets an identity and a grant from one schema template), ADR-046 (A machine becomes an AI agent's body by a person comparing six words), ADR-050 (One check for a controller's actions and an AI agent's capability calls)
 
 ## Context
 
@@ -22,7 +22,8 @@ four things, in this order:
 2. It withdraws every grant the AI agent holds, writing each one to the registry.
 3. It ends every machine that is the AI agent's live body, and withdraws that
    body's credential. It refuses any machine still waiting for approval.
-4. It has the machines a provider made for the AI agent destroyed (ADR-055).
+4. It has the machines a provider made for the AI agent destroyed, by telling the
+   provider to remove each one.
 
 The mark comes first, so a change arriving while the grants are being withdrawn
 cannot issue a new one. A step that cannot be written yet is reported, and asking

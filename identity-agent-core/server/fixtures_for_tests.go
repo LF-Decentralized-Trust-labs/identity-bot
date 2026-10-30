@@ -30,16 +30,16 @@ import (
 	keri "github.com/grapeid/keri-go"
 )
 
-// Fixtures for the tests of the core and of the add-ons built in this module.
+// Fixtures for the tests of the core and of its add-ons.
 //
 // They are written here, outside any _test.go file, because the add-ons' tests
 // live in the add-ons' own packages and use the same worlds the core's tests
 // do: an organisation founded as startup finds it, a controller paired and
 // granted, a request signed as a machine signs it. A _test.go file is
 // compiled only into this package's own tests, so a fixture kept in one could
-// only be copied, never shared. The add-ons reach these through
-// internal/addonhost; nothing in this module's programs calls them, so they
-// are not linked into any binary.
+// only be copied, never shared. An add-on's tests reach these through package
+// addon/addontest; nothing in this module's programs calls them, so they are
+// not linked into any binary.
 
 func grantFor(n byte, grade ControllerGrade) ControllerGrant {
 	seed := make([]byte, ed25519.SeedSize)

@@ -9,16 +9,17 @@ import (
 	"testing"
 )
 
-// Code in another module does not reach the server's add-on handle by
-// mistake. It cannot name hostlink.Token, so no value it writes converts to
-// one; and the token it can still conjure without naming it — a zero value,
-// inferred from the function's own parameter by a generic call or made by
-// reflect — is refused when it is used. This builds and runs a module of its
-// own that depends on this one, as an app built on the core would.
+// Code in another module reaches the server's add-on handle through package
+// addon, the plug-in point, and not by calling the server directly. It cannot
+// name hostlink.Token, so no value it writes converts to one; and the token it
+// can still conjure without naming it — a zero value, inferred from the
+// function's own parameter by a generic call or made by reflect — is refused
+// when it is used. This builds and runs a module of its own that depends on
+// this one, as an app built on the core would.
 //
 // It also records the limit (hostlink.Token): the token is a safeguard, not a
 // boundary, and a module whose path begins identity-agent-core/ imports the
-// internal packages and reaches the handle directly.
+// internal packages and makes a token of its own.
 func TestAnotherModuleCannotMakeAToken(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module of its own")
@@ -149,24 +150,48 @@ func main() {
 		}
 	}
 
+	// The plug-in point: an add-on in a module of its own registers, and
+	// reaches the handle and the fixtures through packages addon and
+	// addon/addontest.
+	if out, err := outsider(t, `package main
+
+import (
+	"fmt"
+
+	"identity-agent-core/addon"
+	"identity-agent-core/addon/addontest"
+	"identity-agent-core/server"
+)
+
+func init() { server.RegisterAddon(server.Addon{ID: "outside", Name: "an add-on from elsewhere"}) }
+
+func main() {
+	var a addon.Authority
+	_ = a
+	// addontest.New is named, not called: outside a test it panics.
+	if addon.Shared().JSONError != nil && addontest.New != nil {
+		fmt.Println("REACHED the handle")
+	}
+}
+`, "run", "."); err != nil || !strings.Contains(out, "REACHED") {
+		t.Errorf("an add-on in another module cannot reach the plug-in point: %v\n%s", err, out)
+	}
+
 	// The recorded limit: a module named under this one's path imports the
-	// internal packages, and reaches the handle with a token of its own
-	// making. If this ever stops reaching it, the docs saying it does are
-	// what to change.
+	// internal packages, and makes a token of its own. If this ever stops
+	// working, the docs saying it does are what to change.
 	out, err := outsiderNamed(t, "identity-agent-core/elsewhere", `package main
 
 import (
 	"fmt"
 
-	"identity-agent-core/internal/addonhost"
 	"identity-agent-core/internal/hostlink"
 	"identity-agent-core/server"
 )
 
 func main() {
-	_ = hostlink.New()
 	var s *server.CoreServer
-	if h := addonhost.Of(s); h != nil {
+	if h := server.AddonHost(s, hostlink.New()); h != nil {
 		fmt.Println("REACHED the handle")
 	}
 }

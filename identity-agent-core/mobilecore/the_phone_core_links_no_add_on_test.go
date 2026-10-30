@@ -14,15 +14,16 @@ import (
 //
 // Every app built on this core carries whatever the phone core links, on
 // every phone, and the core's own desktop program is the core and nothing
-// else. An add-on is a package an app may include; it includes one by
-// importing it, which registers it with the server (server.RegisterAddon).
-// So neither the phone core (mobilecore) nor the core's desktop program (the
-// module's main package) may come to depend on an add-on, or on a package
-// only add-ons use, on any platform the phone core is built for.
+// else. An add-on is a package an app may include, from a module of its own;
+// it includes one by importing it, which registers it with the server
+// (server.RegisterAddon). An add-on reaches the core through the plug-in
+// point, package addon, and its tests through addon/addontest. So neither the
+// phone core (mobilecore) nor the core's desktop program (the module's main
+// package) may come to depend on the plug-in point, or on a package of this
+// module that does, on any platform the phone core is built for.
 //
-// The add-ons are found, not listed: every package of this module that
-// calls server.RegisterAddon outside its tests. What only they use is
-// whatever they depend on that the server does not.
+// What only add-ons use is found, not listed: the plug-in point's packages,
+// and every package of this module that depends on one of them.
 
 // module is this module's path, as package paths begin.
 const module = "identity-agent-core"
@@ -65,66 +66,50 @@ func goList(t *testing.T, goos, goarch string, args ...string) []string {
 	return strings.Fields(string(out))
 }
 
-// addOnPackages are this module's packages that register an add-on.
-func addOnPackages(t *testing.T) []string {
+// pluginPoint are the packages of the plug-in point.
+const pluginPoint = module + "/addon"
+
+// addOnOnly are the packages of this module only add-ons use, on one
+// platform: the plug-in point's, and every package that depends on one.
+func addOnOnly(t *testing.T, goos, goarch string) map[string]bool {
 	t.Helper()
-	var found []string
-	for _, line := range goList(t, "", "", "-f", "{{.ImportPath}}|{{.Dir}}|{{join .GoFiles \",\"}}", "./...") {
-		parts := strings.SplitN(line, "|", 3)
-		if len(parts) != 3 || parts[2] == "" {
+	only := map[string]bool{}
+	for _, line := range goList(t, goos, goarch, "-f", "{{.ImportPath}}|{{join .Deps \",\"}}", "./...") {
+		path, deps, _ := strings.Cut(line, "|")
+		if path == pluginPoint || strings.HasPrefix(path, pluginPoint+"/") {
+			only[path] = true
 			continue
 		}
-		for _, f := range strings.Split(parts[2], ",") {
-			src, err := os.ReadFile(filepath.Join(parts[1], f))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if strings.Contains(string(src), "server.RegisterAddon(") {
-				found = append(found, parts[0])
+		for _, d := range strings.Split(deps, ",") {
+			if d == pluginPoint || strings.HasPrefix(d, pluginPoint+"/") {
+				only[path] = true
 				break
 			}
 		}
 	}
-	sort.Strings(found)
-	return found
+	return only
 }
 
 func TestNoCoreProgramLinksAnAddOn(t *testing.T) {
-	addOns := addOnPackages(t)
-	if len(addOns) < 2 {
-		t.Fatalf("found only %v registering an add-on; the search no longer finds them", addOns)
-	}
 	for _, p := range platforms {
 		name := p.goos
 		if name == "" {
 			name = runtime.GOOS
 		}
-		server := map[string]bool{}
-		for _, d := range goList(t, p.goos, p.goarch, "-deps", module+"/server") {
-			server[d] = true
-		}
-		// What only add-ons bring: the add-ons and every package they need
-		// that the server does not.
-		addOnOnly := map[string]string{}
-		for _, a := range addOns {
-			for _, d := range goList(t, p.goos, p.goarch, "-deps", a) {
-				if strings.HasPrefix(d, module+"/") && !server[d] {
-					if _, seen := addOnOnly[d]; !seen {
-						addOnOnly[d] = a
-					}
-				}
-			}
+		only := addOnOnly(t, p.goos, p.goarch)
+		if !only[pluginPoint] || !only[pluginPoint+"/addontest"] {
+			t.Fatalf("the plug-in point's packages are not found on %s (found %v); the search no longer finds them", name, only)
 		}
 		for _, prog := range corePrograms {
 			var linked []string
 			for _, d := range goList(t, p.goos, p.goarch, "-deps", prog) {
-				if a, ok := addOnOnly[d]; ok {
-					linked = append(linked, d+" (from "+a+")")
+				if only[d] {
+					linked = append(linked, d)
 				}
 			}
 			sort.Strings(linked)
 			if len(linked) > 0 {
-				t.Errorf("%s links what only add-ons bring, on %s: %s; an add-on is included by an app that imports it, never by the core",
+				t.Errorf("%s links what only add-ons use, on %s: %s; an add-on is included by an app that imports it, never by the core",
 					prog, name, strings.Join(linked, ", "))
 			}
 		}

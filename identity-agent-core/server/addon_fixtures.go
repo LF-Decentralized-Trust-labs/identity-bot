@@ -5,6 +5,7 @@ import (
 	"identity-agent-core/activitylog"
 	"identity-agent-core/asset"
 	"identity-agent-core/authprovider"
+	"identity-agent-core/didcomm"
 	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/internal/hostlink"
 	"identity-agent-core/permission"
@@ -18,10 +19,9 @@ import (
 )
 
 // AddonFixtures are the core's test fixtures (fixtures_for_tests.go), for
-// the tests of the add-ons built in this module (addonhost.TestFixtures). It
-// panics unless given a token hostlink.New made, as AddonHost does, as a
-// safeguard and not a boundary (hostlink.Token). Only
-// a test calls it, so no program links it or the fixtures.
+// an add-on's tests (package addon/addontest). It asks for a token only
+// addontest makes (hostlink.Token), so the fixtures are reached through
+// addontest.New, which refuses a program that is not a test.
 func AddonFixtures(t hostlink.Token) any {
 	hostlink.Refuse(t, "server.AddonFixtures")
 	return fixtureWrapper{}
@@ -131,6 +131,20 @@ func (fixtureWrapper) SignsWithSeeds(e interface {
 	SetEventSignature(func(aid string, key string, raw []byte) (string, error))
 }, seeds ...[]byte) {
 	signsWithSeeds(e, seeds...)
+}
+func (fixtureWrapper) HandleDIDCommInbound(s *CoreServer, w http.ResponseWriter, r *http.Request) {
+	s.handleDIDCommInbound(w, r)
+}
+func (fixtureWrapper) HandleGrantController(s *CoreServer, w http.ResponseWriter, r *http.Request) {
+	s.handleGrantController(w, r)
+}
+func (fixtureWrapper) Router(s *CoreServer) chi.Router { return s.router }
+func (fixtureWrapper) BuildRouter(s *CoreServer, flutterWebDir string) chi.Router {
+	return s.buildRouter(flutterWebDir)
+}
+func (fixtureWrapper) KeySignerOf(seed []byte) coretypes.KeySigner { return heldKeyOf(seed) }
+func (fixtureWrapper) KeySetFor(s *CoreServer, aid string) (*didcomm.KeySet, error) {
+	return s.keySetFor(aid)
 }
 func (fixtureWrapper) TalkSigner() string                             { return talkSigner }
 func (fixtureWrapper) TestOwnerSecret() string                        { return testOwnerSecret }

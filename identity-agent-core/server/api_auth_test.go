@@ -353,11 +353,10 @@ func TestEveryRegisteredRouteResolvesToAClass(t *testing.T) {
 // behaviour because the defect being prevented is a line of code someone adds
 // back out of habit.
 //
-// The add-ons built in this module serve handlers too, from packages of their
-// own, so their sources are scanned as well: for the predicates, and for the
-// names the add-on handle would give them (addonhost) were they ever put on it.
+// Add-ons serve handlers too, through the handle package addon gives them, so
+// that package is scanned as well: none of the predicates is ever put on it.
 func TestNoHandlerUsesLoopbackAsTheOwnerTest(t *testing.T) {
-	for _, dir := range []string{"../aiagents", "../sandboxedapps"} {
+	for _, dir := range []string{"../addon", "../addon/addontest"} {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			t.Fatalf("read %s: %v", dir, err)

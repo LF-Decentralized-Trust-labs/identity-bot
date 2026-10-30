@@ -37,7 +37,7 @@ untested there.
 |---|---|
 | Desktop app | macOS, Windows |
 | Phones (apps that embed the core) | iOS, Android |
-| Servers (the sealed server image, agent-host on AI agent machines) | Linux |
+| Servers (the sealed server image) | Linux |
 
 A Linux desktop app is incomplete and deferred: it remains a goal and is open to
 contributions, but is not currently maintained. The Linux builds below are for the

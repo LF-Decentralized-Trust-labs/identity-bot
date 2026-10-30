@@ -9,21 +9,20 @@ import (
 	"identity-agent-core/didcomm"
 	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/internal/hostlink"
+	"identity-agent-core/login"
 	"identity-agent-core/permission"
 	"identity-agent-core/schemas"
 	"identity-agent-core/store"
 	"net/http"
 	"time"
-
-	"github.com/go-chi/chi/v5"
 )
 
-// AddonHost is the server's side of the handle the add-ons built in this
-// module have on s (internal/addonhost); s may be nil for the helpers that
-// need no server. It panics unless given a token hostlink.New made, so it is
-// not reached by mistake. That is a safeguard, not a boundary against code an
-// app chooses to link: see hostlink.Token. Each method of what it returns
-// calls the server's own; none is a second copy.
+// AddonHost is the server's side of the handle an add-on has on s (package
+// addon); s may be nil for the helpers that need no server. It asks for a
+// token only package addon makes (hostlink.Token), so every use of the handle
+// goes through that package; it keeps nothing from code an app chooses to
+// link. Each method of what it returns calls the server's own; none is a
+// second copy.
 //
 // It is a function an add-on calls, rather than something the server
 // registers when it starts, so that a program that includes no add-on (the
@@ -37,7 +36,7 @@ func AddonHost(s *CoreServer, t hostlink.Token) any {
 type hostWrapper struct{ s *CoreServer }
 
 // addonStates is what each add-on keeps for one server
-// (addonhost.Host.AddonState).
+// (addon.Host.AddonState).
 type addonStates struct{ m sync.Map }
 
 func (h hostWrapper) AddonState(key any, make func() any) any {
@@ -58,9 +57,6 @@ func (h hostWrapper) AwaitingFor(holder string, pending bool) string {
 }
 func (h hostWrapper) BindSigner(aid string, signer string) (ControllerGrant, error) {
 	return h.s.bindSigner(aid, signer)
-}
-func (h hostWrapper) BuildRouter(flutterWebDir string) chi.Router {
-	return h.s.buildRouter(flutterWebDir)
 }
 func (h hostWrapper) CredentialLog(registrySAID string, acdcSAID string) ([]string, string, error) {
 	return h.s.credentialLog(registrySAID, acdcSAID)
@@ -85,18 +81,24 @@ func (h hostWrapper) GrantController(g ControllerGrant, now time.Time, by corety
 func (h hostWrapper) GrantsHeldBy(agentAID string, usableOnly bool) []store.CredentialRecord {
 	return h.s.grantsHeldBy(agentAID, usableOnly)
 }
-func (h hostWrapper) HandleDIDCommInbound(w http.ResponseWriter, r *http.Request) {
-	h.s.handleDIDCommInbound(w, r)
-}
-func (h hostWrapper) HandleGrantController(w http.ResponseWriter, r *http.Request) {
-	h.s.handleGrantController(w, r)
-}
 func (h hostWrapper) HasBrowserSession(r *http.Request) bool      { return h.s.hasBrowserSession(r) }
 func (h hostWrapper) HoldTheRecord() (string, bool, bool, func()) { return h.s.holdTheRecord() }
-func (h hostWrapper) IdentitySigningSeed() ([]byte, error)        { return h.s.identitySigningSeed() }
-func (h hostWrapper) InBackground(fn func(ctx context.Context))   { h.s.inBackground(fn) }
-func (h hostWrapper) InitAssetHandler() error                     { return h.s.initAssetHandler() }
-func (h hostWrapper) IsVaultEntry(name string) bool               { return h.s.isVaultEntry(name) }
+func (h hostWrapper) SignerForAsset(aid string) (coretypes.KeySigner, error) {
+	return h.s.assetSigner(aid)
+}
+func (h hostWrapper) LogSigner() (coretypes.KeySigner, string, coretypes.LogSignerRecord, error) {
+	return h.s.logSigner()
+}
+func (h hostWrapper) SignAsTheIdentity(message []byte) (string, error) {
+	seed, err := h.s.identitySigningSeed()
+	if err != nil {
+		return "", err
+	}
+	return login.SignString(string(message), seed)
+}
+func (h hostWrapper) InBackground(fn func(ctx context.Context)) { h.s.inBackground(fn) }
+func (h hostWrapper) InitAssetHandler() error                   { return h.s.initAssetHandler() }
+func (h hostWrapper) IsVaultEntry(name string) bool             { return h.s.isVaultEntry(name) }
 func (h hostWrapper) IssueAssetCredential(kind *schemas.AssetGrant, holder string, issuer string, claims map[string]interface{}, expiry string, by coretypes.Authority) (string, error) {
 	return h.s.issueAssetCredential(kind, holder, issuer, claims, expiry, by)
 }
@@ -106,10 +108,18 @@ func (h hostWrapper) IssueCapabilityGrant(agent *asset.Asset, by coretypes.Autho
 func (h hostWrapper) IssuedUnderFirstVersionTooLate(rec *store.CredentialRecord) bool {
 	return h.s.issuedUnderFirstVersionTooLate(rec)
 }
-func (h hostWrapper) KeyCanSign() error                             { return h.s.keyCanSign() }
-func (h hostWrapper) KeyIsElsewhere() bool                          { return h.s.keyIsElsewhere() }
-func (h hostWrapper) KeySetFor(aid string) (*didcomm.KeySet, error) { return h.s.keySetFor(aid) }
-func (h hostWrapper) NoteRecorded()                                 { h.s.noteRecorded() }
+func (h hostWrapper) KeyCanSign() error    { return h.s.keyCanSign() }
+func (h hostWrapper) KeyIsElsewhere() bool { return h.s.keyIsElsewhere() }
+func (h hostWrapper) MessagingKeysOf(aid string) (*didcomm.DID, error) {
+	return h.s.messagingKeysOf(aid)
+}
+func (h hostWrapper) PackSignedAs(aid string, m *didcomm.JWM) (*didcomm.Envelope, error) {
+	return h.s.packSignedAs(aid, m)
+}
+func (h hostWrapper) OpenSealedTo(aid string, sender *didcomm.DID, env *didcomm.Envelope) (*didcomm.JWM, error) {
+	return h.s.openSealedTo(aid, sender, env)
+}
+func (h hostWrapper) NoteRecorded() { h.s.noteRecorded() }
 func (h hostWrapper) OwnAgentAtArrival(aid string, did *didcomm.DID) (string, error) {
 	return h.s.ownAgentAtArrival(aid, did)
 }
@@ -131,7 +141,6 @@ func (h hostWrapper) ResolveCaller(r *http.Request) permission.CallerContext {
 	return h.s.resolveCaller(r)
 }
 func (h hostWrapper) RevokeController(aid string) error     { return h.s.revokeController(aid) }
-func (h hostWrapper) Router() chi.Router                    { return h.s.router }
 func (h hostWrapper) RowIsItsGrant(g ControllerGrant) error { return h.s.rowIsItsGrant(g) }
 func (h hostWrapper) StoredKelForVerifying(aid string) ([]map[string]interface{}, error) {
 	return h.s.storedKelForVerifying(aid)
@@ -209,11 +218,8 @@ func (hostWrapper) RequiresTheKeyItself(method string, pattern string) (string, 
 }
 func (hostWrapper) SameJSONValue(a interface{}, b interface{}) bool { return sameJSONValue(a, b) }
 func (hostWrapper) SealedRemoteAddr() string                        { return sealedRemoteAddr }
-func (hostWrapper) SignEventBytes(raw []byte, seed []byte) (string, error) {
-	return signEventBytes(raw, seed)
-}
-func (hostWrapper) TheGateAdmittedTheOwner(r *http.Request) bool { return theGateAdmittedTheOwner(r) }
-func (hostWrapper) UnknownRouteRefusal() string                  { return unknownRouteRefusal }
+func (hostWrapper) TheGateAdmittedTheOwner(r *http.Request) bool    { return theGateAdmittedTheOwner(r) }
+func (hostWrapper) UnknownRouteRefusal() string                     { return unknownRouteRefusal }
 func (hostWrapper) WriteError(w http.ResponseWriter, status int, errMsg string, details string) {
 	writeError(w, status, errMsg, details)
 }

@@ -1,25 +1,20 @@
 // Package hostlink holds the token server.AddonHost and server.AddonFixtures
-// ask for (internal/addonhost). It is a safeguard: it keeps the handle from
-// being reached by accident, and keeps it out of programs that include no
-// add-on. It is not a security boundary (see Token).
+// ask for. It is a naming device, not a guard: packages addon and
+// addon/addontest are the only code that makes one, so every use of the
+// add-on handle is found through package addon, and every use of the test
+// fixtures goes through addontest.New, which refuses a program that is not a
+// test.
 package hostlink
 
-// Token is what server.AddonHost and server.AddonFixtures ask for.
+// Token is what server.AddonHost and server.AddonFixtures ask for. Code that
+// cannot import this package cannot name the type, and a zero Token conjured
+// without naming it (by a generic call, or by reflect) is refused, because
+// only New sets the field that makes it this module's.
 //
-// Only a token made by New is accepted. Code that cannot import this package
-// cannot name the type, so writes no value that converts to it; and the zero
-// Token it can still conjure without naming it (inferred from the function's
-// own parameter by a generic call, or made by reflect) is refused, because
-// only New sets the field that makes a token this module's. That keeps the
-// handle from being used by mistake.
-//
-// What it is not: a boundary against code an app chooses to link. Go's
-// internal packages are kept by import path, and this module's path is the
-// bare identity-agent-core, so a module declaring itself
-// identity-agent-core/<anything> imports this package and internal/addonhost
-// directly; and code in the same process can always reach anything through
-// unsafe or its memory. An app's builder decides what is trusted, by choosing
-// the add-ons and other code it links.
+// It keeps nothing from code an app chooses to link. Any module may import
+// package addon, which is its purpose; a module declaring itself
+// identity-agent-core/<anything> may import this package; and code in the
+// same process can reach anything through unsafe.
 type Token struct{ key *sentinel }
 
 type sentinel struct{ _ byte }

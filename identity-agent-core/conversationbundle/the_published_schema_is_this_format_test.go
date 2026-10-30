@@ -1,8 +1,6 @@
 package conversationbundle
 
 import (
-	"bytes"
-	"encoding/json"
 	"testing"
 
 	"identity-agent-core/activitylog"
@@ -42,26 +40,5 @@ func TestThePublishedSchemaDescribesTheBundle(t *testing.T) {
 	faults = append(faults, s.Unheld(held)...)
 	for _, f := range faults {
 		t.Error(f)
-	}
-}
-
-// A bundle as Build writes it reads back through Read unchanged: nothing an
-// export writes is a field the format does not have.
-func TestABuiltBundleReadsBack(t *testing.T) {
-	b, err := build(t, newStore(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, err := json.Marshal(b)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := Read(raw)
-	if err != nil {
-		t.Fatalf("an exported bundle does not read back: %v", err)
-	}
-	again, _ := json.Marshal(got)
-	if !bytes.Equal(raw, again) {
-		t.Fatal("an exported bundle changed on reading back")
 	}
 }

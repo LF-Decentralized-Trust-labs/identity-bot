@@ -2,16 +2,16 @@
 
 **Status:** Proposed
 **Date:** 2026-10-29
-**Supersedes in part:** ADR-046 (step 4, the six-word comparison), ADR-055 (the per-machine human approval of a provider-made machine)
+**Supersedes in part:** ADR-046 (step 4, the six-word comparison), the per-machine human approval of a machine a provider made (a provider is a program that makes machines for AI agents on request; how it does so is that runtime's own decision, kept outside this repository)
 **Relates to:** ADR-044 (an authorized controller does the app's work), ADR-050 (one check for a controller's actions and an AI agent's capability calls)
 
-**Rollout.** This is adopted as the design and built in phases. The signed-request approval path described below is added first, alongside the existing six-word flow. The six-word derivation and comparison are removed, the provider vouch is built, and the claim this supersedes is registered — with the supersession notes on ADR-046 and ADR-055 — in the change that removes the six words, not before: until then the code still derives and shows them, so the old claim is not yet false.
+**Rollout.** This is adopted as the design and built in phases. The signed-request approval path described below is added first, alongside the existing six-word flow. The six-word derivation and comparison are removed, the provider vouch is built, and the claim this supersedes is registered — with the supersession note on ADR-046 — in the change that removes the six words, not before: until then the code still derives and shows them, so the old claim is not yet false.
 
 ## Context
 
 A machine becomes an AI agent's body by proving possession of its key K and binding it to one AI agent with a credential a person approves (ADR-046). The approval step put a person in the middle to compare six words derived from K — shown on the machine and in the approver's app — so that a stolen one-time enrolment string, used by a different machine, would show different words and be rejected.
 
-That comparison does real work in exactly one case: a person setting a machine up by hand, reading the words off the machine's own screen. It is the reading-off-the-machine that ties "the machine in front of me" to "the key that asked." When a machine is made by a provider (ADR-055), nobody reads its screen — the provider reports the words, so the approver compares two values the same software produced, which proves nothing. The comparison is also fragile: it is timing-sensitive (a provider that reported the words a moment before the machine's request arrived could have the machine refused and then destroyed), and asking people to match word lists on every machine trains them to approve without looking, eroding the one case where the check matters.
+That comparison does real work in exactly one case: a person setting a machine up by hand, reading the words off the machine's own screen. It is the reading-off-the-machine that ties "the machine in front of me" to "the key that asked." When a machine is made by a provider, nobody reads its screen — the provider reports the words, so the approver compares two values the same software produced, which proves nothing. The comparison is also fragile: it is timing-sensitive (a provider that reported the words a moment before the machine's request arrived could have the machine refused and then destroyed), and asking people to match word lists on every machine trains them to approve without looking, eroding the one case where the check matters.
 
 ## Decision
 
@@ -21,7 +21,7 @@ That comparison does real work in exactly one case: a person setting a machine u
 
 **Because the request proves itself, how it reaches the approver carries no authority and is not part of the protocol.** It may be pasted, read off the machine's screen by a camera, or relayed by another device the person holds. A tampered copy fails signature verification. A copy of someone else's request binds their K, not the machine in front of the person — and it is simply not the one the person captures. This replaces a comparison done by a person's eyes with a check done by the Identity Agent, and leaves the person only the decision.
 
-**A machine a provider makes is approved on the provider's signed vouch.** A provider is an enrolled body with a proven key, handed the one-time secret sealed to its keys (ADR-055). For a machine it made for a request, the provider signs a statement binding K to that request and that enrolment string. The Identity Agent approves on the vouch, with no per-machine human step, and records the provider as the approver. The per-machine human decision becomes a standing one — which providers may make machines — settled once when a provider is granted.
+**A machine a provider makes is approved on the provider's signed vouch.** A provider is an enrolled body with a proven key, handed the one-time secret sealed to its keys. For a machine it made for a request, the provider signs a statement binding K to that request and that enrolment string. The Identity Agent approves on the vouch, with no per-machine human step, and records the provider as the approver. The per-machine human decision becomes a standing one — which providers may make machines — settled once when a provider is granted.
 
 **Grades are unchanged.** Approval decides that K is this AI agent's body and who approved it; it never raises the grade. A machine's grade is still the most its own hardware report supports until attested evidence is verified (ADR-046).
 

@@ -66,7 +66,6 @@ type CoreServer struct {
 	// BrowserSessions lets somebody reach this agent from a browser, having
 	// proved ownership once on the device that holds the key.
 	BrowserSessions *browserSessions
-	AIMemory        *store.AIMemoryStore
 	KeriDriver      drivers.KeriEngine
 	TunnelManager   *tunnel.Manager
 	RelayManager    *relay.Manager
@@ -311,13 +310,6 @@ func New(cfg Config) (*CoreServer, error) {
 		return nil, fmt.Errorf("failed to initialize store: %w", err)
 	}
 
-	aiMemory, err := store.NewAIMemoryStore(cfg.DataDir)
-	if err != nil {
-		cancel()
-		dataStore.Close()
-		return nil, fmt.Errorf("failed to initialize AI memory store: %w", err)
-	}
-
 	// The owner's measurement policy, read before anything can be adopted.
 	//
 	// A malformed value fails here rather than at adoption. Otherwise the first
@@ -328,7 +320,6 @@ func New(cfg Config) (*CoreServer, error) {
 	if err != nil {
 		cancel()
 		dataStore.Close()
-		aiMemory.Close()
 		return nil, err
 	}
 	if buildmode.IsDev() {
@@ -346,7 +337,6 @@ func New(cfg Config) (*CoreServer, error) {
 	if err != nil {
 		cancel()
 		dataStore.Close()
-		aiMemory.Close()
 		return nil, err
 	}
 
@@ -362,7 +352,6 @@ func New(cfg Config) (*CoreServer, error) {
 		// reachable, so failing here is better found at startup than at first use.
 		Providers:          provider.Load(cfg.DataDir),
 		BrowserSessions:    newBrowserSessions(),
-		AIMemory:           aiMemory,
 		EndpointService:    endpointSvc,
 		EventHub:           eventHub,
 		StartTime:          time.Now(),

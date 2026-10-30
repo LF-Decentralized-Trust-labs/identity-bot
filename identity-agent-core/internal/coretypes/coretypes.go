@@ -4,7 +4,11 @@
 // It imports nothing of the server's, so both sides can name them.
 package coretypes
 
-import "identity-agent-core/activitylog"
+import (
+	"errors"
+
+	"identity-agent-core/activitylog"
+)
 
 // Authority is who authorised a credential.
 type Authority struct {
@@ -103,4 +107,17 @@ type LogSignerRecord struct {
 type OwnEvidence struct {
 	Inception string   `json:"inception"`
 	RootKEL   []string `json:"root_kel"`
+}
+
+// ErrKeysUnavailable is a key this Identity Agent holds and cannot read right
+// now. It is the Identity Agent's fault, not the caller's.
+var ErrKeysUnavailable = errors.New("this Identity Agent cannot read its keys right now")
+
+// KeySigner signs with one key the core holds, which stays in the core: as a
+// string is signed (login.SignString) and as a key event is signed.
+type KeySigner interface {
+	// PublicKey is the key's public half, qb64.
+	PublicKey() string
+	SignString(message string) (string, error)
+	SignEvent(raw []byte) (string, error)
 }

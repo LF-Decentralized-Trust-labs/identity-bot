@@ -114,7 +114,7 @@ type AgentConfig struct {
 }
 
 // MachineNeeds is what an AI agent's machine must provide — a screen, a code
-// toolchain, Xcode — as agentmachine names them. Empty is a machine that only
+// toolchain, Xcode — by the names the AI-agent add-on gives them. Empty is a machine that only
 // carries messages.
 type MachineNeeds struct {
 	Provides []string `json:"provides"`
@@ -125,11 +125,11 @@ type MachineNeeds struct {
 type BrainConfig struct {
 	// Kind: how the brain is signed in — see Provider.
 	Kind string `json:"kind,omitempty"`
-	// Kind and Provider are kept as brainsignin normalises them: kind
+	// Kind and Provider are kept normalised by the AI-agent add-on: kind
 	// "api_key"|"subscription"|"local", provider "anthropic"|"openai"|"google"|
 	// "xai"|"openrouter"|"claude-code"|"codex"|"grok"|"local". Older records may
-	// still say "cli" or "remote", or carry a display label; read them through
-	// brainsignin's normalising functions.
+	// still say "cli" or "remote", or carry a display label, which that
+	// add-on normalises on reading.
 	Provider string `json:"provider,omitempty"`
 	Model    string `json:"model,omitempty"`
 	// Endpoint is the base URL for a local (or self-hosted) model API.
@@ -142,10 +142,10 @@ type BrainConfig struct {
 	// this identity (brain-topology enforcement).
 	TEEAttestedOnly bool `json:"tee_attested_only,omitempty"`
 	// Program is what runs the brain on its body: empty for the program its
-	// provider is run by (brainsignin.Harness); brainsignin.ProgramNone for
-	// an AI agent that only reads and answers, whose body calls the model
-	// itself, through the Identity Agent, with no program of its own; or
-	// brainsignin.ProgramBuiltIn for agent-host's own loop (ADR-058).
+	// provider is run by; a value meaning none for an AI agent that only
+	// reads and answers, whose body calls the model itself, through the
+	// Identity Agent, with no program of its own; or a value meaning the
+	// machine program's own loop. The AI-agent add-on defines the values.
 	Program string `json:"program,omitempty"`
 }
 

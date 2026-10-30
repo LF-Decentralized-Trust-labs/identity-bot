@@ -148,7 +148,7 @@ saying why, so it neither waits in the queue nor leaves the asker waiting. A che
 could not be made at all, because a key log could not be fetched, is not a refusal: the
 message is tried again.
 
-**A body's requests are sealed.** `agent-host` carries every request inside the sealed
+**A body's requests are sealed.** The machine's program carries every request inside the sealed
 transport (`didcomm.SendSealed`, the same format an Identity Agent uses to reach a peer).
 It seals from the keys the body enrolled with to the Identity Agent's. The message
 routes refuse a body-signed request that did not arrive that way.

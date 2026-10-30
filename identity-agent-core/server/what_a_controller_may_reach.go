@@ -220,7 +220,7 @@ var controllerOwnerOnly = map[string]string{
 // Taking control of an AI agent's screen (routeScreenControl, routeScreenInput)
 // is its own action so that it can be set to need a higher score than watching
 // without changing watching; it is not set here, so it needs the default like
-// everything else (ADR-053). This table is the only place a minimum is set
+// everything else. This table is the only place a minimum is set
 // today; a setting the owner can change is future work.
 var controllerMinimumScore = map[string]int{}
 

@@ -1,0 +1,130 @@
+package server
+
+import (
+	"crypto/ed25519"
+	"fmt"
+
+	"identity-agent-core/asset"
+	"identity-agent-core/backup"
+	"identity-agent-core/didcomm"
+	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/coretypes"
+	"identity-agent-core/login"
+	"identity-agent-core/secureenclave"
+)
+
+// An add-on signs as an identity this Identity Agent holds, an AI agent or
+// the governance log's signer, without being given the key: the core hands
+// it a signer that holds the key and signs on request.
+
+// heldKey is one key the core holds, as a signer.
+type heldKey struct {
+	seed []byte
+	pub  string
+}
+
+func heldKeyOf(seed []byte) heldKey {
+	return heldKey{seed: seed, pub: iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey))}
+}
+
+func (k heldKey) PublicKey() string                         { return k.pub }
+func (k heldKey) SignString(message string) (string, error) { return login.SignString(message, k.seed) }
+func (k heldKey) SignEvent(raw []byte) (string, error)      { return signEventBytes(raw, k.seed) }
+
+// assetSigner signs as the asset this Identity Agent holds whose identifier
+// is aid, such as one of its AI agents.
+func (s *CoreServer) assetSigner(aid string) (coretypes.KeySigner, error) {
+	if s.assetHandler == nil || aid == "" {
+		return nil, fmt.Errorf("%s is not an asset held here", aid)
+	}
+	for _, a := range s.assetHandler.Store.ListAssets() {
+		if a.PairwiseAID == aid {
+			seed, err := asset.AssetSigningSeed(s.DataDir, a.SigningIndex)
+			if err != nil {
+				return nil, fmt.Errorf("the signing key of %s is unavailable: %w", aid, err)
+			}
+			return heldKeyOf(seed), nil
+		}
+	}
+	return nil, fmt.Errorf("%s is not an asset held here", aid)
+}
+
+// logSigner signs as the identity that signs the governance log, and gives
+// the public half of its next key, which its inception commits to. rec is
+// that identity as recorded in the data directory.
+func (s *CoreServer) logSigner() (signer coretypes.KeySigner, nextPublicKey string, rec coretypes.LogSignerRecord, err error) {
+	rec, found, err := readInvocationSignerRecord(s.DataDir)
+	if err != nil || !found {
+		return nil, "", rec, fmt.Errorf("no governance log signer is on record: %v", err)
+	}
+	root, err := secureenclave.LoadRootSeed(s.DataDir)
+	if err != nil {
+		return nil, "", rec, fmt.Errorf("the log signer's key cannot be had: %v", err)
+	}
+	seed, err := backup.DerivePairwiseSeed(root, rec.Index, 0)
+	if err != nil {
+		return nil, "", rec, err
+	}
+	next, err := backup.DerivePairwiseSeed(root, rec.Index, 1)
+	if err != nil {
+		return nil, "", rec, err
+	}
+	return heldKeyOf(seed), heldKeyOf(next).pub, rec, nil
+}
+
+// heldKeySet is the DIDComm keyset of aid, when aid is this Identity Agent's
+// own identity or an asset it holds. Its private keys stay in the core: an
+// add-on asks for what it needs done with them.
+func (s *CoreServer) heldKeySet(aid string) (*didcomm.KeySet, error) {
+	held := false
+	if s.DataStore == nil || aid == "" {
+		return nil, fmt.Errorf("this Identity Agent does not speak for %s", aid)
+	}
+	if id, err := s.DataStore.GetIdentity(); err == nil && id != nil && id.AID == aid && aid != "" {
+		held = true
+	} else if s.assetHandler != nil && aid != "" {
+		for _, a := range s.assetHandler.Store.ListAssets() {
+			if a.PairwiseAID == aid {
+				held = true
+				break
+			}
+		}
+	}
+	if !held {
+		return nil, fmt.Errorf("this Identity Agent does not speak for %s", aid)
+	}
+	ks, err := s.keySetFor(aid)
+	if err != nil {
+		return nil, fmt.Errorf("%w: the DIDComm keys of %s: %v", coretypes.ErrKeysUnavailable, aid, err)
+	}
+	return ks, nil
+}
+
+// messagingKeysOf are the public DIDComm keys of aid.
+func (s *CoreServer) messagingKeysOf(aid string) (*didcomm.DID, error) {
+	ks, err := s.heldKeySet(aid)
+	if err != nil {
+		return nil, err
+	}
+	return ks.DID()
+}
+
+// packSignedAs signs m as aid, with aid's DIDComm keys.
+func (s *CoreServer) packSignedAs(aid string, m *didcomm.JWM) (*didcomm.Envelope, error) {
+	ks, err := s.heldKeySet(aid)
+	if err != nil {
+		return nil, err
+	}
+	return didcomm.PackSigned(ks, m)
+}
+
+// openSealedTo opens env, sealed to aid by sender. When aid's keys cannot be
+// read right now the error is coretypes.ErrKeysUnavailable; otherwise the
+// envelope is not one sealed to aid by sender.
+func (s *CoreServer) openSealedTo(aid string, sender *didcomm.DID, env *didcomm.Envelope) (*didcomm.JWM, error) {
+	ks, err := s.heldKeySet(aid)
+	if err != nil {
+		return nil, err
+	}
+	return didcomm.UnpackAuthcrypt(ks, sender, env)
+}

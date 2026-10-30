@@ -27,7 +27,7 @@ import (
 // does it vouch for GitHub's number for each repository: the Identity Agent
 // asks GitHub for it, and the request names repositories only by owner/name.
 // Each must be a distinct positive number, and a token is made for a number
-// only when GitHub names its repository as the grant does (githubapp's Mint),
+// only when GitHub names its repository as the grant does,
 // so a name paired with another repository's number lends nothing.
 //
 // Closing the first gap would need a grant to name the grant it replaces, so a
