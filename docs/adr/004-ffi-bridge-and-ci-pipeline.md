@@ -173,7 +173,7 @@ The `codemagic.yaml` defines build workflows for all platforms:
 - `identity_agent_ui/ios/Runner/AppDelegate.swift` — iOS platform channel bridge
 - `packages/agent_client/lib/services/mobile_core_service.dart` — Dart wrapper around platform channels
 
-> **2026-10-30:** the reference app these paths name, `identity_agent_ui/`, has been removed from this repository; commit `ec5734b` still contains it. The client code it shared is in `packages/agent_client/`, and [BUILDING.md](../../BUILDING.md) covers building an app on the core.
+> **2026-10-30:** the reference app these paths name, `identity_agent_ui/`, has been removed from this repository; the parent of the commit that removed it still contains it. The client code it shared is in `packages/agent_client/`, and [BUILDING.md](../../BUILDING.md) covers building an app on the core.
 
 ### Service Layer
 - `identity_agent_ui/lib/services/mobile_on_device_keri_service.dart` — `MobileOnDeviceKeriService`: Rust bridge + Go Core for Standalone; Rust bridge + paired server for Remote WITH Keys. Single class covers both topologies via optional `pairedServerUrl` parameter.

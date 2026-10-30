@@ -185,7 +185,12 @@ Run its tests with `flutter test` in `packages/agent_client`.
 ## The old reference app
 
 This repository used to contain a Flutter app, `identity_agent_ui`. It was
-removed on 2026-10-30 because it had fallen behind the core. Commit `ec5734b` is
-the last that contains it, for anyone who wants to read it
-(`git switch --detach ec5734b`). It is outdated: do not expect it to build or to
-work against today's core.
+removed on 2026-10-30 because it had fallen behind the core. The parent of the
+commit that removed it is the last that contains it, for anyone who wants to
+read it:
+
+```bash
+git switch --detach "$(git rev-list -n 1 HEAD -- identity_agent_ui)^"
+```
+
+It is outdated: do not expect it to build or to work against today's core.

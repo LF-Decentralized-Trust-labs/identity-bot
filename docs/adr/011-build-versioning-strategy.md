@@ -127,4 +127,4 @@ Android enforces `versionCode` ordering strictly:
 | `identity_agent_ui/pubspec.yaml` | Base version (`1.0.0+1`) — overridden at build time |
 | `identity_agent_ui/android/app/build.gradle` | Reads `flutterVersionCode` from local.properties (set by `--build-number`) |
 
-> **2026-10-30:** the reference app these paths name, `identity_agent_ui/`, has been removed from this repository; commit `ec5734b` still contains it. The client code it shared is in `packages/agent_client/`, and [BUILDING.md](../../BUILDING.md) covers building an app on the core.
+> **2026-10-30:** the reference app these paths name, `identity_agent_ui/`, has been removed from this repository; the parent of the commit that removed it still contains it. The client code it shared is in `packages/agent_client/`, and [BUILDING.md](../../BUILDING.md) covers building an app on the core.

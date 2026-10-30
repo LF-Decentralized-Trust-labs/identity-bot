@@ -1,8 +1,9 @@
 # ADR-018: Navigation Structure (Desktop & Mobile)
 
 **Status:** Withdrawn (2026-10-30). It described the navigation of the reference app, which has been
-removed from this repository; commit `ec5734b` still contains it. The core ships no screens, so an app
-built on it decides its own navigation. Kept so that what was decided stays readable.
+removed from this repository; the parent of the commit that removed it still contains it. The core
+ships no screens, so an app built on it decides its own navigation. Kept so that what was decided
+stays readable.
 **Date:** 2026-03-21
 **Deciders:** Rob Andersen
 
