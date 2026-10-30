@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 import '../../services/core_service.dart';
 import 'package:agent_client/services/keri_service.dart';
+import 'package:agent_client/config/agent_config.dart';
+import 'package:agent_client/services/agent_add_ons.dart';
 import '../../services/preferences_service.dart';
 import 'desktop_dashboard_screen.dart';
 import '../../screens/contacts_screen.dart';
@@ -52,6 +54,30 @@ class _DesktopAppState extends State<DesktopApp> {
   int _historyInitialTab = 0;
   bool _aiPanelOpen = false;
 
+  /// What the agent includes. A screen for an add-on it does not include is
+  /// never opened, whichever way it is reached.
+  late AgentAddOns _addOns =
+      AgentAddOns.known(widget.serverUrl ?? AgentConfig.coreBaseUrl);
+
+  @override
+  void initState() {
+    super.initState();
+    AgentAddOns.at(widget.serverUrl ?? AgentConfig.coreBaseUrl).then((a) {
+      if (mounted) setState(() => _addOns = a);
+    });
+  }
+
+  /// Whether this agent serves what [route] shows.
+  bool _served(DesktopRoute route) {
+    switch (route) {
+      case DesktopRoute.apps:
+      case DesktopRoute.settingsApiKeys:
+        return _addOns.hasSandboxedApps;
+      default:
+        return true;
+    }
+  }
+
   void _navigate(DesktopRoute route) {
     setState(() => _route = route);
   }
@@ -60,7 +86,7 @@ class _DesktopAppState extends State<DesktopApp> {
     final url = widget.serverUrl;
     final keri = widget.keriService;
 
-    switch (_route) {
+    switch (_served(_route) ? _route : DesktopRoute.dashboard) {
       // ── Identity ───────────────────────────────────────────────────────────
       case DesktopRoute.dashboard:
         return DesktopDashboardScreen(keriService: keri, serverUrl: url);

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../../theme/app_theme.dart';
 import '../../services/core_service.dart';
 import 'package:agent_client/config/agent_config.dart';
+import 'package:agent_client/services/agent_add_ons.dart';
 
 /// Endpoints screen — shows all live public endpoints and available actions.
 ///
@@ -33,10 +34,18 @@ class _EndpointsScreenState extends State<EndpointsScreen> {
   String _searchQuery = '';
   String? _expandedAction;
 
+  /// What the agent includes. The MCP endpoint is the AI-agent add-on's, and
+  /// an agent without it serves none.
+  late AgentAddOns _addOns =
+      AgentAddOns.known(widget.serverUrl ?? AgentConfig.coreBaseUrl);
+
   @override
   void initState() {
     super.initState();
     _load();
+    AgentAddOns.at(widget.serverUrl ?? AgentConfig.coreBaseUrl).then((a) {
+      if (mounted) setState(() => _addOns = a);
+    });
   }
 
   @override
@@ -192,15 +201,17 @@ class _EndpointsScreenState extends State<EndpointsScreen> {
           badgeColor: AppColors.textMuted,
           valueColor: AppColors.primary,
         ),
-        const SizedBox(height: 10),
-        _endpointRow(
-          icon: Icons.smart_toy_outlined,
-          label: 'MCP Server',
-          description: 'AI agents connect here to access identity actions via Model Context Protocol.',
-          value: _agentUrl.isNotEmpty ? '$_agentUrl/api/mcp' : '(agent URL not set)',
-          badge: 'MCP',
-          badgeColor: AppColors.accent,
-        ),
+        if (_addOns.hasAiAgents) ...[
+          const SizedBox(height: 10),
+          _endpointRow(
+            icon: Icons.smart_toy_outlined,
+            label: 'MCP Server',
+            description: 'AI agents connect here to access identity actions via Model Context Protocol.',
+            value: _agentUrl.isNotEmpty ? '$_agentUrl/api/mcp' : '(agent URL not set)',
+            badge: 'MCP',
+            badgeColor: AppColors.accent,
+          ),
+        ],
       ],
     );
   }
