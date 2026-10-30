@@ -1,7 +1,6 @@
 package server
 
 import (
-	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -14,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"identity-agent-core/appcall"
+	"identity-agent-core/permission"
 )
 
 // handleAppDisplayProxy reverse-proxies browser requests to the container's
@@ -177,7 +177,7 @@ func (s *CoreServer) stripWhatOnlyTheIdentityAgentReads(r *http.Request) {
 	// Both readings the Identity Agent itself uses: a token, and a browser
 	// session, whose prefix is matched without case.
 	for _, tok := range []string{bearerFrom(r), bearerToken(r)} {
-		if tok != "" && s.isAnIdentityAgentCredential(strings.TrimSpace(tok)) {
+		if tok != "" && s.isAnIdentityAgentCredential(r, strings.TrimSpace(tok)) {
 			r.Header.Del("Authorization")
 			break
 		}
@@ -186,20 +186,14 @@ func (s *CoreServer) stripWhatOnlyTheIdentityAgentReads(r *http.Request) {
 
 // isAnIdentityAgentCredential reports whether tok is a token this Identity
 // Agent issued, or a live browser session.
-func (s *CoreServer) isAnIdentityAgentCredential(tok string) bool {
+func (s *CoreServer) isAnIdentityAgentCredential(r *http.Request, tok string) bool {
 	if s.BrowserSessions != nil && s.BrowserSessions.valid(tok) {
 		return true
 	}
-	presented := hashMCPToken(tok)
-	mcpTokensMu.Lock()
-	toks := s.loadMCPTokens()
-	mcpTokensMu.Unlock()
-	for _, entry := range toks {
-		if subtle.ConstantTimeCompare([]byte(entry.Hash), []byte(presented)) == 1 {
-			return true
-		}
-	}
-	return false
+	// A token is this Identity Agent's when an add-on that issues tokens
+	// recognises it.
+	_, issued := s.resolveBearerToken(r, tok, permission.CallerContext{})
+	return issued
 }
 
 // ── Open WebUI API format translators ─────────────────────────────────────────
