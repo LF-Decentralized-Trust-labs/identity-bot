@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -351,7 +352,34 @@ func TestEveryRegisteredRouteResolvesToAClass(t *testing.T) {
 // which accepts a signed request too. This scans the package rather than the
 // behaviour because the defect being prevented is a line of code someone adds
 // back out of habit.
+//
+// The add-ons built in this module serve handlers too, from packages of their
+// own, so their sources are scanned as well: for the predicates, and for the
+// names the add-on handle would give them (addonhost) were they ever put on it.
 func TestNoHandlerUsesLoopbackAsTheOwnerTest(t *testing.T) {
+	for _, dir := range []string{"../aiagents", "../sandboxedapps"} {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("read %s: %v", dir, err)
+		}
+		for _, e := range entries {
+			name := e.Name()
+			if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+				continue
+			}
+			src, err := os.ReadFile(filepath.Join(dir, name))
+			if err != nil {
+				t.Fatalf("read %s: %v", name, err)
+			}
+			for _, banned := range []string{"isLocalOwnerRequest(", "isLocalConnection(", "isLocalhost(",
+				"IsLocalOwnerRequest(", "IsLocalConnection(", "IsLocalhost("} {
+				if strings.Contains(string(src), banned) {
+					t.Errorf("%s/%s calls %s — use IsOwner so an owner who is not at "+
+						"the keyboard can still prove it by signing the request", dir, name, banned)
+				}
+			}
+		}
+	}
 	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatalf("read package dir: %v", err)
@@ -367,7 +395,7 @@ func TestNoHandlerUsesLoopbackAsTheOwnerTest(t *testing.T) {
 		// one: deciding whether a caller is local is what a resolver is FOR, and
 		// the result is recorded as a fact about the connection rather than used
 		// as an ownership test.
-		if name == "api_auth.go" || name == "mcp_tokens.go" || name == "caller_resolver.go" || name == "the_owner_at_this_computer.go" {
+		if name == "api_auth.go" || name == "caller_resolver.go" || name == "the_owner_at_this_computer.go" {
 			continue
 		}
 		// The one route where being local is not standing in for being the
