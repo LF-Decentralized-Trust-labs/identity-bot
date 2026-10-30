@@ -5,6 +5,17 @@ package permission
 
 import "strings"
 
+// Headers that present a caller. The core reads them to know that a caller
+// presented something, whichever add-on can then say who that is.
+const (
+	// HeaderBodyHost names the machine key an AI agent's body signs a request
+	// with. A request carrying it presents a body's signature.
+	HeaderBodyHost = "X-IA-Body-Host"
+	// HeaderSession says which of the caller's runs made a request. It is
+	// recorded and passed to the app a call reaches, and decides nothing.
+	HeaderSession = "X-IA-Session"
+)
+
 // CallerContext is who is invoking a capability, as far as governance needs. Remote
 // marks a request that arrived over the network (not the local owner); Scopes are the
 // capability ids the caller has been granted. CallerAID identifies the caller for the

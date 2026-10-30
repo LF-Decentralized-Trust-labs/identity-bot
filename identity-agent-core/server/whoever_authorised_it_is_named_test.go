@@ -470,7 +470,7 @@ func TestAGrantIsHeldWhileACredentialIsIssuedOnIt(t *testing.T) {
 // A browser session can issue no authority over an AI agent.
 func TestASessionIssuesNoAuthority(t *testing.T) {
 	for _, route := range []string{"POST /api/mcp/agents", "PUT /api/mcp/agents/{id}/capabilities", "POST /api/mcp/agents/{id}/bodies/{bid}/approve"} {
-		if _, refused := sessionForbidden[route]; !refused {
+		if _, refused := everySessionForbidden()[route]; !refused {
 			t.Fatalf("a browser session may reach %s", route)
 		}
 	}

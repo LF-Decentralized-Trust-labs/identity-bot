@@ -51,7 +51,7 @@ func TestAPeerCanReachTheInboundRoute(t *testing.T) {
 // peer silently stops being able to deliver again — which is the failure this
 // whole change is undoing.
 func TestTheInboundRouteDoesNotRequireBeingTheOwner(t *testing.T) {
-	if _, ok := publicRoutes["POST /didcomm"]; !ok {
+	if _, ok := everyPublicRoute()["POST /didcomm"]; !ok {
 		t.Fatal("POST /didcomm is not in the public allow-list, so no peer can reach it")
 	}
 }

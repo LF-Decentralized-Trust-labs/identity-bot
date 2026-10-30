@@ -533,3 +533,40 @@ func (s *CoreServer) handleBodyStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSONStatus(w, http.StatusOK, out)
 }
+
+// callerFromBody is who signed r with a body's key, when it is a live body of
+// an AI agent here. It speaks as that AI agent, with the AI agent's grant
+// deciding what it may do, and the record says which body it was and how
+// strongly that body's key is held.
+func (s *CoreServer) callerFromBody(r *http.Request, cc permission.CallerContext) (permission.CallerContext, bool) {
+	b, present, err := s.identifyBody(r)
+	if !present {
+		return cc, false
+	}
+	if err != nil {
+		log.Printf("[body] request from %s not admitted: %v", r.Header.Get(agentbody.HeaderHost), err)
+		return cc, false
+	}
+	agent, ok := s.ResolveAgentCaller(b.Agent)
+	if !ok {
+		return cc, false
+	}
+	agent.CorrelationID = cc.CorrelationID
+	agent.Transport = "body"
+	agent.AuthLevel = "body_signed"
+	agent.BodyHost = b.Host
+	agent.BodyGrade = b.Grade
+	agent.BodyCredential = b.CredentialSAID
+	applyCallerWhy(r, &agent)
+	return agent, true
+}
+
+// bodySealingFrom is the DIDComm identity of the live body whose machine key
+// is kid, when there is one: a body seals its requests to this Identity Agent
+// from the keys it enrolled with.
+func (s *CoreServer) bodySealingFrom(kid string) (didcomm.DID, bool) {
+	if b, ok := s.bodies().LatestByHost(kid); ok && b.State == agentbody.StateActive {
+		return *b.Keys.DID(), true
+	}
+	return didcomm.DID{}, false
+}

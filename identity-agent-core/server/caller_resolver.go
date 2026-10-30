@@ -3,14 +3,11 @@ package server
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/hex"
-	"log"
 	"net"
 	"net/http"
 	"strings"
 
-	"identity-agent-core/agentbody"
 	"identity-agent-core/permission"
 )
 
@@ -84,7 +81,7 @@ func applyCallerWhy(r *http.Request, cc *permission.CallerContext) {
 	// Which of the caller's runs is asking. The same standing as the two
 	// above — recorded and passed to the app, never consulted here — and
 	// signed with the request where the caller is a body.
-	cc.Session = clampWhy(r.Header.Get(agentbody.HeaderSession))
+	cc.Session = clampWhy(r.Header.Get(permission.HeaderSession))
 }
 
 func clampWhy(v string) string {
@@ -122,58 +119,24 @@ func (t tokenAwareResolver) Resolve(r *http.Request) permission.CallerContext {
 	}
 	if tok := bearerFrom(r); tok != "" {
 		cc.AuthLevel = "bearer" // upgraded to "signed_request" if an envelope verifies
-		presented := hashMCPToken(tok)
-		mcpTokensMu.Lock()
-		toks := t.s.loadMCPTokens()
-		mcpTokensMu.Unlock()
-		for _, entry := range toks {
-			if subtle.ConstantTimeCompare([]byte(entry.Hash), []byte(presented)) == 1 {
-				cc.Scopes = entry.Scopes
-				if entry.AgentAID != "" {
-					// A token bound to a provisioned agent identity: the caller IS
-					// that delegated AID, with its lineage to the owner root.
-					cc.CallerAID = entry.AgentAID
-					cc.DelegationChain = []string{entry.AgentAID}
-					if entry.DelegatorAID != "" {
-						cc.DelegationChain = append(cc.DelegationChain, entry.DelegatorAID)
-					}
-					// Credential-proven authority: when the agent holds a capability
-					// grant (an ACDC the owner issued to it) and the KERI driver is
-					// available, verify it and derive the ceiling FROM the credential
-					// rather than trusting the stored scope list. A revoked, missing,
-					// tampered, or wrong-issuer grant yields no scopes (default-deny).
-					// Driverless builds fall back to the stored ceiling above.
-					t.s.applyGrantScopes(entry, &cc)
-				} else {
-					cc.CallerAID = "token:" + entry.Name
-				}
-				return cc
-			}
+		// A token is whatever an add-on that issues tokens says it is. One no
+		// add-on recognises, or any token where no add-on issues them, is a
+		// remote caller with no scopes, and never the owner: having presented
+		// it, the caller is not asked anything else.
+		if resolved, ok := t.s.resolveBearerToken(r, tok, cc); ok {
+			return resolved
 		}
-		// An invalid token is a remote caller with no scopes — not the owner.
 		return cc
 	}
 
-	// A body of an AI agent, signing with its own key. It speaks as that AI
-	// agent, with the AI agent's grant deciding what it may do, and the record
-	// says which body it was and how strongly that body's key is held.
-	if b, present, err := t.s.identifyBody(r); present {
-		if err != nil {
-			log.Printf("[body] request from %s not admitted: %v", r.Header.Get(agentbody.HeaderHost), err)
-			return cc
+	// A body of an AI agent, signing with its own key. Who it speaks as is
+	// whatever an add-on that keeps bodies says. A body no add-on recognises,
+	// or any body where none keeps them, is refused in the same way.
+	if r.Header.Get(permission.HeaderBodyHost) != "" {
+		if resolved, ok := t.s.resolveBodySignature(r, cc); ok {
+			return resolved
 		}
-		agent, ok := t.s.ResolveAgentCaller(b.Agent)
-		if !ok {
-			return cc
-		}
-		agent.CorrelationID = cc.CorrelationID
-		agent.Transport = "body"
-		agent.AuthLevel = "body_signed"
-		agent.BodyHost = b.Host
-		agent.BodyGrade = b.Grade
-		agent.BodyCredential = b.CredentialSAID
-		applyCallerWhy(r, &agent)
-		return agent
+		return cc
 	}
 
 	// A machine this identity enrolled, signing as itself.
@@ -272,4 +235,17 @@ func bearerFrom(r *http.Request) string {
 		return strings.TrimPrefix(h, "Bearer ")
 	}
 	return r.Header.Get("X-IA-Token")
+}
+
+// ResolveEndpointCaller resolves who is calling an endpoint (bearer token or
+// signed-request envelope), enriching an envelope-proven agent with its lineage +
+// capability ceiling. Returns an error only when a present envelope is invalid.
+// Exported so an overlay handler can authenticate a caller the same way the core does.
+func (s *CoreServer) ResolveEndpointCaller(r *http.Request, method string, body []byte) (permission.CallerContext, error) {
+	caller := s.resolveCaller(r)
+	if err := s.verifyRequestEnvelope(r, method, body, &caller); err != nil {
+		return caller, err
+	}
+	s.enrichProvenCaller(&caller)
+	return caller, nil
 }

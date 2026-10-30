@@ -60,7 +60,7 @@ func TestUnclassifiedRoutesAreOwnerOnly(t *testing.T) {
 // Every route that is deliberately open should be open for the reason recorded
 // next to it — an entry with no reason is an entry nobody reviewed.
 func TestEveryPublicRouteStatesWhy(t *testing.T) {
-	for key, why := range publicRoutes {
+	for key, why := range everyPublicRoute() {
 		if strings.TrimSpace(why) == "" {
 			t.Errorf("public route %q has no stated reason", key)
 		}
@@ -70,7 +70,7 @@ func TestEveryPublicRouteStatesWhy(t *testing.T) {
 			t.Errorf("public route %q is not keyed METHOD /pattern", key)
 		}
 	}
-	for key, why := range scopedRoutes {
+	for key, why := range everyScopedRoute() {
 		if strings.TrimSpace(why) == "" {
 			t.Errorf("scoped route %q has no stated reason", key)
 		}
@@ -530,8 +530,8 @@ func TestEveryOpenRouteIsMountedWhereItSaysItIs(t *testing.T) {
 		name  string
 		table map[string]string
 	}{
-		{"publicRoutes", publicRoutes},
-		{"scopedRoutes", scopedRoutes},
+		{"publicRoutes", everyPublicRoute()},
+		{"scopedRoutes", everyScopedRoute()},
 	} {
 		for key, why := range m.table {
 			if !mounted[key] {

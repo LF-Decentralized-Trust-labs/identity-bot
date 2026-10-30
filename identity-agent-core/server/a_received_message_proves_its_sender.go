@@ -393,15 +393,8 @@ func (s *CoreServer) partyConversation(convID, party string) string {
 	if !conversationIDPattern.MatchString(convID) {
 		return ""
 	}
-	store, err := s.conversations()
-	if err != nil {
-		return ""
-	}
-	c, err := store.Get(convID)
-	if err != nil {
-		return ""
-	}
-	if c.OpenedBy != party && !store.IsParty(convID, party) {
+	held, isParty, err := s.conversationParty(convID, party)
+	if err != nil || !held || !isParty {
 		return ""
 	}
 	return convID
@@ -427,11 +420,7 @@ func (s *CoreServer) trafficConversation(sender string, body json.RawMessage) st
 	if conv == "" {
 		return ""
 	}
-	store, err := s.conversations()
-	if err != nil {
-		return conv
-	}
-	if _, err := store.Get(conv); err != nil {
+	if held, _, err := s.conversationParty(conv, sender); err != nil || !held {
 		return conv
 	}
 	return s.partyConversation(conv, sender)

@@ -3,6 +3,11 @@ package server
 import (
 	"context"
 	"errors"
+	"identity-agent-core/authorisation"
+	"identity-agent-core/didcomm"
+	"identity-agent-core/permission"
+	"identity-agent-core/schemas"
+	"net/http"
 	"sync"
 	"time"
 
@@ -61,6 +66,60 @@ type Addon struct {
 	// withdrawn or revoked, so that whatever the add-on gave on the strength
 	// of it ends now rather than when it would have lapsed. why says which.
 	CredentialWithdrawn func(s *CoreServer, why string)
+
+	// ConversationParty says whether conversation id is held here, and
+	// whether party is in it, so a log row is filed under a conversation only
+	// for one of its parties.
+	ConversationParty func(s *CoreServer, id, party string) (held, isParty bool, err error)
+
+	// Who is calling. The core detects that a caller presented a bearer
+	// token or a body's signature, and asks the add-ons, in the order they
+	// registered, who that is. A credential no add-on recognises is refused
+	// exactly as an unknown one always was: the caller is remote, holds no
+	// scopes, and is never taken for the owner, whatever else it carries.
+
+	// ResolveBearerToken says who presented token, when it is one the add-on
+	// issued; cc is the caller as far as the core knows it.
+	ResolveBearerToken func(s *CoreServer, r *http.Request, token string, cc permission.CallerContext) (permission.CallerContext, bool)
+	// ResolveBodySignature says who signed r with a body's key
+	// (permission.HeaderBodyHost), when it is a live body of the add-on's.
+	ResolveBodySignature func(s *CoreServer, r *http.Request, cc permission.CallerContext) (permission.CallerContext, bool)
+	// EnrichProvenCaller fills in the lineage and scopes of a caller that
+	// proved its identifier with a signed-request envelope, when the
+	// identifier is one of the add-on's, and reports whether it was.
+	EnrichProvenCaller func(s *CoreServer, caller *permission.CallerContext) bool
+	// SealedSender is the DIDComm identity a sealed envelope from kid comes
+	// from, when kid is one the add-on recognises, such as a live body's.
+	SealedSender func(s *CoreServer, kid string) (didcomm.DID, bool)
+
+	// The add-on's entries in the core's route tables (api_auth.go), keyed
+	// "METHOD /chi/pattern" with the reason, as the core's own are: routes
+	// open to anyone, routes open to a caller holding scopes, path prefixes
+	// open to a caller holding scopes, and routes a browser session must not
+	// take. A route the add-on does not list is the owner's.
+	PublicRoutes     map[string]string
+	ScopedRoutes     map[string]string
+	ScopedPrefixes   []string
+	SessionForbidden map[string]string
+
+	// GrantKinds are the kinds of grant the add-on issues, by schema, with
+	// what the core's grant engine asks about each one. A grant of a kind no
+	// add-on here issues is not appended when its signature comes back.
+	GrantKinds map[*schemas.AssetGrant]GrantKind
+}
+
+// GrantKind is what the grant engine asks an add-on about a grant it issues
+// when the device that holds the identity's key signs it.
+type GrantKind struct {
+	// StillWhatItGrants says why the grant must not be appended: what it is
+	// for is gone, has changed, or was granted meanwhile.
+	StillWhatItGrants func(s *CoreServer, shown *authorisation.ToSign) error
+	// Arrived tells the add-on the grant is in force, under said.
+	Arrived func(s *CoreServer, holder, said string)
+	// Awaiting lists what waits for a grant of this kind, for the owner to
+	// approve, under the key AwaitingKey in the list of what awaits approval.
+	Awaiting    func(s *CoreServer) []map[string]any
+	AwaitingKey string
 }
 
 // AnchoredChains are chains of entries, each entry naming the hash of the one
@@ -181,4 +240,100 @@ func (s *CoreServer) anchoredChains() ([]AnchoredChains, error) {
 		return nil, errNoAnchoredChains
 	}
 	return out, nil
+}
+
+// resolveBearerToken asks the add-ons who presented token.
+func (s *CoreServer) resolveBearerToken(r *http.Request, token string, cc permission.CallerContext) (permission.CallerContext, bool) {
+	for _, a := range registeredAddons() {
+		if a.ResolveBearerToken != nil {
+			if resolved, ok := a.ResolveBearerToken(s, r, token, cc); ok {
+				return resolved, true
+			}
+		}
+	}
+	return cc, false
+}
+
+// resolveBodySignature asks the add-ons who signed r with a body's key.
+func (s *CoreServer) resolveBodySignature(r *http.Request, cc permission.CallerContext) (permission.CallerContext, bool) {
+	for _, a := range registeredAddons() {
+		if a.ResolveBodySignature != nil {
+			if resolved, ok := a.ResolveBodySignature(s, r, cc); ok {
+				return resolved, true
+			}
+		}
+	}
+	return cc, false
+}
+
+// enrichProvenCaller gives a caller that proved its identifier with a
+// signed-request envelope, and has no lineage yet, what an add-on says that
+// identifier holds. An identifier no add-on recognises is granted nothing.
+func (s *CoreServer) enrichProvenCaller(caller *permission.CallerContext) {
+	if !caller.EnvelopeVerified || caller.CallerAID == "" || len(caller.DelegationChain) > 0 {
+		return
+	}
+	for _, a := range registeredAddons() {
+		if a.EnrichProvenCaller != nil && a.EnrichProvenCaller(s, caller) {
+			return
+		}
+	}
+}
+
+// sealedSenderOfAnAddon asks the add-ons who a sealed envelope from kid comes from.
+func (s *CoreServer) sealedSenderOfAnAddon(kid string) (didcomm.DID, bool) {
+	for _, a := range registeredAddons() {
+		if a.SealedSender != nil {
+			if did, ok := a.SealedSender(s, kid); ok {
+				return did, true
+			}
+		}
+	}
+	return didcomm.DID{}, false
+}
+
+// errNoConversations is an Identity Agent none of whose add-ons keeps
+// conversations.
+var errNoConversations = errors.New("no add-on here keeps conversations")
+
+// conversationParty asks the add-ons about conversation id. With none that
+// keeps conversations it fails, as the conversations failing to open did.
+func (s *CoreServer) conversationParty(id, party string) (held, isParty bool, err error) {
+	for _, a := range registeredAddons() {
+		if a.ConversationParty != nil {
+			return a.ConversationParty(s, id, party)
+		}
+	}
+	return false, false, errNoConversations
+}
+
+// addonRouteEntry is an add-on's entry for key in one of the route tables.
+func addonRouteEntry(table func(Addon) map[string]string, key string) (string, bool) {
+	for _, a := range registeredAddons() {
+		if why, ok := table(a)[key]; ok {
+			return why, true
+		}
+	}
+	return "", false
+}
+
+// addonScopedPrefixes are the path prefixes the add-ons open to a caller
+// holding scopes.
+func addonScopedPrefixes() []string {
+	var out []string
+	for _, a := range registeredAddons() {
+		out = append(out, a.ScopedPrefixes...)
+	}
+	return out
+}
+
+// grantKind is what an add-on says about grants of kind, and whether any
+// add-on here issues them.
+func grantKind(kind *schemas.AssetGrant) (GrantKind, bool) {
+	for _, a := range registeredAddons() {
+		if g, ok := a.GrantKinds[kind]; ok {
+			return g, true
+		}
+	}
+	return GrantKind{}, false
 }

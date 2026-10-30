@@ -383,34 +383,15 @@ func (s *CoreServer) stillWhatItGrants(kind *schemas.AssetGrant, shown *authoris
 			string(g.Grade) != shown.Grade || g.Signer != shown.Signer || !sameMoment(shown.ValidUntil, g.ExpiresAt) {
 			return fmt.Errorf("the machine is no longer what the grant says")
 		}
-	case schemas.AIAgentGrant:
-		ref := s.findAgentAssetByAID(shown.Holder)
-		if ref == nil || s.agentStatus(ref.PairwiseAID) == "revoked" || s.assetHandler == nil {
-			return fmt.Errorf("the AI agent has been removed")
+	default:
+		// Any other kind is an add-on's. Where no add-on here issues it, what
+		// it is for is not here either, and it is refused as one whose holder
+		// was removed is.
+		g, ok := grantKind(kind)
+		if !ok || g.StillWhatItGrants == nil {
+			return fmt.Errorf("nothing here issues a grant of this kind, so what it is for is not here")
 		}
-		a, ok := s.assetHandler.Store.GetAsset(ref.ID)
-		if !ok {
-			return fmt.Errorf("the AI agent has been removed")
-		}
-		if s.findCapabilityGrant(a.PairwiseAID) != nil {
-			return fmt.Errorf("the AI agent has been granted meanwhile")
-		}
-		caps := append([]string{}, a.Capabilities...)
-		granted := append([]string{}, shown.Capabilities...)
-		sort.Strings(caps)
-		sort.Strings(granted)
-		if strings.Join(caps, "\n") != strings.Join(granted, "\n") {
-			return fmt.Errorf("the AI agent's capabilities have changed since")
-		}
-		var limits interface{}
-		if len(shown.Limits) > 0 {
-			_ = json.Unmarshal(shown.Limits, &limits)
-		}
-		if len(a.GrantConstraints) > 0 || limits != nil {
-			if !sameJSONValue(a.GrantConstraints, limits) {
-				return fmt.Errorf("the AI agent's limits have changed since")
-			}
-		}
+		return g.StillWhatItGrants(s, shown)
 	}
 	return nil
 }
@@ -512,17 +493,9 @@ func (s *CoreServer) grantArrived(kind *schemas.AssetGrant, spec grantSpec, said
 		if err := s.controllers().Put(g); err != nil {
 			log.Printf("[grants] machine %s was granted %s and could not be marked so: %v", spec.Holder, said, err)
 		}
-	case schemas.AIAgentGrant:
-		mcpTokensMu.Lock()
-		defer mcpTokensMu.Unlock()
-		toks := s.loadMCPTokens()
-		for i := range toks {
-			if toks[i].AgentAID == spec.Holder {
-				toks[i].GrantSAID, toks[i].GrantPending = said, false
-			}
-		}
-		if err := s.saveMCPTokens(toks); err != nil {
-			log.Printf("[grants] AI agent %s was granted %s and its token could not be marked so: %v", spec.Holder, said, err)
+	default:
+		if g, ok := grantKind(kind); ok && g.Arrived != nil {
+			g.Arrived(s, spec.Holder, said)
 		}
 	}
 }

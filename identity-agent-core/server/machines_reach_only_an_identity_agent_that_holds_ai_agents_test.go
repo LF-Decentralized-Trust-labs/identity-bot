@@ -28,7 +28,7 @@ func TestMachinesReachOnlyAnIdentityAgentThatHoldsAIAgents(t *testing.T) {
 	// Every route a body calls is declared public, so the declarations are the
 	// list: a body route added later is covered without editing this test.
 	var bodyRoutes [][2]string
-	for key := range publicRoutes {
+	for key := range everyPublicRoute() {
 		method, path, _ := strings.Cut(key, " ")
 		if strings.HasPrefix(path, bodyRoutePrefix) {
 			path = strings.NewReplacer("{rid}", "x", "{cid}", "x").Replace(path)

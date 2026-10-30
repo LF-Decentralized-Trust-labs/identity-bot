@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -489,4 +490,39 @@ func (s *CoreServer) agentGrantLapsed(aid string) bool {
 		}
 	}
 	return grantLapsed(newest)
+}
+
+// callerFromToken is who presented tok, when it is a token minted here: a
+// token bound to an AI agent speaks as that AI agent, any other as the token.
+// cc is the caller as far as the core knows it.
+func (s *CoreServer) callerFromToken(tok string, cc permission.CallerContext) (permission.CallerContext, bool) {
+	presented := hashMCPToken(tok)
+	mcpTokensMu.Lock()
+	toks := s.loadMCPTokens()
+	mcpTokensMu.Unlock()
+	for _, entry := range toks {
+		if subtle.ConstantTimeCompare([]byte(entry.Hash), []byte(presented)) == 1 {
+			cc.Scopes = entry.Scopes
+			if entry.AgentAID != "" {
+				// A token bound to a provisioned agent identity: the caller IS
+				// that delegated AID, with its lineage to the owner root.
+				cc.CallerAID = entry.AgentAID
+				cc.DelegationChain = []string{entry.AgentAID}
+				if entry.DelegatorAID != "" {
+					cc.DelegationChain = append(cc.DelegationChain, entry.DelegatorAID)
+				}
+				// Credential-proven authority: when the agent holds a capability
+				// grant (an ACDC the owner issued to it) and the KERI driver is
+				// available, verify it and derive the ceiling FROM the credential
+				// rather than trusting the stored scope list. A revoked, missing,
+				// tampered, or wrong-issuer grant yields no scopes (default-deny).
+				// Driverless builds fall back to the stored ceiling above.
+				s.applyGrantScopes(entry, &cc)
+			} else {
+				cc.CallerAID = "token:" + entry.Name
+			}
+			return cc, true
+		}
+	}
+	return cc, false
 }

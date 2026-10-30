@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"identity-agent-core/agentmachine"
 	"identity-agent-core/asset"
+	"identity-agent-core/authorisation"
 	"identity-agent-core/brainsignin"
 	"identity-agent-core/schemas"
 	"identity-agent-core/vault"
@@ -766,4 +768,84 @@ func brainProgramFits(b asset.BrainConfig) error {
 		return nil
 	}
 	return brainsignin.ProgramFits(b.Program, b.Kind, b.Provider)
+}
+
+// aiAgentGrantStillWhatItGrants checks that the AI agent a waiting grant is
+// for is still there, is still what the grant says, and has not been granted
+// anything meanwhile.
+func (s *CoreServer) aiAgentGrantStillWhatItGrants(shown *authorisation.ToSign) error {
+	ref := s.findAgentAssetByAID(shown.Holder)
+	if ref == nil || s.agentStatus(ref.PairwiseAID) == "revoked" || s.assetHandler == nil {
+		return fmt.Errorf("the AI agent has been removed")
+	}
+	a, ok := s.assetHandler.Store.GetAsset(ref.ID)
+	if !ok {
+		return fmt.Errorf("the AI agent has been removed")
+	}
+	if s.findCapabilityGrant(a.PairwiseAID) != nil {
+		return fmt.Errorf("the AI agent has been granted meanwhile")
+	}
+	caps := append([]string{}, a.Capabilities...)
+	granted := append([]string{}, shown.Capabilities...)
+	sort.Strings(caps)
+	sort.Strings(granted)
+	if strings.Join(caps, "\n") != strings.Join(granted, "\n") {
+		return fmt.Errorf("the AI agent's capabilities have changed since")
+	}
+	var limits interface{}
+	if len(shown.Limits) > 0 {
+		_ = json.Unmarshal(shown.Limits, &limits)
+	}
+	if len(a.GrantConstraints) > 0 || limits != nil {
+		if !sameJSONValue(a.GrantConstraints, limits) {
+			return fmt.Errorf("the AI agent's limits have changed since")
+		}
+	}
+	return nil
+}
+
+// aiAgentGrantArrived stops an AI agent waiting for its grant.
+func (s *CoreServer) aiAgentGrantArrived(holder, said string) {
+	mcpTokensMu.Lock()
+	defer mcpTokensMu.Unlock()
+	toks := s.loadMCPTokens()
+	for i := range toks {
+		if toks[i].AgentAID == holder {
+			toks[i].GrantSAID, toks[i].GrantPending = said, false
+		}
+	}
+	if err := s.saveMCPTokens(toks); err != nil {
+		log.Printf("[grants] AI agent %s was granted %s and its token could not be marked so: %v", holder, said, err)
+	}
+}
+
+// agentsAwaitingGrants are the AI agents with no usable grant, whether they
+// hold a token or authenticate by their own signature, for the owner to
+// approve.
+func (s *CoreServer) agentsAwaitingGrants() []map[string]any {
+	agents := []map[string]any{}
+	if s.assetHandler != nil && s.KeriDriver != nil {
+		tokenWithout := map[string]bool{}
+		mcpTokensMu.Lock()
+		for _, t := range s.loadMCPTokens() {
+			if t.AgentAID != "" && t.GrantSAID == "" {
+				tokenWithout[t.AssetID] = true
+			}
+		}
+		mcpTokensMu.Unlock()
+		for _, a := range s.assetHandler.ListAgents() {
+			if s.agentStatus(a.PairwiseAID) == "revoked" {
+				continue
+			}
+			if !tokenWithout[a.ID] && s.findCapabilityGrant(a.PairwiseAID) != nil {
+				continue
+			}
+			agents = append(agents, map[string]any{
+				"asset_id": a.ID, "name": a.DisplayName, "agent_aid": a.PairwiseAID,
+				"capabilities": a.Capabilities, "resource_constraints": nonNilConstraints(a.GrantConstraints),
+				"awaiting": s.awaitingFor(a.PairwiseAID, s.agentGrantPendingFor(a.ID)),
+			})
+		}
+	}
+	return agents
 }

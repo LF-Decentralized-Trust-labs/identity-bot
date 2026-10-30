@@ -10,7 +10,6 @@ import (
 	"net/http/httptest"
 	"time"
 
-	"identity-agent-core/agentbody"
 	"identity-agent-core/didcomm"
 )
 
@@ -258,11 +257,12 @@ func (s *CoreServer) sealedParties(env *didcomm.Envelope) (*didcomm.DID, *didcom
 		}
 	}
 	if !known {
-		// An AI agent's body, sealing to this Identity Agent from the keys it
-		// enrolled with. What it may then do is decided by the routes the
-		// request inside reaches, which check its signature again.
-		if b, ok := s.bodies().LatestByHost(skid); ok && b.State == agentbody.StateActive {
-			peer, known = peerRecord{AID: skid, DID: *b.Keys.DID()}, true
+		// A sender an add-on recognises, such as an AI agent's body sealing
+		// to this Identity Agent from the keys it enrolled with. What it may
+		// then do is decided by the routes the request inside reaches, which
+		// check its signature again.
+		if did, ok := s.sealedSenderOfAnAddon(skid); ok {
+			peer, known = peerRecord{AID: skid, DID: did}, true
 		}
 	}
 	if !known {

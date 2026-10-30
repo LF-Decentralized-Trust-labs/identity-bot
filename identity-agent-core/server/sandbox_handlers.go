@@ -99,7 +99,7 @@ func (s *CoreServer) handleInvokeCapability(w http.ResponseWriter, r *http.Reque
 		jsonError(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
-	s.enrichCallerFromIdentity(&caller)
+	s.enrichProvenCaller(&caller)
 	applyCallerWhy(r, &caller)
 
 	res, err := s.SandboxManager.InvokeCapability(r.Context(), caller, id, body)

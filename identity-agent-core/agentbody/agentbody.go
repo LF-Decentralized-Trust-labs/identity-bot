@@ -37,6 +37,7 @@ import (
 
 	"identity-agent-core/didcomm"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/permission"
 
 	"github.com/zeebo/blake3"
 )
@@ -237,7 +238,7 @@ type SealedEnrolment struct {
 
 // Request headers a body signs a request with.
 const (
-	HeaderHost      = "X-IA-Body-Host"
+	HeaderHost      = permission.HeaderBodyHost
 	HeaderSignature = "X-IA-Body-Sig"
 	HeaderTimestamp = "X-IA-Body-Timestamp"
 	// HeaderNonce makes every signed request distinct, so two identical
@@ -258,7 +259,7 @@ const (
 	// runs made the request. It decides nothing at the Identity Agent and is
 	// passed to the app a call reaches, so it is signed for the same reason
 	// the stated purpose is.
-	HeaderSession = "X-IA-Session"
+	HeaderSession = permission.HeaderSession
 )
 
 // RequestWindow is how far a body's timestamp may be from the Identity Agent's

@@ -339,7 +339,7 @@ func TestEveryActionClosedToASessionWasDecidedForAControllerToo(t *testing.T) {
 		"GET /api/recovery/sessions":      "the owner is told a recovery of their identity is running",
 		"GET /api/recovery/sessions/{id}": "the owner is told about a recovery of their identity",
 	}
-	for route := range sessionForbidden {
+	for route := range everySessionForbidden() {
 		_, closed := controllerOwnerOnly[route]
 		_, open := deliberatelyOpen[route]
 		switch {
@@ -351,7 +351,7 @@ func TestEveryActionClosedToASessionWasDecidedForAControllerToo(t *testing.T) {
 		}
 	}
 	for route := range deliberatelyOpen {
-		if _, ok := sessionForbidden[route]; !ok {
+		if _, ok := everySessionForbidden()[route]; !ok {
 			t.Errorf("%s is named as deliberately open but is no longer closed to a session, "+
 				"so this entry decides nothing", route)
 		}

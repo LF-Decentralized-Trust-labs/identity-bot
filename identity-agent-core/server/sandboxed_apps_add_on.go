@@ -13,8 +13,15 @@ import "github.com/go-chi/chi/v5"
 // from here, and every build includes it.
 func init() {
 	RegisterAddon(Addon{
-		Name:   "sandboxed apps",
-		Routes: func(s *CoreServer, r chi.Router) { s.sandboxRoutes(r) },
+		Name: "sandboxed apps",
+		ScopedRoutes: map[string]string{
+			"POST /api/capabilities/{id}/invoke": "capability invocation is gated by the grant, not by locality",
+		},
+		// The display proxy is reached from the container network, so its
+		// caller is neither the owner nor a token holder; the handler behind
+		// it is its own gate.
+		ScopedPrefixes: []string{"/apps/{app_id}/"},
+		Routes:         func(s *CoreServer, r chi.Router) { s.sandboxRoutes(r) },
 		RootRoutes: func(s *CoreServer, r chi.Router) {
 			s.traceRoutes(r)
 			// The display reverse proxy: intercepts container API calls to

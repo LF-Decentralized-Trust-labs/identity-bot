@@ -261,7 +261,7 @@ func TestEveryForbiddenRouteIsARealRoute(t *testing.T) {
 		t.Fatalf("only %d routes walked — the router did not build", len(registered))
 	}
 
-	for key := range sessionForbidden {
+	for key := range everySessionForbidden() {
 		if registered[key] {
 			continue
 		}
@@ -278,7 +278,7 @@ func TestEveryForbiddenRouteIsARealRoute(t *testing.T) {
 	// unconditional is an excuse nobody needs any more, and leaving it means the
 	// next genuine rot hides behind it.
 	for key := range conditionallyMounted {
-		if _, forbidden := sessionForbidden[key]; !forbidden {
+		if _, forbidden := everySessionForbidden()[key]; !forbidden {
 			t.Errorf("%q is excused as conditionally mounted but is no longer in "+
 				"sessionForbidden — remove the excuse", key)
 		}
@@ -305,7 +305,7 @@ func TestASessionCannotStartStopOrWeakenARecovery(t *testing.T) {
 		"POST /api/inception",
 		"POST /api/rotation",
 	} {
-		if _, forbidden := sessionForbidden[route]; !forbidden {
+		if _, forbidden := everySessionForbidden()[route]; !forbidden {
 			t.Fatalf("a browser session can reach %s", route)
 		}
 	}

@@ -66,7 +66,7 @@ func (s *CoreServer) handleMCP(w http.ResponseWriter, r *http.Request) {
 	}
 	// Identity-first: an agent that proved its AID by envelope (no bearer token) picks
 	// up its delegation lineage + capability ceiling from its provisioned asset here.
-	s.enrichCallerFromIdentity(&caller)
+	s.enrichProvenCaller(&caller)
 
 	switch req.Method {
 	case "notifications/initialized":

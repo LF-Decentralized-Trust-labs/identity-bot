@@ -565,33 +565,16 @@ func (s *CoreServer) handleGrantsAwaitingApproval(w http.ResponseWriter, r *http
 			machines = append(machines, m)
 		}
 	}
-	// Every AI agent with no usable grant, whether it holds a token or
-	// authenticates by its own signature.
-	agents := []map[string]any{}
-	if s.assetHandler != nil && s.KeriDriver != nil {
-		tokenWithout := map[string]bool{}
-		mcpTokensMu.Lock()
-		for _, t := range s.loadMCPTokens() {
-			if t.AgentAID != "" && t.GrantSAID == "" {
-				tokenWithout[t.AssetID] = true
+	// What waits for a grant an add-on issues, under its key. AI agents are
+	// always listed, as none where no add-on here makes them.
+	out := map[string]any{"machines": machines, "agents": []map[string]any{}}
+	for _, a := range registeredAddons() {
+		for _, g := range a.GrantKinds {
+			if g.Awaiting != nil && g.AwaitingKey != "" {
+				out[g.AwaitingKey] = g.Awaiting(s)
 			}
-		}
-		mcpTokensMu.Unlock()
-		for _, a := range s.assetHandler.ListAgents() {
-			if s.agentStatus(a.PairwiseAID) == "revoked" {
-				continue
-			}
-			if !tokenWithout[a.ID] && s.findCapabilityGrant(a.PairwiseAID) != nil {
-				continue
-			}
-			agents = append(agents, map[string]any{
-				"asset_id": a.ID, "name": a.DisplayName, "agent_aid": a.PairwiseAID,
-				"capabilities": a.Capabilities, "resource_constraints": nonNilConstraints(a.GrantConstraints),
-				"awaiting": s.awaitingFor(a.PairwiseAID, s.agentGrantPendingFor(a.ID)),
-			})
 		}
 	}
-	out := map[string]any{"machines": machines, "agents": agents}
 	for k, v := range s.keyLogReport() {
 		out[k] = v
 	}
@@ -656,4 +639,62 @@ func nonNilConstraints(c map[string]interface{}) map[string]interface{} {
 		return map[string]interface{}{}
 	}
 	return c
+}
+
+// signers are the people who sign for the organisation: every active signer
+// on its roster, and its owner. The owner counts whether or not founding put
+// them on the roster, because the organisation's own key log names them, which
+// is the strongest proof of a person it has. Their standing says which, so the
+// record shows what the proof is.
+func (s *CoreServer) signers() []signerRef {
+	var out []signerRef
+	seen := map[string]bool{}
+	if s.assetHandler != nil {
+		for _, e := range s.assetHandler.Store.ListEmployees() {
+			if e.IsSigner && e.Status == "active" {
+				out = append(out, signerRef{AID: e.PairwiseAID, Standing: "signer", Credential: e.VouchSig, Name: e.Name})
+				seen[e.PairwiseAID] = true
+			}
+		}
+	}
+	if owner, ok := s.theOwner(); ok && !seen[owner] {
+		out = append(out, signerRef{AID: owner, Standing: "owner", Name: "The owner"})
+	}
+	return out
+}
+
+// onlyActiveSigner is the organisation's signer when it has exactly one, and
+// empty otherwise.
+func (s *CoreServer) onlyActiveSigner() string {
+	if signers := s.signers(); len(signers) == 1 {
+		return signers[0].AID
+	}
+	return ""
+}
+
+// signerRef is one of the people who sign for this identity, and how it knows
+// them: "owner" (named in its own key log) or "signer". Credential is the
+// signature with which they founded the organisation.
+type signerRef struct {
+	AID        string
+	Standing   string
+	Credential string
+	Name       string
+}
+
+// theOwner is the person this organisation answers to: the owner its own
+// inception event names, or, with no such anchor, the one sealed when it was
+// provisioned. Never the organisation itself, which is what ownerAuthority
+// falls back to when nobody was named.
+func (s *CoreServer) theOwner() (string, bool) {
+	oa, err := s.ownerAuthority()
+	if err != nil || oa == nil || oa.AID == "" {
+		return "", false
+	}
+	if s.DataStore != nil {
+		if id, _ := s.DataStore.GetIdentity(); id != nil && id.AID == oa.AID {
+			return "", false
+		}
+	}
+	return oa.AID, true
 }
