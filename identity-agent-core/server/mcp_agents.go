@@ -17,7 +17,6 @@ import (
 	"identity-agent-core/asset"
 	"identity-agent-core/authorisation"
 	"identity-agent-core/brainsignin"
-	"identity-agent-core/schemas"
 	"identity-agent-core/vault"
 
 	"github.com/go-chi/chi/v5"
@@ -624,54 +623,6 @@ func (s *CoreServer) regrantAgent(id string, by authority, change func(candidate
 		updated.PairwiseAID, before.Capabilities, updated.Capabilities, touched)
 	s.endLendsNoLongerGranted("the AI agent's grant changed")
 	return regranted{before: before, updated: *updated, grantSAID: grantSAID, touched: touched}, 0, nil
-}
-
-// issueCapabilityGrant issues a capability-grant ACDC from the owner root to the
-// agent's AID, persists the credential and its anchoring KEL event (so a verifier
-// can resolve the issuer KEL), and returns the grant SAID. Requires the KERI
-// driver; on any failure the caller falls back to the stored ceiling.
-func (s *CoreServer) issueCapabilityGrant(agent *asset.Asset, by authority) (string, error) {
-	agentAID, issuerRootAID := agent.PairwiseAID, agent.DelegatorAID
-	capabilities := agent.Capabilities
-	if capabilities == nil {
-		capabilities = []string{}
-	}
-	claims := map[string]interface{}{
-		"name":         agent.DisplayName,
-		"capabilities": capabilities,
-	}
-	if len(agent.GrantConstraints) > 0 {
-		claims["resource_constraints"] = agent.GrantConstraints
-	}
-	expiry := ""
-	if agent.GrantValidUntil != nil {
-		expiry = agent.GrantValidUntil.UTC().Format(time.RFC3339)
-	}
-	superseded := s.grantsHeldBy(agentAID, true)
-	grantSAID, err := s.issueAssetCredential(schemas.AIAgentGrant, agentAID, issuerRootAID, claims, expiry, by)
-	if err != nil {
-		return "", err
-	}
-	// The grant this one replaces is withdrawn, not left standing. A re-issue
-	// that narrows a ceiling would otherwise leave the wider grant valid beside
-	// it, and anything checking "does this agent hold a valid grant" would find
-	// the old one as readily as the new.
-	//
-	// If the revocation cannot be written to the registry, the replaced grant is
-	// still marked unusable here — this identity issued it, and its own record is
-	// what its gateway reads — and the failure is reported, never skipped.
-	for i := range superseded {
-		old := superseded[i]
-		if _, _, err := s.withdrawCredential(&old); err != nil {
-			log.Printf("[mcp] grant %s superseded by %s: its revocation was not recorded in the registry (%v); "+
-				"it is marked superseded and no longer admits anything here", old.SAID, grantSAID, err)
-			if err := s.DataStore.UpdateCredentialStatus(old.SAID, "superseded"); err != nil {
-				log.Printf("[mcp] grant %s superseded by %s but not marked so: %v", old.SAID, grantSAID, err)
-			}
-		}
-	}
-	log.Printf("[mcp] issued capability grant %s to agent %s (%d capabilities)", grantSAID, agentAID, len(capabilities))
-	return grantSAID, nil
 }
 
 // checkResourceConstraints refuses constraints the gateway would not enforce as

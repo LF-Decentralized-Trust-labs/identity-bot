@@ -7,8 +7,6 @@ import (
 	keri "github.com/grapeid/keri-go"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -16,65 +14,9 @@ import (
 
 	"identity-agent-core/drivers"
 	"identity-agent-core/login"
-	"identity-agent-core/permission"
 	"identity-agent-core/schemas"
 	"identity-agent-core/store"
 )
-
-// elsewhere is an Identity Agent whose identity's key is held on another
-// device: it publishes the same key and can no longer derive it. seed is that
-// other device's key.
-type elsewhere struct {
-	w    *talkWorld
-	s    *CoreServer
-	seed []byte
-	// earlier are AI agents made while the key was here, whose grants are
-	// gone, as before every AI agent was given one: by name, their ids.
-	earlier map[string]string
-}
-
-func keyElsewhere(t *testing.T, earlier ...string) *elsewhere {
-	t.Helper()
-	w := newTalkWorld(t)
-	resetSeenSignatures(t)
-	w.s.localOwnerSecret = testOwnerSecret
-	made := map[string]string{}
-	for _, name := range earlier {
-		rec := httptest.NewRecorder()
-		w.s.router.ServeHTTP(rec, local("POST", "/api/mcp/agents", `{"name":"`+name+`","capabilities":["`+capabilityMessageAgent+`"]}`))
-		var out map[string]interface{}
-		json.Unmarshal(rec.Body.Bytes(), &out)
-		id, _ := out["asset_id"].(string)
-		if id == "" {
-			t.Fatalf("provisioning %s: %d %s", name, rec.Code, rec.Body.String())
-		}
-		a, _ := w.s.assetHandler.Store.GetAsset(id)
-		recordDB(t, w.s).Exec(`DELETE FROM credentials WHERE holder_aid = ?`, a.PairwiseAID)
-		mcpTokensMu.Lock()
-		toks := w.s.loadMCPTokens()
-		for i := range toks {
-			if toks[i].AssetID == id {
-				toks[i].GrantSAID = ""
-			}
-		}
-		w.s.saveMCPTokens(toks)
-		mcpTokensMu.Unlock()
-		made[name] = id
-	}
-	seed, err := w.s.identitySigningSeed()
-	if err != nil {
-		t.Fatal(err)
-	}
-	owner, _ := w.s.DataStore.GetIdentity()
-	owner.DerivationIndex += 1000
-	if err := w.s.DataStore.SaveIdentity(*owner); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := w.s.identitySigningSeed(); err == nil {
-		t.Fatal("the key still reads as held here")
-	}
-	return &elsewhere{w: w, s: w.s, seed: seed, earlier: made}
-}
 
 // pairMachine asks, signed by the owner, for machine g to be granted.
 func (e *elsewhere) pairMachine(t *testing.T, g ControllerGrant) *httptest.ResponseRecorder {
@@ -82,15 +24,6 @@ func (e *elsewhere) pairMachine(t *testing.T, g ControllerGrant) *httptest.Respo
 	body := `{"controller_aid":"` + g.ControllerAID + `","public_key":"` + g.PublicKey + `","label":"` + g.Label + `","grade":"` + string(g.Grade) + `"}`
 	rec := httptest.NewRecorder()
 	e.s.router.ServeHTTP(rec, signedFor(t, e.s.thisIdentityAgentsIdentifier(), "POST", "/api/controllers", body, testOwnerSeed(), time.Now()))
-	return rec
-}
-
-// setCapabilities asks, signed by the owner, for an AI agent's capabilities.
-func (e *elsewhere) setCapabilities(t *testing.T, id string, caps ...string) *httptest.ResponseRecorder {
-	t.Helper()
-	list, _ := json.Marshal(caps)
-	rec := httptest.NewRecorder()
-	e.s.router.ServeHTTP(rec, signedFor(t, e.s.thisIdentityAgentsIdentifier(), "PUT", "/api/mcp/agents/"+id+"/capabilities", `{"capabilities":`+string(list)+`}`, testOwnerSeed(), time.Now()))
 	return rec
 }
 
@@ -195,43 +128,6 @@ func TestAMachineIsGrantedOnceTheDeviceWithTheKeySigns(t *testing.T) {
 	got, _, _ := e.s.controllers().Get(g.ControllerAID)
 	if got.CredentialSAID == "" || got.CredentialPending {
 		t.Fatalf("the machine is still waiting: %+v", got)
-	}
-	keyLogVerifies(t, e.s)
-}
-
-// An AI agent created where the key is elsewhere may do nothing until the
-// device signs its grant, and then may do what it was granted.
-func TestAnAIAgentIsGrantedOnceTheDeviceWithTheKeySigns(t *testing.T) {
-	e := keyElsewhere(t, "Waiting")
-	id := e.earlier["Waiting"]
-	if rec := e.setCapabilities(t, id, capabilityMessageAgent); rec.Code != http.StatusOK {
-		t.Fatalf("approving: %d %s", rec.Code, rec.Body.String())
-	}
-	scopes := func() []string {
-		for _, tok := range e.s.loadMCPTokens() {
-			if tok.AssetID == id {
-				cc := permission.CallerContext{Scopes: tok.Scopes}
-				e.s.applyGrantScopes(tok, &cc)
-				return cc.Scopes
-			}
-		}
-		return nil
-	}
-	if len(scopes()) != 0 {
-		t.Fatal("an AI agent waiting for its grant may do something")
-	}
-	reqs := waiting(t, e.s)
-	if len(reqs) != 1 {
-		t.Fatalf("%d grants were asked for", len(reqs))
-	}
-	if shown, err := checkAsTheDevice(t, e.s, reqs[0]); err != nil || shown["kind"] != "ai_agent" {
-		t.Fatalf("the device's check: %v %v", shown, err)
-	}
-	if rec := fulfil(t, e.s, reqs[0], e.seed); rec.Code != http.StatusOK {
-		t.Fatalf("the device's signature: %d %s", rec.Code, rec.Body.String())
-	}
-	if len(scopes()) == 0 {
-		t.Fatal("the AI agent may still do nothing once its grant is signed")
 	}
 	keyLogVerifies(t, e.s)
 }
@@ -354,46 +250,6 @@ func withdrawIt(t *testing.T, e *elsewhere) {
 	if c, _ := e.s.DataStore.GetCredential(p.Revokes); c == nil || c.Status != "revoked" {
 		t.Fatalf("the grant signed and not wanted is not revoked: %+v", c)
 	}
-}
-
-// At most one grant waits for an AI agent: asking again withdraws the one
-// waiting, and an agent changed underneath is not granted what it was.
-func TestOnlyTheNewestGrantWaitsForAnAIAgent(t *testing.T) {
-	e := keyElsewhere(t, "Changing")
-	id := e.earlier["Changing"]
-	if rec := e.setCapabilities(t, id, capabilityMessageAgent); rec.Code != http.StatusOK {
-		t.Fatalf("approving: %d %s", rec.Code, rec.Body.String())
-	}
-	first := waiting(t, e.s)
-	if rec := e.setCapabilities(t, id, capabilityMessageAgent, "system.info.read"); rec.Code != http.StatusOK {
-		t.Fatalf("changing: %d %s", rec.Code, rec.Body.String())
-	}
-	now := waiting(t, e.s)
-	if len(first) != 1 || len(now) != 1 || now[0].ID == first[0].ID {
-		t.Fatalf("waiting before %d, after %d", len(first), len(now))
-	}
-	if rec := fulfil(t, e.s, first[0], e.seed); !strings.Contains(rec.Body.String(), `"in_force":false`) {
-		t.Fatalf("signing the withdrawn grant was answered %d %s", rec.Code, rec.Body.String())
-	}
-	if held, _ := e.s.assetHandler.Store.GetAsset(id); e.s.findCapabilityGrant(held.PairwiseAID) != nil {
-		t.Fatal("the withdrawn grant is in force")
-	}
-	// Taken up at the place the newer grant was built for, which is built
-	// again behind the withdrawal.
-	withdrawIt(t, e)
-	now = waiting(t, e.s)
-	// Changed underneath, in its files, after the grant was asked for.
-	a, _ := e.s.assetHandler.Store.GetAsset(id)
-	a.Capabilities = []string{capabilityMessageAgent}
-	e.s.assetHandler.Store.UpsertAsset(a)
-	if rec := fulfil(t, e.s, now[0], e.seed); rec.Code < 400 {
-		t.Fatalf("signing a grant for an AI agent changed since was answered %d", rec.Code)
-	}
-	if e.s.findCapabilityGrant(a.PairwiseAID) != nil {
-		t.Fatal("an AI agent changed since was granted what it was")
-	}
-	withdrawIt(t, e)
-	keyLogVerifies(t, e.s)
 }
 
 // Two signatures for one request at once: one is acted on.
@@ -595,116 +451,6 @@ func TestAWaitingGrantNeedsItsRequest(t *testing.T) {
 	}
 }
 
-// Where the key is elsewhere, an earlier AI agent approved by its owner
-// waits for the device rather than failing; one already granted is refused
-// before anything is asked for, since its grant could not be withdrawn here.
-func TestApprovingWhereTheKeyIsElsewhereWaitsOrRefuses(t *testing.T) {
-	w := newTalkWorld(t)
-	resetSeenSignatures(t)
-	provision := func(name string) string {
-		rec := httptest.NewRecorder()
-		w.s.router.ServeHTTP(rec, local("POST", "/api/mcp/agents", `{"name":"`+name+`","capabilities":["`+capabilityMessageAgent+`"]}`))
-		var made map[string]interface{}
-		json.Unmarshal(rec.Body.Bytes(), &made)
-		id, _ := made["asset_id"].(string)
-		if id == "" {
-			t.Fatalf("provisioning %s: %d %s", name, rec.Code, rec.Body.String())
-		}
-		return id
-	}
-	earlier, granted := provision("Earlier"), provision("Granted")
-	ea, _ := w.s.assetHandler.Store.GetAsset(earlier)
-	recordDB(t, w.s).Exec(`DELETE FROM credentials WHERE holder_aid = ?`, ea.PairwiseAID)
-	mcpTokensMu.Lock()
-	toks := w.s.loadMCPTokens()
-	for i := range toks {
-		if toks[i].AssetID == earlier {
-			toks[i].GrantSAID = ""
-		}
-	}
-	w.s.saveMCPTokens(toks)
-	mcpTokensMu.Unlock()
-	owner, _ := w.s.DataStore.GetIdentity()
-	owner.DerivationIndex += 1000
-	w.s.DataStore.SaveIdentity(*owner)
-	e := &elsewhere{w: w, s: w.s}
-	if rec := e.setCapabilities(t, earlier, capabilityMessageAgent); rec.Code != http.StatusOK {
-		t.Fatalf("approving an earlier AI agent where the key is elsewhere: %d %s", rec.Code, rec.Body.String())
-	}
-	if !w.s.agentGrantPendingFor(earlier) || len(waiting(t, w.s)) != 1 {
-		t.Fatal("the approved AI agent is not waiting for the device")
-	}
-	if rec := e.setCapabilities(t, granted, capabilityMessageAgent); rec.Code != http.StatusConflict {
-		t.Fatalf("re-granting an AI agent already granted, where the key is elsewhere, was answered %d", rec.Code)
-	}
-	if len(waiting(t, w.s)) != 1 {
-		t.Fatal("a grant was asked for before re-granting was refused")
-	}
-}
-
-// An AI agent is not made where the identity's key is on another device: its
-// identity is approved by an interaction only that key may sign, and nothing
-// is written into the key log unsigned.
-func TestAnAIAgentIsNotMadeWhereTheKeyIsElsewhere(t *testing.T) {
-	e := keyElsewhere(t)
-	owner, _ := e.s.DataStore.GetIdentity()
-	before, _ := e.s.DataStore.GetEvents(owner.AID)
-	rec := httptest.NewRecorder()
-	e.s.router.ServeHTTP(rec, signedFor(t, e.s.thisIdentityAgentsIdentifier(), "POST", "/api/mcp/agents", `{"name":"Here","capabilities":["`+capabilityMessageAgent+`"]}`, testOwnerSeed(), time.Now()))
-	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "another device") {
-		t.Fatalf("making an AI agent where the key is elsewhere was answered %d %s", rec.Code, rec.Body.String())
-	}
-	if after, _ := e.s.DataStore.GetEvents(owner.AID); len(after) != len(before) {
-		t.Fatal("an event was written into the key log")
-	}
-	for _, ev := range before {
-		if ev.CesrSignature == "" {
-			t.Fatalf("event %d of the key log is unsigned", ev.SequenceNumber)
-		}
-	}
-}
-
-// A key held here that cannot be read right now is not a key held elsewhere:
-// it is reported as unavailable, nothing is asked of a device that does not
-// exist, and the stored seed is never replaced.
-func TestAnUnreadableKeyIsNotAKeyElsewhere(t *testing.T) {
-	w := newTalkWorld(t)
-	resetSeenSignatures(t)
-	path := filepath.Join(w.s.DataDir, "secureenclave", "root_seed.key")
-	if err := os.Chmod(path, 0); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Chmod(path, 0o600) })
-	if err := w.s.keyCanSign(); !errors.Is(err, errKeyUnavailable) {
-		t.Fatalf("an unreadable key reads as %v", err)
-	}
-	if w.s.keyIsElsewhere() {
-		t.Fatal("an unreadable key reads as held elsewhere")
-	}
-	g := grantFor(5, GradeEnrolled)
-	body := `{"controller_aid":"` + g.ControllerAID + `","public_key":"` + g.PublicKey + `","label":"` + g.Label + `","grade":"` + string(g.Grade) + `"}`
-	rec := httptest.NewRecorder()
-	w.s.router.ServeHTTP(rec, signedFor(t, w.s.thisIdentityAgentsIdentifier(), "POST", "/api/controllers", body, testOwnerSeed(), time.Now()))
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("granting with the key unreadable was answered %d %s", rec.Code, rec.Body.String())
-	}
-	if len(waiting(t, w.s)) != 0 {
-		t.Fatal("a grant was asked of another device, where there is none")
-	}
-	if got, _, _ := w.s.controllers().Get(g.ControllerAID); got.CredentialPending {
-		t.Fatal("the machine was marked as waiting for another device")
-	}
-	rec = httptest.NewRecorder()
-	w.s.router.ServeHTTP(rec, signedFor(t, w.s.thisIdentityAgentsIdentifier(), "POST", "/api/mcp/agents", `{"name":"Later","capabilities":["`+capabilityMessageAgent+`"]}`, testOwnerSeed(), time.Now().Add(time.Second)))
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("making an AI agent with the key unreadable was answered %d %s", rec.Code, rec.Body.String())
-	}
-	os.Chmod(path, 0o600)
-	if err := w.s.keyCanSign(); err != nil {
-		t.Fatalf("once readable again, the stored seed is not the one it was: %v", err)
-	}
-}
-
 // Where the key is genuinely held on another device, it reads so.
 func TestAKeyElsewhereReadsSo(t *testing.T) {
 	e := keyElsewhere(t)
@@ -733,4 +479,42 @@ func TestAStaleRegistryIsBuiltAgain(t *testing.T) {
 	if len(fresh) != 1 || fresh[0].ID == req.ID || fresh[0].Kind != signingKindRegistry {
 		t.Fatalf("the stale registry was not asked for afresh: %+v", fresh)
 	}
+}
+
+// elsewhere is an organisation whose key is held on another device: seed is
+// the key that device holds.
+type elsewhere struct {
+	s    *CoreServer
+	seed []byte
+	// earlier are AI agents made while the key was here, whose grants are
+	// gone, as before every AI agent was given one: by name, their ids.
+	earlier map[string]string
+}
+
+// keyElsewhere is the controller world with its key moved to another device.
+func keyElsewhere(t *testing.T) *elsewhere {
+	t.Helper()
+	w := newControllerWorld(t)
+	resetSeenSignatures(t)
+	w.s.localOwnerSecret = testOwnerSecret
+	return moveTheKeyElsewhere(t, w.s, map[string]string{})
+}
+
+// moveTheKeyElsewhere makes s's key unreadable here, as it is where the device
+// that holds it is another one, and returns the key that device holds.
+func moveTheKeyElsewhere(t *testing.T, s *CoreServer, earlier map[string]string) *elsewhere {
+	t.Helper()
+	seed, err := s.identitySigningSeed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, _ := s.DataStore.GetIdentity()
+	owner.DerivationIndex += 1000
+	if err := s.DataStore.SaveIdentity(*owner); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.identitySigningSeed(); err == nil {
+		t.Fatal("the key still reads as held here")
+	}
+	return &elsewhere{s: s, seed: seed, earlier: earlier}
 }

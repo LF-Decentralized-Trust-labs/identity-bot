@@ -97,108 +97,6 @@ func (s *CoreServer) mountConversationRoutes(r chi.Router) {
 
 // ── Who is asking ────────────────────────────────────────────────────────────
 
-// errNoProvablePerson is a request that does not come from a person the
-// organisation can prove.
-var errNoProvablePerson = errors.New("a person speaks to an AI agent from an app paired to this " +
-	"organisation, so the record can show which person asked")
-
-// thePersonAsking is the person behind a request a controller signed, and the
-// controller's signature as proof of what they said.
-func (s *CoreServer) thePersonAsking(r *http.Request) (agentmessage.PersonRef, *agentmessage.ControllerProof, error) {
-	grant, ok := TheControllerThatAsked(r)
-	if !ok {
-		return agentmessage.PersonRef{}, nil, errNoProvablePerson
-	}
-	// The person is read from the machine's record only where that record is
-	// what its grant says: a signer or an expiry written into the file is
-	// refused, not attributed. A machine with no grant awaits the owner's
-	// approval; one whose grant waits for another device is believed only
-	// where the key really is elsewhere.
-	if current, had, err := s.controllers().Get(grant.ControllerAID); err == nil && had {
-		switch {
-		case current.CredentialSAID != "":
-			if err := s.rowIsItsGrant(current); err != nil {
-				return agentmessage.PersonRef{}, nil, err
-			}
-		case !current.CredentialPending || !s.keyIsElsewhere():
-			return agentmessage.PersonRef{}, nil, fmt.Errorf("this machine was paired before machines were given grants, and awaits the owner's approval")
-		}
-		grant = current
-	}
-	person, err := s.signerOf(grant)
-	if err != nil {
-		return agentmessage.PersonRef{}, nil, err
-	}
-	// Settling the signer re-issues the machine's grant, so the grant named is
-	// read again rather than taken from before.
-	if g, ok, err := s.controllers().Get(grant.ControllerAID); err == nil && ok {
-		grant.CredentialSAID = g.CredentialSAID
-	}
-	signed, sig, err := s.theRequestAsSigned(r, grant)
-	if err != nil {
-		return agentmessage.PersonRef{}, nil, err
-	}
-	body, err := readSignedBody(r)
-	if err != nil {
-		return agentmessage.PersonRef{}, nil, err
-	}
-	return person, &agentmessage.ControllerProof{
-		Controller: grant.ControllerAID, PublicKey: grant.PublicKey, SignedString: signed,
-		Signature: sig, RequestBytes: body, ControllerGrant: grant.CredentialSAID,
-	}, nil
-}
-
-// signerOf is the signer a controller belongs to: the one its grant names.
-// A grant that names none is bound, the first time it is needed, to the
-// organisation's only signer — so the machine keeps speaking as that person
-// whoever joins later, rather than as whoever happens to be the only signer
-// at the time of each message.
-func (s *CoreServer) signerOf(g ControllerGrant) (agentmessage.PersonRef, error) {
-	signers := s.signers()
-	if g.Signer != "" {
-		for _, p := range signers {
-			if p.AID == g.Signer {
-				return agentmessage.PersonRef(p), nil
-			}
-		}
-		return agentmessage.PersonRef{}, fmt.Errorf("the signer this app belongs to is no longer an active signer of the organisation")
-	}
-	switch len(signers) {
-	case 0:
-		return agentmessage.PersonRef{}, fmt.Errorf("this organisation has no signer on its roster and names no owner, " +
-			"so nobody it can prove is asking. A signer joins by accepting the organisation's signer invitation from their own identity")
-	case 1:
-		if _, err := s.bindSigner(g.ControllerAID, signers[0].AID); err != nil {
-			return agentmessage.PersonRef{}, fmt.Errorf("which signer this app belongs to could not be recorded: %w", err)
-		}
-		return agentmessage.PersonRef(signers[0]), nil
-	}
-	return agentmessage.PersonRef{}, fmt.Errorf("this organisation has more than one signer, and this app has not " +
-		"been tied to one of them, so the record could not say which person asked")
-}
-
-// personStillStands reports whether the person who opened a conversation is
-// still someone the organisation can prove — checked on every ask made in
-// their name, not only when they opened it.
-func (s *CoreServer) personStillStands(p agentmessage.PersonRef) bool {
-	if p.AID == "" {
-		return false
-	}
-	if p.Standing == "owner" {
-		owner, ok := s.theOwner()
-		return ok && owner == p.AID
-	}
-	if s.assetHandler == nil {
-		return false
-	}
-	for _, e := range s.assetHandler.Store.ListEmployees() {
-		if e.PairwiseAID == p.AID && e.Status == "active" && (p.Standing != "signer" || e.IsSigner) {
-			return true
-		}
-	}
-	return false
-}
-
 // personMayUse reports whether a person may use an AI agent. A signer or the
 // owner may use every AI agent of the organisation they sign for.
 func personMayUse(p agentmessage.PersonRef, _ asset.Asset) bool {
@@ -299,7 +197,7 @@ func (s *CoreServer) handlePersonSays(w http.ResponseWriter, r *http.Request) {
 		s.refuseMessage(w, cc, agentmessage.KindAsk, "AI agent not found", http.StatusNotFound)
 		return
 	}
-	person, proof, err := s.thePersonAsking(r)
+	person, proof, err := s.personAsking(r)
 	if err != nil {
 		s.refuseMessage(w, cc, agentmessage.KindAsk, err.Error(), http.StatusForbidden)
 		return
@@ -704,7 +602,7 @@ func (s *CoreServer) handleBodySays(w http.ResponseWriter, r *http.Request) {
 		// The opener's reach, as the opener stands now.
 		entries, _ := store.Entries(c.ID, 0)
 		opener, _ := personRefFor(entries, c.OpenedBy)
-		if !s.personStillStands(opener) {
+		if !s.personStillStands(signerRef(opener)) {
 			refuse("the person who opened this conversation is no longer someone the organisation can prove", http.StatusForbidden)
 			return
 		}
@@ -996,4 +894,18 @@ func (s *CoreServer) conversationHeldWith(id, party string) (held, isParty bool,
 		return false, false, nil
 	}
 	return true, c.OpenedBy == party || st.IsParty(id, party), nil
+}
+
+// personAsking is the person behind a request a controller signed, and the
+// controller's signature as proof of what they said, as a conversation
+// records them.
+func (s *CoreServer) personAsking(r *http.Request) (agentmessage.PersonRef, *agentmessage.ControllerProof, error) {
+	person, proof, err := s.thePersonAsking(r)
+	if err != nil {
+		return agentmessage.PersonRef{}, nil, err
+	}
+	return agentmessage.PersonRef(person), &agentmessage.ControllerProof{
+		Controller: proof.Controller, PublicKey: proof.PublicKey, SignedString: proof.SignedString,
+		Signature: proof.Signature, RequestBytes: proof.RequestBytes, ControllerGrant: proof.ControllerGrant,
+	}, nil
 }

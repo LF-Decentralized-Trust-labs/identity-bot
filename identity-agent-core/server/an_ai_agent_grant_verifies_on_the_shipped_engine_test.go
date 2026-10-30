@@ -2,92 +2,13 @@ package server
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"testing"
 	"time"
 
 	"identity-agent-core/asset"
 	"identity-agent-core/drivers"
-	"identity-agent-core/keriengine"
-	"identity-agent-core/login"
 	"identity-agent-core/store"
-
-	keri "github.com/grapeid/keri-go"
 )
-
-// grantWorld is an organisation that holds its own key, founded and reloaded
-// into the engine the way startup reloads it, with its founding event signed and
-// stored, and an AI agent delegated from it. Nothing is faked: the grant is
-// issued, signed, verified and revoked by the engine that ships.
-func grantWorld(t *testing.T) (*CoreServer, *asset.Asset) {
-	t.Helper()
-	s := agentWithDerivedIdentity(t) // the organisation's key is derivable here
-	return foundedWith(t, s, nil, 0)
-}
-
-// foundedWith founds the organisation in s, naming witnesses when given, and
-// delegates an AI agent from it.
-func foundedWith(t *testing.T, s *CoreServer, witnesses []string, toad int) (*CoreServer, *asset.Asset) {
-	t.Helper()
-	e := keriengine.New()
-	s.KeriDriver = e
-	s.engineSigns()
-
-	owner, _ := s.DataStore.GetIdentity()
-	seed, err := s.identitySigningSeed()
-	if err != nil {
-		t.Fatal(err)
-	}
-	next, _ := keri.GenerateSigner(true)
-	nextPub, _ := next.PublicKey()
-	founding := keriengine.New()
-	root, err := founding.Incept(drivers.InceptionRequest{
-		PublicKey: owner.PublicKey, NextPublicKey: nextPub, Name: "owner", Witnesses: witnesses, Toad: toad,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	kel, _ := founding.GetKel("owner")
-	raw, _ := base64.StdEncoding.DecodeString(root.RawBytesB64)
-	sig, err := login.SignString(string(raw), seed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	icp, _ := json.Marshal(kel.KEL[0])
-	owner.AID, owner.NextKeyDigest = root.AID, root.NextKeyDigest
-	if err := s.DataStore.SaveIdentity(*owner); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.DataStore.SaveEvent(store.EventRecord{
-		AID: root.AID, SequenceNumber: 0, EventType: "icp", EventJSON: string(icp),
-		PublicKey: owner.PublicKey, RawBytesB64: root.RawBytesB64, CesrSignature: sig,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := e.ReloadIdentity(&drivers.DriverReloadIdentityRequest{
-		AID: root.AID, PublicKey: root.PublicKey, NextKeyDigest: root.NextKeyDigest,
-		KEL: kel.KEL, RawEventsB64: kel.RawEventsB64,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	aSigner, _ := keri.GenerateSigner(true)
-	aNext, _ := keri.GenerateSigner(true)
-	aPub, _ := aSigner.PublicKey()
-	aNextPub, _ := aNext.PublicKey()
-	dip, err := e.CreateDelegatedInception(aPub, aNextPub, "Research assistant", root.AID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.saveDelegationAnchor(root.AID, dip); err != nil {
-		t.Fatal(err)
-	}
-	return s, &asset.Asset{
-		ID: "agent-1", DisplayName: "Research assistant", AssetType: "ai_agent",
-		PairwiseAID: dip.AID, DelegatorAID: root.AID,
-		Capabilities: []string{"infra.zone.list", "system.info.read"},
-	}
-}
 
 // Every event the organisation wrote into its own log — approving the agent,
 // opening the registry, issuing the grant — is signed, so the whole log verifies

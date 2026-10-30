@@ -24,18 +24,11 @@ import (
 // talkWorld is an organisation with a signer on its roster, a controller paired
 // to it, and two AI agents — "Desk assistant" and "Build server" — each allowed to
 // message the other, each enrolled with a body.
-// talkSigner is the founder: the owner the test organisation names
-// (sealTestOwner), and its one signer on the roster.
-const talkSigner = "EOWNERTESTAID"
-
 type talkWorld struct {
-	s            *CoreServer
-	srv          *httptest.Server
+	*controllerWorld
 	a, b         *asset.Asset
 	hostA, hostB *agenthost.Host
 	machineA     testMachine
-	ctlAID       string
-	ctlSeed      []byte
 }
 
 func newTalkWorld(t *testing.T, caps ...string) *talkWorld {
@@ -43,39 +36,17 @@ func newTalkWorld(t *testing.T, caps ...string) *talkWorld {
 	if len(caps) == 0 {
 		caps = []string{capabilityMessageAgent}
 	}
-	s, _ := grantWorld(t)
-	if err := s.initAssetHandler(); err != nil {
-		t.Fatal(err)
-	}
+	cw := newControllerWorld(t)
+	s := cw.s
 	mgr, err := sandbox.NewManager(sandbox.ManagerConfig{Log: s.logForTest(t, s.DataDir), Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(mgr.Stop)
 	s.SandboxManager = mgr
-	w := &talkWorld{s: s}
+	w := &talkWorld{controllerWorld: cw}
 	w.a = w.provision(t, "Desk assistant", caps)
 	w.b = w.provision(t, "Build server", caps)
-	// The founder: the owner the organisation names, and its one signer on
-	// the roster, as founding makes them.
-	w.ctlAID, w.ctlSeed = anAuthorisedMachine(t, s, GradeEnrolled)
-	if err := s.assetHandler.Store.UpsertEmployee(asset.Employee{
-		PairwiseAID: talkSigner, Name: "Alex", Role: "Owner", Status: "active", IsSigner: true, VouchSig: "0Bvouch",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	// Granted as a real one is: anchored. Its signer is settled at first use.
-	g, _, _ := s.controllers().Get(w.ctlAID)
-	if _, err := s.grantController(g, time.Now().UTC(), authority{}); err != nil {
-		t.Fatalf("anchoring the controller's grant: %v", err)
-	}
-
-	// The sealed transport replays what it opens through the server's own
-	// router, as it does in production.
-	s.router = s.buildRouter("")
-	w.srv = httptest.NewServer(s.router)
-	t.Cleanup(w.srv.Close)
-	t.Setenv("PUBLIC_URL", w.srv.URL)
 	w.hostA, w.machineA = w.enrolBody(t, w.a)
 	w.hostB, _ = w.enrolBody(t, w.b)
 	return w

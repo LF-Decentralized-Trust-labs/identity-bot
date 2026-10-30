@@ -39,7 +39,7 @@ type twoCores struct {
 
 func newTwoCores(t *testing.T) *twoCores {
 	t.Helper()
-	w := newTalkWorld(t)
+	w := newControllerWorld(t)
 	resetSeenSignatures(t)
 	device := w.s
 	device.localOwnerSecret = testOwnerSecret
