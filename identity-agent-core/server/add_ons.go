@@ -3,11 +3,14 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"identity-agent-core/authorisation"
 	"identity-agent-core/didcomm"
 	"identity-agent-core/permission"
 	"identity-agent-core/schemas"
 	"net/http"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -410,6 +413,100 @@ func addonRouteEntry(table func(Addon) map[string]string, key string) (string, b
 		}
 	}
 	return "", false
+}
+
+// underPrefix reports whether route pattern is p or lies under it, on a path
+// segment's boundary: /api/controller covers /api/controller/x and not
+// /api/controllers.
+func underPrefix(pattern, p string) bool {
+	q := strings.TrimSuffix(p, "/")
+	return pattern == q || strings.HasPrefix(pattern, q+"/")
+}
+
+// addonEntriesNotItsOwn are the entries an add-on makes for a route it does
+// not itself mount, as "add-on: table: entry", given served, everything the
+// server serves. An entry that opens a route (PublicRoutes, ScopedRoutes,
+// ScopedPrefixes) is one an add-on may make only for its own routes: a
+// prefix must cover some route of the add-on's and nobody else's. With
+// loosening only, those are all that are checked; otherwise the entries that
+// close or rate a route are checked the same way.
+func (s *CoreServer) addonEntriesNotItsOwn(served chi.Routes, loosening bool) []string {
+	var all []string
+	chi.Walk(served, func(_, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		all = append(all, route)
+		return nil
+	})
+	var out []string
+	for _, a := range registeredAddons() {
+		r := chi.NewRouter()
+		if a.Routes != nil {
+			r.Route("/api", func(r chi.Router) { a.Routes(s, r) })
+		}
+		if a.RootRoutes != nil {
+			a.RootRoutes(s, r)
+		}
+		own, ownPattern := map[string]bool{}, map[string]bool{}
+		chi.Walk(r, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+			own[method+" "+route] = true
+			ownPattern[route] = true
+			return nil
+		})
+		check := func(table string, keys []string) {
+			for _, k := range keys {
+				if !own[k] {
+					out = append(out, a.ID+": "+table+": "+k)
+				}
+			}
+		}
+		check("PublicRoutes", keysOf(a.PublicRoutes))
+		check("ScopedRoutes", keysOf(a.ScopedRoutes))
+		for _, p := range a.ScopedPrefixes {
+			found, foreign := false, false
+			for _, route := range all {
+				if !underPrefix(route, p) {
+					continue
+				}
+				if ownPattern[route] {
+					found = true
+				} else {
+					foreign = true
+				}
+			}
+			if !found || foreign {
+				out = append(out, a.ID+": ScopedPrefixes: "+p)
+			}
+		}
+		if !loosening {
+			check("SessionForbidden", keysOf(a.SessionForbidden))
+			check("ControllerOwnerOnly", keysOf(a.ControllerOwnerOnly))
+			var mins []string
+			for k := range a.ControllerMinimumScore {
+				mins = append(mins, k)
+			}
+			check("ControllerMinimumScore", mins)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// keysOf are m's keys.
+func keysOf(m map[string]string) []string {
+	var ks []string
+	for k := range m {
+		ks = append(ks, k)
+	}
+	return ks
+}
+
+// addonsOpeningOthersRoutes says which add-on opens a route it does not
+// mount, given served, everything the server serves. An add-on may open only its own routes; one that would make
+// a core route, or another's, public or scoped is a server that must not run.
+func (s *CoreServer) addonsOpeningOthersRoutes(served chi.Routes) error {
+	if bad := s.addonEntriesNotItsOwn(served, true); len(bad) > 0 {
+		return fmt.Errorf("an add-on opens routes it does not serve, which only their owner may open: %s", strings.Join(bad, "; "))
+	}
+	return nil
 }
 
 // addonScopedPrefixes are the path prefixes the add-ons open to a caller

@@ -220,3 +220,73 @@ func TestTheInfoNamesTheAddOnsIncluded(t *testing.T) {
 		}
 	}
 }
+
+// A server is not made with an add-on that opens a route it does not serve:
+// one that would make a core route public, or scope a prefix over a core
+// route, is refused as the server is made.
+func TestAnAddOnThatOpensACoreRouteIsRefused(t *testing.T) {
+	unsealedAfter(t)
+	ok := func(w http.ResponseWriter, r *http.Request) {}
+	for name, rogue := range map[string]Addon{
+		"a core route made public": {ID: "rogue",
+			Routes:       func(s *CoreServer, r chi.Router) { r.Get("/rogue", ok) },
+			PublicRoutes: map[string]string{"POST /api/reset": "taken over"}},
+		"a prefix over a core route": {ID: "rogue",
+			Routes:         func(s *CoreServer, r chi.Router) { r.Get("/controller", ok) },
+			ScopedPrefixes: []string{"/api/controller"}},
+		"a core route scoped": {ID: "rogue",
+			ScopedRoutes: map[string]string{"DELETE /api/controllers/{aid}": "taken over"}},
+	} {
+		onlyAddons(t, rogue)
+		msg, refused := panics(func() { New(Config{DataDir: t.TempDir()}) })
+		if !refused || !strings.Contains(msg, "opens routes it does not serve") {
+			t.Errorf("a server was made with an add-on opening %s (%q)", name, msg)
+		}
+	}
+	// The same add-ons, opening only their own routes, are made.
+	onlyAddons(t, Addon{ID: "own",
+		Routes:         func(s *CoreServer, r chi.Router) { r.Get("/its-own/{x}", ok) },
+		PublicRoutes:   map[string]string{"GET /api/its-own/{x}": "its own"},
+		ScopedPrefixes: []string{"/api/its-own"}})
+	if msg, refused := panics(func() { New(Config{DataDir: t.TempDir()}) }); refused {
+		t.Fatalf("an add-on opening only its own route was refused: %s", msg)
+	}
+}
+
+// A scoped prefix covers routes under it on a path segment's boundary only:
+// /api/controller opens /api/controller/... and never /api/controllers/...
+func TestAPrefixOpensOnlyWhatIsUnderIt(t *testing.T) {
+	onlyAddons(t, Addon{ID: "prefix", ScopedPrefixes: []string{"/api/controller"}})
+	for pattern, want := range map[string]accessClass{
+		"/api/controller":             accessScoped,
+		"/api/controller/{x}":         accessScoped,
+		"/api/controllers/{aid}":      accessOwner,
+		"/api/controllers-and-more/x": accessOwner,
+	} {
+		if got := classify("DELETE", pattern); got != want {
+			t.Errorf("%s classified %v, want %v", pattern, got, want)
+		}
+	}
+}
+
+// An overlay's routes, added after the server is made, are checked too: a
+// prefix an add-on opens may not cover one of them, and the server does not
+// start.
+func TestAPrefixOverAnOverlaysRouteStopsTheStart(t *testing.T) {
+	unsealedAfter(t)
+	ok := func(w http.ResponseWriter, r *http.Request) {}
+	onlyAddons(t, Addon{ID: "prefix",
+		Routes:         func(s *CoreServer, r chi.Router) { r.Get("/shared/mine", ok) },
+		ScopedPrefixes: []string{"/api/shared"}})
+	s, err := New(Config{DataDir: t.TempDir(), Port: 0})
+	if err != nil {
+		t.Skipf("making the server: %v", err)
+	}
+	s.MountExtraRoutes(func(r chi.Router) { r.Get("/shared/the-overlays", ok) })
+	if err := s.Start(); err == nil {
+		s.Stop()
+		t.Fatal("a server started with an add-on's prefix over an overlay's route")
+	} else if !strings.Contains(err.Error(), "opens routes it does not serve") {
+		t.Fatalf("the start failed for another reason: %v", err)
+	}
+}

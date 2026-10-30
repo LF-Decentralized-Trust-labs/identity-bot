@@ -274,7 +274,7 @@ func classify(method, pattern string) accessClass {
 		return accessScoped
 	}
 	for _, p := range addonScopedPrefixes() {
-		if len(pattern) >= len(p) && pattern[:len(p)] == p {
+		if underPrefix(pattern, p) {
 			return accessScoped
 		}
 	}

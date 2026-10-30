@@ -557,6 +557,12 @@ func New(cfg Config) (*CoreServer, error) {
 	s.flutterWebDir = cfg.FlutterWebDir
 	s.requireOwnerAtInception = cfg.RequireOwnerAtInception
 
+	// An add-on may open only routes it serves itself. One that would make a
+	// core route, or another add-on's, public or scoped is refused here, as
+	// the server is made, before anything is served.
+	if err := s.addonsOpeningOthersRoutes(s.buildRouter("")); err != nil {
+		panic("server.New: " + err.Error())
+	}
 	return s, nil
 }
 
@@ -578,6 +584,11 @@ func (s *CoreServer) Start() error {
 	// registered. Idempotent-safe: Start guards against double-run above.
 	if s.router == nil {
 		s.router = s.buildRouter(s.flutterWebDir)
+	}
+	// Checked again with every route an overlay added since New: a prefix
+	// an add-on opens must not cover one of the overlay's either.
+	if err := s.addonsOpeningOthersRoutes(s.router); err != nil {
+		return err
 	}
 
 	// Try the configured port first, then fallback to 5051–5059
