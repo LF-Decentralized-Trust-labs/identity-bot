@@ -43,7 +43,7 @@
 <!-- Where this lands. One line each; delete any line that does not apply.
 
      - Subsystem — the named runtime part, with its package: the credential vault
-       (`CredentialVault`, `identity-agent-core/sandbox`), the forward proxy, the
+       (`CredentialVault`, `identity-agent-core/vault`), the forward proxy, the
        attestation runner, the KERI driver.
      - User-facing — the navigation items in docs/adr/018-desktop-navigation-structure.md
        (Credentials → API Keys, Apps → Marketplace, Settings → Security, History …),
