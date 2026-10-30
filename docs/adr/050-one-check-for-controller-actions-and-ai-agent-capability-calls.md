@@ -62,7 +62,7 @@ to controllers: a handler that needs to know its caller acts for the owner asks
 goes on this list instead.
 
 **Every other action a controller takes, and every capability an AI agent
-invokes, passes one check.** `permission.MayThisPersonDoThis` asks two questions in
+invokes, passes one check.** `sandbox.MayThisPersonDoThis` asks two questions in
 order:
 
 1. Is this person's identity score (0-100) at least the action's minimum? The
