@@ -399,9 +399,36 @@ func (h *Host) Enrol(enrolment string, placement string, wait time.Duration) (St
 	if err := h.saveState(st); err != nil {
 		return State{}, err
 	}
+	// The approval request: a self-verifying string naming this machine's key
+	// and signed by it, which a person captures into the app to approve the
+	// pending binding — rather than comparing six words by eye.
+	approval, err := h.approvalRequest(e, host, verkey, signer)
+	if err != nil {
+		return State{}, err
+	}
 	fmt.Fprintf(h.out(), "This machine is asking to become the body of %q, at grade %s.\n", e.AgentName, grade)
-	fmt.Fprintf(h.out(), "Approve it in the app only if it shows exactly the six words above.\n")
+	fmt.Fprintf(h.out(), "\nTo approve it, paste this into the app (or scan it as a QR code):\n\n    %s\n\n", approval)
 	return st, h.waitForDecision(wait)
+}
+
+// approvalRequest builds the self-verifying string a person captures to approve
+// this machine: the key it holds, the AI agent and Identity Agent it is for,
+// and a signature by the key over all of it.
+func (h *Host) approvalRequest(e agentbody.Enrolment, host, verkey string, signer agentbody.Signer) (string, error) {
+	nonceBytes := make([]byte, 18)
+	if _, err := rand.Read(nonceBytes); err != nil {
+		return "", err
+	}
+	nonce := base64.RawURLEncoding.EncodeToString(nonceBytes)
+	sig, err := agentbody.Sign(signer, agentbody.ApprovalProof(e.IdentityAgent, e.Agent, host, verkey, nonce))
+	if err != nil {
+		return "", err
+	}
+	return agentbody.ApprovalRequest{
+		URL: strings.TrimRight(e.URL, "/"), IdentityAgent: e.IdentityAgent,
+		Agent: e.Agent, AgentName: e.AgentName, Host: host, Verkey: verkey,
+		Nonce: nonce, Signature: sig,
+	}.Encode()
 }
 
 // Status asks the Identity Agent, signed by this machine's key, where its
