@@ -57,15 +57,6 @@ func withResolvedCaller(r *http.Request, cc permission.CallerContext) *http.Requ
 	return r.WithContext(context.WithValue(r.Context(), resolvedCallerKey{}, cc))
 }
 
-// Header names carrying the "why" of a governed call. They ride outside the request
-// body deliberately: the body is the capability's own arguments, its schema commonly
-// forbids unknown properties, and the args hash must commit to exactly what the
-// capability was asked to do — not to bookkeeping wrapped around it.
-const (
-	HeaderWorkItem = "X-Work-Item"
-	HeaderReason   = "X-Reason"
-)
-
 // maxWhyLen bounds what a caller can write into the audit log through these headers.
 // They are recorded verbatim and never authorize anything, so the only real risk they
 // carry is unbounded growth of the record.
@@ -76,8 +67,8 @@ const maxWhyLen = 512
 // work item exactly as it can misstate a commit message. The fields that decide what is
 // permitted (CallerAID, GrantSAID, DelegationChain) are proven elsewhere.
 func applyCallerWhy(r *http.Request, cc *permission.CallerContext) {
-	cc.WorkItem = clampWhy(r.Header.Get(HeaderWorkItem))
-	cc.Reason = clampWhy(r.Header.Get(HeaderReason))
+	cc.WorkItem = clampWhy(r.Header.Get(permission.HeaderWorkItem))
+	cc.Reason = clampWhy(r.Header.Get(permission.HeaderReason))
 	// Which of the caller's runs is asking. The same standing as the two
 	// above — recorded and passed to the app, never consulted here — and
 	// signed with the request where the caller is a body.

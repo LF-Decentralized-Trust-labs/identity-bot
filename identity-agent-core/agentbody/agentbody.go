@@ -248,8 +248,8 @@ const (
 	// HeaderWorkItem and HeaderReason are the request's stated purpose, which
 	// the Identity Agent records. Signed, so nothing between the two can
 	// rewrite what the record says the AI agent was doing.
-	HeaderWorkItem = "X-Work-Item"
-	HeaderReason   = "X-Reason"
+	HeaderWorkItem = permission.HeaderWorkItem
+	HeaderReason   = permission.HeaderReason
 	// HeaderFor names the Identity Agent the request is meant for, by its
 	// identifier — the one the enrolment named. Signed, so a request captured
 	// on its way to one Identity Agent is refused by any other that has the

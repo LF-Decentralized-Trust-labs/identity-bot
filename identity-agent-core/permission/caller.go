@@ -11,6 +11,15 @@ const (
 	// HeaderBodyHost names the machine key an AI agent's body signs a request
 	// with. A request carrying it presents a body's signature.
 	HeaderBodyHost = "X-IA-Body-Host"
+	// HeaderWorkItem and HeaderReason are a request's stated purpose: the
+	// piece of work it serves, and one line for a person reading the record.
+	// Recorded, and never consulted to decide anything. They ride outside the
+	// request body deliberately: the body is the capability's own arguments,
+	// its schema commonly forbids unknown properties, and the args hash must
+	// commit to exactly what the capability was asked to do — not to
+	// bookkeeping wrapped around it.
+	HeaderWorkItem = "X-Work-Item"
+	HeaderReason   = "X-Reason"
 	// HeaderSession says which of the caller's runs made a request. It is
 	// recorded and passed to the app a call reaches, and decides nothing.
 	HeaderSession = "X-IA-Session"
