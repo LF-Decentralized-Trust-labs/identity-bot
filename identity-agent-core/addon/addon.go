@@ -41,8 +41,6 @@ import (
 	"identity-agent-core/store"
 	"net/http"
 	"time"
-
-	"github.com/go-chi/chi/v5"
 )
 
 // The plain data the core and an add-on hand each other.
@@ -87,7 +85,6 @@ type Host interface {
 	AuthorityOf(r *http.Request) (Authority, func(), error)
 	AwaitingFor(holder string, pending bool) string
 	BindSigner(aid string, signer string) (server.ControllerGrant, error)
-	BuildRouter(flutterWebDir string) chi.Router
 	CredentialLog(registrySAID string, acdcSAID string) ([]string, string, error)
 	DelegatedFromHere(aid string, e OwnEvidence) error
 	EngineSigns()
@@ -97,8 +94,6 @@ type Host interface {
 	GetPublicURL(r *http.Request) string
 	GrantController(g server.ControllerGrant, now time.Time, by Authority) (server.ControllerGrant, error)
 	GrantsHeldBy(agentAID string, usableOnly bool) []store.CredentialRecord
-	HandleDIDCommInbound(w http.ResponseWriter, r *http.Request)
-	HandleGrantController(w http.ResponseWriter, r *http.Request)
 	HasBrowserSession(r *http.Request) bool
 	HoldTheRecord() (string, bool, bool, func())
 	InBackground(fn func(ctx context.Context))
@@ -126,7 +121,6 @@ type Host interface {
 	// key stays in the core.
 	SignAsTheIdentity(message []byte) (string, error)
 	RevokeController(aid string) error
-	Router() chi.Router
 	RowIsItsGrant(g server.ControllerGrant) error
 	StoredKelForVerifying(aid string) ([]map[string]interface{}, error)
 	TheOwner() (string, bool)

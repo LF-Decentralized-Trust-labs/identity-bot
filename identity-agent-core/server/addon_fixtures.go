@@ -132,6 +132,16 @@ func (fixtureWrapper) SignsWithSeeds(e interface {
 }, seeds ...[]byte) {
 	signsWithSeeds(e, seeds...)
 }
+func (fixtureWrapper) HandleDIDCommInbound(s *CoreServer, w http.ResponseWriter, r *http.Request) {
+	s.handleDIDCommInbound(w, r)
+}
+func (fixtureWrapper) HandleGrantController(s *CoreServer, w http.ResponseWriter, r *http.Request) {
+	s.handleGrantController(w, r)
+}
+func (fixtureWrapper) Router(s *CoreServer) chi.Router { return s.router }
+func (fixtureWrapper) BuildRouter(s *CoreServer, flutterWebDir string) chi.Router {
+	return s.buildRouter(flutterWebDir)
+}
 func (fixtureWrapper) TalkSigner() string                             { return talkSigner }
 func (fixtureWrapper) TestOwnerSecret() string                        { return testOwnerSecret }
 func (fixtureWrapper) TestOwnerSeed() []byte                          { return testOwnerSeed() }

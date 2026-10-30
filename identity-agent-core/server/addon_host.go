@@ -15,8 +15,6 @@ import (
 	"identity-agent-core/store"
 	"net/http"
 	"time"
-
-	"github.com/go-chi/chi/v5"
 )
 
 // AddonHost is the server's side of the handle an add-on has on s (package
@@ -60,9 +58,6 @@ func (h hostWrapper) AwaitingFor(holder string, pending bool) string {
 func (h hostWrapper) BindSigner(aid string, signer string) (ControllerGrant, error) {
 	return h.s.bindSigner(aid, signer)
 }
-func (h hostWrapper) BuildRouter(flutterWebDir string) chi.Router {
-	return h.s.buildRouter(flutterWebDir)
-}
 func (h hostWrapper) CredentialLog(registrySAID string, acdcSAID string) ([]string, string, error) {
 	return h.s.credentialLog(registrySAID, acdcSAID)
 }
@@ -85,12 +80,6 @@ func (h hostWrapper) GrantController(g ControllerGrant, now time.Time, by corety
 }
 func (h hostWrapper) GrantsHeldBy(agentAID string, usableOnly bool) []store.CredentialRecord {
 	return h.s.grantsHeldBy(agentAID, usableOnly)
-}
-func (h hostWrapper) HandleDIDCommInbound(w http.ResponseWriter, r *http.Request) {
-	h.s.handleDIDCommInbound(w, r)
-}
-func (h hostWrapper) HandleGrantController(w http.ResponseWriter, r *http.Request) {
-	h.s.handleGrantController(w, r)
 }
 func (h hostWrapper) HasBrowserSession(r *http.Request) bool      { return h.s.hasBrowserSession(r) }
 func (h hostWrapper) HoldTheRecord() (string, bool, bool, func()) { return h.s.holdTheRecord() }
@@ -138,7 +127,6 @@ func (h hostWrapper) ResolveCaller(r *http.Request) permission.CallerContext {
 	return h.s.resolveCaller(r)
 }
 func (h hostWrapper) RevokeController(aid string) error     { return h.s.revokeController(aid) }
-func (h hostWrapper) Router() chi.Router                    { return h.s.router }
 func (h hostWrapper) RowIsItsGrant(g ControllerGrant) error { return h.s.rowIsItsGrant(g) }
 func (h hostWrapper) StoredKelForVerifying(aid string) ([]map[string]interface{}, error) {
 	return h.s.storedKelForVerifying(aid)

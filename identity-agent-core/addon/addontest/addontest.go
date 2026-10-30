@@ -70,6 +70,15 @@ type Fixtures interface {
 	GrantControllerRow(s *server.CoreServer, g server.ControllerGrant, now time.Time) (server.ControllerGrant, error)
 	GrantFor(n byte, grade server.ControllerGrade) server.ControllerGrant
 	GrantWorld(t TB) (*server.CoreServer, *asset.Asset)
+	// HandleDIDCommInbound and HandleGrantController call the core's own
+	// handlers directly, and Router and BuildRouter are the server's whole
+	// router, for a test. None is on the add-on handle, so an add-on cannot
+	// serve a core handler from a route of its own, where the core's access
+	// class for that handler would not apply.
+	Router(s *server.CoreServer) chi.Router
+	BuildRouter(s *server.CoreServer, flutterWebDir string) chi.Router
+	HandleDIDCommInbound(s *server.CoreServer, w http.ResponseWriter, r *http.Request)
+	HandleGrantController(s *server.CoreServer, w http.ResponseWriter, r *http.Request)
 	KeyLogVerifies(t TB, s *server.CoreServer)
 	LiveControllerRow(s *server.CoreServer, aid string, now time.Time) (server.ControllerGrant, bool, error)
 	Local(method string, path string, body string) *http.Request
