@@ -1,4 +1,4 @@
-package aiagents
+package sandboxedapps
 
 import (
 	"net/http"

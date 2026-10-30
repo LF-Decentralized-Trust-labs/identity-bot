@@ -3,8 +3,12 @@
 // lent to them, and the MCP endpoint they call capabilities through.
 //
 // An app includes it by importing it; it registers with the server when it
-// starts (ai_agents_add_on.go). The core names none of it: the phone core and
-// the free desktop app never link it.
+// starts (ai_agents_add_on.go). The core names none of it, and an app that
+// does not import it links none of it.
+//
+// It depends on the sandboxed-apps add-on (sandboxedapps), whose capability
+// gateway AI agents call capabilities through: importing this package
+// includes that one too.
 package aiagents
 
 import (

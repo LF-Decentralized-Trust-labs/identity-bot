@@ -1,10 +1,15 @@
 // Package sandboxedapps is the sandboxed-apps add-on: installing and running
 // apps in containers, the capability gateway and registry that apps and AI
-// agents call capabilities through, the display proxy, and the trace viewer.
+// agents call capabilities through, the display proxy, the model proxy and
+// model keys sandboxed apps use, the conversations they keep (ai-memory.db),
+// and the trace viewer.
 //
 // An app includes it by importing it; it registers with the server when it
-// starts (sandboxed_apps_add_on.go). The core names none of it: the phone core
-// and the free desktop app never link it.
+// starts (sandboxed_apps_add_on.go). The core names none of it, and an app
+// that does not import it links none of it.
+//
+// The AI-agent add-on (aiagents) depends on this one: AI agents call
+// capabilities through its gateway. This package depends on no other add-on.
 package sandboxedapps
 
 import (

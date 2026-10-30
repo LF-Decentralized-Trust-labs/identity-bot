@@ -23,9 +23,7 @@ func init() {
 		Name: "AI agents",
 		Routes: func(s *server.CoreServer, r chi.Router) {
 			of(s).aiAgentRoutes(r)
-			of(s).aiMemoryRoutes(r)
 		},
-		RootRoutes: func(s *server.CoreServer, r chi.Router) { of(s).llmRoutes(r) },
 		// A key an earlier version kept on an AI agent's record moves into
 		// the vault, where every other sign-in is kept.
 		Prepare: func(s *server.CoreServer) { of(s).moveBrainSecretsIntoTheVault() },
@@ -56,7 +54,6 @@ func init() {
 		SealedSender:     func(s *server.CoreServer, kid string) (didcomm.DID, bool) { return of(s).bodySealingFrom(kid) },
 		PublicRoutes:     aiAgentPublicRoutes,
 		ScopedRoutes:     aiAgentScopedRoutes,
-		ScopedPrefixes:   aiAgentScopedPrefixes,
 		SessionForbidden: aiAgentSessionForbidden,
 		GrantKinds: map[*schemas.AssetGrant]server.GrantKind{
 			schemas.AIAgentGrant: {
@@ -182,12 +179,6 @@ var aiAgentPublicRoutes = map[string]string{
 var aiAgentScopedRoutes = map[string]string{
 	"POST /api/mcp": "MCP clients act under a minted token with explicit scopes",
 }
-
-// aiAgentScopedPrefixes are the container-facing LLM namespace. A sandboxed
-// app reaches it from the container network, so it is neither the owner nor a
-// token holder; the handler behind it is its own gate (LLM egress is
-// structurally denied except the static model catalogue).
-var aiAgentScopedPrefixes = []string{"/sandbox/llm/v1"}
 
 // aiAgentSessionForbidden are the AI-agent routes a browser session must not
 // take, and why.

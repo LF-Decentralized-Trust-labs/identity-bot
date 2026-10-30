@@ -1,4 +1,4 @@
-package aiagents
+package sandboxedapps
 
 import (
 	"encoding/json"
@@ -12,7 +12,7 @@ import (
 
 // aiMemoryRoutes registers the AI Memory domain endpoints under /api/ai/.
 // These routes expose the ai-memory.db domain to the Identity Agent and future Data Manager.
-func (s *aiAgents) aiMemoryRoutes(r chi.Router) {
+func (s *sandboxedApps) aiMemoryRoutes(r chi.Router) {
 	r.Route("/ai", func(r chi.Router) {
 		// Conversations
 		r.Get("/conversations", s.handleListConversations)
@@ -38,7 +38,7 @@ func (s *aiAgents) aiMemoryRoutes(r chi.Router) {
 
 // ── Conversations ─────────────────────────────────────────────────────────────
 
-func (s *aiAgents) handleListConversations(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleListConversations(w http.ResponseWriter, r *http.Request) {
 	includeArchived := r.URL.Query().Get("archived") == "true"
 	convs, err := s.AIMemory.GetConversations(includeArchived)
 	if err != nil {
@@ -48,7 +48,7 @@ func (s *aiAgents) handleListConversations(w http.ResponseWriter, r *http.Reques
 	helpers.WriteJSON(w, convs)
 }
 
-func (s *aiAgents) handleCreateConversation(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleCreateConversation(w http.ResponseWriter, r *http.Request) {
 	var conv store.Conversation
 	if err := json.NewDecoder(r.Body).Decode(&conv); err != nil {
 		helpers.WriteError(w, http.StatusBadRequest, "Invalid request body", err.Error())
@@ -73,7 +73,7 @@ func (s *aiAgents) handleCreateConversation(w http.ResponseWriter, r *http.Reque
 	helpers.WriteJSON(w, saved)
 }
 
-func (s *aiAgents) handleGetConversation(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	conv, err := s.AIMemory.GetConversation(id)
 	if err != nil {
@@ -87,7 +87,7 @@ func (s *aiAgents) handleGetConversation(w http.ResponseWriter, r *http.Request)
 	helpers.WriteJSON(w, conv)
 }
 
-func (s *aiAgents) handleUpdateConversation(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleUpdateConversation(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var conv store.Conversation
 	if err := json.NewDecoder(r.Body).Decode(&conv); err != nil {
@@ -102,7 +102,7 @@ func (s *aiAgents) handleUpdateConversation(w http.ResponseWriter, r *http.Reque
 	helpers.WriteJSON(w, map[string]string{"status": "ok"})
 }
 
-func (s *aiAgents) handleDeleteConversation(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleDeleteConversation(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := s.AIMemory.DeleteConversation(id); err != nil {
 		helpers.WriteError(w, http.StatusInternalServerError, "Failed to delete conversation", err.Error())
@@ -111,7 +111,7 @@ func (s *aiAgents) handleDeleteConversation(w http.ResponseWriter, r *http.Reque
 	helpers.WriteJSON(w, map[string]string{"status": "deleted"})
 }
 
-func (s *aiAgents) handleArchiveConversation(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleArchiveConversation(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var req struct {
 		Archived bool `json:"archived"`
@@ -129,7 +129,7 @@ func (s *aiAgents) handleArchiveConversation(w http.ResponseWriter, r *http.Requ
 
 // ── Messages ──────────────────────────────────────────────────────────────────
 
-func (s *aiAgents) handleGetMessages(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	convID := chi.URLParam(r, "id")
 	messages, err := s.AIMemory.GetMessages(convID)
 	if err != nil {
@@ -139,7 +139,7 @@ func (s *aiAgents) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	helpers.WriteJSON(w, messages)
 }
 
-func (s *aiAgents) handleAddMessage(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleAddMessage(w http.ResponseWriter, r *http.Request) {
 	convID := chi.URLParam(r, "id")
 	var msg store.Message
 	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
@@ -161,7 +161,7 @@ func (s *aiAgents) handleAddMessage(w http.ResponseWriter, r *http.Request) {
 
 // ── Search ────────────────────────────────────────────────────────────────────
 
-func (s *aiAgents) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	if q == "" {
 		helpers.WriteError(w, http.StatusBadRequest, "Query parameter 'q' is required", "")
@@ -183,7 +183,7 @@ func (s *aiAgents) handleSearchMessages(w http.ResponseWriter, r *http.Request) 
 
 // ── AI Settings ───────────────────────────────────────────────────────────────
 
-func (s *aiAgents) handleGetAISettings(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleGetAISettings(w http.ResponseWriter, r *http.Request) {
 	appID := chi.URLParam(r, "app_id")
 	settings, err := s.AIMemory.GetAISettings(appID)
 	if err != nil {
@@ -193,7 +193,7 @@ func (s *aiAgents) handleGetAISettings(w http.ResponseWriter, r *http.Request) {
 	helpers.WriteJSON(w, settings)
 }
 
-func (s *aiAgents) handleSetAISetting(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleSetAISetting(w http.ResponseWriter, r *http.Request) {
 	appID := chi.URLParam(r, "app_id")
 	key := chi.URLParam(r, "key")
 	var req struct {

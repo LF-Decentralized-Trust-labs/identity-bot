@@ -28,13 +28,22 @@ func init() {
 		ScopedRoutes: map[string]string{
 			"POST /api/capabilities/{id}/invoke": "capability invocation is gated by the grant, not by locality",
 		},
-		// The display proxy is reached from the container network, so its
-		// caller is neither the owner nor a token holder; the handler behind
-		// it is its own gate.
-		ScopedPrefixes: []string{"/apps/{app_id}/"},
-		Routes:         func(s *server.CoreServer, r chi.Router) { of(s).sandboxRoutes(r) },
+		// The display proxy and the model proxy are reached from the
+		// container network, so their caller is neither the owner nor a token
+		// holder; the handler behind each is its own gate (the model proxy's
+		// egress is structurally denied except the static model catalogue).
+		ScopedPrefixes: []string{"/apps/{app_id}/", "/sandbox/llm/v1"},
+		Routes: func(s *server.CoreServer, r chi.Router) {
+			of(s).sandboxRoutes(r)
+			// The conversations and per-app settings sandboxed apps keep in
+			// ai-memory.db.
+			of(s).aiMemoryRoutes(r)
+		},
 		RootRoutes: func(s *server.CoreServer, r chi.Router) {
 			of(s).traceRoutes(r)
+			// The model proxy a sandboxed app calls, and the model keys it
+			// uses.
+			of(s).llmRoutes(r)
 			// The display reverse proxy: intercepts container API calls to
 			// serve from ai-memory.db.
 			r.HandleFunc("/apps/{app_id}/*", of(s).handleAppDisplayProxy)

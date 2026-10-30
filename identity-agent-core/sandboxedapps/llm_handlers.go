@@ -1,4 +1,4 @@
-package aiagents
+package sandboxedapps
 
 import (
 	"bytes"
@@ -71,7 +71,7 @@ var llmModelCatalog = []llmModel{
 	{ID: "meta-llama/llama-3.1-8b-instruct:free", Object: "model", Created: 1721347200, OwnedBy: "meta-llama"},
 }
 
-func (s *aiAgents) llmRoutes(r chi.Router) {
+func (s *sandboxedApps) llmRoutes(r chi.Router) {
 	r.Get("/api/settings/llm", s.handleGetLLMSettings)
 	r.Post("/api/settings/llm", s.handleSaveLLMKey)
 	r.Delete("/api/settings/llm/{service}", s.handleDeleteLLMKey)
@@ -81,7 +81,7 @@ func (s *aiAgents) llmRoutes(r chi.Router) {
 	r.HandleFunc("/sandbox/llm/v1/*", s.handleLLMProxy)
 }
 
-func (s *aiAgents) handleGetLLMSettings(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleGetLLMSettings(w http.ResponseWriter, r *http.Request) {
 	if s.Vault == nil {
 		helpers.WriteJSON(w, map[string]interface{}{"services": []string{}, "available": false})
 		return
@@ -106,7 +106,7 @@ func (s *aiAgents) handleGetLLMSettings(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-func (s *aiAgents) handleSaveLLMKey(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleSaveLLMKey(w http.ResponseWriter, r *http.Request) {
 	if s.Vault == nil {
 		helpers.WriteError(w, http.StatusServiceUnavailable, "Sandbox not available", "")
 		return
@@ -131,7 +131,7 @@ func (s *aiAgents) handleSaveLLMKey(w http.ResponseWriter, r *http.Request) {
 	helpers.WriteJSON(w, map[string]interface{}{"saved": true, "service": req.Service})
 }
 
-func (s *aiAgents) handleDeleteLLMKey(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleDeleteLLMKey(w http.ResponseWriter, r *http.Request) {
 	if s.Vault == nil {
 		helpers.WriteError(w, http.StatusServiceUnavailable, "Sandbox not available", "")
 		return
@@ -167,7 +167,7 @@ func llmCORSHeaders(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept")
 }
 
-func (s *aiAgents) handleLLMProxy(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleLLMProxy(w http.ResponseWriter, r *http.Request) {
 	llmCORSHeaders(w)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
@@ -186,7 +186,7 @@ func (s *aiAgents) handleLLMProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.sandboxManager() == nil {
+	if s.SandboxManager == nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		w.Write([]byte(`{"error":{"message":"Sandbox not initialized","code":"unavailable","type":"server_error"}}`))
@@ -247,7 +247,7 @@ func (s *aiAgents) handleLLMProxy(w http.ResponseWriter, r *http.Request) {
 	// injected too, by the proxy itself, from the same vault — so a model called
 	// through here and one called from inside a sandboxed app authenticate alike.
 	// No client-level timeout — streaming LLM responses can take many minutes.
-	resp, err := s.sandboxManager().MakeTrackedRequest(r.Context(), upReq)
+	resp, err := s.SandboxManager.MakeTrackedRequest(r.Context(), upReq)
 	if err != nil {
 		log.Printf("[llm-proxy] Upstream error: %v", err)
 		w.Header().Set("Content-Type", "application/json")
@@ -304,7 +304,7 @@ func (s *aiAgents) handleLLMProxy(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *aiAgents) handleLLMModels(w http.ResponseWriter, _ *http.Request) {
+func (s *sandboxedApps) handleLLMModels(w http.ResponseWriter, _ *http.Request) {
 	type modelsResponse struct {
 		Object string     `json:"object"`
 		Data   []llmModel `json:"data"`
@@ -321,7 +321,7 @@ func (s *aiAgents) handleLLMModels(w http.ResponseWriter, _ *http.Request) {
 // from a chat completion exchange and saves them to ai-memory.db.
 //
 // This runs in a goroutine — errors are logged, never surfaced to the client.
-func (s *aiAgents) captureConversation(req chatCompletionRequest, rawResponse []byte) {
+func (s *sandboxedApps) captureConversation(req chatCompletionRequest, rawResponse []byte) {
 	// 1. Derive a stable conversation ID from the first system + first user messages.
 	convID := deriveConversationID(req.Messages)
 	if convID == "" {
