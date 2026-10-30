@@ -44,11 +44,9 @@ fi
 echo ""
 echo "[2/2] Starting Identity Agent..."
 echo "      Go Core:     http://0.0.0.0:${PORT:-5050}/api/health"
-echo "      UI:          http://0.0.0.0:${PORT:-5050}/"
 echo "============================================"
 echo ""
 
 cd "$WORKSPACE"
 
-export FLUTTER_WEB_DIR="$WORKSPACE/identity_agent_ui/build/web"
 exec "$BINARY"
