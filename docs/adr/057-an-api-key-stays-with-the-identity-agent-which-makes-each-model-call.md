@@ -91,10 +91,11 @@ body passes to its brain"}`:
 | Status | When |
 |---|---|
 | 400 | The request names no lease or no call to make |
-| 403 | The lease is not open for this body, the AI agent may no longer act (revoked, its grant lapsed), its sign-in is not a key kept here, or the path, query or model is not one allowed above. A collection refused this way also says `"refused": true` |
+| 403 | The lease is not open for this body, the AI agent may no longer act (revoked, its grant lapsed), its sign-in is not a key kept here or has expired or was removed, or the path, query or model is not one allowed above. A start or a collection refused this way also says `"refused": true` |
+| 409 | A collection asks for part of the answer from before `from` it already collected: that part was let go and cannot be given again |
 | 413 | The call is larger than 3 MB, or unreadable |
 | 429 | The machine already holds as many calls for this AI agent as it may; it collects their answers first |
-| 503 | The provider the key is for cannot be reached from here right now |
+| 503 | The AI agent's sign-in, or what was lent to the run, cannot be read right now (a start refused this way also says `"refused": true`); or the provider the key is for cannot be reached from here right now |
 
 A call the Identity Agent no longer knows, for example after a restart, is
 answered 410. The body tells its brain the call failed, and the brain's
