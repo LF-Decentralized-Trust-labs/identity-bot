@@ -17,13 +17,15 @@
 // one gives is nobody's, and an error fails closed. An add-on's rules for a
 // machine acting for the owner can only make a route harder to reach.
 //
-// This is a safeguard and not a security boundary. An add-on is code the
-// app's maker chose to link into the same process, and such code can reach
-// anything in that process. The server hands this handle only to a caller
-// holding a token this module makes (internal/hostlink), so the handle is
-// reached through this package and no other way by mistake, and a program
-// that includes no add-on links none of it. Which code is trusted is decided
-// by whoever builds the app, by choosing its add-ons.
+// None of this is a security boundary. An add-on is code the app's maker
+// chose to link into the same process, and such code can reach anything in
+// that process. What the handle does is keep the core's secrets and owner-only
+// handlers off the add-on's ordinary path: it signs as the identity rather
+// than giving out the key, and it offers no core handler or router. The
+// server hands it out only through this package (internal/hostlink), so every
+// use is found here, and a program that includes no add-on links none of it.
+// Which code is trusted is decided by whoever builds the app, by choosing its
+// add-ons.
 //
 // Every method calls the server's own: nothing here is a second copy.
 package addon
