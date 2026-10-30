@@ -676,19 +676,40 @@ func (s *CoreServer) checkAnchors() (anchorCheck, error) {
 	heads := map[string]ChainHead{}
 	chains, cerr := s.anchoredChains()
 	for _, chain := range chains {
-		if h, err := chain.Heads(); err == nil {
-			for id, c := range h {
-				heads[id] = c
+		h, err := chain.Heads()
+		if err != nil {
+			// A chain that cannot be read is not one that holds: what it
+			// keeps cannot be counted or checked.
+			out.BrokenAt, out.Why = -1, "a chain kept beside the log cannot be read: "+err.Error()
+			return out, nil
+		}
+		for id, c := range h {
+			if _, twice := heads[id]; twice {
+				out.BrokenAt, out.Why = -1, "conversation "+id+" is kept by more than one add-on, so which one the anchors fix cannot be told"
+				return out, nil
 			}
+			heads[id] = c
 		}
 	}
+	// entryHash is the entry's hash from the one chain that holds it. One
+	// more than one chain answers for is refused, as conversationParty
+	// refuses a conversation held twice.
 	entryHash := func(id string, seq int) (string, error) {
+		var found []string
 		var err error
 		for _, chain := range chains {
-			var h string
-			if h, err = chain.EntryHash(id, seq); err == nil {
-				return h, nil
+			h, e := chain.EntryHash(id, seq)
+			if e != nil {
+				err = e
+				continue
 			}
+			found = append(found, h)
+		}
+		switch {
+		case len(found) == 1:
+			return found[0], nil
+		case len(found) > 1:
+			return "", errConversationHeldTwice
 		}
 		return "", err
 	}

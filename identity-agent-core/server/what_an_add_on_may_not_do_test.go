@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -288,5 +289,132 @@ func TestAPrefixOverAnOverlaysRouteStopsTheStart(t *testing.T) {
 		t.Fatal("a server started with an add-on's prefix over an overlay's route")
 	} else if !strings.Contains(err.Error(), "opens routes it does not serve") {
 		t.Fatalf("the start failed for another reason: %v", err)
+	}
+}
+
+// A message is filed under the conversation its sender named only where that
+// is known to be right: where no add-on keeps conversations it is the
+// sender's thread, as named; where an add-on fails to say, or two hold it, it
+// is filed under none.
+func TestAMessageIsFiledUnderNoConversationWhenItCannotBeTold(t *testing.T) {
+	s := &CoreServer{DataDir: t.TempDir()}
+	body := json.RawMessage(`{"conversation":"c_named"}`)
+	holds := func(id string) Addon {
+		return Addon{ID: id, ConversationParty: func(*CoreServer, string, string) (bool, bool, error) { return true, true, nil }}
+	}
+
+	onlyAddons(t)
+	if got := s.trafficConversation("Esender", body); got != "c_named" {
+		t.Fatalf("with no add-on keeping conversations, the message was filed under %q", got)
+	}
+	onlyAddons(t, Addon{ID: "fails", ConversationParty: func(*CoreServer, string, string) (bool, bool, error) {
+		return false, false, errors.New("the store is unreadable")
+	}})
+	if got := s.trafficConversation("Esender", body); got != "" {
+		t.Fatalf("an add-on that failed to say still had the message filed under %q", got)
+	}
+	onlyAddons(t, holds("one"), holds("two"))
+	if got := s.trafficConversation("Esender", body); got != "" {
+		t.Fatalf("a conversation two add-ons hold had the message filed under %q", got)
+	}
+}
+
+// A body two add-ons claim is nobody's, and an add-on's work on a caller it
+// does not claim reaches nothing: each works on a copy, and the caller takes
+// only what exactly one claims.
+func TestAProvenCallerTakesOnlyWhatOneAddOnClaims(t *testing.T) {
+	s := &CoreServer{DataDir: t.TempDir()}
+	r := httptest.NewRequest("POST", "/api/agent-host/messages", nil)
+	body := func(id string) Addon {
+		return Addon{ID: id, ResolveBodySignature: func(s *CoreServer, r *http.Request, cc permission.CallerContext) (permission.CallerContext, bool) {
+			cc.CallerAID = "E" + id
+			return cc, true
+		}}
+	}
+	onlyAddons(t, body("one"))
+	if cc, ok := s.resolveBodySignature(r, permission.CallerContext{Remote: true}); !ok || cc.CallerAID != "Eone" {
+		t.Fatalf("one add-on's body was not resolved: %+v %v", cc, ok)
+	}
+	onlyAddons(t, body("one"), body("two"))
+	if cc, ok := s.resolveBodySignature(r, permission.CallerContext{Remote: true}); ok || cc.CallerAID != "" {
+		t.Fatalf("a body two add-ons claim was taken as %q", cc.CallerAID)
+	}
+
+	meddles := Addon{ID: "meddles", EnrichProvenCaller: func(s *CoreServer, c *permission.CallerContext) bool {
+		c.Scopes = append(c.Scopes, "everything")
+		c.DelegationChain = []string{"Esomebody"}
+		return false
+	}}
+	claims := func(id string) Addon {
+		return Addon{ID: id, EnrichProvenCaller: func(s *CoreServer, c *permission.CallerContext) bool {
+			c.DelegationChain = []string{"E" + id}
+			return true
+		}}
+	}
+	proven := func() *permission.CallerContext {
+		return &permission.CallerContext{EnvelopeVerified: true, CallerAID: "Eproven", Scopes: []string{"read"}}
+	}
+	onlyAddons(t, meddles)
+	c := proven()
+	s.enrichProvenCaller(c)
+	if len(c.DelegationChain) != 0 || len(c.Scopes) != 1 {
+		t.Fatalf("an add-on that did not claim the caller changed it: %+v", c)
+	}
+	onlyAddons(t, meddles, claims("one"))
+	c = proven()
+	s.enrichProvenCaller(c)
+	if len(c.DelegationChain) != 1 || c.DelegationChain[0] != "Eone" || len(c.Scopes) != 1 {
+		t.Fatalf("the one add-on that claimed the caller did not have its way alone: %+v", c)
+	}
+	onlyAddons(t, claims("one"), claims("two"))
+	c = proven()
+	s.enrichProvenCaller(c)
+	if len(c.DelegationChain) != 0 {
+		t.Fatalf("a caller two add-ons claim was given %v", c.DelegationChain)
+	}
+}
+
+// failingChains are chains that cannot be read.
+type failingChains struct{}
+
+func (failingChains) Heads() (map[string]ChainHead, error) {
+	return nil, errors.New("the store is unreadable")
+}
+func (failingChains) EntryHash(string, int) (string, error) {
+	return "", errors.New("the store is unreadable")
+}
+
+// silentChains answer for entries without listing them among their heads.
+type silentChains struct{ fixedChains }
+
+func (silentChains) Heads() (map[string]ChainHead, error) { return map[string]ChainHead{}, nil }
+
+// The anchoring's check reports a chain it cannot read as broken, not as
+// nothing to check, and refuses a conversation entry more than one chain
+// answers for, as it refuses a conversation held twice.
+func TestTheAnchorCheckNeitherIgnoresNorGuessesAtChains(t *testing.T) {
+	s := recordWorld(t)
+	chain := fixedChains{"c1": {Seq: 2, Hash: "Ehead"}}
+	keeps := func(id string, c AnchoredChains) Addon {
+		return Addon{ID: id, AnchoredChains: func(*CoreServer) (AnchoredChains, error) { return c, nil }}
+	}
+	onlyAddons(t, keeps("one", chain))
+	writeRows(t, s, 1)
+	s.anchorRecord()
+	if got, err := s.checkAnchors(); err != nil || got.BrokenAt != 0 {
+		t.Fatalf("the anchors did not hold to begin with: %+v %v", got, err)
+	}
+
+	onlyAddons(t, keeps("one", chain), keeps("broken", failingChains{}))
+	if got, _ := s.checkAnchors(); got.BrokenAt == 0 || !strings.Contains(got.Why, "cannot be read") {
+		t.Fatalf("a chain that cannot be read was not reported: %+v", got)
+	}
+	onlyAddons(t, keeps("one", chain), keeps("two", chain))
+	if got, _ := s.checkAnchors(); got.BrokenAt == 0 || !strings.Contains(got.Why, "more than one add-on") {
+		t.Fatalf("a conversation two add-ons keep was not reported: %+v", got)
+	}
+	onlyAddons(t, keeps("one", chain), keeps("silent", silentChains{chain}))
+	if got, _ := s.checkAnchors(); got.BrokenAt == 0 {
+		t.Fatalf("an entry two chains answer for was checked against one of them: %+v", got)
 	}
 }

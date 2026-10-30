@@ -314,7 +314,7 @@ func (s *CoreServer) resolveBearerToken(r *http.Request, token string, cc permis
 	var found []permission.CallerContext
 	for _, a := range registeredAddons() {
 		if a.ResolveBearerToken != nil {
-			if resolved, ok := a.ResolveBearerToken(s, r, token, cc); ok {
+			if resolved, ok := a.ResolveBearerToken(s, r, token, copyCaller(cc)); ok {
 				found = append(found, resolved)
 			}
 		}
@@ -325,29 +325,61 @@ func (s *CoreServer) resolveBearerToken(r *http.Request, token string, cc permis
 	return found[0], true
 }
 
-// resolveBodySignature asks the add-ons who signed r with a body's key.
+// resolveBodySignature asks the add-ons who signed r with a body's key. A
+// body more than one add-on claims is nobody's, as a token is.
 func (s *CoreServer) resolveBodySignature(r *http.Request, cc permission.CallerContext) (permission.CallerContext, bool) {
+	var found []permission.CallerContext
 	for _, a := range registeredAddons() {
 		if a.ResolveBodySignature != nil {
-			if resolved, ok := a.ResolveBodySignature(s, r, cc); ok {
-				return resolved, true
+			if resolved, ok := a.ResolveBodySignature(s, r, copyCaller(cc)); ok {
+				found = append(found, resolved)
 			}
 		}
 	}
-	return cc, false
+	if len(found) != 1 {
+		return cc, false
+	}
+	return found[0], true
+}
+
+// copyCaller is cc with nothing shared, so what one add-on does to it reaches
+// neither the caller nor another add-on.
+func copyCaller(cc permission.CallerContext) permission.CallerContext {
+	cc.Scopes = append([]string(nil), cc.Scopes...)
+	cc.DelegationChain = append([]string(nil), cc.DelegationChain...)
+	if cc.ResourceConstraints != nil {
+		rc := make(map[string]interface{}, len(cc.ResourceConstraints))
+		for k, v := range cc.ResourceConstraints {
+			rc[k] = v
+		}
+		cc.ResourceConstraints = rc
+	}
+	return cc
 }
 
 // enrichProvenCaller gives a caller that proved its identifier with a
 // signed-request envelope, and has no lineage yet, what an add-on says that
-// identifier holds. An identifier no add-on recognises is granted nothing.
+// identifier holds. An identifier no add-on recognises, or more than one
+// does, is granted nothing.
 func (s *CoreServer) enrichProvenCaller(caller *permission.CallerContext) {
 	if !caller.EnvelopeVerified || caller.CallerAID == "" || len(caller.DelegationChain) > 0 {
 		return
 	}
+	// Each add-on works on a copy, so one that writes and then says the
+	// identifier is not its own changes nothing; the caller takes what one
+	// add-on, and only one, claims.
+	var found []permission.CallerContext
 	for _, a := range registeredAddons() {
-		if a.EnrichProvenCaller != nil && a.EnrichProvenCaller(s, caller) {
-			return
+		if a.EnrichProvenCaller == nil {
+			continue
 		}
+		c := copyCaller(*caller)
+		if a.EnrichProvenCaller(s, &c) {
+			found = append(found, c)
+		}
+	}
+	if len(found) == 1 {
+		*caller = found[0]
 	}
 }
 

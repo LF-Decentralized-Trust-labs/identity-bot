@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"sync"
@@ -398,13 +399,22 @@ func conversationOf(body json.RawMessage) string {
 
 // trafficConversation is the conversation a message from sender is filed
 // under. One held here is used only if the sender is a party to it; one this
-// agent does not hold is the sender's thread, filed as named.
+// agent does not hold is the sender's thread, filed as named, as it is where
+// no add-on keeps conversations. Where whether it is held cannot be told (an
+// add-on failed to say, or more than one holds it) the message is filed
+// under none, rather than under the conversation its sender named.
 func (s *CoreServer) trafficConversation(sender string, body json.RawMessage) string {
 	conv := conversationOf(body)
 	if conv == "" {
 		return ""
 	}
-	if held, _, err := s.conversationParty(conv, sender); err != nil || !held {
+	held, _, err := s.conversationParty(conv, sender)
+	switch {
+	case errors.Is(err, errNoConversations):
+		return conv
+	case err != nil:
+		return ""
+	case !held:
 		return conv
 	}
 	return s.partyConversation(conv, sender)
