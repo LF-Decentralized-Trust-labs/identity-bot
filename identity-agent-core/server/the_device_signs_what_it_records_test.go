@@ -741,7 +741,7 @@ func TestAnEventIsTakenUpEvenWhenWhatItAnchorsIsRefused(t *testing.T) {
 	if now, _, _ := c.requester.s.ownTip(owner.AID); now != tipSN+1 {
 		t.Fatal("the key-log event was not taken up")
 	}
-	notHeld := c.requester.s.anchoredNotHeld()
+	notHeld, _ := c.requester.s.anchoredNotHeld()
 	if len(notHeld) != 1 || notHeld[0].Interaction != saidOf(ixn) || len(notHeld[0].Anchors) != 1 ||
 		!strings.Contains(string(notHeld[0].Anchors[0]), said) || !strings.Contains(string(notHeld[0].Anchors[0]), second.RevSAID) {
 		t.Fatalf("what it anchors is not named: %+v", notHeld)

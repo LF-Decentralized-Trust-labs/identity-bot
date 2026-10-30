@@ -77,7 +77,7 @@ func newMessaging(t *testing.T) *messaging {
 	srv := httptest.NewServer(http.HandlerFunc(receiver.handleDIDCommInbound))
 	t.Cleanup(srv.Close)
 	didcommMu.Lock()
-	peers := sender.loadPeers()
+	peers := sender.peersInTest()
 	p := peers[receiverAID]
 	p.Endpoint = srv.URL
 	peers[receiverAID] = p
@@ -163,7 +163,7 @@ func TestAReceivedMessageIsKeptWithItsProofAndBothEndsLogIt(t *testing.T) {
 	defer capture.Close()
 	m.url = capture.URL
 	didcommMu.Lock()
-	peers := m.sender.loadPeers()
+	peers := m.sender.peersInTest()
 	p := peers[m.receiverAID]
 	p.Endpoint = capture.URL
 	peers[m.receiverAID] = p
@@ -287,7 +287,7 @@ func TestARotationNeitherBreaksAnOldMessageNorLetsTheRetiredKeyVouch(t *testing.
 	}
 	// The receiver holds the sender's keys vouched for by the first key.
 	didcommMu.Lock()
-	peers := m.receiver.loadPeers()
+	peers := m.receiver.peersInTest()
 	p := peers[m.senderAID]
 	sig, err := login.SignString(string(p.DID.SigningInput()), seed1)
 	if err != nil {
@@ -403,7 +403,7 @@ func TestRefusalsAreRecordedApartFromReplays(t *testing.T) {
 	}
 	did, _ := ks.DID()
 	didcommMu.Lock()
-	peers := m.receiver.loadPeers()
+	peers := m.receiver.peersInTest()
 	peers[second] = peerRecord{AID: second, DID: *did}
 	_ = m.receiver.savePeers(peers)
 	didcommMu.Unlock()
@@ -476,7 +476,7 @@ func TestOneSendersFloodOfRefusalsSilencesOnlyItself(t *testing.T) {
 	}
 	did, _ := ks.DID()
 	didcommMu.Lock()
-	peers := m.receiver.loadPeers()
+	peers := m.receiver.peersInTest()
 	peers[other] = peerRecord{AID: other, DID: *did}
 	_ = m.receiver.savePeers(peers)
 	didcommMu.Unlock()

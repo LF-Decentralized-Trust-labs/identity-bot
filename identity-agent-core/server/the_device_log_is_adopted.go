@@ -32,7 +32,6 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -508,20 +507,31 @@ type notHeldAnchor struct {
 // noteAnchoredNotHeld records an interaction taken up whose anchored events
 // this Identity Agent could not obtain.
 func (s *CoreServer) noteAnchoredNotHeld(said string, anchors []json.RawMessage) {
-	list := s.anchoredNotHeld()
-	list = append(list, notHeldAnchor{Interaction: said, Anchors: anchors})
-	if b, err := json.Marshal(list); err == nil {
-		_ = os.WriteFile(filepath.Join(s.DataDir, anchoredNotHeldFile), b, 0o600)
+	list, err := s.anchoredNotHeld()
+	if err == nil {
+		// Not over a list that cannot be read, which would lose every
+		// interaction it holds (readKeptRecord).
+		list = append(list, notHeldAnchor{Interaction: said, Anchors: anchors})
+		if b, merr := json.Marshal(list); merr == nil {
+			if werr := writeFileAtomic(filepath.Join(s.DataDir, anchoredNotHeldFile), b, 0o600); werr != nil {
+				log.Printf("[grants] %s could not be added to the interactions whose anchors are not held: %v", said, werr)
+			}
+		}
 	}
 	log.Printf("[grants] took up %s, signed on the device that holds the key; what it anchors (%s) is not held here", said, anchors)
 }
 
-func (s *CoreServer) anchoredNotHeld() []notHeldAnchor {
+// anchoredNotHeld is every interaction noted by noteAnchoredNotHeld. A list
+// that is there and cannot be read is an error, and nothing may be saved over
+// it.
+func (s *CoreServer) anchoredNotHeld() ([]notHeldAnchor, error) {
 	var list []notHeldAnchor
-	if b, err := os.ReadFile(filepath.Join(s.DataDir, anchoredNotHeldFile)); err == nil {
-		_ = json.Unmarshal(b, &list)
+	if _, err := readKeptRecord(filepath.Join(s.DataDir, anchoredNotHeldFile),
+		"the list of interactions whose anchored events are not held here",
+		"this Identity Agent cannot say which of them are missing", errRecordUnreadable, &list); err != nil {
+		return nil, err
 	}
-	return list
+	return list, nil
 }
 
 // settleAfterAdoption deals with every interaction that waited at a place the
@@ -743,7 +753,9 @@ func (s *CoreServer) keyLogReport() map[string]any {
 			"version without the identity's key, and the device that holds the key never had them. Nothing can be signed "+
 			"there until they are discarded or signed.", len(unsigned), unsigned)
 	}
-	if notHeld := s.anchoredNotHeld(); len(notHeld) > 0 {
+	if notHeld, err := s.anchoredNotHeld(); err != nil {
+		out["key_log_anchors_not_held_unreadable"] = err.Error()
+	} else if len(notHeld) > 0 {
 		out["key_log_anchors_not_held"] = notHeld
 	}
 	return out

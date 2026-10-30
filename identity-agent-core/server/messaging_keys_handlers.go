@@ -41,7 +41,7 @@ func (s *CoreServer) handlePrepareMessagingKeys(w http.ResponseWriter, r *http.R
 	}
 	ks, _, err := s.deriveMessagingKeys("")
 	if err != nil {
-		writeError(w, http.StatusConflict, "Could not derive this identity's messaging keys", err.Error())
+		writeError(w, statusForUnreadable(err, http.StatusConflict), "Could not derive this identity's messaging keys", err.Error())
 		return
 	}
 	kem, err := ks.KemPub.MarshalBinary()

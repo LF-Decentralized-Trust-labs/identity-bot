@@ -21,9 +21,10 @@ func (s *CoreServer) SendDIDCommMessage(fromAID, toAID, typ string, body json.Ra
 	if err != nil {
 		return "", 0, fmt.Errorf("sender keyset: %w", err)
 	}
-	didcommMu.Lock()
-	peer, ok := s.loadPeers()[toAID]
-	didcommMu.Unlock()
+	peer, ok, err := s.peerFor(toAID)
+	if err != nil {
+		return "", 0, err
+	}
 	if !ok {
 		// Intra-org convenience: if the recipient is one of this IA's own provisioned
 		// agents, auto-establish the relationship. Cross-IA peers must be registered.

@@ -4,12 +4,12 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sync"
 
 	"identity-agent-core/backup"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/login"
 	"identity-agent-core/secureenclave"
 )
@@ -66,9 +66,16 @@ func (s *CoreServer) witnessSigningKey() (seed []byte, aid string, err error) {
 		return nil, "", fmt.Errorf("no key material to witness with: %w", err)
 	}
 
+	// A record that cannot be read is refused, never taken for none: a new
+	// key here would be written over it and retire every receipt already
+	// issued (readKeptRecord).
 	var rec witnessKeyRecord
-	if data, rerr := os.ReadFile(s.witnessKeyPath()); rerr == nil &&
-		json.Unmarshal(data, &rec) == nil && rec.AID != "" {
+	found, rerr := readKeptRecord(s.witnessKeyPath(), "the record of this Identity Agent's witnessing key",
+		"this Identity Agent cannot witness", coretypes.ErrKeysUnavailable, &rec)
+	if rerr != nil {
+		return nil, "", rerr
+	}
+	if found && rec.AID != "" {
 		seed, derr := backup.DerivePairwiseSeed(rootSeed, rec.Index, 0)
 		if derr != nil {
 			return nil, "", fmt.Errorf("could not derive the witnessing key: %w", derr)
@@ -103,7 +110,7 @@ func (s *CoreServer) witnessSigningKey() (seed []byte, aid string, err error) {
 	}
 
 	data, _ := json.Marshal(witnessKeyRecord{AID: aid, Index: idx})
-	if werr := os.WriteFile(s.witnessKeyPath(), data, 0600); werr != nil {
+	if werr := writeFileAtomic(s.witnessKeyPath(), data, 0600); werr != nil {
 		return nil, "", fmt.Errorf("could not record the witnessing key: %w", werr)
 	}
 	return seed, aid, nil

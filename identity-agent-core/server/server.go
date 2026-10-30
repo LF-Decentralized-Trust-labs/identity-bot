@@ -1581,7 +1581,7 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 	// produces one that can prove who it is and can never be sent anything.
 	messagingKeys, keyIndex, err := s.deriveMessagingKeys("")
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not derive this identity's messaging keys", err.Error())
+		writeError(w, statusForUnreadable(err, http.StatusInternalServerError), "Could not derive this identity's messaging keys", err.Error())
 		return
 	}
 	kemPub, err := messagingKeys.KemPub.MarshalBinary()
@@ -1693,7 +1693,7 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 	// it advertises a keyset nobody holds the private half of, permanently, and
 	// no later event can take the commitment back.
 	if err := s.storeKeySetFor(result.AID, messagingKeys); err != nil {
-		writeError(w, statusForKeyError(err, http.StatusInternalServerError),
+		writeError(w, statusForUnreadable(err, http.StatusInternalServerError),
 			"The identity's messaging keys could not be saved", err.Error())
 		return
 	}

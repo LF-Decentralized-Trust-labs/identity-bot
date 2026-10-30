@@ -182,7 +182,7 @@ func (s *CoreServer) tryFirstContact(w http.ResponseWriter, r *http.Request,
 	}
 	rcpt, err := s.keySetFor(kid)
 	if err != nil {
-		jsonError(w, "recipient keyset error", statusForKeyError(err, http.StatusInternalServerError))
+		jsonError(w, "recipient keyset error", statusForUnreadable(err, http.StatusInternalServerError))
 		return true
 	}
 	jwm, err := didcomm.UnpackAuthcrypt(rcpt, did, env)
@@ -378,7 +378,10 @@ func (s *CoreServer) registerPeerFromVerifiedHistory(aid, oobiURL string) error 
 
 	didcommMu.Lock()
 	defer didcommMu.Unlock()
-	peers := s.loadPeers()
+	peers, err := s.loadPeers()
+	if err != nil {
+		return err
+	}
 	if _, exists := peers[aid]; exists {
 		return nil
 	}

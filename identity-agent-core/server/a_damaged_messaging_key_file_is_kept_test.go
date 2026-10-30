@@ -156,3 +156,13 @@ func TestADamagedKeyFileAnswers503(t *testing.T) {
 		t.Fatalf("the file was written over: %q", b)
 	}
 }
+
+// peersInTest is the peers list, for tests that set one up or look at it.
+// A damaged file reads as none here; the tests above check that case.
+func (s *CoreServer) peersInTest() map[string]peerRecord {
+	m, err := s.loadPeers()
+	if err != nil {
+		return map[string]peerRecord{}
+	}
+	return m
+}

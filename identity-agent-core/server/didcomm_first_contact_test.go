@@ -81,7 +81,7 @@ func TestAnAcceptedContactCanReachUsFirst(t *testing.T) {
 
 	// And they are now a peer, which is what makes the next envelope land.
 	didcommMu.Lock()
-	peer, ok := s.loadPeers()["EKNOWN"]
+	peer, ok := s.peersInTest()["EKNOWN"]
 	didcommMu.Unlock()
 	if !ok {
 		t.Fatal("resolution reported success and registered nothing")

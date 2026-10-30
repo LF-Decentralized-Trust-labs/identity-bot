@@ -250,7 +250,7 @@ func (s *CoreServer) handleAssetNotify(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// The device is told plainly, because it is the only party that knows
 		// this needed saying and it has to decide whether to try again.
-		writeError(w, statusForKeyError(err, http.StatusBadGateway), "The message was not delivered", err.Error())
+		writeError(w, statusForUnreadable(err, http.StatusBadGateway), "The message was not delivered", err.Error())
 		return
 	}
 	if status < 200 || status > 299 {
@@ -286,9 +286,10 @@ func (s *CoreServer) rememberPeerAt(aid, agentURL string) error {
 		return fmt.Errorf("an agent address must be an http(s) URL")
 	}
 
-	didcommMu.Lock()
-	_, already := s.loadPeers()[aid]
-	didcommMu.Unlock()
+	_, already, err := s.peerFor(aid)
+	if err != nil {
+		return err
+	}
 	if already {
 		return nil
 	}
@@ -338,7 +339,10 @@ func (s *CoreServer) rememberPeerAt(aid, agentURL string) error {
 
 	didcommMu.Lock()
 	defer didcommMu.Unlock()
-	peers := s.loadPeers()
+	peers, err := s.loadPeers()
+	if err != nil {
+		return err
+	}
 	peers[aid] = peerRecord{
 		AID: aid, DID: did,
 		Endpoint: canonicalPeerEndpoint(base),

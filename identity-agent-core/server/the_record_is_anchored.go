@@ -123,7 +123,9 @@ type recordIdentityRecord struct {
 // found is false where there is none.
 func (s *CoreServer) holdTheRecord() (aid string, pending, found bool, release func()) {
 	s.record.mu.Lock()
-	rec, ok := s.loadRecordIdentity()
+	// Read only, so an unreadable record is reported as none to the caller;
+	// readKeptRecord has said why in the log, and nothing is written here.
+	rec, ok, _ := s.loadRecordIdentity()
 	return rec.AID, rec.Pending, ok, s.record.mu.Unlock
 }
 
@@ -250,13 +252,23 @@ func (s *CoreServer) recordIdentityPath() string {
 	return filepath.Join(s.DataDir, recordIdentityFile)
 }
 
-func (s *CoreServer) loadRecordIdentity() (recordIdentityRecord, bool) {
+// loadRecordIdentity reads the record identity; found is false when there is
+// none yet. A record that is there and cannot be read is an error and never
+// taken for none, since the next anchoring would make a new record identity
+// and write it over the one this identity's key log already approved
+// (readKeptRecord).
+func (s *CoreServer) loadRecordIdentity() (recordIdentityRecord, bool, error) {
 	var rec recordIdentityRecord
-	b, err := os.ReadFile(s.recordIdentityPath())
-	if err != nil || json.Unmarshal(b, &rec) != nil || rec.AID == "" {
-		return rec, false
+	found, err := readKeptRecord(s.recordIdentityPath(), "the record identity's record",
+		"this Identity Agent cannot anchor its record", errRecordUnreadable, &rec)
+	if err != nil {
+		return rec, false, err
 	}
-	return rec, true
+	if found && rec.AID == "" {
+		return rec, false, fmt.Errorf("%w: the record identity's record names no identifier; restore it from a backup",
+			errRecordUnreadable)
+	}
+	return rec, found, nil
 }
 
 func (s *CoreServer) saveRecordIdentity(rec recordIdentityRecord) error {
@@ -309,8 +321,8 @@ func (s *CoreServer) recordKeys(index int) ([]byte, string, string, error) {
 // a stop part way through making it: kept if its inception reached the
 // database, removed if it did not.
 func (s *CoreServer) repairRecordIdentity() {
-	rec, ok := s.loadRecordIdentity()
-	if !ok || !rec.Pending || s.DataStore == nil {
+	rec, ok, err := s.loadRecordIdentity()
+	if err != nil || !ok || !rec.Pending || s.DataStore == nil {
 		return
 	}
 	events, _ := s.DataStore.GetEvents(rec.AID)
@@ -330,9 +342,11 @@ func (s *CoreServer) repairRecordIdentity() {
 // time it is needed. Callers hold s.record.mu.
 func (s *CoreServer) recordIdentity() (recordIdentityRecord, []byte, error) {
 	s.repairRecordIdentity()
-	if rec, ok := s.loadRecordIdentity(); ok {
-		seed, _, _, err := s.recordKeys(rec.Index)
-		return rec, seed, err
+	if held, ok, err := s.loadRecordIdentity(); err != nil {
+		return recordIdentityRecord{}, nil, err
+	} else if ok {
+		seed, _, _, err := s.recordKeys(held.Index)
+		return held, seed, err
 	}
 	keeper, ok := s.KeriDriver.(drivers.KELKeeper)
 	if !ok || s.DataStore == nil {
@@ -436,8 +450,8 @@ func (s *CoreServer) delegationRecords(delegator string, k drivers.KELKeep, pub 
 // engine after a restart, so the next anchoring chains to the last one kept.
 func (s *CoreServer) reloadRecordIdentity() {
 	s.repairRecordIdentity()
-	rec, ok := s.loadRecordIdentity()
-	if !ok || s.KeriDriver == nil || s.DataStore == nil {
+	rec, ok, err := s.loadRecordIdentity()
+	if err != nil || !ok || s.KeriDriver == nil || s.DataStore == nil {
 		return
 	}
 	events, err := s.DataStore.GetEvents(rec.AID)
@@ -730,7 +744,11 @@ func (s *CoreServer) checkAnchors() (anchorCheck, error) {
 	if err != nil {
 		return out, err
 	}
-	rec, made := s.loadRecordIdentity()
+	rec, made, err := s.loadRecordIdentity()
+	if err != nil {
+		out.BrokenAt, out.Why = -1, "the record identity's record here cannot be read; restore it from a backup"
+		return unanchored(0, map[string]int{})
+	}
 	if !made || rec.Pending {
 		latest, err := s.DataStore.GetLatestRecordAnchor()
 		if err != nil {

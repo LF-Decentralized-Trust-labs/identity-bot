@@ -41,7 +41,7 @@ func TestAnAppsRequestReachesAHostedAgentWithoutTheMiddleReadingIt(t *testing.T)
 	defer front.Close()
 
 	didcommMu.Lock()
-	peers := caller.loadPeers()
+	peers := caller.peersInTest()
 	p := peers[responderAID]
 	p.Endpoint = front.URL + "/didcomm"
 	peers[responderAID] = p

@@ -105,7 +105,7 @@ func TestAStrangerCarryingProofGetsInFrontOfTheOwner(t *testing.T) {
 	if rec.Status == "accepted" {
 		t.Fatalf("proving a name was treated as being agreed to: %q", rec.Status)
 	}
-	if _, known := receiver.loadPeers()[strangerAID]; known {
+	if _, known := receiver.peersInTest()[strangerAID]; known {
 		t.Fatal("a stranger was registered as a peer before the owner agreed")
 	}
 }
@@ -254,7 +254,7 @@ func TestApprovingAStrangerEstablishesThemFromWhatWasVerified(t *testing.T) {
 		t.Fatalf("approving did not establish the peer: %v", err)
 	}
 
-	peer, known := s.loadPeers()[strangerAID]
+	peer, known := s.peersInTest()[strangerAID]
 	if !known {
 		t.Fatal("an approved stranger was not established as a peer")
 	}
@@ -280,7 +280,7 @@ func TestAnApprovedStrangerWithNoAddressIsNotEstablished(t *testing.T) {
 	if err := s.registerPeerFromVerifiedHistory(strangerAID, ""); err == nil {
 		t.Fatal("a peer was recorded with no address to reach it at")
 	}
-	if _, known := s.loadPeers()[strangerAID]; known {
+	if _, known := s.peersInTest()[strangerAID]; known {
 		t.Fatal("a peer was recorded despite having no address")
 	}
 }

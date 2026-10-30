@@ -51,7 +51,7 @@ func twoAgents(t *testing.T) (caller *CoreServer, callerAID string, responder *C
 			t.Fatal(err)
 		}
 		didcommMu.Lock()
-		peers := pair.side.loadPeers()
+		peers := pair.side.peersInTest()
 		peers[pair.peer] = peerRecord{DID: *did}
 		_ = pair.side.savePeers(peers)
 		didcommMu.Unlock()
@@ -92,7 +92,7 @@ func TestARequestGoesOutSealedAndComesBack(t *testing.T) {
 
 	// The caller knows where the responder lives.
 	didcommMu.Lock()
-	peers := caller.loadPeers()
+	peers := caller.peersInTest()
 	p := peers[responderAID]
 	// The "/didcomm" suffix is what rememberPeerAt stores. Building it by hand
 	// without one is what let a broken URL through unnoticed.
@@ -143,7 +143,7 @@ func TestAnAnswerFromSomebodyElseIsRefused(t *testing.T) {
 	defer front.Close()
 
 	didcommMu.Lock()
-	peers := caller.loadPeers()
+	peers := caller.peersInTest()
 	p := peers[responderAID]
 	// The "/didcomm" suffix is what rememberPeerAt stores. Building it by hand
 	// without one is what let a broken URL through unnoticed.

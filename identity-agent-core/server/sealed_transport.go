@@ -75,7 +75,7 @@ func (s *CoreServer) handleSealedTransport(w http.ResponseWriter, r *http.Reques
 	// agent do expensive work on demand.
 	senderDID, keys, err := s.sealedParties(&env)
 	if err != nil {
-		writeSealedError(w, statusForKeyError(err, http.StatusForbidden), err.Error())
+		writeSealedError(w, statusForUnreadable(err, http.StatusForbidden), err.Error())
 		return
 	}
 
@@ -245,16 +245,17 @@ func (s *CoreServer) sealedParties(env *didcomm.Envelope) (*didcomm.DID, *didcom
 	if skid == "" {
 		return nil, nil, fmt.Errorf("this envelope does not say who it is from")
 	}
-	didcommMu.Lock()
-	peer, known := s.loadPeers()[skid]
-	didcommMu.Unlock()
+	peer, known, err := s.peerFor(skid)
+	if err != nil {
+		return nil, nil, err
+	}
 	if !known {
 		// A sender the owner has already accepted as a contact is finishing a
 		// step the owner authorised. A stranger still gets nothing.
 		if resolved, _ := s.resolveKnownContactAsPeer(skid); resolved {
-			didcommMu.Lock()
-			peer, known = s.loadPeers()[skid]
-			didcommMu.Unlock()
+			if peer, known, err = s.peerFor(skid); err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 	if !known {
