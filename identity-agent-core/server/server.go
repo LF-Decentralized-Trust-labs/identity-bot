@@ -36,7 +36,6 @@ import (
 	"identity-agent-core/provider"
 	"identity-agent-core/recovery"
 	"identity-agent-core/relay"
-	"identity-agent-core/sandbox"
 	"identity-agent-core/schemas"
 	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
@@ -91,12 +90,11 @@ type CoreServer struct {
 	Vault *vault.CredentialVault
 	// ActivityLog is the signed record of who did what, under whose
 	// authority, and of the governance decisions taken about them.
-	ActivityLog    *activitylog.Log
-	SandboxManager *sandbox.Manager
-	EventHub       *EventHub
-	StartTime      time.Time
-	Port           int
-	DataDir        string
+	ActivityLog *activitylog.Log
+	EventHub    *EventHub
+	StartTime   time.Time
+	Port        int
+	DataDir     string
 	// registeredKeys answers for identities that published their key here
 	// through /_register, each one proved by its key log. See public_didwebs.go.
 	registeredKeysOnce sync.Once
@@ -491,13 +489,6 @@ func New(cfg Config) (*CoreServer, error) {
 		},
 	})
 
-	// Plug-in manifests directory. Defaults to ./manifests (relative to the
-	// working dir); MANIFESTS_DIR overrides it so a service-managed agent (whose
-	// working dir it doesn't control) can point at an absolute plug-in location.
-	manifestsDir := filepath.Join(".", "manifests")
-	if d := os.Getenv("MANIFESTS_DIR"); d != "" {
-		manifestsDir = d
-	}
 	// The credential vault stays encrypted at rest and unlocks lazily, once
 	// the identity's root seed is there to derive its key from.
 	s.Vault = vault.NewCredentialVault(cfg.DataDir)
@@ -521,24 +512,6 @@ func New(cfg Config) (*CoreServer, error) {
 			log.Printf("[identity-agent-core] could not record where the log's signed chain begins: %v", err)
 		}
 	}
-	sbxMgr, err := sandbox.NewManager(sandbox.ManagerConfig{
-		DataDir:      cfg.DataDir,
-		ManifestsDir: manifestsDir,
-		Log:          s.ActivityLog,
-		Vault:        s.Vault,
-	})
-	if err != nil {
-		log.Printf("[identity-agent-core] Sandbox manager init failed (non-fatal): %v", err)
-	} else {
-		s.SandboxManager = sbxMgr
-		// The endpoint uses the structural authorizer by default (host-control never
-		// remote; a remote caller must hold the capability in its grant). An overlay
-		// may inject a richer authorizer via SetAuthorizer.
-		if startErr := s.SandboxManager.Start(); startErr != nil {
-			log.Printf("[identity-agent-core] Sandbox manager start failed (non-fatal): %v", startErr)
-		}
-	}
-
 	if err := s.initLoginHandler(); err != nil {
 		log.Printf("[identity-agent-core] login handler init failed (non-fatal): %v", err)
 	}
@@ -829,9 +802,9 @@ func (s *CoreServer) Stop() {
 		s.UpdateService.Stop()
 	}
 
-	if s.SandboxManager != nil {
-		s.SandboxManager.Stop()
-	}
+	// What add-ons started when the server was made ends here, before the
+	// activity log they write to closes.
+	s.stopAddons()
 	if s.ActivityLog != nil {
 		s.ActivityLog.Close()
 	}
@@ -1177,6 +1150,8 @@ func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
 		s.mountProviderRoutes(r)
 		s.mountSigningRequestRoutes(r)
 		s.mountUpdateRoutes(r)
+		// The activity log is the core's: every build serves it.
+		s.auditRoutes(r)
 
 		// Add-ons' routes, then overlay-registered routes (MountExtraRoutes)
 		// mount last, under /api.

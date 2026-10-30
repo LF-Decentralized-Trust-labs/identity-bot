@@ -64,13 +64,12 @@ type Host interface {
 	GrantsHeldBy(agentAID string, usableOnly bool) []store.CredentialRecord
 	HandleDIDCommInbound(w http.ResponseWriter, r *http.Request)
 	HandleGrantController(w http.ResponseWriter, r *http.Request)
-	HandleImportCapabilityPack(w http.ResponseWriter, r *http.Request)
-	HandleListCapabilityRegistry(w http.ResponseWriter, r *http.Request)
 	HasBrowserSession(r *http.Request) bool
 	HoldTheRecord() (string, bool, bool, func())
 	IdentitySigningSeed() ([]byte, error)
 	InBackground(fn func(ctx context.Context))
 	InitAssetHandler() error
+	IsLiveBrowserSession(token string) bool
 	IsVaultEntry(name string) bool
 	IssueAssetCredential(kind *schemas.AssetGrant, holder string, issuer string, claims map[string]interface{}, expiry string, by coretypes.Authority) (string, error)
 	IssueCapabilityGrant(agent *asset.Asset, by coretypes.Authority) (string, error)
@@ -86,6 +85,7 @@ type Host interface {
 	ProvedSender(n store.Notification) (*didcomm.JWM, string, error)
 	RecordDeliveryOnce(cc permission.CallerContext, messageID string, host string)
 	RequireOwner(w http.ResponseWriter, r *http.Request) bool
+	ResolveBearerToken(r *http.Request, token string, cc permission.CallerContext) (permission.CallerContext, bool)
 	ResolveCaller(r *http.Request) permission.CallerContext
 	RevokeController(aid string) error
 	Router() chi.Router
@@ -115,6 +115,7 @@ type Helpers interface {
 	AnchorTick() time.Duration
 	ApplyCallerWhy(r *http.Request, cc *permission.CallerContext)
 	AwaitingPhrase(pending bool) string
+	BearerFrom(r *http.Request) string
 	BearerToken(r *http.Request) string
 	CanonicalControllerRequest(controllerAID string, target string, method string, path string, timestamp string, authenticated authprovider.Result, body []byte) string
 	CanonicalOwnerRequest(target string, method string, path string, timestamp string, body []byte) string
@@ -215,5 +216,6 @@ type Fixtures interface {
 	Waiting(t coretypes.TB, s *server.CoreServer) []store.SigningRequest
 	WithController(r *http.Request, g server.ControllerGrant) *http.Request
 	WithOwnerSecret(s *server.CoreServer, secret string) *server.CoreServer
+	UseAssetHandler(s *server.CoreServer, ah *asset.Handler)
 	WithdrawWith(t coretypes.TB, s *server.CoreServer, seed []byte)
 }

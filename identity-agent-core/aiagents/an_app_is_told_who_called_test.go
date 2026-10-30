@@ -14,6 +14,7 @@ import (
 
 	"identity-agent-core/appcall"
 	"identity-agent-core/sandbox"
+	"identity-agent-core/sandboxedapps"
 	"identity-agent-core/server"
 	"identity-agent-core/store"
 )
@@ -61,7 +62,7 @@ func withNotesApp(t *testing.T, s *server.CoreServer) *notesApp {
 	if err := m.LoadManifests(); err != nil {
 		t.Fatal(err)
 	}
-	s.SandboxManager = m
+	sandboxedapps.UseManager(s, m)
 
 	key, err := m.AppCallKey("notes")
 	if err != nil {

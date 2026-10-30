@@ -1,4 +1,4 @@
-package server
+package sandboxedapps
 
 import (
 	"encoding/json"
@@ -14,7 +14,7 @@ import (
 	"identity-agent-core/sandbox"
 )
 
-func (s *CoreServer) traceRoutes(r chi.Router) {
+func (s *sandboxedApps) traceRoutes(r chi.Router) {
 	r.Get("/dev/trace", s.handleTraceViewer)
 	r.Route("/api/trace", func(r chi.Router) {
 		r.Get("/", s.handleTraceList)
@@ -32,24 +32,24 @@ func (s *CoreServer) traceRoutes(r chi.Router) {
 	r.Get("/ws/trace", s.handleTraceWebSocket)
 }
 
-func (s *CoreServer) getTracer() *sandbox.Tracer {
+func (s *sandboxedApps) getTracer() *sandbox.Tracer {
 	if s.SandboxManager == nil {
 		return nil
 	}
 	return s.SandboxManager.Tracer()
 }
 
-func (s *CoreServer) handleTraceViewer(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleTraceViewer(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.WriteHeader(200)
 	fmt.Fprint(w, traceViewerHTML)
 }
 
-func (s *CoreServer) handleTraceList(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleTraceList(w http.ResponseWriter, r *http.Request) {
 	tracer := s.getTracer()
 	if tracer == nil {
-		jsonError(w, "Tracer not available", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Tracer not available", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -69,10 +69,10 @@ func (s *CoreServer) handleTraceList(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *CoreServer) handleTraceEnable(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleTraceEnable(w http.ResponseWriter, r *http.Request) {
 	tracer := s.getTracer()
 	if tracer == nil {
-		jsonError(w, "Tracer not available", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Tracer not available", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -82,10 +82,10 @@ func (s *CoreServer) handleTraceEnable(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"enabled": true})
 }
 
-func (s *CoreServer) handleTraceDisable(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleTraceDisable(w http.ResponseWriter, r *http.Request) {
 	tracer := s.getTracer()
 	if tracer == nil {
-		jsonError(w, "Tracer not available", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Tracer not available", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -95,10 +95,10 @@ func (s *CoreServer) handleTraceDisable(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(map[string]interface{}{"enabled": false})
 }
 
-func (s *CoreServer) handleTraceStatus(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleTraceStatus(w http.ResponseWriter, r *http.Request) {
 	tracer := s.getTracer()
 	if tracer == nil {
-		jsonError(w, "Tracer not available", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Tracer not available", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -120,10 +120,10 @@ func (s *CoreServer) handleTraceStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *CoreServer) handleTraceClear(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleTraceClear(w http.ResponseWriter, r *http.Request) {
 	tracer := s.getTracer()
 	if tracer == nil {
-		jsonError(w, "Tracer not available", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Tracer not available", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -132,10 +132,10 @@ func (s *CoreServer) handleTraceClear(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"cleared": true})
 }
 
-func (s *CoreServer) handleTraceEntries(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleTraceEntries(w http.ResponseWriter, r *http.Request) {
 	tracer := s.getTracer()
 	if tracer == nil {
-		jsonError(w, "Tracer not available", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Tracer not available", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -161,10 +161,10 @@ func (s *CoreServer) handleTraceEntries(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-func (s *CoreServer) handleTraceStartSession(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleTraceStartSession(w http.ResponseWriter, r *http.Request) {
 	tracer := s.getTracer()
 	if tracer == nil {
-		jsonError(w, "Tracer not available", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Tracer not available", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -174,7 +174,7 @@ func (s *CoreServer) handleTraceStartSession(w http.ResponseWriter, r *http.Requ
 		StepThrough bool   `json:"step_through"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		jsonError(w, "Invalid request body", http.StatusBadRequest)
+		helpers.JSONError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -187,17 +187,17 @@ func (s *CoreServer) handleTraceStartSession(w http.ResponseWriter, r *http.Requ
 	})
 }
 
-func (s *CoreServer) handleTraceGetSession(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleTraceGetSession(w http.ResponseWriter, r *http.Request) {
 	tracer := s.getTracer()
 	if tracer == nil {
-		jsonError(w, "Tracer not available", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Tracer not available", http.StatusServiceUnavailable)
 		return
 	}
 
 	traceID := chi.URLParam(r, "traceId")
 	session := tracer.GetSession(traceID)
 	if session == nil {
-		jsonError(w, "Session not found", http.StatusNotFound)
+		helpers.JSONError(w, "Session not found", http.StatusNotFound)
 		return
 	}
 
@@ -205,10 +205,10 @@ func (s *CoreServer) handleTraceGetSession(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(session)
 }
 
-func (s *CoreServer) handleTraceEndSession(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleTraceEndSession(w http.ResponseWriter, r *http.Request) {
 	tracer := s.getTracer()
 	if tracer == nil {
-		jsonError(w, "Tracer not available", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Tracer not available", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -219,10 +219,10 @@ func (s *CoreServer) handleTraceEndSession(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(map[string]interface{}{"ended": true, "trace_id": traceID})
 }
 
-func (s *CoreServer) handleTraceStepContinue(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleTraceStepContinue(w http.ResponseWriter, r *http.Request) {
 	tracer := s.getTracer()
 	if tracer == nil {
-		jsonError(w, "Tracer not available", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Tracer not available", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -233,10 +233,10 @@ func (s *CoreServer) handleTraceStepContinue(w http.ResponseWriter, r *http.Requ
 	json.NewEncoder(w).Encode(map[string]interface{}{"continued": true, "trace_id": traceID})
 }
 
-func (s *CoreServer) handleTraceSetStepMode(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleTraceSetStepMode(w http.ResponseWriter, r *http.Request) {
 	tracer := s.getTracer()
 	if tracer == nil {
-		jsonError(w, "Tracer not available", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Tracer not available", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -244,7 +244,7 @@ func (s *CoreServer) handleTraceSetStepMode(w http.ResponseWriter, r *http.Reque
 		Enabled bool `json:"enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		jsonError(w, "Invalid request body", http.StatusBadRequest)
+		helpers.JSONError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -253,7 +253,7 @@ func (s *CoreServer) handleTraceSetStepMode(w http.ResponseWriter, r *http.Reque
 	json.NewEncoder(w).Encode(map[string]interface{}{"step_mode": req.Enabled})
 }
 
-func (s *CoreServer) handleTraceWebSocket(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleTraceWebSocket(w http.ResponseWriter, r *http.Request) {
 	tracer := s.getTracer()
 	if tracer == nil {
 		http.Error(w, "Tracer not available", http.StatusServiceUnavailable)

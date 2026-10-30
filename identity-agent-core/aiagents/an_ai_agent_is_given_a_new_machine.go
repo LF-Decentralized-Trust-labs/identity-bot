@@ -476,10 +476,10 @@ func (s *aiAgents) theProvider(w http.ResponseWriter, r *http.Request) (agentbod
 	if err := s.mayBeLent(a, cc, "work making machines"); err != nil {
 		return refuse(err.Error())
 	}
-	if s.SandboxManager == nil {
+	if s.sandboxManager() == nil {
 		return refuse("this Identity Agent has no gateway to check the grant against")
 	}
-	if ok, why := s.SandboxManager.MayServe(cc, capabilityProvideMachines); !ok {
+	if ok, why := s.sandboxManager().MayServe(cc, capabilityProvideMachines); !ok {
 		return refuse(why)
 	}
 	return b, a, true

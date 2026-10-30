@@ -853,3 +853,6 @@ func anchorAtLeastEvery(t coretypes.TB, d time.Duration) {
 	anchorInterval = d
 	t.Cleanup(func() { anchorInterval = was })
 }
+
+// useAssetHandler gives s the asset handler ah.
+func useAssetHandler(s *CoreServer, ah *asset.Handler) { s.assetHandler = ah }

@@ -20,6 +20,7 @@ import (
 	"identity-agent-core/conversation"
 	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/sandbox"
+	"identity-agent-core/sandboxedapps"
 	"identity-agent-core/server"
 )
 
@@ -49,7 +50,7 @@ func newTalkWorld(t *testing.T, caps ...string) *talkWorld {
 		t.Fatal(err)
 	}
 	t.Cleanup(mgr.Stop)
-	s.SandboxManager = mgr
+	sandboxedapps.UseManager(s, mgr)
 	w.a = w.provision(t, "Desk assistant", caps)
 	w.b = w.provision(t, "Build server", caps)
 	w.hostA, w.machineA = w.enrolBody(t, w.a)

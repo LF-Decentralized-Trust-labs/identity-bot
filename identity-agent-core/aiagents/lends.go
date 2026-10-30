@@ -154,7 +154,7 @@ func (s *aiAgents) recordLapsedLends() {
 // at its service; every withdrawal a service could not be reached for is
 // tried again. why says what prompted it.
 func (s *aiAgents) endLendsNoLongerGranted(why string) {
-	if s.SandboxManager == nil || s.AssetHandler() == nil {
+	if s.sandboxManager() == nil || s.AssetHandler() == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

@@ -1,4 +1,4 @@
-package server
+package sandboxedapps
 
 import (
 	"encoding/json"
@@ -14,6 +14,7 @@ import (
 
 	"identity-agent-core/appcall"
 	"identity-agent-core/permission"
+	"identity-agent-core/server"
 )
 
 // handleAppDisplayProxy reverse-proxies browser requests to the container's
@@ -26,7 +27,7 @@ import (
 // Agent owns all data and the container is fully ephemeral. Any chat app
 // (Open WebUI, LibreChat, etc.) gets its inbox populated from ai-memory.db
 // without any app-specific integration beyond the API schema document.
-func (s *CoreServer) handleAppDisplayProxy(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleAppDisplayProxy(w http.ResponseWriter, r *http.Request) {
 	appID := chi.URLParam(r, "app_id")
 	if appID == "" {
 		http.Error(w, "Missing app_id", http.StatusBadRequest)
@@ -117,7 +118,7 @@ func (s *CoreServer) handleAppDisplayProxy(w http.ResponseWriter, r *http.Reques
 
 // isAConversationRead reports whether method and path are one of the
 // intercepted reads of ai-memory conversations.
-func (s *CoreServer) isAConversationRead(method, p string) bool {
+func (s *sandboxedApps) isAConversationRead(method, p string) bool {
 	if method != http.MethodGet {
 		return false
 	}
@@ -127,8 +128,8 @@ func (s *CoreServer) isAConversationRead(method, p string) bool {
 // mayReadTheOwnersConversations is the conversation read rule for this route:
 // the gate admitted the request as the owner's, or as a controller's acting
 // for them. A caller admitted only for holding a scope is neither.
-func (s *CoreServer) mayReadTheOwnersConversations(r *http.Request) bool {
-	return s.isOwnerOrItsController(r)
+func (s *sandboxedApps) mayReadTheOwnersConversations(r *http.Request) bool {
+	return s.IsOwnerOrItsController(r)
 }
 
 // isACapabilityCall reports whether path, as an app's server would read it,
@@ -164,10 +165,10 @@ func cleanedKeepingTheSlash(p string) string {
 //
 // An Authorization header that is not an Identity Agent credential is the
 // app's own login and is left alone.
-func (s *CoreServer) stripWhatOnlyTheIdentityAgentReads(r *http.Request) {
+func (s *sandboxedApps) stripWhatOnlyTheIdentityAgentReads(r *http.Request) {
 	// Compared with underscores read as hyphens: some servers an app runs
 	// behind treat X_IA_Call_Kind and X-IA-Call-Kind as one header.
-	secret := http.CanonicalHeaderKey(LocalOwnerSecretHeader)
+	secret := http.CanonicalHeaderKey(server.LocalOwnerSecretHeader)
 	for name := range r.Header {
 		n := http.CanonicalHeaderKey(strings.ReplaceAll(name, "_", "-"))
 		if strings.HasPrefix(n, "X-Ia-") || appcall.IsCallHeader(n) || n == secret {
@@ -176,7 +177,7 @@ func (s *CoreServer) stripWhatOnlyTheIdentityAgentReads(r *http.Request) {
 	}
 	// Both readings the Identity Agent itself uses: a token, and a browser
 	// session, whose prefix is matched without case.
-	for _, tok := range []string{bearerFrom(r), bearerToken(r)} {
+	for _, tok := range []string{helpers.BearerFrom(r), helpers.BearerToken(r)} {
 		if tok != "" && s.isAnIdentityAgentCredential(r, strings.TrimSpace(tok)) {
 			r.Header.Del("Authorization")
 			break
@@ -186,13 +187,13 @@ func (s *CoreServer) stripWhatOnlyTheIdentityAgentReads(r *http.Request) {
 
 // isAnIdentityAgentCredential reports whether tok is a token this Identity
 // Agent issued, or a live browser session.
-func (s *CoreServer) isAnIdentityAgentCredential(r *http.Request, tok string) bool {
-	if s.BrowserSessions != nil && s.BrowserSessions.valid(tok) {
+func (s *sandboxedApps) isAnIdentityAgentCredential(r *http.Request, tok string) bool {
+	if s.IsLiveBrowserSession(tok) {
 		return true
 	}
 	// A token is this Identity Agent's when an add-on that issues tokens
 	// recognises it.
-	_, issued := s.resolveBearerToken(r, tok, permission.CallerContext{})
+	_, issued := s.ResolveBearerToken(r, tok, permission.CallerContext{})
 	return issued
 }
 
@@ -203,7 +204,7 @@ func (s *CoreServer) isAnIdentityAgentCredential(r *http.Request, tok string) bo
 
 // serveConversationList responds to GET /api/v1/chats with the conversation
 // list in Open WebUI's expected format.
-func (s *CoreServer) serveConversationList(w http.ResponseWriter, _ *http.Request) {
+func (s *sandboxedApps) serveConversationList(w http.ResponseWriter, _ *http.Request) {
 	convs, err := s.AIMemory.GetConversations(false)
 	if err != nil {
 		log.Printf("[display-proxy] Failed to list conversations: %v", err)
@@ -237,7 +238,7 @@ func (s *CoreServer) serveConversationList(w http.ResponseWriter, _ *http.Reques
 
 // serveConversationDetail responds to GET /api/v1/chats/{id} with the full
 // conversation (including messages) in Open WebUI's expected format.
-func (s *CoreServer) serveConversationDetail(w http.ResponseWriter, _ *http.Request, chatID string) {
+func (s *sandboxedApps) serveConversationDetail(w http.ResponseWriter, _ *http.Request, chatID string) {
 	conv, err := s.AIMemory.GetConversation(chatID)
 	if err != nil || conv == nil {
 		http.Error(w, "Conversation not found", http.StatusNotFound)
@@ -290,6 +291,6 @@ func (s *CoreServer) serveConversationDetail(w http.ResponseWriter, _ *http.Requ
 }
 
 // appDisplayProxyURL returns the Identity Agent's reverse proxy URL for a given app.
-func (s *CoreServer) appDisplayProxyURL(appID string) string {
+func (s *sandboxedApps) appDisplayProxyURL(appID string) string {
 	return fmt.Sprintf("http://127.0.0.1:%d/apps/%s/", s.Port, appID)
 }

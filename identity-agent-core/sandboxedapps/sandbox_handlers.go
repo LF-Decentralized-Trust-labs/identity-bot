@@ -1,4 +1,4 @@
-package server
+package sandboxedapps
 
 import (
 	"bytes"
@@ -25,7 +25,7 @@ var wsUpgrader = websocket.Upgrader{
 	WriteBufferSize: 1024,
 }
 
-func (s *CoreServer) sandboxRoutes(r chi.Router) {
+func (s *sandboxedApps) sandboxRoutes(r chi.Router) {
 	r.Get("/apps", s.handleListApps)
 	r.Get("/apps/{id}", s.handleGetApp)
 	r.Post("/apps/{id}/install", s.handleInstallApp)
@@ -44,7 +44,6 @@ func (s *CoreServer) sandboxRoutes(r chi.Router) {
 	r.Put("/apps/{id}/settings", s.handleUpdateAppSettings)
 	r.Get("/apps/{id}/install-progress", s.handleInstallProgress)
 	r.Get("/apps/{id}/display", s.handleAppDisplay)
-	s.auditRoutes(r)
 	r.Get("/capabilities", s.handleListCapabilities)
 	r.Post("/capabilities/{id}/invoke", s.handleInvokeCapability)
 	r.Post("/capability-registry/packs", s.handleImportCapabilityPack)
@@ -61,20 +60,20 @@ func (s *CoreServer) sandboxRoutes(r chi.Router) {
 // handleListCapabilities returns the functional capabilities offered by installed
 // plug-ins (aggregated from manifests' provides[]). Discovery surface for the agent's
 // governed capability endpoint; invoking a capability is governed separately.
-func (s *CoreServer) handleListCapabilities(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleListCapabilities(w http.ResponseWriter, r *http.Request) {
 	if s.SandboxManager == nil {
-		jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
-	jsonResponse(w, s.SandboxManager.ProvidedCapabilities())
+	helpers.JSONResponse(w, s.SandboxManager.ProvidedCapabilities())
 }
 
 // handleInvokeCapability is the governed capability-invocation endpoint:
 // ingress-authorize -> route to the providing plug-in -> egress-recheck -> return.
 // A host-control capability is never invocable by a remote caller.
-func (s *CoreServer) handleInvokeCapability(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleInvokeCapability(w http.ResponseWriter, r *http.Request) {
 	if s.SandboxManager == nil {
-		jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
 	id := chi.URLParam(r, "id")
@@ -87,30 +86,30 @@ func (s *CoreServer) handleInvokeCapability(w http.ResponseWriter, r *http.Reque
 	// the blank one.
 	body, err := io.ReadAll(io.LimitReader(r.Body, 8<<20))
 	if err != nil {
-		jsonError(w, err.Error(), http.StatusBadRequest)
+		helpers.JSONError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
-	caller := s.resolveCaller(r)
+	caller := s.ResolveCaller(r)
 	// Support the same identity-first path as /mcp: an optional signed-request
 	// envelope proves the caller AID, and a proven agent picks up its lineage +
 	// ceiling. Both are no-ops when no envelope is presented.
-	if err := s.verifyRequestEnvelope(r, "invoke:"+id, body, &caller); err != nil {
-		jsonError(w, err.Error(), http.StatusUnauthorized)
+	if err := s.VerifyRequestEnvelope(r, "invoke:"+id, body, &caller); err != nil {
+		helpers.JSONError(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
-	s.enrichProvenCaller(&caller)
-	applyCallerWhy(r, &caller)
+	s.EnrichProvenCaller(&caller)
+	helpers.ApplyCallerWhy(r, &caller)
 
 	res, err := s.SandboxManager.InvokeCapability(r.Context(), caller, id, body)
 	if err != nil {
 		switch {
 		case errors.Is(err, sandbox.ErrCapabilityNotFound):
-			jsonError(w, err.Error(), http.StatusNotFound)
+			helpers.JSONError(w, err.Error(), http.StatusNotFound)
 		case errors.Is(err, sandbox.ErrDenied):
-			jsonError(w, err.Error(), http.StatusForbidden)
+			helpers.JSONError(w, err.Error(), http.StatusForbidden)
 		default:
-			jsonError(w, err.Error(), http.StatusBadGateway)
+			helpers.JSONError(w, err.Error(), http.StatusBadGateway)
 		}
 		return
 	}
@@ -119,50 +118,50 @@ func (s *CoreServer) handleInvokeCapability(w http.ResponseWriter, r *http.Reque
 	w.Write(res.Body)
 }
 
-func (s *CoreServer) handleListApps(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleListApps(w http.ResponseWriter, r *http.Request) {
 	if s.SandboxManager == nil {
-		jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
 	apps, err := s.SandboxManager.ListApps()
 	if err != nil {
-		jsonError(w, err.Error(), http.StatusInternalServerError)
+		helpers.JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	jsonResponse(w, apps)
+	helpers.JSONResponse(w, apps)
 }
 
-func (s *CoreServer) handleGetApp(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleGetApp(w http.ResponseWriter, r *http.Request) {
 	if s.SandboxManager == nil {
-		jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
 	id := chi.URLParam(r, "id")
 	app, err := s.SandboxManager.GetApp(id)
 	if err != nil {
-		jsonError(w, err.Error(), http.StatusInternalServerError)
+		helpers.JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if app == nil {
-		jsonError(w, "App not found", http.StatusNotFound)
+		helpers.JSONError(w, "App not found", http.StatusNotFound)
 		return
 	}
 
-	jsonResponse(w, app)
+	helpers.JSONResponse(w, app)
 }
 
-func (s *CoreServer) handleInstallApp(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleInstallApp(w http.ResponseWriter, r *http.Request) {
 	if s.SandboxManager == nil {
-		jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
 	id := chi.URLParam(r, "id")
 
-	s.inBackground(func(ctx context.Context) {
+	s.InBackground(func(ctx context.Context) {
 		err := s.SandboxManager.InstallApp(ctx, id, func(progress sandbox.PullProgress) {
 			log.Printf("[sandbox-api] Pull progress for %s: %s %.1f%%", id, progress.Status, progress.Progress)
 		})
@@ -171,15 +170,15 @@ func (s *CoreServer) handleInstallApp(w http.ResponseWriter, r *http.Request) {
 		}
 	})
 
-	jsonResponse(w, map[string]string{
+	helpers.JSONResponse(w, map[string]string{
 		"status":  "installing",
 		"message": fmt.Sprintf("Installation of %s started", id),
 	})
 }
 
-func (s *CoreServer) handleInstallProgress(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleInstallProgress(w http.ResponseWriter, r *http.Request) {
 	if s.SandboxManager == nil {
-		jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -188,14 +187,14 @@ func (s *CoreServer) handleInstallProgress(w http.ResponseWriter, r *http.Reques
 	if info == nil {
 		app, _ := s.SandboxManager.GetApp(id)
 		if app != nil && app.InstallStatus == "installed" {
-			jsonResponse(w, map[string]interface{}{
+			helpers.JSONResponse(w, map[string]interface{}{
 				"app_id":   id,
 				"status":   "complete",
 				"progress": 100.0,
 				"done":     true,
 			})
 		} else {
-			jsonResponse(w, map[string]interface{}{
+			helpers.JSONResponse(w, map[string]interface{}{
 				"app_id":   id,
 				"status":   "idle",
 				"progress": 0.0,
@@ -204,58 +203,58 @@ func (s *CoreServer) handleInstallProgress(w http.ResponseWriter, r *http.Reques
 		}
 		return
 	}
-	jsonResponse(w, info)
+	helpers.JSONResponse(w, info)
 }
 
-func (s *CoreServer) handleUninstallApp(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleUninstallApp(w http.ResponseWriter, r *http.Request) {
 	if s.SandboxManager == nil {
-		jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
 	id := chi.URLParam(r, "id")
 	if err := s.SandboxManager.UninstallApp(id); err != nil {
-		jsonError(w, err.Error(), http.StatusInternalServerError)
+		helpers.JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	jsonResponse(w, map[string]string{"status": "uninstalled"})
+	helpers.JSONResponse(w, map[string]string{"status": "uninstalled"})
 }
 
-func (s *CoreServer) handleLaunchApp(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleLaunchApp(w http.ResponseWriter, r *http.Request) {
 	if s.SandboxManager == nil {
-		jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
 	id := chi.URLParam(r, "id")
 	instance, err := s.SandboxManager.LaunchApp(r.Context(), id)
 	if err != nil {
-		jsonError(w, err.Error(), http.StatusInternalServerError)
+		helpers.JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	jsonResponse(w, instance)
+	helpers.JSONResponse(w, instance)
 }
 
-func (s *CoreServer) handleStopApp(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleStopApp(w http.ResponseWriter, r *http.Request) {
 	if s.SandboxManager == nil {
-		jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
 	id := chi.URLParam(r, "id")
 	if err := s.SandboxManager.StopApp(r.Context(), id); err != nil {
-		jsonError(w, err.Error(), http.StatusInternalServerError)
+		helpers.JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	jsonResponse(w, map[string]string{"status": "stopped"})
+	helpers.JSONResponse(w, map[string]string{"status": "stopped"})
 }
 
-func (s *CoreServer) handleAppStatus(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleAppStatus(w http.ResponseWriter, r *http.Request) {
 	if s.SandboxManager == nil {
-		jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -263,7 +262,7 @@ func (s *CoreServer) handleAppStatus(w http.ResponseWriter, r *http.Request) {
 
 	status, err := s.SandboxManager.GetAppStatus(id)
 	if err != nil {
-		jsonError(w, err.Error(), http.StatusInternalServerError)
+		helpers.JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -279,12 +278,12 @@ func (s *CoreServer) handleAppStatus(w http.ResponseWriter, r *http.Request) {
 		result["instance"] = instance
 	}
 
-	jsonResponse(w, result)
+	helpers.JSONResponse(w, result)
 }
 
-func (s *CoreServer) handleAppLogs(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleAppLogs(w http.ResponseWriter, r *http.Request) {
 	if s.SandboxManager == nil {
-		jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -313,32 +312,32 @@ func (s *CoreServer) handleAppLogs(w http.ResponseWriter, r *http.Request) {
 
 	logs, err := s.SandboxManager.GetProxyLogs(id, filter)
 	if err != nil {
-		jsonError(w, err.Error(), http.StatusInternalServerError)
+		helpers.JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	jsonResponse(w, logs)
+	helpers.JSONResponse(w, logs)
 }
 
-func (s *CoreServer) handleHeldLogs(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleHeldLogs(w http.ResponseWriter, r *http.Request) {
 	if s.SandboxManager == nil {
-		jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
 	id := chi.URLParam(r, "id")
 	held, err := s.SandboxManager.GetHeldRequests(id)
 	if err != nil {
-		jsonError(w, err.Error(), http.StatusInternalServerError)
+		helpers.JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	jsonResponse(w, held)
+	helpers.JSONResponse(w, held)
 }
 
-func (s *CoreServer) handleApproveLog(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleApproveLog(w http.ResponseWriter, r *http.Request) {
 	if s.SandboxManager == nil {
-		jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -346,21 +345,21 @@ func (s *CoreServer) handleApproveLog(w http.ResponseWriter, r *http.Request) {
 	logIDStr := chi.URLParam(r, "logId")
 	logID, err := strconv.ParseInt(logIDStr, 10, 64)
 	if err != nil {
-		jsonError(w, "Invalid log ID", http.StatusBadRequest)
+		helpers.JSONError(w, "Invalid log ID", http.StatusBadRequest)
 		return
 	}
 
 	if err := s.SandboxManager.ApproveHeldRequest(logID, id); err != nil {
-		jsonError(w, err.Error(), http.StatusInternalServerError)
+		helpers.JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	jsonResponse(w, map[string]string{"status": "approved"})
+	helpers.JSONResponse(w, map[string]string{"status": "approved"})
 }
 
-func (s *CoreServer) handleBlockLog(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleBlockLog(w http.ResponseWriter, r *http.Request) {
 	if s.SandboxManager == nil {
-		jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -368,79 +367,79 @@ func (s *CoreServer) handleBlockLog(w http.ResponseWriter, r *http.Request) {
 	logIDStr := chi.URLParam(r, "logId")
 	logID, err := strconv.ParseInt(logIDStr, 10, 64)
 	if err != nil {
-		jsonError(w, "Invalid log ID", http.StatusBadRequest)
+		helpers.JSONError(w, "Invalid log ID", http.StatusBadRequest)
 		return
 	}
 
 	if err := s.SandboxManager.BlockHeldRequest(logID, id); err != nil {
-		jsonError(w, err.Error(), http.StatusInternalServerError)
+		helpers.JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	jsonResponse(w, map[string]string{"status": "blocked"})
+	helpers.JSONResponse(w, map[string]string{"status": "blocked"})
 }
 
-func (s *CoreServer) handlePendingResources(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handlePendingResources(w http.ResponseWriter, r *http.Request) {
 	if s.SandboxManager == nil {
-		jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
 	id := chi.URLParam(r, "id")
 	reqs, err := s.SandboxManager.GetPendingResourceRequests(id)
 	if err != nil {
-		jsonError(w, err.Error(), http.StatusInternalServerError)
+		helpers.JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	jsonResponse(w, reqs)
+	helpers.JSONResponse(w, reqs)
 }
 
-func (s *CoreServer) handleApproveResource(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleApproveResource(w http.ResponseWriter, r *http.Request) {
 	if s.SandboxManager == nil {
-		jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
 	reqIDStr := chi.URLParam(r, "reqId")
 	reqID, err := strconv.ParseInt(reqIDStr, 10, 64)
 	if err != nil {
-		jsonError(w, "Invalid request ID", http.StatusBadRequest)
+		helpers.JSONError(w, "Invalid request ID", http.StatusBadRequest)
 		return
 	}
 
 	if err := s.SandboxManager.ApproveResourceRequest(reqID); err != nil {
-		jsonError(w, err.Error(), http.StatusInternalServerError)
+		helpers.JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	jsonResponse(w, map[string]string{"status": "approved"})
+	helpers.JSONResponse(w, map[string]string{"status": "approved"})
 }
 
-func (s *CoreServer) handleDenyResource(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleDenyResource(w http.ResponseWriter, r *http.Request) {
 	if s.SandboxManager == nil {
-		jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
 	reqIDStr := chi.URLParam(r, "reqId")
 	reqID, err := strconv.ParseInt(reqIDStr, 10, 64)
 	if err != nil {
-		jsonError(w, "Invalid request ID", http.StatusBadRequest)
+		helpers.JSONError(w, "Invalid request ID", http.StatusBadRequest)
 		return
 	}
 
 	if err := s.SandboxManager.DenyResourceRequest(reqID); err != nil {
-		jsonError(w, err.Error(), http.StatusInternalServerError)
+		helpers.JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	jsonResponse(w, map[string]string{"status": "denied"})
+	helpers.JSONResponse(w, map[string]string{"status": "denied"})
 }
 
-func (s *CoreServer) handleBatchResources(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleBatchResources(w http.ResponseWriter, r *http.Request) {
 	if s.SandboxManager == nil {
-		jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -449,21 +448,21 @@ func (s *CoreServer) handleBatchResources(w http.ResponseWriter, r *http.Request
 		Deny    []int64 `json:"deny"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		jsonError(w, "Invalid request body", http.StatusBadRequest)
+		helpers.JSONError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if err := s.SandboxManager.BatchResolveResourceRequests(body.Approve, body.Deny); err != nil {
-		jsonError(w, err.Error(), http.StatusInternalServerError)
+		helpers.JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	jsonResponse(w, map[string]string{"status": "processed"})
+	helpers.JSONResponse(w, map[string]string{"status": "processed"})
 }
 
-func (s *CoreServer) handleUpdateAppSettings(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleUpdateAppSettings(w http.ResponseWriter, r *http.Request) {
 	if s.SandboxManager == nil {
-		jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -471,21 +470,21 @@ func (s *CoreServer) handleUpdateAppSettings(w http.ResponseWriter, r *http.Requ
 
 	var settings map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&settings); err != nil {
-		jsonError(w, "Invalid request body", http.StatusBadRequest)
+		helpers.JSONError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if err := s.SandboxManager.UpdateAppSettings(id, settings); err != nil {
-		jsonError(w, err.Error(), http.StatusInternalServerError)
+		helpers.JSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	jsonResponse(w, map[string]string{"status": "updated"})
+	helpers.JSONResponse(w, map[string]string{"status": "updated"})
 }
 
-func (s *CoreServer) handleAppDisplay(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleAppDisplay(w http.ResponseWriter, r *http.Request) {
 	if s.SandboxManager == nil {
-		jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -493,7 +492,7 @@ func (s *CoreServer) handleAppDisplay(w http.ResponseWriter, r *http.Request) {
 	// Verify the app is actually running before returning a proxy URL.
 	_, err := s.SandboxManager.GetDisplayURL(id)
 	if err != nil {
-		jsonError(w, err.Error(), http.StatusNotFound)
+		helpers.JSONError(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
@@ -502,24 +501,24 @@ func (s *CoreServer) handleAppDisplay(w http.ResponseWriter, r *http.Request) {
 	// paths (e.g., chat data) and serve from its own data stores while
 	// forwarding everything else to the container.
 	proxyURL := s.appDisplayProxyURL(id)
-	jsonResponse(w, map[string]string{"display_url": proxyURL})
+	helpers.JSONResponse(w, map[string]string{"display_url": proxyURL})
 }
 
-func (s *CoreServer) handleSandboxHealth(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleSandboxHealth(w http.ResponseWriter, r *http.Request) {
 	if s.SandboxManager == nil {
-		jsonResponse(w, map[string]interface{}{
+		helpers.JSONResponse(w, map[string]interface{}{
 			"sandbox_initialized": false,
 			"container_engine":    sandbox.CheckContainerEngine(),
 		})
 		return
 	}
 
-	jsonResponse(w, s.SandboxManager.HealthCheck())
+	helpers.JSONResponse(w, s.SandboxManager.HealthCheck())
 }
 
-func (s *CoreServer) handleSandboxWebSocket(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleSandboxWebSocket(w http.ResponseWriter, r *http.Request) {
 	if s.SandboxManager == nil {
-		jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -553,9 +552,9 @@ func (s *CoreServer) handleSandboxWebSocket(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-func (s *CoreServer) handleTerminalWebSocket(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handleTerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 	if s.SandboxManager == nil {
-		jsonError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
+		helpers.JSONError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -563,7 +562,7 @@ func (s *CoreServer) handleTerminalWebSocket(w http.ResponseWriter, r *http.Requ
 
 	brt := s.SandboxManager.GetBinaryRuntime(instanceID)
 	if brt == nil {
-		jsonError(w, "No binary runtime found for instance", http.StatusNotFound)
+		helpers.JSONError(w, "No binary runtime found for instance", http.StatusNotFound)
 		return
 	}
 
@@ -625,9 +624,9 @@ func isLocalRequest(r *http.Request) bool {
 	return host == "127.0.0.1" || host == "::1" || host == "localhost"
 }
 
-func (s *CoreServer) handlePodmanSetup(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handlePodmanSetup(w http.ResponseWriter, r *http.Request) {
 	if !isLocalRequest(r) {
-		jsonError(w, "Podman setup is only available from the local machine", http.StatusForbidden)
+		helpers.JSONError(w, "Podman setup is only available from the local machine", http.StatusForbidden)
 		return
 	}
 
@@ -635,17 +634,17 @@ func (s *CoreServer) handlePodmanSetup(w http.ResponseWriter, r *http.Request) {
 		Action string `json:"action"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		jsonError(w, "Invalid request body", http.StatusBadRequest)
+		helpers.JSONError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if body.Action != "install" && body.Action != "init-machine" && body.Action != "start-machine" {
-		jsonError(w, "Invalid action. Must be one of: install, init-machine, start-machine", http.StatusBadRequest)
+		helpers.JSONError(w, "Invalid action. Must be one of: install, init-machine, start-machine", http.StatusBadRequest)
 		return
 	}
 
 	if !sandbox.TryStartSetup() {
-		jsonError(w, "A setup operation is already in progress", http.StatusConflict)
+		helpers.JSONError(w, "A setup operation is already in progress", http.StatusConflict)
 		return
 	}
 
@@ -656,19 +655,19 @@ func (s *CoreServer) handlePodmanSetup(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	jsonResponse(w, map[string]string{
+	helpers.JSONResponse(w, map[string]string{
 		"status":  "started",
 		"action":  body.Action,
 		"message": fmt.Sprintf("Podman setup action '%s' started", body.Action),
 	})
 }
 
-func (s *CoreServer) handlePodmanSetupStatus(w http.ResponseWriter, r *http.Request) {
+func (s *sandboxedApps) handlePodmanSetupStatus(w http.ResponseWriter, r *http.Request) {
 	// Reading how far setup got is open to the owner's own machines; starting
 	// it is not (controllerOwnerOnly).
-	if !isLocalRequest(r) && !s.isOwnerOrItsController(r) {
-		jsonError(w, "Podman setup status is only available from the local machine", http.StatusForbidden)
+	if !isLocalRequest(r) && !s.IsOwnerOrItsController(r) {
+		helpers.JSONError(w, "Podman setup status is only available from the local machine", http.StatusForbidden)
 		return
 	}
-	jsonResponse(w, sandbox.GetPodmanSetupStatus())
+	helpers.JSONResponse(w, sandbox.GetPodmanSetupStatus())
 }

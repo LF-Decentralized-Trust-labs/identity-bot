@@ -51,6 +51,9 @@ type Addon struct {
 	// Run is work that runs in the background from when the server starts
 	// until it stops; stop closes when it does.
 	Run func(s *CoreServer, stop <-chan struct{})
+	// Stop ends what Prepare started, when the server stops: after its
+	// background work is told to end and before the activity log closes.
+	Stop func(s *CoreServer)
 
 	// TickAtMost, when set, is the longest the add-on can wait between two
 	// ticks of the loop every Identity Agent runs (what_runs_every_tick.go);
@@ -192,6 +195,15 @@ func (s *CoreServer) runAddons(stop <-chan struct{}) {
 		if a.Run != nil {
 			run := a.Run
 			s.inBackground(func(context.Context) { run(s, stop) })
+		}
+	}
+}
+
+// stopAddons runs every add-on's Stop.
+func (s *CoreServer) stopAddons() {
+	for _, a := range registeredAddons() {
+		if a.Stop != nil {
+			a.Stop(s)
 		}
 	}
 }

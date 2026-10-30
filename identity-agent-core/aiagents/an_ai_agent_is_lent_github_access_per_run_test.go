@@ -32,6 +32,7 @@ import (
 	"identity-agent-core/brainsignin"
 	"identity-agent-core/githubapp"
 	"identity-agent-core/lending"
+	"identity-agent-core/sandboxedapps"
 )
 
 // gitHub is a stand-in for GitHub's API: one App (42, "acme-agents"), one
@@ -774,12 +775,12 @@ func TestReplacingTheAppWithdrawsWhatItLent(t *testing.T) {
 func TestARefusedWriteKeepsRead(t *testing.T) {
 	w, g := githubWorld(t)
 	w.grantRepos(t, w.a.ID, [2]string{"acme/sandbox", "write"}, [2]string{"acme/docs", "read"})
-	rec, err := w.s.SandboxManager.Store().GetCapabilityRecord(capabilityRepoWrite)
+	rec, err := sandboxedapps.Manager(w.s).Store().GetCapabilityRecord(capabilityRepoWrite)
 	if err != nil || rec == nil {
 		t.Fatalf("the write capability: %v %v", rec, err)
 	}
 	rec.Enabled = false
-	if err := w.s.SandboxManager.Store().UpsertCapabilityRecord(*rec); err != nil {
+	if err := sandboxedapps.Manager(w.s).Store().UpsertCapabilityRecord(*rec); err != nil {
 		t.Fatal(err)
 	}
 	lent, err := w.hostA.BorrowGitHub(context.Background())

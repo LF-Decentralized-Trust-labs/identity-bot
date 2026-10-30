@@ -6,6 +6,7 @@ import (
 	"errors"
 	"identity-agent-core/lending"
 	"identity-agent-core/sandbox"
+	"identity-agent-core/sandboxedapps"
 	"identity-agent-core/vault"
 	"io/fs"
 	"net/http"
@@ -274,11 +275,11 @@ func TestACheckKeepsToTheOwnersBlocks(t *testing.T) {
 	of(w.s).brainChecker = &brainsignin.Checker{AddressRule: loopbackAllowed}
 	// No screen sets the owner's blocks for this Identity Agent's own requests
 	// yet; a rule kept for them is still applied.
-	if err := w.s.SandboxManager.Store().SaveApp(sandbox.App{ID: sandbox.BackendLLMAppID, Name: "this Identity Agent",
+	if err := sandboxedapps.Manager(w.s).Store().SaveApp(sandbox.App{ID: sandbox.BackendLLMAppID, Name: "this Identity Agent",
 		ExecutionType: "native", DisplayMethod: "none", ManifestJSON: "{}", InstallStatus: "installed"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w.s.SandboxManager.Store().SavePolicyRule(sandbox.PolicyRule{AppID: sandbox.BackendLLMAppID,
+	if _, err := sandboxedapps.Manager(w.s).Store().SavePolicyRule(sandbox.PolicyRule{AppID: sandbox.BackendLLMAppID,
 		RuleType: "domain_block", Target: "127.0.0.1", Source: "user"}); err != nil {
 		t.Fatal(err)
 	}

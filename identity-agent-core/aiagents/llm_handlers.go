@@ -186,7 +186,7 @@ func (s *aiAgents) handleLLMProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.SandboxManager == nil {
+	if s.sandboxManager() == nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		w.Write([]byte(`{"error":{"message":"Sandbox not initialized","code":"unavailable","type":"server_error"}}`))
@@ -247,7 +247,7 @@ func (s *aiAgents) handleLLMProxy(w http.ResponseWriter, r *http.Request) {
 	// injected too, by the proxy itself, from the same vault — so a model called
 	// through here and one called from inside a sandboxed app authenticate alike.
 	// No client-level timeout — streaming LLM responses can take many minutes.
-	resp, err := s.SandboxManager.MakeTrackedRequest(r.Context(), upReq)
+	resp, err := s.sandboxManager().MakeTrackedRequest(r.Context(), upReq)
 	if err != nil {
 		log.Printf("[llm-proxy] Upstream error: %v", err)
 		w.Header().Set("Content-Type", "application/json")

@@ -32,7 +32,7 @@ type mcpErr struct {
 }
 
 func (s *aiAgents) handleMCP(w http.ResponseWriter, r *http.Request) {
-	if s.SandboxManager == nil {
+	if s.sandboxManager() == nil {
 		helpers.JSONError(w, "Sandbox not initialized", http.StatusServiceUnavailable)
 		return
 	}
@@ -81,7 +81,7 @@ func (s *aiAgents) handleMCP(w http.ResponseWriter, r *http.Request) {
 		helpers.JSONResponse(w, mcpResp{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{}})
 	case "tools/list":
 		helpers.JSONResponse(w, mcpResp{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{
-			"tools": s.SandboxManager.MCPToolsList(caller),
+			"tools": s.sandboxManager().MCPToolsList(caller),
 		}})
 	case "tools/call":
 		var p struct {
@@ -97,7 +97,7 @@ func (s *aiAgents) handleMCP(w http.ResponseWriter, r *http.Request) {
 		if len(args) == 0 {
 			args = []byte("{}")
 		}
-		tr := s.SandboxManager.MCPToolsCall(r.Context(), caller, p.Name, args)
+		tr := s.sandboxManager().MCPToolsCall(r.Context(), caller, p.Name, args)
 		helpers.JSONResponse(w, mcpResp{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{
 			"content": []map[string]any{{"type": "text", "text": tr.Text}},
 			"isError": tr.IsError,
@@ -112,8 +112,8 @@ func (s *aiAgents) handleMCP(w http.ResponseWriter, r *http.Request) {
 // MCP server is the built-out surface. GraphQL is planned.
 func (s *aiAgents) handleEndpointHealth(w http.ResponseWriter, r *http.Request) {
 	n := 0
-	if s.SandboxManager != nil {
-		n = len(s.SandboxManager.MCPToolsList(s.ResolveCaller(r)))
+	if s.sandboxManager() != nil {
+		n = len(s.sandboxManager().MCPToolsList(s.ResolveCaller(r)))
 	}
 	helpers.JSONResponse(w, map[string]any{
 		"status": "ok",

@@ -76,11 +76,11 @@ func (s *aiAgents) mountGitHubRoutes(r chi.Router) {
 // vault's, and following no redirect. GitHub's address is not something a
 // request can set (githubAPI exists for tests only).
 func (s *aiAgents) githubClient() (githubapp.Client, error) {
-	if s.SandboxManager == nil {
+	if s.sandboxManager() == nil {
 		return githubapp.Client{}, errNoVault
 	}
 	return githubapp.Client{API: s.githubAPI, Send: func(ctx context.Context, req *http.Request, client *http.Client) (*http.Response, error) {
-		return s.SandboxManager.MakeTrackedRequestAsGiven(ctx, req, client)
+		return s.sandboxManager().MakeTrackedRequestAsGiven(ctx, req, client)
 	}}, nil
 }
 
@@ -549,7 +549,7 @@ func (s *aiAgents) lendableRepos(cc permission.CallerContext) map[int64]repoGran
 	out := map[int64]repoGrant{}
 	for _, access := range []githubrepo.Access{githubrepo.Read, githubrepo.Write} {
 		capID := capabilityFor(access)
-		if ok, _ := s.SandboxManager.MayBeLent(cc, capID); !ok {
+		if ok, _ := s.sandboxManager().MayBeLent(cc, capID); !ok {
 			continue
 		}
 		for id, name := range namedIn(cc.ResourceConstraints, capID) {
@@ -756,7 +756,7 @@ func (s *aiAgents) handleBodyBorrowsGitHub(w http.ResponseWriter, r *http.Reques
 	if len(lendable) == 0 {
 		why := "the one check refused every repository this AI agent's grant names"
 		for _, access := range []githubrepo.Access{githubrepo.Write, githubrepo.Read} {
-			if ok, reason := s.SandboxManager.MayBeLent(cc, capabilityFor(access)); !ok && reason != "" {
+			if ok, reason := s.sandboxManager().MayBeLent(cc, capabilityFor(access)); !ok && reason != "" {
 				why = reason
 			}
 		}

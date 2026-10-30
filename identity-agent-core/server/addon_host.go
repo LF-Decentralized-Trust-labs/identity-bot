@@ -91,12 +91,6 @@ func (h hostWrapper) HandleDIDCommInbound(w http.ResponseWriter, r *http.Request
 func (h hostWrapper) HandleGrantController(w http.ResponseWriter, r *http.Request) {
 	h.s.handleGrantController(w, r)
 }
-func (h hostWrapper) HandleImportCapabilityPack(w http.ResponseWriter, r *http.Request) {
-	h.s.handleImportCapabilityPack(w, r)
-}
-func (h hostWrapper) HandleListCapabilityRegistry(w http.ResponseWriter, r *http.Request) {
-	h.s.handleListCapabilityRegistry(w, r)
-}
 func (h hostWrapper) HasBrowserSession(r *http.Request) bool      { return h.s.hasBrowserSession(r) }
 func (h hostWrapper) HoldTheRecord() (string, bool, bool, func()) { return h.s.holdTheRecord() }
 func (h hostWrapper) IdentitySigningSeed() ([]byte, error)        { return h.s.identitySigningSeed() }
@@ -338,5 +332,11 @@ func (hostWrapper) WithOwnerSecret(s *CoreServer, secret string) *CoreServer {
 	return withOwnerSecret(s, secret)
 }
 func (hostWrapper) WithdrawWith(t coretypes.TB, s *CoreServer, seed []byte) { withdrawWith(t, s, seed) }
-func (hostWrapper) AnchorTick() time.Duration { return anchorTick() }
-func (hostWrapper) AnchorAtLeastEvery(t coretypes.TB, d time.Duration) { anchorAtLeastEvery(t, d) }
+func (hostWrapper) AnchorTick() time.Duration                               { return anchorTick() }
+func (hostWrapper) AnchorAtLeastEvery(t coretypes.TB, d time.Duration)      { anchorAtLeastEvery(t, d) }
+func (h hostWrapper) IsLiveBrowserSession(token string) bool                { return h.s.isLiveBrowserSession(token) }
+func (h hostWrapper) ResolveBearerToken(r *http.Request, token string, cc permission.CallerContext) (permission.CallerContext, bool) {
+	return h.s.resolveBearerToken(r, token, cc)
+}
+func (hostWrapper) BearerFrom(r *http.Request) string                { return bearerFrom(r) }
+func (hostWrapper) UseAssetHandler(s *CoreServer, ah *asset.Handler) { useAssetHandler(s, ah) }

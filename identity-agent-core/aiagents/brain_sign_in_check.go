@@ -30,11 +30,11 @@ import (
 // the key goes only where it is checked. A model server is reached only at the
 // addresses its name had when checked (brainsignin.ModelServerAddress).
 func (s *aiAgents) brainCheck() (brainsignin.Checker, error) {
-	if s.SandboxManager == nil {
+	if s.sandboxManager() == nil {
 		return brainsignin.Checker{}, errNoVault
 	}
 	send := func(ctx context.Context, req *http.Request, client *http.Client) (*http.Response, error) {
-		return s.SandboxManager.MakeTrackedRequestAsGiven(ctx, req, client)
+		return s.sandboxManager().MakeTrackedRequestAsGiven(ctx, req, client)
 	}
 	if s.brainChecker != nil {
 		c := *s.brainChecker

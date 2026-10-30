@@ -16,9 +16,9 @@ import (
 // one by importing its package, which registers it with the server
 // (server.RegisterAddon), and the phone core must never come to depend on one.
 //
-// Some add-ons are still linked, because the server still uses them. Each is listed in stillLinked with the reason. The list only shrinks: the test fails if mobilecore depends on an
-// add-on that is not on it, and fails again once one on it is no longer
-// linked, so that it is taken off.
+// An add-on it does depend on fails this test unless it is listed in
+// stillLinked with the reason. The list only shrinks: the test fails again
+// once one on it is no longer linked, so that it is taken off.
 
 // addOns are the packages that are add-ons, by their path in this module.
 var addOns = []string{
@@ -26,14 +26,12 @@ var addOns = []string{
 	"aiagents", "agentbody", "agentmachine", "agentmessage", "agenthost", "brainsignin",
 	"conversation", "conversationbundle", "githubapp", "lending", "screenview",
 	// Sandboxed apps.
-	"sandbox", "appcall", "endpointclient",
+	"sandboxedapps", "sandbox", "appcall", "endpointclient",
 }
 
-// stillLinked are the add-ons mobilecore depends on today, and why.
-var stillLinked = map[string]string{
-	"sandbox": "the server still makes the sandbox manager, which the AI-agent code calls capabilities through",
-	"appcall": "the sandbox package imports it",
-}
+// stillLinked are the add-ons mobilecore depends on today, and why. None is:
+// an entry goes here only with a reason a reviewer can check.
+var stillLinked = map[string]string{}
 
 func TestThePhoneCoreLinksNoAddOn(t *testing.T) {
 	goBin, err := exec.LookPath("go")

@@ -93,7 +93,7 @@ func TestAuditEndpointsAllGuarded(t *testing.T) {
 	// Every audit route must refuse a token-bearing loopback caller. This catches a
 	// new endpoint being added without the gate — the likeliest future mistake.
 	s := auditTestServer(t)
-	s.SandboxManager = nil // the gate must run before anything touches the store
+	s.ActivityLog = nil // the gate must run before anything touches the log
 	targets := []string{
 		"/api/activity/invocations",
 		"/api/activity/invocations/1",

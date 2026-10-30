@@ -8,10 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"identity-agent-core/asset"
 	"identity-agent-core/authprovider"
-
-	"github.com/go-chi/chi/v5"
 )
 
 // The owner-only list is refused at any score, including the strongest a root
@@ -190,39 +187,6 @@ func TestTheOwnerOnlyListIsTheOneTheADRRecords(t *testing.T) {
 	if strings.Join(want, "\n") != strings.Join(have, "\n") {
 		t.Fatalf("the owner-only list is not the one ADR-050 records.\nwant:\n%s\nhave:\n%s",
 			strings.Join(want, "\n"), strings.Join(have, "\n"))
-	}
-}
-
-// Every owner-only entry and every per-action minimum names a route this
-// Identity Agent actually serves. The maps are keyed by hand-typed strings, and
-// a key that matches no route guards nothing while looking exactly like
-// protection.
-func TestEveryControllerRuleNamesARouteThisAgentServes(t *testing.T) {
-	s := newAuthTestServer(t)
-	// The employee and signer routes are mounted only with an asset handler.
-	ah, err := asset.NewHandler(s.DataDir, nil)
-	if err != nil {
-		t.Fatalf("asset handler: %v", err)
-	}
-	s.assetHandler = ah
-
-	served := map[string]bool{}
-	if werr := chi.Walk(s.buildRouter(""),
-		func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
-			served[method+" "+route] = true
-			return nil
-		}); werr != nil {
-		t.Fatalf("walking the router: %v", werr)
-	}
-	for route := range controllerOwnerOnly {
-		if !served[route] {
-			t.Errorf("%s is owner-only but this Identity Agent serves no such route", route)
-		}
-	}
-	for route := range controllerMinimumScore {
-		if !served[route] {
-			t.Errorf("%s has a minimum score but this Identity Agent serves no such route", route)
-		}
 	}
 }
 

@@ -1,4 +1,4 @@
-package server
+package sandboxedapps
 
 const traceViewerHTML = `<!DOCTYPE html>
 <html lang="en">

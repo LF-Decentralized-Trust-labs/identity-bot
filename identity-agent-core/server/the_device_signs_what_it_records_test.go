@@ -8,7 +8,6 @@ import (
 	"errors"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/recovery"
-	"identity-agent-core/sandbox"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -84,12 +83,8 @@ func (c *twoCores) openRequester(t *testing.T) *CoreServer {
 	if err := r.initAssetHandler(); err != nil {
 		t.Fatal(err)
 	}
-	mgr, err := sandbox.NewManager(sandbox.ManagerConfig{Log: r.logForTest(t, c.dir), Vault: r.vaultForTest(c.dir), DataDir: c.dir})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(mgr.Stop)
-	r.SandboxManager = mgr
+	r.logForTest(t, c.dir)
+	r.vaultForTest(c.dir)
 	r.router = r.buildRouter("")
 	r.fetchSignedEvent = func(aid string, sn int) []heldEvent {
 		if c.noWitnesses {

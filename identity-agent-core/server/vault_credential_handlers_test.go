@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"identity-agent-core/sandbox"
 	"identity-agent-core/vault"
 )
 
@@ -21,12 +20,7 @@ func vaultTestServer(t *testing.T) *CoreServer {
 	v.SetKeyProvider(func() ([]byte, error) {
 		return []byte("0123456789abcdef0123456789abcdef"), nil
 	})
-	mgr, err := sandbox.NewManager(sandbox.ManagerConfig{DataDir: dir, Vault: v})
-	if err != nil {
-		t.Fatalf("manager: %v", err)
-	}
-	t.Cleanup(mgr.Stop)
-	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, Vault: v, SandboxManager: mgr}
+	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, Vault: v}
 }
 
 func postCredential(s *CoreServer, body map[string]any, remote bool) *httptest.ResponseRecorder {

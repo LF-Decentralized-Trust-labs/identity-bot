@@ -238,6 +238,12 @@ func (b *browserSessions) claim(id, secret string) (token string, expires time.T
 // than treating "not yet" as "no".
 var errSessionNotGranted = fmt.Errorf("not granted yet")
 
+// isLiveBrowserSession reports whether token names a live browser session
+// of this server's.
+func (s *CoreServer) isLiveBrowserSession(token string) bool {
+	return s.BrowserSessions != nil && s.BrowserSessions.valid(token)
+}
+
 // valid reports whether a token names a live session.
 func (b *browserSessions) valid(token string) bool {
 	if token == "" {

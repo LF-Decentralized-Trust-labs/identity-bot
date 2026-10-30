@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"identity-agent-core/internal/coretypes"
-	"identity-agent-core/sandbox"
 	"identity-agent-core/witness"
 	"net/http"
 	"net/http/httptest"
@@ -35,12 +34,8 @@ func recordWorld(t *testing.T) *CoreServer {
 	t.Helper()
 	s, _ := grantWorld(t)
 	s.DeclaredEntityType = "organization"
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{Log: s.logForTest(t, s.DataDir), Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(m.Stop)
-	s.SandboxManager = m
+	s.logForTest(t, s.DataDir)
+	s.vaultForTest(s.DataDir)
 	s.ActivityLog.SetEventSigner(&invocationSigner{s: s})
 	return s
 }
@@ -468,12 +463,8 @@ func TestAnchorsAreHeldOutsideOnceTheirWitnessesReceiptThem(t *testing.T) {
 	}
 	s, _ := foundedWith(t, agentWithDerivedIdentity(t), names, 2)
 	s.DeclaredEntityType = "organization"
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{Log: s.logForTest(t, s.DataDir), Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(m.Stop)
-	s.SandboxManager = m
+	s.logForTest(t, s.DataDir)
+	s.vaultForTest(s.DataDir)
 	s.ActivityLog.SetEventSigner(&invocationSigner{s: s})
 	writeRows(t, s, 2)
 	if ok, err := s.anchorRecord(); err != nil || !ok {
@@ -610,12 +601,8 @@ func TestTheWitnessesAreAskedForTheRecordsTip(t *testing.T) {
 	}
 	s, _ := foundedWith(t, agentWithDerivedIdentity(t), names, 1)
 	s.DeclaredEntityType = "organization"
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{Log: s.logForTest(t, s.DataDir), Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(m.Stop)
-	s.SandboxManager = m
+	s.logForTest(t, s.DataDir)
+	s.vaultForTest(s.DataDir)
 	s.ActivityLog.SetEventSigner(&invocationSigner{s: s})
 	sq := s.DataStore.(*store.SQLiteStore)
 	s.WitnessService = witness.NewService(witness.NewSQLiteStore(sq.DB()), sq, s.KeriDriver, witness.BackendDesktop)
@@ -748,12 +735,8 @@ func TestCheckingWhileAnchoringRaisesNoFalseAlarm(t *testing.T) {
 	}
 	s, _ := foundedWith(t, agentWithDerivedIdentity(t), names, 1)
 	s.DeclaredEntityType = "organization"
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{Log: s.logForTest(t, s.DataDir), Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(m.Stop)
-	s.SandboxManager = m
+	s.logForTest(t, s.DataDir)
+	s.vaultForTest(s.DataDir)
 	s.ActivityLog.SetEventSigner(&invocationSigner{s: s})
 	sq := s.DataStore.(*store.SQLiteStore)
 	s.WitnessService = witness.NewService(witness.NewSQLiteStore(sq.DB()), sq, s.KeriDriver, witness.BackendDesktop)
@@ -844,12 +827,8 @@ func TestARealWitnessWitnessesTheRecord(t *testing.T) {
 	peer := startPeer(t, "witness")
 	s, _ := foundedWith(t, agentWithDerivedIdentity(t), []string{peer.witnessKey}, 1)
 	s.DeclaredEntityType = "organization"
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{Log: s.logForTest(t, s.DataDir), Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(m.Stop)
-	s.SandboxManager = m
+	s.logForTest(t, s.DataDir)
+	s.vaultForTest(s.DataDir)
 	s.ActivityLog.SetEventSigner(&invocationSigner{s: s})
 	sq := s.DataStore.(*store.SQLiteStore)
 	s.WitnessService = witness.NewService(witness.NewSQLiteStore(sq.DB()), sq, s.KeriDriver, witness.BackendDesktop)
@@ -996,12 +975,8 @@ func TestEnrolledWitnessesAreAskedToCoverTheRecord(t *testing.T) {
 	unwilling.svc.Store.SetConfig(witness.ConfigDelegates, "off")
 	s, _ := foundedWith(t, agentWithDerivedIdentity(t), []string{willing.witnessKey, unwilling.witnessKey}, 1)
 	s.DeclaredEntityType = "organization"
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{Log: s.logForTest(t, s.DataDir), Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(m.Stop)
-	s.SandboxManager = m
+	s.logForTest(t, s.DataDir)
+	s.vaultForTest(s.DataDir)
 	s.ActivityLog.SetEventSigner(&invocationSigner{s: s})
 	sq := s.DataStore.(*store.SQLiteStore)
 	s.WitnessService = witness.NewService(witness.NewSQLiteStore(sq.DB()), sq, s.KeriDriver, witness.BackendDesktop)

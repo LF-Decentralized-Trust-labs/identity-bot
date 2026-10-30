@@ -17,7 +17,6 @@ import (
 	"identity-agent-core/drivers"
 	"identity-agent-core/drivers/driverfake"
 	"identity-agent-core/login"
-	"identity-agent-core/sandbox"
 	"identity-agent-core/store"
 )
 
@@ -29,12 +28,8 @@ func withLog(t *testing.T, s *CoreServer) {
 		t.Fatal(err)
 	}
 	s.DataStore = ds
-	m, err := sandbox.NewManager(sandbox.ManagerConfig{Log: s.logForTest(t, s.DataDir), Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir, ManifestsDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(m.Stop)
-	s.SandboxManager = m
+	s.logForTest(t, s.DataDir)
+	s.vaultForTest(s.DataDir)
 }
 
 func logged(t *testing.T, s *CoreServer, event, messageID string) []activitylog.InvocationEvent {

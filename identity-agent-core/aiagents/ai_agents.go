@@ -15,6 +15,8 @@ import (
 	"identity-agent-core/brainsignin"
 	"identity-agent-core/internal/addonhost"
 	"identity-agent-core/lending"
+	"identity-agent-core/sandbox"
+	"identity-agent-core/sandboxedapps"
 	"identity-agent-core/server"
 )
 
@@ -66,3 +68,7 @@ var helpers = addonhost.Shared()
 func AgentConfigByAID(s *server.CoreServer, aid string) *asset.AgentConfig {
 	return of(s).AgentConfigByAID(aid)
 }
+
+// sandboxManager is what runs the capability gateway AI agents call
+// capabilities through: the sandboxed-apps add-on's, which this one includes.
+func (s *aiAgents) sandboxManager() *sandbox.Manager { return sandboxedapps.Manager(s.CoreServer) }

@@ -11,12 +11,11 @@ import (
 // application operations therefore no longer re-check the owner inside the handler
 // — the router-wide authorize gate decides who may reach them, and it admits the
 // owner's authorized controller the same way it admits the owner. These tests pin
-// the two halves of that: the application handlers no longer owner-gate (a request
-// that is not the owner gets past the owner question to the real work), while
-// importing a capability pack — which defines the capabilities, with their
-// host-control and egress rules, that the gateway trusts at invoke time — stays
-// owner-only. (That the gate itself admits a controller to these non-closed routes
-// is covered by the controller-reachability tests next door.)
+// that the application handlers no longer owner-gate: a request that is not the
+// owner gets past the owner question to the real work. (The capability registry's
+// handlers are tested with the sandboxed-apps add-on, and that the gate itself
+// admits a controller to these non-closed routes is covered by the
+// controller-reachability tests next door.)
 
 func TestProvisionAgentNoLongerOwnerGatedInHandler(t *testing.T) {
 	s := helpers.NewAuthTestServer(t)
@@ -34,36 +33,6 @@ func TestProvisionAgentNoLongerOwnerGatedInHandler(t *testing.T) {
 		t.Fatalf("provisioning still returns 403 from the handler, so it is re-gating "+
 			"owner-only and would refuse the controller the router admits; body: %s",
 			rec.Body.String())
-	}
-}
-
-func TestCapabilityRegistryListNoLongerOwnerGatedInHandler(t *testing.T) {
-	s := helpers.NewAuthTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/capability-registry", nil)
-	rec := httptest.NewRecorder()
-
-	hostOf(s).HandleListCapabilityRegistry(rec, req)
-
-	if rec.Code == http.StatusForbidden {
-		t.Fatalf("reading the capability registry still returns 403 from the handler, so "+
-			"a controller acting for the owner would be refused; body: %s", rec.Body.String())
-	}
-}
-
-func TestCapabilityPackImportStaysOwnerOnly(t *testing.T) {
-	s := helpers.NewAuthTestServer(t)
-	// A request that is not the owner: not from this machine, not sealed by the
-	// owner's identity, not owner-signed. isOwner is false, so import must refuse it.
-	req := httptest.NewRequest(http.MethodPost, "/api/capability-registry/packs",
-		strings.NewReader(`{"pack":"x","capabilities":[]}`))
-	rec := httptest.NewRecorder()
-
-	hostOf(s).HandleImportCapabilityPack(rec, req)
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("importing a capability pack returned %d, but it defines the capabilities "+
-			"the gateway trusts and must stay owner-only — not reachable by a controller",
-			rec.Code)
 	}
 }
 
