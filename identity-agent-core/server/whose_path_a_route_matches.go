@@ -1,8 +1,11 @@
 package server
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
+
+	"identity-agent-core/iacrypto"
 )
 
 // Whose paths a route pattern matches.
@@ -83,43 +86,63 @@ func segmentsMeetFrom(a, b []string) bool {
 	}
 }
 
-// prefixMeets reports whether some request path under prefix (static, on a
-// segment's boundary, or the prefix itself) matches pattern.
-func prefixMeets(prefix, pattern string) bool {
-	return segmentsMeetFrom(append(segmentsOf(strings.TrimSuffix(prefix, "/")), "*"), segmentsOf(pattern))
+// prefixSegments are prefix's path segments, or why it is not one an add-on
+// may own: it must begin with a slash, name no parameter or wildcard, and
+// have no empty segment, so "/" alone, "//x", "/x//y" and "/x/" are refused.
+func prefixSegments(prefix string) ([]string, error) {
+	if !strings.HasPrefix(prefix, "/") || strings.ContainsAny(prefix, "{}*") {
+		return nil, fmt.Errorf("prefix %s is not a static path", prefix)
+	}
+	segs := segmentsOf(prefix)
+	for _, seg := range segs {
+		if seg == "" {
+			return nil, fmt.Errorf("prefix %q has an empty segment", prefix)
+		}
+	}
+	return segs, nil
+}
+
+// prefixAndRoute is how route pattern stands to prefix: inside, when every
+// path it matches lies under the prefix (or is the prefix), and meets, when
+// some path it matches does. One function decides both, from one reading of
+// each, so the two can never disagree about a prefix.
+func prefixAndRoute(prefix, pattern string) (inside, meets bool, err error) {
+	ps, err := prefixSegments(prefix)
+	if err != nil {
+		return false, false, err
+	}
+	rs := segmentsOf(pattern)
+	meets = segmentsMeetFrom(append(append([]string(nil), ps...), "*"), rs)
+	inside = len(rs) >= len(ps)
+	for i := 0; inside && i < len(ps); i++ {
+		inside = rs[i] == ps[i]
+	}
+	return inside, meets, nil
 }
 
 // identifierRoutes is where the core serves an identity's own documents at
-// the root, by its identifier: /{aid}/did.json, /{aid}/oobi and the like.
-// The segment takes an identifier, a CESR prefix, and the core answers
-// nothing for one it does not hold. A prefix whose first segment is a word no
-// identifier can be ("apps") therefore never takes a request these routes
-// would answer, though chi would hand the word to {aid} if nothing else
-// claimed it. That is the only case the check is told about, and only for
-// these routes; every other parameter is taken to match anything.
+// the root, by identifier: /{aid}/did.json, /{aid}/kel, /{aid}/keri.cesr,
+// /{aid}/oobi, and the OIDC routes under /{aid}/. Each answers a first
+// segment that is not an identifier (iacrypto.IsIdentifierQB64: a CESR
+// identifier code with the length that code carries) with a refusal and
+// nothing else. So a prefix whose first segment is not an identifier, such as
+// /apps, takes no request these routes would answer, though chi would hand
+// the word to {aid} if nothing else claimed it. That is the only case the
+// check is told about; every other parameter, and an identifier-shaped first
+// segment, is taken to match.
 const identifierRoutes = "/{aid}/"
 
-// couldBeAnIdentifier reports whether seg could be a CESR identifier prefix:
-// 44 characters of the base64url alphabet.
-func couldBeAnIdentifier(seg string) bool {
-	if len(seg) != 44 {
-		return false
+// prefixMeetsTheCore reports whether some request under prefix is one a core
+// route matching pattern would answer, with what identifierRoutes says.
+func prefixMeetsTheCore(prefix, pattern string) (bool, error) {
+	_, meets, err := prefixAndRoute(prefix, pattern)
+	if err != nil || !meets {
+		return meets, err
 	}
-	for _, c := range seg {
-		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
-			return false
-		}
+	if strings.HasPrefix(pattern, identifierRoutes) && !iacrypto.IsIdentifierQB64(segmentsOf(prefix)[0]) {
+		return false, nil
 	}
-	return true
-}
-
-// prefixMeetsTheCore is prefixMeets for a route of the core's, with what
-// identifierRoutes says about the core's identifier routes.
-func prefixMeetsTheCore(prefix, pattern string) bool {
-	if strings.HasPrefix(pattern, identifierRoutes) && !couldBeAnIdentifier(segmentsOf(prefix)[0]) {
-		return false
-	}
-	return prefixMeets(prefix, pattern)
+	return true, nil
 }
 
 // theWebUI is the core's catch-all for the web app's own files. Every route

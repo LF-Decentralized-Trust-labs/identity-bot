@@ -11,6 +11,7 @@ import (
 
 	"identity-agent-core/authprovider"
 	"identity-agent-core/didcomm"
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/keriengine"
 	"identity-agent-core/permission"
 
@@ -596,8 +597,43 @@ func TestWhenTwoPatternsMeet(t *testing.T) {
 		{"/apps", "/{aid}/did.json", false},
 		{"/api/mcp", "/api/{x}/thing", true},
 	} {
-		if got := prefixMeetsTheCore(c.prefix, c.pattern); got != c.meet {
+		if got, err := prefixMeetsTheCore(c.prefix, c.pattern); err != nil || got != c.meet {
 			t.Errorf("prefix %s meets %s: %v, want %v", c.prefix, c.pattern, got, c.meet)
+		}
+	}
+}
+
+// A prefix with an empty segment owns nothing: "/" would hold every route,
+// and "//x" and "/x//y" hide one. Each is refused, and an add-on owning one
+// is not made.
+func TestAPrefixWithAnEmptySegmentIsRefused(t *testing.T) {
+	unsealedAfter(t)
+	ok := func(w http.ResponseWriter, r *http.Request) {}
+	for _, p := range []string{"/", "//x", "/x//y", "/x/", ""} {
+		if _, _, err := prefixAndRoute(p, "/api/controllers/{aid}"); err == nil {
+			t.Errorf("prefix %q was taken as a prefix", p)
+		}
+		onlyAddons(t, Addon{ID: "everything", Prefixes: []string{p},
+			Routes:       func(s *CoreServer, r chi.Router) { r.Delete("/controllers/{x}", ok) },
+			PublicRoutes: map[string]string{"DELETE /api/controllers/{x}": "taken over"}})
+		if _, refused := panics(func() { New(Config{DataDir: t.TempDir()}) }); !refused {
+			t.Errorf("a server was made with an add-on owning %q", p)
+		}
+	}
+}
+
+// The core's identity routes at the root are spared only by a prefix whose
+// first segment cannot be an identifier: one shaped like a self-addressing
+// identifier (44 characters) or a machine's (48) covers them.
+func TestOnlyANonIdentifierPrefixSparesTheIdentityRoutes(t *testing.T) {
+	self := "EBfdlu8R27Fbx-ehrqwImnK-8Cm79sqbAQ4MmvEAYqao"
+	machine := "1AAIA2Bz7ZYbFlbmGMg2vt9wPp0VjNPcjyUOuJcDeJ_6aHQh"
+	if !iacrypto.IsIdentifierQB64(self) || !iacrypto.IsIdentifierQB64(machine) {
+		t.Fatalf("the probes are not identifiers: %v %v", iacrypto.IsIdentifierQB64(self), iacrypto.IsIdentifierQB64(machine))
+	}
+	for prefix, want := range map[string]bool{"/apps": false, "/" + self: true, "/" + machine: true} {
+		if got, err := prefixMeetsTheCore(prefix, "/{aid}/did.json"); err != nil || got != want {
+			t.Errorf("prefix %s covers /{aid}/did.json: %v (%v), want %v", prefix, got, err, want)
 		}
 	}
 }

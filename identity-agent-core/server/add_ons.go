@@ -549,32 +549,35 @@ func (s *CoreServer) prefixViolations() []string {
 	var all []owned
 	for _, a := range registeredAddons() {
 		for _, p := range a.Prefixes {
-			if !strings.HasPrefix(p, "/") || strings.ContainsAny(p, "{}*") {
-				out = append(out, a.ID+": prefix "+p+" is not a static path")
+			if _, err := prefixSegments(p); err != nil {
+				out = append(out, a.ID+": "+err.Error())
 				continue
 			}
 			for _, o := range all {
-				if underPrefix(p, o.prefix) || underPrefix(o.prefix, p) {
+				if _, meets, _ := prefixAndRoute(p, o.prefix+"/*"); meets {
 					out = append(out, a.ID+": prefix "+p+" overlaps "+o.id+"'s "+o.prefix)
 				}
 			}
 			all = append(all, owned{a.ID, p})
 			for k := range core {
 				pattern := k[strings.Index(k, " ")+1:]
-				if pattern != theWebUI && prefixMeetsTheCore(p, pattern) {
+				if pattern == theWebUI {
+					continue
+				}
+				if meets, _ := prefixMeetsTheCore(p, pattern); meets {
 					out = append(out, a.ID+": prefix "+p+" covers the core's "+k)
 				}
 			}
 		}
 		for k := range s.addonRoutes(a) {
 			pattern := k[strings.Index(k, " ")+1:]
-			inside := false
+			in := false
 			for _, p := range a.Prefixes {
-				if underPrefix(pattern, p) {
-					inside = true
+				if inside, _, err := prefixAndRoute(p, pattern); err == nil && inside {
+					in = true
 				}
 			}
-			if !inside {
+			if !in {
 				out = append(out, a.ID+": mounts "+k+" outside its prefixes")
 			}
 		}
