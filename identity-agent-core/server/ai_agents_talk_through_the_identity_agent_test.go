@@ -18,6 +18,7 @@ import (
 	"identity-agent-core/agentmessage"
 	"identity-agent-core/asset"
 	"identity-agent-core/conversation"
+	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/sandbox"
 )
 
@@ -58,7 +59,7 @@ func (w *talkWorld) provision(t *testing.T, name string, caps []string) *asset.A
 	if err != nil {
 		t.Fatalf("provisioning %s: %v", name, err)
 	}
-	if _, err := w.s.issueCapabilityGrant(a, authority{}); err != nil {
+	if _, err := w.s.issueCapabilityGrant(a, coretypes.Authority{}); err != nil {
 		t.Fatalf("granting %s: %v", name, err)
 	}
 	return a
@@ -570,7 +571,7 @@ func TestAnAIAgentMessagesOnlyWhomItsGrantNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	a, _ := w.s.aiAgentAsset(w.a.ID)
-	if _, err := w.s.issueCapabilityGrant(&a, authority{}); err != nil {
+	if _, err := w.s.issueCapabilityGrant(&a, coretypes.Authority{}); err != nil {
 		t.Fatal(err)
 	}
 	w.openedWith(t)

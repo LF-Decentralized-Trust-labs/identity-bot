@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/sandbox"
 	"identity-agent-core/witness"
 	"net/http"
@@ -1140,7 +1141,7 @@ func TestEveryIdentityAgentKeepsItsWitnessesUpToDate(t *testing.T) {
 				return nil, fmt.Errorf("offline")
 			}
 			if via == "issuing" {
-				if _, err := s.grantController(aGrant(GradeEnrolled), time.Now().UTC(), authority{}); err != nil {
+				if _, err := s.grantController(aGrant(GradeEnrolled), time.Now().UTC(), coretypes.Authority{}); err != nil {
 					t.Fatal(err)
 				}
 			} else {

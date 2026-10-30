@@ -25,7 +25,9 @@ import (
 	"identity-agent-core/conversation"
 	"identity-agent-core/conversationbundle"
 	"identity-agent-core/didcomm"
+	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/login"
 	"identity-agent-core/permission"
 
@@ -398,7 +400,7 @@ func aSecondMachine(t *testing.T, s *CoreServer) (ControllerGrant, []byte) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	granted, err := s.grantController(g, time.Now().UTC(), authority{})
+	granted, err := s.grantController(g, time.Now().UTC(), coretypes.Authority{})
 	if err != nil {
 		t.Fatalf("anchoring the second machine's grant: %v", err)
 	}
@@ -571,7 +573,7 @@ func TestTheIdentityAgentsSideFailsPlainly(t *testing.T) {
 	ids := exportedIdentities{s: w.s, root: identity.AID, signer: signer}
 	creds := exportedCredentials{s: w.s}
 	wrongSeed := make([]byte, 32)
-	agentLog, err := w.s.KeriDriver.(kelHolder).GetKelByAID(w.b.PairwiseAID)
+	agentLog, err := w.s.KeriDriver.(drivers.KELHolder).GetKelByAID(w.b.PairwiseAID)
 	if err != nil {
 		t.Fatal(err)
 	}

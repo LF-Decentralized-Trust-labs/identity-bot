@@ -503,3 +503,10 @@ type DriverEndpointResponse struct {
 	RawBytesB64 string                 `json:"raw_bytes_b64"`
 	SAID        string                 `json:"said"`
 }
+
+// KELHolder is an engine that can find a key history by identifier, not only
+// by the name it is held under. A name can be reused or renamed; the
+// identifier cannot.
+type KELHolder interface {
+	GetKelByAID(aid string) (*DriverKelResponse, error)
+}

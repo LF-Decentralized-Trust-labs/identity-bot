@@ -18,6 +18,7 @@ import (
 	"identity-agent-core/asset"
 	"identity-agent-core/conversation"
 	"identity-agent-core/didcomm"
+	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/login"
 	"identity-agent-core/permission"
 	"identity-agent-core/sandbox"
@@ -602,7 +603,7 @@ func (s *CoreServer) handleBodySays(w http.ResponseWriter, r *http.Request) {
 		// The opener's reach, as the opener stands now.
 		entries, _ := store.Entries(c.ID, 0)
 		opener, _ := personRefFor(entries, c.OpenedBy)
-		if !s.personStillStands(signerRef(opener)) {
+		if !s.personStillStands(coretypes.Signer(opener)) {
 			refuse("the person who opened this conversation is no longer someone the organisation can prove", http.StatusForbidden)
 			return
 		}

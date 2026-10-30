@@ -35,6 +35,7 @@ import (
 
 	"identity-agent-core/authorisation"
 	"identity-agent-core/drivers"
+	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/login"
 	"identity-agent-core/schemas"
 	"identity-agent-core/store"
@@ -54,20 +55,20 @@ const (
 
 // grantSpec is everything a grant is built from, so it can be built again.
 type grantSpec struct {
-	Schema        string                 `json:"schema"`
-	Issuer        string                 `json:"issuer"`
-	Claims        map[string]interface{} `json:"claims"`
-	Edges         map[string]interface{} `json:"edges,omitempty"`
-	Holder        string                 `json:"holder"`
-	Expiry        string                 `json:"expiry,omitempty"`
-	RequestDigest string                 `json:"request_digest,omitempty"`
-	About         string                 `json:"about,omitempty"`
-	Grant         string                 `json:"controller_grant,omitempty"`
-	Request       *signedRequest         `json:"request,omitempty"`
+	Schema        string                   `json:"schema"`
+	Issuer        string                   `json:"issuer"`
+	Claims        map[string]interface{}   `json:"claims"`
+	Edges         map[string]interface{}   `json:"edges,omitempty"`
+	Holder        string                   `json:"holder"`
+	Expiry        string                   `json:"expiry,omitempty"`
+	RequestDigest string                   `json:"request_digest,omitempty"`
+	About         string                   `json:"about,omitempty"`
+	Grant         string                   `json:"controller_grant,omitempty"`
+	Request       *coretypes.SignedRequest `json:"request,omitempty"`
 }
 
-func (g grantSpec) by() authority {
-	return authority{About: g.About, ControllerGrant: g.Grant, Request: g.Request}
+func (g grantSpec) by() coretypes.Authority {
+	return coretypes.Authority{About: g.About, ControllerGrant: g.Grant, Request: g.Request}
 }
 
 // pendingIssuance is what waits for the device that holds the identity's key:

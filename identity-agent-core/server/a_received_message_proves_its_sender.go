@@ -108,13 +108,6 @@ type ownEvidence struct {
 	RootKEL   []string `json:"root_kel"`
 }
 
-// kelHolder is an engine that can find a key history by identifier, not only
-// by the name it is held under. A name can be reused or renamed; the
-// identifier cannot.
-type kelHolder interface {
-	GetKelByAID(aid string) (*drivers.DriverKelResponse, error)
-}
-
 // ownAgentAtArrival reports whether did is the keyset this agent holds for one
 // of its own AI agents, and returns the evidence to keep if so. Neither an
 // asset row nor a keyset file is enough: both are files this agent writes, and
@@ -143,7 +136,7 @@ func (s *CoreServer) ownAgentAtArrival(aid string, did *didcomm.DID) (string, er
 		return "", fmt.Errorf("the keys are not the ones this Identity Agent holds for %s", aid)
 	}
 	root := s.OwnerRootAID()
-	engine, ok := s.KeriDriver.(kelHolder)
+	engine, ok := s.KeriDriver.(drivers.KELHolder)
 	if root == "" || !ok {
 		return "", fmt.Errorf("this Identity Agent has no root identity and key engine to check with")
 	}

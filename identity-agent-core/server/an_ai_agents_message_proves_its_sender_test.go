@@ -12,6 +12,7 @@ import (
 
 	"identity-agent-core/asset"
 	"identity-agent-core/didcomm"
+	"identity-agent-core/drivers"
 	"identity-agent-core/keriengine"
 	"identity-agent-core/store"
 )
@@ -196,7 +197,7 @@ func TestOwnProofOutlivesTheAIAgent(t *testing.T) {
 // else's making.
 func TestDelegationEvidenceMustBeThisAgentsAndThisRoot(t *testing.T) {
 	w := newTalkWorld(t)
-	engine := w.s.KeriDriver.(kelHolder)
+	engine := w.s.KeriDriver.(drivers.KELHolder)
 	evidence := func(aid string) ownEvidence {
 		kel, err := engine.GetKelByAID(aid)
 		if err != nil {

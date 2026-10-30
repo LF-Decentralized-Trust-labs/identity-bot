@@ -17,6 +17,7 @@ import (
 	"identity-agent-core/asset"
 	"identity-agent-core/authorisation"
 	"identity-agent-core/brainsignin"
+	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/vault"
 
 	"github.com/go-chi/chi/v5"
@@ -538,7 +539,7 @@ type regranted struct {
 //
 // Whatever was lent to the AI agent's bodies that the new grant no longer
 // gives is withdrawn once it stands.
-func (s *CoreServer) regrantAgent(id string, by authority, change func(candidate *asset.Asset) error) (regranted, int, error) {
+func (s *CoreServer) regrantAgent(id string, by coretypes.Authority, change func(candidate *asset.Asset) error) (regranted, int, error) {
 	// One change to an AI agent's grant at a time. Two at once would each find
 	// the same grant to replace, both issue, and leave two usable grants.
 	unlock := lockAgentGrant(id)

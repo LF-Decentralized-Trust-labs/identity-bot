@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"identity-agent-core/drivers"
+	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/login"
 	"identity-agent-core/schemas"
 	"identity-agent-core/store"
@@ -434,7 +435,7 @@ func TestARefusedOrExpiredGrantIsListedSo(t *testing.T) {
 // request has gone is not issued.
 func TestAWaitingGrantNeedsItsRequest(t *testing.T) {
 	e := keyElsewhere(t)
-	if _, err := e.s.grantController(grantFor(5, GradeEnrolled), time.Now().UTC(), authority{}); err == nil {
+	if _, err := e.s.grantController(grantFor(5, GradeEnrolled), time.Now().UTC(), coretypes.Authority{}); err == nil {
 		t.Fatal("a grant was asked for, where the key is elsewhere, with no request behind it")
 	}
 	g := grantFor(6, GradeEnrolled)

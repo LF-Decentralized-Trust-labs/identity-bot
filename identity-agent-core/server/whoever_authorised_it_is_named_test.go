@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/schemas"
 	"identity-agent-core/store"
 
@@ -106,7 +107,7 @@ func TestAMachineIsNotGrantedWhenItsGrantCannotBeAnchored(t *testing.T) {
 func TestTyingAMachineToItsSignerReissuesItsGrant(t *testing.T) {
 	w := newControllerWorld(t)
 	g := aGrant(GradeEnrolled)
-	granted, err := w.s.grantController(g, time.Now().UTC(), authority{})
+	granted, err := w.s.grantController(g, time.Now().UTC(), coretypes.Authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +152,7 @@ func testOwnerSeed() []byte {
 func TestSettlingASignerIsTriedAgainWhenItsGrantCannotBeReissued(t *testing.T) {
 	w := newControllerWorld(t)
 	g := aGrant(GradeEnrolled)
-	granted, err := w.s.grantController(g, time.Now().UTC(), authority{})
+	granted, err := w.s.grantController(g, time.Now().UTC(), coretypes.Authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,11 +176,11 @@ func TestSettlingASignerIsTriedAgainWhenItsGrantCannotBeReissued(t *testing.T) {
 func TestReGrantingAMachine(t *testing.T) {
 	s, _ := grantWorld(t)
 	g := aGrant(GradeEnrolled)
-	first, err := s.grantController(g, time.Now().UTC(), authority{})
+	first, err := s.grantController(g, time.Now().UTC(), coretypes.Authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := s.grantController(g, time.Now().UTC(), authority{})
+	second, err := s.grantController(g, time.Now().UTC(), coretypes.Authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +189,7 @@ func TestReGrantingAMachine(t *testing.T) {
 	}
 	engine := s.KeriDriver
 	s.KeriDriver = nil
-	if _, err := s.grantController(g, time.Now().UTC(), authority{}); err == nil {
+	if _, err := s.grantController(g, time.Now().UTC(), coretypes.Authority{}); err == nil {
 		t.Fatal("a re-grant with nothing to anchor it in succeeded")
 	}
 	s.KeriDriver = engine
@@ -205,14 +206,14 @@ func TestReGrantingAMachine(t *testing.T) {
 func TestAMachineNeverHasTwoGrantsInForce(t *testing.T) {
 	s, _ := grantWorld(t)
 	g := aGrant(GradeEnrolled)
-	first, err := s.grantController(g, time.Now().UTC(), authority{})
+	first, err := s.grantController(g, time.Now().UTC(), coretypes.Authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DataStore.DeleteCredential(first.CredentialSAID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.grantController(g, time.Now().UTC(), authority{}); err == nil {
+	if _, err := s.grantController(g, time.Now().UTC(), coretypes.Authority{}); err == nil {
 		t.Fatal("a machine was re-granted while its earlier grant could not be withdrawn")
 	}
 	for _, c := range credentialsOf(t, s, g.ControllerAID) {
@@ -239,7 +240,7 @@ func TestASessionIssuesNoAuthority(t *testing.T) {
 func TestSettlingASignerNeverLeavesTwoGrantsInForce(t *testing.T) {
 	w := newControllerWorld(t)
 	g := aGrant(GradeEnrolled)
-	granted, err := w.s.grantController(g, time.Now().UTC(), authority{})
+	granted, err := w.s.grantController(g, time.Now().UTC(), coretypes.Authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,12 +276,12 @@ func TestAGrantIsNotIssuedUnsignedWhereTheKeyIsElsewhere(t *testing.T) {
 		t.Fatal(err)
 	}
 	before, _ := s.DataStore.GetEvents(owner.AID)
-	if _, err := s.issueCapabilityGrant(agent, authority{About: agent.ID}); !errors.Is(err, errKeyElsewhere) && !errors.Is(err, errNeedsSignedRequest) {
+	if _, err := s.issueCapabilityGrant(agent, coretypes.Authority{About: agent.ID}); !errors.Is(err, errKeyElsewhere) && !errors.Is(err, errNeedsSignedRequest) {
 		t.Fatalf("issuing where the key is elsewhere: %v", err)
 	}
 	// Asked for without a signed request, there is nothing to show the
 	// device that holds the key as the authority for it: refused.
-	if _, err := s.grantController(aGrant(GradeEnrolled), time.Now().UTC(), authority{}); err == nil {
+	if _, err := s.grantController(aGrant(GradeEnrolled), time.Now().UTC(), coretypes.Authority{}); err == nil {
 		t.Fatal("a machine was granted, where the key is elsewhere, with no request behind it")
 	}
 	after, _ := s.DataStore.GetEvents(owner.AID)
@@ -387,7 +388,7 @@ func TestAMachineSpeaksOnlyForAnActiveSigner(t *testing.T) {
 	w := newControllerWorld(t)
 	g := grantFor(7, GradeEnrolled)
 	g.Signer = "ENotASigner0000000000000000000000000000000000"
-	if _, err := w.s.grantController(g, time.Now().UTC(), authority{}); err == nil {
+	if _, err := w.s.grantController(g, time.Now().UTC(), coretypes.Authority{}); err == nil {
 		t.Fatal("a machine was granted as speaking for somebody who is not a signer")
 	}
 	signers := w.s.signers()
@@ -395,7 +396,7 @@ func TestAMachineSpeaksOnlyForAnActiveSigner(t *testing.T) {
 		t.Fatal("the world has no signer")
 	}
 	g.Signer = signers[0].AID
-	if _, err := w.s.grantController(g, time.Now().UTC(), authority{}); err != nil {
+	if _, err := w.s.grantController(g, time.Now().UTC(), coretypes.Authority{}); err != nil {
 		t.Fatalf("a machine speaking for an active signer: %v", err)
 	}
 }

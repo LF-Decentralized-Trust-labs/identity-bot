@@ -4,6 +4,7 @@ import (
 	"sort"
 	"time"
 
+	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/schemas"
 	"identity-agent-core/store"
 )
@@ -106,12 +107,10 @@ func (s *CoreServer) HoldsValidCredential(aid, schema, issuer string) bool {
 }
 
 // findCapabilityGrant returns the newest usable capability-grant credential held by aid.
-func (s *CoreServer) findCapabilityGrant(aid string) *grantRef {
+func (s *CoreServer) findCapabilityGrant(aid string) *coretypes.GrantRef {
 	held := s.grantsHeldBy(aid, true)
 	if len(held) == 0 {
 		return nil
 	}
-	return &grantRef{SAID: held[0].SAID}
+	return &coretypes.GrantRef{SAID: held[0].SAID}
 }
-
-type grantRef struct{ SAID string }

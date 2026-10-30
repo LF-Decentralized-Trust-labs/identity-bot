@@ -16,6 +16,7 @@ import (
 	"identity-agent-core/conversation"
 	"identity-agent-core/conversationbundle"
 	"identity-agent-core/didcomm"
+	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/keriengine"
 	"identity-agent-core/permission"
@@ -284,7 +285,7 @@ func (s *CoreServer) exportKeyLog(aid string, seed []byte) (conversationbundle.K
 			raws = append(raws, raw)
 			sigs = append(sigs, ev.CesrSignature)
 		}
-	} else if engine, ok := s.KeriDriver.(kelHolder); ok {
+	} else if engine, ok := s.KeriDriver.(drivers.KELHolder); ok {
 		held, err := engine.GetKelByAID(aid)
 		if err != nil || len(held.RawEventsB64) == 0 {
 			return kl, fmt.Errorf("the key log of %s is not held here", aid)
@@ -373,7 +374,7 @@ func (s *CoreServer) exportLogSigner(rec invocationSignerRecord) (conversationbu
 	if err != nil {
 		return conversationbundle.KeyLog{}, err
 	}
-	if engine, ok := s.KeriDriver.(kelHolder); ok {
+	if engine, ok := s.KeriDriver.(drivers.KELHolder); ok {
 		if held, err := engine.GetKelByAID(rec.AID); err == nil && len(held.RawEventsB64) > 0 {
 			return s.exportKeyLog(rec.AID, seed)
 		}

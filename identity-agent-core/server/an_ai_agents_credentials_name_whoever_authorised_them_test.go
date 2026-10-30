@@ -14,6 +14,7 @@ import (
 	"identity-agent-core/agenthost"
 	"identity-agent-core/authprovider"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/permission"
 	"identity-agent-core/schemas"
 )
@@ -151,7 +152,7 @@ func TestACredentialThatDoesNotRestOnItsRequestIsNotIssued(t *testing.T) {
 		}
 	}
 	stamp := time.Now().UTC().Format(time.RFC3339)
-	bogus := authority{Request: &signedRequest{Kind: "owner", Signer: "EOWNERTESTAID", Body: `{"capabilities":[]}`,
+	bogus := coretypes.Authority{Request: &coretypes.SignedRequest{Kind: "owner", Signer: "EOWNERTESTAID", Body: `{"capabilities":[]}`,
 		Signed:    canonicalRequestString("PUT", "/api/mcp/agents/"+w.a.ID+"/capabilities", stamp, []byte(`{"capabilities":[]}`)),
 		Signature: "0Bnot-a-signature"}, About: w.a.ID}
 	if _, err := w.s.issueCapabilityGrant(w.a, bogus); err == nil {
@@ -174,15 +175,15 @@ func TestACredentialThatDoesNotRestOnItsRequestIsNotIssued(t *testing.T) {
 func TestAFirstVersionCredentialIssuedAfterwardsIsNotHonoured(t *testing.T) {
 	s, agent := grantWorld(t)
 	early, err := s.issueAssetCredential(schemas.AIAgentGrantV1, agent.PairwiseAID, agent.DelegatorAID,
-		map[string]interface{}{"name": "early", "capabilities": []string{}}, "", authority{})
+		map[string]interface{}{"name": "early", "capabilities": []string{}}, "", coretypes.Authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.issueCapabilityGrant(agent, authority{}); err != nil {
+	if _, err := s.issueCapabilityGrant(agent, coretypes.Authority{}); err != nil {
 		t.Fatal(err)
 	}
 	late, err := s.issueAssetCredential(schemas.AIAgentGrantV1, agent.PairwiseAID, agent.DelegatorAID,
-		map[string]interface{}{"name": "late", "capabilities": []string{}}, "", authority{})
+		map[string]interface{}{"name": "late", "capabilities": []string{}}, "", coretypes.Authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +308,7 @@ func TestARequestAuthorisesOneCredential(t *testing.T) {
 	path := "/api/mcp/agents/" + w.a.ID + "/capabilities"
 	ia := w.s.thisIdentityAgentsIdentifier()
 	sig, _ := SignOwnerRequest(ia, "PUT", path, stamp, []byte(body), testOwnerSeed())
-	by := authority{About: w.a.ID, Request: &signedRequest{Kind: "owner", Signer: "EOWNERTESTAID", Body: body,
+	by := coretypes.Authority{About: w.a.ID, Request: &coretypes.SignedRequest{Kind: "owner", Signer: "EOWNERTESTAID", Body: body,
 		Signed: canonicalOwnerRequest(ia, "PUT", path, stamp, []byte(body)), Signature: sig}}
 	if _, err := w.s.issueCapabilityGrant(w.a, by); err != nil {
 		t.Fatalf("the first credential on the request: %v", err)

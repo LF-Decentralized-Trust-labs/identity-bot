@@ -9,6 +9,7 @@ import (
 
 	"identity-agent-core/asset"
 	"identity-agent-core/drivers"
+	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/keriengine"
 	"identity-agent-core/login"
 	"identity-agent-core/store"
@@ -111,7 +112,7 @@ func newControllerWorld(t *testing.T) *controllerWorld {
 	}
 	// Granted as a real one is: anchored. Its signer is settled at first use.
 	g, _, _ := s.controllers().Get(w.ctlAID)
-	if _, err := s.grantController(g, time.Now().UTC(), authority{}); err != nil {
+	if _, err := s.grantController(g, time.Now().UTC(), coretypes.Authority{}); err != nil {
 		t.Fatalf("anchoring the controller's grant: %v", err)
 	}
 	// The sealed transport replays what it opens through the server's own

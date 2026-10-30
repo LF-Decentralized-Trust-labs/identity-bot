@@ -7,6 +7,7 @@ import (
 
 	"identity-agent-core/asset"
 	"identity-agent-core/drivers"
+	"identity-agent-core/internal/coretypes"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -108,21 +109,14 @@ func (s *CoreServer) mountAssetRoutes(r chi.Router) {
 }
 
 // findAgentAssetByAID returns the provisioned ai_agent asset whose delegated AID is aid.
-func (s *CoreServer) findAgentAssetByAID(aid string) *assetAgentRef {
+func (s *CoreServer) findAgentAssetByAID(aid string) *coretypes.AgentRef {
 	if s.assetHandler == nil || aid == "" {
 		return nil
 	}
 	for _, a := range s.assetHandler.Store.ListAssets() {
 		if a.AssetType == "ai_agent" && a.PairwiseAID == aid {
-			return &assetAgentRef{ID: a.ID, PairwiseAID: a.PairwiseAID, DelegatorAID: a.DelegatorAID, Capabilities: a.Capabilities}
+			return &coretypes.AgentRef{ID: a.ID, PairwiseAID: a.PairwiseAID, DelegatorAID: a.DelegatorAID, Capabilities: a.Capabilities}
 		}
 	}
 	return nil
-}
-
-type assetAgentRef struct {
-	ID           string
-	PairwiseAID  string
-	DelegatorAID string
-	Capabilities []string
 }

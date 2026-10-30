@@ -7,6 +7,7 @@ import (
 
 	"identity-agent-core/asset"
 	"identity-agent-core/drivers"
+	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/store"
 )
 
@@ -15,7 +16,7 @@ import (
 // to somebody who has only the log.
 func TestTheOrganisationsOwnEventsAreSigned(t *testing.T) {
 	s, agent := grantWorld(t)
-	if _, err := s.issueCapabilityGrant(agent, authority{}); err != nil {
+	if _, err := s.issueCapabilityGrant(agent, coretypes.Authority{}); err != nil {
 		t.Fatal(err)
 	}
 	events, _ := s.DataStore.GetEvents(agent.DelegatorAID)
@@ -51,7 +52,7 @@ func scopesFor(t *testing.T, s *CoreServer, a *asset.Asset, grantSAID, token str
 // denied. Issued and verified for real, the grant now decides the agent's scopes.
 func TestAnAIAgentGrantIsIssuedAndVerifiedOnTheShippedEngine(t *testing.T) {
 	s, agent := grantWorld(t)
-	grant, err := s.issueCapabilityGrant(agent, authority{})
+	grant, err := s.issueCapabilityGrant(agent, coretypes.Authority{})
 	if err != nil {
 		t.Fatalf("issuing the grant: %v", err)
 	}
@@ -70,12 +71,12 @@ func TestAnAIAgentGrantIsIssuedAndVerifiedOnTheShippedEngine(t *testing.T) {
 // cannot be found and used beside the new.
 func TestReissuingAGrantRevokesTheOneItReplaces(t *testing.T) {
 	s, agent := grantWorld(t)
-	first, err := s.issueCapabilityGrant(agent, authority{})
+	first, err := s.issueCapabilityGrant(agent, coretypes.Authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	agent.Capabilities = []string{"system.info.read"}
-	second, err := s.issueCapabilityGrant(agent, authority{})
+	second, err := s.issueCapabilityGrant(agent, coretypes.Authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +103,7 @@ func TestALapsedGrantAdmitsNothing(t *testing.T) {
 	s, agent := grantWorld(t)
 	lapsed := mustParseTime(t, "2020-01-01T00:00:00Z")
 	agent.GrantValidUntil = &lapsed
-	grant, err := s.issueCapabilityGrant(agent, authority{})
+	grant, err := s.issueCapabilityGrant(agent, coretypes.Authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +148,7 @@ func mustParseTime(t *testing.T, s string) time.Time {
 // before this, one unsigned event anywhere in the log denied every AI agent.
 func TestALaterUnsignedEventDoesNotWithdrawAGrant(t *testing.T) {
 	s, agent := grantWorld(t)
-	grant, err := s.issueCapabilityGrant(agent, authority{})
+	grant, err := s.issueCapabilityGrant(agent, coretypes.Authority{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +167,7 @@ func TestALaterUnsignedEventDoesNotWithdrawAGrant(t *testing.T) {
 // A grant counts only from the identity that delegated the AI agent.
 func TestAGrantFromAnotherIssuerAdmitsNothing(t *testing.T) {
 	s, agent := grantWorld(t)
-	grant, err := s.issueCapabilityGrant(agent, authority{})
+	grant, err := s.issueCapabilityGrant(agent, coretypes.Authority{})
 	if err != nil {
 		t.Fatal(err)
 	}

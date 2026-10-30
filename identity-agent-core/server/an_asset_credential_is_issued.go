@@ -9,6 +9,7 @@ import (
 	"identity-agent-core/asset"
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/schemas"
 	"identity-agent-core/store"
 )
@@ -25,7 +26,7 @@ import (
 // by is who authorised it, written into the credential where its schema admits
 // it: an edge to their machine's Controller Grant and the request they signed.
 func (s *CoreServer) issueAssetCredential(
-	kind *schemas.AssetGrant, holder, issuer string, claims map[string]interface{}, expiry string, by authority,
+	kind *schemas.AssetGrant, holder, issuer string, claims map[string]interface{}, expiry string, by coretypes.Authority,
 ) (string, error) {
 	if s.KeriDriver == nil {
 		return "", fmt.Errorf("keri driver unavailable")
@@ -68,7 +69,7 @@ func (s *CoreServer) issueAssetCredential(
 			return "", fmt.Errorf("this request already authorised a credential, and authorises no other")
 		}
 	}
-	edges := by.name(kind, claims)
+	edges := nameAuthority(by, kind, claims)
 	if err := kind.CheckAttributes(claims); err != nil {
 		return "", err
 	}
@@ -150,7 +151,7 @@ func (s *CoreServer) issueAssetCredential(
 // request it was issued on, and the check of it against that request with the
 // order of events read from the key log.
 func (s *CoreServer) finishIssuance(kind *schemas.AssetGrant, result *drivers.DriverIssueCredentialResponse,
-	holder, issuer, expiry, registrySAID, requestDigest string, by authority) (string, error) {
+	holder, issuer, expiry, registrySAID, requestDigest string, by coretypes.Authority) (string, error) {
 	// Fixed-width to the nanosecond, so two credentials issued in one second
 	// still order correctly as text, which is how the newest is picked.
 	now := time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z07:00")
@@ -236,7 +237,7 @@ func (s *CoreServer) ensureRegistry(issuerRootAID string) (string, error) {
 // agent's AID, persists the credential and its anchoring KEL event (so a verifier
 // can resolve the issuer KEL), and returns the grant SAID. Requires the KERI
 // driver; on any failure the caller falls back to the stored ceiling.
-func (s *CoreServer) issueCapabilityGrant(agent *asset.Asset, by authority) (string, error) {
+func (s *CoreServer) issueCapabilityGrant(agent *asset.Asset, by coretypes.Authority) (string, error) {
 	agentAID, issuerRootAID := agent.PairwiseAID, agent.DelegatorAID
 	capabilities := agent.Capabilities
 	if capabilities == nil {

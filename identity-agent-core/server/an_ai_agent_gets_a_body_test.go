@@ -17,6 +17,7 @@ import (
 
 	"identity-agent-core/agentbody"
 	"identity-agent-core/didcomm"
+	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/sandbox"
 	"identity-agent-core/schemas"
 
@@ -156,7 +157,7 @@ func bodyWorld(t *testing.T) (*CoreServer, string) {
 	if err := s.assetHandler.Store.UpsertAsset(*agent); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.issueCapabilityGrant(agent, authority{}); err != nil {
+	if _, err := s.issueCapabilityGrant(agent, coretypes.Authority{}); err != nil {
 		t.Fatal(err)
 	}
 	mgr, err := sandbox.NewManager(sandbox.ManagerConfig{Log: s.logForTest(t, s.DataDir), Vault: s.vaultForTest(s.DataDir), DataDir: s.DataDir})
