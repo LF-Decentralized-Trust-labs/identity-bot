@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -46,25 +47,35 @@ type Addon struct {
 	// until it stops; stop closes when it does.
 	Run func(s *CoreServer, stop <-chan struct{})
 
-	// EveryTick runs on each tick of the loop every Identity Agent runs
-	// (what_runs_every_tick.go), before the core's own work for that tick.
-	EveryTick func(s *CoreServer)
 	// TickAtMost, when set, is the longest the add-on can wait between two
-	// ticks; the loop ticks at least that often.
+	// ticks of the loop every Identity Agent runs (what_runs_every_tick.go);
+	// the loop ticks at least that often.
 	TickAtMost time.Duration
+
+	// AnchoredChains are chains the add-on keeps beside the activity log, such
+	// as AI agents' conversations, whose newest entries the record's
+	// anchoring fixes along with the log's head.
+	AnchoredChains func(s *CoreServer) (AnchoredChains, error)
 
 	// CredentialWithdrawn runs when a credential this identity issued is
 	// withdrawn or revoked, so that whatever the add-on gave on the strength
 	// of it ends now rather than when it would have lapsed. why says which.
 	CredentialWithdrawn func(s *CoreServer, why string)
+}
 
-	// ReloadKeyLogs hands the KERI engine any key log the add-on writes to
-	// besides the identity's own: at start, and whenever the core reloads
-	// the identity's.
-	ReloadKeyLogs func(s *CoreServer)
-	// WitnessesCoverDelegates reports whether the identity's witnesses are
-	// asked to witness identities delegated from it, as well as the identity.
-	WitnessesCoverDelegates func(s *CoreServer) bool
+// AnchoredChains are chains of entries, each entry naming the hash of the one
+// before, kept beside the activity log.
+type AnchoredChains interface {
+	// Heads is each chain's newest entry, by the chain's id.
+	Heads() (map[string]ChainHead, error)
+	// EntryHash is the hash of entry seq of chain id.
+	EntryHash(id string, seq int) (string, error)
+}
+
+// ChainHead is a chain's newest entry.
+type ChainHead struct {
+	Seq  int
+	Hash string
 }
 
 var (
@@ -126,15 +137,6 @@ func (s *CoreServer) runAddons(stop <-chan struct{}) {
 	}
 }
 
-// addonsTick runs every add-on's work for this tick.
-func (s *CoreServer) addonsTick() {
-	for _, a := range registeredAddons() {
-		if a.EveryTick != nil {
-			a.EveryTick(s)
-		}
-	}
-}
-
 // addonsTickAtMost is the shortest TickAtMost an add-on asked for, or 0
 // where none did.
 func addonsTickAtMost() time.Duration {
@@ -156,22 +158,27 @@ func (s *CoreServer) credentialWithdrawn(why string) {
 	}
 }
 
-// reloadAddonKeyLogs has every add-on hand the engine the key logs it writes.
-func (s *CoreServer) reloadAddonKeyLogs() {
-	for _, a := range registeredAddons() {
-		if a.ReloadKeyLogs != nil {
-			a.ReloadKeyLogs(s)
-		}
-	}
-}
+// errNoAnchoredChains is an Identity Agent none of whose add-ons keeps chains
+// beside the log.
+var errNoAnchoredChains = errors.New("no add-on here keeps chains beside the activity log")
 
-// witnessesCoverDelegates reports whether any add-on has the identity's
-// witnesses witness the identities delegated from it.
-func (s *CoreServer) witnessesCoverDelegates() bool {
+// anchoredChains are the chains every add-on keeps beside the log. It fails
+// when none keeps any, or when one cannot be opened, exactly as the record's
+// anchoring treats chains it cannot read.
+func (s *CoreServer) anchoredChains() ([]AnchoredChains, error) {
+	var out []AnchoredChains
 	for _, a := range registeredAddons() {
-		if a.WitnessesCoverDelegates != nil && a.WitnessesCoverDelegates(s) {
-			return true
+		if a.AnchoredChains == nil {
+			continue
 		}
+		c, err := a.AnchoredChains(s)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
 	}
-	return false
+	if len(out) == 0 {
+		return nil, errNoAnchoredChains
+	}
+	return out, nil
 }

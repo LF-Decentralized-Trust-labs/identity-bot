@@ -1,9 +1,6 @@
 package server
 
 import (
-	"errors"
-	"log"
-
 	"identity-agent-core/conversation"
 
 	"github.com/go-chi/chi/v5"
@@ -30,14 +27,17 @@ func init() {
 		// the vault, where every other sign-in is kept.
 		Prepare: func(s *CoreServer) { s.moveBrainSecretsIntoTheVault() },
 		Run:     func(s *CoreServer, stop <-chan struct{}) { s.keepSweepingLends(stop) },
-		EveryTick: func(s *CoreServer) {
-			if _, err := s.anchorRecord(); err != nil && !errors.Is(err, errKeyElsewhere) {
-				log.Printf("[record] anchoring: %v", err)
-			}
-		},
 		// Half the time a quiet conversation takes to close, so its last
 		// entry is anchored before it closes.
 		TickAtMost: conversation.IdleClose / 2,
+		// Conversations are anchored with the log.
+		AnchoredChains: func(s *CoreServer) (AnchoredChains, error) {
+			st, err := s.conversations()
+			if err != nil {
+				return nil, err
+			}
+			return conversationChains{st}, nil
+		},
 		CredentialWithdrawn: func(s *CoreServer, why string) {
 			// What was lent on the strength of a grant or a body's credential
 			// is withdrawn once the credential is.
@@ -46,8 +46,6 @@ func init() {
 			// destroyed.
 			s.sweepMachinesSoon(why)
 		},
-		ReloadKeyLogs:           func(s *CoreServer) { s.reloadRecordIdentity() },
-		WitnessesCoverDelegates: func(s *CoreServer) bool { return s.anchorsItsRecord() },
 	})
 }
 
@@ -73,4 +71,28 @@ func (s *CoreServer) aiAgentRoutes(r chi.Router) {
 	r.Get("/mcp/tokens", s.handleListMCPTokens)
 	r.Delete("/mcp/tokens/{name}", s.handleRevokeMCPToken)
 	r.Get("/endpoint/health", s.handleEndpointHealth)
+}
+
+// conversationChains are the conversations, as chains the record's anchoring
+// fixes.
+type conversationChains struct{ st *conversation.Store }
+
+func (c conversationChains) Heads() (map[string]ChainHead, error) {
+	heads, err := c.st.Heads()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]ChainHead, len(heads))
+	for id, h := range heads {
+		out[id] = ChainHead{Seq: h.Seq, Hash: h.HeadHash}
+	}
+	return out, nil
+}
+
+func (c conversationChains) EntryHash(id string, seq int) (string, error) {
+	e, err := c.st.EntryAt(id, seq)
+	if err != nil {
+		return "", err
+	}
+	return e.Hash, nil
 }

@@ -17,9 +17,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"identity-agent-core/activitylog"
 	"identity-agent-core/backup"
-	"identity-agent-core/conversation"
-	"identity-agent-core/conversationbundle"
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/keriengine"
@@ -67,7 +66,7 @@ import (
 const recordIdentityFile = "record_identity.json"
 
 // capabilityRecordAnchoring is the governance log's row for an anchoring.
-const capabilityRecordAnchoring = conversationbundle.CapabilityRecordAnchoring
+const capabilityRecordAnchoring = activitylog.CapabilityRecordAnchoring
 
 var (
 	anchorEvery = intFromEnv("RECORD_ANCHOR_EVERY", 20)
@@ -233,9 +232,9 @@ func recordIndex() (int, error) {
 // format is the bundle's, so an exported record is read exactly as it was
 // written.
 type (
-	anchorStatement      = conversationbundle.AnchorStatement
-	anchoredLog          = conversationbundle.AnchoredLog
-	anchoredConversation = conversationbundle.AnchoredConversation
+	anchorStatement      = activitylog.AnchorStatement
+	anchoredLog          = activitylog.AnchoredLog
+	anchoredConversation = activitylog.AnchoredConversation
 )
 
 func (s *CoreServer) recordIdentityPath() string {
@@ -509,14 +508,16 @@ func (s *CoreServer) anchorRecord() (bool, error) {
 	if signer, found, err := readInvocationSignerRecord(s.DataDir); err == nil && found {
 		st.Signer = signer.AID
 	}
-	if convs, err := s.conversations(); err == nil {
-		heads, err := convs.Heads()
-		if err != nil {
-			return false, err
-		}
-		for _, c := range heads {
-			if c.Seq > anchored[c.ID] {
-				st.Conversations = append(st.Conversations, anchoredConversation{ID: c.ID, Seq: c.Seq, Head: c.HeadHash})
+	if chains, err := s.anchoredChains(); err == nil {
+		for _, chain := range chains {
+			heads, err := chain.Heads()
+			if err != nil {
+				return false, err
+			}
+			for id, c := range heads {
+				if c.Seq > anchored[id] {
+					st.Conversations = append(st.Conversations, anchoredConversation{ID: id, Seq: c.Seq, Head: c.Hash})
+				}
 			}
 		}
 	}
@@ -658,12 +659,24 @@ func (s *CoreServer) checkAnchors() (anchorCheck, error) {
 		return out, nil
 	}
 	rows := s.ActivityLog
-	heads := map[string]conversation.Conversation{}
-	convs, cerr := s.conversations()
-	if cerr == nil {
-		if h, err := convs.Heads(); err == nil {
-			heads = h
+	heads := map[string]ChainHead{}
+	chains, cerr := s.anchoredChains()
+	for _, chain := range chains {
+		if h, err := chain.Heads(); err == nil {
+			for id, c := range h {
+				heads[id] = c
+			}
 		}
+	}
+	entryHash := func(id string, seq int) (string, error) {
+		var err error
+		for _, chain := range chains {
+			var h string
+			if h, err = chain.EntryHash(id, seq); err == nil {
+				return h, nil
+			}
+		}
+		return "", err
 	}
 	unanchored := func(through int64, anchored map[string]int) (anchorCheck, error) {
 		n, err := rows.RowsAfter(through)
@@ -819,8 +832,8 @@ func (s *CoreServer) checkAnchors() (anchorCheck, error) {
 			if cerr != nil {
 				return broken(sn, "the conversations an anchor fixes cannot be read")
 			}
-			e, err := convs.EntryAt(c.ID, c.Seq)
-			if err != nil || e.Hash != c.Head {
+			h, err := entryHash(c.ID, c.Seq)
+			if err != nil || h != c.Head {
 				return broken(sn, fmt.Sprintf("entry %d of conversation %s, which an anchor fixes, has been removed or changed", c.Seq, c.ID))
 			}
 			if c.Seq > anchoredSeq[c.ID] {

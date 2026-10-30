@@ -455,7 +455,7 @@ func New(cfg Config) (*CoreServer, error) {
 	wsvc.SignReceipt = s.signWitnessReceipt
 	// An Identity Agent that anchors its record through a delegated record
 	// identity asks its witnesses to witness that identity too.
-	wsvc.AskToCoverDelegates = s.witnessesCoverDelegates
+	wsvc.AskToCoverDelegates = s.anchorsItsRecord
 	wsvc.SignAsRequester = func(statement string) (string, error) {
 		seed, err := s.identitySigningSeed()
 		if err != nil {
@@ -4785,11 +4785,10 @@ func (s *CoreServer) prepareKeyLogs() {
 }
 
 // reloadKeyLogs hands the engine every key log this Identity Agent writes to:
-// its identity's, then any an add-on writes to (the record identity's, which
-// its identity approved).
+// its identity's, then the record identity's, which its identity approved.
 func (s *CoreServer) reloadKeyLogs() {
 	s.reloadIdentityIntoDriver()
-	s.reloadAddonKeyLogs()
+	s.reloadRecordIdentity()
 }
 
 func (s *CoreServer) reloadIdentityIntoDriver() {

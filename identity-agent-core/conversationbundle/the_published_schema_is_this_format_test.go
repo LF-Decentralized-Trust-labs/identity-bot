@@ -31,9 +31,9 @@ func TestThePublishedSchemaDescribesTheBundle(t *testing.T) {
 		"log_record":            activitylog.InvocationEvent{},
 		"cost":                  activitylog.Cost{},
 		"anchor":                Anchor{},
-		"anchor_statement":      AnchorStatement{},
-		"anchored_log":          AnchoredLog{},
-		"anchored_conversation": AnchoredConversation{},
+		"anchor_statement":      activitylog.AnchorStatement{},
+		"anchored_log":          activitylog.AnchoredLog{},
+		"anchored_conversation": activitylog.AnchoredConversation{},
 	}
 	var faults []string
 	for def, v := range held {

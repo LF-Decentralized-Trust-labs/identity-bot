@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -100,12 +101,31 @@ func TestTheLoopTicksAsOftenAsAnAddOnNeeds(t *testing.T) {
 	}
 }
 
-// What an add-on does on a tick runs when the loop asks the add-ons.
-func TestATickAsksTheAddOns(t *testing.T) {
-	ticked := 0
-	onlyAddons(t, Addon{EveryTick: func(s *CoreServer) { ticked++ }})
-	(&CoreServer{}).addonsTick()
-	if ticked != 1 {
-		t.Fatalf("an add-on's tick ran %d times", ticked)
+// The record's anchoring reads the chains every add-on keeps beside the log;
+// where none keeps any, it treats them as chains it cannot read.
+func TestTheAnchoringReadsTheChainsAddOnsKeep(t *testing.T) {
+	onlyAddons(t, Addon{Name: "keeps none"})
+	if _, err := (&CoreServer{}).anchoredChains(); !errors.Is(err, errNoAnchoredChains) {
+		t.Fatalf("with no add-on keeping chains, the anchoring was given %v", err)
 	}
+	chain := fixedChains{"c1": {Seq: 3, Hash: "Ehead"}}
+	onlyAddons(t, Addon{Name: "keeps one", AnchoredChains: func(*CoreServer) (AnchoredChains, error) { return chain, nil }})
+	chains, err := (&CoreServer{}).anchoredChains()
+	if err != nil || len(chains) != 1 {
+		t.Fatalf("the anchoring was not given the add-on's chains: %v %v", chains, err)
+	}
+	if heads, _ := chains[0].Heads(); heads["c1"].Seq != 3 {
+		t.Fatalf("the chain's head was not read: %+v", heads)
+	}
+}
+
+// fixedChains are chains whose entries are their heads.
+type fixedChains map[string]ChainHead
+
+func (f fixedChains) Heads() (map[string]ChainHead, error) { return f, nil }
+func (f fixedChains) EntryHash(id string, seq int) (string, error) {
+	if h, ok := f[id]; ok && h.Seq == seq {
+		return h.Hash, nil
+	}
+	return "", errors.New("no such entry")
 }

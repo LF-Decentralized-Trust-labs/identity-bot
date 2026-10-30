@@ -943,7 +943,7 @@ func (v *verifier) checkLog() map[int64]string {
 			}
 		}
 		hashes[row.ID] = activitylog.HashRecord([]byte(row.Record))
-		if ev.CapabilityID == CapabilityRecordAnchoring && len(v.b.Anchors) == 0 {
+		if ev.CapabilityID == activitylog.CapabilityRecordAnchoring && len(v.b.Anchors) == 0 {
 			v.fault(where, "it records that the record was anchored, and the bundle carries no anchors")
 		}
 		if ev.WorkItem == v.b.Conversation && ev.ResultStatus == "ok" {
@@ -1045,7 +1045,7 @@ func (v *verifier) checkAnchors(rowHashes map[int64]string) {
 			v.fault(aw, "the statement carried is not the one this anchor seals")
 			continue
 		}
-		var st AnchorStatement
+		var st activitylog.AnchorStatement
 		if err := json.Unmarshal([]byte(statement), &st); err != nil {
 			v.fault(aw, "the statement it seals is unreadable")
 			continue

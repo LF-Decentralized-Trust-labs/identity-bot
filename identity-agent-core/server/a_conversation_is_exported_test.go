@@ -254,7 +254,7 @@ func TestDeletingRowsAfterAnAnchorIsDetected(t *testing.T) {
 
 	// The newest anchor fixes the newest row when the export was made: cut the
 	// log there.
-	var newest conversationbundle.AnchorStatement
+	var newest activitylog.AnchorStatement
 	if err := json.Unmarshal([]byte(b.Anchors[len(b.Anchors)-1].Statement), &newest); err != nil {
 		t.Fatal(err)
 	}

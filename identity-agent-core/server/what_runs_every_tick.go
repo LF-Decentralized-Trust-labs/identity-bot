@@ -1,16 +1,16 @@
 package server
 
 import (
+	"errors"
 	"log"
 	"os"
 	"time"
 )
 
-// What the Identity Agent does on every tick, until it stops: what each
-// add-on does on a tick (anchoring the record, where one is anchored), then
-// adopt what the device that holds the key has signed, ask again for
-// withdrawals still waiting, and keep its witnesses up to date. Every Identity
-// Agent runs this loop, whatever add-ons it includes.
+// What the Identity Agent does on every tick, until it stops: anchor its record
+// where it anchors one, adopt what the device that holds the key has signed,
+// ask again for withdrawals still waiting, and keep its witnesses up to date.
+// Every Identity Agent runs this loop, whatever add-ons it includes.
 
 // keepAnchoring runs a tick every anchorTick until stop closes.
 func (s *CoreServer) keepAnchoring(stop <-chan struct{}) {
@@ -28,7 +28,9 @@ func (s *CoreServer) keepAnchoring(stop <-chan struct{}) {
 
 // tick is what runs every anchorTick.
 func (s *CoreServer) tick() {
-	s.addonsTick()
+	if _, err := s.anchorRecord(); err != nil && !errors.Is(err, errKeyElsewhere) {
+		log.Printf("[record] anchoring: %v", err)
+	}
 	// What the device that holds the key signed and is not here yet.
 	if _, err := s.adoptWhatTheDeviceSigned(nil); err != nil {
 		log.Printf("[grants] %v", err)
