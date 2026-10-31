@@ -167,7 +167,7 @@
       "go_reads": false
     }
   ],
-  "description": "Produced by the Go core: canonical bodies, accept/refuse decisions for key and signature spellings, and a signed assertion. The TypeScript verifier must agree byte for byte.",
+  "description": "Produced by the Go core: canonical bodies, accept/refuse decisions for key and signature spellings, and a signed assertion. The TypeScript verifier must agree byte for byte. Regenerated and checked by TestThePublishedLoginVectorsAreTheCores in identity-agent-core/login.",
   "non_transferable_aid": [
     {
       "name": "canonical",
@@ -178,8 +178,7 @@
     {
       "name": "lead bits set in the second character",
       "value": "BQOhB7_zzhC-HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4",
-      "go_accepts": true,
-      "raw_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+      "go_accepts": false
     },
     {
       "name": "a trailing character",
@@ -337,14 +336,12 @@
     {
       "name": "lead bits set in the second character",
       "value": "DQOhB7_zzhC-HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4",
-      "go_accepts": true,
-      "raw_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+      "go_accepts": false
     },
     {
       "name": "lead bits set high in the second character",
       "value": "DwOhB7_zzhC-HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4",
-      "go_accepts": true,
-      "raw_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+      "go_accepts": false
     },
     {
       "name": "a trailing character",

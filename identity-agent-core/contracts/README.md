@@ -39,7 +39,7 @@ cannot run fails. The relay protocol's Python check and
 `check_model_call_vectors.py` follow the same rule.
 
 When a format changes on purpose, regenerate the files with
-`IA_WRITE_CONTRACTS=1 go test ./schemas ./agentbody ./agentmessage ./modelcall` (refused
+`IA_WRITE_CONTRACTS=1 go test ./schemas ./agentbody ./agentmessage ./modelcall ./login` (refused
 when `CI` is set) and review the diff: every changed line is a change another
 implementation has to make.
 
@@ -52,5 +52,6 @@ implementation has to make.
 | `backup-format/iab-format.schema.json` | The backup file's manifest |
 | `backup-push/push-protocol.schema.json` | Pushing a backup to a paired device |
 | `link-verifier/link-verifier-sdk.schema.json` | Verifying a link |
+| `../../packages/login-verify/test-vectors/core-canonical-and-spellings.json` | How the core reads a login: canonical challenge and assertion bodies, which key, identifier and signature spellings it accepts, and a signed assertion. Recomputed from the core by `../login`, and the TypeScript login verifier is held to it |
 | `root-aid-continuity/continuity-proof.schema.json` | Proving a root identifier continues |
 | `update-manifest/manifest.schema.json` | A signed release manifest |

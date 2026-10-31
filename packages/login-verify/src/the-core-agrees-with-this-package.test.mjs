@@ -13,20 +13,13 @@ import { verifyLoginAssertion } from "../dist/standalone-verify.js";
 
 // Every expectation here was produced by the Go core (its login canonicaliser
 // and its key and signature decoders), so this package is held to the core's
-// bytes and the core's decisions rather than to its own idea of them.
+// bytes and the core's decisions rather than to its own idea of them. The Go
+// test TestThePublishedLoginVectorsAreTheCores recomputes the file from the
+// core, so it cannot drift from what the core does.
 const PKG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const V = JSON.parse(
   fs.readFileSync(path.join(PKG, "test-vectors", "core-canonical-and-spellings.json"), "utf8"),
 );
-
-// The one place this package is stricter than the core. The core reads a key
-// with a one-character code without checking the lead bits that character
-// shares with the key, so it accepts a second spelling of the same key. A key
-// has one spelling here.
-const STRICTER_THAN_THE_CORE = new Set([
-  "lead bits set in the second character",
-  "lead bits set high in the second character",
-]);
 
 let failures = 0;
 function check(ok, msg) {
@@ -65,17 +58,13 @@ for (const c of V.canonical_challenges) {
 function decided(cases, decode, label) {
   for (const c of cases) {
     const raw = decode(c.value);
-    const want = c.go_accepts && !STRICTER_THAN_THE_CORE.has(c.name);
-    check((raw !== null) === want, `${label} "${c.name}": accepted ${raw !== null}, expected ${want}`);
+    const want = c.go_accepts;
+    check((raw !== null) === want, `${label} "${c.name}": accepted ${raw !== null}, the core ${want}`);
     if (raw && want) check(Buffer.from(raw).toString("hex") === c.raw_hex, `${label} "${c.name}": wrong bytes`);
   }
 }
 decided(V.verkey_qb64, decodeVerkeyQb64, "key");
 decided(V.non_transferable_aid, (v) => decodeMatterRaw(v, "B", 32), "identifier");
-check(
-  V.verkey_qb64.filter((c) => STRICTER_THAN_THE_CORE.has(c.name)).length === 2,
-  "the cases where this package is stricter than the core are no longer in the vectors",
-);
 
 const s = V.signed_assertion;
 const pub = new Uint8Array(Buffer.from(s.public_key_hex, "hex"));
