@@ -39,8 +39,11 @@ An assertion is read by the Identity Agent core's rules, so the two accept
 exactly the same ones. A repeated key, and a whole number written as `1.0`,
 can only be seen in the text, which `JSON.parse` discards: where you receive an
 assertion as text, read it with `readAssertion(text)` before verifying it.
-`mountIdentityAgentLoginRoutes` does this for its callback when it is mounted
-before any JSON body parser of your own.
+`mountIdentityAgentLoginRoutes` does this for its callback wherever you mount
+it, before or after a JSON body parser of your own.
+
+`maxSkewSeconds` is a whole number of seconds: zero or less means the default
+of 300, more than 3600 is narrowed to 3600, and anything else is refused.
 
 `generateDevSiteIdentity` is for development only. It makes an identifier with
 no key log behind it, so an up-to-date Identity Agent refuses every challenge it
