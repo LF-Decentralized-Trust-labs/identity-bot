@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"identity-agent-core/internal/atomicfile"
 )
 
 // ReceiveArchive is reached by a PUBLIC route. These drive it the way a caller
@@ -82,7 +84,7 @@ func TestAnAcceptedArchiveIsStoredWholeOrNotAtAll(t *testing.T) {
 	// no file, because a restore would find it and try.
 	entries, _ := os.ReadDir(filepath.Join(root, "backup_receive", aid))
 	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".partial") {
+		if strings.HasSuffix(e.Name(), ".partial") || atomicfile.IsTemp(e.Name()) {
 			t.Fatalf("a partial file was left on disk: %s", e.Name())
 		}
 	}
