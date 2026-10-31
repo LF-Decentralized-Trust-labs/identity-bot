@@ -129,3 +129,12 @@ their threshold as not met.
   That includes a stored record. The producer has to write the canonical form.
 - Another implementation that checks keys, signatures or counts received
   from this one can rely on getting exactly one string for each.
+- A DIDComm message's body_hash is read in two forms, permanently: the CESR
+  digest of the body, and the form written so far (E followed by the raw
+  digest in base64url, which looks like a CESR digest and is not one).
+  Writing moves to the CESR form in a later release, once every reader in
+  use accepts both (`writeCESRBodyHash`). Reading both is not a second
+  spelling of a value. A body_hash is never chosen: it is derived from the
+  body it covers, and where it travels it is accepted only as one of the
+  two forms that body gives and only under a signature that covers it, so
+  it cannot be respelled without the sender's key.

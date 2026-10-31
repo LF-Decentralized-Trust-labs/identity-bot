@@ -14,6 +14,8 @@ import (
 	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/crypto/curve25519"
 	"golang.org/x/crypto/hkdf"
+
+	"identity-agent-core/iacrypto"
 )
 
 // Hybrid authcrypt: the content key is derived from BOTH an X25519 ECDH-1PU exchange
@@ -143,8 +145,51 @@ func verifyHybrid(sender *parsedDID, msg, edSig, dsaSig []byte) bool {
 	return mldsa65.Scheme().Verify(sender.dsa, msg, dsaSig, nil)
 }
 
-// blake3Body is the protocol-wide content hash for the JWM body.
-func blake3Body(b []byte) string {
-	s := blake3.Sum256(b)
-	return "E" + b64.EncodeToString(s[:]) // CESR-style E prefix (canonical byte-freeze pending)
+// The body_hash a signed message carries comes in two forms, and both are
+// read (bodyHashes). Which one is written is a separate decision, made here.
+//
+// writeCESRBodyHash switches writing from the earlier form to the CESR
+// digest. It stays off until every reader in use accepts both forms: a reader
+// that accepts only the earlier form refuses every message written in the
+// CESR one, and an Identity Agent and the machines that deliver to it do not
+// upgrade at the same moment. Turning it on is the whole of the switch.
+const writeCESRBodyHash = false
+
+// writtenBodyHash is the body_hash a new signed message is written with.
+func writtenBodyHash(b []byte) string {
+	if writeCESRBodyHash {
+		return cesrBodyHash(b)
+	}
+	return bodyHashBeforeCESR(b)
+}
+
+// cesrBodyHash is the Blake3-256 digest of the body as a CESR digest in qb64
+// (code E), the form every other digest in the protocol takes, so another
+// implementation reading a value that starts with E reads it as what it is.
+func cesrBodyHash(b []byte) string {
+	return iacrypto.Blake3QB64Must(b)
+}
+
+// bodyHashBeforeCESR is E followed by the raw Blake3-256 digest of the body in
+// unpadded base64url: the form messages have been written with. It looks like
+// a CESR digest and is not one, which is why writing moves to cesrBodyHash.
+func bodyHashBeforeCESR(b []byte) string {
+	sum := blake3.Sum256(b)
+	return "E" + b64.EncodeToString(sum[:])
+}
+
+// bodyHashes are the body_hash values a body may be signed under, CESR first.
+// Both are read, permanently: a message, a countersigned conversation or a
+// kept proof signed under either form verifies.
+//
+// Reading both gives no value a second accepted spelling, which ADR-060
+// forbids. Each is a function of the body, never a free choice: a signed
+// plaintext carries no body_hash at all, and both are derived from the body
+// it carries; a kept signed message carries one, and it is accepted only if
+// it is exactly one of the two derived from its body, and only under a
+// signature that covers it. So a message signed under one form cannot be
+// respelled into the other without the sender's key, and nothing compared as
+// text (a body, a signature, an entry's hash) can be given a second string.
+func bodyHashes(b []byte) [2]string {
+	return [2]string{cesrBodyHash(b), bodyHashBeforeCESR(b)}
 }
