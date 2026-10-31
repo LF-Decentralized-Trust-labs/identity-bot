@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-10-31
-**Relates to:** ADR-031 (Who witnesses what, whose receipts this counts), ADR-049 (One signing form for every service provider request)
+**Relates to:** ADR-031 (Who witnesses what), ADR-049 (One signing form for every service provider request)
 
 ## Context
 
@@ -52,8 +52,9 @@ a number) in hex, and `"2"`, `"02"` and `"002"` read as the same number.
 
 ## Decision
 
-**Every value is read in exactly one string for each spelling it may arrive
-in.** A string that only a lenient decoder would read is refused.
+**Every key, signature, hex value and count that is decoded is read in
+exactly one string for each spelling it may arrive in.** A string that only a
+lenient decoder would read is refused.
 
 - **qb64** (keys, identifiers, signatures, indexed signatures): the exact
   length for its code, base64url only, and every lead bit zero. This is the
@@ -65,8 +66,8 @@ in.** A string that only a lenient decoder would read is refused.
 - **Raw keys and signatures where a format names unpadded base64url**
   (signatures and keys on DIDComm messages, activity log records, the stored
   hardware-signer attestation and its public key, the sealing keys an AI
-  agent's body declares, update manifests and their signing keys, URL relay
-  admissions): only that alphabet, no padding, no line breaks, and zero spare
+  agent's body declares, update manifests and their signing keys, the key an
+  app is given to check calls from the Identity Agent, URL relay admissions): only that alphabet, no padding, no line breaks, and zero spare
   bits. `iacrypto.DecodeBase64URL` and `DecodeBase64URLSized` read it. URL
   relay admission applies the same rule in its own `signatureOf`, because
   `relayproto` is a module a URL relay imports on its own, without the core.
@@ -77,8 +78,9 @@ in.** A string that only a lenient decoder would read is refused.
   `iacrypto.DecodeSized` reads it. A key may still arrive in more than one of
   those spellings, so code that compares keys from such a field compares the
   decoded bytes, never the text.
-- **Hex:** lowercase only, through `iacrypto.DecodeHex`. A machine identity
-  is compared as text, so this is what keeps one machine from being two.
+- **Hex:** lowercase only, through `iacrypto.DecodeHex`. That includes
+  reading back a recorded machine identity (`ParseMachineIdentity`), a value
+  compared as text, which is written in lowercase.
 - **Counts:** lowercase hex with no leading zeros (`"0"` is zero), no larger
   than the reader can hold. keri-go reads the counts in an event this way and
   refuses an event with an unreadable one rather than reading it as if the
@@ -89,7 +91,10 @@ in.** A string that only a lenient decoder would read is refused.
   decoded is read exactly as it arrives, and whitespace around it is
   refused. It is trimmed before decoding only where a person types the
   value: the release key given in the environment or at build time, and the
-  accepted launch measurements in configuration.
+  accepted launch measurements in configuration. One key is not decoded at
+  all: a controller grant's `public_key` is opaque text, compared with the
+  key a request names, and spaces around it are ignored on both sides of
+  every comparison, so it too has one meaning however it is padded.
 
 **Witnesses are compared by key.** keri-go refuses to build or validate a
 witness list (or a credential registry's backers) that names one witness
@@ -110,16 +115,17 @@ their threshold as not met.
 
 ## Consequences
 
-- Within any one spelling, comparing two values as text gives the same answer
-  as comparing their bytes. A value cannot be counted twice, stored twice, or
-  slip past a duplicate check by being respelled.
+- Within any one spelling, comparing two decoded keys, signatures or counts
+  as text gives the same answer as comparing their bytes. None can be counted
+  twice, stored twice, or slip past a duplicate check by being respelled.
 - Everything this implementation, keri-go and keripy write is already in the
   accepted string, so nothing they produce stops reading. That was checked
   producer by producer: keys and signatures are written by the qb64 encoders
-  and `RawURLEncoding`, update manifests by `EncodeBase64URL`, hex by Go's
+  and `RawURLEncoding`, update manifests by `EncodeBase64URL`, an app's call
+  key by `appcall.EncodeKey`, hex by Go's
   `hex.EncodeToString`, and counts by keri-go and keripy, all of which write
   the canonical form.
 - A value written in a non-canonical string by some other producer is refused.
   That includes a stored record. The producer has to write the canonical form.
-- Another implementation that checks values received from this one can rely
-  on getting exactly one string per value.
+- Another implementation that checks keys, signatures or counts received
+  from this one can rely on getting exactly one string for each.
