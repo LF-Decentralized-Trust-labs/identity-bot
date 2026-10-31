@@ -25,7 +25,10 @@ class LocalCoreKeriService extends KeriService {
   final String _baseUrl;
   final http.Client _client;
 
-  LocalCoreKeriService({String? baseUrl, http.Client? client})
+  /// [theCoreWasGivenThisPhrase]: the app handed this phrase's seed to the
+  /// core before founding, so the founding may carry the core's post-quantum
+  /// commitment and messaging keys (TheKeyInForce.requireTheFoundingIsThisDevices).
+  LocalCoreKeriService({String? baseUrl, http.Client? client, this.theCoreWasGivenThisPhrase = false})
       // Where the KEYS are, which is not always this computer.
       //
       // Stateful KERI operations always run on the engine local to the keys —
@@ -39,7 +42,9 @@ class LocalCoreKeriService extends KeriService {
   /// identity rather than at whichever core happens to be on this machine.
   String get baseUrl => _baseUrl;
 
-  late final TheKeyInForce _keys = TheKeyInForce(_client, _baseUrl, asked: _asked);
+  final bool theCoreWasGivenThisPhrase;
+  late final TheKeyInForce _keys =
+      TheKeyInForce(_client, _baseUrl, asked: _asked, theCoreWasGivenThisPhrase: theCoreWasGivenThisPhrase);
   final _asked = TheEventsThisDeviceAskedFor();
 
   /// The event the core says it added, read from the bytes it returned for
@@ -73,13 +78,16 @@ class LocalCoreKeriService extends KeriService {
 
     final Map<String, dynamic> json;
     final String rawBytesB64;
+    // Step 1: Create the inception event on the Python driver via Go backend.
+    // A request that fails in transit is NOT forgotten: the core may have
+    // added the event, and the entry, bounded by its sequence number, lets it
+    // be finished later. Only a refusal or a failed check forgets it.
+    final response = await _client.post(
+      Uri.parse('$_baseUrl/api/inception'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'public_key': key, 'next_public_key': next}),
+    );
     try {
-      // Step 1: Create the inception event on the Python driver via Go backend.
-      final response = await _client.post(
-        Uri.parse('$_baseUrl/api/inception'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'public_key': key, 'next_public_key': next}),
-      );
       if (response.statusCode != 201 && response.statusCode != 200) {
         final body = jsonDecode(response.body);
         throw Exception(body['error'] ?? 'Inception failed: ${response.statusCode}');
@@ -90,11 +98,11 @@ class LocalCoreKeriService extends KeriService {
       // be the founding asked for (TheKeyInForce.requireTheFoundingIsThisDevices).
       final founding = _eventIn(rawBytesB64);
       TheKeyInForce.requireTheFoundingIsThisDevices(founding,
-          key: key, next: next, aid: json['aid'] as String? ?? '');
+          key: key, next: next, aid: json['aid'] as String? ?? '', theCoreWasGivenThisPhrase: theCoreWasGivenThisPhrase);
       await _asked.added(request, aid: json['aid'] as String? ?? '', sequenceNumber: 0, digest: '${founding['d']}');
     } catch (_) {
-      // Refused, not the founding asked for, or no answer: nothing of this
-      // device's to finish later.
+      // Refused, or not the founding asked for: nothing of this device's to
+      // finish later.
       await _asked.forget(request);
       rethrow;
     }
@@ -187,17 +195,20 @@ class LocalCoreKeriService extends KeriService {
 
     final Map<String, dynamic> json;
     final String rawBytesB64;
+    // Step 1: Ask the Python driver to create the rotation event.
+    // A request that fails in transit is NOT forgotten: the core may have
+    // added the event, and the entry, bounded by its sequence number, lets it
+    // be finished later. Only a refusal or a failed check forgets it.
+    final response = await _client.post(
+      Uri.parse('$_baseUrl/api/rotation'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'name': name,
+        'new_public_key': rot1Keys.publicKeyEncoded,
+        'new_next_public_key': rot2Keys.publicKeyEncoded,
+      }),
+    );
     try {
-      // Step 1: Ask the Python driver to create the rotation event.
-      final response = await _client.post(
-        Uri.parse('$_baseUrl/api/rotation'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'name': name,
-          'new_public_key': rot1Keys.publicKeyEncoded,
-          'new_next_public_key': rot2Keys.publicKeyEncoded,
-        }),
-      );
       if (response.statusCode != 200) {
         refusedByTheCore(response, 'Rotation failed');
       }
@@ -222,8 +233,8 @@ class LocalCoreKeriService extends KeriService {
       await _asked.added(request,
           aid: aid, sequenceNumber: state.nextSequenceNumber, digest: '${rotation['d']}');
     } catch (_) {
-      // Refused, not the rotation asked for, or no answer: nothing of this
-      // device's to finish later.
+      // Refused, or not the rotation asked for: nothing of this device's to
+      // finish later.
       await _asked.forget(request);
       rethrow;
     }
@@ -270,13 +281,16 @@ class LocalCoreKeriService extends KeriService {
 
     final Map<String, dynamic> json;
     final String rawBytesB64;
+    // Step 1: Create the IXN event via the Python driver.
+    // A request that fails in transit is NOT forgotten: the core may have
+    // added the event, and the entry, bounded by its sequence number, lets it
+    // be finished later. Only a refusal or a failed check forgets it.
+    final response = await _client.post(
+      Uri.parse('$_baseUrl/api/interact'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'name': name, 'data': sealData}),
+    );
     try {
-      // Step 1: Create the IXN event via the Python driver.
-      final response = await _client.post(
-        Uri.parse('$_baseUrl/api/interact'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'name': name, 'data': sealData}),
-      );
       if (response.statusCode != 201 && response.statusCode != 200) {
         refusedByTheCore(response, 'IXN failed');
       }
@@ -415,17 +429,20 @@ class LocalCoreKeriService extends KeriService {
 
     final Map<String, dynamic> json;
     final String ixnRawBytesB64;
+    // Step 1: Ask the Go backend to format the ACDC and create the IXN anchor.
+    // A request that fails in transit is NOT forgotten: the core may have
+    // added the event, and the entry, bounded by its sequence number, lets it
+    // be finished later. Only a refusal or a failed check forgets it.
+    final response = await _client.post(
+      Uri.parse('$_baseUrl/api/credential/issue'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'claims': claims,
+        'schema_said': schemaSaid,
+        'holder_aid': holderAid,
+      }),
+    );
     try {
-      // Step 1: Ask the Go backend to format the ACDC and create the IXN anchor.
-      final response = await _client.post(
-        Uri.parse('$_baseUrl/api/credential/issue'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'claims': claims,
-          'schema_said': schemaSaid,
-          'holder_aid': holderAid,
-        }),
-      );
       if (response.statusCode != 201 && response.statusCode != 200) {
         refusedByTheCore(response, 'Credential issuance failed');
       }

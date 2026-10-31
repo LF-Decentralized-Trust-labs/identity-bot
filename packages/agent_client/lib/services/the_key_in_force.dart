@@ -28,7 +28,11 @@ class TheKeyInForce {
   /// owner-signing transport asks this which key to sign with, so reading the
   /// key log through it would ask again, without end. Give it the transport's
   /// inner client.
-  TheKeyInForce(this._client, this._baseUrl, {TheEventsThisDeviceAskedFor? asked})
+  ///
+  /// [theCoreWasGivenThisPhrase] is as for [requireTheFoundingIsThisDevices],
+  /// and applies when a stranded founding is finished.
+  TheKeyInForce(this._client, this._baseUrl,
+      {TheEventsThisDeviceAskedFor? asked, this.theCoreWasGivenThisPhrase = false})
       : _asked = asked ?? TheEventsThisDeviceAskedFor() {
     if (_client is OwnerSigningClient) {
       throw ArgumentError.value(_client, 'client',
@@ -40,6 +44,7 @@ class TheKeyInForce {
   final http.Client _client;
   final String _baseUrl;
   final TheEventsThisDeviceAskedFor _asked;
+  final bool theCoreWasGivenThisPhrase;
 
   /// The digest a next-key commitment names for [keyQb64]: Blake3 over the
   /// key's qb64 text, as a validator recomputes it.
@@ -75,36 +80,44 @@ class TheKeyInForce {
 
   /// Refuses the founding event of an identity this device would sign unless
   /// it is the one it asks for:
-  ///  - a founding ("t" icp, sequence 0) of the identifier [aid], when the
-  ///    device knows it;
+  ///  - a founding ("t" icp, sequence 0) whose identifier is its own digest
+  ///    ("i" equal to "d"), and is [aid] when the device knows it;
   ///  - naming one key, [key], with a threshold of one ("kt" "1");
-  ///  - committing first to [next], with at most one more commitment, and a
-  ///    threshold of one ("nt" "1");
+  ///  - committing to [next] with a threshold of one ("nt" "1");
   ///  - with no configuration traits ("c" empty);
-  ///  - anchoring nothing, or exactly one anchor of the identity's messaging
-  ///    keys (an IA-HYBRID-1 keyset: "ia", "ka" and "sa" and nothing else),
-  ///    after an owner seal naming [ownerAid] when the device asked for one.
+  ///  - anchoring nothing, after an owner seal naming [ownerAid] when the
+  ///    device asked for one.
   /// The witnesses ("b", "bt") are the core's choice at founding.
   ///
-  /// THE LIMIT. The one further commitment, to a post-quantum key, and the
-  /// messaging keys are what the core adds of its own, derived from the root
-  /// seed it holds, and the device cannot recompute either. Where that seed is
-  /// this phrase's they are the identity's own keys. A core holding a
-  /// different root seed can still put its own post-quantum digest and
-  /// messaging-keyset anchor into a founding this device signs, and with a
-  /// next threshold of one that post-quantum key alone could rotate the
-  /// identity. Closing it needs the core to prove which seed it holds, which
-  /// is a protocol step of its own. What is refused here is everything else:
-  /// another first commitment, more commitments, other anchors, traits and
-  /// thresholds.
+  /// Where [theCoreWasGivenThisPhrase] — the caller handed this phrase's seed
+  /// to this core before founding, as an app does that keeps its identity's
+  /// keys in the core too — the core adds two things of its own, derived from
+  /// that seed and so the identity's own keys: one more next-key commitment, to
+  /// a post-quantum key, and one anchor of the identity's messaging keys (an
+  /// IA-HYBRID-1 keyset: "ia", "ka" and "sa" and nothing else). Only then are
+  /// they accepted. A core adds them only for a key it derives itself, so from
+  /// a core this device did not give the phrase, either one would be a key of
+  /// that machine's in this identity — the post-quantum one alone could rotate
+  /// it — and the founding is refused.
   static void requireTheFoundingIsThisDevices(Map<String, dynamic> event,
-      {required String key, required String next, String? aid, String? ownerAid}) {
+      {required String key,
+      required String next,
+      String? aid,
+      String? ownerAid,
+      bool theCoreWasGivenThisPhrase = false}) {
+    // Compared as JSON text, so the order of a map's keys counts: the engine
+    // writes a seal as {"i", "s", "d"} and a keyset anchor as {"ia", "ka",
+    // "sa"} (keriengine), the order these are written in below, and an event
+    // with the same fields in another order is refused rather than read.
     bool same(Object? a, Object? b) => jsonEncode(a) == jsonEncode(b);
     String? why;
     final n = event['n'];
     final want = commitmentTo(next);
+    final extraCommitments = theCoreWasGivenThisPhrase ? 1 : 0;
     if (event['t'] != 'icp' || event['s'] != '0') {
       why = 'it is not a founding event';
+    } else if (event['i'] == null || event['i'] != event['d']) {
+      why = 'its identifier ${event['i']} is not its own digest ${event['d']}';
     } else if (aid != null && event['i'] != aid) {
       why = 'it founds ${event['i']}, not $aid';
     } else if (!same(event['k'], [key])) {
@@ -113,20 +126,24 @@ class TheKeyInForce {
       why = 'its signing thresholds are ${event['kt']} and ${event['nt']}, not 1 and 1';
     } else if (!same(event['c'] ?? const [], const [])) {
       why = 'it sets configuration traits ${event['c']} this device did not ask for';
-    } else if (n is! List || n.isEmpty || n.length > 2 || n.first != want) {
-      why = 'it commits to $n, not to this device\'s next key ($want) with at most one more';
+    } else if (n is! List || n.isEmpty || n.length > 1 + extraCommitments || n.first != want) {
+      why = theCoreWasGivenThisPhrase
+          ? 'it commits to $n, not to this device\'s next key ($want) with at most one more'
+          : 'it commits to $n, not to this device\'s next key ($want) alone; this core was not given '
+              'this phrase, so any other commitment would be a key of that machine\'s';
     } else {
-      why = _foundingAnchorProblem(event['a'], ownerAid: ownerAid);
+      why = _foundingAnchorProblem(event['a'], ownerAid: ownerAid, keysetAllowed: theCoreWasGivenThisPhrase);
     }
     if (why != null) {
       throw Exception('the founding event is not the one this device asked for, so it is not signed: $why');
     }
   }
 
-  static String? _foundingAnchorProblem(Object? a, {String? ownerAid}) {
-    final anchors = a is List ? List<Object?>.from(a) : <Object?>[];
+  static String? _foundingAnchorProblem(Object? a, {String? ownerAid, required bool keysetAllowed}) {
     if (a != null && a is! List) return 'its anchors are not a list';
+    final anchors = a is List ? List<Object?>.from(a) : <Object?>[];
     if (ownerAid != null) {
+      // In the engine's order: {"i", "s", "d"}.
       final seal = {'i': ownerAid, 's': '0', 'd': ownerAid};
       if (anchors.isEmpty || jsonEncode(anchors.first) != jsonEncode(seal)) {
         return 'it does not name the owner this device asked for ($ownerAid) first';
@@ -141,6 +158,10 @@ class TheKeyInForce {
         keyset['sa'] is List &&
         keyset.keys.length == 3;
     if (anchors.length > 1 || !isKeyset) return 'it anchors $anchors, which this device did not ask for';
+    if (!keysetAllowed) {
+      return 'it anchors messaging keys, and this core was not given this phrase, so they would be '
+          'keys of that machine\'s';
+    }
     return null;
   }
 
@@ -285,7 +306,8 @@ class TheKeyInForce {
       requireTheFoundingIsThisDevices(event,
           key: KeyManager.keyAt(seed, 0).publicKeyEncoded,
           next: KeyManager.keyAt(seed, 1).publicKeyEncoded,
-          aid: checked.aid);
+          aid: checked.aid,
+          theCoreWasGivenThisPhrase: theCoreWasGivenThisPhrase);
     }
     if (event['t'] != 'rot' && event['t'] != 'icp' && event['t'] != 'ixn') {
       throw Exception('event ${event['s']} is a ${event['t']}, which this device does not sign late');

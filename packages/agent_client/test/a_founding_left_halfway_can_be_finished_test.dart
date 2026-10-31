@@ -26,12 +26,28 @@ void main() {
   final key = AgentKeyPair.fromSigningSeed(seed).publicKeyEncoded;
   final next = AgentKeyPair.fromSigningSeed(Uint8List.fromList(List<int>.generate(32, (i) => i + 2))).publicKeyEncoded;
 
-  /// A founding as the engine writes one, committing to [commitsTo].
-  String foundingBytes({String? commitsTo}) => jsonEncode({
+  /// A founding as the engine writes one, committing to [commitsTo] and any
+  /// [more] commitments, anchoring [anchors].
+  String foundingBytes({String? commitsTo, List<String> more = const [], List<Object?> anchors = const []}) =>
+      jsonEncode({
         'v': 'KERI10JSON', 't': 'icp', 'd': 'EIDENTITY', 'i': 'EIDENTITY', 's': '0',
-        'kt': '1', 'k': [key], 'nt': '1', 'n': [TheKeyInForce.commitmentTo(commitsTo ?? next)],
-        'bt': '0', 'b': [], 'c': [], 'a': [],
+        'kt': '1', 'k': [key], 'nt': '1', 'n': [TheKeyInForce.commitmentTo(commitsTo ?? next), ...more],
+        'bt': '0', 'b': [], 'c': [], 'a': anchors,
       });
+
+  /// An agent that creates the founding [bytes].
+  CoreService agentFounding(String bytes, List<http.BaseRequest> sent) => CoreService(
+        baseUrl: agent,
+        inner: MockClient((req) async {
+          sent.add(req);
+          if (req.url.path == '/api/inception') {
+            return http.Response(
+                jsonEncode({'aid': 'EIDENTITY', 'public_key': key, 'raw_bytes_b64': base64Encode(utf8.encode(bytes))}),
+                201);
+          }
+          return http.Response(jsonEncode({'cesr_sig': '0Bx'}), 200);
+        }),
+      );
 
   /// The engine's own shape: bytes beside the events, sequence as text.
   String theEngineShape({String sequence = '0', String? commitsTo}) => jsonEncode({
@@ -176,5 +192,46 @@ void main() {
       throwsA(predicate((e) => '$e'.contains('not the one this device asked for'))),
     );
     expect(sent.any((r) => r.url.path == '/api/cesr/encode'), isFalse);
+  });
+
+  test('a founding naming an owner other than the one asked for is never signed', () async {
+    const asked = 'EOWNERASKEDFOR';
+    const other = 'ESOMEBODYELSE';
+    var sent = <http.BaseRequest>[];
+    await expectLater(
+        agentFounding(foundingBytes(anchors: [{'i': other, 's': '0', 'd': other}]), sent)
+            .createInception(publicKey: key, nextPublicKey: next, signingSeed: seed, ownerAid: asked),
+        throwsA(predicate((e) => '$e'.contains('owner'))));
+    expect(sent.any((r) => r.url.path == '/api/cesr/encode'), isFalse);
+    sent = [];
+    await agentFounding(foundingBytes(anchors: [{'i': asked, 's': '0', 'd': asked}]), sent)
+        .createInception(publicKey: key, nextPublicKey: next, signingSeed: seed, ownerAid: asked);
+    expect(sent.any((r) => r.url.path == '/api/cesr/encode'), isTrue);
+  });
+
+  test('what the agent adds of its own is accepted only where it was given the phrase', () async {
+    final bytes = foundingBytes(more: ['Epostquantum'], anchors: [
+      {'ia': 'IA-HYBRID-1', 'ka': ['C'], 'sa': ['D']}
+    ]);
+    var sent = <http.BaseRequest>[];
+    await expectLater(agentFounding(bytes, sent).createInception(publicKey: key, nextPublicKey: next, signingSeed: seed),
+        throwsA(predicate((e) => '$e'.contains('was not given this phrase'))));
+    expect(sent.any((r) => r.url.path == '/api/cesr/encode'), isFalse);
+    for (final one in [
+      foundingBytes(more: ['Epostquantum']),
+      foundingBytes(anchors: [
+        {'ia': 'IA-HYBRID-1', 'ka': ['C'], 'sa': ['D']}
+      ]),
+    ]) {
+      sent = [];
+      await expectLater(agentFounding(one, sent).createInception(publicKey: key, nextPublicKey: next, signingSeed: seed),
+          throwsA(predicate((e) => '$e'.contains('was not given this phrase'))),
+          reason: 'either addition alone, from a core not given the phrase');
+      expect(sent.any((r) => r.url.path == '/api/cesr/encode'), isFalse);
+    }
+    sent = [];
+    await agentFounding(bytes, sent)
+        .createInception(publicKey: key, nextPublicKey: next, signingSeed: seed, theCoreWasGivenThisPhrase: true);
+    expect(sent.any((r) => r.url.path == '/api/cesr/encode'), isTrue);
   });
 }

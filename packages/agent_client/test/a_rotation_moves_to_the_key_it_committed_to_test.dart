@@ -54,8 +54,13 @@ class FakeCore {
   // Rewrites the rotation the core builds, or the anchors of an interaction.
   Map<String, dynamic> Function(Map<String, dynamic>)? changeRotation;
   List<Object?>? interactionAnchors;
-  // A path whose request fails in transit.
+  // A path whose request fails in transit, before or after the core acts on it.
   String? dropsRequestsTo;
+  String? dropsAnswersFrom;
+  // Numbers the next event one past where it belongs.
+  bool skipsASequenceNumber = false;
+  // Writes another identifier into the credential anchor it builds.
+  String? anchorsAs;
   // Adds to a founding what the real core adds of its own: a post-quantum
   // next-key commitment and an anchor of the identity's messaging keys.
   bool addsItsOwn = false;
@@ -79,8 +84,11 @@ class FakeCore {
 
   // Appends an event, laid out as the engine lays one out.
   void add(Map<String, dynamic> event) {
-    final sn = kel.length.toRadixString(16);
-    final e = <String, dynamic>{'v': 'KERI10JSON', 't': event['t'], 'd': 'Eevent$sn', 'i': 'Eaid', 's': sn};
+    final sn = (kel.length + (skipsASequenceNumber ? 1 : 0)).toRadixString(16);
+    // A founding's digest is the identifier it founds.
+    final e = <String, dynamic>{
+      'v': 'KERI10JSON', 't': event['t'], 'd': event['d'] ?? (event['t'] == 'icp' ? 'Eaid' : 'Eevent$sn'), 'i': 'Eaid', 's': sn,
+    };
     for (final f in ['kt', 'k', 'nt', 'n', 'bt', 'b', 'br', 'ba', 'c', 'a']) {
       if (event.containsKey(f)) e[f] = event[f];
     }
@@ -146,6 +154,11 @@ class FakeCore {
             add({'t': 'ixn', 'a': interactionAnchors ?? body['data']});
           case '/api/credential/issue':
             add({'t': 'ixn', 'a': credentialAnchor ?? [{'i': 'Ecredential', 's': '0', 'd': 'Ecredential'}]});
+            if (anchorsAs != null) {
+              final e = Map<String, dynamic>.from(jsonDecode(utf8.decode(raws.last)) as Map)..['i'] = anchorsAs;
+              raws[raws.length - 1] = utf8.encode(jsonEncode(e));
+              kel[kel.length - 1]['i'] = anchorsAs;
+            }
           case '/api/cesr/encode':
             // Carries the raw signature through, so the core can check it.
             return http.Response(jsonEncode({'cesr_sig': body['raw_sig_b64']}), 200);
@@ -162,6 +175,7 @@ class FakeCore {
           default:
             return http.Response('{}', 200);
         }
+        if (req.url.path == dropsAnswersFrom) throw http.ClientException('the answer was lost');
         final raw = base64Encode(raws.last);
         return http.Response(
             jsonEncode({
@@ -575,7 +589,7 @@ void main() {
     expect(await pending(), isEmpty);
   });
 
-  test('a request refused, answered wrongly or lost in transit leaves nothing written down', () async {
+  test('a request refused or answered wrongly is forgotten, one lost in transit is kept', () async {
     await keri.inceptAid(name: 'Eaid', code: words.join(' '));
     core.keyNotHeldHere = true;
     await expectLater(keri.rotateAid(name: 'Eaid'), throwsException);
@@ -590,7 +604,9 @@ void main() {
     core.raws.removeLast();
     core.dropsRequestsTo = '/api/interact';
     await expectLater(keri.interactAid(name: 'Eaid'), throwsA(isA<http.ClientException>()));
-    expect(await pending(), isEmpty, reason: 'lost in transit');
+    final kept = await pending();
+    expect(kept, hasLength(1), reason: 'lost in transit: the core may have added it');
+    expect(kept.single['s'], isNull);
   });
 
   test('a stranded event, once finished, is no longer written down', () async {
@@ -674,12 +690,19 @@ void main() {
     expect(core.posted, isNot(contains('/api/cesr/encode')));
   });
 
-  test('a founding with the core\'s own post-quantum commitment and messaging keys is signed', () async {
-    // What the real core adds of its own. The device cannot check these
-    // against the phrase; it checks everything else (see the founding check).
+  test('the core\'s own post-quantum commitment and messaging keys are signed only where it was given the phrase',
+      () async {
+    // What the real core adds of its own, for a key it derives itself.
     core.addsItsOwn = true;
+    await expectLater(keri.inceptAid(name: 'Eaid', code: words.join(' ')),
+        throwsA(predicate((e) => '$e'.contains('was not given this phrase'))),
+        reason: 'the app did not hand this core its phrase');
+    expect(core.posted, isNot(contains('/api/cesr/encode')));
+
+    core = FakeCore()..addsItsOwn = true;
+    keri = LocalCoreKeriService(baseUrl: 'http://core.test', client: core.client(), theCoreWasGivenThisPhrase: true);
     await keri.inceptAid(name: 'Eaid', code: words.join(' '));
-    expect(core.kel.first['sig'], isNotNull);
+    expect(core.kel.first['sig'], isNotNull, reason: 'the app handed this core its phrase');
   });
 
   test('a founding that differs from the one asked for in anything else is never signed', () async {
@@ -702,9 +725,129 @@ void main() {
       core = FakeCore()
         ..addsItsOwn = true
         ..changeFounding = change;
-      keri = LocalCoreKeriService(baseUrl: 'http://core.test', client: core.client());
+      keri = LocalCoreKeriService(baseUrl: 'http://core.test', client: core.client(), theCoreWasGivenThisPhrase: true);
       await expectLater(keri.inceptAid(name: 'Eaid', code: words.join(' ')), throwsException, reason: what);
       expect(core.posted, isNot(contains('/api/cesr/encode')), reason: 'a founding with $what was signed');
+    }
+  });
+
+  test('a rotation whose answer was lost after the core added it is finished later, without approval', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    core.dropsAnswersFrom = '/api/rotation';
+    await expectLater(keri.rotateAid(name: 'Eaid'), throwsA(isA<http.ClientException>()));
+    expect(core.kel.last['t'], 'rot');
+    expect(core.kel.last['sig'], isNull, reason: 'added, and its answer never arrived');
+    core.dropsAnswersFrom = null;
+    await keri.signPayload(name: 'Eaid', data: [1]);
+    expect(core.kel.last['sig'], isNotNull, reason: 'recognised as asked for and finished');
+    expect(await pending(), isEmpty);
+  });
+
+  test('a founding that is not a founding at sequence zero is never signed', () async {
+    for (final change in <Map<String, dynamic> Function(Map<String, dynamic>)>[
+      (f) => {...f, 't': 'dip'},
+      (f) => {...f, 'd': 'Esomethingelse'},
+    ]) {
+      FlutterSecureStorage.setMockInitialValues({});
+      SharedPreferences.setMockInitialValues({});
+      await SecureKeyStore.saveMnemonic(words);
+      core = FakeCore()..changeFounding = change;
+      keri = LocalCoreKeriService(baseUrl: 'http://core.test', client: core.client());
+      await expectLater(keri.inceptAid(name: 'Eaid', code: words.join(' ')), throwsException);
+      expect(core.posted, isNot(contains('/api/cesr/encode')));
+    }
+    // And numbered one past zero.
+    FlutterSecureStorage.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({});
+    await SecureKeyStore.saveMnemonic(words);
+    core = FakeCore()..skipsASequenceNumber = true;
+    keri = LocalCoreKeriService(baseUrl: 'http://core.test', client: core.client());
+    await expectLater(keri.inceptAid(name: 'Eaid', code: words.join(' ')), throwsException);
+    expect(core.posted, isNot(contains('/api/cesr/encode')));
+  });
+
+  test('a stranded founding committing to one more key than this core may add is not finished', () async {
+    final seed = Bip39.mnemonicToSeed(words);
+    final key0 = KeyManager.keyAt(seed, 0).publicKeyEncoded;
+    final key1 = KeyManager.keyAt(seed, 1).publicKeyEncoded;
+    // This device asked for this founding, and the answer never arrived.
+    await TheEventsThisDeviceAskedFor().asking(t: 'icp', expectedSn: 0, asked: {'key': key0, 'next': key1});
+    core.add({
+      't': 'icp', 'kt': '1', 'k': [key0], 'nt': '1', 'n': [FakeCore.commitmentTo(key1), 'Eanothermachineskey'],
+      'bt': '0', 'b': [], 'c': [], 'a': [],
+    });
+    core.posted.clear();
+    await expectLater(keri.signPayload(name: 'Eaid', data: [1]), throwsA(predicate((e) => '$e'.contains('was not given'))));
+    expect(core.posted, isNot(contains('/api/cesr/encode')));
+  });
+
+  test('a rotation or interaction the core numbers wrongly is not signed', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    core.skipsASequenceNumber = true;
+    core.posted.clear();
+    await expectLater(keri.rotateAid(name: 'Eaid'), throwsException);
+    expect(core.posted, isNot(contains('/api/cesr/encode')));
+    core.kel.removeLast();
+    core.raws.removeLast();
+    await expectLater(keri.interactAid(name: 'Eaid'), throwsException);
+    expect(core.posted, isNot(contains('/api/cesr/encode')));
+  });
+
+  test('a credential anchor of another identity, or numbered wrongly, is not signed', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    core.anchorsAs = 'Eother';
+    core.posted.clear();
+    await expectLater(keri.issueCredential(claims: {'a': 'b'}, schemaSaid: 'E'), throwsException);
+    expect(core.posted, isNot(contains('/api/cesr/encode')));
+    core.kel.removeLast();
+    core.raws.removeLast();
+    core.anchorsAs = null;
+    core.skipsASequenceNumber = true;
+    await expectLater(keri.issueCredential(claims: {'a': 'b'}, schemaSaid: 'E'), throwsException);
+    expect(core.posted, isNot(contains('/api/cesr/encode')));
+  });
+
+  test('an interaction whose answer never arrived is recognised only by the anchors asked for', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    await TheEventsThisDeviceAskedFor().asking(t: 'ixn', aid: 'Eaid', expectedSn: 1, asked: {
+      'anchors': [{'d': 'Easked'}]
+    });
+    core.add({'t': 'ixn', 'a': [{'d': 'Esomethingelse'}]});
+    core.posted.clear();
+    await expectLater(keri.signPayload(name: 'Eaid', data: [1]), throwsA(isA<AnEventThisDeviceDidNotAskFor>()));
+    expect(core.posted, isNot(contains('/api/cesr/encode')));
+    core.kel.removeLast();
+    core.raws.removeLast();
+    core.add({'t': 'ixn', 'a': [{'d': 'Easked'}]});
+    await keri.signPayload(name: 'Eaid', data: [1]);
+    expect(core.kel.last['sig'], isNotNull);
+  });
+
+  test('a request is forgotten once the core has signed its event itself', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    await keri.issueCredential(claims: {'a': 'b'}, schemaSaid: 'E');
+    expect(await pending(), hasLength(1), reason: 'the anchor is written down until it is signed');
+    core.kel.last['sig'] = 'signed by the core';
+    await keri.signPayload(name: 'Eaid', data: [1]);
+    expect(await pending(), isEmpty);
+  });
+
+  test('approval signs only an interaction, founding or rotation still waiting for its signature', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    final seed = Bip39.mnemonicToSeed(words);
+    final keys = TheKeyInForce(core.client(), 'http://core.test');
+    // Already signed.
+    await expectLater(
+        keys.signApprovedEvent(seed, sequenceNumber: '0', digest: 'Eaid'), throwsA(predicate((e) => '$e'.contains('not waiting'))));
+    for (final t in ['dip', 'drt']) {
+      core.add({...FakeCore.rotation(KeyManager.keyAt(seed, 1).publicKeyEncoded, KeyManager.keyAt(seed, 2).publicKeyEncoded), 't': t});
+      core.posted.clear();
+      await expectLater(
+          keys.signApprovedEvent(seed, sequenceNumber: core.kel.last['s'] as String, digest: core.kel.last['d'] as String),
+          throwsException, reason: t);
+      expect(core.posted, isNot(contains('/api/cesr/encode')), reason: t);
+      core.kel.removeLast();
+      core.raws.removeLast();
     }
   });
 }
