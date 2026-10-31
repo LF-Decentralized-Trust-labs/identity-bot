@@ -110,14 +110,32 @@ export async function signCanonical(
   return ed25519SigQb64(sig);
 }
 
+const BASE64URL = /^[A-Za-z0-9_-]*$/;
+
+/**
+ * The raw bytes of a fixed-size qb64 value, or null unless it is the one
+ * canonical string for them.
+ *
+ * Canonical means: the code; exactly the length the code and size make;
+ * base64url only (Node's decoder otherwise skips characters it does not know);
+ * and zero lead bits. The lead bytes are (3 - size mod 3) mod 3 zero bytes in
+ * front of the value. The code stands in for the first characters they
+ * produce, but the character after the code carries the rest of their bits —
+ * 2 after a one-character code, 4 after a two-character one — and unchecked
+ * they gave every key 4 spellings and every signature 16.
+ */
 export function decodeMatterRaw(qb64: string, code: string, expectedLen: number): Uint8Array | null {
-  if (!qb64.startsWith(code)) return null;
-  const cs = code.length;
-  const ps = cs % 4;
-  const paw = Buffer.from("A".repeat(ps) + qb64.slice(cs), "base64url");
-  const raw = paw.slice(ps);
-  if (raw.length !== expectedLen) return null;
-  return new Uint8Array(raw);
+  if (!code || expectedLen <= 0 || !qb64.startsWith(code)) return null;
+  const lead = (3 - (expectedLen % 3)) % 3;
+  const stood = code.length % 4;
+  if (stood * 6 > lead * 8) return null;
+  if (qb64.length !== code.length - stood + ((lead + expectedLen) / 3) * 4) return null;
+  const body = qb64.slice(code.length);
+  if (!BASE64URL.test(body)) return null;
+  const padded = Buffer.from("A".repeat(stood) + body, "base64url");
+  if (padded.length !== lead + expectedLen) return null;
+  for (let i = 0; i < lead; i++) if (padded[i] !== 0) return null;
+  return new Uint8Array(padded.subarray(lead));
 }
 
 export async function verifyCanonical(
