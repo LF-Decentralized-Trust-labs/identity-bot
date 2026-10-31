@@ -367,6 +367,18 @@ func WitnessKey(witnessAID string) (string, bool) {
 	return string(pub), true
 }
 
+// WitnessingByEvent is the witnessing report for every event of a key log,
+// by the event's identifier: one walk of the log for all of them, where
+// WitnessingOf walks it once per event asked about.
+func WitnessingByEvent(in ValidateKELInput) map[string]EventWitnessing {
+	report, _ := witnessingReport(in)
+	out := make(map[string]EventWitnessing, len(report))
+	for _, row := range report {
+		out[row.EventSAID] = row
+	}
+	return out
+}
+
 // WitnessingOf reports, for one event of a key log, who was designated to
 // witness it, how many receipts it needs, and how many verified receipts from
 // those witnesses it has. False when the event is not in the log.
