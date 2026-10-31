@@ -29,14 +29,20 @@ import (
 // decode reads the bundle's base64. Strictly: an encoding whose unused bits
 // are set reads as the same bytes, so accepting one would let a bundle be
 // changed without anything it proves changing, and a check meant to catch
-// every edit would pass it.
-var decode = base64.StdEncoding.Strict().DecodeString
+// every edit would pass it. Line breaks are the same hole, since the standard
+// decoder skips them even in strict mode, so they are refused.
+func decode(s string) ([]byte, error) {
+	if strings.ContainsAny(s, "\r\n") {
+		return nil, fmt.Errorf("a line break inside base64")
+	}
+	return base64.StdEncoding.Strict().DecodeString(s)
+}
 
 // canonicalURL reports whether s is the one unpadded base64url encoding of
 // the bytes it decodes to.
 func canonicalURL(s string) bool {
-	raw, err := base64.RawURLEncoding.Strict().DecodeString(s)
-	return err == nil && base64.RawURLEncoding.EncodeToString(raw) == s
+	_, err := iacrypto.DecodeBase64URL(s)
+	return err == nil
 }
 
 // Report is what Verify found.
