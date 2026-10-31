@@ -47,6 +47,7 @@ import (
 
 	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
 
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -2094,7 +2095,45 @@ func (s *CoreServer) handleKel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	json.NewEncoder(w).Encode(kelWithSignatures{DriverKelResponse: result, Signed: s.whichEventsAreSigned(result)})
+}
+
+// kelWithSignatures is a key log with, beside each event, whether this Identity
+// Agent holds a signature over it.
+//
+// A device that holds the identity's key signs each event after it is added.
+// If that second step never happened (the device lost its connection between
+// the two, say) the event sits unsigned, every counterparty refuses the log
+// from there on, and nothing else says so. With this the device can see which
+// events are still waiting for it and sign them.
+type kelWithSignatures struct {
+	*drivers.DriverKelResponse
+	// Signed[i] says whether KEL[i] carries a signature. Absent where this
+	// Identity Agent keeps no record of the log's events.
+	Signed []bool `json:"signed,omitempty"`
+}
+
+// whichEventsAreSigned is, for each event of kel, whether its stored record
+// carries a signature; nil where none of its events are stored here.
+func (s *CoreServer) whichEventsAreSigned(kel *drivers.DriverKelResponse) []bool {
+	if s.DataStore == nil || kel == nil || kel.AID == "" {
+		return nil
+	}
+	stored, err := s.DataStore.GetEvents(kel.AID)
+	if err != nil || len(stored) == 0 {
+		return nil
+	}
+	signedAt := map[int]bool{}
+	for _, ev := range stored {
+		signedAt[ev.SequenceNumber] = ev.CesrSignature != ""
+	}
+	out := make([]bool, len(kel.KEL))
+	for i, ev := range kel.KEL {
+		if sn, err := witnessproto.SequenceNumber(ev); err == nil {
+			out[i] = signedAt[sn]
+		}
+	}
+	return out
 }
 
 func (s *CoreServer) handleVerify(w http.ResponseWriter, r *http.Request) {

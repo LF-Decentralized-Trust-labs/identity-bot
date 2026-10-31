@@ -7,6 +7,7 @@ import '../crypto/keys.dart';
 import 'keri_service.dart';
 import 'secure_key_store.dart';
 import 'signing_an_event.dart';
+import 'the_key_in_force.dart';
 import 'the_key_is_not_held_by_the_core.dart';
 import 'the_agent_this_app_talks_to.dart';
 
@@ -36,6 +37,8 @@ class LocalCoreKeriService extends KeriService {
   /// Where this service sends, for a caller checking it is pointed at the
   /// identity rather than at whichever core happens to be on this machine.
   String get baseUrl => _baseUrl;
+
+  late final TheKeyInForce _keys = TheKeyInForce(_client, _baseUrl);
 
   @override
   AgentEnvironment get environment => AgentEnvironment.desktop;
@@ -129,7 +132,15 @@ class LocalCoreKeriService extends KeriService {
     // and nothing hashes them again: a second hash here once made the named
     // key neither the committed one nor the signer.
     final seed = Bip39.mnemonicToSeed(mnemonic);
-    final current = await _keyInForce(seed);
+    // The keys are this app's identity's, so only it can be rotated with them.
+    final aid = await _keys.ownIdentifier();
+    if (name != aid) {
+      throw ArgumentError.value(name, 'name',
+          'the identity held here is $aid, and only it can be rotated with this phrase');
+    }
+    // Reading the key in force also finishes an earlier establishment event
+    // left unsigned, so this rotation does not build on one nobody can verify.
+    final current = await _keys.index(seed);
     final rot1Seed = KeyManager.signingSeed(seed, index: current + 1);
     final rot1Keys = KeyManager.keyAt(seed, current + 1);
     final rot2Keys = KeyManager.keyAt(seed, current + 2);
@@ -181,6 +192,10 @@ class LocalCoreKeriService extends KeriService {
     if (mnemonic == null) {
       throw Exception('No identity keys found in secure storage.');
     }
+    // The key is worked out before the event exists, so a key log this phrase
+    // cannot sign for is refused before anything is added to it.
+    final seed = Bip39.mnemonicToSeed(mnemonic);
+    final signingSeed = KeyManager.signingSeed(seed, index: await _keys.index(seed));
 
     // Step 1: Create the IXN event via the Python driver.
     final response = await _client.post(
@@ -198,12 +213,11 @@ class LocalCoreKeriService extends KeriService {
 
     // Step 2: Sign the IXN event with the key in force and record the
     // signature against it.
-    final seed = Bip39.mnemonicToSeed(mnemonic);
     final cesrSig = await signAndRecordEvent(_client, _baseUrl,
         aid: json['aid'] as String? ?? '',
         sequenceNumber: json['sequence_number'],
         rawBytesB64: rawBytesB64,
-        signingSeed: KeyManager.signingSeed(seed, index: await _keyInForce(seed)),
+        signingSeed: signingSeed,
         what: 'this interaction');
 
     return InteractResult(
@@ -233,7 +247,7 @@ class LocalCoreKeriService extends KeriService {
     // log says is in force: after a rotation that is no longer the founding
     // key, and a signature by the founding key verifies against nothing a
     // counterparty would look up.
-    final index = await _keyInForce(seed);
+    final index = await _keys.index(seed);
     final signingKeyPair = KeyManager.keyAt(seed, index);
     final privateKey = ed.newKeyFromSeed(KeyManager.signingSeed(seed, index: index));
 
@@ -250,54 +264,13 @@ class LocalCoreKeriService extends KeriService {
     );
   }
 
-  /// Which key in the identity's chain is in force, as its key log says.
-  ///
-  /// Key n is [KeyManager.keyAt] at index n. Founding puts key 0 in force and
-  /// every rotation moves one along, so the key in force is the number of
-  /// establishment events after the first. That is read from the log every
-  /// time rather than remembered here: the log is what a counterparty checks
-  /// a signature against, it survives a restart because the core keeps it, and
-  /// a count kept beside it could disagree with it and nothing would notice.
-  ///
-  /// The key derived for that index must be the key the log's last
-  /// establishment event names. If it is not, this throws rather than signing:
-  /// a signature by any other key is one no counterparty can verify, and
-  /// carrying on would only move the failure to them.
-  Future<int> _keyInForce(Uint8List seed) async {
-    final aid = await _ownIdentifier();
-    final establishments = (await getCurrentKel(name: aid)).establishmentEvents;
-    if (establishments.isEmpty) {
-      throw Exception('the key log of $aid has no founding event, so there is no '
-          'key in force to sign with');
-    }
-    final index = establishments.length - 1;
-    final keys = establishments.last['k'];
-    final named = keys is List && keys.isNotEmpty ? keys.first : null;
-    if (index > 255 || named != KeyManager.keyAt(seed, index).publicKeyEncoded) {
-      throw Exception('the key log of $aid names $named as the key in force, which '
-          'is not key $index of this recovery phrase, so nothing signed here '
-          'would verify against it');
-    }
-    return index;
-  }
-
-  /// The private key in force (see [_keyInForce]).
-  Future<ed.PrivateKey> _signingKeyInForce(Uint8List seed) async =>
-      ed.newKeyFromSeed(KeyManager.signingSeed(seed, index: await _keyInForce(seed)));
-
-  /// The identifier of the identity this core holds, which is the name its key
-  /// log is kept under. The recovery phrase in secure storage is that
-  /// identity's, so it is the log every key derived from the phrase answers to.
-  Future<String> _ownIdentifier() async {
-    final res = await _client.get(Uri.parse('$_baseUrl/api/identity'));
-    if (res.statusCode != 200) {
-      refusedByTheCore(res, 'Could not read which identity this core holds');
-    }
-    final aid = (jsonDecode(res.body) as Map<String, dynamic>)['aid'];
-    if (aid is! String || aid.isEmpty) {
-      throw Exception('this core holds no identity, so there is no key in force to sign with');
-    }
-    return aid;
+  /// The private key in force (TheKeyInForce), or null where this device
+  /// holds no recovery phrase.
+  Future<ed.PrivateKey?> _signerInForce() async {
+    final mnemonic = await SecureKeyStore.loadMnemonic();
+    if (mnemonic == null) return null;
+    final seed = Bip39.mnemonicToSeed(mnemonic);
+    return ed.newKeyFromSeed(KeyManager.signingSeed(seed, index: await _keys.index(seed)));
   }
 
   /// The key event log of the identity held under [name], as the core serves
@@ -305,19 +278,7 @@ class LocalCoreKeriService extends KeriService {
   /// answers with a list of events, not text; this once returned that list as
   /// a String and failed at runtime for every caller.
   @override
-  Future<KeyEventLog> getCurrentKel({required String name}) async {
-    final response = await _client.get(
-      Uri.parse('$_baseUrl/api/kel?name=${Uri.encodeQueryComponent(name)}'),
-    );
-    if (response.statusCode != 200) {
-      refusedByTheCore(response, 'Could not read the key log');
-    }
-    final json = jsonDecode(response.body);
-    if (json is! Map<String, dynamic>) {
-      throw Exception('the core answered with something that is not a key log');
-    }
-    return KeyEventLog.fromJson(json);
-  }
+  Future<KeyEventLog> getCurrentKel({required String name}) => _keys.keyLog(name);
 
   @override
   Future<bool> verifySignature({
@@ -350,6 +311,10 @@ class LocalCoreKeriService extends KeriService {
     String holderAid = '',
     String name = '',
   }) async {
+    // The key is worked out before the event exists, so a key log this phrase
+    // cannot sign for is refused before anything is added to it.
+    final signer = await _signerInForce();
+
     // Step 1: Ask the Go backend to format the ACDC and create the IXN anchor.
     final response = await _client.post(
       Uri.parse('$_baseUrl/api/credential/issue'),
@@ -371,15 +336,10 @@ class LocalCoreKeriService extends KeriService {
     // Step 2: Sign the IXN event bytes locally with the key in force.
     // Private key never leaves this device (ADR-014).
     String cesrSig = '';
-    if (ixnRawBytesB64.isNotEmpty) {
-      final mnemonic = await SecureKeyStore.loadMnemonic();
-      if (mnemonic != null) {
-        final seed = Bip39.mnemonicToSeed(mnemonic);
-        final privateKey = await _signingKeyInForce(seed);
-        final rawEventBytes = base64Decode(ixnRawBytesB64);
-        final rawSig = ed.sign(privateKey, Uint8List.fromList(rawEventBytes));
-        cesrSig = await _cesrEncode(base64Encode(rawSig));
-      }
+    if (ixnRawBytesB64.isNotEmpty && signer != null) {
+      final rawEventBytes = base64Decode(ixnRawBytesB64);
+      final rawSig = ed.sign(signer, Uint8List.fromList(rawEventBytes));
+      cesrSig = await _cesrEncode(base64Encode(rawSig));
     }
 
     return CredentialIssuanceResult(
@@ -399,6 +359,8 @@ class LocalCoreKeriService extends KeriService {
     String issuerAid = '',
     String schemaSaid = '',
   }) async {
+    final signer = await _signerInForce();
+
     // Step 1: Ask the Go backend to build the presentation and compute its SAID.
     final response = await _client.post(
       Uri.parse('$_baseUrl/api/credential/present'),
@@ -424,15 +386,10 @@ class LocalCoreKeriService extends KeriService {
     // The holder signs pres_said.encode() — the UTF-8 bytes of the 44-char SAID.
     // Private key never leaves this device (ADR-014).
     String cesrSig = '';
-    if (presSaidB64.isNotEmpty) {
-      final mnemonic = await SecureKeyStore.loadMnemonic();
-      if (mnemonic != null) {
-        final seed = Bip39.mnemonicToSeed(mnemonic);
-        final privateKey = await _signingKeyInForce(seed);
-        final saidBytes = base64Decode(presSaidB64);
-        final rawSig = ed.sign(privateKey, Uint8List.fromList(saidBytes));
-        cesrSig = await _cesrEncode(base64Encode(rawSig));
-      }
+    if (presSaidB64.isNotEmpty && signer != null) {
+      final saidBytes = base64Decode(presSaidB64);
+      final rawSig = ed.sign(signer, Uint8List.fromList(saidBytes));
+      cesrSig = await _cesrEncode(base64Encode(rawSig));
     }
 
     return PresentationResult(

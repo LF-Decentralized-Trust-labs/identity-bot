@@ -4,7 +4,11 @@ import 'dart:typed_data';
 import 'package:agent_client/crypto/bip39.dart';
 import 'package:agent_client/crypto/keys.dart';
 import 'package:agent_client/services/local_core_keri_service.dart';
+import 'package:agent_client/services/keri_service.dart';
+import 'package:agent_client/services/owner_signing_client.dart';
 import 'package:agent_client/services/secure_key_store.dart';
+import 'package:agent_client/services/the_key_in_force.dart';
+import 'package:agent_client/services/the_key_is_not_held_by_the_core.dart';
 import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
@@ -21,13 +25,21 @@ List<int> rawOf(String qb64) => base64Url.decode('A${qb64.substring(1)}').sublis
 // outlives the app talking to it.
 //
 // Like the real core it records a signature over an event only if it verifies
-// under the key that event is checked against, and records the same one again
-// without complaint.
+// under the key that event is checked against, records the same one again
+// without complaint, and says in its key log which events are signed.
+//
+// [keyNotHeldHere] is the real core's answer today for an identity whose key
+// the app holds: it refuses to add a rotation or an interaction at all
+// (409 key_not_held_here), because it cannot sign one itself. What this test
+// shows about rotations and interactions is the app's half, ready for a core
+// that accepts an event the app signs.
 class FakeCore {
   final kel = <Map<String, dynamic>>[];
   final sent = <String, Map<String, dynamic>>{};
+  final posted = <String>[];
   final List<int> eventBytes;
   bool refuseSignatures = false;
+  bool keyNotHeldHere = false;
   FakeCore(this.eventBytes);
 
   // The key an event at [sn] is checked against: the one in force after it.
@@ -53,6 +65,7 @@ class FakeCore {
                     'raw_events_b64': [for (final _ in kel) base64Encode(eventBytes)],
                     'sequence_number': kel.length - 1,
                     'event_count': kel.length,
+                    'signed': [for (final e in kel) e['sig'] != null],
                   }),
                   200);
           }
@@ -60,6 +73,12 @@ class FakeCore {
         }
         final body = jsonDecode(req.body) as Map<String, dynamic>;
         sent[req.url.path] = body;
+        posted.add(req.url.path);
+        if (keyNotHeldHere && (req.url.path == '/api/rotation' || req.url.path == '/api/interact')) {
+          return http.Response(
+              jsonEncode({'error': 'key_not_held_here', 'details': "This identity's key is not held by this Identity Agent."}),
+              409);
+        }
         final sn = '${kel.length}';
         switch (req.url.path) {
           case '/api/inception':
@@ -124,7 +143,7 @@ void main() {
     await keri.inceptAid(name: 'me', code: words.join(' '));
     final committed = sent['/api/inception']!['next_public_key'] as String;
 
-    await keri.rotateAid(name: 'me');
+    await keri.rotateAid(name: 'Eaid');
     final rotation = sent['/api/rotation']!;
     expect(rotation['new_public_key'], committed,
         reason: 'the new key must be the next key the founding event committed to');
@@ -254,5 +273,75 @@ void main() {
     expect(log.sequenceNumber, 1);
     expect(log.eventCount, 2);
     expect(log.establishmentEvents.last['k'], [core.currentKey]);
+  });
+
+  test('where the core does not hold the key, a rotation says so and signs nothing', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    core.keyNotHeldHere = true;
+    core.posted.clear();
+    await expectLater(keri.rotateAid(name: 'Eaid'), throwsA(isA<KeyNotHeldByTheCore>()));
+    await expectLater(keri.interactAid(name: 'Eaid'), throwsA(isA<KeyNotHeldByTheCore>()));
+    expect(core.posted.where((p) => p == '/api/cesr/encode' || p == '/api/events/signature'), isEmpty,
+        reason: 'nothing is signed for an event the core refused to add');
+    expect(core.kel.map((e) => e['t']), ['icp']);
+  });
+
+  test('only the identity held here is rotated with its phrase', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    core.posted.clear();
+    await expectLater(keri.rotateAid(name: 'Esomebody-else'), throwsArgumentError);
+    expect(core.posted, isNot(contains('/api/rotation')));
+  });
+
+  test('the key is worked out before the event exists', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    // A log naming a key this phrase does not hold.
+    final stranger = KeyManager.keyAt(Bip39.mnemonicToSeed(Bip39.generateMnemonic()), 1);
+    core.kel.add({'t': 'rot', 's': '1', 'k': [stranger.publicKeyEncoded], 'sig': 'x'});
+    core.posted.clear();
+    await expectLater(keri.interactAid(name: 'Eaid'), throwsException);
+    await expectLater(keri.issueCredential(claims: {'a': 'b'}, schemaSaid: 'E'), throwsException);
+    expect(core.posted, isEmpty, reason: 'no event is added to a log this phrase cannot sign for');
+  });
+
+  test('an establishment event left unsigned is signed the next time the identity signs', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    core.refuseSignatures = true;
+    await expectLater(keri.rotateAid(name: 'Eaid'), throwsException);
+    expect(core.kel.last['t'], 'rot');
+    expect(core.kel.last['sig'], isNull, reason: 'the rotation is stranded: added and never signed');
+
+    core.refuseSignatures = false;
+    final data = utf8.encode('after the connection came back');
+    final result = await keri.signPayload(name: 'Eaid', data: data);
+    expect(core.kel.last['sig'], isNotNull, reason: 'the stranded rotation was finished');
+    expect(verifiesUnder(core.keyFor(1), rotationEvent, base64Decode(core.kel.last['sig'] as String)), isTrue);
+    expect(result.publicKey, core.currentKey);
+
+    // And the next rotation builds on it.
+    await keri.rotateAid(name: 'Eaid');
+    expect(sent['/api/rotation']!['new_public_key'],
+        KeyManager.keyAt(Bip39.mnemonicToSeed(words), 2).publicKeyEncoded);
+  });
+
+  test('a request signed as the owner is signed with the key in force', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    await keri.rotateAid(name: 'Eaid');
+    final reader = seedFromMnemonic(
+      () async => words,
+      (m) => Bip39.mnemonicToSeed(m.split(' ')),
+      TheKeyInForce(core.client(), 'http://core.test').index,
+    );
+    final ownerSeed = await reader();
+    expect(KeyManager.keyAt(Bip39.mnemonicToSeed(words), 1).publicKey,
+        ed.public(ed.newKeyFromSeed(ownerSeed!)).bytes,
+        reason: 'after a rotation the owner is the rotated key, not the founding one');
+  });
+
+  test('an answer that is not a key log is refused, not read as an empty one', () {
+    expect(() => KeyEventLog.fromJson({'kel': []}), throwsFormatException);
+    expect(() => KeyEventLog.fromJson({'aid': 'Eaid'}), throwsFormatException);
+    expect(() => KeyEventLog.fromJson({'aid': 'Eaid', 'kel': 'x'}), throwsFormatException);
+    expect(KeyEventLog.fromJson({'aid': 'Eaid', 'kel': []}).events, isEmpty);
   });
 }

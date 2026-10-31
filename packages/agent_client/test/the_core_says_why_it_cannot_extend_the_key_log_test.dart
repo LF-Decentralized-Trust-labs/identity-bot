@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:agent_client/services/local_core_keri_service.dart';
 import 'package:agent_client/services/the_key_is_not_held_by_the_core.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:test/test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -16,6 +18,10 @@ http.Response refused() => http.Response(jsonEncode({'error': 'key_not_held_here
 
 void main() {
   test('the core\'s reason for refusing reaches the person, word for word', () async {
+    // No phrase on this device: the key in force is read before the event is
+    // asked for, from secure storage, which is empty here.
+    FlutterSecureStorage.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({});
     final keri = LocalCoreKeriService(baseUrl: 'http://core.test', client: MockClient((_) async => refused()));
     Object? thrown;
     try {

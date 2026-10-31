@@ -26,6 +26,7 @@ void main() {
     final reader = seedFromMnemonic(
       () async => words,
       (m) => Bip39.mnemonicToSeed(m.split(' ')),
+      (_) async => 0, // the founding key is in force
     );
     final seed = await reader();
     expect(seed, isNotNull);
@@ -42,6 +43,7 @@ void main() {
     final reader = seedFromMnemonic(
       () async => null,
       (m) => Bip39.mnemonicToSeed(m.split(' ')),
+      (_) async => 0, // the founding key is in force
     );
     expect(await reader(), isNull);
   });

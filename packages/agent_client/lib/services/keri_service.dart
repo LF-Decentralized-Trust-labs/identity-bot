@@ -132,27 +132,43 @@ class KeyEventLog {
   final int sequenceNumber;
   final int eventCount;
 
+  /// Whether the core holds a signature over each event, beside [events]; null
+  /// from a core that does not say.
+  final List<bool>? signed;
+
   KeyEventLog({
     required this.aid,
     required this.events,
     required this.rawEventsB64,
     required this.sequenceNumber,
     required this.eventCount,
+    this.signed,
   });
 
-  /// Reads the core's GET /api/kel answer.
-  factory KeyEventLog.fromJson(Map<String, dynamic> json) => KeyEventLog(
-        aid: json['aid'] as String? ?? '',
-        events: [
-          for (final e in json['kel'] as List? ?? const [])
-            if (e is Map) Map<String, dynamic>.from(e),
-        ],
-        rawEventsB64: [
-          for (final r in json['raw_events_b64'] as List? ?? const []) r is String ? r : '',
-        ],
-        sequenceNumber: json['sequence_number'] as int? ?? 0,
-        eventCount: json['event_count'] as int? ?? 0,
-      );
+  /// Reads the core's GET /api/kel answer. Throws for an answer that names no
+  /// identifier or carries no list of events: an empty log read from a broken
+  /// answer would look like an identity with no history.
+  factory KeyEventLog.fromJson(Map<String, dynamic> json) {
+    final aid = json['aid'];
+    final kel = json['kel'];
+    if (aid is! String || aid.isEmpty || kel is! List) {
+      throw const FormatException('the core\'s answer is not a key log: it names no identifier or no events');
+    }
+    final signed = json['signed'];
+    return KeyEventLog(
+      aid: aid,
+      events: [
+        for (final e in kel)
+          if (e is Map) Map<String, dynamic>.from(e),
+      ],
+      rawEventsB64: [
+        for (final r in json['raw_events_b64'] as List? ?? const []) r is String ? r : '',
+      ],
+      sequenceNumber: json['sequence_number'] as int? ?? 0,
+      eventCount: json['event_count'] as int? ?? 0,
+      signed: signed is List && signed.length == kel.length ? [for (final b in signed) b == true] : null,
+    );
+  }
 
   /// The events that set the identity's keys (founding and rotations), oldest
   /// first. The last one names the key in force.

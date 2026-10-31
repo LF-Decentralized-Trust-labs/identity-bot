@@ -93,6 +93,16 @@ func (s *CoreServer) handleAttachEventSignature(w http.ResponseWriter, r *http.R
 	log.Printf("[identity-agent-core] SIGNATURE: %s event sn=%d is now signed",
 		req.AID, req.SequenceNumber)
 
+	// An establishment event goes to the witnesses now that it can be checked.
+	// When it was added it carried no signature, and a witness is never sent
+	// an unsigned event (it could not verify one), so a rotation signed after
+	// the fact would otherwise never be witnessed, and nobody relying on the
+	// witnesses would see the identity's new key.
+	switch event.EventType {
+	case "icp", "dip", "rot", "drt":
+		s.broadcastWitnessEvent(*event)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"status": "signed", "aid": req.AID,
 		"sequence_number": req.SequenceNumber})
