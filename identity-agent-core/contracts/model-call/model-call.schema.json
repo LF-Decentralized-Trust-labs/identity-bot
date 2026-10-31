@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "identity-agent-core/contracts/model-call/model-call.schema.json",
+  "title": "A model call made through the Identity Agent (ADR-057)",
+  "description": "How an AI agent's body makes its brain's model calls through the Identity Agent that keeps the API key. The body starts a call with POST /api/agent-host/model-calls carrying a request; collects the answer with GET /api/agent-host/model-calls/{call}?from=N&lease=L, adding &head=1 once it has the status and headers; and gives up on it with DELETE /api/agent-host/model-calls/{call}, answered with stopped. {call} is the call_id path-escaped: every byte but A-Z a-z 0-9 - _ . ~ $ & + : = @ written as %XX in upper case. The lease is form-encoded: every byte but A-Z a-z 0-9 - _ . ~ written as %XX in upper case, and a space as +. A start and every collection are answered with an answer, and a refused request with a refusal and an HTTP status. Every request is sealed and signed by the body (ADR-047). The Identity Agent reads from as a base-10 whole number, an optional sign then digits only, after form-decoding the query (so a + is a space); anything else, a number below 0 or one beyond a signed 64-bit integer is 0. head is set only by the value 1. Worked examples are in identity-agent-core/modelcall/model-call-vectors.json; contracts/check_model_call_vectors.py recomputes them from this prose.",
+  "$defs": {
+    "request": {
+      "description": "Starts a call: what the body's brain sent its body, and the run's lease. The Identity Agent checks it in this order and answers the first rule broken. (1) lease_id is empty, or the request is not readable JSON: 400. (2) body_b64 is not standard base64 with padding, or decodes to more than 3,145,728 bytes (3 MB): 413. (3) The route: the method, upper-cased, and the path must be one of the routes the sign-in's provider has, each a method (GET or POST) and a path. A path is allowed only if it is plain: at most 256 bytes in UTF-8; starting with /; holding only letters and decimal digits (Unicode categories L and Nd) and the characters . - _ : / ~; and unchanged by cleaning, so with no empty segment (//), no . or .. segment and no trailing slash. So nothing escaped, no query and no fragment can be in it. It must then equal a route's path for the same method; and where GET /v1/models is a route, GET /v1/models/{model} is allowed too, for any plain path below it, whose model name may hold a slash. Otherwise 403. (4) The query, where not empty, is form-decoded (split on &, empty pieces skipped, a piece holding ; is unreadable, then each name and value split at the first = and decoded with + as a space and %XX as a byte, a broken %-escape being unreadable). Unreadable, a name other than beta, limit, after_id and before_id (names exactly, in that case), or a name given more than once: 403. beta must be true; limit at most 4 bytes of the digits 0-9 (none at all is allowed); after_id and before_id at most 128 bytes holding only what a plain path may (letters, digits, . - _ : / ~), none at all being allowed. It is sent on re-encoded: names sorted, each name=value form-encoded, every byte but A-Z a-z 0-9 - _ . ~ written as %XX in upper case and a space as +, joined with &. (5) The model: where a model is chosen for the AI agent and the method is POST, the body must be one JSON object (white space aside, nothing before or after it) whose own fields name the model exactly once, as model spelt exactly, with a string equal to the chosen model. A field spelt model in another case, a second model, or a field models in any case (a list to fall back on) is refused. Otherwise 403. Where no model is chosen, or the call is a GET, the body is not read. (6) Under an allowance (a limit on what the AI agent's model calls may cost), a POST is a model call and must also, read the same way as one JSON object of its own fields: give at least one of max_tokens, max_completion_tokens and max_output_tokens, each spelt exactly (one spelt in another case is refused) and given at most once, each a JSON number that is whole and from 1 to 32,768, the largest given counting as the call's bound; and give n and best_of, where given, matched in any case, as the number 1. Fields nested inside the object's values are not read. Otherwise 403. A GET only reads (the list of models, one model by name): it costs nothing and is never held to an allowance. All of these but (1) and (2) say refused: true. The headers, by name in any case, that travel on are Content-Type, Accept, Anthropic-Version, Anthropic-Beta and Openai-Beta, named as written here, each only where it has a value; every other header is dropped, not refused. Where one is given more than once in different cases, the one whose name comes first in byte order among those with a value travels.",
+      "type": "object",
+      "required": [
+        "lease_id",
+        "method",
+        "path"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "lease_id": {
+          "type": "string",
+          "description": "the run's lease on the AI agent's sign-in"
+        },
+        "method": {
+          "type": "string",
+          "description": "the method the brain sent, GET or POST in any case"
+        },
+        "path": {
+          "type": "string",
+          "description": "the provider's path as the brain sent it"
+        },
+        "query": {
+          "type": "string",
+          "description": "the query as the brain sent it, without the ?"
+        },
+        "header": {
+          "$ref": "#/$defs/header"
+        },
+        "body_b64": {
+          "type": "string",
+          "description": "the brain's request body, standard base64 with padding; absent for none"
+        }
+      }
+    },
+    "header": {
+      "description": "HTTP headers, by name, each with one value.",
+      "type": "object",
+      "patternProperties": {
+        "^.*$": {
+          "type": "string"
+        }
+      }
+    },
+    "answer": {
+      "description": "What a start and every collection answer with. One answer carries at most 2,097,152 bytes (2 MB) of the provider's answer, decoded; a collection waits up to twenty seconds for more before it answers with what there is. A collection from N lets go of everything before N: asking again from before it is refused 409. The answer is complete when done is true, and error, where given, says why it ended before the provider finished (stopped because the AI agent may no longer act, the provider could not be reached, it was cut off). An answer that would carry the key back is stopped before any of it is passed on.",
+      "type": "object",
+      "required": [
+        "call_id",
+        "next",
+        "done"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "call_id": {
+          "type": "string",
+          "description": "the call, to collect and stop it by"
+        },
+        "status": {
+          "type": "integer",
+          "description": "the provider's HTTP status, once it has answered; absent until then"
+        },
+        "header": {
+          "$ref": "#/$defs/header",
+          "description": "the provider's headers that travel back: Content-Type, Retry-After, Request-Id, X-Request-Id"
+        },
+        "data_b64": {
+          "type": "string",
+          "description": "the next part of the provider's answer, standard base64 with padding; absent when there is none"
+        },
+        "next": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "the offset to collect from next: from plus the number of bytes in this part"
+        },
+        "done": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string"
+        }
+      }
+    },
+    "refusal": {
+      "description": "A request that was not served, with an HTTP status. By reason: no lease, or unreadable, 400; too large or not base64, 413; the route, query or model not allowed, the lease not open for this body, the AI agent no longer able to act, its sign-in not a key kept here or expired or removed, 403 and refused; under an allowance, a rule above broken, the allowance spent, or stopped because an earlier call's cost is not known, 403 and refused; a collection from before what was collected, 409; the call no longer known, 410 and no_call; the machine already holding as many calls for the AI agent as it may, 429; under an allowance, another of the AI agent's calls under way or not yet counted, 429 and refused; the sign-in, what was lent or the allowance not readable now, 503 and refused; the allowance not writable before the call is sent, 503; the provider's address not known here, 503.",
+      "type": "object",
+      "required": [
+        "error"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "type": "string",
+          "description": "a sentence the body passes to its brain"
+        },
+        "refused": {
+          "const": true,
+          "description": "the call was refused for what it asked or for what the AI agent may do, rather than failing"
+        },
+        "no_call": {
+          "const": true,
+          "description": "the Identity Agent no longer knows the call: the brain's program makes it again"
+        }
+      }
+    },
+    "stopped": {
+      "description": "The answer to DELETE.",
+      "type": "object",
+      "required": [
+        "stopped"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "stopped": {
+          "const": true
+        }
+      }
+    }
+  }
+}
