@@ -160,14 +160,17 @@ class LocalCoreKeriService extends KeriService {
       throw Exception('No identity keys found in secure storage.');
     }
 
-    // The new key is the one founding committed to (index 1), and it signs the
-    // rotation; the rotation commits to the key after it (index 2). Both come
-    // from KeyManager.signingSeed and nothing hashes them again: a second hash
-    // here once made the named key neither the committed one nor the signer.
+    // The new key is the one the last establishment event committed to, and it
+    // signs the rotation; the rotation commits to the key after it. With the
+    // key in force at index n, that is n + 1 and n + 2: 1 and 2 at the first
+    // rotation, 2 and 3 at the second. Both come from KeyManager.signingSeed
+    // and nothing hashes them again: a second hash here once made the named
+    // key neither the committed one nor the signer.
     final seed = Bip39.mnemonicToSeed(mnemonic);
-    final rot1Seed = KeyManager.signingSeed(seed, index: 1);
-    final rot1Keys = KeyManager.keyAt(seed, 1);
-    final rot2Keys = KeyManager.keyAt(seed, 2);
+    final current = await _keyInForce(seed);
+    final rot1Seed = KeyManager.signingSeed(seed, index: current + 1);
+    final rot1Keys = KeyManager.keyAt(seed, current + 1);
+    final rot2Keys = KeyManager.keyAt(seed, current + 2);
 
     // Step 1: Ask the Python driver to create the rotation event.
     final response = await _client.post(
@@ -187,7 +190,7 @@ class LocalCoreKeriService extends KeriService {
     final json = jsonDecode(response.body);
     final rawBytesB64 = json['raw_bytes_b64'] as String? ?? '';
 
-    // Step 2: Sign with the pre-rotated key (index 1) and CESR-encode.
+    // Step 2: Sign with the key being rotated to and CESR-encode.
     String cesrSig = '';
     if (rawBytesB64.isNotEmpty) {
       final rot1PrivKey = ed.newKeyFromSeed(rot1Seed);
@@ -228,11 +231,11 @@ class LocalCoreKeriService extends KeriService {
     final json = jsonDecode(response.body);
     final rawBytesB64 = json['raw_bytes_b64'] as String? ?? '';
 
-    // Step 2: Sign IXN event body with current key (index 0) and CESR-encode.
+    // Step 2: Sign IXN event body with the key in force and CESR-encode.
     String cesrSig = '';
     if (rawBytesB64.isNotEmpty) {
       final seed = Bip39.mnemonicToSeed(mnemonic);
-      final privateKey = ed.newKeyFromSeed(KeyManager.signingSeed(seed));
+      final privateKey = await _signingKeyInForce(seed);
       final rawEventBytes = base64Decode(rawBytesB64);
       final rawSig = ed.sign(privateKey, Uint8List.fromList(rawEventBytes));
       cesrSig = await _cesrEncode(base64Encode(rawSig));
@@ -261,11 +264,13 @@ class LocalCoreKeriService extends KeriService {
     }
 
     final seed = Bip39.mnemonicToSeed(mnemonic);
-    // The key reported is the key that signed. It was derived from the
-    // already-hashed seed, hashing it twice, so it named a key that signs
-    // nothing.
-    final signingKeyPair = KeyManager.generateFromSeed(seed);
-    final privateKey = ed.newKeyFromSeed(KeyManager.signingSeed(seed));
+    // The key reported is the key that signed, and it is the key the identity's
+    // log says is in force: after a rotation that is no longer the founding
+    // key, and a signature by the founding key verifies against nothing a
+    // counterparty would look up.
+    final index = await _keyInForce(seed);
+    final signingKeyPair = KeyManager.keyAt(seed, index);
+    final privateKey = ed.newKeyFromSeed(KeyManager.signingSeed(seed, index: index));
 
     final rawSig = ed.sign(privateKey, Uint8List.fromList(data));
     final rawSigB64 = base64Encode(rawSig);
@@ -278,6 +283,66 @@ class LocalCoreKeriService extends KeriService {
       publicKey: signingKeyPair.publicKeyEncoded,
       cesrSignature: cesrSig,
     );
+  }
+
+  /// Which key in the identity's chain is in force, as its key log says.
+  ///
+  /// Key n is [KeyManager.keyAt] at index n. Founding puts key 0 in force and
+  /// every rotation moves one along, so the key in force is the number of
+  /// establishment events after the first. That is read from the log every
+  /// time rather than remembered here: the log is what a counterparty checks
+  /// a signature against, it survives a restart because the core keeps it, and
+  /// a count kept beside it could disagree with it and nothing would notice.
+  ///
+  /// The key derived for that index must be the key the log's last
+  /// establishment event names. If it is not, this throws rather than signing:
+  /// a signature by any other key is one no counterparty can verify, and
+  /// carrying on would only move the failure to them.
+  Future<int> _keyInForce(Uint8List seed) async {
+    final aid = await _ownIdentifier();
+    final res = await _client.get(
+      Uri.parse('$_baseUrl/api/kel?name=${Uri.encodeQueryComponent(aid)}'),
+    );
+    if (res.statusCode != 200) {
+      refusedByTheCore(res, 'Could not read the key log to find the key in force');
+    }
+    final events = (jsonDecode(res.body) as Map<String, dynamic>)['kel'];
+    final establishments = (events is List ? events : const [])
+        .whereType<Map>()
+        .where((e) => const {'icp', 'dip', 'rot', 'drt'}.contains(e['t']))
+        .toList();
+    if (establishments.isEmpty) {
+      throw Exception('the key log of $aid has no founding event, so there is no '
+          'key in force to sign with');
+    }
+    final index = establishments.length - 1;
+    final keys = establishments.last['k'];
+    final named = keys is List && keys.isNotEmpty ? keys.first : null;
+    if (index > 255 || named != KeyManager.keyAt(seed, index).publicKeyEncoded) {
+      throw Exception('the key log of $aid names $named as the key in force, which '
+          'is not key $index of this recovery phrase, so nothing signed here '
+          'would verify against it');
+    }
+    return index;
+  }
+
+  /// The private key in force (see [_keyInForce]).
+  Future<ed.PrivateKey> _signingKeyInForce(Uint8List seed) async =>
+      ed.newKeyFromSeed(KeyManager.signingSeed(seed, index: await _keyInForce(seed)));
+
+  /// The identifier of the identity this core holds, which is the name its key
+  /// log is kept under. The recovery phrase in secure storage is that
+  /// identity's, so it is the log every key derived from the phrase answers to.
+  Future<String> _ownIdentifier() async {
+    final res = await _client.get(Uri.parse('$_baseUrl/api/identity'));
+    if (res.statusCode != 200) {
+      refusedByTheCore(res, 'Could not read which identity this core holds');
+    }
+    final aid = (jsonDecode(res.body) as Map<String, dynamic>)['aid'];
+    if (aid is! String || aid.isEmpty) {
+      throw Exception('this core holds no identity, so there is no key in force to sign with');
+    }
+    return aid;
   }
 
   @override
@@ -343,14 +408,14 @@ class LocalCoreKeriService extends KeriService {
     final json = jsonDecode(response.body);
     final ixnRawBytesB64 = json['ixn_raw_bytes_b64'] as String? ?? '';
 
-    // Step 2: Sign the IXN event bytes locally with the current key (index 0).
+    // Step 2: Sign the IXN event bytes locally with the key in force.
     // Private key never leaves this device (ADR-014).
     String cesrSig = '';
     if (ixnRawBytesB64.isNotEmpty) {
       final mnemonic = await SecureKeyStore.loadMnemonic();
       if (mnemonic != null) {
         final seed = Bip39.mnemonicToSeed(mnemonic);
-        final privateKey = ed.newKeyFromSeed(KeyManager.signingSeed(seed));
+        final privateKey = await _signingKeyInForce(seed);
         final rawEventBytes = base64Decode(ixnRawBytesB64);
         final rawSig = ed.sign(privateKey, Uint8List.fromList(rawEventBytes));
         cesrSig = await _cesrEncode(base64Encode(rawSig));
@@ -394,8 +459,8 @@ class LocalCoreKeriService extends KeriService {
     final json = jsonDecode(response.body);
     final presSaidB64 = json['pres_said_b64'] as String? ?? '';
 
-    // Step 2: Sign the presentation SAID bytes locally with the holder's current
-    // key (index 0). This proves possession of the key bound to the holder AID.
+    // Step 2: Sign the presentation SAID bytes locally with the holder's key in
+    // force. This proves possession of the key bound to the holder AID.
     // The holder signs pres_said.encode() — the UTF-8 bytes of the 44-char SAID.
     // Private key never leaves this device (ADR-014).
     String cesrSig = '';
@@ -403,7 +468,7 @@ class LocalCoreKeriService extends KeriService {
       final mnemonic = await SecureKeyStore.loadMnemonic();
       if (mnemonic != null) {
         final seed = Bip39.mnemonicToSeed(mnemonic);
-        final privateKey = ed.newKeyFromSeed(KeyManager.signingSeed(seed));
+        final privateKey = await _signingKeyInForce(seed);
         final saidBytes = base64Decode(presSaidB64);
         final rawSig = ed.sign(privateKey, Uint8List.fromList(saidBytes));
         cesrSig = await _cesrEncode(base64Encode(rawSig));
