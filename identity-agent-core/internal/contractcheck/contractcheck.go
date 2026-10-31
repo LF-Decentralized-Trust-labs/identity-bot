@@ -63,7 +63,14 @@ func Read(path string) (*Schema, error) {
 // Matches reports every way the definition named def disagrees with the Go
 // type v, which is a struct or a pointer to one. An empty result means they
 // agree.
-func (s *Schema) Matches(def string, v any) []string {
+func (s *Schema) Matches(def string, v any) []string { return s.matches(def, v, true) }
+
+// MatchesOpen is Matches for a definition whose reader ignores fields it
+// does not know, so the schema must not refuse them: everything Matches
+// checks but additionalProperties, which must not be false.
+func (s *Schema) MatchesOpen(def string, v any) []string { return s.matches(def, v, false) }
+
+func (s *Schema) matches(def string, v any, closed bool) []string {
 	d, ok := s.Defs[def]
 	if !ok {
 		return []string{fmt.Sprintf("%s: no definition %q", s.Path, def)}
@@ -74,8 +81,11 @@ func (s *Schema) Matches(def string, v any) []string {
 	}
 	where := fmt.Sprintf("%s $defs/%s (Go %s)", s.Path, def, t)
 	var out []string
-	if d.AdditionalProperties == nil || *d.AdditionalProperties {
+	if closed && (d.AdditionalProperties == nil || *d.AdditionalProperties) {
 		out = append(out, where+": does not refuse undeclared fields (additionalProperties must be false)")
+	}
+	if !closed && d.AdditionalProperties != nil && !*d.AdditionalProperties {
+		out = append(out, where+": refuses undeclared fields, which its reader ignores")
 	}
 	written, always := fieldsOf(t)
 	required := map[string]bool{}
@@ -207,16 +217,26 @@ func Unavailable(t Tester, why string) {
 // installed, see Unavailable.
 func Independently(t Tester, contracts, vectors string) {
 	t.Helper()
+	IndependentlyWith(t, filepath.Join(contracts, "check_ai_agent_vectors.py"), vectors, "blake3")
+}
+
+// IndependentlyWith runs another independent check, the Python script at
+// script, over a vector file, where Python and each of the modules it needs
+// are installed; see Unavailable for where they are not.
+func IndependentlyWith(t Tester, script, vectors string, modules ...string) {
+	t.Helper()
 	py, err := exec.LookPath("python3")
 	if err != nil {
 		Unavailable(t, "python3 is not installed")
 		return
 	}
-	if exec.Command(py, "-c", "import blake3").Run() != nil {
-		Unavailable(t, "the python blake3 module is not installed (pip install blake3)")
-		return
+	for _, m := range modules {
+		if exec.Command(py, "-c", "import "+m).Run() != nil {
+			Unavailable(t, "the python "+m+" module is not installed (pip install "+m+")")
+			return
+		}
 	}
-	out, err := exec.Command(py, "-I", filepath.Join(contracts, "check_ai_agent_vectors.py"), vectors).CombinedOutput()
+	out, err := exec.Command(py, "-I", script, vectors).CombinedOutput()
 	if err != nil {
 		t.Fatalf("the independent check disagrees:\n%s", out)
 	}

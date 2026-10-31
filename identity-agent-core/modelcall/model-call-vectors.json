@@ -1,0 +1,3184 @@
+{
+  "about": "Model calls a body makes through the Identity Agent that keeps the API key, worked through; the rules are in contracts/model-call/model-call.schema.json. Each start arrives as its request written as JSON (or as raw, padded to raw_pad_to) and is checked against example_profile, or its own profile, under its model (the model chosen for the AI agent, where one is) and allowance (whether its model calls are held to an allowance). example_profile is made up for these vectors: it is not any provider's, and the routes, headers, query parameters and answer-length names in it are not part of the exchange. Each outcome is what the request alone decides; what only the Identity Agent knows (the lease, the AI agent's standing, what an allowance has left) is not in it.",
+  "limits": {
+    "request_largest": 3145728,
+    "start_largest": 6291456,
+    "part_largest": 2097152,
+    "path_longest": 256,
+    "answer_longest": 32768,
+    "depth_deepest": 1000,
+    "collection_wait_seconds": 20
+  },
+  "example_profile": {
+    "routes": [
+      {
+        "method": "POST",
+        "path": "/v1/generate"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/generate/count",
+        "counts": true
+      },
+      {
+        "method": "POST",
+        "path": "/v1/complete"
+      },
+      {
+        "method": "GET",
+        "path": "/v1/models"
+      }
+    ],
+    "models_path": "/v1/models",
+    "headers": [
+      "Content-Type",
+      "Accept",
+      "Example-Version",
+      "Example-Beta",
+      "Example-Preview"
+    ],
+    "answer_headers": [
+      "Content-Type",
+      "Retry-After",
+      "Request-Id",
+      "X-Request-Id"
+    ],
+    "query": [
+      {
+        "name": "preview",
+        "value": "true"
+      },
+      {
+        "name": "page_size",
+        "digits": 4
+      },
+      {
+        "name": "page_after",
+        "plain": 128
+      },
+      {
+        "name": "page_before",
+        "plain": 128
+      }
+    ],
+    "answer_bound_names": [
+      "max_answer_tokens",
+      "answer_limit",
+      "answer_tokens"
+    ],
+    "answer_count_names": [
+      "answer_count",
+      "candidates"
+    ]
+  },
+  "borrow": {
+    "request": {
+      "model_calls": "through_identity_agent"
+    },
+    "answer": {
+      "lease_id": "lease-0001",
+      "lease_expires_at": "2026-10-30T12:05:00Z",
+      "renew_every_seconds": 100,
+      "model_calls": "through_identity_agent"
+    },
+    "renew": {
+      "lease_id": "lease-0001"
+    },
+    "renewed": {
+      "lease_id": "lease-0001",
+      "lease_expires_at": "2026-10-30T12:06:40Z"
+    },
+    "return": {
+      "lease_id": "lease-0001"
+    },
+    "returned": {
+      "returned": true
+    },
+    "lease_gone": {
+      "error": "no such lease",
+      "no_lease": true
+    },
+    "update_agent_host": {
+      "error": "this AI agent's key stays with its Identity Agent, and this machine's body is too old to make its model calls through it; update it",
+      "update_agent_host": true
+    }
+  },
+  "starts": [
+    {
+      "name": "a model call",
+      "body": "{\"model\":\"example-model-1\",\"max_answer_tokens\":1024,\"input\":[{\"role\":\"user\",\"content\":\"Hello\"}]}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "query": "preview=true",
+        "header": {
+          "Authorization": "Bearer run-token",
+          "Example-Version": "2023-06-01",
+          "User-Agent": "a-program/1.0",
+          "X-Api-Key": "run-token",
+          "content-type": "application/json"
+        },
+        "body_b64": "eyJtb2RlbCI6ImV4YW1wbGUtbW9kZWwtMSIsIm1heF9hbnN3ZXJfdG9rZW5zIjoxMDI0LCJpbnB1dCI6W3sicm9sZSI6InVzZXIiLCJjb250ZW50IjoiSGVsbG8ifV19"
+      },
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "POST",
+          "path": "/v1/generate",
+          "query": "preview=true",
+          "header": {
+            "Content-Type": "application/json",
+            "Example-Version": "2023-06-01"
+          }
+        }
+      }
+    },
+    {
+      "name": "the method in lower case",
+      "body": "{\"model\":\"m\",\"input\":[]}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "post",
+        "path": "/v1/complete",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJpbnB1dCI6W119"
+      },
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "POST",
+          "path": "/v1/complete"
+        }
+      }
+    },
+    {
+      "name": "the list of models, paged",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models",
+        "query": "page_size=20&page_after=model-a"
+      },
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "GET",
+          "path": "/v1/models",
+          "query": "page_after=model-a&page_size=20",
+          "reads": true
+        }
+      }
+    },
+    {
+      "name": "one model by a name holding a slash",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models/vendor/example-model:latest"
+      },
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "GET",
+          "path": "/v1/models/vendor/example-model:latest",
+          "reads": true
+        }
+      }
+    },
+    {
+      "name": "the query is sent on sorted",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models",
+        "query": "page_size=5&preview=true"
+      },
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "GET",
+          "path": "/v1/models",
+          "query": "page_size=5&preview=true",
+          "reads": true
+        }
+      }
+    },
+    {
+      "name": "an empty query value of the paging",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models",
+        "query": "page_size=&page_after="
+      },
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "GET",
+          "path": "/v1/models",
+          "query": "page_after=&page_size=",
+          "reads": true
+        }
+      }
+    },
+    {
+      "name": "a path of 256 bytes",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "GET",
+          "path": "/v1/models/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "reads": true
+        }
+      }
+    },
+    {
+      "name": "the chosen model",
+      "model": "example-model-1",
+      "body": "{\"model\":\"example-model-1\",\"input\":[]}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6ImV4YW1wbGUtbW9kZWwtMSIsImlucHV0IjpbXX0="
+      },
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "POST",
+          "path": "/v1/generate"
+        }
+      }
+    },
+    {
+      "name": "a chosen model does not bind a read",
+      "model": "example-model-1",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models"
+      },
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "GET",
+          "path": "/v1/models",
+          "reads": true
+        }
+      }
+    },
+    {
+      "name": "no model chosen: the body is not read",
+      "body": "not json",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "bm90IGpzb24="
+      },
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "POST",
+          "path": "/v1/generate"
+        }
+      }
+    },
+    {
+      "name": "no model chosen: a list of models to fall back on passes",
+      "body": "{\"models\":[\"a\",\"b\"]}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/complete",
+        "body_b64": "eyJtb2RlbHMiOlsiYSIsImIiXX0="
+      },
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "POST",
+          "path": "/v1/complete"
+        }
+      }
+    },
+    {
+      "name": "a body of exactly 3 MB",
+      "body": "{\"model\":\"m\",\"input\":[]}",
+      "pad_to": 3145728,
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate"
+      },
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "POST",
+          "path": "/v1/generate"
+        }
+      }
+    },
+    {
+      "name": "an allowance: the largest answer length counts",
+      "allowance": true,
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":1024,\"answer_limit\":2048}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/complete",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6MTAyNCwiYW5zd2VyX2xpbWl0IjoyMDQ4fQ=="
+      },
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "POST",
+          "path": "/v1/complete",
+          "bound": 2048
+        }
+      }
+    },
+    {
+      "name": "an allowance: one answer, asked for as 1",
+      "allowance": true,
+      "body": "{\"model\":\"m\",\"answer_tokens\":32768,\"answer_count\":1,\"candidates\":1.0}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/complete",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJhbnN3ZXJfdG9rZW5zIjozMjc2OCwiYW5zd2VyX2NvdW50IjoxLCJjYW5kaWRhdGVzIjoxLjB9"
+      },
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "POST",
+          "path": "/v1/complete",
+          "bound": 32768
+        }
+      }
+    },
+    {
+      "name": "an allowance: a whole number written with an exponent",
+      "allowance": true,
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":1e3}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6MWUzfQ=="
+      },
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "POST",
+          "path": "/v1/generate",
+          "bound": 1000
+        }
+      }
+    },
+    {
+      "name": "an allowance: only the object's own fields are read",
+      "allowance": true,
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":10,\"metadata\":{\"answer_count\":5,\"max_answer_tokens\":99999}}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6MTAsIm1ldGFkYXRhIjp7ImFuc3dlcl9jb3VudCI6NSwibWF4X2Fuc3dlcl90b2tlbnMiOjk5OTk5fX0="
+      },
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "POST",
+          "path": "/v1/generate",
+          "bound": 10
+        }
+      }
+    },
+    {
+      "name": "an allowance: a read is not held to it",
+      "allowance": true,
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models"
+      },
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "GET",
+          "path": "/v1/models",
+          "reads": true
+        }
+      }
+    },
+    {
+      "name": "an allowance and a chosen model",
+      "model": "example-model-1",
+      "allowance": true,
+      "body": "{\"model\":\"example-model-1\",\"max_answer_tokens\":1}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6ImV4YW1wbGUtbW9kZWwtMSIsIm1heF9hbnN3ZXJfdG9rZW5zIjoxfQ=="
+      },
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "POST",
+          "path": "/v1/generate",
+          "bound": 1
+        }
+      }
+    },
+    {
+      "name": "no lease",
+      "body": "{\"model\":\"m\"}",
+      "request": {
+        "lease_id": "",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0ifQ=="
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "no_lease",
+        "status": 400
+      }
+    },
+    {
+      "name": "a start that is not JSON",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate"
+      },
+      "raw": "not json",
+      "outcome": {
+        "allowed": false,
+        "reason": "no_lease",
+        "status": 400
+      }
+    },
+    {
+      "name": "a start that is not an object",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate"
+      },
+      "raw": "[\"lease-0001\"]",
+      "outcome": {
+        "allowed": false,
+        "reason": "no_lease",
+        "status": 400
+      }
+    },
+    {
+      "name": "a start whose lease is not a string",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate"
+      },
+      "raw": "{\"lease_id\":1,\"method\":\"GET\",\"path\":\"/v1/models\"}",
+      "outcome": {
+        "allowed": false,
+        "reason": "no_lease",
+        "status": 400
+      }
+    },
+    {
+      "name": "a start naming its fields in another case",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate"
+      },
+      "raw": "{\"LEASE_ID\":\"lease-0001\",\"method\":\"GET\",\"path\":\"/v1/models\"}",
+      "outcome": {
+        "allowed": false,
+        "reason": "no_lease",
+        "status": 400
+      }
+    },
+    {
+      "name": "a start with a field it does not know",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate"
+      },
+      "raw": "{\"lease_id\":\"lease-0001\",\"method\":\"GET\",\"path\":\"/v1/models\",\"extra\":{\"a\":1}}",
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "GET",
+          "path": "/v1/models",
+          "reads": true
+        }
+      }
+    },
+    {
+      "name": "a start with nulls for its strings",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate"
+      },
+      "raw": "{\"lease_id\":\"lease-0001\",\"method\":\"GET\",\"path\":\"/v1/models\",\"query\":null,\"header\":{\"Accept\":null},\"body_b64\":null}",
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "GET",
+          "path": "/v1/models",
+          "reads": true
+        }
+      }
+    },
+    {
+      "name": "a start escaping a lone surrogate in a header",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate"
+      },
+      "raw": "{\"lease_id\":\"lease-0001\",\"method\":\"GET\",\"path\":\"/v1/models\",\"header\":{\"Accept\":\"\\ud800\"}}",
+      "outcome": {
+        "allowed": false,
+        "reason": "no_lease",
+        "status": 400
+      }
+    },
+    {
+      "name": "a start escaping a lone low surrogate in its lease",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate"
+      },
+      "raw": "{\"lease_id\":\"\\udc00\",\"method\":\"GET\",\"path\":\"/v1/models\"}",
+      "outcome": {
+        "allowed": false,
+        "reason": "no_lease",
+        "status": 400
+      }
+    },
+    {
+      "name": "a start escaping a surrogate pair",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate"
+      },
+      "raw": "{\"lease_id\":\"lease-0001\",\"method\":\"GET\",\"path\":\"/v1/models\",\"header\":{\"Accept\":\"\\ud83d\\ude00\"}}",
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "GET",
+          "path": "/v1/models",
+          "header": {
+            "Accept": "😀"
+          },
+          "reads": true
+        }
+      }
+    },
+    {
+      "name": "a start escaping a backslash before a u",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate"
+      },
+      "raw": "{\"lease_id\":\"lease-0001\",\"method\":\"GET\",\"path\":\"/v1/models\",\"header\":{\"Accept\":\"\\\\ud800\"}}",
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "GET",
+          "path": "/v1/models",
+          "header": {
+            "Accept": "\\ud800"
+          },
+          "reads": true
+        }
+      }
+    },
+    {
+      "name": "a start nested 1000 deep",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate"
+      },
+      "raw": "{\"lease_id\":\"lease-0001\",\"method\":\"GET\",\"path\":\"/v1/models\",\"extra\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}",
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "GET",
+          "path": "/v1/models",
+          "reads": true
+        }
+      }
+    },
+    {
+      "name": "a start nested 1001 deep",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate"
+      },
+      "raw": "{\"lease_id\":\"lease-0001\",\"method\":\"GET\",\"path\":\"/v1/models\",\"extra\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}",
+      "outcome": {
+        "allowed": false,
+        "reason": "no_lease",
+        "status": 400
+      }
+    },
+    {
+      "name": "a start of exactly 6 MB",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models"
+      },
+      "raw_pad_to": 6291456,
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "GET",
+          "path": "/v1/models",
+          "reads": true
+        }
+      }
+    },
+    {
+      "name": "a start of 6 MB and a byte",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models"
+      },
+      "raw_pad_to": 6291457,
+      "outcome": {
+        "allowed": false,
+        "reason": "too_large",
+        "status": 413
+      }
+    },
+    {
+      "name": "no lease, and a body that is not base64",
+      "request": {
+        "lease_id": "",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "not base64!"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "no_lease",
+        "status": 400
+      }
+    },
+    {
+      "name": "a body that is not base64",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "not base64!"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "too_large",
+        "status": 413
+      }
+    },
+    {
+      "name": "a body in base64 broken across lines",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "e30=\n"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "too_large",
+        "status": 413
+      }
+    },
+    {
+      "name": "a method named with a letter outside ASCII",
+      "body": "{\"model\":\"m\"}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "poſt",
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0ifQ=="
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a body of 3 MB and a byte",
+      "body": "{\"model\":\"m\",\"input\":[]}",
+      "pad_to": 3145729,
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "too_large",
+        "status": 413
+      }
+    },
+    {
+      "name": "a route the sign-in does not have",
+      "body": "{\"model\":\"m\"}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/embeddings",
+        "body_b64": "eyJtb2RlbCI6Im0ifQ=="
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "the right path with the wrong method",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/generate"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a method the exchange has no route for",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "DELETE",
+        "path": "/v1/models"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "one model by name is only read",
+      "body": "{}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/models/example-model",
+        "body_b64": "e30="
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "an escaped path",
+      "body": "{\"model\":\"m\"}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate%2Fcount",
+        "body_b64": "eyJtb2RlbCI6Im0ifQ=="
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a path that cleaning changes",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models/../generate"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a path with an empty segment",
+      "body": "{\"model\":\"m\"}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "//v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0ifQ=="
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a path with a trailing slash",
+      "body": "{\"model\":\"m\"}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate/",
+        "body_b64": "eyJtb2RlbCI6Im0ifQ=="
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a path holding a query",
+      "body": "{\"model\":\"m\"}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate?preview=true",
+        "body_b64": "eyJtb2RlbCI6Im0ifQ=="
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a path holding a fragment",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models#x"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a path not starting with a slash",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "v1/models"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a path holding a letter outside ASCII",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models/modèle"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a path holding a letter newer than some Unicode tables",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models/a𐵐"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a method other than GET or POST, though the profile lists it",
+      "profile": {
+        "routes": [
+          {
+            "method": "PUT",
+            "path": "/v1/models"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview"
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id"
+        ],
+        "query": [
+          {
+            "name": "preview",
+            "value": "true"
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "PUT",
+        "path": "/v1/models"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a profile naming a route's method in lower case allows no call",
+      "profile": {
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          },
+          {
+            "method": "get",
+            "path": "/v1/other"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview"
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id"
+        ],
+        "query": [
+          {
+            "name": "preview",
+            "value": "true"
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a profile naming a header with a space in it allows no call",
+      "profile": {
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview",
+          "Authorization "
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id"
+        ],
+        "query": [
+          {
+            "name": "preview",
+            "value": "true"
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a profile naming a header with a colon in it allows no call",
+      "profile": {
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview"
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id",
+          "Set-Cookie:"
+        ],
+        "query": [
+          {
+            "name": "preview",
+            "value": "true"
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a profile naming a header with a letter outside ASCII allows no call",
+      "profile": {
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview",
+          "Cöokie"
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id"
+        ],
+        "query": [
+          {
+            "name": "preview",
+            "value": "true"
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a profile naming one header twice, ignoring case, allows no call",
+      "profile": {
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview",
+          "ACCEPT"
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id"
+        ],
+        "query": [
+          {
+            "name": "preview",
+            "value": "true"
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a profile naming one answer-length field twice, ignoring case, allows no call",
+      "profile": {
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview"
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id"
+        ],
+        "query": [
+          {
+            "name": "preview",
+            "value": "true"
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens",
+          "MAX_ANSWER_TOKENS"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "allowance": true,
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":5}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6NX0="
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a profile naming one query parameter twice, ignoring case, allows no call",
+      "profile": {
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview"
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id"
+        ],
+        "query": [
+          {
+            "name": "preview",
+            "value": "true"
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          },
+          {
+            "name": "Preview",
+            "value": "1"
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a profile whose query parameter gives two rules allows no call",
+      "profile": {
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview"
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id"
+        ],
+        "query": [
+          {
+            "name": "preview",
+            "value": "true",
+            "digits": 2
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a profile whose query parameter gives no rule allows no call",
+      "profile": {
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview"
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id"
+        ],
+        "query": [
+          {
+            "name": "preview"
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a path of 257 bytes",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "no path",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": ""
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a query parameter not allowed",
+      "body": "{\"model\":\"m\"}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "query": "stream=true",
+        "body_b64": "eyJtb2RlbCI6Im0ifQ=="
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a fixed value other than its own",
+      "body": "{\"model\":\"m\"}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "query": "preview=false",
+        "body_b64": "eyJtb2RlbCI6Im0ifQ=="
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a query parameter given twice",
+      "body": "{\"model\":\"m\"}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "query": "preview=true&preview=true",
+        "body_b64": "eyJtb2RlbCI6Im0ifQ=="
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a page size of five digits",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models",
+        "query": "page_size=12345"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a page size that is not digits",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models",
+        "query": "page_size=-1"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a query parameter in another case",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models",
+        "query": "Page_Size=5"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a query split by a semicolon",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models",
+        "query": "page_size=5;preview=true"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a query with a broken escape",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models",
+        "query": "page_after=%zz"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a paging id holding a space",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models",
+        "query": "page_after=a+b"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a paging id holding a letter outside ASCII",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models",
+        "query": "page_after=mod%C3%A8le"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a paging id of 129 bytes",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models",
+        "query": "page_before=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "another model than the one chosen",
+      "model": "example-model-1",
+      "body": "{\"model\":\"another-model\"}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6ImFub3RoZXItbW9kZWwifQ=="
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "no model named, with one chosen",
+      "model": "example-model-1",
+      "body": "{\"input\":[]}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "eyJpbnB1dCI6W119"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "the model named twice",
+      "model": "example-model-1",
+      "body": "{\"model\":\"example-model-1\",\"model\":\"another-model\"}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6ImV4YW1wbGUtbW9kZWwtMSIsIm1vZGVsIjoiYW5vdGhlci1tb2RlbCJ9"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "the model named in another case",
+      "model": "example-model-1",
+      "body": "{\"Model\":\"example-model-1\"}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "eyJNb2RlbCI6ImV4YW1wbGUtbW9kZWwtMSJ9"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a list of models to fall back on, with one chosen",
+      "model": "example-model-1",
+      "body": "{\"model\":\"example-model-1\",\"models\":[\"another-model\"]}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/complete",
+        "body_b64": "eyJtb2RlbCI6ImV4YW1wbGUtbW9kZWwtMSIsIm1vZGVscyI6WyJhbm90aGVyLW1vZGVsIl19"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a model that is not a name",
+      "model": "example-model-1",
+      "body": "{\"model\":[\"example-model-1\"]}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6WyJleGFtcGxlLW1vZGVsLTEiXX0="
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a field named with a letter outside ASCII is not a list of models",
+      "model": "example-model-1",
+      "body": "{\"model\":\"example-model-1\",\"modelſ\":[\"a\"]}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/complete",
+        "body_b64": "eyJtb2RlbCI6ImV4YW1wbGUtbW9kZWwtMSIsIm1vZGVsxb8iOlsiYSJdfQ=="
+      },
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "POST",
+          "path": "/v1/complete"
+        }
+      }
+    },
+    {
+      "name": "a body that is not one JSON object, with a model chosen",
+      "model": "example-model-1",
+      "body": "{\"model\":\"example-model-1\"} {\"model\":\"another-model\"}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6ImV4YW1wbGUtbW9kZWwtMSJ9IHsibW9kZWwiOiJhbm90aGVyLW1vZGVsIn0="
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "an allowance: no answer length",
+      "allowance": true,
+      "body": "{\"model\":\"m\",\"input\":[]}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJpbnB1dCI6W119"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "allowance",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "an allowance: an answer length of 0",
+      "allowance": true,
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":0}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6MH0="
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "allowance",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "an allowance: an answer length over 32768",
+      "allowance": true,
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":32769}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6MzI3Njl9"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "allowance",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "an allowance: an answer length that is not whole",
+      "allowance": true,
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":1.5}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6MS41fQ=="
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "allowance",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "an allowance: an answer length as a string",
+      "allowance": true,
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":\"100\"}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6IjEwMCJ9"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "allowance",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "an allowance: an answer length spelt in another case",
+      "allowance": true,
+      "body": "{\"model\":\"m\",\"Max_Answer_Tokens\":100}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJNYXhfQW5zd2VyX1Rva2VucyI6MTAwfQ=="
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "allowance",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "an allowance: an answer length given twice",
+      "allowance": true,
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":100,\"max_answer_tokens\":200}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6MTAwLCJtYXhfYW5zd2VyX3Rva2VucyI6MjAwfQ=="
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "allowance",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "an allowance: two answers",
+      "allowance": true,
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":100,\"answer_count\":2}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/complete",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6MTAwLCJhbnN3ZXJfY291bnQiOjJ9"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "allowance",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "an allowance: two answers, asked for in another case",
+      "allowance": true,
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":100,\"ANSWER_COUNT\":2}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/complete",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6MTAwLCJBTlNXRVJfQ09VTlQiOjJ9"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "allowance",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "an allowance: three candidates",
+      "allowance": true,
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":100,\"candidates\":3}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/complete",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6MTAwLCJjYW5kaWRhdGVzIjozfQ=="
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "allowance",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "an allowance: a number of answers that is not a number",
+      "allowance": true,
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":100,\"answer_count\":null}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/complete",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6MTAwLCJhbnN3ZXJfY291bnQiOm51bGx9"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "allowance",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "an allowance: something after the object",
+      "allowance": true,
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":100} x",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6MTAwfSB4"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "allowance",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "an allowance: an object cut short",
+      "allowance": true,
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":100",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6MTAw"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "allowance",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "an allowance: an array",
+      "allowance": true,
+      "body": "[{\"model\":\"m\",\"max_answer_tokens\":100}]",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "W3sibW9kZWwiOiJtIiwibWF4X2Fuc3dlcl90b2tlbnMiOjEwMH1d"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "allowance",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "an allowance: an empty body",
+      "allowance": true,
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "allowance",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "an allowance: a body that is not UTF-8",
+      "allowance": true,
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6NSwieCI6Iv8ifQ=="
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "allowance",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "an allowance: a number of answers named with a letter outside ASCII is not one",
+      "allowance": true,
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":5,\"candidateſ\":3}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/complete",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6NSwiY2FuZGlkYXRlxb8iOjN9"
+      },
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "POST",
+          "path": "/v1/complete",
+          "bound": 5
+        }
+      }
+    },
+    {
+      "name": "an allowance: a body nested 1000 deep",
+      "allowance": true,
+      "nest": 1000,
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate"
+      },
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "POST",
+          "path": "/v1/generate",
+          "bound": 5
+        }
+      }
+    },
+    {
+      "name": "an allowance: a body nested 1001 deep",
+      "allowance": true,
+      "nest": 1001,
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "allowance",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a chosen model: a body nested 1001 deep",
+      "model": "m",
+      "nest": 1001,
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "an allowance: a counting route is not held to it",
+      "allowance": true,
+      "body": "{\"model\":\"m\",\"input\":[]}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate/count",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJpbnB1dCI6W119"
+      },
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "POST",
+          "path": "/v1/generate/count",
+          "counts": true
+        }
+      }
+    }
+  ],
+  "headers": [
+    {
+      "name": "what describes the call travels; how the brain proved itself does not",
+      "sent": {
+        "Accept": "text/event-stream",
+        "Authorization": "Bearer run-token",
+        "Content-Type": "application/json",
+        "Cookie": "a=b",
+        "Example-Beta": "a-beta-feature",
+        "Example-Preview": "v2",
+        "Example-Version": "2023-06-01",
+        "User-Agent": "a-program/1.0",
+        "X-Api-Key": "run-token"
+      },
+      "passed": {
+        "Accept": "text/event-stream",
+        "Content-Type": "application/json",
+        "Example-Beta": "a-beta-feature",
+        "Example-Preview": "v2",
+        "Example-Version": "2023-06-01"
+      }
+    },
+    {
+      "name": "names in any case travel as the exchange names them",
+      "sent": {
+        "EXAMPLE-VERSION": "2023-06-01",
+        "content-type": "application/json",
+        "example-preview": "v1"
+      },
+      "passed": {
+        "Content-Type": "application/json",
+        "Example-Preview": "v1",
+        "Example-Version": "2023-06-01"
+      }
+    },
+    {
+      "name": "only ASCII letters fold",
+      "sent": {
+        "Accept": "application/json",
+        "Example-Verſion": "2023-06-01"
+      },
+      "passed": {
+        "Accept": "application/json"
+      }
+    },
+    {
+      "name": "a header with no value does not travel",
+      "sent": {
+        "Accept": "application/json",
+        "Content-Type": ""
+      },
+      "passed": {
+        "Accept": "application/json"
+      }
+    },
+    {
+      "name": "one header named twice: the first name by byte order with a value",
+      "sent": {
+        "ACCEPT": "",
+        "Accept": "application/json",
+        "Content-type": "application/json",
+        "accept": "text/plain",
+        "content-type": "text/plain"
+      },
+      "passed": {
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      }
+    },
+    {
+      "name": "nothing travels",
+      "sent": {
+        "Authorization": "Bearer run-token"
+      }
+    },
+    {
+      "name": "credentials and connection headers never travel, though the profile lists them",
+      "profile": {
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview",
+          "Authorization",
+          "Authentication",
+          "Proxy-Authorization",
+          "Cookie",
+          "Cookie2",
+          "Set-Cookie",
+          "Set-Cookie2",
+          "X-Api-Key",
+          "Api-Key",
+          "X-Auth-Token",
+          "Host",
+          "Content-Length",
+          "Transfer-Encoding",
+          "Connection",
+          "Keep-Alive",
+          "Proxy-Connection",
+          "TE",
+          "Trailer",
+          "Upgrade",
+          "Expect"
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id",
+          "Authorization",
+          "Authentication",
+          "Proxy-Authorization",
+          "Cookie",
+          "Cookie2",
+          "Set-Cookie",
+          "Set-Cookie2",
+          "X-Api-Key",
+          "Api-Key",
+          "X-Auth-Token",
+          "Host",
+          "Content-Length",
+          "Transfer-Encoding",
+          "Connection",
+          "Keep-Alive",
+          "Proxy-Connection",
+          "TE",
+          "Trailer",
+          "Upgrade",
+          "Expect"
+        ],
+        "query": [
+          {
+            "name": "preview",
+            "value": "true"
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "sent": {
+        "Accept": "application/json",
+        "Api-Key": "run-token",
+        "Authorization": "Bearer run-token",
+        "Connection": "close",
+        "Content-Length": "9",
+        "Cookie": "a=b",
+        "Expect": "100-continue",
+        "Host": "elsewhere.example",
+        "Keep-Alive": "timeout=5",
+        "Proxy-Connection": "close",
+        "TE": "trailers",
+        "Trailer": "X-Sum",
+        "Transfer-Encoding": "chunked",
+        "Upgrade": "websocket",
+        "X-API-KEY": "run-token",
+        "proxy-authorization": "Basic x"
+      },
+      "passed": {
+        "Accept": "application/json"
+      }
+    },
+    {
+      "name": "an underscore counts as a hyphen: those spellings never travel either",
+      "profile": {
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview",
+          "X_Api_Key",
+          "Proxy_Authorization",
+          "Content_Length",
+          "Transfer_Encoding"
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id"
+        ],
+        "query": [
+          {
+            "name": "preview",
+            "value": "true"
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "sent": {
+        "Accept": "application/json",
+        "Content_Length": "9",
+        "TRANSFER_ENCODING": "chunked",
+        "X_Api_Key": "run-token",
+        "proxy_authorization": "Basic x"
+      },
+      "passed": {
+        "Accept": "application/json"
+      }
+    }
+  ],
+  "answer_headers": [
+    {
+      "name": "what describes the answer travels back",
+      "sent": {
+        "Content-Type": "text/event-stream",
+        "Request-Id": "req_0001",
+        "Server": "example",
+        "X-Internal": "1",
+        "retry-after": "30"
+      },
+      "passed": {
+        "Content-Type": "text/event-stream",
+        "Request-Id": "req_0001",
+        "Retry-After": "30"
+      }
+    },
+    {
+      "name": "a header with no value does not travel back",
+      "sent": {
+        "Content-Type": "",
+        "Request-Id": "req_0001"
+      },
+      "passed": {
+        "Request-Id": "req_0001"
+      }
+    },
+    {
+      "name": "one header named twice: the first name by byte order with a value",
+      "sent": {
+        "REQUEST-ID": "",
+        "Request-Id": "a",
+        "request-id": "b"
+      },
+      "passed": {
+        "Request-Id": "a"
+      }
+    },
+    {
+      "name": "credentials and connection headers never travel back, though the profile lists them",
+      "profile": {
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview",
+          "Authorization",
+          "Authentication",
+          "Proxy-Authorization",
+          "Cookie",
+          "Cookie2",
+          "Set-Cookie",
+          "Set-Cookie2",
+          "X-Api-Key",
+          "Api-Key",
+          "X-Auth-Token",
+          "Host",
+          "Content-Length",
+          "Transfer-Encoding",
+          "Connection",
+          "Keep-Alive",
+          "Proxy-Connection",
+          "TE",
+          "Trailer",
+          "Upgrade",
+          "Expect"
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id",
+          "Authorization",
+          "Authentication",
+          "Proxy-Authorization",
+          "Cookie",
+          "Cookie2",
+          "Set-Cookie",
+          "Set-Cookie2",
+          "X-Api-Key",
+          "Api-Key",
+          "X-Auth-Token",
+          "Host",
+          "Content-Length",
+          "Transfer-Encoding",
+          "Connection",
+          "Keep-Alive",
+          "Proxy-Connection",
+          "TE",
+          "Trailer",
+          "Upgrade",
+          "Expect"
+        ],
+        "query": [
+          {
+            "name": "preview",
+            "value": "true"
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "sent": {
+        "Authorization": "Bearer key",
+        "Connection": "close",
+        "Content-Length": "10",
+        "Content-Type": "application/json",
+        "Set-Cookie": "session=x",
+        "Transfer-Encoding": "chunked",
+        "X-Api-Key": "key",
+        "set-cookie2": "session=y"
+      },
+      "passed": {
+        "Content-Type": "application/json"
+      }
+    },
+    {
+      "name": "an underscore counts as a hyphen: those spellings never travel back either",
+      "profile": {
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview"
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id",
+          "Set_Cookie",
+          "Content_Length"
+        ],
+        "query": [
+          {
+            "name": "preview",
+            "value": "true"
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "sent": {
+        "Request-Id": "req_0001",
+        "Set_Cookie": "session=x",
+        "content_length": "10"
+      },
+      "passed": {
+        "Request-Id": "req_0001"
+      }
+    }
+  ],
+  "collections": [
+    {
+      "name": "the first collection",
+      "call_id": "call-0001",
+      "from": 0,
+      "lease": "lease-0001",
+      "head": false,
+      "path": "/api/agent-host/model-calls/call-0001?from=0&lease=lease-0001"
+    },
+    {
+      "name": "a later collection, with the status and headers in hand",
+      "call_id": "call-0001",
+      "from": 1234,
+      "lease": "lease-0001",
+      "head": true,
+      "path": "/api/agent-host/model-calls/call-0001?from=1234&lease=lease-0001&head=1"
+    },
+    {
+      "name": "a lease and a call that must be escaped",
+      "call_id": "call/0004 a",
+      "from": 7,
+      "lease": "lease 2/+&",
+      "head": true,
+      "path": "/api/agent-host/model-calls/call%2F0004%20a?from=7&lease=lease+2%2F%2B%26&head=1"
+    }
+  ],
+  "collection_queries": [
+    {
+      "name": "a collection",
+      "query": "from=1234&lease=lease-0001&head=1",
+      "from": 1234,
+      "lease": "lease-0001",
+      "head": true
+    },
+    {
+      "name": "no from",
+      "query": "lease=lease-0001",
+      "from": 0,
+      "lease": "lease-0001",
+      "head": false
+    },
+    {
+      "name": "a from below nothing",
+      "query": "from=-5&lease=lease-0001",
+      "from": 0,
+      "lease": "lease-0001",
+      "head": false
+    },
+    {
+      "name": "a from that is not a number",
+      "query": "from=abc&lease=lease-0001",
+      "from": 0,
+      "lease": "lease-0001",
+      "head": false
+    },
+    {
+      "name": "a from in hexadecimal",
+      "query": "from=0x10&lease=lease-0001",
+      "from": 0,
+      "lease": "lease-0001",
+      "head": false
+    },
+    {
+      "name": "a from with a sign",
+      "query": "from=+5&lease=lease-0001",
+      "from": 0,
+      "lease": "lease-0001",
+      "head": false
+    },
+    {
+      "name": "a from too large",
+      "query": "from=99999999999999999999&lease=lease-0001",
+      "from": 0,
+      "lease": "lease-0001",
+      "head": false
+    },
+    {
+      "name": "head other than 1",
+      "query": "from=5&lease=lease-0001&head=true",
+      "from": 5,
+      "lease": "lease-0001",
+      "head": false
+    },
+    {
+      "name": "an escaped lease",
+      "query": "from=5&lease=lease+2%2F%2B%26",
+      "from": 5,
+      "lease": "lease 2/+&",
+      "head": false
+    },
+    {
+      "name": "an unreadable piece is skipped",
+      "query": "from=5&x;y&%zz=1&lease=lease-0001&head=1",
+      "from": 5,
+      "lease": "lease-0001",
+      "head": true
+    }
+  ],
+  "refusals": [
+    {
+      "reason": "no_lease",
+      "status": 400,
+      "refused": false,
+      "no_call": false
+    },
+    {
+      "reason": "too_large",
+      "status": 413,
+      "refused": false,
+      "no_call": false
+    },
+    {
+      "reason": "not_allowed",
+      "status": 403,
+      "refused": true,
+      "no_call": false
+    },
+    {
+      "reason": "allowance",
+      "status": 403,
+      "refused": true,
+      "no_call": false
+    },
+    {
+      "reason": "collected_already",
+      "status": 409,
+      "refused": false,
+      "no_call": false
+    },
+    {
+      "reason": "gone",
+      "status": 410,
+      "refused": false,
+      "no_call": true
+    },
+    {
+      "reason": "too_many_held",
+      "status": 429,
+      "refused": false,
+      "no_call": false
+    },
+    {
+      "reason": "one_at_a_time",
+      "status": 429,
+      "refused": true,
+      "no_call": false
+    },
+    {
+      "reason": "unreadable",
+      "status": 503,
+      "refused": true,
+      "no_call": false
+    },
+    {
+      "reason": "not_kept",
+      "status": 503,
+      "refused": false,
+      "no_call": false
+    },
+    {
+      "reason": "unreachable",
+      "status": 503,
+      "refused": false,
+      "no_call": false
+    }
+  ],
+  "answers": [
+    {
+      "name": "the start, with the status, the headers and the first part",
+      "from": 0,
+      "data": "event: part\ndata: {\"text\":\"Hel\"}\n\n",
+      "answer": {
+        "call_id": "call-0001",
+        "status": 200,
+        "header": {
+          "Content-Type": "text/event-stream",
+          "Request-Id": "req_0001"
+        },
+        "data_b64": "ZXZlbnQ6IHBhcnQKZGF0YTogeyJ0ZXh0IjoiSGVsIn0KCg==",
+        "next": 34,
+        "done": false
+      }
+    },
+    {
+      "name": "a collection with nothing new yet",
+      "from": 36,
+      "data": "",
+      "answer": {
+        "call_id": "call-0001",
+        "status": 200,
+        "header": {
+          "Content-Type": "text/event-stream",
+          "Request-Id": "req_0001"
+        },
+        "next": 36,
+        "done": false
+      }
+    },
+    {
+      "name": "the last part",
+      "from": 36,
+      "data": "event: end\ndata: {\"text\":\"lo\"}\n\n",
+      "answer": {
+        "call_id": "call-0001",
+        "status": 200,
+        "header": {
+          "Content-Type": "text/event-stream",
+          "Request-Id": "req_0001"
+        },
+        "data_b64": "ZXZlbnQ6IGVuZApkYXRhOiB7InRleHQiOiJsbyJ9Cgo=",
+        "next": 68,
+        "done": true
+      }
+    },
+    {
+      "name": "an answer stopped because the AI agent may no longer act",
+      "from": 2048,
+      "data": "",
+      "answer": {
+        "call_id": "call-0001",
+        "status": 200,
+        "header": {
+          "Content-Type": "text/event-stream"
+        },
+        "next": 2048,
+        "done": true,
+        "error": "this AI agent was revoked"
+      }
+    },
+    {
+      "name": "a call whose provider could not be reached",
+      "from": 0,
+      "data": "",
+      "answer": {
+        "call_id": "call-0002",
+        "next": 0,
+        "done": true,
+        "error": "the model's provider could not be reached"
+      }
+    },
+    {
+      "name": "the provider's own refusal, passed on",
+      "from": 0,
+      "data": "{\"error\":{\"message\":\"Too many requests\"}}",
+      "answer": {
+        "call_id": "call-0003",
+        "status": 429,
+        "header": {
+          "Content-Type": "application/json",
+          "Retry-After": "30"
+        },
+        "data_b64": "eyJlcnJvciI6eyJtZXNzYWdlIjoiVG9vIG1hbnkgcmVxdWVzdHMifX0=",
+        "next": 41,
+        "done": true
+      }
+    }
+  ]
+}
