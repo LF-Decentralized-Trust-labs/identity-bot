@@ -56,7 +56,9 @@ func (s *Service) sessionsDir() string {
 // sealed archive on disk indefinitely.
 const sessionMaxAge = 30 * 24 * time.Hour
 
-// partialSuffix marks a session file still being written.
+// partialSuffix marked a session file still being written, before sessions
+// were written through atomicfile. Only leftovers from then carry it; the
+// sweep still removes them, alongside atomicfile's own temporaries.
 const partialSuffix = ".partial"
 
 // acceptableSessionID is the same allowlist reasoning used elsewhere: the id is
