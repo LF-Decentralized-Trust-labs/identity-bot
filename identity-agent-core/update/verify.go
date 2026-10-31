@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/zeebo/blake3"
+
+	"identity-agent-core/iacrypto"
 )
 
 // Verification errors.
@@ -44,18 +46,6 @@ func (ta *TrustAnchor) AddTrustedKey(id string, pub ed25519.PublicKey) {
 func (ta *TrustAnchor) PublicKey(id string) (ed25519.PublicKey, bool) {
 	pub, ok := ta.keys[id]
 	return pub, ok
-}
-
-// DecodeBase64URL decodes unpadded base64url.
-func DecodeBase64URL(s string) ([]byte, error) {
-	s = strings.TrimRight(s, "=")
-	switch len(s) % 4 {
-	case 2:
-		s += "=="
-	case 3:
-		s += "="
-	}
-	return base64.URLEncoding.DecodeString(s)
 }
 
 // EncodeBase64URL encodes bytes as unpadded base64url.
@@ -95,7 +85,7 @@ func VerifyManifest(raw []byte, ta *TrustAnchor) (*Manifest, error) {
 		return nil, fmt.Errorf("%w: %v", ErrSignatureInvalid, err)
 	}
 
-	sig, err := DecodeBase64URL(probe.Signature)
+	sig, err := iacrypto.DecodeBase64URLSized(probe.Signature, ed25519.SignatureSize)
 	if err != nil {
 		return nil, ErrSignatureInvalid
 	}
@@ -124,7 +114,7 @@ func (ta *TrustAnchor) learnNextSigningKey(m *Manifest) error {
 	if m.NextSigningKey.KeyID == otherRealmSigningKeyID() {
 		return fmt.Errorf("next_signing_key: id %q belongs to the other build realm and will not be learned", m.NextSigningKey.KeyID)
 	}
-	raw, err := DecodeBase64URL(m.NextSigningKey.PublicKey)
+	raw, err := iacrypto.DecodeBase64URLSized(m.NextSigningKey.PublicKey, ed25519.PublicKeySize)
 	if err != nil {
 		return fmt.Errorf("next_signing_key: %w", err)
 	}
@@ -149,7 +139,7 @@ func VerifyKeyTransition(raw []byte, ta *TrustAnchor) (*KeyTransition, error) {
 	if err != nil {
 		return nil, ErrSignatureInvalid
 	}
-	sig, err := DecodeBase64URL(kt.Signature)
+	sig, err := iacrypto.DecodeBase64URLSized(kt.Signature, ed25519.SignatureSize)
 	if err != nil {
 		return nil, ErrSignatureInvalid
 	}
@@ -159,7 +149,7 @@ func VerifyKeyTransition(raw []byte, ta *TrustAnchor) (*KeyTransition, error) {
 	if kt.NewKeyID == otherRealmSigningKeyID() {
 		return nil, fmt.Errorf("new_key_id %q belongs to the other build realm and will not be learned", kt.NewKeyID)
 	}
-	newRaw, err := DecodeBase64URL(kt.NewPublicKey)
+	newRaw, err := iacrypto.DecodeBase64URLSized(kt.NewPublicKey, ed25519.PublicKeySize)
 	if err != nil || len(newRaw) != ed25519.PublicKeySize {
 		return nil, fmt.Errorf("invalid new_public_key")
 	}
