@@ -70,11 +70,25 @@ func RestoreFile(dataDir, rel string, raw []byte) error {
 	return nil
 }
 
+// RestoreWaitsForABusyDatabase is how long a restore waits for a writer that
+// has a database it is restoring into.
+var RestoreWaitsForABusyDatabase = 30 * time.Second
+
+// busyDSN opens path waiting, for a busy database, no longer than a restore
+// waits in all.
+func busyDSN(path string) string {
+	ms := RestoreWaitsForABusyDatabase.Milliseconds()
+	if ms > 5000 {
+		ms = 5000
+	}
+	return fmt.Sprintf("%s?_pragma=busy_timeout(%d)", path, ms)
+}
+
 // aUsableDatabase reports whether the file at path is a database SQLite can
 // open and that passes its quick check. Busy is not unusable: somebody is
 // using it, and the restore waits for them.
 func aUsableDatabase(path string) bool {
-	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)")
+	db, err := sql.Open("sqlite", busyDSN(path))
 	if err != nil {
 		return false
 	}
@@ -112,7 +126,7 @@ func restoreIntoDatabase(raw []byte, dest, workDir string) error {
 	// Only the wait for a busy database, which is what every other
 	// connection to it has. Its journal mode is the database's own, and is
 	// left as it is.
-	db, err := sql.Open("sqlite", dest+"?_pragma=busy_timeout(5000)")
+	db, err := sql.Open("sqlite", busyDSN(dest))
 	if err != nil {
 		return err
 	}
@@ -147,7 +161,7 @@ func restoreIntoDatabase(raw []byte, dest, workDir string) error {
 		}
 		// Busy is a writer that has the database right now. The backup may
 		// be stepped again once it has finished, and the wait is bounded.
-		deadline := time.Now().Add(30 * time.Second)
+		deadline := time.Now().Add(RestoreWaitsForABusyDatabase)
 		for {
 			more, err := b.Step(-1)
 			if err != nil {
