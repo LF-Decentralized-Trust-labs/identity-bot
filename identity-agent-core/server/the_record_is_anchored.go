@@ -961,6 +961,9 @@ func sealsDigest(ev map[string]interface{}, digest string) bool {
 // witnessedEnough reports whether enough of the designated witnesses have
 // returned a receipt for an event that verifies against their keys.
 func witnessedEnough(ds store.Store, eventSAID string, witnesses []string, toad int) bool {
+	if toad < 0 {
+		return false
+	}
 	receipts, err := ds.GetWitnessReceipts(eventSAID)
 	if err != nil {
 		return false
@@ -970,7 +973,7 @@ func witnessedEnough(ds store.Store, eventSAID string, witnesses []string, toad 
 		designated[w] = true
 	}
 	need := toad
-	if need <= 0 {
+	if need == 0 {
 		need = len(witnesses)
 	}
 	return witnessesWhoReceipted(eventSAID, receipts, designated) >= need
@@ -999,9 +1002,15 @@ func witnessesWhoReceipted(eventSAID string, receipts []store.WitnessReceiptReco
 	return len(seen)
 }
 
+// thresholdOf reads a witness threshold as KERI writes it, lowercase hex with
+// no leading zeros, and is -1 for anything else, which witnessedEnough never
+// takes as met.
 func thresholdOf(v interface{}) int {
 	s, _ := v.(string)
-	n, _ := strconv.ParseInt(s, 16, 64)
+	n, err := strconv.ParseInt(s, 16, 32)
+	if err != nil || n < 0 || strconv.FormatInt(n, 16) != s {
+		return -1
+	}
 	return int(n)
 }
 

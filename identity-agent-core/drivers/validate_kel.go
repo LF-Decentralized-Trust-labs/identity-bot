@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"fmt"
+	"math"
 
 	keri "github.com/grapeid/keri-go"
 
@@ -387,17 +388,26 @@ func WitnessingOf(in ValidateKELInput, eventSAID string) (EventWitnessing, bool)
 // and adding; everything else leaves it alone. Reading only the inception would
 // report a set the identity has since changed, and reading only the latest
 // event would report nothing for the events before it.
+//
+// It fails closed. The set and threshold at any event depend on every event
+// before it, so once one cannot be read — an event that does not parse, or an
+// establishment event whose witness threshold is missing or too large to hold
+// — nothing from there on can say who its witnesses are, and that event and
+// every later one is reported as not met. Carrying on would inherit the
+// previous threshold, which at inception is zero and always met.
 func witnessingReport(in ValidateKELInput) ([]EventWitnessing, bool) {
 	var (
 		designated []string
 		threshold  int
 		report     []EventWitnessing
+		broken     bool
 	)
 	allMet := true
 
 	for _, raw := range in.RawEvents {
 		ev, err := keri.ParseEvent(raw)
 		if err != nil {
+			broken, allMet = true, false
 			continue
 		}
 		switch ev.Ilk {
@@ -406,8 +416,12 @@ func witnessingReport(in ValidateKELInput) ([]EventWitnessing, bool) {
 		case "rot", "drt":
 			designated = amendWitnesses(designated, ev.WitnessCut, ev.WitnessAdd)
 		}
-		if ev.HasTOAD {
-			threshold = int(ev.TOAD)
+		if ev.Establishment() {
+			if !ev.HasTOAD || ev.TOAD > math.MaxInt32 {
+				broken = true
+			} else {
+				threshold = int(ev.TOAD)
+			}
 		}
 
 		row := EventWitnessing{
@@ -438,7 +452,7 @@ func witnessingReport(in ValidateKELInput) ([]EventWitnessing, bool) {
 		}
 		// A threshold of zero is met by definition — an identity that asked for
 		// no witnesses is not failing to reach them.
-		row.Met = row.Verified >= threshold
+		row.Met = !broken && row.Verified >= threshold
 		if !row.Met {
 			allMet = false
 		}

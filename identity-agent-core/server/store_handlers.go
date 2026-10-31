@@ -179,9 +179,7 @@ func (s *CoreServer) receiptsAgainstOwnLog(eventSAID string, receipts []store.Wi
 	if !found {
 		return 0, false
 	}
-	need := row.Threshold
-	if callerThreshold > need {
-		need = callerThreshold
-	}
-	return row.Verified, row.Verified >= need
+	// row.Met is false wherever the log cannot say who the witnesses are; a
+	// caller's threshold can only add to what is required.
+	return row.Verified, row.Met && row.Verified >= callerThreshold
 }

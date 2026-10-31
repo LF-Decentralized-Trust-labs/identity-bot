@@ -40,3 +40,16 @@ func TestAWitnessUnderTwoSpellingsIsCountedOnce(t *testing.T) {
 		t.Fatalf("one witness designated under two spellings was counted %d times", n)
 	}
 }
+
+// A record's witness threshold is read as KERI writes it, and anything else
+// is never met.
+func TestARecordWitnessThresholdHasOneSpelling(t *testing.T) {
+	for in, want := range map[interface{}]int{"0": 0, "2": 2, "a": 10, "02": -1, "A": -1, "": -1, 2: -1, "ffffffffff": -1} {
+		if got := thresholdOf(in); got != want {
+			t.Errorf("thresholdOf(%#v) = %d, want %d", in, got, want)
+		}
+	}
+	if witnessedEnough(nil, "E", []string{"B"}, -1) {
+		t.Error("an unreadable threshold was met")
+	}
+}
