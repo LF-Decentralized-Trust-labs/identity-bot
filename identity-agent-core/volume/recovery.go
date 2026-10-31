@@ -89,9 +89,10 @@ type sealedForOwner struct {
 
 // ownerSealKey reads an owner's X25519 sealing key: 32 bytes in base64, in
 // any of the four spellings but each in its one canonical string, as every
-// key is read (iacrypto.DecodeSized). Surrounding whitespace is ignored.
+// key is read (iacrypto.DecodeSized). It arrives in the adoption request, so
+// whitespace around it is not trimmed: it is not part of any spelling.
 func ownerSealKey(pubB64 string) ([]byte, error) {
-	pub, err := iacrypto.DecodeSized(strings.TrimSpace(pubB64), backup.X25519KeyLen, false)
+	pub, err := iacrypto.DecodeSized(pubB64, backup.X25519KeyLen, false)
 	if err != nil {
 		return nil, fmt.Errorf("not an X25519 public key: %w", err)
 	}

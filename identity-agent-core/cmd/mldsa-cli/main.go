@@ -22,6 +22,8 @@ import (
 	"os"
 
 	"github.com/cloudflare/circl/sign/mldsa/mldsa65"
+
+	"identity-agent-core/iacrypto"
 )
 
 type request struct {
@@ -65,7 +67,7 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		msg, err := hex.DecodeString(req.MsgHex)
+		msg, err := iacrypto.DecodeHex(req.MsgHex)
 		if err != nil {
 			return fmt.Errorf("msg_hex: %w", err)
 		}
@@ -80,18 +82,18 @@ func run() error {
 		return emit(map[string]string{"sig_hex": hex.EncodeToString(sig)})
 
 	case "verify":
-		vk, err := hex.DecodeString(req.VkHex)
+		vk, err := iacrypto.DecodeHex(req.VkHex)
 		if err != nil {
 			return fmt.Errorf("vk_hex: %w", err)
 		}
 		if len(vk) != mldsa65.PublicKeySize {
 			return fmt.Errorf("vk_hex is %d bytes, want %d", len(vk), mldsa65.PublicKeySize)
 		}
-		msg, err := hex.DecodeString(req.MsgHex)
+		msg, err := iacrypto.DecodeHex(req.MsgHex)
 		if err != nil {
 			return fmt.Errorf("msg_hex: %w", err)
 		}
-		sig, err := hex.DecodeString(req.SigHex)
+		sig, err := iacrypto.DecodeHex(req.SigHex)
 		if err != nil {
 			return fmt.Errorf("sig_hex: %w", err)
 		}
@@ -106,7 +108,7 @@ func run() error {
 }
 
 func seedFrom(s string) (*[mldsa65.SeedSize]byte, error) {
-	raw, err := hex.DecodeString(s)
+	raw, err := iacrypto.DecodeHex(s)
 	if err != nil {
 		return nil, fmt.Errorf("seed_hex: %w", err)
 	}

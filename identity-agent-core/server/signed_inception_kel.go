@@ -3,9 +3,10 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 
 	keri "github.com/grapeid/keri-go"
+
+	"identity-agent-core/iacrypto"
 )
 
 // signedInceptionKEL is the key event log of an identity that has only ever had
@@ -29,11 +30,11 @@ func signedInceptionKEL(aid string, kel []map[string]interface{}, seed []byte) (
 	if c, _ := ev["c"].([]interface{}); len(c) > 0 {
 		return nil, fmt.Errorf("%s's inception declares configuration traits, which cannot be rebuilt here", aid)
 	}
-	toad, err := strconv.ParseInt(fmt.Sprint(ev["bt"]), 16, 64)
+	bt, _ := ev["bt"].(string)
+	t, err := iacrypto.ParseHexCount(bt)
 	if err != nil {
 		return nil, fmt.Errorf("%s's witness threshold %v is unreadable", aid, ev["bt"])
 	}
-	t := int(toad)
 	in := keri.InceptionInput{
 		Keys:        stringsOf(ev["k"]),
 		NextDigests: stringsOf(ev["n"]),

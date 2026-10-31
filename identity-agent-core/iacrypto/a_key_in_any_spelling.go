@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -46,8 +47,8 @@ func DecodeSized(s string, size int, hexToo bool) ([]byte, error) {
 				return raw, nil
 			}
 		}
-		if hexToo && s == strings.ToLower(s) {
-			if raw, err := hex.DecodeString(s); err == nil && len(raw) == size {
+		if hexToo {
+			if raw, err := DecodeHex(s); err == nil && len(raw) == size {
 				return raw, nil
 			}
 		}
@@ -56,6 +57,31 @@ func DecodeSized(s string, size int, hexToo bool) ([]byte, error) {
 		return nil, fmt.Errorf("not %d bytes in base64 or hex", size)
 	}
 	return nil, fmt.Errorf("not %d bytes in base64", size)
+}
+
+// ParseHexCount reads a count as KERI writes one, a sequence number or a
+// threshold: lowercase hexadecimal with no leading zeros, "0" itself
+// included, and no larger than an int32. strconv alone also takes uppercase
+// and leading zeros, and fmt's %x stops at the first character it cannot read,
+// so "2zz" read as 2. keri-go reads the counts in an event by the same rule.
+func ParseHexCount(s string) (int, error) {
+	n, err := strconv.ParseUint(s, 16, 31)
+	if err != nil || strconv.FormatUint(n, 16) != s {
+		return 0, fmt.Errorf("%q is not a count in lowercase hexadecimal without leading zeros", s)
+	}
+	return int(n), nil
+}
+
+// DecodeHex decodes lowercase hex, the case hex is written in, and only
+// that: the standard decoder also reads uppercase, which gives a value one
+// string per mix of cases.
+func DecodeHex(s string) ([]byte, error) {
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c >= 'A' && c <= 'F' {
+			return nil, fmt.Errorf("hex is read in lowercase only")
+		}
+	}
+	return hex.DecodeString(s)
 }
 
 // DecodeBase64URLSized decodes s as exactly size raw bytes in unpadded

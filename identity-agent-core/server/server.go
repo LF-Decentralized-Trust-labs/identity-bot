@@ -50,6 +50,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	keri "github.com/grapeid/keri-go"
 )
 
 type CoreServer struct {
@@ -2893,15 +2894,16 @@ func (s *CoreServer) handleVerifyCredentialChain(w http.ResponseWriter, r *http.
 	})
 }
 
-// handleSubmitReceipt keeps a witness receipt for one of this identity's own
-// events, and reports how far that event is now witnessed.
+// handleSubmitReceipt keeps a witness receipt for an event in a key log this
+// Identity Agent keeps (logOfEvent), and reports how far that event is now
+// witnessed.
 //
 // Owner only: a witness hands its receipt back in its answer to this Identity Agent's
 // own request, so nobody else has a receipt to deliver here. Nothing the
 // caller says about keys, trusted witnesses or thresholds is used. The
 // verifying key is the witness identifier itself, which is non-transferable,
-// and who was designated and how many receipts are needed are read from this
-// identity's own key log.
+// and who was designated and how many receipts are needed are read from the
+// key log of the identity the event belongs to.
 func (s *CoreServer) handleSubmitReceipt(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		EventSAID     string `json:"event_said"`
@@ -2920,10 +2922,10 @@ func (s *CoreServer) handleSubmitReceipt(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusUnprocessableEntity, "The receipt does not verify", err.Error())
 		return
 	}
-	in, ok := s.ownLogWithReceipts(req.EventSAID)
+	in, ok := s.logOfEvent(req.EventSAID)
 	if !ok {
-		writeError(w, http.StatusNotFound, "Not an event of this identity",
-			"a receipt is kept here only for an event in this identity's own key log")
+		writeError(w, http.StatusNotFound, "Not an event of a key log kept here",
+			"a receipt is kept here only for an event in a key log this Identity Agent keeps")
 		return
 	}
 	if err := s.DataStore.SaveWitnessReceipt(store.WitnessReceiptRecord{
@@ -2954,30 +2956,67 @@ func (s *CoreServer) handleSubmitReceipt(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(resp)
 }
 
-// ownLogWithReceipts is this identity's key log, as published, when it holds
-// the event eventSAID.
-func (s *CoreServer) ownLogWithReceipts(eventSAID string) (drivers.ValidateKELInput, bool) {
-	identity, err := s.DataStore.GetIdentity()
-	if err != nil || identity == nil || identity.AID == "" {
-		return drivers.ValidateKELInput{}, false
-	}
-	events, err := s.DataStore.GetEvents(identity.AID)
+// logOfEvent is the stored key log of the identity eventSAID belongs to, as
+// published, wherever this Identity Agent keeps one: its own, its record
+// identity's, or another it holds. An event is judged against the log it is
+// in, since that log alone says who its witnesses are and how many it needs.
+//
+// An identity's log claims the event only where one of its stored rows holds
+// published bytes that parse to an event with that identifier and with that
+// identity's own prefix. A row whose recorded JSON merely names the
+// identifier, or whose bytes say it is another identity's, claims nothing.
+// An event no log claims, or that two claim, is not found.
+//
+// It fails closed, for that identity alone: if any of its stored events lacks
+// the bytes it was published as, its log cannot be walked, so none of its
+// events can be judged. Other identities' logs are unaffected.
+//
+// The log is judged as stored, not validated again here: the routes that
+// write key log rows are the owner's alone, and validating a log is the key
+// log check's job.
+func (s *CoreServer) logOfEvent(eventSAID string) (drivers.ValidateKELInput, bool) {
+	candidates, err := s.DataStore.AIDsOfEvent(eventSAID)
 	if err != nil {
 		return drivers.ValidateKELInput{}, false
 	}
-	in := drivers.ValidateKELInput{AID: identity.AID}
-	found := false
-	for _, ev := range events {
+	var claimant string
+	var claimed []store.EventRecord
+	for _, aid := range candidates {
+		events, err := s.DataStore.GetEvents(aid)
+		if err != nil {
+			return drivers.ValidateKELInput{}, false
+		}
+		if !slices.ContainsFunc(events, func(ev store.EventRecord) bool { return claimsEvent(ev, aid, eventSAID) }) {
+			continue
+		}
+		if claimant != "" {
+			return drivers.ValidateKELInput{}, false // claimed by two
+		}
+		claimant, claimed = aid, events
+	}
+	if claimant == "" {
+		return drivers.ValidateKELInput{}, false
+	}
+	in := drivers.ValidateKELInput{AID: claimant}
+	for _, ev := range claimed {
 		raw, err := base64.StdEncoding.DecodeString(ev.RawBytesB64)
 		if err != nil || len(raw) == 0 {
 			return drivers.ValidateKELInput{}, false
 		}
 		in.RawEvents = append(in.RawEvents, raw)
-		if saidOfEventRecord(ev) == eventSAID {
-			found = true
-		}
 	}
-	return in, found
+	return in, true
+}
+
+// claimsEvent reports whether a stored row of aid's log holds the event said:
+// its published bytes parse to an event with that identifier and that prefix.
+func claimsEvent(ev store.EventRecord, aid, said string) bool {
+	raw, err := base64.StdEncoding.DecodeString(ev.RawBytesB64)
+	if err != nil || len(raw) == 0 {
+		return false
+	}
+	parsed, err := keri.ParseEvent(raw)
+	return err == nil && parsed.SAID == said && parsed.Identifier == aid
 }
 
 func (s *CoreServer) handleGetKERL(w http.ResponseWriter, r *http.Request) {
@@ -2998,7 +3037,7 @@ func (s *CoreServer) handleGetKERL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	counted, thresholdMet := s.receiptsAgainstOwnLog(eventSAID, receipts, threshold)
+	counted, thresholdMet := s.receiptsAgainstItsLog(eventSAID, receipts, threshold)
 
 	type receiptEntry struct {
 		WitnessAID    string `json:"witness_aid"`

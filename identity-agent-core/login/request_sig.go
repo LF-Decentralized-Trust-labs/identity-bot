@@ -2,7 +2,6 @@ package login
 
 import (
 	"fmt"
-	"strings"
 
 	"identity-agent-core/iacrypto"
 )
@@ -31,7 +30,6 @@ func VerifyString(body, sigQB64 string, pub []byte) (bool, error) {
 // from the KERI driver, plain base64 from the mobile core, hex from older
 // records — so all three are accepted rather than failing on a format detail.
 func DecodeVerkey(key string) ([]byte, error) {
-	key = strings.TrimSpace(key)
 	if key == "" {
 		return nil, fmt.Errorf("empty public key")
 	}

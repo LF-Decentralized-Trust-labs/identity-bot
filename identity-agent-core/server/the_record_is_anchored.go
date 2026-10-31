@@ -855,8 +855,27 @@ func (s *CoreServer) checkAnchors() (anchorCheck, error) {
 	for _, a := range anchors {
 		bySeq[a.Seq] = a
 	}
-	witnesses, toad := stringsOf(dip["b"]), thresholdOf(dip["bt"])
-	out.External = len(witnesses) > 0
+	// Whether each anchoring is witnessed is the key log's own report: the
+	// witnesses designated at that event and its own threshold, by the same
+	// counter every receipt route uses, where a threshold of zero needs no
+	// receipt and one the log cannot state is never met.
+	out.External = len(stringsOf(dip["b"])) > 0
+	var witnessing map[string]drivers.EventWitnessing
+	if out.External {
+		in.Receipts = map[string][]drivers.WitnessReceipt{}
+		for _, ev := range kel[1:] {
+			said, _ := ev["d"].(string)
+			held, err := s.DataStore.GetWitnessReceipts(said)
+			if err != nil {
+				return out, err
+			}
+			for _, r := range held {
+				in.Receipts[said] = append(in.Receipts[said],
+					drivers.WitnessReceipt{WitnessAID: r.WitnessAID, CesrSignature: r.CesrSignature})
+			}
+		}
+		witnessing = drivers.WitnessingByEvent(in)
+	}
 	anchoredSeq := map[string]int{}
 	for sn := 1; sn < len(kel); sn++ {
 		ev := kel[sn]
@@ -904,7 +923,7 @@ func (s *CoreServer) checkAnchors() (anchorCheck, error) {
 			out.AnchoredThrough = st.Log.Row
 		}
 		if out.External {
-			if witnessedEnough(s.DataStore, said, witnesses, toad) {
+			if witnessing[said].Met {
 				out.WitnessedThrough = out.AnchoredThrough
 			} else {
 				out.AwaitingWitnesses++
@@ -958,60 +977,16 @@ func sealsDigest(ev map[string]interface{}, digest string) bool {
 	return false
 }
 
-// witnessedEnough reports whether enough of the designated witnesses have
-// returned a receipt for an event that verifies against their keys.
-func witnessedEnough(ds store.Store, eventSAID string, witnesses []string, toad int) bool {
-	if toad < 0 {
-		return false
-	}
-	receipts, err := ds.GetWitnessReceipts(eventSAID)
-	if err != nil {
-		return false
-	}
-	designated := map[string]bool{}
-	for _, w := range witnesses {
-		designated[w] = true
-	}
-	need := toad
-	if need == 0 {
-		need = len(witnesses)
-	}
-	return witnessesWhoReceipted(eventSAID, receipts, designated) >= need
-}
-
-// witnessesWhoReceipted counts the witnesses with a receipt for eventSAID
-// that verifies, each once, and only those in designated.
-//
-// Counted by key, not by the text of the identifier, so one witness is one
-// vote however it is written, and by verified receipt rather than stored
-// row, so a receipt that does not check out is no vote at all.
-func witnessesWhoReceipted(eventSAID string, receipts []store.WitnessReceiptRecord, designated map[string]bool) int {
-	seen := map[string]bool{}
-	for _, r := range receipts {
-		if !designated[r.WitnessAID] {
-			continue
-		}
-		key, ok := drivers.WitnessKey(r.WitnessAID)
-		if !ok || seen[key] {
-			continue
-		}
-		if drivers.VerifyReceipt(r.WitnessAID, eventSAID, r.CesrSignature) == nil {
-			seen[key] = true
-		}
-	}
-	return len(seen)
-}
-
 // thresholdOf reads a witness threshold as KERI writes it, lowercase hex with
-// no leading zeros, and is -1 for anything else, which witnessedEnough never
-// takes as met.
+// no leading zeros, and is -1 for anything else, which no inception
+// re-derived from it can match.
 func thresholdOf(v interface{}) int {
 	s, _ := v.(string)
-	n, err := strconv.ParseInt(s, 16, 32)
-	if err != nil || n < 0 || strconv.FormatInt(n, 16) != s {
+	n, err := iacrypto.ParseHexCount(s)
+	if err != nil {
 		return -1
 	}
-	return int(n)
+	return n
 }
 
 // askWitnessesToCoverTheRecord asks the identity's witnesses, by the ordinary

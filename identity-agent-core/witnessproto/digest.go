@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
-	"strings"
 
 	keri "github.com/grapeid/keri-go"
 )
@@ -18,35 +17,22 @@ import (
 // that gets this wrong places events at the wrong position in the log from the
 // eleventh event on.
 //
-// A number that arrived as a JSON number rather than a string is taken as it
-// is. A missing, signed or unreadable sequence number is an error, never a
-// guess.
+// It is read in its one canonical spelling, as KERI writes it: a string of
+// lowercase hexadecimal with no leading zeros ("0" itself included), no
+// larger than an int32. A JSON number is not how KERI writes one and is
+// refused, as are uppercase digits and leading zeros, which would give one
+// position several strings. A missing or unreadable sequence number is an
+// error, never a guess. (The core reads counts by the same rule in
+// iacrypto.ParseHexCount; this module stands alone, so it states the rule
+// itself.)
 func SequenceNumber(ev map[string]interface{}) (int, error) {
 	switch v := ev["s"].(type) {
 	case string:
-		if v == "" || strings.HasPrefix(v, "+") || strings.HasPrefix(v, "-") {
-			return -1, fmt.Errorf("invalid sequence number %q", v)
-		}
-		n, err := strconv.ParseInt(v, 16, 64)
-		if err != nil {
+		n, err := strconv.ParseUint(v, 16, 31)
+		if err != nil || strconv.FormatUint(n, 16) != v {
 			return -1, fmt.Errorf("invalid sequence number %q", v)
 		}
 		return int(n), nil
-	case float64:
-		if v < 0 || v != float64(int64(v)) {
-			return -1, fmt.Errorf("invalid sequence number %v", v)
-		}
-		return int(v), nil
-	case int:
-		if v < 0 {
-			return -1, fmt.Errorf("invalid sequence number %d", v)
-		}
-		return v, nil
-	case int64:
-		if v < 0 {
-			return -1, fmt.Errorf("invalid sequence number %d", v)
-		}
-		return int(v), nil
 	case nil:
 		return -1, fmt.Errorf("the event carries no sequence number")
 	default:

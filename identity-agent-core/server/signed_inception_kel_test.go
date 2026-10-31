@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/ed25519"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	keri "github.com/grapeid/keri-go"
@@ -50,6 +51,20 @@ func TestARecordedInceptionIsSignedAsAVerifiableKeyLog(t *testing.T) {
 	}
 	if state.Identifier != parsed.Identifier || len(state.Keys) != 1 || state.Keys[0] != pub {
 		t.Fatalf("the key log establishes %s with %v", state.Identifier, state.Keys)
+	}
+
+	// A witness threshold in any but its one spelling is refused, before any
+	// rebuild is tried. fmt and strconv read all of these as 1.
+	for _, bt := range []interface{}{"01", "1 ", float64(1)} {
+		again := map[string]interface{}{}
+		for k, v := range recorded {
+			again[k] = v
+		}
+		again["bt"] = bt
+		if _, err := signedInceptionKEL(parsed.Identifier, []map[string]interface{}{again}, seed); err == nil ||
+			!strings.Contains(err.Error(), "witness threshold") {
+			t.Errorf("a witness threshold of %#v was read: %v", bt, err)
+		}
 	}
 
 	// A record that does not rebuild to its own identifier is refused, not sent.

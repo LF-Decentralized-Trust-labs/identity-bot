@@ -388,37 +388,55 @@ func TestAnchorsWithNoWitnessesSaySo(t *testing.T) {
 }
 
 // A receipt counts only from a witness the record identity names, verified
-// against that witness's key, once per witness, and enough of them.
+// against that witness's key, once per witness, and enough of them. Judged by
+// the record identity's own key log, the same counter every receipt route
+// uses.
 func TestOnlyNamedWitnessesReceiptsCount(t *testing.T) {
-	s := recordWorld(t)
 	keys := make([]ed25519.PrivateKey, 3)
 	names := make([]string, 3)
 	for i := range keys {
 		pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 		keys[i], names[i] = priv, iacrypto.NonTransferableAIDQB64(pub)
 	}
-	said := "Ethe-event"
+	s, _ := foundedWith(t, agentWithDerivedIdentity(t), names, 2)
+	s.DeclaredEntityType = "organization"
+	s.logForTest(t, s.DataDir)
+	s.vaultForTest(s.DataDir)
+	s.ActivityLog.SetEventSigner(&invocationSigner{s: s})
+	writeRows(t, s, 2)
+	if ok, err := s.anchorRecord(); err != nil || !ok {
+		t.Fatalf("anchoring: %v %v", ok, err)
+	}
+	rec, _, _ := s.loadRecordIdentity()
+	events, _ := s.DataStore.GetEvents(rec.AID)
+	var ixn map[string]interface{}
+	json.Unmarshal([]byte(events[1].EventJSON), &ixn)
+	said, _ := ixn["d"].(string)
 	sign := func(i int) string {
 		sig, _ := login.SignString(said, keys[i].Seed())
 		return sig
 	}
-	s.DataStore.SaveWitnessReceipt(store.WitnessReceiptRecord{EventSAID: said, WitnessAID: names[0], CesrSignature: sign(0)})
-	if witnessedEnough(s.DataStore, said, names, 2) {
+	keep := func(witness, sig string) {
+		s.DataStore.SaveWitnessReceipt(store.WitnessReceiptRecord{EventSAID: said, WitnessAID: witness, CesrSignature: sig})
+	}
+	awaiting := func() bool { return chainSays(t, s)["awaiting_witnesses"] != float64(0) }
+
+	keep(names[0], sign(0))
+	if !awaiting() {
 		t.Fatal("one receipt met a threshold of two")
 	}
-	s.DataStore.SaveWitnessReceipt(store.WitnessReceiptRecord{EventSAID: said, WitnessAID: names[1], CesrSignature: sign(2)})
-	if witnessedEnough(s.DataStore, said, names, 2) {
+	keep(names[1], sign(2))
+	if !awaiting() {
 		t.Fatal("a receipt signed by another witness's key counted")
 	}
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
-	stranger := iacrypto.NonTransferableAIDQB64(pub)
 	strangerSig, _ := login.SignString(said, priv.Seed())
-	s.DataStore.SaveWitnessReceipt(store.WitnessReceiptRecord{EventSAID: said, WitnessAID: stranger, CesrSignature: strangerSig})
-	if witnessedEnough(s.DataStore, said, names, 2) {
+	keep(iacrypto.NonTransferableAIDQB64(pub), strangerSig)
+	if !awaiting() {
 		t.Fatal("a receipt from a witness the record identity does not name counted")
 	}
-	s.DataStore.SaveWitnessReceipt(store.WitnessReceiptRecord{EventSAID: said, WitnessAID: names[2], CesrSignature: sign(2)})
-	if !witnessedEnough(s.DataStore, said, names, 2) {
+	keep(names[2], sign(2))
+	if awaiting() {
 		t.Fatal("two named witnesses' receipts did not meet a threshold of two")
 	}
 }

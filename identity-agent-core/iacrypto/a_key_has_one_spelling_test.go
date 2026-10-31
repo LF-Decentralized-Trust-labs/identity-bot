@@ -209,3 +209,27 @@ func TestOnlyBase64URLIsReadWhereTheFormatSaysSo(t *testing.T) {
 		}
 	}
 }
+
+func TestACountHasOneSpelling(t *testing.T) {
+	for in, want := range map[string]int{"0": 0, "1": 1, "a": 10, "ff": 255, "7fffffff": 1<<31 - 1} {
+		if got, err := ParseHexCount(in); err != nil || got != want {
+			t.Errorf("%q read as %d (%v), want %d", in, got, err, want)
+		}
+	}
+	for _, bad := range []string{"", "A", "0a", "00", "2zz", "-1", "+1", "0x1", "80000000", " 1"} {
+		if n, err := ParseHexCount(bad); err == nil {
+			t.Errorf("%q read as %d", bad, n)
+		}
+	}
+}
+
+func TestHexIsReadInLowercaseOnly(t *testing.T) {
+	if got, err := DecodeHex("00ab"); err != nil || !bytes.Equal(got, []byte{0, 0xab}) {
+		t.Fatalf("lowercase hex: %x %v", got, err)
+	}
+	for _, bad := range []string{"00AB", "00aB", "0g"} {
+		if _, err := DecodeHex(bad); err == nil {
+			t.Errorf("%q was read", bad)
+		}
+	}
+}

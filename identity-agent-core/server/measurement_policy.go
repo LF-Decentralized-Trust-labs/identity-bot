@@ -1,10 +1,11 @@
 package server
 
 import (
-	"encoding/hex"
 	"fmt"
 	"os"
 	"strings"
+
+	"identity-agent-core/iacrypto"
 )
 
 // Which software an owner will adopt a sealed box for.
@@ -41,9 +42,9 @@ func parseMeasurements(values []string) ([][]byte, error) {
 		if v == "" {
 			continue
 		}
-		raw, err := hex.DecodeString(v)
+		raw, err := iacrypto.DecodeHex(v)
 		if err != nil {
-			return nil, fmt.Errorf("%q is not hex, so it is not a measurement: %w", short(v), err)
+			return nil, fmt.Errorf("%q is not lowercase hex, so it is not a measurement: %w", short(v), err)
 		}
 		// SEV-SNP measurements are 48 bytes. A wrong length is almost always a
 		// truncated copy-paste, and it would otherwise fail later as a

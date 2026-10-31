@@ -1,8 +1,9 @@
 package secureenclave
 
 import (
-	"encoding/hex"
 	"fmt"
+
+	"identity-agent-core/iacrypto"
 )
 
 // Which physical machine is this?
@@ -133,8 +134,10 @@ func ParseMachineIdentity(kind, value string) (MachineIdentity, error) {
 	if value == "" {
 		return MachineIdentity{}, fmt.Errorf("machine identifier of kind %q has no value", kind)
 	}
-	if _, err := hex.DecodeString(value); err != nil {
-		return MachineIdentity{}, fmt.Errorf("machine identifier %q is not hex: %w", value, err)
+	// Lowercase only: identities are compared as text, so a second case
+	// would be a second machine.
+	if _, err := iacrypto.DecodeHex(value); err != nil {
+		return MachineIdentity{}, fmt.Errorf("machine identifier %q is not lowercase hex: %w", value, err)
 	}
 	return MachineIdentity{Kind: k, Value: value}, nil
 }
