@@ -7,6 +7,7 @@ import {
   signCanonical,
   createDevRelayServer,
   keyFromIdentityAgent,
+  nonTransferableAidQb64,
 } from "../../dist/index.js";
 import { anIdentityAgentStandIn } from "../an-identity-agent-stand-in.mjs";
 import {
@@ -93,7 +94,7 @@ async function run() {
 
   const pairwiseSeed = ed.utils.randomPrivateKey();
   const pairwisePub = await ed.getPublicKeyAsync(pairwiseSeed);
-  const pairwiseAid = `E${Buffer.from(pairwisePub).toString("base64url").slice(0, 43)}`;
+  const pairwiseAid = nonTransferableAidQb64(pairwisePub);
   relay.registerIdentity({
     aid: pairwiseAid,
     publicKey: pairwisePub,

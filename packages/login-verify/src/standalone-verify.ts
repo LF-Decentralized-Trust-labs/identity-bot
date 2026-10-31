@@ -67,6 +67,10 @@ export async function verifyLoginAssertion(
     const maxSkew = opts.maxSkewSeconds ?? 300;
     const now = opts.nowMs ?? Date.now();
     const dtMs = parseRfc3339(assertion.dt);
+    // An unreadable time is refused, not compared: NaN is never "outside" a window.
+    if (Number.isNaN(dtMs)) {
+      return { valid: false, reason: "bad dt" };
+    }
     if (Math.abs(now - dtMs) > maxSkew * 1000) {
       return { valid: false, reason: "dt outside freshness window" };
     }
@@ -84,7 +88,12 @@ export async function verifyLoginAssertion(
     }
   }
 
-  const body = canonicalAssertionBody(assertion);
+  let body: string;
+  try {
+    body = canonicalAssertionBody(assertion);
+  } catch (err) {
+    return { valid: false, reason: `malformed assertion: ${(err as Error).message}` };
+  }
   const validSig = await verifyCanonical(body, assertion.sig, publicKey);
   if (!validSig) {
     return { valid: false, reason: "invalid signature" };

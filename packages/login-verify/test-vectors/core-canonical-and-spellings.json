@@ -1,0 +1,405 @@
+{
+  "canonical_assertions": [
+    {
+      "name": "nested keys out of order",
+      "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"z\":\"1\",\"email\":\"a@example.com\",\"a\":\"2\"},\"presented_acdcs\":[{\"said\":\"Ex\",\"b\":{\"z\":1,\"a\":[3,{\"y\":true,\"b\":null}]}},\"text\",7],\"custom_data\":{\"zeta\":1.5,\"alpha\":{\"k2\":\"v\",\"k1\":1e21},\"n\":-0,\"small\":1e-7,\"tiny\":0.000001,\"big\":12345678901234567890,\"int\":100,\"exp\":1E2},\"p_kel\":\"kel\",\"site_aid\":\"ESite\"}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"a\":\"2\",\"email\":\"a@example.com\",\"z\":\"1\"},\"presented_acdcs\":[{\"b\":{\"a\":[3,{\"b\":null,\"y\":true}],\"z\":1},\"said\":\"Ex\"},\"text\",7],\"custom_data\":{\"alpha\":{\"k1\":1e+21,\"k2\":\"v\"},\"big\":12345678901234567000,\"exp\":100,\"int\":100,\"n\":-0,\"small\":1e-7,\"tiny\":0.000001,\"zeta\":1.5},\"p_kel\":\"kel\",\"site_aid\":\"ESite\"}",
+      "said": "EG_cHUI0SD-MBeGHZn2v4YklTwBkwLSQGOA459pZcwZ_"
+    },
+    {
+      "name": "html characters and line separators",
+      "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"o\",\"audience\":\"https://a.example/?x=1\u0026y=\u003c2\u003e\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"A\u2028B\u2029C \u003cb\u003e\u0026amp;\u003c/b\u003e\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\"}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"o\",\"audience\":\"https://a.example/?x=1\\u0026y=\\u003c2\\u003e\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"A\\u2028B\\u2029C \\u003cb\\u003e\\u0026amp;\\u003c/b\\u003e\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\"}",
+      "said": "EK48Xyedc4vDM_IQ30ZWk2ZH_WePEA0d071iFH8vr5Q0"
+    },
+    {
+      "name": "a decomposed string is signed as given",
+      "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"o\",\"audience\":\"https://app.example.com\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"René\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\"}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"o\",\"audience\":\"https://app.example.com\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"René\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\"}",
+      "said": "EMKqfib1wIOhqsO1nQDo0sZatFAfmWPYhhSTTMzm0Qtl"
+    },
+    {
+      "name": "map keys sort by their UTF-8 bytes",
+      "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"o\",\"audience\":\"a\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"😀\":\"astral\",\"�\":\"replacement\",\"Ａ\":\"fullwidth\",\"z\":\"ascii\",\"é\":\"latin\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\"}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"o\",\"audience\":\"a\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"z\":\"ascii\",\"é\":\"latin\",\"Ａ\":\"fullwidth\",\"�\":\"replacement\",\"😀\":\"astral\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\"}",
+      "said": "ELmVzd1x2YRcWMTvoAVnhGqOSvR_KlkQv8TeR6npMPXD"
+    },
+    {
+      "name": "an unpaired surrogate becomes U+FFFD",
+      "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"o\",\"audience\":\"a\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"x\\ud800y\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\"}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"o\",\"audience\":\"a\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"x�y\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\"}",
+      "said": "EOjocWB7b7Gooz5XMZ5P1uDYilAvqV4txvHmJLY5ukfT"
+    },
+    {
+      "name": "control characters",
+      "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"o\",\"audience\":\"a\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"\\b\\f\\n\\r\\t\\u0001\\u001f\\u007f\\\"\\\\/\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\"}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"o\",\"audience\":\"a\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"\\b\\f\\n\\r\\t\\u0001\\u001f\\\"\\\\/\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\"}",
+      "said": "EL9TgqESA2EoPibUoIYFmbxOtwGoBr2V3W9eRfNozxZc"
+    },
+    {
+      "name": "absent fields are written empty",
+      "json": "{\"v\":\"IALOGIN10JSON\"}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"IALOGIN10JSON\",\"t\":\"\",\"i\":\"\",\"relationship_aid_oobi\":\"\",\"audience\":\"\",\"nonce\":\"\",\"dt\":\"\",\"disclosures\":null,\"presented_acdcs\":null}",
+      "said": "EKZttCxc7jYvkAoQ93eaFXk4pvYGSz9wAT7KF_pbVJm1"
+    },
+    {
+      "name": "null fields",
+      "json": "{\"v\":null,\"t\":\"login-assertion\",\"d\":null,\"disclosures\":null,\"presented_acdcs\":null,\"custom_data\":null,\"p_kel\":\"\",\"site_aid\":null}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"\",\"t\":\"login-assertion\",\"i\":\"\",\"relationship_aid_oobi\":\"\",\"audience\":\"\",\"nonce\":\"\",\"dt\":\"\",\"disclosures\":null,\"presented_acdcs\":null}",
+      "said": "EO4nZ5FElF4dAqwZvANOSFaW9ApFSW4OFDRBoE3ifOd_"
+    },
+    {
+      "name": "empty custom data is written",
+      "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"disclosures\":{},\"presented_acdcs\":[],\"custom_data\":{}}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"\",\"relationship_aid_oobi\":\"\",\"audience\":\"\",\"nonce\":\"\",\"dt\":\"\",\"disclosures\":{},\"presented_acdcs\":[],\"custom_data\":{}}",
+      "said": "EEIaLDDqXXVmgsT2h9F1VkIAjQ-RgfuTfX4PKipr3K6M"
+    },
+    {
+      "name": "a null disclosure value",
+      "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"disclosures\":{\"a\":null},\"presented_acdcs\":[]}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"\",\"relationship_aid_oobi\":\"\",\"audience\":\"\",\"nonce\":\"\",\"dt\":\"\",\"disclosures\":{\"a\":\"\"},\"presented_acdcs\":[]}",
+      "said": "ECm7vG5ZZbUlpeROrhvsFYGrB0JXCMYf9fenh1EbBaNu"
+    },
+    {
+      "name": "unknown fields are ignored",
+      "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"extra\":{\"b\":1},\"disclosures\":{},\"presented_acdcs\":[],\"sig\":\"0Bxx\"}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"\",\"relationship_aid_oobi\":\"\",\"audience\":\"\",\"nonce\":\"\",\"dt\":\"\",\"disclosures\":{},\"presented_acdcs\":[]}",
+      "said": "EMf8BeKcUy9jiRw9xowr-l_eZqtiEo6krbRwyKEVGLpD"
+    },
+    {
+      "name": "a number disclosure is refused",
+      "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"disclosures\":{\"a\":1},\"presented_acdcs\":[]}",
+      "go_reads": false
+    },
+    {
+      "name": "a number nonce is refused",
+      "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"nonce\":5,\"disclosures\":{},\"presented_acdcs\":[]}",
+      "go_reads": false
+    },
+    {
+      "name": "presented credentials that are not a list are refused",
+      "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"disclosures\":{},\"presented_acdcs\":{}}",
+      "go_reads": false
+    },
+    {
+      "name": "custom data that is a list is refused",
+      "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"disclosures\":{},\"presented_acdcs\":[],\"custom_data\":[1]}",
+      "go_reads": false
+    },
+    {
+      "name": "disclosures that are a list are refused",
+      "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"disclosures\":[\"a\"],\"presented_acdcs\":[]}",
+      "go_reads": false
+    }
+  ],
+  "canonical_challenges": [
+    {
+      "name": "credential and score fields keep their declared order",
+      "json": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"ESite\",\"site_oobi\":\"https://s.example/oobi/ESite\",\"audience\":\"https://app.example.com\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"expiry\":\"2026-06-17T12:05:00Z\",\"requested_disclosures\":[\"email\",\"display_name\"],\"requested_credentials\":[{\"required\":true,\"schema_said\":\"ESchema\"},{\"schema_said\":\"EOther\"}],\"requested_score\":{\"required\":true,\"min_score\":70,\"min_band\":\"green\"},\"callback_url\":\"https://app.example.com/cb?a=1\u0026b=2\",\"session_token\":\"tok\"}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"ESite\",\"site_oobi\":\"https://s.example/oobi/ESite\",\"audience\":\"https://app.example.com\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"expiry\":\"2026-06-17T12:05:00Z\",\"requested_disclosures\":[\"email\",\"display_name\"],\"requested_credentials\":[{\"schema_said\":\"ESchema\",\"required\":true},{\"schema_said\":\"EOther\",\"required\":false}],\"requested_score\":{\"min_band\":\"green\",\"min_score\":70,\"required\":true},\"callback_url\":\"https://app.example.com/cb?a=1\\u0026b=2\",\"session_token\":\"tok\"}"
+    },
+    {
+      "name": "a score of zero values is written empty",
+      "json": "{\"v\":\"ASK1\",\"t\":1,\"requested_disclosures\":[],\"requested_credentials\":[],\"requested_score\":{\"min_score\":0,\"required\":false,\"min_band\":\"\"}}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"\",\"site_oobi\":\"\",\"audience\":\"\",\"nonce\":\"\",\"dt\":\"\",\"expiry\":\"\",\"requested_disclosures\":[],\"requested_credentials\":[],\"requested_score\":{},\"callback_url\":\"\",\"session_token\":\"\"}"
+    },
+    {
+      "name": "a null score is left out",
+      "json": "{\"v\":\"ASK1\",\"t\":1,\"requested_disclosures\":null,\"requested_credentials\":null,\"requested_score\":null}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"\",\"site_oobi\":\"\",\"audience\":\"\",\"nonce\":\"\",\"dt\":\"\",\"expiry\":\"\",\"requested_disclosures\":null,\"requested_credentials\":null,\"callback_url\":\"\",\"session_token\":\"\"}"
+    },
+    {
+      "name": "a relationship anchor",
+      "json": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"ESite\",\"requested_disclosures\":[],\"requested_credentials\":[],\"relationship_anchor_aid\":\"EOrg\",\"callback_url\":\"c\",\"session_token\":\"s\"}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"ESite\",\"site_oobi\":\"\",\"audience\":\"\",\"nonce\":\"\",\"dt\":\"\",\"expiry\":\"\",\"requested_disclosures\":[],\"requested_credentials\":[],\"relationship_anchor_aid\":\"EOrg\",\"relationship_anchor_oobi\":\"\",\"callback_url\":\"c\",\"session_token\":\"s\"}"
+    },
+    {
+      "name": "an anchor oobi with no anchor is left out",
+      "json": "{\"v\":\"ASK1\",\"t\":1,\"requested_disclosures\":[],\"requested_credentials\":[],\"relationship_anchor_oobi\":\"https://o.example\"}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"\",\"site_oobi\":\"\",\"audience\":\"\",\"nonce\":\"\",\"dt\":\"\",\"expiry\":\"\",\"requested_disclosures\":[],\"requested_credentials\":[],\"callback_url\":\"\",\"session_token\":\"\"}"
+    },
+    {
+      "name": "a null credential entry",
+      "json": "{\"v\":\"ASK1\",\"t\":1,\"requested_disclosures\":[null],\"requested_credentials\":[null]}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"\",\"site_oobi\":\"\",\"audience\":\"\",\"nonce\":\"\",\"dt\":\"\",\"expiry\":\"\",\"requested_disclosures\":[\"\"],\"requested_credentials\":[{\"schema_said\":\"\",\"required\":false}],\"callback_url\":\"\",\"session_token\":\"\"}"
+    },
+    {
+      "name": "absent fields are written empty",
+      "json": "{}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"\",\"t\":0,\"site_aid\":\"\",\"site_oobi\":\"\",\"audience\":\"\",\"nonce\":\"\",\"dt\":\"\",\"expiry\":\"\",\"requested_disclosures\":null,\"requested_credentials\":null,\"callback_url\":\"\",\"session_token\":\"\"}"
+    },
+    {
+      "name": "a text action is refused",
+      "json": "{\"v\":\"ASK1\",\"t\":\"1\",\"requested_disclosures\":[],\"requested_credentials\":[]}",
+      "go_reads": false
+    },
+    {
+      "name": "a fractional action is refused",
+      "json": "{\"v\":\"ASK1\",\"t\":1.5,\"requested_disclosures\":[],\"requested_credentials\":[]}",
+      "go_reads": false
+    },
+    {
+      "name": "a fractional minimum score is refused",
+      "json": "{\"v\":\"ASK1\",\"t\":1,\"requested_score\":{\"min_score\":70.5}}",
+      "go_reads": false
+    },
+    {
+      "name": "a text required flag is refused",
+      "json": "{\"v\":\"ASK1\",\"t\":1,\"requested_credentials\":[{\"schema_said\":\"E\",\"required\":\"yes\"}]}",
+      "go_reads": false
+    }
+  ],
+  "description": "Produced by the Go core: canonical bodies, accept/refuse decisions for key and signature spellings, and a signed assertion. The TypeScript verifier must agree byte for byte.",
+  "non_transferable_aid": [
+    {
+      "name": "canonical",
+      "value": "BAOhB7_zzhC-HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4",
+      "go_accepts": true,
+      "raw_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+    },
+    {
+      "name": "lead bits set in the second character",
+      "value": "BQOhB7_zzhC-HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4",
+      "go_accepts": true,
+      "raw_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+    },
+    {
+      "name": "a trailing character",
+      "value": "BAOhB7_zzhC-HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4A",
+      "go_accepts": false
+    },
+    {
+      "name": "a transferable code",
+      "value": "DAOhB7_zzhC-HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4",
+      "go_accepts": false
+    }
+  ],
+  "signed_assertion": {
+    "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EG_cHUI0SD-MBeGHZn2v4YklTwBkwLSQGOA459pZcwZ_\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"a\":\"2\",\"email\":\"a@example.com\",\"z\":\"1\"},\"presented_acdcs\":[{\"b\":{\"a\":[3,{\"b\":null,\"y\":true}],\"z\":1},\"said\":\"Ex\"},\"text\",7],\"custom_data\":{\"alpha\":{\"k1\":1e+21,\"k2\":\"v\"},\"big\":12345678901234567000,\"exp\":100,\"int\":100,\"n\":-0,\"small\":1e-7,\"tiny\":0.000001,\"zeta\":1.5},\"p_kel\":\"kel\",\"site_aid\":\"ESite\",\"sig\":\"0BDuQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhxT6Z2BDu6wANkprfrldP-lj4T8eJ9VIiLiocLICKrcNEWgHQG\"}",
+    "canonical_body": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EG_cHUI0SD-MBeGHZn2v4YklTwBkwLSQGOA459pZcwZ_\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAid\",\"audience\":\"https://app.example.com\",\"nonce\":\"n1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"a\":\"2\",\"email\":\"a@example.com\",\"z\":\"1\"},\"presented_acdcs\":[{\"b\":{\"a\":[3,{\"b\":null,\"y\":true}],\"z\":1},\"said\":\"Ex\"},\"text\",7],\"custom_data\":{\"alpha\":{\"k1\":1e+21,\"k2\":\"v\"},\"big\":12345678901234567000,\"exp\":100,\"int\":100,\"n\":-0,\"small\":1e-7,\"tiny\":0.000001,\"zeta\":1.5},\"p_kel\":\"kel\",\"site_aid\":\"ESite\"}",
+    "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+    "said": "EG_cHUI0SD-MBeGHZn2v4YklTwBkwLSQGOA459pZcwZ_",
+    "seed_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "signatures": [
+      {
+        "name": "canonical",
+        "sig": "0BDuQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhxT6Z2BDu6wANkprfrldP-lj4T8eJ9VIiLiocLICKrcNEWgHQG",
+        "go_accepts": true
+      },
+      {
+        "name": "lead bits set in the third character, variant a",
+        "sig": "0BHuQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhxT6Z2BDu6wANkprfrldP-lj4T8eJ9VIiLiocLICKrcNEWgHQG",
+        "go_accepts": false
+      },
+      {
+        "name": "lead bits set in the third character, variant b",
+        "sig": "0BLuQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhxT6Z2BDu6wANkprfrldP-lj4T8eJ9VIiLiocLICKrcNEWgHQG",
+        "go_accepts": false
+      },
+      {
+        "name": "lead bits set in the third character, variant c",
+        "sig": "0BPuQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhxT6Z2BDu6wANkprfrldP-lj4T8eJ9VIiLiocLICKrcNEWgHQG",
+        "go_accepts": false
+      },
+      {
+        "name": "lead bits set in the third character, variant d",
+        "sig": "0BTuQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhxT6Z2BDu6wANkprfrldP-lj4T8eJ9VIiLiocLICKrcNEWgHQG",
+        "go_accepts": false
+      },
+      {
+        "name": "lead bits set in the third character, variant e",
+        "sig": "0BXuQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhxT6Z2BDu6wANkprfrldP-lj4T8eJ9VIiLiocLICKrcNEWgHQG",
+        "go_accepts": false
+      },
+      {
+        "name": "lead bits set in the third character, variant f",
+        "sig": "0BbuQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhxT6Z2BDu6wANkprfrldP-lj4T8eJ9VIiLiocLICKrcNEWgHQG",
+        "go_accepts": false
+      },
+      {
+        "name": "lead bits set in the third character, variant g",
+        "sig": "0BfuQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhxT6Z2BDu6wANkprfrldP-lj4T8eJ9VIiLiocLICKrcNEWgHQG",
+        "go_accepts": false
+      },
+      {
+        "name": "lead bits set in the third character, variant h",
+        "sig": "0BjuQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhxT6Z2BDu6wANkprfrldP-lj4T8eJ9VIiLiocLICKrcNEWgHQG",
+        "go_accepts": false
+      },
+      {
+        "name": "lead bits set in the third character, variant i",
+        "sig": "0BnuQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhxT6Z2BDu6wANkprfrldP-lj4T8eJ9VIiLiocLICKrcNEWgHQG",
+        "go_accepts": false
+      },
+      {
+        "name": "lead bits set in the third character, variant j",
+        "sig": "0BruQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhxT6Z2BDu6wANkprfrldP-lj4T8eJ9VIiLiocLICKrcNEWgHQG",
+        "go_accepts": false
+      },
+      {
+        "name": "lead bits set in the third character, variant k",
+        "sig": "0BvuQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhxT6Z2BDu6wANkprfrldP-lj4T8eJ9VIiLiocLICKrcNEWgHQG",
+        "go_accepts": false
+      },
+      {
+        "name": "lead bits set in the third character, variant l",
+        "sig": "0BzuQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhxT6Z2BDu6wANkprfrldP-lj4T8eJ9VIiLiocLICKrcNEWgHQG",
+        "go_accepts": false
+      },
+      {
+        "name": "lead bits set in the third character, variant m",
+        "sig": "0B3uQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhxT6Z2BDu6wANkprfrldP-lj4T8eJ9VIiLiocLICKrcNEWgHQG",
+        "go_accepts": false
+      },
+      {
+        "name": "lead bits set in the third character, variant n",
+        "sig": "0B7uQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhxT6Z2BDu6wANkprfrldP-lj4T8eJ9VIiLiocLICKrcNEWgHQG",
+        "go_accepts": false
+      },
+      {
+        "name": "lead bits set in the third character, variant o",
+        "sig": "0B_uQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhxT6Z2BDu6wANkprfrldP-lj4T8eJ9VIiLiocLICKrcNEWgHQG",
+        "go_accepts": false
+      },
+      {
+        "name": "a trailing character",
+        "sig": "0BDuQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhxT6Z2BDu6wANkprfrldP-lj4T8eJ9VIiLiocLICKrcNEWgHQGA",
+        "go_accepts": false
+      },
+      {
+        "name": "padding",
+        "sig": "0BDuQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhxT6Z2BDu6wANkprfrldP-lj4T8eJ9VIiLiocLICKrcNEWgHQG==",
+        "go_accepts": false
+      },
+      {
+        "name": "padding and junk",
+        "sig": "0BDuQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhxT6Z2BDu6wANkprfrldP-lj4T8eJ9VIiLiocLICKrcNEWgHQG=junk",
+        "go_accepts": false
+      },
+      {
+        "name": "the standard alphabet",
+        "sig": "0BDuQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf/ZAhxT6Z2BDu6wANkprfrldP+lj4T8eJ9VIiLiocLICKrcNEWgHQG",
+        "go_accepts": false
+      },
+      {
+        "name": "a character outside the alphabet",
+        "sig": "0BDuQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhx.6Z2BDu6wANkprfrldP-lj4T8eJ9VIiLiocLICKrcNEWgHQG",
+        "go_accepts": false
+      },
+      {
+        "name": "an inserted newline",
+        "sig": "0BDuQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhx\nT6Z2BDu6wANkprfrldP-lj4T8eJ9VIiLiocLICKrcNEWgHQG",
+        "go_accepts": false
+      },
+      {
+        "name": "another code",
+        "sig": "0CDuQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhxT6Z2BDu6wANkprfrldP-lj4T8eJ9VIiLiocLICKrcNEWgHQG",
+        "go_accepts": false
+      },
+      {
+        "name": "one character short",
+        "sig": "0BDuQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhxT6Z2BDu6wANkprfrldP-lj4T8eJ9VIiLiocLICKrcNEWgHQ",
+        "go_accepts": false
+      },
+      {
+        "name": "the last character changed",
+        "sig": "0BDuQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhxT6Z2BDu6wANkprfrldP-lj4T8eJ9VIiLiocLICKrcNEWgHQA",
+        "go_accepts": false
+      }
+    ],
+    "verkey_qb64": "DAOhB7_zzhC-HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4"
+  },
+  "verkey_qb64": [
+    {
+      "name": "canonical",
+      "value": "DAOhB7_zzhC-HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4",
+      "go_accepts": true,
+      "raw_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+    },
+    {
+      "name": "lead bits set in the second character",
+      "value": "DQOhB7_zzhC-HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4",
+      "go_accepts": true,
+      "raw_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+    },
+    {
+      "name": "lead bits set high in the second character",
+      "value": "DwOhB7_zzhC-HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4",
+      "go_accepts": true,
+      "raw_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+    },
+    {
+      "name": "a trailing character",
+      "value": "DAOhB7_zzhC-HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4A",
+      "go_accepts": false
+    },
+    {
+      "name": "padding",
+      "value": "DAOhB7_zzhC-HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4=",
+      "go_accepts": false
+    },
+    {
+      "name": "padding and junk",
+      "value": "DAOhB7_zzhC-HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4=junk",
+      "go_accepts": false
+    },
+    {
+      "name": "the standard alphabet",
+      "value": "DAOhB7/zzhC+HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4",
+      "go_accepts": false
+    },
+    {
+      "name": "a character outside the alphabet",
+      "value": "DAOhB7_zzh.-HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4",
+      "go_accepts": false
+    },
+    {
+      "name": "an inserted space",
+      "value": "DAOhB7_zzh C-HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4",
+      "go_accepts": false
+    },
+    {
+      "name": "a non-transferable code",
+      "value": "BAOhB7_zzhC-HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4",
+      "go_accepts": false
+    },
+    {
+      "name": "a digest code",
+      "value": "EAOhB7_zzhC-HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4",
+      "go_accepts": false
+    },
+    {
+      "name": "a lower-case code",
+      "value": "dAOhB7_zzhC-HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4",
+      "go_accepts": false
+    },
+    {
+      "name": "one character short",
+      "value": "DAOhB7_zzhC-HXDdGOdLwJln5NYwm6UNXx3chmQSVTG",
+      "go_accepts": false
+    },
+    {
+      "name": "empty",
+      "value": "",
+      "go_accepts": false
+    }
+  ]
+}

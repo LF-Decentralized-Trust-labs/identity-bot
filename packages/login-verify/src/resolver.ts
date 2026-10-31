@@ -1,3 +1,6 @@
+import { decodeBase64UrlStrict } from "./canonical.js";
+
+
 export interface DidWebsDocument {
   id: string;
   verificationMethod: Array<{
@@ -68,7 +71,11 @@ export function keyFromIdentityAgent(
     if (!resp.ok || !out.public_key_b64) {
       throw new Error(out.error ?? `the Identity Agent at ${identityAgentUrl} answered ${resp.status}`);
     }
-    return new Uint8Array(Buffer.from(out.public_key_b64, "base64url"));
+    const key = decodeBase64UrlStrict(out.public_key_b64, 32);
+    if (!key) {
+      throw new Error(`the Identity Agent at ${identityAgentUrl} answered with something that is not a 32-byte key`);
+    }
+    return key;
   };
 }
 

@@ -5,6 +5,7 @@ import {
   canonicalAssertionBody,
   assertionDigest,
   signCanonical,
+  nonTransferableAidQb64,
 } from "../../dist/index.js";
 
 // An assertion is spent once.
@@ -14,7 +15,7 @@ import {
 async function run() {
   const priv = ed.utils.randomPrivateKey();
   const pub = await ed.getPublicKeyAsync(priv);
-  const aid = "E" + Buffer.from(pub).toString("base64url").slice(0, 43);
+  const aid = nonTransferableAidQb64(pub);
 
   const assertion = {
     v: "IALOGIN10JSON", t: "login-assertion", i: aid,
