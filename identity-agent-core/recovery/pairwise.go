@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/iacrypto"
 )
 
 // PairwiseVerification describes one regenerated HD pairwise identity.
@@ -127,17 +128,12 @@ func decodePublicKeyBytes(s string) ([]byte, error) {
 	if s == "" {
 		return nil, fmt.Errorf("empty public key")
 	}
-	if strings.HasPrefix(s, "B") {
-		s = s[1:]
+	// Which spelling a key is in is iacrypto's to decide. This stripped a
+	// leading "B" as a code, which is also how one standard-base64 raw key in
+	// 64 begins, so that key failed to compare with itself.
+	raw, _, err := iacrypto.DecodeEd25519Key(s, false)
+	if err != nil {
+		return nil, fmt.Errorf("unrecognized public key encoding")
 	}
-	if raw, err := base64.RawURLEncoding.DecodeString(s); err == nil && len(raw) == ed25519.PublicKeySize {
-		return raw, nil
-	}
-	if raw, err := base64.URLEncoding.DecodeString(s); err == nil && len(raw) == ed25519.PublicKeySize {
-		return raw, nil
-	}
-	if raw, err := base64.StdEncoding.DecodeString(s); err == nil && len(raw) == ed25519.PublicKeySize {
-		return raw, nil
-	}
-	return nil, fmt.Errorf("unrecognized public key encoding")
+	return raw, nil
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"testing"
 )
 
@@ -57,5 +58,38 @@ func TestDecodeVerkeyNaiveBFormIsNotTheKey(t *testing.T) {
 	if derr == nil && bytes.Equal(got, pub) {
 		t.Fatal("the naive 'B'+base64 form decoded back to the signing key; " +
 			"the two encodings are not distinguishable, so the fix is moot")
+	}
+}
+
+// A raw key reaches here in every base64 spelling, padded URL-safe included,
+// and one that happens to start with a qb64 code is still read as raw: qb64
+// is never padded, so the padded spellings cannot be qb64.
+func TestDecodeVerkeyReadsEveryBase64Spelling(t *testing.T) {
+	raw, err := base64.StdEncoding.DecodeString("B/awzunMRvtYlgq21ZegG9MD5kNmLbPNspHGcryAbK4=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, enc := range []*base64.Encoding{
+		base64.RawURLEncoding, base64.URLEncoding, base64.RawStdEncoding, base64.StdEncoding,
+	} {
+		got, err := DecodeVerkey(enc.EncodeToString(raw))
+		if err != nil || !bytes.Equal(got, raw) {
+			t.Fatalf("%s read as %x (%v)", enc.EncodeToString(raw), got, err)
+		}
+	}
+}
+
+// Hex and both qb64 codes are read as they were, alongside every base64
+// spelling.
+func TestDecodeVerkeyReadsHexAndBothCodes(t *testing.T) {
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	for _, k := range []string{
+		canonicalVerkey("D", pub), canonicalVerkey("B", pub),
+		hex.EncodeToString(pub), " " + base64.StdEncoding.EncodeToString(pub) + " ",
+	} {
+		got, err := DecodeVerkey(k)
+		if err != nil || !bytes.Equal(got, pub) {
+			t.Fatalf("%q read as %x (%v)", k, got, err)
+		}
 	}
 }

@@ -69,7 +69,7 @@ func (e *Engine) CreateHybridInception(synthetic bool, name string) (*drivers.Dr
 		}
 	}
 
-	raw, err := decodeB64(result.RawBytesB64)
+	raw, err := iacrypto.DecodeBase64(result.RawBytesB64)
 	if err != nil {
 		return nil, fmt.Errorf("the hybrid inception this engine built is not readable: %w", err)
 	}
