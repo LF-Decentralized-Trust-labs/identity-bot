@@ -1,7 +1,6 @@
 package brr_test
 
 import (
-	"crypto/ed25519"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +10,6 @@ import (
 	"testing"
 
 	"identity-agent-core/brr"
-	"identity-agent-core/iacrypto"
 )
 
 // newFakeBRR is a minimal in-process stand-in for the BRR service, sufficient to
@@ -85,20 +83,13 @@ func TestSteelThreadIssueBlindRevokeVerify(t *testing.T) {
 	ts := newFakeBRR(t)
 	defer ts.Close()
 
-	issuerPub, issuerPriv, err := ed25519.GenerateKey(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	client, err := brr.NewClient(ts.URL, iacrypto.NonTransferableAIDQB64(issuerPub), issuerPriv)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	registryPrefix := "ERegM36Steel"
+	is := newIssuer(t)
+	client := is.client(t, ts.URL)
+	registryPrefix, inception := registry(t, is.aid)
 	credentialSAID := "EAcredM36SteelThread000000000000000001"
 	registrySalt := "private-acdc-registry-salt-7f3a"
 
-	if err := client.Enroll(registryPrefix); err != nil {
+	if _, err := client.Enroll(is.kel(t), inception); err != nil {
 		t.Fatal(err)
 	}
 

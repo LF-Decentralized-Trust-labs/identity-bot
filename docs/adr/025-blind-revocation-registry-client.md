@@ -34,7 +34,7 @@ BlindedID = Blake3-256( credential_SAID || registry_salt )   // hex
 
 ### Issuer side — enroll, then push blinded events
 
-- **Enroll** (`Client.Enroll`): the issuer registers a `registry_prefix`, its AID, and its public key with a provider via `POST /registry/enroll`, signing the request body with Ed25519.
+- **Enroll** (`Client.Enroll`): the issuer registers a `registry_prefix`, its AID, and its public key with a provider via `POST /registry/enroll`, signing the request body with Ed25519. The enrolment proves both claims rather than asserting them, because whoever holds a registry's enrolled key can revoke every credential in it: it carries the issuer's signed key event log (`kel`), which must derive the AID and name the key as current, and the registry's inception event (`registry_inception`), which must digest to the prefix and name the issuer. Both are signed with the rest. A provider refuses with 409 a log that forks from the one it holds, and the client reports that as `brr.ErrRefused`.
 - **Push** (`Client.PushBlindedEvent`): for each issuance or revocation the issuer pushes `(blinded_id, event_type ∈ {iss, rev}, sequence_number)` — and only that — to `POST /registry/{prefix}/event`, again signed. The plaintext credential never leaves the issuer.
 
 ### Verifier side — herd-private bulk query, checked locally
