@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:agent_client/crypto/bip39.dart';
 import 'package:agent_client/crypto/keys.dart';
+import 'package:agent_client/crypto/owner_signature.dart';
 import 'package:agent_client/services/local_core_keri_service.dart';
 import 'package:agent_client/services/keri_service.dart';
 import 'package:agent_client/services/owner_signing_client.dart';
@@ -41,8 +42,11 @@ class FakeCore {
   final posted = <String>[];
   bool refuseSignatures = false;
   bool keyNotHeldHere = false;
-  // Serves the bytes of the event before it in place of an unsigned event's.
-  bool swapBytes = false;
+  // Rewrites the bytes served for an unsigned event, as a core lying about
+  // what an event is would.
+  Map<String, dynamic> Function(Map<String, dynamic>)? tamper;
+  // Makes the rotation the core builds commit to somebody else's next key.
+  String? foreignNext;
   // Answers 404 to a signature, as a core that does not hold the event does.
   bool forgetsEvents = false;
 
@@ -55,12 +59,22 @@ class FakeCore {
 
   List<int> raw(int sn) => raws[sn];
 
+  static String commitmentTo(String key) => OwnerSignature.blake3QB64(utf8.encode(key));
+
+  // Appends an event, laid out as the engine lays one out.
   void add(Map<String, dynamic> event) {
     final sn = kel.length.toRadixString(16);
-    final e = {'v': 'KERI10JSON', 't': event['t'], 'd': 'Eevent$sn', 'i': 'Eaid', 's': sn, if (event['k'] != null) 'k': event['k']};
+    final e = <String, dynamic>{'v': 'KERI10JSON', 't': event['t'], 'd': 'Eevent$sn', 'i': 'Eaid', 's': sn};
+    for (final f in ['k', 'n', 'bt', 'b', 'br', 'ba', 'a']) {
+      if (event.containsKey(f)) e[f] = event[f];
+    }
     raws.add(utf8.encode(jsonEncode(e)));
     kel.add({...e, if (event['sig'] != null) 'sig': event['sig']});
   }
+
+  // A rotation to [key], committing to [next], as the engine writes one.
+  static Map<String, dynamic> rotation(String key, String next) =>
+      {'t': 'rot', 'k': [key], 'n': [commitmentTo(next)], 'bt': '0', 'br': [], 'ba': []};
 
   http.Client client() => MockClient((req) async {
         if (req.method == 'GET') {
@@ -77,7 +91,9 @@ class FakeCore {
                     'kel': kel,
                     'raw_events_b64': [
                       for (var i = 0; i < kel.length; i++)
-                        base64Encode(swapBytes && kel[i]['sig'] == null && i > 0 ? raws[i - 1] : raws[i]),
+                        base64Encode(tamper != null && kel[i]['sig'] == null
+                            ? utf8.encode(jsonEncode(tamper!(Map<String, dynamic>.from(jsonDecode(utf8.decode(raws[i])) as Map))))
+                            : raws[i]),
                     ],
                     'sequence_number': kel.length - 1,
                     'event_count': kel.length,
@@ -97,12 +113,13 @@ class FakeCore {
         }
         switch (req.url.path) {
           case '/api/inception':
-            add({'t': 'icp', 'k': [body['public_key']]});
+            add({'t': 'icp', 'k': [body['public_key']], 'n': [commitmentTo(body['next_public_key'] as String)], 'bt': '0', 'b': []});
           case '/api/rotation':
-            add({'t': 'rot', 'k': [body['new_public_key']]});
+            add(rotation(body['new_public_key'] as String, foreignNext ?? body['new_next_public_key'] as String));
           case '/api/interact':
+            add({'t': 'ixn', 'a': body['data']});
           case '/api/credential/issue':
-            add({'t': 'ixn'});
+            add({'t': 'ixn', 'a': [{'d': 'Ecredential'}]});
           case '/api/cesr/encode':
             // Carries the raw signature through, so the core can check it.
             return http.Response(jsonEncode({'cesr_sig': body['raw_sig_b64']}), 200);
@@ -253,7 +270,8 @@ void main() {
 
   test('nothing is signed when the log names a key this phrase does not hold', () async {
     await keri.inceptAid(name: 'Eaid', code: words.join(' '));
-    core.add({'t': 'rot', 'k': [KeyManager.keyAt(Bip39.mnemonicToSeed(Bip39.generateMnemonic()), 1).publicKeyEncoded]});
+    final stranger = Bip39.mnemonicToSeed(Bip39.generateMnemonic());
+    core.add(FakeCore.rotation(KeyManager.keyAt(stranger, 1).publicKeyEncoded, KeyManager.keyAt(stranger, 2).publicKeyEncoded));
     await expectLater(keri.signPayload(name: 'Eaid', data: [1, 2, 3]), throwsException);
   });
 
@@ -312,7 +330,7 @@ void main() {
     await keri.inceptAid(name: 'Eaid', code: words.join(' '));
     // A log naming a key this phrase does not hold.
     final stranger = KeyManager.keyAt(Bip39.mnemonicToSeed(Bip39.generateMnemonic()), 1);
-    core.add({'t': 'rot', 'k': [stranger.publicKeyEncoded], 'sig': 'x'});
+    core.add({...FakeCore.rotation(stranger.publicKeyEncoded, stranger.publicKeyEncoded), 'sig': 'x'});
     core.posted.clear();
     await expectLater(keri.interactAid(name: 'Eaid'), throwsException);
     await expectLater(keri.issueCredential(claims: {'a': 'b'}, schemaSaid: 'E'), throwsException);
@@ -377,16 +395,29 @@ void main() {
         reason: 'signed by the key in force at it: the rotated key, not the founding one');
   });
 
-  test('bytes that are not the event are not signed', () async {
-    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
-    core.refuseSignatures = true;
-    await expectLater(keri.interactAid(name: 'Eaid'), throwsException);
-    core.refuseSignatures = false;
-    core.swapBytes = true;
-    core.posted.clear();
-    await expectLater(keri.signPayload(name: 'Eaid', data: [1]), throwsException);
-    expect(core.posted, isNot(contains('/api/cesr/encode')),
-        reason: 'bytes the core named for one event and that are another are never signed');
+  test('bytes that differ from the event in one field are not signed', () async {
+    final cases = <String, Map<String, dynamic> Function(Map<String, dynamic>)>{
+      'its digest': (e) => {...e, 'd': 'Eanother'},
+      'its keys': (e) => {...e, 'k': [KeyManager.keyAt(Bip39.mnemonicToSeed(Bip39.generateMnemonic()), 1).publicKeyEncoded]},
+      'its sequence number': (e) => {...e, 's': 'f'},
+      'its identifier': (e) => {...e, 'i': 'Eother'},
+    };
+    for (final MapEntry(key: what, value: change) in cases.entries) {
+      FlutterSecureStorage.setMockInitialValues({});
+      SharedPreferences.setMockInitialValues({});
+      await SecureKeyStore.saveMnemonic(words);
+      core = FakeCore();
+      keri = LocalCoreKeriService(baseUrl: 'http://core.test', client: core.client());
+      await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+      core.refuseSignatures = true;
+      await expectLater(keri.rotateAid(name: 'Eaid'), throwsException);
+      core.refuseSignatures = false;
+      core.tamper = change;
+      core.posted.clear();
+      await expectLater(keri.signPayload(name: 'Eaid', data: [1]), throwsException, reason: what);
+      expect(core.posted, isNot(contains('/api/cesr/encode')),
+          reason: 'bytes that differ from the event in $what are never signed');
+    }
   });
 
   test('a stranded event the core will not take a signature for stops signing, and says why', () async {
@@ -413,5 +444,52 @@ void main() {
     await expectLater(keri.presentCredential(acdcSaid: 'Ex', holderAid: 'Eaid'),
         throwsA(predicate((e) => '$e'.contains('No identity keys found in secure storage.'))));
     expect(core.posted, isEmpty, reason: 'nothing is asked of the core that could not then be signed');
+  });
+
+  test('a rotation the core added on its own, committing to its own key, is never signed', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    final seed = Bip39.mnemonicToSeed(words);
+    final attacker = KeyManager.keyAt(Bip39.mnemonicToSeed(Bip39.generateMnemonic()), 0).publicKeyEncoded;
+    // Reveals this phrase's key 1, as a real rotation would, and commits to
+    // the attacker's key, marked unsigned so the device would finish it.
+    core.add(FakeCore.rotation(KeyManager.keyAt(seed, 1).publicKeyEncoded, attacker));
+    core.posted.clear();
+    await expectLater(keri.signPayload(name: 'Eaid', data: [1]), throwsA(isA<AnEventThisDeviceDidNotAskFor>()));
+    expect(core.posted, isNot(contains('/api/cesr/encode')));
+  });
+
+  test('an interaction the core added on its own is never signed', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    core.add({'t': 'ixn', 'a': [{'d': 'Esomething the core wants anchored'}]});
+    core.posted.clear();
+    await expectLater(keri.signPayload(name: 'Eaid', data: [1]), throwsA(isA<AnEventThisDeviceDidNotAskFor>()));
+    expect(core.posted, isNot(contains('/api/cesr/encode')));
+  });
+
+  test('a rotation that commits to any key but the next one is not signed', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    core.foreignNext = KeyManager.keyAt(Bip39.mnemonicToSeed(Bip39.generateMnemonic()), 0).publicKeyEncoded;
+    core.posted.clear();
+    await expectLater(keri.rotateAid(name: 'Eaid'), throwsA(predicate((e) => '$e'.contains('not to the next key'))));
+    expect(core.posted, isNot(contains('/api/cesr/encode')));
+    // Nor is it signed later, though this device did ask for a rotation.
+    await expectLater(keri.signPayload(name: 'Eaid', data: [1]), throwsException);
+    expect(core.posted, isNot(contains('/api/cesr/encode')));
+  });
+
+  test('an interaction left unsigned before a rotation is signed with the key in force at it', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    core.refuseSignatures = true;
+    await expectLater(keri.interactAid(name: 'Eaid'), throwsException);
+    core.refuseSignatures = false;
+    final ixn = core.kel.length - 1;
+    // A rotation added and signed since, by this device on another occasion.
+    final seed = Bip39.mnemonicToSeed(words);
+    core.add({...FakeCore.rotation(KeyManager.keyAt(seed, 1).publicKeyEncoded, KeyManager.keyAt(seed, 2).publicKeyEncoded), 'sig': 'x'});
+    await keri.signPayload(name: 'Eaid', data: [1]);
+    expect(core.kel[ixn]['sig'], isNotNull);
+    expect(verifiesUnder(KeyManager.keyAt(seed, 0).publicKeyEncoded, core.raw(ixn),
+        base64Decode(core.kel[ixn]['sig'] as String)), isTrue,
+        reason: 'the interaction came before the rotation, so the founding key signs it, not the key in force now');
   });
 }

@@ -7,6 +7,7 @@ import '../crypto/keys.dart';
 import 'keri_service.dart';
 import 'secure_key_store.dart';
 import 'signing_an_event.dart';
+import 'the_events_this_device_asked_for.dart';
 import 'the_key_in_force.dart';
 import 'the_key_is_not_held_by_the_core.dart';
 import 'the_agent_this_app_talks_to.dart';
@@ -38,7 +39,20 @@ class LocalCoreKeriService extends KeriService {
   /// identity rather than at whichever core happens to be on this machine.
   String get baseUrl => _baseUrl;
 
-  late final TheKeyInForce _keys = TheKeyInForce(_client, _baseUrl);
+  late final TheKeyInForce _keys = TheKeyInForce(_client, _baseUrl, asked: _asked);
+  final _asked = TheEventsThisDeviceAskedFor();
+
+  /// The event the core says it added, read from the bytes it returned for
+  /// signing, which are what is signed.
+  static Map<String, dynamic> _eventIn(String rawBytesB64) {
+    try {
+      final e = jsonDecode(utf8.decode(base64Decode(rawBytesB64)));
+      if (e is Map<String, dynamic>) return e;
+    } catch (_) {}
+    throw Exception('the core returned no readable event to sign');
+  }
+
+  static bool _same(Object? a, Object? b) => jsonEncode(a) == jsonEncode(b);
 
   @override
   AgentEnvironment get environment => AgentEnvironment.desktop;
@@ -51,6 +65,11 @@ class LocalCoreKeriService extends KeriService {
     final mnemonic = code.split(' ');
     final keys = KeyManager.generateKeysFromMnemonic(mnemonic);
 
+    // Written down before it is asked for, so a founding left unsigned is one
+    // this device can recognise as its own and finish.
+    final asking = await _asked.asking(
+        t: 'icp', asked: {'key': keys.signing.publicKeyEncoded, 'next': keys.next.publicKeyEncoded});
+
     // Step 1: Create the inception event on the Python driver via Go backend.
     final response = await _client.post(
       Uri.parse('$_baseUrl/api/inception'),
@@ -62,12 +81,20 @@ class LocalCoreKeriService extends KeriService {
     );
 
     if (response.statusCode != 201 && response.statusCode != 200) {
+      await _asked.forget(asking);
       final body = jsonDecode(response.body);
       throw Exception(body['error'] ?? 'Inception failed: ${response.statusCode}');
     }
 
     final json = jsonDecode(response.body);
     final rawBytesB64 = json['raw_bytes_b64'] as String? ?? '';
+    final founding = _eventIn(rawBytesB64);
+    if (founding['t'] != 'icp' || !_same(founding['k'], [keys.signing.publicKeyEncoded])) {
+      throw Exception('the core returned an event that is not the founding this device asked for, '
+          'so it is not signed');
+    }
+    await _asked.added(asking,
+        aid: json['aid'] as String? ?? '', sequenceNumber: 0, digest: '${founding['d']}');
 
     // Step 2: Sign the inception event bytes locally with the Ed25519 key,
     // have the core CESR-encode the signature, and record it against the
@@ -96,6 +123,7 @@ class LocalCoreKeriService extends KeriService {
         rawBytesB64: rawBytesB64,
         signingSeed: KeyManager.signingSeed(Bip39.mnemonicToSeed(mnemonic)),
         what: 'the founding of this identity');
+    await _asked.forget(asking);
 
     return InceptionResult(
       aid: json['aid'] ?? '',
@@ -140,11 +168,14 @@ class LocalCoreKeriService extends KeriService {
     }
     // An earlier event left unsigned is finished first, so this rotation does
     // not build on one nobody can verify.
-    await _keys.finishStrandedEvents(seed);
-    final current = await _keys.index(seed);
+    final state = await _keys.finishStrandedEvents(seed);
+    final current = state.index;
     final rot1Seed = KeyManager.signingSeed(seed, index: current + 1);
     final rot1Keys = KeyManager.keyAt(seed, current + 1);
     final rot2Keys = KeyManager.keyAt(seed, current + 2);
+
+    final asking = await _asked.asking(
+        t: 'rot', aid: aid, asked: {'key': rot1Keys.publicKeyEncoded, 'next': rot2Keys.publicKeyEncoded});
 
     // Step 1: Ask the Python driver to create the rotation event.
     final response = await _client.post(
@@ -158,11 +189,26 @@ class LocalCoreKeriService extends KeriService {
     );
 
     if (response.statusCode != 200) {
+      await _asked.forget(asking);
       refusedByTheCore(response, 'Rotation failed');
     }
 
     final json = jsonDecode(response.body);
     final rawBytesB64 = json['raw_bytes_b64'] as String? ?? '';
+
+    // What is signed is the bytes the core returned, so they are checked to be
+    // the rotation asked for: this identity's, revealing the key asked for,
+    // committing to exactly the next one and changing no witness. A rotation
+    // committing to any other key would hand whoever holds it the identity.
+    final rotation = _eventIn(rawBytesB64);
+    if (rotation['t'] != 'rot' || rotation['i'] != aid || !_same(rotation['k'], [rot1Keys.publicKeyEncoded])) {
+      throw Exception('the core returned an event that is not the rotation this device asked for, '
+          'so it is not signed');
+    }
+    TheKeyInForce.requireTheEstablishmentIsThisDevices(rotation, seed, current + 1,
+        priorBt: state.establishment['bt']);
+    await _asked.added(asking,
+        aid: aid, sequenceNumber: int.parse('${rotation['s']}', radix: 16), digest: '${rotation['d']}');
 
     // Step 2: Sign with the key being rotated to and record the signature
     // against the event, as founding does. The core does not sign a rotation
@@ -175,6 +221,7 @@ class LocalCoreKeriService extends KeriService {
         rawBytesB64: rawBytesB64,
         signingSeed: rot1Seed,
         what: 'this rotation');
+    await _asked.forget(asking);
 
     return RotationResult(
       aid: json['aid'] ?? '',
@@ -196,8 +243,9 @@ class LocalCoreKeriService extends KeriService {
     // The key is worked out before the event exists, so a key log this phrase
     // cannot sign for is refused before anything is added to it.
     final seed = Bip39.mnemonicToSeed(mnemonic);
-    await _keys.finishStrandedEvents(seed);
-    final signingSeed = KeyManager.signingSeed(seed, index: await _keys.index(seed));
+    final state = await _keys.finishStrandedEvents(seed);
+    final signingSeed = KeyManager.signingSeed(seed, index: state.index);
+    final asking = await _asked.asking(t: 'ixn', aid: state.aid, asked: {'anchors': sealData});
 
     // Step 1: Create the IXN event via the Python driver.
     final response = await _client.post(
@@ -207,11 +255,19 @@ class LocalCoreKeriService extends KeriService {
     );
 
     if (response.statusCode != 201 && response.statusCode != 200) {
+      await _asked.forget(asking);
       refusedByTheCore(response, 'IXN failed');
     }
 
     final json = jsonDecode(response.body);
     final rawBytesB64 = json['raw_bytes_b64'] as String? ?? '';
+    final interaction = _eventIn(rawBytesB64);
+    if (interaction['t'] != 'ixn' || interaction['i'] != state.aid || !_same(interaction['a'], sealData)) {
+      throw Exception('the core returned an event that is not the interaction this device asked for, '
+          'so it is not signed');
+    }
+    await _asked.added(asking,
+        aid: state.aid, sequenceNumber: int.parse('${interaction['s']}', radix: 16), digest: '${interaction['d']}');
 
     // Step 2: Sign the IXN event with the key in force and record the
     // signature against it.
@@ -221,6 +277,7 @@ class LocalCoreKeriService extends KeriService {
         rawBytesB64: rawBytesB64,
         signingSeed: signingSeed,
         what: 'this interaction');
+    await _asked.forget(asking);
 
     return InteractResult(
       aid: json['aid'] ?? '',
@@ -249,8 +306,7 @@ class LocalCoreKeriService extends KeriService {
     // log says is in force: after a rotation that is no longer the founding
     // key, and a signature by the founding key verifies against nothing a
     // counterparty would look up.
-    await _keys.finishStrandedEvents(seed);
-    final index = await _keys.index(seed);
+    final index = (await _keys.finishStrandedEvents(seed)).index;
     final signingKeyPair = KeyManager.keyAt(seed, index);
     final privateKey = ed.newKeyFromSeed(KeyManager.signingSeed(seed, index: index));
 
@@ -270,14 +326,14 @@ class LocalCoreKeriService extends KeriService {
   /// The private key in force (TheKeyInForce), with any event left unsigned
   /// finished first. Throws where this device holds no recovery phrase: an
   /// event the core builds would otherwise be added and never signed.
-  Future<ed.PrivateKey> _signerInForce() async {
+  Future<({ed.PrivateKey key, String aid})> _signerInForce() async {
     final mnemonic = await SecureKeyStore.loadMnemonic();
     if (mnemonic == null) {
       throw Exception('No identity keys found in secure storage.');
     }
     final seed = Bip39.mnemonicToSeed(mnemonic);
-    await _keys.finishStrandedEvents(seed);
-    return ed.newKeyFromSeed(KeyManager.signingSeed(seed, index: await _keys.index(seed)));
+    final state = await _keys.finishStrandedEvents(seed);
+    return (key: ed.newKeyFromSeed(KeyManager.signingSeed(seed, index: state.index)), aid: state.aid);
   }
 
   /// The key event log of the identity held under [name], as the core serves
@@ -321,6 +377,9 @@ class LocalCoreKeriService extends KeriService {
     // The key is worked out before the event exists, so a key log this phrase
     // cannot sign for is refused before anything is added to it.
     final signer = await _signerInForce();
+    // The anchor the core builds is written down as asked for before it is,
+    // so if it is ever left unsigned this device can recognise it as its own.
+    final asking = await _asked.asking(t: 'ixn', aid: signer.aid);
 
     // Step 1: Ask the Go backend to format the ACDC and create the IXN anchor.
     final response = await _client.post(
@@ -334,18 +393,30 @@ class LocalCoreKeriService extends KeriService {
     );
 
     if (response.statusCode != 201 && response.statusCode != 200) {
+      await _asked.forget(asking);
       refusedByTheCore(response, 'Credential issuance failed');
     }
 
     final json = jsonDecode(response.body);
     final ixnRawBytesB64 = json['ixn_raw_bytes_b64'] as String? ?? '';
+    if (ixnRawBytesB64.isNotEmpty) {
+      final anchor = _eventIn(ixnRawBytesB64);
+      if (anchor['t'] != 'ixn') {
+        throw Exception('the core returned an event that is not an interaction to anchor the credential, '
+            'so it is not signed');
+      }
+      await _asked.added(asking,
+          aid: '${anchor['i']}', sequenceNumber: int.parse('${anchor['s']}', radix: 16), digest: '${anchor['d']}');
+    } else {
+      await _asked.forget(asking);
+    }
 
     // Step 2: Sign the IXN event bytes locally with the key in force.
     // Private key never leaves this device (ADR-014).
     String cesrSig = '';
     if (ixnRawBytesB64.isNotEmpty) {
       final rawEventBytes = base64Decode(ixnRawBytesB64);
-      final rawSig = ed.sign(signer, Uint8List.fromList(rawEventBytes));
+      final rawSig = ed.sign(signer.key, Uint8List.fromList(rawEventBytes));
       cesrSig = await _cesrEncode(base64Encode(rawSig));
     }
 
@@ -395,7 +466,7 @@ class LocalCoreKeriService extends KeriService {
     String cesrSig = '';
     if (presSaidB64.isNotEmpty) {
       final saidBytes = base64Decode(presSaidB64);
-      final rawSig = ed.sign(signer, Uint8List.fromList(saidBytes));
+      final rawSig = ed.sign(signer.key, Uint8List.fromList(saidBytes));
       cesrSig = await _cesrEncode(base64Encode(rawSig));
     }
 

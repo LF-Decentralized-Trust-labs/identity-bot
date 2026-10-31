@@ -4,9 +4,11 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import '../crypto/keys.dart';
+import '../crypto/owner_signature.dart';
 import 'keri_service.dart';
 import 'owner_signing_client.dart';
 import 'signing_an_event.dart';
+import 'the_events_this_device_asked_for.dart';
 import 'the_key_is_not_held_by_the_core.dart';
 
 /// Which of an identity's keys is in force, read from its key log at the core
@@ -26,7 +28,8 @@ class TheKeyInForce {
   /// owner-signing transport asks this which key to sign with, so reading the
   /// key log through it would ask again, without end. Give it the transport's
   /// inner client.
-  TheKeyInForce(this._client, this._baseUrl) {
+  TheKeyInForce(this._client, this._baseUrl, {TheEventsThisDeviceAskedFor? asked})
+      : _asked = asked ?? TheEventsThisDeviceAskedFor() {
     if (_client is OwnerSigningClient) {
       throw ArgumentError.value(_client, 'client',
           'the key in force is read through a plain client; the owner-signing '
@@ -36,6 +39,38 @@ class TheKeyInForce {
 
   final http.Client _client;
   final String _baseUrl;
+  final TheEventsThisDeviceAskedFor _asked;
+
+  /// The digest a next-key commitment names for [keyQb64]: Blake3 over the
+  /// key's qb64 text, as a validator recomputes it.
+  static String commitmentTo(String keyQb64) => OwnerSignature.blake3QB64(utf8.encode(keyQb64));
+
+  /// Refuses an establishment event this device would sign unless it commits
+  /// to exactly the next key of this phrase, and, for a rotation, changes no
+  /// witness and keeps the threshold [priorBt] the identity had. [j] is the
+  /// event's place among the establishment events: it reveals key j and must
+  /// commit to key j + 1. A core choosing what an event commits to would
+  /// otherwise choose who can rotate the identity next.
+  static void requireTheEstablishmentIsThisDevices(
+      Map<String, dynamic> event, Uint8List seed, int j, {Object? priorBt}) {
+    String? why;
+    final next = commitmentTo(KeyManager.keyAt(seed, j + 1).publicKeyEncoded);
+    final n = event['n'];
+    if (n is! List || n.length != 1 || n.first != next) {
+      why = 'it commits to $n, not to the next key of this recovery phrase ($next)';
+    } else if (event['t'] == 'rot') {
+      bool empty(Object? v) => v == null || (v is List && v.isEmpty);
+      if (!empty(event['br']) || !empty(event['ba'])) {
+        why = 'it changes the witnesses, which this device did not ask for';
+      } else if (priorBt != null && event['bt'] != priorBt) {
+        why = 'it changes the witness threshold from $priorBt to ${event['bt']}, which this device did not ask for';
+      }
+    }
+    if (why != null) {
+      throw Exception('event ${event['s']} is not the ${event['t'] == 'rot' ? 'rotation' : 'founding'} '
+          'this device asked for, so it is not signed: $why');
+    }
+  }
 
   /// The identifier of the identity the core holds, which is the name its key
   /// log is kept under. The recovery phrase in secure storage is that
@@ -104,34 +139,63 @@ class TheKeyInForce {
   /// is [seed]. Throws rather than answering if the log names a key this phrase
   /// does not hold: a signature by any other key is one no counterparty can
   /// verify, and carrying on would only move the failure to them.
+  ///
+  /// It finishes nothing. The owner-signing transport calls this alone: a
+  /// request it signs adds no event to the log, so there is nothing for it to
+  /// finish, and finishing would mean signing and posting events from inside
+  /// a transport that is only meant to sign the request in hand.
   Future<int> index(Uint8List seed) async {
     final checked = await _checkedLog(seed);
     return checked.keyAt.last;
   }
 
-  /// Signs and records every event of the identity's log that the core says
-  /// is unsigned: a founding or rotation with the key it names, an interaction
+  /// Signs and records the events of the identity's log that the core says are
+  /// unsigned and that this device asked for, then returns the key in force.
+  /// A founding or rotation is signed with the key it names, an interaction
   /// with the key in force at it.
   ///
   /// An event is added first and signed second, so a device that lost its
   /// connection between the two leaves the log refused by everybody from that
   /// event on; this is the second step, done late. Call it before making a
-  /// signature. A core that does not say which events are signed is left as
-  /// it is.
+  /// signature, instead of [index]: it reads the log once for both.
   ///
-  /// The bytes signed are checked first to be the event the log lists at that
-  /// place: this identity's, with the same type, sequence number, digest and
-  /// keys. Bytes that are anything else are refused, not signed.
-  Future<void> finishStrandedEvents(Uint8List seed) async {
+  /// Nothing is signed unless all of these hold, because the core supplies
+  /// both the log and the bytes:
+  ///  - this device asked for the event (TheEventsThisDeviceAskedFor). Any
+  ///    other unsigned event is refused, never signed: a core appending one of
+  ///    its own and marking it unsigned would otherwise have it signed here;
+  ///  - the bytes are the event the log lists at that place: this identity's,
+  ///    with the same type, sequence number, digest and keys;
+  ///  - a founding or rotation commits to exactly the next key of this phrase,
+  ///    and a rotation changes no witness
+  ///    ([requireTheEstablishmentIsThisDevices]).
+  ///
+  /// A core that does not say which events are signed is left as it is.
+  Future<({String aid, int index, Map<String, dynamic> establishment})> finishStrandedEvents(
+      Uint8List seed) async {
     final checked = await _checkedLog(seed);
     final log = checked.log;
     final signed = log.signed;
-    if (signed == null) return;
+    Map<String, dynamic>? establishment;
+    Object? priorBt;
+    var j = -1;
     for (var at = 0; at < log.events.length; at++) {
-      if (signed[at]) continue;
       final event = log.events[at];
+      final establishing = _establishing.contains(event['t']);
+      final bt = priorBt;
+      if (establishing) {
+        j++;
+        establishment = event;
+        priorBt = event['bt'];
+      }
+      if (signed == null || signed[at]) continue;
+      final asked = await _asked.whichAskedFor(checked.aid, event, commitmentTo);
+      if (asked == null) {
+        throw AnEventThisDeviceDidNotAskFor(checked.aid, '${event['s']}', '${event['t']}');
+      }
       final raw = at < log.rawEventsB64.length ? log.rawEventsB64[at] : '';
       _requireTheBytesAreTheEvent(checked.aid, event, raw);
+      if (establishing) requireTheEstablishmentIsThisDevices(event, seed, j, priorBt: bt);
       try {
         await signAndRecordEvent(_client, _baseUrl,
             aid: checked.aid,
@@ -145,7 +209,15 @@ class TheKeyInForce {
         }
         rethrow;
       }
+      await _asked.forget(asked);
     }
+    if (signed != null) {
+      await _asked.forgetSigned(checked.aid, [
+        for (var at = 0; at < log.events.length; at++)
+          if (signed[at]) log.events[at],
+      ]);
+    }
+    return (aid: checked.aid, index: checked.keyAt.last, establishment: establishment!);
   }
 
   static void _requireTheBytesAreTheEvent(String aid, Map<String, dynamic> event, String rawB64) {
@@ -166,6 +238,24 @@ class TheKeyInForce {
           'event, so they are not signed');
     }
   }
+}
+
+/// An event of the identity's log is unsigned and this device never asked for
+/// it. It is not signed: the core supplies the log, so an event it appended on
+/// its own and marked unsigned would otherwise be signed by this device, and a
+/// rotation committing to somebody else's key would hand them the identity.
+/// Nothing more is signed until the event is explained.
+class AnEventThisDeviceDidNotAskFor implements Exception {
+  AnEventThisDeviceDidNotAskFor(this.aid, this.sequenceNumber, this.type);
+
+  final String aid;
+  final String sequenceNumber;
+  final String type;
+
+  @override
+  String toString() => 'event $sequenceNumber ($type) of $aid is unsigned, and this device did not ask '
+      'for it, so it will not sign it. Something other than this device added it to the '
+      "identity's key log; until it is explained, nothing more is signed.";
 }
 
 /// An event of the identity's log is unsigned, and the core would not record
