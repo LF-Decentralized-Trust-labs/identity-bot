@@ -34,12 +34,19 @@ examples in `identity-agent-core/modelcall/model-call-vectors.json`.
 A run starts by borrowing its AI agent's sign-in. A body that makes its
 brain's model calls through the Identity Agent says so:
 `{"model_calls": "through_identity_agent"}`. The answer carries the run's
-`lease_id`, `renew_every_seconds` and the same `model_calls`, and no key. The
-body keeps the lease with `POST /api/agent-host/brain-sign-in/renew` and gives
-it back with `POST /api/agent-host/brain-sign-in/return`, each sending
-`{"lease_id": "…"}`. A body that does not say it makes its calls through the
-Identity Agent is refused 409 with `"update_agent_host": true`, and is never
-lent the key.
+`lease_id`, `lease_expires_at`, `renew_every_seconds` and the same
+`model_calls`, and no key. The body keeps the lease with
+`POST /api/agent-host/brain-sign-in/renew` and gives it back with
+`POST /api/agent-host/brain-sign-in/return`, each sending
+`{"lease_id": "…"}`. A renewal keeps the same `lease_id` and answers with a new
+`lease_expires_at`. A lease not renewed by its `lease_expires_at` lapses: from
+then on, a renewal or return naming it is answered 404 with `"no_lease": true`,
+and a model call naming it is refused 403. A call already under way goes on
+while the same machine holds another open lease on the sign-in, and is
+otherwise stopped, its answer ending with an error. A body whose lease lapsed
+borrows again and names the new lease in its next collection. A body that does
+not say it makes its calls through the Identity Agent is refused 409 with
+`"update_agent_host": true`, and is never lent the key.
 
 ### Starting a call: `POST /api/agent-host/model-calls`
 
@@ -47,8 +54,8 @@ lent the key.
 {
   "lease_id": "the run's lease on the AI agent's sign-in",
   "method":   "POST",
-  "path":     "/v1/messages",
-  "query":    "beta=true",
+  "path":     "/v1/generate",
+  "query":    "preview=true",
   "header":   {"Content-Type": "application/json"},
   "body_b64": "the brain's request body, base64"
 }
@@ -63,7 +70,9 @@ The schema states each rule exactly. In short:
   model calls, its list of models, one model by name below that list, and its
   own read-only and counting routes, such as counting a request's tokens or
   reading the key's own details. The checks read that profile. Nothing outside
-  it is made.
+  it is made. A profile that is not valid (a lower-case route method, a name
+  listed twice ignoring ASCII case, or a query parameter with other than one
+  rule) allows no call.
 - **The method** is GET or POST, in any ASCII case, whatever the profile lists.
 - **The path** must be plain: at most 256 bytes, starting with `/`, holding
   only ASCII letters, digits and `. - _ : / ~`, and unchanged by cleaning.
@@ -71,16 +80,26 @@ The schema states each rule exactly. In short:
   any route. A paging value may be empty. The query is sent on re-encoded,
   sorted by name.
 - **Headers** are the profile's, matched in any ASCII case. Any other header is
-  dropped, not refused. Where one is given more than once in different cases,
+  dropped, not refused. Whatever a profile lists, credentials and
+  per-connection headers never travel on (`Authorization`,
+  `Proxy-Authorization`, `Cookie`, `X-Api-Key`, `Api-Key`, `Host`,
+  `Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`,
+  `Proxy-Connection`, `TE`, `Trailer`, `Upgrade`, `Expect`), and those and
+  `Set-Cookie` and `Set-Cookie2` never travel back. Where one is given more than once in different cases,
   the first by byte order among those with a value is sent. Nothing that proves
   who the brain is travels on.
 - **The body** is at most 3 MB, in standard base64 with padding and no line
-  breaks.
+  breaks. The start itself is at most 6 MB, nests at most 1,000 deep, and
+  escapes no lone surrogate.
 - **A chosen model.** Where a model is chosen for the AI agent, a POST must be
   one UTF-8 JSON object, nested at most 1,000 deep, that names its model once
   as `model` and names exactly that model. A list of models to fall back on
   (`models`) is refused. Where no model is chosen, the body is not read for
   its model.
+- **Where these read the body.** A chosen model and an allowance read only the
+  body's own top-level fields: the model in `model`, the answer length and
+  count in the profile's fields. A provider whose calls name these elsewhere
+  cannot use either yet.
 - **An allowance** is a limit on what the AI agent's model calls may cost.
   Under one, every POST that is not on a counting route is a model call. It
   must say how long an answer it wants, by the profile's answer-length fields:
@@ -122,7 +141,7 @@ Both the start and every collection answer with:
 ```
 
 `status` and `header` are the provider's. Only the profile's answer headers
-travel back. `next` is the offset to collect from next. When `done` is true,
+travel back, never the ones above. `next` is the offset to collect from next. When `done` is true,
 the answer is complete, or `error` says why it ended. A provider that cannot be
 reached is not a refusal: its answer ends, done, with an error saying so. An
 answer that would carry the key back is stopped before any of it is passed on.
