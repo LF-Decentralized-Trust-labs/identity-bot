@@ -5,9 +5,9 @@ import 'package:http/http.dart' as http;
 import 'package:agent_client/services/the_key_is_not_held_by_the_core.dart';
 
 import 'package:crypto/crypto.dart';
-import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 
 import 'owner_signing_client.dart';
+import 'signing_an_event.dart';
 import 'browser_session_client.dart';
 import 'the_agent_this_app_talks_to.dart';
 import '../config/agent_config.dart';
@@ -918,7 +918,12 @@ class CoreService {
       throw Exception('this identity\'s founding event was stored without the '
           'bytes it was made from, so no signature over it can be checked');
     }
-    await _signTheseBytes(aid, rawBytesB64, signingSeed);
+    await signAndRecordEvent(_client, baseUrl,
+        aid: aid,
+        sequenceNumber: 0,
+        rawBytesB64: rawBytesB64,
+        signingSeed: signingSeed,
+        what: 'the founding of this identity');
   }
 
   /// Whether an event is the founding one, in either shape.
@@ -948,48 +953,12 @@ class CoreService {
           'its founding event is, so nothing can sign it and nobody would be '
           'able to verify it');
     }
-    await _signTheseBytes(inception.aid, inception.rawBytesB64, signingSeed);
-  }
-
-  Future<void> _signTheseBytes(
-      String aid, String rawBytesB64, Uint8List signingSeed) async {
-    final raw = base64Decode(rawBytesB64);
-    final signature = ed.sign(ed.newKeyFromSeed(signingSeed), raw);
-
-
-    // CESR-encoded by the agent rather than here, because the encoding is part
-    // of the protocol and there is one implementation of it.
-    final encoded = await _client.post(
-      Uri.parse('$baseUrl/api/cesr/encode'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'raw_sig_b64': base64Encode(signature)}),
-    );
-    if (encoded.statusCode != 200) {
-      throw Exception('this identity was created and its signature could not be '
-          'encoded (${encoded.statusCode}): ${encoded.body}');
-    }
-    final cesr =
-        (jsonDecode(encoded.body)['cesr_sig'] ?? '').toString();
-    if (cesr.isEmpty) {
-      throw Exception('this identity was created and no signature came back to '
-          'record');
-    }
-
-    final attached = await _client.post(
-      Uri.parse('$baseUrl/api/events/signature'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'aid': aid,
-        // The founding event. This route takes any of them, which is what
-        // rotations and interactions need too.
-        'sequence_number': 0,
-        'cesr_signature': cesr,
-      }),
-    );
-    if (attached.statusCode != 200) {
-      throw Exception('this identity was created and its signature was refused '
-          '(${attached.statusCode}): ${attached.body}');
-    }
+    await signAndRecordEvent(_client, baseUrl,
+        aid: inception.aid,
+        sequenceNumber: 0,
+        rawBytesB64: inception.rawBytesB64,
+        signingSeed: signingSeed,
+        what: 'the founding of this identity');
   }
 
   Future<OobiResponse> getOobi({String? action}) async {

@@ -6,6 +6,7 @@ import '../crypto/bip39.dart';
 import '../crypto/keys.dart';
 import 'keri_service.dart';
 import 'secure_key_store.dart';
+import 'signing_an_event.dart';
 import 'the_key_is_not_held_by_the_core.dart';
 import 'the_agent_this_app_talks_to.dart';
 
@@ -65,39 +66,33 @@ class LocalCoreKeriService extends KeriService {
     final json = jsonDecode(response.body);
     final rawBytesB64 = json['raw_bytes_b64'] as String? ?? '';
 
-    // Step 2: Sign the inception event bytes locally with the Ed25519 key.
-    // Private key never leaves this device (ADR-014).
-    String cesrSignature = '';
-    if (rawBytesB64.isNotEmpty) {
-      final seed = Bip39.mnemonicToSeed(mnemonic);
-      final privateKey = ed.newKeyFromSeed(KeyManager.signingSeed(seed));
-
-      final rawEventBytes = base64Decode(rawBytesB64);
-      final rawSig = ed.sign(privateKey, Uint8List.fromList(rawEventBytes));
-
-      // Step 3: CESR-encode the raw signature via the stateless /cesr/encode endpoint.
-      cesrSignature = await _cesrEncode(base64Encode(rawSig));
-
-      // STEP 4, WHICH EVERY CALLER HAD TO REMEMBER.
-      //
-      // The route that records this has existed since August and is correct.
-      // What was missing is that nothing here called it: each screen was
-      // expected to, and the applications people actually ran did not — so
-      // every identity they founded published a key history in which nothing
-      // had been authorised by anybody. A counterparty
-      // checking properly refuses such a log, so the identity works alone and
-      // can convince nobody, and nothing said so at any point.
-      //
-      // It belongs here rather than in a screen for exactly that reason: this
-      // is the one place that knows the signature was made, and a step every
-      // caller must remember is a step somebody will not.
-      //
-      // It cannot be sent with the inception itself — the signature is over
-      // bytes the engine has not produced when that call is made — so founding
-      // is two steps, and this is the second.
-      await _attachSignature(json['aid'] as String? ?? '', 0, cesrSignature,
-          what: 'the founding of this identity');
-    }
+    // Step 2: Sign the inception event bytes locally with the Ed25519 key,
+    // have the core CESR-encode the signature, and record it against the
+    // event. Private key never leaves this device (ADR-014).
+    //
+    // RECORDING IT IS THE STEP EVERY CALLER ONCE HAD TO REMEMBER.
+    //
+    // The route that records this has existed since August and is correct.
+    // What was missing is that nothing here called it: each screen was
+    // expected to, and the applications people actually ran did not — so
+    // every identity they founded published a key history in which nothing
+    // had been authorised by anybody. A counterparty
+    // checking properly refuses such a log, so the identity works alone and
+    // can convince nobody, and nothing said so at any point.
+    //
+    // It belongs here rather than in a screen for exactly that reason: this
+    // is the one place that knows the signature was made, and a step every
+    // caller must remember is a step somebody will not.
+    //
+    // It cannot be sent with the inception itself — the signature is over
+    // bytes the engine has not produced when that call is made — so founding
+    // is two steps, and this is the second.
+    final cesrSignature = await signAndRecordEvent(_client, _baseUrl,
+        aid: json['aid'] as String? ?? '',
+        sequenceNumber: 0,
+        rawBytesB64: rawBytesB64,
+        signingSeed: KeyManager.signingSeed(Bip39.mnemonicToSeed(mnemonic)),
+        what: 'the founding of this identity');
 
     return InceptionResult(
       aid: json['aid'] ?? '',
@@ -109,51 +104,15 @@ class LocalCoreKeriService extends KeriService {
     );
   }
 
-  /// Hands back the signature over an event of the identity's log — its
-  /// founding, a rotation, an interaction — which completes it.
-  ///
-  /// Throws on failure rather than carrying on. An event nobody signed is
-  /// refused by every counterparty that checks — so finishing quietly would
-  /// hand somebody an identity that looks fine and cannot be used with
-  /// anybody, and the failure would surface weeks later as a stranger refusing
-  /// them for no reason they can see.
-  ///
-  /// Recording the same signature twice is harmless: the core checks it
-  /// against the event again and stores it again. So a caller that still
-  /// attaches the signature it is handed back does no damage.
-  Future<void> _attachSignature(String aid, Object? sequenceNumber, String cesrSignature,
-      {required String what}) async {
-    if (aid.isEmpty || cesrSignature.isEmpty || sequenceNumber is! int) {
-      throw Exception('$what could not be signed, so nobody would be able to verify it');
-    }
-    final res = await _client.post(
-      Uri.parse('$_baseUrl/api/events/signature'),
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'aid': aid,
-        'sequence_number': sequenceNumber,
-        'cesr_signature': cesrSignature,
-      }),
-    );
-    if (res.statusCode != 200) {
-      throw Exception('the signature over $what was refused '
-          '(${res.statusCode}): ${res.body}');
-    }
-  }
-
-  /// Calls POST /api/cesr/encode to wrap a raw base64 signature in CESR '0B...' format.
+  /// The CESR form of a raw base64 signature that is handed back rather than
+  /// recorded (a payload, a credential anchor, a presentation), or an empty
+  /// string where the core could not encode it.
   Future<String> _cesrEncode(String rawSigB64) async {
-    final response = await _client.post(
-      Uri.parse('$_baseUrl/api/cesr/encode'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'raw_sig_b64': rawSigB64}),
-    );
-    if (response.statusCode == 200) {
-      final json = jsonDecode(response.body);
-      return json['cesr_sig'] as String? ?? '';
+    try {
+      return await cesrEncodeSignature(_client, _baseUrl, base64Decode(rawSigB64));
+    } catch (_) {
+      return '';
     }
-    // Non-fatal: return empty string; caller can proceed without CESR sig for now.
-    return '';
   }
 
   @override
@@ -193,20 +152,17 @@ class LocalCoreKeriService extends KeriService {
     final json = jsonDecode(response.body);
     final rawBytesB64 = json['raw_bytes_b64'] as String? ?? '';
 
-    // Step 2: Sign with the key being rotated to and CESR-encode.
-    String cesrSig = '';
-    if (rawBytesB64.isNotEmpty) {
-      final rot1PrivKey = ed.newKeyFromSeed(rot1Seed);
-      final rawEventBytes = base64Decode(rawBytesB64);
-      final rawSig = ed.sign(rot1PrivKey, Uint8List.fromList(rawEventBytes));
-      cesrSig = await _cesrEncode(base64Encode(rawSig));
-      // Step 3: record it against the event, as founding does. The core does
-      // not sign a rotation itself, so a rotation whose signature is only
-      // handed back stays unsigned in the log and every counterparty that
-      // checks refuses the identity from then on.
-      await _attachSignature(json['aid'] as String? ?? '', json['sequence_number'], cesrSig,
-          what: 'this rotation');
-    }
+    // Step 2: Sign with the key being rotated to and record the signature
+    // against the event, as founding does. The core does not sign a rotation
+    // itself, so a rotation whose signature is only handed back stays
+    // unsigned in the log and every counterparty that checks refuses the
+    // identity from then on.
+    final cesrSig = await signAndRecordEvent(_client, _baseUrl,
+        aid: json['aid'] as String? ?? '',
+        sequenceNumber: json['sequence_number'],
+        rawBytesB64: rawBytesB64,
+        signingSeed: rot1Seed,
+        what: 'this rotation');
 
     return RotationResult(
       aid: json['aid'] ?? '',
@@ -240,17 +196,15 @@ class LocalCoreKeriService extends KeriService {
     final json = jsonDecode(response.body);
     final rawBytesB64 = json['raw_bytes_b64'] as String? ?? '';
 
-    // Step 2: Sign IXN event body with the key in force and CESR-encode.
-    String cesrSig = '';
-    if (rawBytesB64.isNotEmpty) {
-      final seed = Bip39.mnemonicToSeed(mnemonic);
-      final privateKey = await _signingKeyInForce(seed);
-      final rawEventBytes = base64Decode(rawBytesB64);
-      final rawSig = ed.sign(privateKey, Uint8List.fromList(rawEventBytes));
-      cesrSig = await _cesrEncode(base64Encode(rawSig));
-      await _attachSignature(json['aid'] as String? ?? '', json['sequence_number'], cesrSig,
-          what: 'this interaction');
-    }
+    // Step 2: Sign the IXN event with the key in force and record the
+    // signature against it.
+    final seed = Bip39.mnemonicToSeed(mnemonic);
+    final cesrSig = await signAndRecordEvent(_client, _baseUrl,
+        aid: json['aid'] as String? ?? '',
+        sequenceNumber: json['sequence_number'],
+        rawBytesB64: rawBytesB64,
+        signingSeed: KeyManager.signingSeed(seed, index: await _keyInForce(seed)),
+        what: 'this interaction');
 
     return InteractResult(
       aid: json['aid'] ?? '',
