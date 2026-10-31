@@ -2113,8 +2113,12 @@ type kelWithSignatures struct {
 	Signed []bool `json:"signed,omitempty"`
 }
 
-// whichEventsAreSigned is, for each event of kel, whether its stored record
-// carries a signature; nil where none of its events are stored here.
+// whichEventsAreSigned is, for each event of kel, whether it is signed as far
+// as this Identity Agent knows: false only for an event it stores without a
+// signature. An event it does not store is not reported unsigned, because a
+// device that tried to sign it would be refused (there is nothing here to
+// attach the signature to) and would stop signing anything. Nil where none of
+// the log's events are stored here.
 func (s *CoreServer) whichEventsAreSigned(kel *drivers.DriverKelResponse) []bool {
 	if s.DataStore == nil || kel == nil || kel.AID == "" {
 		return nil
@@ -2129,8 +2133,11 @@ func (s *CoreServer) whichEventsAreSigned(kel *drivers.DriverKelResponse) []bool
 	}
 	out := make([]bool, len(kel.KEL))
 	for i, ev := range kel.KEL {
+		out[i] = true
 		if sn, err := witnessproto.SequenceNumber(ev); err == nil {
-			out[i] = signedAt[sn]
+			if signed, stored := signedAt[sn]; stored {
+				out[i] = signed
+			}
 		}
 	}
 	return out

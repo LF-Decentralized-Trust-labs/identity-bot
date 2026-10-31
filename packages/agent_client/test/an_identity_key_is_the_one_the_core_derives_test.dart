@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:agent_client/crypto/bip39.dart';
 import 'package:agent_client/crypto/keys.dart';
+import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:test/test.dart';
 
 String hexOf(List<int> b) => b.map((x) => x.toRadixString(16).padLeft(2, '0')).join();
@@ -27,6 +28,7 @@ void main() {
     final p = vectors['slip10_published'] as Map<String, dynamic>;
     final key = KeyManager.slip10Ed25519(bytesOf(p['seed_hex'] as String), pathOf(p['path'] as String));
     expect(hexOf(key), p['private_key_hex']);
+    expect(hexOf(ed.public(ed.newKeyFromSeed(key)).bytes), p['public_key_hex']);
   });
 
   test('every key of every phrase is the key the core derives', () {

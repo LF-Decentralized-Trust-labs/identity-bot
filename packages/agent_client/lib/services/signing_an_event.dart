@@ -78,8 +78,20 @@ Future<String> signAndRecordEvent(
     }),
   );
   if (res.statusCode != 200) {
-    throw Exception('the signature over $what was refused '
-        '(${res.statusCode}): ${res.body}');
+    throw EventSignatureRefused(what, res.statusCode, res.body);
   }
   return cesr;
+}
+
+/// The core refused to record a signature over an event.
+class EventSignatureRefused implements Exception {
+  EventSignatureRefused(this.what, this.statusCode, this.body);
+
+  /// The event, as named to [signAndRecordEvent].
+  final String what;
+  final int statusCode;
+  final String body;
+
+  @override
+  String toString() => 'the signature over $what was refused ($statusCode): $body';
 }

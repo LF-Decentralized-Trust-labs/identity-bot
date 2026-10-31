@@ -35,19 +35,32 @@ List<int> rawOf(String qb64) => base64Url.decode('A${qb64.substring(1)}').sublis
 // that accepts an event the app signs.
 class FakeCore {
   final kel = <Map<String, dynamic>>[];
+  // The bytes each event was published as, beside it.
+  final raws = <List<int>>[];
   final sent = <String, Map<String, dynamic>>{};
   final posted = <String>[];
-  final List<int> eventBytes;
   bool refuseSignatures = false;
   bool keyNotHeldHere = false;
-  FakeCore(this.eventBytes);
+  // Serves the bytes of the event before it in place of an unsigned event's.
+  bool swapBytes = false;
+  // Answers 404 to a signature, as a core that does not hold the event does.
+  bool forgetsEvents = false;
 
-  // The key an event at [sn] is checked against: the one in force after it.
+  // The key an event at [sn] is checked against: the one in force at it.
   String keyFor(int sn) =>
       (kel.sublist(0, sn + 1).lastWhere((e) => e['t'] != 'ixn')['k'] as List).first as String;
 
   String? get currentKey =>
       (kel.lastWhere((e) => e['t'] != 'ixn')['k'] as List).first as String;
+
+  List<int> raw(int sn) => raws[sn];
+
+  void add(Map<String, dynamic> event) {
+    final sn = kel.length.toRadixString(16);
+    final e = {'v': 'KERI10JSON', 't': event['t'], 'd': 'Eevent$sn', 'i': 'Eaid', 's': sn, if (event['k'] != null) 'k': event['k']};
+    raws.add(utf8.encode(jsonEncode(e)));
+    kel.add({...e, if (event['sig'] != null) 'sig': event['sig']});
+  }
 
   http.Client client() => MockClient((req) async {
         if (req.method == 'GET') {
@@ -62,7 +75,10 @@ class FakeCore {
                   jsonEncode({
                     'aid': 'Eaid',
                     'kel': kel,
-                    'raw_events_b64': [for (final _ in kel) base64Encode(eventBytes)],
+                    'raw_events_b64': [
+                      for (var i = 0; i < kel.length; i++)
+                        base64Encode(swapBytes && kel[i]['sig'] == null && i > 0 ? raws[i - 1] : raws[i]),
+                    ],
                     'sequence_number': kel.length - 1,
                     'event_count': kel.length,
                     'signed': [for (final e in kel) e['sig'] != null],
@@ -79,23 +95,23 @@ class FakeCore {
               jsonEncode({'error': 'key_not_held_here', 'details': "This identity's key is not held by this Identity Agent."}),
               409);
         }
-        final sn = '${kel.length}';
         switch (req.url.path) {
           case '/api/inception':
-            kel.add({'t': 'icp', 's': sn, 'k': [body['public_key']]});
+            add({'t': 'icp', 'k': [body['public_key']]});
           case '/api/rotation':
-            kel.add({'t': 'rot', 's': sn, 'k': [body['new_public_key']]});
+            add({'t': 'rot', 'k': [body['new_public_key']]});
           case '/api/interact':
           case '/api/credential/issue':
-            kel.add({'t': 'ixn', 's': sn});
+            add({'t': 'ixn'});
           case '/api/cesr/encode':
             // Carries the raw signature through, so the core can check it.
             return http.Response(jsonEncode({'cesr_sig': body['raw_sig_b64']}), 200);
           case '/api/events/signature':
+            if (forgetsEvents) return http.Response(jsonEncode({'error': 'No such event'}), 404);
             final at = body['sequence_number'] as int;
             final sig = base64Decode(body['cesr_signature'] as String);
             if (refuseSignatures || at >= kel.length ||
-                !ed.verify(ed.PublicKey(rawOf(keyFor(at))), Uint8List.fromList(eventBytes), sig)) {
+                !ed.verify(ed.PublicKey(rawOf(keyFor(at))), Uint8List.fromList(raws[at]), sig)) {
               return http.Response(jsonEncode({'error': 'That signature does not cover this event'}), 400);
             }
             kel[at]['sig'] = body['cesr_signature'];
@@ -103,7 +119,7 @@ class FakeCore {
           default:
             return http.Response('{}', 200);
         }
-        final raw = base64Encode(eventBytes);
+        final raw = base64Encode(raws.last);
         return http.Response(
             jsonEncode({
               'aid': 'Eaid',
@@ -117,7 +133,6 @@ class FakeCore {
 
 void main() {
   final words = Bip39.generateMnemonic();
-  final rotationEvent = utf8.encode('{"t":"rot","s":"1"}');
 
   late FakeCore core;
   late Map<String, Map<String, dynamic>> sent;
@@ -134,7 +149,7 @@ void main() {
     FlutterSecureStorage.setMockInitialValues({});
     SharedPreferences.setMockInitialValues({});
     await SecureKeyStore.saveMnemonic(words);
-    core = FakeCore(rotationEvent);
+    core = FakeCore();
     sent = core.sent;
     keri = LocalCoreKeriService(baseUrl: 'http://core.test', client: core.client());
   });
@@ -151,7 +166,7 @@ void main() {
     // The signature handed back for the rotation verifies under the key it names.
     final sig = base64Decode(sent['/api/cesr/encode']!['raw_sig_b64'] as String);
     final named = ed.PublicKey(rawOf(rotation['new_public_key'] as String));
-    expect(ed.verify(named, Uint8List.fromList(rotationEvent), Uint8List.fromList(sig)), isTrue,
+    expect(ed.verify(named, Uint8List.fromList(core.raw(1)), Uint8List.fromList(sig)), isTrue,
         reason: 'the key the rotation names must be the key that signs it');
 
     // And the rotation commits to the key after it, derived the same way.
@@ -189,7 +204,7 @@ void main() {
     expect(inForce, KeyManager.keyAt(Bip39.mnemonicToSeed(words), 1).publicKeyEncoded);
 
     await keri.interactAid(name: 'Eaid');
-    expect(verifiesUnder(inForce, rotationEvent, lastSignature()), isTrue,
+    expect(verifiesUnder(inForce, core.raw(2), lastSignature()), isTrue,
         reason: 'an interaction after a rotation is signed by the key the log says is in force');
 
     final data = utf8.encode('after the rotation');
@@ -199,7 +214,7 @@ void main() {
     expect(verifiesUnder(inForce, data, base64Decode(result.signature)), isTrue);
 
     await keri.issueCredential(claims: {'role': 'engineer'}, schemaSaid: 'Eschema');
-    expect(verifiesUnder(inForce, rotationEvent, lastSignature()), isTrue,
+    expect(verifiesUnder(inForce, core.raw(3), lastSignature()), isTrue,
         reason: 'the event anchoring a credential is signed by the key in force');
   });
 
@@ -216,7 +231,7 @@ void main() {
         reason: 'the second rotation reveals the key the first committed to');
     expect(second['new_public_key'], KeyManager.keyAt(seed, 2).publicKeyEncoded);
     expect(second['new_next_public_key'], KeyManager.keyAt(seed, 3).publicKeyEncoded);
-    expect(verifiesUnder(second['new_public_key'] as String, rotationEvent, lastSignature()), isTrue,
+    expect(verifiesUnder(second['new_public_key'] as String, core.raw(2), lastSignature()), isTrue,
         reason: 'the key the second rotation names is the key that signs it');
   });
 
@@ -238,7 +253,7 @@ void main() {
 
   test('nothing is signed when the log names a key this phrase does not hold', () async {
     await keri.inceptAid(name: 'Eaid', code: words.join(' '));
-    core.kel.add({'t': 'rot', 's': '1', 'k': [KeyManager.keyAt(Bip39.mnemonicToSeed(Bip39.generateMnemonic()), 1).publicKeyEncoded]});
+    core.add({'t': 'rot', 'k': [KeyManager.keyAt(Bip39.mnemonicToSeed(Bip39.generateMnemonic()), 1).publicKeyEncoded]});
     await expectLater(keri.signPayload(name: 'Eaid', data: [1, 2, 3]), throwsException);
   });
 
@@ -251,7 +266,7 @@ void main() {
     for (final (sn, event) in core.kel.indexed) {
       expect(event['sig'], isNotNull, reason: 'event $sn (${event['t']}) was left unsigned in the log');
       expect(
-          verifiesUnder(core.keyFor(sn), rotationEvent, base64Decode(event['sig'] as String)), isTrue,
+          verifiesUnder(core.keyFor(sn), core.raw(sn), base64Decode(event['sig'] as String)), isTrue,
           reason: 'event $sn is signed by the key it is checked against');
     }
   });
@@ -269,7 +284,7 @@ void main() {
     final log = await keri.getCurrentKel(name: 'Eaid');
     expect(log.aid, 'Eaid');
     expect(log.events.map((e) => e['t']), ['icp', 'rot']);
-    expect(log.rawEventsB64, [base64Encode(rotationEvent), base64Encode(rotationEvent)]);
+    expect(log.rawEventsB64, [base64Encode(core.raw(0)), base64Encode(core.raw(1))]);
     expect(log.sequenceNumber, 1);
     expect(log.eventCount, 2);
     expect(log.establishmentEvents.last['k'], [core.currentKey]);
@@ -297,7 +312,7 @@ void main() {
     await keri.inceptAid(name: 'Eaid', code: words.join(' '));
     // A log naming a key this phrase does not hold.
     final stranger = KeyManager.keyAt(Bip39.mnemonicToSeed(Bip39.generateMnemonic()), 1);
-    core.kel.add({'t': 'rot', 's': '1', 'k': [stranger.publicKeyEncoded], 'sig': 'x'});
+    core.add({'t': 'rot', 'k': [stranger.publicKeyEncoded], 'sig': 'x'});
     core.posted.clear();
     await expectLater(keri.interactAid(name: 'Eaid'), throwsException);
     await expectLater(keri.issueCredential(claims: {'a': 'b'}, schemaSaid: 'E'), throwsException);
@@ -315,7 +330,7 @@ void main() {
     final data = utf8.encode('after the connection came back');
     final result = await keri.signPayload(name: 'Eaid', data: data);
     expect(core.kel.last['sig'], isNotNull, reason: 'the stranded rotation was finished');
-    expect(verifiesUnder(core.keyFor(1), rotationEvent, base64Decode(core.kel.last['sig'] as String)), isTrue);
+    expect(verifiesUnder(core.keyFor(1), core.raw(1), base64Decode(core.kel.last['sig'] as String)), isTrue);
     expect(result.publicKey, core.currentKey);
 
     // And the next rotation builds on it.
@@ -343,5 +358,60 @@ void main() {
     expect(() => KeyEventLog.fromJson({'aid': 'Eaid'}), throwsFormatException);
     expect(() => KeyEventLog.fromJson({'aid': 'Eaid', 'kel': 'x'}), throwsFormatException);
     expect(KeyEventLog.fromJson({'aid': 'Eaid', 'kel': []}).events, isEmpty);
+  });
+
+  test('an interaction left unsigned is signed with the key in force at it', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    await keri.rotateAid(name: 'Eaid');
+    core.refuseSignatures = true;
+    await expectLater(keri.interactAid(name: 'Eaid'), throwsException);
+    expect(core.kel.last['t'], 'ixn');
+    expect(core.kel.last['sig'], isNull, reason: 'the interaction is stranded');
+
+    core.refuseSignatures = false;
+    await keri.signPayload(name: 'Eaid', data: [1, 2, 3]);
+    final ixn = core.kel.length - 1;
+    expect(core.kel[ixn]['sig'], isNotNull, reason: 'the stranded interaction was finished');
+    expect(verifiesUnder(KeyManager.keyAt(Bip39.mnemonicToSeed(words), 1).publicKeyEncoded, core.raw(ixn),
+        base64Decode(core.kel[ixn]['sig'] as String)), isTrue,
+        reason: 'signed by the key in force at it: the rotated key, not the founding one');
+  });
+
+  test('bytes that are not the event are not signed', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    core.refuseSignatures = true;
+    await expectLater(keri.interactAid(name: 'Eaid'), throwsException);
+    core.refuseSignatures = false;
+    core.swapBytes = true;
+    core.posted.clear();
+    await expectLater(keri.signPayload(name: 'Eaid', data: [1]), throwsException);
+    expect(core.posted, isNot(contains('/api/cesr/encode')),
+        reason: 'bytes the core named for one event and that are another are never signed');
+  });
+
+  test('a stranded event the core will not take a signature for stops signing, and says why', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    core.refuseSignatures = true;
+    await expectLater(keri.interactAid(name: 'Eaid'), throwsException);
+    core.refuseSignatures = false;
+    core.forgetsEvents = true;
+    await expectLater(keri.signPayload(name: 'Eaid', data: [1]), throwsA(isA<StrandedEventCannotBeFinished>()));
+  });
+
+  test('the key in force is read through a plain client, never the owner-signing one', () {
+    final signing = OwnerSigningClient(agentOrigin: 'http://core.test', ownerSeed: () async => null);
+    expect(() => TheKeyInForce(signing, 'http://core.test'), throwsArgumentError);
+    signing.close();
+  });
+
+  test('a credential is not asked for where there is no phrase to sign it with', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    await SecureKeyStore.clearMnemonic();
+    core.posted.clear();
+    await expectLater(keri.issueCredential(claims: {'a': 'b'}, schemaSaid: 'E'),
+        throwsA(predicate((e) => '$e'.contains('No identity keys found in secure storage.'))));
+    await expectLater(keri.presentCredential(acdcSaid: 'Ex', holderAid: 'Eaid'),
+        throwsA(predicate((e) => '$e'.contains('No identity keys found in secure storage.'))));
+    expect(core.posted, isEmpty, reason: 'nothing is asked of the core that could not then be signed');
   });
 }

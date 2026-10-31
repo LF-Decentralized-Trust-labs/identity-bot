@@ -138,8 +138,9 @@ class LocalCoreKeriService extends KeriService {
       throw ArgumentError.value(name, 'name',
           'the identity held here is $aid, and only it can be rotated with this phrase');
     }
-    // Reading the key in force also finishes an earlier establishment event
-    // left unsigned, so this rotation does not build on one nobody can verify.
+    // An earlier event left unsigned is finished first, so this rotation does
+    // not build on one nobody can verify.
+    await _keys.finishStrandedEvents(seed);
     final current = await _keys.index(seed);
     final rot1Seed = KeyManager.signingSeed(seed, index: current + 1);
     final rot1Keys = KeyManager.keyAt(seed, current + 1);
@@ -195,6 +196,7 @@ class LocalCoreKeriService extends KeriService {
     // The key is worked out before the event exists, so a key log this phrase
     // cannot sign for is refused before anything is added to it.
     final seed = Bip39.mnemonicToSeed(mnemonic);
+    await _keys.finishStrandedEvents(seed);
     final signingSeed = KeyManager.signingSeed(seed, index: await _keys.index(seed));
 
     // Step 1: Create the IXN event via the Python driver.
@@ -247,6 +249,7 @@ class LocalCoreKeriService extends KeriService {
     // log says is in force: after a rotation that is no longer the founding
     // key, and a signature by the founding key verifies against nothing a
     // counterparty would look up.
+    await _keys.finishStrandedEvents(seed);
     final index = await _keys.index(seed);
     final signingKeyPair = KeyManager.keyAt(seed, index);
     final privateKey = ed.newKeyFromSeed(KeyManager.signingSeed(seed, index: index));
@@ -264,12 +267,16 @@ class LocalCoreKeriService extends KeriService {
     );
   }
 
-  /// The private key in force (TheKeyInForce), or null where this device
-  /// holds no recovery phrase.
-  Future<ed.PrivateKey?> _signerInForce() async {
+  /// The private key in force (TheKeyInForce), with any event left unsigned
+  /// finished first. Throws where this device holds no recovery phrase: an
+  /// event the core builds would otherwise be added and never signed.
+  Future<ed.PrivateKey> _signerInForce() async {
     final mnemonic = await SecureKeyStore.loadMnemonic();
-    if (mnemonic == null) return null;
+    if (mnemonic == null) {
+      throw Exception('No identity keys found in secure storage.');
+    }
     final seed = Bip39.mnemonicToSeed(mnemonic);
+    await _keys.finishStrandedEvents(seed);
     return ed.newKeyFromSeed(KeyManager.signingSeed(seed, index: await _keys.index(seed)));
   }
 
@@ -336,7 +343,7 @@ class LocalCoreKeriService extends KeriService {
     // Step 2: Sign the IXN event bytes locally with the key in force.
     // Private key never leaves this device (ADR-014).
     String cesrSig = '';
-    if (ixnRawBytesB64.isNotEmpty && signer != null) {
+    if (ixnRawBytesB64.isNotEmpty) {
       final rawEventBytes = base64Decode(ixnRawBytesB64);
       final rawSig = ed.sign(signer, Uint8List.fromList(rawEventBytes));
       cesrSig = await _cesrEncode(base64Encode(rawSig));
@@ -386,7 +393,7 @@ class LocalCoreKeriService extends KeriService {
     // The holder signs pres_said.encode() — the UTF-8 bytes of the 44-char SAID.
     // Private key never leaves this device (ADR-014).
     String cesrSig = '';
-    if (presSaidB64.isNotEmpty && signer != null) {
+    if (presSaidB64.isNotEmpty) {
       final saidBytes = base64Decode(presSaidB64);
       final rawSig = ed.sign(signer, Uint8List.fromList(saidBytes));
       cesrSig = await _cesrEncode(base64Encode(rawSig));

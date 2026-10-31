@@ -85,6 +85,7 @@ func (s *CoreServer) handleAttachEventSignature(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	changed := event.CesrSignature != req.CesrSignature
 	event.CesrSignature = req.CesrSignature
 	if serr := s.DataStore.SaveEvent(*event); serr != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to persist the signature", serr.Error())
@@ -93,14 +94,17 @@ func (s *CoreServer) handleAttachEventSignature(w http.ResponseWriter, r *http.R
 	log.Printf("[identity-agent-core] SIGNATURE: %s event sn=%d is now signed",
 		req.AID, req.SequenceNumber)
 
-	// An establishment event goes to the witnesses now that it can be checked.
-	// When it was added it carried no signature, and a witness is never sent
-	// an unsigned event (it could not verify one), so a rotation signed after
-	// the fact would otherwise never be witnessed, and nobody relying on the
-	// witnesses would see the identity's new key.
-	switch event.EventType {
-	case "icp", "dip", "rot", "drt":
-		s.broadcastWitnessEvent(*event)
+	// The identity's witnesses are brought up to date now the event can be
+	// checked: an event signed after the fact, a rotation or an interaction,
+	// would otherwise reach them only on the next pass, and nobody relying on
+	// them would see it until then. Through the one mechanism that keeps them
+	// up to date (witnessOwnLog), which sends the designated witnesses
+	// whatever they lack, in order. Only when the signature is new: recording
+	// the same one again changes nothing they need.
+	if changed {
+		if own, _ := s.DataStore.GetIdentity(); own != nil && own.AID == req.AID {
+			s.witnessOwnLog()
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
