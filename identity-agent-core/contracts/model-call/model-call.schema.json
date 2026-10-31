@@ -109,6 +109,16 @@
         }
       }
     },
+    "borrowing": {
+      "description": "What a body says of its model calls when it borrows its AI agent's sign-in: one that makes them through the Identity Agent sends model_calls as through_identity_agent, and the Identity Agent's answer carries the same, and no key. A body that does not say so, where the AI agent's key stays with the Identity Agent, is refused 409 with update_agent_host: true, and never lent the key.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "model_calls": {
+          "const": "through_identity_agent"
+        }
+      }
+    },
     "stopped": {
       "description": "The answer to DELETE.",
       "type": "object",

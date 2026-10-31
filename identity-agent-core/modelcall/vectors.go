@@ -30,6 +30,10 @@ type VectorSet struct {
 	// of a sign-in's provider's routes, not a list any provider has.
 	Routes []Route `json:"routes"`
 
+	// Borrowing is what a body that makes its model calls through the
+	// Identity Agent says when it borrows its AI agent's sign-in.
+	Borrowing Borrowing `json:"borrowing"`
+
 	Starts            []StartVector           `json:"starts"`
 	Headers           []HeaderVector          `json:"headers"`
 	Collections       []CollectionVector      `json:"collections"`

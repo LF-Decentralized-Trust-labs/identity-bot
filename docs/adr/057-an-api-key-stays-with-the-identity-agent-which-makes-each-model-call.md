@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-10-28
-**Amended:** 2026-10-30 — trimmed to the exchange a machine follows. How an Identity Agent that holds AI agents keeps the key, routes the call, caps a machine's calls and records what each call cost is that runtime's own decision, kept with it outside this repository. Also 2026-10-30 — the exchange a machine sees when the Identity Agent holds the AI agent's model calls to an allowance.
+**Amended:** 2026-10-30 — trimmed to the exchange a machine follows. How an Identity Agent that holds AI agents keeps the key, routes the call, caps a machine's calls and records what each call cost is that runtime's own decision, kept with it outside this repository. Also 2026-10-30 — the exchange a machine sees when the Identity Agent holds the AI agent's model calls to an allowance. 2026-10-31 — the exchange stated as the published checks (package `modelcall`) enforce it.
 **Relates to:** ADR-046 (A machine becomes an AI agent's body by a person comparing six words), ADR-047 (AI agents talk through the Identity Agent that holds them), ADR-056 (Revoking an AI agent is final)
 
 ## Context
@@ -42,35 +42,60 @@ examples in `identity-agent-core/modelcall/model-call-vectors.json`.
 }
 ```
 
+- `method` is GET or POST, in any case. A start with no lease, or whose JSON
+  is unreadable or longer than 6 MB, is answered 400; a start with no method or
+  no path is a route not allowed, 403.
 - `path` is the provider's path as the brain sent it. It must be plain and
-  short: nothing escaped, no fragment, nothing that cleaning it would change.
-  Only the provider's model calls, its list of models, and one model by name
-  are made.
-- `query` may carry only the parameters a model call uses: `beta=true`, and
-  the paging of a list of models.
+  short: at most 256 bytes, starting with `/`, holding only letters and digits
+  (of any script) and `. - _ : / ~`, and unchanged by cleaning. So nothing is
+  escaped, there is no query or fragment in it, and there is no empty, `.` or
+  `..` segment and no trailing slash.
+- The routes a call may take are the Identity Agent's to list, for the
+  provider the AI agent's key is for: the provider's model calls, its list of
+  models, one model by name below that list, and the provider's own read-only
+  and counting routes, such as counting a request's tokens or reading the
+  key's own details. The checks are given that list; nothing else the key
+  could do is made.
+- `query` may carry only `beta=true` and the paging of a list (`limit`, at
+  most four digits; `after_id` and `before_id`, at most 128 bytes of the
+  characters a plain path holds), each at most once, on any route. A paging
+  parameter may be empty. The query is sent on re-encoded, sorted by name.
 - `header` carries only `Content-Type`, `Accept`, `Anthropic-Version`,
-  `Anthropic-Beta` and `Openai-Beta`. Nothing that proves who the brain is
-  travels on.
-- The request body is at most 3 MB. A model call is one JSON object naming its
-  model once, as `model`. Where a model is chosen for the AI agent, it must name
-  exactly that model.
+  `Anthropic-Beta` and `Openai-Beta`, matched in any ASCII case and sent on as
+  written here. Any other header is dropped, not refused, and so is one with
+  no value. Where one is given more than once in different cases, the one
+  whose name comes first in byte order is sent. Nothing that proves who the
+  brain is travels on.
+- The request body is at most 3 MB, in standard base64 with no line breaks;
+  larger or unreadable is 413. Where a model is chosen for the AI agent, a
+  model call (a POST) is one UTF-8 JSON object naming its model once, as
+  `model` spelt exactly, and it must name exactly that model. A second
+  `model`, one spelt in another ASCII case, or a list of models to fall back
+  on (`models`, in any ASCII case) is refused. Where no model is chosen, the body is not read for
+  its model.
 - Where the Identity Agent holds the AI agent's model calls to an allowance (a
   limit on what they may cost), a model call must also say how long an answer
   it wants, as `max_tokens`, `max_completion_tokens` or `max_output_tokens`,
   each spelt exactly and given at most once, a whole number from 1 to 32,768;
   where more than one is given, the largest counts. It asks for one answer:
-  `n` and `best_of`, where given, must be 1. While an allowance is set, the AI
-  agent makes one model call at a time, across all its machines. A request
-  that only reads, such as listing the provider's models or reading one model,
-  is not held to the allowance at all: it is not refused, counted or made to
-  wait.
+  `n` and `best_of`, where given, must be 1. Only the object's own fields are
+  read, and it must be one whole UTF-8 JSON object: trailing or truncated data
+  is refused. While an allowance is set, the AI agent makes one model call at a
+  time, across all its machines. A GET only reads (the list of models, one
+  model by name) and is not held to the allowance at all: it is not refused,
+  counted or made to wait. Every POST is a model call, a request to count
+  tokens included.
 
 ### Reading the answer: `GET /api/agent-host/model-calls/{call}?from=N&lease=L`
 
 The answer streams, so the body collects it in parts. Each collection names
-the run's lease, which may have been renewed since the call began; adds
-`head=1` once it has the status and headers; and returns at most 2 MB, waiting
-up to twenty seconds for more.
+the run's lease, which may have been renewed since the call began (an empty
+`lease` keeps the one the call has); adds `head=1` once it has the status and
+headers; and returns at most 2 MB, waiting up to twenty seconds for more.
+`from` is read as a base-10 whole number; one that is unreadable or below 0
+is read as 0. A collection refused because the run's lease or the AI agent's
+standing does not hold is answered 403 with `"refused": true`, whatever the
+cause.
 
 Both the start and every collection answer with:
 
@@ -86,11 +111,13 @@ Both the start and every collection answer with:
 }
 ```
 
-`status` and `header` are the provider's. `next` is the offset to collect
-from next. When `done` is true the answer is complete, or `error` says why it
-ended. An answer that would carry the key back is stopped before any of it is
-passed on, and an answer under way is stopped when the AI agent may no longer
-act.
+`status` and `header` are the provider's; the headers that travel back are
+`Content-Type`, `Retry-After`, `Request-Id` and `X-Request-Id`, and no other.
+`next` is the offset to collect from next. When `done` is true the answer is
+complete, or `error` says why it ended: a provider that cannot be reached is
+not a refusal, but an answer that ends, done, with an error saying so. An
+answer that would carry the key back is stopped before any of it is passed
+on, and an answer under way is stopped when the AI agent may no longer act.
 
 ### Stopping a call: `DELETE /api/agent-host/model-calls/{call}`
 
@@ -100,24 +127,30 @@ The body sends this when its brain gives up on a call. It answers
 ### Refusals
 
 A refused call is answered with an HTTP status and `{"error": "a sentence the
-body passes to its brain"}`:
+body passes to its brain"}`, of the rules the request alone decides the first
+broken being the one answered. The Identity Agent's own checks (the lease,
+the AI agent's standing, how many calls it holds, an allowance's state) may be
+answered before or between them. Fields of a request the Identity Agent does
+not know are ignored.
 
 | Status | When |
 |---|---|
-| 400 | The request names no lease or no call to make |
+| 400 | The request names no lease, or is unreadable or longer than 6 MB |
 | 403 | The lease is not open for this body, the AI agent may no longer act (revoked, its grant lapsed), its sign-in is not a key kept here or has expired or was removed, or the path, query or model is not one allowed above. Under an allowance, also: the allowance is spent; an earlier call ended without its cost being known (the provider answered it without saying what it cost, it was lost in a restart, or its cost could not be written down), which stops the allowance until it is set again; the provider does not say what a call costs; or the call breaks the rules above on answer length or the number of answers, or is not one JSON object. A start or a collection refused this way also says `"refused": true` |
 | 409 | A collection asks for part of the answer from before `from` it already collected: that part was let go and cannot be given again |
-| 413 | The call is larger than 3 MB, or unreadable |
-| 429 | The machine already holds as many calls for this AI agent as it may; it collects their answers first. Under an allowance, also: another of the AI agent's calls is under way or not yet counted, and this one says `"refused": true` |
-| 503 | The AI agent's sign-in, what was lent to the run, or its allowance cannot be read right now (a start refused this way also says `"refused": true`); the allowance cannot be written down before the call is sent, so the call was not made; or the provider the key is for cannot be reached from here right now |
+| 413 | The call's body is larger than 3 MB, or is not base64 |
+| 429 | The machine already holds as many calls for this AI agent as it may, or the Identity Agent holds as many calls as it may across all its machines; the machine collects their answers first. Under an allowance, also: another of the AI agent's calls is under way or not yet counted, and this one says `"refused": true` |
+| 503 | The AI agent's sign-in, what was lent to the run, or its allowance cannot be read right now (a start refused this way also says `"refused": true`); the allowance cannot be written down before the call is sent, so the call was not made; or no address is known here for the provider the key is for |
 
 A call the Identity Agent no longer knows, for example after a restart, is
-answered 410. The body tells its brain the call failed, and the brain's
-program makes it again, as it does for any failed call.
+answered 410 with `"no_call": true`. The body tells its brain the call failed,
+and the brain's program makes it again, as it does for any failed call.
 
-A body that does not say, when it borrows a sign-in, that it makes its brain's
-model calls through the Identity Agent is refused and told to update. It is
-never lent the key.
+A body says, when it borrows its AI agent's sign-in, that it makes its brain's
+model calls through the Identity Agent: what it sends to borrow carries
+`{"model_calls": "through_identity_agent"}`, and the Identity Agent's answer
+carries the same, and no key. A body that does not say so is refused, 409 with
+`"update_agent_host": true`, and told to update. It is never lent the key.
 
 ## Consequences
 

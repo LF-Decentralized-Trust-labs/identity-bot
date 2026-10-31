@@ -415,6 +415,8 @@ def check_limits(v):
     same("query_parameters", v["query_parameters"], QUERY_NAMES)
     same("answer_bound_names", v["answer_bound_names"], BOUND_NAMES)
     same("answer_count_names", v["answer_count_names"], COUNT_NAMES)
+    schema = json.load(open(os.path.join(HERE, "model-call", "model-call.schema.json")))
+    same("borrowing", v["borrowing"], {"model_calls": schema["$defs"]["borrowing"]["properties"]["model_calls"]["const"]})
 
 
 def check_headers(v):

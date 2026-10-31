@@ -54,6 +54,9 @@
       "path": "/v1/models"
     }
   ],
+  "borrowing": {
+    "model_calls": "through_identity_agent"
+  },
   "starts": [
     {
       "name": "a model call",

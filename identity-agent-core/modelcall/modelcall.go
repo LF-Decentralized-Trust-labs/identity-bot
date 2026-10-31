@@ -50,6 +50,23 @@ const (
 // CallPath is where one call's answer is collected, and where it is stopped.
 func CallPath(callID string) string { return StartPath + "/" + url.PathEscape(callID) }
 
+// ThroughIdentityAgent is the value of model_calls in what a body sends when
+// it borrows its AI agent's sign-in, saying it makes its brain's model calls
+// through the Identity Agent; the Identity Agent's answer carries the same.
+// A body that does not say it is refused (409, "update_agent_host": true) and
+// never lent a key that stays with the Identity Agent.
+const ThroughIdentityAgent = "through_identity_agent"
+
+// Borrowing is what a body's request to borrow its AI agent's sign-in says of
+// how it makes model calls.
+type Borrowing struct {
+	ModelCalls string `json:"model_calls,omitempty"`
+}
+
+// ThroughIdentityAgent reports whether b says model calls go through the
+// Identity Agent.
+func (b Borrowing) ThroughIdentityAgent() bool { return b.ModelCalls == ThroughIdentityAgent }
+
 // The limits of the exchange.
 const (
 	// RequestLargest bounds a call's request body, decoded.

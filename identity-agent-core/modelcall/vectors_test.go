@@ -75,10 +75,11 @@ func TestTheModelCallSchemaDescribesTheseTypes(t *testing.T) {
 		t.Fatal(err)
 	}
 	held := map[string]any{
-		"request": Request{},
-		"answer":  Answer{},
-		"refusal": Refusal{},
-		"stopped": Stopped{},
+		"request":   Request{},
+		"answer":    Answer{},
+		"refusal":   Refusal{},
+		"stopped":   Stopped{},
+		"borrowing": Borrowing{},
 		// The provider's headers are a map of names to values, not a type.
 		"header": nil,
 	}
@@ -158,6 +159,7 @@ func fillModelCallVectors(set *VectorSet) error {
 	set.QueryParameters = QueryParameters()
 	set.AnswerBoundNames = append([]string(nil), AnswerBoundNames...)
 	set.AnswerCountNames = append([]string(nil), AnswerCountNames...)
+	set.Borrowing = Borrowing{ModelCalls: ThroughIdentityAgent}
 	for i := range set.Starts {
 		s := &set.Starts[i]
 		q := startRequest(*s)
