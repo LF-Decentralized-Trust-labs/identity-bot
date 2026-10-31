@@ -13,8 +13,10 @@ import (
 // key is. One in 32 padded raw keys starts with D or B, so thousands are drawn.
 func TestARawKeyIsNeverTakenForQB64InAnySpelling(t *testing.T) {
 	for i := 0; i < 5000; i++ {
-		raw := make([]byte, Ed25519PubkeyBytes)
-		rand.Read(raw)
+		// A real key: a key that is not a point is refused whatever its spelling.
+		seed := make([]byte, ed25519.SeedSize)
+		rand.Read(seed)
+		raw := []byte(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey))
 		for _, enc := range base64Spellings {
 			s := enc.EncodeToString(raw)
 			if _, ok := Ed25519KeyCode(s); ok {
@@ -36,8 +38,7 @@ func TestARawKeyIsNeverTakenForQB64InAnySpelling(t *testing.T) {
 
 // Hex is read only where a caller asks for it.
 func TestHexIsReadOnlyWhenAsked(t *testing.T) {
-	raw := make([]byte, Ed25519PubkeyBytes)
-	rand.Read(raw)
+	raw := randomKey(t)
 	h := hex.EncodeToString(raw)
 	if _, _, err := DecodeEd25519Key(h, false); err == nil {
 		t.Fatal("hex was read where it was not asked for")

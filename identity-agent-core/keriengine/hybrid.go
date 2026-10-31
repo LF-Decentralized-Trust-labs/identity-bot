@@ -18,22 +18,14 @@ import (
 // key, there is no private half, and nothing can ever sign with them. An
 // identity founded that way carries a post-quantum key it can never use.
 //
-// synthetic selects fixed, predictable material. That is correct for
-// conformance vectors and never correct for an identity: anyone can reproduce
-// the private half.
-func (e *Engine) CreateHybridInception(synthetic bool, name string) (*drivers.DriverHybridInceptionResponse, error) {
-	var (
-		material iacrypto.HybridKeyMaterial
-		secrets  iacrypto.HybridSecrets
-		err      error
-	)
-	if synthetic {
-		material = iacrypto.SyntheticHybridKeyMaterial(0)
-	} else {
-		material, secrets, err = iacrypto.GenerateHybridKeyMaterial()
-		if err != nil {
-			return nil, fmt.Errorf("generating hybrid key material: %w", err)
-		}
+// There is no way to ask it for fixed material. Fixed material has a private
+// half anyone can rebuild from its seed, so an identity founded on it would
+// belong to everyone; it is for test vectors only
+// (iacrypto.SyntheticHybridKeyMaterial).
+func (e *Engine) CreateHybridInception(name string) (*drivers.DriverHybridInceptionResponse, error) {
+	material, secrets, err := iacrypto.GenerateHybridKeyMaterial()
+	if err != nil {
+		return nil, fmt.Errorf("generating hybrid key material: %w", err)
 	}
 
 	result, err := iacrypto.BuildHybridInception(material)
@@ -53,20 +45,17 @@ func (e *Engine) CreateHybridInception(synthetic bool, name string) (*drivers.Dr
 	//
 	// The store belongs to the caller and lives on the controller device; the
 	// engine writes through to it and keeps nothing.
-	if !synthetic {
-		if e.secrets == nil {
-			return nil, fmt.Errorf("no secret store was configured, so the private half of this " +
-				"identity would be generated and immediately lost. That identity could never " +
-				"sign and could never rotate. Construct the engine with NewWithSecretStore, or " +
-				"ask for synthetic material if this is a conformance vector rather than an identity")
-		}
-		label := name
-		if label == "" {
-			label = result.AID
-		}
-		if err := iacrypto.StoreHybridSecrets(e.secrets, label, secrets); err != nil {
-			return nil, fmt.Errorf("storing the identity's private material: %w", err)
-		}
+	if e.secrets == nil {
+		return nil, fmt.Errorf("no secret store was configured, so the private half of this " +
+			"identity would be generated and immediately lost. That identity could never " +
+			"sign and could never rotate. Construct the engine with NewWithSecretStore")
+	}
+	label := name
+	if label == "" {
+		label = result.AID
+	}
+	if err := iacrypto.StoreHybridSecrets(e.secrets, label, secrets); err != nil {
+		return nil, fmt.Errorf("storing the identity's private material: %w", err)
 	}
 
 	raw, err := iacrypto.DecodeBase64(result.RawBytesB64)

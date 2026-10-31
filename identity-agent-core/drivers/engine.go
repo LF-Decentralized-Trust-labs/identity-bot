@@ -45,7 +45,7 @@ type KeriEngine interface {
 	Rotate(req RotationRequest) (*DriverRotationResponse, error)
 	// CreateHybridInception founds an identity holding both classical and
 	// post-quantum keys.
-	CreateHybridInception(synthetic bool, name string) (*DriverHybridInceptionResponse, error)
+	CreateHybridInception(name string) (*DriverHybridInceptionResponse, error)
 	// Thresholds are strings, not counts: KERI allows a weighted threshold
 	// ("1/2", "1/3") as well as a plain one, and a signing policy that could
 	// only be expressed as an integer would silently exclude the weighted case.

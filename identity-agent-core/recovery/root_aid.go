@@ -38,7 +38,10 @@ type RootAIDRotationRequest struct {
 	WitnessThreshold        int      `json:"witness_threshold,omitempty"`
 	CarryForwardAIDs        []string `json:"carry_forward_aids,omitempty"`
 	UseHybridInception      bool     `json:"use_hybrid_inception,omitempty"`
-	HybridSynthetic         bool     `json:"hybrid_synthetic,omitempty"`
+	// HybridSynthetic is refused when true. It once minted the new root from
+	// fixed material whose private half anyone can rebuild from a public
+	// seed, so the root would have belonged to everyone.
+	HybridSynthetic bool `json:"hybrid_synthetic,omitempty"`
 }
 
 // ContinuityProof documents the old-root-signed delegation anchor authorizing the
@@ -125,7 +128,7 @@ type KeriInteractResult struct {
 // KeriDriverPort is the KERI surface required for break-glass root rotation.
 type KeriDriverPort interface {
 	CreateInception(publicKey, nextPublicKey string) (*KeriInceptionResult, error)
-	CreateHybridInception(synthetic bool, name string) (*KeriInceptionResult, error)
+	CreateHybridInception(name string) (*KeriInceptionResult, error)
 	RotateWithAnchor(name, newPublicKey, newNextPublicKey string, anchorData []interface{}) (*KeriRotationResult, error)
 	Interact(name string, data []interface{}) (*KeriInteractResult, error)
 }
@@ -418,6 +421,10 @@ func validateRootAIDRotationRequest(req RootAIDRotationRequest) error {
 	if req.RecoverySessionID == "" {
 		return fmt.Errorf("recovery_session_id is required")
 	}
+	if req.HybridSynthetic {
+		return fmt.Errorf("hybrid_synthetic is not taken: a root minted from fixed material has a " +
+			"private half anyone can rebuild, so it would belong to everyone")
+	}
 	if req.UseHybridInception {
 		if req.PreRotationPublicKey == "" || req.PreRotationNextPublicKey == "" {
 			return fmt.Errorf("pre_rotation_public_key and pre_rotation_next_public_key are required")
@@ -442,7 +449,7 @@ func validateRootAIDRotationRequest(req RootAIDRotationRequest) error {
 func (s *RootAIDRotationService) mintNewRoot(driver KeriDriverPort, req RootAIDRotationRequest) (*KeriInceptionResult, error) {
 	if req.UseHybridInception {
 		name := fmt.Sprintf("root-successor-%s", req.RecoverySessionID)
-		return driver.CreateHybridInception(req.HybridSynthetic, name)
+		return driver.CreateHybridInception(name)
 	}
 	return driver.CreateInception(req.NewRootPublicKey, req.NewRootNextPublicKey)
 }

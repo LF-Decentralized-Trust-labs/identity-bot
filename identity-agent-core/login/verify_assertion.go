@@ -12,6 +12,29 @@ type AssertionVerifyResult struct {
 	Disclosures map[string]string
 }
 
+// The window an assertion's dt must fall in, either way from now.
+const (
+	// DefaultMaxSkewSeconds is the window when none is given (zero or less).
+	DefaultMaxSkewSeconds = 300
+	// LongestMaxSkewSeconds is the widest window honoured; a wider one is
+	// narrowed to it. A sign-in is approved within moments of being asked
+	// for, so an hour covers any honest clock, and a wider window only
+	// lengthens the time a captured assertion stays usable. It also keeps
+	// the window's Duration from overflowing, which once made it wrap.
+	LongestMaxSkewSeconds = 3600
+)
+
+// freshnessWindow is the window maxSkewSeconds asks for, by the rules above.
+func freshnessWindow(maxSkewSeconds int) time.Duration {
+	switch {
+	case maxSkewSeconds <= 0:
+		maxSkewSeconds = DefaultMaxSkewSeconds
+	case maxSkewSeconds > LongestMaxSkewSeconds:
+		maxSkewSeconds = LongestMaxSkewSeconds
+	}
+	return time.Duration(maxSkewSeconds) * time.Second
+}
+
 // VerifyAssertion verifies a login assertion on the relying-party side: it binds the
 // assertion to the original challenge (nonce, audience, freshness), takes the
 // asserter's current signing key from the key log the assertion carries (p_kel),
@@ -27,15 +50,13 @@ type AssertionVerifyResult struct {
 // name it: an assertion naming another site was approved for that site's
 // challenge, carrying this one's nonce and audience copied into it.
 func VerifyAssertion(a Assertion, expectedNonce, expectedAudience, expectedSiteAID string, maxSkewSeconds int) AssertionVerifyResult {
-	if maxSkewSeconds <= 0 {
-		maxSkewSeconds = 300
-	}
+	window := freshnessWindow(maxSkewSeconds)
 
-	dt, err := time.Parse(time.RFC3339, a.Dt)
+	dt, err := parseRFC3339(a.Dt)
 	if err != nil {
 		return AssertionVerifyResult{Reason: "bad dt"}
 	}
-	if d := time.Since(dt); d > time.Duration(maxSkewSeconds)*time.Second || d < -time.Duration(maxSkewSeconds)*time.Second {
+	if d := time.Since(dt); d > window || d < -window {
 		return AssertionVerifyResult{Reason: "dt outside freshness window"}
 	}
 	if a.Nonce != expectedNonce {

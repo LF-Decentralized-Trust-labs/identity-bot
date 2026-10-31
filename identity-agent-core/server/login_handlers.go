@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -192,9 +193,14 @@ func (s *CoreServer) mountAssetLoginChallenge(r chi.Router) {
 // challenge (site_aid) and its nonce and audience, it must be fresh, and the asserter
 // must satisfy the asset's enrollment policy.
 func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request) {
-	var a login.Assertion
-	if err := json.NewDecoder(r.Body).Decode(&a); err != nil {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
+		return
+	}
+	a, err := login.ReadAssertion(body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	token := r.URL.Query().Get("session")

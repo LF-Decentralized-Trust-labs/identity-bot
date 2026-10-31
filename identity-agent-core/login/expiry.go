@@ -24,7 +24,7 @@ func CheckExpiry(expiry string, now time.Time) error {
 	if expiry == "" {
 		return ErrExpiryUnreadable
 	}
-	at, err := time.Parse(time.RFC3339, expiry)
+	at, err := parseRFC3339(expiry)
 	if err != nil {
 		return ErrExpiryUnreadable
 	}

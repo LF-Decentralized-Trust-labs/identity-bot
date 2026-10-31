@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/ed25519"
 	"strings"
 	"testing"
 
@@ -103,10 +104,11 @@ func TestTwoAgentsWitnessUnderDifferentIdentifiers(t *testing.T) {
 // The encoder and decoder are each other's inverse — checked directly, because
 // everything above rests on it.
 func TestTheWitnessIdentifierRoundTrips(t *testing.T) {
-	raw := make([]byte, 32)
-	for i := range raw {
-		raw[i] = byte(i + 1)
+	seed := make([]byte, 32)
+	for i := range seed {
+		seed[i] = byte(i + 1)
 	}
+	raw := []byte(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey))
 	aid := iacrypto.NonTransferableAIDQB64(raw)
 	if len(aid) != 44 {
 		t.Fatalf("identifier is %d characters, want 44: %q", len(aid), aid)

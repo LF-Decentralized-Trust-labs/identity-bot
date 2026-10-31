@@ -1,7 +1,10 @@
 import express from "express";
 import {
+  freshnessWindowSeconds,
   keyFromIdentityAgent,
   parseRfc3339,
+  parseStrictJson,
+  utf8Text,
   verifyLoginAssertion,
   type LoginAssertion,
 } from "@identity-agent/login-verify";
@@ -19,7 +22,16 @@ let goldenOk = false;
 let goldenReason = "not run";
 
 const app = express();
-app.use(express.json({ limit: "1mb" }));
+// The body is kept as sent, so the assertion in it is read from its text as
+// the core reads one: a repeated key is gone once JSON.parse has run.
+app.use(
+  express.json({
+    limit: "1mb",
+    verify: (req, _res, buf) => {
+      (req as unknown as { rawBody?: Buffer }).rawBody = buf;
+    },
+  }),
+);
 
 app.get("/health", (_req, res) => {
   res.json({
@@ -33,12 +45,19 @@ app.get("/health", (_req, res) => {
 
 app.post("/verify", async (req, res) => {
   try {
+    const raw = (req as unknown as { rawBody?: Buffer }).rawBody;
+    let body: Record<string, unknown> | undefined;
+    try {
+      body = raw ? (parseStrictJson(utf8Text(raw)) as Record<string, unknown>) : undefined;
+    } catch (err) {
+      return res.status(400).json({ ok: false, reason: `the request cannot be read: ${(err as Error).message}` });
+    }
+    req.body = body;
     const assertion = req.body?.assertion as LoginAssertion | undefined;
     const expectedAudience = req.body?.expected_audience ?? req.body?.expectedAudience;
     const expectedNonce = req.body?.expected_nonce ?? req.body?.expectedNonce;
     const expectedSiteAid = req.body?.expected_site_aid ?? req.body?.expectedSiteAid;
     const maxSkewSeconds = req.body?.max_skew_seconds ?? req.body?.maxSkewSeconds;
-    const skipDtCheck = req.body?.skip_dt_check ?? req.body?.skipDtCheck;
     const referenceNow =
       req.body?.reference_now_rfc3339 ?? req.body?.referenceNowRfc3339;
 
@@ -47,6 +66,14 @@ app.post("/verify", async (req, res) => {
         ok: false,
         reason: "assertion, expected_audience, expected_nonce and expected_site_aid are required",
       });
+    }
+    // The time check is not something a caller can turn off: a fixed time to
+    // check against is reference_now_rfc3339.
+    if ((req.body?.skip_dt_check ?? req.body?.skipDtCheck) !== undefined) {
+      return res.status(400).json({ ok: false, reason: "skip_dt_check is not taken; give reference_now_rfc3339 to check against a fixed time" });
+    }
+    if (maxSkewSeconds !== undefined && freshnessWindowSeconds(maxSkewSeconds) === null) {
+      return res.status(400).json({ ok: false, reason: "max_skew_seconds must be a whole number of seconds" });
     }
     if (req.body?.signing_verkey_qb64 ?? req.body?.signingVerkeyQb64) {
       return res.status(400).json({
@@ -63,8 +90,15 @@ app.post("/verify", async (req, res) => {
       resolveKey,
     };
 
-    if (skipDtCheck) verifyOpts.skipDtCheck = true;
-    if (referenceNow) verifyOpts.nowMs = parseRfc3339(referenceNow);
+    if (referenceNow !== undefined) {
+      // A reference time that cannot be read is the caller's mistake, said as
+      // such: passed on as NaN it once put every dt inside the window.
+      const nowMs = parseRfc3339(referenceNow);
+      if (!Number.isFinite(nowMs)) {
+        return res.status(400).json({ ok: false, reason: "reference_now_rfc3339 is not an RFC 3339 time" });
+      }
+      verifyOpts.nowMs = nowMs;
+    }
 
     const result = await verifyLoginAssertion(assertion, verifyOpts);
 

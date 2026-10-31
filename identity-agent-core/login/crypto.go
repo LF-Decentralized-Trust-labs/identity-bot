@@ -43,6 +43,13 @@ func verifyUTF8(body, sigQB64 string, pub []byte) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	// A key of small order or in a second encoding is refused here too, for a
+	// caller that hands in raw bytes it did not read through iacrypto:
+	// crypto/ed25519 would verify a signature under the identity point over
+	// any message.
+	if err := iacrypto.CheckEd25519PublicKey(pub); err != nil {
+		return false, err
+	}
 	return ed25519.Verify(pub, []byte(body), raw), nil
 }
 

@@ -1,6 +1,7 @@
 package keriengine
 
 import (
+	"crypto/ed25519"
 	"encoding/json"
 	"testing"
 
@@ -17,8 +18,8 @@ import (
 func TestInceptCommitsToEveryNextKeyItIsGiven(t *testing.T) {
 	e := New()
 
-	pub := iacrypto.VerkeyQB64(bytes32(1))
-	next := iacrypto.VerkeyQB64(bytes32(2))
+	pub := iacrypto.VerkeyQB64(keyFrom(1))
+	next := iacrypto.VerkeyQB64(keyFrom(2))
 
 	classical, err := iacrypto.NextKeyDigest(next)
 	if err != nil {
@@ -62,8 +63,8 @@ func TestInceptCommitsToEveryNextKeyItIsGiven(t *testing.T) {
 // caller changes behaviour.
 func TestInceptWithoutDigestsIsUnchanged(t *testing.T) {
 	e := New()
-	pub := iacrypto.VerkeyQB64(bytes32(1))
-	next := iacrypto.VerkeyQB64(bytes32(2))
+	pub := iacrypto.VerkeyQB64(keyFrom(1))
+	next := iacrypto.VerkeyQB64(keyFrom(2))
 
 	res, err := e.Incept(drivers.InceptionRequest{PublicKey: pub, NextPublicKey: next})
 	if err != nil {
@@ -79,6 +80,12 @@ func TestInceptWithoutDigestsIsUnchanged(t *testing.T) {
 }
 
 func bytes32(fill byte) []byte { return fillBytes(32, fill) }
+
+// keyFrom is the public key made from a seed of fill: a key has to be a point
+// on the curve, which 32 arbitrary bytes are not.
+func keyFrom(fill byte) []byte {
+	return ed25519.NewKeyFromSeed(bytes32(fill)).Public().(ed25519.PublicKey)
+}
 func bytes64(fill byte) []byte { return fillBytes(64, fill) }
 func fillBytes(n int, fill byte) []byte {
 	b := make([]byte, n)

@@ -1,5 +1,6 @@
 import * as ed from "@noble/ed25519";
 import { verifyIDToken } from "../../dist/oidc/idtoken.js";
+import { nonTransferableAidQb64 } from "../../dist/canonical.js";
 
 // The OIDC path must be able to refuse somebody who is who they say they are.
 //
@@ -10,7 +11,7 @@ import { verifyIDToken } from "../../dist/oidc/idtoken.js";
 async function run() {
   const priv = ed.utils.randomPrivateKey();
   const pub = await ed.getPublicKeyAsync(priv);
-  const aid = "E" + Buffer.from(pub).toString("base64url").slice(0, 43);
+  const aid = nonTransferableAidQb64(pub);
   const iss = `did:webs:relay.test:${aid}`;
 
   const assertion = {

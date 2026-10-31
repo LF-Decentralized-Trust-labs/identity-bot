@@ -17,7 +17,7 @@ func TestPairwiseMismatchHardError(t *testing.T) {
 	contacts := []ContactPairwiseExpectation{{
 		ContactRecord: store.ContactRecord{
 			AID:       "Econtact00000000000000000000000000001",
-			PublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+			PublicKey: "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=", // a real key, and not this contact's
 			Status:    "accepted",
 		},
 	}}

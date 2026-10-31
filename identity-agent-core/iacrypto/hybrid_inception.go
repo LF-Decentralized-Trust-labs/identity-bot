@@ -2,13 +2,14 @@ package iacrypto
 
 import (
 	"crypto/ed25519"
+	"crypto/sha3"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	keri "github.com/grapeid/keri-go"
 )
 
-// HybridKeyMaterial holds raw key bytes for hybrid inception (synthetic or caller-supplied).
+// HybridKeyMaterial holds the public key bytes a hybrid inception is built from.
 type HybridKeyMaterial struct {
 	Ed25519SigningRaw     []byte
 	MLDSA65SigningRaw     []byte
@@ -18,23 +19,25 @@ type HybridKeyMaterial struct {
 	NextMLDSA65SigningRaw []byte
 }
 
-// SyntheticHybridKeyMaterial returns deterministic synthetic bytes for harness vectors.
+// SyntheticHybridKeyMaterial returns fixed key material for test vectors: the
+// same seed gives the same keys every time.
+//
+// Every key is a real one, made the way GenerateHybridKeyMaterial makes
+// keys, from a stream derived from the seed rather than from randomness. A
+// counting pattern of the right length is not a key: its Ed25519 half is not
+// a point on the curve, so a vector built from it pins an event no verifier
+// should accept. Its private halves are as public as the seed, so it is never
+// correct for an identity, and nothing outside a test calls it
+// (TestFixedKeyMaterialIsReachedOnlyFromTests).
 func SyntheticHybridKeyMaterial(seed int) HybridKeyMaterial {
-	fill := func(n, tag int) []byte {
-		out := make([]byte, n)
-		for i := range out {
-			out[i] = byte((seed + tag + i) % 256)
-		}
-		return out
+	stream := sha3.NewSHAKE256()
+	_, _ = fmt.Fprintf(stream, "IA-HYBRID-1 synthetic key material, seed %d", seed)
+	m, _, err := generateHybridKeyMaterial(stream)
+	if err != nil {
+		// A SHAKE stream does not run out, so this is a broken build.
+		panic(fmt.Sprintf("synthetic hybrid key material: %v", err))
 	}
-	return HybridKeyMaterial{
-		Ed25519SigningRaw:     fill(Ed25519PubkeyBytes, 0x01),
-		MLDSA65SigningRaw:     fill(MLDSA65VerkeyBytes, 0x02),
-		X25519AgreementRaw:    fill(X25519PubkeyBytes, 0x03),
-		MLKEM768EncapRaw:      fill(MLKEM768EncapBytes, 0x04),
-		NextEd25519SigningRaw: fill(Ed25519PubkeyBytes, 0x11),
-		NextMLDSA65SigningRaw: fill(MLDSA65VerkeyBytes, 0x12),
-	}
+	return m
 }
 
 type cesrKeys struct {

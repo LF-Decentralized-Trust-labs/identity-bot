@@ -1,8 +1,9 @@
-import * as ed from "@noble/ed25519";
 import { CLAIM_NAMESPACE } from "./profile.js";
 import type { IDTokenVerifyResult } from "./types.js";
 import type { LoginAssertion } from "../types.js";
 import { NO_KEY_RESOLVER, type KeyResolver } from "../resolver.js";
+import { decodeBase64UrlStrict, verifyEd25519 } from "../canonical.js";
+import { freshnessWindowSeconds } from "../standalone-verify.js";
 
 const CLAIM_SEAM8_ASSERTION = `${CLAIM_NAMESPACE}/seam8_assertion`;
 
@@ -39,8 +40,9 @@ export async function verifyIDTokenSignature(
     return { ok: false, reason: `key resolve failed: ${(err as Error).message}` };
   }
   const signed = `${jwtParts[0]}.${jwtParts[1]}`;
-  const sig = Buffer.from(jwtParts[2], "base64url");
-  const valid = await ed.verifyAsync(sig, new TextEncoder().encode(signed), publicKey);
+  const sig = decodeBase64UrlStrict(jwtParts[2], 64);
+  if (!sig) return { ok: false, reason: "invalid JWT signature" };
+  const valid = await verifyEd25519(sig, new TextEncoder().encode(signed), publicKey);
   if (!valid) return { ok: false, reason: "invalid JWT signature" };
   return { ok: true, publicKey };
 }
@@ -108,7 +110,10 @@ export async function verifyIDToken(
   const now = Math.floor(Date.now() / 1000);
   const exp = payload.exp as number | undefined;
   const iat = payload.iat as number | undefined;
-  const skew = opts.maxSkewSeconds ?? 300;
+  const skew = freshnessWindowSeconds(opts.maxSkewSeconds);
+  if (skew === null) {
+    return { ok: false, reason: "bad freshness window: maxSkewSeconds must be a whole number of seconds" };
+  }
   if (exp && now > exp + skew) return { ok: false, reason: "token expired" };
   if (iat && now < iat - skew) return { ok: false, reason: "token not yet valid" };
 

@@ -13,9 +13,8 @@ import (
 
 // Generating real key material for a hybrid identity.
 //
-// Until now nothing could. The synthetic path fills every field with a counting
-// pattern, which is right for conformance vectors and useless for an identity.
-// The Python driver's "generate" path says what it is in its own docstring —
+// Fixed material (SyntheticHybridKeyMaterial) is for test vectors only: its
+// private halves can be rebuilt by anyone from its seed. The Python driver's "generate" path says what it is in its own docstring —
 // "placeholder PQC material (PQC bytes filled for structure)" — and fills the
 // post-quantum fields with random bytes. Random bytes are not a public key:
 // there is no private half, so nothing can ever sign with them, and an identity

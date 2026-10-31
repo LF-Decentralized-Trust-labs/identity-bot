@@ -40,8 +40,8 @@ func TestEveryCoreGetsAWorkingKeriEngine(t *testing.T) {
 	}
 
 	// It must actually work, not merely exist.
-	pub := "DDRMAuLAoa-uPycYJudpUBVaF8PO4J-GLrCSQD2K3Hqx"
-	next := "DL6mIBjSF7hxDPTRnMPQOWnHZQhFPfM5Q3aOAqFqZKD5"
+	pub := "DIqI4910CfGV_VLbLTy6XXLKZwm_HZQSG_N0iAG0D29c"
+	next := "DIE5dw6ofRdfVqNUZsNMfszLjYqRtO43ol32D1uPybOU"
 	got, err := s.KeriDriver.CreateInceptionNamed(pub, next, "mobile-test")
 	if err != nil {
 		t.Fatalf("the engine could not create an identity: %v", err)

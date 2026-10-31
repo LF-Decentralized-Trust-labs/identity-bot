@@ -3,6 +3,7 @@ package iacrypto
 import (
 	"bytes"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/base64"
@@ -22,13 +23,15 @@ func setLeadBits(qb64 string, k int) string {
 	return qb64[:1] + string(b64Chars[v]) + qb64[2:]
 }
 
+// randomKey is a fresh Ed25519 public key: a real one, because a key that is
+// not a point on the curve is refused whatever its spelling.
 func randomKey(t *testing.T) []byte {
 	t.Helper()
-	raw := make([]byte, Ed25519PubkeyBytes)
-	if _, err := rand.Read(raw); err != nil {
+	seed := make([]byte, ed25519.SeedSize)
+	if _, err := rand.Read(seed); err != nil {
 		t.Fatal(err)
 	}
-	return raw
+	return ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
 }
 
 func TestAQB64KeyWithLeadBitsSetIsRefused(t *testing.T) {
@@ -109,7 +112,9 @@ func TestARawKeyHasOneStringPerSpelling(t *testing.T) {
 // Hex is read in lowercase, the case it is written in, and only that.
 func TestHexIsReadInOneCase(t *testing.T) {
 	raw := randomKey(t)
-	raw[0] = 0xab // at least one letter
+	for !strings.ContainsAny(hex.EncodeToString(raw), "abcdef") { // at least one letter
+		raw = randomKey(t)
+	}
 	h := hex.EncodeToString(raw)
 	if got, _, err := DecodeEd25519Key(h, true); err != nil || !bytes.Equal(got, raw) {
 		t.Fatalf("lowercase hex did not read: %v", err)

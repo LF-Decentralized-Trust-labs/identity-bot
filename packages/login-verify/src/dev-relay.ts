@@ -1,5 +1,6 @@
 import express from "express";
 import type { Server } from "node:http";
+import { decodeBase64UrlStrict } from "./canonical.js";
 import { buildDidWebsDocument } from "./resolver.js";
 import type { SiteIdentity } from "./types.js";
 
@@ -42,7 +43,10 @@ export function createDevRelayServer(opts: DevRelayOptions = {}): {
     if (!aid || !pubB64) {
       return res.status(400).json({ error: "aid and public_key_b64 required" });
     }
-    const pub = Buffer.from(pubB64, "base64url");
+    const pub = decodeBase64UrlStrict(pubB64, 32);
+    if (!pub) {
+      return res.status(400).json({ error: "public_key_b64 must be a 32-byte key in base64url" });
+    }
     registry.set(aid, {
       aid,
       publicKey: pub,

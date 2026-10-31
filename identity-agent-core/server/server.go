@@ -1380,8 +1380,9 @@ type InceptionResponse struct {
 }
 
 type HybridInceptionRequest struct {
-	// Synthetic: use fixed seed=0 harness material (C3 golden-vector prep).
-	Synthetic bool   `json:"synthetic"`
+	// Synthetic is refused when true. It once founded the identity on fixed
+	// material whose private half anyone can rebuild from a public seed.
+	Synthetic bool   `json:"synthetic,omitempty"`
 	Name      string `json:"name,omitempty"`
 }
 
@@ -1781,29 +1782,33 @@ func (s *CoreServer) handleHybridInception(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Synthetic material is a counting pattern: right for conformance vectors,
-	// useless for an identity. Real material is generated in-process, and the
-	// post-quantum halves are genuine keypairs rather than random bytes of the
-	// right length — which is what the other implementations of this path
-	// produced, and which yields an identity whose post-quantum key can never
-	// be used.
-	material := iacrypto.SyntheticHybridKeyMaterial(0)
-	if !req.Synthetic {
-		generated, secrets, err := iacrypto.GenerateHybridKeyMaterial()
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "Failed to generate hybrid key material", err.Error())
-			return
-		}
-		material = generated
-		// The secrets are deliberately NOT returned. The response is an
-		// inception event, which is published; a private key that travelled
-		// beside it would eventually be logged, cached or forwarded by
-		// something that had no idea what it was holding. Persisting them
-		// belongs with the keystore, and until that is wired a caller cannot
-		// use this identity to sign — which is a smaller problem than handing
-		// out keys.
-		_ = secrets
+	// Fixed material is for test vectors, never for an identity: its private
+	// half can be rebuilt by anyone from its seed. A request that asks for it
+	// is refused rather than quietly given real keys, so the caller learns
+	// what it asked for is gone.
+	if req.Synthetic {
+		writeError(w, http.StatusBadRequest, "synthetic is not taken",
+			"fixed key material has a private half anyone can rebuild, so an identity founded on it would belong to everyone")
+		return
 	}
+
+	// Real material is generated in-process, and the post-quantum halves are
+	// genuine keypairs rather than random bytes of the right length — which
+	// is what the other implementations of this path produced, and which
+	// yields an identity whose post-quantum key can never be used.
+	material, secrets, err := iacrypto.GenerateHybridKeyMaterial()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to generate hybrid key material", err.Error())
+		return
+	}
+	// The secrets are deliberately NOT returned. The response is an
+	// inception event, which is published; a private key that travelled
+	// beside it would eventually be logged, cached or forwarded by
+	// something that had no idea what it was holding. Persisting them
+	// belongs with the keystore, and until that is wired a caller cannot
+	// use this identity to sign — which is a smaller problem than handing
+	// out keys.
+	_ = secrets
 
 	result, err := iacrypto.BuildHybridInception(material)
 	if err != nil {

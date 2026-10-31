@@ -146,3 +146,37 @@ func stringSlice(v interface{}) []string {
 	}
 	return nil
 }
+
+// The vector's keys are keys. A counting pattern of the right length once
+// stood in for them, and its Ed25519 half was not a point on the curve, so
+// the bytes pinned here were an event no verifier should accept.
+func TestTheRecordedInceptionHoldsRealKeys(t *testing.T) {
+	data, err := os.ReadFile("golden_vectors.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var g struct {
+		HybridInception struct {
+			CESRWire struct {
+				Ed25519Signing  string `json:"ed25519_signing"`
+				X25519Agreement string `json:"x25519_agreement"`
+			} `json:"cesr_wire"`
+		} `json:"hybrid_inception"`
+	}
+	if err := json.Unmarshal(data, &g); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := iacrypto.DecodeQB64("D", g.HybridInception.CESRWire.Ed25519Signing, 32)
+	if err != nil {
+		t.Fatalf("the recorded Ed25519 key cannot be read: %v", err)
+	}
+	if err := iacrypto.CheckEd25519PublicKey(raw); err != nil {
+		t.Fatalf("the recorded Ed25519 key is not a key: %v", err)
+	}
+	mat := iacrypto.SyntheticHybridKeyMaterial(0)
+	for name, k := range map[string][]byte{"current": mat.Ed25519SigningRaw, "next": mat.NextEd25519SigningRaw} {
+		if err := iacrypto.CheckEd25519PublicKey(k); err != nil {
+			t.Errorf("the synthetic %s Ed25519 key is not a key: %v", name, err)
+		}
+	}
+}

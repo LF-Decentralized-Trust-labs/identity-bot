@@ -151,6 +151,9 @@ func DecodeEd25519Key(key string, hexToo bool) (raw []byte, code string, err err
 	if err != nil {
 		return nil, "", fmt.Errorf("%q is not an Ed25519 public key in qb64, or as raw bytes: %w", key, err)
 	}
+	if err := CheckEd25519PublicKey(raw); err != nil {
+		return nil, "", fmt.Errorf("%q: %w", key, err)
+	}
 	return raw, "", nil
 }
 
@@ -292,5 +295,13 @@ func DecodeQB64(code, qb64 string, size int) ([]byte, error) {
 			return nil, fmt.Errorf("the %s value's lead bits are not zero, so it is not in canonical qb64", code)
 		}
 	}
-	return decoded[lead:], nil
+	raw := decoded[lead:]
+	// An Ed25519 key, transferable or not, must also be one point
+	// (CheckEd25519PublicKey): every key read in qb64 is read here.
+	if code == "D" || code == "B" {
+		if err := CheckEd25519PublicKey(raw); err != nil {
+			return nil, err
+		}
+	}
+	return raw, nil
 }

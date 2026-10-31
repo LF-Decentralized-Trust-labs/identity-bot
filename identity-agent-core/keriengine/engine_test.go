@@ -505,12 +505,12 @@ func TestAPresentationIsReproducible(t *testing.T) {
 // A hybrid identity whose secrets cannot be stored must not be reported as
 // created: it could never sign and could never rotate.
 func TestAHybridIdentityIsRefusedWhenItsSecretsWouldBeLost(t *testing.T) {
-	if _, err := New().CreateHybridInception(false, "root"); err == nil {
+	if _, err := New().CreateHybridInception("root"); err == nil {
 		t.Fatal("a hybrid identity was created with nowhere to keep its private half")
 	}
 
 	e := NewWithSecretStore(keri.NewMemoryKeyStore())
-	got, err := e.CreateHybridInception(false, "root")
+	got, err := e.CreateHybridInception("root")
 	if err != nil {
 		t.Fatal(err)
 	}
