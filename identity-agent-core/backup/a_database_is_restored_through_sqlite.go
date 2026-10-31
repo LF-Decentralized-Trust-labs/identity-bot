@@ -44,9 +44,16 @@ func RestoreFile(dataDir, rel string, raw []byte) error {
 		}
 		return nil
 	}
-	if _, err := os.Stat(dest); os.IsNotExist(err) {
-		// An orphan: no database owns it, and SQLite would take it for this
-		// file's own log.
+	usable := false
+	if _, err := os.Stat(dest); err == nil {
+		usable = aUsableDatabase(dest)
+	}
+	if !usable {
+		// Nothing there, or something SQLite cannot use: garbage, or a
+		// database that fails its own check. That is exactly when somebody
+		// restores, so it is replaced as a file. Its log goes first: no
+		// usable database owns it, and SQLite would take it for the restored
+		// file's own.
 		for _, sidecar := range []string{"-wal", "-shm", "-journal"} {
 			if err := os.Remove(dest + sidecar); err != nil && !os.IsNotExist(err) {
 				return fmt.Errorf("remove the log left beside %s: %w", rel, err)
@@ -61,6 +68,22 @@ func RestoreFile(dataDir, rel string, raw []byte) error {
 		return fmt.Errorf("restore %s: %w", rel, err)
 	}
 	return nil
+}
+
+// aUsableDatabase reports whether the file at path is a database SQLite can
+// open and that passes its quick check. Busy is not unusable: somebody is
+// using it, and the restore waits for them.
+func aUsableDatabase(path string) bool {
+	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		return false
+	}
+	defer db.Close()
+	var verdict string
+	if err := db.QueryRow("PRAGMA quick_check").Scan(&verdict); err != nil {
+		return isBusy(err)
+	}
+	return verdict == "ok"
 }
 
 // isADatabase reports whether raw is a SQLite database, by its header, as

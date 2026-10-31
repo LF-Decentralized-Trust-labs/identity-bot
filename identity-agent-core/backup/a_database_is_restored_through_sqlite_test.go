@@ -185,3 +185,24 @@ func TestAFileThatIsNotADatabaseIsWritten(t *testing.T) {
 		t.Fatalf("read back %q", b)
 	}
 }
+
+// A destination that is not a usable database, which is when somebody
+// restores, is replaced as a file, its log removed with it.
+func TestADamagedDatabaseIsReplaced(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "store.db")
+	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+		if err := os.WriteFile(p, []byte("this is not a database at all, it is garbage"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := RestoreFile(dir, "store.db", snapshotOf(t, "from the archive")); err != nil {
+		t.Fatalf("a damaged database could not be restored: %v", err)
+	}
+	sound(t, path)
+	db, _ := sql.Open("sqlite", path)
+	defer db.Close()
+	if got := notesIn(t, db); len(got) != 1 || got[0] != "from the archive" {
+		t.Fatalf("the restored database holds %v", got)
+	}
+}
