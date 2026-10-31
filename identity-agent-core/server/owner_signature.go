@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -219,23 +220,19 @@ func (s *CoreServer) SealOwnerAuthority(oa OwnerAuthority) error {
 	// from adoption as well as from redeeming an invite, so the guarantee has to
 	// be here, where it cannot be forgotten.
 	//
-	// O_EXCL also makes the write itself all-or-nothing at creation. Truncating
-	// an existing file and writing over it can be interrupted, and half a record
-	// reads back as unreadable rather than as unclaimed.
-	f, err := os.OpenFile(filepath.Join(s.DataDir, ownerAuthorityFile),
-		os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		if os.IsExist(err) {
+	// Written whole beside the record and linked into place only once it is
+	// on disk (atomicfile.Create). Creating the record and then writing into
+	// it, as this did, left an empty or half-written record if the process
+	// stopped in between, and half a record reads back as unreadable rather
+	// than as unclaimed: the agent answered to nobody and could not be claimed.
+	if err := atomicfile.Create(filepath.Join(s.DataDir, ownerAuthorityFile), raw, 0o600); err != nil {
+		if errors.Is(err, fs.ErrExist) {
 			return fmt.Errorf("this agent already answers to an owner — replacing one " +
 				"is an ownership ceremony, not a seal")
 		}
 		return err
 	}
-	defer f.Close()
-	if _, err := f.Write(raw); err != nil {
-		return err
-	}
-	return f.Sync()
+	return nil
 }
 
 // ReSealOwnerAuthority replaces the record for a path that legitimately changes

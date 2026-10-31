@@ -59,3 +59,25 @@ func TestAWriteThatCannotHappenSaysSo(t *testing.T) {
 		t.Fatal("a write into a missing directory reported success")
 	}
 }
+
+// A write stopped after its contents are on disk and before they take the
+// target's name, as a crash would stop it, leaves no target and nothing
+// beside it: never an empty or half-written file under the real name.
+func TestAStoppedWriteLeavesNoPartialFile(t *testing.T) {
+	stop := errors.New("stopped")
+	beforePlacing = func() error { return stop }
+	defer func() { beforePlacing = func() error { return nil } }()
+	for _, write := range []func(string, []byte, fs.FileMode) error{Write, Create} {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "owner_authority.json")
+		if err := write(path, []byte(`{"aid":"E"}`), 0o600); !errors.Is(err, stop) {
+			t.Fatalf("%v, want the stop", err)
+		}
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("a stopped write left the target: %v", err)
+		}
+		if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+			t.Fatalf("a stopped write left %v", entries)
+		}
+	}
+}

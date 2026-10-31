@@ -24,12 +24,21 @@ func Write(path string, data []byte, perm fs.FileMode) error {
 	if err != nil {
 		return err
 	}
+	if err := beforePlacing(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
 	if err := os.Rename(tmp, path); err != nil {
 		os.Remove(tmp)
 		return err
 	}
 	return syncDir(filepath.Dir(path))
 }
+
+// beforePlacing runs after the new contents are written and flushed and
+// before they take the target's name. Tests set it to stop a write there, as
+// a crash would.
+var beforePlacing = func() error { return nil }
 
 // Create writes data to path only if nothing is there yet. When something
 // is, the error satisfies errors.Is(err, fs.ErrExist) and the existing file
@@ -41,6 +50,9 @@ func Create(path string, data []byte, perm fs.FileMode) error {
 		return err
 	}
 	defer os.Remove(tmp)
+	if err := beforePlacing(); err != nil {
+		return err
+	}
 	if err := os.Link(tmp, path); err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return fmt.Errorf("%s: %w", filepath.Base(path), fs.ErrExist)
