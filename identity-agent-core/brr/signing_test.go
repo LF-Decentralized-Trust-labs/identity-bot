@@ -10,6 +10,7 @@ import (
 
 	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
 	"identity-agent-core/brr"
+	"identity-agent-core/iacrypto"
 )
 
 // The registry checks an issuer's requests over the one signing form every
@@ -35,7 +36,10 @@ func TestRegistryRequestsAreSignedInTheOneForm(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	c := brr.NewClient(ts.URL, priv)
+	c, err := brr.NewClient(ts.URL, iacrypto.NonTransferableAIDQB64(pub), priv)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := c.Enroll("EREG"); err != nil {
 		t.Fatal(err)
 	}
@@ -61,4 +65,24 @@ func TestRegistryRequestsAreSignedInTheOneForm(t *testing.T) {
 	}
 	check("the event", map[string]any{"registry_prefix": "EREG", "blinded_id": "blind-1", "event_type": "rev",
 		"sequence_number": "7"}, event["signature"])
+}
+
+// The issuer is named by the identifier it is given, never by a string made
+// from its key. One made that way looked like an identifier and belonged to
+// nobody: no key log answers to it.
+func TestTheIssuerIsTheIdentifierItWasGiven(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	aid := iacrypto.NonTransferableAIDQB64(pub)
+	c, err := brr.NewClient("http://registry.invalid", aid, priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.IssuerAID != aid {
+		t.Fatalf("the client names its issuer %q, not the identifier it was given %q", c.IssuerAID, aid)
+	}
+	for _, bad := range []string{"", "E" + base64.RawURLEncoding.EncodeToString(pub)[:43] + "x", "not-an-identifier"} {
+		if _, err := brr.NewClient("http://registry.invalid", bad, priv); err == nil {
+			t.Errorf("an issuer named %q was accepted", bad)
+		}
+	}
 }

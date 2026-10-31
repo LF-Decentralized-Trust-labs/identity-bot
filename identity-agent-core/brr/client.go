@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
+	"identity-agent-core/iacrypto"
 )
 
 // Client is the IA-side BRR HTTP client (issuer push + verifier fetch).
@@ -23,14 +24,27 @@ type Client struct {
 	IssuerPriv ed25519.PrivateKey
 }
 
-func NewClient(baseURL string, issuerPriv ed25519.PrivateKey) *Client {
-	pub := issuerPriv.Public().(ed25519.PublicKey)
-	aid := "E" + base64.RawURLEncoding.EncodeToString(pub)[:43]
-	return &Client{
-		BaseURL: baseURL, IssuerAID: aid,
-		IssuerPub: pub, IssuerPriv: issuerPriv,
-		HTTPClient: &http.Client{Timeout: 15 * time.Second},
+// NewClient is a client for the registry at baseURL, enrolling and pushing as
+// the issuer issuerAID, whose current signing key is issuerPriv.
+//
+// The identifier is given, never made from the key. An issuer's identifier is
+// the prefix of its key log, which names its first key but is not that key
+// spelled differently, and after a rotation names a different key altogether.
+// A string built from the key alone looks like an identifier and belongs to
+// nobody, so the registry would hold the issuer's events under a name no key
+// log answers to. So issuerAID must be an identifier in canonical qb64.
+func NewClient(baseURL, issuerAID string, issuerPriv ed25519.PrivateKey) (*Client, error) {
+	if !iacrypto.IsIdentifierQB64(issuerAID) {
+		return nil, fmt.Errorf("the issuer %q is not an identifier in qb64", issuerAID)
 	}
+	if len(issuerPriv) != ed25519.PrivateKeySize {
+		return nil, fmt.Errorf("the issuer's signing key is not an Ed25519 private key")
+	}
+	return &Client{
+		BaseURL: baseURL, IssuerAID: issuerAID,
+		IssuerPub: issuerPriv.Public().(ed25519.PublicKey), IssuerPriv: issuerPriv,
+		HTTPClient: &http.Client{Timeout: 15 * time.Second},
+	}, nil
 }
 
 type EnrollRequest struct {

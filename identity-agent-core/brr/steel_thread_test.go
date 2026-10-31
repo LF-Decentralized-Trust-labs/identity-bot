@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"identity-agent-core/brr"
+	"identity-agent-core/iacrypto"
 )
 
 // newFakeBRR is a minimal in-process stand-in for the BRR service, sufficient to
@@ -84,11 +85,14 @@ func TestSteelThreadIssueBlindRevokeVerify(t *testing.T) {
 	ts := newFakeBRR(t)
 	defer ts.Close()
 
-	_, issuerPriv, err := ed25519.GenerateKey(nil)
+	issuerPub, issuerPriv, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := brr.NewClient(ts.URL, issuerPriv)
+	client, err := brr.NewClient(ts.URL, iacrypto.NonTransferableAIDQB64(issuerPub), issuerPriv)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	registryPrefix := "ERegM36Steel"
 	credentialSAID := "EAcredM36SteelThread000000000000000001"
