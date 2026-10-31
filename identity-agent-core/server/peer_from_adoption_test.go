@@ -32,7 +32,7 @@ func TestAdoptionLeavesTheOwnerReachablePrivately(t *testing.T) {
 	}
 
 	didcommMu.Lock()
-	peer, known := s.loadPeers()["EOWNER"]
+	peer, known := s.peersInTest()["EOWNER"]
 	didcommMu.Unlock()
 	if !known {
 		t.Fatal("the owner is not a peer after adoption, so nothing can be sealed to them")

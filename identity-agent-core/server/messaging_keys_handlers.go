@@ -41,7 +41,7 @@ func (s *CoreServer) handlePrepareMessagingKeys(w http.ResponseWriter, r *http.R
 	}
 	ks, _, err := s.deriveMessagingKeys("")
 	if err != nil {
-		writeError(w, http.StatusConflict, "Could not derive this identity's messaging keys", err.Error())
+		writeError(w, statusForUnreadable(err, http.StatusConflict), "Could not derive this identity's messaging keys", err.Error())
 		return
 	}
 	kem, err := ks.KemPub.MarshalBinary()
@@ -75,8 +75,11 @@ func (s *CoreServer) handlePrepareMessagingKeys(w http.ResponseWriter, r *http.R
 // event has been built. Same keys either way: derivation is from the root seed
 // at a recorded branch, so this is the same set that was sealed into the event.
 func (s *CoreServer) fileMessagingKeysFor(aid string) error {
-	if aid == "" || s.hasKeySet(aid) {
+	if aid == "" {
 		return nil
+	}
+	if has, err := s.hasKeySet(aid); err != nil || has {
+		return err
 	}
 	ks, idx, err := s.deriveMessagingKeys(aid)
 	if err != nil {

@@ -185,7 +185,7 @@ func TestTheMessagingKeysSurviveTheFoundingRequest(t *testing.T) {
 	}); w.Code != http.StatusCreated {
 		t.Fatalf("inception failed: %d %s", w.Code, w.Body.String())
 	}
-	if !s.hasKeySet(aid) {
+	if has, err := s.hasKeySet(aid); err != nil || !has {
 		t.Fatal("the identity committed to messaging keys that were never kept")
 	}
 }

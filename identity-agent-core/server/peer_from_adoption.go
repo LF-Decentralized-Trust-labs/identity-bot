@@ -38,7 +38,10 @@ func (s *CoreServer) rememberPeerFromAdoption(did *didcomm.DID, endpoint string)
 
 	didcommMu.Lock()
 	defer didcommMu.Unlock()
-	peers := s.loadPeers()
+	peers, err := s.loadPeers()
+	if err != nil {
+		return err
+	}
 	if existing, ok := peers[did.AID]; ok && existing.DID.X25519 != did.X25519 {
 		// Adoption happens once. A second one arriving with different keys for
 		// the same identity is either a mistake or somebody replacing the

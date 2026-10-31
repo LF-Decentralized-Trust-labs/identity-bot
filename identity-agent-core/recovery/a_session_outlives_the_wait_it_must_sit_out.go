@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"identity-agent-core/internal/atomicfile"
 )
 
 // A recovery session has to survive being waited out.
@@ -54,7 +56,9 @@ func (s *Service) sessionsDir() string {
 // sealed archive on disk indefinitely.
 const sessionMaxAge = 30 * 24 * time.Hour
 
-// partialSuffix marks a session file still being written.
+// partialSuffix marked a session file still being written, before sessions
+// were written through atomicfile. Only leftovers from then carry it; the
+// sweep still removes them, alongside atomicfile's own temporaries.
 const partialSuffix = ".partial"
 
 // acceptableSessionID is the same allowlist reasoning used elsewhere: the id is
@@ -98,39 +102,11 @@ func (s *Service) writeSession(rec *sessionRecord) error {
 	// agent does not accumulate other people's sealed archives.
 	s.ForgetExpiredSessions()
 	path := filepath.Join(s.sessionsDir(), rec.Session.ID+".json")
-	tmp := path + partialSuffix
 	// Written aside, flushed, and renamed. The rename makes the swap atomic;
 	// the flush is what makes it mean anything. Without it a power loss can
 	// leave a zero-length file, which for a feature whose entire point is
 	// surviving an abrupt stop is the case that matters.
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(body); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return err
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	// The directory entry too, or the rename itself can be lost.
-	if d, derr := os.Open(s.sessionsDir()); derr == nil {
-		d.Sync()
-		d.Close()
-	}
-	return nil
+	return atomicfile.Write(path, body, 0600)
 }
 
 // forgetSession removes a session that has finished or been abandoned.
@@ -188,7 +164,7 @@ func (s *Service) ForgetExpiredSessions() int {
 		name := e.Name()
 		// Leftovers from a write that died. Skipped when loading, so they only
 		// accumulated.
-		if strings.HasSuffix(name, partialSuffix) {
+		if strings.HasSuffix(name, partialSuffix) || atomicfile.IsTemp(name) {
 			if info, ierr := e.Info(); ierr == nil && time.Since(info.ModTime()) > time.Hour {
 				os.Remove(filepath.Join(s.sessionsDir(), name))
 			}

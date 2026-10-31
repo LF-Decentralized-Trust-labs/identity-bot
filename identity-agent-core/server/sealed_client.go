@@ -71,9 +71,10 @@ func (s *CoreServer) SealedRequest(ctx context.Context, fromAID, toAID, method, 
 	if err != nil {
 		return nil, fmt.Errorf("no keys to send as %s: %w", fromAID, err)
 	}
-	didcommMu.Lock()
-	peer, known := s.loadPeers()[toAID]
-	didcommMu.Unlock()
+	peer, known, err := s.peerFor(toAID)
+	if err != nil {
+		return nil, err
+	}
 	if !known {
 		return nil, fmt.Errorf("no relationship with %s, so there is nothing to encrypt a request to", toAID)
 	}

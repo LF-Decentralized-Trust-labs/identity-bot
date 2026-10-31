@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"time"
 
 	"identity-agent-core/didcomm"
+	"identity-agent-core/internal/coretypes"
 )
 
 // Carrying a request nobody in the middle can read.
@@ -74,6 +76,13 @@ func (s *CoreServer) handleSealedTransport(w http.ResponseWriter, r *http.Reques
 	// agent do expensive work on demand.
 	senderDID, keys, err := s.sealedParties(&env)
 	if err != nil {
+		if status := statusForUnreadable(err, http.StatusForbidden); status != http.StatusForbidden {
+			// Answered to anybody, so nothing about where or how this
+			// Identity Agent keeps its data. The log has the detail.
+			log.Printf("[sealed] an envelope arrived and could not be opened here: %v", err)
+			writeSealedError(w, status, "this Identity Agent cannot open envelopes right now")
+			return
+		}
 		writeSealedError(w, http.StatusForbidden, err.Error())
 		return
 	}
@@ -244,16 +253,17 @@ func (s *CoreServer) sealedParties(env *didcomm.Envelope) (*didcomm.DID, *didcom
 	if skid == "" {
 		return nil, nil, fmt.Errorf("this envelope does not say who it is from")
 	}
-	didcommMu.Lock()
-	peer, known := s.loadPeers()[skid]
-	didcommMu.Unlock()
+	peer, known, err := s.peerFor(skid)
+	if err != nil {
+		return nil, nil, err
+	}
 	if !known {
 		// A sender the owner has already accepted as a contact is finishing a
 		// step the owner authorised. A stranger still gets nothing.
 		if resolved, _ := s.resolveKnownContactAsPeer(skid); resolved {
-			didcommMu.Lock()
-			peer, known = s.loadPeers()[skid]
-			didcommMu.Unlock()
+			if peer, known, err = s.peerFor(skid); err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 	if !known {
@@ -273,12 +283,16 @@ func (s *CoreServer) sealedParties(env *didcomm.Envelope) (*didcomm.DID, *didcom
 		return nil, nil, fmt.Errorf("this envelope names no recipient")
 	}
 	kid := env.Recipients[0].Header.Kid
-	if !s.hasKeySet(kid) {
+	has, err := s.hasKeySet(kid)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: this agent could not load the keys to open it", coretypes.ErrKeysUnavailable)
+	}
+	if !has {
 		return nil, nil, fmt.Errorf("this envelope is addressed to an identity this agent does not hold")
 	}
 	keys, err := s.keySetFor(kid)
 	if err != nil {
-		return nil, nil, fmt.Errorf("this agent could not load the keys to open it")
+		return nil, nil, fmt.Errorf("%w: this agent could not load the keys to open it", coretypes.ErrKeysUnavailable)
 	}
 	return &peer.DID, keys, nil
 }

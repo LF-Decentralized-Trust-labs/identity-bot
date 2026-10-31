@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"identity-agent-core/secureenclave"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
 	"time"
 
 	"identity-agent-core/backup/remote"
+	"identity-agent-core/internal/atomicfile"
 	"identity-agent-core/store"
 
 	"github.com/google/uuid"
@@ -574,41 +576,30 @@ func (s *Service) ReceiveArchive(identityAID string, data []byte) (string, error
 	// Named to the second, plus a counter, because two archives CAN arrive
 	// inside one second and the timestamp alone silently overwrote the first.
 	//
-	// The name is CLAIMED by creating the file exclusively rather than by
-	// checking whether it exists and then writing it. A stat-then-write leaves
-	// a window in which two concurrent pushes both see the name free, both take
-	// it, and both write the same file — and since the route is public and the
-	// name is a predictable timestamp, that window can be aimed at. The result
-	// there is worse than a lost archive: two interleaved writes leave one file
-	// with parts of both, and the rename below publishes it under a name that
-	// looks like a complete archive.
+	// The name is CLAIMED by the write itself rather than by checking whether
+	// it exists and then writing it. A stat-then-write leaves a window in which
+	// two concurrent pushes both see the name free, both take it, and both
+	// write the same file — and since the route is public and the name is a
+	// predictable timestamp, that window can be aimed at. The result there is
+	// worse than a lost archive: two interleaved writes leave one file with
+	// parts of both under a name that looks like a complete archive.
+	//
+	// atomicfile.Create writes each push to its own temporary, flushes it, and
+	// links it to the name only if the name is free, so a push that loses the
+	// race moves on to the next name, and a transfer that dies partway leaves
+	// nothing under any name that looks restorable.
 	base := time.Now().UTC().Format("20060102-150405")
-	var f *os.File
-	var path string
 	for n := 0; ; n++ {
-		if n == 0 {
-			path = filepath.Join(dir, base+archiveSuffix)
-		} else {
+		path := filepath.Join(dir, base+archiveSuffix)
+		if n > 0 {
 			path = filepath.Join(dir, fmt.Sprintf("%s-%d%s", base, n, archiveSuffix))
 		}
-		// Both names have to be free, and for different reasons. The finished
-		// archive may already be there from an earlier push in this same
-		// second — the rename below would replace it silently. The partial may
-		// be there from a push happening right now.
-		if _, serr := os.Stat(path); serr == nil {
-			continue
-		} else if !os.IsNotExist(serr) {
-			return "", serr
-		}
-		var err error
-		// O_EXCL: the create fails if somebody else already took this name, so
-		// the loop advances instead of two callers sharing a file.
-		f, err = os.OpenFile(path+partialSuffix, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		err := atomicfile.Create(path, data, 0600)
 		if err == nil {
-			break
+			return path, nil
 		}
-		if !os.IsExist(err) {
-			// Anything other than "taken" is a real failure. The earlier
+		if !errors.Is(err, fs.ErrExist) {
+			// Anything other than "taken" is a real failure. An earlier
 			// version treated every error as "taken" and retried forever, so a
 			// directory that could not be read span on a public route.
 			return "", err
@@ -617,24 +608,6 @@ func (s *Service) ReceiveArchive(identityAID string, data []byte) (string, error
 			return "", fmt.Errorf("could not find a free name for this archive")
 		}
 	}
-
-	// Written aside and moved into place, so a transfer that dies partway
-	// leaves nothing rather than something that looks restorable.
-	tmp := path + partialSuffix
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return "", err
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(tmp)
-		return "", err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
-		return "", err
-	}
-	return path, nil
 }
 
 // AdoptArchivesFiledUnderNoIdentity moves archives that were stored before a

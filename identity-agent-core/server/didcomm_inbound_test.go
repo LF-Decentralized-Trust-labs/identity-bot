@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"identity-agent-core/internal/atomicfile"
 	"identity-agent-core/store"
 )
 
@@ -134,7 +135,7 @@ func TestStateFilesAreReplacedInOneStep(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"original":true}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeFileAtomic(path, []byte(`{"replacement":true}`), 0600); err != nil {
+	if err := atomicfile.Write(path, []byte(`{"replacement":true}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -149,8 +150,8 @@ func TestStateFilesAreReplacedInOneStep(t *testing.T) {
 	if !parsed["replacement"] {
 		t.Error("the replacement did not land")
 	}
-	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
-		t.Error("the temporary file was left behind")
+	if left, _ := filepath.Glob(path + ".tmp*"); len(left) > 0 {
+		t.Errorf("the temporary file was left behind: %v", left)
 	}
 }
 

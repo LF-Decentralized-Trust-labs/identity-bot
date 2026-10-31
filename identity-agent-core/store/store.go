@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"identity-agent-core/internal/atomicfile"
 )
 
 type EventRecord struct {
@@ -728,11 +730,7 @@ func (s *FileStore) saveCountersLocked() error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return atomicfile.Write(path, b, 0600)
 }
 
 func (s *FileStore) SaveEvent(record EventRecord) error {

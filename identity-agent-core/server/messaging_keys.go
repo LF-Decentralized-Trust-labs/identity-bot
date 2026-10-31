@@ -3,12 +3,13 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sync"
 
 	"identity-agent-core/backup"
 	"identity-agent-core/didcomm"
+	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/secureenclave"
 )
 
@@ -58,9 +59,16 @@ func (s *CoreServer) deriveMessagingKeys(aid string) (*didcomm.KeySet, int, erro
 		return nil, 0, fmt.Errorf("no key material to derive messaging keys from: %w", err)
 	}
 
+	// A record that cannot be read is refused, never taken for none: a new
+	// branch here would be written over the one record a restore needs to
+	// bring these keys back (readKeptRecord).
 	var rec messagingKeyRecord
-	if data, rerr := os.ReadFile(s.messagingKeyPath()); rerr == nil &&
-		json.Unmarshal(data, &rec) == nil && rec.Index > 0 {
+	found, rerr := readKeptRecord(s.messagingKeyPath(), "the record of which branch the messaging keys came from",
+		"this Identity Agent cannot prepare or file its messaging keys", coretypes.ErrKeysUnavailable, &rec)
+	if rerr != nil {
+		return nil, 0, rerr
+	}
+	if found && rec.Index > 0 {
 		ks, derr := s.keysAtIndex(rootSeed, aid, rec.Index)
 		return ks, rec.Index, derr
 	}
@@ -96,7 +104,7 @@ func (s *CoreServer) keysAtIndex(rootSeed []byte, aid string, idx int) (*didcomm
 // practice, which is the same as lost.
 func (s *CoreServer) recordMessagingKeyIndex(aid string, idx int) error {
 	data, _ := json.Marshal(messagingKeyRecord{AID: aid, Index: idx})
-	if err := os.WriteFile(s.messagingKeyPath(), data, 0600); err != nil {
+	if err := atomicfile.Write(s.messagingKeyPath(), data, 0600); err != nil {
 		return fmt.Errorf("could not record which branch the messaging keys came from: %w", err)
 	}
 	return nil

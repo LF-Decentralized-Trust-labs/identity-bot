@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"identity-agent-core/internal/atomicfile"
 )
 
 type RelationshipStore struct {
@@ -108,11 +110,7 @@ func (s *RelationshipStore) saveLocked() error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
 		return err
 	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, s.path); err != nil {
+	if err := atomicfile.Write(s.path, b, 0o600); err != nil {
 		return err
 	}
 	return s.saveHighWaterLocked()

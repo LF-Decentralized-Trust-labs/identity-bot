@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"identity-agent-core/asset"
+	"identity-agent-core/internal/atomicfile"
 	"identity-agent-core/login"
 
 	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
@@ -367,30 +368,7 @@ func (reg *keyRegistry) write(aid string, k registeredKey) error {
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(reg.dir, aid+".*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	if _, err := tmp.Write(b); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpName)
-		return err
-	}
-	if err := os.Rename(tmpName, filepath.Join(reg.dir, aid+".json")); err != nil {
-		os.Remove(tmpName)
-		return err
-	}
-	return nil
+	return atomicfile.Write(filepath.Join(reg.dir, aid+".json"), b, 0o600)
 }
 
 // mayReplace allows a log to replace another when it is the same identity's

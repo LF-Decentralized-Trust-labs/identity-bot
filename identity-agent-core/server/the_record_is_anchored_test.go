@@ -63,7 +63,7 @@ func TestTheNewestRowsCannotBeQuietlyRemovedOnceAnchored(t *testing.T) {
 		t.Fatal("an anchoring was made with nothing new to anchor")
 	}
 
-	rec, ok := s.loadRecordIdentity()
+	rec, ok, _ := s.loadRecordIdentity()
 	if !ok {
 		t.Fatal("no record identity was made")
 	}
@@ -131,7 +131,7 @@ func TestAnchoringCarriesOnAfterARestart(t *testing.T) {
 	if anchored, err := s.anchorRecord(); err != nil || !anchored {
 		t.Fatalf("anchoring after a restart: %v %v", anchored, err)
 	}
-	rec, _ := s.loadRecordIdentity()
+	rec, _, _ := s.loadRecordIdentity()
 	events, _ := s.DataStore.GetEvents(rec.AID)
 	in := drivers.ValidateKELInput{AID: rec.AID}
 	for _, ev := range events {
@@ -254,7 +254,7 @@ func TestRemovingTheNewestAnchorAndItsRowsIsCaught(t *testing.T) {
 // log shorter than the tip kept outside the database.
 func TestTrimmingTheRecordIdentitysKeyLogIsCaught(t *testing.T) {
 	s, first := anchoredTwice(t)
-	rec, _ := s.loadRecordIdentity()
+	rec, _, _ := s.loadRecordIdentity()
 	db := recordDB(t, s)
 	db.Exec(`DELETE FROM record_anchors WHERE seq = (SELECT MAX(seq) FROM record_anchors)`)
 	if _, err := db.Exec(`DELETE FROM kel WHERE aid = ? AND seq_num = (SELECT MAX(seq_num) FROM kel WHERE aid = ?)`, rec.AID, rec.AID); err != nil {
@@ -295,7 +295,7 @@ func TestAStatementTheKeyLogDoesNotSealIsCaught(t *testing.T) {
 // A record identity's key log that has been altered does not verify.
 func TestAnAlteredRecordKeyLogIsCaught(t *testing.T) {
 	s, _ := anchoredTwice(t)
-	rec, _ := s.loadRecordIdentity()
+	rec, _, _ := s.loadRecordIdentity()
 	db := recordDB(t, s)
 	// The event as it was, signed by a key that is not the record identity's.
 	var b64 string
@@ -312,7 +312,7 @@ func TestAnAlteredRecordKeyLogIsCaught(t *testing.T) {
 // A record identity this identity's key log does not approve is not one.
 func TestARecordIdentityWithoutItsApprovalIsCaught(t *testing.T) {
 	s, _ := anchoredTwice(t)
-	rec, _ := s.loadRecordIdentity()
+	rec, _, _ := s.loadRecordIdentity()
 	owner, _ := s.DataStore.GetIdentity()
 	events, _ := s.DataStore.GetEvents(owner.AID)
 	db := recordDB(t, s)
@@ -361,18 +361,18 @@ func TestARecordIdentityLeftPartlyMadeIsRepaired(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.repairRecordIdentity()
-	if _, ok := s.loadRecordIdentity(); ok {
+	if _, ok, _ := s.loadRecordIdentity(); ok {
 		t.Fatal("a record identity never kept was left in place")
 	}
 	writeRows(t, s, 1)
 	if ok, err := s.anchorRecord(); err != nil || !ok {
 		t.Fatalf("anchoring after the repair: %v %v", ok, err)
 	}
-	rec, _ := s.loadRecordIdentity()
+	rec, _, _ := s.loadRecordIdentity()
 	rec.Pending = true
 	s.saveRecordIdentity(rec)
 	s.repairRecordIdentity()
-	if got, ok := s.loadRecordIdentity(); !ok || got.Pending {
+	if got, ok, _ := s.loadRecordIdentity(); !ok || got.Pending {
 		t.Fatal("a record identity whose inception was kept was not finished")
 	}
 }
@@ -470,7 +470,7 @@ func TestAnchorsAreHeldOutsideOnceTheirWitnessesReceiptThem(t *testing.T) {
 	if ok, err := s.anchorRecord(); err != nil || !ok {
 		t.Fatalf("anchoring: %v %v", ok, err)
 	}
-	rec, _ := s.loadRecordIdentity()
+	rec, _, _ := s.loadRecordIdentity()
 	events, _ := s.DataStore.GetEvents(rec.AID)
 	var dip struct {
 		B  []string `json:"b"`
@@ -536,7 +536,7 @@ func TestAnchorsGoneWithTheFileInPlaceAreCaught(t *testing.T) {
 // identity's key.
 func TestALoweredTipIsCaught(t *testing.T) {
 	s, _ := anchoredTwice(t)
-	rec, _ := s.loadRecordIdentity()
+	rec, _, _ := s.loadRecordIdentity()
 	events, _ := s.DataStore.GetEvents(rec.AID)
 	var first map[string]interface{}
 	json.Unmarshal([]byte(events[1].EventJSON), &first)
@@ -549,7 +549,7 @@ func TestALoweredTipIsCaught(t *testing.T) {
 // anchors left behind still stop a new one being made over them.
 func TestNoRecordIdentityIsMadeOverAnchorsLeftBehind(t *testing.T) {
 	s, _ := anchoredTwice(t)
-	rec, _ := s.loadRecordIdentity()
+	rec, _, _ := s.loadRecordIdentity()
 	owner, _ := s.DataStore.GetIdentity()
 	events, _ := s.DataStore.GetEvents(owner.AID)
 	db := recordDB(t, s)
@@ -569,7 +569,7 @@ func TestNoRecordIdentityIsMadeOverAnchorsLeftBehind(t *testing.T) {
 // record key but naming other witnesses, breaks the record.
 func TestASecondRecordIdentityIsCaught(t *testing.T) {
 	s, _ := anchoredTwice(t)
-	rec, _ := s.loadRecordIdentity()
+	rec, _, _ := s.loadRecordIdentity()
 	owner, _ := s.DataStore.GetIdentity()
 	seed, pub, nextPub, err := s.recordKeys(rec.Index)
 	if err != nil {
@@ -647,7 +647,7 @@ func TestTheWitnessesAreAskedForTheRecordsTip(t *testing.T) {
 	if ok, err := s.anchorRecord(); err != nil || !ok {
 		t.Fatalf("anchoring: %v %v", ok, err)
 	}
-	rec, _ := s.loadRecordIdentity()
+	rec, _, _ := s.loadRecordIdentity()
 	owner, _ := s.DataStore.GetIdentity()
 	for i := 0; i < 100; i++ {
 		postedMu.Lock()
@@ -749,7 +749,7 @@ func TestCheckingWhileAnchoringRaisesNoFalseAlarm(t *testing.T) {
 	if ok, err := s.anchorRecord(); err != nil || !ok {
 		t.Fatalf("anchoring: %v %v", ok, err)
 	}
-	rec, _ := s.loadRecordIdentity()
+	rec, _, _ := s.loadRecordIdentity()
 	// The witness is slow to answer, and answers with whatever has been
 	// appended by then, so an anchoring may land while the check waits.
 	s.WitnessService.FetchTip = func(_ context.Context, url string) (witness.TipAnswer, error) {
@@ -848,7 +848,7 @@ func TestARealWitnessWitnessesTheRecord(t *testing.T) {
 			t.Fatalf("anchoring: %v %v", ok, err)
 		}
 	}
-	rec, _ := s.loadRecordIdentity()
+	rec, _, _ := s.loadRecordIdentity()
 	events, _ := s.DataStore.GetEvents(rec.AID)
 	ownerEvents, _ := s.DataStore.GetEvents(owner.AID)
 	held := func(aid string) int {

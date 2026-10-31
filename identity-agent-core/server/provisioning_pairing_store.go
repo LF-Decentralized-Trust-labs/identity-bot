@@ -3,9 +3,10 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
+
+	"identity-agent-core/internal/atomicfile"
 )
 
 // Remembering the identity this agent offered for pairing.
@@ -96,38 +97,8 @@ func savePairingOffer(dataDir string, offer storedPairingOffer) error {
 	// The directory is flushed as well as the file. A rename is a directory
 	// change, so without it the file's contents can be durable while the name
 	// pointing at them is not.
-	tmp := pairingOfferPath(dataDir) + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(raw); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return fmt.Errorf("the pairing identity could not be flushed to disk, so it would not survive this agent stopping: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	if err := os.Rename(tmp, pairingOfferPath(dataDir)); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	if dir, derr := os.Open(dataDir); derr == nil {
-		// Reported but not fatal: the contents are already durable, so the worst
-		// case is losing the record rather than corrupting it, and refusing to
-		// pair over it would be a worse trade.
-		if serr := dir.Sync(); serr != nil {
-			log.Printf("[provisioning] WARNING: could not flush the directory holding the pairing identity, "+
-				"so it may not survive this agent stopping: %v", serr)
-		}
-		dir.Close()
+	if err := atomicfile.Write(pairingOfferPath(dataDir), raw, 0o600); err != nil {
+		return fmt.Errorf("the pairing identity could not be written durably, so it would not survive this agent stopping: %w", err)
 	}
 	return nil
 }

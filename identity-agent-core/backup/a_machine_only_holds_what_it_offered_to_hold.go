@@ -35,7 +35,9 @@ import (
 // places have to agree: what we write, what we list, and what we serve back.
 const archiveSuffix = ".iab"
 
-// partialSuffix marks an archive still being written.
+// partialSuffix marked an archive still being written, before archives were
+// written through atomicfile. Only leftovers from then carry it; readers still
+// pass over them.
 const partialSuffix = ".partial"
 
 // unattributed is where archives go when nothing recorded whose they were.

@@ -3,10 +3,10 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 
+	"identity-agent-core/internal/atomicfile"
 	"identity-agent-core/relay"
 )
 
@@ -106,35 +106,8 @@ func saveRelayEnrollment(dataDir, fileName string, enr storedRelayEnrollment) er
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return err
 	}
-	tmp := relayEnrollmentPath(dataDir, fileName) + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(raw); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return fmt.Errorf("the relay enrollment could not be flushed to disk, so it would not survive this agent stopping: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	if err := os.Rename(tmp, relayEnrollmentPath(dataDir, fileName)); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	if dir, derr := os.Open(dataDir); derr == nil {
-		if serr := dir.Sync(); serr != nil {
-			log.Printf("[relay] WARNING: could not flush the directory holding the relay enrollment, "+
-				"so it may not survive this agent stopping: %v", serr)
-		}
-		dir.Close()
+	if err := atomicfile.Write(relayEnrollmentPath(dataDir, fileName), raw, 0o600); err != nil {
+		return fmt.Errorf("the relay enrollment could not be written durably, so it would not survive this agent stopping: %w", err)
 	}
 	return nil
 }

@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"identity-agent-core/internal/atomicfile"
 )
 
 // Everything on this device, rather than everything somebody remembered to list.
@@ -48,6 +50,14 @@ func skipReason(rel string) string {
 	if strings.HasPrefix(slashed, snapshotPrefix) || strings.HasPrefix(slashed, restoringPrefix) ||
 		strings.Contains(slashed, "/"+snapshotPrefix) || strings.Contains(slashed, "/"+restoringPrefix) {
 		return "this agent's own working copy, being written right now or left by a run that died"
+	}
+
+	// A write in progress, or a copy left by one that stopped part way. It is
+	// a whole or partial duplicate of whatever was being written beside it,
+	// which is carried in its own right, and some of what is written that way
+	// is private key material: a holding in shares_held, the messaging keys.
+	if atomicfile.IsTemp(base) {
+		return "a write in progress, or a copy left by one that stopped; the file it was writing is carried itself"
 	}
 
 	// Already captured by name, in a form that is consistent rather than a

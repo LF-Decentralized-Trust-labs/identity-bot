@@ -114,7 +114,7 @@ func TestAProvenStrangerIsNotAccepted(t *testing.T) {
 		t.Fatalf("a stranger who proved their name was treated as agreed to: %q", rec.Status)
 	}
 	// And no peer was registered, so nothing can be sent to them yet.
-	if _, known := s.loadPeers()[aid]; known {
+	if _, known := s.peersInTest()[aid]; known {
 		t.Fatal("a stranger was registered as a peer before the owner agreed to anything")
 	}
 }

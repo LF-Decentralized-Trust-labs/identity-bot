@@ -9,12 +9,13 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
 	"identity-agent-core/didcomm"
+	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/login"
 
 	"github.com/go-chi/chi/v5"
@@ -23,8 +24,8 @@ import (
 // DIDComm wiring — the encrypted, mutually-authenticated IA-to-IA transport.
 //
 // This IA holds a hybrid DIDComm keyset per local AID (didcomm_keys.json), a registry
-// of peer DIDs + endpoints it has exchanged with (didcomm_peers.json), and an inbox of
-// received messages (didcomm_inbox.json). Establishing a relationship = both sides
+// of peer DIDs + endpoints it has exchanged with (didcomm_peers.json), and keeps
+// received messages as notifications in its store. Establishing a relationship = both sides
 // register each other's DID. Then either can authcrypt to the other's pairwise AID.
 //
 // Public surface: POST /didcomm (inbound envelopes) and GET /api/didcomm/did (this
@@ -64,50 +65,55 @@ func (s *CoreServer) mountDIDCommRoutes(r chi.Router) {
 func (s *CoreServer) didcommKeysPath() string  { return filepath.Join(s.DataDir, "didcomm_keys.json") }
 func (s *CoreServer) didcommPeersPath() string { return filepath.Join(s.DataDir, "didcomm_peers.json") }
 
-func (s *CoreServer) loadDIDCommKeys() map[string]json.RawMessage {
-	m := map[string]json.RawMessage{}
-	if b, err := os.ReadFile(s.didcommKeysPath()); err == nil {
-		_ = json.Unmarshal(b, &m)
+// loadDIDCommKeys reads every DIDComm keyset this Identity Agent holds.
+//
+// A missing file means no keys have been made yet, and is an empty set. A file
+// that is there and cannot be read or parsed is an error wrapping
+// coretypes.ErrKeysUnavailable, and never an empty set: every caller here that
+// finds no keyset for an identifier makes one and saves the whole set, so a
+// damaged file read as empty was replaced with fresh keys, and every contact
+// and AI agent that knew the old ones could no longer reach this identity,
+// with nothing to say why. The file is left exactly as it is, so it can be
+// restored.
+func (s *CoreServer) loadDIDCommKeys() (map[string]json.RawMessage, error) {
+	var m map[string]json.RawMessage
+	found, err := readKeptRecord(s.didcommKeysPath(), "the messaging key file", didcommKeysMeanwhile,
+		coretypes.ErrKeysUnavailable, &m)
+	if err != nil {
+		return nil, err
 	}
-	return m
+	if !found {
+		return map[string]json.RawMessage{}, nil
+	}
+	if m == nil {
+		// "null" is never written here: an empty set is written as {}.
+		return nil, fmt.Errorf("%w: the messaging key file holds no key set; restore it from a backup",
+			coretypes.ErrKeysUnavailable)
+	}
+	return m, nil
 }
 
-// writeFileAtomic replaces a file in one step, or leaves the old one alone.
-//
-// These three files were each written with a bare os.WriteFile: truncate, then
-// write. A process that stopped in between left a half-written file, and every
-// reader here discards the unmarshal error and carries on with an empty map. So
-// an interrupted write did not fail loudly — it silently emptied the peers list,
-// the inbox, or the file holding this agent's DIDComm private keys.
-//
-// Writing beside the target and renaming means a reader sees either the old
-// file or the new one. Losing the newest change is recoverable; a truncated key
-// file is not.
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, perm); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return nil
-}
+// didcommKeysMeanwhile is what cannot work while the messaging key file
+// cannot be read.
+const didcommKeysMeanwhile = "this Identity Agent cannot send, receive or open private messages, " +
+	"and making new keys instead would cut it off from every contact and AI agent that knows the old ones"
 
 func (s *CoreServer) saveDIDCommKeys(m map[string]json.RawMessage) error {
 	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(s.didcommKeysPath(), b, 0600)
+	return atomicfile.Write(s.didcommKeysPath(), b, 0600)
 }
 
 // keySetFor returns the DIDComm keyset for aid, minting + persisting one on first use.
 func (s *CoreServer) keySetFor(aid string) (*didcomm.KeySet, error) {
 	didcommMu.Lock()
 	defer didcommMu.Unlock()
-	keys := s.loadDIDCommKeys()
+	keys, err := s.loadDIDCommKeys()
+	if err != nil {
+		return nil, err
+	}
 	if blob, ok := keys[aid]; ok {
 		return didcomm.UnmarshalKeySet(blob)
 	}
@@ -140,7 +146,10 @@ func (s *CoreServer) storeKeySetFor(aid string, ks *didcomm.KeySet) error {
 	}
 	didcommMu.Lock()
 	defer didcommMu.Unlock()
-	keys := s.loadDIDCommKeys()
+	keys, err := s.loadDIDCommKeys()
+	if err != nil {
+		return err
+	}
 	if _, exists := keys[aid]; exists {
 		return fmt.Errorf("%s already has messaging keys, which will not be replaced", aid)
 	}
@@ -153,20 +162,50 @@ func (s *CoreServer) storeKeySetFor(aid string, ks *didcomm.KeySet) error {
 	return s.saveDIDCommKeys(keys)
 }
 
-// hasKeySet reports whether a keyset already exists for aid (no minting).
-func (s *CoreServer) hasKeySet(aid string) bool {
+// hasKeySet reports whether a keyset already exists for aid (no minting). The
+// error is the key file being unreadable, and then nothing is known either way.
+func (s *CoreServer) hasKeySet(aid string) (bool, error) {
 	didcommMu.Lock()
 	defer didcommMu.Unlock()
-	_, ok := s.loadDIDCommKeys()[aid]
-	return ok
+	keys, err := s.loadDIDCommKeys()
+	if err != nil {
+		return false, err
+	}
+	_, ok := keys[aid]
+	return ok, nil
 }
 
-func (s *CoreServer) loadPeers() map[string]peerRecord {
-	m := map[string]peerRecord{}
-	if b, err := os.ReadFile(s.didcommPeersPath()); err == nil {
-		_ = json.Unmarshal(b, &m)
+// loadPeers reads the peers this Identity Agent has exchanged keys with. A
+// missing file is no peers; a file that is there and cannot be read is an
+// error, and nothing may be saved over it (readKeptRecord). Callers hold
+// didcommMu.
+func (s *CoreServer) loadPeers() (map[string]peerRecord, error) {
+	var m map[string]peerRecord
+	found, err := readKeptRecord(s.didcommPeersPath(), "the DIDComm peers file",
+		"this Identity Agent cannot reach or hear from the peers it holds keys for", errRecordUnreadable, &m)
+	if err != nil {
+		return nil, err
 	}
-	return m
+	if !found {
+		return map[string]peerRecord{}, nil
+	}
+	if m == nil {
+		return nil, fmt.Errorf("%w: the DIDComm peers file holds no peers list; restore it from a backup",
+			errRecordUnreadable)
+	}
+	return m, nil
+}
+
+// peerFor is the peer recorded under aid, and whether there is one.
+func (s *CoreServer) peerFor(aid string) (peerRecord, bool, error) {
+	didcommMu.Lock()
+	defer didcommMu.Unlock()
+	peers, err := s.loadPeers()
+	if err != nil {
+		return peerRecord{}, false, err
+	}
+	p, ok := peers[aid]
+	return p, ok, nil
 }
 
 func (s *CoreServer) savePeers(m map[string]peerRecord) error {
@@ -174,7 +213,7 @@ func (s *CoreServer) savePeers(m map[string]peerRecord) error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(s.didcommPeersPath(), b, 0600)
+	return atomicfile.Write(s.didcommPeersPath(), b, 0600)
 }
 
 // --- replay: in-process seen-ID cache (id -> expiry) ---
@@ -252,11 +291,13 @@ func (s *CoreServer) ensureLocalPeer(aid string) (peerRecord, error) {
 		AddedAt:  time.Now().UTC(),
 	}
 	didcommMu.Lock()
-	peers := s.loadPeers()
+	defer didcommMu.Unlock()
+	peers, err := s.loadPeers()
+	if err != nil {
+		return peerRecord{}, err
+	}
 	peers[aid] = rec
-	err = s.savePeers(peers)
-	didcommMu.Unlock()
-	return rec, err
+	return rec, s.savePeers(peers)
 }
 
 // handleListDIDCommPeers lists the registered DIDComm peers (the owner and its controllers).
@@ -266,8 +307,12 @@ func (s *CoreServer) handleListDIDCommPeers(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	didcommMu.Lock()
-	m := s.loadPeers()
+	m, err := s.loadPeers()
 	didcommMu.Unlock()
+	if err != nil {
+		jsonError(w, "this Identity Agent cannot read its peers right now", http.StatusServiceUnavailable)
+		return
+	}
 	out := make([]map[string]any, 0, len(m))
 	for _, p := range m {
 		out = append(out, map[string]any{"aid": p.AID, "endpoint": p.Endpoint, "added_at": p.AddedAt})
@@ -284,7 +329,14 @@ func (s *CoreServer) handleGetDIDCommDID(w http.ResponseWriter, r *http.Request)
 		jsonError(w, "aid is required", http.StatusBadRequest)
 		return
 	}
-	if !s.hasKeySet(aid) && !s.isOwner(r) {
+	has, err := s.hasKeySet(aid)
+	if err != nil {
+		// Not err itself: this is answered to anybody, and the error names
+		// where this Identity Agent keeps its data.
+		jsonError(w, "this Identity Agent cannot read its messaging keys right now", http.StatusServiceUnavailable)
+		return
+	}
+	if !has && !s.isOwner(r) {
 		// A stranger cannot make this agent generate keys for an arbitrary
 		// identifier — that is unbounded work on demand. But refusing outright
 		// broke the case this endpoint exists for: an agent that has never sent
@@ -302,7 +354,10 @@ func (s *CoreServer) handleGetDIDCommDID(w http.ResponseWriter, r *http.Request)
 	}
 	ks, err := s.keySetFor(aid)
 	if err != nil {
-		jsonError(w, "keyset error: "+err.Error(), http.StatusInternalServerError)
+		// Answered to anybody: the detail goes to the log, not the reply.
+		log.Printf("[didcomm] the keys of %s could not be had: %v", aid, err)
+		jsonError(w, "this Identity Agent cannot give its messaging keys right now",
+			statusForUnreadable(err, http.StatusInternalServerError))
 		return
 	}
 	did, err := ks.DID()
@@ -351,12 +406,14 @@ func (s *CoreServer) handleRegisterDIDCommPeer(w http.ResponseWriter, r *http.Re
 		return
 	}
 	didcommMu.Lock()
-	peers := s.loadPeers()
-	peers[req.DID.AID] = peerRecord{AID: req.DID.AID, DID: req.DID, Endpoint: canonicalPeerEndpoint(req.Endpoint), AddedAt: time.Now().UTC()}
-	err := s.savePeers(peers)
+	peers, err := s.loadPeers()
+	if err == nil {
+		peers[req.DID.AID] = peerRecord{AID: req.DID.AID, DID: req.DID, Endpoint: canonicalPeerEndpoint(req.Endpoint), AddedAt: time.Now().UTC()}
+		err = s.savePeers(peers)
+	}
 	didcommMu.Unlock()
 	if err != nil {
-		jsonError(w, "failed to persist peer", http.StatusInternalServerError)
+		jsonError(w, "failed to persist peer", statusForUnreadable(err, http.StatusInternalServerError))
 		return
 	}
 	jsonResponse(w, map[string]any{"registered": req.DID.AID, "endpoint": req.Endpoint})
@@ -400,7 +457,7 @@ func (s *CoreServer) handleSendDIDCommMessage(w http.ResponseWriter, r *http.Req
 	}
 	msgID, status, err := s.SendDIDCommMessage(req.FromAID, req.ToAID, req.Type, req.Body)
 	if err != nil {
-		jsonError(w, err.Error(), http.StatusBadGateway)
+		jsonError(w, err.Error(), statusForUnreadable(err, http.StatusBadGateway))
 		return
 	}
 	jsonResponse(w, map[string]any{
@@ -452,9 +509,11 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 	}
 	// Resolve the sender DID from the peer registry. If the sender is one of THIS IA's
 	// own provisioned agents (intra-org A2A), auto-resolve it — its DID is ours.
-	didcommMu.Lock()
-	peer, known := s.loadPeers()[skid]
-	didcommMu.Unlock()
+	peer, known, err := s.peerFor(skid)
+	if err != nil {
+		jsonError(w, "this Identity Agent cannot read its peers right now", http.StatusServiceUnavailable)
+		return
+	}
 	if !known {
 		// The peers file is the ONLY authority on this path, and registering a
 		// peer is an owner action.
@@ -497,9 +556,11 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 			jsonError(w, "sender is not a registered peer", http.StatusForbidden)
 			return
 		}
-		didcommMu.Lock()
-		peer, known = s.loadPeers()[skid]
-		didcommMu.Unlock()
+		peer, known, err = s.peerFor(skid)
+		if err != nil {
+			jsonError(w, "this Identity Agent cannot read its peers right now", http.StatusServiceUnavailable)
+			return
+		}
 		if !known {
 			jsonError(w, "sender is not a registered peer", http.StatusForbidden)
 			return
@@ -511,13 +572,18 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 		return
 	}
 	kid := env.Recipients[0].Header.Kid
-	if !s.hasKeySet(kid) {
+	has, err := s.hasKeySet(kid)
+	if err != nil {
+		jsonError(w, "recipient keys unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if !has {
 		jsonError(w, "unknown_recipient_aid", http.StatusNotFound)
 		return
 	}
 	rcpt, err := s.keySetFor(kid)
 	if err != nil {
-		jsonError(w, "recipient keyset error", http.StatusInternalServerError)
+		jsonError(w, "recipient keyset error", statusForUnreadable(err, http.StatusInternalServerError))
 		return
 	}
 	jwm, signed, err := didcomm.UnpackAuthcryptKeeping(rcpt, &peer.DID, &env)

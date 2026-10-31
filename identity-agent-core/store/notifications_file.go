@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
+
+	"identity-agent-core/internal/atomicfile"
 )
 
 // The file-backed half of the notification store.
@@ -41,13 +43,8 @@ func (s *FileStore) saveNotifications(m map[string]Notification) error {
 	if err != nil {
 		return err
 	}
-	tmp := s.notificationsPath() + ".tmp"
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
+	if err := atomicfile.Write(s.notificationsPath(), data, 0600); err != nil {
 		return fmt.Errorf("failed to write notifications: %w", err)
-	}
-	if err := os.Rename(tmp, s.notificationsPath()); err != nil {
-		os.Remove(tmp)
-		return fmt.Errorf("failed to replace notifications: %w", err)
 	}
 	return nil
 }

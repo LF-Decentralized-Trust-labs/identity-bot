@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"identity-agent-core/internal/atomicfile"
 	"identity-agent-core/secureenclave"
 
 	"github.com/go-chi/chi/v5"
@@ -169,26 +170,7 @@ func (s *CoreServer) beAFrontEndFor(f AFrontEndFor) error {
 	// power loss or a full disk halfway through a plain write leaves half a
 	// record, which reads back as unreadable — and this core then cannot tell
 	// which half it is running. A rename is the one step that is all or nothing.
-	tmp, err := os.CreateTemp(s.DataDir, filepath.Base(s.frontEndFile())+".*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(raw); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp.Name(), s.frontEndFile()); err != nil {
+	if err := atomicfile.Write(s.frontEndFile(), raw, 0o600); err != nil {
 		return err
 	}
 
