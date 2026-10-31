@@ -74,9 +74,9 @@ The Go Core backend is compiled for mobile using **gomobile** (`golang.org/x/mob
 - `GetPort() int` — Returns the port the server is listening on
 - `GetDataDir() string` — Returns the data directory path
 
-**Android:** gomobile produces `mobilecore.aar` placed at `identity_agent_ui/android/app/libs/mobilecore.aar`. The AAR is loaded as a local dependency in `build.gradle`.
+**Android:** gomobile produces `mobilecore.aar` placed in the embedding app at `android/app/libs/mobilecore.aar`. The AAR is loaded as a local dependency in `build.gradle`.
 
-**iOS:** gomobile produces `Mobilecore.xcframework` placed at `identity_agent_ui/ios/Frameworks/Mobilecore.xcframework`. The framework is embedded in the Xcode project.
+**iOS:** gomobile produces `Mobilecore.xcframework` placed in the embedding app at `ios/Frameworks/Mobilecore.xcframework`. The framework is embedded in the Xcode project.
 
 The Go Core on mobile uses `ServerConfig` with:
 - `EnableKeriDriver: false` — No Python process is spawned
@@ -171,13 +171,15 @@ The `codemagic.yaml` defines build workflows for all platforms:
 ### Platform Channels
 - `identity_agent_ui/android/app/src/main/kotlin/.../MainActivity.kt` — Android platform channel bridge
 - `identity_agent_ui/ios/Runner/AppDelegate.swift` — iOS platform channel bridge
-- `identity_agent_ui/lib/services/mobile_core_service.dart` — Dart wrapper around platform channels
+- `packages/agent_client/lib/services/mobile_core_service.dart` — Dart wrapper around platform channels
+
+> **2026-10-30:** the reference app these paths name, `identity_agent_ui/`, has been removed from this repository; the parent of the commit that removed it still contains it. The client code it shared is in `packages/agent_client/`, and [BUILDING.md](../../BUILDING.md) covers building an app on the core.
 
 ### Service Layer
 - `identity_agent_ui/lib/services/mobile_on_device_keri_service.dart` — `MobileOnDeviceKeriService`: Rust bridge + Go Core for Standalone; Rust bridge + paired server for Remote WITH Keys. Single class covers both topologies via optional `pairedServerUrl` parameter.
 - `identity_agent_ui/lib/services/mobile_remote_keri_service.dart` — `MobileRemoteKeriService`: forwards all ops to paired server; no Rust bridge.
 - `identity_agent_ui/lib/services/desktop_on_device_keri_service.dart` — `DesktopOnDeviceKeriService`: all desktop topologies via Go + Python keripy.
-- `identity_agent_ui/lib/services/keri_service.dart` — Abstract `KeriService` interface implemented by all three classes.
+- `packages/agent_client/lib/services/keri_service.dart` — Abstract `KeriService` interface implemented by all three classes.
 
 ### CI/CD
 - `codemagic.yaml` — Build pipelines for Android, iOS, macOS, Windows, Linux

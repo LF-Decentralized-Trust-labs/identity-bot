@@ -1,3 +1,6 @@
+> The original build plan, kept for history. The Flutter app it starts from, `identity_agent_ui`, was
+> removed on 2026-10-30; see [BUILDING.md](BUILDING.md) for what this repository builds today.
+
 Artifact 2: Implementation Milestones
 Instruction for Replit Agent: Import this roadmap. Do not deviate from this order. Complete all tasks in a Milestone before proceeding to the next.
 

@@ -45,10 +45,8 @@
      - Subsystem — the named runtime part, with its package: the credential vault
        (`CredentialVault`, `identity-agent-core/vault`), the forward proxy, the
        attestation runner, the KERI driver.
-     - User-facing — the navigation items in docs/adr/018-desktop-navigation-structure.md
-       (Credentials → API Keys, Apps → Marketplace, Settings → Security, History …),
-       or "none" when no screen changes. Say where the change is *felt*, not only
-       where a screen changed.
+     - User-facing — what a person using an app built on this core would notice,
+       or "none". The core ships no screens, so say where the change is *felt*.
      - Developer-facing — the exported symbols, HTTP routes or SDK surface a caller
        would notice, and say plainly what stays unchanged.
 

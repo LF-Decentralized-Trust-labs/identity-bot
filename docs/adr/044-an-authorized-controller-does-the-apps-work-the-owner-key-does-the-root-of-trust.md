@@ -146,7 +146,7 @@ device no rotation of it is made here at all (the rotation route, a recovery's r
 or changing who owns it): it would be appended unsigned and the key logs would split.
 Break-glass root rotation, whose events are not signed by their keys either, is refused
 whole until they are. The same holds where the identity's key is held by the app rather than
-the core, as the reference app holds it: the app signs an event only after the core has
+the core, as an app may hold it: the app signs an event only after the core has
 added it, which is too late, so through the core such an identity can be neither rotated
 nor extended (no interaction, no credential issued), and the core says so in those words.
 Before this the core appended those events unsigned, so the key logs they made were not

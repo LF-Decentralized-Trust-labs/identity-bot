@@ -39,7 +39,7 @@ We follow **coordinated disclosure**: we will work with you on a timeline that p
 ### In scope
 
 - The `identity-bot` / Identity Agent source code in this repository
-- The Flutter UI (`identity_agent_ui/`)
+- The Dart client for the core's API (`packages/agent_client/`)
 - The Go backend (`identity-agent-core/`), including the `keri-go` KERI engine
   compiled into it
 - The sandbox marketplace runtime (Podman + compiled binary runtimes)

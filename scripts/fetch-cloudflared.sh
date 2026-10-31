@@ -12,8 +12,8 @@
 #   CLOUDFLARED_VERSION  the pinned release (default below)
 #   CLOUDFLARED_CACHE    download cache dir (default ~/.cache/cloudflared-bundle)
 #
-# Windows builds fetch cloudflared-windows-amd64.exe directly in PowerShell; this
-# script covers the two POSIX desktops.
+# This script covers macOS and Linux. cloudflared.sha256 also pins
+# cloudflared-windows-amd64.exe, which a Windows build fetches and checks itself.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

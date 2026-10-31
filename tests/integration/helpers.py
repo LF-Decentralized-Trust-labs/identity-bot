@@ -16,10 +16,7 @@ def _ensure_libsodium():
     if sys.platform != "win32":
         return
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    repo_root  = os.path.dirname(os.path.dirname(script_dir))
     for d in [
-        os.path.join(repo_root, "identity_agent_ui", "build", "windows",
-                     "x64", "runner", "Release", "backend"),
         script_dir,
     ]:
         dll = os.path.join(d, "libsodium.dll")

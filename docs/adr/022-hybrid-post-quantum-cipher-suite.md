@@ -90,6 +90,7 @@ Because both backends are pinned to the same golden vectors, an identity created
 - liboqs desktop proof-of-concept: `pqc-poc/` (`roundtrip/`, `mobilepqc/`, `cmd/c4roundtrip/`).
 - Key sizes are FIPS Level-3: ML-DSA-65 verify key 1952 B / signature 3309 B; ML-KEM-768 encapsulation key 1184 B; X25519 / Ed25519 32 B.
 
+> **2026-10-30:** the reference app these paths name, `identity_agent_ui/`, has been removed from this repository; the parent of the commit that removed it still contains it. The client code it shared is in `packages/agent_client/`, and [BUILDING.md](../../BUILDING.md) covers building an app on the core.
 
 ---
 

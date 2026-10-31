@@ -1,5 +1,5 @@
 name: agent_client
-description: "Backend-client glue (services, config, models, crypto, bridge) for the Identity Agent, extracted from identity_agent_ui so downstream apps can depend on the client without pulling in any OSS UI."
+description: "The Dart client for the Identity Agent core's API (services, config, models, crypto, bridge), for apps built on the core."
 publish_to: 'none'
 version: 0.1.0
 

@@ -68,13 +68,11 @@ GOOS=ios GOARCH=arm64 CGO_ENABLED=1 CC="xcrun -sdk iphoneos clang -arch arm64" g
 
 If you cannot run the Mac part, say so in the pull request.
 
-### Building the desktop app
+### Building the core and an app on it
 
-The desktop app is built by `scripts/build-desktop-macos.sh` and
-`scripts/build-desktop-windows.ps1` (`scripts/build-desktop-linux.sh` for the deferred
-Linux app). Each script lists the toolchain it expects. The project publishes no builds
-of its own: whoever distributes the app builds and signs it under their own identity.
-`scripts/sign-notarize-macos.sh` shows the macOS signing and notarization steps.
+[BUILDING.md](BUILDING.md) covers building the core for each system and building an
+app on it. The project publishes no builds of its own: whoever distributes an app built
+on the core builds and signs it under their own identity.
 
 ## Security
 

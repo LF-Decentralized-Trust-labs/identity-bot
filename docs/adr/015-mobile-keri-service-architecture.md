@@ -142,5 +142,7 @@ if (mode == AgentMode.connectExisting && serverUrl != null) {
 - `identity_agent_ui/rust/src/api/keri_bridge.rs` — Rust bridge implementation
 - `identity_agent_ui/lib/services/mobile_on_device_keri_service.dart`
 - `identity_agent_ui/lib/services/mobile_remote_keri_service.dart`
-- `identity_agent_ui/lib/config/agent_config.dart` — `publicKeriServiceUrl`
+- `packages/agent_client/lib/config/agent_config.dart` — `publicKeriServiceUrl`
 - `identity-agent-core/server/store_handlers.go` — mobile storage endpoints
+
+> **2026-10-30:** the reference app these paths name, `identity_agent_ui/`, has been removed from this repository; the parent of the commit that removed it still contains it. The client code it shared is in `packages/agent_client/`, and [BUILDING.md](../../BUILDING.md) covers building an app on the core.

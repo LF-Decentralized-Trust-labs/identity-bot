@@ -137,7 +137,7 @@ The fallback is intentionally a subset (3 items) rather than all 5, reflecting t
 ## Implementation notes
 
 - `store.ShareAction` in `identity-agent-core/store/store.go` is the canonical Go struct
-- `ShareAction` in `identity_agent_ui/lib/services/core_service.dart` is the Dart model; uses `const` constructor so fallback lists can be compile-time constants
+- `ShareAction` in `packages/agent_client/lib/services/core_service.dart` is the Dart model; uses `const` constructor so fallback lists can be compile-time constants
 - `camera_service.dart` / `camera_service_web.dart` / `camera_service_stub.dart` follow the existing conditional import pattern from ADR-013
 - The `action_key` field is the stable identifier used as `?action=<key>` in OOBI URLs; `id` is the DB primary key (prefixed `sa-`)
 

@@ -35,7 +35,7 @@ This rule applies uniformly across all platforms — desktop, mobile, and web. T
 
 ### Decision 2: Platform-aware port configuration via AgentConfig
 
-The Flutter UI needs to know which local port its Go backend is on. This is now defined in one place: `identity_agent_ui/lib/config/agent_config.dart`.
+The Flutter UI needs to know which local port its Go backend is on. This is now defined in one place: `packages/agent_client/lib/config/agent_config.dart`.
 
 | Platform | Go Backend Port | `AgentConfig.coreBaseUrl` |
 |---|---|---|
@@ -91,7 +91,7 @@ func (s *CoreServer) handleCheckSomething(w http.ResponseWriter, r *http.Request
 ### Step 2: Call the proxy from Flutter via CoreService
 
 ```dart
-// In identity_agent_ui/lib/services/core_service.dart
+// In packages/agent_client/lib/services/core_service.dart
 Future<bool> checkSomething(String param) async {
   final url = Uri.parse('$baseUrl/api/settings/my-service/check-something?param=${Uri.encodeComponent(param)}');
   final response = await _client.get(url);  // _client, not http.get — uses baseUrl
