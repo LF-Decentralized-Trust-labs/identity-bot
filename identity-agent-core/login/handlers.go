@@ -114,8 +114,12 @@ func (h *Handler) fetchChallengeBundle(rpBase, sessionToken string) (*ChallengeB
 		b, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("bundle fetch %d: %s", resp.StatusCode, string(b))
 	}
-	var bundle ChallengeBundle
-	if err := json.NewDecoder(resp.Body).Decode(&bundle); err != nil {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+	bundle, err := ReadChallengeBundle(body)
+	if err != nil {
 		return nil, err
 	}
 	return &bundle, nil

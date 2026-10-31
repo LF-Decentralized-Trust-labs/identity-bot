@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"identity-agent-core/iacrypto"
 )
@@ -107,11 +106,4 @@ func filterEmpty(ss []string) []string {
 
 func rfc3339UTC(t time.Time) string {
 	return t.UTC().Format("2006-01-02T15:04:05Z")
-}
-
-func parseRFC3339(s string) (time.Time, error) {
-	if !utf8.ValidString(s) {
-		return time.Time{}, fmt.Errorf("invalid dt")
-	}
-	return time.Parse(time.RFC3339, s)
 }

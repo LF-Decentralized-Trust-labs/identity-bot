@@ -31,7 +31,7 @@ func VerifyAssertion(a Assertion, expectedNonce, expectedAudience, expectedSiteA
 		maxSkewSeconds = 300
 	}
 
-	dt, err := time.Parse(time.RFC3339, a.Dt)
+	dt, err := parseRFC3339(a.Dt)
 	if err != nil {
 		return AssertionVerifyResult{Reason: "bad dt"}
 	}
