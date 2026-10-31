@@ -95,7 +95,8 @@ class LocalCoreKeriService extends KeriService {
       // It cannot be sent with the inception itself — the signature is over
       // bytes the engine has not produced when that call is made — so founding
       // is two steps, and this is the second.
-      await _attachTheSignature(json['aid'] as String? ?? '', cesrSignature);
+      await _attachSignature(json['aid'] as String? ?? '', 0, cesrSignature,
+          what: 'the founding of this identity');
     }
 
     return InceptionResult(
@@ -108,32 +109,34 @@ class LocalCoreKeriService extends KeriService {
     );
   }
 
-  /// Hands back the signature over the founding event, which completes it.
+  /// Hands back the signature over an event of the identity's log — its
+  /// founding, a rotation, an interaction — which completes it.
   ///
-  /// Throws on failure rather than carrying on. An identity whose founding
-  /// nobody signed is refused by every counterparty that checks — so finishing
-  /// quietly would hand somebody an identity that looks made and cannot be
-  /// used with anybody, and the failure would surface weeks later as a stranger
-  /// refusing them for no reason they can see.
-  Future<void> _attachTheSignature(String aid, String cesrSignature) async {
-    if (aid.isEmpty || cesrSignature.isEmpty) {
-      throw Exception('this identity was founded and could not be signed, so '
-          'nobody would be able to verify it');
+  /// Throws on failure rather than carrying on. An event nobody signed is
+  /// refused by every counterparty that checks — so finishing quietly would
+  /// hand somebody an identity that looks fine and cannot be used with
+  /// anybody, and the failure would surface weeks later as a stranger refusing
+  /// them for no reason they can see.
+  ///
+  /// Recording the same signature twice is harmless: the core checks it
+  /// against the event again and stores it again. So a caller that still
+  /// attaches the signature it is handed back does no damage.
+  Future<void> _attachSignature(String aid, Object? sequenceNumber, String cesrSignature,
+      {required String what}) async {
+    if (aid.isEmpty || cesrSignature.isEmpty || sequenceNumber is! int) {
+      throw Exception('$what could not be signed, so nobody would be able to verify it');
     }
     final res = await _client.post(
       Uri.parse('$_baseUrl/api/events/signature'),
       headers: const {'Content-Type': 'application/json'},
       body: jsonEncode({
         'aid': aid,
-        // The founding event. This route takes any of them, which is what
-        // rotations and interactions need too — a second route that only ever
-        // understood the founding would have to be duplicated for each.
-        'sequence_number': 0,
+        'sequence_number': sequenceNumber,
         'cesr_signature': cesrSignature,
       }),
     );
     if (res.statusCode != 200) {
-      throw Exception('this identity was founded and its signature was refused '
+      throw Exception('the signature over $what was refused '
           '(${res.statusCode}): ${res.body}');
     }
   }
@@ -197,6 +200,12 @@ class LocalCoreKeriService extends KeriService {
       final rawEventBytes = base64Decode(rawBytesB64);
       final rawSig = ed.sign(rot1PrivKey, Uint8List.fromList(rawEventBytes));
       cesrSig = await _cesrEncode(base64Encode(rawSig));
+      // Step 3: record it against the event, as founding does. The core does
+      // not sign a rotation itself, so a rotation whose signature is only
+      // handed back stays unsigned in the log and every counterparty that
+      // checks refuses the identity from then on.
+      await _attachSignature(json['aid'] as String? ?? '', json['sequence_number'], cesrSig,
+          what: 'this rotation');
     }
 
     return RotationResult(
@@ -239,6 +248,8 @@ class LocalCoreKeriService extends KeriService {
       final rawEventBytes = base64Decode(rawBytesB64);
       final rawSig = ed.sign(privateKey, Uint8List.fromList(rawEventBytes));
       cesrSig = await _cesrEncode(base64Encode(rawSig));
+      await _attachSignature(json['aid'] as String? ?? '', json['sequence_number'], cesrSig,
+          what: 'this interaction');
     }
 
     return InteractResult(
@@ -300,17 +311,7 @@ class LocalCoreKeriService extends KeriService {
   /// carrying on would only move the failure to them.
   Future<int> _keyInForce(Uint8List seed) async {
     final aid = await _ownIdentifier();
-    final res = await _client.get(
-      Uri.parse('$_baseUrl/api/kel?name=${Uri.encodeQueryComponent(aid)}'),
-    );
-    if (res.statusCode != 200) {
-      refusedByTheCore(res, 'Could not read the key log to find the key in force');
-    }
-    final events = (jsonDecode(res.body) as Map<String, dynamic>)['kel'];
-    final establishments = (events is List ? events : const [])
-        .whereType<Map>()
-        .where((e) => const {'icp', 'dip', 'rot', 'drt'}.contains(e['t']))
-        .toList();
+    final establishments = (await getCurrentKel(name: aid)).establishmentEvents;
     if (establishments.isEmpty) {
       throw Exception('the key log of $aid has no founding event, so there is no '
           'key in force to sign with');
@@ -345,18 +346,23 @@ class LocalCoreKeriService extends KeriService {
     return aid;
   }
 
+  /// The key event log of the identity held under [name], as the core serves
+  /// it: the parsed events and the bytes each was published as. The core
+  /// answers with a list of events, not text; this once returned that list as
+  /// a String and failed at runtime for every caller.
   @override
-  Future<String> getCurrentKel({required String name}) async {
+  Future<KeyEventLog> getCurrentKel({required String name}) async {
     final response = await _client.get(
-      Uri.parse('$_baseUrl/api/kel?name=$name'),
+      Uri.parse('$_baseUrl/api/kel?name=${Uri.encodeQueryComponent(name)}'),
     );
-
-    if (response.statusCode == 200) {
-      final json = jsonDecode(response.body);
-      return json['kel'] ?? '';
-    } else {
-      throw Exception('Failed to get KEL: ${response.statusCode}');
+    if (response.statusCode != 200) {
+      refusedByTheCore(response, 'Could not read the key log');
     }
+    final json = jsonDecode(response.body);
+    if (json is! Map<String, dynamic>) {
+      throw Exception('the core answered with something that is not a key log');
+    }
+    return KeyEventLog.fromJson(json);
   }
 
   @override

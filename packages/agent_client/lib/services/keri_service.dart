@@ -118,6 +118,50 @@ class WitnessReceiptResult {
   });
 }
 
+/// An identity's key event log as the core serves it.
+///
+/// [events] are the parsed events, oldest first, and [rawEventsB64] the bytes
+/// each was published as, in base64. Anything that checks a signature or
+/// recomputes an identifier must use the bytes: field order is part of an
+/// event, and re-serialising the parsed form produces something that verifies
+/// as nothing. An entry is empty where the core did not keep the bytes.
+class KeyEventLog {
+  final String aid;
+  final List<Map<String, dynamic>> events;
+  final List<String> rawEventsB64;
+  final int sequenceNumber;
+  final int eventCount;
+
+  KeyEventLog({
+    required this.aid,
+    required this.events,
+    required this.rawEventsB64,
+    required this.sequenceNumber,
+    required this.eventCount,
+  });
+
+  /// Reads the core's GET /api/kel answer.
+  factory KeyEventLog.fromJson(Map<String, dynamic> json) => KeyEventLog(
+        aid: json['aid'] as String? ?? '',
+        events: [
+          for (final e in json['kel'] as List? ?? const [])
+            if (e is Map) Map<String, dynamic>.from(e),
+        ],
+        rawEventsB64: [
+          for (final r in json['raw_events_b64'] as List? ?? const []) r is String ? r : '',
+        ],
+        sequenceNumber: json['sequence_number'] as int? ?? 0,
+        eventCount: json['event_count'] as int? ?? 0,
+      );
+
+  /// The events that set the identity's keys (founding and rotations), oldest
+  /// first. The last one names the key in force.
+  List<Map<String, dynamic>> get establishmentEvents => [
+        for (final e in events)
+          if (const {'icp', 'dip', 'rot', 'drt'}.contains(e['t'])) e,
+      ];
+}
+
 class KerlEntry {
   final String eventSaid;
   final List<Map<String, dynamic>> receipts;
@@ -169,7 +213,7 @@ abstract class KeriService {
     required List<int> data,
   });
 
-  Future<String> getCurrentKel({
+  Future<KeyEventLog> getCurrentKel({
     required String name,
   });
 

@@ -19,11 +19,20 @@ List<int> rawOf(String qb64) => base64Url.decode('A${qb64.substring(1)}').sublis
 // it is handed in force, a rotation puts the new key in force, an interaction
 // changes no key. It outlives any one LocalCoreKeriService, as the real core
 // outlives the app talking to it.
+//
+// Like the real core it records a signature over an event only if it verifies
+// under the key that event is checked against, and records the same one again
+// without complaint.
 class FakeCore {
   final kel = <Map<String, dynamic>>[];
   final sent = <String, Map<String, dynamic>>{};
   final List<int> eventBytes;
+  bool refuseSignatures = false;
   FakeCore(this.eventBytes);
+
+  // The key an event at [sn] is checked against: the one in force after it.
+  String keyFor(int sn) =>
+      (kel.sublist(0, sn + 1).lastWhere((e) => e['t'] != 'ixn')['k'] as List).first as String;
 
   String? get currentKey =>
       (kel.lastWhere((e) => e['t'] != 'ixn')['k'] as List).first as String;
@@ -37,7 +46,15 @@ class FakeCore {
               if (req.url.queryParameters['name'] != 'Eaid') {
                 return http.Response(jsonEncode({'error': 'no identity named that'}), 500);
               }
-              return http.Response(jsonEncode({'aid': 'Eaid', 'kel': kel}), 200);
+              return http.Response(
+                  jsonEncode({
+                    'aid': 'Eaid',
+                    'kel': kel,
+                    'raw_events_b64': [for (final _ in kel) base64Encode(eventBytes)],
+                    'sequence_number': kel.length - 1,
+                    'event_count': kel.length,
+                  }),
+                  200);
           }
           return http.Response('{}', 404);
         }
@@ -53,13 +70,29 @@ class FakeCore {
           case '/api/credential/issue':
             kel.add({'t': 'ixn', 's': sn});
           case '/api/cesr/encode':
-            return http.Response(jsonEncode({'cesr_sig': '0Bsig'}), 200);
+            // Carries the raw signature through, so the core can check it.
+            return http.Response(jsonEncode({'cesr_sig': body['raw_sig_b64']}), 200);
+          case '/api/events/signature':
+            final at = body['sequence_number'] as int;
+            final sig = base64Decode(body['cesr_signature'] as String);
+            if (refuseSignatures || at >= kel.length ||
+                !ed.verify(ed.PublicKey(rawOf(keyFor(at))), Uint8List.fromList(eventBytes), sig)) {
+              return http.Response(jsonEncode({'error': 'That signature does not cover this event'}), 400);
+            }
+            kel[at]['sig'] = body['cesr_signature'];
+            return http.Response(jsonEncode({'status': 'signed'}), 200);
           default:
             return http.Response('{}', 200);
         }
         final raw = base64Encode(eventBytes);
         return http.Response(
-            jsonEncode({'aid': 'Eaid', 'raw_bytes_b64': raw, 'ixn_raw_bytes_b64': raw}), 200);
+            jsonEncode({
+              'aid': 'Eaid',
+              'raw_bytes_b64': raw,
+              'ixn_raw_bytes_b64': raw,
+              'sequence_number': kel.length - 1,
+            }),
+            200);
       });
 }
 
@@ -187,5 +220,38 @@ void main() {
     await keri.inceptAid(name: 'Eaid', code: words.join(' '));
     core.kel.add({'t': 'rot', 's': '1', 'k': [KeyManager.keyAt(Bip39.mnemonicToSeed(Bip39.generateMnemonic()), 1).publicKeyEncoded]});
     await expectLater(keri.signPayload(name: 'Eaid', data: [1, 2, 3]), throwsException);
+  });
+
+  test('a rotation and an interaction end up signed in the key log', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    await keri.rotateAid(name: 'Eaid');
+    await keri.interactAid(name: 'Eaid');
+    await keri.rotateAid(name: 'Eaid');
+    expect(core.kel.map((e) => e['t']), ['icp', 'rot', 'ixn', 'rot']);
+    for (final (sn, event) in core.kel.indexed) {
+      expect(event['sig'], isNotNull, reason: 'event $sn (${event['t']}) was left unsigned in the log');
+      expect(
+          verifiesUnder(core.keyFor(sn), rotationEvent, base64Decode(event['sig'] as String)), isTrue,
+          reason: 'event $sn is signed by the key it is checked against');
+    }
+  });
+
+  test('a rotation whose signature the core refuses says so', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    core.refuseSignatures = true;
+    await expectLater(keri.rotateAid(name: 'Eaid'), throwsA(predicate((e) => '$e'.contains('was refused'))));
+    await expectLater(keri.interactAid(name: 'Eaid'), throwsException);
+  });
+
+  test('the key log is read as the list of events the core sends', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    await keri.rotateAid(name: 'Eaid');
+    final log = await keri.getCurrentKel(name: 'Eaid');
+    expect(log.aid, 'Eaid');
+    expect(log.events.map((e) => e['t']), ['icp', 'rot']);
+    expect(log.rawEventsB64, [base64Encode(rotationEvent), base64Encode(rotationEvent)]);
+    expect(log.sequenceNumber, 1);
+    expect(log.eventCount, 2);
+    expect(log.establishmentEvents.last['k'], [core.currentKey]);
   });
 }
