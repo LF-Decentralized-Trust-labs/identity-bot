@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:typed_data';
-import 'package:crypto/crypto.dart';
 import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:http/http.dart' as http;
 import '../crypto/bip39.dart';
@@ -71,9 +70,7 @@ class LocalCoreKeriService extends KeriService {
     String cesrSignature = '';
     if (rawBytesB64.isNotEmpty) {
       final seed = Bip39.mnemonicToSeed(mnemonic);
-      final seedHash = sha256.convert(seed.sublist(0, 32));
-      final privateSeed = Uint8List.fromList(seedHash.bytes);
-      final privateKey = ed.newKeyFromSeed(privateSeed);
+      final privateKey = ed.newKeyFromSeed(KeyManager.signingSeed(seed));
 
       final rawEventBytes = base64Decode(rawBytesB64);
       final rawSig = ed.sign(privateKey, Uint8List.fromList(rawEventBytes));
@@ -163,19 +160,14 @@ class LocalCoreKeriService extends KeriService {
       throw Exception('No identity keys found in secure storage.');
     }
 
-    // Derive the pre-rotated key (index 1) and the next-next key (index 2).
-    // Rotation is signed with the PRE-ROTATED key (index 1), not the original key.
+    // The new key is the one founding committed to (index 1), and it signs the
+    // rotation; the rotation commits to the key after it (index 2). Both come
+    // from KeyManager.signingSeed and nothing hashes them again: a second hash
+    // here once made the named key neither the committed one nor the signer.
     final seed = Bip39.mnemonicToSeed(mnemonic);
-    final seedBytes = Uint8List.fromList(seed.sublist(0, 32));
-
-    // Index 1: the key that was committed as pre-rotation at inception
-    final rot1Hash = sha256.convert([...seedBytes, 0x01]);
-    final rot1Seed = Uint8List.fromList(rot1Hash.bytes);
-    final rot1Keys = KeyManager.generateFromSeed(rot1Seed);
-
-    // Index 2: the new pre-rotation to commit
-    final rot2Hash = sha256.convert([...seedBytes, 0x02]);
-    final rot2Keys = KeyManager.generateFromSeed(Uint8List.fromList(rot2Hash.bytes));
+    final rot1Seed = KeyManager.signingSeed(seed, index: 1);
+    final rot1Keys = KeyManager.keyAt(seed, 1);
+    final rot2Keys = KeyManager.keyAt(seed, 2);
 
     // Step 1: Ask the Python driver to create the rotation event.
     final response = await _client.post(
@@ -240,9 +232,7 @@ class LocalCoreKeriService extends KeriService {
     String cesrSig = '';
     if (rawBytesB64.isNotEmpty) {
       final seed = Bip39.mnemonicToSeed(mnemonic);
-      final seedHash = sha256.convert(seed.sublist(0, 32));
-      final privateSeed = Uint8List.fromList(seedHash.bytes);
-      final privateKey = ed.newKeyFromSeed(privateSeed);
+      final privateKey = ed.newKeyFromSeed(KeyManager.signingSeed(seed));
       final rawEventBytes = base64Decode(rawBytesB64);
       final rawSig = ed.sign(privateKey, Uint8List.fromList(rawEventBytes));
       cesrSig = await _cesrEncode(base64Encode(rawSig));
@@ -271,12 +261,13 @@ class LocalCoreKeriService extends KeriService {
     }
 
     final seed = Bip39.mnemonicToSeed(mnemonic);
-    final seedHash = sha256.convert(seed.sublist(0, 32));
-    final privateSeed = Uint8List.fromList(seedHash.bytes);
-    final privateKey = ed.newKeyFromSeed(privateSeed);
+    // The key reported is the key that signed. It was derived from the
+    // already-hashed seed, hashing it twice, so it named a key that signs
+    // nothing.
+    final signingKeyPair = KeyManager.generateFromSeed(seed);
+    final privateKey = ed.newKeyFromSeed(KeyManager.signingSeed(seed));
 
     final rawSig = ed.sign(privateKey, Uint8List.fromList(data));
-    final signingKeyPair = KeyManager.generateFromSeed(privateSeed);
     final rawSigB64 = base64Encode(rawSig);
 
     // CESR-encode the signature via the stateless Python driver endpoint.
@@ -359,9 +350,7 @@ class LocalCoreKeriService extends KeriService {
       final mnemonic = await SecureKeyStore.loadMnemonic();
       if (mnemonic != null) {
         final seed = Bip39.mnemonicToSeed(mnemonic);
-        final seedHash = sha256.convert(seed.sublist(0, 32));
-        final privateSeed = Uint8List.fromList(seedHash.bytes);
-        final privateKey = ed.newKeyFromSeed(privateSeed);
+        final privateKey = ed.newKeyFromSeed(KeyManager.signingSeed(seed));
         final rawEventBytes = base64Decode(ixnRawBytesB64);
         final rawSig = ed.sign(privateKey, Uint8List.fromList(rawEventBytes));
         cesrSig = await _cesrEncode(base64Encode(rawSig));
@@ -414,9 +403,7 @@ class LocalCoreKeriService extends KeriService {
       final mnemonic = await SecureKeyStore.loadMnemonic();
       if (mnemonic != null) {
         final seed = Bip39.mnemonicToSeed(mnemonic);
-        final seedHash = sha256.convert(seed.sublist(0, 32));
-        final privateSeed = Uint8List.fromList(seedHash.bytes);
-        final privateKey = ed.newKeyFromSeed(privateSeed);
+        final privateKey = ed.newKeyFromSeed(KeyManager.signingSeed(seed));
         final saidBytes = base64Decode(presSaidB64);
         final rawSig = ed.sign(privateKey, Uint8List.fromList(saidBytes));
         cesrSig = await _cesrEncode(base64Encode(rawSig));

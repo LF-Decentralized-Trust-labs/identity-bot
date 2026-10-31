@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:blake3_dart/blake3_dart.dart';
+import '../crypto/constant_time.dart';
 
 /// Reading an AMD SEV-SNP attestation report.
 ///
@@ -106,15 +107,7 @@ class SnpReport {
   ///
   /// Compared in full, not by prefix: a report carrying the right first bytes
   /// and arbitrary remainder must not pass.
-  bool isBoundTo(String value) {
-    final want = bindReportData(value);
-    final got = reportData;
-    var diff = 0;
-    for (var i = 0; i < want.length; i++) {
-      diff |= want[i] ^ got[i];
-    }
-    return diff == 0;
-  }
+  bool isBoundTo(String value) => constantTimeEquals(bindReportData(value), reportData);
 }
 
 /// Recomputes what a guest puts in REPORT_DATA when it binds a report to a

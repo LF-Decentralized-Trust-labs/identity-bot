@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:pointycastle/key_derivators/api.dart';
 import 'package:pointycastle/key_derivators/argon2_native_int_impl.dart';
+import '../crypto/constant_time.dart';
 
 /// Stores and verifies the user's PIN and password as **Argon2id** hashes.
 ///
@@ -121,16 +122,7 @@ class PinPasswordService {
       return false;
     }
     final got = _argon2id(value, salt, memoryKiB: m, iterations: t, lanes: p);
-    return _constantTimeEquals(got, expected);
-  }
-
-  static bool _constantTimeEquals(Uint8List a, Uint8List b) {
-    if (a.length != b.length) return false;
-    var diff = 0;
-    for (var i = 0; i < a.length; i++) {
-      diff |= a[i] ^ b[i];
-    }
-    return diff == 0;
+    return constantTimeEquals(got, expected);
   }
 
   // ── PIN ─────────────────────────────────────────────────────────────────

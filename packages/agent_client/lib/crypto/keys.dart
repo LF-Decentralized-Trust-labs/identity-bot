@@ -46,35 +46,33 @@ class KeyManager {
   /// A BIP39 seed is 64 bytes and Ed25519 wants 32, so something has to give.
   /// What gives is a SHA-256 of the first half — not a truncation of it. The
   /// difference is invisible until a signature is checked by somebody else.
-  static Uint8List signingSeed(Uint8List seed) {
-    return Uint8List.fromList(sha256.convert(seed.sublist(0, 32)).bytes);
+  ///
+  /// [index] is which key in the identity's chain of keys: 0 is the key it was
+  /// founded with, 1 the next key that founding committed to, 2 the key the
+  /// first rotation commits to, and so on. Key n for n > 0 is a SHA-256 of the
+  /// first half and the byte n. Every key, at every index, comes from here:
+  /// rotation once hashed a second time on top of this, so the key it named was
+  /// neither the one founding had committed to nor the one that signed.
+  static Uint8List signingSeed(Uint8List seed, {int index = 0}) {
+    if (index < 0 || index > 255) {
+      throw ArgumentError.value(index, 'index', 'a key index is one byte');
+    }
+    final half = seed.sublist(0, 32);
+    return Uint8List.fromList(sha256.convert(index == 0 ? half : [...half, index]).bytes);
   }
 
-  static AgentKeyPair generateFromSeed(Uint8List seed) {
-    final privateSeed = signingSeed(seed);
-
-    final privateKey = ed.newKeyFromSeed(privateSeed);
-    final publicKey = ed.public(privateKey);
-
+  /// The key pair at [index] in the identity's chain (see [signingSeed]).
+  static AgentKeyPair keyAt(Uint8List seed, int index) {
+    final privateKey = ed.newKeyFromSeed(signingSeed(seed, index: index));
     return AgentKeyPair(
-      publicKey: Uint8List.fromList(publicKey.bytes),
+      publicKey: Uint8List.fromList(ed.public(privateKey).bytes),
       privateKey: Uint8List.fromList(privateKey.bytes),
     );
   }
 
-  static AgentKeyPair generateNextKeyFromSeed(Uint8List seed) {
-    final nextSeedInput = Uint8List.fromList([...seed.sublist(0, 32), 0x01]);
-    final seedHash = sha256.convert(nextSeedInput);
-    final privateSeed = Uint8List.fromList(seedHash.bytes);
+  static AgentKeyPair generateFromSeed(Uint8List seed) => keyAt(seed, 0);
 
-    final privateKey = ed.newKeyFromSeed(privateSeed);
-    final publicKey = ed.public(privateKey);
-
-    return AgentKeyPair(
-      publicKey: Uint8List.fromList(publicKey.bytes),
-      privateKey: Uint8List.fromList(privateKey.bytes),
-    );
-  }
+  static AgentKeyPair generateNextKeyFromSeed(Uint8List seed) => keyAt(seed, 1);
 
   static ({AgentKeyPair signing, AgentKeyPair next}) generateKeysFromMnemonic(
     List<String> mnemonic,

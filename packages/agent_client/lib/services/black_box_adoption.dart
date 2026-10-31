@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:math';
+import '../crypto/constant_time.dart';
 
 /// Renting an agent, from the app's side.
 ///
@@ -66,7 +67,7 @@ class BlackBoxAdoption {
         'started.',
       );
     }
-    if (!_constantTimeEquals(state, pending)) {
+    if (!constantTimeEquals(state.codeUnits, pending.codeUnits)) {
       throw const AdoptionRefused(
         'That link belongs to a different setup than the one you started. '
         'It was not opened.',
@@ -115,18 +116,6 @@ class BlackBoxAdoption {
   String _newNonce() {
     final bytes = List<int>.generate(32, (_) => _random.nextInt(256));
     return base64Url.encode(bytes).replaceAll('=', '');
-  }
-
-  /// Compares without leaking where two values first differ. The nonce is not
-  /// a secret an attacker is guessing character by character, but comparing it
-  /// in variable time is a habit worth not having.
-  static bool _constantTimeEquals(String a, String b) {
-    if (a.length != b.length) return false;
-    var diff = 0;
-    for (var i = 0; i < a.length; i++) {
-      diff |= a.codeUnitAt(i) ^ b.codeUnitAt(i);
-    }
-    return diff == 0;
   }
 }
 
