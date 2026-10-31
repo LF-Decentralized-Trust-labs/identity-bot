@@ -5,7 +5,6 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/sha256"
-	"encoding/base64"
 	"fmt"
 	"math/big"
 )
@@ -226,24 +225,6 @@ func keyFromMachineVerkey(qb64 string) ([]byte, error) {
 		return raw, nil
 	}
 	return KeyFromVerkeyQB64(qb64)
-}
-
-// decodeTwoCharCode recovers the raw bytes behind a two-character code.
-//
-// TWO lead bytes, not one. The count is (3 - size mod 3) mod 3, and a 64-byte
-// signature is 1 mod 3, so encoding prepends two zero bytes and the code then
-// replaces the two base64 characters they produced. Decoding has to restore both
-// and drop both — assuming one leaves the whole value shifted by a byte, which
-// is a signature that never verifies and no error to say why.
-func decodeTwoCharCode(qb64 string) ([]byte, error) {
-	raw, err := base64.RawURLEncoding.DecodeString("AA" + qb64[2:])
-	if err != nil {
-		return nil, fmt.Errorf("signature is not valid base64url: %w", err)
-	}
-	if len(raw) != 66 {
-		return nil, fmt.Errorf("expected 64 signature bytes, got %d", len(raw)-2)
-	}
-	return raw[2:], nil
 }
 
 // uncompressedP256 returns the X9.63 form, decompressing when needed, because

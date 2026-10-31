@@ -2,9 +2,7 @@ package login
 
 import (
 	"crypto/ed25519"
-	"encoding/base64"
 	"fmt"
-	"strings"
 
 	"identity-agent-core/iacrypto"
 )
@@ -41,29 +39,11 @@ func verifyUTF8(body, sigQB64 string, pub []byte) (bool, error) {
 	if !hasPrefix(sigQB64, "0B") {
 		return false, fmt.Errorf("expected Ed25519 sig code 0B")
 	}
-	raw, err := decodeMatterRaw(sigQB64, "0B", ed25519.SignatureSize)
+	raw, err := iacrypto.DecodeEd25519SignatureQB64(sigQB64)
 	if err != nil {
 		return false, err
 	}
 	return ed25519.Verify(pub, []byte(body), raw), nil
-}
-
-func decodeMatterRaw(qb64, code string, expectedLen int) ([]byte, error) {
-	if !hasPrefix(qb64, code) {
-		return nil, fmt.Errorf("code prefix mismatch")
-	}
-	cs := len(code)
-	ps := cs % 4
-	padPrefix := strings.Repeat("A", ps)
-	paw, err := base64.RawURLEncoding.DecodeString(padPrefix + qb64[cs:])
-	if err != nil {
-		return nil, err
-	}
-	if len(paw) < ps+expectedLen {
-		return nil, fmt.Errorf("matter raw too short")
-	}
-	raw := paw[ps : ps+expectedLen]
-	return raw, nil
 }
 
 func hasPrefix(s, prefix string) bool {

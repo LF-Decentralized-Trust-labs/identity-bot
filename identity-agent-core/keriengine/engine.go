@@ -188,7 +188,7 @@ func verifiedBy(aid, key string, raw []byte, sig string) error {
 		return fmt.Errorf("the key in force for %s is not known here (its log was restored without the "+
 			"bytes it was published as, and no key was given with it), so nothing is appended to it", aid)
 	}
-	sigRaw, err := keri.MatterRaw(keri.CodeEd25519Sig, sig, 64)
+	sigRaw, err := iacrypto.DecodeEd25519SignatureQB64(sig)
 	if err != nil {
 		return fmt.Errorf("the signature over an event of %s is unreadable, so it is not appended: %w", aid, err)
 	}
