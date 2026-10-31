@@ -8,7 +8,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
+	"identity-agent-core/internal/atomicfile"
 	"identity-agent-core/internal/coretypes"
 )
 
@@ -64,4 +66,26 @@ func statusForUnreadable(err error, otherwise int) int {
 		return http.StatusServiceUnavailable
 	}
 	return otherwise
+}
+
+// staleTemporaryAge is how long a temporary must have sat untouched before
+// it is taken for the leftover of a write that stopped. A write takes
+// milliseconds; this is generous so that one in flight from another process
+// sharing the data directory is never touched.
+const staleTemporaryAge = 10 * time.Minute
+
+// removeStaleTemporaries clears what writes that stopped part way left in the
+// data directory, at every depth. Each is a whole or partial copy of a record,
+// some of them private key material, and nothing else would ever remove them.
+func (s *CoreServer) removeStaleTemporaries() {
+	if s.DataDir == "" {
+		return
+	}
+	removed, err := atomicfile.RemoveStale(s.DataDir, staleTemporaryAge)
+	for _, p := range removed {
+		log.Printf("[store] removed %s, left by a write that stopped part way", p)
+	}
+	if err != nil {
+		log.Printf("[store] could not finish clearing what stopped writes left behind: %v", err)
+	}
 }

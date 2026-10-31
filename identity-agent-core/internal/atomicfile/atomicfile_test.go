@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 )
 
 // A write replaces the file whole, with the mode asked for, and leaves
@@ -78,6 +79,67 @@ func TestAStoppedWriteLeavesNoPartialFile(t *testing.T) {
 		}
 		if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 			t.Fatalf("a stopped write left %v", entries)
+		}
+	}
+}
+
+// Only a temporary this package names is one: the target's name, ".tmp-"
+// and digits.
+func TestATemporaryIsRecognisedByItsWholeName(t *testing.T) {
+	for name, want := range map[string]bool{
+		"didcomm_keys.json.tmp-123456": true,
+		"shares_held/E.json.tmp-9":     true,
+		"notes.tmp-draft":              false,
+		".tmp-123":                     false,
+		"record.json.tmp-":             false,
+		"record.json":                  false,
+	} {
+		if IsTemp(name) != want {
+			t.Errorf("IsTemp(%q) = %v, want %v", name, !want, want)
+		}
+	}
+}
+
+// Leftovers are removed at every depth once they are old, and one that is
+// fresh, which may be a write in flight, is not. Nothing else is touched.
+func TestStaleTemporariesAreRemovedAndFreshOnesKept(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "shares_held")
+	if err := os.Mkdir(sub, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	write := func(path string, mtime time.Time) {
+		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, mtime, mtime); err != nil {
+			t.Fatal(err)
+		}
+	}
+	staleTop := filepath.Join(root, "didcomm_keys.json.tmp-1")
+	staleSub := filepath.Join(sub, "E.json.tmp-2")
+	fresh := filepath.Join(sub, "F.json.tmp-3")
+	kept := filepath.Join(sub, "E.json")
+	write(staleTop, old)
+	write(staleSub, old)
+	write(fresh, time.Now())
+	write(kept, old)
+	removed, err := RemoveStale(root, 10*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(removed) != 2 {
+		t.Fatalf("removed %v, want the two stale temporaries", removed)
+	}
+	for _, p := range []string{staleTop, staleSub} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("%s was left", p)
+		}
+	}
+	for _, p := range []string{fresh, kept} {
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("%s was removed: %v", p, err)
 		}
 	}
 }

@@ -571,6 +571,8 @@ func (s *CoreServer) Start() error {
 		log.Printf("[identity-agent-core] *** DEVELOPMENT BUILD *** — not a production build; it trusts development signing keys only and must never be used in production")
 	}
 
+	s.removeStaleTemporaries()
+
 	// Build the router now that all overlay routes (MountExtraRoutes) are
 	// registered. Idempotent-safe: Start guards against double-run above.
 	if s.router == nil {

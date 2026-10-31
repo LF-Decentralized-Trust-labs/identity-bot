@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // Write replaces path with data, readable as perm.
@@ -112,8 +113,51 @@ func syncDir(dir string) error {
 }
 
 // IsTemp reports whether name is a temporary file one of these writes made
-// and, if it is still there, a write that stopped part way left behind. A
-// directory that sweeps its own leftovers can recognise them by it.
+// and, if it is still there, a write that stopped part way left behind: the
+// target's name, ".tmp-", and the digits os.CreateTemp chose.
 func IsTemp(name string) bool {
-	return strings.Contains(filepath.Base(name), ".tmp-")
+	base := filepath.Base(name)
+	i := strings.LastIndex(base, ".tmp-")
+	if i <= 0 || i+len(".tmp-") == len(base) {
+		return false
+	}
+	for _, c := range base[i+len(".tmp-"):] {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// RemoveStale removes, under root and every directory below it, the
+// temporaries that writes which stopped part way left behind, and returns
+// what it removed. Only those untouched for olderThan: a write in flight,
+// from this process or another sharing the directory, is touching its
+// temporary now. Symbolic links are not followed.
+//
+// A leftover is a complete or partial copy of whatever was being written,
+// and some of what is written here is private key material, so leftovers are
+// not left to accumulate.
+func RemoveStale(root string, olderThan time.Duration) ([]string, error) {
+	var removed []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() || !d.Type().IsRegular() || !IsTemp(d.Name()) {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil || time.Since(info.ModTime()) < olderThan {
+			return nil
+		}
+		if err := os.Remove(path); err == nil {
+			removed = append(removed, path)
+		}
+		return nil
+	})
+	return removed, err
 }

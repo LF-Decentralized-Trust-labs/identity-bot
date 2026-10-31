@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"identity-agent-core/didcomm"
 	"identity-agent-core/internal/coretypes"
@@ -173,5 +174,33 @@ func TestAnUnreadableRecordsErrorNamesNoPath(t *testing.T) {
 	_, err := readKeptRecord(path, "a record", "nothing works", errRecordUnreadable, &v)
 	if err == nil || strings.Contains(err.Error(), dir) || strings.Contains(err.Error(), "record.json") {
 		t.Fatalf("the error names where the data lives: %v", err)
+	}
+}
+
+// At start, what stopped writes left anywhere in the data directory is
+// cleared once it is old, and a fresh one is left for the write that owns it.
+func TestStartClearsStaleTemporaries(t *testing.T) {
+	s := &CoreServer{DataDir: t.TempDir()}
+	sub := filepath.Join(s.DataDir, "shares_held")
+	if err := os.Mkdir(sub, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(sub, "E.json.tmp-1")
+	fresh := filepath.Join(s.DataDir, "didcomm_peers.json.tmp-2")
+	for _, p := range []string{stale, fresh} {
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatal(err)
+	}
+	s.removeStaleTemporaries()
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("a stale temporary was left: %v", err)
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Fatalf("a fresh temporary was removed: %v", err)
 	}
 }
