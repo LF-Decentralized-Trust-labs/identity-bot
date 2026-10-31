@@ -2,6 +2,7 @@ import express from "express";
 import {
   keyFromIdentityAgent,
   parseRfc3339,
+  parseStrictJson,
   verifyLoginAssertion,
   type LoginAssertion,
 } from "@identity-agent/login-verify";
@@ -19,7 +20,16 @@ let goldenOk = false;
 let goldenReason = "not run";
 
 const app = express();
-app.use(express.json({ limit: "1mb" }));
+// The body is kept as sent, so the assertion in it is read from its text as
+// the core reads one: a repeated key is gone once JSON.parse has run.
+app.use(
+  express.json({
+    limit: "1mb",
+    verify: (req, _res, buf) => {
+      (req as unknown as { rawBody?: Buffer }).rawBody = buf;
+    },
+  }),
+);
 
 app.get("/health", (_req, res) => {
   res.json({
@@ -33,6 +43,14 @@ app.get("/health", (_req, res) => {
 
 app.post("/verify", async (req, res) => {
   try {
+    const raw = (req as unknown as { rawBody?: Buffer }).rawBody;
+    let body: Record<string, unknown> | undefined;
+    try {
+      body = raw ? (parseStrictJson(new TextDecoder("utf-8", { fatal: true }).decode(raw)) as Record<string, unknown>) : undefined;
+    } catch (err) {
+      return res.status(400).json({ ok: false, reason: `the request cannot be read: ${(err as Error).message}` });
+    }
+    req.body = body;
     const assertion = req.body?.assertion as LoginAssertion | undefined;
     const expectedAudience = req.body?.expected_audience ?? req.body?.expectedAudience;
     const expectedNonce = req.body?.expected_nonce ?? req.body?.expectedNonce;
@@ -64,7 +82,15 @@ app.post("/verify", async (req, res) => {
     };
 
     if (skipDtCheck) verifyOpts.skipDtCheck = true;
-    if (referenceNow) verifyOpts.nowMs = parseRfc3339(referenceNow);
+    if (referenceNow !== undefined) {
+      // A reference time that cannot be read is the caller's mistake, said as
+      // such: passed on as NaN it once put every dt inside the window.
+      const nowMs = parseRfc3339(referenceNow);
+      if (!Number.isFinite(nowMs)) {
+        return res.status(400).json({ ok: false, reason: "reference_now_rfc3339 is not an RFC 3339 time" });
+      }
+      verifyOpts.nowMs = nowMs;
+    }
 
     const result = await verifyLoginAssertion(assertion, verifyOpts);
 

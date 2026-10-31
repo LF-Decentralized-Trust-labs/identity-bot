@@ -122,10 +122,43 @@ async function main() {
     });
     if (otherSiteRes.status !== 401) fail("an assertion for another site was accepted");
 
+    // A reference time with no zone cannot be read. It is refused as the
+    // caller's mistake, never passed on as a clock that puts every dt inside
+    // the window — which made a 2026 assertion valid "in 2030".
+    const verifyAt = (referenceNow, assertion = fresh.assertion) =>
+      fetch(`${baseUrl}/verify`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          assertion,
+          expected_audience: fresh.assertion.audience,
+          expected_nonce: fresh.assertion.nonce,
+          expected_site_aid: fresh.assertion.site_aid,
+          reference_now_rfc3339: referenceNow,
+        }),
+      });
+    const noZone = await verifyAt("2030-01-01T00:00:00");
+    if (noZone.status !== 400) fail(`a reference time with no zone was answered ${noZone.status}`);
+    const later = await verifyAt("2030-01-01T00:00:00Z");
+    if (later.status !== 401) fail(`an assertion checked four years later was answered ${later.status}`);
+
+    // A repeated key is refused from the text: JSON.parse would keep the last.
+    const text = JSON.stringify({
+      assertion: fresh.assertion,
+      expected_audience: fresh.assertion.audience,
+      expected_nonce: fresh.assertion.nonce,
+      expected_site_aid: fresh.assertion.site_aid,
+    }).replace('"nonce":', '"nonce":"another","nonce":');
+    const doubled = await fetch(`${baseUrl}/verify`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: text,
+    });
+    if (doubled.status !== 400) fail(`a repeated key was answered ${doubled.status}`);
+
     console.log("✅ login-verify-ms selftest passed");
     console.log(`   golden said=${g.said}`);
     console.log(`   canonical_body_len=${g.canonical_body_len}`);
-    console.log(`   HTTP POST /verify: key from the key log, caller's key and another site refused`);
+    console.log(`   HTTP POST /verify: key from the key log, caller's key and another site refused,`);
+    console.log(`   an unreadable reference time and a repeated key refused`);
   } finally {
     await ia.close();
     server.kill("SIGTERM");

@@ -17,6 +17,7 @@ import type {
   CreateChallengeOptions,
   LoginAssertion,
   LoginChallenge,
+  SessionState,
   SiteIdentity,
   VerifyAssertionOptions,
   VerifyAssertionResult,
@@ -31,6 +32,9 @@ export interface VerifierConfig {
    *  Without one every assertion is refused; see `keyFromIdentityAgent`. */
   resolveKey?: KeyResolver;
 }
+
+/** The states in which a sign-in is still waiting for its answer. */
+const CALLBACK_STATES = new Set<SessionState>(["created", "scanned", "connected"]);
 
 export class IdentityAgentVerifier {
   private site: SiteIdentity;
@@ -119,7 +123,16 @@ export class IdentityAgentVerifier {
     assertion: LoginAssertion,
     opts: VerifyAssertionOptions,
   ): Promise<VerifyAssertionResult> {
-    return verifyLoginAssertion(assertion, { ...opts, resolveKey: this.resolveKey });
+    // Only what this method promises to take: anything else on the caller's
+    // object (a key of its own, a clock, a flag to skip the time check) is
+    // not passed on to the verifier.
+    return verifyLoginAssertion(assertion, {
+      expectedAudience: opts.expectedAudience,
+      expectedNonce: opts.expectedNonce,
+      expectedSiteAid: opts.expectedSiteAid,
+      maxSkewSeconds: opts.maxSkewSeconds,
+      resolveKey: this.resolveKey,
+    });
   }
 
   async handleCallback(
@@ -131,8 +144,11 @@ export class IdentityAgentVerifier {
     if (!rec) {
       return { ok: false, reason: "unknown session" };
     }
-    if (rec.state === "verified") {
-      return { ok: true };
+    // Only a sign-in still waiting for its answer can be answered. An expired
+    // or declined one stays that way, and a verified one is not verified
+    // again by whatever is posted next.
+    if (!CALLBACK_STATES.has(rec.state)) {
+      return { ok: false, reason: `this sign-in is ${rec.state}, so it cannot be answered` };
     }
 
     const result = await this.verifyAssertion(assertion, {

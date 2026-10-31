@@ -35,6 +35,13 @@ const result = await verifyLoginAssertion(assertion, {
 });
 ```
 
+An assertion is read by the Identity Agent core's rules, so the two accept
+exactly the same ones. A repeated key, and a whole number written as `1.0`,
+can only be seen in the text, which `JSON.parse` discards: where you receive an
+assertion as text, read it with `readAssertion(text)` before verifying it.
+`mountIdentityAgentLoginRoutes` does this for its callback when it is mounted
+before any JSON body parser of your own.
+
 `generateDevSiteIdentity` is for development only. It makes an identifier with
 no key log behind it, so an up-to-date Identity Agent refuses every challenge it
 signs.

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,9 +39,32 @@ type loginVectorFile struct {
 	CanonicalAssertions []canonicalCase `json:"canonical_assertions"`
 	CanonicalChallenges []canonicalCase `json:"canonical_challenges"`
 	Description         string          `json:"description"`
+	Ed25519Signatures   []ed25519Case   `json:"ed25519_signatures"`
 	NonTransferableAID  []spellingCase  `json:"non_transferable_aid"`
 	SignedAssertion     signedAssertion `json:"signed_assertion"`
+	Times               []timeCase      `json:"times"`
 	VerkeyQB64          []spellingCase  `json:"verkey_qb64"`
+}
+
+// A signature over message under a raw key, and whether the core's login
+// verifier accepts it. These are the cases where Ed25519 verifiers are known
+// to differ: a key of small order, an R of mixed order, an S of the group
+// order or more.
+type ed25519Case struct {
+	Name         string `json:"name"`
+	PublicKeyHex string `json:"public_key_hex"`
+	Message      string `json:"message"`
+	Sig          string `json:"sig"`
+	GoAccepts    bool   `json:"go_accepts"`
+}
+
+// A time as a login carries it (dt, expiry), whether the core reads it, and
+// the instant it reads, in milliseconds since the epoch.
+type timeCase struct {
+	Name    string `json:"name"`
+	Value   string `json:"value"`
+	GoReads bool   `json:"go_reads"`
+	UnixMs  *int64 `json:"unix_ms,omitempty"`
 }
 
 // A document, and what the core makes of it: whether it reads it at all, and
@@ -141,8 +165,8 @@ func recomputeLoginVectors(file loginVectorFile) (loginVectorFile, error) {
 	out.CanonicalAssertions = make([]canonicalCase, len(file.CanonicalAssertions))
 	for i, c := range file.CanonicalAssertions {
 		out.CanonicalAssertions[i] = canonicalCase{Name: c.Name, JSON: c.JSON}
-		var a Assertion
-		if json.Unmarshal([]byte(c.JSON), &a) != nil {
+		a, err := ReadAssertion([]byte(c.JSON))
+		if err != nil {
 			continue
 		}
 		said, err := assertionDigest(a)
@@ -157,8 +181,8 @@ func recomputeLoginVectors(file loginVectorFile) (loginVectorFile, error) {
 	out.CanonicalChallenges = make([]canonicalCase, len(file.CanonicalChallenges))
 	for i, c := range file.CanonicalChallenges {
 		out.CanonicalChallenges[i] = canonicalCase{Name: c.Name, JSON: c.JSON}
-		var b ChallengeBundle
-		if json.Unmarshal([]byte(c.JSON), &b) != nil {
+		b, err := ReadChallengeBundle([]byte(c.JSON))
+		if err != nil {
 			continue
 		}
 		out.CanonicalChallenges[i].GoReads = true
@@ -170,6 +194,26 @@ func recomputeLoginVectors(file loginVectorFile) (loginVectorFile, error) {
 	// way the core reads it.
 	out.VerkeyQB64 = decideSpellings(file.VerkeyQB64, iacrypto.KeyFromVerkeyQB64)
 	out.NonTransferableAID = decideSpellings(file.NonTransferableAID, iacrypto.KeyFromNonTransferableAID)
+
+	out.Times = make([]timeCase, len(file.Times))
+	for i, c := range file.Times {
+		out.Times[i] = timeCase{Name: c.Name, Value: c.Value}
+		if at, err := parseRFC3339(c.Value); err == nil {
+			ms := at.UnixMilli()
+			out.Times[i].GoReads, out.Times[i].UnixMs = true, &ms
+		}
+	}
+
+	out.Ed25519Signatures = make([]ed25519Case, len(file.Ed25519Signatures))
+	for i, c := range file.Ed25519Signatures {
+		out.Ed25519Signatures[i] = c
+		pub, err := hex.DecodeString(c.PublicKeyHex)
+		if err != nil {
+			return out, fmt.Errorf("signature case %q: the key is not hex", c.Name)
+		}
+		ok, verr := VerifyString(c.Message, c.Sig, pub)
+		out.Ed25519Signatures[i].GoAccepts = verr == nil && ok
+	}
 
 	s, err := recomputeSignedAssertion(file.SignedAssertion)
 	if err != nil {
@@ -201,8 +245,8 @@ func recomputeSignedAssertion(in signedAssertion) (signedAssertion, error) {
 	}
 	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
 
-	var a Assertion
-	if err := json.Unmarshal([]byte(in.AssertionJSON), &a); err != nil {
+	a, err := ReadAssertion([]byte(in.AssertionJSON))
+	if err != nil {
 		return in, fmt.Errorf("the signed assertion is one the core does not read: %w", err)
 	}
 	a.Sig = ""
@@ -283,6 +327,26 @@ func spellSignature(name, sig string) (string, error) {
 		return sig[:len(sig)-1], nil
 	case "the last character changed":
 		return sig[:len(sig)-1] + string(last), nil
+	case "S plus the group order":
+		// The same signature with S + L in place of S: the same point, and a
+		// verifier that does not insist on S < L accepts it.
+		raw, err := iacrypto.DecodeEd25519SignatureQB64(sig)
+		if err != nil {
+			return "", err
+		}
+		le := func(b []byte) *big.Int {
+			r := make([]byte, len(b))
+			for i := range b {
+				r[len(b)-1-i] = b[i]
+			}
+			return new(big.Int).SetBytes(r)
+		}
+		order, _ := new(big.Int).SetString("7237005577332262213973186563042994240857116359379907606001950938285454250989", 10)
+		s := new(big.Int).Add(le(raw[32:]), order).FillBytes(make([]byte, 32))
+		for i, j := 0, 31; i < j; i, j = i+1, j-1 {
+			s[i], s[j] = s[j], s[i]
+		}
+		return iacrypto.MatterFixedQB64("0B", append(append([]byte{}, raw[:32]...), s...))
 	}
 	return "", fmt.Errorf("no signature spelling %q: say in spellSignature how it is made", name)
 }
@@ -305,6 +369,19 @@ func describeLoginVectorDrift(file, now loginVectorFile) string {
 				fmt.Fprintf(&b, "  %s %q: the file says accepted=%v %s, the core accepted=%v %s\n", kind, was[i].Name,
 					was[i].GoAccepts, was[i].RawHex, is[i].GoAccepts, is[i].RawHex)
 			}
+		}
+	}
+	for i := range file.Times {
+		if i < len(now.Times) && (file.Times[i].GoReads != now.Times[i].GoReads ||
+			fmt.Sprint(file.Times[i].UnixMs) != fmt.Sprint(now.Times[i].UnixMs)) {
+			fmt.Fprintf(&b, "  time %q: the file says reads=%v, the core reads=%v\n", file.Times[i].Name,
+				file.Times[i].GoReads, now.Times[i].GoReads)
+		}
+	}
+	for i := range file.Ed25519Signatures {
+		if i < len(now.Ed25519Signatures) && file.Ed25519Signatures[i] != now.Ed25519Signatures[i] {
+			fmt.Fprintf(&b, "  signature case %q: the file says accepted=%v, the core %v\n",
+				file.Ed25519Signatures[i].Name, file.Ed25519Signatures[i].GoAccepts, now.Ed25519Signatures[i].GoAccepts)
 		}
 	}
 	canon("assertion", file.CanonicalAssertions, now.CanonicalAssertions)

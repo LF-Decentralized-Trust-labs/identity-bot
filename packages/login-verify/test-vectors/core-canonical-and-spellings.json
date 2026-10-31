@@ -29,11 +29,9 @@
       "said": "ELmVzd1x2YRcWMTvoAVnhGqOSvR_KlkQv8TeR6npMPXD"
     },
     {
-      "name": "an unpaired surrogate becomes U+FFFD",
+      "name": "an unpaired surrogate is refused",
       "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"o\",\"audience\":\"a\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"x\\ud800y\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\"}",
-      "go_reads": true,
-      "canonical_body": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAid\",\"relationship_aid_oobi\":\"o\",\"audience\":\"a\",\"nonce\":\"n\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"x�y\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\"}",
-      "said": "EOjocWB7b7Gooz5XMZ5P1uDYilAvqV4txvHmJLY5ukfT"
+      "go_reads": false
     },
     {
       "name": "control characters",
@@ -71,11 +69,9 @@
       "said": "ECm7vG5ZZbUlpeROrhvsFYGrB0JXCMYf9fenh1EbBaNu"
     },
     {
-      "name": "unknown fields are ignored",
+      "name": "unknown fields are refused",
       "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"extra\":{\"b\":1},\"disclosures\":{},\"presented_acdcs\":[],\"sig\":\"0Bxx\"}",
-      "go_reads": true,
-      "canonical_body": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"\",\"relationship_aid_oobi\":\"\",\"audience\":\"\",\"nonce\":\"\",\"dt\":\"\",\"disclosures\":{},\"presented_acdcs\":[]}",
-      "said": "EMf8BeKcUy9jiRw9xowr-l_eZqtiEo6krbRwyKEVGLpD"
+      "go_reads": false
     },
     {
       "name": "a number disclosure is refused",
@@ -100,6 +96,56 @@
     {
       "name": "disclosures that are a list are refused",
       "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"disclosures\":[\"a\"],\"presented_acdcs\":[]}",
+      "go_reads": false
+    },
+    {
+      "name": "a field named in another case is refused",
+      "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"E\",\"nonce\":\"n\",\"Nonce\":\"evil\",\"audience\":\"a\",\"disclosures\":{},\"presented_acdcs\":[]}",
+      "go_reads": false
+    },
+    {
+      "name": "a field only in another case is refused",
+      "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"AUDIENCE\":\"evil\",\"disclosures\":{}}",
+      "go_reads": false
+    },
+    {
+      "name": "signed fields in another case are refused",
+      "json": "{\"v\":\"x\",\"t\":\"y\",\"D\":\"Ed\",\"P_KEL\":\"k\",\"Site_Aid\":\"S\"}",
+      "go_reads": false
+    },
+    {
+      "name": "a repeated field is refused",
+      "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"nonce\":\"a\",\"nonce\":\"b\",\"disclosures\":{},\"presented_acdcs\":[]}",
+      "go_reads": false
+    },
+    {
+      "name": "a repeated disclosure is refused",
+      "json": "{\"v\":\"x\",\"t\":\"y\",\"disclosures\":{\"a\":\"1\",\"a\":\"2\"}}",
+      "go_reads": false
+    },
+    {
+      "name": "two different unpaired surrogates are refused",
+      "json": "{\"v\":\"x\",\"t\":\"y\",\"disclosures\":{\"\\ud800\":\"a\",\"\\ud801\":\"b\"}}",
+      "go_reads": false
+    },
+    {
+      "name": "an unpaired low surrogate is refused",
+      "json": "{\"v\":\"x\",\"t\":\"y\",\"i\":\"\\udc00x\"}",
+      "go_reads": false
+    },
+    {
+      "name": "a signature that is not text is refused",
+      "json": "{\"v\":\"x\",\"t\":\"y\",\"presented_acdcs\":null,\"sig\":5}",
+      "go_reads": false
+    },
+    {
+      "name": "a document that is null is refused",
+      "json": "null",
+      "go_reads": false
+    },
+    {
+      "name": "a document that is a list is refused",
+      "json": "[]",
       "go_reads": false
     }
   ],
@@ -165,9 +211,77 @@
       "name": "a text required flag is refused",
       "json": "{\"v\":\"ASK1\",\"t\":1,\"requested_credentials\":[{\"schema_said\":\"E\",\"required\":\"yes\"}]}",
       "go_reads": false
+    },
+    {
+      "name": "a whole number written with a fraction is refused",
+      "json": "{\"v\":\"ASK1\",\"t\":1.0}",
+      "go_reads": false
+    },
+    {
+      "name": "a whole number written with an exponent is refused",
+      "json": "{\"v\":\"ASK1\",\"t\":1e0}",
+      "go_reads": false
+    },
+    {
+      "name": "negative zero is refused",
+      "json": "{\"v\":\"ASK1\",\"t\":-0}",
+      "go_reads": false
+    },
+    {
+      "name": "a whole number too large to be exact is refused",
+      "json": "{\"v\":\"ASK1\",\"t\":9007199254740993}",
+      "go_reads": false
+    },
+    {
+      "name": "a minimum score written with a fraction is refused",
+      "json": "{\"v\":\"ASK1\",\"t\":1,\"requested_score\":{\"min_score\":5.0}}",
+      "go_reads": false
+    },
+    {
+      "name": "a credential field in another case is refused",
+      "json": "{\"v\":\"ASK1\",\"t\":1,\"requested_credentials\":[{\"schema_said\":\"s\",\"required\":null,\"Required\":true}]}",
+      "go_reads": false
+    },
+    {
+      "name": "the action in another case is refused",
+      "json": "{\"v\":\"ASK1\",\"T\":2}",
+      "go_reads": false
+    },
+    {
+      "name": "a repeated field is refused",
+      "json": "{\"v\":\"ASK1\",\"t\":1,\"nonce\":\"a\",\"nonce\":\"b\"}",
+      "go_reads": false
+    },
+    {
+      "name": "unknown fields are refused",
+      "json": "{\"v\":\"ASK1\",\"t\":1,\"extra\":true}",
+      "go_reads": false
     }
   ],
   "description": "Produced by the Go core: canonical bodies, accept/refuse decisions for key and signature spellings, and a signed assertion. The TypeScript verifier must agree byte for byte. Regenerated and checked by TestThePublishedLoginVectorsAreTheCores in identity-agent-core/login.",
+  "ed25519_signatures": [
+    {
+      "name": "a valid signature",
+      "public_key_hex": "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c",
+      "message": "a login body",
+      "sig": "0BBgbv7M5lXCtjB6v1fdjaEuu7-QxBMULztM0BOolfbkzz7gghXS8wtJOq1thaxzyWPjHAxlf3nz4K7bAeAbq7sB",
+      "go_accepts": true
+    },
+    {
+      "name": "an R of mixed order, which a cofactored check accepts",
+      "public_key_hex": "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c",
+      "message": "a login body",
+      "sig": "0BDQQktwHWAlXeXfcFBxBZzNIrg0m7QTggLrvWXp4K0hG2g4izOEFVYWtfNLR2pLfw2MviOdyEoBicel3mUwUSgC",
+      "go_accepts": false
+    },
+    {
+      "name": "a key of small order, under which one signature verifies over every message",
+      "public_key_hex": "0100000000000000000000000000000000000000000000000000000000000000",
+      "message": "anything",
+      "sig": "0BABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "go_accepts": false
+    }
+  ],
   "non_transferable_aid": [
     {
       "name": "canonical",
@@ -188,6 +302,16 @@
     {
       "name": "a transferable code",
       "value": "DAOhB7_zzhC-HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4",
+      "go_accepts": false
+    },
+    {
+      "name": "a key of small order",
+      "value": "BAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "go_accepts": false
+    },
+    {
+      "name": "a key in a second encoding",
+      "value": "BPD_______________________________________9_",
       "go_accepts": false
     }
   ],
@@ -322,10 +446,129 @@
         "name": "the last character changed",
         "sig": "0BDuQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhxT6Z2BDu6wANkprfrldP-lj4T8eJ9VIiLiocLICKrcNEWgHQA",
         "go_accepts": false
+      },
+      {
+        "name": "S plus the group order",
+        "sig": "0BDuQPuSmO7TW36G44IyqYSG9AG2tSfM9Nf_ZAhxT6Z2BCiOtmB-CcpDbHD2OR0N0Pd9VIiLiocLICKrcNEWgHQW",
+        "go_accepts": false
       }
     ],
     "verkey_qb64": "DAOhB7_zzhC-HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4"
   },
+  "times": [
+    {
+      "name": "a time in UTC",
+      "value": "2026-06-17T12:00:00Z",
+      "go_reads": true,
+      "unix_ms": 1781697600000
+    },
+    {
+      "name": "an offset and a fraction",
+      "value": "2026-06-17T12:00:00.5+05:30",
+      "go_reads": true,
+      "unix_ms": 1781677800500
+    },
+    {
+      "name": "a day February does not have",
+      "value": "2026-02-30T00:00:00Z",
+      "go_reads": false
+    },
+    {
+      "name": "29 February in a year that is not a leap year",
+      "value": "2026-02-29T00:00:00Z",
+      "go_reads": false
+    },
+    {
+      "name": "29 February in a leap year",
+      "value": "2028-02-29T00:00:00Z",
+      "go_reads": true,
+      "unix_ms": 1835395200000
+    },
+    {
+      "name": "31 April",
+      "value": "2026-04-31T00:00:00Z",
+      "go_reads": false
+    },
+    {
+      "name": "hour 24",
+      "value": "2026-06-17T24:00:00Z",
+      "go_reads": false
+    },
+    {
+      "name": "minute 60",
+      "value": "2026-06-17T12:60:00Z",
+      "go_reads": false
+    },
+    {
+      "name": "a leap second",
+      "value": "2026-06-17T23:59:60Z",
+      "go_reads": false
+    },
+    {
+      "name": "month 13",
+      "value": "2026-13-01T00:00:00Z",
+      "go_reads": false
+    },
+    {
+      "name": "a fraction finer than a nanosecond",
+      "value": "2026-06-17T12:00:00.123456789123Z",
+      "go_reads": true,
+      "unix_ms": 1781697600123
+    },
+    {
+      "name": "an offset of 24 hours",
+      "value": "2026-06-17T12:00:00+24:00",
+      "go_reads": false
+    },
+    {
+      "name": "an offset of 23:59",
+      "value": "2026-06-17T12:00:00+23:59",
+      "go_reads": true,
+      "unix_ms": 1781611260000
+    },
+    {
+      "name": "an offset minute of 60",
+      "value": "2026-06-17T12:00:00+05:60",
+      "go_reads": false
+    },
+    {
+      "name": "a comma before the fraction",
+      "value": "2026-06-17T12:00:00,5Z",
+      "go_reads": false
+    },
+    {
+      "name": "a dot with no fraction",
+      "value": "2026-06-17T12:00:00.Z",
+      "go_reads": false
+    },
+    {
+      "name": "year zero",
+      "value": "0000-01-01T00:00:00Z",
+      "go_reads": true,
+      "unix_ms": -62167219200000
+    },
+    {
+      "name": "lower-case separators",
+      "value": "2026-06-17t12:00:00z",
+      "go_reads": false
+    },
+    {
+      "name": "an unknown local offset",
+      "value": "2026-06-17T12:00:00-00:00",
+      "go_reads": true,
+      "unix_ms": 1781697600000
+    },
+    {
+      "name": "an expanded year",
+      "value": "+002026-06-17T12:00:00Z",
+      "go_reads": false
+    },
+    {
+      "name": "no zone",
+      "value": "2026-06-17T12:00:00",
+      "go_reads": false
+    }
+  ],
   "verkey_qb64": [
     {
       "name": "canonical",
@@ -396,6 +639,16 @@
     {
       "name": "empty",
       "value": "",
+      "go_accepts": false
+    },
+    {
+      "name": "a key of small order",
+      "value": "DAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "go_accepts": false
+    },
+    {
+      "name": "a key in a second encoding",
+      "value": "DPD_______________________________________9_",
       "go_accepts": false
     }
   ]

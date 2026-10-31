@@ -45,13 +45,43 @@ export function inMemoryConsumedNonces(): ConsumedNonces {
   };
 }
 
-/** Language-agnostic verify core — HTTP microservice wraps this. */
+/** Language-agnostic verify core — HTTP microservice wraps this.
+ *
+ *  The checks run in the core's order (VerifyAssertion in
+ *  identity-agent-core/login), so an assertion wrong in more than one way is
+ *  refused for the same reason by both: its shape, then dt, nonce, audience,
+ *  site, then the signature. */
 export async function verifyLoginAssertion(
   assertion: LoginAssertion,
   opts: StandaloneVerifyOptions,
 ): Promise<VerifyAssertionResult> {
-  if (!assertion.sig) {
-    return { valid: false, reason: "missing sig" };
+  // The core refuses a document it cannot read before it checks anything.
+  if (typeof assertion !== "object" || assertion === null || Array.isArray(assertion)) {
+    return { valid: false, reason: "malformed assertion: an assertion must be an object" };
+  }
+  let body: string;
+  try {
+    body = canonicalAssertionBody(assertion);
+  } catch (err) {
+    return { valid: false, reason: `malformed assertion: ${(err as Error).message}` };
+  }
+
+  if (!opts.skipDtCheck) {
+    const maxSkew = opts.maxSkewSeconds ?? 300;
+    const now = opts.nowMs ?? Date.now();
+    // A clock that cannot be read is refused, not compared: every comparison
+    // with NaN is false, so it would put any dt inside the window.
+    if (!Number.isFinite(now)) {
+      return { valid: false, reason: "bad reference time" };
+    }
+    const dtMs = parseRfc3339(assertion.dt);
+    // An unreadable time is refused, not compared: NaN is never "outside" a window.
+    if (Number.isNaN(dtMs)) {
+      return { valid: false, reason: "bad dt" };
+    }
+    if (Math.abs(now - dtMs) > maxSkew * 1000) {
+      return { valid: false, reason: "dt outside freshness window" };
+    }
   }
   if (assertion.nonce !== opts.expectedNonce) {
     return { valid: false, reason: "nonce mismatch" };
@@ -62,18 +92,8 @@ export async function verifyLoginAssertion(
   if (!opts.expectedSiteAid || assertion.site_aid !== opts.expectedSiteAid) {
     return { valid: false, reason: "site mismatch: the assertion answers another site's challenge" };
   }
-
-  if (!opts.skipDtCheck) {
-    const maxSkew = opts.maxSkewSeconds ?? 300;
-    const now = opts.nowMs ?? Date.now();
-    const dtMs = parseRfc3339(assertion.dt);
-    // An unreadable time is refused, not compared: NaN is never "outside" a window.
-    if (Number.isNaN(dtMs)) {
-      return { valid: false, reason: "bad dt" };
-    }
-    if (Math.abs(now - dtMs) > maxSkew * 1000) {
-      return { valid: false, reason: "dt outside freshness window" };
-    }
+  if (!assertion.sig) {
+    return { valid: false, reason: "missing sig" };
   }
 
   let publicKey = opts.signingPublicKey;
@@ -88,12 +108,6 @@ export async function verifyLoginAssertion(
     }
   }
 
-  let body: string;
-  try {
-    body = canonicalAssertionBody(assertion);
-  } catch (err) {
-    return { valid: false, reason: `malformed assertion: ${(err as Error).message}` };
-  }
   const validSig = await verifyCanonical(body, assertion.sig, publicKey);
   if (!validSig) {
     return { valid: false, reason: "invalid signature" };

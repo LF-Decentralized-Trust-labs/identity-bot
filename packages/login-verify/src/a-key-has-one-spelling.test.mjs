@@ -2,6 +2,7 @@
 // to the same bytes — lead bits set, a character added, line breaks — are
 // refused.
 import assert from "node:assert/strict";
+import * as ed from "@noble/ed25519";
 import { decodeMatterRaw, matterFixedQb64 } from "../dist/canonical.js";
 
 const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -13,7 +14,8 @@ function withLeadBits(qb64, codeLen, k) {
   return qb64.slice(0, codeLen) + B64[w] + qb64.slice(codeLen + 1);
 }
 
-const key = new Uint8Array(32).fill(0x5a);
+// A real key: one that is not a point on the curve is refused in any spelling.
+const key = await ed.getPublicKeyAsync(new Uint8Array(32).fill(0x5a));
 const verkey = matterFixedQb64("D", key);
 assert.deepEqual(decodeMatterRaw(verkey, "D", 32), key, "the canonical key reads back");
 for (let k = 1; k < 4; k++) {

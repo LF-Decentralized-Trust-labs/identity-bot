@@ -7,6 +7,9 @@ import {
   canonicalChallengeBody,
   decodeMatterRaw,
   decodeVerkeyQb64,
+  parseRfc3339,
+  readAssertion,
+  readChallenge,
   verifyCanonical,
 } from "../dist/canonical.js";
 import { verifyLoginAssertion } from "../dist/standalone-verify.js";
@@ -29,16 +32,18 @@ function check(ok, msg) {
   }
 }
 
-function canonical(fn, json) {
+// Read from the text, as the core reads it: a repeated key or a whole number
+// written as 1.0 is gone once JSON.parse has run.
+function canonical(read, fn, json) {
   try {
-    return { reads: true, body: fn(JSON.parse(json)) };
+    return { reads: true, body: fn(read(json)) };
   } catch {
     return { reads: false };
   }
 }
 
 for (const c of V.canonical_assertions) {
-  const got = canonical(canonicalAssertionBody, c.json);
+  const got = canonical(readAssertion, canonicalAssertionBody, c.json);
   check(got.reads === c.go_reads, `assertion "${c.name}": read ${got.reads}, the core ${c.go_reads}`);
   if (c.go_reads && got.reads) {
     check(got.body === c.canonical_body, `assertion "${c.name}":\n  ts: ${got.body}\n  go: ${c.canonical_body}`);
@@ -48,7 +53,7 @@ for (const c of V.canonical_assertions) {
 }
 
 for (const c of V.canonical_challenges) {
-  const got = canonical(canonicalChallengeBody, c.json);
+  const got = canonical(readChallenge, canonicalChallengeBody, c.json);
   check(got.reads === c.go_reads, `challenge "${c.name}": read ${got.reads}, the core ${c.go_reads}`);
   if (c.go_reads && got.reads) {
     check(got.body === c.canonical_body, `challenge "${c.name}":\n  ts: ${got.body}\n  go: ${c.canonical_body}`);
@@ -65,6 +70,18 @@ function decided(cases, decode, label) {
 }
 decided(V.verkey_qb64, decodeVerkeyQb64, "key");
 decided(V.non_transferable_aid, (v) => decodeMatterRaw(v, "B", 32), "identifier");
+
+for (const c of V.times) {
+  const ms = parseRfc3339(c.value);
+  const reads = !Number.isNaN(ms);
+  check(reads === c.go_reads, `time "${c.name}" (${c.value}): read ${reads}, the core ${c.go_reads}`);
+  if (reads && c.go_reads) check(ms === c.unix_ms, `time "${c.name}": ${ms}, the core ${c.unix_ms}`);
+}
+
+for (const c of V.ed25519_signatures) {
+  const ok = await verifyCanonical(c.message, c.sig, new Uint8Array(Buffer.from(c.public_key_hex, "hex")));
+  check(ok === c.go_accepts, `signature case "${c.name}": verified ${ok}, the core ${c.go_accepts}`);
+}
 
 const s = V.signed_assertion;
 const pub = new Uint8Array(Buffer.from(s.public_key_hex, "hex"));
@@ -117,5 +134,6 @@ if (failures) {
 }
 console.log(
   `core agreement: ${V.canonical_assertions.length} assertion and ${V.canonical_challenges.length} challenge bodies, ` +
-    `${V.verkey_qb64.length + V.non_transferable_aid.length} key spellings, ${s.signatures.length} signature spellings`,
+    `${V.verkey_qb64.length + V.non_transferable_aid.length} key spellings, ${s.signatures.length} signature spellings, ` +
+    `${V.times.length} times, ${V.ed25519_signatures.length} Ed25519 cases`,
 );

@@ -1,6 +1,43 @@
 import type { Express, Request, Response } from "express";
 import type { IdentityAgentVerifier } from "./verifier.js";
 import type { LoginAssertion } from "./types.js";
+import { readAssertion } from "./canonical.js";
+
+const MAX_ASSERTION_BYTES = 1 << 20;
+
+/** The request's body as sent, or null where a body parser the host app
+ *  installed has already read it. */
+function rawBodyOf(req: Request): Promise<Buffer | null> {
+  if ((req as unknown as { _body?: boolean })._body || !req.readable) return Promise.resolve(null);
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on("data", (c: Buffer) => {
+      size += c.length;
+      if (size > MAX_ASSERTION_BYTES) {
+        reject(new Error("the assertion is too large"));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
+/** The assertion posted to the callback, read as the core reads one. From
+ *  the text where it is still there, so a repeated key is refused; where the
+ *  host app's JSON parser has already read the body, only what survives
+ *  parsing can be checked, which leaves a repeated key unseen. Mount these
+ *  routes before a global JSON parser to keep that check. */
+async function postedAssertion(req: Request): Promise<LoginAssertion> {
+  const raw = await rawBodyOf(req);
+  if (raw) return readAssertion(new TextDecoder("utf-8", { fatal: true }).decode(raw));
+  if (typeof req.body === "string") return readAssertion(req.body);
+  if (Buffer.isBuffer(req.body)) return readAssertion(new TextDecoder("utf-8", { fatal: true }).decode(req.body));
+  return req.body as LoginAssertion;
+}
 
 export interface MountOptions {
   sessionPath?: string;
@@ -89,10 +126,17 @@ export function mountIdentityAgentLoginRoutes(
 
   app.post("/auth/ia/callback", async (req: Request, res: Response) => {
     try {
-      const assertion = req.body as LoginAssertion;
-      const sessionToken = (req.query.session as string) ?? (req.body?.session_token as string);
+      // The session is named in the query, as an Identity Agent posts it: the
+      // body is the assertion and nothing else.
+      const sessionToken = req.query.session as string | undefined;
       if (!sessionToken) {
         return res.status(400).json({ error: "session query param required" });
+      }
+      let assertion: LoginAssertion;
+      try {
+        assertion = await postedAssertion(req);
+      } catch (err) {
+        return res.status(400).json({ error: `the assertion cannot be read: ${(err as Error).message}` });
       }
 
       const rec = verifier.sessionStore.get(sessionToken);
