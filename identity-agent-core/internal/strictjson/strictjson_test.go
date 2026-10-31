@@ -1,6 +1,9 @@
 package strictjson
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 type inner struct {
 	Name     string `json:"name"`
@@ -52,5 +55,32 @@ func TestADocumentIsReadOneWayOrNotAtAll(t *testing.T) {
 		if err := Decode([]byte(bad), &d); err == nil {
 			t.Errorf("%s was read as %+v", bad, d)
 		}
+	}
+}
+
+// Every reader gives up at some depth, each at its own, so a document nested
+// deeper than one of them will go is read by some and not others. This one
+// stops at MaxDepth, the same place as the TypeScript reader.
+func TestADocumentNestedTooDeepIsRefused(t *testing.T) {
+	nest := func(n int, open, close string) string {
+		return `{"any":{"x":` + strings.Repeat(open, n-2) + `1` + strings.Repeat(close, n-2) + `}}`
+	}
+	for _, c := range []struct {
+		open, close string
+	}{{"[", "]"}, {`{"k":`, "}"}} {
+		var d doc
+		if err := Decode([]byte(nest(MaxDepth, c.open, c.close)), &d); err != nil {
+			t.Errorf("%d deep with %s was refused: %v", MaxDepth, c.open, err)
+		}
+		if err := Decode([]byte(nest(MaxDepth+1, c.open, c.close)), &d); err == nil {
+			t.Errorf("%d deep with %s was read", MaxDepth+1, c.open)
+		}
+	}
+}
+
+func TestADocumentWithAByteOrderMarkIsRefused(t *testing.T) {
+	var d doc
+	if err := Decode([]byte("\xef\xbb\xbf"+`{"nonce":"n"}`), &d); err == nil {
+		t.Error("a document that starts with a byte order mark was read")
 	}
 }

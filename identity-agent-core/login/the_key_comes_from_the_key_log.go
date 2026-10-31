@@ -9,6 +9,7 @@ import (
 
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/strictjson"
 	"identity-agent-core/keriengine"
 
 	keri "github.com/grapeid/keri-go"
@@ -53,7 +54,11 @@ func EncodeKeyLog(rawEvents [][]byte, signatures []string) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// DecodeKeyLog reads a key log in the form EncodeKeyLog writes. It checks
+// DecodeKeyLog reads a key log in the form EncodeKeyLog writes, by the same
+// rules as the assertion that carries it (strictjson): its two fields named
+// exactly, once each, and nothing else. Read leniently, a key log with
+// "Raw_Events_B64" beside "raw_events_b64" names one set of events here and
+// another to a reader that matches names exactly. Beyond its form it checks
 // nothing; KeyFromKeyLog is what says whether the log proves anything.
 func DecodeKeyLog(encoded string) (KeyLog, error) {
 	var kl KeyLog
@@ -61,8 +66,8 @@ func DecodeKeyLog(encoded string) (KeyLog, error) {
 	if err != nil {
 		return kl, fmt.Errorf("the key log is not readable: %w", err)
 	}
-	if err := json.Unmarshal(b, &kl); err != nil {
-		return kl, fmt.Errorf("the key log is not readable: %w", err)
+	if err := strictjson.Decode(b, &kl); err != nil {
+		return KeyLog{}, fmt.Errorf("the key log is not readable: %w", err)
 	}
 	return kl, nil
 }

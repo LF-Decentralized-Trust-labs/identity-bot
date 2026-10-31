@@ -416,15 +416,26 @@ const JSON_NUMBER = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
 const JSON_STRING = /"(?:[^"\\\u0000-\u001f]|\\["\\/bfnrt]|\\u[0-9a-fA-F]{4})*"/y;
 const WHOLE_NUMBER = /^-?(?:0|[1-9]\d*)$/;
 
+/** How many objects and arrays may be open at once, as in the core
+ *  (strictjson.MaxDepth). */
+export const MAX_JSON_DEPTH = 64;
+
 /** Parses JSON text only if every reader would read it the same way, as the
  *  core reads a login (identity-agent-core/internal/strictjson): no key
- *  repeated in any object, no half of a surrogate pair in any string, and,
- *  where `isWhole(path)` says a whole number belongs, one written plainly
- *  (not 1.0, 1e0 or -0) and exact in a 64-bit float. JSON.parse keeps the
- *  last of a repeated key and reads 1.0 as 1, so neither can be seen after
- *  it has run. */
-export function parseStrictJson(text: string, isWhole: (path: string[]) => boolean = () => false): unknown {
+ *  repeated in any object, no half of a surrogate pair in any string, nothing
+ *  nested deeper than MAX_JSON_DEPTH, no byte order mark, and, where
+ *  `isWhole(path)` says a whole number belongs, one written plainly (not 1.0,
+ *  1e0 or -0) and exact in a 64-bit float. JSON.parse keeps the last of a
+ *  repeated key and reads 1.0 as 1, so neither can be seen after it has run.
+ *  `path` is only valid during the call; copy it to keep it. */
+export function parseStrictJson(
+  text: string,
+  isWhole: (path: readonly string[]) => boolean = () => false,
+): unknown {
   let i = 0;
+  // The keys and indexes leading to the value being read, pushed and popped
+  // as the reader goes rather than copied at every level.
+  const path: string[] = [];
   const fail = (why: string): never => {
     throw new StrictJsonError(why);
   };
@@ -440,9 +451,12 @@ export function parseStrictJson(text: string, isWhole: (path: string[]) => boole
     if (UNPAIRED_SURROGATE.test(v)) fail("text holds half of a surrogate pair");
     return v;
   };
-  const value = (path: string[]): unknown => {
+  const value = (): unknown => {
     ws();
     const c = text[i];
+    if ((c === "{" || c === "[") && path.length >= MAX_JSON_DEPTH) {
+      fail(`nested more than ${MAX_JSON_DEPTH} deep`);
+    }
     if (c === "{") {
       i++;
       const obj: Record<string, unknown> = {};
@@ -461,7 +475,10 @@ export function parseStrictJson(text: string, isWhole: (path: string[]) => boole
         ws();
         if (text[i++] !== ":") fail(`not JSON at ${i - 1}`);
         // Defined rather than assigned, so "__proto__" is a key like any other.
-        Object.defineProperty(obj, key, { value: value([...path, key]), enumerable: true, writable: true, configurable: true });
+        path.push(key);
+        const v = value();
+        path.pop();
+        Object.defineProperty(obj, key, { value: v, enumerable: true, writable: true, configurable: true });
         ws();
         if (text[i] === ",") {
           i++;
@@ -480,7 +497,9 @@ export function parseStrictJson(text: string, isWhole: (path: string[]) => boole
         return arr;
       }
       for (;;) {
-        arr.push(value([...path, String(arr.length)]));
+        path.push(String(arr.length));
+        arr.push(value());
+        path.pop();
         ws();
         if (text[i] === ",") {
           i++;
@@ -509,10 +528,17 @@ export function parseStrictJson(text: string, isWhole: (path: string[]) => boole
     }
     return n;
   };
-  const out = value([]);
+  const out = value();
   ws();
   if (i !== text.length) fail("the text continues after its value");
   return out;
+}
+
+/** Bytes received as UTF-8 text, refused unless they are UTF-8. A leading
+ *  byte order mark is kept, not dropped, so `parseStrictJson` sees it and
+ *  refuses the document, as the core does. */
+export function utf8Text(bytes: Uint8Array): string {
+  return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
 }
 
 /** Reads a login assertion from its JSON text by the core's rules: strictly

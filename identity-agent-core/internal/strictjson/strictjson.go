@@ -14,8 +14,10 @@
 //
 // Decode refuses all four, and refuses a whole number written any way but
 // one (1.0, 1e0, -0) or too large to be exact in a 64-bit float, so a reader
-// in JavaScript reads it as the same number. What it accepts, it then reads
-// with encoding/json.
+// in JavaScript reads it as the same number. It refuses objects and arrays
+// nested more than MaxDepth deep, a limit every reader can keep, where each
+// parser otherwise gives up at a depth of its own. What it accepts, it then
+// reads with encoding/json.
 package strictjson
 
 import (
@@ -29,6 +31,10 @@ import (
 	"strings"
 	"unicode/utf8"
 )
+
+// MaxDepth is how many objects and arrays may be open at once. Nothing this
+// package reads comes near it.
+const MaxDepth = 64
 
 // maxExactInt is the largest whole number a 64-bit float holds exactly.
 const maxExactInt = 1<<53 - 1
@@ -50,7 +56,7 @@ func Decode(data []byte, v any) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 	w := walker{dec: dec}
-	if err := w.value(rv.Type().Elem(), "the document", true); err != nil {
+	if err := w.value(rv.Type().Elem(), "the document", true, 0); err != nil {
 		return err
 	}
 	if _, err := dec.Token(); err != io.EOF {
@@ -61,7 +67,8 @@ func Decode(data []byte, v any) error {
 
 type walker struct{ dec *json.Decoder }
 
-func (w walker) value(t reflect.Type, at string, top bool) error {
+// value reads one value at a point where depth objects and arrays are open.
+func (w walker) value(t reflect.Type, at string, top bool, depth int) error {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
@@ -74,16 +81,19 @@ func (w walker) value(t reflect.Type, at string, top bool) error {
 	}
 	switch tok := tok.(type) {
 	case json.Delim:
+		if depth >= MaxDepth {
+			return fmt.Errorf("%s is nested more than %d deep", at, MaxDepth)
+		}
 		switch tok {
 		case '{':
-			return w.object(t, at)
+			return w.object(t, at, depth+1)
 		case '[':
 			elem := reflect.TypeOf((*any)(nil)).Elem()
 			if t.Kind() == reflect.Slice || t.Kind() == reflect.Array {
 				elem = t.Elem()
 			}
 			for i := 0; w.dec.More(); i++ {
-				if err := w.value(elem, fmt.Sprintf("%s[%d]", at, i), false); err != nil {
+				if err := w.value(elem, fmt.Sprintf("%s[%d]", at, i), false, depth+1); err != nil {
 					return err
 				}
 			}
@@ -107,7 +117,7 @@ func (w walker) value(t reflect.Type, at string, top bool) error {
 	return nil
 }
 
-func (w walker) object(t reflect.Type, at string) error {
+func (w walker) object(t reflect.Type, at string, depth int) error {
 	var fields map[string]reflect.Type
 	elem := reflect.TypeOf((*any)(nil)).Elem()
 	switch t.Kind() {
@@ -135,7 +145,7 @@ func (w walker) object(t reflect.Type, at string) error {
 			}
 			vt = ft
 		}
-		if err := w.value(vt, at+"."+key, false); err != nil {
+		if err := w.value(vt, at+"."+key, false, depth); err != nil {
 			return err
 		}
 	}

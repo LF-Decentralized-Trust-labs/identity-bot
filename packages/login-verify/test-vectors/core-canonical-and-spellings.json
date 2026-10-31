@@ -139,6 +139,23 @@
       "go_reads": false
     },
     {
+      "name": "nested as deep as every reader goes",
+      "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"disclosures\":{},\"presented_acdcs\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}",
+      "go_reads": true,
+      "canonical_body": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"\",\"relationship_aid_oobi\":\"\",\"audience\":\"\",\"nonce\":\"\",\"dt\":\"\",\"disclosures\":{},\"presented_acdcs\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}",
+      "said": "ELHsyf-Ur74kwIh-dH6160O-EjgaR5nTy2ZnB3Ht_Gf6"
+    },
+    {
+      "name": "nested deeper than every reader goes is refused",
+      "json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"disclosures\":{},\"presented_acdcs\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}",
+      "go_reads": false
+    },
+    {
+      "name": "a byte order mark is refused",
+      "json": "﻿{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"disclosures\":{},\"presented_acdcs\":[]}",
+      "go_reads": false
+    },
+    {
       "name": "a document that is null is refused",
       "json": "null",
       "go_reads": false
