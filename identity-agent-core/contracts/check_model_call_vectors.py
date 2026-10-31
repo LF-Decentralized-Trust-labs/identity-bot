@@ -4,9 +4,11 @@
 Everything here is rebuilt from the prose in model-call/model-call.schema.json,
 not from the Go code: which calls a body may start and how each refused one is
 answered, the query and headers that travel on, the collection paths and how a
-collection's query is read, the refusal statuses, and the answers' offsets. If
-this script and the vector file ever disagree, the prose no longer says what
-the code does.
+collection's query is read, the refusal statuses, and the answers' offsets. The
+provider's routes, headers, query parameters and answer-length names come from
+the vector file's example profile, as an Identity Agent's come from its own
+profile for each provider. If this script and the vector file ever disagree,
+the prose no longer says what the code does.
 
 Run: python3 check_model_call_vectors.py model-call-vectors.json
 Needs nothing beyond the Python standard library.
@@ -16,20 +18,17 @@ import binascii
 import json
 import os
 import sys
-import unicodedata
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 failures = []
 
 REQUEST_LARGEST = 3 * 1024 * 1024
+START_LARGEST = 6 * 1024 * 1024
 PART_LARGEST = 2 * 1024 * 1024
 PATH_LONGEST = 256
 ANSWER_LONGEST = 32768
-HEADER_NAMES = ["Content-Type", "Accept", "Anthropic-Version", "Anthropic-Beta", "Openai-Beta"]
-ANSWER_HEADER_NAMES = ["Content-Type", "Retry-After", "Request-Id", "X-Request-Id"]
-BOUND_NAMES = ["max_tokens", "max_completion_tokens", "max_output_tokens"]
-COUNT_NAMES = ["n", "best_of"]
-QUERY_NAMES = ["after_id", "before_id", "beta", "limit"]
+DEPTH_DEEPEST = 1000
+PLAIN = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-_:/~")
 FORM_SAFE = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~"
 PATH_SAFE = FORM_SAFE + b"$&+:=@"
 
@@ -75,15 +74,11 @@ class Refused(Exception):
         self.reason = reason
 
 
-# ── the path ─────────────────────────────────────────────────────────────
+# ── the path and the route ───────────────────────────────────────────────
 
 
 def plain_chars(s):
-    for c in s:
-        cat = unicodedata.category(c)
-        if not (cat.startswith("L") or cat == "Nd" or c in ".-_:/~"):
-            return False
-    return True
+    return all(c in PLAIN for c in s)
 
 
 def plain_path(p):
@@ -91,21 +86,21 @@ def plain_path(p):
         return False
     if p == "/":
         return True
-    segments = p[1:].split("/")
-    return all(seg not in ("", ".", "..") for seg in segments)
+    return all(seg not in ("", ".", "..") for seg in p[1:].split("/"))
 
 
-def route_allowed(routes, method, p):
-    if not plain_path(p):
-        return False
-    for r in routes:
+def route_of(profile, method, p):
+    if method not in ("GET", "POST") or not plain_path(p):
+        return None
+    models = profile.get("models_path", "")
+    for r in profile["routes"]:
         if r["method"] != method:
             continue
         if p == r["path"]:
-            return True
-        if method == "GET" and r["path"] == "/v1/models" and p.startswith("/v1/models/"):
-            return True
-    return False
+            return r
+        if method == "GET" and models and r["path"] == models and p.startswith(models + "/"):
+            return r
+    return None
 
 
 # ── the query ────────────────────────────────────────────────────────────
@@ -159,18 +154,17 @@ def form_encode(s, safe):
     return "".join(out)
 
 
-def query_value_ok(name, v):
-    n = len(v.encode())
-    if name == "beta":
-        return v == "true"
-    if name == "limit":
-        return n <= 4 and all(c in "0123456789" for c in v)
-    if name in ("after_id", "before_id"):
-        return n <= 128 and plain_chars(v)
+def parameter_allows(p, v):
+    if p.get("value"):
+        return v == p["value"]
+    if p.get("digits"):
+        return len(v.encode()) <= p["digits"] and all(c in "0123456789" for c in v)
+    if p.get("plain"):
+        return len(v.encode()) <= p["plain"] and plain_chars(v)
     return False
 
 
-def query(raw):
+def query(profile, raw):
     if raw == "":
         return ""
     pairs = form_pieces(raw)
@@ -179,7 +173,8 @@ def query(raw):
     names = [n for n, _ in pairs]
     by = {}
     for n, v in pairs:
-        if n not in QUERY_NAMES or names.count(n) != 1 or not query_value_ok(n, v):
+        p = next((q for q in profile["query"] if q["name"] == n), None)
+        if p is None or names.count(n) != 1 or not parameter_allows(p, v):
             raise Refused("not_allowed")
         by[n] = v
     return "&".join(form_encode(n, FORM_SAFE) + "=" + form_encode(by[n], FORM_SAFE) for n in sorted(by))
@@ -188,9 +183,9 @@ def query(raw):
 # ── the headers ──────────────────────────────────────────────────────────
 
 
-def headers(sent):
+def pick(names, sent):
     out = {}
-    for name in HEADER_NAMES:
+    for name in names:
         for k in sorted(sent):
             if fold(k) == fold(name) and sent[k] != "":
                 out[name] = sent[k]
@@ -205,16 +200,40 @@ def no_constants(c):
     raise ValueError("not JSON: " + c)
 
 
+def depth(text):
+    n = most = 0
+    in_string = escaped = False
+    for c in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif c == "\\":
+                escaped = True
+            elif c == '"':
+                in_string = False
+        elif c == '"':
+            in_string = True
+        elif c in "[{":
+            n += 1
+            most = max(most, n)
+        elif c in "]}":
+            n -= 1
+    return most
+
+
 def one_object(body):
     """The object's own fields in order, keys exactly as written, or None where
-    the body is anything but one JSON object."""
+    the body is anything but one UTF-8 JSON object nested no deeper than
+    DEPTH_DEEPEST."""
     try:
         text = body.decode("utf-8")
     except UnicodeDecodeError:
         return None
+    if depth(text) > DEPTH_DEEPEST:
+        return None
     try:
         top = json.loads(text, object_pairs_hook=lambda pairs: pairs, parse_constant=no_constants)
-    except ValueError:
+    except (ValueError, RecursionError):
         return None
     if not isinstance(top, list) or (top and not all(isinstance(p, tuple) for p in top)):
         return None
@@ -230,7 +249,7 @@ def is_number(v):
 
 def check_model(chosen, method, body):
     chosen = chosen.strip()
-    if chosen == "" or method != "POST":
+    if chosen == "" or method == "GET":
         return
     fields = one_object(body)
     if fields is None:
@@ -254,16 +273,16 @@ def check_model(chosen, method, body):
         raise Refused("not_allowed")
 
 
-def answer_bound(body):
+def answer_bound(profile, body):
     fields = one_object(body)
     if fields is None:
         raise Refused("allowance")
     seen, most = set(), 0
     for k, v in fields:
-        for m in COUNT_NAMES:
-            if fold(k) == m and not (is_number(v) and v == 1):
+        for m in profile["answer_count_names"]:
+            if fold(k) == fold(m) and not (is_number(v) and v == 1):
                 raise Refused("allowance")
-        name = next((n for n in BOUND_NAMES if fold(k) == n), None)
+        name = next((n for n in profile["answer_bound_names"] if fold(k) == fold(n)), None)
         if name is None:
             continue
         if k != name or name in seen:
@@ -287,30 +306,62 @@ def decode_body(b64):
     return body
 
 
-def check_start(routes, s, request):
+def parse_start(raw):
+    """A start as it arrives: too long is too_large; anything but one UTF-8
+    JSON object whose named fields have the right types is unreadable."""
+    if len(raw) > START_LARGEST:
+        raise Refused("too_large")
+    try:
+        v = json.loads(raw.decode("utf-8"), parse_constant=no_constants)
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        raise Refused("no_lease")
+    if not isinstance(v, dict):
+        raise Refused("no_lease")
+    q = {}
+    for name in ("lease_id", "method", "path", "query", "body_b64"):
+        x = v.get(name)
+        if x is not None and not isinstance(x, str):
+            raise Refused("no_lease")
+        q[name] = x or ""
+    h = v.get("header")
+    if h is not None:
+        if not isinstance(h, dict) or any(x is not None and not isinstance(x, str) for x in h.values()):
+            raise Refused("no_lease")
+        q["header"] = {k: (x or "") for k, x in h.items()}
+    return q
+
+
+def check_start(profile, s, request):
     if request.get("lease_id", "") == "":
         raise Refused("no_lease")
     body = decode_body(request.get("body_b64", ""))
     method = upper(request.get("method", ""))
-    if not route_allowed(routes, method, request.get("path", "")):
+    route = route_of(profile, method, request.get("path", ""))
+    if route is None:
         raise Refused("not_allowed")
-    q = query(request.get("query", ""))
+    q = query(profile, request.get("query", ""))
     check_model(s.get("model", ""), method, body)
     call = {"method": method, "path": request["path"]}
     if q:
         call["query"] = q
-    h = headers(request.get("header", {}))
+    h = pick(profile["headers"], request.get("header") or {})
     if h:
         call["header"] = h
-    reads = method != "POST"
+    reads = method == "GET"
+    counts = bool(route.get("counts")) and not reads
     if reads:
         call["reads"] = True
-    if s.get("allowance") and not reads:
-        call["bound"] = answer_bound(body)
+    if counts:
+        call["counts"] = True
+    if s.get("allowance") and not reads and not counts:
+        call["bound"] = answer_bound(profile, body)
     return call
 
 
 def start_body(s):
+    if s.get("nest"):
+        n = s["nest"] - 1
+        return ('{"model":"m","max_tokens":5,"x":' + "[" * n + "]" * n + "}").encode()
     b = s.get("body", "").encode()
     pad = s.get("pad_to", 0)
     if pad > len(b):
@@ -319,18 +370,21 @@ def start_body(s):
 
 
 def check_starts(v):
-    routes = v["routes"]
     for s in v["starts"]:
         request = dict(s["request"])
-        if s.get("body"):
+        if s.get("body") or s.get("nest"):
             b64 = base64.b64encode(start_body(s)).decode()
-            if s.get("pad_to"):
+            if s.get("pad_to") or s.get("nest"):
                 same(s["name"] + " leaves body_b64 out", request.get("body_b64", ""), "")
             else:
                 same(s["name"] + " body_b64", request.get("body_b64", ""), b64)
             request["body_b64"] = b64
+        raw = s["raw"].encode() if s.get("raw") else json.dumps(request).encode()
+        if s.get("raw_pad_to", 0) > len(raw):
+            raw += b" " * (s["raw_pad_to"] - len(raw))
+        profile = s.get("profile") or v["example_profile"]
         try:
-            call = check_start(routes, s, request)
+            call = check_start(profile, s, parse_start(raw))
             got = {"allowed": True, "call": call}
         except Refused as r:
             status, refused, _ = REASONS[r.reason]
@@ -363,9 +417,8 @@ def check_collections(v):
             p += "&head=1"
         same(c["name"], p, c["path"])
     for c in v["collection_queries"]:
-        pairs = form_pieces(c["query"], skip=True)
         first = {}
-        for n, val in pairs:
+        for n, val in form_pieces(c["query"], skip=True):
             first.setdefault(n, val)
         got = {"from": read_from(first.get("from", "")), "lease": first.get("lease", ""), "head": first.get("head") == "1"}
         same(c["name"], got, {"from": c["from"], "lease": c["lease"], "head": c["head"]})
@@ -384,6 +437,7 @@ def check_refusals(v):
 def check_answers(v):
     schema = json.load(open(os.path.join(HERE, "model-call", "model-call.schema.json")))
     d = schema["$defs"]["answer"]
+    back = v["example_profile"]["answer_headers"]
     for a in v["answers"]:
         ans = a["answer"]
         for f in d["required"]:
@@ -393,7 +447,7 @@ def check_answers(v):
             if f not in d["properties"]:
                 fail("%s carries %s, which the schema does not declare" % (a["name"], f))
         for k in ans.get("header", {}):
-            if k not in ANSWER_HEADER_NAMES:
+            if k not in back:
                 fail("%s carries the header %s, which does not travel back" % (a["name"], k))
         data = a["data"].encode()
         if data:
@@ -407,21 +461,17 @@ def check_answers(v):
 
 
 def check_limits(v):
-    same("limits", v["limits"], {"request_largest": REQUEST_LARGEST, "start_largest": 2 * REQUEST_LARGEST, "part_largest": PART_LARGEST,
-                                 "path_longest": PATH_LONGEST, "answer_longest": ANSWER_LONGEST,
+    same("limits", v["limits"], {"request_largest": REQUEST_LARGEST, "start_largest": START_LARGEST,
+                                 "part_largest": PART_LARGEST, "path_longest": PATH_LONGEST,
+                                 "answer_longest": ANSWER_LONGEST, "depth_deepest": DEPTH_DEEPEST,
                                  "collection_wait_seconds": 20})
-    same("header_names", v["header_names"], HEADER_NAMES)
-    same("answer_header_names", v["answer_header_names"], ANSWER_HEADER_NAMES)
-    same("query_parameters", v["query_parameters"], QUERY_NAMES)
-    same("answer_bound_names", v["answer_bound_names"], BOUND_NAMES)
-    same("answer_count_names", v["answer_count_names"], COUNT_NAMES)
     schema = json.load(open(os.path.join(HERE, "model-call", "model-call.schema.json")))
     same("borrowing", v["borrowing"], {"model_calls": schema["$defs"]["borrowing"]["properties"]["model_calls"]["const"]})
 
 
 def check_headers(v):
     for h in v["headers"]:
-        same(h["name"], headers(h["sent"]), h.get("passed", {}))
+        same(h["name"], pick(v["example_profile"]["headers"], h["sent"]), h.get("passed", {}))
     return len(v["headers"])
 
 

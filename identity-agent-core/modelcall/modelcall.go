@@ -12,10 +12,12 @@
 // What is checked here is what the request alone decides: whether its path,
 // query, headers and body are ones the exchange allows, and, where the
 // Identity Agent holds the AI agent's model calls to an allowance, whether the
-// call says how long an answer it wants and asks for one answer. What the
-// Identity Agent alone knows (whether the lease is open, whether the AI agent
-// may still act, what an allowance has left) it decides itself, and answers
-// with the statuses Reason names.
+// call says how long an answer it wants and asks for one answer. Which routes,
+// headers, query parameters and answer-length fields a provider has is not
+// fixed here: the Identity Agent lists them, per provider, in a Profile, and
+// the checks are run against it. What the Identity Agent alone knows (whether
+// the lease is open, whether the AI agent may still act, what an allowance has
+// left) it decides itself, and answers with the statuses Reason names.
 //
 // The published form is contracts/model-call/model-call.schema.json, with
 // worked examples in model-call-vectors.json beside this file.
@@ -45,6 +47,11 @@ const (
 	// StartPath is where a body starts a call (POST). A call's answer is
 	// collected (GET) and the call stopped (DELETE) at CallPath.
 	StartPath = "/api/agent-host/model-calls"
+	// BorrowPath is where a body borrows its AI agent's sign-in for one run
+	// (POST), and is given the run's lease. It keeps the lease with POST
+	// BorrowPath/renew and gives it back with POST BorrowPath/return, each
+	// naming lease_id.
+	BorrowPath = "/api/agent-host/brain-sign-in"
 )
 
 // CallPath is where one call's answer is collected, and where it is stopped.
@@ -71,8 +78,8 @@ func (b Borrowing) ThroughIdentityAgent() bool { return b.ModelCalls == ThroughI
 const (
 	// RequestLargest bounds a call's request body, decoded.
 	RequestLargest = 3 << 20
-	// StartLargest bounds what an Identity Agent reads of a start's JSON: a
-	// start any longer is unreadable (NoLease, 400), not TooLarge.
+	// StartLargest bounds a start's JSON as it arrives: a start any longer
+	// is TooLarge (413).
 	StartLargest = 2 * RequestLargest
 	// PartLargest bounds what one collection carries of an answer, decoded.
 	PartLargest = 2 << 20
@@ -84,6 +91,9 @@ const (
 	// AnswerLongest bounds, in tokens, how long an answer a call under an
 	// allowance may ask for.
 	AnswerLongest = 32768
+	// DepthDeepest bounds how deeply a body read for its fields may nest
+	// arrays and objects, the body's own object counting as 1.
+	DepthDeepest = 1000
 )
 
 // Request starts a call: what the body's brain sent, and the run's lease on
@@ -95,6 +105,55 @@ type Request struct {
 	Query   string            `json:"query,omitempty"`
 	Header  map[string]string `json:"header,omitempty"`
 	BodyB64 string            `json:"body_b64,omitempty"`
+}
+
+// ParseRequest reads a start as it arrives. One longer than StartLargest is
+// TooLarge. One that is not UTF-8, not one JSON object, or whose lease_id,
+// method, path, query or body_b64 is not a string (or null), or whose header
+// is not an object of strings (or null), is unreadable (NoLease). Fields are
+// matched by exact name; any other field is ignored.
+func ParseRequest(raw []byte) (Request, error) {
+	if len(raw) > StartLargest {
+		return Request{}, refuse(TooLarge, "this model call is too large or unreadable")
+	}
+	unreadable := refuse(NoLease, "name the run's lease and the call to make")
+	if !utf8.Valid(raw) {
+		return Request{}, unreadable
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
+		return Request{}, unreadable
+	}
+	var q Request
+	for name, dst := range map[string]*string{"lease_id": &q.LeaseID, "method": &q.Method, "path": &q.Path,
+		"query": &q.Query, "body_b64": &q.BodyB64} {
+		if v, ok := fields[name]; ok {
+			var s *string
+			if err := json.Unmarshal(v, &s); err != nil {
+				return Request{}, unreadable
+			}
+			if s != nil {
+				*dst = *s
+			}
+		}
+	}
+	if v, ok := fields["header"]; ok {
+		var h map[string]*string
+		if err := json.Unmarshal(v, &h); err != nil {
+			return Request{}, unreadable
+		}
+		for k, s := range h {
+			if q.Header == nil {
+				q.Header = map[string]string{}
+			}
+			if s != nil {
+				q.Header[k] = *s
+			} else {
+				q.Header[k] = ""
+			}
+		}
+	}
+	return q, nil
 }
 
 // Answer is what a start and every collection answer with: the provider's
@@ -161,7 +220,8 @@ func (c Collection) Path(callID string) string {
 // ParseCollection reads a collection's query, as url.ParseQuery gives it:
 // an unreadable piece of the query is skipped, and where a name is given more
 // than once the first counts. A from that is not a base-10 whole number, or
-// is below nothing, is read as 0; head is set only by 1.
+// is below nothing, is read as 0; head is set only by 1. An empty lease keeps
+// the one the call has.
 func ParseCollection(q url.Values) Collection {
 	from, err := strconv.ParseInt(q.Get("from"), 10, 64)
 	if err != nil || from < 0 {
@@ -177,25 +237,27 @@ type Reason string
 const (
 	// NoLease: the request names no lease, or is unreadable. 400.
 	NoLease Reason = "no_lease"
-	// TooLarge: the call's body is larger than RequestLargest, or is not
-	// base64. 413.
+	// TooLarge: the start is longer than StartLargest, or the call's body is
+	// larger than RequestLargest or is not base64. 413.
 	TooLarge Reason = "too_large"
-	// NotAllowed: the path, query or model is not one allowed; the lease is
-	// not open for this body; the AI agent may no longer act; its sign-in is
-	// not a key kept here, has expired or was removed. 403, refused.
+	// NotAllowed: the method, path, query or model is not one allowed; the
+	// lease is not open for this body; the AI agent may no longer act; its
+	// sign-in is not a key kept here, has expired or was removed. 403,
+	// refused.
 	NotAllowed Reason = "not_allowed"
 	// AllowanceRule: under an allowance, the call breaks the rules on answer
 	// length or the number of answers, or is not one JSON object; the
 	// allowance is spent, or stopped because an earlier call's cost is not
 	// known; or the provider does not say what a call costs. 403, refused.
 	AllowanceRule Reason = "allowance"
-	// CollectedAlready: a collection asks for part of the answer before what
-	// it already collected. 409.
+	// CollectedAlready: a collection asks again for part of the answer it has
+	// already collected. 409.
 	CollectedAlready Reason = "collected_already"
 	// Gone: the Identity Agent no longer knows the call. 410, no_call.
 	Gone Reason = "gone"
 	// TooManyHeld: the machine already holds as many calls for this AI agent
-	// as it may. 429.
+	// as it may, or the Identity Agent holds as many as it may across all its
+	// machines. 429.
 	TooManyHeld Reason = "too_many_held"
 	// OneAtATime: under an allowance, another of the AI agent's calls is
 	// under way or not yet counted. 429, refused.
@@ -260,81 +322,113 @@ func refuse(r Reason, format string, args ...any) *Error {
 	return &Error{Reason: r, Why: fmt.Sprintf(format, args...)}
 }
 
+// Profile is what the Identity Agent lists, for one provider, of the calls a
+// brain signed in with that provider's key may make: the routes, the headers
+// that travel on and back, the query parameters, and how a model call says
+// how long an answer it wants and how many answers. The checks in this
+// package are the mechanism; the profile is the provider's data.
+type Profile struct {
+	Routes []Route `json:"routes"`
+	// ModelsPath is the provider's list of models, where it has one: a GET
+	// route at it also allows reading one model by name, GET
+	// ModelsPath/{model}, whose name may hold a slash.
+	ModelsPath string `json:"models_path,omitempty"`
+	// Headers are the headers of a call that travel on to the provider:
+	// what describes the call, never how the brain proved itself.
+	Headers []string `json:"headers"`
+	// AnswerHeaders are the headers of the provider's answer that travel
+	// back to the brain.
+	AnswerHeaders []string         `json:"answer_headers"`
+	Parameters    []QueryParameter `json:"query"`
+	// AnswerBoundNames are the fields a model call says how long an answer
+	// it wants by; AnswerCountNames those it asks for more than one answer
+	// by.
+	AnswerBoundNames []string `json:"answer_bound_names"`
+	AnswerCountNames []string `json:"answer_count_names"`
+}
+
 // Route is one call a brain may make with its key: GET or POST, and a path.
+// A counting route (Counts) is a POST that costs nothing, such as counting a
+// request's tokens: like a read, it is never held to an allowance.
 type Route struct {
 	Method string `json:"method"`
 	Path   string `json:"path"`
+	Counts bool   `json:"counts,omitempty"`
 }
 
-// ModelsPath is the provider's list of models. A route GET ModelsPath also
-// allows reading one model by name, GET ModelsPath/{model}, whose name may
-// hold a slash.
-const ModelsPath = "/v1/models"
+// QueryParameter is one query parameter a call may carry, and what its value
+// may be: exactly Value, where Value is set; or at most Digits of the digits
+// 0-9, where Digits is set; or at most Plain bytes of the characters a plain
+// path holds, where Plain is set. An empty value is allowed by Digits and by
+// Plain.
+type QueryParameter struct {
+	Name   string `json:"name"`
+	Value  string `json:"value,omitempty"`
+	Digits int    `json:"digits,omitempty"`
+	Plain  int    `json:"plain,omitempty"`
+}
+
+func (p QueryParameter) allows(v string) bool {
+	switch {
+	case p.Value != "":
+		return v == p.Value
+	case p.Digits > 0:
+		return len(v) <= p.Digits && strings.Trim(v, "0123456789") == ""
+	case p.Plain > 0:
+		return len(v) <= p.Plain && plain(v)
+	}
+	return false
+}
 
 // PlainPath reports whether p is a path the exchange passes on: at most
-// PathLongest bytes, starting with /, holding only letters, digits and
-// . - _ : / ~, and unchanged by cleaning (no empty, . or .. segment, and no
-// trailing slash). Nothing escaped, no query and no fragment can be in it.
+// PathLongest bytes, starting with /, holding only the ASCII letters A-Z and
+// a-z, the digits 0-9 and . - _ : / ~, and unchanged by cleaning (no empty,
+// . or .. segment, and no trailing slash). Nothing escaped, no query and no
+// fragment can be in it.
 func PlainPath(p string) bool {
 	return len(p) <= PathLongest && strings.HasPrefix(p, "/") && plain(p) && path.Clean(p) == p
 }
 
-// plain reports whether s holds only letters, digits and . - _ : / ~.
+// plain reports whether s holds only A-Z, a-z, 0-9 and . - _ : / ~.
 func plain(s string) bool {
-	for _, r := range s {
-		if !(unicode.IsLetter(r) || unicode.IsDigit(r) || strings.ContainsRune(".-_:/~", r)) {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !('A' <= c && c <= 'Z' || 'a' <= c && c <= 'z' || '0' <= c && c <= '9' || strings.IndexByte(".-_:/~", c) >= 0) {
 			return false
 		}
 	}
 	return true
 }
 
-// RouteAllowed reports whether method p is one of routes: the path must be
-// plain (PlainPath) and the method, in any case, GET or POST as the route
-// names it. Which routes a sign-in's provider has is the Identity Agent's to
-// say; this checks a call against them.
-func RouteAllowed(routes []Route, method, p string) bool {
-	if !PlainPath(p) {
-		return false
-	}
+// Methods are the only methods a call may use, whatever routes a profile
+// lists.
+var Methods = []string{http.MethodGet, http.MethodPost}
+
+// Route is the route of p's that method p takes, if it takes one: the method,
+// in any ASCII case, must be GET or POST and the route's; the path must be
+// plain (PlainPath) and the route's, or, for GET, below ModelsPath where a
+// GET route is at ModelsPath.
+func (pr Profile) Route(method, p string) (Route, bool) {
 	method = asciiUpper(method)
-	for _, r := range routes {
+	if (method != http.MethodGet && method != http.MethodPost) || !PlainPath(p) {
+		return Route{}, false
+	}
+	for _, r := range pr.Routes {
 		if r.Method != method {
 			continue
 		}
-		if p == r.Path || (method == http.MethodGet && r.Path == ModelsPath && strings.HasPrefix(p, ModelsPath+"/")) {
-			return true
+		if p == r.Path ||
+			(method == http.MethodGet && pr.ModelsPath != "" && r.Path == pr.ModelsPath && strings.HasPrefix(p, pr.ModelsPath+"/")) {
+			return r, true
 		}
 	}
-	return false
-}
-
-// queryParameters are the query parameters a call may carry, by what each
-// may be: beta=true, which asks for a provider's beta features, and the
-// paging of a list of models.
-var queryParameters = map[string]func(string) bool{
-	"beta":      func(v string) bool { return v == "true" },
-	"limit":     func(v string) bool { return len(v) <= 4 && strings.Trim(v, "0123456789") == "" },
-	"after_id":  func(v string) bool { return len(v) <= 128 && plain(v) },
-	"before_id": func(v string) bool { return len(v) <= 128 && plain(v) },
-}
-
-// QueryParameters are the names of the query parameters a call may carry.
-func QueryParameters() []string {
-	out := make([]string, 0, len(queryParameters))
-	for k := range queryParameters {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
+	return Route{}, false
 }
 
 // Query is a call's query as it is sent on, or why it is refused: only the
-// parameters QueryParameters names, each at most once, each as it allows
-// (beta only as true; limit as at most four digits; after_id and before_id as
-// at most 128 bytes of letters, digits and . - _ : / ~). It is sent on
-// re-encoded, sorted by name.
-func Query(raw string) (string, error) {
+// parameters the profile names (by exact name), each at most once, each as
+// its QueryParameter allows. It is sent on re-encoded, sorted by name.
+func (pr Profile) Query(raw string) (string, error) {
 	if raw == "" {
 		return "", nil
 	}
@@ -344,32 +438,39 @@ func Query(raw string) (string, error) {
 	}
 	for _, k := range sortedKeys(v) {
 		vals := v[k]
-		ok := queryParameters[k]
-		if ok == nil || len(vals) != 1 || !ok(vals[0]) {
+		var allowed *QueryParameter
+		for i := range pr.Parameters {
+			if pr.Parameters[i].Name == k {
+				allowed = &pr.Parameters[i]
+				break
+			}
+		}
+		if allowed == nil || len(vals) != 1 || !allowed.allows(vals[0]) {
 			return "", refuse(NotAllowed, "the query parameter %q is not one a model call may carry", printable(k, 40))
 		}
 	}
 	return v.Encode(), nil
 }
 
-// HeaderNames are the headers of a call that travel on to the provider: what
-// describes the call, and never how the brain proved itself, which the
-// Identity Agent replaces with the key.
-var HeaderNames = []string{"Content-Type", "Accept", "Anthropic-Version", "Anthropic-Beta", "Openai-Beta"}
+// PassedHeaders are the headers of h that travel on, named as the profile
+// names them, matched in any ASCII case. Any other header is dropped, not refused,
+// and so is one with no value. Where h names one header more than once, in
+// different cases, the first by byte order of its name among those with a
+// value is the one kept. Nil when none travels.
+func (pr Profile) PassedHeaders(h map[string]string) map[string]string {
+	return pick(pr.Headers, h)
+}
 
-// AnswerHeaderNames are the headers of the provider's answer that travel back
-// to the brain, in an Answer's header; no other does.
-var AnswerHeaderNames = []string{"Content-Type", "Retry-After", "Request-Id", "X-Request-Id"}
+// AnswerHeadersBack are the headers of the provider's answer h that travel
+// back to the brain, by the same rule as PassedHeaders.
+func (pr Profile) AnswerHeadersBack(h map[string]string) map[string]string {
+	return pick(pr.AnswerHeaders, h)
+}
 
-// Headers are the headers of h that travel on, named as HeaderNames names
-// them, matched in any ASCII case. Any other header is dropped, not refused,
-// and so is one with no value. Where h names one header more than once, in different cases, the
-// first by byte order of its name with a value is the one kept. Nil when
-// none travels.
-func Headers(h map[string]string) map[string]string {
+func pick(names []string, h map[string]string) map[string]string {
 	var out map[string]string
 	keys := sortedKeys(h)
-	for _, name := range HeaderNames {
+	for _, name := range names {
 		for _, k := range keys {
 			if asciiEqualFold(k, name) && h[k] != "" {
 				if out == nil {
@@ -394,18 +495,17 @@ func (q Request) Body() ([]byte, error) {
 	return b, nil
 }
 
-// Reads reports whether a call with method only reads (a list of models, or
-// one model asked about by name): it is not a model call, costs nothing, and
-// is never held to an allowance. Only a POST is a model call.
-func Reads(method string) bool { return asciiUpper(method) != http.MethodPost }
+// Reads reports whether a call with method only reads: exactly GET, in any
+// ASCII case. It is not a model call, costs nothing, and is never held to an
+// allowance.
+func Reads(method string) bool { return asciiUpper(method) == http.MethodGet }
 
 // ModelNamed is the one model a call's body names, read the way a provider
 // reads it: the body must be one JSON object naming its model once, as
 // "model" spelt exactly, with a string. A second "model", one spelt in
 // another ASCII case, or a list of models to fall back on ("models", in any
-// ASCII case)
-// is refused, so what is checked is what the provider reads. The name is ""
-// where none is given.
+// ASCII case) is refused, so what is checked is what the provider reads. The
+// name is "" where none is given.
 func ModelNamed(body []byte) (string, error) {
 	named, seen := "", false
 	err := eachField(body, func(k string, v json.RawMessage) error {
@@ -451,23 +551,18 @@ func CheckModel(chosen, method string, body []byte) error {
 	return nil
 }
 
-// AnswerBoundNames are the ways a call says how long an answer it wants.
-var AnswerBoundNames = []string{"max_tokens", "max_completion_tokens", "max_output_tokens"}
-
-// AnswerCountNames are the ways a call asks for more than one answer.
-var AnswerCountNames = []string{"n", "best_of"}
-
 // AnswerBound is how long an answer a model call asks for, in tokens, as a
 // call under an allowance must say it, or why it is refused: the body is one
-// JSON object; it gives at least one of AnswerBoundNames, each spelt exactly
-// and at most once, as a whole number from 1 to AnswerLongest, and the
-// largest given counts; and each of AnswerCountNames it gives, in any ASCII
-// case, is 1. Only the object's own fields are read, not those nested in them.
-func AnswerBound(body []byte) (int, error) {
+// JSON object; it gives at least one of the profile's AnswerBoundNames, each
+// spelt exactly and at most once, as a whole number from 1 to AnswerLongest,
+// and the largest given counts; and each of its AnswerCountNames it gives, in
+// any ASCII case, is 1. Only the object's own fields are read, not those
+// nested in them.
+func (pr Profile) AnswerBound(body []byte) (int, error) {
 	seen := map[string]bool{}
 	most := 0
 	err := eachField(body, func(k string, v json.RawMessage) error {
-		for _, m := range AnswerCountNames {
+		for _, m := range pr.AnswerCountNames {
 			if asciiEqualFold(k, m) {
 				var n float64
 				if err := json.Unmarshal(v, &n); err != nil || n != 1 {
@@ -476,7 +571,7 @@ func AnswerBound(body []byte) (int, error) {
 			}
 		}
 		name := ""
-		for _, n := range AnswerBoundNames {
+		for _, n := range pr.AnswerBoundNames {
 			if asciiEqualFold(k, n) {
 				name = n
 			}
@@ -515,10 +610,10 @@ var errNotOneObject = errors.New("not one JSON object")
 
 // eachField calls f with each of the fields of body's one JSON object, in
 // order, keys exactly as written. It refuses with errNotOneObject a body that
-// is not UTF-8, or is anything but one whole object, with nothing after it
-// but white space.
+// is not UTF-8, nests deeper than DepthDeepest, or is anything but one whole
+// object, with nothing after it but white space.
 func eachField(body []byte, f func(k string, v json.RawMessage) error) error {
-	if !utf8.Valid(body) {
+	if !utf8.Valid(body) || depth(body) > DepthDeepest {
 		return errNotOneObject
 	}
 	d := json.NewDecoder(bytes.NewReader(body))
@@ -548,11 +643,37 @@ func eachField(body []byte, f func(k string, v json.RawMessage) error) error {
 	return nil
 }
 
-// Rules are what a call is checked against: the routes the sign-in's
-// provider has, the model chosen for the AI agent (empty for none), and
-// whether the AI agent's model calls are held to an allowance.
+// depth is the deepest b nests [ and { outside strings.
+func depth(b []byte) int {
+	n, most, inString, escaped := 0, 0, false, false
+	for _, c := range b {
+		switch {
+		case inString && escaped:
+			escaped = false
+		case inString && c == '\\':
+			escaped = true
+		case inString && c == '"':
+			inString = false
+		case inString:
+		case c == '"':
+			inString = true
+		case c == '[' || c == '{':
+			n++
+			if n > most {
+				most = n
+			}
+		case c == ']' || c == '}':
+			n--
+		}
+	}
+	return most
+}
+
+// Rules are what a call is checked against: the provider's profile, the
+// model chosen for the AI agent (empty for none), and whether the AI agent's
+// model calls are held to an allowance.
 type Rules struct {
-	Routes    []Route `json:"routes"`
+	Profile   Profile `json:"profile"`
 	Model     string  `json:"model,omitempty"`
 	Allowance bool    `json:"allowance,omitempty"`
 }
@@ -564,8 +685,10 @@ type Call struct {
 	Query  string            `json:"query,omitempty"`
 	Header map[string]string `json:"header,omitempty"`
 	Body   []byte            `json:"-"`
-	// Reads says the call only reads, and is never held to an allowance.
-	Reads bool `json:"reads,omitempty"`
+	// Reads says the call only reads (a GET); Counts that it takes a
+	// counting route. Neither is held to an allowance.
+	Reads  bool `json:"reads,omitempty"`
+	Counts bool `json:"counts,omitempty"`
 	// Bound is how long an answer a model call under an allowance asks for,
 	// in tokens; 0 when it is not held to one.
 	Bound int `json:"bound,omitempty"`
@@ -573,10 +696,10 @@ type Call struct {
 
 // Check is everything the request alone decides, composed in one place: a
 // lease is named (NoLease); the body is base64 and not too large (TooLarge);
-// the route, query and model are ones allowed (NotAllowed); and, under an
-// allowance, a model call says how long an answer it wants and asks for one
-// answer (AllowanceRule). Of these, the first broken is the one answered. A
-// refusal is an *Error, whose Reason gives the status.
+// the method, route, query and model are ones allowed (NotAllowed); and,
+// under an allowance, a model call says how long an answer it wants and asks
+// for one answer (AllowanceRule). Of these, the first broken is the one
+// answered. A refusal is an *Error, whose Reason gives the status.
 //
 // What only the Identity Agent knows (the lease, the AI agent's standing,
 // how many calls it holds, what an allowance has left) is not checked here,
@@ -592,20 +715,22 @@ func (r Rules) Check(q Request) (Call, error) {
 		return Call{}, err
 	}
 	method := asciiUpper(q.Method)
-	if !RouteAllowed(r.Routes, method, q.Path) {
+	route, ok := r.Profile.Route(method, q.Path)
+	if !ok {
 		return Call{}, refuse(NotAllowed, "%s %s is not a model call this AI agent's sign-in may make",
 			printable(method, 10), printable(q.Path, 80))
 	}
-	query, err := Query(q.Query)
+	query, err := r.Profile.Query(q.Query)
 	if err != nil {
 		return Call{}, err
 	}
 	if err := CheckModel(r.Model, method, body); err != nil {
 		return Call{}, err
 	}
-	c := Call{Method: method, Path: q.Path, Query: query, Header: Headers(q.Header), Body: body, Reads: Reads(method)}
-	if r.Allowance && !c.Reads {
-		if c.Bound, err = AnswerBound(body); err != nil {
+	c := Call{Method: method, Path: q.Path, Query: query, Header: r.Profile.PassedHeaders(q.Header), Body: body,
+		Reads: Reads(method), Counts: route.Counts && !Reads(method)}
+	if r.Allowance && !c.Reads && !c.Counts {
+		if c.Bound, err = r.Profile.AnswerBound(body); err != nil {
 			return Call{}, err
 		}
 	}

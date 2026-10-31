@@ -1,59 +1,76 @@
 {
-  "about": "Model calls a body makes through the Identity Agent that keeps the API key, worked through; the rules are in contracts/model-call/model-call.schema.json. Each start is checked against routes, under its model (the model chosen for the AI agent, where one is) and allowance (whether its model calls are held to an allowance). Each outcome is what the request alone decides; what only the Identity Agent knows (the lease, the AI agent's standing, what an allowance has left) is not in it.",
+  "about": "Model calls a body makes through the Identity Agent that keeps the API key, worked through; the rules are in contracts/model-call/model-call.schema.json. Each start arrives as its request written as JSON (or as raw, padded to raw_pad_to) and is checked against example_profile, or its own profile, under its model (the model chosen for the AI agent, where one is) and allowance (whether its model calls are held to an allowance). example_profile is made up for these vectors: it is not any provider's, and the routes, headers, query parameters and answer-length names in it are not part of the exchange. Each outcome is what the request alone decides; what only the Identity Agent knows (the lease, the AI agent's standing, what an allowance has left) is not in it.",
   "limits": {
     "request_largest": 3145728,
     "start_largest": 6291456,
     "part_largest": 2097152,
     "path_longest": 256,
     "answer_longest": 32768,
+    "depth_deepest": 1000,
     "collection_wait_seconds": 20
   },
-  "header_names": [
-    "Content-Type",
-    "Accept",
-    "Anthropic-Version",
-    "Anthropic-Beta",
-    "Openai-Beta"
-  ],
-  "answer_header_names": [
-    "Content-Type",
-    "Retry-After",
-    "Request-Id",
-    "X-Request-Id"
-  ],
-  "query_parameters": [
-    "after_id",
-    "before_id",
-    "beta",
-    "limit"
-  ],
-  "answer_bound_names": [
-    "max_tokens",
-    "max_completion_tokens",
-    "max_output_tokens"
-  ],
-  "answer_count_names": [
-    "n",
-    "best_of"
-  ],
-  "routes": [
-    {
-      "method": "POST",
-      "path": "/v1/messages"
-    },
-    {
-      "method": "POST",
-      "path": "/v1/messages/count_tokens"
-    },
-    {
-      "method": "POST",
-      "path": "/v1/chat/completions"
-    },
-    {
-      "method": "GET",
-      "path": "/v1/models"
-    }
-  ],
+  "example_profile": {
+    "routes": [
+      {
+        "method": "POST",
+        "path": "/v1/messages"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/messages/count_tokens",
+        "counts": true
+      },
+      {
+        "method": "POST",
+        "path": "/v1/chat/completions"
+      },
+      {
+        "method": "GET",
+        "path": "/v1/models"
+      }
+    ],
+    "models_path": "/v1/models",
+    "headers": [
+      "Content-Type",
+      "Accept",
+      "Anthropic-Version",
+      "Anthropic-Beta",
+      "Openai-Beta"
+    ],
+    "answer_headers": [
+      "Content-Type",
+      "Retry-After",
+      "Request-Id",
+      "X-Request-Id"
+    ],
+    "query": [
+      {
+        "name": "beta",
+        "value": "true"
+      },
+      {
+        "name": "limit",
+        "digits": 4
+      },
+      {
+        "name": "after_id",
+        "plain": 128
+      },
+      {
+        "name": "before_id",
+        "plain": 128
+      }
+    ],
+    "answer_bound_names": [
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens"
+    ],
+    "answer_count_names": [
+      "n",
+      "best_of"
+    ]
+  },
   "borrowing": {
     "model_calls": "through_identity_agent"
   },
@@ -135,22 +152,6 @@
         "call": {
           "method": "GET",
           "path": "/v1/models/vendor/example-model:latest",
-          "reads": true
-        }
-      }
-    },
-    {
-      "name": "one model by a name holding a letter outside ASCII",
-      "request": {
-        "lease_id": "lease-0001",
-        "method": "GET",
-        "path": "/v1/models/modèle"
-      },
-      "outcome": {
-        "allowed": true,
-        "call": {
-          "method": "GET",
-          "path": "/v1/models/modèle",
           "reads": true
         }
       }
@@ -422,6 +423,127 @@
       }
     },
     {
+      "name": "a start that is not JSON",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/messages"
+      },
+      "raw": "not json",
+      "outcome": {
+        "allowed": false,
+        "reason": "no_lease",
+        "status": 400
+      }
+    },
+    {
+      "name": "a start that is not an object",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/messages"
+      },
+      "raw": "[\"lease-0001\"]",
+      "outcome": {
+        "allowed": false,
+        "reason": "no_lease",
+        "status": 400
+      }
+    },
+    {
+      "name": "a start whose lease is not a string",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/messages"
+      },
+      "raw": "{\"lease_id\":1,\"method\":\"GET\",\"path\":\"/v1/models\"}",
+      "outcome": {
+        "allowed": false,
+        "reason": "no_lease",
+        "status": 400
+      }
+    },
+    {
+      "name": "a start naming its fields in another case",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/messages"
+      },
+      "raw": "{\"LEASE_ID\":\"lease-0001\",\"method\":\"GET\",\"path\":\"/v1/models\"}",
+      "outcome": {
+        "allowed": false,
+        "reason": "no_lease",
+        "status": 400
+      }
+    },
+    {
+      "name": "a start with a field it does not know",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/messages"
+      },
+      "raw": "{\"lease_id\":\"lease-0001\",\"method\":\"GET\",\"path\":\"/v1/models\",\"extra\":{\"a\":1}}",
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "GET",
+          "path": "/v1/models",
+          "reads": true
+        }
+      }
+    },
+    {
+      "name": "a start with nulls for its strings",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/messages"
+      },
+      "raw": "{\"lease_id\":\"lease-0001\",\"method\":\"GET\",\"path\":\"/v1/models\",\"query\":null,\"header\":{\"Accept\":null},\"body_b64\":null}",
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "GET",
+          "path": "/v1/models",
+          "reads": true
+        }
+      }
+    },
+    {
+      "name": "a start of exactly 6 MB",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models"
+      },
+      "raw_pad_to": 6291456,
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "GET",
+          "path": "/v1/models",
+          "reads": true
+        }
+      }
+    },
+    {
+      "name": "a start of 6 MB and a byte",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models"
+      },
+      "raw_pad_to": 6291457,
+      "outcome": {
+        "allowed": false,
+        "reason": "too_large",
+        "status": 413
+      }
+    },
+    {
       "name": "no lease, and a body that is not base64",
       "request": {
         "lease_id": "",
@@ -661,6 +783,114 @@
       }
     },
     {
+      "name": "a path holding a letter outside ASCII",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models/modèle"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a path holding a letter newer than some Unicode tables",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models/a𐵐"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a method other than GET or POST, though the profile lists it",
+      "profile": {
+        "routes": [
+          {
+            "method": "PUT",
+            "path": "/v1/models"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/messages"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/messages/count_tokens",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/chat/completions"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Anthropic-Version",
+          "Anthropic-Beta",
+          "Openai-Beta"
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id"
+        ],
+        "query": [
+          {
+            "name": "beta",
+            "value": "true"
+          },
+          {
+            "name": "limit",
+            "digits": 4
+          },
+          {
+            "name": "after_id",
+            "plain": 128
+          },
+          {
+            "name": "before_id",
+            "plain": 128
+          }
+        ],
+        "answer_bound_names": [
+          "max_tokens",
+          "max_completion_tokens",
+          "max_output_tokens"
+        ],
+        "answer_count_names": [
+          "n",
+          "best_of"
+        ]
+      },
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "PUT",
+        "path": "/v1/models"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
       "name": "a path of 257 bytes",
       "request": {
         "lease_id": "lease-0001",
@@ -821,6 +1051,21 @@
         "method": "GET",
         "path": "/v1/models",
         "query": "after_id=a+b"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a paging id holding a letter outside ASCII",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models",
+        "query": "after_id=mod%C3%A8le"
       },
       "outcome": {
         "allowed": false,
@@ -1270,7 +1515,57 @@
       }
     },
     {
-      "name": "an allowance: counting tokens is a POST, so it is held to it",
+      "name": "an allowance: a body nested 1000 deep",
+      "allowance": true,
+      "nest": 1000,
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/messages"
+      },
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "POST",
+          "path": "/v1/messages",
+          "bound": 5
+        }
+      }
+    },
+    {
+      "name": "an allowance: a body nested 1001 deep",
+      "allowance": true,
+      "nest": 1001,
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/messages"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "allowance",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a chosen model: a body nested 1001 deep",
+      "model": "m",
+      "nest": 1001,
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/messages"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "an allowance: a counting route is not held to it",
       "allowance": true,
       "body": "{\"model\":\"m\",\"messages\":[]}",
       "request": {
@@ -1280,10 +1575,12 @@
         "body_b64": "eyJtb2RlbCI6Im0iLCJtZXNzYWdlcyI6W119"
       },
       "outcome": {
-        "allowed": false,
-        "reason": "allowance",
-        "status": 403,
-        "refused": true
+        "allowed": true,
+        "call": {
+          "method": "POST",
+          "path": "/v1/messages/count_tokens",
+          "counts": true
+        }
       }
     }
   ],

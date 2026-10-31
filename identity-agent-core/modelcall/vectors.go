@@ -19,16 +19,13 @@ var modelCallVectors []byte
 type VectorSet struct {
 	About string `json:"about"`
 
-	Limits            Limits   `json:"limits"`
-	HeaderNames       []string `json:"header_names"`
-	AnswerHeaderNames []string `json:"answer_header_names"`
-	QueryParameters   []string `json:"query_parameters"`
-	AnswerBoundNames  []string `json:"answer_bound_names"`
-	AnswerCountNames  []string `json:"answer_count_names"`
+	Limits Limits `json:"limits"`
 
-	// Routes are the routes every start below is checked against: an example
-	// of a sign-in's provider's routes, not a list any provider has.
-	Routes []Route `json:"routes"`
+	// Profile is the provider profile every start below is checked against,
+	// unless it gives its own: an example, made up for these vectors, of what
+	// an Identity Agent lists for one provider. It is not any provider's
+	// profile, and nothing in it is part of the exchange.
+	Profile Profile `json:"example_profile"`
 
 	// Borrowing is what a body that makes its model calls through the
 	// Identity Agent says when it borrows its AI agent's sign-in.
@@ -49,13 +46,16 @@ type Limits struct {
 	PartLargest           int `json:"part_largest"`
 	PathLongest           int `json:"path_longest"`
 	AnswerLongest         int `json:"answer_longest"`
+	DepthDeepest          int `json:"depth_deepest"`
 	CollectionWaitSeconds int `json:"collection_wait_seconds"`
 }
 
-// StartVector is one start: the rules it is checked under, the request, and
-// what is decided of it.
+// StartVector is one start: the rules it is checked under, the start as it
+// arrives, and what is decided of it.
 type StartVector struct {
 	Name string `json:"name"`
+	// Profile, where given, replaces the example profile for this start.
+	Profile *Profile `json:"profile,omitempty"`
 	// Model is the model chosen for the AI agent, if one is; Allowance says
 	// its model calls are held to an allowance.
 	Model     string `json:"model,omitempty"`
@@ -63,10 +63,18 @@ type StartVector struct {
 	// Body is the call's body as text, whose base64 is the request's
 	// body_b64. Where PadTo is set, the body is Body followed by spaces to
 	// PadTo bytes, and body_b64 is left out of the file for its size.
-	Body    string  `json:"body,omitempty"`
-	PadTo   int     `json:"pad_to,omitempty"`
+	Body  string `json:"body,omitempty"`
+	PadTo int    `json:"pad_to,omitempty"`
+	// Nest, where set, is the body's object holding one field "x" nested
+	// in arrays until the body is Nest deep, and model and max_tokens before
+	// it; the body is left out of the file.
+	Nest    int     `json:"nest,omitempty"`
 	Request Request `json:"request"`
-	Outcome Outcome `json:"outcome"`
+	// Raw, where set, is the start as it arrives, in place of the request
+	// written as JSON; RawPadTo pads it with spaces to that many bytes.
+	Raw      string  `json:"raw,omitempty"`
+	RawPadTo int     `json:"raw_pad_to,omitempty"`
+	Outcome  Outcome `json:"outcome"`
 }
 
 // Outcome is what the checks decide of a start: the call as it is sent on,
@@ -79,7 +87,8 @@ type Outcome struct {
 	Refused bool   `json:"refused,omitempty"`
 }
 
-// HeaderVector is the headers a body sent, and those that travel on.
+// HeaderVector is the headers a body sent, and those that travel on under
+// the example profile.
 type HeaderVector struct {
 	Name   string            `json:"name"`
 	Sent   map[string]string `json:"sent"`

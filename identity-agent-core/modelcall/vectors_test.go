@@ -26,7 +26,7 @@ func TestThePublishedModelCallVectorsHold(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(set.Routes) == 0 || len(set.Starts) == 0 || len(set.Headers) == 0 || len(set.Collections) == 0 ||
+	if len(set.Profile.Routes) == 0 || len(set.Starts) == 0 || len(set.Headers) == 0 || len(set.Collections) == 0 ||
 		len(set.CollectionQueries) == 0 || len(set.Refusals) == 0 || len(set.Answers) == 0 {
 		t.Fatal("the vector file is missing a section")
 	}
@@ -75,17 +75,27 @@ func TestTheModelCallSchemaDescribesTheseTypes(t *testing.T) {
 		t.Fatal(err)
 	}
 	held := map[string]any{
-		"request":   Request{},
-		"answer":    Answer{},
-		"refusal":   Refusal{},
-		"stopped":   Stopped{},
-		"borrowing": Borrowing{},
+		"request":         Request{},
+		"answer":          Answer{},
+		"refusal":         Refusal{},
+		"stopped":         Stopped{},
+		"borrowing":       Borrowing{},
+		"profile":         Profile{},
+		"route":           Route{},
+		"query_parameter": QueryParameter{},
 		// The provider's headers are a map of names to values, not a type.
 		"header": nil,
 	}
+	// A request and an answer are read ignoring fields the reader does not
+	// know, so their definitions must not refuse them.
+	open := map[string]bool{"request": true, "answer": true}
 	var faults []string
 	for def, v := range held {
-		if v != nil {
+		switch {
+		case v == nil:
+		case open[def]:
+			faults = append(faults, s.MatchesOpen(def, v)...)
+		default:
 			faults = append(faults, s.Matches(def, v)...)
 		}
 	}
@@ -111,7 +121,7 @@ func TestEveryRefusalHasAReason(t *testing.T) {
 		if s.Outcome.Allowed {
 			continue
 		}
-		_, err := Rules{Routes: set.Routes, Model: s.Model, Allowance: s.Allowance}.Check(startRequest(s))
+		_, err := checkStart(set, s)
 		var e *Error
 		if !errors.As(err, &e) || e.Why == "" {
 			t.Errorf("%s: refused without a reason or a sentence: %v", s.Name, err)
@@ -134,6 +144,9 @@ func TestAnAnswerCarriesAtMostOnePart(t *testing.T) {
 
 // startBody is a start's body as it is sent.
 func startBody(s StartVector) []byte {
+	if s.Nest > 0 {
+		return []byte(`{"model":"m","max_tokens":5,"x":` + strings.Repeat("[", s.Nest-1) + strings.Repeat("]", s.Nest-1) + "}")
+	}
 	b := []byte(s.Body)
 	if s.PadTo > len(b) {
 		b = append(b, bytes.Repeat([]byte(" "), s.PadTo-len(b))...)
@@ -144,32 +157,59 @@ func startBody(s StartVector) []byte {
 // startRequest is a start's request as it is sent, its body included.
 func startRequest(s StartVector) Request {
 	q := s.Request
-	if s.Body != "" {
+	if s.Body != "" || s.Nest > 0 {
 		q.BodyB64 = base64.StdEncoding.EncodeToString(startBody(s))
 	}
 	return q
 }
 
+// startArrives is a start as it arrives: Raw, or the request as JSON, padded
+// with spaces to RawPadTo.
+func startArrives(s StartVector) ([]byte, error) {
+	raw := []byte(s.Raw)
+	if s.Raw == "" {
+		var err error
+		if raw, err = json.Marshal(startRequest(s)); err != nil {
+			return nil, err
+		}
+	}
+	if s.RawPadTo > len(raw) {
+		raw = append(raw, bytes.Repeat([]byte(" "), s.RawPadTo-len(raw))...)
+	}
+	return raw, nil
+}
+
+// checkStart is what Check decides of a start as it arrives.
+func checkStart(set VectorSet, s StartVector) (Call, error) {
+	raw, err := startArrives(s)
+	if err != nil {
+		return Call{}, err
+	}
+	q, err := ParseRequest(raw)
+	if err != nil {
+		return Call{}, err
+	}
+	rules := Rules{Profile: set.Profile, Model: s.Model, Allowance: s.Allowance}
+	if s.Profile != nil {
+		rules.Profile = *s.Profile
+	}
+	return rules.Check(q)
+}
+
 // fillModelCallVectors computes every derived value in set from its inputs.
 func fillModelCallVectors(set *VectorSet) error {
 	set.Limits = Limits{RequestLargest: RequestLargest, StartLargest: StartLargest, PartLargest: PartLargest, PathLongest: PathLongest,
-		AnswerLongest: AnswerLongest, CollectionWaitSeconds: int(CollectionWait.Seconds())}
-	set.HeaderNames = append([]string(nil), HeaderNames...)
-	set.AnswerHeaderNames = append([]string(nil), AnswerHeaderNames...)
-	set.QueryParameters = QueryParameters()
-	set.AnswerBoundNames = append([]string(nil), AnswerBoundNames...)
-	set.AnswerCountNames = append([]string(nil), AnswerCountNames...)
+		AnswerLongest: AnswerLongest, DepthDeepest: DepthDeepest, CollectionWaitSeconds: int(CollectionWait.Seconds())}
 	set.Borrowing = Borrowing{ModelCalls: ThroughIdentityAgent}
 	for i := range set.Starts {
 		s := &set.Starts[i]
-		q := startRequest(*s)
-		if s.Body != "" {
-			s.Request.BodyB64 = q.BodyB64
-			if s.PadTo > 0 {
+		if s.Body != "" || s.Nest > 0 {
+			s.Request.BodyB64 = startRequest(*s).BodyB64
+			if s.PadTo > 0 || s.Nest > 0 {
 				s.Request.BodyB64 = ""
 			}
 		}
-		c, err := Rules{Routes: set.Routes, Model: s.Model, Allowance: s.Allowance}.Check(q)
+		c, err := checkStart(*set, *s)
 		if err != nil {
 			var e *Error
 			if !errors.As(err, &e) {
@@ -182,7 +222,7 @@ func fillModelCallVectors(set *VectorSet) error {
 		s.Outcome = Outcome{Allowed: true, Call: &c}
 	}
 	for i := range set.Headers {
-		set.Headers[i].Passed = Headers(set.Headers[i].Sent)
+		set.Headers[i].Passed = set.Profile.PassedHeaders(set.Headers[i].Sent)
 	}
 	for i := range set.Collections {
 		c := &set.Collections[i]
@@ -215,16 +255,34 @@ func writeModelCallVectors(t *testing.T) {
 	t.Helper()
 	var set VectorSet
 	set.About = "Model calls a body makes through the Identity Agent that keeps the API key, worked through; " +
-		"the rules are in contracts/model-call/model-call.schema.json. Each start is checked against routes, under " +
-		"its model (the model chosen for the AI agent, where one is) and allowance (whether its model calls are " +
-		"held to an allowance). Each outcome is what the request alone decides; what only the Identity Agent knows " +
-		"(the lease, the AI agent's standing, what an allowance has left) is not in it."
-	set.Routes = []Route{
-		{"POST", "/v1/messages"},
-		{"POST", "/v1/messages/count_tokens"},
-		{"POST", "/v1/chat/completions"},
-		{"GET", "/v1/models"},
+		"the rules are in contracts/model-call/model-call.schema.json. Each start arrives as its request written as " +
+		"JSON (or as raw, padded to raw_pad_to) and is checked against example_profile, or its own profile, under its " +
+		"model (the model chosen for the AI agent, where one is) and allowance (whether its model calls are held to " +
+		"an allowance). example_profile is made up for these vectors: it is not any provider's, and the routes, " +
+		"headers, query parameters and answer-length names in it are not part of the exchange. Each outcome is what " +
+		"the request alone decides; what only the Identity Agent knows (the lease, the AI agent's standing, what an " +
+		"allowance has left) is not in it."
+	set.Profile = Profile{
+		Routes: []Route{
+			{Method: "POST", Path: "/v1/messages"},
+			{Method: "POST", Path: "/v1/messages/count_tokens", Counts: true},
+			{Method: "POST", Path: "/v1/chat/completions"},
+			{Method: "GET", Path: "/v1/models"},
+		},
+		ModelsPath:    "/v1/models",
+		Headers:       []string{"Content-Type", "Accept", "Anthropic-Version", "Anthropic-Beta", "Openai-Beta"},
+		AnswerHeaders: []string{"Content-Type", "Retry-After", "Request-Id", "X-Request-Id"},
+		Parameters: []QueryParameter{
+			{Name: "beta", Value: "true"},
+			{Name: "limit", Digits: 4},
+			{Name: "after_id", Plain: 128},
+			{Name: "before_id", Plain: 128},
+		},
+		AnswerBoundNames: []string{"max_tokens", "max_completion_tokens", "max_output_tokens"},
+		AnswerCountNames: []string{"n", "best_of"},
 	}
+	withPUT := set.Profile
+	withPUT.Routes = append([]Route{{Method: "PUT", Path: "/v1/models"}}, set.Profile.Routes...)
 	const lease = "lease-0001"
 	call := func(method, path string) Request { return Request{LeaseID: lease, Method: method, Path: path} }
 	with := func(q Request, f func(*Request)) Request { f(&q); return q }
@@ -244,7 +302,6 @@ func writeModelCallVectors(t *testing.T) {
 		{Name: "the method in lower case", Body: `{"model":"m","messages":[]}`, Request: with(chat, func(q *Request) { q.Method = "post" })},
 		{Name: "the list of models, paged", Request: with(models, func(q *Request) { q.Query = "limit=20&after_id=model-a" })},
 		{Name: "one model by a name holding a slash", Request: call("GET", "/v1/models/vendor/example-model:latest")},
-		{Name: "one model by a name holding a letter outside ASCII", Request: call("GET", "/v1/models/modèle")},
 		{Name: "the query is sent on sorted", Request: with(models, func(q *Request) { q.Query = "limit=5&beta=true" })},
 		{Name: "an empty query value of the paging", Request: with(models, func(q *Request) { q.Query = "limit=&after_id=" })},
 		{Name: "a path of 256 bytes", Request: call("GET", "/v1/models/"+strings.Repeat("a", 256-len("/v1/models/")))},
@@ -267,6 +324,14 @@ func writeModelCallVectors(t *testing.T) {
 
 		// Refused: the request.
 		{Name: "no lease", Body: `{"model":"m"}`, Request: with(msg, func(q *Request) { q.LeaseID = "" })},
+		{Name: "a start that is not JSON", Raw: "not json", Request: msg},
+		{Name: "a start that is not an object", Raw: `["lease-0001"]`, Request: msg},
+		{Name: "a start whose lease is not a string", Raw: `{"lease_id":1,"method":"GET","path":"/v1/models"}`, Request: msg},
+		{Name: "a start naming its fields in another case", Raw: `{"LEASE_ID":"lease-0001","method":"GET","path":"/v1/models"}`, Request: msg},
+		{Name: "a start with a field it does not know", Raw: `{"lease_id":"lease-0001","method":"GET","path":"/v1/models","extra":{"a":1}}`, Request: msg},
+		{Name: "a start with nulls for its strings", Raw: `{"lease_id":"lease-0001","method":"GET","path":"/v1/models","query":null,"header":{"Accept":null},"body_b64":null}`, Request: msg},
+		{Name: "a start of exactly 6 MB", RawPadTo: StartLargest, Request: models},
+		{Name: "a start of 6 MB and a byte", RawPadTo: StartLargest + 1, Request: models},
 		{Name: "no lease, and a body that is not base64", Request: with(msg, func(q *Request) { q.LeaseID = ""; q.BodyB64 = "not base64!" })},
 		{Name: "a body that is not base64", Request: with(msg, func(q *Request) { q.BodyB64 = "not base64!" })},
 		{Name: "a body in base64 broken across lines", Request: with(msg, func(q *Request) { q.BodyB64 = "e30=\n" })},
@@ -285,6 +350,9 @@ func writeModelCallVectors(t *testing.T) {
 		{Name: "a path holding a query", Body: `{"model":"m"}`, Request: call("POST", "/v1/messages?beta=true")},
 		{Name: "a path holding a fragment", Request: call("GET", "/v1/models#x")},
 		{Name: "a path not starting with a slash", Request: call("GET", "v1/models")},
+		{Name: "a path holding a letter outside ASCII", Request: call("GET", "/v1/models/mod\u00e8le")},
+		{Name: "a path holding a letter newer than some Unicode tables", Request: call("GET", "/v1/models/a\U00010D50")},
+		{Name: "a method other than GET or POST, though the profile lists it", Profile: &withPUT, Request: call("PUT", "/v1/models")},
 		{Name: "a path of 257 bytes", Request: call("GET", "/v1/models/"+strings.Repeat("a", 257-len("/v1/models/")))},
 		{Name: "no path", Request: call("GET", "")},
 
@@ -298,6 +366,7 @@ func writeModelCallVectors(t *testing.T) {
 		{Name: "a query split by a semicolon", Request: with(models, func(q *Request) { q.Query = "limit=5;beta=true" })},
 		{Name: "a query with a broken escape", Request: with(models, func(q *Request) { q.Query = "after_id=%zz" })},
 		{Name: "a paging id holding a space", Request: with(models, func(q *Request) { q.Query = "after_id=a+b" })},
+		{Name: "a paging id holding a letter outside ASCII", Request: with(models, func(q *Request) { q.Query = "after_id=mod%C3%A8le" })},
 		{Name: "a paging id of 129 bytes", Request: with(models, func(q *Request) { q.Query = "before_id=" + strings.Repeat("b", 129) })},
 
 		// Refused: the chosen model.
@@ -338,7 +407,10 @@ func writeModelCallVectors(t *testing.T) {
 			})},
 		{Name: "an allowance: a number of answers named with a letter outside ASCII is not one", Allowance: true,
 			Body: "{\"model\":\"m\",\"max_tokens\":5,\"be\u017ft_of\":3}", Request: chat},
-		{Name: "an allowance: counting tokens is a POST, so it is held to it", Allowance: true,
+		{Name: "an allowance: a body nested 1000 deep", Allowance: true, Nest: DepthDeepest, Request: msg},
+		{Name: "an allowance: a body nested 1001 deep", Allowance: true, Nest: DepthDeepest + 1, Request: msg},
+		{Name: "a chosen model: a body nested 1001 deep", Model: "m", Nest: DepthDeepest + 1, Request: msg},
+		{Name: "an allowance: a counting route is not held to it", Allowance: true,
 			Body: `{"model":"m","messages":[]}`, Request: call("POST", "/v1/messages/count_tokens")},
 	}
 	set.Headers = []HeaderVector{
