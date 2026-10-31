@@ -27,12 +27,13 @@ type VectorSet struct {
 	// profile, and nothing in it is part of the exchange.
 	Profile Profile `json:"example_profile"`
 
-	// Borrowing is what a body that makes its model calls through the
-	// Identity Agent says when it borrows its AI agent's sign-in.
-	Borrowing Borrowing `json:"borrowing"`
+	// Borrow is a run's borrowing of its AI agent's sign-in, worked through:
+	// what it sends and is answered, renewing, giving back, and refusals.
+	Borrow BorrowVectors `json:"borrow"`
 
 	Starts            []StartVector           `json:"starts"`
 	Headers           []HeaderVector          `json:"headers"`
+	AnswerHeaders     []HeaderVector          `json:"answer_headers"`
 	Collections       []CollectionVector      `json:"collections"`
 	CollectionQueries []CollectionQueryVector `json:"collection_queries"`
 	Refusals          []RefusalVector         `json:"refusals"`
@@ -66,7 +67,7 @@ type StartVector struct {
 	Body  string `json:"body,omitempty"`
 	PadTo int    `json:"pad_to,omitempty"`
 	// Nest, where set, is the body's object holding one field "x" nested
-	// in arrays until the body is Nest deep, and model and max_tokens before
+	// in arrays until the body is Nest deep, and model and max_answer_tokens before
 	// it; the body is left out of the file.
 	Nest    int     `json:"nest,omitempty"`
 	Request Request `json:"request"`
@@ -87,12 +88,26 @@ type Outcome struct {
 	Refused bool   `json:"refused,omitempty"`
 }
 
-// HeaderVector is the headers a body sent, and those that travel on under
-// the example profile.
+// HeaderVector is the headers a body sent (or, among answer_headers, the
+// provider answered with), and those that travel on (or back) under the
+// example profile, or the vector's own.
 type HeaderVector struct {
-	Name   string            `json:"name"`
-	Sent   map[string]string `json:"sent"`
-	Passed map[string]string `json:"passed,omitempty"`
+	Name    string            `json:"name"`
+	Profile *Profile          `json:"profile,omitempty"`
+	Sent    map[string]string `json:"sent"`
+	Passed  map[string]string `json:"passed,omitempty"`
+}
+
+// BorrowVectors are a run's borrowing of its sign-in, worked through.
+type BorrowVectors struct {
+	Request         Borrowing     `json:"request"`
+	Answer          Borrowed      `json:"answer"`
+	Renew           LeaseRequest  `json:"renew"`
+	Renewed         Renewed       `json:"renewed"`
+	Return          LeaseRequest  `json:"return"`
+	Returned        Returned      `json:"returned"`
+	LeaseGone       BorrowRefusal `json:"lease_gone"`
+	UpdateAgentHost BorrowRefusal `json:"update_agent_host"`
 }
 
 // CollectionVector is a collection, and the path it is asked at.

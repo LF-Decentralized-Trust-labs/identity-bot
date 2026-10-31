@@ -13,16 +13,16 @@
     "routes": [
       {
         "method": "POST",
-        "path": "/v1/messages"
+        "path": "/v1/generate"
       },
       {
         "method": "POST",
-        "path": "/v1/messages/count_tokens",
+        "path": "/v1/generate/count",
         "counts": true
       },
       {
         "method": "POST",
-        "path": "/v1/chat/completions"
+        "path": "/v1/complete"
       },
       {
         "method": "GET",
@@ -33,9 +33,9 @@
     "headers": [
       "Content-Type",
       "Accept",
-      "Anthropic-Version",
-      "Anthropic-Beta",
-      "Openai-Beta"
+      "Example-Version",
+      "Example-Beta",
+      "Example-Preview"
     ],
     "answer_headers": [
       "Content-Type",
@@ -45,80 +45,109 @@
     ],
     "query": [
       {
-        "name": "beta",
+        "name": "preview",
         "value": "true"
       },
       {
-        "name": "limit",
+        "name": "page_size",
         "digits": 4
       },
       {
-        "name": "after_id",
+        "name": "page_after",
         "plain": 128
       },
       {
-        "name": "before_id",
+        "name": "page_before",
         "plain": 128
       }
     ],
     "answer_bound_names": [
-      "max_tokens",
-      "max_completion_tokens",
-      "max_output_tokens"
+      "max_answer_tokens",
+      "answer_limit",
+      "answer_tokens"
     ],
     "answer_count_names": [
-      "n",
-      "best_of"
+      "answer_count",
+      "candidates"
     ]
   },
-  "borrowing": {
-    "model_calls": "through_identity_agent"
+  "borrow": {
+    "request": {
+      "model_calls": "through_identity_agent"
+    },
+    "answer": {
+      "lease_id": "lease-0001",
+      "lease_expires_at": "2026-10-30T12:05:00Z",
+      "renew_every_seconds": 100,
+      "model_calls": "through_identity_agent"
+    },
+    "renew": {
+      "lease_id": "lease-0001"
+    },
+    "renewed": {
+      "lease_id": "lease-0001",
+      "lease_expires_at": "2026-10-30T12:06:40Z"
+    },
+    "return": {
+      "lease_id": "lease-0001"
+    },
+    "returned": {
+      "returned": true
+    },
+    "lease_gone": {
+      "error": "no such lend",
+      "no_lease": true
+    },
+    "update_agent_host": {
+      "error": "this AI agent's key stays with its Identity Agent, and this machine's body is too old to make its model calls through it; update it",
+      "update_agent_host": true
+    }
   },
   "starts": [
     {
       "name": "a model call",
-      "body": "{\"model\":\"example-model-1\",\"max_tokens\":1024,\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}",
+      "body": "{\"model\":\"example-model-1\",\"max_answer_tokens\":1024,\"input\":[{\"role\":\"user\",\"content\":\"Hello\"}]}",
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
-        "query": "beta=true",
+        "path": "/v1/generate",
+        "query": "preview=true",
         "header": {
-          "Anthropic-Version": "2023-06-01",
           "Authorization": "Bearer run-token",
+          "Example-Version": "2023-06-01",
           "User-Agent": "a-program/1.0",
           "X-Api-Key": "run-token",
           "content-type": "application/json"
         },
-        "body_b64": "eyJtb2RlbCI6ImV4YW1wbGUtbW9kZWwtMSIsIm1heF90b2tlbnMiOjEwMjQsIm1lc3NhZ2VzIjpbeyJyb2xlIjoidXNlciIsImNvbnRlbnQiOiJIZWxsbyJ9XX0="
+        "body_b64": "eyJtb2RlbCI6ImV4YW1wbGUtbW9kZWwtMSIsIm1heF9hbnN3ZXJfdG9rZW5zIjoxMDI0LCJpbnB1dCI6W3sicm9sZSI6InVzZXIiLCJjb250ZW50IjoiSGVsbG8ifV19"
       },
       "outcome": {
         "allowed": true,
         "call": {
           "method": "POST",
-          "path": "/v1/messages",
-          "query": "beta=true",
+          "path": "/v1/generate",
+          "query": "preview=true",
           "header": {
-            "Anthropic-Version": "2023-06-01",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "Example-Version": "2023-06-01"
           }
         }
       }
     },
     {
       "name": "the method in lower case",
-      "body": "{\"model\":\"m\",\"messages\":[]}",
+      "body": "{\"model\":\"m\",\"input\":[]}",
       "request": {
         "lease_id": "lease-0001",
         "method": "post",
-        "path": "/v1/chat/completions",
-        "body_b64": "eyJtb2RlbCI6Im0iLCJtZXNzYWdlcyI6W119"
+        "path": "/v1/complete",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJpbnB1dCI6W119"
       },
       "outcome": {
         "allowed": true,
         "call": {
           "method": "POST",
-          "path": "/v1/chat/completions"
+          "path": "/v1/complete"
         }
       }
     },
@@ -128,14 +157,14 @@
         "lease_id": "lease-0001",
         "method": "GET",
         "path": "/v1/models",
-        "query": "limit=20&after_id=model-a"
+        "query": "page_size=20&page_after=model-a"
       },
       "outcome": {
         "allowed": true,
         "call": {
           "method": "GET",
           "path": "/v1/models",
-          "query": "after_id=model-a&limit=20",
+          "query": "page_after=model-a&page_size=20",
           "reads": true
         }
       }
@@ -162,14 +191,14 @@
         "lease_id": "lease-0001",
         "method": "GET",
         "path": "/v1/models",
-        "query": "limit=5&beta=true"
+        "query": "page_size=5&preview=true"
       },
       "outcome": {
         "allowed": true,
         "call": {
           "method": "GET",
           "path": "/v1/models",
-          "query": "beta=true&limit=5",
+          "query": "page_size=5&preview=true",
           "reads": true
         }
       }
@@ -180,14 +209,14 @@
         "lease_id": "lease-0001",
         "method": "GET",
         "path": "/v1/models",
-        "query": "limit=&after_id="
+        "query": "page_size=&page_after="
       },
       "outcome": {
         "allowed": true,
         "call": {
           "method": "GET",
           "path": "/v1/models",
-          "query": "after_id=&limit=",
+          "query": "page_after=&page_size=",
           "reads": true
         }
       }
@@ -211,18 +240,18 @@
     {
       "name": "the chosen model",
       "model": "example-model-1",
-      "body": "{\"model\":\"example-model-1\",\"messages\":[]}",
+      "body": "{\"model\":\"example-model-1\",\"input\":[]}",
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
-        "body_b64": "eyJtb2RlbCI6ImV4YW1wbGUtbW9kZWwtMSIsIm1lc3NhZ2VzIjpbXX0="
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6ImV4YW1wbGUtbW9kZWwtMSIsImlucHV0IjpbXX0="
       },
       "outcome": {
         "allowed": true,
         "call": {
           "method": "POST",
-          "path": "/v1/messages"
+          "path": "/v1/generate"
         }
       }
     },
@@ -249,14 +278,14 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
+        "path": "/v1/generate",
         "body_b64": "bm90IGpzb24="
       },
       "outcome": {
         "allowed": true,
         "call": {
           "method": "POST",
-          "path": "/v1/messages"
+          "path": "/v1/generate"
         }
       }
     },
@@ -266,49 +295,49 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/chat/completions",
+        "path": "/v1/complete",
         "body_b64": "eyJtb2RlbHMiOlsiYSIsImIiXX0="
       },
       "outcome": {
         "allowed": true,
         "call": {
           "method": "POST",
-          "path": "/v1/chat/completions"
+          "path": "/v1/complete"
         }
       }
     },
     {
       "name": "a body of exactly 3 MB",
-      "body": "{\"model\":\"m\",\"messages\":[]}",
+      "body": "{\"model\":\"m\",\"input\":[]}",
       "pad_to": 3145728,
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages"
+        "path": "/v1/generate"
       },
       "outcome": {
         "allowed": true,
         "call": {
           "method": "POST",
-          "path": "/v1/messages"
+          "path": "/v1/generate"
         }
       }
     },
     {
       "name": "an allowance: the largest answer length counts",
       "allowance": true,
-      "body": "{\"model\":\"m\",\"max_tokens\":1024,\"max_completion_tokens\":2048}",
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":1024,\"answer_limit\":2048}",
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/chat/completions",
-        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfdG9rZW5zIjoxMDI0LCJtYXhfY29tcGxldGlvbl90b2tlbnMiOjIwNDh9"
+        "path": "/v1/complete",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6MTAyNCwiYW5zd2VyX2xpbWl0IjoyMDQ4fQ=="
       },
       "outcome": {
         "allowed": true,
         "call": {
           "method": "POST",
-          "path": "/v1/chat/completions",
+          "path": "/v1/complete",
           "bound": 2048
         }
       }
@@ -316,18 +345,18 @@
     {
       "name": "an allowance: one answer, asked for as 1",
       "allowance": true,
-      "body": "{\"model\":\"m\",\"max_output_tokens\":32768,\"n\":1,\"best_of\":1.0}",
+      "body": "{\"model\":\"m\",\"answer_tokens\":32768,\"answer_count\":1,\"candidates\":1.0}",
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/chat/completions",
-        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfb3V0cHV0X3Rva2VucyI6MzI3NjgsIm4iOjEsImJlc3Rfb2YiOjEuMH0="
+        "path": "/v1/complete",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJhbnN3ZXJfdG9rZW5zIjozMjc2OCwiYW5zd2VyX2NvdW50IjoxLCJjYW5kaWRhdGVzIjoxLjB9"
       },
       "outcome": {
         "allowed": true,
         "call": {
           "method": "POST",
-          "path": "/v1/chat/completions",
+          "path": "/v1/complete",
           "bound": 32768
         }
       }
@@ -335,18 +364,18 @@
     {
       "name": "an allowance: a whole number written with an exponent",
       "allowance": true,
-      "body": "{\"model\":\"m\",\"max_tokens\":1e3}",
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":1e3}",
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
-        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfdG9rZW5zIjoxZTN9"
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6MWUzfQ=="
       },
       "outcome": {
         "allowed": true,
         "call": {
           "method": "POST",
-          "path": "/v1/messages",
+          "path": "/v1/generate",
           "bound": 1000
         }
       }
@@ -354,18 +383,18 @@
     {
       "name": "an allowance: only the object's own fields are read",
       "allowance": true,
-      "body": "{\"model\":\"m\",\"max_tokens\":10,\"metadata\":{\"n\":5,\"max_tokens\":99999}}",
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":10,\"metadata\":{\"answer_count\":5,\"max_answer_tokens\":99999}}",
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
-        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfdG9rZW5zIjoxMCwibWV0YWRhdGEiOnsibiI6NSwibWF4X3Rva2VucyI6OTk5OTl9fQ=="
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6MTAsIm1ldGFkYXRhIjp7ImFuc3dlcl9jb3VudCI6NSwibWF4X2Fuc3dlcl90b2tlbnMiOjk5OTk5fX0="
       },
       "outcome": {
         "allowed": true,
         "call": {
           "method": "POST",
-          "path": "/v1/messages",
+          "path": "/v1/generate",
           "bound": 10
         }
       }
@@ -391,18 +420,18 @@
       "name": "an allowance and a chosen model",
       "model": "example-model-1",
       "allowance": true,
-      "body": "{\"model\":\"example-model-1\",\"max_tokens\":1}",
+      "body": "{\"model\":\"example-model-1\",\"max_answer_tokens\":1}",
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
-        "body_b64": "eyJtb2RlbCI6ImV4YW1wbGUtbW9kZWwtMSIsIm1heF90b2tlbnMiOjF9"
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6ImV4YW1wbGUtbW9kZWwtMSIsIm1heF9hbnN3ZXJfdG9rZW5zIjoxfQ=="
       },
       "outcome": {
         "allowed": true,
         "call": {
           "method": "POST",
-          "path": "/v1/messages",
+          "path": "/v1/generate",
           "bound": 1
         }
       }
@@ -413,7 +442,7 @@
       "request": {
         "lease_id": "",
         "method": "POST",
-        "path": "/v1/messages",
+        "path": "/v1/generate",
         "body_b64": "eyJtb2RlbCI6Im0ifQ=="
       },
       "outcome": {
@@ -427,7 +456,7 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages"
+        "path": "/v1/generate"
       },
       "raw": "not json",
       "outcome": {
@@ -441,7 +470,7 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages"
+        "path": "/v1/generate"
       },
       "raw": "[\"lease-0001\"]",
       "outcome": {
@@ -455,7 +484,7 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages"
+        "path": "/v1/generate"
       },
       "raw": "{\"lease_id\":1,\"method\":\"GET\",\"path\":\"/v1/models\"}",
       "outcome": {
@@ -469,7 +498,7 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages"
+        "path": "/v1/generate"
       },
       "raw": "{\"LEASE_ID\":\"lease-0001\",\"method\":\"GET\",\"path\":\"/v1/models\"}",
       "outcome": {
@@ -483,7 +512,7 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages"
+        "path": "/v1/generate"
       },
       "raw": "{\"lease_id\":\"lease-0001\",\"method\":\"GET\",\"path\":\"/v1/models\",\"extra\":{\"a\":1}}",
       "outcome": {
@@ -500,7 +529,7 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages"
+        "path": "/v1/generate"
       },
       "raw": "{\"lease_id\":\"lease-0001\",\"method\":\"GET\",\"path\":\"/v1/models\",\"query\":null,\"header\":{\"Accept\":null},\"body_b64\":null}",
       "outcome": {
@@ -510,6 +539,105 @@
           "path": "/v1/models",
           "reads": true
         }
+      }
+    },
+    {
+      "name": "a start escaping a lone surrogate in a header",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate"
+      },
+      "raw": "{\"lease_id\":\"lease-0001\",\"method\":\"GET\",\"path\":\"/v1/models\",\"header\":{\"Accept\":\"\\ud800\"}}",
+      "outcome": {
+        "allowed": false,
+        "reason": "no_lease",
+        "status": 400
+      }
+    },
+    {
+      "name": "a start escaping a lone low surrogate in its lease",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate"
+      },
+      "raw": "{\"lease_id\":\"\\udc00\",\"method\":\"GET\",\"path\":\"/v1/models\"}",
+      "outcome": {
+        "allowed": false,
+        "reason": "no_lease",
+        "status": 400
+      }
+    },
+    {
+      "name": "a start escaping a surrogate pair",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate"
+      },
+      "raw": "{\"lease_id\":\"lease-0001\",\"method\":\"GET\",\"path\":\"/v1/models\",\"header\":{\"Accept\":\"\\ud83d\\ude00\"}}",
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "GET",
+          "path": "/v1/models",
+          "header": {
+            "Accept": "😀"
+          },
+          "reads": true
+        }
+      }
+    },
+    {
+      "name": "a start escaping a backslash before a u",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate"
+      },
+      "raw": "{\"lease_id\":\"lease-0001\",\"method\":\"GET\",\"path\":\"/v1/models\",\"header\":{\"Accept\":\"\\\\ud800\"}}",
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "GET",
+          "path": "/v1/models",
+          "header": {
+            "Accept": "\\ud800"
+          },
+          "reads": true
+        }
+      }
+    },
+    {
+      "name": "a start nested 1000 deep",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate"
+      },
+      "raw": "{\"lease_id\":\"lease-0001\",\"method\":\"GET\",\"path\":\"/v1/models\",\"extra\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}",
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "GET",
+          "path": "/v1/models",
+          "reads": true
+        }
+      }
+    },
+    {
+      "name": "a start nested 1001 deep",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate"
+      },
+      "raw": "{\"lease_id\":\"lease-0001\",\"method\":\"GET\",\"path\":\"/v1/models\",\"extra\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}",
+      "outcome": {
+        "allowed": false,
+        "reason": "no_lease",
+        "status": 400
       }
     },
     {
@@ -548,7 +676,7 @@
       "request": {
         "lease_id": "",
         "method": "POST",
-        "path": "/v1/messages",
+        "path": "/v1/generate",
         "body_b64": "not base64!"
       },
       "outcome": {
@@ -562,7 +690,7 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
+        "path": "/v1/generate",
         "body_b64": "not base64!"
       },
       "outcome": {
@@ -576,7 +704,7 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
+        "path": "/v1/generate",
         "body_b64": "e30=\n"
       },
       "outcome": {
@@ -591,7 +719,7 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "poſt",
-        "path": "/v1/messages",
+        "path": "/v1/generate",
         "body_b64": "eyJtb2RlbCI6Im0ifQ=="
       },
       "outcome": {
@@ -603,12 +731,12 @@
     },
     {
       "name": "a body of 3 MB and a byte",
-      "body": "{\"model\":\"m\",\"messages\":[]}",
+      "body": "{\"model\":\"m\",\"input\":[]}",
       "pad_to": 3145729,
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages"
+        "path": "/v1/generate"
       },
       "outcome": {
         "allowed": false,
@@ -637,7 +765,7 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "GET",
-        "path": "/v1/messages"
+        "path": "/v1/generate"
       },
       "outcome": {
         "allowed": false,
@@ -682,7 +810,7 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages%2Fcount_tokens",
+        "path": "/v1/generate%2Fcount",
         "body_b64": "eyJtb2RlbCI6Im0ifQ=="
       },
       "outcome": {
@@ -697,7 +825,7 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "GET",
-        "path": "/v1/models/../messages"
+        "path": "/v1/models/../generate"
       },
       "outcome": {
         "allowed": false,
@@ -712,7 +840,7 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "//v1/messages",
+        "path": "//v1/generate",
         "body_b64": "eyJtb2RlbCI6Im0ifQ=="
       },
       "outcome": {
@@ -728,7 +856,7 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages/",
+        "path": "/v1/generate/",
         "body_b64": "eyJtb2RlbCI6Im0ifQ=="
       },
       "outcome": {
@@ -744,7 +872,7 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages?beta=true",
+        "path": "/v1/generate?preview=true",
         "body_b64": "eyJtb2RlbCI6Im0ifQ=="
       },
       "outcome": {
@@ -820,16 +948,16 @@
           },
           {
             "method": "POST",
-            "path": "/v1/messages"
+            "path": "/v1/generate"
           },
           {
             "method": "POST",
-            "path": "/v1/messages/count_tokens",
+            "path": "/v1/generate/count",
             "counts": true
           },
           {
             "method": "POST",
-            "path": "/v1/chat/completions"
+            "path": "/v1/complete"
           },
           {
             "method": "GET",
@@ -840,9 +968,9 @@
         "headers": [
           "Content-Type",
           "Accept",
-          "Anthropic-Version",
-          "Anthropic-Beta",
-          "Openai-Beta"
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview"
         ],
         "answer_headers": [
           "Content-Type",
@@ -852,35 +980,504 @@
         ],
         "query": [
           {
-            "name": "beta",
+            "name": "preview",
             "value": "true"
           },
           {
-            "name": "limit",
+            "name": "page_size",
             "digits": 4
           },
           {
-            "name": "after_id",
+            "name": "page_after",
             "plain": 128
           },
           {
-            "name": "before_id",
+            "name": "page_before",
             "plain": 128
           }
         ],
         "answer_bound_names": [
-          "max_tokens",
-          "max_completion_tokens",
-          "max_output_tokens"
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens"
         ],
         "answer_count_names": [
-          "n",
-          "best_of"
+          "answer_count",
+          "candidates"
         ]
       },
       "request": {
         "lease_id": "lease-0001",
         "method": "PUT",
+        "path": "/v1/models"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a profile naming a route's method in lower case allows no call",
+      "profile": {
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          },
+          {
+            "method": "get",
+            "path": "/v1/other"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview"
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id"
+        ],
+        "query": [
+          {
+            "name": "preview",
+            "value": "true"
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a profile naming one header twice, ignoring case, allows no call",
+      "profile": {
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview",
+          "ACCEPT"
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id"
+        ],
+        "query": [
+          {
+            "name": "preview",
+            "value": "true"
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a profile naming one answer-length field twice, ignoring case, allows no call",
+      "profile": {
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview"
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id"
+        ],
+        "query": [
+          {
+            "name": "preview",
+            "value": "true"
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens",
+          "MAX_ANSWER_TOKENS"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "allowance": true,
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":5}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6NX0="
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a profile naming one query parameter twice, ignoring case, allows no call",
+      "profile": {
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview"
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id"
+        ],
+        "query": [
+          {
+            "name": "preview",
+            "value": "true"
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          },
+          {
+            "name": "Preview",
+            "value": "1"
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a profile whose query parameter gives two rules allows no call",
+      "profile": {
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview"
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id"
+        ],
+        "query": [
+          {
+            "name": "preview",
+            "value": "true",
+            "digits": 2
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a profile whose query parameter gives no rule allows no call",
+      "profile": {
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview"
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id"
+        ],
+        "query": [
+          {
+            "name": "preview"
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
         "path": "/v1/models"
       },
       "outcome": {
@@ -924,7 +1521,7 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
+        "path": "/v1/generate",
         "query": "stream=true",
         "body_b64": "eyJtb2RlbCI6Im0ifQ=="
       },
@@ -936,13 +1533,13 @@
       }
     },
     {
-      "name": "beta other than true",
+      "name": "a fixed value other than its own",
       "body": "{\"model\":\"m\"}",
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
-        "query": "beta=false",
+        "path": "/v1/generate",
+        "query": "preview=false",
         "body_b64": "eyJtb2RlbCI6Im0ifQ=="
       },
       "outcome": {
@@ -958,8 +1555,8 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
-        "query": "beta=true&beta=true",
+        "path": "/v1/generate",
+        "query": "preview=true&preview=true",
         "body_b64": "eyJtb2RlbCI6Im0ifQ=="
       },
       "outcome": {
@@ -970,12 +1567,12 @@
       }
     },
     {
-      "name": "a limit of five digits",
+      "name": "a page size of five digits",
       "request": {
         "lease_id": "lease-0001",
         "method": "GET",
         "path": "/v1/models",
-        "query": "limit=12345"
+        "query": "page_size=12345"
       },
       "outcome": {
         "allowed": false,
@@ -985,12 +1582,12 @@
       }
     },
     {
-      "name": "a limit that is not digits",
+      "name": "a page size that is not digits",
       "request": {
         "lease_id": "lease-0001",
         "method": "GET",
         "path": "/v1/models",
-        "query": "limit=-1"
+        "query": "page_size=-1"
       },
       "outcome": {
         "allowed": false,
@@ -1005,7 +1602,7 @@
         "lease_id": "lease-0001",
         "method": "GET",
         "path": "/v1/models",
-        "query": "Limit=5"
+        "query": "Page_Size=5"
       },
       "outcome": {
         "allowed": false,
@@ -1020,7 +1617,7 @@
         "lease_id": "lease-0001",
         "method": "GET",
         "path": "/v1/models",
-        "query": "limit=5;beta=true"
+        "query": "page_size=5;preview=true"
       },
       "outcome": {
         "allowed": false,
@@ -1035,7 +1632,7 @@
         "lease_id": "lease-0001",
         "method": "GET",
         "path": "/v1/models",
-        "query": "after_id=%zz"
+        "query": "page_after=%zz"
       },
       "outcome": {
         "allowed": false,
@@ -1050,7 +1647,7 @@
         "lease_id": "lease-0001",
         "method": "GET",
         "path": "/v1/models",
-        "query": "after_id=a+b"
+        "query": "page_after=a+b"
       },
       "outcome": {
         "allowed": false,
@@ -1065,7 +1662,7 @@
         "lease_id": "lease-0001",
         "method": "GET",
         "path": "/v1/models",
-        "query": "after_id=mod%C3%A8le"
+        "query": "page_after=mod%C3%A8le"
       },
       "outcome": {
         "allowed": false,
@@ -1080,7 +1677,7 @@
         "lease_id": "lease-0001",
         "method": "GET",
         "path": "/v1/models",
-        "query": "before_id=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        "query": "page_before=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
       },
       "outcome": {
         "allowed": false,
@@ -1096,7 +1693,7 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
+        "path": "/v1/generate",
         "body_b64": "eyJtb2RlbCI6ImFub3RoZXItbW9kZWwifQ=="
       },
       "outcome": {
@@ -1109,12 +1706,12 @@
     {
       "name": "no model named, with one chosen",
       "model": "example-model-1",
-      "body": "{\"messages\":[]}",
+      "body": "{\"input\":[]}",
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
-        "body_b64": "eyJtZXNzYWdlcyI6W119"
+        "path": "/v1/generate",
+        "body_b64": "eyJpbnB1dCI6W119"
       },
       "outcome": {
         "allowed": false,
@@ -1130,7 +1727,7 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
+        "path": "/v1/generate",
         "body_b64": "eyJtb2RlbCI6ImV4YW1wbGUtbW9kZWwtMSIsIm1vZGVsIjoiYW5vdGhlci1tb2RlbCJ9"
       },
       "outcome": {
@@ -1147,7 +1744,7 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
+        "path": "/v1/generate",
         "body_b64": "eyJNb2RlbCI6ImV4YW1wbGUtbW9kZWwtMSJ9"
       },
       "outcome": {
@@ -1164,7 +1761,7 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/chat/completions",
+        "path": "/v1/complete",
         "body_b64": "eyJtb2RlbCI6ImV4YW1wbGUtbW9kZWwtMSIsIm1vZGVscyI6WyJhbm90aGVyLW1vZGVsIl19"
       },
       "outcome": {
@@ -1181,7 +1778,7 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
+        "path": "/v1/generate",
         "body_b64": "eyJtb2RlbCI6WyJleGFtcGxlLW1vZGVsLTEiXX0="
       },
       "outcome": {
@@ -1198,14 +1795,14 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/chat/completions",
+        "path": "/v1/complete",
         "body_b64": "eyJtb2RlbCI6ImV4YW1wbGUtbW9kZWwtMSIsIm1vZGVsxb8iOlsiYSJdfQ=="
       },
       "outcome": {
         "allowed": true,
         "call": {
           "method": "POST",
-          "path": "/v1/chat/completions"
+          "path": "/v1/complete"
         }
       }
     },
@@ -1216,7 +1813,7 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
+        "path": "/v1/generate",
         "body_b64": "eyJtb2RlbCI6ImV4YW1wbGUtbW9kZWwtMSJ9IHsibW9kZWwiOiJhbm90aGVyLW1vZGVsIn0="
       },
       "outcome": {
@@ -1229,12 +1826,12 @@
     {
       "name": "an allowance: no answer length",
       "allowance": true,
-      "body": "{\"model\":\"m\",\"messages\":[]}",
+      "body": "{\"model\":\"m\",\"input\":[]}",
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
-        "body_b64": "eyJtb2RlbCI6Im0iLCJtZXNzYWdlcyI6W119"
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJpbnB1dCI6W119"
       },
       "outcome": {
         "allowed": false,
@@ -1246,12 +1843,12 @@
     {
       "name": "an allowance: an answer length of 0",
       "allowance": true,
-      "body": "{\"model\":\"m\",\"max_tokens\":0}",
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":0}",
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
-        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfdG9rZW5zIjowfQ=="
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6MH0="
       },
       "outcome": {
         "allowed": false,
@@ -1263,12 +1860,12 @@
     {
       "name": "an allowance: an answer length over 32768",
       "allowance": true,
-      "body": "{\"model\":\"m\",\"max_tokens\":32769}",
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":32769}",
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
-        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfdG9rZW5zIjozMjc2OX0="
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6MzI3Njl9"
       },
       "outcome": {
         "allowed": false,
@@ -1280,12 +1877,12 @@
     {
       "name": "an allowance: an answer length that is not whole",
       "allowance": true,
-      "body": "{\"model\":\"m\",\"max_tokens\":1.5}",
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":1.5}",
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
-        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfdG9rZW5zIjoxLjV9"
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6MS41fQ=="
       },
       "outcome": {
         "allowed": false,
@@ -1297,12 +1894,12 @@
     {
       "name": "an allowance: an answer length as a string",
       "allowance": true,
-      "body": "{\"model\":\"m\",\"max_tokens\":\"100\"}",
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":\"100\"}",
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
-        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfdG9rZW5zIjoiMTAwIn0="
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6IjEwMCJ9"
       },
       "outcome": {
         "allowed": false,
@@ -1314,12 +1911,12 @@
     {
       "name": "an allowance: an answer length spelt in another case",
       "allowance": true,
-      "body": "{\"model\":\"m\",\"Max_Tokens\":100}",
+      "body": "{\"model\":\"m\",\"Max_Answer_Tokens\":100}",
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
-        "body_b64": "eyJtb2RlbCI6Im0iLCJNYXhfVG9rZW5zIjoxMDB9"
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJNYXhfQW5zd2VyX1Rva2VucyI6MTAwfQ=="
       },
       "outcome": {
         "allowed": false,
@@ -1331,12 +1928,12 @@
     {
       "name": "an allowance: an answer length given twice",
       "allowance": true,
-      "body": "{\"model\":\"m\",\"max_tokens\":100,\"max_tokens\":200}",
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":100,\"max_answer_tokens\":200}",
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
-        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfdG9rZW5zIjoxMDAsIm1heF90b2tlbnMiOjIwMH0="
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6MTAwLCJtYXhfYW5zd2VyX3Rva2VucyI6MjAwfQ=="
       },
       "outcome": {
         "allowed": false,
@@ -1348,12 +1945,12 @@
     {
       "name": "an allowance: two answers",
       "allowance": true,
-      "body": "{\"model\":\"m\",\"max_tokens\":100,\"n\":2}",
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":100,\"answer_count\":2}",
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/chat/completions",
-        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfdG9rZW5zIjoxMDAsIm4iOjJ9"
+        "path": "/v1/complete",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6MTAwLCJhbnN3ZXJfY291bnQiOjJ9"
       },
       "outcome": {
         "allowed": false,
@@ -1365,12 +1962,12 @@
     {
       "name": "an allowance: two answers, asked for in another case",
       "allowance": true,
-      "body": "{\"model\":\"m\",\"max_tokens\":100,\"N\":2}",
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":100,\"ANSWER_COUNT\":2}",
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/chat/completions",
-        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfdG9rZW5zIjoxMDAsIk4iOjJ9"
+        "path": "/v1/complete",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6MTAwLCJBTlNXRVJfQ09VTlQiOjJ9"
       },
       "outcome": {
         "allowed": false,
@@ -1380,14 +1977,14 @@
       }
     },
     {
-      "name": "an allowance: the best of three",
+      "name": "an allowance: three candidates",
       "allowance": true,
-      "body": "{\"model\":\"m\",\"max_tokens\":100,\"best_of\":3}",
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":100,\"candidates\":3}",
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/chat/completions",
-        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfdG9rZW5zIjoxMDAsImJlc3Rfb2YiOjN9"
+        "path": "/v1/complete",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6MTAwLCJjYW5kaWRhdGVzIjozfQ=="
       },
       "outcome": {
         "allowed": false,
@@ -1399,12 +1996,12 @@
     {
       "name": "an allowance: a number of answers that is not a number",
       "allowance": true,
-      "body": "{\"model\":\"m\",\"max_tokens\":100,\"n\":null}",
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":100,\"answer_count\":null}",
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/chat/completions",
-        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfdG9rZW5zIjoxMDAsIm4iOm51bGx9"
+        "path": "/v1/complete",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6MTAwLCJhbnN3ZXJfY291bnQiOm51bGx9"
       },
       "outcome": {
         "allowed": false,
@@ -1416,12 +2013,12 @@
     {
       "name": "an allowance: something after the object",
       "allowance": true,
-      "body": "{\"model\":\"m\",\"max_tokens\":100} x",
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":100} x",
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
-        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfdG9rZW5zIjoxMDB9IHg="
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6MTAwfSB4"
       },
       "outcome": {
         "allowed": false,
@@ -1433,12 +2030,12 @@
     {
       "name": "an allowance: an object cut short",
       "allowance": true,
-      "body": "{\"model\":\"m\",\"max_tokens\":100",
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":100",
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
-        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfdG9rZW5zIjoxMDA="
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6MTAw"
       },
       "outcome": {
         "allowed": false,
@@ -1450,12 +2047,12 @@
     {
       "name": "an allowance: an array",
       "allowance": true,
-      "body": "[{\"model\":\"m\",\"max_tokens\":100}]",
+      "body": "[{\"model\":\"m\",\"max_answer_tokens\":100}]",
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
-        "body_b64": "W3sibW9kZWwiOiJtIiwibWF4X3Rva2VucyI6MTAwfV0="
+        "path": "/v1/generate",
+        "body_b64": "W3sibW9kZWwiOiJtIiwibWF4X2Fuc3dlcl90b2tlbnMiOjEwMH1d"
       },
       "outcome": {
         "allowed": false,
@@ -1470,7 +2067,7 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages"
+        "path": "/v1/generate"
       },
       "outcome": {
         "allowed": false,
@@ -1485,8 +2082,8 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages",
-        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfdG9rZW5zIjo1LCJ4Ijoi/yJ9"
+        "path": "/v1/generate",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6NSwieCI6Iv8ifQ=="
       },
       "outcome": {
         "allowed": false,
@@ -1498,18 +2095,18 @@
     {
       "name": "an allowance: a number of answers named with a letter outside ASCII is not one",
       "allowance": true,
-      "body": "{\"model\":\"m\",\"max_tokens\":5,\"beſt_of\":3}",
+      "body": "{\"model\":\"m\",\"max_answer_tokens\":5,\"candidateſ\":3}",
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/chat/completions",
-        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfdG9rZW5zIjo1LCJiZcW/dF9vZiI6M30="
+        "path": "/v1/complete",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfYW5zd2VyX3Rva2VucyI6NSwiY2FuZGlkYXRlxb8iOjN9"
       },
       "outcome": {
         "allowed": true,
         "call": {
           "method": "POST",
-          "path": "/v1/chat/completions",
+          "path": "/v1/complete",
           "bound": 5
         }
       }
@@ -1521,13 +2118,13 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages"
+        "path": "/v1/generate"
       },
       "outcome": {
         "allowed": true,
         "call": {
           "method": "POST",
-          "path": "/v1/messages",
+          "path": "/v1/generate",
           "bound": 5
         }
       }
@@ -1539,7 +2136,7 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages"
+        "path": "/v1/generate"
       },
       "outcome": {
         "allowed": false,
@@ -1555,7 +2152,7 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages"
+        "path": "/v1/generate"
       },
       "outcome": {
         "allowed": false,
@@ -1567,18 +2164,18 @@
     {
       "name": "an allowance: a counting route is not held to it",
       "allowance": true,
-      "body": "{\"model\":\"m\",\"messages\":[]}",
+      "body": "{\"model\":\"m\",\"input\":[]}",
       "request": {
         "lease_id": "lease-0001",
         "method": "POST",
-        "path": "/v1/messages/count_tokens",
-        "body_b64": "eyJtb2RlbCI6Im0iLCJtZXNzYWdlcyI6W119"
+        "path": "/v1/generate/count",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJpbnB1dCI6W119"
       },
       "outcome": {
         "allowed": true,
         "call": {
           "method": "POST",
-          "path": "/v1/messages/count_tokens",
+          "path": "/v1/generate/count",
           "counts": true
         }
       }
@@ -1589,41 +2186,41 @@
       "name": "what describes the call travels; how the brain proved itself does not",
       "sent": {
         "Accept": "text/event-stream",
-        "Anthropic-Beta": "a-beta-feature",
-        "Anthropic-Version": "2023-06-01",
         "Authorization": "Bearer run-token",
         "Content-Type": "application/json",
         "Cookie": "a=b",
-        "Openai-Beta": "assistants=v2",
+        "Example-Beta": "a-beta-feature",
+        "Example-Preview": "v2",
+        "Example-Version": "2023-06-01",
         "User-Agent": "a-program/1.0",
         "X-Api-Key": "run-token"
       },
       "passed": {
         "Accept": "text/event-stream",
-        "Anthropic-Beta": "a-beta-feature",
-        "Anthropic-Version": "2023-06-01",
         "Content-Type": "application/json",
-        "Openai-Beta": "assistants=v2"
+        "Example-Beta": "a-beta-feature",
+        "Example-Preview": "v2",
+        "Example-Version": "2023-06-01"
       }
     },
     {
       "name": "names in any case travel as the exchange names them",
       "sent": {
-        "ANTHROPIC-VERSION": "2023-06-01",
+        "EXAMPLE-VERSION": "2023-06-01",
         "content-type": "application/json",
-        "openai-beta": "responses=v1"
+        "example-preview": "v1"
       },
       "passed": {
-        "Anthropic-Version": "2023-06-01",
         "Content-Type": "application/json",
-        "Openai-Beta": "responses=v1"
+        "Example-Preview": "v1",
+        "Example-Version": "2023-06-01"
       }
     },
     {
       "name": "only ASCII letters fold",
       "sent": {
         "Accept": "application/json",
-        "Anthropic-Verſion": "2023-06-01"
+        "Example-Verſion": "2023-06-01"
       },
       "passed": {
         "Accept": "application/json"
@@ -1657,6 +2254,272 @@
       "name": "nothing travels",
       "sent": {
         "Authorization": "Bearer run-token"
+      }
+    },
+    {
+      "name": "credentials and connection headers never travel, though the profile lists them",
+      "profile": {
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview",
+          "Authorization",
+          "Proxy-Authorization",
+          "Cookie",
+          "X-Api-Key",
+          "Api-Key",
+          "Host",
+          "Content-Length",
+          "Transfer-Encoding",
+          "Connection",
+          "Keep-Alive",
+          "Proxy-Connection",
+          "TE",
+          "Trailer",
+          "Upgrade",
+          "Expect"
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id",
+          "Authorization",
+          "Proxy-Authorization",
+          "Cookie",
+          "X-Api-Key",
+          "Api-Key",
+          "Host",
+          "Content-Length",
+          "Transfer-Encoding",
+          "Connection",
+          "Keep-Alive",
+          "Proxy-Connection",
+          "TE",
+          "Trailer",
+          "Upgrade",
+          "Expect",
+          "Set-Cookie",
+          "Set-Cookie2"
+        ],
+        "query": [
+          {
+            "name": "preview",
+            "value": "true"
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "sent": {
+        "Accept": "application/json",
+        "Api-Key": "run-token",
+        "Authorization": "Bearer run-token",
+        "Connection": "close",
+        "Content-Length": "9",
+        "Cookie": "a=b",
+        "Expect": "100-continue",
+        "Host": "elsewhere.example",
+        "Keep-Alive": "timeout=5",
+        "Proxy-Connection": "close",
+        "TE": "trailers",
+        "Trailer": "X-Sum",
+        "Transfer-Encoding": "chunked",
+        "Upgrade": "websocket",
+        "X-API-KEY": "run-token",
+        "proxy-authorization": "Basic x"
+      },
+      "passed": {
+        "Accept": "application/json"
+      }
+    }
+  ],
+  "answer_headers": [
+    {
+      "name": "what describes the answer travels back",
+      "sent": {
+        "Content-Type": "text/event-stream",
+        "Request-Id": "req_0001",
+        "Server": "example",
+        "X-Internal": "1",
+        "retry-after": "30"
+      },
+      "passed": {
+        "Content-Type": "text/event-stream",
+        "Request-Id": "req_0001",
+        "Retry-After": "30"
+      }
+    },
+    {
+      "name": "a header with no value does not travel back",
+      "sent": {
+        "Content-Type": "",
+        "Request-Id": "req_0001"
+      },
+      "passed": {
+        "Request-Id": "req_0001"
+      }
+    },
+    {
+      "name": "one header named twice: the first name by byte order with a value",
+      "sent": {
+        "REQUEST-ID": "",
+        "Request-Id": "a",
+        "request-id": "b"
+      },
+      "passed": {
+        "Request-Id": "a"
+      }
+    },
+    {
+      "name": "credentials and connection headers never travel back, though the profile lists them",
+      "profile": {
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview",
+          "Authorization",
+          "Proxy-Authorization",
+          "Cookie",
+          "X-Api-Key",
+          "Api-Key",
+          "Host",
+          "Content-Length",
+          "Transfer-Encoding",
+          "Connection",
+          "Keep-Alive",
+          "Proxy-Connection",
+          "TE",
+          "Trailer",
+          "Upgrade",
+          "Expect"
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id",
+          "Authorization",
+          "Proxy-Authorization",
+          "Cookie",
+          "X-Api-Key",
+          "Api-Key",
+          "Host",
+          "Content-Length",
+          "Transfer-Encoding",
+          "Connection",
+          "Keep-Alive",
+          "Proxy-Connection",
+          "TE",
+          "Trailer",
+          "Upgrade",
+          "Expect",
+          "Set-Cookie",
+          "Set-Cookie2"
+        ],
+        "query": [
+          {
+            "name": "preview",
+            "value": "true"
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "sent": {
+        "Authorization": "Bearer key",
+        "Connection": "close",
+        "Content-Length": "10",
+        "Content-Type": "application/json",
+        "Set-Cookie": "session=x",
+        "Transfer-Encoding": "chunked",
+        "X-Api-Key": "key",
+        "set-cookie2": "session=y"
+      },
+      "passed": {
+        "Content-Type": "application/json"
       }
     }
   ],
@@ -1830,7 +2693,7 @@
     {
       "name": "the start, with the status, the headers and the first part",
       "from": 0,
-      "data": "event: message_start\ndata: {\"type\":\"message_start\"}\n\n",
+      "data": "event: part\ndata: {\"text\":\"Hel\"}\n\n",
       "answer": {
         "call_id": "call-0001",
         "status": 200,
@@ -1838,14 +2701,14 @@
           "Content-Type": "text/event-stream",
           "Request-Id": "req_0001"
         },
-        "data_b64": "ZXZlbnQ6IG1lc3NhZ2Vfc3RhcnQKZGF0YTogeyJ0eXBlIjoibWVzc2FnZV9zdGFydCJ9Cgo=",
-        "next": 53,
+        "data_b64": "ZXZlbnQ6IHBhcnQKZGF0YTogeyJ0ZXh0IjoiSGVsIn0KCg==",
+        "next": 34,
         "done": false
       }
     },
     {
       "name": "a collection with nothing new yet",
-      "from": 55,
+      "from": 36,
       "data": "",
       "answer": {
         "call_id": "call-0001",
@@ -1854,14 +2717,14 @@
           "Content-Type": "text/event-stream",
           "Request-Id": "req_0001"
         },
-        "next": 55,
+        "next": 36,
         "done": false
       }
     },
     {
       "name": "the last part",
-      "from": 55,
-      "data": "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+      "from": 36,
+      "data": "event: end\ndata: {\"text\":\"lo\"}\n\n",
       "answer": {
         "call_id": "call-0001",
         "status": 200,
@@ -1869,8 +2732,8 @@
           "Content-Type": "text/event-stream",
           "Request-Id": "req_0001"
         },
-        "data_b64": "ZXZlbnQ6IG1lc3NhZ2Vfc3RvcApkYXRhOiB7InR5cGUiOiJtZXNzYWdlX3N0b3AifQoK",
-        "next": 106,
+        "data_b64": "ZXZlbnQ6IGVuZApkYXRhOiB7InRleHQiOiJsbyJ9Cgo=",
+        "next": 68,
         "done": true
       }
     },

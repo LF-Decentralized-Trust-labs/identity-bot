@@ -31,6 +31,11 @@ DEPTH_DEEPEST = 1000
 PLAIN = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-_:/~")
 FORM_SAFE = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~"
 PATH_SAFE = FORM_SAFE + b"$&+:=@"
+# The headers that never travel, whatever a profile lists, as the request
+# definition's prose and the answer's header prose name them.
+NEVER_ON = ["Authorization", "Proxy-Authorization", "Cookie", "X-Api-Key", "Api-Key", "Host", "Content-Length",
+            "Transfer-Encoding", "Connection", "Keep-Alive", "Proxy-Connection", "TE", "Trailer", "Upgrade", "Expect"]
+NEVER_BACK = NEVER_ON + ["Set-Cookie", "Set-Cookie2"]
 
 # The refusal statuses, by reason, as the refusal definition's prose lists them:
 # (status, says refused, says no_call).
@@ -183,9 +188,12 @@ def query(profile, raw):
 # ── the headers ──────────────────────────────────────────────────────────
 
 
-def pick(names, sent):
+def pick(names, sent, never):
     out = {}
+    never = {fold(n) for n in never}
     for name in names:
+        if fold(name) in never:
+            continue
         for k in sorted(sent):
             if fold(k) == fold(name) and sent[k] != "":
                 out[name] = sent[k]
@@ -306,14 +314,36 @@ def decode_body(b64):
     return body
 
 
+def lone_surrogate(v):
+    """Whether any string in v, a key included, holds a surrogate code point:
+    JSON joins an escaped pair into one character, so any left is lone."""
+    todo = [v]
+    while todo:
+        x = todo.pop()
+        if isinstance(x, str):
+            if any(0xD800 <= ord(c) <= 0xDFFF for c in x):
+                return True
+        elif isinstance(x, list):
+            todo.extend(x)
+        elif isinstance(x, dict):
+            todo.extend(x.keys())
+            todo.extend(x.values())
+    return False
+
+
 def parse_start(raw):
     """A start as it arrives: too long is too_large; anything but one UTF-8
     JSON object whose named fields have the right types is unreadable."""
     if len(raw) > START_LARGEST:
         raise Refused("too_large")
     try:
-        v = json.loads(raw.decode("utf-8"), parse_constant=no_constants)
+        text = raw.decode("utf-8")
+        if depth(text) > DEPTH_DEEPEST:
+            raise Refused("no_lease")
+        v = json.loads(text, parse_constant=no_constants)
     except (UnicodeDecodeError, ValueError, RecursionError):
+        raise Refused("no_lease")
+    if lone_surrogate(v):
         raise Refused("no_lease")
     if not isinstance(v, dict):
         raise Refused("no_lease")
@@ -331,10 +361,31 @@ def parse_start(raw):
     return q
 
 
+def profile_valid(profile):
+    """The profile definition's rules: upper-case route methods, names distinct
+    in each list ignoring ASCII case, and exactly one rule per query parameter."""
+    for r in profile["routes"]:
+        if r["method"] == "" or r["method"] != upper(r["method"]):
+            return False
+    for q in profile["query"]:
+        given = [q.get("value", "") != "", q.get("digits", 0) != 0, q.get("plain", 0) != 0]
+        if sum(given) != 1 or q.get("digits", 0) < 0 or q.get("plain", 0) < 0:
+            return False
+    lists = [profile["headers"], profile["answer_headers"], [q["name"] for q in profile["query"]],
+             profile["answer_bound_names"], profile["answer_count_names"]]
+    for names in lists:
+        folded = [fold(n) for n in names]
+        if len(set(folded)) != len(folded):
+            return False
+    return True
+
+
 def check_start(profile, s, request):
     if request.get("lease_id", "") == "":
         raise Refused("no_lease")
     body = decode_body(request.get("body_b64", ""))
+    if not profile_valid(profile):
+        raise Refused("not_allowed")
     method = upper(request.get("method", ""))
     route = route_of(profile, method, request.get("path", ""))
     if route is None:
@@ -344,7 +395,7 @@ def check_start(profile, s, request):
     call = {"method": method, "path": request["path"]}
     if q:
         call["query"] = q
-    h = pick(profile["headers"], request.get("header") or {})
+    h = pick(profile["headers"], request.get("header") or {}, NEVER_ON)
     if h:
         call["header"] = h
     reads = method == "GET"
@@ -361,7 +412,7 @@ def check_start(profile, s, request):
 def start_body(s):
     if s.get("nest"):
         n = s["nest"] - 1
-        return ('{"model":"m","max_tokens":5,"x":' + "[" * n + "]" * n + "}").encode()
+        return ('{"model":"m","max_answer_tokens":5,"x":' + "[" * n + "]" * n + "}").encode()
     b = s.get("body", "").encode()
     pad = s.get("pad_to", 0)
     if pad > len(b):
@@ -465,14 +516,49 @@ def check_limits(v):
                                  "part_largest": PART_LARGEST, "path_longest": PATH_LONGEST,
                                  "answer_longest": ANSWER_LONGEST, "depth_deepest": DEPTH_DEEPEST,
                                  "collection_wait_seconds": 20})
-    schema = json.load(open(os.path.join(HERE, "model-call", "model-call.schema.json")))
-    same("borrowing", v["borrowing"], {"model_calls": schema["$defs"]["borrowing"]["properties"]["model_calls"]["const"]})
+
+
 
 
 def check_headers(v):
     for h in v["headers"]:
-        same(h["name"], pick(v["example_profile"]["headers"], h["sent"]), h.get("passed", {}))
-    return len(v["headers"])
+        profile = h.get("profile") or v["example_profile"]
+        same(h["name"], pick(profile["headers"], h["sent"], NEVER_ON), h.get("passed", {}))
+    for h in v["answer_headers"]:
+        profile = h.get("profile") or v["example_profile"]
+        same("answer: " + h["name"], pick(profile["answer_headers"], h["sent"], NEVER_BACK), h.get("passed", {}))
+    return len(v["headers"]) + len(v["answer_headers"])
+
+
+def check_borrow(v):
+    """Each borrow vector has what its definition requires, of the right kind,
+    and the constants it names; a renewal keeps the lease it renews."""
+    defs = json.load(open(os.path.join(HERE, "model-call", "model-call.schema.json")))["$defs"]
+    b = v["borrow"]
+    kinds = {"string": str, "integer": int, "boolean": bool}
+    for name, d in [("request", "borrowing"), ("answer", "borrowed"), ("renew", "lease_request"), ("renewed", "renewed"),
+                    ("return", "lease_request"), ("returned", "returned"), ("lease_gone", "borrow_refusal"),
+                    ("update_agent_host", "borrow_refusal")]:
+        x, sd = b[name], defs[d]
+        for f in sd.get("required", []):
+            if f not in x:
+                fail("borrow %s lacks %s" % (name, f))
+        for f, val in x.items():
+            prop = sd["properties"].get(f)
+            if prop is None:
+                fail("borrow %s carries %s, which %s does not declare" % (name, f, d))
+            elif "const" in prop:
+                same("borrow %s %s" % (name, f), val, prop["const"])
+            elif not isinstance(val, kinds[prop["type"]]):
+                fail("borrow %s %s is not a %s" % (name, f, prop["type"]))
+    same("borrow request", b["request"], {"model_calls": "through_identity_agent"})
+    same("borrow answer's model_calls", b["answer"].get("model_calls"), "through_identity_agent")
+    same("renewal keeps the lease", b["renewed"]["lease_id"], b["answer"]["lease_id"])
+    same("renew names the lease", b["renew"], {"lease_id": b["answer"]["lease_id"]})
+    same("return names the lease", b["return"], {"lease_id": b["answer"]["lease_id"]})
+    same("lease gone", b["lease_gone"].get("no_lease"), True)
+    same("update", b["update_agent_host"].get("update_agent_host"), True)
+    return 8
 
 
 def main():
@@ -483,7 +569,7 @@ def main():
     if "starts" not in v:
         sys.exit("%s is not a model-call vector file" % sys.argv[1])
     check_limits(v)
-    n = check_starts(v) + check_headers(v) + check_collections(v) + check_refusals(v) + check_answers(v)
+    n = check_starts(v) + check_headers(v) + check_collections(v) + check_refusals(v) + check_answers(v) + check_borrow(v)
     if failures:
         sys.exit(1)
     print("ok: %d vectors" % n)

@@ -2,10 +2,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "identity-agent-core/contracts/model-call/model-call.schema.json",
   "title": "A model call made through the Identity Agent (ADR-057)",
-  "description": "How an AI agent's body makes its brain's model calls through the Identity Agent that keeps the API key. The body starts a call with POST /api/agent-host/model-calls carrying a request; collects the answer with GET /api/agent-host/model-calls/{call}?from=N&lease=L, adding &head=1 once it has the status and headers; and gives up on it with DELETE /api/agent-host/model-calls/{call}, answered with stopped. {call} is the call_id path-escaped: every byte but A-Z a-z 0-9 - _ . ~ $ & + : = @ written as %XX in upper case. The lease is form-encoded: every byte but A-Z a-z 0-9 - _ . ~ written as %XX in upper case, and a space as +. A start and every collection are answered with an answer, and a refused request with a refusal and an HTTP status. Throughout, a name matched in any case is matched in any ASCII case only: only A-Z and a-z fold, and no other letter does. Every request is sealed and signed by the body (ADR-047). Which routes, headers, query parameters and answer-length fields a provider has is not part of the exchange: the Identity Agent lists them for each provider in a profile, and every rule below that names them reads them from the profile of the provider the AI agent's key is for. A body read for its fields nests arrays and objects at most 1,000 deep, its own object counting as 1, counted over the brackets outside strings; one deeper is not one JSON object. The Identity Agent form-decodes a collection's query as the request's query is decoded, but skips an unreadable piece rather than refusing; where a name is given more than once the first counts. It reads from as a base-10 whole number, an optional sign then digits only, after form-decoding (so a + is a space); anything else, a number below 0 or one beyond a signed 64-bit integer is 0. head is set only by the value 1. Worked examples are in identity-agent-core/modelcall/model-call-vectors.json; contracts/check_model_call_vectors.py recomputes them from this prose.",
+  "description": "How an AI agent's body makes its brain's model calls through the Identity Agent that keeps the API key. The body starts a call with POST /api/agent-host/model-calls carrying a request; collects the answer with GET /api/agent-host/model-calls/{call}?from=N&lease=L, adding &head=1 once it has the status and headers; and gives up on it with DELETE /api/agent-host/model-calls/{call}, answered with stopped. {call} is the call_id path-escaped: every byte but A-Z a-z 0-9 - _ . ~ $ & + : = @ written as %XX in upper case. The lease is form-encoded: every byte but A-Z a-z 0-9 - _ . ~ written as %XX in upper case, and a space as +. A start and every collection are answered with an answer, and a refused request with a refusal and an HTTP status. Throughout, a name matched in any case is matched in any ASCII case only: only A-Z and a-z fold, and no other letter does. Every request is sealed and signed by the body (ADR-047). Which routes, headers, query parameters and answer-length fields a provider has is not part of the exchange: the Identity Agent lists them for each provider in a profile, and every rule below that names them reads them from the profile of the provider the AI agent's key is for. A body read for its fields nests arrays and objects at most 1,000 deep, its own object counting as 1, counted over the brackets outside strings; one deeper is not one JSON object. A profile that breaks the profile definition's rules allows no call: every start under it is refused 403, refused: true. The body borrows its AI agent's sign-in, and is given the run's lease, with POST /api/agent-host/brain-sign-in (borrowing, answered with borrowed); renews the lease with POST /api/agent-host/brain-sign-in/renew and gives it back with POST /api/agent-host/brain-sign-in/return (each a lease_request, answered with renewed and returned); a refusal of these is a borrow_refusal. The Identity Agent form-decodes a collection's query as the request's query is decoded, but skips an unreadable piece rather than refusing; where a name is given more than once the first counts. It reads from as a base-10 whole number, an optional sign then digits only, after form-decoding (so a + is a space); anything else, a number below 0 or one beyond a signed 64-bit integer is 0. head is set only by the value 1. Worked examples are in identity-agent-core/modelcall/model-call-vectors.json; contracts/check_model_call_vectors.py recomputes them from this prose.",
   "$defs": {
     "request": {
-      "description": "Starts a call: what the body's brain sent its body, and the run's lease. Of the rules below, which the request alone decides, the first broken is the one answered; the Identity Agent's own checks (the lease, the AI agent's standing, how many calls it holds, an allowance's state) may be answered before any of them or between them. (0) A start longer than 6,291,456 bytes (6 MB) as it arrives: 413. A start that is not UTF-8, not one JSON object, or whose lease_id, method, path, query or body_b64 is not a string or null, or whose header is not an object of strings or nulls: 400. Fields are matched by their exact names, a null reading as empty; any other field is ignored. (1) lease_id is empty: 400. (2) body_b64 is not standard base64 with padding (a line break in it included), or decodes to more than 3,145,728 bytes (3 MB): 413. (3) The route: the method, its ASCII letters upper-cased, must be GET or POST, whatever the profile lists, and the method and path must be one of the profile's routes. A path is allowed only if it is plain: at most 256 bytes; starting with /; holding only the ASCII letters A-Z and a-z, the digits 0-9 and the characters . - _ : / ~; and unchanged by cleaning, so with no empty segment (//), no . or .. segment and no trailing slash. So nothing escaped, no query and no fragment can be in it. It must then equal a route's path for the same method; and where the profile names its list of models (models_path) and has a GET route at it, a GET of any plain path below it is allowed too, reading one model by a name that may hold a slash. Otherwise 403. (4) The query, where not empty, is form-decoded (split on &, empty pieces skipped, a piece holding ; is unreadable, then each name and value split at the first = and decoded with + as a space and %XX as a byte, a broken %-escape being unreadable). Unreadable, a name that is not exactly one of the profile's query parameters, or a name given more than once: 403. A parameter's value must be its value exactly, where it has one; or at most digits bytes of the digits 0-9, where it has digits; or at most plain bytes of the characters a plain path may hold, where it has plain; an empty value is allowed by digits and by plain. It is sent on re-encoded: names sorted, each name=value form-encoded, every byte but A-Z a-z 0-9 - _ . ~ written as %XX in upper case and a space as +, joined with &. Paging may come on any route. (5) The model: where a model is chosen for the AI agent (trimmed of white space) and the method is POST, the body must be one JSON object (UTF-8, white space aside, nothing before or after it, nested no deeper than allowed) whose own fields name the model exactly once, as model spelt exactly, with a string equal to the chosen model. A field spelt model in another ASCII case, a second model, or a field models in any ASCII case (a list to fall back on) is refused. Otherwise 403. Where no model is chosen, or the call is a GET, the body is not read. (6) Under an allowance (a limit on what the AI agent's model calls may cost), a POST that does not take a counting route is a model call and must also, read the same way as one JSON object of its own fields: give at least one of the profile's answer_bound_names, each spelt exactly (one spelt in another ASCII case is refused) and given at most once, each a JSON number that is whole and from 1 to 32,768, the largest given counting as the call's bound; and give each of the profile's answer_count_names, where given, matched in any ASCII case, as the number 1. Fields nested inside the object's values are not read. Otherwise 403. A GET only reads, and a POST on a counting route only counts: neither costs anything, and neither is held to an allowance. All of these but (0), (1) and (2) say refused: true. The headers that travel on are the profile's headers, matched by name in any ASCII case and named as the profile writes them, each only where it has a value; every other header is dropped, not refused. Where one is given more than once in different cases, the one whose name comes first in byte order among those with a value travels.",
+      "description": "Starts a call: what the body's brain sent its body, and the run's lease. Of the rules below, which the request alone decides, the first broken is the one answered; the Identity Agent's own checks (the lease, the AI agent's standing, how many calls it holds, an allowance's state) may be answered before any of them or between them. (0) A start longer than 6,291,456 bytes (6 MB) as it arrives: 413. A start that is not UTF-8, nests arrays and objects deeper than 1,000 (counted as for a body), escapes anywhere a lone surrogate (a \\u escape of D800 to DBFF not followed by one of DC00 to DFFF, or one of DC00 to DFFF on its own), is not one JSON object, or whose lease_id, method, path, query or body_b64 is not a string or null, or whose header is not an object of strings or nulls: 400. Fields are matched by their exact names, a null reading as empty; any other field is ignored. (1) lease_id is empty: 400. (2) body_b64 is not standard base64 with padding (a line break in it included), or decodes to more than 3,145,728 bytes (3 MB): 413. (3) The profile must be valid (see profile); otherwise 403. The route: the method, its ASCII letters upper-cased, must be GET or POST, whatever the profile lists, and the method and path must be one of the profile's routes. A path is allowed only if it is plain: at most 256 bytes; starting with /; holding only the ASCII letters A-Z and a-z, the digits 0-9 and the characters . - _ : / ~; and unchanged by cleaning, so with no empty segment (//), no . or .. segment and no trailing slash. So nothing escaped, no query and no fragment can be in it. It must then equal a route's path for the same method; and where the profile names its list of models (models_path) and has a GET route at it, a GET of any plain path below it is allowed too, reading one model by a name that may hold a slash. Otherwise 403. (4) The query, where not empty, is form-decoded (split on &, empty pieces skipped, a piece holding ; is unreadable, then each name and value split at the first = and decoded with + as a space and %XX as a byte, a broken %-escape being unreadable). Unreadable, a name that is not exactly one of the profile's query parameters, or a name given more than once: 403. A parameter's value must be its value exactly, where it has one; or at most digits bytes of the digits 0-9, where it has digits; or at most plain bytes of the characters a plain path may hold, where it has plain; an empty value is allowed by digits and by plain. It is sent on re-encoded: names sorted, each name=value form-encoded, every byte but A-Z a-z 0-9 - _ . ~ written as %XX in upper case and a space as +, joined with &. Paging may come on any route. (5) The model: where a model is chosen for the AI agent (trimmed of white space) and the method is POST, the body must be one JSON object (UTF-8, white space aside, nothing before or after it, nested no deeper than allowed) whose own fields name the model exactly once, as model spelt exactly, with a string equal to the chosen model. A field spelt model in another ASCII case, a second model, or a field models in any ASCII case (a list to fall back on) is refused. Otherwise 403. Where no model is chosen, or the call is a GET, the body is not read. (6) Under an allowance (a limit on what the AI agent's model calls may cost), a POST that does not take a counting route is a model call and must also, read the same way as one JSON object of its own fields: give at least one of the profile's answer_bound_names, each spelt exactly (one spelt in another ASCII case is refused) and given at most once, each a JSON number that is whole and from 1 to 32,768, the largest given counting as the call's bound; and give each of the profile's answer_count_names, where given, matched in any ASCII case, as the number 1. Fields nested inside the object's values are not read. Otherwise 403. A GET only reads, and a POST on a counting route only counts: neither costs anything, and neither is held to an allowance. All of these but (0), (1) and (2) say refused: true. The headers that travel on are the profile's headers, never Authorization, Proxy-Authorization, Cookie, X-Api-Key, Api-Key, Host, Content-Length, Transfer-Encoding, Connection, Keep-Alive, Proxy-Connection, TE, Trailer, Upgrade, Expect (matched in any ASCII case), whatever the profile lists: nothing that proves who the brain is, and nothing that belongs to one connection, travels on. The others are matched by name in any ASCII case and named as the profile writes them, each only where it has a value; every other header is dropped, not refused. Where one is given more than once in different cases, the one whose name comes first in byte order among those with a value travels.",
       "type": "object",
       "required": [
         "lease_id",
@@ -66,7 +66,7 @@
         },
         "header": {
           "$ref": "#/$defs/header",
-          "description": "the provider's headers that travel back: the profile's answer_headers, by the same rule as the headers that travel on, and no other"
+          "description": "the provider's headers that travel back: the profile's answer_headers, by the same rule as the headers that travel on, and no other; never Set-Cookie, Set-Cookie2 or any header that never travels on, whatever the profile lists"
         },
         "data_b64": {
           "type": "string",
@@ -110,15 +110,103 @@
     "borrowing": {
       "description": "What a body says of its model calls when it borrows its AI agent's sign-in: one that makes them through the Identity Agent sends model_calls as through_identity_agent, and the Identity Agent's answer carries the same, and no key. A body that does not say so, where the AI agent's key stays with the Identity Agent, is refused 409 with update_agent_host: true, and never lent the key.",
       "type": "object",
-      "additionalProperties": false,
       "properties": {
         "model_calls": {
           "const": "through_identity_agent"
         }
       }
     },
+    "borrowed": {
+      "description": "The answer to a borrow: the run's lease, until when it holds unless renewed, how often to renew it, and, where the AI agent's key stays with the Identity Agent, model_calls as through_identity_agent. No key is in it.",
+      "type": "object",
+      "required": [
+        "lease_id",
+        "lease_expires_at",
+        "renew_every_seconds"
+      ],
+      "properties": {
+        "lease_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "lease_expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "renew_every_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "model_calls": {
+          "const": "through_identity_agent"
+        }
+      }
+    },
+    "lease_request": {
+      "description": "Renews or gives back the run's lease. sign_in, on a return only, is a sign-in file the run's program refreshed, where the run was lent one; a run whose key stays with the Identity Agent has none. No lease_id: 400.",
+      "type": "object",
+      "required": [
+        "lease_id"
+      ],
+      "properties": {
+        "lease_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sign_in": {
+          "type": "string"
+        }
+      }
+    },
+    "renewed": {
+      "description": "The answer to a renewal: the same lease_id, held until a new lease_expires_at. A lease not renewed by its lease_expires_at lapses, and is refused as if never lent.",
+      "type": "object",
+      "required": [
+        "lease_id",
+        "lease_expires_at"
+      ],
+      "properties": {
+        "lease_id": {
+          "type": "string"
+        },
+        "lease_expires_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "returned": {
+      "description": "The answer to a return.",
+      "type": "object",
+      "required": [
+        "returned"
+      ],
+      "properties": {
+        "returned": {
+          "const": true
+        }
+      }
+    },
+    "borrow_refusal": {
+      "description": "A borrow, renewal or return refused: 404 with no_lease for a lease the Identity Agent does not hold open (lapsed, returned or never lent); 409 with update_agent_host for a borrow that does not say model_calls through_identity_agent where the AI agent's key stays with the Identity Agent.",
+      "type": "object",
+      "required": [
+        "error"
+      ],
+      "properties": {
+        "error": {
+          "type": "string"
+        },
+        "no_lease": {
+          "const": true
+        },
+        "update_agent_host": {
+          "const": true
+        }
+      }
+    },
     "profile": {
-      "description": "What an Identity Agent lists for one provider: the routes a brain signed in with that provider's key may take, its list of models, the headers that travel on and back, the query parameters a call may carry, and the fields a model call says how long an answer it wants and how many answers by. It is the Identity Agent's data, not part of the exchange; the rules for reading it are.",
+      "description": "What an Identity Agent lists for one provider: the routes a brain signed in with that provider's key may take, its list of models, the headers that travel on and back, the query parameters a call may carry, and the fields a model call says how long an answer it wants and how many answers by. It is the Identity Agent's data, not part of the exchange; the rules for reading it are. A valid profile names each route's method in upper case; names no header, answer header, query parameter, answer-length field or answer-count field twice in its list, ignoring ASCII case; and gives each query parameter exactly one of value, digits or plain.",
       "type": "object",
       "required": [
         "routes",
@@ -182,7 +270,9 @@
       "additionalProperties": false,
       "properties": {
         "method": {
-          "type": "string"
+          "type": "string",
+          "pattern": "^[A-Z]+$",
+          "description": "upper case; only GET and POST are ever taken"
         },
         "path": {
           "type": "string"
@@ -204,7 +294,8 @@
           "type": "string"
         },
         "value": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         },
         "digits": {
           "type": "integer",
@@ -214,7 +305,24 @@
           "type": "integer",
           "minimum": 1
         }
-      }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "value"
+          ]
+        },
+        {
+          "required": [
+            "digits"
+          ]
+        },
+        {
+          "required": [
+            "plain"
+          ]
+        }
+      ]
     },
     "stopped": {
       "description": "The answer to DELETE.",

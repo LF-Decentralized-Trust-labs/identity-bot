@@ -70,6 +70,48 @@ type Borrowing struct {
 	ModelCalls string `json:"model_calls,omitempty"`
 }
 
+// Borrowed answers a borrow: the run's lease, until when it holds unless
+// renewed (RFC 3339), how often to renew it, and, for a key that stays with
+// the Identity Agent, model_calls saying the calls go through it. No key is
+// in it.
+type Borrowed struct {
+	LeaseID           string `json:"lease_id"`
+	LeaseExpiresAt    string `json:"lease_expires_at"`
+	RenewEverySeconds int    `json:"renew_every_seconds"`
+	ModelCalls        string `json:"model_calls,omitempty"`
+}
+
+// LeaseRequest renews (POST BorrowPath/renew) or gives back (POST
+// BorrowPath/return) a lease. SignIn, on a return, is a sign-in file the
+// run's program refreshed, where the run was lent one; a run whose key stays
+// with the Identity Agent has none.
+type LeaseRequest struct {
+	LeaseID string `json:"lease_id"`
+	SignIn  string `json:"sign_in,omitempty"`
+}
+
+// Renewed answers a renewal: the same lease, held until a new time.
+type Renewed struct {
+	LeaseID        string `json:"lease_id"`
+	LeaseExpiresAt string `json:"lease_expires_at"`
+}
+
+// Returned answers a return.
+type Returned struct {
+	Returned bool `json:"returned"`
+}
+
+// BorrowRefusal answers a borrow, renewal or return that was refused: 404
+// with NoLease for a lease the Identity Agent does not hold open (lapsed,
+// returned or never lent); 409 with UpdateAgentHost for a body that did not
+// say it makes its model calls through the Identity Agent, where the key
+// stays there.
+type BorrowRefusal struct {
+	Error           string `json:"error"`
+	NoLease         bool   `json:"no_lease,omitempty"`
+	UpdateAgentHost bool   `json:"update_agent_host,omitempty"`
+}
+
 // ThroughIdentityAgent reports whether b says model calls go through the
 // Identity Agent.
 func (b Borrowing) ThroughIdentityAgent() bool { return b.ModelCalls == ThroughIdentityAgent }
@@ -108,7 +150,9 @@ type Request struct {
 }
 
 // ParseRequest reads a start as it arrives. One longer than StartLargest is
-// TooLarge. One that is not UTF-8, not one JSON object, or whose lease_id,
+// TooLarge. One that is not UTF-8, nests deeper than DepthDeepest, escapes a
+// lone surrogate (\uD800 to \uDFFF not in a pair) anywhere, is not one JSON
+// object, or whose lease_id,
 // method, path, query or body_b64 is not a string (or null), or whose header
 // is not an object of strings (or null), is unreadable (NoLease). Fields are
 // matched by exact name; any other field is ignored.
@@ -117,7 +161,7 @@ func ParseRequest(raw []byte) (Request, error) {
 		return Request{}, refuse(TooLarge, "this model call is too large or unreadable")
 	}
 	unreadable := refuse(NoLease, "name the run's lease and the call to make")
-	if !utf8.Valid(raw) {
+	if !utf8.Valid(raw) || depth(raw) > DepthDeepest || loneSurrogate(raw) {
 		return Request{}, unreadable
 	}
 	var fields map[string]json.RawMessage
@@ -347,6 +391,48 @@ type Profile struct {
 	AnswerCountNames []string `json:"answer_count_names"`
 }
 
+// Validate reports why p is not a profile the checks can read, or nothing:
+// each route's method is upper case; the names in each of Headers,
+// AnswerHeaders, Parameters, AnswerBoundNames and AnswerCountNames are
+// distinct ignoring ASCII case; and each query parameter gives exactly one of
+// Value (not empty), Digits or Plain (each at least 1). A profile that breaks
+// these allows no call.
+func (pr Profile) Validate() error {
+	for _, r := range pr.Routes {
+		if r.Method == "" || r.Method != asciiUpper(r.Method) {
+			return fmt.Errorf("the profile's route %s %s does not name its method in upper case", printable(r.Method, 10), printable(r.Path, 80))
+		}
+	}
+	names := make([]string, len(pr.Parameters))
+	for i, q := range pr.Parameters {
+		names[i] = q.Name
+		given := 0
+		if q.Value != "" {
+			given++
+		}
+		if q.Digits != 0 {
+			given++
+		}
+		if q.Plain != 0 {
+			given++
+		}
+		if given != 1 || q.Digits < 0 || q.Plain < 0 {
+			return fmt.Errorf("the profile's query parameter %q does not give exactly one of value, digits or plain", printable(q.Name, 40))
+		}
+	}
+	for what, list := range map[string][]string{"headers": pr.Headers, "answer headers": pr.AnswerHeaders,
+		"query parameters": names, "answer-length names": pr.AnswerBoundNames, "answer-count names": pr.AnswerCountNames} {
+		for i := range list {
+			for j := 0; j < i; j++ {
+				if asciiEqualFold(list[i], list[j]) {
+					return fmt.Errorf("the profile's %s name %q twice, ignoring case", what, printable(list[i], 40))
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // Route is one call a brain may make with its key: GET or POST, and a path.
 // A counting route (Counts) is a POST that costs nothing, such as counting a
 // request's tokens: like a read, it is never held to an allowance.
@@ -452,25 +538,42 @@ func (pr Profile) Query(raw string) (string, error) {
 	return v.Encode(), nil
 }
 
+// NeverPassedOn are headers of a call that never travel on, whatever a
+// profile lists: what proves who the brain is, and what belongs to one
+// connection only. The Identity Agent sets its own.
+var NeverPassedOn = []string{"Authorization", "Proxy-Authorization", "Cookie", "X-Api-Key", "Api-Key", "Host",
+	"Content-Length", "Transfer-Encoding", "Connection", "Keep-Alive", "Proxy-Connection", "TE", "Trailer",
+	"Upgrade", "Expect"}
+
+// NeverPassedBack are headers of the provider's answer that never travel
+// back, whatever a profile lists: those that never travel on, and what would
+// set a credential on the brain's side.
+var NeverPassedBack = append(append([]string(nil), NeverPassedOn...), "Set-Cookie", "Set-Cookie2")
+
 // PassedHeaders are the headers of h that travel on, named as the profile
-// names them, matched in any ASCII case. Any other header is dropped, not refused,
+// names them, matched in any ASCII case. A header in NeverPassedOn never
+// does, whatever the profile lists. Any other header is dropped, not refused,
 // and so is one with no value. Where h names one header more than once, in
 // different cases, the first by byte order of its name among those with a
 // value is the one kept. Nil when none travels.
 func (pr Profile) PassedHeaders(h map[string]string) map[string]string {
-	return pick(pr.Headers, h)
+	return pick(pr.Headers, NeverPassedOn, h)
 }
 
 // AnswerHeadersBack are the headers of the provider's answer h that travel
-// back to the brain, by the same rule as PassedHeaders.
+// back to the brain, by the same rule as PassedHeaders, NeverPassedBack in
+// place of NeverPassedOn.
 func (pr Profile) AnswerHeadersBack(h map[string]string) map[string]string {
-	return pick(pr.AnswerHeaders, h)
+	return pick(pr.AnswerHeaders, NeverPassedBack, h)
 }
 
-func pick(names []string, h map[string]string) map[string]string {
+func pick(names, never []string, h map[string]string) map[string]string {
 	var out map[string]string
 	keys := sortedKeys(h)
 	for _, name := range names {
+		if foldIn(name, never) {
+			continue
+		}
 		for _, k := range keys {
 			if asciiEqualFold(k, name) && h[k] != "" {
 				if out == nil {
@@ -643,6 +746,41 @@ func eachField(body []byte, f func(k string, v json.RawMessage) error) error {
 	return nil
 }
 
+// loneSurrogate reports whether b escapes, anywhere, a UTF-16 surrogate that
+// is not half of a pair: \uD800 to \uDBFF not followed by \uDC00 to \uDFFF,
+// or \uDC00 to \uDFFF on its own.
+func loneSurrogate(b []byte) bool {
+	code := func(i int) (rune, bool) {
+		if i+6 > len(b) || b[i] != '\\' || b[i+1] != 'u' {
+			return 0, false
+		}
+		n, err := strconv.ParseUint(string(b[i+2:i+6]), 16, 32)
+		return rune(n), err == nil
+	}
+	for i := 0; i < len(b); i++ {
+		if b[i] != '\\' {
+			continue
+		}
+		r, ok := code(i)
+		if !ok {
+			i++ // an escaped character, skipped whole
+			continue
+		}
+		switch {
+		case 0xD800 <= r && r <= 0xDBFF:
+			if lo, ok := code(i + 6); ok && 0xDC00 <= lo && lo <= 0xDFFF {
+				i += 11
+				continue
+			}
+			return true
+		case 0xDC00 <= r && r <= 0xDFFF:
+			return true
+		}
+		i += 5
+	}
+	return false
+}
+
 // depth is the deepest b nests [ and { outside strings.
 func depth(b []byte) int {
 	n, most, inString, escaped := 0, 0, false, false
@@ -696,7 +834,8 @@ type Call struct {
 
 // Check is everything the request alone decides, composed in one place: a
 // lease is named (NoLease); the body is base64 and not too large (TooLarge);
-// the method, route, query and model are ones allowed (NotAllowed); and,
+// the profile is one the checks can read, and the method, route, query and
+// model are ones allowed (NotAllowed); and,
 // under an allowance, a model call says how long an answer it wants and asks
 // for one answer (AllowanceRule). Of these, the first broken is the one
 // answered. A refusal is an *Error, whose Reason gives the status.
@@ -713,6 +852,9 @@ func (r Rules) Check(q Request) (Call, error) {
 	body, err := q.Body()
 	if err != nil {
 		return Call{}, err
+	}
+	if err := r.Profile.Validate(); err != nil {
+		return Call{}, refuse(NotAllowed, "this AI agent's sign-in allows no call: %s", err.Error())
 	}
 	method := asciiUpper(q.Method)
 	route, ok := r.Profile.Route(method, q.Path)
@@ -750,6 +892,16 @@ func asciiEqualFold(a, b string) bool {
 		}
 	}
 	return true
+}
+
+// foldIn reports whether name is in list, ignoring ASCII case.
+func foldIn(name string, list []string) bool {
+	for _, x := range list {
+		if asciiEqualFold(name, x) {
+			return true
+		}
+	}
+	return false
 }
 
 func asciiLower(c byte) byte {
