@@ -28,7 +28,7 @@ type Engine struct {
 	RotateAidFunc                  func(name, newPublicKey, newNextPublicKey string) (*drivers.DriverRotationResponse, error)
 	RotateAidWithAnchorFunc        func(name, newPublicKey, newNextPublicKey string, anchorData []interface{}) (*drivers.DriverRotationResponse, error)
 	RotateFunc                     func(req drivers.RotationRequest) (*drivers.DriverRotationResponse, error)
-	CreateHybridInceptionFunc      func(synthetic bool, name string) (*drivers.DriverHybridInceptionResponse, error)
+	CreateHybridInceptionFunc      func(name string) (*drivers.DriverHybridInceptionResponse, error)
 	RotateToMultisigFunc           func(name string, keys, nextKeyDigests []string, isith, nsith string, anchorData []interface{}) (*drivers.DriverRotationResponse, error)
 	GenerateMultisigEventFunc      func(aids []string, threshold int, currentKeys, nextKeys []string, eventType string) (*drivers.DriverMultisigResponse, error)
 	InteractFunc                   func(name string, data []interface{}) (*drivers.DriverInteractResponse, error)
@@ -122,11 +122,11 @@ func (e *Engine) Rotate(req drivers.RotationRequest) (*drivers.DriverRotationRes
 	return e.RotateFunc(req)
 }
 
-func (e *Engine) CreateHybridInception(synthetic bool, name string) (*drivers.DriverHybridInceptionResponse, error) {
+func (e *Engine) CreateHybridInception(name string) (*drivers.DriverHybridInceptionResponse, error) {
 	if e.CreateHybridInceptionFunc == nil {
 		return nil, unset("CreateHybridInception")
 	}
-	return e.CreateHybridInceptionFunc(synthetic, name)
+	return e.CreateHybridInceptionFunc(name)
 }
 
 func (e *Engine) RotateToMultisig(name string, keys, nextKeyDigests []string, isith, nsith string, anchorData []interface{}) (*drivers.DriverRotationResponse, error) {

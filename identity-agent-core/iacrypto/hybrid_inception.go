@@ -9,7 +9,7 @@ import (
 	keri "github.com/grapeid/keri-go"
 )
 
-// HybridKeyMaterial holds raw key bytes for hybrid inception (synthetic or caller-supplied).
+// HybridKeyMaterial holds the public key bytes a hybrid inception is built from.
 type HybridKeyMaterial struct {
 	Ed25519SigningRaw     []byte
 	MLDSA65SigningRaw     []byte
@@ -27,7 +27,8 @@ type HybridKeyMaterial struct {
 // counting pattern of the right length is not a key: its Ed25519 half is not
 // a point on the curve, so a vector built from it pins an event no verifier
 // should accept. Its private halves are as public as the seed, so it is never
-// correct for an identity.
+// correct for an identity, and nothing outside a test calls it
+// (TestFixedKeyMaterialIsReachedOnlyFromTests).
 func SyntheticHybridKeyMaterial(seed int) HybridKeyMaterial {
 	stream := sha3.NewSHAKE256()
 	_, _ = fmt.Fprintf(stream, "IA-HYBRID-1 synthetic key material, seed %d", seed)

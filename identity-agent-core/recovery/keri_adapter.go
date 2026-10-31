@@ -22,8 +22,8 @@ func (a *KeriDriverAdapter) CreateInception(publicKey, nextPublicKey string) (*K
 	}, nil
 }
 
-func (a *KeriDriverAdapter) CreateHybridInception(synthetic bool, name string) (*KeriInceptionResult, error) {
-	resp, err := a.Driver.CreateHybridInception(synthetic, name)
+func (a *KeriDriverAdapter) CreateHybridInception(name string) (*KeriInceptionResult, error) {
+	resp, err := a.Driver.CreateHybridInception(name)
 	if err != nil {
 		return nil, err
 	}

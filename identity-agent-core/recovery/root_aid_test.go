@@ -54,7 +54,7 @@ type mockKeriDriver struct {
 func (m *mockKeriDriver) CreateInception(_, _ string) (*KeriInceptionResult, error) {
 	return m.inception, nil
 }
-func (m *mockKeriDriver) CreateHybridInception(_ bool, _ string) (*KeriInceptionResult, error) {
+func (m *mockKeriDriver) CreateHybridInception(_ string) (*KeriInceptionResult, error) {
 	return m.inception, nil
 }
 func (m *mockKeriDriver) RotateWithAnchor(_ string, _, _ string, data []interface{}) (*KeriRotationResult, error) {
