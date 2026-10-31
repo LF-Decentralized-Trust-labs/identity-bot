@@ -48,6 +48,45 @@ async function signed(fields) {
   check(!late.valid, "an assertion from 2026 checked in 2030 was valid");
 }
 
+// A freshness window is a whole number of seconds, zero or less meaning the
+// default and more than an hour meaning an hour, as in the core. Anything else
+// is refused: "abc", NaN and Infinity compared false with everything, so each
+// once let an assertion from 2001 through.
+{
+  const old = await signed({ audience: "https://app.example", nonce: "n", dt: "2001-01-01T00:00:00Z" });
+  const opts = { expectedAudience: "https://app.example", expectedNonce: "n", expectedSiteAid: site.aid, signingPublicKey: personPub };
+  for (const w of ["abc", "300", NaN, Infinity, -Infinity, 1.5, 1e300, null, true, {}]) {
+    const r = await verifyLoginAssertion(old, { ...opts, maxSkewSeconds: w });
+    check(!r.valid && /^bad freshness window/.test(r.reason), `a window of ${String(w)}: valid=${r.valid} (${r.reason})`);
+  }
+  for (const w of [undefined, 0, -1, 999999999]) {
+    const r = await verifyLoginAssertion(old, { ...opts, maxSkewSeconds: w });
+    check(!r.valid && r.reason === "dt outside freshness window", `a window of ${String(w)}: valid=${r.valid} (${r.reason})`);
+  }
+  // Two hours old: inside a window of two hours were it honoured, outside the hour it is narrowed to.
+  const twoHours = await signed({
+    audience: "https://app.example", nonce: "n",
+    dt: new Date(Date.now() - 2 * 3600 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"),
+  });
+  const narrowed = await verifyLoginAssertion(twoHours, { ...opts, maxSkewSeconds: 3 * 3600 });
+  check(!narrowed.valid && narrowed.reason === "dt outside freshness window", `a window wider than an hour was honoured: ${narrowed.reason}`);
+  const fiftyMinutes = await signed({
+    audience: "https://app.example", nonce: "n",
+    dt: new Date(Date.now() - 50 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"),
+  });
+  const hour = await verifyLoginAssertion(fiftyMinutes, { ...opts, maxSkewSeconds: 3600 });
+  check(hour.valid, `a window of an hour refused an assertion fifty minutes old: ${hour.reason}`);
+  // Only a real true skips the time check.
+  for (const skip of ["false", "true", 1, {}]) {
+    const r = await verifyLoginAssertion(old, { ...opts, skipDtCheck: skip });
+    check(!r.valid && r.reason === "dt outside freshness window", `skipDtCheck ${JSON.stringify(skip)} skipped the time check`);
+  }
+  // The verifier's own method, which passes the window on.
+  const verifier = new IdentityAgentVerifier({ siteIdentity: site, resolveKey });
+  const viaVerifier = await verifier.verifyAssertion(old, { expectedAudience: "https://app.example", expectedNonce: "n", expectedSiteAid: site.aid, maxSkewSeconds: "abc" });
+  check(!viaVerifier.valid && /^bad freshness window/.test(viaVerifier.reason), `verifyAssertion with a window of "abc": ${viaVerifier.reason}`);
+}
+
 // A document that is not an object is a refusal, never a throw.
 for (const bad of [null, [], "text", 5]) {
   let r;

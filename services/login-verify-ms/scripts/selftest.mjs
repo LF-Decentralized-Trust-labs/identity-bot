@@ -154,11 +154,58 @@ async function main() {
     });
     if (doubled.status !== 400) fail(`a repeated key was answered ${doubled.status}`);
 
+    // A freshness window that is not a whole number of seconds, and any
+    // attempt to turn the time check off, are refused as the caller's
+    // mistakes. "abc" or 1e400 once compared false with everything, and
+    // skip_dt_check: "false" is a truthy string: both made an assertion from
+    // 2001 valid.
+    const withOptions = (extra) =>
+      fetch(`${baseUrl}/verify`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          assertion: fresh.assertion,
+          expected_audience: fresh.assertion.audience,
+          expected_nonce: fresh.assertion.nonce,
+          expected_site_aid: fresh.assertion.site_aid,
+          ...extra,
+        }),
+      });
+    for (const extra of [
+      { max_skew_seconds: "abc" },
+      { max_skew_seconds: "300" },
+      { max_skew_seconds: 1.5 },
+      { max_skew_seconds: 99999999999999999999 },
+      { skip_dt_check: "false" },
+      { skip_dt_check: false },
+      { skip_dt_check: true, reference_now_rfc3339: "2030-01-01T00:00:00Z" },
+    ]) {
+      const r = await withOptions(extra);
+      if (r.status !== 400) fail(`${JSON.stringify(extra)} was answered ${r.status}`);
+    }
+    // A window wider than an hour is narrowed to an hour.
+    const wide = await withOptions({ max_skew_seconds: 1000000, reference_now_rfc3339: new Date(Date.now() + 2 * 3600 * 1000).toISOString() });
+    if (wide.status !== 401) fail(`an assertion checked two hours on with a wide window was answered ${wide.status}`);
+
+    // A byte order mark is refused, as the core refuses it, not dropped.
+    const bom = await fetch(`${baseUrl}/verify`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(JSON.stringify({
+        assertion: fresh.assertion,
+        expected_audience: fresh.assertion.audience,
+        expected_nonce: fresh.assertion.nonce,
+        expected_site_aid: fresh.assertion.site_aid,
+      }))]),
+    });
+    if (bom.status !== 400) fail(`a body with a byte order mark was answered ${bom.status}`);
+
     console.log("✅ login-verify-ms selftest passed");
     console.log(`   golden said=${g.said}`);
     console.log(`   canonical_body_len=${g.canonical_body_len}`);
     console.log(`   HTTP POST /verify: key from the key log, caller's key and another site refused,`);
-    console.log(`   an unreadable reference time and a repeated key refused`);
+    console.log(`   an unreadable reference time, a repeated key, a byte order mark, a bad`);
+    console.log(`   freshness window and skip_dt_check refused`);
   } finally {
     await ia.close();
     server.kill("SIGTERM");

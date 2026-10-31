@@ -1,8 +1,10 @@
 import express from "express";
 import {
+  freshnessWindowSeconds,
   keyFromIdentityAgent,
   parseRfc3339,
   parseStrictJson,
+  utf8Text,
   verifyLoginAssertion,
   type LoginAssertion,
 } from "@identity-agent/login-verify";
@@ -46,7 +48,7 @@ app.post("/verify", async (req, res) => {
     const raw = (req as unknown as { rawBody?: Buffer }).rawBody;
     let body: Record<string, unknown> | undefined;
     try {
-      body = raw ? (parseStrictJson(new TextDecoder("utf-8", { fatal: true }).decode(raw)) as Record<string, unknown>) : undefined;
+      body = raw ? (parseStrictJson(utf8Text(raw)) as Record<string, unknown>) : undefined;
     } catch (err) {
       return res.status(400).json({ ok: false, reason: `the request cannot be read: ${(err as Error).message}` });
     }
@@ -56,7 +58,6 @@ app.post("/verify", async (req, res) => {
     const expectedNonce = req.body?.expected_nonce ?? req.body?.expectedNonce;
     const expectedSiteAid = req.body?.expected_site_aid ?? req.body?.expectedSiteAid;
     const maxSkewSeconds = req.body?.max_skew_seconds ?? req.body?.maxSkewSeconds;
-    const skipDtCheck = req.body?.skip_dt_check ?? req.body?.skipDtCheck;
     const referenceNow =
       req.body?.reference_now_rfc3339 ?? req.body?.referenceNowRfc3339;
 
@@ -65,6 +66,14 @@ app.post("/verify", async (req, res) => {
         ok: false,
         reason: "assertion, expected_audience, expected_nonce and expected_site_aid are required",
       });
+    }
+    // The time check is not something a caller can turn off: a fixed time to
+    // check against is reference_now_rfc3339.
+    if ((req.body?.skip_dt_check ?? req.body?.skipDtCheck) !== undefined) {
+      return res.status(400).json({ ok: false, reason: "skip_dt_check is not taken; give reference_now_rfc3339 to check against a fixed time" });
+    }
+    if (maxSkewSeconds !== undefined && freshnessWindowSeconds(maxSkewSeconds) === null) {
+      return res.status(400).json({ ok: false, reason: "max_skew_seconds must be a whole number of seconds" });
     }
     if (req.body?.signing_verkey_qb64 ?? req.body?.signingVerkeyQb64) {
       return res.status(400).json({
@@ -81,7 +90,6 @@ app.post("/verify", async (req, res) => {
       resolveKey,
     };
 
-    if (skipDtCheck) verifyOpts.skipDtCheck = true;
     if (referenceNow !== undefined) {
       // A reference time that cannot be read is the caller's mistake, said as
       // such: passed on as NaN it once put every dt inside the window.

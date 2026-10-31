@@ -45,6 +45,29 @@ export function inMemoryConsumedNonces(): ConsumedNonces {
   };
 }
 
+/** The window an assertion's dt must fall in when none is given, either way
+ *  from now: the core's default (DefaultMaxSkewSeconds in
+ *  identity-agent-core/login). */
+export const DEFAULT_MAX_SKEW_SECONDS = 300;
+
+/** The widest window that is honoured, as in the core (LongestMaxSkewSeconds).
+ *  A sign-in is approved within moments of being asked for, so an hour covers
+ *  any honest clock; a wider window only lengthens the time a captured
+ *  assertion stays usable. A wider request is narrowed to this. */
+export const LONGEST_MAX_SKEW_SECONDS = 3600;
+
+/** The freshness window in seconds that `maxSkewSeconds` asks for, by the
+ *  core's rules: none, zero or less is the default, more than the longest is
+ *  the longest. Anything but a whole number is refused (null): every
+ *  comparison with NaN is false, so "abc", NaN or Infinity once turned the
+ *  check off and an assertion from 2001 was accepted. */
+export function freshnessWindowSeconds(maxSkewSeconds: unknown): number | null {
+  if (maxSkewSeconds === undefined) return DEFAULT_MAX_SKEW_SECONDS;
+  if (typeof maxSkewSeconds !== "number" || !Number.isSafeInteger(maxSkewSeconds)) return null;
+  if (maxSkewSeconds <= 0) return DEFAULT_MAX_SKEW_SECONDS;
+  return Math.min(maxSkewSeconds, LONGEST_MAX_SKEW_SECONDS);
+}
+
 /** Language-agnostic verify core — HTTP microservice wraps this.
  *
  *  The checks run in the core's order (VerifyAssertion in
@@ -66,8 +89,13 @@ export async function verifyLoginAssertion(
     return { valid: false, reason: `malformed assertion: ${(err as Error).message}` };
   }
 
-  if (!opts.skipDtCheck) {
-    const maxSkew = opts.maxSkewSeconds ?? 300;
+  // Only a real true turns the time check off: a caller's "false" is a
+  // string, and a string is truthy.
+  if (opts.skipDtCheck !== true) {
+    const maxSkew = freshnessWindowSeconds(opts.maxSkewSeconds);
+    if (maxSkew === null) {
+      return { valid: false, reason: "bad freshness window: maxSkewSeconds must be a whole number of seconds" };
+    }
     const now = opts.nowMs ?? Date.now();
     // A clock that cannot be read is refused, not compared: every comparison
     // with NaN is false, so it would put any dt inside the window.
