@@ -1,8 +1,12 @@
 package server
 
 import (
+	"crypto/ed25519"
 	"net/http"
 	"testing"
+
+	"identity-agent-core/backup"
+	"identity-agent-core/secureenclave"
 
 	"identity-agent-core/drivers"
 	"identity-agent-core/drivers/driverfake"
@@ -46,6 +50,22 @@ func fakeInceptionDriver(t *testing.T, aid string, seen *map[string]interface{})
 	}
 }
 
+// ourFounding is a founding request with the key this agent derives itself,
+// the only key it anchors its own messaging keys and post-quantum commitment
+// for (foundingKeyIsOurs).
+func ourFounding(t *testing.T, s *CoreServer) map[string]any {
+	t.Helper()
+	root, err := secureenclave.LoadRootSeed(s.DataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := func(n int) string {
+		seed, _ := backup.DerivePairwiseSeed(root, 0, n)
+		return iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey))
+	}
+	return map[string]any{"public_key": key(0), "next_public_key": key(1)}
+}
+
 // The loop that had never closed: an identity founded here commits to its own
 // messaging keys, and the keys it later publishes are those same keys.
 //
@@ -62,9 +82,7 @@ func TestAFoundedIdentityCommitsToTheKeysItPublishes(t *testing.T) {
 	var sent map[string]interface{}
 	s.KeriDriver = fakeInceptionDriver(t, aid, &sent)
 
-	w := inceptionRequest(t, s, map[string]any{
-		"public_key": "Dpub", "next_public_key": "Dnext",
-	})
+	w := inceptionRequest(t, s, ourFounding(t, s))
 	if w.Code != http.StatusCreated {
 		t.Fatalf("inception failed: %d %s", w.Code, w.Body.String())
 	}
@@ -106,9 +124,7 @@ func TestAFoundedIdentityPassesThePeerKeyCheckAsAnchored(t *testing.T) {
 	var sent map[string]interface{}
 	s.KeriDriver = fakeInceptionDriver(t, aid, &sent)
 
-	if w := inceptionRequest(t, s, map[string]any{
-		"public_key": "Dpub", "next_public_key": "Dnext",
-	}); w.Code != http.StatusCreated {
+	if w := inceptionRequest(t, s, ourFounding(t, s)); w.Code != http.StatusCreated {
 		t.Fatalf("inception failed: %d %s", w.Code, w.Body.String())
 	}
 
@@ -140,18 +156,14 @@ func TestSubstitutedKeysAreRefusedAgainstAnAnchoredIdentity(t *testing.T) {
 	var sent map[string]interface{}
 	s.KeriDriver = fakeInceptionDriver(t, aid, &sent)
 
-	if w := inceptionRequest(t, s, map[string]any{
-		"public_key": "Dpub", "next_public_key": "Dnext",
-	}); w.Code != http.StatusCreated {
+	if w := inceptionRequest(t, s, ourFounding(t, s)); w.Code != http.StatusCreated {
 		t.Fatalf("inception failed: %d %s", w.Code, w.Body.String())
 	}
 
 	// Somebody else's keys, offered under this identifier.
 	other := witnessWithSeed(t, 9)
 	other.KeriDriver = fakeInceptionDriver(t, "EImpostor", nil)
-	if w := inceptionRequest(t, other, map[string]any{
-		"public_key": "Dpub", "next_public_key": "Dnext",
-	}); w.Code != http.StatusCreated {
+	if w := inceptionRequest(t, other, ourFounding(t, other)); w.Code != http.StatusCreated {
 		t.Fatalf("second inception failed: %d %s", w.Code, w.Body.String())
 	}
 	impostorKS, _ := other.keySetFor("EImpostor")
@@ -180,9 +192,7 @@ func TestTheMessagingKeysSurviveTheFoundingRequest(t *testing.T) {
 	s := witnessWithSeed(t, 1)
 	s.KeriDriver = fakeInceptionDriver(t, aid, nil)
 
-	if w := inceptionRequest(t, s, map[string]any{
-		"public_key": "Dpub", "next_public_key": "Dnext",
-	}); w.Code != http.StatusCreated {
+	if w := inceptionRequest(t, s, ourFounding(t, s)); w.Code != http.StatusCreated {
 		t.Fatalf("inception failed: %d %s", w.Code, w.Body.String())
 	}
 	if has, err := s.hasKeySet(aid); err != nil || !has {

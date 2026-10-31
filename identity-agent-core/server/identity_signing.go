@@ -7,6 +7,7 @@ import (
 
 	"identity-agent-core/backup"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/secureenclave"
 )
 
 // The agent's own signing key, where it can derive one.
@@ -77,4 +78,25 @@ func (s *CoreServer) keyCanSign() error {
 // another device.
 func (s *CoreServer) keyIsElsewhere() bool {
 	return errors.Is(s.keyCanSign(), errKeyElsewhere)
+}
+
+// foundingKeyIsOurs says whether publicKey, offered as the key an identity is
+// to be founded with, is the key this agent derives itself for a new identity:
+// generation 0 on branch 0 of the root seed it holds, the key
+// identitySigningSeed would find for the identity once founded. False where
+// no root seed is held or the key is any other.
+func (s *CoreServer) foundingKeyIsOurs(publicKey string) bool {
+	rootSeed, err := secureenclave.LoadRootSeed(s.DataDir)
+	if err != nil {
+		return false
+	}
+	seed, err := backup.DerivePairwiseSeed(rootSeed, 0, 0)
+	if err != nil {
+		return false
+	}
+	offered, err := iacrypto.CanonicalVerkeyQB64(publicKey)
+	if err != nil {
+		return false
+	}
+	return offered == iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey))
 }

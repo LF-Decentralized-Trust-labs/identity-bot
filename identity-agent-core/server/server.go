@@ -26,6 +26,7 @@ import (
 	"identity-agent-core/avatar"
 	"identity-agent-core/backup"
 	"identity-agent-core/buildmode"
+	"identity-agent-core/didcomm"
 	"identity-agent-core/drivers"
 	"identity-agent-core/endpoint"
 	"identity-agent-core/iacrypto"
@@ -1584,26 +1585,49 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 	// Derived from the agent's root seed, never drawn at random: the recovery
 	// phrase has to be able to bring these back, or restoring an identity
 	// produces one that can prove who it is and can never be sent anything.
-	messagingKeys, keyIndex, err := s.deriveMessagingKeys("")
-	if err != nil {
-		writeError(w, statusForUnreadable(err, http.StatusInternalServerError), "Could not derive this identity's messaging keys", err.Error())
-		return
-	}
-	kemPub, err := messagingKeys.KemPub.MarshalBinary()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not encode this identity's messaging keys", err.Error())
-		return
-	}
-	dsaPub, err := messagingKeys.DsaPub.MarshalBinary()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not encode this identity's messaging keys", err.Error())
-		return
-	}
-	keyAnchor, err := iacrypto.KeySetAnchor(
-		messagingKeys.XPub[:], kemPub, messagingKeys.EdPub, dsaPub)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not commit to this identity's messaging keys", err.Error())
-		return
+	//
+	// ONLY FOR A KEY THIS AGENT DERIVES ITSELF. The messaging keys, and the
+	// post-quantum commitment below, come from the root seed held here. Where
+	// the identity's key is this agent's own (the root seed is the identity's
+	// phrase), they are the identity's own keys too. Where the key is held
+	// somewhere else, they would be this machine's keys written into somebody
+	// else's identity: the post-quantum commitment alone could rotate it, and
+	// the messaging keys would let this machine read what is sent to it. Such
+	// a founding carries neither, and commits only to the next key asked for.
+	var (
+		messagingKeys *didcomm.KeySet
+		keyIndex      int
+		anchors       []map[string]interface{}
+	)
+	ours := s.foundingKeyIsOurs(req.PublicKey)
+	if ours {
+		var err error
+		messagingKeys, keyIndex, err = s.deriveMessagingKeys("")
+		if err != nil {
+			writeError(w, statusForUnreadable(err, http.StatusInternalServerError), "Could not derive this identity's messaging keys", err.Error())
+			return
+		}
+		kemPub, err := messagingKeys.KemPub.MarshalBinary()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Could not encode this identity's messaging keys", err.Error())
+			return
+		}
+		dsaPub, err := messagingKeys.DsaPub.MarshalBinary()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Could not encode this identity's messaging keys", err.Error())
+			return
+		}
+		keyAnchor, err := iacrypto.KeySetAnchor(
+			messagingKeys.XPub[:], kemPub, messagingKeys.EdPub, dsaPub)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Could not commit to this identity's messaging keys", err.Error())
+			return
+		}
+		anchors = []map[string]interface{}{keyAnchor}
+	} else {
+		log.Printf("[identity-agent-core] INCEPTION: the founding key is not one this agent " +
+			"derives, so the identity commits to no messaging keys or post-quantum key of this " +
+			"agent's; it cannot be established as a peer by keys anchored in its founding")
 	}
 
 	// Designate witnesses in the event that founds the identity.
@@ -1657,13 +1681,23 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 	// it was before, with one commitment, rather than not founded at all: the
 	// post-quantum rotation is a future option, and losing a future option is
 	// not a reason to refuse somebody an identity today.
-	nextDigests, pq := s.postQuantumPreRotation(req.NextPublicKey)
+	var (
+		nextDigests []string
+		pq          *iacrypto.PostQuantumNextKey
+	)
+	if ours {
+		nextDigests, pq = s.postQuantumPreRotation(req.NextPublicKey)
+	}
 
+	if s.KeriDriver == nil {
+		writeError(w, http.StatusServiceUnavailable, "No KERI engine is running", "an identity cannot be founded without one")
+		return
+	}
 	result, err := s.KeriDriver.Incept(drivers.InceptionRequest{
 		PublicKey:      req.PublicKey,
 		NextPublicKey:  req.NextPublicKey,
 		OwnerAID:       req.OwnerAID,
-		AnchorData:     []map[string]interface{}{keyAnchor},
+		AnchorData:     anchors,
 		Witnesses:      witnesses,
 		Toad:           toad,
 		NextKeyDigests: nextDigests,
@@ -1697,19 +1731,23 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 	// keys the agent then failed to keep is worse than one with no keys at all:
 	// it advertises a keyset nobody holds the private half of, permanently, and
 	// no later event can take the commitment back.
-	if err := s.storeKeySetFor(result.AID, messagingKeys); err != nil {
-		writeError(w, statusForUnreadable(err, http.StatusInternalServerError),
-			"The identity's messaging keys could not be saved", err.Error())
-		return
+	if messagingKeys != nil {
+		if err := s.storeKeySetFor(result.AID, messagingKeys); err != nil {
+			writeError(w, statusForUnreadable(err, http.StatusInternalServerError),
+				"The identity's messaging keys could not be saved", err.Error())
+			return
+		}
+		// Now that the identifier exists, record which identity the branch belongs
+		// to. Restoring needs the branch; knowing whose it is makes a mismatch
+		// visible instead of quietly producing the wrong keys.
+		if err := s.recordMessagingKeyIndex(result.AID, keyIndex); err != nil {
+			log.Printf("[identity-agent-core] INCEPTION: %v", err)
+		}
 	}
-	// Now that the identifier exists, record which identity the branch belongs
-	// to. Restoring needs the branch; knowing whose it is makes a mismatch
-	// visible instead of quietly producing the wrong keys.
-	if err := s.recordMessagingKeyIndex(result.AID, keyIndex); err != nil {
-		log.Printf("[identity-agent-core] INCEPTION: %v", err)
-	}
-	if err := s.recordPostQuantumCommitment(pq); err != nil {
-		log.Printf("[identity-agent-core] INCEPTION: %v", err)
+	if pq != nil {
+		if err := s.recordPostQuantumCommitment(pq); err != nil {
+			log.Printf("[identity-agent-core] INCEPTION: %v", err)
+		}
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
