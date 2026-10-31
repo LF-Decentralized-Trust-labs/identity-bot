@@ -64,37 +64,40 @@ class LocalCoreKeriService extends KeriService {
   }) async {
     final mnemonic = code.split(' ');
     final keys = KeyManager.generateKeysFromMnemonic(mnemonic);
+    final key = keys.signing.publicKeyEncoded;
+    final next = keys.next.publicKeyEncoded;
 
     // Written down before it is asked for, so a founding left unsigned is one
     // this device can recognise as its own and finish.
-    final asking = await _asked.asking(
-        t: 'icp', asked: {'key': keys.signing.publicKeyEncoded, 'next': keys.next.publicKeyEncoded});
+    final request = await _asked.asking(t: 'icp', expectedSn: 0, asked: {'key': key, 'next': next});
 
-    // Step 1: Create the inception event on the Python driver via Go backend.
-    final response = await _client.post(
-      Uri.parse('$_baseUrl/api/inception'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'public_key': keys.signing.publicKeyEncoded,
-        'next_public_key': keys.next.publicKeyEncoded,
-      }),
-    );
-
-    if (response.statusCode != 201 && response.statusCode != 200) {
-      await _asked.forget(asking);
-      final body = jsonDecode(response.body);
-      throw Exception(body['error'] ?? 'Inception failed: ${response.statusCode}');
+    final Map<String, dynamic> json;
+    final String rawBytesB64;
+    try {
+      // Step 1: Create the inception event on the Python driver via Go backend.
+      final response = await _client.post(
+        Uri.parse('$_baseUrl/api/inception'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'public_key': key, 'next_public_key': next}),
+      );
+      if (response.statusCode != 201 && response.statusCode != 200) {
+        final body = jsonDecode(response.body);
+        throw Exception(body['error'] ?? 'Inception failed: ${response.statusCode}');
+      }
+      json = jsonDecode(response.body) as Map<String, dynamic>;
+      rawBytesB64 = json['raw_bytes_b64'] as String? ?? '';
+      // What is signed is the bytes the core returned, so they are checked to
+      // be the founding asked for (TheKeyInForce.requireTheFoundingIsThisDevices).
+      final founding = _eventIn(rawBytesB64);
+      TheKeyInForce.requireTheFoundingIsThisDevices(founding,
+          key: key, next: next, aid: json['aid'] as String? ?? '');
+      await _asked.added(request, aid: json['aid'] as String? ?? '', sequenceNumber: 0, digest: '${founding['d']}');
+    } catch (_) {
+      // Refused, not the founding asked for, or no answer: nothing of this
+      // device's to finish later.
+      await _asked.forget(request);
+      rethrow;
     }
-
-    final json = jsonDecode(response.body);
-    final rawBytesB64 = json['raw_bytes_b64'] as String? ?? '';
-    final founding = _eventIn(rawBytesB64);
-    if (founding['t'] != 'icp' || !_same(founding['k'], [keys.signing.publicKeyEncoded])) {
-      throw Exception('the core returned an event that is not the founding this device asked for, '
-          'so it is not signed');
-    }
-    await _asked.added(asking,
-        aid: json['aid'] as String? ?? '', sequenceNumber: 0, digest: '${founding['d']}');
 
     // Step 2: Sign the inception event bytes locally with the Ed25519 key,
     // have the core CESR-encode the signature, and record it against the
@@ -116,14 +119,15 @@ class LocalCoreKeriService extends KeriService {
     //
     // It cannot be sent with the inception itself — the signature is over
     // bytes the engine has not produced when that call is made — so founding
-    // is two steps, and this is the second.
+    // is two steps, and this is the second. If it fails, the request stays
+    // written down and the founding is finished later.
     final cesrSignature = await signAndRecordEvent(_client, _baseUrl,
         aid: json['aid'] as String? ?? '',
         sequenceNumber: 0,
         rawBytesB64: rawBytesB64,
         signingSeed: KeyManager.signingSeed(Bip39.mnemonicToSeed(mnemonic)),
         what: 'the founding of this identity');
-    await _asked.forget(asking);
+    await _asked.forget(request);
 
     return InceptionResult(
       aid: json['aid'] ?? '',
@@ -134,6 +138,7 @@ class LocalCoreKeriService extends KeriService {
       rawBytesB64: rawBytesB64,
     );
   }
+
 
   /// The CESR form of a raw base64 signature that is handed back rather than
   /// recorded (a payload, a credential anchor, a presentation), or an empty
@@ -174,54 +179,68 @@ class LocalCoreKeriService extends KeriService {
     final rot1Keys = KeyManager.keyAt(seed, current + 1);
     final rot2Keys = KeyManager.keyAt(seed, current + 2);
 
-    final asking = await _asked.asking(
-        t: 'rot', aid: aid, asked: {'key': rot1Keys.publicKeyEncoded, 'next': rot2Keys.publicKeyEncoded});
+    final request = await _asked.asking(
+        t: 'rot',
+        aid: aid,
+        expectedSn: state.nextSequenceNumber,
+        asked: {'key': rot1Keys.publicKeyEncoded, 'next': rot2Keys.publicKeyEncoded});
 
-    // Step 1: Ask the Python driver to create the rotation event.
-    final response = await _client.post(
-      Uri.parse('$_baseUrl/api/rotation'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'name': name,
-        'new_public_key': rot1Keys.publicKeyEncoded,
-        'new_next_public_key': rot2Keys.publicKeyEncoded,
-      }),
-    );
+    final Map<String, dynamic> json;
+    final String rawBytesB64;
+    try {
+      // Step 1: Ask the Python driver to create the rotation event.
+      final response = await _client.post(
+        Uri.parse('$_baseUrl/api/rotation'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'name': name,
+          'new_public_key': rot1Keys.publicKeyEncoded,
+          'new_next_public_key': rot2Keys.publicKeyEncoded,
+        }),
+      );
+      if (response.statusCode != 200) {
+        refusedByTheCore(response, 'Rotation failed');
+      }
+      json = jsonDecode(response.body) as Map<String, dynamic>;
+      rawBytesB64 = json['raw_bytes_b64'] as String? ?? '';
 
-    if (response.statusCode != 200) {
-      await _asked.forget(asking);
-      refusedByTheCore(response, 'Rotation failed');
+      // What is signed is the bytes the core returned, so they are checked to
+      // be the rotation asked for: this identity's, at the next sequence
+      // number, revealing the key asked for, committing to exactly the next
+      // one and changing nothing else. A rotation committing to any other key
+      // would hand whoever holds it the identity.
+      final rotation = _eventIn(rawBytesB64);
+      if (rotation['t'] != 'rot' ||
+          rotation['i'] != aid ||
+          rotation['s'] != state.nextSequenceNumber.toRadixString(16) ||
+          !_same(rotation['k'], [rot1Keys.publicKeyEncoded])) {
+        throw Exception('the core returned an event that is not the rotation this device asked for, '
+            'so it is not signed');
+      }
+      TheKeyInForce.requireTheRotationIsThisDevices(rotation, seed, current + 1,
+          priorBt: state.establishment['bt']);
+      await _asked.added(request,
+          aid: aid, sequenceNumber: state.nextSequenceNumber, digest: '${rotation['d']}');
+    } catch (_) {
+      // Refused, not the rotation asked for, or no answer: nothing of this
+      // device's to finish later.
+      await _asked.forget(request);
+      rethrow;
     }
-
-    final json = jsonDecode(response.body);
-    final rawBytesB64 = json['raw_bytes_b64'] as String? ?? '';
-
-    // What is signed is the bytes the core returned, so they are checked to be
-    // the rotation asked for: this identity's, revealing the key asked for,
-    // committing to exactly the next one and changing no witness. A rotation
-    // committing to any other key would hand whoever holds it the identity.
-    final rotation = _eventIn(rawBytesB64);
-    if (rotation['t'] != 'rot' || rotation['i'] != aid || !_same(rotation['k'], [rot1Keys.publicKeyEncoded])) {
-      throw Exception('the core returned an event that is not the rotation this device asked for, '
-          'so it is not signed');
-    }
-    TheKeyInForce.requireTheEstablishmentIsThisDevices(rotation, seed, current + 1,
-        priorBt: state.establishment['bt']);
-    await _asked.added(asking,
-        aid: aid, sequenceNumber: int.parse('${rotation['s']}', radix: 16), digest: '${rotation['d']}');
 
     // Step 2: Sign with the key being rotated to and record the signature
     // against the event, as founding does. The core does not sign a rotation
     // itself, so a rotation whose signature is only handed back stays
     // unsigned in the log and every counterparty that checks refuses the
-    // identity from then on.
+    // identity from then on. If it fails, the request stays written down and
+    // the rotation is finished later.
     final cesrSig = await signAndRecordEvent(_client, _baseUrl,
-        aid: json['aid'] as String? ?? '',
+        aid: aid,
         sequenceNumber: json['sequence_number'],
         rawBytesB64: rawBytesB64,
         signingSeed: rot1Seed,
         what: 'this rotation');
-    await _asked.forget(asking);
+    await _asked.forget(request);
 
     return RotationResult(
       aid: json['aid'] ?? '',
@@ -230,6 +249,7 @@ class LocalCoreKeriService extends KeriService {
       cesrSignature: cesrSig,
     );
   }
+
 
   @override
   Future<InteractResult> interactAid({
@@ -245,39 +265,47 @@ class LocalCoreKeriService extends KeriService {
     final seed = Bip39.mnemonicToSeed(mnemonic);
     final state = await _keys.finishStrandedEvents(seed);
     final signingSeed = KeyManager.signingSeed(seed, index: state.index);
-    final asking = await _asked.asking(t: 'ixn', aid: state.aid, asked: {'anchors': sealData});
+    final request = await _asked.asking(
+        t: 'ixn', aid: state.aid, expectedSn: state.nextSequenceNumber, asked: {'anchors': sealData});
 
-    // Step 1: Create the IXN event via the Python driver.
-    final response = await _client.post(
-      Uri.parse('$_baseUrl/api/interact'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'name': name, 'data': sealData}),
-    );
-
-    if (response.statusCode != 201 && response.statusCode != 200) {
-      await _asked.forget(asking);
-      refusedByTheCore(response, 'IXN failed');
+    final Map<String, dynamic> json;
+    final String rawBytesB64;
+    try {
+      // Step 1: Create the IXN event via the Python driver.
+      final response = await _client.post(
+        Uri.parse('$_baseUrl/api/interact'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'name': name, 'data': sealData}),
+      );
+      if (response.statusCode != 201 && response.statusCode != 200) {
+        refusedByTheCore(response, 'IXN failed');
+      }
+      json = jsonDecode(response.body) as Map<String, dynamic>;
+      rawBytesB64 = json['raw_bytes_b64'] as String? ?? '';
+      final interaction = _eventIn(rawBytesB64);
+      if (interaction['t'] != 'ixn' ||
+          interaction['i'] != state.aid ||
+          interaction['s'] != state.nextSequenceNumber.toRadixString(16) ||
+          !_same(interaction['a'], sealData)) {
+        throw Exception('the core returned an event that is not the interaction this device asked for, '
+            'so it is not signed');
+      }
+      await _asked.added(request,
+          aid: state.aid, sequenceNumber: state.nextSequenceNumber, digest: '${interaction['d']}');
+    } catch (_) {
+      await _asked.forget(request);
+      rethrow;
     }
-
-    final json = jsonDecode(response.body);
-    final rawBytesB64 = json['raw_bytes_b64'] as String? ?? '';
-    final interaction = _eventIn(rawBytesB64);
-    if (interaction['t'] != 'ixn' || interaction['i'] != state.aid || !_same(interaction['a'], sealData)) {
-      throw Exception('the core returned an event that is not the interaction this device asked for, '
-          'so it is not signed');
-    }
-    await _asked.added(asking,
-        aid: state.aid, sequenceNumber: int.parse('${interaction['s']}', radix: 16), digest: '${interaction['d']}');
 
     // Step 2: Sign the IXN event with the key in force and record the
     // signature against it.
     final cesrSig = await signAndRecordEvent(_client, _baseUrl,
-        aid: json['aid'] as String? ?? '',
+        aid: state.aid,
         sequenceNumber: json['sequence_number'],
         rawBytesB64: rawBytesB64,
         signingSeed: signingSeed,
         what: 'this interaction');
-    await _asked.forget(asking);
+    await _asked.forget(request);
 
     return InteractResult(
       aid: json['aid'] ?? '',
@@ -286,6 +314,7 @@ class LocalCoreKeriService extends KeriService {
       cesrSignature: cesrSig,
     );
   }
+
 
   @override
   Future<SignatureResult> signPayload({
@@ -326,15 +355,16 @@ class LocalCoreKeriService extends KeriService {
   /// The private key in force (TheKeyInForce), with any event left unsigned
   /// finished first. Throws where this device holds no recovery phrase: an
   /// event the core builds would otherwise be added and never signed.
-  Future<({ed.PrivateKey key, String aid})> _signerInForce() async {
+  Future<({ed.PrivateKey key, KeyState state})> _signerInForce() async {
     final mnemonic = await SecureKeyStore.loadMnemonic();
     if (mnemonic == null) {
       throw Exception('No identity keys found in secure storage.');
     }
     final seed = Bip39.mnemonicToSeed(mnemonic);
     final state = await _keys.finishStrandedEvents(seed);
-    return (key: ed.newKeyFromSeed(KeyManager.signingSeed(seed, index: state.index)), aid: state.aid);
+    return (key: ed.newKeyFromSeed(KeyManager.signingSeed(seed, index: state.index)), state: state);
   }
+
 
   /// The key event log of the identity held under [name], as the core serves
   /// it: the parsed events and the bytes each was published as. The core
@@ -377,48 +407,64 @@ class LocalCoreKeriService extends KeriService {
     // The key is worked out before the event exists, so a key log this phrase
     // cannot sign for is refused before anything is added to it.
     final signer = await _signerInForce();
-    // The anchor the core builds is written down as asked for before it is,
-    // so if it is ever left unsigned this device can recognise it as its own.
-    final asking = await _asked.asking(t: 'ixn', aid: signer.aid);
+    final aid = signer.state.aid;
+    // Written down before it is asked for. The anchor is built by the core, so
+    // nothing about it is known yet: this entry is only ever recognised by the
+    // sequence number and digest of the answer.
+    final request = await _asked.asking(t: 'ixn', aid: aid, expectedSn: signer.state.nextSequenceNumber);
 
-    // Step 1: Ask the Go backend to format the ACDC and create the IXN anchor.
-    final response = await _client.post(
-      Uri.parse('$_baseUrl/api/credential/issue'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'claims': claims,
-        'schema_said': schemaSaid,
-        'holder_aid': holderAid,
-      }),
-    );
+    final Map<String, dynamic> json;
+    final String ixnRawBytesB64;
+    try {
+      // Step 1: Ask the Go backend to format the ACDC and create the IXN anchor.
+      final response = await _client.post(
+        Uri.parse('$_baseUrl/api/credential/issue'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'claims': claims,
+          'schema_said': schemaSaid,
+          'holder_aid': holderAid,
+        }),
+      );
+      if (response.statusCode != 201 && response.statusCode != 200) {
+        refusedByTheCore(response, 'Credential issuance failed');
+      }
+      json = jsonDecode(response.body) as Map<String, dynamic>;
+      ixnRawBytesB64 = json['ixn_raw_bytes_b64'] as String? ?? '';
 
-    if (response.statusCode != 201 && response.statusCode != 200) {
-      await _asked.forget(asking);
-      refusedByTheCore(response, 'Credential issuance failed');
-    }
-
-    final json = jsonDecode(response.body);
-    final ixnRawBytesB64 = json['ixn_raw_bytes_b64'] as String? ?? '';
-    if (ixnRawBytesB64.isNotEmpty) {
+      // The interaction must be this identity's, at the next sequence number,
+      // anchoring exactly the credential the core says it issued: one seal,
+      // {"i": the credential's identifier, "s": "0", "d": the same}, which is
+      // what the core anchors for a credential issued without a registry.
+      //
+      // THE LIMIT. That the identifier is the digest of the credential returned
+      // is the core's computation and is not repeated here (this package does
+      // not compute KERI digests), so a core could anchor a credential other
+      // than the one it shows. What it cannot do is anchor anything else.
+      final acdcSaid = json['acdc_said'] as String? ?? '';
       final anchor = _eventIn(ixnRawBytesB64);
-      if (anchor['t'] != 'ixn') {
-        throw Exception('the core returned an event that is not an interaction to anchor the credential, '
+      if (anchor['t'] != 'ixn' ||
+          anchor['i'] != aid ||
+          anchor['s'] != signer.state.nextSequenceNumber.toRadixString(16) ||
+          acdcSaid.isEmpty ||
+          !_same(anchor['a'], [
+            {'i': acdcSaid, 's': '0', 'd': acdcSaid}
+          ])) {
+        throw Exception('the core returned an event that is not the anchor of the credential it issued, '
             'so it is not signed');
       }
-      await _asked.added(asking,
-          aid: '${anchor['i']}', sequenceNumber: int.parse('${anchor['s']}', radix: 16), digest: '${anchor['d']}');
-    } else {
-      await _asked.forget(asking);
+      await _asked.added(request,
+          aid: aid, sequenceNumber: signer.state.nextSequenceNumber, digest: '${anchor['d']}');
+    } catch (_) {
+      await _asked.forget(request);
+      rethrow;
     }
 
     // Step 2: Sign the IXN event bytes locally with the key in force.
-    // Private key never leaves this device (ADR-014).
-    String cesrSig = '';
-    if (ixnRawBytesB64.isNotEmpty) {
-      final rawEventBytes = base64Decode(ixnRawBytesB64);
-      final rawSig = ed.sign(signer.key, Uint8List.fromList(rawEventBytes));
-      cesrSig = await _cesrEncode(base64Encode(rawSig));
-    }
+    // Private key never leaves this device (ADR-014). The core signs this
+    // anchor itself where it holds the key; this signature is handed back.
+    final rawSig = ed.sign(signer.key, Uint8List.fromList(base64Decode(ixnRawBytesB64)));
+    final cesrSig = await _cesrEncode(base64Encode(rawSig));
 
     return CredentialIssuanceResult(
       acdcSaid: json['acdc_said'] ?? '',
@@ -429,6 +475,7 @@ class LocalCoreKeriService extends KeriService {
       cesrSignature: cesrSig,
     );
   }
+
 
   @override
   Future<PresentationResult> presentCredential({

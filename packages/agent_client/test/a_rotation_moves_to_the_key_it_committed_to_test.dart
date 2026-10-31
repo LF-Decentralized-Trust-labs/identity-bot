@@ -8,6 +8,7 @@ import 'package:agent_client/services/local_core_keri_service.dart';
 import 'package:agent_client/services/keri_service.dart';
 import 'package:agent_client/services/owner_signing_client.dart';
 import 'package:agent_client/services/secure_key_store.dart';
+import 'package:agent_client/services/the_events_this_device_asked_for.dart';
 import 'package:agent_client/services/the_key_in_force.dart';
 import 'package:agent_client/services/the_key_is_not_held_by_the_core.dart';
 import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
@@ -45,8 +46,23 @@ class FakeCore {
   // Rewrites the bytes served for an unsigned event, as a core lying about
   // what an event is would.
   Map<String, dynamic> Function(Map<String, dynamic>)? tamper;
-  // Makes the rotation the core builds commit to somebody else's next key.
+  // Makes the founding or rotation the core builds commit to somebody else's
+  // next key.
   String? foreignNext;
+  // What the core anchors when it issues a credential, if not the credential.
+  List<Object?>? credentialAnchor;
+  // Rewrites the rotation the core builds, or the anchors of an interaction.
+  Map<String, dynamic> Function(Map<String, dynamic>)? changeRotation;
+  List<Object?>? interactionAnchors;
+  // A path whose request fails in transit.
+  String? dropsRequestsTo;
+  // Adds to a founding what the real core adds of its own: a post-quantum
+  // next-key commitment and an anchor of the identity's messaging keys.
+  bool addsItsOwn = false;
+  // Rewrites the founding the core builds.
+  Map<String, dynamic> Function(Map<String, dynamic>)? changeFounding;
+
+  static const keysetAnchor = {'ia': 'IA-HYBRID-1', 'ka': ['Ckem'], 'sa': ['Dsig']};
   // Answers 404 to a signature, as a core that does not hold the event does.
   bool forgetsEvents = false;
 
@@ -65,7 +81,7 @@ class FakeCore {
   void add(Map<String, dynamic> event) {
     final sn = kel.length.toRadixString(16);
     final e = <String, dynamic>{'v': 'KERI10JSON', 't': event['t'], 'd': 'Eevent$sn', 'i': 'Eaid', 's': sn};
-    for (final f in ['k', 'n', 'bt', 'b', 'br', 'ba', 'a']) {
+    for (final f in ['kt', 'k', 'nt', 'n', 'bt', 'b', 'br', 'ba', 'c', 'a']) {
       if (event.containsKey(f)) e[f] = event[f];
     }
     raws.add(utf8.encode(jsonEncode(e)));
@@ -74,7 +90,7 @@ class FakeCore {
 
   // A rotation to [key], committing to [next], as the engine writes one.
   static Map<String, dynamic> rotation(String key, String next) =>
-      {'t': 'rot', 'k': [key], 'n': [commitmentTo(next)], 'bt': '0', 'br': [], 'ba': []};
+      {'t': 'rot', 'kt': '1', 'k': [key], 'nt': '1', 'n': [commitmentTo(next)], 'bt': '0', 'br': [], 'ba': [], 'a': []};
 
   http.Client client() => MockClient((req) async {
         if (req.method == 'GET') {
@@ -106,6 +122,7 @@ class FakeCore {
         final body = jsonDecode(req.body) as Map<String, dynamic>;
         sent[req.url.path] = body;
         posted.add(req.url.path);
+        if (req.url.path == dropsRequestsTo) throw http.ClientException('the connection dropped');
         if (keyNotHeldHere && (req.url.path == '/api/rotation' || req.url.path == '/api/interact')) {
           return http.Response(
               jsonEncode({'error': 'key_not_held_here', 'details': "This identity's key is not held by this Identity Agent."}),
@@ -113,13 +130,22 @@ class FakeCore {
         }
         switch (req.url.path) {
           case '/api/inception':
-            add({'t': 'icp', 'k': [body['public_key']], 'n': [commitmentTo(body['next_public_key'] as String)], 'bt': '0', 'b': []});
+            final founding = <String, dynamic>{
+              't': 'icp', 'kt': '1', 'k': [body['public_key']], 'nt': '1',
+              'n': [
+                foreignNext != null ? commitmentTo(foreignNext!) : commitmentTo(body['next_public_key'] as String),
+                if (addsItsOwn) 'Epostquantumdigest',
+              ],
+              'bt': '0', 'b': [], 'c': [], 'a': [if (addsItsOwn) keysetAnchor],
+            };
+            add(changeFounding != null ? changeFounding!(founding) : founding);
           case '/api/rotation':
-            add(rotation(body['new_public_key'] as String, foreignNext ?? body['new_next_public_key'] as String));
+            final r = rotation(body['new_public_key'] as String, foreignNext ?? body['new_next_public_key'] as String);
+            add(changeRotation != null ? changeRotation!(r) : r);
           case '/api/interact':
-            add({'t': 'ixn', 'a': body['data']});
+            add({'t': 'ixn', 'a': interactionAnchors ?? body['data']});
           case '/api/credential/issue':
-            add({'t': 'ixn', 'a': [{'d': 'Ecredential'}]});
+            add({'t': 'ixn', 'a': credentialAnchor ?? [{'i': 'Ecredential', 's': '0', 'd': 'Ecredential'}]});
           case '/api/cesr/encode':
             // Carries the raw signature through, so the core can check it.
             return http.Response(jsonEncode({'cesr_sig': body['raw_sig_b64']}), 200);
@@ -142,6 +168,7 @@ class FakeCore {
               'aid': 'Eaid',
               'raw_bytes_b64': raw,
               'ixn_raw_bytes_b64': raw,
+              'acdc_said': 'Ecredential',
               'sequence_number': kel.length - 1,
             }),
             200);
@@ -491,5 +518,193 @@ void main() {
     expect(verifiesUnder(KeyManager.keyAt(seed, 0).publicKeyEncoded, core.raw(ixn),
         base64Decode(core.kel[ixn]['sig'] as String)), isTrue,
         reason: 'the interaction came before the rotation, so the founding key signs it, not the key in force now');
+  });
+
+  Future<List<Map<String, dynamic>>> pending() async {
+    final asked = TheEventsThisDeviceAskedFor();
+    return asked.pending(await asked.scope());
+  }
+
+  test('a founding that commits to somebody else\'s next key is never signed', () async {
+    core.foreignNext = KeyManager.keyAt(Bip39.mnemonicToSeed(Bip39.generateMnemonic()), 0).publicKeyEncoded;
+    await expectLater(keri.inceptAid(name: 'Eaid', code: words.join(' ')),
+        throwsA(predicate((e) => '$e'.contains('not the one this device asked for'))));
+    expect(core.posted, isNot(contains('/api/cesr/encode')));
+    expect(await pending(), isEmpty, reason: 'a founding refused here is nothing to finish later');
+  });
+
+  test('a rotation that changes anything this device did not ask for is not signed', () async {
+    final cases = <String, Map<String, dynamic> Function(Map<String, dynamic>)>{
+      'a witness removed': (r) => {...r, 'br': ['Ewitness']},
+      'a witness added': (r) => {...r, 'ba': ['Ewitness']},
+      'the witness threshold': (r) => {...r, 'bt': '1'},
+      'the signing threshold': (r) => {...r, 'kt': '2'},
+      'the next threshold': (r) => {...r, 'nt': '2'},
+      'an anchor': (r) => {...r, 'a': [{'d': 'Esomething'}]},
+    };
+    for (final MapEntry(key: what, value: change) in cases.entries) {
+      FlutterSecureStorage.setMockInitialValues({});
+      SharedPreferences.setMockInitialValues({});
+      await SecureKeyStore.saveMnemonic(words);
+      core = FakeCore();
+      keri = LocalCoreKeriService(baseUrl: 'http://core.test', client: core.client());
+      await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+      core.changeRotation = change;
+      core.posted.clear();
+      await expectLater(keri.rotateAid(name: 'Eaid'), throwsException, reason: what);
+      expect(core.posted, isNot(contains('/api/cesr/encode')), reason: 'a rotation with $what changed was signed');
+      expect(await pending(), isEmpty, reason: 'a rotation refused here is nothing to finish later');
+    }
+  });
+
+  test('an interaction anchoring anything but what was asked is not signed', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    core.interactionAnchors = [{'d': 'Esomething else'}];
+    core.posted.clear();
+    await expectLater(keri.interactAid(name: 'Eaid', sealData: [{'d': 'Ewhat was asked'}]), throwsException);
+    expect(core.posted, isNot(contains('/api/cesr/encode')));
+    expect(await pending(), isEmpty);
+  });
+
+  test('a credential anchor that is not the credential issued is not signed', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    core.credentialAnchor = [{'i': 'Esomething else', 's': '0', 'd': 'Esomething else'}];
+    core.posted.clear();
+    await expectLater(keri.issueCredential(claims: {'a': 'b'}, schemaSaid: 'E'), throwsException);
+    expect(core.posted, isNot(contains('/api/cesr/encode')));
+    expect(await pending(), isEmpty);
+  });
+
+  test('a request refused, answered wrongly or lost in transit leaves nothing written down', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    core.keyNotHeldHere = true;
+    await expectLater(keri.rotateAid(name: 'Eaid'), throwsException);
+    expect(await pending(), isEmpty, reason: 'refused');
+    core.keyNotHeldHere = false;
+    core.foreignNext = KeyManager.keyAt(Bip39.mnemonicToSeed(Bip39.generateMnemonic()), 0).publicKeyEncoded;
+    await expectLater(keri.rotateAid(name: 'Eaid'), throwsException);
+    expect(await pending(), isEmpty, reason: 'answered with something that is not the rotation');
+    core.foreignNext = null;
+    // That rotation, never signed, would lock the identity; the core drops it.
+    core.kel.removeLast();
+    core.raws.removeLast();
+    core.dropsRequestsTo = '/api/interact';
+    await expectLater(keri.interactAid(name: 'Eaid'), throwsA(isA<http.ClientException>()));
+    expect(await pending(), isEmpty, reason: 'lost in transit');
+  });
+
+  test('a stranded event, once finished, is no longer written down', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    core.refuseSignatures = true;
+    await expectLater(keri.rotateAid(name: 'Eaid'), throwsException);
+    expect(await pending(), hasLength(1), reason: 'the stranded rotation is written down');
+    core.refuseSignatures = false;
+    await keri.signPayload(name: 'Eaid', data: [1]);
+    expect(await pending(), isEmpty);
+  });
+
+  test('a request whose answer never arrived is recognised only at its own sequence number', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    final seed = Bip39.mnemonicToSeed(words);
+    final asked = TheEventsThisDeviceAskedFor();
+    final key1 = KeyManager.keyAt(seed, 1).publicKeyEncoded;
+    final key2 = KeyManager.keyAt(seed, 2).publicKeyEncoded;
+    // Asked for at sequence 1, the answer lost; the core holds the rotation at 2.
+    await asked.asking(t: 'rot', aid: 'Eaid', expectedSn: 1, asked: {'key': key1, 'next': key2});
+    core.add({'t': 'ixn', 'a': [], 'sig': 'x'});
+    core.add(FakeCore.rotation(key1, key2));
+    core.posted.clear();
+    await expectLater(keri.signPayload(name: 'Eaid', data: [1]), throwsA(isA<AnEventThisDeviceDidNotAskFor>()));
+    expect(core.posted, isNot(contains('/api/cesr/encode')));
+    // And it is dropped once a signed event holds its place.
+    core.kel.removeLast();
+    core.raws.removeLast();
+    await keri.signPayload(name: 'Eaid', data: [1]);
+    expect(await pending(), isEmpty, reason: 'sequence 1 is now held by a signed event');
+  });
+
+  test('a request whose answer never arrived is recognised by its keys, at its sequence number', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    final seed = Bip39.mnemonicToSeed(words);
+    final asked = TheEventsThisDeviceAskedFor();
+    final key1 = KeyManager.keyAt(seed, 1).publicKeyEncoded;
+    final key2 = KeyManager.keyAt(seed, 2).publicKeyEncoded;
+    await asked.asking(t: 'rot', aid: 'Eaid', expectedSn: 1, asked: {'key': key1, 'next': key2});
+    // The rotation at 1 reveals the key asked for but commits to another.
+    final attacker = KeyManager.keyAt(Bip39.mnemonicToSeed(Bip39.generateMnemonic()), 0).publicKeyEncoded;
+    core.add(FakeCore.rotation(key1, attacker));
+    core.posted.clear();
+    await expectLater(keri.signPayload(name: 'Eaid', data: [1]), throwsA(isA<AnEventThisDeviceDidNotAskFor>()));
+    expect(core.posted, isNot(contains('/api/cesr/encode')));
+    // The rotation it did ask for is finished.
+    core.kel.removeLast();
+    core.raws.removeLast();
+    core.add(FakeCore.rotation(key1, key2));
+    await keri.signPayload(name: 'Eaid', data: [1]);
+    expect(core.kel.last['sig'], isNotNull);
+  });
+
+  test('requests written down at the same moment are all kept', () async {
+    final asked = TheEventsThisDeviceAskedFor();
+    await Future.wait([for (var i = 0; i < 20; i++) asked.asking(t: 'ixn', aid: 'Eaid', expectedSn: i)]);
+    expect(await pending(), hasLength(20), reason: 'each write read the list another was writing');
+  });
+
+  test('an event this device did not ask for is signed only once the person approves it', () async {
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    final seed = Bip39.mnemonicToSeed(words);
+    core.add({'t': 'ixn', 'a': [{'d': 'Emade on another of their devices'}]});
+    final ixn = core.kel.last;
+    final keys = TheKeyInForce(core.client(), 'http://core.test');
+    final awaiting = await keys.eventsAwaitingApproval(seed);
+    expect(awaiting.map((e) => e['d']), [ixn['d']]);
+    await expectLater(keri.signPayload(name: 'Eaid', data: [1]), throwsA(isA<AnEventThisDeviceDidNotAskFor>()),
+        reason: 'the identity is locked until somebody acts');
+    await keys.signApprovedEvent(seed, sequenceNumber: ixn['s'] as String, digest: ixn['d'] as String);
+    expect(core.kel.last['sig'], isNotNull);
+    await keri.signPayload(name: 'Eaid', data: [1]);
+
+    // Approval does not lift the rotation checks.
+    final attacker = KeyManager.keyAt(Bip39.mnemonicToSeed(Bip39.generateMnemonic()), 0).publicKeyEncoded;
+    core.add(FakeCore.rotation(KeyManager.keyAt(seed, 1).publicKeyEncoded, attacker));
+    core.posted.clear();
+    await expectLater(
+        keys.signApprovedEvent(seed, sequenceNumber: core.kel.last['s'] as String, digest: core.kel.last['d'] as String),
+        throwsA(predicate((e) => '$e'.contains('not to the next key'))));
+    expect(core.posted, isNot(contains('/api/cesr/encode')));
+  });
+
+  test('a founding with the core\'s own post-quantum commitment and messaging keys is signed', () async {
+    // What the real core adds of its own. The device cannot check these
+    // against the phrase; it checks everything else (see the founding check).
+    core.addsItsOwn = true;
+    await keri.inceptAid(name: 'Eaid', code: words.join(' '));
+    expect(core.kel.first['sig'], isNotNull);
+  });
+
+  test('a founding that differs from the one asked for in anything else is never signed', () async {
+    final stranger = KeyManager.keyAt(Bip39.mnemonicToSeed(Bip39.generateMnemonic()), 0).publicKeyEncoded;
+    final cases = <String, Map<String, dynamic> Function(Map<String, dynamic>)>{
+      'a third commitment': (f) => {...f, 'n': [...f['n'] as List, 'Eanother']},
+      'a first commitment to another key': (f) => {...f, 'n': [FakeCore.commitmentTo(stranger), ...(f['n'] as List).skip(1)]},
+      'another key': (f) => {...f, 'k': [stranger]},
+      'a signing threshold of two': (f) => {...f, 'kt': '2'},
+      'a next threshold of two': (f) => {...f, 'nt': '2'},
+      'a configuration trait': (f) => {...f, 'c': ['EO']},
+      'a second anchor': (f) => {...f, 'a': [...f['a'] as List, {'d': 'Esomething'}]},
+      'an anchor that is not a keyset': (f) => {...f, 'a': [{'d': 'Esomething'}]},
+      'a keyset with something more': (f) => {...f, 'a': [{...FakeCore.keysetAnchor, 'x': 1}]},
+    };
+    for (final MapEntry(key: what, value: change) in cases.entries) {
+      FlutterSecureStorage.setMockInitialValues({});
+      SharedPreferences.setMockInitialValues({});
+      await SecureKeyStore.saveMnemonic(words);
+      core = FakeCore()
+        ..addsItsOwn = true
+        ..changeFounding = change;
+      keri = LocalCoreKeriService(baseUrl: 'http://core.test', client: core.client());
+      await expectLater(keri.inceptAid(name: 'Eaid', code: words.join(' ')), throwsException, reason: what);
+      expect(core.posted, isNot(contains('/api/cesr/encode')), reason: 'a founding with $what was signed');
+    }
   });
 }

@@ -10,6 +10,15 @@ class AgentKeyPair {
 
   AgentKeyPair({required this.publicKey, required this.privateKey});
 
+  /// The key pair a 32-byte Ed25519 signing seed makes.
+  factory AgentKeyPair.fromSigningSeed(Uint8List signingSeed) {
+    final privateKey = ed.newKeyFromSeed(signingSeed);
+    return AgentKeyPair(
+      publicKey: Uint8List.fromList(ed.public(privateKey).bytes),
+      privateKey: Uint8List.fromList(privateKey.bytes),
+    );
+  }
+
   String get publicKeyEncoded {
     // CESR qb64 for a 32-byte Ed25519 verkey under the 1-char code "D", the
     // transferable code: an identity whose keys rotate names each key with D.
