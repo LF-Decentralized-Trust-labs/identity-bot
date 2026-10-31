@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -134,6 +135,31 @@ func (s *SQLiteStore) GetEvents(aid string) ([]EventRecord, error) {
 		events = []EventRecord{}
 	}
 	return events, nil
+}
+
+// AIDsOfEvent narrows by substring in SQL and confirms by reading each
+// candidate's d field, so an identifier that merely appears inside another
+// event (as a prior digest, say) is not taken for that event's own.
+func (s *SQLiteStore) AIDsOfEvent(said string) ([]string, error) {
+	if said == "" {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`SELECT aid, event_json FROM kel WHERE instr(event_json, ?) > 0`, said)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query KEL: %w", err)
+	}
+	defer rows.Close()
+	var aids []string
+	for rows.Next() {
+		var aid, eventJSON string
+		if err := rows.Scan(&aid, &eventJSON); err != nil {
+			return nil, fmt.Errorf("failed to scan KEL row: %w", err)
+		}
+		if eventSAIDIs(eventJSON, said) && !slices.Contains(aids, aid) {
+			aids = append(aids, aid)
+		}
+	}
+	return aids, rows.Err()
 }
 
 // ── Identity ──────────────────────────────────────────────────────────────────

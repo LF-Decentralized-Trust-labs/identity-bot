@@ -2920,10 +2920,10 @@ func (s *CoreServer) handleSubmitReceipt(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusUnprocessableEntity, "The receipt does not verify", err.Error())
 		return
 	}
-	in, ok := s.ownLogWithReceipts(req.EventSAID)
+	in, ok := s.logOfEvent(req.EventSAID)
 	if !ok {
-		writeError(w, http.StatusNotFound, "Not an event of this identity",
-			"a receipt is kept here only for an event in this identity's own key log")
+		writeError(w, http.StatusNotFound, "Not an event of a key log kept here",
+			"a receipt is kept here only for an event in a key log this Identity Agent keeps")
 		return
 	}
 	if err := s.DataStore.SaveWitnessReceipt(store.WitnessReceiptRecord{
@@ -2954,18 +2954,25 @@ func (s *CoreServer) handleSubmitReceipt(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(resp)
 }
 
-// ownLogWithReceipts is this identity's key log, as published, when it holds
-// the event eventSAID.
-func (s *CoreServer) ownLogWithReceipts(eventSAID string) (drivers.ValidateKELInput, bool) {
-	identity, err := s.DataStore.GetIdentity()
-	if err != nil || identity == nil || identity.AID == "" {
+// logOfEvent is the stored key log of the identity eventSAID belongs to, as
+// published, wherever this Identity Agent keeps one: its own, its record
+// identity's, or another it holds. An event is judged against the log it is
+// in, since that log alone says who its witnesses are and how many it needs.
+//
+// It fails closed, for that identity alone: if any of its stored events lacks
+// the bytes it was published as, its log cannot be walked, so none of its
+// events can be judged. Other identities' logs are unaffected. An event in no
+// stored log, or claimed by the logs of two identities, is not found.
+func (s *CoreServer) logOfEvent(eventSAID string) (drivers.ValidateKELInput, bool) {
+	aids, err := s.DataStore.AIDsOfEvent(eventSAID)
+	if err != nil || len(aids) != 1 {
 		return drivers.ValidateKELInput{}, false
 	}
-	events, err := s.DataStore.GetEvents(identity.AID)
+	events, err := s.DataStore.GetEvents(aids[0])
 	if err != nil {
 		return drivers.ValidateKELInput{}, false
 	}
-	in := drivers.ValidateKELInput{AID: identity.AID}
+	in := drivers.ValidateKELInput{AID: aids[0]}
 	found := false
 	for _, ev := range events {
 		raw, err := base64.StdEncoding.DecodeString(ev.RawBytesB64)
@@ -2998,7 +3005,7 @@ func (s *CoreServer) handleGetKERL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	counted, thresholdMet := s.receiptsAgainstOwnLog(eventSAID, receipts, threshold)
+	counted, thresholdMet := s.receiptsAgainstItsLog(eventSAID, receipts, threshold)
 
 	type receiptEntry struct {
 		WitnessAID    string `json:"witness_aid"`

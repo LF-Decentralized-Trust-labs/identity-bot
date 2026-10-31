@@ -66,7 +66,7 @@ func (s *CoreServer) handleStoreReceipt(w http.ResponseWriter, r *http.Request) 
 //
 // GET /api/store/receipts?event_said=<SAID>&threshold=<int>
 //
-// receipt_count and threshold_met are judged as receiptsAgainstOwnLog says:
+// receipt_count and threshold_met are judged as receiptsAgainstItsLog says:
 // designated witnesses only, once each, against at least the event's own
 // threshold. Every stored receipt is still listed.
 func (s *CoreServer) handleGetStoreReceipts(w http.ResponseWriter, r *http.Request) {
@@ -86,7 +86,7 @@ func (s *CoreServer) handleGetStoreReceipts(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	counted, thresholdMet := s.receiptsAgainstOwnLog(eventSAID, receipts, threshold)
+	counted, thresholdMet := s.receiptsAgainstItsLog(eventSAID, receipts, threshold)
 
 	type entry struct {
 		WitnessAID    string `json:"witness_aid"`
@@ -155,18 +155,19 @@ func (s *CoreServer) handleStoreCredential(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(map[string]interface{}{"status": "saved", "said": req.SAID})
 }
 
-// receiptsAgainstOwnLog counts the designated witnesses of eventSAID, in this
-// identity's own key log, whose receipt among receipts verifies, each once by
-// its key, and reports whether that meets the threshold.
+// receiptsAgainstItsLog counts the designated witnesses of eventSAID, in the
+// key log of the identity it belongs to (logOfEvent), whose receipt among
+// receipts verifies, each once by its key, and reports whether that meets
+// the threshold.
 //
 // The witnesses and the threshold come from the event, never from the caller.
 // A caller's threshold is honoured only when it asks for more than the event
 // does: a lower one would let a caller declare an event witnessed that its
 // own witnesses have not, and a receipt from a witness the event never named
-// is no vote however well it verifies. An event that is not in this
-// identity's log has no designated witnesses, so nothing counts.
-func (s *CoreServer) receiptsAgainstOwnLog(eventSAID string, receipts []store.WitnessReceiptRecord, callerThreshold int) (counted int, met bool) {
-	in, found := s.ownLogWithReceipts(eventSAID)
+// is no vote however well it verifies. An event in no key log kept here has
+// no designated witnesses, so nothing counts.
+func (s *CoreServer) receiptsAgainstItsLog(eventSAID string, receipts []store.WitnessReceiptRecord, callerThreshold int) (counted int, met bool) {
+	in, found := s.logOfEvent(eventSAID)
 	if !found {
 		return 0, false
 	}

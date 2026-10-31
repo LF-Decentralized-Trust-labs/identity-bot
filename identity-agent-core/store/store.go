@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -556,6 +557,11 @@ type ServiceProviderRecord struct {
 type Store interface {
 	SaveEvent(record EventRecord) error
 	GetEvents(aid string) ([]EventRecord, error)
+	// AIDsOfEvent are the identities whose stored key log holds an event
+	// whose own identifier (its d field) is said. An Identity Agent keeps
+	// more than one identity's log — its own, its record identity's, others
+	// it holds — and an event is judged against the log it belongs to.
+	AIDsOfEvent(said string) ([]string, error)
 
 	// The machines this identity has adopted. An owner that cannot list them
 	// has not finished adopting one: the machine knows who owns it, and
@@ -763,6 +769,30 @@ func (s *FileStore) GetEvents(aid string) ([]EventRecord, error) {
 		}
 	}
 	return filtered, nil
+}
+
+func (s *FileStore) AIDsOfEvent(said string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	events, err := s.loadEvents()
+	if err != nil {
+		return nil, err
+	}
+	var aids []string
+	for _, e := range events {
+		if eventSAIDIs(e.EventJSON, said) && !slices.Contains(aids, e.AID) {
+			aids = append(aids, e.AID)
+		}
+	}
+	return aids, nil
+}
+
+// eventSAIDIs reports whether the stored event JSON's d field is said.
+func eventSAIDIs(eventJSON, said string) bool {
+	var ked struct {
+		D string `json:"d"`
+	}
+	return said != "" && json.Unmarshal([]byte(eventJSON), &ked) == nil && ked.D == said
 }
 
 func (s *FileStore) GetIdentity() (*IdentityState, error) {
