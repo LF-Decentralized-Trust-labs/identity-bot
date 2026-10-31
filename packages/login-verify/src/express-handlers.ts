@@ -13,25 +13,55 @@ const CALLBACK_PATH = "/auth/ia/callback";
 const RAW_BODY = Symbol.for("@identity-agent/login-verify raw body");
 type WithRawBody = Request & { [RAW_BODY]?: Buffer | Promise<Buffer> };
 
+/** A body larger than a sign-in sends, answered 413. */
+class BodyTooLarge extends Error {
+  constructor() {
+    super(`the body is larger than ${MAX_BODY_BYTES} bytes`);
+  }
+}
+
 /** The request's body as sent. Reading it marks it read (`_body`), as a body
- *  parser does, so a parser further along leaves it alone. */
+ *  parser does, so a parser further along leaves it alone. A body over the
+ *  limit stops being read and is refused with BodyTooLarge; the socket is
+ *  left alone so the 413 can be sent, and Node closes the connection after
+ *  it because the rest of the body was never read. */
 function readBody(req: Request): Promise<Buffer> {
   (req as unknown as { _body?: boolean })._body = true;
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
-    req.on("data", (c: Buffer) => {
+    const onData = (c: Buffer) => {
       size += c.length;
       if (size > MAX_BODY_BYTES) {
-        reject(new Error("the body is too large"));
-        req.destroy();
+        stop();
+        req.pause();
+        reject(new BodyTooLarge());
         return;
       }
       chunks.push(c);
-    });
-    req.on("end", () => resolve(Buffer.concat(chunks)));
-    req.on("error", reject);
+    };
+    const onEnd = () => {
+      stop();
+      resolve(Buffer.concat(chunks));
+    };
+    const onError = (err: Error) => {
+      stop();
+      reject(err);
+    };
+    const stop = () => {
+      req.off("data", onData);
+      req.off("end", onEnd);
+      req.off("error", onError);
+    };
+    req.on("data", onData);
+    req.on("end", onEnd);
+    req.on("error", onError);
   });
+}
+
+/** The status to answer a body that could not be read with. */
+function unreadableStatus(err: unknown): number {
+  return err instanceof BodyTooLarge ? 413 : 400;
 }
 
 /** True where a body parser has already consumed the request. */
@@ -39,11 +69,18 @@ function alreadyRead(req: Request): boolean {
   return Boolean((req as unknown as { _body?: boolean })._body) || !req.readable;
 }
 
-/** True for a POST to the sign-in callback, wherever the routes are mounted. */
-function isCallback(req: Request): boolean {
-  if (req.method !== "POST") return false;
-  const path = (req.originalUrl ?? req.url ?? "").split("?")[0].replace(/\/+$/, "");
-  return path.endsWith(CALLBACK_PATH);
+export interface CallbackBodyOptions {
+  /** The callback's full path as the app serves it: "/auth/ia/callback"
+   *  (the default) where the routes are mounted at the top, or with the
+   *  prefix they are mounted under, "/login/auth/ia/callback". Only a POST
+   *  to exactly this path is read. */
+  path?: string;
+  /** As Express's own "case sensitive routing": false by default, so
+   *  "/Auth/IA/Callback" is the same path, as Express routes it. */
+  caseSensitive?: boolean;
+  /** As Express's own "strict routing": false by default, so one trailing
+   *  slash is the same path, as Express routes it. */
+  strict?: boolean;
 }
 
 /** Middleware that keeps the sign-in callback's body as sent, so the
@@ -53,12 +90,23 @@ function isCallback(req: Request): boolean {
  *      app.use(identityAgentCallbackBody());
  *      app.use(express.json());
  *
- *  It reads only the callback's body and passes every other request on
- *  untouched. An app with no body parser of its own needs neither this nor
+ *  Where the routes are mounted under a prefix, name the callback's full
+ *  path: `identityAgentCallbackBody({ path: "/login/auth/ia/callback" })`.
+ *  It reads only a POST to that path, matched by Express's own rules, and
+ *  passes every other request on untouched. A body over 1 MiB is answered
+ *  413. An app with no body parser of its own needs neither this nor
  *  `keepLoginRawBody`. */
-export function identityAgentCallbackBody() {
-  return (req: Request, _res: Response, next: (err?: unknown) => void): void => {
-    if (!isCallback(req) || alreadyRead(req) || (req as WithRawBody)[RAW_BODY]) {
+export function identityAgentCallbackBody(options: CallbackBodyOptions = {}) {
+  const fold = (p: string) => (options.caseSensitive ? p : p.toLowerCase());
+  const want = fold(options.path ?? CALLBACK_PATH);
+  const matches = (req: Request): boolean => {
+    if (req.method !== "POST") return false;
+    let path = fold((req.originalUrl ?? req.url ?? "").split("?")[0]);
+    if (!options.strict && path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);
+    return path === want;
+  };
+  return (req: Request, res: Response, next: (err?: unknown) => void): void => {
+    if (!matches(req) || alreadyRead(req) || (req as WithRawBody)[RAW_BODY]) {
       next();
       return;
     }
@@ -67,7 +115,12 @@ export function identityAgentCallbackBody() {
         (req as WithRawBody)[RAW_BODY] = buf;
         next();
       },
-      (err) => next(Object.assign(err instanceof Error ? err : new Error(String(err)), { status: 413 })),
+      (err) => {
+        // Answered here, as the route answers it, rather than handed to the
+        // app's error handler, which may not know what a 413 is for.
+        if (err instanceof BodyTooLarge) res.setHeader("Connection", "close");
+        res.status(unreadableStatus(err)).json({ error: `the assertion cannot be read: ${(err as Error).message}` });
+      },
     );
   };
 }
@@ -80,14 +133,17 @@ export function identityAgentCallbackBody() {
  *  Give it to every body parser that could read the callback (by default,
  *  express.json; also express.text or express.raw with a wide `type`). */
 export function keepLoginRawBody(req: unknown, _res: unknown, buf: Buffer): void {
-  const r = req as WithRawBody;
-  if (isCallback(r)) r[RAW_BODY] = Buffer.from(buf);
+  // Kept for whatever request the parser read, since only this request's
+  // own routes ever look at it. Nothing extra is read: the parser has
+  // already read these bytes.
+  (req as WithRawBody)[RAW_BODY] = buf;
 }
 
 /** What the callback says when the text it needs is gone. */
 const RAW_BODY_GONE =
   "a body parser read the assertion before this route could see its text; mount " +
-  "identityAgentCallbackBody() before your body parsers, or give them " +
+  "identityAgentCallbackBody() before your body parsers (with { path } naming the " +
+  "callback's full path if the routes sit under a prefix), or give them " +
   "{ verify: keepLoginRawBody }";
 
 /** The assertion posted to the callback, read from its text as the core reads
@@ -165,7 +221,8 @@ export function mountIdentityAgentLoginRoutes(
       try {
         body = await sessionOptions(req);
       } catch (err) {
-        return res.status(400).json({ error: `the request cannot be read: ${(err as Error).message}` });
+        if (err instanceof BodyTooLarge) res.setHeader("Connection", "close");
+        return res.status(unreadableStatus(err)).json({ error: `the request cannot be read: ${(err as Error).message}` });
       }
       let origin = process.env.IA_AUDIENCE ?? "http://127.0.0.1:5000";
       if (req.headers["x-forwarded-proto"] && req.headers["x-forwarded-host"]) {
@@ -241,7 +298,8 @@ export function mountIdentityAgentLoginRoutes(
       try {
         assertion = await postedAssertion(req);
       } catch (err) {
-        return res.status(400).json({ error: `the assertion cannot be read: ${(err as Error).message}` });
+        if (err instanceof BodyTooLarge) res.setHeader("Connection", "close");
+        return res.status(unreadableStatus(err)).json({ error: `the assertion cannot be read: ${(err as Error).message}` });
       }
 
       const rec = verifier.sessionStore.get(sessionToken);

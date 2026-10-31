@@ -45,7 +45,9 @@ async function signed(fields) {
   return a;
 }
 
-// Each layout returns the path the routes sit under.
+// Each layout returns the path the routes sit under, which is also given
+// up front so a parser layout can name the callback's full path.
+const prefixes = { "at the top": "", "in a Router": "", "in a Router at /login": "/login", "in a sub-app at /login": "/login" };
 const mounts = {
   "at the top": (app, v) => { mountIdentityAgentLoginRoutes(app, v); return ""; },
   "in a Router": (app, v) => { const r = express.Router(); mountIdentityAgentLoginRoutes(r, v); app.use(r); return ""; },
@@ -58,7 +60,7 @@ const parsers = {
   "a JSON parser first": { kept: false, before: (app) => app.use(express.json()) },
   "a text parser for everything first": { kept: false, before: (app) => app.use(express.text({ type: "*/*" })) },
   "identityAgentCallbackBody() then a JSON parser": {
-    kept: true, before: (app) => { app.use(identityAgentCallbackBody()); app.use(express.json()); },
+    kept: true, before: (app, prefix) => { app.use(identityAgentCallbackBody({ path: `${prefix}/auth/ia/callback` })); app.use(express.json()); },
   },
   "a JSON parser with keepLoginRawBody": { kept: true, before: (app) => app.use(express.json({ verify: keepLoginRawBody })) },
 };
@@ -74,7 +76,7 @@ for (const [where, mount] of Object.entries(mounts)) {
       if (req.path.endsWith("/auth/ia/callback")) appMiddlewareSawCallback = true;
       next();
     });
-    before?.(app);
+    before?.(app, prefixes[where]);
     const prefix = mount(app, verifier);
     after?.(app);
     // A route of the app's own, unaffected by the sign-in routes.
@@ -134,6 +136,70 @@ for (const [where, mount] of Object.entries(mounts)) {
     check(JSON.stringify(got) === JSON.stringify(want), `${layout}: the app's own route read ${JSON.stringify(got)}`);
     server.close();
   }
+}
+
+// identityAgentCallbackBody() reads the callback's body and nothing else: not
+// an app route of its own whose path merely ends the same way. It matches the
+// callback as Express routes it, so a path in another case or with a trailing
+// slash, which Express sends to the callback, is still read as sent.
+{
+  const verifier = new IdentityAgentVerifier({ siteIdentity: site, resolveKey: async () => personPub });
+  const app = express();
+  app.use(identityAgentCallbackBody());
+  app.use(express.json());
+  mountIdentityAgentLoginRoutes(app, verifier);
+  app.post("/webhooks/auth/ia/callback", (req, res) => res.json({ got: req.body ?? null }));
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise((r) => server.once("listening", r));
+  const root = `http://127.0.0.1:${server.address().port}`;
+
+  const own = await fetch(`${root}/webhooks/auth/ia/callback`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: '{"x":1}',
+  });
+  const { got } = await own.json();
+  check(got?.x === 1, `the app's own /webhooks/auth/ia/callback read ${JSON.stringify(got)}`);
+
+  for (const path of ["/Auth/IA/Callback", "/auth/ia/callback/"]) {
+    const { session_token, bundle } = await verifier.createChallenge({
+      audience: "https://app.example", requestedDisclosures: [], callbackUrl: `${root}${path}`,
+    });
+    const text = JSON.stringify(await signed({ audience: bundle.audience, nonce: bundle.nonce }));
+    const post = (body) => fetch(`${root}${path}?session=${session_token}`, {
+      method: "POST", headers: { "content-type": "application/json" }, body,
+    });
+    const doubled = await post(text.replace('"nonce":', '"nonce":"another","nonce":'));
+    check(doubled.status === 400, `${path}: a repeated key was answered ${doubled.status}`);
+    const genuine = await post(text);
+    check(genuine.status === 200, `${path}: the genuine assertion was answered ${genuine.status} ${await genuine.text()}`);
+  }
+  server.close();
+}
+
+// A body larger than a sign-in sends is answered 413, not dropped, whether
+// the route reads it or identityAgentCallbackBody() does.
+for (const [layout, build] of Object.entries({
+  "no parser": () => {},
+  "identityAgentCallbackBody() first": (app) => { app.use(identityAgentCallbackBody()); app.use(express.json()); },
+})) {
+  const verifier = new IdentityAgentVerifier({ siteIdentity: site, resolveKey: async () => personPub });
+  const app = express();
+  build(app);
+  mountIdentityAgentLoginRoutes(app, verifier);
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise((r) => server.once("listening", r));
+  const root = `http://127.0.0.1:${server.address().port}`;
+  const huge = '{"v":"' + "x".repeat((1 << 20) + 1024) + '"}';
+  for (const path of ["/auth/ia/callback?session=s", "/auth/ia/session"]) {
+    if (path === "/auth/ia/session" && layout !== "no parser") continue;
+    let status;
+    try {
+      status = (await fetch(`${root}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: huge })).status;
+    } catch (e) {
+      status = `a dropped connection (${e.cause?.code ?? e.message})`;
+    }
+    check(status === 413, `${layout}: an oversize body at ${path.split("?")[0]} was answered ${status}`);
+  }
+  server.close();
 }
 
 if (failures) {

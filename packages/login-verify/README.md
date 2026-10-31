@@ -53,7 +53,13 @@ app, a `Router` or a sub-app. What else to mount depends on your body parsers:
   mountIdentityAgentLoginRoutes(app, verifier);
   ```
 
-  or give every parser that could read the callback `keepLoginRawBody` as its
+  Where the routes sit under a prefix, name the callback's full path:
+  `identityAgentCallbackBody({ path: "/login/auth/ia/callback" })`. It reads
+  only a POST to exactly that path, matched as Express matches routes (case
+  and a trailing slash ignored unless you pass `caseSensitive` or `strict`),
+  and answers a body over 1 MiB with 413.
+
+  Or give every parser that could read the callback `keepLoginRawBody` as its
   `verify` option: `app.use(express.json({ verify: keepLoginRawBody }))`.
 
 Without one of these, a parser has already read the assertion by the time the
