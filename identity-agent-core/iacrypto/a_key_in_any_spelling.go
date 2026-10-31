@@ -62,14 +62,26 @@ func DecodeSized(s string, size int, hexToo bool) ([]byte, error) {
 // base64url and in no other spelling, for a format that names that one. It is
 // strict as DecodeSized is, so the value has one string.
 func DecodeBase64URLSized(s string, size int) ([]byte, error) {
-	if len(s) != base64.RawURLEncoding.EncodedLen(size) || !isBase64URL(s) {
+	if len(s) != base64.RawURLEncoding.EncodedLen(size) {
 		return nil, fmt.Errorf("not %d bytes in unpadded base64url", size)
 	}
-	raw, err := base64.RawURLEncoding.Strict().DecodeString(s)
+	raw, err := DecodeBase64URL(s)
 	if err != nil {
 		return nil, fmt.Errorf("not %d bytes in unpadded base64url: %w", size, err)
 	}
 	return raw, nil
+}
+
+// DecodeBase64URL decodes unpadded base64url of any length, strictly: only
+// the base64url alphabet (so no padding and no line breaks, which the standard
+// decoder skips) and zero spare bits in the last character. For a key or
+// signature whose size depends on its kind; where the size is known,
+// DecodeBase64URLSized also checks it.
+func DecodeBase64URL(s string) ([]byte, error) {
+	if !isBase64URL(s) {
+		return nil, fmt.Errorf("a character outside unpadded base64url")
+	}
+	return base64.RawURLEncoding.Strict().DecodeString(s)
 }
 
 // Ed25519KeyCode reports whether key is an Ed25519 public key in qb64, and

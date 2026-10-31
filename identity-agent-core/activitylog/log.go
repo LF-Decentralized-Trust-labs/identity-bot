@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"database/sql"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/zeebo/blake3"
 
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/permission"
 )
 
@@ -878,7 +878,7 @@ func verifyEventSignature(ev InvocationEvent, kept []byte, mustKeep bool, keys E
 	if err != nil {
 		return fmt.Sprintf("the record's signer %s is not this log's: %v", ev.SignerAID, err), nil
 	}
-	sig, err := base64.RawURLEncoding.DecodeString(ev.Signature)
+	sig, err := iacrypto.DecodeBase64URLSized(ev.Signature, ed25519.SignatureSize)
 	if err != nil {
 		return "the record's signature is not readable", nil
 	}
