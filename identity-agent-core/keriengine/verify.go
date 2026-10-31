@@ -155,11 +155,7 @@ func hexSN(v interface{}) (int, error) {
 	if !ok {
 		return 0, fmt.Errorf("expected a hex string, got %T", v)
 	}
-	var n int
-	if _, err := fmt.Sscanf(s, "%x", &n); err != nil {
-		return 0, err
-	}
-	return n, nil
+	return iacrypto.ParseHexCount(s)
 }
 
 // GenerateMultisigEvent builds an event for a group identity.

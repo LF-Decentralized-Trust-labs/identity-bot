@@ -50,7 +50,11 @@ func TestSequenceNumberIsHexadecimal(t *testing.T) {
 			t.Errorf("%q read as %d (%v), want %d", in, got, err, want)
 		}
 	}
-	for _, bad := range []interface{}{"", "-1", "+a", "g", "0x10", -1.0, 1.5, nil, true} {
+	// Also refused: uppercase, leading zeros and JSON numbers, which are not
+	// how KERI writes a sequence number and would give one position several
+	// spellings.
+	for _, bad := range []interface{}{"", "-1", "+a", "g", "0x10", -1.0, 1.5, nil, true,
+		"A", "0a", "00", "01", 1.0, 0.0, 16, "ffffffffff"} {
 		if n, err := SequenceNumber(map[string]interface{}{"s": bad}); err == nil {
 			t.Errorf("%#v read as %d; an unreadable sequence number must be an error", bad, n)
 		}

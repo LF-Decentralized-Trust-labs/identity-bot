@@ -386,8 +386,8 @@ func anchoredAt(kel [][]byte, subject string, sn int, said string) (int, bool) {
 		}
 		for _, seal := range ev.A {
 			if seal["i"] == subject && seal["s"] == want && seal["d"] == said {
-				n, err := strconv.ParseInt(ev.S, 16, 64)
-				return int(n), err == nil
+				n, err := iacrypto.ParseHexCount(ev.S)
+				return n, err == nil
 			}
 		}
 	}
