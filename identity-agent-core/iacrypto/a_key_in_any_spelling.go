@@ -34,7 +34,17 @@ func DecodeBase64(s string) ([]byte, error) {
 // DecodeSized decodes s as exactly size raw bytes written in any base64
 // spelling, or in hex when hexToo is set.
 func DecodeSized(s string, size int, hexToo bool) ([]byte, error) {
+	return decodeSized(s, size, hexToo, false)
+}
+
+// decodeSized is DecodeSized, decoding base64 strictly when strict is set:
+// the bits left over in the last character must then be zero, so each
+// spelling of a value has one string.
+func decodeSized(s string, size int, hexToo, strict bool) ([]byte, error) {
 	for _, enc := range base64Spellings {
+		if strict {
+			enc = enc.Strict()
+		}
 		if raw, err := enc.DecodeString(s); err == nil && len(raw) == size {
 			return raw, nil
 		}
@@ -150,7 +160,9 @@ func DecodeEd25519Signature(sig string, indexedToo bool) (raw []byte, index int,
 		// is no raw signature either.
 		return nil, 0, false, fmt.Errorf("the signature is in qb64 with a code that is not read here")
 	}
-	raw, err = DecodeSized(sig, sigBytes, false)
+	// Strict, as qb64 is: 64 bytes leave 4 bits over in the last character,
+	// and read leniently they gave each spelling 16 strings.
+	raw, err = decodeSized(sig, sigBytes, false, true)
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("the signature is neither qb64 nor 64 raw bytes in base64: %w", err)
 	}

@@ -100,3 +100,27 @@ func TestNoSecondSpellingOfASignatureIsRead(t *testing.T) {
 		t.Error("an indexed signature with its lead bits set was read")
 	}
 }
+
+// A raw signature has one string in each base64 spelling. 64 bytes leave 4
+// bits over in the last character; set, they are another string for the same
+// signature, and are refused.
+func TestARawSignatureHasOneStringPerSpelling(t *testing.T) {
+	sig := randomSig(t, "")
+	for _, enc := range base64Spellings {
+		s := enc.EncodeToString(sig)
+		end := strings.TrimRight(s, "=")
+		last := len(end) - 1
+		alphabet := b64Chars
+		if strings.ContainsAny(s, "+/") || enc == base64.StdEncoding || enc == base64.RawStdEncoding {
+			alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+		}
+		i := strings.IndexByte(alphabet, end[last])
+		other := end[:last] + string(alphabet[i|0x01]) + s[len(end):]
+		if other == s {
+			other = end[:last] + string(alphabet[i|0x02]) + s[len(end):]
+		}
+		if got, _, _, err := DecodeEd25519Signature(other, false); err == nil && bytes.Equal(got, sig) {
+			t.Fatalf("%s and %s both read as the same signature", s, other)
+		}
+	}
+}
