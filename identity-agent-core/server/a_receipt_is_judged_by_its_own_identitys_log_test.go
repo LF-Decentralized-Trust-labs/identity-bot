@@ -124,3 +124,50 @@ func TestAnEventOfAnotherKeptIdentityIsJudgedByItsOwnLog(t *testing.T) {
 		t.Errorf("another identity's damaged log stopped this one being judged: %v", got)
 	}
 }
+
+// A stray row under another identity, whose recorded JSON names the event's
+// identifier but whose bytes are not that identity's event, claims nothing.
+// It used to make the event "claimed by two" and so never met.
+func TestAStrayRowDoesNotClaimAnEvent(t *testing.T) {
+	w := witnessedIdentity(t)
+	for i := 0; i < 2; i++ {
+		if err := w.s.DataStore.SaveWitnessReceipt(store.WitnessReceiptRecord{
+			EventSAID: w.said, WitnessAID: w.witnesses[i], CesrSignature: w.sign(i),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := kerlOf(t, w.s, w.said); got["threshold_met"] != true {
+		t.Fatalf("both witnesses' receipts reported as %v", got)
+	}
+	stray := `{"d":"` + w.said + `","i":"EIntruder"}`
+	for _, rec := range []store.EventRecord{
+		{AID: "EIntruder", EventType: "icp", EventJSON: stray},
+		{AID: "EIntruder2", EventType: "icp", EventJSON: stray, RawBytesB64: base64.StdEncoding.EncodeToString([]byte(`{"t":"icp","d":"` + w.said + `","i":"ESomebodyElse"}`))},
+	} {
+		if err := w.s.DataStore.SaveEvent(rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := kerlOf(t, w.s, w.said); got["threshold_met"] != true || got["receipt_count"] != float64(2) {
+		t.Errorf("a stray row stopped the event being judged: %v", got)
+	}
+}
+
+// An event that two identities' logs both genuinely claim cannot be placed,
+// so it is not met.
+func TestAnEventClaimedByTwoLogsIsNotMet(t *testing.T) {
+	w := witnessedIdentity(t)
+	for i := 0; i < 2; i++ {
+		w.s.DataStore.SaveWitnessReceipt(store.WitnessReceiptRecord{EventSAID: w.said, WitnessAID: w.witnesses[i], CesrSignature: w.sign(i)})
+	}
+	raw := `{"t":"icp","d":"` + w.said + `","i":"EOther"}`
+	if err := w.s.DataStore.SaveEvent(store.EventRecord{
+		AID: "EOther", EventType: "icp", EventJSON: raw, RawBytesB64: base64.StdEncoding.EncodeToString([]byte(raw)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := kerlOf(t, w.s, w.said); got["threshold_met"] != false || got["receipt_count"] != float64(0) {
+		t.Errorf("an event claimed by two logs reported as %v", got)
+	}
+}
