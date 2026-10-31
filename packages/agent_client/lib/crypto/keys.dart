@@ -11,22 +11,23 @@ class AgentKeyPair {
   AgentKeyPair({required this.publicKey, required this.privateKey});
 
   String get publicKeyEncoded {
-    // CESR qb64 for a 32-byte Ed25519 verkey under the 1-char code "B"
-    // (Ed25519N): one pad byte is prepended so the key material lands on a
-    // base64 boundary, and the code replaces the leading output char. This is
-    // the canonical encoding every correct CESR reader expects — it is the same
-    // shape OwnerSignature.blake3QB64 (code "E") and sigQB64 (code "0B") use.
+    // CESR qb64 for a 32-byte Ed25519 verkey under the 1-char code "D", the
+    // transferable code: an identity whose keys rotate names each key with D.
+    // One pad byte is prepended so the key material lands on a base64
+    // boundary, and the code replaces the leading output char — the same shape
+    // OwnerSignature.blake3QB64 (code "E") and sigQB64 (code "0B") use.
     //
-    // The earlier form, 'B' + base64(key), omitted the pad byte, so the string
-    // named in the inception's k[0] decoded — under keri-go, keripy, and this
-    // repo's own DecodeVerkey — to the WRONG 32 bytes. The key the event names
-    // was then not the key whose private half signs it, and the attach-signature
-    // step correctly refused the (valid) signature with a 400. It only surfaced
-    // once a signature over the inception was actually checked; before that the
-    // inception was stored unsigned and the mis-encoding never mattered.
+    // This was "B", the code for a key that can never rotate, which KERI's
+    // code table does not allow in a transferable identity's key list. It also
+    // kept the core from recognising a key it derives itself: the core writes
+    // its own key with D, so the same key under B compared as a different one.
+    //
+    // An earlier form, 'B' + base64(key), omitted the pad byte as well, so the
+    // string named in the inception's k[0] decoded to the WRONG 32 bytes and the
+    // attach-signature step correctly refused the (valid) signature.
     final padded = Uint8List.fromList([0, ...publicKey]);
     final b64 = base64Url.encode(padded).replaceAll('=', '');
-    return 'B${b64.substring(1)}';
+    return 'D${b64.substring(1)}';
   }
 
   String get publicKeyBase64 {

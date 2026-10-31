@@ -42,8 +42,9 @@ void main() {
         expect(KeyManager.slip10Ed25519(seed, pathOf(k['path'] as String)), KeyManager.signingSeed(seed, index: n));
         final pair = KeyManager.keyAt(seed, n);
         expect(hexOf(pair.publicKey), k['public_key_hex'], reason: 'public key $n');
-        final d = 'D${base64Url.encode([0, ...pair.publicKey]).replaceAll('=', '').substring(1)}';
-        expect(d, k['public_key_qb64']);
+        // The string the app founds and rotates with is the string the core
+        // writes for the same key, so a core holding this phrase recognises it.
+        expect(pair.publicKeyEncoded, k['public_key_qb64'], reason: 'key $n in qb64');
       }
     }
   });
