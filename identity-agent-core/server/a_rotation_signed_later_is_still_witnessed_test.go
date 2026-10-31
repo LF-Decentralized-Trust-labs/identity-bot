@@ -33,6 +33,7 @@ type lateSignedWorld struct {
 	mu       sync.Mutex
 	received []map[string]any // what the witness took, in order
 	held     []store.EventRecord
+	unsigned int // events sent to the witness with no signature
 }
 
 func newLateSignedWorld(t *testing.T) *lateSignedWorld {
@@ -66,6 +67,9 @@ func newLateSignedWorld(t *testing.T) *lateSignedWorld {
 		w.mu.Lock()
 		defer w.mu.Unlock()
 		sig, _ := req["cesr_signature"].(string)
+		if sig == "" {
+			w.unsigned++
+		}
 		if sig == "" || ev["s"] != fmt.Sprintf("%x", len(w.held)) {
 			return nil, fmt.Errorf("refused")
 		}
@@ -248,20 +252,24 @@ func TestEventsSignedLaterReachTheWitnessesInOrder(t *testing.T) {
 		t.Fatalf("the key log does not say both are now signed: %v", flags)
 	}
 
-	// The same signature again changes nothing, and sends nothing.
-	sends := 0
-	w.s.WitnessService.PostEvent = func(context.Context, string, []byte) (map[string]interface{}, error) {
-		w.mu.Lock()
-		sends++
+	// No event was ever sent without its signature: a witness refuses one,
+	// and sending it only turns a gap here into a refusal there.
+	w.mu.Lock()
+	if w.unsigned != 0 {
 		w.mu.Unlock()
-		return nil, fmt.Errorf("refused")
+		t.Fatalf("%d events were sent to the witness unsigned", w.unsigned)
 	}
+	// The same signature again changes nothing, so it sends nothing, even to
+	// a witness that has since fallen behind and would take the rotation.
+	w.held = w.held[:len(w.held)-1]
+	w.received = nil
+	w.mu.Unlock()
 	w.attach(t, rot, rotSig)
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if sends != 0 {
-		t.Fatalf("recording a signature already held sent %d events again", sends)
+	if len(w.received) != 0 {
+		t.Fatalf("recording a signature already held sent %d events again", len(w.received))
 	}
 }
 

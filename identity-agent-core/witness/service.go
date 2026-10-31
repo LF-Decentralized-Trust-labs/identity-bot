@@ -725,6 +725,12 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 				if sn, err := eventSeq(ev); err != nil || sn < from {
 					continue
 				}
+				// An event not yet signed ends this witness's pass. A witness
+				// cannot verify it and refuses it, and every event after it
+				// would be held back as a gap; it is sent once it is signed.
+				if e.CesrSignature == "" {
+					return
+				}
 				body, _ := json.Marshal(map[string]interface{}{
 					"aid": signerAID, "event_b64": e.RawBytesB64, "cesr_signature": e.CesrSignature,
 				})
