@@ -30,6 +30,8 @@ import (
 	"github.com/cloudflare/circl/kem/mlkem/mlkem768"
 	"github.com/cloudflare/circl/sign/mldsa/mldsa65"
 	"golang.org/x/crypto/curve25519"
+
+	"identity-agent-core/iacrypto"
 )
 
 // KeySet is one identity's full hybrid DIDComm keyset — the private halves. It is
@@ -95,17 +97,17 @@ type DID struct {
 // had to decode them under a declared type, which is where a key of one kind
 // gets caught being offered as a key of another.
 func (d *DID) MatchesAnchoredKeys(x25519, mlkem768 []byte) error {
-	got, err := b64.DecodeString(d.X25519)
+	got, err := iacrypto.DecodeBase64URLSized(d.X25519, iacrypto.X25519PubkeyBytes)
 	if err != nil {
-		return fmt.Errorf("the agreement key offered is not valid base64url: %w", err)
+		return fmt.Errorf("the agreement key offered is not readable: %w", err)
 	}
 	if !bytes.Equal(got, x25519) {
 		return fmt.Errorf("the agreement key offered for %s is not the one that identifier "+
 			"committed to", d.AID)
 	}
-	got, err = b64.DecodeString(d.MlKem)
+	got, err = iacrypto.DecodeBase64URLSized(d.MlKem, iacrypto.MLKEM768EncapBytes)
 	if err != nil {
-		return fmt.Errorf("the encapsulation key offered is not valid base64url: %w", err)
+		return fmt.Errorf("the encapsulation key offered is not readable: %w", err)
 	}
 	if !bytes.Equal(got, mlkem768) {
 		return fmt.Errorf("the encapsulation key offered for %s is not the one that identifier "+
@@ -200,11 +202,11 @@ type parsedDID struct {
 }
 
 func (d *DID) parse() (*parsedDID, error) {
-	edB, err := b64.DecodeString(d.Ed)
-	if err != nil || len(edB) != ed25519.PublicKeySize {
+	edB, err := iacrypto.DecodeBase64URLSized(d.Ed, ed25519.PublicKeySize)
+	if err != nil {
 		return nil, fmt.Errorf("bad ed25519 key")
 	}
-	dsaB, err := b64.DecodeString(d.Dsa)
+	dsaB, err := iacrypto.DecodeBase64URLSized(d.Dsa, iacrypto.MLDSA65VerkeyBytes)
 	if err != nil {
 		return nil, fmt.Errorf("bad mldsa key: %w", err)
 	}
@@ -212,11 +214,11 @@ func (d *DID) parse() (*parsedDID, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse mldsa key: %w", err)
 	}
-	xB, err := b64.DecodeString(d.X25519)
-	if err != nil || len(xB) != 32 {
+	xB, err := iacrypto.DecodeBase64URLSized(d.X25519, iacrypto.X25519PubkeyBytes)
+	if err != nil {
 		return nil, fmt.Errorf("bad x25519 key")
 	}
-	kemB, err := b64.DecodeString(d.MlKem)
+	kemB, err := iacrypto.DecodeBase64URLSized(d.MlKem, iacrypto.MLKEM768EncapBytes)
 	if err != nil {
 		return nil, fmt.Errorf("bad mlkem key: %w", err)
 	}
@@ -363,17 +365,17 @@ func EncodeKeyForTest(raw []byte) string { return b64.EncodeToString(raw) }
 // keys were anchored has the agreement pair and not these, and that is a
 // weaker position rather than a broken one.
 func (d *DID) MatchesAnchoredSigningKeys(ed25519Pub, mldsa65Pub []byte) error {
-	got, err := b64.DecodeString(d.Ed)
+	got, err := iacrypto.DecodeBase64URLSized(d.Ed, ed25519.PublicKeySize)
 	if err != nil {
-		return fmt.Errorf("the signing key offered is not valid base64url: %w", err)
+		return fmt.Errorf("the signing key offered is not readable: %w", err)
 	}
 	if !bytes.Equal(got, ed25519Pub) {
 		return fmt.Errorf("the signing key offered for %s is not the one that identifier "+
 			"committed to", d.AID)
 	}
-	got, err = b64.DecodeString(d.Dsa)
+	got, err = iacrypto.DecodeBase64URLSized(d.Dsa, iacrypto.MLDSA65VerkeyBytes)
 	if err != nil {
-		return fmt.Errorf("the post-quantum signing key offered is not valid base64url: %w", err)
+		return fmt.Errorf("the post-quantum signing key offered is not readable: %w", err)
 	}
 	if !bytes.Equal(got, mldsa65Pub) {
 		return fmt.Errorf("the post-quantum signing key offered for %s is not the one that "+

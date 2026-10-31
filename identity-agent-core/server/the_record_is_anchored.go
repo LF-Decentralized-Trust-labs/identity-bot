@@ -961,6 +961,9 @@ func sealsDigest(ev map[string]interface{}, digest string) bool {
 // witnessedEnough reports whether enough of the designated witnesses have
 // returned a receipt for an event that verifies against their keys.
 func witnessedEnough(ds store.Store, eventSAID string, witnesses []string, toad int) bool {
+	if toad < 0 {
+		return false
+	}
 	receipts, err := ds.GetWitnessReceipts(eventSAID)
 	if err != nil {
 		return false
@@ -969,22 +972,45 @@ func witnessedEnough(ds store.Store, eventSAID string, witnesses []string, toad 
 	for _, w := range witnesses {
 		designated[w] = true
 	}
-	seen := map[string]bool{}
-	for _, r := range receipts {
-		if designated[r.WitnessAID] && !seen[r.WitnessAID] && drivers.VerifyReceipt(r.WitnessAID, eventSAID, r.CesrSignature) == nil {
-			seen[r.WitnessAID] = true
-		}
-	}
 	need := toad
-	if need <= 0 {
+	if need == 0 {
 		need = len(witnesses)
 	}
-	return len(seen) >= need
+	return witnessesWhoReceipted(eventSAID, receipts, designated) >= need
 }
 
+// witnessesWhoReceipted counts the witnesses with a receipt for eventSAID
+// that verifies, each once, and only those in designated.
+//
+// Counted by key, not by the text of the identifier, so one witness is one
+// vote however it is written, and by verified receipt rather than stored
+// row, so a receipt that does not check out is no vote at all.
+func witnessesWhoReceipted(eventSAID string, receipts []store.WitnessReceiptRecord, designated map[string]bool) int {
+	seen := map[string]bool{}
+	for _, r := range receipts {
+		if !designated[r.WitnessAID] {
+			continue
+		}
+		key, ok := drivers.WitnessKey(r.WitnessAID)
+		if !ok || seen[key] {
+			continue
+		}
+		if drivers.VerifyReceipt(r.WitnessAID, eventSAID, r.CesrSignature) == nil {
+			seen[key] = true
+		}
+	}
+	return len(seen)
+}
+
+// thresholdOf reads a witness threshold as KERI writes it, lowercase hex with
+// no leading zeros, and is -1 for anything else, which witnessedEnough never
+// takes as met.
 func thresholdOf(v interface{}) int {
 	s, _ := v.(string)
-	n, _ := strconv.ParseInt(s, 16, 64)
+	n, err := strconv.ParseInt(s, 16, 32)
+	if err != nil || n < 0 || strconv.FormatInt(n, 16) != s {
+		return -1
+	}
 	return int(n)
 }
 

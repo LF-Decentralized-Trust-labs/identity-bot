@@ -156,8 +156,7 @@ func (k Keys) CheckSealingKeys() error {
 		{"Ed25519 sealing signature key", k.Ed25519, iacrypto.Ed25519PubkeyBytes},
 		{"ML-DSA-65 sealing signature key", k.MLDSA65, iacrypto.MLDSA65VerkeyBytes},
 	} {
-		b, err := base64.RawURLEncoding.DecodeString(key.value)
-		if err != nil || len(b) != key.size {
+		if _, err := iacrypto.DecodeBase64URLSized(key.value, key.size); err != nil {
 			return fmt.Errorf("the %s must be %d bytes, base64url", key.name, key.size)
 		}
 	}

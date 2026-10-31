@@ -13,6 +13,7 @@ import (
 	"golang.org/x/crypto/curve25519"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/secureenclave"
 )
 
@@ -86,6 +87,17 @@ type sealedForOwner struct {
 	NonceB64              string `json:"nonce_b64"`
 }
 
+// ownerSealKey reads an owner's X25519 sealing key: 32 bytes in base64, in
+// any of the four spellings but each in its one canonical string, as every
+// key is read (iacrypto.DecodeSized). Surrounding whitespace is ignored.
+func ownerSealKey(pubB64 string) ([]byte, error) {
+	pub, err := iacrypto.DecodeSized(strings.TrimSpace(pubB64), backup.X25519KeyLen, false)
+	if err != nil {
+		return nil, fmt.Errorf("not an X25519 public key: %w", err)
+	}
+	return pub, nil
+}
+
 // addOwnerRecovery gives the owner a way to open this volume.
 //
 // Called once the owner is known, which is at adoption rather than at first
@@ -110,9 +122,9 @@ func addOwnerRecovery(device string, sealPublicKeysB64 []string, currentKey []by
 		Keyslots: []string{"1"},
 	}
 	for i, pubB64 := range sealPublicKeysB64 {
-		pub, err := base64.StdEncoding.DecodeString(strings.TrimSpace(pubB64))
+		pub, err := ownerSealKey(pubB64)
 		if err != nil {
-			return fmt.Errorf("owner key %d is not valid base64: %w", i, err)
+			return fmt.Errorf("owner key %d: %w", i, err)
 		}
 		epk, wrapped, nonce, err := backup.SealBEK(pub, secret)
 		if err != nil {

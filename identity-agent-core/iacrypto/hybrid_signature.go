@@ -58,7 +58,10 @@ func ParseCompositeSignature(wire string) (ed25519Siger string, mldsaSig string,
 	if len(wire) < 4 || wire[:2] != CtrControllerIdxSigs {
 		return "", "", fmt.Errorf("composite signature must start with %s counter", CtrControllerIdxSigs)
 	}
-	count := b64ToInt(wire[2:4])
+	count, err := b64ToInt(wire[2:4])
+	if err != nil {
+		return "", "", fmt.Errorf("composite signature counter: %w", err)
+	}
 	if count != 2 {
 		return "", "", fmt.Errorf("expected 2 indexed sigs, counter=%d", count)
 	}
@@ -79,13 +82,23 @@ func DecodeIndexedMLDSASig(wire string) (int, []byte, error) {
 	if len(wire) < 5 || wire[:4] != CESRMLDSA65Sig {
 		return 0, nil, fmt.Errorf("expected %s indexed sig", CESRMLDSA65Sig)
 	}
-	index := b64ToInt(string(wire[4]))
-	raw, err := base64.RawURLEncoding.DecodeString(wire[5:])
+	index, err := b64ToInt(wire[4:5])
+	if err != nil {
+		return 0, nil, fmt.Errorf("signature index: %w", err)
+	}
+	// Not qb64: the provisional encoding puts raw base64url straight after the
+	// code and index, with no lead bytes, so DecodeQB64 does not apply. 3309
+	// bytes are a whole number of base64 groups, so there are no spare bits;
+	// what keeps it to one string is the exact length and the alphabet, which
+	// also refuses the line breaks the decoder would skip.
+	body := wire[5:]
+	if len(body) != base64.RawURLEncoding.EncodedLen(MLDSA65SigBytes) || !isBase64URL(body) {
+		return 0, nil, fmt.Errorf("an ML-DSA-65 signature is %d base64url characters after its code",
+			base64.RawURLEncoding.EncodedLen(MLDSA65SigBytes))
+	}
+	raw, err := base64.RawURLEncoding.Strict().DecodeString(body)
 	if err != nil {
 		return 0, nil, err
-	}
-	if len(raw) != MLDSA65SigBytes {
-		return 0, nil, fmt.Errorf("decoded sig len %d != %d", len(raw), MLDSA65SigBytes)
 	}
 	return index, raw, nil
 }

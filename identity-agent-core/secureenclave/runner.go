@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"identity-agent-core/iacrypto"
 )
 
 // Runner performs periodic local secure-enclave self-attestation.
@@ -243,7 +245,7 @@ func (r *Runner) Genuineness() EnclaveGenuinenessAxis {
 		}
 	}
 
-	pubRaw, err := base64.RawURLEncoding.DecodeString(rec.PublicKey)
+	pubRaw, err := iacrypto.DecodeBase64URL(rec.PublicKey)
 	if err != nil {
 		return EnclaveGenuinenessAxis{
 			Status:  "failed",
@@ -257,7 +259,7 @@ func (r *Runner) Genuineness() EnclaveGenuinenessAxis {
 			Message: err.Error(),
 		}
 	}
-	sigRaw, err := base64.RawURLEncoding.DecodeString(rec.Signature)
+	sigRaw, err := iacrypto.DecodeBase64URL(rec.Signature)
 	if err != nil {
 		return EnclaveGenuinenessAxis{
 			Status:  "failed",

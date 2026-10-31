@@ -1,8 +1,10 @@
 package drivers
 
 import (
+	"crypto/ed25519"
 	"encoding/base64"
 	"fmt"
+	"math"
 
 	keri "github.com/grapeid/keri-go"
 
@@ -337,19 +339,32 @@ func VerifyReceipt(witnessAID, eventSAID, cesrSig string) error {
 	if witnessAID == "" || eventSAID == "" || cesrSig == "" {
 		return fmt.Errorf("a receipt needs a witness, an event and a signature")
 	}
-	if len(witnessAID) != 44 || witnessAID[0] != 'B' {
+	pub, err := iacrypto.KeyFromNonTransferableAID(witnessAID)
+	if err != nil {
 		return fmt.Errorf("%q is not a non-transferable witness identifier, so its receipts "+
-			"cannot be checked without resolving a key log first", witnessAID)
+			"cannot be checked without resolving a key log first: %w", witnessAID, err)
 	}
 	raw, err := iacrypto.DecodeEd25519SignatureQB64(cesrSig)
 	if err != nil {
 		return fmt.Errorf("the receipt signature does not decode: %w", err)
 	}
-	if err := keri.VerifySignature(witnessAID, []byte(eventSAID), raw); err != nil {
+	if !ed25519.Verify(pub, []byte(eventSAID), raw) {
 		return fmt.Errorf("the receipt was not signed by %s, so that witness did not issue it",
 			witnessAID)
 	}
 	return nil
+}
+
+// WitnessKey is the key a witness identifier is made of, in a form to compare
+// or count by, and false when it is not a canonical non-transferable
+// identifier. Two names for one witness give the same key, so a witness
+// counted by its key is counted once however it is written.
+func WitnessKey(witnessAID string) (string, bool) {
+	pub, err := iacrypto.KeyFromNonTransferableAID(witnessAID)
+	if err != nil {
+		return "", false
+	}
+	return string(pub), true
 }
 
 // WitnessingOf reports, for one event of a key log, who was designated to
@@ -373,17 +388,26 @@ func WitnessingOf(in ValidateKELInput, eventSAID string) (EventWitnessing, bool)
 // and adding; everything else leaves it alone. Reading only the inception would
 // report a set the identity has since changed, and reading only the latest
 // event would report nothing for the events before it.
+//
+// It fails closed. The set and threshold at any event depend on every event
+// before it, so once one cannot be read — an event that does not parse, or an
+// establishment event whose witness threshold is missing or too large to hold
+// — nothing from there on can say who its witnesses are, and that event and
+// every later one is reported as not met. Carrying on would inherit the
+// previous threshold, which at inception is zero and always met.
 func witnessingReport(in ValidateKELInput) ([]EventWitnessing, bool) {
 	var (
 		designated []string
 		threshold  int
 		report     []EventWitnessing
+		broken     bool
 	)
 	allMet := true
 
 	for _, raw := range in.RawEvents {
 		ev, err := keri.ParseEvent(raw)
 		if err != nil {
+			broken, allMet = true, false
 			continue
 		}
 		switch ev.Ilk {
@@ -392,8 +416,12 @@ func witnessingReport(in ValidateKELInput) ([]EventWitnessing, bool) {
 		case "rot", "drt":
 			designated = amendWitnesses(designated, ev.WitnessCut, ev.WitnessAdd)
 		}
-		if ev.HasTOAD {
-			threshold = int(ev.TOAD)
+		if ev.Establishment() {
+			if !ev.HasTOAD || ev.TOAD > math.MaxInt32 {
+				broken = true
+			} else {
+				threshold = int(ev.TOAD)
+			}
 		}
 
 		row := EventWitnessing{
@@ -403,23 +431,28 @@ func witnessingReport(in ValidateKELInput) ([]EventWitnessing, bool) {
 			Threshold:      threshold,
 		}
 
-		// Count each designated witness at most once. Without that one witness
-		// meets any threshold by sending its receipt repeatedly, which is how a
-		// single party becomes a quorum.
+		// Count each designated witness at most once, by its key. Without that
+		// one witness meets any threshold by sending its receipt repeatedly, or
+		// under a second spelling of its identifier, which is how a single
+		// party becomes a quorum.
 		counted := map[string]bool{}
 		for _, r := range in.Receipts[ev.SAID] {
-			if !contains(designated, r.WitnessAID) || counted[r.WitnessAID] {
+			if !contains(designated, r.WitnessAID) {
+				continue
+			}
+			key, ok := WitnessKey(r.WitnessAID)
+			if !ok || counted[key] {
 				continue
 			}
 			if err := VerifyReceipt(r.WitnessAID, ev.SAID, r.CesrSignature); err != nil {
 				continue
 			}
-			counted[r.WitnessAID] = true
+			counted[key] = true
 			row.Verified++
 		}
 		// A threshold of zero is met by definition — an identity that asked for
 		// no witnesses is not failing to reach them.
-		row.Met = row.Verified >= threshold
+		row.Met = !broken && row.Verified >= threshold
 		if !row.Met {
 			allMet = false
 		}

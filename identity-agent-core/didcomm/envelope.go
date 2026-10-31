@@ -1,9 +1,12 @@
 package didcomm
 
 import (
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"identity-agent-core/iacrypto"
 )
 
 // JWM is the cleartext message body. The router dispatches on Type; Body is
@@ -235,9 +238,8 @@ func verifySigned(pd *parsedDID, sjB []byte) (*JWM, error) {
 	if err := json.Unmarshal(sjB, &sj); err != nil {
 		return nil, errors.New("bad signed jwm")
 	}
-	edSig, _ := b64.DecodeString(sj.EdSig)
-	dsaSig, _ := b64.DecodeString(sj.DsaSig)
-	if !verifyHybrid(pd, signInput(sj.JWM, sj.BodyHash), edSig, dsaSig) {
+	edSig, dsaSig, ok := hybridSignatures(sj.EdSig, sj.DsaSig)
+	if !ok || !verifyHybrid(pd, signInput(sj.JWM, sj.BodyHash), edSig, dsaSig) {
 		return nil, errors.New("signature_invalid")
 	}
 	var jwm JWM
@@ -292,10 +294,24 @@ func UnpackSigned(senderDID *DID, env *Envelope) (*JWM, error) {
 	if err := json.Unmarshal(canonical, &jwm); err != nil {
 		return nil, errors.New("bad jwm")
 	}
-	edSig, _ := b64.DecodeString(env.EdSig)
-	dsaSig, _ := b64.DecodeString(env.DsaSig)
-	if !verifyHybrid(pd, signInput(canonical, blake3Body(jwm.Body)), edSig, dsaSig) {
+	edSig, dsaSig, ok := hybridSignatures(env.EdSig, env.DsaSig)
+	if !ok || !verifyHybrid(pd, signInput(canonical, blake3Body(jwm.Body)), edSig, dsaSig) {
 		return nil, errors.New("signature_invalid")
 	}
 	return &jwm, nil
+}
+
+// hybridSignatures reads the two halves of a hybrid signature, each in
+// unpadded base64url at exactly its size and in its one canonical string, so
+// a signature has one spelling. False when either is not.
+func hybridSignatures(ed, dsa string) (edSig, dsaSig []byte, ok bool) {
+	edSig, err := iacrypto.DecodeBase64URLSized(ed, ed25519.SignatureSize)
+	if err != nil {
+		return nil, nil, false
+	}
+	dsaSig, err = iacrypto.DecodeBase64URLSized(dsa, iacrypto.MLDSA65SigBytes)
+	if err != nil {
+		return nil, nil, false
+	}
+	return edSig, dsaSig, true
 }

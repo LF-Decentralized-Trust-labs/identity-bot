@@ -70,7 +70,10 @@ func verifyEnrolProof(token, publicKey, nextPublicKey, signature string) error {
 	// Otherwise a bare 64-byte signature in whichever encoding the enrolling
 	// machine reached for. A daemon written in Go, a shell script and an SDK do
 	// not naturally agree on an alphabet, and refusing over that would be a
-	// protocol detail masquerading as a security check.
+	// protocol detail masquerading as a security check. Any of the four base64
+	// alphabets or lowercase hex is read, each in its one canonical string:
+	// unwrapped (a line break inside the value is refused, so wrap-free output
+	// such as base64 -w0 is needed) and with zero spare bits.
 	raw, err := decodeEnrolSig(signature)
 	if err != nil {
 		return fmt.Errorf("signature: %w", err)

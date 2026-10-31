@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	keri "github.com/grapeid/keri-go"
@@ -125,6 +126,26 @@ type Signer interface {
 }
 
 var b64 = base64.RawURLEncoding
+
+// signatureOf reads an Ed25519 signature in unpadded base64url, in its one
+// canonical string: exactly 86 characters of the base64url alphabet, with the
+// 4 spare bits of the last one zero. Leniently read, a signature had 16
+// strings, and the standard decoder skipped line breaks inside one.
+//
+// This module is kept free of the core's packages so a URL relay can import it
+// alone, so it cannot use the core's decoder; the rule is the same.
+func signatureOf(s string) ([]byte, error) {
+	if len(s) != b64.EncodedLen(ed25519.SignatureSize) || strings.Trim(s, b64url) != "" {
+		return nil, fmt.Errorf("the signature is not %d bytes in unpadded base64url", ed25519.SignatureSize)
+	}
+	sig, err := b64.Strict().DecodeString(s)
+	if err != nil {
+		return nil, fmt.Errorf("the signature is not in canonical base64url: %w", err)
+	}
+	return sig, nil
+}
+
+const b64url = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
 func randomToken(n int) string {
 	buf := make([]byte, n)
@@ -269,9 +290,9 @@ func (v *Verifier) verify(a Admission, ch Challenge, exporter []byte, now time.T
 	if err != nil {
 		return nil, err
 	}
-	sig, err := b64.DecodeString(a.Signature)
+	sig, err := signatureOf(a.Signature)
 	if err != nil {
-		return nil, fmt.Errorf("the signature is not base64url")
+		return nil, err
 	}
 	body, err := st.canonical()
 	if err != nil {

@@ -95,21 +95,19 @@ func intToB64(i int, length int) string {
 	return string(d)
 }
 
-func b64ToInt(s string) int {
+// b64ToInt reads a count or index written in the base64url alphabet. A
+// character outside it is refused rather than read as zero, which would give
+// every count a second spelling.
+func b64ToInt(s string) (int, error) {
 	n := 0
-	for _, c := range s {
-		n = n*64 + int(bytesIndexRune(b64Chars, c))
-	}
-	return n
-}
-
-func bytesIndexRune(s string, r rune) int {
-	for i, c := range s {
-		if c == r {
-			return i
+	for i := 0; i < len(s); i++ {
+		v := strings.IndexByte(b64Chars, s[i])
+		if v < 0 {
+			return 0, fmt.Errorf("%q is not base64url", s)
 		}
+		n = n*64 + v
 	}
-	return 0
+	return n, nil
 }
 
 // MatterFixedQB64 encodes fixed-size CESR material (keri 1.1.17 Matter._infil).
@@ -202,20 +200,15 @@ func NonTransferableAIDQB64(pub []byte) string {
 // This is the whole reason a witness is named this way: given the identifier
 // written in a key event, a verifier holds the key already and checks a receipt
 // without asking anybody anything.
+//
+// Only the canonical spelling is read (DecodeQB64), so an identifier names
+// exactly one key and a key has exactly one identifier.
 func KeyFromNonTransferableAID(aid string) ([]byte, error) {
-	const code = "B"
-	if len(aid) != 44 || aid[:1] != code {
-		return nil, fmt.Errorf("%q is not a non-transferable identifier", aid)
-	}
-	// One code character, so one leading pad character to realign to base64.
-	raw, err := base64.RawURLEncoding.DecodeString("A" + aid[1:])
+	raw, err := DecodeQB64("B", aid, Ed25519PubkeyBytes)
 	if err != nil {
-		return nil, fmt.Errorf("identifier is not valid base64url: %w", err)
+		return nil, fmt.Errorf("%q is not a non-transferable identifier: %w", aid, err)
 	}
-	if len(raw) != 33 {
-		return nil, fmt.Errorf("expected 32 key bytes, got %d", len(raw)-1)
-	}
-	return raw[1:], nil
+	return raw, nil
 }
 
 // KeyFromVerkeyQB64 recovers the raw Ed25519 key from a CESR verfer (code "D").
@@ -226,24 +219,11 @@ func KeyFromNonTransferableAID(aid string) ([]byte, error) {
 // are a straight prefix. Decoding one with the other's rules yields bytes that
 // are wrong rather than an error, which is the failure worth designing out.
 func KeyFromVerkeyQB64(qb64 string) ([]byte, error) {
-	const code = "D"
-	if len(qb64) != 44 || qb64[:1] != code {
-		return nil, fmt.Errorf("%q is not a CESR Ed25519 verifying key", qb64)
-	}
-	return rawOfOneCharCode(qb64)
-}
-
-// rawOfOneCharCode is the 32 raw bytes of a qb64 value with a one-character
-// code, which takes the place of one pad byte.
-func rawOfOneCharCode(qb64 string) ([]byte, error) {
-	raw, err := base64.RawURLEncoding.DecodeString("A" + qb64[1:])
+	raw, err := DecodeQB64("D", qb64, Ed25519PubkeyBytes)
 	if err != nil {
-		return nil, fmt.Errorf("verifying key is not valid base64url: %w", err)
+		return nil, fmt.Errorf("%q is not a CESR Ed25519 verifying key: %w", qb64, err)
 	}
-	if len(raw) != 33 {
-		return nil, fmt.Errorf("expected 32 key bytes, got %d", len(raw)-1)
-	}
-	return raw[1:], nil
+	return raw, nil
 }
 
 // VerkeyQB64 encodes a raw Ed25519 public key as a CESR qb64 verfer (code "D"). Use this for
@@ -330,15 +310,9 @@ func MachineVerkeyQB64(pub []byte) (string, error) {
 // Kept beside the encoder for the reason its Ed25519 counterpart is: the two
 // have to agree, and the way they stop agreeing is being edited apart.
 func KeyFromMachineAID(aid string) ([]byte, error) {
-	if len(aid) != 48 || aid[:4] != CodeP256N {
-		return nil, fmt.Errorf("%q is not a machine identifier", aid)
-	}
-	raw, err := base64.RawURLEncoding.DecodeString(aid[4:])
+	raw, err := DecodeQB64(CodeP256N, aid, rawSizeForCode[CodeP256N])
 	if err != nil {
-		return nil, fmt.Errorf("machine identifier is not valid base64url: %w", err)
-	}
-	if len(raw) != 33 {
-		return nil, fmt.Errorf("expected a 33-byte compressed point, got %d", len(raw))
+		return nil, fmt.Errorf("%q is not a machine identifier: %w", aid, err)
 	}
 	// VALIDATED, NOT MERELY MEASURED. A 33-byte value of the right length whose
 	// prefix is not 0x02 or 0x03 is not a point on the curve, and letting it
@@ -366,17 +340,8 @@ func IsIdentifierQB64(s string) bool {
 		if !strings.HasPrefix(s, code) {
 			continue
 		}
-		pad := len(code) % 4
-		decoded, err := base64.RawURLEncoding.DecodeString(strings.Repeat("A", pad) + s[len(code):])
-		if err != nil || len(decoded) < pad {
-			return false
-		}
-		raw := decoded[pad:]
-		if len(raw) != rawSizeForCode[code] {
-			return false
-		}
-		again, err := MatterFixedQB64(code, raw)
-		return err == nil && again == s
+		_, err := DecodeQB64(code, s, rawSizeForCode[code])
+		return err == nil
 	}
 	return false
 }

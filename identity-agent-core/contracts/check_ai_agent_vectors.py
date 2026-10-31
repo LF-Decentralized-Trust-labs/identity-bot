@@ -39,8 +39,35 @@ def b64url(raw):
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
 
 
+B64URL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+
+
 def unb64url(s):
-    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+    """Unpadded base64url, read only in its one canonical string, as the Go
+    code reads it: the base64url alphabet alone and zero spare bits in the last
+    character. Python's decoder discards spare bits and, without validation,
+    characters outside the alphabet, so it is checked by re-encoding."""
+    if any(c not in B64URL for c in s) or len(s) % 4 == 1:
+        raise ValueError("%r is not unpadded base64url" % s)
+    raw = base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+    if b64url(raw) != s:
+        raise ValueError("%r is not the canonical base64url of its bytes" % s)
+    return raw
+
+
+def qb64_raw(code, s, size):
+    """The size raw bytes of a fixed-size qb64 value under code, read only in its
+    canonical string: exactly the right length, base64url, and zero lead bytes.
+    The lead bytes are (3 - size % 3) % 3 zero bytes in front of the value; the
+    code stands in for the first len(code) % 4 characters they produce."""
+    lead = (3 - size % 3) % 3
+    stood = len(code) % 4
+    if not s.startswith(code) or len(s) != len(code) - stood + (lead + size) // 3 * 4:
+        raise ValueError("%r is not a %d-byte %s value" % (s, size, code))
+    padded = unb64url("A" * stood + s[len(code):])
+    if len(padded) != lead + size or any(padded[:lead]):
+        raise ValueError("%r is not in canonical qb64" % s)
+    return padded[lead:]
 
 
 def digest(data):
@@ -137,7 +164,7 @@ def check_body(v):
     p = v["p256"]
     for name, sig, low in (("signature", p["signature"], True), ("refused_signature", p["refused_signature"], False)):
         same("p256 %s code" % name, sig[:2], "0I")
-        raw = unb64url("AA" + sig[2:])[2:]
+        raw = qb64_raw("0I", sig, 64)
         s = int.from_bytes(raw[32:], "big")
         if (s <= P256_N // 2) != low:
             fail("p256 %s is %s-s" % (name, "high" if low else "low"))

@@ -2998,7 +2998,7 @@ func (s *CoreServer) handleGetKERL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	thresholdMet := threshold == 0 || len(receipts) >= threshold
+	counted, thresholdMet := s.receiptsAgainstOwnLog(eventSAID, receipts, threshold)
 
 	type receiptEntry struct {
 		WitnessAID    string `json:"witness_aid"`
@@ -3018,7 +3018,7 @@ func (s *CoreServer) handleGetKERL(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"event_said":    eventSAID,
 		"receipts":      entries,
-		"receipt_count": len(receipts),
+		"receipt_count": counted,
 		"threshold_met": thresholdMet,
 	})
 }
