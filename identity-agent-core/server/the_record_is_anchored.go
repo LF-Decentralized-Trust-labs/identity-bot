@@ -977,8 +977,7 @@ func witnessedEnough(ds store.Store, eventSAID string, witnesses []string, toad 
 }
 
 // witnessesWhoReceipted counts the witnesses with a receipt for eventSAID
-// that verifies, each once, and only those in designated when it is given.
-// With designated nil any verifying witness counts, designated or not.
+// that verifies, each once, and only those in designated.
 //
 // Counted by key, not by the text of the identifier, so one witness is one
 // vote however it is written, and by verified receipt rather than stored
@@ -986,7 +985,7 @@ func witnessedEnough(ds store.Store, eventSAID string, witnesses []string, toad 
 func witnessesWhoReceipted(eventSAID string, receipts []store.WitnessReceiptRecord, designated map[string]bool) int {
 	seen := map[string]bool{}
 	for _, r := range receipts {
-		if designated != nil && !designated[r.WitnessAID] {
+		if !designated[r.WitnessAID] {
 			continue
 		}
 		key, ok := drivers.WitnessKey(r.WitnessAID)

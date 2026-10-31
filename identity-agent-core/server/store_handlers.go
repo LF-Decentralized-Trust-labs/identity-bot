@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/drivers"
 	"identity-agent-core/store"
 )
 
@@ -64,6 +65,10 @@ func (s *CoreServer) handleStoreReceipt(w http.ResponseWriter, r *http.Request) 
 // handleGetStoreReceipts retrieves all stored witness receipts for an event SAID.
 //
 // GET /api/store/receipts?event_said=<SAID>&threshold=<int>
+//
+// receipt_count and threshold_met are judged as receiptsAgainstOwnLog says:
+// designated witnesses only, once each, against at least the event's own
+// threshold. Every stored receipt is still listed.
 func (s *CoreServer) handleGetStoreReceipts(w http.ResponseWriter, r *http.Request) {
 	eventSAID := r.URL.Query().Get("event_said")
 	if eventSAID == "" {
@@ -81,7 +86,7 @@ func (s *CoreServer) handleGetStoreReceipts(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	thresholdMet := threshold == 0 || witnessesWhoReceipted(eventSAID, receipts, nil) >= threshold
+	counted, thresholdMet := s.receiptsAgainstOwnLog(eventSAID, receipts, threshold)
 
 	type entry struct {
 		WitnessAID    string `json:"witness_aid"`
@@ -101,7 +106,7 @@ func (s *CoreServer) handleGetStoreReceipts(w http.ResponseWriter, r *http.Reque
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"event_said":    eventSAID,
 		"receipts":      entries,
-		"receipt_count": len(receipts),
+		"receipt_count": counted,
 		"threshold_met": thresholdMet,
 	})
 }
@@ -148,4 +153,35 @@ func (s *CoreServer) handleStoreCredential(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{"status": "saved", "said": req.SAID})
+}
+
+// receiptsAgainstOwnLog counts the designated witnesses of eventSAID, in this
+// identity's own key log, whose receipt among receipts verifies, each once by
+// its key, and reports whether that meets the threshold.
+//
+// The witnesses and the threshold come from the event, never from the caller.
+// A caller's threshold is honoured only when it asks for more than the event
+// does: a lower one would let a caller declare an event witnessed that its
+// own witnesses have not, and a receipt from a witness the event never named
+// is no vote however well it verifies. An event that is not in this
+// identity's log has no designated witnesses, so nothing counts.
+func (s *CoreServer) receiptsAgainstOwnLog(eventSAID string, receipts []store.WitnessReceiptRecord, callerThreshold int) (counted int, met bool) {
+	in, found := s.ownLogWithReceipts(eventSAID)
+	if !found {
+		return 0, false
+	}
+	in.Receipts = map[string][]drivers.WitnessReceipt{}
+	for _, r := range receipts {
+		in.Receipts[eventSAID] = append(in.Receipts[eventSAID],
+			drivers.WitnessReceipt{WitnessAID: r.WitnessAID, CesrSignature: r.CesrSignature})
+	}
+	row, found := drivers.WitnessingOf(in, eventSAID)
+	if !found {
+		return 0, false
+	}
+	need := row.Threshold
+	if callerThreshold > need {
+		need = callerThreshold
+	}
+	return row.Verified, row.Verified >= need
 }

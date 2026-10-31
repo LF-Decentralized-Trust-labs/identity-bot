@@ -35,9 +35,6 @@ func TestAWitnessUnderTwoSpellingsIsCountedOnce(t *testing.T) {
 		{EventSAID: said, WitnessAID: other, CesrSignature: sig},
 		{EventSAID: said, WitnessAID: aid, CesrSignature: sig},
 	}
-	if n := witnessesWhoReceipted(said, receipts, nil); n != 1 {
-		t.Fatalf("one witness was counted %d times", n)
-	}
 	designated := map[string]bool{aid: true, other: true}
 	if n := witnessesWhoReceipted(said, receipts, designated); n != 1 {
 		t.Fatalf("one witness designated under two spellings was counted %d times", n)
