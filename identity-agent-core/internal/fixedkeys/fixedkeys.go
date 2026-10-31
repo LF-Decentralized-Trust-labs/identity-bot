@@ -12,10 +12,10 @@ package fixedkeys
 
 import (
 	"crypto/ed25519"
-	"encoding/hex"
 	"fmt"
 
 	"identity-agent-core/didcomm"
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/internal/vectorseeds"
 
 	"github.com/cloudflare/circl/kem/mlkem/mlkem768"
@@ -56,9 +56,9 @@ func KeySet(aid string, s vectorseeds.Seeds) (*didcomm.KeySet, error) {
 }
 
 func seed(h string, size int, name string) ([]byte, error) {
-	b, err := hex.DecodeString(h)
+	b, err := iacrypto.DecodeHex(h)
 	if err != nil || len(b) != size {
-		return nil, fmt.Errorf("the %s seed must be %d bytes, hex", name, size)
+		return nil, fmt.Errorf("the %s seed must be %d bytes, lowercase hex", name, size)
 	}
 	return b, nil
 }

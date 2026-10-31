@@ -93,3 +93,11 @@ func TestOnlyTheListedMeasurementsAreAccepted(t *testing.T) {
 		t.Error("a truncated measurement matched a listed one")
 	}
 }
+
+// A measurement is read in lowercase hex only, the case the image build
+// prints it in.
+func TestAnUppercaseMeasurementIsRefused(t *testing.T) {
+	if _, err := parseMeasurements([]string{strings.ToUpper(aMeasurement(0xab))}); err == nil {
+		t.Fatal("an uppercase measurement was accepted")
+	}
+}

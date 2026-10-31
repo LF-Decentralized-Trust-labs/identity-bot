@@ -2,11 +2,11 @@ package server
 
 import (
 	"encoding/base64"
-	"encoding/hex"
 	"net/http"
 	"os"
 	"time"
 
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/volume"
 )
 
@@ -134,7 +134,7 @@ func (s *CoreServer) handleAttestationLineage(w http.ResponseWriter, r *http.Req
 		// Whether the software it started is software this owner accepts. An
 		// empty policy stays unknown rather than becoming a pass — the same
 		// refusal the adoption gate makes.
-		if raw, err := hex.DecodeString(att.Measurement); err == nil && len(raw) > 0 {
+		if raw, err := iacrypto.DecodeHex(att.Measurement); err == nil && len(raw) > 0 {
 			if len(s.AcceptedMeasurements) == 0 {
 				out.MeasurementMatchesExpected = ProofUnknown
 			} else if s.acceptableMeasurement(raw) {

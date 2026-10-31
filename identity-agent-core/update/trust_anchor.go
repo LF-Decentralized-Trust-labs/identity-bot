@@ -2,12 +2,12 @@ package update
 
 import (
 	"crypto/ed25519"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"strings"
 
 	"identity-agent-core/buildmode"
+	"identity-agent-core/iacrypto"
 )
 
 // DefaultSigningKeyID is the compiled-in release key identifier for a
@@ -89,15 +89,15 @@ func DefaultTrustAnchor() (*TrustAnchor, error) {
 	if hexKey == "" {
 		return nil, ErrNoReleaseKey
 	}
-	if which, published := publishedTestKeys[strings.ToLower(hexKey)]; published {
+	if which, published := publishedTestKeys[hexKey]; published {
 		return nil, fmt.Errorf(
 			"the release signing key for this build is %s, a published test vector whose "+
 				"private key anybody can read — an update signed by anyone at all would verify "+
 				"against it. Supply a real release key", which)
 	}
-	raw, err := hex.DecodeString(hexKey)
+	raw, err := iacrypto.DecodeHex(hexKey)
 	if err != nil {
-		return nil, fmt.Errorf("the release signing key is not hex: %w", err)
+		return nil, fmt.Errorf("the release signing key is not lowercase hex: %w", err)
 	}
 	if len(raw) != ed25519.PublicKeySize {
 		return nil, fmt.Errorf("a release signing key is %d bytes, got %d",

@@ -4,7 +4,6 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -163,7 +162,7 @@ func VerifyArtifactBytes(data []byte, art Artifact, checkSHA256Interop bool) err
 	if int64(len(data)) != art.SizeBytes {
 		return fmt.Errorf("%w: size mismatch got %d want %d", ErrChecksumMismatch, len(data), art.SizeBytes)
 	}
-	wantBlake, err := hex.DecodeString(art.Blake3_256)
+	wantBlake, err := iacrypto.DecodeHex(art.Blake3_256)
 	if err != nil {
 		return fmt.Errorf("%w: invalid blake3_256 hex", ErrChecksumMismatch)
 	}
@@ -172,7 +171,7 @@ func VerifyArtifactBytes(data []byte, art Artifact, checkSHA256Interop bool) err
 		return ErrChecksumMismatch
 	}
 	if checkSHA256Interop && art.SHA256 != "" {
-		wantSHA, err := hex.DecodeString(art.SHA256)
+		wantSHA, err := iacrypto.DecodeHex(art.SHA256)
 		if err != nil {
 			return fmt.Errorf("invalid sha256 hex")
 		}
