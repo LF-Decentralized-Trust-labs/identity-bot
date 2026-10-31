@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-10-31
-**Relates to:** ADR-015 (Mobile KERI service architecture, whose receipt routes report `threshold_met`), ADR-049 (One signing form for every service provider request)
+**Relates to:** ADR-031 (Who witnesses what, whose receipts this counts), ADR-049 (One signing form for every service provider request)
 
 ## Context
 
@@ -42,8 +42,8 @@ UNhY4JhezH9gQYqvDMWrWH9CwlcKiECVqejMrND2VFw    spare bits 00, the only one accep
 UNhY4JhezH9gQYqvDMWrWH9CwlcKiECVqejMrND2VFx    spare bits 01
 ```
 
-**Line breaks.** Standard base64 decoders skip `\r` and `\n` anywhere in the
-string.
+**Line breaks.** Go's and Python's default base64 decoders skip `\r` and
+`\n` anywhere in the string.
 
 **Hex case.** `50d858e0…` and `50D858E0…` are the same bytes.
 
@@ -58,28 +58,55 @@ in.** A string that only a lenient decoder would read is refused.
 - **qb64** (keys, identifiers, signatures, indexed signatures): the exact
   length for its code, base64url only, and every lead bit zero. This is the
   form keripy and keri-go both write. `iacrypto.DecodeQB64` reads it, and
-  keri-go reads every CESR value the same way.
-- **Raw base64 where a format names unpadded base64url** (signatures on
-  DIDComm messages, activity log records, hardware-signer attestations, URL
-  relay admissions): only that alphabet, no padding, no line breaks, and zero
-  spare bits. `iacrypto.DecodeBase64URL` and `DecodeBase64URLSized` read it.
-- **Raw keys in a field that accepts more than one base64 spelling** (because
-  different languages write different ones): each of the four spellings
-  (base64url or standard alphabet, padded or not) is read strictly, at the
-  exact size, with zero spare bits and no line breaks. `iacrypto.DecodeSized`
-  reads it. A key may still arrive in more than one of those spellings, so
-  code that compares keys from such a field compares the decoded bytes, never
-  the text.
-- **Hex:** lowercase only.
-- **Counts in a KERI event:** lowercase hex with no leading zeros (`"0"` is
-  zero). An event with an unreadable count is refused, not read as if the
-  count were missing.
+  keri-go reads every CESR value the same way. An indexed ML-DSA-65
+  signature, whose provisional encoding puts raw base64url after its code and
+  index with no lead bytes, is read at exactly its length and in base64url
+  only (`iacrypto.DecodeIndexedMLDSASig`).
+- **Raw keys and signatures where a format names unpadded base64url**
+  (signatures and keys on DIDComm messages, activity log records, the stored
+  hardware-signer attestation and its public key, the sealing keys an AI
+  agent's body declares, update manifests and their signing keys, URL relay
+  admissions): only that alphabet, no padding, no line breaks, and zero spare
+  bits. `iacrypto.DecodeBase64URL` and `DecodeBase64URLSized` read it. URL
+  relay admission applies the same rule in its own `signatureOf`, because
+  `relayproto` is a module a URL relay imports on its own, without the core.
+- **Raw keys and signatures in a field that accepts more than one base64
+  spelling** (because different languages write different ones): each of the
+  four spellings (base64url or standard alphabet, padded or not) is read
+  strictly, at the exact size, with zero spare bits and no line breaks.
+  `iacrypto.DecodeSized` reads it. A key may still arrive in more than one of
+  those spellings, so code that compares keys from such a field compares the
+  decoded bytes, never the text.
+- **Hex:** lowercase only, through `iacrypto.DecodeHex`. A machine identity
+  is compared as text, so this is what keeps one machine from being two.
+- **Counts:** lowercase hex with no leading zeros (`"0"` is zero), no larger
+  than the reader can hold. keri-go reads the counts in an event this way and
+  refuses an event with an unreadable one rather than reading it as if the
+  count were missing. A sequence number the core reads itself goes through
+  `iacrypto.ParseHexCount`; `witnessproto`, which stands alone, applies the
+  same rule and refuses a JSON number.
+- **Whitespace** is not part of any spelling. A key or signature that is
+  decoded is read exactly as it arrives, and whitespace around it is
+  refused. It is trimmed before decoding only where a person types the
+  value: the release key given in the environment or at build time, and the
+  accepted launch measurements in configuration.
 
-**Witnesses are compared by key.** A witness list that names one witness
-twice, under any spelling, is refused. A receipt counts toward an event's
-threshold only when it comes from a witness that event names, verifies, and
-comes from a witness not already counted. If a key log's witness threshold
-cannot be read, the event reports its threshold as not met.
+**Witnesses are compared by key.** keri-go refuses to build or validate a
+witness list (or a credential registry's backers) that names one witness
+twice, under any spelling, or that names one by anything but a canonical
+non-transferable identifier. The core counts by key and ignores a receipt
+under a name that is not canonical.
+
+A receipt counts toward an event's threshold only when it comes from a
+witness designated at that event, verifies, and comes from a witness not
+already counted. The designated witnesses are named at inception and
+amended by each rotation; an interaction event is witnessed by the set in
+force at it. The threshold is the key log's own, and a threshold of zero
+needs no receipt. Every receipt route and the record check use the one
+counter that does this. Where the log cannot say who the witnesses are (an
+event that does not parse, or an establishment event whose witness
+threshold is missing or unreadable), that event and every later one report
+their threshold as not met.
 
 ## Consequences
 
@@ -87,7 +114,11 @@ cannot be read, the event reports its threshold as not met.
   as comparing their bytes. A value cannot be counted twice, stored twice, or
   slip past a duplicate check by being respelled.
 - Everything this implementation, keri-go and keripy write is already in the
-  accepted string, so nothing they produce stops reading.
+  accepted string, so nothing they produce stops reading. That was checked
+  producer by producer: keys and signatures are written by the qb64 encoders
+  and `RawURLEncoding`, update manifests by `EncodeBase64URL`, hex by Go's
+  `hex.EncodeToString`, and counts by keri-go and keripy, all of which write
+  the canonical form.
 - A value written in a non-canonical string by some other producer is refused.
   That includes a stored record. The producer has to write the canonical form.
 - Another implementation that checks values received from this one can rely
