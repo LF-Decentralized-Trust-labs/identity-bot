@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"identity-agent-core/authprovider"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -716,6 +717,17 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 	for name, raw := range payload.Bundle.Sections {
 		rel, ok := backup.FilePathOfSection(name)
 		if !ok {
+			continue
+		}
+		// Never a path the backup deliberately leaves out, whatever an archive
+		// says: which machines may act, which tokens are good and which bodies
+		// are an AI agent's are decided after a restore, not restored, and the
+		// identity database comes back only through its own section, migrated
+		// and checked. The same list the backup leaves them out by, so the two
+		// cannot drift. Passed over rather than refused, so an archive written
+		// before a rule was added still restores.
+		if why := backup.NotRestored(rel); why != "" {
+			log.Printf("[recovery] not restoring %s from the archive: %s", filepath.ToSlash(rel), why)
 			continue
 		}
 		if err := backup.RestoreFile(s.DataDir, rel, raw); err != nil {

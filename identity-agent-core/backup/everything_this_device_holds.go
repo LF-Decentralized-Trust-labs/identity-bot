@@ -354,3 +354,10 @@ func FilePathOfSection(name string) (string, bool) {
 	}
 	return clean, true
 }
+
+// NotRestored says why a restore leaves rel alone, or "" when it puts it
+// back: whatever the backup deliberately leaves out is never written by a
+// restore either, whatever an archive carries. One list for both, skipReason.
+func NotRestored(rel string) string {
+	return skipReason(rel)
+}
