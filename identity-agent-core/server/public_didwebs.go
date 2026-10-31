@@ -552,8 +552,20 @@ func (s *CoreServer) publicDidWebsPubKey(aid string) string {
 			}
 			// An asset that brought its own key: the public half was recorded at
 			// enrolment and the private half never reached us. Authoritative.
+			//
+			// Recorded as the machine sent it, which may be qb64 or hex, while
+			// every caller of this function takes 32 bytes in unpadded base64url:
+			// the DID document publishes it as a JWK "x", and signed-request
+			// verification decodes it in that spelling. So it is read here, once,
+			// and handed on in the one spelling. A recorded key that does not
+			// read is no key, never a string passed through for someone else to
+			// misread.
 			if a.PublicKey != "" {
-				return a.PublicKey
+				raw, err := login.DecodeVerkey(a.PublicKey)
+				if err != nil {
+					return ""
+				}
+				return base64.RawURLEncoding.EncodeToString(raw)
 			}
 			// An asset whose key we derive from the owner's seed. Also authoritative,
 			// and cheaper to trust than anything published over the wire.

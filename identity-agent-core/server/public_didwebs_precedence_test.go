@@ -1,9 +1,14 @@
 package server
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
 	"testing"
 
 	"identity-agent-core/asset"
+	"identity-agent-core/iacrypto"
 )
 
 // The endpoint that writes this map is unauthenticated, and has to be: a pairwise
@@ -27,9 +32,14 @@ func serverWithAsset(t *testing.T, a asset.Asset) *CoreServer {
 
 func TestSelfRegisteredKeyCannotOverrideOurOwnAsset(t *testing.T) {
 	const aid = "EOurOwnProvisionedAgentAID"
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorded := base64.RawURLEncoding.EncodeToString(pub)
 	s := serverWithAsset(t, asset.Asset{
 		ID: "a1", AssetType: "ai_agent", PairwiseAID: aid,
-		PublicKey: "the-real-key-recorded-at-enrolment",
+		PublicKey: recorded,
 	})
 
 	// An attacker who knows the AID publishes a key of their own choosing.
@@ -42,7 +52,7 @@ func TestSelfRegisteredKeyCannotOverrideOurOwnAsset(t *testing.T) {
 		pairwiseKeys.Unlock()
 	})
 
-	if got := s.publicDidWebsPubKey(aid); got != "the-real-key-recorded-at-enrolment" {
+	if got := s.publicDidWebsPubKey(aid); got != recorded {
 		t.Fatalf("a self-registered key overrode our own record: got %q", got)
 	}
 }
@@ -87,5 +97,40 @@ func TestAStrangerIsStillAnsweredFromTheRegistry(t *testing.T) {
 
 	if got := s.publicDidWebsPubKey(aid); got != "their-published-key" {
 		t.Fatalf("an unknown AID should still resolve from the registry, got %q", got)
+	}
+}
+
+// An enrolling machine sends its key as qb64, or as hex, and the record keeps
+// what it sent. Everything downstream takes 32 bytes in unpadded base64url: the
+// DID document publishes the key as a JWK "x", which RFC 8037 defines as
+// exactly that, and signed-request verification decodes it in that spelling.
+// Passing the recorded string through published a qb64 key as a JWK and left a
+// machine enrolled in hex unable to sign a request at all.
+func TestARecordedAssetKeyIsAnsweredInOneSpelling(t *testing.T) {
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := base64.RawURLEncoding.EncodeToString(pub)
+	for name, recorded := range map[string]string{
+		"qb64":      iacrypto.VerkeyQB64(pub),
+		"hex":       hex.EncodeToString(pub),
+		"base64url": want,
+	} {
+		t.Run(name, func(t *testing.T) {
+			const aid = "EAMachineThatBroughtItsOwnKey"
+			s := serverWithAsset(t, asset.Asset{ID: "m1", PairwiseAID: aid, PublicKey: recorded})
+			if got := s.publicDidWebsPubKey(aid); got != want {
+				t.Fatalf("recorded as %s %q, answered %q, want %q", name, recorded, got, want)
+			}
+		})
+	}
+}
+
+func TestARecordedAssetKeyThatDoesNotReadAnswersNothing(t *testing.T) {
+	const aid = "EAMachineWithAnUnreadableKey"
+	s := serverWithAsset(t, asset.Asset{ID: "m2", PairwiseAID: aid, PublicKey: "not-a-key"})
+	if got := s.publicDidWebsPubKey(aid); got != "" {
+		t.Fatalf("an unreadable recorded key must answer nothing, got %q", got)
 	}
 }
