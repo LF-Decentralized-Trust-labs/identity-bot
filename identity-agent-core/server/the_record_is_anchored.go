@@ -982,11 +982,11 @@ func sealsDigest(ev map[string]interface{}, digest string) bool {
 // re-derived from it can match.
 func thresholdOf(v interface{}) int {
 	s, _ := v.(string)
-	n, err := strconv.ParseInt(s, 16, 32)
-	if err != nil || n < 0 || strconv.FormatInt(n, 16) != s {
+	n, err := iacrypto.ParseHexCount(s)
+	if err != nil {
 		return -1
 	}
-	return int(n)
+	return n
 }
 
 // askWitnessesToCoverTheRecord asks the identity's witnesses, by the ordinary
