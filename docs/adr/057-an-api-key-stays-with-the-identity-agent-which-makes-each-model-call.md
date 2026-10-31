@@ -25,6 +25,10 @@ the Identity Agent adds the key.
 **Every request below is sealed and signed** by the body, as everything it
 sends the Identity Agent is (ADR-047).
 
+The exchange is published as
+`identity-agent-core/contracts/model-call/model-call.schema.json`, with worked
+examples in `identity-agent-core/modelcall/model-call-vectors.json`.
+
 ### Starting a call: `POST /api/agent-host/model-calls`
 
 ```json
@@ -128,4 +132,3 @@ never lent the key.
 - Under an allowance, a brain whose program does not say how long an answer it
   wants is refused until it does, and the AI agent's calls run one after
   another rather than together.
-- Test vectors for this exchange are not published yet.
