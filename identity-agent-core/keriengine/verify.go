@@ -50,32 +50,15 @@ func signatureBytes(signature string) ([]byte, error) {
 	if signature == "" {
 		return nil, fmt.Errorf("no signature was supplied")
 	}
-	// CESR: a two-character code and 86 characters of payload.
-	if len(signature) == 88 && signature[:2] == keri.CodeEd25519Sig {
-		raw, err := keri.MatterRaw(keri.CodeEd25519Sig, signature, 64)
-		if err != nil {
-			return nil, fmt.Errorf("the signature looks like CESR and does not decode as it: %w", err)
-		}
-		return raw, nil
-	}
-	raw, err := iacrypto.DecodeBase64(signature)
-	if err != nil {
-		return nil, fmt.Errorf("the signature is neither CESR nor base64: %w", err)
-	}
-	if len(raw) != 64 {
-		return nil, fmt.Errorf("a signature decodes to %d bytes; Ed25519 signatures are 64", len(raw))
-	}
-	return raw, nil
+	raw, _, _, err := iacrypto.DecodeEd25519Signature(signature, false)
+	return raw, err
 }
 
 // CesrEncode wraps a raw signature in its CESR form.
 func (e *Engine) CesrEncode(rawSigB64 string) (*drivers.DriverCesrEncodeResponse, error) {
-	raw, err := iacrypto.DecodeBase64(rawSigB64)
+	raw, err := iacrypto.DecodeSized(rawSigB64, 64, false)
 	if err != nil {
-		return nil, fmt.Errorf("the signature is not base64: %w", err)
-	}
-	if len(raw) != 64 {
-		return nil, fmt.Errorf("a signature decodes to %d bytes; Ed25519 signatures are 64", len(raw))
+		return nil, fmt.Errorf("the signature is not 64 bytes in base64: %w", err)
 	}
 	qb64, err := keri.MatterQB64(keri.CodeEd25519Sig, raw)
 	if err != nil {

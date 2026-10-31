@@ -89,7 +89,7 @@ func errProofMismatch() error {
 func decodeEnrolSig(s string) ([]byte, error) {
 	raw, err := iacrypto.DecodeSized(strings.TrimSpace(s), ed25519.SignatureSize, true)
 	if err != nil {
-		return nil, fmt.Errorf("not a recognisable Ed25519 signature (want %d bytes, CESR-qualified, "+
+		return nil, fmt.Errorf("not a recognisable Ed25519 signature (want %d raw bytes in "+
 			"base64 or hex)", ed25519.SignatureSize)
 	}
 	return raw, nil

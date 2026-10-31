@@ -214,19 +214,13 @@ func VerifyHybridSignature(
 }
 
 func decodeEd25519SigerRaw(sigerQB64 string) ([]byte, error) {
-	if len(sigerQB64) != 88 || sigerQB64[0] != 'B' {
+	// The current-list code, B. The index is not consulted: the composite
+	// carries one Ed25519 signature, from the one Ed25519 key.
+	code, _, raw, err := DecodeIndexedEd25519SignatureQB64(sigerQB64)
+	if err != nil || code != 'B' {
 		return nil, fmt.Errorf("invalid Ed25519 indexed sig")
 	}
-	ps := (3 - (Ed25519SigBytes % 3)) % 3
-	prefix := intToB64(0, ps)
-	padded, err := base64.RawURLEncoding.DecodeString(prefix + sigerQB64[2:])
-	if err != nil {
-		return nil, err
-	}
-	if len(padded) < Ed25519SigBytes {
-		return nil, fmt.Errorf("ed25519 sig len %d", len(padded))
-	}
-	return padded[len(padded)-Ed25519SigBytes:], nil
+	return raw, nil
 }
 
 // C2SigningVerkeys returns deterministic Ed25519 + ML-DSA-65 verification key bytes.

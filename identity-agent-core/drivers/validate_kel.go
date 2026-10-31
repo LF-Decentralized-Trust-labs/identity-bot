@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	keri "github.com/grapeid/keri-go"
+
+	"identity-agent-core/iacrypto"
 )
 
 // Validating a key log from the bytes it was actually published as.
@@ -231,40 +233,22 @@ func ValidateKELFromBytes(in ValidateKELInput) (*DriverValidateKELResponse, erro
 // indexed one (A…) is what appears in a published stream, where the index says
 // which of several keys signed.
 func decodeCesrSignature(sig string) ([]byte, error) {
-	switch {
-	case len(sig) == 88 && sig[:2] == keri.CodeEd25519Sig:
-		raw, err := keri.MatterRaw(keri.CodeEd25519Sig, sig, 64)
-		if err != nil {
-			return nil, fmt.Errorf("the signature looks unindexed and does not decode: %w", err)
-		}
-		return raw, nil
-	case len(sig) == 88 && sig[0] == 'A':
-		// Indexed: a one-character code, one character of index, then payload.
-		// The index selects a key; only single-key logs are checked here, so
-		// the only index that names a key that exists is the first.
-		if sig[1] != 'A' {
-			return nil, fmt.Errorf("the signature is indexed to key %q, and only the first key "+
-				"exists in a single-key log", sig[1:2])
-		}
-		raw, err := base64.RawURLEncoding.DecodeString("AA" + sig[2:])
-		if err != nil {
-			return nil, fmt.Errorf("the signature looks indexed and does not decode: %w", err)
-		}
-		if len(raw) < 64 {
-			return nil, fmt.Errorf("an indexed signature decodes to %d bytes, not 64", len(raw))
-		}
-		return raw[len(raw)-64:], nil
-	default:
-		raw, err := base64.StdEncoding.DecodeString(sig)
-		if err != nil {
-			return nil, fmt.Errorf("the signature is not a form this understands")
-		}
-		if len(raw) != 64 {
-			return nil, fmt.Errorf("a signature decodes to %d bytes; Ed25519 signatures are 64",
-				len(raw))
-		}
-		return raw, nil
+	raw, index, indexed, err := iacrypto.DecodeEd25519Signature(sig, true)
+	if err != nil {
+		return nil, err
 	}
+	// Of the indexed forms, the one a published stream carries: A, the key at
+	// that index in both key lists.
+	if indexed && sig[0] != 'A' {
+		return nil, fmt.Errorf("the signature is indexed with code %q, which is not read here", sig[:1])
+	}
+	// The index selects a key; only single-key logs are checked here, so the
+	// only index that names a key that exists is the first.
+	if indexed && index != 0 {
+		return nil, fmt.Errorf("the signature is indexed to key %q, and only the first key "+
+			"exists in a single-key log", sig[1:2])
+	}
+	return raw, nil
 }
 
 // DecodeRawEvents turns the base64 wire form into bytes, reporting which entry
@@ -357,7 +341,7 @@ func VerifyReceipt(witnessAID, eventSAID, cesrSig string) error {
 		return fmt.Errorf("%q is not a non-transferable witness identifier, so its receipts "+
 			"cannot be checked without resolving a key log first", witnessAID)
 	}
-	raw, err := keri.MatterRaw(keri.CodeEd25519Sig, cesrSig, 64)
+	raw, err := iacrypto.DecodeEd25519SignatureQB64(cesrSig)
 	if err != nil {
 		return fmt.Errorf("the receipt signature does not decode: %w", err)
 	}
