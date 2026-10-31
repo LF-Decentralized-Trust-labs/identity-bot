@@ -132,14 +132,14 @@ func NewKey() ([]byte, error) {
 // EncodeKey is a key in the form KeyEnv carries.
 func EncodeKey(k []byte) string { return base64.RawURLEncoding.EncodeToString(k) }
 
-// DecodeKey reads a key in the form KeyEnv carries.
+// DecodeKey reads a key in the form KeyEnv carries, exactly as EncodeKey
+// writes it: unpadded base64url at exactly KeySize, its spare bits zero, and
+// nothing around it. The Identity Agent sets it when it launches the app, so
+// no person types it and nothing is trimmed.
 func DecodeKey(s string) ([]byte, error) {
-	k, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(s))
+	k, err := iacrypto.DecodeBase64URLSized(s, KeySize)
 	if err != nil {
-		return nil, fmt.Errorf("the call key is not base64url: %w", err)
-	}
-	if len(k) != KeySize {
-		return nil, fmt.Errorf("the call key is %d bytes, not %d", len(k), KeySize)
+		return nil, fmt.Errorf("the call key is not %d bytes in canonical base64url: %w", KeySize, err)
 	}
 	return k, nil
 }
