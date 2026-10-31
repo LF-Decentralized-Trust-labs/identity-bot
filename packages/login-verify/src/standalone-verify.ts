@@ -57,8 +57,9 @@ export const DEFAULT_MAX_SKEW_SECONDS = 300;
 export const LONGEST_MAX_SKEW_SECONDS = 3600;
 
 /** The freshness window in seconds that `maxSkewSeconds` asks for, by the
- *  core's rules: none, zero or less is the default, more than the longest is
- *  the longest. Anything but a whole number is refused (null): every
+ *  core's rules: undefined, zero or less is the default, more than the
+ *  longest is the longest. Anything but a whole number is refused, `null`
+ *  included (the function returns null for a refusal): every
  *  comparison with NaN is false, so "abc", NaN or Infinity once turned the
  *  check off and an assertion from 2001 was accepted. */
 export function freshnessWindowSeconds(maxSkewSeconds: unknown): number | null {

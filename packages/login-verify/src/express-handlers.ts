@@ -1,16 +1,20 @@
-import type { Express, Request, Response } from "express";
+import type { IRouter, Request, Response } from "express";
 import type { IdentityAgentVerifier } from "./verifier.js";
 import type { LoginAssertion } from "./types.js";
 import { readAssertion, utf8Text } from "./canonical.js";
 
 const MAX_BODY_BYTES = 1 << 20;
 
-/** Where the callback's body is kept once it has been read as sent. */
-const RAW_BODY = Symbol("identity-agent raw body");
-type WithRawBody = Request & { [RAW_BODY]?: Promise<Buffer> };
+/** The path the Identity Agent posts its assertion to, under wherever the
+ *  routes are mounted. */
+const CALLBACK_PATH = "/auth/ia/callback";
+
+/** Where the callback's body is kept, as sent, once something has read it. */
+const RAW_BODY = Symbol.for("@identity-agent/login-verify raw body");
+type WithRawBody = Request & { [RAW_BODY]?: Buffer | Promise<Buffer> };
 
 /** The request's body as sent. Reading it marks it read (`_body`), as a body
- *  parser does, so a JSON parser further along leaves it alone. */
+ *  parser does, so a parser further along leaves it alone. */
 function readBody(req: Request): Promise<Buffer> {
   (req as unknown as { _body?: boolean })._body = true;
   return new Promise((resolve, reject) => {
@@ -35,56 +39,98 @@ function alreadyRead(req: Request): boolean {
   return Boolean((req as unknown as { _body?: boolean })._body) || !req.readable;
 }
 
+/** True for a POST to the sign-in callback, wherever the routes are mounted. */
+function isCallback(req: Request): boolean {
+  if (req.method !== "POST") return false;
+  const path = (req.originalUrl ?? req.url ?? "").split("?")[0].replace(/\/+$/, "");
+  return path.endsWith(CALLBACK_PATH);
+}
+
+/** Middleware that keeps the sign-in callback's body as sent, so the
+ *  assertion in it can be checked from its text. Mount it before any body
+ *  parser of your own:
+ *
+ *      app.use(identityAgentCallbackBody());
+ *      app.use(express.json());
+ *
+ *  It reads only the callback's body and passes every other request on
+ *  untouched. An app with no body parser of its own needs neither this nor
+ *  `keepLoginRawBody`. */
+export function identityAgentCallbackBody() {
+  return (req: Request, _res: Response, next: (err?: unknown) => void): void => {
+    if (!isCallback(req) || alreadyRead(req) || (req as WithRawBody)[RAW_BODY]) {
+      next();
+      return;
+    }
+    readBody(req).then(
+      (buf) => {
+        (req as WithRawBody)[RAW_BODY] = buf;
+        next();
+      },
+      (err) => next(Object.assign(err instanceof Error ? err : new Error(String(err)), { status: 413 })),
+    );
+  };
+}
+
+/** A body parser `verify` option that keeps the sign-in callback's body as
+ *  sent, for an app that would rather keep its own parser first:
+ *
+ *      app.use(express.json({ verify: keepLoginRawBody }));
+ *
+ *  Give it to every body parser that could read the callback (by default,
+ *  express.json; also express.text or express.raw with a wide `type`). */
+export function keepLoginRawBody(req: unknown, _res: unknown, buf: Buffer): void {
+  const r = req as WithRawBody;
+  if (isCallback(r)) r[RAW_BODY] = Buffer.from(buf);
+}
+
+/** What the callback says when the text it needs is gone. */
+const RAW_BODY_GONE =
+  "a body parser read the assertion before this route could see its text; mount " +
+  "identityAgentCallbackBody() before your body parsers, or give them " +
+  "{ verify: keepLoginRawBody }";
+
 /** The assertion posted to the callback, read from its text as the core reads
  *  one, so a repeated key, a byte order mark or a whole number spelled 1.0 is
- *  refused. The text is captured ahead of any JSON parser the host app
- *  installed (`readCallbackBodyFirst`); were it ever gone, the callback is
- *  refused rather than checked from what a lenient parser left. */
+ *  refused. The text comes from `identityAgentCallbackBody` or
+ *  `keepLoginRawBody` where the app has a parser, and is read here where it
+ *  has none. Where it is gone, the callback is refused rather than checked
+ *  from what a lenient parser left. */
 async function postedAssertion(req: Request): Promise<LoginAssertion> {
   const kept = (req as WithRawBody)[RAW_BODY];
   if (kept) return readAssertion(utf8Text(await kept));
   if (!alreadyRead(req)) return readAssertion(utf8Text(await readBody(req)));
-  throw new Error("the body was read by another parser before this route saw its text");
+  throw new Error(RAW_BODY_GONE);
 }
 
-/** The options a site's own page posts to start a sign-in. Taken from the
- *  host app's JSON parser where one has run, and read here where none has. */
+/** The options a site's own page posts to start a sign-in, as an object.
+ *  Taken from whatever the app's body parsers left (an object from
+ *  express.json or express.urlencoded, text from express.text, bytes from
+ *  express.raw), and read here where none has run. */
 async function sessionOptions(req: Request): Promise<Record<string, any>> {
-  if (alreadyRead(req)) {
-    return req.body && typeof req.body === "object" ? req.body : {};
+  let text: string | undefined;
+  const kept = (req as WithRawBody)[RAW_BODY];
+  if (kept) {
+    text = utf8Text(await kept);
+  } else if (!alreadyRead(req)) {
+    text = utf8Text(await readBody(req));
+  } else if (typeof req.body === "string") {
+    text = req.body;
+  } else if (Buffer.isBuffer(req.body)) {
+    text = utf8Text(req.body);
+  } else if (req.body === undefined || req.body === null) {
+    return {};
+  } else if (typeof req.body === "object" && !Array.isArray(req.body)) {
+    return req.body as Record<string, any>;
+  } else {
+    throw new Error("the options must be a JSON object");
   }
-  const raw = await readBody(req);
-  if (raw.length === 0) return {};
-  const parsed = JSON.parse(utf8Text(raw)) as unknown;
-  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, any>) : {};
-}
-
-/** Puts a reader for the callback's body at the front of the app's
- *  middleware, so it holds the text before any JSON parser the app installed,
- *  whether that was mounted before these routes or after. It reads only the
- *  callback's body and then hands the request on, so everything else the app
- *  mounted still runs in its order. */
-function readCallbackBodyFirst(app: Express, path: string): void {
-  app.use(path, (req: Request, _res: Response, next: () => void) => {
-    // Only the callback itself, not a route of the app's that happens to sit
-    // beneath its path.
-    if (req.method === "POST" && req.path === "/" && !alreadyRead(req)) {
-      const body = readBody(req);
-      body.catch(() => undefined); // surfaced by the route, as a 400
-      (req as WithRawBody)[RAW_BODY] = body;
-    }
-    next();
-  });
-  // Express 4 keeps its middleware in app._router.stack (Express 5 in
-  // app.router.stack). The layer just added is the last; it moves to just
-  // after Express's own request set-up, ahead of the app's.
-  const anyApp = app as unknown as { _router?: { stack?: unknown[] }; router?: { stack?: unknown[] } };
-  const stack = (anyApp._router ?? anyApp.router)?.stack;
-  if (!Array.isArray(stack)) return;
-  const layer = stack.pop();
-  let at = 0;
-  while (at < stack.length && ["query", "expressInit"].includes((stack[at] as { name?: string }).name ?? "")) at++;
-  stack.splice(at, 0, layer);
+  if (text.trim() === "") return {};
+  const parsed = JSON.parse(text) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("the options must be a JSON object");
+  }
+  return parsed as Record<string, any>;
 }
 
 export interface MountOptions {
@@ -98,14 +144,13 @@ export interface MountOptions {
   issueAppSession?: (pairwiseAid: string, disclosures: Record<string, string>) => string;
 }
 
-const CALLBACK_PATH = "/auth/ia/callback";
-
-/** Mounts the sign-in routes. They work wherever they are mounted relative to
- *  the app's own body parsers: the session route takes its options from the
- *  app's JSON parser or reads them itself, and the callback's text is read
- *  ahead of any parser, so the assertion in it is checked as sent. */
+/** Mounts the sign-in routes on an app, a Router or a sub-app. The session
+ *  route reads its options whatever body parsers the app has. The callback
+ *  needs the assertion's text: an app with no body parser of its own needs
+ *  nothing more; one with a parser mounts `identityAgentCallbackBody()`
+ *  before it, or gives it `{ verify: keepLoginRawBody }`. */
 export function mountIdentityAgentLoginRoutes(
-  app: Express,
+  app: IRouter,
   verifier: IdentityAgentVerifier,
   opts: MountOptions = {},
 ): void {
@@ -113,8 +158,6 @@ export function mountIdentityAgentLoginRoutes(
   const issueSession =
     opts.issueAppSession ??
     ((pairwiseAid: string) => `ia-session-${pairwiseAid.slice(0, 16)}`);
-
-  readCallbackBodyFirst(app, CALLBACK_PATH);
 
   app.post(base, async (req: Request, res: Response) => {
     try {
@@ -138,7 +181,7 @@ export function mountIdentityAgentLoginRoutes(
 
       const callbackUrl =
         body.callbackUrl ??
-        `${origin}${CALLBACK_PATH}`;
+        `${origin}${req.baseUrl ?? ""}${CALLBACK_PATH}`;
 
       const result = await verifier.createChallenge({
         audience: process.env.IA_AUDIENCE ?? origin,

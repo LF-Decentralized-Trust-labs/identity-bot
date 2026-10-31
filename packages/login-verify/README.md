@@ -39,11 +39,30 @@ An assertion is read by the Identity Agent core's rules, so the two accept
 exactly the same ones. A repeated key, and a whole number written as `1.0`,
 can only be seen in the text, which `JSON.parse` discards: where you receive an
 assertion as text, read it with `readAssertion(text)` before verifying it.
-`mountIdentityAgentLoginRoutes` does this for its callback wherever you mount
-it, before or after a JSON body parser of your own.
+`mountIdentityAgentLoginRoutes` does this for its callback, and mounts on an
+app, a `Router` or a sub-app. What else to mount depends on your body parsers:
 
-`maxSkewSeconds` is a whole number of seconds: zero or less means the default
-of 300, more than 3600 is narrowed to 3600, and anything else is refused.
+- **No body parser of your own**, or only ones mounted after these routes:
+  nothing. The callback reads its own body.
+- **A body parser mounted before these routes**, anywhere above them
+  (including a parent app's): mount `identityAgentCallbackBody()` before it,
+
+  ```ts
+  app.use(identityAgentCallbackBody());
+  app.use(express.json());
+  mountIdentityAgentLoginRoutes(app, verifier);
+  ```
+
+  or give every parser that could read the callback `keepLoginRawBody` as its
+  `verify` option: `app.use(express.json({ verify: keepLoginRawBody }))`.
+
+Without one of these, a parser has already read the assertion by the time the
+callback runs, and the callback refuses it with a message naming both. The
+session route reads its options whatever parsers you have.
+
+`maxSkewSeconds` is a whole number of seconds: left out (undefined), zero or
+less means the default of 300, more than 3600 is narrowed to 3600, and
+anything else, `null` included, is refused.
 
 `generateDevSiteIdentity` is for development only. It makes an identifier with
 no key log behind it, so an up-to-date Identity Agent refuses every challenge it
