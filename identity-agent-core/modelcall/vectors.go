@@ -19,11 +19,12 @@ var modelCallVectors []byte
 type VectorSet struct {
 	About string `json:"about"`
 
-	Limits           Limits   `json:"limits"`
-	HeaderNames      []string `json:"header_names"`
-	QueryParameters  []string `json:"query_parameters"`
-	AnswerBoundNames []string `json:"answer_bound_names"`
-	AnswerCountNames []string `json:"answer_count_names"`
+	Limits            Limits   `json:"limits"`
+	HeaderNames       []string `json:"header_names"`
+	AnswerHeaderNames []string `json:"answer_header_names"`
+	QueryParameters   []string `json:"query_parameters"`
+	AnswerBoundNames  []string `json:"answer_bound_names"`
+	AnswerCountNames  []string `json:"answer_count_names"`
 
 	// Routes are the routes every start below is checked against: an example
 	// of a sign-in's provider's routes, not a list any provider has.
@@ -40,6 +41,7 @@ type VectorSet struct {
 // Limits are the exchange's limits, as the vectors state them.
 type Limits struct {
 	RequestLargest        int `json:"request_largest"`
+	StartLargest          int `json:"start_largest"`
 	PartLargest           int `json:"part_largest"`
 	PathLongest           int `json:"path_longest"`
 	AnswerLongest         int `json:"answer_longest"`

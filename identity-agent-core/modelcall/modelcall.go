@@ -37,6 +37,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 // The routes of the exchange on the Identity Agent.
@@ -49,16 +50,13 @@ const (
 // CallPath is where one call's answer is collected, and where it is stopped.
 func CallPath(callID string) string { return StartPath + "/" + url.PathEscape(callID) }
 
-// ThroughIdentityAgent is the value of model_calls in what a body sends when
-// it borrows its AI agent's sign-in, saying it makes its brain's model calls
-// through the Identity Agent. A body that does not say it is never lent a key
-// that stays with the Identity Agent.
-const ThroughIdentityAgent = "through_identity_agent"
-
 // The limits of the exchange.
 const (
 	// RequestLargest bounds a call's request body, decoded.
 	RequestLargest = 3 << 20
+	// StartLargest bounds what an Identity Agent reads of a start's JSON: a
+	// start any longer is unreadable (NoLease, 400), not TooLarge.
+	StartLargest = 2 * RequestLargest
 	// PartLargest bounds what one collection carries of an answer, decoded.
 	PartLargest = 2 << 20
 	// CollectionWait is the longest one collection waits for more of an
@@ -143,8 +141,10 @@ func (c Collection) Path(callID string) string {
 	return p
 }
 
-// ParseCollection reads a collection's query. A from that is not a whole
-// number, or is below nothing, is read as 0.
+// ParseCollection reads a collection's query, as url.ParseQuery gives it:
+// an unreadable piece of the query is skipped, and where a name is given more
+// than once the first counts. A from that is not a base-10 whole number, or
+// is below nothing, is read as 0; head is set only by 1.
 func ParseCollection(q url.Values) Collection {
 	from, err := strconv.ParseInt(q.Get("from"), 10, 64)
 	if err != nil || from < 0 {
@@ -168,8 +168,9 @@ const (
 	// not a key kept here, has expired or was removed. 403, refused.
 	NotAllowed Reason = "not_allowed"
 	// AllowanceRule: under an allowance, the call breaks the rules on answer
-	// length or the number of answers, or is not one JSON object; or the
-	// allowance is spent or stopped. 403, refused.
+	// length or the number of answers, or is not one JSON object; the
+	// allowance is spent, or stopped because an earlier call's cost is not
+	// known; or the provider does not say what a call costs. 403, refused.
 	AllowanceRule Reason = "allowance"
 	// CollectedAlready: a collection asks for part of the answer before what
 	// it already collected. 409.
@@ -188,8 +189,9 @@ const (
 	// NotKept: the allowance cannot be written down before the call is sent,
 	// so the call was not made. 503.
 	NotKept Reason = "not_kept"
-	// Unreachable: the provider the key is for cannot be reached from here.
-	// 503.
+	// Unreachable: no address is known here for the provider the key is
+	// for. 503. A provider that is known but cannot be reached is not a
+	// refusal: the call's answer ends, done, with an error saying so.
 	Unreachable Reason = "unreachable"
 )
 
@@ -278,7 +280,7 @@ func RouteAllowed(routes []Route, method, p string) bool {
 	if !PlainPath(p) {
 		return false
 	}
-	method = strings.ToUpper(method)
+	method = asciiUpper(method)
 	for _, r := range routes {
 		if r.Method != method {
 			continue
@@ -338,9 +340,13 @@ func Query(raw string) (string, error) {
 // Identity Agent replaces with the key.
 var HeaderNames = []string{"Content-Type", "Accept", "Anthropic-Version", "Anthropic-Beta", "Openai-Beta"}
 
+// AnswerHeaderNames are the headers of the provider's answer that travel back
+// to the brain, in an Answer's header; no other does.
+var AnswerHeaderNames = []string{"Content-Type", "Retry-After", "Request-Id", "X-Request-Id"}
+
 // Headers are the headers of h that travel on, named as HeaderNames names
-// them. Any other header is dropped, not refused, and so is one with no
-// value. Where h names one header more than once, in different cases, the
+// them, matched in any ASCII case. Any other header is dropped, not refused,
+// and so is one with no value. Where h names one header more than once, in different cases, the
 // first by byte order of its name with a value is the one kept. Nil when
 // none travels.
 func Headers(h map[string]string) map[string]string {
@@ -348,7 +354,7 @@ func Headers(h map[string]string) map[string]string {
 	keys := sortedKeys(h)
 	for _, name := range HeaderNames {
 		for _, k := range keys {
-			if strings.EqualFold(k, name) && h[k] != "" {
+			if asciiEqualFold(k, name) && h[k] != "" {
 				if out == nil {
 					out = map[string]string{}
 				}
@@ -361,10 +367,11 @@ func Headers(h map[string]string) map[string]string {
 }
 
 // Body is the call's request body, decoded: refused as TooLarge where it is
-// not base64 or is larger than RequestLargest.
+// not standard base64 with padding (a line break in it included) or is larger
+// than RequestLargest.
 func (q Request) Body() ([]byte, error) {
 	b, err := base64.StdEncoding.DecodeString(q.BodyB64)
-	if err != nil || len(b) > RequestLargest {
+	if err != nil || strings.ContainsAny(q.BodyB64, "\r\n") || len(b) > RequestLargest {
 		return nil, refuse(TooLarge, "this model call is too large or unreadable")
 	}
 	return b, nil
@@ -373,21 +380,22 @@ func (q Request) Body() ([]byte, error) {
 // Reads reports whether a call with method only reads (a list of models, or
 // one model asked about by name): it is not a model call, costs nothing, and
 // is never held to an allowance. Only a POST is a model call.
-func Reads(method string) bool { return !strings.EqualFold(method, http.MethodPost) }
+func Reads(method string) bool { return asciiUpper(method) != http.MethodPost }
 
 // ModelNamed is the one model a call's body names, read the way a provider
 // reads it: the body must be one JSON object naming its model once, as
 // "model" spelt exactly, with a string. A second "model", one spelt in
-// another case, or a list of models to fall back on ("models", in any case)
+// another ASCII case, or a list of models to fall back on ("models", in any
+// ASCII case)
 // is refused, so what is checked is what the provider reads. The name is ""
 // where none is given.
 func ModelNamed(body []byte) (string, error) {
 	named, seen := "", false
 	err := eachField(body, func(k string, v json.RawMessage) error {
 		switch {
-		case strings.EqualFold(k, "models"):
+		case asciiEqualFold(k, "models"):
 			return errors.New("this call names a list of models to fall back on")
-		case !strings.EqualFold(k, "model"):
+		case !asciiEqualFold(k, "model"):
 			return nil
 		case k != "model" || seen:
 			return errors.New("this call names its model more than once, or not as \"model\"")
@@ -404,9 +412,9 @@ func ModelNamed(body []byte) (string, error) {
 	return named, err
 }
 
-// CheckModel refuses a model call that names a model other than chosen, or
-// none, or more than one. Where no model is chosen (chosen is empty), or the
-// call only reads, any call passes.
+// CheckModel refuses a model call that names a model other than chosen
+// (trimmed of white space), or none, or more than one. Where no model is
+// chosen (chosen is empty), or the call only reads, any call passes.
 func CheckModel(chosen, method string, body []byte) error {
 	chosen = strings.TrimSpace(chosen)
 	if chosen == "" || Reads(method) {
@@ -436,14 +444,14 @@ var AnswerCountNames = []string{"n", "best_of"}
 // call under an allowance must say it, or why it is refused: the body is one
 // JSON object; it gives at least one of AnswerBoundNames, each spelt exactly
 // and at most once, as a whole number from 1 to AnswerLongest, and the
-// largest given counts; and each of AnswerCountNames it gives, in any case,
-// is 1. Only the object's own fields are read, not those nested in them.
+// largest given counts; and each of AnswerCountNames it gives, in any ASCII
+// case, is 1. Only the object's own fields are read, not those nested in them.
 func AnswerBound(body []byte) (int, error) {
 	seen := map[string]bool{}
 	most := 0
 	err := eachField(body, func(k string, v json.RawMessage) error {
 		for _, m := range AnswerCountNames {
-			if strings.EqualFold(k, m) {
+			if asciiEqualFold(k, m) {
 				var n float64
 				if err := json.Unmarshal(v, &n); err != nil || n != 1 {
 					return fmt.Errorf("this call asks for more than one answer (%s)", m)
@@ -452,7 +460,7 @@ func AnswerBound(body []byte) (int, error) {
 		}
 		name := ""
 		for _, n := range AnswerBoundNames {
-			if strings.EqualFold(k, n) {
+			if asciiEqualFold(k, n) {
 				name = n
 			}
 		}
@@ -490,8 +498,12 @@ var errNotOneObject = errors.New("not one JSON object")
 
 // eachField calls f with each of the fields of body's one JSON object, in
 // order, keys exactly as written. It refuses with errNotOneObject a body that
-// is anything but one whole object, with nothing after it but white space.
+// is not UTF-8, or is anything but one whole object, with nothing after it
+// but white space.
 func eachField(body []byte, f func(k string, v json.RawMessage) error) error {
+	if !utf8.Valid(body) {
+		return errNotOneObject
+	}
 	d := json.NewDecoder(bytes.NewReader(body))
 	if t, err := d.Token(); err != nil || t != json.Delim('{') {
 		return errNotOneObject
@@ -542,13 +554,18 @@ type Call struct {
 	Bound int `json:"bound,omitempty"`
 }
 
-// Check is everything the request alone decides, in the order the Identity
-// Agent decides it: a lease is named (NoLease); the body is base64 and not
-// too large (TooLarge); the route, query and model are ones allowed
-// (NotAllowed); and, under an allowance, a model call says how long an answer
-// it wants and asks for one answer (AllowanceRule). A refusal is an *Error,
-// whose Reason gives the status. What only the Identity Agent knows is not
-// checked here.
+// Check is everything the request alone decides, composed in one place: a
+// lease is named (NoLease); the body is base64 and not too large (TooLarge);
+// the route, query and model are ones allowed (NotAllowed); and, under an
+// allowance, a model call says how long an answer it wants and asks for one
+// answer (AllowanceRule). Of these, the first broken is the one answered. A
+// refusal is an *Error, whose Reason gives the status.
+//
+// What only the Identity Agent knows (the lease, the AI agent's standing,
+// how many calls it holds, what an allowance has left) is not checked here,
+// and an Identity Agent may answer its own checks before any of these, or
+// between them: it calls the checks below one by one where it needs to, and
+// Check is their composed reference, the one the published vectors hold.
 func (r Rules) Check(q Request) (Call, error) {
 	if q.LeaseID == "" {
 		return Call{}, refuse(NoLease, "name the run's lease and the call to make")
@@ -557,7 +574,7 @@ func (r Rules) Check(q Request) (Call, error) {
 	if err != nil {
 		return Call{}, err
 	}
-	method := strings.ToUpper(q.Method)
+	method := asciiUpper(q.Method)
 	if !RouteAllowed(r.Routes, method, q.Path) {
 		return Call{}, refuse(NotAllowed, "%s %s is not a model call this AI agent's sign-in may make",
 			printable(method, 10), printable(q.Path, 80))
@@ -576,6 +593,39 @@ func (r Rules) Check(q Request) (Call, error) {
 		}
 	}
 	return c, nil
+}
+
+// asciiEqualFold reports whether a and b are the same but for the case of
+// ASCII letters. Nothing outside ASCII folds, so every implementation reads a
+// name the same way.
+func asciiEqualFold(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := 0; i < len(a); i++ {
+		if asciiLower(a[i]) != asciiLower(b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func asciiLower(c byte) byte {
+	if 'A' <= c && c <= 'Z' {
+		return c + 'a' - 'A'
+	}
+	return c
+}
+
+// asciiUpper is s with its ASCII letters upper-cased, and nothing else.
+func asciiUpper(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		if 'a' <= c && c <= 'z' {
+			b[i] = c - 'a' + 'A'
+		}
+	}
+	return string(b)
 }
 
 // printable is s as a refusal may quote it: at most n bytes, and nothing that

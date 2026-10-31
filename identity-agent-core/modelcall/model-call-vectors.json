@@ -2,6 +2,7 @@
   "about": "Model calls a body makes through the Identity Agent that keeps the API key, worked through; the rules are in contracts/model-call/model-call.schema.json. Each start is checked against routes, under its model (the model chosen for the AI agent, where one is) and allowance (whether its model calls are held to an allowance). Each outcome is what the request alone decides; what only the Identity Agent knows (the lease, the AI agent's standing, what an allowance has left) is not in it.",
   "limits": {
     "request_largest": 3145728,
+    "start_largest": 6291456,
     "part_largest": 2097152,
     "path_longest": 256,
     "answer_longest": 32768,
@@ -13,6 +14,12 @@
     "Anthropic-Version",
     "Anthropic-Beta",
     "Openai-Beta"
+  ],
+  "answer_header_names": [
+    "Content-Type",
+    "Retry-After",
+    "Request-Id",
+    "X-Request-Id"
   ],
   "query_parameters": [
     "after_id",
@@ -118,13 +125,13 @@
       "request": {
         "lease_id": "lease-0001",
         "method": "GET",
-        "path": "/v1/models/vendor/example-model:free"
+        "path": "/v1/models/vendor/example-model:latest"
       },
       "outcome": {
         "allowed": true,
         "call": {
           "method": "GET",
-          "path": "/v1/models/vendor/example-model:free",
+          "path": "/v1/models/vendor/example-model:latest",
           "reads": true
         }
       }
@@ -437,6 +444,36 @@
         "allowed": false,
         "reason": "too_large",
         "status": 413
+      }
+    },
+    {
+      "name": "a body in base64 broken across lines",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/messages",
+        "body_b64": "e30=\n"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "too_large",
+        "status": 413
+      }
+    },
+    {
+      "name": "a method named with a letter outside ASCII",
+      "body": "{\"model\":\"m\"}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "poſt",
+        "path": "/v1/messages",
+        "body_b64": "eyJtb2RlbCI6Im0ifQ=="
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
       }
     },
     {
@@ -907,6 +944,24 @@
       }
     },
     {
+      "name": "a field named with a letter outside ASCII is not a list of models",
+      "model": "example-model-1",
+      "body": "{\"model\":\"example-model-1\",\"modelſ\":[\"a\"]}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "body_b64": "eyJtb2RlbCI6ImV4YW1wbGUtbW9kZWwtMSIsIm1vZGVsxb8iOlsiYSJdfQ=="
+      },
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "POST",
+          "path": "/v1/chat/completions"
+        }
+      }
+    },
+    {
       "name": "a body that is not one JSON object, with a model chosen",
       "model": "example-model-1",
       "body": "{\"model\":\"example-model-1\"} {\"model\":\"another-model\"}",
@@ -1177,6 +1232,41 @@
       }
     },
     {
+      "name": "an allowance: a body that is not UTF-8",
+      "allowance": true,
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/messages",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfdG9rZW5zIjo1LCJ4Ijoi/yJ9"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "allowance",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "an allowance: a number of answers named with a letter outside ASCII is not one",
+      "allowance": true,
+      "body": "{\"model\":\"m\",\"max_tokens\":5,\"beſt_of\":3}",
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "body_b64": "eyJtb2RlbCI6Im0iLCJtYXhfdG9rZW5zIjo1LCJiZcW/dF9vZiI6M30="
+      },
+      "outcome": {
+        "allowed": true,
+        "call": {
+          "method": "POST",
+          "path": "/v1/chat/completions",
+          "bound": 5
+        }
+      }
+    },
+    {
       "name": "an allowance: counting tokens is a POST, so it is held to it",
       "allowance": true,
       "body": "{\"model\":\"m\",\"messages\":[]}",
@@ -1230,6 +1320,16 @@
       }
     },
     {
+      "name": "only ASCII letters fold",
+      "sent": {
+        "Accept": "application/json",
+        "Anthropic-Verſion": "2023-06-01"
+      },
+      "passed": {
+        "Accept": "application/json"
+      }
+    },
+    {
       "name": "a header with no value does not travel",
       "sent": {
         "Accept": "application/json",
@@ -1263,27 +1363,27 @@
   "collections": [
     {
       "name": "the first collection",
-      "call_id": "mc_AAECAwQFBgcICQoLDA0ODxAR",
+      "call_id": "call-0001",
       "from": 0,
       "lease": "lease-0001",
       "head": false,
-      "path": "/api/agent-host/model-calls/mc_AAECAwQFBgcICQoLDA0ODxAR?from=0&lease=lease-0001"
+      "path": "/api/agent-host/model-calls/call-0001?from=0&lease=lease-0001"
     },
     {
       "name": "a later collection, with the status and headers in hand",
-      "call_id": "mc_AAECAwQFBgcICQoLDA0ODxAR",
+      "call_id": "call-0001",
       "from": 1234,
       "lease": "lease-0001",
       "head": true,
-      "path": "/api/agent-host/model-calls/mc_AAECAwQFBgcICQoLDA0ODxAR?from=1234&lease=lease-0001&head=1"
+      "path": "/api/agent-host/model-calls/call-0001?from=1234&lease=lease-0001&head=1"
     },
     {
       "name": "a lease and a call that must be escaped",
-      "call_id": "mc_a/b c",
+      "call_id": "call/0004 a",
       "from": 7,
       "lease": "lease 2/+&",
       "head": true,
-      "path": "/api/agent-host/model-calls/mc_a%2Fb%20c?from=7&lease=lease+2%2F%2B%26&head=1"
+      "path": "/api/agent-host/model-calls/call%2F0004%20a?from=7&lease=lease+2%2F%2B%26&head=1"
     }
   ],
   "collection_queries": [
@@ -1349,6 +1449,13 @@
       "from": 5,
       "lease": "lease 2/+&",
       "head": false
+    },
+    {
+      "name": "an unreadable piece is skipped",
+      "query": "from=5&x;y&%zz=1&lease=lease-0001&head=1",
+      "from": 5,
+      "lease": "lease-0001",
+      "head": true
     }
   ],
   "refusals": [
@@ -1425,7 +1532,7 @@
       "from": 0,
       "data": "event: message_start\ndata: {\"type\":\"message_start\"}\n\n",
       "answer": {
-        "call_id": "mc_AAECAwQFBgcICQoLDA0ODxAR",
+        "call_id": "call-0001",
         "status": 200,
         "header": {
           "Content-Type": "text/event-stream",
@@ -1441,7 +1548,7 @@
       "from": 55,
       "data": "",
       "answer": {
-        "call_id": "mc_AAECAwQFBgcICQoLDA0ODxAR",
+        "call_id": "call-0001",
         "status": 200,
         "header": {
           "Content-Type": "text/event-stream",
@@ -1456,7 +1563,7 @@
       "from": 55,
       "data": "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
       "answer": {
-        "call_id": "mc_AAECAwQFBgcICQoLDA0ODxAR",
+        "call_id": "call-0001",
         "status": 200,
         "header": {
           "Content-Type": "text/event-stream",
@@ -1472,7 +1579,7 @@
       "from": 2048,
       "data": "",
       "answer": {
-        "call_id": "mc_AAECAwQFBgcICQoLDA0ODxAR",
+        "call_id": "call-0001",
         "status": 200,
         "header": {
           "Content-Type": "text/event-stream"
@@ -1487,7 +1594,7 @@
       "from": 0,
       "data": "",
       "answer": {
-        "call_id": "mc_AAECAwQFBgcICQoLDA0ODxAS",
+        "call_id": "call-0002",
         "next": 0,
         "done": true,
         "error": "the model's provider could not be reached"
@@ -1496,16 +1603,16 @@
     {
       "name": "the provider's own refusal, passed on",
       "from": 0,
-      "data": "{\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}",
+      "data": "{\"error\":{\"message\":\"Too many requests\"}}",
       "answer": {
-        "call_id": "mc_AAECAwQFBgcICQoLDA0ODxAT",
-        "status": 529,
+        "call_id": "call-0003",
+        "status": 429,
         "header": {
           "Content-Type": "application/json",
           "Retry-After": "30"
         },
-        "data_b64": "eyJ0eXBlIjoiZXJyb3IiLCJlcnJvciI6eyJ0eXBlIjoib3ZlcmxvYWRlZF9lcnJvciIsIm1lc3NhZ2UiOiJPdmVybG9hZGVkIn19",
-        "next": 75,
+        "data_b64": "eyJlcnJvciI6eyJtZXNzYWdlIjoiVG9vIG1hbnkgcmVxdWVzdHMifX0=",
+        "next": 41,
         "done": true
       }
     }

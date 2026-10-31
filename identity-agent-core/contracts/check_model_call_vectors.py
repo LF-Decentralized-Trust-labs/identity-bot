@@ -26,6 +26,7 @@ PART_LARGEST = 2 * 1024 * 1024
 PATH_LONGEST = 256
 ANSWER_LONGEST = 32768
 HEADER_NAMES = ["Content-Type", "Accept", "Anthropic-Version", "Anthropic-Beta", "Openai-Beta"]
+ANSWER_HEADER_NAMES = ["Content-Type", "Retry-After", "Request-Id", "X-Request-Id"]
 BOUND_NAMES = ["max_tokens", "max_completion_tokens", "max_output_tokens"]
 COUNT_NAMES = ["n", "best_of"]
 QUERY_NAMES = ["after_id", "before_id", "beta", "limit"]
@@ -47,6 +48,15 @@ REASONS = {
     "not_kept": (503, False, False),
     "unreachable": (503, False, False),
 }
+
+
+def fold(s):
+    """ASCII letters in lower case; nothing outside ASCII folds."""
+    return "".join(chr(ord(c) + 32) if "A" <= c <= "Z" else c for c in s)
+
+
+def upper(s):
+    return "".join(chr(ord(c) - 32) if "a" <= c <= "z" else c for c in s)
 
 
 def fail(what):
@@ -120,17 +130,18 @@ def form_decode(s):
     return out.decode("utf-8", errors="replace")
 
 
-def form_pieces(raw):
-    """The query's names and values in order, or None where it is unreadable."""
+def form_pieces(raw, skip=False):
+    """The query's names and values in order. A piece that is unreadable makes
+    the whole query unreadable (None), or, with skip, is skipped."""
     pairs = []
     for piece in raw.split("&"):
         if piece == "":
             continue
-        if ";" in piece:
-            return None
         name, _, value = piece.partition("=")
         name, value = form_decode(name), form_decode(value)
-        if name is None or value is None:
+        if ";" in piece or name is None or value is None:
+            if skip:
+                continue
             return None
         pairs.append((name, value))
     return pairs
@@ -181,7 +192,7 @@ def headers(sent):
     out = {}
     for name in HEADER_NAMES:
         for k in sorted(sent):
-            if k.lower() == name.lower() and sent[k] != "":
+            if fold(k) == fold(name) and sent[k] != "":
                 out[name] = sent[k]
                 break
     return out
@@ -226,9 +237,9 @@ def check_model(chosen, method, body):
         raise Refused("not_allowed")
     named, seen = "", False
     for k, v in fields:
-        if k.lower() == "models":
+        if fold(k) == "models":
             raise Refused("not_allowed")
-        if k.lower() != "model":
+        if fold(k) != "model":
             continue
         if k != "model" or seen:
             raise Refused("not_allowed")
@@ -250,9 +261,9 @@ def answer_bound(body):
     seen, most = set(), 0
     for k, v in fields:
         for m in COUNT_NAMES:
-            if k.lower() == m and not (is_number(v) and v == 1):
+            if fold(k) == m and not (is_number(v) and v == 1):
                 raise Refused("allowance")
-        name = next((n for n in BOUND_NAMES if k.lower() == n), None)
+        name = next((n for n in BOUND_NAMES if fold(k) == n), None)
         if name is None:
             continue
         if k != name or name in seen:
@@ -280,7 +291,7 @@ def check_start(routes, s, request):
     if request.get("lease_id", "") == "":
         raise Refused("no_lease")
     body = decode_body(request.get("body_b64", ""))
-    method = request.get("method", "").upper()
+    method = upper(request.get("method", ""))
     if not route_allowed(routes, method, request.get("path", "")):
         raise Refused("not_allowed")
     q = query(request.get("query", ""))
@@ -352,7 +363,7 @@ def check_collections(v):
             p += "&head=1"
         same(c["name"], p, c["path"])
     for c in v["collection_queries"]:
-        pairs = form_pieces(c["query"]) or []
+        pairs = form_pieces(c["query"], skip=True)
         first = {}
         for n, val in pairs:
             first.setdefault(n, val)
@@ -381,6 +392,9 @@ def check_answers(v):
         for f in ans:
             if f not in d["properties"]:
                 fail("%s carries %s, which the schema does not declare" % (a["name"], f))
+        for k in ans.get("header", {}):
+            if k not in ANSWER_HEADER_NAMES:
+                fail("%s carries the header %s, which does not travel back" % (a["name"], k))
         data = a["data"].encode()
         if data:
             same(a["name"] + " data_b64", ans.get("data_b64"), base64.b64encode(data).decode())
@@ -393,10 +407,11 @@ def check_answers(v):
 
 
 def check_limits(v):
-    same("limits", v["limits"], {"request_largest": REQUEST_LARGEST, "part_largest": PART_LARGEST,
+    same("limits", v["limits"], {"request_largest": REQUEST_LARGEST, "start_largest": 2 * REQUEST_LARGEST, "part_largest": PART_LARGEST,
                                  "path_longest": PATH_LONGEST, "answer_longest": ANSWER_LONGEST,
                                  "collection_wait_seconds": 20})
     same("header_names", v["header_names"], HEADER_NAMES)
+    same("answer_header_names", v["answer_header_names"], ANSWER_HEADER_NAMES)
     same("query_parameters", v["query_parameters"], QUERY_NAMES)
     same("answer_bound_names", v["answer_bound_names"], BOUND_NAMES)
     same("answer_count_names", v["answer_count_names"], COUNT_NAMES)

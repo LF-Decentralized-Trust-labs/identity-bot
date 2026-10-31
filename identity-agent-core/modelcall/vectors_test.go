@@ -118,6 +118,19 @@ func TestEveryRefusalHasAReason(t *testing.T) {
 	}
 }
 
+// A part of an answer is at most PartLargest bytes, and is base64.
+func TestAnAnswerCarriesAtMostOnePart(t *testing.T) {
+	if b, err := (Answer{DataB64: base64.StdEncoding.EncodeToString(make([]byte, PartLargest))}).Data(); err != nil || len(b) != PartLargest {
+		t.Fatalf("a whole part was refused: %v", err)
+	}
+	if _, err := (Answer{DataB64: base64.StdEncoding.EncodeToString(make([]byte, PartLargest+1))}).Data(); err == nil {
+		t.Fatal("a part a byte too large was read")
+	}
+	if _, err := (Answer{DataB64: "not base64!"}).Data(); err == nil {
+		t.Fatal("a part that is not base64 was read")
+	}
+}
+
 // startBody is a start's body as it is sent.
 func startBody(s StartVector) []byte {
 	b := []byte(s.Body)
@@ -138,9 +151,10 @@ func startRequest(s StartVector) Request {
 
 // fillModelCallVectors computes every derived value in set from its inputs.
 func fillModelCallVectors(set *VectorSet) error {
-	set.Limits = Limits{RequestLargest: RequestLargest, PartLargest: PartLargest, PathLongest: PathLongest,
+	set.Limits = Limits{RequestLargest: RequestLargest, StartLargest: StartLargest, PartLargest: PartLargest, PathLongest: PathLongest,
 		AnswerLongest: AnswerLongest, CollectionWaitSeconds: int(CollectionWait.Seconds())}
 	set.HeaderNames = append([]string(nil), HeaderNames...)
+	set.AnswerHeaderNames = append([]string(nil), AnswerHeaderNames...)
 	set.QueryParameters = QueryParameters()
 	set.AnswerBoundNames = append([]string(nil), AnswerBoundNames...)
 	set.AnswerCountNames = append([]string(nil), AnswerCountNames...)
@@ -227,7 +241,7 @@ func writeModelCallVectors(t *testing.T) {
 			})},
 		{Name: "the method in lower case", Body: `{"model":"m","messages":[]}`, Request: with(chat, func(q *Request) { q.Method = "post" })},
 		{Name: "the list of models, paged", Request: with(models, func(q *Request) { q.Query = "limit=20&after_id=model-a" })},
-		{Name: "one model by a name holding a slash", Request: call("GET", "/v1/models/vendor/example-model:free")},
+		{Name: "one model by a name holding a slash", Request: call("GET", "/v1/models/vendor/example-model:latest")},
 		{Name: "one model by a name holding a letter outside ASCII", Request: call("GET", "/v1/models/modèle")},
 		{Name: "the query is sent on sorted", Request: with(models, func(q *Request) { q.Query = "limit=5&beta=true" })},
 		{Name: "an empty query value of the paging", Request: with(models, func(q *Request) { q.Query = "limit=&after_id=" })},
@@ -253,6 +267,8 @@ func writeModelCallVectors(t *testing.T) {
 		{Name: "no lease", Body: `{"model":"m"}`, Request: with(msg, func(q *Request) { q.LeaseID = "" })},
 		{Name: "no lease, and a body that is not base64", Request: with(msg, func(q *Request) { q.LeaseID = ""; q.BodyB64 = "not base64!" })},
 		{Name: "a body that is not base64", Request: with(msg, func(q *Request) { q.BodyB64 = "not base64!" })},
+		{Name: "a body in base64 broken across lines", Request: with(msg, func(q *Request) { q.BodyB64 = "e30=\n" })},
+		{Name: "a method named with a letter outside ASCII", Body: `{"model":"m"}`, Request: with(msg, func(q *Request) { q.Method = "po\u017ft" })},
 		{Name: "a body of 3 MB and a byte", Body: `{"model":"m","messages":[]}`, PadTo: RequestLargest + 1, Request: msg},
 
 		// Refused: the route.
@@ -290,6 +306,8 @@ func writeModelCallVectors(t *testing.T) {
 		{Name: "a list of models to fall back on, with one chosen", Model: chosen,
 			Body: `{"model":"example-model-1","models":["another-model"]}`, Request: chat},
 		{Name: "a model that is not a name", Model: chosen, Body: `{"model":["example-model-1"]}`, Request: msg},
+		{Name: "a field named with a letter outside ASCII is not a list of models", Model: chosen,
+			Body: "{\"model\":\"example-model-1\",\"model\u017f\":[\"a\"]}", Request: chat},
 		{Name: "a body that is not one JSON object, with a model chosen", Model: chosen,
 			Body: `{"model":"example-model-1"} {"model":"another-model"}`, Request: msg},
 
@@ -312,6 +330,12 @@ func writeModelCallVectors(t *testing.T) {
 		{Name: "an allowance: an object cut short", Allowance: true, Body: `{"model":"m","max_tokens":100`, Request: msg},
 		{Name: "an allowance: an array", Allowance: true, Body: `[{"model":"m","max_tokens":100}]`, Request: msg},
 		{Name: "an allowance: an empty body", Allowance: true, Request: msg},
+		{Name: "an allowance: a body that is not UTF-8", Allowance: true,
+			Request: with(msg, func(q *Request) {
+				q.BodyB64 = base64.StdEncoding.EncodeToString([]byte("{\"model\":\"m\",\"max_tokens\":5,\"x\":\"\xff\"}"))
+			})},
+		{Name: "an allowance: a number of answers named with a letter outside ASCII is not one", Allowance: true,
+			Body: "{\"model\":\"m\",\"max_tokens\":5,\"be\u017ft_of\":3}", Request: chat},
 		{Name: "an allowance: counting tokens is a POST, so it is held to it", Allowance: true,
 			Body: `{"model":"m","messages":[]}`, Request: call("POST", "/v1/messages/count_tokens")},
 	}
@@ -322,16 +346,17 @@ func writeModelCallVectors(t *testing.T) {
 			"X-Api-Key": "run-token", "Cookie": "a=b", "User-Agent": "a-program/1.0"}},
 		{Name: "names in any case travel as the exchange names them", Sent: map[string]string{
 			"content-type": "application/json", "ANTHROPIC-VERSION": "2023-06-01", "openai-beta": "responses=v1"}},
+		{Name: "only ASCII letters fold", Sent: map[string]string{"Anthropic-Ver\u017fion": "2023-06-01", "Accept": "application/json"}},
 		{Name: "a header with no value does not travel", Sent: map[string]string{"Content-Type": "", "Accept": "application/json"}},
 		{Name: "one header named twice: the first name by byte order with a value", Sent: map[string]string{
 			"accept": "text/plain", "Accept": "application/json", "ACCEPT": "", "content-type": "text/plain", "Content-type": "application/json"}},
 		{Name: "nothing travels", Sent: map[string]string{"Authorization": "Bearer run-token"}},
 	}
 	set.Collections = []CollectionVector{
-		{Name: "the first collection", CallID: "mc_AAECAwQFBgcICQoLDA0ODxAR", From: 0, Lease: lease},
-		{Name: "a later collection, with the status and headers in hand", CallID: "mc_AAECAwQFBgcICQoLDA0ODxAR",
+		{Name: "the first collection", CallID: "call-0001", From: 0, Lease: lease},
+		{Name: "a later collection, with the status and headers in hand", CallID: "call-0001",
 			From: 1234, Lease: lease, Head: true},
-		{Name: "a lease and a call that must be escaped", CallID: "mc_a/b c", From: 7, Lease: "lease 2/+&", Head: true},
+		{Name: "a lease and a call that must be escaped", CallID: "call/0004 a", From: 7, Lease: "lease 2/+&", Head: true},
 	}
 	set.CollectionQueries = []CollectionQueryVector{
 		{Name: "a collection", Query: "from=1234&lease=lease-0001&head=1"},
@@ -343,28 +368,29 @@ func writeModelCallVectors(t *testing.T) {
 		{Name: "a from too large", Query: "from=99999999999999999999&lease=lease-0001"},
 		{Name: "head other than 1", Query: "from=5&lease=lease-0001&head=true"},
 		{Name: "an escaped lease", Query: "from=5&lease=lease+2%2F%2B%26"},
+		{Name: "an unreadable piece is skipped", Query: "from=5&x;y&%zz=1&lease=lease-0001&head=1"},
 	}
 	set.Answers = []AnswerVector{
 		{Name: "the start, with the status, the headers and the first part", From: 0,
 			Data: "event: message_start\ndata: {\"type\":\"message_start\"}\n\n",
-			Answer: Answer{CallID: "mc_AAECAwQFBgcICQoLDA0ODxAR", Status: 200,
+			Answer: Answer{CallID: "call-0001", Status: 200,
 				Header: map[string]string{"Content-Type": "text/event-stream", "Request-Id": "req_0001"}}},
 		{Name: "a collection with nothing new yet", From: 55,
-			Answer: Answer{CallID: "mc_AAECAwQFBgcICQoLDA0ODxAR", Status: 200,
+			Answer: Answer{CallID: "call-0001", Status: 200,
 				Header: map[string]string{"Content-Type": "text/event-stream", "Request-Id": "req_0001"}}},
 		{Name: "the last part", From: 55, Data: "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
-			Answer: Answer{CallID: "mc_AAECAwQFBgcICQoLDA0ODxAR", Status: 200,
+			Answer: Answer{CallID: "call-0001", Status: 200,
 				Header: map[string]string{"Content-Type": "text/event-stream", "Request-Id": "req_0001"}, Done: true}},
 		{Name: "an answer stopped because the AI agent may no longer act", From: 2048,
-			Answer: Answer{CallID: "mc_AAECAwQFBgcICQoLDA0ODxAR", Status: 200,
+			Answer: Answer{CallID: "call-0001", Status: 200,
 				Header: map[string]string{"Content-Type": "text/event-stream"}, Done: true,
 				Error: "this AI agent was revoked"}},
 		{Name: "a call whose provider could not be reached", From: 0,
-			Answer: Answer{CallID: "mc_AAECAwQFBgcICQoLDA0ODxAS", Done: true,
+			Answer: Answer{CallID: "call-0002", Done: true,
 				Error: "the model's provider could not be reached"}},
 		{Name: "the provider's own refusal, passed on", From: 0,
-			Data: `{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`,
-			Answer: Answer{CallID: "mc_AAECAwQFBgcICQoLDA0ODxAT", Status: 529,
+			Data: `{"error":{"message":"Too many requests"}}`,
+			Answer: Answer{CallID: "call-0003", Status: 429,
 				Header: map[string]string{"Content-Type": "application/json", "Retry-After": "30"}, Done: true}},
 	}
 	if err := fillModelCallVectors(&set); err != nil {
