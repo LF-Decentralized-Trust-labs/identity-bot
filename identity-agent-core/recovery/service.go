@@ -3,12 +3,15 @@ package recovery
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"identity-agent-core/authprovider"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -586,6 +589,13 @@ func (s *Service) Activate(sessionID string, req ActivateRequest) (*Session, err
 	}
 
 	if err := s.applyPayload(payload); err != nil {
+		// Stopped before anything but files the archive holds was written,
+		// and for a reason that passes: the session is left as it was, archive
+		// and all, so finishing is asking again.
+		var again *ErrRestoreCanBeRetried
+		if errors.As(err, &again) {
+			return nil, err
+		}
 		s.mu.Lock()
 		rec.Session.State = SessionFailed
 		rec.Session.Error = err.Error()
@@ -650,6 +660,22 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 		defer checked.cleanup()
 	}
 
+	// The files first, by path, before the key material and the identity.
+	//
+	// A file can fail for an ordinary reason: a database that is open and
+	// busy for longer than a restore waits. They used to go last, in whatever
+	// order a map gave them, so that left the root seed and the identity
+	// already replaced and the files part-way through, and the session was
+	// then marked failed, which ends a recovery that waited days. Done first,
+	// a failure here has replaced nothing but some of these files, each with
+	// what the archive holds, and writing them again is the same write, so
+	// the session stays open for another attempt (ErrRestoreCanBeRetried).
+	for _, f := range checked.files {
+		if err := backup.RestoreFile(s.DataDir, f.rel, f.raw); err != nil {
+			return &ErrRestoreCanBeRetried{Err: err}
+		}
+	}
+
 	if err := s.restoreTheKeyMaterial(payload); err != nil {
 		return err
 	}
@@ -702,29 +728,6 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 		}
 	}
 
-	// Every file the archive carries, back to the path it came from.
-	//
-	// The collector no longer names the files it takes — it sweeps the data
-	// directory — so this cannot name them either. A restore that knew only
-	// the files somebody remembered to list would drop exactly the ones a
-	// build on top of this core had added, which is the failure the sweep
-	// exists to remove. Every name was resolved to a path by
-	// checkBeforeWriting, so none of them can surprise this loop half-way
-	// through.
-	for name, raw := range payload.Bundle.Sections {
-		rel, ok := backup.FilePathOfSection(name)
-		if !ok {
-			continue
-		}
-		dest := filepath.Join(s.DataDir, rel)
-		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-			return fmt.Errorf("make room for %s: %w", rel, err)
-		}
-		if err := os.WriteFile(dest, raw, 0o600); err != nil {
-			return fmt.Errorf("write %s: %w", rel, err)
-		}
-	}
-
 	return nil
 }
 
@@ -761,6 +764,9 @@ func (s *Service) restoreTheKeyMaterial(payload *RestoredPayload) error {
 // checkedPayload is everything an archive's sections mean, read and validated
 // before the restore has written anything.
 type checkedPayload struct {
+	// files are the file sections to put back, in a fixed order: by path.
+	files []fileSection
+
 	credentials []store.CredentialRecord
 	settings    *store.SettingsData
 	pending     []store.PendingRequest
@@ -805,15 +811,29 @@ func (s *Service) checkBeforeWriting(payload *RestoredPayload) (*checkedPayload,
 	// path, so every one is resolved here. A name that does not land inside
 	// the data directory refuses the archive rather than being discovered
 	// part-way through writing the others.
-	for name := range payload.Bundle.Sections {
-		if _, ok := backup.FilePathOfSection(name); ok {
+	for name, raw := range payload.Bundle.Sections {
+		rel, ok := backup.FilePathOfSection(name)
+		if !ok {
+			if strings.HasPrefix(name, backup.FileSectionPrefix) {
+				return nil, fmt.Errorf(
+					"this archive names a file section with an unusable path: %q", name)
+			}
 			continue
 		}
-		if strings.HasPrefix(name, backup.FileSectionPrefix) {
-			return nil, fmt.Errorf(
-				"this archive names a file section with an unusable path: %q", name)
+		// Never a path the backup deliberately leaves out, whatever an archive
+		// says: which machines may act, which tokens are good and which bodies
+		// are an AI agent's are decided after a restore, not restored, and the
+		// identity database comes back only through its own section, migrated
+		// and checked. The same list the backup leaves them out by, so the two
+		// cannot drift. Passed over rather than refused, so an archive written
+		// before a rule was added still restores.
+		if why := backup.NotRestored(rel); why != "" {
+			log.Printf("[recovery] not restoring %s from the archive: %s", filepath.ToSlash(rel), why)
+			continue
 		}
+		checked.files = append(checked.files, fileSection{rel: rel, raw: raw})
 	}
+	sort.Slice(checked.files, func(i, j int) bool { return checked.files[i].rel < checked.files[j].rel })
 
 	// The database, unpacked and brought to this build's schema — here, before
 	// the seed is written, rather than during the restore.
@@ -1137,3 +1157,22 @@ func decodeWriterKey(b64 string) []byte {
 	}
 	return raw
 }
+
+// fileSection is a file an archive carries, and where it goes.
+type fileSection struct {
+	rel string
+	raw []byte
+}
+
+// ErrRestoreCanBeRetried is a restore that stopped before it wrote the key
+// material or the identity, having put back only some of the archive's files,
+// each as the archive holds it, for a reason that passes, such as a database
+// busy for longer than a restore waits. The session stays open, and asking to
+// finish it again completes it.
+type ErrRestoreCanBeRetried struct{ Err error }
+
+func (e *ErrRestoreCanBeRetried) Error() string {
+	return "the restore stopped before replacing this identity, and can be finished by trying again: " + e.Err.Error()
+}
+
+func (e *ErrRestoreCanBeRetried) Unwrap() error { return e.Err }
