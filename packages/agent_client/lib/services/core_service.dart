@@ -841,11 +841,17 @@ class CoreService {
   /// only the signature is sent.
   ///
   /// What the agent returns is checked to be the founding asked for before it
-  /// is signed (TheKeyInForce.requireTheFoundingIsThisDevices). Pass
-  /// [theCoreWasGivenThisPhrase] true when this phrase's seed was handed to
-  /// the agent first (RootSeedHandoff.register): only then may the founding
-  /// carry the agent's post-quantum commitment and messaging keys, which it
-  /// adds for a key it derives itself.
+  /// is signed (TheKeyInForce.requireTheFoundingIsThisDevices).
+  ///
+  /// [theCoreWasGivenThisPhrase] must be true ONLY when this same agent — the
+  /// one at [baseUrl] — accepted this phrase's seed in a
+  /// RootSeedHandoff.register call that returned true, before founding. It
+  /// lets the founding carry the core's post-quantum commitment and messaging
+  /// keys (TheKeyInForce.requireTheFoundingIsThisDevices), which the core adds
+  /// only for keys it derives from the seed it holds. Set any other way — for a
+  /// different core, a handoff that failed or was never made — it lets a core
+  /// put a post-quantum key of its own into this identity, which alone could
+  /// rotate it.
   Future<InceptionResponse> createInception({
     required String publicKey,
     required String nextPublicKey,

@@ -850,4 +850,15 @@ void main() {
       core.raws.removeLast();
     }
   });
+
+  test('a founding whose answer was lost after the core added it is finished later, without approval', () async {
+    core.dropsAnswersFrom = '/api/inception';
+    await expectLater(keri.inceptAid(name: 'Eaid', code: words.join(' ')), throwsA(isA<http.ClientException>()));
+    expect(core.kel.single['t'], 'icp');
+    expect(core.kel.single['sig'], isNull, reason: 'added, and its answer never arrived');
+    core.dropsAnswersFrom = null;
+    await keri.signPayload(name: 'Eaid', data: [1]);
+    expect(core.kel.single['sig'], isNotNull, reason: 'recognised as asked for and finished');
+    expect(await pending(), isEmpty);
+  });
 }

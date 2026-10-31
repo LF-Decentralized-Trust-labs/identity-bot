@@ -89,16 +89,21 @@ class TheKeyInForce {
   ///    device asked for one.
   /// The witnesses ("b", "bt") are the core's choice at founding.
   ///
-  /// Where [theCoreWasGivenThisPhrase] — the caller handed this phrase's seed
-  /// to this core before founding, as an app does that keeps its identity's
-  /// keys in the core too — the core adds two things of its own, derived from
-  /// that seed and so the identity's own keys: one more next-key commitment, to
+  /// Where [theCoreWasGivenThisPhrase] — this same core accepted this phrase's
+  /// seed in a RootSeedHandoff.register that returned true, before founding, as
+  /// an app does that keeps its identity's keys in the core too — the core adds
+  /// two things of its own, derived from that seed and so the identity's own
+  /// keys: one more next-key commitment, to
   /// a post-quantum key, and one anchor of the identity's messaging keys (an
   /// IA-HYBRID-1 keyset: "ia", "ka" and "sa" and nothing else). Only then are
   /// they accepted. A core adds them only for a key it derives itself, so from
   /// a core this device did not give the phrase, either one would be a key of
   /// that machine's in this identity — the post-quantum one alone could rotate
   /// it — and the founding is refused.
+  ///
+  /// The flag is the caller's statement and is not checked here. Set true for
+  /// a core that was not given the phrase, it lets that core plant its own
+  /// post-quantum key, which alone could rotate the identity.
   static void requireTheFoundingIsThisDevices(Map<String, dynamic> event,
       {required String key,
       required String next,

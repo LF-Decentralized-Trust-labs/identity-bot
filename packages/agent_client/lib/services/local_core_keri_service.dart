@@ -25,9 +25,15 @@ class LocalCoreKeriService extends KeriService {
   final String _baseUrl;
   final http.Client _client;
 
-  /// [theCoreWasGivenThisPhrase]: the app handed this phrase's seed to the
-  /// core before founding, so the founding may carry the core's post-quantum
-  /// commitment and messaging keys (TheKeyInForce.requireTheFoundingIsThisDevices).
+  /// [theCoreWasGivenThisPhrase] must be true ONLY when this same core — the
+  /// one at this base URL — accepted this phrase's seed in a
+  /// RootSeedHandoff.register call that returned true, before founding. It
+  /// lets the founding carry the core's post-quantum commitment and messaging
+  /// keys (TheKeyInForce.requireTheFoundingIsThisDevices), which the core adds
+  /// only for keys it derives from the seed it holds. Set any other way — for a
+  /// different core, a handoff that failed or was never made — it lets a core
+  /// put a post-quantum key of its own into this identity, which alone could
+  /// rotate it.
   LocalCoreKeriService({String? baseUrl, http.Client? client, this.theCoreWasGivenThisPhrase = false})
       // Where the KEYS are, which is not always this computer.
       //
