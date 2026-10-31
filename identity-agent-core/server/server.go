@@ -1539,6 +1539,12 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 	if s.refuseIfThisComputerMayNotFound(w) {
 		return
 	}
+	// Then whether there is an engine to found with, before anything is read
+	// or derived for a founding that cannot happen.
+	if s.KeriDriver == nil {
+		writeError(w, http.StatusServiceUnavailable, "No KERI engine is running", "an identity cannot be founded without one")
+		return
+	}
 
 	existing, _ := s.DataStore.GetIdentity()
 	if existing != nil {
@@ -1599,7 +1605,7 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 		keyIndex      int
 		anchors       []map[string]interface{}
 	)
-	ours := s.foundingKeyIsOurs(req.PublicKey)
+	ours := s.foundingKeyIsOurs(req.PublicKey, req.NextPublicKey)
 	if ours {
 		var err error
 		messagingKeys, keyIndex, err = s.deriveMessagingKeys("")
@@ -1689,10 +1695,6 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 		nextDigests, pq = s.postQuantumPreRotation(req.NextPublicKey)
 	}
 
-	if s.KeriDriver == nil {
-		writeError(w, http.StatusServiceUnavailable, "No KERI engine is running", "an identity cannot be founded without one")
-		return
-	}
 	result, err := s.KeriDriver.Incept(drivers.InceptionRequest{
 		PublicKey:      req.PublicKey,
 		NextPublicKey:  req.NextPublicKey,

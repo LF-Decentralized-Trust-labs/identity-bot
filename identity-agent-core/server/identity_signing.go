@@ -80,23 +80,28 @@ func (s *CoreServer) keyIsElsewhere() bool {
 	return errors.Is(s.keyCanSign(), errKeyElsewhere)
 }
 
-// foundingKeyIsOurs says whether publicKey, offered as the key an identity is
-// to be founded with, is the key this agent derives itself for a new identity:
-// generation 0 on branch 0 of the root seed it holds, the key
-// identitySigningSeed would find for the identity once founded. False where
-// no root seed is held or the key is any other.
-func (s *CoreServer) foundingKeyIsOurs(publicKey string) bool {
+// foundingKeyIsOurs says whether publicKey and nextPublicKey, offered as the
+// keys an identity is to be founded with and commit to, are the keys this
+// agent derives itself for a new identity: generations 0 and 1 on branch 0 of
+// the root seed it holds, the chain identitySigningSeed and ownRotationKeys
+// follow once it is founded. Both, so that "ours" means the whole founding
+// chain is this agent's: a founding with this agent's first key and somebody
+// else's next key is not one it may add its own keys to. False where no root
+// seed is held or either key is any other.
+func (s *CoreServer) foundingKeyIsOurs(publicKey, nextPublicKey string) bool {
 	rootSeed, err := secureenclave.LoadRootSeed(s.DataDir)
 	if err != nil {
 		return false
 	}
-	seed, err := backup.DerivePairwiseSeed(rootSeed, 0, 0)
-	if err != nil {
-		return false
+	for gen, offered := range []string{publicKey, nextPublicKey} {
+		seed, err := backup.DerivePairwiseSeed(rootSeed, 0, gen)
+		if err != nil {
+			return false
+		}
+		canonical, err := iacrypto.CanonicalVerkeyQB64(offered)
+		if err != nil || canonical != iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)) {
+			return false
+		}
 	}
-	offered, err := iacrypto.CanonicalVerkeyQB64(publicKey)
-	if err != nil {
-		return false
-	}
-	return offered == iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey))
+	return true
 }
