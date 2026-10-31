@@ -15,7 +15,7 @@ func TestPostQuantumPreRotationReportsHonestly(t *testing.T) {
 	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 
 	// No root seed in an empty data directory, so nothing can be derived.
-	digests, pq := s.postQuantumPreRotation("DAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8g")
+	digests, pq := s.postQuantumPreRotation("DJw8Aszer-nfK3XvwZGSnFBOqNNckWVtEZtt4JszoXX6")
 	if pq != nil {
 		t.Error("reported a commitment with no root seed to derive one from")
 	}
