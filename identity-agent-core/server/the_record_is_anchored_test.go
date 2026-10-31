@@ -441,6 +441,34 @@ func TestOnlyNamedWitnessesReceiptsCount(t *testing.T) {
 	}
 }
 
+// An anchoring the record identity's key log does not seal is not one.
+func TestAnAnchorNobodySealedIsCaught(t *testing.T) {
+	s, _ := anchoredTwice(t)
+	db := recordDB(t, s)
+	if _, err := db.Exec(`INSERT INTO record_anchors (seq, said, statement, digest, created_at) SELECT 99, said, statement, digest, created_at FROM record_anchors WHERE seq = 1`); err != nil {
+		t.Fatal(err)
+	}
+	mustBreak(t, s, "an anchoring nobody sealed")
+}
+
+// A record identity is the delegated identity it claims to be, of this
+// identity, and of nobody else.
+func TestARecordIdentityIsDelegatedByThisIdentity(t *testing.T) {
+	dip := map[string]interface{}{"t": "dip", "di": "EOrg", "i": "ERec"}
+	if !delegatedBy(dip, "EOrg", "ERec") {
+		t.Fatal("the organisation's own delegation was refused")
+	}
+	for _, bad := range []map[string]interface{}{
+		{"t": "icp", "di": "EOrg", "i": "ERec"},
+		{"t": "dip", "di": "EOther", "i": "ERec"},
+		{"t": "dip", "di": "EOrg", "i": "EElse"},
+	} {
+		if delegatedBy(bad, "EOrg", "ERec") {
+			t.Fatalf("%v was taken as the organisation's delegation of the record identity", bad)
+		}
+	}
+}
+
 // Where the organisation names witnesses, the record identity names the same
 // ones, and an anchoring counts as held outside only once enough of them have
 // receipted it.
