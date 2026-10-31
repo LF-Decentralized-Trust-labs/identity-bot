@@ -427,6 +427,7 @@ func (l *Log) writeEvent(ev InvocationEvent, strict bool) (int64, error) {
 	}
 	l.writeMu.Lock()
 	defer l.writeMu.Unlock()
+	ev = withValidUTF8(ev)
 
 	signer := l.getEventSigner()
 	begun := l.chainBegun()
@@ -716,9 +717,14 @@ func (l *Log) VerifyChain(keys EventKeys, start *ChainStart) ([]ChainFault, erro
 			if cerr != nil {
 				return nil, cerr
 			}
+			if why == "" {
+				why = recordEncodingFault([]byte(stored.String), ev, []byte(payload))
+			}
 			if why != "" {
 				fault(id, why)
 			}
+		} else if why := recordEncodingFault([]byte(stored.String), ev, []byte(payload)); why != "" {
+			fault(id, why)
 		}
 		if why := cols.disagreeWith(ev); why != "" {
 			fault(id, why)
@@ -752,6 +758,125 @@ func decodeEvent(stored []byte) (InvocationEvent, error) {
 		return ev, fmt.Errorf("more than one record")
 	}
 	return ev, nil
+}
+
+// withValidUTF8 replaces each run of invalid UTF-8 in every string of ev with
+// the replacement character, before it is signed or stored. The encoder would
+// write a bad byte as the escape \ufffd, which reads back as the replacement
+// character and encodes again raw, so the record would not be the encoding of
+// the event it reads as. Writing the character itself means it is.
+//
+// It walks the event by reflection, into slices and the structs pointers
+// lead to, so a string added to the event or to anything it holds is covered
+// without anyone remembering to list it.
+func withValidUTF8(ev InvocationEvent) InvocationEvent {
+	v := reflect.ValueOf(&ev).Elem()
+	validUTF8In(v)
+	return ev
+}
+
+func validUTF8In(v reflect.Value) {
+	switch v.Kind() {
+	case reflect.String:
+		if v.CanSet() {
+			v.SetString(strings.ToValidUTF8(v.String(), "\uFFFD"))
+		}
+	case reflect.Struct:
+		for i := 0; i < v.NumField(); i++ {
+			validUTF8In(v.Field(i))
+		}
+	case reflect.Slice:
+		if v.Len() == 0 || !v.CanSet() {
+			return
+		}
+		// A copy, so the caller's slice is not changed underneath it.
+		cp := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
+		reflect.Copy(cp, v)
+		for i := 0; i < cp.Len(); i++ {
+			validUTF8In(cp.Index(i))
+		}
+		v.Set(cp)
+	case reflect.Ptr:
+		if v.IsNil() || !v.CanSet() {
+			return
+		}
+		// Likewise a copy of what it points to.
+		cp := reflect.New(v.Type().Elem())
+		cp.Elem().Set(v.Elem())
+		validUTF8In(cp.Elem())
+		v.Set(cp)
+	}
+}
+
+// recordEncodingFault says why a record is not the one string its row allows,
+// or "" when it is. Spacing, key order, how a character is escaped and how a
+// number is written all leave an event the same, so without this one event
+// had many records; and the link to a record is the hash of its text, so a
+// record respelled kept its signature while its hash changed.
+//
+// Which string is allowed depends on what the row kept:
+//
+//   - With the signed bytes kept beside it, the record is those bytes with the
+//     signer and signature added, exactly where the encoder puts them. The
+//     signature fixes the kept bytes, so the record is fixed too. Encoding the
+//     event again is not the reference here, because it is not always the
+//     same string: a string with invalid UTF-8 was written with each bad byte
+//     escaped as \ufffd, and reads back as the replacement character itself,
+//     which encodes raw. An honest row written that way would fault.
+//   - Without them (a row from before they were kept, or never signed), the
+//     record is the encoding of the event it reads as. Such a row with invalid
+//     UTF-8 in it never verified, because its signature is checked over the
+//     same encoding.
+func recordEncodingFault(record []byte, ev InvocationEvent, kept []byte) string {
+	if len(kept) > 0 {
+		// Kept bytes are what a signature covers. On a row with no signature
+		// they fix nothing, so they cannot stand in for the encoding rule.
+		if ev.Signature == "" {
+			return "the row keeps signed bytes and carries no signature"
+		}
+		if want, ok := recordFromKept(kept, ev.SignerAID, ev.Signature); !ok || !bytes.Equal(record, want) {
+			return "the record is not the signed bytes kept beside it, with its signature"
+		}
+		return ""
+	}
+	if again, err := json.Marshal(ev); err != nil || !bytes.Equal(again, record) {
+		return "the record is not in the encoding this log writes"
+	}
+	return ""
+}
+
+// recordFromKept is the record a row with signed bytes kept stores: the kept
+// bytes, which are the event encoded with no signer and no signature, with
+// those two fields put back where the encoder writes them. They come after
+// every field but intent_event_id, so they go before that field, or before
+// the closing brace when it is absent. The text ,"intent_event_id": cannot
+// occur inside a string value, where every quote is escaped.
+func recordFromKept(kept []byte, signerAID, signature string) ([]byte, bool) {
+	fields, err := json.Marshal(struct {
+		SignerAID string `json:"signer_aid,omitempty"`
+		Signature string `json:"signature,omitempty"`
+	}{signerAID, signature})
+	if err != nil || len(kept) < 2 || kept[0] != '{' || kept[len(kept)-1] != '}' {
+		return nil, false
+	}
+	inner := fields[1 : len(fields)-1]
+	if len(inner) == 0 {
+		return kept, true
+	}
+	at := bytes.LastIndex(kept, []byte(`,"intent_event_id":`))
+	if at < 0 {
+		at = len(kept) - 1
+	}
+	out := make([]byte, 0, len(kept)+len(inner)+1)
+	out = append(out, kept[:at]...)
+	if at > 1 {
+		out = append(out, ',')
+	}
+	out = append(out, inner...)
+	if at == 1 && len(kept) > 2 {
+		out = append(out, ',')
+	}
+	return append(out, kept[at:]...), true
 }
 
 var (

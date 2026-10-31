@@ -70,5 +70,8 @@ func CheckStoredRow(row StoredRow, keys EventKeys) (InvocationEvent, string, err
 		return ev, "the record cannot be read: " + err.Error(), nil
 	}
 	why, err := verifyEventSignature(ev, []byte(row.SignedPayload), true, keys)
+	if err == nil && why == "" {
+		why = recordEncodingFault([]byte(row.Record), ev, []byte(row.SignedPayload))
+	}
 	return ev, why, err
 }
