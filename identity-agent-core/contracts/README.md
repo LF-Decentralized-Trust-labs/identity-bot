@@ -39,7 +39,7 @@ cannot run fails. The relay protocol's Python check and
 `check_model_call_vectors.py` follow the same rule.
 
 When a format changes on purpose, regenerate the files with
-`IA_WRITE_CONTRACTS=1 go test ./schemas ./agentbody ./agentmessage ./modelcall ./login` (refused
+`IA_WRITE_CONTRACTS=1 go test ./schemas ./agentbody ./agentmessage ./modelcall ./login ./backup` (refused
 when `CI` is set) and review the diff: every changed line is a change another
 implementation has to make.
 
@@ -53,5 +53,6 @@ implementation has to make.
 | `backup-push/push-protocol.schema.json` | Pushing a backup to a paired device |
 | `link-verifier/link-verifier-sdk.schema.json` | Verifying a link |
 | `../../packages/login-verify/test-vectors/core-canonical-and-spellings.json` | How the core reads a login: canonical challenge and assertion bodies, which key, identifier and signature spellings it accepts, and a signed assertion. Recomputed from the core by `../login`, and the TypeScript login verifier is held to it |
+| `../backup/identity-key-vectors.json` | How an identity's keys come from its recovery phrase: the BIP39 seed, then SLIP-0010 Ed25519 at m/44'/0'/0'/0'/n' for key n, with SLIP-0010's own vector as an anchor. Checked by `../backup` and by the Dart key manager in `packages/agent_client` |
 | `root-aid-continuity/continuity-proof.schema.json` | Proving a root identifier continues |
 | `update-manifest/manifest.schema.json` | A signed release manifest |

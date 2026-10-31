@@ -35,30 +35,64 @@ class AgentKeyPair {
 }
 
 class KeyManager {
-  /// The 32 bytes Ed25519 actually takes, for the identity's signing key.
-  ///
-  /// Exposed because anything that SIGNS as this identity later has to arrive
-  /// at the same bytes, and the only safe way to guarantee that is to call the
-  /// one function rather than repeat the steps. Repeating them is not a
-  /// hypothetical risk: seedFromMnemonic did, stopped one step short, and
-  /// produced a seed that signs as a key this identity has never used.
-  ///
-  /// A BIP39 seed is 64 bytes and Ed25519 wants 32, so something has to give.
-  /// What gives is a SHA-256 of the first half — not a truncation of it. The
-  /// difference is invisible until a signature is checked by somebody else.
+  /// The branch an identity's own keys are on: m/44'/0'/0'/0'/n'. The core
+  /// derives an identity's keys from the same phrase on the same path
+  /// (DerivePairwiseSeed in identity-agent-core/backup), so an identity founded
+  /// here is one the core can find again from the phrase.
+  static const identityBranch = 0;
+
+  /// The 32 bytes Ed25519 takes for key [index] of the identity: SLIP-0010
+  /// Ed25519 from the 64-byte BIP39 [seed], at m/44'/0'/0'/0'/[index]'.
   ///
   /// [index] is which key in the identity's chain of keys: 0 is the key it was
   /// founded with, 1 the next key that founding committed to, 2 the key the
-  /// first rotation commits to, and so on. Key n for n > 0 is a SHA-256 of the
-  /// first half and the byte n. Every key, at every index, comes from here:
-  /// rotation once hashed a second time on top of this, so the key it named was
-  /// neither the one founding had committed to nor the one that signed.
+  /// first rotation commits to, and so on.
+  ///
+  /// Exposed because anything that SIGNS as this identity later has to arrive
+  /// at the same bytes, and the only safe way to guarantee that is to call the
+  /// one function rather than repeat the steps. Every key, at every index,
+  /// comes from here, and identity-agent-core/backup/identity-key-vectors.json
+  /// holds this function and the core's to the same answers.
+  ///
+  /// This replaced a SHA-256 of the seed's first half and the byte n, which
+  /// only this app computed: an identity founded on it could not be recovered
+  /// anywhere else from its phrase.
   static Uint8List signingSeed(Uint8List seed, {int index = 0}) {
-    if (index < 0 || index > 255) {
-      throw ArgumentError.value(index, 'index', 'a key index is one byte');
+    if (index < 0 || index >= 0x80000000) {
+      throw ArgumentError.value(index, 'index', 'a key index is below 2^31');
     }
-    final half = seed.sublist(0, 32);
-    return Uint8List.fromList(sha256.convert(index == 0 ? half : [...half, index]).bytes);
+    return slip10Ed25519(seed, [
+      44 | _hardened,
+      0 | _hardened,
+      0 | _hardened,
+      identityBranch | _hardened,
+      index | _hardened,
+    ]);
+  }
+
+  static const _hardened = 0x80000000;
+
+  /// SLIP-0010 for Ed25519: the master key is HMAC-SHA512 keyed "ed25519
+  /// seed" over [seed], and each step of [path] — every one hardened, the only
+  /// kind Ed25519 has — is HMAC-SHA512 under the chain code over 0x00, the
+  /// parent key and the index, big-endian. Returns the 32-byte private key.
+  static Uint8List slip10Ed25519(Uint8List seed, List<int> path) {
+    var i = Hmac(sha512, utf8.encode('ed25519 seed')).convert(seed).bytes;
+    var key = i.sublist(0, 32);
+    var chain = i.sublist(32);
+    for (final step in path) {
+      if (step < _hardened || step > 0xFFFFFFFF) {
+        throw ArgumentError.value(step, 'path', 'every Ed25519 step is hardened');
+      }
+      final data = Uint8List(37)
+        ..[0] = 0
+        ..setRange(1, 33, key)
+        ..buffer.asByteData().setUint32(33, step);
+      i = Hmac(sha512, chain).convert(data).bytes;
+      key = i.sublist(0, 32);
+      chain = i.sublist(32);
+    }
+    return Uint8List.fromList(key);
   }
 
   /// The key pair at [index] in the identity's chain (see [signingSeed]).

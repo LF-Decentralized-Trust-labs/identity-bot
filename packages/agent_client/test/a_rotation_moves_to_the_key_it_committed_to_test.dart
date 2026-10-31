@@ -141,7 +141,7 @@ void main() {
     expect(rotation['new_next_public_key'], isNot(rotation['new_public_key']));
   });
 
-  test('every key in the chain comes from signingSeed, hashed once', () {
+  test('every key in the chain comes from signingSeed', () {
     final seed = Bip39.mnemonicToSeed(words);
     final keys = KeyManager.generateKeysFromMnemonic(words);
     for (final (index, pair) in [(0, keys.signing), (1, keys.next)]) {
@@ -150,7 +150,8 @@ void main() {
       expect(KeyManager.keyAt(seed, index).publicKey, fromSeed.bytes);
     }
     expect(KeyManager.signingSeed(seed), KeyManager.signingSeed(seed, index: 0));
-    expect(() => KeyManager.signingSeed(seed, index: 256), throwsArgumentError);
+    expect(() => KeyManager.signingSeed(seed, index: -1), throwsArgumentError);
+    expect(() => KeyManager.signingSeed(seed, index: 0x80000000), throwsArgumentError);
   });
 
   test('a signature made as the identity reports the key that made it', () async {
