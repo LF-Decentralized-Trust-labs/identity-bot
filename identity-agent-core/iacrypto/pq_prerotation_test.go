@@ -152,7 +152,7 @@ func TestTheCommitmentIsAnOrdinaryDigestWidth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	classical, err := NextKeyDigest("DAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8g")
+	classical, err := NextKeyDigest("DIqI4910CfGV_VLbLTy6XXLKZwm_HZQSG_N0iAG0D29c")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestBothNextKeyFormsCommitIdentically(t *testing.T) {
 // A non-transferable qb64 key is still refused: the engine would commit to
 // its text with code B, and a commitment here over code D would disagree.
 func TestANextKeyIsCommittedToInAnySpelling(t *testing.T) {
-	raw, err := base64.StdEncoding.DecodeString("DDfja0BSaHyUzcmR5qSWupbddyc85Oe3PRRcFkiitao=")
+	raw, err := base64.StdEncoding.DecodeString("DsOf06GmmgHo7sSLghlyd5EbCB9AhW146xyb1vFdeiI=") // a real key: a key is a point
 	if err != nil {
 		t.Fatal(err)
 	}

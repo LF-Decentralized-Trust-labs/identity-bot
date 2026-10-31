@@ -17,7 +17,7 @@ func TestARawKeyIsNeverTakenForQB64(t *testing.T) {
 	for _, raw64 := range []string{
 		"B/awzunMRvtYlgq21ZegG9MD5kNmLbPNspHGcryAbK4=", // standard alphabet
 		"DhIl/3hQFnLNtcKl1Jf8wdRBd5k81l/tS4158ZPje64=",
-		"DDfja0BSaHyUzcmR5qSWupbddyc85Oe3PRRcFkiitao=", // only the padding is not base64url
+		"DsOf06GmmgHo7sSLghlyd5EbCB9AhW146xyb1vFdeiI=", // only the padding is not base64url
 	} {
 		raw, err := base64.StdEncoding.DecodeString(raw64)
 		if err != nil {

@@ -187,7 +187,7 @@ func TestAPairedComputerRefusesARootSeed(t *testing.T) {
 	}
 	if err := s.SealOwnerAuthority(OwnerAuthority{
 		AID:       "EThePersonWhoOwnsIt",
-		PublicKey: "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+		PublicKey: "ypOsFwUYcHHWe4PH_w7-gQjo7EUwV113JoeTM9vavnw",
 	}); err != nil {
 		t.Fatal(err)
 	}

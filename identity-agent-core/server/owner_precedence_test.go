@@ -49,7 +49,7 @@ func TestTheAnchoredOwnerBeatsASealedFile(t *testing.T) {
 	// redeeming an invite would.
 	if err := s.SealOwnerAuthority(OwnerAuthority{
 		AID:       "EIMPOSTER",
-		PublicKey: "DEC4FUUdUvgDKk07vt2cJUOaSGVLBGnbeGGjHvJTMUgo",
+		PublicKey: "DO1JKMYo0cLG6ukDOJBZlWEpWSc6XGP5NjbBRhSshzfR",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestASealedRecordForADifferentOwnerIsStillRefused(t *testing.T) {
 	// Somebody re-seals under their own AID, the way a second signer would.
 	if err := s.SealOwnerAuthority(OwnerAuthority{
 		AID:       "EIMPOSTER",
-		PublicKey: "DEC4FUUdUvgDKk07vt2cJUOaSGVLBGnbeGGjHvJTMUgo",
+		PublicKey: "DO1JKMYo0cLG6ukDOJBZlWEpWSc6XGP5NjbBRhSshzfR",
 	}); err != nil {
 		t.Fatal(err)
 	}
