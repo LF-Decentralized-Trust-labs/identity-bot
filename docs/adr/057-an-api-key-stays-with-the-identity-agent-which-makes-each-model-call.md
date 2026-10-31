@@ -70,9 +70,9 @@ The schema states each rule exactly. In short:
   model calls, its list of models, one model by name below that list, and its
   own read-only and counting routes, such as counting a request's tokens or
   reading the key's own details. The checks read that profile. Nothing outside
-  it is made. A profile that is not valid (a lower-case route method, a name
-  listed twice ignoring ASCII case, or a query parameter with other than one
-  rule) allows no call.
+  it is made. A profile that is not valid (a lower-case route method, a header
+  name that is not an HTTP header name, a name listed twice ignoring ASCII
+  case, or a query parameter with other than one rule) allows no call.
 - **The method** is GET or POST, in any ASCII case, whatever the profile lists.
 - **The path** must be plain: at most 256 bytes, starting with `/`, holding
   only ASCII letters, digits and `. - _ : / ~`, and unchanged by cleaning.
@@ -81,11 +81,12 @@ The schema states each rule exactly. In short:
   sorted by name.
 - **Headers** are the profile's, matched in any ASCII case. Any other header is
   dropped, not refused. Whatever a profile lists, credentials and
-  per-connection headers never travel on (`Authorization`,
-  `Proxy-Authorization`, `Cookie`, `X-Api-Key`, `Api-Key`, `Host`,
+  per-connection headers never travel, on or back: `Authorization`,
+  `Authentication`, `Proxy-Authorization`, `Cookie`, `Cookie2`, `Set-Cookie`,
+  `Set-Cookie2`, `X-Api-Key`, `Api-Key`, `X-Auth-Token`, `Host`,
   `Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`,
-  `Proxy-Connection`, `TE`, `Trailer`, `Upgrade`, `Expect`), and those and
-  `Set-Cookie` and `Set-Cookie2` never travel back. Where one is given more than once in different cases,
+  `Proxy-Connection`, `TE`, `Trailer`, `Upgrade` and `Expect`. These are matched in any
+  ASCII case, an underscore counting as a hyphen. Where one is given more than once in different cases,
   the first by byte order among those with a value is sent. Nothing that proves
   who the brain is travels on.
 - **The body** is at most 3 MB, in standard base64 with padding and no line

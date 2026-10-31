@@ -33,9 +33,12 @@ FORM_SAFE = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~
 PATH_SAFE = FORM_SAFE + b"$&+:=@"
 # The headers that never travel, whatever a profile lists, as the request
 # definition's prose and the answer's header prose name them.
-NEVER_ON = ["Authorization", "Proxy-Authorization", "Cookie", "X-Api-Key", "Api-Key", "Host", "Content-Length",
-            "Transfer-Encoding", "Connection", "Keep-Alive", "Proxy-Connection", "TE", "Trailer", "Upgrade", "Expect"]
-NEVER_BACK = NEVER_ON + ["Set-Cookie", "Set-Cookie2"]
+NEVER_ON = ["Authorization", "Authentication", "Proxy-Authorization", "Cookie", "Cookie2", "Set-Cookie", "Set-Cookie2",
+            "X-Api-Key", "Api-Key", "X-Auth-Token", "Host", "Content-Length", "Transfer-Encoding", "Connection", "Keep-Alive",
+            "Proxy-Connection", "TE", "Trailer", "Upgrade", "Expect"]
+NEVER_BACK = list(NEVER_ON)
+# The characters of an HTTP header name (RFC 9110 token).
+TOKEN = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&'*+-.^_`|~")
 
 # The refusal statuses, by reason, as the refusal definition's prose lists them:
 # (status, says refused, says no_call).
@@ -190,9 +193,9 @@ def query(profile, raw):
 
 def pick(names, sent, never):
     out = {}
-    never = {fold(n) for n in never}
+    never = {fold(n).replace("_", "-") for n in never}
     for name in names:
-        if fold(name) in never:
+        if fold(name).replace("_", "-") in never:
             continue
         for k in sorted(sent):
             if fold(k) == fold(name) and sent[k] != "":
@@ -366,6 +369,9 @@ def profile_valid(profile):
     in each list ignoring ASCII case, and exactly one rule per query parameter."""
     for r in profile["routes"]:
         if r["method"] == "" or r["method"] != upper(r["method"]):
+            return False
+    for h in profile["headers"] + profile["answer_headers"]:
+        if h == "" or any(c not in TOKEN for c in h):
             return False
     for q in profile["query"]:
         given = [q.get("value", "") != "", q.get("digits", 0) != 0, q.get("plain", 0) != 0]

@@ -435,6 +435,12 @@ func writeModelCallVectors(t *testing.T) {
 		{Name: "a method other than GET or POST, though the profile lists it", Profile: withPUT, Request: call("PUT", "/v1/models")},
 		{Name: "a profile naming a route's method in lower case allows no call",
 			Profile: withProfile(func(p *Profile) { p.Routes = append(p.Routes, Route{Method: "get", Path: "/v1/other"}) }), Request: models},
+		{Name: "a profile naming a header with a space in it allows no call",
+			Profile: withProfile(func(p *Profile) { p.Headers = append(p.Headers, "Authorization ") }), Request: models},
+		{Name: "a profile naming a header with a colon in it allows no call",
+			Profile: withProfile(func(p *Profile) { p.AnswerHeaders = append(p.AnswerHeaders, "Set-Cookie:") }), Request: models},
+		{Name: "a profile naming a header with a letter outside ASCII allows no call",
+			Profile: withProfile(func(p *Profile) { p.Headers = append(p.Headers, "C\u00f6okie") }), Request: models},
 		{Name: "a profile naming one header twice, ignoring case, allows no call",
 			Profile: withProfile(func(p *Profile) { p.Headers = append(p.Headers, "ACCEPT") }), Request: models},
 		{Name: "a profile naming one answer-length field twice, ignoring case, allows no call", Allowance: true,
@@ -524,6 +530,12 @@ func writeModelCallVectors(t *testing.T) {
 				"Transfer-Encoding": "chunked", "Connection": "close", "Keep-Alive": "timeout=5", "Proxy-Connection": "close",
 				"TE": "trailers", "Trailer": "X-Sum", "Upgrade": "websocket", "Expect": "100-continue",
 				"Accept": "application/json"}},
+		{Name: "an underscore counts as a hyphen: those spellings never travel either",
+			Profile: withProfile(func(p *Profile) {
+				p.Headers = append(p.Headers, "X_Api_Key", "Proxy_Authorization", "Content_Length", "Transfer_Encoding")
+			}),
+			Sent: map[string]string{"X_Api_Key": "run-token", "proxy_authorization": "Basic x", "Content_Length": "9",
+				"TRANSFER_ENCODING": "chunked", "Accept": "application/json"}},
 	}
 	set.AnswerHeaders = []HeaderVector{
 		{Name: "what describes the answer travels back", Sent: map[string]string{"Content-Type": "text/event-stream",
@@ -535,6 +547,9 @@ func writeModelCallVectors(t *testing.T) {
 			Sent: map[string]string{"Set-Cookie": "session=x", "set-cookie2": "session=y", "Authorization": "Bearer key",
 				"X-Api-Key": "key", "Connection": "close", "Transfer-Encoding": "chunked", "Content-Length": "10",
 				"Content-Type": "application/json"}},
+		{Name: "an underscore counts as a hyphen: those spellings never travel back either",
+			Profile: withProfile(func(p *Profile) { p.AnswerHeaders = append(p.AnswerHeaders, "Set_Cookie", "Content_Length") }),
+			Sent:    map[string]string{"Set_Cookie": "session=x", "content_length": "10", "Request-Id": "req_0001"}},
 	}
 	set.Collections = []CollectionVector{
 		{Name: "the first collection", CallID: "call-0001", From: 0, Lease: lease},
@@ -579,7 +594,7 @@ func writeModelCallVectors(t *testing.T) {
 	}
 	set.Borrow.Answer = Borrowed{LeaseID: "lease-0001", LeaseExpiresAt: "2026-10-30T12:05:00Z", RenewEverySeconds: 100}
 	set.Borrow.Renewed.LeaseExpiresAt = "2026-10-30T12:06:40Z"
-	set.Borrow.LeaseGone.Error = "no such lend"
+	set.Borrow.LeaseGone.Error = "no such lease"
 	set.Borrow.UpdateAgentHost.Error = "this AI agent's key stays with its Identity Agent, and this machine's body is too old to make its model calls through it; update it"
 	if err := fillModelCallVectors(&set); err != nil {
 		t.Fatal(err)

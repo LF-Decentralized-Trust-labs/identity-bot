@@ -392,7 +392,8 @@ type Profile struct {
 }
 
 // Validate reports why p is not a profile the checks can read, or nothing:
-// each route's method is upper case; the names in each of Headers,
+// each route's method is upper case; each of Headers and AnswerHeaders is
+// an HTTP header name (HeaderName); the names in each of Headers,
 // AnswerHeaders, Parameters, AnswerBoundNames and AnswerCountNames are
 // distinct ignoring ASCII case; and each query parameter gives exactly one of
 // Value (not empty), Digits or Plain (each at least 1). A profile that breaks
@@ -401,6 +402,11 @@ func (pr Profile) Validate() error {
 	for _, r := range pr.Routes {
 		if r.Method == "" || r.Method != asciiUpper(r.Method) {
 			return fmt.Errorf("the profile's route %s %s does not name its method in upper case", printable(r.Method, 10), printable(r.Path, 80))
+		}
+	}
+	for _, h := range append(append([]string(nil), pr.Headers...), pr.AnswerHeaders...) {
+		if !HeaderName(h) {
+			return fmt.Errorf("the profile's header %q is not an HTTP header name", printable(h, 40))
 		}
 	}
 	names := make([]string, len(pr.Parameters))
@@ -539,16 +545,17 @@ func (pr Profile) Query(raw string) (string, error) {
 }
 
 // NeverPassedOn are headers of a call that never travel on, whatever a
-// profile lists: what proves who the brain is, and what belongs to one
-// connection only. The Identity Agent sets its own.
-var NeverPassedOn = []string{"Authorization", "Proxy-Authorization", "Cookie", "X-Api-Key", "Api-Key", "Host",
-	"Content-Length", "Transfer-Encoding", "Connection", "Keep-Alive", "Proxy-Connection", "TE", "Trailer",
-	"Upgrade", "Expect"}
+// profile lists: what proves who the brain is or would set a credential, and
+// what belongs to one connection only. The Identity Agent sets its own. A name is compared
+// ignoring ASCII case and counting an underscore as a hyphen.
+var NeverPassedOn = []string{"Authorization", "Authentication", "Proxy-Authorization", "Cookie", "Cookie2",
+	"Set-Cookie", "Set-Cookie2", "X-Api-Key", "Api-Key", "X-Auth-Token", "Host", "Content-Length",
+	"Transfer-Encoding", "Connection", "Keep-Alive", "Proxy-Connection", "TE", "Trailer", "Upgrade", "Expect"}
 
 // NeverPassedBack are headers of the provider's answer that never travel
-// back, whatever a profile lists: those that never travel on, and what would
-// set a credential on the brain's side.
-var NeverPassedBack = append(append([]string(nil), NeverPassedOn...), "Set-Cookie", "Set-Cookie2")
+// back, whatever a profile lists: the same as never travel on, Set-Cookie
+// and Set-Cookie2 among them.
+var NeverPassedBack = append([]string(nil), NeverPassedOn...)
 
 // PassedHeaders are the headers of h that travel on, named as the profile
 // names them, matched in any ASCII case. A header in NeverPassedOn never
@@ -571,7 +578,7 @@ func pick(names, never []string, h map[string]string) map[string]string {
 	var out map[string]string
 	keys := sortedKeys(h)
 	for _, name := range names {
-		if foldIn(name, never) {
+		if neverPassed(name, never) {
 			continue
 		}
 		for _, k := range keys {
@@ -894,14 +901,31 @@ func asciiEqualFold(a, b string) bool {
 	return true
 }
 
-// foldIn reports whether name is in list, ignoring ASCII case.
-func foldIn(name string, list []string) bool {
-	for _, x := range list {
-		if asciiEqualFold(name, x) {
+// neverPassed reports whether name is in never, ignoring ASCII case and
+// counting an underscore as a hyphen, so no spelling of a header that never
+// travels gets through.
+func neverPassed(name string, never []string) bool {
+	for _, x := range never {
+		if asciiEqualFold(strings.ReplaceAll(name, "_", "-"), strings.ReplaceAll(x, "_", "-")) {
 			return true
 		}
 	}
 	return false
+}
+
+// HeaderName reports whether s is a valid HTTP header name (RFC 9110): one
+// or more of the token characters A-Z, a-z, 0-9 and ! # $ % & ' * + - . ^ _ ` | ~.
+func HeaderName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !('A' <= c && c <= 'Z' || 'a' <= c && c <= 'z' || '0' <= c && c <= '9' || strings.IndexByte("!#$%&'*+-.^_`|~", c) >= 0) {
+			return false
+		}
+	}
+	return true
 }
 
 func asciiLower(c byte) byte {

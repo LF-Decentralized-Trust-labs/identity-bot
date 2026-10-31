@@ -95,7 +95,7 @@
       "returned": true
     },
     "lease_gone": {
-      "error": "no such lend",
+      "error": "no such lease",
       "no_lease": true
     },
     "update_agent_host": {
@@ -1051,6 +1051,237 @@
           "Example-Version",
           "Example-Beta",
           "Example-Preview"
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id"
+        ],
+        "query": [
+          {
+            "name": "preview",
+            "value": "true"
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a profile naming a header with a space in it allows no call",
+      "profile": {
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview",
+          "Authorization "
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id"
+        ],
+        "query": [
+          {
+            "name": "preview",
+            "value": "true"
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a profile naming a header with a colon in it allows no call",
+      "profile": {
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview"
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id",
+          "Set-Cookie:"
+        ],
+        "query": [
+          {
+            "name": "preview",
+            "value": "true"
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "request": {
+        "lease_id": "lease-0001",
+        "method": "GET",
+        "path": "/v1/models"
+      },
+      "outcome": {
+        "allowed": false,
+        "reason": "not_allowed",
+        "status": 403,
+        "refused": true
+      }
+    },
+    {
+      "name": "a profile naming a header with a letter outside ASCII allows no call",
+      "profile": {
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview",
+          "Cöokie"
         ],
         "answer_headers": [
           "Content-Type",
@@ -2286,10 +2517,15 @@
           "Example-Beta",
           "Example-Preview",
           "Authorization",
+          "Authentication",
           "Proxy-Authorization",
           "Cookie",
+          "Cookie2",
+          "Set-Cookie",
+          "Set-Cookie2",
           "X-Api-Key",
           "Api-Key",
+          "X-Auth-Token",
           "Host",
           "Content-Length",
           "Transfer-Encoding",
@@ -2307,10 +2543,15 @@
           "Request-Id",
           "X-Request-Id",
           "Authorization",
+          "Authentication",
           "Proxy-Authorization",
           "Cookie",
+          "Cookie2",
+          "Set-Cookie",
+          "Set-Cookie2",
           "X-Api-Key",
           "Api-Key",
+          "X-Auth-Token",
           "Host",
           "Content-Length",
           "Transfer-Encoding",
@@ -2320,9 +2561,7 @@
           "TE",
           "Trailer",
           "Upgrade",
-          "Expect",
-          "Set-Cookie",
-          "Set-Cookie2"
+          "Expect"
         ],
         "query": [
           {
@@ -2369,6 +2608,85 @@
         "Upgrade": "websocket",
         "X-API-KEY": "run-token",
         "proxy-authorization": "Basic x"
+      },
+      "passed": {
+        "Accept": "application/json"
+      }
+    },
+    {
+      "name": "an underscore counts as a hyphen: those spellings never travel either",
+      "profile": {
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview",
+          "X_Api_Key",
+          "Proxy_Authorization",
+          "Content_Length",
+          "Transfer_Encoding"
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id"
+        ],
+        "query": [
+          {
+            "name": "preview",
+            "value": "true"
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "sent": {
+        "Accept": "application/json",
+        "Content_Length": "9",
+        "TRANSFER_ENCODING": "chunked",
+        "X_Api_Key": "run-token",
+        "proxy_authorization": "Basic x"
       },
       "passed": {
         "Accept": "application/json"
@@ -2442,10 +2760,15 @@
           "Example-Beta",
           "Example-Preview",
           "Authorization",
+          "Authentication",
           "Proxy-Authorization",
           "Cookie",
+          "Cookie2",
+          "Set-Cookie",
+          "Set-Cookie2",
           "X-Api-Key",
           "Api-Key",
+          "X-Auth-Token",
           "Host",
           "Content-Length",
           "Transfer-Encoding",
@@ -2463,10 +2786,15 @@
           "Request-Id",
           "X-Request-Id",
           "Authorization",
+          "Authentication",
           "Proxy-Authorization",
           "Cookie",
+          "Cookie2",
+          "Set-Cookie",
+          "Set-Cookie2",
           "X-Api-Key",
           "Api-Key",
+          "X-Auth-Token",
           "Host",
           "Content-Length",
           "Transfer-Encoding",
@@ -2476,9 +2804,7 @@
           "TE",
           "Trailer",
           "Upgrade",
-          "Expect",
-          "Set-Cookie",
-          "Set-Cookie2"
+          "Expect"
         ],
         "query": [
           {
@@ -2520,6 +2846,81 @@
       },
       "passed": {
         "Content-Type": "application/json"
+      }
+    },
+    {
+      "name": "an underscore counts as a hyphen: those spellings never travel back either",
+      "profile": {
+        "routes": [
+          {
+            "method": "POST",
+            "path": "/v1/generate"
+          },
+          {
+            "method": "POST",
+            "path": "/v1/generate/count",
+            "counts": true
+          },
+          {
+            "method": "POST",
+            "path": "/v1/complete"
+          },
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ],
+        "models_path": "/v1/models",
+        "headers": [
+          "Content-Type",
+          "Accept",
+          "Example-Version",
+          "Example-Beta",
+          "Example-Preview"
+        ],
+        "answer_headers": [
+          "Content-Type",
+          "Retry-After",
+          "Request-Id",
+          "X-Request-Id",
+          "Set_Cookie",
+          "Content_Length"
+        ],
+        "query": [
+          {
+            "name": "preview",
+            "value": "true"
+          },
+          {
+            "name": "page_size",
+            "digits": 4
+          },
+          {
+            "name": "page_after",
+            "plain": 128
+          },
+          {
+            "name": "page_before",
+            "plain": 128
+          }
+        ],
+        "answer_bound_names": [
+          "max_answer_tokens",
+          "answer_limit",
+          "answer_tokens"
+        ],
+        "answer_count_names": [
+          "answer_count",
+          "candidates"
+        ]
+      },
+      "sent": {
+        "Request-Id": "req_0001",
+        "Set_Cookie": "session=x",
+        "content_length": "10"
+      },
+      "passed": {
+        "Request-Id": "req_0001"
       }
     }
   ],
