@@ -3,6 +3,7 @@ package backup
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -126,6 +127,20 @@ func TestTheSweepStaysInsideTheDataDirectory(t *testing.T) {
 	for name, data := range bundle.Sections {
 		if strings.Contains(name, "tax-returns") || strings.Contains(string(data), "nothing to do with") {
 			t.Fatalf("the sweep reached outside the agent's storage: %s", name)
+		}
+	}
+}
+
+// On Windows a device name and a colon are no path to a file in the data
+// directory: NUL and CON are devices, and a colon names a drive or another
+// file's alternate stream.
+func TestAWindowsDeviceOrStreamIsNoPath(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("these names are ordinary file names elsewhere")
+	}
+	for _, bad := range []string{"NUL", "CON", "sub/aux.txt", "C:foo", "notes.txt:hidden"} {
+		if _, ok := FilePathOfSection(FileSectionPrefix + bad); ok {
+			t.Errorf("%q was accepted as a path to write to", bad)
 		}
 	}
 }

@@ -345,9 +345,11 @@ func FilePathOfSection(name string) (string, bool) {
 	if rel == "" {
 		return "", false
 	}
+	// IsLocal rather than a check for "..": on Windows it also refuses a
+	// device name such as NUL or CON, which is no file at all, and a colon,
+	// which names a drive or an alternate stream of another file.
 	clean := filepath.Clean(filepath.FromSlash(rel))
-	if filepath.IsAbs(clean) || clean == ".." ||
-		strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+	if !filepath.IsLocal(clean) {
 		return "", false
 	}
 	return clean, true
