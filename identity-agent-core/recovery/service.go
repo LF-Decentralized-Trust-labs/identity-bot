@@ -710,18 +710,16 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 	// build on top of this core had added, which is the failure the sweep
 	// exists to remove. Every name was resolved to a path by
 	// checkBeforeWriting, so none of them can surprise this loop half-way
-	// through.
+	// through. A database among them may be open right now, by this core or
+	// an add-on, and is restored into rather than written over
+	// (backup.RestoreFile).
 	for name, raw := range payload.Bundle.Sections {
 		rel, ok := backup.FilePathOfSection(name)
 		if !ok {
 			continue
 		}
-		dest := filepath.Join(s.DataDir, rel)
-		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-			return fmt.Errorf("make room for %s: %w", rel, err)
-		}
-		if err := os.WriteFile(dest, raw, 0o600); err != nil {
-			return fmt.Errorf("write %s: %w", rel, err)
+		if err := backup.RestoreFile(s.DataDir, rel, raw); err != nil {
+			return err
 		}
 	}
 
