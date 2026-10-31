@@ -475,6 +475,12 @@ func (h *Handler) prepareLogin(req StartLoginRequest) (*ChallengeBundle, *SiteRe
 	if err != nil || !ok {
 		return nil, nil, nil, fmt.Errorf("challenge verification failed")
 	}
+	// The expiry is read from the bundle whose signature was just verified,
+	// never from an earlier fetch of the same session, which a relay could
+	// have served differently.
+	if err := CheckExpiry(bundle.Expiry, time.Now()); err != nil {
+		return nil, nil, nil, err
+	}
 
 	// Membership-gated assets anchor the relationship to the asset's CONTROLLER
 	// (the delegating identity — an organization or an individual) so the
@@ -666,6 +672,10 @@ func (h *Handler) completeLogin(p *pendingLogin) (map[string]interface{}, error)
 	}
 	rel := p.Relationship
 	bundle := p.Bundle
+	// A login prepared earlier can expire before the person approves it.
+	if err := CheckExpiry(bundle.Expiry, time.Now()); err != nil {
+		return nil, err
+	}
 
 	var customData map[string]interface{}
 	var err error

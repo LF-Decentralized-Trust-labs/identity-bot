@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -12,6 +13,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"identity-agent-core/login"
 )
 
 // The single gate for the dumb-router scanner. The scanner forwards the raw scanned URL here;
@@ -74,6 +77,13 @@ func (s *CoreServer) handleScanDecode(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
+	// An expired Ask gets no consent screen, so nobody approves what will be
+	// refused.
+	if ferr := askExpiryFresh(ctx.AskBytes, time.Now()); ferr != nil {
+		status, _ := statusForAskExpiry(ferr)
+		http.Error(w, ferr.Error(), status)
+		return
+	}
 	// Base-layer verification: a base-layer-signed Ask must have a valid signature.
 	if verr := s.verifyAskSignature(ctx.AskBytes); verr != nil {
 		http.Error(w, verr.Error(), http.StatusUnauthorized)
@@ -86,6 +96,10 @@ func (s *CoreServer) handleScanDecode(w http.ResponseWriter, r *http.Request) {
 	}
 	preview, err := h.Preview(s, ctx)
 	if err != nil {
+		if status, ok := statusForAskExpiry(err); ok {
+			http.Error(w, err.Error(), status)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
@@ -120,6 +134,13 @@ func (s *CoreServer) handleScanExecute(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
+	// Freshness: a relayed code must not stay valid forever, so an expired Ask
+	// is refused before anything is signed or disclosed.
+	if ferr := askExpiryFresh(ctx.AskBytes, time.Now()); ferr != nil {
+		status, _ := statusForAskExpiry(ferr)
+		http.Error(w, ferr.Error(), status)
+		return
+	}
 	// Base-layer verification: a base-layer-signed Ask must have a valid signature.
 	if verr := s.verifyAskSignature(ctx.AskBytes); verr != nil {
 		http.Error(w, verr.Error(), http.StatusUnauthorized)
@@ -139,6 +160,10 @@ func (s *CoreServer) handleScanExecute(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := h.Execute(s, ctx, ScanDecision{Approved: body.Approved, Tier: body.Tier})
 	if err != nil {
+		if status, ok := statusForAskExpiry(err); ok {
+			http.Error(w, err.Error(), status)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
@@ -148,4 +173,42 @@ func (s *CoreServer) handleScanExecute(w http.ResponseWriter, r *http.Request) {
 func scanWriteJSON(w http.ResponseWriter, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// askExpiryFresh refuses an Ask that carries an expiry which has passed or
+// cannot be read. The Asks an Identity Agent mints itself (add-contact,
+// add-employee, add-signer) carry none today and pass. A login must carry one;
+// its expiry is checked again inside the login handler against the bundle
+// whose signature it verifies, which is the check that binds it.
+func askExpiryFresh(askBytes []byte, now time.Time) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(askBytes, &fields); err != nil {
+		return login.ErrExpiryUnreadable
+	}
+	raw, present := fields["expiry"]
+	if !present {
+		var env askEnvelope
+		if err := json.Unmarshal(askBytes, &env); err != nil || env.T == 1 {
+			return login.ErrExpiryUnreadable
+		}
+		return nil
+	}
+	var expiry string
+	if err := json.Unmarshal(raw, &expiry); err != nil {
+		return login.ErrExpiryUnreadable
+	}
+	return login.CheckExpiry(expiry, now)
+}
+
+// statusForAskExpiry is the 4xx for an Ask refused on freshness: gone for one
+// that expired, bad request for one whose expiry could not be read. ok is
+// false for any other error.
+func statusForAskExpiry(err error) (status int, ok bool) {
+	switch {
+	case errors.Is(err, login.ErrExpired):
+		return http.StatusGone, true
+	case errors.Is(err, login.ErrExpiryUnreadable):
+		return http.StatusBadRequest, true
+	}
+	return 0, false
 }
