@@ -207,16 +207,26 @@ func Unavailable(t Tester, why string) {
 // installed, see Unavailable.
 func Independently(t Tester, contracts, vectors string) {
 	t.Helper()
+	IndependentlyWith(t, filepath.Join(contracts, "check_ai_agent_vectors.py"), vectors, "blake3")
+}
+
+// IndependentlyWith runs another independent check, the Python script at
+// script, over a vector file, where Python and each of the modules it needs
+// are installed; see Unavailable for where they are not.
+func IndependentlyWith(t Tester, script, vectors string, modules ...string) {
+	t.Helper()
 	py, err := exec.LookPath("python3")
 	if err != nil {
 		Unavailable(t, "python3 is not installed")
 		return
 	}
-	if exec.Command(py, "-c", "import blake3").Run() != nil {
-		Unavailable(t, "the python blake3 module is not installed (pip install blake3)")
-		return
+	for _, m := range modules {
+		if exec.Command(py, "-c", "import "+m).Run() != nil {
+			Unavailable(t, "the python "+m+" module is not installed (pip install "+m+")")
+			return
+		}
 	}
-	out, err := exec.Command(py, "-I", filepath.Join(contracts, "check_ai_agent_vectors.py"), vectors).CombinedOutput()
+	out, err := exec.Command(py, "-I", script, vectors).CombinedOutput()
 	if err != nil {
 		t.Fatalf("the independent check disagrees:\n%s", out)
 	}
