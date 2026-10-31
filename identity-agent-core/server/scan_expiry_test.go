@@ -118,7 +118,7 @@ func in(d time.Duration) string { return time.Now().Add(d).UTC().Format(time.RFC
 // consent screen.
 func TestAnExpiredAskIsRefusedAndNothingIsSigned(t *testing.T) {
 	signed := withProbe(t)
-	ask := probeAskWith(t, in(-2*time.Minute), true)
+	ask := probeAskWith(t, in(-time.Minute), true)
 	if rec := scanDecode(t, ask); rec.Code != http.StatusGone {
 		t.Fatalf("an expired Ask was shown for consent: %d %s", rec.Code, rec.Body.String())
 	}
@@ -134,7 +134,7 @@ func TestAnExpiredAskIsRefusedAndNothingIsSigned(t *testing.T) {
 // A live Ask, and one expired by less than the skew allowance, still execute.
 func TestALiveAskStillWorks(t *testing.T) {
 	signed := withProbe(t)
-	for name, expiry := range map[string]string{"live": in(time.Hour), "inside the skew": in(-30 * time.Second)} {
+	for name, expiry := range map[string]string{"live": in(time.Hour), "inside the skew": in(-15 * time.Second)} {
 		if rec := scanExecute(t, probeAskWith(t, expiry, true)); rec.Code != http.StatusOK {
 			t.Fatalf("%s: answered %d, want 200: %s", name, rec.Code, rec.Body.String())
 		}

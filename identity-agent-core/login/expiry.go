@@ -14,9 +14,9 @@ var ErrExpired = errors.New("this request has expired")
 var ErrExpiryUnreadable = errors.New("this request's expiry could not be read")
 
 // ExpirySkew is how far past its expiry a request is still accepted, so a
-// minute of clock difference between the site and this device cannot break a
+// small clock difference between the site and this device cannot break a
 // request that is really still live.
-const ExpirySkew = time.Minute
+const ExpirySkew = 30 * time.Second
 
 // CheckExpiry refuses an expiry that is missing, unreadable, or further in
 // the past than ExpirySkew.

@@ -80,8 +80,9 @@ func TestCheckExpiry(t *testing.T) {
 		want   error
 	}{
 		"live":            {now.Add(time.Minute).UTC().Format(time.RFC3339), nil},
-		"inside the skew": {now.Add(-30 * time.Second).UTC().Format(time.RFC3339), nil},
-		"expired":         {now.Add(-2 * time.Minute).UTC().Format(time.RFC3339), ErrExpired},
+		"inside the skew": {now.Add(-15 * time.Second).UTC().Format(time.RFC3339), nil},
+		"past the skew":   {now.Add(-45 * time.Second).UTC().Format(time.RFC3339), ErrExpired},
+		"expired":         {now.Add(-time.Minute).UTC().Format(time.RFC3339), ErrExpired},
 		"missing":         {"", ErrExpiryUnreadable},
 		"not a time":      {"tomorrow", ErrExpiryUnreadable},
 	} {
