@@ -32,32 +32,44 @@ func DecodeBase64(s string) ([]byte, error) {
 }
 
 // DecodeSized decodes s as exactly size raw bytes written in any base64
-// spelling, or in hex when hexToo is set.
+// spelling, or in lowercase hex when hexToo is set.
+//
+// Strict, so that each spelling of a value has exactly one string. Three
+// things would otherwise give it more: the bits left over in the last base64
+// character, which must be zero; the line breaks the standard decoder skips,
+// which are refused; and the case of hex digits, where only lowercase, the
+// form hex is written in, is read.
 func DecodeSized(s string, size int, hexToo bool) ([]byte, error) {
-	return decodeSized(s, size, hexToo, false)
-}
-
-// decodeSized is DecodeSized, decoding base64 strictly when strict is set:
-// the bits left over in the last character must then be zero, so each
-// spelling of a value has one string.
-func decodeSized(s string, size int, hexToo, strict bool) ([]byte, error) {
-	for _, enc := range base64Spellings {
-		if strict {
-			enc = enc.Strict()
+	if !strings.ContainsAny(s, "\r\n") {
+		for _, enc := range base64Spellings {
+			if raw, err := enc.Strict().DecodeString(s); err == nil && len(raw) == size {
+				return raw, nil
+			}
 		}
-		if raw, err := enc.DecodeString(s); err == nil && len(raw) == size {
-			return raw, nil
-		}
-	}
-	if hexToo {
-		if raw, err := hex.DecodeString(s); err == nil && len(raw) == size {
-			return raw, nil
+		if hexToo && s == strings.ToLower(s) {
+			if raw, err := hex.DecodeString(s); err == nil && len(raw) == size {
+				return raw, nil
+			}
 		}
 	}
 	if hexToo {
 		return nil, fmt.Errorf("not %d bytes in base64 or hex", size)
 	}
 	return nil, fmt.Errorf("not %d bytes in base64", size)
+}
+
+// DecodeBase64URLSized decodes s as exactly size raw bytes in unpadded
+// base64url and in no other spelling, for a format that names that one. It is
+// strict as DecodeSized is, so the value has one string.
+func DecodeBase64URLSized(s string, size int) ([]byte, error) {
+	if len(s) != base64.RawURLEncoding.EncodedLen(size) || !isBase64URL(s) {
+		return nil, fmt.Errorf("not %d bytes in unpadded base64url", size)
+	}
+	raw, err := base64.RawURLEncoding.Strict().DecodeString(s)
+	if err != nil {
+		return nil, fmt.Errorf("not %d bytes in unpadded base64url: %w", size, err)
+	}
+	return raw, nil
 }
 
 // Ed25519KeyCode reports whether key is an Ed25519 public key in qb64, and
@@ -91,7 +103,7 @@ func isBase64URL(s string) bool {
 // or in hex when hexToo is set (code is then "").
 func DecodeEd25519Key(key string, hexToo bool) (raw []byte, code string, err error) {
 	if code, ok := Ed25519KeyCode(key); ok {
-		raw, err := rawOfOneCharCode(key)
+		raw, err := DecodeQB64(code, key, Ed25519PubkeyBytes)
 		if err != nil {
 			return nil, "", fmt.Errorf("%q looks like a qb64 key and does not decode as one: %w", key, err)
 		}
@@ -162,7 +174,7 @@ func DecodeEd25519Signature(sig string, indexedToo bool) (raw []byte, index int,
 	}
 	// Strict, as qb64 is: 64 bytes leave 4 bits over in the last character,
 	// and read leniently they gave each spelling 16 strings.
-	raw, err = decodeSized(sig, sigBytes, false, true)
+	raw, err = DecodeSized(sig, sigBytes, false)
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("the signature is neither qb64 nor 64 raw bytes in base64: %w", err)
 	}
@@ -170,31 +182,77 @@ func DecodeEd25519Signature(sig string, indexedToo bool) (raw []byte, index int,
 }
 
 // decodeTwoCharCode recovers the 64 raw bytes behind a two-character code,
-// or a one-character code and one character of index.
+// or a one-character code and one character of index: to the decoder the
+// index is simply a second code character.
 //
-// TWO lead bytes, not one. The count is (3 - size mod 3) mod 3, and a 64-byte
-// signature is 1 mod 3, so encoding prepends two zero bytes and the code then
-// replaces the two base64 characters they produced. Decoding has to restore both
-// and drop both — assuming one leaves the whole value shifted by a byte, which
-// is a signature that never verifies and no error to say why.
-//
-// Strict: the lead bytes must be zero, and they are not entirely covered by
-// the code. Its two characters stand for 12 bits; the third character carries
-// the last 4 bits of the lead bytes and the first 2 of the signature. Leaving
-// those 4 bits unchecked gave each signature 16 spellings that all verified.
+// TWO lead bytes, not one. A 64-byte signature is 1 mod 3, so encoding
+// prepends two zero bytes and the code replaces the two base64 characters they
+// produced. The third character carries the last 4 bits of those lead bytes,
+// and DecodeQB64 requires them to be zero; unchecked, they gave each
+// signature 16 spellings that all verified.
 func decodeTwoCharCode(qb64 string) ([]byte, error) {
 	if len(qb64) != sigQB64Len {
 		return nil, fmt.Errorf("a 64-byte value in qb64 is 88 characters, not %d", len(qb64))
 	}
-	raw, err := base64.RawURLEncoding.Strict().DecodeString("AA" + qb64[2:])
+	raw, err := DecodeQB64(qb64[:2], qb64, sigBytes)
 	if err != nil {
-		return nil, fmt.Errorf("signature is not valid base64url: %w", err)
+		return nil, fmt.Errorf("the signature is not in canonical qb64: %w", err)
 	}
-	if len(raw) != sigBytes+2 {
-		return nil, fmt.Errorf("expected 64 signature bytes, got %d", len(raw)-2)
+	return raw, nil
+}
+
+// DecodeQB64 returns the size raw bytes of a fixed-size CESR value under code,
+// and is the one place a qb64 key, identifier or signature is decoded.
+//
+// It reads only the canonical string, so each value has exactly one. That
+// matters because a qb64 key is also a name: an identifier is compared as
+// text, a witness is counted once, and a reader that accepted a second string
+// for the same bytes would let one party appear as two. So it requires:
+//
+//   - the code, exactly;
+//   - exactly the length the code and size make: the code, then the size and
+//     its lead bytes in base64, less the characters the code stands in for;
+//   - base64url only, which also refuses padding and the line breaks the
+//     standard decoder would skip;
+//   - zero lead bits. The lead bytes are (3 - size mod 3) mod 3 zero bytes
+//     put in front so the value fills whole base64 groups. A code of one or
+//     two characters stands in for the first characters they produce, but a
+//     character is 6 bits and a byte 8, so the character after the code
+//     carries the rest of them: 2 bits after a one-character code, 4 after a
+//     two-character one. Unchecked, those gave every key 4 spellings and every
+//     signature 16.
+func DecodeQB64(code, qb64 string, size int) ([]byte, error) {
+	if code == "" || size <= 0 {
+		return nil, fmt.Errorf("decoding qb64 needs a code and a size")
 	}
-	if raw[0] != 0 || raw[1] != 0 {
-		return nil, fmt.Errorf("the signature's lead bytes are not zero, so it is not in canonical qb64")
+	if len(qb64) < len(code) || qb64[:len(code)] != code {
+		return nil, fmt.Errorf("expected a %s value, got one starting %.4q", code, qb64)
 	}
-	return raw[2:], nil
+	if want, known := rawSizeForCode[code]; known && want != size {
+		return nil, fmt.Errorf("code %s carries %d bytes, not %d", code, want, size)
+	}
+	lead := (3 - size%3) % 3
+	stood := len(code) % 4 // base64 characters the code stands in for
+	if stood*6 > lead*8 {
+		return nil, fmt.Errorf("a %d-byte value cannot carry the %d-character code %s", size, len(code), code)
+	}
+	if want := len(code) - stood + (lead+size)/3*4; len(qb64) != want {
+		return nil, fmt.Errorf("a %d-byte %s value is %d characters in qb64, not %d", size, code, want, len(qb64))
+	}
+	if !isBase64URL(qb64[len(code):]) {
+		return nil, fmt.Errorf("a %s value has a character outside base64url, so it is not qb64", code)
+	}
+	decoded, err := base64.RawURLEncoding.Strict().DecodeString(strings.Repeat("A", stood) + qb64[len(code):])
+	if err != nil {
+		return nil, fmt.Errorf("a %s value is not valid base64url: %w", code, err)
+	}
+	if len(decoded) != lead+size {
+		return nil, fmt.Errorf("expected %d bytes for a %s value, got %d", size, code, len(decoded)-lead)
+	}
+	for _, b := range decoded[:lead] {
+		if b != 0 {
+			return nil, fmt.Errorf("the %s value's lead bits are not zero, so it is not in canonical qb64", code)
+		}
+	}
+	return decoded[lead:], nil
 }

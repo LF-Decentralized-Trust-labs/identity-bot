@@ -1,12 +1,14 @@
 package didwebs
 
 import (
-	"encoding/base64"
+	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/mr-tron/base58"
+
+	"identity-agent-core/iacrypto"
 )
 
 // PublishInput is the live keystate used to derive did:webs artifacts.
@@ -25,8 +27,8 @@ func BuildDidJSON(in PublishInput) ([]byte, error) {
 	if in.AID == "" || in.Host == "" {
 		return nil, fmt.Errorf("aid and host required")
 	}
-	pubRaw, err := base64.StdEncoding.DecodeString(in.PublicKeyB64)
-	if err != nil || len(pubRaw) != 32 {
+	pubRaw, err := iacrypto.DecodeSized(in.PublicKeyB64, ed25519.PublicKeySize, false)
+	if err != nil {
 		return nil, fmt.Errorf("invalid ed25519 public key")
 	}
 	did := fmt.Sprintf("did:webs:%s:%s", colonHost(in.Host), in.AID)

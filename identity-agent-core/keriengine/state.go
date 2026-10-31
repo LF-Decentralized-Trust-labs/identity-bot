@@ -198,15 +198,14 @@ func normaliseKey(key string, transferable bool) (string, error) {
 	// rewritten — changing a non-transferable key into a transferable one would
 	// change the identifier of anything derived from it. How a qb64 key is told
 	// from a raw one is iacrypto.Ed25519KeyCode's to decide.
-	if code, ok := iacrypto.Ed25519KeyCode(key); ok {
-		if _, err := keri.MatterRaw(code, key, 32); err != nil {
-			return "", fmt.Errorf("%q looks like a qb64 key and does not decode as one: %w", key, err)
-		}
-		return key, nil
-	}
-	raw, err := iacrypto.DecodeSized(key, 32, false)
+	// Only the canonical qb64 spelling passes, so the key kept is the one
+	// string for those bytes.
+	raw, qb64Code, err := iacrypto.DecodeEd25519Key(key, false)
 	if err != nil {
-		return "", fmt.Errorf("the public key is neither qb64 nor 32 raw bytes in base64: %w", err)
+		return "", err
+	}
+	if qb64Code != "" {
+		return key, nil
 	}
 	code := keri.CodeEd25519
 	if !transferable {

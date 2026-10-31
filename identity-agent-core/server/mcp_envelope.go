@@ -2,7 +2,6 @@ package server
 
 import (
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -10,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
 	"identity-agent-core/permission"
 )
@@ -74,7 +74,7 @@ func (s *CoreServer) verifyRequestEnvelope(r *http.Request, method string, param
 	if pubB64 == "" {
 		return fmt.Errorf("signer key unavailable for %s", signerAID)
 	}
-	pub, err := base64.RawURLEncoding.DecodeString(pubB64)
+	pub, _, err := iacrypto.DecodeEd25519Key(pubB64, false)
 	if err != nil {
 		return fmt.Errorf("signer key decode failed")
 	}

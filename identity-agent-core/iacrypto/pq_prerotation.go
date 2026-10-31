@@ -52,10 +52,9 @@ const ProposedMLDSA65Verkey = "2AAE"
 
 // MLDSA65VerkeyQB64 encodes an ML-DSA-65 public key as CESR.
 //
-// Deliberately not EncodeLargeFixed, which concatenates the code with raw
-// base64 and omits lead bytes entirely. That is correct only when the raw size
-// divides by 3 and silently malformed when it does not — which is the case
-// here.
+// Encodes through MatterFixedQB64, which writes the lead byte a raw size of
+// 2 mod 3 needs; concatenating the code with raw base64 would omit it and be
+// silently malformed for this key.
 func MLDSA65VerkeyQB64(pub []byte) (string, error) {
 	if len(pub) != MLDSA65VerkeyBytes {
 		return "", fmt.Errorf("an ML-DSA-65 public key is %d bytes, got %d",

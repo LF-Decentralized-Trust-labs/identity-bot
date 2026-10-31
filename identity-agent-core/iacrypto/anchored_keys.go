@@ -1,7 +1,6 @@
 package iacrypto
 
 import (
-	"encoding/base64"
 	"errors"
 	"fmt"
 )
@@ -110,38 +109,14 @@ var ErrNotAnchored = errors.New("this identifier does not commit to any encrypti
 // The code is checked rather than skipped. Two different key types are stored in
 // the same list and are the same shape once the prefix is removed, so decoding
 // whichever one is at a given position without checking what it claims to be is
-// how an encapsulation key gets read as an agreement key.
-// DecodeLargeFixed recovers the raw bytes MatterFixedQB64 encoded.
-//
-// Has to account for the same two things the encoder does: a code may be any
-// length, and the encoded value carries lead bytes that are padding rather than
-// key material.
+// how an encapsulation key gets read as an agreement key. Decoding is
+// DecodeQB64's: exactly the length the code and size make, base64url only, and
+// zero lead bytes, so a longer or respelled value is refused.
 func DecodeLargeFixed(code, qb64 string, expectedLen int) ([]byte, error) {
-	if code == "" {
-		return nil, fmt.Errorf("a CESR code is required")
+	if expectedLen <= 0 {
+		return nil, fmt.Errorf("decoding a %s value needs the size it carries", code)
 	}
-	if len(qb64) < len(code) || qb64[:len(code)] != code {
-		return nil, fmt.Errorf("expected a %s value, got one starting %.4q", code, qb64)
-	}
-	// The encoder replaced the leading (len(code) mod 4) base64 characters with
-	// the code itself, so they are restored as zeros before decoding.
-	prefix := ""
-	for i := 0; i < len(code)%4; i++ {
-		prefix += "A"
-	}
-	padded, err := base64.RawURLEncoding.DecodeString(prefix + qb64[len(code):])
-	if err != nil {
-		return nil, fmt.Errorf("%s value is not valid base64url: %w", code, err)
-	}
-	// Whatever lead bytes the size required are padding, and the primitive is
-	// what follows them.
-	if expectedLen > 0 {
-		if len(padded) < expectedLen {
-			return nil, fmt.Errorf("expected %d bytes for %s, got %d", expectedLen, code, len(padded))
-		}
-		return padded[len(padded)-expectedLen:], nil
-	}
-	return padded, nil
+	return DecodeQB64(code, qb64, expectedLen)
 }
 
 // AnchoredAgreementKeys returns the key-agreement keys an inception event
