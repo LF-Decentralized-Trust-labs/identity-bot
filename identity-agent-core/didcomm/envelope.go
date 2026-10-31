@@ -132,7 +132,7 @@ func PackAuthcrypt(sender *KeySet, rcpt *DID, jwm *JWM) (*Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	bodyHash := blake3Body(jwm.Body)
+	bodyHash := writtenBodyHash(jwm.Body)
 	edSig, dsaSig := signHybrid(sender, signInput(canonical, bodyHash))
 	sjB, err := json.Marshal(signedJWM{
 		JWM: canonical, BodyHash: bodyHash,
@@ -246,7 +246,7 @@ func verifySigned(pd *parsedDID, sjB []byte) (*JWM, error) {
 	if err := json.Unmarshal(sj.JWM, &jwm); err != nil {
 		return nil, errors.New("bad jwm")
 	}
-	if blake3Body(jwm.Body) != sj.BodyHash {
+	if h := bodyHashes(jwm.Body); sj.BodyHash != h[0] && sj.BodyHash != h[1] {
 		return nil, errors.New("body_hash_mismatch")
 	}
 	if !KnownType(jwm.Type) {
@@ -266,7 +266,7 @@ func PackSigned(sender *KeySet, jwm *JWM) (*Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	bodyHash := blake3Body(jwm.Body)
+	bodyHash := writtenBodyHash(jwm.Body)
 	edSig, dsaSig := signHybrid(sender, signInput(canonical, bodyHash))
 	return &Envelope{
 		Mode:      "signed",
@@ -295,7 +295,19 @@ func UnpackSigned(senderDID *DID, env *Envelope) (*JWM, error) {
 		return nil, errors.New("bad jwm")
 	}
 	edSig, dsaSig, ok := hybridSignatures(env.EdSig, env.DsaSig)
-	if !ok || !verifyHybrid(pd, signInput(canonical, blake3Body(jwm.Body)), edSig, dsaSig) {
+	if !ok {
+		return nil, errors.New("signature_invalid")
+	}
+	// No body_hash travels here: the signature is over one derived from the
+	// body, in either of its two forms (bodyHashes).
+	signed := false
+	for _, h := range bodyHashes(jwm.Body) {
+		if verifyHybrid(pd, signInput(canonical, h), edSig, dsaSig) {
+			signed = true
+			break
+		}
+	}
+	if !signed {
 		return nil, errors.New("signature_invalid")
 	}
 	return &jwm, nil

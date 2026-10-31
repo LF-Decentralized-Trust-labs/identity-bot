@@ -15,6 +15,7 @@ func newTestLog(t *testing.T) *Log {
 
 // For the tests in activitylog_test.
 var (
-	NewTestLog = newTestLog
-	EventJSON  = (*Log).eventJSON
+	NewTestLog    = newTestLog
+	EventJSON     = (*Log).eventJSON
+	WithValidUTF8 = withValidUTF8
 )

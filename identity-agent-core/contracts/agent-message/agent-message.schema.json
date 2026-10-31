@@ -343,7 +343,7 @@
       }
     },
     "envelope": {
-      "description": "A signed DIDComm envelope (mode signed). plaintext is the base64url (no padding) of the JWM's JSON, its fields in the order id, type, from, to, created_time, expires_time, body. ed_sig and mldsa_sig are base64url signatures by the countersigner's messaging keys over those JSON bytes followed directly by E and the base64url (no padding) of the Blake3-256 of the JWM's body bytes: ed_sig with Ed25519, mldsa_sig with ML-DSA-65 with an empty context, signed deterministically, so both reproduce from the keys. Both must verify. The countersigner is the AI agent the message is from, or the Identity Agent itself for a person's message.",
+      "description": "A signed DIDComm envelope (mode signed). plaintext is the base64url (no padding) of the JWM's JSON, its fields in the order id, type, from, to, created_time, expires_time, body. ed_sig and mldsa_sig are base64url signatures by the countersigner's messaging keys over those JSON bytes followed directly by E and the base64url (no padding) of the Blake3-256 of the JWM's body bytes: ed_sig with Ed25519, mldsa_sig with ML-DSA-65 with an empty context, signed deterministically, so both reproduce from the keys. Both must verify. A verifier also accepts signatures over the same JSON bytes followed by the Blake3-256 of the body as a CESR digest (qb64, code E), the form envelopes will be signed over in a later release. The countersigner is the AI agent the message is from, or the Identity Agent itself for a person's message.",
       "type": "object",
       "required": [
         "mode",

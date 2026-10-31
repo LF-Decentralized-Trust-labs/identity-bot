@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -174,9 +175,16 @@ func (s *CoreServer) recordAcceptance(token, pairwiseAID, publicKey, nextPublicK
 		return nil, false, nil
 	}
 
+	// The token is the secret the invitee's QR code carries, so it is compared
+	// in constant time: an ordinary comparison returns at the first byte that
+	// differs, and how long it took tells someone guessing how much of a guess
+	// was right. An empty token is nobody's.
+	if token == "" {
+		return nil, false, nil
+	}
 	found := false
 	for i := range c.Invited {
-		if c.Invited[i].Token != token {
+		if subtle.ConstantTimeCompare([]byte(c.Invited[i].Token), []byte(token)) != 1 {
 			continue
 		}
 		found = true

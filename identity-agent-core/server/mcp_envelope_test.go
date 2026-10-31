@@ -4,11 +4,13 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"net/http/httptest"
 	"strconv"
 	"testing"
 	"time"
 
+	"identity-agent-core/asset"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/permission"
 )
@@ -149,5 +151,29 @@ func TestEnvelopeSignerMismatchRejected(t *testing.T) {
 	caller := permission.CallerContext{CallerAID: "EAgentOther"}
 	if err := s.verifyRequestEnvelope(r, "tools/call", params, &caller); err == nil {
 		t.Fatal("signer AID not matching the authenticated caller must be rejected")
+	}
+}
+
+// A machine enrolled with its key in hex has that hex recorded. Its signed
+// requests must verify like anyone else's: the key is read in the spelling it
+// was recorded in, not refused because it is not base64.
+func TestEnvelopeFromAMachineEnrolledInHexVerifies(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const aid = "EMachineEnrolledInHex"
+	s := serverWithAsset(t, asset.Asset{ID: "hx", PairwiseAID: aid, PublicKey: hex.EncodeToString(pub)})
+	params := []byte(`{}`)
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	env := signedEnvelopeRequest(t, priv, aid, "tools/call", params, "nonce-hex-1", ts)
+
+	r := httptest.NewRequest("POST", "/api/mcp", nil)
+	r.Header.Set(envSigHeader, env[0])
+	r.Header.Set(envNonceHeader, env[1])
+	r.Header.Set(envTSHeader, env[2])
+	caller := permission.CallerContext{CallerAID: aid, AuthLevel: "bearer"}
+	if err := s.verifyRequestEnvelope(r, "tools/call", params, &caller); err != nil {
+		t.Fatalf("a machine enrolled in hex should sign requests, got %v", err)
 	}
 }

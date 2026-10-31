@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"identity-agent-core/permission"
 )
@@ -85,8 +86,14 @@ func clampWhy(v string) string {
 		}
 		return r
 	}, v)
+	// Cut on a character boundary: cut inside a multi-byte character, the
+	// value would end in a byte that is not UTF-8.
 	if len(v) > maxWhyLen {
-		return v[:maxWhyLen]
+		cut := maxWhyLen
+		for cut > 0 && !utf8.RuneStart(v[cut]) {
+			cut--
+		}
+		return v[:cut]
 	}
 	return v
 }
