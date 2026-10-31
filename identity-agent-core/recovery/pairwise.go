@@ -4,7 +4,6 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"fmt"
-	"strings"
 
 	"identity-agent-core/backup"
 	"identity-agent-core/iacrypto"
@@ -124,7 +123,6 @@ func PublicKeysEqual(a, b string) (matched bool, normA, normB string, err error)
 }
 
 func decodePublicKeyBytes(s string) ([]byte, error) {
-	s = strings.TrimSpace(s)
 	if s == "" {
 		return nil, fmt.Errorf("empty public key")
 	}

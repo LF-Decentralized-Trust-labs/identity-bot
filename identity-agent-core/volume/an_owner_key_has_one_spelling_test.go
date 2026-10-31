@@ -15,8 +15,8 @@ func TestAnOwnerSealingKeyHasOneSpelling(t *testing.T) {
 	if got, err := ownerSealKey(s); err != nil || string(got) != string(pub) {
 		t.Fatalf("the canonical key did not read: %v", err)
 	}
-	if _, err := ownerSealKey(" " + s + "\n"); err != nil {
-		t.Fatalf("surrounding whitespace was not ignored: %v", err)
+	if _, err := ownerSealKey(" " + s + "\n"); err == nil {
+		t.Fatal("a key with whitespace around it was read; it arrives over the wire and is not trimmed")
 	}
 	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 	v := strings.IndexByte(alphabet, s[42])

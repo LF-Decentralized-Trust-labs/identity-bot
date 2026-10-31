@@ -85,11 +85,16 @@ func TestDecodeVerkeyReadsHexAndBothCodes(t *testing.T) {
 	pub, _, _ := ed25519.GenerateKey(rand.Reader)
 	for _, k := range []string{
 		canonicalVerkey("D", pub), canonicalVerkey("B", pub),
-		hex.EncodeToString(pub), " " + base64.StdEncoding.EncodeToString(pub) + " ",
+		hex.EncodeToString(pub), base64.StdEncoding.EncodeToString(pub),
 	} {
 		got, err := DecodeVerkey(k)
 		if err != nil || !bytes.Equal(got, pub) {
 			t.Fatalf("%q read as %x (%v)", k, got, err)
 		}
+	}
+	// Whitespace is not part of any spelling, so a key with it around it is
+	// not read.
+	if _, err := DecodeVerkey(" " + base64.StdEncoding.EncodeToString(pub) + " "); err == nil {
+		t.Fatal("a key with whitespace around it was read")
 	}
 }

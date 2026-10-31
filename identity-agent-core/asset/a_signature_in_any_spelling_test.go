@@ -17,7 +17,7 @@ func TestAnEnrolmentSignatureIsReadInEverySpelling(t *testing.T) {
 	for _, s := range []string{
 		base64.RawURLEncoding.EncodeToString(sig), base64.URLEncoding.EncodeToString(sig),
 		base64.RawStdEncoding.EncodeToString(sig), base64.StdEncoding.EncodeToString(sig),
-		hex.EncodeToString(sig), "  " + hex.EncodeToString(sig) + "\n",
+		hex.EncodeToString(sig),
 	} {
 		got, err := decodeEnrolSig(s)
 		if err != nil || !bytes.Equal(got, sig) {

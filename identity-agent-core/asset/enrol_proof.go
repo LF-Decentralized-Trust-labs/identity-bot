@@ -50,7 +50,7 @@ func EnrolProofPayload(token, publicKey, nextPublicKey string) string {
 // verifyEnrolProof checks that whoever sent this enrolment holds the private
 // half of publicKey.
 func verifyEnrolProof(token, publicKey, nextPublicKey, signature string) error {
-	if strings.TrimSpace(signature) == "" {
+	if signature == "" {
 		return fmt.Errorf("an enrolment must be signed by the key being enrolled")
 	}
 	pub, err := login.DecodeVerkey(publicKey)
@@ -60,7 +60,7 @@ func verifyEnrolProof(token, publicKey, nextPublicKey, signature string) error {
 	payload := EnrolProofPayload(token, publicKey, nextPublicKey)
 
 	// CESR-qualified first, since that is what this project's own tooling emits.
-	if ok, verr := login.VerifyString(payload, strings.TrimSpace(signature), pub); verr == nil {
+	if ok, verr := login.VerifyString(payload, signature, pub); verr == nil {
 		if ok {
 			return nil
 		}
@@ -73,7 +73,8 @@ func verifyEnrolProof(token, publicKey, nextPublicKey, signature string) error {
 	// protocol detail masquerading as a security check. Any of the four base64
 	// alphabets or lowercase hex is read, each in its one canonical string:
 	// unwrapped (a line break inside the value is refused, so wrap-free output
-	// such as base64 -w0 is needed) and with zero spare bits.
+	// such as base64 -w0 is needed), with zero spare bits, and with nothing
+	// around it: a trailing newline from a shell is not trimmed.
 	raw, err := decodeEnrolSig(signature)
 	if err != nil {
 		return fmt.Errorf("signature: %w", err)
@@ -90,7 +91,7 @@ func errProofMismatch() error {
 }
 
 func decodeEnrolSig(s string) ([]byte, error) {
-	raw, err := iacrypto.DecodeSized(strings.TrimSpace(s), ed25519.SignatureSize, true)
+	raw, err := iacrypto.DecodeSized(s, ed25519.SignatureSize, true)
 	if err != nil {
 		return nil, fmt.Errorf("not a recognisable Ed25519 signature (want %d raw bytes in "+
 			"base64 or hex)", ed25519.SignatureSize)
