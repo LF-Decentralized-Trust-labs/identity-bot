@@ -969,17 +969,35 @@ func witnessedEnough(ds store.Store, eventSAID string, witnesses []string, toad 
 	for _, w := range witnesses {
 		designated[w] = true
 	}
-	seen := map[string]bool{}
-	for _, r := range receipts {
-		if designated[r.WitnessAID] && !seen[r.WitnessAID] && drivers.VerifyReceipt(r.WitnessAID, eventSAID, r.CesrSignature) == nil {
-			seen[r.WitnessAID] = true
-		}
-	}
 	need := toad
 	if need <= 0 {
 		need = len(witnesses)
 	}
-	return len(seen) >= need
+	return witnessesWhoReceipted(eventSAID, receipts, designated) >= need
+}
+
+// witnessesWhoReceipted counts the witnesses with a receipt for eventSAID
+// that verifies, each once, and only those in designated when it is given.
+// With designated nil any verifying witness counts, designated or not.
+//
+// Counted by key, not by the text of the identifier, so one witness is one
+// vote however it is written, and by verified receipt rather than stored
+// row, so a receipt that does not check out is no vote at all.
+func witnessesWhoReceipted(eventSAID string, receipts []store.WitnessReceiptRecord, designated map[string]bool) int {
+	seen := map[string]bool{}
+	for _, r := range receipts {
+		if designated != nil && !designated[r.WitnessAID] {
+			continue
+		}
+		key, ok := drivers.WitnessKey(r.WitnessAID)
+		if !ok || seen[key] {
+			continue
+		}
+		if drivers.VerifyReceipt(r.WitnessAID, eventSAID, r.CesrSignature) == nil {
+			seen[key] = true
+		}
+	}
+	return len(seen)
 }
 
 func thresholdOf(v interface{}) int {

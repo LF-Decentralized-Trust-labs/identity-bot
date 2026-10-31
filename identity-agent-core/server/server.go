@@ -2998,7 +2998,7 @@ func (s *CoreServer) handleGetKERL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	thresholdMet := threshold == 0 || len(receipts) >= threshold
+	thresholdMet := threshold == 0 || witnessesWhoReceipted(eventSAID, receipts, nil) >= threshold
 
 	type receiptEntry struct {
 		WitnessAID    string `json:"witness_aid"`

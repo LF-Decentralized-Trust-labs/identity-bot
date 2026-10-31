@@ -81,7 +81,7 @@ func (s *CoreServer) handleGetStoreReceipts(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	thresholdMet := threshold == 0 || len(receipts) >= threshold
+	thresholdMet := threshold == 0 || witnessesWhoReceipted(eventSAID, receipts, nil) >= threshold
 
 	type entry struct {
 		WitnessAID    string `json:"witness_aid"`
