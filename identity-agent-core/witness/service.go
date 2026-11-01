@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"log"
 	"net/http"
@@ -42,11 +43,12 @@ type Service struct {
 	HTTPClient  *http.Client
 	PostEvent   EventPoster
 	delegatesMu sync.Mutex
-	// receiving holds a *sync.Mutex per identity, so one identity's events
-	// are judged and stored one at a time: an event judged against a log
-	// another event is changing could be stored on a history that no longer
-	// exists.
-	receiving sync.Map
+	// receiving is a fixed set of locks, one chosen by a hash of the
+	// identity, so one identity's events are judged and stored one at a time:
+	// an event judged against a log another event is changing could be stored
+	// on a history that no longer exists. Fixed, so identifiers anybody can
+	// send cannot grow it; two identities sharing a lock only wait in turn.
+	receiving [receivingLocks]sync.Mutex
 	// confirmed is, by identity and witness, the furthest place a witness
 	// has confirmed holding: by its signed tip, or its receipt.
 	confirmed sync.Map
@@ -436,9 +438,9 @@ func (s *Service) ReceiveSignedEvent(signerAID string, rawEvent []byte, sigs []s
 	if signerAID == "" {
 		return nil, fmt.Errorf("missing signer aid")
 	}
-	mu, _ := s.receiving.LoadOrStore(signerAID, &sync.Mutex{})
-	mu.(*sync.Mutex).Lock()
-	defer mu.(*sync.Mutex).Unlock()
+	mu := s.receivingLock(signerAID)
+	mu.Lock()
+	defer mu.Unlock()
 	if len(sigs) == 0 {
 		// Refused rather than receipted unsigned. A witness that will attest to
 		// an unsigned event is a witness anyone can make say anything, and its
@@ -593,6 +595,16 @@ func (s *Service) ReceiveSignedEvent(signerAID string, rawEvent []byte, sigs []s
 		"event_said": said, "witness_aid": witnessAID, "sequence_number": seq,
 		"receipt": receipt, "cesr_signature": sig,
 	}, nil
+}
+
+// receivingLocks is how many locks events are judged under.
+const receivingLocks = 64
+
+// receivingLock is the lock aid's events are judged and stored under.
+func (s *Service) receivingLock(aid string) *sync.Mutex {
+	h := fnv.New32a()
+	h.Write([]byte(aid))
+	return &s.receiving[h.Sum32()%receivingLocks]
 }
 
 // eventBody is an event as it is sent to a witness: its published bytes and
