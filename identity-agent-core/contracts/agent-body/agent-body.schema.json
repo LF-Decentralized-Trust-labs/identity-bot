@@ -165,7 +165,7 @@
       "type": "string"
     },
     "approval_request": {
-      "description": "What a machine shows once it has asked to become a body, for whoever approves it to capture (pasted, or read from a QR code). It is iaapprove1. followed by base64url, without padding, of this object as JSON. signature is K's over approval_proof. The Identity Agent named by ia checks the signature against host and verkey, and that this key is the one its pending enrolment holds; how the string reaches it carries no authority. A machine is approved this way, or on the vouch of the provider that made it; the decision is ADR-059.",
+      "description": "What a machine shows once it has asked to become a body, for whoever approves it to capture (pasted, or read from a QR code). It is iaapprove1. followed by base64url, without padding, of this object as JSON. signature is K's over approval_proof, which covers ia, agent, host, verkey and nonce. url and name are NOT signed: they are hints for finding the Identity Agent and labelling the request, and an approver shows the AI agent's name from its own record of the pending enrolment, never from this string. The Identity Agent named by ia checks the signature against host and verkey, and that this key is the one its pending enrolment holds, so how the string reaches it carries no authority. A writer emits every field listed as required. A reader refuses: another prefix; base64url that does not decode; anything but a JSON object; v other than 1; an empty ia, agent, host, verkey or signature; and a nonce under 16 characters. It may ignore a missing url or name, and keys it does not know. A machine is approved this way, or on the vouch of the provider that made it; the decision is ADR-059.",
       "type": "object",
       "required": [
         "v",
@@ -186,7 +186,7 @@
         },
         "url": {
           "type": "string",
-          "description": "where the Identity Agent is reached, as the enrolment named it"
+          "description": "where the Identity Agent is reached, as the enrolment named it; not signed"
         },
         "ia": {
           "type": "string",
@@ -198,7 +198,7 @@
         },
         "name": {
           "type": "string",
-          "description": "the AI agent's name, for showing"
+          "description": "the AI agent's name, as the enrolment named it; not signed, and never shown in place of the approver's own record"
         },
         "host": {
           "type": "string",

@@ -18,7 +18,7 @@ import (
 // binding for that key, and approves in one action.
 //
 // The string proves itself, so how it reaches the approver carries no authority
-// and is not trusted: a tampered copy fails the signature, and a copy of another
+// and is not trusted: a copy with a signed field changed fails the signature, and a copy of another
 // machine's request names that machine's key, not the one in front of the
 // person, so it is simply not the one they capture. That ties "the machine in
 // front of me" to "the key that asked", with the check done by the Identity
@@ -33,10 +33,13 @@ const ApprovalPrefix = "iaapprove1."
 type ApprovalRequest struct {
 	Version int `json:"v"`
 	// URL and IdentityAgent name the Identity Agent that holds the pending
-	// binding and will issue the body credential.
+	// binding and will issue the body credential. URL is not signed: it only
+	// says where to find that Identity Agent.
 	URL           string `json:"url"`
 	IdentityAgent string `json:"ia"`
 	// Agent and AgentName name the AI agent the machine asked to be the body of.
+	// AgentName is not signed: an approver shows the name from its own record
+	// of the pending binding, never this one.
 	Agent     string `json:"agent"`
 	AgentName string `json:"name"`
 	// Host is K's identifier and Verkey is K in the form a signature is checked

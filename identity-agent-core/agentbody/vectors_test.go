@@ -409,6 +409,11 @@ func writeBodyVectors(t *testing.T) {
 		{"not JSON", "iaapprove1.bm90IGpzb24"},
 		{"version 2", "iaapprove1." + b64json(version2)},
 		{"no signature", "iaapprove1." + b64json(without("signature"))},
+		{"no ia", "iaapprove1." + b64json(without("ia"))},
+		{"no agent", "iaapprove1." + b64json(without("agent"))},
+		{"no host", "iaapprove1." + b64json(without("host"))},
+		{"no verkey", "iaapprove1." + b64json(without("verkey"))},
+		{"padded base64url", "iaapprove1." + b64json(whole) + "="},
 		{"a nonce under 16 characters", "iaapprove1." + b64json(shortNonce)},
 	} {
 		set.RefusedApprovals = append(set.RefusedApprovals, struct {

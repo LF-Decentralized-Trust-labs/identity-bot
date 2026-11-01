@@ -193,6 +193,26 @@
       "encoded": "iaapprove1.eyJhZ2VudCI6IkUiLCJob3N0IjoiMSIsImlhIjoiRSIsIm5vbmNlIjoiYXBwcm92ZS1ub25jZS0wMDAxIiwidiI6MSwidmVya2V5IjoiMSJ9"
     },
     {
+      "name": "no ia",
+      "encoded": "iaapprove1.eyJhZ2VudCI6IkUiLCJob3N0IjoiMSIsIm5vbmNlIjoiYXBwcm92ZS1ub25jZS0wMDAxIiwic2lnbmF0dXJlIjoiMEIiLCJ2IjoxLCJ2ZXJrZXkiOiIxIn0"
+    },
+    {
+      "name": "no agent",
+      "encoded": "iaapprove1.eyJob3N0IjoiMSIsImlhIjoiRSIsIm5vbmNlIjoiYXBwcm92ZS1ub25jZS0wMDAxIiwic2lnbmF0dXJlIjoiMEIiLCJ2IjoxLCJ2ZXJrZXkiOiIxIn0"
+    },
+    {
+      "name": "no host",
+      "encoded": "iaapprove1.eyJhZ2VudCI6IkUiLCJpYSI6IkUiLCJub25jZSI6ImFwcHJvdmUtbm9uY2UtMDAwMSIsInNpZ25hdHVyZSI6IjBCIiwidiI6MSwidmVya2V5IjoiMSJ9"
+    },
+    {
+      "name": "no verkey",
+      "encoded": "iaapprove1.eyJhZ2VudCI6IkUiLCJob3N0IjoiMSIsImlhIjoiRSIsIm5vbmNlIjoiYXBwcm92ZS1ub25jZS0wMDAxIiwic2lnbmF0dXJlIjoiMEIiLCJ2IjoxfQ"
+    },
+    {
+      "name": "padded base64url",
+      "encoded": "iaapprove1.eyJhZ2VudCI6IkUiLCJob3N0IjoiMSIsImlhIjoiRSIsIm5vbmNlIjoiYXBwcm92ZS1ub25jZS0wMDAxIiwic2lnbmF0dXJlIjoiMEIiLCJ2IjoxLCJ2ZXJrZXkiOiIxIn0="
+    },
+    {
       "name": "a nonce under 16 characters",
       "encoded": "iaapprove1.eyJhZ2VudCI6IkUiLCJob3N0IjoiMSIsImlhIjoiRSIsIm5vbmNlIjoiZmlmdGVlbi1jaGFycy0wIiwic2lnbmF0dXJlIjoiMEIiLCJ2IjoxLCJ2ZXJrZXkiOiIxIn0"
     }
