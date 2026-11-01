@@ -172,3 +172,21 @@ func rawEd25519From(key string) ([]byte, error) {
 	}
 	return raw, nil
 }
+
+// SignMLDSA65FromSeed is the ML-DSA-65 signature over msg by the key that
+// seed generates (FIPS 204 key generation from a 32-byte seed), deterministic
+// and with no context, so the same seed and message always give the same bytes.
+func SignMLDSA65FromSeed(seed, msg []byte) ([]byte, error) {
+	if len(seed) != mldsa65.SeedSize {
+		return nil, fmt.Errorf("an ML-DSA-65 seed is %d bytes, not %d", mldsa65.SeedSize, len(seed))
+	}
+	var s [mldsa65.SeedSize]byte
+	copy(s[:], seed)
+	defer func() { s = [mldsa65.SeedSize]byte{} }()
+	_, sk := mldsa65.NewKeyFromSeed(&s)
+	sig := make([]byte, mldsa65.SignatureSize)
+	if err := mldsa65.SignTo(sk, msg, nil, false, sig); err != nil {
+		return nil, fmt.Errorf("signing with ML-DSA-65: %w", err)
+	}
+	return sig, nil
+}
