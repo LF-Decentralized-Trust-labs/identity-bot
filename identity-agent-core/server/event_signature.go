@@ -58,7 +58,7 @@ type eventSigner interface {
 // The route goes in the first release that no longer upgrades directly from a
 // version that could add events unsigned.
 func (s *CoreServer) handleAttachEventSignature(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
+	if !s.theOwnerAsks(r) {
 		jsonError(w, "signing an event is for the owner of this agent", http.StatusForbidden)
 		return
 	}

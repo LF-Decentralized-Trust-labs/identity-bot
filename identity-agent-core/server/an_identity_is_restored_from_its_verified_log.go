@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"identity-agent-core/keriengine"
 	"identity-agent-core/store"
 )
 
@@ -21,17 +22,8 @@ import (
 // and threshold, with the one log verifier; it installs no seed, because the
 // key stays where the phrase is.
 func (s *CoreServer) handleRestoreIdentity(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
+	if !s.theOwnerAsks(r) {
 		writeError(w, http.StatusForbidden, "Installing an identity is the owner's", "")
-		return
-	}
-	if s.refuseIfThisComputerMayNotFound(w) {
-		return
-	}
-	s.founding.Lock()
-	defer s.founding.Unlock()
-	if existing, _ := s.DataStore.GetIdentity(); existing != nil {
-		writeError(w, http.StatusConflict, "Identity already exists", "AID: "+existing.AID)
 		return
 	}
 	var req keyStateRequest
@@ -54,24 +46,36 @@ func (s *CoreServer) handleRestoreIdentity(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusUnprocessableEntity, "The key log does not verify, so it is not installed", err.Error())
 		return
 	}
-
-	records := make([]store.EventRecord, 0, len(req.Events))
-	for i, ev := range req.Events {
+	raws := make([][]byte, 0, len(req.Events))
+	given := make([][]string, 0, len(req.Events))
+	for _, ev := range req.Events {
 		raw, _ := base64.StdEncoding.Strict().DecodeString(ev.RawB64)
-		rec, err := eventRecordOf(req.AID, i, raw, ev.Sigs)
+		raws, given = append(raws, raw), append(given, ev.Sigs)
+	}
+	// The gate a founding passes, owner named or not, since this installs an
+	// identity just as founding one does.
+	s.founding.Lock()
+	defer s.founding.Unlock()
+	if !s.mayFoundHere(w, ownerNamedIn(raws[0])) {
+		return
+	}
+	// Only the signatures that verify are kept: a copy read from a witness may
+	// carry others beside them, and what is kept here is published again.
+	kept, err := keriengine.VerifiedSignatures(raws, given)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "An event is unreadable", err.Error())
+		return
+	}
+	records := make([]store.EventRecord, 0, len(raws))
+	for i, raw := range raws {
+		rec, err := eventRecordOf(req.AID, i, raw, kept[i])
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "An event is unreadable", err.Error())
 			return
 		}
 		records = append(records, rec)
 	}
-	for _, rec := range records {
-		if err := s.DataStore.SaveEvent(rec); err != nil {
-			writeError(w, http.StatusInternalServerError, "The key log could not be stored", err.Error())
-			return
-		}
-	}
-	if err := s.DataStore.SaveIdentity(store.IdentityState{AID: req.AID, PublicKey: state.K[0],
+	if err := s.DataStore.SaveRestoredIdentity(records, store.IdentityState{AID: req.AID, PublicKey: state.K[0],
 		NextKeyDigest: firstOr(state.N), Created: time.Now().UTC().Format(time.RFC3339),
 		EventCount: len(records)}); err != nil {
 		writeError(w, http.StatusInternalServerError, "The identity could not be stored", err.Error())

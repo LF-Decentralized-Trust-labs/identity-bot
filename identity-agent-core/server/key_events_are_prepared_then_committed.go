@@ -109,7 +109,7 @@ func witnessThresholdOf(raw *json.RawMessage) (*int, error) {
 }
 
 func (s *CoreServer) handlePrepareEvent(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
+	if !s.theOwnerAsks(r) {
 		writeError(w, http.StatusForbidden, "Key events are the owner's", "only the owner prepares a key event")
 		return
 	}
@@ -207,7 +207,7 @@ func (s *CoreServer) mayFoundHere(w http.ResponseWriter, ownerAID string) bool {
 }
 
 func (s *CoreServer) handleCommitEvent(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
+	if !s.theOwnerAsks(r) {
 		writeError(w, http.StatusForbidden, "Key events are the owner's", "only the owner commits a key event")
 		return
 	}
@@ -257,25 +257,9 @@ func (s *CoreServer) handleCommitEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// An identity commits only to messaging keys this Identity Agent holds.
-	keysFor := name
-	if ev.Ilk == "icp" {
-		keysFor = ev.Identifier
-	}
-	if s.refuseAnUnheldKeySet(w, raw, keysFor) {
+	res, ok := s.commitOwnEvent(w, c, name, raw, ev, req.Sigs)
+	if !ok {
 		return
-	}
-	res, err := c.Commit(name, raw, req.Sigs, func(k drivers.KELKeep) error {
-		return s.keepCommittedEvent(k, ev)
-	})
-	if err != nil {
-		writeEventError(w, err)
-		return
-	}
-	if ev.Ilk == "icp" && res.Status == "recorded" {
-		if err := s.fileCommittedKeySet(raw, ev.Identifier); err != nil {
-			log.Printf("[keri] the messaging keys %s anchors could not be filed under it: %v", ev.Identifier, err)
-		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	switch res.Status {
@@ -288,9 +272,40 @@ func (s *CoreServer) handleCommitEvent(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"status": res.Status, "s": fmt.Sprintf("%x", res.SN), "d": res.SAID})
 		return
 	}
-	s.afterCommit(ev)
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]any{"status": res.Status, "s": fmt.Sprintf("%x", res.SN), "d": res.SAID})
+}
+
+// commitOwnEvent commits raw, an event of this Identity Agent's identity, with
+// sigs: the one place an event signed elsewhere is committed, whichever route
+// it came by. It refuses an event anchoring messaging keys this Identity Agent
+// does not hold, keeps the event before the engine adds it, and once it is
+// added files the keys a founding anchors and brings the witnesses up to date.
+// A refusal is answered here; ok is false then.
+func (s *CoreServer) commitOwnEvent(w http.ResponseWriter, c eventCommitter, name string, raw []byte,
+	ev *keri.Event, sigs []string) (*keriengine.CommitResult, bool) {
+
+	keysFor := name
+	if ev.Ilk == "icp" {
+		keysFor = ev.Identifier
+	}
+	if s.refuseAnUnheldKeySet(w, raw, keysFor) {
+		return nil, false
+	}
+	res, err := c.Commit(name, raw, sigs, func(k drivers.KELKeep) error {
+		return s.keepCommittedEvent(k, ev)
+	})
+	if err != nil {
+		writeEventError(w, err)
+		return nil, false
+	}
+	if res.Status == "recorded" {
+		if err := s.fileCommittedKeySet(raw, ev.Identifier); err != nil {
+			log.Printf("[keri] the messaging keys %s anchors could not be filed under it: %v", ev.Identifier, err)
+		}
+		s.afterCommit(ev)
+	}
+	return res, true
 }
 
 // ownerNamedIn is the owner a founding's first seal names, if it names one.
@@ -469,4 +484,12 @@ func (s *CoreServer) handleEventReceipts(w http.ResponseWriter, r *http.Request)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"s": fmt.Sprintf("%x", sn), "d": parsed.D, "receipts": receipts})
+}
+
+// theOwnerAsks is whether r is the owner's: admitted as the owner by the gate,
+// which spends an owner signature when it checks it, or the owner at this
+// computer. A remote owner whose signature the gate already checked would be
+// refused by asking isOwner again.
+func (s *CoreServer) theOwnerAsks(r *http.Request) bool {
+	return theGateAdmittedTheOwner(r) || s.isOwner(r)
 }

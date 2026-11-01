@@ -385,3 +385,41 @@ func (e *Engine) ownSignatures(aid string, keys []string, raw []byte) []string {
 	}
 	return out
 }
+
+// VerifiedSignatures keeps, for each event of a log, only the signatures that
+// verify under the key they name in the key state in force there, one per
+// key place. A log received from elsewhere may carry signatures that verify
+// nothing beside ones that do, and keri-go judges it on the ones that do; what
+// this Identity Agent keeps, and publishes again, carries only those.
+func VerifiedSignatures(raws [][]byte, sigs [][]string) ([][]string, error) {
+	out := make([][]string, len(raws))
+	var keys []string
+	for i, raw := range raws {
+		ev, err := keri.ParseEvent(raw)
+		if err != nil {
+			return nil, fmt.Errorf("event %d: %w", i, err)
+		}
+		if ev.Establishment() {
+			keys = ev.Keys
+		}
+		if i >= len(sigs) {
+			continue
+		}
+		seen := map[int]bool{}
+		for _, s := range sigs[i] {
+			c, err := drivers.ReadControllerSignature(s)
+			if err != nil || c.At.Index < 0 || c.At.Index >= len(keys) || seen[c.At.Index] {
+				continue
+			}
+			if c.QB64 != s && len(keys) != 1 {
+				continue // names no key, among several
+			}
+			if keri.VerifySignature(keys[c.At.Index], raw, c.Raw) != nil {
+				continue
+			}
+			seen[c.At.Index] = true
+			out[i] = append(out[i], c.QB64)
+		}
+	}
+	return out, nil
+}

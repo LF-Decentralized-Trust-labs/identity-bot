@@ -57,4 +57,27 @@ func TestTheAppChoosesTheMessagingKeysAndTheCoreHoldsThem(t *testing.T) {
 	if left, _ := s.hasKeySet(pendingKeySetLabel(anchor)); left {
 		t.Fatal("the keyset handed over before the founding is still held aside")
 	}
+
+	// A new keyset replaces nothing when it is handed over; it does once an
+	// interaction anchoring it is committed.
+	next := appSeeds(4)[3]
+	nextAnchor, _ := keymath.MessagingKeySet(next)
+	if code, out := call(t, s, s.handleMessagingSeed, "/api/keystore/messaging-seed",
+		map[string]any{"seed_hex": hex.EncodeToString(next)}); code != http.StatusOK || out["filed"] != "pending" {
+		t.Fatalf("a new keyset for a founded identity: %d %v", code, out)
+	}
+	if held, _ := s.keySetAnchorHeld(own.AID, anchor); !held {
+		t.Fatal("handing over a new seed replaced the keyset the log anchors")
+	}
+	nextJSON, _ := json.Marshal(nextAnchor)
+	_, out = call(t, s, s.handlePrepareEvent, "/api/events/prepare", map[string]any{"aid": own.AID, "t": "ixn",
+		"a": []json.RawMessage{nextJSON}, "after": map[string]string{"s": "0", "d": own.AID}})
+	ixn := preparedBytes(t, out)
+	if code, out := call(t, s, s.handleCommitEvent, "/api/events/commit", map[string]any{
+		"raw_b64": base64.StdEncoding.EncodeToString(ixn), "sigs": []string{appSign(t, k[0], ixn, false)}}); code != http.StatusCreated {
+		t.Fatalf("the interaction anchoring the new keyset: %d %v", code, out)
+	}
+	if held, _ := s.keySetAnchorHeld(own.AID, nextAnchor); !held {
+		t.Fatal("the keyset the interaction anchored is not the one held")
+	}
 }

@@ -7,8 +7,6 @@ import (
 	"io"
 	"net/http"
 
-	"identity-agent-core/iacrypto"
-
 	keri "github.com/grapeid/keri-go"
 )
 
@@ -166,13 +164,9 @@ func KeyStateOf(aid string, messages [][]byte) (*KeyState, error) {
 			state.LastEstablishment = place
 			state.K, state.N, state.Kt, state.Nt = ev.Keys, ev.NextDigest, fields.Kt, fields.Nt
 		}
-		for _, a := range fields.A {
-			var probe struct {
-				IA string `json:"ia"`
-			}
-			if json.Unmarshal(a, &probe) == nil && probe.IA == iacrypto.CipherSuiteIAHybrid1 {
-				state.MessagingKeySets = append(state.MessagingKeySets, anchoredKeySet{S: place["s"], Anchor: a})
-			}
+		for _, a := range messagingAnchorsAmong(fields.A) {
+			b, _ := json.Marshal(a)
+			state.MessagingKeySets = append(state.MessagingKeySets, anchoredKeySet{S: place["s"], Anchor: b})
 		}
 	}
 	return state, nil

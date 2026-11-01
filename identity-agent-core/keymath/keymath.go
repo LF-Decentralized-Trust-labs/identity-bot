@@ -9,10 +9,11 @@
 // byte, so the app runs this instead: linked into the app on a phone, and as
 // the core binary's one-shot keymath command on a desktop.
 //
-// It takes a 32-byte child seed, never the root, and imports nothing that
-// reaches a network or storage. It zeroes its copies of a seed when done, which
-// reduces how long one is held but cannot guarantee it: a garbage collector
-// may have copied a buffer first.
+// It takes a 32-byte child seed, never the root, and depends on no package that
+// reaches a network or storage of this core's (a test holds it to that); of
+// keri-go it calls only the parser and digests, never its key stores. It zeroes
+// its copies of a seed when done, which reduces how long one is held but cannot
+// guarantee it: a garbage collector may have copied a buffer first.
 package keymath
 
 import (

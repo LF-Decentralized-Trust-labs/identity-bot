@@ -41,8 +41,15 @@ func TestAnIdentityIsRestoredOnlyFromALogThatVerifies(t *testing.T) {
 	if id, _ := fresh.DataStore.GetIdentity(); id != nil {
 		t.Fatal("a log that does not verify was installed")
 	}
-	if code, out := call(t, fresh, fresh.handleRestoreIdentity, "/api/identity/restore", logWith(rotSig)); code != http.StatusCreated {
+	// A copy carrying a signature that verifies nothing beside the good one
+	// is installed with the good one alone.
+	junky := logWith(rotSig)
+	junky["events"].([]map[string]any)[1]["sigs"] = []string{rotSig, appSign(t, k[2], rot, true)}
+	if code, out := call(t, fresh, fresh.handleRestoreIdentity, "/api/identity/restore", junky); code != http.StatusCreated {
 		t.Fatalf("a sound log was answered %d %v", code, out)
+	}
+	if evs, _ := fresh.DataStore.GetEvents(own.AID); len(evs) != 2 || len(evs[1].ControllerSignatures()) != 1 {
+		t.Fatalf("the restored rotation holds %v", evs[1].ControllerSignatures())
 	}
 
 	_, out = call(t, fresh, fresh.handlePrepareEvent, "/api/events/prepare", map[string]any{"aid": own.AID,
