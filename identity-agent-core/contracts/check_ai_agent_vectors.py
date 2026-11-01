@@ -3,7 +3,7 @@
 
 Everything here is rebuilt from the prose in agent-body.schema.json and
 agent-message.schema.json, not from the Go code: the strings a body signs, the
-keys digest, the six words, the nonce and key-size rules, the grades, the
+keys digest, the nonce and key-size rules, the grades, the
 countersigned message's fields and the hash that chains entries. If this script
 and the vector files ever disagree, the prose no longer says what the code does.
 
@@ -84,7 +84,6 @@ def lines(*fields):
 
 
 def check_body(v):
-    words = open(os.path.join(HERE, "..", "agentbody", "bip39_english.txt")).read().split()
     k = v["keys"]
     same("keys host", k["host"], v["host"])
     same("keys verkey", k["verkey"], v["verkey"])
@@ -145,11 +144,6 @@ def check_body(v):
         if len(n) >= 16:
             fail("refused nonce %r is 16 characters or more" % n)
 
-    for w in v["words"]:
-        bits = int.from_bytes(blake3.blake3(("IA-BODY-WORDS-V1\n" + w["host"]).encode()).digest()[:9], "big")
-        got = [words[(bits >> (72 - 11 * (i + 1))) & 0x7FF] for i in range(6)]
-        same("words for " + w["host"], got, w["words"])
-
     order = ["software", "hardware-asserted", "hardware-attested", "attested-runtime"]
     for g in v["grades"]:
         c = g["claimed"]
@@ -168,7 +162,7 @@ def check_body(v):
         s = int.from_bytes(raw[32:], "big")
         if (s <= P256_N // 2) != low:
             fail("p256 %s is %s-s" % (name, "high" if low else "low"))
-    return len(v["enrol_requests"]) + len(v["signed_requests"]) + len(v["words"])
+    return len(v["enrol_requests"]) + len(v["signed_requests"])
 
 
 # ── agent-message.schema.json ─────────────────────────────────────────────

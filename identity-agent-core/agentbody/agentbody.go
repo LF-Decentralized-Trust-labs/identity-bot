@@ -13,23 +13,24 @@
 //     one-time secret.
 //  2. The machine checks the Identity Agent's key log against the string, makes
 //     K, and sends a first contact signed by K over the secret.
-//  3. Both sides show six words derived from K. The owner compares them and
-//     approves; a stolen secret used by another machine shows other words.
+//  3. The machine shows an approval request signed by K (approval.go). The
+//     owner captures it from the machine in front of them and approves; a
+//     stolen secret used by another machine holds another key, and its request
+//     is never the one captured. A machine a provider made is approved on that
+//     provider's vouch instead.
 //  4. The Identity Agent issues a credential saying K is the body of this AI
 //     agent, at a stated grade. From then on the machine signs every request
 //     with K, and no shared secret exists to steal.
 //
 // This package is what both sides need to agree on: the enrolment string, the
-// strings each signature covers, the six words, and the grades. The Identity
+// strings each signature covers, the approval request, and the grades. The Identity
 // Agent uses it to issue and check; the program a machine runs uses it to enrol
 // and to sign. Keeping one copy is what keeps the two from disagreeing.
 package agentbody
 
 import (
 	"bytes"
-	_ "embed"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -38,8 +39,6 @@ import (
 	"identity-agent-core/didcomm"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/permission"
-
-	"github.com/zeebo/blake3"
 )
 
 // ── The enrolment string ─────────────────────────────────────────────────────
@@ -76,7 +75,7 @@ type Enrolment struct {
 	Agent     string `json:"agent"`
 	AgentName string `json:"name"`
 	// Secret is single-use, and only lets a machine ASK. Nothing is granted
-	// until the owner compares the words and approves.
+	// until the machine is approved.
 	Secret  string    `json:"secret"`
 	Expires time.Time `json:"exp"`
 }
@@ -299,36 +298,6 @@ func (r SignedRequest) Bytes() []byte {
 		r.Reason,
 		r.Session,
 	}, "\n"))
-}
-
-// ── The six words ────────────────────────────────────────────────────────────
-
-//go:embed bip39_english.txt
-var wordlistFile []byte
-
-var wordlist = func() []string {
-	words := strings.Split(strings.TrimSpace(string(wordlistFile)), "\n")
-	if len(words) != 2048 {
-		panic(fmt.Sprintf("agentbody: the word list has %d words, not 2048", len(words)))
-	}
-	return words
-}()
-
-// Words are the six words both sides show for a body's key, so a person can
-// tell that the machine asking is the one in front of them. They come from a
-// digest of the body's identifier: 66 bits, so a machine that wanted to show the
-// same words with its own key would have to find a key that collides with them
-// within the few minutes an enrolment stays open.
-func Words(host string) []string {
-	sum := blake3.Sum256([]byte("IA-BODY-WORDS-V1\n" + host))
-	bits := binary.BigEndian.Uint64(sum[:8])
-	extra := uint64(sum[8]) // two more bits for the sixth word
-	out := make([]string, 6)
-	for i := 0; i < 5; i++ {
-		out[i] = wordlist[(bits>>(64-11*(i+1)))&0x7ff]
-	}
-	out[5] = wordlist[((bits&0x1ff)<<2)|(extra>>6)]
-	return out
 }
 
 // ── Grades ───────────────────────────────────────────────────────────────────

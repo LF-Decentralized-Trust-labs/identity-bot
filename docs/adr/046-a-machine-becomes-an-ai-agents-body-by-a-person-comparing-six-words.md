@@ -1,8 +1,10 @@
 # ADR-046 — A machine becomes an AI agent's body by a person comparing six words
 
-**Status:** Accepted
+**Status:** Accepted; step 4, the six-word comparison, superseded by ADR-059 (2026-11-01)
 **Date:** 2026-10-20
 **Relates to:** ADR-044 (An authorized controller does the app's work), ADR-045 (Every asset gets an identity and a grant from one schema template)
+
+> **Superseded in part, 2026-11-01.** A machine is no longer approved by a person comparing six words. It is approved from its own signed approval request, or on the vouch of the provider that made it (ADR-059). The six words are no longer derived or shown, and `agentbody.Words` is removed. The rest of this decision stands: proof of possession, the sealed enrolment, the one-time secret and the grades.
 
 ## Context
 

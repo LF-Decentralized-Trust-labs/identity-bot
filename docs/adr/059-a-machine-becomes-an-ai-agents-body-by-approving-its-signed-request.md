@@ -1,11 +1,11 @@
 # ADR-059 — A machine becomes an AI agent's body by approving its signed request, not by comparing six words
 
-**Status:** Proposed
+**Status:** Accepted (2026-11-01)
 **Date:** 2026-10-29
 **Supersedes in part:** ADR-046 (step 4, the six-word comparison), the per-machine human approval of a machine a provider made (a provider is a program that makes machines for AI agents on request; how it does so is that runtime's own decision, kept outside this repository)
 **Relates to:** ADR-044 (an authorized controller does the app's work), ADR-050 (one check for a controller's actions and an AI agent's capability calls)
 
-**Rollout.** This is adopted as the design and built in phases. The signed-request approval path described below is added first, alongside the existing six-word flow. The six-word derivation and comparison are removed, the provider vouch is built, and the claim this supersedes is registered — with the supersession note on ADR-046 — in the change that removes the six words, not before: until then the code still derives and shows them, so the old claim is not yet false.
+**Rollout.** Built in phases: the signed-request approval path first, alongside the six-word flow, then the provider vouch, then (2026-11-01) the removal of the six-word derivation and comparison, with the supersession note on ADR-046.
 
 ## Context
 

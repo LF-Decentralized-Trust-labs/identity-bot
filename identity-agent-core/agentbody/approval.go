@@ -7,8 +7,7 @@ import (
 	"strings"
 )
 
-// A machine the person sets up is approved from its own signed request, rather
-// than by a person comparing six words.
+// A machine the person sets up is approved from its own signed request.
 //
 // After a machine has asked to become a body (handleBodyEnrol has its sealed,
 // proven request and holds a pending binding for its key K), the machine also
@@ -21,9 +20,9 @@ import (
 // The string proves itself, so how it reaches the approver carries no authority
 // and is not trusted: a tampered copy fails the signature, and a copy of another
 // machine's request names that machine's key, not the one in front of the
-// person, so it is simply not the one they capture. This is the same protection
-// the six words gave — tying "the machine in front of me" to "the key that
-// asked" — with the check done by the Identity Agent instead of by eye.
+// person, so it is simply not the one they capture. That ties "the machine in
+// front of me" to "the key that asked", with the check done by the Identity
+// Agent rather than by eye.
 
 // ApprovalPrefix marks a string as an AI agent body approval request, version 1.
 const ApprovalPrefix = "iaapprove1."

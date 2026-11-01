@@ -6,31 +6,10 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/hex"
 	"strings"
 	"testing"
 	"time"
 )
-
-// The word list is the published BIP-39 English list, byte for byte. A person
-// reads these words aloud between two screens; a list that drifted from the
-// standard one would be a list nobody else could check.
-func TestTheWordListIsTheStandardOne(t *testing.T) {
-	sum := sha256.Sum256(wordlistFile)
-	if got := hex.EncodeToString(sum[:]); got != "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda" {
-		t.Fatalf("the word list is not the published BIP-39 English list: %s", got)
-	}
-}
-
-func TestSixWordsAreStableAndDifferPerKey(t *testing.T) {
-	a := Words("1AAIAtzkysVOrUt0qUoLK39vKrGYuBbLRQ8wF1pjUz__rAab")
-	if len(a) != 6 || strings.Join(a, " ") != strings.Join(Words("1AAIAtzkysVOrUt0qUoLK39vKrGYuBbLRQ8wF1pjUz__rAab"), " ") {
-		t.Fatalf("the words are not stable: %v", a)
-	}
-	if strings.Join(a, " ") == strings.Join(Words("1AAIAtzkysVOrUt0qUoLK39vKrGYuBbLRQ8wF1pjUz__rAac"), " ") {
-		t.Fatal("two keys showed the same words")
-	}
-}
 
 func TestAnEnrolmentStringRoundTrips(t *testing.T) {
 	e := Enrolment{URL: "https://ia.example", IdentityAgent: "EIA", KeyStateSN: 3, KeyStateSAID: "EKS",

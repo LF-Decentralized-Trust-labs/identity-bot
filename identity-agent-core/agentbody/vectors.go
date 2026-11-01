@@ -9,7 +9,7 @@ import (
 )
 
 // bodyVectors are the enrolment strings, the enrolment request, the strings a
-// body signs, the six words and the grades, worked through from fixed inputs
+// body signs and the grades, worked through from fixed inputs
 // and fixed keys: the file another implementation of a body, or of the
 // Identity Agent's side of one, tests itself against. It ships inside this
 // module so a Go implementation reads the same file instead of keeping a copy.
@@ -87,11 +87,6 @@ type BodyVectorSet struct {
 
 	// RefusedNonces are too short for an enrolment or a signed request.
 	RefusedNonces []string `json:"refused_nonces"`
-
-	Words []struct {
-		Host  string   `json:"host"`
-		Words []string `json:"words"`
-	} `json:"words"`
 
 	Grades []struct {
 		Claimed string `json:"claimed"`

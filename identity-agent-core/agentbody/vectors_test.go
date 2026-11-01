@@ -26,7 +26,7 @@ import (
 
 // Every published vector is what this package produces from its inputs: the
 // body's keys, the encoded enrolment, the enrolment request and the string K
-// signs for it, the signed requests, the six words, the grades. A change to
+// signs for it, the signed requests, the grades. A change to
 // any of them breaks this test before it breaks another implementation.
 func TestThePublishedBodyVectorsHold(t *testing.T) {
 	if contractcheck.Writing(t) {
@@ -37,7 +37,7 @@ func TestThePublishedBodyVectorsHold(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(set.Enrolments) == 0 || len(set.RefusedEnrolments) == 0 || len(set.EnrolRequests) == 0 ||
-		len(set.SignedRequests) == 0 || len(set.RefusedKeys) == 0 || len(set.RefusedNonces) == 0 || len(set.Words) == 0 || len(set.Grades) == 0 {
+		len(set.SignedRequests) == 0 || len(set.RefusedKeys) == 0 || len(set.RefusedNonces) == 0 || len(set.Grades) == 0 {
 		t.Fatal("the vector file is missing a section")
 	}
 	// Recomputed into a second copy read from the file, so nothing the
@@ -252,9 +252,6 @@ func fillBodyVectors(set *BodyVectorSet) error {
 			return err
 		}
 	}
-	for i := range set.Words {
-		set.Words[i].Words = Words(set.Words[i].Host)
-	}
 	for i := range set.Grades {
 		g := &set.Grades[i]
 		g.Grade, g.Clamped = Grade(g.Claimed)
@@ -351,12 +348,6 @@ func writeBodyVectors(t *testing.T) {
 	set.RefusedNonces = []string{"", "fifteen-chars-0"}
 	if err := fillBodyVectors(&set); err != nil {
 		t.Fatal(err)
-	}
-	for _, h := range []string{set.Host, "1AAIAtzkysVOrUt0qUoLK39vKrGYuBbLRQ8wF1pjUz__rAab"} {
-		set.Words = append(set.Words, struct {
-			Host  string   `json:"host"`
-			Words []string `json:"words"`
-		}{Host: h})
 	}
 	for _, c := range []string{GradeSoftware, GradeHardwareAsserted, GradeHardwareAttested, GradeAttestedRuntime, "", "root"} {
 		set.Grades = append(set.Grades, struct {
