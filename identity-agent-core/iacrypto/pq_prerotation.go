@@ -39,17 +39,6 @@ const mldsa65SeedBytes = mldsa65.SeedSize
 // server's inception handler — but it is the reason this is a bet rather than a
 // certainty.
 
-// ProposedMLDSA65Verkey is the CESR code for an ML-DSA-65 public verification
-// key, as proposed for the specification's next minor version.
-//
-// It is four characters in the `2` table because that is not a choice: the
-// table follows from the raw size modulo 3, since the encoding has to land on a
-// 24-bit boundary. 1952 mod 3 is 2, which needs one lead byte, which is what
-// the `2` selector means. Encoding it in the `1` table instead produces a body
-// that is not a whole number of base64 quadruples, and a conforming parser then
-// mis-frames the value and loses its place in the rest of the stream.
-const ProposedMLDSA65Verkey = "2AAE"
-
 // MLDSA65VerkeyQB64 encodes an ML-DSA-65 public key as CESR.
 //
 // Encodes through MatterFixedQB64, which writes the lead byte a raw size of
@@ -60,7 +49,7 @@ func MLDSA65VerkeyQB64(pub []byte) (string, error) {
 		return "", fmt.Errorf("an ML-DSA-65 public key is %d bytes, got %d",
 			MLDSA65VerkeyBytes, len(pub))
 	}
-	qb64, err := MatterFixedQB64(ProposedMLDSA65Verkey, pub)
+	qb64, err := MatterFixedQB64(CESRMLDSA65Verkey, pub)
 	if err != nil {
 		return "", err
 	}

@@ -28,9 +28,9 @@ A hybrid AID is born with **two classical and two post-quantum keys**, identifie
 | Slot | Purpose | Algorithm | CESR code |
 |---|---|---|---|
 | `k[0]` | Signing (classical) | Ed25519 | `D` |
-| `k[1]` | Signing (post-quantum) | ML-DSA-65 | `1PDA` |
-| `a[0].ka[0]` | Key agreement (classical) | X25519 | `1PXB` |
-| `a[0].ka[1]` | Key agreement (post-quantum) | ML-KEM-768 | `1PKM` |
+| `k[1]` | Signing (post-quantum) | ML-DSA-65 | `2AAE` |
+| `a[0].ka[0]` | Key agreement (classical) | X25519 | `C` |
+| `a[0].ka[1]` | Key agreement (post-quantum) | ML-KEM-768 | `2PKM` |
 
 The two signing keys live in the standard KERI `k` field (length 2). The pre-rotation `n` field carries two Blake3-256 digests — one per next signing key — so rotation stays hybrid across the whole KEL. The two key-agreement (encryption) keys ride in an anchor seal `a[0]` alongside the cipher-suite id `ia: "IA-HYBRID-1"`, keeping the event a valid KERI 1.1.x event that a non-hybrid verifier can still parse. ML-DSA-65 and ML-KEM-768 are the FIPS Level-3 parameter sets (verify key 1952 / 1184 bytes; signature 3309 bytes).
 
@@ -129,3 +129,12 @@ that is tracked separately.
 accepts the Ed25519 signature alone. Any work to make identities hybrid has to
 address the threshold as well, or the protection is enforced by our verifier
 rather than by the identity.
+
+**Correction, 2026-11-01: the key codes in the table above were changed.** They
+were `1PDA` (ML-DSA-65), `1PXB` (X25519) and `1PKM` (ML-KEM-768), four-character
+codes in the `1` table. That table is only for a raw size divisible by three, and
+none of these keys is, so each value came out one character short of a whole
+number of base64 quadruples. The codes in force are those in
+`identity-agent-core/iacrypto/cesr.go`: `2AAE` for ML-DSA-65 (proposed in the
+specification, not yet assigned), `C` for X25519 (already assigned) and `2PKM`
+for ML-KEM-768 (ours, provisional). `golden_vectors.json` names the same codes.

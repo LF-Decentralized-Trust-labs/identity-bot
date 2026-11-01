@@ -15,9 +15,9 @@
     "field_order": "v,t,d,i,s,kt,k,nt,n,bt,b,c,a",
     "cesr_selectors": {
       "ed25519_verkey": "D",
-      "mldsa65_verkey": "1PDA",
-      "x25519_pubkey": "1PXB",
-      "mlkem768_encap": "1PKM"
+      "mldsa65_verkey": "2AAE",
+      "x25519_pubkey": "C",
+      "mlkem768_encap": "2PKM"
     },
     "cesr_wire": {
       "ed25519_signing": "DJw8Aszer-nfK3XvwZGSnFBOqNNckWVtEZtt4JszoXX6",
