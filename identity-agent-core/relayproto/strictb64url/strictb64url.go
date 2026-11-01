@@ -3,7 +3,7 @@
 //
 // It lives inside the relayproto module and imports nothing outside the
 // standard library: relayproto must stay importable alone by a URL relay, and
-// the core's iacrypto imports relayproto already, so both read it from here.
+// the core module already depends on relayproto, so both read it from here.
 package strictb64url
 
 import (
@@ -21,6 +21,10 @@ func Decode(s string) ([]byte, error) {
 	}
 	return base64.RawURLEncoding.Strict().DecodeString(s)
 }
+
+// Alphabet is the base64url alphabet in index order, which is also KERI's
+// (keripy intToB64).
+const Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
 // IsAlphabet reports whether every character of s is in the base64url
 // alphabet, the only one qb64 uses. Padding is not in it.

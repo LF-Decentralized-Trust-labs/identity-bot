@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strings"
+
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto/strictb64url"
 )
 
 const (
@@ -81,7 +83,7 @@ var (
 )
 
 // keri Base64 index alphabet (matches keripy intToB64).
-var b64Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+const b64Chars = strictb64url.Alphabet
 
 func intToB64(i int, length int) string {
 	d := make([]byte, 0, length)

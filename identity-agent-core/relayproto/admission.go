@@ -146,8 +146,6 @@ func signatureOf(s string) ([]byte, error) {
 	return sig, nil
 }
 
-const b64url = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-
 func randomToken(n int) string {
 	buf := make([]byte, n)
 	if _, err := rand.Read(buf); err != nil {
