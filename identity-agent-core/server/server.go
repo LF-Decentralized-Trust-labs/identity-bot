@@ -1773,6 +1773,11 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 		Timestamp:      now,
 		RawBytesB64:    result.RawBytesB64,
 		CesrSignature:  req.CesrSignature,
+		// Signed here where this Identity Agent holds the founding key.
+		Signatures: result.Signatures,
+	}
+	if len(result.Signatures) > 0 {
+		eventRecord.CesrSignature = result.Signatures[0]
 	}
 	if err := s.DataStore.SaveEvent(eventRecord); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to persist inception event", err.Error())
@@ -2039,7 +2044,12 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 		NextKeyDigest:  result.NewNextKeyDigest,
 		Timestamp:      now,
 		RawBytesB64:    result.RawBytesB64,
-		CesrSignature:  req.CesrSignature,
+		// What the engine added it with: a rotation is added only signed by
+		// the key it reveals, so whatever a caller sent beside it is not it.
+		Signatures: result.Signatures,
+	}
+	if len(result.Signatures) > 0 {
+		eventRecord.CesrSignature = result.Signatures[0]
 	}
 	if err := s.DataStore.SaveEvent(eventRecord); err != nil {
 		log.Printf("[identity-agent-core] Warning: failed to persist rotation event: %v", err)
@@ -2052,7 +2062,7 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 		// Without this the record still named the founding generation, and
 		// after one rotation this Identity Agent took its own key for one
 		// held elsewhere and refused to sign or rotate again.
-		gen, genErr := s.ownGenerationOf(result.NewPublicKey)
+		_, gen, genErr := s.ownKeyAt(result.NewPublicKey)
 		identity.PublicKey = result.NewPublicKey
 		identity.NextKeyDigest = result.NewNextKeyDigest
 		identity.EventCount = result.SequenceNumber + 1

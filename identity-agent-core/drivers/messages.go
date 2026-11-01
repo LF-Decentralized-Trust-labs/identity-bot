@@ -31,6 +31,9 @@ type DriverInceptionResponse struct {
 	RawBytesB64   string `json:"raw_bytes_b64"`
 	PublicKey     string `json:"public_key"`
 	NextKeyDigest string `json:"next_key_digest"`
+	// Signatures are the founding's controller signatures where the engine's
+	// installed signer holds its keys; empty where it is signed elsewhere.
+	Signatures []string `json:"signatures,omitempty"`
 }
 
 type DriverHybridInceptionResponse struct {
@@ -76,6 +79,8 @@ type DriverRotationResponse struct {
 	// establishment event committed to), then /cesr-encode.
 	RawBytesB64    string `json:"raw_bytes_b64"`
 	SequenceNumber int    `json:"sequence_number"`
+	// Signatures are the controller signatures the event was added with.
+	Signatures []string `json:"signatures,omitempty"`
 }
 
 type DriverInteractResponse struct {
