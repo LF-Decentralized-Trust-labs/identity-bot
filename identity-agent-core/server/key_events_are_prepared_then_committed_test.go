@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"identity-agent-core/backup"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/keriengine"
 	"identity-agent-core/store"
@@ -226,5 +227,68 @@ func TestKeyEventRoutesAreTheOwnersAlone(t *testing.T) {
 	s.handlePrepareEvent(rec, remote(http.MethodPost, "/api/events/prepare", `{"t":"icp"}`))
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("a caller who is not the owner prepared an event: %d", rec.Code)
+	}
+}
+
+// A core that holds the identity's key founds and rotates it through its own
+// routes, and every event it stores carries the signature it was added with:
+// the stored log verifies, which it did not while rotations were appended
+// unsigned.
+func TestACoreHeldRotationIsStoredSigned(t *testing.T) {
+	aMachineThatMayFound(t)
+	dir := t.TempDir()
+	ds, err := store.NewSQLiteStore(dir)
+	if err != nil {
+		t.Skipf("data store unavailable: %v", err)
+	}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, DataStore: ds, EventHub: NewEventHub(),
+		KeriDriver: keriengine.New()}
+	endsItsBackgroundWork(t, s)
+	s.engineSigns()
+	root, err := ensureRootSeed(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := func(gen int) string {
+		seed, err := backup.DerivePairwiseSeed(root, 0, gen)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return verkeyOf(seed)
+	}
+
+	code, out := call(t, s, s.handleInception, "/api/inception",
+		map[string]any{"public_key": key(0), "next_public_key": key(1)})
+	if code != http.StatusCreated {
+		t.Fatalf("founding: %d %v", code, out)
+	}
+	aid := out["aid"].(string)
+	code, out = call(t, s, s.handleRotation, "/api/rotation",
+		map[string]any{"name": aid, "new_public_key": key(1), "new_next_public_key": key(2)})
+	if code != http.StatusOK {
+		t.Fatalf("rotation: %d %v", code, out)
+	}
+
+	code, out = call(t, s, s.handleRotation, "/api/rotation",
+		map[string]any{"name": aid, "new_public_key": key(2), "new_next_public_key": key(3)})
+	if code != http.StatusOK {
+		t.Fatalf("a second rotation: %d %v", code, out)
+	}
+
+	evs, _ := s.DataStore.GetEvents(aid)
+	if len(evs) != 3 {
+		t.Fatalf("%d events stored", len(evs))
+	}
+	var messages [][]byte
+	for _, ev := range evs {
+		raw, _ := base64.StdEncoding.DecodeString(ev.RawBytesB64)
+		group, err := keri.AttachControllerSigs(ev.ControllerSignatures())
+		if err != nil {
+			t.Fatalf("event %d (%s) is stored without its signature", ev.SequenceNumber, ev.EventType)
+		}
+		messages = append(messages, append(raw, group...))
+	}
+	if _, err := keri.ValidateSignedKEL(messages); err != nil {
+		t.Fatalf("the stored log does not verify: %v", err)
 	}
 }

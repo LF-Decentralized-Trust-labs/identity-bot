@@ -14,8 +14,8 @@ import 'package:http/testing.dart';
 // What the core answers where it does not hold the identity's key, as its
 // writeKeyNotHeldHere writes it.
 const reason = "This identity's key is not held by this Identity Agent: it is on your device or in your app. "
-    "Its key log can't be extended here (no rotation, interaction or credential issued) until the app "
-    'signs each event before it is added.';
+    "This Identity Agent doesn't make this event itself; the app that holds the key makes it, "
+    'signing it before it is added.';
 
 http.Response refused() => http.Response(jsonEncode({'error': 'key_not_held_here', 'details': reason}), 409);
 

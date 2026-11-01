@@ -61,27 +61,51 @@ func (s *CoreServer) identitySigningSeed() ([]byte, error) {
 // one after next, at the identity's recorded derivation index. A key it does
 // not derive is elsewhere, whatever this Identity Agent's own seed is.
 func (s *CoreServer) ownSeedForKey(key string) ([]byte, error) {
+	seed, _, err := s.ownKeyAt(key)
+	return seed, err
+}
+
+// ownKeyAt is ownSeedForKey with the generation the key is at.
+func (s *CoreServer) ownKeyAt(key string) ([]byte, int, error) {
 	identity, err := s.DataStore.GetIdentity()
 	if err != nil || identity == nil {
-		return nil, fmt.Errorf("this agent has no identity to sign as")
+		return nil, 0, fmt.Errorf("this agent has no identity to sign as")
 	}
 	if _, err := s.identitySigningSeed(); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	rootSeed, err := ensureRootSeed(s.DataDir)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", errKeyUnavailable, err)
+		return nil, 0, fmt.Errorf("%w: %v", errKeyUnavailable, err)
 	}
 	for gen := 0; gen <= identity.KeyGeneration+2; gen++ {
 		seed, err := backup.DerivePairwiseSeed(rootSeed, identity.DerivationIndex, gen)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", errKeyUnavailable, err)
+			return nil, 0, fmt.Errorf("%w: %v", errKeyUnavailable, err)
 		}
 		if iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)) == key {
-			return seed, nil
+			return seed, gen, nil
 		}
 	}
-	return nil, errKeyElsewhere
+	return nil, 0, errKeyElsewhere
+}
+
+// foundingSeedForKey is the seed of key where it is the founding key this
+// Identity Agent derives for an identity of its own (index 0, generation 0, as
+// foundingKeyIsOurs reads it), before any identity is recorded here.
+func (s *CoreServer) foundingSeedForKey(key string) ([]byte, error) {
+	rootSeed, err := secureenclave.LoadRootSeed(s.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	seed, err := backup.DerivePairwiseSeed(rootSeed, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+	if iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)) != key {
+		return nil, errKeyElsewhere
+	}
+	return seed, nil
 }
 
 var errKeyUnavailable = errors.New("this machine holds the identity's key and cannot read it right now")

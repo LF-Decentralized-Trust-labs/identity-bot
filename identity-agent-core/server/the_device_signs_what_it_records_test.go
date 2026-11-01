@@ -936,12 +936,12 @@ func TestIssuingOutsideARegistryWhereTheKeyIsElsewhereWritesNothing(t *testing.T
 	rec := httptest.NewRecorder()
 	c.requester.s.router.ServeHTTP(rec, local("POST", "/api/credential/issue",
 		`{"claims":{"role":"engineer"},"schema_said":"EBdXt3gIXOf2BBWNHdSXCJnFJL5OuQPyM5K0neuniccM"}`))
-	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "can't be extended here") {
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "POST /api/events/prepare") {
 		t.Fatalf("an issuance where the key is elsewhere was answered %d %s", rec.Code, rec.Body.String())
 	}
 	rec = httptest.NewRecorder()
 	c.requester.s.router.ServeHTTP(rec, local("POST", "/api/interact", `{"name":"`+owner.AID+`","data":[{"d":"Eanything"}]}`))
-	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "can't be extended here") {
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "POST /api/events/prepare") {
 		t.Fatalf("an interaction where the key is elsewhere was answered %d %s", rec.Code, rec.Body.String())
 	}
 	if after, _ := c.requester.s.DataStore.GetEvents(owner.AID); len(after) != len(before) {
@@ -974,7 +974,7 @@ func TestNoRotationIsMadeWhereTheKeyIsElsewhere(t *testing.T) {
 	} {
 		rec := httptest.NewRecorder()
 		c.requester.s.router.ServeHTTP(rec, local("POST", call.path, call.body))
-		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "can't be extended here") {
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "POST /api/events/prepare") {
 			t.Fatalf("%s was answered %d %s", call.path, rec.Code, rec.Body.String())
 		}
 	}

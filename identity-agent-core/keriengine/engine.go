@@ -414,6 +414,7 @@ func (e *Engine) inceptWith(publicKey, nextPublicKey, name string, data []json.R
 		return nil, err
 	}
 	first.Sigs = e.foundingSignatures(ev, raw)
+	sigs := append([]string(nil), first.Sigs...)
 	e.state.put(&identity{
 		Name:            name,
 		AID:             ev.Identifier,
@@ -434,6 +435,7 @@ func (e *Engine) inceptWith(publicKey, nextPublicKey, name string, data []json.R
 		RawBytesB64:    b64(raw),
 		PublicKey:      pub,
 		NextKeyDigest:  nextDigest,
+		Signatures:     sigs,
 	}, nil
 }
 
@@ -808,6 +810,7 @@ func (e *Engine) Rotate(req drivers.RotationRequest) (*drivers.DriverRotationRes
 		RawBytesB64:      b64(raw),
 		Said:             ev.SAID,
 		SequenceNumber:   int(ev.SN),
+		Signatures:       sigsAt(e, id, int(ev.SN)),
 	}, nil
 }
 
@@ -903,7 +906,18 @@ func (e *Engine) RotateToMultisig(name string, keys, nextKeyDigests []string, is
 		RawBytesB64:      b64(raw),
 		Said:             ev.SAID,
 		SequenceNumber:   int(ev.SN),
+		Signatures:       sigsAt(e, id, int(ev.SN)),
 	}, nil
+}
+
+// sigsAt are the signatures held with id's event at sn.
+func sigsAt(e *Engine, id *identity, sn int) []string {
+	e.state.mu.RLock()
+	defer e.state.mu.RUnlock()
+	if sn < 0 || sn >= len(id.KEL) {
+		return nil
+	}
+	return append([]string(nil), id.KEL[sn].Sigs...)
 }
 
 // Interact anchors data in an identity's key log.

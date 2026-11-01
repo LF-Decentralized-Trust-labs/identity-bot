@@ -208,13 +208,23 @@ func (s *CoreServer) mayRotateHere(name string) error {
 
 // keyNotHeldHere is what a person is told when an event of their identity is
 // asked of this Identity Agent and its key is not held here: on another
-// device, or in the app itself, which signs only after an event is added.
+// device, or in the app itself.
 const keyNotHeldHere = "This identity's key is not held by this Identity Agent: it is on your device or in your app. " +
-	"Its key log can't be extended here (no rotation, interaction or credential issued) until the app " +
-	"signs each event before it is added."
+	"This Identity Agent doesn't make this event itself; the app that holds the key makes it, " +
+	"signing it before it is added."
 
 // writeKeyNotHeldHere answers a request that would extend the key log of an
 // identity whose key is not held here.
+//
+// It names the routes a signer that holds the key uses instead: the event is
+// prepared there, signed by that signer, and committed signed (ADR-061).
 func writeKeyNotHeldHere(w http.ResponseWriter) {
-	writeError(w, http.StatusConflict, "key_not_held_here", keyNotHeldHere)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusConflict)
+	json.NewEncoder(w).Encode(map[string]string{
+		"error":   "key_not_held_here",
+		"details": keyNotHeldHere,
+		"prepare": "POST /api/events/prepare",
+		"commit":  "POST /api/events/commit",
+	})
 }
