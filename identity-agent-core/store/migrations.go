@@ -1004,8 +1004,10 @@ ALTER TABLE kel ADD COLUMN unsigned_at_upgrade INTEGER NOT NULL DEFAULT 0;
 UPDATE kel SET unsigned_at_upgrade = 1 WHERE cesr_signature = '';
 
 -- Interactions a recovery rotation supersedes are moved here, never deleted.
+-- Keyed by the event itself, not a counter, so a restored backup's rows are
+-- added beside this machine's rather than written over rows that happen to
+-- share a number.
 CREATE TABLE IF NOT EXISTS kel_superseded (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     aid                 TEXT NOT NULL,
     seq_num             INTEGER NOT NULL,
     event_type          TEXT NOT NULL,
@@ -1017,7 +1019,8 @@ CREATE TABLE IF NOT EXISTS kel_superseded (
     raw_bytes_b64       TEXT NOT NULL DEFAULT '',
     signatures          TEXT NOT NULL DEFAULT '',
     unsigned_at_upgrade INTEGER NOT NULL DEFAULT 0,
-    superseded_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    superseded_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    PRIMARY KEY (aid, seq_num, event_json)
 );
 CREATE INDEX IF NOT EXISTS idx_kel_superseded_aid ON kel_superseded(aid);
 `},
@@ -1029,16 +1032,17 @@ CREATE INDEX IF NOT EXISTS idx_kel_superseded_aid ON kel_superseded(aid);
 -- stays the first, for readers of one.
 ALTER TABLE witness_kel_events ADD COLUMN signatures TEXT NOT NULL DEFAULT '';
 
--- Interactions a recovery rotation supersedes at a witness, never deleted.
+-- Interactions a recovery rotation supersedes at a witness, never deleted;
+-- keyed by the event, so a restored backup's rows are added, not written over.
 CREATE TABLE IF NOT EXISTS witness_kel_superseded (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
     signer_aid     TEXT NOT NULL,
     sequence_num   INTEGER NOT NULL,
     event_said     TEXT NOT NULL,
     raw_bytes_b64  TEXT NOT NULL DEFAULT '',
     signatures     TEXT NOT NULL DEFAULT '',
     superseded_by  TEXT NOT NULL,
-    superseded_at  TEXT NOT NULL DEFAULT ''
+    superseded_at  TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (signer_aid, event_said)
 );
 CREATE INDEX IF NOT EXISTS idx_witness_kel_superseded_aid ON witness_kel_superseded(signer_aid);
 
