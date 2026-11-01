@@ -36,3 +36,13 @@ That comparison does real work in exactly one case: a person setting a machine u
 - A device that only captures a request needs no authority of its own, because the request proves itself; the authority to approve remains the owner's or an authorized controller's, checked the one way (ADR-050). This is what lets a capture device — a camera, or another of the person's apps relaying the request — feed an approver that holds the authority, without being granted any.
 
 The claim this supersedes is registered in the architecture's superseded-claims register in the change that removes the six words (see Rollout), when the old claim becomes false.
+
+## Note, 2026-11-01: how the provider's vouch is first built
+
+The first implementation differs from the Decision above in three ways. Each is recorded here so a reader can tell what is checked today.
+
+- **The vouch is the machine's own request, passed on by the provider.** The provider does not sign a separate statement binding K. It passes on the approval request its new machine printed, over the authenticated, sealed connection it already holds as an enrolled body. The Identity Agent approves only when that request checks, names the AI agent the provider was asked to make a machine for, and K is the key that enrolled with exactly the one-time enrolment string the Identity Agent gave that provider for that request. A machine that used a string taken from elsewhere holds another key and is refused. A request the provider's connection did not carry is never considered.
+- **The approval request does not sign over the one-time secret.** `ApprovalProof` covers the Identity Agent, the AI agent, K and a nonce. The tie between K and the enrolment string is made by the Identity Agent, which keeps a digest of the secret each pending binding used and compares it with the digest of the string given for the provider's request.
+- **The body credential names no external authority for a vouched machine.** It is issued on the Identity Agent's own authority, under the standing grant that lets the provider make machines, so `authorisation.Check` reports that the issuer is the authority. The provider and the machine's request are kept in the Identity Agent's own record of the approval. Naming the provider's vouch in the credential itself, so that a third party can see a machine was approved on a vouch rather than by the owner, is a later step.
+
+The six-word derivation is still present, for a provider that reports only words and for an Identity Agent that predates vouches. It is removed, and the claim this decision supersedes is registered, in the change that removes it, as Rollout says.
