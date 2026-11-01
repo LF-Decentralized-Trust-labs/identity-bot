@@ -2033,6 +2033,16 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.recordOwnRotation(result)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+// recordOwnRotation stores a rotation this Identity Agent made of its own
+// identity, with the signatures the engine added it with, moves the identity's
+// record on, and brings its witnesses up to date.
+func (s *CoreServer) recordOwnRotation(result *drivers.DriverRotationResponse) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	eventJSON, _ := json.Marshal(result.RotationEvent)
 	eventRecord := store.EventRecord{
@@ -2075,9 +2085,6 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[identity-agent-core] ROTATION: Key rotated for AID: %s (sn: %d)", result.AID, result.SequenceNumber)
 	s.broadcastWitnessEvent(eventRecord)
 	s.notifyBackupEvent(backup.EventKeyRotation)
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
 }
 
 func (s *CoreServer) handleInteract(w http.ResponseWriter, r *http.Request) {

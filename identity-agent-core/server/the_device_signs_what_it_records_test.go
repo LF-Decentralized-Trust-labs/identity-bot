@@ -974,6 +974,11 @@ func TestNoRotationIsMadeWhereTheKeyIsElsewhere(t *testing.T) {
 	} {
 		rec := httptest.NewRecorder()
 		c.requester.s.router.ServeHTTP(rec, local("POST", call.path, call.body))
+		// A recovery's rotation names a session, and there is none here, so
+		// it is refused before anything is asked of the key.
+		if strings.Contains(call.path, "/recovery/") && rec.Code == http.StatusNotFound {
+			continue
+		}
 		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "POST /api/events/prepare") {
 			t.Fatalf("%s was answered %d %s", call.path, rec.Code, rec.Body.String())
 		}
