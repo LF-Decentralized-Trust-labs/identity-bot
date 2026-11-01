@@ -693,3 +693,51 @@ func onlyFaults(ve *keri.ValidationError, kind keri.FaultKind) bool {
 	}
 	return true
 }
+
+// AttachSignatures signs, in place, an event of name's log that is held
+// without signatures because an earlier version added it unsigned. It creates
+// no event and changes none: raw must be the bytes held at sn. The signatures
+// must make the log up to and including the event one that verifies, so the
+// events before it are signed first, oldest first. It returns the signatures
+// now held for the event.
+func (e *Engine) AttachSignatures(name string, sn int, raw []byte, sigs []string) ([]string, error) {
+	id, release, err := e.holdForWriting(name)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	e.state.mu.RLock()
+	entries := append([]kelEntry(nil), id.KEL...)
+	e.state.mu.RUnlock()
+	if sn < 0 || sn >= len(entries) || entries[sn].Raw == nil || string(entries[sn].Raw) != string(raw) {
+		return nil, fmt.Errorf("%s holds no event with these bytes at sequence number %d", id.AID, sn)
+	}
+	if len(entries[sn].Sigs) > 0 {
+		return nil, fmt.Errorf("the event at sequence number %d of %s is already signed", sn, id.AID)
+	}
+	ev, err := keri.ParseEvent(raw)
+	if err != nil {
+		return nil, err
+	}
+	keys, err := signingKeys(entries[:sn], ev)
+	if ev.Ilk == "icp" || ev.Ilk == "dip" {
+		keys, err = ev.Keys, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	indexed, err := checkedSignatures(raw, sigs, keys)
+	if err != nil {
+		return nil, &ErrNotAuthorised{AID: id.AID, SN: sn, Err: err, BadSignature: true}
+	}
+	if _, err := e.judge(id.AID, entries[:sn], raw, ev, indexed); err != nil {
+		return nil, err
+	}
+	e.state.mu.Lock()
+	defer e.state.mu.Unlock()
+	if sn < len(id.KEL) && string(id.KEL[sn].Raw) == string(raw) {
+		id.KEL[sn].Sigs = indexed
+		id.KEL[sn].MarkedUnsigned = false
+	}
+	return indexed, nil
+}
