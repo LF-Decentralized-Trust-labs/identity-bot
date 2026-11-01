@@ -72,7 +72,8 @@ type DriverRotationResponse struct {
 	Nsith          string                 `json:"nsith,omitempty"`
 	RotationEvent  map[string]interface{} `json:"rotation_event"`
 	Said           string                 `json:"said"`
-	// RawBytesB64: sign with the PRE-ROTATED key (mnemonic index 1), then /cesr-encode.
+	// RawBytesB64: sign with the key being rotated to (the one the previous
+	// establishment event committed to), then /cesr-encode.
 	RawBytesB64    string `json:"raw_bytes_b64"`
 	SequenceNumber int    `json:"sequence_number"`
 }

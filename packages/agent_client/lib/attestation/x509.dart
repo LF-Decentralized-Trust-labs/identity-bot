@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:pointycastle/asn1.dart';
 import 'package:pointycastle/export.dart';
+import '../crypto/constant_time.dart';
 
 /// Raised when a certificate cannot be read, or reads as something this code
 /// will not accept. Distinct from [FormatException] so a caller can tell a
@@ -95,7 +96,7 @@ class X509Certificate {
   final ECPublicKey? ecPublicKey;
 
   /// Compared over encoded names, not common names.
-  bool get isSelfIssued => _bytesEqual(subjectDer, issuerDer);
+  bool get isSelfIssued => constantTimeEquals(subjectDer, issuerDer);
 
   bool isValidAt(DateTime t) => !t.isBefore(notBefore) && !t.isAfter(notAfter);
 
@@ -152,7 +153,7 @@ class X509Certificate {
     // encoded bytes closes that without needing to interpret the parameters.
     final innerAlg = _need<ASN1Sequence>(
         tbsElements[2], 'the signature algorithm inside the body');
-    if (!_bytesEqual(_encoded(outerAlg), _encoded(innerAlg))) {
+    if (!constantTimeEquals(_encoded(outerAlg), _encoded(innerAlg))) {
       throw CertificateException(
         'the certificate states one signature algorithm inside the signed body '
         'and a different one outside it, so the unsigned copy is describing the '
@@ -463,14 +464,5 @@ class X509Certificate {
       }
     }
     return '';
-  }
-
-  static bool _bytesEqual(Uint8List a, Uint8List b) {
-    if (a.length != b.length) return false;
-    var diff = 0;
-    for (var i = 0; i < a.length; i++) {
-      diff |= a[i] ^ b[i];
-    }
-    return diff == 0;
   }
 }

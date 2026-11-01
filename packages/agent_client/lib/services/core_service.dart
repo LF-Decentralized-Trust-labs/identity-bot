@@ -5,9 +5,11 @@ import 'package:http/http.dart' as http;
 import 'package:agent_client/services/the_key_is_not_held_by_the_core.dart';
 
 import 'package:crypto/crypto.dart';
-import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 
 import 'owner_signing_client.dart';
+import 'signing_an_event.dart';
+import 'the_key_in_force.dart';
+import '../crypto/keys.dart';
 import 'browser_session_client.dart';
 import 'the_agent_this_app_talks_to.dart';
 import '../config/agent_config.dart';
@@ -837,11 +839,25 @@ class CoreService {
   /// that cannot be signed is one nobody can accept, so it should not be
   /// possible to ask for. The seed never leaves this device: it signs here and
   /// only the signature is sent.
+  ///
+  /// What the agent returns is checked to be the founding asked for before it
+  /// is signed (TheKeyInForce.requireTheFoundingIsThisDevices).
+  ///
+  /// [theCoreWasGivenThisPhrase] must be true ONLY when this same agent — the
+  /// one at [baseUrl] — accepted this phrase's seed in a
+  /// RootSeedHandoff.register call that returned true, before founding. It
+  /// lets the founding carry the core's post-quantum commitment and messaging
+  /// keys (TheKeyInForce.requireTheFoundingIsThisDevices), which the core adds
+  /// only for keys it derives from the seed it holds. Set any other way — for a
+  /// different core, a handoff that failed or was never made — it lets a core
+  /// put a post-quantum key of its own into this identity, which alone could
+  /// rotate it.
   Future<InceptionResponse> createInception({
     required String publicKey,
     required String nextPublicKey,
     required Uint8List signingSeed,
     String? ownerAid,
+    bool theCoreWasGivenThisPhrase = false,
   }) async {
     final response = await _client.post(
       Uri.parse('$baseUrl/api/inception'),
@@ -858,7 +874,11 @@ class CoreService {
       throw Exception(body['error'] ?? 'Inception failed: ${response.statusCode}');
     }
     final inception = InceptionResponse.fromJson(jsonDecode(response.body));
-    await _signTheFounding(inception, signingSeed);
+    await _signTheFounding(inception, signingSeed,
+        key: publicKey,
+        next: nextPublicKey,
+        ownerAid: (ownerAid ?? '').isEmpty ? null : ownerAid,
+        theCoreWasGivenThisPhrase: theCoreWasGivenThisPhrase);
     return inception;
   }
 
@@ -881,7 +901,14 @@ class CoreService {
   /// the bytes on each event and the sequence as a number. The first version of
   /// this read only the second shape and therefore failed every time, because
   /// founding needs the engine and so only ever meets the first.
-  Future<void> signTheFoundingOf(String aid, Uint8List signingSeed) async {
+  ///
+  /// [nextPublicKey] is the key the founding must commit to, so that what is
+  /// signed is checked to be the founding this device would ask for
+  /// (TheKeyInForce.requireTheFoundingIsThisDevices); the key it names is the
+  /// one [signingSeed] makes.
+  /// [theCoreWasGivenThisPhrase] is as for [createInception].
+  Future<void> signTheFoundingOf(String aid, Uint8List signingSeed,
+      {required String nextPublicKey, String? ownerAid, bool theCoreWasGivenThisPhrase = false}) async {
     final res = await _client.get(Uri.parse('$baseUrl/api/kel?name=$aid'));
     if (res.statusCode != 200) {
       throw Exception('could not read this identity\'s founding event to sign '
@@ -918,7 +945,36 @@ class CoreService {
       throw Exception('this identity\'s founding event was stored without the '
           'bytes it was made from, so no signature over it can be checked');
     }
-    await _signTheseBytes(aid, rawBytesB64, signingSeed);
+    _requireTheFounding(rawBytesB64,
+        aid: aid,
+        key: AgentKeyPair.fromSigningSeed(signingSeed).publicKeyEncoded,
+        next: nextPublicKey,
+        ownerAid: ownerAid,
+        theCoreWasGivenThisPhrase: theCoreWasGivenThisPhrase);
+    await signAndRecordEvent(_client, baseUrl,
+        aid: aid,
+        sequenceNumber: 0,
+        rawBytesB64: rawBytesB64,
+        signingSeed: signingSeed,
+        what: 'the founding of this identity');
+  }
+
+  /// Refuses founding bytes that are not the founding this device asked for.
+  static void _requireTheFounding(String rawBytesB64,
+      {required String aid,
+      required String key,
+      required String next,
+      String? ownerAid,
+      bool theCoreWasGivenThisPhrase = false}) {
+    Object? event;
+    try {
+      event = jsonDecode(utf8.decode(base64Decode(rawBytesB64)));
+    } catch (_) {}
+    if (event is! Map<String, dynamic>) {
+      throw Exception('the founding bytes the agent returned are not an event, so they are not signed');
+    }
+    TheKeyInForce.requireTheFoundingIsThisDevices(event,
+        key: key, next: next, aid: aid, ownerAid: ownerAid, theCoreWasGivenThisPhrase: theCoreWasGivenThisPhrase);
   }
 
   /// Whether an event is the founding one, in either shape.
@@ -941,55 +997,25 @@ class CoreService {
   /// signed looks made and cannot be used with anybody — the failure would
   /// otherwise surface much later, as a stranger refusing somebody for no
   /// reason they can see.
-  Future<void> _signTheFounding(
-      InceptionResponse inception, Uint8List signingSeed) async {
+  Future<void> _signTheFounding(InceptionResponse inception, Uint8List signingSeed,
+      {required String key, required String next, String? ownerAid, bool theCoreWasGivenThisPhrase = false}) async {
     if (inception.rawBytesB64.isEmpty) {
       throw Exception('this identity was created and the agent did not say what '
           'its founding event is, so nothing can sign it and nobody would be '
           'able to verify it');
     }
-    await _signTheseBytes(inception.aid, inception.rawBytesB64, signingSeed);
-  }
-
-  Future<void> _signTheseBytes(
-      String aid, String rawBytesB64, Uint8List signingSeed) async {
-    final raw = base64Decode(rawBytesB64);
-    final signature = ed.sign(ed.newKeyFromSeed(signingSeed), raw);
-
-
-    // CESR-encoded by the agent rather than here, because the encoding is part
-    // of the protocol and there is one implementation of it.
-    final encoded = await _client.post(
-      Uri.parse('$baseUrl/api/cesr/encode'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'raw_sig_b64': base64Encode(signature)}),
-    );
-    if (encoded.statusCode != 200) {
-      throw Exception('this identity was created and its signature could not be '
-          'encoded (${encoded.statusCode}): ${encoded.body}');
-    }
-    final cesr =
-        (jsonDecode(encoded.body)['cesr_sig'] ?? '').toString();
-    if (cesr.isEmpty) {
-      throw Exception('this identity was created and no signature came back to '
-          'record');
-    }
-
-    final attached = await _client.post(
-      Uri.parse('$baseUrl/api/events/signature'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'aid': aid,
-        // The founding event. This route takes any of them, which is what
-        // rotations and interactions need too.
-        'sequence_number': 0,
-        'cesr_signature': cesr,
-      }),
-    );
-    if (attached.statusCode != 200) {
-      throw Exception('this identity was created and its signature was refused '
-          '(${attached.statusCode}): ${attached.body}');
-    }
+    _requireTheFounding(inception.rawBytesB64,
+        aid: inception.aid,
+        key: key,
+        next: next,
+        ownerAid: ownerAid,
+        theCoreWasGivenThisPhrase: theCoreWasGivenThisPhrase);
+    await signAndRecordEvent(_client, baseUrl,
+        aid: inception.aid,
+        sequenceNumber: 0,
+        rawBytesB64: inception.rawBytesB64,
+        signingSeed: signingSeed,
+        what: 'the founding of this identity');
   }
 
   Future<OobiResponse> getOobi({String? action}) async {

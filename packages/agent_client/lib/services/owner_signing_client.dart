@@ -134,8 +134,14 @@ class OwnerSigningClient extends http.BaseClient {
   }
 }
 
-/// Builds the seed reader most callers want: the owner's root seed, derived
-/// from the recovery phrase held in secure storage.
+/// Builds the seed reader most callers want: the owner's signing seed, derived
+/// from the recovery phrase held in secure storage, for the key the owner's
+/// identity has in force.
+///
+/// [keyInForce] says which of the identity's keys that is, from the 64-byte
+/// BIP39 seed: `TheKeyInForce(client, origin).index` reads it from the key log
+/// at the core that keeps it. Signing with the key the identity was founded
+/// with stops being signing as the owner at the first rotation.
 ///
 /// Kept separate from the client so that a caller signing as something other
 /// than the root — an organisation's founder signing with the per-relationship
@@ -144,20 +150,14 @@ class OwnerSigningClient extends http.BaseClient {
 Future<Uint8List?> Function() seedFromMnemonic(
   Future<List<String>?> Function() loadMnemonic,
   Uint8List Function(String mnemonic) toSeed,
+  Future<int> Function(Uint8List bip39Seed) keyInForce,
 ) {
   return () async {
     final words = await loadMnemonic();
     if (words == null || words.isEmpty) return null;
     final seed = toSeed(words.join(' '));
-    // The same 32 bytes the identity was founded with, obtained by calling the
-    // one function that defines them rather than by repeating its steps.
-    //
-    // This used to truncate the BIP39 seed to 32 bytes, with a comment saying
-    // truncating rather than hashing was what matched. It was the wrong half of
-    // its own warning: KeyManager.generateFromSeed hashes the first 32 bytes,
-    // so a truncated seed signs as a key this identity has never used. Proven
-    // by deriving both and comparing — see the test beside this file. Nothing
-    // called it, so nothing had ever failed.
-    return KeyManager.signingSeed(seed);
+    // The bytes the identity's key in force has, obtained by calling the one
+    // function that defines every key rather than by repeating its steps.
+    return KeyManager.signingSeed(seed, index: await keyInForce(seed));
   };
 }

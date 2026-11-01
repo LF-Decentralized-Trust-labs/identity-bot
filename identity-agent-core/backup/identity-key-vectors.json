@@ -1,0 +1,72 @@
+{
+  "about": "How an identity's keys come from its recovery phrase: BIP39 seed (PBKDF2-HMAC-SHA512, 2048 rounds, salt \"mnemonic\"), then SLIP-0010 Ed25519 with every step hardened. Key n of an identity is at m/44'/0'/0'/0'/n': 0 founds it, 1 is what founding commits to, n+1 is what the rotation to key n commits to. public_key_qb64 is the key in CESR with code D. Checked by identity-agent-core/backup and by the app's key manager.",
+  "slip10_published": {
+    "seed_hex": "000102030405060708090a0b0c0d0e0f",
+    "path": "m/0'/1'/2'/2'/1000000000'",
+    "private_key_hex": "8f94d394a8e8fd6b1bc2f3f49f5c47e385281d5c17e65324b0f62483e37e8793",
+    "public_key_hex": "3c24da049451555d51a7014a37337aa4e12d41e485abccfa46b47dfb2af54b7a"
+  },
+  "phrases": [
+    {
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art",
+      "bip39_seed_hex": "408b285c123836004f4b8842c89324c1f01382450c0d439af345ba7fc49acf705489c6fc77dbd4e3dc1dd8cc6bc9f043db8ada1e243c4a0eafb290d399480840",
+      "keys": [
+        {
+          "index": 0,
+          "path": "m/44'/0'/0'/0'/0'",
+          "seed_hex": "5003dc56d47808058079a1ab5e2abdbc82af63a0c6641b4013dd911686a9e800",
+          "public_key_hex": "2f7f7e1169910cfb436de3624e096ef02e50fae21e5cf737f813ae6821121e75",
+          "public_key_qb64": "DC9_fhFpkQz7Q23jYk4JbvAuUPriHlz3N_gTrmghEh51"
+        },
+        {
+          "index": 1,
+          "path": "m/44'/0'/0'/0'/1'",
+          "seed_hex": "bb147094e4b3843de0911f5e14fdaf6a57ff29633311f4929ecc609e39ed0874",
+          "public_key_hex": "20c15ada397e3ef53e5588dfa7d4a43a78123408d9a401c6ba0312d5c153c9f1",
+          "public_key_qb64": "DCDBWto5fj71PlWI36fUpDp4EjQI2aQBxroDEtXBU8nx"
+        },
+        {
+          "index": 2,
+          "path": "m/44'/0'/0'/0'/2'",
+          "seed_hex": "cf71762093281486e84767c0f8366af09d44f93ac2a78cc2f82138eb7229106c",
+          "public_key_hex": "d3ceadf6140d3d2d66cbc749e9544fba61f847909277702fc2b5913ec9a926c9",
+          "public_key_qb64": "DNPOrfYUDT0tZsvHSelUT7ph-EeQkndwL8K1kT7JqSbJ"
+        },
+        {
+          "index": 3,
+          "path": "m/44'/0'/0'/0'/3'",
+          "seed_hex": "3f042053f9c0170351627264da8619fef946fd5f607e1ee32ef527e0adca35af",
+          "public_key_hex": "74457faed6e6a053adcc7072ddb69256a74ae108b83e0b6d3f45e1831d1395eb",
+          "public_key_qb64": "DHRFf67W5qBTrcxwct22klanSuEIuD4LbT9F4YMdE5Xr"
+        }
+      ]
+    },
+    {
+      "mnemonic": "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo vote",
+      "bip39_seed_hex": "e28a37058c7f5112ec9e16a3437cf363a2572d70b6ceb3b6965447623d620f14d06bb321a26b33ec15fcd84a3b5ddfd5520e230c924c87aaa0d559749e044fef",
+      "keys": [
+        {
+          "index": 0,
+          "path": "m/44'/0'/0'/0'/0'",
+          "seed_hex": "303f1c2bdb3c44561d4537001bcba564c5cc3738433b22a0fcd7b149aa52038b",
+          "public_key_hex": "9a7c7d8da02cbe3abfcd211e590ac51eab26832f5b9e6f42394fc1211c489294",
+          "public_key_qb64": "DJp8fY2gLL46v80hHlkKxR6rJoMvW55vQjlPwSEcSJKU"
+        },
+        {
+          "index": 1,
+          "path": "m/44'/0'/0'/0'/1'",
+          "seed_hex": "ca1e7d7c4ed87b0e367d6c5566594d5f6c106af8031fc99c872e93a503ccff0f",
+          "public_key_hex": "468bcb8d513601c67aba415b6182d78cce68628e0427f68e3dd24efdf3d0fd13",
+          "public_key_qb64": "DEaLy41RNgHGerpBW2GC14zOaGKOBCf2jj3STv3z0P0T"
+        },
+        {
+          "index": 2,
+          "path": "m/44'/0'/0'/0'/2'",
+          "seed_hex": "5f5485eb00af91fe51ec34a321ea6adeec0a5ae98be0a1d27d286575b7569acb",
+          "public_key_hex": "ebc9a974c1a18bbc5fd8f443e954b3826e6dfb01021d8f04f4eef469ddec08d4",
+          "public_key_qb64": "DOvJqXTBoYu8X9j0Q-lUs4JubfsBAh2PBPTu9Gnd7AjU"
+        }
+      ]
+    }
+  ]
+}
