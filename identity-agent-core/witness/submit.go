@@ -13,7 +13,7 @@ import (
 // that proves nothing. Separate from BroadcastEvent because the two answer
 // different questions: broadcasting asks everybody and counts, this asks one and
 // reports what it said.
-func (s *Service) SubmitToWitness(ctx context.Context, witnessURL, signerAID string, rawEvent []byte, cesrSig string) (map[string]interface{}, error) {
+func (s *Service) SubmitToWitness(ctx context.Context, witnessURL, signerAID string, rawEvent []byte, cesrSigs ...string) (map[string]interface{}, error) {
 	if len(rawEvent) == 0 {
 		return nil, fmt.Errorf("an event cannot be submitted without the bytes it was published as")
 	}
@@ -26,14 +26,7 @@ func (s *Service) SubmitToWitness(ctx context.Context, witnessURL, signerAID str
 		return nil, fmt.Errorf("the event carries no identifier to be receipted")
 	}
 
-	body, err := json.Marshal(map[string]interface{}{
-		"aid":            signerAID,
-		"event_b64":      base64.StdEncoding.EncodeToString(rawEvent),
-		"cesr_signature": cesrSig,
-	})
-	if err != nil {
-		return nil, err
-	}
+	body := eventBody(signerAID, base64.StdEncoding.EncodeToString(rawEvent), cesrSigs)
 	resp, err := s.PostEvent(ctx, witnessURL, body)
 	if err != nil {
 		return nil, err

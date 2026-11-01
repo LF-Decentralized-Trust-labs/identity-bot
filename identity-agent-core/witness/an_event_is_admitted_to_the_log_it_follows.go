@@ -155,25 +155,18 @@ func heldAt(existing []KelEvent, message []byte) *KelEvent {
 // signedMessage is an event with its controller signatures attached, as keri-go
 // verifies it, from the forms the agent stores and sends them in.
 func signedMessage(raw []byte, sigs []string) ([]byte, error) {
-	indexed := make([]string, 0, len(sigs))
-	for _, sig := range sigs {
-		if sig == "" {
-			continue
-		}
-		at, err := drivers.ReadControllerSignature(sig)
-		if err != nil {
-			return nil, err
-		}
-		indexed = append(indexed, at.QB64)
+	keys := 1
+	if ev, err := keri.ParseEvent(raw); err == nil && len(ev.Keys) > 1 {
+		keys = len(ev.Keys)
+	}
+	indexed, err := drivers.IndexedSignatures(sigs, keys)
+	if err != nil {
+		return nil, err
 	}
 	if len(indexed) == 0 {
 		return nil, fmt.Errorf("unsigned_event")
 	}
-	group, err := keri.AttachControllerSigs(indexed)
-	if err != nil {
-		return nil, err
-	}
-	return append(append([]byte(nil), raw...), group...), nil
+	return drivers.SignedMessage(raw, indexed)
 }
 
 // asSent is each of the signatures sent whose indexed form is among verified,
@@ -197,22 +190,23 @@ func asSent(sent, verified []string) []string {
 	return out
 }
 
-// mergeSignatures is held with each of more whose indexed form it does not
-// already hold.
+// mergeSignatures is held with each of more that is by a key held has no
+// signature from: one signature per key place, so a signature spelled another
+// way, which verifies just as well, is never kept a second time.
 func mergeSignatures(held, more []string) []string {
 	out := append([]string(nil), held...)
-	have := make(map[string]bool, len(out)+len(more))
+	places := make(map[int]bool, len(out)+len(more))
 	for _, sig := range held {
 		if at, err := drivers.ReadControllerSignature(sig); err == nil {
-			have[at.QB64] = true
+			places[at.At.Index] = true
 		}
 	}
 	for _, sig := range more {
 		at, err := drivers.ReadControllerSignature(sig)
-		if err != nil || have[at.QB64] {
+		if err != nil || places[at.At.Index] {
 			continue
 		}
-		have[at.QB64] = true
+		places[at.At.Index] = true
 		out = append(out, sig)
 	}
 	return out

@@ -58,11 +58,17 @@ type EventRecord struct {
 // ControllerSignatures are the signatures stored over the event, in whichever
 // field an earlier version wrote them.
 func (e EventRecord) ControllerSignatures() []string {
-	if len(e.Signatures) > 0 {
-		return e.Signatures
+	return ControllerSignaturesOf(e.Signatures, e.CesrSignature)
+}
+
+// ControllerSignaturesOf is an event's signatures from a list and the one
+// signature kept before lists were: the list where there is one.
+func ControllerSignaturesOf(list []string, single string) []string {
+	if len(list) > 0 {
+		return list
 	}
-	if e.CesrSignature != "" {
-		return []string{e.CesrSignature}
+	if single != "" {
+		return []string{single}
 	}
 	return nil
 }

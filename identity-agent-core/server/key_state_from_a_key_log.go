@@ -8,6 +8,8 @@ import (
 	"net/http"
 
 	keri "github.com/grapeid/keri-go"
+
+	"identity-agent-core/drivers"
 )
 
 // What key state a key log establishes, for whoever is holding a copy of one
@@ -108,11 +110,11 @@ func keyStateMessages(req keyStateRequest) ([][]byte, error) {
 		if len(ev.Sigs) == 0 {
 			return nil, fmt.Errorf("event %d carries no signature", i)
 		}
-		group, err := keri.AttachControllerSigs(ev.Sigs)
+		m, err := drivers.SignedMessage(raw, ev.Sigs)
 		if err != nil {
 			return nil, fmt.Errorf("event %d: %w", i, err)
 		}
-		out = append(out, append(raw, group...))
+		out = append(out, m)
 	}
 	return out, nil
 }

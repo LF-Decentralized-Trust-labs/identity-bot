@@ -66,7 +66,7 @@ func TestAnEventGoesToTheWitnessesItsIdentityNames(t *testing.T) {
 		return map[string]interface{}{"witness_aid": iacrypto.NonTransferableAIDQB64(pub), "cesr_signature": sig}, nil
 	}
 	raw := []byte(`{"v":"KERI10JSON000000_","t":"ixn","d":"` + said + `","i":"ERecord","s":"1"}`)
-	if err := s.BroadcastToDesignated(context.Background(), "ERecord", raw, "0Bsig", named, 2); err != nil {
+	if err := s.BroadcastToDesignated(context.Background(), "ERecord", raw, []string{"0Bsig"}, named, 2); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 100; i++ {
@@ -147,7 +147,7 @@ func TestARealDelegatedInceptionIsWitnessed(t *testing.T) {
 	}
 	for _, ev := range [][]byte{dip, ixnRaw} {
 		sig, _ := login.SignString(string(ev), recSeed)
-		if err := sender.BroadcastToDesignated(context.Background(), d.AID, ev, sig, []string{wkey}, 1); err != nil {
+		if err := sender.BroadcastToDesignated(context.Background(), d.AID, ev, []string{sig}, []string{wkey}, 1); err != nil {
 			t.Fatal(err)
 		}
 		for i := 0; i < 100; i++ {

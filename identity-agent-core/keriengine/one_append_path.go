@@ -57,50 +57,6 @@ func (e *ErrNotAuthorised) Error() string {
 
 func (e *ErrNotAuthorised) Unwrap() error { return e.Err }
 
-// signedMessage is an event with its controller signatures attached, as it
-// travels and as keri-go verifies it.
-func signedMessage(raw []byte, sigs []string) ([]byte, error) {
-	if len(sigs) == 0 {
-		return nil, fmt.Errorf("an event with no signature has nothing to attach")
-	}
-	group, err := keri.AttachControllerSigs(sigs)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]byte, 0, len(raw)+len(group))
-	out = append(out, raw...)
-	return append(out, group...), nil
-}
-
-// indexedSignatures reads signatures over an event signed by a list of
-// keyCount keys, into the indexed form KERI attaches. An unindexed signature,
-// the form this agent's own signing path produces, names no key, so it is
-// read as the first key's only where there is one key to sign; on an event
-// several keys sign, it is refused rather than guessed at. The same signature
-// twice is one signature.
-func indexedSignatures(sigs []string, keyCount int) ([]string, error) {
-	out := make([]string, 0, len(sigs))
-	seen := map[string]bool{}
-	for i, s := range sigs {
-		if s == "" {
-			continue
-		}
-		c, err := drivers.ReadControllerSignature(s)
-		if err != nil {
-			return nil, fmt.Errorf("signature %d is unreadable: %w", i, err)
-		}
-		if c.QB64 != s && keyCount != 1 {
-			return nil, fmt.Errorf("signature %d names no key, and this event is signed by %d keys, "+
-				"so which one made it cannot be told; send it indexed", i, keyCount)
-		}
-		if !seen[c.QB64] {
-			seen[c.QB64] = true
-			out = append(out, c.QB64)
-		}
-	}
-	return out, nil
-}
-
 // signingKeys is the key list an event's signatures index into: its own for an
 // establishment event, and the last establishment event's for an interaction.
 func signingKeys(before []kelEntry, ev *keri.Event) ([]string, error) {
@@ -163,7 +119,7 @@ func signaturesVerify(raw []byte, sigs []string, keys []string) (signed []int, o
 // elsewhere; a log this engine keeps and publishes carries none, so nobody
 // can add junk to an event by sending it beside good signatures.
 func checkedSignatures(raw []byte, sigs []string, keys []string) ([]string, error) {
-	indexed, err := indexedSignatures(sigs, len(keys))
+	indexed, err := drivers.IndexedSignatures(sigs, len(keys))
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +185,7 @@ func (e *Engine) signHistory(aid string, entries []kelEntry) map[int][]string {
 		if err != nil {
 			continue
 		}
-		if indexed, err := indexedSignatures([]string{sig}, 1); err == nil && len(indexed) == 1 {
+		if indexed, err := drivers.IndexedSignatures([]string{sig}, 1); err == nil && len(indexed) == 1 {
 			filled[i] = indexed
 		}
 	}
@@ -252,7 +208,7 @@ func (e *Engine) judge(aid string, before []kelEntry, raw []byte, ev *keri.Event
 			unsigned = append(unsigned, i)
 			continue
 		}
-		m, err := signedMessage(en.Raw, s)
+		m, err := drivers.SignedMessage(en.Raw, s)
 		if err != nil {
 			return nil, err
 		}
@@ -264,7 +220,7 @@ func (e *Engine) judge(aid string, before []kelEntry, raw []byte, ev *keri.Event
 	if len(sigs) == 0 {
 		return nil, &ErrNotAuthorised{AID: aid, SN: int(ev.SN), Err: errors.New("it carries no signature")}
 	}
-	m, err := signedMessage(raw, sigs)
+	m, err := drivers.SignedMessage(raw, sigs)
 	if err != nil {
 		return nil, err
 	}

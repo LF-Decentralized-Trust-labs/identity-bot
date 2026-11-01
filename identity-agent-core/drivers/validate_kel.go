@@ -154,12 +154,12 @@ func ValidateKELFromBytes(in ValidateKELInput) (*DriverValidateKELResponse, erro
 			problems = append(problems, fmt.Sprintf("event %d: %v", i, err))
 			continue
 		}
-		group, err := keri.AttachControllerSigs([]string{at.QB64})
+		m, err := SignedMessage(raw, []string{at.QB64})
 		if err != nil {
 			problems = append(problems, fmt.Sprintf("event %d: %v", i, err))
 			continue
 		}
-		signed = append(signed, append(append([]byte(nil), raw...), group...))
+		signed = append(signed, m)
 	}
 
 	switch {
@@ -181,13 +181,13 @@ func ValidateKELFromBytes(in ValidateKELInput) (*DriverValidateKELResponse, erro
 		// signed or not. Past the first unsigned event there is no verified
 		// key state to judge anything against, so nothing after it is judged;
 		// the log is reported unverified, as it is.
-		first := 0
-		for first < len(in.RawEvents) && first < len(in.CesrSignatures) &&
-			in.CesrSignatures[first] != "" {
-			first++
+		signedFirst := 0
+		for signedFirst < len(in.RawEvents) && signedFirst < len(in.CesrSignatures) &&
+			in.CesrSignatures[signedFirst] != "" {
+			signedFirst++
 		}
-		if first > 0 {
-			if _, err := keri.ValidateSignedKEL(signed[:first]); err != nil {
+		if signedFirst > 0 {
+			if _, err := keri.ValidateSignedKEL(signed[:signedFirst]); err != nil {
 				problems = append(problems, fmt.Sprintf(
 					"the signed events before the first unsigned one do not show its "+
 						"controller authorised them: %v", err))

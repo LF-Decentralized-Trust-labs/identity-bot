@@ -513,7 +513,7 @@ func (e *Engine) commitFounding(name string, raw []byte, ev *keri.Event, sigs []
 func (e *Engine) placeTaken(id *identity, entries []kelEntry, raw []byte, ev *keri.Event, sigs []string) error {
 	sn := int(ev.SN)
 	held := Place{SN: sn, SAID: entryDigest(entries[sn])}
-	indexed, err := indexedSignatures(sigs, len(ev.Keys))
+	indexed, err := drivers.IndexedSignatures(sigs, len(ev.Keys))
 	if err != nil {
 		return &ErrPlaceTaken{Held: held}
 	}
@@ -674,7 +674,7 @@ func (e *Engine) foundingSignatures(ev *keri.Event, raw []byte) []string {
 	if len(sigs) == 0 {
 		return nil
 	}
-	m, err := signedMessage(raw, sigs)
+	m, err := drivers.SignedMessage(raw, sigs)
 	if err != nil {
 		return nil
 	}
