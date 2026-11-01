@@ -45,8 +45,17 @@ func TestOneMemberOfATwoKeyIdentityDoesNotSignForIt(t *testing.T) {
 // An indexed signature naming a second key cannot be checked against a
 // single-key log's only key and taken as that key's.
 func TestASignatureIndexedToAnotherKeyIsRefused(t *testing.T) {
-	sig := "AB" + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-	if _, err := decodeCesrSignature(sig[:88]); err == nil {
-		t.Fatal("a signature indexed to the second key was decoded as the first key's")
+	aid, raws, sigs := signedLog(t)
+	raw, err := readControllerSignature(sigs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	sigs[0] = indexed('A', 1, raw.Raw)
+	got, err := ValidateKELFromBytes(ValidateKELInput{AID: aid, RawEvents: raws, CesrSignatures: sigs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.KelVerified || got.LogSound {
+		t.Fatal("a signature indexed to a second key verified a single-key log")
 	}
 }

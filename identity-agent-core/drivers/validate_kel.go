@@ -114,6 +114,9 @@ func ValidateKELFromBytes(in ValidateKELInput) (*DriverValidateKELResponse, erro
 	var problems []string
 	unsigned := 0
 	current := ""
+	// Each event's signature as KERI carries it, for the log verifier below.
+	signed := make([][]byte, 0, len(in.RawEvents))
+	sigs := make([]controllerSignature, len(in.RawEvents))
 
 	for i, raw := range in.RawEvents {
 		ev, err := keri.ParseEvent(raw)
@@ -122,30 +125,20 @@ func ValidateKELFromBytes(in ValidateKELInput) (*DriverValidateKELResponse, erro
 			continue
 		}
 
-		// Which key signed this event depends on what kind it is. An
-		// establishment event is signed by a key it declares — for a rotation
-		// that is the newly revealed pre-rotated key, which is what makes the
-		// commitment mean anything. A non-establishment event declares no keys
-		// and is signed by whatever is currently in force.
-		signing := current
-		// One signature travels with each event here, so only an identity
-		// with one key can be shown to have signed. Whether one member's
-		// signature meets a multi-key identity's threshold depends on that
-		// threshold and on which key the signature is indexed to: with kt "2"
-		// it never does, and with kt "1" (a hybrid Ed25519 + ML-DSA key set,
-		// say) any one listed key's signature does. This check does not read
-		// thresholds or index signatures to keys yet, and checking only the
-		// first key's would let one member sign for all of them under kt "2".
-		// So every multi-key identity is refused rather than half-checked,
-		// kt "1" included, until thresholds are read.
+		// The result names one current key, and every caller verifies what
+		// the identity signs later against that one key. A multi-key
+		// identity's log can have its thresholds judged (keri-go does, below),
+		// but reporting one member's key as the identity's would let that
+		// member sign for all of them afterwards under kt "2". So a multi-key
+		// identity is refused here until the result carries the whole key set
+		// and its threshold.
 		if ev.Establishment() && len(ev.Keys) > 1 {
 			problems = append(problems, fmt.Sprintf(
-				"event %d declares %d keys; this check verifies identities with one key, "+
-					"so a multi-key identity's signing threshold is not taken as met", i, len(ev.Keys)))
+				"event %d declares %d keys; this check reports one current key, so a "+
+					"multi-key identity is not taken as verified", i, len(ev.Keys)))
 			continue
 		}
 		if ev.Establishment() && len(ev.Keys) > 0 {
-			signing = ev.Keys[0]
 			current = ev.Keys[0]
 		}
 
@@ -157,20 +150,55 @@ func ValidateKELFromBytes(in ValidateKELInput) (*DriverValidateKELResponse, erro
 			unsigned++
 			continue
 		}
-		if signing == "" {
-			problems = append(problems, fmt.Sprintf(
-				"event %d carries a signature and no key is in force to check it against", i))
-			continue
-		}
-		rawSig, err := decodeCesrSignature(sig)
+		at, err := readControllerSignature(sig)
 		if err != nil {
 			problems = append(problems, fmt.Sprintf("event %d: %v", i, err))
 			continue
 		}
-		if err := keri.VerifySignature(signing, raw, rawSig); err != nil {
+		sigs[i] = at
+		group, err := keri.AttachControllerSigs([]string{at.QB64})
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("event %d: %v", i, err))
+			continue
+		}
+		signed = append(signed, append(append([]byte(nil), raw...), group...))
+	}
+
+	switch {
+	case len(problems) > 0:
+	case unsigned == 0:
+		// Every event carries its signature, so the whole log goes to the one
+		// KEL verifier: each event signed by the key state in force, meeting
+		// its signing threshold, and each rotation authorised by the prior
+		// commitments its signing keys open, as keripy judges it.
+		if _, err := keri.ValidateSignedKEL(signed); err != nil {
 			problems = append(problems, fmt.Sprintf(
-				"event %d is not signed by the key it declares, so it was not authorised by "+
-					"the identity it claims to extend", i))
+				"the log's signatures do not show its controller authorised it: %v", err))
+		}
+	default:
+		// Some events arrived unsigned, so the log is not verified whatever
+		// the rest show, and the log verifier, which needs every event signed,
+		// cannot judge it. What can still be caught is a signature that is
+		// present and is not by the key in force: a log carrying one is not
+		// sound, signed or not.
+		current := ""
+		for i, raw := range in.RawEvents {
+			ev, err := keri.ParseEvent(raw)
+			if err != nil {
+				continue // reported above
+			}
+			if ev.Establishment() && len(ev.Keys) > 0 {
+				current = ev.Keys[0]
+			}
+			if sigs[i].Raw == nil {
+				continue
+			}
+			if sigs[i].At.Index != 0 || current == "" ||
+				keri.VerifySignature(current, raw, sigs[i].Raw) != nil {
+				problems = append(problems, fmt.Sprintf(
+					"event %d is not signed by the key it declares, so it was not authorised by "+
+						"the identity it claims to extend", i))
+			}
 		}
 	}
 
@@ -227,30 +255,36 @@ func ValidateKELFromBytes(in ValidateKELInput) (*DriverValidateKELResponse, erro
 	return out, nil
 }
 
-// decodeCesrSignature accepts a controller signature in the forms the agent
-// stores and produces.
+// controllerSignature is one controller signature as KERI attaches it.
+type controllerSignature struct {
+	keri.IndexedSignature
+	// QB64 is the indexed form attached to the event.
+	QB64 string
+}
+
+// readControllerSignature reads a controller signature in the forms the agent
+// stores and produces, and returns it indexed as a published stream carries it.
 //
-// Both are 88 characters and neither can be told from the other by length. An
-// unindexed signature (0B) is what this agent's own signing path produces; an
-// indexed one (A…) is what appears in a published stream, where the index says
-// which of several keys signed.
-func decodeCesrSignature(sig string) ([]byte, error) {
-	raw, index, indexed, err := iacrypto.DecodeEd25519Signature(sig, true)
+// An unindexed signature (0B, or 64 raw bytes in base64) is what this agent's
+// own signing path produces, for a single-key identity whose one key sits first
+// in both key lists, so it is indexed there. An indexed one (A, B, 2A or 2B) is
+// read as keri-go reads it, and the places it names are judged by the log
+// verifier, not here.
+func readControllerSignature(sig string) (controllerSignature, error) {
+	if raw, _, _, err := iacrypto.DecodeEd25519Signature(sig, false); err == nil {
+		qb64, err := keri.EncodeIndexedSignature(raw, keri.SamePlace(0))
+		if err != nil {
+			return controllerSignature{}, err
+		}
+		return controllerSignature{IndexedSignature: keri.IndexedSignature{
+			Code: "A", At: keri.SamePlace(0), Raw: raw}, QB64: qb64}, nil
+	}
+	parsed, err := keri.ParseIndexedSignature(sig)
 	if err != nil {
-		return nil, err
+		return controllerSignature{}, fmt.Errorf("the signature is neither an Ed25519 signature "+
+			"nor an indexed one: %w", err)
 	}
-	// Of the indexed forms, the one a published stream carries: A, the key at
-	// that index in both key lists.
-	if indexed && sig[0] != 'A' {
-		return nil, fmt.Errorf("the signature is indexed with code %q, which is not read here", sig[:1])
-	}
-	// The index selects a key; only single-key logs are checked here, so the
-	// only index that names a key that exists is the first.
-	if indexed && index != 0 {
-		return nil, fmt.Errorf("the signature is indexed to key %q, and only the first key "+
-			"exists in a single-key log", sig[1:2])
-	}
-	return raw, nil
+	return controllerSignature{IndexedSignature: parsed, QB64: sig}, nil
 }
 
 // DecodeRawEvents turns the base64 wire form into bytes, reporting which entry
