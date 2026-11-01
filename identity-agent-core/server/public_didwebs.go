@@ -102,10 +102,15 @@ func (s *CoreServer) mountPublicDidWebsRoutes(r chi.Router) {
 //
 // Requests that came through the URL relay all arrive from the relay's own
 // address, so a per-address share would make one stranger's burst everyone's
-// limit. They draw on one larger budget of their own instead, so a burst
-// through the relay cannot use up direct callers' shares and the reverse.
-// Telling relayed callers apart needs the relay to pass on an address it has
-// authenticated, which it does not yet do.
+// limit. The relay passes on the address it saw the visitor connect from, in
+// the stream preamble, which a visitor cannot set; each such address gets the
+// same share as a direct caller, and a burst through the relay cannot use up a
+// direct caller's share or the reverse. A header such as X-Forwarded-For is
+// never used, because a visitor can write it.
+//
+// A preamble without an address, from a relay that does not send one, leaves
+// relayed callers indistinguishable, so they draw on one larger budget of
+// their own.
 const (
 	keyLogChecksPerMinute        = 60
 	keyLogChecksPerMinuteRelayed = 600
@@ -121,7 +126,8 @@ const (
 // run at once. A caller over either is told to come back, not queued.
 type keyLogGate struct {
 	perCaller  *attestationRateLimiter
-	relayed    *attestationRateLimiter
+	relayed    *attestationRateLimiter // relayed callers whose address is not known, together
+	byVisitor  *attestationRateLimiter // relayed callers by the address the relay passed on
 	running    chan struct{}
 	readWithin time.Duration
 }
@@ -130,6 +136,7 @@ func newKeyLogGate() *keyLogGate {
 	return &keyLogGate{
 		perCaller:  newAttestationRateLimiter(keyLogChecksPerMinute),
 		relayed:    newAttestationRateLimiter(keyLogChecksPerMinuteRelayed),
+		byVisitor:  newAttestationRateLimiter(keyLogChecksPerMinute),
 		running:    make(chan struct{}, keyLogChecksAtOnce),
 		readWithin: keyLogReadWithin,
 	}
@@ -138,8 +145,11 @@ func newKeyLogGate() *keyLogGate {
 func (g *keyLogGate) guard(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		limiter, caller := g.perCaller, callerIP(r)
-		if _, relayed := relayproto.PreambleFrom(r.Context()); relayed {
+		if p, relayed := relayproto.PreambleFrom(r.Context()); relayed {
 			limiter, caller = g.relayed, "through the relay"
+			if v := relayproto.VisitorAddr(p.Visitor); v != "" {
+				limiter, caller = g.byVisitor, v
+			}
 		}
 		if !limiter.allow(caller) {
 			http.Error(w, "too many key logs from this address; try again in a minute", http.StatusTooManyRequests)
