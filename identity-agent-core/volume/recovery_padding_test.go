@@ -121,9 +121,15 @@ func TestPaddingEntriesAreShapedLikeRealOnes(t *testing.T) {
 // Padding appended after the real entries would be identifiable by position,
 // which makes the count readable again. Over many runs the real entry must
 // land in every position.
+//
+// With an unbiased shuffle the chance that some position is still unvisited
+// after n runs is at most recoveryPadTo*(1-1/recoveryPadTo)^n. At 200 runs that
+// is about 2e-11, so a failure here means a bias and not bad luck. (60 runs
+// missed a position about once in 370.)
 func TestTheRealEntryIsNotAlwaysFirst(t *testing.T) {
+	const padPositionRuns = 200
 	positions := map[int]bool{}
-	for run := 0; run < 60; run++ {
+	for run := 0; run < padPositionRuns; run++ {
 		slot := sealTo(t, ownerKeys(t, 1))
 		mark := slot.Owners[0].WrappedSecretB64
 		if err := padOwners(&slot); err != nil {
@@ -136,7 +142,7 @@ func TestTheRealEntryIsNotAlwaysFirst(t *testing.T) {
 		}
 	}
 	if len(positions) < recoveryPadTo {
-		t.Errorf("across 60 runs the real entry appeared in only %d of %d positions (%v) — "+
-			"its position is predictable", len(positions), recoveryPadTo, positions)
+		t.Errorf("across %d runs the real entry appeared in only %d of %d positions (%v) — "+
+			"its position is predictable", padPositionRuns, len(positions), recoveryPadTo, positions)
 	}
 }
