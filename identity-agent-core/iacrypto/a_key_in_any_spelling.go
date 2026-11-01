@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto/strictb64url"
 )
 
 // Keys and signatures reach this Identity Agent spelled several ways: qb64
@@ -104,10 +106,7 @@ func DecodeBase64URLSized(s string, size int) ([]byte, error) {
 // signature whose size depends on its kind; where the size is known,
 // DecodeBase64URLSized also checks it.
 func DecodeBase64URL(s string) ([]byte, error) {
-	if !isBase64URL(s) {
-		return nil, fmt.Errorf("a character outside unpadded base64url")
-	}
-	return base64.RawURLEncoding.Strict().DecodeString(s)
+	return strictb64url.Decode(s)
 }
 
 // Ed25519KeyCode reports whether key is an Ed25519 public key in qb64, and
@@ -118,22 +117,10 @@ func DecodeBase64URL(s string) ([]byte, error) {
 // alphabet does: qb64 is base64url and never padded, while padded base64 of
 // 32 bytes always ends in "=", so the two can never be confused.
 func Ed25519KeyCode(key string) (code string, ok bool) {
-	if len(key) != 44 || (key[0] != 'D' && key[0] != 'B') || !isBase64URL(key) {
+	if len(key) != 44 || (key[0] != 'D' && key[0] != 'B') || !strictb64url.IsAlphabet(key) {
 		return "", false
 	}
 	return key[:1], true
-}
-
-// isBase64URL reports whether every character of s is in the base64url
-// alphabet, the only one qb64 uses. Padding is not in it.
-func isBase64URL(s string) bool {
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
-			return false
-		}
-	}
-	return true
 }
 
 // DecodeEd25519Key returns the 32 raw bytes of an Ed25519 public key given in
@@ -200,7 +187,7 @@ func DecodeIndexedEd25519SignatureQB64(sig string) (code byte, index int, raw []
 // read only when indexedToo is set, and then index is its index and indexed
 // is true.
 func DecodeEd25519Signature(sig string, indexedToo bool) (raw []byte, index int, indexed bool, err error) {
-	if len(sig) == sigQB64Len && isBase64URL(sig) {
+	if len(sig) == sigQB64Len && strictb64url.IsAlphabet(sig) {
 		switch {
 		case sig[:2] == "0B":
 			raw, err = DecodeEd25519SignatureQB64(sig)
@@ -280,7 +267,7 @@ func DecodeQB64(code, qb64 string, size int) ([]byte, error) {
 	if want := len(code) - stood + (lead+size)/3*4; len(qb64) != want {
 		return nil, fmt.Errorf("a %d-byte %s value is %d characters in qb64, not %d", size, code, want, len(qb64))
 	}
-	if !isBase64URL(qb64[len(code):]) {
+	if !strictb64url.IsAlphabet(qb64[len(code):]) {
 		return nil, fmt.Errorf("a %s value has a character outside base64url, so it is not qb64", code)
 	}
 	decoded, err := base64.RawURLEncoding.Strict().DecodeString(strings.Repeat("A", stood) + qb64[len(code):])

@@ -8,10 +8,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	keri "github.com/grapeid/keri-go"
+
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto/strictb64url"
 )
 
 // Admission: an Identity Agent is let in on a signature, never a password.
@@ -132,13 +133,13 @@ var b64 = base64.RawURLEncoding
 // 4 spare bits of the last one zero. Leniently read, a signature had 16
 // strings, and the standard decoder skipped line breaks inside one.
 //
-// This module is kept free of the core's packages so a URL relay can import it
-// alone, so it cannot use the core's decoder; the rule is the same.
+// The rule is strictb64url's, which this module carries so a URL relay can
+// import it alone and the core's decoder reads it from the same place.
 func signatureOf(s string) ([]byte, error) {
-	if len(s) != b64.EncodedLen(ed25519.SignatureSize) || strings.Trim(s, b64url) != "" {
+	if len(s) != b64.EncodedLen(ed25519.SignatureSize) {
 		return nil, fmt.Errorf("the signature is not %d bytes in unpadded base64url", ed25519.SignatureSize)
 	}
-	sig, err := b64.Strict().DecodeString(s)
+	sig, err := strictb64url.Decode(s)
 	if err != nil {
 		return nil, fmt.Errorf("the signature is not in canonical base64url: %w", err)
 	}
