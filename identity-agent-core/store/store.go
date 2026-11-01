@@ -578,12 +578,13 @@ type ServiceProviderRecord struct {
 type Store interface {
 	SaveEvent(record EventRecord) error
 	GetEvents(aid string) ([]EventRecord, error)
-	// SupersedeEvents moves the events of aid from sequence number fromSN on
-	// out of its key log, into the record of what was superseded, where a
-	// recovery rotation has superseded them. Nothing is deleted.
-	SupersedeEvents(aid string, fromSN int) error
-	// SupersededEvents are what SupersedeEvents moved aside for aid, oldest
-	// first.
+	// SaveSupersedingEvent saves record, a recovery rotation, at its sequence
+	// number, and in the same write moves the events of its identity from that
+	// sequence number on out of the key log, into the record of what was
+	// superseded. Nothing is deleted, and either both happen or neither.
+	SaveSupersedingEvent(record EventRecord) error
+	// SupersededEvents are what SaveSupersedingEvent moved aside for aid,
+	// oldest first.
 	SupersededEvents(aid string) ([]EventRecord, error)
 	// AIDsOfEvent are the identities whose stored key log holds an event
 	// whose own identifier (its d field) is said. An Identity Agent keeps
@@ -781,9 +782,13 @@ func (s *FileStore) SaveEvent(record EventRecord) error {
 	return s.writeJSON(filepath.Join(s.dir, "kel.json"), events)
 }
 
-func (s *FileStore) SupersedeEvents(aid string, fromSN int) error {
+// SaveSupersedingEvent writes the record of what was superseded first and the
+// log, with the rotation in place of what it superseded, second, so a crash
+// between the two leaves the events in both places rather than in neither.
+func (s *FileStore) SaveSupersedingEvent(record EventRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	aid, fromSN := record.AID, record.SequenceNumber
 	events, err := s.loadEvents()
 	if err != nil {
 		return err
@@ -803,7 +808,7 @@ func (s *FileStore) SupersedeEvents(aid string, fromSN int) error {
 	if err := s.writeJSON(filepath.Join(s.dir, "kel_superseded.json"), aside); err != nil {
 		return err
 	}
-	return s.writeJSON(filepath.Join(s.dir, "kel.json"), kept)
+	return s.writeJSON(filepath.Join(s.dir, "kel.json"), append(kept, record))
 }
 
 func (s *FileStore) SupersededEvents(aid string) ([]EventRecord, error) {

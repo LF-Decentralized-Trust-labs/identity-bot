@@ -37,6 +37,11 @@ type eventCommitter interface {
 	Commit(name string, raw []byte, sigs []string, keep func(drivers.KELKeep) error) (*keriengine.CommitResult, error)
 }
 
+// maxKeyEventBody bounds a prepare or commit request. A key event with several
+// owners and their post-quantum keys revealed is a few tens of kilobytes; this
+// leaves room for that and no more.
+const maxKeyEventBody = 256 << 10
+
 type prepareEventRequest struct {
 	AID      string            `json:"aid"`
 	T        string            `json:"t"`
@@ -112,6 +117,7 @@ func (s *CoreServer) handlePrepareEvent(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxKeyEventBody)
 	var req prepareEventRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
@@ -209,6 +215,7 @@ func (s *CoreServer) handleCommitEvent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxKeyEventBody)
 	var req commitEventRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
@@ -292,11 +299,6 @@ func ownerNamedIn(raw []byte) string {
 // obtained for earlier events kept with them, and the identity's record moved
 // on.
 func (s *CoreServer) keepCommittedEvent(k drivers.KELKeep, ev *keri.Event) error {
-	if k.Supersedes > 0 {
-		if err := s.DataStore.SupersedeEvents(k.AID, k.Supersedes); err != nil {
-			return err
-		}
-	}
 	if len(k.Earlier) > 0 {
 		events, err := s.DataStore.GetEvents(k.AID)
 		if err != nil {
@@ -315,7 +317,11 @@ func (s *CoreServer) keepCommittedEvent(k drivers.KELKeep, ev *keri.Event) error
 	if err != nil {
 		return err
 	}
-	if err := s.DataStore.SaveEvent(rec); err != nil {
+	save := s.DataStore.SaveEvent
+	if k.Supersedes > 0 {
+		save = s.DataStore.SaveSupersedingEvent
+	}
+	if err := save(rec); err != nil {
 		return err
 	}
 	own, err := s.DataStore.GetIdentity()
@@ -334,6 +340,11 @@ func (s *CoreServer) keepCommittedEvent(k drivers.KELKeep, ev *keri.Event) error
 		return nil
 	default:
 		if ev.Ilk == "rot" {
+			// Where this Identity Agent derives the key rotated to, its
+			// record follows the generation, as a rotation here does.
+			if _, gen, err := s.ownKeyAt(rec.PublicKey); err == nil {
+				own.KeyGeneration = gen
+			}
 			own.PublicKey, own.NextKeyDigest = rec.PublicKey, rec.NextKeyDigest
 		}
 		own.EventCount = k.SN + 1

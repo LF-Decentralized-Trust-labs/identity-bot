@@ -122,7 +122,8 @@ func signaturesColumn(record EventRecord) string {
 	return string(b)
 }
 
-func (s *SQLiteStore) SupersedeEvents(aid string, fromSN int) error {
+func (s *SQLiteStore) SaveSupersedingEvent(record EventRecord) error {
+	aid, fromSN := record.AID, record.SequenceNumber
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -138,6 +139,9 @@ func (s *SQLiteStore) SupersedeEvents(aid string, fromSN int) error {
 	}
 	if _, err := tx.Exec(`DELETE FROM kel WHERE aid = ? AND seq_num >= ?`, aid, fromSN); err != nil {
 		return fmt.Errorf("could not move the superseded events out of the log: %w", err)
+	}
+	if err := saveEvent(tx, record); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

@@ -460,3 +460,20 @@ func TestAnUnmarkedUnsignedRotationIsNeverSignedHere(t *testing.T) {
 		}
 	}
 }
+
+// A rotation with several keys that cannot open the commitment however they
+// sign is refused as not committed, never held waiting for signatures that
+// could not help.
+func TestARotationNobodyCouldAuthoriseIsNotHeld(t *testing.T) {
+	e, aid, ks := appHeld(t)
+	x, y := appKey(t), appKey(t)
+	raw, err := keri.BuildRotation(keri.RotationInput{Prefix: aid, Keys: []string{pubOf(t, x), pubOf(t, y)},
+		PriorSAID: aid, SN: 1, NextDigests: []string{digestOf(t, ks[3])}, Isith: json.RawMessage(`"2"`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var nc *ErrNotCommitted
+	if res, err := e.Commit(aid, raw, []string{signAt(t, x, raw, 0, 0)}, nil); !errors.As(err, &nc) {
+		t.Fatalf("a rotation to keys nobody committed to: %+v %v", res, err)
+	}
+}
