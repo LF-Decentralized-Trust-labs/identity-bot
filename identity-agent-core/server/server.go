@@ -1136,6 +1136,7 @@ func (s *CoreServer) buildRouterOf(flutterWebDir string, addons []Addon, extras 
 		r.Post("/messaging-keys/prepare", s.handlePrepareMessagingKeys)
 		r.Post("/store/event", s.handleStoreEvent)
 		r.Post("/events/signature", s.handleAttachEventSignature)
+		r.Post("/identity/restore", s.handleRestoreIdentity)
 		r.Post("/events/prepare", s.handlePrepareEvent)
 		r.Post("/events/commit", s.handleCommitEvent)
 		r.Get("/events/{s}/receipts", s.handleEventReceipts)

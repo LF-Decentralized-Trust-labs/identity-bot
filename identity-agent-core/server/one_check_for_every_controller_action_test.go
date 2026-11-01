@@ -167,6 +167,9 @@ func TestTheOwnerOnlyListIsTheOneTheADRRecords(t *testing.T) {
 		// committed signed (ADR-061).
 		"POST /api/events/prepare",
 		"POST /api/events/commit",
+		// Installing a key log, which decides what the identity is: the
+		// root of trust (ADR-061).
+		"POST /api/identity/restore",
 		"POST /api/signing-requests/{id}/fulfil",
 		"POST /api/signing-requests/{id}/refuse",
 		"POST /api/signing-requests/sign-for-another",
