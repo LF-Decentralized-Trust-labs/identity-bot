@@ -360,6 +360,10 @@ func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handle
 				if served := s.controllerActsForTheOwner(w, r, pattern, next); served {
 					return
 				}
+				if s.ownerKeyStateIsStale(r) {
+					writeStaleKeyState(w)
+					return
+				}
 				denyAuthorization(w, "this endpoint needs a token carrying the capability scope for it")
 			default:
 				how, proofErr := s.theProofOfTheOwner(r)
@@ -391,6 +395,10 @@ func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handle
 						return
 					}
 					next.ServeHTTP(w, r)
+					return
+				}
+				if s.ownerKeyStateIsStale(r) {
+					writeStaleKeyState(w)
 					return
 				}
 				denyAuthorization(w, "this endpoint is for the owner of this agent; sign the request with the owner key or call it locally")
