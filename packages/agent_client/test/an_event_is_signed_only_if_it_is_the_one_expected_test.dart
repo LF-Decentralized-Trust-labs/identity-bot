@@ -1,32 +1,11 @@
 import 'dart:convert';
-import 'dart:io';
 
-import 'package:agent_client/crypto/owner_signature.dart';
 import 'package:agent_client/services/key_math.dart';
 import 'package:agent_client/services/the_event_this_device_expects.dart';
-import 'package:crypto/crypto.dart' as crypto;
 import 'package:test/test.dart';
 
-class _SignedByUs implements BinarySignature {
-  @override
-  Future<void> requireSameSigner(String binary, String app) async {}
-}
-
-/// A KERI 1.0 JSON event with its digest (and, for a founding, identifier)
-/// filled in, from fields in order. The core's parser then confirms the digest,
-/// so an event made here that the parser accepts is a real event.
-List<int> saidified(Map<String, Object?> fields) {
-  const placeholder = '############################################';
-  final m = <String, Object?>{'v': 'KERI10JSON000000_', ...fields};
-  m['d'] = placeholder;
-  if (m['t'] == 'icp') m['i'] = placeholder;
-  final size = utf8.encode(jsonEncode(m)).length;
-  m['v'] = 'KERI10JSON${size.toRadixString(16).padLeft(6, '0')}_';
-  final said = OwnerSignature.blake3QB64(utf8.encode(jsonEncode(m)));
-  m['d'] = said;
-  if (m['t'] == 'icp') m['i'] = said;
-  return utf8.encode(jsonEncode(m));
-}
+import 'support/kel_events.dart';
+import 'support/the_core.dart';
 
 const key = 'DC9_fhFpkQz7Q23jYk4JbvAuUPriHlz3N_gTrmghEh51';
 const next = [
@@ -63,18 +42,7 @@ void main() {
   late KeyMath km;
 
   setUpAll(() async {
-    final dir = await Directory.systemTemp.createTemp('expects-core');
-    final core =
-        '${dir.path}/identity-agent-core${Platform.isWindows ? '.exe' : ''}';
-    final built = await Process.run('go', ['build', '-o', core, '.'],
-        workingDirectory: '../../identity-agent-core');
-    if (built.exitCode != 0)
-      fail('the core could not be built for this test: ${built.stderr}');
-    km = CommandKeyMath(
-        binaryPath: core,
-        expectedSha256:
-            crypto.sha256.convert(await File(core).readAsBytes()).toString(),
-        signature: _SignedByUs());
+    km = await keyMathOf(await buildTheCore('expects-core'));
   });
 
   final expectedFounding =

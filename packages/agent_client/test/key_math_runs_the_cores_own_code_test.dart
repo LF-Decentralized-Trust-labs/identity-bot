@@ -4,16 +4,9 @@ import 'dart:typed_data';
 
 import 'package:agent_client/crypto/keys.dart';
 import 'package:agent_client/services/key_math.dart';
-import 'package:crypto/crypto.dart' as crypto;
 import 'package:test/test.dart';
 
-/// A signature check that accepts, for running a locally built core in a test.
-/// What it stands in for is the platform's own check, which a locally built
-/// binary would fail; the hash check is still made.
-class _SignedByUs implements BinarySignature {
-  @override
-  Future<void> requireSameSigner(String binary, String app) async {}
-}
+import 'support/the_core.dart';
 
 class _SignedBySomebodyElse implements BinarySignature {
   @override
@@ -38,14 +31,8 @@ void main() {
   late String coreHash;
 
   setUpAll(() async {
-    final dir = await Directory.systemTemp.createTemp('keymath-core');
-    core = '${dir.path}/identity-agent-core${Platform.isWindows ? '.exe' : ''}';
-    final built = await Process.run('go', ['build', '-o', core, '.'],
-        workingDirectory: '../../identity-agent-core');
-    if (built.exitCode != 0) {
-      fail('the core could not be built for this test: ${built.stderr}');
-    }
-    coreHash = crypto.sha256.convert(await File(core).readAsBytes()).toString();
+    core = await buildTheCore('keymath-core');
+    coreHash = await sha256Of(core);
   });
 
   final vectors = jsonDecode(
@@ -55,7 +42,7 @@ void main() {
 
   test('the shared key vectors come out of the core through KeyMath', () async {
     final km = CommandKeyMath(
-        binaryPath: core, expectedSha256: coreHash, signature: _SignedByUs());
+        binaryPath: core, expectedSha256: coreHash, signature: SignedByUs());
     for (final pq in phrase['post_quantum'] as List) {
       final got = await km.postQuantumNext(_hexBytes(pq['seed_hex'] as String));
       expect(got.verkey, pq['verkey_qb64']);
@@ -85,11 +72,11 @@ void main() {
     final km = CommandKeyMath(
         binaryPath: tampered.path,
         expectedSha256: coreHash,
-        signature: _SignedByUs());
+        signature: SignedByUs());
     await expectLater(
         km.parseEvent(utf8.encode('{}')), throwsA(isA<KeyMathBinaryRefused>()));
     final none = CommandKeyMath(
-        binaryPath: core, expectedSha256: '', signature: _SignedByUs());
+        binaryPath: core, expectedSha256: '', signature: SignedByUs());
     await expectLater(none.parseEvent(utf8.encode('{}')),
         throwsA(isA<KeyMathBinaryRefused>()));
   });
@@ -114,7 +101,7 @@ void main() {
   test('a refusal says what is wrong with the request and nothing more',
       () async {
     final km = CommandKeyMath(
-        binaryPath: core, expectedSha256: coreHash, signature: _SignedByUs());
+        binaryPath: core, expectedSha256: coreHash, signature: SignedByUs());
     final seed = 'ff' * 31;
     try {
       await km.run('pq_next', {'seed_hex': seed});

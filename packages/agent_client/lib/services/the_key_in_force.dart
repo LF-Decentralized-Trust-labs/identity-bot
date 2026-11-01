@@ -295,7 +295,8 @@ class TheKeyInForce {
       await _asked.forgetId(scope, asked);
     }
     if (signed != null) await _asked.forgetSettled(scope, checked.aid, log.events, signed);
-    return KeyState(checked.aid, checked.keyAt.last, establishment!, log.events.length);
+    return KeyState(checked.aid, checked.keyAt.last, establishment!, log.events.length,
+        '${log.events.last['d'] ?? ''}');
   }
 
   /// The checks every event this device signs late must pass, then the
@@ -454,7 +455,7 @@ class _Checked {
 
 /// Where the identity's keys stand after any stranded event is finished.
 class KeyState {
-  KeyState(this.aid, this.index, this.establishment, this.nextSequenceNumber);
+  KeyState(this.aid, this.index, this.establishment, this.nextSequenceNumber, this.tipDigest);
 
   final String aid;
 
@@ -466,4 +467,7 @@ class KeyState {
 
   /// The sequence number the next event will have: the tip plus one.
   final int nextSequenceNumber;
+
+  /// The digest of the tip, which the next event follows.
+  final String tipDigest;
 }
