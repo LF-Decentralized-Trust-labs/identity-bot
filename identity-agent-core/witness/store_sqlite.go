@@ -2,9 +2,10 @@ package witness
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"time"
+
+	"identity-agent-core/store"
 )
 
 type SQLiteStore struct {
@@ -126,13 +127,19 @@ type execer interface {
 }
 
 func storeKelEvent(db execer, ev KelEvent) error {
-	_, err := db.Exec(`
+	res, err := db.Exec(`
 		INSERT INTO witness_kel_events (signer_aid, sequence_num, event_json, event_said, stored_at, raw_bytes_b64, cesr_signature, signatures)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(signer_aid, sequence_num) DO NOTHING`,
 		ev.SignerAID, ev.SequenceNum, ev.EventJSON, ev.EventSAID, ev.StoredAt,
 		ev.RawBytesB64, firstOf(ev.Signatures, ev.CesrSignature), signatureList(ev.Signatures))
-	return err
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return fmt.Errorf("an event of %s is already held at sequence number %d", ev.SignerAID, ev.SequenceNum)
+	}
+	return nil
 }
 
 func firstOf(sigs []string, otherwise string) string {
@@ -142,21 +149,11 @@ func firstOf(sigs []string, otherwise string) string {
 	return otherwise
 }
 
-// signatureList is a signature list as stored: a JSON list, or empty for none.
-func signatureList(sigs []string) string {
-	if len(sigs) == 0 {
-		return ""
-	}
-	b, _ := json.Marshal(sigs)
-	return string(b)
-}
+func signatureList(sigs []string) string { return store.SignatureListColumn(sigs) }
 
 func readSignatureList(stored string) ([]string, error) {
-	if stored == "" {
-		return nil, nil
-	}
-	var sigs []string
-	if err := json.Unmarshal([]byte(stored), &sigs); err != nil {
+	sigs, err := store.ReadSignatureListColumn(stored)
+	if err != nil {
 		return nil, fmt.Errorf("a stored signature list is unreadable: %w", err)
 	}
 	return sigs, nil
@@ -193,12 +190,20 @@ func (s *SQLiteStore) SetKelSignatures(signerAID string, seq int, signatures []s
 	return err
 }
 
-func (s *SQLiteStore) SupersedeKelEvents(signerAID string, by KelEvent) error {
+func (s *SQLiteStore) SupersedeKelEvents(signerAID string, by KelEvent, tip int) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	var last sql.NullInt64
+	if err := tx.QueryRow(`SELECT MAX(sequence_num) FROM witness_kel_events WHERE signer_aid = ?`,
+		signerAID).Scan(&last); err != nil {
+		return err
+	}
+	if !last.Valid || int(last.Int64) != tip {
+		return fmt.Errorf("the key log of %s moved while the recovery rotation was judged", signerAID)
+	}
 	if _, err := tx.Exec(`
 		INSERT INTO witness_kel_superseded (signer_aid, sequence_num, event_said, raw_bytes_b64, signatures, superseded_by, superseded_at)
 		SELECT signer_aid, sequence_num, event_said, raw_bytes_b64,

@@ -101,7 +101,7 @@ func signedLog(t *testing.T, e *Engine, aid string) [][]byte {
 		if err != nil {
 			t.Fatal(err)
 		}
-		m, err := signedMessage(raw, kel.Signatures[i])
+		m, err := drivers.SignedMessage(raw, kel.Signatures[i])
 		if err != nil {
 			t.Fatalf("event %d is held without signatures", i)
 		}

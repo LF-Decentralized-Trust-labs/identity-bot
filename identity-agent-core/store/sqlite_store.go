@@ -115,11 +115,30 @@ func saveEvent(ex sqlExecer, record EventRecord) error {
 // signaturesColumn is the signatures column's value: a JSON list, or empty
 // when the record carries none of its own.
 func signaturesColumn(record EventRecord) string {
-	if len(record.Signatures) == 0 {
+	return SignatureListColumn(record.Signatures)
+}
+
+// SignatureListColumn is a list of signatures over an event as a column holds
+// it: a JSON list, or empty for none. The one format every table keeping an
+// event's signatures uses.
+func SignatureListColumn(sigs []string) string {
+	if len(sigs) == 0 {
 		return ""
 	}
-	b, _ := json.Marshal(record.Signatures)
+	b, _ := json.Marshal(sigs)
 	return string(b)
+}
+
+// ReadSignatureListColumn reads a column SignatureListColumn wrote.
+func ReadSignatureListColumn(stored string) ([]string, error) {
+	if stored == "" {
+		return nil, nil
+	}
+	var sigs []string
+	if err := json.Unmarshal([]byte(stored), &sigs); err != nil {
+		return nil, err
+	}
+	return sigs, nil
 }
 
 func (s *SQLiteStore) SaveSupersedingEvent(record EventRecord) error {
@@ -181,11 +200,10 @@ func scanEvents(rows *sql.Rows) ([]EventRecord, error) {
 			&e.CesrSignature, &e.RawBytesB64, &sigs, &e.UnsignedAtUpgrade); err != nil {
 			return nil, fmt.Errorf("failed to scan KEL row: %w", err)
 		}
-		if sigs != "" {
-			if err := json.Unmarshal([]byte(sigs), &e.Signatures); err != nil {
-				return nil, fmt.Errorf("the signatures stored with event %d of %s are unreadable: %w",
-					e.SequenceNumber, e.AID, err)
-			}
+		var err error
+		if e.Signatures, err = ReadSignatureListColumn(sigs); err != nil {
+			return nil, fmt.Errorf("the signatures stored with event %d of %s are unreadable: %w",
+				e.SequenceNumber, e.AID, err)
 		}
 		events = append(events, e)
 	}

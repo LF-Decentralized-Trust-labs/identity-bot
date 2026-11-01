@@ -42,6 +42,11 @@ type Service struct {
 	HTTPClient  *http.Client
 	PostEvent   EventPoster
 	delegatesMu sync.Mutex
+	// receiving holds a *sync.Mutex per identity, so one identity's events
+	// are judged and stored one at a time: an event judged against a log
+	// another event is changing could be stored on a history that no longer
+	// exists.
+	receiving sync.Map
 	// confirmed is, by identity and witness, the furthest place a witness
 	// has confirmed holding: by its signed tip, or its receipt.
 	confirmed sync.Map
@@ -150,8 +155,8 @@ func (s *Service) EventAt(aid string, sn int) (SignedEvent, error) {
 		return SignedEvent{}, err
 	}
 	for _, e := range kel {
-		if e.SequenceNum == sn && e.RawBytesB64 != "" && e.CesrSignature != "" {
-			return SignedEvent{RawBytesB64: e.RawBytesB64, CesrSignature: e.CesrSignature}, nil
+		if sigs := e.ControllerSignatures(); e.SequenceNum == sn && e.RawBytesB64 != "" && len(sigs) > 0 {
+			return SignedEvent{RawBytesB64: e.RawBytesB64, CesrSignature: sigs[0], Signatures: sigs}, nil
 		}
 	}
 	return SignedEvent{}, fmt.Errorf("not_found")
@@ -431,6 +436,9 @@ func (s *Service) ReceiveSignedEvent(signerAID string, rawEvent []byte, sigs []s
 	if signerAID == "" {
 		return nil, fmt.Errorf("missing signer aid")
 	}
+	mu, _ := s.receiving.LoadOrStore(signerAID, &sync.Mutex{})
+	mu.(*sync.Mutex).Lock()
+	defer mu.(*sync.Mutex).Unlock()
 	if len(sigs) == 0 {
 		// Refused rather than receipted unsigned. A witness that will attest to
 		// an unsigned event is a witness anyone can make say anything, and its
@@ -533,7 +541,8 @@ func (s *Service) ReceiveSignedEvent(signerAID string, rawEvent []byte, sigs []s
 	switch {
 	case got.Repeat:
 	case got.Supersedes > 0:
-		if err := s.Store.SupersedeKelEvents(signerAID, stored); err != nil {
+		if err := s.Store.SupersedeKelEvents(signerAID, stored,
+			int(got.Log.State().SN())+got.Supersedes-1); err != nil {
 			return nil, err
 		}
 	default:
@@ -586,6 +595,30 @@ func (s *Service) ReceiveSignedEvent(signerAID string, rawEvent []byte, sigs []s
 	}, nil
 }
 
+// eventBody is an event as it is sent to a witness: its published bytes and
+// every controller signature over them. cesr_signatures is the whole list and
+// cesr_signature its first, for a witness that reads one.
+func eventBody(signerAID, rawB64 string, sigs []string) []byte {
+	sigs = nonEmpty(sigs)
+	m := map[string]interface{}{"aid": signerAID, "event_b64": rawB64, "cesr_signature": ""}
+	if len(sigs) > 0 {
+		m["cesr_signature"] = sigs[0]
+		m["cesr_signatures"] = sigs
+	}
+	body, _ := json.Marshal(m)
+	return body
+}
+
+func nonEmpty(sigs []string) []string {
+	var out []string
+	for _, s := range sigs {
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // GetKelReplica implements C4.
 func (s *Service) GetKelReplica(signerAID string) ([]map[string]interface{}, error) {
 	kel, err := s.Store.GetKelEvents(signerAID)
@@ -603,7 +636,7 @@ func (s *Service) GetKelReplica(signerAID string) ([]map[string]interface{}, err
 // Sends the event as published, with the controller's signature over those
 // bytes. A witness cannot earn its receipt without both, so sending anything
 // less would be asking for an attestation nobody could make honestly.
-func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent []byte, cesrSig string) error {
+func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent []byte, cesrSigs ...string) error {
 	if len(rawEvent) == 0 {
 		return fmt.Errorf("an event cannot be broadcast without the bytes it was published as")
 	}
@@ -611,7 +644,7 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 	if err := json.Unmarshal(rawEvent, &event); err != nil {
 		return fmt.Errorf("the event to broadcast is not readable: %w", err)
 	}
-	if cesrSig == "" {
+	if len(nonEmpty(cesrSigs)) == 0 {
 		// Reported rather than sent. Every witness would refuse it, so sending
 		// it would turn one local fault into a round of remote refusals whose
 		// cause is much harder to see from here.
@@ -637,11 +670,7 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 		StartedAt: now, UpdatedAt: now,
 	})
 
-	body, _ := json.Marshal(map[string]interface{}{
-		"aid":            signerAID,
-		"event_b64":      base64.StdEncoding.EncodeToString(rawEvent),
-		"cesr_signature": cesrSig,
-	})
+	body := eventBody(signerAID, base64.StdEncoding.EncodeToString(rawEvent), cesrSigs)
 	for _, w := range witnesses {
 		url := witnessEventURL(w)
 		go s.postWithRetry(ctx, url, body, said, w.AID)
@@ -743,17 +772,11 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 				// An event not yet signed ends this witness's pass. A witness
 				// cannot verify it and refuses it, and every event after it
 				// would be held back as a gap; it is sent once it is signed.
-				if e.CesrSignature == "" && len(e.Signatures) == 0 {
+				sigs := store.ControllerSignaturesOf(e.Signatures, e.CesrSignature)
+				if len(sigs) == 0 {
 					return
 				}
-				sent := map[string]interface{}{
-					"aid": signerAID, "event_b64": e.RawBytesB64, "cesr_signature": e.CesrSignature,
-				}
-				if len(e.Signatures) > 0 {
-					sent["cesr_signature"] = e.Signatures[0]
-					sent["cesr_signatures"] = e.Signatures
-				}
-				body, _ := json.Marshal(sent)
+				body := eventBody(signerAID, e.RawBytesB64, sigs)
 				said := eventSAID(ev)
 				resp, err := s.PostEvent(ctx, witnessEventURL(w), body)
 				if err != nil {
@@ -776,12 +799,12 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 // log designates, found by their keys among this agent's witnesses and the
 // bootstrap pool, and keeps the receipts they return. Used for an identity
 // that names its delegator's witnesses rather than ones chosen for it here.
-func (s *Service) BroadcastToDesignated(ctx context.Context, signerAID string, rawEvent []byte, cesrSig string, designated []string, threshold int) error {
+func (s *Service) BroadcastToDesignated(ctx context.Context, signerAID string, rawEvent []byte, cesrSigs []string, designated []string, threshold int) error {
 	var event map[string]interface{}
 	if err := json.Unmarshal(rawEvent, &event); err != nil {
 		return fmt.Errorf("the event to broadcast is not readable: %w", err)
 	}
-	if cesrSig == "" {
+	if len(nonEmpty(cesrSigs)) == 0 {
 		return fmt.Errorf("refusing to broadcast an unsigned event for %s", signerAID)
 	}
 	known := s.designatedTargets(designated)
@@ -792,9 +815,7 @@ func (s *Service) BroadcastToDesignated(ctx context.Context, signerAID string, r
 		EventSAID: said, SignerAID: signerAID, SequenceNum: seq,
 		State: FinalizePending, Threshold: threshold, StartedAt: now, UpdatedAt: now,
 	})
-	body, _ := json.Marshal(map[string]interface{}{
-		"aid": signerAID, "event_b64": base64.StdEncoding.EncodeToString(rawEvent), "cesr_signature": cesrSig,
-	})
+	body := eventBody(signerAID, base64.StdEncoding.EncodeToString(rawEvent), cesrSigs)
 	for _, key := range designated {
 		w, ok := known[key]
 		if !ok {

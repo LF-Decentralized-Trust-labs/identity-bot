@@ -327,3 +327,124 @@ func TestARepeatsNewSignatureIsKeptAndJunkNeverIs(t *testing.T) {
 		t.Fatal("the same signature sent twice was kept twice")
 	}
 }
+
+// One public signature spelled thousands of ways, sent with a repeat, is kept
+// once: the 2A form's prior-next place is not covered by the signature, so
+// anyone holding it can respell it, and a witness keeping each spelling could
+// be filled until it can no longer frame the event.
+func TestASignatureRespelledIsKeptOnce(t *testing.T) {
+	s := witnessFor(t)
+	id, icp, icpSig := newIdentity(t)
+	witnessesFor(t, s, id.prefix)
+	mustReceive(t, s, id.prefix, icp, icpSig)
+	id.kept(icp)
+
+	raw, err := id.keys[0].Sign(icp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spellings []string
+	for ondex := 0; ondex < 2000; ondex++ {
+		qb, err := keri.EncodeIndexedSignature(raw, keri.SignaturePlace{Index: 0, Ondex: ondex})
+		if err != nil {
+			t.Fatal(err)
+		}
+		spellings = append(spellings, qb)
+	}
+	mustReceive(t, s, id.prefix, icp, spellings...)
+	held, _ := s.Store.GetKelEvents(id.prefix)
+	if len(held[0].ControllerSignatures()) != 1 {
+		t.Fatalf("the witness kept %d spellings of one signature", len(held[0].ControllerSignatures()))
+	}
+	next, sig := id.interaction(1, `{"i":"EA","s":"0","d":"EA"}`)
+	mustReceive(t, s, id.prefix, next, sig)
+}
+
+// Events of one identity arriving together are judged one at a time: an
+// interaction by a key being recovered from and the recovery rotation, sent at
+// once, leave a log that still verifies, whichever lands first.
+func TestEventsArrivingTogetherLeaveAVerifiableLog(t *testing.T) {
+	for round := 0; round < 20; round++ {
+		s := witnessFor(t)
+		id, icp, icpSig := newIdentity(t)
+		witnessesFor(t, s, id.prefix)
+		mustReceive(t, s, id.prefix, icp, icpSig)
+		id.kept(icp)
+		ixn1, sig1 := id.interaction(1, `{"i":"EA","s":"0","d":"EA"}`)
+		mustReceive(t, s, id.prefix, ixn1, sig1)
+		id.kept(ixn1)
+		ixn2, sig2 := id.interaction(2, `{"i":"EB","s":"0","d":"EB"}`)
+		rot, rotSig := id.rotation(1, 1)
+
+		done := make(chan struct{}, 2)
+		go func() { _, _ = s.ReceiveSignedEvent(id.prefix, ixn2, []string{sig2}); done <- struct{}{} }()
+		go func() { _, _ = s.ReceiveSignedEvent(id.prefix, rot, []string{rotSig}); done <- struct{}{} }()
+		<-done
+		<-done
+
+		held, err := s.Store.GetKelEvents(id.prefix)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var log [][]byte
+		for _, e := range held {
+			m, err := signedMessage(mustRaw(t, e), e.ControllerSignatures())
+			if err != nil {
+				t.Fatal(err)
+			}
+			log = append(log, m)
+		}
+		if _, err := keri.ValidateSignedKEL(log); err != nil {
+			t.Fatalf("round %d: the witness's log no longer verifies: %v", round, err)
+		}
+	}
+}
+
+// A witness hands back every signature it holds over an event.
+func TestAWitnessHandsBackEverySignature(t *testing.T) {
+	s := witnessFor(t)
+	a, b := newOwner(t), newOwner(t)
+	icp, err := keri.BuildInception(keri.InceptionInput{
+		Keys:        []string{pub(t, a.now), pub(t, b.now)},
+		NextDigests: []string{digest(t, a.next), digest(t, b.next)},
+		Isith:       json.RawMessage(`"2"`), Nsith: json.RawMessage(`"2"`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	aid := parsed(t, icp).Identifier
+	witnessesFor(t, s, aid)
+	mustReceive(t, s, aid, icp, signAt(t, a.now, icp, keri.SamePlace(0)),
+		signAt(t, b.now, icp, keri.SamePlace(1)))
+	got, err := s.EventAt(aid, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Signatures) != 2 || got.CesrSignature != got.Signatures[0] {
+		t.Fatalf("the witness handed back %d signatures", len(got.Signatures))
+	}
+	var sent map[string]interface{}
+	if err := json.Unmarshal(eventBody(aid, got.RawBytesB64, got.Signatures), &sent); err != nil {
+		t.Fatal(err)
+	}
+	if list, _ := sent["cesr_signatures"].([]interface{}); len(list) != 2 || sent["cesr_signature"] != got.Signatures[0] {
+		t.Fatalf("an event is sent to a witness as %v", sent)
+	}
+}
+
+// Storing an event at a place already held fails, so no receipt is issued for
+// an event that was not stored.
+func TestAnEventAtAHeldPlaceIsNotStored(t *testing.T) {
+	s := witnessFor(t)
+	ev := KelEvent{SignerAID: "EX", SequenceNum: 0, EventJSON: "{}", EventSAID: "E1"}
+	if err := s.Store.StoreKelEvent(ev); err != nil {
+		t.Fatal(err)
+	}
+	ev.EventSAID = "E2"
+	if err := s.Store.StoreKelEvent(ev); err == nil {
+		t.Fatal("a second event at a held place was reported stored")
+	}
+	if err := s.Store.SupersedeKelEvents("EX", KelEvent{SignerAID: "EX", SequenceNum: 0, EventSAID: "E3"}, 5); err == nil {
+		t.Fatal("a recovery judged against a log that ended elsewhere was stored")
+	}
+}

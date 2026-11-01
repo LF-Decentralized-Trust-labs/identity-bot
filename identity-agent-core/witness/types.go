@@ -1,6 +1,10 @@
 package witness
 
-import "time"
+import (
+	"time"
+
+	"identity-agent-core/store"
+)
 
 // Witness protocol constants.
 const (
@@ -136,13 +140,7 @@ type KelEvent struct {
 
 // ControllerSignatures are the controller signatures held for the event.
 func (e KelEvent) ControllerSignatures() []string {
-	if len(e.Signatures) > 0 {
-		return e.Signatures
-	}
-	if e.CesrSignature != "" {
-		return []string{e.CesrSignature}
-	}
-	return nil
+	return store.ControllerSignaturesOf(e.Signatures, e.CesrSignature)
 }
 
 // KelConflict is a correctly signed event that arrived at a place this witness

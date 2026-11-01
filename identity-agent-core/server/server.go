@@ -3726,7 +3726,7 @@ func (s *CoreServer) broadcastWitnessEvent(record store.EventRecord) {
 			record.AID, record.SequenceNumber, err)
 		return
 	}
-	s.triggerWitnessBroadcast(record.AID, raw, record.CesrSignature)
+	s.triggerWitnessBroadcast(record.AID, raw, record.ControllerSignatures()...)
 }
 
 func (s *CoreServer) handlePublicCredentialServe(w http.ResponseWriter, r *http.Request) {
