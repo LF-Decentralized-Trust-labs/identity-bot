@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -75,8 +76,8 @@ func TestATestCannotReachTheRealVolume(t *testing.T) {
 	if err := os.WriteFile(present, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := addVolumeRecoveryVia(present, []string{"a"}); err == nil {
-		t.Fatal("recovery was started from a test")
+	if err := addVolumeRecoveryVia(present, []string{"a"}); !errors.Is(err, errRecoveryUnderTest) {
+		t.Fatalf("recovery was not refused as started from a test: %v", err)
 	}
 }
 
@@ -88,7 +89,7 @@ func TestTheRecoveryProcessDoesNotStartAnother(t *testing.T) {
 	if err := os.WriteFile(present, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := addVolumeRecoveryVia(present, []string{"a"}); err == nil {
-		t.Fatal("a recovery process started another")
+	if err := addVolumeRecoveryVia(present, []string{"a"}); !errors.Is(err, errRecoveryChild) {
+		t.Fatalf("a recovery process was not refused as one: %v", err)
 	}
 }
