@@ -83,8 +83,8 @@ func saveEvent(ex sqlExecer, record EventRecord) error {
 	// event exists. A plain insert made attaching one impossible.
 	_, err := ex.Exec(`
 		INSERT INTO kel (aid, seq_num, event_type, event_json, public_key,
-		                 next_key_digest, timestamp, cesr_signature, raw_bytes_b64)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		                 next_key_digest, timestamp, cesr_signature, raw_bytes_b64, signatures)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(aid, seq_num) DO UPDATE SET
 		    event_json     = excluded.event_json,
 		    next_key_digest = excluded.next_key_digest,
@@ -100,10 +100,11 @@ func saveEvent(ex sqlExecer, record EventRecord) error {
 		    -- empty one. A later write that simply does not carry them must not
 		    -- erase what an earlier one established.
 		    cesr_signature = CASE WHEN excluded.cesr_signature != '' THEN excluded.cesr_signature ELSE kel.cesr_signature END,
-		    raw_bytes_b64  = CASE WHEN excluded.raw_bytes_b64 != '' THEN excluded.raw_bytes_b64 ELSE kel.raw_bytes_b64 END`,
+		    raw_bytes_b64  = CASE WHEN excluded.raw_bytes_b64 != '' THEN excluded.raw_bytes_b64 ELSE kel.raw_bytes_b64 END,
+		    signatures     = CASE WHEN excluded.signatures != '' THEN excluded.signatures ELSE kel.signatures END`,
 		record.AID, record.SequenceNumber, record.EventType, record.EventJSON,
 		record.PublicKey, record.NextKeyDigest, record.Timestamp,
-		record.CesrSignature, record.RawBytesB64,
+		record.CesrSignature, record.RawBytesB64, signaturesColumn(record),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to save KEL event: %w", err)
@@ -111,23 +112,76 @@ func saveEvent(ex sqlExecer, record EventRecord) error {
 	return nil
 }
 
+// signaturesColumn is the signatures column's value: a JSON list, or empty
+// when the record carries none of its own.
+func signaturesColumn(record EventRecord) string {
+	if len(record.Signatures) == 0 {
+		return ""
+	}
+	b, _ := json.Marshal(record.Signatures)
+	return string(b)
+}
+
+func (s *SQLiteStore) SupersedeEvents(aid string, fromSN int) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`
+		INSERT INTO kel_superseded (aid, seq_num, event_type, event_json, public_key, next_key_digest,
+		                            timestamp, cesr_signature, raw_bytes_b64, signatures, unsigned_at_upgrade)
+		SELECT aid, seq_num, event_type, event_json, public_key, next_key_digest,
+		       timestamp, cesr_signature, raw_bytes_b64, signatures, unsigned_at_upgrade
+		  FROM kel WHERE aid = ? AND seq_num >= ?`, aid, fromSN); err != nil {
+		return fmt.Errorf("could not keep the superseded events: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM kel WHERE aid = ? AND seq_num >= ?`, aid, fromSN); err != nil {
+		return fmt.Errorf("could not move the superseded events out of the log: %w", err)
+	}
+	return tx.Commit()
+}
+
+func (s *SQLiteStore) SupersededEvents(aid string) ([]EventRecord, error) {
+	rows, err := s.db.Query(
+		`SELECT aid, seq_num, event_type, event_json, public_key, next_key_digest,
+		        timestamp, cesr_signature, raw_bytes_b64, signatures, unsigned_at_upgrade
+		 FROM kel_superseded WHERE aid = ? ORDER BY id ASC`, aid)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query superseded events: %w", err)
+	}
+	defer rows.Close()
+	return scanEvents(rows)
+}
+
 func (s *SQLiteStore) GetEvents(aid string) ([]EventRecord, error) {
 	rows, err := s.db.Query(
 		`SELECT aid, seq_num, event_type, event_json, public_key, next_key_digest,
-		        timestamp, cesr_signature, raw_bytes_b64
+		        timestamp, cesr_signature, raw_bytes_b64, signatures, unsigned_at_upgrade
 		 FROM kel WHERE aid = ? ORDER BY seq_num ASC`, aid)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query KEL: %w", err)
 	}
 	defer rows.Close()
+	return scanEvents(rows)
+}
 
+// scanEvents reads kel rows selected with the columns GetEvents names.
+func scanEvents(rows *sql.Rows) ([]EventRecord, error) {
 	var events []EventRecord
 	for rows.Next() {
 		var e EventRecord
+		var sigs string
 		if err := rows.Scan(&e.AID, &e.SequenceNumber, &e.EventType, &e.EventJSON,
 			&e.PublicKey, &e.NextKeyDigest, &e.Timestamp,
-			&e.CesrSignature, &e.RawBytesB64); err != nil {
+			&e.CesrSignature, &e.RawBytesB64, &sigs, &e.UnsignedAtUpgrade); err != nil {
 			return nil, fmt.Errorf("failed to scan KEL row: %w", err)
+		}
+		if sigs != "" {
+			if err := json.Unmarshal([]byte(sigs), &e.Signatures); err != nil {
+				return nil, fmt.Errorf("the signatures stored with event %d of %s are unreadable: %w",
+					e.SequenceNumber, e.AID, err)
+			}
 		}
 		events = append(events, e)
 	}

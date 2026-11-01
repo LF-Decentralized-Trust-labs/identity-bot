@@ -989,6 +989,51 @@ UPDATE duplicity_alerts
        resolution_note = 'raised by a sequence number read as decimal; the observation it compared against has been discarded'
  WHERE resolved = 0 AND sequence_num >= 9;
 `},
+	{
+		Version:     46,
+		Description: "Keep every signature over a key event, mark the events already unsigned, and keep what a recovery rotation supersedes",
+		SQL: `
+-- An event with several signers carries several signatures, so they are kept
+-- as a JSON list; cesr_signature stays the first, for readers of one.
+ALTER TABLE kel ADD COLUMN signatures TEXT NOT NULL DEFAULT '';
+
+-- Every event already in a log without a signature is marked, once, here.
+-- Only a marked event may have a signature attached after it was added; an
+-- event added from now on is added signed or not at all.
+ALTER TABLE kel ADD COLUMN unsigned_at_upgrade INTEGER NOT NULL DEFAULT 0;
+UPDATE kel SET unsigned_at_upgrade = 1 WHERE cesr_signature = '';
+
+-- Interactions a recovery rotation supersedes are moved here, never deleted.
+CREATE TABLE IF NOT EXISTS kel_superseded (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    aid                 TEXT NOT NULL,
+    seq_num             INTEGER NOT NULL,
+    event_type          TEXT NOT NULL,
+    event_json          TEXT NOT NULL,
+    public_key          TEXT NOT NULL DEFAULT '',
+    next_key_digest     TEXT NOT NULL DEFAULT '',
+    timestamp           TEXT NOT NULL DEFAULT '',
+    cesr_signature      TEXT NOT NULL DEFAULT '',
+    raw_bytes_b64       TEXT NOT NULL DEFAULT '',
+    signatures          TEXT NOT NULL DEFAULT '',
+    unsigned_at_upgrade INTEGER NOT NULL DEFAULT 0,
+    superseded_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_kel_superseded_aid ON kel_superseded(aid);
+`},
+}
+
+// ReapplyIdentityMigration runs one identity migration's SQL again, for a test
+// that proves what that migration does to data it did not see the first time.
+// It records nothing, and no later migration is involved.
+func ReapplyIdentityMigration(db *sql.DB, version int) error {
+	for _, m := range identityMigrations {
+		if m.Version == version {
+			_, err := db.Exec(m.SQL)
+			return err
+		}
+	}
+	return fmt.Errorf("there is no identity migration %d", version)
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

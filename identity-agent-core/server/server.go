@@ -4944,6 +4944,7 @@ func (s *CoreServer) reloadIdentityIntoDriver() {
 		LastSAID:       lastSAID,
 		KEL:            kel,
 		RawEventsB64:   rawEvents,
+		Signatures:     signaturesOf(events),
 	}
 
 	result, err := s.KeriDriver.ReloadIdentity(req)
@@ -4959,6 +4960,20 @@ func (s *CoreServer) reloadIdentityIntoDriver() {
 // parsed, the bytes it was published as beside it, and the tip. Bytes are
 // carried so an engine can verify the history rather than only continue it;
 // they are empty for events stored before the canonical bytes were kept.
+// signaturesOf are the signatures stored with each event, parallel to the
+// events kelFromEvents reads.
+func signaturesOf(events []store.EventRecord) [][]string {
+	out := make([][]string, 0, len(events))
+	for _, ev := range events {
+		var ked map[string]interface{}
+		if json.Unmarshal([]byte(ev.EventJSON), &ked) != nil {
+			continue
+		}
+		out = append(out, ev.ControllerSignatures())
+	}
+	return out
+}
+
 func kelFromEvents(events []store.EventRecord) ([]map[string]interface{}, []string, string, int) {
 	kel := make([]map[string]interface{}, 0, len(events))
 	raws := make([]string, 0, len(events))

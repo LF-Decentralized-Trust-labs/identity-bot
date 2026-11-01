@@ -44,6 +44,27 @@ type EventRecord struct {
 	// unverifiable rather than treated as passing, because the whole point is
 	// that an unchecked digest is what got us here.
 	RawBytesB64 string `json:"raw_bytes_b64,omitempty"`
+	// Signatures are every controller signature over the event, each indexed
+	// as KERI attaches it. An event with several signers carries several;
+	// CesrSignature is the first, kept for readers of one.
+	Signatures []string `json:"signatures,omitempty"`
+	// UnsignedAtUpgrade marks an event that was already in the log without a
+	// signature when this version first ran. Only such an event may have a
+	// signature attached after it was added; every event added since is added
+	// signed or not at all (ADR-061).
+	UnsignedAtUpgrade bool `json:"unsigned_at_upgrade,omitempty"`
+}
+
+// ControllerSignatures are the signatures stored over the event, in whichever
+// field an earlier version wrote them.
+func (e EventRecord) ControllerSignatures() []string {
+	if len(e.Signatures) > 0 {
+		return e.Signatures
+	}
+	if e.CesrSignature != "" {
+		return []string{e.CesrSignature}
+	}
+	return nil
 }
 
 type IdentityState struct {
@@ -557,6 +578,13 @@ type ServiceProviderRecord struct {
 type Store interface {
 	SaveEvent(record EventRecord) error
 	GetEvents(aid string) ([]EventRecord, error)
+	// SupersedeEvents moves the events of aid from sequence number fromSN on
+	// out of its key log, into the record of what was superseded, where a
+	// recovery rotation has superseded them. Nothing is deleted.
+	SupersedeEvents(aid string, fromSN int) error
+	// SupersededEvents are what SupersedeEvents moved aside for aid, oldest
+	// first.
+	SupersededEvents(aid string) ([]EventRecord, error)
 	// AIDsOfEvent are the identities whose stored key log holds an event
 	// whose own identifier (its d field) is said. An Identity Agent keeps
 	// more than one identity's log — its own, its record identity's, others
@@ -751,6 +779,48 @@ func (s *FileStore) SaveEvent(record EventRecord) error {
 	events = append(events, record)
 
 	return s.writeJSON(filepath.Join(s.dir, "kel.json"), events)
+}
+
+func (s *FileStore) SupersedeEvents(aid string, fromSN int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	events, err := s.loadEvents()
+	if err != nil {
+		return err
+	}
+	var aside []EventRecord
+	if b, err := os.ReadFile(filepath.Join(s.dir, "kel_superseded.json")); err == nil {
+		_ = json.Unmarshal(b, &aside)
+	}
+	kept := events[:0]
+	for _, e := range events {
+		if e.AID == aid && e.SequenceNumber >= fromSN {
+			aside = append(aside, e)
+			continue
+		}
+		kept = append(kept, e)
+	}
+	if err := s.writeJSON(filepath.Join(s.dir, "kel_superseded.json"), aside); err != nil {
+		return err
+	}
+	return s.writeJSON(filepath.Join(s.dir, "kel.json"), kept)
+}
+
+func (s *FileStore) SupersededEvents(aid string) ([]EventRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var aside, out []EventRecord
+	if b, err := os.ReadFile(filepath.Join(s.dir, "kel_superseded.json")); err == nil {
+		if err := json.Unmarshal(b, &aside); err != nil {
+			return nil, err
+		}
+	}
+	for _, e := range aside {
+		if e.AID == aid {
+			out = append(out, e)
+		}
+	}
+	return out, nil
 }
 
 func (s *FileStore) GetEvents(aid string) ([]EventRecord, error) {

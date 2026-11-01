@@ -63,6 +63,14 @@ type identity struct {
 
 	// Registries maps a registry identifier to its transaction event log.
 	Registries map[string]*registry `json:"registries"`
+
+	// Superseded are interactions a recovery rotation superseded, in order:
+	// moved out of the log, never deleted.
+	Superseded []kelEntry `json:"superseded,omitempty"`
+	// held are events waiting for more of their signers, by place; evidence
+	// is what was refused as duplicity. Neither is ever sent anywhere.
+	held     map[int][]*heldEvent
+	evidence []Evidence
 }
 
 // kelEntry is one event in a key log.
@@ -79,6 +87,9 @@ type identity struct {
 type kelEntry struct {
 	Raw    []byte                 `json:"raw"`
 	Parsed map[string]interface{} `json:"parsed"`
+	// Sigs are the controller signatures over Raw, indexed as KERI attaches
+	// them. Empty only for an event an earlier version added unsigned.
+	Sigs []string `json:"sigs,omitempty"`
 }
 
 func entry(raw []byte) (kelEntry, error) {

@@ -44,6 +44,10 @@ type Engine struct {
 	// eventSignature signs an interaction about to be appended to an
 	// identity's own key log; see SetEventSignature.
 	eventSignature func(aid, key string, raw []byte) (string, error)
+	// holdFor is how long an event with several signers waits for the rest;
+	// clock replaces time.Now in tests.
+	holdFor time.Duration
+	clock   func() time.Time
 }
 
 // SetEventSignature installs how this engine obtains an identity's signature
@@ -141,10 +145,9 @@ func (e *Engine) commit(id *identity, sn uint64, kel, tel []byte) (string, error
 	return sig, f(drivers.TELCommit{AID: id.AID, SN: int(sn), KELRaw: kel, TELRaw: tel, Signature: sig})
 }
 
-// extend appends raw to id's key log: the one place an event other than a
-// rotation joins a key log, and it does so only with a signature by id's
-// current key over exactly raw, checked here whatever the caller checked.
-// also runs, under the same lock, for what else the event changes.
+// extend appends an interaction to id's key log with sig, a signature by id's
+// current key over exactly raw, through the one append path (add). also runs,
+// under the same lock, for what else the event changes.
 func (e *Engine) extend(id *identity, raw []byte, sig string, also func()) error {
 	e.state.mu.RLock()
 	key := id.PublicKey
@@ -152,34 +155,11 @@ func (e *Engine) extend(id *identity, raw []byte, sig string, also func()) error
 	if err := verifiedBy(id.AID, key, raw, sig); err != nil {
 		return err
 	}
-	return e.appendEvent(id, raw, also)
-}
-
-// extendByRotation appends a rotation to id's key log. A rotation is signed
-// by its new keys, which the callers of this engine do not yet hand it, so
-// it is the one event appended without a signature checked here.
-func (e *Engine) extendByRotation(id *identity, raw []byte, also func()) error {
-	return e.appendEvent(id, raw, also)
-}
-
-func (e *Engine) appendEvent(id *identity, raw []byte, also func()) error {
-	ev, err := keri.ParseEvent(raw)
-	if err != nil {
-		return err
-	}
-	next, err := entry(raw)
-	if err != nil {
-		return err
-	}
-	e.state.mu.Lock()
-	defer e.state.mu.Unlock()
-	if also != nil {
-		also()
-	}
-	id.SN = int(ev.SN)
-	id.LastSAID = ev.SAID
-	id.KEL = append(id.KEL, next)
-	return nil
+	return e.add(id, raw, []string{sig}, nil, func(*keri.Event) {
+		if also != nil {
+			also()
+		}
+	})
 }
 
 // verifiedBy checks sig is aid's current key's signature over raw.
@@ -424,6 +404,7 @@ func (e *Engine) inceptWith(publicKey, nextPublicKey, name string, data []json.R
 	if err != nil {
 		return nil, err
 	}
+	first.Sigs = e.foundingSignatures(ev, raw)
 	e.state.put(&identity{
 		Name:            name,
 		AID:             ev.Identifier,
@@ -665,6 +646,7 @@ func (e *Engine) holdDelegatedIdentity(name, pub, nextDigest string, dip []byte,
 	if err != nil {
 		return err
 	}
+	first.Sigs = e.foundingSignatures(dipEvent, dip)
 	return e.state.claim(&identity{
 		Name:            name,
 		AID:             dipEvent.Identifier,
@@ -794,9 +776,12 @@ func (e *Engine) Rotate(req drivers.RotationRequest) (*drivers.DriverRotationRes
 		return nil, err
 	}
 
-	if err := e.extendByRotation(id, raw, func() {
-		id.PublicKey = newPub
-		id.NextKeyDigest = newNextDigest
+	// Signed by the key it reveals before it is added, by the installed
+	// signer where this engine's caller holds that key. Where nobody here
+	// holds it, nothing is added: the rotation is made through Prepare and
+	// Commit by whoever does.
+	sigs := e.ownSignatures(id.AID, []string{newPub}, raw)
+	if err := e.add(id, raw, sigs, nil, func(ev *keri.Event) {
 		// The witness set now in force, read back off the event rather than
 		// recomputed here. The event is what everyone else will read, so
 		// anything this engine believes that the event does not say is wrong.
@@ -888,10 +873,12 @@ func (e *Engine) RotateToMultisig(name string, keys, nextKeyDigests []string, is
 		return nil, err
 	}
 
-	if err := e.extendByRotation(id, raw, func() {
-		id.PublicKey = normalised[0]
-		id.NextKeyDigest = nextKeyDigests[0]
-	}); err != nil {
+	// Added only once its signatures meet both thresholds. The keys this
+	// engine's caller holds sign here; a rotation that also needs keys held
+	// by others (owners joining) is made through Prepare and Commit, where
+	// each signer commits its own signatures.
+	sigs := e.ownSignatures(id.AID, normalised, raw)
+	if err := e.add(id, raw, sigs, nil, nil); err != nil {
 		return nil, err
 	}
 
@@ -1018,8 +1005,10 @@ func (e *Engine) kelOf(id *identity) *drivers.DriverKelResponse {
 	// get a confident, wrong answer; an empty string cannot be mistaken for an
 	// event.
 	rawB64 := make([]string, 0, len(id.KEL))
+	sigs := make([][]string, 0, len(id.KEL))
 	for _, ev := range id.KEL {
 		events = append(events, ev.Parsed)
+		sigs = append(sigs, append([]string(nil), ev.Sigs...))
 		if ev.Raw == nil {
 			rawB64 = append(rawB64, "")
 			continue
@@ -1030,6 +1019,7 @@ func (e *Engine) kelOf(id *identity) *drivers.DriverKelResponse {
 		AID:            id.AID,
 		KEL:            events,
 		RawEventsB64:   rawB64,
+		Signatures:     sigs,
 		SequenceNumber: id.SN,
 		EventCount:     len(id.KEL),
 	}
@@ -1080,6 +1070,23 @@ func (e *Engine) ReloadIdentity(req *drivers.DriverReloadIdentityRequest) (*driv
 					"the parsed form says %s and the bytes digest to %s", i, req.AID, d, ev.SAID)
 			}
 			e.Raw = raw
+			if i < len(req.Signatures) && len(req.Signatures[i]) > 0 {
+				keys := 1
+				if parsedKeys, ok := parsed["k"].([]interface{}); ok && len(parsedKeys) > 0 {
+					keys = len(parsedKeys)
+				}
+				if ev.Ilk == "ixn" {
+					keys = 0 // judged against the key state when the log is next extended
+				}
+				sigs, err := indexedSignatures(req.Signatures[i], keys)
+				if err != nil && ev.Ilk == "ixn" {
+					sigs, err = indexedSignatures(req.Signatures[i], 1)
+				}
+				if err != nil {
+					return nil, fmt.Errorf("event %d of %s has an unreadable stored signature: %w", i, req.AID, err)
+				}
+				e.Sigs = sigs
+			}
 		}
 		entries = append(entries, e)
 	}

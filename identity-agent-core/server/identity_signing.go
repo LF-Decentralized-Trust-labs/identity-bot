@@ -56,33 +56,32 @@ func (s *CoreServer) identitySigningSeed() ([]byte, error) {
 
 // errKeyUnavailable is the identity's key held here and not readable right
 // now. Nothing waits for another device on it: there is none.
-// ownGenerationOf is the generation key is at, where it is one of this
-// identity's own keys that this Identity Agent derives: any generation from
-// founding to the one after next, at the identity's recorded derivation index.
-// A key it does not derive is elsewhere, whatever this Identity Agent's own
-// seed is.
-func (s *CoreServer) ownGenerationOf(key string) (int, error) {
+// ownSeedForKey is the seed of key, one of this identity's own signing keys,
+// where this Identity Agent derives it: any generation from founding to the
+// one after next, at the identity's recorded derivation index. A key it does
+// not derive is elsewhere, whatever this Identity Agent's own seed is.
+func (s *CoreServer) ownSeedForKey(key string) ([]byte, error) {
 	identity, err := s.DataStore.GetIdentity()
 	if err != nil || identity == nil {
-		return 0, fmt.Errorf("this agent has no identity")
+		return nil, fmt.Errorf("this agent has no identity to sign as")
 	}
 	if _, err := s.identitySigningSeed(); err != nil {
-		return 0, err
+		return nil, err
 	}
 	rootSeed, err := ensureRootSeed(s.DataDir)
 	if err != nil {
-		return 0, fmt.Errorf("%w: %v", errKeyUnavailable, err)
+		return nil, fmt.Errorf("%w: %v", errKeyUnavailable, err)
 	}
 	for gen := 0; gen <= identity.KeyGeneration+2; gen++ {
 		seed, err := backup.DerivePairwiseSeed(rootSeed, identity.DerivationIndex, gen)
 		if err != nil {
-			return 0, fmt.Errorf("%w: %v", errKeyUnavailable, err)
+			return nil, fmt.Errorf("%w: %v", errKeyUnavailable, err)
 		}
 		if iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)) == key {
-			return gen, nil
+			return seed, nil
 		}
 	}
-	return 0, errKeyElsewhere
+	return nil, errKeyElsewhere
 }
 
 var errKeyUnavailable = errors.New("this machine holds the identity's key and cannot read it right now")
