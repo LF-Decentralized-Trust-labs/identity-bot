@@ -3,6 +3,7 @@ package iacrypto
 import (
 	"bytes"
 	"fmt"
+	keri "github.com/grapeid/keri-go"
 
 	"github.com/cloudflare/circl/sign/mldsa/mldsa65"
 )
@@ -110,7 +111,7 @@ func PostQuantumNextKeyFromSeed(seed32 []byte) (PostQuantumNextKey, error) {
 	// Digested over the qb64 TEXT, not the raw bytes, because that is what a
 	// validator recomputes when the key is revealed. Digesting the raw bytes
 	// would produce a commitment nothing could ever satisfy.
-	digest, err := Blake3QB64([]byte(verkey))
+	digest, err := keri.NextDigest(verkey)
 	if err != nil {
 		return PostQuantumNextKey{}, err
 	}
@@ -131,12 +132,16 @@ func PostQuantumNextKeyFromSeed(seed32 []byte) (PostQuantumNextKey, error) {
 // identity whose classical commitment no key can satisfy. Nothing detects it
 // until somebody tries to rotate, which may be years later, and by then the
 // event cannot be amended.
+//
+// There is one digest of a next key, keri-go's NextDigest, which is what KERI
+// computes over a key as it is written in k. This puts the key into that form
+// and refuses a non-transferable one; the digesting is keri-go's.
 func NextKeyDigest(nextVerkey string) (string, error) {
 	canonical, err := CanonicalVerkeyQB64(nextVerkey)
 	if err != nil {
 		return "", err
 	}
-	return Blake3QB64([]byte(canonical))
+	return keri.NextDigest(canonical)
 }
 
 // CanonicalVerkeyQB64 puts an Ed25519 public key into the single form a

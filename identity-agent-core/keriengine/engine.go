@@ -341,7 +341,7 @@ func inceptionOver(publicKey, nextPublicKey string, data []json.RawMessage, witn
 	// bytes and not the key itself. Committing to anything else produces a
 	// rotation that every conformant implementation refuses, at the point where
 	// the identity most needs to rotate.
-	nextDigest, err = keri.NextDigest(nextPub)
+	nextDigest, err = iacrypto.NextKeyDigest(nextPub)
 	if err != nil {
 		return "", "", nil, fmt.Errorf("committing to the next key: %w", err)
 	}
@@ -633,7 +633,7 @@ func delegatedInceptionOver(publicKey, nextPublicKey, delegatorAID string, witne
 	if err != nil {
 		return "", "", nil, nil, fmt.Errorf("the next signing key: %w", err)
 	}
-	nextDigest, err = keri.NextDigest(nextPub)
+	nextDigest, err = iacrypto.NextKeyDigest(nextPub)
 	if err != nil {
 		return "", "", nil, nil, err
 	}
@@ -750,7 +750,7 @@ func (e *Engine) Rotate(req drivers.RotationRequest) (*drivers.DriverRotationRes
 			"to %s and this key digests to %s. Rotating to it would produce an event no "+
 			"conformant implementation accepts", id.NextKeyDigest, revealed)
 	}
-	newNextDigest, err := keri.NextDigest(newNextPub)
+	newNextDigest, err := iacrypto.NextKeyDigest(newNextPub)
 	if err != nil {
 		return nil, err
 	}
