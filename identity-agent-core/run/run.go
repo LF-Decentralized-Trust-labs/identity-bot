@@ -11,6 +11,7 @@ package run
 
 import (
 	"fmt"
+	"identity-agent-core/keymath"
 	"log"
 	"os"
 	"os/signal"
@@ -68,6 +69,11 @@ func (o Options) name() string {
 // start is Main with its arguments given, and wait, which returns when the
 // server is to stop.
 func start(o Options, args []string, wait func()) error {
+	// keymath runs instead of the Identity Agent, before anything else does: one computation for an app
+	// holding the identity's keys, then the process ends (ADR-061).
+	if len(args) > 0 && args[0] == "keymath" {
+		os.Exit(keymath.Command(args[1:], os.Stdin, os.Stdout, os.Stderr))
+	}
 	// Volume commands run before the Identity Agent does, or instead of it.
 	// One dispatcher rather than a switch here, so that a program embedding
 	// this core wires up every one of them by wiring up one thing; see the
