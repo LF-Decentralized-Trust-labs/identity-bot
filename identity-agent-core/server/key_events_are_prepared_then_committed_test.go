@@ -12,6 +12,7 @@ import (
 	"identity-agent-core/backup"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/keriengine"
+	"identity-agent-core/recovery"
 	"identity-agent-core/store"
 
 	keri "github.com/grapeid/keri-go"
@@ -290,5 +291,73 @@ func TestACoreHeldRotationIsStoredSigned(t *testing.T) {
 	}
 	if _, err := keri.ValidateSignedKEL(messages); err != nil {
 		t.Fatalf("the stored log does not verify: %v", err)
+	}
+}
+
+// A recovery rotation the app prepared and signed, following an interaction
+// it keeps, supersedes the interactions after it: in the engine and in the
+// store, where they are moved aside rather than deleted, and the log that
+// remains verifies.
+func TestARecoveryRotationSupersedesWhatAThiefAnchored(t *testing.T) {
+	s := appHeldCore(t)
+	k := appSeeds(3)
+	_, out := call(t, s, s.handlePrepareEvent, "/api/events/prepare", map[string]any{
+		"t": "icp", "k": []string{verkeyOf(k[0])}, "kt": "1", "n": []string{digestOfSeed(t, k[1])}, "nt": "1"})
+	icp := preparedBytes(t, out)
+	call(t, s, s.handleCommitEvent, "/api/events/commit", map[string]any{
+		"raw_b64": base64.StdEncoding.EncodeToString(icp), "sigs": []string{appSign(t, k[0], icp, true)}})
+	own, _ := s.DataStore.GetIdentity()
+	after := map[string]string{"s": "0", "d": own.AID}
+	var kept map[string]string
+	for i, d := range []string{"EKeptByTheOwner", "EAnchoredByAThief", "EAlsoByTheThief"} {
+		_, out := call(t, s, s.handlePrepareEvent, "/api/events/prepare", map[string]any{"aid": own.AID,
+			"t": "ixn", "a": []any{map[string]string{"d": d}}, "after": after})
+		raw := preparedBytes(t, out)
+		code, res := call(t, s, s.handleCommitEvent, "/api/events/commit", map[string]any{
+			"raw_b64": base64.StdEncoding.EncodeToString(raw), "sigs": []string{appSign(t, k[0], raw, false)}})
+		if code != http.StatusCreated {
+			t.Fatalf("interaction %d: %d %v", i, code, res)
+		}
+		after = map[string]string{"s": res["s"].(string), "d": res["d"].(string)}
+		if i == 0 {
+			kept = after
+		}
+	}
+
+	code, out := call(t, s, s.handlePrepareEvent, "/api/events/prepare", map[string]any{"aid": own.AID,
+		"t": "rot", "k": []string{verkeyOf(k[1])}, "kt": "1", "n": []string{digestOfSeed(t, k[2])}, "nt": "1",
+		"after": kept})
+	if code != http.StatusOK {
+		t.Fatalf("prepare recovery rotation: %d %v", code, out)
+	}
+	rot := preparedBytes(t, out)
+	rec := httptest.NewRecorder()
+	res, ok := s.commitRecoveryRotation(rec, recovery.RotationRequest{
+		RawB64: base64.StdEncoding.EncodeToString(rot), Sigs: []string{appSign(t, k[1], rot, true)}})
+	if !ok {
+		t.Fatalf("the recovery rotation was refused: %d %s", rec.Code, rec.Body.String())
+	}
+	if res.SequenceNumber != 2 {
+		t.Fatalf("the recovery rotation is at %d, not just after the kept interaction", res.SequenceNumber)
+	}
+	evs, _ := s.DataStore.GetEvents(own.AID)
+	aside, _ := s.DataStore.SupersededEvents(own.AID)
+	if len(evs) != 3 || len(aside) != 2 {
+		t.Fatalf("the log holds %d events and %d were set aside; want 3 and 2", len(evs), len(aside))
+	}
+	if !strings.Contains(aside[0].EventJSON, "EAnchoredByAThief") {
+		t.Fatalf("the wrong interaction was set aside: %s", aside[0].EventJSON)
+	}
+	var messages [][]byte
+	for _, ev := range evs {
+		raw, _ := base64.StdEncoding.DecodeString(ev.RawBytesB64)
+		group, err := keri.AttachControllerSigs(ev.ControllerSignatures())
+		if err != nil {
+			t.Fatalf("event %d is stored without its signatures", ev.SequenceNumber)
+		}
+		messages = append(messages, append(raw, group...))
+	}
+	if _, err := keri.ValidateSignedKEL(messages); err != nil {
+		t.Fatalf("the recovered log does not verify: %v", err)
 	}
 }

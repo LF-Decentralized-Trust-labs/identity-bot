@@ -1,8 +1,10 @@
 package server
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"sync"
@@ -10,10 +12,12 @@ import (
 
 	"identity-agent-core/authprovider"
 	"identity-agent-core/backup"
+	"identity-agent-core/drivers"
 	"identity-agent-core/recovery"
 	"identity-agent-core/store"
 
 	"github.com/google/uuid"
+	keri "github.com/grapeid/keri-go"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -208,6 +212,12 @@ func (s *CoreServer) handleRecoveryRotation(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "Invalid rotation request", err.Error())
 		return
 	}
+	// The session first: a rotation is not undone, so none is made for a
+	// recovery that is not there to record it.
+	if _, err := s.recoveryService().GetSession(sessionID); err != nil {
+		writeError(w, http.StatusNotFound, "Session not found", err.Error())
+		return
+	}
 
 	if s.KeriDriver == nil {
 		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
@@ -215,20 +225,39 @@ func (s *CoreServer) handleRecoveryRotation(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if err := s.mayRotateHere(req.Name); err != nil {
-		writeKeyNotHeldHere(w)
-		return
-	}
-	result, err := s.KeriDriver.RotateAid(req.Name, req.NewPublicKey, req.NewNextPublicKey)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Rotation failed", err.Error())
-		return
-	}
-
-	rotResult := recovery.RotationResult{
-		AID:            result.AID,
-		NewPublicKey:   result.NewPublicKey,
-		SequenceNumber: result.SequenceNumber,
+	var rotResult recovery.RotationResult
+	var result any
+	if req.RawB64 != "" {
+		// Prepared and signed by whoever holds the key: committed signed,
+		// and as a recovery rotation where it follows an interaction it
+		// keeps, superseding those after it.
+		committed, ok := s.commitRecoveryRotation(w, req)
+		if !ok {
+			return
+		}
+		rotResult, result = committed, committed
+	} else {
+		if err := s.mayRotateHere(req.Name); err != nil {
+			writeKeyNotHeldHere(w)
+			return
+		}
+		// Carrying the post-quantum commitment, as every rotation does.
+		rotated, err := s.rotateCarryingTheCommitment(req.Name, req.NewPublicKey, req.NewNextPublicKey)
+		if errors.Is(err, errKeyElsewhere) {
+			writeKeyNotHeldHere(w)
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Rotation failed", err.Error())
+			return
+		}
+		s.recordOwnRotation(rotated)
+		rotResult = recovery.RotationResult{
+			AID:            rotated.AID,
+			NewPublicKey:   rotated.NewPublicKey,
+			SequenceNumber: rotated.SequenceNumber,
+		}
+		result = rotated
 	}
 	sess, err := s.recoveryService().RecordRotation(sessionID, rotResult)
 	if err != nil {
@@ -650,4 +679,40 @@ func writeShareRefusal(w http.ResponseWriter, err error) {
 		return
 	}
 	writeError(w, http.StatusForbidden, "This share was not released", err.Error())
+}
+
+// commitRecoveryRotation commits a recovery's rotation that the identity's key
+// holder prepared and signed, through the one commit path.
+func (s *CoreServer) commitRecoveryRotation(w http.ResponseWriter, req recovery.RotationRequest) (recovery.RotationResult, bool) {
+	c, ok := s.committer(w)
+	if !ok {
+		return recovery.RotationResult{}, false
+	}
+	raw, err := base64.StdEncoding.Strict().DecodeString(req.RawB64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "raw_b64 is not the event", err.Error())
+		return recovery.RotationResult{}, false
+	}
+	ev, err := keri.ParseEvent(raw)
+	if err != nil || ev.Ilk != "rot" {
+		writeError(w, http.StatusBadRequest, "That is not a rotation", fmt.Sprint(err))
+		return recovery.RotationResult{}, false
+	}
+	own, err := s.DataStore.GetIdentity()
+	if err != nil || own == nil || own.AID != ev.Identifier {
+		writeError(w, http.StatusBadRequest, "That is not this Identity Agent's identity",
+			"a recovery rotates the identity kept here")
+		return recovery.RotationResult{}, false
+	}
+	res, err := c.Commit(own.AID, raw, req.Sigs, func(k drivers.KELKeep) error {
+		return s.keepCommittedEvent(k, ev)
+	})
+	if err != nil {
+		writeEventError(w, err)
+		return recovery.RotationResult{}, false
+	}
+	if res.Status == "recorded" {
+		s.afterCommit(ev)
+	}
+	return recovery.RotationResult{AID: own.AID, NewPublicKey: ev.Keys[0], SequenceNumber: res.SN}, true
 }
