@@ -19,24 +19,35 @@
 
 ## Summary
 
-<!-- Two sentences, in this order: what was wrong before, then what this changes.
+<!-- One sentence that expands the title by a single notch: the title says the
+     outcome, this says the same thing with just enough substance that somebody can
+     tell whether it concerns them. State what the change does, in the present
+     tense, as a fact about the software once this merges.
 
-         Previously, <the problem, concretely and in plain words>.
-         This PR <what it now does>, so <what that gets you>.
+         <What the change now does.>
 
-     A summary that names only the problem is the most common mistake here, and
-     it is worse than a vague one: the reader cannot tell whether this PR causes
-     that problem, fixes it, or merely describes it, so they have to read the
-     diff to find out what the page was for.
+     Plain text. A second sentence only when one cannot carry it; never a third.
 
-     One sentence is fine for a small change; never more than two. This is the
-     change at a glance — the section below is the detail. -->
+     Do not write a before-and-after. "It used to do X, now it does Y" is two facts
+     where one is wanted, and it spends the first half of the sentence on code that
+     is about to stop existing. What was wrong belongs under Why.
+
+     A summary that names only the problem is the other mistake, and a worse one:
+     the reader cannot tell whether this PR causes that problem, fixes it, or merely
+     describes it. The test: could this sentence be the title, if the title had room?
+     If it reads like the opening of Why, it is the wrong shape. -->
 
 ## What This Is
 
 <!-- One or two plain sentences: what this pull request changes. Don't restate the
      title. Write it so a developer who has never seen this subsystem understands it
      on one read — no jargon, no assumed context. -->
+
+## Why
+
+<!-- One or two plain sentences on why this is worth doing — what it makes
+     possible, or what it costs to leave alone. This is where what was wrong goes,
+     since the Summary states only what the change does. Don't repeat the Summary. -->
 
 ## Affected
 
@@ -53,12 +64,6 @@
      Reviewers triage on this. Trace it rather than guessing: a fix at a shared
      chokepoint reaches every caller of it, and that is usually wider than the
      directory the diff sits in. -->
-
-## Why
-
-<!-- One or two plain sentences on why this is worth doing — what it makes
-     possible, or what it costs to leave alone. The Summary already named the
-     problem in one clause; this is where it earns a paragraph. Don't repeat it. -->
 
 ## Who This Helps
 
