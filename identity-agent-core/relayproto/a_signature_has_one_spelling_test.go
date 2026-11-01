@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto/strictb64url"
 )
 
 // An admission signature is read in its one canonical string.
@@ -13,9 +15,9 @@ func TestAnAdmissionSignatureHasOneSpelling(t *testing.T) {
 	if got, err := signatureOf(s); err != nil || !bytes.Equal(got, sig) {
 		t.Fatalf("the canonical signature did not read: %v", err)
 	}
-	v := strings.IndexByte(b64url, s[85])
+	v := strings.IndexByte(strictb64url.Alphabet, s[85])
 	for spare := 1; spare < 16; spare++ {
-		other := s[:85] + string(b64url[v&^0xf|spare])
+		other := s[:85] + string(strictb64url.Alphabet[v&^0xf|spare])
 		if _, err := signatureOf(other); err == nil {
 			t.Errorf("%q, with spare bits %d, read as the same signature", other, spare)
 		}

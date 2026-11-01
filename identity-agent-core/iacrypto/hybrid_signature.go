@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto/strictb64url"
 	"github.com/cloudflare/circl/sign/mldsa/mldsa65"
 )
 
@@ -92,7 +93,7 @@ func DecodeIndexedMLDSASig(wire string) (int, []byte, error) {
 	// what keeps it to one string is the exact length and the alphabet, which
 	// also refuses the line breaks the decoder would skip.
 	body := wire[5:]
-	if len(body) != base64.RawURLEncoding.EncodedLen(MLDSA65SigBytes) || !isBase64URL(body) {
+	if len(body) != base64.RawURLEncoding.EncodedLen(MLDSA65SigBytes) || !strictb64url.IsAlphabet(body) {
 		return 0, nil, fmt.Errorf("an ML-DSA-65 signature is %d base64url characters after its code",
 			base64.RawURLEncoding.EncodedLen(MLDSA65SigBytes))
 	}
