@@ -228,7 +228,13 @@ func (s *CoreServer) handleCommitEvent(w http.ResponseWriter, r *http.Request) {
 	name := ""
 	switch ev.Ilk {
 	case "icp":
-		if !s.mayFoundHere(w, ownerNamedIn(raw)) {
+		s.founding.Lock()
+		defer s.founding.Unlock()
+		// The founding of the identity already kept here may be committed
+		// again, for further signatures; any other founding passes the gate.
+		if own, _ := s.DataStore.GetIdentity(); own != nil && own.AID == ev.Identifier {
+			name = own.AID
+		} else if !s.mayFoundHere(w, ownerNamedIn(raw)) {
 			return
 		}
 	case "rot", "ixn":
@@ -312,15 +318,21 @@ func (s *CoreServer) keepCommittedEvent(k drivers.KELKeep, ev *keri.Event) error
 	if err := s.DataStore.SaveEvent(rec); err != nil {
 		return err
 	}
-	switch ev.Ilk {
-	case "icp":
+	own, err := s.DataStore.GetIdentity()
+	if err != nil {
+		return err
+	}
+	switch {
+	case ev.Ilk == "icp" && own == nil:
 		return s.DataStore.SaveIdentity(store.IdentityState{AID: ev.Identifier, PublicKey: rec.PublicKey,
 			NextKeyDigest: rec.NextKeyDigest, Created: rec.Timestamp, EventCount: 1})
+	case own == nil:
+		return fmt.Errorf("no identity record to move on")
+	case k.Supersedes == 0 && k.SN+1 < own.EventCount, ev.Ilk == "icp":
+		// More signatures for an event already in the log: the record of
+		// where the log stands does not move back to it.
+		return nil
 	default:
-		own, err := s.DataStore.GetIdentity()
-		if err != nil || own == nil {
-			return fmt.Errorf("no identity record to move on")
-		}
 		if ev.Ilk == "rot" {
 			own.PublicKey, own.NextKeyDigest = rec.PublicKey, rec.NextKeyDigest
 		}

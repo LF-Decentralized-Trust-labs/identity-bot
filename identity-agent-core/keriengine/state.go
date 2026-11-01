@@ -90,6 +90,10 @@ type kelEntry struct {
 	// Sigs are the controller signatures over Raw, indexed as KERI attaches
 	// them. Empty only for an event an earlier version added unsigned.
 	Sigs []string `json:"sigs,omitempty"`
+	// MarkedUnsigned is an event that was already in the log without a
+	// signature when this version first ran. Only such an event is ever
+	// signed after it was added, and only by this engine's installed signer.
+	MarkedUnsigned bool `json:"marked_unsigned,omitempty"`
 }
 
 func entry(raw []byte) (kelEntry, error) {

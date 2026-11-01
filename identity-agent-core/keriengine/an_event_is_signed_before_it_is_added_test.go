@@ -391,3 +391,72 @@ func TestAnUnsignedEventStopsTheLogUntilItIsSigned(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A signature that does not verify is refused with the event, even beside
+// signatures that meet the threshold, and nothing is kept: a log this engine
+// publishes carries no junk somebody sent with it. A commit of an event
+// already recorded with junk added is refused the same way.
+func TestASignatureThatDoesNotVerifyIsNeverKept(t *testing.T) {
+	e := New()
+	a, b, n := appKey(t), appKey(t), appKey(t)
+	p, err := e.Prepare(PrepareRequest{Ilk: "icp", Keys: []string{pubOf(t, a), pubOf(t, b)}, Kt: one,
+		Next: []string{digestOf(t, n)}, Nt: one})
+	if err != nil {
+		t.Fatal(err)
+	}
+	junk := signAt(t, n, p.Raw, 1, 1) // made with a key that is not k[1]
+	var na *ErrNotAuthorised
+	if _, err := e.Commit("", p.Raw, []string{signAt(t, a, p.Raw, 0, 0), junk}, nil); !errors.As(err, &na) || !na.BadSignature {
+		t.Fatalf("a founding with a signature that does not verify: %v", err)
+	}
+	if _, err := e.Commit("", p.Raw, []string{signAt(t, a, p.Raw, 0, 0)}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Commit("", p.Raw, []string{junk}, nil); err == nil {
+		t.Fatal("junk was accepted beside an event already recorded")
+	}
+	kel, _ := e.GetKel(p.Hint.I)
+	if len(kel.Signatures[0]) != 1 {
+		t.Fatalf("the founding is held with %d signatures", len(kel.Signatures[0]))
+	}
+}
+
+// A rotation held without its signature is signed by the engine's own signer
+// only where it was marked unsigned when this version first ran. One stored
+// unsigned since, which whoever could write the store may have composed, is
+// never signed here, and the log is not extended past it.
+func TestAnUnmarkedUnsignedRotationIsNeverSignedHere(t *testing.T) {
+	k0, _ := testSigner(true)
+	k1, _ := testSigner(true)
+	k2, _ := testSigner(true)
+	e := New()
+	inc, err := e.CreateInceptionNamed(pubOf(t, k0), pubOf(t, k1), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Rotate(drivers.RotationRequest{Name: "a", NewPublicKey: pubOf(t, k1), NewNextPublicKey: pubOf(t, k2)}); err != nil {
+		t.Fatal(err)
+	}
+	kel, _ := e.GetKel("a")
+	sigs := [][]string{kel.Signatures[0], nil} // the rotation stored unsigned
+	ixn := func(e *Engine) error {
+		_, err := e.Interact(inc.AID, []interface{}{map[string]string{"d": "EZ"}})
+		return err
+	}
+	for _, marked := range []bool{false, true} {
+		r := New()
+		if _, err := r.ReloadIdentity(&drivers.DriverReloadIdentityRequest{AID: inc.AID, LastSAID: kel.KEL[1]["d"].(string),
+			KEL: kel.KEL, RawEventsB64: kel.RawEventsB64, Signatures: sigs,
+			UnsignedAtUpgrade: []bool{false, marked}}); err != nil {
+			t.Fatal(err)
+		}
+		err := ixn(r)
+		var unsigned *ErrUnsignedHistory
+		if marked && err != nil {
+			t.Fatalf("a rotation marked unsigned at upgrade was not signed and the log not extended: %v", err)
+		}
+		if !marked && !errors.As(err, &unsigned) {
+			t.Fatalf("an unmarked unsigned rotation was signed here: %v", err)
+		}
+	}
+}

@@ -345,10 +345,15 @@ func (e *Engine) Commit(name string, raw []byte, sigs []string, keep func(driver
 	// The same event already here: any further valid signature is kept.
 	if sn < len(entries) && entryDigest(entries[sn]) == ev.SAID {
 		res.Status = "already_recorded"
-		merged := mergeSigs(entries[sn].Sigs, sigs)
 		keys, kerr := signingKeys(entries[:sn], ev)
-		indexed, ierr := indexedSignatures(merged, len(keys))
-		if kerr == nil && ierr == nil && len(indexed) > len(entries[sn].Sigs) {
+		if kerr != nil {
+			return nil, kerr
+		}
+		if _, err := checkedSignatures(raw, sigs, keys); err != nil {
+			return nil, &ErrNotAuthorised{AID: id.AID, SN: sn, Err: err, BadSignature: true}
+		}
+		indexed, ierr := checkedSignatures(raw, mergeSigs(entries[sn].Sigs, sigs), keys)
+		if ierr == nil && len(indexed) > len(entries[sn].Sigs) {
 			if _, err := e.judge(id.AID, entries[:sn], raw, ev, indexed); err == nil {
 				if keep != nil {
 					if err := keep(drivers.KELKeep{AID: id.AID, SN: sn, Raw: raw, Signature: indexed[0], Signatures: indexed}); err != nil {
@@ -394,13 +399,12 @@ func (e *Engine) Commit(name string, raw []byte, sigs []string, keep func(driver
 	if h := e.heldAt(id, sn, ev.SAID); h != nil {
 		merged = mergeSigs(h.sigs, sigs)
 	}
-	indexed, err := indexedSignatures(merged, len(keys))
-	if err != nil {
+	if _, err := checkedSignatures(raw, sigs, keys); err != nil {
 		return nil, &ErrNotAuthorised{AID: id.AID, SN: sn, Err: err, BadSignature: true}
 	}
-	if len(indexed) > len(keys) {
-		return nil, &ErrNotAuthorised{AID: id.AID, SN: sn, BadSignature: true,
-			Err: fmt.Errorf("%d signatures for an event %d keys sign", len(indexed), len(keys))}
+	indexed, err := checkedSignatures(raw, merged, keys)
+	if err != nil {
+		return nil, &ErrNotAuthorised{AID: id.AID, SN: sn, Err: err, BadSignature: true}
 	}
 
 	var superseded [][]byte
@@ -437,7 +441,7 @@ func (e *Engine) Commit(name string, raw []byte, sigs []string, keep func(driver
 }
 
 func (e *Engine) commitFounding(name string, raw []byte, ev *keri.Event, sigs []string, keep func(drivers.KELKeep) error) (*CommitResult, error) {
-	indexed, err := indexedSignatures(sigs, len(ev.Keys))
+	indexed, err := checkedSignatures(raw, sigs, ev.Keys)
 	if err != nil {
 		return nil, &ErrNotAuthorised{AID: ev.Identifier, Err: err, BadSignature: true}
 	}
@@ -445,11 +449,28 @@ func (e *Engine) commitFounding(name string, raw []byte, ev *keri.Event, sigs []
 		name = ev.Identifier
 	}
 	if held, err := e.state.get(name); err == nil {
-		if held.AID == ev.Identifier && len(held.KEL) > 0 && entryDigest(held.KEL[0]) == ev.SAID {
-			return &CommitResult{Status: "already_recorded", AID: ev.Identifier, SAID: ev.SAID,
-				Signatures: append([]string(nil), held.KEL[0].Sigs...)}, nil
+		if held.AID != ev.Identifier || len(held.KEL) == 0 || entryDigest(held.KEL[0]) != ev.SAID {
+			return nil, fmt.Errorf("the name %q already holds %s", name, held.AID)
 		}
-		return nil, fmt.Errorf("the name %q already holds %s", name, held.AID)
+		// The same founding again: any further valid signature is kept.
+		e.state.mu.RLock()
+		have := append([]string(nil), held.KEL[0].Sigs...)
+		e.state.mu.RUnlock()
+		merged, err := checkedSignatures(raw, mergeSigs(have, indexed), ev.Keys)
+		if err == nil && len(merged) > len(have) {
+			if _, err := e.judge(ev.Identifier, nil, raw, ev, merged); err == nil {
+				if keep != nil {
+					if err := keep(drivers.KELKeep{AID: ev.Identifier, SN: 0, Raw: raw, Signature: merged[0], Signatures: merged}); err != nil {
+						return nil, err
+					}
+				}
+				e.state.mu.Lock()
+				held.KEL[0].Sigs = merged
+				e.state.mu.Unlock()
+				have = merged
+			}
+		}
+		return &CommitResult{Status: "already_recorded", AID: ev.Identifier, SAID: ev.SAID, Signatures: have}, nil
 	}
 	if _, err := e.judge(ev.Identifier, nil, raw, ev, indexed); err != nil {
 		return nil, err

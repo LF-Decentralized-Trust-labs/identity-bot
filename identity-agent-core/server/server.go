@@ -129,6 +129,9 @@ type CoreServer struct {
 
 	// See Config.RequireOwnerAtInception.
 	requireOwnerAtInception bool
+	// founding is held from the founding gate to the founding being kept,
+	// so two foundings committed at once cannot both pass it.
+	founding sync.Mutex
 
 	loginHandler   *login.Handler
 	assetHandler   *asset.Handler
@@ -1548,6 +1551,9 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 	if s.refuseIfThisComputerMayNotFound(w) {
 		return
 	}
+	// One founding at a time, through this route or the commit route.
+	s.founding.Lock()
+	defer s.founding.Unlock()
 	// Then whether there is an engine to found with, before anything is read
 	// or derived for a founding that cannot happen.
 	if s.KeriDriver == nil {
@@ -4957,14 +4963,15 @@ func (s *CoreServer) reloadIdentityIntoDriver() {
 	kel, rawEvents, lastSAID, lastSN := kelFromEvents(events)
 
 	req := &drivers.DriverReloadIdentityRequest{
-		AID:            identity.AID,
-		PublicKey:      identity.PublicKey,
-		NextKeyDigest:  identity.NextKeyDigest,
-		SequenceNumber: lastSN,
-		LastSAID:       lastSAID,
-		KEL:            kel,
-		RawEventsB64:   rawEvents,
-		Signatures:     signaturesOf(events),
+		AID:               identity.AID,
+		PublicKey:         identity.PublicKey,
+		NextKeyDigest:     identity.NextKeyDigest,
+		SequenceNumber:    lastSN,
+		LastSAID:          lastSAID,
+		KEL:               kel,
+		RawEventsB64:      rawEvents,
+		Signatures:        signaturesOf(events),
+		UnsignedAtUpgrade: markedUnsignedOf(events),
 	}
 
 	result, err := s.KeriDriver.ReloadIdentity(req)
@@ -4980,6 +4987,20 @@ func (s *CoreServer) reloadIdentityIntoDriver() {
 // parsed, the bytes it was published as beside it, and the tip. Bytes are
 // carried so an engine can verify the history rather than only continue it;
 // they are empty for events stored before the canonical bytes were kept.
+// markedUnsignedOf is which events were marked unsigned at upgrade, parallel to
+// the events kelFromEvents reads.
+func markedUnsignedOf(events []store.EventRecord) []bool {
+	out := make([]bool, 0, len(events))
+	for _, ev := range events {
+		var ked map[string]interface{}
+		if json.Unmarshal([]byte(ev.EventJSON), &ked) != nil {
+			continue
+		}
+		out = append(out, ev.UnsignedAtUpgrade)
+	}
+	return out
+}
+
 // signaturesOf are the signatures stored with each event, parallel to the
 // events kelFromEvents reads.
 func signaturesOf(events []store.EventRecord) [][]string {

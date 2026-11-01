@@ -58,7 +58,8 @@ func (s *CoreServer) mountRecoveryRoutes(r chi.Router) {
 	})
 }
 
-// recoveryOnce guards building the recovery service exactly once.
+// recoveryMu guards building each Identity Agent's recovery service exactly
+// once.
 //
 // Two requests arriving together both saw a nil field, both built a service
 // over the same directory, both loaded the sessions, and the later assignment
@@ -66,7 +67,7 @@ func (s *CoreServer) mountRecoveryRoutes(r chi.Router) {
 // other and reported "not found" while sitting on disk. Handlers run
 // concurrently, so this was reachable by two people, or one person and a
 // retry.
-var recoveryOnce sync.Once
+var recoveryMu sync.Mutex
 
 // Built per server rather than once per process.
 //
@@ -128,7 +129,15 @@ func (s *CoreServer) holdings() *recovery.Holdings { return s.holderPairFor().ho
 func (s *CoreServer) shareHolder() *recovery.Holder { return s.holderPairFor().holder }
 
 func (s *CoreServer) recoveryService() *recovery.Service {
-	recoveryOnce.Do(func() {
+	// Made once per Identity Agent, not once per process: a second one in
+	// the same process (a test, or a core started again) would otherwise
+	// be handed none.
+	recoveryMu.Lock()
+	defer recoveryMu.Unlock()
+	if s.RecoveryService != nil {
+		return s.RecoveryService
+	}
+	func() {
 		s.RecoveryService = recovery.NewService(s.DataDir, s.DataStore, s.backupService())
 		// Sessions that were waiting out their window when this agent last
 		// stopped. Loaded here rather than in a startup hook so it happens on
@@ -140,7 +149,7 @@ func (s *CoreServer) recoveryService() *recovery.Service {
 		} else if n > 0 {
 			log.Printf("[recovery] %d recovery session(s) resumed after restart", n)
 		}
-	})
+	}()
 	return s.RecoveryService
 }
 
