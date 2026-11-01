@@ -32,7 +32,7 @@ import (
 // which makes this a hazard rather than a live flaw, and not one worth leaving
 // for a future caller to walk into.
 const (
-	postQuantumPreRotationContact = 7000001
+	postQuantumPreRotationContact = backup.PostQuantumBranch
 	postQuantumPreRotationKey     = 0
 )
 
