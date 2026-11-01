@@ -149,7 +149,7 @@ func (s *SQLiteStore) SaveSupersedingEvent(record EventRecord) error {
 	}
 	defer tx.Rollback()
 	if _, err := tx.Exec(`
-		INSERT INTO kel_superseded (aid, seq_num, event_type, event_json, public_key, next_key_digest,
+		INSERT OR IGNORE INTO kel_superseded (aid, seq_num, event_type, event_json, public_key, next_key_digest,
 		                            timestamp, cesr_signature, raw_bytes_b64, signatures, unsigned_at_upgrade)
 		SELECT aid, seq_num, event_type, event_json, public_key, next_key_digest,
 		       timestamp, cesr_signature, raw_bytes_b64, signatures, unsigned_at_upgrade
@@ -169,7 +169,7 @@ func (s *SQLiteStore) SupersededEvents(aid string) ([]EventRecord, error) {
 	rows, err := s.db.Query(
 		`SELECT aid, seq_num, event_type, event_json, public_key, next_key_digest,
 		        timestamp, cesr_signature, raw_bytes_b64, signatures, unsigned_at_upgrade
-		 FROM kel_superseded WHERE aid = ? ORDER BY id ASC`, aid)
+		 FROM kel_superseded WHERE aid = ? ORDER BY rowid ASC`, aid)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query superseded events: %w", err)
 	}

@@ -571,3 +571,37 @@ func TestADownstreamTableWithNoPrimaryKeyIsNotCleared(t *testing.T) {
 		t.Fatal("a downstream table written since the backup was cleared by the restore")
 	}
 }
+
+// What a recovery rotation superseded, here and at a witness, is kept beside
+// what a restored backup superseded: neither machine's record is written over
+// by the other's because the two happen to share a row number.
+func TestSupersededEventsFromABackupAreAddedNotWrittenOver(t *testing.T) {
+	insert := func(s *SQLiteStore, tag string) {
+		t.Helper()
+		if _, err := s.db.Exec(`INSERT INTO kel_superseded (aid, seq_num, event_type, event_json)
+			VALUES ('EA', 2, 'ixn', ?)`, `{"d":"`+tag+`"}`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.db.Exec(`INSERT INTO witness_kel_superseded
+			(signer_aid, sequence_num, event_said, superseded_by) VALUES ('EA', 2, ?, 'EROT')`, tag); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, from := openStore(t)
+	insert(from, "Ebackup")
+	snap := snapshotOf(t, from)
+	_, into := openStore(t)
+	insert(into, "Elocal")
+	if err := into.ImportSnapshot(snap); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"kel_superseded", "witness_kel_superseded"} {
+		var n int
+		if err := into.db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 2 {
+			t.Errorf("%s holds %d rows after the restore; both machines' should remain", table, n)
+		}
+	}
+}

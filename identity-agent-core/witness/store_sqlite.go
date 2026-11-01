@@ -205,7 +205,7 @@ func (s *SQLiteStore) SupersedeKelEvents(signerAID string, by KelEvent, tip int)
 		return fmt.Errorf("the key log of %s moved while the recovery rotation was judged", signerAID)
 	}
 	if _, err := tx.Exec(`
-		INSERT INTO witness_kel_superseded (signer_aid, sequence_num, event_said, raw_bytes_b64, signatures, superseded_by, superseded_at)
+		INSERT OR IGNORE INTO witness_kel_superseded (signer_aid, sequence_num, event_said, raw_bytes_b64, signatures, superseded_by, superseded_at)
 		SELECT signer_aid, sequence_num, event_said, raw_bytes_b64,
 		       CASE WHEN signatures != '' THEN signatures
 		            WHEN cesr_signature != '' THEN json_array(cesr_signature) ELSE '' END,
@@ -226,7 +226,7 @@ func (s *SQLiteStore) SupersedeKelEvents(signerAID string, by KelEvent, tip int)
 
 func (s *SQLiteStore) GetSupersededKelEvents(signerAID string) ([]KelEvent, error) {
 	rows, err := s.db.Query(`SELECT signer_aid, sequence_num, event_said, raw_bytes_b64, signatures, superseded_at
-		FROM witness_kel_superseded WHERE signer_aid = ? ORDER BY id`, signerAID)
+		FROM witness_kel_superseded WHERE signer_aid = ? ORDER BY rowid`, signerAID)
 	if err != nil {
 		return nil, err
 	}
