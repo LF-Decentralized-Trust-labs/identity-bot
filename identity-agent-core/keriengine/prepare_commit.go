@@ -418,7 +418,15 @@ func (e *Engine) Commit(name string, raw []byte, sigs []string, keep func(driver
 		}
 	})
 	var na *ErrNotAuthorised
-	if errors.As(err, &na) && !na.BadSignature && len(keys) > 1 {
+	var ve *keri.ValidationError
+	if errors.As(err, &na) && errors.As(na.Err, &ve) && ve.Has(keri.FaultKeyNotPrecommitted) {
+		// No set of these keys' signatures could ever authorise it.
+		return nil, &ErrNotCommitted{Err: na.Err}
+	}
+	// Held only when what is missing is signatures: right ones, too few.
+	shortOnlyOfSignatures := errors.As(err, &na) && !na.BadSignature && errors.As(na.Err, &ve) &&
+		ve.Has(keri.FaultThresholdNotMet) && onlyFaults(ve, keri.FaultThresholdNotMet)
+	if shortOnlyOfSignatures && len(keys) > 1 {
 		// Signatures that are right and too few: an event with several
 		// signers waits for the rest.
 		signed, ok := signaturesVerify(raw, indexed, keys)
@@ -674,4 +682,14 @@ func (e *Engine) foundingSignatures(ev *keri.Event, raw []byte) []string {
 		return nil
 	}
 	return sigs
+}
+
+// onlyFaults reports whether every fault in ve is of kind.
+func onlyFaults(ve *keri.ValidationError, kind keri.FaultKind) bool {
+	for _, f := range ve.Faults {
+		if f.Kind != kind {
+			return false
+		}
+	}
+	return true
 }
