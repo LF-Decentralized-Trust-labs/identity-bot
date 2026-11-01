@@ -44,17 +44,7 @@ func (s *CoreServer) handlePrepareMessagingKeys(w http.ResponseWriter, r *http.R
 		writeError(w, statusForUnreadable(err, http.StatusConflict), "Could not derive this identity's messaging keys", err.Error())
 		return
 	}
-	kem, err := ks.KemPub.MarshalBinary()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not encode the messaging keys", err.Error())
-		return
-	}
-	dsa, err := ks.DsaPub.MarshalBinary()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not encode the messaging keys", err.Error())
-		return
-	}
-	anchor, err := iacrypto.KeySetAnchor(ks.XPub[:], kem, ks.EdPub, dsa)
+	anchor, err := ks.Anchor()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not build the commitment", err.Error())
 		return

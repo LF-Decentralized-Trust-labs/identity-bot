@@ -1629,18 +1629,7 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 			writeError(w, statusForUnreadable(err, http.StatusInternalServerError), "Could not derive this identity's messaging keys", err.Error())
 			return
 		}
-		kemPub, err := messagingKeys.KemPub.MarshalBinary()
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "Could not encode this identity's messaging keys", err.Error())
-			return
-		}
-		dsaPub, err := messagingKeys.DsaPub.MarshalBinary()
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "Could not encode this identity's messaging keys", err.Error())
-			return
-		}
-		keyAnchor, err := iacrypto.KeySetAnchor(
-			messagingKeys.XPub[:], kemPub, messagingKeys.EdPub, dsaPub)
+		keyAnchor, err := messagingKeys.Anchor()
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "Could not commit to this identity's messaging keys", err.Error())
 			return
