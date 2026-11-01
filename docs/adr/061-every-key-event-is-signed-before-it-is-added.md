@@ -192,8 +192,9 @@ for sig in signatures:
     signed += {index}
     if sig carries an ondex (codes A, 2A; for A, ondex = index):
         D = Blake3-256 digest of P's qb64 text, as qb64 (section 1)
-        refuse unless D == E.n[ondex]         # refuse if outside E.n
-        opened += {ondex}
+        if ondex is inside E.n and D == E.n[ondex]:
+            opened += {ondex}                 # otherwise it opens nothing
+                                              # and still counts toward kt
 refuse unless kt is satisfied by signed
 refuse unless E.nt is satisfied by opened
 ```
@@ -211,7 +212,11 @@ for sig in signatures:
 refuse unless KT is satisfied by signed
 ```
 
-Duplicate signatures for one place count once.
+Duplicate signatures for one place count once. This is keri-go's rule and
+keripy 1.3.6's: a signature that opens nothing is not itself a fault, because
+it may still count toward the new `kt`. As a verifier the engine drops a
+signature that does not verify and judges the rest, as keripy does; what it
+adds to a log it keeps carries no such signature (section 3).
 
 **What the parser refuses.** In a production build an event is refused if any
 key in `k`, or any signature, uses a CESR code the engine does not know, or has

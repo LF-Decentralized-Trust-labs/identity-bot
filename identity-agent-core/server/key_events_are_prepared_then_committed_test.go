@@ -392,3 +392,52 @@ func TestAFoundingWithAForeignNextKeyIsNotSignedHere(t *testing.T) {
 		t.Fatalf("a founding committing to a foreign next key was signed here: %+v", evs)
 	}
 }
+
+// A signature is attached after the fact only to an event an earlier version
+// added unsigned, and only one that verifies over its stored bytes. An event
+// stored unsigned since the upgrade is never signed in place.
+func TestOnlyAnEventMarkedAtUpgradeIsSignedInPlace(t *testing.T) {
+	s := appHeldCore(t)
+	k := appSeeds(2)
+	_, out := call(t, s, s.handlePrepareEvent, "/api/events/prepare", map[string]any{
+		"t": "icp", "k": []string{verkeyOf(k[0])}, "kt": "1", "n": []string{digestOfSeed(t, k[1])}, "nt": "1"})
+	icp := preparedBytes(t, out)
+	good := appSign(t, k[0], icp, true)
+	call(t, s, s.handleCommitEvent, "/api/events/commit", map[string]any{
+		"raw_b64": base64.StdEncoding.EncodeToString(icp), "sigs": []string{good}})
+	own, _ := s.DataStore.GetIdentity()
+	sq := s.DataStore.(*store.SQLiteStore)
+	strip := func(marked int) {
+		if _, err := sq.DB().Exec(`UPDATE kel SET cesr_signature = '', signatures = '', unsigned_at_upgrade = ? WHERE aid = ?`,
+			marked, own.AID); err != nil {
+			t.Fatal(err)
+		}
+		s.KeriDriver = keriengine.New()
+		s.engineSigns()
+		s.reloadIdentityIntoDriver()
+	}
+	attach := func(sig string) int {
+		code, _ := call(t, s, s.handleAttachEventSignature, "/api/events/signature",
+			map[string]any{"aid": own.AID, "sequence_number": 0, "cesr_signature": sig})
+		return code
+	}
+
+	strip(0)
+	if code := attach(good); code != http.StatusConflict {
+		t.Fatalf("an event stored unsigned since the upgrade was signed in place: %d", code)
+	}
+	strip(1)
+	if code := attach(appSign(t, k[1], icp, true)); code != http.StatusBadRequest {
+		t.Fatalf("a signature by the wrong key was attached: %d", code)
+	}
+	if code := attach(good); code != http.StatusOK {
+		t.Fatalf("the right signature over a marked event: %d", code)
+	}
+	if code := attach(good); code != http.StatusOK {
+		t.Fatalf("recording the same signature again: %d", code)
+	}
+	evs, _ := s.DataStore.GetEvents(own.AID)
+	if len(evs[0].ControllerSignatures()) != 1 {
+		t.Fatalf("the founding holds %d signatures", len(evs[0].ControllerSignatures()))
+	}
+}
