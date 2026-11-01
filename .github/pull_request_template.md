@@ -19,18 +19,25 @@
 
 ## Summary
 
-<!-- Two sentences, in this order: what was wrong before, then what this changes.
+<!-- One sentence that expands the title by a single notch: what the change
+     now does, in the present tense, stated as a fact about the software after
+     this merges.
 
-         Previously, <the problem, concretely and in plain words>.
-         This PR <what it now does>, so <what that gets you>.
+         <What the change now does.>
 
-     A summary that names only the problem is the most common mistake here, and
-     it is worse than a vague one: the reader cannot tell whether this PR causes
-     that problem, fixes it, or merely describes it, so they have to read the
-     diff to find out what the page was for.
+     Not a before-and-after, and never open with "Previously": that spends the
+     most-read sentence on code that is about to stop existing. What was wrong
+     belongs under Why. If a sentence truly has to name today's behaviour, say
+     "Currently".
 
-     One sentence is fine for a small change; never more than two. This is the
-     change at a glance — the section below is the detail. -->
+     A summary that names only the problem is the other way this goes wrong,
+     and it is worse than a vague one: the reader cannot tell whether this PR
+     causes that problem, fixes it, or merely describes it, so they have to
+     read the diff to find out what the page was for.
+
+     The test: could this sentence be the title, if the title had room? A
+     second sentence only when one genuinely cannot carry it; never a third.
+     This is the change at a glance — the section below is the detail. -->
 
 ## What This Is
 
