@@ -56,6 +56,35 @@ func (s *CoreServer) identitySigningSeed() ([]byte, error) {
 
 // errKeyUnavailable is the identity's key held here and not readable right
 // now. Nothing waits for another device on it: there is none.
+// ownGenerationOf is the generation key is at, where it is one of this
+// identity's own keys that this Identity Agent derives: any generation from
+// founding to the one after next, at the identity's recorded derivation index.
+// A key it does not derive is elsewhere, whatever this Identity Agent's own
+// seed is.
+func (s *CoreServer) ownGenerationOf(key string) (int, error) {
+	identity, err := s.DataStore.GetIdentity()
+	if err != nil || identity == nil {
+		return 0, fmt.Errorf("this agent has no identity")
+	}
+	if _, err := s.identitySigningSeed(); err != nil {
+		return 0, err
+	}
+	rootSeed, err := ensureRootSeed(s.DataDir)
+	if err != nil {
+		return 0, fmt.Errorf("%w: %v", errKeyUnavailable, err)
+	}
+	for gen := 0; gen <= identity.KeyGeneration+2; gen++ {
+		seed, err := backup.DerivePairwiseSeed(rootSeed, identity.DerivationIndex, gen)
+		if err != nil {
+			return 0, fmt.Errorf("%w: %v", errKeyUnavailable, err)
+		}
+		if iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)) == key {
+			return gen, nil
+		}
+	}
+	return 0, errKeyElsewhere
+}
+
 var errKeyUnavailable = errors.New("this machine holds the identity's key and cannot read it right now")
 
 // keyCanSign says whether this Identity Agent can sign as its identity now:

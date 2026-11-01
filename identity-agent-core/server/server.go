@@ -2038,9 +2038,18 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 
 	identity, _ := s.DataStore.GetIdentity()
 	if identity != nil {
+		// The generation the key in force is at, read before the record
+		// moves on, so the next signature and rotation derive from it.
+		// Without this the record still named the founding generation, and
+		// after one rotation this Identity Agent took its own key for one
+		// held elsewhere and refused to sign or rotate again.
+		gen, genErr := s.ownGenerationOf(result.NewPublicKey)
 		identity.PublicKey = result.NewPublicKey
 		identity.NextKeyDigest = result.NewNextKeyDigest
 		identity.EventCount = result.SequenceNumber + 1
+		if genErr == nil {
+			identity.KeyGeneration = gen
+		}
 		s.DataStore.SaveIdentity(*identity)
 	}
 
