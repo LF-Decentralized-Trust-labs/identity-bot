@@ -164,9 +164,8 @@ func KeyStateOf(aid string, messages [][]byte) (*KeyState, error) {
 			state.LastEstablishment = place
 			state.K, state.N, state.Kt, state.Nt = ev.Keys, ev.NextDigest, fields.Kt, fields.Nt
 		}
-		for _, a := range messagingAnchorsAmong(fields.A) {
-			b, _ := json.Marshal(a)
-			state.MessagingKeySets = append(state.MessagingKeySets, anchoredKeySet{S: place["s"], Anchor: b})
+		for _, a := range messagingSealsAmong(fields.A) {
+			state.MessagingKeySets = append(state.MessagingKeySets, anchoredKeySet{S: place["s"], Anchor: a})
 		}
 	}
 	return state, nil
