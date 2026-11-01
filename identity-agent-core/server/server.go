@@ -758,9 +758,13 @@ func (s *CoreServer) Start() error {
 	s.inBackground(func(context.Context) { s.keepAnchoring(stop) })
 	s.runAddons(stop)
 
-	s.httpSrv = s.httpServer()
+	// Taken into locals before the goroutine starts: Stop clears the fields
+	// under mu, and one that ran before this goroutine did would leave it
+	// serving nil.
+	httpSrv, listener := s.httpServer(), s.listener
+	s.httpSrv = httpSrv
 	go func() {
-		if err := s.httpSrv.Serve(s.listener); err != nil {
+		if err := httpSrv.Serve(listener); err != nil {
 			log.Printf("[identity-agent-core] Server stopped: %v", err)
 		}
 	}()
@@ -782,6 +786,8 @@ func (s *CoreServer) Stop() {
 	s.running = false
 	httpSrv, tunnelSrv, listener := s.httpSrv, s.tunnelSrv, s.listener
 	s.httpSrv, s.tunnelSrv, s.listener = nil, nil, nil
+	// Read here as well: a relay start still running replaces it under mu.
+	relayManager := s.RelayManager
 	s.mu.Unlock()
 
 	log.Println("[identity-agent-core] Shutting down...")
@@ -822,8 +828,8 @@ func (s *CoreServer) Stop() {
 		s.TunnelManager.Disconnect()
 	}
 
-	if s.RelayManager != nil {
-		s.RelayManager.Stop()
+	if relayManager != nil {
+		relayManager.Stop()
 	}
 
 	// Stop taking requests, and let those under way finish, since a request
