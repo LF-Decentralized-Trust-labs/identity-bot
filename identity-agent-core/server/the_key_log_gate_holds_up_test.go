@@ -155,6 +155,40 @@ func TestAPreambleWithNoAddressUsesTheSharedRelayedBudget(t *testing.T) {
 	}
 }
 
+// A relay that names a new visitor on every request gets a fresh share each
+// time, but every relayed request also counts against the one relayed budget.
+func TestARelayNamingANewVisitorEachTimeIsStoppedByTheRelayedBudget(t *testing.T) {
+	_, h := aGateAnswering(time.Second)
+	limited := false
+	for i := 0; i < keyLogChecksPerMinuteRelayed+1; i++ {
+		visitor := fmt.Sprintf("10.%d.%d.1", i/250, i%250)
+		if relayedCall(h, visitor, "") == http.StatusTooManyRequests {
+			limited = true
+			break
+		}
+	}
+	if !limited {
+		t.Fatalf("%d requests, each naming a different visitor, were never limited", keyLogChecksPerMinuteRelayed+1)
+	}
+}
+
+// One visitor holds a whole IPv6 /64, so its addresses share one budget; an
+// address in another /64 has its own.
+func TestRelayedIPv6VisitorsShareTheirSixtyFour(t *testing.T) {
+	_, h := aGateAnswering(time.Second)
+	for i := 0; i < keyLogChecksPerMinute; i++ {
+		if code := relayedCall(h, fmt.Sprintf("2001:db8:1:2::%x", i+1), ""); code != http.StatusOK {
+			t.Fatalf("call %d answered %d inside the share", i, code)
+		}
+	}
+	if code := relayedCall(h, "2001:db8:1:2:ffff::9", ""); code != http.StatusTooManyRequests {
+		t.Fatalf("another address in the same /64 was answered %d, not told to come back", code)
+	}
+	if code := relayedCall(h, "2001:db8:1:3::1", ""); code != http.StatusOK {
+		t.Fatalf("an address in a different /64 was answered %d", code)
+	}
+}
+
 // An entry is filed under the identity it holds, but the file name is only
 // where it was put. One identity's entry written under another's name is not
 // answered for that other identity when the registry is loaded again.
