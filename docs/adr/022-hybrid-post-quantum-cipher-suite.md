@@ -129,3 +129,10 @@ that is tracked separately.
 accepts the Ed25519 signature alone. Any work to make identities hybrid has to
 address the threshold as well, or the protection is enforced by our verifier
 rather than by the identity.
+
+**Correction, 2026-11-01: the ML-DSA-65 verification key code is `2AAE`, not
+`1PDA`.** `1PDA` (in the table under "Decision" and in the golden vectors) was
+structurally invalid CESR: a 1952-byte key is 2 mod 3, so it needs the `2` table
+with one lead byte, and a `1`-table code produces a body that is not a whole
+number of base64 quadruples. `2AAE` replaced it, and `golden_vectors.json` now
+says `2AAE`. The table row above is left as originally written.

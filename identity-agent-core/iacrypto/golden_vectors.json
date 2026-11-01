@@ -15,7 +15,7 @@
     "field_order": "v,t,d,i,s,kt,k,nt,n,bt,b,c,a",
     "cesr_selectors": {
       "ed25519_verkey": "D",
-      "mldsa65_verkey": "1PDA",
+      "mldsa65_verkey": "2AAE",
       "x25519_pubkey": "1PXB",
       "mlkem768_encap": "1PKM"
     },

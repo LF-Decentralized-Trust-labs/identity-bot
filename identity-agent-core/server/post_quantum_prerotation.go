@@ -135,7 +135,7 @@ func (s *CoreServer) recordPostQuantumCommitment(pq *iacrypto.PostQuantumNextKey
 	rec := postQuantumCommitmentRecord{
 		Digest: pq.Digest,
 		Verkey: pq.Verkey,
-		Code:   iacrypto.ProposedMLDSA65Verkey,
+		Code:   iacrypto.CESRMLDSA65Verkey,
 	}
 	data, err := json.Marshal(rec)
 	if err != nil {

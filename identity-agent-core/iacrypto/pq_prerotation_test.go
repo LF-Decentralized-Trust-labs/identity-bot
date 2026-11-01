@@ -18,12 +18,12 @@ func TestMLDSA65VerkeyEncodesToTheSpecifiedWidth(t *testing.T) {
 	if len(qb64) != 2608 {
 		t.Errorf("encoded width is %d, want 2608", len(qb64))
 	}
-	body := len(qb64) - len(ProposedMLDSA65Verkey)
+	body := len(qb64) - len(CESRMLDSA65Verkey)
 	if body%4 != 0 {
 		t.Errorf("body is %d characters, which is not a whole number of base64 quadruples", body)
 	}
-	if got := qb64[:4]; got != ProposedMLDSA65Verkey {
-		t.Errorf("code is %q, want %q", got, ProposedMLDSA65Verkey)
+	if got := qb64[:4]; got != CESRMLDSA65Verkey {
+		t.Errorf("code is %q, want %q", got, CESRMLDSA65Verkey)
 	}
 }
 
@@ -125,7 +125,7 @@ func TestCommitmentIsTakenOverTheEncodedKeyNotTheRawBytes(t *testing.T) {
 	// 44-character D-coded key, and this one is 2608 characters beginning 2AAE,
 	// so the guard was always false and the test compared the implementation to
 	// itself. The raw bytes are recovered from the encoding directly instead.
-	rawB64 := pq.Verkey[len(ProposedMLDSA65Verkey):]
+	rawB64 := pq.Verkey[len(CESRMLDSA65Verkey):]
 	padded, err := base64.RawURLEncoding.DecodeString(rawB64)
 	if err != nil {
 		t.Fatal(err)
