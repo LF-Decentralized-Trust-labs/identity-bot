@@ -380,7 +380,7 @@ func (s *CoreServer) signEventFor(aid, key string, raw []byte) (string, error) {
 	// This Identity Agent's own identity being founded, before there is a
 	// record of it: the founding key is the one it derives first.
 	if identity, err := s.DataStore.GetIdentity(); err == nil && identity == nil {
-		if seed, err := s.foundingSeedForKey(key); err == nil {
+		if seed, err := s.foundingSeedForKey(key, raw); err == nil {
 			return signEventBytes(raw, seed)
 		}
 	}

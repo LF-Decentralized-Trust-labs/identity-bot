@@ -4,10 +4,13 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
+	"slices"
 
 	"identity-agent-core/backup"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/secureenclave"
+
+	keri "github.com/grapeid/keri-go"
 )
 
 // The agent's own signing key, where it can derive one.
@@ -93,7 +96,13 @@ func (s *CoreServer) ownKeyAt(key string) ([]byte, int, error) {
 // foundingSeedForKey is the seed of key where it is the founding key this
 // Identity Agent derives for an identity of its own (index 0, generation 0, as
 // foundingKeyIsOurs reads it), before any identity is recorded here.
-func (s *CoreServer) foundingSeedForKey(key string) ([]byte, error) {
+//
+// It signs only a founding whose whole key chain is this Identity Agent's: the
+// key it names, and a next-key commitment to the key it derives next (with,
+// where it makes one, its own post-quantum commitment), so a founding that
+// pairs this Identity Agent's key with somebody else's next key is not signed
+// here, since that would hand the next rotation to them.
+func (s *CoreServer) foundingSeedForKey(key string, raw []byte) ([]byte, error) {
 	rootSeed, err := secureenclave.LoadRootSeed(s.DataDir)
 	if err != nil {
 		return nil, err
@@ -105,7 +114,29 @@ func (s *CoreServer) foundingSeedForKey(key string) ([]byte, error) {
 	if iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)) != key {
 		return nil, errKeyElsewhere
 	}
-	return seed, nil
+	nextSeed, err := backup.DerivePairwiseSeed(rootSeed, 0, 1)
+	if err != nil {
+		return nil, err
+	}
+	next := iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(nextSeed).Public().(ed25519.PublicKey))
+	ev, err := keri.ParseEvent(raw)
+	if err != nil || (ev.Ilk != "icp" && ev.Ilk != "dip") {
+		return nil, errKeyElsewhere
+	}
+	classical, err := iacrypto.NextKeyDigest(next)
+	if err != nil {
+		return nil, err
+	}
+	allowed := [][]string{{classical}}
+	if withPQ, _ := s.postQuantumPreRotationAt(next, 0); len(withPQ) == 2 {
+		allowed = append(allowed, withPQ)
+	}
+	for _, want := range allowed {
+		if slices.Equal(ev.NextDigest, want) {
+			return seed, nil
+		}
+	}
+	return nil, fmt.Errorf("%w: the founding commits to a next key this Identity Agent does not derive", errKeyElsewhere)
 }
 
 var errKeyUnavailable = errors.New("this machine holds the identity's key and cannot read it right now")

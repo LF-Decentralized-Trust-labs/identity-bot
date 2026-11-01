@@ -119,6 +119,10 @@ type DriverReloadIdentityRequest struct {
 	// by an earlier version: nothing more is added to the log until it is
 	// signed, because a log with an unsigned event in it verifies for nobody.
 	Signatures [][]string `json:"signatures,omitempty"`
+	// UnsignedAtUpgrade[i] marks KEL[i] as already unsigned when this
+	// version first ran: the only events the engine's own signer signs after
+	// they were added.
+	UnsignedAtUpgrade []bool `json:"unsigned_at_upgrade,omitempty"`
 }
 
 type DriverReloadIdentityResponse struct {

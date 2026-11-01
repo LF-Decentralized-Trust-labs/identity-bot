@@ -361,3 +361,34 @@ func TestARecoveryRotationSupersedesWhatAThiefAnchored(t *testing.T) {
 		t.Fatalf("the recovered log does not verify: %v", err)
 	}
 }
+
+// A founding that pairs this Identity Agent's key with somebody else's next key
+// is not signed here: the next rotation would belong to whoever holds that
+// next key.
+func TestAFoundingWithAForeignNextKeyIsNotSignedHere(t *testing.T) {
+	aMachineThatMayFound(t)
+	dir := t.TempDir()
+	ds, err := store.NewSQLiteStore(dir)
+	if err != nil {
+		t.Skipf("data store unavailable: %v", err)
+	}
+	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, DataStore: ds, EventHub: NewEventHub(),
+		KeriDriver: keriengine.New()}
+	endsItsBackgroundWork(t, s)
+	s.engineSigns()
+	root, err := ensureRootSeed(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed0, _ := backup.DerivePairwiseSeed(root, 0, 0)
+	foreign := appSeeds(1)[0]
+	code, out := call(t, s, s.handleInception, "/api/inception",
+		map[string]any{"public_key": verkeyOf(seed0), "next_public_key": verkeyOf(foreign)})
+	if code != http.StatusCreated {
+		t.Fatalf("founding: %d %v", code, out)
+	}
+	evs, _ := s.DataStore.GetEvents(out["aid"].(string))
+	if len(evs) != 1 || len(evs[0].ControllerSignatures()) != 0 {
+		t.Fatalf("a founding committing to a foreign next key was signed here: %+v", evs)
+	}
+}

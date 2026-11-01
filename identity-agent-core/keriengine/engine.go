@@ -131,31 +131,47 @@ func (e *Engine) SetTELCommit(f func(drivers.TELCommit) error) {
 
 // commit offers a registry event and its anchor for keeping. With nothing
 // installed there is nothing to offer them to.
-func (e *Engine) commit(id *identity, sn uint64, kel, tel []byte) (string, error) {
+//
+// It returns the identity's signature over kel and the keep that offers both
+// for keeping; the keep runs inside the one append path, once the log with kel
+// in it has been judged, so nothing is kept that the engine then refuses.
+func (e *Engine) commit(id *identity, sn uint64, kel, tel []byte) (string, func(drivers.KELKeep) error, error) {
 	sig, err := e.signed(id, kel)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	e.commitMu.Lock()
 	f := e.telCommit
 	e.commitMu.Unlock()
 	if f == nil {
-		return sig, nil
+		return sig, nil, nil
 	}
-	return sig, f(drivers.TELCommit{AID: id.AID, SN: int(sn), KELRaw: kel, TELRaw: tel, Signature: sig})
+	return sig, func(drivers.KELKeep) error {
+		return f(drivers.TELCommit{AID: id.AID, SN: int(sn), KELRaw: kel, TELRaw: tel, Signature: sig})
+	}, nil
 }
 
 // extend appends an interaction to id's key log with sig, a signature by id's
 // current key over exactly raw, through the one append path (add). also runs,
 // under the same lock, for what else the event changes.
-func (e *Engine) extend(id *identity, raw []byte, sig string, also func()) error {
+//
+// keep, when given, is offered the event once the log with it has been judged
+// and before it is added, carrying sig as given.
+func (e *Engine) extend(id *identity, raw []byte, sig string, keep func(drivers.KELKeep) error, also func()) error {
 	e.state.mu.RLock()
 	key := id.PublicKey
 	e.state.mu.RUnlock()
 	if err := verifiedBy(id.AID, key, raw, sig); err != nil {
 		return err
 	}
-	return e.add(id, raw, []string{sig}, nil, func(*keri.Event) {
+	var kept func(drivers.KELKeep) error
+	if keep != nil {
+		kept = func(k drivers.KELKeep) error {
+			k.Signature = sig
+			return keep(k)
+		}
+	}
+	return e.add(id, raw, []string{sig}, kept, func(*keri.Event) {
 		if also != nil {
 			also()
 		}
@@ -496,8 +512,7 @@ func (e *Engine) CreateDelegatedInceptionKept(publicKey, nextPublicKey, name, de
 	if err != nil {
 		return nil, fmt.Errorf("building the delegator's approval: %w", err)
 	}
-	ixnEvent, err := keri.ParseEvent(ixn)
-	if err != nil {
+	if _, err := keri.ParseEvent(ixn); err != nil {
 		return nil, err
 	}
 
@@ -514,25 +529,31 @@ func (e *Engine) CreateDelegatedInceptionKept(publicKey, nextPublicKey, name, de
 	if err != nil {
 		return nil, err
 	}
+	// The name must be free before anything is kept, or the store would hold a
+	// delegation the engine then refuses to.
+	heldAs := name
+	if heldAs == "" {
+		heldAs = dipEvent.Identifier
+	}
+	if held, err := e.state.get(heldAs); err == nil && held.AID != dipEvent.Identifier {
+		return nil, fmt.Errorf("the name %q already holds %s", heldAs, held.AID)
+	}
+	var kept func(drivers.KELKeep) error
 	if keep != nil {
-		// The name must be free before anything is kept, or the store would
-		// hold a delegation the engine then refuses to.
-		heldAs := name
-		if heldAs == "" {
-			heldAs = dipEvent.Identifier
-		}
-		if held, err := e.state.get(heldAs); err == nil && held.AID != dipEvent.Identifier {
-			return nil, fmt.Errorf("the name %q already holds %s", heldAs, held.AID)
-		}
-		if err := keep(drivers.KELKeep{AID: delegator.AID, SN: int(ixnEvent.SN), Raw: ixn, Delegated: dip, Signature: approvalSig}); err != nil {
-			return nil, fmt.Errorf("the delegation was not kept, so it was not made: %w", err)
+		kept = func(k drivers.KELKeep) error {
+			k.Delegated = dip
+			if err := keep(k); err != nil {
+				return fmt.Errorf("the delegation was not kept, so it was not made: %w", err)
+			}
+			return nil
 		}
 	}
-	if err := e.holdDelegatedIdentity(name, pub, nextDigest, dip, dipEvent); err != nil {
+	// The delegator's approval first, kept once the delegator's log with it
+	// has been judged; only then is the delegated identity held.
+	if err := e.extend(delegator, ixn, approvalSig, kept, nil); err != nil {
 		return nil, err
 	}
-	// The delegator's log only advances once its approval is recorded.
-	if err := e.extend(delegator, ixn, approvalSig, nil); err != nil {
+	if err := e.holdDelegatedIdentity(name, pub, nextDigest, dip, dipEvent); err != nil {
 		return nil, err
 	}
 
@@ -963,12 +984,16 @@ func (e *Engine) InteractKept(name string, data []interface{}, keep func(drivers
 	if err != nil {
 		return nil, err
 	}
+	var kept func(drivers.KELKeep) error
 	if keep != nil {
-		if err := keep(drivers.KELKeep{AID: id.AID, SN: int(ev.SN), Raw: raw, Signature: sig}); err != nil {
-			return nil, fmt.Errorf("the interaction was not kept, so it was not made: %w", err)
+		kept = func(k drivers.KELKeep) error {
+			if err := keep(k); err != nil {
+				return fmt.Errorf("the interaction was not kept, so it was not made: %w", err)
+			}
+			return nil
 		}
 	}
-	if err := e.extend(id, raw, sig, nil); err != nil {
+	if err := e.extend(id, raw, sig, kept, nil); err != nil {
 		return nil, err
 	}
 
@@ -1110,6 +1135,9 @@ func (e *Engine) ReloadIdentity(req *drivers.DriverReloadIdentityRequest) (*driv
 				}
 				e.Sigs = sigs
 			}
+		}
+		if i < len(req.UnsignedAtUpgrade) {
+			e.MarkedUnsigned = req.UnsignedAtUpgrade[i]
 		}
 		entries = append(entries, e)
 	}

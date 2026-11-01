@@ -156,9 +156,44 @@ func signaturesVerify(raw []byte, sigs []string, keys []string) (signed []int, o
 	return signed, true
 }
 
+// checkedSignatures reads sigs over raw, an event signed by keys, keeping one
+// signature per key place, and refuses the lot if any signature does not
+// verify under the key it names. keri-go drops a signature that does not
+// verify and judges the rest, which is right for a log received from
+// elsewhere; a log this engine keeps and publishes carries none, so nobody
+// can add junk to an event by sending it beside good signatures.
+func checkedSignatures(raw []byte, sigs []string, keys []string) ([]string, error) {
+	indexed, err := indexedSignatures(sigs, len(keys))
+	if err != nil {
+		return nil, err
+	}
+	byPlace := map[int]bool{}
+	out := make([]string, 0, len(indexed))
+	for i, s := range indexed {
+		c, err := drivers.ReadControllerSignature(s)
+		if err != nil {
+			return nil, fmt.Errorf("signature %d is unreadable: %w", i, err)
+		}
+		if c.At.Index < 0 || c.At.Index >= len(keys) {
+			return nil, fmt.Errorf("signature %d names key %d, and the event is signed by %d keys", i, c.At.Index, len(keys))
+		}
+		if err := keri.VerifySignature(keys[c.At.Index], raw, c.Raw); err != nil {
+			return nil, fmt.Errorf("signature %d does not verify under key %d: %w", i, c.At.Index, err)
+		}
+		if byPlace[c.At.Index] {
+			continue
+		}
+		byPlace[c.At.Index] = true
+		out = append(out, s)
+	}
+	return out, nil
+}
+
 // signHistory obtains, from the installed signer, signatures for events in
 // entries that are held without them, where each was signed by one key the
-// signer holds. It changes nothing: what it returns is kept only with the next
+// signer holds: a founding (which the core's signer signs only where the whole
+// key chain is its own) or an interaction, and a rotation only where it was
+// marked unsigned when this version first ran. It changes nothing: what it returns is kept only with the next
 // event, once the whole log verifies with it.
 func (e *Engine) signHistory(aid string, entries []kelEntry) map[int][]string {
 	e.commitMu.Lock()
@@ -181,6 +216,13 @@ func (e *Engine) signHistory(aid string, entries []kelEntry) map[int][]string {
 			keys = ev.Keys
 		}
 		if len(en.Sigs) > 0 || len(keys) != 1 {
+			continue
+		}
+		// A rotation moves control to the keys it names and the commitment
+		// it makes, so one is signed after the fact only where an earlier
+		// version of this engine added it unsigned: never one stored since,
+		// which anybody able to write the store could have composed.
+		if (ev.Ilk == "rot" || ev.Ilk == "drt") && !en.MarkedUnsigned {
 			continue
 		}
 		sig, err := f(aid, keys[0], en.Raw)
@@ -265,7 +307,7 @@ func (e *Engine) place(id *identity, before []kelEntry, at int, raw []byte, ev *
 	if ev.Ilk == "icp" || ev.Ilk == "dip" {
 		keys = ev.Keys
 	}
-	indexed, err := indexedSignatures(sigs, len(keys))
+	indexed, err := checkedSignatures(raw, sigs, keys)
 	if err != nil {
 		return &ErrNotAuthorised{AID: id.AID, SN: int(ev.SN), Err: err, BadSignature: true}
 	}

@@ -178,11 +178,11 @@ func (e *Engine) appendPreparedRegistry(id *identity, p *drivers.PreparedRegistr
 	if err != nil {
 		return nil, err
 	}
-	sig, err := e.commit(id, ixnEvent.SN, ixn, vcp)
+	sig, kept, err := e.commit(id, ixnEvent.SN, ixn, vcp)
 	if err != nil {
 		return nil, err
 	}
-	if err := e.extend(id, ixn, sig, func() {
+	if err := e.extend(id, ixn, sig, kept, func() {
 		if id.Registries == nil {
 			id.Registries = map[string]*registry{}
 		}
@@ -375,12 +375,13 @@ func (e *Engine) appendPrepared(id *identity, p *drivers.PreparedIssuance) (*dri
 		return nil, fmt.Errorf("the prepared interaction does not anchor the prepared issuance")
 	}
 	var sig string
+	var kept func(drivers.KELKeep) error
 	if p.Registry != "" {
 		issEvent, err := keri.VerifyTELEvent(p.IssRaw)
 		if err != nil || issEvent.SAID != p.IssSAID || issEvent.Subject != p.AcdcSAID {
 			return nil, fmt.Errorf("the prepared issuance event is not this credential's")
 		}
-		if sig, err = e.commit(id, ixnEvent.SN, p.IxnRaw, p.IssRaw); err != nil {
+		if sig, kept, err = e.commit(id, ixnEvent.SN, p.IxnRaw, p.IssRaw); err != nil {
 			return nil, err
 		}
 	} else if sig, err = e.signed(id, p.IxnRaw); err != nil {
@@ -394,7 +395,7 @@ func (e *Engine) appendPrepared(id *identity, p *drivers.PreparedIssuance) (*dri
 	if err != nil {
 		return nil, err
 	}
-	if err := e.extend(id, p.IxnRaw, sig, func() {
+	if err := e.extend(id, p.IxnRaw, sig, kept, func() {
 		if p.Registry == "" {
 			return
 		}
@@ -559,11 +560,11 @@ func (e *Engine) appendPreparedRevocation(id *identity, p *drivers.PreparedRevoc
 	if err != nil {
 		return nil, err
 	}
-	sig, err := e.commit(id, ixnEvent.SN, p.IxnRaw, p.RevRaw)
+	sig, kept, err := e.commit(id, ixnEvent.SN, p.IxnRaw, p.RevRaw)
 	if err != nil {
 		return nil, err
 	}
-	if err := e.extend(id, p.IxnRaw, sig, func() {
+	if err := e.extend(id, p.IxnRaw, sig, kept, func() {
 		if reg := id.Registries[p.Registry]; reg != nil {
 			reg.TEL[p.AcdcSAID] = append(reg.TEL[p.AcdcSAID], p.RevRaw)
 		}
