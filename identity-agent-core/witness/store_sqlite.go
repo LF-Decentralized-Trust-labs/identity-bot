@@ -2,6 +2,7 @@ package witness
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -116,18 +117,54 @@ func (s *SQLiteStore) ListContactMeta() ([]ContactMeta, error) {
 }
 
 func (s *SQLiteStore) StoreKelEvent(ev KelEvent) error {
-	_, err := s.db.Exec(`
-		INSERT INTO witness_kel_events (signer_aid, sequence_num, event_json, event_said, stored_at, raw_bytes_b64, cesr_signature)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+	return storeKelEvent(s.db, ev)
+}
+
+// execer is a database or a transaction.
+type execer interface {
+	Exec(query string, args ...interface{}) (sql.Result, error)
+}
+
+func storeKelEvent(db execer, ev KelEvent) error {
+	_, err := db.Exec(`
+		INSERT INTO witness_kel_events (signer_aid, sequence_num, event_json, event_said, stored_at, raw_bytes_b64, cesr_signature, signatures)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(signer_aid, sequence_num) DO NOTHING`,
 		ev.SignerAID, ev.SequenceNum, ev.EventJSON, ev.EventSAID, ev.StoredAt,
-		ev.RawBytesB64, ev.CesrSignature)
+		ev.RawBytesB64, firstOf(ev.Signatures, ev.CesrSignature), signatureList(ev.Signatures))
 	return err
+}
+
+func firstOf(sigs []string, otherwise string) string {
+	if len(sigs) > 0 {
+		return sigs[0]
+	}
+	return otherwise
+}
+
+// signatureList is a signature list as stored: a JSON list, or empty for none.
+func signatureList(sigs []string) string {
+	if len(sigs) == 0 {
+		return ""
+	}
+	b, _ := json.Marshal(sigs)
+	return string(b)
+}
+
+func readSignatureList(stored string) ([]string, error) {
+	if stored == "" {
+		return nil, nil
+	}
+	var sigs []string
+	if err := json.Unmarshal([]byte(stored), &sigs); err != nil {
+		return nil, fmt.Errorf("a stored signature list is unreadable: %w", err)
+	}
+	return sigs, nil
 }
 
 func (s *SQLiteStore) GetKelEvents(signerAID string) ([]KelEvent, error) {
 	rows, err := s.db.Query(`
-		SELECT signer_aid, sequence_num, event_json, event_said, stored_at, raw_bytes_b64, cesr_signature
+		SELECT signer_aid, sequence_num, event_json, event_said, stored_at, raw_bytes_b64, cesr_signature, signatures
 		FROM witness_kel_events WHERE signer_aid = ? ORDER BY sequence_num`, signerAID)
 	if err != nil {
 		return nil, err
@@ -136,11 +173,103 @@ func (s *SQLiteStore) GetKelEvents(signerAID string) ([]KelEvent, error) {
 	var out []KelEvent
 	for rows.Next() {
 		var ev KelEvent
+		var sigs string
 		if err := rows.Scan(&ev.SignerAID, &ev.SequenceNum, &ev.EventJSON, &ev.EventSAID, &ev.StoredAt,
-			&ev.RawBytesB64, &ev.CesrSignature); err != nil {
+			&ev.RawBytesB64, &ev.CesrSignature, &sigs); err != nil {
+			return nil, err
+		}
+		if ev.Signatures, err = readSignatureList(sigs); err != nil {
 			return nil, err
 		}
 		out = append(out, ev)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteStore) SetKelSignatures(signerAID string, seq int, signatures []string) error {
+	_, err := s.db.Exec(`UPDATE witness_kel_events SET signatures = ?, cesr_signature = ?
+		WHERE signer_aid = ? AND sequence_num = ?`,
+		signatureList(signatures), firstOf(signatures, ""), signerAID, seq)
+	return err
+}
+
+func (s *SQLiteStore) SupersedeKelEvents(signerAID string, by KelEvent) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`
+		INSERT INTO witness_kel_superseded (signer_aid, sequence_num, event_said, raw_bytes_b64, signatures, superseded_by, superseded_at)
+		SELECT signer_aid, sequence_num, event_said, raw_bytes_b64,
+		       CASE WHEN signatures != '' THEN signatures
+		            WHEN cesr_signature != '' THEN json_array(cesr_signature) ELSE '' END,
+		       ?, ?
+		FROM witness_kel_events WHERE signer_aid = ? AND sequence_num >= ?`,
+		by.EventSAID, by.StoredAt, signerAID, by.SequenceNum); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM witness_kel_events WHERE signer_aid = ? AND sequence_num >= ?`,
+		signerAID, by.SequenceNum); err != nil {
+		return err
+	}
+	if err := storeKelEvent(tx, by); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *SQLiteStore) GetSupersededKelEvents(signerAID string) ([]KelEvent, error) {
+	rows, err := s.db.Query(`SELECT signer_aid, sequence_num, event_said, raw_bytes_b64, signatures, superseded_at
+		FROM witness_kel_superseded WHERE signer_aid = ? ORDER BY id`, signerAID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []KelEvent
+	for rows.Next() {
+		var ev KelEvent
+		var sigs string
+		if err := rows.Scan(&ev.SignerAID, &ev.SequenceNum, &ev.EventSAID, &ev.RawBytesB64,
+			&sigs, &ev.StoredAt); err != nil {
+			return nil, err
+		}
+		if ev.Signatures, err = readSignatureList(sigs); err != nil {
+			return nil, err
+		}
+		out = append(out, ev)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteStore) SaveKelConflict(c KelConflict) error {
+	_, err := s.db.Exec(`INSERT INTO witness_kel_conflicts
+		(signer_aid, sequence_num, event_said, raw_bytes_b64, signatures, held_said, seen_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(signer_aid, event_said) DO NOTHING`,
+		c.SignerAID, c.SequenceNum, c.EventSAID, c.RawBytesB64, signatureList(c.Signatures),
+		c.HeldSAID, c.SeenAt)
+	return err
+}
+
+func (s *SQLiteStore) GetKelConflicts(signerAID string) ([]KelConflict, error) {
+	rows, err := s.db.Query(`SELECT signer_aid, sequence_num, event_said, raw_bytes_b64, signatures, held_said, seen_at
+		FROM witness_kel_conflicts WHERE signer_aid = ? ORDER BY sequence_num, seen_at`, signerAID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []KelConflict
+	for rows.Next() {
+		var c KelConflict
+		var sigs string
+		if err := rows.Scan(&c.SignerAID, &c.SequenceNum, &c.EventSAID, &c.RawBytesB64, &sigs,
+			&c.HeldSAID, &c.SeenAt); err != nil {
+			return nil, err
+		}
+		if c.Signatures, err = readSignatureList(sigs); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
 	}
 	return out, rows.Err()
 }

@@ -38,7 +38,14 @@ CREATE TABLE IF NOT EXISTS witness_contact_meta (
 CREATE TABLE IF NOT EXISTS witness_kel_events (
     signer_aid TEXT, sequence_num INTEGER, event_json TEXT, event_said TEXT, stored_at TEXT,
     raw_bytes_b64 TEXT NOT NULL DEFAULT '', cesr_signature TEXT NOT NULL DEFAULT '',
+    signatures TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (signer_aid, sequence_num));
+CREATE TABLE IF NOT EXISTS witness_kel_superseded (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, signer_aid TEXT, sequence_num INTEGER,
+    event_said TEXT, raw_bytes_b64 TEXT, signatures TEXT, superseded_by TEXT, superseded_at TEXT);
+CREATE TABLE IF NOT EXISTS witness_kel_conflicts (
+    signer_aid TEXT, sequence_num INTEGER, event_said TEXT, raw_bytes_b64 TEXT,
+    signatures TEXT, held_said TEXT, seen_at TEXT, PRIMARY KEY (signer_aid, event_said));
 CREATE TABLE IF NOT EXISTS witness_receipts_issued (
     id INTEGER PRIMARY KEY AUTOINCREMENT, signer_aid TEXT, event_said TEXT, sequence_num INTEGER,
     witness_aid TEXT, receipt_json TEXT, cesr_signature TEXT, issued_at TEXT);

@@ -24,6 +24,8 @@ github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aN
 github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
 github.com/grapeid/keri-go v0.3.0 h1:DSA/qpVUlRtrvxvQB5EesYx/UgEXeu5dHuCZD3Oi1RI=
 github.com/grapeid/keri-go v0.3.0/go.mod h1:Gypsr09J5eYiw9vpimQrE8nn9UolBOv0HkkrdNynLYg=
+github.com/grapeid/keri-go v0.3.1-0.20261101184427-33b44720d225 h1:TOlwSUXkrbk+NpBBYVeQzxbhqhfxL2Yj5u3Zyyqu9Zo=
+github.com/grapeid/keri-go v0.3.1-0.20261101184427-33b44720d225/go.mod h1:Gypsr09J5eYiw9vpimQrE8nn9UolBOv0HkkrdNynLYg=
 github.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs4luLUK2k=
 github.com/hashicorp/golang-lru/v2 v2.0.7/go.mod h1:QeFd9opnmA6QUJc5vARoKUSoFhyfM2/ZepoAG6RGpeM=
 github.com/hashicorp/yamux v0.1.2 h1:XtB8kyFOyHXYVFnwT5C3+Bdo8gArse7j2AQ0DA0Uey8=

@@ -1021,6 +1021,41 @@ CREATE TABLE IF NOT EXISTS kel_superseded (
 );
 CREATE INDEX IF NOT EXISTS idx_kel_superseded_aid ON kel_superseded(aid);
 `},
+	{
+		Version:     47,
+		Description: "Keep every signature over an event a witness holds, what a recovery rotation supersedes there, and a conflicting event as evidence",
+		SQL: `
+-- A JSON list of the controller signatures that verified; cesr_signature
+-- stays the first, for readers of one.
+ALTER TABLE witness_kel_events ADD COLUMN signatures TEXT NOT NULL DEFAULT '';
+
+-- Interactions a recovery rotation supersedes at a witness, never deleted.
+CREATE TABLE IF NOT EXISTS witness_kel_superseded (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    signer_aid     TEXT NOT NULL,
+    sequence_num   INTEGER NOT NULL,
+    event_said     TEXT NOT NULL,
+    raw_bytes_b64  TEXT NOT NULL DEFAULT '',
+    signatures     TEXT NOT NULL DEFAULT '',
+    superseded_by  TEXT NOT NULL,
+    superseded_at  TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_witness_kel_superseded_aid ON witness_kel_superseded(signer_aid);
+
+-- A correctly signed event at a place the witness already holds a different
+-- one at, which may not replace it: with the held event, that is evidence of
+-- duplicity, kept once per event.
+CREATE TABLE IF NOT EXISTS witness_kel_conflicts (
+    signer_aid     TEXT NOT NULL,
+    sequence_num   INTEGER NOT NULL,
+    event_said     TEXT NOT NULL,
+    raw_bytes_b64  TEXT NOT NULL,
+    signatures     TEXT NOT NULL DEFAULT '',
+    held_said      TEXT NOT NULL,
+    seen_at        TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (signer_aid, event_said)
+);
+`},
 }
 
 // ReapplyIdentityMigration runs one identity migration's SQL again, for a test
