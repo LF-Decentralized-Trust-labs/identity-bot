@@ -116,7 +116,6 @@ func ValidateKELFromBytes(in ValidateKELInput) (*DriverValidateKELResponse, erro
 	current := ""
 	// Each event's signature as KERI carries it, for the log verifier below.
 	signed := make([][]byte, 0, len(in.RawEvents))
-	sigs := make([]controllerSignature, len(in.RawEvents))
 
 	for i, raw := range in.RawEvents {
 		ev, err := keri.ParseEvent(raw)
@@ -150,18 +149,17 @@ func ValidateKELFromBytes(in ValidateKELInput) (*DriverValidateKELResponse, erro
 			unsigned++
 			continue
 		}
-		at, err := readControllerSignature(sig)
+		at, err := ReadControllerSignature(sig)
 		if err != nil {
 			problems = append(problems, fmt.Sprintf("event %d: %v", i, err))
 			continue
 		}
-		sigs[i] = at
-		group, err := keri.AttachControllerSigs([]string{at.QB64})
+		m, err := SignedMessage(raw, []string{at.QB64})
 		if err != nil {
 			problems = append(problems, fmt.Sprintf("event %d: %v", i, err))
 			continue
 		}
-		signed = append(signed, append(append([]byte(nil), raw...), group...))
+		signed = append(signed, m)
 	}
 
 	switch {
@@ -177,27 +175,22 @@ func ValidateKELFromBytes(in ValidateKELInput) (*DriverValidateKELResponse, erro
 		}
 	default:
 		// Some events arrived unsigned, so the log is not verified whatever
-		// the rest show, and the log verifier, which needs every event signed,
-		// cannot judge it. What can still be caught is a signature that is
-		// present and is not by the key in force: a log carrying one is not
-		// sound, signed or not.
-		current := ""
-		for i, raw := range in.RawEvents {
-			ev, err := keri.ParseEvent(raw)
-			if err != nil {
-				continue // reported above
-			}
-			if ev.Establishment() && len(ev.Keys) > 0 {
-				current = ev.Keys[0]
-			}
-			if sigs[i].Raw == nil {
-				continue
-			}
-			if sigs[i].At.Index != 0 || current == "" ||
-				keri.VerifySignature(current, raw, sigs[i].Raw) != nil {
+		// the rest show. The signed events before the first unsigned one are
+		// judged by the one KEL verifier as a log of their own: a log whose
+		// signed beginning was not authorised by its controller is not sound,
+		// signed or not. Past the first unsigned event there is no verified
+		// key state to judge anything against, so nothing after it is judged;
+		// the log is reported unverified, as it is.
+		signedFirst := 0
+		for signedFirst < len(in.RawEvents) && signedFirst < len(in.CesrSignatures) &&
+			in.CesrSignatures[signedFirst] != "" {
+			signedFirst++
+		}
+		if signedFirst > 0 {
+			if _, err := keri.ValidateSignedKEL(signed[:signedFirst]); err != nil {
 				problems = append(problems, fmt.Sprintf(
-					"event %d is not signed by the key it declares, so it was not authorised by "+
-						"the identity it claims to extend", i))
+					"the signed events before the first unsigned one do not show its "+
+						"controller authorised them: %v", err))
 			}
 		}
 	}
@@ -255,14 +248,14 @@ func ValidateKELFromBytes(in ValidateKELInput) (*DriverValidateKELResponse, erro
 	return out, nil
 }
 
-// controllerSignature is one controller signature as KERI attaches it.
-type controllerSignature struct {
+// ControllerSignature is one controller signature as KERI attaches it.
+type ControllerSignature struct {
 	keri.IndexedSignature
 	// QB64 is the indexed form attached to the event.
 	QB64 string
 }
 
-// readControllerSignature reads a controller signature in the forms the agent
+// ReadControllerSignature reads a controller signature in the forms the agent
 // stores and produces, and returns it indexed as a published stream carries it.
 //
 // An unindexed signature (0B, or 64 raw bytes in base64) is what this agent's
@@ -270,21 +263,21 @@ type controllerSignature struct {
 // in both key lists, so it is indexed there. An indexed one (A, B, 2A or 2B) is
 // read as keri-go reads it, and the places it names are judged by the log
 // verifier, not here.
-func readControllerSignature(sig string) (controllerSignature, error) {
+func ReadControllerSignature(sig string) (ControllerSignature, error) {
 	if raw, _, _, err := iacrypto.DecodeEd25519Signature(sig, false); err == nil {
 		qb64, err := keri.EncodeIndexedSignature(raw, keri.SamePlace(0))
 		if err != nil {
-			return controllerSignature{}, err
+			return ControllerSignature{}, err
 		}
-		return controllerSignature{IndexedSignature: keri.IndexedSignature{
+		return ControllerSignature{IndexedSignature: keri.IndexedSignature{
 			Code: "A", At: keri.SamePlace(0), Raw: raw}, QB64: qb64}, nil
 	}
 	parsed, err := keri.ParseIndexedSignature(sig)
 	if err != nil {
-		return controllerSignature{}, fmt.Errorf("the signature is neither an Ed25519 signature "+
+		return ControllerSignature{}, fmt.Errorf("the signature is neither an Ed25519 signature "+
 			"nor an indexed one: %w", err)
 	}
-	return controllerSignature{IndexedSignature: parsed, QB64: sig}, nil
+	return ControllerSignature{IndexedSignature: parsed, QB64: sig}, nil
 }
 
 // DecodeRawEvents turns the base64 wire form into bytes, reporting which entry

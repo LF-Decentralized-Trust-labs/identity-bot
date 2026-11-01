@@ -67,6 +67,15 @@ func DeriveVaultKEK(bip39Seed []byte) ([]byte, error) {
 	return out, nil
 }
 
+// The fixed branches of m/44'/0'/0'/branch'/n' an identity's other keys come
+// from, so the phrase alone finds them (ADR-061 section 1): the post-quantum
+// next key of generation j at PostQuantumBranch/j, the messaging keyset of
+// generation g at MessagingBranch/g.
+const (
+	PostQuantumBranch = 7000001
+	MessagingBranch   = 7000002
+)
+
 // DerivePairwiseSeed derives an Ed25519 seed for a contact index using BIP32/SLIP-0010 HD from the root keystore seed.
 // Path: m / 44' / 0' / 0' / contactIndex' / keyIndex'
 // This is the architected derivation (replaces previous HKDF). Deterministic, matches across engines for restore.

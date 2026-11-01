@@ -44,6 +44,10 @@ type Engine struct {
 	// eventSignature signs an interaction about to be appended to an
 	// identity's own key log; see SetEventSignature.
 	eventSignature func(aid, key string, raw []byte) (string, error)
+	// holdFor is how long an event with several signers waits for the rest;
+	// clock replaces time.Now in tests.
+	holdFor time.Duration
+	clock   func() time.Time
 }
 
 // SetEventSignature installs how this engine obtains an identity's signature
@@ -127,59 +131,51 @@ func (e *Engine) SetTELCommit(f func(drivers.TELCommit) error) {
 
 // commit offers a registry event and its anchor for keeping. With nothing
 // installed there is nothing to offer them to.
-func (e *Engine) commit(id *identity, sn uint64, kel, tel []byte) (string, error) {
+//
+// It returns the identity's signature over kel and the keep that offers both
+// for keeping; the keep runs inside the one append path, once the log with kel
+// in it has been judged, so nothing is kept that the engine then refuses.
+func (e *Engine) commit(id *identity, sn uint64, kel, tel []byte) (string, func(drivers.KELKeep) error, error) {
 	sig, err := e.signed(id, kel)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	e.commitMu.Lock()
 	f := e.telCommit
 	e.commitMu.Unlock()
 	if f == nil {
-		return sig, nil
+		return sig, nil, nil
 	}
-	return sig, f(drivers.TELCommit{AID: id.AID, SN: int(sn), KELRaw: kel, TELRaw: tel, Signature: sig})
+	return sig, func(drivers.KELKeep) error {
+		return f(drivers.TELCommit{AID: id.AID, SN: int(sn), KELRaw: kel, TELRaw: tel, Signature: sig})
+	}, nil
 }
 
-// extend appends raw to id's key log: the one place an event other than a
-// rotation joins a key log, and it does so only with a signature by id's
-// current key over exactly raw, checked here whatever the caller checked.
-// also runs, under the same lock, for what else the event changes.
-func (e *Engine) extend(id *identity, raw []byte, sig string, also func()) error {
+// extend appends an interaction to id's key log with sig, a signature by id's
+// current key over exactly raw, through the one append path (add). also runs,
+// under the same lock, for what else the event changes.
+//
+// keep, when given, is offered the event once the log with it has been judged
+// and before it is added, carrying sig as given.
+func (e *Engine) extend(id *identity, raw []byte, sig string, keep func(drivers.KELKeep) error, also func()) error {
 	e.state.mu.RLock()
 	key := id.PublicKey
 	e.state.mu.RUnlock()
 	if err := verifiedBy(id.AID, key, raw, sig); err != nil {
 		return err
 	}
-	return e.appendEvent(id, raw, also)
-}
-
-// extendByRotation appends a rotation to id's key log. A rotation is signed
-// by its new keys, which the callers of this engine do not yet hand it, so
-// it is the one event appended without a signature checked here.
-func (e *Engine) extendByRotation(id *identity, raw []byte, also func()) error {
-	return e.appendEvent(id, raw, also)
-}
-
-func (e *Engine) appendEvent(id *identity, raw []byte, also func()) error {
-	ev, err := keri.ParseEvent(raw)
-	if err != nil {
-		return err
+	var kept func(drivers.KELKeep) error
+	if keep != nil {
+		kept = func(k drivers.KELKeep) error {
+			k.Signature = sig
+			return keep(k)
+		}
 	}
-	next, err := entry(raw)
-	if err != nil {
-		return err
-	}
-	e.state.mu.Lock()
-	defer e.state.mu.Unlock()
-	if also != nil {
-		also()
-	}
-	id.SN = int(ev.SN)
-	id.LastSAID = ev.SAID
-	id.KEL = append(id.KEL, next)
-	return nil
+	return e.add(id, raw, []string{sig}, kept, func(*keri.Event) {
+		if also != nil {
+			also()
+		}
+	})
 }
 
 // verifiedBy checks sig is aid's current key's signature over raw.
@@ -282,24 +278,33 @@ func (e *Engine) CreateOwnedInception(publicKey, nextPublicKey, name, ownerAID s
 	// The role label is gone; position replaces it. An owner seal is an event
 	// seal in an establishment event — see the reader in the server package for
 	// why that is unambiguous and what would break it.
-	if !strings.HasPrefix(ownerAID, "E") {
+	anchor, err := OwnerSeal(ownerAID)
+	if err != nil {
+		return nil, err
+	}
+	return e.incept(publicKey, nextPublicKey, name, []json.RawMessage{anchor})
+}
+
+// OwnerSeal is the seal a founding carries naming its owner: an event seal
+// naming the owner's own founding, which for a self-addressing identifier is
+// the identifier itself.
+func OwnerSeal(ownerAID string) (json.RawMessage, error) {
+	if !strings.HasPrefix(ownerAID, "E") || len(ownerAID) != 44 {
 		return nil, fmt.Errorf("%q is not a self-addressing identifier, so an owner seal "+
 			"naming it would point at no event", ownerAID)
 	}
-	anchor := json.RawMessage(fmt.Sprintf(`{"i":%q,"s":"0","d":%q}`, ownerAID, ownerAID))
-	return e.incept(publicKey, nextPublicKey, name, []json.RawMessage{anchor})
+	return json.RawMessage(fmt.Sprintf(`{"i":%q,"s":"0","d":%q}`, ownerAID, ownerAID)), nil
 }
 
 // Incept founds an identity, optionally designating witnesses for it.
 func (e *Engine) Incept(req drivers.InceptionRequest) (*drivers.DriverInceptionResponse, error) {
 	var anchors []json.RawMessage
 	if req.OwnerAID != "" {
-		if !strings.HasPrefix(req.OwnerAID, "E") {
-			return nil, fmt.Errorf("%q is not a self-addressing identifier, so an owner seal "+
-				"naming it would point at no event", req.OwnerAID)
+		seal, err := OwnerSeal(req.OwnerAID)
+		if err != nil {
+			return nil, err
 		}
-		anchors = append(anchors, json.RawMessage(
-			fmt.Sprintf(`{"i":%q,"s":"0","d":%q}`, req.OwnerAID, req.OwnerAID)))
+		anchors = append(anchors, seal)
 	}
 	// Anything else the caller anchors — the messaging keys an identity commits
 	// to, most importantly. Dropping these silently would leave an identity
@@ -341,7 +346,7 @@ func inceptionOver(publicKey, nextPublicKey string, data []json.RawMessage, witn
 	// bytes and not the key itself. Committing to anything else produces a
 	// rotation that every conformant implementation refuses, at the point where
 	// the identity most needs to rotate.
-	nextDigest, err = keri.NextDigest(nextPub)
+	nextDigest, err = iacrypto.NextKeyDigest(nextPub)
 	if err != nil {
 		return "", "", nil, fmt.Errorf("committing to the next key: %w", err)
 	}
@@ -424,6 +429,8 @@ func (e *Engine) inceptWith(publicKey, nextPublicKey, name string, data []json.R
 	if err != nil {
 		return nil, err
 	}
+	first.Sigs = e.foundingSignatures(ev, raw)
+	sigs := append([]string(nil), first.Sigs...)
 	e.state.put(&identity{
 		Name:            name,
 		AID:             ev.Identifier,
@@ -444,6 +451,7 @@ func (e *Engine) inceptWith(publicKey, nextPublicKey, name string, data []json.R
 		RawBytesB64:    b64(raw),
 		PublicKey:      pub,
 		NextKeyDigest:  nextDigest,
+		Signatures:     sigs,
 	}, nil
 }
 
@@ -504,8 +512,7 @@ func (e *Engine) CreateDelegatedInceptionKept(publicKey, nextPublicKey, name, de
 	if err != nil {
 		return nil, fmt.Errorf("building the delegator's approval: %w", err)
 	}
-	ixnEvent, err := keri.ParseEvent(ixn)
-	if err != nil {
+	if _, err := keri.ParseEvent(ixn); err != nil {
 		return nil, err
 	}
 
@@ -522,25 +529,31 @@ func (e *Engine) CreateDelegatedInceptionKept(publicKey, nextPublicKey, name, de
 	if err != nil {
 		return nil, err
 	}
+	// The name must be free before anything is kept, or the store would hold a
+	// delegation the engine then refuses to.
+	heldAs := name
+	if heldAs == "" {
+		heldAs = dipEvent.Identifier
+	}
+	if held, err := e.state.get(heldAs); err == nil && held.AID != dipEvent.Identifier {
+		return nil, fmt.Errorf("the name %q already holds %s", heldAs, held.AID)
+	}
+	var kept func(drivers.KELKeep) error
 	if keep != nil {
-		// The name must be free before anything is kept, or the store would
-		// hold a delegation the engine then refuses to.
-		heldAs := name
-		if heldAs == "" {
-			heldAs = dipEvent.Identifier
-		}
-		if held, err := e.state.get(heldAs); err == nil && held.AID != dipEvent.Identifier {
-			return nil, fmt.Errorf("the name %q already holds %s", heldAs, held.AID)
-		}
-		if err := keep(drivers.KELKeep{AID: delegator.AID, SN: int(ixnEvent.SN), Raw: ixn, Delegated: dip, Signature: approvalSig}); err != nil {
-			return nil, fmt.Errorf("the delegation was not kept, so it was not made: %w", err)
+		kept = func(k drivers.KELKeep) error {
+			k.Delegated = dip
+			if err := keep(k); err != nil {
+				return fmt.Errorf("the delegation was not kept, so it was not made: %w", err)
+			}
+			return nil
 		}
 	}
-	if err := e.holdDelegatedIdentity(name, pub, nextDigest, dip, dipEvent); err != nil {
+	// The delegator's approval first, kept once the delegator's log with it
+	// has been judged; only then is the delegated identity held.
+	if err := e.extend(delegator, ixn, approvalSig, kept, nil); err != nil {
 		return nil, err
 	}
-	// The delegator's log only advances once its approval is recorded.
-	if err := e.extend(delegator, ixn, approvalSig, nil); err != nil {
+	if err := e.holdDelegatedIdentity(name, pub, nextDigest, dip, dipEvent); err != nil {
 		return nil, err
 	}
 
@@ -633,7 +646,7 @@ func delegatedInceptionOver(publicKey, nextPublicKey, delegatorAID string, witne
 	if err != nil {
 		return "", "", nil, nil, fmt.Errorf("the next signing key: %w", err)
 	}
-	nextDigest, err = keri.NextDigest(nextPub)
+	nextDigest, err = iacrypto.NextKeyDigest(nextPub)
 	if err != nil {
 		return "", "", nil, nil, err
 	}
@@ -665,6 +678,7 @@ func (e *Engine) holdDelegatedIdentity(name, pub, nextDigest string, dip []byte,
 	if err != nil {
 		return err
 	}
+	first.Sigs = e.foundingSignatures(dipEvent, dip)
 	return e.state.claim(&identity{
 		Name:            name,
 		AID:             dipEvent.Identifier,
@@ -750,7 +764,7 @@ func (e *Engine) Rotate(req drivers.RotationRequest) (*drivers.DriverRotationRes
 			"to %s and this key digests to %s. Rotating to it would produce an event no "+
 			"conformant implementation accepts", id.NextKeyDigest, revealed)
 	}
-	newNextDigest, err := keri.NextDigest(newNextPub)
+	newNextDigest, err := iacrypto.NextKeyDigest(newNextPub)
 	if err != nil {
 		return nil, err
 	}
@@ -794,9 +808,12 @@ func (e *Engine) Rotate(req drivers.RotationRequest) (*drivers.DriverRotationRes
 		return nil, err
 	}
 
-	if err := e.extendByRotation(id, raw, func() {
-		id.PublicKey = newPub
-		id.NextKeyDigest = newNextDigest
+	// Signed by the key it reveals before it is added, by the installed
+	// signer where this engine's caller holds that key. Where nobody here
+	// holds it, nothing is added: the rotation is made through Prepare and
+	// Commit by whoever does.
+	sigs := e.ownSignatures(id.AID, []string{newPub}, raw)
+	if err := e.add(id, raw, sigs, nil, func(ev *keri.Event) {
 		// The witness set now in force, read back off the event rather than
 		// recomputed here. The event is what everyone else will read, so
 		// anything this engine believes that the event does not say is wrong.
@@ -814,6 +831,7 @@ func (e *Engine) Rotate(req drivers.RotationRequest) (*drivers.DriverRotationRes
 		RawBytesB64:      b64(raw),
 		Said:             ev.SAID,
 		SequenceNumber:   int(ev.SN),
+		Signatures:       sigsAt(e, id, int(ev.SN)),
 	}, nil
 }
 
@@ -888,10 +906,12 @@ func (e *Engine) RotateToMultisig(name string, keys, nextKeyDigests []string, is
 		return nil, err
 	}
 
-	if err := e.extendByRotation(id, raw, func() {
-		id.PublicKey = normalised[0]
-		id.NextKeyDigest = nextKeyDigests[0]
-	}); err != nil {
+	// Added only once its signatures meet both thresholds. The keys this
+	// engine's caller holds sign here; a rotation that also needs keys held
+	// by others (owners joining) is made through Prepare and Commit, where
+	// each signer commits its own signatures.
+	sigs := e.ownSignatures(id.AID, normalised, raw)
+	if err := e.add(id, raw, sigs, nil, nil); err != nil {
 		return nil, err
 	}
 
@@ -907,7 +927,18 @@ func (e *Engine) RotateToMultisig(name string, keys, nextKeyDigests []string, is
 		RawBytesB64:      b64(raw),
 		Said:             ev.SAID,
 		SequenceNumber:   int(ev.SN),
+		Signatures:       sigsAt(e, id, int(ev.SN)),
 	}, nil
+}
+
+// sigsAt are the signatures held with id's event at sn.
+func sigsAt(e *Engine, id *identity, sn int) []string {
+	e.state.mu.RLock()
+	defer e.state.mu.RUnlock()
+	if sn < 0 || sn >= len(id.KEL) {
+		return nil
+	}
+	return append([]string(nil), id.KEL[sn].Sigs...)
 }
 
 // Interact anchors data in an identity's key log.
@@ -953,12 +984,16 @@ func (e *Engine) InteractKept(name string, data []interface{}, keep func(drivers
 	if err != nil {
 		return nil, err
 	}
+	var kept func(drivers.KELKeep) error
 	if keep != nil {
-		if err := keep(drivers.KELKeep{AID: id.AID, SN: int(ev.SN), Raw: raw, Signature: sig}); err != nil {
-			return nil, fmt.Errorf("the interaction was not kept, so it was not made: %w", err)
+		kept = func(k drivers.KELKeep) error {
+			if err := keep(k); err != nil {
+				return fmt.Errorf("the interaction was not kept, so it was not made: %w", err)
+			}
+			return nil
 		}
 	}
-	if err := e.extend(id, raw, sig, nil); err != nil {
+	if err := e.extend(id, raw, sig, kept, nil); err != nil {
 		return nil, err
 	}
 
@@ -1018,8 +1053,10 @@ func (e *Engine) kelOf(id *identity) *drivers.DriverKelResponse {
 	// get a confident, wrong answer; an empty string cannot be mistaken for an
 	// event.
 	rawB64 := make([]string, 0, len(id.KEL))
+	sigs := make([][]string, 0, len(id.KEL))
 	for _, ev := range id.KEL {
 		events = append(events, ev.Parsed)
+		sigs = append(sigs, append([]string(nil), ev.Sigs...))
 		if ev.Raw == nil {
 			rawB64 = append(rawB64, "")
 			continue
@@ -1030,6 +1067,7 @@ func (e *Engine) kelOf(id *identity) *drivers.DriverKelResponse {
 		AID:            id.AID,
 		KEL:            events,
 		RawEventsB64:   rawB64,
+		Signatures:     sigs,
 		SequenceNumber: id.SN,
 		EventCount:     len(id.KEL),
 	}
@@ -1081,10 +1119,26 @@ func (e *Engine) ReloadIdentity(req *drivers.DriverReloadIdentityRequest) (*driv
 			}
 			e.Raw = raw
 		}
+		if i < len(req.UnsignedAtUpgrade) {
+			e.MarkedUnsigned = req.UnsignedAtUpgrade[i]
+		}
 		entries = append(entries, e)
 	}
 
 	raws, complete := verifiable(entries)
+	// Stored signatures are kept only where they verify under the key they
+	// name: nothing this engine holds, and so publishes, verifies nothing.
+	if complete && len(req.Signatures) > 0 {
+		kept, err := VerifiedSignatures(raws, req.Signatures)
+		if err != nil {
+			return nil, err
+		}
+		for i := range entries {
+			if i < len(kept) {
+				entries[i].Sigs = kept[i]
+			}
+		}
+	}
 	if complete {
 		if err := keri.ValidateKEL(raws); err != nil {
 			return nil, fmt.Errorf("the stored key log for %s does not validate, so it is not "+

@@ -1,8 +1,10 @@
 package server
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"sync"
@@ -14,6 +16,7 @@ import (
 	"identity-agent-core/store"
 
 	"github.com/google/uuid"
+	keri "github.com/grapeid/keri-go"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -54,7 +57,8 @@ func (s *CoreServer) mountRecoveryRoutes(r chi.Router) {
 	})
 }
 
-// recoveryOnce guards building the recovery service exactly once.
+// recoveryMu guards building each Identity Agent's recovery service exactly
+// once.
 //
 // Two requests arriving together both saw a nil field, both built a service
 // over the same directory, both loaded the sessions, and the later assignment
@@ -62,7 +66,7 @@ func (s *CoreServer) mountRecoveryRoutes(r chi.Router) {
 // other and reported "not found" while sitting on disk. Handlers run
 // concurrently, so this was reachable by two people, or one person and a
 // retry.
-var recoveryOnce sync.Once
+var recoveryMu sync.Mutex
 
 // Built per server rather than once per process.
 //
@@ -124,7 +128,15 @@ func (s *CoreServer) holdings() *recovery.Holdings { return s.holderPairFor().ho
 func (s *CoreServer) shareHolder() *recovery.Holder { return s.holderPairFor().holder }
 
 func (s *CoreServer) recoveryService() *recovery.Service {
-	recoveryOnce.Do(func() {
+	// Made once per Identity Agent, not once per process: a second one in
+	// the same process (a test, or a core started again) would otherwise
+	// be handed none.
+	recoveryMu.Lock()
+	defer recoveryMu.Unlock()
+	if s.RecoveryService != nil {
+		return s.RecoveryService
+	}
+	func() {
 		s.RecoveryService = recovery.NewService(s.DataDir, s.DataStore, s.backupService())
 		// Sessions that were waiting out their window when this agent last
 		// stopped. Loaded here rather than in a startup hook so it happens on
@@ -136,7 +148,7 @@ func (s *CoreServer) recoveryService() *recovery.Service {
 		} else if n > 0 {
 			log.Printf("[recovery] %d recovery session(s) resumed after restart", n)
 		}
-	})
+	}()
 	return s.RecoveryService
 }
 
@@ -208,6 +220,12 @@ func (s *CoreServer) handleRecoveryRotation(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "Invalid rotation request", err.Error())
 		return
 	}
+	// The session first: a rotation is not undone, so none is made for a
+	// recovery that is not there to record it.
+	if _, err := s.recoveryService().GetSession(sessionID); err != nil {
+		writeError(w, http.StatusNotFound, "Session not found", err.Error())
+		return
+	}
 
 	if s.KeriDriver == nil {
 		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
@@ -215,20 +233,39 @@ func (s *CoreServer) handleRecoveryRotation(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if err := s.mayRotateHere(req.Name); err != nil {
-		writeKeyNotHeldHere(w)
-		return
-	}
-	result, err := s.KeriDriver.RotateAid(req.Name, req.NewPublicKey, req.NewNextPublicKey)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Rotation failed", err.Error())
-		return
-	}
-
-	rotResult := recovery.RotationResult{
-		AID:            result.AID,
-		NewPublicKey:   result.NewPublicKey,
-		SequenceNumber: result.SequenceNumber,
+	var rotResult recovery.RotationResult
+	var result any
+	if req.RawB64 != "" {
+		// Prepared and signed by whoever holds the key: committed signed,
+		// and as a recovery rotation where it follows an interaction it
+		// keeps, superseding those after it.
+		committed, ok := s.commitRecoveryRotation(w, req)
+		if !ok {
+			return
+		}
+		rotResult, result = committed, committed
+	} else {
+		if err := s.mayRotateHere(req.Name); err != nil {
+			writeKeyNotHeldHere(w)
+			return
+		}
+		// Carrying the post-quantum commitment, as every rotation does.
+		rotated, err := s.rotateCarryingTheCommitment(req.Name, req.NewPublicKey, req.NewNextPublicKey)
+		if errors.Is(err, errKeyElsewhere) {
+			writeKeyNotHeldHere(w)
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Rotation failed", err.Error())
+			return
+		}
+		s.recordOwnRotation(rotated)
+		rotResult = recovery.RotationResult{
+			AID:            rotated.AID,
+			NewPublicKey:   rotated.NewPublicKey,
+			SequenceNumber: rotated.SequenceNumber,
+		}
+		result = rotated
 	}
 	sess, err := s.recoveryService().RecordRotation(sessionID, rotResult)
 	if err != nil {
@@ -650,4 +687,45 @@ func writeShareRefusal(w http.ResponseWriter, err error) {
 		return
 	}
 	writeError(w, http.StatusForbidden, "This share was not released", err.Error())
+}
+
+// commitRecoveryRotation commits a recovery's rotation that the identity's key
+// holder prepared and signed, through the one commit path.
+func (s *CoreServer) commitRecoveryRotation(w http.ResponseWriter, req recovery.RotationRequest) (recovery.RotationResult, bool) {
+	c, ok := s.committer(w)
+	if !ok {
+		return recovery.RotationResult{}, false
+	}
+	raw, err := base64.StdEncoding.Strict().DecodeString(req.RawB64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "raw_b64 is not the event", err.Error())
+		return recovery.RotationResult{}, false
+	}
+	ev, err := keri.ParseEvent(raw)
+	if err != nil || ev.Ilk != "rot" {
+		writeError(w, http.StatusBadRequest, "That is not a rotation", fmt.Sprint(err))
+		return recovery.RotationResult{}, false
+	}
+	own, err := s.DataStore.GetIdentity()
+	if err != nil || own == nil || own.AID != ev.Identifier {
+		writeError(w, http.StatusBadRequest, "That is not this Identity Agent's identity",
+			"a recovery rotates the identity kept here")
+		return recovery.RotationResult{}, false
+	}
+	res, ok := s.commitOwnEvent(w, c, own.AID, raw, ev, req.Sigs)
+	if !ok {
+		return recovery.RotationResult{}, false
+	}
+	switch res.Status {
+	case "recorded", "already_recorded":
+	default:
+		// Not yet added, so the recovery's rotation is not done: said as the
+		// commit route says it, and nothing is recorded against the session.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(map[string]any{"status": res.Status, "s": fmt.Sprintf("%x", res.SN),
+			"d": res.SAID, "signed": res.Signed, "keys": res.Keys, "expires": res.Expires.UTC().Format(time.RFC3339)})
+		return recovery.RotationResult{}, false
+	}
+	return recovery.RotationResult{AID: own.AID, NewPublicKey: ev.Keys[0], SequenceNumber: res.SN}, true
 }

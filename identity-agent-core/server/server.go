@@ -129,6 +129,9 @@ type CoreServer struct {
 
 	// See Config.RequireOwnerAtInception.
 	requireOwnerAtInception bool
+	// founding is held from the founding gate to the founding being kept,
+	// so two foundings committed at once cannot both pass it.
+	founding sync.Mutex
 
 	loginHandler   *login.Handler
 	assetHandler   *asset.Handler
@@ -1133,6 +1136,11 @@ func (s *CoreServer) buildRouterOf(flutterWebDir string, addons []Addon, extras 
 		r.Post("/messaging-keys/prepare", s.handlePrepareMessagingKeys)
 		r.Post("/store/event", s.handleStoreEvent)
 		r.Post("/events/signature", s.handleAttachEventSignature)
+		r.Post("/identity/restore", s.handleRestoreIdentity)
+		r.Post("/keystore/messaging-seed", s.handleMessagingSeed)
+		r.Post("/events/prepare", s.handlePrepareEvent)
+		r.Post("/events/commit", s.handleCommitEvent)
+		r.Get("/events/{s}/receipts", s.handleEventReceipts)
 		r.Post("/store/receipt", s.handleStoreReceipt)
 		r.Get("/store/receipts", s.handleGetStoreReceipts)
 		r.Post("/store/credential", s.handleStoreCredential)
@@ -1545,6 +1553,9 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 	if s.refuseIfThisComputerMayNotFound(w) {
 		return
 	}
+	// One founding at a time, through this route or the commit route.
+	s.founding.Lock()
+	defer s.founding.Unlock()
 	// Then whether there is an engine to found with, before anything is read
 	// or derived for a founding that cannot happen.
 	if s.KeriDriver == nil {
@@ -1619,18 +1630,7 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 			writeError(w, statusForUnreadable(err, http.StatusInternalServerError), "Could not derive this identity's messaging keys", err.Error())
 			return
 		}
-		kemPub, err := messagingKeys.KemPub.MarshalBinary()
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "Could not encode this identity's messaging keys", err.Error())
-			return
-		}
-		dsaPub, err := messagingKeys.DsaPub.MarshalBinary()
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "Could not encode this identity's messaging keys", err.Error())
-			return
-		}
-		keyAnchor, err := iacrypto.KeySetAnchor(
-			messagingKeys.XPub[:], kemPub, messagingKeys.EdPub, dsaPub)
+		keyAnchor, err := messagingKeys.Anchor()
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "Could not commit to this identity's messaging keys", err.Error())
 			return
@@ -1770,6 +1770,11 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 		Timestamp:      now,
 		RawBytesB64:    result.RawBytesB64,
 		CesrSignature:  req.CesrSignature,
+		// Signed here where this Identity Agent holds the founding key.
+		Signatures: result.Signatures,
+	}
+	if len(result.Signatures) > 0 {
+		eventRecord.CesrSignature = result.Signatures[0]
 	}
 	if err := s.DataStore.SaveEvent(eventRecord); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to persist inception event", err.Error())
@@ -2025,6 +2030,16 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.recordOwnRotation(result)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+// recordOwnRotation stores a rotation this Identity Agent made of its own
+// identity, with the signatures the engine added it with, moves the identity's
+// record on, and brings its witnesses up to date.
+func (s *CoreServer) recordOwnRotation(result *drivers.DriverRotationResponse) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	eventJSON, _ := json.Marshal(result.RotationEvent)
 	eventRecord := store.EventRecord{
@@ -2036,7 +2051,12 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 		NextKeyDigest:  result.NewNextKeyDigest,
 		Timestamp:      now,
 		RawBytesB64:    result.RawBytesB64,
-		CesrSignature:  req.CesrSignature,
+		// What the engine added it with: a rotation is added only signed by
+		// the key it reveals, so whatever a caller sent beside it is not it.
+		Signatures: result.Signatures,
+	}
+	if len(result.Signatures) > 0 {
+		eventRecord.CesrSignature = result.Signatures[0]
 	}
 	if err := s.DataStore.SaveEvent(eventRecord); err != nil {
 		log.Printf("[identity-agent-core] Warning: failed to persist rotation event: %v", err)
@@ -2049,7 +2069,7 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 		// Without this the record still named the founding generation, and
 		// after one rotation this Identity Agent took its own key for one
 		// held elsewhere and refused to sign or rotate again.
-		gen, genErr := s.ownGenerationOf(result.NewPublicKey)
+		_, gen, genErr := s.ownKeyAt(result.NewPublicKey)
 		identity.PublicKey = result.NewPublicKey
 		identity.NextKeyDigest = result.NewNextKeyDigest
 		identity.EventCount = result.SequenceNumber + 1
@@ -2062,9 +2082,6 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[identity-agent-core] ROTATION: Key rotated for AID: %s (sn: %d)", result.AID, result.SequenceNumber)
 	s.broadcastWitnessEvent(eventRecord)
 	s.notifyBackupEvent(backup.EventKeyRotation)
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
 }
 
 func (s *CoreServer) handleInteract(w http.ResponseWriter, r *http.Request) {
@@ -3709,7 +3726,7 @@ func (s *CoreServer) broadcastWitnessEvent(record store.EventRecord) {
 			record.AID, record.SequenceNumber, err)
 		return
 	}
-	s.triggerWitnessBroadcast(record.AID, raw, record.CesrSignature)
+	s.triggerWitnessBroadcast(record.AID, raw, record.ControllerSignatures()...)
 }
 
 func (s *CoreServer) handlePublicCredentialServe(w http.ResponseWriter, r *http.Request) {
@@ -4937,13 +4954,15 @@ func (s *CoreServer) reloadIdentityIntoDriver() {
 	kel, rawEvents, lastSAID, lastSN := kelFromEvents(events)
 
 	req := &drivers.DriverReloadIdentityRequest{
-		AID:            identity.AID,
-		PublicKey:      identity.PublicKey,
-		NextKeyDigest:  identity.NextKeyDigest,
-		SequenceNumber: lastSN,
-		LastSAID:       lastSAID,
-		KEL:            kel,
-		RawEventsB64:   rawEvents,
+		AID:               identity.AID,
+		PublicKey:         identity.PublicKey,
+		NextKeyDigest:     identity.NextKeyDigest,
+		SequenceNumber:    lastSN,
+		LastSAID:          lastSAID,
+		KEL:               kel,
+		RawEventsB64:      rawEvents,
+		Signatures:        signaturesOf(events),
+		UnsignedAtUpgrade: markedUnsignedOf(events),
 	}
 
 	result, err := s.KeriDriver.ReloadIdentity(req)
@@ -4959,6 +4978,34 @@ func (s *CoreServer) reloadIdentityIntoDriver() {
 // parsed, the bytes it was published as beside it, and the tip. Bytes are
 // carried so an engine can verify the history rather than only continue it;
 // they are empty for events stored before the canonical bytes were kept.
+// markedUnsignedOf is which events were marked unsigned at upgrade, parallel to
+// the events kelFromEvents reads.
+func markedUnsignedOf(events []store.EventRecord) []bool {
+	out := make([]bool, 0, len(events))
+	for _, ev := range events {
+		var ked map[string]interface{}
+		if json.Unmarshal([]byte(ev.EventJSON), &ked) != nil {
+			continue
+		}
+		out = append(out, ev.UnsignedAtUpgrade)
+	}
+	return out
+}
+
+// signaturesOf are the signatures stored with each event, parallel to the
+// events kelFromEvents reads.
+func signaturesOf(events []store.EventRecord) [][]string {
+	out := make([][]string, 0, len(events))
+	for _, ev := range events {
+		var ked map[string]interface{}
+		if json.Unmarshal([]byte(ev.EventJSON), &ked) != nil {
+			continue
+		}
+		out = append(out, ev.ControllerSignatures())
+	}
+	return out
+}
+
 func kelFromEvents(events []store.EventRecord) ([]map[string]interface{}, []string, string, int) {
 	kel := make([]map[string]interface{}, 0, len(events))
 	raws := make([]string, 0, len(events))

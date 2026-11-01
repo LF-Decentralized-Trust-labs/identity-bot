@@ -163,6 +163,16 @@ func TestTheOwnerOnlyListIsTheOneTheADRRecords(t *testing.T) {
 		"POST /api/backup/pull/{destID}",
 		"POST /api/sign",
 		"POST /api/events/signature",
+		// Key events, which ADR-050 lists under who the owner is, prepared and
+		// committed signed (ADR-061).
+		"POST /api/events/prepare",
+		"POST /api/events/commit",
+		// Installing a key log, which decides what the identity is: the
+		// root of trust (ADR-061).
+		"POST /api/identity/restore",
+		// The messaging keys an identity commits to, which ADR-050 lists
+		// under the root of trust as preparing them is (ADR-061).
+		"POST /api/keystore/messaging-seed",
 		"POST /api/signing-requests/{id}/fulfil",
 		"POST /api/signing-requests/{id}/refuse",
 		"POST /api/signing-requests/sign-for-another",

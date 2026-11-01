@@ -83,8 +83,8 @@ func saveEvent(ex sqlExecer, record EventRecord) error {
 	// event exists. A plain insert made attaching one impossible.
 	_, err := ex.Exec(`
 		INSERT INTO kel (aid, seq_num, event_type, event_json, public_key,
-		                 next_key_digest, timestamp, cesr_signature, raw_bytes_b64)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		                 next_key_digest, timestamp, cesr_signature, raw_bytes_b64, signatures)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(aid, seq_num) DO UPDATE SET
 		    event_json     = excluded.event_json,
 		    next_key_digest = excluded.next_key_digest,
@@ -100,10 +100,11 @@ func saveEvent(ex sqlExecer, record EventRecord) error {
 		    -- empty one. A later write that simply does not carry them must not
 		    -- erase what an earlier one established.
 		    cesr_signature = CASE WHEN excluded.cesr_signature != '' THEN excluded.cesr_signature ELSE kel.cesr_signature END,
-		    raw_bytes_b64  = CASE WHEN excluded.raw_bytes_b64 != '' THEN excluded.raw_bytes_b64 ELSE kel.raw_bytes_b64 END`,
+		    raw_bytes_b64  = CASE WHEN excluded.raw_bytes_b64 != '' THEN excluded.raw_bytes_b64 ELSE kel.raw_bytes_b64 END,
+		    signatures     = CASE WHEN excluded.signatures != '' THEN excluded.signatures ELSE kel.signatures END`,
 		record.AID, record.SequenceNumber, record.EventType, record.EventJSON,
 		record.PublicKey, record.NextKeyDigest, record.Timestamp,
-		record.CesrSignature, record.RawBytesB64,
+		record.CesrSignature, record.RawBytesB64, signaturesColumn(record),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to save KEL event: %w", err)
@@ -111,23 +112,98 @@ func saveEvent(ex sqlExecer, record EventRecord) error {
 	return nil
 }
 
+// signaturesColumn is the signatures column's value: a JSON list, or empty
+// when the record carries none of its own.
+func signaturesColumn(record EventRecord) string {
+	return SignatureListColumn(record.Signatures)
+}
+
+// SignatureListColumn is a list of signatures over an event as a column holds
+// it: a JSON list, or empty for none. The one format every table keeping an
+// event's signatures uses.
+func SignatureListColumn(sigs []string) string {
+	if len(sigs) == 0 {
+		return ""
+	}
+	b, _ := json.Marshal(sigs)
+	return string(b)
+}
+
+// ReadSignatureListColumn reads a column SignatureListColumn wrote.
+func ReadSignatureListColumn(stored string) ([]string, error) {
+	if stored == "" {
+		return nil, nil
+	}
+	var sigs []string
+	if err := json.Unmarshal([]byte(stored), &sigs); err != nil {
+		return nil, err
+	}
+	return sigs, nil
+}
+
+func (s *SQLiteStore) SaveSupersedingEvent(record EventRecord) error {
+	aid, fromSN := record.AID, record.SequenceNumber
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`
+		INSERT OR IGNORE INTO kel_superseded (aid, seq_num, event_type, event_json, public_key, next_key_digest,
+		                            timestamp, cesr_signature, raw_bytes_b64, signatures, unsigned_at_upgrade)
+		SELECT aid, seq_num, event_type, event_json, public_key, next_key_digest,
+		       timestamp, cesr_signature, raw_bytes_b64, signatures, unsigned_at_upgrade
+		  FROM kel WHERE aid = ? AND seq_num >= ?`, aid, fromSN); err != nil {
+		return fmt.Errorf("could not keep the superseded events: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM kel WHERE aid = ? AND seq_num >= ?`, aid, fromSN); err != nil {
+		return fmt.Errorf("could not move the superseded events out of the log: %w", err)
+	}
+	if err := saveEvent(tx, record); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *SQLiteStore) SupersededEvents(aid string) ([]EventRecord, error) {
+	rows, err := s.db.Query(
+		`SELECT aid, seq_num, event_type, event_json, public_key, next_key_digest,
+		        timestamp, cesr_signature, raw_bytes_b64, signatures, unsigned_at_upgrade
+		 FROM kel_superseded WHERE aid = ? ORDER BY rowid ASC`, aid)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query superseded events: %w", err)
+	}
+	defer rows.Close()
+	return scanEvents(rows)
+}
+
 func (s *SQLiteStore) GetEvents(aid string) ([]EventRecord, error) {
 	rows, err := s.db.Query(
 		`SELECT aid, seq_num, event_type, event_json, public_key, next_key_digest,
-		        timestamp, cesr_signature, raw_bytes_b64
+		        timestamp, cesr_signature, raw_bytes_b64, signatures, unsigned_at_upgrade
 		 FROM kel WHERE aid = ? ORDER BY seq_num ASC`, aid)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query KEL: %w", err)
 	}
 	defer rows.Close()
+	return scanEvents(rows)
+}
 
+// scanEvents reads kel rows selected with the columns GetEvents names.
+func scanEvents(rows *sql.Rows) ([]EventRecord, error) {
 	var events []EventRecord
 	for rows.Next() {
 		var e EventRecord
+		var sigs string
 		if err := rows.Scan(&e.AID, &e.SequenceNumber, &e.EventType, &e.EventJSON,
 			&e.PublicKey, &e.NextKeyDigest, &e.Timestamp,
-			&e.CesrSignature, &e.RawBytesB64); err != nil {
+			&e.CesrSignature, &e.RawBytesB64, &sigs, &e.UnsignedAtUpgrade); err != nil {
 			return nil, fmt.Errorf("failed to scan KEL row: %w", err)
+		}
+		var err error
+		if e.Signatures, err = ReadSignatureListColumn(sigs); err != nil {
+			return nil, fmt.Errorf("the signatures stored with event %d of %s are unreadable: %w",
+				e.SequenceNumber, e.AID, err)
 		}
 		events = append(events, e)
 	}
@@ -181,7 +257,30 @@ func (s *SQLiteStore) GetIdentity() (*IdentityState, error) {
 }
 
 func (s *SQLiteStore) SaveIdentity(state IdentityState) error {
-	_, err := s.db.Exec(`
+	return saveIdentity(s.db, state)
+}
+
+// SaveRestoredIdentity saves an identity's whole key log and its record in one
+// transaction, so a restore that fails partway leaves nothing behind it.
+func (s *SQLiteStore) SaveRestoredIdentity(events []EventRecord, state IdentityState) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, ev := range events {
+		if err := saveEvent(tx, ev); err != nil {
+			return err
+		}
+	}
+	if err := saveIdentity(tx, state); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func saveIdentity(ex sqlExecer, state IdentityState) error {
+	_, err := ex.Exec(`
 		-- Pinned to one row, deliberately.
 		--
 		-- The table has no primary key, so ON CONFLICT(rowid) never fired and

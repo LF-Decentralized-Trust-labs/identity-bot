@@ -1,6 +1,10 @@
 package witness
 
-import "time"
+import (
+	"time"
+
+	"identity-agent-core/store"
+)
 
 // Witness protocol constants.
 const (
@@ -128,6 +132,28 @@ type KelEvent struct {
 	// Empty for events stored before a witness kept them.
 	RawBytesB64   string
 	CesrSignature string
+	// Signatures are the controller signatures over the event that verified
+	// when it arrived or since, as attached. Empty on events stored before a
+	// witness kept them, which hold CesrSignature only.
+	Signatures []string
+}
+
+// ControllerSignatures are the controller signatures held for the event.
+func (e KelEvent) ControllerSignatures() []string {
+	return store.ControllerSignaturesOf(e.Signatures, e.CesrSignature)
+}
+
+// KelConflict is a correctly signed event that arrived at a place this witness
+// already holds a different event at, and could not replace it. Kept with the
+// held event's SAID, the pair is evidence of duplicity.
+type KelConflict struct {
+	SignerAID   string
+	SequenceNum int
+	EventSAID   string
+	RawBytesB64 string
+	Signatures  []string
+	HeldSAID    string
+	SeenAt      string
 }
 
 // IssuedReceipt is a CESR receipt this agent issued as witness.

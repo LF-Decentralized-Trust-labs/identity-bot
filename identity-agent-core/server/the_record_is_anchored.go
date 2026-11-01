@@ -469,6 +469,7 @@ func (s *CoreServer) reloadRecordIdentity() {
 	}
 	if _, err := s.KeriDriver.ReloadIdentity(&drivers.DriverReloadIdentityRequest{
 		AID: rec.AID, PublicKey: pub, SequenceNumber: lastSN, LastSAID: lastSAID, KEL: kel, RawEventsB64: raws,
+		Signatures: signaturesOf(events), UnsignedAtUpgrade: markedUnsignedOf(events),
 	}); err != nil {
 		log.Printf("[record] the record identity %s could not be reloaded: %v", rec.AID, err)
 	}

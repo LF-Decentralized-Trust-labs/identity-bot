@@ -9,10 +9,22 @@ type Store interface {
 	SaveContactMeta(m ContactMeta) error
 	ListContactMeta() ([]ContactMeta, error)
 
+	// StoreKelEvent stores an event at a place the log does not hold yet,
+	// and fails if it already holds one there.
 	StoreKelEvent(ev KelEvent) error
 	GetKelEvents(signerAID string) ([]KelEvent, error)
 	LastKelSeq(signerAID string) (int, error)
 	CountKelEvents(signerAID string) (int, error)
+	// SetKelSignatures replaces the signatures held for the event at seq.
+	SetKelSignatures(signerAID string, seq int, signatures []string) error
+	// SupersedeKelEvents moves every event at or after by's place to the
+	// superseded record and stores by in their stead, in one transaction,
+	// only while the log still ends at tip: the events it judged by.
+	SupersedeKelEvents(signerAID string, by KelEvent, tip int) error
+	GetSupersededKelEvents(signerAID string) ([]KelEvent, error)
+	// SaveKelConflict keeps a conflicting event, once.
+	SaveKelConflict(c KelConflict) error
+	GetKelConflicts(signerAID string) ([]KelConflict, error)
 
 	SaveIssuedReceipt(r IssuedReceipt) error
 	// GetIssuedReceipt is the receipt this agent issued for an event, or nil.

@@ -44,6 +44,33 @@ type EventRecord struct {
 	// unverifiable rather than treated as passing, because the whole point is
 	// that an unchecked digest is what got us here.
 	RawBytesB64 string `json:"raw_bytes_b64,omitempty"`
+	// Signatures are every controller signature over the event, each indexed
+	// as KERI attaches it. An event with several signers carries several;
+	// CesrSignature is the first, kept for readers of one.
+	Signatures []string `json:"signatures,omitempty"`
+	// UnsignedAtUpgrade marks an event that was already in the log without a
+	// signature when this version first ran. Only such an event may have a
+	// signature attached after it was added; every event added since is added
+	// signed or not at all (ADR-061).
+	UnsignedAtUpgrade bool `json:"unsigned_at_upgrade,omitempty"`
+}
+
+// ControllerSignatures are the signatures stored over the event, in whichever
+// field an earlier version wrote them.
+func (e EventRecord) ControllerSignatures() []string {
+	return ControllerSignaturesOf(e.Signatures, e.CesrSignature)
+}
+
+// ControllerSignaturesOf is an event's signatures from a list and the one
+// signature kept before lists were: the list where there is one.
+func ControllerSignaturesOf(list []string, single string) []string {
+	if len(list) > 0 {
+		return list
+	}
+	if single != "" {
+		return []string{single}
+	}
+	return nil
 }
 
 type IdentityState struct {
@@ -557,6 +584,17 @@ type ServiceProviderRecord struct {
 type Store interface {
 	SaveEvent(record EventRecord) error
 	GetEvents(aid string) ([]EventRecord, error)
+	// SaveSupersedingEvent saves record, a recovery rotation, at its sequence
+	// number, and in the same write moves the events of its identity from that
+	// sequence number on out of the key log, into the record of what was
+	// superseded. Nothing is deleted, and either both happen or neither.
+	SaveSupersedingEvent(record EventRecord) error
+	// SaveRestoredIdentity saves an identity's whole key log and its record
+	// together: all of it or none.
+	SaveRestoredIdentity(events []EventRecord, state IdentityState) error
+	// SupersededEvents are what SaveSupersedingEvent moved aside for aid,
+	// oldest first.
+	SupersededEvents(aid string) ([]EventRecord, error)
 	// AIDsOfEvent are the identities whose stored key log holds an event
 	// whose own identifier (its d field) is said. An Identity Agent keeps
 	// more than one identity's log — its own, its record identity's, others
@@ -751,6 +789,63 @@ func (s *FileStore) SaveEvent(record EventRecord) error {
 	events = append(events, record)
 
 	return s.writeJSON(filepath.Join(s.dir, "kel.json"), events)
+}
+
+// SaveSupersedingEvent writes the record of what was superseded first and the
+// log, with the rotation in place of what it superseded, second, so a crash
+// between the two leaves the events in both places rather than in neither.
+func (s *FileStore) SaveSupersedingEvent(record EventRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	aid, fromSN := record.AID, record.SequenceNumber
+	events, err := s.loadEvents()
+	if err != nil {
+		return err
+	}
+	var aside []EventRecord
+	if b, err := os.ReadFile(filepath.Join(s.dir, "kel_superseded.json")); err == nil {
+		_ = json.Unmarshal(b, &aside)
+	}
+	kept := events[:0]
+	for _, e := range events {
+		if e.AID == aid && e.SequenceNumber >= fromSN {
+			aside = append(aside, e)
+			continue
+		}
+		kept = append(kept, e)
+	}
+	if err := s.writeJSON(filepath.Join(s.dir, "kel_superseded.json"), aside); err != nil {
+		return err
+	}
+	return s.writeJSON(filepath.Join(s.dir, "kel.json"), append(kept, record))
+}
+
+func (s *FileStore) SupersededEvents(aid string) ([]EventRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var aside, out []EventRecord
+	if b, err := os.ReadFile(filepath.Join(s.dir, "kel_superseded.json")); err == nil {
+		if err := json.Unmarshal(b, &aside); err != nil {
+			return nil, err
+		}
+	}
+	for _, e := range aside {
+		if e.AID == aid {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+// SaveRestoredIdentity writes the log first and the identity record last, so
+// an identity is never recorded over a log that is not all there.
+func (s *FileStore) SaveRestoredIdentity(events []EventRecord, state IdentityState) error {
+	for _, ev := range events {
+		if err := s.SaveEvent(ev); err != nil {
+			return err
+		}
+	}
+	return s.SaveIdentity(state)
 }
 
 func (s *FileStore) GetEvents(aid string) ([]EventRecord, error) {

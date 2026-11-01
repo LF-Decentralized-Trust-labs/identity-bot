@@ -43,7 +43,15 @@ func (s *CoreServer) handleWitnessEvent(w http.ResponseWriter, r *http.Request) 
 		AID           string `json:"aid"`
 		EventB64      string `json:"event_b64"`
 		CesrSignature string `json:"cesr_signature"`
+		// Every controller signature, for an identity with several signers:
+		// the whole list, with cesr_signature its first. A sender that
+		// sends only extra signatures here is read the same way; the same
+		// signature twice counts once.
+		CesrSignatures []string `json:"cesr_signatures"`
 	}
+	// Bounded as a key event sent to the core is: the event and a signature
+	// per signer.
+	r.Body = http.MaxBytesReader(w, r.Body, maxKeyEventBody)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid body", err.Error())
 		return
@@ -59,7 +67,11 @@ func (s *CoreServer) handleWitnessEvent(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "invalid_event_bytes", err.Error())
 		return
 	}
-	result, err := s.WitnessService.ReceiveEvent(req.AID, rawEvent, req.CesrSignature)
+	sigs := req.CesrSignatures
+	if req.CesrSignature != "" {
+		sigs = append([]string{req.CesrSignature}, sigs...)
+	}
+	result, err := s.WitnessService.ReceiveSignedEvent(req.AID, rawEvent, sigs)
 	if err != nil {
 		switch err.Error() {
 		case "unsigned_event":
@@ -208,7 +220,7 @@ func (s *CoreServer) handleWitnessAccept(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(map[string]string{"status": "received", "decision": req.Decision})
 }
 
-func (s *CoreServer) triggerWitnessBroadcast(signerAID string, rawEvent []byte, cesrSig string) {
+func (s *CoreServer) triggerWitnessBroadcast(signerAID string, rawEvent []byte, cesrSigs ...string) {
 	if s.WitnessService == nil || len(rawEvent) == 0 {
 		return
 	}
@@ -216,7 +228,7 @@ func (s *CoreServer) triggerWitnessBroadcast(signerAID string, rawEvent []byte, 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := s.WitnessService.BroadcastEvent(ctx, signerAID, rawEvent, cesrSig); err != nil {
+	if err := s.WitnessService.BroadcastEvent(ctx, signerAID, rawEvent, cesrSigs...); err != nil {
 		log.Printf("[witness] broadcast failed: %v", err)
 	}
 }

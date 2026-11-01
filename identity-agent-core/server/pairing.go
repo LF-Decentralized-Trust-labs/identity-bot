@@ -586,7 +586,7 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 			s.inBackground(func(ctx context.Context) {
 				ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 				defer cancel()
-				if berr := s.WitnessService.BroadcastToDesignated(ctx, aid, body, sig, foundedNamed, foundedToad); berr != nil {
+				if berr := s.WitnessService.BroadcastToDesignated(ctx, aid, body, []string{sig}, foundedNamed, foundedToad); berr != nil {
 					log.Printf("[pairing] %s named witnesses but they did not accept its "+
 						"inception (%v) — its history is uncorroborated until they do", aid, berr)
 				}

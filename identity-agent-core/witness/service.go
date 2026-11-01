@@ -6,7 +6,9 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"log"
 	"net/http"
@@ -41,6 +43,12 @@ type Service struct {
 	HTTPClient  *http.Client
 	PostEvent   EventPoster
 	delegatesMu sync.Mutex
+	// receiving is a fixed set of locks, one chosen by a hash of the
+	// identity, so one identity's events are judged and stored one at a time:
+	// an event judged against a log another event is changing could be stored
+	// on a history that no longer exists. Fixed, so identifiers anybody can
+	// send cannot grow it; two identities sharing a lock only wait in turn.
+	receiving [receivingLocks]sync.Mutex
 	// confirmed is, by identity and witness, the furthest place a witness
 	// has confirmed holding: by its signed tip, or its receipt.
 	confirmed sync.Map
@@ -149,8 +157,8 @@ func (s *Service) EventAt(aid string, sn int) (SignedEvent, error) {
 		return SignedEvent{}, err
 	}
 	for _, e := range kel {
-		if e.SequenceNum == sn && e.RawBytesB64 != "" && e.CesrSignature != "" {
-			return SignedEvent{RawBytesB64: e.RawBytesB64, CesrSignature: e.CesrSignature}, nil
+		if sigs := e.ControllerSignatures(); e.SequenceNum == sn && e.RawBytesB64 != "" && len(sigs) > 0 {
+			return SignedEvent{RawBytesB64: e.RawBytesB64, CesrSignature: sigs[0], Signatures: sigs}, nil
 		}
 	}
 	return SignedEvent{}, fmt.Errorf("not_found")
@@ -202,6 +210,9 @@ func (s *Service) defaultFetchTip(ctx context.Context, url string) (TipAnswer, e
 type SignedEvent struct {
 	RawBytesB64   string `json:"raw_bytes_b64"`
 	CesrSignature string `json:"cesr_signature"`
+	// Signatures are every controller signature over the event, for an
+	// identity with several signers; CesrSignature is the first.
+	Signatures []string `json:"cesr_signatures,omitempty"`
 }
 
 // TipAnswer is a witness's answer to how far it holds an identity's key log:
@@ -398,6 +409,22 @@ func (s *Service) OOBIExtensions() map[string]interface{} {
 // evidence that somebody sent a JSON object, which is not what a receipt is
 // read as meaning.
 func (s *Service) ReceiveEvent(signerAID string, rawEvent []byte, cesrSig string) (map[string]interface{}, error) {
+	var sigs []string
+	if cesrSig != "" {
+		sigs = []string{cesrSig}
+	}
+	return s.ReceiveSignedEvent(signerAID, rawEvent, sigs)
+}
+
+// ReceiveSignedEvent is ReceiveEvent for an event carrying any number of
+// controller signatures: one for each signer of an identity with several. It is
+// judged against the key log held here by keri-go's Admit, so it is receipted
+// when it extends the log, repeats an event the log holds, or is a recovery
+// rotation replacing the interactions after the last establishment event (those
+// are kept as superseded, never deleted). A correctly signed event at a place
+// the log holds a different event at, which may not replace it, is refused and
+// kept as evidence of duplicity.
+func (s *Service) ReceiveSignedEvent(signerAID string, rawEvent []byte, sigs []string) (map[string]interface{}, error) {
 	if len(rawEvent) == 0 {
 		return nil, fmt.Errorf("missing_event_bytes")
 	}
@@ -411,7 +438,10 @@ func (s *Service) ReceiveEvent(signerAID string, rawEvent []byte, cesrSig string
 	if signerAID == "" {
 		return nil, fmt.Errorf("missing signer aid")
 	}
-	if cesrSig == "" {
+	mu := s.receivingLock(signerAID)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sigs) == 0 {
 		// Refused rather than receipted unsigned. A witness that will attest to
 		// an unsigned event is a witness anyone can make say anything, and its
 		// receipts stop distinguishing a real history from an invented one.
@@ -449,19 +479,48 @@ func (s *Service) ReceiveEvent(signerAID string, rawEvent []byte, cesrSig string
 	if err != nil {
 		return nil, fmt.Errorf("invalid_sequence")
 	}
-	last, _ := s.Store.LastKelSeq(signerAID)
-	if last >= 0 && seq <= last {
-		// One already held is answered with its receipt, so somebody sending
-		// a key log again from where they think this witness stopped carries
-		// on. Something else at that place is a conflicting history.
-		return s.alreadyHeld(signerAID, seq, eventSAID(event))
+	if last, _ := s.Store.LastKelSeq(signerAID); seq > last+1 {
+		return nil, errSequenceGap
 	}
-	if last >= 0 && seq != last+1 {
-		return nil, fmt.Errorf("sequence_gap")
-	}
-
-	if err := s.verifyEventChain(signerAID, rawEvent, cesrSig, seq); err != nil {
+	got, err := s.admit(signerAID, rawEvent, sigs)
+	switch {
+	case errors.Is(err, errUnverifiableLog):
+		if last, _ := s.Store.LastKelSeq(signerAID); last >= 0 && seq <= last {
+			return s.alreadyHeld(signerAID, seq, eventSAID(event))
+		}
 		return nil, fmt.Errorf("rejected: %w", err)
+	case errors.Is(err, errPlaceTaken):
+		// An interaction a recovery rotation replaced, sent again, is kept
+		// as superseded already: it is not evidence of duplicity.
+		if got != nil && got.conflict != nil && !s.supersededHere(signerAID, got.conflict.EventSAID) {
+			got.conflict.SeenAt = NowRFC3339()
+			if serr := s.Store.SaveKelConflict(*got.conflict); serr != nil {
+				log.Printf("[witness] could not keep a conflicting event of %s: %v", signerAID, serr)
+			}
+		}
+		return nil, errPlaceTaken
+	case errors.Is(err, errSequenceGap):
+		return nil, errSequenceGap
+	case err != nil && err.Error() == "unsigned_event":
+		return nil, err
+	case err != nil:
+		return nil, fmt.Errorf("rejected: %w", err)
+	}
+	if got.Repeat {
+		// A repeat may carry signatures this witness did not hold, which
+		// are kept; it is answered with the receipt already issued.
+		if got.held != nil {
+			merged := mergeSignatures(got.held.ControllerSignatures(), got.Signatures)
+			if len(merged) > len(got.held.ControllerSignatures()) {
+				if err := s.Store.SetKelSignatures(signerAID, seq, merged); err != nil {
+					return nil, err
+				}
+			}
+		}
+		if held, err := s.alreadyHeld(signerAID, seq, eventSAID(event)); err == nil {
+			return held, nil
+		}
+		// Held, but never receipted here: receipted now.
 	}
 	if enrolAs != "" {
 		if err := s.enrollWitnessingFor(signerAID, enrolAs); err != nil {
@@ -474,14 +533,24 @@ func (s *Service) ReceiveEvent(signerAID string, rawEvent []byte, cesrSig string
 	said := eventSAID(event)
 	// The published bytes are stored alongside the readable form. Storing only
 	// the readable form is what made every event a witness held unverifiable
-	// after the fact.
-	if err := s.Store.StoreKelEvent(KelEvent{
+	// after the fact. Only the signatures that verified are kept.
+	stored := KelEvent{
 		SignerAID: signerAID, SequenceNum: seq, EventJSON: string(rawEvent),
 		EventSAID: said, StoredAt: now,
-		RawBytesB64:   base64.StdEncoding.EncodeToString(rawEvent),
-		CesrSignature: cesrSig,
-	}); err != nil {
-		return nil, err
+		RawBytesB64: base64.StdEncoding.EncodeToString(rawEvent),
+		Signatures:  got.Signatures,
+	}
+	switch {
+	case got.Repeat:
+	case got.Supersedes > 0:
+		if err := s.Store.SupersedeKelEvents(signerAID, stored,
+			int(got.Log.State().SN())+got.Supersedes-1); err != nil {
+			return nil, err
+		}
+	default:
+		if err := s.Store.StoreKelEvent(stored); err != nil {
+			return nil, err
+		}
 	}
 
 	// Signed with a key, or not issued at all.
@@ -528,47 +597,38 @@ func (s *Service) ReceiveEvent(signerAID string, rawEvent []byte, cesrSig string
 	}, nil
 }
 
-// verifyEventChain checks that the new event extends a log this identity
-// actually published, and that this identity signed it.
-//
-// Runs over canonical bytes, which is what makes it a check at all. The
-// previous version compared parsed events, so it could confirm that the fields
-// referred to each other and nothing more — a forged log satisfies that, since
-// whoever forged it wrote every field.
-func (s *Service) verifyEventChain(signerAID string, rawEvent []byte, cesrSig string, seq int) error {
-	existing, _ := s.Store.GetKelEvents(signerAID)
+// receivingLocks is how many locks events are judged under.
+const receivingLocks = 64
 
-	raws := make([][]byte, 0, len(existing)+1)
-	sigs := make([]string, 0, len(existing)+1)
-	for _, e := range existing {
-		if e.RawBytesB64 == "" {
-			// Stored before a witness kept the published bytes. The history
-			// cannot be verified, so it is not offered up as though it had
-			// been; the new event is checked on its own instead.
-			raws = raws[:0]
-			sigs = sigs[:0]
-			break
-		}
-		raw, err := base64.StdEncoding.DecodeString(e.RawBytesB64)
-		if err != nil {
-			return fmt.Errorf("stored_event_unreadable")
-		}
-		raws = append(raws, raw)
-		sigs = append(sigs, e.CesrSignature)
-	}
-	raws = append(raws, rawEvent)
-	sigs = append(sigs, cesrSig)
+// receivingLock is the lock aid's events are judged and stored under.
+func (s *Service) receivingLock(aid string) *sync.Mutex {
+	h := fnv.New32a()
+	h.Write([]byte(aid))
+	return &s.receiving[h.Sum32()%receivingLocks]
+}
 
-	res, err := drivers.ValidateKELFromBytes(drivers.ValidateKELInput{
-		AID: signerAID, RawEvents: raws, CesrSignatures: sigs,
-	})
-	if err != nil {
-		return err
+// eventBody is an event as it is sent to a witness: its published bytes and
+// every controller signature over them. cesr_signatures is the whole list and
+// cesr_signature its first, for a witness that reads one.
+func eventBody(signerAID, rawB64 string, sigs []string) []byte {
+	sigs = nonEmpty(sigs)
+	m := map[string]interface{}{"aid": signerAID, "event_b64": rawB64, "cesr_signature": ""}
+	if len(sigs) > 0 {
+		m["cesr_signature"] = sigs[0]
+		m["cesr_signatures"] = sigs
 	}
-	if !res.KelVerified {
-		return fmt.Errorf("kel_verify_failed: %s", strings.Join(res.ValidationErrors, "; "))
+	body, _ := json.Marshal(m)
+	return body
+}
+
+func nonEmpty(sigs []string) []string {
+	var out []string
+	for _, s := range sigs {
+		if s != "" {
+			out = append(out, s)
+		}
 	}
-	return nil
+	return out
 }
 
 // GetKelReplica implements C4.
@@ -588,7 +648,7 @@ func (s *Service) GetKelReplica(signerAID string) ([]map[string]interface{}, err
 // Sends the event as published, with the controller's signature over those
 // bytes. A witness cannot earn its receipt without both, so sending anything
 // less would be asking for an attestation nobody could make honestly.
-func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent []byte, cesrSig string) error {
+func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent []byte, cesrSigs ...string) error {
 	if len(rawEvent) == 0 {
 		return fmt.Errorf("an event cannot be broadcast without the bytes it was published as")
 	}
@@ -596,7 +656,7 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 	if err := json.Unmarshal(rawEvent, &event); err != nil {
 		return fmt.Errorf("the event to broadcast is not readable: %w", err)
 	}
-	if cesrSig == "" {
+	if len(nonEmpty(cesrSigs)) == 0 {
 		// Reported rather than sent. Every witness would refuse it, so sending
 		// it would turn one local fault into a round of remote refusals whose
 		// cause is much harder to see from here.
@@ -622,11 +682,7 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 		StartedAt: now, UpdatedAt: now,
 	})
 
-	body, _ := json.Marshal(map[string]interface{}{
-		"aid":            signerAID,
-		"event_b64":      base64.StdEncoding.EncodeToString(rawEvent),
-		"cesr_signature": cesrSig,
-	})
+	body := eventBody(signerAID, base64.StdEncoding.EncodeToString(rawEvent), cesrSigs)
 	for _, w := range witnesses {
 		url := witnessEventURL(w)
 		go s.postWithRetry(ctx, url, body, said, w.AID)
@@ -728,12 +784,11 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 				// An event not yet signed ends this witness's pass. A witness
 				// cannot verify it and refuses it, and every event after it
 				// would be held back as a gap; it is sent once it is signed.
-				if e.CesrSignature == "" {
+				sigs := store.ControllerSignaturesOf(e.Signatures, e.CesrSignature)
+				if len(sigs) == 0 {
 					return
 				}
-				body, _ := json.Marshal(map[string]interface{}{
-					"aid": signerAID, "event_b64": e.RawBytesB64, "cesr_signature": e.CesrSignature,
-				})
+				body := eventBody(signerAID, e.RawBytesB64, sigs)
 				said := eventSAID(ev)
 				resp, err := s.PostEvent(ctx, witnessEventURL(w), body)
 				if err != nil {
@@ -756,12 +811,12 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 // log designates, found by their keys among this agent's witnesses and the
 // bootstrap pool, and keeps the receipts they return. Used for an identity
 // that names its delegator's witnesses rather than ones chosen for it here.
-func (s *Service) BroadcastToDesignated(ctx context.Context, signerAID string, rawEvent []byte, cesrSig string, designated []string, threshold int) error {
+func (s *Service) BroadcastToDesignated(ctx context.Context, signerAID string, rawEvent []byte, cesrSigs []string, designated []string, threshold int) error {
 	var event map[string]interface{}
 	if err := json.Unmarshal(rawEvent, &event); err != nil {
 		return fmt.Errorf("the event to broadcast is not readable: %w", err)
 	}
-	if cesrSig == "" {
+	if len(nonEmpty(cesrSigs)) == 0 {
 		return fmt.Errorf("refusing to broadcast an unsigned event for %s", signerAID)
 	}
 	known := s.designatedTargets(designated)
@@ -772,9 +827,7 @@ func (s *Service) BroadcastToDesignated(ctx context.Context, signerAID string, r
 		EventSAID: said, SignerAID: signerAID, SequenceNum: seq,
 		State: FinalizePending, Threshold: threshold, StartedAt: now, UpdatedAt: now,
 	})
-	body, _ := json.Marshal(map[string]interface{}{
-		"aid": signerAID, "event_b64": base64.StdEncoding.EncodeToString(rawEvent), "cesr_signature": cesrSig,
-	})
+	body := eventBody(signerAID, base64.StdEncoding.EncodeToString(rawEvent), cesrSigs)
 	for _, key := range designated {
 		w, ok := known[key]
 		if !ok {
@@ -1329,6 +1382,21 @@ func (s *Service) delegatorApproves(event map[string]interface{}) (string, bool)
 
 // alreadyHeld answers an event this witness already holds at seq: with its
 // receipt when it is the same event, as a conflict when it is not.
+// supersededHere is whether this witness holds the event as replaced by a
+// recovery rotation.
+func (s *Service) supersededHere(signerAID, said string) bool {
+	gone, err := s.Store.GetSupersededKelEvents(signerAID)
+	if err != nil {
+		return false
+	}
+	for _, e := range gone {
+		if e.EventSAID == said {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Service) alreadyHeld(signerAID string, seq int, said string) (map[string]interface{}, error) {
 	held, err := s.Store.GetKelEvents(signerAID)
 	if err != nil {
