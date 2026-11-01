@@ -116,7 +116,6 @@ func ValidateKELFromBytes(in ValidateKELInput) (*DriverValidateKELResponse, erro
 	current := ""
 	// Each event's signature as KERI carries it, for the log verifier below.
 	signed := make([][]byte, 0, len(in.RawEvents))
-	sigs := make([]ControllerSignature, len(in.RawEvents))
 
 	for i, raw := range in.RawEvents {
 		ev, err := keri.ParseEvent(raw)
@@ -155,7 +154,6 @@ func ValidateKELFromBytes(in ValidateKELInput) (*DriverValidateKELResponse, erro
 			problems = append(problems, fmt.Sprintf("event %d: %v", i, err))
 			continue
 		}
-		sigs[i] = at
 		group, err := keri.AttachControllerSigs([]string{at.QB64})
 		if err != nil {
 			problems = append(problems, fmt.Sprintf("event %d: %v", i, err))
@@ -177,27 +175,22 @@ func ValidateKELFromBytes(in ValidateKELInput) (*DriverValidateKELResponse, erro
 		}
 	default:
 		// Some events arrived unsigned, so the log is not verified whatever
-		// the rest show, and the log verifier, which needs every event signed,
-		// cannot judge it. What can still be caught is a signature that is
-		// present and is not by the key in force: a log carrying one is not
-		// sound, signed or not.
-		current := ""
-		for i, raw := range in.RawEvents {
-			ev, err := keri.ParseEvent(raw)
-			if err != nil {
-				continue // reported above
-			}
-			if ev.Establishment() && len(ev.Keys) > 0 {
-				current = ev.Keys[0]
-			}
-			if sigs[i].Raw == nil {
-				continue
-			}
-			if sigs[i].At.Index != 0 || current == "" ||
-				keri.VerifySignature(current, raw, sigs[i].Raw) != nil {
+		// the rest show. The signed events before the first unsigned one are
+		// judged by the one KEL verifier as a log of their own: a log whose
+		// signed beginning was not authorised by its controller is not sound,
+		// signed or not. Past the first unsigned event there is no verified
+		// key state to judge anything against, so nothing after it is judged;
+		// the log is reported unverified, as it is.
+		first := 0
+		for first < len(in.RawEvents) && first < len(in.CesrSignatures) &&
+			in.CesrSignatures[first] != "" {
+			first++
+		}
+		if first > 0 {
+			if _, err := keri.ValidateSignedKEL(signed[:first]); err != nil {
 				problems = append(problems, fmt.Sprintf(
-					"event %d is not signed by the key it declares, so it was not authorised by "+
-						"the identity it claims to extend", i))
+					"the signed events before the first unsigned one do not show its "+
+						"controller authorised them: %v", err))
 			}
 		}
 	}

@@ -317,3 +317,21 @@ func TestRecordsWithoutCanonicalBytesAreNotTreatedAsVerifiable(t *testing.T) {
 		t.Fatal("a log missing canonical bytes was offered up as verifiable")
 	}
 }
+
+// A signed beginning of a partly signed log is judged by keri-go's log
+// verifier: one wrongly signed event there leaves the log unsound, while the
+// unsigned end leaves it unverified either way.
+func TestAPartlySignedLogsSignedBeginningIsJudged(t *testing.T) {
+	aid, raws, sigs := signedLog(t)
+	_, _, otherSigs := signedLog(t)
+	partial := append([]string{}, sigs...)
+	partial[0] = otherSigs[0]
+	partial[len(partial)-1] = ""
+	got, err := ValidateKELFromBytes(ValidateKELInput{AID: aid, RawEvents: raws, CesrSignatures: partial})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.LogSound || got.KelVerified {
+		t.Fatal("a log whose signed beginning was signed by a stranger reported as sound")
+	}
+}
