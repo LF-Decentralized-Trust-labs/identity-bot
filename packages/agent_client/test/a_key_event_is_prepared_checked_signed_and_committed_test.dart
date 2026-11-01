@@ -7,16 +7,12 @@ import 'package:agent_client/crypto/bip39.dart';
 import 'package:agent_client/services/key_math.dart';
 import 'package:agent_client/services/the_events_this_device_signed.dart';
 import 'package:agent_client/services/the_key_events_this_device_makes.dart';
-import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:test/test.dart';
 
-class _SignedByUs implements BinarySignature {
-  @override
-  Future<void> requireSameSigner(String binary, String app) async {}
-}
+import 'support/the_core.dart';
 
 /// A client whose next commit reaches the core and whose answer is lost, as
 /// when the connection drops after the core has the request.
@@ -51,32 +47,13 @@ void main() {
   final Uint8List seed = Bip39.mnemonicToSeed(mnemonic.split(' '));
 
   setUpAll(() async {
-    final dir = await Directory.systemTemp.createTemp('prepare-commit-core');
-    final bin =
-        '${dir.path}/identity-agent-core${Platform.isWindows ? '.exe' : ''}';
     // A development build: it founds an identity on a machine that cannot
     // attest, as a production build rightly refuses to.
-    final built = await Process.run(
-        'go',
-        [
-          'build',
-          '-ldflags',
-          '-X identity-agent-core/buildmode.rawMode=dev',
-          '-o',
-          bin,
-          '.'
-        ],
-        workingDirectory: '../../identity-agent-core');
-    if (built.exitCode != 0)
-      fail('the core could not be built for this test: ${built.stderr}');
-    km = CommandKeyMath(
-        binaryPath: bin,
-        expectedSha256:
-            crypto.sha256.convert(await File(bin).readAsBytes()).toString(),
-        signature: _SignedByUs());
+    final bin = await buildTheCore('prepare-commit-core', dev: true);
+    km = await keyMathOf(bin);
     final port = 20000 + Random().nextInt(20000);
     base = 'http://127.0.0.1:$port';
-    final data = await Directory('${dir.path}/data').create();
+    final data = await Directory('${File(bin).parent.path}/data').create();
     core = await Process.start(bin, [], environment: {
       ...Platform.environment,
       'PORT': '$port',
