@@ -86,6 +86,109 @@ func TestRelayedCallersDoNotUseUpDirectCallersShares(t *testing.T) {
 	}
 }
 
+func relayedCall(h http.HandlerFunc, visitor, forwardedFor string) int {
+	r := httptest.NewRequest(http.MethodPost, "/public/login/key", strings.NewReader(`{}`))
+	if forwardedFor != "" {
+		r.Header.Set("X-Forwarded-For", forwardedFor)
+	}
+	r = r.WithContext(relayproto.ContextWithPreamble(r.Context(),
+		relayproto.Preamble{Allocation: "a", Mode: relayproto.ModePublic, Visitor: visitor}))
+	w := httptest.NewRecorder()
+	h(w, r)
+	return w.Code
+}
+
+// When the relay passes on the visitor's address, a relayed caller who uses up
+// their share does not stop a second relayed caller.
+func TestOneRelayedCallerUsingTheirShareDoesNotStopAnother(t *testing.T) {
+	_, h := aGateAnswering(time.Second)
+	limited := false
+	for i := 0; i < keyLogChecksPerMinute+1; i++ {
+		if relayedCall(h, "192.0.2.1", "") == http.StatusTooManyRequests {
+			limited = true
+			break
+		}
+	}
+	if !limited {
+		t.Fatalf("a relayed caller was never limited")
+	}
+	if code := relayedCall(h, "192.0.2.2", ""); code != http.StatusOK {
+		t.Fatalf("a second relayed caller was answered %d after the first used up their share", code)
+	}
+}
+
+// A header the visitor sets names nobody: the share is the preamble's address.
+func TestAForwardingHeaderTheVisitorSetsIsIgnored(t *testing.T) {
+	_, h := aGateAnswering(time.Second)
+	for i := 0; i < keyLogChecksPerMinute; i++ {
+		// Each call claims a different address; none may buy a fresh share.
+		relayedCall(h, "192.0.2.1", fmt.Sprintf("198.51.100.%d", i%250))
+	}
+	if code := relayedCall(h, "192.0.2.1", "198.51.100.250"); code != http.StatusTooManyRequests {
+		t.Fatalf("a caller got %d by writing a new X-Forwarded-For", code)
+	}
+	if code := relayedCall(h, "192.0.2.2", "192.0.2.1"); code != http.StatusOK {
+		t.Fatalf("a caller was answered %d because a header named someone else's address", code)
+	}
+}
+
+// A preamble with no address, from an older relay, keeps the one shared
+// relayed budget; so does one whose address is not an address.
+func TestAPreambleWithNoAddressUsesTheSharedRelayedBudget(t *testing.T) {
+	for _, visitor := range []string{"", "not-an-address"} {
+		_, h := aGateAnswering(time.Second)
+		for i := 0; i < keyLogChecksPerMinute+10; i++ {
+			if code := relayedCall(h, visitor, ""); code != http.StatusOK {
+				t.Fatalf("visitor %q: call %d answered %d, inside the shared relayed budget", visitor, i, code)
+			}
+		}
+		limited := false
+		for i := 0; i < keyLogChecksPerMinuteRelayed; i++ {
+			if relayedCall(h, visitor, "") == http.StatusTooManyRequests {
+				limited = true
+				break
+			}
+		}
+		if !limited {
+			t.Fatalf("visitor %q: the shared relayed budget was never used up", visitor)
+		}
+	}
+}
+
+// A relay that names a new visitor on every request gets a fresh share each
+// time, but every relayed request also counts against the one relayed budget.
+func TestARelayNamingANewVisitorEachTimeIsStoppedByTheRelayedBudget(t *testing.T) {
+	_, h := aGateAnswering(time.Second)
+	limited := false
+	for i := 0; i < keyLogChecksPerMinuteRelayed+1; i++ {
+		visitor := fmt.Sprintf("10.%d.%d.1", i/250, i%250)
+		if relayedCall(h, visitor, "") == http.StatusTooManyRequests {
+			limited = true
+			break
+		}
+	}
+	if !limited {
+		t.Fatalf("%d requests, each naming a different visitor, were never limited", keyLogChecksPerMinuteRelayed+1)
+	}
+}
+
+// One visitor holds a whole IPv6 /64, so its addresses share one budget; an
+// address in another /64 has its own.
+func TestRelayedIPv6VisitorsShareTheirSixtyFour(t *testing.T) {
+	_, h := aGateAnswering(time.Second)
+	for i := 0; i < keyLogChecksPerMinute; i++ {
+		if code := relayedCall(h, fmt.Sprintf("2001:db8:1:2::%x", i+1), ""); code != http.StatusOK {
+			t.Fatalf("call %d answered %d inside the share", i, code)
+		}
+	}
+	if code := relayedCall(h, "2001:db8:1:2:ffff::9", ""); code != http.StatusTooManyRequests {
+		t.Fatalf("another address in the same /64 was answered %d, not told to come back", code)
+	}
+	if code := relayedCall(h, "2001:db8:1:3::1", ""); code != http.StatusOK {
+		t.Fatalf("an address in a different /64 was answered %d", code)
+	}
+}
+
 // An entry is filed under the identity it holds, but the file name is only
 // where it was put. One identity's entry written under another's name is not
 // answered for that other identity when the registry is loaded again.
@@ -103,5 +206,20 @@ func TestAnEntryFiledUnderAnotherIdentitysNameIsNotBelieved(t *testing.T) {
 	registry := theOrganisationsRegistry(t, &CoreServer{DataDir: dir})
 	if got := publishedKey(t, registry, x); got != "" {
 		t.Fatalf("another identity's key, filed under this one's name, was answered for it: %s", got)
+	}
+}
+
+// A relay naming a new visitor on every request cannot grow the gate's record
+// of visitors beyond what the relayed budget lets through.
+func TestARelayNamingNewVisitorsCannotGrowTheRecordPastTheBudget(t *testing.T) {
+	g, h := aGateAnswering(time.Second)
+	for i := 0; i < 3*keyLogChecksPerMinuteRelayed; i++ {
+		relayedCall(h, fmt.Sprintf("10.%d.%d.%d", i/62500, (i/250)%250, i%250), "")
+	}
+	g.byVisitor.mu.Lock()
+	n := len(g.byVisitor.seen)
+	g.byVisitor.mu.Unlock()
+	if n > keyLogChecksPerMinuteRelayed {
+		t.Fatalf("%d visitors remembered, more than the %d the relayed budget admits", n, keyLogChecksPerMinuteRelayed)
 	}
 }

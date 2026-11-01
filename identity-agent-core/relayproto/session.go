@@ -453,6 +453,12 @@ func (s *Session) Forward(w http.ResponseWriter, r *http.Request, p Preamble) {
 		http.NotFound(w, r)
 		return
 	}
+	// The visitor is the connection this relay accepted, never a header. A relay
+	// that sits behind another proxy sets p.Visitor itself from what that proxy
+	// authenticates; otherwise every visitor looks like the proxy.
+	if p.Visitor == "" {
+		p.Visitor = VisitorAddr(r.RemoteAddr)
+	}
 	if p.Mode == ModePrivate {
 		if r.ContentLength > MaxPrivateBodyBytes {
 			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)

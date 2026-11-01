@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -27,7 +28,8 @@ const (
 )
 
 // Preamble is what the relay says about a stream before any HTTP crosses it:
-// which allocation the request arrived on, in which mode, and at which host.
+// which allocation the request arrived on, in which mode, at which host, and
+// from which address.
 //
 // It is written by the relay and read by the Identity Agent before the HTTP
 // bytes, so nothing a caller puts in a request can change it. A header naming an
@@ -36,6 +38,26 @@ type Preamble struct {
 	Allocation string `json:"allocation"`
 	Mode       Mode   `json:"mode"`
 	Host       string `json:"host"`
+	// Visitor is the network address the relay saw the request arrive from, as a
+	// bare IP. Every relayed request reaches the Identity Agent from the relay's
+	// own address, so this is the only way it can tell callers apart. It is empty
+	// from a relay that does not send it, and then callers cannot be told apart.
+	Visitor string `json:"visitor,omitempty"`
+}
+
+// VisitorAddr is the bare IP in a network address such as a request's
+// RemoteAddr, or "" if it holds none. The relay uses it to fill [Preamble]'s
+// Visitor from the connection it accepted, and the Identity Agent uses it to
+// read the field back, so a malformed or oversized value is never used as a key.
+func VisitorAddr(addr string) string {
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		addr = host
+	}
+	ip, err := netip.ParseAddr(addr)
+	if err != nil {
+		return ""
+	}
+	return ip.Unmap().WithZone("").String()
 }
 
 func (p Preamble) valid() error {

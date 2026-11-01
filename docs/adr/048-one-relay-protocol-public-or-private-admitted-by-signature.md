@@ -580,3 +580,7 @@ The package's tests exercise each property above. Among them:
 - a session that cannot renew being closed;
 - a caller unable to claim another allocation or redirect a request's host;
 - one address unable to starve the others.
+
+## Amendment, 2026-11-01: the preamble names the visitor
+
+The preamble gains an optional field, `visitor`: the address the relay accepted the visitor's connection from, as a bare IP, never taken from a header the visitor sends. The Identity Agent uses it only to rate-limit relayed requests per visitor (an IPv6 visitor by its /64), and every relayed request still counts against one budget for all relayed traffic, so a relay that misreports visitors gains nothing beyond that budget. A preamble without the field, from an older relay, is read as before, and an older Identity Agent ignores the field. A relay that sits behind a proxy sets it from the address it trusts that proxy to report.

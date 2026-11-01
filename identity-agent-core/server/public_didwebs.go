@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -102,10 +103,16 @@ func (s *CoreServer) mountPublicDidWebsRoutes(r chi.Router) {
 //
 // Requests that came through the URL relay all arrive from the relay's own
 // address, so a per-address share would make one stranger's burst everyone's
-// limit. They draw on one larger budget of their own instead, so a burst
-// through the relay cannot use up direct callers' shares and the reverse.
-// Telling relayed callers apart needs the relay to pass on an address it has
-// authenticated, which it does not yet do.
+// limit. The relay passes on the address it saw the visitor connect from, in
+// the stream preamble, which a visitor cannot set; each such address gets the
+// same share as a direct caller, and a burst through the relay cannot use up a
+// direct caller's share or the reverse. An IPv6 visitor's share is its /64. A
+// header such as X-Forwarded-For is never used, because a visitor can write it.
+//
+// Every relayed request also counts against one larger budget of its own, so a
+// relay that names a new visitor each time still cannot exceed it. A preamble
+// without an address, from a relay that does not send one, draws on that
+// budget alone.
 const (
 	keyLogChecksPerMinute        = 60
 	keyLogChecksPerMinuteRelayed = 600
@@ -121,7 +128,8 @@ const (
 // run at once. A caller over either is told to come back, not queued.
 type keyLogGate struct {
 	perCaller  *attestationRateLimiter
-	relayed    *attestationRateLimiter
+	relayed    *attestationRateLimiter // every relayed request, whoever it names
+	byVisitor  *attestationRateLimiter // relayed callers by the address the relay passed on
 	running    chan struct{}
 	readWithin time.Duration
 }
@@ -130,18 +138,47 @@ func newKeyLogGate() *keyLogGate {
 	return &keyLogGate{
 		perCaller:  newAttestationRateLimiter(keyLogChecksPerMinute),
 		relayed:    newAttestationRateLimiter(keyLogChecksPerMinuteRelayed),
+		byVisitor:  newAttestationRateLimiter(keyLogChecksPerMinute),
 		running:    make(chan struct{}, keyLogChecksAtOnce),
 		readWithin: keyLogReadWithin,
 	}
 }
 
+// visitorShare is what a relayed caller's share is keyed on: the address the
+// relay passed on, or for IPv6 its /64, since one visitor commonly holds a whole
+// /64 and could otherwise take a fresh share from each address in it. It is ""
+// when the preamble holds no usable address.
+func visitorShare(visitor string) string {
+	v := relayproto.VisitorAddr(visitor)
+	if v == "" {
+		return ""
+	}
+	ip := netip.MustParseAddr(v)
+	if ip.Is6() {
+		return netip.PrefixFrom(ip, 64).Masked().String()
+	}
+	return v
+}
+
 func (g *keyLogGate) guard(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		limiter, caller := g.perCaller, callerIP(r)
-		if _, relayed := relayproto.PreambleFrom(r.Context()); relayed {
-			limiter, caller = g.relayed, "through the relay"
+		allowed := true
+		if p, relayed := relayproto.PreambleFrom(r.Context()); relayed {
+			// A relayed request passes the visitor's own share, when the relay
+			// named one, and the shared relayed budget. A visitor already over
+			// its share spends none of the budget; and a visitor is remembered
+			// only once the budget has let its request through, so a relay
+			// naming a new visitor each time cannot grow the record past what
+			// the budget admits.
+			v := visitorShare(p.Visitor)
+			allowed = (v == "" || g.byVisitor.wouldAllow(v)) && g.relayed.allow("through the relay")
+			if allowed && v != "" {
+				allowed = g.byVisitor.allow(v)
+			}
+		} else {
+			allowed = g.perCaller.allow(callerIP(r))
 		}
-		if !limiter.allow(caller) {
+		if !allowed {
 			http.Error(w, "too many key logs from this address; try again in a minute", http.StatusTooManyRequests)
 			return
 		}
