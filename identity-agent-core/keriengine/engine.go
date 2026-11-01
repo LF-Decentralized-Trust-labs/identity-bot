@@ -262,24 +262,33 @@ func (e *Engine) CreateOwnedInception(publicKey, nextPublicKey, name, ownerAID s
 	// The role label is gone; position replaces it. An owner seal is an event
 	// seal in an establishment event — see the reader in the server package for
 	// why that is unambiguous and what would break it.
-	if !strings.HasPrefix(ownerAID, "E") {
+	anchor, err := OwnerSeal(ownerAID)
+	if err != nil {
+		return nil, err
+	}
+	return e.incept(publicKey, nextPublicKey, name, []json.RawMessage{anchor})
+}
+
+// OwnerSeal is the seal a founding carries naming its owner: an event seal
+// naming the owner's own founding, which for a self-addressing identifier is
+// the identifier itself.
+func OwnerSeal(ownerAID string) (json.RawMessage, error) {
+	if !strings.HasPrefix(ownerAID, "E") || len(ownerAID) != 44 {
 		return nil, fmt.Errorf("%q is not a self-addressing identifier, so an owner seal "+
 			"naming it would point at no event", ownerAID)
 	}
-	anchor := json.RawMessage(fmt.Sprintf(`{"i":%q,"s":"0","d":%q}`, ownerAID, ownerAID))
-	return e.incept(publicKey, nextPublicKey, name, []json.RawMessage{anchor})
+	return json.RawMessage(fmt.Sprintf(`{"i":%q,"s":"0","d":%q}`, ownerAID, ownerAID)), nil
 }
 
 // Incept founds an identity, optionally designating witnesses for it.
 func (e *Engine) Incept(req drivers.InceptionRequest) (*drivers.DriverInceptionResponse, error) {
 	var anchors []json.RawMessage
 	if req.OwnerAID != "" {
-		if !strings.HasPrefix(req.OwnerAID, "E") {
-			return nil, fmt.Errorf("%q is not a self-addressing identifier, so an owner seal "+
-				"naming it would point at no event", req.OwnerAID)
+		seal, err := OwnerSeal(req.OwnerAID)
+		if err != nil {
+			return nil, err
 		}
-		anchors = append(anchors, json.RawMessage(
-			fmt.Sprintf(`{"i":%q,"s":"0","d":%q}`, req.OwnerAID, req.OwnerAID)))
+		anchors = append(anchors, seal)
 	}
 	// Anything else the caller anchors — the messaging keys an identity commits
 	// to, most importantly. Dropping these silently would leave an identity

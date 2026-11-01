@@ -75,6 +75,8 @@ var controllerOwnerOnly = map[string]string{
 	// said something.
 	"POST /api/sign":                         "this signs as the identity, and anything it signs cannot be unsaid",
 	"POST /api/events/signature":             "this attaches this identity's signature to an event",
+	"POST /api/events/prepare":               "a key event writes the state that decides who the owner is",
+	"POST /api/events/commit":                "a key event writes the state that decides who the owner is",
 	"POST /api/signing-requests/{id}/fulfil": "this signs as the identity, and what is signed cannot be unsaid",
 	// Refusing is the key device's answer too, and a refused withdrawal is left
 	// to the owner for good: one controller could keep another's revoked grant

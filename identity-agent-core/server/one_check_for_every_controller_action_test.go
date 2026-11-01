@@ -163,6 +163,10 @@ func TestTheOwnerOnlyListIsTheOneTheADRRecords(t *testing.T) {
 		"POST /api/backup/pull/{destID}",
 		"POST /api/sign",
 		"POST /api/events/signature",
+		// Key events, which ADR-050 lists under who the owner is, prepared and
+		// committed signed (ADR-061).
+		"POST /api/events/prepare",
+		"POST /api/events/commit",
 		"POST /api/signing-requests/{id}/fulfil",
 		"POST /api/signing-requests/{id}/refuse",
 		"POST /api/signing-requests/sign-for-another",
