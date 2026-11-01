@@ -257,12 +257,25 @@ func (s *CoreServer) handleCommitEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// An identity commits only to messaging keys this Identity Agent holds.
+	keysFor := name
+	if ev.Ilk == "icp" {
+		keysFor = ev.Identifier
+	}
+	if s.refuseAnUnheldKeySet(w, raw, keysFor) {
+		return
+	}
 	res, err := c.Commit(name, raw, req.Sigs, func(k drivers.KELKeep) error {
 		return s.keepCommittedEvent(k, ev)
 	})
 	if err != nil {
 		writeEventError(w, err)
 		return
+	}
+	if ev.Ilk == "icp" && res.Status == "recorded" {
+		if err := s.fileCommittedKeySet(raw, ev.Identifier); err != nil {
+			log.Printf("[keri] the messaging keys %s anchors could not be filed under it: %v", ev.Identifier, err)
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	switch res.Status {
