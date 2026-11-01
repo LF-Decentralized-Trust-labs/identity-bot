@@ -583,6 +583,9 @@ type Store interface {
 	// sequence number on out of the key log, into the record of what was
 	// superseded. Nothing is deleted, and either both happen or neither.
 	SaveSupersedingEvent(record EventRecord) error
+	// SaveRestoredIdentity saves an identity's whole key log and its record
+	// together: all of it or none.
+	SaveRestoredIdentity(events []EventRecord, state IdentityState) error
 	// SupersededEvents are what SaveSupersedingEvent moved aside for aid,
 	// oldest first.
 	SupersededEvents(aid string) ([]EventRecord, error)
@@ -826,6 +829,17 @@ func (s *FileStore) SupersededEvents(aid string) ([]EventRecord, error) {
 		}
 	}
 	return out, nil
+}
+
+// SaveRestoredIdentity writes the log first and the identity record last, so
+// an identity is never recorded over a log that is not all there.
+func (s *FileStore) SaveRestoredIdentity(events []EventRecord, state IdentityState) error {
+	for _, ev := range events {
+		if err := s.SaveEvent(ev); err != nil {
+			return err
+		}
+	}
+	return s.SaveIdentity(state)
 }
 
 func (s *FileStore) GetEvents(aid string) ([]EventRecord, error) {

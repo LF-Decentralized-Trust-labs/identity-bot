@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -29,7 +30,7 @@ func pendingKeySetLabel(anchor map[string]interface{}) string {
 }
 
 func (s *CoreServer) handleMessagingSeed(w http.ResponseWriter, r *http.Request) {
-	if !s.isOwner(r) {
+	if !s.theOwnerAsks(r) {
 		writeError(w, http.StatusForbidden, "Messaging keys are the owner's", "")
 		return
 	}
@@ -60,10 +61,18 @@ func (s *CoreServer) handleMessagingSeed(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "The messaging keys could not be anchored", err.Error())
 		return
 	}
-	label := pendingKeySetLabel(anchor)
-	if own, _ := s.DataStore.GetIdentity(); own != nil {
-		// An identity already founded here: its keyset is filed under it.
-		label = own.AID
+	// Filed under the identity only when its log already anchors this
+	// keyset (an identity restored here, say); otherwise held aside until the
+	// event that anchors it is committed, so no seed handed over here can
+	// stand in for keys the identity's log does not commit to.
+	label, filed := pendingKeySetLabel(anchor), "pending"
+	if own, _ := s.DataStore.GetIdentity(); own != nil && s.anchoredInOwnLog(own.AID, anchor) {
+		if has, _ := s.hasKeySet(own.AID); !has {
+			label, filed = own.AID, "identity"
+		} else if held, _ := s.keySetAnchorHeld(own.AID, anchor); held {
+			writeJSONResponse(w, map[string]any{"anchor": anchor, "filed": "identity"})
+			return
+		}
 	}
 	if held, err := s.hasKeySet(label); err != nil {
 		writeError(w, statusForUnreadable(err, http.StatusInternalServerError), "The messaging keys could not be read", err.Error())
@@ -73,12 +82,8 @@ func (s *CoreServer) handleMessagingSeed(w http.ResponseWriter, r *http.Request)
 			writeError(w, statusForUnreadable(err, http.StatusInternalServerError), "The messaging keys could not be kept", err.Error())
 			return
 		}
-	} else if held, _ := s.keySetAnchorHeld(label, anchor); !held {
-		writeError(w, http.StatusConflict, "This identity already holds other messaging keys",
-			"replacing a keyset is done by anchoring the new one in an interaction")
-		return
 	}
-	writeJSONResponse(w, map[string]any{"anchor": anchor})
+	writeJSONResponse(w, map[string]any{"anchor": anchor, "filed": filed})
 }
 
 // keySetAnchorHeld reports whether the keyset filed under label is the one
@@ -109,8 +114,14 @@ func messagingAnchorsIn(raw []byte) []map[string]interface{} {
 	if json.Unmarshal(raw, &ev) != nil {
 		return nil
 	}
+	return messagingAnchorsAmong(ev.A)
+}
+
+// messagingAnchorsAmong are the IA-HYBRID-1 keyset anchors among an event's
+// seals: the one reading of which seal commits to messaging keys.
+func messagingAnchorsAmong(seals []json.RawMessage) []map[string]interface{} {
 	var out []map[string]interface{}
-	for _, a := range ev.A {
+	for _, a := range seals {
 		var m map[string]interface{}
 		if json.Unmarshal(a, &m) == nil && m["ia"] == iacrypto.CipherSuiteIAHybrid1 {
 			out = append(out, m)
@@ -136,27 +147,64 @@ func (s *CoreServer) refuseAnUnheldKeySet(w http.ResponseWriter, raw []byte, aid
 	return false
 }
 
-// fileCommittedKeySet files a keyset handed over before the founding under the
-// identity the founding made, once that founding is committed.
+// anchoredInOwnLog reports whether aid's stored key log anchors this keyset.
+func (s *CoreServer) anchoredInOwnLog(aid string, anchor map[string]interface{}) bool {
+	events, err := s.DataStore.GetEvents(aid)
+	if err != nil {
+		return false
+	}
+	want, _ := json.Marshal(anchor)
+	for _, ev := range events {
+		raw, err := base64.StdEncoding.DecodeString(ev.RawBytesB64)
+		if err != nil {
+			continue
+		}
+		for _, a := range messagingAnchorsIn(raw) {
+			if got, _ := json.Marshal(a); string(got) == string(want) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// fileCommittedKeySet files a keyset held aside under the identity whose event
+// anchoring it was just committed. The latest anchored keyset is the one the
+// identity is reached on, so it replaces any filed before it.
 func (s *CoreServer) fileCommittedKeySet(raw []byte, aid string) error {
 	for _, anchor := range messagingAnchorsIn(raw) {
 		label := pendingKeySetLabel(anchor)
 		if held, _ := s.keySetAnchorHeld(label, anchor); !held {
 			continue
 		}
-		if has, _ := s.hasKeySet(aid); has {
-			continue
-		}
 		ks, err := s.keySetFor(label)
 		if err != nil {
 			return err
 		}
-		if err := s.storeKeySetFor(aid, ks); err != nil {
+		if err := s.replaceKeySetFor(aid, ks); err != nil {
 			return err
 		}
 		return s.forgetKeySet(label)
 	}
 	return nil
+}
+
+// replaceKeySetFor files ks under aid in place of any keyset filed there: only
+// once an event of aid's log anchoring ks has been committed.
+func (s *CoreServer) replaceKeySetFor(aid string, ks *didcomm.KeySet) error {
+	didcommMu.Lock()
+	defer didcommMu.Unlock()
+	keys, err := s.loadDIDCommKeys()
+	if err != nil {
+		return err
+	}
+	ks.AID = aid
+	blob, err := ks.Marshal()
+	if err != nil {
+		return err
+	}
+	keys[aid] = blob
+	return s.saveDIDCommKeys(keys)
 }
 
 // forgetKeySet removes the keyset filed under label, once it is filed under

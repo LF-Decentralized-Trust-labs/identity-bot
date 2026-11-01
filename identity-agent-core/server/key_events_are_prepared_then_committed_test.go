@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"identity-agent-core/backup"
 	"identity-agent-core/iacrypto"
@@ -439,5 +440,22 @@ func TestOnlyAnEventMarkedAtUpgradeIsSignedInPlace(t *testing.T) {
 	evs, _ := s.DataStore.GetEvents(own.AID)
 	if len(evs[0].ControllerSignatures()) != 1 {
 		t.Fatalf("the founding holds %d signatures", len(evs[0].ControllerSignatures()))
+	}
+}
+
+// An app signing remotely as the owner, the signer these routes are for, is
+// served: the gate spends its signature when it checks it, and the handler
+// does not ask for it again.
+func TestARemoteOwnerPreparesAnEvent(t *testing.T) {
+	s := appHeldCore(t)
+	seed, _ := sealTestOwner(t, s)
+	r := s.buildRouter("")
+	k := appSeeds(2)
+	body, _ := json.Marshal(map[string]any{"t": "icp", "k": []string{verkeyOf(k[0])}, "kt": "1",
+		"n": []string{digestOfSeed(t, k[1])}, "nt": "1"})
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, signed(t, http.MethodPost, "/api/events/prepare", string(body), seed, time.Now()))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("a remote owner's signed prepare was answered %d %s", rec.Code, rec.Body.String())
 	}
 }

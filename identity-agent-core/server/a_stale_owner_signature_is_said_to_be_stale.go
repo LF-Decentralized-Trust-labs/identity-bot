@@ -1,10 +1,13 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
-	"fmt"
+	"io"
 	"net/http"
 	"strings"
+
+	"identity-agent-core/login"
 )
 
 // An owner's signature names the establishment event it was made under
@@ -15,54 +18,86 @@ import (
 // ordinary bad signature, the app cannot tell that from a forgery, or from a
 // commit whose answer it lost; told the key state it named is stale, it reads
 // the key state again rather than guessing. The answer says nothing beyond
-// what the request claimed.
+// what the request proved: only a request the owner's earlier key signed is
+// told so.
 
 // headerOwnerKeyState names the owner's establishment event a request was
 // signed under: its sequence number, as KERI writes it, a dot, and its digest.
 const headerOwnerKeyState = "X-IA-Owner-Key-State"
 
-// ownerKeyStateIsStale reports whether r is owner-signed under an
-// establishment event that is not the owner's current one here.
+// ownerKeyStateIsStale reports whether r is owner-signed under an earlier key
+// state of the owner's: the header names an establishment event in the
+// owner's verified log that is not the last one, and the request's signature
+// verifies under the key that event named. Only then is the request told it is
+// stale; anything else is refused as an unproved request is, so a caller who
+// cannot sign as the owner learns nothing about the owner's key state.
 func (s *CoreServer) ownerKeyStateIsStale(r *http.Request) bool {
 	named := strings.TrimSpace(r.Header.Get(headerOwnerKeyState))
-	if named == "" || r.Header.Get(headerOwnerSig) == "" {
+	sig := r.Header.Get(headerOwnerSig)
+	stamp := r.Header.Get(headerOwnerTimestamp)
+	if named == "" || sig == "" || stamp == "" || s.DataStore == nil {
 		return false
 	}
 	authority, err := s.ownerAuthority()
 	if err != nil || authority == nil || authority.AID == "" {
 		return false
 	}
-	current, err := s.ownerEstablishment(authority.AID)
+	record, err := s.DataStore.GetContactKEL(authority.AID)
+	if err != nil || record == nil || !record.KelVerified {
+		return false
+	}
+	states := establishmentsOf(record.KEL)
+	if len(states) < 2 || named == states[len(states)-1].place {
+		return false
+	}
+	key := ""
+	for _, st := range states[:len(states)-1] {
+		if st.place == named {
+			key = st.key
+		}
+	}
+	if key == "" {
+		return false
+	}
+	pub, err := login.DecodeVerkey(key)
 	if err != nil {
 		return false
 	}
-	return named != current
+	var body []byte
+	if r.Body != nil {
+		body, _ = io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(body))
+	}
+	target, err := s.theIdentityAgentAnOwnerNames(r)
+	if err != nil {
+		return false
+	}
+	ok, err := login.VerifyString(canonicalOwnerRequest(target, r.Method, r.URL.Path, stamp, body), sig, pub)
+	return err == nil && ok
 }
 
-// ownerEstablishment is the owner's last establishment event as this Identity
-// Agent knows it, from the owner's verified key log, or the owner's founding
-// where it holds no log of the owner's (the key sealed at pairing).
-func (s *CoreServer) ownerEstablishment(owner string) (string, error) {
-	if s.DataStore == nil {
-		return "0." + owner, nil
-	}
-	record, err := s.DataStore.GetContactKEL(owner)
-	if err != nil || record == nil || !record.KelVerified || len(record.KEL) == 0 {
-		return "0." + owner, nil
-	}
-	place := ""
-	for _, ev := range record.KEL {
+type keyStatePlace struct {
+	place string // sequence number, a dot, digest
+	key   string // the first key it names
+}
+
+// establishmentsOf are the establishment events of a parsed key log, in order.
+func establishmentsOf(kel []map[string]interface{}) []keyStatePlace {
+	var out []keyStatePlace
+	for _, ev := range kel {
 		switch t, _ := ev["t"].(string); t {
 		case "icp", "rot", "dip", "drt":
-			s, _ := ev["s"].(string)
+			sn, _ := ev["s"].(string)
 			d, _ := ev["d"].(string)
-			place = s + "." + d
+			k, _ := ev["k"].([]interface{})
+			first := ""
+			if len(k) > 0 {
+				first, _ = k[0].(string)
+			}
+			out = append(out, keyStatePlace{place: sn + "." + d, key: first})
 		}
 	}
-	if place == "" {
-		return "", fmt.Errorf("the owner's log names no establishment event")
-	}
-	return place, nil
+	return out
 }
 
 // writeStaleKeyState answers a request signed under an owner's earlier key

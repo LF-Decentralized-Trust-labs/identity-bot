@@ -12,7 +12,6 @@ import (
 
 	"identity-agent-core/authprovider"
 	"identity-agent-core/backup"
-	"identity-agent-core/drivers"
 	"identity-agent-core/recovery"
 	"identity-agent-core/store"
 
@@ -713,15 +712,20 @@ func (s *CoreServer) commitRecoveryRotation(w http.ResponseWriter, req recovery.
 			"a recovery rotates the identity kept here")
 		return recovery.RotationResult{}, false
 	}
-	res, err := c.Commit(own.AID, raw, req.Sigs, func(k drivers.KELKeep) error {
-		return s.keepCommittedEvent(k, ev)
-	})
-	if err != nil {
-		writeEventError(w, err)
+	res, ok := s.commitOwnEvent(w, c, own.AID, raw, ev, req.Sigs)
+	if !ok {
 		return recovery.RotationResult{}, false
 	}
-	if res.Status == "recorded" {
-		s.afterCommit(ev)
+	switch res.Status {
+	case "recorded", "already_recorded":
+	default:
+		// Not yet added, so the recovery's rotation is not done: said as the
+		// commit route says it, and nothing is recorded against the session.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(map[string]any{"status": res.Status, "s": fmt.Sprintf("%x", res.SN),
+			"d": res.SAID, "signed": res.Signed, "keys": res.Keys, "expires": res.Expires.UTC().Format(time.RFC3339)})
+		return recovery.RotationResult{}, false
 	}
 	return recovery.RotationResult{AID: own.AID, NewPublicKey: ev.Keys[0], SequenceNumber: res.SN}, true
 }

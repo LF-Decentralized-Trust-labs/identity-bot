@@ -239,7 +239,30 @@ func (s *SQLiteStore) GetIdentity() (*IdentityState, error) {
 }
 
 func (s *SQLiteStore) SaveIdentity(state IdentityState) error {
-	_, err := s.db.Exec(`
+	return saveIdentity(s.db, state)
+}
+
+// SaveRestoredIdentity saves an identity's whole key log and its record in one
+// transaction, so a restore that fails partway leaves nothing behind it.
+func (s *SQLiteStore) SaveRestoredIdentity(events []EventRecord, state IdentityState) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, ev := range events {
+		if err := saveEvent(tx, ev); err != nil {
+			return err
+		}
+	}
+	if err := saveIdentity(tx, state); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func saveIdentity(ex sqlExecer, state IdentityState) error {
+	_, err := ex.Exec(`
 		-- Pinned to one row, deliberately.
 		--
 		-- The table has no primary key, so ON CONFLICT(rowid) never fired and

@@ -20,7 +20,9 @@ import (
 //	next_key_digest   {"key"}                    -> {"digest"}
 //
 // An error never carries any part of the request: a seed, or anything derived
-// from one, never reaches an error message, a log or a crash report.
+// from one, never reaches an error message, a log or a crash report. The
+// request's hex text of a seed is a Go string, which cannot be zeroed; the
+// bytes decoded from it are, and the process that ran the command ends.
 func Do(op string, request []byte) ([]byte, error) {
 	var req struct {
 		SeedHex string `json:"seed_hex"`

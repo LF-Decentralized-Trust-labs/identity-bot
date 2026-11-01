@@ -1118,23 +1118,6 @@ func (e *Engine) ReloadIdentity(req *drivers.DriverReloadIdentityRequest) (*driv
 					"the parsed form says %s and the bytes digest to %s", i, req.AID, d, ev.SAID)
 			}
 			e.Raw = raw
-			if i < len(req.Signatures) && len(req.Signatures[i]) > 0 {
-				keys := 1
-				if parsedKeys, ok := parsed["k"].([]interface{}); ok && len(parsedKeys) > 0 {
-					keys = len(parsedKeys)
-				}
-				if ev.Ilk == "ixn" {
-					keys = 0 // judged against the key state when the log is next extended
-				}
-				sigs, err := indexedSignatures(req.Signatures[i], keys)
-				if err != nil && ev.Ilk == "ixn" {
-					sigs, err = indexedSignatures(req.Signatures[i], 1)
-				}
-				if err != nil {
-					return nil, fmt.Errorf("event %d of %s has an unreadable stored signature: %w", i, req.AID, err)
-				}
-				e.Sigs = sigs
-			}
 		}
 		if i < len(req.UnsignedAtUpgrade) {
 			e.MarkedUnsigned = req.UnsignedAtUpgrade[i]
@@ -1143,6 +1126,19 @@ func (e *Engine) ReloadIdentity(req *drivers.DriverReloadIdentityRequest) (*driv
 	}
 
 	raws, complete := verifiable(entries)
+	// Stored signatures are kept only where they verify under the key they
+	// name: nothing this engine holds, and so publishes, verifies nothing.
+	if complete && len(req.Signatures) > 0 {
+		kept, err := VerifiedSignatures(raws, req.Signatures)
+		if err != nil {
+			return nil, err
+		}
+		for i := range entries {
+			if i < len(kept) {
+				entries[i].Sigs = kept[i]
+			}
+		}
+	}
 	if complete {
 		if err := keri.ValidateKEL(raws); err != nil {
 			return nil, fmt.Errorf("the stored key log for %s does not validate, so it is not "+
