@@ -43,6 +43,12 @@
      title. Write it so a developer who has never seen this subsystem understands it
      on one read — no jargon, no assumed context. -->
 
+## Why
+
+<!-- One or two plain sentences on why this is worth doing — what it makes
+     possible, or what it costs to leave alone. This is where what was wrong goes,
+     since the Summary states only what the change does. Don't repeat the Summary. -->
+
 ## Affected
 
 <!-- Where this lands. One line each; delete any line that does not apply.
@@ -58,12 +64,6 @@
      Reviewers triage on this. Trace it rather than guessing: a fix at a shared
      chokepoint reaches every caller of it, and that is usually wider than the
      directory the diff sits in. -->
-
-## Why
-
-<!-- One or two plain sentences on why this is worth doing — what it makes
-     possible, or what it costs to leave alone. This is where what was wrong goes,
-     since the Summary states only what the change does. Don't repeat the Summary. -->
 
 ## Who This Helps
 
