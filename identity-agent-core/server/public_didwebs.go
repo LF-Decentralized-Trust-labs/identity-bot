@@ -96,6 +96,7 @@ func (s *CoreServer) mountPublicDidWebsRoutes(r chi.Router) {
 	r.Post("/public/_register", keyLogs.guard(s.handleRegisterPairwise))
 	r.Post("/_register", keyLogs.guard(s.handleRegisterPairwise))
 	r.Post("/public/login/key", keyLogs.guard(s.handleKeyFromKeyLog))
+	r.Post("/public/key-state", keyLogs.guard(s.handleKeyState))
 }
 
 // Checking a key log costs this Identity Agent time, and these routes are open

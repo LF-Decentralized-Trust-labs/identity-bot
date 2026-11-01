@@ -66,6 +66,7 @@ var publicRoutes = map[string]string{
 	// instead of keeping a second implementation of the check. Pure
 	// computation over what it is sent: nothing fetched, nothing stored.
 	"POST /public/login/key":        "a verifier asking what key an identity's own key log establishes",
+	"POST /public/key-state":        "a signer asking what key state a copy of a key log establishes, before it can sign as anyone",
 	"GET /public/credential/{said}": "a credential the user chose to publish at a shareable link",
 	// A credential names its schema by digest; a verifier fetches the document to
 	// confirm what the credential claims. Schemas are public by nature.
