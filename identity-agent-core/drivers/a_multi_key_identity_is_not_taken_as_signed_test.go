@@ -46,7 +46,7 @@ func TestOneMemberOfATwoKeyIdentityDoesNotSignForIt(t *testing.T) {
 // single-key log's only key and taken as that key's.
 func TestASignatureIndexedToAnotherKeyIsRefused(t *testing.T) {
 	aid, raws, sigs := signedLog(t)
-	raw, err := readControllerSignature(sigs[0])
+	raw, err := ReadControllerSignature(sigs[0])
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -109,6 +109,11 @@ type DriverReloadIdentityRequest struct {
 	// Empty entries are expected for events stored before the canonical bytes
 	// were kept.
 	RawEventsB64 []string `json:"raw_events_b64,omitempty"`
+	// Signatures[i] are the controller signatures stored with KEL[i], in any
+	// form ReadControllerSignature reads. An event with none was added unsigned
+	// by an earlier version: nothing more is added to the log until it is
+	// signed, because a log with an unsigned event in it verifies for nobody.
+	Signatures [][]string `json:"signatures,omitempty"`
 }
 
 type DriverReloadIdentityResponse struct {
@@ -133,9 +138,13 @@ type DriverKelResponse struct {
 	// language that marshals a map in its own order produces something that
 	// verifies as nothing. Anything checking signatures or recomputing
 	// identifiers must use these bytes.
-	RawEventsB64   []string `json:"raw_events_b64"`
-	SequenceNumber int      `json:"sequence_number"`
-	EventCount     int      `json:"event_count"`
+	RawEventsB64 []string `json:"raw_events_b64"`
+	// Signatures[i] are the controller signatures over RawEventsB64[i], each
+	// an indexed signature as KERI attaches it. Empty for an event this engine
+	// holds without them: one added unsigned by an earlier version.
+	Signatures     [][]string `json:"signatures,omitempty"`
+	SequenceNumber int        `json:"sequence_number"`
+	EventCount     int        `json:"event_count"`
 }
 
 type DriverVerifyResponse struct {
@@ -369,6 +378,18 @@ type KELKeep struct {
 	// Signature is the identity's signature over Raw, checked by the engine
 	// against the identity's current key before the event is offered.
 	Signature string
+	// Signatures are every controller signature over Raw, indexed as KERI
+	// attaches them. Signature is the first of them, for a store that keeps
+	// one.
+	Signatures []string
+	// Supersedes, when above zero, is the sequence number from which this
+	// event, a recovery rotation, supersedes interactions already in the log:
+	// they are moved to the record of what was superseded, never deleted.
+	Supersedes int
+	// Earlier are signatures this engine obtained for events already in the
+	// log that were held without them, by sequence number, to be kept with
+	// this one.
+	Earlier map[int][]string
 }
 
 // KELKeeper is an engine that offers an event to be kept before it appends it.

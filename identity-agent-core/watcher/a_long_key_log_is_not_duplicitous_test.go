@@ -111,10 +111,7 @@ func TestAnObservationRecordedWithADecimalSequenceIsForgotten(t *testing.T) {
 	}
 
 	// Upgrade: the migration runs on a database that has not had it.
-	if _, err := db.Exec(`DELETE FROM identity_schema_migrations WHERE version = 45`); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.ApplyIdentityMigrations(db); err != nil {
+	if err := store.ReapplyIdentityMigration(db, 45); err != nil {
 		t.Fatal(err)
 	}
 

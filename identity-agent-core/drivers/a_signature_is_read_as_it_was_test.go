@@ -42,7 +42,7 @@ func TestAControllerSignatureIsReadAsItWas(t *testing.T) {
 		sig := sigStarting(t, prefix)
 		qb64, _ := keri.MatterQB64(keri.CodeEd25519Sig, sig)
 		for _, s := range []string{qb64, indexed('A', 0, sig), base64.StdEncoding.EncodeToString(sig)} {
-			got, err := readControllerSignature(s)
+			got, err := ReadControllerSignature(s)
 			if err != nil || !bytes.Equal(got.Raw, sig) || got.At != keri.SamePlace(0) {
 				t.Fatalf("%s read as %x at %+v (%v)", s, got.Raw, got.At, err)
 			}
@@ -54,14 +54,14 @@ func TestAControllerSignatureIsReadAsItWas(t *testing.T) {
 			"indexed to the second key": {indexed('A', 1, sig), keri.SamePlace(1)},
 			"current-list code B":       {indexed('B', 0, sig), keri.SignaturePlace{CurrentOnly: true}},
 		} {
-			got, err := readControllerSignature(c.s)
+			got, err := ReadControllerSignature(c.s)
 			if err != nil || !bytes.Equal(got.Raw, sig) || got.At != c.at {
 				t.Errorf("%s: read as %+v (%v)", name, got.At, err)
 			}
 		}
 		for _, s := range []string{qb64, indexed('A', 0, sig)} {
 			i := strings.IndexByte(b64url, s[2])
-			if got, err := readControllerSignature(s[:2] + string(b64url[i|0x10]) + s[3:]); err == nil && bytes.Equal(got.Raw, sig) {
+			if got, err := ReadControllerSignature(s[:2] + string(b64url[i|0x10]) + s[3:]); err == nil && bytes.Equal(got.Raw, sig) {
 				t.Errorf("a second spelling of %s was read as it", s)
 			}
 		}

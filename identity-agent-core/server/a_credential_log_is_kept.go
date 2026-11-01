@@ -368,7 +368,14 @@ func (s *CoreServer) signEventFor(aid, key string, raw []byte) (string, error) {
 		return signEventBytes(raw, v.([]byte))
 	}
 	if identity, err := s.DataStore.GetIdentity(); err == nil && identity != nil && identity.AID == aid {
-		return s.signOwnEventBytes(b64)
+		// The key the event names, which for a rotation is the key it
+		// reveals and for an earlier event an earlier key: whichever of
+		// this identity's keys this Identity Agent derives.
+		seed, err := s.ownSeedForKey(key)
+		if err != nil {
+			return "", err
+		}
+		return signEventBytes(raw, seed)
 	}
 	// One of this identity's pairwise identities, whose keys it derives.
 	if seed, err := s.signingSeedForAID(aid); err == nil {
