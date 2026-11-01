@@ -160,6 +160,64 @@
         }
       }
     },
+    "approval_proof": {
+      "description": "The string K signs to show it is the machine asking to become the AI agent's body, once its enrolment is pending: the lines IA-BODY-APPROVE-V1, the Identity Agent's identifier (ia), the AI agent's identifier (agent), host, verkey and the request's nonce (at least 16 characters, fresh), joined with a newline, no trailing newline.",
+      "type": "string"
+    },
+    "approval_request": {
+      "description": "What a machine shows once it has asked to become a body, for whoever approves it to capture (pasted, or read from a QR code). It is iaapprove1. followed by base64url, without padding, of this object as JSON. signature is K's over approval_proof. The Identity Agent named by ia checks the signature against host and verkey, and that this key is the one its pending enrolment holds; how the string reaches it carries no authority. A machine is approved this way, or on the vouch of the provider that made it; the decision is ADR-059.",
+      "type": "object",
+      "required": [
+        "v",
+        "url",
+        "ia",
+        "agent",
+        "name",
+        "host",
+        "verkey",
+        "nonce",
+        "signature"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "type": "integer",
+          "const": 1
+        },
+        "url": {
+          "type": "string",
+          "description": "where the Identity Agent is reached, as the enrolment named it"
+        },
+        "ia": {
+          "type": "string",
+          "description": "the Identity Agent's identifier, as in the enrolment"
+        },
+        "agent": {
+          "type": "string",
+          "description": "the AI agent's identifier, as in the enrolment"
+        },
+        "name": {
+          "type": "string",
+          "description": "the AI agent's name, for showing"
+        },
+        "host": {
+          "type": "string",
+          "description": "K's identifier"
+        },
+        "verkey": {
+          "type": "string",
+          "description": "K, as a signature is checked against it"
+        },
+        "nonce": {
+          "type": "string",
+          "minLength": 16
+        },
+        "signature": {
+          "type": "string",
+          "description": "K's, over approval_proof"
+        }
+      }
+    },
     "sealed_enrolment": {
       "description": "How an enrol_request travels: POSTed as JSON to /api/agent-host/enrol at the enrolment's url. envelope is a DIDComm authcrypt envelope from the body's sealing keys (sender) to the Identity Agent's, which the machine fetched and checked against the Identity Agent's key log first. Its message has type body-enrolment, id the request's nonce, from did:keri: + host, to [did:keri: + ia], and the enrol_request as body. Inside, the message is signed with both the sender's ed25519 key (Ed25519) and its mldsa65 key (ML-DSA-65, empty context, deterministic signing) over the message's JSON followed by E and the base64url of the Blake3-256 of its body; the content key is HKDF-SHA256 over an ephemeral-static X25519 secret, a static-static X25519 secret and an ML-KEM-768 shared secret, and the content is sealed with XChaCha20-Poly1305 with additional data sender-identifier|recipient-identifier. The Identity Agent refuses an envelope it cannot open with the keys sender names, a message of another type, and keys inside other than sender.",
       "type": "object",

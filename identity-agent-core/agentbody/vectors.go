@@ -68,6 +68,20 @@ type BodyVectorSet struct {
 	// whose body is the request.
 	SealedEnrolment SealedEnrolment `json:"sealed_enrolment"`
 
+	// ApprovalRequests are what the body shows once it has asked: the string K
+	// signs, the request, and the string a person captures.
+	ApprovalRequests []struct {
+		Name    string          `json:"name"`
+		Nonce   string          `json:"nonce"`
+		Signed  string          `json:"signed"`
+		Request ApprovalRequest `json:"request"`
+		Encoded string          `json:"encoded"`
+	} `json:"approval_requests"`
+	RefusedApprovals []struct {
+		Name    string `json:"name"`
+		Encoded string `json:"encoded"`
+	} `json:"refused_approvals"`
+
 	SignedRequests []struct {
 		Name string `json:"name"`
 		// The headers the request carries, and its body exactly as sent.

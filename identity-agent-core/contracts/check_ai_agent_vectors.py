@@ -140,6 +140,29 @@ def check_body(v):
         same(r["name"] + " signed", signed, r["signed"])
         if len(h.get("X-IA-Body-Nonce", "")) < 16:
             fail(r["name"] + " carries a nonce under 16 characters")
+    approve_required = ("ia", "agent", "host", "verkey", "signature")
+    for r in v["approval_requests"]:
+        signed = lines("IA-BODY-APPROVE-V1", first["ia"], first["agent"], k["host"], k["verkey"], r["nonce"])
+        same(r["name"] + " signed", signed, r["signed"])
+        q = r["request"]
+        for field, want in (("v", 1), ("ia", first["ia"]), ("agent", first["agent"]), ("host", k["host"]),
+                            ("verkey", k["verkey"]), ("nonce", r["nonce"])):
+            same("%s request %s" % (r["name"], field), q[field], want)
+        if not r["encoded"].startswith("iaapprove1."):
+            fail(r["name"] + " does not start iaapprove1.")
+        same(r["name"] + " encoded", json.loads(unb64url(r["encoded"][11:])), q)
+    for r in v["refused_approvals"]:
+        try:
+            if not r["encoded"].startswith("iaapprove1."):
+                raise ValueError
+            f = json.loads(unb64url(r["encoded"][11:]))
+            refused = (f.get("v") != 1 or any(not f.get(x) for x in approve_required)
+                       or len(f.get("nonce", "")) < 16)
+        except Exception:
+            refused = True
+        if not refused:
+            fail("%s is not refused by the prose's rules" % r["name"])
+
     for n in v["refused_nonces"]:
         if len(n) >= 16:
             fail("refused nonce %r is 16 characters or more" % n)
@@ -162,7 +185,7 @@ def check_body(v):
         s = int.from_bytes(raw[32:], "big")
         if (s <= P256_N // 2) != low:
             fail("p256 %s is %s-s" % (name, "high" if low else "low"))
-    return len(v["enrol_requests"]) + len(v["signed_requests"])
+    return len(v["enrol_requests"]) + len(v["signed_requests"]) + len(v["approval_requests"])
 
 
 # ── agent-message.schema.json ─────────────────────────────────────────────

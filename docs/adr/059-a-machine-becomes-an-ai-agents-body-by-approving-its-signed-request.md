@@ -35,4 +35,4 @@ That comparison does real work in exactly one case: a person setting a machine u
 - The six-word derivation and the approver-side comparison are removed once this lands in full (`agentbody.Words` and the comparison surface); see Rollout.
 - A device that only captures a request needs no authority of its own, because the request proves itself; the authority to approve remains the owner's or an authorized controller's, checked the one way (ADR-050). This is what lets a capture device — a camera, or another of the person's apps relaying the request — feed an approver that holds the authority, without being granted any.
 
-The claim this supersedes is registered in the architecture's superseded-claims register in the change that removes the six words (see Rollout), when the old claim becomes false.
+ADR-046 carries the note recording which part of it this supersedes (see Rollout).

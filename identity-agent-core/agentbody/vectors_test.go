@@ -37,7 +37,7 @@ func TestThePublishedBodyVectorsHold(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(set.Enrolments) == 0 || len(set.RefusedEnrolments) == 0 || len(set.EnrolRequests) == 0 ||
-		len(set.SignedRequests) == 0 || len(set.RefusedKeys) == 0 || len(set.RefusedNonces) == 0 || len(set.Grades) == 0 {
+		len(set.SignedRequests) == 0 || len(set.ApprovalRequests) == 0 || len(set.RefusedApprovals) == 0 || len(set.RefusedKeys) == 0 || len(set.RefusedNonces) == 0 || len(set.Grades) == 0 {
 		t.Fatal("the vector file is missing a section")
 	}
 	// Recomputed into a second copy read from the file, so nothing the
@@ -76,6 +76,29 @@ func TestThePublishedBodyVectorsHold(t *testing.T) {
 		}
 		if err := Verify(set.Host, set.Verkey, r.Request.Signature, []byte(r.Signed)); err != nil {
 			t.Fatalf("%s: %v", r.Name, err)
+		}
+	}
+	ia := set.Enrolments[0].Fields.IdentityAgent
+	for _, r := range set.ApprovalRequests {
+		parsed, err := ParseApprovalRequest(r.Encoded)
+		if err != nil || !reflect.DeepEqual(parsed, r.Request) {
+			t.Fatalf("%s does not read back: %v %+v", r.Name, err, parsed)
+		}
+		if err := parsed.Check(ia); err != nil {
+			t.Fatalf("%s: %v", r.Name, err)
+		}
+		if parsed.Check("EAnotherIdentityAgent00000000000000000000000") == nil {
+			t.Fatalf("%s was accepted by an Identity Agent it does not name", r.Name)
+		}
+		tampered := parsed
+		tampered.Nonce = "a-different-nonce-0001"
+		if tampered.Check(ia) == nil {
+			t.Fatalf("%s with its nonce changed still checks", r.Name)
+		}
+	}
+	for _, r := range set.RefusedApprovals {
+		if _, err := ParseApprovalRequest(r.Encoded); err == nil {
+			t.Fatalf("%s was read; it must be refused", r.Name)
 		}
 	}
 	for _, r := range set.SignedRequests {
@@ -147,6 +170,7 @@ func TestTheBodySchemaDescribesTheseTypes(t *testing.T) {
 		"keys":             Keys{},
 		"enrol_request":    EnrolRequest{},
 		"sealed_enrolment": SealedEnrolment{},
+		"approval_request": ApprovalRequest{},
 		// The signed request's headers are HTTP headers, not JSON a Go type
 		// writes; the vectors and the independent check hold them instead.
 		"signed_request": nil,
@@ -225,6 +249,19 @@ func fillBodyVectors(set *BodyVectorSet) error {
 	for i := range set.Enrolments {
 		e := &set.Enrolments[i]
 		if e.Encoded, err = e.Fields.Encode(); err != nil {
+			return err
+		}
+	}
+	for i := range set.ApprovalRequests {
+		r := &set.ApprovalRequests[i]
+		r.Signed = string(ApprovalProof(first.IdentityAgent, first.Agent, set.Host, set.Verkey, r.Nonce))
+		sig, err := Sign(signer, []byte(r.Signed))
+		if err != nil {
+			return err
+		}
+		r.Request = ApprovalRequest{Version: 1, URL: first.URL, IdentityAgent: first.IdentityAgent, Agent: first.Agent,
+			AgentName: first.AgentName, Host: set.Host, Verkey: set.Verkey, Nonce: r.Nonce, Signature: sig}
+		if r.Encoded, err = r.Request.Encode(); err != nil {
 			return err
 		}
 	}
@@ -344,6 +381,40 @@ func writeBodyVectors(t *testing.T) {
 			Body: `{"conversation":"c_1","text":"done"}`,
 			Headers: map[string]string{HeaderFor: ia, HeaderTimestamp: "2026-10-28T12:00:01Z", HeaderNonce: "request-nonce-0002",
 				HeaderWorkItem: "issue-42", HeaderReason: "report the result", HeaderSession: "run-7"}},
+	}
+	set.ApprovalRequests = append(set.ApprovalRequests, struct {
+		Name    string          `json:"name"`
+		Nonce   string          `json:"nonce"`
+		Signed  string          `json:"signed"`
+		Request ApprovalRequest `json:"request"`
+		Encoded string          `json:"encoded"`
+	}{Name: "an approval request", Nonce: "approve-nonce-0001"})
+	whole := map[string]any{"v": 1, "ia": "E", "agent": "E", "host": "1", "verkey": "1", "nonce": "approve-nonce-0001", "signature": "0B"}
+	without := func(field string) map[string]any {
+		m := map[string]any{}
+		for k, v := range whole {
+			if k != field {
+				m[k] = v
+			}
+		}
+		return m
+	}
+	version2 := without("")
+	version2["v"] = 2
+	shortNonce := without("")
+	shortNonce["nonce"] = "fifteen-chars-0"
+	for _, r := range []struct{ name, encoded string }{
+		{"another prefix", "iaapprove2." + b64json(whole)},
+		{"not base64url", "iaapprove1.***"},
+		{"not JSON", "iaapprove1.bm90IGpzb24"},
+		{"version 2", "iaapprove1." + b64json(version2)},
+		{"no signature", "iaapprove1." + b64json(without("signature"))},
+		{"a nonce under 16 characters", "iaapprove1." + b64json(shortNonce)},
+	} {
+		set.RefusedApprovals = append(set.RefusedApprovals, struct {
+			Name    string `json:"name"`
+			Encoded string `json:"encoded"`
+		}{r.name, r.encoded})
 	}
 	set.RefusedNonces = []string{"", "fifteen-chars-0"}
 	if err := fillBodyVectors(&set); err != nil {
