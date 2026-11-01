@@ -496,7 +496,7 @@ func TestAWitnessHandsBackAnEventItHolds(t *testing.T) {
 	sig, _ := login.SignString(string(raw), d.orgSeed)
 	icp, _ := base64.StdEncoding.DecodeString(d.icpB64)
 	icpSig, _ := login.SignString(string(icp), d.orgSeed)
-	sender.BringUpToDate(context.Background(), d.org, []SignedEvent{{d.icpB64, icpSig}, {d.approvalB64, sig}}, []string{d.wkey}, 1)
+	sender.BringUpToDate(context.Background(), d.org, []SignedEvent{{RawBytesB64: d.icpB64, CesrSignature: icpSig}, {RawBytesB64: d.approvalB64, CesrSignature: sig}}, []string{d.wkey}, 1)
 	got := sender.EventsHeldAt(context.Background(), d.org, 1, []string{d.wkey})
 	if len(got) != 1 || got[0].RawBytesB64 != d.approvalB64 || got[0].CesrSignature != sig {
 		t.Fatalf("the witness handed back %+v", got)

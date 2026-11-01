@@ -97,7 +97,8 @@ func (s *CoreServer) signedEventsOf(aid string) []witness.SignedEvent {
 	}
 	out := make([]witness.SignedEvent, 0, len(events))
 	for _, ev := range events {
-		out = append(out, witness.SignedEvent{RawBytesB64: ev.RawBytesB64, CesrSignature: ev.CesrSignature})
+		out = append(out, witness.SignedEvent{RawBytesB64: ev.RawBytesB64,
+			CesrSignature: ev.CesrSignature, Signatures: ev.ControllerSignatures()})
 	}
 	return out
 }
