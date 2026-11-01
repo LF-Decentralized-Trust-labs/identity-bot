@@ -208,3 +208,18 @@ func TestAnEntryFiledUnderAnotherIdentitysNameIsNotBelieved(t *testing.T) {
 		t.Fatalf("another identity's key, filed under this one's name, was answered for it: %s", got)
 	}
 }
+
+// A relay naming a new visitor on every request cannot grow the gate's record
+// of visitors beyond what the relayed budget lets through.
+func TestARelayNamingNewVisitorsCannotGrowTheRecordPastTheBudget(t *testing.T) {
+	g, h := aGateAnswering(time.Second)
+	for i := 0; i < 3*keyLogChecksPerMinuteRelayed; i++ {
+		relayedCall(h, fmt.Sprintf("10.%d.%d.%d", i/62500, (i/250)%250, i%250), "")
+	}
+	g.byVisitor.mu.Lock()
+	n := len(g.byVisitor.seen)
+	g.byVisitor.mu.Unlock()
+	if n > keyLogChecksPerMinuteRelayed {
+		t.Fatalf("%d visitors remembered, more than the %d the relayed budget admits", n, keyLogChecksPerMinuteRelayed)
+	}
+}

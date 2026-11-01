@@ -290,6 +290,19 @@ func (l *attestationRateLimiter) allow(key string) bool {
 	return true
 }
 
+// wouldAllow reports whether allow(key) would let a request through, without
+// counting it or remembering key.
+func (l *attestationRateLimiter) wouldAllow(key string) bool {
+	if l == nil {
+		return true
+	}
+	now := time.Now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	b, ok := l.seen[key]
+	return !ok || now.Sub(b.start) > time.Minute || b.count < l.perMin
+}
+
 // callerIP identifies the caller for rate limiting only.
 //
 // Not used for any access decision, so a forged forwarding header costs the

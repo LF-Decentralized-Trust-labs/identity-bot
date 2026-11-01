@@ -165,12 +165,16 @@ func (g *keyLogGate) guard(next http.HandlerFunc) http.HandlerFunc {
 		allowed := true
 		if p, relayed := relayproto.PreambleFrom(r.Context()); relayed {
 			// A relayed request passes the visitor's own share, when the relay
-			// named one, and then the shared relayed budget. The share is checked
-			// first so a visitor already over it does not spend the budget.
-			if v := visitorShare(p.Visitor); v != "" {
+			// named one, and the shared relayed budget. A visitor already over
+			// its share spends none of the budget; and a visitor is remembered
+			// only once the budget has let its request through, so a relay
+			// naming a new visitor each time cannot grow the record past what
+			// the budget admits.
+			v := visitorShare(p.Visitor)
+			allowed = (v == "" || g.byVisitor.wouldAllow(v)) && g.relayed.allow("through the relay")
+			if allowed && v != "" {
 				allowed = g.byVisitor.allow(v)
 			}
-			allowed = allowed && g.relayed.allow("through the relay")
 		} else {
 			allowed = g.perCaller.allow(callerIP(r))
 		}
