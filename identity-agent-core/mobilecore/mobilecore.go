@@ -3,6 +3,7 @@ package mobilecore
 import (
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/keymath"
 	"log"
 	"sync"
 
@@ -117,4 +118,15 @@ func GetPort() int {
 // claim more coverage than it has.
 func RunKeriSelfTest() (string, error) {
 	return keri.SelfTestJSON()
+}
+
+// KeyMath runs one keymath operation for the app, in the app's own process: a
+// request as JSON in, the answer as JSON out (keymath.Do). It is how a phone
+// that holds the identity's keys computes with the core's own code.
+func KeyMath(op, request string) (string, error) {
+	out, err := keymath.Do(op, []byte(request))
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
 }
