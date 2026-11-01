@@ -1,6 +1,6 @@
 # ADR-022: Hybrid Post-Quantum KERI Cipher Suite
 
-**Status:** Accepted, with the implementation notes below corrected 2026-08-18.
+**Status:** Accepted, with the implementation notes below corrected 2026-08-18, and amended by ADR-061.
 The suite and its reasoning stand. Two things this ADR describes are no longer
 how the code works, and one never became true — see "What changed since this was
 written" at the end before relying on any implementation detail here.
@@ -138,3 +138,13 @@ number of base64 quadruples. The codes in force are those in
 `identity-agent-core/iacrypto/cesr.go`: `2AAE` for ML-DSA-65 (proposed in the
 specification, not yet assigned), `C` for X25519 (already assigned) and `2PKM`
 for ML-KEM-768 (ours, provisional). `golden_vectors.json` names the same codes.
+
+**Amended by ADR-061, 2026-10-31: how post-quantum pre-rotation is committed
+and revealed.** Every establishment event commits `n = [classical next,
+post-quantum next]` with `nt = "1"`, derived by whoever holds the recovery
+phrase, including where the app rather than the core holds the key. No
+post-quantum key or signature appears in a published event until CESR assigns
+codes for them; the reveal, and the stage in which both keys sign
+(`kt = nt = "2"`), are built and tested behind a setting that stays off. The
+digest a commitment is taken over is frozen. ADR-061 sections 1 and 6 are the
+reference.

@@ -1,8 +1,8 @@
 # ADR-044 — An authorized controller does the application's work; the owner key does the root of trust
 
-**Status:** Accepted, amended by ADR-050
+**Status:** Accepted, amended by ADR-050 and ADR-061
 **Date:** 2026-10-18
-**Amended by:** ADR-050 (One check for a controller's actions and an AI agent's capability calls, 2026-10-26)
+**Amended by:** ADR-050 (One check for a controller's actions and an AI agent's capability calls, 2026-10-26), ADR-061 (Every key event is signed before it is added, 2026-10-31)
 **Relates to:** ADR-042 (How an agent is reached, and who may manage it), ADR-038 (Who claims a machine is not who owns what it founds), ADR-027 (Hardware-gated signing-key custody)
 
 ## Context
@@ -119,7 +119,7 @@ at a place already filled, or from the identity's witnesses, verified against th
 identity's current key. It does so whether the request still waits, was refused or
 expired, or was withdrawn, before it builds any grant and on every tick, so the two key
 logs never diverge; signing is never split into a prepare and a commit, which would
-reopen the duplicity it prevents. A grant taken up that is no longer wanted (its machine
+reopen the duplicity it prevents. *(Scope, per ADR-061: this holds for the device that signs through its own core. Where a signer outside the core signs an event the core prepared, ADR-061 splits signing into a prepare and a commit and keeps duplicity out by having the signer reserve each place before it signs.)* A grant taken up that is no longer wanted (its machine
 removed, its request withdrawn or changed) is kept so the registry's log is whole, is
 never in force, and is withdrawn at once by a revocation the device signs on the same
 queue, ahead of anything else; the device signs a revocation only of a grant its own key
@@ -150,7 +150,7 @@ the core, as an app may hold it: the app signs an event only after the core has
 added it, which is too late, so through the core such an identity can be neither rotated
 nor extended (no interaction, no credential issued), and the core says so in those words.
 Before this the core appended those events unsigned, so the key logs they made were not
-valid. It changes once the app signs each event before it is added. An Identity Agent whose key log holds events written by an earlier version
+valid. It changes once the app signs each event before it is added. *(Superseded by ADR-061: every key event, rotations included, is now signed before it is added, through a prepare and a commit, so an identity whose key the app holds can rotate and interact, and no rotation is appended unsigned.)* An Identity Agent whose key log holds events written by an earlier version
 without the key, which the device never had, asks the device for nothing and says so. Only one
 interaction waits for the device at a time, as each extends the same tip; another is kept
 and built once the one before it is appended, refused or expired. When a signature comes back it must be over the request's own
