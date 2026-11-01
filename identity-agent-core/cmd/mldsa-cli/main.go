@@ -10,9 +10,13 @@
 // It is a test/harness tool, not part of the served API. It takes a seed rather
 // than generating one, because the whole point is a byte-identical vector.
 //
-//	go run ./cmd/mldsa-cli verkey '{"seed_hex":"..."}'
-//	go run ./cmd/mldsa-cli sign   '{"seed_hex":"...","msg_hex":"..."}'
-//	go run ./cmd/mldsa-cli verify '{"vk_hex":"...","msg_hex":"...","sig_hex":"..."}'
+// The operation is the only argument. The JSON request is read from standard
+// input, never from the command line, because the seed is a private key and
+// other processes on the machine can read another process's arguments.
+//
+//	echo '{"seed_hex":"..."}'                                   | go run ./cmd/mldsa-cli verkey
+//	echo '{"seed_hex":"...","msg_hex":"..."}'                   | go run ./cmd/mldsa-cli sign
+//	echo '{"vk_hex":"...","msg_hex":"...","sig_hex":"..."}'     | go run ./cmd/mldsa-cli verify
 package main
 
 import (
@@ -41,13 +45,13 @@ func main() {
 }
 
 func run() error {
-	if len(os.Args) != 3 {
-		return fmt.Errorf("usage: mldsa-cli <sign|verkey|verify> <json>")
+	if len(os.Args) != 2 {
+		return fmt.Errorf("usage: mldsa-cli <sign|verkey|verify> < request.json")
 	}
 	op := os.Args[1]
 
 	var req request
-	if err := json.Unmarshal([]byte(os.Args[2]), &req); err != nil {
+	if err := json.NewDecoder(os.Stdin).Decode(&req); err != nil {
 		return fmt.Errorf("bad request json: %w", err)
 	}
 
