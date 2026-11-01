@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"testing"
 )
 
 // Asking this instance's own binary to add the owner's way back into the
@@ -24,6 +25,11 @@ type volumeRecoveryRunner func(keysB64 []string) error
 // tenantVolumeDevice is the volume an agent's data lives on where one exists.
 const tenantVolumeDevice = "/dev/vdb"
 
+// recoveryChildEnv marks the process addVolumeRecoveryVia starts. A binary that
+// does not know the command would run the Identity Agent again, reach this
+// code again, and start another, without end; the mark stops the second.
+const recoveryChildEnv = "IDENTITY_AGENT_VOLUME_RECOVERY_CHILD"
+
 func (s *CoreServer) addVolumeRecovery(keysB64 []string) error {
 	if s.volumeRecovery != nil {
 		return s.volumeRecovery(keysB64)
@@ -40,6 +46,16 @@ func addVolumeRecoveryVia(device string, keysB64 []string) error {
 		return fmt.Errorf("no owner keys, so there is nobody to give a way back in to")
 	}
 
+	// Under go test, os.Executable is the test binary, which does not know the
+	// command and would run the whole suite again, to reach here again. A test
+	// that means to arrange recovery sets CoreServer.volumeRecovery.
+	if testing.Testing() {
+		return fmt.Errorf("a test reached the real volume; set CoreServer.volumeRecovery")
+	}
+	if os.Getenv(recoveryChildEnv) != "" {
+		return fmt.Errorf("this is already the recovery command's process, so it will not start another")
+	}
+
 	self, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("could not find this binary to run its recovery command: %w", err)
@@ -47,7 +63,7 @@ func addVolumeRecoveryVia(device string, keysB64 []string) error {
 
 	args := append([]string{"add-owner-recovery", device}, keysB64...)
 	cmd := exec.Command(self, args...)
-	cmd.Env = childenv.Environ()
+	cmd.Env = append(childenv.Environ(), recoveryChildEnv+"=1")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%w (%s)", err, strings.TrimSpace(string(out)))

@@ -66,3 +66,29 @@ func TestRecoveryIsAttemptedWithTheOwnersKeys(t *testing.T) {
 		t.Fatalf("the owners' keys did not reach the volume: %v", got)
 	}
 }
+
+// A test that does not set the seam must never start a process. Under go test
+// the binary to run is the test binary itself, which runs the suite again and
+// reaches this code again, a new copy every few seconds without end.
+func TestATestCannotReachTheRealVolume(t *testing.T) {
+	present := filepath.Join(t.TempDir(), "device")
+	if err := os.WriteFile(present, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := addVolumeRecoveryVia(present, []string{"a"}); err == nil {
+		t.Fatal("recovery was started from a test")
+	}
+}
+
+// The process the recovery command runs in never starts another, whatever
+// binary it is.
+func TestTheRecoveryProcessDoesNotStartAnother(t *testing.T) {
+	t.Setenv(recoveryChildEnv, "1")
+	present := filepath.Join(t.TempDir(), "device")
+	if err := os.WriteFile(present, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := addVolumeRecoveryVia(present, []string{"a"}); err == nil {
+		t.Fatal("a recovery process started another")
+	}
+}
