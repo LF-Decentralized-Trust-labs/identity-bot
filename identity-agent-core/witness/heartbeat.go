@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -52,10 +51,19 @@ func (s *Service) runHeartbeatPass(ctx context.Context) {
 	}
 }
 
+// healthURL is where an Identity Agent asks a witness whether it is alive.
+//
+// Derived from witnessBase rather than repeating its trimming, which is how
+// the two drifted: this copy and that one both stripped only "/public/oobi/",
+// a path our witnesses never publish, so the probe was appended to a full
+// endpoint path and 404'd every time. Each failure counted towards
+// OfflineFailureThreshold, so healthy witnesses were marching towards being
+// written off — and being written off means looking for a replacement, which
+// means a key rotation.
+//
+// The /api prefix matches what an Identity Agent serves for its own witness
+// routes, which is the convention a witness is addressed by. A witness service
+// is expected to answer health there as well as at /health.
 func healthURL(oobi string) string {
-	base := oobi
-	if idx := strings.Index(oobi, "/public/oobi/"); idx != -1 {
-		base = oobi[:idx]
-	}
-	return strings.TrimRight(base, "/") + "/api/health"
+	return witnessBase(oobi) + "/api/health"
 }
