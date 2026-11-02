@@ -254,6 +254,26 @@ func TestABodyApprovalMustNameTheMachineApproved(t *testing.T) {
 	}
 }
 
+// An app's body is approved by the same request as an AI agent's, and a body
+// credential for another machine than the one approved is refused for an app too.
+func TestAnAppBodyIsApprovedByTheSameRequest(t *testing.T) {
+	w := newWorld(t)
+	approve := func(bid, about string) []byte {
+		req := w.signs("POST", "/api/mcp/agents/app-1/bodies/"+bid+"/approve", "", ago(time.Minute))
+		acdc, _ := w.build(schemas.AppBody.Schema.SAID, agentAID, time.Now().UTC(), map[string]interface{}{
+			"asset_type": "app", "name": "Task console", "host": "BHost", "verkey": "DKey",
+			"keys_digest": "EDigest", "grade": "software", "request": req, "about": about,
+		}, w.edge())
+		return acdc
+	}
+	if err := w.check(approve("body-1", "body-1")); err != nil {
+		t.Fatalf("an app body approval that holds was refused: %v", err)
+	}
+	if err := w.check(approve("body-1", "body-2")); err == nil {
+		t.Fatal("an app body credential for another machine than the one approved was accepted")
+	}
+}
+
 func TestAnOwnersRequestIsCheckedAgainstTheOwnersKey(t *testing.T) {
 	w := newWorld(t)
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)

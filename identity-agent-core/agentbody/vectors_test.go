@@ -340,6 +340,16 @@ func writeBodyVectors(t *testing.T) {
 	}{Name: "an enrolment", Fields: Enrolment{Version: 1, URL: "https://ia.example", IdentityAgent: ia,
 		KeyStateSN: 3, KeyStateSAID: "EKeyState00000000000000000000000000000000000", Agent: "EAIAgent000000000000000000000000000000000000",
 		AgentName: "Research assistant", Secret: "one-time-secret-0001", Expires: exp}})
+	// An app's body enrols with the same string: the asset is named by its
+	// identifier, and nothing in the string says what kind of asset it is
+	// (ADR-045 amended 2026-11-02, ADR-046).
+	set.Enrolments = append(set.Enrolments, struct {
+		Name    string    `json:"name"`
+		Fields  Enrolment `json:"fields"`
+		Encoded string    `json:"encoded"`
+	}{Name: "an enrolment for an app", Fields: Enrolment{Version: 1, URL: "https://ia.example", IdentityAgent: ia,
+		KeyStateSN: 3, KeyStateSAID: "EKeyState00000000000000000000000000000000000", Agent: "EApp0000000000000000000000000000000000000000",
+		AgentName: "Task console", Secret: "one-time-secret-0002", Expires: exp}})
 	for _, r := range []struct{ name, encoded string }{
 		{"another prefix", "iabody2.eyJ2IjoxfQ"},
 		{"not base64url", "iabody1.***"},

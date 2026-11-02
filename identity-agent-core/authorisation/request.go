@@ -443,7 +443,9 @@ func checkAskedFor(cred acdc, method, path string, asked map[string]json.RawMess
 		if !sameInstant(strings.TrimSpace(stringOf(asked["expires_at"])), stringAttr(cred.A, "valid_until")) {
 			return fmt.Errorf("the request asked for another end to the grant than was granted")
 		}
-	case schemas.AIAgentBody.Schema.SAID:
+	case schemas.AIAgentBody.Schema.SAID, schemas.AppBody.Schema.SAID:
+		// An app's body is approved by the same request as an AI agent's
+		// (ADR-059): the machine is named in the path, whatever the asset is.
 		if method != "POST" || len(segments) != 7 || segments[4] != "bodies" || segments[6] != "approve" {
 			return fmt.Errorf("%s %s is not a request that approves a machine", method, path)
 		}

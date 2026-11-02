@@ -27,6 +27,8 @@ var publishedGrantFiles = map[*AssetGrant]string{
 	AIAgentBody:     "ai-agent-body-1.1.0.schema.json",
 	AIAgentBodyV1:   "ai-agent-body-1.0.0.schema.json",
 	ControllerGrant: "controller-grant-1.1.0.schema.json",
+	AppGrant:        "app-grant-1.1.0.schema.json",
+	AppBody:         "app-body-1.1.0.schema.json",
 }
 
 func TestThePublishedGrantSchemasAreTheOnesBuilt(t *testing.T) {
