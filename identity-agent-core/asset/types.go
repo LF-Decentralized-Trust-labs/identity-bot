@@ -131,7 +131,13 @@ type BrainConfig struct {
 	// still say "cli" or "remote", or carry a display label, which that
 	// add-on normalises on reading.
 	Provider string `json:"provider,omitempty"`
-	Model    string `json:"model,omitempty"`
+	// Model is the one default model: what runs when a task does not ask for
+	// another, and what every reader that knows one model reads.
+	Model string `json:"model,omitempty"`
+	// Models are the models this AI agent may use, among which a task's tier
+	// chooses. Empty means only Model. Model is always allowed whether or not
+	// it is listed here.
+	Models []string `json:"models,omitempty"`
 	// Endpoint is the base URL for a local (or self-hosted) model API.
 	Endpoint string `json:"endpoint,omitempty"`
 	// CredentialRef names the vault entry holding the brain's sign-in
@@ -279,4 +285,18 @@ type Employee struct {
 	VouchPayload string    `json:"vouch_payload,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// AllowedModels is every model this brain may use: Model first, then Models
+// without repeating it. Empty when neither names one.
+func (b BrainConfig) AllowedModels() []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, m := range append([]string{b.Model}, b.Models...) {
+		if m != "" && !seen[m] {
+			seen[m] = true
+			out = append(out, m)
+		}
+	}
+	return out
 }

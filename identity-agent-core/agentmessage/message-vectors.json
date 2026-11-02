@@ -5,6 +5,30 @@
   "verkey": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
   "statements": [
     {
+      "name": "an ask with a tier",
+      "statement": {
+        "conversation": "c_vector",
+        "kind": "ask",
+        "from": "EAGENT_A",
+        "to": "EAGENT_B",
+        "in_reply_to": "m_person",
+        "body_hash": "EJu2MbcM89EL49u82b73SSGGxoWeMc9wyh1XyNTqcA31",
+        "brain": {
+          "provider": "example-harness",
+          "model": "example-model",
+          "session": "s-0"
+        },
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "host_nonce": "nonce-deep-0000001",
+        "host_time": "2026-10-20T11:59:40Z",
+        "body_credential": "EBODYCRED",
+        "tier": "deep"
+      },
+      "body": "Review this design for races.",
+      "signed": "IA-AGENT-MSG-V2\nc_vector\nask\nEAGENT_A\nEAGENT_B\nm_person\nEJu2MbcM89EL49u82b73SSGGxoWeMc9wyh1XyNTqcA31\nexample-harness\nexample-model\ns-0\n\nBHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk\nnonce-deep-0000001\n2026-10-20T11:59:40Z\nEBODYCRED\ndeep",
+      "signature": "0BBVP_amz8YraOH8Kbgq05FMeTiJpacBH69FS8lppauqwFJQSZgfaS2J2EdeQigSW9jM-QAng0VY2TJnh-Q8GDMG"
+    },
+    {
       "name": "a reply",
       "statement": {
         "conversation": "c_vector",
@@ -72,6 +96,49 @@
     }
   ],
   "refused_statements": [
+    {
+      "name": "a tier that is not quick, standard or deep",
+      "statement": {
+        "conversation": "c_vector",
+        "kind": "ask",
+        "from": "EAGENT_A",
+        "to": "EAGENT_B",
+        "in_reply_to": "m_person",
+        "body_hash": "EHASH",
+        "brain": {
+          "provider": "example-harness",
+          "model": "example-model",
+          "session": "s-0"
+        },
+        "host": "BHOST",
+        "host_nonce": "nonce-fedcba9876543210",
+        "host_time": "2026-10-20T11:59:30Z",
+        "body_credential": "EBODYCRED",
+        "tier": "turbo"
+      }
+    },
+    {
+      "name": "a tier on a reply",
+      "statement": {
+        "conversation": "c_vector",
+        "kind": "reply",
+        "from": "EAGENT_B",
+        "to": "EAGENT_A",
+        "in_reply_to": "m_ask",
+        "body_hash": "EHASH",
+        "brain": {
+          "provider": "example-harness",
+          "model": "example-model",
+          "session": "s-1",
+          "run_hash": "Erun"
+        },
+        "host": "BHOST",
+        "host_nonce": "nonce-0123456789abcdef",
+        "host_time": "2026-10-20T12:00:00Z",
+        "body_credential": "EBODYCRED",
+        "tier": "quick"
+      }
+    },
     {
       "name": "a line break in a field",
       "statement": {

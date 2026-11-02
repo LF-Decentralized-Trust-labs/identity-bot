@@ -108,8 +108,12 @@ lowercase escape for one of them; such a record stays unverifiable.
 1. **The sender's own statement.** A body signs it with its machine key over a
    fixed, line-separated string. The string covers the conversation, the kind of
    message, from and to, the message it acts on, a digest of the words, what brain
-   produced them, a nonce, a time, and the body's credential. A person's controller
-   signs their request. The Identity Agent never holds either key, so it cannot forge
+   produced them, a nonce, a time, and the body's credential. An ask may also name a
+   tier of model, quick, standard or deep, for the task; the tier is inside the
+   signature, and a message that carries one is signed as `IA-AGENT-MSG-V2`, while
+   one with none is signed exactly as before. A reader that does not know tiers
+   refuses a tiered message rather than running it without its tier. A person's
+   controller signs their request. The Identity Agent never holds either key, so it cannot forge
    this layer.
 2. **The Identity Agent's countersignature, as the party the message is from.** For an
    AI agent's message, that AI agent's own messaging keys sign it. Those keys are

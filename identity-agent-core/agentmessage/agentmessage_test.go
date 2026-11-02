@@ -116,3 +116,59 @@ func TestTheCountersignatureCoversTheSendersSignature(t *testing.T) {
 		t.Fatal("a record re-addressed after the body signed it was accepted")
 	}
 }
+
+// A statement with no tier is signed exactly as before tiers existed, and a
+// reader that does not know tiers refuses a tiered one instead of running it
+// without its tier: it rebuilds the V1 string from the fields it knows.
+func TestATierIsSignedAndAReaderWithoutTiersRefusesIt(t *testing.T) {
+	_, verkey, _ := agentbody.Identity(vectorSigner())
+	plain := vectorStatement(t)
+	plain.Kind = KindAsk
+	if !strings.HasPrefix(string(plain.Bytes()), "IA-AGENT-MSG-V1\n") || strings.Count(string(plain.Bytes()), "\n") != 14 {
+		t.Fatalf("a statement with no tier is not the V1 string: %q", plain.Bytes())
+	}
+	tiered := plain
+	tiered.Tier = TierDeep
+	if !strings.HasPrefix(string(tiered.Bytes()), "IA-AGENT-MSG-V2\n") || !strings.HasSuffix(string(tiered.Bytes()), "\n"+TierDeep) {
+		t.Fatalf("a tiered statement is not V2 ending in its tier: %q", tiered.Bytes())
+	}
+	sig, err := Sign(vectorSigner(), tiered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Verify(tiered, verkey, sig); err != nil {
+		t.Fatal(err)
+	}
+	// What a reader of the version before tiers has: the same JSON, the tier
+	// dropped as an unknown field.
+	if err := Verify(plain, verkey, sig); err == nil {
+		t.Fatal("a reader that drops the tier accepted the signature")
+	}
+	// The tier is bound: changing it breaks the signature.
+	other := tiered
+	other.Tier = TierQuick
+	if Verify(other, verkey, sig) == nil {
+		t.Fatal("changing the tier left the signature valid")
+	}
+}
+
+func TestOnlyAnAskCarriesAKnownTier(t *testing.T) {
+	st := vectorStatement(t)
+	st.Tier = TierQuick // st is a reply
+	if st.Check() == nil {
+		t.Error("a reply with a tier was accepted")
+	}
+	st.Kind = KindAsk
+	for _, tier := range []string{TierQuick, TierStandard, TierDeep} {
+		st.Tier = tier
+		if err := st.Check(); err != nil {
+			t.Errorf("%s: %v", tier, err)
+		}
+	}
+	for _, bad := range []string{"turbo", "Deep", "deep\nquick"} {
+		st.Tier = bad
+		if st.Check() == nil {
+			t.Errorf("tier %q was accepted", bad)
+		}
+	}
+}

@@ -193,9 +193,11 @@ def check_body(v):
 
 def statement_bytes(s):
     b = s.get("brain", {})
-    return lines("IA-AGENT-MSG-V1", s["conversation"], s["kind"], s["from"], s["to"], s.get("in_reply_to", ""),
+    tier = s.get("tier", "")
+    return lines("IA-AGENT-MSG-V2" if tier else "IA-AGENT-MSG-V1", s["conversation"], s["kind"], s["from"], s["to"], s.get("in_reply_to", ""),
                  s["body_hash"], b.get("provider", ""), b.get("model", ""), b.get("session", ""),
-                 b.get("run_hash", ""), s["host"], s["host_nonce"], s["host_time"], s["body_credential"])
+                 b.get("run_hash", ""), s["host"], s["host_nonce"], s["host_time"], s["body_credential"],
+                 *([tier] if tier else []))
 
 
 def statement_refused(s):
@@ -203,10 +205,12 @@ def statement_refused(s):
     req = ("conversation", "kind", "from", "to", "body_hash", "host", "host_nonce", "host_time", "body_credential")
     if any(not s.get(x) for x in req):
         return True
-    vals = [s.get(x, "") for x in req + ("in_reply_to",)] + list(s.get("brain", {}).values())
+    vals = [s.get(x, "") for x in req + ("in_reply_to", "tier")] + list(s.get("brain", {}).values())
     if any("\n" in x or "\r" in x for x in vals):
         return True
     if s["kind"] not in ("ask", "reply", "receipt", "failure") or not s.get("in_reply_to"):
+        return True
+    if s.get("tier") and (s["tier"] not in ("quick", "standard", "deep") or s["kind"] != "ask"):
         return True
     if len(s["host_nonce"]) < 16:
         return True

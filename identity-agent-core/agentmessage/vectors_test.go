@@ -296,7 +296,10 @@ func writeMessageVectors(t *testing.T) {
 		Brain: brain, HostNonce: "nonce-0123456789abcdef", HostTime: "2026-10-20T12:00:00Z", BodyCredential: "EBODYCRED"}
 	receipt := Statement{Conversation: "c_vector", Kind: KindReceipt, From: "EAGENT_A", To: "EAGENT_B", InReplyTo: "m_reply",
 		HostNonce: "nonce-receipt-00000001", HostTime: "2026-10-20T12:00:02Z", BodyCredential: "EBODYCRED"}
+	deepAsk := ask
+	deepAsk.Tier, deepAsk.HostNonce, deepAsk.HostTime = TierDeep, "nonce-deep-0000001", "2026-10-20T11:59:40Z"
 	set.Statements = []stmt{
+		{Name: "an ask with a tier", Statement: deepAsk, Body: "Review this design for races."},
 		{Name: "a reply", Statement: reply, Body: "I run macOS 26.1 on a MacBook Pro."},
 		{Name: "an ask", Statement: ask, Body: "Which operating system are you on?"},
 		{Name: "a receipt, with no brain", Statement: receipt, Body: ""},
@@ -316,7 +319,13 @@ func writeMessageVectors(t *testing.T) {
 	shortNonce.HostNonce = "fifteen-chars-0"
 	badTime := withHost(reply)
 	badTime.HostTime = "20 October 2026"
+	unknownTier := withHost(ask)
+	unknownTier.Tier = "turbo"
+	tierOnReply := withHost(reply)
+	tierOnReply.Tier = TierQuick
 	set.RefusedStatements = []refused{
+		{"a tier that is not quick, standard or deep", unknownTier},
+		{"a tier on a reply", tierOnReply},
 		{"a line break in a field", lineBreak},
 		{"an ask that names no message it acts on", noTarget},
 		{"an unknown kind", otherKind},
