@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/ed25519"
 	"encoding/base64"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -495,5 +496,46 @@ func TestEveryOpenRouteIsMountedWhereItSaysItIs(t *testing.T) {
 					m.name, key, why)
 			}
 		}
+	}
+}
+
+// countingBody serves total bytes and records how many were actually taken.
+type countingBody struct {
+	total, served int64
+}
+
+func (c *countingBody) Read(p []byte) (int, error) {
+	if c.served >= c.total {
+		return 0, io.EOF
+	}
+	n := int64(len(p))
+	if rest := c.total - c.served; n > rest {
+		n = rest
+	}
+	c.served += n
+	return int(n), nil
+}
+
+func (c *countingBody) Close() error { return nil }
+
+// A caller with a fresh timestamp and a garbage signature must not be able to
+// make the agent buffer its whole body: the read happens before the signature
+// is known good, so it stops at the bound and the request is refused.
+func TestAnOversizedBodyWithABadSignatureIsNotFullyRead(t *testing.T) {
+	s := newAuthTestServer(t)
+	sealTestOwner(t, s)
+
+	body := &countingBody{total: 4 * maxSignedBodyBytes}
+	req := remote("POST", "/api/profile", "")
+	req.Body = body
+	req.Header.Set(headerOwnerSig, "0Bgarbage")
+	req.Header.Set(headerOwnerTimestamp, time.Now().UTC().Format(time.RFC3339))
+
+	if err := s.verifyOwnerSignature(req); err == nil {
+		t.Fatal("an oversized body with a garbage signature was accepted")
+	}
+	if body.served > maxSignedBodyBytes+1 {
+		t.Fatalf("the agent read %d bytes of a body it should have stopped at %d",
+			body.served, maxSignedBodyBytes+1)
 	}
 }
