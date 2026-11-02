@@ -331,7 +331,7 @@ func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handle
 				next.ServeHTTP(w, r)
 			case accessScoped:
 				how, proofErr := s.theProofOfTheOwner(r)
-				if refuseTooLarge(w, proofErr) {
+				if refuseTheBody(w, proofErr) {
 					return
 				}
 				if how != "" {
@@ -362,7 +362,7 @@ func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handle
 				denyAuthorization(w, "this endpoint needs a token carrying the capability scope for it")
 			default:
 				how, proofErr := s.theProofOfTheOwner(r)
-				if refuseTooLarge(w, proofErr) {
+				if refuseTheBody(w, proofErr) {
 					return
 				}
 				if how != "" {
@@ -506,9 +506,11 @@ func (s *CoreServer) howThisIsTheOwner(r *http.Request) string {
 }
 
 // theProofOfTheOwner is howThisIsTheOwner, and also says when the proof failed
-// because the body is over the bound for its route: that is the one failure
-// the caller can fix by sending less, so it is carried out rather than thrown
-// away. The error is only ever a requestTooLarge, and only with how == "".
+// because of the body -- over the bound for its route, or not the one the
+// request signed (X-IA-Body-Digest): the failures the caller can fix by sending
+// something else, so they are carried out rather than thrown away. The error is
+// only ever a requestTooLarge or a bodyDoesNotMatchItsDigest, and only with
+// how == "".
 func (s *CoreServer) theProofOfTheOwner(r *http.Request) (string, error) {
 	if s.isLocalOwnerRequest(r) {
 		return ownerAtThisComputer, nil
@@ -524,19 +526,29 @@ func (s *CoreServer) theProofOfTheOwner(r *http.Request) (string, error) {
 	if errors.As(err, &tooLarge) {
 		return "", tooLarge
 	}
+	var mismatched bodyDoesNotMatchItsDigest
+	if errors.As(err, &mismatched) {
+		return "", mismatched
+	}
 	return "", nil
 }
 
-// refuseTooLarge answers 413 when err is the size refusal, and says whether it
-// did. A size is not a signature: telling them apart lets a client that signed
-// correctly learn it should send less, not that its key is wrong.
-func refuseTooLarge(w http.ResponseWriter, err error) bool {
+// refuseTheBody answers 413 when err is the size refusal and 400 when it is a
+// body that is not the one the request signed, and says whether it did. A body
+// is not a signature: telling them apart lets a client that signed correctly
+// learn it should send less, or send what it signed, not that its key is wrong.
+func refuseTheBody(w http.ResponseWriter, err error) bool {
 	var tooLarge requestTooLarge
-	if !errors.As(err, &tooLarge) {
-		return false
+	if errors.As(err, &tooLarge) {
+		writeError(w, http.StatusRequestEntityTooLarge, "Request too large", tooLarge.Error())
+		return true
 	}
-	writeError(w, http.StatusRequestEntityTooLarge, "Request too large", tooLarge.Error())
-	return true
+	var mismatched bodyDoesNotMatchItsDigest
+	if errors.As(err, &mismatched) {
+		writeError(w, http.StatusBadRequest, "Body does not match its digest", mismatched.Error())
+		return true
+	}
+	return false
 }
 
 // theGateAdmittedTheOwnerKey marks a request the gate admitted on a route open

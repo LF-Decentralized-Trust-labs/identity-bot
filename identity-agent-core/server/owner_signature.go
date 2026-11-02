@@ -281,13 +281,21 @@ func verifyOwnerString(body, sig string, pub []byte) (bool, error) {
 // each keeps its own memory of spent signatures: without the name, a request
 // captured on its way to one could be presented to another within the window.
 func canonicalOwnerRequest(target, method, path, timestamp string, body []byte) string {
+	return canonicalOwnerRequestOver(target, method, path, timestamp, iacrypto.Blake3QB64Must(body))
+}
+
+// canonicalOwnerRequestOver is canonicalOwnerRequest from the body's digest,
+// which is what lets a request be checked before its body is read: the client
+// sends the digest in X-IA-Body-Digest (body_digest_header.go). The one place the
+// string is built.
+func canonicalOwnerRequestOver(target, method, path, timestamp, bodyDigest string) string {
 	return strings.Join([]string{
 		"IA-REQ-V2",
 		target,
 		strings.ToUpper(method),
 		path,
 		timestamp,
-		iacrypto.Blake3QB64Must(body),
+		bodyDigest,
 	}, "\n")
 }
 
@@ -309,6 +317,10 @@ func canonicalRequestString(method, path, timestamp string, body []byte) string 
 // the Identity Agent whose identifier is target (sent in X-IA-Owner-For).
 // Exported so the desktop app, the CLI and the tests all sign the same bytes
 // rather than each inventing a format.
+//
+// A caller sends the request with X-IA-Body-Digest set to iacrypto.Blake3QB64 of
+// the same body, so the agent verifies this signature before reading any of the
+// body. The header becomes required in a later version.
 func SignOwnerRequest(target, method, path, timestamp string, body, seed []byte) (string, error) {
 	return login.SignString(canonicalOwnerRequest(target, method, path, timestamp, body), seed)
 }
@@ -345,20 +357,28 @@ func (s *CoreServer) verifyOwnerSignature(r *http.Request) error {
 		return err
 	}
 
-	// Read the body to digest it, then put it back — the handler still needs it.
-	// Bounded, because this runs before the signature is known good: an unsigned
-	// caller with a fresh timestamp must not be able to make the agent buffer
-	// whatever it cares to send. Over the bound is refused, never truncated.
-	body, err := readSignedBody(r)
+	// The digest the signature covers. With X-IA-Body-Digest it is the one the
+	// client declared and NOTHING of the body is read until the signature has
+	// verified, so a caller without the key makes the agent read nothing.
+	// Without it (an older client) the body is read to digest it, bounded by
+	// maxSignedBodyBytes only; the header becomes required in a later version.
+	digest, declared, err := theDigestTheRequestDeclares(r)
 	if err != nil {
 		return err
+	}
+	if !declared {
+		body, err := readSignedBody(r)
+		if err != nil {
+			return err
+		}
+		digest = iacrypto.Blake3QB64Must(body)
 	}
 
 	target, err := s.theIdentityAgentAnOwnerNames(r)
 	if err != nil {
 		return err
 	}
-	ok, err := login.VerifyString(canonicalOwnerRequest(target, r.Method, r.URL.Path, stamp, body), sig, pub)
+	ok, err := login.VerifyString(canonicalOwnerRequestOver(target, r.Method, r.URL.Path, stamp, digest), sig, pub)
 	if err != nil {
 		return fmt.Errorf("signature: %w", err)
 	}
@@ -366,10 +386,25 @@ func (s *CoreServer) verifyOwnerSignature(r *http.Request) error {
 		return fmt.Errorf("signature does not match the owner key")
 	}
 
-	// Valid — and now spent. Checked last so a bad signature cannot burn a good
-	// one by presenting it first.
+	// Verified, so spent NOW -- before any of the body is read. A signature is
+	// good for one request. If a mismatched body left it unspent, whoever held
+	// one captured request could resend it many times inside the window, each
+	// time making the agent read up to the route's bound; and resends with the
+	// right body, sent in parallel, would all be read before the first spent it.
+	// A mismatch burns the signature instead. That costs the real sender nothing:
+	// anyone holding the capture could already race them. Checked after the
+	// signature verifies so a bad signature cannot burn a good one by presenting
+	// it first.
 	if rememberSignature(sig, now) {
 		return fmt.Errorf("this signed request has already been used")
+	}
+
+	// Signed by the owner, so the body may now be read -- up to the route's
+	// bound -- and must be the one that was signed.
+	if declared {
+		if err := readTheBodyAgainst(r, digest); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:agent_client/crypto/owner_signature.dart';
 import 'package:agent_client/services/signing_as_the_identity_that_owns_a_machine.dart';
 import 'package:test/test.dart';
 import 'package:http/http.dart' as http;
@@ -81,6 +82,10 @@ void main() {
     // Echoed from the core, not formatted again here: the moment is inside the
     // signature, so a second formatting signs a string the machine never sees.
     expect(sent.headers['X-IA-Owner-Timestamp'], '2026-09-01T00:00:00Z');
+    // The digest the signature covers, so the machine checks the signature
+    // before reading any of the body: Blake3 of the bytes that were sent.
+    expect(sent.headers['X-IA-Body-Digest'],
+        OwnerSignature.blake3QB64(utf8.encode('{"x":1}')));
   });
 
   test('nothing else is signed, however similar the name', () async {

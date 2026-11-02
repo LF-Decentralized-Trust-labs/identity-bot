@@ -1,6 +1,6 @@
 # ADR-042 — How an agent is reached, and who may manage it
 
-**Status:** Accepted; §1, §3 and §5 amended by ADR-048 (2026-10-21): URL Relay carries both private and public addresses under one relay protocol; the Chisel tunnel provider goes, while development tunnels (Cloudflare, ngrok) stay; the core defaults every identity to URL Relay and a product sets its own per-entity default; the Identity Agent itself marks every relayed request; §3 amended 2026-10-22: a request from this computer is the owner's only with the secret the core was started with
+**Status:** Accepted; §1, §3 and §5 amended by ADR-048 (2026-10-21): URL Relay carries both private and public addresses under one relay protocol; the Chisel tunnel provider goes, while development tunnels (Cloudflare, ngrok) stay; the core defaults every identity to URL Relay and a product sets its own per-entity default; the Identity Agent itself marks every relayed request; §3 amended 2026-10-22: a request from this computer is the owner's only with the secret the core was started with; §3 amended 2026-11-02: the signature is checked, and spent, before the body is read
 **Date:** 2026-09-16
 **Relates to:** ADR-006 (Standardized Topology), ADR-033 (An identifier travels with an address), ADR-036 (A computer you pair with does not publish who you are), ADR-041 (One neutral scheme for the protocol's device codes)
 
@@ -198,6 +198,41 @@ Three properties make this sound:
   a request is local (`isLocalConnection`); only the owner test adds the secret, so a
   signed program on the machine keeps its local standing and an unsigned one without
   the secret is treated as remote. Sealed and signed owner requests are unchanged.
+- *Amended 2026-11-02:* **the signature is checked before the body is read.** An
+  owner's (or a controller's) signature covers a digest of the body, so the agent
+  used to read the body to learn what the signature covered, and a caller holding
+  no key could make it read up to a route's bound (512 MiB on the recovery
+  routes) before the signature failed. The request now carries that digest in
+  `X-IA-Body-Digest` — the Blake3 qb64 value (`E` and 43 characters) the signed
+  string already contains, sent once. The signed string does not change:
+  `IA-REQ-V2` for an owner, `IA-CONTROLLER-REQ-V2` for a controller.
+  - *With the header*, the agent builds the signed string from the header's digest
+    and verifies the signature having read **none** of the body. Only then does it
+    read the body (up to the bound of the route, `signedBodyBounds`), hashing as it
+    reads, and refuses a body whose digest is not the one in the header with `400`
+    before any handler sees it. The signature is spent once it verifies, before the
+    body is read, so a request that fails on its body has used it and must be signed
+    again; a captured request cannot be resent to make the agent read its body twice.
+    A header that is present but malformed, or sent twice, is refused,
+    never treated as absent.
+  - *Without the header* (older clients) the agent reads the body to digest it, as
+    before, but only up to the default bound (`maxSignedBodyBytes`, 12 MiB); the
+    larger per-route bounds apply only to a request that sends the header.
+  - **The header becomes required in a later version**, and the no-header path is
+    then removed. Every client sends it now (`SignOwnerRequest` callers, the
+    recovery client, and `OwnerSignature`, `OwnerSigningClient`,
+    `SigningAsTheIdentityThatOwnsAMachine` and `ControllerSigningClient` in
+    `packages/agent_client`).
+  - *Vectors*, in `identity-agent-core/server/owner_signature_interop_test.go`
+    (`TestTheBodyDigestVectors`) and `packages/agent_client/test/owner_signature_test.dart`,
+    both pinned to these values. Seed: bytes 1..32; Identity Agent
+    `EGOLDENIDENTITYAGENT`; `POST /api/recovery/start`; timestamp
+    `2026-07-27T12:00:00Z`; body `{"archive_b64":"AAAA"}`:
+    - `X-IA-Body-Digest: EGYyOU4vRQiXR9KODcp7bLmX2fzoFVAbS9ozYvstod3d`
+    - `X-IA-Owner-Sig: 0BCg90nECbDmFqAN13nETR9MK5po24EF5FSlM22NAXpbaag1xsPIPZAOXOA85y2RGF2-UNyC3q7atuiLjxmI5tgD`
+    - signed string: `IA-REQ-V2\nEGOLDENIDENTITYAGENT\nPOST\n/api/recovery/start\n2026-07-27T12:00:00Z\nEGYyOU4vRQiXR9KODcp7bLmX2fzoFVAbS9ozYvstod3d`
+    - *Mismatch:* the same two headers sent with the body `{"archive_b64":"BBBB"}`
+      are refused with `400`, the body never reaching a handler.
   The limit: a program running as the same operating-system user can read the file
   or the starting process's environment, so a program that must not act as the owner
   has to run as a different user.

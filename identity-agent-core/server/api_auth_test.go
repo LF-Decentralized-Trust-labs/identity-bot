@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
 	"identity-agent-core/store"
 
@@ -583,8 +584,11 @@ func TestASignedBodyMayBeAsLargeAsItsRouteAllows(t *testing.T) {
 			})
 			router := s.buildRouter("")
 			w := httptest.NewRecorder()
-			s.authorize(router)(probe).ServeHTTP(w,
-				signed(t, tc.method, tc.path, tc.body, seed, time.Now()))
+			req := signed(t, tc.method, tc.path, tc.body, seed, time.Now())
+			// The larger bounds are for a request that declares its digest, so
+			// that its signature is checked before any of the body is read.
+			req.Header.Set(headerBodyDigest, iacrypto.Blake3QB64Must([]byte(tc.body)))
+			s.authorize(router)(probe).ServeHTTP(w, req)
 			if tc.accepted {
 				if !reached || !admitted {
 					t.Fatalf("the gate did not admit a validly signed request (reached %v, admitted as the owner %v): %d %s",

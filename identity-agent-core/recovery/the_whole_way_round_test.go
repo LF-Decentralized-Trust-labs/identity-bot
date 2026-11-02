@@ -1,8 +1,10 @@
 package recovery
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
 )
@@ -846,9 +849,14 @@ func TestAnArchiveThatSaysNothingIsRefusedUnlessSomebodySaysOtherwise(t *testing
 // sign rather than taught to, and what actually signs is whatever holds the
 // root key.
 func TestAskingAMachineToHoldCarriesTheOwnersSignature(t *testing.T) {
-	var sawSig, sawStamp string
+	var sawSig, sawStamp, sawDigest, sawBodyDigest string
 	fussy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sawSig = r.Header.Get("X-IA-Owner-Sig")
+		sawDigest = r.Header.Get("X-IA-Body-Digest")
+		if b, err := io.ReadAll(r.Body); err == nil {
+			sawBodyDigest = iacrypto.Blake3QB64Must(b)
+			r.Body = io.NopCloser(bytes.NewReader(b))
+		}
 		sawStamp = r.Header.Get("X-IA-Owner-Timestamp")
 		if sawSig == "" {
 			// What a remote paired machine does with an unsigned request.
@@ -896,6 +904,9 @@ func TestAskingAMachineToHoldCarriesTheOwnersSignature(t *testing.T) {
 	}
 	if sawSig == "" || sawStamp == "" {
 		t.Fatal("the request arrived without both the signature and its timestamp")
+	}
+	if sawDigest == "" || sawDigest != sawBodyDigest {
+		t.Fatalf("X-IA-Body-Digest is %q, want the digest of the body that arrived (%q)", sawDigest, sawBodyDigest)
 	}
 	if _, err := time.Parse(time.RFC3339, sawStamp); err != nil {
 		t.Fatalf("the timestamp is not something a machine can check a window against: %q", sawStamp)

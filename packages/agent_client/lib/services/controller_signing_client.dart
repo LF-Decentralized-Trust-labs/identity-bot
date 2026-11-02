@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../crypto/owner_signature.dart';
 import 'the_path_a_signature_covers.dart';
 import 'the_owner_at_this_computer.dart';
 
@@ -149,6 +150,11 @@ class ControllerSigningClient extends http.BaseClient {
         // by a millisecond or a timezone produces a signature over a string the
         // agent never sees.
         'X-IA-Controller-Timestamp': stamp,
+        // The digest the signature covers, so the agent checks the signature
+        // before it reads any of the body. Computed here from the very bytes
+        // that are sent (and that the core was asked to sign), not echoed.
+        OwnerSignature.bodyDigestHeader:
+            OwnerSignature.blake3QB64(request.bodyBytes),
         if (signedFor.isNotEmpty) 'X-IA-Controller-For': signedFor,
         for (final e in {
           'X-IA-Controller-Auth-Level': (body['auth_level'] ?? '').toString(),

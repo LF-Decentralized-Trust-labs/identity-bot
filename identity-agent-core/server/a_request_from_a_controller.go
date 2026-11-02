@@ -136,8 +136,8 @@ func (s *CoreServer) controllerActsForTheOwner(
 			denyAuthorizationBecause(w, refused.code, refused.message)
 			return true
 		}
-		// A size is not a signature: say so, as the owner path does.
-		if refuseTooLarge(w, err) {
+		// A body is not a signature: say so, as the owner path does.
+		if refuseTheBody(w, err) {
 			return true
 		}
 		// A request carrying no controller headers at all is simply not from a
@@ -267,15 +267,25 @@ func (s *CoreServer) theControllerBehindIf(
 			"this request was not signed by the machine it claims to be from")
 	}
 
-	// Valid — and now spent. Checked last so a bad signature cannot burn a good
+	// Verified, so spent NOW -- before any of the body is read, for the reasons
+	// given where the owner path does the same: a mismatched body burns the
+	// signature, so a captured request cannot be resent to make the agent read
+	// again, and parallel resends cannot all be read before the first spends it.
+	// Checked after the signature verifies so a bad signature cannot burn a good
 	// one by presenting it first.
 	if rememberSignature(sig, now) {
 		return none, unmeasured, fmt.Errorf("this signed request has already been used")
 	}
+
+	// Signed by the machine, so a declared body is read now and must be the one
+	// signed.
+	if err := theBodyAMachineSigned(r); err != nil {
+		return none, unmeasured, err
+	}
 	return grant, asserted, nil
 }
 
-// theStringThisMachineSigned reads the request body, puts it back, and builds
+// theStringThisMachineSigned builds (reading the body, and putting it back, only for a request without X-IA-Body-Digest)
 // the exact string a controller's signature covers.
 //
 // ONE PLACE KNOWS WHAT A CONTROLLER SIGNS. Two paths need it — admitting a
@@ -303,9 +313,21 @@ func (s *CoreServer) theControllerBehindIf(
 func (s *CoreServer) theStringThisMachineSigned(
 	r *http.Request, aid, stamp string, now time.Time,
 ) (string, authprovider.Result, error) {
-	body, err := readSignedBody(r)
+	// With X-IA-Body-Digest the string is built from the digest the machine
+	// declared and no body is read here at all; theBodyAMachineSigned reads and
+	// matches it once the signature has verified. Without it (an older client)
+	// the body is read, at maxSignedBodyBytes only, and digested. The header
+	// becomes required in a later version.
+	digest, declared, err := theDigestTheRequestDeclares(r)
 	if err != nil {
 		return "", authprovider.Result{}, err
+	}
+	if !declared {
+		body, err := readSignedBody(r)
+		if err != nil {
+			return "", authprovider.Result{}, err
+		}
+		digest = iacrypto.Blake3QB64Must(body)
 	}
 	target, err := s.theIdentityAgentItNames(r)
 	if err != nil {
@@ -319,8 +341,21 @@ func (s *CoreServer) theStringThisMachineSigned(
 	if asserted.Measured {
 		signedAs.Level = authprovider.Level(strings.TrimSpace(r.Header.Get(headerControllerAuthLevel)))
 	}
-	return canonicalControllerRequest(
-		aid, target, r.Method, r.URL.Path, stamp, signedAs, body), asserted, nil
+	return canonicalControllerRequestOver(
+		aid, target, r.Method, r.URL.Path, stamp, signedAs, digest), asserted, nil
+}
+
+// theBodyAMachineSigned reads the body of a request whose signature has
+// verified and which declared its digest (X-IA-Body-Digest), bounded by the
+// route and refused unless it is the body that was signed. Nothing to do for a
+// request without the header: its body was read, at the default bound, to build
+// the string that verified.
+func theBodyAMachineSigned(r *http.Request) error {
+	digest, declared, err := theDigestTheRequestDeclares(r)
+	if err != nil || !declared {
+		return err
+	}
+	return readTheBodyAgainst(r, digest)
 }
 
 // theIdentityAgentItNames is the Identity Agent a controller's request is meant
@@ -479,6 +514,18 @@ func canonicalControllerRequest(
 	authenticated authprovider.Result,
 	body []byte,
 ) string {
+	return canonicalControllerRequestOver(
+		controllerAID, target, method, path, timestamp, authenticated, iacrypto.Blake3QB64Must(body))
+}
+
+// canonicalControllerRequestOver is canonicalControllerRequest from the body's
+// digest, so a request can be checked before its body is read. The one place the
+// string is built.
+func canonicalControllerRequestOver(
+	controllerAID, target, method, path, timestamp string,
+	authenticated authprovider.Result,
+	bodyDigest string,
+) string {
 	measuredAt := ""
 	if authenticated.Measured && !authenticated.At.IsZero() {
 		measuredAt = authenticated.At.UTC().Format(time.RFC3339)
@@ -497,7 +544,7 @@ func canonicalControllerRequest(
 		level,
 		measuredAt,
 		strconv.Itoa(authenticated.Score),
-		iacrypto.Blake3QB64Must(body),
+		bodyDigest,
 	}, "\n")
 }
 
