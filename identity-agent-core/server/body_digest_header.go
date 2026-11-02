@@ -88,8 +88,11 @@ func (aBodyThatWasChecked) Close() error { return nil }
 
 // readTheBodyAgainst reads r's body -- bounded by its route (signedBodyBoundFor),
 // hashing as it reads -- and refuses one whose digest is not declared. Called
-// only AFTER the signature over declared has verified, which is what makes the
-// route's larger bound safe to apply: the caller is the key holder by then.
+// only AFTER the signature over declared has verified AND been spent. Verifying
+// proves the request was signed once by the key holder, not that this sender is
+// the key holder: a captured request can be resent. Spending first is what makes
+// the route's larger bound safe -- a replay is refused as already used before
+// any of the body is read, so a capture buys one read, not many.
 //
 // Over the bound is requestTooLarge, a mismatch is bodyDoesNotMatchItsDigest, and
 // on either r.Body is left erroring rather than holding what was read, so no

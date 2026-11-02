@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -114,13 +116,14 @@ func TestABodyThatDoesNotMatchItsDigestIsRefusedBeforeTheHandler(t *testing.T) {
 	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), headerBodyDigest) {
 		t.Fatalf("got %d, want a 400 naming %s: %s", w.Code, headerBodyDigest, w.Body.String())
 	}
-	// The signature was not spent by a request that failed on its body: the same
-	// headers with the body that was signed are admitted.
+	// The signature IS spent by a request that failed on its body, so that a
+	// captured request cannot be resent to make the agent read again: the same
+	// headers with the body that was signed are refused too.
 	again := httptest.NewRequest("POST", "/api/recovery/start", strings.NewReader(signedBody))
 	again.RemoteAddr = req.RemoteAddr
 	again.Header = req.Header.Clone()
-	if reached, w := serveThroughTheGate(s, again); !reached {
-		t.Fatalf("the signed body was refused after a mismatch: %d %s", w.Code, w.Body.String())
+	if reached, w := serveThroughTheGate(s, again); reached {
+		t.Fatalf("a signature burned by a mismatched body admitted a resend: %d %s", w.Code, w.Body.String())
 	}
 }
 
@@ -258,8 +261,10 @@ func TestAControllersBodyThatDoesNotMatchItsDigestIsRefusedAs400(t *testing.T) {
 		t.Fatalf("a refused body still yields %d bytes (err %v)", len(left), rerr)
 	}
 
-	// Through the gate: a 400, and the handler is never reached.
-	req = asThatMachine(t, aid, "PUT", "/api/profile", `{"a":1}`, seed, "", time.Time{})
+	// Through the gate: a 400, and the handler is never reached. A different
+	// timestamp, so this is a different signature from the one the direct call
+	// above spent.
+	req = asThatMachineAt(t, aid, "PUT", "/api/profile", `{"a":1}`, seed, time.Now().Add(-5*time.Second))
 	req.Header.Set(headerBodyDigest, digestOf(`{"a":1}`))
 	req.Body = io.NopCloser(strings.NewReader(`{"a":2}`))
 	reached, w := serveThroughTheGate(s, req)
@@ -284,5 +289,174 @@ func TestAControllerWithoutTheHeaderGetsOnlyTheDefaultBound(t *testing.T) {
 	}
 	if body.served > maxSignedBodyBytes+1 {
 		t.Fatalf("read %d bytes, want at most %d", body.served, maxSignedBodyBytes+1)
+	}
+}
+
+// --- a verified signature is spent before the body is read ---
+
+// A captured signed request resent with a body that does not match is refused as
+// already used, and the second time nothing of the body is read.
+func TestAVerifiedSignatureResentWithAMismatchedBodyIsRefusedHavingReadNothing(t *testing.T) {
+	s := newAuthTestServer(t)
+	seed, _ := sealTestOwner(t, s)
+	at := time.Now()
+
+	first := signed(t, "POST", "/api/recovery/start", "{}", seed, at)
+	first.Header.Set(headerBodyDigest, digestOf("{}"))
+	first.Body = io.NopCloser(strings.NewReader(`{"x":1}`))
+	if reached, w := serveThroughTheGate(s, first); reached || w.Code != http.StatusBadRequest {
+		t.Fatalf("first: reached %v, code %d: %s", reached, w.Code, w.Body.String())
+	}
+
+	resent := signed(t, "POST", "/api/recovery/start", "{}", seed, at)
+	resent.Header.Set(headerBodyDigest, digestOf("{}"))
+	body := &countingBody{total: 400 << 20}
+	resent.Body = body
+	resent.ContentLength = body.total
+	// Directly, for the reason: through the gate an owner refusal reads the same
+	// whatever the cause.
+	err := s.verifyOwnerSignature(resent)
+	if err == nil || !strings.Contains(err.Error(), "already been used") {
+		t.Fatalf("got %v, want refused as already used", err)
+	}
+	if body.served != 0 {
+		t.Fatalf("read %d bytes of a request whose signature was already spent", body.served)
+	}
+}
+
+// The same, on the controller path.
+func TestAControllerSignatureResentWithAMismatchedBodyIsRefusedHavingReadNothing(t *testing.T) {
+	s := newAuthTestServer(t)
+	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
+	at := time.Now()
+
+	first := asThatMachine(t, aid, "PUT", "/api/profile", `{"a":1}`, seed, "", at)
+	first.Header.Set(headerBodyDigest, digestOf(`{"a":1}`))
+	first.Body = io.NopCloser(strings.NewReader(`{"a":2}`))
+	var mismatched bodyDoesNotMatchItsDigest
+	if _, _, err := s.theControllerBehind(first); !errors.As(err, &mismatched) {
+		t.Fatalf("first: got %v, want the digest mismatch", err)
+	}
+
+	// The very same headers, not a second signing: the stamp is the clock's.
+	resent := asThatMachine(t, aid, "PUT", "/api/profile", `{"a":1}`, seed, "", at)
+	resent.Header = first.Header.Clone()
+	body := &countingBody{total: 400 << 20}
+	resent.Body = body
+	resent.ContentLength = body.total
+	_, _, err := s.theControllerBehind(resent)
+	if err == nil || !strings.Contains(err.Error(), "already been used") {
+		t.Fatalf("got %v, want refused as already used", err)
+	}
+	if body.served != 0 {
+		t.Fatalf("read %d bytes of a request whose signature was already spent", body.served)
+	}
+}
+
+// Resends of one valid request sent at once: the body is read at most once.
+func TestParallelResendsOfOneSignedRequestReadTheBodyAtMostOnce(t *testing.T) {
+	const n = 16
+	payload := `{"pad":"` + strings.Repeat("A", 1<<20) + `"}`
+
+	check := func(t *testing.T, name string, run func(i int, body io.ReadCloser) bool) {
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+		var admitted, readers int
+		start := make(chan struct{})
+		for i := 0; i < n; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				c := &readCounted{r: strings.NewReader(payload)}
+				<-start
+				ok := run(i, c)
+				mu.Lock()
+				defer mu.Unlock()
+				if ok {
+					admitted++
+				}
+				if atomic.LoadInt64(&c.n) > 0 {
+					readers++
+				}
+			}(i)
+		}
+		close(start)
+		wg.Wait()
+		if readers > 1 || admitted > 1 {
+			t.Fatalf("%s: %d requests had their body read, %d admitted; want at most one", name, readers, admitted)
+		}
+	}
+
+	t.Run("owner", func(t *testing.T) {
+		s := newAuthTestServer(t)
+		seed, _ := sealTestOwner(t, s)
+		at := time.Now()
+		reqs := make([]*http.Request, n)
+		for i := range reqs {
+			reqs[i] = signed(t, "POST", "/api/recovery/start", payload, seed, at)
+			reqs[i].Header.Set(headerBodyDigest, digestOf(payload))
+		}
+		check(t, "owner", func(i int, body io.ReadCloser) bool {
+			reqs[i].Body = body
+			reached, _ := serveThroughTheGate(s, reqs[i])
+			return reached
+		})
+	})
+	t.Run("controller", func(t *testing.T) {
+		s := newAuthTestServer(t)
+		aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
+		at := time.Now()
+		reqs := make([]*http.Request, n)
+		// Signed once and the headers copied: a machine's signature is not
+		// deterministic, so signing again would be a different request.
+		one := asThatMachine(t, aid, "POST", "/api/recovery/start", payload, seed, "", at)
+		one.Header.Set(headerBodyDigest, digestOf(payload))
+		for i := range reqs {
+			reqs[i] = asThatMachine(t, aid, "POST", "/api/recovery/start", payload, seed, "", at)
+			reqs[i].Header = one.Header.Clone()
+			reqs[i] = withSignedBodyBound(reqs[i], "/api/recovery/start")
+		}
+		check(t, "controller", func(i int, body io.ReadCloser) bool {
+			reqs[i].Body = body
+			_, _, err := s.theControllerBehind(reqs[i])
+			return err == nil
+		})
+	})
+}
+
+type readCounted struct {
+	r io.Reader
+	n int64
+}
+
+func (c *readCounted) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	atomic.AddInt64(&c.n, int64(n))
+	return n, err
+}
+func (c *readCounted) Close() error { return nil }
+
+// The controller case through the gate, on a large-bound route, with a
+// well-formed signature from a key that is not the machine's: refused having
+// read nothing. (The direct test above uses a default-bound route and a
+// signature that may not even decode.)
+func TestAControllersWrongKeyWithADeclaredDigestIsRefusedHavingReadNothing(t *testing.T) {
+	s := newAuthTestServer(t)
+	aid, _ := anAuthorisedMachine(t, s, GradeEnrolled)
+	otherSeed := make([]byte, 32)
+	otherSeed[0] = 9
+
+	req := asThatMachine(t, aid, "POST", "/api/recovery/start", "{}", otherSeed, "", time.Time{})
+	req.Header.Set(headerBodyDigest, digestOf("{}"))
+	body := &countingBody{total: 400 << 20}
+	req.Body = body
+	req.ContentLength = -1
+
+	reached, w := serveThroughTheGate(s, req)
+	if reached || w.Code == http.StatusOK {
+		t.Fatalf("reached %v, code %d: %s", reached, w.Code, w.Body.String())
+	}
+	if body.served != 0 {
+		t.Fatalf("read %d bytes before the machine's signature was known good", body.served)
 	}
 }

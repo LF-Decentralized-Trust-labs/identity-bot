@@ -267,17 +267,20 @@ func (s *CoreServer) theControllerBehindIf(
 			"this request was not signed by the machine it claims to be from")
 	}
 
-	// Signed by the machine, so a declared body is read now and must be the one
-	// signed. Before the signature is spent: a body that does not match must not
-	// burn it.
-	if err := theBodyAMachineSigned(r); err != nil {
-		return none, unmeasured, err
-	}
-
-	// Valid — and now spent. Checked last so a bad signature cannot burn a good
+	// Verified, so spent NOW -- before any of the body is read, for the reasons
+	// given where the owner path does the same: a mismatched body burns the
+	// signature, so a captured request cannot be resent to make the agent read
+	// again, and parallel resends cannot all be read before the first spends it.
+	// Checked after the signature verifies so a bad signature cannot burn a good
 	// one by presenting it first.
 	if rememberSignature(sig, now) {
 		return none, unmeasured, fmt.Errorf("this signed request has already been used")
+	}
+
+	// Signed by the machine, so a declared body is read now and must be the one
+	// signed.
+	if err := theBodyAMachineSigned(r); err != nil {
+		return none, unmeasured, err
 	}
 	return grant, asserted, nil
 }

@@ -386,19 +386,25 @@ func (s *CoreServer) verifyOwnerSignature(r *http.Request) error {
 		return fmt.Errorf("signature does not match the owner key")
 	}
 
+	// Verified, so spent NOW -- before any of the body is read. A signature is
+	// good for one request. If a mismatched body left it unspent, whoever held
+	// one captured request could resend it many times inside the window, each
+	// time making the agent read up to the route's bound; and resends with the
+	// right body, sent in parallel, would all be read before the first spent it.
+	// A mismatch burns the signature instead. That costs the real sender nothing:
+	// anyone holding the capture could already race them. Checked after the
+	// signature verifies so a bad signature cannot burn a good one by presenting
+	// it first.
+	if rememberSignature(sig, now) {
+		return fmt.Errorf("this signed request has already been used")
+	}
+
 	// Signed by the owner, so the body may now be read -- up to the route's
-	// bound -- and must be the one that was signed. Before the signature is
-	// spent: a body that does not match must not burn it.
+	// bound -- and must be the one that was signed.
 	if declared {
 		if err := readTheBodyAgainst(r, digest); err != nil {
 			return err
 		}
-	}
-
-	// Valid — and now spent. Checked last so a bad signature cannot burn a good
-	// one by presenting it first.
-	if rememberSignature(sig, now) {
-		return fmt.Errorf("this signed request has already been used")
 	}
 	return nil
 }
