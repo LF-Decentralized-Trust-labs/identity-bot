@@ -108,6 +108,48 @@ void main() {
     expect(h[OwnerSignature.forHeader], 'EAGENTA');
   });
 
+  test('the body digest is sent, and is the one the signed string contains', () {
+    final body = utf8.encode('{"archive_b64":"AAAA"}');
+    final h = OwnerSignature.headers(
+      method: 'POST', path: '/api/recovery/start', body: body,
+      ownerSeed: fixedSeed(), targetAid: 'EGOLDENIDENTITYAGENT',
+      now: DateTime.utc(2026, 7, 27, 12, 0, 0),
+    );
+    expect(h[OwnerSignature.bodyDigestHeader], OwnerSignature.blake3QB64(body));
+    expect(OwnerSignature.bodyDigestHeader, 'X-IA-Body-Digest');
+    // Built from the digest, the string is the one built from the body.
+    expect(
+      OwnerSignature.canonicalStringOver(
+        target: 'EGOLDENIDENTITYAGENT', method: 'POST',
+        path: '/api/recovery/start', timestamp: '2026-07-27T12:00:00Z',
+        bodyDigest: h[OwnerSignature.bodyDigestHeader]!,
+      ),
+      OwnerSignature.canonicalString(
+        target: 'EGOLDENIDENTITYAGENT', method: 'POST',
+        path: '/api/recovery/start', timestamp: '2026-07-27T12:00:00Z',
+        body: body,
+      ),
+    );
+  });
+
+  /// The vector for a request with a body and its digest header. The agent's
+  /// owner_signature_interop_test.go (TestTheBodyDigestVectors) pins the same
+  /// values; change both or neither.
+  test('golden vector with a body and its digest header', () {
+    final h = OwnerSignature.headers(
+      method: 'POST',
+      path: '/api/recovery/start',
+      body: utf8.encode('{"archive_b64":"AAAA"}'),
+      ownerSeed: fixedSeed(),
+      targetAid: 'EGOLDENIDENTITYAGENT',
+      now: DateTime.utc(2026, 7, 27, 12, 0, 0),
+    );
+    expect(h[OwnerSignature.bodyDigestHeader],
+        'EGYyOU4vRQiXR9KODcp7bLmX2fzoFVAbS9ozYvstod3d');
+    expect(h[OwnerSignature.sigHeader],
+        '0BCg90nECbDmFqAN13nETR9MK5po24EF5FSlM22NAXpbaag1xsPIPZAOXOA85y2RGF2-UNyC3q7atuiLjxmI5tgD');
+  });
+
   /// The vector the agent's test pins from the other side. If either
   /// implementation changes, one of the two fails rather than every request
   /// failing silently in production.

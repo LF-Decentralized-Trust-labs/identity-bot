@@ -35,6 +35,7 @@ void main() {
 
       expect(recorder.last!.headers, contains(OwnerSignature.sigHeader));
       expect(recorder.last!.headers, contains(OwnerSignature.timestampHeader));
+      expect(recorder.last!.headers, contains(OwnerSignature.bodyDigestHeader));
     });
 
     test('the body survives being signed', () async {

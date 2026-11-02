@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:agent_client/crypto/owner_signature.dart';
 import 'package:agent_client/services/controller_signing_client.dart';
 import 'package:http/http.dart' as http;
 import 'package:test/test.dart';
@@ -74,6 +75,10 @@ void main() {
     // the signature, so a second formatting that differs at all signs a string
     // the agent never sees.
     expect(sent.headers['X-IA-Controller-Timestamp'], '2026-08-31T12:00:00Z');
+    // The digest the signature covers, so the agent checks the signature before
+    // reading any of the body: Blake3 of the bytes that were sent.
+    expect(sent.headers['X-IA-Body-Digest'],
+        OwnerSignature.blake3QB64(utf8.encode('{"a":1}')));
   });
 
   test('the core is asked to sign the path and body actually being sent', () async {

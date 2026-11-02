@@ -32,6 +32,15 @@ class OwnerSignature {
   /// signature, and any other Identity Agent refuses the request.
   static const forHeader = 'X-IA-Owner-For';
 
+  /// Header carrying the body's digest: the same Blake3 qb64 value the signed
+  /// string already contains. Sent so the agent can check the signature BEFORE it
+  /// reads any of the body, instead of having to read the body to learn what the
+  /// signature covers. The signed string does not change.
+  ///
+  /// An agent that predates it ignores it. It becomes REQUIRED in a later
+  /// version: a request without it is then refused, so every client sends it now.
+  static const bodyDigestHeader = 'X-IA-Body-Digest';
+
   /// The exact text the owner signs: the Identity Agent it is for, method,
   /// path, timestamp, and a digest of the body.
   ///
@@ -47,6 +56,23 @@ class OwnerSignature {
     required String path,
     required String timestamp,
     required List<int> body,
+  }) =>
+      canonicalStringOver(
+        target: target,
+        method: method,
+        path: path,
+        timestamp: timestamp,
+        bodyDigest: blake3QB64(body),
+      );
+
+  /// [canonicalString] from the body's digest, which is what the agent builds it
+  /// from when the request carries [bodyDigestHeader].
+  static String canonicalStringOver({
+    String target = '',
+    required String method,
+    required String path,
+    required String timestamp,
+    required String bodyDigest,
   }) {
     return [
       version,
@@ -54,7 +80,7 @@ class OwnerSignature {
       method.toUpperCase(),
       path,
       timestamp,
-      blake3QB64(body),
+      bodyDigest,
     ].join('\n');
   }
 
@@ -73,12 +99,14 @@ class OwnerSignature {
     DateTime? now,
   }) {
     final timestamp = rfc3339Seconds(now ?? DateTime.now().toUtc());
-    final message = canonicalString(
+    // Hashed once: it is both inside the signed string and sent as the header.
+    final bodyDigest = blake3QB64(body);
+    final message = canonicalStringOver(
       target: targetAid,
       method: method,
       path: path,
       timestamp: timestamp,
-      body: body,
+      bodyDigest: bodyDigest,
     );
 
     final privateKey = ed.newKeyFromSeed(ownerSeed);
@@ -88,6 +116,7 @@ class OwnerSignature {
     return {
       sigHeader: sigQB64(Uint8List.fromList(signature)),
       timestampHeader: timestamp,
+      bodyDigestHeader: bodyDigest,
       if (ownerAid != null && ownerAid.isNotEmpty) aidHeader: ownerAid,
       if (targetAid.isNotEmpty) forHeader: targetAid,
     };
