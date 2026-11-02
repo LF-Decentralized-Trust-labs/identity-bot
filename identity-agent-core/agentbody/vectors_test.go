@@ -521,3 +521,43 @@ func must[T any](v T, err error) T {
 	}
 	return v
 }
+
+// Published vectors are a contract other implementations test against, so a
+// vector that has been published never changes: a new case is added beside
+// them. Regenerating the file redraws the sealed enrolment and the P-256
+// signature, so a regeneration that is not reverted trips this. The hash is of
+// the file as first published, less the cases listed in addedVectors; add a
+// new case's name there, and never touch the hash.
+const publishedBodyVectorsSHA256 = "1d76d21e9c044b8c004b2fc44179af6ea6063d853dac98ecd4cb1e46ce73d354"
+
+var addedVectors = map[string]bool{"an enrolment for an app": true}
+
+func TestAPublishedBodyVectorNeverChanges(t *testing.T) {
+	raw, err := os.ReadFile("body-vectors.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if list, ok := doc["enrolments"].([]any); ok {
+		kept := list[:0]
+		for _, e := range list {
+			if m, ok := e.(map[string]any); ok && addedVectors[fmt.Sprint(m["name"])] {
+				continue
+			}
+			kept = append(kept, e)
+		}
+		doc["enrolments"] = kept
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(doc); err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprintf("%x", sha256.Sum256(buf.Bytes())); got != publishedBodyVectorsSHA256 {
+		t.Errorf("a published vector changed (hash %s): restore body-vectors.json from main and add only the new case", got)
+	}
+}
