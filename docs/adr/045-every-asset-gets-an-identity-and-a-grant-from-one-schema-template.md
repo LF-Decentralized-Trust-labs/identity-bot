@@ -267,8 +267,11 @@ A machine becomes an app's body by the contract it already uses to become an AI 
 the enrolment string, the sealed request, the signed requests (ADR-046) and the approval of
 its signed request by a controller or the owner (ADR-059). Nothing in that contract names a
 kind of asset, only the asset's identifier, so it is unchanged; an approving request for an
-app's body is checked as it is for an AI agent's (`POST .../bodies/{machine}/approve`, with the
-credential naming that machine). A machine a provider made is approved for an app on the
+app's body is checked as it is for an AI agent's. The approval is
+`POST /api/mcp/agents/{id}/bodies/{machine}/approve`, mounted by the AI agents add-on
+(`identity-agent-addons/aiagents`), and the body credential names that machine in `about`.
+Apps share this path under its AI-agent name for now: `{id}` is the asset's identifier, and
+the path says nothing of the asset's kind. A machine a provider made is approved for an app on the
 provider's signed vouch exactly as for an AI agent (ADR-059).
 
 The published schemas are `app-grant-1.1.0.schema.json` and `app-body-1.1.0.schema.json` in
@@ -279,3 +282,19 @@ enrolment for an app.
 encrypted stores, a relay and sign-in are later steps and are not in this contract. The
 conversation verifier still accepts only an AI agent's body and grant: an app is not a party to
 a conversation.
+
+These seams are open, and each is refused rather than half-working:
+
+- No route issues an App Grant or an App Body yet. The schemas, the vectors and the check of
+  an App Body's approval exist; nothing in the Identity Agent or an add-on calls them.
+- `checkAskedFor` (`identity-agent-core/authorisation/request.go`) has no case for an App
+  Grant, so an App Grant that carries an authorising request is refused.
+- `grantShown` (`identity-agent-core/authorisation/what_is_signed_is_what_is_shown.go`) cannot
+  show an App Grant, so a device holding the owner's key cannot be asked to sign one.
+- The edge lookup in `identity-agent-core/server/whoever_authorised_it_is_named.go` accepts
+  only the AI agent schemas, so an App Grant or App Body does not resolve the grant that
+  authorised it.
+- The check of an App Body's approval binds the approval to the machine, not to the asset or
+  its kind: the credential carries the machine in `about` and no asset identifier the path's
+  `{id}` can be compared with, so an approval made for an AI agent also backs an App Body
+  naming the same machine, and the reverse.
