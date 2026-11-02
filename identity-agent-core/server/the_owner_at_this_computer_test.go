@@ -21,7 +21,7 @@ func TestARequestFromThisComputerNeedsTheSecretToBeTheOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Stop()
-	router := s.buildRouter("")
+	router := s.buildRouter()
 
 	ask := func(secret string) int {
 		r := httptest.NewRequest(http.MethodPost, "/api/didcomm/send", strings.NewReader(`{}`))
@@ -137,7 +137,7 @@ func TestTheSecretIsSettledAndWrittenForThisUserAlone(t *testing.T) {
 // to the real core hands back a proof for the wrong port.
 func TestTheCoreProvesItHoldsTheSecretOnItsOwnPort(t *testing.T) {
 	s := &CoreServer{localOwnerSecret: testOwnerSecret, Port: 8643}
-	router := s.buildRouter("")
+	router := s.buildRouter()
 	nonce := "a-fresh-nonce-0123456789"
 	r := httptest.NewRequest(http.MethodGet, "/api/local-owner/proof?nonce="+nonce, nil)
 	r.RemoteAddr = "203.0.113.9:51000" // answered to anyone: no secret needed to ask

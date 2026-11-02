@@ -99,7 +99,7 @@ func relayWorld(t *testing.T, mode relayproto.Mode) (*CoreServer, *relaytest.Rel
 			t.Fatal(err)
 		}
 	}
-	s.router = s.buildRouter("")
+	s.router = s.buildRouter()
 	return s, rl, rec, cancel
 }
 
@@ -268,7 +268,7 @@ func TestARestartedIdentityAgentKeepsItsAddress(t *testing.T) {
 	defer cancel2()
 	again := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: s.DataDir, DataStore: s.DataStore, EndpointService: endpoint.New(nil, 5050), Port: 5050,
 		AppCtx: ctx, cancel: cancel2, running: true, relayTLS: rl.TLS(), relayClient: rl.Client()}
-	again.router = again.buildRouter("")
+	again.router = again.buildRouter()
 	go again.startRelay()
 	defer again.Stop()
 	if url := again.waitForRelay(t); url != first {

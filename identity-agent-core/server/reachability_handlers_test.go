@@ -61,7 +61,7 @@ func waitForState(t *testing.T, s *CoreServer, state string) map[string]interfac
 // happens.
 func TestTheRelayRoutesAreTheOwners(t *testing.T) {
 	s := newAuthTestServer(t)
-	s.router = s.buildRouter("")
+	s.router = s.buildRouter()
 	for _, c := range []struct{ method, path string }{
 		{"GET", "/api/settings/reachability/relay"},
 		{"PUT", "/api/settings/reachability"},
@@ -299,11 +299,7 @@ func TestACallerThroughARelayCannotSetTheAddressOrReachThePage(t *testing.T) {
 	s, rl, _, cancel := relayWorld(t, relayproto.ModePublic)
 	rl.KeepCallerPrefix = true
 	defer cancel()
-	web := t.TempDir()
-	if err := os.WriteFile(filepath.Join(web, "index.html"), []byte(`<html><head><base href="/"></head></html>`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	s.router = s.buildRouter(web)
+	s.router = s.buildRouter()
 	go s.startRelay()
 	defer s.Stop()
 	url := s.waitForRelay(t)

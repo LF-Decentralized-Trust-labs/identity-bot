@@ -27,7 +27,7 @@ import (
 func TestAnAuthorisedMachineReachesAnOrdinaryRoute(t *testing.T) {
 	s := newAuthTestServer(t)
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, asThatMachine(t, aid, "GET", "/api/profile", "", seed, "", time.Time{}))
@@ -42,7 +42,7 @@ func TestAnAuthorisedMachineReachesAnOrdinaryRoute(t *testing.T) {
 func TestARouteNobodyNamedIsStillReachable(t *testing.T) {
 	s := newAuthTestServer(t)
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	// A route that is not owner-only.
 	const ordinary = "GET /api/contacts"
@@ -63,7 +63,7 @@ func TestARouteNobodyNamedIsStillReachable(t *testing.T) {
 func TestRaisingTheLevelInFlightIsRefused(t *testing.T) {
 	s := newAuthTestServer(t)
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	req := asThatMachine(t, aid, "GET", "/api/profile", "", seed,
 		authprovider.LevelBasic, time.Now())
@@ -115,7 +115,7 @@ func TestARevokedMachineIsRefused(t *testing.T) {
 	if err := s.controllers().Revoke(aid); err != nil {
 		t.Fatal(err)
 	}
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, asThatMachine(t, aid, "GET", "/api/profile", "", seed, "", time.Time{}))
@@ -133,7 +133,7 @@ func TestASignatureFromAnotherKeyIsNotThatMachine(t *testing.T) {
 	for i := range imposter {
 		imposter[i] = byte(200 - i)
 	}
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, asThatMachine(t, aid, "GET", "/api/profile", "", imposter, "", time.Time{}))
@@ -156,7 +156,7 @@ func TestASignatureFromAnotherKeyIsNotThatMachine(t *testing.T) {
 func TestNoLevelLetsAControllerEnrolAnotherController(t *testing.T) {
 	s := newAuthTestServer(t)
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	for _, level := range []authprovider.Level{
 		authprovider.LevelAuthenticated,
@@ -185,7 +185,7 @@ func TestNoLevelLetsAControllerEnrolAnotherController(t *testing.T) {
 func TestAuthorisingAnotherMachineIsOwnerOnly(t *testing.T) {
 	s := newAuthTestServer(t)
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, asThatMachine(t, aid, "POST", "/api/controllers",
@@ -285,7 +285,7 @@ func TestAnOversizedBodyIsRefusedRatherThanTruncated(t *testing.T) {
 func TestAMachineMayNotScoreItself(t *testing.T) {
 	s := newAuthTestServer(t)
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	req := asThatMachine(t, aid, "GET", "/api/profile", "", seed,
 		authprovider.LevelHigh, time.Now())
@@ -315,7 +315,7 @@ func TestAMachineMayNotScoreItself(t *testing.T) {
 func TestOneMachinesLevelCannotBeRelayedByAnother(t *testing.T) {
 	s := newAuthTestServer(t)
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	req := asThatMachine(t, aid, "GET", "/api/profile", "", seed,
 		authprovider.LevelHigh, time.Now())
@@ -361,7 +361,7 @@ func TestWithNoRootDeviceNobodyCanVouch(t *testing.T) {
 func TestAControllerCannotInstallTheKeyThatVouchesForIt(t *testing.T) {
 	s := newAuthTestServer(t)
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	// The first lock: the routes that decide who the owner is are closed.
 	for _, route := range []struct{ method, path, pattern string }{
@@ -452,7 +452,7 @@ func TestEveryOwnerRouteHasHadADecisionMadeAboutIt(t *testing.T) {
 	// of them changes who the owner is, what signs for the identity, or what an
 	// authorisation decision reads.
 	reviewed := 0
-	err := chi.Walk(s.buildRouter(""),
+	err := chi.Walk(s.buildRouter(),
 		func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 			if classify(method, route) != accessOwner {
 				return nil
@@ -520,7 +520,7 @@ func asThatMachineAt(t *testing.T, aid, method, path, body string, seed []byte,
 func TestTheLessObviousDoorsToAContactRecordAreClosedToo(t *testing.T) {
 	s := newAuthTestServer(t)
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	for _, path := range []string{"/api/scan/execute", "/api/ask/create"} {
 		if _, closed := isOwnerOnly("POST", path); !closed {
@@ -638,7 +638,7 @@ func TestAnUnverifiedOwnerRowCannotVouch(t *testing.T) {
 func TestARefusedControllerIsToldWhichRefusalItHit(t *testing.T) {
 	s := newAuthTestServer(t)
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	// An authorisation that has been removed.
 	if err := s.controllers().Revoke(aid); err != nil {

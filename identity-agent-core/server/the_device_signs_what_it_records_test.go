@@ -85,7 +85,7 @@ func (c *twoCores) openRequester(t *testing.T) *CoreServer {
 	}
 	r.logForTest(t, c.dir)
 	r.vaultForTest(c.dir)
-	r.router = r.buildRouter("")
+	r.router = r.buildRouter()
 	r.fetchSignedEvent = func(aid string, sn int) []heldEvent {
 		if c.noWitnesses {
 			return nil

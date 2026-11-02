@@ -206,7 +206,7 @@ func TestRevokingAMachineThatIsNotThereSucceeds(t *testing.T) {
 // that genuinely exposed the route.
 func TestGrantingAControllerIsRefusedToAnybodyButTheOwner(t *testing.T) {
 	s := newAuthTestServer(t)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	for _, c := range []struct{ method, path string }{
 		{"POST", "/api/controllers"},
@@ -234,7 +234,7 @@ func TestTheControllerRoutesAreTheOnesRegistered(t *testing.T) {
 		"GET /api/controllers":          false,
 		"DELETE /api/controllers/{aid}": false,
 	}
-	err := chi.Walk(s.buildRouter(""),
+	err := chi.Walk(s.buildRouter(),
 		func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 			if _, ok := want[method+" "+route]; ok {
 				want[method+" "+route] = true
@@ -362,7 +362,7 @@ func TestABorrowedMachineCannotBeGrantedPastOrForever(t *testing.T) {
 func TestGrantingAndListingDescribeAMachineTheSameWay(t *testing.T) {
 	// One that can anchor the grant in its key log, as every real one can.
 	s, _ := grantWorld(t)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	w := httptest.NewRecorder()
 	kept := aGrant(GradeEnrolled)

@@ -122,10 +122,9 @@ type CoreServer struct {
 	// reference leaks the server and its keep-alive connections on every
 	// stop/restart — invisible on a desktop that stops once, but it accrues on
 	// mobile where the app is suspended and the core restarted over and over.
-	httpSrv       *http.Server
-	tunnelSrv     *http.Server
-	router        chi.Router
-	flutterWebDir string
+	httpSrv   *http.Server
+	tunnelSrv *http.Server
+	router    chi.Router
 
 	// See Config.RequireOwnerAtInception.
 	requireOwnerAtInception bool
@@ -243,8 +242,7 @@ type Config struct {
 	// kind. An agent that does not know what it is enrols no peers at all,
 	// which is safe and useless, so a build that leaves this empty is
 	// misconfigured and says so at startup.
-	EntityType    string
-	FlutterWebDir string
+	EntityType string
 
 	// RequireOwnerAtInception refuses to found an identity that names no owner.
 	//
@@ -279,10 +277,6 @@ func DefaultConfig() Config {
 		fmt.Sscanf(p, "%d", &port)
 	}
 
-	// A built web app to serve at "/", supplied by whichever application is
-	// built on the core. Unset, the core serves its API and a placeholder page.
-	webDir := os.Getenv("FLUTTER_WEB_DIR")
-
 	// Off unless asked for. An agent that needs it sets it in code (the
 	// organisation backend does); the variable exists so a deployment can turn
 	// it on without a rebuild.
@@ -295,7 +289,6 @@ func DefaultConfig() Config {
 		DataDir:                 dataDir,
 		Port:                    port,
 		EntityType:              os.Getenv("IDENTITY_AGENT_ENTITY_TYPE"),
-		FlutterWebDir:           webDir,
 		RequireOwnerAtInception: requireOwner,
 		LocalOwnerSecret:        takeLocalOwnerSecretFromEnv(),
 	}
@@ -545,7 +538,6 @@ func New(cfg Config) (*CoreServer, error) {
 	// Defer router construction to Start() so overlays can register routes
 	// (MountExtraRoutes) after New() returns but before serving. Building here
 	// would consume an empty extraRoutes slice, silently dropping overlay routes.
-	s.flutterWebDir = cfg.FlutterWebDir
 	s.requireOwnerAtInception = cfg.RequireOwnerAtInception
 
 	// Checked as the server is made, before anything is served: no route is
@@ -554,7 +546,7 @@ func New(cfg Config) (*CoreServer, error) {
 	// can match; and an add-on makes no public or scoped entry for a route
 	// that is not its own. A server breaking any of these is not made. The
 	// routes an overlay adds later are checked by Start.
-	if err := s.addonsOpeningOthersRoutes(s.buildRouter(""), nil); err != nil {
+	if err := s.addonsOpeningOthersRoutes(s.buildRouter(), nil); err != nil {
 		panic("server.New: " + err.Error())
 	}
 	return s, nil
@@ -579,7 +571,7 @@ func (s *CoreServer) Start() error {
 	// Build the router now that all overlay routes (MountExtraRoutes) are
 	// registered. Idempotent-safe: Start guards against double-run above.
 	if s.router == nil {
-		s.router = s.buildRouter(s.flutterWebDir)
+		s.router = s.buildRouter()
 	}
 	// Checked again with every route an overlay added since New: a prefix
 	// an add-on opens must not cover one of the overlay's either.
@@ -901,13 +893,13 @@ func corsPolicy() func(http.Handler) http.Handler {
 	})
 }
 
-func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
-	return s.buildRouterOf(flutterWebDir, registeredAddons(), s.extraRoutes)
+func (s *CoreServer) buildRouter() chi.Router {
+	return s.buildRouterOf(registeredAddons(), s.extraRoutes)
 }
 
 // buildRouterOf is the router with only addons' routes and only the overlay
 // routes extras, for telling whose a route is (add_ons.go).
-func (s *CoreServer) buildRouterOf(flutterWebDir string, addons []Addon, extras []func(chi.Router)) chi.Router {
+func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) chi.Router {
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
@@ -1207,106 +1199,6 @@ func (s *CoreServer) buildRouterOf(flutterWebDir string, addons []Addon, extras 
 	s.mountAskCreateRoute(r)
 	// login-web SignInButton-compatible endpoints (drop-in widget → an Identity Agent, no per-site backend).
 	s.mountLoginWidgetRoutes(r)
-
-	absWebDir, err := filepath.Abs(flutterWebDir)
-	if err != nil {
-		absWebDir = flutterWebDir
-	}
-
-	// An empty directory is checked by name, not by Stat: the absolute form of
-	// "" is the working directory, which exists and must never be served.
-	if _, err := os.Stat(absWebDir); flutterWebDir != "" && err == nil {
-		log.Printf("[identity-agent-core] Serving Flutter web from: %s", absWebDir)
-		fileServer := http.FileServer(http.Dir(absWebDir))
-		// WEB_NO_CACHE=1 opts into a maximally-aggressive dev/dogfood cache
-		// posture; default (unset) is the correct production posture.
-		webNoCache := os.Getenv("WEB_NO_CACHE") == "1"
-
-		// setCache applies the Flutter-web cache posture. The top-level
-		// entrypoints (index.html, the bootstrap/loader JS, and *.json manifests)
-		// have STABLE names — not content hashes — so serving them immutable makes
-		// a rebuilt bundle invisible to returning browsers (the "why am I still
-		// seeing an old build?" bug). They must revalidate; only genuinely
-		// content-hashed assets (assets/, canvaskit/) are cached long-term.
-		// With WEB_NO_CACHE, nothing is cached and the HTML shell also sends
-		// Clear-Site-Data to PURGE whatever a browser cached under a previous
-		// policy — recovering machines poisoned by the old immutable headers, or a
-		// different app that used to run on this port.
-		setCache := func(w http.ResponseWriter, urlPath string, isShell bool) {
-			if webNoCache {
-				w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-				w.Header().Set("Pragma", "no-cache")
-				w.Header().Set("Expires", "0")
-				if isShell {
-					w.Header().Set("Clear-Site-Data", `"cache"`)
-				}
-				return
-			}
-			base := filepath.Base(urlPath)
-			isEntrypoint := isShell ||
-				base == "main.dart.js" ||
-				base == "flutter.js" ||
-				base == "flutter_bootstrap.js" ||
-				base == "flutter_service_worker.js" ||
-				strings.HasSuffix(base, ".json")
-			if isEntrypoint {
-				w.Header().Set("Cache-Control", "no-cache, must-revalidate")
-				w.Header().Set("Pragma", "no-cache")
-			} else {
-				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-			}
-		}
-
-		r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
-			if arrivedByRelay(r) {
-				http.NotFound(w, r)
-				return
-			}
-			// The prefix this agent is being served under. Empty at the root,
-			// set when a proxy has put the UI on a subpath — see
-			// web_base_href.go for why both halves of this are needed.
-			prefix := webPathPrefix(r)
-			urlPath := stripPrefix(r.URL.Path, prefix)
-			filePath := filepath.Join(absWebDir, urlPath)
-			_, statErr := os.Stat(filePath)
-
-			// SPA fallback to index.html for unknown (client-side-routed) paths.
-			if os.IsNotExist(statErr) {
-				setCache(w, urlPath, true)
-				serveShell(w, filepath.Join(absWebDir, "index.html"), prefix)
-				return
-			}
-
-			isShell := urlPath == "/" || urlPath == "/index.html" ||
-				strings.HasSuffix(urlPath, "/index.html")
-			setCache(w, urlPath, isShell)
-			if isShell {
-				serveShell(w, filepath.Join(absWebDir, "index.html"), prefix)
-				return
-			}
-			// Serve the file the stripped path points at, not the one the
-			// original URL did, or a forwarded prefix reaches the file server
-			// and misses.
-			r2 := r.Clone(r.Context())
-			r2.URL.Path = urlPath
-			fileServer.ServeHTTP(w, r2)
-		})
-	} else {
-		r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
-			if arrivedByRelay(r) {
-				http.NotFound(w, r)
-				return
-			}
-			w.Header().Set("Content-Type", "text/html")
-			w.WriteHeader(200)
-			fmt.Fprintf(w, `<!DOCTYPE html>
-<html><head><title>Identity Agent</title>
-<style>body{background:#0A1628;color:#F0F4F8;font-family:monospace;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;}
-.c{text-align:center;}.t{color:#00E5A0;font-size:14px;margin-top:12px;}</style></head>
-<body><div class="c"><h1>IDENTITY AGENT CORE</h1><p style="color:#8B9DC3;">Go Core is running. No web app is configured.</p>
-<p class="t">Set FLUTTER_WEB_DIR to a built web app to serve it here.</p></div></body></html>`)
-		})
-	}
 
 	return r
 }

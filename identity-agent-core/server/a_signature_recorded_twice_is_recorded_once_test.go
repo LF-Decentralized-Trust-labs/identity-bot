@@ -14,7 +14,7 @@ import (
 func TestASignatureRecordedTwiceIsRecordedOnce(t *testing.T) {
 	s, _ := grantWorld(t)
 	s.localOwnerSecret = testOwnerSecret
-	s.router = s.buildRouter("")
+	s.router = s.buildRouter()
 	id, err := s.DataStore.GetIdentity()
 	if err != nil || id == nil {
 		t.Fatalf("no identity: %v", err)

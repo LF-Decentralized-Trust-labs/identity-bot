@@ -15,14 +15,6 @@ say()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 fail() { printf '\n\033[31mFAILED: %s\033[0m\n' "$*" >&2; exit 1; }
 
 AGENT_BINARY=${AGENT_BINARY:-}
-# WEB_BUNDLE is the front end this instance serves to a browser: the directory
-# a `flutter build web` produced, or the tarball of one.
-#
-# Optional, and its absence is a real state rather than a mistake — an instance
-# with no bundle answers with a placeholder saying so, which is what every
-# instance did before this existed. But an instance somebody reaches from a
-# browser needs it, and that is the whole point of a hosted agent.
-WEB_BUNDLE=${WEB_BUNDLE:-}
 # BUILD_NAME is what this software is CALLED, for the screens that have to tell
 # somebody what their agent is actually running.
 #
@@ -150,35 +142,6 @@ probe="$WORK/seal-volume-probe"
 timeout -k 2 10 "$AGENT_BINARY" seal-volume /nonexistent-probe-device >"$probe" 2>&1 </dev/null || true
 grep -qi 'no volume at' "$probe" || fail "AGENT_BINARY does not answer 'seal-volume', so an image built from it would never encrypt its data volume — and would fail later, somewhere else, in a way that does not mention the volume. Whatever embeds this core must dispatch the volume commands (identity-agent-core/volume.Handle). It answered: $(head -c 200 "$probe")"
 
-# The web bundle is checked HERE, before anything expensive runs.
-#
-# Everything below this point bootstraps a root filesystem, which takes minutes.
-# A bundle that is the wrong shape should cost a second, not a build — the first
-# version of this validated after the bootstrap, which meant finding out at the
-# end.
-WEB_SRC=""
-WEB_DIGEST=""
-if [[ -n "$WEB_BUNDLE" ]]; then
-  WEB_SRC="$WEB_BUNDLE"
-  if [[ -f "$WEB_BUNDLE" ]]; then
-    WEB_SRC="$(mktemp -d)"
-    tar -xzf "$WEB_BUNDLE" -C "$WEB_SRC" || fail "WEB_BUNDLE is a file but not a readable tarball: $WEB_BUNDLE"
-  fi
-  [[ -d "$WEB_SRC" ]] || fail "WEB_BUNDLE is neither a directory nor a tarball: $WEB_BUNDLE"
-  [[ -f "$WEB_SRC/index.html" ]] || fail "WEB_BUNDLE has no index.html — that is not a built web bundle: $WEB_BUNDLE"
-  # A bundle that cannot boot the app is worse than none: the agent serves it,
-  # the browser gets a blank page, and nothing says why.
-  [[ -f "$WEB_SRC/main.dart.js" ]] || fail "WEB_BUNDLE has no main.dart.js — the app did not compile into it: $WEB_BUNDLE"
-  # A service worker outlives the page that installed it, so a cached one keeps
-  # serving the previous app after this image is replaced — invisibly, and to
-  # exactly the people who used it before.
-  if [[ -s "$WEB_SRC/flutter_service_worker.js" ]]; then
-    fail "WEB_BUNDLE contains a non-empty service worker, so it would cache itself and keep serving an old app after this image is updated. Build it with --pwa-strategy=none"
-  fi
-  WEB_DIGEST=$(cd "$WEB_SRC" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
-  echo "  web bundle accepted: sha256 $WEB_DIGEST"
-fi
-
 # Checked here rather than where each is first used, because the ones that come
 # late come after ten minutes of bootstrapping, and a build that fails at the
 # end for a missing package is a build nobody runs twice.
@@ -227,25 +190,6 @@ printf 'deb https://deb.debian.org/debian %s main\n' "$SUITE" > "$WORK/root/etc/
 say "Installing the agent"
 install -D -m 0755 "$AGENT_BINARY" "$WORK/root/usr/local/bin/identity-agent-core"
 
-# The front end goes inside the image, which means inside the measurement.
-#
-# That is the correct consequence and worth being deliberate about: the bundle
-# is code the agent serves to a browser, so it belongs to what this instance is,
-# and a change to it must change what the instance measures. The alternative --
-# mounting it from the host -- would let the operator swap the interface a
-# person types their details into without the measurement moving.
-#
-# This image used to mount one thing that way. It no longer does: everything
-# the Identity Agent needs is now inside what it measures.
-if [[ -n "$WEB_BUNDLE" ]]; then
-  mkdir -p "$WORK/root/usr/share/identity-agent/web"
-  cp -a "$WEB_SRC/." "$WORK/root/usr/share/identity-agent/web/"
-  # Read-only at runtime. The agent serves these; nothing should write them.
-  chmod -R a-w "$WORK/root/usr/share/identity-agent/web"
-  echo "  web bundle: $(find "$WEB_SRC" -type f | wc -l | tr -d ' ') files, sha256 $WEB_DIGEST"
-else
-  echo "  web bundle: none — a browser will get the placeholder page"
-fi
 install -d -m 0700 "$WORK/root/var/lib/identity-agent"
 
 # Where the agent's identity lives, on a writable volume of its own.
@@ -452,30 +396,6 @@ else
   echo "  WARNING: no ENTITY_TYPE, so this image will not know whether it serves"
   echo "           a person or an organisation, and will enrol no witness or watcher"
 fi
-# The browser front end, only where one was actually installed.
-#
-# Set unconditionally, this named a directory that a default build never
-# creates: the image declared a front end it did not have. Worse in the other
-# direction — an instance reached through a proxy that terminates TLS cannot
-# protect a browser at all, because the application itself arrives from the
-# machine it is meant to be protecting the user against, and a browser cannot
-# check that what it downloaded is genuine. So the default is no browser front
-# end, and turning it on is a deliberate act by whoever builds the image.
-#
-# Note this is NOT a runtime setting. The bundle is inside the measured image,
-# so an image with a browser front end and one without have different launch
-# measurements. Turning it on or off later is a rebuild, a new measurement, and
-# the same owner-approval step as any other change to the software — which also
-# means whether a given instance serves a browser front end is a fact anybody
-# can verify from its measurement, rather than a setting nobody can audit.
-if [[ -n "$WEB_SRC" ]]; then
-  sed -i 's|^ExecStart=|Environment=FLUTTER_WEB_DIR=/usr/share/identity-agent/web\nExecStart=|' \
-    "$WORK/root/etc/systemd/system/identity-agent.service"
-  echo "  browser front end: INCLUDED (this image serves one)"
-else
-  echo "  browser front end: none (set WEB_BUNDLE= to include one)"
-fi
-
 ln -sf /etc/systemd/system/identity-agent.service \
   "$WORK/root/etc/systemd/system/multi-user.target.wants/identity-agent.service"
 

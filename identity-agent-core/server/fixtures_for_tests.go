@@ -271,7 +271,7 @@ func newControllerWorld(t coretypes.TB) *controllerWorld {
 	}
 	// The sealed transport replays what it opens through the server's own
 	// router, as it does in production.
-	s.router = s.buildRouter("")
+	s.router = s.buildRouter()
 	w.srv = httptest.NewServer(s.router)
 	t.Cleanup(w.srv.Close)
 	t.Setenv("PUBLIC_URL", w.srv.URL)
@@ -813,7 +813,7 @@ func withOwnerSecret(s *CoreServer, secret string) *CoreServer {
 }
 
 // rebuildRouter builds s's routes again, with every add-on's.
-func rebuildRouter(s *CoreServer) { s.router = s.buildRouter("") }
+func rebuildRouter(s *CoreServer) { s.router = s.buildRouter() }
 
 // setRouter puts r in place of s's routes.
 func setRouter(s *CoreServer, r chi.Router) { s.router = r }
@@ -860,7 +860,7 @@ func useAssetHandler(s *CoreServer, ah *asset.Handler) { s.assetHandler = ah }
 // routes: an entry for a core route, or another add-on's, is one it must not
 // make.
 func entriesForRoutesNotItsOwn(s *CoreServer) []string {
-	return s.addonEntriesNotItsOwn(s.buildRouter(""), false)
+	return s.addonEntriesNotItsOwn(s.buildRouter(), false)
 }
 
 // controllerNeedsScore makes route need score from a controller for the rest

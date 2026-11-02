@@ -3,8 +3,6 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -23,28 +21,6 @@ func relayedRequest(method, path string) *http.Request {
 		relayproto.Preamble{Allocation: "acme", Mode: relayproto.ModePublic, Host: "acme.relay.test"}))
 }
 
-func TestTheWebAppIsNotServedThroughARelay(t *testing.T) {
-	s := agentWithNoIdentity(t)
-	web := t.TempDir()
-	if err := os.WriteFile(filepath.Join(web, "index.html"),
-		[]byte(`<!doctype html><html><head><base href="/"></head><body>app</body></html>`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	r := s.buildRouter(web)
-
-	direct := httptest.NewRecorder()
-	r.ServeHTTP(direct, httptest.NewRequest("GET", "/", nil))
-	if !strings.Contains(direct.Body.String(), "<html") {
-		t.Fatalf("the page this test guards is not served directly any more: %d %.100q", direct.Code, direct.Body.String())
-	}
-
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, relayedRequest("GET", "/"))
-	if w.Code == http.StatusOK || strings.Contains(w.Body.String(), "<html") {
-		t.Fatalf("the web app answered a relayed request: %d %.100q", w.Code, w.Body.String())
-	}
-}
-
 func TestACredentialIsNotShownAsAPageThroughARelay(t *testing.T) {
 	s := agentWithNoIdentity(t)
 	if err := s.DataStore.SaveCredential(store.CredentialRecord{
@@ -53,7 +29,7 @@ func TestACredentialIsNotShownAsAPageThroughARelay(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	r := s.buildRouter("")
+	r := s.buildRouter()
 	ask := func(req *http.Request) *httptest.ResponseRecorder {
 		req.Header.Set("Accept", "text/html")
 		w := httptest.NewRecorder()

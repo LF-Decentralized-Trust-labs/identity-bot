@@ -123,7 +123,6 @@ The core reads its configuration from the environment:
 |---|---|---|
 | `PORT` | `5050` | The port it listens on. If it is taken, the core takes the next free one. |
 | `AGENT_DATA_DIR` | `./data` | Where the identity, its keys and its records are kept. |
-| `FLUTTER_WEB_DIR` | unset | A built web app to serve at `/`. Unset, `/` is a placeholder page and only the API is served. |
 
 ## Build the core for a phone
 

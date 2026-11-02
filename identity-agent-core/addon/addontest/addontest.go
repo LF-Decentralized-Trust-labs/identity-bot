@@ -77,7 +77,7 @@ type Fixtures interface {
 	// serve a core handler from a route of its own, where the core's access
 	// class for that handler would not apply.
 	Router(s *server.CoreServer) chi.Router
-	BuildRouter(s *server.CoreServer, flutterWebDir string) chi.Router
+	BuildRouter(s *server.CoreServer) chi.Router
 	HandleDIDCommInbound(s *server.CoreServer, w http.ResponseWriter, r *http.Request)
 	HandleGrantController(s *server.CoreServer, w http.ResponseWriter, r *http.Request)
 	KeyLogVerifies(t TB, s *server.CoreServer)

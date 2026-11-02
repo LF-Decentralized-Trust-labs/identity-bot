@@ -555,7 +555,7 @@ func TestAnOverlayCannotShadowARoute(t *testing.T) {
 		t.Skipf("making the server: %v", err)
 	}
 	s.MountExtraRoutes(func(r chi.Router) { r.Delete("/an-overlays-own/{x}", ok) })
-	if err := s.addonsOpeningOthersRoutes(s.buildRouter(""), s.extraRoutes); err != nil {
+	if err := s.addonsOpeningOthersRoutes(s.buildRouter(), s.extraRoutes); err != nil {
 		t.Fatalf("an overlay route nothing else answers would stop the start: %v", err)
 	}
 }
