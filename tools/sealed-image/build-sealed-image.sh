@@ -14,6 +14,9 @@ set -euo pipefail
 say()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 fail() { printf '\n\033[31mFAILED: %s\033[0m\n' "$*" >&2; exit 1; }
 
+# An Identity Agent serves no UI to a browser, so an image never carries one.
+# Said loudly rather than ignored, for anyone still passing the old option.
+[[ -z "${WEB_BUNDLE:-}" ]] || fail "WEB_BUNDLE is no longer accepted: an Identity Agent serves no UI to a browser, so the image carries none."
 AGENT_BINARY=${AGENT_BINARY:-}
 # BUILD_NAME is what this software is CALLED, for the screens that have to tell
 # somebody what their agent is actually running.

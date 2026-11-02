@@ -40,7 +40,6 @@ At inception, the BIP39 mnemonic is saved to `SecureKeyStore` immediately after 
 
 > **Status note, 2026-11-02.** The Web row no longer describes a supported target: the core serves no UI to a browser, and no Identity Agent app is reached through one.
 
-
 At signing time, `DesktopKeriService.signPayload()` loads the mnemonic from `SecureKeyStore`, deterministically derives the Ed25519 key pair via `KeyManager.generateKeysFromMnemonic()`, and signs directly in Dart using `ed25519_edwards`. **No network call is made for signing.** The Go backend and Python driver are never involved in signing operations on desktop.
 
 The Python driver's `/sign` endpoint is therefore bypassed entirely for desktop. It remains in the codebase for potential future use but is not part of any production code path.

@@ -4,6 +4,8 @@
 **Status:** Accepted
 **Relates to:** ADR-009 (Two-Layer OOBI Exchange), ADR-003 (Adaptive Architecture — OOBI/Contacts)
 
+> **Status note, 2026-11-02.** The core serves no UI to a browser, and no Identity Agent app is reached through one. Any mention of a web build here describes a compile target only, not a way the app is delivered.
+
 ## The Problem This Solves
 
 The contact management UI had grown organically across three separate implementations:
