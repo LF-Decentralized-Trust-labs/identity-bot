@@ -5,6 +5,7 @@
 **Status:** Superseded in part by ADR-006 (mode definitions, 2026-05-01) and by
 ADR-037 (2026-08-18) — every reference below to a Rust bridge on mobile is
 historical. That engine is removed; mobile runs the embedded Go core.
+**Amended:** 2026-11-02 — the core serves no UI to a browser (see "Amendment, 2026-11-02" at the end)
 **Context:** Phase 3 (Connectivity) — OOBI serving, contact management, and tunneling
 
 > **Note:** The four-mode model described in this ADR has been superseded twice: first by the 3-state × 2-device-type model in ADR-006 (2026-02-22), then by the two-topology + four-configuration model in ADR-006's 2026-05-01 revision. This ADR remains the authoritative source for OOBI serving, contact management, tunneling, endpoint naming conventions, trust boundaries, and configuration variables. The terms "Mobile Standalone," "Mobile Remote WITHOUT Keys," and "Mobile Remote WITH Keys" used below are historical — the current model is "Phone + Computer" / "Computer only" (with auto-detection of key location). See ADR-006 for the current architectural topology.
@@ -268,3 +269,7 @@ Note: Server URLs for Remote Controller modes are entered by the user during onb
 - Rust native compilation (for the bridge) and Go mobile compilation (for Go Core) require local developer toolchains and CI/CD (Codemagic). These do not happen on Replit.
 - The Python driver's endpoint paths are the single source of truth — all other components match them exactly.
 - Mode selection happens through explicit user choice during onboarding, not automatic environment detection.
+
+## Amendment, 2026-11-02: no Identity Agent app is reached through a browser
+
+The "Note about the web build" (the Go backend serves the Flutter UI as static files) and "web" as a platform under Desktop Mode no longer hold. The core serves no UI to a browser, and no Identity Agent app is reached through one: the Identity Agent apps are installed desktop and phone apps. The core mounts no directory of files as a UI, whatever the environment says, and answers `/` with nothing. Desktop Mode covers Linux, macOS and Windows only. The accepted text above is left as written.
