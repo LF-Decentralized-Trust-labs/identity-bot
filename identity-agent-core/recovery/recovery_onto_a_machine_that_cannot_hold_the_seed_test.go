@@ -36,6 +36,8 @@ func TestRecoveryOntoAMachineThatCannotProtectASeedIsRefusedAndWritesNothing(t *
 		"nobody has looked":           {secureenclave.Capability{Status: secureenclave.Unknown}, true},
 		"zero-value capability":       {secureenclave.Capability{}, true},
 		"hardware usable, no wrapper": {secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindTPM2}, false},
+		// A production Windows or Linux desktop: a TPM, and no wrapper written.
+		"production desktop": {secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindTPM2}, false},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -81,5 +83,38 @@ func TestRecoveryOntoAMachineThatCanProtectASeedStillWorks(t *testing.T) {
 	raw, _ := os.ReadFile(filepath.Join(dir, "secureenclave", "root_seed.key"))
 	if !bytes.Contains(raw, []byte(`"wrap":"test-wrap"`)) {
 		t.Fatalf("the restored seed was not wrapped: %s", raw)
+	}
+}
+
+// The black box and an Android phone are where a root identity is meant to
+// live: recovery onto either succeeds, and the envelope records what protects
+// the seed.
+func TestRecoveryOntoASealedHostOrAPhoneWorksAndRecordsTheProtection(t *testing.T) {
+	for name, c := range map[string]struct {
+		stand      func(testing.TB)
+		protection string
+	}{
+		"sealed host":        {seedwraptest.ThisMachineIsASealedHost, secureenclave.ProtectionSealedVolume},
+		"android-like phone": {seedwraptest.ThisMachineIsAPhoneWithNoWrapper, secureenclave.ProtectionUnwrapped},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c.stand(t)
+			bundle, seed := archiveWithARootSeed(t)
+			dir := t.TempDir()
+			if err := (&Service{DataDir: dir}).applyPayload(&RestoredPayload{Bundle: bundle}); err != nil {
+				t.Fatalf("recovery was refused: %v", err)
+			}
+			got, err := secureenclave.LoadRootSeed(dir)
+			if err != nil || !bytes.Equal(got, seed) {
+				t.Fatalf("seed not reseated: %v", err)
+			}
+			p, _, why, err := secureenclave.RootSeedProtection(dir)
+			if err != nil || p != c.protection {
+				t.Fatalf("envelope records %q (%v), want %q", p, err, c.protection)
+			}
+			if p == secureenclave.ProtectionUnwrapped && why == "" {
+				t.Fatal("an unwrapped seed must record why")
+			}
+		})
 	}
 }

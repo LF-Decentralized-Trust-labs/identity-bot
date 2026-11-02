@@ -92,10 +92,60 @@ const seedWrapNone = "none"
 // seedEnvelope is the self-describing on-disk form of root_seed.key. A legacy
 // file (raw seed bytes, pre-envelope) is detected by failing to parse as this
 // envelope and is migrated on first load.
+//
+// Protection and Why say what protects the seed, in words rather than only as a
+// scheme name, so the file describes itself truthfully: "hardware-wrapped",
+// "sealed-volume" (the sealed machine's encrypted volume), or "unwrapped" with
+// the reason. Older files lack them and are read by Wrap alone.
 type seedEnvelope struct {
-	V    int    `json:"v"`
-	Wrap string `json:"wrap"`
-	Blob string `json:"blob"`
+	V          int    `json:"v"`
+	Wrap       string `json:"wrap"`
+	Blob       string `json:"blob"`
+	Protection string `json:"protection,omitempty"`
+	Why        string `json:"why,omitempty"`
+}
+
+// What protects a stored seed, as recorded in the envelope.
+const (
+	ProtectionHardwareWrapped = "hardware-wrapped"
+	ProtectionSealedVolume    = "sealed-volume"
+	ProtectionUnwrapped       = "unwrapped"
+)
+
+// unwrappedStorageReason is non-empty only on a platform where a root identity
+// may be held unwrapped in production because a wrapper is owed and not yet
+// written (Android). A var so tests can stand such a phone on any host.
+var unwrappedStorageReason = platformUnwrappedReason
+
+// UseUnwrappedPhoneStorage makes this process behave as a phone whose seed
+// wrapper is not written yet, for tests. It returns a function that undoes it.
+func UseUnwrappedPhoneStorage(reason string) (restore func()) {
+	prev := unwrappedStorageReason
+	unwrappedStorageReason = func() string { return reason }
+	return func() { unwrappedStorageReason = prev }
+}
+
+// RootSeedProtection reports what the stored seed's envelope says protects it:
+// the protection kind, the scheme and, for an unwrapped seed, why. It reads the
+// envelope only; it does not open the seed.
+func RootSeedProtection(dataDir string) (protection, scheme, why string, err error) {
+	raw, err := os.ReadFile(rootSeedPath(dataDir))
+	if err != nil {
+		return "", "", "", err
+	}
+	var env seedEnvelope
+	if jerr := json.Unmarshal(raw, &env); jerr != nil || env.V < 1 || env.Wrap == "" {
+		return ProtectionUnwrapped, seedWrapNone, "legacy seed file with no envelope", nil
+	}
+	p := env.Protection
+	if p == "" {
+		if env.Wrap == seedWrapNone {
+			p = ProtectionUnwrapped
+		} else {
+			p = ProtectionHardwareWrapped
+		}
+	}
+	return p, env.Wrap, env.Why, nil
 }
 
 // ErrNoRootSeed is LoadRootSeed's answer when no root seed was ever stored
@@ -118,6 +168,9 @@ func whyNotWrapped() string {
 	switch {
 	case w == nil:
 		return "no seed wrapper is compiled in for this platform"
+	case !w.Available() && w.Scheme() == SealedVolumeScheme:
+		return "this build has no hardware seed wrapper for this platform, and the " +
+			"sealed-volume protection applies only inside a sealed machine"
 	case !w.Available():
 		return "the " + w.Scheme() + " wrapper is compiled in and cannot use the hardware"
 	default:
@@ -150,8 +203,14 @@ func storeSeed(dataDir string, seed []byte, w SeedWrapper, requireWrap bool) err
 		toStore = toStore[:64]
 	}
 
-	env := seedEnvelope{V: 1, Wrap: seedWrapNone, Blob: base64.StdEncoding.EncodeToString(toStore)}
-	if requireWrap && (w == nil || !w.Available()) {
+	// Why an unwrapped envelope is being written, said in the file itself.
+	why := unwrappedStorageReason()
+	if why == "" {
+		why = whyNotWrapped()
+	}
+	env := seedEnvelope{V: 1, Wrap: seedWrapNone, Blob: base64.StdEncoding.EncodeToString(toStore),
+		Protection: ProtectionUnwrapped, Why: why}
+	if requireWrap && (w == nil || !w.Available()) && unwrappedStorageReason() == "" {
 		return &ErrRootSeedCannotLiveHere{Reason: "this machine has no working seed wrapper, " +
 			"so the seed could only be written as a plain file"}
 	}
@@ -177,9 +236,14 @@ func storeSeed(dataDir string, seed []byte, w SeedWrapper, requireWrap bool) err
 		if err != nil || !bytes.Equal(back, toStore) {
 			return fmt.Errorf("wrap verification failed (%s): %v", w.Scheme(), err)
 		}
-		env = seedEnvelope{V: 1, Wrap: w.Scheme(), Blob: base64.StdEncoding.EncodeToString(blob)}
+		protection := ProtectionHardwareWrapped
+		if w.Scheme() == SealedVolumeScheme {
+			protection = ProtectionSealedVolume
+		}
+		env = seedEnvelope{V: 1, Wrap: w.Scheme(), Blob: base64.StdEncoding.EncodeToString(blob),
+			Protection: protection}
 	}
-	if requireWrap && env.Wrap == seedWrapNone {
+	if requireWrap && env.Wrap == seedWrapNone && unwrappedStorageReason() == "" {
 		return &ErrRootSeedCannotLiveHere{Reason: "the seed would have been written unwrapped"}
 	}
 

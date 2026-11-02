@@ -42,3 +42,27 @@ func ThisMachineCannot(t testing.TB, cap secureenclave.Capability, wrapperWorks 
 	r2 := secureenclave.UseSeedWrapper(Wrapper{Works: wrapperWorks})
 	t.Cleanup(func() { r2(); r1() })
 }
+
+// ThisMachineIsASealedHost stands the black box: a confidential guest (SEV-SNP)
+// whose protection is the sealed volume, with no per-key hardware wrapper.
+func ThisMachineIsASealedHost(t testing.TB) {
+	t.Helper()
+	r1 := secureenclave.UseCapabilityDetector(func() secureenclave.Capability {
+		return secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindSEVSNP, Reason: "attested_execution"}
+	})
+	r2 := secureenclave.UseSeedWrapper(secureenclave.SealedVolumeSeedWrapper())
+	r3 := secureenclave.UseUnwrappedPhoneStorage("")
+	t.Cleanup(func() { r3(); r2(); r1() })
+}
+
+// ThisMachineIsAPhoneWithNoWrapper stands an Android phone: its Keystore is
+// usable and reported, and no seed wrapper is written for it yet.
+func ThisMachineIsAPhoneWithNoWrapper(t testing.TB) {
+	t.Helper()
+	r1 := secureenclave.UseCapabilityDetector(func() secureenclave.Capability {
+		return secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindAndroidTEE}
+	})
+	r2 := secureenclave.UseSeedWrapper(nil)
+	r3 := secureenclave.UseUnwrappedPhoneStorage("android: the Keystore/StrongBox seed wrapper is not written yet")
+	t.Cleanup(func() { r3(); r2(); r1() })
+}

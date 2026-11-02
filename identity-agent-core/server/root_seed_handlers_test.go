@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/secureenclave/seedwraptest"
 	"identity-agent-core/store"
 	"net/http"
 	"net/http/httptest"
@@ -336,5 +337,52 @@ func TestTheRouteStoresTheSeedWrapped(t *testing.T) {
 	raw, _ := os.ReadFile(filepath.Join(s.DataDir, "secureenclave", "root_seed.key"))
 	if !bytes.Contains(raw, []byte(`"wrap":"test-wrap"`)) {
 		t.Fatalf("not wrapped: %s", raw)
+	}
+}
+
+// Founding works where a root identity is meant to live — the sealed black box
+// and an Android phone — and the envelope records what protects the seed; and
+// a production desktop (a TPM, no wrapper) is refused.
+func TestFoundingByRootSeedOnASealedHostAndAPhoneAndNotADesktop(t *testing.T) {
+	seed := make([]byte, 64)
+	for i := range seed {
+		seed[i] = byte(i + 1)
+	}
+	b64 := base64.StdEncoding.EncodeToString(seed)
+	for name, c := range map[string]struct {
+		stand      func(testing.TB)
+		cap        secureenclave.Capability
+		wantCode   int
+		protection string
+	}{
+		"sealed host": {seedwraptest.ThisMachineIsASealedHost,
+			secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindSEVSNP},
+			http.StatusCreated, secureenclave.ProtectionSealedVolume},
+		"android-like phone": {seedwraptest.ThisMachineIsAPhoneWithNoWrapper,
+			secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindAndroidTEE},
+			http.StatusCreated, secureenclave.ProtectionUnwrapped},
+		"production desktop": {func(t testing.TB) {
+			seedwraptest.ThisMachineCannot(t, secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindTPM2}, false)
+		}, secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindTPM2},
+			http.StatusPreconditionFailed, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c.stand(t)
+			keyProtectionAnswers(t, c.cap)
+			s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
+			if w := postSeed(s, b64, false); w.Code != c.wantCode {
+				t.Fatalf("got %d: %s", w.Code, w.Body.String())
+			}
+			p, _, _, err := secureenclave.RootSeedProtection(s.DataDir)
+			if c.protection == "" {
+				if err == nil {
+					t.Fatal("a refused founding left a seed file")
+				}
+				return
+			}
+			if err != nil || p != c.protection {
+				t.Fatalf("envelope records %q (%v), want %q", p, err, c.protection)
+			}
+		})
 	}
 }

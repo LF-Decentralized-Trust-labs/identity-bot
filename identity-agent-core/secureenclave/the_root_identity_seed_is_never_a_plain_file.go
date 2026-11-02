@@ -66,11 +66,19 @@ func UseSeedWrapper(w SeedWrapper) (restore func()) {
 }
 
 // rootSeedMayLiveHere is the decision, pure so every combination can be tested.
-// A production build needs proven-usable hardware AND a wrapper that is working;
-// a development build is exempt, exactly as the root-seed route's gate is
+//
+// THE RULE IS "STORED ONLY UNDER A PROTECTION THIS PLATFORM ACTUALLY HAS", not
+// "only under the iOS wrapper". A production build needs proven-usable key
+// protection AND one of:
+//   - a working seed wrapper (the iOS Secure Enclave; the sealed machine's
+//     volume, whose scheme is only available inside a sealed guest), or
+//   - to be a phone whose wrapper is owed and not yet written (Android), which
+//     holds the seed unwrapped and records that and why in the envelope.
+//
+// A development build is exempt, exactly as the root-seed route's gate is
 // (the identity it admits is a development-realm one).
-func rootSeedMayLiveHere(cap Capability, wrapperWorks, dev bool) bool {
-	return dev || (cap.RootKeyPermitted() && wrapperWorks)
+func rootSeedMayLiveHere(cap Capability, wrapperWorks, phoneWithoutWrapper, dev bool) bool {
+	return dev || (cap.RootKeyPermitted() && (wrapperWorks || phoneWithoutWrapper))
 }
 
 // CheckRootSeedMayLiveHere asks whether a person's root seed may be written on
@@ -81,7 +89,7 @@ func CheckRootSeedMayLiveHere() error {
 	cap := detectCapability()
 	w := platformSeedWrapper()
 	works := w != nil && w.Available()
-	if rootSeedMayLiveHere(cap, works, buildmode.IsDev()) {
+	if rootSeedMayLiveHere(cap, works, unwrappedStorageReason() != "", buildmode.IsDev()) {
 		return nil
 	}
 	reason := "its key protection is not proven usable"
