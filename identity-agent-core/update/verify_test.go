@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"strconv"
 	"testing"
@@ -51,7 +52,7 @@ func TestManifestSignatureGoldenVector(t *testing.T) {
       }]
     }
   },
-  "compatibility": {"flutter_web": {"min_go_backend": "2.3.0", "max_go_backend": "2.5.x"}},
+  "compatibility": {"go_backend": {"min_go_backend": "2.3.0", "max_go_backend": "2.5.x"}},
   "changelog": [{"version": "2.4.0", "date": "2026-06-15", "critical": true, "summary": "test", "entries": ["fix"]}],
   "signature": ""
 }`)
@@ -167,4 +168,21 @@ func replaceJSONField(raw []byte, field, value string) []byte {
 	}
 	out, _ := jsonMarshal(obj)
 	return out
+}
+
+func TestManifestNamingARetiredComponentIsRefused(t *testing.T) {
+	_, priv, _ := TestTrustAnchor()
+	for name, body := range map[string]string{
+		"components":    `"components":{"flutter_web":{"version":"1.0.0","minimum_version":"1.0.0","critical":false,"artifacts":[]}},"compatibility":{}`,
+		"compatibility": `"components":{},"compatibility":{"flutter_web":{"min_go_backend":"2.3.0","max_go_backend":"2.5.x"}}`,
+	} {
+		ta, _, _ := TestTrustAnchor()
+		signed, err := SignManifestForTest([]byte(`{"manifest_version":1,"published_at":"2026-06-15T00:00:00Z","signing_key_id":"grape-release-test","channels":{},`+body+`,"signature":""}`), priv)
+		if err != nil {
+			t.Fatalf("%s: sign: %v", name, err)
+		}
+		if _, err := VerifyManifest(signed, ta); !errors.Is(err, ErrRetiredComponent) {
+			t.Fatalf("%s: want ErrRetiredComponent, got %v", name, err)
+		}
+	}
 }
