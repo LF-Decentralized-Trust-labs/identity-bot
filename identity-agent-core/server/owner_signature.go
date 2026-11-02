@@ -1,11 +1,9 @@
 package server
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"net/http"
 	"os"
@@ -348,13 +346,12 @@ func (s *CoreServer) verifyOwnerSignature(r *http.Request) error {
 	}
 
 	// Read the body to digest it, then put it back — the handler still needs it.
-	var body []byte
-	if r.Body != nil {
-		body, err = io.ReadAll(r.Body)
-		if err != nil {
-			return fmt.Errorf("read body: %w", err)
-		}
-		r.Body = io.NopCloser(bytes.NewReader(body))
+	// Bounded, because this runs before the signature is known good: an unsigned
+	// caller with a fresh timestamp must not be able to make the agent buffer
+	// whatever it cares to send. Over the bound is refused, never truncated.
+	body, err := readSignedBody(r)
+	if err != nil {
+		return err
 	}
 
 	target, err := s.theIdentityAgentAnOwnerNames(r)

@@ -3,6 +3,8 @@ package server
 import (
 	"crypto/ed25519"
 	"encoding/base64"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -495,5 +497,189 @@ func TestEveryOpenRouteIsMountedWhereItSaysItIs(t *testing.T) {
 					m.name, key, why)
 			}
 		}
+	}
+}
+
+// countingBody serves total bytes and records how many were actually taken.
+type countingBody struct {
+	total, served int64
+}
+
+func (c *countingBody) Read(p []byte) (int, error) {
+	if c.served >= c.total {
+		return 0, io.EOF
+	}
+	n := int64(len(p))
+	if rest := c.total - c.served; n > rest {
+		n = rest
+	}
+	c.served += n
+	return int(n), nil
+}
+
+func (c *countingBody) Close() error { return nil }
+
+// A caller with a fresh timestamp and a garbage signature must not be able to
+// make the agent buffer its whole body: the read happens before the signature
+// is known good, so it stops at the bound and the request is refused.
+func TestAnOversizedBodyWithABadSignatureIsNotFullyRead(t *testing.T) {
+	s := newAuthTestServer(t)
+	sealTestOwner(t, s)
+
+	body := &countingBody{total: 4 * maxSignedBodyBytes}
+	req := remote("POST", "/api/profile", "")
+	req.Body = body
+	req.Header.Set(headerOwnerSig, "0Bgarbage")
+	req.Header.Set(headerOwnerTimestamp, time.Now().UTC().Format(time.RFC3339))
+
+	err := s.verifyOwnerSignature(req)
+	var tooLarge requestTooLarge
+	if !errors.As(err, &tooLarge) {
+		t.Fatalf("an oversized body was refused with %v, want the size refusal", err)
+	}
+	if body.served == 0 {
+		t.Fatal("none of the body was read, so this proves nothing about where reading stops")
+	}
+	// Whatever was read must not be handed on as if it were the whole body.
+	if left, rerr := io.ReadAll(req.Body); rerr == nil || len(left) != 0 {
+		t.Fatalf("a refused request's body still yields %d bytes (err %v)", len(left), rerr)
+	}
+	if body.served > maxSignedBodyBytes+1 {
+		t.Fatalf("the agent read %d bytes of a body it should have stopped at %d",
+			body.served, maxSignedBodyBytes+1)
+	}
+}
+
+// A body is read up to the bound of its ROUTE. The archive routes and the photo
+// routes carry far more than the default, and a remote owner can only sign
+// them; the same size on any other route is refused, as a size and not as a
+// bad signature.
+func TestASignedBodyMayBeAsLargeAsItsRouteAllows(t *testing.T) {
+	big := func(fill string, n int) string {
+		return `{"` + fill + `":"` + strings.Repeat("A", n) + `"}`
+	}
+	for _, tc := range []struct {
+		name, method, path, body string
+		accepted                 bool
+	}{
+		{"recovery start, 20 MiB archive", "POST", "/api/recovery/start", big("archive_b64", 20<<20), true},
+		{"recovery verify, 20 MiB archive", "POST", "/api/recovery/verify", big("archive_b64", 20<<20), true},
+		{"profile PUT, 15 MiB", "PUT", "/api/profile", big("photo_pad", 15<<20), true},
+		{"avatar stylize, 15 MiB", "POST", "/api/profile/avatar/stylize", big("image", 15<<20), true},
+		{"profile PUT, over the photo bound", "PUT", "/api/profile", big("photo_pad", int(maxPhotoBody)), false},
+		{"tunnel settings, 20 MiB (default bound)", "PUT", "/api/settings/tunnel", big("pad", 20<<20), false},
+		{"tunnel settings, 15 MiB (default bound)", "PUT", "/api/settings/tunnel", big("pad", 15<<20), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newAuthTestServer(t)
+			seed, _ := sealTestOwner(t, s)
+			// A probe stands where the handler would, so "the gate let it
+			// through" is observed rather than inferred from the absence of a
+			// refusal: a handler that crashes after the gate looks the same as
+			// one that served.
+			reached, admitted := false, false
+			probe := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				reached, admitted = true, theGateAdmittedTheOwner(r)
+			})
+			router := s.buildRouter("")
+			w := httptest.NewRecorder()
+			s.authorize(router)(probe).ServeHTTP(w,
+				signed(t, tc.method, tc.path, tc.body, seed, time.Now()))
+			if tc.accepted {
+				if !reached || !admitted {
+					t.Fatalf("the gate did not admit a validly signed request (reached %v, admitted as the owner %v): %d %s",
+						reached, admitted, w.Code, w.Body.String())
+				}
+				return
+			}
+			if reached {
+				t.Fatal("a body over its route's bound reached the handler")
+			}
+			if w.Code != http.StatusRequestEntityTooLarge {
+				t.Fatalf("got %d, want 413: %s", w.Code, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), "too large for this route") {
+				t.Fatalf("the refusal does not say the request is too large: %s", w.Body.String())
+			}
+		})
+	}
+}
+
+// Every route that raises its bound is a route the router actually serves; a
+// misspelt key would silently leave it at the default.
+func TestEverySignedBodyBoundNamesAMountedRoute(t *testing.T) {
+	s := newAuthTestServer(t)
+	router := s.buildRouter("")
+	for key := range signedBodyBounds {
+		method, path, _ := strings.Cut(key, " ")
+		req := httptest.NewRequest(method, path, nil)
+		if matchedRoutePattern(router, req) != path {
+			t.Errorf("%s is not a mounted route pattern", key)
+		}
+	}
+}
+
+// A body that declares it is too big is refused without reading any of it, and
+// with the same 413 as one found too big by reading.
+func TestADeclaredOversizeBodyIsRefusedUnread(t *testing.T) {
+	s := newAuthTestServer(t)
+	seed, _ := sealTestOwner(t, s)
+
+	body := &countingBody{total: 4 * maxSignedBodyBytes}
+	req := signed(t, "PUT", "/api/settings/tunnel", "{}", seed, time.Now())
+	req.Body = body
+	req.ContentLength = body.total
+
+	w := httptest.NewRecorder()
+	s.buildRouter("").ServeHTTP(w, req)
+	if w.Code != http.StatusRequestEntityTooLarge ||
+		!strings.Contains(w.Body.String(), "too large for this route") {
+		t.Fatalf("got %d, want the 413: %s", w.Code, w.Body.String())
+	}
+	if body.served != 0 {
+		t.Fatalf("the agent read %d bytes of a body that declared itself too big", body.served)
+	}
+}
+
+// An owner who claims to be a different identity gets the refusal it always
+// did, not a size error, however large the body.
+func TestAMismatchedOwnerClaimIsNotAnSizeError(t *testing.T) {
+	s := newAuthTestServer(t)
+	seed, _ := sealTestOwner(t, s)
+
+	req := signed(t, "PUT", "/api/settings/tunnel",
+		`{"pad":"`+strings.Repeat("A", int(maxSignedBodyBytes)+1)+`"}`, seed, time.Now())
+	req.Header.Set(headerOwnerAID, "ESOMEONEELSE")
+
+	w := httptest.NewRecorder()
+	s.buildRouter("").ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("got %d, want the 403 a mismatched owner always got: %s", w.Code, w.Body.String())
+	}
+}
+
+// A machine asking for a route it may not use is refused before any of its body
+// is read; the same machine on a route it may use still reaches the size bound.
+func TestAControllerIsCheckedAgainstTheRouteBeforeItsBodyIsRead(t *testing.T) {
+	s := newAuthTestServer(t)
+	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
+	if _, closed := isOwnerOnly("POST", "/api/rotation"); !closed {
+		t.Fatal("POST /api/rotation is no longer owner-only, so this proves nothing")
+	}
+
+	serve := func(method, path string) (int, *countingBody) {
+		req := asThatMachine(t, aid, method, path, "", seed, "", time.Time{})
+		body := &countingBody{total: 4 * maxSignedBodyBytes}
+		req.Body = body
+		w := httptest.NewRecorder()
+		s.buildRouter("").ServeHTTP(w, req)
+		return w.Code, body
+	}
+
+	if code, body := serve("POST", "/api/rotation"); code != http.StatusForbidden || body.served != 0 {
+		t.Fatalf("an owner-only route: got %d after reading %d bytes, want 403 and none read", code, body.served)
+	}
+	if code, body := serve("GET", "/api/profile"); code != http.StatusRequestEntityTooLarge || body.served == 0 {
+		t.Fatalf("a permitted route: got %d after reading %d bytes, want the size refusal", code, body.served)
 	}
 }

@@ -116,8 +116,30 @@ func TheControllerThatAsked(r *http.Request) (ControllerGrant, bool) {
 func (s *CoreServer) controllerActsForTheOwner(
 	w http.ResponseWriter, r *http.Request, pattern string, next http.Handler,
 ) bool {
-	grant, authenticated, err := s.theControllerBehind(r)
+	grant, _, err := s.theControllerBehindIf(r, func(grant ControllerGrant, vouched authprovider.Result) error {
+		// Before the body is read: whether this machine may use this route at
+		// all depends on the route and the headers, never on the body, so a
+		// route it may not use costs the agent no read.
+		authenticated := howSureWeAreItIsThem(vouched, time.Now().UTC())
+		if ok, why := mayThisControllerDoThis(
+			r.Method, pattern, grant.ControllerAID, authenticated); !ok {
+			return aControllerRefusedHere{
+				code:    whyAControllerWasRefused(r.Method, pattern, authenticated),
+				message: "this machine may act for you, but " + why,
+			}
+		}
+		return nil
+	})
 	if err != nil {
+		var refused aControllerRefusedHere
+		if errors.As(err, &refused) {
+			denyAuthorizationBecause(w, refused.code, refused.message)
+			return true
+		}
+		// A size is not a signature: say so, as the owner path does.
+		if refuseTooLarge(w, err) {
+			return true
+		}
 		// A request carrying no controller headers at all is simply not from a
 		// controller, and the caller carries on trying whatever else might stand
 		// in for the owner. Anything else IS a controller and was refused for a
@@ -134,22 +156,18 @@ func (s *CoreServer) controllerActsForTheOwner(
 		denyAuthorization(w, err.Error())
 		return true
 	}
-	// The same in every build: a vouched statement where a recent one verified,
-	// otherwise the placeholder score every person has until human
-	// authentication is built.
-	authenticated = howSureWeAreItIsThem(authenticated, time.Now().UTC())
-	if ok, why := mayThisControllerDoThis(
-		r.Method, pattern, grant.ControllerAID, authenticated); !ok {
-		denyAuthorizationBecause(w, whyAControllerWasRefused(r.Method, pattern, authenticated),
-			"this machine may act for you, but "+why)
-		return true
-	}
 	// Carried forward so what this machine did is attributable to it rather than
 	// to the owner.
 	next.ServeHTTP(w, r.WithContext(
 		context.WithValue(r.Context(), controllerContextKey{}, grant)))
 	return true
 }
+
+// aControllerRefusedHere is the refusal for a machine whose grant stands but
+// which may not do this action, raised before the body is read.
+type aControllerRefusedHere struct{ code, message string }
+
+func (e aControllerRefusedHere) Error() string { return e.message }
 
 // errNotFromAController means no machine claimed this request, which is the
 // ordinary case for every other caller and not a fault.
@@ -166,6 +184,16 @@ var errNotFromAController = errors.New("this request is not from a controller")
 // The error says which of those failed, because "not a controller" and "your
 // authorisation ran out" need different things from the person.
 func (s *CoreServer) theControllerBehind(r *http.Request) (ControllerGrant, authprovider.Result, error) {
+	return s.theControllerBehindIf(r, nil)
+}
+
+// theControllerBehindIf is theControllerBehind with a check run once the grant
+// is known to stand and before the body is read. An error from it refuses the
+// request as it stands, so a request that is refused for what it asks for is
+// never made to cost a read of what it carries. Nil checks nothing.
+func (s *CoreServer) theControllerBehindIf(
+	r *http.Request, beforeTheBody func(ControllerGrant, authprovider.Result) error,
+) (ControllerGrant, authprovider.Result, error) {
 	var none ControllerGrant
 	unmeasured := authprovider.Unmeasured("this machine reported no authentication")
 
@@ -216,6 +244,12 @@ func (s *CoreServer) theControllerBehind(r *http.Request) (ControllerGrant, auth
 	// raw bytes that no longer say what they are.
 	if grant.PublicKey == "" {
 		return none, unmeasured, fmt.Errorf("no key is recorded for this machine")
+	}
+
+	if beforeTheBody != nil {
+		if err := beforeTheBody(grant, s.theAuthenticationSomebodyVouchedFor(r, aid, now)); err != nil {
+			return none, unmeasured, err
+		}
 	}
 
 	signed, asserted, err := s.theStringThisMachineSigned(r, aid, stamp, now)

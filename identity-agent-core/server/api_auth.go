@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -323,11 +324,17 @@ func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handle
 				return
 			}
 
+			r = withSignedBodyBound(r, pattern)
+
 			switch classify(r.Method, pattern) {
 			case accessPublic:
 				next.ServeHTTP(w, r)
 			case accessScoped:
-				if how := s.howThisIsTheOwner(r); how != "" {
+				how, proofErr := s.theProofOfTheOwner(r)
+				if refuseTooLarge(w, proofErr) {
+					return
+				}
+				if how != "" {
 					// The owner at this computer is recognised again by the
 					// handler. An owner proving it remotely cannot be: the
 					// signature is spent here, so the handler would find a
@@ -354,7 +361,11 @@ func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handle
 				}
 				denyAuthorization(w, "this endpoint needs a token carrying the capability scope for it")
 			default:
-				if how := s.howThisIsTheOwner(r); how != "" {
+				how, proofErr := s.theProofOfTheOwner(r)
+				if refuseTooLarge(w, proofErr) {
+					return
+				}
+				if how != "" {
 					// Said, as on the scoped routes, so a handler that names
 					// its caller names the owner the gate admitted: an owner
 					// signature is spent here and cannot be checked again.
@@ -490,16 +501,42 @@ const (
 // howThisIsTheOwner is isOwner, saying which proof held, or "" when none did.
 // Asked once per request: an owner signature is spent when it verifies.
 func (s *CoreServer) howThisIsTheOwner(r *http.Request) string {
+	how, _ := s.theProofOfTheOwner(r)
+	return how
+}
+
+// theProofOfTheOwner is howThisIsTheOwner, and also says when the proof failed
+// because the body is over the bound for its route: that is the one failure
+// the caller can fix by sending less, so it is carried out rather than thrown
+// away. The error is only ever a requestTooLarge, and only with how == "".
+func (s *CoreServer) theProofOfTheOwner(r *http.Request) (string, error) {
 	if s.isLocalOwnerRequest(r) {
-		return ownerAtThisComputer
+		return ownerAtThisComputer, nil
 	}
 	if s.isSealedOwnerRequest(r) {
-		return ownerSealed
+		return ownerSealed, nil
 	}
-	if s.verifyOwnerSignature(r) == nil {
-		return ownerSigned
+	err := s.verifyOwnerSignature(r)
+	if err == nil {
+		return ownerSigned, nil
 	}
-	return ""
+	var tooLarge requestTooLarge
+	if errors.As(err, &tooLarge) {
+		return "", tooLarge
+	}
+	return "", nil
+}
+
+// refuseTooLarge answers 413 when err is the size refusal, and says whether it
+// did. A size is not a signature: telling them apart lets a client that signed
+// correctly learn it should send less, not that its key is wrong.
+func refuseTooLarge(w http.ResponseWriter, err error) bool {
+	var tooLarge requestTooLarge
+	if !errors.As(err, &tooLarge) {
+		return false
+	}
+	writeError(w, http.StatusRequestEntityTooLarge, "Request too large", tooLarge.Error())
+	return true
 }
 
 // theGateAdmittedTheOwnerKey marks a request the gate admitted on a route open

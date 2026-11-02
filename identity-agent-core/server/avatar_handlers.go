@@ -60,6 +60,7 @@ func (s *CoreServer) handleGenerateAvatar(w http.ResponseWriter, r *http.Request
 // image is processed in memory and never stored by this call — saving is the
 // user's separate, deliberate act through the profile.
 func (s *CoreServer) handleStylizeAvatar(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxPhotoBody) // see signedBodyBounds
 	var req struct {
 		Image string `json:"image"`
 	}

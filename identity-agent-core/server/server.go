@@ -4850,6 +4850,8 @@ func (s *CoreServer) handleGetProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *CoreServer) handlePutProfile(w http.ResponseWriter, r *http.Request) {
+	// A photo travels in this body: the bound is the photo's (signedBodyBounds).
+	r.Body = http.MaxBytesReader(w, r.Body, maxPhotoBody)
 	var profile store.ProfileData
 	if err := json.NewDecoder(r.Body).Decode(&profile); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())

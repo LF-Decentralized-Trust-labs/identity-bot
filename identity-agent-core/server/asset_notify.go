@@ -40,30 +40,63 @@ const (
 // verifyAssetSignature identifies the machine AND spends the signature, so the
 // same request cannot be replayed into a second action. Callers that ACT on a
 // request use this one.
-// maxSignedBodyBytes bounds what a request may make this agent buffer before
-// its signature has been checked. Above the 8 MB the capability handlers accept,
-// so a legitimate request is never truncated by this and an illegitimate one
-// stops here rather than at whatever the sender felt like sending.
+// maxSignedBodyBytes is the default bound on what a signed request may make
+// this agent buffer before its signature has been checked. Above the 8 MB the
+// capability handlers accept, so a legitimate request is never truncated by this
+// and an illegitimate one stops here rather than at whatever the sender felt
+// like sending. A route that legitimately carries more declares its own bound
+// in signedBodyBounds (signed_body_bounds.go).
 const maxSignedBodyBytes = 12 << 20
 
+// requestTooLarge is the refusal for a signed body over the bound for its
+// route. A type of its own so the gate can answer 413 and say so, where any
+// other failure to verify is a 403 that says nothing about size.
+type requestTooLarge struct{ limit int64 }
+
+func (e requestTooLarge) Error() string {
+	return fmt.Sprintf("this request is too large for this route: a signed request here may carry at most %d bytes", e.limit)
+}
+
+// refusedBody is what a refused request's body becomes: it yields nothing and
+// says why. Never the part that was read, because a cut-off body handed to a
+// handler is read as a whole one.
+type refusedBody struct{ err error }
+
+func (b refusedBody) Read([]byte) (int, error) { return 0, b.err }
+func (refusedBody) Close() error               { return nil }
+
 // readSignedBody reads a signed request's body to digest it, and puts it back
-// for the handler, on every path including the refusals. Over the bound it is
-// refused rather than truncated: a truncated body would be checked against a
-// signature over the whole one and handed on cut short.
+// for the handler. Over the bound for its route (signedBodyBoundFor) it is
+// refused rather than truncated, and on any refusal r.Body is left erroring
+// rather than holding the part that was read: a truncated body would be
+// checked against a signature over the whole one and handed on cut short.
 //
 // The one reader for every request whose body a signature covers.
 func readSignedBody(r *http.Request) ([]byte, error) {
 	if r.Body == nil {
 		return nil, nil
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxSignedBodyBytes+1))
-	r.Body = io.NopCloser(bytes.NewReader(body))
+	limit := signedBodyBoundFor(r)
+	// A body that says up front it is too big is refused without reading any of
+	// it. A chunked body declares no length (ContentLength is -1), so the
+	// bounded read below still covers it.
+	if r.ContentLength > limit {
+		err := requestTooLarge{limit}
+		r.Body = refusedBody{err}
+		return nil, err
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
 	if err != nil {
-		return nil, fmt.Errorf("read body: %w", err)
+		err = fmt.Errorf("read body: %w", err)
+		r.Body = refusedBody{err}
+		return nil, err
 	}
-	if int64(len(body)) > maxSignedBodyBytes {
-		return nil, fmt.Errorf("this request is larger than the %d bytes a signed request may carry", maxSignedBodyBytes)
+	if int64(len(body)) > limit {
+		err = requestTooLarge{limit}
+		r.Body = refusedBody{err}
+		return nil, err
 	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
 	return body, nil
 }
 
