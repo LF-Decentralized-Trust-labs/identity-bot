@@ -14,7 +14,7 @@ import (
 // signAs asks a controller's own core to sign a request, and returns the reply.
 func signAs(t *testing.T, s *CoreServer, body string) (*httptest.ResponseRecorder, map[string]any) {
 	t.Helper()
-	r := s.buildRouter("")
+	r := s.buildRouter()
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, local("POST", "/api/controller/sign", body))
 	out := map[string]any{}

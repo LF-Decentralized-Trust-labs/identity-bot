@@ -27,7 +27,7 @@ import (
 
 func didcommPost(t *testing.T, s *CoreServer, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	r := s.buildRouter("")
+	r := s.buildRouter()
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, remote("POST", "/didcomm", body))
 	return w
@@ -206,7 +206,7 @@ func dataDirSnapshot(t *testing.T, dir string) string {
 func TestAFreshAgentCanStillBeWrittenToFirst(t *testing.T) {
 	s := serverWithIdentity(t, "EOURS")
 
-	r := s.buildRouter("")
+	r := s.buildRouter()
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, remote("GET", "/api/didcomm/did?aid=EOURS", ""))
 
@@ -221,7 +221,7 @@ func TestAFreshAgentCanStillBeWrittenToFirst(t *testing.T) {
 func TestAStrangerStillCannotMakeUsGenerateKeysForAnythingElse(t *testing.T) {
 	s := serverWithIdentity(t, "EOURS")
 
-	r := s.buildRouter("")
+	r := s.buildRouter()
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, remote("GET", "/api/didcomm/did?aid=ESOMETHING-ELSE", ""))
 

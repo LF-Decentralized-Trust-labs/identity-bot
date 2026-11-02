@@ -507,7 +507,7 @@ func (s *CoreServer) addonRoutes(a Addon) map[string]bool {
 // access class. None is allowed.
 func (s *CoreServer) routeTakeovers(extras []func(chi.Router)) []string {
 	var out []string
-	core := routesIn(s.buildRouterOf("", nil, nil))
+	core := routesIn(s.buildRouterOf(nil, nil))
 	whose := map[string]string{}
 	for k := range core {
 		whose[k] = "the core"
@@ -544,7 +544,7 @@ func (s *CoreServer) routeTakeovers(extras []func(chi.Router)) []string {
 // path a core route matches.
 func (s *CoreServer) prefixViolations() []string {
 	var out []string
-	core := routesIn(s.buildRouterOf("", nil, nil))
+	core := routesIn(s.buildRouterOf(nil, nil))
 	type owned struct{ id, prefix string }
 	var all []owned
 	for _, a := range registeredAddons() {
@@ -561,9 +561,6 @@ func (s *CoreServer) prefixViolations() []string {
 			all = append(all, owned{a.ID, p})
 			for k := range core {
 				pattern := k[strings.Index(k, " ")+1:]
-				if pattern == theWebUI {
-					continue
-				}
 				if meets, _ := prefixMeetsTheCore(p, pattern); meets {
 					out = append(out, a.ID+": prefix "+p+" covers the core's "+k)
 				}
@@ -592,7 +589,7 @@ func (s *CoreServer) overlayShadows(extras []func(chi.Router)) []string {
 	if len(extras) == 0 {
 		return nil
 	}
-	without := routesIn(s.buildRouterOf("", registeredAddons(), nil))
+	without := routesIn(s.buildRouterOf(registeredAddons(), nil))
 	r := chi.NewRouter()
 	r.Route("/api", func(r chi.Router) {
 		for _, fn := range extras {
@@ -604,7 +601,7 @@ func (s *CoreServer) overlayShadows(extras []func(chi.Router)) []string {
 		om, op, _ := strings.Cut(o, " ")
 		for k := range without {
 			km, kp, _ := strings.Cut(k, " ")
-			if km == om && kp != theWebUI && patternsMeet(op, kp) {
+			if km == om && patternsMeet(op, kp) {
 				out = append(out, "an overlay mounts "+o+", which can take requests "+k+" serves")
 			}
 		}
@@ -635,7 +632,7 @@ func (s *CoreServer) addonEntriesNotItsOwn(served chi.Routes, loosening bool) []
 		return nil
 	})
 	var out []string
-	core := routesIn(s.buildRouterOf("", nil, nil))
+	core := routesIn(s.buildRouterOf(nil, nil))
 	for _, a := range registeredAddons() {
 		// An add-on's own routes are those it adds that the server built
 		// without it does not serve: re-mounting somebody else's route does

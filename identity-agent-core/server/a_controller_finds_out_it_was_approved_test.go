@@ -18,7 +18,7 @@ import (
 func TestAMachineLearnsItWasApprovedByAsking(t *testing.T) {
 	s := agentWithNoIdentity(t)
 	ownerSeedForTest(t, s)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	// The machine as it is before anybody approves it: it has its own key and
 	// nothing else.
@@ -78,7 +78,7 @@ func TestAnApprovedMachineIsToldWhichIdentityItActsFor(t *testing.T) {
 	if _, gerr := s.controllers().Grant(me, time.Now().UTC()); gerr != nil {
 		t.Fatal(gerr)
 	}
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, asThatMachine(t, me.ControllerAID, "GET", "/api/controller/agent",

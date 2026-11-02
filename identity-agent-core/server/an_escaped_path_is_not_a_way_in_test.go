@@ -26,7 +26,7 @@ import (
 // {param} had the same way past it.
 func TestAnEscapedPathCannotSkipTheGate(t *testing.T) {
 	s := newAuthTestServer(t)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	for _, c := range []struct{ method, path string }{
 		{"DELETE", "/api/backup/destinations/a%2Fb"},
@@ -47,7 +47,7 @@ func TestAnEscapedPathCannotSkipTheGate(t *testing.T) {
 // service wearing a security fix's clothes.
 func TestOrdinaryPathsStillResolveToTheirRoute(t *testing.T) {
 	s := newAuthTestServer(t)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	// Public, so a 403 here would mean the gate stopped classifying it.
 	w := httptest.NewRecorder()

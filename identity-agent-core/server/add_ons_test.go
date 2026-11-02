@@ -36,7 +36,7 @@ func TestAnAddOnsRoutesAreServedBehindTheCoresAuthorisation(t *testing.T) {
 		RootRoutes: func(s *CoreServer, r chi.Router) { r.Get("/an-add-on-outside-the-api", ok) },
 	})
 	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
-	s.router = s.buildRouter("")
+	s.router = s.buildRouter()
 
 	serve := func(r *http.Request) int {
 		w := httptest.NewRecorder()
@@ -59,7 +59,7 @@ func TestAnAddOnsRoutesAreServedBehindTheCoresAuthorisation(t *testing.T) {
 func TestAnAddOnLeftOutServesNothing(t *testing.T) {
 	onlyAddons(t)
 	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
-	s.router = s.buildRouter("")
+	s.router = s.buildRouter()
 	serve := func(path string) (int, string) {
 		w := httptest.NewRecorder()
 		s.router.ServeHTTP(w, local("GET", path, ""))
