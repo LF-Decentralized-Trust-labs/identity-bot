@@ -32,7 +32,7 @@ func TestThePublishedMessageVectorsHold(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(set.Statements) == 0 || len(set.RefusedStatements) == 0 || len(set.Conversation) < 2 || len(set.RefusedEntries) == 0 {
+	if len(set.Statements) == 0 || len(set.RefusedStatements) == 0 || len(set.TierStripped) == 0 || len(set.Conversation) < 2 || len(set.RefusedEntries) == 0 {
 		t.Fatal("the vector file is missing a section")
 	}
 	// Recomputed into a second copy read from the file, so nothing the
@@ -57,6 +57,19 @@ func TestThePublishedMessageVectorsHold(t *testing.T) {
 	for _, r := range set.RefusedStatements {
 		if r.Statement.Check() == nil {
 			t.Fatalf("%s was accepted; it must be refused", r.Name)
+		}
+	}
+	for _, s := range set.TierStripped {
+		if s.Statement.Tier != "" || s.TierRemoved == "" {
+			t.Fatalf("%s: the statement must have no tier and name the one removed", s.Name)
+		}
+		if Verify(s.Statement, set.Verkey, s.Signature) == nil {
+			t.Fatalf("%s: a reader without tiers accepted the signature", s.Name)
+		}
+		tiered := s.Statement
+		tiered.Tier = s.TierRemoved
+		if err := Verify(tiered, set.Verkey, s.Signature); err != nil {
+			t.Fatalf("%s: the signature does not hold with the tier put back: %v", s.Name, err)
 		}
 	}
 	prev := ""
@@ -150,6 +163,17 @@ func fillMessageVectors(set *MessageVectorSet) error {
 		s.Statement.BodyHash = HashBody([]byte(s.Body))
 		s.Signed = string(s.Statement.Bytes())
 		if s.Signature, err = Sign(signer, s.Statement); err != nil {
+			return err
+		}
+	}
+
+	for i := range set.TierStripped {
+		s := &set.TierStripped[i]
+		s.Statement.Host = set.Host
+		s.Statement.BodyHash = HashBody([]byte(s.Body))
+		tiered := s.Statement
+		tiered.Tier = s.TierRemoved
+		if s.Signature, err = Sign(signer, tiered); err != nil {
 			return err
 		}
 	}
@@ -296,7 +320,10 @@ func writeMessageVectors(t *testing.T) {
 		Brain: brain, HostNonce: "nonce-0123456789abcdef", HostTime: "2026-10-20T12:00:00Z", BodyCredential: "EBODYCRED"}
 	receipt := Statement{Conversation: "c_vector", Kind: KindReceipt, From: "EAGENT_A", To: "EAGENT_B", InReplyTo: "m_reply",
 		HostNonce: "nonce-receipt-00000001", HostTime: "2026-10-20T12:00:02Z", BodyCredential: "EBODYCRED"}
+	deepAsk := ask
+	deepAsk.Tier, deepAsk.HostNonce, deepAsk.HostTime = TierDeep, "nonce-deep-0000001", "2026-10-20T11:59:40Z"
 	set.Statements = []stmt{
+		{Name: "an ask with a tier", Statement: deepAsk, Body: "Review this design for races."},
 		{Name: "a reply", Statement: reply, Body: "I run macOS 26.1 on a MacBook Pro."},
 		{Name: "an ask", Statement: ask, Body: "Which operating system are you on?"},
 		{Name: "a receipt, with no brain", Statement: receipt, Body: ""},
@@ -316,13 +343,29 @@ func writeMessageVectors(t *testing.T) {
 	shortNonce.HostNonce = "fifteen-chars-0"
 	badTime := withHost(reply)
 	badTime.HostTime = "20 October 2026"
+	unknownTier := withHost(ask)
+	unknownTier.Tier = "turbo"
+	tierOnReply := withHost(reply)
+	tierOnReply.Tier = TierQuick
 	set.RefusedStatements = []refused{
+		{"a tier that is not quick, standard or deep", unknownTier},
+		{"a tier on a reply", tierOnReply},
 		{"a line break in a field", lineBreak},
 		{"an ask that names no message it acts on", noTarget},
 		{"an unknown kind", otherKind},
 		{"a nonce of 15 characters", shortNonce},
 		{"a time that is not RFC 3339", badTime},
 	}
+
+	stripped := ask
+	stripped.HostNonce, stripped.HostTime = "nonce-deep-0000001", "2026-10-20T11:59:40Z"
+	set.TierStripped = []struct {
+		Name        string    `json:"name"`
+		Statement   Statement `json:"statement"`
+		Body        string    `json:"body"`
+		TierRemoved string    `json:"tier_removed"`
+		Signature   string    `json:"signature"`
+	}{{Name: "a tiered ask with its tier stripped", Statement: stripped, Body: "Review this design for races.", TierRemoved: TierDeep}}
 
 	// AI agent B answers AI agent A, then tells the person who asked.
 	toPerson := reply

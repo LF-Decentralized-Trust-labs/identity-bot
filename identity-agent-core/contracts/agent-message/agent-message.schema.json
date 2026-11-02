@@ -5,11 +5,11 @@
   "description": "Every message is signed twice. The sender signs a statement (a body, with its machine key) or a request (a person, from a paired controller). The Identity Agent then countersigns a record of it, as the AI agent the message is from, in a signed DIDComm envelope whose body is the record. Worked examples, every byte reproducible from published seeds, are in identity-agent-core/agentmessage/message-vectors.json; contracts/check_ai_agent_vectors.py recomputes them from this prose.",
   "$defs": {
     "statement_bytes": {
-      "description": "What a body signs: the lines IA-AGENT-MSG-V1, conversation, kind, from, to, in_reply_to, body_hash, brain.provider, brain.model, brain.session, brain.run_hash, host, host_nonce, host_time, body_credential, joined with a newline (0x0a), no trailing newline. An absent field is an empty line. The signature is made with the body's machine key and encoded as for a signed request (see contracts/agent-body).",
+      "description": "What a body signs: the lines IA-AGENT-MSG-V1 (IA-AGENT-MSG-V2 when the statement has a tier; an empty tier is no tier), conversation, kind, from, to, in_reply_to, body_hash, brain.provider, brain.model, brain.session, brain.run_hash, host, host_nonce, host_time, body_credential, and for V2 only, tier, joined with a newline (0x0a), no trailing newline. An absent field is an empty line, except tier: with no tier the string is V1 with no tier line, exactly as it was before tiers existed, so earlier messages verify unchanged. A reader that does not know tiers rebuilds V1 and so refuses a tiered statement, never runs it without its tier. The signature is made with the body's machine key and encoded as for a signed request (see contracts/agent-body).",
       "type": "string"
     },
     "statement": {
-      "description": "A body's statement. Refused unless every required field is non-empty, no field holds a carriage return or newline, kind is one of the four, in_reply_to is present (a body only ever speaks about a message it was given, so even an ask names the message it was handling), host_nonce is at least 16 characters and host_time is RFC 3339.",
+      "description": "A body's statement. Refused unless every required field is non-empty, no field holds a carriage return or newline, kind is one of the four, tier if not empty is quick, standard or deep and the kind is ask, in_reply_to is present (a body only ever speaks about a message it was given, so even an ask names the message it was handling), host_nonce is at least 16 characters and host_time is RFC 3339.",
       "type": "object",
       "required": [
         "conversation",
@@ -67,6 +67,15 @@
           "type": "string",
           "minLength": 1,
           "description": "the AI Agent Body credential that made host this AI agent's body"
+        },
+        "tier": {
+          "enum": [
+            "",
+            "quick",
+            "standard",
+            "deep"
+          ],
+          "description": "on an ask only: the tier of model the asker wants the task run on. It is advisory: it names a family, not a model, and the receiving AI agent decides which model it means, from the models its brain allows. A sender adds one only when the receiver is known to read IA-AGENT-MSG-V2 messages (within one organisation's Identity Agent that is always so); otherwise the receiver refuses the ask. An empty tier is absent: the same as none, signed as V1. Absent means the receiver's default. Covered by the signature."
         }
       }
     },

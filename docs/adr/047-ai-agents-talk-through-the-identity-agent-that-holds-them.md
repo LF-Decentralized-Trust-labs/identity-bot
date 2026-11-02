@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-10-20
+**Amended:** 2026-11-02 — An ask may carry a signed, advisory tier of model, which makes the message `IA-AGENT-MSG-V2` (see §Amendment 1)
 **Relates to:** ADR-044 (An authorized controller does the app's work), ADR-045 (Every asset gets an identity and a grant from one schema template), ADR-046 (A machine becomes an AI agent's body by a person comparing six words)
 
 ## Context
@@ -259,3 +260,15 @@ asking, and must sign as themselves.
   no anchor fixes yet; nothing anchored is reported as unavailable, never as checked.
 - Running the brain as a separate Windows user is not available yet. On a Windows
   machine a person also uses, the brain runs as that person's user.
+
+---
+
+## Amendment 1: An ask may name a tier of model (2026-11-02)
+
+An ask may carry a `tier`: `quick`, `standard` or `deep`. It says how much model the task deserves.
+
+- **It is signed.** A statement with a tier is signed as `IA-AGENT-MSG-V2`: the same lines as `IA-AGENT-MSG-V1`, then the tier as a last line. A statement with no tier is signed exactly as before, so every earlier message still verifies. The Identity Agent cannot raise or lower a tier without breaking the body's signature.
+- **An empty tier is no tier.** In the signed string, the schema, the JSON and the code alike, an empty `tier` is absent: the message is V1 and carries no tier line.
+- **A reader that does not know tiers refuses a tiered message.** It rebuilds the V1 string from the fields it knows, which is not what was signed, so the signature fails. It never runs the task without the tier. A vector (`a tiered ask with its tier stripped`) pins this, and the independent checker verifies the signature fails.
+- **A tier is advisory.** It names a family, not a model. The receiving AI agent decides which model it means, from the models its brain allows. Only an ask carries one, and only one of the three names is valid.
+- **A sender adds a tier only when the receiver is known to read V2 messages.** Otherwise the receiver refuses the ask. Within one organisation's Identity Agent that is always so, because it and the AI agents it holds are built together.

@@ -38,6 +38,17 @@ type MessageVectorSet struct {
 		Name      string    `json:"name"`
 		Statement Statement `json:"statement"`
 	} `json:"refused_statements"`
+	// TierStripped is a tiered ask as a reader that does not know tiers sees
+	// it: Statement has no tier, TierRemoved is the one it lost, and Signature
+	// is the body's over the statement with that tier. The signature must not
+	// verify the statement as given, and must verify it with the tier put back.
+	TierStripped []struct {
+		Name        string    `json:"name"`
+		Statement   Statement `json:"statement"`
+		Body        string    `json:"body"`
+		TierRemoved string    `json:"tier_removed"`
+		Signature   string    `json:"signature"`
+	} `json:"tier_stripped"`
 
 	// Countersigner is the messaging keys, from these seeds, of the AI agent
 	// every entry below is from, which countersigns them.

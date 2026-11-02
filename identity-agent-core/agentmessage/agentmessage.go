@@ -105,6 +105,22 @@ type Brain struct {
 	RunHash string `json:"run_hash,omitempty"`
 }
 
+// Tiers a task may ask for: how much model the work deserves. A tier is
+// advisory: it names a family of models, not a model; which model of the family runs is the
+// receiving AI agent's to choose from the models its brain allows
+// (asset.BrainConfig.Models). A sender adds a tier only when the receiver is
+// known to read IA-AGENT-MSG-V2; within one organisation's Identity Agent it is.
+const (
+	TierQuick    = "quick"
+	TierStandard = "standard"
+	TierDeep     = "deep"
+)
+
+// ValidTier reports whether t is a tier a message may carry.
+func ValidTier(t string) bool {
+	return t == TierQuick || t == TierStandard || t == TierDeep
+}
+
 // Statement is what a body signs when its AI agent speaks.
 type Statement struct {
 	Conversation string `json:"conversation"`
@@ -125,14 +141,30 @@ type Statement struct {
 	HostTime  string `json:"host_time"`
 	// BodyCredential is the credential that made Host the AI agent's body.
 	BodyCredential string `json:"body_credential"`
+	// Tier, on an ask, is the tier of model the asker wants the task run on:
+	// quick, standard or deep. Absent means the receiver's default. It is
+	// covered by the signature, so neither the Identity Agent nor anything
+	// between can raise or lower it.
+	Tier string `json:"tier,omitempty"`
 }
 
 // Bytes is the string a body signs. One field per line, in a fixed order, so
 // three implementations produce it identically without agreeing on a JSON
 // encoder.
+//
+// A statement with no tier is signed as IA-AGENT-MSG-V1, byte for byte as
+// before the tier existed, so every earlier message still verifies. A
+// statement with a tier is signed as IA-AGENT-MSG-V2: the same lines and then
+// the tier. A reader that does not know tiers rebuilds the V1 string from the
+// fields it knows, which is not what was signed, and so refuses the message
+// rather than running it without the tier.
 func (s Statement) Bytes() []byte {
-	return []byte(strings.Join([]string{
-		"IA-AGENT-MSG-V1",
+	version := "IA-AGENT-MSG-V1"
+	if s.Tier != "" {
+		version = "IA-AGENT-MSG-V2"
+	}
+	lines := []string{
+		version,
 		s.Conversation,
 		s.Kind,
 		s.From,
@@ -147,7 +179,11 @@ func (s Statement) Bytes() []byte {
 		s.HostNonce,
 		s.HostTime,
 		s.BodyCredential,
-	}, "\n"))
+	}
+	if s.Tier != "" {
+		lines = append(lines, s.Tier)
+	}
+	return []byte(strings.Join(lines, "\n"))
 }
 
 // HashBody is the digest a statement carries for its words.
@@ -168,7 +204,7 @@ func (s Statement) Check() error {
 	}
 	for _, v := range []string{s.Conversation, s.Kind, s.From, s.To, s.InReplyTo, s.BodyHash,
 		s.Brain.Provider, s.Brain.Model, s.Brain.Session, s.Brain.RunHash,
-		s.Host, s.HostNonce, s.HostTime, s.BodyCredential} {
+		s.Host, s.HostNonce, s.HostTime, s.BodyCredential, s.Tier} {
 		if strings.ContainsAny(v, "\r\n") {
 			return errors.New("a message field may not contain a line break")
 		}
@@ -177,6 +213,14 @@ func (s Statement) Check() error {
 	case KindAsk, KindReply, KindReceipt, KindFailure:
 	default:
 		return fmt.Errorf("%q is not a kind of message", s.Kind)
+	}
+	if s.Tier != "" {
+		if !ValidTier(s.Tier) {
+			return fmt.Errorf("%q is not a tier: quick, standard or deep", s.Tier)
+		}
+		if s.Kind != KindAsk {
+			return fmt.Errorf("only an ask carries a tier, not a %s", s.Kind)
+		}
 	}
 	// A body only ever speaks about a message it was given: it cannot open a
 	// conversation, so even an ask names the message the AI agent was handling.
