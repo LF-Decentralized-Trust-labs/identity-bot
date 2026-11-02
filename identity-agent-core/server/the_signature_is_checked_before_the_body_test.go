@@ -22,7 +22,7 @@ func digestOf(body string) string { return iacrypto.Blake3QB64Must([]byte(body))
 func serveThroughTheGate(s *CoreServer, req *http.Request) (reached bool, w *httptest.ResponseRecorder) {
 	w = httptest.NewRecorder()
 	probe := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true })
-	s.authorize(s.buildRouter(""))(probe).ServeHTTP(w, req)
+	s.authorize(s.buildRouter())(probe).ServeHTTP(w, req)
 	return
 }
 
@@ -41,7 +41,7 @@ func TestAGarbageSignatureOnTheRecoveryRouteIsRefusedHavingReadNothing(t *testin
 	req.Header.Set(headerBodyDigest, digestOf("anything"))
 
 	w := httptest.NewRecorder()
-	s.buildRouter("").ServeHTTP(w, req)
+	s.buildRouter().ServeHTTP(w, req)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("got %d, want 403: %s", w.Code, w.Body.String())
 	}
@@ -89,7 +89,7 @@ func TestAValidlySignedArchiveWithItsDigestIsAcceptedWhole(t *testing.T) {
 		b, _ := io.ReadAll(r.Body)
 		got = string(b)
 	})
-	s.authorize(s.buildRouter(""))(probe).ServeHTTP(w, req)
+	s.authorize(s.buildRouter())(probe).ServeHTTP(w, req)
 	if got != payload {
 		t.Fatalf("the handler was given %d bytes, want the %d that were signed (code %d: %s)",
 			len(got), len(payload), w.Code, w.Body.String())
