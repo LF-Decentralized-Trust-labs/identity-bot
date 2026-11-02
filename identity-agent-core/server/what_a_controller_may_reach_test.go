@@ -2,6 +2,7 @@ package server
 
 import (
 	"crypto/ed25519"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -264,7 +265,8 @@ func TestAnOversizedBodyIsRefusedRatherThanTruncated(t *testing.T) {
 		t.Fatal("an oversized body was accepted, so the handler reads a truncated " +
 			"request that the signature appears to cover")
 	}
-	if !strings.Contains(err.Error(), "larger than") {
+	var tooLarge requestTooLarge
+	if !errors.As(err, &tooLarge) {
 		t.Fatalf("refused for the wrong reason: %v", err)
 	}
 }

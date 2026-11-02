@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/ed25519"
 	"encoding/base64"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -531,11 +532,75 @@ func TestAnOversizedBodyWithABadSignatureIsNotFullyRead(t *testing.T) {
 	req.Header.Set(headerOwnerSig, "0Bgarbage")
 	req.Header.Set(headerOwnerTimestamp, time.Now().UTC().Format(time.RFC3339))
 
-	if err := s.verifyOwnerSignature(req); err == nil {
-		t.Fatal("an oversized body with a garbage signature was accepted")
+	err := s.verifyOwnerSignature(req)
+	var tooLarge requestTooLarge
+	if !errors.As(err, &tooLarge) {
+		t.Fatalf("an oversized body was refused with %v, want the size refusal", err)
+	}
+	if body.served == 0 {
+		t.Fatal("none of the body was read, so this proves nothing about where reading stops")
+	}
+	// Whatever was read must not be handed on as if it were the whole body.
+	if left, rerr := io.ReadAll(req.Body); rerr == nil || len(left) != 0 {
+		t.Fatalf("a refused request's body still yields %d bytes (err %v)", len(left), rerr)
 	}
 	if body.served > maxSignedBodyBytes+1 {
 		t.Fatalf("the agent read %d bytes of a body it should have stopped at %d",
 			body.served, maxSignedBodyBytes+1)
+	}
+}
+
+// A body is read up to the bound of its ROUTE. The archive routes and the photo
+// routes carry far more than the default, and a remote owner can only sign
+// them; the same size on any other route is refused, as a size and not as a
+// bad signature.
+func TestASignedBodyMayBeAsLargeAsItsRouteAllows(t *testing.T) {
+	big := func(fill string, n int) string {
+		return `{"` + fill + `":"` + strings.Repeat("A", n) + `"}`
+	}
+	for _, tc := range []struct {
+		name, method, path, body string
+		accepted                 bool
+	}{
+		{"recovery start, 20 MiB archive", "POST", "/api/recovery/start", big("archive_b64", 20<<20), true},
+		{"recovery verify, 20 MiB archive", "POST", "/api/recovery/verify", big("archive_b64", 20<<20), true},
+		{"profile PUT, 15 MiB", "PUT", "/api/profile", big("photo_pad", 15<<20), true},
+		{"avatar stylize, 15 MiB", "POST", "/api/profile/avatar/stylize", big("image", 15<<20), true},
+		{"profile PUT, over the photo bound", "PUT", "/api/profile", big("photo_pad", int(maxPhotoBody)), false},
+		{"tunnel settings, 20 MiB (default bound)", "PUT", "/api/settings/tunnel", big("pad", 20<<20), false},
+		{"tunnel settings, 15 MiB (default bound)", "PUT", "/api/settings/tunnel", big("pad", 15<<20), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newAuthTestServer(t)
+			seed, _ := sealTestOwner(t, s)
+			w := httptest.NewRecorder()
+			s.buildRouter("").ServeHTTP(w, signed(t, tc.method, tc.path, tc.body, seed, time.Now()))
+			if tc.accepted {
+				if w.Code == http.StatusForbidden || w.Code == http.StatusRequestEntityTooLarge {
+					t.Fatalf("a validly signed request was refused at the gate: %d %s", w.Code, w.Body.String())
+				}
+				return
+			}
+			if w.Code != http.StatusRequestEntityTooLarge {
+				t.Fatalf("got %d, want 413: %s", w.Code, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), "too large for this route") {
+				t.Fatalf("the refusal does not say the request is too large: %s", w.Body.String())
+			}
+		})
+	}
+}
+
+// Every route that raises its bound is a route the router actually serves; a
+// misspelt key would silently leave it at the default.
+func TestEverySignedBodyBoundNamesAMountedRoute(t *testing.T) {
+	s := newAuthTestServer(t)
+	router := s.buildRouter("")
+	for key := range signedBodyBounds {
+		method, path, _ := strings.Cut(key, " ")
+		req := httptest.NewRequest(method, path, nil)
+		if matchedRoutePattern(router, req) != strings.TrimPrefix(path, "") {
+			t.Errorf("%s is not a mounted route pattern", key)
+		}
 	}
 }

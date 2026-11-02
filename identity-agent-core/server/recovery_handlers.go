@@ -141,6 +141,9 @@ func (s *CoreServer) recoveryService() *recovery.Service {
 }
 
 func (s *CoreServer) handleRecoveryVerify(w http.ResponseWriter, r *http.Request) {
+	// The archive travels in this body, so the bound is the archive's: the same
+	// one the gate reads a signed request up to (signedBodyBounds).
+	r.Body = http.MaxBytesReader(w, r.Body, maxRecoveryBody)
 	var req recovery.VerifyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
@@ -165,6 +168,9 @@ func (s *CoreServer) handleRecoveryVerify(w http.ResponseWriter, r *http.Request
 }
 
 func (s *CoreServer) handleRecoveryStart(w http.ResponseWriter, r *http.Request) {
+	// The archive travels in this body, so the bound is the archive's: the same
+	// one the gate reads a signed request up to (signedBodyBounds).
+	r.Body = http.MaxBytesReader(w, r.Body, maxRecoveryBody)
 	var req recovery.StartRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
