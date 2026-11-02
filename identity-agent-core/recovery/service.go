@@ -666,7 +666,7 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 	// Asked up front because restoring the files first and refusing at the seed
 	// would leave this machine half-restored.
 	if _, has := payload.Bundle.Sections["root_seed"]; has {
-		if err := secureenclave.CheckRootSeedMayLiveHere(); err != nil {
+		if err := secureenclave.CheckRootSeedMayLiveHere(s.DataDir); err != nil {
 			return err
 		}
 	}

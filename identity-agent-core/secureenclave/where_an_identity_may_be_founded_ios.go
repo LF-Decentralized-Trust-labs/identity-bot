@@ -8,6 +8,6 @@ package secureenclave
 //
 // GOOS=ios also satisfies the `darwin` build tag, so without this file the
 // macOS answer would run here and refuse an iPhone.
-func foundingVerdictForThisPlatform() FoundingVerdict {
+func foundingVerdictForThisPlatform(_ string) FoundingVerdict {
 	return FoundingVerdict{Permitted: true, Platform: "ios"}
 }

@@ -44,10 +44,38 @@ func (w sealedVolumeWrapper) inAConfidentialGuest() bool {
 
 // storageError is nil only when the data directory is on the encrypted volume.
 func (w sealedVolumeWrapper) storageError() error {
+	return w.storageErrorAt(agentDataDir())
+}
+
+// storageErrorAt asks about the directory actually being written.
+func (w sealedVolumeWrapper) storageErrorAt(dataDir string) error {
 	if w.storage != nil {
 		return w.storage()
 	}
-	return dataDirIsOnADmCryptVolume(agentDataDir())
+	return dataDirIsOnADmCryptVolume(dataDir)
+}
+
+// wrapperWorksAt is whether w can protect a seed written to dataDir. For the
+// sealed volume that depends on the directory; for every other wrapper it is
+// Available.
+func wrapperWorksAt(w SeedWrapper, dataDir string) bool {
+	if w == nil {
+		return false
+	}
+	if sv, ok := w.(sealedVolumeWrapper); ok {
+		return sv.inAConfidentialGuest() && sv.storageErrorAt(dataDir) == nil
+	}
+	return w.Available()
+}
+
+// whyNotWrappedAt is whyNotWrapped for a seed written to dataDir.
+func whyNotWrappedAt(dataDir string) string {
+	if sv, ok := platformSeedWrapper().(sealedVolumeWrapper); ok && sv.inAConfidentialGuest() {
+		if err := sv.storageErrorAt(dataDir); err != nil {
+			return "the sealed volume is not mounted, so the data directory is not on encrypted storage: " + err.Error()
+		}
+	}
+	return whyNotWrapped()
 }
 
 // Available is true only inside a confidential guest AND when the data

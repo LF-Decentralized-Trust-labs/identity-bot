@@ -18,7 +18,7 @@ import (
 // rule runs on a platform that may found, the way a phone or a sealed machine
 // does. The tests below replace it with the verdicts that matter.
 func init() {
-	foundingVerdictHere = func() FoundingVerdict { return FoundingVerdict{Permitted: true, Platform: "test"} }
+	foundingVerdictHere = func(string) FoundingVerdict { return FoundingVerdict{Permitted: true, Platform: "test"} }
 }
 
 func productionMac(t *testing.T) {
@@ -43,7 +43,7 @@ func (fakeWorkingWrapper) Unwrap(b []byte) ([]byte, error) { return b[1:], nil }
 func TestAProductionMacIsRefusedARootSeedAndAnIPhoneIsNot(t *testing.T) {
 	productionMac(t)
 	dir := t.TempDir()
-	if err := CheckRootSeedMayLiveHere(); !IsRootSeedRefusal(err) {
+	if err := CheckRootSeedMayLiveHere(t.TempDir()); !IsRootSeedRefusal(err) {
 		t.Fatalf("check: a production Mac must be refused, got %v", err)
 	} else if !strings.Contains(err.Error(), "cannot prove") {
 		t.Fatalf("the refusal should give the founding reason: %v", err)
@@ -69,7 +69,7 @@ func TestADevelopmentMacMayHoldARootSeed(t *testing.T) {
 	if !buildmode.IsDev() {
 		t.Skip("production build")
 	}
-	if err := CheckRootSeedMayLiveHere(); err != nil {
+	if err := CheckRootSeedMayLiveHere(t.TempDir()); err != nil {
 		t.Fatalf("dev build refused: %v", err)
 	}
 }
@@ -154,7 +154,7 @@ func TestASealedGuestWithoutItsVolumeMountedRefusesTheRootSeed(t *testing.T) {
 	r2 := UseSeedWrapper(SealedVolumeSeedWrapper())
 	defer func() { r2(); r1() }()
 
-	err := CheckRootSeedMayLiveHere()
+	err := CheckRootSeedMayLiveHere("/var/lib/identity-agent")
 	if !IsRootSeedRefusal(err) || !strings.Contains(err.Error(), "sealed volume is not mounted") {
 		t.Fatalf("want a refusal saying the sealed volume is not mounted, got %v", err)
 	}
@@ -168,7 +168,7 @@ func TestASealedGuestWithoutItsVolumeMountedRefusesTheRootSeed(t *testing.T) {
 
 	// And with the volume mounted the same machine is allowed.
 	fakeMachine(t, withVolume, map[string]string{"253:0": "CRYPT-LUKS2-x"})
-	if err := CheckRootSeedMayLiveHere(); err != nil {
+	if err := CheckRootSeedMayLiveHere("/var/lib/identity-agent"); err != nil {
 		t.Fatalf("mounted sealed guest refused: %v", err)
 	}
 }
@@ -200,25 +200,111 @@ func inProduction(t *testing.T) {
 	}
 }
 
-// A root seed already on disk in the clear, on a machine that may not hold one,
-// is reported loudly and once, and nothing is deleted.
-func TestAPlaintextRootSeedWhereItMayNotLiveIsSaidLoudlyOnceAndKept(t *testing.T) {
+// A person's root seed on a production Mac, where the wrapper WORKS, is reported
+// loudly and once whether it is plaintext or already wrapped, is kept, and a
+// plaintext one is never re-wrapped into looking legitimate.
+func TestAPersonsRootSeedOnAProductionMacIsSaidLoudlyOnceWhateverItsWrapping(t *testing.T) {
+	inProduction(t)
+	for _, wrapped := range []bool{false, true} {
+		name := "plaintext"
+		if wrapped {
+			name = "wrapped"
+		}
+		t.Run(name, func(t *testing.T) {
+			productionMac(t) // a usable enclave AND a working wrapper
+			out := captureLog(t)
+			dir := t.TempDir()
+			var w SeedWrapper
+			if wrapped {
+				w = fakeWorkingWrapper{}
+			}
+			if err := storeSeedAs(dir, theSeed(), w, false, holderIdentity); err != nil {
+				t.Fatal(err)
+			}
+			before, _ := os.ReadFile(rootSeedPath(dir))
+			for i := 0; i < 3; i++ {
+				if _, err := LoadRootSeed(dir); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if n := strings.Count(out.String(), "A PERSON'S ROOT SEED IS STORED HERE"); n != 1 {
+				t.Fatalf("want exactly one loud line, got %d:\n%s", n, out.String())
+			}
+			after, err := os.ReadFile(rootSeedPath(dir))
+			if err != nil {
+				t.Fatalf("the seed must be kept: %v", err)
+			}
+			if string(before) != string(after) {
+				t.Fatalf("the seed file was rewritten:\n%s\n->\n%s", before, after)
+			}
+		})
+	}
+}
+
+// An envelope written before `holder` existed is recognised as a person's root by
+// the origin the machine recorded.
+func TestAnOlderEnvelopeIsRecognisedAsARootSeedByItsRecordedOrigin(t *testing.T) {
 	inProduction(t)
 	productionMac(t)
-	UseSeedWrapper(nil) // the wrapper is not usable, so no re-wrap is possible
 	out := captureLog(t)
 	dir := t.TempDir()
-	plainEnvelopeFor(t, dir, holderIdentity)
-	for i := 0; i < 3; i++ {
-		if _, err := LoadRootSeed(dir); err != nil {
-			t.Fatal(err)
-		}
+	if err := storeSeedAs(dir, theSeed(), nil, false, ""); err != nil {
+		t.Fatal(err)
 	}
-	if n := strings.Count(out.String(), "A PERSON'S ROOT SEED IS STORED HERE"); n != 1 {
-		t.Fatalf("want exactly one loud line, got %d:\n%s", n, out.String())
+	if err := RecordSeedOrigin(dir, SeedFromPhrase); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(rootSeedPath(dir)); err != nil {
-		t.Fatalf("the seed must be kept: %v", err)
+	if _, err := LoadRootSeed(dir); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "A PERSON'S ROOT SEED IS STORED HERE") {
+		t.Fatalf("an older root seed was not reported:\n%s", out.String())
+	}
+}
+
+// The legacy raw-bytes file keeps whose seed it is through migration.
+func TestTheLegacyMigrationKeepsTheHolder(t *testing.T) {
+	inProduction(t)
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Dir(rootSeedPath(dir)), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootSeedPath(dir), theSeed(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecordSeedOrigin(dir, SeedFromPhrase); err != nil {
+		t.Fatal(err)
+	}
+	// A phone: allowed to hold it, so migration runs.
+	r1 := UseCapabilityDetector(func() Capability { return Capability{Status: Usable, Kind: KindAppleEnclave} })
+	r2 := UseSeedWrapper(fakeWorkingWrapper{})
+	r3 := UseFoundingVerdict(func() FoundingVerdict { return FoundingVerdict{Permitted: true, Platform: "ios"} })
+	defer func() { r3(); r2(); r1() }()
+	if _, err := LoadRootSeed(dir); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(rootSeedPath(dir))
+	if !strings.Contains(string(raw), fmt.Sprintf(`"holder":%q`, holderIdentity)) {
+		t.Fatalf("holder lost in migration: %s", raw)
+	}
+}
+
+// The mount check looks at the directory actually written, not a default.
+func TestTheDirectoryBeingWrittenIsTheOneChecked(t *testing.T) {
+	fakeMachine(t, withVolume, map[string]string{"253:0": "CRYPT-LUKS2-x"})
+	t.Setenv("AGENT_DATA_DIR", "/var/lib/identity-agent") // the default is fine...
+	r1 := UseCapabilityDetector(func() Capability { return Capability{Status: Usable, Kind: KindSEVSNP} })
+	r2 := UseSeedWrapper(SealedVolumeSeedWrapper())
+	defer func() { r2(); r1() }()
+	if err := CheckRootSeedMayLiveHere("/var/lib/identity-agent"); err != nil {
+		t.Fatal(err)
+	}
+	// ...and a directory elsewhere, on the plain root, is not.
+	if err := CheckRootSeedMayLiveHere("/srv/data"); !IsRootSeedRefusal(err) {
+		t.Fatalf("a data directory off the volume was allowed: %v", err)
+	}
+	if err := StoreIdentityRootSeed("/srv/data", theSeed()); !IsRootSeedRefusal(err) {
+		t.Fatalf("store off the volume: %v", err)
 	}
 }
 

@@ -29,7 +29,7 @@ func asPhoneWithNoWrapper(t *testing.T) {
 func TestASealedHostStoresTheIdentityRootSeedAndSaysItIsTheVolume(t *testing.T) {
 	asSealedHost(t)
 	dir := t.TempDir()
-	if err := CheckRootSeedMayLiveHere(); err != nil {
+	if err := CheckRootSeedMayLiveHere(t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	if err := StoreIdentityRootSeed(dir, theSeed()); err != nil {
@@ -89,7 +89,7 @@ func TestAPhoneThatNeverReportedItsKeystoreIsRefused(t *testing.T) {
 	asPhoneWithNoWrapper(t)
 	r := UseCapabilityDetector(func() Capability { return Unproven("app_did_not_report_key_protection", "") })
 	defer r()
-	if err := CheckRootSeedMayLiveHere(); !IsRootSeedRefusal(err) {
+	if err := CheckRootSeedMayLiveHere(t.TempDir()); !IsRootSeedRefusal(err) {
 		t.Fatalf("want refusal, got %v", err)
 	}
 }
@@ -101,7 +101,7 @@ func TestAProductionDesktopStillRefusesToHoldARootIdentity(t *testing.T) {
 	r3 := UseUnwrappedPhoneStorage("")
 	defer func() { r3(); r2(); r1() }()
 	dir := t.TempDir()
-	if err := CheckRootSeedMayLiveHere(); !IsRootSeedRefusal(err) {
+	if err := CheckRootSeedMayLiveHere(t.TempDir()); !IsRootSeedRefusal(err) {
 		t.Fatalf("check: want refusal, got %v", err)
 	}
 	if err := StoreIdentityRootSeed(dir, theSeed()); !IsRootSeedRefusal(err) {

@@ -57,14 +57,17 @@ const ActForOneInstead = "it can act for an identity kept on a machine that " +
 var foundingVerdictHere = foundingVerdictForThisPlatform
 
 // MayFoundAnIdentityHere is the one place that decides, per platform in the
-// files beside this one.
-func MayFoundAnIdentityHere() FoundingVerdict { return foundingVerdictHere() }
+// files beside this one. dataDir is the directory the identity's state is
+// actually written to: on a sealed machine the answer depends on that directory
+// being on the encrypted volume, and the directory that matters is the one
+// being written, not a default.
+func MayFoundAnIdentityHere(dataDir string) FoundingVerdict { return foundingVerdictHere(dataDir) }
 
 // UseFoundingVerdict replaces the platform's founding verdict and returns a
 // function that puts the real one back. For tests.
 func UseFoundingVerdict(f func() FoundingVerdict) (restore func()) {
 	prev := foundingVerdictHere
-	foundingVerdictHere = f
+	foundingVerdictHere = func(string) FoundingVerdict { return f() }
 	return func() { foundingVerdictHere = prev }
 }
 

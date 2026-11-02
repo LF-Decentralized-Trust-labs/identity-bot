@@ -16,7 +16,7 @@ import (
 // No build tags, so it compiles everywhere and fires on whichever machine runs
 // it. On a Mac, which is where this is developed, it fires immediately.
 func TestThisPlatformAnswersWhatItShould(t *testing.T) {
-	v := foundingVerdictForThisPlatform()
+	v := foundingVerdictForThisPlatform(t.TempDir())
 
 	switch runtime.GOOS {
 	case "darwin", "windows":
@@ -57,7 +57,7 @@ func TestThisPlatformAnswersWhatItShould(t *testing.T) {
 // stopped from doing the obvious thing is told what to do instead. Nothing
 // enforced that.
 func TestARefusalAlwaysSaysWhyAndWhatInstead(t *testing.T) {
-	v := foundingVerdictForThisPlatform()
+	v := foundingVerdictForThisPlatform(t.TempDir())
 
 	if v.Platform == "" {
 		t.Error("a verdict that does not say which platform it is about")

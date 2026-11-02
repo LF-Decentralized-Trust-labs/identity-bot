@@ -13,9 +13,24 @@ package secureenclave
 //
 // Asked through the same detection everything else uses, so a machine cannot be
 // judged capable here and incapable one function away.
-func foundingVerdictForThisPlatform() FoundingVerdict {
+//
+// A sealed guest whose encrypted volume did not come up is not a sealed machine
+// for this purpose: the volume mount is nofail, so the data directory would be
+// an ordinary folder on the root filesystem. So the directory being written must
+// also be on dm-crypt — asked through dataDirIsOnADmCryptVolume, the same
+// function the seed wrapper uses, not a copy of it.
+func foundingVerdictForThisPlatform(dataDir string) FoundingVerdict {
 	cap := detectCapability()
 	if cap.Kind == KindSEVSNP && cap.Status == Usable {
+		if err := dataDirIsOnADmCryptVolume(dataDir); err != nil {
+			return FoundingVerdict{
+				Permitted: false,
+				Platform:  "amd_sev_snp",
+				Why: "this sealed machine's encrypted volume is not mounted under the " +
+					"data directory, so an identity founded here would sit on plain storage: " + err.Error(),
+				Instead: ActForOneInstead,
+			}
+		}
 		return FoundingVerdict{Permitted: true, Platform: "amd_sev_snp"}
 	}
 	// Present-but-unusable is refused with everything else, and deliberately.

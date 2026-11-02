@@ -97,6 +97,16 @@ The **root hash** goes on the kernel command line, and the command line is
 inside the measurement — so the measurement covers the entire system image, the
 agent binary included, and not merely the kernel.
 
+### Every instance needs a second disk
+
+Whether or not `VERITY=1` is set, an instance must be booted with a second block
+device (`/dev/vdb`) to hold its data. The image encrypts it on first boot
+(`seal-volume`), mounts it at `/var/lib/identity-agent`, and the agent starts
+only once that mount is there; it also refuses to store a root seed unless its
+data directory is on an encrypted device. **An image booted without a second
+disk comes up but does not start the agent.** This applies to the default
+(`VERITY=0`) image too, which used to boot from its own writable root.
+
 ### The command line is part of the measurement
 
 Because the measurement covers the kernel command line, reproducing the image

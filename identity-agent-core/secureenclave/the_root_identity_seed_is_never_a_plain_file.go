@@ -85,23 +85,22 @@ func rootSeedMayLiveHere(cap Capability, wrapperWorks, phoneWithoutWrapper, dev 
 // this machine, without writing anything. Callers that have work to do before
 // the write (recovery restores files first) ask this first so a refusal
 // touches nothing.
-func CheckRootSeedMayLiveHere() error {
+func CheckRootSeedMayLiveHere(dataDir string) error {
 	// FIRST, the rule founding uses: a root identity lives only where the
 	// machine can prove its software (a phone, a sealed machine). Having a Secure
 	// Enclave and a working wrapper is not enough, or a production Mac would hold
 	// a root identity it is not allowed to found.
-	if v := MayFoundAnIdentityHere(); !FoundingPermitted(v, buildmode.IsDev()) {
+	if v := MayFoundAnIdentityHere(dataDir); !FoundingPermitted(v, buildmode.IsDev()) {
 		return &ErrRootSeedCannotLiveHere{Capability: detectCapability(), Reason: v.Why}
 	}
 	cap := detectCapability()
-	w := platformSeedWrapper()
-	works := w != nil && w.Available()
+	works := wrapperWorksAt(platformSeedWrapper(), dataDir)
 	if rootSeedMayLiveHere(cap, works, unwrappedStorageReason() != "", buildmode.IsDev()) {
 		return nil
 	}
 	reason := "its key protection is not proven usable"
 	if cap.RootKeyPermitted() {
-		reason = "key hardware is usable but " + whyNotWrapped()
+		reason = "key hardware is usable but " + whyNotWrappedAt(dataDir)
 	}
 	return &ErrRootSeedCannotLiveHere{Capability: cap, Reason: reason}
 }
@@ -110,7 +109,7 @@ func CheckRootSeedMayLiveHere() error {
 // written nothing, where the machine cannot protect it; and outside a
 // development build it cannot write the plaintext envelope at all.
 func StoreIdentityRootSeed(dataDir string, seed []byte) error {
-	if err := CheckRootSeedMayLiveHere(); err != nil {
+	if err := CheckRootSeedMayLiveHere(dataDir); err != nil {
 		return err
 	}
 	// Production: a wrapper is mandatory, so the check inside storeSeed is a

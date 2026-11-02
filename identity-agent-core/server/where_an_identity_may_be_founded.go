@@ -31,7 +31,7 @@ const (
 // Placed before anything is read or generated, so a machine that may not found
 // never produces key material it would then have to throw away.
 func (s *CoreServer) refuseIfThisComputerMayNotFound(w http.ResponseWriter) bool {
-	v := secureenclave.MayFoundAnIdentityHere()
+	v := secureenclave.MayFoundAnIdentityHere(s.DataDir)
 	if secureenclave.FoundingPermitted(v, buildmode.IsDev()) {
 		if !v.Permitted {
 			// Permitted only by the development-build relaxation. Loud on purpose:

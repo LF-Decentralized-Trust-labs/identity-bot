@@ -9,7 +9,7 @@ package secureenclave
 // A Mac has a Secure Enclave and can hold a key perfectly well. That is a
 // different question, and answering it instead is exactly how root identities
 // came to be founded on Macs.
-func foundingVerdictForThisPlatform() FoundingVerdict {
+func foundingVerdictForThisPlatform(_ string) FoundingVerdict {
 	return FoundingVerdict{
 		Permitted: false,
 		Platform:  "macos",
