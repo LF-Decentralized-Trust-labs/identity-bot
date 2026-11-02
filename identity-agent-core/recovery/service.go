@@ -596,6 +596,12 @@ func (s *Service) Activate(sessionID string, req ActivateRequest) (*Session, err
 		if errors.As(err, &again) {
 			return nil, err
 		}
+		// Refused before anything was written, for a reason about this machine
+		// rather than this recovery: the session is left as it was, so it is
+		// not burned by having waited out its window on the wrong computer.
+		if secureenclave.IsRootSeedRefusal(err) {
+			return nil, err
+		}
 		s.mu.Lock()
 		rec.Session.State = SessionFailed
 		rec.Session.Error = err.Error()
@@ -652,6 +658,18 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 	// what both of those attempts were reaching for. What remains after this
 	// point is disk failure, which can still leave a restore half-applied —
 	// that is real, and it is not something ordering can solve.
+	//
+	// And this machine is asked whether it can hold the root seed before
+	// anything else is. The archive's seed is the owner's own root, so a machine
+	// that would be refused founding an identity (handleSetRootSeed) must be
+	// refused recovering one — otherwise recovery is the way round that gate.
+	// Asked up front because restoring the files first and refusing at the seed
+	// would leave this machine half-restored.
+	if _, has := payload.Bundle.Sections["root_seed"]; has {
+		if err := secureenclave.CheckRootSeedMayLiveHere(s.DataDir); err != nil {
+			return err
+		}
+	}
 	checked, err := s.checkBeforeWriting(payload)
 	if err != nil {
 		return err
@@ -738,10 +756,11 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 // credential vault. It is carried unwrapped inside the encrypted payload
 // deliberately: the on-disk copy may be sealed to the old device's hardware,
 // and a recovery onto new hardware must never need the old secure element.
-// StoreRootSeed re-wraps it under THIS device's key where one is usable.
+// StoreIdentityRootSeed wraps it under THIS device's key and refuses, writing
+// nothing, on a machine that has none.
 func (s *Service) restoreTheKeyMaterial(payload *RestoredPayload) error {
 	if raw, ok := payload.Bundle.Sections["root_seed"]; ok && len(raw) >= 32 {
-		if err := secureenclave.StoreRootSeed(s.DataDir, raw); err != nil {
+		if err := secureenclave.StoreIdentityRootSeed(s.DataDir, raw); err != nil {
 			return fmt.Errorf("reseat root seed: %w", err)
 		}
 		// This seed arrived inside an archive the recovery words opened, so

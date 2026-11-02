@@ -40,7 +40,7 @@ func TestAnUnwrappedSeedIsSaidOnceAndNotOncePerStore(t *testing.T) {
 	dir := t.TempDir()
 	seed := make([]byte, 64)
 	for i := 0; i < 3; i++ {
-		if err := StoreRootSeed(dir, seed); err != nil {
+		if err := StoreDeviceLocalSeed(dir, seed); err != nil {
 			t.Fatalf("store %d: %v", i, err)
 		}
 	}
@@ -79,7 +79,7 @@ func TestAStoreThatFailedClaimsNothingAndSilencesNothing(t *testing.T) {
 	t.Cleanup(func() { unwrappedSeedWarning = sync.Once{} })
 
 	// A path that cannot be written, so the store fails and nothing lands.
-	if err := StoreRootSeed("/proc/a-path-that-cannot-be-created", make([]byte, 64)); err == nil {
+	if err := StoreDeviceLocalSeed("/proc/a-path-that-cannot-be-created", make([]byte, 64)); err == nil {
 		t.Skip("this platform allowed the write, so there is no failed store to check")
 	}
 	if strings.Contains(out.String(), "stored UNWRAPPED") {
@@ -89,7 +89,7 @@ func TestAStoreThatFailedClaimsNothingAndSilencesNothing(t *testing.T) {
 
 	// And the real one that follows must still be able to speak.
 	out.Reset()
-	if err := StoreRootSeed(t.TempDir(), make([]byte, 64)); err != nil {
+	if err := StoreDeviceLocalSeed(t.TempDir(), make([]byte, 64)); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "stored UNWRAPPED") {

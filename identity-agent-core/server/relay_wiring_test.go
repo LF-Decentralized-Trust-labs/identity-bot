@@ -77,7 +77,7 @@ func relayWorld(t *testing.T, mode relayproto.Mode) (*CoreServer, *relaytest.Rel
 	rl := relaytest.New(mode)
 	t.Cleanup(rl.Close)
 	dir := t.TempDir()
-	if err := secureenclave.StoreRootSeed(dir, deterministicRootSeed()); err != nil {
+	if err := secureenclave.StoreDeviceLocalSeed(dir, deterministicRootSeed()); err != nil {
 		t.Fatal(err)
 	}
 	kind := privateRelay

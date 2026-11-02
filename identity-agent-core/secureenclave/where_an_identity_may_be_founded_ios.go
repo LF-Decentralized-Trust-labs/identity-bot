@@ -1,6 +1,6 @@
 //go:build ios
 
-package server
+package secureenclave
 
 // iOS attests the running application: the vendor signs a statement about which
 // build is asking, which is exactly the proof an identity's keys need to be
@@ -8,6 +8,6 @@ package server
 //
 // GOOS=ios also satisfies the `darwin` build tag, so without this file the
 // macOS answer would run here and refuse an iPhone.
-func foundingVerdictForThisPlatform() foundingVerdict {
-	return foundingVerdict{Permitted: true, Platform: "ios"}
+func foundingVerdictForThisPlatform(_ string) FoundingVerdict {
+	return FoundingVerdict{Permitted: true, Platform: "ios"}
 }

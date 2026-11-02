@@ -40,7 +40,7 @@ func TestTheCoreRecognisesAKeyTheAppDerived(t *testing.T) {
 	bip39, _ := hex.DecodeString(ph.BIP39SeedHex)
 
 	dir := t.TempDir()
-	if err := secureenclave.StoreRootSeed(dir, bip39); err != nil {
+	if err := secureenclave.StoreDeviceLocalSeed(dir, bip39); err != nil {
 		t.Fatal(err)
 	}
 	ds, err := store.NewSQLiteStore(dir)

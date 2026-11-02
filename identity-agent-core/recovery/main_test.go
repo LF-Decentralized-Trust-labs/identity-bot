@@ -1,0 +1,27 @@
+package recovery
+
+import (
+	"os"
+	"testing"
+
+	"identity-agent-core/secureenclave"
+	"identity-agent-core/secureenclave/seedwraptest"
+)
+
+// The tests here restore archives that carry a root seed, which a machine only
+// accepts if it can protect one. The suite runs on machines of every kind, so it
+// stands one that can; tests of the refusal stand one that cannot.
+func TestMain(m *testing.M) {
+	restoreCap := secureenclave.UseCapabilityDetector(func() secureenclave.Capability {
+		return secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindTPM2}
+	})
+	restoreWrap := secureenclave.UseSeedWrapper(seedwraptest.Wrapper{Works: true})
+	restoreFounding := secureenclave.UseFoundingVerdict(func() secureenclave.FoundingVerdict {
+		return secureenclave.FoundingVerdict{Permitted: true, Platform: "test"}
+	})
+	code := m.Run()
+	restoreFounding()
+	restoreWrap()
+	restoreCap()
+	os.Exit(code)
+}

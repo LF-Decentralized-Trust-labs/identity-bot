@@ -1,6 +1,6 @@
 //go:build darwin && !ios
 
-package server
+package secureenclave
 
 import "testing"
 
@@ -11,7 +11,7 @@ import "testing"
 // honest limit is that it runs only on a Mac, which is where this work happens
 // and where four root identities were founded before the check existed.
 func TestAMacMayNotFoundAnIdentity(t *testing.T) {
-	v := foundingVerdictForThisPlatform()
+	v := foundingVerdictForThisPlatform(t.TempDir())
 	if v.Permitted {
 		t.Fatalf("a Mac may not found an identity: %+v", v)
 	}

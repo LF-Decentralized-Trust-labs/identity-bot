@@ -151,7 +151,7 @@ func TestAnExportCannotChooseWhereOnTheMachineItLands(t *testing.T) {
 	// hole this package closed on the read side with the arrow reversed.
 	dir := t.TempDir()
 	seed, _ := backup.MnemonicToBIP39Seed(sealTestMnemonic, "")
-	if err := secureenclave.StoreRootSeed(dir, seed); err != nil {
+	if err := secureenclave.StoreDeviceLocalSeed(dir, seed); err != nil {
 		t.Fatal(err)
 	}
 	s := exportServer(t, dir)

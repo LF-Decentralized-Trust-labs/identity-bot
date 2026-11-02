@@ -100,7 +100,7 @@ func TestARestoredAgentDerivesTheSameMessagingKeys(t *testing.T) {
 	}
 
 	original := witnessWithStore(t)
-	if err := secureenclave.StoreRootSeed(original.DataDir, seed); err != nil {
+	if err := secureenclave.StoreDeviceLocalSeed(original.DataDir, seed); err != nil {
 		t.Fatal(err)
 	}
 	ks1, idx, err := original.deriveMessagingKeys("EIdentity")
@@ -110,7 +110,7 @@ func TestARestoredAgentDerivesTheSameMessagingKeys(t *testing.T) {
 
 	// A different device, same recovery phrase, and the branch that was recorded.
 	restored := witnessWithStore(t)
-	if err := secureenclave.StoreRootSeed(restored.DataDir, seed); err != nil {
+	if err := secureenclave.StoreDeviceLocalSeed(restored.DataDir, seed); err != nil {
 		t.Fatal(err)
 	}
 	if err := restored.recordMessagingKeyIndex("EIdentity", idx); err != nil {

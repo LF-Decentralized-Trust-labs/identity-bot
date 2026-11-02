@@ -42,7 +42,7 @@ func TestLoginPairwiseAndDisclosures(t *testing.T) {
 	// identifier could not sign in: nothing would derive it.
 	dummyRoot := make([]byte, 64)
 	copy(dummyRoot, "testrootseedforhdderivationtestonly0000000000000000000000000000")
-	if err := secureenclave.StoreRootSeed(h.dataDir, dummyRoot); err != nil {
+	if err := secureenclave.StoreDeviceLocalSeed(h.dataDir, dummyRoot); err != nil {
 		t.Fatal(err)
 	}
 	relA, err := h.getOrCreateRelationship("EsiteAAA", bundleA)

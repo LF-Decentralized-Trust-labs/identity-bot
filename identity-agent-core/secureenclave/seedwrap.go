@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"identity-agent-core/buildmode"
 	"identity-agent-core/internal/atomicfile"
 )
 
@@ -92,10 +93,70 @@ const seedWrapNone = "none"
 // seedEnvelope is the self-describing on-disk form of root_seed.key. A legacy
 // file (raw seed bytes, pre-envelope) is detected by failing to parse as this
 // envelope and is migrated on first load.
+//
+// Protection and Why say what protects the seed, in words rather than only as a
+// scheme name, so the file describes itself truthfully: "hardware-wrapped",
+// "sealed-volume" (the sealed machine's encrypted volume), or "unwrapped" with
+// the reason. Older files lack them and are read by Wrap alone.
 type seedEnvelope struct {
-	V    int    `json:"v"`
-	Wrap string `json:"wrap"`
-	Blob string `json:"blob"`
+	V          int    `json:"v"`
+	Wrap       string `json:"wrap"`
+	Blob       string `json:"blob"`
+	Protection string `json:"protection,omitempty"`
+	Why        string `json:"why,omitempty"`
+	// Holder says whose seed this is: a person's root identity or the machine's
+	// own. Older files lack it. It exists so that a root identity found where it
+	// should not be can be told apart from a machine's own seed, which is
+	// legitimately held unwrapped on a desktop.
+	Holder string `json:"holder,omitempty"`
+}
+
+const (
+	holderIdentity = "identity"
+	holderDevice   = "device"
+)
+
+// What protects a stored seed, as recorded in the envelope.
+const (
+	ProtectionHardwareWrapped = "hardware-wrapped"
+	ProtectionSealedVolume    = "sealed-volume"
+	ProtectionUnwrapped       = "unwrapped"
+)
+
+// unwrappedStorageReason is non-empty only on a platform where a root identity
+// may be held unwrapped in production because a wrapper is owed and not yet
+// written (Android). A var so tests can stand such a phone on any host.
+var unwrappedStorageReason = platformUnwrappedReason
+
+// UseUnwrappedPhoneStorage makes this process behave as a phone whose seed
+// wrapper is not written yet, for tests. It returns a function that undoes it.
+func UseUnwrappedPhoneStorage(reason string) (restore func()) {
+	prev := unwrappedStorageReason
+	unwrappedStorageReason = func() string { return reason }
+	return func() { unwrappedStorageReason = prev }
+}
+
+// RootSeedProtection reports what the stored seed's envelope says protects it:
+// the protection kind, the scheme and, for an unwrapped seed, why. It reads the
+// envelope only; it does not open the seed.
+func RootSeedProtection(dataDir string) (protection, scheme, why string, err error) {
+	raw, err := os.ReadFile(rootSeedPath(dataDir))
+	if err != nil {
+		return "", "", "", err
+	}
+	var env seedEnvelope
+	if jerr := json.Unmarshal(raw, &env); jerr != nil || env.V < 1 || env.Wrap == "" {
+		return ProtectionUnwrapped, seedWrapNone, "legacy seed file with no envelope", nil
+	}
+	p := env.Protection
+	if p == "" {
+		if env.Wrap == seedWrapNone {
+			p = ProtectionUnwrapped
+		} else {
+			p = ProtectionHardwareWrapped
+		}
+	}
+	return p, env.Wrap, env.Why, nil
 }
 
 // ErrNoRootSeed is LoadRootSeed's answer when no root seed was ever stored
@@ -118,6 +179,12 @@ func whyNotWrapped() string {
 	switch {
 	case w == nil:
 		return "no seed wrapper is compiled in for this platform"
+	case !w.Available() && w.Scheme() == SealedVolumeScheme:
+		if sv, ok := w.(sealedVolumeWrapper); ok {
+			return sv.whyUnavailable()
+		}
+		return "this build has no hardware seed wrapper for this platform, and the " +
+			"sealed-volume protection applies only inside a sealed machine"
 	case !w.Available():
 		return "the " + w.Scheme() + " wrapper is compiled in and cannot use the hardware"
 	default:
@@ -125,10 +192,28 @@ func whyNotWrapped() string {
 	}
 }
 
-// StoreRootSeed persists the root keystore seed (64-byte BIP39-class seed),
-// wrapped under the platform hardware key when one is usable.
+// StoreDeviceLocalSeed persists a seed that belongs to THIS MACHINE and to no
+// person: the device-local root EnsureRootSeed makes for a machine that has
+// none. It is wrapped under the platform hardware key when one is usable and
+// otherwise stored unwrapped, which is acceptable for a key that is not anybody's
+// identity and is recoverable from this machine's own backup.
+//
+// It must never be given the seed that is a PERSON's root identity — the one
+// their recovery phrase reproduces. That goes through StoreIdentityRootSeed,
+// which refuses to write it where it cannot be protected.
+func StoreDeviceLocalSeed(dataDir string, seed []byte) error {
+	return storeSeedAs(dataDir, seed, platformSeedWrapper(), false, holderDevice)
+}
 
-func StoreRootSeed(dataDir string, seed []byte) error {
+// storeSeed writes the seed envelope. With requireWrap, a seed that cannot be
+// wrapped is an error and NOTHING is written: the plaintext envelope is not
+// reachable from that call, by construction rather than by a caller remembering.
+func storeSeed(dataDir string, seed []byte, w SeedWrapper, requireWrap bool) error {
+	return storeSeedAs(dataDir, seed, w, requireWrap, "")
+}
+
+// storeSeedAs is storeSeed that records whose seed it is.
+func storeSeedAs(dataDir string, seed []byte, w SeedWrapper, requireWrap bool, holder string) error {
 	if len(seed) < 32 {
 		return fmt.Errorf("root seed must be at least 32 bytes")
 	}
@@ -137,7 +222,17 @@ func StoreRootSeed(dataDir string, seed []byte) error {
 		toStore = toStore[:64]
 	}
 
-	env := seedEnvelope{V: 1, Wrap: seedWrapNone, Blob: base64.StdEncoding.EncodeToString(toStore)}
+	// Why an unwrapped envelope is being written, said in the file itself.
+	why := unwrappedStorageReason()
+	if why == "" {
+		why = whyNotWrapped()
+	}
+	env := seedEnvelope{V: 1, Wrap: seedWrapNone, Blob: base64.StdEncoding.EncodeToString(toStore),
+		Protection: ProtectionUnwrapped, Why: why, Holder: holder}
+	if requireWrap && !wrapperWorksAt(w, dataDir) && unwrappedStorageReason() == "" {
+		return &ErrRootSeedCannotLiveHere{Reason: "this machine has no working seed wrapper, " +
+			"so the seed could only be written as a plain file"}
+	}
 
 	// SAY WHICH ONE HAPPENED. Storing wrapped and storing in the clear look
 	// identical from outside this function, and the second is the failure
@@ -149,7 +244,7 @@ func StoreRootSeed(dataDir string, seed []byte) error {
 	// whether THIS BUILD uses it to protect the seed. A machine can pass the
 	// first and fail the second, which is the case this warns about: our gap,
 	// on somebody's hardware, and silent until now.
-	if w := platformSeedWrapper(); w != nil && w.Available() {
+	if wrapperWorksAt(w, dataDir) {
 		blob, err := w.Wrap(toStore)
 		if err != nil {
 			return fmt.Errorf("wrap root seed (%s): %w", w.Scheme(), err)
@@ -160,7 +255,15 @@ func StoreRootSeed(dataDir string, seed []byte) error {
 		if err != nil || !bytes.Equal(back, toStore) {
 			return fmt.Errorf("wrap verification failed (%s): %v", w.Scheme(), err)
 		}
-		env = seedEnvelope{V: 1, Wrap: w.Scheme(), Blob: base64.StdEncoding.EncodeToString(blob)}
+		protection := ProtectionHardwareWrapped
+		if w.Scheme() == SealedVolumeScheme {
+			protection = ProtectionSealedVolume
+		}
+		env = seedEnvelope{V: 1, Wrap: w.Scheme(), Blob: base64.StdEncoding.EncodeToString(blob),
+			Protection: protection, Holder: holder}
+	}
+	if requireWrap && env.Wrap == seedWrapNone && unwrappedStorageReason() == "" {
+		return &ErrRootSeedCannotLiveHere{Reason: "the seed would have been written unwrapped"}
 	}
 
 	data, err := json.Marshal(env)
@@ -215,6 +318,47 @@ func announceIfStoredInTheClear(wrap string) {
 	})
 }
 
+// rootIdentityMisplacedWarning holds the misplaced-seed line to one per process.
+var rootIdentityMisplacedWarning sync.Once
+
+// aPersonsRootSeed says whether the seed in dataDir is a person's root identity
+// rather than the machine's own. The envelope records it (holder); envelopes
+// written before that field existed are recognised by the origin the machine
+// recorded when the recovery words produced the seed.
+func aPersonsRootSeed(dataDir, holder string) bool {
+	switch holder {
+	case holderIdentity:
+		return true
+	case holderDevice:
+		return false
+	}
+	return SeedCameFromAPhrase(dataDir)
+}
+
+// announceRootIdentityHeldWhereItShouldNotBe says, once per process and loudly,
+// that a person's root seed is on this machine and the machine may not hold one
+// (a laptop, say, that was given one before the rule existed). It reports
+// whether the seed is misplaced, and whether or not it is wrapped: a wrapped seed
+// on a Mac is exactly as misplaced as a plaintext one.
+//
+// It deletes nothing: the file may be the only copy, and what to do about it is
+// the owner's decision. A machine's own seed is not this and is never reported.
+func announceRootIdentityHeldWhereItShouldNotBe(dataDir, holder string) bool {
+	if buildmode.IsDev() || !aPersonsRootSeed(dataDir, holder) {
+		return false
+	}
+	err := CheckRootSeedMayLiveHere(dataDir)
+	if err == nil {
+		return false
+	}
+	rootIdentityMisplacedWarning.Do(func() {
+		log.Printf("[keystore] *** A PERSON'S ROOT SEED IS STORED HERE, ON A MACHINE THAT MAY NOT HOLD ONE *** "+
+			"%v. Anyone who reads the file becomes this identity, permanently and undetectably. "+
+			"Nothing has been deleted, and it has not been re-wrapped. Move this identity to a phone or a sealed machine.", err)
+	})
+	return true
+}
+
 // LoadRootSeed reads the root keystore seed, unwrapping it when stored under a
 // platform key. A legacy raw-bytes file is migrated to the envelope form (and
 // wrapped, when hardware is usable) on first load.
@@ -235,7 +379,18 @@ func LoadRootSeed(dataDir string) ([]byte, error) {
 			return nil, fmt.Errorf("invalid root seed size")
 		}
 		seed := raw
-		if merr := StoreRootSeed(dataDir, seed); merr != nil {
+		// The legacy file carries no holder; a partial envelope might. Keep
+		// whichever is known, so migration does not turn a person's root into
+		// an unlabelled seed.
+		holder := env.Holder
+		if holder == "" && SeedCameFromAPhrase(dataDir) {
+			holder = holderIdentity
+		}
+		if announceRootIdentityHeldWhereItShouldNotBe(dataDir, holder) {
+			// Misplaced: reported, kept as it is, never re-wrapped into looking legitimate.
+			return seed, nil
+		}
+		if merr := storeSeedAs(dataDir, seed, platformSeedWrapper(), false, holder); merr != nil {
 			// Keep serving the legacy file rather than risk the only copy.
 			log.Printf("[secureenclave] root seed migration deferred: %v", merr)
 		} else {
@@ -248,14 +403,21 @@ func LoadRootSeed(dataDir string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("root seed envelope corrupt: %w", err)
 	}
+	// A person's root seed on a machine that may not hold one is said loudly
+	// whether or not it is wrapped, and is never re-wrapped below.
+	misplaced := announceRootIdentityHeldWhereItShouldNotBe(dataDir, env.Holder)
 	if env.Wrap == seedWrapNone {
 		if len(blob) < 32 {
 			return nil, fmt.Errorf("invalid root seed size")
 		}
 		// Opportunistic upgrade: if hardware became usable since the seed was
 		// stored (e.g. a signed build replacing a dev build), wrap it now.
-		if w := platformSeedWrapper(); w != nil && w.Available() {
-			if merr := StoreRootSeed(dataDir, blob); merr != nil {
+		if w := platformSeedWrapper(); !misplaced && wrapperWorksAt(w, dataDir) {
+			holder := env.Holder
+			if holder == "" && SeedCameFromAPhrase(dataDir) {
+				holder = holderIdentity
+			}
+			if merr := storeSeedAs(dataDir, blob, w, false, holder); merr != nil {
 				log.Printf("[secureenclave] root seed wrap upgrade deferred: %v", merr)
 			} else {
 				log.Printf("[secureenclave] root seed upgraded to %s wrapping", w.Scheme())

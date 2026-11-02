@@ -255,9 +255,16 @@ install -d -m 0700 "$WORK/root/var/lib/identity-agent"
 # live on it and cannot live in memory. One small volume per instance carries
 # exactly what must persist and nothing else.
 #
-# nofail because an image built without verity has no second volume and boots
-# perfectly well from its own writable root. The mount is what changes between
-# the two shapes; nothing else has to know which one it is on.
+# EVERY IMAGE NEEDS THIS SECOND VOLUME, verity or not. The agent requires this
+# mount (RequiresMountsFor in identity-agent.service) and refuses a root seed
+# unless its data directory is on a dm-crypt device, so an image booted without
+# /dev/vdb brings the machine up and does not start the agent. VERITY defaults
+# to 0 and that default is no exception: attach a data disk to every instance.
+#
+# The mount itself is nofail only so a missing volume leaves the machine
+# reachable for diagnosis rather than stuck in emergency mode. It is not what
+# makes the agent optional on one: the agent's requirement on it is what stops
+# keys being written to the plain root filesystem.
 # Encrypting the volume before anything mounts it.
 #
 # The key comes from the processor, derived from this software's measurement,
@@ -339,6 +346,11 @@ cat > "$WORK/root/etc/systemd/system/identity-agent.service" <<'UNIT'
 Description=Identity Agent (sealed instance)
 After=network-online.target
 Wants=network-online.target
+# The agent never starts without the sealed data volume. The mount is nofail so
+# the machine still boots without it, and without this line the agent would then
+# start and write its keys to the unencrypted root filesystem. (The agent also
+# refuses a root seed unless its data directory is on a dm-crypt device.)
+RequiresMountsFor=/var/lib/identity-agent
 
 [Service]
 Environment=AGENT_DATA_DIR=/var/lib/identity-agent

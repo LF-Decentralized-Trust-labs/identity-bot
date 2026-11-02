@@ -52,7 +52,7 @@ func TestARootDeviceBacksUpWithoutBeingGivenAPhrase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := secureenclave.StoreRootSeed(dir, seed); err != nil {
+	if err := secureenclave.StoreDeviceLocalSeed(dir, seed); err != nil {
 		t.Fatalf("store root seed: %v", err)
 	}
 	s := exportServer(t, dir)
@@ -76,7 +76,7 @@ func TestARootDeviceBacksUpWithoutBeingGivenAPhrase(t *testing.T) {
 func TestWhatItWroteOpensWithTheOwnersPhrase(t *testing.T) {
 	dir := t.TempDir()
 	seed, _ := backup.MnemonicToBIP39Seed(sealTestMnemonic, "")
-	if err := secureenclave.StoreRootSeed(dir, seed); err != nil {
+	if err := secureenclave.StoreDeviceLocalSeed(dir, seed); err != nil {
 		t.Fatal(err)
 	}
 	s := exportServer(t, dir)

@@ -156,15 +156,12 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 		// production binary, and admits only a development-realm identity. A
 		// production build still refuses here.
 		//
-		// WHAT THIS DOES NOT COVER, said here because the sentence above reads
-		// like it does. This is one of five places that store a root seed and
-		// the only one that asks this question. restoreTheKeyMaterial in
-		// recovery/service.go writes the owner's phrase-derived seed straight
-		// out of an archive; getOrCreateRelationship in login/handlers.go and
-		// ensureRootSeed in ask_sign_layer.go each mint a device-local one.
-		// None consults the capability, and StoreRootSeed itself degrades to an
-		// unwrapped envelope rather than refusing. So recovering onto a machine
-		// that cannot protect a key still does what this route now forbids.
+		// THE SAME RULE NOW HOLDS WHEREVER A PERSON'S ROOT SEED IS WRITTEN.
+		// secureenclave.StoreIdentityRootSeed asks it itself, and recovery asks
+		// it before restoring anything, so recovering onto a machine this route
+		// refuses is refused too. The device-local seeds (EnsureRootSeed, used
+		// by login and asset signing) are not anybody's identity and go through
+		// StoreDeviceLocalSeed.
 		//
 		// The way to run a PRODUCTION build on hardware this route refuses is to
 		// fix the hardware, or to hold the identity somewhere else and control
@@ -208,7 +205,11 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 		// this identity must never be relied on as a production one.
 		log.Printf("[identity-agent-core] *** DEVELOPMENT BUILD *** storing a root key on a machine with no usable hardware key store (%s) — allowed only because this is a development build; the seed is stored UNWRAPPED and this identity must never be relied on as a production identity", cap.String())
 	}
-	if err := secureenclave.StoreRootSeed(s.DataDir, seed); err != nil {
+	if err := secureenclave.StoreIdentityRootSeed(s.DataDir, seed); err != nil {
+		if secureenclave.IsRootSeedRefusal(err) {
+			jsonError(w, err.Error(), http.StatusPreconditionFailed)
+			return
+		}
 		jsonError(w, "failed to store root seed", http.StatusInternalServerError)
 		return
 	}
