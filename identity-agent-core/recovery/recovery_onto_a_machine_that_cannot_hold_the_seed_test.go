@@ -2,12 +2,15 @@ package recovery
 
 import (
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/buildmode"
 	"identity-agent-core/secureenclave"
 	"identity-agent-core/secureenclave/seedwraptest"
 )
@@ -116,5 +119,77 @@ func TestRecoveryOntoASealedHostOrAPhoneWorksAndRecordsTheProtection(t *testing.
 				t.Fatal("an unwrapped seed must record why")
 			}
 		})
+	}
+}
+
+// A production Mac has a usable Secure Enclave and a working wrapper, and is
+// still refused: the rule is the one founding uses, not "can it wrap a key". An
+// iPhone, which differs only in being able to prove its software, is not.
+func TestRecoveryOntoAProductionMacIsRefusedAndAnIPhoneIsNot(t *testing.T) {
+	seedwraptest.ThisMachineIsAProductionMac(t)
+	if buildmode.IsDev() {
+		t.Skip("a development build is exempt")
+	}
+	bundle, _ := archiveWithARootSeed(t)
+	macDir := t.TempDir()
+	if err := (&Service{DataDir: macDir}).applyPayload(&RestoredPayload{Bundle: bundle}); !secureenclave.IsRootSeedRefusal(err) {
+		t.Fatalf("a production Mac must be refused, got %v", err)
+	}
+	if _, lerr := secureenclave.LoadRootSeed(macDir); !errors.Is(lerr, secureenclave.ErrNoRootSeed) {
+		t.Fatalf("a root seed was written on a Mac: %v", lerr)
+	}
+
+	seedwraptest.ThisMachineIsAnIPhone(t)
+	if err := (&Service{DataDir: t.TempDir()}).applyPayload(&RestoredPayload{Bundle: bundle}); err != nil {
+		t.Fatalf("an iPhone was refused: %v", err)
+	}
+}
+
+// A recovery refused because THIS machine may not hold the seed is not burned:
+// the session is not marked failed and keeps its archive, so the person can
+// finish it on a machine that may.
+func TestARefusedActivationOnTheWrongMachineLeavesTheSessionToFinishElsewhere(t *testing.T) {
+	if buildmode.IsDev() {
+		t.Skip("a development build is exempt")
+	}
+	dir := t.TempDir()
+	svc := NewService(dir, nil, nil)
+	seed := make([]byte, 64)
+	for i := range seed {
+		seed[i] = byte(3*i + 1)
+	}
+	archive := buildTestArchiveWith(t, testMnemonic, nil, map[string][]byte{"root_seed": seed})
+	sess, err := svc.Start(StartRequest{ArchiveB64: base64.StdEncoding.EncodeToString(archive), Mnemonic: testMnemonic})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.CancelGate.Now = func() time.Time { return time.Now().Add(96 * time.Hour) }
+	svc.Rotation.MarkCompleted(sess.ID, RotationResult{})
+
+	// The wrong machine.
+	seedwraptest.ThisMachineIsAProductionMac(t)
+	_, err = svc.Activate(sess.ID, ActivateRequest{Mnemonic: testMnemonic})
+	if !secureenclave.IsRootSeedRefusal(err) {
+		t.Fatalf("want the root-seed refusal, got %v", err)
+	}
+	got, gerr := svc.GetSession(sess.ID)
+	if gerr != nil || got.State == SessionFailed || got.State == SessionActivated || got.Error != "" {
+		t.Fatalf("the refusal burned the session: %+v (%v)", got, gerr)
+	}
+	if _, lerr := secureenclave.LoadRootSeed(dir); !errors.Is(lerr, secureenclave.ErrNoRootSeed) {
+		t.Fatalf("a seed was written by the refused activation: %v", lerr)
+	}
+
+	// The right machine, same session.
+	seedwraptest.ThisMachineIsAnIPhone(t)
+	done, err := svc.Activate(sess.ID, ActivateRequest{Mnemonic: testMnemonic})
+	if err != nil {
+		t.Fatalf("the preserved session could not be activated on a machine that may hold the seed: %v", err)
+	}
+	if after, _ := secureenclave.LoadRootSeed(dir); !bytes.Equal(after, seed) {
+		t.Fatal("the seed was not installed by the later activation")
+	}
+	if done == nil || done.State != SessionActivated {
+		t.Fatalf("session not activated: %+v", done)
 	}
 }

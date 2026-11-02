@@ -86,6 +86,13 @@ func rootSeedMayLiveHere(cap Capability, wrapperWorks, phoneWithoutWrapper, dev 
 // the write (recovery restores files first) ask this first so a refusal
 // touches nothing.
 func CheckRootSeedMayLiveHere() error {
+	// FIRST, the rule founding uses: a root identity lives only where the
+	// machine can prove its software (a phone, a sealed machine). Having a Secure
+	// Enclave and a working wrapper is not enough, or a production Mac would hold
+	// a root identity it is not allowed to found.
+	if v := MayFoundAnIdentityHere(); !FoundingPermitted(v, buildmode.IsDev()) {
+		return &ErrRootSeedCannotLiveHere{Capability: detectCapability(), Reason: v.Why}
+	}
 	cap := detectCapability()
 	w := platformSeedWrapper()
 	works := w != nil && w.Available()
@@ -108,7 +115,7 @@ func StoreIdentityRootSeed(dataDir string, seed []byte) error {
 	}
 	// Production: a wrapper is mandatory, so the check inside storeSeed is a
 	// second, independent lock on the same door.
-	return storeSeed(dataDir, seed, platformSeedWrapper(), !buildmode.IsDev())
+	return storeSeedAs(dataDir, seed, platformSeedWrapper(), !buildmode.IsDev(), holderIdentity)
 }
 
 // IsRootSeedRefusal reports whether err is the refusal above.

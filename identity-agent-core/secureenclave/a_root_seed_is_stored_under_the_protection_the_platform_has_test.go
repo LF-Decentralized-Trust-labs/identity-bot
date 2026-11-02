@@ -13,7 +13,7 @@ func asSealedHost(t *testing.T) {
 	r1 := UseCapabilityDetector(func() Capability {
 		return Capability{Status: Usable, Kind: KindSEVSNP}
 	})
-	r2 := UseSeedWrapper(SealedVolumeSeedWrapper())
+	r2 := UseSeedWrapper(SealedVolumeSeedWrapperOn(func() error { return nil }))
 	t.Cleanup(func() { r2(); r1() })
 }
 

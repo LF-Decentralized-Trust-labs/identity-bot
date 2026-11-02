@@ -1,4 +1,4 @@
-package server
+package secureenclave
 
 import (
 	"runtime"

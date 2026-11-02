@@ -1,6 +1,6 @@
 //go:build !ios && !android && !darwin && !windows && !linux
 
-package server
+package secureenclave
 
 import "runtime"
 
@@ -8,8 +8,8 @@ import "runtime"
 // the question is that being unable to answer it is not permission — an
 // identity founded on a machine nobody has established anything about is the
 // one failure that cannot be undone afterwards.
-func foundingVerdictForThisPlatform() foundingVerdict {
-	return foundingVerdict{
+func foundingVerdictForThisPlatform() FoundingVerdict {
+	return FoundingVerdict{
 		Permitted: false,
 		Platform:  runtime.GOOS,
 		Why: "nothing is known about what this computer can prove, and an " +

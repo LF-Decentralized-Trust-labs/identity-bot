@@ -22,16 +22,53 @@ package secureenclave
 // sealed machine's volume.
 const SealedVolumeScheme = "sealed-volume"
 
-type sealedVolumeWrapper struct{}
+// sealedVolumeWrapper's storage check asks whether the data directory is on the
+// encrypted volume. Nil means the real one, which reads the machine.
+type sealedVolumeWrapper struct{ storage func() error }
 
 // SealedVolumeSeedWrapper is the protection for a seed on a sealed machine.
 // Exposed so a test (or an embedder) can stand a sealed host on any platform.
 func SealedVolumeSeedWrapper() SeedWrapper { return sealedVolumeWrapper{} }
 
-func (sealedVolumeWrapper) Available() bool {
+// SealedVolumeSeedWrapperOn is the same, with the question "is the data directory
+// on the encrypted volume" answered by storage, so a test can stand a sealed
+// host without a real mount.
+func SealedVolumeSeedWrapperOn(storage func() error) SeedWrapper {
+	return sealedVolumeWrapper{storage: storage}
+}
+
+func (w sealedVolumeWrapper) inAConfidentialGuest() bool {
 	c := detectCapability()
 	return c.Status == Usable && (c.Kind == KindSEVSNP || c.Kind == KindTDX)
 }
+
+// storageError is nil only when the data directory is on the encrypted volume.
+func (w sealedVolumeWrapper) storageError() error {
+	if w.storage != nil {
+		return w.storage()
+	}
+	return dataDirIsOnADmCryptVolume(agentDataDir())
+}
+
+// Available is true only inside a confidential guest AND when the data
+// directory is on the encrypted volume. The first alone checks the device and
+// not the storage: the volume mount is nofail, so a machine whose volume did not
+// come up would write to its plain root filesystem and still call the seed
+// sealed.
+func (w sealedVolumeWrapper) Available() bool {
+	return w.inAConfidentialGuest() && w.storageError() == nil
+}
+
+// whyUnavailable says which half failed.
+func (w sealedVolumeWrapper) whyUnavailable() string {
+	if !w.inAConfidentialGuest() {
+		return "this build has no hardware seed wrapper for this platform, and the " +
+			"sealed-volume protection applies only inside a sealed machine"
+	}
+	return "the sealed volume is not mounted, so the data directory is not on encrypted storage: " +
+		w.storageError().Error()
+}
+
 func (sealedVolumeWrapper) Scheme() string { return SealedVolumeScheme }
 func (sealedVolumeWrapper) Wrap(p []byte) ([]byte, error) {
 	return append([]byte(nil), p...), nil

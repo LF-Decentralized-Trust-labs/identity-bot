@@ -1,8 +1,6 @@
 //go:build linux && !android
 
-package server
-
-import "identity-agent-core/secureenclave"
+package secureenclave
 
 // Linux is the one platform where the answer is not a property of the operating
 // system, so it is asked at runtime rather than decided at build time.
@@ -15,19 +13,19 @@ import "identity-agent-core/secureenclave"
 //
 // Asked through the same detection everything else uses, so a machine cannot be
 // judged capable here and incapable one function away.
-func foundingVerdictForThisPlatform() foundingVerdict {
-	cap := secureenclave.DetectCapability()
-	if cap.Kind == secureenclave.KindSEVSNP && cap.Status == secureenclave.Usable {
-		return foundingVerdict{Permitted: true, Platform: "amd_sev_snp"}
+func foundingVerdictForThisPlatform() FoundingVerdict {
+	cap := detectCapability()
+	if cap.Kind == KindSEVSNP && cap.Status == Usable {
+		return FoundingVerdict{Permitted: true, Platform: "amd_sev_snp"}
 	}
 	// Present-but-unusable is refused with everything else, and deliberately.
 	// Hardware that answered and will not hold a key cannot produce the report
 	// either, and an identity founded on a promise that the hardware will start
 	// working is one nobody can check today.
-	return foundingVerdict{
+	return FoundingVerdict{
 		Permitted: false,
 		Platform:  "linux",
-		Why:       cannotProveItsSoftware,
-		Instead:   actForOneInstead,
+		Why:       CannotProveItsSoftware,
+		Instead:   ActForOneInstead,
 	}
 }

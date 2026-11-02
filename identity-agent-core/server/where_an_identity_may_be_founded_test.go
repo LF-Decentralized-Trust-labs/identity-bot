@@ -5,17 +5,18 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"identity-agent-core/secureenclave"
 )
 
 // Stands in for a machine that can prove its software, for the tests that are
 // about something else and merely have to get past this.
 func aMachineThatMayFound(t *testing.T) {
 	t.Helper()
-	was := mayFoundAnIdentityHere
-	mayFoundAnIdentityHere = func() foundingVerdict {
+	restore := secureenclave.UseFoundingVerdict(func() foundingVerdict {
 		return foundingVerdict{Permitted: true, Platform: "test"}
-	}
-	t.Cleanup(func() { mayFoundAnIdentityHere = was })
+	})
+	t.Cleanup(restore)
 }
 
 // A machine that cannot prove its software is refused before it produces any.
@@ -32,16 +33,15 @@ func aMachineThatMayFound(t *testing.T) {
 func TestAComputerThatCannotProveItsSoftwareMayNotFoundAnIdentity(t *testing.T) {
 	s := agentWithNoIdentity(t)
 
-	was := mayFoundAnIdentityHere
-	mayFoundAnIdentityHere = func() foundingVerdict {
+	restore := secureenclave.UseFoundingVerdict(func() foundingVerdict {
 		return foundingVerdict{
 			Permitted: false,
 			Platform:  "macos",
 			Why:       cannotProveItsSoftware,
 			Instead:   actForOneInstead,
 		}
-	}
-	t.Cleanup(func() { mayFoundAnIdentityHere = was })
+	})
+	t.Cleanup(restore)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/inception",
 		strings.NewReader(`{"public_key":"D1","next_public_key":"D2"}`))
@@ -100,14 +100,13 @@ func TestAMachineThatCanProveItselfIsNotStopped(t *testing.T) {
 func TestEveryWayAnIdentityCanBeginIsRefusedOnAMachineThatMayNotFound(t *testing.T) {
 	refuseHere := func(t *testing.T) {
 		t.Helper()
-		was := mayFoundAnIdentityHere
-		mayFoundAnIdentityHere = func() foundingVerdict {
+		restore := secureenclave.UseFoundingVerdict(func() foundingVerdict {
 			return foundingVerdict{
 				Permitted: false, Platform: "macos",
 				Why: cannotProveItsSoftware, Instead: actForOneInstead,
 			}
-		}
-		t.Cleanup(func() { mayFoundAnIdentityHere = was })
+		})
+		t.Cleanup(restore)
 	}
 
 	for _, door := range []struct {
@@ -183,14 +182,13 @@ func TestAComputerThatMayNotFoundIsRefusedWhileBeingPaired(t *testing.T) {
 	// an identity; the material is discarded unused.
 	_ = beginAt(t, srv.URL)
 
-	was := mayFoundAnIdentityHere
-	mayFoundAnIdentityHere = func() foundingVerdict {
+	restore := secureenclave.UseFoundingVerdict(func() foundingVerdict {
 		return foundingVerdict{
 			Permitted: false, Platform: "macos",
 			Why: cannotProveItsSoftware, Instead: actForOneInstead,
 		}
-	}
-	t.Cleanup(func() { mayFoundAnIdentityHere = was })
+	})
+	t.Cleanup(restore)
 
 	body := `{"found_as_root":true,"owner_aid":"EOWNER","adoption_code":"` + code + `"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/pairing/complete",
@@ -218,14 +216,13 @@ func TestAnIdentityThatAlreadyExistsGoesOnWorking(t *testing.T) {
 	for _, kind := range []string{"rot", "ixn", "rct"} {
 		t.Run(kind, func(t *testing.T) {
 			s := agentWithNoIdentity(t)
-			was := mayFoundAnIdentityHere
-			mayFoundAnIdentityHere = func() foundingVerdict {
+			restore := secureenclave.UseFoundingVerdict(func() foundingVerdict {
 				return foundingVerdict{
 					Permitted: false, Platform: "macos",
 					Why: cannotProveItsSoftware, Instead: actForOneInstead,
 				}
-			}
-			t.Cleanup(func() { mayFoundAnIdentityHere = was })
+			})
+			t.Cleanup(restore)
 
 			body := `{"aid":"EWHATEVER","event_type":"` + kind + `","sequence_number":1}`
 			req := httptest.NewRequest(http.MethodPost, "/api/store/event",

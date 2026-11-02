@@ -339,6 +339,11 @@ cat > "$WORK/root/etc/systemd/system/identity-agent.service" <<'UNIT'
 Description=Identity Agent (sealed instance)
 After=network-online.target
 Wants=network-online.target
+# The agent never starts without the sealed data volume. The mount is nofail so
+# the machine still boots without it, and without this line the agent would then
+# start and write its keys to the unencrypted root filesystem. (The agent also
+# refuses a root seed unless its data directory is on a dm-crypt device.)
+RequiresMountsFor=/var/lib/identity-agent
 
 [Service]
 Environment=AGENT_DATA_DIR=/var/lib/identity-agent

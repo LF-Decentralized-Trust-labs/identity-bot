@@ -16,7 +16,11 @@ func TestMain(m *testing.M) {
 		return secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindTPM2}
 	})
 	restoreWrap := secureenclave.UseSeedWrapper(seedwraptest.Wrapper{Works: true})
+	restoreFounding := secureenclave.UseFoundingVerdict(func() secureenclave.FoundingVerdict {
+		return secureenclave.FoundingVerdict{Permitted: true, Platform: "test"}
+	})
 	code := m.Run()
+	restoreFounding()
 	restoreWrap()
 	restoreCap()
 	os.Exit(code)

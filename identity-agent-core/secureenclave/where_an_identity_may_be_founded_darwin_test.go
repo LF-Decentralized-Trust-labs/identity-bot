@@ -1,6 +1,6 @@
 //go:build darwin && !ios
 
-package server
+package secureenclave
 
 import "testing"
 

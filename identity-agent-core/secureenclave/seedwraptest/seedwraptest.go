@@ -31,7 +31,39 @@ func ThisMachineCanProtectASeed(t testing.TB) {
 		return secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindTPM2}
 	})
 	r2 := secureenclave.UseSeedWrapper(Wrapper{Works: true})
-	t.Cleanup(func() { r2(); r1() })
+	r3 := thisPlatformMayFound()
+	t.Cleanup(func() { r3(); r2(); r1() })
+}
+
+// thisPlatformMayFound stands a platform that can prove its software (a phone or
+// a sealed machine), so a test about something else gets past the founding rule.
+func thisPlatformMayFound() func() {
+	return secureenclave.UseFoundingVerdict(func() secureenclave.FoundingVerdict {
+		return secureenclave.FoundingVerdict{Permitted: true, Platform: "test"}
+	})
+}
+
+// ThisMachineIsAProductionMac stands a production Apple-silicon Mac: the Secure
+// Enclave is usable and the seed wrapper works, and it still cannot prove its
+// software, so it may not hold a person's root seed.
+func ThisMachineIsAProductionMac(t testing.TB) {
+	t.Helper()
+	r1 := secureenclave.UseCapabilityDetector(func() secureenclave.Capability {
+		return secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindAppleEnclave}
+	})
+	r2 := secureenclave.UseSeedWrapper(Wrapper{Works: true})
+	r3 := secureenclave.UseFoundingVerdict(func() secureenclave.FoundingVerdict {
+		return secureenclave.FoundingVerdict{Permitted: false, Platform: "macos",
+			Why: secureenclave.CannotProveItsSoftware, Instead: secureenclave.ActForOneInstead}
+	})
+	t.Cleanup(func() { r3(); r2(); r1() })
+}
+
+// ThisMachineIsAnIPhone stands an iPhone: usable Secure Enclave, a working
+// wrapper, and a platform that attests its application.
+func ThisMachineIsAnIPhone(t testing.TB) {
+	t.Helper()
+	ThisMachineCanProtectASeed(t)
 }
 
 // ThisMachineCannot installs a machine whose key protection is cap and whose
@@ -50,9 +82,10 @@ func ThisMachineIsASealedHost(t testing.TB) {
 	r1 := secureenclave.UseCapabilityDetector(func() secureenclave.Capability {
 		return secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindSEVSNP, Reason: "attested_execution"}
 	})
-	r2 := secureenclave.UseSeedWrapper(secureenclave.SealedVolumeSeedWrapper())
+	r2 := secureenclave.UseSeedWrapper(secureenclave.SealedVolumeSeedWrapperOn(func() error { return nil }))
 	r3 := secureenclave.UseUnwrappedPhoneStorage("")
-	t.Cleanup(func() { r3(); r2(); r1() })
+	r4 := thisPlatformMayFound()
+	t.Cleanup(func() { r4(); r3(); r2(); r1() })
 }
 
 // ThisMachineIsAPhoneWithNoWrapper stands an Android phone: its Keystore is
@@ -64,5 +97,6 @@ func ThisMachineIsAPhoneWithNoWrapper(t testing.TB) {
 	})
 	r2 := secureenclave.UseSeedWrapper(nil)
 	r3 := secureenclave.UseUnwrappedPhoneStorage("android: the Keystore/StrongBox seed wrapper is not written yet")
-	t.Cleanup(func() { r3(); r2(); r1() })
+	r4 := thisPlatformMayFound()
+	t.Cleanup(func() { r4(); r3(); r2(); r1() })
 }
