@@ -66,8 +66,11 @@ func (b refusedBody) Read([]byte) (int, error) { return 0, b.err }
 func (refusedBody) Close() error               { return nil }
 
 // readSignedBody reads a signed request's body to digest it, and puts it back
-// for the handler. Over the bound for its route (signedBodyBoundFor) it is
-// refused rather than truncated, and on any refusal r.Body is left erroring
+// for the handler. Over maxSignedBodyBytes it is refused rather than truncated
+// -- the larger per-route bounds apply only to a request that declared its
+// digest (X-IA-Body-Digest) and so had its signature checked before any of the
+// body was read; see readTheBodyAgainst. A body already read and matched that
+// way is returned as it is, and on any refusal r.Body is left erroring
 // rather than holding the part that was read: a truncated body would be
 // checked against a signature over the whole one and handed on cut short.
 //
@@ -76,7 +79,11 @@ func readSignedBody(r *http.Request) ([]byte, error) {
 	if r.Body == nil {
 		return nil, nil
 	}
-	limit := signedBodyBoundFor(r)
+	if done, ok := r.Body.(*aBodyThatWasChecked); ok {
+		_, _ = done.Seek(0, io.SeekStart)
+		return done.bytes, nil
+	}
+	limit := int64(maxSignedBodyBytes)
 	// A body that says up front it is too big is refused without reading any of
 	// it. A chunked body declares no length (ContentLength is -1), so the
 	// bounded read below still covers it.

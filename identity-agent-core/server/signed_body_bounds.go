@@ -14,7 +14,10 @@ import (
 const maxPhotoBody = avatar.MaxSourceBytes*4/3 + 64<<10
 
 // signedBodyBounds are the routes whose signed body may exceed
-// maxSignedBodyBytes, each at the bound its own handler applies. Keys are
+// maxSignedBodyBytes, each at the bound its own handler applies -- for a request
+// that declares its digest (X-IA-Body-Digest), whose signature is therefore
+// checked before any of the body is read. A request without the header gets
+// maxSignedBodyBytes on every route. Keys are
 // "METHOD pattern", as classify takes them. A route not listed gets the default.
 var signedBodyBounds = map[string]int64{
 	"POST /api/recovery/start":         maxRecoveryBody,
@@ -26,7 +29,7 @@ var signedBodyBounds = map[string]int64{
 type signedBodyBoundKey struct{}
 
 // withSignedBodyBound records, on a request the gate has matched to pattern,
-// how much of its body may be read before the signature is checked.
+// how much of its body may be read once its signature has been checked.
 func withSignedBodyBound(r *http.Request, pattern string) *http.Request {
 	limit, ok := signedBodyBounds[r.Method+" "+pattern]
 	if !ok {
@@ -36,7 +39,8 @@ func withSignedBodyBound(r *http.Request, pattern string) *http.Request {
 }
 
 // signedBodyBoundFor is the bound for r's route, as the gate recorded it, or
-// the default for a request that never passed the gate.
+// the default for a request that never passed the gate. Applied by
+// readTheBodyAgainst only, after the signature verified.
 func signedBodyBoundFor(r *http.Request) int64 {
 	if limit, ok := r.Context().Value(signedBodyBoundKey{}).(int64); ok {
 		return limit

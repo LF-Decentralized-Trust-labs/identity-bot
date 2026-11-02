@@ -19,3 +19,19 @@ func Blake3QB64Must(data []byte) string {
 	}
 	return out
 }
+
+// Blake3Digest digests a stream as it is read, so a body need not be held
+// whole before its digest is known. Its result is the value Blake3QB64 gives
+// for the same bytes.
+type Blake3Digest struct{ h *blake3.Hasher }
+
+func NewBlake3Digest() *Blake3Digest { return &Blake3Digest{h: blake3.New()} }
+
+func (d *Blake3Digest) Write(p []byte) (int, error) { return d.h.Write(p) }
+
+// QB64 is the digest of everything written so far, as Blake3QB64 spells it.
+func (d *Blake3Digest) QB64() (string, error) {
+	var sum [32]byte
+	d.h.Sum(sum[:0])
+	return MatterFixedQB64("E", sum[:])
+}

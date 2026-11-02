@@ -3,8 +3,10 @@ package server
 import (
 	"crypto/ed25519"
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -74,4 +76,55 @@ func TestAcceptsASignatureProducedByTheDartClient(t *testing.T) {
 			"change identically and in the same release.", body)
 	}
 	_ = signed
+}
+
+// The vectors for X-IA-Body-Digest, pinned from both sides: packages/agent_client
+// /test/owner_signature_test.dart holds the same constants. The signed string is
+// the one it always was; the header carries the digest it already contains, so
+// the agent can check the signature before it reads the body.
+func TestTheBodyDigestVectors(t *testing.T) {
+	seed := make([]byte, ed25519.SeedSize)
+	for i := range seed {
+		seed[i] = byte(i + 1)
+	}
+	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
+
+	const (
+		target    = "EGOLDENIDENTITYAGENT"
+		stamp     = "2026-07-27T12:00:00Z"
+		path      = "/api/recovery/start"
+		body      = `{"archive_b64":"AAAA"}`
+		digest    = "EGYyOU4vRQiXR9KODcp7bLmX2fzoFVAbS9ozYvstod3d"
+		signature = "0BCg90nECbDmFqAN13nETR9MK5po24EF5FSlM22NAXpbaag1xsPIPZAOXOA85y2RGF2-UNyC3q7atuiLjxmI5tgD"
+		// A body that is not the one signed.
+		otherBody = `{"archive_b64":"BBBB"}`
+	)
+
+	// Vector 1: a request with its digest header. The digest is Blake3 of the
+	// body in qb64, and the signature covers the string built from it.
+	if got := digestOf(body); got != digest {
+		t.Fatalf("digest of the body is %s, want %s", got, digest)
+	}
+	signed := canonicalOwnerRequestOver(target, http.MethodPost, path, stamp, digest)
+	if want := "IA-REQ-V2\n" + target + "\nPOST\n" + path + "\n" + stamp + "\n" + digest; signed != want {
+		t.Fatalf("signed string is %q, want %q", signed, want)
+	}
+	if signed != canonicalOwnerRequest(target, http.MethodPost, path, stamp, []byte(body)) {
+		t.Fatal("the string built from the digest differs from the one built from the body")
+	}
+	ok, err := verifyOwnerString(signed, signature, pub)
+	if err != nil || !ok {
+		t.Fatalf("the vector's signature does not verify over its digest (ok %v, err %v)", ok, err)
+	}
+
+	// The body that matches its header is read; the one that does not is refused.
+	good := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	if err := readTheBodyAgainst(good, digest); err != nil {
+		t.Fatalf("the body that was signed was refused: %v", err)
+	}
+	// Vector 2: the same header and signature, a body that is not the signed one.
+	bad := httptest.NewRequest(http.MethodPost, path, strings.NewReader(otherBody))
+	if err := readTheBodyAgainst(bad, digest); !errors.As(err, new(bodyDoesNotMatchItsDigest)) {
+		t.Fatalf("a body that is not the signed one was not refused as a mismatch: %v", err)
+	}
 }

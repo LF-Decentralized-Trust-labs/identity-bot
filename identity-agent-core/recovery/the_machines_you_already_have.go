@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/store"
 )
 
@@ -150,6 +151,9 @@ func askAMachineToHold(client *http.Client, url, target string, sign SignAsOwner
 			return nil, fmt.Errorf("this request could not be signed as the owner")
 		}
 		httpReq.Header.Set("X-IA-Owner-Sig", sig)
+		// The digest the signature already covers, so the machine checks the
+		// signature before it reads any of the body.
+		httpReq.Header.Set("X-IA-Body-Digest", iacrypto.Blake3QB64Must(body))
 		if target != "" {
 			httpReq.Header.Set("X-IA-Owner-For", target)
 		}
