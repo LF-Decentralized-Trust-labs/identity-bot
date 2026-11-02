@@ -77,6 +77,14 @@ func readSignedBody(r *http.Request) ([]byte, error) {
 		return nil, nil
 	}
 	limit := signedBodyBoundFor(r)
+	// A body that says up front it is too big is refused without reading any of
+	// it. A chunked body declares no length (ContentLength is -1), so the
+	// bounded read below still covers it.
+	if r.ContentLength > limit {
+		err := requestTooLarge{limit}
+		r.Body = refusedBody{err}
+		return nil, err
+	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
 	if err != nil {
 		err = fmt.Errorf("read body: %w", err)

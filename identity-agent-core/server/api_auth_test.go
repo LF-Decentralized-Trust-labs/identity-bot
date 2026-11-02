@@ -573,13 +573,27 @@ func TestASignedBodyMayBeAsLargeAsItsRouteAllows(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newAuthTestServer(t)
 			seed, _ := sealTestOwner(t, s)
+			// A probe stands where the handler would, so "the gate let it
+			// through" is observed rather than inferred from the absence of a
+			// refusal: a handler that crashes after the gate looks the same as
+			// one that served.
+			reached, admitted := false, false
+			probe := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				reached, admitted = true, theGateAdmittedTheOwner(r)
+			})
+			router := s.buildRouter("")
 			w := httptest.NewRecorder()
-			s.buildRouter("").ServeHTTP(w, signed(t, tc.method, tc.path, tc.body, seed, time.Now()))
+			s.authorize(router)(probe).ServeHTTP(w,
+				signed(t, tc.method, tc.path, tc.body, seed, time.Now()))
 			if tc.accepted {
-				if w.Code == http.StatusForbidden || w.Code == http.StatusRequestEntityTooLarge {
-					t.Fatalf("a validly signed request was refused at the gate: %d %s", w.Code, w.Body.String())
+				if !reached || !admitted {
+					t.Fatalf("the gate did not admit a validly signed request (reached %v, admitted as the owner %v): %d %s",
+						reached, admitted, w.Code, w.Body.String())
 				}
 				return
+			}
+			if reached {
+				t.Fatal("a body over its route's bound reached the handler")
 			}
 			if w.Code != http.StatusRequestEntityTooLarge {
 				t.Fatalf("got %d, want 413: %s", w.Code, w.Body.String())
@@ -599,8 +613,73 @@ func TestEverySignedBodyBoundNamesAMountedRoute(t *testing.T) {
 	for key := range signedBodyBounds {
 		method, path, _ := strings.Cut(key, " ")
 		req := httptest.NewRequest(method, path, nil)
-		if matchedRoutePattern(router, req) != strings.TrimPrefix(path, "") {
+		if matchedRoutePattern(router, req) != path {
 			t.Errorf("%s is not a mounted route pattern", key)
 		}
+	}
+}
+
+// A body that declares it is too big is refused without reading any of it, and
+// with the same 413 as one found too big by reading.
+func TestADeclaredOversizeBodyIsRefusedUnread(t *testing.T) {
+	s := newAuthTestServer(t)
+	seed, _ := sealTestOwner(t, s)
+
+	body := &countingBody{total: 4 * maxSignedBodyBytes}
+	req := signed(t, "PUT", "/api/settings/tunnel", "{}", seed, time.Now())
+	req.Body = body
+	req.ContentLength = body.total
+
+	w := httptest.NewRecorder()
+	s.buildRouter("").ServeHTTP(w, req)
+	if w.Code != http.StatusRequestEntityTooLarge ||
+		!strings.Contains(w.Body.String(), "too large for this route") {
+		t.Fatalf("got %d, want the 413: %s", w.Code, w.Body.String())
+	}
+	if body.served != 0 {
+		t.Fatalf("the agent read %d bytes of a body that declared itself too big", body.served)
+	}
+}
+
+// An owner who claims to be a different identity gets the refusal it always
+// did, not a size error, however large the body.
+func TestAMismatchedOwnerClaimIsNotAnSizeError(t *testing.T) {
+	s := newAuthTestServer(t)
+	seed, _ := sealTestOwner(t, s)
+
+	req := signed(t, "PUT", "/api/settings/tunnel",
+		`{"pad":"`+strings.Repeat("A", int(maxSignedBodyBytes)+1)+`"}`, seed, time.Now())
+	req.Header.Set(headerOwnerAID, "ESOMEONEELSE")
+
+	w := httptest.NewRecorder()
+	s.buildRouter("").ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("got %d, want the 403 a mismatched owner always got: %s", w.Code, w.Body.String())
+	}
+}
+
+// A machine asking for a route it may not use is refused before any of its body
+// is read; the same machine on a route it may use still reaches the size bound.
+func TestAControllerIsCheckedAgainstTheRouteBeforeItsBodyIsRead(t *testing.T) {
+	s := newAuthTestServer(t)
+	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
+	if _, closed := isOwnerOnly("POST", "/api/rotation"); !closed {
+		t.Fatal("POST /api/rotation is no longer owner-only, so this proves nothing")
+	}
+
+	serve := func(method, path string) (int, *countingBody) {
+		req := asThatMachine(t, aid, method, path, "", seed, "", time.Time{})
+		body := &countingBody{total: 4 * maxSignedBodyBytes}
+		req.Body = body
+		w := httptest.NewRecorder()
+		s.buildRouter("").ServeHTTP(w, req)
+		return w.Code, body
+	}
+
+	if code, body := serve("POST", "/api/rotation"); code != http.StatusForbidden || body.served != 0 {
+		t.Fatalf("an owner-only route: got %d after reading %d bytes, want 403 and none read", code, body.served)
+	}
+	if code, body := serve("GET", "/api/profile"); code != http.StatusRequestEntityTooLarge || body.served == 0 {
+		t.Fatalf("a permitted route: got %d after reading %d bytes, want the size refusal", code, body.served)
 	}
 }
