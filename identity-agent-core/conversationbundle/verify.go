@@ -517,7 +517,7 @@ func (v *verifier) readCredential(bc Credential, c *credential) string {
 // checkAuthority applies authorisation.Check to a credential that carries the
 // request that asked for it.
 func (v *verifier) checkAuthority(bc Credential, c *credential) string {
-	in := authorisation.Input{Credential: c.raw, CredentialLog: c.log}
+	in := authorisation.Input{Credential: c.raw, CredentialLog: c.log, Asset: v.assetNamedBy}
 	if root, ok := v.kels[v.b.Root]; ok {
 		in.IssuerKEL = root.raws
 	}
@@ -549,6 +549,35 @@ func (v *verifier) checkAuthority(bc Credential, c *credential) string {
 		return ""
 	}
 	return "it does not rest on the request that authorised it: " + err.Error()
+}
+
+// assetNamedBy is the asset an authorising request's path names, read from the
+// bundle: the grants it carries name, in `about`, the asset they were issued
+// for, and are held by its pairwise AID. An asset no grant in the bundle names,
+// or that grants disagree on, is not known.
+func (v *verifier) assetNamedBy(id string) (authorisation.ExpectedAsset, bool) {
+	var found authorisation.ExpectedAsset
+	for _, c := range v.creds {
+		var kind string
+		switch c.schema {
+		case schemas.AIAgentGrant.Schema.SAID, schemas.AIAgentGrantV1.Schema.SAID:
+			kind = authorisation.AssetKindAIAgent
+		case schemas.AppGrant.Schema.SAID:
+			kind = authorisation.AssetKindApp
+		default:
+			continue
+		}
+		var about string
+		if json.Unmarshal(c.attrs["about"], &about) != nil || about != id || c.holder == "" {
+			continue
+		}
+		this := authorisation.ExpectedAsset{PairwiseAID: c.holder, Kind: kind}
+		if found != (authorisation.ExpectedAsset{}) && found != this {
+			return authorisation.ExpectedAsset{}, false
+		}
+		found = this
+	}
+	return found, found != (authorisation.ExpectedAsset{})
 }
 
 // ownerKey sets the key an owner-signed request is checked against: the

@@ -116,6 +116,32 @@ func (w *world) check(cred []byte) error {
 	return Check(Input{Credential: cred, Grant: w.grant, GrantLog: w.log, Body: w.body, HaveBody: true})
 }
 
+// checkKnowing checks cred with the assets the route would know.
+func (w *world) checkKnowing(cred []byte, assets map[string]ExpectedAsset) error {
+	return Check(Input{Credential: cred, Grant: w.grant, GrantLog: w.log, Body: w.body, HaveBody: true,
+		Asset: func(id string) (ExpectedAsset, bool) { a, ok := assets[id]; return a, ok }})
+}
+
+var (
+	knownAgent = map[string]ExpectedAsset{"agent-1": {PairwiseAID: agentAID, Kind: AssetKindAIAgent}}
+	knownApp   = map[string]ExpectedAsset{"app-1": {PairwiseAID: agentAID, Kind: AssetKindApp}}
+)
+
+// bodyOf is a body credential of the given schema, held by holder, issued on a
+// request approving machine body-1 under the asset path names.
+func (w *world) bodyOf(schema, holder, path string) []byte {
+	req := w.signs("POST", path+"/bodies/body-1/approve", "", ago(time.Minute))
+	assetType := "ai_agent"
+	if schema == schemas.AppBody.Schema.SAID {
+		assetType = "app"
+	}
+	acdc, _ := w.build(schema, holder, time.Now().UTC(), map[string]interface{}{
+		"asset_type": assetType, "name": "Thing", "host": "BHost", "verkey": "DKey",
+		"keys_digest": "EDigest", "grade": "software", "request": req, "about": "body-1",
+	}, w.edge())
+	return acdc
+}
+
 func ago(d time.Duration) time.Time { return time.Now().UTC().Add(-d) }
 
 const capBody = `{"capabilities":["system.info.read"]}`
@@ -246,10 +272,10 @@ func TestABodyApprovalMustNameTheMachineApproved(t *testing.T) {
 		}, w.edge())
 		return acdc
 	}
-	if err := w.check(approve("body-1", "body-1")); err != nil {
+	if err := w.checkKnowing(approve("body-1", "body-1"), knownAgent); err != nil {
 		t.Fatalf("a body approval that holds was refused: %v", err)
 	}
-	if err := w.check(approve("body-1", "body-2")); err == nil {
+	if err := w.checkKnowing(approve("body-1", "body-2"), knownAgent); err == nil {
 		t.Fatal("a body credential for another machine than the one approved was accepted")
 	}
 }
@@ -266,11 +292,62 @@ func TestAnAppBodyIsApprovedByTheSameRequest(t *testing.T) {
 		}, w.edge())
 		return acdc
 	}
-	if err := w.check(approve("body-1", "body-1")); err != nil {
+	if err := w.checkKnowing(approve("body-1", "body-1"), knownApp); err != nil {
 		t.Fatalf("an app body approval that holds was refused: %v", err)
 	}
-	if err := w.check(approve("body-1", "body-2")); err == nil {
+	if err := w.checkKnowing(approve("body-1", "body-2"), knownApp); err == nil {
 		t.Fatal("an app body credential for another machine than the one approved was accepted")
+	}
+}
+
+// A body credential is the named asset's: held by its pairwise AID.
+func TestABodyApprovalIsForTheAssetThePathNames(t *testing.T) {
+	w := newWorld(t)
+	other := "EOther0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZa"
+	if err := w.checkKnowing(w.bodyOf(schemas.AIAgentBody.Schema.SAID, agentAID, "/api/mcp/agents/agent-1"), knownAgent); err != nil {
+		t.Fatalf("a body credential held by the asset the path names was refused: %v", err)
+	}
+	if err := w.checkKnowing(w.bodyOf(schemas.AIAgentBody.Schema.SAID, other, "/api/mcp/agents/agent-1"), knownAgent); err == nil {
+		t.Fatal("a body credential held by another asset than the path names was accepted")
+	}
+	if err := w.checkKnowing(w.bodyOf(schemas.AppBody.Schema.SAID, other, "/api/mcp/agents/app-1"), knownApp); err == nil {
+		t.Fatal("an App Body held by another asset than the path names was accepted")
+	}
+}
+
+// An approval made for an AI agent does not back an App Body, nor the reverse.
+func TestABodyApprovalIsOfTheKindOfAssetThePathNames(t *testing.T) {
+	w := newWorld(t)
+	if err := w.checkKnowing(w.bodyOf(schemas.AppBody.Schema.SAID, agentAID, "/api/mcp/agents/agent-1"), knownAgent); err == nil {
+		t.Fatal("an App Body was accepted on the approval of an AI agent's machine")
+	}
+	if err := w.checkKnowing(w.bodyOf(schemas.AIAgentBody.Schema.SAID, agentAID, "/api/mcp/agents/app-1"), knownApp); err == nil {
+		t.Fatal("an AI Agent Body was accepted on the approval of an app's machine")
+	}
+}
+
+// With nobody to say which asset the path names, a body approval is refused.
+func TestABodyApprovalWithNoExpectedAssetIsRefused(t *testing.T) {
+	w := newWorld(t)
+	cred := w.bodyOf(schemas.AIAgentBody.Schema.SAID, agentAID, "/api/mcp/agents/agent-1")
+	if err := w.check(cred); err == nil {
+		t.Fatal("a body approval was accepted with no way to know the asset it was for")
+	}
+}
+
+// An asset the lookup does not know, or knows without an identifier or a kind
+// that has a body, is refused rather than passed.
+func TestABodyApprovalForAnAssetNotKnownIsRefused(t *testing.T) {
+	w := newWorld(t)
+	cred := w.bodyOf(schemas.AIAgentBody.Schema.SAID, agentAID, "/api/mcp/agents/agent-1")
+	for name, assets := range map[string]map[string]ExpectedAsset{
+		"unknown":    {},
+		"no AID":     {"agent-1": {Kind: AssetKindAIAgent}},
+		"other kind": {"agent-1": {PairwiseAID: agentAID, Kind: "domain"}},
+	} {
+		if err := w.checkKnowing(cred, assets); err == nil {
+			t.Fatalf("a body approval was accepted for an asset that was %s", name)
+		}
 	}
 }
 

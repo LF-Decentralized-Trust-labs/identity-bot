@@ -294,7 +294,8 @@ These seams are open, and each is refused rather than half-working:
 - The edge lookup in `identity-agent-core/server/whoever_authorised_it_is_named.go` accepts
   only the AI agent schemas, so an App Grant or App Body does not resolve the grant that
   authorised it.
-- The check of an App Body's approval binds the approval to the machine, not to the asset or
-  its kind: the credential carries the machine in `about` and no asset identifier the path's
-  `{id}` can be compared with, so an approval made for an AI agent also backs an App Body
-  naming the same machine, and the reverse.
+
+The check of a body's approval is tied to the asset the path names: the caller gives the check
+a lookup from the path's `{id}` to that asset's pairwise AID and kind, and the body credential
+must be held by that AID and be the AI Agent Body for an AI agent or the App Body for an app.
+No lookup, or an asset it does not know, refuses.
