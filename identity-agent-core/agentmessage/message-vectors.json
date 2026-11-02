@@ -243,6 +243,31 @@
       }
     }
   ],
+  "tier_stripped": [
+    {
+      "name": "a tiered ask with its tier stripped",
+      "statement": {
+        "conversation": "c_vector",
+        "kind": "ask",
+        "from": "EAGENT_A",
+        "to": "EAGENT_B",
+        "in_reply_to": "m_person",
+        "body_hash": "EJu2MbcM89EL49u82b73SSGGxoWeMc9wyh1XyNTqcA31",
+        "brain": {
+          "provider": "example-harness",
+          "model": "example-model",
+          "session": "s-0"
+        },
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "host_nonce": "nonce-deep-0000001",
+        "host_time": "2026-10-20T11:59:40Z",
+        "body_credential": "EBODYCRED"
+      },
+      "body": "Review this design for races.",
+      "tier_removed": "deep",
+      "signature": "0BBVP_amz8YraOH8Kbgq05FMeTiJpacBH69FS8lppauqwFJQSZgfaS2J2EdeQigSW9jM-QAng0VY2TJnh-Q8GDMG"
+    }
+  ],
   "countersigner_seeds": {
     "ed25519": "303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f",
     "mldsa65": "3132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f50",

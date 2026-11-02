@@ -1,7 +1,9 @@
 package agentmessage
 
 import (
+	"bytes"
 	"crypto/ed25519"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -170,5 +172,33 @@ func TestOnlyAnAskCarriesAKnownTier(t *testing.T) {
 		if st.Check() == nil {
 			t.Errorf("tier %q was accepted", bad)
 		}
+	}
+}
+
+// An empty tier is no tier, whether it was never set or arrived as "tier":"":
+// the statement is V1, and it is written without a tier field.
+func TestAnEmptyTierIsAbsent(t *testing.T) {
+	var st Statement
+	if err := json.Unmarshal([]byte(`{"kind":"ask","tier":""}`), &st); err != nil {
+		t.Fatal(err)
+	}
+	plain := vectorStatement(t)
+	plain.Kind = KindAsk
+	empty := plain
+	empty.Tier = ""
+	if !bytes.Equal(empty.Bytes(), plain.Bytes()) || !strings.HasPrefix(string(empty.Bytes()), "IA-AGENT-MSG-V1\n") {
+		t.Fatalf("an empty tier changed the signed string: %q", empty.Bytes())
+	}
+	if err := empty.Check(); err != nil {
+		t.Fatalf("an empty tier was refused: %v", err)
+	}
+	reply := vectorStatement(t)
+	reply.Tier = ""
+	if err := reply.Check(); err != nil {
+		t.Fatalf("an empty tier on a reply was refused: %v", err)
+	}
+	b, _ := json.Marshal(empty)
+	if strings.Contains(string(b), `"tier"`) {
+		t.Fatalf("an empty tier was written: %s", b)
 	}
 }

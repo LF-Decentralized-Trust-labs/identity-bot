@@ -7,7 +7,9 @@ keys digest, the nonce and key-size rules, the grades, the
 countersigned message's fields and the hash that chains entries. If this script
 and the vector files ever disagree, the prose no longer says what the code does.
 
-It checks bytes and digests, not signatures: those the Go tests verify.
+It checks bytes and digests, and signatures only where a vector is about one
+(a tier stripped from a signed ask): there it verifies Ed25519 itself, below.
+Every other signature the Go tests verify.
 
 Run: python3 check_ai_agent_vectors.py <body-vectors.json | message-vectors.json>
 Needs the blake3 module (pip install blake3).
@@ -74,6 +76,71 @@ def digest(data):
     """Blake3-256 as CESR qb64 with code E: one zero lead byte, then the code
     replaces the first base64 character."""
     return "E" + b64url(b"\x00" + blake3.blake3(data).digest())[1:]
+
+
+# ── Ed25519 verification (RFC 8032, section 5.1.7), for the one vector that
+# needs it. Plain integers, so the script needs nothing beyond blake3. ────────
+
+import hashlib
+
+_P = 2 ** 255 - 19
+_L = 2 ** 252 + 27742317777372353535851937790883648493
+_D = -121665 * pow(121666, -1, _P) % _P
+_I = pow(2, (_P - 1) // 4, _P)
+
+
+def _recover_x(y, sign):
+    x2 = (y * y - 1) * pow(_D * y * y + 1, -1, _P) % _P
+    x = pow(x2, (_P + 3) // 8, _P)
+    if (x * x - x2) % _P:
+        x = x * _I % _P
+    if (x * x - x2) % _P:
+        raise ValueError("not a point")
+    if x & 1 != sign:
+        x = _P - x
+    return x
+
+
+def _add(a, b):
+    (x1, y1), (x2, y2) = a, b
+    t = _D * x1 * x2 * y1 * y2 % _P
+    return ((x1 * y2 + x2 * y1) * pow(1 + t, -1, _P) % _P,
+            (y1 * y2 + x1 * x2) * pow(1 - t, -1, _P) % _P)
+
+
+def _mul(k, pt):
+    r = (0, 1)
+    while k:
+        if k & 1:
+            r = _add(r, pt)
+        pt = _add(pt, pt)
+        k >>= 1
+    return r
+
+
+def _point(raw):
+    if len(raw) != 32:
+        raise ValueError("a point is 32 bytes")
+    n = int.from_bytes(raw, "little")
+    y = n & ((1 << 255) - 1)
+    if y >= _P:
+        raise ValueError("not canonical")
+    return (_recover_x(y, n >> 255), y)
+
+
+def ed25519_verify(pub, sig, msg):
+    if len(sig) != 64:
+        return False
+    try:
+        a, r = _point(pub), _point(sig[:32])
+    except ValueError:
+        return False
+    s = int.from_bytes(sig[32:], "little")
+    if s >= _L:
+        return False
+    k = int.from_bytes(hashlib.sha512(sig[:32] + pub + msg).digest(), "little") % _L
+    base = (_recover_x(4 * pow(5, -1, _P) % _P, 0), 4 * pow(5, -1, _P) % _P)
+    return _mul(s, base) == _add(r, _mul(k, a))
 
 
 def lines(*fields):
@@ -237,6 +304,27 @@ def check_message(v):
         if not statement_refused(r["statement"]):
             fail(r["name"] + " is not refused by the prose's rules")
 
+    # A reader that does not know tiers rebuilds the V1 string from a tiered
+    # ask, which is not what was signed: the signature must fail on it, and
+    # hold once the tier is put back (so the failure is the tier's and not a
+    # fault in this verifier).
+    verkey = qb64_raw("D", v["verkey"], 32)
+    if not v.get("tier_stripped"):
+        fail("there is no vector for a tier stripped from a signed ask")
+    for s in v.get("tier_stripped", []):
+        st = s["statement"]
+        same(s["name"] + " body_hash", digest(s["body"].encode()), st["body_hash"])
+        if st.get("tier"):
+            fail(s["name"] + " still has its tier")
+        sig = qb64_raw("0B", s["signature"], 64)
+        if ed25519_verify(verkey, sig, statement_bytes(st).encode()):
+            fail(s["name"] + ": a reader without tiers accepts the signature")
+        if not ed25519_verify(verkey, sig, statement_bytes(dict(st, tier=s["tier_removed"])).encode()):
+            fail(s["name"] + ": the signature does not hold with the tier put back")
+    for s in v["statements"]:
+        if not ed25519_verify(verkey, qb64_raw("0B", s["signature"], 64), s["signed"].encode()):
+            fail(s["name"] + " signature does not verify")
+
     me = v["countersigner"]["aid"]
     prev = ""
     for i, e in enumerate(v["conversation"]):
@@ -267,7 +355,7 @@ def check_message(v):
         jwm = dict(jwm_of(r["envelope"]))
         if jwm["id"] == dict_deep(jwm["body"])["message_id"]:
             fail(r["name"] + " is not refused by the prose's rules")
-    return len(v["statements"]) + len(v["conversation"]) + check_person(v["person"])
+    return len(v["statements"]) + len(v.get("tier_stripped", [])) + len(v["conversation"]) + check_person(v["person"])
 
 
 def check_controller_proof(where, proof, request, rec):

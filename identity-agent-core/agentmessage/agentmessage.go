@@ -105,10 +105,11 @@ type Brain struct {
 	RunHash string `json:"run_hash,omitempty"`
 }
 
-// Tiers a task may ask for: how much model the work deserves. The tier names
-// a family of models, not a model; which model of the family runs is the
+// Tiers a task may ask for: how much model the work deserves. A tier is
+// advisory: it names a family of models, not a model; which model of the family runs is the
 // receiving AI agent's to choose from the models its brain allows
-// (asset.BrainConfig.Models).
+// (asset.BrainConfig.Models). A sender adds a tier only when the receiver is
+// known to read IA-AGENT-MSG-V2; within one organisation's Identity Agent it is.
 const (
 	TierQuick    = "quick"
 	TierStandard = "standard"
