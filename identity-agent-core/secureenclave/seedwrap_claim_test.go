@@ -27,7 +27,7 @@ func TestTheWrapClaimMatchesWhatIsOnDisk(t *testing.T) {
 	t.Run("no wrapper: claims nothing, and stores nothing wrapped", func(t *testing.T) {
 		withWrapper(t, nil)
 		dir := t.TempDir()
-		if err := StoreRootSeed(dir, testSeed()); err != nil {
+		if err := StoreDeviceLocalSeed(dir, testSeed()); err != nil {
 			t.Fatalf("storing: %v", err)
 		}
 		if SeedWrapAvailable() {
@@ -46,7 +46,7 @@ func TestTheWrapClaimMatchesWhatIsOnDisk(t *testing.T) {
 	t.Run("wrapper present but unusable: still claims nothing", func(t *testing.T) {
 		withWrapper(t, &fakeWrapper{key: make([]byte, 32), available: false})
 		dir := t.TempDir()
-		if err := StoreRootSeed(dir, testSeed()); err != nil {
+		if err := StoreDeviceLocalSeed(dir, testSeed()); err != nil {
 			t.Fatalf("storing: %v", err)
 		}
 		if SeedWrapAvailable() {
@@ -61,7 +61,7 @@ func TestTheWrapClaimMatchesWhatIsOnDisk(t *testing.T) {
 		w := &fakeWrapper{key: make([]byte, 32), available: true}
 		withWrapper(t, w)
 		dir := t.TempDir()
-		if err := StoreRootSeed(dir, testSeed()); err != nil {
+		if err := StoreDeviceLocalSeed(dir, testSeed()); err != nil {
 			t.Fatalf("storing: %v", err)
 		}
 		if !SeedWrapAvailable() {

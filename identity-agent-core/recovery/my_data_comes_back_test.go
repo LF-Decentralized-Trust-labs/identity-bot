@@ -36,7 +36,7 @@ func anAgentWithRealDataInIt(t *testing.T) (dir string, st *store.SQLiteStore, s
 	for i := range seed {
 		seed[i] = byte(i + 1)
 	}
-	if err := secureenclave.StoreRootSeed(dir, seed); err != nil {
+	if err := secureenclave.StoreDeviceLocalSeed(dir, seed); err != nil {
 		t.Fatalf("seed the device: %v", err)
 	}
 	// A device its owner carries derives its root seed from the recovery

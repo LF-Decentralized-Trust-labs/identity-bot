@@ -59,7 +59,7 @@ func theirAgent(t *testing.T, index int) (*login.Handler, *login.SiteRelationshi
 	for i := range root {
 		root[i] = byte(i + 7)
 	}
-	if err := secureenclave.StoreRootSeed(dir, root); err != nil {
+	if err := secureenclave.StoreDeviceLocalSeed(dir, root); err != nil {
 		t.Fatalf("store root seed: %v", err)
 	}
 

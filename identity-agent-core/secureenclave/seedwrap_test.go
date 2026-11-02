@@ -65,7 +65,7 @@ func TestSeedEnvelopeRoundTripNoWrapper(t *testing.T) {
 	withWrapper(t, nil)
 	dir := t.TempDir()
 	seed := testSeed()
-	if err := StoreRootSeed(dir, seed); err != nil {
+	if err := StoreDeviceLocalSeed(dir, seed); err != nil {
 		t.Fatalf("store: %v", err)
 	}
 	got, err := LoadRootSeed(dir)
@@ -85,7 +85,7 @@ func TestSeedWrappedRoundTrip(t *testing.T) {
 	withWrapper(t, fw)
 	dir := t.TempDir()
 	seed := testSeed()
-	if err := StoreRootSeed(dir, seed); err != nil {
+	if err := StoreDeviceLocalSeed(dir, seed); err != nil {
 		t.Fatalf("store: %v", err)
 	}
 	raw, _ := os.ReadFile(rootSeedPath(dir))
@@ -137,7 +137,7 @@ func TestSeedUpgradesWhenWrapperAppears(t *testing.T) {
 	withWrapper(t, nil)
 	dir := t.TempDir()
 	seed := testSeed()
-	if err := StoreRootSeed(dir, seed); err != nil {
+	if err := StoreDeviceLocalSeed(dir, seed); err != nil {
 		t.Fatal(err)
 	}
 
@@ -160,7 +160,7 @@ func TestWrappedSeedFailsClosed(t *testing.T) {
 	fw := &fakeWrapper{key: bytes.Repeat([]byte{5}, 32), available: true}
 	withWrapper(t, fw)
 	dir := t.TempDir()
-	if err := StoreRootSeed(dir, testSeed()); err != nil {
+	if err := StoreDeviceLocalSeed(dir, testSeed()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -183,7 +183,7 @@ func TestStoreRejectsUnverifiableWrap(t *testing.T) {
 	bad := &badWrapper{}
 	withWrapper(t, bad)
 	dir := t.TempDir()
-	if err := StoreRootSeed(dir, testSeed()); err == nil {
+	if err := StoreDeviceLocalSeed(dir, testSeed()); err == nil {
 		t.Fatal("store must fail when the wrap round trip fails")
 	}
 	if _, err := os.Stat(rootSeedPath(dir)); !os.IsNotExist(err) {
@@ -200,7 +200,7 @@ func (badWrapper) Unwrap([]byte) ([]byte, error) { return nil, fmt.Errorf("nope"
 
 func TestStoreRejectsShortSeed(t *testing.T) {
 	withWrapper(t, nil)
-	if err := StoreRootSeed(t.TempDir(), []byte("short")); err == nil {
+	if err := StoreDeviceLocalSeed(t.TempDir(), []byte("short")); err == nil {
 		t.Fatal("short seed must be rejected")
 	}
 }

@@ -20,7 +20,7 @@ func TestRootSeedBackupAndReseat(t *testing.T) {
 
 	// Old device: seed exists; the collector captures it.
 	oldDir := t.TempDir()
-	if err := secureenclave.StoreRootSeed(oldDir, seed); err != nil {
+	if err := secureenclave.StoreDeviceLocalSeed(oldDir, seed); err != nil {
 		t.Fatalf("store on old device: %v", err)
 	}
 	st, err := store.NewSQLiteStore(oldDir)

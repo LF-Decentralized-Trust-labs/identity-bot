@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/go-chi/chi/v5"
+	"identity-agent-core/secureenclave"
 )
 
 func (s *CoreServer) mountRecoveryRoutes(r chi.Router) {
@@ -447,6 +448,9 @@ func statusForActivateError(err error) int {
 	var needs *backup.ErrNeedsShares
 	if errors.As(err, &needs) {
 		return http.StatusConflict
+	}
+	if secureenclave.IsRootSeedRefusal(err) {
+		return http.StatusPreconditionFailed
 	}
 	switch err.(type) {
 	case *recovery.ErrCancelWindowActive:

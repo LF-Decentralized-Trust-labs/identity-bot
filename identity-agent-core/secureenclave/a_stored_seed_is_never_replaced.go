@@ -42,7 +42,7 @@ func EnsureRootSeed(dataDir string) ([]byte, error) {
 	if _, err := rand.Read(seed); err != nil {
 		return nil, err
 	}
-	if err := StoreRootSeed(dataDir, seed); err != nil {
+	if err := StoreDeviceLocalSeed(dataDir, seed); err != nil {
 		return nil, fmt.Errorf("bootstrap root seed: %w", err)
 	}
 	// Written down, because nothing else can tell afterwards. This seed is

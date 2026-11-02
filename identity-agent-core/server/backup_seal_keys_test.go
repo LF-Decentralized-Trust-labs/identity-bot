@@ -21,7 +21,7 @@ func seedOnDisk(t *testing.T) *CoreServer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := secureenclave.StoreRootSeed(dir, seed); err != nil {
+	if err := secureenclave.StoreDeviceLocalSeed(dir, seed); err != nil {
 		t.Fatalf("store root seed: %v", err)
 	}
 	return &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir}

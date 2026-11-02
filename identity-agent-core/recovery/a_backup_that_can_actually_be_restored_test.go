@@ -312,7 +312,7 @@ func TestAnUnusableDatabaseSectionRefusesBeforeWritingAnything(t *testing.T) {
 	for i := range seed {
 		seed[i] = byte(i + 1)
 	}
-	if err := secureenclave.StoreRootSeed(oldDir, seed); err != nil {
+	if err := secureenclave.StoreDeviceLocalSeed(oldDir, seed); err != nil {
 		t.Fatal(err)
 	}
 	archive := archiveOf(t, oldDir, oldStore)
@@ -414,7 +414,7 @@ func TestAnAbandonedPlaintextCopyIsCleanedUp(t *testing.T) {
 //
 // Writing the key material first is right on a machine with nothing to lose:
 // the seed is irreplaceable, so a restore that fails afterwards should still
-// leave it on disk. But StoreRootSeed overwrites in place, so on a machine
+// leave it on disk. But StoreDeviceLocalSeed overwrites in place, so on a machine
 // that already holds an identity the same ordering means any later failure —
 // a malformed credentials section, nothing to do with key material at all —
 // replaces a working identity's seed with the archive's and destroys it.
@@ -427,7 +427,7 @@ func TestAFailedRestoreLeavesAnExistingIdentityAlone(t *testing.T) {
 	for i := range fromArchive {
 		fromArchive[i] = 0xAA
 	}
-	if err := secureenclave.StoreRootSeed(oldDir, fromArchive); err != nil {
+	if err := secureenclave.StoreDeviceLocalSeed(oldDir, fromArchive); err != nil {
 		t.Fatal(err)
 	}
 	archive := archiveOf(t, oldDir, oldStore)
@@ -440,7 +440,7 @@ func TestAFailedRestoreLeavesAnExistingIdentityAlone(t *testing.T) {
 	for i := range alreadyHere {
 		alreadyHere[i] = 0x55
 	}
-	if err := secureenclave.StoreRootSeed(newDir, alreadyHere); err != nil {
+	if err := secureenclave.StoreDeviceLocalSeed(newDir, alreadyHere); err != nil {
 		t.Fatal(err)
 	}
 
@@ -531,7 +531,7 @@ func TestABackupFromANewerBuildDoesNotReseatTheSeedFirst(t *testing.T) {
 	for i := range fromArchive {
 		fromArchive[i] = 0xAA
 	}
-	if err := secureenclave.StoreRootSeed(oldDir, fromArchive); err != nil {
+	if err := secureenclave.StoreDeviceLocalSeed(oldDir, fromArchive); err != nil {
 		t.Fatal(err)
 	}
 	// A backup whose schema this build does not understand. Refused, by
@@ -550,7 +550,7 @@ func TestABackupFromANewerBuildDoesNotReseatTheSeedFirst(t *testing.T) {
 	for i := range alreadyHere {
 		alreadyHere[i] = 0x55
 	}
-	if err := secureenclave.StoreRootSeed(newDir, alreadyHere); err != nil {
+	if err := secureenclave.StoreDeviceLocalSeed(newDir, alreadyHere); err != nil {
 		t.Fatal(err)
 	}
 

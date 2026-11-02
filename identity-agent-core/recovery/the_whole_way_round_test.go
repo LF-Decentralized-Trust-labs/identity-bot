@@ -768,7 +768,7 @@ func aMachineThatWritesBackups(t *testing.T, ownerPub []byte, fill byte) aWritte
 	for i := range seed {
 		seed[i] = fill
 	}
-	if err := secureenclave.StoreRootSeed(dir, seed); err != nil {
+	if err := secureenclave.StoreDeviceLocalSeed(dir, seed); err != nil {
 		t.Fatal(err)
 	}
 	pub, err := secureenclave.BackupSigningPublicKey(dir)

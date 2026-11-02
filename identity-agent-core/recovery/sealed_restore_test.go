@@ -56,7 +56,7 @@ func sealedArchiveFor(t *testing.T, mnemonics ...string) []byte {
 	for i := range machineSeed {
 		machineSeed[i] = byte(i + 7)
 	}
-	if err := secureenclave.StoreRootSeed(dir, machineSeed); err != nil {
+	if err := secureenclave.StoreDeviceLocalSeed(dir, machineSeed); err != nil {
 		t.Fatal(err)
 	}
 	pub, err := secureenclave.BackupSigningPublicKey(dir)

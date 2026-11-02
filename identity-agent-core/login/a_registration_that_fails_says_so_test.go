@@ -19,7 +19,7 @@ func aRelationshipFor(t *testing.T, siteOOBI string) (*Handler, *SiteRelationshi
 	h := &Handler{Store: store, dataDir: t.TempDir(), HTTPClient: &http.Client{}}
 	root := make([]byte, 64)
 	copy(root, "a root seed for the registration tests, nothing else 000000000000")
-	if err := secureenclave.StoreRootSeed(h.dataDir, root); err != nil {
+	if err := secureenclave.StoreDeviceLocalSeed(h.dataDir, root); err != nil {
 		t.Fatal(err)
 	}
 	rel, err := h.getOrCreateRelationship("ESite", &ChallengeBundle{SiteAID: "ESite", SiteOOBI: siteOOBI})

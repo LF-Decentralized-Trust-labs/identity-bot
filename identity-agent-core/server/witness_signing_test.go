@@ -19,7 +19,7 @@ func witnessWithSeed(t *testing.T, mark byte) *CoreServer {
 	for i := range seed {
 		seed[i] = byte(i) + mark
 	}
-	if err := secureenclave.StoreRootSeed(s.DataDir, seed); err != nil {
+	if err := secureenclave.StoreDeviceLocalSeed(s.DataDir, seed); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	return s
