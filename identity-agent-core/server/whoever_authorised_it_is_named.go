@@ -252,7 +252,7 @@ func (s *CoreServer) checkAuthorisationOf(acdc []byte, issuer, registry, said st
 // expectedAsset is the asset an authorising request's path names, from the
 // same asset store the routes that serve it look in. An asset it does not hold
 // is not known, and a body approval for it is refused.
-func (s *CoreServer) expectedAsset(id string) (authorisation.ExpectedAsset, bool) {
+func (s *CoreServer) expectedAsset(id, _ string) (authorisation.ExpectedAsset, bool) {
 	if s.assetHandler == nil || s.assetHandler.Store == nil {
 		return authorisation.ExpectedAsset{}, false
 	}

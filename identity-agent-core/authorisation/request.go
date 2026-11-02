@@ -62,12 +62,14 @@ type Input struct {
 	// before relying on it.
 	IssuerKEL     [][]byte
 	CredentialLog [][]byte
-	// Asset resolves the asset identifier a request's path names to the asset
-	// itself. Needed for a request that approves a machine as an asset's body
+	// Asset resolves the asset identifier a request's path names, and the
+	// identifier the body credential is held by (its `i`), to the asset
+	// itself: a lookup that has the asset store answers by the identifier, one
+	// that has only credentials answers by the holder. Needed for a request that approves a machine as an asset's body
 	// (POST .../bodies/{machine}/approve): the body credential must be the
 	// named asset's, which only whoever knows the asset can say. Left nil, or
 	// answering that the asset is unknown, such a credential is refused.
-	Asset func(id string) (ExpectedAsset, bool)
+	Asset func(id, holder string) (ExpectedAsset, bool)
 }
 
 // ExpectedAsset is who a request's path names: the asset's pairwise AID, which
@@ -416,7 +418,7 @@ func anchoredAt(kel [][]byte, subject string, sn int, said string) (int, bool) {
 }
 
 // checkAskedFor checks that what the request asked for is what was issued.
-func checkAskedFor(cred acdc, method, path string, asked map[string]json.RawMessage, resolve func(string) (ExpectedAsset, bool)) error {
+func checkAskedFor(cred acdc, method, path string, asked map[string]json.RawMessage, resolve func(id, holder string) (ExpectedAsset, bool)) error {
 	about := stringAttr(cred.A, "about")
 	segments := strings.Split(strings.Trim(path, "/"), "/")
 	switch cred.Schema {
@@ -467,7 +469,8 @@ func checkAskedFor(cred acdc, method, path string, asked map[string]json.RawMess
 	case schemas.AIAgentBody.Schema.SAID, schemas.AppBody.Schema.SAID:
 		// An app's body is approved by the same request as an AI agent's
 		// (ADR-059): the machine is named in the path, whatever the asset is.
-		if method != "POST" || len(segments) != 7 || segments[4] != "bodies" || segments[6] != "approve" {
+		// Mounted at POST /api/mcp/agents/{asset}/bodies/{machine}/approve.
+		if method != "POST" || len(segments) != 7 || segments[0] != "api" || segments[1] != "mcp" || segments[2] != "agents" || segments[4] != "bodies" || segments[6] != "approve" {
 			return fmt.Errorf("%s %s is not a request that approves a machine", method, path)
 		}
 		if segments[5] != about {
@@ -478,7 +481,7 @@ func checkAskedFor(cred acdc, method, path string, asked map[string]json.RawMess
 		if resolve == nil {
 			return fmt.Errorf("the asset %s the request approved a body for cannot be told, so the body credential is not tied to it", segments[3])
 		}
-		want, ok := resolve(segments[3])
+		want, ok := resolve(segments[3], stringAttr(cred.A, "i"))
 		if !ok || want.PairwiseAID == "" {
 			return fmt.Errorf("the asset %s the request approved a body for is not known", segments[3])
 		}

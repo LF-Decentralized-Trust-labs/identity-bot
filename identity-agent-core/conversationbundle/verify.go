@@ -551,33 +551,44 @@ func (v *verifier) checkAuthority(bc Credential, c *credential) string {
 	return "it does not rest on the request that authorised it: " + err.Error()
 }
 
-// assetNamedBy is the asset an authorising request's path names, read from the
-// bundle: the grants it carries name, in `about`, the asset they were issued
-// for, and are held by its pairwise AID. An asset no grant in the bundle names,
-// or that grants disagree on, is not known.
-func (v *verifier) assetNamedBy(id string) (authorisation.ExpectedAsset, bool) {
-	var found authorisation.ExpectedAsset
+// assetNamedBy is the asset a body credential's holder is, read from the
+// bundle: the grant held by the body's holder (its pairwise AID) was issued for
+// the asset and says its kind. A grant that names the asset in `about` must
+// name the one the path does; one that names none (the grant POST
+// /api/mcp/agents issues, and every first-version grant) is the holder's all
+// the same. A holder with no grant in the bundle, or whose grants disagree on
+// the kind, is not known.
+func (v *verifier) assetNamedBy(id, holder string) (authorisation.ExpectedAsset, bool) {
+	if holder == "" {
+		return authorisation.ExpectedAsset{}, false
+	}
+	kind := ""
 	for _, c := range v.creds {
-		var kind string
+		var this string
 		switch c.schema {
 		case schemas.AIAgentGrant.Schema.SAID, schemas.AIAgentGrantV1.Schema.SAID:
-			kind = authorisation.AssetKindAIAgent
+			this = authorisation.AssetKindAIAgent
 		case schemas.AppGrant.Schema.SAID:
-			kind = authorisation.AssetKindApp
+			this = authorisation.AssetKindApp
 		default:
 			continue
 		}
-		var about string
-		if json.Unmarshal(c.attrs["about"], &about) != nil || about != id || c.holder == "" {
+		if c.holder != holder {
 			continue
 		}
-		this := authorisation.ExpectedAsset{PairwiseAID: c.holder, Kind: kind}
-		if found != (authorisation.ExpectedAsset{}) && found != this {
+		var about string
+		if raw, ok := c.attrs["about"]; ok && json.Unmarshal(raw, &about) == nil && about != "" && about != id {
 			return authorisation.ExpectedAsset{}, false
 		}
-		found = this
+		if kind != "" && kind != this {
+			return authorisation.ExpectedAsset{}, false
+		}
+		kind = this
 	}
-	return found, found != (authorisation.ExpectedAsset{})
+	if kind == "" {
+		return authorisation.ExpectedAsset{}, false
+	}
+	return authorisation.ExpectedAsset{PairwiseAID: holder, Kind: kind}, true
 }
 
 // ownerKey sets the key an owner-signed request is checked against: the

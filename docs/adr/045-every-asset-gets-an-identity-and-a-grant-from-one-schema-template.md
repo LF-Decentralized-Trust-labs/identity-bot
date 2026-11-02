@@ -299,3 +299,9 @@ The check of a body's approval is tied to the asset the path names: the caller g
 a lookup from the path's `{id}` to that asset's pairwise AID and kind, and the body credential
 must be held by that AID and be the AI Agent Body for an AI agent or the App Body for an app.
 No lookup, or an asset it does not know, refuses.
+The lookup is given the path's `{id}` and the body credential's holder. An Identity Agent that
+keeps its assets answers by `{id}`. An offline verifier has only credentials, and a grant names
+its asset in `about` only when the request that asked for it named one, so it answers by the
+grant the holder holds: that grant gives the kind, and its `about`, where it has one, must be
+the `{id}`. The check also requires the path to be the one the route mounts,
+`/api/mcp/agents/{id}/bodies/{machine}/approve`.

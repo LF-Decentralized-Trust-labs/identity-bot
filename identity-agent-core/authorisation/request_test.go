@@ -119,7 +119,7 @@ func (w *world) check(cred []byte) error {
 // checkKnowing checks cred with the assets the route would know.
 func (w *world) checkKnowing(cred []byte, assets map[string]ExpectedAsset) error {
 	return Check(Input{Credential: cred, Grant: w.grant, GrantLog: w.log, Body: w.body, HaveBody: true,
-		Asset: func(id string) (ExpectedAsset, bool) { a, ok := assets[id]; return a, ok }})
+		Asset: func(id, _ string) (ExpectedAsset, bool) { a, ok := assets[id]; return a, ok }})
 }
 
 var (
@@ -723,5 +723,16 @@ func TestAnOwnersRequestMustNameTheIssuer(t *testing.T) {
 	if err := Check(Input{Credential: grantFor("EAnotherIdentityAgent0123456789ABCDEFGHIJKLM"), OwnerKey: iacrypto.VerkeyQB64(pub),
 		Body: capBody, HaveBody: true}); err == nil {
 		t.Fatal("an owner's request signed for another Identity Agent was taken as authorising this one's credential")
+	}
+}
+
+// The path an approval is made at is the one the route is mounted at.
+func TestABodyApprovalIsAtThePathTheRouteMounts(t *testing.T) {
+	w := newWorld(t)
+	for _, path := range []string{"/api/mcp/agents/agent-1", "/x/mcp/agents/agent-1", "/api/other/agents/agent-1", "/api/mcp/apps/agent-1"} {
+		err := w.checkKnowing(w.bodyOf(schemas.AIAgentBody.Schema.SAID, agentAID, path), knownAgent)
+		if (path == "/api/mcp/agents/agent-1") != (err == nil) {
+			t.Errorf("a body approval at %s: %v", path, err)
+		}
 	}
 }
