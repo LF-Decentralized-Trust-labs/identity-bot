@@ -843,21 +843,16 @@ class CoreService {
   /// What the agent returns is checked to be the founding asked for before it
   /// is signed (TheKeyInForce.requireTheFoundingIsThisDevices).
   ///
-  /// [theCoreWasGivenThisPhrase] must be true ONLY when this same agent — the
-  /// one at [baseUrl] — accepted this phrase's seed in a
-  /// RootSeedHandoff.register call that returned true, before founding. It
-  /// lets the founding carry the core's post-quantum commitment and messaging
-  /// keys (TheKeyInForce.requireTheFoundingIsThisDevices), which the core adds
-  /// only for keys it derives from the seed it holds. Set any other way — for a
-  /// different core, a handoff that failed or was never made — it lets a core
-  /// put a post-quantum key of its own into this identity, which alone could
-  /// rotate it.
+  /// The founding checked is one committing to [nextPublicKey] alone, with
+  /// no anchor but the owner seal: a core that adds a post-quantum commitment
+  /// or messaging keys is refused, whatever seed it was given. A founding
+  /// carrying the identity's own post-quantum commitment is made through
+  /// prepare and commit (TheKeyEventsThisDeviceMakes.found).
   Future<InceptionResponse> createInception({
     required String publicKey,
     required String nextPublicKey,
     required Uint8List signingSeed,
     String? ownerAid,
-    bool theCoreWasGivenThisPhrase = false,
   }) async {
     final response = await _client.post(
       Uri.parse('$baseUrl/api/inception'),
@@ -877,8 +872,7 @@ class CoreService {
     await _signTheFounding(inception, signingSeed,
         key: publicKey,
         next: nextPublicKey,
-        ownerAid: (ownerAid ?? '').isEmpty ? null : ownerAid,
-        theCoreWasGivenThisPhrase: theCoreWasGivenThisPhrase);
+        ownerAid: (ownerAid ?? '').isEmpty ? null : ownerAid);
     return inception;
   }
 
@@ -906,9 +900,8 @@ class CoreService {
   /// signed is checked to be the founding this device would ask for
   /// (TheKeyInForce.requireTheFoundingIsThisDevices); the key it names is the
   /// one [signingSeed] makes.
-  /// [theCoreWasGivenThisPhrase] is as for [createInception].
   Future<void> signTheFoundingOf(String aid, Uint8List signingSeed,
-      {required String nextPublicKey, String? ownerAid, bool theCoreWasGivenThisPhrase = false}) async {
+      {required String nextPublicKey, String? ownerAid}) async {
     final res = await _client.get(Uri.parse('$baseUrl/api/kel?name=$aid'));
     if (res.statusCode != 200) {
       throw Exception('could not read this identity\'s founding event to sign '
@@ -949,8 +942,7 @@ class CoreService {
         aid: aid,
         key: AgentKeyPair.fromSigningSeed(signingSeed).publicKeyEncoded,
         next: nextPublicKey,
-        ownerAid: ownerAid,
-        theCoreWasGivenThisPhrase: theCoreWasGivenThisPhrase);
+        ownerAid: ownerAid);
     await signAndRecordEvent(_client, baseUrl,
         aid: aid,
         sequenceNumber: 0,
@@ -964,8 +956,7 @@ class CoreService {
       {required String aid,
       required String key,
       required String next,
-      String? ownerAid,
-      bool theCoreWasGivenThisPhrase = false}) {
+      String? ownerAid}) {
     Object? event;
     try {
       event = jsonDecode(utf8.decode(base64Decode(rawBytesB64)));
@@ -974,7 +965,7 @@ class CoreService {
       throw Exception('the founding bytes the agent returned are not an event, so they are not signed');
     }
     TheKeyInForce.requireTheFoundingIsThisDevices(event,
-        key: key, next: next, aid: aid, ownerAid: ownerAid, theCoreWasGivenThisPhrase: theCoreWasGivenThisPhrase);
+        key: key, next: next, aid: aid, ownerAid: ownerAid);
   }
 
   /// Whether an event is the founding one, in either shape.
@@ -998,7 +989,7 @@ class CoreService {
   /// otherwise surface much later, as a stranger refusing somebody for no
   /// reason they can see.
   Future<void> _signTheFounding(InceptionResponse inception, Uint8List signingSeed,
-      {required String key, required String next, String? ownerAid, bool theCoreWasGivenThisPhrase = false}) async {
+      {required String key, required String next, String? ownerAid}) async {
     if (inception.rawBytesB64.isEmpty) {
       throw Exception('this identity was created and the agent did not say what '
           'its founding event is, so nothing can sign it and nobody would be '
@@ -1008,8 +999,7 @@ class CoreService {
         aid: inception.aid,
         key: key,
         next: next,
-        ownerAid: ownerAid,
-        theCoreWasGivenThisPhrase: theCoreWasGivenThisPhrase);
+        ownerAid: ownerAid);
     await signAndRecordEvent(_client, baseUrl,
         aid: inception.aid,
         sequenceNumber: 0,

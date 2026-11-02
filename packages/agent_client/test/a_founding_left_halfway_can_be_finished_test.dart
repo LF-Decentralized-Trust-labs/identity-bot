@@ -209,29 +209,21 @@ void main() {
     expect(sent.any((r) => r.url.path == '/api/cesr/encode'), isTrue);
   });
 
-  test('what the agent adds of its own is accepted only where it was given the phrase', () async {
-    final bytes = foundingBytes(more: ['Epostquantum'], anchors: [
-      {'ia': 'IA-HYBRID-1', 'ka': ['C'], 'sa': ['D']}
-    ]);
-    var sent = <http.BaseRequest>[];
-    await expectLater(agentFounding(bytes, sent).createInception(publicKey: key, nextPublicKey: next, signingSeed: seed),
-        throwsA(predicate((e) => '$e'.contains('was not given this phrase'))));
-    expect(sent.any((r) => r.url.path == '/api/cesr/encode'), isFalse);
+  test('what the agent adds of its own to a founding is never signed', () async {
     for (final one in [
+      foundingBytes(more: ['Epostquantum'], anchors: [
+        {'ia': 'IA-HYBRID-1', 'ka': ['C'], 'sa': ['D']}
+      ]),
       foundingBytes(more: ['Epostquantum']),
       foundingBytes(anchors: [
         {'ia': 'IA-HYBRID-1', 'ka': ['C'], 'sa': ['D']}
       ]),
     ]) {
-      sent = [];
+      final sent = <http.BaseRequest>[];
       await expectLater(agentFounding(one, sent).createInception(publicKey: key, nextPublicKey: next, signingSeed: seed),
-          throwsA(predicate((e) => '$e'.contains('was not given this phrase'))),
-          reason: 'either addition alone, from a core not given the phrase');
+          throwsA(predicate((e) => '$e'.contains('not the one this device asked for'))),
+          reason: 'a commitment or anchor the core added would be a key of that machine\'s');
       expect(sent.any((r) => r.url.path == '/api/cesr/encode'), isFalse);
     }
-    sent = [];
-    await agentFounding(bytes, sent)
-        .createInception(publicKey: key, nextPublicKey: next, signingSeed: seed, theCoreWasGivenThisPhrase: true);
-    expect(sent.any((r) => r.url.path == '/api/cesr/encode'), isTrue);
   });
 }

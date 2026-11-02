@@ -159,5 +159,34 @@ void main() {
         reason: 'one event at each of four places: $kel');
     expect(kel['signed'], [true, true, true, true],
         reason: 'every event the core holds is signed');
+
+    // Moving to a new phrase: step 1 reveals the old phrase's key 2 and
+    // commits to the new phrase; step 2 reveals the new phrase's key 1.
+    final newSeed = Bip39.mnemonicToSeed(
+        'legal winner thank year wave sausage worth useful legal winner thank yellow'
+            .split(' '));
+    final step1 = await makes.moveToANewPhrase(seed, newSeed,
+        aid: aid,
+        generation: 1,
+        afterSn: 3,
+        afterDigest: finished.single.digest);
+    expect(step1.sn, 4);
+    final step2 = await makes.rotate(newSeed,
+        aid: aid, generation: 0, afterSn: 4, afterDigest: step1.digest);
+    expect(step2.sn, 5);
+
+    // The old phrase's next key is no longer committed to: the core refuses
+    // the rotation it would make.
+    await expectLater(
+        makes.rotate(seed,
+            aid: aid, generation: 2, afterSn: 5, afterDigest: step2.digest),
+        throwsA(isA<KeyEventRefused>()
+            .having((e) => e.code, 'code', 'not_committed')));
+    final after = jsonDecode((await http.get(
+            Uri.parse('$base/api/kel?name=$aid'),
+            headers: {'X-Local-Owner-Secret': ownerSecret}))
+        .body) as Map<String, dynamic>;
+    expect([for (final e in after['kel'] as List) e['s']],
+        ['0', '1', '2', '3', '4', '5']);
   });
 }

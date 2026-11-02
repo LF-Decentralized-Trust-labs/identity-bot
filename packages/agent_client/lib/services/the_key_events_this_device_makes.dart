@@ -126,18 +126,70 @@ class TheKeyEventsThisDeviceMakes {
   /// last establishment event or a kept interaction, read from this device's
   /// own verified key state, never from the core.
   Future<Committed> rotate(Uint8List seed,
-      {required String aid,
-      required int generation,
+          {required String aid,
+          required int generation,
+          required int afterSn,
+          required String afterDigest,
+          int toad = 0,
+          List<String> cuts = const [],
+          List<String> adds = const [],
+          List<Object?> anchors = const []}) =>
+      _rotate('this rotation',
+          revealing: seed,
+          revealed: generation + 1,
+          committingFrom: seed,
+          nextClassical: generation + 2,
+          nextPostQuantum: generation + 1,
+          aid: aid,
+          afterSn: afterSn,
+          afterDigest: afterDigest,
+          toad: toad,
+          cuts: cuts,
+          adds: adds,
+          anchors: anchors);
+
+  /// Step 1 of moving [aid] to a new phrase (ADR-061 section 10): reveals the
+  /// old phrase's key generation [generation] + 1, as a routine rotation would,
+  /// and commits to the new phrase's classical key 1 and post-quantum
+  /// generation 0. The new phrase's own key appears in no `k` until step 2,
+  /// which is [rotate] with [newSeed] at generation 0, made as a recovery
+  /// rotation after this one so that any interaction a holder of the old
+  /// phrase signed in between is superseded.
+  Future<Committed> moveToANewPhrase(Uint8List oldSeed, Uint8List newSeed,
+          {required String aid,
+          required int generation,
+          required int afterSn,
+          required String afterDigest,
+          int toad = 0}) =>
+      _rotate('moving to a new phrase',
+          revealing: oldSeed,
+          revealed: generation + 1,
+          committingFrom: newSeed,
+          nextClassical: 1,
+          nextPostQuantum: 0,
+          aid: aid,
+          afterSn: afterSn,
+          afterDigest: afterDigest,
+          toad: toad);
+
+  Future<Committed> _rotate(String what,
+      {required Uint8List revealing,
+      required int revealed,
+      required Uint8List committingFrom,
+      required int nextClassical,
+      required int nextPostQuantum,
+      required String aid,
       required int afterSn,
       required String afterDigest,
       int toad = 0,
       List<String> cuts = const [],
       List<String> adds = const [],
       List<Object?> anchors = const []}) async {
-    final key = KeyManager.keyAt(seed, generation + 1).publicKeyEncoded;
-    final next = KeyManager.keyAt(seed, generation + 2).publicKeyEncoded;
-    final pqSeed =
-        KeyManager.slip10Ed25519(seed, KeyPaths.postQuantum(generation + 1));
+    final key = KeyManager.keyAt(revealing, revealed).publicKeyEncoded;
+    final next =
+        KeyManager.keyAt(committingFrom, nextClassical).publicKeyEncoded;
+    final pqSeed = KeyManager.slip10Ed25519(
+        committingFrom, KeyPaths.postQuantum(nextPostQuantum));
     try {
       final commitments = [
         await _km.nextKeyDigest(next),
@@ -154,7 +206,7 @@ class TheKeyEventsThisDeviceMakes {
           cuts: cuts,
           adds: adds,
           anchors: anchors);
-      final prepared = await _prepare('this rotation', {
+      final prepared = await _prepare(what, {
         'aid': aid,
         't': 'rot',
         'k': [key],
@@ -170,8 +222,8 @@ class TheKeyEventsThisDeviceMakes {
       // A rotation that follows a kept interaction supersedes the events
       // after it: none of this device's reservations there may be committed.
       await _signed.supersededBy(aid, sn);
-      return await _checkSignCommit('this rotation', expected, prepared,
-          KeyManager.signingSeed(seed, index: generation + 1));
+      return await _checkSignCommit(what, expected, prepared,
+          KeyManager.signingSeed(revealing, index: revealed));
     } finally {
       pqSeed.fillRange(0, pqSeed.length, 0);
     }

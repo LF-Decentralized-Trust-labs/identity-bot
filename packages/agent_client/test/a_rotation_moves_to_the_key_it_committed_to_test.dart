@@ -472,13 +472,8 @@ void main() {
     km = await keyMathOf(await buildTheCore('rotation-core'));
   });
 
-  LocalCoreKeriService serviceOver(FakeCore c,
-          {bool theCoreWasGivenThisPhrase = false}) =>
-      LocalCoreKeriService(
-          baseUrl: 'http://core.test',
-          client: c.client(),
-          keyMath: km,
-          theCoreWasGivenThisPhrase: theCoreWasGivenThisPhrase);
+  LocalCoreKeriService serviceOver(FakeCore c) => LocalCoreKeriService(
+      baseUrl: 'http://core.test', client: c.client(), keyMath: km);
 
   Future<void> freshDevice() async {
     FlutterSecureStorage.setMockInitialValues({});
@@ -1263,49 +1258,35 @@ void main() {
     expect(core.posted, isNot(contains('/api/cesr/encode')));
   });
 
-  // Was one test of a founding the core built: it added these only where it
-  // was given the phrase. Now the app asks for both itself, so a core adding
-  // either to what it prepares is refused whatever it was given; a founding
-  // an earlier version left unsigned is still finished only where it was.
+  // The app asks for its post-quantum commitment and messaging keys itself,
+  // so a core adding either to what it prepares is refused, whatever seed it
+  // holds.
   test(
       'a post-quantum commitment or messaging keys the core adds of its own to a founding it prepares are never signed',
       () async {
-    for (final given in [false, true]) {
-      await freshDevice();
-      core = FakeCore()..addsItsOwn = true;
-      keri = serviceOver(core, theCoreWasGivenThisPhrase: given);
-      await expectLater(keri.inceptAid(name: 'me', code: words.join(' ')),
-          throwsA(isA<NotTheEventExpected>()),
-          reason: 'given the phrase: $given');
-      await nothingSigned(core, reason: 'given the phrase: $given');
-      expect(core.kel, isEmpty);
-    }
+    await freshDevice();
+    core = FakeCore()..addsItsOwn = true;
+    keri = serviceOver(core);
+    await expectLater(keri.inceptAid(name: 'me', code: words.join(' ')),
+        throwsA(isA<NotTheEventExpected>()));
+    await nothingSigned(core, reason: 'the core added keys of its own');
+    expect(core.kel, isEmpty);
   });
 
   test(
-      'a stranded founding carrying the core\'s own post-quantum commitment and messaging keys is finished only where it was given the phrase',
+      'a stranded founding carrying a post-quantum commitment and messaging keys the core added is never finished',
       () async {
-    Future<void> strandedFounding(FakeCore c) => strandedByAnEarlierVersion(
-        c,
+    await strandedByAnEarlierVersion(
+        core,
         FakeCore.oldFounding(key(0), key(1),
             n: ['E${'P' * 43}'], a: [FakeCore.keysetAnchor]),
         {'key': key(0), 'next': key(1)});
-
-    await strandedFounding(core);
     core.posted.clear();
-    await expectLater(keri.signPayload(name: core.aid, data: [1]),
-        throwsA(predicate((e) => '$e'.contains('was not given this phrase'))),
-        reason: 'the app did not hand this core its phrase');
+    await expectLater(
+        keri.signPayload(name: core.aid, data: [1]),
+        throwsA(predicate(
+            (e) => '$e'.contains('not the one this device asked for'))));
     expect(core.posted, isNot(contains('/api/cesr/encode')));
-
-    await freshDevice();
-    core = FakeCore();
-    keri = serviceOver(core, theCoreWasGivenThisPhrase: true);
-    await strandedFounding(core);
-    await keri.signPayload(name: core.aid, data: [1]);
-    expect(core.kel.first['sig'], isNotNull,
-        reason: 'the app handed this core its phrase');
-    expect(verifiesUnder(key(0), core.raw(0), core.sigAt(0)), isTrue);
   });
 
   test(
@@ -1367,8 +1348,7 @@ void main() {
     for (final MapEntry(key: what, value: change) in cases.entries) {
       await freshDevice();
       core = FakeCore()..changeFounding = change;
-      // Even a core given the phrase may not change the founding.
-      keri = serviceOver(core, theCoreWasGivenThisPhrase: true);
+      keri = serviceOver(core);
       await expectLater(keri.inceptAid(name: 'me', code: words.join(' ')),
           throwsA(isA<NotTheEventExpected>()),
           reason: what);
@@ -1428,7 +1408,7 @@ void main() {
   });
 
   test(
-      'a stranded founding committing to one more key than this core may add is not finished',
+      'a stranded founding committing to one more key than this device asked for is not finished',
       () async {
     // An earlier version asked for this founding, and the answer never arrived.
     await TheEventsThisDeviceAskedFor().asking(
@@ -1436,7 +1416,7 @@ void main() {
     core.add(FakeCore.oldFounding(key(0), key(1), n: ['E${'M' * 43}']));
     core.posted.clear();
     await expectLater(keri.signPayload(name: core.aid, data: [1]),
-        throwsA(predicate((e) => '$e'.contains('was not given'))));
+        throwsA(predicate((e) => '$e'.contains('alone'))));
     expect(core.posted, isNot(contains('/api/cesr/encode')));
   });
 

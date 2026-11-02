@@ -27,21 +27,11 @@ class LocalCoreKeriService extends KeriService {
   final String _baseUrl;
   final http.Client _client;
 
-  /// [theCoreWasGivenThisPhrase] must be true ONLY when this same core — the
-  /// one at this base URL — accepted this phrase's seed in a
-  /// RootSeedHandoff.register call that returned true, before founding. It
-  /// lets the founding carry the core's post-quantum commitment and messaging
-  /// keys (TheKeyInForce.requireTheFoundingIsThisDevices), which the core adds
-  /// only for keys it derives from the seed it holds. Set any other way — for a
-  /// different core, a handoff that failed or was never made — it lets a core
-  /// put a post-quantum key of its own into this identity, which alone could
-  /// rotate it.
-  ///
   /// [keyMath] is how this app runs the core's key arithmetic (a phone's
   /// bridge, or the core binary on a desktop). Founding, rotating and
   /// interacting need it; without it they refuse rather than fall back.
   LocalCoreKeriService(
-      {String? baseUrl, http.Client? client, this.theCoreWasGivenThisPhrase = false, this.keyMath})
+      {String? baseUrl, http.Client? client, this.keyMath})
       // Where the KEYS are, which is not always this computer.
       //
       // Stateful KERI operations always run on the engine local to the keys —
@@ -55,7 +45,6 @@ class LocalCoreKeriService extends KeriService {
   /// identity rather than at whichever core happens to be on this machine.
   String get baseUrl => _baseUrl;
 
-  final bool theCoreWasGivenThisPhrase;
   final KeyMath? keyMath;
 
   /// How this device makes its identity's key events.
@@ -69,7 +58,7 @@ class LocalCoreKeriService extends KeriService {
   }
 
   late final TheKeyInForce _keys =
-      TheKeyInForce(_client, _baseUrl, asked: _asked, theCoreWasGivenThisPhrase: theCoreWasGivenThisPhrase);
+      TheKeyInForce(_client, _baseUrl, asked: _asked);
   final _asked = TheEventsThisDeviceAskedFor();
 
   /// The event the core says it added, read from the bytes it returned for

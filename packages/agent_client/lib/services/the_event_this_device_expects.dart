@@ -12,7 +12,9 @@ import 'key_math.dart';
 /// be missing or extra. A hint the core sends alongside is never read: what is
 /// signed is the bytes, so the bytes are what is checked.
 class ExpectedEvent {
-  ExpectedEvent._(this.t, this.aid, this.sn, this.prior, this.fields);
+  ExpectedEvent._(this.t, this.aid, this.sn, this.prior, this.fields,
+      {Map<String, _OwnPlaces> own = const {}})
+      : _own = own;
 
   /// A founding: the signing keys, their next-key commitments (classical
   /// first, then post-quantum), the witnesses and their threshold, and its
@@ -74,6 +76,124 @@ class ExpectedEvent {
   }) =>
       ExpectedEvent._('ixn', aid, sn, prior, {'a': anchors});
 
+  /// A rotation revealing the post-quantum reserve alone: `k` is the
+  /// post-quantum key of generation j−1, opening the prior `n[1]` (ADR-061
+  /// sections 5 and 6). Refused while CESR has assigned no code for an
+  /// ML-DSA-65 key ([PostQuantumCodes.assigned]): such a key has no agreed
+  /// form, so no event may publish one.
+  factory ExpectedEvent.postQuantumReserveReveal({
+    required String aid,
+    required int sn,
+    required String prior,
+    required String postQuantumKey,
+    required List<String> next,
+    int toad = 0,
+    List<String> cuts = const [],
+    List<String> adds = const [],
+    List<Object?> anchors = const [],
+  }) {
+    PostQuantumCodes.require('a rotation revealing the post-quantum reserve');
+    return ExpectedEvent.rotation(
+        aid: aid,
+        sn: sn,
+        prior: prior,
+        keys: [postQuantumKey],
+        next: next,
+        toad: toad,
+        cuts: cuts,
+        adds: adds,
+        anchors: anchors);
+  }
+
+  /// A stage-two rotation: both keys revealed, `kt = nt = "2"` (ADR-061
+  /// section 6). Refused while no code is assigned, and until the classical
+  /// re-commit rotation the first release that knows the codes makes has been
+  /// witnessed ([reCommitWitnessed]), since that rotation is what commits to a
+  /// post-quantum key in the assigned form.
+  factory ExpectedEvent.stageTwoRotation({
+    required String aid,
+    required int sn,
+    required String prior,
+    required String classicalKey,
+    required String postQuantumKey,
+    required List<String> next,
+    required bool reCommitWitnessed,
+    int toad = 0,
+    List<String> cuts = const [],
+    List<String> adds = const [],
+    List<Object?> anchors = const [],
+  }) {
+    PostQuantumCodes.require('a stage-two rotation');
+    if (!reCommitWitnessed) {
+      throw PostQuantumNotYet('a stage-two rotation',
+          'the re-commit rotation under the assigned codes is not yet witnessed');
+    }
+    return ExpectedEvent.rotation(
+        aid: aid,
+        sn: sn,
+        prior: prior,
+        keys: [classicalKey, postQuantumKey],
+        next: next,
+        kt: '2',
+        nt: '2',
+        toad: toad,
+        cuts: cuts,
+        adds: adds,
+        anchors: anchors);
+  }
+
+  /// A founding or rotation with several owners, as one of them checks it
+  /// (ADR-061 section 5, "for an event with several signers"): this signer's
+  /// own key and next digests at the places [layout] gives it, the lengths and
+  /// thresholds the ceremony agreed, and every other field as agreed. The
+  /// other owners' keys and digests are theirs to check.
+  factory ExpectedEvent.asOneOfSeveralOwners({
+    required String t,
+    String? aid,
+    int sn = 0,
+    String? prior,
+    required OwnerLayout layout,
+    required String myKey,
+    required String myNextClassical,
+    required String myNextPostQuantum,
+    required Object kt,
+    required Object nt,
+    List<String> witnesses = const [],
+    int toad = 0,
+    List<String> cuts = const [],
+    List<String> adds = const [],
+    List<Object?> anchors = const [],
+  }) {
+    if (t != 'icp' && t != 'rot') {
+      throw ArgumentError.value(
+          t, 't', 'only a founding or a rotation has several owners\' keys');
+    }
+    if (t == 'rot' && (aid == null || prior == null)) {
+      throw ArgumentError(
+          'a rotation names the identity and the event it follows');
+    }
+    final own = {
+      'k': _OwnPlaces(layout.count, {layout.keyIndex: myKey}),
+      'n': _OwnPlaces(2 * layout.count, {
+        layout.nextClassicalIndex: myNextClassical,
+        layout.nextPostQuantumIndex: myNextPostQuantum,
+      }),
+    };
+    final fields = <String, Object?>{
+      'kt': kt,
+      'k': null,
+      'nt': nt,
+      'n': null,
+      'bt': toad.toRadixString(16),
+      if (t == 'icp') ...{'b': witnesses, 'c': const <String>[]},
+      if (t == 'rot') ...{'br': cuts, 'ba': adds},
+      'a': anchors,
+    };
+    return ExpectedEvent._(
+        t, t == 'icp' ? null : aid, t == 'icp' ? 0 : sn, prior, fields,
+        own: own);
+  }
+
   final String t;
 
   /// The identifier, or null for a founding, whose identifier is its digest.
@@ -86,6 +206,10 @@ class ExpectedEvent {
   /// Every field the event must carry besides `v`, `t`, `d`, `i`, `s` and `p`,
   /// with its exact value.
   final Map<String, Object?> fields;
+
+  /// For an event with several owners, the fields of which this signer checks
+  /// only its own places.
+  final Map<String, _OwnPlaces> _own;
 
   /// Parses [raw] with the core's parser and returns it when it is exactly
   /// this event; throws [NotTheEventExpected] saying the first difference.
@@ -120,6 +244,12 @@ class ExpectedEvent {
       if (!fields.containsKey(f.name))
         return 'it carries a field "${f.name}" that was not asked for';
       if (!seen.add(f.name)) return 'it carries "${f.name}" twice';
+      final own = _own[f.name];
+      if (own != null) {
+        final problem = own.differenceFrom(f.name, f.value);
+        if (problem != null) return problem;
+        continue;
+      }
       if (jsonEncode(f.value) != jsonEncode(fields[f.name])) {
         return 'its "${f.name}" is ${jsonEncode(f.value)}, not ${jsonEncode(fields[f.name])}';
       }
@@ -129,6 +259,101 @@ class ExpectedEvent {
     }
     return null;
   }
+}
+
+/// The places one owner holds in an event with several (ADR-061 section 6).
+///
+/// The owners are sorted by identifier, as ASCII strings, ascending; owner i
+/// has `k[i]` and `n[2i]`, `n[2i+1]` (classical, then post-quantum), and signs
+/// at index i with ondex 2i. Every signer computes this from the owner list in
+/// its own record, never from the core.
+class OwnerLayout {
+  OwnerLayout._(this.owners, this.keyIndex);
+
+  /// [owners] is the ceremony's owner list as this signer recorded it, in any
+  /// order; [me] is this signer's identifier, which must be in it once.
+  factory OwnerLayout(List<String> owners, String me) {
+    final sorted = [...owners]..sort();
+    for (var i = 1; i < sorted.length; i++) {
+      if (sorted[i] == sorted[i - 1]) {
+        throw ArgumentError.value(owners, 'owners', 'names ${sorted[i]} twice');
+      }
+    }
+    final i = sorted.indexOf(me);
+    if (i < 0) {
+      throw ArgumentError.value(me, 'me', 'is not one of the owners');
+    }
+    return OwnerLayout._(List.unmodifiable(sorted), i);
+  }
+
+  /// The owners in the layout's order.
+  final List<String> owners;
+
+  /// This signer's place in `k`, which is also the index it signs at.
+  final int keyIndex;
+
+  int get count => owners.length;
+
+  /// The places of this signer's next digests in `n`; the classical one is
+  /// the ondex its signature names.
+  int get nextClassicalIndex => 2 * keyIndex;
+  int get nextPostQuantumIndex => 2 * keyIndex + 1;
+}
+
+/// A list field of which one signer checks its length and its own entries.
+class _OwnPlaces {
+  const _OwnPlaces(this.length, this.mine);
+  final int length;
+  final Map<int, String> mine;
+
+  String? differenceFrom(String name, Object? value) {
+    if (value is! List) return 'its "$name" is not a list';
+    if (value.length != length) {
+      return 'its "$name" has ${value.length} entries, not the $length agreed';
+    }
+    for (final e in value) {
+      if (e is! String || e.isEmpty) {
+        return 'its "$name" holds ${jsonEncode(e)}, which is not a key or digest';
+      }
+    }
+    for (final p in mine.entries) {
+      if (value[p.key] != p.value) {
+        return 'its "$name" holds ${value[p.key]} at place ${p.key}, not this signer\'s ${p.value}';
+      }
+    }
+    // This signer's key or digest anywhere else would count it twice.
+    for (var i = 0; i < value.length; i++) {
+      if (!mine.containsKey(i) && mine.containsValue(value[i])) {
+        return 'its "$name" holds this signer\'s ${value[i]} again at place $i';
+      }
+    }
+    return null;
+  }
+}
+
+/// Whether CESR has assigned codes for an ML-DSA-65 public key and its indexed
+/// signatures. Until it has, no event that reveals a post-quantum key is
+/// signed, so none is ever published in a form nobody agreed (ADR-061
+/// section 6). Changed only by the release that adopts the assigned codes.
+class PostQuantumCodes {
+  static bool get assigned => false;
+
+  static void require(String what) {
+    if (!assigned) {
+      throw PostQuantumNotYet(what,
+          'CESR has assigned no code for an ML-DSA-65 key, so no event may reveal one');
+    }
+  }
+}
+
+/// An event that would reveal a post-quantum key, refused because it may not
+/// be made yet.
+class PostQuantumNotYet implements Exception {
+  PostQuantumNotYet(this.what, this.why);
+  final String what;
+  final String why;
+  @override
+  String toString() => '$what is not signed yet: $why';
 }
 
 /// The bytes the core prepared are not the event this device expected, so
