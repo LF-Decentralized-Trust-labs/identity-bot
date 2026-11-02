@@ -13,8 +13,7 @@ import 'key_math.dart';
 /// signed is the bytes, so the bytes are what is checked.
 class ExpectedEvent {
   ExpectedEvent._(this.t, this.aid, this.sn, this.prior, this.fields,
-      {Map<String, _OwnPlaces> own = const {}})
-      : _own = own;
+      {this.layout});
 
   /// A founding: the signing keys, their next-key commitments (classical
   /// first, then post-quantum), the witnesses and their threshold, and its
@@ -143,19 +142,23 @@ class ExpectedEvent {
   }
 
   /// A founding or rotation with several owners, as one of them checks it
-  /// (ADR-061 section 5, "for an event with several signers"): this signer's
-  /// own key and next digests at the places [layout] gives it, the lengths and
-  /// thresholds the ceremony agreed, and every other field as agreed. The
-  /// other owners' keys and digests are theirs to check.
+  /// (ADR-061 section 5, "for an event with several signers"), in stage one.
+  ///
+  /// [agreed] is every owner's current key and next digests, as each gave them
+  /// in the ceremony and this signer recorded them, keyed by identifier; [me]
+  /// is this signer, and [mine] what its own phrase derives, which must be what
+  /// it agreed. `k` and `n` must be exactly the agreed keys and digests at the
+  /// places the layout gives them: checking only its own places would let a
+  /// core replace an owner who is not signing. The thresholds and every other
+  /// field must be as agreed.
   factory ExpectedEvent.asOneOfSeveralOwners({
     required String t,
     String? aid,
     int sn = 0,
     String? prior,
-    required OwnerLayout layout,
-    required String myKey,
-    required String myNextClassical,
-    required String myNextPostQuantum,
+    required Map<String, OwnerKeys> agreed,
+    required String me,
+    required OwnerKeys mine,
     required Object kt,
     required Object nt,
     List<String> witnesses = const [],
@@ -168,22 +171,31 @@ class ExpectedEvent {
       throw ArgumentError.value(
           t, 't', 'only a founding or a rotation has several owners\' keys');
     }
-    if (t == 'rot' && (aid == null || prior == null)) {
+    if (t == 'rot' && (aid == null || prior == null || sn < 1)) {
       throw ArgumentError(
-          'a rotation names the identity and the event it follows');
+          'a rotation names the identity, its place and the event it follows');
     }
-    final own = {
-      'k': _OwnPlaces(layout.count, {layout.keyIndex: myKey}),
-      'n': _OwnPlaces(2 * layout.count, {
-        layout.nextClassicalIndex: myNextClassical,
-        layout.nextPostQuantumIndex: myNextPostQuantum,
-      }),
-    };
+    final layout = OwnerLayout(agreed.keys.toList(), me);
+    if (agreed[me] != mine) {
+      throw ArgumentError.value(me, 'me',
+          'agreed keys other than the ones this signer\'s phrase derives');
+    }
+    final k = [for (final o in layout.owners) agreed[o]!.key];
+    final n = [
+      for (final o in layout.owners) ...[
+        agreed[o]!.nextClassical,
+        agreed[o]!.nextPostQuantum
+      ]
+    ];
+    if ({...k, ...n}.length != k.length + n.length) {
+      throw ArgumentError.value(
+          agreed, 'agreed', 'names one key or digest more than once');
+    }
     final fields = <String, Object?>{
       'kt': kt,
-      'k': null,
+      'k': k,
       'nt': nt,
-      'n': null,
+      'n': n,
       'bt': toad.toRadixString(16),
       if (t == 'icp') ...{'b': witnesses, 'c': const <String>[]},
       if (t == 'rot') ...{'br': cuts, 'ba': adds},
@@ -191,7 +203,7 @@ class ExpectedEvent {
     };
     return ExpectedEvent._(
         t, t == 'icp' ? null : aid, t == 'icp' ? 0 : sn, prior, fields,
-        own: own);
+        layout: layout);
   }
 
   final String t;
@@ -207,9 +219,9 @@ class ExpectedEvent {
   /// with its exact value.
   final Map<String, Object?> fields;
 
-  /// For an event with several owners, the fields of which this signer checks
-  /// only its own places.
-  final Map<String, _OwnPlaces> _own;
+  /// For an event with several owners, this signer's places in it, which
+  /// give the index and ondex it signs with.
+  final OwnerLayout? layout;
 
   /// Parses [raw] with the core's parser and returns it when it is exactly
   /// this event; throws [NotTheEventExpected] saying the first difference.
@@ -244,11 +256,11 @@ class ExpectedEvent {
       if (!fields.containsKey(f.name))
         return 'it carries a field "${f.name}" that was not asked for';
       if (!seen.add(f.name)) return 'it carries "${f.name}" twice';
-      final own = _own[f.name];
-      if (own != null) {
-        final problem = own.differenceFrom(f.name, f.value);
-        if (problem != null) return problem;
-        continue;
+      if (f.name == 'k' && !PostQuantumCodes.assigned) {
+        final v = f.value;
+        if (v is List && v.any((e) => e is! String || !_isEd25519Key(e))) {
+          return 'its "k" holds a key that is not Ed25519, and no other kind may be revealed yet';
+        }
       }
       if (jsonEncode(f.value) != jsonEncode(fields[f.name])) {
         return 'its "${f.name}" is ${jsonEncode(f.value)}, not ${jsonEncode(fields[f.name])}';
@@ -261,7 +273,8 @@ class ExpectedEvent {
   }
 }
 
-/// The places one owner holds in an event with several (ADR-061 section 6).
+/// The places one owner holds in an event with several (ADR-061 section 6),
+/// in stage one; stage two's layout (`k[2i]`, `k[2i+1]`) comes with stage two.
 ///
 /// The owners are sorted by identifier, as ASCII strings, ascending; owner i
 /// has `k[i]` and `n[2i]`, `n[2i+1]` (classical, then post-quantum), and signs
@@ -300,36 +313,30 @@ class OwnerLayout {
   int get nextPostQuantumIndex => 2 * keyIndex + 1;
 }
 
-/// A list field of which one signer checks its length and its own entries.
-class _OwnPlaces {
-  const _OwnPlaces(this.length, this.mine);
-  final int length;
-  final Map<int, String> mine;
+/// One owner's keys as the ceremony agreed them: its current key and its next
+/// classical and post-quantum digests.
+class OwnerKeys {
+  const OwnerKeys(this.key, this.nextClassical, this.nextPostQuantum);
+  final String key;
+  final String nextClassical;
+  final String nextPostQuantum;
 
-  String? differenceFrom(String name, Object? value) {
-    if (value is! List) return 'its "$name" is not a list';
-    if (value.length != length) {
-      return 'its "$name" has ${value.length} entries, not the $length agreed';
-    }
-    for (final e in value) {
-      if (e is! String || e.isEmpty) {
-        return 'its "$name" holds ${jsonEncode(e)}, which is not a key or digest';
-      }
-    }
-    for (final p in mine.entries) {
-      if (value[p.key] != p.value) {
-        return 'its "$name" holds ${value[p.key]} at place ${p.key}, not this signer\'s ${p.value}';
-      }
-    }
-    // This signer's key or digest anywhere else would count it twice.
-    for (var i = 0; i < value.length; i++) {
-      if (!mine.containsKey(i) && mine.containsValue(value[i])) {
-        return 'its "$name" holds this signer\'s ${value[i]} again at place $i';
-      }
-    }
-    return null;
-  }
+  @override
+  bool operator ==(Object other) =>
+      other is OwnerKeys &&
+      other.key == key &&
+      other.nextClassical == nextClassical &&
+      other.nextPostQuantum == nextPostQuantum;
+
+  @override
+  int get hashCode => Object.hash(key, nextClassical, nextPostQuantum);
 }
+
+/// A transferable Ed25519 public key in qb64: code `D` and 43 more characters.
+bool _isEd25519Key(String k) =>
+    k.length == 44 &&
+    k.startsWith('D') &&
+    RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(k);
 
 /// Whether CESR has assigned codes for an ML-DSA-65 public key and its indexed
 /// signatures. Until it has, no event that reveals a post-quantum key is

@@ -256,23 +256,36 @@ void main() {
   });
 
   group('an event with several owners', () {
-    // Sorted as ASCII: EAlice before EBob, so Bob is owner 1 (k[1], n[2..3]).
-    const alice = 'EAliceAliceAliceAliceAliceAliceAliceAliceAl1';
-    const bob = 'EBobBobBobBobBobBobBobBobBobBobBobBobBobBob12';
-    const aliceKey = 'DAliceKeyAliceKeyAliceKeyAliceKeyAliceKey123';
-    const bobKey = 'DBobKeyBobKeyBobKeyBobKeyBobKeyBobKeyBobKey1';
-    const aliceN = [
-      'EAliceNextAliceNextAliceNextAliceNextAlice12',
-      'EAlicePqAlicePqAlicePqAlicePqAlicePqAlicePq1'
-    ];
-    const bobN = [
-      'EBobNextBobNextBobNextBobNextBobNextBobNext1',
-      'EBobPqBobPqBobPqBobPqBobPqBobPqBobPqBobPqBo1'
-    ];
+    // Sorted as ASCII: alice, bob, carol, so bob is owner 1 (k[1], n[2..3]).
+    String id(String w) => 'E${w.padRight(43, w[0])}';
+    String keyOf(String w) => 'D${w.padRight(43, w[0])}';
+    final alice = id('alice'), bob = id('bob'), carol = id('carol');
+    OwnerKeys keysOf(String w) =>
+        OwnerKeys(keyOf(w), id('${w}next'), id('${w}pq'));
+    final agreed = {
+      carol: keysOf('carol'),
+      bob: keysOf('bob'),
+      alice: keysOf('alice'),
+    };
+    // Any two of three, stage one (ADR-061 section 6).
     const kt = '2';
     const nt = [
-      ['1', '1'],
-      ['1', '1']
+      {
+        '1/2': ['1', '1']
+      },
+      {
+        '1/2': ['1', '1']
+      },
+      {
+        '1/2': ['1', '1']
+      }
+    ];
+    final ks = [keyOf('alice'), keyOf('bob'), keyOf('carol')];
+    final ns = [
+      for (final w in ['alice', 'bob', 'carol']) ...[
+        id('${w}next'),
+        id('${w}pq')
+      ]
     ];
     Map<String, Object?> groupFounding(
             {List<String>? k, List<String>? n, Object nt = nt}) =>
@@ -282,26 +295,20 @@ void main() {
           'i': '',
           's': '0',
           'kt': kt,
-          'k': k ?? [aliceKey, bobKey],
+          'k': k ?? ks,
           'nt': nt,
-          'n': n ?? [...aliceN, ...bobN],
+          'n': n ?? ns,
           'bt': '0',
           'b': [],
           'c': [],
           'a': [],
         };
-    final layout = OwnerLayout([bob, alice], bob);
     final asBob = ExpectedEvent.asOneOfSeveralOwners(
-        t: 'icp',
-        layout: layout,
-        myKey: bobKey,
-        myNextClassical: bobN[0],
-        myNextPostQuantum: bobN[1],
-        kt: kt,
-        nt: nt);
+        t: 'icp', agreed: agreed, me: bob, mine: keysOf('bob'), kt: kt, nt: nt);
 
     test('each owner\'s place comes from the sorted owner list', () {
-      expect(layout.owners, [alice, bob]);
+      final layout = asBob.layout!;
+      expect(layout.owners, [alice, bob, carol]);
       expect(layout.keyIndex, 1);
       expect(layout.nextClassicalIndex, 2);
       expect(layout.nextPostQuantumIndex, 3);
@@ -309,31 +316,137 @@ void main() {
       expect(() => OwnerLayout([alice, alice, bob], bob), throwsArgumentError);
     });
 
-    test('an owner signs the founding that holds its own keys where agreed',
+    test('an owner signs the founding that holds every agreed key in place',
         () async {
       await asBob.requireIn(km, saidified(groupFounding()));
     });
 
+    test(
+        'an owner whose record disagrees with its phrase, or names a key twice, prepares nothing',
+        () {
+      expect(
+          () => ExpectedEvent.asOneOfSeveralOwners(
+              t: 'icp',
+              agreed: agreed,
+              me: bob,
+              mine: keysOf('bobby'),
+              kt: kt,
+              nt: nt),
+          throwsArgumentError);
+      expect(
+          () => ExpectedEvent.asOneOfSeveralOwners(
+              t: 'icp',
+              agreed: {...agreed, carol: keysOf('bob')},
+              me: bob,
+              mine: keysOf('bob'),
+              kt: kt,
+              nt: nt),
+          throwsArgumentError);
+    });
+
     final refused = <String, Map<String, Object?>>{
+      // Alice and Bob would meet "any two" without Carol.
+      'an owner who is not signing replaced by another key':
+          groupFounding(k: [ks[0], ks[1], keyOf('mallory')]),
+      'an owner who is not signing given other next digests':
+          groupFounding(n: [...ns.take(4), id('mallorynext'), id('mallorypq')]),
       'another owner\'s key at this owner\'s index':
-          groupFounding(k: [bobKey, aliceKey]),
-      'another key at this owner\'s index': groupFounding(
-          k: [aliceKey, 'DAnotherKeyAnotherKeyAnotherKeyAnotherKey12']),
+          groupFounding(k: [ks[1], ks[0], ks[2]]),
       'this owner\'s digests swapped':
-          groupFounding(n: [...aliceN, bobN[1], bobN[0]]),
-      'a third owner\'s key added': groupFounding(
-          k: [aliceKey, bobKey, 'DThirdThirdThirdThirdThirdThirdThirdThird1']),
+          groupFounding(n: [ns[0], ns[1], ns[3], ns[2], ns[4], ns[5]]),
+      'a fourth owner\'s key added': groupFounding(k: [...ks, keyOf('dave')]),
       'a threshold the ceremony did not agree': groupFounding(nt: '1'),
-      'this owner\'s key at another owner\'s place too':
-          groupFounding(k: [bobKey, bobKey]),
-      'this owner\'s digest at another owner\'s place too':
-          groupFounding(n: [bobN[0], aliceN[1], ...bobN]),
     };
     refused.forEach((why, fields) {
       test('a founding with $why is not signed', () async {
         await expectLater(asBob.requireIn(km, saidified(fields)),
             throwsA(isA<NotTheEventExpected>()));
       });
+    });
+  });
+
+  // What the parser already refuses, refused by this device's own check too,
+  // so that neither depends on the other.
+  group('the device\'s own check, on events the parser would refuse', () {
+    ParsedEvent parsed(List<List<Object?>> fields, {String i = 'Ed'}) =>
+        ParsedEvent.fromJson({
+          't': 'icp',
+          'd': 'Ed',
+          'i': i,
+          's': 0,
+          'fields': [
+            for (final f in fields) {'name': f[0], 'value': f[1]}
+          ]
+        });
+    final good = [
+      ['v', 'KERI10JSON000000_'],
+      ['t', 'icp'],
+      ['d', 'Ed'],
+      ['i', 'Ed'],
+      ['s', '0'],
+      ['kt', '1'],
+      [
+        'k',
+        [key]
+      ],
+      ['nt', '1'],
+      ['n', next],
+      ['bt', '0'],
+      ['b', []],
+      ['c', []],
+      [
+        'a',
+        [anchor]
+      ],
+    ];
+
+    test('the expected founding passes', () {
+      expect(expectedFounding.differenceFrom(parsed(good)), isNull);
+    });
+
+    test('a field nobody asked for is refused', () {
+      expect(
+          expectedFounding.differenceFrom(parsed([
+            ...good,
+            ['x', 'unasked']
+          ])),
+          contains('not asked for'));
+    });
+
+    test('a field carried twice is refused', () {
+      expect(
+          expectedFounding.differenceFrom(parsed([
+            ...good,
+            ['bt', '0']
+          ])),
+          contains('twice'));
+    });
+
+    test('a field left out is refused', () {
+      expect(
+          expectedFounding.differenceFrom(parsed([
+            for (final f in good)
+              if (f[0] != 'c') f
+          ])),
+          contains('no "c"'));
+    });
+
+    test('a key that is not Ed25519 is refused while no other code exists', () {
+      final pq = ExpectedEvent.founding(
+          keys: ['1AAPpostquantumpostquantumpostquantumpostqua'],
+          next: next,
+          anchors: [anchor]);
+      expect(
+          pq.differenceFrom(parsed([
+            for (final f in good)
+              f[0] == 'k'
+                  ? [
+                      'k',
+                      ['1AAPpostquantumpostquantumpostquantumpostqua']
+                    ]
+                  : f
+          ])),
+          contains('not Ed25519'));
     });
   });
 }

@@ -514,15 +514,19 @@ being signed (section 1), and *P(x)* is the digest of key *x*.
 
 **For an event with several signers** (several owners, a recovery for a
 client, the break-glass root rotation), each signer checks what is its own and
-what was agreed, and the rest it cannot derive. The prepare request names every
-owner's identifier (`owners`), and each signer keeps that list in its own
-record from the ceremony, so it sorts the list and computes section 6's layout
-itself before signing, rather than taking the layout from the core:
+what was agreed. The prepare request names every owner's identifier (`owners`).
+In the ceremony each owner gives the others its current key and its next
+classical and post-quantum digests, and each signer keeps every owner's in its
+own record. So it sorts the owner list, computes section 6's layout itself and
+checks `k` and `n` whole, rather than taking any of it from the core:
 
-- its own current key is in `k` at the index it will sign with;
-- its own next classical and post-quantum digests are in `n` at the places the
-  fixed layout of section 6 gives it;
-- the lengths of `k` and `n`, and `kt` and `nt`, are those the ceremony agreed;
+- `k` and `n` are exactly every owner's agreed key and digests at the places
+  section 6's layout gives them, and its own are those its phrase derives. A
+  signer that checked only its own places would sign an event in which the
+  core had replaced an owner who is not signing, which an "any two of three"
+  threshold lets through;
+- no key or digest appears twice;
+- `kt` and `nt` are those the ceremony agreed;
 - `a`, `b`, `bt`, `br`, `ba` and `c` are as agreed, and every other field
   follows the rule above.
 

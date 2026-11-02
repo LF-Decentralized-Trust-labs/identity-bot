@@ -4,6 +4,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:agent_client/crypto/bip39.dart';
+import 'package:agent_client/crypto/keys.dart';
 import 'package:agent_client/services/key_math.dart';
 import 'package:agent_client/services/the_events_this_device_signed.dart';
 import 'package:agent_client/services/the_key_events_this_device_makes.dart';
@@ -171,6 +172,22 @@ void main() {
         afterSn: 3,
         afterDigest: finished.single.digest);
     expect(step1.sn, 4);
+    // Step 1 commits to the new phrase's keys and to none of the old one's:
+    // an old post-quantum reserve left committed would let the old phrase take
+    // the identity back once that key can be revealed.
+    final step1Event = jsonDecode(utf8.decode(base64Decode(step1.bytesB64)))
+        as Map<String, dynamic>;
+    expect(step1Event['n'], [
+      await km.nextKeyDigest(KeyManager.keyAt(newSeed, 1).publicKeyEncoded),
+      (await km.postQuantumNext(
+              KeyManager.slip10Ed25519(newSeed, KeyPaths.postQuantum(0))))
+          .digest
+    ]);
+    expect(step1Event['k'], [KeyManager.keyAt(seed, 2).publicKeyEncoded]);
+    await expectLater(
+        makes.moveToANewPhrase(seed, Uint8List.fromList(seed),
+            aid: aid, generation: 1, afterSn: 4, afterDigest: step1.digest),
+        throwsArgumentError);
     final step2 = await makes.rotate(newSeed,
         aid: aid, generation: 0, afterSn: 4, afterDigest: step1.digest);
     expect(step2.sn, 5);

@@ -156,21 +156,34 @@ class TheKeyEventsThisDeviceMakes {
   /// rotation after this one so that any interaction a holder of the old
   /// phrase signed in between is superseded.
   Future<Committed> moveToANewPhrase(Uint8List oldSeed, Uint8List newSeed,
-          {required String aid,
-          required int generation,
-          required int afterSn,
-          required String afterDigest,
-          int toad = 0}) =>
-      _rotate('moving to a new phrase',
-          revealing: oldSeed,
-          revealed: generation + 1,
-          committingFrom: newSeed,
-          nextClassical: 1,
-          nextPostQuantum: 0,
-          aid: aid,
-          afterSn: afterSn,
-          afterDigest: afterDigest,
-          toad: toad);
+      {required String aid,
+      required int generation,
+      required int afterSn,
+      required String afterDigest,
+      int toad = 0}) async {
+    if (_sameBytes(oldSeed, newSeed)) {
+      throw ArgumentError('the new phrase is the phrase it replaces');
+    }
+    return await _rotate('moving to a new phrase',
+        revealing: oldSeed,
+        revealed: generation + 1,
+        committingFrom: newSeed,
+        nextClassical: 1,
+        nextPostQuantum: 0,
+        aid: aid,
+        afterSn: afterSn,
+        afterDigest: afterDigest,
+        toad: toad);
+  }
+
+  static bool _sameBytes(Uint8List a, Uint8List b) {
+    if (a.length != b.length) return false;
+    var d = 0;
+    for (var i = 0; i < a.length; i++) {
+      d |= a[i] ^ b[i];
+    }
+    return d == 0;
+  }
 
   Future<Committed> _rotate(String what,
       {required Uint8List revealing,
