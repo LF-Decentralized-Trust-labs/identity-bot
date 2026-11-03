@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"identity-agent-core/internal/validutf8"
 	"log"
 	"reflect"
 	"sort"
@@ -764,48 +765,10 @@ func decodeEvent(stored []byte) (InvocationEvent, error) {
 // the replacement character, before it is signed or stored. The encoder would
 // write a bad byte as the escape \ufffd, which reads back as the replacement
 // character and encodes again raw, so the record would not be the encoding of
-// the event it reads as. Writing the character itself means it is.
-//
-// It walks the event by reflection, into slices and the structs pointers
-// lead to, so a string added to the event or to anything it holds is covered
-// without anyone remembering to list it.
+// the event it reads as. Writing the character itself means it is. The walk is
+// the shared one in internal/validutf8.
 func withValidUTF8(ev InvocationEvent) InvocationEvent {
-	v := reflect.ValueOf(&ev).Elem()
-	validUTF8In(v)
-	return ev
-}
-
-func validUTF8In(v reflect.Value) {
-	switch v.Kind() {
-	case reflect.String:
-		if v.CanSet() {
-			v.SetString(strings.ToValidUTF8(v.String(), "\uFFFD"))
-		}
-	case reflect.Struct:
-		for i := 0; i < v.NumField(); i++ {
-			validUTF8In(v.Field(i))
-		}
-	case reflect.Slice:
-		if v.Len() == 0 || !v.CanSet() {
-			return
-		}
-		// A copy, so the caller's slice is not changed underneath it.
-		cp := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
-		reflect.Copy(cp, v)
-		for i := 0; i < cp.Len(); i++ {
-			validUTF8In(cp.Index(i))
-		}
-		v.Set(cp)
-	case reflect.Ptr:
-		if v.IsNil() || !v.CanSet() {
-			return
-		}
-		// Likewise a copy of what it points to.
-		cp := reflect.New(v.Type().Elem())
-		cp.Elem().Set(v.Elem())
-		validUTF8In(cp.Elem())
-		v.Set(cp)
-	}
+	return validutf8.Of(ev)
 }
 
 // recordEncodingFault says why a record is not the one string its row allows,

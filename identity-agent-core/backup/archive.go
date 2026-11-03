@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/internal/validutf8"
 
 	"identity-agent-core/secureenclave"
 )
@@ -98,7 +99,10 @@ func (c *Collector) CreateArchive(opts CollectOptions, req ExportRequest) (*Expo
 	}
 
 	manifest := NewManifest(aid, tiers, snapshotType)
-	manifest.ExternalPointers = pointers
+	// A locator is a file path, and a path may hold bytes that are not UTF-8.
+	// Made valid here, before anything is derived from the manifest, so the
+	// bytes the mark covers never depend on how an encoder spells a bad byte.
+	manifest.ExternalPointers = validutf8.Of(pointers)
 	manifest.DeltaStateDigestQB64 = req.DeltaStateDigestQB64
 	// Only a full snapshot holds everything. See Manifest.SelfSufficient.
 	manifest.SelfSufficient = snapshotType == SnapshotFull
@@ -361,9 +365,14 @@ func (c *Collector) CreateArchive(opts CollectOptions, req ExportRequest) (*Expo
 	return finishArchive(manifest, ciphertext, tiers, snapshotType, req, c.DataDir)
 }
 
+// validUTF8Manifest is the manifest with every string made valid UTF-8.
+func validUTF8Manifest(m Manifest) Manifest { return validutf8.Of(m) }
+
 func finishArchive(manifest Manifest, ciphertext []byte, tiers []string,
 	snapshotType string, req ExportRequest, dataDir string) (*ExportResult, error) {
 
+	// Every string, whichever way it got here, before it is signed.
+	manifest = validUTF8Manifest(manifest)
 	arch := &ArchiveFile{Manifest: manifest, Ciphertext: ciphertext}
 
 	// Marked with who wrote it, before it is encoded, because the mark covers

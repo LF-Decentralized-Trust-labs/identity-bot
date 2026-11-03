@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/internal/validutf8"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -110,7 +111,7 @@ func (r *Runner) RunOnce(ctx context.Context) error {
 		Timestamp:  time.Now().UTC().Format(time.RFC3339),
 		Platform:   r.signer.Platform(),
 		Signer:     r.signer.Label(),
-		Components: components,
+		Components: validutf8.Of(components),
 		ChainHash:  chainHash,
 	}
 	canonical, err := CanonicalPayload(payload)

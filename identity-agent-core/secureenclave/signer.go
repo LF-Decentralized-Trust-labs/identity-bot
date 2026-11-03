@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/internal/validutf8"
 	"os"
 	"path/filepath"
 	"sync"
@@ -138,8 +139,12 @@ func EncodeSignature(sig []byte) string {
 }
 
 // CanonicalPayload returns deterministic JSON bytes for signing.
+//
+// Every string is made valid UTF-8 first, so the bytes signed never depend on
+// how an encoder spells a bad byte (component names are map keys, and a key
+// is written the same way a value is).
 func CanonicalPayload(v interface{}) ([]byte, error) {
-	return json.Marshal(v)
+	return json.Marshal(validutf8.Of(v))
 }
 
 // VerifySoftwareSignature checks an Ed25519 signature over canonical payload bytes.
