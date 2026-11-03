@@ -955,11 +955,15 @@ void main() {
     // what the identity's real log verifies; the core's rotation is not in it.
     final signed = await keri.signPayload(name: core.aid, data: [1]);
     expect(signed.publicKey, key(0));
+    final injected = core.kel.length - 1;
+    core.posted.clear();
     await expectLater(keri.rotateAid(name: core.aid), throwsException);
-    expect(core.posted, isNot(contains('/api/events/signature')),
-        reason: 'the rotation the core added is never signed');
+    expect(core.posted, isNot(contains('/api/cesr/encode')),
+        reason: 'nothing is signed after the rotation the core added');
     expect(core.posted, isNot(contains('/api/events/commit')),
         reason: 'nothing is built on an event this device did not ask for');
+    expect(core.kel[injected]['sig'], anyOf(isNull, isEmpty),
+        reason: 'the rotation the core added is never signed');
   });
 
   test('an interaction the core added on its own is never signed', () async {
@@ -972,7 +976,12 @@ void main() {
     });
     core.posted.clear();
     await keri.signPayload(name: core.aid, data: [1]);
-    expect(core.posted, isNot(contains('/api/events/signature')),
+    final injected = core.kel.length - 1;
+    core.posted.clear();
+    await expectLater(keri.interactAid(name: core.aid), throwsException);
+    expect(core.posted, isNot(contains('/api/cesr/encode')),
+        reason: 'nothing is signed after the interaction the core added');
+    expect(core.kel[injected]['sig'], anyOf(isNull, isEmpty),
         reason: 'the interaction the core added is never signed');
   });
 

@@ -104,15 +104,30 @@ class LocalCoreKeriService extends KeriService {
             keyInForce: KeyManager.keyAt(seed, legacy.index).publicKeyEncoded,
             generation: legacy.index,
             tip: (sn: legacy.nextSequenceNumber - 1, digest: legacy.tipDigest),
-            witnesses: WitnessSet.none,
+            // The witnesses and threshold the identity has, as its core
+            // keeps them; the threshold travels into the next rotation, so it
+            // is never set to nothing because copies could not be read.
+            witnesses: WitnessSet([
+              for (final w in (legacy.establishment['b'] as List? ?? const []))
+                '$w'
+            ],
+                int.tryParse('${legacy.establishment['bt'] ?? '0'}',
+                        radix: 16) ??
+                    0),
             fromItsOwnRecord: false,
             corroborated: false);
       }
     }
-    return TheKeyStateThisDeviceReads(_client, _km, _baseUrl, held: _held)
-        .read(seed)
-        .catchError((Object _) => _readTheCopies(seed),
-            test: (e) => e is TheWitnessesDoNotSay);
+    try {
+      return await TheKeyStateThisDeviceReads(_client, _km, _baseUrl,
+              held: _held)
+          .read(seed);
+    } on TheWitnessesDoNotSay {
+      // Read again taking the core's own copy only where no witness can be
+      // asked at all; otherwise the witnesses' silence stands.
+      if (h.witnessAddresses.isNotEmpty) rethrow;
+      return _readTheCopies(seed);
+    }
   }
 
   /// The key state read from the copies. Where this device knows no witness

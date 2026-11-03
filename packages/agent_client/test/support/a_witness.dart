@@ -46,6 +46,11 @@ class AWitness {
   /// Answers in another witness's name.
   bool namesAnother = false;
 
+  /// Signs, as the end of the log it holds, a digest that is not the digest
+  /// of the event its copy ends on: what a wrong address relaying a real
+  /// witness's signed answer beside another copy amounts to.
+  bool signsAnotherTip = false;
+
   /// The identities it has agreed to witness, or null for any. A real witness
   /// agrees through `witness/request` first, and refuses any other identity
   /// with `403 not_witnessing`.
@@ -65,6 +70,7 @@ class AWitness {
   void forgetAll() {
     held.clear();
     _digests.clear();
+    signsAnotherTip = false;
   }
 
   Future<void> close() => _server.close(force: true);
@@ -92,7 +98,7 @@ class AWitness {
         final nonce = req.uri.queryParameters['nonce'] ?? '';
         final log = _digests[a] ?? const [];
         final sn = log.length - 1;
-        final said = sn < 0 ? '' : log[sn];
+        final said = sn < 0 ? '' : (signsAnotherTip ? 'E${'x' * 43}' : log[sn]);
         _json(req.response, 200, {
           'aid': a,
           'nonce': nonce,

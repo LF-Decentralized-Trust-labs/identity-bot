@@ -169,12 +169,16 @@ class TheWitnessesOfThisDevicesEvents {
           if (base == null) return;
           final tip = await _tip(base, w, aid);
           if (tip == null) return;
-          if (tip < sn) {
+          if (tip.sn < sn) {
             out[w] = null;
             return;
           }
-          final st = await _verifiedCopy(base, aid, sn);
-          if (st != null && st.sn == sn) out[w] = Held(st.digest, st.ilk);
+          // The whole copy up to the tip the witness signed, so the event at
+          // [sn] is the one in the history it vouches for.
+          final st = await _signedCopy(base, aid, tip);
+          if (st == null) return;
+          final at = st.events[sn];
+          out[w] = Held(at.digest, at.ilk);
         }()
     ]);
     return out;
@@ -188,9 +192,19 @@ class TheWitnessesOfThisDevicesEvents {
     final base = _where.whereIs(w);
     if (base == null) return null;
     final tip = await _tip(base, w, aid);
-    if (tip == null || tip < 0) return null;
-    final st = await _verifiedCopy(base, aid, tip);
-    return st != null && st.sn == tip ? st : null;
+    if (tip == null || tip.sn < 0) return null;
+    return _signedCopy(base, aid, tip);
+  }
+
+  /// The copy at [base] up to [tip], judged from the founding, and ending in
+  /// the event whose digest the witness signed: a copy served at a wrong
+  /// address cannot pass for the witness's own.
+  Future<LogState?> _signedCopy(
+      Uri base, String aid, ({int sn, String said}) tip) async {
+    final st = await _verifiedCopy(base, aid, tip.sn);
+    if (st == null || st.sn != tip.sn || st.digest != tip.said) return null;
+    if (st.events.length != tip.sn + 1) return null;
+    return st;
   }
 
   Future<(_Answer, String?)> _receiptFrom(String w, WitnessSet set, String aid,
@@ -266,7 +280,7 @@ class TheWitnessesOfThisDevicesEvents {
   /// pass on.
   Future<void> _fillUpTo(
       String w, Uri base, WitnessSet set, String aid, int sn) async {
-    final has = await _tip(base, w, aid);
+    final has = (await _tip(base, w, aid))?.sn;
     if (has == null) return;
     for (var k = has + 1; k < sn; k++) {
       SignedCopy? copy;
@@ -281,10 +295,11 @@ class TheWitnessesOfThisDevicesEvents {
     }
   }
 
-  /// How far witness [w] holds [aid]'s log, from its signed answer to a fresh
-  /// nonce: -1 when it holds nothing, null when it cannot be reached or its
-  /// answer does not check.
-  Future<int?> _tip(Uri base, String w, String aid) async {
+  /// How far witness [w] holds [aid]'s log, and the digest of the event it
+  /// ends on, from its signed answer to a fresh nonce: sequence number -1 when
+  /// it holds nothing, null when it cannot be reached or its answer does not
+  /// check.
+  Future<({int sn, String said})?> _tip(Uri base, String w, String aid) async {
     final nonce = base64Url
         .encode(List<int>.generate(16, (_) => Random.secure().nextInt(256)))
         .replaceAll('=', '');
@@ -306,7 +321,7 @@ class TheWitnessesOfThisDevicesEvents {
               w, 'witness-kel-tip/v1\n$aid\n$nonce\n$sn\n$said', sig)) {
         return null;
       }
-      return sn;
+      return (sn: sn, said: said);
     } catch (_) {
       return null;
     }

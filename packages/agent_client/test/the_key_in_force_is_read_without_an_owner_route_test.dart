@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:agent_client/crypto/bip39.dart';
 import 'package:agent_client/crypto/keys.dart';
 import 'package:agent_client/services/key_math.dart';
+import 'package:agent_client/services/local_core_keri_service.dart';
+import 'package:agent_client/services/secure_key_store.dart';
 import 'package:agent_client/services/signing_an_event.dart';
 import 'package:agent_client/services/the_identity_this_device_holds.dart';
 import 'package:agent_client/services/the_key_events_this_device_makes.dart';
@@ -68,8 +70,9 @@ void main() {
         at('w2', [icp, ixn]),
         at('w3', [icp, ixn]),
       ];
-      final c = TheKeyStateThisDeviceReads.combine(aid, copies);
-      expect((c.establishment.digest, c.tip.digest), ('E0', 'E1'));
+      expect(() => TheKeyStateThisDeviceReads.combine(aid, copies),
+          throwsA(isA<TheWitnessesDoNotSay>()),
+          reason: 'a rotation one witness holds is not signed over');
       expect(
           () => TheKeyStateThisDeviceReads.combine(aid, copies,
               made: [(sn: 2, digest: 'E2')]),
@@ -117,6 +120,49 @@ void main() {
               ]),
           throwsA(anyOf(isA<TheLogHasTwoHistories>(),
               isA<TheCopiesAreBehindThisDevice>())));
+    });
+
+    test(
+        'an establishment event this device made must stand in the history '
+        'chosen, whatever holds its place', () {
+      final replaced = _ev(2, 'E2ixn', 'ixn', w: names, toad: 2);
+      final later = _ev(3, 'E3', 'rot', w: names, toad: 2);
+      expect(
+          () => TheKeyStateThisDeviceReads.combine(aid, [
+                at('w1', [icp, ixn, replaced, later]),
+                at('w2', [icp, ixn, replaced, later]),
+              ], made: [
+                (sn: 2, digest: 'E2')
+              ]),
+          throwsA(
+              isA<TheLogHasTwoHistories>().having((e) => e.sn, 'place', 2)));
+    });
+
+    test(
+        'only the witnesses an event names count toward its quorum, and the '
+        'core\'s copy never does', () {
+      final stranger = 'B${'9' * 43}';
+      final copies = [
+        at('w1', [icp, ixn, rot]),
+        LogCopy('witness $stranger', [icp, ixn, rot], witness: stranger),
+        LogCopy('the discovery record', [icp, ixn, rot]),
+        at('w2', [icp, ixn]),
+        at('w3', [icp, ixn]),
+      ];
+      expect(() => TheKeyStateThisDeviceReads.combine(aid, copies),
+          throwsA(isA<TheWitnessesDoNotSay>()));
+    });
+
+    test('a copy that has not caught up does not cut the interactions short',
+        () {
+      final a = _ev(3, 'E3a', 'ixn', w: names, toad: 2);
+      final b = _ev(4, 'E4a', 'ixn', w: names, toad: 2);
+      final c = TheKeyStateThisDeviceReads.combine(aid, [
+        at('w1', [icp, ixn, rot, a, b]),
+        at('w2', [icp, ixn, rot, a]),
+        at('w3', [icp, ixn, rot]),
+      ]);
+      expect(c.tip.digest, 'E4a');
     });
 
     test('nothing read from the witnesses is no key state, unless asked', () {
@@ -253,6 +299,48 @@ void main() {
       await TheIdentityThisDeviceHolds().forgetTheTip();
       await expectLater(
           reader().read(seed), throwsA(isA<TheCopiesAreBehindThisDevice>()));
+    });
+
+    test(
+        'a copy served beside a witness\'s signed answer for another history '
+        'is not counted as that witness\'s', () async {
+      final m = makes();
+      await m.found(seed, witnesses: [w1.aid, w2.aid, w3.aid], toad: 2);
+      await TheIdentityThisDeviceHolds().forgetTheTip();
+      expect((await reader().read(seed)).corroborated, isTrue);
+      w1.signsAnotherTip = true;
+      w2.signsAnotherTip = true;
+      await TheIdentityThisDeviceHolds().forgetTheTip();
+      await expectLater(
+          reader().read(seed), throwsA(isA<TheWitnessesDoNotSay>()));
+    });
+
+    test(
+        'the app rotates, interacts and signs as its identity reading no owner '
+        'route at all', () async {
+      await SecureKeyStore.saveMnemonic(
+          'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
+              .split(' '));
+      final keri =
+          LocalCoreKeriService(baseUrl: core.base, client: reads, keyMath: km);
+      final founded = await keri.inceptAid(
+          name: 'me',
+          code:
+              'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about');
+      reads.reads.clear();
+      await keri.rotateAid(name: founded.aid);
+      await keri.interactAid(name: founded.aid, sealData: const [
+        {
+          'i': 'EAnchoredAnchoredAnchoredAnchoredAnchored12',
+          's': '0',
+          'd': 'EAnchoredAnchoredAnchoredAnchoredAnchored12'
+        }
+      ]);
+      final signed = await keri.signPayload(name: founded.aid, data: [1, 2]);
+      expect(signed.publicKey, KeyManager.keyAt(seed, 1).publicKeyEncoded);
+      expect(reads.reads.where((p) => !p.startsWith('/public/')), isEmpty,
+          reason: 'every read of the core was of a public route: '
+              '${reads.reads}');
     });
 
     test('two copies that differ at a rotation stop signing', () async {

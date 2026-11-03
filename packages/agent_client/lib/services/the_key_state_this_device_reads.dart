@@ -240,7 +240,10 @@ class TheKeyStateThisDeviceReads {
         fromItsOwnRecord: false,
         corroborated: read.corroborated,
         movingToThisPhrase: moving);
-    if (!moving) {
+    // Only what enough witnesses corroborate becomes this device's record:
+    // the core's copy alone is read, used once, and never remembered as if
+    // this device had made it.
+    if (!moving && read.corroborated) {
       await _held.readFromCopies(
           aid: aid,
           establishment: state.establishment,
@@ -284,6 +287,13 @@ class TheKeyStateThisDeviceReads {
   /// Combines verified [copies] of [aid]'s log as ADR-061 section 9 says,
   /// with [made], the establishment events this device made, as one more
   /// source.
+  ///
+  /// A rotation in one copy where another holds an interaction is not two
+  /// histories: a recovery rotation replaces interactions, and a copy holding
+  /// the interaction has not caught up. Only a copy agreeing with the chosen
+  /// establishment event is read past it, and an establishment event this
+  /// device made must stand in the history chosen, whatever else holds its
+  /// place.
   static CombinedLog combine(String aid, List<LogCopy> copies,
       {List<Place> made = const [], bool acceptTheCoreAlone = false}) {
     // Different establishment events at one place, anywhere.
@@ -345,6 +355,20 @@ class TheKeyStateThisDeviceReads {
       if (m.sn > chosen.sn) {
         throw TheCopiesAreBehindThisDevice(
             aid, m, (sn: chosen.sn, digest: chosen.digest));
+      }
+    }
+
+    // A rotation after it that too few witnesses hold leaves this device
+    // unable to say which key is in force: nothing is signed over it.
+    for (final c in copies) {
+      for (final e in c.events.skip(chosen.sn + 1)) {
+        if (e.establishment) {
+          throw TheWitnessesDoNotSay(
+              aid,
+              'the establishment event at sequence number ${e.sn} '
+              '(${c.source}) is held by too few of its witnesses to say whether '
+              'it is in force');
+        }
       }
     }
 
