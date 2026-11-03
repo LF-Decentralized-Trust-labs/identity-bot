@@ -104,6 +104,42 @@ func (c *capturePoster) lastAccept() AcceptCallback {
 	return AcceptCallback{}
 }
 
+// identityKey is a new identity signing key as a contact record holds it, and
+// its seed.
+func identityKey(t *testing.T) (string, []byte) {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return iacrypto.NonTransferableAIDQB64(pub), priv.Seed()
+}
+
+// lastRequest is the witness request that was posted, as the receiver sees it.
+func (c *capturePoster) lastRequest(t *testing.T) WitnessRequest {
+	t.Helper()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i := len(c.posts) - 1; i >= 0; i-- {
+		if strings.Contains(c.posts[i].URL, "/api/witness/request") {
+			var m struct {
+				RequesterAID    string `json:"requester_aid"`
+				RequesterOOBI   string `json:"requester_oobi"`
+				BackendType     string `json:"backend_type"`
+				CoversDelegates bool   `json:"covers_delegates"`
+				RequestID       string `json:"request_id"`
+				Stamp           string `json:"stamp"`
+				Signature       string `json:"signature"`
+			}
+			_ = json.Unmarshal(c.posts[i].Body, &m)
+			return WitnessRequest{RequesterAID: m.RequesterAID, RequesterOOBI: m.RequesterOOBI, BackendType: m.BackendType,
+				CoversDelegates: m.CoversDelegates, RequestID: m.RequestID, Stamp: m.Stamp, Signature: m.Signature}
+		}
+	}
+	t.Fatal("no witness request was posted")
+	return WitnessRequest{}
+}
+
 func agentService(t *testing.T, aid string, mc *memContacts) *Service {
 	t.Helper()
 	s, _, _ := signingAgent(t, aid, mc)
@@ -136,11 +172,17 @@ func witnessKey() (string, []byte) {
 // answerFrom is a witness's answer to requester, signed with the seed of the
 // witness key it names.
 func answerFrom(responder, requester, key, decision string, seed []byte, at time.Time) AcceptCallback {
+	return answerTo("sent", responder, requester, key, decision, seed, at)
+}
+
+// answerTo is answerFrom to the request named requestID.
+func answerTo(requestID, responder, requester, key, decision string, seed []byte, at time.Time) AcceptCallback {
 	cb := AcceptCallback{
+		RequestID:    requestID,
 		RequesterAID: requester, ResponderAID: responder, Decision: decision,
 		BackendType: BackendDesktop, WitnessKey: key, Stamp: at.UTC().Format(time.RFC3339Nano),
 	}
-	cb.Signature, _ = login.SignString(AcceptStatement(cb.RequesterAID, cb.ResponderAID, cb.WitnessKey, cb.Decision, cb.BackendType, cb.Stamp), seed)
+	cb.Signature, _ = login.SignString(AcceptStatement(cb.RequesterAID, cb.ResponderAID, cb.WitnessKey, cb.Decision, cb.BackendType, cb.RequestID, cb.Stamp), seed)
 	return cb
 }
 
@@ -171,16 +213,20 @@ func TestMutualEnrollmentPostBack(t *testing.T) {
 	sB.RecordContactCapability(aidA, BackendDesktop, keyA, "")
 	sA.PostEvent = cap.post
 	sB.PostEvent = cap.post
+	// A signs as its identity, which B holds the key of through the contact.
+	pubA, seedA := identityKey(t)
+	cA := mcB.contacts[aidA]
+	cA.PublicKey = pubA
+	mcB.contacts[aidA] = cA
+	sA.SignAsRequester = func(st string) (string, error) { return login.SignString(st, seedA) }
 
 	// A sends outbound request to B.
 	if err := sA.SendWitnessRequest(context.Background(), aidB); err != nil {
 		t.Fatal(err)
 	}
 
-	// B receives the enrollment request and POSTs accept back to A.
-	result := sB.ProcessInboundRequest(context.Background(), WitnessRequest{
-		RequesterAID: aidA, RequesterOOBI: sA.OurOOBI(), BackendType: BackendDesktop,
-	})
+	// B receives the enrollment request A sent and POSTs accept back to A.
+	result := sB.ProcessInboundRequest(context.Background(), cap.lastRequest(t))
 	if !result.Accepted {
 		t.Fatalf("B should accept A: %s", result.Reason)
 	}
@@ -248,7 +294,7 @@ func TestApplyAcceptCallbackCompletesTask(t *testing.T) {
 	sA := agentService(t, aidA, mcA)
 	key, seed := witnessKey()
 	sA.RecordContactCapability(aidB, BackendDesktop, key, "")
-	if err := sA.ApplyAcceptCallback(answerFrom(aidB, aidA, key, "accepted", seed, time.Now())); err != nil {
+	if err := sA.ApplyAcceptCallback(answerTo("t1", aidB, aidA, key, "accepted", seed, time.Now())); err != nil {
 		t.Fatal(err)
 	}
 	tasks, _ := mcA.GetTasks()

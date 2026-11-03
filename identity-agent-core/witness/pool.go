@@ -34,7 +34,7 @@ func (s *Service) SendWitnessRequest(ctx context.Context, contactAID string) err
 	if err := s.Contacts.SaveTask(task); err != nil {
 		return err
 	}
-	if _, err := s.postWitnessRequest(ctx, c, covers); err != nil {
+	if _, err := s.postWitnessRequest(ctx, c, task.ID, covers); err != nil {
 		_ = s.completeTask(task, "failed", fmt.Sprintf("The request could not be sent: %v", err))
 		return err
 	}
@@ -43,7 +43,7 @@ func (s *Service) SendWitnessRequest(ctx context.Context, contactAID string) err
 
 // postWitnessRequest sends a witness request, signed by this agent's
 // identity where it can sign, and returns the witness's answer.
-func (s *Service) postWitnessRequest(ctx context.Context, c *store.ContactRecord, covers bool) (map[string]interface{}, error) {
+func (s *Service) postWitnessRequest(ctx context.Context, c *store.ContactRecord, requestID string, covers bool) (map[string]interface{}, error) {
 	req := map[string]interface{}{
 		"requester_aid":  s.ourAID(),
 		"requester_oobi": s.ourOOBI(),
@@ -51,12 +51,13 @@ func (s *Service) postWitnessRequest(ctx context.Context, c *store.ContactRecord
 		// Whether this identity asks for the identities it delegates to be
 		// witnessed too.
 		"covers_delegates": covers,
+		"request_id":       requestID,
 	}
 	if s.SignAsRequester != nil {
 		// To the nanosecond: a witness acts only on a stamp newer than the
 		// last, and two requests in one second are not a replay.
 		stamp := time.Now().UTC().Format(time.RFC3339Nano)
-		if sig, err := s.SignAsRequester(RequestStatement(s.ourAID(), c.AID, covers, stamp)); err == nil {
+		if sig, err := s.SignAsRequester(RequestStatement(s.ourAID(), c.AID, s.ourOOBI(), requestID, covers, stamp)); err == nil {
 			req["stamp"], req["signature"] = stamp, sig
 		}
 	}
@@ -81,7 +82,7 @@ func (s *Service) AskToCoverDelegatesOf(ctx context.Context, designated []string
 			declined[key] = "no contact to ask"
 			continue
 		}
-		out, err := s.postWitnessRequest(ctx, c, true)
+		out, err := s.postWitnessRequest(ctx, c, "", true)
 		if err != nil {
 			declined[key] = err.Error()
 			continue

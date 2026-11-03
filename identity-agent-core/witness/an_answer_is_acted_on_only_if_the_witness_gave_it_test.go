@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -45,7 +46,7 @@ func nothingChanged(t *testing.T, s *Service, mc *memContacts, aid string) {
 	if meta, _ := s.Store.GetContactMeta(aid); meta != nil && meta.EnrolledAt != "" {
 		t.Fatalf("%s was enrolled: %+v", aid, meta)
 	}
-	if task, _ := s.pendingSentTask(witnessAID); task == nil {
+	if task, _ := s.pendingSentTask(witnessAID, "sent"); task == nil {
 		t.Fatal("the request to the witness is no longer waiting for its real answer")
 	}
 }
@@ -140,7 +141,7 @@ func TestAnUnsignedDeclineDoesNotCloseTheRequest(t *testing.T) {
 	if err := s.ApplyAcceptCallback(answerFrom(witnessAID, askerAID, key, "declined", seed, time.Now())); err != nil {
 		t.Fatalf("the witness's own decline was refused: %v", err)
 	}
-	if task, _ := s.pendingSentTask(witnessAID); task != nil {
+	if task, _ := s.pendingSentTask(witnessAID, "sent"); task != nil {
 		t.Fatal("the witness's own decline did not close the request")
 	}
 }
@@ -172,7 +173,11 @@ func TestAnAnswerArrivingBeforeTheRequestReturnsIsActedOn(t *testing.T) {
 	s.RecordContactCapability(witnessAID, BackendDesktop, key, "")
 	var answered error
 	s.PostEvent = func(ctx context.Context, url string, body []byte) (map[string]interface{}, error) {
-		answered = s.ApplyAcceptCallback(answerFrom(witnessAID, askerAID, key, "accepted", seed, time.Now()))
+		var sent struct {
+			RequestID string `json:"request_id"`
+		}
+		_ = json.Unmarshal(body, &sent)
+		answered = s.ApplyAcceptCallback(answerTo(sent.RequestID, witnessAID, askerAID, key, "accepted", seed, time.Now()))
 		return map[string]interface{}{"status": "accepted"}, nil
 	}
 	if err := s.SendWitnessRequest(context.Background(), witnessAID); err != nil {
