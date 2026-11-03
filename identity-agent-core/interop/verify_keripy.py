@@ -1,0 +1,69 @@
+"""Judge the logs identity-agent-core produces with keripy's own validator.
+
+Cases come from server/key_events_keripy_judges_test.go (see its header): each
+is a whole signed key log as one CESR stream, plus any witness receipts. Every
+case is given to a fresh Kevery in a single parse, so keripy finds each message
+boundary itself, then the escrows are drained (a witnessed event waits there
+for its receipts). A case passes only if keripy ends at the log's last event.
+
+    python3 -I interop/verify_keripy.py /tmp/cases.json     # needs keri==1.3.6
+
+Exit status is non-zero if keripy refuses anything, or runs a version other
+than the one this is meant for. Modelled on keri-go's interop/verify_interop.py
+(judge_stream), which it does not copy: see interop/README.md.
+"""
+
+import base64
+import importlib.metadata
+import json
+import sys
+import tempfile
+
+from keri.core import eventing, parsing, serdering
+from keri.db import basing
+
+KERIPY = "1.3.6"
+
+
+def d(b64):
+    return base64.b64decode(b64)
+
+
+def judge(case):
+    # A fresh database per case, so one log cannot lend another its state.
+    with tempfile.TemporaryDirectory() as tmp, basing.openDB(name="x3", temp=True, headDirPath=tmp) as db:
+        kvy = eventing.Kevery(db=db, lax=True, local=True)
+        parsing.Parser(kvy=kvy).parse(ims=bytearray(d(case["message_b64"])))
+        for extra in case.get("extra_b64") or []:
+            parsing.Parser(kvy=kvy).parse(ims=bytearray(d(extra)))
+        kvy.processEscrows()
+        last = serdering.SerderKERI(raw=d(case["event_b64"]))
+        kever = kvy.kevers.get(last.pre)
+        if kever is None:
+            return False, "nothing was established"
+        if kever.serder.said != last.said:
+            return False, f"keripy stopped at sn={kever.sn} {kever.serder.said}, the log ends at {last.said}"
+        return True, f"sn={kever.sn}"
+
+
+def main(path):
+    have = importlib.metadata.version("keri")
+    if have != KERIPY:
+        print(f"keripy {have} is installed, this judges against {KERIPY}")
+        return 2
+    with open(path) as f:
+        cases = json.load(f)
+    refused = 0
+    for case in cases:
+        try:
+            ok, detail = judge(case)
+        except Exception as exc:  # noqa: BLE001 - report, never mask
+            ok, detail = False, f"{type(exc).__name__}: {exc}"
+        print(f"  {'accepted' if ok else 'REFUSED '} {case['label']:34} {detail}")
+        refused += not ok
+    print(f"\nkeripy {have}: {len(cases) - refused} accepted, {refused} refused, out of {len(cases)}")
+    return 1 if refused or not cases else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1]))
