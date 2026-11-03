@@ -1,12 +1,11 @@
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
 import '../crypto/owner_signature.dart';
-import 'the_core_is_settled.dart';
+import 'signs_before_it_sends.dart';
+export 'signs_before_it_sends.dart' show ThisMachineCouldNotSign;
 import 'the_path_a_signature_covers.dart';
-import 'the_owner_at_this_computer.dart';
 
 /// Reaching an Identity Agent that runs on a different machine.
 ///
@@ -37,16 +36,15 @@ import 'the_owner_at_this_computer.dart';
 /// nobody, with nothing reporting a problem. Sending it unsigned is the same
 /// failure one step later: the agent's refusal reads as "you are not allowed",
 /// when the truth is "this machine has not finished starting".
-class ControllerSigningClient extends http.BaseClient {
+class ControllerSigningClient extends SignsBeforeItSends {
   ControllerSigningClient({
     required this.agentOrigin,
     required this.localCoreOrigin,
     this.agentAid,
     this.authentication,
-    this.waitAtMost = const Duration(seconds: 90),
-    http.Client? inner,
-  })  : _inner = ProvingThisComputer.over(inner),
-        _ownsInner = inner == null;
+    super.waitAtMost = const Duration(seconds: 90),
+    super.inner,
+  }) : super(signedOrigin: agentOrigin);
 
   /// The agent this app is a front end for, as scheme://host:port.
   /// Requests anywhere else are passed through untouched.
@@ -80,134 +78,47 @@ class ControllerSigningClient extends http.BaseClient {
   /// actions that need one — which is the correct outcome and a legible one.
   final Future<VouchedAuthentication?> Function()? authentication;
 
-  /// How long a request waits for [TheCoreIsSettled] before it is refused.
-  final Duration waitAtMost;
-
-  final http.Client _inner;
-
-  /// Whether this wrapper created [_inner] and so may close it. When the inner
-  /// client was handed in — the poll wraps one shared client per attempt — it is
-  /// borrowed, and closing it would shut a transport the caller still needs. The
-  /// first successful poll did exactly that, closing the client the next call
-  /// then found already closed.
-  final bool _ownsInner;
-
-  @override
-  Future<http.StreamedResponse> send(http.BaseRequest request) async {
-    if (!_isTheAgent(request.url)) {
-      return _inner.send(request);
-    }
-    await _untilTheCoreIsSettled(request.url);
-
-    // Any request to the agent is signed, however it was built. A streamed or
-    // multipart body is read once, here, into the bytes that are both signed and
-    // sent — passing it through would be an unsigned request to the agent.
-    final http.Request plain;
-    if (request is http.Request) {
-      plain = request;
-    } else {
-      plain = http.Request(request.method, request.url)
-        ..headers.addAll(request.headers)
-        ..bodyBytes = await request.finalize().toBytes()
-        ..followRedirects = request.followRedirects
-        ..maxRedirects = request.maxRedirects
-        ..persistentConnection = request.persistentConnection;
-    }
-
-    final headers = await _askThisMachineToSign(plain);
-    final signed = http.Request(plain.method, plain.url)
-      ..headers.addAll(plain.headers)
-      ..bodyBytes = plain.bodyBytes
-      ..followRedirects = plain.followRedirects
-      ..maxRedirects = plain.maxRedirects
-      ..persistentConnection = plain.persistentConnection;
-    signed.headers.addAll(headers);
-    return _inner.send(signed);
-  }
-
-  /// Holds the request while this app is starting its core or switching profile.
-  ///
-  /// Refuses, rather than sends, if it never settles or the start did not work.
-  Future<void> _untilTheCoreIsSettled(Uri url) async {
-    try {
-      await TheCoreIsSettled.ready.timeout(waitAtMost);
-    } on TimeoutException {
-      throw ThisMachineCouldNotSign(
-          'this app is still starting up, try again in a moment', url);
-    }
-    if (!TheCoreIsSettled.worked) {
-      throw ThisMachineCouldNotSign(
-          'this app could not finish starting, so it has no core to sign with',
-          url);
-    }
-  }
-
   /// Asks the local core to sign this request as this machine.
   ///
   /// Throws [ThisMachineCouldNotSign] when it will not. A locked machine, a core
   /// still starting, or hardware that cannot hold a key are ordinary states, and
   /// each is reported as what it is rather than sent on as a request the agent
   /// can only answer with a refusal that blames the person.
-  Future<Map<String, String>> _askThisMachineToSign(http.Request request) async {
+  @override
+  Future<Map<String, String>> headersFor(http.Request request) async {
     final vouched = await authentication?.call();
-    final core = localCoreOrigin();
-    final http.Response res;
-    try {
-      res = await _inner.post(
-        Uri.parse('$core/api/controller/sign'),
-        headers: const {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'method': request.method,
-          // The path the agent will actually verify — its own, with no host and
-          // no relay mount prefix. A signature over the host breaks when a relay
-          // renames it; a signature over the mount prefix breaks because a
-          // path-mounting relay strips that prefix before the agent sees the
-          // request, so the agent verifies `/api/…` and a prefixed signature
-          // matches nothing. pathSignatureCovers removes the prefix, and leaves
-          // a bare origin's path untouched.
-          'path': pathSignatureCovers(agentOrigin, request.url),
-          'body_b64': base64.encode(request.bodyBytes),
-          if (vouched != null) 'auth_level': vouched.level,
-          if (vouched != null) 'auth_at': vouched.at.toUtc().toIso8601String(),
-          if (vouched != null) 'auth_score': vouched.score,
-          if (agentAid != null) 'for': agentAid,
-        }),
-      );
-    } catch (e) {
-      throw ThisMachineCouldNotSign(
-          'the core on this computer at $core could not be reached ($e)',
-          request.url);
-    }
-    if (res.statusCode != 200) {
-      throw ThisMachineCouldNotSign(
-          'the core on this computer at $core answered ${res.statusCode}',
-          request.url);
-    }
-
-    final Map<String, dynamic> body;
-    try {
-      body = jsonDecode(res.body) as Map<String, dynamic>;
-    } catch (_) {
-      throw ThisMachineCouldNotSign(
-          'the core on this computer at $core answered with something that is '
-          'not a signature',
-          request.url);
-    }
-    final aid = (body['controller_aid'] ?? '').toString();
-    final sig = (body['signature'] ?? '').toString();
-    final stamp = (body['timestamp'] ?? '').toString();
+    final body = await askTheCoreToSign(
+      localCoreOrigin(),
+      '/api/controller/sign',
+      {
+        'method': request.method,
+        // The path the agent will actually verify — its own, with no host and
+        // no relay mount prefix. A signature over the host breaks when a relay
+        // renames it; a signature over the mount prefix breaks because a
+        // path-mounting relay strips that prefix before the agent sees the
+        // request, so the agent verifies `/api/…` and a prefixed signature
+        // matches nothing. pathSignatureCovers removes the prefix, and leaves
+        // a bare origin's path untouched.
+        'path': pathSignatureCovers(agentOrigin, request.url),
+        'body_b64': base64.encode(request.bodyBytes),
+        if (vouched != null) 'auth_level': vouched.level,
+        if (vouched != null) 'auth_at': vouched.at.toUtc().toIso8601String(),
+        if (vouched != null) 'auth_score': vouched.score,
+        if (agentAid != null) 'for': agentAid,
+      },
+      request.url,
+      mustHave: const {
+        'controller_aid': 'its identifier',
+        'signature': 'a signature',
+        'timestamp': 'a timestamp',
+      },
+    );
+    final aid = body['controller_aid'].toString();
+    final sig = body['signature'].toString();
+    final stamp = body['timestamp'].toString();
     // Which Identity Agent the core signed this for. Echoed rather than
     // filled in here, because it is inside the signature.
     final signedFor = (body['for'] ?? '').toString();
-    if (aid.isEmpty || sig.isEmpty || stamp.isEmpty) {
-      throw ThisMachineCouldNotSign(
-          'the core on this computer at $core answered without ${[
-            if (aid.isEmpty) 'its identifier',
-            if (sig.isEmpty) 'a signature',
-            if (stamp.isEmpty) 'a timestamp',
-          ].join(' or ')}',
-          request.url);
-    }
 
     return {
       'X-IA-Controller-AID': aid,
@@ -233,39 +144,6 @@ class ControllerSigningClient extends http.BaseClient {
         'X-IA-Auth-Level-Vouched-By': vouched!.vouchedBy,
     };
   }
-
-  /// Whether a URL belongs to the agent this app is a front end for.
-  ///
-  /// Compared on scheme, host and port rather than on a prefix, because a
-  /// prefix test accepts `https://agent.example.com.attacker.test` as the
-  /// agent — a real way to be handed this machine's signature.
-  bool _isTheAgent(Uri url) {
-    final own = Uri.tryParse(agentOrigin);
-    if (own == null || own.host.isEmpty) return false;
-    return url.scheme == own.scheme &&
-        url.host == own.host &&
-        url.port == own.port;
-  }
-
-  @override
-  void close() {
-    // Only what this wrapper created. A borrowed inner belongs to the caller,
-    // which closes it — closing it here would break the caller's next request.
-    if (_ownsInner) _inner.close();
-    super.close();
-  }
-}
-
-/// This machine would not sign a request to the agent, so the request was not
-/// sent.
-///
-/// A [http.ClientException] so everything that already treats a failed request
-/// as "could not reach it" treats this the same way, instead of crashing on a
-/// type nobody expects. [message] says why, in terms a person can act on.
-class ThisMachineCouldNotSign extends http.ClientException {
-  ThisMachineCouldNotSign(String why, Uri url)
-      : super('This computer could not sign the request, so it was not sent: '
-            '$why.', url);
 }
 
 /// How well the person was authenticated, as established by the device holding

@@ -51,7 +51,16 @@ class TheCoreIsSettled {
   }
 
   /// Completes when nothing is starting or switching.
-  static Future<void> get ready => _settled.future;
+  ///
+  /// A loop and not one wait: the waiters resume a microtask after the last
+  /// [during] ends, and a new one can begin in that gap. Resuming on the old,
+  /// completed signal would let a request out in the middle of that switch, so
+  /// the gate is looked at again after every wake.
+  static Future<void> untilSettled() async {
+    while (_open > 0) {
+      await _settled.future;
+    }
+  }
 
   /// False when the start or switch that just finished did not work, in which
   /// case requests to the agent are refused rather than sent.

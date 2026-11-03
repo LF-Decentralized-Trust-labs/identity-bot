@@ -1,7 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:agent_client/crypto/owner_signature.dart';
+import 'package:agent_client/services/controller_signing_client.dart' show ThisMachineCouldNotSign;
 import 'package:agent_client/services/signing_as_the_identity_that_owns_a_machine.dart';
+import 'package:agent_client/services/the_core_is_settled.dart';
 import 'package:test/test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart' as testing;
@@ -45,7 +49,7 @@ void main() {
       };
     final c = SigningAsTheIdentityThatOwnsAMachine(
       machineOrigin: _machine,
-      localCoreOrigin: _core,
+      localCoreOrigin: () => _core,
       ownerAid: _owner('EMINTEDHERE'),
       inner: w.client,
     );
@@ -59,7 +63,7 @@ void main() {
     final w = _Watcher();
     final c = SigningAsTheIdentityThatOwnsAMachine(
       machineOrigin: _machine,
-      localCoreOrigin: _core,
+      localCoreOrigin: () => _core,
       ownerAid: _owner('EMINTEDHERE'),
       inner: w.client,
     );
@@ -92,7 +96,7 @@ void main() {
     final w = _Watcher();
     final c = SigningAsTheIdentityThatOwnsAMachine(
       machineOrigin: _machine,
-      localCoreOrigin: _core,
+      localCoreOrigin: () => _core,
       ownerAid: _owner('EMINTEDHERE'),
       inner: w.client,
     );
@@ -111,38 +115,140 @@ void main() {
     }
   });
 
-  test('a machine this device does not own goes unsigned rather than wrong',
+  tearDown(TheCoreIsSettled.reset);
+
+  SigningAsTheIdentityThatOwnsAMachine owning(http.Client inner,
+          {String? Function()? core, String? aid = 'EMINTEDHERE'}) =>
+      SigningAsTheIdentityThatOwnsAMachine(
+        machineOrigin: _machine,
+        localCoreOrigin: () => core?.call() ?? _core,
+        ownerAid: _owner(aid),
+        waitAtMost: const Duration(milliseconds: 200),
+        inner: inner,
+      );
+
+  test('a machine this device does not own is refused, never sent unsigned',
       () async {
     final w = _Watcher();
-    final c = SigningAsTheIdentityThatOwnsAMachine(
-      machineOrigin: _machine,
-      localCoreOrigin: _core,
-      ownerAid: _owner(null),
-      inner: w.client,
-    );
-
-    await c.get(Uri.parse('$_machine/api/identity'));
-
-    // It must not reach for the local core's own answer, and must not sign as
-    // anything else. The machine refuses, which says more about what to do next
-    // than a signature from the wrong identity ever could.
+    final c = owning(w.client, aid: null);
+    await expectLater(c.get(Uri.parse('$_machine/api/identity')),
+        throwsA(isA<ThisMachineCouldNotSign>()));
     expect(w.signAsked, isNull);
-    expect(w.requests.single.headers.containsKey('X-IA-Owner-Sig'), isFalse);
+    expect(w.requests, isEmpty);
+    final empty = owning(w.client, aid: '');
+    await expectLater(empty.get(Uri.parse('$_machine/api/identity')),
+        throwsA(isA<ThisMachineCouldNotSign>()));
+    expect(w.requests, isEmpty);
   });
 
-  test('a core that will not sign leaves the request unsigned', () async {
+  test('a core that will not sign refuses the request', () async {
     final w = _Watcher()..signature = null;
-    final c = SigningAsTheIdentityThatOwnsAMachine(
-      machineOrigin: _machine,
-      localCoreOrigin: _core,
-      ownerAid: _owner('EMINTEDHERE'),
-      inner: w.client,
-    );
-
-    await c.get(Uri.parse('$_machine/api/identity'));
-
+    await expectLater(owning(w.client).get(Uri.parse('$_machine/api/identity')),
+        throwsA(isA<ThisMachineCouldNotSign>()));
     expect(w.signAsked, isNotNull);
-    expect(w.requests.last.headers.containsKey('X-IA-Owner-Sig'), isFalse);
+    expect(w.requests.where((r) => r.url.host == 'box.example.test'), isEmpty);
+  });
+
+  test('an answer that is not a signature refuses the request', () async {
+    for (final answer in [
+      '{}',
+      '{"signature":"0B"}',
+      '{"timestamp":"t"}',
+      'not json',
+      '[1]',
+    ]) {
+      final sent = <http.BaseRequest>[];
+      final c = owning(testing.MockClient((req) async {
+        if (req.url.path == '/api/machines/owner/sign') {
+          return http.Response(answer, 200);
+        }
+        sent.add(req);
+        return http.Response('{}', 200);
+      }));
+      await expectLater(c.get(Uri.parse('$_machine/api/identity')),
+          throwsA(isA<ThisMachineCouldNotSign>()),
+          reason: 'the core answered $answer');
+      expect(sent, isEmpty, reason: 'sent unsigned after $answer');
+    }
+  });
+
+  test('an unreachable core refuses the request', () async {
+    final sent = <http.BaseRequest>[];
+    final c = owning(testing.MockClient((req) async {
+      if (req.url.path == '/api/machines/owner/sign') {
+        throw const SocketException('connection refused');
+      }
+      sent.add(req);
+      return http.Response('{}', 200);
+    }));
+    await expectLater(c.get(Uri.parse('$_machine/api/identity')),
+        throwsA(isA<ThisMachineCouldNotSign>()));
+    expect(sent, isEmpty);
+  });
+
+  test('a streamed body is signed, not passed through', () async {
+    final w = _Watcher();
+    final streamed = http.StreamedRequest('POST', Uri.parse('$_machine/api/up'))
+      ..sink.add(utf8.encode('{"big":1}'))
+      ..sink.close();
+    await owning(w.client).send(streamed);
+    expect(w.requests.last.headers['X-IA-Owner-Sig'], '0BSIG');
+    expect(utf8.decode(base64.decode(w.signAsked!['body_b64'] as String)),
+        '{"big":1}');
+  });
+
+  test('a multipart upload is signed and reaches the machine with its boundary',
+      () async {
+    final w = _Watcher();
+    final m = http.MultipartRequest('POST', Uri.parse('$_machine/api/up'))
+      ..fields['a'] = 'b';
+    await owning(w.client).send(m);
+    final sent = w.requests.last;
+    expect(sent.headers['content-type'], startsWith('multipart/form-data; boundary='));
+    expect(sent.headers['X-IA-Owner-Sig'], '0BSIG');
+  });
+
+  test('it signs at the core\'s address now, not the one it was built with',
+      () async {
+    final asked = <String>[];
+    var core = 'http://127.0.0.1:5050';
+    final c = owning(testing.MockClient((req) async {
+      if (req.url.path == '/api/machines/owner/sign') {
+        asked.add(req.url.origin);
+        return http.Response(
+            jsonEncode({'signature': '0B', 'timestamp': 't'}), 200);
+      }
+      return http.Response('{}', 200);
+    }), core: () => core);
+    await c.get(Uri.parse('$_machine/api/identity'));
+    core = 'http://127.0.0.1:50555';
+    await c.get(Uri.parse('$_machine/api/identity'));
+    expect(asked, ['http://127.0.0.1:5050', 'http://127.0.0.1:50555']);
+  });
+
+  test('a request waits while the core is being switched, and a start that '
+      'failed refuses it', () async {
+    final w = _Watcher();
+    final c = owning(w.client);
+    final starting = Completer<void>();
+    final during = TheCoreIsSettled.during(() => starting.future);
+    var done = false;
+    final pending = c
+        .get(Uri.parse('$_machine/api/identity'))
+        .whenComplete(() => done = true);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(done, isFalse);
+    expect(w.signAsked, isNull);
+    starting.complete();
+    await during;
+    await pending;
+    expect(w.signAsked, isNotNull);
+
+    await expectLater(
+        TheCoreIsSettled.during<void>(() async => throw StateError('no')),
+        throwsStateError);
+    await expectLater(c.get(Uri.parse('$_machine/api/identity')),
+        throwsA(isA<ThisMachineCouldNotSign>()));
   });
 
   group('which identity adopted a machine', () {
@@ -160,7 +266,7 @@ void main() {
       // saying why.
       final read = theIdentityThatAdopted(
         _machine,
-        localCoreOrigin: _core,
+        localCoreOrigin: () => _core,
         using: listing([
           {'url': 'https://other.example.test', 'owner_aid': 'ENOPE'},
           {'url': '$_machine/', 'owner_aid': 'EMINTEDHERE'},
@@ -175,7 +281,7 @@ void main() {
       // and one this client cannot act on, so it must not guess.
       final read = theIdentityThatAdopted(
         _machine,
-        localCoreOrigin: _core,
+        localCoreOrigin: () => _core,
         using: listing([
           {'url': _machine, 'owner_aid': ''},
         ]),
@@ -186,7 +292,7 @@ void main() {
     test('a machine this device does not own is null', () async {
       final read = theIdentityThatAdopted(
         _machine,
-        localCoreOrigin: _core,
+        localCoreOrigin: () => _core,
         using: listing(const []),
       );
       expect(await read(), isNull);

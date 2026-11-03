@@ -356,6 +356,89 @@ void main() {
         reason: 'what was signed is not what was sent');
   });
 
+  test('a multipart upload reaches the agent signed and with its boundary',
+      () async {
+    final w = _Watched();
+    final c = ControllerSigningClient(
+        agentOrigin: _agent, localCoreOrigin: () => _localCore, inner: w.client);
+    final m = http.MultipartRequest('POST', Uri.parse('$_agent/api/upload'))
+      ..fields['a'] = 'b'
+      ..files.add(http.MultipartFile.fromBytes('f', [1, 2, 3], filename: 'f.bin'));
+    await c.send(m);
+
+    final sent = w.toTheAgent.single;
+    final type = sent.headers['content-type'] ?? '';
+    expect(type, startsWith('multipart/form-data; boundary='),
+        reason: 'the body arrived without the boundary that delimits it');
+    final boundary = type.split('boundary=').last;
+    expect(sent.body, contains('--$boundary'));
+    expect(sent.headers['X-IA-Controller-Sig'], isNotNull);
+    expect(base64.decode(w.askedToSign.single['body_b64'] as String),
+        sent.bodyBytes,
+        reason: 'what was signed is not what was sent');
+  });
+
+  test('a second switch that starts while requests wait holds them too',
+      () async {
+    final asked = <String>[];
+    var core = _localCore;
+    final c = ControllerSigningClient(
+      agentOrigin: _agent,
+      localCoreOrigin: () => core,
+      inner: _Scripted((r) {
+        if (r.url.path == '/api/controller/sign') {
+          asked.add(r.url.origin);
+          return ('{"controller_aid":"B","signature":"0B","timestamp":"t"}', 200);
+        }
+        return ('{}', 200);
+      }),
+    );
+    final first = Completer<void>();
+    final firstSwitch = TheCoreIsSettled.during(() => first.future);
+    final pending = [
+      for (var i = 0; i < 3; i++) c.get(Uri.parse('$_agent/api/profile')),
+    ];
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    // The first switch ends and, before the waiters have run, another begins.
+    final second = Completer<void>();
+    late Future<void> secondSwitch;
+    first.complete();
+    secondSwitch = TheCoreIsSettled.during(() => second.future);
+    await firstSwitch;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(asked, isEmpty,
+        reason: 'a request went out in the middle of the second switch');
+
+    core = 'http://127.0.0.1:50999';
+    second.complete();
+    await secondSwitch;
+    await Future.wait(pending);
+    expect(asked, ['http://127.0.0.1:50999', 'http://127.0.0.1:50999',
+        'http://127.0.0.1:50999']);
+  });
+
+  test('nested switches open the gate only when the outer one ends', () async {
+    final w = _Watched();
+    final c = ControllerSigningClient(
+        agentOrigin: _agent, localCoreOrigin: () => _localCore, inner: w.client);
+    final outer = Completer<void>();
+    final inner = Completer<void>();
+    final done = TheCoreIsSettled.during(() async {
+      await TheCoreIsSettled.during(() => inner.future);
+      await outer.future;
+    });
+    final pending = c.get(Uri.parse('$_agent/api/profile'));
+    inner.complete();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(w.askedToSign, isEmpty,
+        reason: 'the gate opened when the inner switch ended');
+    outer.complete();
+    await done;
+    await pending;
+    expect(w.askedToSign, hasLength(1));
+  });
+
   test('it signs at the core\'s address now, not the one it was built with',
       () async {
     final asked = <String>[];
