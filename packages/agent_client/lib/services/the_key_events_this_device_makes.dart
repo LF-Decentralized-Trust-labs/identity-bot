@@ -101,13 +101,10 @@ enum LetGo {
   itIsInTheLog,
 }
 
-/// Where an identity's log ends: the place and digest of its last event.
-typedef Tip = ({int sn, String digest});
-
 /// An identity's key state as this device has verified it: where the log
 /// ends, which generation of this phrase's keys is in force, and the
 /// witnesses in force.
-typedef KeyStateNow = ({Tip tip, int generation, WitnessSet witnesses});
+typedef KeyStateNow = ({Place tip, int generation, WitnessSet witnesses});
 
 /// An event this device committed: its identifier, place and digest, and
 /// whether the core added it or holds it for further signers.
@@ -470,8 +467,8 @@ class TheKeyEventsThisDeviceMakes {
       ({int afterSn, String digest}) given,
       int generation,
       bool mayMove,
-      Future<Committed> Function(Tip after, WitnessSet? witnesses) make) async {
-    Tip after = (sn: given.afterSn, digest: given.digest);
+      Future<Committed> Function(Place after, WitnessSet? witnesses) make) async {
+    Place after = (sn: given.afterSn, digest: given.digest);
     WitnessSet? witnesses;
     for (var tries = 0;; tries++) {
       try {

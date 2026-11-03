@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:agent_client/crypto/bip39.dart';
@@ -6,12 +5,10 @@ import 'package:agent_client/crypto/keys.dart';
 import 'package:agent_client/services/key_math.dart';
 import 'package:agent_client/services/local_core_keri_service.dart';
 import 'package:agent_client/services/secure_key_store.dart';
-import 'package:agent_client/services/signing_an_event.dart';
 import 'package:agent_client/services/the_identity_this_device_holds.dart';
 import 'package:agent_client/services/the_key_events_this_device_makes.dart';
 import 'package:agent_client/services/the_key_state_this_device_reads.dart';
 import 'package:agent_client/services/the_witnesses_of_this_devices_events.dart';
-import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -343,6 +340,23 @@ void main() {
               '${reads.reads}');
     });
 
+    test(
+        'a key state only the core\'s own copy supports is used once and '
+        'never becomes this device\'s record', () async {
+      // Founded by a device that kept no record, and known here with no
+      // witness address: the core's copy is all there is to read.
+      final founded = await TheKeyEventsThisDeviceMakes(reads, core.base, km)
+          .found(seed, witnesses: [w1.aid, w2.aid, w3.aid], toad: 2);
+      await TheIdentityThisDeviceHolds().holds(founded.aid);
+      await expectLater(
+          reader().readTheCopies(seed), throwsA(isA<TheWitnessesDoNotSay>()));
+      final read = await reader().readTheCopies(seed, acceptTheCoreAlone: true);
+      expect((read.tip.digest, read.corroborated), (founded.digest, false));
+      final h = await TheIdentityThisDeviceHolds().read();
+      expect((h!.establishment, h.tip), (null, null),
+          reason: 'nothing the witnesses did not corroborate is recorded');
+    });
+
     test('two copies that differ at a rotation stop signing', () async {
       final m = makes();
       final founded =
@@ -374,30 +388,20 @@ void main() {
 Future<SignedCopy> _rotationOf(ACore core, KeyMath km, Uint8List seed,
     String aid, Place after, List<Object?> anchors) async {
   final pq = KeyManager.slip10Ed25519(seed, KeyPaths.postQuantum(1));
-  final res = await http.post(Uri.parse('${core.base}/api/events/prepare'),
-      headers: const {
-        'Content-Type': 'application/json',
-        'X-Local-Owner-Secret': ownerSecret
-      },
-      body: jsonEncode({
-        'aid': aid,
-        't': 'rot',
-        'k': [KeyManager.keyAt(seed, 1).publicKeyEncoded],
-        'kt': '1',
-        'n': [
-          await km.nextKeyDigest(KeyManager.keyAt(seed, 2).publicKeyEncoded),
-          (await km.postQuantumNext(pq)).digest
-        ],
-        'nt': '1',
-        'a': anchors,
-        'br': [],
-        'ba': [],
-        'bt': '2',
-        'after': {'s': after.sn.toRadixString(16), 'd': after.digest},
-      }));
-  final raw = (jsonDecode(res.body) as Map)['raw_b64'] as String;
-  final sig = ed.sign(ed.newKeyFromSeed(KeyManager.signingSeed(seed, index: 1)),
-      base64Decode(raw));
-  return SignedCopy(
-      raw, [await cesrEncodeSignature(core.client, core.base, sig)]);
+  return preparedAndSigned(core.client, core.base, seed, 1, {
+    'aid': aid,
+    't': 'rot',
+    'k': [KeyManager.keyAt(seed, 1).publicKeyEncoded],
+    'kt': '1',
+    'n': [
+      await km.nextKeyDigest(KeyManager.keyAt(seed, 2).publicKeyEncoded),
+      (await km.postQuantumNext(pq)).digest
+    ],
+    'nt': '1',
+    'a': anchors,
+    'br': [],
+    'ba': [],
+    'bt': '2',
+    'after': {'s': after.sn.toRadixString(16), 'd': after.digest},
+  });
 }

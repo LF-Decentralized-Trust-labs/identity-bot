@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:agent_client/crypto/keys.dart';
 import 'package:agent_client/services/key_math.dart';
 import 'package:agent_client/services/signing_an_event.dart';
+import 'package:agent_client/services/the_identity_this_device_holds.dart';
 import 'package:agent_client/services/the_key_events_this_device_makes.dart';
 import 'package:agent_client/services/the_witnesses_of_this_devices_events.dart';
 import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
@@ -62,30 +63,37 @@ class ACoreThatMisleads extends http.BaseClient {
           Stream.value(utf8.encode(jsonEncode({'error': code}))), status);
 }
 
-/// An interaction of [aid] after [after], prepared by the core and signed by
-/// the key [seed] derives at generation [gen].
-Future<SignedCopy> signedInteraction(
-    http.Client client,
-    String base,
-    Uint8List seed,
-    String aid,
-    int gen,
-    Tip after,
-    List<Object?> anchors) async {
+/// The event [body] asks the core at [base] to prepare, signed by the key
+/// [seed] derives at generation [gen]: what another device holding the
+/// phrase would make.
+Future<SignedCopy> preparedAndSigned(http.Client client, String base,
+    Uint8List seed, int gen, Map<String, Object?> body) async {
   final res = await client.post(Uri.parse('$base/api/events/prepare'),
       headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'aid': aid,
-        't': 'ixn',
-        'a': anchors,
-        'after': {'s': after.sn.toRadixString(16), 'd': after.digest},
-      }));
+      body: jsonEncode(body));
   final raw = (jsonDecode(res.body) as Map)['raw_b64'] as String;
   final sig = ed.sign(
       ed.newKeyFromSeed(KeyManager.signingSeed(seed, index: gen)),
       base64Decode(raw));
   return SignedCopy(raw, [await cesrEncodeSignature(client, base, sig)]);
 }
+
+/// An interaction of [aid] after [after], prepared by the core and signed by
+/// the key [seed] derives at generation [gen].
+Future<SignedCopy> signedInteraction(
+        http.Client client,
+        String base,
+        Uint8List seed,
+        String aid,
+        int gen,
+        Place after,
+        List<Object?> anchors) =>
+    preparedAndSigned(client, base, seed, gen, {
+      'aid': aid,
+      't': 'ixn',
+      'a': anchors,
+      'after': {'s': after.sn.toRadixString(16), 'd': after.digest},
+    });
 
 /// Commits a signed event to the core at [base] directly.
 Future<void> commitTo(String base, String rawB64, List<String> sigs) async {

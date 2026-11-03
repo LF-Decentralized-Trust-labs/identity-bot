@@ -736,12 +736,17 @@ recovery; it is public. It has three sources for the key in force, in order:
    them to meet `bt`, read on their public routes.
 3. **The Identity Agent's discovery record** at its public address.
 
-Every copy from sources 2 and 3 is checked by the app's local core on
-`POST /public/key-state`, a public route that reads a key log, verifies it as
-section 2 does, and returns the key state it establishes: the last
-establishment event, `k`, `kt`, `n`, `nt`, and the anchored messaging keysets.
-It computes over what it is sent, fetches and stores nothing, and has the rate
-limits of `/public/login/key`.
+Every copy from sources 2 and 3 is checked on the app's own device by the
+engine's code through `keymath` (section 7, `verify_log`): it verifies the log
+from its founding as section 2 does and reports, for every event, its place,
+digest and type and the keys, commitments and witnesses in force after it. It
+is the same check `POST /public/key-state` makes, through one implementation
+(`drivers.VerifiedLogOf`); the route is for parties without `keymath`, and an
+app does not ask a core to judge copies of its own log. A witness's copy counts
+only when it ends on the event whose digest that witness signed in its answer
+to a fresh nonce. The anchored messaging keysets are read from the same copies
+when they are needed: on recovery (section 10) and when keysets migrate
+(section 8).
 
 **How copies are combined.**
 
@@ -753,9 +758,22 @@ limits of `/public/login/key`.
   longest chain of establishment events that copies from enough witnesses to
   meet `bt` hold, then the longest run of interactions after it.
 
-An establishment event the app did not sign and does not recognise also stops
-signing until the person has looked at it. The key state that results is what
-the app takes `after` from.
+A rotation in one copy where another holds an interaction is not duplicity: a
+recovery rotation replaces interactions, and the copy holding the interaction
+has not caught up. An establishment event this device made must stand in the
+history chosen, and a copy that does not reach it is behind this device: both
+stop signing. So does an establishment event any copy holds after the one
+chosen that too few witnesses hold to say whether it is in force, and, once
+this phrase's keys are in force, one revealing a key that is not this
+phrase's. An establishment event the app did not sign and does not recognise
+also stops signing until the person has looked at it. The key state that
+results is what the app takes `after` from.
+
+Only a key state enough witnesses corroborate is written into the app's own
+record. Where no witness can be read at all (an identity founded before the
+app kept witness addresses), the Identity Agent's own copy may be used for the
+operation in hand, marked uncorroborated, and is never recorded as if the app
+had made it.
 
 The app reads the witnesses when its own record cannot answer: on first use,
 after recovery, after a commit whose outcome it has to confirm, and when an

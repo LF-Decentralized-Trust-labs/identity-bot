@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:agent_client/crypto/bip39.dart';
 import 'package:agent_client/services/key_math.dart';
 import 'package:agent_client/services/the_events_this_device_signed.dart';
+import 'package:agent_client/services/the_identity_this_device_holds.dart';
 import 'package:agent_client/services/the_key_events_this_device_makes.dart';
 import 'package:agent_client/services/the_witnesses_of_this_devices_events.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -94,7 +95,7 @@ void main() {
   // one another, in order.
   late String aid;
   late WitnessSet set;
-  late Tip tip;
+  late Place tip;
   var generation = 0;
 
   TheKeyEventsThisDeviceMakes makes() =>
@@ -453,7 +454,7 @@ void main() {
     final more = await anotherCore(bin, km);
     addTearDown(more.close);
     var reads = 0;
-    late Tip at;
+    late Place at;
     var inForce = 0;
     final m = TheKeyEventsThisDeviceMakes(more.client, more.base, km,
         readTheKeyState: (_) async {
