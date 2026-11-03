@@ -92,6 +92,42 @@ class PostQuantumNext {
   final String digest;
 }
 
+/// The key state a copy of an identity's key log establishes, as the core's
+/// engine judges it from the founding: where the log ends, the keys in force,
+/// their commitments and the witnesses.
+class LogState {
+  LogState.fromJson(Map<String, dynamic> j)
+      : aid = j['aid'] as String? ?? '',
+        sn = (j['sn'] as num?)?.toInt() ?? -1,
+        digest = j['digest'] as String? ?? '',
+        ilk = j['ilk'] as String? ?? '',
+        establishment = (j['establishment'] as num?)?.toInt() ?? -1,
+        keys = [for (final k in (j['keys'] as List? ?? const [])) '$k'],
+        next = [for (final n in (j['next'] as List? ?? const [])) '$n'],
+        witnesses = [
+          for (final w in (j['witnesses'] as List? ?? const [])) '$w'
+        ],
+        toad = (j['toad'] as num?)?.toInt() ?? 0;
+  final String aid;
+  final int sn;
+  final String digest;
+  final String ilk;
+  final int establishment;
+  final List<String> keys;
+  final List<String> next;
+  final List<String> witnesses;
+  final int toad;
+}
+
+/// An event's bytes, base64, with its controller signatures, as a witness
+/// holds it.
+class SignedCopy {
+  SignedCopy(this.rawB64, this.sigs);
+  final String rawB64;
+  final List<String> sigs;
+  Map<String, Object> toJson() => {'raw_b64': rawB64, 'sigs': sigs};
+}
+
 /// Typed calls over a [KeyMath].
 extension KeyMathOperations on KeyMath {
   /// Parses an event's bytes with the core's parser.
@@ -112,6 +148,27 @@ extension KeyMathOperations on KeyMath {
   Future<Map<String, dynamic>> messagingKeySet(Uint8List seed) async =>
       (await run('messaging_keyset', {'seed_hex': _hex(seed)}))['anchor']
           as Map<String, dynamic>;
+
+  /// Whether [sig] is the witness [witness]'s receipt over the event whose
+  /// digest is [digest]. A witness's name is its key, so nothing is fetched.
+  Future<bool> isReceipt(String witness, String digest, String sig) async {
+    try {
+      await run(
+          'verify_receipt', {'witness': witness, 'digest': digest, 'sig': sig});
+      return true;
+    } on KeyMathRefused {
+      return false;
+    }
+  }
+
+  /// Judges [events] as [aid]'s key log from its founding, and returns the
+  /// state it ends in. Throws [KeyMathRefused] when it is not that identity's
+  /// correctly signed log.
+  Future<LogState> verifyLog(String aid, List<SignedCopy> events) async =>
+      LogState.fromJson(await run('verify_log', {
+        'aid': aid,
+        'events': [for (final e in events) e.toJson()]
+      }));
 
   /// An ML-DSA-65 signature by a 32-byte child seed over [message].
   Future<Uint8List> signMlDsa65(Uint8List seed, List<int> message) async {

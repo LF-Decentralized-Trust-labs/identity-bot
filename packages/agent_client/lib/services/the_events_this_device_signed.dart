@@ -20,6 +20,15 @@ class Reservation {
   List<String> get signatures =>
       [for (final s in (entry['sigs'] as List? ?? const [])) '$s'];
   bool get signed => signatures.isNotEmpty;
+
+  /// Whether the core added the event. It is kept until enough witnesses
+  /// have receipted it, so it can still be sent to them, or to a new core.
+  bool get recorded => entry['recorded'] == true;
+
+  /// The code the core refused the event with, for good, or null. A refused
+  /// event still holds its place: nothing else is signed there until the
+  /// person lets it go ([TheEventsThisDeviceSigned.letGo]).
+  String? get refusedWith => entry['refused'] as String?;
 }
 
 /// A different event at a place this device already reserved for one.
@@ -135,11 +144,38 @@ class TheEventsThisDeviceSigned {
             'the reservation of sequence number ${r.sn} of ${r.aid} is gone');
       });
 
-  /// Ends [r]: its event is in the identity's log.
+  /// Ends [r]: its event is in the identity's log, and witnessed as far as
+  /// this device needs it to be.
   Future<void> committed(Reservation r) => _serialised(() async {
         final entries = await _load(r.storageKey);
         entries.removeWhere((e) => _same(e, r.entry));
         await _save(r.storageKey, entries);
+      });
+
+  /// Marks [r] added by the core, and keeps it until its witnesses have it.
+  Future<Reservation> recorded(Reservation r) => _mark(r, 'recorded', true);
+
+  /// Marks [r] refused by the core for good, with [code].
+  Future<Reservation> refused(Reservation r, String code) =>
+      _mark(r, 'refused', code);
+
+  /// Marks [r] dead: the person let it go after its place was checked with
+  /// the witnesses, or the witnesses hold another event there. Nothing of it
+  /// is committed again, and its place may be signed for again.
+  Future<Reservation> letGo(Reservation r) => _mark(r, 'dead', true);
+
+  Future<Reservation> _mark(Reservation r, String field, Object value) =>
+      _serialised(() async {
+        final entries = await _load(r.storageKey);
+        for (final e in entries) {
+          if (_same(e, r.entry)) {
+            e[field] = value;
+            await _save(r.storageKey, entries);
+            return Reservation._(r.storageKey, e);
+          }
+        }
+        throw StateError(
+            'the reservation of sequence number ${r.sn} of ${r.aid} is gone');
       });
 
   /// Marks dead every reservation of [aid] at or after [sn]: a recovery
