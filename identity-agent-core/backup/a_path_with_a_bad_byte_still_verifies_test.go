@@ -17,7 +17,11 @@ func TestAManifestWithAPathHoldingABadByteVerifiesAfterAFileRoundTrip(t *testing
 	arch.Manifest.ExternalPointers = []ExternalDataPointer{{Domain: "photos", Locator: bad, KeyRef: "k\xc3"}}
 
 	// The way in: what finishArchive does to every manifest.
-	arch.Manifest = validUTF8Manifest(arch.Manifest)
+	var verr error
+	arch.Manifest, verr = validUTF8Manifest(arch.Manifest)
+	if verr != nil {
+		t.Fatal(verr)
+	}
 	if err := SignWithSeed(arch, seed); err != nil {
 		t.Fatal(err)
 	}

@@ -428,7 +428,10 @@ func (l *Log) writeEvent(ev InvocationEvent, strict bool) (int64, error) {
 	}
 	l.writeMu.Lock()
 	defer l.writeMu.Unlock()
-	ev = withValidUTF8(ev)
+	ev, err := withValidUTF8(ev)
+	if err != nil {
+		return 0, err
+	}
 
 	signer := l.getEventSigner()
 	begun := l.chainBegun()
@@ -767,7 +770,7 @@ func decodeEvent(stored []byte) (InvocationEvent, error) {
 // character and encodes again raw, so the record would not be the encoding of
 // the event it reads as. Writing the character itself means it is. The walk is
 // the shared one in internal/validutf8.
-func withValidUTF8(ev InvocationEvent) InvocationEvent {
+func withValidUTF8(ev InvocationEvent) (InvocationEvent, error) {
 	return validutf8.Of(ev)
 }
 

@@ -10,6 +10,7 @@
 package validutf8
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 )
@@ -21,16 +22,37 @@ import (
 // and pointed-to values are copied, never changed underneath the caller.
 // Unexported fields cannot be set and are left as they are.
 //
-// Two map keys that differ only in their invalid bytes become one key; the
-// later one in iteration order wins, so such a map should not be relied on to
-// keep both.
-func Of[T any](v T) T {
+// Two map keys that differ only in their invalid bytes would become one key
+// and one of their values would be dropped without a word, so Of refuses that
+// with an error. A value that reaches itself through pointers, maps or slices
+// has no end to walk, so Of refuses that too. A value shared by two places
+// without a loop is fine.
+func Of[T any](v T) (T, error) {
 	rv := reflect.ValueOf(&v).Elem()
-	fix(rv)
-	return v
+	if err := fix(rv, map[visit]bool{}); err != nil {
+		var zero T
+		return zero, err
+	}
+	return v, nil
 }
 
-func fix(v reflect.Value) {
+// visit names something reached by address, on the way down only.
+type visit struct {
+	p uintptr
+	n int
+	t reflect.Type
+}
+
+func enter(v reflect.Value, n int, on map[visit]bool) (visit, error) {
+	k := visit{v.Pointer(), n, v.Type()}
+	if on[k] {
+		return k, fmt.Errorf("validutf8: a value of type %s reaches itself", v.Type())
+	}
+	on[k] = true
+	return k, nil
+}
+
+func fix(v reflect.Value, on map[visit]bool) error {
 	switch v.Kind() {
 	case reflect.String:
 		if v.CanSet() {
@@ -38,53 +60,86 @@ func fix(v reflect.Value) {
 		}
 	case reflect.Struct:
 		for i := 0; i < v.NumField(); i++ {
-			fix(v.Field(i))
+			if err := fix(v.Field(i), on); err != nil {
+				return err
+			}
 		}
 	case reflect.Array:
 		for i := 0; i < v.Len(); i++ {
-			fix(v.Index(i))
+			if err := fix(v.Index(i), on); err != nil {
+				return err
+			}
 		}
 	case reflect.Slice:
 		if v.Len() == 0 || !v.CanSet() {
-			return
+			return nil
 		}
+		k, err := enter(v, v.Len(), on)
+		if err != nil {
+			return err
+		}
+		defer delete(on, k)
 		cp := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
 		reflect.Copy(cp, v)
 		for i := 0; i < cp.Len(); i++ {
-			fix(cp.Index(i))
+			if err := fix(cp.Index(i), on); err != nil {
+				return err
+			}
 		}
 		v.Set(cp)
 	case reflect.Map:
 		if v.IsNil() || !v.CanSet() {
-			return
+			return nil
 		}
+		k0, err := enter(v, 0, on)
+		if err != nil {
+			return err
+		}
+		defer delete(on, k0)
 		cp := reflect.MakeMapWithSize(v.Type(), v.Len())
 		it := v.MapRange()
 		for it.Next() {
 			k := reflect.New(v.Type().Key()).Elem()
 			k.Set(it.Key())
-			fix(k)
+			if err := fix(k, on); err != nil {
+				return err
+			}
 			e := reflect.New(v.Type().Elem()).Elem()
 			e.Set(it.Value())
-			fix(e)
+			if err := fix(e, on); err != nil {
+				return err
+			}
+			if cp.MapIndex(k).IsValid() {
+				return fmt.Errorf("validutf8: two map keys differ only in their invalid bytes (both become %q)", k.Interface())
+			}
 			cp.SetMapIndex(k, e)
 		}
 		v.Set(cp)
 	case reflect.Interface:
 		if v.IsNil() || !v.CanSet() {
-			return
+			return nil
 		}
 		c := reflect.New(v.Elem().Type()).Elem()
 		c.Set(v.Elem())
-		fix(c)
+		if err := fix(c, on); err != nil {
+			return err
+		}
 		v.Set(c)
 	case reflect.Ptr:
 		if v.IsNil() || !v.CanSet() {
-			return
+			return nil
 		}
+		k, err := enter(v, 0, on)
+		if err != nil {
+			return err
+		}
+		defer delete(on, k)
 		cp := reflect.New(v.Type().Elem())
 		cp.Elem().Set(v.Elem())
-		fix(cp.Elem())
+		if err := fix(cp.Elem(), on); err != nil {
+			return err
+		}
 		v.Set(cp)
 	}
+	return nil
 }

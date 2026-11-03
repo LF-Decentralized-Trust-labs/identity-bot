@@ -109,7 +109,7 @@ func TestARowWrittenWithAnEscapedBadByteVerifiesInItsOneSpelling(t *testing.T) {
 func TestEveryStringOfAnEventIsMadeValidUTF8(t *testing.T) {
 	var ev activitylog.InvocationEvent
 	spoil(t, reflect.ValueOf(&ev).Elem())
-	out, err := json.Marshal(activitylog.WithValidUTF8(ev))
+	out, err := json.Marshal(mustValid(t, ev))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,4 +143,13 @@ func spoil(t *testing.T, v reflect.Value) {
 	default:
 		t.Fatalf("a field of kind %s is not covered by this test", v.Kind())
 	}
+}
+
+func mustValid(t *testing.T, ev activitylog.InvocationEvent) activitylog.InvocationEvent {
+	t.Helper()
+	out, err := activitylog.WithValidUTF8(ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }

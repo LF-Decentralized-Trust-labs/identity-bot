@@ -144,7 +144,11 @@ func EncodeSignature(sig []byte) string {
 // how an encoder spells a bad byte (component names are map keys, and a key
 // is written the same way a value is).
 func CanonicalPayload(v interface{}) ([]byte, error) {
-	return json.Marshal(validutf8.Of(v))
+	valid, err := validutf8.Of(v)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(valid)
 }
 
 // VerifySoftwareSignature checks an Ed25519 signature over canonical payload bytes.

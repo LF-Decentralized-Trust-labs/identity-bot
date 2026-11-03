@@ -106,12 +106,19 @@ func (r *Runner) RunOnce(ctx context.Context) error {
 		return err
 	}
 
+	components, err = validutf8.Of(components)
+	if err != nil {
+		r.mu.Lock()
+		r.lastErr = err.Error()
+		r.mu.Unlock()
+		return err
+	}
 	payload := AttestationPayload{
 		Version:    PayloadVersion,
 		Timestamp:  time.Now().UTC().Format(time.RFC3339),
 		Platform:   r.signer.Platform(),
 		Signer:     r.signer.Label(),
-		Components: validutf8.Of(components),
+		Components: components,
 		ChainHash:  chainHash,
 	}
 	canonical, err := CanonicalPayload(payload)
