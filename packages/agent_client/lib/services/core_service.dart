@@ -944,7 +944,7 @@ class CoreService {
     }
     _requireTheFounding(rawBytesB64,
         aid: aid,
-        key: AgentKeyPair.fromSigningSeed(signingSeed).publicKeyEncoded,
+        key: KeyManager.publicKeyOf(signingSeed),
         next: nextPublicKey,
         ownerAid: ownerAid);
     await signAndRecordEvent(_client, baseUrl,

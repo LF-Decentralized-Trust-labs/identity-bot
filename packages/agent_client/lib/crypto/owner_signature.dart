@@ -110,8 +110,12 @@ class OwnerSignature {
     );
 
     final privateKey = ed.newKeyFromSeed(ownerSeed);
-    final signature =
-        ed.sign(privateKey, Uint8List.fromList(utf8.encode(message)));
+    final List<int> signature;
+    try {
+      signature = ed.sign(privateKey, Uint8List.fromList(utf8.encode(message)));
+    } finally {
+      privateKey.bytes.fillRange(0, privateKey.bytes.length, 0);
+    }
 
     return {
       sigHeader: sigQB64(Uint8List.fromList(signature)),

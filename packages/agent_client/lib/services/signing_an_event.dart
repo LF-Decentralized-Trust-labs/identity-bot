@@ -65,8 +65,8 @@ Future<String> signAndRecordEvent(
   try {
     signature = ed.sign(privateKey, base64Decode(rawBytesB64));
   } finally {
-    // The seed is the caller's, and zeroed there; the key made from it is
-    // this function's.
+    // The seed is the caller's to zero; the key made from it is this
+    // function's.
     privateKey.bytes.fillRange(0, privateKey.bytes.length, 0);
   }
   final String cesr;

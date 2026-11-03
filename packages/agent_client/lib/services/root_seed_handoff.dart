@@ -65,11 +65,17 @@ class RootSeedHandoff {
     final c = ProvingThisComputer.over(client);
     try {
       final seed = Bip39.mnemonicToSeed(mnemonic);
+      final String body;
+      try {
+        body = jsonEncode({'seed_b64': base64Encode(seed)});
+      } finally {
+        seed.fillRange(0, seed.length, 0);
+      }
       final resp = await c
           .post(
             Uri.parse('$url/api/keystore/root-seed'),
             headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({'seed_b64': base64Encode(seed)}),
+            body: body,
           )
           .timeout(const Duration(seconds: 10));
       if (resp.statusCode == 200 || resp.statusCode == 201) {

@@ -288,18 +288,21 @@ class TheKeyInForce {
     if (event['t'] != 'rot' && event['t'] != 'icp' && event['t'] != 'ixn') {
       throw Exception('event ${event['s']} is a ${event['t']}, which this device does not sign late');
     }
+    final signingSeed = KeyManager.signingSeed(seed, index: checked.keyAt[at]);
     try {
       await signAndRecordEvent(_client, _baseUrl,
           aid: checked.aid,
           sequenceNumber: int.tryParse('${event['s']}', radix: 16),
           rawBytesB64: raw,
-          signingSeed: KeyManager.signingSeed(seed, index: checked.keyAt[at]),
+          signingSeed: signingSeed,
           what: 'event ${event['s']} of this identity, left unsigned,');
     } on EventSignatureRefused catch (e) {
       if (e.statusCode == 404 || e.statusCode == 409) {
         throw StrandedEventCannotBeFinished(checked.aid, '${event['s']}', e);
       }
       rethrow;
+    } finally {
+      signingSeed.fillRange(0, signingSeed.length, 0);
     }
   }
 

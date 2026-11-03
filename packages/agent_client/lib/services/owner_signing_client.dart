@@ -297,8 +297,13 @@ Future<Uint8List?> Function() seedFromMnemonic(
     final words = await loadMnemonic();
     if (words == null || words.isEmpty) return null;
     final seed = toSeed(words.join(' '));
-    // The bytes the identity's key in force has, obtained by calling the one
-    // function that defines every key rather than by repeating its steps.
-    return KeyManager.signingSeed(seed, index: await keyInForce(seed));
+    try {
+      // The bytes the identity's key in force has, obtained by calling the
+      // one function that defines every key rather than by repeating its
+      // steps.
+      return KeyManager.signingSeed(seed, index: await keyInForce(seed));
+    } finally {
+      seed.fillRange(0, seed.length, 0);
+    }
   };
 }

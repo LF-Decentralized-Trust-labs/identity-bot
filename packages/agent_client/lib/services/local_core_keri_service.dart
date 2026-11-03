@@ -599,11 +599,17 @@ class LocalCoreKeriService extends KeriService {
       throw Exception('No identity keys found in secure storage.');
     }
     final seed = Bip39.mnemonicToSeed(mnemonic);
-    final state = await _keys.finishStrandedEvents(seed);
-    return (
-      key: ed.newKeyFromSeed(KeyManager.signingSeed(seed, index: state.index)),
-      state: state
-    );
+    try {
+      final state = await _keys.finishStrandedEvents(seed);
+      final child = KeyManager.signingSeed(seed, index: state.index);
+      try {
+        return (key: ed.newKeyFromSeed(child), state: state);
+      } finally {
+        child.fillRange(0, child.length, 0);
+      }
+    } finally {
+      seed.fillRange(0, seed.length, 0);
+    }
   }
 
   /// The key event log of the identity held under [name], as the core serves
@@ -711,8 +717,13 @@ class LocalCoreKeriService extends KeriService {
     // Step 2: Sign the IXN event bytes locally with the key in force.
     // Private key never leaves this device (ADR-014). The core signs this
     // anchor itself where it holds the key; this signature is handed back.
-    final rawSig =
-        ed.sign(signer.key, Uint8List.fromList(base64Decode(ixnRawBytesB64)));
+    final List<int> rawSig;
+    try {
+      rawSig =
+          ed.sign(signer.key, Uint8List.fromList(base64Decode(ixnRawBytesB64)));
+    } finally {
+      signer.key.bytes.fillRange(0, signer.key.bytes.length, 0);
+    }
     final cesrSig = await _cesrEncode(base64Encode(rawSig));
 
     return CredentialIssuanceResult(
@@ -760,10 +771,14 @@ class LocalCoreKeriService extends KeriService {
     // The holder signs pres_said.encode() — the UTF-8 bytes of the 44-char SAID.
     // Private key never leaves this device (ADR-014).
     String cesrSig = '';
-    if (presSaidB64.isNotEmpty) {
-      final saidBytes = base64Decode(presSaidB64);
-      final rawSig = ed.sign(signer.key, Uint8List.fromList(saidBytes));
-      cesrSig = await _cesrEncode(base64Encode(rawSig));
+    try {
+      if (presSaidB64.isNotEmpty) {
+        final saidBytes = base64Decode(presSaidB64);
+        final rawSig = ed.sign(signer.key, Uint8List.fromList(saidBytes));
+        cesrSig = await _cesrEncode(base64Encode(rawSig));
+      }
+    } finally {
+      signer.key.bytes.fillRange(0, signer.key.bytes.length, 0);
     }
 
     return PresentationResult(
