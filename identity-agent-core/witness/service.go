@@ -42,6 +42,14 @@ type Service struct {
 	HTTPClient  *http.Client
 	PostEvent   EventPoster
 	delegatesMu sync.Mutex
+	// finalizationMu makes reading an event's finalization, recounting its
+	// receipts and writing it back one step. Receipts arrive from concurrent
+	// goroutines, and without it a slower one writes back a count it read
+	// before a faster one's receipt was kept, lowering the count and letting
+	// finalizeLoop time out an event that had reached its threshold. One lock
+	// for the service rather than one per event: the section is a few small
+	// store calls, so contention is negligible and nothing needs freeing.
+	finalizationMu sync.Mutex
 	// confirmed is, by identity and witness, the furthest place a witness
 	// has confirmed holding: by its signed tip, or its receipt.
 	confirmed sync.Map
@@ -591,12 +599,32 @@ func (s *Service) GetKelReplica(signerAID string) ([]map[string]interface{}, err
 	return eventsToMaps(kel), nil
 }
 
-// BroadcastEvent implements C1 — POST to all enrolled witnesses.
+// designationAt is who the key log designated to witness the event eventSAID,
+// and how many of them its receipts must come from, as that log says at that
+// event's own position. Never anything about who is enrolled or configured
+// today. An error when the log does not hold the event or cannot be read that
+// far, because then nothing can be said about its witnesses.
+func designationAt(keyLog [][]byte, eventSAID string) (designated []string, threshold int, err error) {
+	row, ok := drivers.WitnessingOf(drivers.ValidateKELInput{RawEvents: keyLog}, eventSAID)
+	if !ok {
+		return nil, 0, fmt.Errorf("event %s is not in the key log given, so who witnesses it is not known", eventSAID)
+	}
+	if row.Unreadable {
+		return nil, 0, fmt.Errorf("the key log cannot be read as far as event %s, so who witnesses it is not known", eventSAID)
+	}
+	return row.Designated, row.Threshold, nil
+}
+
+// BroadcastEvent sends an event to the witnesses its identity's key log
+// designates for it, and keeps the receipts they return. keyLog is that
+// identity's log as published, ending at or after the event: the designated
+// set and the threshold are the log's, at this event, not this agent's
+// enrolled witnesses or configured threshold.
 //
 // Sends the event as published, with the controller's signature over those
 // bytes. A witness cannot earn its receipt without both, so sending anything
 // less would be asking for an attestation nobody could make honestly.
-func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent []byte, cesrSig string) error {
+func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent []byte, cesrSig string, keyLog [][]byte) error {
 	if len(rawEvent) == 0 {
 		return fmt.Errorf("an event cannot be broadcast without the bytes it was published as")
 	}
@@ -611,44 +639,15 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 		return fmt.Errorf("refusing to broadcast an unsigned event for %s: a witness cannot "+
 			"attest to an event it cannot verify", signerAID)
 	}
-	rootAID := signerAID
-	if id, _ := s.Contacts.GetIdentity(); id != nil {
-		rootAID = id.AID
-	}
-	kind := ClassifyAID(signerAID, rootAID)
-	witnesses, err := s.enrolledWitnesses(kind, signerAID)
-	if err != nil {
-		return err
-	}
 	said, err := eventSAID(event)
 	if err != nil {
 		return err
 	}
-	seq, _ := eventSeq(event)
-	threshold := s.Threshold()
-	now := NowRFC3339()
-	_ = s.Store.SaveFinalization(FinalizationState{
-		EventSAID: said, SignerAID: signerAID, SequenceNum: seq,
-		State: FinalizePending, ReceiptCount: 0, Threshold: threshold,
-		StartedAt: now, UpdatedAt: now,
-	})
-
-	body, _ := json.Marshal(map[string]interface{}{
-		"aid":            signerAID,
-		"event_b64":      base64.StdEncoding.EncodeToString(rawEvent),
-		"cesr_signature": cesrSig,
-	})
-	// Designated here are the witnesses addressed, by the key each signs with.
-	var designated []string
-	for _, w := range witnesses {
-		designated = append(designated, targetKey(w))
+	designated, threshold, err := designationAt(keyLog, said)
+	if err != nil {
+		return err
 	}
-	for _, w := range witnesses {
-		url := witnessEventURL(w)
-		go s.postWithRetry(ctx, url, body, said, targetKey(w), designated)
-	}
-	go s.finalizeLoop(said, threshold)
-	return nil
+	return s.BroadcastToDesignated(ctx, signerAID, rawEvent, cesrSig, designated, threshold)
 }
 
 // BringUpToDate sends each designated witness, in order, every event of
@@ -658,7 +657,10 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 // be sent from where each witness stopped, not one event at a time. Each
 // witness is asked only for its tip, and one whose tip is not known is sent
 // nothing this time.
-func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []SignedEvent, designated []string, threshold int) {
+//
+// designated are the witnesses to send to, today's set. Each event's receipts
+// are counted against the set and threshold the key log gives at that event.
+func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []SignedEvent, designated []string) {
 	if len(events) == 0 {
 		return
 	}
@@ -670,6 +672,16 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 		}
 	}
 	known := s.designatedTargets(designated)
+	var keyLog [][]byte
+	for _, e := range events {
+		raw, err := base64.StdEncoding.DecodeString(e.RawBytesB64)
+		if err != nil {
+			log.Printf("[witness] key log of %s has an unreadable event; nothing is sent", signerAID)
+			return
+		}
+		keyLog = append(keyLog, raw)
+	}
+	at := drivers.WitnessingByEvent(drivers.ValidateKELInput{RawEvents: keyLog})
 	// Only events past what every witness has confirmed can still be sent, so
 	// only those are looked at here.
 	lowest := localTip
@@ -697,14 +709,20 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 			log.Printf("[witness] event of %s skipped: %v", signerAID, serr)
 			continue
 		}
+		row, ok := at[said]
+		if !ok || row.Unreadable {
+			continue
+		}
+		s.finalizationMu.Lock()
 		if f, _ := s.Store.GetFinalization(said); f == nil {
 			seq, _ := eventSeq(ev)
 			now := NowRFC3339()
 			_ = s.Store.SaveFinalization(FinalizationState{
 				EventSAID: said, SignerAID: signerAID, SequenceNum: seq,
-				State: FinalizePending, Threshold: threshold, StartedAt: now, UpdatedAt: now,
+				State: FinalizePending, Threshold: row.Threshold, StartedAt: now, UpdatedAt: now,
 			})
 		}
+		s.finalizationMu.Unlock()
 	}
 	var wg sync.WaitGroup
 	for _, key := range designated {
@@ -765,7 +783,7 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 					return
 				}
 				if sig, wit, verr := receiptFromResponse(resp, said); verr == nil && wit == key {
-					s.onReceipt(said, key, sig, designated)
+					s.onReceipt(said, key, sig, at[said].Designated)
 					if sn, err := eventSeq(ev); err == nil {
 						s.confirm(signerAID, key, sn)
 					}
@@ -795,10 +813,12 @@ func (s *Service) BroadcastToDesignated(ctx context.Context, signerAID string, r
 	}
 	seq, _ := eventSeq(event)
 	now := NowRFC3339()
+	s.finalizationMu.Lock()
 	_ = s.Store.SaveFinalization(FinalizationState{
 		EventSAID: said, SignerAID: signerAID, SequenceNum: seq,
 		State: FinalizePending, Threshold: threshold, StartedAt: now, UpdatedAt: now,
 	})
+	s.finalizationMu.Unlock()
 	body, _ := json.Marshal(map[string]interface{}{
 		"aid": signerAID, "event_b64": base64.StdEncoding.EncodeToString(rawEvent), "cesr_signature": cesrSig,
 	})
@@ -982,34 +1002,26 @@ func targetKey(w witnessTarget) string {
 
 // onReceipt keeps a receipt and recounts the event's witnessing.
 //
-// A receipt counts only when the witness is one of designated (the witnesses
-// the identity's own key log names, never anything a receipt says) and its
-// signature over this event verifies. The count is the number of distinct
-// designated witnesses holding a verified receipt, recomputed from the receipts
-// kept, so a witness answering twice, or under two spellings of one key, counts
-// once and an undesignated one never counts.
+// designated must be the set the identity's key log names for this event at its
+// own position (see designationAt), never anything a receipt or an enrolment
+// says. A receipt is kept only when its witness is designated
+// (drivers.DesignatesWitness) and its signature over this event verifies. The
+// count is drivers.CountDesignated over the receipts kept, re-verified as read:
+// distinct designated witnesses, so one answering twice counts once. The threshold met is the one stored with the
+// finalization, which was taken from the same log.
 func (s *Service) onReceipt(eventSAID, witnessAID, cesrSig string, designated []string) {
-	f, _ := s.Store.GetFinalization(eventSAID)
-	if f == nil {
-		return
-	}
-	key, ok := drivers.WitnessKey(witnessAID)
-	if !ok {
-		log.Printf("[witness] receipt from %s for %s refused: not a witness identifier", witnessAID, eventSAID)
-		return
-	}
-	want := map[string]bool{}
-	for _, d := range designated {
-		if k, ok := drivers.WitnessKey(d); ok {
-			want[k] = true
-		}
-	}
-	if !want[key] {
+	if !drivers.DesignatesWitness(designated, witnessAID) {
 		log.Printf("[witness] receipt from %s for %s refused: not a designated witness", witnessAID, eventSAID)
 		return
 	}
 	if err := drivers.VerifyReceipt(witnessAID, eventSAID, cesrSig); err != nil {
 		log.Printf("[witness] receipt from %s for %s refused: %v", witnessAID, eventSAID, err)
+		return
+	}
+	s.finalizationMu.Lock()
+	defer s.finalizationMu.Unlock()
+	f, _ := s.Store.GetFinalization(eventSAID)
+	if f == nil {
 		return
 	}
 	// Counted only once it is kept, so the count never runs ahead of the
@@ -1025,13 +1037,11 @@ func (s *Service) onReceipt(eventSAID, witnessAID, cesrSig string, designated []
 		log.Printf("[witness] receipts for %s not read back: %v", eventSAID, err)
 		return
 	}
-	counted := map[string]bool{}
+	receipts := make([]drivers.WitnessReceipt, 0, len(held))
 	for _, h := range held {
-		if k, ok := drivers.WitnessKey(h.WitnessAID); ok && want[k] {
-			counted[k] = true
-		}
+		receipts = append(receipts, drivers.WitnessReceipt{WitnessAID: h.WitnessAID, CesrSignature: h.CesrSignature})
 	}
-	f.ReceiptCount = len(counted)
+	f.ReceiptCount = drivers.CountDesignated(designated, receipts, eventSAID)
 	f.UpdatedAt = NowRFC3339()
 	if f.ReceiptCount >= f.Threshold {
 		f.State = FinalizeFinalized
@@ -1043,6 +1053,8 @@ func (s *Service) onReceipt(eventSAID, witnessAID, cesrSig string, designated []
 
 func (s *Service) finalizeLoop(eventSAID string, threshold int) {
 	time.Sleep(FinalizeWaitDuration)
+	s.finalizationMu.Lock()
+	defer s.finalizationMu.Unlock()
 	f, _ := s.Store.GetFinalization(eventSAID)
 	if f == nil || f.State == FinalizeFinalized {
 		return

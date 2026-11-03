@@ -216,7 +216,14 @@ func (s *CoreServer) triggerWitnessBroadcast(signerAID string, rawEvent []byte, 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := s.WitnessService.BroadcastEvent(ctx, signerAID, rawEvent, cesrSig); err != nil {
+	// The identity's log decides who witnesses the event and how many must.
+	var keyLog [][]byte
+	for _, e := range s.signedEventsOf(signerAID) {
+		if raw, err := base64.StdEncoding.DecodeString(e.RawBytesB64); err == nil {
+			keyLog = append(keyLog, raw)
+		}
+	}
+	if err := s.WitnessService.BroadcastEvent(ctx, signerAID, rawEvent, cesrSig, keyLog); err != nil {
 		log.Printf("[witness] broadcast failed: %v", err)
 	}
 }

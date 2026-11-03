@@ -74,6 +74,9 @@ type EventWitnessing struct {
 	// a threshold, since anyone can generate a key and sign.
 	Verified int  `json:"verified"`
 	Met      bool `json:"met"`
+	// Unreadable is true when the log up to this event could not be read, so
+	// Designated and Threshold are not to be relied on: the event is never Met.
+	Unreadable bool `json:"unreadable,omitempty"`
 }
 
 // ValidateKELFromBytes checks a key log and reports what it established.
@@ -401,6 +404,49 @@ func WitnessKey(witnessAID string) (string, bool) {
 	return string(pub), true
 }
 
+// DesignatesWitness reports whether witnessAID is one of designated. This is
+// the one membership rule for witnesses, and it matches by KEY, not by the
+// string: a receipt is verified against the key its witness identifier is made
+// of, so the key is what identifies the witness, and one witness written two
+// ways is one witness. An identifier that is not a canonical non-transferable
+// one designates nothing and is designated by nothing.
+func DesignatesWitness(designated []string, witnessAID string) bool {
+	want, ok := WitnessKey(witnessAID)
+	if !ok {
+		return false
+	}
+	for _, d := range designated {
+		if k, ok := WitnessKey(d); ok && k == want {
+			return true
+		}
+	}
+	return false
+}
+
+// CountDesignated is the number of distinct designated witnesses that hold a
+// receipt in receipts whose signature over eventSAID verifies. It is the one
+// way a receipt is counted: a receipt from a witness not in designated is not
+// counted whether or not it verifies, and a witness counts once however many
+// receipts it sent. Without that, one witness meets any threshold by repeating
+// itself.
+func CountDesignated(designated []string, receipts []WitnessReceipt, eventSAID string) int {
+	counted := map[string]bool{}
+	for _, r := range receipts {
+		if !DesignatesWitness(designated, r.WitnessAID) {
+			continue
+		}
+		key, _ := WitnessKey(r.WitnessAID)
+		if counted[key] {
+			continue
+		}
+		if VerifyReceipt(r.WitnessAID, eventSAID, r.CesrSignature) != nil {
+			continue
+		}
+		counted[key] = true
+	}
+	return len(counted)
+}
+
 // WitnessingByEvent is the witnessing report for every event of a key log,
 // by the event's identifier: one walk of the log for all of them, where
 // WitnessingOf walks it once per event asked about.
@@ -477,25 +523,8 @@ func witnessingReport(in ValidateKELInput) ([]EventWitnessing, bool) {
 			Threshold:      threshold,
 		}
 
-		// Count each designated witness at most once, by its key. Without that
-		// one witness meets any threshold by sending its receipt repeatedly, or
-		// under a second spelling of its identifier, which is how a single
-		// party becomes a quorum.
-		counted := map[string]bool{}
-		for _, r := range in.Receipts[ev.SAID] {
-			if !contains(designated, r.WitnessAID) {
-				continue
-			}
-			key, ok := WitnessKey(r.WitnessAID)
-			if !ok || counted[key] {
-				continue
-			}
-			if err := VerifyReceipt(r.WitnessAID, ev.SAID, r.CesrSignature); err != nil {
-				continue
-			}
-			counted[key] = true
-			row.Verified++
-		}
+		row.Verified = CountDesignated(designated, in.Receipts[ev.SAID], ev.SAID)
+		row.Unreadable = broken
 		// A threshold of zero is met by definition — an identity that asked for
 		// no witnesses is not failing to reach them.
 		row.Met = !broken && row.Verified >= threshold
@@ -511,24 +540,15 @@ func witnessingReport(in ValidateKELInput) ([]EventWitnessing, bool) {
 func amendWitnesses(current, cuts, adds []string) []string {
 	out := make([]string, 0, len(current)+len(adds))
 	for _, w := range current {
-		if contains(cuts, w) {
+		if DesignatesWitness(cuts, w) {
 			continue
 		}
 		out = append(out, w)
 	}
 	for _, w := range adds {
-		if !contains(out, w) {
+		if !DesignatesWitness(out, w) {
 			out = append(out, w)
 		}
 	}
 	return out
-}
-
-func contains(list []string, v string) bool {
-	for _, s := range list {
-		if s == v {
-			return true
-		}
-	}
-	return false
 }

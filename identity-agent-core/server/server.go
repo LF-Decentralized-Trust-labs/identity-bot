@@ -2921,18 +2921,8 @@ func (s *CoreServer) handleSubmitReceipt(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusUnprocessableEntity, "The receipt does not verify", err.Error())
 		return
 	}
-	in, ok := s.logOfEvent(req.EventSAID)
+	in, ok := s.requireDesignated(w, req.EventSAID, req.WitnessAID)
 	if !ok {
-		writeError(w, http.StatusNotFound, "Not an event of a key log kept here",
-			"a receipt is kept here only for an event in a key log this Identity Agent keeps")
-		return
-	}
-	// Refused, not kept, unless the identity's own key log designates this
-	// witness for this event.
-	row, found := drivers.WitnessingOf(in, req.EventSAID)
-	if !found || !designates(row.Designated, req.WitnessAID) {
-		writeError(w, http.StatusUnprocessableEntity, "Not a designated witness",
-			req.WitnessAID+" is not a witness this identity's key log designates for that event")
 		return
 	}
 	if err := s.DataStore.SaveWitnessReceipt(store.WitnessReceiptRecord{
@@ -2958,19 +2948,24 @@ func (s *CoreServer) handleSubmitReceipt(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(resp)
 }
 
-// designates reports whether witnessAID is among designated, compared by the
-// key each is made of so one witness written two ways is one witness.
-func designates(designated []string, witnessAID string) bool {
-	want, ok := drivers.WitnessKey(witnessAID)
+// requireDesignated finds the key log eventSAID is in and refuses, writing the
+// error itself, unless that log designates witnessAID for that event. It is the
+// one gate for a receipt offered through a route; the matching rule is
+// drivers.DesignatesWitness. It returns the log for the caller to count against.
+func (s *CoreServer) requireDesignated(w http.ResponseWriter, eventSAID, witnessAID string) (drivers.ValidateKELInput, bool) {
+	in, ok := s.logOfEvent(eventSAID)
 	if !ok {
-		return false
+		writeError(w, http.StatusNotFound, "Not an event of a key log kept here",
+			"a receipt is kept here only for an event in a key log this Identity Agent keeps")
+		return in, false
 	}
-	for _, d := range designated {
-		if k, ok := drivers.WitnessKey(d); ok && k == want {
-			return true
-		}
+	row, found := drivers.WitnessingOf(in, eventSAID)
+	if !found || row.Unreadable || !drivers.DesignatesWitness(row.Designated, witnessAID) {
+		writeError(w, http.StatusUnprocessableEntity, "Not a designated witness",
+			witnessAID+" is not a witness this identity's key log designates for that event")
+		return in, false
 	}
-	return false
+	return in, true
 }
 
 // logOfEvent is the stored key log of the identity eventSAID belongs to, as

@@ -160,7 +160,7 @@ func TestTwoAgentsWitnessForEachOther(t *testing.T) {
 	bob.willWitnessFor(t, aliceAID)
 
 	resp, err := alice.svc.SubmitToWitness(ctx, bob.base+"/api/witness/event",
-		aliceAID, aliceRaw, aliceSig)
+		aliceAID, aliceRaw, aliceSig, [][]byte{aliceRaw})
 	if err != nil {
 		t.Fatalf("bob would not witness for alice: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestTwoAgentsWitnessForEachOther(t *testing.T) {
 	alice.willWitnessFor(t, bobAID)
 
 	resp, err = bob.svc.SubmitToWitness(ctx, alice.base+"/api/witness/event",
-		bobAID, bobRaw, bobSig)
+		bobAID, bobRaw, bobSig, [][]byte{bobRaw})
 	if err != nil {
 		t.Fatalf("alice would not witness for bob: %v", err)
 	}
@@ -221,20 +221,20 @@ func TestAPeerRefusesOverTheWireWhatItCannotVerify(t *testing.T) {
 	bob.willWitnessFor(t, aid)
 
 	// No controller signature.
-	if _, err := alice.svc.SubmitToWitness(ctx, bob.base+"/api/witness/event", aid, raw, ""); err == nil {
+	if _, err := alice.svc.SubmitToWitness(ctx, bob.base+"/api/witness/event", aid, raw, "", [][]byte{raw}); err == nil {
 		t.Fatal("a peer receipted an event that arrived unsigned")
 	}
 
 	// Signed by somebody else.
 	_, _, _, strangerSig := signedInception(t, bob.witnessKey)
-	if _, err := alice.svc.SubmitToWitness(ctx, bob.base+"/api/witness/event", aid, raw, strangerSig); err == nil {
+	if _, err := alice.svc.SubmitToWitness(ctx, bob.base+"/api/witness/event", aid, raw, strangerSig, [][]byte{raw}); err == nil {
 		t.Fatal("a peer receipted an event signed by a key it does not declare")
 	}
 
 	// An identity it never agreed to witness for.
 	other, _, otherRaw, otherSig := signedInception(t, bob.witnessKey)
 	if _, err := alice.svc.SubmitToWitness(ctx, bob.base+"/api/witness/event",
-		other, otherRaw, otherSig); err == nil {
+		other, otherRaw, otherSig, [][]byte{otherRaw}); err == nil {
 		t.Fatal("a peer witnessed for an identity it never agreed to")
 	}
 	_ = http.StatusOK

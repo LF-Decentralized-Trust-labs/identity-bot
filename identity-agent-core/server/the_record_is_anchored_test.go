@@ -917,7 +917,7 @@ func TestStoppingWhileWitnessingEndsTheWorker(t *testing.T) {
 	go func() {
 		defer close(done)
 		for i := 0; i < 50; i++ {
-			s.witnessRecord(owner.AID, owner.AID, []string{"BWitness"}, 1)
+			s.witnessRecord(owner.AID, owner.AID, []string{"BWitness"})
 		}
 	}()
 	s.anchorStopMu.Lock()
@@ -939,8 +939,8 @@ func TestWitnessingTheOwnLogKeepsTheRecordDue(t *testing.T) {
 		<-hold
 		return witness.TipAnswer{}, fmt.Errorf("offline")
 	}
-	s.witnessRecord("EOwner", "ERecord", []string{"BWitness"}, 1)
-	s.witnessRecord("EOwner", "", []string{"BWitness"}, 1)
+	s.witnessRecord("EOwner", "ERecord", []string{"BWitness"})
+	s.witnessRecord("EOwner", "", []string{"BWitness"})
 	s.witnessing.witnessMu.Lock()
 	defer s.witnessing.witnessMu.Unlock()
 	if s.witnessing.witnessJob.record != "ERecord" {

@@ -422,7 +422,7 @@ func (s *CoreServer) recordIdentity() (recordIdentityRecord, []byte, error) {
 	if err := s.saveRecordIdentity(rec); err != nil {
 		log.Printf("[record] the record identity %s was made but could not be marked so: %v", rec.AID, err)
 	}
-	s.witnessRecord(owner.AID, rec.AID, witnesses, toad)
+	s.witnessRecord(owner.AID, rec.AID, witnesses)
 	s.askWitnessesToCoverTheRecord(witnesses, true)
 	log.Printf("[record] record identity %s made, approved in %s's key log, witnessed by %d", rec.AID, owner.AID, len(witnesses))
 	return rec, seed, nil
@@ -616,10 +616,10 @@ func (s *CoreServer) anchorRecord() (bool, error) {
 	if err := s.saveRecordIdentity(rec); err != nil {
 		log.Printf("[record] the record identity's tip could not be kept outside the database: %v", err)
 	}
-	if witnesses, toad, err := keeper.WitnessConfig(rec.AID); err == nil {
+	if witnesses, _, err := keeper.WitnessConfig(rec.AID); err == nil {
 		s.askWitnessesToCoverTheRecord(witnesses, false)
 		if owner, err := s.DataStore.GetIdentity(); err == nil && owner != nil {
-			s.witnessRecord(owner.AID, rec.AID, witnesses, toad)
+			s.witnessRecord(owner.AID, rec.AID, witnesses)
 		}
 	}
 	return true, nil

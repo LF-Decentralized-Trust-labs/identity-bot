@@ -40,6 +40,12 @@ func (s *CoreServer) handleStoreReceipt(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Kept only for a witness the event's own key log designates, as the
+	// other receipt route does.
+	if _, ok := s.requireDesignated(w, req.EventSAID, req.WitnessAID); !ok {
+		return
+	}
+
 	record := store.WitnessReceiptRecord{
 		EventSAID:     req.EventSAID,
 		WitnessAID:    req.WitnessAID,

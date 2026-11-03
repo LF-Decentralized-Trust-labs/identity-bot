@@ -190,7 +190,7 @@ func TestAWitnessRefusesAnEventFromADifferentIdentity(t *testing.T) {
 func TestBroadcastingAnUnsignedEventIsRefusedLocally(t *testing.T) {
 	s, aid, raw, _ := enrolled(t)
 
-	if err := s.BroadcastEvent(t.Context(), aid, raw, ""); err == nil {
+	if err := s.BroadcastEvent(t.Context(), aid, raw, "", [][]byte{raw}); err == nil {
 		t.Fatal("an unsigned event was broadcast to witnesses")
 	}
 }

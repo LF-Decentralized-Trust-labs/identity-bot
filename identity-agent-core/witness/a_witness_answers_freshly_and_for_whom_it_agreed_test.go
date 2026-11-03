@@ -46,7 +46,11 @@ func newDelegation(t *testing.T) *delegation {
 	e, key, _ := signedEngine()
 	orgPub, orgSeed := key()
 	orgNext, _ := key()
-	icp, err := e.CreateInceptionNamed(orgPub, orgNext, "org")
+	// The org's own inception names the witness: receipts are counted against
+	// the set the key log gives, so a log naming none would count none.
+	icp, err := e.Incept(drivers.InceptionRequest{
+		PublicKey: orgPub, NextPublicKey: orgNext, Name: "org", Witnesses: []string{wkey}, Toad: 1,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,13 +199,13 @@ func TestOnlyWhatAWitnessLacksIsSent(t *testing.T) {
 		return SignedEvent{RawBytesB64: rawB64, CesrSignature: sig}
 	}
 	log := []SignedEvent{signed(d.icpB64), signed(d.approvalB64)}
-	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey}, 1)
+	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey})
 	if posts != 2 {
 		t.Fatalf("%d events were sent to a witness holding none", posts)
 	}
 	log = append(log, signed(d.interaction(t, "org", d.org, 1)))
 	posts = 0
-	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey}, 1)
+	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey})
 	if posts != 1 {
 		t.Fatalf("%d events were sent to a witness lacking one", posts)
 	}
@@ -278,7 +282,7 @@ func TestAWitnessWithNoTipIsSentNothing(t *testing.T) {
 	}
 	raw, _ := base64.StdEncoding.DecodeString(d.icpB64)
 	sig, _ := login.SignString(string(raw), d.orgSeed)
-	sender.BringUpToDate(context.Background(), d.org, []SignedEvent{{RawBytesB64: d.icpB64, CesrSignature: sig}}, []string{d.wkey}, 1)
+	sender.BringUpToDate(context.Background(), d.org, []SignedEvent{{RawBytesB64: d.icpB64, CesrSignature: sig}}, []string{d.wkey})
 	if posts != 0 {
 		t.Fatalf("%d events were sent to a witness whose tip is not known", posts)
 	}
@@ -416,16 +420,16 @@ func TestAWitnessUpToDateIsNotAskedAgain(t *testing.T) {
 		return SignedEvent{RawBytesB64: rawB64, CesrSignature: sig}
 	}
 	log := []SignedEvent{signed(d.icpB64), signed(d.approvalB64)}
-	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey}, 1)
+	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey})
 	if asked != 1 {
 		t.Fatalf("asked %d times bringing it up to date", asked)
 	}
-	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey}, 1)
+	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey})
 	if asked != 1 {
 		t.Fatal("a witness already up to date was asked again")
 	}
 	log = append(log, signed(d.interaction(t, "org", d.org, 1)))
-	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey}, 1)
+	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey})
 	if asked != 2 {
 		t.Fatal("a witness was not asked once there was more to send")
 	} // Nothing new, but long enough since: asked again, so a witness that has
@@ -433,7 +437,7 @@ func TestAWitnessUpToDateIsNotAskedAgain(t *testing.T) {
 	prior := RecheckWitnessesEvery
 	RecheckWitnessesEvery = 0
 	t.Cleanup(func() { RecheckWitnessesEvery = prior })
-	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey}, 1)
+	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey})
 	if asked != 3 {
 		t.Fatal("a witness was not asked again after the recheck interval")
 	} // The witness loses what it held past the inception (restored from an
@@ -448,10 +452,10 @@ func TestAWitnessUpToDateIsNotAskedAgain(t *testing.T) {
 	sender.PostEvent = func(context.Context, string, []byte) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("unreachable")
 	}
-	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey}, 1)
+	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey})
 	sender.PostEvent = post
 	RecheckWitnessesEvery = time.Hour
-	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey}, 1)
+	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey})
 	if held, _ := d.w.Store.GetKelEvents(d.org); len(held) != len(log) {
 		t.Fatalf("a witness that fell behind holds %d of %d after the recheck", len(held), len(log))
 	}
@@ -459,7 +463,7 @@ func TestAWitnessUpToDateIsNotAskedAgain(t *testing.T) {
 	// recheck.
 	RecheckWitnessesEvery = time.Hour
 	before := asked
-	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey}, 1)
+	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey})
 	if asked != before {
 		t.Fatal("a witness filled again was asked again at once")
 	}
@@ -496,7 +500,7 @@ func TestAWitnessHandsBackAnEventItHolds(t *testing.T) {
 	sig, _ := login.SignString(string(raw), d.orgSeed)
 	icp, _ := base64.StdEncoding.DecodeString(d.icpB64)
 	icpSig, _ := login.SignString(string(icp), d.orgSeed)
-	sender.BringUpToDate(context.Background(), d.org, []SignedEvent{{d.icpB64, icpSig}, {d.approvalB64, sig}}, []string{d.wkey}, 1)
+	sender.BringUpToDate(context.Background(), d.org, []SignedEvent{{d.icpB64, icpSig}, {d.approvalB64, sig}}, []string{d.wkey})
 	got := sender.EventsHeldAt(context.Background(), d.org, 1, []string{d.wkey})
 	if len(got) != 1 || got[0].RawBytesB64 != d.approvalB64 || got[0].CesrSignature != sig {
 		t.Fatalf("the witness handed back %+v", got)
@@ -548,16 +552,16 @@ func TestAPassLooksOnlyAtWhatIsNotConfirmed(t *testing.T) {
 		return SignedEvent{RawBytesB64: rawB64, CesrSignature: sig}
 	}
 	log := []SignedEvent{signed(d.icpB64), signed(d.approvalB64)}
-	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey}, 1)
+	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey})
 	log = append(log, signed(d.interaction(t, "org", d.org, 1)))
 	before := counting.looked
-	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey}, 1)
+	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey})
 	// One for the new event, and one as its receipt is counted.
 	if n := counting.looked - before; n != 2 {
 		t.Fatalf("a pass with one new event looked up %d finalisations", n)
 	}
 	before = counting.looked
-	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey}, 1)
+	sender.BringUpToDate(context.Background(), d.org, log, []string{d.wkey})
 	if n := counting.looked - before; n != 0 {
 		t.Fatalf("a pass with nothing new looked up %d finalisations", n)
 	}

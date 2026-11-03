@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	keri "github.com/grapeid/keri-go"
 )
 
 // SubmitToWitness sends one event to one witness and returns its receipt.
@@ -14,7 +13,11 @@ import (
 // that proves nothing. Separate from BroadcastEvent because the two answer
 // different questions: broadcasting asks everybody and counts, this asks one and
 // reports what it said.
-func (s *Service) SubmitToWitness(ctx context.Context, witnessURL, signerAID string, rawEvent []byte, cesrSig string) (map[string]interface{}, error) {
+//
+// keyLog is the identity's log as published, ending at or after the event. It
+// says who was designated for the event and how many receipts it needs, so the
+// receipt is counted for any event, not only a founding one.
+func (s *Service) SubmitToWitness(ctx context.Context, witnessURL, signerAID string, rawEvent []byte, cesrSig string, keyLog [][]byte) (map[string]interface{}, error) {
 	if len(rawEvent) == 0 {
 		return nil, fmt.Errorf("an event cannot be submitted without the bytes it was published as")
 	}
@@ -25,6 +28,11 @@ func (s *Service) SubmitToWitness(ctx context.Context, witnessURL, signerAID str
 	said, _ := ked["d"].(string)
 	if said == "" {
 		return nil, fmt.Errorf("the event carries no identifier to be receipted")
+	}
+
+	designated, _, err := designationAt(keyLog, said)
+	if err != nil {
+		return nil, err
 	}
 
 	body, err := json.Marshal(map[string]interface{}{
@@ -44,13 +52,6 @@ func (s *Service) SubmitToWitness(ctx context.Context, witnessURL, signerAID str
 	sig, wit, err := receiptFromResponse(resp, said)
 	if err != nil {
 		return nil, err
-	}
-	// Designated, for a founding event, is what the event itself names. A later
-	// event's set depends on the whole log, which this call does not have, so
-	// its receipt is returned but not counted here.
-	var designated []string
-	if ev, perr := keri.ParseEvent(rawEvent); perr == nil && (ev.Ilk == "icp" || ev.Ilk == "dip") {
-		designated = ev.Witnesses
 	}
 	s.onReceipt(said, wit, sig, designated)
 	return resp, nil

@@ -30,7 +30,6 @@ type witnessState struct {
 type witnessJob struct {
 	owner, record string
 	witnesses     []string
-	toad          int
 }
 
 // witnessRecord brings the record identity's witnesses up to date: first with
@@ -38,12 +37,12 @@ type witnessJob struct {
 // identity, in order, then with the record identity's. A witness that holds
 // the approval witnesses the record identity from its inception. Nothing to
 // do where it names none.
-func (s *CoreServer) witnessRecord(ownerAID, recordAID string, witnesses []string, toad int) {
+func (s *CoreServer) witnessRecord(ownerAID, recordAID string, witnesses []string) {
 	if len(witnesses) == 0 || s.WitnessService == nil {
 		return
 	}
 	s.witnessing.witnessMu.Lock()
-	job := witnessJob{owner: ownerAID, record: recordAID, witnesses: witnesses, toad: toad}
+	job := witnessJob{owner: ownerAID, record: recordAID, witnesses: witnesses}
 	// A request for the identity's own log alone does not drop a record
 	// identity a pass is already due to send.
 	if job.record == "" {
@@ -81,9 +80,9 @@ func (s *CoreServer) keepWitnessing(running context.Context, stop <-chan struct{
 		job := s.witnessing.witnessJob
 		s.witnessing.witnessMu.Unlock()
 		ctx, cancel := context.WithTimeout(running, time.Minute)
-		s.WitnessService.BringUpToDate(ctx, job.owner, s.signedEventsOf(job.owner), job.witnesses, job.toad)
+		s.WitnessService.BringUpToDate(ctx, job.owner, s.signedEventsOf(job.owner), job.witnesses)
 		if job.record != "" {
-			s.WitnessService.BringUpToDate(ctx, job.record, s.signedEventsOf(job.record), job.witnesses, job.toad)
+			s.WitnessService.BringUpToDate(ctx, job.record, s.signedEventsOf(job.record), job.witnesses)
 		}
 		cancel()
 	}
@@ -115,7 +114,7 @@ func (s *CoreServer) witnessOwnLog() {
 	if err != nil || owner == nil {
 		return
 	}
-	if witnesses, toad, err := keeper.WitnessConfig(owner.AID); err == nil && len(witnesses) > 0 {
-		s.witnessRecord(owner.AID, "", witnesses, toad)
+	if witnesses, _, err := keeper.WitnessConfig(owner.AID); err == nil && len(witnesses) > 0 {
+		s.witnessRecord(owner.AID, "", witnesses)
 	}
 }
