@@ -447,17 +447,14 @@ func checkAskedFor(cred acdc, method, path string, asked map[string]json.RawMess
 			return fmt.Errorf("the request asked for other limits than were granted")
 		}
 	case schemas.AppGrant.Schema.SAID:
-		// An app's grant is asked for at its own routes, never an AI agent's,
-		// so a request to grant an AI agent cannot be turned into an app's
-		// grant or the reverse.
+		// An app's grant is asked for at the route that creates an app, never
+		// an AI agent's, so a request to grant an AI agent cannot be turned
+		// into an app's grant or the reverse. No route changes an app's
+		// capabilities yet; when one is added it is bound here with it.
 		switch {
-		case method == "POST" && path == "/api/apps":
+		case method == "POST" && path == "/api/hosted-apps":
 			if stringOf(asked["name"]) != stringAttr(cred.A, "name") {
 				return fmt.Errorf("the request asked for an app named differently")
-			}
-		case method == "PUT" && len(segments) == 4 && segments[1] == "apps" && segments[3] == "capabilities":
-			if segments[2] != about {
-				return fmt.Errorf("the request was about %s, the credential about %s", segments[2], about)
 			}
 		default:
 			return fmt.Errorf("%s %s is not a request that grants an app anything", method, path)

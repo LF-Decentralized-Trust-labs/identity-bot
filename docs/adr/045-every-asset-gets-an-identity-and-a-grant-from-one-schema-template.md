@@ -293,9 +293,10 @@ identities by it. Three seams are closed with it:
 
 - `checkAskedFor` (`identity-agent-core/authorisation/request.go`) checks an App Grant against the
   request that asked for it, exactly as it does an AI Agent Grant (name, capabilities, limits, and
-  the asset the request is about), at the app's own routes `POST /api/apps` and
-  `PUT /api/apps/{id}/capabilities`. A request to grant an AI agent is not accepted as an app's, nor the
-  reverse.
+  the asset the request is about), at the route that creates an app, `POST /api/hosted-apps`
+  (mounted by the apphosting add-on), and only there: no route changes an app's capabilities yet,
+  and when one is added it is bound in `checkAskedFor` with it. A request to grant an AI agent is
+  not accepted as an app's, nor the reverse.
 - `grantShown` (`identity-agent-core/authorisation/what_is_signed_is_what_is_shown.go`) shows an
   App Grant, as kind `app`, with its name, capabilities, limits and end, so a device holding the
   owner's key can be asked to sign one.
@@ -306,11 +307,12 @@ identities by it. Three seams are closed with it:
 These seams are still open, and each is refused rather than half-working:
 
 - No route issues an App Grant or an App Body yet. `ProvisionAppAsset` and the issuance exist; no
-  route in the Identity Agent or an add-on calls them, and so the app routes above are named by the
-  check and not yet mounted.
+  route in the Identity Agent calls them; the apphosting add-on's `POST /api/hosted-apps` is the
+  route that will, and no route yet changes an app's capabilities.
 - The Identity Agent's own list of grant schemas it honours as capability grants
   (`CapabilityGrantSchemaSAIDs`, read by add-ons) is unchanged, so no gateway admits an app on its App
-  Grant yet.
+  Grant yet. Admitting an app's grant at the gateway belongs to step 3 (apps reached through the
+  relay and making calls), and is decided there.
 
 The check of a body's approval is tied to the asset the path names: the caller gives the check
 a lookup from the path's `{id}` to that asset's pairwise AID and kind, and the body credential
