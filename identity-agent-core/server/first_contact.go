@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/witness"
 	"log"
 	"net/http"
 	"sync"
@@ -278,13 +279,21 @@ func (s *CoreServer) recordConnectionRequest(aid string, jwm *didcomm.JWM) error
 	if kel, _ := s.DataStore.GetContactKEL(aid); kel != nil && kel.KelVerified {
 		publicKey = kel.CurrentPublicKey
 	}
+	// A stranger's address is the stranger's say-so: it is kept only if it names
+	// this stranger's own AID and is not a private address (the owner's own
+	// agents, which may be local, are added by the owner, not by a request).
+	oobi := body.OobiURL
+	if u, err := witness.OOBIFitsAID(oobi, aid); err != nil || witness.LiteralIsLocal(u.Hostname()) {
+		oobi = ""
+	}
 	rec := store.ContactRecord{
-		AID:          aid,
-		Alias:        alias,
-		OobiURL:      body.OobiURL,
-		PublicKey:    publicKey,
-		Status:       "pending_inbound",
-		DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
+		AID:           aid,
+		Alias:         alias,
+		OobiURL:       oobi,
+		ContactSource: witness.ContactSourceInbound,
+		PublicKey:     publicKey,
+		Status:        "pending_inbound",
+		DiscoveredAt:  time.Now().UTC().Format(time.RFC3339),
 	}
 	if err := s.DataStore.SaveContact(rec); err != nil {
 		return err

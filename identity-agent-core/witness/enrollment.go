@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	neturl "net/url"
 	"strings"
+	"syscall"
 	"time"
 
 	"identity-agent-core/iacrypto"
@@ -362,45 +364,66 @@ var lookupHost = net.LookupIP
 // address is refused, unless the recorded OOBI is itself such an address (a
 // local test agent): this agent is not to be made to call what is on its own
 // network by a name somebody else controls.
-func (s *Service) answerAddress(requesterAID, signed string) (string, error) {
+func (s *Service) answerAddress(requesterAID, signed string) (url string, local bool, err error) {
 	c, _ := s.Contacts.GetContact(requesterAID)
 	if c == nil || c.OobiURL == "" {
-		return "", fmt.Errorf("%s has no recorded OOBI to answer at", requesterAID)
+		return "", false, fmt.Errorf("%s has no recorded OOBI to answer at", requesterAID)
 	}
-	rec, err := neturl.Parse(c.OobiURL)
-	if err != nil || (rec.Scheme != "http" && rec.Scheme != "https") || rec.Hostname() == "" {
-		return "", fmt.Errorf("the recorded OOBI of %s is not a web address", requesterAID)
-	}
-	if i := strings.Index(rec.Path, "/oobi/"); i != -1 {
-		if named := strings.Trim(strings.SplitN(rec.Path[i+len("/oobi/"):], "/", 2)[0], " "); named != requesterAID {
-			return "", fmt.Errorf("the recorded OOBI of %s names %q, not %s", requesterAID, named, requesterAID)
-		}
+	rec, err := OOBIFitsAID(c.OobiURL, requesterAID)
+	if err != nil {
+		return "", false, fmt.Errorf("the recorded OOBI of %s: %w", requesterAID, err)
 	}
 	if signed != "" {
 		sg, err := neturl.Parse(signed)
 		if err != nil || !strings.EqualFold(sg.Host, rec.Host) || sg.Scheme != rec.Scheme {
-			return "", fmt.Errorf("the request's OOBI is not at the address recorded for %s", requesterAID)
+			return "", false, fmt.Errorf("the request's OOBI is not at the address recorded for %s", requesterAID)
 		}
 	}
 	host := rec.Hostname()
-	if literalIsLocal(host) {
-		return witnessAcceptURL(c.OobiURL), nil
+	// A local address is a local test agent only where the owner is the one who
+	// recorded it; one a stranger's request left behind is not.
+	if LiteralIsLocal(host) && c.ContactSource != ContactSourceInbound {
+		return witnessAcceptURL(c.OobiURL), true, nil
 	}
 	ips, err := lookupHost(host)
 	if err != nil || len(ips) == 0 {
-		return "", fmt.Errorf("%s does not resolve", host)
+		return "", false, fmt.Errorf("%s does not resolve", host)
 	}
 	for _, ip := range ips {
 		if ipIsInternal(ip) {
-			return "", fmt.Errorf("%s resolves to an internal address, and is not called", host)
+			return "", false, fmt.Errorf("%s resolves to an internal address, and is not called", host)
 		}
 	}
-	return witnessAcceptURL(c.OobiURL), nil
+	return witnessAcceptURL(c.OobiURL), false, nil
 }
 
-// literalIsLocal is whether host is itself "localhost" or a private, loopback
-// or link-local address, written out.
-func literalIsLocal(host string) bool {
+// OOBIFitsAID checks that oobi is an http(s) address that names aid, and
+// returns it parsed: aid must be one of its path segments, and where it has
+// an /oobi/ segment, the one right after it.
+func OOBIFitsAID(oobi, aid string) (*neturl.URL, error) {
+	u, err := neturl.Parse(oobi)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+		return nil, fmt.Errorf("is not a web address")
+	}
+	segs := strings.Split(strings.Trim(u.Path, "/"), "/")
+	named := false
+	for i, seg := range segs {
+		if seg == "oobi" && i+1 < len(segs) && strings.TrimSpace(segs[i+1]) != aid {
+			return nil, fmt.Errorf("names %q, not %s", segs[i+1], aid)
+		}
+		if seg == aid {
+			named = true
+		}
+	}
+	if !named {
+		return nil, fmt.Errorf("does not name %s", aid)
+	}
+	return u, nil
+}
+
+// LiteralIsLocal is whether host is itself "localhost" or a private, loopback,
+// link-local or shared-address-space address, written out.
+func LiteralIsLocal(host string) bool {
 	if strings.EqualFold(host, "localhost") {
 		return true
 	}
@@ -408,19 +431,52 @@ func literalIsLocal(host string) bool {
 	return ip != nil && ipIsInternal(ip)
 }
 
+var cgnat = &net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
+
 func ipIsInternal(ip net.IP) bool {
 	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
-		ip.IsUnspecified() || ip.IsInterfaceLocalMulticast()
+		ip.IsUnspecified() || ip.IsInterfaceLocalMulticast() || cgnat.Contains(ip)
 }
+
+// guardedClient is an HTTP client for the answer: it follows no redirect, uses
+// no proxy, and refuses to connect to an internal address (the one actually
+// dialled, so a name that changes what it resolves to between the check and
+// the call gains nothing) unless local, which is only for a contact whose
+// recorded address is itself a local one the owner set.
+func guardedClient(timeout time.Duration, local bool) *http.Client {
+	d := &net.Dialer{Timeout: timeout, Control: func(network, address string, _ syscall.RawConn) error {
+		if local {
+			return nil
+		}
+		host, _, err := net.SplitHostPort(address)
+		if err != nil {
+			return err
+		}
+		if ip := net.ParseIP(host); ip == nil || ipIsInternal(ip) {
+			return fmt.Errorf("%s is an internal address, and is not called", host)
+		}
+		return nil
+	}}
+	return &http.Client{
+		Timeout:       timeout,
+		Transport:     &http.Transport{Proxy: nil, DialContext: d.DialContext, TLSHandshakeTimeout: timeout},
+		CheckRedirect: refuseRedirects,
+	}
+}
+
+func refuseRedirects(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
+type guardKey struct{}
 
 // SendAcceptCallback sends the accept POST-back to the requester's agent, at
 // the address recorded for the requester and no other (see answerAddress).
 // requesterOOBI is the one the request was signed with.
 func (s *Service) SendAcceptCallback(ctx context.Context, requesterOOBI string, cb AcceptCallback) error {
-	url, err := s.answerAddress(cb.RequesterAID, requesterOOBI)
+	url, local, err := s.answerAddress(cb.RequesterAID, requesterOOBI)
 	if err != nil {
 		return err
 	}
+	ctx = context.WithValue(ctx, guardKey{}, local)
 	if cb.ResponderAID == "" {
 		cb.ResponderAID = s.ourAID()
 	}

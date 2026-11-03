@@ -331,7 +331,15 @@ func (s *Service) defaultPostEvent(ctx context.Context, witnessURL string, body 
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := s.HTTPClient.Do(req)
+	// A POST carries a body that must go where it was addressed and nowhere
+	// else, so no redirect is followed; an answer to a request is also held to
+	// the address it dials (see guardedClient).
+	client := *s.HTTPClient
+	client.CheckRedirect = refuseRedirects
+	if local, ok := ctx.Value(guardKey{}).(bool); ok {
+		client = *guardedClient(s.HTTPClient.Timeout, local)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
