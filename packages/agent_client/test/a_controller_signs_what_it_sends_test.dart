@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:agent_client/crypto/owner_signature.dart';
 import 'package:agent_client/services/controller_signing_client.dart';
+import 'package:agent_client/services/the_core_is_settled.dart';
 import 'package:http/http.dart' as http;
 import 'package:test/test.dart';
 
@@ -71,6 +73,80 @@ class _Scripted extends http.BaseClient {
 }
 
 void main() {
+  tearDown(TheCoreIsSettled.reset);
+
+  test('a request waits while the core is being started, then signs at the '
+      'address it ended up at', () async {
+    var core = _localCore;
+    final askedAt = <String>[];
+    final c = ControllerSigningClient(
+      agentOrigin: _agent,
+      localCoreOrigin: () => core,
+      inner: _Scripted((r) {
+        if (r.url.path == '/api/controller/sign') {
+          askedAt.add(r.url.origin);
+          return ('{"controller_aid":"B","signature":"0B","timestamp":"t"}', 200);
+        }
+        return ('{}', 200);
+      }),
+    );
+    final starting = Completer<void>();
+    final during = TheCoreIsSettled.during(() => starting.future);
+
+    var done = false;
+    final pending =
+        c.get(Uri.parse('$_agent/api/profile')).whenComplete(() => done = true);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(done, isFalse, reason: 'a request was sent while the core was starting');
+    expect(askedAt, isEmpty);
+
+    core = 'http://127.0.0.1:50999'; // found on its real port
+    starting.complete();
+    await during;
+    await pending;
+    expect(askedAt, ['http://127.0.0.1:50999']);
+  });
+
+  test('a start that failed refuses the request with a reason, not a wait',
+      () async {
+    final w = _Watched();
+    final c = ControllerSigningClient(
+        agentOrigin: _agent, localCoreOrigin: () => _localCore, inner: w.client);
+    await expectLater(
+        TheCoreIsSettled.during<void>(() async => throw StateError('no core')),
+        throwsStateError);
+    await expectLater(c.get(Uri.parse('$_agent/api/profile')),
+        throwsA(isA<ThisMachineCouldNotSign>()));
+    expect(w.toTheAgent, isEmpty);
+    expect(w.askedToSign, isEmpty);
+  });
+
+  test('a core that never settles refuses after the wait instead of hanging',
+      () async {
+    final w = _Watched();
+    final c = ControllerSigningClient(
+        agentOrigin: _agent,
+        localCoreOrigin: () => _localCore,
+        waitAtMost: const Duration(milliseconds: 50),
+        inner: w.client);
+    final never = Completer<void>();
+    unawaited(TheCoreIsSettled.during(() => never.future));
+    await expectLater(c.get(Uri.parse('$_agent/api/profile')),
+        throwsA(isA<ThisMachineCouldNotSign>()));
+    expect(w.toTheAgent, isEmpty);
+    never.complete();
+  });
+
+  test('a request to anyone else does not wait for the core', () async {
+    final w = _Watched();
+    final c = ControllerSigningClient(
+        agentOrigin: _agent, localCoreOrigin: () => _localCore, inner: w.client);
+    final never = Completer<void>();
+    unawaited(TheCoreIsSettled.during(() => never.future));
+    await c.get(Uri.parse('https://someone-else.example.test/oobi/E1'));
+    expect(w.toTheAgent, hasLength(1));
+    never.complete();
+  });
   test('a request to the agent carries this machine\'s signature', () async {
     final w = _Watched();
     final c = ControllerSigningClient(

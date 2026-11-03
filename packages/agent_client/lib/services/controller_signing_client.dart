@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
 import '../crypto/owner_signature.dart';
+import 'the_core_is_settled.dart';
 import 'the_path_a_signature_covers.dart';
 import 'the_owner_at_this_computer.dart';
 
@@ -41,6 +43,7 @@ class ControllerSigningClient extends http.BaseClient {
     required this.localCoreOrigin,
     this.agentAid,
     this.authentication,
+    this.waitAtMost = const Duration(seconds: 90),
     http.Client? inner,
   })  : _inner = ProvingThisComputer.over(inner),
         _ownsInner = inner == null;
@@ -77,6 +80,9 @@ class ControllerSigningClient extends http.BaseClient {
   /// actions that need one — which is the correct outcome and a legible one.
   final Future<VouchedAuthentication?> Function()? authentication;
 
+  /// How long a request waits for [TheCoreIsSettled] before it is refused.
+  final Duration waitAtMost;
+
   final http.Client _inner;
 
   /// Whether this wrapper created [_inner] and so may close it. When the inner
@@ -91,6 +97,8 @@ class ControllerSigningClient extends http.BaseClient {
     if (!_isTheAgent(request.url)) {
       return _inner.send(request);
     }
+    await _untilTheCoreIsSettled(request.url);
+
     // Any request to the agent is signed, however it was built. A streamed or
     // multipart body is read once, here, into the bytes that are both signed and
     // sent — passing it through would be an unsigned request to the agent.
@@ -115,6 +123,23 @@ class ControllerSigningClient extends http.BaseClient {
       ..persistentConnection = plain.persistentConnection;
     signed.headers.addAll(headers);
     return _inner.send(signed);
+  }
+
+  /// Holds the request while this app is starting its core or switching profile.
+  ///
+  /// Refuses, rather than sends, if it never settles or the start did not work.
+  Future<void> _untilTheCoreIsSettled(Uri url) async {
+    try {
+      await TheCoreIsSettled.ready.timeout(waitAtMost);
+    } on TimeoutException {
+      throw ThisMachineCouldNotSign(
+          'this app is still starting up, try again in a moment', url);
+    }
+    if (!TheCoreIsSettled.worked) {
+      throw ThisMachineCouldNotSign(
+          'this app could not finish starting, so it has no core to sign with',
+          url);
+    }
   }
 
   /// Asks the local core to sign this request as this machine.
