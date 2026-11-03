@@ -104,7 +104,8 @@
         "ask",
         "reply",
         "receipt",
-        "failure"
+        "failure",
+        "progress"
       ]
     },
     "party": {

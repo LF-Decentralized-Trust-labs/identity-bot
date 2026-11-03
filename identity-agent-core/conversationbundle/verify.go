@@ -848,6 +848,10 @@ func (v *verifier) checkThread(where string, rec agentmessage.Record) {
 		if prompt.Kind != agentmessage.KindAsk || prompt.To != rec.From || rec.To != prompt.From {
 			v.fault(where, "an answer goes only to the sender of an ask addressed to the one answering, and this does not")
 		}
+	case agentmessage.KindProgress:
+		if prompt.Kind != agentmessage.KindAsk || prompt.To != rec.From || rec.To != prompt.From {
+			v.fault(where, "a progress note goes only to the sender of an ask addressed to the one writing it, and this does not")
+		}
 	case agentmessage.KindAsk:
 		if prompt.To != rec.From {
 			v.fault(where, "an AI agent asks only while handling a message given to it, and this one was not")

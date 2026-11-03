@@ -320,6 +320,8 @@ func writeMessageVectors(t *testing.T) {
 		Brain: brain, HostNonce: "nonce-0123456789abcdef", HostTime: "2026-10-20T12:00:00Z", BodyCredential: "EBODYCRED"}
 	receipt := Statement{Conversation: "c_vector", Kind: KindReceipt, From: "EAGENT_A", To: "EAGENT_B", InReplyTo: "m_reply",
 		HostNonce: "nonce-receipt-00000001", HostTime: "2026-10-20T12:00:02Z", BodyCredential: "EBODYCRED"}
+	progress := Statement{Conversation: "c_vector", Kind: KindProgress, From: "EAGENT_B", To: "EAGENT_A", InReplyTo: "m_ask",
+		Brain: brain, HostNonce: "nonce-progress-000001", HostTime: "2026-10-20T11:59:50Z", BodyCredential: "EBODYCRED"}
 	deepAsk := ask
 	deepAsk.Tier, deepAsk.HostNonce, deepAsk.HostTime = TierDeep, "nonce-deep-0000001", "2026-10-20T11:59:40Z"
 	set.Statements = []stmt{
@@ -327,6 +329,7 @@ func writeMessageVectors(t *testing.T) {
 		{Name: "a reply", Statement: reply, Body: "I run macOS 26.1 on a MacBook Pro."},
 		{Name: "an ask", Statement: ask, Body: "Which operating system are you on?"},
 		{Name: "a receipt, with no brain", Statement: receipt, Body: ""},
+		{Name: "a progress note, which is not the answer", Statement: progress, Body: "Half the files read; no problems so far."},
 	}
 	type refused = struct {
 		Name      string    `json:"name"`
