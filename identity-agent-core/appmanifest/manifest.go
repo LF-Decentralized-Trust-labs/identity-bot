@@ -12,6 +12,7 @@ package appmanifest
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -56,7 +57,81 @@ type AppManifest struct {
 	// never remote-invocable (structural rule) and serialized per capability
 	// (one screen = one driver).
 	Isolation string `json:"isolation,omitempty"` // "" (legacy=sandbox) | sandbox | host
+
+	// --- Rows of an app beside an Identity Agent (ADR-012, Amendment 5) ---
+	// An app is a manifest with kind "app". Its name, resources and outbound
+	// hosts are the existing name, resources and network.allowed_domains rows;
+	// the rows below are the ones it adds. validateApp (app_rules.go) is the
+	// rule for every row, and the prose of
+	// contracts/app-manifest/app-manifest.schema.json says it in words.
+
+	// ReleaseDigest names the exact release this manifest describes: for a
+	// compiled app "blake3:" and 64 lower-case hex digits of the executable's
+	// bytes, for a container app "sha256:" and 64 lower-case hex digits of the
+	// image's OCI manifest. It is the only name an app has for its release.
+	ReleaseDigest string `json:"release_digest,omitempty"`
+	// EncryptedMachine says whether the app needs a machine whose memory is
+	// encrypted (a TEE): "required", "preferred" or "not_needed".
+	EncryptedMachine string `json:"encrypted_machine,omitempty"`
+	// Store is the app's own encrypted store: its format and the size it asks for.
+	Store *AppStore `json:"store,omitempty"`
+	// Placement is where the app runs: "own_machine" (the default when the row
+	// is absent) or "shared_machine". Never inside the Identity Agent.
+	Placement string `json:"placement,omitempty"`
+	// FrontAndBackEnd says what the app serves: a static front end at a fixed
+	// web address, a back end on the app machine, or both, and the device
+	// front ends a person uses.
+	FrontAndBackEnd *FrontAndBackEnd `json:"front_and_back_end,omitempty"`
+	// Secrets are the names of the credentials the app needs. The Identity
+	// Agent holds them and uses them for the app; the app is never handed one.
+	// Present and empty means the app needs none.
+	Secrets *[]string `json:"secrets,omitempty"`
+	// WhenDown says what a person sees while the app is down and whether
+	// requests for it queue.
+	WhenDown *WhenDown `json:"when_down,omitempty"`
+	// Backup says what of the app is backed up and how often.
+	Backup *Backup `json:"backup,omitempty"`
 }
+
+// AppStore is the row "store".
+type AppStore struct {
+	Format string `json:"format"`  // a lower-case token naming the layout, e.g. "sqlite"; "none" for an app with no store
+	SizeMB int    `json:"size_mb"` // MiB the store may grow to; 0 exactly when the format is "none"
+}
+
+// FrontAndBackEnd is the row "front_and_back_end".
+type FrontAndBackEnd struct {
+	StaticFrontEndURL *string  `json:"static_front_end_url,omitempty"` // https address the static front end is served from
+	BackEndPort       *int     `json:"back_end_port,omitempty"`        // TCP port the back end listens on, on the app machine; reached only through the relay, no inbound port is open on that machine
+	DeviceFrontEnds   []string `json:"device_front_ends"`              // "installed_app" and/or "browser"
+}
+
+// WhenDown is the row "when_down".
+type WhenDown struct {
+	PersonSees      string `json:"person_sees"`                 // "notice" or "last_known_data" (shown by the app's own front end, never by the Identity Agent)
+	QueueRequests   *bool  `json:"queue_requests"`              // whether requests made while down are held
+	QueueMaxSeconds *int   `json:"queue_max_seconds,omitempty"` // how long one is held; present exactly when queue_requests is true
+}
+
+// Backup is the row "backup".
+type Backup struct {
+	What       []string `json:"what"`                  // any of "store", "settings"; empty means nothing is backed up
+	EveryHours *int     `json:"every_hours,omitempty"` // present exactly when what is not empty
+}
+
+// The values of AppManifest.EncryptedMachine.
+const (
+	EncryptedMachineRequired  = "required"
+	EncryptedMachinePreferred = "preferred"
+	EncryptedMachineNotNeeded = "not_needed"
+)
+
+// KindApp is the Kind of an app beside an Identity Agent.
+const KindApp = "app"
+
+// IsApp reports whether this manifest describes an app beside an Identity
+// Agent, which must carry the rows validateApp checks.
+func (m *AppManifest) IsApp() bool { return m.Kind == KindApp }
 
 // EffectiveIsolation resolves the isolation class; legacy manifests are sandboxed.
 func (m *AppManifest) EffectiveIsolation() string {
@@ -120,6 +195,24 @@ type BinaryConfig struct {
 	Args        []string          `json:"args"`
 	Environment map[string]string `json:"environment"`
 	Hash        string            `json:"hash,omitempty"` // "blake3:<hex>"; required + verified for host plug-ins
+
+	// hashDeclared is set when the JSON carried a "hash" key, whatever its
+	// value, so that an app (which has no binary.hash) can be refused for
+	// "hash": "" as for any other value.
+	hashDeclared bool
+}
+
+// UnmarshalJSON reads a BinaryConfig and notes whether it carried a "hash" key.
+func (b *BinaryConfig) UnmarshalJSON(data []byte) error {
+	type plain BinaryConfig
+	if err := json.Unmarshal(data, (*plain)(b)); err != nil {
+		return err
+	}
+	var keys map[string]json.RawMessage
+	if json.Unmarshal(data, &keys) == nil {
+		_, b.hashDeclared = keys["hash"]
+	}
+	return nil
 }
 
 type ResourceLimits struct {
@@ -147,9 +240,9 @@ func LoadManifest(path string) (*AppManifest, error) {
 		return nil, fmt.Errorf("failed to read manifest file: %w", err)
 	}
 
-	var manifest AppManifest
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		return nil, fmt.Errorf("failed to parse manifest: %w", err)
+	manifest, err := DecodeManifest(data)
+	if err != nil {
+		return nil, err
 	}
 
 	// Resolve the host-matching binary for plug-ins that declare per-OS artifacts
@@ -160,28 +253,39 @@ func LoadManifest(path string) (*AppManifest, error) {
 		return nil, fmt.Errorf("invalid manifest: %w", err)
 	}
 
-	return &manifest, nil
+	return manifest, nil
 }
 
-func LoadManifestsFromDir(dir string) ([]*AppManifest, error) {
+// LoadManifestsFromDir loads every .json manifest in dir. One bad file does not
+// cost the rest: a file that cannot be read or does not validate is skipped and
+// named in the returned skipped list (file name and the reason), and the others
+// load. The error is for a folder that cannot be read at all.
+func LoadManifestsFromDir(dir string) (manifests []*AppManifest, skipped []SkippedManifest, err error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read manifests directory: %w", err)
+		return nil, nil, fmt.Errorf("failed to read manifests directory: %w", err)
 	}
 
-	var manifests []*AppManifest
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
 		m, err := LoadManifest(filepath.Join(dir, entry.Name()))
 		if err != nil {
-			return nil, fmt.Errorf("failed to load manifest %s: %w", entry.Name(), err)
+			skipped = append(skipped, SkippedManifest{File: entry.Name(), Err: err})
+			log.Printf("[appmanifest] skipping %s: %v", entry.Name(), err)
+			continue
 		}
 		manifests = append(manifests, m)
 	}
 
-	return manifests, nil
+	return manifests, skipped, nil
+}
+
+// SkippedManifest names a manifest file LoadManifestsFromDir did not load, and why.
+type SkippedManifest struct {
+	File string
+	Err  error
 }
 
 // Validate checks an app manifest against the rules the agent enforces at load.
@@ -195,7 +299,7 @@ func (m *AppManifest) Validate() error {
 	if m.ID == "" {
 		return fmt.Errorf("id is required")
 	}
-	if m.Name == "" {
+	if !m.IsApp() && m.Name == "" {
 		return fmt.Errorf("name is required")
 	}
 	if m.ExecutionType != "container" && m.ExecutionType != "compiled" {
@@ -204,7 +308,8 @@ func (m *AppManifest) Validate() error {
 	if m.DisplayMethod != "webview" && m.DisplayMethod != "terminal" {
 		return fmt.Errorf("display_method must be 'webview' or 'terminal', got '%s'", m.DisplayMethod)
 	}
-	if m.Container != nil {
+	if m.Container != nil && !m.IsApp() {
+		// An app's volumes are its own encrypted store, checked by validateApp.
 		for hostPath := range m.Container.Volumes {
 			if !strings.HasPrefix(hostPath, "{APP_DATA}") || strings.Contains(hostPath, "..") {
 				return fmt.Errorf("volume %q: an app may mount only from {APP_DATA}, its own directory", hostPath)
@@ -237,7 +342,7 @@ func (m *AppManifest) Validate() error {
 	if !validLogLevels[m.LogLevel] {
 		return fmt.Errorf("log_level must be 'none', 'metadata', or 'full'; got '%s'", m.LogLevel)
 	}
-	if m.Resources.MemoryMB <= 0 {
+	if !m.IsApp() && m.Resources.MemoryMB <= 0 {
 		return fmt.Errorf("resources.memory_mb must be positive")
 	}
 
@@ -271,6 +376,9 @@ func (m *AppManifest) Validate() error {
 	if m.Isolation != "" && m.Isolation != "sandbox" && m.Isolation != "host" {
 		return fmt.Errorf("isolation must be 'sandbox' or 'host', got '%s'", m.Isolation)
 	}
+	if m.IsApp() && m.Isolation == "host" {
+		return fmt.Errorf("isolation: an app runs in its own sandbox and is never a host plug-in")
+	}
 	if m.Isolation == "host" {
 		if m.ExecutionType != "compiled" {
 			return fmt.Errorf("a host plug-in must be a compiled binary (execution_type 'compiled'), got '%s'", m.ExecutionType)
@@ -284,6 +392,12 @@ func (m *AppManifest) Validate() error {
 				return fmt.Errorf("a host plug-in requires supported_platforms[%d].hash (blake3:<hex>)", i)
 			}
 		}
+	}
+	if m.IsApp() {
+		return m.validateApp()
+	}
+	if row := m.appRowPresent(); row != "" {
+		return fmt.Errorf("%s is a row of an app (kind 'app'); this manifest's kind is '%s'", row, m.Kind)
 	}
 	return nil
 }
@@ -382,14 +496,18 @@ func (m *AppManifest) DisplayPort() string {
 	return ""
 }
 
-func (m *AppManifest) IsDomainAllowed(domain string) (allowed bool, explicitRule bool) {
+// IsDomainAllowed reports whether the app may reach host on port. Pass the port
+// actually dialled (the scheme's default when the URL names none) and do not
+// strip it from the destination: an entry written with a port, blocked or
+// allowed, applies to that port only, and cannot see a port it is not given.
+func (m *AppManifest) IsDomainAllowed(host, port string) (allowed bool, explicitRule bool) {
 	for _, d := range m.Network.BlockedDomains {
-		if vault.MatchDomain(d, domain) {
+		if vault.MatchHostPort(d, host, port) {
 			return false, true
 		}
 	}
 	for _, d := range m.Network.AllowedDomains {
-		if vault.MatchDomain(d, domain) {
+		if vault.MatchHostPort(d, host, port) {
 			return true, true
 		}
 	}
