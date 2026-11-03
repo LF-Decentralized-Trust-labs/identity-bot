@@ -7,6 +7,7 @@
 **Amended:** 2026-03-13 — URL namespace convention established; LLM proxy moved to `/sandbox/llm/v1/`; display reverse proxy added (see §Amendment 3)
 **Amended:** 2026-10-24 — The display proxy no longer forwards capability calls or the caller's credentials, and serves the owner's conversations only to the owner; a forwarded capability call tells the app who called (see §Amendment 4)
 **Amended:** 2026-10-30 — The runtime that installs and runs apps is an add-on kept outside this repository; this record now keeps only the contract an app is written against (see §Note, 2026-10-30)
+**Amended:** 2026-11-03 — An app beside an Identity Agent declares its name, release digest, resources, whether it needs an encrypted machine, and its outbound hosts; a manifest missing one is refused (see §Amendment 5)
 
 
 ## Note, 2026-10-30: this repository keeps the contract, not the runtime
@@ -63,6 +64,37 @@ The "forward everything else" in Amendment 3 no longer holds in full.
 - **The intercepted conversation reads follow the conversation read rule.** `GET /apps/{app_id}/api/v1/chats` and the reads below it serve the owner's AI conversations from the owner's AI conversations, so they are served only to the owner or a machine acting for them. A caller admitted to `/apps/` only for holding some scope is refused them.
 
 ---
+
+## Amendment 5 (2026-11-03): the rows an app beside an Identity Agent declares
+
+*Amended 2026-11-03. Nothing above is changed.*
+
+An app beside an Identity Agent (ADR-045, Amendment 1) is described by one manifest that
+the runtime and the Identity Agent both check before the app runs. It is the manifest of §9
+with `kind` set to `"app"`, and it must declare five rows. Three are rows §9 already has;
+two are new:
+
+| Row | What it says |
+|---|---|
+| `name` | The app's name (§9). |
+| `release_digest` | **New.** The exact release the manifest describes: `blake3:` and 64 lower-case hex digits. What is about to run is checked against it. |
+| `resources` | The resources the app asks for (§9): `cpu_cores`, `memory_mb` and `disk_mb` must each be positive. |
+| `encrypted_machine` | **New.** Whether it needs a machine with encrypted memory (a TEE): `required` (refuse to run anywhere else), `preferred` (run elsewhere, and say so), or `not_needed`. Never assumed from a missing row. |
+| `network.allowed_domains` | The app's outbound hosts (§9). An empty list says it reaches no host; a missing one says nothing, so it is refused. |
+
+`appmanifest.Validate` refuses an app manifest missing any of the five, or with a value
+outside those above, and names the row. A manifest of any other kind that carries
+`release_digest` or `encrypted_machine` is refused too, since the rows mean nothing there.
+Manifests with no `kind`, or another, are checked as before.
+
+Published, and held to the Go types and the check by tests: the schema
+`identity-agent-core/contracts/app-manifest/app-manifest.schema.json`, and the vectors
+`identity-agent-core/appmanifest/app-manifest-vectors.json` (accepted manifests, and one
+missing each required row, which must be refused).
+
+**What this does not settle.** How a runtime picks a machine for `encrypted_machine`, how it
+proves the machine is encrypted (ADR-035), and how `release_digest` is checked against what
+is installed are the runtime's, and later steps.
 
 ## Decision
 

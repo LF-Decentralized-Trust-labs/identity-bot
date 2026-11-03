@@ -1,0 +1,765 @@
+{
+  "description": "Worked examples of the app manifest rows (ADR-012, Amendment 5). 'accepted' manifests pass appmanifest.Validate; each 'refused' one fails, and 'row' names the row it is refused for.",
+  "vectors": [
+    {
+      "name": "a valid app",
+      "outcome": "accepted",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "blake3:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "encrypted_machine": "preferred",
+        "container": {
+          "image": "example.org/task-console@sha256:abababababababababababababababababababababababababababababababab",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 1,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "agent.internal",
+            "*.example.org"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      }
+    },
+    {
+      "name": "a valid app that needs an encrypted machine and reaches no host",
+      "outcome": "accepted",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "blake3:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "encrypted_machine": "required",
+        "container": {
+          "image": "example.org/task-console@sha256:abababababababababababababababababababababababababababababababab",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 1,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      }
+    },
+    {
+      "name": "a valid app that does not need an encrypted machine",
+      "outcome": "accepted",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "blake3:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "encrypted_machine": "not_needed",
+        "container": {
+          "image": "example.org/task-console@sha256:abababababababababababababababababababababababababababababababab",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 1,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "agent.internal",
+            "*.example.org"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      }
+    },
+    {
+      "name": "an app with no name",
+      "outcome": "refused",
+      "manifest": {
+        "id": "task-console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "blake3:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "encrypted_machine": "preferred",
+        "container": {
+          "image": "example.org/task-console@sha256:abababababababababababababababababababababababababababababababab",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 1,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "agent.internal",
+            "*.example.org"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      },
+      "row": "name",
+      "why": "every app is named"
+    },
+    {
+      "name": "an app with no release_digest",
+      "outcome": "refused",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "encrypted_machine": "preferred",
+        "container": {
+          "image": "example.org/task-console@sha256:abababababababababababababababababababababababababababababababab",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 1,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "agent.internal",
+            "*.example.org"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      },
+      "row": "release_digest",
+      "why": "the release it describes must be named"
+    },
+    {
+      "name": "an app with no encrypted_machine",
+      "outcome": "refused",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "blake3:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "container": {
+          "image": "example.org/task-console@sha256:abababababababababababababababababababababababababababababababab",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 1,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "agent.internal",
+            "*.example.org"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      },
+      "row": "encrypted_machine",
+      "why": "whether it needs an encrypted machine must be said, not assumed"
+    },
+    {
+      "name": "an app with no resources",
+      "outcome": "refused",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "blake3:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "encrypted_machine": "preferred",
+        "container": {
+          "image": "example.org/task-console@sha256:abababababababababababababababababababababababababababababababab",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "agent.internal",
+            "*.example.org"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      },
+      "row": "resources",
+      "why": "the resources it asks for must be declared"
+    },
+    {
+      "name": "an app with no network.allowed_domains",
+      "outcome": "refused",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "blake3:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "encrypted_machine": "preferred",
+        "container": {
+          "image": "example.org/task-console@sha256:abababababababababababababababababababababababababababababababab",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 1,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      },
+      "row": "network.allowed_domains",
+      "why": "an absent list is not the statement that it reaches no host"
+    },
+    {
+      "name": "an app whose release digest is not a blake3 digest",
+      "outcome": "refused",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "encrypted_machine": "preferred",
+        "container": {
+          "image": "example.org/task-console@sha256:abababababababababababababababababababababababababababababababab",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 1,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "agent.internal",
+            "*.example.org"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      },
+      "row": "release_digest",
+      "why": "only blake3 digests, 64 lower-case hex digits"
+    },
+    {
+      "name": "an app whose release digest is upper case",
+      "outcome": "refused",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "blake3:ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789",
+        "encrypted_machine": "preferred",
+        "container": {
+          "image": "example.org/task-console@sha256:abababababababababababababababababababababababababababababababab",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 1,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "agent.internal",
+            "*.example.org"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      },
+      "row": "release_digest",
+      "why": "one spelling of a digest"
+    },
+    {
+      "name": "an app that gives an unknown encrypted_machine value",
+      "outcome": "refused",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "blake3:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "encrypted_machine": "yes",
+        "container": {
+          "image": "example.org/task-console@sha256:abababababababababababababababababababababababababababababababab",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 1,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "agent.internal",
+            "*.example.org"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      },
+      "row": "encrypted_machine",
+      "why": "the three values only"
+    },
+    {
+      "name": "an app that asks for no memory",
+      "outcome": "refused",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "blake3:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "encrypted_machine": "preferred",
+        "container": {
+          "image": "example.org/task-console@sha256:abababababababababababababababababababababababababababababababab",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 1,
+          "memory_mb": 0,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "agent.internal",
+            "*.example.org"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      },
+      "row": "resources",
+      "why": "each resource asked for is positive"
+    },
+    {
+      "name": "an app whose outbound host is a URL",
+      "outcome": "refused",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "blake3:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "encrypted_machine": "preferred",
+        "container": {
+          "image": "example.org/task-console@sha256:abababababababababababababababababababababababababababababababab",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 1,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "https://example.org/x"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      },
+      "row": "network.allowed_domains",
+      "why": "a host or *.host pattern, not a URL"
+    },
+    {
+      "name": "a manifest that is not an app but carries an app row",
+      "outcome": "refused",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "capability",
+        "sub_type": "oci-container",
+        "release_digest": "blake3:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "encrypted_machine": "preferred",
+        "container": {
+          "image": "example.org/task-console@sha256:abababababababababababababababababababababababababababababababab",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 1,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "agent.internal",
+            "*.example.org"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      },
+      "row": "release_digest",
+      "why": "the rows belong to kind app"
+    }
+  ]
+}

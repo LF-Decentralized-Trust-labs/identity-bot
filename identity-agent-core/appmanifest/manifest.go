@@ -56,7 +56,36 @@ type AppManifest struct {
 	// never remote-invocable (structural rule) and serialized per capability
 	// (one screen = one driver).
 	Isolation string `json:"isolation,omitempty"` // "" (legacy=sandbox) | sandbox | host
+
+	// --- Rows of an app beside an Identity Agent (ADR-012, Amendment 5) ---
+	// An app is a manifest with kind "app". Its name, resources and outbound
+	// hosts are the existing name, resources and network.allowed_domains rows;
+	// these two are the rows it adds. Validate refuses a kind "app" manifest
+	// that lacks either, or lacks any of those three.
+
+	// ReleaseDigest names the exact release this manifest describes:
+	// "blake3:" and 64 lower-case hex digits. A runtime and the Identity Agent
+	// check what they are about to run against it.
+	ReleaseDigest string `json:"release_digest,omitempty"`
+	// EncryptedMachine says whether the app needs a machine whose memory is
+	// encrypted (a TEE): "required" (refuse to run anywhere else), "preferred"
+	// (run elsewhere, and say so), or "not_needed".
+	EncryptedMachine string `json:"encrypted_machine,omitempty"`
 }
+
+// The values of AppManifest.EncryptedMachine.
+const (
+	EncryptedMachineRequired  = "required"
+	EncryptedMachinePreferred = "preferred"
+	EncryptedMachineNotNeeded = "not_needed"
+)
+
+// KindApp is the Kind of an app beside an Identity Agent.
+const KindApp = "app"
+
+// IsApp reports whether this manifest describes an app beside an Identity
+// Agent, which must carry the rows validateApp checks.
+func (m *AppManifest) IsApp() bool { return m.Kind == KindApp }
 
 // EffectiveIsolation resolves the isolation class; legacy manifests are sandboxed.
 func (m *AppManifest) EffectiveIsolation() string {
@@ -285,7 +314,62 @@ func (m *AppManifest) Validate() error {
 			}
 		}
 	}
+	if m.IsApp() {
+		return m.validateApp()
+	}
+	if m.ReleaseDigest != "" || m.EncryptedMachine != "" {
+		return fmt.Errorf("release_digest and encrypted_machine are rows of an app (kind 'app'); this manifest's kind is '%s'", m.Kind)
+	}
 	return nil
+}
+
+// validateApp checks the rows an app declares: its name, release digest, the
+// resources it asks for, whether it needs an encrypted machine, and its
+// outbound hosts. A row that is missing is refused by name, so a maker is told
+// which one to add. An empty allowed_domains list is a statement (the app
+// reaches no host); an absent one is not.
+func (m *AppManifest) validateApp() error {
+	if strings.TrimSpace(m.Name) == "" {
+		return fmt.Errorf("an app must declare name")
+	}
+	if m.ReleaseDigest == "" {
+		return fmt.Errorf("an app must declare release_digest (blake3:<64 hex digits>)")
+	}
+	if !validReleaseDigest(m.ReleaseDigest) {
+		return fmt.Errorf("release_digest must be 'blake3:' and 64 lower-case hex digits, got '%s'", m.ReleaseDigest)
+	}
+	if m.Resources.CPUCores <= 0 || m.Resources.MemoryMB <= 0 || m.Resources.DiskMB <= 0 {
+		return fmt.Errorf("an app must declare the resources it asks for: resources.cpu_cores, memory_mb and disk_mb must each be positive")
+	}
+	switch m.EncryptedMachine {
+	case "":
+		return fmt.Errorf("an app must declare encrypted_machine ('required', 'preferred' or 'not_needed')")
+	case EncryptedMachineRequired, EncryptedMachinePreferred, EncryptedMachineNotNeeded:
+	default:
+		return fmt.Errorf("encrypted_machine must be 'required', 'preferred' or 'not_needed', got '%s'", m.EncryptedMachine)
+	}
+	if m.Network.AllowedDomains == nil {
+		return fmt.Errorf("an app must declare network.allowed_domains, its outbound hosts (an empty list means it reaches none)")
+	}
+	for i, d := range m.Network.AllowedDomains {
+		if strings.TrimSpace(d) == "" || strings.Contains(d, "://") || strings.ContainsAny(d, "/ ") {
+			return fmt.Errorf("network.allowed_domains[%d] must be a host name or a *.host pattern, got '%s'", i, d)
+		}
+	}
+	return nil
+}
+
+func validReleaseDigest(d string) bool {
+	hex, ok := strings.CutPrefix(d, "blake3:")
+	if !ok || len(hex) != 64 {
+		return false
+	}
+	for _, c := range hex {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // resolveHostBinary picks the supported_platforms entry matching this host and, for a
