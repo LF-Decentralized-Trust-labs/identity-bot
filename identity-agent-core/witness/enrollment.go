@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	neturl "net/url"
 	"strings"
 	"time"
@@ -262,6 +263,17 @@ func (s *Service) ProcessInboundRequest(ctx context.Context, req WitnessRequest)
 	if !s.signedByRequester(req) {
 		return InboundResult{Accepted: false, Reason: "unsigned_request"}
 	}
+	// A contact not yet accepted gets an answer in the response and nothing
+	// else: a task per request would let anyone whose key is held fill the
+	// task list, one row for every newly stamped request, and nothing is
+	// posted to an address nobody has accepted.
+	if c, _ := s.Contacts.GetContact(req.RequesterAID); c == nil || c.Status != "accepted" {
+		reason := "unknown_contact"
+		if c != nil {
+			reason = "contact_not_accepted"
+		}
+		return InboundResult{Accepted: false, Reason: reason}
+	}
 	accept, reason := s.EvaluateInboundRequest(req)
 	taskID := fmt.Sprintf("witness-recv-%s-%d", req.RequesterAID, time.Now().Unix())
 	now := NowRFC3339()
@@ -337,10 +349,77 @@ func (s *Service) enrollWitnessingFor(requesterAID, backendType string) error {
 	})
 }
 
-// SendAcceptCallback sends the accept POST-back to the requester's agent.
+// lookupHost resolves a name for the check on where an answer may go; a
+// variable so a test can say what a name resolves to.
+var lookupHost = net.LookupIP
+
+// answerAddress is the one place the answer to requester's request may be
+// posted: the address in the contact's own recorded OOBI for that AID, and
+// nothing the request itself says. signed is the OOBI the request carried
+// (it must name the same host as the recorded one, or the request is not from
+// where the contact lives); an OOBI that names an AID must name the
+// requester's. A name that resolves to a private, loopback or link-local
+// address is refused, unless the recorded OOBI is itself such an address (a
+// local test agent): this agent is not to be made to call what is on its own
+// network by a name somebody else controls.
+func (s *Service) answerAddress(requesterAID, signed string) (string, error) {
+	c, _ := s.Contacts.GetContact(requesterAID)
+	if c == nil || c.OobiURL == "" {
+		return "", fmt.Errorf("%s has no recorded OOBI to answer at", requesterAID)
+	}
+	rec, err := neturl.Parse(c.OobiURL)
+	if err != nil || (rec.Scheme != "http" && rec.Scheme != "https") || rec.Hostname() == "" {
+		return "", fmt.Errorf("the recorded OOBI of %s is not a web address", requesterAID)
+	}
+	if i := strings.Index(rec.Path, "/oobi/"); i != -1 {
+		if named := strings.Trim(strings.SplitN(rec.Path[i+len("/oobi/"):], "/", 2)[0], " "); named != requesterAID {
+			return "", fmt.Errorf("the recorded OOBI of %s names %q, not %s", requesterAID, named, requesterAID)
+		}
+	}
+	if signed != "" {
+		sg, err := neturl.Parse(signed)
+		if err != nil || !strings.EqualFold(sg.Host, rec.Host) || sg.Scheme != rec.Scheme {
+			return "", fmt.Errorf("the request's OOBI is not at the address recorded for %s", requesterAID)
+		}
+	}
+	host := rec.Hostname()
+	if literalIsLocal(host) {
+		return witnessAcceptURL(c.OobiURL), nil
+	}
+	ips, err := lookupHost(host)
+	if err != nil || len(ips) == 0 {
+		return "", fmt.Errorf("%s does not resolve", host)
+	}
+	for _, ip := range ips {
+		if ipIsInternal(ip) {
+			return "", fmt.Errorf("%s resolves to an internal address, and is not called", host)
+		}
+	}
+	return witnessAcceptURL(c.OobiURL), nil
+}
+
+// literalIsLocal is whether host is itself "localhost" or a private, loopback
+// or link-local address, written out.
+func literalIsLocal(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ipIsInternal(ip)
+}
+
+func ipIsInternal(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsUnspecified() || ip.IsInterfaceLocalMulticast()
+}
+
+// SendAcceptCallback sends the accept POST-back to the requester's agent, at
+// the address recorded for the requester and no other (see answerAddress).
+// requesterOOBI is the one the request was signed with.
 func (s *Service) SendAcceptCallback(ctx context.Context, requesterOOBI string, cb AcceptCallback) error {
-	if requesterOOBI == "" {
-		return fmt.Errorf("missing requester oobi")
+	url, err := s.answerAddress(cb.RequesterAID, requesterOOBI)
+	if err != nil {
+		return err
 	}
 	if cb.ResponderAID == "" {
 		cb.ResponderAID = s.ourAID()
@@ -368,13 +447,6 @@ func (s *Service) SendAcceptCallback(ctx context.Context, requesterOOBI string, 
 	if err != nil {
 		return err
 	}
-	// Only to a web address the requester named, never to anything else this
-	// agent could be made to call.
-	u, perr := neturl.Parse(requesterOOBI)
-	if perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return fmt.Errorf("the requester's OOBI is not a web address")
-	}
-	url := witnessAcceptURL(requesterOOBI)
 	_, err = s.PostEvent(ctx, url, body)
 	return err
 }
@@ -434,7 +506,7 @@ func (s *Service) ApplyAcceptCallback(cb AcceptCallback) error {
 	// request is what makes the answer usable once, so if it cannot be marked
 	// done the enrolment is undone and the answer can be tried again.
 	accepted := cb.Decision == "accepted"
-	var undo func()
+	var undo func() error
 	if accepted {
 		var err error
 		if undo, err = s.enrollWitnessForUsUndoably(cb.ResponderAID, cb.BackendType); err != nil {
@@ -442,7 +514,9 @@ func (s *Service) ApplyAcceptCallback(cb AcceptCallback) error {
 		}
 		if err := s.completeTask(*task, "completed",
 			fmt.Sprintf("Witness enrollment accepted by %s", cb.ResponderAID[:12])); err != nil {
-			undo()
+			if uerr := undo(); uerr != nil {
+				return fmt.Errorf("%w, and the enrolment could not be put back: %v", err, uerr)
+			}
 			return err
 		}
 	} else if err := s.completeTask(*task, "failed", fmt.Sprintf("Declined: %s", cb.Reason)); err != nil {
@@ -467,22 +541,31 @@ func (s *Service) ApplyAcceptCallback(cb AcceptCallback) error {
 }
 
 // enrollWitnessForUsUndoably is enrollWitnessForUs, and the way to put back
-// what it changed.
-func (s *Service) enrollWitnessForUsUndoably(responderAID, backendType string) (func(), error) {
+// what it changed: the earlier records as they were, and where there were
+// none, no record. It returns the first thing it could not put back.
+func (s *Service) enrollWitnessForUsUndoably(responderAID, backendType string) (func() error, error) {
 	prevContact, _ := s.Contacts.GetContact(responderAID)
 	prevMeta, _ := s.Store.GetContactMeta(responderAID)
 	if err := s.enrollWitnessForUs(responderAID, backendType); err != nil {
 		return nil, err
 	}
-	return func() {
+	return func() error {
+		var first error
 		if prevContact != nil {
-			_ = s.Contacts.SaveContact(*prevContact)
+			if err := s.Contacts.SaveContact(*prevContact); err != nil {
+				first = err
+			}
 		}
+		var err error
 		if prevMeta != nil {
-			_ = s.Store.SaveContactMeta(*prevMeta)
+			err = s.Store.SaveContactMeta(*prevMeta)
 		} else {
-			_ = s.Store.SaveContactMeta(ContactMeta{ContactAID: responderAID})
+			err = s.Store.DeleteContactMeta(responderAID)
 		}
+		if err != nil && first == nil {
+			first = err
+		}
+		return first
 	}, nil
 }
 

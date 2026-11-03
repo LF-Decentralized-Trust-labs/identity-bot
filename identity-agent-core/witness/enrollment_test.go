@@ -255,7 +255,6 @@ func TestMutualEnrollmentPostBack(t *testing.T) {
 }
 
 func TestInboundDeclinePostsBack(t *testing.T) {
-	aidA := "EAgentA00000000000000000000000000003"
 	aidU := "EUnknown00000000000000000000000000004"
 	mcB := &memContacts{
 		contacts: map[string]store.ContactRecord{},
@@ -268,8 +267,8 @@ func TestInboundDeclinePostsBack(t *testing.T) {
 	// A signed request from somebody this agent holds a key for, but has not
 	// agreed to, is declined, and the decline is posted back.
 	pub, seed := identityKey(t)
-	mcB.contacts[aidU] = store.ContactRecord{AID: aidU, Status: "accepted", ContactCategory: "general", PublicKey: pub}
-	oobi := "http://127.0.0.1:5050/public/oobi/" + aidA
+	oobi := "http://127.0.0.1:5050/public/oobi/" + aidU
+	mcB.contacts[aidU] = store.ContactRecord{AID: aidU, Status: "accepted", ContactCategory: "general", PublicKey: pub, OobiURL: oobi}
 	stamp := time.Now().UTC().Format(time.RFC3339Nano)
 	sig, _ := login.SignString(RequestStatement(aidU, sB.Identity(), oobi, BackendDesktop, "r1", false, stamp), seed)
 	result := sB.ProcessInboundRequest(context.Background(), WitnessRequest{
