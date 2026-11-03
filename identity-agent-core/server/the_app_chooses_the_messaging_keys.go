@@ -69,13 +69,31 @@ func (s *CoreServer) handleMessagingSeed(w http.ResponseWriter, r *http.Request)
 	// seed handed over here stands in for keys the identity's log does not
 	// commit to.
 	label, filed := pendingKeySetLabel(anchor), "pending"
-	if own, _ := s.DataStore.GetIdentity(); own != nil && s.anchoredLast(own.AID, anchor) {
+	if own, _ := s.DataStore.GetIdentity(); own != nil {
+		if !s.anchoredLast(own.AID, anchor) {
+			// A replacement not yet anchored: held in the identity's one
+			// replacement slot, in place of any earlier one.
+			if err := s.putKeySet(pendingReplacementLabel(own.AID), ks); err != nil {
+				writeError(w, statusForUnreadable(err, http.StatusInternalServerError), "The messaging keys could not be kept", err.Error())
+				return
+			}
+			writeJSONResponse(w, map[string]any{"anchor": anchor, "filed": "pending"})
+			return
+		}
 		if held, _ := s.keySetAnchorHeld(own.AID, anchor); held {
 			writeJSONResponse(w, map[string]any{"anchor": anchor, "filed": "identity"})
 			return
 		}
+		// The log anchors these keys last and the identity holds others: a
+		// replacement whose filing did not finish when it was committed. The
+		// seed proves the keys, and the log says they are in force.
 		if has, _ := s.hasKeySet(own.AID); has {
-			writeError(w, http.StatusConflict, "This identity holds other messaging keys", "")
+			if err := s.replaceKeySetFor(own.AID, ks); err != nil {
+				writeError(w, statusForUnreadable(err, http.StatusInternalServerError), "The messaging keys could not be kept", err.Error())
+				return
+			}
+			_ = s.forgetKeySet(pendingReplacementLabel(own.AID))
+			writeJSONResponse(w, map[string]any{"anchor": anchor, "filed": "identity"})
 			return
 		}
 		label, filed = own.AID, "identity"
@@ -150,10 +168,17 @@ func messagingAnchorsAmong(seals []json.RawMessage) []map[string]interface{} {
 // replacement takes the earlier keyset's place, and the earlier one is kept to
 // open messages already sent to it.
 func (s *CoreServer) refuseAnUnheldKeySet(w http.ResponseWriter, raw []byte, aid string) bool {
-	for _, anchor := range messagingAnchorsIn(raw) {
+	anchors := messagingAnchorsIn(raw)
+	if len(anchors) > 1 {
+		writeError(w, http.StatusBadRequest, "one_messaging_keyset_per_event",
+			"an event anchors at most one messaging keyset: the one the identity is reached on after it")
+		return true
+	}
+	for _, anchor := range anchors {
 		heldHere, _ := s.keySetAnchorHeld(aid, anchor)
 		pending, _ := s.keySetAnchorHeld(pendingKeySetLabel(anchor), anchor)
-		if !heldHere && !pending {
+		replacing, _ := s.keySetAnchorHeld(pendingReplacementLabel(aid), anchor)
+		if !heldHere && !pending && !replacing {
 			writeError(w, http.StatusBadRequest, "messaging_keyset_not_held",
 				"the event anchors messaging keys this Identity Agent does not hold; hand it the messaging seed first "+
 					"(POST /api/keystore/messaging-seed)")
@@ -195,8 +220,14 @@ func (s *CoreServer) anchoredLast(aid string, anchor map[string]interface{}) boo
 // which takes the earlier keyset's place and keeps it as the previous one.
 func (s *CoreServer) fileCommittedKeySet(raw []byte, aid string) error {
 	for _, anchor := range messagingAnchorsIn(raw) {
-		label := pendingKeySetLabel(anchor)
-		if held, _ := s.keySetAnchorHeld(label, anchor); !held {
+		label := ""
+		for _, l := range []string{pendingReplacementLabel(aid), pendingKeySetLabel(anchor)} {
+			if held, _ := s.keySetAnchorHeld(l, anchor); held {
+				label = l
+				break
+			}
+		}
+		if label == "" {
 			continue
 		}
 		ks, err := s.keySetFor(label)

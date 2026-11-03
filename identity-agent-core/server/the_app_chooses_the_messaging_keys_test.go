@@ -7,6 +7,7 @@ import (
 	"identity-agent-core/didcomm"
 	"net/http"
 	"testing"
+	"time"
 
 	"identity-agent-core/keymath"
 )
@@ -72,6 +73,29 @@ func TestTheAppChoosesTheMessagingKeysAndTheCoreHoldsThem(t *testing.T) {
 		t.Fatalf("an interaction anchoring keys this core does not hold: %d", code)
 	}
 
+	// An event anchors one messaging keyset at most.
+	two := appSeeds(7)
+	a1, _ := keymath.MessagingKeySet(two[5])
+	a2, _ := keymath.MessagingKeySet(two[6])
+	j1, _ := json.Marshal(a1)
+	j2, _ := json.Marshal(a2)
+	for _, seed := range [][]byte{two[5], two[6]} {
+		call(t, s, s.handleMessagingSeed, "/api/keystore/messaging-seed",
+			map[string]any{"seed_hex": hex.EncodeToString(seed)})
+	}
+	_, out = call(t, s, s.handlePrepareEvent, "/api/events/prepare", map[string]any{"aid": own.AID, "t": "ixn",
+		"a": []json.RawMessage{j1, j2}, "after": map[string]string{"s": "0", "d": own.AID}})
+	both := preparedBytes(t, out)
+	if code, out := call(t, s, s.handleCommitEvent, "/api/events/commit", map[string]any{
+		"raw_b64": base64.StdEncoding.EncodeToString(both), "sigs": []string{appSign(t, k[0], both, false)}}); code != http.StatusBadRequest || out["error"] != "one_messaging_keyset_per_event" {
+		t.Fatalf("an event anchoring two keysets: %d %v", code, out)
+	}
+	// One replacement is held at a time: the second hand-over took the
+	// first's place.
+	if held, _ := s.keySetAnchorHeld(pendingReplacementLabel(own.AID), a2); !held {
+		t.Fatal("the latest replacement handed over is not the one held aside")
+	}
+
 	// A replacement (ADR-061 section 8): its seed is held aside, the
 	// interaction anchoring it is committed, and it takes the earlier
 	// keyset's place, which is kept to open messages already sent to it.
@@ -102,7 +126,7 @@ func TestTheAppChoosesTheMessagingKeysAndTheCoreHoldsThem(t *testing.T) {
 	if got, _ := prev.Anchor(); !sameJSON(got, anchor) {
 		t.Fatal("the keyset kept is not the one replaced")
 	}
-	if left, _ := s.hasKeySet(pendingKeySetLabel(nextAnchor)); left {
+	if left, _ := s.hasKeySet(pendingReplacementLabel(own.AID)); left {
 		t.Fatal("the replacement is still held aside")
 	}
 	if !s.anchoredLast(own.AID, nextAnchor) {
@@ -135,4 +159,91 @@ func TestAMessageSentToReplacedKeysIsStillOpened(t *testing.T) {
 	if n.ID == "" {
 		t.Fatal("the message sent to the earlier keys was not taken")
 	}
+}
+
+// A replacement committed whose filing did not finish is filed when its seed
+// is handed over again; a replaced keyset opens messages only for a grace
+// period; and no keyset kept aside is ever a message's recipient.
+func TestAReplacementIsRepairedRetiredAndNeverAddressed(t *testing.T) {
+	s, own, anchor, k := anIdentityWithAppMessagingKeys(t)
+	next := appSeeds(4)[3]
+	nextAnchor, _ := keymath.MessagingKeySet(next)
+	call(t, s, s.handleMessagingSeed, "/api/keystore/messaging-seed",
+		map[string]any{"seed_hex": hex.EncodeToString(next)})
+	nextJSON, _ := json.Marshal(nextAnchor)
+	_, out := call(t, s, s.handlePrepareEvent, "/api/events/prepare", map[string]any{"aid": own, "t": "ixn",
+		"a": []json.RawMessage{nextJSON}, "after": map[string]string{"s": "0", "d": own}})
+	ixn := preparedBytes(t, out)
+	if code, out := call(t, s, s.handleCommitEvent, "/api/events/commit", map[string]any{
+		"raw_b64": base64.StdEncoding.EncodeToString(ixn), "sigs": []string{appSign(t, k, ixn, false)}}); code != http.StatusCreated {
+		t.Fatalf("the replacement: %d %v", code, out)
+	}
+	// As though filing had failed: the identity still holds the earlier keys.
+	earlier := s.previousKeySetFor(own)
+	if earlier == nil {
+		t.Fatal("no earlier keyset was kept")
+	}
+	if err := s.putKeySet(own, earlier); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := call(t, s, s.handleMessagingSeed, "/api/keystore/messaging-seed",
+		map[string]any{"seed_hex": hex.EncodeToString(next)}); code != http.StatusOK || out["filed"] != "identity" {
+		t.Fatalf("handing the seed of the keys the log anchors last again: %d %v", code, out)
+	}
+	if held, _ := s.keySetAnchorHeld(own, nextAnchor); !held {
+		t.Fatal("the replacement the log anchors was not filed")
+	}
+	if got, _ := s.previousKeySetFor(own).Anchor(); !sameJSON(got, anchor) {
+		t.Fatal("the keyset kept as previous is not the earlier one")
+	}
+
+	// Past its grace the replaced keyset is forgotten.
+	didcommMu.Lock()
+	keys, _ := s.loadDIDCommKeys()
+	old, _ := json.Marshal(time.Now().Add(-previousKeySetGrace - time.Hour).UTC().Format(time.RFC3339))
+	keys[previousKeySetSinceLabel(own)] = old
+	_ = s.saveDIDCommKeys(keys)
+	didcommMu.Unlock()
+	if s.previousKeySetFor(own) != nil {
+		t.Fatal("a replaced keyset still opens messages past its grace")
+	}
+
+	for _, label := range []string{previousKeySetLabel(own), pendingReplacementLabel(own),
+		pendingKeySetLabel(nextAnchor), previousKeySetSinceLabel(own)} {
+		if ok, _ := s.hasRecipientKeySet(label); ok {
+			t.Fatalf("%s may be addressed as a recipient", label)
+		}
+	}
+	if ok, _ := s.hasRecipientKeySet(own); !ok {
+		t.Fatal("the identity itself is not a recipient")
+	}
+}
+
+// anIdentityWithAppMessagingKeys founds an identity on a new core whose
+// messaging keys the app chose, and returns the core, the identifier, the
+// keyset's anchor and the seed of the key in force.
+func anIdentityWithAppMessagingKeys(t *testing.T) (*CoreServer, string, map[string]interface{}, []byte) {
+	t.Helper()
+	s := appHeldCore(t)
+	k := appSeeds(2)
+	msgSeed := appSeeds(3)[2]
+	anchor, err := keymath.MessagingKeySet(msgSeed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, out := call(t, s, s.handleMessagingSeed, "/api/keystore/messaging-seed",
+		map[string]any{"seed_hex": hex.EncodeToString(msgSeed)}); code != http.StatusOK {
+		t.Fatalf("handing over the messaging seed: %d %v", code, out)
+	}
+	anchorJSON, _ := json.Marshal(anchor)
+	_, out := call(t, s, s.handlePrepareEvent, "/api/events/prepare", map[string]any{
+		"t": "icp", "k": []string{verkeyOf(k[0])}, "kt": "1", "n": []string{digestOfSeed(t, k[1])}, "nt": "1",
+		"a": []json.RawMessage{anchorJSON}})
+	icp := preparedBytes(t, out)
+	if code, out := call(t, s, s.handleCommitEvent, "/api/events/commit", map[string]any{
+		"raw_b64": base64.StdEncoding.EncodeToString(icp), "sigs": []string{appSign(t, k[0], icp, true)}}); code != http.StatusCreated {
+		t.Fatalf("the founding: %d %v", code, out)
+	}
+	own, _ := s.DataStore.GetIdentity()
+	return s, own.AID, anchor, k[0]
 }

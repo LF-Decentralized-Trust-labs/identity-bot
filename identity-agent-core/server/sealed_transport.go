@@ -87,13 +87,11 @@ func (s *CoreServer) handleSealedTransport(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	jwm, err := didcomm.UnpackAuthcrypt(keys, senderDID, &env)
-	if err != nil && len(env.Recipients) > 0 {
-		// Sent to the keys a replacement has not yet taken out of use.
-		if prev := s.previousKeySetFor(env.Recipients[0].Header.Kid); prev != nil {
-			jwm, err = didcomm.UnpackAuthcrypt(prev, senderDID, &env)
-		}
-	}
+	var jwm *didcomm.JWM
+	err = s.openWithRecipientKeys(env.Recipients[0].Header.Kid, keys, func(ks *didcomm.KeySet) (e error) {
+		jwm, e = didcomm.UnpackAuthcrypt(ks, senderDID, &env)
+		return e
+	})
 	if err != nil {
 		// Deliberately not specific. Distinguishing "wrong key" from "corrupt"
 		// from "not for us" tells somebody probing which of those they achieved.
@@ -289,7 +287,7 @@ func (s *CoreServer) sealedParties(env *didcomm.Envelope) (*didcomm.DID, *didcom
 		return nil, nil, fmt.Errorf("this envelope names no recipient")
 	}
 	kid := env.Recipients[0].Header.Kid
-	has, err := s.hasKeySet(kid)
+	has, err := s.hasRecipientKeySet(kid)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: this agent could not load the keys to open it", coretypes.ErrKeysUnavailable)
 	}

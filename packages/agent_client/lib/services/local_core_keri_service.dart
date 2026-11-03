@@ -257,7 +257,16 @@ class LocalCoreKeriService extends KeriService {
       throw Exception('No identity keys found in secure storage.');
     final oldSeed = Bip39.mnemonicToSeed(old);
     final newSeed = Bip39.mnemonicToSeed(words);
+    try {
+      return await _finishMoveWith(oldSeed, newSeed, words);
+    } finally {
+      oldSeed.fillRange(0, oldSeed.length, 0);
+      newSeed.fillRange(0, newSeed.length, 0);
+    }
+  }
 
+  Future<RotationResult> _finishMoveWith(
+      Uint8List oldSeed, Uint8List newSeed, List<String> words) async {
     await _finishSignedDuringAMove();
 
     VerifiedKeyState state;
@@ -283,15 +292,15 @@ class LocalCoreKeriService extends KeriService {
           recovery: true);
       signature = step2.signatures.first;
     }
+    // The messaging keys came from the old phrase, so whoever holds it can
+    // read the identity's messages: they are replaced with the new phrase's
+    // first keyset before the move counts as finished, so a replacement that
+    // fails leaves the move under way, and the next signing tries it again.
+    await _replaceMessagingKeysWith(newSeed, generation: 0);
     if (!await SecureKeyStore.finishMovingToThePhrase(words)) {
       throw StateError('the new phrase could not be made the phrase in force; '
           'the move is in the log and both phrases are still kept');
     }
-    // The messaging keys came from the old phrase, so whoever holds it can
-    // read the identity's messages: they are replaced at once with the new
-    // phrase's.
-    // The new phrase has anchored no keyset yet: its first is generation 0.
-    await _replaceMessagingKeysWith(newSeed, generation: 0);
     return RotationResult(
       aid: state.aid,
       newPublicKey: KeyManager.keyAt(newSeed, 1).publicKeyEncoded,
@@ -365,19 +374,25 @@ class LocalCoreKeriService extends KeriService {
   Future<int> replaceMessagingKeys() async {
     await _finishAnyMoveUnderWay();
     final mnemonic = await SecureKeyStore.loadMnemonic();
-    if (mnemonic == null) throw Exception('No identity keys found in secure storage.');
-    return _replaceMessagingKeysWith(Bip39.mnemonicToSeed(mnemonic));
+    if (mnemonic == null)
+      throw Exception('No identity keys found in secure storage.');
+    final seed = Bip39.mnemonicToSeed(mnemonic);
+    try {
+      return await _replaceMessagingKeysWith(seed);
+    } finally {
+      seed.fillRange(0, seed.length, 0);
+    }
   }
 
   Future<int> _replaceMessagingKeysWith(Uint8List seed,
       {int? generation}) async {
+    final copies = await _readTheCopies(seed);
+    final anchored = [
+      for (final e in copies.log?.events ?? const <LoggedEvent>[])
+        ...e.messagingKeysets
+    ];
     var g = generation;
     if (g == null) {
-      final copies = await _readTheCopies(seed);
-      final anchored = [
-        for (final e in copies.log?.events ?? const <LoggedEvent>[])
-          ...e.messagingKeysets
-      ];
       final last = anchored.isEmpty
           ? null
           : await RecoveringThisIdentity.messagingGenerationOf(
@@ -389,14 +404,15 @@ class LocalCoreKeriService extends KeriService {
     final Map<String, dynamic> anchor;
     try {
       anchor = await _km.messagingKeySet(messagingSeed);
-      final res = await _client.post(
-          Uri.parse('$_baseUrl/api/keystore/messaging-seed'),
-          headers: const {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'seed_hex': [
-              for (final b in messagingSeed) b.toRadixString(16).padLeft(2, '0')
-            ].join()
-          }));
+      final res =
+          await _client.post(Uri.parse('$_baseUrl/api/keystore/messaging-seed'),
+              headers: const {'Content-Type': 'application/json'},
+              body: jsonEncode({
+                'seed_hex': [
+                  for (final b in messagingSeed)
+                    b.toRadixString(16).padLeft(2, '0')
+                ].join()
+              }));
       if (res.statusCode < 200 || res.statusCode > 299) {
         throw Exception('the core would not take the messaging keys '
             '(${res.statusCode}): ${res.body}');
@@ -409,6 +425,14 @@ class LocalCoreKeriService extends KeriService {
       }
     } finally {
       messagingSeed.fillRange(0, messagingSeed.length, 0);
+    }
+    // Already the keyset the log anchors last (a replacement whose answer was
+    // lost, finished again): the core now holds it, and it is not anchored
+    // twice.
+    if (anchored.isNotEmpty &&
+        RecoveringThisIdentity.canonicalJson(anchored.last) ==
+            RecoveringThisIdentity.canonicalJson(anchor)) {
+      return g;
     }
 
     var state = await _keyInForce(seed);

@@ -262,4 +262,25 @@ void main() {
     expect(await SecureKeyStore.loadPhraseMovingTo(), isNull);
     expect(await SecureKeyStore.loadMnemonic(), old.split(' '));
   });
+
+  test(
+      'a move whose messaging keys were not yet replaced is still under way, '
+      'and the next signing replaces them once', () async {
+    final aid = await anIdentity();
+    // Commits: step 1, step 2, then the interaction replacing the messaging
+    // keys, whose answer is lost.
+    core.client.loseTheAnswerToCommitsAfter = 2;
+    await expectLater(service().moveToANewPhrase(words: fresh.split(' ')),
+        throwsA(isA<http.ClientException>()));
+    expect(await SecureKeyStore.loadPhraseMovingTo(), fresh.split(' '),
+        reason: 'the move is not finished until the messaging keys are');
+
+    final signed = await service().signPayload(name: aid, data: [1]);
+    expect(signed.publicKey, KeyManager.keyAt(newSeed, 1).publicKeyEncoded);
+    final log = await kel(aid);
+    expect([for (final e in log) e['t']], ['icp', 'rot', 'rot', 'rot', 'ixn'],
+        reason: 'the new keyset is anchored once');
+    expect(await SecureKeyStore.loadMnemonic(), fresh.split(' '));
+    expect(await SecureKeyStore.loadPhraseMovingTo(), isNull);
+  });
 }
