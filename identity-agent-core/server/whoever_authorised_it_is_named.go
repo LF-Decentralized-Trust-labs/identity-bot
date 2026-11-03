@@ -193,7 +193,7 @@ func (s *CoreServer) checkAuthorisationOf(acdc []byte, issuer, registry, said st
 	if by.Request == nil {
 		return nil
 	}
-	in := authorisation.Input{Credential: acdc, Body: by.Request.Body, HaveBody: true}
+	in := authorisation.Input{Credential: acdc, Body: by.Request.Body, HaveBody: true, Asset: s.expectedAsset}
 	if said != "" {
 		// The issuer's key log and this credential's own log, so the order of
 		// issue and revocation is read from where each is anchored.
@@ -247,6 +247,20 @@ func (s *CoreServer) checkAuthorisationOf(acdc []byte, issuer, registry, said st
 		return err
 	}
 	return nil
+}
+
+// expectedAsset is the asset an authorising request's path names, from the
+// same asset store the routes that serve it look in. An asset it does not hold
+// is not known, and a body approval for it is refused.
+func (s *CoreServer) expectedAsset(id, _ string) (authorisation.ExpectedAsset, bool) {
+	if s.assetHandler == nil || s.assetHandler.Store == nil {
+		return authorisation.ExpectedAsset{}, false
+	}
+	a, ok := s.assetHandler.Store.GetAsset(id)
+	if !ok {
+		return authorisation.ExpectedAsset{}, false
+	}
+	return authorisation.ExpectedAsset{PairwiseAID: a.PairwiseAID, Kind: a.AssetType}, true
 }
 
 // issuedUnderFirstVersionTooLate reports whether rec is an AI agent grant or

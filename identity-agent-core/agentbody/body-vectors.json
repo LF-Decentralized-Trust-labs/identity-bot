@@ -47,6 +47,21 @@
         "exp": "2026-10-28T12:15:00Z"
       },
       "encoded": "iabody1.eyJ2IjoxLCJ1cmwiOiJodHRwczovL2lhLmV4YW1wbGUiLCJpYSI6IkVJZGVudGl0eUFnZW50MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInNuIjozLCJkIjoiRUtleVN0YXRlMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAiLCJhZ2VudCI6IkVBSUFnZW50MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwIiwibmFtZSI6IlJlc2VhcmNoIGFzc2lzdGFudCIsInNlY3JldCI6Im9uZS10aW1lLXNlY3JldC0wMDAxIiwiZXhwIjoiMjAyNi0xMC0yOFQxMjoxNTowMFoifQ"
+    },
+    {
+      "name": "an enrolment for an app",
+      "fields": {
+        "v": 1,
+        "url": "https://ia.example",
+        "ia": "EIdentityAgent0000000000000000000000000000000",
+        "sn": 3,
+        "d": "EKeyState00000000000000000000000000000000000",
+        "agent": "EApp0000000000000000000000000000000000000000",
+        "name": "Task console",
+        "secret": "one-time-secret-0002",
+        "exp": "2026-10-28T12:15:00Z"
+      },
+      "encoded": "iabody1.eyJ2IjoxLCJ1cmwiOiJodHRwczovL2lhLmV4YW1wbGUiLCJpYSI6IkVJZGVudGl0eUFnZW50MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInNuIjozLCJkIjoiRUtleVN0YXRlMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAiLCJhZ2VudCI6IkVBcHAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwIiwibmFtZSI6IlRhc2sgY29uc29sZSIsInNlY3JldCI6Im9uZS10aW1lLXNlY3JldC0wMDAyIiwiZXhwIjoiMjAyNi0xMC0yOFQxMjoxNTowMFoifQ"
     }
   ],
   "refused_enrolments": [

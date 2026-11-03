@@ -128,3 +128,71 @@ func TestTheAIAgentBodySchemaIsPinned(t *testing.T) {
 			AIAgentBody.Schema.SAID, pinnedAIAgentBodySAID)
 	}
 }
+
+// An app is an asset beside the AI agent (ADR-045, amended 2026-11-02). Its two
+// schemas are pinned like the others.
+const (
+	pinnedAppGrantSAID = "EPHAxwxwkVY137Vc0hXPa5CVujNWZEsitFvzKYdNL4ek"
+	pinnedAppBodySAID  = "EEh1VDLvJvXxfM7kLywJo3Yi0cRyukISFkY8m3FWPxmZ"
+)
+
+func TestTheAppSchemasArePinned(t *testing.T) {
+	if AppGrant.Schema.SAID != pinnedAppGrantSAID || AppBody.Schema.SAID != pinnedAppBodySAID {
+		t.Fatalf("the app schemas are now %s and %s, not %s and %s. If the change is meant, it is "+
+			"a new schema version: pin the new identifiers and say so in the change.",
+			AppGrant.Schema.SAID, AppBody.Schema.SAID, pinnedAppGrantSAID, pinnedAppBodySAID)
+	}
+}
+
+// An app has no brain, no model and no conversation inbox: its grant declares
+// none of what configures or talks for an AI agent, and refuses it if offered.
+func TestAnAppGrantRefusesWhatItsSchemaRefuses(t *testing.T) {
+	good := map[string]interface{}{
+		"i": "EApp", "asset_type": "app", "name": "Task console",
+		"capabilities": []string{"system.info.read"},
+	}
+	if err := AppGrant.CheckAttributes(good); err != nil {
+		t.Fatalf("a well-formed app grant was refused: %v", err)
+	}
+	for name, mutate := range map[string]func(map[string]interface{}){
+		"missing capabilities": func(m map[string]interface{}) { delete(m, "capabilities") },
+		"a model":              func(m map[string]interface{}) { m["model"] = "any" },
+		"a role":               func(m map[string]interface{}) { m["role"] = "orchestrator" },
+		"an inbox":             func(m map[string]interface{}) { m["inbox"] = "conversation" },
+		"an AI agent's type":   func(m map[string]interface{}) { m["asset_type"] = "ai_agent" },
+	} {
+		bad := map[string]interface{}{}
+		for k, v := range good {
+			bad[k] = v
+		}
+		mutate(bad)
+		if AppGrant.CheckAttributes(bad) == nil {
+			t.Fatalf("%s: accepted", name)
+		}
+	}
+}
+
+// An app's body is the same statement as an AI agent's, in the same attributes,
+// with only the kind different, so one body contract serves both.
+func TestAnAppBodyIsAnAIAgentBodyOfAnotherKind(t *testing.T) {
+	body := map[string]interface{}{
+		"i": "EApp", "asset_type": "app", "name": "Task console", "host": "BHost", "verkey": "DKey",
+		"keys_digest": "EDigest", "grade": "software", "placement": "vm",
+	}
+	if err := AppBody.CheckAttributes(body); err != nil {
+		t.Fatalf("a well-formed app body was refused: %v", err)
+	}
+	if AIAgentBody.CheckAttributes(body) == nil {
+		t.Fatal("an AI agent's body schema accepted an app's body")
+	}
+	body["asset_type"] = "ai_agent"
+	if AppBody.CheckAttributes(body) == nil {
+		t.Fatal("an app's body schema accepted an AI agent's body")
+	}
+	if AppBody.Schema.SAID == AIAgentBody.Schema.SAID || AppBody.AssetType != "app" {
+		t.Fatal("an app body is not told apart from an AI agent body")
+	}
+	if !AppBody.HasEdges() || !AppGrant.HasEdges() {
+		t.Fatal("an app credential cannot name the grant of whoever authorised it")
+	}
+}

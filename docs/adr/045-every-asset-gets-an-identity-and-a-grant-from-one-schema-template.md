@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-10-20
+**Amended:** 2026-11-02 — An app is a kind of asset, with a grant and a body of its own (see §Amendment 1)
 **Relates to:** ADR-032 (An identity can name who owns it, from its first event), ADR-042 (How an agent is reached, and who may manage it), ADR-044 (An authorized controller does the app's work)
 
 ## Context
@@ -240,3 +241,67 @@ authorised to act for the identity (ADR-044).
   verified by anybody else.
 - Other credential schemas name their lapse `expiry_date` or `authorized_until`, as a date.
   Asset grants use `valid_until`, as a date and time, because a grant may lapse within a day.
+
+## Amendment 1 (2026-11-02): an app is an asset, with a grant and a body
+
+*Amended 2026-11-02. Nothing above is changed.*
+
+Each app that runs beside an Identity Agent (the task console first) runs on its own
+small machine. Like an AI agent, an app is something the identity owns and lets act for it,
+so it is an asset under this ADR: it has a delegated identifier, and a grant that is its only
+authority. Two more kinds are built from the template, each with only the newer version
+(1.1.0, with an edge to the grant of whoever authorised it):
+
+- **App Grant** (`asset_type` `app`), what the app may ask of the Identity Agent. It adds
+  `capabilities`, the ceiling, and `resource_constraints`, exactly as the AI Agent Grant does
+  and checked the same way (ADR-050). It has **no role, prompt, model, messaging recipients
+  or conversation limits**: an app has no brain, no model and no conversation inbox, so there
+  is nothing of those to grant, and a grant that carried them would be refused as declaring
+  an attribute the schema does not have.
+- **App Body** (`asset_type` `app`), that one machine key is the body of one app. Its
+  attributes are those of the AI Agent Body, the same grades and the same revocation. Only the
+  asset type, the title and the description differ, so that an app's body is never mistaken for
+  an AI agent's, and the reverse.
+
+A machine becomes an app's body by the contract it already uses to become an AI agent's body:
+the enrolment string, the sealed request, the signed requests (ADR-046) and the approval of
+its signed request by a controller or the owner (ADR-059). Nothing in that contract names a
+kind of asset, only the asset's identifier, so it is unchanged; an approving request for an
+app's body is checked as it is for an AI agent's. The approval is
+`POST /api/mcp/agents/{id}/bodies/{machine}/approve`, mounted by the AI agents add-on
+(`identity-agent-addons/aiagents`), and the body credential names that machine in `about`.
+Apps share this path under its AI-agent name for now: `{id}` is the asset's identifier, and
+the path says nothing of the asset's kind. A machine a provider made is approved for an app on the
+provider's signed vouch exactly as for an AI agent (ADR-059).
+
+The published schemas are `app-grant-1.1.0.schema.json` and `app-body-1.1.0.schema.json` in
+`identity-agent-core/contracts/asset-grants/`, byte for byte, and the body vectors include an
+enrolment for an app.
+
+**What this does not settle.** How an app's key is held (in a virtual chip or otherwise), its
+encrypted stores, a relay and sign-in are later steps and are not in this contract. The
+conversation verifier still accepts only an AI agent's body and grant: an app is not a party to
+a conversation.
+
+These seams are open, and each is refused rather than half-working:
+
+- No route issues an App Grant or an App Body yet. The schemas, the vectors and the check of
+  an App Body's approval exist; nothing in the Identity Agent or an add-on calls them.
+- `checkAskedFor` (`identity-agent-core/authorisation/request.go`) has no case for an App
+  Grant, so an App Grant that carries an authorising request is refused.
+- `grantShown` (`identity-agent-core/authorisation/what_is_signed_is_what_is_shown.go`) cannot
+  show an App Grant, so a device holding the owner's key cannot be asked to sign one.
+- The edge lookup in `identity-agent-core/server/whoever_authorised_it_is_named.go` accepts
+  only the AI agent schemas, so an App Grant or App Body does not resolve the grant that
+  authorised it.
+
+The check of a body's approval is tied to the asset the path names: the caller gives the check
+a lookup from the path's `{id}` to that asset's pairwise AID and kind, and the body credential
+must be held by that AID and be the AI Agent Body for an AI agent or the App Body for an app.
+No lookup, or an asset it does not know, refuses.
+The lookup is given the path's `{id}` and the body credential's holder. An Identity Agent that
+keeps its assets answers by `{id}`. An offline verifier has only credentials, and a grant names
+its asset in `about` only when the request that asked for it named one, so it answers by the
+grant the holder holds: that grant gives the kind, and its `about`, where it has one, must be
+the `{id}`. The check also requires the path to be the one the route mounts,
+`/api/mcp/agents/{id}/bodies/{machine}/approve`.

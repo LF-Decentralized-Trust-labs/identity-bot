@@ -36,3 +36,7 @@ That comparison does real work in exactly one case: a person setting a machine u
 - A device that only captures a request needs no authority of its own, because the request proves itself; the authority to approve remains the owner's or an authorized controller's, checked the one way (ADR-050). This is what lets a capture device — a camera, or another of the person's apps relaying the request — feed an approver that holds the authority, without being granted any.
 
 ADR-046 carries the note recording which part of it this supersedes (see Rollout).
+
+## Amendment, 2026-11-02
+
+An app's body is approved by this same request, under its AI-agent path, and the check of that approval is the one this ADR describes. What that leaves open is recorded in ADR-045's amendment of the same date, under "What this does not settle".

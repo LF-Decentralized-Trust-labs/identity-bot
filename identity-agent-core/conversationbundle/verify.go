@@ -517,7 +517,7 @@ func (v *verifier) readCredential(bc Credential, c *credential) string {
 // checkAuthority applies authorisation.Check to a credential that carries the
 // request that asked for it.
 func (v *verifier) checkAuthority(bc Credential, c *credential) string {
-	in := authorisation.Input{Credential: c.raw, CredentialLog: c.log}
+	in := authorisation.Input{Credential: c.raw, CredentialLog: c.log, Asset: v.assetNamedBy}
 	if root, ok := v.kels[v.b.Root]; ok {
 		in.IssuerKEL = root.raws
 	}
@@ -549,6 +549,46 @@ func (v *verifier) checkAuthority(bc Credential, c *credential) string {
 		return ""
 	}
 	return "it does not rest on the request that authorised it: " + err.Error()
+}
+
+// assetNamedBy is the asset a body credential's holder is, read from the
+// bundle: the grant held by the body's holder (its pairwise AID) was issued for
+// the asset and says its kind. A grant that names the asset in `about` must
+// name the one the path does; one that names none (the grant POST
+// /api/mcp/agents issues, and every first-version grant) is the holder's all
+// the same. A holder with no grant in the bundle, or whose grants disagree on
+// the kind, is not known.
+func (v *verifier) assetNamedBy(id, holder string) (authorisation.ExpectedAsset, bool) {
+	if holder == "" {
+		return authorisation.ExpectedAsset{}, false
+	}
+	kind := ""
+	for _, c := range v.creds {
+		var this string
+		switch c.schema {
+		case schemas.AIAgentGrant.Schema.SAID, schemas.AIAgentGrantV1.Schema.SAID:
+			this = authorisation.AssetKindAIAgent
+		case schemas.AppGrant.Schema.SAID:
+			this = authorisation.AssetKindApp
+		default:
+			continue
+		}
+		if c.holder != holder {
+			continue
+		}
+		var about string
+		if raw, ok := c.attrs["about"]; ok && json.Unmarshal(raw, &about) == nil && about != "" && about != id {
+			return authorisation.ExpectedAsset{}, false
+		}
+		if kind != "" && kind != this {
+			return authorisation.ExpectedAsset{}, false
+		}
+		kind = this
+	}
+	if kind == "" {
+		return authorisation.ExpectedAsset{}, false
+	}
+	return authorisation.ExpectedAsset{PairwiseAID: holder, Kind: kind}, true
 }
 
 // ownerKey sets the key an owner-signed request is checked against: the
