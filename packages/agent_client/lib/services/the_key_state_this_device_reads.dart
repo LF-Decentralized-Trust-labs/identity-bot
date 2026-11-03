@@ -20,7 +20,8 @@ class VerifiedKeyState {
       required this.witnesses,
       required this.fromItsOwnRecord,
       required this.corroborated,
-      this.movingToThisPhrase = false});
+      this.movingToThisPhrase = false,
+      this.log});
 
   final String aid;
 
@@ -53,6 +54,10 @@ class VerifiedKeyState {
   /// this phrase until it is.
   final bool movingToThisPhrase;
 
+  /// The combined log the state was read from, where it was read from
+  /// copies: what recovery installs, and where the messaging keysets lie.
+  final CombinedLog? log;
+
   /// The form [TheKeyEventsThisDeviceMakes] retries a `tip_moved` with.
   KeyStateNow get now => (
         tip: (sn: tip.sn, digest: tip.digest),
@@ -64,10 +69,13 @@ class VerifiedKeyState {
 /// One verified copy of an identity's log, and where it came from: a witness
 /// named [witness], or the Identity Agent's discovery record.
 class LogCopy {
-  LogCopy(this.source, this.events, {this.witness});
+  LogCopy(this.source, this.events, {this.witness, this.signed});
   final String source;
   final String? witness;
   final List<LoggedEvent> events;
+
+  /// The events as signed, in order, where the copy came with them.
+  final List<SignedCopy>? signed;
 }
 
 /// Two verified copies of the log, or a copy and this device's own record,
@@ -144,7 +152,8 @@ class TheKeyStateThisDeviceReads {
   final http.Client _client;
   final KeyMath _km;
 
-  /// The Identity Agent's address, whose public discovery record is one copy.
+  /// The Identity Agent's address, whose public discovery record is one copy;
+  /// empty where none is known.
   final String _agentBase;
   final TheIdentityThisDeviceHolds _held;
 
@@ -190,9 +199,11 @@ class TheKeyStateThisDeviceReads {
     final copies = <LogCopy>[];
     await Future.wait([
       for (final w in h.witnessAddresses.keys)
-        witnesses.copyHeldBy(w, aid).then((st) {
-          if (st != null)
-            copies.add(LogCopy('witness $w', st.events, witness: w));
+        witnesses.copyHeldBy(w, aid).then((held) {
+          if (held != null) {
+            copies.add(LogCopy('witness $w', held.state.events,
+                witness: w, signed: held.events));
+          }
         }),
       _discoveryCopy(aid).then((c) {
         if (c != null) copies.add(c);
@@ -207,13 +218,22 @@ class TheKeyStateThisDeviceReads {
 
     // Once this phrase's keys are in force, every establishment event after
     // is this phrase's: anything else is another phrase, or someone else.
+    // From the first, this phrase's keys are revealed at consecutive
+    // positions (ADR-061 sections 1 and 10): key 0 by the founding, or key 1
+    // by step 2 of a move to this phrase, then one more by each rotation.
     var ours = false;
+    int? last;
     for (final ev in read.events) {
       if (!ev.establishment) continue;
       final k = ev.keys.isEmpty ? '' : ev.keys.first;
-      final mine = _generationOf(seed, k) != null || h.keysRevealed.contains(k);
+      final g = _generationOf(seed, k);
+      final mine = g != null || h.keysRevealed.contains(k);
       if (mine) ours = true;
       if (ours && !mine) throw TheKeyInForceIsNotThisPhrases(aid, ev.sn, k);
+      if (g == null) continue;
+      final expected = last == null ? (ev.sn == 0 ? 0 : 1) : last + 1;
+      if (g != expected) throw TheKeyInForceIsNotThisPhrases(aid, ev.sn, k);
+      last = g;
     }
 
     var g = _generationOf(seed, key);
@@ -239,7 +259,8 @@ class TheKeyStateThisDeviceReads {
         witnesses: WitnessSet(tip.witnesses, tip.toad),
         fromItsOwnRecord: false,
         corroborated: read.corroborated,
-        movingToThisPhrase: moving);
+        movingToThisPhrase: moving,
+        log: read);
     // Only what enough witnesses corroborate becomes this device's record:
     // the core's copy alone is read, used once, and never remembered as if
     // this device had made it.
@@ -267,6 +288,7 @@ class TheKeyStateThisDeviceReads {
   /// The copy of the log the Identity Agent's public discovery record serves,
   /// verified; null when it cannot be read or does not verify.
   Future<LogCopy?> _discoveryCopy(String aid) async {
+    if (_agentBase.isEmpty) return null;
     try {
       final res = await _client.get(Uri.parse('$_agentBase/public/oobi/$aid'));
       if (res.statusCode != 200) return null;
@@ -274,11 +296,12 @@ class TheKeyStateThisDeviceReads {
       final raws = j['raw_events_b64'] as List? ?? const [];
       final sigs = j['cesr_signatures'] as List? ?? const [];
       if (raws.isEmpty || raws.length != sigs.length) return null;
-      final st = await _km.verifyLog(aid, [
+      final signed = [
         for (var i = 0; i < raws.length; i++)
           SignedCopy('${raws[i]}', ['${sigs[i]}'])
-      ]);
-      return LogCopy('the discovery record', st.events);
+      ];
+      final st = await _km.verifyLog(aid, signed);
+      return LogCopy('the discovery record', st.events, signed: signed);
     } catch (_) {
       return null;
     }
@@ -402,15 +425,26 @@ class TheKeyStateThisDeviceReads {
       }
       events.add(here.first);
     }
-    return CombinedLog(chosen, events.last, events, corroborated);
+    // The history as signed, from a copy that reaches its end.
+    final signedBy = agreeing
+        .where((c) => c.signed != null && c.signed!.length >= events.length);
+    final signed = signedBy.isEmpty
+        ? null
+        : signedBy.first.signed!.sublist(0, events.length);
+    return CombinedLog(chosen, events.last, events, corroborated,
+        signed: signed);
   }
 }
 
 /// The log as the copies combine into it.
 class CombinedLog {
-  CombinedLog(this.establishment, this.tip, this.events, this.corroborated);
+  CombinedLog(this.establishment, this.tip, this.events, this.corroborated,
+      {this.signed});
   final LoggedEvent establishment;
   final LoggedEvent tip;
   final List<LoggedEvent> events;
   final bool corroborated;
+
+  /// [events] as signed, where a copy that reaches the tip came with them.
+  final List<SignedCopy>? signed;
 }

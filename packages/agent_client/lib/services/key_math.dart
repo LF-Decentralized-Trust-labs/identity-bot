@@ -130,7 +130,8 @@ class LogState {
 /// commitments and witnesses in force after it.
 class LoggedEvent {
   LoggedEvent(this.sn, this.digest, this.ilk, this.keys, this.next,
-      this.witnesses, this.toad);
+      this.witnesses, this.toad,
+      {this.messagingKeysets = const []});
   LoggedEvent.fromJson(Map<String, dynamic> j)
       : sn = (j['sn'] as num?)?.toInt() ?? -1,
         digest = j['digest'] as String? ?? '',
@@ -140,11 +141,18 @@ class LoggedEvent {
         witnesses = [
           for (final w in (j['witnesses'] as List? ?? const [])) '$w'
         ],
-        toad = (j['toad'] as num?)?.toInt() ?? 0;
+        toad = (j['toad'] as num?)?.toInt() ?? 0,
+        messagingKeysets = [
+          for (final m in (j['messaging_keysets'] as List? ?? const []))
+            Map<String, dynamic>.from(m as Map)
+        ];
   final int sn;
   final String digest;
   final String ilk;
   final List<String> keys;
+
+  /// The messaging keyset anchors the event carries.
+  final List<Map<String, dynamic>> messagingKeysets;
 
   /// The next-key commitments in force after it.
   final List<String> next;

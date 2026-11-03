@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"identity-agent-core/messagingkeys"
 	"io"
 	"net/http"
 
@@ -129,19 +130,9 @@ func messagingAnchorsIn(raw []byte) []map[string]interface{} {
 }
 
 // messagingSealsAmong are the IA-HYBRID-1 keyset anchors among an event's
-// seals, as the event carries them: the one reading of which seal commits to
-// messaging keys.
+// seals (messagingkeys.SealsAmong).
 func messagingSealsAmong(seals []json.RawMessage) []json.RawMessage {
-	var out []json.RawMessage
-	for _, a := range seals {
-		var probe struct {
-			IA string `json:"ia"`
-		}
-		if json.Unmarshal(a, &probe) == nil && probe.IA == iacrypto.CipherSuiteIAHybrid1 {
-			out = append(out, a)
-		}
-	}
-	return out
+	return messagingkeys.SealsAmong(seals)
 }
 
 // messagingAnchorsAmong is messagingSealsAmong, each read into a map.

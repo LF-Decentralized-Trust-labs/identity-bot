@@ -1,6 +1,13 @@
 package keymath
 
-import "identity-agent-core/drivers"
+import (
+	"encoding/json"
+
+	keri "github.com/grapeid/keri-go"
+
+	"identity-agent-core/drivers"
+	"identity-agent-core/messagingkeys"
+)
 
 // What an app checks for itself about what its identity's witnesses say: that a
 // receipt is the named witness's signature over the event's digest, and what
@@ -38,6 +45,9 @@ type LoggedEvent struct {
 	Next      []string `json:"next"`
 	Witnesses []string `json:"witnesses"`
 	TOAD      uint64   `json:"toad"`
+	// MessagingKeysets are the messaging keyset anchors the event carries,
+	// as it carries them.
+	MessagingKeysets []json.RawMessage `json:"messaging_keysets,omitempty"`
 }
 
 // VerifyReceipt checks that sig is the witness named witness's signature over
@@ -71,10 +81,34 @@ func VerifyLog(aid string, events []SignedEvent) (*LogState, error) {
 		if at == nil {
 			break
 		}
-		out.Events = append(out.Events, LoggedEvent{
+		e := LoggedEvent{
 			SN: at.SN(), Digest: at.Digest(), Ilk: at.Ilk(), Keys: at.Keys(),
 			Next: at.NextDigests(), Witnesses: at.Witnesses(), TOAD: at.TOAD(),
-		})
+		}
+		if int(sn) < len(messages) {
+			e.MessagingKeysets = messagingKeysetsOf(messages[sn])
+		}
+		out.Events = append(out.Events, e)
 	}
 	return out, nil
+}
+
+// messagingKeysetsOf are the messaging keyset anchors among the seals of the
+// event a message carries.
+func messagingKeysetsOf(message []byte) []json.RawMessage {
+	ev, err := keri.ParseEvent(message)
+	if err != nil {
+		return nil
+	}
+	for _, f := range ev.Fields {
+		if f.Name != "a" {
+			continue
+		}
+		var seals []json.RawMessage
+		if json.Unmarshal(f.Value, &seals) != nil {
+			return nil
+		}
+		return messagingkeys.SealsAmong(seals)
+	}
+	return nil
 }

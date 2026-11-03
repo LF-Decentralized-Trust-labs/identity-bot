@@ -80,6 +80,14 @@ class Held {
   bool get establishment => ilk != 'ixn';
 }
 
+/// A copy of an identity's log a witness holds: the key state it verifies to,
+/// and its events as signed, in order.
+class HeldCopy {
+  HeldCopy(this.state, this.events);
+  final LogState state;
+  final List<SignedCopy> events;
+}
+
 /// What an identity's witnesses said about one of its events, each answer
 /// checked by this app.
 class Witnessed {
@@ -175,7 +183,7 @@ class TheWitnessesOfThisDevicesEvents {
           }
           // The whole copy up to the tip the witness signed, so the event at
           // [sn] is the one in the history it vouches for.
-          final st = await _signedCopy(base, aid, tip);
+          final st = (await _signedCopy(base, aid, tip))?.state;
           if (st == null) return;
           final at = st.events[sn];
           out[w] = Held(at.digest, at.ilk);
@@ -188,7 +196,7 @@ class TheWitnessesOfThisDevicesEvents {
   /// founding; null when it cannot be reached, holds nothing, or its copy does
   /// not verify. Where it ends is taken from its signed answer to a fresh
   /// nonce, so a copy cut short in transit is not mistaken for the whole.
-  Future<LogState?> copyHeldBy(String w, String aid) async {
+  Future<HeldCopy?> copyHeldBy(String w, String aid) async {
     final base = _where.whereIs(w);
     if (base == null) return null;
     final tip = await _tip(base, w, aid);
@@ -199,12 +207,13 @@ class TheWitnessesOfThisDevicesEvents {
   /// The copy at [base] up to [tip], judged from the founding, and ending in
   /// the event whose digest the witness signed: a copy served at a wrong
   /// address cannot pass for the witness's own.
-  Future<LogState?> _signedCopy(
+  Future<HeldCopy?> _signedCopy(
       Uri base, String aid, ({int sn, String said}) tip) async {
-    final st = await _verifiedCopy(base, aid, tip.sn);
+    final held = await _verifiedCopy(base, aid, tip.sn);
+    final st = held?.state;
     if (st == null || st.sn != tip.sn || st.digest != tip.said) return null;
     if (st.events.length != tip.sn + 1) return null;
-    return st;
+    return held;
   }
 
   Future<(_Answer, String?)> _receiptFrom(String w, WitnessSet set, String aid,
@@ -329,7 +338,7 @@ class TheWitnessesOfThisDevicesEvents {
 
   /// The copy of [aid]'s log up to [sn] the witness at [base] holds, judged
   /// from the founding.
-  Future<LogState?> _verifiedCopy(Uri base, String aid, int sn) async {
+  Future<HeldCopy?> _verifiedCopy(Uri base, String aid, int sn) async {
     final copies = <SignedCopy>[];
     for (var k = 0; k <= sn; k++) {
       final c = await _eventAt(base, aid, k);
@@ -337,7 +346,7 @@ class TheWitnessesOfThisDevicesEvents {
       copies.add(c);
     }
     try {
-      return await _km.verifyLog(aid, copies);
+      return HeldCopy(await _km.verifyLog(aid, copies), copies);
     } on KeyMathRefused {
       return null;
     }
