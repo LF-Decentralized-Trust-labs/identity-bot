@@ -203,9 +203,9 @@ func (s *CoreServer) describeAID(aid string) (name, owner string) {
 		if name == "" {
 			name = a.ID
 		}
-		// An AI agent is not a sovereign actor — it acts under whoever authorized it,
-		// and that party is who a reader actually wants named.
-		if a.AssetType == "ai_agent" {
+		// An AI agent or an app is not a sovereign actor — it acts under whoever
+		// authorized it, and that party is who a reader actually wants named.
+		if a.AssetType == "ai_agent" || a.AssetType == "app" {
 			owner = a.DelegatorAID
 		}
 		return name, owner

@@ -56,10 +56,13 @@ func (s *CoreServer) credentialsOfAnyHeldBy(holder string, schemaSAIDs []string,
 	return out
 }
 
-// grantsHeldBy is the AI agent grants this identity issued to one AI agent,
-// newest first.
+// grantsHeldBy is the grants this identity issued to one asset, newest first:
+// an AI agent's AI Agent Grants, or an app's App Grants. It answers "what does
+// this asset hold", so that revoking or removing the asset can find every grant
+// to withdraw. It does not say what a gateway admits; that is
+// capabilityGrantSchemaSAIDs, kept apart on purpose.
 func (s *CoreServer) grantsHeldBy(agentAID string, usableOnly bool) []store.CredentialRecord {
-	return s.credentialsOfAnyHeldBy(agentAID, capabilityGrantSchemaSAIDs, s.OwnerRootAID(), usableOnly)
+	return s.credentialsOfAnyHeldBy(agentAID, grantSchemaSAIDsHeld, s.OwnerRootAID(), usableOnly)
 }
 
 // issuedAt reads a credential's issue time in either format it has been
@@ -83,6 +86,11 @@ var capabilityGrantSchemaSAID = schemas.AIAgentGrant.Schema.SAID
 // honoured: the current one, and the first, which grants issued before edges
 // carry.
 var capabilityGrantSchemaSAIDs = []string{capabilityGrantSchemaSAID, schemas.AIAgentGrantV1.Schema.SAID}
+
+// grantSchemaSAIDsHeld are the schemas of every grant an asset can hold from
+// this identity, whether or not a gateway admits it yet: those admitted, and
+// the App Grant. Looking a grant up is not admitting it.
+var grantSchemaSAIDsHeld = append(append([]string{}, capabilityGrantSchemaSAIDs...), schemas.AppGrant.Schema.SAID)
 
 // OwnerRootAID returns the owner's root AID (the delegator every provisioned agent
 // chains to), or "" if no identity is established. Exported for overlay governance.

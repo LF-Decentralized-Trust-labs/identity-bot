@@ -283,7 +283,7 @@ func (s *CoreServer) saveRecordIdentity(rec recordIdentityRecord) error {
 }
 
 // anchorsItsRecord reports whether this Identity Agent anchors its record: an
-// organisation does, and so does any Identity Agent that holds AI agents. An
+// organisation does, and so does any Identity Agent that holds AI agents or apps. An
 // individual's phone with no AI agent writes nothing into its key log unasked.
 func (s *CoreServer) anchorsItsRecord() bool {
 	if strings.EqualFold(s.ourEntityType(), "organization") || strings.EqualFold(s.ourEntityType(), "organisation") {
@@ -291,7 +291,7 @@ func (s *CoreServer) anchorsItsRecord() bool {
 	}
 	if s.assetHandler != nil {
 		for _, a := range s.assetHandler.Store.ListAssets() {
-			if a.AssetType == "ai_agent" {
+			if a.AssetType == "ai_agent" || a.AssetType == "app" {
 				return true
 			}
 		}

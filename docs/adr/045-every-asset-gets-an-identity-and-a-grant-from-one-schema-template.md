@@ -283,17 +283,45 @@ encrypted stores, a relay and sign-in are later steps and are not in this contra
 conversation verifier still accepts only an AI agent's body and grant: an app is not a party to
 a conversation.
 
-These seams are open, and each is refused rather than half-working:
+**Closed (2026-11-02).** The core provisions an app as it does an AI agent:
+`asset.Handler.ProvisionAppAsset(displayName string, capabilities []string, validUntil *time.Time,
+constraints map[string]interface{}) (*Asset, error)` mints an asset of type `app` with its own
+delegated identifier, and the Identity Agent issues its App Grant from the owner's registry with
+`issueCapabilityGrant`, recorded as an AI Agent Grant is (and, where the key is on another device,
+left for that device to sign). An app and an AI agent cannot share a name, since the engine keys
+identities by it. Three seams are closed with it:
 
-- No route issues an App Grant or an App Body yet. The schemas, the vectors and the check of
-  an App Body's approval exist; nothing in the Identity Agent or an add-on calls them.
-- `checkAskedFor` (`identity-agent-core/authorisation/request.go`) has no case for an App
-  Grant, so an App Grant that carries an authorising request is refused.
-- `grantShown` (`identity-agent-core/authorisation/what_is_signed_is_what_is_shown.go`) cannot
-  show an App Grant, so a device holding the owner's key cannot be asked to sign one.
-- The edge lookup in `identity-agent-core/server/whoever_authorised_it_is_named.go` accepts
-  only the AI agent schemas, so an App Grant or App Body does not resolve the grant that
-  authorised it.
+- `checkAskedFor` (`identity-agent-core/authorisation/request.go`) checks an App Grant against the
+  request that asked for it, exactly as it does an AI Agent Grant (name, capabilities and limits), at the route that creates an app,
+  `POST /api/hosted-apps` (mounted by the apphosting add-on), and only there: no route changes an app's capabilities yet,
+  and when one is added it is bound in `checkAskedFor` with it. A request to grant an AI agent is
+  not accepted as an app's, nor the reverse. The request does not name the app it creates, so
+  nothing ties the grant to an asset beyond its name.
+- `grantShown` (`identity-agent-core/authorisation/what_is_signed_is_what_is_shown.go`) shows an
+  App Grant, as kind `app`, with its name, capabilities, limits and end, so a device holding the
+  owner's key can be asked to sign one.
+- Looking up the grants an asset holds (`GrantsHeldBy`, `FindCapabilityGrant`) covers an app's
+  App Grant, so whatever revokes or removes an app can find and withdraw it. That is a different
+  list from the grants a gateway admits, below.
+- The edge lookup in `identity-agent-core/server/whoever_authorised_it_is_named.go` accepts the
+  App Grant and App Body when it finds when this Identity Agent first issued a credential that names
+  who authorised it.
+
+These seams are still open, and each is refused rather than half-working:
+
+- An App Grant signed on another device is kept by this Identity Agent only once an add-on
+  registers the app grant kind; until then it is not taken up. No add-on registers it yet.
+- Re-issuing an app's grant while the owner's key is on another device withdraws the old App
+  Grant before the new one is signed, which leaves the app with none until it is; no route
+  re-issues an app's grant yet, and the one that does must keep the old grant until the new one
+  is taken up.
+- No route issues an App Grant or an App Body yet. `ProvisionAppAsset` and the issuance exist; no
+  route in the Identity Agent calls them; the apphosting add-on's `POST /api/hosted-apps` is the
+  route that will, and no route yet changes an app's capabilities.
+- The Identity Agent's own list of grant schemas it honours as capability grants
+  (`CapabilityGrantSchemaSAIDs`, read by add-ons) is unchanged, so no gateway admits an app on its App
+  Grant yet. Admitting an app's grant at the gateway belongs to step 3 (apps reached through the
+  relay and making calls), and is decided there.
 
 The check of a body's approval is tied to the asset the path names: the caller gives the check
 a lookup from the path's `{id}` to that asset's pairwise AID and kind, and the body credential

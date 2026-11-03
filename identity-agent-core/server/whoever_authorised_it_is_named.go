@@ -279,8 +279,20 @@ func (s *CoreServer) issuedUnderFirstVersionTooLate(rec *store.CredentialRecord)
 	return issuedAt(*rec).After(since)
 }
 
+// isEdgedAssetSchema reports whether a schema is a grant or body of an AI agent
+// or an app in the version that names who authorised it. An app has only that
+// version (ADR-045, Amendment 1).
+func isEdgedAssetSchema(schema string) bool {
+	switch schema {
+	case schemas.AIAgentGrant.Schema.SAID, schemas.AIAgentBody.Schema.SAID,
+		schemas.AppGrant.Schema.SAID, schemas.AppBody.Schema.SAID:
+		return true
+	}
+	return false
+}
+
 // firstEdgedIssuance is when this Identity Agent first issued an AI agent
-// grant or body credential under the version that names who authorised it.
+// or app grant or body credential under the version that names who authorised it.
 // Found once and remembered: it never moves.
 func (s *CoreServer) firstEdgedIssuance() (time.Time, bool) {
 	if t, ok := s.edgesSince.Load().(time.Time); ok {
@@ -292,7 +304,7 @@ func (s *CoreServer) firstEdgedIssuance() (time.Time, bool) {
 	}
 	var first time.Time
 	for _, c := range creds {
-		if c.SchemaSAID != schemas.AIAgentGrant.Schema.SAID && c.SchemaSAID != schemas.AIAgentBody.Schema.SAID {
+		if !isEdgedAssetSchema(c.SchemaSAID) {
 			continue
 		}
 		if t := issuedAt(c); !t.IsZero() && (first.IsZero() || t.Before(first)) {
