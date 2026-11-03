@@ -38,6 +38,16 @@ type MessageVectorSet struct {
 		Name      string    `json:"name"`
 		Statement Statement `json:"statement"`
 	} `json:"refused_statements"`
+	// OpeningGrants are a grant's resource constraints and the AI agent an
+	// opening ask is toward, with whether the grant lets it open one. An
+	// opening names whom it may open toward and how often, outright: a missing
+	// "to" constraint is not leave to open toward anyone (ADR-047, Amendment 3).
+	OpeningGrants []struct {
+		Name        string                 `json:"name"`
+		Constraints map[string]interface{} `json:"constraints"`
+		To          string                 `json:"to"`
+		Allowed     bool                   `json:"allowed"`
+	} `json:"opening_grants"`
 	// TierStripped is a tiered ask as a reader that does not know tiers sees
 	// it: Statement has no tier, TierRemoved is the one it lost, and Signature
 	// is the body's over the statement with that tier. The signature must not

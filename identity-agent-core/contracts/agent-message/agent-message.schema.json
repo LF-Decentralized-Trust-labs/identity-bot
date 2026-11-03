@@ -26,7 +26,7 @@
       "properties": {
         "conversation": {
           "type": "string",
-          "description": "the conversation this is in; empty, and signed as an empty line, only on an ask that acts on no message, which opens a conversation whose identifier the Identity Agent chooses (ADR-047, Amendment 3)"
+          "description": "the conversation this is in; empty, and signed as an empty line, only on an ask that acts on no message, which opens a conversation whose identifier the Identity Agent chooses. An opening is admitted only under a grant whose resource constraints state, outright, the AI agents it may open toward (a non-empty list under agent.message.send, key to; a missing one is a refusal, not leave to open toward anyone) and a positive whole number of openings per hour (agent.message.open, key per_hour); the opening's host_nonce is remembered by the Identity Agent so one signed opening opens one conversation (ADR-047, Amendment 3)"
         },
         "kind": {
           "$ref": "#/$defs/kind"

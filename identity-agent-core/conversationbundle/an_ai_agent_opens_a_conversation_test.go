@@ -18,7 +18,10 @@ func openingGrant(said, holder string, to ...string) *credential {
 	caps, _ := json.Marshal([]string{agentmessage.CapabilityMessageAgent})
 	attrs := map[string]json.RawMessage{"capabilities": caps}
 	if len(to) > 0 {
-		limits, _ := json.Marshal(map[string]interface{}{agentmessage.CapabilityMessageAgent: map[string]interface{}{"to": to}})
+		limits, _ := json.Marshal(map[string]interface{}{
+			agentmessage.CapabilityMessageAgent: map[string]interface{}{"to": to},
+			agentmessage.CapabilityMessageOpen:  map[string]interface{}{"per_hour": 6},
+		})
 		attrs["resource_constraints"] = limits
 	}
 	return &credential{said: said, holder: holder, attrs: attrs, issued: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)}
@@ -120,4 +123,41 @@ func TestAnOpenersRevokedGrantEndsItsConversation(t *testing.T) {
 	if !strings.Contains(openingFaults(v), "was not in force") {
 		t.Fatalf("an ask after its opener's grant was revoked was accepted: %q", openingFaults(v))
 	}
+}
+
+// An opening is admitted only under a grant that names, outright, whom it may
+// open toward and how often: a grant with no constraint on "to" reads as
+// unconstrained for an ordinary ask, and must not for an opening.
+func TestAnOpeningNeedsAGrantThatNamesWhomAndHowOften(t *testing.T) {
+	ask := func(g *credential) *verifier {
+		v := newVerifier()
+		v.checkAskAllowed("entry 1", g, openingEntry("EA", "EB"), []byte("words"))
+		return v
+	}
+	if v := ask(openingGrant("Egrant_a", "EA", "EB")); len(v.r.Faults) != 0 {
+		t.Fatalf("an opening under a grant naming EB and a rate was refused: %s", openingFaults(v))
+	}
+	for name, g := range map[string]*credential{
+		"no constraint on to": openingGrant("Egrant_a", "EA"),
+		"another agent named": openingGrant("Egrant_a", "EA", "EC"),
+		"no count per hour":   withoutRate(openingGrant("Egrant_a", "EA", "EB")),
+	} {
+		if v := ask(g); !strings.Contains(openingFaults(v), "does not let it") {
+			t.Errorf("an opening was accepted under a grant with %s: %q", name, openingFaults(v))
+		}
+	}
+	// An ordinary ask inside a conversation is unchanged by this rule.
+	v := newVerifier()
+	reply := openingEntry("EA", "EB")
+	reply.Statement.InReplyTo = "m0"
+	v.checkAskAllowed("entry 3", openingGrant("Egrant_a", "EA"), reply, []byte("words"))
+	if len(v.r.Faults) != 0 {
+		t.Fatalf("an ask that acts on a message was held to the opening rule: %s", openingFaults(v))
+	}
+}
+
+func withoutRate(g *credential) *credential {
+	limits, _ := json.Marshal(map[string]interface{}{agentmessage.CapabilityMessageAgent: map[string]interface{}{"to": []string{"EB"}}})
+	g.attrs["resource_constraints"] = limits
+	return g
 }

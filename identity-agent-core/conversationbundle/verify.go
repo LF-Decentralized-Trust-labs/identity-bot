@@ -679,7 +679,12 @@ func (v *verifier) checkEntries() {
 // ask, or by an AI agent's ask toward another AI agent (ADR-047, Amendment 3).
 // The person's is checked as it always was. The AI agent's must be its own, name
 // no earlier message, be addressed to an AI agent and not a person, and sit at
-// depth 1 where a person's message sits at 0.
+// depth 1 where a person's message sits at 0. That the grant names whom it may
+// open toward, and how often, is checked with the rest of the ask's grant
+// (checkAskAllowed). What no bundle can show is not checked here: that the
+// body held no unanswered message when it opened, how many conversations it
+// opened in an hour, and that depth beyond the opening stays within three.
+// Those are the Identity Agent's to enforce (ADR-047, Amendment 3).
 func (v *verifier) checkOpening(where string, rec agentmessage.Record) {
 	if rec.Kind != agentmessage.KindAsk || rec.From != rec.OpenedBy {
 		v.fault(where, "a conversation is opened by an ask from the one who opened it, and this is not one")
@@ -852,6 +857,11 @@ func (v *verifier) checkAskAllowed(where string, grant *credential, rec agentmes
 	args := agentmessage.AskArgs(rec.To, string(body))
 	if err := permission.CheckResourceConstraints(limits, agentmessage.CapabilityMessageAgent, args); err != nil {
 		v.fault(where, "the AI agent's grant does not let it ask %s: %v", rec.To, err)
+	}
+	if rec.Statement != nil && rec.Statement.Opens() {
+		if err := agentmessage.CheckOpeningGrant(limits, rec.To); err != nil {
+			v.fault(where, "the AI agent opened a conversation its grant does not let it: %v", err)
+		}
 	}
 	v.checkOpenerReach(where, rec, args)
 }

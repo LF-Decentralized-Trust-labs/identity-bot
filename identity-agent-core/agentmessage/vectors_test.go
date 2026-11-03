@@ -59,6 +59,14 @@ func TestThePublishedMessageVectorsHold(t *testing.T) {
 			t.Fatalf("%s was accepted; it must be refused", r.Name)
 		}
 	}
+	if len(set.OpeningGrants) == 0 {
+		t.Fatal("the vector file has no opening grants")
+	}
+	for _, g := range set.OpeningGrants {
+		if err := CheckOpeningGrant(g.Constraints, g.To); (err == nil) != g.Allowed {
+			t.Fatalf("%s: allowed %v, but the check said %v", g.Name, g.Allowed, err)
+		}
+	}
 	for _, s := range set.TierStripped {
 		if s.Statement.Tier != "" || s.TierRemoved == "" {
 			t.Fatalf("%s: the statement must have no tier and name the one removed", s.Name)
@@ -367,6 +375,24 @@ func writeMessageVectors(t *testing.T) {
 		{"an unknown kind", otherKind},
 		{"a nonce of 15 characters", shortNonce},
 		{"a time that is not RFC 3339", badTime},
+	}
+
+	toB := map[string]interface{}{"to": []string{"EAGENT_B"}}
+	perHour := map[string]interface{}{"per_hour": 6}
+	set.OpeningGrants = []struct {
+		Name        string                 `json:"name"`
+		Constraints map[string]interface{} `json:"constraints"`
+		To          string                 `json:"to"`
+		Allowed     bool                   `json:"allowed"`
+	}{
+		{"a grant that names whom it opens toward and how often", map[string]interface{}{CapabilityMessageAgent: toB, CapabilityMessageOpen: perHour}, "EAGENT_B", true},
+		{"a grant with no constraints at all", map[string]interface{}{}, "EAGENT_B", false},
+		{"a grant with no constraint on to", map[string]interface{}{CapabilityMessageAgent: map[string]interface{}{"text": []string{"hello"}}, CapabilityMessageOpen: perHour}, "EAGENT_B", false},
+		{"a grant with an empty list for to", map[string]interface{}{CapabilityMessageAgent: map[string]interface{}{"to": []string{}}, CapabilityMessageOpen: perHour}, "EAGENT_B", false},
+		{"a grant that names another AI agent", map[string]interface{}{CapabilityMessageAgent: toB, CapabilityMessageOpen: perHour}, "EAGENT_C", false},
+		{"a grant that states no count of openings per hour", map[string]interface{}{CapabilityMessageAgent: toB}, "EAGENT_B", false},
+		{"a grant whose count of openings per hour is zero", map[string]interface{}{CapabilityMessageAgent: toB, CapabilityMessageOpen: map[string]interface{}{"per_hour": 0}}, "EAGENT_B", false},
+		{"a grant whose count of openings per hour is not a whole number", map[string]interface{}{CapabilityMessageAgent: toB, CapabilityMessageOpen: map[string]interface{}{"per_hour": 1.5}}, "EAGENT_B", false},
 	}
 
 	stripped := ask

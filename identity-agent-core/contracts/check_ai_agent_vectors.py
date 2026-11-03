@@ -293,6 +293,16 @@ def statement_refused(s):
     return False
 
 
+def opening_allowed(constraints, to):
+    """An AI agent opens a conversation only under a grant that names, outright,
+    whom it may open toward and how many conversations it may open per hour:
+    a missing constraint is not leave to open toward anyone."""
+    names = constraints.get("agent.message.send", {}).get("to", [])
+    n = constraints.get("agent.message.open", {}).get("per_hour")
+    counted = isinstance(n, (int, float)) and not isinstance(n, bool) and n >= 1 and n == int(n)
+    return to in names and counted
+
+
 def jwm_of(env):
     return json.loads(unb64url(env["plaintext"]), object_pairs_hook=lambda kv: kv)
 
@@ -308,6 +318,11 @@ def check_message(v):
     for r in v["refused_statements"]:
         if not statement_refused(r["statement"]):
             fail(r["name"] + " is not refused by the prose's rules")
+
+    if not v.get("opening_grants"):
+        fail("there are no vectors for the grants an opening needs")
+    for g in v.get("opening_grants", []):
+        same(g["name"], opening_allowed(g["constraints"], g["to"]), g["allowed"])
 
     # A reader that does not know tiers rebuilds the V1 string from a tiered
     # ask, which is not what was signed: the signature must fail on it, and
@@ -360,7 +375,7 @@ def check_message(v):
         jwm = dict(jwm_of(r["envelope"]))
         if jwm["id"] == dict_deep(jwm["body"])["message_id"]:
             fail(r["name"] + " is not refused by the prose's rules")
-    return len(v["statements"]) + len(v.get("tier_stripped", [])) + len(v["conversation"]) + check_person(v["person"])
+    return len(v["statements"]) + len(v.get("opening_grants", [])) + len(v.get("tier_stripped", [])) + len(v["conversation"]) + check_person(v["person"])
 
 
 def check_controller_proof(where, proof, request, rec):

@@ -69,6 +69,41 @@ func AskArgs(to, text string) []byte {
 	return b
 }
 
+// CapabilityMessageOpen names the grant's limit on how often an AI agent opens
+// a conversation. It is a key in the grant's resource constraints, read only
+// by CheckOpeningGrant: {"agent.message.open": {"per_hour": 6}}. It is not a
+// capability an AI agent is granted, so it never reaches
+// permission.CheckResourceConstraints.
+const CapabilityMessageOpen = "agent.message.open"
+
+// CheckOpeningGrant refuses a grant that does not state, outright, whom an AI
+// agent may open a conversation toward and how often (ADR-047, Amendment 3).
+// permission.CheckResourceConstraints reads a missing constraint as no limit,
+// which is right for an ask inside a conversation but not for opening one, so
+// an opening fails closed: the grant's constraint on "to" must exist and name
+// the AI agent asked, and its openings per hour must be a stated, positive
+// count. The Identity Agent admitting an opening and a verifier checking one
+// later both call it.
+func CheckOpeningGrant(limits map[string]interface{}, to string) error {
+	send, _ := limits[CapabilityMessageAgent].(map[string]interface{})
+	names, _ := send["to"].([]interface{})
+	if len(names) == 0 {
+		return fmt.Errorf("the grant does not name whom its AI agent may open a conversation toward: an opening needs an explicit %q constraint on %s", "to", CapabilityMessageAgent)
+	}
+	named := false
+	for _, n := range names {
+		named = named || fmt.Sprint(n) == to
+	}
+	if !named {
+		return fmt.Errorf("the grant does not let its AI agent open a conversation toward %s", to)
+	}
+	open, _ := limits[CapabilityMessageOpen].(map[string]interface{})
+	if n, ok := open["per_hour"].(float64); !ok || n < 1 || n != float64(int64(n)) {
+		return fmt.Errorf("the grant states no count of conversations its AI agent may open per hour: an opening needs a positive %q under %s", "per_hour", CapabilityMessageOpen)
+	}
+	return nil
+}
+
 // PersonPrefix marks a party that is a person rather than an AI agent: the
 // identifier after it is the person's identity on the organisation's roster.
 const PersonPrefix = "person:"

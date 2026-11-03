@@ -328,6 +328,114 @@
       }
     }
   ],
+  "opening_grants": [
+    {
+      "name": "a grant that names whom it opens toward and how often",
+      "constraints": {
+        "agent.message.open": {
+          "per_hour": 6
+        },
+        "agent.message.send": {
+          "to": [
+            "EAGENT_B"
+          ]
+        }
+      },
+      "to": "EAGENT_B",
+      "allowed": true
+    },
+    {
+      "name": "a grant with no constraints at all",
+      "constraints": {},
+      "to": "EAGENT_B",
+      "allowed": false
+    },
+    {
+      "name": "a grant with no constraint on to",
+      "constraints": {
+        "agent.message.open": {
+          "per_hour": 6
+        },
+        "agent.message.send": {
+          "text": [
+            "hello"
+          ]
+        }
+      },
+      "to": "EAGENT_B",
+      "allowed": false
+    },
+    {
+      "name": "a grant with an empty list for to",
+      "constraints": {
+        "agent.message.open": {
+          "per_hour": 6
+        },
+        "agent.message.send": {
+          "to": []
+        }
+      },
+      "to": "EAGENT_B",
+      "allowed": false
+    },
+    {
+      "name": "a grant that names another AI agent",
+      "constraints": {
+        "agent.message.open": {
+          "per_hour": 6
+        },
+        "agent.message.send": {
+          "to": [
+            "EAGENT_B"
+          ]
+        }
+      },
+      "to": "EAGENT_C",
+      "allowed": false
+    },
+    {
+      "name": "a grant that states no count of openings per hour",
+      "constraints": {
+        "agent.message.send": {
+          "to": [
+            "EAGENT_B"
+          ]
+        }
+      },
+      "to": "EAGENT_B",
+      "allowed": false
+    },
+    {
+      "name": "a grant whose count of openings per hour is zero",
+      "constraints": {
+        "agent.message.open": {
+          "per_hour": 0
+        },
+        "agent.message.send": {
+          "to": [
+            "EAGENT_B"
+          ]
+        }
+      },
+      "to": "EAGENT_B",
+      "allowed": false
+    },
+    {
+      "name": "a grant whose count of openings per hour is not a whole number",
+      "constraints": {
+        "agent.message.open": {
+          "per_hour": 1.5
+        },
+        "agent.message.send": {
+          "to": [
+            "EAGENT_B"
+          ]
+        }
+      },
+      "to": "EAGENT_B",
+      "allowed": false
+    }
+  ],
   "tier_stripped": [
     {
       "name": "a tiered ask with its tier stripped",
