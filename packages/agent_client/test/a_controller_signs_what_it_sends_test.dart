@@ -400,11 +400,16 @@ void main() {
     ];
     await Future<void>.delayed(const Duration(milliseconds: 20));
 
-    // The first switch ends and, before the waiters have run, another begins.
+    // The first switch ends and the gate opens (its count reaches zero). Before
+    // the waiting requests resume, another switch begins. The microtask queued
+    // here runs after the one that ends the first switch and before the
+    // waiters' wake-ups, which that ending queues.
     final second = Completer<void>();
-    late Future<void> secondSwitch;
+    late final Future<void> secondSwitch;
     first.complete();
-    secondSwitch = TheCoreIsSettled.during(() => second.future);
+    scheduleMicrotask(() {
+      secondSwitch = TheCoreIsSettled.during(() => second.future);
+    });
     await firstSwitch;
     await Future<void>.delayed(const Duration(milliseconds: 50));
     expect(asked, isEmpty,
