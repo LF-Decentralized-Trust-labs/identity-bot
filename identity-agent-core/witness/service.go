@@ -26,6 +26,7 @@ type ContactStore interface {
 	SaveContact(contact store.ContactRecord) error
 	GetIdentity() (*store.IdentityState, error)
 	SaveWitnessReceipt(rec store.WitnessReceiptRecord) error
+	GetWitnessReceipts(eventSAID string) ([]store.WitnessReceiptRecord, error)
 	SaveTask(task store.TaskRecord) error
 	GetTasks() ([]store.TaskRecord, error)
 }
@@ -454,7 +455,11 @@ func (s *Service) ReceiveEvent(signerAID string, rawEvent []byte, cesrSig string
 		// One already held is answered with its receipt, so somebody sending
 		// a key log again from where they think this witness stopped carries
 		// on. Something else at that place is a conflicting history.
-		return s.alreadyHeld(signerAID, seq, eventSAID(event))
+		held, serr := eventSAID(event)
+		if serr != nil {
+			return nil, fmt.Errorf("rejected: %w", serr)
+		}
+		return s.alreadyHeld(signerAID, seq, held)
 	}
 	if last >= 0 && seq != last+1 {
 		return nil, fmt.Errorf("sequence_gap")
@@ -471,7 +476,10 @@ func (s *Service) ReceiveEvent(signerAID string, rawEvent []byte, cesrSig string
 	}
 
 	now := NowRFC3339()
-	said := eventSAID(event)
+	said, err := eventSAID(event)
+	if err != nil {
+		return nil, fmt.Errorf("rejected: %w", err)
+	}
 	// The published bytes are stored alongside the readable form. Storing only
 	// the readable form is what made every event a witness held unverifiable
 	// after the fact.
@@ -612,7 +620,10 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 	if err != nil {
 		return err
 	}
-	said := eventSAID(event)
+	said, err := eventSAID(event)
+	if err != nil {
+		return err
+	}
 	seq, _ := eventSeq(event)
 	threshold := s.Threshold()
 	now := NowRFC3339()
@@ -627,9 +638,14 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 		"event_b64":      base64.StdEncoding.EncodeToString(rawEvent),
 		"cesr_signature": cesrSig,
 	})
+	// Designated here are the witnesses addressed, by the key each signs with.
+	var designated []string
+	for _, w := range witnesses {
+		designated = append(designated, targetKey(w))
+	}
 	for _, w := range witnesses {
 		url := witnessEventURL(w)
-		go s.postWithRetry(ctx, url, body, said, w.AID)
+		go s.postWithRetry(ctx, url, body, said, targetKey(w), designated)
 	}
 	go s.finalizeLoop(said, threshold)
 	return nil
@@ -676,7 +692,11 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 		if sn, err := eventSeq(ev); err == nil && sn <= lowest {
 			continue
 		}
-		said := eventSAID(ev)
+		said, serr := eventSAID(ev)
+		if serr != nil {
+			log.Printf("[witness] event of %s skipped: %v", signerAID, serr)
+			continue
+		}
 		if f, _ := s.Store.GetFinalization(said); f == nil {
 			seq, _ := eventSeq(ev)
 			now := NowRFC3339()
@@ -734,14 +754,18 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 				body, _ := json.Marshal(map[string]interface{}{
 					"aid": signerAID, "event_b64": e.RawBytesB64, "cesr_signature": e.CesrSignature,
 				})
-				said := eventSAID(ev)
+				said, serr := eventSAID(ev)
+				if serr != nil {
+					log.Printf("[witness] event of %s not sent to %s: %v", signerAID, key, serr)
+					return
+				}
 				resp, err := s.PostEvent(ctx, witnessEventURL(w), body)
 				if err != nil {
 					log.Printf("[witness] %s did not take event %s of %s: %v", key, said, signerAID, err)
 					return
 				}
 				if sig, wit, verr := receiptFromResponse(resp, said); verr == nil && wit == key {
-					s.onReceipt(said, key, sig)
+					s.onReceipt(said, key, sig, designated)
 					if sn, err := eventSeq(ev); err == nil {
 						s.confirm(signerAID, key, sn)
 					}
@@ -765,7 +789,10 @@ func (s *Service) BroadcastToDesignated(ctx context.Context, signerAID string, r
 		return fmt.Errorf("refusing to broadcast an unsigned event for %s", signerAID)
 	}
 	known := s.designatedTargets(designated)
-	said := eventSAID(event)
+	said, err := eventSAID(event)
+	if err != nil {
+		return err
+	}
 	seq, _ := eventSeq(event)
 	now := NowRFC3339()
 	_ = s.Store.SaveFinalization(FinalizationState{
@@ -781,7 +808,7 @@ func (s *Service) BroadcastToDesignated(ctx context.Context, signerAID string, r
 			log.Printf("[witness] %s designates %s, which this agent has no address for", signerAID, key)
 			continue
 		}
-		go s.postWithRetry(ctx, witnessEventURL(w), body, said, key)
+		go s.postWithRetry(ctx, witnessEventURL(w), body, said, key, designated)
 	}
 	go s.finalizeLoop(said, threshold)
 	return nil
@@ -881,7 +908,7 @@ func (s *Service) enrolledWitnesses(kind AidKind, aid string) ([]witnessTarget, 
 // some number of servers had responded — not that anybody had attested to
 // anything. A witness returning 200 and no receipt finalised an event just as
 // well as one that signed it.
-func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, eventSAID, witnessAID string) {
+func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, eventSAID, witnessAID string, designated []string) {
 	// Its own time, not the caller's: every caller starts this in the
 	// background and returns, and a caller that cancels its context on return
 	// cancelled the post before it reached the witness.
@@ -921,7 +948,7 @@ func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, ev
 		log.Printf("[witness] asked %s for a receipt and %s answered; not counted", witnessAID, wit)
 		return
 	}
-	s.onReceipt(eventSAID, witnessAID, sig)
+	s.onReceipt(eventSAID, witnessAID, sig, designated)
 }
 
 // receiptFromResponse pulls a verified receipt out of a witness's reply.
@@ -944,9 +971,45 @@ func receiptFromResponse(resp map[string]interface{}, eventSAID string) (sig, wi
 	return sig, witnessAID, nil
 }
 
-func (s *Service) onReceipt(eventSAID, witnessAID, cesrSig string) {
+// targetKey is the identifier a witness target signs receipts with: its
+// witness key, or its contact identifier where it has published none.
+func targetKey(w witnessTarget) string {
+	if w.WitnessKey != "" {
+		return w.WitnessKey
+	}
+	return w.AID
+}
+
+// onReceipt keeps a receipt and recounts the event's witnessing.
+//
+// A receipt counts only when the witness is one of designated (the witnesses
+// the identity's own key log names, never anything a receipt says) and its
+// signature over this event verifies. The count is the number of distinct
+// designated witnesses holding a verified receipt, recomputed from the receipts
+// kept, so a witness answering twice, or under two spellings of one key, counts
+// once and an undesignated one never counts.
+func (s *Service) onReceipt(eventSAID, witnessAID, cesrSig string, designated []string) {
 	f, _ := s.Store.GetFinalization(eventSAID)
 	if f == nil {
+		return
+	}
+	key, ok := drivers.WitnessKey(witnessAID)
+	if !ok {
+		log.Printf("[witness] receipt from %s for %s refused: not a witness identifier", witnessAID, eventSAID)
+		return
+	}
+	want := map[string]bool{}
+	for _, d := range designated {
+		if k, ok := drivers.WitnessKey(d); ok {
+			want[k] = true
+		}
+	}
+	if !want[key] {
+		log.Printf("[witness] receipt from %s for %s refused: not a designated witness", witnessAID, eventSAID)
+		return
+	}
+	if err := drivers.VerifyReceipt(witnessAID, eventSAID, cesrSig); err != nil {
+		log.Printf("[witness] receipt from %s for %s refused: %v", witnessAID, eventSAID, err)
 		return
 	}
 	// Counted only once it is kept, so the count never runs ahead of the
@@ -957,7 +1020,18 @@ func (s *Service) onReceipt(eventSAID, witnessAID, cesrSig string) {
 		log.Printf("[witness] receipt from %s for %s not kept: %v", witnessAID, eventSAID, err)
 		return
 	}
-	f.ReceiptCount++
+	held, err := s.Contacts.GetWitnessReceipts(eventSAID)
+	if err != nil {
+		log.Printf("[witness] receipts for %s not read back: %v", eventSAID, err)
+		return
+	}
+	counted := map[string]bool{}
+	for _, h := range held {
+		if k, ok := drivers.WitnessKey(h.WitnessAID); ok && want[k] {
+			counted[k] = true
+		}
+	}
+	f.ReceiptCount = len(counted)
 	f.UpdatedAt = NowRFC3339()
 	if f.ReceiptCount >= f.Threshold {
 		f.State = FinalizeFinalized
@@ -1296,8 +1370,8 @@ func (s *Service) delegatorApproves(event map[string]interface{}) (string, bool)
 	}
 	delegator, _ := event["di"].(string)
 	aid, _ := event["i"].(string)
-	said := eventSAID(event)
-	if delegator == "" || aid == "" || said == "" {
+	said, serr := eventSAID(event)
+	if serr != nil || delegator == "" || aid == "" || said == "" {
 		return "", false
 	}
 	dm, _ := s.Store.GetContactMeta(delegator)

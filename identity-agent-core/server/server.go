@@ -2927,6 +2927,14 @@ func (s *CoreServer) handleSubmitReceipt(w http.ResponseWriter, r *http.Request)
 			"a receipt is kept here only for an event in a key log this Identity Agent keeps")
 		return
 	}
+	// Refused, not kept, unless the identity's own key log designates this
+	// witness for this event.
+	row, found := drivers.WitnessingOf(in, req.EventSAID)
+	if !found || !designates(row.Designated, req.WitnessAID) {
+		writeError(w, http.StatusUnprocessableEntity, "Not a designated witness",
+			req.WitnessAID+" is not a witness this identity's key log designates for that event")
+		return
+	}
 	if err := s.DataStore.SaveWitnessReceipt(store.WitnessReceiptRecord{
 		EventSAID:     req.EventSAID,
 		WitnessAID:    req.WitnessAID,
@@ -2942,17 +2950,27 @@ func (s *CoreServer) handleSubmitReceipt(w http.ResponseWriter, r *http.Request)
 			drivers.WitnessReceipt{WitnessAID: h.WitnessAID, CesrSignature: h.CesrSignature})
 	}
 	resp := drivers.DriverSubmitReceiptResponse{Accepted: true, Errors: []string{}}
-	if row, found := drivers.WitnessingOf(in, req.EventSAID); found {
-		resp.ReceiptCount = row.Verified
-		resp.ThresholdMet = row.Met
-		if !slices.Contains(row.Designated, req.WitnessAID) {
-			resp.Errors = append(resp.Errors, fmt.Sprintf(
-				"%s is not a designated witness for this event, so its receipt is kept and not counted",
-				req.WitnessAID))
-		}
+	if now, found := drivers.WitnessingOf(in, req.EventSAID); found {
+		resp.ReceiptCount = now.Verified
+		resp.ThresholdMet = now.Met
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+// designates reports whether witnessAID is among designated, compared by the
+// key each is made of so one witness written two ways is one witness.
+func designates(designated []string, witnessAID string) bool {
+	want, ok := drivers.WitnessKey(witnessAID)
+	if !ok {
+		return false
+	}
+	for _, d := range designated {
+		if k, ok := drivers.WitnessKey(d); ok && k == want {
+			return true
+		}
+	}
+	return false
 }
 
 // logOfEvent is the stored key log of the identity eventSAID belongs to, as

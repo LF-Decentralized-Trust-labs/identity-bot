@@ -164,3 +164,21 @@ func TestAReceiptForSomebodyElsesEventIsNotKept(t *testing.T) {
 		t.Fatalf("a receipt for an event not in this identity's log answered %d, want 404", code)
 	}
 }
+
+// A genuine signature from a witness the identity's key log does not name is
+// refused outright and not kept, even though it verifies.
+func TestAReceiptFromAnUndesignatedWitnessIsRefusedAndNotKept(t *testing.T) {
+	w := witnessedIdentity(t)
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	stranger := iacrypto.NonTransferableAIDQB64(pub)
+	sig, _ := login.SignString(w.said, priv.Seed())
+	code, _ := w.submit(t, map[string]interface{}{
+		"event_said": w.said, "witness_aid": stranger, "cesr_signature": sig,
+	})
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("an undesignated witness's receipt answered %d, want 422", code)
+	}
+	if held, _ := w.s.DataStore.GetWitnessReceipts(w.said); len(held) != 0 {
+		t.Fatalf("an undesignated witness's receipt was kept: %+v", held)
+	}
+}

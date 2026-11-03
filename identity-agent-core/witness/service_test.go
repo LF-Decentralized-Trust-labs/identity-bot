@@ -2,6 +2,7 @@ package witness
 
 import (
 	"context"
+	keri "github.com/grapeid/keri-go"
 	"sync"
 	"testing"
 
@@ -15,6 +16,7 @@ type memContacts struct {
 	contacts map[string]store.ContactRecord
 	identity *store.IdentityState
 	tasks    []store.TaskRecord
+	receipts map[string]store.WitnessReceiptRecord
 }
 
 func (m *memContacts) GetContacts() ([]store.ContactRecord, error) {
@@ -48,7 +50,27 @@ func (m *memContacts) GetIdentity() (*store.IdentityState, error) {
 	return m.identity, nil
 }
 
-func (m *memContacts) SaveWitnessReceipt(store.WitnessReceiptRecord) error { return nil }
+func (m *memContacts) SaveWitnessReceipt(r store.WitnessReceiptRecord) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.receipts == nil {
+		m.receipts = map[string]store.WitnessReceiptRecord{}
+	}
+	m.receipts[r.EventSAID+"|"+r.WitnessAID] = r
+	return nil
+}
+
+func (m *memContacts) GetWitnessReceipts(said string) ([]store.WitnessReceiptRecord, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []store.WitnessReceiptRecord
+	for _, r := range m.receipts {
+		if r.EventSAID == said {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
 func (m *memContacts) SaveTask(t store.TaskRecord) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -155,12 +177,126 @@ func TestFinalizeThreshold(t *testing.T) {
 		EventSAID: said, SignerAID: "ERoot", SequenceNum: 1,
 		State: FinalizePending, Threshold: 5, StartedAt: NowRFC3339(), UpdatedAt: NowRFC3339(),
 	})
+	var designated []string
+	var ws []testWitness
 	for i := 0; i < 5; i++ {
-		s.onReceipt(said, "EW"+string(rune('0'+i)), "")
+		w := newTestWitness(t)
+		ws = append(ws, w)
+		designated = append(designated, w.aid)
+	}
+	for _, w := range ws {
+		s.onReceipt(said, w.aid, w.sign(said), designated)
 	}
 	f, _ := s.Store.GetFinalization(said)
-	if f.State != FinalizeFinalized {
-		t.Fatalf("state=%s want finalized", f.State)
+	if f.State != FinalizeFinalized || f.ReceiptCount != 5 {
+		t.Fatalf("state=%s count=%d want finalized with 5", f.State, f.ReceiptCount)
+	}
+}
+
+type testWitness struct {
+	aid  string
+	sign func(said string) string
+}
+
+func newTestWitness(t *testing.T) testWitness {
+	t.Helper()
+	sg, err := keri.GenerateSigner(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aid, err := sg.PublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return testWitness{aid: aid, sign: func(said string) string {
+		raw, err := sg.Sign([]byte(said))
+		if err != nil {
+			t.Fatal(err)
+		}
+		q, err := keri.MatterQB64(keri.CodeEd25519Sig, raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return q
+	}}
+}
+
+func pendingEvent(t *testing.T, s *Service, said string, threshold int) {
+	t.Helper()
+	_ = s.Store.SaveFinalization(FinalizationState{
+		EventSAID: said, SignerAID: "ERoot", SequenceNum: 1,
+		State: FinalizePending, Threshold: threshold, StartedAt: NowRFC3339(), UpdatedAt: NowRFC3339(),
+	})
+}
+
+// One witness answering twice is one receipt, so it cannot meet a threshold of two.
+func TestOneWitnessReceiptingTwiceCountsOnce(t *testing.T) {
+	s, _ := testService(t)
+	const said = "EHtwice"
+	pendingEvent(t, s, said, 2)
+	w, other := newTestWitness(t), newTestWitness(t)
+	des := []string{w.aid, other.aid}
+	s.onReceipt(said, w.aid, w.sign(said), des)
+	s.onReceipt(said, w.aid, w.sign(said), des)
+	f, _ := s.Store.GetFinalization(said)
+	if f.ReceiptCount != 1 || f.State == FinalizeFinalized {
+		t.Fatalf("count=%d state=%s: one witness counted twice", f.ReceiptCount, f.State)
+	}
+	s.onReceipt(said, other.aid, other.sign(said), des)
+	f, _ = s.Store.GetFinalization(said)
+	if f.ReceiptCount != 2 || f.State != FinalizeFinalized {
+		t.Fatalf("count=%d state=%s: two distinct designated witnesses should finalize", f.ReceiptCount, f.State)
+	}
+}
+
+// A genuine signature from a witness the identity did not designate is not kept or counted.
+func TestAReceiptFromAnUndesignatedWitnessIsRefused(t *testing.T) {
+	s, mc := testService(t)
+	const said = "EHundesignated"
+	pendingEvent(t, s, said, 1)
+	named, stranger := newTestWitness(t), newTestWitness(t)
+	s.onReceipt(said, stranger.aid, stranger.sign(said), []string{named.aid})
+	f, _ := s.Store.GetFinalization(said)
+	if f.ReceiptCount != 0 || f.State == FinalizeFinalized {
+		t.Fatalf("count=%d state=%s: an undesignated witness was counted", f.ReceiptCount, f.State)
+	}
+	if held, _ := mc.GetWitnessReceipts(said); len(held) != 0 {
+		t.Fatalf("an undesignated witness's receipt was kept: %+v", held)
+	}
+}
+
+// A designated witness's signature over some other event is refused.
+func TestAReceiptOverADifferentEventIsRefused(t *testing.T) {
+	s, mc := testService(t)
+	const said = "EHreal"
+	pendingEvent(t, s, said, 1)
+	w := newTestWitness(t)
+	s.onReceipt(said, w.aid, w.sign("EHsomethingelse"), []string{w.aid})
+	if held, _ := mc.GetWitnessReceipts(said); len(held) != 0 {
+		t.Fatalf("a receipt over another event was kept: %+v", held)
+	}
+	f, _ := s.Store.GetFinalization(said)
+	if f.ReceiptCount != 0 {
+		t.Fatalf("count=%d", f.ReceiptCount)
+	}
+}
+
+// Two events of the same length never share an identifier, and one with none
+// is an error rather than an invented name.
+func TestEventSAIDIsNeverInvented(t *testing.T) {
+	a := map[string]interface{}{"t": "ixn", "i": "EAAAA", "s": "1"}
+	b := map[string]interface{}{"t": "ixn", "i": "EBBBB", "s": "1"}
+	if _, err := eventSAID(a); err == nil {
+		t.Fatal("an event with no d field was given an identifier")
+	}
+	if _, err := eventSAID(b); err == nil {
+		t.Fatal("an event with no d field was given an identifier")
+	}
+	a["d"], b["d"] = "EDigestA", "EDigestB"
+	x, _ := eventSAID(a)
+	y, _ := eventSAID(b)
+	if x == y || x != "EDigestA" {
+		t.Fatalf("identifiers %q %q", x, y)
 	}
 }
 

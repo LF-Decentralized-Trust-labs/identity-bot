@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	keri "github.com/grapeid/keri-go"
 )
 
 // SubmitToWitness sends one event to one witness and returns its receipt.
@@ -44,6 +45,13 @@ func (s *Service) SubmitToWitness(ctx context.Context, witnessURL, signerAID str
 	if err != nil {
 		return nil, err
 	}
-	s.onReceipt(said, wit, sig)
+	// Designated, for a founding event, is what the event itself names. A later
+	// event's set depends on the whole log, which this call does not have, so
+	// its receipt is returned but not counted here.
+	var designated []string
+	if ev, perr := keri.ParseEvent(rawEvent); perr == nil && (ev.Ilk == "icp" || ev.Ilk == "dip") {
+		designated = ev.Witnesses
+	}
+	s.onReceipt(said, wit, sig, designated)
 	return resp, nil
 }
