@@ -74,9 +74,55 @@ func TestAMalformedStatementIsRefusedBeforeSigning(t *testing.T) {
 	}
 	st = vectorStatement(t)
 	st.InReplyTo = ""
+	if _, err := Sign(vectorSigner(), st); err == nil {
+		t.Fatal("a reply was signed without naming the message it acts on")
+	}
+	st.Kind = KindReceipt
+	if _, err := Sign(vectorSigner(), st); err == nil {
+		t.Fatal("a receipt was signed without naming the message it acts on")
+	}
+	// An ask that names a conversation but no message would borrow a
+	// conversation the AI agent was never brought into.
 	st.Kind = KindAsk
 	if _, err := Sign(vectorSigner(), st); err == nil {
-		t.Fatal("a body spoke without naming the message it acts on")
+		t.Fatal("an ask naming a conversation but no message it acts on was signed")
+	}
+}
+
+// An AI agent opens a conversation with an ask that names no message and no
+// conversation (ADR-047, Amendment 3). Both are signed as empty lines, so it
+// is still IA-AGENT-MSG-V1, and a record of it is only ever the first entry.
+func TestAnAskThatActsOnNoMessageOpensAConversation(t *testing.T) {
+	st := vectorStatement(t)
+	st.Kind, st.InReplyTo, st.Conversation = KindAsk, "", ""
+	sig, err := Sign(vectorSigner(), st)
+	if err != nil {
+		t.Fatalf("an ask opening a conversation was refused: %v", err)
+	}
+	if !st.Opens() || !strings.HasPrefix(string(st.Bytes()), "IA-AGENT-MSG-V1\n\n"+KindAsk+"\n") {
+		t.Fatalf("an opening ask is not signed with an empty conversation line:\n%s", st.Bytes())
+	}
+	_, verkey, _ := agentbody.Identity(vectorSigner())
+	if err := Verify(st, verkey, sig); err != nil {
+		t.Fatal(err)
+	}
+	rec := Record{Conversation: "c_chosen", Seq: 1, Kind: KindAsk, From: st.From, To: st.To, BodyHash: st.BodyHash, Depth: 1,
+		Statement: &st, HostSignature: sig, HostVerkey: verkey, BodyCredential: st.BodyCredential, OpenedBy: st.From}
+	if err := rec.CheckSenderProof(); err != nil {
+		t.Fatalf("a body's opening ask, in the conversation the Identity Agent chose, was refused: %v", err)
+	}
+	// Opening is the first entry, the sender's own, at depth 1: anywhere else
+	// the same signed ask would be a way into somebody else's conversation.
+	for name, change := range map[string]func(*Record){
+		"later in a conversation":    func(r *Record) { r.Seq = 2 },
+		"in somebody else's opening": func(r *Record) { r.OpenedBy = "EAGENT_C" },
+		"at the depth of a person":   func(r *Record) { r.Depth = 0 },
+	} {
+		moved := rec
+		change(&moved)
+		if moved.CheckSenderProof() == nil {
+			t.Errorf("an ask that acts on no message was accepted %s", name)
+		}
 	}
 }
 

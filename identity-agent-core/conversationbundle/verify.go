@@ -172,6 +172,9 @@ type verifier struct {
 	// answered is every ask a reply or failure has closed, by its message id:
 	// a progress note on an ask is valid only while the ask is still open.
 	answered map[string]bool
+	// opener is the first entry when an AI agent opened the conversation; the
+	// zero Record when a person did.
+	opener agentmessage.Record
 }
 
 func (v *verifier) fault(where, format string, args ...any) {
@@ -659,9 +662,7 @@ func (v *verifier) checkEntries() {
 		if ok {
 			if seq == 1 {
 				opener = rec.OpenedBy
-				if rec.ControllerProof == nil || rec.Kind != agentmessage.KindAsk || rec.From != rec.OpenedBy {
-					v.fault(where, "a conversation is opened by a person's ask, and this is not one")
-				}
+				v.checkOpening(where, rec)
 			} else if rec.OpenedBy != opener {
 				v.fault(where, "it names %s as having opened the conversation, where the first entry names %s", rec.OpenedBy, opener)
 			}
@@ -672,6 +673,26 @@ func (v *verifier) checkEntries() {
 		}
 		v.r.Messages = append(v.r.Messages, m)
 	}
+}
+
+// checkOpening checks the first entry: a conversation is opened by a person's
+// ask, or by an AI agent's ask toward another AI agent (ADR-047, Amendment 3).
+// The person's is checked as it always was. The AI agent's must be its own, name
+// no earlier message, be addressed to an AI agent and not a person, and sit at
+// depth 1 where a person's message sits at 0.
+func (v *verifier) checkOpening(where string, rec agentmessage.Record) {
+	if rec.Kind != agentmessage.KindAsk || rec.From != rec.OpenedBy {
+		v.fault(where, "a conversation is opened by an ask from the one who opened it, and this is not one")
+		return
+	}
+	if rec.ControllerProof != nil {
+		return
+	}
+	if _, person := agentmessage.IsPerson(rec.To); person || rec.Statement == nil || !rec.Statement.Opens() || rec.Depth != 1 {
+		v.fault(where, "a conversation an AI agent opens begins with its ask to another AI agent that acts on no earlier message, and this is not one")
+		return
+	}
+	v.opener = rec
 }
 
 // checkEntry checks one entry: the countersignature, its place in the chain,
@@ -832,11 +853,19 @@ func (v *verifier) checkAskAllowed(where string, grant *credential, rec agentmes
 	if err := permission.CheckResourceConstraints(limits, agentmessage.CapabilityMessageAgent, args); err != nil {
 		v.fault(where, "the AI agent's grant does not let it ask %s: %v", rec.To, err)
 	}
+	v.checkOpenerReach(where, rec, args)
 }
 
 // checkThread checks that a body spoke only about a message it was given, and
 // answered only whoever asked it.
 func (v *verifier) checkThread(where string, rec agentmessage.Record) {
+	if rec.Statement != nil && rec.Statement.Opens() {
+		// The only message that acts on none: the entry that opened the conversation.
+		if rec.Seq != 1 {
+			v.fault(where, "an ask that acts on no message may only open a conversation, and this is not its first entry")
+		}
+		return
+	}
 	prompt, ok := v.entries[rec.InReplyTo]
 	if !ok || prompt.MessageID == rec.MessageID {
 		v.fault(where, "it acts on message %s, which is not earlier in this conversation", rec.InReplyTo)
@@ -1221,4 +1250,34 @@ func joinInts(ns []int) string {
 		parts[i] = strconv.Itoa(n)
 	}
 	return strings.Join(parts, ", ")
+}
+
+// checkOpenerReach applies, to an ask made inside a conversation an AI agent
+// opened, the opener's own grant as it stood then: a chain reaches no further
+// than the one who started it, as for a person (ADR-047). The opening ask itself
+// is checked against the same grant by checkAskAllowed.
+func (v *verifier) checkOpenerReach(where string, rec agentmessage.Record, args []byte) {
+	if v.opener.MessageID == "" || rec.GrantSAID == v.opener.GrantSAID {
+		return
+	}
+	grant, ok := v.creds[v.opener.GrantSAID]
+	if !ok || grant.holder != v.opener.From {
+		v.fault(where, "the grant the conversation was opened under is not in the bundle, so the opener's reach cannot be checked")
+		return
+	}
+	at, err := time.Parse(time.RFC3339Nano, rec.IATime)
+	if err != nil {
+		return
+	}
+	if why := grant.liveAt(at); why != "" {
+		v.fault(where, "the grant its opener %s held was not in force when this was asked: %s", v.opener.From, why)
+		return
+	}
+	var limits map[string]interface{}
+	if raw, ok := grant.attrs["resource_constraints"]; ok {
+		_ = json.Unmarshal(raw, &limits)
+	}
+	if err := permission.CheckResourceConstraints(limits, agentmessage.CapabilityMessageAgent, args); err != nil {
+		v.fault(where, "the conversation's opener, %s, could not have asked %s: %v", v.opener.From, rec.To, err)
+	}
 }

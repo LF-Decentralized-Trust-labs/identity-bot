@@ -4,6 +4,7 @@
 **Date:** 2026-10-20
 **Amended:** 2026-11-02 — An ask may carry a signed, advisory tier of model, which makes the message `IA-AGENT-MSG-V2` (see §Amendment 1)
 **Amended:** 2026-11-03 — The AI agent asked may send progress notes before it answers (see §Amendment 2)
+**Amended:** 2026-11-03 — An AI agent may open a conversation toward an AI agent its grant allows (see §Amendment 3)
 **Relates to:** ADR-044 (An authorized controller does the app's work), ADR-045 (Every asset gets an identity and a grant from one schema template), ADR-046 (A machine becomes an AI agent's body by a person comparing six words)
 
 ## Context
@@ -286,3 +287,17 @@ An AI agent working on an ask may send `progress` notes before it answers. A not
 - **What the one asked may send while an ask is open:** the ask's receipt, progress notes, its own asks to other AI agents while it works on this one, and one reply or failure.
 
 The kind is added to `agent-message.schema.json`, to the vectors (a valid note, and a note refused for having a tier), and to the independent checker. `conversationbundle` refuses a note that is not from the one asked to the one who asked, or that comes after its ask was answered.
+
+---
+
+## Amendment 3: An AI agent may open a conversation (2026-11-03)
+
+This changes one sentence of the Decision: "A body cannot open a conversation." An AI agent now may, toward an AI agent its own grant names, under the same limits as any ask. Nothing else above is edited; where the two differ, this governs.
+
+- **What opens it.** An ask that acts on no message and names no conversation. The Identity Agent chooses the identifier, as it does for a person's request, and writes it into the record; the body's statement signs an empty conversation line and an empty `in_reply_to` line. The string is unchanged, so it is still `IA-AGENT-MSG-V1` (or V2 with a tier) and no new version is needed.
+- **Only an ask, only first.** A reply, a failure notice or a receipt still names the message it acts on. An ask that acts on no message but names a conversation is refused, so it cannot borrow one. The entry is `seq` 1, its sender is the opener, and it sits at depth 1: a person's message is depth 0, so a chain still goes at most three deep from the opening ask.
+- **Toward an AI agent, never a person.** An AI agent opens toward another AI agent. It cannot open a conversation with a person, and a person's message to an AI agent opens as before.
+- **The same limits as any ask.** The grant must include `agent.message.send`, its constraint on `to` must name the AI agent asked, and the opener's standing is checked again on every ask in the conversation: the opener's grant must be in force, and every ask later in the chain must be one the opener could have made itself. An AI agent therefore cannot reach further by asking another to ask for it. The conversation limits (40 entries, three deep, 30 quiet minutes, one answer per ask) apply unchanged, and the opening ask counts as one entry.
+- **Provable afterwards.** The record's `opened_by` is the opening AI agent's own identifier and the first entry carries the body's signature, so a verifier checks that the first entry is an ask from the opener, to an AI agent, with no earlier message, and that the grant it was sent under allowed it (`conversationbundle`). The core's vectors add the signed opening ask and refuse the statements that would let a body into a conversation it was not brought into.
+- **An older reader refuses it.** A reader built before this amendment refuses an ask with no `in_reply_to`, which is the safe failure: it never acts on a conversation it cannot place. A sender opens a conversation only toward an AI agent known to read this, which within one organisation's Identity Agent is always so.
+- **A governed opening.** Every refusal of an opening ask is written to the signed governance record, as any refused message is.
