@@ -149,10 +149,9 @@ void main() {
   late Tip tip;
   var generation = 0;
 
-  TheKeyEventsThisDeviceMakes makes({Future<Tip> Function(String)? readTip}) =>
+  TheKeyEventsThisDeviceMakes makes() =>
       TheKeyEventsThisDeviceMakes(client, base, km,
           witnesses: witnesses,
-          readTheTip: readTip,
           retryDelays: const [Duration.zero, Duration.zero, Duration.zero]);
 
   test(
@@ -237,9 +236,12 @@ void main() {
   });
 
   test(
-      'a rotation reaches its witnesses, and a core that answers 201 and keeps '
-      'nothing cannot stop it', () async {
+      'a rotation reaches its witnesses, a core that answers 201 and keeps '
+      'nothing cannot stop it, and no receipt counts from a witness that has '
+      'not agreed to witness it or answers in another\'s name', () async {
     client.answerTheNextCommit = (201, '');
+    w3.witnessesOnly = {};
+    w2.namesAnother = true;
     final rot = await makes().rotate(seed,
         aid: aid,
         generation: generation,
@@ -249,7 +251,16 @@ void main() {
         witnessedBy: set);
     generation++;
     tip = (sn: rot.sn, digest: rot.digest);
-    expect(rot.witnessed!.receipts, hasLength(3));
+    expect(rot.witnessed!.receipts.keys, [w1.aid]);
+    expect(rot.witnessed!.unreached, {w2.aid, w3.aid});
+    final kept = await TheEventsThisDeviceSigned().unfinished(aid);
+    expect([for (final r in kept) (r.recorded, r.witnessed)], [(true, false)],
+        reason: 'the core said it had it; one receipt of two is not enough');
+
+    w3.witnessesOnly = null;
+    w2.namesAnother = false;
+    final again = await makes().finishSigned(aid, witnessedBy: set);
+    expect(again.single.witnessed!.receipts, hasLength(3));
     expect(await TheEventsThisDeviceSigned().unfinished(aid), isEmpty);
     // The signed rotation is portable: it goes to the core as it went to the
     // witnesses.
@@ -275,13 +286,14 @@ void main() {
     }
     expect(withheld.witnessed.enough, isTrue,
         reason: 'the witnesses took the event from the app');
-    // The core never got it: committing it again adds it there too.
+    expect(withheld.reservation.witnessed, isTrue);
+    expect(withheld.reservation.recorded, isFalse);
+    // The core never got it: it is kept until it does, and finishing commits
+    // it there too.
     final finished = await makes().finishSigned(aid, witnessedBy: set);
-    expect(finished, isEmpty,
-        reason: 'enough witnesses receipted it, so nothing is left to finish');
-    final tipNow = withheld.reservation;
-    tip = (sn: tipNow.sn, digest: tipNow.digest);
-    await _commitTo(base, tipNow.bytesB64, tipNow.signatures);
+    expect(finished.single.status, 'recorded');
+    expect(await TheEventsThisDeviceSigned().unfinished(aid), isEmpty);
+    tip = (sn: finished.single.sn, digest: finished.single.digest);
   });
 
   test(
@@ -349,17 +361,26 @@ void main() {
 
   test(
       'an event the core refuses for good holds its place until the person lets '
-      'it go, which the witnesses must allow', () async {
+      'it go, which needs enough witnesses to show no copy of the log has it',
+      () async {
     final s3 = Bip39.mnemonicToSeed(
         'letter advice cage absurd amount doctor acoustic avoid letter advice cage above'
             .split(' '));
     final more = await _anotherCore(km);
     addTearDown(more.close);
     final m = more.makes(witnesses);
-    final founded = await m.found(s3, witnesses: [w1.aid, w2.aid], toad: 2);
-    final s = WitnessSet([w1.aid, w2.aid], 2);
+    final s = WitnessSet([w1.aid, w2.aid, w3.aid], 2);
+    final founded =
+        await m.found(s3, witnesses: [w1.aid, w2.aid, w3.aid], toad: 2);
     final at = (sn: 0, digest: founded.digest);
+    void reach(bool on) {
+      for (final w in [w1, w2, w3]) {
+        w.offline = !on;
+      }
+    }
 
+    // Refused, and no witness could be reached to take it either.
+    reach(false);
     more.client.answerTheNextCommit = (403, 'not_authorised');
     await expectLater(
         m.interact(s3,
@@ -385,11 +406,12 @@ void main() {
             witnessedBy: s),
         throwsA(isA<PlaceAlreadyReserved>()));
 
-    // With too few witnesses answering, it is not let go.
-    w2.offline = true;
+    // Two of three witnesses must show they lack it, since any two of them
+    // would establish it: one answering is not enough.
+    w1.offline = false;
     await expectLater(
         m.letGoOf(founded.aid, 1, witnessedBy: s), throwsA(isA<StateError>()));
-    w2.offline = false;
+    reach(true);
     expect(await m.letGoOf(founded.aid, 1, witnessedBy: s), LetGo.released);
 
     final ixn = await m.interact(s3,
@@ -402,29 +424,69 @@ void main() {
     expect(ixn.sn, 1);
     expect(ixn.witnessed!.enough, isTrue);
 
-    // A refusal for an event the witnesses hold: it is in the log after all.
+    // A core that adds an event and answers that it refused it: the event
+    // still goes to the witnesses, who take it, so it is in the log.
+    more.client.replaceTheNextCommitsAnswer = (403, 'not_authorised');
+    final withheld = await m
+        .interact(s3,
+            aid: founded.aid,
+            generation: 0,
+            afterSn: ixn.sn,
+            afterDigest: ixn.digest,
+            anchors: anchor,
+            witnessedBy: s)
+        .then<Object>((c) => c, onError: (Object e) => e);
+    expect(withheld, isA<TheCoreWithholdsThisEvent>());
+    expect((withheld as TheCoreWithholdsThisEvent).witnessed.enough, isTrue);
+    // Kept until the core says it has it, which it does when asked again.
+    expect((await m.finishSigned(founded.aid, witnessedBy: s)).single.status,
+        'already_recorded');
+    expect(await TheEventsThisDeviceSigned().unfinished(founded.aid), isEmpty);
+    final tip2 = withheld.reservation;
+
+    // Refused while the witnesses were out of reach, though one of them
+    // already had it: letting it go finds it in the log, and sends it on.
+    reach(false);
     more.client.replaceTheNextCommitsAnswer = (403, 'not_authorised');
     Reservation? refused;
     try {
       await m.interact(s3,
           aid: founded.aid,
           generation: 0,
-          afterSn: ixn.sn,
-          afterDigest: ixn.digest,
-          anchors: anchor,
+          afterSn: tip2.sn,
+          afterDigest: tip2.digest,
+          anchors: another,
           witnessedBy: s);
     } on AnEventWasRefused catch (e) {
       refused = e.reservation;
     }
+    reach(true);
     await witnesses.receipt(
         aid: founded.aid,
         sn: refused!.sn,
         digest: refused.digest,
         bytesB64: refused.bytesB64,
         sigs: refused.signatures,
-        set: s);
-    expect(await m.letGoOf(founded.aid, 2, witnessedBy: s), LetGo.itIsInTheLog);
+        set: WitnessSet([w1.aid], 1));
+    expect(await m.letGoOf(founded.aid, 3, witnessedBy: s), LetGo.itIsInTheLog);
+    expect(w2.held[founded.aid], hasLength(4),
+        reason: 'found in one copy, it was sent to the other witnesses');
+    // No longer refused: finishing commits it to the core, which has it.
+    expect((await m.finishSigned(founded.aid, witnessedBy: s)).single.status,
+        'already_recorded');
     expect(await TheEventsThisDeviceSigned().unfinished(founded.aid), isEmpty);
+  });
+
+  test(
+      'a witness is counted once, by its one spelling, and at least one must '
+      'receipt an event wherever there are witnesses', () {
+    final s =
+        WitnessSet([w1.aid, w1.aid, 'D${w2.aid.substring(1)}', w2.aid], 0);
+    expect(s.witnesses, [w1.aid, w2.aid]);
+    expect((s.toEstablish, s.toRuleOut), (1, 2));
+    expect((WitnessSet.none.toEstablish, WitnessSet.none.toRuleOut), (0, 1));
+    final four = WitnessSet([w1.aid, w2.aid, w3.aid, 'B${'A' * 43}'], 2);
+    expect((four.toEstablish, four.toRuleOut), (2, 3));
   });
 
   test(
@@ -436,10 +498,11 @@ void main() {
     addTearDown(more.close);
     var reads = 0;
     late Tip at;
+    var inForce = 0;
     final m = TheKeyEventsThisDeviceMakes(more.client, more.base, km,
-        readTheTip: (_) async {
+        readTheKeyState: (_) async {
       reads++;
-      return at;
+      return (tip: at, generation: inForce, witnesses: WitnessSet.none);
     }, retryDelays: const [Duration.zero, Duration.zero, Duration.zero]);
     final founded = await m.found(s4);
     at = (sn: 0, digest: founded.digest);
@@ -455,6 +518,7 @@ void main() {
     at = (sn: 1, digest: ixn.digest);
 
     more.client.movePrepares = 4;
+    reads = 0;
     await expectLater(
         m.interact(s4,
             aid: founded.aid,
@@ -462,8 +526,25 @@ void main() {
             afterSn: 1,
             afterDigest: ixn.digest,
             anchors: another),
-        throwsA(isA<TheLogKeepsMoving>()));
+        throwsA(isA<TheLogKeepsMoving>()
+            .having((e) => e.rotatedElsewhere, 'rotated elsewhere', false)));
+    expect(reads, 3);
     more.client.movePrepares = 0;
+
+    // Read again, the keys in force are another generation's: another device
+    // rotated, and nothing is signed with the old key.
+    more.client.movePrepares = 1;
+    inForce = 1;
+    await expectLater(
+        m.interact(s4,
+            aid: founded.aid,
+            generation: 0,
+            afterSn: 1,
+            afterDigest: ixn.digest,
+            anchors: another),
+        throwsA(isA<TheLogKeepsMoving>()
+            .having((e) => e.rotatedElsewhere, 'rotated elsewhere', true)));
+    inForce = 0;
 
     more.client.movePrepares = 1;
     reads = 0;

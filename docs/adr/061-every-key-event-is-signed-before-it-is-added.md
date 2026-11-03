@@ -430,9 +430,15 @@ state: `reserved`, `signed`, `recorded` or `dead`.
    nothing cannot pin the identity. A signed event the app holds is portable:
    it can go to the witnesses, or to a new core.
 6. **`place_taken` is confirmed before anything is given up.** The app asks
-   enough of the witnesses to meet `bt` what they hold at that place. Only if
-   they hold a different establishment event is its own marked `dead`. If they
-   do not, the core is withholding the event, and item 5 applies.
+   the witnesses what they hold at that place, believing an answer only as a
+   copy of the log that verifies from the founding. Only if so many hold a
+   different event that the rest could not meet `bt` between them, and that
+   event is one its own cannot supersede (an establishment event, or any event
+   where its own is an interaction), is its own marked `dead`. If they do not,
+   the core is withholding the event, and item 5 applies. A commit the core
+   refuses for good is kept and shown to the person, and nothing else is
+   signed at its place; it is let go only when the person decides to and the
+   same count of witnesses shows they do not hold it.
 7. **`tip_moved` is retried with care.** The app reads the key state again
    (section 9), checks every event it has not seen as it would before signing,
    and prepares again with `after` taken from that key state, at most three times with increasing

@@ -71,15 +71,22 @@ class TheCoreWithholdsThisEvent implements Exception {
 }
 
 /// The log kept moving: each time this device read where it ends and
-/// prepared after it, another event had taken the place. A phrase in use on
-/// another device does that; signing stops and the person is told.
+/// prepared after it, another event had taken the place, or another device
+/// rotated the keys. A phrase in use on another device does that; signing
+/// stops and the person is told.
 class TheLogKeepsMoving implements Exception {
-  TheLogKeepsMoving(this.aid, this.tries);
+  TheLogKeepsMoving(this.aid, this.tries, {this.rotatedElsewhere = false});
   final String aid;
   final int tries;
+
+  /// Whether the keys in force changed: a rotation this device did not make.
+  final bool rotatedElsewhere;
   @override
-  String toString() => 'the log of $aid moved under this device $tries times; '
-      'this phrase may be in use on another device';
+  String toString() => rotatedElsewhere
+      ? 'the keys of $aid were rotated by another device; this phrase is in '
+          'use elsewhere'
+      : 'the log of $aid moved under this device $tries times; this phrase '
+          'may be in use on another device';
 }
 
 /// What letting go of a refused event found.
@@ -95,6 +102,11 @@ enum LetGo {
 
 /// Where an identity's log ends: the place and digest of its last event.
 typedef Tip = ({int sn, String digest});
+
+/// An identity's key state as this device has verified it: where the log
+/// ends, which generation of this phrase's keys is in force, and the
+/// witnesses in force.
+typedef KeyStateNow = ({Tip tip, int generation, WitnessSet witnesses});
 
 /// An event this device committed: its identifier, place and digest, and
 /// whether the core added it or holds it for further signers.
@@ -145,14 +157,14 @@ class KeyPaths {
 /// identity's witnesses and their receipts are checked here
 /// ([TheWitnessesOfThisDevicesEvents]); the event is kept until enough have
 /// receipted it. A `place_taken` is believed only when the witnesses confirm
-/// it. A `tip_moved` before signing is prepared again after the place
-/// [readTheTip] reads, at most [retryDelays].length times. A refusal for good
+/// it. A `tip_moved` before signing is prepared again after the key state
+/// [readTheKeyState] reads, at most [retryDelays].length times. A refusal for good
 /// is kept and shown, and only the person lets the event go ([letGoOf]).
 class TheKeyEventsThisDeviceMakes {
   TheKeyEventsThisDeviceMakes(this._client, this._baseUrl, this._km,
       {TheEventsThisDeviceSigned? signed,
       TheWitnessesOfThisDevicesEvents? witnesses,
-      this.readTheTip,
+      this.readTheKeyState,
       this.retryDelays = const [
         Duration(seconds: 1),
         Duration(seconds: 2),
@@ -167,10 +179,11 @@ class TheKeyEventsThisDeviceMakes {
   final TheEventsThisDeviceSigned _signed;
   final TheWitnessesOfThisDevicesEvents? _witnesses;
 
-  /// Reads where an identity's log ends, from this device's own verified key
-  /// state, never from the core's say-so; null means a `tip_moved` is not
-  /// retried.
-  final Future<Tip> Function(String aid)? readTheTip;
+  /// Reads an identity's key state again, as this device verifies it (ADR-061
+  /// section 9): from copies of the log, every event this device has not seen
+  /// checked as it would be before signing, never from the core's say-so.
+  /// Null means a `tip_moved` is not retried.
+  final Future<KeyStateNow> Function(String aid)? readTheKeyState;
 
   /// The waits before each retry of a `tip_moved`.
   final List<Duration> retryDelays;
@@ -314,13 +327,12 @@ class TheKeyEventsThisDeviceMakes {
       List<Object?> anchors = const [],
       WitnessSet? witnessedBy,
       bool recovery = false}) async {
-    final after = (witnessedBy ?? WitnessSet.none)
-        .rotated(cuts: cuts, adds: adds, toad: toad);
     return _atTheTip(
         aid,
         (afterSn: afterSn, digest: afterDigest),
+        revealed - 1,
         !recovery,
-        (tip) => _rotateAfter(what,
+        (tip, before) => _rotateAfter(what,
             revealing: revealing,
             revealed: revealed,
             committingFrom: committingFrom,
@@ -333,7 +345,9 @@ class TheKeyEventsThisDeviceMakes {
             cuts: cuts,
             adds: adds,
             anchors: anchors,
-            set: after));
+            set: (before ?? witnessedBy ?? WitnessSet.none)
+                .rotated(cuts: cuts, adds: adds, toad: toad),
+            recovery: recovery));
   }
 
   Future<Committed> _rotateAfter(String what,
@@ -349,7 +363,8 @@ class TheKeyEventsThisDeviceMakes {
       required List<String> cuts,
       required List<String> adds,
       required List<Object?> anchors,
-      required WitnessSet set}) async {
+      required WitnessSet set,
+      required bool recovery}) async {
     final key = KeyManager.keyAt(revealing, revealed).publicKeyEncoded;
     final next =
         KeyManager.keyAt(committingFrom, nextClassical).publicKeyEncoded;
@@ -384,11 +399,9 @@ class TheKeyEventsThisDeviceMakes {
         'bt': toad.toRadixString(16),
         'after': {'s': afterSn.toRadixString(16), 'd': afterDigest},
       });
-      // A rotation that follows a kept interaction supersedes the events
-      // after it: none of this device's reservations there may be committed.
-      await _signed.supersededBy(aid, sn);
       return await _checkSignCommit(what, expected, prepared,
-          KeyManager.signingSeed(revealing, index: revealed), set);
+          KeyManager.signingSeed(revealing, index: revealed), set,
+          recovery: recovery);
     } finally {
       pqSeed.fillRange(0, pqSeed.length, 0);
     }
@@ -407,14 +420,15 @@ class TheKeyEventsThisDeviceMakes {
       _atTheTip(
           aid,
           (afterSn: afterSn, digest: afterDigest),
+          generation,
           true,
-          (tip) => _interactAfter(seed,
+          (tip, before) => _interactAfter(seed,
               aid: aid,
               generation: generation,
               afterSn: tip.sn,
               afterDigest: tip.digest,
               anchors: anchors,
-              set: witnessedBy ?? WitnessSet.none));
+              set: before ?? witnessedBy ?? WitnessSet.none));
 
   Future<Committed> _interactAfter(Uint8List seed,
       {required String aid,
@@ -435,21 +449,34 @@ class TheKeyEventsThisDeviceMakes {
         KeyManager.signingSeed(seed, index: generation), set);
   }
 
-  /// Makes an event after [given], and when the core answers `tip_moved`
-  /// before anything is signed, waits, reads the tip again with [readTheTip]
-  /// and makes it after that, at most [retryDelays].length times.
-  Future<Committed> _atTheTip(String aid, ({int afterSn, String digest}) given,
-      bool mayMove, Future<Committed> Function(Tip after) make) async {
+  /// Makes an event after [given], signed by the generation [generation] key
+  /// in force, and when the core answers `tip_moved` before anything is
+  /// signed, waits, reads the key state again with [readTheKeyState] and
+  /// makes it after the tip that reads, with its witnesses, at most
+  /// [retryDelays].length times. A key state whose keys in force are not the
+  /// generation [generation] ones means another device rotated: it stops.
+  Future<Committed> _atTheTip(
+      String aid,
+      ({int afterSn, String digest}) given,
+      int generation,
+      bool mayMove,
+      Future<Committed> Function(Tip after, WitnessSet? witnesses) make) async {
     Tip after = (sn: given.afterSn, digest: given.digest);
+    WitnessSet? witnesses;
     for (var tries = 0;; tries++) {
       try {
-        return await make(after);
+        return await make(after, witnesses);
       } on _MovedBeforeSigning catch (moved) {
-        final read = readTheTip;
+        final read = readTheKeyState;
         if (!mayMove || read == null) throw moved.refusal;
         if (tries >= retryDelays.length) throw TheLogKeepsMoving(aid, tries);
         await Future<void>.delayed(retryDelays[tries]);
-        after = await read(aid);
+        final now = await read(aid);
+        if (now.generation != generation) {
+          throw TheLogKeepsMoving(aid, tries + 1, rotatedElsewhere: true);
+        }
+        after = now.tip;
+        witnesses = now.witnesses;
       }
     }
   }
@@ -474,7 +501,7 @@ class TheKeyEventsThisDeviceMakes {
             r, KeyEventRefused(what, 0, refused, 'refused before'));
       }
       done.add(r.recorded
-          ? await _seeItWitnessed(r, 'already_recorded', set)
+          ? await _seeItWitnessed(r, 'already_recorded', set, coreHasIt: true)
           : await _commit(what, r, set));
     }
     return done;
@@ -488,9 +515,10 @@ class TheKeyEventsThisDeviceMakes {
   Future<LetGo> letGoOf(String aid, int sn,
       {WitnessSet? witnessedBy, bool withoutWitnesses = false}) async {
     final set = witnessedBy ?? WitnessSet.none;
-    final r = (await _signed.unfinished(aid)).firstWhere((r) => r.sn == sn,
-        orElse: () => throw StateError(
-            'this device holds no event at sequence number $sn of $aid'));
+    final r = (await _signed.unfinished(aid)).firstWhere(
+        (r) => r.sn == sn && r.refusedWith != null,
+        orElse: () => throw StateError('this device holds no refused event at '
+            'sequence number $sn of $aid'));
     final witnesses = _witnesses;
     if (set.witnesses.isEmpty || witnesses == null) {
       if (!withoutWitnesses) {
@@ -501,13 +529,17 @@ class TheKeyEventsThisDeviceMakes {
       return LetGo.released;
     }
     final held = await witnesses.holdAt(aid: aid, sn: sn, set: set);
-    if (held.values.contains(r.digest)) {
-      await _signed.committed(r);
+    if (held.values.any((h) => h?.digest == r.digest)) {
+      // In the log after all: no longer refused, sent on until enough
+      // witnesses have it, and committed to the core again when this device
+      // next finishes what it signed.
+      await _toTheWitnesses(await _signed.refused(r, null), set);
       return LetGo.itIsInTheLog;
     }
-    if (held.length < max(set.toad, 1)) {
-      throw StateError('only ${held.length} of the witnesses of $aid answered '
-          'for sequence number $sn, and ${max(set.toad, 1)} must');
+    if (held.length < set.toRuleOut) {
+      throw StateError('only ${held.length} of the ${set.witnesses.length} '
+          'witnesses of $aid showed they do not hold sequence number $sn, '
+          'and ${set.toRuleOut} must for it to be in no copy of the log');
     }
     await _signed.letGo(r);
     return LetGo.released;
@@ -528,12 +560,23 @@ class TheKeyEventsThisDeviceMakes {
   }
 
   Future<Committed> _checkSignCommit(String what, ExpectedEvent expected,
-      String rawB64, Uint8List signingSeed, WitnessSet set) async {
+      String rawB64, Uint8List signingSeed, WitnessSet set,
+      {bool recovery = false}) async {
     try {
       final raw = base64Decode(rawB64);
       final ev = await expected.requireIn(_km, raw);
+      // A recovery rotation the person asked for supersedes the interactions
+      // after the place it follows: none of this device's reservations of
+      // interactions there may be committed. Nothing else is superseded, and
+      // nothing is before the event is checked.
+      if (recovery) await _signed.supersededBy(ev.i, ev.s);
       final reservation = await _signed.reserve(
-          aid: ev.i, sn: ev.s, prior: ev.p, digest: ev.d, bytesB64: rawB64);
+          aid: ev.i,
+          sn: ev.s,
+          prior: ev.p,
+          digest: ev.d,
+          bytesB64: rawB64,
+          t: ev.t);
       if (!reservation.signed) {
         final signature = ed.sign(ed.newKeyFromSeed(signingSeed), raw);
         final cesr = await cesrEncodeSignature(_client, _baseUrl, signature);
@@ -556,24 +599,32 @@ class TheKeyEventsThisDeviceMakes {
       if (e.code == 'place_taken' || e.code == 'tip_moved') {
         return _confirmTheTakenPlace(r, e, set);
       }
-      if (_forGood(e)) {
-        throw AnEventWasRefused(await _signed.refused(r, e.code), e);
+      // Whatever the core answered, the event goes to the witnesses: a core
+      // that refuses an event, or fails, after passing it on to some of them
+      // would otherwise leave it in their copies unknown to this device.
+      final (kept, w) = await _toTheWitnesses(r, set);
+      if (w != null && w.receipts.isNotEmpty) {
+        throw TheCoreWithholdsThisEvent(kept, e, w);
       }
+      if (_forGood(e))
+        throw AnEventWasRefused(await _signed.refused(kept, e.code), e);
+      rethrow;
+    } catch (_) {
+      // Not answered at all: the event is kept, signed, to commit again, and
+      // goes to the witnesses meanwhile.
+      await _toTheWitnesses(r, set);
       rethrow;
     }
-    return _seeItWitnessed(r, '${res['status'] ?? ''}', set);
+    return _seeItWitnessed(r, '${res['status'] ?? ''}', set, coreHasIt: true);
   }
 
-  /// Sends a committed event to its witnesses and checks their receipts; it is
-  /// kept until enough have receipted it.
-  Future<Committed> _seeItWitnessed(
-      Reservation r, String status, WitnessSet set) async {
+  /// Sends [r] to its witnesses and checks their receipts, marking it
+  /// witnessed when enough receipt it, and ending it once the core has it too.
+  /// Null where there are no witnesses to ask.
+  Future<(Reservation, Witnessed?)> _toTheWitnesses(
+      Reservation r, WitnessSet set) async {
     final witnesses = _witnesses;
-    if (witnesses == null || set.witnesses.isEmpty) {
-      await _signed.committed(r);
-      return Committed(r.aid, r.sn, r.digest, status, r.bytesB64, r.signatures);
-    }
-    final kept = r.recorded ? r : await _signed.recorded(r);
+    if (witnesses == null || set.witnesses.isEmpty) return (r, null);
     final w = await witnesses.receipt(
         aid: r.aid,
         sn: r.sn,
@@ -581,38 +632,50 @@ class TheKeyEventsThisDeviceMakes {
         bytesB64: r.bytesB64,
         sigs: r.signatures,
         set: set);
-    if (w.enough) await _signed.committed(kept);
+    var kept = r;
+    if (w.enough && !kept.witnessed) kept = await _signed.witnessed(kept);
+    if (kept.recorded && kept.witnessed) await _signed.committed(kept);
+    return (kept, w);
+  }
+
+  /// An event the core has: sent to its witnesses, and ended once enough of
+  /// them have it too (at once, where there are none to ask).
+  Future<Committed> _seeItWitnessed(
+      Reservation r, String status, WitnessSet set,
+      {required bool coreHasIt}) async {
+    var kept = r;
+    if (coreHasIt && !kept.recorded) kept = await _signed.recorded(kept);
+    final (after, w) = await _toTheWitnesses(kept, set);
+    if (w == null) await _signed.committed(after);
     return Committed(r.aid, r.sn, r.digest, status, r.bytesB64, r.signatures,
         witnessed: w);
   }
 
   /// The core said another event holds [r]'s place, or that the log moved
-  /// past it. Believed only when enough witnesses hold a different event
-  /// there, in a log that verifies; otherwise [r] goes to the witnesses
+  /// past it. Believed only when enough witnesses that the rest could not
+  /// establish [r] hold a different event there, in a log that verifies, and
+  /// that event is one [r] cannot supersede: an establishment event, or any
+  /// event where [r] is an interaction. Otherwise [r] goes to the witnesses
   /// itself, and is kept.
   Future<Committed> _confirmTheTakenPlace(
       Reservation r, KeyEventRefused refusal, WitnessSet set) async {
     final witnesses = _witnesses;
     if (witnesses == null || set.witnesses.isEmpty) throw refusal;
+    final ours = r.t ?? (await _km.parseEvent(base64Decode(r.bytesB64))).t;
     final held = await witnesses.holdAt(aid: r.aid, sn: r.sn, set: set);
     final others = {
       for (final e in held.entries)
-        if (e.value != null && e.value != r.digest) e.key: e.value!
+        if (e.value != null &&
+            e.value!.digest != r.digest &&
+            (e.value!.establishment || ours == 'ixn'))
+          e.key: e.value!.digest
     };
-    if (others.length >= max(set.toad, 1)) {
+    if (others.length >= set.toRuleOut) {
       await _signed.letGo(r);
       throw ThePlaceIsTaken(r.aid, r.sn, others);
     }
-    final kept = r.recorded ? r : await _signed.recorded(r);
-    final w = await witnesses.receipt(
-        aid: r.aid,
-        sn: r.sn,
-        digest: r.digest,
-        bytesB64: r.bytesB64,
-        sigs: r.signatures,
-        set: set);
-    if (w.enough) await _signed.committed(kept);
-    throw TheCoreWithholdsThisEvent(kept, refusal, w);
+    final (kept, w) = await _toTheWitnesses(r, set);
+    throw TheCoreWithholdsThisEvent(kept, refusal, w!);
   }
 
   /// Whether a refusal will be the same however often the event is sent:

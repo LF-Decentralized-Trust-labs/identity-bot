@@ -26,10 +26,7 @@ import (
 // An identity's whole log, not a sign-in's few events: bounded so one request
 // cannot hold this Identity Agent for long, and checked under the same per-caller
 // share as every other route that checks a stranger's log.
-const (
-	maxKeyStateEvents = 2048
-	maxKeyStateBody   = 4 << 20
-)
+const maxKeyStateBody = 4 << 20
 
 type keyStateRequest struct {
 	AID string `json:"aid"`
@@ -95,42 +92,18 @@ func keyStateMessages(req keyStateRequest) ([][]byte, error) {
 		}
 		return keri.ParseKELStream(stream)
 	}
-	if len(req.Events) == 0 {
-		return nil, fmt.Errorf("the log has no events")
+	events := make([]drivers.SignedEventBytes, 0, len(req.Events))
+	for _, ev := range req.Events {
+		events = append(events, drivers.SignedEventBytes{RawB64: ev.RawB64, Sigs: ev.Sigs})
 	}
-	if len(req.Events) > maxKeyStateEvents {
-		return nil, fmt.Errorf("the log has %d events; at most %d are checked here", len(req.Events), maxKeyStateEvents)
-	}
-	out := make([][]byte, 0, len(req.Events))
-	for i, ev := range req.Events {
-		raw, err := base64.StdEncoding.Strict().DecodeString(ev.RawB64)
-		if err != nil {
-			return nil, fmt.Errorf("event %d is not standard base64: %w", i, err)
-		}
-		if len(ev.Sigs) == 0 {
-			return nil, fmt.Errorf("event %d carries no signature", i)
-		}
-		m, err := drivers.SignedMessage(raw, ev.Sigs)
-		if err != nil {
-			return nil, fmt.Errorf("event %d: %w", i, err)
-		}
-		out = append(out, m)
-	}
-	return out, nil
+	return drivers.LogMessages(events)
 }
 
 // KeyStateOf verifies messages as aid's key log and returns the key state it
 // establishes.
 func KeyStateOf(aid string, messages [][]byte) (*KeyState, error) {
-	if len(messages) > maxKeyStateEvents {
-		return nil, fmt.Errorf("the log has %d events; at most %d are checked here", len(messages), maxKeyStateEvents)
-	}
-	res, err := keri.ValidateSignedKEL(messages)
-	if err != nil {
+	if _, err := drivers.VerifiedLogOf(aid, messages); err != nil {
 		return nil, err
-	}
-	if res.Identifier != aid {
-		return nil, fmt.Errorf("this log is the history of %s, not %s", res.Identifier, aid)
 	}
 	state := &KeyState{AID: aid}
 	for _, msg := range messages {

@@ -219,9 +219,20 @@ var publicRoutes = map[string]string{
 	// signature, the key agreement and the body hash against the sender's known
 	// DID. Expiry and replay are checked after that. A stranger who is not
 	// already a peer gets no further than the first of those.
-	"POST /didcomm":                                         "an agent we know posts an encrypted envelope, authenticated by what it carries",
-	"POST /api/witness/request":                             "witnessing protocol — a controller asks us to witness",
-	"POST /api/witness/accept":                              "witnessing protocol — a witness answers our request, signed by its key",
+	"POST /didcomm":             "an agent we know posts an encrypted envelope, authenticated by what it carries",
+	"POST /api/witness/request": "witnessing protocol — a controller asks us to witness",
+	"POST /api/witness/accept":  "witnessing protocol — a witness answers our request, signed by its key",
+	// A controller, or the app holding its keys, sends a witness each event
+	// itself (ADR-061 section 4): the event carries its controller's
+	// signatures, and the witness refuses an identity it has not agreed to
+	// witness and verifies the event against the log it holds before it keeps
+	// or receipts anything.
+	"POST /api/witness/event": "witnessing protocol — a controller sends a signed event to be receipted",
+	// A key log is public by nature, and both answers are checkable without
+	// trusting this agent: the tip is signed with the witness's key over the
+	// asker's nonce, and an event carries its controller's signatures.
+	"GET /api/witness/kel/{signer_aid}/tip":                 "witnessing protocol — how far this witness holds a log, signed",
+	"GET /api/witness/kel/{signer_aid}/event/{sn}":          "witnessing protocol — one event of a log this witness holds, as signed",
 	"POST /api/backup/receive":                              "a peer pushes an opaque, already-encrypted archive",
 	"GET /api/backup/receive/{identityAID}":                 "the owning agent lists its own archives during recovery",
 	"GET /api/backup/receive/{identityAID}/download/{name}": "the owning agent retrieves an opaque archive during recovery",

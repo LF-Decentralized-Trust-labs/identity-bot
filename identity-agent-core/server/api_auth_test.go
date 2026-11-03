@@ -16,6 +16,7 @@ import (
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
 	"identity-agent-core/store"
+	"identity-agent-core/witness"
 
 	"github.com/go-chi/chi/v5"
 
@@ -471,6 +472,9 @@ func TestEveryOpenRouteIsMountedWhereItSaysItIs(t *testing.T) {
 		t.Fatalf("asset handler: %v", err)
 	}
 	s.assetHandler = ah
+	// The witness routes are mounted only on an agent with a witness service;
+	// an empty one mounts them, and nothing here calls it.
+	s.WitnessService = &witness.Service{}
 
 	mounted := map[string]bool{}
 	if err := chi.Walk(s.buildRouter(""),

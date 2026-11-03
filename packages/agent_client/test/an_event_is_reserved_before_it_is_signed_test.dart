@@ -9,9 +9,15 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  Future<Reservation> reserve(TheEventsThisDeviceSigned r, int sn, String d) =>
+  Future<Reservation> reserve(TheEventsThisDeviceSigned r, int sn, String d,
+          {String? t}) =>
       r.reserve(
-          aid: 'EA', sn: sn, prior: 'EP', digest: d, bytesB64: 'bytes-of-$d');
+          aid: 'EA',
+          sn: sn,
+          prior: 'EP',
+          digest: d,
+          bytesB64: 'bytes-of-$d',
+          t: t);
 
   test(
       'a second event at a reserved place is refused, and the same one is the same reservation',
@@ -58,14 +64,20 @@ void main() {
     expect(order, [1, 3, 2]);
   });
 
-  test('a recovery rotation marks the interactions it supersedes dead',
-      () async {
+  test(
+      'a recovery rotation marks the interactions it supersedes dead, and '
+      'nothing else', () async {
     final r = TheEventsThisDeviceSigned();
-    await r.signedWith(await reserve(r, 2, 'Eixn'), ['AAsig']);
-    await reserve(r, 1, 'Ekept');
+    await r.signedWith(await reserve(r, 2, 'Eixn', t: 'ixn'), ['AAsig']);
+    await reserve(r, 1, 'Ekept', t: 'ixn');
+    await r.recorded(
+        await r.signedWith(await reserve(r, 3, 'Erot3', t: 'rot'), ['AAs']));
+    await reserve(r, 4, 'Eunknown');
     await r.supersededBy('EA', 2);
     final left = await r.unfinished('EA');
-    expect([for (final x in left) x.sn], [1]);
+    expect([for (final x in left) x.sn], unorderedEquals([1, 3, 4]),
+        reason: 'a rotation, or an event of unrecorded type, is not '
+            'superseded by a rotation');
     // The rotation may now take the place.
     expect(await r.maySign('EA', 2, 'Erot'), isTrue);
     await reserve(r, 2, 'Erot');

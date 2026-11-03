@@ -21,9 +21,18 @@ class Reservation {
       [for (final s in (entry['sigs'] as List? ?? const [])) '$s'];
   bool get signed => signatures.isNotEmpty;
 
-  /// Whether the core added the event. It is kept until enough witnesses
-  /// have receipted it, so it can still be sent to them, or to a new core.
+  /// The event's type (`icp`, `rot`, `ixn`), or null for a reservation made
+  /// before types were recorded.
+  String? get t => entry['t'] as String?;
+
+  /// Whether the core acknowledged adding the event.
   bool get recorded => entry['recorded'] == true;
+
+  /// Whether enough of the identity's witnesses receipted the event, each
+  /// receipt checked by this device. A reservation ends only when both the
+  /// core and the witnesses have the event, so until then it can still be
+  /// sent to either, or to a new core.
+  bool get witnessed => entry['witnessed'] == true;
 
   /// The code the core refused the event with, for good, or null. A refused
   /// event still holds its place: nothing else is signed there until the
@@ -106,7 +115,8 @@ class TheEventsThisDeviceSigned {
       required int sn,
       required String prior,
       required String digest,
-      required String bytesB64}) async {
+      required String bytesB64,
+      String? t}) async {
     final key = await scope();
     return _serialised(() async {
       final entries = await _load(key);
@@ -121,7 +131,8 @@ class TheEventsThisDeviceSigned {
         's': sn,
         'p': prior,
         'd': digest,
-        'bytes': bytesB64
+        'bytes': bytesB64,
+        if (t != null) 't': t
       };
       entries.add(e);
       await _save(key, entries);
@@ -152,11 +163,15 @@ class TheEventsThisDeviceSigned {
         await _save(r.storageKey, entries);
       });
 
-  /// Marks [r] added by the core, and keeps it until its witnesses have it.
+  /// Marks [r] added by the core.
   Future<Reservation> recorded(Reservation r) => _mark(r, 'recorded', true);
 
-  /// Marks [r] refused by the core for good, with [code].
-  Future<Reservation> refused(Reservation r, String code) =>
+  /// Marks [r] receipted by enough of its witnesses.
+  Future<Reservation> witnessed(Reservation r) => _mark(r, 'witnessed', true);
+
+  /// Marks [r] refused by the core for good, with [code]; null clears it, for
+  /// an event the witnesses turn out to hold.
+  Future<Reservation> refused(Reservation r, String? code) =>
       _mark(r, 'refused', code);
 
   /// Marks [r] dead: the person let it go after its place was checked with
@@ -164,7 +179,7 @@ class TheEventsThisDeviceSigned {
   /// is committed again, and its place may be signed for again.
   Future<Reservation> letGo(Reservation r) => _mark(r, 'dead', true);
 
-  Future<Reservation> _mark(Reservation r, String field, Object value) =>
+  Future<Reservation> _mark(Reservation r, String field, Object? value) =>
       _serialised(() async {
         final entries = await _load(r.storageKey);
         for (final e in entries) {
@@ -178,16 +193,21 @@ class TheEventsThisDeviceSigned {
             'the reservation of sequence number ${r.sn} of ${r.aid} is gone');
       });
 
-  /// Marks dead every reservation of [aid] at or after [sn]: a recovery
-  /// rotation at [sn] this device is about to sign supersedes them, so none of
-  /// them may be signed or committed again.
+  /// Marks dead every reservation of an interaction of [aid] at or after
+  /// [sn]: a recovery rotation at [sn] this device is about to sign
+  /// supersedes them, so none of them may be signed or committed again. A
+  /// reservation of anything else, or of an event whose type was not
+  /// recorded, is left: a rotation does not supersede one, and the new
+  /// rotation's own reservation will be refused at its place instead.
   Future<void> supersededBy(String aid, int sn) async {
     final key = await scope();
     await _serialised(() async {
       final entries = await _load(key);
       for (final e in entries) {
-        if (e['aid'] == aid && (e['s'] as int) >= sn && e['dead'] != true)
-          e['dead'] = true;
+        if (e['aid'] == aid &&
+            (e['s'] as int) >= sn &&
+            e['t'] == 'ixn' &&
+            e['dead'] != true) e['dead'] = true;
       }
       await _save(key, entries);
     });

@@ -1,6 +1,7 @@
 package drivers
 
 import (
+	"encoding/base64"
 	"fmt"
 
 	keri "github.com/grapeid/keri-go"
@@ -70,4 +71,59 @@ func SignedMessageAsSent(raw []byte, sigs []string) ([]byte, error) {
 		return nil, fmt.Errorf("unsigned_event")
 	}
 	return SignedMessage(raw, indexed)
+}
+
+// MaxLogEvents bounds a key log judged in one go from copies somebody sent:
+// an identity's whole log, but not so long that one request holds the judge
+// for long.
+const MaxLogEvents = 2048
+
+// SignedEventBytes is an event's bytes, base64, with its controller
+// signatures, as a copy of a log is sent to be judged.
+type SignedEventBytes struct {
+	RawB64 string   `json:"raw_b64"`
+	Sigs   []string `json:"sigs"`
+}
+
+// LogMessages makes events into the messages keri-go judges a log by, each
+// with its signatures attached as they are stored and sent.
+func LogMessages(events []SignedEventBytes) ([][]byte, error) {
+	if len(events) == 0 {
+		return nil, fmt.Errorf("the log has no events")
+	}
+	if len(events) > MaxLogEvents {
+		return nil, fmt.Errorf("the log has %d events; at most %d are checked", len(events), MaxLogEvents)
+	}
+	out := make([][]byte, 0, len(events))
+	for i, ev := range events {
+		raw, err := base64.StdEncoding.Strict().DecodeString(ev.RawB64)
+		if err != nil {
+			return nil, fmt.Errorf("event %d is not standard base64", i)
+		}
+		if len(ev.Sigs) == 0 {
+			return nil, fmt.Errorf("event %d carries no signature", i)
+		}
+		m, err := SignedMessageAsSent(raw, ev.Sigs)
+		if err != nil {
+			return nil, fmt.Errorf("event %d: %w", i, err)
+		}
+		out = append(out, m)
+	}
+	return out, nil
+}
+
+// VerifiedLogOf judges messages as aid's key log, from its founding, as every
+// log is judged: a log that verifies but is another identity's is refused.
+func VerifiedLogOf(aid string, messages [][]byte) (*keri.SignedKELResult, error) {
+	if len(messages) > MaxLogEvents {
+		return nil, fmt.Errorf("the log has %d events; at most %d are checked", len(messages), MaxLogEvents)
+	}
+	res, err := keri.ValidateSignedKEL(messages)
+	if err != nil {
+		return nil, err
+	}
+	if res.Identifier != aid {
+		return nil, fmt.Errorf("this log is the history of %s, not %s", res.Identifier, aid)
+	}
+	return res, nil
 }

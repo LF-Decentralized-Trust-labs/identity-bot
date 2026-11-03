@@ -26,11 +26,31 @@ class KnownWitnesses implements WitnessDirectory {
 
 /// The witnesses an event of an identity is witnessed by, and how many of
 /// them must receipt it (`b` and `bt` in force after the event).
+///
+/// A witness is counted by its name, so only the canonical spelling of a
+/// non-transferable Ed25519 witness (`B` and 43 characters, the one spelling
+/// the core accepts, ADR-060) is counted, each once: a name in any other
+/// spelling, or a second copy of one, could otherwise be counted twice.
 class WitnessSet {
   WitnessSet(List<String> witnesses, this.toad)
-      : witnesses = List.unmodifiable(witnesses);
+      : witnesses = List.unmodifiable({
+          for (final w in witnesses)
+            if (_canonical.hasMatch(w)) w
+        });
   final List<String> witnesses;
   final int toad;
+
+  static final _canonical = RegExp(r'^B[A-Za-z0-9_-]{43}$');
+
+  /// How many receipts establish an event: the threshold, and at least one
+  /// wherever there are witnesses, however low the threshold was set.
+  int get toEstablish =>
+      witnesses.isEmpty ? 0 : min(max(toad, 1), witnesses.length);
+
+  /// How many witnesses must show they do not hold an event before it can be
+  /// taken to be in no one's copy of the log: enough that the rest could not
+  /// meet [toEstablish] between them.
+  int get toRuleOut => witnesses.length - toEstablish + 1;
 
   /// None: an identity with no witnesses has nothing to wait for.
   static final none = WitnessSet(const [], 0);
@@ -46,6 +66,18 @@ class WitnessSet {
           if (!cuts.contains(w)) w,
         ...adds
       ], toad);
+}
+
+/// The event a witness holds at a place, from a copy of the log that
+/// verifies from the founding: its digest and type.
+class Held {
+  Held(this.digest, this.ilk);
+  final String digest;
+  final String ilk;
+
+  /// Whether it is an establishment event, which nothing at its place
+  /// supersedes.
+  bool get establishment => ilk != 'ixn';
 }
 
 /// What an identity's witnesses said about one of its events, each answer
@@ -64,8 +96,8 @@ class Witnessed {
   /// Witnesses that could not be reached, or gave no answer that checked.
   final Set<String> unreached;
 
-  /// Whether enough witnesses receipted the event to meet the threshold.
-  bool get enough => receipts.length >= set.toad;
+  /// Whether enough witnesses receipted the event to establish it.
+  bool get enough => receipts.length >= set.toEstablish;
 }
 
 /// What this app learns, by asking the witnesses itself, about the events of
@@ -119,14 +151,14 @@ class TheWitnessesOfThisDevicesEvents {
   }
 
   /// What each witness in [set] holds at [sn] of [aid], by witness: the
-  /// digest of the event there, counted only where the witness's copy of the
+  /// event there, counted only where the witness's copy of the
   /// log up to that place verifies from the identity's founding; or null where
   /// the witness's signed answer for how far it holds the log stops before
   /// [sn]. A witness that cannot be reached, or whose answer does not check,
   /// is left out.
-  Future<Map<String, String?>> holdAt(
+  Future<Map<String, Held?>> holdAt(
       {required String aid, required int sn, required WitnessSet set}) async {
-    final out = <String, String?>{};
+    final out = <String, Held?>{};
     await Future.wait([
       for (final w in set.witnesses)
         () async {
@@ -139,7 +171,7 @@ class TheWitnessesOfThisDevicesEvents {
             return;
           }
           final st = await _verifiedCopy(base, aid, sn);
-          if (st != null && st.sn == sn) out[w] = st.digest;
+          if (st != null && st.sn == sn) out[w] = Held(st.digest, st.ilk);
         }()
     ]);
     return out;
@@ -249,6 +281,7 @@ class TheWitnessesOfThisDevicesEvents {
       final said = a['said'] as String? ?? '';
       final sig = a['signature'];
       if (res.statusCode != 200 ||
+          (sn >= 0) == said.isEmpty ||
           a['aid'] != aid ||
           a['nonce'] != nonce ||
           a['witness_aid'] != w ||

@@ -22,6 +22,9 @@ import (
 //     relying party's browser, which is nobody's owner.
 //   - GET /api/employees/invites/{token} and its redeem, called by an invited
 //     person's agent, which is not the org's owner either.
+//   - POST /api/witness/event and the witness's tip and event reads, which an
+//     app holding its keys calls to see its own events witnessed, and which a
+//     peer agent calls to witness at all.
 //   - GET /api/didcomm/did, which publishes the public keys another agent needs
 //     in order to encrypt to us. Its own handler already assumed a non-owner
 //     would call it — it refuses to MINT for one — so two agents could never
@@ -34,13 +37,16 @@ import (
 // count that changed.
 func TestTheRoutesThatWereSilentlyUnreachableAreDeclared(t *testing.T) {
 	for route, feature := range map[string]string{
-		"POST /didcomm":                              "agent-to-agent messaging",
-		"GET /api/invites/{token}":                   "the login SDK's invite flow",
-		"POST /api/invites/{token}/redeem":           "the login SDK's invite flow",
-		"POST /api/assets/{id}/requests":             "asking an owner for access",
-		"GET /api/employees/invites/{token}":         "employee onboarding",
-		"GET /api/didcomm/did":                       "two agents establishing a relationship at all",
-		"POST /api/employees/invites/{token}/redeem": "employee onboarding",
+		"POST /didcomm":                                "agent-to-agent messaging",
+		"GET /api/invites/{token}":                     "the login SDK's invite flow",
+		"POST /api/invites/{token}/redeem":             "the login SDK's invite flow",
+		"POST /api/assets/{id}/requests":               "asking an owner for access",
+		"GET /api/employees/invites/{token}":           "employee onboarding",
+		"GET /api/didcomm/did":                         "two agents establishing a relationship at all",
+		"POST /api/employees/invites/{token}/redeem":   "employee onboarding",
+		"POST /api/witness/event":                      "an app sending its own events to its witnesses",
+		"GET /api/witness/kel/{signer_aid}/tip":        "an app or a peer learning how far a witness holds a log",
+		"GET /api/witness/kel/{signer_aid}/event/{sn}": "an app or a peer reading a witness's copy of a log",
 	} {
 		if _, ok := everyPublicRoute()[route]; !ok {
 			t.Errorf("%s is not in publicRoutes, so %s does not work — "+

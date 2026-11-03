@@ -43,6 +43,14 @@ class AWitness {
   /// Signs its receipts with another key.
   bool forgesReceipts = false;
 
+  /// Answers in another witness's name.
+  bool namesAnother = false;
+
+  /// The identities it has agreed to witness, or null for any. A real witness
+  /// agrees through `witness/request` first, and refuses any other identity
+  /// with `403 not_witnessing`.
+  Set<String>? witnessesOnly;
+
   /// How many events it was sent.
   int sent = 0;
 
@@ -113,6 +121,11 @@ class AWitness {
 
   Future<void> _event(
       HttpResponse res, String forAid, String rawB64, List<String> sigs) async {
+    final only = witnessesOnly;
+    if (only != null && !only.contains(forAid)) {
+      _json(res, 403, {'error': 'not_witnessing'});
+      return;
+    }
     final ev = await _km.parseEvent(base64Decode(rawB64));
     final log = held[forAid] ?? const <SignedCopy>[];
     final digests = _digests[forAid] ?? const <String>[];
@@ -120,11 +133,23 @@ class AWitness {
       _json(res, 409, {'error': 'sequence_gap'});
       return;
     }
-    if (ev.s < log.length) {
-      if (digests[ev.s] != ev.d) {
+    if (ev.s < log.length && digests[ev.s] != ev.d) {
+      // A recovery rotation replaces the interactions from its place on, as a
+      // real witness admits one; anything else at a held place is refused.
+      final replaces = ev.t == 'rot' &&
+          [for (final c in log.sublist(ev.s)) await _ilk(c)]
+              .every((t) => t == 'ixn');
+      if (!replaces) {
         _json(res, 409, {'error': 'duplicate_sequence'});
         return;
       }
+      final copy = SignedCopy(rawB64, sigs);
+      await _km.verifyLog(forAid, [...log.sublist(0, ev.s), copy]);
+      held[forAid] = [...log.sublist(0, ev.s)];
+      _digests[forAid] = [...digests.sublist(0, ev.s)];
+      await hold(forAid, copy);
+    } else if (ev.s < log.length) {
+      // A repeat: answered with the receipt it already issued.
     } else {
       final copy = SignedCopy(rawB64, sigs);
       // Judged as the next event of the log it holds, by the engine.
@@ -133,7 +158,7 @@ class AWitness {
     }
     _json(res, 200, {
       'event_said': ev.d,
-      'witness_aid': aid,
+      'witness_aid': namesAnother ? qb64('B', Uint8List(32)) : aid,
       'sequence_number': ev.s,
       'cesr_signature': forgesReceipts
           ? qb64(
@@ -143,6 +168,9 @@ class AWitness {
           : _sign(ev.d),
     });
   }
+
+  Future<String> _ilk(SignedCopy c) async =>
+      (await _km.parseEvent(base64Decode(c.rawB64))).t;
 
   String _sign(String message) => qb64(
       '0B',
