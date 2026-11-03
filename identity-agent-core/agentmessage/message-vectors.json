@@ -93,6 +93,30 @@
       "body": "",
       "signed": "IA-AGENT-MSG-V1\nc_vector\nreceipt\nEAGENT_A\nEAGENT_B\nm_reply\nEK8TSbn1-aGmoEBN6jbcyUmbyyXJrcESt8yak8rkHzJi\n\n\n\n\nBHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk\nnonce-receipt-00000001\n2026-10-20T12:00:02Z\nEBODYCRED",
       "signature": "0BAkWGFoTT9CTzWXsf5uSf48GRLYz_ARZRIXrovjDBqzy7qJOl4NmDgo7ogQJhOPNktMGMwybJqB95Ep3gCsOEsC"
+    },
+    {
+      "name": "a progress note, which is not the answer",
+      "statement": {
+        "conversation": "c_vector",
+        "kind": "progress",
+        "from": "EAGENT_B",
+        "to": "EAGENT_A",
+        "in_reply_to": "m_ask",
+        "body_hash": "ELT7xsFSBXqndBxN5I55qQoF7anik6QTIMQcZw0WqY2R",
+        "brain": {
+          "provider": "example-harness",
+          "model": "example-model",
+          "session": "s-1",
+          "run_hash": "Erun"
+        },
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "host_nonce": "nonce-progress-000001",
+        "host_time": "2026-10-20T11:59:50Z",
+        "body_credential": "EBODYCRED"
+      },
+      "body": "Half the files read; no problems so far.",
+      "signed": "IA-AGENT-MSG-V1\nc_vector\nprogress\nEAGENT_B\nEAGENT_A\nm_ask\nELT7xsFSBXqndBxN5I55qQoF7anik6QTIMQcZw0WqY2R\nexample-harness\nexample-model\ns-1\nErun\nBHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk\nnonce-progress-000001\n2026-10-20T11:59:50Z\nEBODYCRED",
+      "signature": "0BBAiZKmcMx6g6M_gc3lPjK4lt8DAxsvVnnTvsTrD0eQn212ImHCex2OMm6LNM4Urw1zA77B6fCk0SMvc0GYl-gB"
     }
   ],
   "refused_statements": [

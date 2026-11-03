@@ -169,6 +169,9 @@ type verifier struct {
 	// signedOnce is every sender's signature seen, by the entry it is in: a
 	// signed statement or request stands for one entry, never two.
 	signedOnce map[string]int
+	// answered is every ask a reply or failure has closed, by its message id:
+	// a progress note on an ask is valid only while the ask is still open.
+	answered map[string]bool
 }
 
 func (v *verifier) fault(where, format string, args ...any) {
@@ -209,7 +212,7 @@ func Verify(b *Bundle) Report {
 	}
 	r.Conversation, r.Root = b.Conversation, b.Root
 	v := &verifier{b: b, r: &r, kels: map[string]*keyLog{}, regs: map[string]bool{}, creds: map[string]*credential{},
-		dids: map[string]*didcomm.DID{}, entries: map[string]agentmessage.Record{}, hashes: map[int]string{}, notes: map[string]bool{}, signedOnce: map[string]int{}}
+		dids: map[string]*didcomm.DID{}, entries: map[string]agentmessage.Record{}, hashes: map[int]string{}, notes: map[string]bool{}, signedOnce: map[string]int{}, answered: map[string]bool{}}
 	r.Trusts = []string{
 		"The organisation's root key log, as the bundle gives it: its inception and every key it puts in force. Every other identity, credential and anchor is checked back to it.",
 		"The times the Identity Agent stamped on each message and on each credential's issuance and revocation, which decide whether a credential was in force when a message was sent. A body's own signed time must agree with the stamp to within " + agentbody.RequestWindow.String() + ", and a person's signed request to within " + authorisation.Skew.String() + ".",
@@ -847,6 +850,14 @@ func (v *verifier) checkThread(where string, rec agentmessage.Record) {
 	case agentmessage.KindReply, agentmessage.KindFailure:
 		if prompt.Kind != agentmessage.KindAsk || prompt.To != rec.From || rec.To != prompt.From {
 			v.fault(where, "an answer goes only to the sender of an ask addressed to the one answering, and this does not")
+		}
+		v.answered[prompt.MessageID] = true
+	case agentmessage.KindProgress:
+		switch {
+		case prompt.Kind != agentmessage.KindAsk || prompt.To != rec.From || rec.To != prompt.From:
+			v.fault(where, "a progress note goes only to the sender of an ask addressed to the one writing it, and this does not")
+		case v.answered[prompt.MessageID]:
+			v.fault(where, "a progress note comes after the ask it is about was answered, and a note is only for an ask still being worked")
 		}
 	case agentmessage.KindAsk:
 		if prompt.To != rec.From {

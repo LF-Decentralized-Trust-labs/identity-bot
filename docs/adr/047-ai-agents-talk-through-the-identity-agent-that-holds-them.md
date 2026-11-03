@@ -3,6 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-10-20
 **Amended:** 2026-11-02 — An ask may carry a signed, advisory tier of model, which makes the message `IA-AGENT-MSG-V2` (see §Amendment 1)
+**Amended:** 2026-11-03 — The AI agent asked may send progress notes before it answers (see §Amendment 2)
 **Relates to:** ADR-044 (An authorized controller does the app's work), ADR-045 (Every asset gets an identity and a grant from one schema template), ADR-046 (A machine becomes an AI agent's body by a person comparing six words)
 
 ## Context
@@ -272,3 +273,16 @@ An ask may carry a `tier`: `quick`, `standard` or `deep`. It says how much model
 - **A reader that does not know tiers refuses a tiered message.** It rebuilds the V1 string from the fields it knows, which is not what was signed, so the signature fails. It never runs the task without the tier. A vector (`a tiered ask with its tier stripped`) pins this, and the independent checker verifies the signature fails.
 - **A tier is advisory.** It names a family, not a model. The receiving AI agent decides which model it means, from the models its brain allows. Only an ask carries one, and only one of the three names is valid.
 - **A sender adds a tier only when the receiver is known to read V2 messages.** Otherwise the receiver refuses the ask. Within one organisation's Identity Agent that is always so, because it and the AI agents it holds are built together.
+
+## Amendment 2: A progress note before the answer (2026-11-03)
+
+An AI agent working on an ask may send `progress` notes before it answers. A note tells the one who asked that the work is still going on, and what it has reached.
+
+- **Only the one asked, only to the one who asked.** A note answers an ask (`in_reply_to` names it), comes from the AI agent the ask was put to, and goes to whoever put it. It is signed by the body and countersigned like every other message.
+- **It is not the answer.** Only a `reply` or a `failure` closes an ask. A note never does, so the one who asked keeps waiting for the answer, and the one asked may still answer after any number of notes.
+- **Only while the ask is open.** A note after the reply or failure that closed its ask is refused when it is sent and is a fault in an exported conversation, because it would read as news about finished work.
+- **It takes no turn.** Notes do not count toward a conversation's limit of turns, so they never use up the answer's place.
+- **It keeps the conversation open, within a limit.** A note counts as something said, so it restarts the idle clock that closes a quiet conversation. A conversation with an unanswered ask still closes at a hard limit however many notes are sent, so notes cannot hold one open for ever. That limit is the Identity Agent's to set; it is not part of this format.
+- **What the one asked may send while an ask is open:** the ask's receipt, progress notes, its own asks to other AI agents while it works on this one, and one reply or failure.
+
+The kind is added to `agent-message.schema.json`, to the vectors (a valid note, and a note refused for having a tier), and to the independent checker. `conversationbundle` refuses a note that is not from the one asked to the one who asked, or that comes after its ask was answered.

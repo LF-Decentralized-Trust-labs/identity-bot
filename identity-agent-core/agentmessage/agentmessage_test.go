@@ -202,3 +202,17 @@ func TestAnEmptyTierIsAbsent(t *testing.T) {
 		t.Fatalf("an empty tier was written: %s", b)
 	}
 }
+
+// A progress note is a kind of message a body may sign, and it carries no tier:
+// only an ask does.
+func TestAProgressNoteIsAMessageButNotAnAsk(t *testing.T) {
+	st := vectorStatement(t)
+	st.Kind = KindProgress
+	if _, err := Sign(vectorSigner(), st); err != nil {
+		t.Fatalf("a progress note was refused: %v", err)
+	}
+	st.Tier = TierQuick
+	if st.Check() == nil {
+		t.Fatal("a progress note carrying a tier was accepted")
+	}
+}

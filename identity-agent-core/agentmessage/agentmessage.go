@@ -49,6 +49,11 @@ const (
 	// KindFailure closes a turn the brain could not answer — a crash, a
 	// timeout, a usage limit — so no conversation waits on silence.
 	KindFailure = "failure"
+	// KindProgress is a note from the AI agent an ask was put to, while it is
+	// still working: what it has done so far. It goes to the asker and is not
+	// the answer — the ask stays open, so the reply or failure that closes it
+	// can still follow, and any number of notes may come before it.
+	KindProgress = "progress"
 )
 
 // CapabilityMessageAgent is the grant entry that lets an AI agent ask
@@ -210,7 +215,7 @@ func (s Statement) Check() error {
 		}
 	}
 	switch s.Kind {
-	case KindAsk, KindReply, KindReceipt, KindFailure:
+	case KindAsk, KindReply, KindReceipt, KindFailure, KindProgress:
 	default:
 		return fmt.Errorf("%q is not a kind of message", s.Kind)
 	}
