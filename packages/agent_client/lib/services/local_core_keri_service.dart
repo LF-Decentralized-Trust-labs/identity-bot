@@ -6,6 +6,7 @@ import '../crypto/bip39.dart';
 import '../crypto/keys.dart';
 import 'key_math.dart';
 import 'keri_service.dart';
+import 'recovering_this_identity.dart';
 import 'secure_key_store.dart';
 import 'signing_an_event.dart';
 import 'the_events_this_device_asked_for.dart';
@@ -286,6 +287,11 @@ class LocalCoreKeriService extends KeriService {
       throw StateError('the new phrase could not be made the phrase in force; '
           'the move is in the log and both phrases are still kept');
     }
+    // The messaging keys came from the old phrase, so whoever holds it can
+    // read the identity's messages: they are replaced at once with the new
+    // phrase's.
+    // The new phrase has anchored no keyset yet: its first is generation 0.
+    await _replaceMessagingKeysWith(newSeed, generation: 0);
     return RotationResult(
       aid: state.aid,
       newPublicKey: KeyManager.keyAt(newSeed, 1).publicKeyEncoded,
@@ -343,6 +349,82 @@ class LocalCoreKeriService extends KeriService {
     } on AnEventWasRefused catch (e) {
       if (e.reservation.t != 'ixn') rethrow;
     }
+  }
+
+  /// Replaces this device's identity's messaging keys with the next
+  /// generation of its phrase (ADR-061 section 8), and returns that
+  /// generation: the keyset is derived on this device, the core is handed its
+  /// seed and must return the same anchor, and an interaction anchors it. The
+  /// earlier keys still open messages sent to them until counterparties have
+  /// read the replacement.
+  ///
+  /// For an identity whose messaging keys are not its phrase's: founded before
+  /// the fixed branch, recovered from a phrase it moved to, or moved to a new
+  /// phrase. The generation after the last one the log anchors is used, or 0
+  /// where the log anchors none of this phrase's.
+  Future<int> replaceMessagingKeys() async {
+    await _finishAnyMoveUnderWay();
+    final mnemonic = await SecureKeyStore.loadMnemonic();
+    if (mnemonic == null) throw Exception('No identity keys found in secure storage.');
+    return _replaceMessagingKeysWith(Bip39.mnemonicToSeed(mnemonic));
+  }
+
+  Future<int> _replaceMessagingKeysWith(Uint8List seed,
+      {int? generation}) async {
+    var g = generation;
+    if (g == null) {
+      final copies = await _readTheCopies(seed);
+      final anchored = [
+        for (final e in copies.log?.events ?? const <LoggedEvent>[])
+          ...e.messagingKeysets
+      ];
+      final last = anchored.isEmpty
+          ? null
+          : await RecoveringThisIdentity.messagingGenerationOf(
+              _km, seed, anchored.last);
+      g = last == null ? 0 : last + 1;
+    }
+
+    final messagingSeed = KeyManager.slip10Ed25519(seed, KeyPaths.messaging(g));
+    final Map<String, dynamic> anchor;
+    try {
+      anchor = await _km.messagingKeySet(messagingSeed);
+      final res = await _client.post(
+          Uri.parse('$_baseUrl/api/keystore/messaging-seed'),
+          headers: const {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'seed_hex': [
+              for (final b in messagingSeed) b.toRadixString(16).padLeft(2, '0')
+            ].join()
+          }));
+      if (res.statusCode < 200 || res.statusCode > 299) {
+        throw Exception('the core would not take the messaging keys '
+            '(${res.statusCode}): ${res.body}');
+      }
+      final held = (jsonDecode(res.body) as Map)['anchor'];
+      if (RecoveringThisIdentity.canonicalJson(held) !=
+          RecoveringThisIdentity.canonicalJson(anchor)) {
+        throw StateError('the core holds messaging keys other than the ones '
+            'this phrase derives, so they are not anchored');
+      }
+    } finally {
+      messagingSeed.fillRange(0, messagingSeed.length, 0);
+    }
+
+    var state = await _keyInForce(seed);
+    final makes = await _makesFor(seed);
+    if ((await makes.finishSigned(state.aid, witnessedBy: state.witnesses))
+        .isNotEmpty) {
+      state = await _keyInForce(seed);
+    }
+    await makes.interact(seed,
+        aid: state.aid,
+        generation: state.generation,
+        afterSn: state.tip.sn,
+        afterDigest: state.tip.digest,
+        anchors: [anchor],
+        witnessedBy: state.witnesses);
+    return g;
   }
 
   /// Finishes a move to a new phrase under way, before anything is signed.

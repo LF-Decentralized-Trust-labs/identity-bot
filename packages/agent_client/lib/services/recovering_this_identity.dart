@@ -175,21 +175,29 @@ class RecoveringThisIdentity {
     }
   }
 
-  /// The generation of this phrase's messaging keyset that is [anchor], or
-  /// null.
   Future<int?> _messagingGenerationOf(
-      Uint8List seed, Map<String, dynamic> anchor) async {
-    final want = _canonical(anchor);
+          Uint8List seed, Map<String, dynamic> anchor) =>
+      messagingGenerationOf(_km, seed, anchor);
+
+  /// The generation of the messaging keyset, of the phrase whose BIP39 seed
+  /// is [seed], that is [anchor], or null where it is none of the first
+  /// [messagingGenerationsTried].
+  static Future<int?> messagingGenerationOf(
+      KeyMath km, Uint8List seed, Map<String, dynamic> anchor) async {
+    final want = canonicalJson(anchor);
     for (var g = 0; g < messagingGenerationsTried; g++) {
       final s = KeyManager.slip10Ed25519(seed, KeyPaths.messaging(g));
       try {
-        if (_canonical(await _km.messagingKeySet(s)) == want) return g;
+        if (canonicalJson(await km.messagingKeySet(s)) == want) return g;
       } finally {
         s.fillRange(0, s.length, 0);
       }
     }
     return null;
   }
+
+  /// JSON text with every object's keys in order, for comparing anchors.
+  static String canonicalJson(Object? v) => _canonical(v);
 
   static String _canonical(Object? v) {
     if (v is Map) {

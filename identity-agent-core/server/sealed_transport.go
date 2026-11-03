@@ -88,6 +88,12 @@ func (s *CoreServer) handleSealedTransport(w http.ResponseWriter, r *http.Reques
 	}
 
 	jwm, err := didcomm.UnpackAuthcrypt(keys, senderDID, &env)
+	if err != nil && len(env.Recipients) > 0 {
+		// Sent to the keys a replacement has not yet taken out of use.
+		if prev := s.previousKeySetFor(env.Recipients[0].Header.Kid); prev != nil {
+			jwm, err = didcomm.UnpackAuthcrypt(prev, senderDID, &env)
+		}
+	}
 	if err != nil {
 		// Deliberately not specific. Distinguishing "wrong key" from "corrupt"
 		// from "not for us" tells somebody probing which of those they achieved.

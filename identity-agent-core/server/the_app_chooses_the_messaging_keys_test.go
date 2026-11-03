@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"identity-agent-core/didcomm"
 	"net/http"
 	"testing"
 
@@ -58,23 +59,80 @@ func TestTheAppChoosesTheMessagingKeysAndTheCoreHoldsThem(t *testing.T) {
 		t.Fatal("the keyset handed over before the founding is still held aside")
 	}
 
-	// Replacing the keyset is not done here yet: a seed for keys the founding
-	// does not anchor is refused, and so is an interaction anchoring them.
+	// A keyset whose seed was never handed over is refused, by an
+	// interaction as by a founding.
+	stranger := appSeeds(5)[4]
+	strangerAnchor, _ := keymath.MessagingKeySet(stranger)
+	strangerJSON, _ := json.Marshal(strangerAnchor)
+	_, out = call(t, s, s.handlePrepareEvent, "/api/events/prepare", map[string]any{"aid": own.AID, "t": "ixn",
+		"a": []json.RawMessage{strangerJSON}, "after": map[string]string{"s": "0", "d": own.AID}})
+	unheld := preparedBytes(t, out)
+	if code, _ := call(t, s, s.handleCommitEvent, "/api/events/commit", map[string]any{
+		"raw_b64": base64.StdEncoding.EncodeToString(unheld), "sigs": []string{appSign(t, k[0], unheld, false)}}); code != http.StatusBadRequest {
+		t.Fatalf("an interaction anchoring keys this core does not hold: %d", code)
+	}
+
+	// A replacement (ADR-061 section 8): its seed is held aside, the
+	// interaction anchoring it is committed, and it takes the earlier
+	// keyset's place, which is kept to open messages already sent to it.
 	next := appSeeds(4)[3]
 	nextAnchor, _ := keymath.MessagingKeySet(next)
-	if code, _ := call(t, s, s.handleMessagingSeed, "/api/keystore/messaging-seed",
-		map[string]any{"seed_hex": hex.EncodeToString(next)}); code != http.StatusConflict {
-		t.Fatalf("a seed for keys the founding does not anchor: %d", code)
+	if code, out := call(t, s, s.handleMessagingSeed, "/api/keystore/messaging-seed",
+		map[string]any{"seed_hex": hex.EncodeToString(next)}); code != http.StatusOK || out["filed"] != "pending" {
+		t.Fatalf("a seed for keys the log does not yet anchor is held aside: %d %v", code, out)
+	}
+	if held, _ := s.keySetAnchorHeld(own.AID, anchor); !held {
+		t.Fatal("the keyset in force was changed before anything anchored its replacement")
 	}
 	nextJSON, _ := json.Marshal(nextAnchor)
 	_, out = call(t, s, s.handlePrepareEvent, "/api/events/prepare", map[string]any{"aid": own.AID, "t": "ixn",
 		"a": []json.RawMessage{nextJSON}, "after": map[string]string{"s": "0", "d": own.AID}})
 	ixn := preparedBytes(t, out)
-	if code, _ := call(t, s, s.handleCommitEvent, "/api/events/commit", map[string]any{
-		"raw_b64": base64.StdEncoding.EncodeToString(ixn), "sigs": []string{appSign(t, k[0], ixn, false)}}); code != http.StatusConflict {
-		t.Fatalf("an interaction anchoring a new keyset: %d", code)
+	if code, out := call(t, s, s.handleCommitEvent, "/api/events/commit", map[string]any{
+		"raw_b64": base64.StdEncoding.EncodeToString(ixn), "sigs": []string{appSign(t, k[0], ixn, false)}}); code != http.StatusCreated {
+		t.Fatalf("an interaction anchoring a replacement whose seed was handed over: %d %v", code, out)
 	}
-	if held, _ := s.keySetAnchorHeld(own.AID, anchor); !held {
-		t.Fatal("the keyset the founding anchors is no longer held")
+	if held, _ := s.keySetAnchorHeld(own.AID, nextAnchor); !held {
+		t.Fatal("the replacement is not the identity's keyset")
+	}
+	prev := s.previousKeySetFor(own.AID)
+	if prev == nil {
+		t.Fatal("the replaced keyset was not kept")
+	}
+	if got, _ := prev.Anchor(); !sameJSON(got, anchor) {
+		t.Fatal("the keyset kept is not the one replaced")
+	}
+	if left, _ := s.hasKeySet(pendingKeySetLabel(nextAnchor)); left {
+		t.Fatal("the replacement is still held aside")
+	}
+	if !s.anchoredLast(own.AID, nextAnchor) {
+		t.Fatal("the replacement is not what the log anchors last")
+	}
+}
+
+func sameJSON(a, b any) bool {
+	x, _ := json.Marshal(a)
+	y, _ := json.Marshal(b)
+	return string(x) == string(y)
+}
+
+// A message a counterparty encrypted to the keyset a replacement has just
+// taken out of use is still opened: until counterparties have read the
+// replacement they encrypt to the earlier keys (ADR-061 section 8).
+func TestAMessageSentToReplacedKeysIsStillOpened(t *testing.T) {
+	m := newMessaging(t)
+	m.anchored(t)
+	replacement, err := didcomm.GenerateKeySet(m.receiverAID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.receiver.replaceKeySetFor(m.receiverAID, replacement); err != nil {
+		t.Fatal(err)
+	}
+	// The sender has not yet read the replacement: it encrypts to the keys it
+	// knew.
+	n := m.send(t, `{"title":"sent to the earlier keys"}`)
+	if n.ID == "" {
+		t.Fatal("the message sent to the earlier keys was not taken")
 	}
 }

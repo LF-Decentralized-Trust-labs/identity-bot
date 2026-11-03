@@ -10,8 +10,6 @@ import (
 
 	"identity-agent-core/didcomm"
 	"identity-agent-core/iacrypto"
-
-	keri "github.com/grapeid/keri-go"
 )
 
 // The app chooses the messaging keys; the core holds them (ADR-061 section 8).
@@ -64,18 +62,14 @@ func (s *CoreServer) handleMessagingSeed(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "The messaging keys could not be anchored", err.Error())
 		return
 	}
-	// An identity already here takes only the keyset its log anchors last,
-	// the one every verifier reads (an identity restored here, say). Before
-	// founding it is held aside until the founding that anchors it is
-	// committed. No seed handed over here stands in for keys the identity's
-	// log does not commit to.
+	// An identity already here files at once only the keyset its log anchors
+	// last, the one every verifier reads (an identity restored here, say).
+	// Any other keyset is held aside, as one before founding is, until an
+	// event anchoring it is committed: a replacement (ADR-061 section 8). No
+	// seed handed over here stands in for keys the identity's log does not
+	// commit to.
 	label, filed := pendingKeySetLabel(anchor), "pending"
-	if own, _ := s.DataStore.GetIdentity(); own != nil {
-		if !s.anchoredLast(own.AID, anchor) {
-			writeError(w, http.StatusConflict, "These are not the messaging keys this identity's log anchors last",
-				"replacing an identity's messaging keys is not done here yet")
-			return
-		}
+	if own, _ := s.DataStore.GetIdentity(); own != nil && s.anchoredLast(own.AID, anchor) {
 		if held, _ := s.keySetAnchorHeld(own.AID, anchor); held {
 			writeJSONResponse(w, map[string]any{"anchor": anchor, "filed": "identity"})
 			return
@@ -151,21 +145,11 @@ func messagingAnchorsAmong(seals []json.RawMessage) []map[string]interface{} {
 // Identity Agent does not hold: it would commit the identity to keys whose
 // private halves nobody here has, and messages sent to it would be lost.
 //
-// An interaction anchoring a keyset other than the one held is refused too:
-// every verifier reads an identity's messaging keys from its founding, and the
-// earlier keys must stay live until a replacement is witnessed, so replacing a
-// keyset waits until both are built.
+// A later event may anchor a replacement keyset (ADR-061 section 8) once its
+// seed has been handed over and held aside; when it is committed the
+// replacement takes the earlier keyset's place, and the earlier one is kept to
+// open messages already sent to it.
 func (s *CoreServer) refuseAnUnheldKeySet(w http.ResponseWriter, raw []byte, aid string) bool {
-	if ev, err := keri.ParseEvent(raw); err == nil && ev.Ilk != "icp" {
-		for _, anchor := range messagingAnchorsIn(raw) {
-			if held, _ := s.keySetAnchorHeld(aid, anchor); !held {
-				writeError(w, http.StatusConflict, "messaging_keyset_replacement_not_supported",
-					"an identity's messaging keys are the ones its founding anchors; replacing them is not done here yet")
-				return true
-			}
-		}
-		return false
-	}
 	for _, anchor := range messagingAnchorsIn(raw) {
 		heldHere, _ := s.keySetAnchorHeld(aid, anchor)
 		pending, _ := s.keySetAnchorHeld(pendingKeySetLabel(anchor), anchor)
@@ -207,21 +191,27 @@ func (s *CoreServer) anchoredLast(aid string, anchor map[string]interface{}) boo
 }
 
 // fileCommittedKeySet files a keyset held aside under the identity whose
-// founding anchoring it was just committed.
+// event anchoring it was just committed: a founding's, or a replacement's,
+// which takes the earlier keyset's place and keeps it as the previous one.
 func (s *CoreServer) fileCommittedKeySet(raw []byte, aid string) error {
 	for _, anchor := range messagingAnchorsIn(raw) {
 		label := pendingKeySetLabel(anchor)
 		if held, _ := s.keySetAnchorHeld(label, anchor); !held {
 			continue
 		}
-		if has, _ := s.hasKeySet(aid); has {
-			continue
-		}
 		ks, err := s.keySetFor(label)
 		if err != nil {
 			return err
 		}
-		if err := s.storeKeySetFor(aid, ks); err != nil {
+		if has, _ := s.hasKeySet(aid); has {
+			if same, _ := s.keySetAnchorHeld(aid, anchor); same {
+				return s.forgetKeySet(label)
+			}
+			err = s.replaceKeySetFor(aid, ks)
+		} else {
+			err = s.storeKeySetFor(aid, ks)
+		}
+		if err != nil {
 			return err
 		}
 		return s.forgetKeySet(label)

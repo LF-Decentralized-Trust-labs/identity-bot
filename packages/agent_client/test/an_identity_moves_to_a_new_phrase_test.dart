@@ -77,13 +77,18 @@ void main() {
     expect(moved.newPublicKey, KeyManager.keyAt(newSeed, 1).publicKeyEncoded);
 
     final log = await kel(aid);
-    expect([for (final e in log) e['t']], ['icp', 'rot', 'rot', 'rot']);
+    expect([for (final e in log) e['t']], ['icp', 'rot', 'rot', 'rot', 'ixn']);
     expect(log[2]['k'], [KeyManager.keyAt(oldSeed, 2).publicKeyEncoded],
         reason: 'step 1 reveals the old phrase\'s next key');
     expect((log[2]['n'] as List).first,
         await km.nextKeyDigest(KeyManager.keyAt(newSeed, 1).publicKeyEncoded),
         reason: 'and commits to the new phrase');
     expect(log[3]['k'], [KeyManager.keyAt(newSeed, 1).publicKeyEncoded]);
+    // The messaging keys are replaced at once with the new phrase's, since
+    // whoever holds the old phrase can derive the old ones.
+    final keyset = await km.messagingKeySet(
+        KeyManager.slip10Ed25519(newSeed, KeyPaths.messaging(0)));
+    expect(jsonEncode(log[4]['a']), jsonEncode([keyset]));
 
     expect(await SecureKeyStore.loadMnemonic(), fresh.split(' '));
     expect(await SecureKeyStore.loadPhraseMovingTo(), isNull);
@@ -116,7 +121,7 @@ void main() {
 
     await service().finishMovingToANewPhrase();
     final log = await kel(aid);
-    expect(log, hasLength(4), reason: 'step 2 is in the log once');
+    expect(log, hasLength(5), reason: 'step 2 is in the log once');
     expect(log[3]['k'], [KeyManager.keyAt(newSeed, 1).publicKeyEncoded]);
     expect(await SecureKeyStore.loadMnemonic(), fresh.split(' '));
     expect(await SecureKeyStore.loadPhraseMovingTo(), isNull);
@@ -148,7 +153,7 @@ void main() {
 
     await service().finishMovingToANewPhrase();
     final log = await kel(aid);
-    expect(log, hasLength(step1.sn + 2));
+    expect(log, hasLength(step1.sn + 3));
     expect(log[step1.sn + 1]['t'], 'rot',
         reason: 'step 2 took the place of the old phrase\'s interaction');
     expect(log[step1.sn + 1]['p'], step1.digest);
@@ -184,7 +189,7 @@ void main() {
     final signed = await service().signPayload(name: aid, data: [1]);
     expect(signed.publicKey, KeyManager.keyAt(newSeed, 1).publicKeyEncoded,
         reason: 'the move was finished first, so the new phrase signed');
-    expect(await kel(aid), hasLength(4));
+    expect(await kel(aid), hasLength(5));
     expect(await SecureKeyStore.loadMnemonic(), fresh.split(' '));
   });
 
@@ -194,7 +199,7 @@ void main() {
     await SecureKeyStore.savePhraseMovingTo(fresh.split(' '));
     await service().finishMovingToANewPhrase();
     final log = await kel(aid);
-    expect([for (final e in log) e['t']], ['icp', 'rot', 'rot', 'rot']);
+    expect([for (final e in log) e['t']], ['icp', 'rot', 'rot', 'rot', 'ixn']);
     expect(log[3]['k'], [KeyManager.keyAt(newSeed, 1).publicKeyEncoded]);
   });
 

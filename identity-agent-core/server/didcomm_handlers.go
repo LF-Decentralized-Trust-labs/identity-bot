@@ -164,6 +164,56 @@ func (s *CoreServer) storeKeySetFor(aid string, ks *didcomm.KeySet) error {
 
 // hasKeySet reports whether a keyset already exists for aid (no minting). The
 // error is the key file being unreadable, and then nothing is known either way.
+// previousKeySetLabel is where an identity's messaging keyset is kept once a
+// later one replaces it (ADR-061 section 8): until counterparties have read
+// the replacement, they still encrypt to the earlier keys, and messages they
+// send are opened with it.
+func previousKeySetLabel(aid string) string { return "previous-messaging:" + aid }
+
+// replaceKeySetFor files ks as aid's messaging keyset, keeping the one it
+// replaces as aid's previous keyset.
+func (s *CoreServer) replaceKeySetFor(aid string, ks *didcomm.KeySet) error {
+	if aid == "" {
+		return fmt.Errorf("a keyset must be filed under an identifier")
+	}
+	didcommMu.Lock()
+	defer didcommMu.Unlock()
+	keys, err := s.loadDIDCommKeys()
+	if err != nil {
+		return err
+	}
+	if old, ok := keys[aid]; ok {
+		keys[previousKeySetLabel(aid)] = old
+	}
+	ks.AID = aid
+	blob, err := ks.Marshal()
+	if err != nil {
+		return err
+	}
+	keys[aid] = blob
+	return s.saveDIDCommKeys(keys)
+}
+
+// previousKeySetFor is the messaging keyset a later one replaced for aid, or
+// nil where none was replaced.
+func (s *CoreServer) previousKeySetFor(aid string) *didcomm.KeySet {
+	didcommMu.Lock()
+	defer didcommMu.Unlock()
+	keys, err := s.loadDIDCommKeys()
+	if err != nil {
+		return nil
+	}
+	blob, ok := keys[previousKeySetLabel(aid)]
+	if !ok {
+		return nil
+	}
+	ks, err := didcomm.UnmarshalKeySet(blob)
+	if err != nil {
+		return nil
+	}
+	return ks
+}
+
 func (s *CoreServer) hasKeySet(aid string) (bool, error) {
 	didcommMu.Lock()
 	defer didcommMu.Unlock()
@@ -587,6 +637,12 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 		return
 	}
 	jwm, signed, err := didcomm.UnpackAuthcryptKeeping(rcpt, &peer.DID, &env)
+	if err != nil {
+		// Sent to the keys a replacement has not yet taken out of use.
+		if prev := s.previousKeySetFor(kid); prev != nil {
+			jwm, signed, err = didcomm.UnpackAuthcryptKeeping(prev, &peer.DID, &env)
+		}
+	}
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusUnauthorized) // signature_invalid / key_agreement_failed / body_hash_mismatch
 		return

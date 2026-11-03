@@ -187,6 +187,12 @@ func (s *CoreServer) tryFirstContact(w http.ResponseWriter, r *http.Request,
 	}
 	jwm, err := didcomm.UnpackAuthcrypt(rcpt, did, env)
 	if err != nil {
+		// Sent to the keys a replacement has not yet taken out of use.
+		if prev := s.previousKeySetFor(kid); prev != nil {
+			jwm, err = didcomm.UnpackAuthcrypt(prev, did, env)
+		}
+	}
+	if err != nil {
 		jsonError(w, err.Error(), http.StatusUnauthorized)
 		return true
 	}
