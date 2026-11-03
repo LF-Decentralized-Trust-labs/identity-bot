@@ -8,8 +8,11 @@ for its receipts). A case passes only if keripy ends at the log's last event.
 
     python3 -I interop/verify_keripy.py /tmp/cases.json     # needs keri==1.3.6
 
-Exit status is non-zero if keripy refuses anything, or runs a version other
-than the one this is meant for. Modelled on keri-go's interop/verify_interop.py
+Each case is also judged once more with one character of its last signature
+changed, and that copy must be refused, so a run shows the judge can say no.
+
+Exit status is non-zero if keripy refuses anything, accepts a broken copy, or
+runs a version other than the one this is meant for. Modelled on keri-go's interop/verify_interop.py
 (judge_stream), which it does not copy: see interop/README.md.
 """
 
@@ -46,6 +49,14 @@ def judge(case):
         return True, f"sn={kever.sn}"
 
 
+def tampered(case):
+    """The same case with one character of its last signature changed."""
+    stream = bytearray(d(case["message_b64"]))
+    i = len(stream) - 5  # inside the last event's last signature
+    stream[i] = ord("A") if stream[i] != ord("A") else ord("B")
+    return dict(case, message_b64=base64.b64encode(bytes(stream)).decode())
+
+
 def main(path):
     have = importlib.metadata.version("keri")
     if have != KERIPY:
@@ -61,6 +72,15 @@ def main(path):
             ok, detail = False, f"{type(exc).__name__}: {exc}"
         print(f"  {'accepted' if ok else 'REFUSED '} {case['label']:34} {detail}")
         refused += not ok
+        # A judge that accepts everything proves nothing: the same log with a
+        # broken signature must be refused.
+        try:
+            still, _ = judge(tampered(case))
+        except Exception:  # noqa: BLE001 - an exception is a refusal
+            still = False
+        if still:
+            print(f"  ACCEPTED {case['label'] + ' with a broken signature':34} the judge cannot say no")
+            refused += 1
     print(f"\nkeripy {have}: {len(cases) - refused} accepted, {refused} refused, out of {len(cases)}")
     return 1 if refused or not cases else 0
 
