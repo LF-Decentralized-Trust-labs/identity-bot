@@ -434,6 +434,75 @@
       },
       "to": "EAGENT_B",
       "allowed": false
+    },
+    {
+      "name": "a grant whose to is a string, not a list",
+      "constraints": {
+        "agent.message.open": {
+          "per_hour": 6
+        },
+        "agent.message.send": {
+          "to": "xEAGENT_Bx"
+        }
+      },
+      "to": "EAGENT_B",
+      "allowed": false
+    },
+    {
+      "name": "a grant whose to is a wildcard",
+      "constraints": {
+        "agent.message.open": {
+          "per_hour": 6
+        },
+        "agent.message.send": {
+          "to": [
+            "*"
+          ]
+        }
+      },
+      "to": "EAGENT_B",
+      "allowed": false
+    },
+    {
+      "name": "a grant whose agent.message.send is not an object",
+      "constraints": {
+        "agent.message.open": {
+          "per_hour": 6
+        },
+        "agent.message.send": "EAGENT_B"
+      },
+      "to": "EAGENT_B",
+      "allowed": false
+    },
+    {
+      "name": "a grant with a count above the ceiling",
+      "constraints": {
+        "agent.message.open": {
+          "per_hour": 61
+        },
+        "agent.message.send": {
+          "to": [
+            "EAGENT_B"
+          ]
+        }
+      },
+      "to": "EAGENT_B",
+      "allowed": false
+    },
+    {
+      "name": "a grant at the ceiling",
+      "constraints": {
+        "agent.message.open": {
+          "per_hour": 60
+        },
+        "agent.message.send": {
+          "to": [
+            "EAGENT_B"
+          ]
+        }
+      },
+      "to": "EAGENT_B",
+      "allowed": true
     }
   ],
   "tier_stripped": [

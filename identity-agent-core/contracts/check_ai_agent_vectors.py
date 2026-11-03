@@ -293,14 +293,22 @@ def statement_refused(s):
     return False
 
 
+MAX_OPENINGS_PER_HOUR = 60
+
+
 def opening_allowed(constraints, to):
     """An AI agent opens a conversation only under a grant that names, outright,
     whom it may open toward and how many conversations it may open per hour:
     a missing constraint is not leave to open toward anyone."""
-    names = constraints.get("agent.message.send", {}).get("to", [])
-    n = constraints.get("agent.message.open", {}).get("per_hour")
-    counted = isinstance(n, (int, float)) and not isinstance(n, bool) and n >= 1 and n == int(n)
-    return to in names and counted
+    send = constraints.get("agent.message.send")
+    opn = constraints.get("agent.message.open")
+    if not isinstance(send, dict) or not isinstance(opn, dict):
+        return False
+    names = send.get("to")
+    if not isinstance(names, list) or not any(isinstance(x, str) and x == to for x in names):
+        return False
+    n = opn.get("per_hour")
+    return isinstance(n, (int, float)) and not isinstance(n, bool) and 1 <= n <= MAX_OPENINGS_PER_HOUR and n == int(n)
 
 
 def jwm_of(env):

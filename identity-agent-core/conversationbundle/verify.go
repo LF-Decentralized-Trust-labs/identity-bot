@@ -1277,6 +1277,7 @@ func (v *verifier) checkOpenerReach(where string, rec agentmessage.Record, args 
 	}
 	at, err := time.Parse(time.RFC3339Nano, rec.IATime)
 	if err != nil {
+		v.fault(where, "it carries no readable time, so whether its opener's grant was in force cannot be checked")
 		return
 	}
 	if why := grant.liveAt(at); why != "" {

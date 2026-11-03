@@ -84,6 +84,10 @@ const CapabilityMessageOpen = "agent.message.open"
 // the AI agent asked, and its openings per hour must be a stated, positive
 // count. The Identity Agent admitting an opening and a verifier checking one
 // later both call it.
+// MaxOpeningsPerHour is the most conversations a grant may let its AI agent
+// open in an hour: a ceiling, so a grant cannot name a count that means none.
+const MaxOpeningsPerHour = 60
+
 func CheckOpeningGrant(limits map[string]interface{}, to string) error {
 	send, _ := limits[CapabilityMessageAgent].(map[string]interface{})
 	names, _ := send["to"].([]interface{})
@@ -92,14 +96,16 @@ func CheckOpeningGrant(limits map[string]interface{}, to string) error {
 	}
 	named := false
 	for _, n := range names {
-		named = named || fmt.Sprint(n) == to
+		if s, ok := n.(string); ok && s == to {
+			named = true
+		}
 	}
 	if !named {
 		return fmt.Errorf("the grant does not let its AI agent open a conversation toward %s", to)
 	}
 	open, _ := limits[CapabilityMessageOpen].(map[string]interface{})
-	if n, ok := open["per_hour"].(float64); !ok || n < 1 || n != float64(int64(n)) {
-		return fmt.Errorf("the grant states no count of conversations its AI agent may open per hour: an opening needs a positive %q under %s", "per_hour", CapabilityMessageOpen)
+	if n, ok := open["per_hour"].(float64); !ok || n < 1 || n > MaxOpeningsPerHour || n != float64(int64(n)) {
+		return fmt.Errorf("the grant states no count of conversations its AI agent may open per hour: an opening needs a whole %q from 1 to %d under %s", "per_hour", MaxOpeningsPerHour, CapabilityMessageOpen)
 	}
 	return nil
 }
