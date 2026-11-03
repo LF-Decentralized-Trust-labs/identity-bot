@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/keymath"
 	"identity-agent-core/recovery"
 
 	keri "github.com/grapeid/keri-go"
@@ -42,25 +43,6 @@ type keripyCase struct {
 var keripyCases []keripyCase
 
 func b64s(b []byte) string { return base64.StdEncoding.EncodeToString(b) }
-
-// signedLogOf is the stored log as a stream of signed messages.
-func signedLogOf(t *testing.T, s *CoreServer, aid string) (messages [][]byte, last []byte) {
-	t.Helper()
-	evs, err := s.DataStore.GetEvents(aid)
-	if err != nil || len(evs) == 0 {
-		t.Fatalf("no log for %s: %v", aid, err)
-	}
-	for _, ev := range evs {
-		raw, _ := base64.StdEncoding.DecodeString(ev.RawBytesB64)
-		group, err := keri.AttachControllerSigs(ev.ControllerSignatures())
-		if err != nil {
-			t.Fatalf("event %d is stored without its signatures", ev.SequenceNumber)
-		}
-		messages = append(messages, append(append([]byte{}, raw...), group...))
-		last = raw
-	}
-	return messages, last
-}
 
 func joined(messages [][]byte) []byte {
 	var out []byte
@@ -100,14 +82,38 @@ func prepareAndCommit(t *testing.T, s *CoreServer, req map[string]any, seed []by
 	return raw, res
 }
 
+// commits is what every establishment event the app makes commits to: the
+// digest of its next signing key, and the digest of a post-quantum key it keeps
+// in reserve, with a threshold of one (the app's shape; ADR-061).
+func commits(t *testing.T, next, reserve []byte) []string {
+	t.Helper()
+	pq, err := keymath.PostQuantumNextKey(reserve)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return []string{digestOfSeed(t, next), pq.Digest}
+}
+
+// messagingAnchor stands in for the messaging keyset the app anchors at founding.
+var messagingAnchor = []any{map[string]string{"d": "EMessagingKeysetAnchoredAtFounding"}}
+
 func founding(t *testing.T, s *CoreServer, key, next []byte, extra map[string]any) (aid string, tip map[string]string) {
 	t.Helper()
-	req := map[string]any{"t": "icp", "k": []string{verkeyOf(key)}, "kt": "1", "n": []string{digestOfSeed(t, next)}, "nt": "1"}
+	req := map[string]any{"t": "icp", "k": []string{verkeyOf(key)}, "kt": "1", "n": commits(t, next, reserveFor(next)), "nt": "1",
+		"a": messagingAnchor}
 	for k, v := range extra {
 		req[k] = v
 	}
 	_, res := prepareAndCommit(t, s, req, key, true)
 	return res["d"].(string), map[string]string{"s": "0", "d": res["d"].(string)}
+}
+
+// reserveFor is the post-quantum reserve committed beside next: another seed,
+// derived from it so each establishment event commits to a different one.
+func reserveFor(next []byte) []byte {
+	r := append([]byte{}, next...)
+	r[31] ^= 0x5A
+	return r
 }
 
 func tipOf(res map[string]any) map[string]string {
@@ -121,7 +127,7 @@ func TestKeripyJudges(t *testing.T) {
 	t.Run("founding", func(t *testing.T) {
 		s := appHeldCore(t)
 		aid, _ := founding(t, s, k[0], k[1], nil)
-		m, last := signedLogOf(t, s, aid)
+		m, last := storedLog(t, s, aid)
 		record(t, "core/founding", "a founding the core prepared, signed by the app", m, last)
 	})
 
@@ -129,8 +135,8 @@ func TestKeripyJudges(t *testing.T) {
 		s := appHeldCore(t)
 		aid, after := founding(t, s, k[0], k[1], nil)
 		prepareAndCommit(t, s, map[string]any{"aid": aid, "t": "rot", "k": []string{verkeyOf(k[1])}, "kt": "1",
-			"n": []string{digestOfSeed(t, k[2])}, "nt": "1", "after": after}, k[1], true)
-		m, last := signedLogOf(t, s, aid)
+			"n": commits(t, k[2], reserveFor(k[2])), "nt": "1", "after": after}, k[1], true)
+		m, last := storedLog(t, s, aid)
 		record(t, "core/rotation", "a rotation revealing the committed key", m, last)
 	})
 
@@ -141,7 +147,7 @@ func TestKeripyJudges(t *testing.T) {
 			"a": []any{map[string]string{"d": "EAnchoredByTheOwner"}}, "after": after}, k[0], false)
 		prepareAndCommit(t, s, map[string]any{"aid": aid, "t": "ixn",
 			"a": []any{map[string]string{"d": "EAnchoredAgain"}}, "after": tipOf(res)}, k[0], false)
-		m, last := signedLogOf(t, s, aid)
+		m, last := storedLog(t, s, aid)
 		record(t, "core/interaction", "two interactions after a founding", m, last)
 	})
 
@@ -158,10 +164,13 @@ func TestKeripyJudges(t *testing.T) {
 			}
 		}
 		// What keripy saw before the recovery: the thief's interactions are in its log.
-		before, _ := signedLogOf(t, s, aid)
+		before, _ := storedLog(t, s, aid)
+		if len(before) != 4 {
+			t.Fatalf("the log before the recovery holds %d events; the case needs the founding and three interactions", len(before))
+		}
 
 		code, out := call(t, s, s.handlePrepareEvent, "/api/events/prepare", map[string]any{"aid": aid,
-			"t": "rot", "k": []string{verkeyOf(k[1])}, "kt": "1", "n": []string{digestOfSeed(t, k[2])}, "nt": "1", "after": kept})
+			"t": "rot", "k": []string{verkeyOf(k[1])}, "kt": "1", "n": commits(t, k[2], reserveFor(k[2])), "nt": "1", "after": kept})
 		if code != http.StatusOK {
 			t.Fatalf("prepare recovery rotation: %d %v", code, out)
 		}
@@ -171,7 +180,7 @@ func TestKeripyJudges(t *testing.T) {
 			Sigs: []string{appSign(t, k[1], rot, true)}}); !ok {
 			t.Fatalf("the recovery rotation was refused: %d %s", rec.Code, rec.Body.String())
 		}
-		after2, last := signedLogOf(t, s, aid)
+		after2, last := storedLog(t, s, aid)
 		// Only the stored log is in keri-go's validator's reach; the replay with the
 		// superseded interactions is what keripy alone judges.
 		record(t, "core/recovery-stored-log", "the log the core keeps after a recovery rotation set the thief's interactions aside", after2, last)
@@ -186,11 +195,11 @@ func TestKeripyJudges(t *testing.T) {
 		aid, after := founding(t, s, k[0], k[1], nil)
 		// Step 1 reveals the old phrase's key and commits to the new phrase's keys.
 		_, res := prepareAndCommit(t, s, map[string]any{"aid": aid, "t": "rot", "k": []string{verkeyOf(k[1])}, "kt": "1",
-			"n": []string{digestOfSeed(t, k[6])}, "nt": "1", "after": after}, k[1], true)
+			"n": commits(t, k[6], reserveFor(k[6])), "nt": "1", "after": after}, k[1], true)
 		// Step 2 reveals the new phrase's key 1 and commits to its key 2.
 		prepareAndCommit(t, s, map[string]any{"aid": aid, "t": "rot", "k": []string{verkeyOf(k[6])}, "kt": "1",
-			"n": []string{digestOfSeed(t, k[7])}, "nt": "1", "after": tipOf(res)}, k[6], true)
-		m, last := signedLogOf(t, s, aid)
+			"n": commits(t, k[7], reserveFor(k[7])), "nt": "1", "after": tipOf(res)}, k[6], true)
+		m, last := storedLog(t, s, aid)
 		record(t, "core/move-to-a-new-phrase", "two rotations: the old phrase's key, then the new phrase's key 1", m, last)
 	})
 
@@ -206,7 +215,7 @@ func TestKeripyJudges(t *testing.T) {
 			wits = append(wits, iacrypto.NonTransferableAIDQB64(priv.Public().(ed25519.PublicKey)))
 		}
 		aid, _ := founding(t, s, k[0], k[1], map[string]any{"b": wits, "bt": "2"})
-		m, last := signedLogOf(t, s, aid)
+		m, last := storedLog(t, s, aid)
 		ev, err := keri.ParseEvent(last)
 		if err != nil || len(ev.Witnesses) != 2 || !ev.HasTOAD || ev.TOAD != 2 {
 			t.Fatalf("the founding does not carry its witnesses: %+v %v", ev, err)

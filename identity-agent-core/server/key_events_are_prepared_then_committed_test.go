@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/keriengine"
 	"identity-agent-core/recovery"
@@ -167,16 +168,7 @@ func TestAnAppHeldIdentityIsFoundedRotatedAndExtendedThroughTheCore(t *testing.T
 		t.Fatalf("commit interaction after a restart: %d %v", code, out)
 	}
 
-	evs, _ := s.DataStore.GetEvents(aid)
-	var messages [][]byte
-	for _, ev := range evs {
-		raw, _ := base64.StdEncoding.DecodeString(ev.RawBytesB64)
-		group, err := keri.AttachControllerSigs(ev.ControllerSignatures())
-		if err != nil {
-			t.Fatalf("event %d is stored without its signatures", ev.SequenceNumber)
-		}
-		messages = append(messages, append(raw, group...))
-	}
+	messages, _ := storedLog(t, s, aid)
 	if _, err := keri.ValidateSignedKEL(messages); err != nil {
 		t.Fatalf("the stored log does not verify: %v", err)
 	}
@@ -281,15 +273,7 @@ func TestACoreHeldRotationIsStoredSigned(t *testing.T) {
 	if len(evs) != 3 {
 		t.Fatalf("%d events stored", len(evs))
 	}
-	var messages [][]byte
-	for _, ev := range evs {
-		raw, _ := base64.StdEncoding.DecodeString(ev.RawBytesB64)
-		group, err := keri.AttachControllerSigs(ev.ControllerSignatures())
-		if err != nil {
-			t.Fatalf("event %d (%s) is stored without its signature", ev.SequenceNumber, ev.EventType)
-		}
-		messages = append(messages, append(raw, group...))
-	}
+	messages, _ := storedLog(t, s, aid)
 	if _, err := keri.ValidateSignedKEL(messages); err != nil {
 		t.Fatalf("the stored log does not verify: %v", err)
 	}
@@ -349,15 +333,7 @@ func TestARecoveryRotationSupersedesWhatAThiefAnchored(t *testing.T) {
 	if !strings.Contains(aside[0].EventJSON, "EAnchoredByAThief") {
 		t.Fatalf("the wrong interaction was set aside: %s", aside[0].EventJSON)
 	}
-	var messages [][]byte
-	for _, ev := range evs {
-		raw, _ := base64.StdEncoding.DecodeString(ev.RawBytesB64)
-		group, err := keri.AttachControllerSigs(ev.ControllerSignatures())
-		if err != nil {
-			t.Fatalf("event %d is stored without its signatures", ev.SequenceNumber)
-		}
-		messages = append(messages, append(raw, group...))
-	}
+	messages, _ := storedLog(t, s, own.AID)
 	if _, err := keri.ValidateSignedKEL(messages); err != nil {
 		t.Fatalf("the recovered log does not verify: %v", err)
 	}
@@ -458,4 +434,28 @@ func TestARemoteOwnerPreparesAnEvent(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("a remote owner's signed prepare was answered %d %s", rec.Code, rec.Body.String())
 	}
+}
+
+// storedLog is aid's stored log as the messages keri-go judges, each with its
+// signatures attached the one way the core attaches them (drivers.LogMessages),
+// and the last event's bytes.
+func storedLog(t *testing.T, s *CoreServer, aid string) (messages [][]byte, last []byte) {
+	t.Helper()
+	evs, err := s.DataStore.GetEvents(aid)
+	if err != nil || len(evs) == 0 {
+		t.Fatalf("no log for %s: %v", aid, err)
+	}
+	signed := make([]drivers.SignedEventBytes, 0, len(evs))
+	for _, ev := range evs {
+		signed = append(signed, drivers.SignedEventBytes{RawB64: ev.RawBytesB64, Sigs: ev.ControllerSignatures()})
+	}
+	messages, err = drivers.LogMessages(signed)
+	if err != nil {
+		t.Fatalf("the stored log of %s cannot be sent: %v", aid, err)
+	}
+	last, err = base64.StdEncoding.DecodeString(evs[len(evs)-1].RawBytesB64)
+	if err != nil {
+		t.Fatalf("the last event of %s is not base64: %v", aid, err)
+	}
+	return messages, last
 }

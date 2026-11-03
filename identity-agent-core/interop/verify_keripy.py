@@ -27,6 +27,18 @@ from keri.db import basing
 
 KERIPY = "1.3.6"
 
+# Every shape the test writes. A file missing one, from a filtered or failed
+# run, is refused rather than judged on what is left.
+EXPECTED = {
+    "core/founding",
+    "core/rotation",
+    "core/interaction",
+    "core/recovery-stored-log",
+    "core/recovery-superseding",
+    "core/move-to-a-new-phrase",
+    "core/witnessed-founding",
+}
+
 
 def d(b64):
     return base64.b64decode(b64)
@@ -64,6 +76,11 @@ def main(path):
         return 2
     with open(path) as f:
         cases = json.load(f)
+    labels = {c["label"] for c in cases}
+    if labels != EXPECTED or len(cases) != len(EXPECTED):
+        print(f"the file does not hold the expected cases: missing {sorted(EXPECTED - labels)}, "
+              f"unexpected {sorted(labels - EXPECTED)}, {len(cases)} cases")
+        return 1
     refused = 0
     for case in cases:
         try:
