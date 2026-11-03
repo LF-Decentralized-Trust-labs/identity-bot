@@ -102,7 +102,7 @@ class LocalCoreKeriService extends KeriService {
               sn: int.parse('${legacy.establishment['s']}', radix: 16),
               digest: '${legacy.establishment['d']}'
             ),
-            keyInForce: KeyManager.keyAt(seed, legacy.index).publicKeyEncoded,
+            keyInForce: KeyManager.publicKeyAt(seed, legacy.index),
             generation: legacy.index,
             tip: (sn: legacy.nextSequenceNumber - 1, digest: legacy.tipDigest),
             // The witnesses and threshold the identity has, as its core
@@ -184,15 +184,19 @@ class LocalCoreKeriService extends KeriService {
     // makes, reserved, signed and committed: the core adds nothing this
     // device did not sign (TheKeyEventsThisDeviceMakes).
     final seed = Bip39.mnemonicToSeed(code.split(' '));
-    final founded = await _makes.found(seed);
-    return InceptionResult(
-      aid: founded.aid,
-      publicKey: KeyManager.keyAt(seed, 0).publicKeyEncoded,
-      kel: '',
-      created: DateTime.now().toIso8601String(),
-      cesrSignature: founded.signatures.first,
-      rawBytesB64: founded.bytesB64,
-    );
+    try {
+      final founded = await _makes.found(seed);
+      return InceptionResult(
+        aid: founded.aid,
+        publicKey: KeyManager.publicKeyAt(seed, 0),
+        kel: '',
+        created: DateTime.now().toIso8601String(),
+        cesrSignature: founded.signatures.first,
+        rawBytesB64: founded.bytesB64,
+      );
+    } finally {
+      seed.fillRange(0, seed.length, 0);
+    }
   }
 
   /// The CESR form of a raw base64 signature that is handed back rather than
@@ -303,7 +307,7 @@ class LocalCoreKeriService extends KeriService {
     }
     return RotationResult(
       aid: state.aid,
-      newPublicKey: KeyManager.keyAt(newSeed, 1).publicKeyEncoded,
+      newPublicKey: KeyManager.publicKeyAt(newSeed, 1),
       kel: '',
       cesrSignature: signature,
     );
@@ -466,37 +470,40 @@ class LocalCoreKeriService extends KeriService {
       throw Exception('No identity keys found in secure storage.');
     }
     final seed = Bip39.mnemonicToSeed(mnemonic);
-    // The keys are this app's identity's, so only it can be rotated with them.
-    var state = await _keyInForce(seed);
-    final aid = state.aid;
-    if (name != aid) {
-      throw ArgumentError.value(name, 'name',
-          'the identity held here is $aid, and only it can be rotated with this phrase');
-    }
-    final makes = await _makesFor(seed);
-    // What this device signed and the core never acknowledged goes first, so
-    // this rotation builds on a log that verifies.
-    if ((await makes.finishSigned(aid, witnessedBy: state.witnesses))
-        .isNotEmpty) {
-      state = await _keyInForce(seed);
-    }
-    // The rotation reveals the key the last establishment event committed to
-    // (generation n + 1), signs with it, and commits to n + 2; the witness
-    // threshold stays as it is.
-    final rotated = await makes.rotate(seed,
+    try {
+      // The keys are this app's identity's, so only it can be rotated with them.
+      var state = await _keyInForce(seed);
+      final aid = state.aid;
+      if (name != aid) {
+        throw ArgumentError.value(name, 'name',
+            'the identity held here is $aid, and only it can be rotated with this phrase');
+      }
+      final makes = await _makesFor(seed);
+      // What this device signed and the core never acknowledged goes first, so
+      // this rotation builds on a log that verifies.
+      if ((await makes.finishSigned(aid, witnessedBy: state.witnesses))
+          .isNotEmpty) {
+        state = await _keyInForce(seed);
+      }
+      // The rotation reveals the key the last establishment event committed to
+      // (generation n + 1), signs with it, and commits to n + 2; the witness
+      // threshold stays as it is.
+      final rotated = await makes.rotate(seed,
+          aid: aid,
+          generation: state.generation,
+          afterSn: state.tip.sn,
+          afterDigest: state.tip.digest,
+          toad: state.witnesses.toad,
+          witnessedBy: state.witnesses);
+      return RotationResult(
         aid: aid,
-        generation: state.generation,
-        afterSn: state.tip.sn,
-        afterDigest: state.tip.digest,
-        toad: state.witnesses.toad,
-        witnessedBy: state.witnesses);
-    return RotationResult(
-      aid: aid,
-      newPublicKey:
-          KeyManager.keyAt(seed, state.generation + 1).publicKeyEncoded,
-      kel: '',
-      cesrSignature: rotated.signatures.first,
-    );
+        newPublicKey: KeyManager.publicKeyAt(seed, state.generation + 1),
+        kel: '',
+        cesrSignature: rotated.signatures.first,
+      );
+    } finally {
+      seed.fillRange(0, seed.length, 0);
+    }
   }
 
   @override
@@ -510,25 +517,29 @@ class LocalCoreKeriService extends KeriService {
       throw Exception('No identity keys found in secure storage.');
     }
     final seed = Bip39.mnemonicToSeed(mnemonic);
-    var state = await _keyInForce(seed);
-    final makes = await _makesFor(seed);
-    if ((await makes.finishSigned(state.aid, witnessedBy: state.witnesses))
-        .isNotEmpty) {
-      state = await _keyInForce(seed);
+    try {
+      var state = await _keyInForce(seed);
+      final makes = await _makesFor(seed);
+      if ((await makes.finishSigned(state.aid, witnessedBy: state.witnesses))
+          .isNotEmpty) {
+        state = await _keyInForce(seed);
+      }
+      final done = await makes.interact(seed,
+          aid: state.aid,
+          generation: state.generation,
+          afterSn: state.tip.sn,
+          afterDigest: state.tip.digest,
+          anchors: sealData,
+          witnessedBy: state.witnesses);
+      return InteractResult(
+        aid: done.aid,
+        said: done.digest,
+        sequenceNumber: done.sn,
+        cesrSignature: done.signatures.first,
+      );
+    } finally {
+      seed.fillRange(0, seed.length, 0);
     }
-    final done = await makes.interact(seed,
-        aid: state.aid,
-        generation: state.generation,
-        afterSn: state.tip.sn,
-        afterDigest: state.tip.digest,
-        anchors: sealData,
-        witnessedBy: state.witnesses);
-    return InteractResult(
-      aid: done.aid,
-      said: done.digest,
-      sequenceNumber: done.sn,
-      cesrSignature: done.signatures.first,
-    );
   }
 
   @override
@@ -546,16 +557,26 @@ class LocalCoreKeriService extends KeriService {
     }
 
     final seed = Bip39.mnemonicToSeed(mnemonic);
-    // The key reported is the key that signed, and it is the key the identity's
-    // log says is in force: after a rotation that is no longer the founding
-    // key, and a signature by the founding key verifies against nothing a
-    // counterparty would look up.
-    final index = (await _keyInForce(seed)).generation;
-    final signingKeyPair = KeyManager.keyAt(seed, index);
-    final privateKey =
-        ed.newKeyFromSeed(KeyManager.signingSeed(seed, index: index));
-
-    final rawSig = ed.sign(privateKey, Uint8List.fromList(data));
+    final String publicKey;
+    final List<int> rawSig;
+    try {
+      // The key reported is the key that signed, and it is the key the
+      // identity's log says is in force: after a rotation that is no longer
+      // the founding key, and a signature by the founding key verifies against
+      // nothing a counterparty would look up.
+      final index = (await _keyInForce(seed)).generation;
+      publicKey = KeyManager.publicKeyAt(seed, index);
+      final child = KeyManager.signingSeed(seed, index: index);
+      final privateKey = ed.newKeyFromSeed(child);
+      try {
+        rawSig = ed.sign(privateKey, Uint8List.fromList(data));
+      } finally {
+        child.fillRange(0, child.length, 0);
+        privateKey.bytes.fillRange(0, privateKey.bytes.length, 0);
+      }
+    } finally {
+      seed.fillRange(0, seed.length, 0);
+    }
     final rawSigB64 = base64Encode(rawSig);
 
     // CESR-encode the signature via the stateless Python driver endpoint.
@@ -563,7 +584,7 @@ class LocalCoreKeriService extends KeriService {
 
     return SignatureResult(
       signature: rawSigB64,
-      publicKey: signingKeyPair.publicKeyEncoded,
+      publicKey: publicKey,
       cesrSignature: cesrSig,
     );
   }

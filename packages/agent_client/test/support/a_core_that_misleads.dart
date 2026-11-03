@@ -132,8 +132,11 @@ Future<void> commitTo(String base, String rawB64, List<String> sigs) async {
 
 /// Another core, for an identity of its own.
 class ACore {
-  ACore(this._process, this.base, this.client, this._km);
+  ACore(this._process, this.base, this.client, this._km, this.logs);
   final Process _process;
+
+  /// Everything the core wrote to its standard output and error.
+  final StringBuffer logs;
   final String base;
   final ACoreThatMisleads client;
   final KeyMath _km;
@@ -153,8 +156,9 @@ Future<ACore> anotherCore(String bin, KeyMath km) async {
     'AGENT_DATA_DIR': data.path,
     'IDENTITY_AGENT_LOCAL_OWNER_SECRET': ownerSecret,
   });
-  p.stdout.drain<void>();
-  p.stderr.drain<void>();
+  final logs = StringBuffer();
+  p.stdout.transform(utf8.decoder).listen(logs.write);
+  p.stderr.transform(utf8.decoder).listen(logs.write);
   for (var i = 0; i < 100; i++) {
     try {
       if ((await http.get(Uri.parse('$base/api/health'))).statusCode == 200) {
@@ -163,5 +167,5 @@ Future<ACore> anotherCore(String bin, KeyMath km) async {
     } catch (_) {}
     await Future<void>.delayed(const Duration(milliseconds: 100));
   }
-  return ACore(p, base, ACoreThatMisleads(http.Client()), km);
+  return ACore(p, base, ACoreThatMisleads(http.Client()), km, logs);
 }

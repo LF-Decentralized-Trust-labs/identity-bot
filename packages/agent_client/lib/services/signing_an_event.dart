@@ -60,8 +60,15 @@ Future<String> signAndRecordEvent(
         'the core did not say which event $what is, so it cannot be '
         'signed and nobody would be able to verify it');
   }
-  final signature =
-      ed.sign(ed.newKeyFromSeed(signingSeed), base64Decode(rawBytesB64));
+  final privateKey = ed.newKeyFromSeed(signingSeed);
+  final List<int> signature;
+  try {
+    signature = ed.sign(privateKey, base64Decode(rawBytesB64));
+  } finally {
+    // The seed is the caller's, and zeroed there; the key made from it is
+    // this function's.
+    privateKey.bytes.fillRange(0, privateKey.bytes.length, 0);
+  }
   final String cesr;
   try {
     cesr = await cesrEncodeSignature(client, baseUrl, signature);
@@ -93,5 +100,6 @@ class EventSignatureRefused implements Exception {
   final String body;
 
   @override
-  String toString() => 'the signature over $what was refused ($statusCode): $body';
+  String toString() =>
+      'the signature over $what was refused ($statusCode): $body';
 }

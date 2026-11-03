@@ -199,8 +199,8 @@ class TheKeyEventsThisDeviceMakes {
   /// keyset, whose seed the core is handed first so it can hold those keys.
   Future<Committed> found(Uint8List seed,
       {List<String> witnesses = const [], int toad = 0}) async {
-    final key = KeyManager.keyAt(seed, 0).publicKeyEncoded;
-    final next = KeyManager.keyAt(seed, 1).publicKeyEncoded;
+    final key = KeyManager.publicKeyAt(seed, 0);
+    final next = KeyManager.publicKeyAt(seed, 1);
     final pqSeed = KeyManager.slip10Ed25519(seed, KeyPaths.postQuantum(0));
     final messagingSeed = KeyManager.slip10Ed25519(seed, KeyPaths.messaging(0));
     try {
@@ -372,9 +372,8 @@ class TheKeyEventsThisDeviceMakes {
       required List<Object?> anchors,
       required WitnessSet set,
       required bool recovery}) async {
-    final key = KeyManager.keyAt(revealing, revealed).publicKeyEncoded;
-    final next =
-        KeyManager.keyAt(committingFrom, nextClassical).publicKeyEncoded;
+    final key = KeyManager.publicKeyAt(revealing, revealed);
+    final next = KeyManager.publicKeyAt(committingFrom, nextClassical);
     final pqSeed = KeyManager.slip10Ed25519(
         committingFrom, KeyPaths.postQuantum(nextPostQuantum));
     try {
@@ -467,7 +466,8 @@ class TheKeyEventsThisDeviceMakes {
       ({int afterSn, String digest}) given,
       int generation,
       bool mayMove,
-      Future<Committed> Function(Place after, WitnessSet? witnesses) make) async {
+      Future<Committed> Function(Place after, WitnessSet? witnesses)
+          make) async {
     Place after = (sn: given.afterSn, digest: given.digest);
     WitnessSet? witnesses;
     for (var tries = 0;; tries++) {
@@ -596,7 +596,13 @@ class TheKeyEventsThisDeviceMakes {
           reveals: reveals,
           generation: generation);
       if (!reservation.signed) {
-        final signature = ed.sign(ed.newKeyFromSeed(signingSeed), raw);
+        final privateKey = ed.newKeyFromSeed(signingSeed);
+        final List<int> signature;
+        try {
+          signature = ed.sign(privateKey, raw);
+        } finally {
+          privateKey.bytes.fillRange(0, privateKey.bytes.length, 0);
+        }
         final cesr = await cesrEncodeSignature(_client, _baseUrl, signature);
         await _signed.signedWith(reservation, [cesr]);
       }

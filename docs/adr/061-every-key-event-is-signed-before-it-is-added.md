@@ -720,8 +720,14 @@ pre-rotation keys.
 anchored, at the branch their record names, until it is replaced. The app
 replaces it with an interaction anchoring generation 0 of the fixed branch,
 after handing the core that seed; the latest anchored keyset is the one the
-identity is reached on. Until that interaction is witnessed the earlier keys
-stay live. For an app-held identity whose earlier keyset came from a core's own
+identity is reached on. The same interaction replaces the keys at any other
+time: after a move to a new phrase (section 10), at once, since the old
+phrase derives the old keys. The core holds one replacement aside per
+identity until the interaction anchoring it is committed, and an event
+anchors one keyset at most. The earlier keys still open messages sent to them
+while counterparties have not yet read the replacement: until it is witnessed
+and for a grace period of 30 days after the replacement, then they are
+forgotten. For an app-held identity whose earlier keyset came from a core's own
 seed, this is the step that takes those keys out of use.
 
 ### 9. The signer learns the key in force without asking an owner route

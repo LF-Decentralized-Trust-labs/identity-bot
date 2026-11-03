@@ -54,7 +54,7 @@ class TheKeyInForce {
   static void requireTheRotationIsThisDevices(
       Map<String, dynamic> event, Uint8List seed, int j, {Object? priorBt}) {
     bool empty(Object? v) => v == null || (v is List && v.isEmpty);
-    final next = commitmentTo(KeyManager.keyAt(seed, j + 1).publicKeyEncoded);
+    final next = commitmentTo(KeyManager.publicKeyAt(seed, j + 1));
     final n = event['n'];
     String? why;
     if (n is! List || n.length != 1 || n.first != next) {
@@ -187,7 +187,7 @@ class TheKeyInForce {
         current++;
         final keys = event['k'];
         final named = keys is List && keys.isNotEmpty ? keys.first : null;
-        if (named != KeyManager.keyAt(seed, current).publicKeyEncoded) {
+        if (named != KeyManager.publicKeyAt(seed, current)) {
           throw Exception('the key log of $aid names $named in its establishment event '
               '${event['s']}, which is not key $current of this recovery phrase, so nothing '
               'signed here would verify against it');
@@ -281,8 +281,8 @@ class TheKeyInForce {
     if (event['t'] == 'rot') requireTheRotationIsThisDevices(event, seed, j, priorBt: priorBt);
     if (event['t'] == 'icp') {
       requireTheFoundingIsThisDevices(event,
-          key: KeyManager.keyAt(seed, 0).publicKeyEncoded,
-          next: KeyManager.keyAt(seed, 1).publicKeyEncoded,
+          key: KeyManager.publicKeyAt(seed, 0),
+          next: KeyManager.publicKeyAt(seed, 1),
           aid: checked.aid);
     }
     if (event['t'] != 'rot' && event['t'] != 'icp' && event['t'] != 'ixn') {

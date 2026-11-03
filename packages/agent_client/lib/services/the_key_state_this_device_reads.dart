@@ -170,7 +170,7 @@ class TheKeyStateThisDeviceReads {
         tip != null &&
         g != null &&
         key != null &&
-        KeyManager.keyAt(seed, g).publicKeyEncoded == key) {
+        KeyManager.publicKeyAt(seed, g) == key) {
       return VerifiedKeyState(
           aid: h.aid,
           establishment: est,
@@ -242,7 +242,7 @@ class TheKeyStateThisDeviceReads {
       // Step 1 of a move to this phrase reveals the old phrase's key and
       // commits to this phrase's key 1.
       final first =
-          await _km.nextKeyDigest(KeyManager.keyAt(seed, 1).publicKeyEncoded);
+          await _km.nextKeyDigest(KeyManager.publicKeyAt(seed, 1));
       if (e.next.isEmpty || e.next.first != first) {
         throw TheKeyInForceIsNotThisPhrases(aid, e.sn, key);
       }
@@ -257,7 +257,7 @@ class TheKeyStateThisDeviceReads {
       try {
         next = [
           await _km
-              .nextKeyDigest(KeyManager.keyAt(seed, g + 1).publicKeyEncoded),
+              .nextKeyDigest(KeyManager.publicKeyAt(seed, g + 1)),
           (await _km.postQuantumNext(pq)).digest,
         ];
       } finally {
@@ -301,7 +301,7 @@ class TheKeyStateThisDeviceReads {
   /// The generation of this phrase whose key is [key], or null.
   static int? _generationOf(Uint8List seed, String key) {
     for (var j = 0; j < 256; j++) {
-      if (KeyManager.keyAt(seed, j).publicKeyEncoded == key) return j;
+      if (KeyManager.publicKeyAt(seed, j) == key) return j;
     }
     return null;
   }
