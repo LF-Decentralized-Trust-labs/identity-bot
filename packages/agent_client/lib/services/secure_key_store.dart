@@ -55,7 +55,8 @@ class SecureKeyStore {
 
     await _storage.write(key: scoped, value: legacy);
     if (await _storage.read(key: scoped) != legacy) {
-      debugPrint('[SecureKeyStore] the phrase did not survive the copy — leaving the original');
+      debugPrint(
+          '[SecureKeyStore] the phrase did not survive the copy — leaving the original');
       return false;
     }
     await _storage.delete(key: _legacyMnemonicKey);
@@ -97,9 +98,15 @@ class SecureKeyStore {
 
   /// The phrase the identity is moving to, or null when no move is under way.
   static Future<List<String>?> loadPhraseMovingTo() async {
-    final value = await _storage.read(key: await ProfileScope.key(_movingToName));
+    final value =
+        await _storage.read(key: await ProfileScope.key(_movingToName));
     if (value == null || value.isEmpty) return null;
     return value.split(' ');
+  }
+
+  /// Drops a move that cannot happen, keeping the phrase in force.
+  static Future<void> clearPhraseMovingTo() async {
+    await _storage.delete(key: await ProfileScope.key(_movingToName));
   }
 
   /// Makes the phrase moved to the phrase in force, once the move's second

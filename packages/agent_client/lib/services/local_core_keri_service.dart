@@ -107,10 +107,12 @@ class LocalCoreKeriService extends KeriService {
             // The witnesses and threshold the identity has, as its core
             // keeps them; the threshold travels into the next rotation, so it
             // is never set to nothing because copies could not be read.
-            witnesses: WitnessSet([
-              for (final w in (legacy.establishment['b'] as List? ?? const []))
-                '$w'
-            ],
+            witnesses: WitnessSet(
+                [
+                  for (final w
+                      in (legacy.establishment['b'] as List? ?? const []))
+                    '$w'
+                ],
                 int.tryParse('${legacy.establishment['bt'] ?? '0'}',
                         radix: 16) ??
                     0),
@@ -220,7 +222,8 @@ class LocalCoreKeriService extends KeriService {
   /// identity keeps the keyset it is reached on until its keys are replaced.
   Future<RotationResult> moveToANewPhrase({required List<String> words}) async {
     final old = await SecureKeyStore.loadMnemonic();
-    if (old == null) throw Exception('No identity keys found in secure storage.');
+    if (old == null)
+      throw Exception('No identity keys found in secure storage.');
     if (old.join(' ') == words.join(' ')) {
       throw ArgumentError('the new phrase is the phrase in force');
     }
@@ -233,42 +236,42 @@ class LocalCoreKeriService extends KeriService {
       throw StateError('the new phrase could not be kept safely, so the move '
           'did not start');
     }
-    if (pending == null) {
-      final oldSeed = Bip39.mnemonicToSeed(old);
-      final newSeed = Bip39.mnemonicToSeed(words);
-      var state = await _keyInForce(oldSeed);
-      final makes = await _makesFor(oldSeed);
-      if ((await makes.finishSigned(state.aid, witnessedBy: state.witnesses))
-          .isNotEmpty) {
-        state = await _keyInForce(oldSeed);
-      }
-      await makes.moveToANewPhrase(oldSeed, newSeed,
-          aid: state.aid,
-          generation: state.generation,
-          afterSn: state.tip.sn,
-          afterDigest: state.tip.digest,
-          toad: state.witnesses.toad,
-          witnessedBy: state.witnesses);
-    }
     return finishMovingToANewPhrase();
   }
 
-  /// Finishes a move to a new phrase whose first rotation is in the log: the
-  /// second rotation, made with the new phrase, then the new phrase in force.
-  /// A second rotation already signed and committed, or already in the log,
-  /// is finished rather than made again.
+  /// Finishes a move to a new phrase, from wherever it stands: step 1 not
+  /// yet in the log, step 2 not yet in it, or both in and only the phrase in
+  /// force left to change. Anything this device signed and its core never
+  /// acknowledged is committed first. Every signing path calls this first
+  /// while a move is under way, so the old phrase signs nothing else meanwhile.
+  ///
+  /// Where the old phrase no longer controls the identity (somebody holding
+  /// it moved first, to keys of their own), the move cannot happen: the record
+  /// of it is dropped and [TheOldPhraseNoLongerControlsTheIdentity] is thrown.
   Future<RotationResult> finishMovingToANewPhrase() async {
     final words = await SecureKeyStore.loadPhraseMovingTo();
     if (words == null) throw StateError('no move to a new phrase is under way');
+    final old = await SecureKeyStore.loadMnemonic();
+    if (old == null)
+      throw Exception('No identity keys found in secure storage.');
+    final oldSeed = Bip39.mnemonicToSeed(old);
     final newSeed = Bip39.mnemonicToSeed(words);
-    var state = await _keyState(newSeed);
-    final makes = await _makesFor(newSeed);
-    if ((await makes.finishSigned(state.aid, witnessedBy: state.witnesses))
-        .isNotEmpty) {
+
+    await _finishSignedDuringAMove();
+
+    VerifiedKeyState state;
+    try {
+      state = await _keyState(newSeed);
+    } on TheKeyInForceIsNotThisPhrases {
+      // Step 1 is not in the log: the old phrase's keys are in force and
+      // commit to its own next key. Step 1 is made now.
+      await _stepOne(oldSeed, newSeed);
       state = await _keyState(newSeed);
     }
+
     String signature = '';
     if (state.movingToThisPhrase) {
+      final makes = await _makesFor(newSeed);
       final step2 = await makes.rotate(newSeed,
           aid: state.aid,
           generation: 0,
@@ -291,8 +294,67 @@ class LocalCoreKeriService extends KeriService {
     );
   }
 
+  /// Step 1 of a move, made with the old phrase at the key state the copies
+  /// say is in force. Where somebody else holding the old phrase rotated
+  /// first, it is made once more after their rotation; where they moved the
+  /// identity to keys of their own, the move is dropped.
+  Future<void> _stepOne(Uint8List oldSeed, Uint8List newSeed) async {
+    for (var tries = 0;; tries++) {
+      final VerifiedKeyState state;
+      try {
+        state = await _keyInForce(oldSeed);
+      } on TheKeyInForceIsNotThisPhrases {
+        await SecureKeyStore.clearPhraseMovingTo();
+        throw TheOldPhraseNoLongerControlsTheIdentity();
+      }
+      final makes = await _makesFor(oldSeed);
+      try {
+        await makes.moveToANewPhrase(oldSeed, newSeed,
+            aid: state.aid,
+            generation: state.generation,
+            afterSn: state.tip.sn,
+            afterDigest: state.tip.digest,
+            toad: state.witnesses.toad,
+            witnessedBy: state.witnesses);
+        return;
+      } on TheKeyInForceIsNotThisPhrases {
+        await SecureKeyStore.clearPhraseMovingTo();
+        throw TheOldPhraseNoLongerControlsTheIdentity();
+      } on TheLogKeepsMoving catch (e) {
+        if (!e.rotatedElsewhere || tries > 0) rethrow;
+        await _held.forgetTheTip();
+      }
+    }
+  }
+
+  /// Commits what this device signed and its core never acknowledged. An
+  /// interaction the core refused for good is left for step 2, which
+  /// supersedes it and marks it dead.
+  Future<void> _finishSignedDuringAMove() async {
+    final h = await _held.read();
+    if (h == null) return;
+    final makes = TheKeyEventsThisDeviceMakes(_client, _baseUrl, _km,
+        held: _held,
+        witnesses: TheWitnessesOfThisDevicesEvents(
+            _client, _km, KnownWitnesses(h.witnessAddresses)));
+    try {
+      await makes.finishSigned(h.aid,
+          witnessedBy: WitnessSet(h.witnesses, h.toad));
+    } on AnEventWasRefused catch (e) {
+      if (e.reservation.t != 'ixn') rethrow;
+    }
+  }
+
+  /// Finishes a move to a new phrase under way, before anything is signed.
+  Future<void> _finishAnyMoveUnderWay() async {
+    if (await SecureKeyStore.loadPhraseMovingTo() != null) {
+      await finishMovingToANewPhrase();
+    }
+  }
+
   @override
   Future<RotationResult> rotateAid({required String name}) async {
+    await _finishAnyMoveUnderWay();
     final mnemonic = await SecureKeyStore.loadMnemonic();
     if (mnemonic == null) {
       throw Exception('No identity keys found in secure storage.');
@@ -336,6 +398,7 @@ class LocalCoreKeriService extends KeriService {
     required String name,
     List<Map<String, String>> sealData = const [],
   }) async {
+    await _finishAnyMoveUnderWay();
     final mnemonic = await SecureKeyStore.loadMnemonic();
     if (mnemonic == null) {
       throw Exception('No identity keys found in secure storage.');
@@ -369,6 +432,7 @@ class LocalCoreKeriService extends KeriService {
   }) async {
     // Signing is performed locally in Dart using the stored mnemonic.
     // The private key never leaves the device and is never sent to the backend.
+    await _finishAnyMoveUnderWay();
     final mnemonic = await SecureKeyStore.loadMnemonic();
     if (mnemonic == null) {
       throw Exception('No identity keys found in secure storage. '
@@ -402,6 +466,7 @@ class LocalCoreKeriService extends KeriService {
   /// finished first. Throws where this device holds no recovery phrase: an
   /// event the core builds would otherwise be added and never signed.
   Future<({ed.PrivateKey key, KeyState state})> _signerInForce() async {
+    await _finishAnyMoveUnderWay();
     final mnemonic = await SecureKeyStore.loadMnemonic();
     if (mnemonic == null) {
       throw Exception('No identity keys found in secure storage.');
@@ -684,3 +749,13 @@ class LocalCoreKeriService extends KeriService {
 /// The name this class had when it was only used on desktop.
 @Deprecated('Use LocalCoreKeriService — it serves mobile too')
 typedef DesktopOnDeviceKeriService = LocalCoreKeriService;
+
+/// A move to a new phrase cannot happen: the old phrase no longer controls
+/// the identity, because somebody else holding it moved the identity to keys
+/// of their own first. The identity is theirs now; the move is dropped.
+class TheOldPhraseNoLongerControlsTheIdentity implements Exception {
+  @override
+  String toString() => 'somebody else holding the old recovery phrase moved '
+      'the identity to keys of their own before this move, so it is no longer '
+      'controlled by that phrase and cannot be moved';
+}

@@ -6,6 +6,7 @@ import 'package:agent_client/services/key_math.dart';
 import 'package:agent_client/services/local_core_keri_service.dart';
 import 'package:agent_client/services/secure_key_store.dart';
 import 'package:agent_client/services/the_identity_this_device_holds.dart';
+import 'package:agent_client/services/the_events_this_device_signed.dart';
 import 'package:agent_client/services/the_key_events_this_device_makes.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
@@ -167,5 +168,93 @@ void main() {
             words:
                 'zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong'.split(' ')),
         throwsStateError);
+  });
+
+  test(
+      'a move whose first rotation never reached the log is finished the next '
+      'time the identity signs, and nothing is signed with the old phrase '
+      'meanwhile', () async {
+    final aid = await anIdentity();
+    final keri = service();
+    core.client.answerTheNextCommit = (503, 'busy');
+    await expectLater(keri.moveToANewPhrase(words: fresh.split(' ')),
+        throwsA(isA<KeyEventRefused>()));
+    expect(await kel(aid), hasLength(2), reason: 'step 1 is not in the log');
+
+    final signed = await service().signPayload(name: aid, data: [1]);
+    expect(signed.publicKey, KeyManager.keyAt(newSeed, 1).publicKeyEncoded,
+        reason: 'the move was finished first, so the new phrase signed');
+    expect(await kel(aid), hasLength(4));
+    expect(await SecureKeyStore.loadMnemonic(), fresh.split(' '));
+  });
+
+  test('a move that stopped before anything was signed is finished from step 1',
+      () async {
+    final aid = await anIdentity();
+    await SecureKeyStore.savePhraseMovingTo(fresh.split(' '));
+    await service().finishMovingToANewPhrase();
+    final log = await kel(aid);
+    expect([for (final e in log) e['t']], ['icp', 'rot', 'rot', 'rot']);
+    expect(log[3]['k'], [KeyManager.keyAt(newSeed, 1).publicKeyEncoded]);
+  });
+
+  test(
+      'an interaction of this device\'s the core refused during the move is '
+      'superseded by step 2 and never committed again', () async {
+    final aid = await anIdentity();
+    final h = await TheIdentityThisDeviceHolds().read();
+    final makes = TheKeyEventsThisDeviceMakes(core.client, core.base, km,
+        held: TheIdentityThisDeviceHolds());
+    await SecureKeyStore.savePhraseMovingTo(fresh.split(' '));
+    final step1 = await makes.moveToANewPhrase(oldSeed, newSeed,
+        aid: aid,
+        generation: 1,
+        afterSn: h!.tip!.sn,
+        afterDigest: h.tip!.digest);
+    core.client.answerTheNextCommit = (403, 'not_authorised');
+    await expectLater(
+        makes.interact(oldSeed,
+            aid: aid,
+            generation: 2,
+            afterSn: step1.sn,
+            afterDigest: step1.digest,
+            anchors: anchor),
+        throwsA(isA<AnEventWasRefused>()));
+    expect(await TheEventsThisDeviceSigned().unfinished(aid), hasLength(1));
+
+    await service().finishMovingToANewPhrase();
+    expect(await TheEventsThisDeviceSigned().unfinished(aid), isEmpty,
+        reason: 'step 2 superseded the refused interaction, which is dead');
+    expect((await kel(aid))[step1.sn + 1]['t'], 'rot');
+  });
+
+  test(
+      'where somebody holding the old phrase moved the identity to keys of their '
+      'own first, the move is dropped and the person is told why', () async {
+    final aid = await anIdentity();
+    final h = await TheIdentityThisDeviceHolds().read();
+    final stranger = Bip39.mnemonicToSeed(
+        'zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong'.split(' '));
+    final theirs = await preparedAndSigned(core.client, core.base, oldSeed, 2, {
+      'aid': aid,
+      't': 'rot',
+      'k': [KeyManager.keyAt(oldSeed, 2).publicKeyEncoded],
+      'kt': '1',
+      'n': [
+        await km.nextKeyDigest(KeyManager.keyAt(stranger, 1).publicKeyEncoded)
+      ],
+      'nt': '1',
+      'a': [],
+      'br': [],
+      'ba': [],
+      'bt': '0',
+      'after': {'s': h!.tip!.sn.toRadixString(16), 'd': h.tip!.digest},
+    });
+    await commitTo(core.base, theirs.rawB64, theirs.sigs);
+
+    await expectLater(service().moveToANewPhrase(words: fresh.split(' ')),
+        throwsA(isA<TheOldPhraseNoLongerControlsTheIdentity>()));
+    expect(await SecureKeyStore.loadPhraseMovingTo(), isNull);
+    expect(await SecureKeyStore.loadMnemonic(), old.split(' '));
   });
 }
