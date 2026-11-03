@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,6 +18,8 @@ import (
 
 	"identity-agent-core/drivers"
 	"identity-agent-core/store"
+
+	keri "github.com/grapeid/keri-go"
 )
 
 // ContactStore is the contacts read/write surface.
@@ -658,8 +661,11 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 // witness is asked only for its tip, and one whose tip is not known is sent
 // nothing this time.
 //
-// designated are the witnesses to send to, today's set. Each event's receipts
-// are counted against the set and threshold the key log gives at that event.
+// designated are today's witnesses. Each event is sent to them and also to the
+// witnesses the key log designated for that event itself, so one a rotation
+// has since cut still gets the events from before the cut, which are counted
+// against the set and threshold the key log gave at that event and may need
+// its receipt to finalise. A witness cut at an event is sent nothing after it.
 func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []SignedEvent, designated []string) {
 	if len(events) == 0 {
 		return
@@ -671,7 +677,6 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 			localTip, _ = eventSeq(ev)
 		}
 	}
-	known := s.designatedTargets(designated)
 	var keyLog [][]byte
 	for _, e := range events {
 		raw, err := base64.StdEncoding.DecodeString(e.RawBytesB64)
@@ -682,10 +687,57 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 		keyLog = append(keyLog, raw)
 	}
 	at := drivers.WitnessingByEvent(drivers.ValidateKELInput{RawEvents: keyLog})
+	// The witnesses to send to, and for each the last sequence number it is
+	// owed: today's set is owed the whole log, one the log has cut only up to
+	// the last event that designated it.
+	owedTo := map[string]int{}
+	var targets []string
+	for _, key := range designated {
+		if _, dup := owedTo[key]; !dup {
+			targets = append(targets, key)
+		}
+		owedTo[key] = math.MaxInt
+	}
+	for _, raw := range keyLog {
+		var ev map[string]interface{}
+		if json.Unmarshal(raw, &ev) != nil {
+			continue
+		}
+		sn, serr := eventSeq(ev)
+		said, derr := eventSAID(ev)
+		if serr != nil || derr != nil {
+			continue
+		}
+		row, ok := at[said]
+		if !ok || row.Unreadable {
+			continue
+		}
+		for _, key := range row.Designated {
+			if cur, seen := owedTo[key]; !seen {
+				targets = append(targets, key)
+				owedTo[key] = sn
+			} else if cur != math.MaxInt && sn > cur {
+				owedTo[key] = sn
+			}
+		}
+	}
+	known := s.designatedTargets(targets)
+	// done is where a witness has nothing more to be sent: the end of the log,
+	// or the last event it is owed.
+	done := func(key string) bool {
+		owed := owedTo[key]
+		if localTip >= 0 && owed > localTip {
+			owed = localTip
+		}
+		return s.confirmedTip(signerAID, key) >= owed
+	}
 	// Only events past what every witness has confirmed can still be sent, so
 	// only those are looked at here.
 	lowest := localTip
-	for _, key := range designated {
+	for _, key := range targets {
+		if done(key) {
+			continue
+		}
 		if c := s.confirmedTip(signerAID, key); c < lowest {
 			lowest = c
 		}
@@ -713,19 +765,11 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 		if !ok || row.Unreadable {
 			continue
 		}
-		s.finalizationMu.Lock()
-		if f, _ := s.Store.GetFinalization(said); f == nil {
-			seq, _ := eventSeq(ev)
-			now := NowRFC3339()
-			_ = s.Store.SaveFinalization(FinalizationState{
-				EventSAID: said, SignerAID: signerAID, SequenceNum: seq,
-				State: FinalizePending, Threshold: row.Threshold, StartedAt: now, UpdatedAt: now,
-			})
-		}
-		s.finalizationMu.Unlock()
+		seq, _ := eventSeq(ev)
+		s.ensureFinalization(said, signerAID, seq, row.Threshold)
 	}
 	var wg sync.WaitGroup
-	for _, key := range designated {
+	for _, key := range targets {
 		w, ok := known[key]
 		if !ok {
 			log.Printf("[witness] %s designates %s, which this agent has no address for", signerAID, key)
@@ -733,7 +777,7 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 		}
 		// A witness that has already confirmed holding the log as far as it
 		// goes here is not asked again until there is more to send.
-		if localTip >= 0 && s.confirmedTip(signerAID, key) >= localTip {
+		if done(key) {
 			continue
 		}
 		wg.Add(1)
@@ -760,8 +804,12 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 				if json.Unmarshal(raw, &ev) != nil {
 					return
 				}
-				if sn, err := eventSeq(ev); err != nil || sn < from {
+				sn, snErr := eventSeq(ev)
+				if snErr != nil || sn < from {
 					continue
+				}
+				if sn > owedTo[key] {
+					return
 				}
 				// An event not yet signed ends this witness's pass. A witness
 				// cannot verify it and refuses it, and every event after it
@@ -777,6 +825,13 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 					log.Printf("[witness] event of %s not sent to %s: %v", signerAID, key, serr)
 					return
 				}
+				// Sent only if its identifier is one the log's walk derived
+				// from its bytes; an event whose d does not match them is
+				// not receipted, and nothing after it can be sent.
+				if _, ok := at[said]; !ok || keri.ValidateEvent(raw) != nil {
+					log.Printf("[witness] event %s of %s does not validate; not sent to %s", said, signerAID, key)
+					return
+				}
 				resp, err := s.PostEvent(ctx, witnessEventURL(w), body)
 				if err != nil {
 					log.Printf("[witness] %s did not take event %s of %s: %v", key, said, signerAID, err)
@@ -784,9 +839,7 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 				}
 				if sig, wit, verr := receiptFromResponse(resp, said); verr == nil && wit == key {
 					s.onReceipt(said, key, sig, at[said].Designated)
-					if sn, err := eventSeq(ev); err == nil {
-						s.confirm(signerAID, key, sn)
-					}
+					s.confirm(signerAID, key, sn)
 				}
 			}
 		}(key, w)
@@ -812,12 +865,14 @@ func (s *Service) BroadcastToDesignated(ctx context.Context, signerAID string, r
 		return err
 	}
 	seq, _ := eventSeq(event)
-	now := NowRFC3339()
+	// A re-broadcast does not start the count again. What is kept is recounted
+	// from the receipts held, so it can rise but never fall, and an event that
+	// reached its threshold stays finalised.
+	s.ensureFinalization(said, signerAID, seq, threshold)
 	s.finalizationMu.Lock()
-	_ = s.Store.SaveFinalization(FinalizationState{
-		EventSAID: said, SignerAID: signerAID, SequenceNum: seq,
-		State: FinalizePending, Threshold: threshold, StartedAt: now, UpdatedAt: now,
-	})
+	if f, _ := s.Store.GetFinalization(said); f != nil {
+		s.recountLocked(f, designated, true)
+	}
 	s.finalizationMu.Unlock()
 	body, _ := json.Marshal(map[string]interface{}{
 		"aid": signerAID, "event_b64": base64.StdEncoding.EncodeToString(rawEvent), "cesr_signature": cesrSig,
@@ -1032,6 +1087,32 @@ func (s *Service) onReceipt(eventSAID, witnessAID, cesrSig string, designated []
 		log.Printf("[witness] receipt from %s for %s not kept: %v", witnessAID, eventSAID, err)
 		return
 	}
+	s.recountLocked(f, designated, false)
+}
+
+// ensureFinalization makes sure an event has a finalisation to count receipts
+// on, creating a pending one with the threshold the key log gave it. One that
+// exists is left as it is.
+func (s *Service) ensureFinalization(eventSAID, signerAID string, seq, threshold int) {
+	s.finalizationMu.Lock()
+	defer s.finalizationMu.Unlock()
+	if f, _ := s.Store.GetFinalization(eventSAID); f != nil {
+		return
+	}
+	now := NowRFC3339()
+	_ = s.Store.SaveFinalization(FinalizationState{
+		EventSAID: eventSAID, SignerAID: signerAID, SequenceNum: seq,
+		State: FinalizePending, Threshold: threshold, StartedAt: now, UpdatedAt: now,
+	})
+}
+
+// recountLocked works out an event's count from the receipts kept for it,
+// verified as read, and writes it back. finalizationMu must be held. The count
+// only rises and a finalised event stays finalised, whatever order callers
+// arrive in. retry puts a timed-out event back to pending, because it is being
+// sent again.
+func (s *Service) recountLocked(f *FinalizationState, designated []string, retry bool) {
+	eventSAID := f.EventSAID
 	held, err := s.Contacts.GetWitnessReceipts(eventSAID)
 	if err != nil {
 		log.Printf("[witness] receipts for %s not read back: %v", eventSAID, err)
@@ -1041,34 +1122,46 @@ func (s *Service) onReceipt(eventSAID, witnessAID, cesrSig string, designated []
 	for _, h := range held {
 		receipts = append(receipts, drivers.WitnessReceipt{WitnessAID: h.WitnessAID, CesrSignature: h.CesrSignature})
 	}
-	f.ReceiptCount = drivers.CountDesignated(designated, receipts, eventSAID)
-	f.UpdatedAt = NowRFC3339()
-	if f.ReceiptCount >= f.Threshold {
+	if n := drivers.CountDesignated(designated, receipts, eventSAID); n > f.ReceiptCount {
+		f.ReceiptCount = n
+	}
+	switch {
+	case f.State == FinalizeFinalized:
+	case f.ReceiptCount >= f.Threshold:
 		f.State = FinalizeFinalized
-	} else if f.ReceiptCount > 0 {
+	case f.ReceiptCount > 0:
 		f.State = FinalizePartial
 	}
+	if retry && f.State == FinalizeTimeout {
+		f.State = FinalizePending
+	}
+	f.UpdatedAt = NowRFC3339()
 	_ = s.Store.SaveFinalization(*f)
 }
 
 func (s *Service) finalizeLoop(eventSAID string, threshold int) {
 	time.Sleep(FinalizeWaitDuration)
+	// The event is reported after the lock is released: OnEvent can block on a
+	// full channel, and a stalled listener must not stall all receipt counting.
+	count, timedOut := s.timeOut(eventSAID, threshold)
+	if timedOut && s.OnEvent != nil {
+		s.OnEvent("witness_finalize_timeout", map[string]interface{}{
+			"event_said": eventSAID, "receipt_count": count, "threshold": threshold,
+		})
+	}
+}
+
+func (s *Service) timeOut(eventSAID string, threshold int) (count int, timedOut bool) {
 	s.finalizationMu.Lock()
 	defer s.finalizationMu.Unlock()
 	f, _ := s.Store.GetFinalization(eventSAID)
-	if f == nil || f.State == FinalizeFinalized {
-		return
+	if f == nil || f.State == FinalizeFinalized || f.ReceiptCount >= threshold {
+		return 0, false
 	}
-	if f.ReceiptCount < threshold {
-		f.State = FinalizeTimeout
-		f.UpdatedAt = NowRFC3339()
-		_ = s.Store.SaveFinalization(*f)
-		if s.OnEvent != nil {
-			s.OnEvent("witness_finalize_timeout", map[string]interface{}{
-				"event_said": eventSAID, "receipt_count": f.ReceiptCount, "threshold": threshold,
-			})
-		}
-	}
+	f.State = FinalizeTimeout
+	f.UpdatedAt = NowRFC3339()
+	_ = s.Store.SaveFinalization(*f)
+	return f.ReceiptCount, true
 }
 
 // EvaluateRequest implements C7 inbound witness request handling.

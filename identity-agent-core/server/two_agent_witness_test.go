@@ -170,6 +170,11 @@ func TestTwoAgentsWitnessForEachOther(t *testing.T) {
 		t.Fatalf("the receipt is attributed to %s, not to bob's key %s", issuer, bob.witnessKey)
 	}
 
+	// The receipt is kept and counted, not only returned.
+	if f, _ := alice.svc.Store.GetFinalization(aliceSAID); f == nil || f.ReceiptCount != 1 {
+		t.Fatalf("the receipt a submission returned was not counted: %+v", f)
+	}
+
 	// Alice checks it herself, against the key her own event names.
 	res, err := drivers.ValidateKELFromBytes(drivers.ValidateKELInput{
 		AID: aliceAID, RawEvents: [][]byte{aliceRaw}, CesrSignatures: []string{aliceSig},

@@ -1858,6 +1858,26 @@ func (s *CoreServer) handleStoreEvent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// An event is stored only if its bytes are the event they say they are.
+	// Its identifier is what a witness receipt is counted under, so one stored
+	// with an identifier its content does not derive would let an honest
+	// receipt for that identifier count for it.
+	raw, derr := base64.StdEncoding.DecodeString(req.RawBytesB64)
+	if derr != nil || len(raw) == 0 {
+		writeError(w, http.StatusBadRequest, "Event bytes missing or unreadable",
+			"raw_bytes_b64 must carry the event exactly as it was published, so that it can be checked")
+		return
+	}
+	if verr := keri.ValidateEvent(raw); verr != nil {
+		writeError(w, http.StatusUnprocessableEntity, "Event does not validate", verr.Error())
+		return
+	}
+	if parsed, perr := keri.ParseEvent(raw); perr != nil || parsed.Identifier != req.AID {
+		writeError(w, http.StatusUnprocessableEntity, "Event is not this identity's",
+			"the published event does not belong to "+req.AID)
+		return
+	}
+
 	if req.Timestamp == "" {
 		req.Timestamp = time.Now().UTC().Format(time.RFC3339)
 	}
@@ -3028,7 +3048,9 @@ func claimsEvent(ev store.EventRecord, aid, said string) bool {
 		return false
 	}
 	parsed, err := keri.ParseEvent(raw)
-	return err == nil && parsed.SAID == said && parsed.Identifier == aid
+	// ParseEvent reads the identifier as written; only ValidateEvent re-derives
+	// it, so a row whose bytes do not derive their own identifier claims nothing.
+	return err == nil && parsed.SAID == said && parsed.Identifier == aid && keri.ValidateEvent(raw) == nil
 }
 
 func (s *CoreServer) handleGetKERL(w http.ResponseWriter, r *http.Request) {

@@ -502,6 +502,15 @@ func witnessingReport(in ValidateKELInput) ([]EventWitnessing, bool) {
 			broken, allMet = true, false
 			continue
 		}
+		// An event's identifier is what a receipt is counted under, and
+		// ParseEvent reads it as written. One whose bytes do not derive it is
+		// not reported at all, since reporting it would let a receipt for the
+		// identifier it claims count for content that is not what was signed.
+		// Like an unparseable event it ends what can be said from here on.
+		if err := keri.ValidateEvent(raw); err != nil {
+			broken, allMet = true, false
+			continue
+		}
 		switch ev.Ilk {
 		case "icp", "dip":
 			designated = append([]string(nil), ev.Witnesses...)

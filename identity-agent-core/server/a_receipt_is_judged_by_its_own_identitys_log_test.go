@@ -154,9 +154,11 @@ func TestAStrayRowDoesNotClaimAnEvent(t *testing.T) {
 	}
 }
 
-// An event that two identities' logs both genuinely claim cannot be placed,
-// so it is not met.
-func TestAnEventClaimedByTwoLogsIsNotMet(t *testing.T) {
+// A second row that claims the event but whose bytes do not derive the
+// identifier it claims is no claim at all, so it cannot make the genuine
+// event "claimed by two" and unplaceable, and a receipt is still counted for
+// the genuine one.
+func TestAnEventWhoseBytesDoNotDeriveItsIdentifierClaimsNothing(t *testing.T) {
 	w := witnessedIdentity(t)
 	for i := 0; i < 2; i++ {
 		w.s.DataStore.SaveWitnessReceipt(store.WitnessReceiptRecord{EventSAID: w.said, WitnessAID: w.witnesses[i], CesrSignature: w.sign(i)})
@@ -167,7 +169,7 @@ func TestAnEventClaimedByTwoLogsIsNotMet(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if got := kerlOf(t, w.s, w.said); got["threshold_met"] != false || got["receipt_count"] != float64(0) {
-		t.Errorf("an event claimed by two logs reported as %v", got)
+	if got := kerlOf(t, w.s, w.said); got["threshold_met"] != true || got["receipt_count"] != float64(2) {
+		t.Errorf("a forged claim stopped the genuine event being judged: %v", got)
 	}
 }

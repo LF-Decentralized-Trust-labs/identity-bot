@@ -30,10 +30,14 @@ func (s *Service) SubmitToWitness(ctx context.Context, witnessURL, signerAID str
 		return nil, fmt.Errorf("the event carries no identifier to be receipted")
 	}
 
-	designated, _, err := designationAt(keyLog, said)
+	designated, threshold, err := designationAt(keyLog, said)
 	if err != nil {
 		return nil, err
 	}
+	// The receipt is kept and counted on the event's finalisation, which is
+	// made from the log first: onReceipt keeps nothing for an event without one.
+	seq, _ := eventSeq(ked)
+	s.ensureFinalization(said, signerAID, seq, threshold)
 
 	body, err := json.Marshal(map[string]interface{}{
 		"aid":            signerAID,
