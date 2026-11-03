@@ -155,18 +155,7 @@ func heldAt(existing []KelEvent, message []byte) *KelEvent {
 // signedMessage is an event with its controller signatures attached, as keri-go
 // verifies it, from the forms the agent stores and sends them in.
 func signedMessage(raw []byte, sigs []string) ([]byte, error) {
-	keys := 1
-	if ev, err := keri.ParseEvent(raw); err == nil && len(ev.Keys) > 1 {
-		keys = len(ev.Keys)
-	}
-	indexed, err := drivers.IndexedSignatures(sigs, keys)
-	if err != nil {
-		return nil, err
-	}
-	if len(indexed) == 0 {
-		return nil, fmt.Errorf("unsigned_event")
-	}
-	return drivers.SignedMessage(raw, indexed)
+	return drivers.SignedMessageAsSent(raw, sigs)
 }
 
 // asSent is each of the signatures sent whose indexed form is among verified,

@@ -18,6 +18,8 @@ import (
 //	messaging_keyset  {"seed_hex"}               -> {"anchor"}
 //	parse_event       {"raw_b64"}                -> Event
 //	next_key_digest   {"key"}                    -> {"digest"}
+//	verify_receipt    {"witness","digest","sig"} -> {"ok"}
+//	verify_log        {"aid","events"}           -> LogState
 //
 // An error never carries any part of the request: a seed, or anything derived
 // from one, never reaches an error message, a log or a crash report. The
@@ -29,6 +31,12 @@ func Do(op string, request []byte) ([]byte, error) {
 		MsgB64  string `json:"msg_b64"`
 		RawB64  string `json:"raw_b64"`
 		Key     string `json:"key"`
+		Witness string `json:"witness"`
+		Digest  string `json:"digest"`
+		Sig     string `json:"sig"`
+		AID     string `json:"aid"`
+		// Events is a key log, for verify_log.
+		Events []SignedEvent `json:"events"`
 	}
 	if err := json.Unmarshal(request, &req); err != nil {
 		return nil, errors.New("the request is not a JSON object of the fields this operation takes")
@@ -97,6 +105,17 @@ func Do(op string, request []byte) ([]byte, error) {
 			return nil, errors.New("there is no key to commit to")
 		}
 		answer = map[string]string{"digest": d}
+	case "verify_receipt":
+		if err := VerifyReceipt(req.Witness, req.Digest, req.Sig); err != nil {
+			return nil, err
+		}
+		answer = map[string]bool{"ok": true}
+	case "verify_log":
+		st, err := VerifyLog(req.AID, req.Events)
+		if err != nil {
+			return nil, err
+		}
+		answer = st
 	default:
 		return nil, errors.New("unknown keymath operation")
 	}

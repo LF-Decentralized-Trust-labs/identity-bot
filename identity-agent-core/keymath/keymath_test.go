@@ -13,6 +13,8 @@ import (
 
 // keymath reaches no network and no storage, whatever it imports: it is
 // handed a seed, and nothing it is built from may be able to send or keep one.
+// drivers is allowed for the one reading of signatures every verifier shares;
+// what it depends on is checked here with the rest.
 func TestKeymathReachesNoNetworkOrStorage(t *testing.T) {
 	out, err := exec.Command("go", "list", "-deps", ".").Output()
 	if err != nil {
@@ -23,7 +25,8 @@ func TestKeymathReachesNoNetworkOrStorage(t *testing.T) {
 		case dep == "net" || strings.HasPrefix(dep, "net/") || dep == "database/sql" || dep == "os/exec",
 			strings.Contains(dep, "sqlite"),
 			strings.HasPrefix(dep, "identity-agent-core/") && dep != "identity-agent-core/iacrypto" &&
-				dep != "identity-agent-core/messagingkeys" && dep != "identity-agent-core/keymath":
+				dep != "identity-agent-core/messagingkeys" && dep != "identity-agent-core/keymath" &&
+				dep != "identity-agent-core/drivers":
 			t.Errorf("keymath depends on %s", dep)
 		}
 	}

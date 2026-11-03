@@ -52,3 +52,22 @@ func IndexedSignatures(sigs []string, keyCount int) ([]string, error) {
 	}
 	return out, nil
 }
+
+// SignedMessageAsSent is an event with its controller signatures attached, as
+// keri-go verifies it, from the forms they are stored and sent in: indexed, or
+// for an event with one key, the unindexed form this agent's own signing path
+// produces. An event with no signature is refused as "unsigned_event".
+func SignedMessageAsSent(raw []byte, sigs []string) ([]byte, error) {
+	keys := 1
+	if ev, err := keri.ParseEvent(raw); err == nil && len(ev.Keys) > 1 {
+		keys = len(ev.Keys)
+	}
+	indexed, err := IndexedSignatures(sigs, keys)
+	if err != nil {
+		return nil, err
+	}
+	if len(indexed) == 0 {
+		return nil, fmt.Errorf("unsigned_event")
+	}
+	return SignedMessage(raw, indexed)
+}
