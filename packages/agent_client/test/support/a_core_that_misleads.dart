@@ -30,6 +30,10 @@ class ACoreThatMisleads extends http.BaseClient {
   /// The next commit is sent, and its answer replaced with this one.
   (int, String)? replaceTheNextCommitsAnswer;
 
+  /// The next commit reaches the core and its answer is lost, as when the
+  /// connection drops after the core has the request.
+  bool loseTheNextCommitsAnswer = false;
+
   /// How many prepares to answer `tip_moved` without asking the core.
   int movePrepares = 0;
 
@@ -46,6 +50,13 @@ class ACoreThatMisleads extends http.BaseClient {
       if (instead != null) {
         answerTheNextCommit = null;
         return _answer(instead.$1, instead.$2);
+      }
+      if (loseTheNextCommitsAnswer) {
+        loseTheNextCommitsAnswer = false;
+        final res = await _inner.send(request);
+        await res.stream.drain<void>();
+        throw http.ClientException(
+            'the connection dropped before the answer arrived', request.url);
       }
       final replaced = replaceTheNextCommitsAnswer;
       if (replaced != null) {

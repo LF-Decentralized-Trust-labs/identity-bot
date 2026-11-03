@@ -720,6 +720,8 @@ class CoreService {
   factory CoreService({
     String? baseUrl,
     Future<Uint8List?> Function()? ownerSeed,
+    Future<OwnerKey?> Function()? ownerKey,
+    Future<void> Function()? onStaleKeyState,
     String? ownerAid,
     String agentAid = '',
     http.Client? inner,
@@ -740,7 +742,7 @@ class CoreService {
     // every other service, because a service that answered "where" and "what
     // signs it" differently from this one would reach the local core in
     // controller mode and report no problem.
-    if (ownerSeed == null || AgentConfig.isAController) {
+    if ((ownerSeed == null && ownerKey == null) || AgentConfig.isAController) {
       final how = TheAgentThisAppTalksTo.theAgent(origin: origin, inner: inner);
       return CoreService._(origin, how.client, how.session);
     }
@@ -749,6 +751,8 @@ class CoreService {
       OwnerSigningClient(
           agentOrigin: origin,
           ownerSeed: ownerSeed,
+          ownerKey: ownerKey,
+          onStaleKeyState: onStaleKeyState,
           ownerAid: ownerAid,
           agentAid: agentAid,
           inner: inner),
