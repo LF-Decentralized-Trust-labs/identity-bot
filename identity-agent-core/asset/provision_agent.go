@@ -71,6 +71,12 @@ func (h *Handler) provisionDelegated(d delegatedAsset) (*Asset, error) {
 	if h.delegatedNameTaken(displayName) {
 		return nil, fmt.Errorf("%w: %q", d.errTaken, displayName)
 	}
+	// What the grant would say is checked before anything is minted or issued,
+	// for an app and an AI agent alike: a grant that could never be in force, or
+	// that records a limit nothing enforces, is refused here, not issued.
+	if err := checkGrantAsked(d.noun, d.capabilities, d.validUntil, d.constraints); err != nil {
+		return nil, err
+	}
 	rootAID := ""
 	if h.RootAID != nil {
 		rootAID = h.RootAID()
@@ -245,17 +251,6 @@ func (h *Handler) ListAgents() []Asset {
 	out := make([]Asset, 0)
 	for _, a := range h.Store.ListAssets() {
 		if a.AssetType == "ai_agent" {
-			out = append(out, a)
-		}
-	}
-	return out
-}
-
-// ListApps returns all app assets (owner-only surface; contains no secrets).
-func (h *Handler) ListApps() []Asset {
-	out := make([]Asset, 0)
-	for _, a := range h.Store.ListAssets() {
-		if a.AssetType == "app" {
 			out = append(out, a)
 		}
 	}

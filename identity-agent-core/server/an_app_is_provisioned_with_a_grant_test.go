@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"identity-agent-core/asset"
 	"identity-agent-core/authorisation"
 	"identity-agent-core/drivers"
 	"identity-agent-core/internal/coretypes"
@@ -33,7 +34,7 @@ func provisionedApp(t *testing.T) (*CoreServer, string, string) {
 	t.Helper()
 	s := appWorld(t)
 	app, err := s.assetHandler.ProvisionAppAsset("Task console", []string{"system.info.read", "infra.zone.list"}, nil,
-		map[string]interface{}{"infra.zone.list": map[string][]string{"zone": {"a.example"}}})
+		map[string]interface{}{"infra.zone.list": map[string]interface{}{"zone": []interface{}{"a.example"}}})
 	if err != nil {
 		t.Fatalf("provisioning an app: %v", err)
 	}
@@ -111,7 +112,12 @@ func attributesOf(t *testing.T, a map[string]json.RawMessage) map[string]interfa
 // grant of that app.
 func TestReissuingAnAppsGrantWithdrawsTheOldOne(t *testing.T) {
 	s, _, first := provisionedApp(t)
-	app, _ := s.assetHandler.Store.GetAsset(s.assetHandler.ListApps()[0].ID)
+	var app asset.Asset
+	for _, a := range s.assetHandler.Store.ListAssets() {
+		if a.AssetType == "app" {
+			app = a
+		}
+	}
 	second, err := s.issueCapabilityGrant(&app, coretypes.Authority{})
 	if err != nil {
 		t.Fatal(err)
@@ -200,5 +206,54 @@ func TestTheEdgeLookupAcceptsAppSchemas(t *testing.T) {
 		IssuedAt: since.Add(time.Hour).Format("2006-01-02T15:04:05.000000000Z07:00")}
 	if !s.issuedUnderFirstVersionTooLate(late) {
 		t.Fatal("a first-version credential issued after edges began was honoured")
+	}
+}
+
+// Revoking or removing an app finds its App Grant, as it does an AI agent's
+// grant, so the grant does not outlive the app. Finding a grant is not
+// admitting it: the schemas a gateway admits do not include the App Grant.
+func TestAnAppsGrantIsFoundAndWithdrawnWithTheApp(t *testing.T) {
+	s, appAID, said := provisionedApp(t)
+	h := hostWrapper{s: s}
+
+	held := h.GrantsHeldBy(appAID, true)
+	if len(held) != 1 || held[0].SAID != said {
+		t.Fatalf("the app's App Grant is not found among what it holds: %+v", held)
+	}
+	if g := h.FindCapabilityGrant(appAID); g == nil || g.SAID != said {
+		t.Fatalf("FindCapabilityGrant does not find the app's grant: %+v", g)
+	}
+	for _, admitted := range h.CapabilityGrantSchemaSAIDs() {
+		if admitted == schemas.AppGrant.Schema.SAID {
+			t.Fatal("looking up an App Grant widened what the gateway admits")
+		}
+	}
+
+	// What revoking an app does with each grant it holds.
+	for _, g := range h.GrantsHeldBy(appAID, true) {
+		rec, _ := s.DataStore.GetCredential(g.SAID)
+		if _, _, err := h.WithdrawCredential(rec); err != nil {
+			t.Fatalf("withdrawing the App Grant: %v", err)
+		}
+	}
+	if rec, _ := s.DataStore.GetCredential(said); rec == nil || rec.Status == "issued" {
+		t.Fatalf("the App Grant outlived its app: %+v", rec)
+	}
+	if left := h.GrantsHeldBy(appAID, true); len(left) != 0 {
+		t.Fatalf("a usable grant is still held after revoking: %+v", left)
+	}
+}
+
+// An app is held to account as an AI agent is: an Identity Agent that holds
+// one anchors its record, and the audit trail names its owner.
+func TestAnAppCountsAsAnAIAgentDoesForTheRecordAndTheAudit(t *testing.T) {
+	s, appAID, _ := provisionedApp(t)
+	s.DeclaredEntityType = "individual"
+	if !s.anchorsItsRecord() {
+		t.Fatal("an Identity Agent that holds an app does not anchor its record")
+	}
+	name, owner := s.describeAID(appAID)
+	if name != "Task console" || owner != s.OwnerRootAID() {
+		t.Fatalf("the audit names %q, owner %q; want the app, owned by %q", name, owner, s.OwnerRootAID())
 	}
 }

@@ -283,7 +283,7 @@ encrypted stores, a relay and sign-in are later steps and are not in this contra
 conversation verifier still accepts only an AI agent's body and grant: an app is not a party to
 a conversation.
 
-**Closed (2026-11-03).** The core provisions an app as it does an AI agent:
+**Closed (2026-11-02).** The core provisions an app as it does an AI agent:
 `asset.Handler.ProvisionAppAsset(displayName string, capabilities []string, validUntil *time.Time,
 constraints map[string]interface{}) (*Asset, error)` mints an asset of type `app` with its own
 delegated identifier, and the Identity Agent issues its App Grant from the owner's registry with
@@ -292,11 +292,11 @@ left for that device to sign). An app and an AI agent cannot share a name, since
 identities by it. Three seams are closed with it:
 
 - `checkAskedFor` (`identity-agent-core/authorisation/request.go`) checks an App Grant against the
-  request that asked for it, exactly as it does an AI Agent Grant (name, capabilities, limits, and
-  the asset the request is about), at the route that creates an app, `POST /api/hosted-apps`
-  (mounted by the apphosting add-on), and only there: no route changes an app's capabilities yet,
+  request that asked for it, exactly as it does an AI Agent Grant (name, capabilities and limits), at the route that creates an app,
+  `POST /api/hosted-apps` (mounted by the apphosting add-on), and only there: no route changes an app's capabilities yet,
   and when one is added it is bound in `checkAskedFor` with it. A request to grant an AI agent is
-  not accepted as an app's, nor the reverse.
+  not accepted as an app's, nor the reverse. The request does not name the app it creates, so
+  nothing ties the grant to an asset beyond its name.
 - `grantShown` (`identity-agent-core/authorisation/what_is_signed_is_what_is_shown.go`) shows an
   App Grant, as kind `app`, with its name, capabilities, limits and end, so a device holding the
   owner's key can be asked to sign one.
@@ -306,6 +306,11 @@ identities by it. Three seams are closed with it:
 
 These seams are still open, and each is refused rather than half-working:
 
+- An App Grant signed on another device is kept by this Identity Agent only once an add-on
+  registers the app grant kind; until then it is not taken up. No add-on registers it yet.
+- Looking up the grants an asset holds (`GrantsHeldBy`, `FindCapabilityGrant`) covers an app's
+  App Grant, so revoking or removing an app withdraws it; that is a different list from the one
+  below, which is what a gateway admits.
 - No route issues an App Grant or an App Body yet. `ProvisionAppAsset` and the issuance exist; no
   route in the Identity Agent calls them; the apphosting add-on's `POST /api/hosted-apps` is the
   route that will, and no route yet changes an app's capabilities.

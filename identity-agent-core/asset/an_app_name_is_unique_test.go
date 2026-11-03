@@ -24,8 +24,14 @@ func TestAnAppCannotTakeAnAgentsNameNorAnAgentAnApps(t *testing.T) {
 	if _, err := h.ProvisionAppAsset("   ", nil, nil, nil); err == nil {
 		t.Fatal("an app with no name was provisioned")
 	}
-	if apps := h.ListApps(); len(apps) != 1 {
-		t.Fatalf("%d apps listed, want 1", len(apps))
+	apps := 0
+	for _, a := range h.Store.ListAssets() {
+		if a.AssetType == "app" {
+			apps++
+		}
+	}
+	if apps != 1 {
+		t.Fatalf("%d apps stored, want 1", apps)
 	}
 	if agents := h.ListAgents(); len(agents) != 1 {
 		t.Fatalf("an app is listed among the AI agents: %d", len(agents))

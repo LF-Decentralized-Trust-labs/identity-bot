@@ -417,6 +417,18 @@ func anchoredAt(kel [][]byte, subject string, sn int, said string) (int, bool) {
 	return 0, false
 }
 
+// checkCapabilitiesAsked checks that the capabilities and limits the request
+// asked for are those the grant gives, for an AI agent and an app alike.
+func checkCapabilitiesAsked(cred acdc, asked map[string]json.RawMessage) error {
+	if !sameSet(asked["capabilities"], cred.A["capabilities"]) {
+		return fmt.Errorf("the request asked for other capabilities than were granted")
+	}
+	if rc, ok := asked["resource_constraints"]; ok && !sameJSON(rc, cred.A["resource_constraints"]) {
+		return fmt.Errorf("the request asked for other limits than were granted")
+	}
+	return nil
+}
+
 // checkAskedFor checks that what the request asked for is what was issued.
 func checkAskedFor(cred acdc, method, path string, asked map[string]json.RawMessage, resolve func(id, holder string) (ExpectedAsset, bool)) error {
 	about := stringAttr(cred.A, "about")
@@ -440,12 +452,7 @@ func checkAskedFor(cred acdc, method, path string, asked map[string]json.RawMess
 		default:
 			return fmt.Errorf("%s %s is not a request that grants an AI agent anything", method, path)
 		}
-		if !sameSet(asked["capabilities"], cred.A["capabilities"]) {
-			return fmt.Errorf("the request asked for other capabilities than were granted")
-		}
-		if rc, ok := asked["resource_constraints"]; ok && !sameJSON(rc, cred.A["resource_constraints"]) {
-			return fmt.Errorf("the request asked for other limits than were granted")
-		}
+		return checkCapabilitiesAsked(cred, asked)
 	case schemas.AppGrant.Schema.SAID:
 		// An app's grant is asked for at the route that creates an app, never
 		// an AI agent's, so a request to grant an AI agent cannot be turned
@@ -459,12 +466,7 @@ func checkAskedFor(cred acdc, method, path string, asked map[string]json.RawMess
 		default:
 			return fmt.Errorf("%s %s is not a request that grants an app anything", method, path)
 		}
-		if !sameSet(asked["capabilities"], cred.A["capabilities"]) {
-			return fmt.Errorf("the request asked for other capabilities than were granted")
-		}
-		if rc, ok := asked["resource_constraints"]; ok && !sameJSON(rc, cred.A["resource_constraints"]) {
-			return fmt.Errorf("the request asked for other limits than were granted")
-		}
+		return checkCapabilitiesAsked(cred, asked)
 	case schemas.ControllerGrant.Schema.SAID:
 		if method != "POST" || path != "/api/controllers" {
 			return fmt.Errorf("%s %s is not a request that grants a machine", method, path)
