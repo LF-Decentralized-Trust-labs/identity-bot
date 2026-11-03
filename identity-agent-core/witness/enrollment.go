@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	neturl "net/url"
 	"strings"
 	"time"
 
@@ -35,18 +36,24 @@ type WitnessRequest struct {
 }
 
 // RequestStatement is what a requester signs in a witness request: who it
-// is, which witness it asks, where the answer is to be sent (its OOBI), which
-// request this is, whether it covers its delegates, and when. Naming the
+// is, which witness it asks, where the answer is to be sent (its OOBI), the
+// backend it runs on, which request this is, whether it covers its delegates,
+// and when. Naming the
 // witness keeps a request signed for one from being replayed to another;
 // binding the OOBI keeps anybody else from pointing the answer, and this
 // agent's next call, at an address of their choosing.
-func RequestStatement(requester, witnessAID, oobi, requestID string, covers bool, stamp string) string {
-	return fmt.Sprintf("witness-request/v3\n%s\n%s\n%s\n%s\n%v\n%s", requester, witnessAID, oobi, requestID, covers, stamp)
+func RequestStatement(requester, witnessAID, oobi, backendType, requestID string, covers bool, stamp string) string {
+	return fmt.Sprintf("witness-request/v4\n%s\n%s\n%s\n%s\n%s\n%v\n%s", requester, witnessAID, oobi, backendType, requestID, covers, stamp)
 }
 
 // configRequestStamps is, by requester, the stamp of the last signed request
 // that changed its coverage: an older or equal one is a replay.
 const configRequestStamps = "witness.request_stamps"
+
+// requestLifetime is how long a request this agent sent can still be answered:
+// an answer after it is refused, so a request nobody answered does not stay
+// open for whoever finds the witness's key later.
+const requestLifetime = 24 * time.Hour
 
 // requestFreshness is how far a signed witness request's stamp may be from
 // now.
@@ -63,7 +70,7 @@ func (s *Service) signedByRequester(req WitnessRequest) bool {
 	if err != nil || time.Since(at) > requestFreshness || time.Until(at) > requestFreshness {
 		return false
 	}
-	if !s.signedBy(req.RequesterAID, RequestStatement(req.RequesterAID, s.ourAID(), req.RequesterOOBI, req.RequestID, req.CoversDelegates, req.Stamp), req.Signature) {
+	if !s.signedBy(req.RequesterAID, RequestStatement(req.RequesterAID, s.ourAID(), req.RequesterOOBI, req.BackendType, req.RequestID, req.CoversDelegates, req.Stamp), req.Signature) {
 		return false
 	}
 	// Newer than the last one acted on for this requester, or a replay.
@@ -167,11 +174,11 @@ type AcceptCallback struct {
 
 // AcceptStatement is what a responder signs in its answer to a witness
 // request: who asked, who answers and under which witness key, the answer, the
-// backend it answers from, the request it answers, and when. Naming the
-// requester and the request keeps an answer to one from being replayed to
-// another.
-func AcceptStatement(requester, responder, witnessKey, decision, backendType, requestID, stamp string) string {
-	return fmt.Sprintf("witness-accept/v2\n%s\n%s\n%s\n%s\n%s\n%s\n%s", requester, responder, witnessKey, decision, backendType, requestID, stamp)
+// reason given for it (which the person is shown), the backend it answers
+// from, the request it answers, and when. Naming the requester and the request
+// keeps an answer to one from being replayed to another.
+func AcceptStatement(requester, responder, witnessKey, decision, reason, backendType, requestID, stamp string) string {
+	return fmt.Sprintf("witness-accept/v3\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s", requester, responder, witnessKey, decision, reason, backendType, requestID, stamp)
 }
 
 // configAcceptStamps is, by responder, the stamp of the last signed answer
@@ -232,18 +239,30 @@ func (s *Service) localWitnessCapacityOK() bool {
 
 // ProcessInboundRequest handles the inbound enrollment request: evaluate, enroll as witnessing-for, task, POST-back, reciprocal.
 //
-// The route this arrives on is open, so the requester's signature is the gate:
-// a request that is not signed by the requester's key, fresh and newer than
-// the last, bound to the OOBI the answer goes to, is refused before anything is
-// created or sent. Nobody is told anything either, since the address in an
-// unsigned request is nobody's to name.
+// The route this arrives on is open, so the requester's signature is the gate,
+// and it is checked first, whatever the decision would be: a request that is
+// not signed by the requester's key, fresh and newer than the last, bound to
+// the OOBI the answer goes to, is refused plainly before anything is created
+// or sent. No task is written and no answer is posted, since the address in an
+// unsigned request is nobody's to name, and a signed decline carrying
+// somebody else's request id would close their real request. An answer, accepted
+// or declined, goes only to the OOBI the requester signed.
+//
+// A requester whose key this agent does not hold (a contact recorded without
+// one, and no key history held for it) cannot be checked, so it is refused
+// as requester_key_unknown. The requester sees that reason in the response to
+// its request and records it against the request.
 func (s *Service) ProcessInboundRequest(ctx context.Context, req WitnessRequest) InboundResult {
-	accept, reason := s.EvaluateInboundRequest(req)
-	if accept {
-		if !s.signedByRequester(req) {
-			return InboundResult{Accepted: false, Reason: "unsigned_request"}
-		}
+	if req.RequesterAID == "" {
+		return InboundResult{Accepted: false, Reason: "missing_requester"}
 	}
+	if s.currentKeyOf(req.RequesterAID) == "" {
+		return InboundResult{Accepted: false, Reason: "requester_key_unknown"}
+	}
+	if !s.signedByRequester(req) {
+		return InboundResult{Accepted: false, Reason: "unsigned_request"}
+	}
+	accept, reason := s.EvaluateInboundRequest(req)
 	taskID := fmt.Sprintf("witness-recv-%s-%d", req.RequesterAID, time.Now().Unix())
 	now := NowRFC3339()
 	taskStatus := "failed"
@@ -337,7 +356,7 @@ func (s *Service) SendAcceptCallback(ctx context.Context, requesterOOBI string, 
 	}
 	cb.WitnessKey = key
 	cb.Stamp = time.Now().UTC().Format(time.RFC3339Nano)
-	signer, sig, err := s.SignReceipt(AcceptStatement(cb.RequesterAID, cb.ResponderAID, cb.WitnessKey, cb.Decision, cb.BackendType, cb.RequestID, cb.Stamp))
+	signer, sig, err := s.SignReceipt(AcceptStatement(cb.RequesterAID, cb.ResponderAID, cb.WitnessKey, cb.Decision, cb.Reason, cb.BackendType, cb.RequestID, cb.Stamp))
 	if err != nil {
 		return fmt.Errorf("sign the answer: %w", err)
 	}
@@ -348,6 +367,12 @@ func (s *Service) SendAcceptCallback(ctx context.Context, requesterOOBI string, 
 	body, err := json.Marshal(cb)
 	if err != nil {
 		return err
+	}
+	// Only to a web address the requester named, never to anything else this
+	// agent could be made to call.
+	u, perr := neturl.Parse(requesterOOBI)
+	if perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("the requester's OOBI is not a web address")
 	}
 	url := witnessAcceptURL(requesterOOBI)
 	_, err = s.PostEvent(ctx, url, body)
@@ -384,7 +409,7 @@ func (s *Service) ApplyAcceptCallback(cb AcceptCallback) error {
 	if cb.WitnessKey != meta.WitnessKey {
 		return fmt.Errorf("the answer names witness key %q, and %s published %q", cb.WitnessKey, cb.ResponderAID, meta.WitnessKey)
 	}
-	if !signedByWitnessKey(meta.WitnessKey, AcceptStatement(cb.RequesterAID, cb.ResponderAID, cb.WitnessKey, cb.Decision, cb.BackendType, cb.RequestID, cb.Stamp), cb.Signature) {
+	if !signedByWitnessKey(meta.WitnessKey, AcceptStatement(cb.RequesterAID, cb.ResponderAID, cb.WitnessKey, cb.Decision, cb.Reason, cb.BackendType, cb.RequestID, cb.Stamp), cb.Signature) {
 		return fmt.Errorf("the answer is not signed by %s's witness key", cb.ResponderAID)
 	}
 
@@ -405,27 +430,33 @@ func (s *Service) ApplyAcceptCallback(cb AcceptCallback) error {
 		return fmt.Errorf("no witness request %q to %s is waiting for an answer", cb.RequestID, cb.ResponderAID)
 	}
 
+	// The enrolment and the request's completion stand or fall together: the
+	// request is what makes the answer usable once, so if it cannot be marked
+	// done the enrolment is undone and the answer can be tried again.
 	accepted := cb.Decision == "accepted"
+	var undo func()
 	if accepted {
-		if err := s.enrollWitnessForUs(cb.ResponderAID, cb.BackendType); err != nil {
+		var err error
+		if undo, err = s.enrollWitnessForUsUndoably(cb.ResponderAID, cb.BackendType); err != nil {
 			return err
 		}
+		if err := s.completeTask(*task, "completed",
+			fmt.Sprintf("Witness enrollment accepted by %s", cb.ResponderAID[:12])); err != nil {
+			undo()
+			return err
+		}
+	} else if err := s.completeTask(*task, "failed", fmt.Sprintf("Declined: %s", cb.Reason)); err != nil {
+		return err
 	}
+	// The request is no longer pending, so the answer cannot be used twice
+	// even if this record is not kept.
 	stamps[cb.ResponderAID] = cb.Stamp
 	raw, _ := json.Marshal(stamps)
 	if err := s.Store.SetConfig(configAcceptStamps, string(raw)); err != nil {
-		return err
+		log.Printf("[witness] could not record the stamp of the answer from %s: %v", cb.ResponderAID, err)
 	}
 	if accepted {
-		if err := s.completeTask(*task, "completed",
-			fmt.Sprintf("Witness enrollment accepted by %s", cb.ResponderAID[:12])); err != nil {
-			return err
-		}
 		_ = s.refreshMutual(cb.ResponderAID)
-	} else {
-		if err := s.completeTask(*task, "failed", fmt.Sprintf("Declined: %s", cb.Reason)); err != nil {
-			return err
-		}
 	}
 	if s.OnEvent != nil {
 		s.OnEvent("witness_accept_received", map[string]interface{}{
@@ -433,6 +464,26 @@ func (s *Service) ApplyAcceptCallback(cb AcceptCallback) error {
 		})
 	}
 	return nil
+}
+
+// enrollWitnessForUsUndoably is enrollWitnessForUs, and the way to put back
+// what it changed.
+func (s *Service) enrollWitnessForUsUndoably(responderAID, backendType string) (func(), error) {
+	prevContact, _ := s.Contacts.GetContact(responderAID)
+	prevMeta, _ := s.Store.GetContactMeta(responderAID)
+	if err := s.enrollWitnessForUs(responderAID, backendType); err != nil {
+		return nil, err
+	}
+	return func() {
+		if prevContact != nil {
+			_ = s.Contacts.SaveContact(*prevContact)
+		}
+		if prevMeta != nil {
+			_ = s.Store.SaveContactMeta(*prevMeta)
+		} else {
+			_ = s.Store.SaveContactMeta(ContactMeta{ContactAID: responderAID})
+		}
+	}, nil
 }
 
 // enrollWitnessForUs marks responder as a witness FOR our AID (broadcast pool).
@@ -475,6 +526,10 @@ func (s *Service) pendingSentTask(contactAID, requestID string) (*store.TaskReco
 	for i := range tasks {
 		t := tasks[i]
 		if requestID != "" && t.ID == requestID && t.Type == "witness_request_sent" && t.ContactAID == contactAID && t.Status == "pending" {
+			// A request nobody answered in time is not answered late.
+			if at, err := time.Parse(time.RFC3339Nano, t.CreatedAt); err != nil || time.Since(at) > requestLifetime {
+				return nil, nil
+			}
 			return &t, nil
 		}
 	}

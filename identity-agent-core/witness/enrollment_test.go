@@ -182,7 +182,7 @@ func answerTo(requestID, responder, requester, key, decision string, seed []byte
 		RequesterAID: requester, ResponderAID: responder, Decision: decision,
 		BackendType: BackendDesktop, WitnessKey: key, Stamp: at.UTC().Format(time.RFC3339Nano),
 	}
-	cb.Signature, _ = login.SignString(AcceptStatement(cb.RequesterAID, cb.ResponderAID, cb.WitnessKey, cb.Decision, cb.BackendType, cb.RequestID, cb.Stamp), seed)
+	cb.Signature, _ = login.SignString(AcceptStatement(cb.RequesterAID, cb.ResponderAID, cb.WitnessKey, cb.Decision, cb.Reason, cb.BackendType, cb.RequestID, cb.Stamp), seed)
 	return cb
 }
 
@@ -265,15 +265,21 @@ func TestInboundDeclinePostsBack(t *testing.T) {
 	sB := agentService(t, mcB.identity.AID, mcB)
 	sB.PostEvent = cap.post
 
+	// A signed request from somebody this agent holds a key for, but has not
+	// agreed to, is declined, and the decline is posted back.
+	pub, seed := identityKey(t)
+	mcB.contacts[aidU] = store.ContactRecord{AID: aidU, Status: "accepted", ContactCategory: "general", PublicKey: pub}
+	oobi := "http://127.0.0.1:5050/public/oobi/" + aidA
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	sig, _ := login.SignString(RequestStatement(aidU, sB.Identity(), oobi, BackendDesktop, "r1", false, stamp), seed)
 	result := sB.ProcessInboundRequest(context.Background(), WitnessRequest{
-		RequesterAID: aidU, RequesterOOBI: "http://127.0.0.1:5050/public/oobi/" + aidA, BackendType: BackendDesktop,
+		RequesterAID: aidU, RequesterOOBI: oobi, BackendType: BackendDesktop, RequestID: "r1", Stamp: stamp, Signature: sig,
 	})
 	if result.Accepted {
-		t.Fatal("unknown contact must decline")
+		t.Fatal("a contact outside trusted and professional must decline")
 	}
-	time.Sleep(50 * time.Millisecond)
-	cb := cap.lastAccept()
-	if cb.Decision != "declined" {
+	cb := cap.waitForAccept(t)
+	if cb.Decision != "declined" || cb.RequestID != "r1" {
 		t.Fatalf("want declined POST-back, got %+v", cb)
 	}
 }

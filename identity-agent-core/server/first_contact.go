@@ -91,24 +91,24 @@ func allowFirstContactAttempt(now time.Time) bool {
 // The claim is checked in this order deliberately: the history must be sound and
 // signed before anything is read out of it, and the identifier it derives must
 // be the one the envelope named before those keys are used to open anything.
-func (s *CoreServer) identifyStranger(claimedAID string, kel []map[string]interface{}) (*didcomm.DID, error) {
+func (s *CoreServer) identifyStranger(claimedAID string, kel []map[string]interface{}) (*didcomm.DID, string, error) {
 	if s.KeriDriver == nil {
-		return nil, fmt.Errorf("this agent cannot check a key history, so it cannot meet anybody new")
+		return nil, "", fmt.Errorf("this agent cannot check a key history, so it cannot meet anybody new")
 	}
 	if len(kel) == 0 {
-		return nil, fmt.Errorf("no key history was presented")
+		return nil, "", fmt.Errorf("no key history was presented")
 	}
 
 	val, err := s.KeriDriver.ValidateKEL(claimedAID, kel)
 	if err != nil {
-		return nil, fmt.Errorf("the presented key history could not be checked: %w", err)
+		return nil, "", fmt.Errorf("the presented key history could not be checked: %w", err)
 	}
 	if !val.KelVerified {
 		reason := "it does not check out"
 		if len(val.ValidationErrors) > 0 {
 			reason = val.ValidationErrors[0]
 		}
-		return nil, fmt.Errorf("the presented key history is not sound: %s", reason)
+		return nil, "", fmt.Errorf("the presented key history is not sound: %s", reason)
 	}
 
 	// The identifier has to be derived from the history presented, not merely
@@ -116,19 +116,22 @@ func (s *CoreServer) identifyStranger(claimedAID string, kel []map[string]interf
 	// not the identifier is refused — so reaching here means the claim holds.
 	icp, err := eventFromKELEntry(kel[0])
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	x, kem, err := iacrypto.AnchoredAgreementKeys(icp)
 	if err != nil {
-		return nil, fmt.Errorf("%s does not commit to any messaging keys, so there is nothing "+
+		return nil, "", fmt.Errorf("%s does not commit to any messaging keys, so there is nothing "+
 			"here that ties it to the message it sent: %w", claimedAID, err)
 	}
 	ed, dsa, err := iacrypto.AnchoredSigningKeys(icp)
 	if err != nil {
-		return nil, fmt.Errorf("%s does not commit to the keys that sign for it: %w", claimedAID, err)
+		return nil, "", fmt.Errorf("%s does not commit to the keys that sign for it: %w", claimedAID, err)
 	}
 
-	return didcomm.DIDFromRawKeys(claimedAID, ed, dsa, x, kem)
+	did, err := didcomm.DIDFromRawKeys(claimedAID, ed, dsa, x, kem)
+	// The key it signs with now, which is what a signature from it is checked
+	// against later.
+	return did, val.CurrentPublicKey, err
 }
 
 // tryFirstContact handles an envelope from a sender this agent does not know.
@@ -157,7 +160,7 @@ func (s *CoreServer) tryFirstContact(w http.ResponseWriter, r *http.Request,
 		return true
 	}
 
-	did, err := s.identifyStranger(claimedAID, env.SenderKEL)
+	did, currentKey, err := s.identifyStranger(claimedAID, env.SenderKEL)
 	if err != nil {
 		log.Printf("[first-contact] refused an introduction from %s: %v", claimedAID, err)
 		jsonError(w, "the key history presented does not establish who you are", http.StatusForbidden)
@@ -220,7 +223,7 @@ func (s *CoreServer) tryFirstContact(w http.ResponseWriter, r *http.Request,
 	// agreeing to are the ones that were actually verified here, rather than
 	// whatever a later fetch happens to return.
 	if err := s.DataStore.SaveContactKEL(store.ContactKELRecord{
-		AID: claimedAID, KEL: env.SenderKEL, KelVerified: true,
+		AID: claimedAID, KEL: env.SenderKEL, KelVerified: true, CurrentPublicKey: currentKey,
 		EventsValidated: len(env.SenderKEL),
 		ValidatedAt:     time.Now().UTC().Format(time.RFC3339),
 	}); err != nil {
@@ -267,10 +270,19 @@ func (s *CoreServer) recordConnectionRequest(aid string, jwm *didcomm.JWM) error
 			alias = alias[:12]
 		}
 	}
+	// The key the checked history ends on, so that something this contact
+	// signs, such as a witness request, can be verified against the contact
+	// record. Left empty only when no checked history was kept; a request
+	// from such a contact is then refused as requester_key_unknown.
+	publicKey := ""
+	if kel, _ := s.DataStore.GetContactKEL(aid); kel != nil && kel.KelVerified {
+		publicKey = kel.CurrentPublicKey
+	}
 	rec := store.ContactRecord{
 		AID:          aid,
 		Alias:        alias,
 		OobiURL:      body.OobiURL,
+		PublicKey:    publicKey,
 		Status:       "pending_inbound",
 		DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
 	}

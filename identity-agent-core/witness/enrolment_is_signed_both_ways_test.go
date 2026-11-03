@@ -28,7 +28,7 @@ func TestAWitnessRequestIsActedOnOnlyIfTheRequesterSignedIt(t *testing.T) {
 
 	sign := func(seed []byte, oobi, id string, at time.Time) WitnessRequest {
 		stamp := at.UTC().Format(time.RFC3339Nano)
-		sig, _ := login.SignString(RequestStatement(aid, w.Identity(), oobi, id, false, stamp), seed)
+		sig, _ := login.SignString(RequestStatement(aid, w.Identity(), oobi, BackendDesktop, id, false, stamp), seed)
 		return WitnessRequest{RequesterAID: aid, RequesterOOBI: oobi, BackendType: BackendDesktop, RequestID: id, Stamp: stamp, Signature: sig}
 	}
 	unsigned := WitnessRequest{RequesterAID: aid, RequesterOOBI: oobi, BackendType: BackendDesktop}
