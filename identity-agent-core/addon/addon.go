@@ -93,6 +93,11 @@ type Host interface {
 	AssetHandler() *asset.Handler
 	AuthorityOf(r *http.Request) (Authority, func(), error)
 	AwaitingFor(holder string, pending bool) string
+	// WaitsForKeyDevice is whether an item whose grant is pending is waiting
+	// for the device that holds the identity's key. An add-on sets
+	// "waiting_for_key_device" to it on each item it lists, so the core can
+	// name that device on the item; the wording of "awaiting" is not read.
+	WaitsForKeyDevice(pending bool) bool
 	BindSigner(aid string, signer string) (server.ControllerGrant, error)
 	CredentialLog(registrySAID string, acdcSAID string) ([]string, string, error)
 	DelegatedFromHere(aid string, e OwnEvidence) error

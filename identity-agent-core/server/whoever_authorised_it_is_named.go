@@ -575,8 +575,10 @@ func (s *CoreServer) handleGrantsAwaitingApproval(w http.ResponseWriter, r *http
 			m := onTheWire(g, now)
 			// A mark that the grant waits for another device is believed only
 			// where the key really is elsewhere.
-			m["awaiting"] = s.awaitingFor(g.ControllerAID, g.CredentialPending && !keyHere)
-			if m["awaiting"] == awaitingWhat(true) && deviceName != "" {
+			waits := g.CredentialPending && !keyHere
+			m["awaiting"] = s.awaitingFor(g.ControllerAID, waits)
+			m[waitingForKeyDevice] = waits
+			if waits && deviceName != "" {
 				m["key_device_name"] = deviceName
 			}
 			machines = append(machines, m)
@@ -589,9 +591,11 @@ func (s *CoreServer) handleGrantsAwaitingApproval(w http.ResponseWriter, r *http
 		for _, g := range a.GrantKinds {
 			if g.Awaiting != nil && g.AwaitingKey != "" {
 				items := g.Awaiting(s)
-				// Named only on what waits for that device, and only when known.
+				// Named only on what is flagged as waiting for that device (the
+				// wording of "awaiting" is for people, never compared), and only
+				// when the name is known.
 				for _, item := range items {
-					if item["awaiting"] == awaitingWhat(true) && deviceName != "" {
+					if waits, _ := item[waitingForKeyDevice].(bool); waits && !keyHere && deviceName != "" {
 						item["key_device_name"] = deviceName
 					}
 				}
@@ -603,6 +607,18 @@ func (s *CoreServer) handleGrantsAwaitingApproval(w http.ResponseWriter, r *http
 		out[k] = v
 	}
 	writeJSON(w, out)
+}
+
+// waitingForKeyDevice is the flag on an item of the approval list that it is
+// waiting for the device that holds the identity's key, whatever its wording
+// of "awaiting" says (waiting, refused, or expired: ask again). An add-on
+// sets it from Host.WaitsForKeyDevice.
+const waitingForKeyDevice = "waiting_for_key_device"
+
+// waitsForKeyDevice is whether a grant marked pending is really waiting for
+// another device: believed only where the key is elsewhere.
+func (s *CoreServer) waitsForKeyDevice(pending bool) bool {
+	return pending && s.keyIsElsewhere()
 }
 
 // awaitingWhat says what a grant is waiting for: the owner's approval, or,

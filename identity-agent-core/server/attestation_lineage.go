@@ -182,13 +182,18 @@ func (s *CoreServer) enclaveStatus() *EnclaveStatusResponse {
 	return &got
 }
 
+// givenDeviceName is the name this device reports for itself, "" where it gave
+// none. The one place the setting is read, and no fallback: "This computer" is
+// a kind, not a name.
+func givenDeviceName() string { return os.Getenv("AGENT_DEVICE_NAME") }
+
 // deviceDisplayName is what to call this machine on screen.
 //
 // A name somebody chose, then what kind of thing it is. Never the identifier:
 // nobody recognises their own machine by a 44-character string, and showing one
 // where a name belongs is how a screen stops being for people.
 func (s *CoreServer) deviceDisplayName() string {
-	if n := os.Getenv("AGENT_DEVICE_NAME"); n != "" {
+	if n := givenDeviceName(); n != "" {
 		return n
 	}
 	if s.cachedAttestation() != nil {

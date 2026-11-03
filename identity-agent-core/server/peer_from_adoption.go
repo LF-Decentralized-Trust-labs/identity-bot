@@ -69,13 +69,17 @@ func (s *CoreServer) rememberPeerFromAdoption(did *didcomm.DID, endpoint, device
 // maxDeviceNameRunes bounds a device's name; it is shown on a screen, not stored as data.
 const maxDeviceNameRunes = 80
 
-// cleanDeviceName makes a name fit to show: control characters dropped, runs of
+// cleanDeviceName makes a name fit to show: control characters made spaces, format characters
+// (direction overrides, zero-width) dropped, runs of
 // space collapsed, cut at maxDeviceNameRunes. "" where nothing readable is left.
 func cleanDeviceName(name string) string {
 	var b strings.Builder
 	for _, r := range name {
 		if unicode.IsControl(r) {
 			r = ' '
+		}
+		if unicode.Is(unicode.Cf, r) {
+			continue // invisible: direction overrides and zero-width characters disguise a name
 		}
 		b.WriteRune(r)
 	}

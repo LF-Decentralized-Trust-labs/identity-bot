@@ -184,13 +184,16 @@ over each request, which every credential issued on it carries (ADR-045).
 
 *Amended 2026-11-03.* **The list names the device a grant waits for.** Each item in
 `GET /api/grants/awaiting-approval` (above, under *Upgrading*) that waits for the device
-that holds the identity's key carries `key_device_name`: the name the person gave that
-device when it was adopted, or the name the device reported for itself
+that holds the identity's key carries `key_device_name`: the device's own reported name where it gave one
 (`owner_device_name` in the adoption request, kept as `device_name` on the owner's peer
-record). It is absent on anything that waits for the owner's approval, and absent where no
-name was given: the Identity Agent never makes one up, and a client that gets none says
-"the device that holds your key". The name is for people to recognise a device by; nothing
-is decided from it.
+record), so a phone is often unnamed. It is set once, at adoption, after every adoption
+check has passed, and not changed later. It is absent on anything that waits for the
+owner's approval, and absent where no name was given: the Identity Agent never makes one
+up, and a client that gets none says "the device that holds your key". Each item also
+carries `waiting_for_key_device`, true while it waits for that device (including when the
+device refused it or it expired, and the owner is to ask again); the name is shown from
+that flag, never from the wording of `awaiting`. The name is for people to recognise a
+device by; nothing is decided from it.
 
 ## Consequences
 

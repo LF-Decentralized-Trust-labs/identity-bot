@@ -13,7 +13,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -1017,9 +1016,8 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		OwnerPublicKey:          ownerKey,
 		BackupSealPublicKeysB64: sealKeys,
 		OwnerDID:                ownerDID,
-		// Only a name somebody gave this device; "This computer" is a kind, not a name.
-		OwnerDeviceName:    os.Getenv("AGENT_DEVICE_NAME"),
-		OwnerAgentEndpoint: s.getPublicURL(r),
+		OwnerDeviceName:         givenDeviceName(),
+		OwnerAgentEndpoint:      s.getPublicURL(r),
 	})
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "The box refused to be adopted", err.Error())

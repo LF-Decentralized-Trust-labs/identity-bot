@@ -55,6 +55,7 @@ func (h hostWrapper) AuthorityOf(r *http.Request) (coretypes.Authority, func(), 
 func (h hostWrapper) AwaitingFor(holder string, pending bool) string {
 	return h.s.awaitingFor(holder, pending)
 }
+func (h hostWrapper) WaitsForKeyDevice(pending bool) bool { return h.s.waitsForKeyDevice(pending) }
 func (h hostWrapper) BindSigner(aid string, signer string) (ControllerGrant, error) {
 	return h.s.bindSigner(aid, signer)
 }
