@@ -1,10 +1,13 @@
 package vault
 
-import "testing"
+import (
+	"net/http"
+	"testing"
+)
 
 // The written rule for a host pattern: no port covers every port of the host,
 // a port covers that port only; "*." is one label and "**." is one or more.
-func TestMatchDomainReadsHostsAndPorts(t *testing.T) {
+func TestMatchHostPortReadsHostsAndPorts(t *testing.T) {
 	for _, c := range []struct {
 		pattern, domain string
 		want            bool
@@ -36,8 +39,39 @@ func TestMatchDomainReadsHostsAndPorts(t *testing.T) {
 		{"", "", false},
 		{"a.example.org", "xa.example.org", false},
 	} {
-		if got := MatchDomain(c.pattern, c.domain); got != c.want {
-			t.Errorf("MatchDomain(%q, %q) = %v, want %v", c.pattern, c.domain, got, c.want)
+		host, port, _ := splitHostPort(c.domain)
+		if got := MatchHostPort(c.pattern, host, port); got != c.want {
+			t.Errorf("MatchHostPort(%q, %q, %q) = %v, want %v", c.pattern, host, port, got, c.want)
+		}
+	}
+}
+
+// The vault passes the port a request is dialled on, so a credential whose
+// domain names a port is injected on that port only, and the scheme's default
+// stands in when the URL names none.
+func TestDestinationHostPort(t *testing.T) {
+	for _, c := range []struct{ url, host, port string }{
+		{"https://API.example.org/x", "api.example.org", "443"},
+		{"http://api.example.org/x", "api.example.org", "80"},
+		{"https://api.example.org:8443/x", "api.example.org", "8443"},
+	} {
+		req, _ := http.NewRequest("GET", c.url, nil)
+		if h, p := destinationHostPort(req); h != c.host || p != c.port {
+			t.Errorf("%s: got %s:%s, want %s:%s", c.url, h, p, c.host, c.port)
+		}
+	}
+	for _, c := range []struct {
+		url  string
+		want bool
+	}{
+		{"https://api.example.org:8443/x", true},
+		{"https://api.example.org/x", false},
+		{"https://api.example.org:9443/x", false},
+	} {
+		req, _ := http.NewRequest("GET", c.url, nil)
+		h, p := destinationHostPort(req)
+		if got := MatchHostPort("api.example.org:8443", h, p); got != c.want {
+			t.Errorf("%s: %v, want %v", c.url, got, c.want)
 		}
 	}
 }

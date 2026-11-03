@@ -12,6 +12,7 @@ package appmanifest
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -255,25 +256,36 @@ func LoadManifest(path string) (*AppManifest, error) {
 	return manifest, nil
 }
 
-func LoadManifestsFromDir(dir string) ([]*AppManifest, error) {
+// LoadManifestsFromDir loads every .json manifest in dir. One bad file does not
+// cost the rest: a file that cannot be read or does not validate is skipped and
+// named in the returned skipped list (file name and the reason), and the others
+// load. The error is for a folder that cannot be read at all.
+func LoadManifestsFromDir(dir string) (manifests []*AppManifest, skipped []SkippedManifest, err error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read manifests directory: %w", err)
+		return nil, nil, fmt.Errorf("failed to read manifests directory: %w", err)
 	}
 
-	var manifests []*AppManifest
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
 		m, err := LoadManifest(filepath.Join(dir, entry.Name()))
 		if err != nil {
-			return nil, fmt.Errorf("failed to load manifest %s: %w", entry.Name(), err)
+			skipped = append(skipped, SkippedManifest{File: entry.Name(), Err: err})
+			log.Printf("[appmanifest] skipping %s: %v", entry.Name(), err)
+			continue
 		}
 		manifests = append(manifests, m)
 	}
 
-	return manifests, nil
+	return manifests, skipped, nil
+}
+
+// SkippedManifest names a manifest file LoadManifestsFromDir did not load, and why.
+type SkippedManifest struct {
+	File string
+	Err  error
 }
 
 // Validate checks an app manifest against the rules the agent enforces at load.
@@ -484,14 +496,18 @@ func (m *AppManifest) DisplayPort() string {
 	return ""
 }
 
-func (m *AppManifest) IsDomainAllowed(domain string) (allowed bool, explicitRule bool) {
+// IsDomainAllowed reports whether the app may reach host on port. Pass the port
+// actually dialled (the scheme's default when the URL names none) and do not
+// strip it from the destination: an entry written with a port, blocked or
+// allowed, applies to that port only, and cannot see a port it is not given.
+func (m *AppManifest) IsDomainAllowed(host, port string) (allowed bool, explicitRule bool) {
 	for _, d := range m.Network.BlockedDomains {
-		if vault.MatchDomain(d, domain) {
+		if vault.MatchHostPort(d, host, port) {
 			return false, true
 		}
 	}
 	for _, d := range m.Network.AllowedDomains {
-		if vault.MatchDomain(d, domain) {
+		if vault.MatchHostPort(d, host, port) {
 			return true, true
 		}
 	}
