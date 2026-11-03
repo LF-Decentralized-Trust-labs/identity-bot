@@ -369,9 +369,11 @@ void main() {
     final more = await _anotherCore(km);
     addTearDown(more.close);
     final m = more.makes(witnesses);
-    final s = WitnessSet([w1.aid, w2.aid, w3.aid], 2);
+    // One receipt establishes an event, so all three must show they lack one
+    // before it may be let go.
+    final s = WitnessSet([w1.aid, w2.aid, w3.aid], 1);
     final founded =
-        await m.found(s3, witnesses: [w1.aid, w2.aid, w3.aid], toad: 2);
+        await m.found(s3, witnesses: [w1.aid, w2.aid, w3.aid], toad: 1);
     final at = (sn: 0, digest: founded.digest);
     void reach(bool on) {
       for (final w in [w1, w2, w3]) {
@@ -406,9 +408,10 @@ void main() {
             witnessedBy: s),
         throwsA(isA<PlaceAlreadyReserved>()));
 
-    // Two of three witnesses must show they lack it, since any two of them
-    // would establish it: one answering is not enough.
+    // Any one of them would establish it, so all three must show they lack
+    // it: two answering is not enough.
     w1.offline = false;
+    w2.offline = false;
     await expectLater(
         m.letGoOf(founded.aid, 1, witnessedBy: s), throwsA(isA<StateError>()));
     reach(true);
@@ -487,6 +490,11 @@ void main() {
     expect((WitnessSet.none.toEstablish, WitnessSet.none.toRuleOut), (0, 1));
     final four = WitnessSet([w1.aid, w2.aid, w3.aid, 'B${'A' * 43}'], 2);
     expect((four.toEstablish, four.toRuleOut), (2, 3));
+    // The engine refuses a threshold of zero where witnesses are named; were
+    // one to reach this device, no receipt would still not be enough.
+    expect(Witnessed(WitnessSet([w1.aid], 0), {}, {}, {}).enough, isFalse);
+    expect(Witnessed(WitnessSet([w1.aid], 0), {w1.aid: 'sig'}, {}, {}).enough,
+        isTrue);
   });
 
   test(
