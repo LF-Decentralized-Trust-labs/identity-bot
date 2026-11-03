@@ -110,8 +110,83 @@ def refuse(row, why):
     return (row, why)
 
 
+# The keys each object has, spelt exactly, from the properties the schema
+# declares. A key not listed is refused at every depth.
+KEYS = {
+    "manifest": "id name description version author execution_type display_method network_mode container binary "
+                "resources network capabilities log_level signature publisher_key signature_algorithm api_schema "
+                "kind sub_type provides host_control supported_platforms isolation release_digest encrypted_machine "
+                "store placement front_and_back_end secrets when_down backup".split(),
+    "container": "image ports environment volumes display_path".split(),
+    "binary": "path args environment hash".split(),
+    "resources": "cpu_cores memory_mb disk_mb egress_kbps ingress_kbps".split(),
+    "network": "tls_mode allowed_domains blocked_domains".split(),
+    "capabilities": "allowed blocked".split(),
+    "provided_capability": "id name description request_contract docs acdc_scope enabled_by_default host_control "
+                           "require_signed_request minimum_score".split(),
+    "host_control": "grants_required kill_switch".split(),
+    "platform_binary": "os min_version arch binary hash".split(),
+    "store": "format size_mb".split(),
+    "front_and_back_end": "static_front_end_url back_end_port device_front_ends".split(),
+    "when_down": "person_sees queue_requests queue_max_seconds".split(),
+    "backup": "what every_hours".split(),
+}
+# Which object (or list of objects) a key holds.
+CHILD = {
+    ("manifest", "container"): ("object", "container"), ("manifest", "binary"): ("object", "binary"),
+    ("manifest", "resources"): ("object", "resources"), ("manifest", "network"): ("object", "network"),
+    ("manifest", "capabilities"): ("object", "capabilities"), ("manifest", "provides"): ("list", "provided_capability"),
+    ("manifest", "host_control"): ("object", "host_control"),
+    ("manifest", "supported_platforms"): ("list", "platform_binary"), ("manifest", "store"): ("object", "store"),
+    ("manifest", "front_and_back_end"): ("object", "front_and_back_end"),
+    ("manifest", "when_down"): ("object", "when_down"), ("manifest", "backup"): ("object", "backup"),
+}
+# The only keys that may hold null; a key with no value is left out.
+NULLABLE = {"signature", "publisher_key", "signature_algorithm", "api_schema", "binary.args", "binary.environment"}
+# Keys whose value is never the empty string.
+NOT_EMPTY = {"kind", "sub_type", "isolation", "release_digest", "encrypted_machine", "placement"}
+
+
+def shape(value, kind, path):
+    """(row, why) for the first unknown key, null or forbidden empty string, else None."""
+    if isinstance(value, dict):
+        for key in sorted(value):
+            here = path + "." + key if path else key
+            if kind in KEYS and key not in KEYS[kind]:
+                # The row is the object that holds the stray key; at the top, the key.
+                return (path or key, "not a key a manifest has (keys are spelt exactly)")
+            if value[key] is None:
+                if here not in NULLABLE:
+                    return (here, "null is not a value, the key is left out")
+                continue
+            if kind == "manifest" and key in NOT_EMPTY and value[key] == "":
+                return (here, "never empty")
+            sub = CHILD.get((kind, key))
+            if sub and sub[0] == "object":
+                found = shape(value[key], sub[1], here)
+            elif sub:
+                found = None
+                for i, item in enumerate(value[key] if isinstance(value[key], list) else []):
+                    found = found or shape(item, sub[1], "%s[%d]" % (here, i))
+            else:
+                found = shape(value[key], None, here)
+            if found:
+                return found
+    elif isinstance(value, list):
+        for i, item in enumerate(value):
+            if item is None:
+                return ("%s[%d]" % (path, i), "null is not a value")
+            found = shape(item, None, "%s[%d]" % (path, i))
+            if found:
+                return found
+    return None
+
+
 def check(m):
     """None if the app manifest is accepted, else (row, why)."""
+    bad = shape(m, "manifest", "")
+    if bad:
+        return bad
     if m.get("kind") != "app":
         for r in APP_ROWS:
             if r in m:
@@ -131,12 +206,17 @@ def check(m):
         return refuse("release_digest", "not a %s digest" % algorithm)
     if m.get("supported_platforms"):
         return refuse("supported_platforms", "an app is one release")
+    # An app is its executable or its image, never both.
+    if kind == "compiled" and "container" in m:
+        return refuse("container", "a compiled app is its executable")
+    if kind == "container" and "binary" in m:
+        return refuse("binary", "a container app is its image")
     if "hash" in (m.get("binary") or {}):
-        return refuse("binary.hash", "release_digest is the one name")
+        return refuse("binary.hash", "release_digest is the one name, even empty")
     if kind == "container":
         image = (m.get("container") or {}).get("image")
-        if not isinstance(image, str) or not image or any(c in "@ \t\r\n" for c in image):
-            return refuse("container.image", "an image name with no digest")
+        if not isinstance(image, str) or not image or "@" in image or any(c in WHITE_SPACE for c in image):
+            return refuse("container.image", "an image name with no digest and no white space")
     # Resources: requests, with units.
     r = m.get("resources") or {}
     if not (is_num(r.get("cpu_cores")) and 0 < r["cpu_cores"] <= 1024):
@@ -160,6 +240,11 @@ def check(m):
             return refuse("store.size_mb", "0 when there is no store")
     elif not (is_int(size) and 1 <= size <= 16777216):
         return refuse("store.size_mb", "1 to 16777216 MiB")
+    # A volume of an app is not a host path: the one it may declare is "store",
+    # its own encrypted store, mounted at an absolute path in the container.
+    for key, target in ((m.get("container") or {}).get("volumes") or {}).items():
+        if key != "store" or s["format"] == "none" or not isinstance(target, str) or not target.startswith("/"):
+            return refuse("container.volumes", "only 'store', at an absolute path, and only when there is a store")
     if "placement" in m and m["placement"] not in ("own_machine", "shared_machine"):
         return refuse("placement", "own_machine or shared_machine, never inside the Identity Agent")
     e = m.get("front_and_back_end")

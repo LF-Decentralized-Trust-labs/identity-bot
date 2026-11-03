@@ -8686,6 +8686,1527 @@
         "publisher_key": null,
         "signature_algorithm": null
       }
+    },
+    {
+      "name": "a valid app that mounts its own store",
+      "outcome": "accepted",
+      "why": "an app's volume is its own encrypted store, at a path inside the container",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "sha256:abababababababababababababababababababababababababababababababab",
+        "encrypted_machine": "preferred",
+        "store": {
+          "format": "sqlite",
+          "size_mb": 2048
+        },
+        "placement": "own_machine",
+        "front_and_back_end": {
+          "static_front_end_url": "https://console.example.org/app/",
+          "back_end_port": 8080,
+          "device_front_ends": [
+            "browser",
+            "installed_app"
+          ]
+        },
+        "secrets": [
+          "mail_api_key"
+        ],
+        "when_down": {
+          "person_sees": "notice",
+          "queue_requests": true,
+          "queue_max_seconds": 3600
+        },
+        "backup": {
+          "what": [
+            "store",
+            "settings"
+          ],
+          "every_hours": 24
+        },
+        "container": {
+          "image": "example.org/task-console:1.0.0",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {
+            "store": "/var/lib/task-console"
+          }
+        },
+        "resources": {
+          "cpu_cores": 0.5,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "api.example.org",
+            "api.example.org:8443",
+            "*.example.org",
+            "**.cdn.example.net:443"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      }
+    },
+    {
+      "name": "an app with a misspelt placement key",
+      "outcome": "refused",
+      "row": "placment",
+      "why": "a key the schema does not declare is refused, so a misspelling cannot pass as the default",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "sha256:abababababababababababababababababababababababababababababababab",
+        "encrypted_machine": "preferred",
+        "store": {
+          "format": "sqlite",
+          "size_mb": 2048
+        },
+        "placement": "own_machine",
+        "front_and_back_end": {
+          "static_front_end_url": "https://console.example.org/app/",
+          "back_end_port": 8080,
+          "device_front_ends": [
+            "browser",
+            "installed_app"
+          ]
+        },
+        "secrets": [
+          "mail_api_key"
+        ],
+        "when_down": {
+          "person_sees": "notice",
+          "queue_requests": true,
+          "queue_max_seconds": 3600
+        },
+        "backup": {
+          "what": [
+            "store",
+            "settings"
+          ],
+          "every_hours": 24
+        },
+        "container": {
+          "image": "example.org/task-console:1.0.0",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 0.5,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "api.example.org",
+            "api.example.org:8443",
+            "*.example.org",
+            "**.cdn.example.net:443"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null,
+        "placment": "shared_machine"
+      }
+    },
+    {
+      "name": "an app whose key differs from a row only in case",
+      "outcome": "refused",
+      "row": "Placement",
+      "why": "keys are spelt exactly: Placement is not placement",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "sha256:abababababababababababababababababababababababababababababababab",
+        "encrypted_machine": "preferred",
+        "store": {
+          "format": "sqlite",
+          "size_mb": 2048
+        },
+        "placement": "own_machine",
+        "front_and_back_end": {
+          "static_front_end_url": "https://console.example.org/app/",
+          "back_end_port": 8080,
+          "device_front_ends": [
+            "browser",
+            "installed_app"
+          ]
+        },
+        "secrets": [
+          "mail_api_key"
+        ],
+        "when_down": {
+          "person_sees": "notice",
+          "queue_requests": true,
+          "queue_max_seconds": 3600
+        },
+        "backup": {
+          "what": [
+            "store",
+            "settings"
+          ],
+          "every_hours": 24
+        },
+        "container": {
+          "image": "example.org/task-console:1.0.0",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 0.5,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "api.example.org",
+            "api.example.org:8443",
+            "*.example.org",
+            "**.cdn.example.net:443"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null,
+        "Placement": "shared_machine"
+      }
+    },
+    {
+      "name": "an app with an unknown key inside a row",
+      "outcome": "refused",
+      "row": "front_and_back_end",
+      "why": "unknown keys are refused at every depth; the row is the object that holds the key (the key itself at the top)",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "sha256:abababababababababababababababababababababababababababababababab",
+        "encrypted_machine": "preferred",
+        "store": {
+          "format": "sqlite",
+          "size_mb": 2048
+        },
+        "placement": "own_machine",
+        "front_and_back_end": {
+          "static_front_end_url": "https://console.example.org/app/",
+          "back_end_port": 8080,
+          "device_front_ends": [
+            "browser",
+            "installed_app"
+          ],
+          "back_end_prot": 8080
+        },
+        "secrets": [
+          "mail_api_key"
+        ],
+        "when_down": {
+          "person_sees": "notice",
+          "queue_requests": true,
+          "queue_max_seconds": 3600
+        },
+        "backup": {
+          "what": [
+            "store",
+            "settings"
+          ],
+          "every_hours": 24
+        },
+        "container": {
+          "image": "example.org/task-console:1.0.0",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 0.5,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "api.example.org",
+            "api.example.org:8443",
+            "*.example.org",
+            "**.cdn.example.net:443"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      }
+    },
+    {
+      "name": "an app whose placement is null",
+      "outcome": "refused",
+      "row": "placement",
+      "why": "null is not a value: a key with no value is left out",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "sha256:abababababababababababababababababababababababababababababababab",
+        "encrypted_machine": "preferred",
+        "store": {
+          "format": "sqlite",
+          "size_mb": 2048
+        },
+        "placement": null,
+        "front_and_back_end": {
+          "static_front_end_url": "https://console.example.org/app/",
+          "back_end_port": 8080,
+          "device_front_ends": [
+            "browser",
+            "installed_app"
+          ]
+        },
+        "secrets": [
+          "mail_api_key"
+        ],
+        "when_down": {
+          "person_sees": "notice",
+          "queue_requests": true,
+          "queue_max_seconds": 3600
+        },
+        "backup": {
+          "what": [
+            "store",
+            "settings"
+          ],
+          "every_hours": 24
+        },
+        "container": {
+          "image": "example.org/task-console:1.0.0",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 0.5,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "api.example.org",
+            "api.example.org:8443",
+            "*.example.org",
+            "**.cdn.example.net:443"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      }
+    },
+    {
+      "name": "an app that queues nothing and gives a null limit",
+      "outcome": "refused",
+      "row": "when_down.queue_max_seconds",
+      "why": "null is not a value: queue_max_seconds is left out, not null",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "sha256:abababababababababababababababababababababababababababababababab",
+        "encrypted_machine": "preferred",
+        "store": {
+          "format": "sqlite",
+          "size_mb": 2048
+        },
+        "placement": "own_machine",
+        "front_and_back_end": {
+          "static_front_end_url": "https://console.example.org/app/",
+          "back_end_port": 8080,
+          "device_front_ends": [
+            "browser",
+            "installed_app"
+          ]
+        },
+        "secrets": [
+          "mail_api_key"
+        ],
+        "when_down": {
+          "person_sees": "notice",
+          "queue_requests": false,
+          "queue_max_seconds": null
+        },
+        "backup": {
+          "what": [
+            "store",
+            "settings"
+          ],
+          "every_hours": 24
+        },
+        "container": {
+          "image": "example.org/task-console:1.0.0",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 0.5,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "api.example.org",
+            "api.example.org:8443",
+            "*.example.org",
+            "**.cdn.example.net:443"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      }
+    },
+    {
+      "name": "an app whose static front end is null",
+      "outcome": "refused",
+      "row": "front_and_back_end.static_front_end_url",
+      "why": "null is not a value: the key is left out",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "sha256:abababababababababababababababababababababababababababababababab",
+        "encrypted_machine": "preferred",
+        "store": {
+          "format": "sqlite",
+          "size_mb": 2048
+        },
+        "placement": "own_machine",
+        "front_and_back_end": {
+          "static_front_end_url": null,
+          "back_end_port": 8080,
+          "device_front_ends": [
+            "browser",
+            "installed_app"
+          ]
+        },
+        "secrets": [
+          "mail_api_key"
+        ],
+        "when_down": {
+          "person_sees": "notice",
+          "queue_requests": true,
+          "queue_max_seconds": 3600
+        },
+        "backup": {
+          "what": [
+            "store",
+            "settings"
+          ],
+          "every_hours": 24
+        },
+        "container": {
+          "image": "example.org/task-console:1.0.0",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 0.5,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "api.example.org",
+            "api.example.org:8443",
+            "*.example.org",
+            "**.cdn.example.net:443"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      }
+    },
+    {
+      "name": "a compiled app with an empty binary hash",
+      "outcome": "refused",
+      "row": "binary.hash",
+      "why": "an app has no binary.hash at all, empty or not",
+      "manifest": {
+        "id": "ledger-sync",
+        "name": "Ledger Sync",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "compiled",
+        "display_method": "terminal",
+        "network_mode": "isolated",
+        "kind": "app",
+        "sub_type": "go-binary",
+        "release_digest": "blake3:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "encrypted_machine": "required",
+        "store": {
+          "format": "none",
+          "size_mb": 0
+        },
+        "placement": "shared_machine",
+        "front_and_back_end": {
+          "back_end_port": 9000,
+          "device_front_ends": []
+        },
+        "secrets": [],
+        "when_down": {
+          "person_sees": "last_known_data",
+          "queue_requests": false
+        },
+        "backup": {
+          "what": []
+        },
+        "resources": {
+          "cpu_cores": 0.5,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null,
+        "binary": {
+          "path": "/opt/ledger-sync/ledger-sync",
+          "args": [],
+          "environment": {},
+          "hash": ""
+        }
+      }
+    },
+    {
+      "name": "a compiled app that also carries a container block",
+      "outcome": "refused",
+      "row": "container",
+      "why": "an app is its executable or its image, never both",
+      "manifest": {
+        "id": "ledger-sync",
+        "name": "Ledger Sync",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "compiled",
+        "display_method": "terminal",
+        "network_mode": "isolated",
+        "kind": "app",
+        "sub_type": "go-binary",
+        "release_digest": "blake3:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "encrypted_machine": "required",
+        "store": {
+          "format": "none",
+          "size_mb": 0
+        },
+        "placement": "shared_machine",
+        "front_and_back_end": {
+          "back_end_port": 9000,
+          "device_front_ends": []
+        },
+        "secrets": [],
+        "when_down": {
+          "person_sees": "last_known_data",
+          "queue_requests": false
+        },
+        "backup": {
+          "what": []
+        },
+        "resources": {
+          "cpu_cores": 0.5,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null,
+        "binary": {
+          "path": "/opt/ledger-sync/ledger-sync",
+          "args": [],
+          "environment": {}
+        },
+        "container": {
+          "image": "example/task-console:1.0.0",
+          "ports": {},
+          "environment": {},
+          "volumes": {}
+        }
+      }
+    },
+    {
+      "name": "a compiled app that also carries a container block with a digest in the image",
+      "outcome": "refused",
+      "row": "container",
+      "why": "a compiled app has no container block, whatever it holds",
+      "manifest": {
+        "id": "ledger-sync",
+        "name": "Ledger Sync",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "compiled",
+        "display_method": "terminal",
+        "network_mode": "isolated",
+        "kind": "app",
+        "sub_type": "go-binary",
+        "release_digest": "blake3:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "encrypted_machine": "required",
+        "store": {
+          "format": "none",
+          "size_mb": 0
+        },
+        "placement": "shared_machine",
+        "front_and_back_end": {
+          "back_end_port": 9000,
+          "device_front_ends": []
+        },
+        "secrets": [],
+        "when_down": {
+          "person_sees": "last_known_data",
+          "queue_requests": false
+        },
+        "backup": {
+          "what": []
+        },
+        "resources": {
+          "cpu_cores": 0.5,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null,
+        "binary": {
+          "path": "/opt/ledger-sync/ledger-sync",
+          "args": [],
+          "environment": {}
+        },
+        "container": {
+          "image": "example/task-console@sha256:abababababababababababababababababababababababababababababababab",
+          "ports": {},
+          "environment": {},
+          "volumes": {}
+        }
+      }
+    },
+    {
+      "name": "a container app that also carries a binary block",
+      "outcome": "refused",
+      "row": "binary",
+      "why": "an app is its executable or its image, never both",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "sha256:abababababababababababababababababababababababababababababababab",
+        "encrypted_machine": "preferred",
+        "store": {
+          "format": "sqlite",
+          "size_mb": 2048
+        },
+        "placement": "own_machine",
+        "front_and_back_end": {
+          "static_front_end_url": "https://console.example.org/app/",
+          "back_end_port": 8080,
+          "device_front_ends": [
+            "browser",
+            "installed_app"
+          ]
+        },
+        "secrets": [
+          "mail_api_key"
+        ],
+        "when_down": {
+          "person_sees": "notice",
+          "queue_requests": true,
+          "queue_max_seconds": 3600
+        },
+        "backup": {
+          "what": [
+            "store",
+            "settings"
+          ],
+          "every_hours": 24
+        },
+        "container": {
+          "image": "example.org/task-console:1.0.0",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 0.5,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "api.example.org",
+            "api.example.org:8443",
+            "*.example.org",
+            "**.cdn.example.net:443"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null,
+        "binary": {
+          "path": "bin/task-console",
+          "args": [],
+          "environment": {}
+        }
+      }
+    },
+    {
+      "name": "an app whose image name has a no-break space",
+      "outcome": "refused",
+      "row": "container.image",
+      "why": "white space is Unicode White_Space everywhere in this contract, not only the ASCII set",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "sha256:abababababababababababababababababababababababababababababababab",
+        "encrypted_machine": "preferred",
+        "store": {
+          "format": "sqlite",
+          "size_mb": 2048
+        },
+        "placement": "own_machine",
+        "front_and_back_end": {
+          "static_front_end_url": "https://console.example.org/app/",
+          "back_end_port": 8080,
+          "device_front_ends": [
+            "browser",
+            "installed_app"
+          ]
+        },
+        "secrets": [
+          "mail_api_key"
+        ],
+        "when_down": {
+          "person_sees": "notice",
+          "queue_requests": true,
+          "queue_max_seconds": 3600
+        },
+        "backup": {
+          "what": [
+            "store",
+            "settings"
+          ],
+          "every_hours": 24
+        },
+        "container": {
+          "image": "example/task-console\u00a0:1.0.0",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 0.5,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "api.example.org",
+            "api.example.org:8443",
+            "*.example.org",
+            "**.cdn.example.net:443"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      }
+    },
+    {
+      "name": "an app whose image name ends in an em space",
+      "outcome": "refused",
+      "row": "container.image",
+      "why": "white space is Unicode White_Space everywhere in this contract, not only the ASCII set",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "sha256:abababababababababababababababababababababababababababababababab",
+        "encrypted_machine": "preferred",
+        "store": {
+          "format": "sqlite",
+          "size_mb": 2048
+        },
+        "placement": "own_machine",
+        "front_and_back_end": {
+          "static_front_end_url": "https://console.example.org/app/",
+          "back_end_port": 8080,
+          "device_front_ends": [
+            "browser",
+            "installed_app"
+          ]
+        },
+        "secrets": [
+          "mail_api_key"
+        ],
+        "when_down": {
+          "person_sees": "notice",
+          "queue_requests": true,
+          "queue_max_seconds": 3600
+        },
+        "backup": {
+          "what": [
+            "store",
+            "settings"
+          ],
+          "every_hours": 24
+        },
+        "container": {
+          "image": "example/task-console\u2003",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 0.5,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "api.example.org",
+            "api.example.org:8443",
+            "*.example.org",
+            "**.cdn.example.net:443"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      }
+    },
+    {
+      "name": "an app whose image name has a vertical tab",
+      "outcome": "refused",
+      "row": "container.image",
+      "why": "a vertical tab is White_Space",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "sha256:abababababababababababababababababababababababababababababababab",
+        "encrypted_machine": "preferred",
+        "store": {
+          "format": "sqlite",
+          "size_mb": 2048
+        },
+        "placement": "own_machine",
+        "front_and_back_end": {
+          "static_front_end_url": "https://console.example.org/app/",
+          "back_end_port": 8080,
+          "device_front_ends": [
+            "browser",
+            "installed_app"
+          ]
+        },
+        "secrets": [
+          "mail_api_key"
+        ],
+        "when_down": {
+          "person_sees": "notice",
+          "queue_requests": true,
+          "queue_max_seconds": 3600
+        },
+        "backup": {
+          "what": [
+            "store",
+            "settings"
+          ],
+          "every_hours": 24
+        },
+        "container": {
+          "image": "example/task-console\u000b:1",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {}
+        },
+        "resources": {
+          "cpu_cores": 0.5,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "api.example.org",
+            "api.example.org:8443",
+            "*.example.org",
+            "**.cdn.example.net:443"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      }
+    },
+    {
+      "name": "an app that mounts a host directory",
+      "outcome": "refused",
+      "row": "container.volumes",
+      "why": "{APP_DATA} does not apply to an app: its data is its store",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "sha256:abababababababababababababababababababababababababababababababab",
+        "encrypted_machine": "preferred",
+        "store": {
+          "format": "sqlite",
+          "size_mb": 2048
+        },
+        "placement": "own_machine",
+        "front_and_back_end": {
+          "static_front_end_url": "https://console.example.org/app/",
+          "back_end_port": 8080,
+          "device_front_ends": [
+            "browser",
+            "installed_app"
+          ]
+        },
+        "secrets": [
+          "mail_api_key"
+        ],
+        "when_down": {
+          "person_sees": "notice",
+          "queue_requests": true,
+          "queue_max_seconds": 3600
+        },
+        "backup": {
+          "what": [
+            "store",
+            "settings"
+          ],
+          "every_hours": 24
+        },
+        "container": {
+          "image": "example.org/task-console:1.0.0",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {
+            "{APP_DATA}/db": "/var/lib/db"
+          }
+        },
+        "resources": {
+          "cpu_cores": 0.5,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "api.example.org",
+            "api.example.org:8443",
+            "*.example.org",
+            "**.cdn.example.net:443"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      }
+    },
+    {
+      "name": "an app that mounts a host path",
+      "outcome": "refused",
+      "row": "container.volumes",
+      "why": "an app's only volume is store",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "sha256:abababababababababababababababababababababababababababababababab",
+        "encrypted_machine": "preferred",
+        "store": {
+          "format": "sqlite",
+          "size_mb": 2048
+        },
+        "placement": "own_machine",
+        "front_and_back_end": {
+          "static_front_end_url": "https://console.example.org/app/",
+          "back_end_port": 8080,
+          "device_front_ends": [
+            "browser",
+            "installed_app"
+          ]
+        },
+        "secrets": [
+          "mail_api_key"
+        ],
+        "when_down": {
+          "person_sees": "notice",
+          "queue_requests": true,
+          "queue_max_seconds": 3600
+        },
+        "backup": {
+          "what": [
+            "store",
+            "settings"
+          ],
+          "every_hours": 24
+        },
+        "container": {
+          "image": "example.org/task-console:1.0.0",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {
+            "/etc": "/etc"
+          }
+        },
+        "resources": {
+          "cpu_cores": 0.5,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "api.example.org",
+            "api.example.org:8443",
+            "*.example.org",
+            "**.cdn.example.net:443"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      }
+    },
+    {
+      "name": "an app whose store is mounted at a relative path",
+      "outcome": "refused",
+      "row": "container.volumes",
+      "why": "the mount point is an absolute path in the container",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "sha256:abababababababababababababababababababababababababababababababab",
+        "encrypted_machine": "preferred",
+        "store": {
+          "format": "sqlite",
+          "size_mb": 2048
+        },
+        "placement": "own_machine",
+        "front_and_back_end": {
+          "static_front_end_url": "https://console.example.org/app/",
+          "back_end_port": 8080,
+          "device_front_ends": [
+            "browser",
+            "installed_app"
+          ]
+        },
+        "secrets": [
+          "mail_api_key"
+        ],
+        "when_down": {
+          "person_sees": "notice",
+          "queue_requests": true,
+          "queue_max_seconds": 3600
+        },
+        "backup": {
+          "what": [
+            "store",
+            "settings"
+          ],
+          "every_hours": 24
+        },
+        "container": {
+          "image": "example.org/task-console:1.0.0",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {
+            "store": "var/lib"
+          }
+        },
+        "resources": {
+          "cpu_cores": 0.5,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "api.example.org",
+            "api.example.org:8443",
+            "*.example.org",
+            "**.cdn.example.net:443"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      }
+    },
+    {
+      "name": "an app with no store that mounts one",
+      "outcome": "refused",
+      "row": "container.volumes",
+      "why": "no store, nothing to mount",
+      "manifest": {
+        "id": "task-console",
+        "name": "Task Console",
+        "description": "Shows an owner the work their AI agents are doing.",
+        "version": "1.0.0",
+        "author": "Example Author",
+        "execution_type": "container",
+        "display_method": "webview",
+        "network_mode": "proxy_required",
+        "kind": "app",
+        "sub_type": "oci-container",
+        "release_digest": "sha256:abababababababababababababababababababababababababababababababab",
+        "encrypted_machine": "preferred",
+        "store": {
+          "format": "none",
+          "size_mb": 0
+        },
+        "placement": "own_machine",
+        "front_and_back_end": {
+          "static_front_end_url": "https://console.example.org/app/",
+          "back_end_port": 8080,
+          "device_front_ends": [
+            "browser",
+            "installed_app"
+          ]
+        },
+        "secrets": [
+          "mail_api_key"
+        ],
+        "when_down": {
+          "person_sees": "notice",
+          "queue_requests": true,
+          "queue_max_seconds": 3600
+        },
+        "backup": {
+          "what": [
+            "store",
+            "settings"
+          ],
+          "every_hours": 24
+        },
+        "container": {
+          "image": "example.org/task-console:1.0.0",
+          "ports": {
+            "8080": "display"
+          },
+          "environment": {},
+          "volumes": {
+            "store": "/var/lib/task-console"
+          }
+        },
+        "resources": {
+          "cpu_cores": 0.5,
+          "memory_mb": 512,
+          "disk_mb": 1024,
+          "egress_kbps": 1024,
+          "ingress_kbps": 1024
+        },
+        "network": {
+          "tls_mode": "sni_only",
+          "allowed_domains": [
+            "api.example.org",
+            "api.example.org:8443",
+            "*.example.org",
+            "**.cdn.example.net:443"
+          ],
+          "blocked_domains": []
+        },
+        "capabilities": {
+          "allowed": [
+            "network"
+          ],
+          "blocked": [
+            "camera",
+            "microphone"
+          ]
+        },
+        "log_level": "metadata",
+        "signature": null,
+        "publisher_key": null,
+        "signature_algorithm": null
+      }
     }
   ]
 }

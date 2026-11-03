@@ -205,7 +205,7 @@
           "$ref": "#/$defs/backup"
         }
       },
-      "description": "An app manifest. A manifest of kind 'app' declares every row of ADR-012 Amendment 5: name, release_digest, resources (all five numbers), encrypted_machine, store, front_and_back_end, secrets, when_down, backup and network.allowed_domains (placement is optional). Any other kind carries none of release_digest, encrypted_machine, store, placement, front_and_back_end, secrets, when_down, backup. This schema refuses exactly what appmanifest.Validate refuses for an app manifest, rows only: the checks Validate makes on every manifest, such as execution_type, are in the properties above. release_digest's form is per execution_type: sha256 for a container app, blake3 for a compiled one.",
+      "description": "An app manifest. A manifest of kind 'app' declares every row of ADR-012 Amendment 5: name, release_digest, resources (all five numbers), encrypted_machine, store, front_and_back_end, secrets, when_down, backup and network.allowed_domains (placement is optional). Any other kind carries none of release_digest, encrypted_machine, store, placement, front_and_back_end, secrets, when_down, backup. An app is its executable or its image, never both: a compiled app has no 'container' block and a container app has no 'binary' block. A key not listed here is refused at every depth, null is refused wherever the schema gives no null (a key with no value is left out), and an empty string is refused for kind, sub_type, isolation, release_digest, encrypted_machine and placement. This schema refuses exactly what appmanifest.DecodeManifest and appmanifest.Validate refuse for an app manifest, rows only: the checks Validate makes on every manifest, such as execution_type, are in the properties above. release_digest's form is per execution_type: sha256 for a container app, blake3 for a compiled one.",
       "allOf": [
         {
           "if": {
@@ -269,7 +269,21 @@
                 "properties": {
                   "allowed_domains": {
                     "items": {
-                      "pattern": "^(?=[^:]{1,253}(?::|$))(?:(?![0-9.]+(?::|$|/))[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*|\\*{1,2}\\.(?![0-9.]+(?::|$|/))[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+)(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?$"
+                      "type": "string",
+                      "allOf": [
+                        {
+                          "pattern": "^[^:]{1,253}(?::|$)"
+                        },
+                        {
+                          "not": {
+                            "pattern": "^(?:\\*{1,2}\\.)?[0-9.]+(?::|$)"
+                          }
+                        },
+                        {
+                          "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*|\\*{1,2}\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+)(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?$"
+                        }
+                      ],
+                      "description": "One of the five forms the description of 'network' lists. Written as three patterns that must all hold (the first bounds the name at 253 characters, the second refuses an IP address, the third gives the form) so that no look-ahead is needed."
                     }
                   }
                 }
@@ -298,16 +312,61 @@
                     "container": {
                       "properties": {
                         "image": {
-                          "pattern": "^[^@\\s]+$"
+                          "type": "string",
+                          "pattern": "^[^@\\t-\\r \\u0085   -     　]+$",
+                          "description": "A name alone: no digest ('@') and no Unicode White_Space character (the set the description of 'name' lists). release_digest is the digest."
                         },
                         "volumes": {
+                          "type": "object",
                           "propertyNames": {
-                            "pattern": "^\\{APP_DATA\\}(?!.*\\.\\.)"
+                            "const": "store"
+                          },
+                          "additionalProperties": {
+                            "type": "string",
+                            "pattern": "^/"
+                          },
+                          "description": "For an app, a volume is not a place on the host ({APP_DATA} does not apply). The one volume an app may declare is 'store', its own encrypted store (the 'store' row), and the value is the absolute path inside the container where the runtime mounts it. Empty says nothing is mounted; an app whose store format is 'none' has no store to mount."
+                        }
+                      }
+                    }
+                  },
+                  "not": {
+                    "required": [
+                      "binary"
+                    ]
+                  },
+                  "allOf": [
+                    {
+                      "if": {
+                        "properties": {
+                          "store": {
+                            "properties": {
+                              "format": {
+                                "const": "none"
+                              }
+                            },
+                            "required": [
+                              "format"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "store"
+                        ]
+                      },
+                      "then": {
+                        "properties": {
+                          "container": {
+                            "properties": {
+                              "volumes": {
+                                "maxProperties": 0
+                              }
+                            }
                           }
                         }
                       }
                     }
-                  }
+                  ]
                 }
               },
               {
@@ -336,6 +395,11 @@
                         ]
                       }
                     }
+                  },
+                  "not": {
+                    "required": [
+                      "container"
+                    ]
                   }
                 }
               },
@@ -445,7 +509,8 @@
           "type": "object",
           "additionalProperties": {
             "type": "string"
-          }
+          },
+          "description": "Host path to container path, for a manifest that is not an app (each host path starts with {APP_DATA}, the app's own directory, and has no '..'). For an app the keys mean something else, see the app branch of 'manifest'."
         },
         "display_path": {
           "type": "string"
@@ -730,14 +795,26 @@
       "properties": {
         "static_front_end_url": {
           "type": "string",
-          "pattern": "^https://(?=[^:/]{1,253}(?::|/|$))(?:(?![0-9.]+(?::|$|/))[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*)(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@/-]|%[0-9A-Fa-f]{2})*)?$",
-          "description": "The fixed web address a static front end is served from: 'https://', an exact lower-case host name (no wildcard, no IP address), optionally ':port', optionally a path of unreserved/sub-delim/':'/'@'/'/' characters and %XX escapes; no user, query or fragment."
+          "description": "The fixed web address a static front end is served from: 'https://', an exact lower-case host name (no wildcard, no IP address), optionally ':port', optionally a path of unreserved/sub-delim/':'/'@'/'/' characters and %XX escapes; no user, query or fragment. Written as three patterns that must all hold so that no look-ahead is needed.",
+          "allOf": [
+            {
+              "pattern": "^https://[^:/]{1,253}(?:[:/]|$)"
+            },
+            {
+              "not": {
+                "pattern": "^https://[0-9.]+(?:[:/]|$)"
+              }
+            },
+            {
+              "pattern": "^https://[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@/-]|%[0-9A-Fa-f]{2})*)?$"
+            }
+          ]
         },
         "back_end_port": {
           "type": "integer",
           "minimum": 1,
           "maximum": 65535,
-          "description": "The TCP port the app's back end listens on, on the app's own machine."
+          "description": "The TCP port the app's back end listens on, on the app's own machine. It is reached only through the relay: no inbound port is open on the app's machine."
         },
         "device_front_ends": {
           "type": "array",
@@ -792,7 +869,7 @@
             "notice",
             "last_known_data"
           ],
-          "description": "'notice': a person asking for the app is told it is unavailable. 'last_known_data': a person is shown the last data the app provided, read-only and marked as out of date."
+          "description": "'notice': a person asking for the app is told it is unavailable. 'last_known_data': the app's own front end shows the last data the app provided, read-only and marked as out of date; the Identity Agent never shows it."
         },
         "queue_requests": {
           "type": "boolean",

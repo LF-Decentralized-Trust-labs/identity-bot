@@ -40,11 +40,14 @@ func TestThePublishedAppManifestVectorsHold(t *testing.T) {
 	vs := readAppVectors(t)
 	accepted, refusedRows := 0, map[string]bool{}
 	for _, v := range vs {
-		var m AppManifest
-		if err := json.Unmarshal(v.Manifest, &m); err != nil {
-			t.Fatalf("%s: %v", v.Name, err)
+		// DecodeManifest, not json.Unmarshal: the keys the schema refuses (an
+		// unknown one, a null) are refused where the manifest is read.
+		var err error
+		if m, decodeErr := DecodeManifest(v.Manifest); decodeErr != nil {
+			err = decodeErr
+		} else {
+			err = m.Validate()
 		}
-		err := m.Validate()
 		switch v.Outcome {
 		case "accepted":
 			accepted++

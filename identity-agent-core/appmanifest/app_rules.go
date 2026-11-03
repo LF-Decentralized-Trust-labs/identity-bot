@@ -69,6 +69,9 @@ func (m *AppManifest) validateApp() error {
 	if err := m.validateStore(); err != nil {
 		return err
 	}
+	if err := m.validateVolumes(); err != nil {
+		return err
+	}
 	if m.Placement != "" && m.Placement != "own_machine" && m.Placement != "shared_machine" {
 		return fmt.Errorf("placement: must be 'own_machine' or 'shared_machine', got '%s'", m.Placement)
 	}
@@ -103,12 +106,20 @@ func (m *AppManifest) validateRelease() error {
 	if len(m.SupportedPlatforms) > 0 {
 		return fmt.Errorf("supported_platforms: an app is one release, named by release_digest, so it declares no per-OS binaries")
 	}
-	if m.Binary != nil && m.Binary.Hash != "" {
+	// An app is its executable or its image, never both: a block for the
+	// other kind would name a second release or be settings nothing reads.
+	if m.ExecutionType == "compiled" && m.Container != nil {
+		return fmt.Errorf("container: a compiled app is its executable, so it declares no container block")
+	}
+	if m.ExecutionType == "container" && m.Binary != nil {
+		return fmt.Errorf("binary: a container app is its image, so it declares no binary block")
+	}
+	if m.Binary != nil && (m.Binary.Hash != "" || m.Binary.hashDeclared) {
 		return fmt.Errorf("binary.hash: an app's release is named by release_digest alone, so binary.hash is left out")
 	}
 	if m.Container != nil {
 		img := m.Container.Image
-		if img == "" || strings.ContainsAny(img, "@ \t\r\n") {
+		if img == "" || strings.ContainsRune(img, '@') || strings.IndexFunc(img, unicode.IsSpace) >= 0 {
 			return fmt.Errorf("container.image: an app's image is a name with no digest and no white space (release_digest is the digest), got '%s'", img)
 		}
 	}
@@ -151,6 +162,29 @@ func (m *AppManifest) validateStore() error {
 	}
 	if s.SizeMB < 1 || s.SizeMB > largestMiB {
 		return fmt.Errorf("store.size_mb: must be 1 to %d MiB, got %d", largestMiB, s.SizeMB)
+	}
+	return nil
+}
+
+// validateVolumes: what container.volumes means for an app. A volume is not a
+// place on the host ({APP_DATA} does not apply to an app): the one volume an
+// app may declare is "store", its own encrypted store (the store row), and the
+// value is the absolute path inside the container where the runtime mounts it.
+// An app with no store has nothing to mount.
+func (m *AppManifest) validateVolumes() error {
+	if m.Container == nil {
+		return nil
+	}
+	for key, target := range m.Container.Volumes {
+		if key != "store" {
+			return fmt.Errorf("container.volumes: an app's only volume is \"store\", its own encrypted store, got '%s'", key)
+		}
+		if m.Store.Format == "none" {
+			return fmt.Errorf("container.volumes: an app with store format \"none\" has no store to mount")
+		}
+		if !strings.HasPrefix(target, "/") {
+			return fmt.Errorf("container.volumes: the store is mounted at an absolute path inside the container, got '%s'", target)
+		}
 	}
 	return nil
 }

@@ -101,13 +101,13 @@ type AppStore struct {
 // FrontAndBackEnd is the row "front_and_back_end".
 type FrontAndBackEnd struct {
 	StaticFrontEndURL *string  `json:"static_front_end_url,omitempty"` // https address the static front end is served from
-	BackEndPort       *int     `json:"back_end_port,omitempty"`        // TCP port the back end listens on, on the app machine
+	BackEndPort       *int     `json:"back_end_port,omitempty"`        // TCP port the back end listens on, on the app machine; reached only through the relay, no inbound port is open on that machine
 	DeviceFrontEnds   []string `json:"device_front_ends"`              // "installed_app" and/or "browser"
 }
 
 // WhenDown is the row "when_down".
 type WhenDown struct {
-	PersonSees      string `json:"person_sees"`                 // "notice" or "last_known_data"
+	PersonSees      string `json:"person_sees"`                 // "notice" or "last_known_data" (shown by the app's own front end, never by the Identity Agent)
 	QueueRequests   *bool  `json:"queue_requests"`              // whether requests made while down are held
 	QueueMaxSeconds *int   `json:"queue_max_seconds,omitempty"` // how long one is held; present exactly when queue_requests is true
 }
@@ -194,6 +194,24 @@ type BinaryConfig struct {
 	Args        []string          `json:"args"`
 	Environment map[string]string `json:"environment"`
 	Hash        string            `json:"hash,omitempty"` // "blake3:<hex>"; required + verified for host plug-ins
+
+	// hashDeclared is set when the JSON carried a "hash" key, whatever its
+	// value, so that an app (which has no binary.hash) can be refused for
+	// "hash": "" as for any other value.
+	hashDeclared bool
+}
+
+// UnmarshalJSON reads a BinaryConfig and notes whether it carried a "hash" key.
+func (b *BinaryConfig) UnmarshalJSON(data []byte) error {
+	type plain BinaryConfig
+	if err := json.Unmarshal(data, (*plain)(b)); err != nil {
+		return err
+	}
+	var keys map[string]json.RawMessage
+	if json.Unmarshal(data, &keys) == nil {
+		_, b.hashDeclared = keys["hash"]
+	}
+	return nil
 }
 
 type ResourceLimits struct {
@@ -221,9 +239,9 @@ func LoadManifest(path string) (*AppManifest, error) {
 		return nil, fmt.Errorf("failed to read manifest file: %w", err)
 	}
 
-	var manifest AppManifest
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		return nil, fmt.Errorf("failed to parse manifest: %w", err)
+	manifest, err := DecodeManifest(data)
+	if err != nil {
+		return nil, err
 	}
 
 	// Resolve the host-matching binary for plug-ins that declare per-OS artifacts
@@ -234,7 +252,7 @@ func LoadManifest(path string) (*AppManifest, error) {
 		return nil, fmt.Errorf("invalid manifest: %w", err)
 	}
 
-	return &manifest, nil
+	return manifest, nil
 }
 
 func LoadManifestsFromDir(dir string) ([]*AppManifest, error) {
@@ -278,7 +296,8 @@ func (m *AppManifest) Validate() error {
 	if m.DisplayMethod != "webview" && m.DisplayMethod != "terminal" {
 		return fmt.Errorf("display_method must be 'webview' or 'terminal', got '%s'", m.DisplayMethod)
 	}
-	if m.Container != nil {
+	if m.Container != nil && !m.IsApp() {
+		// An app's volumes are its own encrypted store, checked by validateApp.
 		for hostPath := range m.Container.Volumes {
 			if !strings.HasPrefix(hostPath, "{APP_DATA}") || strings.Contains(hostPath, "..") {
 				return fmt.Errorf("volume %q: an app may mount only from {APP_DATA}, its own directory", hostPath)
