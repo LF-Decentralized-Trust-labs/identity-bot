@@ -33,8 +33,9 @@ func readAppVectors(t *testing.T) []appVector {
 }
 
 // Every published manifest is accepted or refused as the file says, and a
-// refusal names the row the file says. The file holds an accepted manifest
-// and, for each of the five rows an app declares, one missing that row.
+// refusal names the row the file says. The file holds accepted manifests and,
+// for each row an app declares, one missing that row; and for every rule of a
+// row, one manifest that breaks only that rule.
 func TestThePublishedAppManifestVectorsHold(t *testing.T) {
 	vs := readAppVectors(t)
 	accepted, refusedRows := 0, map[string]bool{}
@@ -65,10 +66,11 @@ func TestThePublishedAppManifestVectorsHold(t *testing.T) {
 			t.Errorf("%s: outcome %q", v.Name, v.Outcome)
 		}
 	}
-	if accepted < 2 {
-		t.Errorf("%d accepted vectors; want at least 2", accepted)
+	if accepted < 10 {
+		t.Errorf("%d accepted vectors; want at least 10", accepted)
 	}
-	for _, row := range []string{"name", "release_digest", "encrypted_machine", "resources", "network.allowed_domains"} {
+	for _, row := range []string{"name", "release_digest", "encrypted_machine", "resources.cpu_cores", "network.allowed_domains",
+		"store", "front_and_back_end", "secrets", "when_down", "backup"} {
 		if !refusedRows[row] {
 			t.Errorf("no vector shows a manifest missing %s refused", row)
 		}
@@ -81,7 +83,7 @@ func TestThePublishedAppManifestVectorsHold(t *testing.T) {
 func TestAnAppDeclaresItsRows(t *testing.T) {
 	var good AppManifest
 	for _, v := range readAppVectors(t) {
-		if v.Name == "a valid app that needs an encrypted machine and reaches no host" {
+		if v.Name == "a valid compiled app that needs an encrypted machine and reaches no host" {
 			if err := json.Unmarshal(v.Manifest, &good); err != nil {
 				t.Fatal(err)
 			}
@@ -96,6 +98,19 @@ func TestAnAppDeclaresItsRows(t *testing.T) {
 	good.Network.AllowedDomains = nil
 	if err := good.Validate(); err == nil {
 		t.Fatal("a nil allowed_domains was accepted")
+	}
+	good.Network.AllowedDomains = []string{}
+	if err := good.Validate(); err != nil {
+		t.Fatalf("an empty list is refused again: %v", err)
+	}
+	empty := []string{}
+	good.Secrets = &empty
+	if err := good.Validate(); err != nil {
+		t.Fatalf("an empty secrets list (none needed) refused: %v", err)
+	}
+	good.Secrets = nil
+	if err := good.Validate(); err == nil || !strings.Contains(err.Error(), "secrets") {
+		t.Fatalf("an absent secrets row: %v", err)
 	}
 
 	for _, v := range readAppVectors(t) {
@@ -122,6 +137,10 @@ func TestTheAppManifestSchemaDescribesTheseTypes(t *testing.T) {
 		"provided_capability": ProvidedCapability{},
 		"host_control":        HostControlSpec{},
 		"platform_binary":     PlatformBinary{},
+		"store":               AppStore{},
+		"front_and_back_end":  FrontAndBackEnd{},
+		"when_down":           WhenDown{},
+		"backup":              Backup{},
 	}
 	var faults []string
 	for def, v := range held {
@@ -131,4 +150,61 @@ func TestTheAppManifestSchemaDescribesTheseTypes(t *testing.T) {
 	for _, f := range faults {
 		t.Error(f)
 	}
+}
+
+// A name that is only white space is no name, and an app's name is checked by
+// one rule whether it is empty or not.
+func TestAnAppNameIsCheckedByOneRule(t *testing.T) {
+	for _, name := range []string{"", " ", "\t\n", "\u00a0\u2003"} {
+		m := validCompiledApp(t)
+		m.Name = name
+		if err := m.Validate(); err == nil || !strings.HasPrefix(err.Error(), "name:") {
+			t.Errorf("name %q: %v", name, err)
+		}
+	}
+	m := validCompiledApp(t)
+	m.Kind, m.Name = "capability", ""
+	m.ReleaseDigest, m.EncryptedMachine, m.Store, m.Placement = "", "", nil, ""
+	m.FrontAndBackEnd, m.Secrets, m.WhenDown, m.Backup = nil, nil, nil, nil
+	if err := m.Validate(); err == nil || err.Error() != "name is required" {
+		t.Errorf("a capability with no name: %v", err)
+	}
+}
+
+func validCompiledApp(t *testing.T) *AppManifest {
+	t.Helper()
+	for _, v := range readAppVectors(t) {
+		if v.Name == "a valid compiled app that needs an encrypted machine and reaches no host" {
+			var m AppManifest
+			if err := json.Unmarshal(v.Manifest, &m); err != nil {
+				t.Fatal(err)
+			}
+			return &m
+		}
+	}
+	t.Fatal("vector for a valid compiled app not found")
+	return nil
+}
+
+// ValidOutboundHost accepts the five written forms and nothing else.
+func TestOutboundHostForms(t *testing.T) {
+	for _, h := range []string{"a", "a.example.org", "a-b.example.org", "a.example.org:1", "a.example.org:65535", "*.example.org",
+		"**.example.org", "*.example.org:8080", "**.a.b.example.org:443", "localhost:8080"} {
+		if !ValidOutboundHost(h) {
+			t.Errorf("%q refused", h)
+		}
+	}
+	for _, h := range []string{"", "*", "*.com", "**.com", "a.*.example.org", "***.example.org", "*example.org", "A.example.org", "10.0.0.1",
+		"1.2", "a.example.org:0", "a.example.org:65536", "a.example.org:080", "a.example.org:", "a:1:2", "a..b", "a.b.", "-a.b", "a_b.c",
+		"https://a.example.org", "a.example.org/x", "a b.example.org", "*.1.2"} {
+		if ValidOutboundHost(h) {
+			t.Errorf("%q accepted", h)
+		}
+	}
+}
+
+// An independent implementation, written from the schema's prose in Python,
+// agrees with the vector file.
+func TestAnIndependentImplementationAgreesWithTheAppManifestVectors(t *testing.T) {
+	contractcheck.IndependentlyWith(t, "../contracts/check_app_manifest_vectors.py", "app-manifest-vectors.json")
 }

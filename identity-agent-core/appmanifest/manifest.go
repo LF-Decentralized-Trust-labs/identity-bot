@@ -60,17 +60,62 @@ type AppManifest struct {
 	// --- Rows of an app beside an Identity Agent (ADR-012, Amendment 5) ---
 	// An app is a manifest with kind "app". Its name, resources and outbound
 	// hosts are the existing name, resources and network.allowed_domains rows;
-	// these two are the rows it adds. Validate refuses a kind "app" manifest
-	// that lacks either, or lacks any of those three.
+	// the rows below are the ones it adds. validateApp (app_rules.go) is the
+	// rule for every row, and the prose of
+	// contracts/app-manifest/app-manifest.schema.json says it in words.
 
-	// ReleaseDigest names the exact release this manifest describes:
-	// "blake3:" and 64 lower-case hex digits. A runtime and the Identity Agent
-	// check what they are about to run against it.
+	// ReleaseDigest names the exact release this manifest describes: for a
+	// compiled app "blake3:" and 64 lower-case hex digits of the executable's
+	// bytes, for a container app "sha256:" and 64 lower-case hex digits of the
+	// image's OCI manifest. It is the only name an app has for its release.
 	ReleaseDigest string `json:"release_digest,omitempty"`
 	// EncryptedMachine says whether the app needs a machine whose memory is
-	// encrypted (a TEE): "required" (refuse to run anywhere else), "preferred"
-	// (run elsewhere, and say so), or "not_needed".
+	// encrypted (a TEE): "required", "preferred" or "not_needed".
 	EncryptedMachine string `json:"encrypted_machine,omitempty"`
+	// Store is the app's own encrypted store: its format and the size it asks for.
+	Store *AppStore `json:"store,omitempty"`
+	// Placement is where the app runs: "own_machine" (the default when the row
+	// is absent) or "shared_machine". Never inside the Identity Agent.
+	Placement string `json:"placement,omitempty"`
+	// FrontAndBackEnd says what the app serves: a static front end at a fixed
+	// web address, a back end on the app machine, or both, and the device
+	// front ends a person uses.
+	FrontAndBackEnd *FrontAndBackEnd `json:"front_and_back_end,omitempty"`
+	// Secrets are the names of the credentials the app needs. The Identity
+	// Agent holds them and uses them for the app; the app is never handed one.
+	// Present and empty means the app needs none.
+	Secrets *[]string `json:"secrets,omitempty"`
+	// WhenDown says what a person sees while the app is down and whether
+	// requests for it queue.
+	WhenDown *WhenDown `json:"when_down,omitempty"`
+	// Backup says what of the app is backed up and how often.
+	Backup *Backup `json:"backup,omitempty"`
+}
+
+// AppStore is the row "store".
+type AppStore struct {
+	Format string `json:"format"`  // a lower-case token naming the layout, e.g. "sqlite"; "none" for an app with no store
+	SizeMB int    `json:"size_mb"` // MiB the store may grow to; 0 exactly when the format is "none"
+}
+
+// FrontAndBackEnd is the row "front_and_back_end".
+type FrontAndBackEnd struct {
+	StaticFrontEndURL *string  `json:"static_front_end_url,omitempty"` // https address the static front end is served from
+	BackEndPort       *int     `json:"back_end_port,omitempty"`        // TCP port the back end listens on, on the app machine
+	DeviceFrontEnds   []string `json:"device_front_ends"`              // "installed_app" and/or "browser"
+}
+
+// WhenDown is the row "when_down".
+type WhenDown struct {
+	PersonSees      string `json:"person_sees"`                 // "notice" or "last_known_data"
+	QueueRequests   *bool  `json:"queue_requests"`              // whether requests made while down are held
+	QueueMaxSeconds *int   `json:"queue_max_seconds,omitempty"` // how long one is held; present exactly when queue_requests is true
+}
+
+// Backup is the row "backup".
+type Backup struct {
+	What       []string `json:"what"`                  // any of "store", "settings"; empty means nothing is backed up
+	EveryHours *int     `json:"every_hours,omitempty"` // present exactly when what is not empty
 }
 
 // The values of AppManifest.EncryptedMachine.
@@ -224,7 +269,7 @@ func (m *AppManifest) Validate() error {
 	if m.ID == "" {
 		return fmt.Errorf("id is required")
 	}
-	if m.Name == "" {
+	if !m.IsApp() && m.Name == "" {
 		return fmt.Errorf("name is required")
 	}
 	if m.ExecutionType != "container" && m.ExecutionType != "compiled" {
@@ -266,7 +311,7 @@ func (m *AppManifest) Validate() error {
 	if !validLogLevels[m.LogLevel] {
 		return fmt.Errorf("log_level must be 'none', 'metadata', or 'full'; got '%s'", m.LogLevel)
 	}
-	if m.Resources.MemoryMB <= 0 {
+	if !m.IsApp() && m.Resources.MemoryMB <= 0 {
 		return fmt.Errorf("resources.memory_mb must be positive")
 	}
 
@@ -300,6 +345,9 @@ func (m *AppManifest) Validate() error {
 	if m.Isolation != "" && m.Isolation != "sandbox" && m.Isolation != "host" {
 		return fmt.Errorf("isolation must be 'sandbox' or 'host', got '%s'", m.Isolation)
 	}
+	if m.IsApp() && m.Isolation == "host" {
+		return fmt.Errorf("isolation: an app runs in its own sandbox and is never a host plug-in")
+	}
 	if m.Isolation == "host" {
 		if m.ExecutionType != "compiled" {
 			return fmt.Errorf("a host plug-in must be a compiled binary (execution_type 'compiled'), got '%s'", m.ExecutionType)
@@ -317,59 +365,10 @@ func (m *AppManifest) Validate() error {
 	if m.IsApp() {
 		return m.validateApp()
 	}
-	if m.ReleaseDigest != "" || m.EncryptedMachine != "" {
-		return fmt.Errorf("release_digest and encrypted_machine are rows of an app (kind 'app'); this manifest's kind is '%s'", m.Kind)
+	if row := m.appRowPresent(); row != "" {
+		return fmt.Errorf("%s is a row of an app (kind 'app'); this manifest's kind is '%s'", row, m.Kind)
 	}
 	return nil
-}
-
-// validateApp checks the rows an app declares: its name, release digest, the
-// resources it asks for, whether it needs an encrypted machine, and its
-// outbound hosts. A row that is missing is refused by name, so a maker is told
-// which one to add. An empty allowed_domains list is a statement (the app
-// reaches no host); an absent one is not.
-func (m *AppManifest) validateApp() error {
-	if strings.TrimSpace(m.Name) == "" {
-		return fmt.Errorf("an app must declare name")
-	}
-	if m.ReleaseDigest == "" {
-		return fmt.Errorf("an app must declare release_digest (blake3:<64 hex digits>)")
-	}
-	if !validReleaseDigest(m.ReleaseDigest) {
-		return fmt.Errorf("release_digest must be 'blake3:' and 64 lower-case hex digits, got '%s'", m.ReleaseDigest)
-	}
-	if m.Resources.CPUCores <= 0 || m.Resources.MemoryMB <= 0 || m.Resources.DiskMB <= 0 {
-		return fmt.Errorf("an app must declare the resources it asks for: resources.cpu_cores, memory_mb and disk_mb must each be positive")
-	}
-	switch m.EncryptedMachine {
-	case "":
-		return fmt.Errorf("an app must declare encrypted_machine ('required', 'preferred' or 'not_needed')")
-	case EncryptedMachineRequired, EncryptedMachinePreferred, EncryptedMachineNotNeeded:
-	default:
-		return fmt.Errorf("encrypted_machine must be 'required', 'preferred' or 'not_needed', got '%s'", m.EncryptedMachine)
-	}
-	if m.Network.AllowedDomains == nil {
-		return fmt.Errorf("an app must declare network.allowed_domains, its outbound hosts (an empty list means it reaches none)")
-	}
-	for i, d := range m.Network.AllowedDomains {
-		if strings.TrimSpace(d) == "" || strings.Contains(d, "://") || strings.ContainsAny(d, "/ ") {
-			return fmt.Errorf("network.allowed_domains[%d] must be a host name or a *.host pattern, got '%s'", i, d)
-		}
-	}
-	return nil
-}
-
-func validReleaseDigest(d string) bool {
-	hex, ok := strings.CutPrefix(d, "blake3:")
-	if !ok || len(hex) != 64 {
-		return false
-	}
-	for _, c := range hex {
-		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
-			return false
-		}
-	}
-	return true
 }
 
 // resolveHostBinary picks the supported_platforms entry matching this host and, for a

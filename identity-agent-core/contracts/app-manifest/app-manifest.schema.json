@@ -33,7 +33,7 @@
         "name": {
           "type": "string",
           "minLength": 1,
-          "description": "An app's name."
+          "description": "An app's name. It must have at least one character that is not Unicode White_Space (tab to carriage return, space, U+0085, U+00A0, U+1680, U+2000 to U+200A, U+2028, U+2029, U+202F, U+205F, U+3000)."
         },
         "description": {
           "type": "string"
@@ -160,12 +160,12 @@
           "enum": [
             "sandbox",
             "host"
-          ]
+          ],
+          "description": "'host' is refused for an app."
         },
         "release_digest": {
           "type": "string",
-          "pattern": "^blake3:[0-9a-f]{64}$",
-          "description": "The exact release this manifest describes. An app must declare it."
+          "description": "The only name an app has for its release. A compiled app: 'blake3:' and 64 lower-case hex digits, the BLAKE3 hash (32-byte output) of the executable file's bytes exactly as the runtime launches it, nothing prepended or appended. A container app: 'sha256:' and 64 lower-case hex digits, the OCI digest of the image's manifest (or, for a multi-platform image, of its index): the value a registry shows as the image's digest. The runtime pulls the image by that digest and runs nothing else. An app has no binary.hash, no supported_platforms and no digest in container.image, so a release has one name."
         },
         "encrypted_machine": {
           "enum": [
@@ -173,10 +173,39 @@
             "preferred",
             "not_needed"
           ],
-          "description": "Whether the app needs a machine with encrypted memory (a TEE). An app must declare it."
+          "description": "Whether the app needs a machine with encrypted memory (a TEE). 'required': a runtime refuses to start the app on any machine that has not proved its memory is encrypted. 'preferred': a runtime places the app on a machine that has proved it if one is free; otherwise it starts the app on one that has not and, when it does, records that in the owner's view of the app (visible on the app's page, in plain words), and never refuses and never stays silent. 'not_needed': placed anywhere, nothing recorded. A machine that cannot prove it counts as not encrypted. An app must declare it; a missing row is never read as any of the three."
+        },
+        "store": {
+          "$ref": "#/$defs/store"
+        },
+        "placement": {
+          "enum": [
+            "own_machine",
+            "shared_machine"
+          ],
+          "description": "Where the app runs: 'own_machine' (a machine of its own) or 'shared_machine' (a machine that also runs other apps). Absent means 'own_machine'. Never inside the Identity Agent: there is no value for that, and any other value is refused."
+        },
+        "front_and_back_end": {
+          "$ref": "#/$defs/front_and_back_end"
+        },
+        "secrets": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          },
+          "description": "The names of the credentials the app needs. The Identity Agent holds each one and uses it for the app, when the app asks it to; the value is never handed to the app and never appears in the manifest. An empty list says the app needs none; an absent row is refused."
+        },
+        "when_down": {
+          "$ref": "#/$defs/when_down"
+        },
+        "backup": {
+          "$ref": "#/$defs/backup"
         }
       },
-      "description": "An app manifest. A manifest of kind 'app' must also declare release_digest, encrypted_machine, positive cpu_cores, memory_mb and disk_mb, and network.allowed_domains (an empty list means it reaches no host); any other kind must not carry release_digest or encrypted_machine. appmanifest.Validate is the full rule.",
+      "description": "An app manifest. A manifest of kind 'app' declares every row of ADR-012 Amendment 5: name, release_digest, resources (all five numbers), encrypted_machine, store, front_and_back_end, secrets, when_down, backup and network.allowed_domains (placement is optional). Any other kind carries none of release_digest, encrypted_machine, store, placement, front_and_back_end, secrets, when_down, backup. This schema refuses exactly what appmanifest.Validate refuses for an app manifest, rows only: the checks Validate makes on every manifest, such as execution_type, are in the properties above. release_digest's form is per execution_type: sha256 for a container app, blake3 for a compiled one.",
       "allOf": [
         {
           "if": {
@@ -192,28 +221,151 @@
           "then": {
             "required": [
               "release_digest",
-              "encrypted_machine"
+              "encrypted_machine",
+              "store",
+              "front_and_back_end",
+              "secrets",
+              "when_down",
+              "backup"
             ],
             "properties": {
-              "network": {
-                "required": [
-                  "allowed_domains"
-                ]
+              "name": {
+                "pattern": "[^\\t-\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]"
+              },
+              "isolation": {
+                "const": "sandbox"
+              },
+              "supported_platforms": {
+                "maxItems": 0
               },
               "resources": {
                 "properties": {
                   "cpu_cores": {
-                    "exclusiveMinimum": 0
+                    "exclusiveMinimum": 0,
+                    "maximum": 1024
                   },
                   "memory_mb": {
-                    "exclusiveMinimum": 0
+                    "minimum": 1,
+                    "maximum": 16777216
                   },
                   "disk_mb": {
-                    "exclusiveMinimum": 0
+                    "minimum": 1,
+                    "maximum": 16777216
+                  },
+                  "egress_kbps": {
+                    "minimum": 0,
+                    "maximum": 100000000
+                  },
+                  "ingress_kbps": {
+                    "minimum": 0,
+                    "maximum": 100000000
+                  }
+                }
+              },
+              "network": {
+                "required": [
+                  "allowed_domains"
+                ],
+                "properties": {
+                  "allowed_domains": {
+                    "items": {
+                      "pattern": "^(?=[^:]{1,253}(?::|$))(?:(?![0-9.]+(?::|$|/))[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*|\\*{1,2}\\.(?![0-9.]+(?::|$|/))[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+)(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?$"
+                    }
                   }
                 }
               }
-            }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "execution_type": {
+                      "const": "container"
+                    }
+                  },
+                  "required": [
+                    "execution_type"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "container"
+                  ],
+                  "properties": {
+                    "release_digest": {
+                      "pattern": "^sha256:[0-9a-f]{64}$"
+                    },
+                    "container": {
+                      "properties": {
+                        "image": {
+                          "pattern": "^[^@\\s]+$"
+                        },
+                        "volumes": {
+                          "propertyNames": {
+                            "pattern": "^\\{APP_DATA\\}(?!.*\\.\\.)"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "execution_type": {
+                      "const": "compiled"
+                    }
+                  },
+                  "required": [
+                    "execution_type"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "binary"
+                  ],
+                  "properties": {
+                    "release_digest": {
+                      "pattern": "^blake3:[0-9a-f]{64}$"
+                    },
+                    "binary": {
+                      "not": {
+                        "required": [
+                          "hash"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "network_mode": {
+                      "enum": [
+                        "isolated",
+                        "local_only"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "network_mode"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "network": {
+                      "properties": {
+                        "allowed_domains": {
+                          "maxItems": 0
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
           },
           "else": {
             "not": {
@@ -226,6 +378,36 @@
                 {
                   "required": [
                     "encrypted_machine"
+                  ]
+                },
+                {
+                  "required": [
+                    "store"
+                  ]
+                },
+                {
+                  "required": [
+                    "placement"
+                  ]
+                },
+                {
+                  "required": [
+                    "front_and_back_end"
+                  ]
+                },
+                {
+                  "required": [
+                    "secrets"
+                  ]
+                },
+                {
+                  "required": [
+                    "when_down"
+                  ]
+                },
+                {
+                  "required": [
+                    "backup"
                   ]
                 }
               ]
@@ -331,7 +513,8 @@
         "ingress_kbps": {
           "type": "integer"
         }
-      }
+      },
+      "description": "What the app asks for. Each number is a request, not a cap: a runtime must be able to reserve all of it before it starts the app, and refuses to start it otherwise; it may give the app more. cpu_cores is a number of CPUs, whole or fractional (0.5 is half a CPU), more than 0 and at most 1024. memory_mb and disk_mb are MiB (1 MiB = 2^20 bytes, despite the 'mb'), 1 to 16777216. egress_kbps and ingress_kbps are kilobits (1000 bits) per second the network is asked to carry, 0 to 100000000; 0 asks for no reserved rate. Applies to a manifest of kind 'app'; other kinds read them as limits."
     },
     "network": {
       "type": "object",
@@ -351,8 +534,7 @@
         "allowed_domains": {
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[^/ ]+$"
+            "type": "string"
           }
         },
         "blocked_domains": {
@@ -362,7 +544,7 @@
           }
         }
       },
-      "description": "allowed_domains are an app's outbound hosts. An app must declare the list, empty if it reaches no host."
+      "description": "allowed_domains are an app's outbound hosts. An app must declare the list. An empty list says the app asks to reach no outside host, and a runtime grants none, whatever network_mode is. network_mode 'isolated' and 'local_only' let an app reach no outside host, so for them the list must be empty. Each entry is exactly one of: a host ('api.example.org'); a host and port ('api.example.org:8443'); '*.host' (one label in front of host, as vault.MatchDomain reads it); '**.host' (one or more labels in front of host); either wildcard form with ':port'. A host is dot-separated labels of lower-case letters, digits and '-' (not at either end of a label), 1 to 63 characters each; the entry before any port is at most 253 characters; a host made only of digits and dots (an IP address) is refused; after a wildcard there are at least two labels ('*.com' is refused). A port is 1 to 65535 in decimal with no leading zero. An entry with no port allows any port of the host; an entry with a port allows that port only. Anything else (a URL, a path, spaces, upper case, a mid-name wildcard) is refused. Applies to a manifest of kind 'app'."
     },
     "capabilities": {
       "type": "object",
@@ -488,6 +670,213 @@
           "type": "string"
         }
       }
+    },
+    "store": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "size_mb"
+      ],
+      "properties": {
+        "format": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,31}$",
+          "description": "A token naming how the store lays out its data, for example 'sqlite' or 'files'. 'none' says the app keeps no store."
+        },
+        "size_mb": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16777216,
+          "description": "The size the store is asked to have, in MiB (1 MiB = 2^20 bytes); the store may not grow past it. 0 exactly when the format is 'none', otherwise 1 or more. It is in addition to resources.disk_mb, which is the app's scratch space."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "format": {
+                "const": "none"
+              }
+            },
+            "required": [
+              "format"
+            ]
+          },
+          "then": {
+            "properties": {
+              "size_mb": {
+                "const": 0
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "size_mb": {
+                "minimum": 1
+              }
+            }
+          }
+        }
+      ],
+      "description": "The app's own encrypted store. The runtime keeps it encrypted; the app never holds the key to it. It lives on the app's machine and is not shared with another app."
+    },
+    "front_and_back_end": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device_front_ends"
+      ],
+      "properties": {
+        "static_front_end_url": {
+          "type": "string",
+          "pattern": "^https://(?=[^:/]{1,253}(?::|/|$))(?:(?![0-9.]+(?::|$|/))[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*)(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@/-]|%[0-9A-Fa-f]{2})*)?$",
+          "description": "The fixed web address a static front end is served from: 'https://', an exact lower-case host name (no wildcard, no IP address), optionally ':port', optionally a path of unreserved/sub-delim/':'/'@'/'/' characters and %XX escapes; no user, query or fragment."
+        },
+        "back_end_port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "The TCP port the app's back end listens on, on the app's own machine."
+        },
+        "device_front_ends": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "installed_app",
+              "browser"
+            ]
+          },
+          "description": "The front ends a person uses on their devices: 'installed_app' and/or 'browser'. May be empty when the app has no front end for a person. A static front end is loaded by a browser, so 'browser' must be listed whenever static_front_end_url is."
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "static_front_end_url"
+          ]
+        },
+        {
+          "required": [
+            "back_end_port"
+          ]
+        }
+      ],
+      "if": {
+        "required": [
+          "static_front_end_url"
+        ]
+      },
+      "then": {
+        "properties": {
+          "device_front_ends": {
+            "contains": {
+              "const": "browser"
+            }
+          }
+        }
+      },
+      "description": "What the app serves: a static front end at a fixed web address, a back end on the app's machine, or both. At least one is declared."
+    },
+    "when_down": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "person_sees",
+        "queue_requests"
+      ],
+      "properties": {
+        "person_sees": {
+          "enum": [
+            "notice",
+            "last_known_data"
+          ],
+          "description": "'notice': a person asking for the app is told it is unavailable. 'last_known_data': a person is shown the last data the app provided, read-only and marked as out of date."
+        },
+        "queue_requests": {
+          "type": "boolean",
+          "description": "Whether requests made to the app while it is down are held and delivered when it is back (true) or answered at once as unavailable (false)."
+        },
+        "queue_max_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400,
+          "description": "How long, in seconds, a held request is kept before it is answered as unavailable. Present exactly when queue_requests is true."
+        }
+      },
+      "if": {
+        "properties": {
+          "queue_requests": {
+            "const": true
+          }
+        },
+        "required": [
+          "queue_requests"
+        ]
+      },
+      "then": {
+        "required": [
+          "queue_max_seconds"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "queue_max_seconds"
+          ]
+        }
+      },
+      "description": "What happens while the app is down."
+    },
+    "backup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "what"
+      ],
+      "properties": {
+        "what": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "store",
+              "settings"
+            ]
+          },
+          "description": "What is backed up: 'store' (the app's encrypted store) and/or 'settings' (the app's configuration). Secrets are never part of an app's backup. An empty list says nothing is backed up."
+        },
+        "every_hours": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8760,
+          "description": "How often, in whole hours, a backup is taken. Present exactly when 'what' is not empty."
+        }
+      },
+      "if": {
+        "properties": {
+          "what": {
+            "minItems": 1
+          }
+        },
+        "required": [
+          "what"
+        ]
+      },
+      "then": {
+        "required": [
+          "every_hours"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "every_hours"
+          ]
+        }
+      },
+      "description": "What of the app is backed up, and how often."
     }
   }
 }
