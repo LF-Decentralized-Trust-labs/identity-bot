@@ -204,6 +204,93 @@ class LocalCoreKeriService extends KeriService {
     }
   }
 
+  /// Moves this device's identity to the phrase [words] (ADR-061 section 10),
+  /// for when the phrase in force may be in somebody else's hands.
+  ///
+  /// Two rotations. The first reveals the old phrase's next key and commits to
+  /// the new phrase's keys; the second, made with the new phrase as a recovery
+  /// rotation after the first, reveals the new phrase's first key and
+  /// supersedes any interaction a holder of the old phrase signed in between.
+  /// The new phrase is kept beside the old one before anything is signed, and
+  /// replaces it only once the second rotation is in the log, so a move
+  /// interrupted between the two is finished by
+  /// [finishMovingToANewPhrase] and never strands the identity.
+  ///
+  /// The new phrase's messaging keys are not anchored by the move: the
+  /// identity keeps the keyset it is reached on until its keys are replaced.
+  Future<RotationResult> moveToANewPhrase({required List<String> words}) async {
+    final old = await SecureKeyStore.loadMnemonic();
+    if (old == null) throw Exception('No identity keys found in secure storage.');
+    if (old.join(' ') == words.join(' ')) {
+      throw ArgumentError('the new phrase is the phrase in force');
+    }
+    final pending = await SecureKeyStore.loadPhraseMovingTo();
+    if (pending != null && pending.join(' ') != words.join(' ')) {
+      throw StateError('a move to another phrase is under way; it is finished '
+          'first');
+    }
+    if (!await SecureKeyStore.savePhraseMovingTo(words)) {
+      throw StateError('the new phrase could not be kept safely, so the move '
+          'did not start');
+    }
+    if (pending == null) {
+      final oldSeed = Bip39.mnemonicToSeed(old);
+      final newSeed = Bip39.mnemonicToSeed(words);
+      var state = await _keyInForce(oldSeed);
+      final makes = await _makesFor(oldSeed);
+      if ((await makes.finishSigned(state.aid, witnessedBy: state.witnesses))
+          .isNotEmpty) {
+        state = await _keyInForce(oldSeed);
+      }
+      await makes.moveToANewPhrase(oldSeed, newSeed,
+          aid: state.aid,
+          generation: state.generation,
+          afterSn: state.tip.sn,
+          afterDigest: state.tip.digest,
+          toad: state.witnesses.toad,
+          witnessedBy: state.witnesses);
+    }
+    return finishMovingToANewPhrase();
+  }
+
+  /// Finishes a move to a new phrase whose first rotation is in the log: the
+  /// second rotation, made with the new phrase, then the new phrase in force.
+  /// A second rotation already signed and committed, or already in the log,
+  /// is finished rather than made again.
+  Future<RotationResult> finishMovingToANewPhrase() async {
+    final words = await SecureKeyStore.loadPhraseMovingTo();
+    if (words == null) throw StateError('no move to a new phrase is under way');
+    final newSeed = Bip39.mnemonicToSeed(words);
+    var state = await _keyState(newSeed);
+    final makes = await _makesFor(newSeed);
+    if ((await makes.finishSigned(state.aid, witnessedBy: state.witnesses))
+        .isNotEmpty) {
+      state = await _keyState(newSeed);
+    }
+    String signature = '';
+    if (state.movingToThisPhrase) {
+      final step2 = await makes.rotate(newSeed,
+          aid: state.aid,
+          generation: 0,
+          afterSn: state.establishment.sn,
+          afterDigest: state.establishment.digest,
+          toad: state.witnesses.toad,
+          witnessedBy: state.witnesses,
+          recovery: true);
+      signature = step2.signatures.first;
+    }
+    if (!await SecureKeyStore.finishMovingToThePhrase(words)) {
+      throw StateError('the new phrase could not be made the phrase in force; '
+          'the move is in the log and both phrases are still kept');
+    }
+    return RotationResult(
+      aid: state.aid,
+      newPublicKey: KeyManager.keyAt(newSeed, 1).publicKeyEncoded,
+      kel: '',
+      cesrSignature: signature,
+    );
+  }
+
   @override
   Future<RotationResult> rotateAid({required String name}) async {
     final mnemonic = await SecureKeyStore.loadMnemonic();

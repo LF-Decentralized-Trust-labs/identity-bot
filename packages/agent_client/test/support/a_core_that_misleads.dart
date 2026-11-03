@@ -34,6 +34,10 @@ class ACoreThatMisleads extends http.BaseClient {
   /// connection drops after the core has the request.
   bool loseTheNextCommitsAnswer = false;
 
+  /// Counts down one per commit; the commit that brings it to zero has its
+  /// answer lost, as [loseTheNextCommitsAnswer] does for the next one.
+  int? loseTheAnswerToCommitsAfter;
+
   /// How many prepares to answer `tip_moved` without asking the core.
   int movePrepares = 0;
 
@@ -50,6 +54,15 @@ class ACoreThatMisleads extends http.BaseClient {
       if (instead != null) {
         answerTheNextCommit = null;
         return _answer(instead.$1, instead.$2);
+      }
+      final after = loseTheAnswerToCommitsAfter;
+      if (after != null) {
+        if (after == 0) {
+          loseTheAnswerToCommitsAfter = null;
+          loseTheNextCommitsAnswer = true;
+        } else {
+          loseTheAnswerToCommitsAfter = after - 1;
+        }
       }
       if (loseTheNextCommitsAnswer) {
         loseTheNextCommitsAnswer = false;
