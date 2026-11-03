@@ -111,23 +111,27 @@ class OwnerSigningClient extends http.BaseClient {
     final first = await _signAndSend(request);
     if (first == null) return _inner.send(request);
     final stale = onStaleKeyState;
-    if (ownerKey == null || stale == null || first.statusCode != 401) {
-      return first;
+    if (ownerKey == null || stale == null || first.response.statusCode != 401) {
+      return first.response;
     }
-    final body = await first.stream.toBytes();
-    if (!_saysStale(body)) {
-      return http.StreamedResponse(Stream.value(body), first.statusCode,
-          headers: first.headers,
-          reasonPhrase: first.reasonPhrase,
-          request: first.request);
-    }
-    // The agent's log has moved past the key this device signed with. The
-    // device reads its key state again, and the request goes once more under
-    // whatever that reading gives.
+    final answer = first.response;
+    final body = await answer.stream.toBytes();
+    http.StreamedResponse again() =>
+        http.StreamedResponse(Stream.value(body), answer.statusCode,
+            contentLength: answer.contentLength,
+            headers: answer.headers,
+            isRedirect: answer.isRedirect,
+            persistentConnection: answer.persistentConnection,
+            reasonPhrase: answer.reasonPhrase,
+            request: answer.request);
+    if (!_saysStale(body)) return again();
+    // The agent says its log has moved past the key this device signed with.
+    // That answer is not signed, so nothing is changed because of it: the
+    // next reading of the key goes to the witnesses, and the request goes
+    // once more only if that reading puts a different key in force.
     await stale();
-    return await _signAndSend(request) ??
-        http.StreamedResponse(Stream.value(body), first.statusCode,
-            headers: first.headers, request: first.request);
+    return (await _signAndSend(request, notUnder: first.place))?.response ??
+        again();
   }
 
   static bool _saysStale(List<int> body) {
@@ -139,9 +143,13 @@ class OwnerSigningClient extends http.BaseClient {
     }
   }
 
-  /// Signs [request] with the owner's key and sends it; null where no key is
-  /// available.
-  Future<http.StreamedResponse?> _signAndSend(http.Request request) async {
+  /// Signs [request] with the owner's key and sends it, with the
+  /// establishment event the key was signed under; null where no key is
+  /// available, or where the key is the one put in force at [notUnder]: a
+  /// request is never sent twice under the same key.
+  Future<({http.StreamedResponse response, Place? place})?> _signAndSend(
+      http.Request request,
+      {Place? notUnder}) async {
     final read = ownerKey;
     Uint8List? seed;
     Place? place;
@@ -153,6 +161,10 @@ class OwnerSigningClient extends http.BaseClient {
       seed = await ownerSeed();
     }
     if (seed == null) return null;
+    if (notUnder != null && place == notUnder) {
+      seed.fillRange(0, seed.length, 0);
+      return null;
+    }
 
     final signed = http.Request(request.method, request.url)
       ..headers.addAll(request.headers)
@@ -161,30 +173,34 @@ class OwnerSigningClient extends http.BaseClient {
       ..maxRedirects = request.maxRedirects
       ..persistentConnection = request.persistentConnection;
 
-    signed.headers.addAll(OwnerSignature.headers(
-      method: request.method,
-      // The path the agent will actually verify — its own, with no host and no
-      // relay mount prefix. A signature over the host breaks when a relay
-      // renames it; a signature over the mount prefix breaks because a
-      // path-mounting relay strips that prefix before the agent sees the
-      // request, so the agent verifies `/api/…` and a prefixed signature matches
-      // nothing. pathSignatureCovers removes the prefix, and leaves a bare
-      // origin's path untouched.
-      path: pathSignatureCovers(agentOrigin, request.url),
-      body: request.bodyBytes,
-      ownerSeed: seed,
-      ownerAid: ownerAid,
-      targetAid: agentAid,
-    ));
+    try {
+      signed.headers.addAll(OwnerSignature.headers(
+        method: request.method,
+        // The path the agent will actually verify — its own, with no host and no
+        // relay mount prefix. A signature over the host breaks when a relay
+        // renames it; a signature over the mount prefix breaks because a
+        // path-mounting relay strips that prefix before the agent sees the
+        // request, so the agent verifies `/api/…` and a prefixed signature matches
+        // nothing. pathSignatureCovers removes the prefix, and leaves a bare
+        // origin's path untouched.
+        path: pathSignatureCovers(agentOrigin, request.url),
+        body: request.bodyBytes,
+        ownerSeed: seed,
+        ownerAid: ownerAid,
+        targetAid: agentAid,
+      ));
+    } finally {
+      // A seed read for this request alone is zeroed once it has signed, or
+      // failed to; one the caller's [ownerSeed] hands over stays the
+      // caller's.
+      if (read != null) seed.fillRange(0, seed.length, 0);
+    }
     if (place != null) {
       signed.headers[keyStateHeader] =
           '${place.sn.toRadixString(16)}.${place.digest}';
     }
-    // A seed read for this request alone is zeroed once it has signed; one
-    // the caller's [ownerSeed] hands over stays the caller's.
-    if (read != null) seed.fillRange(0, seed.length, 0);
 
-    return _inner.send(signed);
+    return (response: await _inner.send(signed), place: place);
   }
 
   /// Whether a URL belongs to the agent this client owns.
@@ -214,9 +230,11 @@ typedef OwnerKey = ({Uint8List seed, Place establishment});
 
 /// The owner key and stale-state handler for an identity whose phrase this
 /// device holds, read without any owner route (ADR-061 section 9): the key in
-/// force from [reader], and, when an agent says a request named a stale key
-/// state, the device's record told to forget where its log ends, so the next
-/// reading asks the witnesses. No key is given while the identity is moving to
+/// force from [reader]; and, after an agent says a request named a stale key
+/// state, the next key read from the witnesses' copies rather than the
+/// device's record. The stale answer is not signed, so it changes nothing
+/// stored: a reading the witnesses corroborate updates the record, and one
+/// that fails gives no key. No key is given while the identity is moving to
 /// this phrase and the move is unfinished.
 ({
   Future<OwnerKey?> Function() ownerKey,
@@ -224,17 +242,26 @@ typedef OwnerKey = ({Uint8List seed, Place establishment});
 }) ownerKeyFromThePhrase(
   Future<List<String>?> Function() loadMnemonic,
   Uint8List Function(String mnemonic) toSeed,
-  TheKeyStateThisDeviceReads reader, {
-  TheIdentityThisDeviceHolds? held,
-}) {
-  final record = held ?? TheIdentityThisDeviceHolds();
+  TheKeyStateThisDeviceReads reader,
+) {
+  var askTheWitnesses = false;
   return (
     ownerKey: () async {
       final words = await loadMnemonic();
       if (words == null || words.isEmpty) return null;
       final seed = toSeed(words.join(' '));
+      final fromTheWitnesses = askTheWitnesses;
+      askTheWitnesses = false;
       try {
-        final state = await reader.read(seed);
+        final VerifiedKeyState state;
+        try {
+          state = fromTheWitnesses
+              ? await reader.readTheCopies(seed)
+              : await reader.read(seed);
+        } on Exception {
+          if (fromTheWitnesses) return null;
+          rethrow;
+        }
         if (state.movingToThisPhrase) return null;
         return (
           seed: KeyManager.signingSeed(seed, index: state.generation),
@@ -244,7 +271,7 @@ typedef OwnerKey = ({Uint8List seed, Place establishment});
         seed.fillRange(0, seed.length, 0);
       }
     },
-    onStaleKeyState: record.forgetTheTip,
+    onStaleKeyState: () async => askTheWitnesses = true,
   );
 }
 

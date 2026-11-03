@@ -66,11 +66,15 @@ class AWitness {
     (_digests[aid] ??= []).add(ev.d);
   }
 
-  /// Forgets every log it holds, as a new witness would have none.
+  /// Forgets every log it holds and behaves again, as a new witness would.
   void forgetAll() {
     held.clear();
     _digests.clear();
     signsAnotherTip = false;
+    offline = false;
+    forgesReceipts = false;
+    namesAnother = false;
+    witnessesOnly = null;
   }
 
   Future<void> close() => _server.close(force: true);

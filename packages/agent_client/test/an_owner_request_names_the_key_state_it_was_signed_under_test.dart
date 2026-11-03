@@ -45,6 +45,9 @@ class _AnAgentOwnedByTheIdentity {
   final String _aid;
   String get origin => 'http://127.0.0.1:${_server.port}';
 
+  /// Answers every request that its key state is stale, whatever it named.
+  bool saysStaleRegardless = false;
+
   /// Each request: the key state it named, the key that signed it, and the
   /// answer.
   final seen = <(String, String, int)>[];
@@ -92,6 +95,7 @@ class _AnAgentOwnedByTheIdentity {
     } else {
       status = signer == placeOf[named]!.keys.first ? 401 : 403;
     }
+    if (saysStaleRegardless) status = 401;
     seen.add((named, signer ?? '', status));
     req.response.statusCode = status;
     req.response.headers.contentType = ContentType.json;
@@ -235,5 +239,45 @@ void main() {
     expect(res.statusCode, 401);
     expect(jsonDecode(res.body)['error'], 'stale_key_state');
     expect(agent.seen, hasLength(1));
+  });
+
+  test(
+      'a stale answer the witnesses do not bear out changes nothing stored, and '
+      'the request is not sent again under the same key', () async {
+    final makes = TheKeyEventsThisDeviceMakes(core.client, core.base, km,
+        witnesses: witnesses, held: TheIdentityThisDeviceHolds());
+    final founded =
+        await makes.found(seed, witnesses: [w1.aid, w2.aid, w3.aid], toad: 2);
+    final before = await TheIdentityThisDeviceHolds().read();
+    final agent =
+        await _AnAgentOwnedByTheIdentity.start(km, core.base, founded.aid);
+    addTearDown(agent.close);
+    agent.saysStaleRegardless = true;
+    final owner = ownerKeyFromThePhrase(
+        () async => phrase.split(' '),
+        (String m) => Bip39.mnemonicToSeed(m.split(' ')),
+        TheKeyStateThisDeviceReads(core.client, km, core.base));
+    final client = OwnerSigningClient(
+        agentOrigin: agent.origin,
+        ownerKey: owner.ownerKey,
+        onStaleKeyState: owner.onStaleKeyState,
+        inner: http.Client());
+    final res = await client.get(Uri.parse('${agent.origin}/api/identity'));
+    expect(res.statusCode, 401);
+    expect(agent.seen, hasLength(1),
+        reason: 'the witnesses put the same key in force, so it is not sent '
+            'again under it');
+    final after = await TheIdentityThisDeviceHolds().read();
+    expect(
+        (after!.tip, after.establishment), (before!.tip, before.establishment));
+
+    // With the witnesses out of reach, the stale answer still changes
+    // nothing, and the next request is signed from the record as before.
+    for (final w in [w1, w2, w3]) {
+      w.offline = true;
+    }
+    agent.saysStaleRegardless = false;
+    final next = await client.get(Uri.parse('${agent.origin}/api/identity'));
+    expect(next.statusCode, 200);
   });
 }
