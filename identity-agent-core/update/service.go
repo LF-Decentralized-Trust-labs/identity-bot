@@ -337,8 +337,6 @@ func (s *Service) componentTargetPath(component string) string {
 	switch component {
 	case "go_backend":
 		return filepath.Join(s.dataDir, "updates", "bin", "go_backend")
-	case "flutter_web":
-		return filepath.Join(s.dataDir, "updates", "flutter_web")
 	case "flutter_native":
 		return filepath.Join(s.dataDir, "updates", "flutter_native")
 	default:
