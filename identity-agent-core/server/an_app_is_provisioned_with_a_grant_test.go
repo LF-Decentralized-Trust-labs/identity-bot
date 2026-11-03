@@ -113,7 +113,11 @@ func attributesOf(t *testing.T, a map[string]json.RawMessage) map[string]interfa
 func TestReissuingAnAppsGrantWithdrawsTheOldOne(t *testing.T) {
 	s, _, first := provisionedApp(t)
 	var app asset.Asset
-	for _, a := range s.assetHandler.Store.ListAssets() {
+	all, err := s.assetHandler.Store.ListAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range all {
 		if a.AssetType == "app" {
 			app = a
 		}

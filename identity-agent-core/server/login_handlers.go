@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -282,7 +283,12 @@ func (s *CoreServer) memberInfoFor(siteAID, pairwiseAID string) map[string]strin
 	if s.assetHandler == nil {
 		return nil
 	}
-	for _, a := range s.assetHandler.Store.ListAssets() {
+	assets, err := s.assetHandler.Store.ListAssets()
+	if err != nil {
+		log.Printf("[identity-agent-core] no member info, the asset store is unreadable: %v", err)
+		return nil
+	}
+	for _, a := range assets {
 		if a.PairwiseAID != siteAID {
 			continue
 		}
@@ -319,7 +325,12 @@ func (s *CoreServer) authorizeAssetAccess(ctx context.Context, siteAID, pairwise
 	if s.assetHandler == nil {
 		return false, "asset store unavailable"
 	}
-	for _, a := range s.assetHandler.Store.ListAssets() {
+	assets, err := s.assetHandler.Store.ListAssets()
+	if err != nil {
+		// Fail closed: an asset store that cannot be read admits nobody.
+		return false, "asset store unreadable: " + err.Error()
+	}
+	for _, a := range assets {
 		if a.PairwiseAID != siteAID {
 			continue
 		}

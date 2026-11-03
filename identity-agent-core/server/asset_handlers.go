@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 
 	"identity-agent-core/asset"
@@ -109,14 +110,32 @@ func (s *CoreServer) mountAssetRoutes(r chi.Router) {
 }
 
 // findAgentAssetByAID returns the provisioned ai_agent asset whose delegated AID is aid.
-func (s *CoreServer) findAgentAssetByAID(aid string) *coretypes.AgentRef {
+// A nil result with a nil error means there is no such agent; an error means
+// the asset store could not be read, which says nothing about whether there is.
+func (s *CoreServer) lookupAgentAssetByAID(aid string) (*coretypes.AgentRef, error) {
 	if s.assetHandler == nil || aid == "" {
-		return nil
+		return nil, nil
 	}
-	for _, a := range s.assetHandler.Store.ListAssets() {
+	assets, err := s.assetHandler.Store.ListAssets()
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range assets {
 		if a.AssetType == "ai_agent" && a.PairwiseAID == aid {
-			return &coretypes.AgentRef{ID: a.ID, PairwiseAID: a.PairwiseAID, DelegatorAID: a.DelegatorAID, Capabilities: a.Capabilities}
+			return &coretypes.AgentRef{ID: a.ID, PairwiseAID: a.PairwiseAID, DelegatorAID: a.DelegatorAID, Capabilities: a.Capabilities}, nil
 		}
 	}
-	return nil
+	return nil, nil
+}
+
+// findAgentAssetByAID is lookupAgentAssetByAID for the add-on host interface,
+// which has no error to return: an unreadable store is logged and answers as
+// "no such agent", which refuses rather than admits.
+func (s *CoreServer) findAgentAssetByAID(aid string) *coretypes.AgentRef {
+	ref, err := s.lookupAgentAssetByAID(aid)
+	if err != nil {
+		log.Printf("[identity-agent-core] cannot look up agent %s, the asset store is unreadable: %v", aid, err)
+		return nil
+	}
+	return ref
 }

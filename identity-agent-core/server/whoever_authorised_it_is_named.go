@@ -256,7 +256,12 @@ func (s *CoreServer) expectedAsset(id, _ string) (authorisation.ExpectedAsset, b
 	if s.assetHandler == nil || s.assetHandler.Store == nil {
 		return authorisation.ExpectedAsset{}, false
 	}
-	a, ok := s.assetHandler.Store.GetAsset(id)
+	a, ok, err := s.assetHandler.Store.GetAsset(id)
+	if err != nil {
+		// Unreadable is not "not held", but either way no approval is accepted.
+		log.Printf("[identity-agent-core] asset %s cannot be looked up, the asset store is unreadable: %v", id, err)
+		return authorisation.ExpectedAsset{}, false
+	}
 	if !ok {
 		return authorisation.ExpectedAsset{}, false
 	}

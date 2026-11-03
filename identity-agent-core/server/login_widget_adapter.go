@@ -26,7 +26,11 @@ func (s *CoreServer) createSignedAssetChallenge(assetID, audience string, disclo
 		return "", "", http.StatusServiceUnavailable, "asset or keri driver not available"
 	}
 	var found *asset.Asset
-	for _, a := range s.assetHandler.Store.ListAssets() {
+	assets, err := s.assetHandler.Store.ListAssets()
+	if err != nil {
+		return "", "", http.StatusInternalServerError, "asset store unreadable: " + err.Error()
+	}
+	for _, a := range assets {
 		if a.ID == assetID {
 			aa := a
 			found = &aa

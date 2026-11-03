@@ -3358,7 +3358,12 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 	if identity == nil || identity.AID != requestedAID {
 		// check asset store for a matching pairwise AID (G-049: serve asset AIDs for login verify)
 		if s.assetHandler != nil {
-			for _, a := range s.assetHandler.Store.ListAssets() {
+			assets, err := s.assetHandler.Store.ListAssets()
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "Asset store unreadable", err.Error())
+				return
+			}
+			for _, a := range assets {
 				if a.PairwiseAID == requestedAID {
 					// serve a minimal OOBI response for the asset AID
 					kelResp, err := s.KeriDriver.GetKel(a.DisplayName)

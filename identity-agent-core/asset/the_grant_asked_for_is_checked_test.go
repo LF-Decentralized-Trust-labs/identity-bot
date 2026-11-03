@@ -41,7 +41,7 @@ func TestAGrantThatShouldNotBeIssuedIsRefusedForAnAppAndAnAIAgent(t *testing.T) 
 			t.Errorf("AI agent, %s: %v", c.name, err)
 		}
 	}
-	if n := len(h.Store.ListAssets()); n != 1 { // only the fixture's agent
+	if n := len(listAssets(t, h)); n != 1 { // only the fixture's agent
 		t.Fatalf("a refused grant left %d assets, want the 1 that was there", n)
 	}
 }

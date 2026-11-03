@@ -274,7 +274,11 @@ func seenBefore(id string, exp time.Time) bool {
 // (minting its keyset + pointing at the loopback /didcomm), so intra-org agent-to-agent
 // messaging needs no manual peer exchange. Errors if aid is not a local ai_agent.
 func (s *CoreServer) ensureLocalPeer(aid string) (peerRecord, error) {
-	if s.findAgentAssetByAID(aid) == nil {
+	ref, err := s.lookupAgentAssetByAID(aid)
+	if err != nil {
+		return peerRecord{}, fmt.Errorf("cannot tell whether %s is a local agent: %w", aid, err)
+	}
+	if ref == nil {
 		return peerRecord{}, fmt.Errorf("%s is not a local provisioned agent", aid)
 	}
 	ks, err := s.keySetFor(aid)

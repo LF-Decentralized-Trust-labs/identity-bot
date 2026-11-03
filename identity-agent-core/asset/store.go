@@ -2,6 +2,9 @@ package asset
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
@@ -18,6 +21,7 @@ type Store struct {
 	requestsPath   string
 	empInvitesPath string
 	employeesPath  string
+	assetsErr      error // why assets.json could not be read; nil when it could
 	assets         map[string]Asset
 	invites        map[string]AssetInvite
 	members        []AssetMember
@@ -42,40 +46,51 @@ func NewStore(dataDir string) (*Store, error) {
 		empInvites:     map[string]EmployeeInvite{},
 		employees:      map[string]Employee{},
 	}
-	if err := s.load(); err != nil {
-		return nil, err
+	// On a load error the store is returned alongside it, with the assets
+	// reads reporting that error, so a caller that holds on to it cannot
+	// mistake an unreadable store for an empty one. Never rewrites a file.
+	return s, s.load()
+}
+
+// readJSON loads one store file into v. A missing file is legitimately empty
+// and leaves v untouched; anything else (permission, I/O, corrupt JSON) is an
+// error naming the file. The file is never rewritten.
+func readJSON(path string, v interface{}) error {
+	b, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
 	}
-	return s, nil
+	if err != nil {
+		return fmt.Errorf("asset store: cannot read %s: %w", path, err)
+	}
+	if err := json.Unmarshal(b, v); err != nil {
+		return fmt.Errorf("asset store: %s is not valid JSON: %w", path, err)
+	}
+	return nil
 }
 
 func (s *Store) load() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// assets
-	if b, err := os.ReadFile(s.assetsPath); err == nil {
-		json.Unmarshal(b, &s.assets)
+	s.assetsErr = readJSON(s.assetsPath, &s.assets)
+	if s.assetsErr != nil {
+		s.assets = map[string]Asset{}
 	}
-	// invites
-	if b, err := os.ReadFile(s.invitesPath); err == nil {
-		json.Unmarshal(b, &s.invites)
+	var errs []error
+	errs = append(errs, s.assetsErr)
+	for _, f := range []struct {
+		path string
+		v    interface{}
+	}{
+		{s.invitesPath, &s.invites},
+		{s.membersPath, &s.members},
+		{s.requestsPath, &s.requests},
+		{s.empInvitesPath, &s.empInvites},
+		{s.employeesPath, &s.employees},
+	} {
+		errs = append(errs, readJSON(f.path, f.v))
 	}
-	// members
-	if b, err := os.ReadFile(s.membersPath); err == nil {
-		json.Unmarshal(b, &s.members)
-	}
-	// requests
-	if b, err := os.ReadFile(s.requestsPath); err == nil {
-		json.Unmarshal(b, &s.requests)
-	}
-	// employee invites
-	if b, err := os.ReadFile(s.empInvitesPath); err == nil {
-		json.Unmarshal(b, &s.empInvites)
-	}
-	// employees
-	if b, err := os.ReadFile(s.employeesPath); err == nil {
-		json.Unmarshal(b, &s.employees)
-	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (s *Store) saveLocked(path string, v interface{}) error {
@@ -90,39 +105,53 @@ func (s *Store) saveLocked(path string, v interface{}) error {
 }
 
 // Assets
-func (s *Store) ListAssets() []Asset {
+func (s *Store) ListAssets() ([]Asset, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if s.assetsErr != nil {
+		return nil, s.assetsErr
+	}
 	out := make([]Asset, 0, len(s.assets))
 	for _, a := range s.assets {
 		out = append(out, a)
 	}
-	return out
+	return out, nil
 }
 
 // HasAssetOfType reports whether any asset of the given type is held, without
 // copying the store.
-func (s *Store) HasAssetOfType(assetType string) bool {
+func (s *Store) HasAssetOfType(assetType string) (bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if s.assetsErr != nil {
+		return false, s.assetsErr
+	}
 	for _, a := range s.assets {
 		if a.AssetType == assetType {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
-func (s *Store) GetAsset(id string) (Asset, bool) {
+// GetAsset returns the asset, found=false when it is not held, or an error when
+// the store could not be read: an unreadable store is not an empty one.
+func (s *Store) GetAsset(id string) (Asset, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if s.assetsErr != nil {
+		return Asset{}, false, s.assetsErr
+	}
 	a, ok := s.assets[id]
-	return a, ok
+	return a, ok, nil
 }
 
 func (s *Store) UpsertAsset(a Asset) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.assetsErr != nil {
+		return s.assetsErr
+	}
 	s.assets[a.ID] = a
 	return s.saveLocked(s.assetsPath, s.assets)
 }
@@ -130,6 +159,9 @@ func (s *Store) UpsertAsset(a Asset) error {
 func (s *Store) DeleteAsset(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.assetsErr != nil {
+		return s.assetsErr
+	}
 	delete(s.assets, id)
 	return s.saveLocked(s.assetsPath, s.assets)
 }
