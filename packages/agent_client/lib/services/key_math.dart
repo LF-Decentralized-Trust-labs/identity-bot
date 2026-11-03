@@ -107,7 +107,11 @@ class LogState {
         witnesses = [
           for (final w in (j['witnesses'] as List? ?? const [])) '$w'
         ],
-        toad = (j['toad'] as num?)?.toInt() ?? 0;
+        toad = (j['toad'] as num?)?.toInt() ?? 0,
+        events = [
+          for (final e in (j['events'] as List? ?? const []))
+            LoggedEvent.fromJson(e as Map<String, dynamic>)
+        ];
   final String aid;
   final int sn;
   final String digest;
@@ -117,6 +121,38 @@ class LogState {
   final List<String> next;
   final List<String> witnesses;
   final int toad;
+
+  /// Every event of the log in order, as verified.
+  final List<LoggedEvent> events;
+}
+
+/// One event of a verified log: its place, digest and type, and the keys,
+/// commitments and witnesses in force after it.
+class LoggedEvent {
+  LoggedEvent(this.sn, this.digest, this.ilk, this.keys, this.next,
+      this.witnesses, this.toad);
+  LoggedEvent.fromJson(Map<String, dynamic> j)
+      : sn = (j['sn'] as num?)?.toInt() ?? -1,
+        digest = j['digest'] as String? ?? '',
+        ilk = j['ilk'] as String? ?? '',
+        keys = [for (final k in (j['keys'] as List? ?? const [])) '$k'],
+        next = [for (final n in (j['next'] as List? ?? const [])) '$n'],
+        witnesses = [
+          for (final w in (j['witnesses'] as List? ?? const [])) '$w'
+        ],
+        toad = (j['toad'] as num?)?.toInt() ?? 0;
+  final int sn;
+  final String digest;
+  final String ilk;
+  final List<String> keys;
+
+  /// The next-key commitments in force after it.
+  final List<String> next;
+  final List<String> witnesses;
+  final int toad;
+
+  /// Whether it is an establishment event.
+  bool get establishment => ilk != 'ixn';
 }
 
 /// An event's bytes, base64, with its controller signatures, as a witness

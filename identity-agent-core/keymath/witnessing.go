@@ -23,6 +23,21 @@ type LogState struct {
 	Next          []string `json:"next"`
 	Witnesses     []string `json:"witnesses"`
 	TOAD          uint64   `json:"toad"`
+	// Events are every event of the log in order, as verified: what copies
+	// of one log are compared by.
+	Events []LoggedEvent `json:"events"`
+}
+
+// LoggedEvent is one event of a verified log: its place, digest and type, and
+// the keys, commitments and witnesses in force after it.
+type LoggedEvent struct {
+	SN        uint64   `json:"sn"`
+	Digest    string   `json:"digest"`
+	Ilk       string   `json:"ilk"`
+	Keys      []string `json:"keys"`
+	Next      []string `json:"next"`
+	Witnesses []string `json:"witnesses"`
+	TOAD      uint64   `json:"toad"`
 }
 
 // VerifyReceipt checks that sig is the witness named witness's signature over
@@ -46,9 +61,20 @@ func VerifyLog(aid string, events []SignedEvent) (*LogState, error) {
 		return nil, err
 	}
 	st := res.State()
-	return &LogState{
+	out := &LogState{
 		AID: aid, SN: st.SN(), Digest: st.Digest(), Ilk: st.Ilk(),
 		Establishment: st.LastEstablishment(), Keys: st.Keys(), Next: st.NextDigests(),
 		Witnesses: st.Witnesses(), TOAD: st.TOAD(),
-	}, nil
+	}
+	for sn := uint64(0); sn <= st.SN(); sn++ {
+		at := res.StateAt(sn)
+		if at == nil {
+			break
+		}
+		out.Events = append(out.Events, LoggedEvent{
+			SN: at.SN(), Digest: at.Digest(), Ilk: at.Ilk(), Keys: at.Keys(),
+			Next: at.NextDigests(), Witnesses: at.Witnesses(), TOAD: at.TOAD(),
+		})
+	}
+	return out, nil
 }

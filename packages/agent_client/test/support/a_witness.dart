@@ -61,6 +61,12 @@ class AWitness {
     (_digests[aid] ??= []).add(ev.d);
   }
 
+  /// Forgets every log it holds, as a new witness would have none.
+  void forgetAll() {
+    held.clear();
+    _digests.clear();
+  }
+
   Future<void> close() => _server.close(force: true);
 
   Future<void> _answer(HttpRequest req) async {

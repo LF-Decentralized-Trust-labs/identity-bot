@@ -119,6 +119,9 @@ class TheWitnessesOfThisDevicesEvents {
   final WitnessDirectory _where;
   final Duration timeout;
 
+  /// Where witness [w] is reached, or null.
+  Uri? addressOf(String w) => _where.whereIs(w);
+
   /// Sends the event at [sn] of [aid] (its bytes [bytesB64], digest [digest]
   /// and signatures [sigs]) to every witness in [set] and checks each receipt.
   /// A witness that lacks earlier events is first sent them, from the copies
@@ -175,6 +178,19 @@ class TheWitnessesOfThisDevicesEvents {
         }()
     ]);
     return out;
+  }
+
+  /// The whole copy of [aid]'s log witness [w] holds, judged from the
+  /// founding; null when it cannot be reached, holds nothing, or its copy does
+  /// not verify. Where it ends is taken from its signed answer to a fresh
+  /// nonce, so a copy cut short in transit is not mistaken for the whole.
+  Future<LogState?> copyHeldBy(String w, String aid) async {
+    final base = _where.whereIs(w);
+    if (base == null) return null;
+    final tip = await _tip(base, w, aid);
+    if (tip == null || tip < 0) return null;
+    final st = await _verifiedCopy(base, aid, tip);
+    return st != null && st.sn == tip ? st : null;
   }
 
   Future<(_Answer, String?)> _receiptFrom(String w, WitnessSet set, String aid,

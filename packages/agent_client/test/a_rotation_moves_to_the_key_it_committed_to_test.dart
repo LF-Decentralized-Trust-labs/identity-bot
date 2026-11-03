@@ -11,6 +11,7 @@ import 'package:agent_client/services/secure_key_store.dart';
 import 'package:agent_client/services/the_event_this_device_expects.dart';
 import 'package:agent_client/services/the_events_this_device_asked_for.dart';
 import 'package:agent_client/services/the_events_this_device_signed.dart';
+import 'package:agent_client/services/the_identity_this_device_holds.dart';
 import 'package:agent_client/services/the_key_events_this_device_makes.dart';
 import 'package:agent_client/services/the_key_in_force.dart';
 import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
@@ -656,10 +657,14 @@ void main() {
     expect(core.kel.last['k'], [key(2)]);
   });
 
-  test('nothing is signed when the log names a key this phrase does not hold',
-      () async {
+  test(
+      'once this device\'s record cannot answer, nothing is signed on a log '
+      'no copy of it confirms', () async {
     await keri.inceptAid(name: 'me', code: words.join(' '));
     core.add(FakeCore.rotation(strangersKey(1), strangersKey(2)));
+    // As after a signature is refused as stale: the key state is read from
+    // copies of the log, and none here can be read and verified.
+    await TheIdentityThisDeviceHolds().forgetTheTip();
     await expectLater(
         keri.signPayload(name: core.aid, data: [1, 2, 3]), throwsException);
   });
@@ -747,9 +752,12 @@ void main() {
     await expectLater(keri.interactAid(name: core.aid), throwsException);
     await expectLater(keri.issueCredential(claims: {'a': 'b'}, schemaSaid: 'E'),
         throwsException);
-    expect(core.posted, isEmpty,
-        reason:
-            'nothing is asked of a core whose log this phrase cannot sign for');
+    // The interaction is prepared after the place this device's record
+    // names, the core says the log moved, and no copy confirms where to: it is
+    // never signed.
+    expect(core.posted, isNot(contains('/api/events/commit')));
+    expect(core.posted, isNot(contains('/api/cesr/encode')),
+        reason: 'nothing is signed on a log this phrase cannot sign for');
   });
 
   test(
@@ -943,12 +951,14 @@ void main() {
     // the attacker's key, marked unsigned so the device would finish it.
     core.add(FakeCore.rotation(key(1), strangersKey(0)));
     core.posted.clear();
-    await expectLater(keri.signPayload(name: core.aid, data: [1]),
-        throwsA(isA<AnEventThisDeviceDidNotAskFor>()));
-    await expectLater(keri.rotateAid(name: core.aid),
-        throwsA(isA<AnEventThisDeviceDidNotAskFor>()));
-    expect(core.posted, isNot(contains('/api/cesr/encode')));
-    expect(core.posted, isNot(contains('/api/events/prepare')),
+    // This device's record says key 0 is in force, and a signature by it is
+    // what the identity's real log verifies; the core's rotation is not in it.
+    final signed = await keri.signPayload(name: core.aid, data: [1]);
+    expect(signed.publicKey, key(0));
+    await expectLater(keri.rotateAid(name: core.aid), throwsException);
+    expect(core.posted, isNot(contains('/api/events/signature')),
+        reason: 'the rotation the core added is never signed');
+    expect(core.posted, isNot(contains('/api/events/commit')),
         reason: 'nothing is built on an event this device did not ask for');
   });
 
@@ -961,9 +971,9 @@ void main() {
       ]
     });
     core.posted.clear();
-    await expectLater(keri.signPayload(name: core.aid, data: [1]),
-        throwsA(isA<AnEventThisDeviceDidNotAskFor>()));
-    expect(core.posted, isNot(contains('/api/cesr/encode')));
+    await keri.signPayload(name: core.aid, data: [1]);
+    expect(core.posted, isNot(contains('/api/events/signature')),
+        reason: 'the interaction the core added is never signed');
   });
 
   test('a rotation that commits to any key but the next one is not signed',
@@ -1489,8 +1499,12 @@ void main() {
     expect(await pending(), hasLength(1),
         reason: 'the anchor is written down until it is signed');
     core.kel.last['sig'] = 'signed by the core';
-    await keri.signPayload(name: core.aid, data: [1]);
-    expect(await pending(), isEmpty);
+    // Settled the next time the core is asked to anchor a credential, the
+    // one path that still adds an event before this device signs it.
+    await keri.issueCredential(claims: {'c': 'd'}, schemaSaid: 'E');
+    final left = await pending();
+    expect([for (final p in left) p['s']], ['2'],
+        reason: 'only the new request is written down');
   });
 
   test(

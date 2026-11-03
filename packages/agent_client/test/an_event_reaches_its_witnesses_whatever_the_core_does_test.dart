@@ -1,71 +1,19 @@
-import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:agent_client/crypto/bip39.dart';
-import 'package:agent_client/crypto/keys.dart';
 import 'package:agent_client/services/key_math.dart';
-import 'package:agent_client/services/signing_an_event.dart';
 import 'package:agent_client/services/the_events_this_device_signed.dart';
 import 'package:agent_client/services/the_key_events_this_device_makes.dart';
 import 'package:agent_client/services/the_witnesses_of_this_devices_events.dart';
-import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:test/test.dart';
 
+import 'support/a_core_that_misleads.dart';
 import 'support/a_witness.dart';
 import 'support/the_core.dart';
-
-const ownerSecret = 'a-secret-only-this-test-and-its-core-know';
-
-/// The client an app reaches its core through, with the ways a core can
-/// mislead it set on it.
-class _ACoreThatMisleads extends http.BaseClient {
-  _ACoreThatMisleads(this._inner);
-  final http.Client _inner;
-
-  /// The next commit is not sent to the core, and is answered with this
-  /// status and refusal code instead.
-  (int, String)? answerTheNextCommit;
-
-  /// The next commit is sent, and its answer replaced with this one.
-  (int, String)? replaceTheNextCommitsAnswer;
-
-  /// How many prepares to answer `tip_moved` without asking the core.
-  int movePrepares = 0;
-
-  @override
-  Future<http.StreamedResponse> send(http.BaseRequest request) async {
-    request.headers['X-Local-Owner-Secret'] = ownerSecret;
-    final path = request.url.path;
-    if (path == '/api/events/prepare' && movePrepares > 0) {
-      movePrepares--;
-      return _answer(409, 'tip_moved');
-    }
-    if (path == '/api/events/commit') {
-      final instead = answerTheNextCommit;
-      if (instead != null) {
-        answerTheNextCommit = null;
-        return _answer(instead.$1, instead.$2);
-      }
-      final replaced = replaceTheNextCommitsAnswer;
-      if (replaced != null) {
-        replaceTheNextCommitsAnswer = null;
-        final res = await _inner.send(request);
-        await res.stream.drain<void>();
-        return _answer(replaced.$1, replaced.$2);
-      }
-    }
-    return _inner.send(request);
-  }
-
-  static http.StreamedResponse _answer(int status, String code) =>
-      http.StreamedResponse(
-          Stream.value(utf8.encode(jsonEncode({'error': code}))), status);
-}
 
 late String bin;
 
@@ -74,7 +22,7 @@ void main() {
   late String base;
   late KeyMath km;
   late AWitness w1, w2, w3;
-  late _ACoreThatMisleads client;
+  late ACoreThatMisleads client;
   late TheWitnessesOfThisDevicesEvents witnesses;
 
   setUpAll(() async {
@@ -103,7 +51,7 @@ void main() {
     w1 = await AWitness.start(km);
     w2 = await AWitness.start(km);
     w3 = await AWitness.start(km);
-    client = _ACoreThatMisleads(http.Client());
+    client = ACoreThatMisleads(http.Client());
     witnesses = TheWitnessesOfThisDevicesEvents(
         http.Client(),
         km,
@@ -264,7 +212,7 @@ void main() {
     expect(await TheEventsThisDeviceSigned().unfinished(aid), isEmpty);
     // The signed rotation is portable: it goes to the core as it went to the
     // witnesses.
-    await _commitTo(base, rot.bytesB64, rot.signatures);
+    await commitTo(base, rot.bytesB64, rot.signatures);
   });
 
   test(
@@ -301,7 +249,7 @@ void main() {
       'signed, lets this device\'s event go', () async {
     // Another device with the same phrase signed a different interaction at
     // the next place, and the witnesses hold it.
-    final rival = await _signedInteraction(
+    final rival = await signedInteraction(
         client, base, seed, aid, generation, tip, another);
     for (final w in [w1, w2, w3]) {
       await w.hold(aid, rival);
@@ -329,13 +277,13 @@ void main() {
     final s2 = Bip39.mnemonicToSeed(
         'legal winner thank year wave sausage worth useful legal winner thank yellow'
             .split(' '));
-    final more = await _anotherCore(km);
+    final more = await anotherCore(bin, km);
     addTearDown(more.close);
     final m = more.makes(witnesses);
     final founded = await m.found(s2, witnesses: [w1.aid, w2.aid], toad: 2);
     final s = WitnessSet([w1.aid, w2.aid], 2);
     // A rival signed with a key that is not this identity's.
-    final forged = await _signedInteraction(
+    final forged = await signedInteraction(
         more.client,
         more.base,
         Bip39.mnemonicToSeed(
@@ -366,7 +314,7 @@ void main() {
     final s3 = Bip39.mnemonicToSeed(
         'letter advice cage absurd amount doctor acoustic avoid letter advice cage above'
             .split(' '));
-    final more = await _anotherCore(km);
+    final more = await anotherCore(bin, km);
     addTearDown(more.close);
     final m = more.makes(witnesses);
     // One receipt establishes an event, so all three must show they lack one
@@ -502,7 +450,7 @@ void main() {
       'three times at most, and never for a recovery rotation', () async {
     final s4 = Bip39.mnemonicToSeed(
         'zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong'.split(' '));
-    final more = await _anotherCore(km);
+    final more = await anotherCore(bin, km);
     addTearDown(more.close);
     var reads = 0;
     late Tip at;
@@ -569,76 +517,4 @@ void main() {
     expect(await TheEventsThisDeviceSigned().unfinished(founded.aid), isEmpty,
         reason: 'nothing was signed for an event the core would not prepare');
   });
-}
-
-/// An interaction of [aid] after [after], prepared by the core and signed by
-/// the key [seed] derives at generation [gen].
-Future<SignedCopy> _signedInteraction(
-    http.Client client,
-    String base,
-    Uint8List seed,
-    String aid,
-    int gen,
-    Tip after,
-    List<Object?> anchors) async {
-  final res = await client.post(Uri.parse('$base/api/events/prepare'),
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'aid': aid,
-        't': 'ixn',
-        'a': anchors,
-        'after': {'s': after.sn.toRadixString(16), 'd': after.digest},
-      }));
-  final raw = (jsonDecode(res.body) as Map)['raw_b64'] as String;
-  final sig = ed.sign(
-      ed.newKeyFromSeed(KeyManager.signingSeed(seed, index: gen)),
-      base64Decode(raw));
-  return SignedCopy(raw, [await cesrEncodeSignature(client, base, sig)]);
-}
-
-/// Commits a signed event to the core at [base] directly.
-Future<void> _commitTo(String base, String rawB64, List<String> sigs) async {
-  final res = await http.post(Uri.parse('$base/api/events/commit'),
-      headers: const {
-        'Content-Type': 'application/json',
-        'X-Local-Owner-Secret': ownerSecret
-      },
-      body: jsonEncode({'raw_b64': rawB64, 'sigs': sigs}));
-  expect(res.statusCode, anyOf(200, 201), reason: res.body);
-}
-
-/// Another core, for an identity of its own.
-class _ACore {
-  _ACore(this._process, this.base, this.client, this._km);
-  final Process _process;
-  final String base;
-  final _ACoreThatMisleads client;
-  final KeyMath _km;
-  TheKeyEventsThisDeviceMakes makes(TheWitnessesOfThisDevicesEvents w) =>
-      TheKeyEventsThisDeviceMakes(client, base, _km, witnesses: w);
-  Future<void> close() async => _process.kill();
-}
-
-Future<_ACore> _anotherCore(KeyMath km) async {
-  final port = 20000 + Random().nextInt(20000);
-  final base = 'http://127.0.0.1:$port';
-  final data = await Directory.systemTemp.createTemp('witnessed-core-data');
-  final p = await Process.start(bin, [], environment: {
-    ...Platform.environment,
-    'PORT': '$port',
-    'HOST': '127.0.0.1',
-    'AGENT_DATA_DIR': data.path,
-    'IDENTITY_AGENT_LOCAL_OWNER_SECRET': ownerSecret,
-  });
-  p.stdout.drain<void>();
-  p.stderr.drain<void>();
-  for (var i = 0; i < 100; i++) {
-    try {
-      if ((await http.get(Uri.parse('$base/api/health'))).statusCode == 200) {
-        break;
-      }
-    } catch (_) {}
-    await Future<void>.delayed(const Duration(milliseconds: 100));
-  }
-  return _ACore(p, base, _ACoreThatMisleads(http.Client()), km);
 }

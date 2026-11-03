@@ -10,6 +10,7 @@ import 'key_math.dart';
 import 'signing_an_event.dart';
 import 'the_event_this_device_expects.dart';
 import 'the_events_this_device_signed.dart';
+import 'the_identity_this_device_holds.dart';
 import 'the_witnesses_of_this_devices_events.dart';
 
 /// The core answered a key-event request with a refusal.
@@ -164,6 +165,7 @@ class TheKeyEventsThisDeviceMakes {
   TheKeyEventsThisDeviceMakes(this._client, this._baseUrl, this._km,
       {TheEventsThisDeviceSigned? signed,
       TheWitnessesOfThisDevicesEvents? witnesses,
+      TheIdentityThisDeviceHolds? held,
       this.readTheKeyState,
       this.retryDelays = const [
         Duration(seconds: 1),
@@ -171,13 +173,19 @@ class TheKeyEventsThisDeviceMakes {
         Duration(seconds: 4)
       ]})
       : _signed = signed ?? TheEventsThisDeviceSigned(),
-        _witnesses = witnesses;
+        _witnesses = witnesses,
+        _held = held;
 
   final http.Client _client;
   final String _baseUrl;
   final KeyMath _km;
   final TheEventsThisDeviceSigned _signed;
   final TheWitnessesOfThisDevicesEvents? _witnesses;
+
+  /// This device's own record of its identity (ADR-061 section 9): the
+  /// identifier and witness addresses at founding, and each event once its
+  /// core holds it. Null leaves no record.
+  final TheIdentityThisDeviceHolds? _held;
 
   /// Reads an identity's key state again, as this device verifies it (ADR-061
   /// section 9): from copies of the log, every event this device has not seen
@@ -230,7 +238,9 @@ class TheKeyEventsThisDeviceMakes {
           expected,
           prepared,
           KeyManager.signingSeed(seed, index: 0),
-          WitnessSet(witnesses, witnesses.isEmpty ? 0 : toad));
+          WitnessSet(witnesses, witnesses.isEmpty ? 0 : toad),
+          reveals: key,
+          generation: 0);
     } finally {
       pqSeed.fillRange(0, pqSeed.length, 0);
       messagingSeed.fillRange(0, messagingSeed.length, 0);
@@ -401,7 +411,7 @@ class TheKeyEventsThisDeviceMakes {
       });
       return await _checkSignCommit(what, expected, prepared,
           KeyManager.signingSeed(revealing, index: revealed), set,
-          recovery: recovery);
+          recovery: recovery, reveals: key, generation: revealed);
     } finally {
       pqSeed.fillRange(0, pqSeed.length, 0);
     }
@@ -561,10 +571,19 @@ class TheKeyEventsThisDeviceMakes {
 
   Future<Committed> _checkSignCommit(String what, ExpectedEvent expected,
       String rawB64, Uint8List signingSeed, WitnessSet set,
-      {bool recovery = false}) async {
+      {bool recovery = false, String? reveals, int? generation}) async {
     try {
       final raw = base64Decode(rawB64);
       final ev = await expected.requireIn(_km, raw);
+      // A founding names the identity this device holds from now on, with
+      // where its witnesses are, before anything is signed for it.
+      final witnesses = _witnesses;
+      if (ev.t == 'icp') {
+        await _held?.holds(ev.i, witnessAddresses: {
+          for (final w in set.witnesses)
+            if (witnesses?.addressOf(w) != null) w: witnesses!.addressOf(w)!
+        });
+      }
       // A recovery rotation the person asked for supersedes the interactions
       // after the place it follows: none of this device's reservations of
       // interactions there may be committed. Nothing else is superseded, and
@@ -576,7 +595,9 @@ class TheKeyEventsThisDeviceMakes {
           prior: ev.p,
           digest: ev.d,
           bytesB64: rawB64,
-          t: ev.t);
+          t: ev.t,
+          reveals: reveals,
+          generation: generation);
       if (!reservation.signed) {
         final signature = ed.sign(ed.newKeyFromSeed(signingSeed), raw);
         final cesr = await cesrEncodeSignature(_client, _baseUrl, signature);
@@ -645,10 +666,26 @@ class TheKeyEventsThisDeviceMakes {
       {required bool coreHasIt}) async {
     var kept = r;
     if (coreHasIt && !kept.recorded) kept = await _signed.recorded(kept);
+    if (coreHasIt) await _remember(kept, set);
     final (after, w) = await _toTheWitnesses(kept, set);
     if (w == null) await _signed.committed(after);
     return Committed(r.aid, r.sn, r.digest, status, r.bytesB64, r.signatures,
         witnessed: w);
+  }
+
+  /// Records [r], which its core holds, in this device's own record, where
+  /// that record is of [r]'s identity.
+  Future<void> _remember(Reservation r, WitnessSet set) async {
+    final held = _held;
+    if (held == null || (await held.read())?.aid != r.aid) return;
+    await held.made(
+        aid: r.aid,
+        at: (sn: r.sn, digest: r.digest),
+        ilk: r.t ?? (await _km.parseEvent(base64Decode(r.bytesB64))).t,
+        key: r.key,
+        generation: r.generation,
+        witnesses: set.witnesses,
+        toad: set.toad);
   }
 
   /// The core said another event holds [r]'s place, or that the log moved

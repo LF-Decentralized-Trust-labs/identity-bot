@@ -9,7 +9,10 @@ import 'keri_service.dart';
 import 'secure_key_store.dart';
 import 'signing_an_event.dart';
 import 'the_events_this_device_asked_for.dart';
+import 'the_identity_this_device_holds.dart';
 import 'the_key_events_this_device_makes.dart';
+import 'the_key_state_this_device_reads.dart';
+import 'the_witnesses_of_this_devices_events.dart';
 import 'the_key_in_force.dart';
 import 'the_key_is_not_held_by_the_core.dart';
 import 'the_agent_this_app_talks_to.dart';
@@ -30,8 +33,7 @@ class LocalCoreKeriService extends KeriService {
   /// [keyMath] is how this app runs the core's key arithmetic (a phone's
   /// bridge, or the core binary on a desktop). Founding, rotating and
   /// interacting need it; without it they refuse rather than fall back.
-  LocalCoreKeriService(
-      {String? baseUrl, http.Client? client, this.keyMath})
+  LocalCoreKeriService({String? baseUrl, http.Client? client, this.keyMath})
       // Where the KEYS are, which is not always this computer.
       //
       // Stateful KERI operations always run on the engine local to the keys —
@@ -48,13 +50,92 @@ class LocalCoreKeriService extends KeriService {
   final KeyMath? keyMath;
 
   /// How this device makes its identity's key events.
-  TheKeyEventsThisDeviceMakes get _makes {
+  TheKeyEventsThisDeviceMakes get _makes =>
+      TheKeyEventsThisDeviceMakes(_client, _baseUrl, _km, held: _held);
+
+  KeyMath get _km {
     final km = keyMath;
     if (km == null) {
-      throw StateError('this app has not given the client the core\'s key arithmetic (KeyMath), '
+      throw StateError(
+          'this app has not given the client the core\'s key arithmetic (KeyMath), '
           'so it cannot check an event before signing it, and signs nothing');
     }
-    return TheKeyEventsThisDeviceMakes(_client, _baseUrl, km);
+    return km;
+  }
+
+  final _held = TheIdentityThisDeviceHolds();
+
+  /// How this device makes the events of [aid] after reading its key state:
+  /// sending each to the witnesses whose addresses it holds, and reading the
+  /// key state again from the copies when the log moves under it.
+  Future<TheKeyEventsThisDeviceMakes> _makesFor(Uint8List seed) async {
+    final h = await _held.read();
+    return TheKeyEventsThisDeviceMakes(_client, _baseUrl, _km,
+        held: _held,
+        witnesses: TheWitnessesOfThisDevicesEvents(
+            _client, _km, KnownWitnesses(h?.witnessAddresses ?? const {})),
+        readTheKeyState: (_) async => (await _readTheCopies(seed)).now);
+  }
+
+  /// The key state of this device's identity for the phrase whose BIP39 seed
+  /// is [seed], read without any owner route (ADR-061 section 9): from this
+  /// device's own record, or from verified copies of the log.
+  ///
+  /// An identity whose establishment events this device has not recorded
+  /// (one founded before it kept a record) is read as it was before, from the
+  /// core that holds it, with any event an earlier version left unsigned
+  /// finished first; then from verified copies where they can be read. Once
+  /// this device records an establishment event of its own, its record
+  /// answers.
+  Future<VerifiedKeyState> _keyState(Uint8List seed) async {
+    final h = await _held.read();
+    if (h == null || h.establishment == null) {
+      final legacy = await _keys.finishStrandedEvents(seed);
+      if (h == null) await _held.holds(legacy.aid);
+      try {
+        return await _readTheCopies(seed);
+      } on TheWitnessesDoNotSay {
+        return VerifiedKeyState(
+            aid: legacy.aid,
+            establishment: (
+              sn: int.parse('${legacy.establishment['s']}', radix: 16),
+              digest: '${legacy.establishment['d']}'
+            ),
+            keyInForce: KeyManager.keyAt(seed, legacy.index).publicKeyEncoded,
+            generation: legacy.index,
+            tip: (sn: legacy.nextSequenceNumber - 1, digest: legacy.tipDigest),
+            witnesses: WitnessSet.none,
+            fromItsOwnRecord: false,
+            corroborated: false);
+      }
+    }
+    return TheKeyStateThisDeviceReads(_client, _km, _baseUrl, held: _held)
+        .read(seed)
+        .catchError((Object _) => _readTheCopies(seed),
+            test: (e) => e is TheWitnessesDoNotSay);
+  }
+
+  /// The key state read from the copies. Where this device knows no witness
+  /// address (an identity founded before it kept them), the Identity Agent's
+  /// own copy is all there is to read, and the result says it is not
+  /// corroborated.
+  Future<VerifiedKeyState> _readTheCopies(Uint8List seed) async {
+    final h = await _held.read();
+    return TheKeyStateThisDeviceReads(_client, _km, _baseUrl, held: _held)
+        .readTheCopies(seed,
+            acceptTheCoreAlone: h == null || h.witnessAddresses.isEmpty);
+  }
+
+  /// The key state of this device's identity, refusing one whose key in
+  /// force is not yet this phrase's: only step 2 of a move to it may be
+  /// signed then.
+  Future<VerifiedKeyState> _keyInForce(Uint8List seed) async {
+    final state = await _keyState(seed);
+    if (state.movingToThisPhrase) {
+      throw StateError('the identity is moving to this recovery phrase and the '
+          'move is not finished, so nothing but its last step is signed');
+    }
+    return state;
   }
 
   late final TheKeyInForce _keys =
@@ -101,7 +182,8 @@ class LocalCoreKeriService extends KeriService {
   /// string where the core could not encode it.
   Future<String> _cesrEncode(String rawSigB64) async {
     try {
-      return await cesrEncodeSignature(_client, _baseUrl, base64Decode(rawSigB64));
+      return await cesrEncodeSignature(
+          _client, _baseUrl, base64Decode(rawSigB64));
     } catch (_) {
       return '';
     }
@@ -115,34 +197,37 @@ class LocalCoreKeriService extends KeriService {
     }
     final seed = Bip39.mnemonicToSeed(mnemonic);
     // The keys are this app's identity's, so only it can be rotated with them.
-    final aid = await _keys.ownIdentifier();
+    var state = await _keyInForce(seed);
+    final aid = state.aid;
     if (name != aid) {
       throw ArgumentError.value(name, 'name',
           'the identity held here is $aid, and only it can be rotated with this phrase');
     }
-    final makes = _makes;
-    // What this device signed and the core never acknowledged goes first, and
-    // an event an earlier version left unsigned is finished, so this rotation
-    // builds on a log that verifies.
-    await makes.finishSigned(aid);
-    final state = await _keys.finishStrandedEvents(seed);
+    final makes = await _makesFor(seed);
+    // What this device signed and the core never acknowledged goes first, so
+    // this rotation builds on a log that verifies.
+    if ((await makes.finishSigned(aid, witnessedBy: state.witnesses))
+        .isNotEmpty) {
+      state = await _keyInForce(seed);
+    }
     // The rotation reveals the key the last establishment event committed to
     // (generation n + 1), signs with it, and commits to n + 2; the witness
     // threshold stays as it is.
     final rotated = await makes.rotate(seed,
         aid: aid,
-        generation: state.index,
-        afterSn: state.nextSequenceNumber - 1,
-        afterDigest: state.tipDigest,
-        toad: int.tryParse('${state.establishment['bt'] ?? '0'}', radix: 16) ?? 0);
+        generation: state.generation,
+        afterSn: state.tip.sn,
+        afterDigest: state.tip.digest,
+        toad: state.witnesses.toad,
+        witnessedBy: state.witnesses);
     return RotationResult(
       aid: aid,
-      newPublicKey: KeyManager.keyAt(seed, state.index + 1).publicKeyEncoded,
+      newPublicKey:
+          KeyManager.keyAt(seed, state.generation + 1).publicKeyEncoded,
       kel: '',
       cesrSignature: rotated.signatures.first,
     );
   }
-
 
   @override
   Future<InteractResult> interactAid({
@@ -154,16 +239,19 @@ class LocalCoreKeriService extends KeriService {
       throw Exception('No identity keys found in secure storage.');
     }
     final seed = Bip39.mnemonicToSeed(mnemonic);
-    final makes = _makes;
-    final aid = await _keys.ownIdentifier();
-    await makes.finishSigned(aid);
-    final state = await _keys.finishStrandedEvents(seed);
+    var state = await _keyInForce(seed);
+    final makes = await _makesFor(seed);
+    if ((await makes.finishSigned(state.aid, witnessedBy: state.witnesses))
+        .isNotEmpty) {
+      state = await _keyInForce(seed);
+    }
     final done = await makes.interact(seed,
         aid: state.aid,
-        generation: state.index,
-        afterSn: state.nextSequenceNumber - 1,
-        afterDigest: state.tipDigest,
-        anchors: sealData);
+        generation: state.generation,
+        afterSn: state.tip.sn,
+        afterDigest: state.tip.digest,
+        anchors: sealData,
+        witnessedBy: state.witnesses);
     return InteractResult(
       aid: done.aid,
       said: done.digest,
@@ -171,7 +259,6 @@ class LocalCoreKeriService extends KeriService {
       cesrSignature: done.signatures.first,
     );
   }
-
 
   @override
   Future<SignatureResult> signPayload({
@@ -182,8 +269,7 @@ class LocalCoreKeriService extends KeriService {
     // The private key never leaves the device and is never sent to the backend.
     final mnemonic = await SecureKeyStore.loadMnemonic();
     if (mnemonic == null) {
-      throw Exception(
-          'No identity keys found in secure storage. '
+      throw Exception('No identity keys found in secure storage. '
           'Please recreate your identity to restore signing capability.');
     }
 
@@ -192,9 +278,10 @@ class LocalCoreKeriService extends KeriService {
     // log says is in force: after a rotation that is no longer the founding
     // key, and a signature by the founding key verifies against nothing a
     // counterparty would look up.
-    final index = (await _keys.finishStrandedEvents(seed)).index;
+    final index = (await _keyInForce(seed)).generation;
     final signingKeyPair = KeyManager.keyAt(seed, index);
-    final privateKey = ed.newKeyFromSeed(KeyManager.signingSeed(seed, index: index));
+    final privateKey =
+        ed.newKeyFromSeed(KeyManager.signingSeed(seed, index: index));
 
     final rawSig = ed.sign(privateKey, Uint8List.fromList(data));
     final rawSigB64 = base64Encode(rawSig);
@@ -219,16 +306,19 @@ class LocalCoreKeriService extends KeriService {
     }
     final seed = Bip39.mnemonicToSeed(mnemonic);
     final state = await _keys.finishStrandedEvents(seed);
-    return (key: ed.newKeyFromSeed(KeyManager.signingSeed(seed, index: state.index)), state: state);
+    return (
+      key: ed.newKeyFromSeed(KeyManager.signingSeed(seed, index: state.index)),
+      state: state
+    );
   }
-
 
   /// The key event log of the identity held under [name], as the core serves
   /// it: the parsed events and the bytes each was published as. The core
   /// answers with a list of events, not text; this once returned that list as
   /// a String and failed at runtime for every caller.
   @override
-  Future<KeyEventLog> getCurrentKel({required String name}) => _keys.keyLog(name);
+  Future<KeyEventLog> getCurrentKel({required String name}) =>
+      _keys.keyLog(name);
 
   @override
   Future<bool> verifySignature({
@@ -268,7 +358,8 @@ class LocalCoreKeriService extends KeriService {
     // Written down before it is asked for. The anchor is built by the core, so
     // nothing about it is known yet: this entry is only ever recognised by the
     // sequence number and digest of the answer.
-    final request = await _asked.asking(t: 'ixn', aid: aid, expectedSn: signer.state.nextSequenceNumber);
+    final request = await _asked.asking(
+        t: 'ixn', aid: aid, expectedSn: signer.state.nextSequenceNumber);
 
     final Map<String, dynamic> json;
     final String ixnRawBytesB64;
@@ -310,11 +401,14 @@ class LocalCoreKeriService extends KeriService {
           !_same(anchor['a'], [
             {'i': acdcSaid, 's': '0', 'd': acdcSaid}
           ])) {
-        throw Exception('the core returned an event that is not the anchor of the credential it issued, '
+        throw Exception(
+            'the core returned an event that is not the anchor of the credential it issued, '
             'so it is not signed');
       }
       await _asked.added(request,
-          aid: aid, sequenceNumber: signer.state.nextSequenceNumber, digest: '${anchor['d']}');
+          aid: aid,
+          sequenceNumber: signer.state.nextSequenceNumber,
+          digest: '${anchor['d']}');
     } catch (_) {
       await _asked.forget(request);
       rethrow;
@@ -323,7 +417,8 @@ class LocalCoreKeriService extends KeriService {
     // Step 2: Sign the IXN event bytes locally with the key in force.
     // Private key never leaves this device (ADR-014). The core signs this
     // anchor itself where it holds the key; this signature is handed back.
-    final rawSig = ed.sign(signer.key, Uint8List.fromList(base64Decode(ixnRawBytesB64)));
+    final rawSig =
+        ed.sign(signer.key, Uint8List.fromList(base64Decode(ixnRawBytesB64)));
     final cesrSig = await _cesrEncode(base64Encode(rawSig));
 
     return CredentialIssuanceResult(
@@ -335,7 +430,6 @@ class LocalCoreKeriService extends KeriService {
       cesrSignature: cesrSig,
     );
   }
-
 
   @override
   Future<PresentationResult> presentCredential({
@@ -360,7 +454,8 @@ class LocalCoreKeriService extends KeriService {
 
     if (response.statusCode != 201 && response.statusCode != 200) {
       final body = jsonDecode(response.body);
-      throw Exception(body['error'] ?? 'Presentation failed: ${response.statusCode}');
+      throw Exception(
+          body['error'] ?? 'Presentation failed: ${response.statusCode}');
     }
 
     final json = jsonDecode(response.body);
@@ -410,7 +505,8 @@ class LocalCoreKeriService extends KeriService {
       );
     } else {
       final body = jsonDecode(response.body);
-      throw Exception(body['error'] ?? 'Receipt submission failed: ${response.statusCode}');
+      throw Exception(
+          body['error'] ?? 'Receipt submission failed: ${response.statusCode}');
     }
   }
 
@@ -420,7 +516,8 @@ class LocalCoreKeriService extends KeriService {
     int threshold = 0,
   }) async {
     final response = await _client.get(
-      Uri.parse('$_baseUrl/api/kerl?event_said=$eventSaid&threshold=$threshold'),
+      Uri.parse(
+          '$_baseUrl/api/kerl?event_said=$eventSaid&threshold=$threshold'),
     );
 
     if (response.statusCode == 200) {
@@ -428,7 +525,8 @@ class LocalCoreKeriService extends KeriService {
       return KerlEntry(
         eventSaid: json['event_said'] ?? '',
         receipts: List<Map<String, dynamic>>.from(
-          (json['receipts'] as List? ?? []).map((r) => Map<String, dynamic>.from(r)),
+          (json['receipts'] as List? ?? [])
+              .map((r) => Map<String, dynamic>.from(r)),
         ),
         receiptCount: json['receipt_count'] as int? ?? 0,
         thresholdMet: json['threshold_met'] == true,
@@ -470,7 +568,8 @@ class LocalCoreKeriService extends KeriService {
       );
     } else {
       final body = jsonDecode(response.body);
-      throw Exception(body['error'] ?? 'Credential verification failed: ${response.statusCode}');
+      throw Exception(body['error'] ??
+          'Credential verification failed: ${response.statusCode}');
     }
   }
 

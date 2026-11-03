@@ -85,6 +85,10 @@ func TestALogIsJudgedFromItsFounding(t *testing.T) {
 		st.Witnesses[0] != wid || st.TOAD != 1 || st.Keys[0] != p || st.Next[0] != d {
 		t.Fatalf("the state was reported wrongly: %+v", st)
 	}
+	if len(st.Events) != 1 || st.Events[0].Digest != ev.SAID || st.Events[0].Ilk != "icp" ||
+		st.Events[0].Keys[0] != p || st.Events[0].TOAD != 1 {
+		t.Fatalf("the events were reported wrongly: %+v", st.Events)
+	}
 	if _, err := ask("E"+strings.Repeat("A", 43), signed); err == nil {
 		t.Fatal("a log was reported as another identity's")
 	}

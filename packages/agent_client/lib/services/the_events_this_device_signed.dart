@@ -25,6 +25,11 @@ class Reservation {
   /// before types were recorded.
   String? get t => entry['t'] as String?;
 
+  /// For an establishment event, the key it reveals and that key's
+  /// generation of the phrase that signs it.
+  String? get key => entry['key'] as String?;
+  int? get generation => (entry['g'] as num?)?.toInt();
+
   /// Whether the core acknowledged adding the event.
   bool get recorded => entry['recorded'] == true;
 
@@ -116,7 +121,9 @@ class TheEventsThisDeviceSigned {
       required String prior,
       required String digest,
       required String bytesB64,
-      String? t}) async {
+      String? t,
+      String? reveals,
+      int? generation}) async {
     final key = await scope();
     return _serialised(() async {
       final entries = await _load(key);
@@ -132,7 +139,9 @@ class TheEventsThisDeviceSigned {
         'p': prior,
         'd': digest,
         'bytes': bytesB64,
-        if (t != null) 't': t
+        if (t != null) 't': t,
+        if (reveals != null) 'key': reveals,
+        if (generation != null) 'g': generation
       };
       entries.add(e);
       await _save(key, entries);
