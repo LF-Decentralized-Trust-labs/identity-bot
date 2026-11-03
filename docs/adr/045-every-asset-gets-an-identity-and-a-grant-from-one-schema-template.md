@@ -300,6 +300,9 @@ identities by it. Three seams are closed with it:
 - `grantShown` (`identity-agent-core/authorisation/what_is_signed_is_what_is_shown.go`) shows an
   App Grant, as kind `app`, with its name, capabilities, limits and end, so a device holding the
   owner's key can be asked to sign one.
+- Looking up the grants an asset holds (`GrantsHeldBy`, `FindCapabilityGrant`) covers an app's
+  App Grant, so whatever revokes or removes an app can find and withdraw it. That is a different
+  list from the grants a gateway admits, below.
 - The edge lookup in `identity-agent-core/server/whoever_authorised_it_is_named.go` accepts the
   App Grant and App Body when it finds when this Identity Agent first issued a credential that names
   who authorised it.
@@ -308,9 +311,10 @@ These seams are still open, and each is refused rather than half-working:
 
 - An App Grant signed on another device is kept by this Identity Agent only once an add-on
   registers the app grant kind; until then it is not taken up. No add-on registers it yet.
-- Looking up the grants an asset holds (`GrantsHeldBy`, `FindCapabilityGrant`) covers an app's
-  App Grant, so revoking or removing an app withdraws it; that is a different list from the one
-  below, which is what a gateway admits.
+- Re-issuing an app's grant while the owner's key is on another device withdraws the old App
+  Grant before the new one is signed, which leaves the app with none until it is; no route
+  re-issues an app's grant yet, and the one that does must keep the old grant until the new one
+  is taken up.
 - No route issues an App Grant or an App Body yet. `ProvisionAppAsset` and the issuance exist; no
   route in the Identity Agent calls them; the apphosting add-on's `POST /api/hosted-apps` is the
   route that will, and no route yet changes an app's capabilities.
