@@ -25,7 +25,7 @@ void main() {
     final inner = _TracksClose();
     ControllerSigningClient(
       agentOrigin: 'https://agent.example',
-      localCoreOrigin: 'http://127.0.0.1:5050',
+      localCoreOrigin: () => 'http://127.0.0.1:5050',
       inner: inner,
     ).close();
     expect(inner.closed, isFalse,
@@ -47,7 +47,7 @@ void main() {
     final inner = _TracksClose();
     SigningAsTheIdentityThatOwnsAMachine(
       machineOrigin: 'https://agent.example',
-      localCoreOrigin: 'http://127.0.0.1:5050',
+      localCoreOrigin: () => 'http://127.0.0.1:5050',
       ownerAid: () async => 'EOwner',
       inner: inner,
     ).close();

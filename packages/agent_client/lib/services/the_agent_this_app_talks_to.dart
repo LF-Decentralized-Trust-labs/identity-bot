@@ -5,6 +5,7 @@ import '../config/agent_config.dart';
 import 'browser_session_client.dart';
 import 'controller_signing_client.dart';
 import 'signing_as_the_identity_that_owns_a_machine.dart';
+import 'the_owner_at_this_computer.dart';
 
 /// Where a request about the identity goes, and what proves who is sending it.
 ///
@@ -62,8 +63,9 @@ class TheAgentThisAppTalksTo {
   /// stranger this app looks up.
   ///
   /// It never falls back to the local core's own answer. Where nothing can
-  /// sign, the request goes unsigned and the agent refuses it — a refusal says
-  /// what to do next, and a screen full of somebody else's data does not.
+  /// sign, a controller's request is refused before it leaves this computer —
+  /// a clear error says what to do next, and a screen full of somebody else's
+  /// data does not.
   ///
   /// [inner] replaces the transport underneath, never the proving. A caller can
   /// stand in for the network — a test, a client with its own timeouts — and
@@ -72,46 +74,101 @@ class TheAgentThisAppTalksTo {
   static HowThisAppReaches theAgent({String? origin, http.Client? inner}) {
     final to = origin ?? TheAgentThisAppTalksTo.origin;
 
-    // This app is the front end for an agent elsewhere. It signs as ITSELF —
-    // the enclave key on this machine — and the agent decides what a machine
-    // acting for somebody may do.
-    if (AgentConfig.isAController && to == AgentConfig.agentBaseUrl) {
-      return HowThisAppReaches._(
-        ControllerSigningClient(
-          agentOrigin: to,
-          // Always this machine, never the agent: the key that signs lives here
-          // and the agent cannot reach it.
-          localCoreOrigin: AgentConfig.coreBaseUrl,
-          // Named in every signature, so a copy is refused by any other
-          // Identity Agent. Unknown leaves it to the core, which was told.
-          agentAid: AgentConfig.agentAid.isEmpty ? null : AgentConfig.agentAid,
-          inner: inner,
-        ),
-        null,
-      );
-    }
+    // One transport under every choice below, so choosing at send time builds
+    // no second connection pool and there is one thing to close.
+    final transport = ProvingThisComputer.over(inner);
 
     // A machine this device owns but is not sitting at. Signed as the pairwise
     // identity that adopted it, which is the only key that machine will accept
     // — not the root, whose signature verifies here and nowhere else.
+    //
+    // The ordinary case otherwise: the core on this computer, which recognises
+    // a request that originated on the machine it runs on. A browser holds no
+    // key, so where this build is a page it carries a session instead.
+    final BrowserSessionClient? session;
+    final http.Client otherwise;
     if (!kIsWeb && to != AgentConfig.coreBaseUrl) {
-      return HowThisAppReaches._(
-        SigningAsTheIdentityThatOwnsAMachine(
-          machineOrigin: to,
-          localCoreOrigin: AgentConfig.coreBaseUrl,
-          ownerAid: theIdentityThatAdopted(to,
-              localCoreOrigin: AgentConfig.coreBaseUrl, using: inner),
-          inner: inner,
-        ),
-        null,
+      session = null;
+      otherwise = SigningAsTheIdentityThatOwnsAMachine(
+        machineOrigin: to,
+        localCoreOrigin: () => AgentConfig.coreBaseUrl,
+        ownerAid: theIdentityThatAdopted(to,
+            localCoreOrigin: () => AgentConfig.coreBaseUrl, using: transport),
+        inner: transport,
       );
+    } else {
+      session = BrowserSessionClient(agentOrigin: to, inner: transport);
+      otherwise = session;
     }
 
-    // The ordinary case: the core on this computer, which recognises a request
-    // that originated on the machine it runs on. A browser holds no key, so
-    // where this build is a page it carries a session instead.
-    final session = BrowserSessionClient(agentOrigin: to, inner: inner);
-    return HowThisAppReaches._(session, session);
+    return HowThisAppReaches._(
+      _ChoosesWhenItSends(
+        asked: origin,
+        to: to,
+        otherwise: otherwise,
+        transport: transport,
+        ownsTransport: inner == null,
+      ),
+      session,
+    );
+  }
+}
+
+/// Decides at SEND time whether this app is a front end, not when it was built.
+///
+/// A client is often built before startup has found out which half this app is
+/// (see `pointThisAppAtItsAgent`), and a service keeps its client for the life
+/// of the screen. A choice made at construction would leave that client as the
+/// ordinary one for ever: it would not wait for [TheCoreIsSettled], would not
+/// refuse, and would name no agent. So the question is asked again for every
+/// request, against what [AgentConfig] says now.
+///
+/// This app is the front end for an agent elsewhere: it signs as ITSELF — the
+/// enclave key on this machine — and the agent decides what a machine acting
+/// for somebody may do.
+class _ChoosesWhenItSends extends http.BaseClient {
+  _ChoosesWhenItSends({
+    required this.asked,
+    required this.to,
+    required this.otherwise,
+    required this.transport,
+    required this.ownsTransport,
+  });
+
+  /// The address the caller named, or null for "wherever this app's agent is".
+  /// Null is read now rather than at construction: it is exactly the case
+  /// where the answer changes once startup has found out which half this is.
+  final String? asked;
+
+  /// Where the non-controller client was built to talk.
+  final String to;
+  final http.Client otherwise;
+  final http.Client transport;
+  final bool ownsTransport;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) {
+    final now = asked ?? AgentConfig.agentBaseUrl;
+    if (AgentConfig.isAController && now == AgentConfig.agentBaseUrl) {
+      return ControllerSigningClient(
+        agentOrigin: now,
+        // Always this machine, never the agent: the key that signs lives here
+        // and the agent cannot reach it.
+        localCoreOrigin: () => AgentConfig.coreBaseUrl,
+        // Named in every signature, so a copy is refused by any other
+        // Identity Agent. Unknown leaves it to the core, which was told.
+        agentAid: AgentConfig.agentAid.isEmpty ? null : AgentConfig.agentAid,
+        inner: transport, // borrowed: closing this wrapper leaves it open
+      ).send(request);
+    }
+    return otherwise.send(request);
+  }
+
+  @override
+  void close() {
+    otherwise.close();
+    if (ownsTransport) transport.close();
+    super.close();
   }
 }
 

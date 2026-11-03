@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../crypto/owner_signature.dart';
+import 'signs_before_it_sends.dart';
 import 'the_path_a_signature_covers.dart';
 import 'the_owner_at_this_computer.dart';
 
@@ -29,26 +30,31 @@ import 'the_owner_at_this_computer.dart';
 /// hand it to every stranger it looks up — the opposite of what a pairwise
 /// identifier is for.
 ///
-/// What it deliberately does NOT do is fall back. If the local core will not
-/// sign, the request goes unsigned and the machine refuses it. Signing as
-/// anything else — the root, another machine's identity — would be a request
+/// What it deliberately does NOT do is fall back, or send unsigned. If the local
+/// core will not sign, or this device has no identity recorded as owning that
+/// machine, the request is refused here with [ThisMachineCouldNotSign]. Signing
+/// as anything else — the root, another machine's identity — would be a request
 /// that fails at the far end with a reason nobody can see.
-class SigningAsTheIdentityThatOwnsAMachine extends http.BaseClient {
+class SigningAsTheIdentityThatOwnsAMachine extends SignsBeforeItSends {
   SigningAsTheIdentityThatOwnsAMachine({
     required this.machineOrigin,
     required this.localCoreOrigin,
     required this.ownerAid,
-    http.Client? inner,
-  })  : _inner = ProvingThisComputer.over(inner),
-        _ownsInner = inner == null;
+    super.waitAtMost = const Duration(seconds: 90),
+    super.inner,
+  }) : super(signedOrigin: machineOrigin);
 
   /// The machine this device owns, as scheme://host:port. Requests anywhere
   /// else are passed through untouched.
   final String machineOrigin;
 
-  /// This device's own core, which can derive the pairwise key and does the
-  /// signing.
-  final String localCoreOrigin;
+  /// Where this device's own core is, which can derive the pairwise key and
+  /// does the signing.
+  ///
+  /// A function, read for EVERY request, and not an address captured when the
+  /// client was built: the core takes the next free port when its default is
+  /// held and is restarted when the profile changes.
+  final String Function() localCoreOrigin;
 
   /// Which of this device's minted identities owns that machine.
   ///
@@ -61,115 +67,62 @@ class SigningAsTheIdentityThatOwnsAMachine extends http.BaseClient {
   /// forgotten, while the app is running.
   final Future<String?> Function() ownerAid;
 
-  final http.Client _inner;
-
-  /// Whether this wrapper created [_inner] and so may close it. A borrowed inner
-  /// belongs to the caller; closing it would break a transport still in use.
-  final bool _ownsInner;
-
-  @override
-  Future<http.StreamedResponse> send(http.BaseRequest request) async {
-    if (!_isTheMachine(request.url)) {
-      return _inner.send(request);
-    }
-    // Only a plain Request can be signed: the body has to be read to digest it
-    // and a stream can be read once. A streamed upload is passed through rather
-    // than half-consumed, so it fails at the machine instead of arriving cut
-    // off.
-    if (request is! http.Request) {
-      return _inner.send(request);
-    }
-
-    final headers = await _askThisDeviceToSign(request);
-    final signed = http.Request(request.method, request.url)
-      ..headers.addAll(request.headers)
-      ..bodyBytes = request.bodyBytes
-      ..followRedirects = request.followRedirects
-      ..maxRedirects = request.maxRedirects
-      ..persistentConnection = request.persistentConnection;
-    if (headers != null) {
-      signed.headers.addAll(headers);
-    }
-    return _inner.send(signed);
-  }
-
   /// Asks the local core to sign this request as the machine's owner.
   ///
-  /// Returns null when it will not, and the request then goes unsigned. Null is
-  /// deliberately not an exception: an identity not yet minted, a core still
-  /// starting, or a machine this device does not own are ordinary states, and
-  /// the machine's own refusal says more about what to do next than a transport
-  /// error would.
-  Future<Map<String, String>?> _askThisDeviceToSign(http.Request request) async {
-    final aid = await ownerAid();
-    if (aid == null || aid.isEmpty) return null;
-    try {
-      final res = await _inner.post(
-        Uri.parse('$localCoreOrigin/api/machines/owner/sign'),
-        headers: const {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'owner_aid': aid,
-          'method': request.method,
-          // The path the machine will actually verify — its own, with no host
-          // and no relay mount prefix. A signature over the host breaks when a
-          // relay renames it; a signature over the mount prefix breaks because a
-          // path-mounting relay strips that prefix before the machine sees the
-          // request, so the machine verifies `/api/…` and a prefixed signature
-          // matches nothing. pathSignatureCovers removes the prefix, and leaves
-          // a bare origin's path untouched.
-          'path': pathSignatureCovers(machineOrigin, request.url),
-          'body_b64': base64.encode(request.bodyBytes),
-        }),
-      );
-      if (res.statusCode != 200) return null;
-
-      final body = jsonDecode(res.body) as Map<String, dynamic>;
-      final sig = (body['signature'] ?? '').toString();
-      final stamp = (body['timestamp'] ?? '').toString();
-      // The Identity Agent the core signed this for — the machine this owner
-      // adopted. Echoed, because it is inside the signature.
-      final signedFor = (body['for'] ?? '').toString();
-      if (sig.isEmpty || stamp.isEmpty) return null;
-
-      return {
-        'X-IA-Owner-Sig': sig,
-        // Echoed back from the core rather than formatted again here. The moment
-        // is inside the signature, so a second formatting that differs by a
-        // millisecond or a zone signs a string the machine never sees.
-        'X-IA-Owner-Timestamp': stamp,
-        // The digest the signature covers, so the machine checks the signature
-        // before it reads any of the body. Computed here from the very bytes
-        // that are sent (and that the core was asked to sign), not echoed.
-        OwnerSignature.bodyDigestHeader:
-            OwnerSignature.blake3QB64(request.bodyBytes),
-        'X-IA-Owner-AID': (body['owner_aid'] ?? aid).toString(),
-        if (signedFor.isNotEmpty) 'X-IA-Owner-For': signedFor,
-      };
-    } catch (_) {
-      // Unreachable local core. Same answer as a refusal: unsigned, and let the
-      // machine say no.
-      return null;
-    }
-  }
-
-  /// Whether a URL belongs to the machine this device owns.
-  ///
-  /// Compared on scheme, host and port rather than on a prefix, because a prefix
-  /// test accepts `https://my-machine.example.com.attacker.test` as the machine
-  /// — a real way to be handed this identity's signature.
-  bool _isTheMachine(Uri url) {
-    final own = Uri.tryParse(machineOrigin);
-    if (own == null || own.host.isEmpty) return false;
-    return url.scheme == own.scheme &&
-        url.host == own.host &&
-        url.port == own.port;
-  }
-
+  /// Throws [ThisMachineCouldNotSign] when it will not: an identity not yet
+  /// minted, a machine this device does not own, a core still starting or one
+  /// that cannot be reached. Each is said as what it is, rather than sent on as
+  /// a request the machine can only answer with a refusal that blames the
+  /// person.
   @override
-  void close() {
-    // Only what this wrapper created; a borrowed inner belongs to the caller.
-    if (_ownsInner) _inner.close();
-    super.close();
+  Future<Map<String, String>> headersFor(http.Request request) async {
+    final aid = await ownerAid();
+    if (aid == null || aid.isEmpty) {
+      throw ThisMachineCouldNotSign(
+          'this device has no identity of its own recorded as owning that '
+          'machine',
+          request.url);
+    }
+    final body = await askTheCoreToSign(
+      localCoreOrigin(),
+      '/api/machines/owner/sign',
+      {
+        'owner_aid': aid,
+        'method': request.method,
+        // The path the machine will actually verify — its own, with no host
+        // and no relay mount prefix. A signature over the host breaks when a
+        // relay renames it; a signature over the mount prefix breaks because a
+        // path-mounting relay strips that prefix before the machine sees the
+        // request, so the machine verifies `/api/…` and a prefixed signature
+        // matches nothing. pathSignatureCovers removes the prefix, and leaves
+        // a bare origin's path untouched.
+        'path': pathSignatureCovers(machineOrigin, request.url),
+        'body_b64': base64.encode(request.bodyBytes),
+      },
+      request.url,
+      mustHave: const {
+        'signature': 'a signature',
+        'timestamp': 'a timestamp',
+      },
+    );
+    // The Identity Agent the core signed this for — the machine this owner
+    // adopted. Echoed, because it is inside the signature.
+    final signedFor = (body['for'] ?? '').toString();
+
+    return {
+      'X-IA-Owner-Sig': body['signature'].toString(),
+      // Echoed back from the core rather than formatted again here. The moment
+      // is inside the signature, so a second formatting that differs by a
+      // millisecond or a zone signs a string the machine never sees.
+      'X-IA-Owner-Timestamp': body['timestamp'].toString(),
+      // The digest the signature covers, so the machine checks the signature
+      // before it reads any of the body. Computed here from the very bytes
+      // that are sent (and that the core was asked to sign), not echoed.
+      OwnerSignature.bodyDigestHeader:
+          OwnerSignature.blake3QB64(request.bodyBytes),
+      'X-IA-Owner-AID': (body['owner_aid'] ?? aid).toString(),
+      if (signedFor.isNotEmpty) 'X-IA-Owner-For': signedFor,
+    };
   }
 }
 
@@ -181,17 +134,17 @@ class SigningAsTheIdentityThatOwnsAMachine extends http.BaseClient {
 /// signature this is being used to produce. The record here was written at
 /// adoption by the side that minted the identity, and it is the same fact.
 ///
-/// A machine this device does not own returns null, and the request goes
-/// unsigned. That is the honest answer: there is no identity to sign as.
+/// A machine this device does not own returns null, and the request is
+/// refused. That is the honest answer: there is no identity to sign as.
 Future<String?> Function() theIdentityThatAdopted(
   String machineOrigin, {
-  required String localCoreOrigin,
+  required String Function() localCoreOrigin,
   http.Client? using,
 }) {
   return () async {
     final client = ProvingThisComputer.over(using);
     try {
-      final res = await client.get(Uri.parse('$localCoreOrigin/api/agents'));
+      final res = await client.get(Uri.parse('${localCoreOrigin()}/api/agents'));
       if (res.statusCode != 200) return null;
       final agents =
           ((jsonDecode(res.body) as Map<String, dynamic>)['agents'] as List?) ??

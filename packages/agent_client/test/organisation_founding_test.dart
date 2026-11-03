@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:agent_client/config/agent_config.dart';
 import 'package:agent_client/services/core_service.dart';
 import 'package:test/test.dart';
 
@@ -17,6 +18,7 @@ import 'package:test/test.dart';
 /// what is being founded.
 void main() {
   late HttpServer agent;
+  final defaultPort = AgentConfig.desktopPort;
   late List<({String path, Map<String, dynamic> body})> seen;
 
   setUp(() async {
@@ -35,9 +37,16 @@ void main() {
         ..write(jsonEncode({'root_aid': 'EORGROOT'}));
       await req.response.close();
     });
+    // This stands in for the core on this computer. A client sending anywhere
+    // else is one for a machine this device owns, and is refused when it has
+    // no identity of its own recorded as owning it.
+    AgentConfig.desktopPort = agent.port;
   });
 
-  tearDown(() async => agent.close(force: true));
+  tearDown(() async {
+    AgentConfig.desktopPort = defaultPort;
+    await agent.close(force: true);
+  });
 
   CoreService client() =>
       CoreService(baseUrl: 'http://127.0.0.1:${agent.port}');

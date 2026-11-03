@@ -1,4 +1,5 @@
 import 'package:agent_client/config/agent_config.dart';
+import 'package:agent_client/services/controller_signing_client.dart' show ThisMachineCouldNotSign;
 import 'package:agent_client/services/link_verification_service.dart';
 import 'package:agent_client/services/local_core_keri_service.dart';
 import 'package:agent_client/services/login_service.dart';
@@ -54,7 +55,11 @@ void main() {
       // Nothing here reaches the network: what is being checked is that the
       // client is the kind that proves who is sending, and that it is pointed
       // at the agent rather than at this computer.
-      expect(client.runtimeType.toString(), contains('Controller'));
+      expect(client.runtimeType.toString(), contains('ChoosesWhenItSends'));
+      // And what it chooses is the controller: a request to the agent is held
+      // and signed, so with no core to sign it, it is refused unsent.
+      await expectLater(client.get(Uri.parse('$_agent/api/profile')),
+          throwsA(isA<ThisMachineCouldNotSign>()));
     });
   });
 

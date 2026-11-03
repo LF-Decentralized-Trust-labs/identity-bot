@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:agent_client/crypto/owner_signature.dart';
 import 'package:agent_client/services/controller_signing_client.dart';
+import 'package:agent_client/services/the_core_is_settled.dart';
 import 'package:http/http.dart' as http;
 import 'package:test/test.dart';
 
@@ -56,12 +59,99 @@ class _Split extends http.BaseClient {
       );
 }
 
+/// Answers every request from a function, so a test can script the core's
+/// replies one by one.
+class _Scripted extends http.BaseClient {
+  _Scripted(this.answer);
+  final (String, int) Function(http.Request) answer;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final (body, code) = answer(request as http.Request);
+    return http.StreamedResponse(Stream.value(utf8.encode(body)), code);
+  }
+}
+
 void main() {
+  tearDown(TheCoreIsSettled.reset);
+
+  test('a request waits while the core is being started, then signs at the '
+      'address it ended up at', () async {
+    var core = _localCore;
+    final askedAt = <String>[];
+    final c = ControllerSigningClient(
+      agentOrigin: _agent,
+      localCoreOrigin: () => core,
+      inner: _Scripted((r) {
+        if (r.url.path == '/api/controller/sign') {
+          askedAt.add(r.url.origin);
+          return ('{"controller_aid":"B","signature":"0B","timestamp":"t"}', 200);
+        }
+        return ('{}', 200);
+      }),
+    );
+    final starting = Completer<void>();
+    final during = TheCoreIsSettled.during(() => starting.future);
+
+    var done = false;
+    final pending =
+        c.get(Uri.parse('$_agent/api/profile')).whenComplete(() => done = true);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(done, isFalse, reason: 'a request was sent while the core was starting');
+    expect(askedAt, isEmpty);
+
+    core = 'http://127.0.0.1:50999'; // found on its real port
+    starting.complete();
+    await during;
+    await pending;
+    expect(askedAt, ['http://127.0.0.1:50999']);
+  });
+
+  test('a start that failed refuses the request with a reason, not a wait',
+      () async {
+    final w = _Watched();
+    final c = ControllerSigningClient(
+        agentOrigin: _agent, localCoreOrigin: () => _localCore, inner: w.client);
+    await expectLater(
+        TheCoreIsSettled.during<void>(() async => throw StateError('no core')),
+        throwsStateError);
+    await expectLater(c.get(Uri.parse('$_agent/api/profile')),
+        throwsA(isA<ThisMachineCouldNotSign>()));
+    expect(w.toTheAgent, isEmpty);
+    expect(w.askedToSign, isEmpty);
+  });
+
+  test('a core that never settles refuses after the wait instead of hanging',
+      () async {
+    final w = _Watched();
+    final c = ControllerSigningClient(
+        agentOrigin: _agent,
+        localCoreOrigin: () => _localCore,
+        waitAtMost: const Duration(milliseconds: 50),
+        inner: w.client);
+    final never = Completer<void>();
+    unawaited(TheCoreIsSettled.during(() => never.future));
+    await expectLater(c.get(Uri.parse('$_agent/api/profile')),
+        throwsA(isA<ThisMachineCouldNotSign>()));
+    expect(w.toTheAgent, isEmpty);
+    never.complete();
+  });
+
+  test('a request to anyone else does not wait for the core', () async {
+    final w = _Watched();
+    final c = ControllerSigningClient(
+        agentOrigin: _agent, localCoreOrigin: () => _localCore, inner: w.client);
+    final never = Completer<void>();
+    unawaited(TheCoreIsSettled.during(() => never.future));
+    await c.get(Uri.parse('https://someone-else.example.test/oobi/E1'));
+    expect(w.toTheAgent, hasLength(1));
+    never.complete();
+  });
   test('a request to the agent carries this machine\'s signature', () async {
     final w = _Watched();
     final c = ControllerSigningClient(
       agentOrigin: _agent,
-      localCoreOrigin: _localCore,
+      localCoreOrigin: () => _localCore,
       inner: w.client,
     );
 
@@ -85,7 +175,7 @@ void main() {
     final w = _Watched();
     final c = ControllerSigningClient(
       agentOrigin: _agent,
-      localCoreOrigin: _localCore,
+      localCoreOrigin: () => _localCore,
       inner: w.client,
     );
 
@@ -105,7 +195,7 @@ void main() {
     final w = _Watched();
     final c = ControllerSigningClient(
       agentOrigin: _agent,
-      localCoreOrigin: _localCore,
+      localCoreOrigin: () => _localCore,
       agentAid: 'EThatIdentity',
       inner: w.client,
     );
@@ -124,7 +214,7 @@ void main() {
     final w = _Watched();
     final c = ControllerSigningClient(
       agentOrigin: _agent,
-      localCoreOrigin: _localCore,
+      localCoreOrigin: () => _localCore,
       inner: w.client,
     );
 
@@ -139,7 +229,7 @@ void main() {
     final w = _Watched();
     final c = ControllerSigningClient(
       agentOrigin: _agent,
-      localCoreOrigin: _localCore,
+      localCoreOrigin: () => _localCore,
       inner: w.client,
     );
 
@@ -154,7 +244,7 @@ void main() {
     final w = _Watched();
     final c = ControllerSigningClient(
       agentOrigin: _agent,
-      localCoreOrigin: _localCore,
+      localCoreOrigin: () => _localCore,
       inner: w.client,
     );
 
@@ -164,30 +254,230 @@ void main() {
         reason: 'a prefix match handed this machine\'s signature to another host');
   });
 
-  test('when this machine will not sign, the request goes unsigned rather '
-      'than falling back to the local core for an answer', () async {
+  test('when this machine will not sign, the request is refused and never '
+      'reaches the agent', () async {
     final w = _Watched()..coreWillSign = false;
     final c = ControllerSigningClient(
       agentOrigin: _agent,
-      localCoreOrigin: _localCore,
+      localCoreOrigin: () => _localCore,
       inner: w.client,
     );
 
-    await c.get(Uri.parse('$_agent/api/employees/roles'));
+    await expectLater(c.get(Uri.parse('$_agent/api/employees/roles')),
+        throwsA(isA<ThisMachineCouldNotSign>()));
 
-    // It still went to the AGENT, which will refuse it. What must never happen
-    // is the request going to the local core and coming back with a plausible
-    // answer about nobody.
-    expect(w.toTheAgent, hasLength(1));
-    expect(w.toTheAgent.single.url.origin, Uri.parse(_agent).origin);
-    expect(w.toTheAgent.single.headers.containsKey('X-IA-Controller-Sig'), isFalse);
+    expect(w.toTheAgent, isEmpty,
+        reason: 'an unsigned request reached the agent, which can only answer '
+            'it with a refusal that blames the person');
+  });
+
+  test('the refusal says why, in words a person can act on', () async {
+    final w = _Watched()..coreWillSign = false;
+    final c = ControllerSigningClient(
+      agentOrigin: _agent,
+      localCoreOrigin: () => _localCore,
+      inner: w.client,
+    );
+
+    try {
+      await c.get(Uri.parse('$_agent/api/profile'));
+      fail('expected a refusal');
+    } on http.ClientException catch (e) {
+      expect(e.message, contains('could not sign'));
+      expect(e.message, contains('501'));
+    }
+  });
+
+  test('a core that answers 200 with fields missing is not a signature', () async {
+    for (final answer in [
+      '{}',
+      '{"controller_aid":"B","signature":"0B"}',
+      '{"controller_aid":"B","timestamp":"t"}',
+      '{"signature":"0B","timestamp":"t"}',
+      'not json',
+      '[1]',
+    ]) {
+      final sent = <http.Request>[];
+      final c = ControllerSigningClient(
+        agentOrigin: _agent,
+        localCoreOrigin: () => _localCore,
+        inner: _Scripted((r) {
+          if (r.url.toString().startsWith(_localCore)) return (answer, 200);
+          sent.add(r);
+          return ('{}', 200);
+        }),
+      );
+
+      await expectLater(c.get(Uri.parse('$_agent/api/profile')),
+          throwsA(isA<ThisMachineCouldNotSign>()),
+          reason: 'the core answered $answer');
+      expect(sent, isEmpty, reason: 'sent unsigned after the core answered $answer');
+    }
+  });
+
+  test('a core that cannot be reached refuses the request instead of '
+      'sending it unsigned', () async {
+    final sent = <http.Request>[];
+    final c = ControllerSigningClient(
+      agentOrigin: _agent,
+      localCoreOrigin: () => _localCore,
+      inner: _Scripted((r) {
+        if (r.url.toString().startsWith(_localCore)) {
+          throw const SocketException('connection refused');
+        }
+        sent.add(r);
+        return ('{}', 200);
+      }),
+    );
+
+    await expectLater(c.get(Uri.parse('$_agent/api/profile')),
+        throwsA(isA<ThisMachineCouldNotSign>()));
+    expect(sent, isEmpty);
+  });
+
+  test('a streamed body to the agent is signed too, not passed through', () async {
+    final w = _Watched();
+    final c = ControllerSigningClient(
+      agentOrigin: _agent,
+      localCoreOrigin: () => _localCore,
+      inner: w.client,
+    );
+
+    final streamed = http.StreamedRequest('POST', Uri.parse('$_agent/api/upload'))
+      ..sink.add(utf8.encode('{"big":1}'))
+      ..sink.close();
+    await c.send(streamed);
+
+    expect(w.toTheAgent.single.headers['X-IA-Controller-Sig'], isNotNull,
+        reason: 'a streamed upload went to the agent unsigned');
+    expect(utf8.decode(base64.decode(w.askedToSign.single['body_b64'] as String)),
+        '{"big":1}');
+    expect(w.toTheAgent.single.body, '{"big":1}',
+        reason: 'what was signed is not what was sent');
+  });
+
+  test('a multipart upload reaches the agent signed and with its boundary',
+      () async {
+    final w = _Watched();
+    final c = ControllerSigningClient(
+        agentOrigin: _agent, localCoreOrigin: () => _localCore, inner: w.client);
+    final m = http.MultipartRequest('POST', Uri.parse('$_agent/api/upload'))
+      ..fields['a'] = 'b'
+      ..files.add(http.MultipartFile.fromBytes('f', [1, 2, 3], filename: 'f.bin'));
+    await c.send(m);
+
+    final sent = w.toTheAgent.single;
+    final type = sent.headers['content-type'] ?? '';
+    expect(type, startsWith('multipart/form-data; boundary='),
+        reason: 'the body arrived without the boundary that delimits it');
+    final boundary = type.split('boundary=').last;
+    expect(sent.body, contains('--$boundary'));
+    expect(sent.headers['X-IA-Controller-Sig'], isNotNull);
+    expect(base64.decode(w.askedToSign.single['body_b64'] as String),
+        sent.bodyBytes,
+        reason: 'what was signed is not what was sent');
+  });
+
+  test('a second switch that starts while requests wait holds them too',
+      () async {
+    final asked = <String>[];
+    var core = _localCore;
+    final c = ControllerSigningClient(
+      agentOrigin: _agent,
+      localCoreOrigin: () => core,
+      inner: _Scripted((r) {
+        if (r.url.path == '/api/controller/sign') {
+          asked.add(r.url.origin);
+          return ('{"controller_aid":"B","signature":"0B","timestamp":"t"}', 200);
+        }
+        return ('{}', 200);
+      }),
+    );
+    final first = Completer<void>();
+    final firstSwitch = TheCoreIsSettled.during(() => first.future);
+    final pending = [
+      for (var i = 0; i < 3; i++) c.get(Uri.parse('$_agent/api/profile')),
+    ];
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    // The first switch ends and the gate opens (its count reaches zero). Before
+    // the waiting requests resume, another switch begins. The microtask queued
+    // here runs after the one that ends the first switch and before the
+    // waiters' wake-ups, which that ending queues.
+    final second = Completer<void>();
+    late final Future<void> secondSwitch;
+    first.complete();
+    scheduleMicrotask(() {
+      secondSwitch = TheCoreIsSettled.during(() => second.future);
+    });
+    await firstSwitch;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(asked, isEmpty,
+        reason: 'a request went out in the middle of the second switch');
+
+    core = 'http://127.0.0.1:50999';
+    second.complete();
+    await secondSwitch;
+    await Future.wait(pending);
+    expect(asked, ['http://127.0.0.1:50999', 'http://127.0.0.1:50999',
+        'http://127.0.0.1:50999']);
+  });
+
+  test('nested switches open the gate only when the outer one ends', () async {
+    final w = _Watched();
+    final c = ControllerSigningClient(
+        agentOrigin: _agent, localCoreOrigin: () => _localCore, inner: w.client);
+    final outer = Completer<void>();
+    final inner = Completer<void>();
+    final done = TheCoreIsSettled.during(() async {
+      await TheCoreIsSettled.during(() => inner.future);
+      await outer.future;
+    });
+    final pending = c.get(Uri.parse('$_agent/api/profile'));
+    inner.complete();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(w.askedToSign, isEmpty,
+        reason: 'the gate opened when the inner switch ended');
+    outer.complete();
+    await done;
+    await pending;
+    expect(w.askedToSign, hasLength(1));
+  });
+
+  test('it signs at the core\'s address now, not the one it was built with',
+      () async {
+    final asked = <String>[];
+    var core = 'http://127.0.0.1:49221';
+    final c = ControllerSigningClient(
+      agentOrigin: _agent,
+      localCoreOrigin: () => core,
+      inner: _Scripted((r) {
+        if (r.url.path == '/api/controller/sign') {
+          asked.add(r.url.origin);
+          return (
+            '{"controller_aid":"B","signature":"0B","timestamp":"t"}',
+            200
+          );
+        }
+        return ('{}', 200);
+      }),
+    );
+
+    await c.get(Uri.parse('$_agent/api/profile'));
+    // The core restarted on another port, as it does when the first is held.
+    core = 'http://127.0.0.1:50555';
+    await c.get(Uri.parse('$_agent/api/profile'));
+
+    expect(asked, ['http://127.0.0.1:49221', 'http://127.0.0.1:50555'],
+        reason: 'the second request was signed by asking an address the core '
+            'is no longer at');
   });
 
   test('an authentication level travels only with what vouched for it', () async {
     final w = _Watched();
     final c = ControllerSigningClient(
       agentOrigin: _agent,
-      localCoreOrigin: _localCore,
+      localCoreOrigin: () => _localCore,
       inner: w.client,
       authentication: () async => VouchedAuthentication(
         level: 'high',

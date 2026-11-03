@@ -56,6 +56,23 @@ void main() {
       await req.response.close();
     });
 
+    // This machine's own core, which signs as the controller. Without one a
+    // controller now refuses to send at all, so the request would never arrive
+    // to be looked at.
+    final core = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => core.close(force: true));
+    core.listen((req) async {
+      req.response
+        ..statusCode = 200
+        ..headers.contentType = ContentType.json
+        ..write('{"controller_aid":"BThisMachine","signature":"0BSig",'
+            '"timestamp":"2026-11-03T00:00:00Z"}');
+      await req.response.close();
+    });
+    final portBefore = AgentConfig.desktopPort;
+    AgentConfig.desktopPort = core.port;
+    addTearDown(() => AgentConfig.desktopPort = portBefore);
+
     AgentConfig.agentOrigin = 'http://127.0.0.1:${stub.port}';
     final asAController = CoreService(
       ownerSeed: () async => Uint8List.fromList(List.filled(32, 7)),
@@ -68,6 +85,8 @@ void main() {
     }
 
     expect(seen, isNotEmpty, reason: 'the request never reached the agent');
+    expect(seen.single.value('x-ia-controller-sig'), '0BSig',
+        reason: 'a controller must sign as the controller');
     expect(seen.single.value('x-ia-owner-sig'), isNull,
         reason: 'a controller signed as the OWNER, which grants everything the '
             'controller gate exists to hold back');
