@@ -68,7 +68,7 @@ func TestAPublicRefusalNamesNoPath(t *testing.T) {
 		s := &CoreServer{DataDir: t.TempDir()}
 		sender, _ := didcomm.GenerateKeySet("Esender")
 		did, _ := sender.DID()
-		if err := s.rememberPeerFromAdoption(did, "https://sender.example"); err != nil {
+		if err := s.rememberPeerFromAdoption(did, "https://sender.example", ""); err != nil {
 			t.Fatal(err)
 		}
 		breakRecord(t, s.didcommKeysPath())

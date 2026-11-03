@@ -559,6 +559,10 @@ func (s *CoreServer) rowIsItsGrant(g ControllerGrant) error {
 func (s *CoreServer) handleGrantsAwaitingApproval(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	keyHere := !s.keyIsElsewhere()
+	deviceName := ""
+	if !keyHere {
+		deviceName = s.keyDeviceName()
+	}
 	machines := []map[string]any{}
 	if all, err := s.controllers().All(); err == nil {
 		for _, g := range all {
@@ -572,6 +576,9 @@ func (s *CoreServer) handleGrantsAwaitingApproval(w http.ResponseWriter, r *http
 			// A mark that the grant waits for another device is believed only
 			// where the key really is elsewhere.
 			m["awaiting"] = s.awaitingFor(g.ControllerAID, g.CredentialPending && !keyHere)
+			if m["awaiting"] == awaitingWhat(true) && deviceName != "" {
+				m["key_device_name"] = deviceName
+			}
 			machines = append(machines, m)
 		}
 	}
@@ -581,7 +588,14 @@ func (s *CoreServer) handleGrantsAwaitingApproval(w http.ResponseWriter, r *http
 	for _, a := range registeredAddons() {
 		for _, g := range a.GrantKinds {
 			if g.Awaiting != nil && g.AwaitingKey != "" {
-				out[g.AwaitingKey] = g.Awaiting(s)
+				items := g.Awaiting(s)
+				// Named only on what waits for that device, and only when known.
+				for _, item := range items {
+					if item["awaiting"] == awaitingWhat(true) && deviceName != "" {
+						item["key_device_name"] = deviceName
+					}
+				}
+				out[g.AwaitingKey] = items
 			}
 		}
 	}

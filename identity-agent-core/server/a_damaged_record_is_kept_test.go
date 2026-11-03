@@ -59,7 +59,7 @@ func TestADamagedPeersFileIsNeverReplaced(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.rememberPeerFromAdoption(did, "https://owner.example"); !errors.Is(err, errRecordUnreadable) {
+	if err := s.rememberPeerFromAdoption(did, "https://owner.example", ""); !errors.Is(err, errRecordUnreadable) {
 		t.Errorf("adding a peer: %v, want the record unreadable", err)
 	}
 	leftAlone(t, s.didcommPeersPath(), damaged)
@@ -83,7 +83,7 @@ func TestAMissingPeersFileMeansNoPeersYet(t *testing.T) {
 	}
 	ks, _ := didcomm.GenerateKeySet("Eowner")
 	did, _ := ks.DID()
-	if err := s.rememberPeerFromAdoption(did, "https://owner.example"); err != nil {
+	if err := s.rememberPeerFromAdoption(did, "https://owner.example", ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, known, err := s.peerFor("Eowner"); err != nil || !known {

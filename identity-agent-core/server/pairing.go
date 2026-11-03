@@ -13,6 +13,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -155,6 +156,10 @@ type pairingCompleteRequest struct {
 	// the encrypted transport, which needs a relationship that exists in both
 	// directions.
 	OwnerDID *didcomm.DID `json:"owner_did,omitempty"`
+	// OwnerDeviceName is what the person calls the owner device, or the name
+	// that device reports for itself. Optional; kept so a screen can say which
+	// device a grant waits for. Never invented here.
+	OwnerDeviceName string `json:"owner_device_name,omitempty"`
 	// OwnerAgentEndpoint is where that owner's agent is reached.
 	OwnerAgentEndpoint string `json:"owner_agent_endpoint,omitempty"`
 	// OwnerOOBI is where the owner's key log can be fetched from.
@@ -687,7 +692,7 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 		"owner_aid": req.OwnerAID,
 	}
 	if req.OwnerDID != nil && req.OwnerDID.AID != "" {
-		if err := s.rememberPeerFromAdoption(req.OwnerDID, req.OwnerAgentEndpoint); err != nil {
+		if err := s.rememberPeerFromAdoption(req.OwnerDID, req.OwnerAgentEndpoint, req.OwnerDeviceName); err != nil {
 			log.Printf("[pairing] WARNING: adopted, but this instance cannot reach its owner "+
 				"privately (%v) — sealed requests between them will be refused until that is fixed", err)
 		}
@@ -1012,7 +1017,9 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		OwnerPublicKey:          ownerKey,
 		BackupSealPublicKeysB64: sealKeys,
 		OwnerDID:                ownerDID,
-		OwnerAgentEndpoint:      s.getPublicURL(r),
+		// Only a name somebody gave this device; "This computer" is a kind, not a name.
+		OwnerDeviceName:    os.Getenv("AGENT_DEVICE_NAME"),
+		OwnerAgentEndpoint: s.getPublicURL(r),
 	})
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "The box refused to be adopted", err.Error())
@@ -1041,7 +1048,7 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		if boxDID, err := didFromResult(raw); err != nil {
 			log.Printf("[pairing] adopted %s but could not read its keys, so sealed traffic to it "+
 				"will be refused until they are: %v", base, err)
-		} else if err := s.rememberPeerFromAdoption(boxDID, base); err != nil {
+		} else if err := s.rememberPeerFromAdoption(boxDID, base, ""); err != nil {
 			log.Printf("[pairing] adopted %s but did not record its keys, so sealed traffic to it "+
 				"will be refused until they are: %v", base, err)
 		}

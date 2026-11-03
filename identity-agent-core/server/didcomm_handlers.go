@@ -39,6 +39,10 @@ type peerRecord struct {
 	DID      didcomm.DID `json:"did"`
 	Endpoint string      `json:"endpoint"` // e.g. https://host/didcomm
 	AddedAt  time.Time   `json:"added_at"`
+	// DeviceName is what the person calls this peer's device, or what the
+	// device called itself when it was adopted. Optional: absent where nobody
+	// gave one, and never made up.
+	DeviceName string `json:"device_name,omitempty"`
 }
 
 type inboxEntry struct {

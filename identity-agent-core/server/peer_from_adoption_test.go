@@ -27,7 +27,7 @@ func TestAdoptionLeavesTheOwnerReachablePrivately(t *testing.T) {
 	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	did := ownerDID(t, "EOWNER")
 
-	if err := s.rememberPeerFromAdoption(did, "https://owner.example"); err != nil {
+	if err := s.rememberPeerFromAdoption(did, "https://owner.example", ""); err != nil {
 		t.Fatalf("the owner was not remembered: %v", err)
 	}
 
@@ -51,10 +51,10 @@ func TestAdoptionLeavesTheOwnerReachablePrivately(t *testing.T) {
 // of the owner's, and overwriting quietly makes the second case invisible.
 func TestASecondAdoptionCannotReplaceTheOwnersKeys(t *testing.T) {
 	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
-	if err := s.rememberPeerFromAdoption(ownerDID(t, "EOWNER"), "https://owner.example"); err != nil {
+	if err := s.rememberPeerFromAdoption(ownerDID(t, "EOWNER"), "https://owner.example", ""); err != nil {
 		t.Fatal(err)
 	}
-	err := s.rememberPeerFromAdoption(ownerDID(t, "EOWNER"), "https://attacker.example")
+	err := s.rememberPeerFromAdoption(ownerDID(t, "EOWNER"), "https://attacker.example", "")
 	if err == nil {
 		t.Fatal("a second set of keys replaced the owner's")
 	}
@@ -75,7 +75,7 @@ func TestUnusableOwnerKeysAreRefusedOnArrival(t *testing.T) {
 		"truncated key":  {AID: "EOWNER", Ed: good.Ed, Dsa: good.Dsa, X25519: "AAAA", MlKem: good.MlKem, Suite: didcomm.CipherSuite},
 		"unknown suite":  {AID: "EOWNER", Ed: good.Ed, Dsa: good.Dsa, X25519: good.X25519, MlKem: good.MlKem, Suite: "SOMETHING-ELSE"},
 	} {
-		if err := s.rememberPeerFromAdoption(did, "https://owner.example"); err == nil {
+		if err := s.rememberPeerFromAdoption(did, "https://owner.example", ""); err == nil {
 			t.Errorf("%s was accepted", name)
 		}
 	}
@@ -87,10 +87,10 @@ func TestUnusableOwnerKeysAreRefusedOnArrival(t *testing.T) {
 func TestRepeatingTheSameKeysIsNotAnError(t *testing.T) {
 	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}
 	did := ownerDID(t, "EOWNER")
-	if err := s.rememberPeerFromAdoption(did, "https://owner.example"); err != nil {
+	if err := s.rememberPeerFromAdoption(did, "https://owner.example", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.rememberPeerFromAdoption(did, "https://owner.example"); err != nil {
+	if err := s.rememberPeerFromAdoption(did, "https://owner.example", ""); err != nil {
 		t.Fatalf("a retried adoption with the same keys was refused: %v", err)
 	}
 }
