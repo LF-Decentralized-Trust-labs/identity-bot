@@ -131,6 +131,7 @@ type CoreServer struct {
 
 	loginHandler   *login.Handler
 	assetHandler   *asset.Handler
+	assetStoreErr  error                 // why assetHandler is nil, when a store file could not be read
 	inboundDIDComm InboundDIDCommHandler // overlay hook for inbound DIDComm messages; nil = deliver-only
 
 	// Overlay-registered extra routes, mounted under /api by buildRouter. See
@@ -502,7 +503,7 @@ func New(cfg Config) (*CoreServer, error) {
 		log.Printf("[identity-agent-core] login handler init failed (non-fatal): %v", err)
 	}
 	if err := s.initAssetHandler(); err != nil {
-		log.Printf("[identity-agent-core] asset handler init failed (non-fatal): %v", err)
+		log.Printf("[identity-agent-core] ERROR: assets are unavailable until this is fixed; a file the asset store needs could not be read, and nothing was changed: %v", err)
 	}
 	// What each add-on readies once the core's stores, vault and asset
 	// handler are made.

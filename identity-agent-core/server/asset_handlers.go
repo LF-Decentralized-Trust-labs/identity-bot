@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 
 	"identity-agent-core/asset"
@@ -16,8 +17,13 @@ import (
 func (s *CoreServer) initAssetHandler() error {
 	h, err := asset.NewHandler(s.DataDir, s.KeriDriver)
 	if err != nil {
+		// No handler is made over a store that could not be read, and the
+		// reason is kept so the asset routes can say it rather than vanish.
+		s.assetHandler = nil
+		s.assetStoreErr = err
 		return err
 	}
+	s.assetStoreErr = nil
 	h.VaultHas = s.isVaultEntry
 	// The delegator for per-asset delegated inception is the agent's root identity AID.
 	h.RootAID = func() string {
@@ -69,8 +75,24 @@ func (s *CoreServer) saveDelegationAnchor(rootAID string, approval *drivers.Driv
 	return nil
 }
 
+// assetsUnavailable answers every route the asset handler would have served
+// when it could not be made because a store file could not be read. It is a
+// 503 naming the file, never a 404 or an empty list, and it touches nothing.
+func (s *CoreServer) assetsUnavailable() http.HandlerFunc {
+	err := s.assetStoreErr
+	return func(w http.ResponseWriter, _ *http.Request) {
+		jsonError(w, fmt.Sprintf("assets are unavailable until this is fixed: %v", err), http.StatusServiceUnavailable)
+	}
+}
+
 func (s *CoreServer) mountAssetRoutes(r chi.Router) {
 	if s.assetHandler == nil {
+		if s.assetStoreErr != nil {
+			h := s.assetsUnavailable()
+			for _, p := range []string{"/assets", "/assets/*", "/invites/*", "/enrolments", "/enrolments/*", "/enrol", "/notify"} {
+				r.HandleFunc(p, h)
+			}
+		}
 		return
 	}
 	r.Route("/assets", func(r chi.Router) {
