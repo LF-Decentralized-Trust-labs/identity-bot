@@ -76,6 +76,10 @@ type (
 // OpenSealedTo return it, wrapped, for that and for nothing else.
 var ErrKeysUnavailable = coretypes.ErrKeysUnavailable
 
+// WaitingForKeyDevice is the key an add-on sets, to Host.WaitsForKeyDevice's
+// answer, on each item it lists in the approval list.
+const WaitingForKeyDevice = coretypes.WaitingForKeyDevice
+
 // Of is the handle on s.
 func Of(s *server.CoreServer) Host { return server.AddonHost(s, hostlink.New()).(Host) }
 

@@ -613,7 +613,7 @@ func (s *CoreServer) handleGrantsAwaitingApproval(w http.ResponseWriter, r *http
 // waiting for the device that holds the identity's key, whatever its wording
 // of "awaiting" says (waiting, refused, or expired: ask again). An add-on
 // sets it from Host.WaitsForKeyDevice.
-const waitingForKeyDevice = "waiting_for_key_device"
+const waitingForKeyDevice = coretypes.WaitingForKeyDevice
 
 // waitsForKeyDevice is whether a grant marked pending is really waiting for
 // another device: believed only where the key is elsewhere.

@@ -109,6 +109,10 @@ type OwnEvidence struct {
 	RootKEL   []string `json:"root_kel"`
 }
 
+// WaitingForKeyDevice is the key an item of the approval list carries, true
+// when it waits for the device that holds the identity's key.
+const WaitingForKeyDevice = "waiting_for_key_device"
+
 // ErrKeysUnavailable is a key this Identity Agent holds and cannot read right
 // now. It is the Identity Agent's fault, not the caller's.
 var ErrKeysUnavailable = errors.New("this Identity Agent cannot read its keys right now")
