@@ -736,3 +736,47 @@ func TestABodyApprovalIsAtThePathTheRouteMounts(t *testing.T) {
 		}
 	}
 }
+
+// An App Grant rests on a request to grant an app, at the app routes: what it
+// grants is what was asked for, and no AI agent request is turned into one.
+func TestAnAppGrantMustBeWhatWasAskedFor(t *testing.T) {
+	w := newWorld(t)
+	grant := func(req map[string]interface{}, name string, capabilities []string, about string) []byte {
+		attrs := map[string]interface{}{"asset_type": "app", "name": name, "capabilities": capabilities, "request": req}
+		if about != "" {
+			attrs["about"] = about
+		}
+		acdc, _ := w.build(schemas.AppGrant.Schema.SAID, agentAID, time.Now().UTC(), attrs, w.edge())
+		return acdc
+	}
+	prov := w.signs("POST", "/api/apps", `{"name":"Task console","capabilities":["system.info.read"]}`, ago(time.Minute))
+	if err := w.check(grant(prov, "Task console", []string{"system.info.read"}, "")); err != nil {
+		t.Fatalf("a provisioning request for an app that holds was refused: %v", err)
+	}
+	set := w.signs("PUT", "/api/apps/app-1/capabilities", capBody, ago(time.Minute))
+	if err := w.check(grant(set, "Task console", []string{"system.info.read"}, "app-1")); err != nil {
+		t.Fatalf("a request to set an app's capabilities that holds was refused: %v", err)
+	}
+	if err := w.check(grant(prov, "Another name", []string{"system.info.read"}, "")); err == nil {
+		t.Fatal("a grant to an app named differently from the one asked for was accepted")
+	}
+	if err := w.check(grant(prov, "Task console", []string{"system.info.read", "infra.zone.list"}, "")); err == nil {
+		t.Fatal("more capabilities than were asked for were accepted")
+	}
+	if err := w.check(grant(set, "Task console", []string{"system.info.read"}, "app-2")); err == nil {
+		t.Fatal("a grant to another app than the one asked about was accepted")
+	}
+	limited := w.signs("PUT", "/api/apps/app-1/capabilities", `{"capabilities":["system.info.read"],"resource_constraints":{"system.info.read":{"host":["a"]}}}`, ago(time.Minute))
+	if err := w.check(grant(limited, "Task console", []string{"system.info.read"}, "app-1")); err == nil {
+		t.Fatal("a grant without the limits that were asked for was accepted")
+	}
+	// An AI agent's request grants no app anything.
+	agentReq := w.signs("PUT", "/api/mcp/agents/agent-1/capabilities", capBody, ago(time.Minute))
+	if err := w.check(grant(agentReq, "Task console", []string{"system.info.read"}, "agent-1")); err == nil {
+		t.Fatal("a request to grant an AI agent was accepted as the grant of an app")
+	}
+	// And an app's request grants no AI agent anything.
+	if err := w.check(w.aGrant(prov, []string{"system.info.read"}, "")); err == nil {
+		t.Fatal("a request to grant an app was accepted as the grant of an AI agent")
+	}
+}

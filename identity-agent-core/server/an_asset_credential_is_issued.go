@@ -89,7 +89,7 @@ func (s *CoreServer) issueAssetCredential(
 		// No registry yet: its inception is asked of the device that holds
 		// the key first, and the grant is built on it once it is signed.
 		preparer, can := s.KeriDriver.(drivers.PreparedIssuer)
-		if !can || (kind != schemas.AIAgentGrant && kind != schemas.ControllerGrant) {
+		if !can || !signedOnAnotherDevice(kind) {
 			return "", errKeyElsewhere
 		}
 		reg, err := preparer.PrepareRegistryInception(issuer)
@@ -130,7 +130,7 @@ func (s *CoreServer) issueAssetCredential(
 		return "", fmt.Errorf("%s was not issued: it does not rest on the request that asked for it: %w", kind.Schema.Name, err)
 	}
 	if !keyHere {
-		if kind != schemas.AIAgentGrant && kind != schemas.ControllerGrant {
+		if !signedOnAnotherDevice(kind) {
 			return "", errKeyElsewhere
 		}
 		if _, err := s.awaitSignature(kind, prepared, grantSpec{Schema: kind.Schema.SAID, Issuer: issuer, Claims: claims, Edges: edges,
@@ -233,8 +233,15 @@ func (s *CoreServer) ensureRegistry(issuerRootAID string) (string, error) {
 	return resp.RegistrySaid, nil
 }
 
-// issueCapabilityGrant issues a capability-grant ACDC from the owner root to the
-// agent's AID, persists the credential and its anchoring KEL event (so a verifier
+// signedOnAnotherDevice reports whether a grant of this kind may be left to the
+// device that holds the identity's key to sign, rather than refused.
+func signedOnAnotherDevice(kind *schemas.AssetGrant) bool {
+	return kind == schemas.AIAgentGrant || kind == schemas.AppGrant || kind == schemas.ControllerGrant
+}
+
+// issueCapabilityGrant issues a capability-grant ACDC (an AI Agent Grant, or an
+// App Grant where the asset is an app) from the owner root to the
+// asset's AID, persists the credential and its anchoring KEL event (so a verifier
 // can resolve the issuer KEL), and returns the grant SAID. Requires the KERI
 // driver; on any failure the caller falls back to the stored ceiling.
 func (s *CoreServer) issueCapabilityGrant(agent *asset.Asset, by coretypes.Authority) (string, error) {
@@ -254,8 +261,14 @@ func (s *CoreServer) issueCapabilityGrant(agent *asset.Asset, by coretypes.Autho
 	if agent.GrantValidUntil != nil {
 		expiry = agent.GrantValidUntil.UTC().Format(time.RFC3339)
 	}
-	superseded := s.grantsHeldBy(agentAID, true)
-	grantSAID, err := s.issueAssetCredential(schemas.AIAgentGrant, agentAID, issuerRootAID, claims, expiry, by)
+	// An app's grant is an App Grant, an AI agent's an AI Agent Grant; each
+	// withdraws the one it replaces, of its own kind.
+	kind, held := schemas.AIAgentGrant, capabilityGrantSchemaSAIDs
+	if agent.AssetType == "app" {
+		kind, held = schemas.AppGrant, []string{schemas.AppGrant.Schema.SAID}
+	}
+	superseded := s.credentialsOfAnyHeldBy(agentAID, held, s.OwnerRootAID(), true)
+	grantSAID, err := s.issueAssetCredential(kind, agentAID, issuerRootAID, claims, expiry, by)
 	if err != nil {
 		return "", err
 	}

@@ -28,7 +28,7 @@ import (
 
 // ToSign is what signing an interaction grants, read from what it anchors.
 type ToSign struct {
-	// Kind is "machine", "ai_agent" or "registry".
+	// Kind is "machine", "ai_agent", "app" or "registry".
 	Kind string `json:"kind"`
 	// Issuer is the identity whose key log the interaction extends, at SN,
 	// after Prior.
@@ -39,7 +39,7 @@ type ToSign struct {
 	Credential string `json:"credential,omitempty"`
 	Registry   string `json:"registry,omitempty"`
 	// Holder is who the grant is to: the machine's identifier, or the AI
-	// agent's.
+	// agent's or the app's.
 	Holder string `json:"holder,omitempty"`
 	Name   string `json:"name,omitempty"`
 	// PublicKey and KeyFingerprint are the machine's key, and the short form
@@ -159,8 +159,13 @@ func grantShown(cred *keri.Credential, ixn *keri.Event) (*ToSign, error) {
 		out.Name = firstNonEmpty(str("label"), out.Name)
 		out.PublicKey, out.Grade, out.Signer = str("public_key"), str("grade"), str("signer")
 		out.KeyFingerprint = KeyFingerprint(out.PublicKey)
-	case schemas.AIAgentGrant.Schema.SAID:
+	case schemas.AIAgentGrant.Schema.SAID, schemas.AppGrant.Schema.SAID:
+		// An App Grant says what an AI Agent Grant says that an app has
+		// (capabilities and limits), so it is shown the same way, under its own kind.
 		out.Kind = "ai_agent"
+		if cred.SchemaSAID == schemas.AppGrant.Schema.SAID {
+			out.Kind = "app"
+		}
 		_ = json.Unmarshal(a["capabilities"], &out.Capabilities)
 		if rc, ok := a["resource_constraints"]; ok {
 			out.Limits = rc
