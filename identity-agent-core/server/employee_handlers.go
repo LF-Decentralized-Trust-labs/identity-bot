@@ -55,7 +55,12 @@ func (s *CoreServer) handleCreateEmployeeInvite(w http.ResponseWriter, r *http.R
 	// Resolve the target portal (asset) → its SiteAID + OOBI.
 	siteAID, siteOOBI := "", ""
 	if body.AssetID != "" {
-		if a, ok := s.assetHandler.Store.GetAsset(body.AssetID); ok {
+		a, ok, err := s.assetHandler.Store.GetAsset(body.AssetID)
+		if err != nil {
+			http.Error(w, "the asset store cannot be read: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if ok {
 			siteAID = a.PairwiseAID
 			siteOOBI = fmt.Sprintf("%s/public/oobi/%s", publicURL, a.PairwiseAID)
 		}

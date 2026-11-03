@@ -109,7 +109,11 @@ func (s *CoreServer) senderKeysAtReceipt(aid string, did *didcomm.DID) (trust, k
 // root's own history (keri-go). Read only: a key history the engine does not
 // already hold is a refusal, never a reason to make one.
 func (s *CoreServer) ownAgentAtArrival(aid string, did *didcomm.DID) (string, error) {
-	if s.findAgentAssetByAID(aid) == nil {
+	ref, err := s.lookupAgentAssetByAID(aid)
+	if err != nil {
+		return "", fmt.Errorf("cannot tell whether %s is one of this Identity Agent's AI agents: %w", aid, err)
+	}
+	if ref == nil {
 		return "", fmt.Errorf("%s is not one of this Identity Agent's AI agents", aid)
 	}
 	// Before keySetFor, which makes a keyset for an identifier it has none for.

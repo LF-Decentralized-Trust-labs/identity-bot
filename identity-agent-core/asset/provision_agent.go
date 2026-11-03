@@ -68,7 +68,11 @@ func (h *Handler) provisionDelegated(d delegatedAsset) (*Asset, error) {
 	// name cannot both pass the check before either is stored.
 	provisionMu.Lock()
 	defer provisionMu.Unlock()
-	if h.delegatedNameTaken(displayName) {
+	taken, err := h.delegatedNameTaken(displayName)
+	if err != nil {
+		return nil, err
+	}
+	if taken {
 		return nil, fmt.Errorf("%w: %q", d.errTaken, displayName)
 	}
 	// What the grant would say is checked before anything is minted or issued,
@@ -148,13 +152,19 @@ var provisionMu sync.Mutex
 
 // delegatedNameTaken reports whether any AI agent or app already has the name.
 // They share the engine's namespace, so a name is taken across both.
-func (h *Handler) delegatedNameTaken(name string) bool {
-	for _, a := range h.Store.ListAssets() {
+// An unreadable store is an error, never "not taken": answering false would let
+// a duplicate name through.
+func (h *Handler) delegatedNameTaken(name string) (bool, error) {
+	assets, err := h.Store.ListAssets()
+	if err != nil {
+		return false, err
+	}
+	for _, a := range assets {
 		if (a.AssetType == "ai_agent" || a.AssetType == "app") && SameAgentName(a.DisplayName, name) {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // SameAgentName is how two AI agent names are compared everywhere: trimmed,
@@ -168,7 +178,10 @@ func SameAgentName(a, b string) bool {
 // (role, prompt, brain, exposure) without touching its identity or grant. Returns
 // the updated asset, or an error if it isn't an ai_agent.
 func (h *Handler) UpdateAgentConfig(assetID string, cfg *AgentConfig) (*Asset, error) {
-	a, ok := h.Store.GetAsset(assetID)
+	a, ok, err := h.Store.GetAsset(assetID)
+	if err != nil {
+		return nil, err
+	}
 	if !ok {
 		return nil, fmt.Errorf("agent not found")
 	}
@@ -195,7 +208,10 @@ func (h *Handler) UpdateAgentConfig(assetID string, cfg *AgentConfig) (*Asset, e
 // grow: every caller adds, nobody subtracts, and after a while nobody can say why
 // an agent holds what it holds.
 func (h *Handler) SetAgentCapabilities(assetID string, caps []string) (*Asset, error) {
-	a, ok := h.Store.GetAsset(assetID)
+	a, ok, err := h.Store.GetAsset(assetID)
+	if err != nil {
+		return nil, err
+	}
 	if !ok {
 		return nil, fmt.Errorf("agent not found")
 	}
@@ -231,7 +247,10 @@ func NormaliseCapabilities(caps []string) []string {
 // SetAgentGrantConstraints replaces the argument limits recorded for an AI
 // agent's grant. The grant itself is re-issued by the caller.
 func (h *Handler) SetAgentGrantConstraints(assetID string, constraints map[string]interface{}) (*Asset, error) {
-	a, ok := h.Store.GetAsset(assetID)
+	a, ok, err := h.Store.GetAsset(assetID)
+	if err != nil {
+		return nil, err
+	}
 	if !ok {
 		return nil, fmt.Errorf("agent not found")
 	}
@@ -247,12 +266,16 @@ func (h *Handler) SetAgentGrantConstraints(assetID string, constraints map[strin
 }
 
 // ListAgents returns all ai_agent assets (owner-only surface; contains no secrets).
-func (h *Handler) ListAgents() []Asset {
+func (h *Handler) ListAgents() ([]Asset, error) {
+	assets, err := h.Store.ListAssets()
+	if err != nil {
+		return nil, err
+	}
 	out := make([]Asset, 0)
-	for _, a := range h.Store.ListAssets() {
+	for _, a := range assets {
 		if a.AssetType == "ai_agent" {
 			out = append(out, a)
 		}
 	}
-	return out
+	return out, nil
 }

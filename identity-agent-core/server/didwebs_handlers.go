@@ -127,7 +127,11 @@ func (s *CoreServer) publisherInput(r *http.Request, aid string) (didwebs.Publis
 	kelName := aid
 	var asAsset *asset.Asset
 	if s.assetHandler != nil {
-		for _, a := range s.assetHandler.Store.ListAssets() {
+		assets, err := s.assetHandler.Store.ListAssets()
+		if err != nil {
+			return didwebs.PublishInput{}, fmt.Errorf("the assets this agent holds cannot be read: %w", err)
+		}
+		for _, a := range assets {
 			if a.PairwiseAID == aid {
 				kelName = a.DisplayName
 				a := a

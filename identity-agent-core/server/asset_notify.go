@@ -162,7 +162,11 @@ func (s *CoreServer) identifyAssetFromSignature(r *http.Request) (*asset.Asset, 
 	// against the key recorded when it enrolled. The claim is only a lookup —
 	// nothing is trusted until the signature matches.
 	var found *asset.Asset
-	for _, a := range s.assetHandler.Store.ListAssets() {
+	assets, err := s.assetHandler.Store.ListAssets()
+	if err != nil {
+		return nil, fmt.Errorf("the machines this agent holds cannot be read: %w", err)
+	}
+	for _, a := range assets {
 		if a.PairwiseAID == claimedAID {
 			candidate := a
 			found = &candidate

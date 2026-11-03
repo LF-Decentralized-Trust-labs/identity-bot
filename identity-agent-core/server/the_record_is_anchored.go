@@ -290,7 +290,14 @@ func (s *CoreServer) anchorsItsRecord() bool {
 		return true
 	}
 	if s.assetHandler != nil {
-		for _, a := range s.assetHandler.Store.ListAssets() {
+		assets, err := s.assetHandler.Store.ListAssets()
+		if err != nil {
+			// Not knowing whether it holds AI agents is not knowing that it
+			// holds none: keep anchoring, as one that holds them must.
+			log.Printf("[identity-agent-core] cannot tell whether this agent holds AI agents or apps, the asset store is unreadable: %v", err)
+			return true
+		}
+		for _, a := range assets {
 			if a.AssetType == "ai_agent" || a.AssetType == "app" {
 				return true
 			}

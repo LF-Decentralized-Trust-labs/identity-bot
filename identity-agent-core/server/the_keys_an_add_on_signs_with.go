@@ -37,7 +37,11 @@ func (s *CoreServer) assetSigner(aid string) (coretypes.KeySigner, error) {
 	if s.assetHandler == nil || aid == "" {
 		return nil, fmt.Errorf("%s is not an asset held here", aid)
 	}
-	for _, a := range s.assetHandler.Store.ListAssets() {
+	assets, err := s.assetHandler.Store.ListAssets()
+	if err != nil {
+		return nil, fmt.Errorf("the assets held here cannot be read: %w", err)
+	}
+	for _, a := range assets {
 		if a.PairwiseAID == aid {
 			seed, err := asset.AssetSigningSeed(s.DataDir, a.SigningIndex)
 			if err != nil {
@@ -83,7 +87,11 @@ func (s *CoreServer) heldKeySet(aid string) (*didcomm.KeySet, error) {
 	if id, err := s.DataStore.GetIdentity(); err == nil && id != nil && id.AID == aid && aid != "" {
 		held = true
 	} else if s.assetHandler != nil && aid != "" {
-		for _, a := range s.assetHandler.Store.ListAssets() {
+		assets, lerr := s.assetHandler.Store.ListAssets()
+		if lerr != nil {
+			return nil, fmt.Errorf("the assets held here cannot be read: %w", lerr)
+		}
+		for _, a := range assets {
 			if a.PairwiseAID == aid {
 				held = true
 				break

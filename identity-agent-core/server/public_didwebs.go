@@ -583,7 +583,14 @@ func (s *CoreServer) handlePublicDidJSON(w http.ResponseWriter, r *http.Request)
 // is exactly the case it exists to serve.
 func (s *CoreServer) publicDidWebsPubKey(aid string) string {
 	if s.assetHandler != nil {
-		for _, a := range s.assetHandler.Store.ListAssets() {
+		assets, err := s.assetHandler.Store.ListAssets()
+		if err != nil {
+			// A store that cannot be read is a failure to answer, never a
+			// licence to fall through to the map of what strangers published.
+			log.Printf("[identity-agent-core] no key for %s, the asset store is unreadable: %v", aid, err)
+			return ""
+		}
+		for _, a := range assets {
 			if a.PairwiseAID != aid {
 				continue
 			}

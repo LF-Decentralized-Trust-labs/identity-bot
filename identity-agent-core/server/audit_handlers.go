@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -195,7 +196,14 @@ func (s *CoreServer) describeAID(aid string) (name, owner string) {
 	if s.assetHandler == nil || aid == "" {
 		return "", ""
 	}
-	for _, a := range s.assetHandler.Store.ListAssets() {
+	assets, err := s.assetHandler.Store.ListAssets()
+	if err != nil {
+		// A name is only a label on a report: say so in the log and leave the
+		// AID unnamed rather than fail the whole report.
+		log.Printf("[identity-agent-core] cannot name %s, the asset store is unreadable: %v", aid, err)
+		return "", ""
+	}
+	for _, a := range assets {
 		if a.PairwiseAID != aid {
 			continue
 		}

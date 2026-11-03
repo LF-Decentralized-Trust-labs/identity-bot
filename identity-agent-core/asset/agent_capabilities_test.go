@@ -92,7 +92,7 @@ func TestSetAgentCapabilitiesPersists(t *testing.T) {
 	if _, err := h.SetAgentCapabilities(id, []string{"x.y.z"}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
-	reloaded, ok := h.Store.GetAsset(id)
+	reloaded, ok, _ := h.Store.GetAsset(id)
 	if !ok {
 		t.Fatal("agent vanished after update")
 	}
