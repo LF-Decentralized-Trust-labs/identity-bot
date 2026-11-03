@@ -18,7 +18,13 @@ class RecoveredIdentity {
 
   /// The generation of this phrase's messaging keyset the log anchors last:
   /// the one the identity is reached on, whose seed the core was handed.
-  final int messagingGeneration;
+  /// Null where that keyset is not one this phrase derives: the core holds no
+  /// messaging keys, and they are replaced next.
+  final int? messagingGeneration;
+
+  /// Whether the identity's messaging keys must be replaced before it can be
+  /// reached.
+  bool get messagingKeysToReplace => messagingGeneration == null;
 }
 
 /// Recovery could not finish: what was found, and why it stops.
@@ -64,6 +70,11 @@ class RecoveringThisIdentity {
   /// Recovers [aid] from the phrase whose 64-byte BIP39 seed is [seed], its
   /// witnesses reached at [witnessAddresses], and, where given, the Identity
   /// Agent at [agentBase] that keeps its log.
+  ///
+  /// The device's own record is written only once the log is installed and
+  /// the messaging seed handed over: until then recovery works in a record of
+  /// its own, forgotten whatever happens, so a recovery that stops leaves
+  /// nothing behind and can be tried again.
   Future<RecoveredIdentity> recover(Uint8List seed,
       {required String aid,
       required Map<String, Uri> witnessAddresses,
@@ -72,53 +83,74 @@ class RecoveringThisIdentity {
     if (already != null && already.aid != aid) {
       throw RecoveryStopped('this device already holds ${already.aid}');
     }
-    await _held.holds(aid, witnessAddresses: witnessAddresses);
+    final working = TheIdentityThisDeviceHolds(name: 'identity_recovering');
+    await working.forget();
+    try {
+      await working.holds(aid, witnessAddresses: witnessAddresses);
 
-    // 1 and 2: the copies, combined; the key in force, from this phrase.
-    final state =
-        await TheKeyStateThisDeviceReads(_client, _km, agentBase, held: _held)
-            .readTheCopies(seed);
-    final log = state.log;
-    if (!state.corroborated || log == null) {
-      throw RecoveryStopped('too few of the identity\'s witnesses could be '
-          'read to corroborate its log');
-    }
-    if (state.movingToThisPhrase) {
-      throw RecoveryStopped(
-          'the identity is moving to this phrase and the move '
-          'is unfinished; it is finished from the device holding the old one');
-    }
-    final signed = log.signed;
-    if (signed == null || signed.length != log.events.length) {
-      throw RecoveryStopped('no copy that reaches the log\'s end came with its '
-          'events as signed');
-    }
+      // 1 and 2: the copies, combined; the key in force, from this phrase.
+      final state = await TheKeyStateThisDeviceReads(_client, _km, agentBase,
+              held: working)
+          .readTheCopies(seed);
+      final log = state.log;
+      if (!state.corroborated || log == null) {
+        throw RecoveryStopped('too few of the identity\'s witnesses could be '
+            'read to corroborate its log');
+      }
+      if (state.movingToThisPhrase) {
+        throw RecoveryStopped('the identity is moving to this phrase and the '
+            'move is unfinished; it is finished from the device holding the '
+            'old one');
+      }
+      final signed = log.signed;
+      if (signed == null || signed.length != log.events.length) {
+        throw RecoveryStopped('no copy that reaches the log\'s end came with '
+            'its events as signed');
+      }
 
-    // The messaging generation the log anchors last.
-    final anchored = [
-      for (final e in log.events) ...e.messagingKeysets,
-    ];
-    if (anchored.isEmpty) {
-      throw RecoveryStopped('the log anchors no messaging keyset');
-    }
-    final g = await _messagingGenerationOf(seed, anchored.last);
-    if (g == null) {
-      throw RecoveryStopped('the messaging keyset the log anchors last is not '
-          'one this phrase derives; it predates the fixed branch and is '
-          'migrated first (ADR-061 section 8)');
-    }
+      // The messaging generation the log anchors last, where it is one this
+      // phrase derives. An identity founded before the fixed branch, or one
+      // whose keyset an earlier phrase made, is recovered without messaging
+      // keys, and its keyset is replaced next (ADR-061 section 8).
+      final anchored = [for (final e in log.events) ...e.messagingKeysets];
+      final g = anchored.isEmpty
+          ? null
+          : await _messagingGenerationOf(seed, anchored.last);
 
-    // 3: installed, and the messaging seed handed over.
-    final res = await _client.post(Uri.parse('$_coreBase/api/identity/restore'),
-        headers: const {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'aid': aid,
-          'events': [for (final c in signed) c.toJson()]
-        }));
-    if (res.statusCode < 200 || res.statusCode > 299) {
-      throw KeyEventRefused(
-          'installing the identity', res.statusCode, _code(res.body), res.body);
+      // 3: installed, and the messaging seed handed over.
+      final res =
+          await _client.post(Uri.parse('$_coreBase/api/identity/restore'),
+              headers: const {'Content-Type': 'application/json'},
+              body: jsonEncode({
+                'aid': aid,
+                'events': [for (final c in signed) c.toJson()]
+              }));
+      if (res.statusCode < 200 || res.statusCode > 299) {
+        throw KeyEventRefused('installing the identity', res.statusCode,
+            _code(res.body), res.body);
+      }
+      if (g != null) await _handOverMessagingSeed(seed, g, anchored.last);
+
+      // 4: the device's record starts from the log's tip.
+      await _held.holds(aid, witnessAddresses: witnessAddresses);
+      await _held.readFromCopies(
+          aid: aid,
+          establishment: state.establishment,
+          key: state.keyInForce,
+          generation: state.generation,
+          tip: state.tip,
+          witnesses: state.witnesses.witnesses,
+          toad: state.witnesses.toad);
+      return RecoveredIdentity(state, g);
+    } finally {
+      await working.forget();
     }
+  }
+
+  /// Hands this device's core the seed of messaging generation [g], and
+  /// checks the keyset it now holds is [anchored].
+  Future<void> _handOverMessagingSeed(
+      Uint8List seed, int g, Map<String, dynamic> anchored) async {
     final messagingSeed = KeyManager.slip10Ed25519(seed, KeyPaths.messaging(g));
     try {
       final m = await _client.post(
@@ -133,12 +165,14 @@ class RecoveringThisIdentity {
         throw KeyEventRefused(
             'the messaging keys', m.statusCode, _code(m.body), m.body);
       }
+      final held = (jsonDecode(m.body) as Map)['anchor'];
+      if (_canonical(held) != _canonical(anchored)) {
+        throw RecoveryStopped('the core holds messaging keys other than the '
+            'ones the log anchors');
+      }
     } finally {
       messagingSeed.fillRange(0, messagingSeed.length, 0);
     }
-
-    // 4: readTheCopies has started this device's record from the tip.
-    return RecoveredIdentity(state, g);
   }
 
   /// The generation of this phrase's messaging keyset that is [anchor], or

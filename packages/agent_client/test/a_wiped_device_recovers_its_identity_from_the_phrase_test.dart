@@ -198,6 +198,8 @@ void main() {
             .recover(seed, aid: founded.aid, witnessAddresses: addresses()),
         throwsA(isA<TheLogHasTwoHistories>().having((e) => e.sn, 'place', 1)));
     expect(await heldBy(after), isNull);
+    expect(await TheIdentityThisDeviceHolds().read(), isNull,
+        reason: 'a recovery that stops leaves the device holding nothing');
   });
 
   test(
@@ -214,5 +216,72 @@ void main() {
             agentBase: before.base),
         throwsA(anyOf(isA<TheWitnessesDoNotSay>(), isA<RecoveryStopped>())));
     expect(await heldBy(after), isNull);
+    expect(await TheIdentityThisDeviceHolds().read(), isNull);
+
+    // Nothing was left behind, so it is tried again once the witnesses can
+    // be read, and finishes.
+    w2.offline = false;
+    w3.offline = false;
+    final recovered = await RecoveringThisIdentity(after.client, after.base, km)
+        .recover(seed,
+            aid: used.aid,
+            witnessAddresses: addresses(),
+            agentBase: before.base);
+    expect(recovered.state.tip.digest, used.ixn.digest);
+  });
+
+  /// Founds an identity on [before] revealing this phrase's key 0 and
+  /// committing to [next], anchoring nothing, witnessed by all three.
+  Future<String> aFounding(List<String> next) async {
+    final icp = await preparedAndSigned(before.client, before.base, seed, 0, {
+      't': 'icp',
+      'k': [KeyManager.keyAt(seed, 0).publicKeyEncoded],
+      'kt': '1',
+      'n': next,
+      'nt': '1',
+      'a': [],
+      'b': [w1.aid, w2.aid, w3.aid],
+      'bt': '2',
+    });
+    await commitTo(before.base, icp.rawB64, icp.sigs);
+    final ev = await km.parseEvent(base64Decode(icp.rawB64));
+    await witnesses.receipt(
+        aid: ev.i,
+        sn: 0,
+        digest: ev.d,
+        bytesB64: icp.rawB64,
+        sigs: icp.sigs,
+        set: WitnessSet([w1.aid, w2.aid, w3.aid], 2));
+    return ev.i;
+  }
+
+  test(
+      'an identity whose keys in force commit to keys this phrase does not '
+      'derive is not recovered with it', () async {
+    final stranger = Bip39.mnemonicToSeed(
+        'zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong'.split(' '));
+    final aid = await aFounding([
+      await km.nextKeyDigest(KeyManager.keyAt(stranger, 1).publicKeyEncoded)
+    ]);
+    await expectLater(
+        RecoveringThisIdentity(after.client, after.base, km)
+            .recover(seed, aid: aid, witnessAddresses: addresses()),
+        throwsA(isA<TheKeyInForceIsNotThisPhrases>()));
+    expect(await heldBy(after), isNull);
+  });
+
+  test(
+      'an identity that anchors no messaging keyset of this phrase is '
+      'recovered, and its messaging keys are to be replaced', () async {
+    final pq = KeyManager.slip10Ed25519(seed, KeyPaths.postQuantum(0));
+    final aid = await aFounding([
+      await km.nextKeyDigest(KeyManager.keyAt(seed, 1).publicKeyEncoded),
+      (await km.postQuantumNext(pq)).digest
+    ]);
+    final recovered = await RecoveringThisIdentity(after.client, after.base, km)
+        .recover(seed, aid: aid, witnessAddresses: addresses());
+    expect(recovered.messagingKeysToReplace, isTrue);
+    expect(await heldBy(after), aid);
+    expect((await TheIdentityThisDeviceHolds().read())!.generation, 0);
   });
 }

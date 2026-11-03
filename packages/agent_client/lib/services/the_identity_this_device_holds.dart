@@ -63,15 +63,18 @@ class HeldIdentity {
 /// witnesses are read when this cannot answer: on first use, after recovery,
 /// and when a signature is refused as stale.
 class TheIdentityThisDeviceHolds {
-  TheIdentityThisDeviceHolds({FlutterSecureStorage? storage})
-      : _storage = storage ??
+  /// [name] keeps a record apart from the device's own, as recovery does
+  /// while it has not finished.
+  TheIdentityThisDeviceHolds({FlutterSecureStorage? storage, String? name})
+      : _name = name ?? 'identity_held',
+        _storage = storage ??
             const FlutterSecureStorage(
               aOptions: AndroidOptions(encryptedSharedPreferences: true),
               mOptions: MacOsOptions(useDataProtectionKeyChain: false),
             );
 
   final FlutterSecureStorage _storage;
-  static const _name = 'identity_held';
+  final String _name;
 
   static Future<void> _tail = Future.value();
   static Future<T> _serialised<T>(Future<T> Function() op) {
@@ -174,6 +177,12 @@ class TheIdentityThisDeviceHolds {
         j['set'] = witnesses;
         j['toad'] = toad;
       });
+
+  /// Forgets everything this record holds.
+  Future<void> forget() async {
+    final key = await ProfileScope.key(_name);
+    await _serialised(() => _storage.delete(key: key));
+  }
 
   /// Forgets where the log ends, so the next read asks the witnesses: after a
   /// signature is refused as stale, or a commit whose outcome is unknown. The

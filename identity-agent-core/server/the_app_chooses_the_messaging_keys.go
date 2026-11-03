@@ -64,15 +64,15 @@ func (s *CoreServer) handleMessagingSeed(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "The messaging keys could not be anchored", err.Error())
 		return
 	}
-	// An identity already here takes only the keyset its founding anchors,
+	// An identity already here takes only the keyset its log anchors last,
 	// the one every verifier reads (an identity restored here, say). Before
 	// founding it is held aside until the founding that anchors it is
 	// committed. No seed handed over here stands in for keys the identity's
-	// founding does not commit to.
+	// log does not commit to.
 	label, filed := pendingKeySetLabel(anchor), "pending"
 	if own, _ := s.DataStore.GetIdentity(); own != nil {
-		if !s.anchoredAtFounding(own.AID, anchor) {
-			writeError(w, http.StatusConflict, "These are not the messaging keys this identity's founding anchors",
+		if !s.anchoredLast(own.AID, anchor) {
+			writeError(w, http.StatusConflict, "These are not the messaging keys this identity's log anchors last",
 				"replacing an identity's messaging keys is not done here yet")
 			return
 		}
@@ -179,24 +179,31 @@ func (s *CoreServer) refuseAnUnheldKeySet(w http.ResponseWriter, raw []byte, aid
 	return false
 }
 
-// anchoredAtFounding reports whether aid's stored founding anchors this
-// keyset: the anchor every verifier reads an identity's messaging keys from.
-func (s *CoreServer) anchoredAtFounding(aid string, anchor map[string]interface{}) bool {
+// anchoredLast reports whether anchor is the messaging keyset aid's log
+// anchors last: the one the identity is reached on (ADR-061 section 9). For a
+// newly founded identity that is its founding's; for one recovered after its
+// keys were replaced, the replacement's.
+func (s *CoreServer) anchoredLast(aid string, anchor map[string]interface{}) bool {
 	events, err := s.DataStore.GetEvents(aid)
 	if err != nil || len(events) == 0 {
 		return false
 	}
-	raw, err := base64.StdEncoding.DecodeString(events[0].RawBytesB64)
-	if err != nil {
+	var last map[string]interface{}
+	for _, ev := range events {
+		raw, err := base64.StdEncoding.DecodeString(ev.RawBytesB64)
+		if err != nil {
+			return false
+		}
+		if found := messagingAnchorsIn(raw); len(found) > 0 {
+			last = found[len(found)-1]
+		}
+	}
+	if last == nil {
 		return false
 	}
 	want, _ := json.Marshal(anchor)
-	for _, a := range messagingAnchorsIn(raw) {
-		if got, _ := json.Marshal(a); string(got) == string(want) {
-			return true
-		}
-	}
-	return false
+	got, _ := json.Marshal(last)
+	return string(got) == string(want)
 }
 
 // fileCommittedKeySet files a keyset held aside under the identity whose

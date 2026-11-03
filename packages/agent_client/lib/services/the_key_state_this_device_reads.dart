@@ -249,6 +249,27 @@ class TheKeyStateThisDeviceReads {
       g = 0;
       moving = true;
     }
+    // The keys in force commit to this phrase's next keys, so it can rotate
+    // the identity (ADR-061 section 10, step 2).
+    if (!moving) {
+      final pq = KeyManager.slip10Ed25519(seed, KeyPaths.postQuantum(g));
+      final List<String> next;
+      try {
+        next = [
+          await _km
+              .nextKeyDigest(KeyManager.keyAt(seed, g + 1).publicKeyEncoded),
+          (await _km.postQuantumNext(pq)).digest,
+        ];
+      } finally {
+        pq.fillRange(0, pq.length, 0);
+      }
+      for (var i = 0; i < e.next.length && i < next.length; i++) {
+        if (e.next[i] != next[i]) {
+          throw TheKeyInForceIsNotThisPhrases(aid, e.sn, key);
+        }
+      }
+      if (e.next.isEmpty) throw TheKeyInForceIsNotThisPhrases(aid, e.sn, key);
+    }
     final tip = read.tip;
     final state = VerifiedKeyState(
         aid: aid,
