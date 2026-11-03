@@ -62,8 +62,9 @@ class TheAgentThisAppTalksTo {
   /// stranger this app looks up.
   ///
   /// It never falls back to the local core's own answer. Where nothing can
-  /// sign, the request goes unsigned and the agent refuses it — a refusal says
-  /// what to do next, and a screen full of somebody else's data does not.
+  /// sign, a controller's request is refused before it leaves this computer —
+  /// a clear error says what to do next, and a screen full of somebody else's
+  /// data does not.
   ///
   /// [inner] replaces the transport underneath, never the proving. A caller can
   /// stand in for the network — a test, a client with its own timeouts — and
@@ -81,7 +82,7 @@ class TheAgentThisAppTalksTo {
           agentOrigin: to,
           // Always this machine, never the agent: the key that signs lives here
           // and the agent cannot reach it.
-          localCoreOrigin: AgentConfig.coreBaseUrl,
+          localCoreOrigin: () => AgentConfig.coreBaseUrl,
           // Named in every signature, so a copy is refused by any other
           // Identity Agent. Unknown leaves it to the core, which was told.
           agentAid: AgentConfig.agentAid.isEmpty ? null : AgentConfig.agentAid,

@@ -108,7 +108,7 @@ class AskingToActForAnIdentity {
       agentOrigin: agentOrigin,
       // The key that signs is in THIS machine's hardware, and the agent cannot
       // reach it, so the signing happens next door and this asks for it.
-      localCoreOrigin: _localCore,
+      localCoreOrigin: () => _localCore,
       // Naming nobody, explicitly: this is how the identifier is learned, and
       // the core must not fill in whichever Identity Agent it was told about
       // before, which would make this one refuse it.
