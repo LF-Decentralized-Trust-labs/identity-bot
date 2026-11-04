@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import '../crypto/keys.dart';
+import 'the_key_events_this_device_makes.dart' show KeyPaths;
 import 'key_math.dart';
 import 'the_event_this_device_expects.dart';
 
@@ -9,10 +10,15 @@ import 'the_event_this_device_expects.dart';
 /// made it: the [ExpectedEvent] a stored, marked event must be before it is
 /// signed late (ADR-061 section 3, "the signer").
 ///
-/// Earlier versions made a founding or rotation that commits to the next
-/// classical key alone, with one key at a threshold of one, no post-quantum
-/// commitment and no anchor; a rotation changes no witness. The keys and
-/// commitments come from [seed]; where the event sits and what it follows from
+/// Earlier versions made a rotation that commits to the next classical key
+/// alone, with one key at a threshold of one, no post-quantum commitment and no
+/// anchor, and changes no witness. Before 2026-10-31 /api/inception made a
+/// founding that also anchored the messaging keyset (from 2026-08-09) and
+/// committed to the post-quantum key (from 2026-08-18) whenever the key was one
+/// the Identity Agent derived itself, and stored it unsigned: both are
+/// recomputed from [seed] and accepted exactly
+/// ([theStoredFoundingThisPhraseWouldHaveMade]). The keys and commitments come
+/// from [seed]; where the event sits and what it follows from
 /// the key state this device trusts ([prior] is the digest of the event it
 /// follows, [toad] the witness threshold in force), never from fields or earlier
 /// bytes the core reports beside the event. What the phrase cannot
@@ -33,8 +39,8 @@ import 'the_event_this_device_expects.dart';
 /// only where the core's answer never arrived.
 ///
 /// [generation] is the key this event reveals (0 for the founding).
-/// [foundingAnchors] are the seals a founding was asked to carry (the owner
-/// seal when it was made for one).
+/// [ownerAid] is the owner the person named for the identity, whose seal a
+/// founding made for one carries.
 Future<ExpectedEvent> theStoredEventThisPhraseWouldHaveMade(
   KeyMath km,
   Uint8List seed, {
@@ -46,7 +52,7 @@ Future<ExpectedEvent> theStoredEventThisPhraseWouldHaveMade(
   required String prior,
   required int toad,
   required int generation,
-  List<Object?> foundingAnchors = const [],
+  String? ownerAid,
   List<Object?>? ixnAnchors,
 }) async {
   Future<List<String>> next() async =>
@@ -54,10 +60,8 @@ Future<ExpectedEvent> theStoredEventThisPhraseWouldHaveMade(
   ExpectedEvent known(ExpectedEvent e) => digest == null ? e : e.withDigest(digest);
   switch (t) {
     case 'icp':
-      return known(await theStoredFoundingThisKeyWouldHaveMade(km, stored,
-          key: KeyManager.publicKeyAt(seed, 0),
-          next: KeyManager.publicKeyAt(seed, 1),
-          anchors: foundingAnchors));
+      return known(await theStoredFoundingThisPhraseWouldHaveMade(km, seed, stored,
+          ownerAid: ownerAid));
     case 'rot':
       return known(ExpectedEvent.rotation(
           aid: aid,
@@ -84,18 +88,81 @@ Future<ExpectedEvent> theStoredEventThisPhraseWouldHaveMade(
   }
 }
 
+/// The branches the Identity Agent allocated a founding's messaging keys on
+/// before 2026-10-31, as the first allocation of the `messaging-keys` pool: its
+/// base, 5000001 (PoolBase), and 1 in the days before the pool had a base
+/// (3869b873, until it was given one).
+const legacyMessagingBranches = [5000001, 1];
+
+/// The founding an earlier version stored, as this phrase would have made it.
+///
+/// Three shapes are accepted, each exactly, and nothing else:
+///  - the plain one: key 0, a commitment to key 1, the owner seal if the person
+///    named an owner ([ownerAid]), nothing more;
+///  - what /api/inception made from 2026-08-09 (3869b873) for a key it derived
+///    itself: the same, with the owner seal followed by the anchor of the
+///    messaging keyset on the branch it allocated ([legacyMessagingBranches]);
+///  - what it made from 2026-08-18 (f2bd7b7d): that, committing also to the
+///    post-quantum key of KeyPaths.postQuantum(0) in `n`.
+/// Every part is recomputed from [seed] and the stored event must hold exactly
+/// that: the messaging keyset on the branch whose anchor it carries is derived
+/// from the phrase, so a keyset the core made itself matches none. Witnesses
+/// and their threshold are the core's designation (WitnessesForNewIdentity) and
+/// are read from [stored].
+Future<ExpectedEvent> theStoredFoundingThisPhraseWouldHaveMade(
+    KeyMath km, Uint8List seed, ParsedEvent stored,
+    {String? ownerAid}) async {
+  final owner = [
+    if ((ownerAid ?? '').isNotEmpty) {'i': ownerAid, 's': '0', 'd': ownerAid}
+  ];
+  final a = stored['a'];
+  final n = stored['n'];
+  final key = KeyManager.publicKeyAt(seed, 0);
+  final next = KeyManager.publicKeyAt(seed, 1);
+  Future<ExpectedEvent> plain(List<Object?> anchors, List<String> alsoCommitTo) =>
+      theStoredFoundingThisKeyWouldHaveMade(km, stored,
+          key: key, next: next, anchors: anchors, alsoCommitTo: alsoCommitTo);
+  // A founding with seals beyond the owner's carries the messaging keyset.
+  if (a is! List || a.length <= owner.length) return plain(owner, const []);
+  final alsoCommitTo = <String>[];
+  if (n is List && n.length == 2) {
+    final pq = KeyManager.slip10Ed25519(seed, KeyPaths.postQuantum(0));
+    try {
+      alsoCommitTo.add((await km.postQuantumNext(pq)).digest);
+    } finally {
+      pq.fillRange(0, pq.length, 0);
+    }
+  }
+  ExpectedEvent? first;
+  for (final branch in legacyMessagingBranches) {
+    final child = KeyManager.slip10Ed25519(
+        seed, KeyPaths.messagingOnAllocatedBranch(branch));
+    final Map<String, dynamic> keyset;
+    try {
+      keyset = await km.messagingKeySet(child);
+    } finally {
+      child.fillRange(0, child.length, 0);
+    }
+    final candidate = await plain([...owner, keyset], alsoCommitTo);
+    if (candidate.differenceFrom(stored) == null) return candidate;
+    first ??= candidate;
+  }
+  return first!;
+}
+
 /// The founding an earlier version stored, as the key [key] committing to
-/// [next] alone would have made it: one key, one commitment, [anchors] and the
-/// witnesses the core chose, read from [stored].
+/// [next] alone (and [alsoCommitTo]) would have made it: one key, [anchors] and
+/// the witnesses the core chose, read from [stored].
 Future<ExpectedEvent> theStoredFoundingThisKeyWouldHaveMade(
     KeyMath km, ParsedEvent stored,
     {required String key,
     required String next,
-    List<Object?> anchors = const []}) async {
+    List<Object?> anchors = const [],
+    List<String> alsoCommitTo = const []}) async {
   final b = stored['b'];
   return ExpectedEvent.founding(
       keys: [key],
-      next: [await km.nextKeyDigest(next)],
+      next: [await km.nextKeyDigest(next), ...alsoCommitTo],
       witnesses: b is List ? [for (final w in b) '$w'] : const [],
       toad: int.tryParse('${stored['bt']}', radix: 16) ?? -1,
       anchors: anchors);

@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:agent_client/crypto/bip39.dart';
 import 'package:agent_client/crypto/keys.dart';
@@ -6,6 +8,7 @@ import 'package:agent_client/services/key_math.dart';
 import 'package:agent_client/services/the_event_this_device_expects.dart';
 import 'package:agent_client/services/the_events_this_device_asked_for.dart';
 import 'package:agent_client/services/the_identity_this_device_holds.dart';
+import 'package:agent_client/services/the_key_events_this_device_makes.dart' show KeyPaths;
 import 'package:agent_client/services/the_key_in_force.dart';
 import 'package:agent_client/services/the_key_state_this_device_reads.dart';
 import 'package:agent_client/services/the_witnesses_of_this_devices_events.dart';
@@ -57,10 +60,12 @@ void main() {
   var rawsOfTheLast = <String>[];
 
   Future<(ACore, String, List<(int, String)>)> storedBy(
-      List<Map<String, Object?>> bodies, List<int> unsigned) async {
+      List<Map<String, Object?>> bodies, List<int> unsigned,
+      {Future<void> Function(ACore core)? readyCore}) async {
     rawsOfTheLast = [];
     var core = await anotherCore(bin, km);
     cores.add(core);
+    await readyCore?.call(core);
     var aid = '';
     final placed = <(int, String)>[];
     var gen = 0;
@@ -260,6 +265,146 @@ void main() {
     // Shown to the person, who approves exactly this event.
     await keysOf(core).signApprovedEvent(seed, sequenceNumber: '1', digest: placed[1].$2);
     expect(await signedInTheCore(core, aid), [true, true]);
+  });
+
+  // A founding built the way /api/inception built it before 2026-10-31 for a key
+  // it derived itself. The core is handed the messaging seed of the branch it
+  // allocated, as it held it then, and returns the keyset anchor the Go
+  // derivation makes of it; the post-quantum digest is the one that handler
+  // computed (test/support/legacy_founding_golden.json).
+  final golden = jsonDecode(File('test/support/legacy_founding_golden.json').readAsStringSync())
+      as Map<String, dynamic>;
+  final owner = 'E${'O' * 43}';
+
+  String hex(List<int> b) => [for (final x in b) x.toRadixString(16).padLeft(2, '0')].join();
+
+  /// The messaging seed of [branch] handed to [core], and the anchor it answers.
+  Future<Map<String, dynamic>> handedTheMessagingSeed(ACore core, int branch,
+      {Uint8List? phrase}) async {
+    final child = KeyManager.slip10Ed25519(
+        phrase ?? seed, KeyPaths.messagingOnAllocatedBranch(branch));
+    final res = await core.client.post(
+        Uri.parse('${core.base}/api/keystore/messaging-seed'),
+        headers: const {'Content-Type': 'application/json'},
+        body: jsonEncode({'seed_hex': hex(child)}));
+    expect(res.statusCode, 200, reason: res.body);
+    return (jsonDecode(res.body) as Map)['anchor'] as Map<String, dynamic>;
+  }
+
+  /// The stored founding of /api/inception, asked for as an earlier version
+  /// asked, left unsigned.
+  Future<(ACore, String, List<(int, String)>)> storedByInception(
+      {int branch = 5000001,
+      bool withPostQuantum = true,
+      bool withOwner = true,
+      String? postQuantum,
+      Uint8List? messagingPhrase,
+      List<Object?> extraSeals = const []}) async {
+    ACore? core;
+    Map<String, dynamic>? anchor;
+    final stored = await storedBy([
+      {
+        ...founding(),
+        'n': [await digest(1), if (withPostQuantum) postQuantum ?? golden['post_quantum_digest']],
+        'a': <Object?>[
+          if (withOwner) {'i': owner, 's': '0', 'd': owner},
+          // A throwaway core derives the anchor; the stored one is handed the same seed.
+          (anchor = await (() async {
+            final other = await anotherCore(bin, km);
+            cores.add(other);
+            return handedTheMessagingSeed(other, branch, phrase: messagingPhrase);
+          })()),
+          ...extraSeals,
+        ],
+      }
+    ], [0], readyCore: (c) async {
+      core = c;
+      await handedTheMessagingSeed(c, branch, phrase: messagingPhrase);
+    });
+    expect(anchor, isNotNull);
+    expect(core, isNotNull);
+    return stored;
+  }
+
+  Future<void> askedForTheFounding() async {
+    await TheEventsThisDeviceAskedFor()
+        .asking(t: 'icp', expectedSn: 0, asked: {'key': key(0), 'next': key(1)});
+  }
+
+  test('what the Go derivation made of the phrase is what this package computes', () async {
+    final pq = KeyManager.slip10Ed25519(seed, KeyPaths.postQuantum(0));
+    expect((await km.postQuantumNext(pq)).digest, golden['post_quantum_digest']);
+    for (final branch in [5000001, 1]) {
+      final child = KeyManager.slip10Ed25519(seed, KeyPaths.messagingOnAllocatedBranch(branch));
+      expect(jsonEncode(await km.messagingKeySet(child)),
+          jsonEncode(golden['messaging_anchor_at_$branch']),
+          reason: 'branch $branch');
+    }
+  });
+
+  test('a founding as /api/inception made it from 2026-08-18 is signed late, and the core takes the signature',
+      () async {
+    final (core, aid, _) = await storedByInception();
+    await askedForTheFounding();
+    expect(await signedInTheCore(core, aid), [false]);
+
+    await keysOf(core).finishStrandedEvents(seed, ownerAid: owner);
+    expect(await signedInTheCore(core, aid), [true]);
+  });
+
+  test('a founding as /api/inception made it from 2026-08-09, before the post-quantum commitment and on the first branch, is signed late',
+      () async {
+    final (core, aid, _) = await storedByInception(
+        branch: 1, withPostQuantum: false, withOwner: false);
+    await askedForTheFounding();
+
+    await keysOf(core).finishStrandedEvents(seed);
+    expect(await signedInTheCore(core, aid), [true]);
+  });
+
+  test('a legacy founding whose messaging keys the phrase does not derive is not signed',
+      () async {
+    // The core made the keys itself, from a seed that is not this phrase's.
+    final stranger = Bip39.mnemonicToSeed(
+        'zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong'.split(' '));
+    final (core, aid, _) = await storedByInception(messagingPhrase: stranger);
+    await askedForTheFounding();
+
+    await expectLater(
+        keysOf(core).finishStrandedEvents(seed, ownerAid: owner),
+        throwsA(isA<AStoredEventIsNotTheOneExpected>()
+            .having((e) => e.difference, 'difference', contains('"a"'))));
+    expect(await signedInTheCore(core, aid), [false]);
+  });
+
+  test('a legacy founding committing to a post-quantum key the phrase does not derive is not signed',
+      () async {
+    final (core, aid, _) = await storedByInception(postQuantum: 'E${'P' * 43}');
+    await askedForTheFounding();
+
+    await expectLater(
+        keysOf(core).finishStrandedEvents(seed, ownerAid: owner),
+        throwsA(isA<AStoredEventIsNotTheOneExpected>()
+            .having((e) => e.difference, 'difference', contains('"n"'))));
+    expect(await signedInTheCore(core, aid), [false]);
+  });
+
+  test('a legacy founding with a seal beyond the owner and the keyset, or an owner the person did not name, is not signed',
+      () async {
+    final extra = 'E${'S' * 43}';
+    final (core, aid, _) = await storedByInception(extraSeals: [
+      {'i': extra, 's': '0', 'd': extra}
+    ]);
+    await askedForTheFounding();
+    await expectLater(keysOf(core).finishStrandedEvents(seed, ownerAid: owner),
+        throwsA(isA<AStoredEventIsNotTheOneExpected>()));
+    expect(await signedInTheCore(core, aid), [false]);
+
+    final (core2, aid2, _) = await storedByInception();
+    await expectLater(keysOf(core2).finishStrandedEvents(seed),
+        throwsA(isA<AStoredEventIsNotTheOneExpected>()),
+        reason: 'the seal of an owner nobody named');
+    expect(await signedInTheCore(core2, aid2), [false]);
   });
 
   test('bytes whose digest is not the one this device recorded are not signed',

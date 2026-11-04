@@ -201,6 +201,12 @@ class KeyPaths {
 
   /// The messaging keyset of generation [g]: m/44'/0'/0'/7000002'/g'.
   static List<int> messaging(int g) => [_h + 44, _h, _h, _h + 7000002, _h + g];
+
+  /// The messaging keyset of a branch the Identity Agent allocated for it
+  /// before 2026-10-31: m/44'/0'/0'/[branch]'/0'. Only to recognise a founding
+  /// made then; a new one uses [messaging].
+  static List<int> messagingOnAllocatedBranch(int branch) =>
+      [_h + 44, _h, _h, _h + branch, _h];
 }
 
 /// How this device makes a key event of an identity whose keys it holds:

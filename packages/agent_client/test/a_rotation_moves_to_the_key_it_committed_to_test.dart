@@ -1353,8 +1353,11 @@ void main() {
     expect(core.kel, isEmpty);
   });
 
+  // The keys here are not derived from the phrase. A founding whose
+  // post-quantum commitment and messaging keyset the phrase does compute is
+  // finished (a_stored_event_is_signed_only_if_it_is_the_one_this_phrase_makes_test).
   test(
-      'a stranded founding carrying a post-quantum commitment and messaging keys the core added is never finished',
+      'a stranded founding carrying a post-quantum commitment and messaging keys that are not this phrase\'s is never finished',
       () async {
     await strandedByAnEarlierVersion(
         core,

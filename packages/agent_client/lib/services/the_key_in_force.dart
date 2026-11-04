@@ -169,7 +169,7 @@ class TheKeyInForce {
   ///    ([TheKeyStateCannotBeReadToSignLate]);
   ///
   /// A core that does not say which events are signed is left as it is.
-  Future<KeyState> finishStrandedEvents(Uint8List seed) async {
+  Future<KeyState> finishStrandedEvents(Uint8List seed, {String? ownerAid}) async {
     final checked = await _checkedLog(seed);
     final log = checked.log;
     final signed = log.signed;
@@ -191,6 +191,7 @@ class TheKeyInForce {
           // The place and digest this device recorded, not the bytes'.
           sn: int.parse('${request?['s'] ?? request?['expected']}', radix: 16),
           digest: request?['d'] as String?,
+          ownerAid: ownerAid,
           ixnAnchors: wanted is List ? List<Object?>.from(wanted) : null);
       await _asked.forgetId(scope, asked);
     }
@@ -207,7 +208,7 @@ class TheKeyInForce {
   /// back as an [AStoredEventIsNotTheOneExpected] carrying what was stored and
   /// what was expected, for the person to see.
   Future<_Trusted> _checkAndSign(Uint8List seed, _Checked checked, int at, _Trusted? running,
-      {required String t, required int sn, required String? digest, List<Object?>? ixnAnchors}) async {
+      {required String t, required int sn, required String? digest, String? ownerAid, List<Object?>? ixnAnchors}) async {
     final km = _keyMath;
     if (km == null) {
       throw StateError('this app has not given the client the core\'s key '
@@ -236,6 +237,7 @@ class TheKeyInForce {
           prior: trusted?.tip.digest ?? '',
           toad: trusted?.witnesses.toad ?? -1,
           generation: checked.keyAt[at],
+          ownerAid: ownerAid,
           ixnAnchors: ixnAnchors);
     } on AStoredEventIsNotTheOneExpected {
       rethrow;
@@ -327,7 +329,8 @@ class TheKeyInForce {
   /// would ask for, committing to its own next key. What it permits is an
   /// event this device has no record of asking for: one made on another of
   /// the person's devices, say, or an interaction they recognise.
-  Future<void> signApprovedEvent(Uint8List seed, {required String sequenceNumber, required String digest}) async {
+  Future<void> signApprovedEvent(Uint8List seed,
+      {required String sequenceNumber, required String digest, String? ownerAid}) async {
     final checked = await _checkedLog(seed);
     final log = checked.log;
     for (var at = 0; at < log.events.length; at++) {
@@ -343,6 +346,7 @@ class TheKeyInForce {
           t: '${event['t']}',
           sn: int.parse(sequenceNumber, radix: 16),
           digest: digest,
+          ownerAid: ownerAid,
           ixnAnchors: seals is List ? List<Object?>.from(seals) : const []);
       return;
     }
