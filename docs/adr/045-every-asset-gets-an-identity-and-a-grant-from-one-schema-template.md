@@ -414,7 +414,10 @@ verifies:
 5. the new AI agent is no more powerful than its creator. It holds only capabilities the
    creator's grant holds, and for every argument the creator's grant limits to some values,
    the new grant limits it to some of those; a limit the creator has and the new grant leaves
-   off is wider, and refused. An AI agent cannot create a more powerful one.
+   off is wider, and refused. A list of values that is empty is refused in either grant, as
+   the schema refuses it. Where the creator's grant has a `valid_until`, the new grant has one
+   too, and it is no later: an AI agent cannot outlive its creator. An AI agent cannot create
+   a more powerful one.
 
 **What is not verified.** The core does not enforce any count or resource limit on how many
 AI agents a creator may create, or how much they may use, even where the creator's grant

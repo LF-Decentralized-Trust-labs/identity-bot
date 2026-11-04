@@ -38,6 +38,11 @@ type creation struct {
 	// creator's grant and the new one, when set.
 	createdCaps                  []string
 	creatorLimits, createdLimits map[string]map[string][]string
+	// creatorUntil and createdUntil are the valid_until of the creator's grant
+	// and the new one, when set. about is the AI agent a request to change an
+	// existing one's grant is about.
+	creatorUntil, createdUntil string
+	about                      string
 }
 
 const (
@@ -133,6 +138,9 @@ func aCreation(t *testing.T, name string, change func(*creation)) CreationCase {
 	if c.creatorLimits != nil {
 		creatorAttrs["resource_constraints"] = c.creatorLimits
 	}
+	if c.creatorUntil != "" {
+		creatorAttrs["valid_until"] = c.creatorUntil
+	}
 	grant, grantSAID := w.build(c.grantSchema, vectorCreator, grantAt, creatorAttrs, nil)
 	body, bodySAID := w.build(schemas.AIAgentBody.Schema.SAID, vectorCreator, bodyAt, map[string]interface{}{
 		"asset_type": "ai_agent", "name": "Orchestrator", "host": host, "verkey": verkey,
@@ -171,6 +179,12 @@ func aCreation(t *testing.T, name string, change func(*creation)) CreationCase {
 		"asset_type": "ai_agent", "name": "Worker", "capabilities": c.createdCaps, "request": request}
 	if c.createdLimits != nil {
 		createdAttrs["resource_constraints"] = c.createdLimits
+	}
+	if c.createdUntil != "" {
+		createdAttrs["valid_until"] = c.createdUntil
+	}
+	if c.about != "" {
+		createdAttrs["about"] = c.about
 	}
 	created, _ := w.build(c.createdSchema, c.createdHolder, base.Add(30*time.Second), createdAttrs,
 		map[string]interface{}{"authorised_by": map[string]interface{}{"n": grantSAID, "s": c.grantSchema}})
@@ -228,6 +242,25 @@ func creationCases(t *testing.T) []CreationCase {
 		accept("the new AI agent is limited within its creator's limit", func(c *creation) {
 			c.creatorLimits = map[string]map[string][]string{"agent.message.send": {"to": {toOnlyA, "agent-b"}}}
 			c.createdLimits = map[string]map[string][]string{"agent.message.send": {"to": {toOnlyA}}}
+		}),
+		refuse("the creator's grant lapses and the new AI agent's grant has no end", "has no end", func(c *creation) {
+			c.creatorUntil = "2026-11-09T12:00:00Z"
+		}),
+		refuse("the new AI agent's grant lapses after its creator's", "after its creator's grant lapses", func(c *creation) {
+			c.creatorUntil, c.createdUntil = "2026-11-09T12:00:00Z", "2026-11-10T12:00:00Z"
+		}),
+		accept("the new AI agent's grant lapses when its creator's does", func(c *creation) {
+			c.creatorUntil, c.createdUntil = "2026-11-09T12:00:00Z", "2026-11-09T12:00:00Z"
+		}),
+		accept("the new AI agent's grant lapses before its creator's", func(c *creation) {
+			c.creatorUntil, c.createdUntil = "2026-11-09T12:00:00Z", "2026-11-08T12:00:00Z"
+		}),
+		accept("an AI agent whose grant holds agent.create sets the repositories of another", func(c *creation) {
+			c.method, c.target, c.about = "PUT", "/api/agent-host/agents/agent-1/github", "agent-1"
+			c.capabilities = []string{"agent.create", "code.repository.read"}
+			c.createdCaps = []string{"code.repository.read"}
+			c.createdLimits = map[string]map[string][]string{"code.repository.read": {"repository": {"acme/docs"}, "repository_id": {"101"}}}
+			c.signedBody = `{"repositories":[{"repository":"acme/docs","access":"read"}]}`
 		}),
 		refuse("the grant is of a version that does not admit the kind", "version that admits", func(c *creation) { c.createdSchema = schemas.AIAgentGrantV11.Schema.SAID }),
 	}
@@ -345,4 +378,76 @@ func TestTheCreatorsChannelIsNotTheOwners(t *testing.T) {
 // signature holds, and that each refused case breaks the one rule it is about.
 func TestAnIndependentImplementationAgreesWithTheAIAgentBodyRequestVectors(t *testing.T) {
 	contractcheck.IndependentlyWith(t, "../contracts/check_ai_agent_body_request_vectors.py", creationVectorFile, "blake3")
+}
+
+// withinCreator's attributes, as a grant carries them.
+func grantAttrs(t *testing.T, caps []string, extra map[string]interface{}) map[string]json.RawMessage {
+	t.Helper()
+	m := map[string]interface{}{"capabilities": caps}
+	for k, v := range extra {
+		m[k] = v
+	}
+	raw, _ := json.Marshal(m)
+	var out map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// An AI agent cannot outlive its creator: where the creator's grant lapses, the
+// grant of the AI agent it created exists and lapses no later.
+func TestACreatedAIAgentDoesNotOutliveItsCreator(t *testing.T) {
+	caps := []string{"agent.create", "agent.message.send"}
+	const end = "2026-11-09T12:00:00Z"
+	until := func(v string) map[string]interface{} {
+		if v == "" {
+			return nil
+		}
+		return map[string]interface{}{"valid_until": v}
+	}
+	for _, c := range []struct {
+		name             string
+		creator, created string
+		because          string // empty: accepted
+	}{
+		{"neither lapses", "", "", ""},
+		{"only the new one lapses", "", end, ""},
+		{"the new one has no end", end, "", "has no end"},
+		{"the new one lapses later", end, "2026-11-09T12:00:01Z", "after its creator"},
+		{"the new one lapses later in another zone", end, "2026-11-09T12:30:00-01:00", "after its creator"},
+		{"the new one lapses when its creator does", end, end, ""},
+		{"the same instant in another zone", end, "2026-11-09T13:00:00+01:00", ""},
+		{"the new one lapses sooner", end, "2026-11-09T11:59:59Z", ""},
+		{"the new one's end is unreadable", end, "soon", "unreadably"},
+	} {
+		err := withinCreator(grantAttrs(t, caps, until(c.creator)), grantAttrs(t, []string{"agent.message.send"}, until(c.created)))
+		switch {
+		case c.because == "" && err != nil:
+			t.Errorf("%s: refused: %v", c.name, err)
+		case c.because != "" && (err == nil || !strings.Contains(err.Error(), c.because)):
+			t.Errorf("%s: want a refusal for %q, got %v", c.name, c.because, err)
+		}
+	}
+}
+
+// A limit that names no value is refused, as the schema refuses it: an empty
+// list is a subset of any list, so it would pass for being within the creator's.
+func TestAnEmptyListOfValuesIsRefused(t *testing.T) {
+	caps := []string{"agent.create", "agent.message.send"}
+	limit := func(vals ...string) map[string]interface{} {
+		return map[string]interface{}{"resource_constraints": map[string]map[string][]string{"agent.message.send": {"to": vals}}}
+	}
+	if err := withinCreator(grantAttrs(t, caps, limit(toOnlyA)), grantAttrs(t, []string{"agent.message.send"}, limit())); err == nil || !strings.Contains(err.Error(), "at least one") {
+		t.Errorf("the new grant lists no values: %v", err)
+	}
+	if err := withinCreator(grantAttrs(t, caps, nil), grantAttrs(t, []string{"agent.message.send"}, limit())); err == nil || !strings.Contains(err.Error(), "at least one") {
+		t.Errorf("the new grant lists no values where its creator has no limit: %v", err)
+	}
+	if err := withinCreator(grantAttrs(t, caps, limit()), grantAttrs(t, []string{"agent.message.send"}, limit(toOnlyA))); err == nil || !strings.Contains(err.Error(), "at least one") {
+		t.Errorf("the creator's grant lists no values: %v", err)
+	}
+	if err := withinCreator(grantAttrs(t, caps, limit(toOnlyA)), grantAttrs(t, []string{"agent.message.send"}, limit(toOnlyA))); err != nil {
+		t.Errorf("a limit that names a value was refused: %v", err)
+	}
 }

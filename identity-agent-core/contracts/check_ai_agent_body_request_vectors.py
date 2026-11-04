@@ -16,7 +16,8 @@ for some other reason. The rules, as the ADR states them:
   2. the request is a body's: eleven lines, the first IA-BODY-REQ-V3, naming the
      Identity Agent that issued the grant, the signing body, the method, the
      target, the time, a nonce, the digest of the request's body, then the work
-     item, reason and session; and it is POST /api/agent-host/agents;
+     item, reason and session; and it is POST /api/agent-host/agents (create an
+     AI agent) or PUT /api/agent-host/agents/{id}/github (set its repositories);
   3. the grant is of the version that admits a body's request (1.2.0) and rests,
      by its authorised_by edge, on the creator's AI Agent Grant, which holds
      agent.create, was issued by the same Identity Agent, and is not the new
@@ -31,7 +32,9 @@ for some other reason. The rules, as the ADR states them:
      grants;
   7. the new AI agent is no more powerful than its creator: it holds only
      capabilities the creator's grant holds, and for every argument the
-     creator's grant limits to some values, its own limit is some of those.
+     creator's grant limits to some values, its own limit is some of those; and
+     where the creator's grant has a valid_until, its own exists and is no
+     later, so it does not outlive its creator. A limit is never an empty list.
 
 What it does not check, as the ADR says: any count or resource limit on how
 many AI agents a creator may create, which the party that issues the creator's
@@ -129,6 +132,37 @@ def signed_fields(signed):
             "digest": lines[7]}
 
 
+def route_ok(method, target):
+    """The request is one of the two a body signs that grant an AI agent
+    something: POST to the create route, or PUT to /agents/{id}/github. Returns
+    the id the PUT is about, "" for a create, None if it is neither."""
+    if method == "POST" and target == CREATE_PATH:
+        return ""
+    parts = target.strip("/").split("/")
+    if method == "PUT" and len(parts) == 5 and parts[:3] == ["api", "agent-host", "agents"] and parts[4] == "github":
+        return parts[3]
+    return None
+
+
+def repositories_grant(sent):
+    """The capabilities and limits a list of repositories asks for: read on
+    each repository asked for, write on those asked for write, each limit
+    naming the repositories (lower case) in a list of its own."""
+    read, write = [], []
+    for item in sent.get("repositories", []):
+        name = item["repository"].strip().lower()
+        if name not in read:
+            read.append(name)
+        if item["access"].strip().lower() in ("write", "read and write", "read-write") and name not in write:
+            write.append(name)
+    caps, limits = [], {}
+    for cap, names in (("code.repository.read", read), ("code.repository.write", write)):
+        if names:
+            caps.append(cap)
+            limits[cap] = {"repository": sorted(names)}
+    return caps, limits
+
+
 def judge(v, case, ids):
     """The rules that case breaks, by this reading of the ADR. Empty if none."""
     rules = set()
@@ -148,7 +182,8 @@ def judge(v, case, ids):
         rules.add("other-identity-agent")
     if s["host"] != request["signer"]:
         rules.add("signer-named")
-    if s["method"] != "POST" or s["target"] != CREATE_PATH:
+    about = route_ok(s["method"], s["target"])
+    if about is None:
         rules.add("route")
     if digest(case["request_body"].encode()) != s["digest"]:
         rules.add("body-digest")
@@ -209,15 +244,37 @@ def judge(v, case, ids):
     if "body-digest" not in rules:
         if request["asked"] != sent:
             rules.add("asked")
-        if attrs["name"] != sent.get("name") or sorted(attrs["capabilities"]) != sorted(sent.get("capabilities", [])):
-            rules.add("asked")
-        if sent.get("resource_constraints", {}) != attrs.get("resource_constraints", {}):
-            rules.add("asked")
+        if about == "":
+            if attrs["name"] != sent.get("name") or sorted(attrs["capabilities"]) != sorted(sent.get("capabilities", [])):
+                rules.add("asked")
+            if sent.get("resource_constraints", {}) != attrs.get("resource_constraints", {}):
+                rules.add("asked")
+        elif about:
+            # A request for repositories: the grant is about the AI agent named
+            # in the route and gives exactly the repositories asked for.
+            if attrs.get("about") != about:
+                rules.add("asked")
+            caps, limits = repositories_grant(sent)
+            if not set(caps) <= set(attrs["capabilities"]):
+                rules.add("asked")
+            for cap, lim in limits.items():
+                got = attrs.get("resource_constraints", {}).get(cap, {}).get("repository")
+                if sorted(got or []) != lim["repository"]:
+                    rules.add("asked")
 
     # No more powerful than its creator.
     held = set(grant["a"]["capabilities"])
     limits = grant["a"].get("resource_constraints", {})
     own = attrs.get("resource_constraints", {})
+    for lim in (limits, own):
+        for args in lim.values():
+            if any(len(values) == 0 for values in args.values()):
+                rules.add("empty-limit")
+    ends = grant["a"].get("valid_until")
+    if ends is not None:
+        mine = attrs.get("valid_until")
+        if mine is None or when(mine) > when(ends):
+            rules.add("outlives-creator")
     for cap in attrs["capabilities"]:
         if cap not in held:
             rules.add("wider-capability")
@@ -245,6 +302,8 @@ REFUSED_FOR = {
     "the grant is the creator's own": "own-request",
     "the grant is of a version that does not admit the kind": "version",
     "the new AI agent would hold a capability its creator's grant does not": "wider-capability",
+    "the creator's grant lapses and the new AI agent's grant has no end": "outlives-creator",
+    "the new AI agent's grant lapses after its creator's": "outlives-creator",
     "the creator limits an argument that the new AI agent's grant leaves unlimited": "unlimited",
     "the new AI agent may use a value its creator's limit does not allow": "wider-limit",
 }

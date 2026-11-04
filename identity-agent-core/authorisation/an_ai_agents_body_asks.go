@@ -33,7 +33,8 @@ import (
 // this AI agent, by that name, with those capabilities and limits. It also
 // vouches that the AI agent created is no more powerful than its creator: it
 // holds only capabilities the creator's grant holds, and where the creator's
-// grant limits the values of an argument, its own limit is within that. What it
+// grant limits the values of an argument, its own limit is within that, and
+// where the creator's grant lapses, its own lapses no later. What it
 // does not vouch for is any count or resource limit on how many AI agents the
 // creator may create, or how much they may use: the core does not enforce
 // those, and the party that issues the creator's grant does (ADR-045,
@@ -157,7 +158,10 @@ func checkCreator(in Input, cred acdc, rests RestsOn, req request, br BodyReques
 // what its creator's grant gives: every capability is one the creator holds,
 // and for every argument the creator's grant limits to some values, the created
 // grant limits it to some of those. A limit the creator has and the created
-// grant leaves off is wider, and refused.
+// grant leaves off is wider, and refused. So is a grant that lasts longer: where
+// the creator's grant lapses, the created grant must lapse too, no later, or the
+// AI agent would outlive its creator. A list of values that is empty is refused
+// in either grant, as the schema refuses it.
 func withinCreator(creator, created map[string]json.RawMessage) error {
 	var held, given []string
 	if err := json.Unmarshal(creator["capabilities"], &held); err != nil {
@@ -175,6 +179,22 @@ func withinCreator(creator, created map[string]json.RawMessage) error {
 			return fmt.Errorf("the AI agent created would hold %s, which its creator's grant does not", c)
 		}
 	}
+	if _, ok := creator["valid_until"]; ok {
+		ends, err := timeAttr(creator, "valid_until")
+		if err != nil {
+			return fmt.Errorf("the creator's grant says when it lapses unreadably")
+		}
+		if _, ok := created["valid_until"]; !ok {
+			return fmt.Errorf("the AI agent created has no end, but its creator's grant lapses at %s", ends.Format(time.RFC3339))
+		}
+		own, err := timeAttr(created, "valid_until")
+		if err != nil {
+			return fmt.Errorf("the AI agent created says when it lapses unreadably")
+		}
+		if own.After(ends) {
+			return fmt.Errorf("the AI agent created lapses at %s, after its creator's grant lapses at %s", own.Format(time.RFC3339), ends.Format(time.RFC3339))
+		}
+	}
 	type limits map[string]map[string][]string
 	var creatorLimits, createdLimits limits
 	if raw := creator["resource_constraints"]; len(raw) > 0 {
@@ -185,6 +205,15 @@ func withinCreator(creator, created map[string]json.RawMessage) error {
 	if raw := created["resource_constraints"]; len(raw) > 0 {
 		if err := json.Unmarshal(raw, &createdLimits); err != nil {
 			return fmt.Errorf("the limits of the AI agent created are unreadable")
+		}
+	}
+	for who, all := range map[string]limits{"creator's grant": creatorLimits, "AI agent created": createdLimits} {
+		for c, args := range all {
+			for arg, values := range args {
+				if len(values) == 0 {
+					return fmt.Errorf("the %s lists no values for %s of %s: a limit names at least one", who, arg, c)
+				}
+			}
 		}
 	}
 	for _, c := range given {
