@@ -246,7 +246,35 @@ func TestKeripyJudges(t *testing.T) {
 		m, last := storedLog(t, b.s, b.oldAID)
 		record(t, "core/break-glass-old-root", "the old root's founding, then the rotation that reveals its pre-committed key and seals the new root's founding", m, last)
 		m, last = storedLog(t, b.s, newAID)
-		record(t, "core/break-glass-new-root", "the new root's founding, then its interaction sealing the old root's log tail", m, last)
+		record(t, "core/break-glass-new-root", "the new root's founding, then its interaction sealing the old root's rotation", m, last)
+	})
+
+	// The rotation over what a thief signed, and a new root founded as any is:
+	// an owner and a messaging keyset. (A witnessed log is judged above, with
+	// the receipts keripy needs to establish one.)
+	t.Run("break-glass over a thief", func(t *testing.T) {
+		newRoot := map[string]any{"owner_aid": anOwner}
+		b := aRootToBreakGlassWith(t, breakGlassSetup{
+			core:        func(s *CoreServer) { s.requireOwnerAtInception = true },
+			oldFounding: map[string]any{"owner_aid": anOwner},
+			newRoot:     newRoot,
+			between: func(b *brokenGlass) {
+				code, out := call(t, b.s, b.s.handleMessagingSeed, "/api/keystore/messaging-seed", map[string]any{"seed_hex": messagingSeedHex(7)})
+				if code != http.StatusOK {
+					t.Fatalf("messaging seed: %d %v", code, out)
+				}
+				newRoot["a"] = []any{out["anchor"]}
+				thiefAnchors(t, b, "EThiefAnchorTheRotationSupersedes00000000000")
+			},
+			after: func(b *brokenGlass) map[string]string { return map[string]string{"s": "0", "d": b.oldAID} },
+		})
+		if code, out := b.rotate(t); code != http.StatusOK {
+			t.Fatalf("break-glass rotation: %d %v", code, out)
+		}
+		m, last := storedLog(t, b.s, b.oldAID)
+		record(t, "core/break-glass-superseding-old-root", "the old root's founding, then the rotation that superseded an interaction the stolen key signed", m, last)
+		m, last = storedLog(t, b.s, newRootOf(b))
+		record(t, "core/break-glass-full-new-root", "a new root founded with the owner's seal and a messaging keyset, then its interaction sealing the rotation", m, last)
 	})
 
 	if out := os.Getenv("IDENTITY_BOT_INTEROP_OUT"); out != "" {

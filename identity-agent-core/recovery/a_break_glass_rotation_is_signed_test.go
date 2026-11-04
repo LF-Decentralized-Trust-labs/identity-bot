@@ -167,11 +167,19 @@ func (b *breakGlass) prepare() *PreparedRootAIDRotation {
 	req.OldRoot.N = b.app.commits(2, 10)
 	req.OldRoot.After.S = "0"
 	req.OldRoot.After.D = ked.D
-	prepared, err := PrepareRootAIDRotation(req, b.e, b.st)
+	prepared, err := PrepareRootAIDRotation(req, b.founding(), b.e, b.st)
 	if err != nil {
 		b.t.Fatal(err)
 	}
 	return prepared
+}
+
+// founding is the new root's inception as a founding is asked for: key 4,
+// committing to keys 5 and 9. (The server builds this from an app's request,
+// with the owner seal, anchors and witnesses; here it is bare.)
+func (b *breakGlass) founding() keriengine.PrepareRequest {
+	return keriengine.PrepareRequest{Ilk: "icp", Keys: []string{b.app.pub(4)}, Kt: one,
+		Next: b.app.commits(5, 9), Nt: one}
 }
 
 func raw(t *testing.T, e PreparedRootAIDEvent) []byte {
@@ -251,12 +259,16 @@ func TestEveryEventBreakGlassWritesIsSignedAndVerifies(t *testing.T) {
 		}
 
 		// The proof ties the two: the rotation seals the new inception, the
-		// interaction seals the old log's tail as it stood before.
-		if err := ValidateAuthorizationEvent(b.oldAID, prepared.NewRootFounding.Hint.D, res.ContinuityProof.AuthorizationEvent); err != nil {
+		// interaction seals the old log's tip after it, the rotation.
+		if err := VerifyContinuityProof(res.ContinuityProof); err != nil {
 			t.Fatal(err)
 		}
 		if res.ContinuityProof.PriorKelTailSAID != b.oldAID {
-			t.Fatalf("the back-reference seals %s, not the old root's founding", res.ContinuityProof.PriorKelTailSAID)
+			t.Fatalf("the rotation follows %s, not the old root's founding", res.ContinuityProof.PriorKelTailSAID)
+		}
+		if res.ContinuityProof.BackAnchorEventSAID != prepared.NewRootInteraction.Hint.D ||
+			res.ContinuityProof.AuthorizationEventSAID != prepared.OldRootRotation.Hint.D {
+			t.Fatal("the proof does not name the events written")
 		}
 		if b.st.identity.AID != newAID || b.st.identity.EventCount != 1 {
 			t.Fatalf("identity record %+v", b.st.identity)
@@ -333,7 +345,7 @@ func TestBreakGlassCarriesThePostQuantumCommitment(t *testing.T) {
 		req.OldRoot.K = []string{b.app.pub(1)}
 		req.OldRoot.N = []string{b.app.digest(2)}
 		req.OldRoot.After.S, req.OldRoot.After.D = "0", b.oldAID
-		if _, err := PrepareRootAIDRotation(req, b.e, b.st); err == nil || !strings.Contains(err.Error(), "two next-key digests") {
+		if _, err := PrepareRootAIDRotation(req, b.founding(), b.e, b.st); err == nil || !strings.Contains(err.Error(), "two next-key digests") {
 			t.Fatalf("a rotation committing to one digest was prepared: %v", err)
 		}
 
@@ -349,6 +361,18 @@ func TestBreakGlassCarriesThePostQuantumCommitment(t *testing.T) {
 		signed := b.signed(p)
 		signed.OldRootRotation = drivers.SignedEventBytes{RawB64: base64.StdEncoding.EncodeToString(oneDigest.Raw),
 			Sigs: []string{b.app.sign(1, oneDigest.Raw, true)}}
+		// The interaction seals the rotation actually sent.
+		sealed, err := keri.ParseEvent(oneDigest.Raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ixnRaw, err := keri.BuildInteraction(keri.InteractionInput{Prefix: p.NewRootFounding.Hint.I,
+			PriorSAID: p.NewRootFounding.Hint.D, SN: 1, Data: []json.RawMessage{json.RawMessage(`{"d":"` + sealed.SAID + `"}`)}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		signed.NewRootInteraction = drivers.SignedEventBytes{RawB64: base64.StdEncoding.EncodeToString(ixnRaw),
+			Sigs: []string{b.app.sign(4, ixnRaw, false)}}
 		if _, err := RotateRootAID(signed, b.commit, b.st, t.TempDir(), nil); err == nil || !strings.Contains(err.Error(), "two next-key digests") {
 			t.Fatalf("a rotation committing to one digest was taken: %v", err)
 		}
@@ -359,7 +383,7 @@ func TestBreakGlassCarriesThePostQuantumCommitment(t *testing.T) {
 // Switched off, nothing is prepared and nothing is committed.
 func TestBreakGlassSwitchedOffPreparesAndCommitsNothing(t *testing.T) {
 	b := aBreakGlassSetup(t)
-	if _, err := PrepareRootAIDRotation(PrepareRootAIDRotationRequest{}, b.e, b.st); err == nil {
+	if _, err := PrepareRootAIDRotation(PrepareRootAIDRotationRequest{}, keriengine.PrepareRequest{}, b.e, b.st); err == nil {
 		t.Fatal("prepared while switched off")
 	}
 	if _, err := RotateRootAID(RootAIDRotationRequest{RecoverySessionID: "s"}, b.commit, b.st, t.TempDir(), nil); err == nil {

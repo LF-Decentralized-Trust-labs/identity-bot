@@ -390,7 +390,7 @@ func (s *CoreServer) keepCommittedEvent(k drivers.KELKeep, ev *keri.Event) error
 		return err
 	}
 	save := s.DataStore.SaveEvent
-	if k.Supersedes > 0 {
+	if k.Supersedes > 0 && !s.alreadyKept(rec) {
 		save = s.DataStore.SaveSupersedingEvent
 	}
 	if err := save(rec); err != nil {
@@ -422,6 +422,21 @@ func (s *CoreServer) keepCommittedEvent(k drivers.KELKeep, ev *keri.Event) error
 		own.EventCount = k.SN + 1
 		return s.DataStore.SaveIdentity(*own)
 	}
+}
+
+// alreadyKept is whether the log already holds rec's event at its place: a
+// superseding rotation that was kept and not added to the engine, because what
+// follows it failed. Superseding again would move the rotation itself aside.
+func (s *CoreServer) alreadyKept(rec store.EventRecord) bool {
+	events, err := s.DataStore.GetEvents(rec.AID)
+	if err != nil || rec.SequenceNumber >= len(events) {
+		return false
+	}
+	var held, got struct {
+		D string `json:"d"`
+	}
+	return json.Unmarshal([]byte(events[rec.SequenceNumber].EventJSON), &held) == nil &&
+		json.Unmarshal([]byte(rec.EventJSON), &got) == nil && held.D != "" && held.D == got.D
 }
 
 // eventRecordOf is the stored form of an event and its signatures.

@@ -147,20 +147,19 @@ func TestRootAIDRotationGatedWhenDisabled(t *testing.T) {
 	}
 }
 
-func TestBuildContinuityProofV2(t *testing.T) {
+func TestBuildContinuityProofV3(t *testing.T) {
 	proof := BuildContinuityProof(ContinuityProofInput{
-		OldRootAID:                 "Eold",
-		NewRootAID:                 "Enew",
-		NewInceptionSAID:           "Eicp",
-		AuthorizationEvent:         map[string]interface{}{"t": "rot", "d": "Eauth"},
-		AuthorizationCesrSignature: "0Bsig",
-		AuthorizationEventSAID:     "Eauth",
-		BackAnchorEventSAID:        "Eixn",
-		PriorKelTailSAID:           "Eprior",
-		RotatedAt:                  "2026-06-20T12:00:00Z",
-		CarryForwardAIDs:           []string{"EP1"},
+		OldRootAID:              "Eold",
+		NewRootAID:              "Enew",
+		NewInceptionSAID:        "Eicp",
+		AuthorizationSignatures: []string{"AAsig"},
+		AuthorizationEventSAID:  "Eauth",
+		BackAnchorEventSAID:     "Eixn",
+		PriorKelTailSAID:        "Eprior",
+		RotatedAt:               "2026-06-20T12:00:00Z",
+		CarryForwardAIDs:        []string{"EP1"},
 	})
-	if proof.V != "2" {
+	if proof.V != "3" {
 		t.Fatalf("version %s", proof.V)
 	}
 	if proof.AuthorizationEventSAID != "Eauth" {

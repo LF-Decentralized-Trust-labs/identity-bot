@@ -363,9 +363,21 @@ func (s *CoreServer) handleRecoveryRootAIDRotation(w http.ResponseWriter, r *htt
 				"so it is refused before anything is made")
 		return
 	}
+	// Three signed events: the bound is theirs, as the prepare route's is one's.
+	r.Body = http.MaxBytesReader(w, r.Body, maxRootRotationBody)
 	var req recovery.RootAIDRotationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
+		return
+	}
+	if req.RecoverySessionID == "" {
+		writeError(w, http.StatusBadRequest, "Invalid request", "recovery_session_id is required")
+		return
+	}
+	// The session first, as the recovery rotation does: a new root is not
+	// undone, so none is founded for a recovery that is not there to record it.
+	if _, err := s.recoveryService().GetSession(req.RecoverySessionID); err != nil {
+		writeError(w, http.StatusNotFound, "Session not found", err.Error())
 		return
 	}
 	c, ok := s.committer(w)
@@ -374,6 +386,9 @@ func (s *CoreServer) handleRecoveryRootAIDRotation(w http.ResponseWriter, r *htt
 	}
 	if s.DataStore == nil {
 		writeError(w, http.StatusServiceUnavailable, "Store not available", "identity store is required")
+		return
+	}
+	if !s.theNewRootMayBeFounded(w, req) {
 		return
 	}
 
@@ -390,11 +405,10 @@ func (s *CoreServer) handleRecoveryRootAIDRotation(w http.ResponseWriter, r *htt
 		if err != nil {
 			return err
 		}
-		own, err := s.DataStore.GetIdentity()
-		if err != nil || own == nil {
-			return fmt.Errorf("no identity is kept here")
-		}
-		name := own.AID
+		// Each event is of the log it extends, whichever identity is kept here
+		// by now: the rotation is of the old root after the record has moved to
+		// the new one, as it is when a repeat finishes the run.
+		name := ev.Identifier
 		if ev.Ilk == "icp" {
 			name = ""
 		}
@@ -445,13 +459,103 @@ func (s *CoreServer) handleRecoveryRootAIDPrepare(w http.ResponseWriter, r *http
 		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
 		return
 	}
-	prepared, err := recovery.PrepareRootAIDRotation(req, c, s.DataStore)
+	// The new root is founded as an ordinary founding is (POST
+	// /api/events/prepare): the same preparation, and the same gate except for
+	// the identity kept here, which it replaces.
+	founding := prepareEventRequest{T: "icp", K: req.NewRoot.K, Kt: one, N: req.NewRoot.N, Nt: one,
+		A: req.NewRoot.A, OwnerAID: req.NewRoot.OwnerAID, B: req.NewRoot.B, Bt: req.NewRoot.Bt}
+	if founding.B == nil {
+		// Unless the app names others, the new root keeps the old root's witnesses.
+		founding.B, founding.Bt = s.witnessesOfTheIdentityKept(founding.Bt)
+	}
+	pr, err := founding.engineRequest()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid witness threshold", err.Error())
+		return
+	}
+	pr, ok = s.foundingRequest(w, founding, pr, true)
+	if !ok {
+		return
+	}
+	prepared, err := recovery.PrepareRootAIDRotation(req, pr, c, s.DataStore)
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, "Root-AID rotation could not be prepared", err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(prepared)
+}
+
+// maxRootRotationBody bounds a break-glass rotation: three signed events, each
+// as large as a prepared or committed one may be.
+const maxRootRotationBody = 3 * maxKeyEventBody
+
+var one = json.RawMessage(`"1"`)
+
+// witnessesOfTheIdentityKept are the witnesses and threshold the identity kept
+// here names now, for a new root that is to keep them. bt, if the app named a
+// threshold, is kept as it named it.
+func (s *CoreServer) witnessesOfTheIdentityKept(bt *json.RawMessage) ([]string, *json.RawMessage) {
+	keeper, ok := s.KeriDriver.(drivers.KELKeeper)
+	own, err := s.DataStore.GetIdentity()
+	if !ok || err != nil || own == nil {
+		return nil, bt
+	}
+	witnesses, toad, err := keeper.WitnessConfig(own.AID)
+	if err != nil || len(witnesses) == 0 {
+		return nil, bt
+	}
+	if bt == nil {
+		threshold := json.RawMessage(fmt.Sprintf("%q", fmt.Sprintf("%x", toad)))
+		bt = &threshold
+	}
+	return witnesses, bt
+}
+
+// theNewRootMayBeFounded applies to the new root of a break-glass rotation
+// what a founding is held to when it is committed: the founding gate, and the
+// messaging keyset it anchors being one this Identity Agent holds. The keyset
+// the app handed over while the old root was kept here is held aside as the old
+// root's replacement; it is held for the new root's founding instead. A refusal
+// is answered here, before anything is written; ok is false then.
+func (s *CoreServer) theNewRootMayBeFounded(w http.ResponseWriter, req recovery.RootAIDRotationRequest) bool {
+	raw, err := base64.StdEncoding.Strict().DecodeString(req.NewRootFounding.RawB64)
+	if err != nil {
+		return true // the rotation's own checks refuse what is not the event
+	}
+	ev, err := keri.ParseEvent(raw)
+	if err != nil || ev.Ilk != "icp" {
+		return true
+	}
+	if s.requireOwnerAtInception && ownerNamedIn(raw) == "" {
+		writeError(w, http.StatusBadRequest, "This agent will not found an identity that names no owner",
+			"owner_aid is required. An owner is written into the founding event and cannot be added afterwards.")
+		return false
+	}
+	own, _ := s.DataStore.GetIdentity()
+	if own != nil && own.AID != ev.Identifier {
+		for _, anchor := range messagingAnchorsIn(raw) {
+			if held, _ := s.keySetAnchorHeld(pendingKeySetLabel(anchor), anchor); held {
+				continue
+			}
+			if held, _ := s.keySetAnchorHeld(pendingReplacementLabel(own.AID), anchor); !held {
+				continue
+			}
+			ks, err := s.keySetFor(pendingReplacementLabel(own.AID))
+			if err == nil {
+				err = s.putKeySet(pendingKeySetLabel(anchor), ks)
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "The messaging keys could not be kept", err.Error())
+				return false
+			}
+		}
+	}
+	if title, detail := s.unheldKeySetRefusal(raw, ev.Identifier); title != "" {
+		writeError(w, http.StatusBadRequest, title, detail)
+		return false
+	}
+	return true
 }
 
 func (s *CoreServer) handleRecoveryRootAIDStatus(w http.ResponseWriter, r *http.Request) {

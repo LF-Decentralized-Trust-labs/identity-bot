@@ -39,6 +39,8 @@ EXPECTED = {
     "core/witnessed-founding",
     "core/break-glass-old-root",
     "core/break-glass-new-root",
+    "core/break-glass-superseding-old-root",
+    "core/break-glass-full-new-root",
 }
 
 

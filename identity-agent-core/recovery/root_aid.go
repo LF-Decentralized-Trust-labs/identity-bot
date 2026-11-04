@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"identity-agent-core/drivers"
@@ -19,7 +20,7 @@ import (
 
 const (
 	rootAIDMapFileName      = "root_aid_map.json"
-	continuityProofVersion  = "2"
+	continuityProofVersion  = "3"
 	rootAIDRotationTaskType = "root_aid_rotation_notify"
 )
 
@@ -30,7 +31,8 @@ var RootAIDRotationEnabled = false
 // RootAIDRotationRequest is the break-glass root-AID rotation payload: the
 // three events it writes, each prepared by this core (PrepareRootAIDRotation)
 // and signed by whoever holds the key it needs (ADR-061). Nothing is written
-// unless all three carry a signature and the logs they make verify.
+// unless the checks pass, and a run stopped part way is finished by sending
+// the same request again.
 type RootAIDRotationRequest struct {
 	RecoverySessionID string `json:"recovery_session_id"`
 	// NewRootFounding is the new root's inception, signed by its own key.
@@ -54,37 +56,51 @@ type RootAIDRotationRequest struct {
 }
 
 // ContinuityProof documents the old-root-signed delegation anchor authorizing the
-// new root inception. The trust gate is the CESR signature on the authorization
-// event verifiable against the old KEL — not a standalone content digest.
+// new root inception. It carries each event as the bytes that were signed and
+// every signature on it, so a verifier holding only the proof recomputes each
+// digest and checks each signature (VerifyContinuityProof). The trust gate is
+// the signature on the authorization event verifiable against the old KEL.
 type ContinuityProof struct {
-	V                          string                 `json:"v"`
-	OldRootAID                 string                 `json:"old_root_aid"`
-	NewRootAID                 string                 `json:"new_root_aid"`
-	NewInceptionSAID           string                 `json:"new_inception_said"`
-	AuthorizationEvent         map[string]interface{} `json:"authorization_event"`
-	AuthorizationCesrSignature string                 `json:"authorization_cesr_signature"`
-	AuthorizationEventSAID     string                 `json:"authorization_event_said"`
-	BackAnchorEvent            map[string]interface{} `json:"back_anchor_event,omitempty"`
-	BackAnchorCesrSignature    string                 `json:"back_anchor_cesr_signature,omitempty"`
-	BackAnchorEventSAID        string                 `json:"back_anchor_event_said,omitempty"`
-	PriorKelTailSAID           string                 `json:"prior_kel_tail_said,omitempty"`
-	RotatedAt                  string                 `json:"rotated_at"`
-	RecoverySessionID          string                 `json:"recovery_session_id,omitempty"`
-	CarryForwardAIDs           []string               `json:"carry_forward_aids,omitempty"`
-	WitnessThreshold           int                    `json:"witness_threshold,omitempty"`
+	V                string `json:"v"`
+	OldRootAID       string `json:"old_root_aid"`
+	NewRootAID       string `json:"new_root_aid"`
+	NewInceptionSAID string `json:"new_inception_said"`
+	// NewInceptionRawB64 and NewInceptionSignatures are the new root's
+	// inception as signed: its key, which the back-anchor is checked against.
+	NewInceptionRawB64     string   `json:"new_inception_raw_b64"`
+	NewInceptionSignatures []string `json:"new_inception_signatures"`
+	// AuthorizationEventRawB64 is the old root's rotation, exactly the bytes
+	// signed, in standard base64; AuthorizationSignatures every indexed
+	// signature on it.
+	AuthorizationEventRawB64 string   `json:"authorization_event_raw_b64"`
+	AuthorizationSignatures  []string `json:"authorization_signatures"`
+	AuthorizationEventSAID   string   `json:"authorization_event_said"`
+	// BackAnchorEventRawB64 is the new root's first interaction, which seals
+	// the authorization event's digest.
+	BackAnchorEventRawB64 string   `json:"back_anchor_event_raw_b64"`
+	BackAnchorSignatures  []string `json:"back_anchor_signatures"`
+	BackAnchorEventSAID   string   `json:"back_anchor_event_said"`
+	// PriorKelTailSAID is the event of the old root's log the authorization
+	// rotation follows: the last establishment event or an interaction the
+	// owner kept. Any interaction after it was superseded.
+	PriorKelTailSAID  string   `json:"prior_kel_tail_said"`
+	RotatedAt         string   `json:"rotated_at"`
+	RecoverySessionID string   `json:"recovery_session_id,omitempty"`
+	CarryForwardAIDs  []string `json:"carry_forward_aids,omitempty"`
+	WitnessThreshold  int      `json:"witness_threshold,omitempty"`
 }
 
 // RootAIDMapEntry records one break-glass rotation in local history.
 type RootAIDMapEntry struct {
-	OldRootAID                 string `json:"old_root_aid"`
-	NewRootAID                 string `json:"new_root_aid"`
-	NewInceptionSAID           string `json:"new_inception_said"`
-	AuthorizationEventSAID     string `json:"authorization_event_said"`
-	AuthorizationCesrSignature string `json:"authorization_cesr_signature"`
-	BackAnchorEventSAID        string `json:"back_anchor_event_said,omitempty"`
-	PriorKelTailSAID           string `json:"prior_kel_tail_said,omitempty"`
-	RotatedAt                  string `json:"rotated_at"`
-	RecoverySessionID          string `json:"recovery_session_id,omitempty"`
+	OldRootAID              string   `json:"old_root_aid"`
+	NewRootAID              string   `json:"new_root_aid"`
+	NewInceptionSAID        string   `json:"new_inception_said"`
+	AuthorizationEventSAID  string   `json:"authorization_event_said"`
+	AuthorizationSignatures []string `json:"authorization_signatures"`
+	BackAnchorEventSAID     string   `json:"back_anchor_event_said,omitempty"`
+	PriorKelTailSAID        string   `json:"prior_kel_tail_said,omitempty"`
+	RotatedAt               string   `json:"rotated_at"`
+	RecoverySessionID       string   `json:"recovery_session_id,omitempty"`
 }
 
 // RootAIDMap is persisted at <dataDir>/root_aid_map.json.
@@ -143,13 +159,17 @@ type EventPreparer interface {
 //
 //  1. The new root's inception (icp, sn 0). Signed by the new root's own first
 //     key, which satisfies its kt. Harmless alone, so it goes first.
-//  2. The old root's rotation (rot). It reveals the old root's pre-committed next
-//     key, so it is signed by that key, not by the compromised current key, and
-//     it seals the new inception's SAID in its anchors `a` (keripy
-//     eventing.rotate data=...). This is the old->new authorization.
+//  2. The old root's rotation (rot). It follows the event the app names, the
+//     last establishment event or an interaction the owner keeps, and
+//     supersedes the interactions after it, as a recovery rotation does
+//     (ADR-061 section 4): whatever the holder of the stolen key added is not
+//     the owner's, and cannot stop this. It reveals the old root's
+//     pre-committed next key, so it is signed by that key, not by the
+//     compromised current key, and it seals the new inception's SAID in its
+//     anchors `a`. This is the old->new authorization.
 //  3. The new root's first interaction (ixn, sn 1). Signed by the new root's key
-//     in force (its inception key). It seals the old root's log tail as it stood
-//     before the rotation: the new->old back-reference.
+//     in force (its inception key). It seals the old root's tip after the
+//     rotation, the rotation itself: the new->old back-reference.
 //
 // Both establishment events carry the post-quantum commitment: two next-key
 // digests with nt "1" (ADR-061 sections 1 and 6).
@@ -157,7 +177,13 @@ type EventPreparer interface {
 // Nothing is written until all three are known to be signed and the two logs
 // they make (the old root's with the rotation, the new root's with the
 // interaction) verify. The identity record moves from the old root to the new
-// one between 2 and 3, as the commit of 3 extends the identity kept here.
+// one between 2 and 3.
+//
+// A run that stops part way is finished by sending the same request again.
+// Each event already in its log is recognised by its digest, the identity
+// record is moved only if it has not been, and the notification tasks and the
+// root map entry are written under keys the request fixes, so a repeat leaves
+// what a run that never stopped leaves.
 //
 // Security boundary: if both the old current key AND its pre-rotation next key are
 // compromised, root-level break-glass cannot help; guardians/social recovery take over.
@@ -195,41 +221,53 @@ func (s *RootAIDRotationService) RotateRootAID(
 		return nil, err
 	}
 
-	if err := commit(checked.icpRaw, req.NewRootFounding.Sigs); err != nil {
+	// The time of the rotation is the one the identity record was moved at, if
+	// a run before this one got that far, so a repeat records the same time.
+	rotatedAt := checked.rotatedAt
+	if rotatedAt == "" {
+		rotatedAt = s.Now().Format(time.RFC3339)
+	}
+
+	// Committing an event the log already holds adds nothing, so each is
+	// committed whether or not an earlier run got to it.
+	if err := commit(checked.icpRaw, checked.icpSigs); err != nil {
 		return nil, fmt.Errorf("new root inception: %w", err)
 	}
-	if err := commit(checked.rotRaw, req.OldRootRotation.Sigs); err != nil {
+	if err := commit(checked.rotRaw, checked.rotSigs); err != nil {
 		return nil, fmt.Errorf("old-root authorization rotation: %w", err)
 	}
-	rotatedAt := s.Now().Format(time.RFC3339)
-	if err := st.SaveIdentity(store.IdentityState{
-		AID:           newRootAID,
-		PublicKey:     checked.icp.Keys[0],
-		NextKeyDigest: checked.icp.NextDigest[0],
-		Created:       rotatedAt,
-		EventCount:    1,
-	}); err != nil {
-		return nil, fmt.Errorf("move the identity record to the new root: %w", err)
+	if !checked.moved {
+		if err := st.SaveIdentity(store.IdentityState{
+			AID:           newRootAID,
+			PublicKey:     checked.icp.Keys[0],
+			NextKeyDigest: checked.icp.NextDigest[0],
+			Created:       rotatedAt,
+			EventCount:    1,
+		}); err != nil {
+			return nil, fmt.Errorf("move the identity record to the new root: %w", err)
+		}
 	}
-	if err := commit(checked.ixnRaw, req.NewRootInteraction.Sigs); err != nil {
+	if err := commit(checked.ixnRaw, checked.ixnSigs); err != nil {
 		return nil, fmt.Errorf("new root back-reference interaction: %w", err)
 	}
 
 	proof := BuildContinuityProof(ContinuityProofInput{
-		OldRootAID:                 oldRootAID,
-		NewRootAID:                 newRootAID,
-		NewInceptionSAID:           newInceptionSAID,
-		AuthorizationEvent:         checked.rotKED,
-		AuthorizationCesrSignature: req.OldRootRotation.Sigs[0],
-		AuthorizationEventSAID:     checked.rot.SAID,
-		BackAnchorEvent:            checked.ixnKED,
-		BackAnchorCesrSignature:    req.NewRootInteraction.Sigs[0],
-		BackAnchorEventSAID:        checked.ixn.SAID,
-		PriorKelTailSAID:           checked.priorTailSAID,
-		RotatedAt:                  rotatedAt,
-		RecoverySessionID:          req.RecoverySessionID,
-		CarryForwardAIDs:           req.CarryForwardAIDs,
-		WitnessThreshold:           req.WitnessThreshold,
+		OldRootAID:               oldRootAID,
+		NewRootAID:               newRootAID,
+		NewInceptionSAID:         newInceptionSAID,
+		NewInceptionRawB64:       req.NewRootFounding.RawB64,
+		NewInceptionSignatures:   checked.icpSigs,
+		AuthorizationEventRawB64: req.OldRootRotation.RawB64,
+		AuthorizationSignatures:  checked.rotSigs,
+		AuthorizationEventSAID:   checked.rot.SAID,
+		BackAnchorEventRawB64:    req.NewRootInteraction.RawB64,
+		BackAnchorSignatures:     checked.ixnSigs,
+		BackAnchorEventSAID:      checked.ixn.SAID,
+		PriorKelTailSAID:         checked.after,
+		RotatedAt:                rotatedAt,
+		RecoverySessionID:        req.RecoverySessionID,
+		CarryForwardAIDs:         req.CarryForwardAIDs,
+		WitnessThreshold:         req.WitnessThreshold,
 	})
 
 	carried := FilterCarryForwardContacts(contacts, req.CarryForwardAIDs)
@@ -245,15 +283,15 @@ func (s *RootAIDRotationService) RotateRootAID(
 	}
 
 	entry := RootAIDMapEntry{
-		OldRootAID:                 oldRootAID,
-		NewRootAID:                 newRootAID,
-		NewInceptionSAID:           newInceptionSAID,
-		AuthorizationEventSAID:     checked.rot.SAID,
-		AuthorizationCesrSignature: req.OldRootRotation.Sigs[0],
-		BackAnchorEventSAID:        checked.ixn.SAID,
-		PriorKelTailSAID:           checked.priorTailSAID,
-		RotatedAt:                  rotatedAt,
-		RecoverySessionID:          req.RecoverySessionID,
+		OldRootAID:              oldRootAID,
+		NewRootAID:              newRootAID,
+		NewInceptionSAID:        newInceptionSAID,
+		AuthorizationEventSAID:  checked.rot.SAID,
+		AuthorizationSignatures: checked.rotSigs,
+		BackAnchorEventSAID:     checked.ixn.SAID,
+		PriorKelTailSAID:        checked.after,
+		RotatedAt:               rotatedAt,
+		RecoverySessionID:       req.RecoverySessionID,
 	}
 	if err := appendRootAIDMapEntry(s.DataDir, entry); err != nil {
 		return nil, err
@@ -285,15 +323,24 @@ func RotateRootAID(
 // PrepareRootAIDRotationRequest is what the signer chooses for the break-glass
 // events: the core composes no key or digest of its own.
 type PrepareRootAIDRotationRequest struct {
-	// NewRoot is the new root's founding: its key, and the two next-key
-	// digests (classical, post-quantum) it commits to.
+	// NewRoot is the new root's founding, asked for as POST /api/events/prepare
+	// asks for an icp: its key, the two next-key digests (classical,
+	// post-quantum) it commits to, and optionally its anchors (the messaging
+	// keyset from POST /api/keystore/messaging-seed among them), its owner, and
+	// its witnesses and their threshold. Witnesses default to the old root's
+	// when b is absent.
 	NewRoot struct {
-		K []string `json:"k"`
-		N []string `json:"n"`
+		K        []string          `json:"k"`
+		N        []string          `json:"n"`
+		A        []json.RawMessage `json:"a,omitempty"`
+		OwnerAID string            `json:"owner_aid,omitempty"`
+		B        []string          `json:"b,omitempty"`
+		Bt       *json.RawMessage  `json:"bt,omitempty"`
 	} `json:"new_root"`
 	// OldRoot is the old root's rotation: the pre-committed key it reveals, the
-	// two next-key digests it commits to, and the event it follows, which must
-	// be the log's tip.
+	// two next-key digests it commits to, and the event it follows (After),
+	// which is the last establishment event or an interaction the owner keeps.
+	// The rotation supersedes every interaction after it.
 	OldRoot struct {
 		K     []string `json:"k"`
 		N     []string `json:"n"`
@@ -320,16 +367,22 @@ type PreparedRootAIDRotation struct {
 var one = json.RawMessage(`"1"`)
 
 // PrepareRootAIDRotation builds the three events of the rotation and adds none.
-// The rotation seals the founding's SAID and the interaction seals the old
-// log's tail, so the founding is built first.
-func PrepareRootAIDRotation(req PrepareRootAIDRotationRequest, prep EventPreparer, st RootRotationStore) (*PreparedRootAIDRotation, error) {
+// founding is the new root's inception exactly as an ordinary founding is
+// prepared (the server's one founding preparation: owner seal, anchors,
+// witnesses); the rotation seals its SAID and the interaction seals the
+// rotation's, so they are built in that order.
+//
+// The rotation follows req.OldRoot.After and supersedes the interactions after
+// it, as a recovery rotation does; the engine refuses a place that is not the
+// last establishment event or an interaction after it.
+func PrepareRootAIDRotation(req PrepareRootAIDRotationRequest, founding keriengine.PrepareRequest, prep EventPreparer, st RootRotationStore) (*PreparedRootAIDRotation, error) {
 	if !RootAIDRotationEnabled {
 		return nil, fmt.Errorf("root-AID rotation is gated pending security review of the signed delegation anchor")
 	}
-	if len(req.NewRoot.K) != 1 || len(req.OldRoot.K) != 1 {
+	if founding.Ilk != "icp" || len(founding.Keys) != 1 || len(req.OldRoot.K) != 1 {
 		return nil, fmt.Errorf("each root names one key")
 	}
-	if len(req.NewRoot.N) != 2 || len(req.OldRoot.N) != 2 {
+	if len(founding.Next) != 2 || len(req.OldRoot.N) != 2 {
 		return nil, fmt.Errorf("each establishment event commits to two next-key digests, " +
 			"a classical key and a post-quantum key (ADR-061 section 6)")
 	}
@@ -340,18 +393,12 @@ func PrepareRootAIDRotation(req PrepareRootAIDRotationRequest, prep EventPrepare
 	if identity == nil || identity.AID == "" {
 		return nil, fmt.Errorf("no existing root identity to rotate")
 	}
-	tipSN, tipSAID, err := kelTip(st, identity.AID)
-	if err != nil {
-		return nil, err
-	}
 	afterSN, err := sequenceFromHex(req.OldRoot.After.S)
-	if err != nil || afterSN != tipSN || req.OldRoot.After.D != tipSAID {
-		return nil, fmt.Errorf("the rotation must follow the log's tip, sequence number %x (%s): "+
-			"a break-glass rotation supersedes nothing", tipSN, tipSAID)
+	if err != nil {
+		return nil, fmt.Errorf("after: %w", err)
 	}
 
-	icp, err := prep.Prepare(keriengine.PrepareRequest{Ilk: "icp", Keys: req.NewRoot.K, Kt: one,
-		Next: req.NewRoot.N, Nt: one})
+	icp, err := prep.Prepare(founding)
 	if err != nil {
 		return nil, fmt.Errorf("new root inception: %w", err)
 	}
@@ -361,11 +408,11 @@ func PrepareRootAIDRotation(req PrepareRootAIDRotationRequest, prep EventPrepare
 	}
 	rot, err := prep.Prepare(keriengine.PrepareRequest{Name: identity.AID, Ilk: "rot", Keys: req.OldRoot.K, Kt: one,
 		Next: req.OldRoot.N, Nt: one, Anchors: []json.RawMessage{seal},
-		After: &keriengine.Place{SN: tipSN, SAID: tipSAID}})
+		After: &keriengine.Place{SN: afterSN, SAID: req.OldRoot.After.D}})
 	if err != nil {
 		return nil, fmt.Errorf("old root rotation: %w", err)
 	}
-	back, err := json.Marshal(BuildContinuityBackReferenceSeal(tipSAID)[0])
+	back, err := json.Marshal(BuildContinuityBackReferenceSeal(rot.Hint.D)[0])
 	if err != nil {
 		return nil, err
 	}
@@ -396,17 +443,28 @@ func sequenceFromHex(s string) (int, error) {
 
 // checkedRootRotation is the three events, parsed and judged.
 type checkedRootRotation struct {
-	oldRootAID             string
-	priorTailSAID          string
+	oldRootAID string
+	// after is the digest of the old root's event the rotation follows.
+	after                  string
 	icp, rot, ixn          *keri.Event
 	icpRaw, rotRaw, ixnRaw []byte
-	rotKED, ixnKED         map[string]interface{}
+	// The indexed signatures each event is committed and proven with.
+	icpSigs, rotSigs, ixnSigs []string
+	rotKED                    map[string]interface{}
+	// moved is whether the identity record is already the new root, and
+	// rotatedAt the time an earlier run moved it.
+	moved     bool
+	rotatedAt string
 }
 
 // checkSignedRootRotation judges the rotation before anything is written: each
 // event is the shape this rotation writes, every one carries a signature, and
 // the two logs they make verify, the old root's from its founding with the
-// rotation on its tip and the new root's with its interaction.
+// rotation on the event it follows and the new root's with its interaction.
+//
+// It judges a run that stopped part way as well as a fresh one: the rotation
+// may already be in the old root's log (the same digest), the founding in the
+// new root's, and the identity record may already be the new root.
 func checkSignedRootRotation(req RootAIDRotationRequest, st RootRotationStore) (*checkedRootRotation, error) {
 	identity, err := st.GetIdentity()
 	if err != nil {
@@ -415,43 +473,49 @@ func checkSignedRootRotation(req RootAIDRotationRequest, st RootRotationStore) (
 	if identity == nil || identity.AID == "" {
 		return nil, fmt.Errorf("no existing root identity to rotate")
 	}
-	c := &checkedRootRotation{oldRootAID: identity.AID}
+	c := &checkedRootRotation{}
 
-	decode := func(label string, e drivers.SignedEventBytes, ilk string) (*keri.Event, []byte, map[string]interface{}, error) {
+	decode := func(label string, e drivers.SignedEventBytes, ilk string) (*keri.Event, []byte, map[string]interface{}, []string, error) {
 		if len(e.Sigs) == 0 {
-			return nil, nil, nil, fmt.Errorf("%s is not signed: a break-glass rotation writes nothing unless all three events are", label)
+			return nil, nil, nil, nil, fmt.Errorf("%s is not signed: a break-glass rotation writes nothing unless all three events are", label)
 		}
 		raw, err := base64.StdEncoding.Strict().DecodeString(e.RawB64)
 		if err != nil || len(raw) == 0 {
-			return nil, nil, nil, fmt.Errorf("%s is not the event's bytes in standard base64", label)
+			return nil, nil, nil, nil, fmt.Errorf("%s is not the event's bytes in standard base64", label)
 		}
 		ev, err := keri.ParseEvent(raw)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("%s does not parse: %w", label, err)
+			return nil, nil, nil, nil, fmt.Errorf("%s does not parse: %w", label, err)
 		}
 		if ev.Ilk != ilk {
-			return nil, nil, nil, fmt.Errorf("%s must be %s, got %q", label, ilk, ev.Ilk)
+			return nil, nil, nil, nil, fmt.Errorf("%s must be %s, got %q", label, ilk, ev.Ilk)
 		}
 		var ked map[string]interface{}
 		if err := json.Unmarshal(raw, &ked); err != nil {
-			return nil, nil, nil, fmt.Errorf("%s: %w", label, err)
+			return nil, nil, nil, nil, fmt.Errorf("%s: %w", label, err)
 		}
-		return ev, raw, ked, nil
+		signers := len(ev.Keys)
+		if signers == 0 {
+			signers = 1
+		}
+		sigs, err := drivers.IndexedSignatures(e.Sigs, signers)
+		if err != nil || len(sigs) == 0 {
+			return nil, nil, nil, nil, fmt.Errorf("%s is not signed with indexed signatures: %v", label, err)
+		}
+		return ev, raw, ked, sigs, nil
 	}
-	var icpKED map[string]interface{}
-	if c.icp, c.icpRaw, icpKED, err = decode("new_root_founding", req.NewRootFounding, "icp"); err != nil {
+	if c.icp, c.icpRaw, _, c.icpSigs, err = decode("new_root_founding", req.NewRootFounding, "icp"); err != nil {
 		return nil, err
 	}
-	if c.rot, c.rotRaw, c.rotKED, err = decode("old_root_rotation", req.OldRootRotation, "rot"); err != nil {
+	if c.rot, c.rotRaw, c.rotKED, c.rotSigs, err = decode("old_root_rotation", req.OldRootRotation, "rot"); err != nil {
 		return nil, err
 	}
-	if c.ixn, c.ixnRaw, c.ixnKED, err = decode("new_root_interaction", req.NewRootInteraction, "ixn"); err != nil {
+	var ixnKED map[string]interface{}
+	if c.ixn, c.ixnRaw, ixnKED, c.ixnSigs, err = decode("new_root_interaction", req.NewRootInteraction, "ixn"); err != nil {
 		return nil, err
 	}
 
-	if c.rot.Identifier != c.oldRootAID {
-		return nil, fmt.Errorf("old_root_rotation is of %s, not the identity kept here, %s", c.rot.Identifier, c.oldRootAID)
-	}
+	c.oldRootAID = c.rot.Identifier
 	if c.icp.Identifier == c.oldRootAID {
 		return nil, fmt.Errorf("new_root_founding founds the identity already kept here")
 	}
@@ -461,20 +525,12 @@ func checkSignedRootRotation(req RootAIDRotationRequest, st RootRotationStore) (
 	if err := ValidateAuthorizationEvent(c.oldRootAID, c.icp.SAID, c.rotKED); err != nil {
 		return nil, err
 	}
-	if len(anchorsOf(c.rotKED)) != 1 || len(anchorsOf(icpKED)) != 0 {
-		return nil, fmt.Errorf("the rotation anchors the new inception and nothing else, and the inception anchors nothing")
+	if len(anchorsOf(c.rotKED)) != 1 {
+		return nil, fmt.Errorf("the rotation anchors the new inception and nothing else")
 	}
-	tipSN, tail, err := kelTip(st, c.oldRootAID)
-	if err != nil {
-		return nil, err
-	}
-	c.priorTailSAID = tail
-	if c.rot.PriorSAID != tail || int(c.rot.SN) != tipSN+1 {
-		return nil, fmt.Errorf("old_root_rotation must follow the log's tip, sequence number %x (%s)", tipSN, tail)
-	}
-	back := anchorsOf(c.ixnKED)
-	if len(back) != 1 || back[0]["d"] != tail {
-		return nil, fmt.Errorf("new_root_interaction must seal the old root's log tail %s and nothing else", tail)
+	back := anchorsOf(ixnKED)
+	if len(back) != 1 || back[0]["d"] != c.rot.SAID {
+		return nil, fmt.Errorf("new_root_interaction must seal the old root's rotation %s and nothing else", c.rot.SAID)
 	}
 	for label, raw := range map[string][]byte{"new_root_founding": c.icpRaw, "old_root_rotation": c.rotRaw} {
 		if err := requirePostQuantumCommitment(raw); err != nil {
@@ -482,16 +538,43 @@ func checkSignedRootRotation(req RootAIDRotationRequest, st RootRotationStore) (
 		}
 	}
 
-	newLog := []drivers.SignedEventBytes{req.NewRootFounding, req.NewRootInteraction}
-	if err := verifyLog(c.icp.Identifier, newLog); err != nil {
-		return nil, fmt.Errorf("the new root's log does not verify: %w", err)
-	}
+	// The old root's log: the events up to the one the rotation follows, then
+	// either the rotation itself (an earlier run added it) or interactions it
+	// supersedes. Anything else at that place is not a rotation of this log.
 	events, err := st.GetEvents(c.oldRootAID)
 	if err != nil {
 		return nil, fmt.Errorf("load KEL events: %w", err)
 	}
+	at := int(c.rot.SN)
+	if at < 1 || at > len(events) {
+		return nil, fmt.Errorf("old_root_rotation is at sequence number %x, which does not follow an event of the log kept here", at)
+	}
+	if c.after, err = saidOfRecord(events[at-1]); err != nil {
+		return nil, err
+	}
+	if c.after != c.rot.PriorSAID {
+		return nil, fmt.Errorf("old_root_rotation follows %s, not the event at sequence number %x of the log kept here (%s)",
+			c.rot.PriorSAID, at-1, c.after)
+	}
+	rotAdded := false
+	if len(events) > at {
+		first, err := saidOfRecord(events[at])
+		if err != nil {
+			return nil, err
+		}
+		if first == c.rot.SAID {
+			rotAdded = true
+		} else {
+			for _, rec := range events[at:] {
+				if rec.EventType != "ixn" {
+					return nil, fmt.Errorf("old_root_rotation takes the place of %s at sequence number %x, "+
+						"and a rotation supersedes only interactions", rec.EventType, rec.SequenceNumber)
+				}
+			}
+		}
+	}
 	var oldLog []drivers.SignedEventBytes
-	for _, rec := range events {
+	for _, rec := range events[:at] {
 		sigs := rec.ControllerSignatures()
 		if rec.RawBytesB64 == "" || len(sigs) == 0 {
 			return nil, fmt.Errorf("the old root's event %d is kept without its signed bytes, so a rotation of it cannot be checked", rec.SequenceNumber)
@@ -501,7 +584,40 @@ func checkSignedRootRotation(req RootAIDRotationRequest, st RootRotationStore) (
 	if err := verifyLog(c.oldRootAID, append(oldLog, req.OldRootRotation)); err != nil {
 		return nil, fmt.Errorf("the old root's log with the rotation does not verify: %w", err)
 	}
+	newLog := []drivers.SignedEventBytes{req.NewRootFounding, req.NewRootInteraction}
+	if err := verifyLog(c.icp.Identifier, newLog); err != nil {
+		return nil, fmt.Errorf("the new root's log does not verify: %w", err)
+	}
+
+	// The identity kept here is the old root, or, once an earlier run moved
+	// it, the new root, which that run could only have done after the rotation
+	// was in the old root's log and the founding in the new root's.
+	switch identity.AID {
+	case c.oldRootAID:
+	case c.icp.Identifier:
+		founded, err := st.GetEvents(c.icp.Identifier)
+		if err != nil {
+			return nil, fmt.Errorf("load KEL events: %w", err)
+		}
+		if !rotAdded || len(founded) == 0 {
+			return nil, fmt.Errorf("the identity kept here is %s, which this rotation does not found", identity.AID)
+		}
+		c.moved, c.rotatedAt = true, identity.Created
+	default:
+		return nil, fmt.Errorf("old_root_rotation is of %s, not the identity kept here, %s", c.rot.Identifier, identity.AID)
+	}
 	return c, nil
+}
+
+// saidOfRecord is the digest of a kept event.
+func saidOfRecord(rec store.EventRecord) (string, error) {
+	var ked struct {
+		D string `json:"d"`
+	}
+	if err := json.Unmarshal([]byte(rec.EventJSON), &ked); err != nil || ked.D == "" {
+		return "", fmt.Errorf("the event at sequence number %d is kept without its digest", rec.SequenceNumber)
+	}
+	return ked.D, nil
 }
 
 func verifyLog(aid string, events []drivers.SignedEventBytes) error {
@@ -552,20 +668,22 @@ var RootAIDRotationSigned = true
 
 // ContinuityProofInput is the continuity payload before assembly.
 type ContinuityProofInput struct {
-	OldRootAID                 string
-	NewRootAID                 string
-	NewInceptionSAID           string
-	AuthorizationEvent         map[string]interface{}
-	AuthorizationCesrSignature string
-	AuthorizationEventSAID     string
-	BackAnchorEvent            map[string]interface{}
-	BackAnchorCesrSignature    string
-	BackAnchorEventSAID        string
-	PriorKelTailSAID           string
-	RotatedAt                  string
-	RecoverySessionID          string
-	CarryForwardAIDs           []string
-	WitnessThreshold           int
+	OldRootAID               string
+	NewRootAID               string
+	NewInceptionSAID         string
+	NewInceptionRawB64       string
+	NewInceptionSignatures   []string
+	AuthorizationEventRawB64 string
+	AuthorizationSignatures  []string
+	AuthorizationEventSAID   string
+	BackAnchorEventRawB64    string
+	BackAnchorSignatures     []string
+	BackAnchorEventSAID      string
+	PriorKelTailSAID         string
+	RotatedAt                string
+	RecoverySessionID        string
+	CarryForwardAIDs         []string
+	WitnessThreshold         int
 }
 
 // BuildDelegationAnchorSeal returns the rot/ixn seal authorizing a new root inception.
@@ -576,9 +694,10 @@ func BuildDelegationAnchorSeal(newInceptionSAID string) []interface{} {
 	}
 }
 
-// BuildContinuityBackReferenceSeal returns the optional new→old back-reference seal.
-func BuildContinuityBackReferenceSeal(priorKelTailSAID string) []interface{} {
-	return BuildDelegationAnchorSeal(priorKelTailSAID)
+// BuildContinuityBackReferenceSeal returns the new→old back-reference seal: the
+// digest of the old root's tip after the rotation, which is the rotation.
+func BuildContinuityBackReferenceSeal(oldRootTipSAID string) []interface{} {
+	return BuildDelegationAnchorSeal(oldRootTipSAID)
 }
 
 // ValidateAuthorizationEvent ensures the old root rot seals the new inception SAID.
@@ -616,22 +735,112 @@ func ValidateAuthorizationEvent(oldRootAID, newInceptionSAID string, event map[s
 // BuildContinuityProof assembles the continuity document for outbound notification.
 func BuildContinuityProof(in ContinuityProofInput) ContinuityProof {
 	return ContinuityProof{
-		V:                          continuityProofVersion,
-		OldRootAID:                 in.OldRootAID,
-		NewRootAID:                 in.NewRootAID,
-		NewInceptionSAID:           in.NewInceptionSAID,
-		AuthorizationEvent:         in.AuthorizationEvent,
-		AuthorizationCesrSignature: in.AuthorizationCesrSignature,
-		AuthorizationEventSAID:     in.AuthorizationEventSAID,
-		BackAnchorEvent:            in.BackAnchorEvent,
-		BackAnchorCesrSignature:    in.BackAnchorCesrSignature,
-		BackAnchorEventSAID:        in.BackAnchorEventSAID,
-		PriorKelTailSAID:           in.PriorKelTailSAID,
-		RotatedAt:                  in.RotatedAt,
-		RecoverySessionID:          in.RecoverySessionID,
-		CarryForwardAIDs:           append([]string(nil), in.CarryForwardAIDs...),
-		WitnessThreshold:           in.WitnessThreshold,
+		V:                        continuityProofVersion,
+		OldRootAID:               in.OldRootAID,
+		NewRootAID:               in.NewRootAID,
+		NewInceptionSAID:         in.NewInceptionSAID,
+		NewInceptionRawB64:       in.NewInceptionRawB64,
+		NewInceptionSignatures:   append([]string(nil), in.NewInceptionSignatures...),
+		AuthorizationEventRawB64: in.AuthorizationEventRawB64,
+		AuthorizationSignatures:  append([]string(nil), in.AuthorizationSignatures...),
+		AuthorizationEventSAID:   in.AuthorizationEventSAID,
+		BackAnchorEventRawB64:    in.BackAnchorEventRawB64,
+		BackAnchorSignatures:     append([]string(nil), in.BackAnchorSignatures...),
+		BackAnchorEventSAID:      in.BackAnchorEventSAID,
+		PriorKelTailSAID:         in.PriorKelTailSAID,
+		RotatedAt:                in.RotatedAt,
+		RecoverySessionID:        in.RecoverySessionID,
+		CarryForwardAIDs:         append([]string(nil), in.CarryForwardAIDs...),
+		WitnessThreshold:         in.WitnessThreshold,
 	}
+}
+
+// VerifyContinuityProof checks a proof from what it carries alone: each
+// event's digest is recomputed from its bytes, the new root's two events are
+// judged as a signed log of their own, and the authorization rotation's
+// signatures are checked against the key it reveals. That the key opens the
+// old root's pre-rotation commitment is checked against the old root's log,
+// which the proof does not carry.
+func VerifyContinuityProof(p ContinuityProof) error {
+	read := func(label, rawB64, ilk, said string) ([]byte, *keri.Event, error) {
+		raw, err := base64.StdEncoding.Strict().DecodeString(rawB64)
+		if err != nil || len(raw) == 0 {
+			return nil, nil, fmt.Errorf("%s: raw bytes are not standard base64", label)
+		}
+		ev, err := keri.ParseEvent(raw)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%s: %w", label, err)
+		}
+		if ev.Ilk != ilk {
+			return nil, nil, fmt.Errorf("%s is a %s, not a %s", label, ev.Ilk, ilk)
+		}
+		got, err := keri.ComputeSAID(raw)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%s: %w", label, err)
+		}
+		if got != said || ev.SAID != said {
+			return nil, nil, fmt.Errorf("%s: its bytes digest to %s, the proof says %s", label, got, said)
+		}
+		return raw, ev, nil
+	}
+	icpRaw, icp, err := read("new inception", p.NewInceptionRawB64, "icp", p.NewInceptionSAID)
+	if err != nil {
+		return err
+	}
+	rotRaw, rot, err := read("authorization event", p.AuthorizationEventRawB64, "rot", p.AuthorizationEventSAID)
+	if err != nil {
+		return err
+	}
+	ixnRaw, ixn, err := read("back-anchor event", p.BackAnchorEventRawB64, "ixn", p.BackAnchorEventSAID)
+	if err != nil {
+		return err
+	}
+	if icp.Identifier != p.NewRootAID || rot.Identifier != p.OldRootAID || ixn.Identifier != icp.Identifier ||
+		ixn.SN != 1 || ixn.PriorSAID != icp.SAID {
+		return fmt.Errorf("the events are not the ones that tie %s to %s", p.OldRootAID, p.NewRootAID)
+	}
+	var rotKED, ixnKED map[string]interface{}
+	if err := json.Unmarshal(rotRaw, &rotKED); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(ixnRaw, &ixnKED); err != nil {
+		return err
+	}
+	if err := ValidateAuthorizationEvent(p.OldRootAID, icp.SAID, rotKED); err != nil {
+		return err
+	}
+	if back := anchorsOf(ixnKED); len(back) != 1 || back[0]["d"] != rot.SAID {
+		return fmt.Errorf("the back-anchor event does not seal the authorization event")
+	}
+	icpMsg, err := drivers.SignedMessage(icpRaw, p.NewInceptionSignatures)
+	if err != nil {
+		return fmt.Errorf("new inception: %w", err)
+	}
+	ixnMsg, err := drivers.SignedMessage(ixnRaw, p.BackAnchorSignatures)
+	if err != nil {
+		return fmt.Errorf("back-anchor event: %w", err)
+	}
+	if _, err := keri.ValidateSignedKEL([][]byte{icpMsg, ixnMsg}); err != nil {
+		return fmt.Errorf("the new root's events do not verify: %w", err)
+	}
+	valid := 0
+	for _, q := range p.AuthorizationSignatures {
+		sig, err := keri.ParseIndexedSignature(q)
+		if err != nil {
+			return fmt.Errorf("authorization event: %w", err)
+		}
+		if sig.At.Index >= len(rot.Keys) {
+			return fmt.Errorf("authorization event: a signature is of key %d of %d", sig.At.Index, len(rot.Keys))
+		}
+		if err := keri.VerifySignature(rot.Keys[sig.At.Index], rotRaw, sig.Raw); err != nil {
+			return fmt.Errorf("authorization event: %w", err)
+		}
+		valid++
+	}
+	if valid == 0 {
+		return fmt.Errorf("the authorization event carries no signature")
+	}
+	return nil
 }
 
 func validateRootAIDRotationRequest(req RootAIDRotationRequest) error {
@@ -649,27 +858,10 @@ func validateRootAIDRotationRequest(req RootAIDRotationRequest) error {
 	return nil
 }
 
-// kelTip is the sequence number and digest of the last event kept of aid.
-func kelTip(st RootRotationStore, aid string) (int, string, error) {
-	events, err := st.GetEvents(aid)
-	if err != nil {
-		return 0, "", fmt.Errorf("load KEL events: %w", err)
-	}
-	if len(events) == 0 {
-		return 0, "", fmt.Errorf("no KEL events for root AID %s", aid)
-	}
-	tail := events[len(events)-1]
-	var ked map[string]interface{}
-	if err := json.Unmarshal([]byte(tail.EventJSON), &ked); err != nil {
-		return 0, "", fmt.Errorf("parse tail event: %w", err)
-	}
-	said, _ := ked["d"].(string)
-	if said == "" {
-		return 0, "", fmt.Errorf("tail KEL event missing SAID (d)")
-	}
-	return tail.SequenceNumber, said, nil
-}
-
+// dispatchNotifications queues one task per party to tell, each carrying the
+// continuity proof (the line after the first of its detail). A task's id is
+// fixed by the new root and the party, so queuing again replaces a task rather
+// than adding one. Nothing sends them here.
 func (s *RootAIDRotationService) dispatchNotifications(st RootRotationStore, set *NotifySet, proof ContinuityProof) (int, error) {
 	if set == nil {
 		return 0, nil
@@ -679,7 +871,6 @@ func (s *RootAIDRotationService) dispatchNotifications(st RootRotationStore, set
 		return 0, fmt.Errorf("marshal continuity proof: %w", err)
 	}
 
-	now := s.Now().Format(time.RFC3339)
 	sent := 0
 	for _, party := range set.All() {
 		target := party.AID
@@ -687,21 +878,32 @@ func (s *RootAIDRotationService) dispatchNotifications(st RootRotationStore, set
 			target = party.URL
 		}
 		task := store.TaskRecord{
-			ID:         fmt.Sprintf("root-aid-notify-%s-%d", target, s.Now().UnixNano()),
+			ID:         fmt.Sprintf("root-aid-notify-%s-%s-%s", proof.NewRootAID, party.Kind, target),
 			Type:       rootAIDRotationTaskType,
 			Status:     "pending",
 			ContactAID: party.AID,
-			Detail:     fmt.Sprintf("notify %s (%s) of new root %s with signed delegation anchor", party.Kind, target, proof.NewRootAID),
-			CreatedAt:  now,
-			UpdatedAt:  now,
+			Detail: fmt.Sprintf("notify %s (%s) of new root %s with signed delegation anchor\n%s",
+				party.Kind, target, proof.NewRootAID, proofJSON),
+			CreatedAt: proof.RotatedAt,
+			UpdatedAt: proof.RotatedAt,
 		}
-		_ = proofJSON
 		if err := st.SaveTask(task); err != nil {
 			return sent, fmt.Errorf("queue notify task for %s: %w", target, err)
 		}
 		sent++
 	}
 	return sent, nil
+}
+
+// ContinuityProofOfTask reads the proof a notification task carries.
+func ContinuityProofOfTask(task store.TaskRecord) (ContinuityProof, error) {
+	var p ContinuityProof
+	_, body, found := strings.Cut(task.Detail, "\n")
+	if !found {
+		return p, fmt.Errorf("task %s carries no continuity proof", task.ID)
+	}
+	err := json.Unmarshal([]byte(body), &p)
+	return p, err
 }
 
 func appendRootAIDMapEntry(dataDir string, entry RootAIDMapEntry) error {
@@ -716,6 +918,13 @@ func appendRootAIDMapEntry(dataDir string, entry RootAIDMapEntry) error {
 	}
 	if existing.Version == 0 {
 		existing.Version = 1
+	}
+	for _, e := range existing.Entries {
+		if e.OldRootAID == entry.OldRootAID && e.NewRootAID == entry.NewRootAID &&
+			e.AuthorizationEventSAID == entry.AuthorizationEventSAID {
+			// A run that stopped after writing this entry, sent again.
+			return nil
+		}
 	}
 	existing.Entries = append(existing.Entries, entry)
 

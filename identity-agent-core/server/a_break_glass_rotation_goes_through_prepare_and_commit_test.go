@@ -4,8 +4,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
 
 	"identity-agent-core/recovery"
 
@@ -30,27 +35,78 @@ type brokenGlass struct {
 	oldAID   string
 	prepared map[string]map[string]any
 	req      map[string]any
+	// preparedWhenLogWas is how long the old root's log was when the
+	// rotation was prepared: preparing added nothing to it.
+	preparedWhenLogWas int
+}
+
+// breakGlassSetup says how the root to break glass on is founded, and what the
+// app asks of the new root.
+type breakGlassSetup struct {
+	oldFounding map[string]any // added to the old root's founding request
+	newRoot     map[string]any // added to the prepare request's new_root
+	core        func(*CoreServer)
+	// between runs after the old root is founded, before the rotation is prepared.
+	between func(b *brokenGlass)
+	// after, if set, names the event the rotation follows.
+	after func(b *brokenGlass) map[string]string
+}
+
+// aSession writes a recovery session the way a running agent keeps one, and
+// returns its id.
+func aSession(t *testing.T, s *CoreServer) string {
+	t.Helper()
+	id := uuid.New().String()
+	dir := filepath.Join(s.DataDir, "recovery_sessions")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]any{"session": map[string]any{"id": id, "state": "pending"},
+		"written_at": time.Now().UTC().Format(time.RFC3339)})
+	if err := os.WriteFile(filepath.Join(dir, id+".json"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return id
 }
 
 // aRootToBreakGlassOn founds the old root, app-held, and has the rotation prepared and signed.
 // Old keys k[0] (current, "stolen") and k[1] (committed); new root keys k[5], k[6].
 func aRootToBreakGlassOn(t *testing.T) *brokenGlass {
+	return aRootToBreakGlassWith(t, breakGlassSetup{})
+}
+
+func aRootToBreakGlassWith(t *testing.T, opt breakGlassSetup) *brokenGlass {
 	t.Helper()
 	breakGlassOn(t)
 	s := appHeldCore(t)
+	if opt.core != nil {
+		opt.core(s)
+	}
 	k := appSeeds(10)
-	aid, tip := founding(t, s, k[0], k[1], nil)
+	aid, tip := founding(t, s, k[0], k[1], opt.oldFounding)
+	b := &brokenGlass{s: s, k: k, oldAID: aid}
+	if opt.between != nil {
+		opt.between(b)
+	}
+	if opt.after != nil {
+		tip = opt.after(b)
+	}
 
+	newRoot := map[string]any{"k": []string{verkeyOf(k[5])}, "n": commits(t, k[6], reserveFor(k[6]))}
+	for name, v := range opt.newRoot {
+		newRoot[name] = v
+	}
+	before, _ := s.DataStore.GetEvents(aid)
 	code, out := call(t, s, s.handleRecoveryRootAIDPrepare, "/api/recovery/root-aid-rotation/prepare", map[string]any{
-		"new_root": map[string]any{"k": []string{verkeyOf(k[5])}, "n": commits(t, k[6], reserveFor(k[6]))},
+		"new_root": newRoot,
 		"old_root": map[string]any{"k": []string{verkeyOf(k[1])}, "n": commits(t, k[2], reserveFor(k[2])),
 			"after": tip},
 	})
 	if code != http.StatusOK {
 		t.Fatalf("prepare: %d %v", code, out)
 	}
-	if evs, _ := s.DataStore.GetEvents(aid); len(evs) != 1 {
-		t.Fatalf("preparing added an event: the old root's log is %d long", len(evs))
+	if after, _ := s.DataStore.GetEvents(aid); len(after) != len(before) {
+		t.Fatalf("preparing added an event: the old root's log is %d long, was %d", len(after), len(before))
 	}
 	prepared := map[string]map[string]any{}
 	for _, name := range []string{"new_root_founding", "old_root_rotation", "new_root_interaction"} {
@@ -60,12 +116,15 @@ func aRootToBreakGlassOn(t *testing.T) *brokenGlass {
 	sig := func(name string, seed []byte, opens bool) map[string]any {
 		return map[string]any{"raw_b64": prepared[name]["raw_b64"], "sigs": []string{appSign(t, seed, rawOf(name), opens)}}
 	}
-	return &brokenGlass{s: s, k: k, oldAID: aid, prepared: prepared, req: map[string]any{
-		"recovery_session_id":  "sess-1",
+	b.prepared = prepared
+	b.preparedWhenLogWas = len(before)
+	b.req = map[string]any{
+		"recovery_session_id":  aSession(t, s),
 		"new_root_founding":    sig("new_root_founding", k[5], true),
 		"old_root_rotation":    sig("old_root_rotation", k[1], true),
 		"new_root_interaction": sig("new_root_interaction", k[5], false),
-	}}
+	}
+	return b
 }
 
 func (b *brokenGlass) rotate(t *testing.T) (int, map[string]any) {
