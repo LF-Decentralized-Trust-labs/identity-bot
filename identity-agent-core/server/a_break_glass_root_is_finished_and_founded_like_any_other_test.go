@@ -461,10 +461,12 @@ func eventsOfRaw(t *testing.T, raw []byte) map[string]any {
 }
 
 // A core that requires an owner prepares no new root without one, and the
-// gate is the founding's: a machine that may not found refuses.
+// gate is the founding's: a machine that may not found refuses. (A new root
+// whose old root has an owner takes it, as it takes its witnesses, so the old
+// root here has none.)
 func TestBreakGlassNewRootIsHeldToTheFoundingGate(t *testing.T) {
-	w := newWitness()
-	b, _ := foundedWitnessed(t, w, map[string]any{"owner_aid": anOwner})
+	b := aRootToBreakGlassOn(t)
+	b.s.requireOwnerAtInception = true
 	k := b.k
 	code, out := call(t, b.s, b.s.handleRecoveryRootAIDPrepare, "/api/recovery/root-aid-rotation/prepare", map[string]any{
 		"new_root": map[string]any{"k": []string{verkeyOf(k[5])}, "n": commits(t, k[6], reserveFor(k[6]))},

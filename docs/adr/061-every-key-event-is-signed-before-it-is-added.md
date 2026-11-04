@@ -386,8 +386,14 @@ a witness.
   last establishment event or an interaction it keeps, and supersedes the
   interactions after it as a recovery rotation does (section 4), so the holder
   of a stolen key cannot block it by adding interactions. The new root is
-  founded as an ordinary founding is: its witnesses default to the old root's,
-  and the owner seal, the messaging keyset and the founding gate apply.
+  founded as an ordinary founding is: its witnesses and its owner default to
+  the old root's when the app names others, so an owned identity is not left
+  without its owner by a break-glass whose app names none; and the messaging
+  keyset and the founding gate apply, the gate being the one
+  `/api/events/commit` applies to an inception, taken under the same founding
+  lock. The messaging keyset the app handed over for the old root is given to
+  the new root only after the rest of the request has passed its checks, and
+  once the new root's keyset is filed no copy and no replacement is left.
   `POST /api/recovery/root-aid-rotation/prepare` builds the three events and
   adds none; `POST /api/recovery/root-aid-rotation` takes all three signed, for
   a recovery session that exists. Nothing is written unless the checks pass,

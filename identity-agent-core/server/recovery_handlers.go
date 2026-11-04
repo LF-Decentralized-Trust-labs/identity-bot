@@ -388,7 +388,11 @@ func (s *CoreServer) handleRecoveryRootAIDRotation(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusServiceUnavailable, "Store not available", "identity store is required")
 		return
 	}
-	if !s.theNewRootMayBeFounded(w, req) {
+	// A founding is made one at a time, as /api/events/commit makes one.
+	s.founding.Lock()
+	defer s.founding.Unlock()
+	oldRootAID, ok := s.theNewRootMayBeFounded(w, req)
+	if !ok {
 		return
 	}
 
@@ -429,6 +433,7 @@ func (s *CoreServer) handleRecoveryRootAIDRotation(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusUnprocessableEntity, "Root-AID rotation failed", err.Error())
 		return
 	}
+	s.theMessagingKeysAreTheNewRoots(req, oldRootAID, result.NewRootAID)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
 }
@@ -468,6 +473,11 @@ func (s *CoreServer) handleRecoveryRootAIDPrepare(w http.ResponseWriter, r *http
 		// Unless the app names others, the new root keeps the old root's witnesses.
 		founding.B, founding.Bt = s.witnessesOfTheIdentityKept(founding.Bt)
 	}
+	if founding.OwnerAID == "" {
+		// And its owner: a new root that named none would drop the owner of an
+		// owned identity, which a core that does not require one would not notice.
+		founding.OwnerAID = s.ownerOfTheIdentityKept()
+	}
 	pr, err := founding.engineRequest()
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid witness threshold", err.Error())
@@ -484,6 +494,24 @@ func (s *CoreServer) handleRecoveryRootAIDPrepare(w http.ResponseWriter, r *http
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(prepared)
+}
+
+// ownerOfTheIdentityKept is the owner the identity kept here was founded with,
+// if its founding names one: the owner seal is written into the inception event.
+func (s *CoreServer) ownerOfTheIdentityKept() string {
+	own, err := s.DataStore.GetIdentity()
+	if err != nil || own == nil {
+		return ""
+	}
+	events, err := s.DataStore.GetEvents(own.AID)
+	if err != nil || len(events) == 0 {
+		return ""
+	}
+	raw, err := base64.StdEncoding.DecodeString(events[0].RawBytesB64)
+	if err != nil {
+		return ""
+	}
+	return ownerNamedIn(raw)
 }
 
 // maxRootRotationBody bounds a break-glass rotation: three signed events, each
@@ -513,49 +541,77 @@ func (s *CoreServer) witnessesOfTheIdentityKept(bt *json.RawMessage) ([]string, 
 }
 
 // theNewRootMayBeFounded applies to the new root of a break-glass rotation
-// what a founding is held to when it is committed: the founding gate, and the
-// messaging keyset it anchors being one this Identity Agent holds. The keyset
-// the app handed over while the old root was kept here is held aside as the old
-// root's replacement; it is held for the new root's founding instead. A refusal
-// is answered here, before anything is written; ok is false then.
-func (s *CoreServer) theNewRootMayBeFounded(w http.ResponseWriter, req recovery.RootAIDRotationRequest) bool {
+// what a founding is held to when it is committed: the founding gate itself
+// (mayFound, as /api/events/commit applies it to an icp), and the messaging
+// keyset it anchors being one this Identity Agent holds. The keyset the app
+// handed over while the old root was kept here is held aside as the old root's
+// replacement; it is held for the new root's founding instead, and only once
+// the request has passed every other check, so a refused request writes
+// nothing. The caller holds s.founding. A refusal is answered here, before
+// anything is written; ok is false then.
+func (s *CoreServer) theNewRootMayBeFounded(w http.ResponseWriter, req recovery.RootAIDRotationRequest) (oldRootAID string, ok bool) {
 	raw, err := base64.StdEncoding.Strict().DecodeString(req.NewRootFounding.RawB64)
 	if err != nil {
-		return true // the rotation's own checks refuse what is not the event
+		return "", true // the rotation's own checks refuse what is not the event
 	}
 	ev, err := keri.ParseEvent(raw)
 	if err != nil || ev.Ilk != "icp" {
-		return true
+		return "", true
 	}
-	if s.requireOwnerAtInception && ownerNamedIn(raw) == "" {
-		writeError(w, http.StatusBadRequest, "This agent will not found an identity that names no owner",
-			"owner_aid is required. An owner is written into the founding event and cannot be added afterwards.")
-		return false
+	if !s.mayFound(w, ownerNamedIn(raw), true) {
+		return "", false
 	}
-	own, _ := s.DataStore.GetIdentity()
-	if own != nil && own.AID != ev.Identifier {
-		for _, anchor := range messagingAnchorsIn(raw) {
-			if held, _ := s.keySetAnchorHeld(pendingKeySetLabel(anchor), anchor); held {
-				continue
-			}
-			if held, _ := s.keySetAnchorHeld(pendingReplacementLabel(own.AID), anchor); !held {
-				continue
-			}
-			ks, err := s.keySetFor(pendingReplacementLabel(own.AID))
-			if err == nil {
-				err = s.putKeySet(pendingKeySetLabel(anchor), ks)
-			}
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "The messaging keys could not be kept", err.Error())
-				return false
-			}
+	oldRootAID, err = recovery.CheckRootAIDRotation(req, s.DataStore)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "Root-AID rotation failed", err.Error())
+		return "", false
+	}
+	if len(messagingAnchorsIn(raw)) > 1 {
+		title, detail := s.unheldKeySetRefusal(raw, ev.Identifier)
+		writeError(w, http.StatusBadRequest, title, detail)
+		return "", false
+	}
+	for _, anchor := range messagingAnchorsIn(raw) {
+		if held, _ := s.keySetAnchorHeld(ev.Identifier, anchor); held {
+			continue // an earlier run filed it under the new root
+		}
+		if held, _ := s.keySetAnchorHeld(pendingKeySetLabel(anchor), anchor); held {
+			continue
+		}
+		if held, _ := s.keySetAnchorHeld(pendingReplacementLabel(oldRootAID), anchor); !held {
+			continue // not held anywhere: refused below
+		}
+		ks, err := s.keySetFor(pendingReplacementLabel(oldRootAID))
+		if err == nil {
+			err = s.putKeySet(pendingKeySetLabel(anchor), ks)
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "The messaging keys could not be kept", err.Error())
+			return "", false
 		}
 	}
 	if title, detail := s.unheldKeySetRefusal(raw, ev.Identifier); title != "" {
 		writeError(w, http.StatusBadRequest, title, detail)
-		return false
+		return "", false
 	}
-	return true
+	return oldRootAID, true
+}
+
+// theMessagingKeysAreTheNewRoots is what a finished rotation leaves of the
+// keyset handed over: filed under the new root, with no copy waiting for a
+// founding that is done and no replacement still held for the old root.
+func (s *CoreServer) theMessagingKeysAreTheNewRoots(req recovery.RootAIDRotationRequest, oldRootAID, newRootAID string) {
+	raw, err := base64.StdEncoding.Strict().DecodeString(req.NewRootFounding.RawB64)
+	if err != nil {
+		return
+	}
+	for _, anchor := range messagingAnchorsIn(raw) {
+		if held, _ := s.keySetAnchorHeld(newRootAID, anchor); !held {
+			continue
+		}
+		_ = s.forgetKeySet(pendingKeySetLabel(anchor))
+		_ = s.forgetKeySet(pendingReplacementLabel(oldRootAID))
+	}
 }
 
 func (s *CoreServer) handleRecoveryRootAIDStatus(w http.ResponseWriter, r *http.Request) {

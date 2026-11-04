@@ -642,6 +642,21 @@ func checkSignedRootRotation(req RootAIDRotationRequest, st RootRotationStore) (
 	return c, nil
 }
 
+// CheckRootAIDRotation judges a rotation request as RotateRootAID does before
+// it writes anything, and says which root it moves on from. A caller that has
+// to prepare something for the rotation (the server hands the new root's
+// messaging keys over) does so only for a request that passes.
+func CheckRootAIDRotation(req RootAIDRotationRequest, st RootRotationStore) (oldRootAID string, err error) {
+	if err := validateRootAIDRotationRequest(req); err != nil {
+		return "", err
+	}
+	checked, err := checkSignedRootRotation(req, st)
+	if err != nil {
+		return "", err
+	}
+	return checked.oldRootAID, nil
+}
+
 // saidOfRecord is the digest of a kept event.
 func saidOfRecord(rec store.EventRecord) (string, error) {
 	var ked struct {
