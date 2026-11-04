@@ -44,6 +44,8 @@ func (s *CoreServer) handleListOwners(w http.ResponseWriter, r *http.Request) {
 	writeJSONResponse(w, map[string]interface{}{
 		"aid":    identity.AID,
 		"owners": owners,
+		// Names only for owners whose name checks out; see verifiedOwnerNames.
+		"owner_names": s.verifiedOwnerNames(identity.AID, owners),
 	})
 }
 
