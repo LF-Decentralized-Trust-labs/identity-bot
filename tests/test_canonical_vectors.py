@@ -21,7 +21,7 @@ import pysodium
 from keri.core import coring, eventing
 from keri.core.coring import MtrDex
 
-from conftest import compute_said
+from conftest import Salter, compute_said
 
 
 # ===========================================================================
@@ -124,14 +124,14 @@ class TestDeterministicSAIDs:
 
     def test_salter_from_spec_salt_produces_valid_signer(self):
         """keripy Salter initialises without error from the spec salt."""
-        salter = coring.Salter(raw=KERI_SPEC_SALT)
+        salter = Salter(raw=KERI_SPEC_SALT)
         signer = salter.signer(transferable=True, temp=True)
         assert signer is not None
         assert signer.verfer is not None
 
     def test_salter_derived_aid_has_correct_format(self):
         """Salter-derived inception event produces a Blake3_256 AID ('E' prefix, 44 chars)."""
-        salter = coring.Salter(raw=KERI_SPEC_SALT)
+        salter = Salter(raw=KERI_SPEC_SALT)
         signer = salter.signer(transferable=True, temp=True)
         # Derive the pre-rotated key at path index 1
         signer_next = salter.signer(transferable=True, temp=True, path="b")
@@ -155,7 +155,7 @@ class TestDeterministicSAIDs:
         """
         EXPECTED_EAN_AID_V1117 = "EIQ3rUKsp3e-KeQ0ZJ_deD5bkfqlijnXRwHVPam4904Q"
 
-        salter   = coring.Salter(raw=KERI_SPEC_SALT)
+        salter   = Salter(raw=KERI_SPEC_SALT)
         signers  = salter.signers(count=18, transferable=True, temp=True)
         ean_cur  = signers[0]
         ean_next = signers[1]
@@ -183,7 +183,7 @@ class TestDeterministicSAIDs:
         EXPECTED_AMY_AID_V1117 = "EA7sG8XoXDpaoYupLE6YYw7dKmCydFXpJx55cZl01Ph-"
         ACDC_SPEC_SALT         = b"acdcspecworkexam"
 
-        salter   = coring.Salter(raw=ACDC_SPEC_SALT)
+        salter   = Salter(raw=ACDC_SPEC_SALT)
         signers  = salter.signers(count=4, transferable=True, temp=True)
         amy_cur  = signers[0]
         amy_next = signers[1]
