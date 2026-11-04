@@ -3,6 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-10-20
 **Amended:** 2026-11-02 — An app is a kind of asset, with a grant and a body of its own (see §Amendment 1)
+**Amended:** 2026-11-04 — A machine key's short code is 80 bits, not about 41 (see §Amendment 2)
 **Relates to:** ADR-032 (An identity can name who owns it, from its first event), ADR-042 (How an agent is reached, and who may manage it), ADR-044 (An authorized controller does the app's work)
 
 ## Context
@@ -203,7 +204,7 @@ issuance event is of that credential, in its registry; the interaction is a well
 event of the credential's issuer whose one seal anchors exactly that issuance; and the
 interaction extends the identity's key log as the device holds it. What is shown is read
 from the credential: its kind, whom it grants, the machine's key and its fingerprint
-(`authorisation.KeyFingerprint`, which pairing shows too), grade, signer, end,
+(`authorisation.KeyFingerprint`, the code the owner compares, see Amendment 2), grade, signer, end,
 capabilities and limits, never text the asking Identity Agent wrote. A registry's
 inception is checked the same way (`WhatSigningRegisters`).
 
@@ -333,3 +334,41 @@ its asset in `about` only when the request that asked for it named one, so it an
 grant the holder holds: that grant gives the kind, and its `about`, where it has one, must be
 the `{id}`. The check also requires the path to be the one the route mounts,
 `/api/mcp/agents/{id}/bodies/{machine}/approve`.
+
+## Amendment 2 (2026-11-04): a machine key's short code is 80 bits
+
+`authorisation.KeyFingerprint` is the short code a person compares to confirm a machine's key.
+It was eight characters of the key's Blake3 text form (QB64), in two groups, upper-cased. The
+first character after the type code takes only 16 values and upper-casing merges letters, so
+the code carried about 41 bits. Someone who knew a person's code could make a different key
+with the same code on a GPU in hours, and the person would confirm the wrong key.
+
+It is now the first 80 bits of the raw Blake3-256 digest (not its QB64 text), written as 16
+Crockford base32 characters in four groups of four, `XXXX-XXXX-XXXX-XXXX`. Crockford has no
+I, L, O or U and is case-insensitive, so nothing is lost by upper-casing or by reading a
+code aloud. The domain string was `key-fingerprint/v1` and the version change means an old code
+never equals a new one. A key of the machine that was compared under the old form must be
+compared again.
+
+Exactly, so that another implementation reproduces it byte for byte:
+
+1. Take the public key as its QB64 text, with leading and trailing white space (space, tab,
+   CR, LF, and the other Unicode white space Go's `strings.TrimSpace` removes) trimmed. An
+   empty key has no code.
+2. Hash the UTF-8 bytes of `key-fingerprint/v2` + one LF (0x0A) + that text with plain,
+   unkeyed BLAKE3, 256-bit output.
+3. Take the first 10 bytes of the digest (80 bits). Read them most significant bit first, in
+   sixteen 5-bit groups, with no padding.
+4. Write each group as a character of `0123456789ABCDEFGHJKMNPQRSTVWXYZ` (value 0 is `0`,
+   value 31 is `Z`), and put a `-` after the 4th, 8th and 12th.
+
+Vector: the key `DAtHgj5xCV3Vm-eKwnHFdu84n4e2RWGrB8-aTrzQLSBB` has the code
+`M8PN-ME83-7RPK-D6FF`.
+
+The code is derived from the key each time it is shown, with one exception: an approval
+queued before this change keeps the old eight-character code in its stored one-line summary,
+while its details show the new one. They differ visibly, which is safe: compare the new one.
+
+Pinned in `identity-agent-core/authorisation/a_key_code_is_too_long_to_forge_test.go`: two
+keys with their codes, and every one-bit change of a key giving a different code. There was no
+published vector file for this code, so none is regenerated.

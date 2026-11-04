@@ -20,8 +20,9 @@ import (
 	"fmt"
 	"strings"
 
-	"identity-agent-core/iacrypto"
 	"identity-agent-core/schemas"
+
+	"github.com/zeebo/blake3"
 
 	keri "github.com/grapeid/keri-go"
 )
@@ -56,15 +57,40 @@ type ToSign struct {
 	Revokes bool `json:"revokes,omitempty"`
 }
 
-// KeyFingerprint is a machine key's short form: eight characters of its
-// digest, in two groups, the same wherever it is shown.
+// KeyFingerprint is a machine key's short code, the same wherever it is shown:
+// 16 characters of its digest in four groups of four (XXXX-XXXX-XXXX-XXXX).
+//
+// The characters are Crockford base32 of the raw digest bytes, which has no I,
+// L, O or U and is the same in either case, so reading a code aloud or typing
+// it in lower case loses nothing. Sixteen characters carry 80 bits, so making
+// a second key with the same code takes about 2^80 tries, not the 2^41 the
+// first form allowed. The domain string carries a version so a code from one
+// form can never equal a code from another.
 func KeyFingerprint(key string) string {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return ""
 	}
-	d := iacrypto.Blake3QB64Must([]byte("key-fingerprint/v1\n" + key))
-	return strings.ToUpper(d[1:5] + "-" + d[5:9])
+	sum := blake3.Sum256([]byte("key-fingerprint/v2\n" + key))
+	const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+	// 80 bits, the first ten bytes, as sixteen groups of five bits.
+	var out [19]byte
+	var acc uint16
+	var bits uint
+	n := 0
+	for _, by := range sum[:10] {
+		acc = acc<<8 | uint16(by)
+		bits += 8
+		for bits >= 5 {
+			bits -= 5
+			if n > 0 && n%4 == 0 {
+				out[n+n/4-1] = '-'
+			}
+			out[n+n/4] = alphabet[(acc>>bits)&31]
+			n++
+		}
+	}
+	return string(out[:])
 }
 
 // anchoringSeal checks that ixn is a well-formed interaction of issuer whose
