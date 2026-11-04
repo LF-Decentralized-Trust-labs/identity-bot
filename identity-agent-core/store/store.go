@@ -316,6 +316,15 @@ type PresentationRecord struct {
 
 // ContactKELRecord stores a contact's validated Key Event Log.
 // This is the cryptographic proof of a contact's identity history.
+// The kinds of signed endpoint record a store holds, as EndpointRecord.Route.
+// A witness keeps the one a controller published for it; an Identity Agent that
+// looks a contact up keeps the newest it has verified, so it is never taken back
+// to an older address.
+const (
+	EndpointRecordHeld = "endpoint-record/1"
+	EndpointRecordSeen = "endpoint-record/1:seen"
+)
+
 // EndpointRecord is a controller's signed statement of where it currently is.
 //
 // It complements the KEL rather than living in it. The KEL says who an identity
@@ -584,6 +593,11 @@ type Store interface {
 	GetContactsByStatus(status string) ([]ContactRecord, error)
 	SaveContactKEL(record ContactKELRecord) error
 	SaveEndpointRecord(record EndpointRecord) error
+	// ReplaceEndpointRecord makes record the only one held for its controller
+	// with its route: every other of that controller and route is removed in
+	// the same step. A route that is open to anybody must not keep a row for
+	// every record ever sent.
+	ReplaceEndpointRecord(record EndpointRecord) error
 	SaveSigningRequest(req SigningRequest) error
 	GetSigningRequest(id string) (*SigningRequest, error)
 	GetPendingSigningRequests() ([]SigningRequest, error)
@@ -1507,6 +1521,27 @@ func (s *FileStore) SaveEndpointRecord(record EndpointRecord) error {
 	records, err := s.loadEndpointRecords()
 	if err != nil {
 		records = map[string]EndpointRecord{}
+	}
+	records[record.SAID] = record
+	return s.writeJSON(filepath.Join(s.dir, "endpoint_records.json"), records)
+}
+
+// ReplaceEndpointRecord holds record as the only one of its controller and
+// route. A file that cannot be read is an error and is left as it is: this is
+// reached by a route open to anybody, and starting over from an empty map would
+// let a stranger wipe every record held.
+func (s *FileStore) ReplaceEndpointRecord(record EndpointRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	records, err := s.loadEndpointRecords()
+	if err != nil {
+		return err
+	}
+	for said, r := range records {
+		if r.CID == record.CID && r.Route == record.Route {
+			delete(records, said)
+		}
 	}
 	records[record.SAID] = record
 	return s.writeJSON(filepath.Join(s.dir, "endpoint_records.json"), records)

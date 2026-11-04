@@ -3,6 +3,7 @@ package witness
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"identity-agent-core/drivers"
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/store"
 )
 
@@ -588,6 +590,40 @@ func (s *Service) verifyEventChain(signerAID string, rawEvent []byte, cesrSig st
 		return fmt.Errorf("kel_verify_failed: %s", strings.Join(res.ValidationErrors, "; "))
 	}
 	return nil
+}
+
+// CurrentVerifiedKey is the key aid signs with now, from the key log this
+// witness holds for it, checked end to end: every event is signed by the key
+// the log itself puts in force at that point, so a rotation is followed and a
+// log with an unsigned or unreadable event names no key at all. An identity
+// this witness holds no log for has none either; it is not witnessing it.
+func (s *Service) CurrentVerifiedKey(aid string) (ed25519.PublicKey, error) {
+	held, err := s.Store.GetKelEvents(aid)
+	if err != nil || len(held) == 0 {
+		return nil, fmt.Errorf("not_witnessing")
+	}
+	raws := make([][]byte, 0, len(held))
+	sigs := make([]string, 0, len(held))
+	for _, e := range held {
+		raw, derr := base64.StdEncoding.DecodeString(e.RawBytesB64)
+		if e.RawBytesB64 == "" || derr != nil || e.CesrSignature == "" {
+			return nil, fmt.Errorf("the key log held for %s cannot be verified", aid)
+		}
+		raws = append(raws, raw)
+		sigs = append(sigs, e.CesrSignature)
+	}
+	res, err := drivers.ValidateKELFromBytes(drivers.ValidateKELInput{AID: aid, RawEvents: raws, CesrSignatures: sigs})
+	if err != nil {
+		return nil, err
+	}
+	if !res.KelVerified || res.CurrentPublicKey == "" {
+		return nil, fmt.Errorf("the key log held for %s does not verify", aid)
+	}
+	raw, _, err := iacrypto.DecodeEd25519Key(res.CurrentPublicKey, false)
+	if err != nil {
+		return nil, fmt.Errorf("the key log held for %s names no Ed25519 key: %w", aid, err)
+	}
+	return ed25519.PublicKey(raw), nil
 }
 
 // GetKelReplica implements C4.

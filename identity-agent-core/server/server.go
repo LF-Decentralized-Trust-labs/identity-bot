@@ -199,7 +199,10 @@ type CoreServer struct {
 	attestationExpires time.Time
 	attestationLimiter *ipRateLimiter
 	// witnessLimiter bounds the peer-facing witness routes that cost work.
-	witnessLimiter     *ipRateLimiter
+	witnessLimiter *ipRateLimiter
+	// endpointRecordMu makes checking a record against the one held and keeping
+	// it a single step.
+	endpointRecordMu   sync.Mutex
 	witnessLimiterOnce sync.Once
 	CallerResolver     CallerResolver // resolves endpoint caller identity/scopes; nil = loopback default (delegated-identity injects the real one)
 	mu                 sync.Mutex
