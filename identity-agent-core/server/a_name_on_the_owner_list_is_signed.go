@@ -141,9 +141,12 @@ func (s *CoreServer) ownerRoster() []asset.Employee {
 // the one thing the name they signed needs besides the signature: their key
 // event log, verified here, so that the key their name is checked against is
 // the one that log gives (keyToCheckAnOwnersNameAgainst). That key moves with a
-// rotation only when contactKeyForUse refreshes the stored log, which happens
-// when the owner's requests are checked; listing owners never triggers it, so
-// until then the name is checked against the key as of the last refresh. The
+// rotation only when the stored log is saved again: by contactKeyForUse when
+// this agent learns the owner's address, is introduced to them or first hears
+// from them, or by any other path that saves a contact's log. Checking the
+// owner's own requests (ownerKeyFromAVerifiedLog) does not refresh it, and
+// listing owners never does, so until then the name is checked against the key
+// as of the last save. The
 // log is fetched from the address the owner's agent gave and accepted only if
 // it belongs to the identifier the owner presented; nothing is written for any
 // other identifier.
