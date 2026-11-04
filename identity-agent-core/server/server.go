@@ -1066,6 +1066,10 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 		// The identity a machine will answer to, minted before the machine is
 		// asked for. Owner-only: it is this device's own key material.
 		r.Post("/machines/owner-identity", s.handleMintMachineOwner)
+		// The short code of a machine's key, for a screen to show; the one function
+		// behind it is authorisation.KeyFingerprint. A controller may reach it too,
+		// by design: it hashes the public key it is sent and reveals nothing.
+		r.Post("/machines/key-short-code", s.handleAKeysShortCode)
 		// Signing a request to a machine as the identity that owns it. Owner-only
 		// for the same reason as the line above, and closed to a controller: a
 		// machine acting for somebody must never be able to obtain the owner's
