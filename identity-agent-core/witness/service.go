@@ -698,9 +698,12 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 // be sent from where each witness stopped, not one event at a time. Each
 // witness is asked only for its tip, and one whose tip is not known is sent
 // nothing this time.
-func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []SignedEvent, designated []string, threshold int) {
+//
+// It reports whether every designated witness is now known to hold the log
+// through its last event, so a caller with nothing more to send can stop.
+func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []SignedEvent, designated []string, threshold int) bool {
 	if len(events) == 0 {
-		return
+		return false
 	}
 	localTip := -1
 	if raw, err := base64.StdEncoding.DecodeString(events[len(events)-1].RawBytesB64); err == nil {
@@ -719,7 +722,7 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 		}
 	}
 	if localTip >= 0 && lowest >= localTip {
-		return
+		return true
 	}
 	// Each event's receipts are counted against its threshold, so each has a
 	// finalisation to count them on.
@@ -805,6 +808,15 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 		}(key, w)
 	}
 	wg.Wait()
+	if localTip < 0 || len(designated) == 0 {
+		return false
+	}
+	for _, key := range designated {
+		if s.confirmedTip(signerAID, key) < localTip {
+			return false
+		}
+	}
+	return true
 }
 
 // BroadcastToDesignated sends an event to the witnesses an identity's own key

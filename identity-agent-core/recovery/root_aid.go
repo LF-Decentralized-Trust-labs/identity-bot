@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"identity-agent-core/drivers"
@@ -108,6 +109,27 @@ type RootAIDMapEntry struct {
 	PriorKelTailSAID        string   `json:"prior_kel_tail_said,omitempty"`
 	RotatedAt               string   `json:"rotated_at"`
 	RecoverySessionID       string   `json:"recovery_session_id,omitempty"`
+	// WitnessedAt is when the old root's witnesses were shown to hold its log
+	// through the rotation, and WitnessingGaveUpAt when this core stopped
+	// trying after the witnesses never did. Either ends the job that sends the
+	// old root's log to them.
+	WitnessedAt        string `json:"witnessed_at,omitempty"`
+	WitnessingGaveUpAt string `json:"witnessing_gave_up_at,omitempty"`
+}
+
+// WrittenBySignedPath is whether the entry was written by the signed rotation,
+// which records the signature the old root's rotation carries. Break-glass was
+// ungated, and wrote this file without signing anything, before 746602a8
+// (2026-06-21): an entry from then names a root whose rotation was never
+// signed, and nothing it names is to be sent to witnesses as the old root's log.
+func (e RootAIDMapEntry) WrittenBySignedPath() bool {
+	return e.OldRootAID != "" && e.AuthorizationEventSAID != "" && len(e.AuthorizationSignatures) > 0
+}
+
+// WitnessingIsOpen is whether the old root's log is still to be sent to its
+// witnesses: the entry is from the signed path and neither done nor given up.
+func (e RootAIDMapEntry) WitnessingIsOpen() bool {
+	return e.WrittenBySignedPath() && e.WitnessedAt == "" && e.WitnessingGaveUpAt == ""
 }
 
 // RootAIDMap is persisted at <dataDir>/root_aid_map.json.
@@ -925,10 +947,58 @@ func ContinuityProofOfTask(task store.TaskRecord) (ContinuityProof, error) {
 	return p, err
 }
 
+// rootAIDMapMu serialises the writes of the map: the rotation appends and the
+// witnessing worker marks, and neither may overwrite the other's change.
+var rootAIDMapMu sync.Mutex
+
+// RecordRootAIDWitnessing marks the entry of oldRootAID's rotation authorised by
+// authorizationSAID as witnessed (its witnesses hold the log) or, when
+// gaveUp, as no longer tried, at the time given.
+func RecordRootAIDWitnessing(dataDir, oldRootAID, authorizationSAID string, gaveUp bool, at time.Time) error {
+	rootAIDMapMu.Lock()
+	defer rootAIDMapMu.Unlock()
+	m, err := LoadRootAIDMap(dataDir)
+	if err != nil {
+		return err
+	}
+	for i, e := range m.Entries {
+		if e.OldRootAID != oldRootAID || e.AuthorizationEventSAID != authorizationSAID {
+			continue
+		}
+		if gaveUp {
+			m.Entries[i].WitnessingGaveUpAt = at.UTC().Format(time.RFC3339)
+		} else {
+			m.Entries[i].WitnessedAt = at.UTC().Format(time.RFC3339)
+		}
+		return writeRootAIDMap(dataDir, m)
+	}
+	return nil
+}
+
+func writeRootAIDMap(dataDir string, m *RootAIDMap) error {
+	out, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal root aid map: %w", err)
+	}
+	// Written whole beside the file and renamed over it: the witnessing worker
+	// reads the map while the rotation or the worker writes it.
+	path := filepath.Join(dataDir, rootAIDMapFileName)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, out, 0600); err != nil {
+		return fmt.Errorf("write root aid map: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("write root aid map: %w", err)
+	}
+	return nil
+}
+
 func appendRootAIDMapEntry(dataDir string, entry RootAIDMapEntry) error {
 	if dataDir == "" {
 		return fmt.Errorf("data directory is required")
 	}
+	rootAIDMapMu.Lock()
+	defer rootAIDMapMu.Unlock()
 	path := filepath.Join(dataDir, rootAIDMapFileName)
 
 	var existing RootAIDMap
@@ -946,15 +1016,7 @@ func appendRootAIDMapEntry(dataDir string, entry RootAIDMapEntry) error {
 		}
 	}
 	existing.Entries = append(existing.Entries, entry)
-
-	out, err := json.MarshalIndent(existing, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal root aid map: %w", err)
-	}
-	if err := os.WriteFile(path, out, 0600); err != nil {
-		return fmt.Errorf("write root aid map: %w", err)
-	}
-	return nil
+	return writeRootAIDMap(dataDir, &existing)
 }
 
 // LoadRootAIDMap reads root_aid_map.json from the data directory.

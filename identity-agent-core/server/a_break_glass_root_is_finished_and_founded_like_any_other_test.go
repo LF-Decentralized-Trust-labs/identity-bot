@@ -123,6 +123,7 @@ func whatARotationLeaves(t *testing.T, b *brokenGlass) map[string]any {
 	var entries []string
 	for _, e := range m.Entries {
 		e.RotatedAt, e.RecoverySessionID = "", ""
+		e.WitnessedAt, e.WitnessingGaveUpAt = "", "" // how the witnessing went is not the rotation's
 		entries = append(entries, fmt.Sprint(e))
 	}
 	out["root map"] = entries
@@ -524,9 +525,7 @@ func TestTheOldRootsWitnessesHearOfTheRotationWhenTheyAreBackUp(t *testing.T) {
 	// Whatever the commit sent in the background has failed; and the agent
 	// restarts, so nothing remembers there was something to send.
 	time.Sleep(300 * time.Millisecond)
-	b.s.witnessing.witnessMu.Lock()
-	b.s.witnessing.witnessJobs = nil
-	b.s.witnessing.witnessMu.Unlock()
+	restart(b)
 	if w.holds(b.oldAID) != 1 || w.holds(newAID) != 0 {
 		t.Fatalf("the witness holds %d of the old root and %d of the new while down", w.holds(b.oldAID), w.holds(newAID))
 	}
