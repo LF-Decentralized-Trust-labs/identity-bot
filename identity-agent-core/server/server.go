@@ -1034,6 +1034,8 @@ func (s *CoreServer) buildRouterOf(flutterWebDir string, addons []Addon, extras 
 		r.Post("/generate-multisig-event", s.handleGenerateMultisigEvent)
 
 		r.Post("/credential/issue", s.handleIssueCredential)
+		r.Post("/credential/prepare", s.handlePrepareCredential)
+		r.Post("/credential/record", s.handleRecordCredential)
 		r.Get("/credentials", s.handleGetCredentials)
 		r.Get("/credentials/{said}", s.handleGetCredential)
 		r.Post("/credentials/receive", s.handleReceiveCredential)
@@ -2357,43 +2359,9 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Populate credential type from builtin schema catalog
-	credType := ""
-	if schema := schemas.Get(req.SchemaSaid); schema != nil {
-		credType = schema.Name
-	}
-
-	// Populate issuer name from profile
-	issuerName := ""
-	if profile, _ := s.DataStore.GetProfile(); profile != nil {
-		issuerName = profile.FullName
-	}
-
-	// Persist the credential record
-	record := store.CredentialRecord{
-		SAID:           result.AcdcSaid,
-		IssuerAID:      issuerAID,
-		HolderAID:      req.HolderAid,
-		SchemaSAID:     req.SchemaSaid,
-		AcdcJson:       result.AcdcJsonB64,
-		IxnSAID:        result.IxnSaid,
-		CesrSignature:  req.CesrSignature,
-		IssuedAt:       time.Now().UTC().Format(time.RFC3339),
-		Status:         "issued",
-		Format:         "acdc",
-		CredentialType: credType,
-		IssuerName:     issuerName,
-	}
-	if err := s.DataStore.SaveCredential(record); err != nil {
-		log.Printf("[identity-agent-core] CREDENTIAL: Failed to persist credential %s: %v", result.AcdcSaid, err)
-	} else {
-		s.notifyBackupEvent(backup.EventCredential)
-	}
-
-	// Attempt automatic push delivery to the holder if they are a known contact
-	if contact, err := s.DataStore.GetContact(req.HolderAid); err == nil && contact != nil && contact.OobiURL != "" {
-		s.inBackground(func(context.Context) { s.deliverCredentialToContact(contact, record) })
-	}
+	record := s.issuedCredentialRecord(result.AcdcSaid, issuerAID, req.HolderAid, req.SchemaSaid,
+		result.AcdcJsonB64, result.IxnSaid, req.CesrSignature)
+	s.keepIssuedCredential(record)
 
 	// Persist the IXN event in the KEL (use the relationship AID when issuing via pairwise context)
 	if err := s.saveOwnInteraction(issuerAID, result.IxnEvent, result.IxnRawBytesB64,

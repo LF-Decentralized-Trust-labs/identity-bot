@@ -267,17 +267,29 @@ func (e *Engine) AppendPreparedIssuance(name string, p *drivers.PreparedIssuance
 	return e.appendPrepared(id, p)
 }
 
-func (e *Engine) prepare(id *identity, claims map[string]interface{}, schemaSaid, holderAid string, edges map[string]interface{}, registrySaid string) (*drivers.PreparedIssuance, error) {
+// BuildCredential builds a credential of issuer's, and anchors nothing: the
+// bytes, for whoever holds the issuer's key to check and anchor in an
+// interaction of their own making (the credential's seal is eventSeal of its
+// identifier, twice, where it is issued outside a registry).
+func (e *Engine) BuildCredential(issuer string, claims map[string]interface{}, schemaSaid, holderAid string, edges map[string]interface{}) ([]byte, string, error) {
+	acdc, cred, err := buildCredential(issuer, claims, schemaSaid, holderAid, edges, "")
+	if err != nil {
+		return nil, "", err
+	}
+	return acdc, cred.SAID, nil
+}
+
+func buildCredential(issuer string, claims map[string]interface{}, schemaSaid, holderAid string, edges map[string]interface{}, registrySaid string) ([]byte, *keri.Credential, error) {
 	if schemaSaid == "" {
-		return nil, fmt.Errorf("a credential needs the identifier of the schema it satisfies")
+		return nil, nil, fmt.Errorf("a credential needs the identifier of the schema it satisfies")
 	}
 	data, err := stampedClaims(claims)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	in := keri.CredentialInput{
 		SchemaSAID: schemaSaid,
-		Issuer:     id.AID,
+		Issuer:     issuer,
 		Recipient:  holderAid,
 		Registry:   registrySaid,
 		Data:       data,
@@ -288,17 +300,25 @@ func (e *Engine) prepare(id *identity, claims map[string]interface{}, schemaSaid
 		// altered after issue without becoming a different credential.
 		src, err := json.Marshal(edges)
 		if err != nil {
-			return nil, fmt.Errorf("the credential's edges cannot be encoded: %w", err)
+			return nil, nil, fmt.Errorf("the credential's edges cannot be encoded: %w", err)
 		}
 		in.Source = src
 	}
 	acdc, err := keri.BuildCredential(in)
 	if err != nil {
-		return nil, fmt.Errorf("building the credential: %w", err)
+		return nil, nil, fmt.Errorf("building the credential: %w", err)
 	}
 	cred, err := keri.VerifyCredential(acdc)
 	if err != nil {
-		return nil, fmt.Errorf("the credential this engine built does not verify: %w", err)
+		return nil, nil, fmt.Errorf("the credential this engine built does not verify: %w", err)
+	}
+	return acdc, cred, nil
+}
+
+func (e *Engine) prepare(id *identity, claims map[string]interface{}, schemaSaid, holderAid string, edges map[string]interface{}, registrySaid string) (*drivers.PreparedIssuance, error) {
+	acdc, cred, err := buildCredential(id.AID, claims, schemaSaid, holderAid, edges, registrySaid)
+	if err != nil {
+		return nil, err
 	}
 	// What gets anchored depends on whether there is a registry. With one, the
 	// issuance event is anchored and the credential's status is readable from
