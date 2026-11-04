@@ -249,6 +249,7 @@ func (s *CoreServer) handleRedeemSignerInvite(w http.ResponseWriter, r *http.Req
 		PublicKey:              body.PublicKey,
 		NextPublicKey:          body.NextPublicKey,
 		BackupSealPublicKeyB64: body.BackupSealPublicKeyB64,
+		OOBI:                   body.OOBI,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -284,6 +285,11 @@ type SignerAcceptance struct {
 	PublicKey              string
 	NextPublicKey          string
 	BackupSealPublicKeyB64 string
+	// OOBI is where the owner's key event log can be fetched. It is what lets
+	// the name they signed be shown beside them afterwards
+	// (recordWhatNamesAnOwner). Optional: without it the owner is listed by
+	// identifier only.
+	OOBI string
 }
 
 // SignerAccepted says what agreeing turned out to mean: one more acceptance in
@@ -311,6 +317,18 @@ type SignerAccepted struct {
 // unfounded organisation that can be founded again, which is recoverable
 // rather than misleading.
 func (s *CoreServer) AcceptFoundingSigner(a SignerAcceptance) (SignerAccepted, error) {
+	accepted, err := s.acceptFoundingSigner(a)
+	if err == nil {
+		// Every way of agreeing to own an organisation -- founding, joining
+		// through an invite, or an ownership ceremony -- ends here, so the
+		// record that lets the owner's name be shown is made once, here, for
+		// this core's own redeem route and for an overlay's alike.
+		s.recordWhatNamesAnOwner(a.PairwiseAID, a.OOBI)
+	}
+	return accepted, err
+}
+
+func (s *CoreServer) acceptFoundingSigner(a SignerAcceptance) (SignerAccepted, error) {
 	// An invite that belongs to an ownership ceremony is collecting keys from
 	// several people; the founding path below is for the FIRST owner, where
 	// there is nothing yet to rotate from.

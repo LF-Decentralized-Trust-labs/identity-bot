@@ -129,10 +129,11 @@ type CoreServer struct {
 	// See Config.RequireOwnerAtInception.
 	requireOwnerAtInception bool
 
-	loginHandler   *login.Handler
-	assetHandler   *asset.Handler
-	assetStoreErr  error                 // why assetHandler is nil, when a store file could not be read
-	inboundDIDComm InboundDIDCommHandler // overlay hook for inbound DIDComm messages; nil = deliver-only
+	loginHandler      *login.Handler
+	assetHandler      *asset.Handler
+	ownerRosterSource func() []asset.Employee // the roster in use when an overlay owns it; see SetOwnerRoster
+	assetStoreErr     error                   // why assetHandler is nil, when a store file could not be read
+	inboundDIDComm    InboundDIDCommHandler   // overlay hook for inbound DIDComm messages; nil = deliver-only
 
 	// Overlay-registered extra routes, mounted under /api by buildRouter. See
 	// MountExtraRoutes / extension.go — inert unless an overlay registers.
