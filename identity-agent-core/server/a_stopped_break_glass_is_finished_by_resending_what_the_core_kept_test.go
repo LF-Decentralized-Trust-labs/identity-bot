@@ -116,3 +116,31 @@ func TestABreakGlassWhoseRotationNeverLandedDoesNotBlockAnother(t *testing.T) {
 		t.Fatalf("the run that authorised nothing is still kept: %v", left)
 	}
 }
+
+// A run whose rotation landed is still judged landed when the request spelled
+// the same bytes in another base64 form (a line break the decoder ignores):
+// "landed" is decided by the event's digest, not its text, so a second run
+// that would leave two roots is refused.
+func TestALandedBreakGlassIsRecognisedWhateverItsBase64Spelling(t *testing.T) {
+	b := aRootToBreakGlassOn(t)
+	rot := b.req["old_root_rotation"].(map[string]any)
+	r := rot["raw_b64"].(string)
+	rot["raw_b64"] = r[:76] + "\n" + r[76:]
+	st := &stopsAtStore{Store: b.s.DataStore}
+	b.s.DataStore = st
+	newAID := newRootOf(b)
+	st.identity = func(id store.IdentityState) bool { return id.AID == newAID && id.EventCount == 1 }
+	if code, out := b.rotate(t); code == http.StatusOK {
+		t.Fatalf("the stop was not reported: %d %v", code, out)
+	}
+	if evs, _ := b.s.DataStore.GetEvents(b.oldAID); len(evs) != 2 {
+		t.Fatalf("the old root's log is %d events; the rotation should have landed", len(evs))
+	}
+	rotA := b.prepared["old_root_rotation"]["hint"].(map[string]any)
+	if code, out := b.prepareAnotherAfter(t, map[string]any{"s": rotA["s"], "d": rotA["d"]}); code != http.StatusConflict {
+		t.Fatalf("a second run on a landed one was answered %d %v", code, out)
+	}
+	if left, _ := b.status(t, true)["unfinished"].([]any); len(left) != 1 {
+		t.Fatalf("the landed run was dropped: %v", left)
+	}
+}

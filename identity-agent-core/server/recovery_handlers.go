@@ -458,6 +458,11 @@ func (s *CoreServer) handleRecoveryRootAIDPrepare(w http.ResponseWriter, r *http
 		writeError(w, http.StatusServiceUnavailable, "Store not available", "identity store is required")
 		return
 	}
+	// One at a time with the rotation route, which holds this lock for a whole
+	// run: a prepare must not judge a run "not landed" while that run is between
+	// keeping its request and committing its rotation.
+	s.founding.Lock()
+	defer s.founding.Unlock()
 	// A rotation begun and not finished is finished, not begun again, once its
 	// rotation is in the old root's log: a second set prepared after it would
 	// leave two roots the old root's log authorises. A run that stopped before

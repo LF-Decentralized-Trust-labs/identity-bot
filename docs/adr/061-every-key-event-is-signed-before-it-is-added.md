@@ -387,7 +387,7 @@ a witness.
   interactions after it as a recovery rotation does (section 4), so the holder
   of a stolen key cannot block it by adding interactions. The new root is
   founded as an ordinary founding is: its witnesses and its owner default to
-  the old root's when the app names others, so an owned identity is not left
+  the old root's when the app names none, so an owned identity is not left
   without its owner by a break-glass whose app names none; and the messaging
   keyset and the founding gate apply, the gate being the one
   `/api/events/commit` applies to an inception, taken under the same founding

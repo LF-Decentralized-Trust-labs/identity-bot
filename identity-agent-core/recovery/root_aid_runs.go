@@ -1,6 +1,7 @@
 package recovery
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +11,8 @@ import (
 	"sync"
 
 	"identity-agent-core/store"
+
+	keri "github.com/grapeid/keri-go"
 )
 
 // A break-glass run stopped part way is finished by sending the same signed
@@ -140,17 +143,35 @@ func UnfinishedRootAIDRotation(dataDir, aid string) (*RunningRootAIDRotation, er
 // new root's founding is stored, which nothing points to), so it may be
 // dropped and another prepared; once it is, the old root's log authorises this
 // run's new root and only finishing this run is safe.
+//
+// It compares the events' digests, not their base64: the same bytes have more
+// than one base64 spelling (a decoder ignores line breaks), and a run judged
+// not landed when it had would let a second run leave two roots. An event that
+// cannot be read is taken as landed, so a doubt keeps the run rather than
+// dropping it.
 func (run RunningRootAIDRotation) RotationLanded(events []store.EventRecord) bool {
-	raw := run.Request.OldRootRotation.RawB64
-	if raw == "" {
-		return false
+	said, ok := saidOfB64(run.Request.OldRootRotation.RawB64)
+	if !ok {
+		return true
 	}
 	for _, ev := range events {
-		if ev.RawBytesB64 == raw {
+		if held, ok := saidOfB64(ev.RawBytesB64); ok && held == said {
 			return true
 		}
 	}
 	return false
+}
+
+func saidOfB64(b64 string) (string, bool) {
+	raw, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil || len(raw) == 0 {
+		return "", false
+	}
+	ev, err := keri.ParseEvent(raw)
+	if err != nil || ev.SAID == "" {
+		return "", false
+	}
+	return ev.SAID, true
 }
 
 // DropUnfinishedRootAIDRotation forgets a run whose rotation has not landed.
