@@ -4,12 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 
 	keri "github.com/grapeid/keri-go"
 
 	"identity-agent-core/drivers"
-	"identity-agent-core/iacrypto"
 )
 
 // The one way an event joins a key log this engine holds.
@@ -91,25 +89,6 @@ func lastEstablishment(entries []kelEntry) (int, *keri.Event, error) {
 	return 0, nil, fmt.Errorf("no establishment event precedes this one")
 }
 
-// signatureVerifies checks one signature over raw under key: an Ed25519 key
-// as keri-go checks it, a post-quantum one (which keri-go reads only in a build
-// with the kerigo_pqtest tag, so none is ever in a production log) as ML-DSA-65,
-// and only in that build.
-func signatureVerifies(key string, raw, sig []byte) error {
-	if !keri.PostQuantumTestCodes() || !strings.HasPrefix(key, iacrypto.CESRMLDSA65Verkey) {
-		return keri.VerifySignature(key, raw, sig)
-	}
-	pub, err := keri.MatterRawSized(iacrypto.CESRMLDSA65Verkey, key, iacrypto.MLDSA65VerkeyBytes)
-	if err != nil {
-		return fmt.Errorf("%q is not a readable ML-DSA-65 public key: %w", key, err)
-	}
-	if !iacrypto.VerifyMLDSA65(pub, raw, sig) {
-		return fmt.Errorf("the signature does not verify under the post-quantum key, so whoever " +
-			"produced it did not hold that key")
-	}
-	return nil
-}
-
 // priorNextOf is the commitment a rotation opens: the one the last
 // establishment event of before made. An event that is not a rotation opens
 // none.
@@ -158,7 +137,7 @@ func signaturesVerify(raw []byte, sigs []string, keys []string) (signed []int, o
 		if err != nil || c.At.Index < 0 || c.At.Index >= len(keys) {
 			return nil, false
 		}
-		if signatureVerifies(keys[c.At.Index], raw, c.Raw) != nil {
+		if keri.VerifyUnderKey(keys[c.At.Index], raw, c.Code, c.Raw) != nil {
 			return nil, false
 		}
 		at[c.At.Index] = true
@@ -197,7 +176,7 @@ func checkedSignatures(raw []byte, sigs []string, keys []string, priorNext []str
 		if c.At.Index < 0 || c.At.Index >= len(keys) {
 			return nil, fmt.Errorf("signature %d names key %d, and the event is signed by %d keys", i, c.At.Index, len(keys))
 		}
-		if err := signatureVerifies(keys[c.At.Index], raw, c.Raw); err != nil {
+		if err := keri.VerifyUnderKey(keys[c.At.Index], raw, c.Code, c.Raw); err != nil {
 			return nil, fmt.Errorf("signature %d does not verify under key %d: %w", i, c.At.Index, err)
 		}
 		if err := opensPriorNext(keys[c.At.Index], c.At, priorNext); err != nil {
@@ -401,7 +380,7 @@ func (e *Engine) ownSignatures(aid string, keys []string, raw []byte) []string {
 			continue
 		}
 		c, err := drivers.ReadControllerSignature(sig)
-		if err != nil || signatureVerifies(key, raw, c.Raw) != nil {
+		if err != nil || keri.VerifyUnderKey(key, raw, c.Code, c.Raw) != nil {
 			continue
 		}
 		qb64, err := keri.EncodeIndexedSignature(c.Raw, keri.SamePlace(i))
@@ -441,7 +420,7 @@ func VerifiedSignatures(raws [][]byte, sigs [][]string) ([][]string, error) {
 			if c.QB64 != s && len(keys) != 1 {
 				continue // names no key, among several
 			}
-			if signatureVerifies(keys[c.At.Index], raw, c.Raw) != nil {
+			if keri.VerifyUnderKey(keys[c.At.Index], raw, c.Code, c.Raw) != nil {
 				continue
 			}
 			seen[c.At.Index] = true

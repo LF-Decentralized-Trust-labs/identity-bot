@@ -1,7 +1,6 @@
 package drivers
 
 import (
-	"crypto/ed25519"
 	"encoding/base64"
 	"fmt"
 	"math"
@@ -366,7 +365,7 @@ func VerifyReceipt(witnessAID, eventSAID, cesrSig string) error {
 	if witnessAID == "" || eventSAID == "" || cesrSig == "" {
 		return fmt.Errorf("a receipt needs a witness, an event and a signature")
 	}
-	pub, err := iacrypto.KeyFromNonTransferableAID(witnessAID)
+	_, err := iacrypto.KeyFromNonTransferableAID(witnessAID)
 	if err != nil {
 		return fmt.Errorf("%q is not a non-transferable witness identifier, so its receipts "+
 			"cannot be checked without resolving a key log first: %w", witnessAID, err)
@@ -375,7 +374,7 @@ func VerifyReceipt(witnessAID, eventSAID, cesrSig string) error {
 	if err != nil {
 		return fmt.Errorf("the receipt signature does not decode: %w", err)
 	}
-	if !ed25519.Verify(pub, []byte(eventSAID), raw) {
+	if keri.VerifyUnderKey(witnessAID, []byte(eventSAID), "", raw) != nil {
 		return fmt.Errorf("the receipt was not signed by %s, so that witness did not issue it",
 			witnessAID)
 	}

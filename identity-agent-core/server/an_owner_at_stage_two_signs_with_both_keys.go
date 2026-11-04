@@ -142,12 +142,8 @@ func thePostQuantumSignatureOver(sig, pqKey string, index int, message string) e
 	if int(read.At.Index) != index {
 		return fmt.Errorf("%s names key %d, and the post-quantum key is key %d", headerOwnerSigPostQuantum, read.At.Index, index)
 	}
-	pub, err := keri.MatterRawSized(iacrypto.CESRMLDSA65Verkey, pqKey, iacrypto.MLDSA65VerkeyBytes)
-	if err != nil {
-		return fmt.Errorf("the owner's post-quantum key is unreadable: %w", err)
-	}
-	if !iacrypto.VerifyMLDSA65(pub, []byte(message), read.Raw) {
-		return fmt.Errorf("the post-quantum signature does not match the owner's post-quantum key")
+	if err := keri.VerifyUnderKey(pqKey, []byte(message), read.Code, read.Raw); err != nil {
+		return fmt.Errorf("the post-quantum signature does not match the owner's post-quantum key: %w", err)
 	}
 	return nil
 }

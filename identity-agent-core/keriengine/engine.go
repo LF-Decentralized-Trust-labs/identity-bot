@@ -188,7 +188,7 @@ func verifiedBy(aid, key string, raw []byte, sig string) error {
 	if err != nil {
 		return fmt.Errorf("the signature over an event of %s is unreadable, so it is not appended: %w", aid, err)
 	}
-	if err := signatureVerifies(key, raw, c.Raw); err != nil {
+	if err := keri.VerifyUnderKey(key, raw, c.Code, c.Raw); err != nil {
 		return fmt.Errorf("an event of %s not signed by its current key is not appended: %w", aid, err)
 	}
 	return nil
