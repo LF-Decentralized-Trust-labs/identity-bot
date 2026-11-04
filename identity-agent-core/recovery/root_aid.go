@@ -674,8 +674,19 @@ func saidOfRecord(rec store.EventRecord) (string, error) {
 	return ked.D, nil
 }
 
+// verifyLog judges a log this Identity Agent keeps, at any length; verifySentLog
+// one somebody sent, such as the old root's log a continuity proof carries,
+// which is held to the cap on a sent log (drivers.LogMessages).
 func verifyLog(aid string, events []drivers.SignedEventBytes) error {
-	messages, err := drivers.StoredLogMessages(events)
+	return verifyLogRead(aid, events, drivers.StoredLogMessages)
+}
+
+func verifySentLog(aid string, events []drivers.SignedEventBytes) error {
+	return verifyLogRead(aid, events, drivers.LogMessages)
+}
+
+func verifyLogRead(aid string, events []drivers.SignedEventBytes, read func([]drivers.SignedEventBytes) ([][]byte, error)) error {
+	messages, err := read(events)
 	if err != nil {
 		return err
 	}
@@ -899,7 +910,7 @@ func VerifyContinuityProof(p ContinuityProof) error {
 		return fmt.Errorf("the old root's log ends at %s, not at the tail the proof names (%s)", tail, p.PriorKelTailSAID)
 	}
 	authorization := drivers.SignedEventBytes{RawB64: p.AuthorizationEventRawB64, Sigs: p.AuthorizationSignatures}
-	if err := verifyLog(p.OldRootAID, append(append([]drivers.SignedEventBytes(nil), p.OldRootLog...), authorization)); err != nil {
+	if err := verifySentLog(p.OldRootAID, append(append([]drivers.SignedEventBytes(nil), p.OldRootLog...), authorization)); err != nil {
 		return fmt.Errorf("the old root's log with the authorization event does not verify: %w", err)
 	}
 	return nil
