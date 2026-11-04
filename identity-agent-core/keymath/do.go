@@ -28,6 +28,8 @@ import (
 //	next_key_digest   {"key"}                    -> {"digest"}
 //	verify_receipt    {"witness","digest","sig"} -> {"ok"}
 //	verify_log        {"aid","events"}           -> LogState
+//	check_credential  {"raw_b64"}                -> Credential
+//	check_presentation {"raw_b64"}               -> Presentation
 //
 // An error never carries any part of the request: a seed, or anything derived
 // from one, never reaches an error message, a log or a crash report. The
@@ -141,6 +143,24 @@ func Do(op string, request []byte) ([]byte, error) {
 			return nil, err
 		}
 		answer = ev
+	case "check_credential", "check_presentation":
+		raw, err := base64.StdEncoding.Strict().DecodeString(req.RawB64)
+		if err != nil {
+			return nil, errors.New("raw_b64 is not standard base64")
+		}
+		if op == "check_credential" {
+			c, err := CheckCredential(raw)
+			if err != nil {
+				return nil, err
+			}
+			answer = c
+		} else {
+			p, err := CheckPresentation(raw)
+			if err != nil {
+				return nil, err
+			}
+			answer = p
+		}
 	case "next_key_digest":
 		d, err := NextKeyDigest(req.Key)
 		if err != nil {

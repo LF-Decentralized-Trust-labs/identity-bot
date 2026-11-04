@@ -27,7 +27,7 @@ func TestKeymathReachesNoNetworkOrStorage(t *testing.T) {
 			strings.Contains(dep, "sqlite"),
 			strings.HasPrefix(dep, "identity-agent-core/") && dep != "identity-agent-core/iacrypto" &&
 				dep != "identity-agent-core/messagingkeys" && dep != "identity-agent-core/keymath" &&
-				dep != "identity-agent-core/drivers":
+				dep != "identity-agent-core/presentation" && dep != "identity-agent-core/drivers":
 			t.Errorf("keymath depends on %s", dep)
 		}
 	}

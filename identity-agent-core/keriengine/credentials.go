@@ -8,6 +8,7 @@ import (
 
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/presentation"
 
 	keri "github.com/grapeid/keri-go"
 )
@@ -781,7 +782,11 @@ func (e *Engine) checkPresentation(
 		return nil
 	}
 
-	body, said, err := reduceePresentation(req.PresentationBody)
+	body, err := presentation.ReadFields(req.PresentationBody)
+	said := ""
+	if body != nil {
+		said = body.D
+	}
 	if err != nil {
 		out.Checks["presentation_intact"] = false
 		out.Errors = append(out.Errors, fmt.Sprintf("the presentation does not hold together: %v", err))
@@ -866,52 +871,6 @@ func (e *Engine) checkPresentation(
 			"so whoever presented this credential has not shown they control it")
 	}
 	return nil
-}
-
-// reduceePresentation reads a presentation back into the shape it was built in
-// and recomputes its identifier.
-//
-// Going through the struct rather than the map is deliberate: the identifier is
-// a digest over the fields in a fixed order, and a map has no order. Anything
-// that re-serialised the map directly would compute a digest nobody else does
-// and report every genuine presentation as altered.
-func reduceePresentation(raw map[string]interface{}) (presentationBody, string, error) {
-	encoded, err := json.Marshal(raw)
-	if err != nil {
-		return presentationBody{}, "", err
-	}
-	var body presentationBody
-	if err := json.Unmarshal(encoded, &body); err != nil {
-		return presentationBody{}, "", fmt.Errorf("it is not shaped like a presentation: %w", err)
-	}
-	claimed := body.D
-	if claimed == "" {
-		return presentationBody{}, "", fmt.Errorf("it carries no identifier")
-	}
-
-	// Recompute exactly as it was built: the attribute block's own identifier
-	// first, then the body with its identifier blanked.
-	attrs := body.A
-	attrs.D = ""
-	attrSAID, err := saidOfCompact(attrs)
-	if err != nil {
-		return presentationBody{}, "", err
-	}
-	if attrSAID != body.A.D {
-		return presentationBody{}, "", fmt.Errorf("its attributes do not match the identifier " +
-			"they carry, so what it says about the credential or the holder has been changed")
-	}
-	check := body
-	check.D = ""
-	recomputed, err := saidOfCompact(check)
-	if err != nil {
-		return presentationBody{}, "", err
-	}
-	if recomputed != claimed {
-		return presentationBody{}, "", fmt.Errorf("it claims to be %s but its contents derive %s",
-			claimed, recomputed)
-	}
-	return body, claimed, nil
 }
 
 func firstNonEmpty(vals ...string) string {
