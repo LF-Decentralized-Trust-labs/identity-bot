@@ -301,6 +301,22 @@ extension KeyMathOperations on KeyMath {
         if (currentOnly) 'current_only': true
       }))['sig_qb64'] as String;
 
+  /// A raw Ed25519 signature by the one key of an identity, written as
+  /// everything this device signs with one key is: at place 0 of the key list
+  /// and place 0 of the prior commitment, which is how the core reads an
+  /// unindexed one. An event signed by more keys names each key's place with
+  /// [indexEd25519Signature] instead.
+  Future<String> signatureByTheOnlyKey(List<int> signature) =>
+      indexEd25519Signature(signature, index: 0, ondex: 0);
+
+  /// A raw Ed25519 signature that is not on a key event, written unindexed
+  /// (code 0B): the form the core's verifiers read against a bare public key.
+  /// Only a signature on a key event, judged against a key state, is indexed
+  /// ([signatureByTheOnlyKey]).
+  Future<String> unindexedEd25519Signature(List<int> signature) async =>
+      (await run('ed25519_sig', {'sig_b64': base64Encode(signature)}))['sig_qb64']
+          as String;
+
   /// A raw ML-DSA-65 signature written as an indexed one at [index] and
   /// [ondex]. Only a core built for tests can: CESR has assigned no such
   /// code, so any other refuses with [KeyMathRefused].

@@ -7,7 +7,6 @@ import 'package:http/http.dart' as http;
 
 import '../crypto/keys.dart';
 import 'key_math.dart';
-import 'signing_an_event.dart';
 import 'the_event_this_device_expects.dart';
 import 'the_events_this_device_signed.dart';
 import 'the_identity_this_device_holds.dart';
@@ -887,7 +886,7 @@ class TheKeyEventsThisDeviceMakes {
         await _signed.signedWith(
             reservation,
             alsoSignedBy == null
-                ? [await cesrEncodeSignature(_client, _baseUrl, signature)]
+                ? [await _km.signatureByTheOnlyKey(signature)]
                 : await _signedByBoth(signature, alsoSignedBy, raw,
                     opensCommitment: ev.t != 'ixn'));
       }

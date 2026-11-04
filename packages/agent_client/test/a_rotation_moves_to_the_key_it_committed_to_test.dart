@@ -22,6 +22,7 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:test/test.dart';
 
+import 'support/a_signature_read_back.dart';
 import 'support/kel_events.dart';
 import 'support/the_core.dart';
 
@@ -321,7 +322,7 @@ class FakeCore {
     bool verifies(String key) =>
         sigs.isNotEmpty &&
         ed.verify(ed.PublicKey(rawOf(key)), Uint8List.fromList(raw),
-            base64Decode(sigs.first));
+            rawOfIndexedSignature(sigs.first));
     if (sn < kel.length) {
       if (kel[sn]['d'] != ev['d']) {
         return _json({
@@ -355,7 +356,7 @@ class FakeCore {
         'details': 'the signatures do not satisfy the key in force'
       }, 400);
     }
-    _append(raw, sigs.first);
+    _append(raw, base64Encode(rawOfIndexedSignature(sigs.first)));
     return _json({'status': 'recorded', 's': ev['s'], 'd': ev['d']}, 201);
   }
 
@@ -404,16 +405,13 @@ class FakeCore {
             answer = _prepare(body);
           case '/api/events/commit':
             answer = _commit(body);
-          case '/api/cesr/encode':
-            // Carries the raw signature through, so the core can check it.
-            answer = _json({'cesr_sig': body['raw_sig_b64']}, 200);
           case '/api/events/signature':
             // An event an earlier version added and left unsigned, signed late.
             if (forgetsEvents) {
               return _json({'error': 'No such event'}, 404);
             }
             final at = body['sequence_number'] as int;
-            final sig = base64Decode(body['cesr_signature'] as String);
+            final sig = rawOfIndexedSignature(body['cesr_signature'] as String);
             if (refuseSignatures ||
                 at >= kel.length ||
                 !ed.verify(ed.PublicKey(rawOf(keyFor(at))),
@@ -421,7 +419,7 @@ class FakeCore {
               return _json(
                   {'error': 'That signature does not cover this event'}, 400);
             }
-            kel[at]['sig'] = body['cesr_signature'];
+            kel[at]['sig'] = base64Encode(sig);
             answer = _json({'status': 'signed'}, 200);
           default:
             answer = http.Response('{}', 200);
@@ -431,6 +429,23 @@ class FakeCore {
         }
         return answer;
       });
+}
+
+/// Keymath that can be made to fail where it writes a signature, as when the
+/// signing step is cut off after a place is reserved and before the event is
+/// signed.
+class _KeyMathThatCanStopWritingSignatures implements KeyMath {
+  _KeyMathThatCanStopWritingSignatures(this.real);
+  final KeyMath real;
+  bool stopped = false;
+  @override
+  Future<Map<String, dynamic>> run(
+      String op, Map<String, dynamic> request) async {
+    if (stopped && op.startsWith('index_')) {
+      throw http.ClientException('the signature could not be written');
+    }
+    return real.run(op, request);
+  }
 }
 
 void main() {
@@ -443,11 +458,14 @@ void main() {
           .publicKeyEncoded;
 
   late KeyMath km;
+  late _KeyMathThatCanStopWritingSignatures writer;
   late FakeCore core;
   late LocalCoreKeriService keri;
 
   setUpAll(() async {
-    km = await keyMathOf(await buildTheCore('rotation-core'));
+    writer = _KeyMathThatCanStopWritingSignatures(
+        await keyMathOf(await buildTheCore('rotation-core')));
+    km = writer;
   });
 
   LocalCoreKeriService serviceOver(FakeCore c) => LocalCoreKeriService(
@@ -1220,10 +1238,10 @@ void main() {
       {'d': 'Easked'}
     ];
     // Reserved, and the signature never made it out: the place is held.
-    core.dropsRequestsTo = '/api/cesr/encode';
+    writer.stopped = true;
     await expectLater(keri.interactAid(name: core.aid, sealData: asked),
         throwsA(isA<http.ClientException>()));
-    core.dropsRequestsTo = null;
+    writer.stopped = false;
     final held = await reservations(core.aid);
     expect(held, hasLength(1));
     expect(held.single.signed, isFalse);

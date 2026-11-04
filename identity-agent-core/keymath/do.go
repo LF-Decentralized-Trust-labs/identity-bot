@@ -17,8 +17,14 @@ import (
 //
 //	pq_next           {"seed_hex"}               -> {"verkey","digest"}
 //	sign_mldsa65      {"seed_hex","msg_b64"}     -> {"sig_b64"}
+//	ed25519_sig       {"sig_b64"}                -> {"sig_qb64"}
 //	index_ed25519_sig {"sig_b64","index","ondex","current_only"} -> {"sig_qb64"}
 //	index_mldsa65_sig {"sig_b64","index","ondex","current_only"} -> {"sig_qb64"}   (test build only)
+//
+// ed25519_sig writes a signature that is not on a key event, unindexed (a
+// Cigar, code 0B), which is what the core's verifiers read against a bare
+// public key. index_ed25519_sig writes the indexed form, which belongs only on
+// a key event judged against a key state.
 //
 // current_only writes a signature that opens no prior commitment, as an
 // interaction's is, and ignores ondex.
@@ -93,6 +99,19 @@ func Do(op string, request []byte) ([]byte, error) {
 			return nil, errors.New("the message could not be signed")
 		}
 		answer = map[string]string{"sig_b64": base64.StdEncoding.EncodeToString(sig)}
+	case "ed25519_sig":
+		sig, err := base64.StdEncoding.DecodeString(req.SigB64)
+		if err != nil {
+			return nil, errors.New("sig_b64 is not standard base64")
+		}
+		if len(sig) != 64 {
+			return nil, errors.New("sig_b64 is not a 64-byte Ed25519 signature")
+		}
+		qb64, err := keri.MatterQB64(keri.CodeEd25519Sig, sig)
+		if err != nil {
+			return nil, err
+		}
+		answer = map[string]string{"sig_qb64": qb64}
 	case "index_ed25519_sig":
 		// An event several keys sign takes each signature at the place of its
 		// key, which only an indexed signature names.

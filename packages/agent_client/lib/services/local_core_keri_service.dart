@@ -8,7 +8,6 @@ import 'key_math.dart';
 import 'keri_service.dart';
 import 'recovering_this_identity.dart';
 import 'secure_key_store.dart';
-import 'signing_an_event.dart';
 import 'the_event_this_device_expects.dart' show sameContent;
 import 'the_identity_this_device_holds.dart';
 import 'the_key_events_this_device_makes.dart';
@@ -249,12 +248,12 @@ class LocalCoreKeriService extends KeriService {
   }
 
   /// The CESR form of a raw base64 signature that is handed back rather than
-  /// recorded (a payload, a credential anchor, a presentation), or an empty
-  /// string where the core could not encode it.
+  /// put on a key event (a payload, a presentation), written by keymath
+  /// unindexed (0B): the form the core's verifiers read against a bare public
+  /// key, which refuse an indexed one. Empty where it could not be written.
   Future<String> _cesrEncode(String rawSigB64) async {
     try {
-      return await cesrEncodeSignature(
-          _client, _baseUrl, base64Decode(rawSigB64));
+      return await _km.unindexedEd25519Signature(base64Decode(rawSigB64));
     } catch (_) {
       return '';
     }

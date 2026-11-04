@@ -240,7 +240,7 @@ void main() {
     final h = await TheIdentityThisDeviceHolds().read();
     final stranger = Bip39.mnemonicToSeed(
         'zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong'.split(' '));
-    final theirs = await preparedAndSigned(core.client, core.base, oldSeed, 2, {
+    final theirs = await preparedAndSigned(core.client, core.base, core.km, oldSeed, 2, {
       'aid': aid,
       't': 'rot',
       'k': [KeyManager.keyAt(oldSeed, 2).publicKeyEncoded],

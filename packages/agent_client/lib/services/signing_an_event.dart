@@ -7,31 +7,6 @@ import 'package:http/http.dart' as http;
 import 'key_math.dart';
 import 'the_event_this_device_expects.dart';
 
-/// Has the core write a raw Ed25519 signature in CESR.
-///
-/// Done by the core rather than here because the encoding is part of the
-/// protocol, and there is one implementation of it. Throws if no encoded
-/// signature comes back.
-Future<String> cesrEncodeSignature(
-    http.Client client, String baseUrl, List<int> rawSignature) async {
-  final res = await client.post(
-    Uri.parse('$baseUrl/api/cesr/encode'),
-    headers: const {'Content-Type': 'application/json'},
-    body: jsonEncode({'raw_sig_b64': base64Encode(rawSignature)}),
-  );
-  if (res.statusCode != 200) {
-    throw Exception('the signature could not be encoded '
-        '(${res.statusCode}): ${res.body}');
-  }
-  final decoded = jsonDecode(res.body);
-  final cesr = decoded is Map ? (decoded['cesr_sig'] ?? '').toString() : '';
-  if (cesr.isEmpty) {
-    throw Exception(
-        'the signature was sent to be encoded and nothing came back');
-  }
-  return cesr;
-}
-
 /// Signs an event of an identity's key log and records the signature against
 /// it in the core: its founding, a rotation, an interaction.
 ///
@@ -91,7 +66,8 @@ Future<String> signAndRecordEvent(
   }
   final String cesr;
   try {
-    cesr = await cesrEncodeSignature(client, baseUrl, signature);
+    // The core is not asked to write it (ADR-061): keymath writes it here.
+    cesr = await km.signatureByTheOnlyKey(signature);
   } catch (e) {
     throw Exception('$what could not be signed: $e');
   }

@@ -5,7 +5,6 @@ import 'dart:typed_data';
 
 import 'package:agent_client/crypto/keys.dart';
 import 'package:agent_client/services/key_math.dart';
-import 'package:agent_client/services/signing_an_event.dart';
 import 'package:agent_client/services/the_identity_this_device_holds.dart';
 import 'package:agent_client/services/the_key_state_this_device_reads.dart';
 import 'package:agent_client/services/the_key_events_this_device_makes.dart';
@@ -155,8 +154,8 @@ class ACoreThatMisleads extends http.BaseClient {
 /// The event [body] asks the core at [base] to prepare, signed by the key
 /// [seed] derives at generation [gen]: what another device holding the
 /// phrase would make.
-Future<SignedCopy> preparedAndSigned(http.Client client, String base,
-    Uint8List seed, int gen, Map<String, Object?> body) async {
+Future<SignedCopy> preparedAndSigned(
+    http.Client client, String base, KeyMath km, Uint8List seed, int gen, Map<String, Object?> body) async {
   final res = await client.post(Uri.parse('$base/api/events/prepare'),
       headers: const {'Content-Type': 'application/json'},
       body: jsonEncode(body));
@@ -164,7 +163,7 @@ Future<SignedCopy> preparedAndSigned(http.Client client, String base,
   final sig = ed.sign(
       ed.newKeyFromSeed(KeyManager.signingSeed(seed, index: gen)),
       base64Decode(raw));
-  return SignedCopy(raw, [await cesrEncodeSignature(client, base, sig)]);
+  return SignedCopy(raw, [await km.signatureByTheOnlyKey(sig)]);
 }
 
 /// An interaction of [aid] after [after], prepared by the core and signed by
@@ -172,12 +171,13 @@ Future<SignedCopy> preparedAndSigned(http.Client client, String base,
 Future<SignedCopy> signedInteraction(
         http.Client client,
         String base,
+        KeyMath km,
         Uint8List seed,
         String aid,
         int gen,
         Place after,
         List<Object?> anchors) =>
-    preparedAndSigned(client, base, seed, gen, {
+    preparedAndSigned(client, base, km, seed, gen, {
       'aid': aid,
       't': 'ixn',
       'a': anchors,
@@ -209,6 +209,9 @@ class ACore {
   final String base;
   final ACoreThatMisleads client;
   final KeyMath _km;
+
+  /// The key arithmetic this core's tests use.
+  KeyMath get km => _km;
   TheKeyEventsThisDeviceMakes makes(TheWitnessesOfThisDevicesEvents w) =>
       TheKeyEventsThisDeviceMakes(client, base, _km, witnesses: w);
 

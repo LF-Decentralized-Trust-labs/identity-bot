@@ -9,10 +9,12 @@ import 'package:agent_client/services/key_math.dart';
 import 'package:agent_client/services/the_event_this_device_expects.dart';
 import 'package:agent_client/services/the_key_in_force.dart';
 import 'package:agent_client/services/the_witnesses_of_this_devices_events.dart' show WitnessSet;
+import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:test/test.dart';
 
+import 'support/a_signature_read_back.dart';
 import 'support/kel_events.dart';
 import 'support/the_core.dart';
 
@@ -96,9 +98,6 @@ void main() {
       inner: MockClient((req) async {
         sent.add(req);
         if (req.url.path == '/api/kel') return http.Response(kel, 200);
-        if (req.url.path == '/api/cesr/encode') {
-          return http.Response(jsonEncode({'cesr_sig': '0BTHESIGNATURE'}), 200);
-        }
         if (req.url.path == '/api/events/signature') {
           return http.Response('{}', attachStatus);
         }
@@ -108,7 +107,7 @@ void main() {
   }
 
   bool signed(List<http.BaseRequest> sent) =>
-      sent.any((r) => r.url.path == '/api/cesr/encode');
+      sent.any((r) => r.url.path == '/api/events/signature');
 
   test('the engine shape is read — bytes beside the events, sequence as text',
       () async {
@@ -122,7 +121,12 @@ void main() {
     final body = jsonDecode(attach.body) as Map<String, dynamic>;
     expect(body['aid'], aidOf(bytes));
     expect(body['sequence_number'], 0);
-    expect(body['cesr_signature'], '0BTHESIGNATURE');
+    expect(
+        ed.verify(
+            ed.public(ed.newKeyFromSeed(KeyManager.signingSeed(seed, index: 0))),
+            Uint8List.fromList(bytes),
+            rawOfIndexedSignature(body['cesr_signature'] as String)),
+        isTrue);
   });
 
   test('and so is the embedded shape', () async {

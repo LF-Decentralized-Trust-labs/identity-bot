@@ -87,7 +87,7 @@ void main() {
     // Founded anchoring no keyset of this phrase's, as an identity founded
     // before the fixed branch is in effect.
     final pq = KeyManager.slip10Ed25519(seed, KeyPaths.postQuantum(0));
-    final icp = await preparedAndSigned(core.client, core.base, seed, 0, {
+    final icp = await preparedAndSigned(core.client, core.base, core.km, seed, 0, {
       't': 'icp',
       'k': [KeyManager.keyAt(seed, 0).publicKeyEncoded],
       'kt': '1',

@@ -252,7 +252,7 @@ void main() {
     // Another device with the same phrase signed a different interaction at
     // the next place, and the witnesses hold it.
     final rival = await signedInteraction(
-        client, base, seed, aid, generation, tip, another);
+        client, base, km, seed, aid, generation, tip, another);
     for (final w in [w1, w2, w3]) {
       await w.hold(aid, rival);
     }
@@ -288,6 +288,7 @@ void main() {
     final forged = await signedInteraction(
         more.client,
         more.base,
+        more.km,
         Bip39.mnemonicToSeed(
             'zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong'.split(' ')),
         founded.aid,

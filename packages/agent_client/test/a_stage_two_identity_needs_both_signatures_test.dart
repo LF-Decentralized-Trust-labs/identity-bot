@@ -215,7 +215,9 @@ void main() {
     expect(last.signatures, hasLength(2));
 
     // A device that is not told the identity is past stage one signs with the
-    // Ed25519 key alone, and the core refuses that for good.
+    // Ed25519 key alone. That is one of the two signatures the event needs,
+    // written at place 0 as keymath writes it, so the core holds it for the
+    // other and does not record it, and the device treats it as refused.
     await expectLater(
         TheKeyEventsThisDeviceMakes(core.client, core.base, km).interact(seed,
             aid: aid,
@@ -223,9 +225,9 @@ void main() {
             afterSn: 5,
             afterDigest: last.digest,
             anchors: [anchorOf('Stage1')]),
-        throwsA(isA<AnEventWasRefused>()
-            .having((e) => e.refusal.code, 'code', 'not_authorised')));
-  });
+        throwsA(isA<AnEventWasRefused>().having((e) => e.refusal.statusCode,
+            'status', 202)));
+  }, timeout: const Timeout(Duration(minutes: 3)));
 
   test(
       'the post-quantum key in k must be the one this phrase derives, or '

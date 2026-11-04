@@ -10,8 +10,9 @@ class InceptionResult {
   final String publicKey;
   final String kel;
   final String created;
-  // cesrSignature: CESR '0B...' (88-char) signature over the inception event body.
-  // Empty string if CESR encoding is not yet available (mobile stub path).
+  // cesrSignature: the signature over the inception event body, indexed (AA...,
+  // 88 chars) at place 0, as a signature on a key event is.
+  // Empty string if it was not written (mobile stub path).
   final String cesrSignature;
   // rawBytesB64: the inception event bytes that were signed (base64).
   final String rawBytesB64;
@@ -44,8 +45,8 @@ class SignatureResult {
   // signature: raw Ed25519 signature, base64-encoded.
   final String signature;
   final String publicKey;
-  // cesrSignature: CESR '0B...' (88-char) encoding of the same signature.
-  // Empty string if CESR encoding was not requested.
+  // cesrSignature: the same signature unindexed (0B..., 88 chars), as the core's
+  // /api/verify reads it against [publicKey]. Empty string if it was not written.
   final String cesrSignature;
 
   SignatureResult({
@@ -59,7 +60,8 @@ class InteractResult {
   final String aid;
   final String said;
   final int sequenceNumber;
-  // cesrSignature: CESR '0B...' signature over the IXN event body.
+  // cesrSignature: the signature over the IXN event body, indexed (AA...) at
+  // place 0, as a signature on a key event is.
   final String cesrSignature;
 
   InteractResult({
@@ -73,8 +75,9 @@ class InteractResult {
 class PresentationResult {
   final String presentationSaid;
   final String presentationJsonB64;
-  // cesrSignature: CESR '0B...' signature over the presentation SAID bytes.
-  // Proves the holder possesses the key bound to the holder AID in the credential.
+  // cesrSignature: the signature over the presentation SAID bytes, unindexed
+  // (0B...), as the core's /api/credential/verify reads it. Proves the holder
+  // possesses the key bound to the holder AID in the credential.
   final String cesrSignature;
 
   PresentationResult({
@@ -91,7 +94,8 @@ class CredentialIssuanceResult {
   final String ixnRawBytesB64;
   final String ixnSaid;
   final int sequenceNumber;
-  // cesrSignature: CESR '0B...' signature over the IXN event body. Empty until Dart signs.
+  // cesrSignature: the signature over the IXN event body, indexed (AA...) at
+  // place 0, as a signature on a key event is. Empty until Dart signs.
   final String cesrSignature;
 
   CredentialIssuanceResult({

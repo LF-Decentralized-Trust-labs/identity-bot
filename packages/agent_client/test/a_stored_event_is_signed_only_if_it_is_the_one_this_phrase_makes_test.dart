@@ -80,7 +80,7 @@ void main() {
       // A rotation is signed by the key it reveals.
       if (body['t'] == 'rot') gen++;
       final signed =
-          await preparedAndSigned(core.client, core.base, seed, gen, b);
+          await preparedAndSigned(core.client, core.base, core.km, seed, gen, b);
       await commitTo(core.base, signed.rawB64, signed.sigs);
       final ev = await km.parseEvent(base64Decode(signed.rawB64));
       if (sn == 0) aid = ev.i;
@@ -572,6 +572,8 @@ void main() {
       ]),
     ], [0, 1, 2]);
     expect(await signedInTheCore(core, aid), [false, false, false]);
+    // The core is not asked to write any of the signatures: keymath does.
+    core.client.failOn.add('/api/cesr/encode');
 
     final asked = TheEventsThisDeviceAskedFor();
     await asked.asking(t: 'icp', expectedSn: 0, asked: {'key': key(0), 'next': key(1)});

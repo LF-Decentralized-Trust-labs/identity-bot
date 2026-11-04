@@ -42,13 +42,11 @@ void main() {
 
   // What the founding itself committed and signed.
   var commitsAtFounding = 0;
-  var signaturesAtFounding = 0;
 
   Future<String> founded() async {
     await SecureKeyStore.saveMnemonic(words.split(' '));
     final aid = (await service().inceptAid(name: 'me', code: words)).aid;
     commitsAtFounding = count('POST /api/events/commit');
-    signaturesAtFounding = count('POST /api/cesr/encode');
     return aid;
   }
 
@@ -80,7 +78,6 @@ void main() {
     expect((await get('/api/kel?name=$aid'))['event_count'], 1,
         reason: 'the key log holds only its founding');
     expect(count('POST /api/events/commit'), commitsAtFounding);
-    expect(count('POST /api/cesr/encode'), signaturesAtFounding);
     expect(await kept(), isEmpty);
   }
 
@@ -375,7 +372,7 @@ void main() {
     expect(presented.credential, issued.acdcSaid);
     expect(presented.holder, holder);
 
-    final before = count('POST /api/cesr/encode');
+    final commitsBefore = count('POST /api/events/commit');
 
     // A presentation of a credential that was not asked for.
     final res = await http.post(Uri.parse('${core.base}/api/credential/present'),
@@ -418,8 +415,8 @@ void main() {
             acdcSaid: issued.acdcSaid, holderAid: holder, issuerAid: aid),
         throwsA(isA<NotThePresentationAsked>()));
 
-    expect(count('POST /api/cesr/encode'), before,
-        reason: 'nothing was signed');
+    expect(count('POST /api/events/commit'), commitsBefore,
+        reason: 'nothing was signed or recorded');
   });
 
   test('no owner-route read is on a signing path', () async {

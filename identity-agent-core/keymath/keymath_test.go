@@ -169,3 +169,27 @@ func TestACurrentOnlyEd25519SignatureOpensNothing(t *testing.T) {
 		t.Fatalf("read back %+v: %v", read.At, err)
 	}
 }
+
+// A signature that is not on a key event is written unindexed (0B), the form
+// the core's verifiers read against a bare public key: the same text the
+// engine's own CesrEncode writes.
+func TestASignatureOffAKeyEventIsWrittenUnindexed(t *testing.T) {
+	sig := bytes.Repeat([]byte{5}, 64)
+	out, err := Do("ed25519_sig", []byte(`{"sig_b64":"`+base64.StdEncoding.EncodeToString(sig)+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Sig string `json:"sig_qb64"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatal(err)
+	}
+	want, _ := keri.MatterQB64(keri.CodeEd25519Sig, sig)
+	if got.Sig != want || !strings.HasPrefix(got.Sig, "0B") {
+		t.Fatalf("got %q, want %q", got.Sig, want)
+	}
+	if _, err := Do("ed25519_sig", []byte(`{"sig_b64":"AAAA"}`)); err == nil {
+		t.Fatal("a signature of the wrong size was written")
+	}
+}

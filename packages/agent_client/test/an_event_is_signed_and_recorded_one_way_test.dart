@@ -9,43 +9,58 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:test/test.dart';
 
+import 'support/a_signature_read_back.dart';
+import 'support/the_core.dart';
+
 // Every service in this package signs an event of an identity's log through
 // signAndRecordEvent. What it records must be a signature over exactly the
 // bytes the core serialised, against the event it names, and anything short of
 // a recorded signature is an error rather than a quiet return.
 /// A key arithmetic that reads every event as [parsed], standing in for the
 /// core's parser, which has its own tests: here only what signAndRecordEvent
-/// does with its verdict is under test.
+/// does with its verdict is under test. Every other operation, the writing of
+/// a signature included, is the real core's, or [refusesToIndex] says it
+/// cannot be done.
 class _ReadsEveryEventAs implements KeyMath {
-  _ReadsEveryEventAs(this.parsed);
+  _ReadsEveryEventAs(this.parsed, this.real, {this.refusesToIndex = false});
   final Map<String, dynamic> parsed;
+  final KeyMath real;
+  final bool refusesToIndex;
   @override
-  Future<Map<String, dynamic>> run(String op, Map<String, dynamic> request) async => parsed;
+  Future<Map<String, dynamic>> run(String op, Map<String, dynamic> request) async {
+    if (op == 'parse_event') return parsed;
+    if (refusesToIndex) throw KeyMathRefused(op, 'the signature could not be written');
+    return real.run(op, request);
+  }
 }
 
+final _parsed = {
+  't': 'ixn',
+  'd': 'Ed',
+  'i': 'Eaid',
+  's': 3,
+  'p': 'Eprior',
+  'fields': [
+    {'name': 'a', 'value': []},
+  ],
+};
+
 void main() {
-  final km = _ReadsEveryEventAs({
-    't': 'ixn',
-    'd': 'Ed',
-    'i': 'Eaid',
-    's': 3,
-    'p': 'Eprior',
-    'fields': [
-      {'name': 'a', 'value': []},
-    ],
+  late KeyMath real;
+  late KeyMath km;
+  setUpAll(() async {
+    real = await keyMathOf(await buildTheCore('signing-an-event-core'));
+    km = _ReadsEveryEventAs(_parsed, real);
   });
+
   final expected = ExpectedEvent.interaction(aid: 'Eaid', sn: 3, prior: 'Eprior', anchors: const []);
   final seed = Uint8List.fromList(List.generate(32, (i) => i));
   final event = utf8.encode('{"t":"rot","s":"3"}');
   final pub = ed.public(ed.newKeyFromSeed(seed));
 
   late List<http.Request> sent;
-  http.Client core({int encode = 200, int record = 200}) => MockClient((req) async {
+  http.Client core({int record = 200}) => MockClient((req) async {
         sent.add(req);
-        final body = jsonDecode(req.body) as Map<String, dynamic>;
-        if (req.url.path == '/api/cesr/encode') {
-          return http.Response(jsonEncode({'cesr_sig': body['raw_sig_b64']}), encode);
-        }
         return http.Response('{}', record);
       });
 
@@ -57,7 +72,7 @@ void main() {
     final recorded = jsonDecode(sent.last.body) as Map<String, dynamic>;
     expect(sent.last.url.path, '/api/events/signature');
     expect(recorded, {'aid': 'Eaid', 'sequence_number': 3, 'cesr_signature': cesr});
-    expect(ed.verify(pub, Uint8List.fromList(event), base64Decode(cesr)), isTrue);
+    expect(ed.verify(pub, Uint8List.fromList(event), rawOfIndexedSignature(cesr)), isTrue);
   });
 
   test('an event the core did not name is never signed', () async {
@@ -94,8 +109,9 @@ void main() {
 
   test('a signature that cannot be encoded or is refused is an error', () async {
     await expectLater(
-        signAndRecordEvent(core(encode: 500), 'http://core.test',
-            aid: 'Eaid', sequenceNumber: 3, rawBytesB64: base64Encode(event), signingSeed: seed, what: 'this rotation', km: km, expected: expected),
+        signAndRecordEvent(core(), 'http://core.test',
+            aid: 'Eaid', sequenceNumber: 3, rawBytesB64: base64Encode(event), signingSeed: seed, what: 'this rotation',
+            km: _ReadsEveryEventAs(_parsed, real, refusesToIndex: true), expected: expected),
         throwsA(predicate((e) => '$e'.contains('this rotation could not be signed'))));
     expect(sent.any((r) => r.url.path == '/api/events/signature'), isFalse);
     await expectLater(

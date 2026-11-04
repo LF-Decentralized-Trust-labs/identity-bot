@@ -172,7 +172,7 @@ void main() {
     });
   });
 
-  group('against a real core and witnesses', () {
+  group('against a real core and witnesses', timeout: const Timeout(Duration(minutes: 3)), () {
     late String bin;
     late KeyMath km;
     late AWitness w1, w2, w3;
@@ -388,7 +388,7 @@ void main() {
 Future<SignedCopy> _rotationOf(ACore core, KeyMath km, Uint8List seed,
     String aid, Place after, List<Object?> anchors) async {
   final pq = KeyManager.slip10Ed25519(seed, KeyPaths.postQuantum(1));
-  return preparedAndSigned(core.client, core.base, seed, 1, {
+  return preparedAndSigned(core.client, core.base, core.km, seed, 1, {
     'aid': aid,
     't': 'rot',
     'k': [KeyManager.keyAt(seed, 1).publicKeyEncoded],
