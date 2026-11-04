@@ -50,8 +50,12 @@ void main() {
   /// (each after the one before) and signed by the key the previous
   /// establishment event named, then the events at [unsigned] lose their
   /// signature and are marked, and the core is started again.
+  /// The stored bytes of each event of the last [storedBy], as prepared.
+  var rawsOfTheLast = <String>[];
+
   Future<(ACore, String, List<(int, String)>)> storedBy(
       List<Map<String, Object?>> bodies, List<int> unsigned) async {
+    rawsOfTheLast = [];
     var core = await anotherCore(bin, km);
     cores.add(core);
     var aid = '';
@@ -71,6 +75,7 @@ void main() {
       final ev = await km.parseEvent(base64Decode(signed.rawB64));
       if (sn == 0) aid = ev.i;
       placed.add((sn, ev.d));
+      rawsOfTheLast.add(signed.rawB64);
     }
     final data = core.dataDir!;
     final port = Uri.parse(core.base).port;
@@ -189,6 +194,45 @@ void main() {
 
     await expectLater(keysOf(core).finishStrandedEvents(seed),
         throwsA(isA<AStoredEventIsNotTheOneExpected>()));
+    expect(await signedInTheCore(core, aid), [true, false]);
+  });
+
+  test('bytes whose digest is not the one this device recorded are not signed',
+      () async {
+    final mine = 'E${'C' * 43}';
+    final theirs = 'E${'D' * 43}';
+    final (core, aid, placed) = await storedBy([
+      await legacyFounding(),
+      interaction([
+        {'i': mine, 's': '0', 'd': mine}
+      ]),
+    ], [1]);
+    // The same founding elsewhere, with an interaction of the core's choosing.
+    await storedBy([
+      await legacyFounding(),
+      interaction([
+        {'i': theirs, 's': '0', 'd': theirs}
+      ]),
+    ], []);
+    final theirBytes = rawsOfTheLast[1];
+    // This device asked for the seal the other bytes carry, and recorded the
+    // digest of the event the core listed: the bytes served are another
+    // event's, whose content is exactly what was asked.
+    final asked = TheEventsThisDeviceAskedFor();
+    final request = await asked.asking(t: 'ixn', aid: aid, expectedSn: 1, asked: {
+      'anchors': [
+        {'i': theirs, 's': '0', 'd': theirs}
+      ]
+    });
+    await asked.added(request, aid: aid, sequenceNumber: 1, digest: placed[1].$2);
+    core.client.serveOtherBytesAt[1] = theirBytes;
+
+    await expectLater(
+        TheKeyInForce(core.client, core.base, asked: asked, keyMath: km)
+            .finishStrandedEvents(seed),
+        throwsA(isA<AStoredEventIsNotTheOneExpected>()
+            .having((e) => e.difference, 'difference', contains('digest'))
+            .having((e) => e.expected['d'], 'the digest recorded', placed[1].$2)));
     expect(await signedInTheCore(core, aid), [true, false]);
   });
 

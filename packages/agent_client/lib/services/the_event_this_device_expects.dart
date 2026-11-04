@@ -15,7 +15,7 @@ import 'key_math.dart';
 /// signed is the bytes, so the bytes are what is checked.
 class ExpectedEvent {
   ExpectedEvent._(this.t, this.aid, this.sn, this.prior, this.fields,
-      {this.layout});
+      {this.layout, this.digest});
 
   /// A founding: the signing keys, their next-key commitments (classical
   /// first, then post-quantum), the witnesses and their threshold, and its
@@ -225,6 +225,15 @@ class ExpectedEvent {
   /// give the index and ondex it signs with.
   final OwnerLayout? layout;
 
+  /// The digest of the event, where this device recorded it when the core said
+  /// it had added the event ([withDigest]); null where it is not yet known.
+  final String? digest;
+
+  /// This event, which must also have the digest [d] this device recorded for
+  /// it, taken from that record and never from the bytes.
+  ExpectedEvent withDigest(String d) => ExpectedEvent._(t, aid, sn, prior, fields,
+      layout: layout, digest: d);
+
   /// Parses [raw] with the core's parser and returns it when it is exactly
   /// this event; throws [NotTheEventExpected] saying the first difference.
   Future<ParsedEvent> requireIn(KeyMath km, List<int> raw) async {
@@ -260,6 +269,7 @@ class ExpectedEvent {
         if (aid != null) 'i': aid,
         's': sn.toRadixString(16),
         if (prior != null) 'p': prior,
+        if (digest != null) 'd': digest,
         ...fields,
       };
 
@@ -267,6 +277,9 @@ class ExpectedEvent {
   String? differenceFrom(ParsedEvent ev) {
     if (ev.t != t) return 'it is a ${ev.t}, not a $t';
     if (ev.s != sn) return 'it is at sequence number ${ev.s}, not $sn';
+    if (digest != null && ev.d != digest) {
+      return 'its digest is ${ev.d}, not the $digest this device recorded for it';
+    }
     if (aid == null) {
       if (ev.i != ev.d)
         return 'a founding is identified by its own digest, and this one is not';

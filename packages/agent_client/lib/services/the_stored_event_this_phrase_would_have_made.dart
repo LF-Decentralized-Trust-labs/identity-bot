@@ -25,12 +25,21 @@ import 'the_event_this_device_expects.dart';
 /// it stores. Left null, the interaction must be the anchor of a credential the
 /// core issued: one seal, `{"i": x, "s": "0", "d": x}`, and nothing else.
 ///
+/// [t], [aid], [sn] and [digest] are what this device recorded when it asked
+/// for the event (or, for one the person approved, what they were shown), never
+/// what the stored bytes say: the bytes must be that event. [digest] is null
+/// only where the core's answer never arrived.
+///
 /// [generation] is the key this event reveals (0 for the founding).
 /// [foundingAnchors] are the seals a founding was asked to carry (the owner
 /// seal when it was made for one).
 Future<ExpectedEvent> theStoredEventThisPhraseWouldHaveMade(
   KeyMath km,
   Uint8List seed, {
+  required String t,
+  required String aid,
+  required int sn,
+  String? digest,
   required ParsedEvent stored,
   required ParsedEvent? before,
   required ParsedEvent? lastEstablishment,
@@ -41,35 +50,36 @@ Future<ExpectedEvent> theStoredEventThisPhraseWouldHaveMade(
   Future<List<String>> next() async =>
       [await km.nextKeyDigest(KeyManager.publicKeyAt(seed, generation + 1))];
   int toadOf(ParsedEvent e) => int.tryParse('${e['bt']}', radix: 16) ?? -1;
-  switch (stored.t) {
+  ExpectedEvent known(ExpectedEvent e) => digest == null ? e : e.withDigest(digest);
+  switch (t) {
     case 'icp':
-      return theStoredFoundingThisKeyWouldHaveMade(km, stored,
+      return known(await theStoredFoundingThisKeyWouldHaveMade(km, stored,
           key: KeyManager.publicKeyAt(seed, 0),
           next: KeyManager.publicKeyAt(seed, 1),
-          anchors: foundingAnchors);
+          anchors: foundingAnchors));
     case 'rot':
-      return ExpectedEvent.rotation(
-          aid: stored.i,
-          sn: stored.s,
+      return known(ExpectedEvent.rotation(
+          aid: aid,
+          sn: sn,
           prior: before?.d ?? '',
           keys: [KeyManager.publicKeyAt(seed, generation)],
           next: await next(),
-          toad: lastEstablishment == null ? -1 : toadOf(lastEstablishment));
+          toad: lastEstablishment == null ? -1 : toadOf(lastEstablishment)));
     case 'ixn':
       final a = stored['a'];
       final seal = a is List && a.length == 1 && a.first is Map ? (a.first as Map)['i'] : null;
-      return ExpectedEvent.interaction(
-          aid: stored.i,
-          sn: stored.s,
+      return known(ExpectedEvent.interaction(
+          aid: aid,
+          sn: sn,
           prior: before?.d ?? '',
           anchors: ixnAnchors ??
               (seal is String
                   ? [
                       {'i': seal, 's': '0', 'd': seal}
                     ]
-                  : const []));
+                  : const [])));
     default:
-      throw NotTheEventExpected('it is a ${stored.t}, which this device does '
+      throw NotTheEventExpected('it is a $t, which this device does '
           'not sign late');
   }
 }

@@ -49,6 +49,11 @@ class ACoreThatMisleads extends http.BaseClient {
   /// was.
   Map<String, Object?>? Function(Map<String, Object?> asked)? alterThePrepare;
 
+  /// The stored bytes the key log serves at these places (index in
+  /// `raw_events_b64`) are replaced by these, as a core serving other bytes
+  /// than the event it lists would; the listing itself is left as it was.
+  final Map<int, String> serveOtherBytesAt = {};
+
   /// How many commits were sent to this client, answered or not.
   int commits = 0;
 
@@ -108,7 +113,15 @@ class ACoreThatMisleads extends http.BaseClient {
         return _answer(replaced.$1, replaced.$2);
       }
     }
-    return _inner.send(request);
+    final res = await _inner.send(request);
+    if (path == '/api/kel' && serveOtherBytesAt.isNotEmpty) {
+      final body = jsonDecode(await res.stream.bytesToString()) as Map;
+      final raws = body['raw_events_b64'] as List;
+      serveOtherBytesAt.forEach((at, raw) => raws[at] = raw);
+      return http.StreamedResponse(
+          Stream.value(utf8.encode(jsonEncode(body))), res.statusCode);
+    }
+    return res;
   }
 
   static http.StreamedResponse _answer(int status, String code) =>

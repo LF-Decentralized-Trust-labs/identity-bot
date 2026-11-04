@@ -165,8 +165,14 @@ class TheKeyInForce {
       if (asked == null) {
         throw AnEventThisDeviceDidNotAskFor(checked.aid, '${event['s']}', '${event['t']}');
       }
-      final wanted = (await _asked.whatWasAsked(scope, asked))?['anchors'];
-      await _checkAndSign(seed, checked, at, ixnAnchors: wanted is List ? List<Object?>.from(wanted) : null);
+      final request = await _asked.theRequest(scope, asked);
+      final wanted = (request?['asked'] as Map?)?['anchors'];
+      await _checkAndSign(seed, checked, at,
+          t: '${request?['t']}',
+          // The place and digest this device recorded, not the bytes'.
+          sn: int.parse('${request?['s'] ?? request?['expected']}', radix: 16),
+          digest: request?['d'] as String?,
+          ixnAnchors: wanted is List ? List<Object?>.from(wanted) : null);
       await _asked.forgetId(scope, asked);
     }
     if (signed != null) await _asked.forgetSettled(scope, checked.aid, log.events, signed);
@@ -181,7 +187,8 @@ class TheKeyInForce {
   /// nothing signs late without). An event that is not is not signed: it comes
   /// back as an [AStoredEventIsNotTheOneExpected] carrying what was stored and
   /// what was expected, for the person to see.
-  Future<void> _checkAndSign(Uint8List seed, _Checked checked, int at, {List<Object?>? ixnAnchors}) async {
+  Future<void> _checkAndSign(Uint8List seed, _Checked checked, int at,
+      {required String t, required int sn, required String? digest, List<Object?>? ixnAnchors}) async {
     final km = _keyMath;
     if (km == null) {
       throw StateError('this app has not given the client the core\'s key '
@@ -204,6 +211,10 @@ class TheKeyInForce {
       lastEstablishment--;
     }
     final expected = await theStoredEventThisPhraseWouldHaveMade(km, seed,
+        t: t,
+        aid: checked.aid,
+        sn: sn,
+        digest: digest,
         stored: stored,
         before: await parsed(at - 1),
         lastEstablishment: await parsed(lastEstablishment),
@@ -213,7 +224,7 @@ class TheKeyInForce {
     try {
       await signAndRecordEvent(_client, _baseUrl,
           aid: checked.aid,
-          sequenceNumber: stored.s,
+          sequenceNumber: sn,
           rawBytesB64: raw,
           signingSeed: signingSeed,
           what: 'event ${event['s']} of this identity, left unsigned,',
@@ -271,7 +282,11 @@ class TheKeyInForce {
       // The person has been shown the event as stored, so its seals are what
       // they approved; everything else is checked as for any other.
       final seals = event['a'];
-      await _checkAndSign(seed, checked, at, ixnAnchors: seals is List ? List<Object?>.from(seals) : const []);
+      await _checkAndSign(seed, checked, at,
+          t: '${event['t']}',
+          sn: int.parse(sequenceNumber, radix: 16),
+          digest: digest,
+          ixnAnchors: seals is List ? List<Object?>.from(seals) : const []);
       return;
     }
     throw Exception('the key log of ${checked.aid} has no event $sequenceNumber with digest $digest');

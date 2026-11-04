@@ -152,6 +152,17 @@ class TheEventsThisDeviceAskedFor {
         return null;
       });
 
+  /// The request [id] as written down: its type, identifier, the sequence
+  /// number it was asked at (`expected`) and, once the core said which event it
+  /// added, that event's `s` and `d`; null when it is not written down.
+  Future<Map<String, dynamic>?> theRequest(String storageKey, String id) =>
+      _serialised(() async {
+        for (final e in await _load(storageKey)) {
+          if (e['id'] == id) return Map<String, dynamic>.from(e);
+        }
+        return null;
+      });
+
   /// The id of the request that asked for [event] of [aid], or null if this
   /// device never asked for it. [commitmentTo] turns a key in qb64 into the
   /// digest a next-key commitment names.
