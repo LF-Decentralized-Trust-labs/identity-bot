@@ -1006,19 +1006,19 @@ func testRotationKeys(t *testing.T) (string, string) {
 		iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(b).Public().(ed25519.PublicKey))
 }
 
-// Break-glass root rotation, switched on, is refused whole and plainly before
-// anything is made, since its events are not yet signed by their keys.
-func TestBreakGlassRootRotationIsRefusedPlainly(t *testing.T) {
+// Break-glass root rotation, switched on but with its events not signable,
+// is refused whole and plainly before anything is made.
+func TestBreakGlassRootRotationIsRefusedPlainlyWhileItsEventsAreNotSigned(t *testing.T) {
 	aMachineThatMayFound(t)
-	prior := recovery.RootAIDRotationEnabled
-	recovery.RootAIDRotationEnabled = true
-	t.Cleanup(func() { recovery.RootAIDRotationEnabled = prior })
+	prior, priorSigned := recovery.RootAIDRotationEnabled, recovery.RootAIDRotationSigned
+	recovery.RootAIDRotationEnabled, recovery.RootAIDRotationSigned = true, false
+	t.Cleanup(func() { recovery.RootAIDRotationEnabled, recovery.RootAIDRotationSigned = prior, priorSigned })
 	s := agentWithDerivedIdentity(t)
 	s.KeriDriver = keriengine.New()
 	s.engineSigns()
 	rec := httptest.NewRecorder()
 	s.handleRecoveryRootAIDRotation(rec, local("POST", "/api/recovery/root-aid-rotation", `{}`))
-	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "neither is yet signed by its key") {
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "not yet signed by their keys") {
 		t.Fatalf("break-glass root rotation was answered %d %s", rec.Code, rec.Body.String())
 	}
 }

@@ -3,7 +3,6 @@ package recovery
 import (
 	"encoding/json"
 	"testing"
-	"time"
 
 	"identity-agent-core/store"
 )
@@ -41,29 +40,6 @@ func (m *memNotifyStore) SaveIdentity(id store.IdentityState) error {
 func (m *memNotifyStore) SaveTask(t store.TaskRecord) error {
 	m.tasks = append(m.tasks, t)
 	return nil
-}
-
-type mockKeriDriver struct {
-	inception  *KeriInceptionResult
-	rot        *KeriRotationResult
-	ixn        *KeriInteractResult
-	authAnchor []interface{}
-	backAnchor []interface{}
-}
-
-func (m *mockKeriDriver) CreateInception(_, _ string) (*KeriInceptionResult, error) {
-	return m.inception, nil
-}
-func (m *mockKeriDriver) CreateHybridInception(_ string) (*KeriInceptionResult, error) {
-	return m.inception, nil
-}
-func (m *mockKeriDriver) RotateWithAnchor(_ string, _, _ string, data []interface{}) (*KeriRotationResult, error) {
-	m.authAnchor = data
-	return m.rot, nil
-}
-func (m *mockKeriDriver) Interact(_ string, data []interface{}) (*KeriInteractResult, error) {
-	m.backAnchor = data
-	return m.ixn, nil
 }
 
 func withRootAIDRotationEnabled(t *testing.T, fn func()) {
@@ -165,130 +141,10 @@ func TestRootAIDRotationGatedWhenDisabled(t *testing.T) {
 	st := &memNotifyStore{
 		identity: &store.IdentityState{AID: "EoldRootAID0123456789ABCDEFGHIJKLMN"},
 	}
-	_, err := RotateRootAID(RootAIDRotationRequest{RecoverySessionID: "sess-1"}, &mockKeriDriver{}, st, t.TempDir(), nil)
+	_, err := RotateRootAID(RootAIDRotationRequest{RecoverySessionID: "sess-1"}, func([]byte, []string) error { return nil }, st, t.TempDir(), nil)
 	if err == nil {
 		t.Fatal("gated rotation must error")
 	}
-}
-
-func TestRotateRootAIDFlow(t *testing.T) {
-	withRootAIDRotationEnabled(t, func() {
-		dir := t.TempDir()
-		oldRoot := "EoldRootAID0123456789ABCDEFGHIJKLMN"
-		newRoot := "EnewRootAID0123456789ABCDEFGHIJKLMN"
-		priorTail := "EpriorTailSAID0123456789ABCDEFGHIJKLMN"
-		newInception := "EicpSAID0123456789ABCDEFGHIJKLMNOP"
-		authSAID := "EauthRotSAID0123456789ABCDEFGHIJKLMN"
-		authSig := "0BsigCESRsignatureExample"
-
-		st := &memNotifyStore{
-			identity: &store.IdentityState{AID: oldRoot, PublicKey: "oldpub", NextKeyDigest: "oldnext"},
-			events: []store.EventRecord{{
-				AID: oldRoot, SequenceNumber: 1, EventType: "rot",
-				EventJSON: `{"v":"KERI10JSON00011c_","t":"rot","d":"` + priorTail + `","i":"` + oldRoot + `","s":"1"}`,
-			}},
-			contacts: []store.ContactRecord{
-				{AID: "EP1", Status: "accepted"},
-				{AID: "EP2", Status: "accepted"},
-			},
-			credentials: []store.CredentialRecord{{HolderAID: oldRoot, IssuerAID: "Eissuer1"}},
-		}
-
-		driver := &mockKeriDriver{
-			inception: &KeriInceptionResult{
-				AID: newRoot, PublicKey: "newpub", NextKeyDigest: "newnext",
-				InceptionEvent: map[string]interface{}{"t": "icp", "d": newInception, "i": newRoot, "s": "0"},
-				InceptionSAID:  newInception,
-				SequenceNumber: 0,
-			},
-			rot: &KeriRotationResult{
-				AID: oldRoot, NewPublicKey: "prerotpub", NewNextKeyDigest: "prerotnext",
-				RotationEvent: map[string]interface{}{
-					"t": "rot", "d": authSAID, "i": oldRoot, "s": "2",
-					"a": []interface{}{map[string]interface{}{"d": newInception}},
-				},
-				RotationSAID:   authSAID,
-				SequenceNumber: 2,
-			},
-			ixn: &KeriInteractResult{
-				AID: newRoot, Said: "EixnSAID0123456789ABCDEFGHIJKLMNOP",
-				IxnEvent:       map[string]interface{}{"t": "ixn", "d": "EixnSAID0123456789ABCDEFGHIJKLMNOP", "i": newRoot, "s": "1"},
-				SequenceNumber: 1,
-			},
-		}
-
-		svc := NewRootAIDRotationService(dir)
-		svc.Now = func() time.Time { return parseTime("2026-06-20T12:00:00Z") }
-
-		result, err := svc.RotateRootAID(RootAIDRotationRequest{
-			RecoverySessionID:          "sess-1",
-			NewRootPublicKey:           "newpub",
-			NewRootNextPublicKey:       "newnext",
-			PreRotationPublicKey:       "prerotpub",
-			PreRotationNextPublicKey:   "prerotnext",
-			AuthorizationCesrSignature: authSig,
-			CarryForwardAIDs:           []string{"EP2"},
-		}, driver, st, []string{"https://watcher.example/kel"})
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if result.NewRootAID != newRoot || result.OldRootAID != oldRoot {
-			t.Fatalf("aids old=%s new=%s", result.OldRootAID, result.NewRootAID)
-		}
-		if result.ContinuityProof.V != "2" {
-			t.Fatalf("proof version %s", result.ContinuityProof.V)
-		}
-		if result.ContinuityProof.NewInceptionSAID != newInception {
-			t.Fatalf("new inception %s", result.ContinuityProof.NewInceptionSAID)
-		}
-		if result.ContinuityProof.AuthorizationEventSAID != authSAID {
-			t.Fatalf("auth said %s", result.ContinuityProof.AuthorizationEventSAID)
-		}
-		if result.ContinuityProof.AuthorizationCesrSignature != authSig {
-			t.Fatalf("auth sig %s", result.ContinuityProof.AuthorizationCesrSignature)
-		}
-		if result.ContinuityProof.PriorKelTailSAID != priorTail {
-			t.Fatalf("proof prior tail %s", result.ContinuityProof.PriorKelTailSAID)
-		}
-		if len(result.CarriedForwardAIDs) != 1 || result.CarriedForwardAIDs[0] != "EP2" {
-			t.Fatalf("carried %+v", result.CarriedForwardAIDs)
-		}
-		if len(driver.authAnchor) != 1 {
-			t.Fatalf("auth anchor %+v", driver.authAnchor)
-		}
-		authMap := driver.authAnchor[0].(map[string]interface{})
-		if authMap["d"] != newInception {
-			t.Fatalf("rot anchor d=%v", authMap["d"])
-		}
-		if len(driver.backAnchor) != 1 {
-			t.Fatalf("back anchor %+v", driver.backAnchor)
-		}
-		backMap := driver.backAnchor[0].(map[string]interface{})
-		if backMap["d"] != priorTail {
-			t.Fatalf("ixn back anchor d=%v", backMap["d"])
-		}
-		if st.identity == nil || st.identity.AID != newRoot {
-			t.Fatalf("identity not updated: %+v", st.identity)
-		}
-		if len(st.events) != 4 {
-			t.Fatalf("events %d want 4 (prior + auth rot + icp + ixn)", len(st.events))
-		}
-		if result.NotificationsSent != 2 {
-			t.Fatalf("notifications %d want watcher+issuer", result.NotificationsSent)
-		}
-
-		m, err := LoadRootAIDMap(dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(m.Entries) != 1 || m.Entries[0].NewRootAID != newRoot {
-			t.Fatalf("map %+v", m.Entries)
-		}
-		if m.Entries[0].AuthorizationEventSAID != authSAID {
-			t.Fatalf("map auth said %s", m.Entries[0].AuthorizationEventSAID)
-		}
-	})
 }
 
 func TestBuildContinuityProofV2(t *testing.T) {

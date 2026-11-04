@@ -378,7 +378,12 @@ a witness.
 - The recovery rotation, the multi-owner ceremony and the break-glass root
   rotation run through prepare and commit, carry the post-quantum commitment
   (section 6), and add nothing until signed by the keys each event reveals.
-  The break-glass root rotation stays refused until then.
+  The break-glass root rotation writes three events: the new root's founding,
+  the old root's rotation sealing it, and the new root's first interaction.
+  `POST /api/recovery/root-aid-rotation/prepare` builds them and adds none;
+  `POST /api/recovery/root-aid-rotation` takes all three signed and writes
+  nothing unless each carries a signature and both logs verify. It stays off
+  behind `RootAIDRotationEnabled`.
 - `POST /api/events/signature` attaches a signature to an event an earlier
   version added unsigned, and does nothing else. Those bytes are already in
   the log and may already be at witnesses, so signing them in place is the

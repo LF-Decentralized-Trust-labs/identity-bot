@@ -215,6 +215,9 @@ var controllerOwnerOnly = map[string]string{
 	// holding the key.
 	"DELETE /api/controllers/{aid}": "removing a machine's authorisation is the owner's decision, made from " +
 		"the device holding the key",
+
+	// The events the root rotation is signed over, built before they are added.
+	"POST /api/recovery/root-aid-rotation/prepare": "preparing the rotation of the root identifier replaces the identity's controlling key",
 }
 
 // controllerMinimumScore names the actions that need a score other than the

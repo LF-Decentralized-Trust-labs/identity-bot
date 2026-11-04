@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 
 	"identity-agent-core/authprovider"
 	"identity-agent-core/backup"
+	"identity-agent-core/drivers"
 	"identity-agent-core/recovery"
 	"identity-agent-core/store"
 
@@ -40,6 +42,7 @@ func (s *CoreServer) mountRecoveryRoutes(r chi.Router) {
 		r.Put("/duress-policy", s.handlePutDuressPolicy)
 		r.Post("/retrieve", s.handleRecoveryRetrieve)
 		r.Post("/root-aid-rotation", s.handleRecoveryRootAIDRotation)
+		r.Post("/root-aid-rotation/prepare", s.handleRecoveryRootAIDPrepare)
 		r.Get("/root-aid-rotation/status", s.handleRecoveryRootAIDStatus)
 
 		// Holding a share for somebody else's identity. Small on purpose: a
@@ -356,8 +359,8 @@ func (s *CoreServer) handleRecoveryRootAIDRotation(w http.ResponseWriter, r *htt
 	}
 	if !recovery.RootAIDRotationSigned {
 		writeError(w, http.StatusServiceUnavailable, "Root-AID rotation not available",
-			"Break-glass root-AID rotation rotates the old root and writes the new root's first interaction, "+
-				"and neither is yet signed by its key here, so it is refused before anything is made")
+			"Break-glass root-AID rotation writes events that are not yet signed by their keys, "+
+				"so it is refused before anything is made")
 		return
 	}
 	var req recovery.RootAIDRotationRequest
@@ -365,9 +368,8 @@ func (s *CoreServer) handleRecoveryRootAIDRotation(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
 		return
 	}
-	if s.KeriDriver == nil {
-		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"Root-AID rotation requires the KERI driver on desktop, or the embedded Go core on mobile")
+	c, ok := s.committer(w)
+	if !ok {
 		return
 	}
 	if s.DataStore == nil {
@@ -380,20 +382,76 @@ func (s *CoreServer) handleRecoveryRootAIDRotation(w http.ResponseWriter, r *htt
 		watcherHints = s.WatcherService.WatcherHints()
 	}
 
-	if identity, err := s.DataStore.GetIdentity(); err == nil && identity != nil {
-		if err := s.mayRotateHere(identity.AID); err != nil {
-			writeKeyNotHeldHere(w)
-			return
+	// Each event goes through the one commit path, signed. The old root's is
+	// also sent to its own witnesses by name: once the identity record moves
+	// to the new root, the identity-wide witnessing no longer reaches it.
+	commit := func(raw []byte, sigs []string) error {
+		ev, err := keri.ParseEvent(raw)
+		if err != nil {
+			return err
 		}
+		own, err := s.DataStore.GetIdentity()
+		if err != nil || own == nil {
+			return fmt.Errorf("no identity is kept here")
+		}
+		name := own.AID
+		if ev.Ilk == "icp" {
+			name = ""
+		}
+		res, err := s.commitAndNote(c, name, raw, ev, sigs)
+		if err != nil {
+			return err
+		}
+		if res.Status != "recorded" && res.Status != "already_recorded" {
+			return fmt.Errorf("it is %s, so it was not added", res.Status)
+		}
+		if keeper, ok := s.KeriDriver.(drivers.KELKeeper); ok && ev.Ilk == "rot" {
+			s.inBackground(func(context.Context) { s.witnessLogOf(keeper, ev.Identifier) })
+		}
+		return nil
 	}
-	adapter := &recovery.KeriDriverAdapter{Driver: s.KeriDriver}
-	result, err := recovery.RotateRootAID(req, adapter, s.DataStore, s.DataDir, watcherHints)
+	result, err := recovery.RotateRootAID(req, commit, s.DataStore, s.DataDir, watcherHints)
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, "Root-AID rotation failed", err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
+}
+
+// handleRecoveryRootAIDPrepare builds the three events of a break-glass root
+// rotation and adds none of them, for the app that holds the root keys to
+// check and sign (ADR-061 section 3).
+func (s *CoreServer) handleRecoveryRootAIDPrepare(w http.ResponseWriter, r *http.Request) {
+	if s.refuseIfThisComputerMayNotFound(w) {
+		return
+	}
+	if !recovery.RootAIDRotationAvailable() || !recovery.RootAIDRotationSigned {
+		writeError(w, http.StatusServiceUnavailable, "Root-AID rotation not available",
+			"Break-glass root-AID rotation is gated pending security review of the signed old-root delegation anchor")
+		return
+	}
+	c, ok := s.committer(w)
+	if !ok {
+		return
+	}
+	if s.DataStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "Store not available", "identity store is required")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxKeyEventBody)
+	var req recovery.PrepareRootAIDRotationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+	prepared, err := recovery.PrepareRootAIDRotation(req, c, s.DataStore)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "Root-AID rotation could not be prepared", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(prepared)
 }
 
 func (s *CoreServer) handleRecoveryRootAIDStatus(w http.ResponseWriter, r *http.Request) {

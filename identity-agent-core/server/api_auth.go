@@ -710,6 +710,10 @@ var sessionForbidden = map[string]string{
 	// archive plus later possession of the phrase, is the identity.
 	"POST /api/recovery/retrieve":          "retrieval hands back an archive, and an archive is the identity to anyone who can open it",
 	"POST /api/recovery/root-aid-rotation": "rotating the root AID replaces the identity's controlling key",
+
+	// The events the root rotation is signed over, built before they are added.
+	"POST /api/recovery/root-aid-rotation/prepare": "preparing the rotation of the root AID replaces the identity's controlling key",
+
 	// The keys this device holds for the machines it owns. A session that
 	// could ask for a signature, or for a new owning identity, would hold the
 	// owner's authority over every machine this device adopted.

@@ -167,6 +167,9 @@ func TestTheOwnerOnlyListIsTheOneTheADRRecords(t *testing.T) {
 		// committed signed (ADR-061).
 		"POST /api/events/prepare",
 		"POST /api/events/commit",
+		// The break-glass root rotation's events, prepared before they are
+		// committed signed with the rotation itself (ADR-061).
+		"POST /api/recovery/root-aid-rotation/prepare",
 		// Installing a key log, which decides what the identity is: the
 		// root of trust (ADR-061).
 		"POST /api/identity/restore",
