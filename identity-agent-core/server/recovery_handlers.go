@@ -434,6 +434,9 @@ func (s *CoreServer) handleRecoveryRootAIDRotation(w http.ResponseWriter, r *htt
 		return
 	}
 	s.theMessagingKeysAreTheNewRoots(req, oldRootAID, result.NewRootAID)
+	// The run's end: its root map entry is written, so the old root is now a
+	// root moved on from and its witnesses are brought up to date for it.
+	s.inBackground(func(context.Context) { s.witnessOwnLog() })
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
 }

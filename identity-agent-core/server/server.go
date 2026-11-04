@@ -758,6 +758,7 @@ func (s *CoreServer) Start() error {
 	s.anchorStop = make(chan struct{})
 	stop := s.anchorStop
 	s.anchorStopMu.Unlock()
+	s.beginWitnessing()
 	s.inBackground(func(context.Context) { s.keepAnchoring(stop) })
 	s.runAddons(stop)
 

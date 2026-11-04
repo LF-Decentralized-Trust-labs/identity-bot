@@ -1000,6 +1000,28 @@ func RecordRootAIDWitnessing(dataDir, oldRootAID, authorizationSAID string, gave
 	return nil
 }
 
+// ClearRootAIDWitnessingGaveUp reopens the witnessing of every root the core
+// gave up on, so a start tries them again.
+func ClearRootAIDWitnessingGaveUp(dataDir string) error {
+	rootAIDMapMu.Lock()
+	defer rootAIDMapMu.Unlock()
+	m, err := LoadRootAIDMap(dataDir)
+	if err != nil {
+		return err
+	}
+	changed := false
+	for i := range m.Entries {
+		if m.Entries[i].WitnessingGaveUpAt != "" {
+			m.Entries[i].WitnessingGaveUpAt = ""
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return writeRootAIDMap(dataDir, m)
+}
+
 func writeRootAIDMap(dataDir string, m *RootAIDMap) error {
 	out, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {

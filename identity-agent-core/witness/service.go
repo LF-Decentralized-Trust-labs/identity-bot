@@ -107,6 +107,35 @@ type Service struct {
 
 	mu         sync.Mutex
 	finalizeWg map[string]chan struct{}
+
+	// sending counts, by identity, the sends to witnesses that have begun and
+	// not completed.
+	sendingMu sync.Mutex
+	sending   map[string]int
+}
+
+// sendBegun marks a send of aid's events to a witness as in flight, and
+// returns what marks it complete.
+func (s *Service) sendBegun(aid string) func() {
+	s.sendingMu.Lock()
+	if s.sending == nil {
+		s.sending = map[string]int{}
+	}
+	s.sending[aid]++
+	s.sendingMu.Unlock()
+	return func() {
+		s.sendingMu.Lock()
+		if s.sending[aid]--; s.sending[aid] <= 0 {
+			delete(s.sending, aid)
+		}
+		s.sendingMu.Unlock()
+	}
+}
+
+func (s *Service) sendsInFlight(aid string) bool {
+	s.sendingMu.Lock()
+	defer s.sendingMu.Unlock()
+	return s.sending[aid] > 0
 }
 
 func NewService(st Store, contacts ContactStore, driver drivers.KeriEngine, backendType string) *Service {
@@ -758,8 +787,10 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 			continue
 		}
 		wg.Add(1)
+		sent := s.sendBegun(signerAID)
 		go func(key string, w witnessTarget) {
 			defer wg.Done()
+			defer sent()
 			// A witness whose tip is not known this time, because it did not
 			// answer, answered too often, has no tip route or answered with
 			// something that does not check out, is left for the next pass.
@@ -819,6 +850,83 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 	return true
 }
 
+// HoldsThreshold reports whether at least threshold of the designated witnesses
+// are known to hold the log through its last event, so one of three gone for
+// good does not keep a caller trying. A threshold of 0 asks for one.
+func (s *Service) HoldsThreshold(signerAID string, events []SignedEvent, designated []string, threshold int) bool {
+	if len(events) == 0 {
+		return false
+	}
+	raw, err := base64.StdEncoding.DecodeString(events[len(events)-1].RawBytesB64)
+	if err != nil {
+		return false
+	}
+	var ev map[string]interface{}
+	if json.Unmarshal(raw, &ev) != nil {
+		return false
+	}
+	tip, err := eventSeq(ev)
+	if err != nil {
+		return false
+	}
+	if threshold < 1 {
+		threshold = 1
+	}
+	n := 0
+	for _, key := range designated {
+		if s.confirmedTip(signerAID, key) >= tip {
+			n++
+		}
+	}
+	return n >= threshold
+}
+
+// HeldThrough settles whether at least threshold of the designated witnesses
+// hold signerAID's log through its last event, for a caller about to conclude
+// that they do not. It waits until no send of that identity's events is in
+// flight, then asks each witness for its signed tip and believes that, so a
+// witness that took the last event while a pass was counting is not counted as
+// not holding it. It reports settled false, and holds nothing, when sends were
+// still in flight when ctx ended: nothing is known then, and no try is to be
+// counted.
+func (s *Service) HeldThrough(ctx context.Context, signerAID string, events []SignedEvent, designated []string, threshold int) (held, settled bool) {
+	for s.sendsInFlight(signerAID) {
+		select {
+		case <-ctx.Done():
+			return false, false
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	if len(events) == 0 {
+		return false, true
+	}
+	if s.HoldsThreshold(signerAID, events, designated, threshold) {
+		return true, true
+	}
+	raw, err := base64.StdEncoding.DecodeString(events[len(events)-1].RawBytesB64)
+	if err != nil {
+		return false, true
+	}
+	var ev map[string]interface{}
+	if json.Unmarshal(raw, &ev) != nil {
+		return false, true
+	}
+	last, err := eventSeq(ev)
+	if err != nil {
+		return false, true
+	}
+	for key, tip := range s.KelHeldBy(ctx, signerAID, designated) {
+		if tip.SN >= last {
+			s.confirm(signerAID, key, last)
+		}
+	}
+	// A send that began while the tips were asked is not settled either.
+	if s.sendsInFlight(signerAID) {
+		return false, false
+	}
+	return s.HoldsThreshold(signerAID, events, designated, threshold), true
+}
+
 // BroadcastToDesignated sends an event to the witnesses an identity's own key
 // log designates, found by their keys among this agent's witnesses and the
 // bootstrap pool, and keeps the receipts they return. Used for an identity
@@ -846,7 +954,11 @@ func (s *Service) BroadcastToDesignated(ctx context.Context, signerAID string, r
 			log.Printf("[witness] %s designates %s, which this agent has no address for", signerAID, key)
 			continue
 		}
-		go s.postWithRetry(ctx, witnessEventURL(w), body, said, key)
+		sent := s.sendBegun(signerAID)
+		go func(key string, w witnessTarget) {
+			defer sent()
+			s.postWithRetry(ctx, witnessEventURL(w), body, said, key)
+		}(key, w)
 	}
 	go s.finalizeLoop(said, threshold)
 	return nil
