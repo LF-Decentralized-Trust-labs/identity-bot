@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	neturl "net/url"
 	"strings"
 	"time"
 
@@ -78,6 +79,9 @@ func (s *Service) postWitnessRequest(ctx context.Context, c *store.ContactRecord
 		}
 	}
 	body, _ := json.Marshal(req)
+	// A local address is allowed only where the owner recorded it: one a
+	// stranger's request left behind is not called until the owner accepts.
+	ctx = context.WithValue(ctx, guardKey{}, LiteralIsLocal(hostOf(c.OobiURL)) && c.ContactSource != ContactSourceInbound)
 	return s.PostEvent(ctx, witnessRequestURL(c.OobiURL), body)
 }
 
@@ -149,3 +153,11 @@ func witnessRequestURL(oobi string) string {
 // Identity is the identity this agent answers witness requests as, which a
 // requester names in what it signs.
 func (s *Service) Identity() string { return s.ourAID() }
+
+func hostOf(raw string) string {
+	u, err := neturl.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
+}

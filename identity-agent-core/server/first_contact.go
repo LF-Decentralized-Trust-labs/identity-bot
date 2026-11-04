@@ -280,10 +280,15 @@ func (s *CoreServer) recordConnectionRequest(aid string, jwm *didcomm.JWM) error
 		publicKey = kel.CurrentPublicKey
 	}
 	// A stranger's address is the stranger's say-so: it is kept only if it names
-	// this stranger's own AID and is not a private address (the owner's own
-	// agents, which may be local, are added by the owner, not by a request).
+	// this stranger's own AID.
+	//
+	// A private address written out is kept, because a local or dev peer is
+	// exactly that, but the contact is marked as inbound, so it is not called
+	// until the owner accepts the contact (which confirms it). A name is
+	// looked up now, and refused if it resolves inward: no owner would be
+	// confirming that on purpose.
 	oobi := body.OobiURL
-	if u, err := witness.OOBIFitsAID(oobi, aid); err != nil || witness.LiteralIsLocal(u.Hostname()) {
+	if u, err := witness.OOBIFitsAID(oobi, aid); err != nil || witness.ResolvesInternal(u.Hostname()) && !witness.LiteralIsLocal(u.Hostname()) {
 		oobi = ""
 	}
 	rec := store.ContactRecord{

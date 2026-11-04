@@ -431,11 +431,61 @@ func LiteralIsLocal(host string) bool {
 	return ip != nil && ipIsInternal(ip)
 }
 
-var cgnat = &net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
+var (
+	cgnat = &net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
+	// "This network", the benchmarking range, and the reserved and broadcast
+	// block: none of them is a place a peer lives.
+	reservedV4 = []*net.IPNet{
+		{IP: net.IPv4(0, 0, 0, 0), Mask: net.CIDRMask(8, 32)},
+		{IP: net.IPv4(198, 18, 0, 0), Mask: net.CIDRMask(15, 32)},
+		{IP: net.IPv4(240, 0, 0, 0), Mask: net.CIDRMask(4, 32)},
+	}
+	// NAT64 (RFC 6052): the last 32 bits are an IPv4 address the gateway will
+	// dial on the sender's behalf.
+	nat64 = &net.IPNet{IP: net.ParseIP("64:ff9b::"), Mask: net.CIDRMask(96, 128)}
+)
 
 func ipIsInternal(ip net.IP) bool {
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
-		ip.IsUnspecified() || ip.IsInterfaceLocalMulticast() || cgnat.Contains(ip)
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsUnspecified() || ip.IsInterfaceLocalMulticast() || ip.IsMulticast() || cgnat.Contains(ip) {
+		return true
+	}
+	for _, n := range reservedV4 {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	if ip.To4() == nil && nat64.Contains(ip) {
+		if v6 := ip.To16(); v6 != nil {
+			return ipIsInternal(net.IPv4(v6[12], v6[13], v6[14], v6[15]))
+		}
+	}
+	return false
+}
+
+// ResolvesInternal is whether host, a name, resolves to an internal address
+// (or cannot be resolved, so cannot be shown not to).
+func ResolvesInternal(host string) bool {
+	if ip := net.ParseIP(host); ip != nil {
+		return ipIsInternal(ip)
+	}
+	ips, err := lookupHost(host)
+	if err != nil || len(ips) == 0 {
+		return true
+	}
+	for _, ip := range ips {
+		if ipIsInternal(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// dialResolve turns a name into the addresses that are dialled. It is a
+// variable so a test can make a name answer differently when dialled than
+// when it was checked.
+var dialResolve = func(ctx context.Context, host string) ([]string, error) {
+	return net.DefaultResolver.LookupHost(ctx, host)
 }
 
 // guardedClient is an HTTP client for the answer: it follows no redirect, uses
@@ -457,9 +507,31 @@ func guardedClient(timeout time.Duration, local bool) *http.Client {
 		}
 		return nil
 	}}
+	dial := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		if net.ParseIP(host) != nil {
+			return d.DialContext(ctx, network, addr)
+		}
+		addrs, err := dialResolve(ctx, host)
+		if err != nil {
+			return nil, err
+		}
+		last := fmt.Errorf("%s does not resolve", host)
+		for _, a := range addrs {
+			c, err := d.DialContext(ctx, network, net.JoinHostPort(a, port))
+			if err == nil {
+				return c, nil
+			}
+			last = err
+		}
+		return nil, last
+	}
 	return &http.Client{
 		Timeout:       timeout,
-		Transport:     &http.Transport{Proxy: nil, DialContext: d.DialContext, TLSHandshakeTimeout: timeout},
+		Transport:     &http.Transport{Proxy: nil, DialContext: dial, TLSHandshakeTimeout: timeout},
 		CheckRedirect: refuseRedirects,
 	}
 }
@@ -718,4 +790,13 @@ func witnessAcceptURL(oobi string) string {
 		base = oobi[:idx]
 	}
 	return strings.TrimRight(base, "/") + "/api/witness/accept"
+}
+
+// SetHostLookup replaces the lookup used to check where a name points, and
+// returns what restores it. For tests in other packages, which cannot reach
+// the lookup itself.
+func SetHostLookup(f func(string) ([]net.IP, error)) (restore func()) {
+	old := lookupHost
+	lookupHost = f
+	return func() { lookupHost = old }
 }
