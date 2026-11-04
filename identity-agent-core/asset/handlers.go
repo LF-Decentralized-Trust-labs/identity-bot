@@ -325,8 +325,23 @@ func (h *Handler) HandleListInvites(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) HandleRevokeInvite(w http.ResponseWriter, r *http.Request) {
 	token := chi.URLParam(r, "token")
-	h.Store.RevokeInvite(token)
-	h.writeJSON(w, map[string]bool{"revoked": true}, http.StatusOK)
+	h.writeRevokeResult(w, h.Store.RevokeInvite(token), func() { h.writeJSON(w, map[string]bool{"revoked": true}, http.StatusOK) })
+}
+
+// writeRevokeResult turns the outcome of a revoke into the status a client can
+// trust: 404 for a code nobody holds, 409 for one already revoked or used up,
+// 500 when the withdrawal could not be saved. ok runs only on a real revoke.
+func (h *Handler) writeRevokeResult(w http.ResponseWriter, err error, ok func()) {
+	switch {
+	case err == nil:
+		ok()
+	case errors.Is(err, ErrInviteNotFound):
+		h.writeJSON(w, map[string]string{"error": "no such invite"}, http.StatusNotFound)
+	case errors.Is(err, ErrInviteClosed):
+		h.writeJSON(w, map[string]string{"error": "invite is already revoked or used up"}, http.StatusConflict)
+	default:
+		h.writeJSON(w, map[string]string{"error": "the invite could not be revoked"}, http.StatusInternalServerError)
+	}
 }
 
 func (h *Handler) HandleGetInviteInfo(w http.ResponseWriter, r *http.Request) {

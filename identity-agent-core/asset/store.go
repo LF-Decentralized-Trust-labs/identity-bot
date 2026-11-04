@@ -204,13 +204,32 @@ func (s *Store) IncrementInviteUse(token string) error {
 	return nil
 }
 
+// ErrInviteNotFound is returned when a revoke names a code the store does not hold.
+var ErrInviteNotFound = errors.New("no such invite")
+
+// ErrInviteClosed is returned when a revoke names a code that is already revoked
+// or already used up, so there is nothing left to withdraw.
+var ErrInviteClosed = errors.New("invite is already revoked or used up")
+
+// RevokeInvite withdraws an asset invite. It says ErrInviteNotFound for a token
+// it does not hold and ErrInviteClosed for one already revoked or used up, so a
+// caller is never told "revoked" about a code that was not live to begin with.
 func (s *Store) RevokeInvite(token string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if inv, ok := s.invites[token]; ok {
-		inv.Revoked = true
+	inv, ok := s.invites[token]
+	if !ok {
+		return ErrInviteNotFound
+	}
+	if inv.Revoked || (inv.MaxUses > 0 && inv.UseCount >= inv.MaxUses) {
+		return ErrInviteClosed
+	}
+	inv.Revoked = true
+	s.invites[token] = inv
+	if err := s.saveLocked(s.invitesPath, s.invites); err != nil {
+		inv.Revoked = false
 		s.invites[token] = inv
-		return s.saveLocked(s.invitesPath, s.invites)
+		return err
 	}
 	return nil
 }
