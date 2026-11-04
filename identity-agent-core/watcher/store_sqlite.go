@@ -63,18 +63,29 @@ func (s *SQLiteStore) ListFirstSeen(aid string) ([]FirstSeenRecord, error) {
 }
 
 func (s *SQLiteStore) InsertDuplicityAlert(alert DuplicityAlert) (int64, error) {
+	detectedAt := alert.DetectedAt.UTC().Format(time.RFC3339)
+	// An alert is identified by what it says and when (migration 46), so the
+	// same one seen again within the same second is the same alert.
 	res, err := s.db.Exec(`
-		INSERT INTO duplicity_alerts (
+		INSERT OR IGNORE INTO duplicity_alerts (
 			aid, sequence_num, our_digest, their_digest, source_url, detected_at, resolved, resolution_note
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		alert.AID, alert.SequenceNum, alert.OurDigest, alert.TheirDigest,
-		alert.SourceURL, alert.DetectedAt.UTC().Format(time.RFC3339),
+		alert.SourceURL, detectedAt,
 		boolToInt(alert.Resolved), alert.ResolutionNote,
 	)
 	if err != nil {
 		return 0, err
 	}
-	return res.LastInsertId()
+	if n, _ := res.RowsAffected(); n > 0 {
+		return res.LastInsertId()
+	}
+	var id int64
+	err = s.db.QueryRow(`
+		SELECT id FROM duplicity_alerts
+		 WHERE aid = ? AND sequence_num = ? AND our_digest = ? AND their_digest = ? AND detected_at = ?`,
+		alert.AID, alert.SequenceNum, alert.OurDigest, alert.TheirDigest, detectedAt).Scan(&id)
+	return id, err
 }
 
 func (s *SQLiteStore) ListDuplicityAlerts(aid string) ([]DuplicityAlert, error) {
