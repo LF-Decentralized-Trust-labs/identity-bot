@@ -101,6 +101,8 @@ type Session struct {
 	expiresAt time.Time
 	inFlight  map[string]int // requests in flight, per allocation
 	closed    chan struct{}
+	// ready is closed once the Identity Agent has been told it is admitted.
+	ready     chan struct{}
 	closeOnce sync.Once
 }
 
@@ -174,14 +176,10 @@ func Accept(w http.ResponseWriter, r *http.Request, cfg *ServiceConfig) (*Sessio
 		ID: randomToken(16), AID: v.AID, cfg: cfg, exporter: exporter,
 		slots: make(chan struct{}, MaxStreamsPerSession), key: v.Key, kel: v.KEL,
 		expiresAt: cfg.now().Add(cfg.lease()), inFlight: map[string]int{},
-		closed: make(chan struct{}),
+		closed: make(chan struct{}), ready: make(chan struct{}),
 	}
 	if err := cfg.Registry.mayReplace(s); err != nil {
 		return refuse(err)
-	}
-	if err := ws.WriteJSON(Admitted{Session: s.ID, ExpiresAt: s.expiresAt.UTC().Format(time.RFC3339)}); err != nil {
-		ws.Close()
-		return nil, err
 	}
 	// From here the websocket carries only the session. The relay is the
 	// yamux client: it is the side that opens streams. It never accepts one,
@@ -199,6 +197,8 @@ func Accept(w http.ResponseWriter, r *http.Request, cfg *ServiceConfig) (*Sessio
 	if err := cfg.Registry.Put(s); err != nil {
 		cfg.logf("relay admission refused aid=%q ip=%q: %v", s.AID, r.RemoteAddr, err)
 		mux.Close()
+		ws.WriteJSON(Admitted{Error: err.Error()})
+		ws.Close()
 		return nil, err
 	}
 	// Only a session that is now the identifier's own is recorded. Telling the
@@ -211,6 +211,16 @@ func Accept(w http.ResponseWriter, r *http.Request, cfg *ServiceConfig) (*Sessio
 			return nil, err
 		}
 	}
+	// The Identity Agent is told it is admitted only once the session is the
+	// identifier's own: its first request on this relay (binding an address)
+	// is answered by a relay that must already know the session. No stream is
+	// opened before the announcement is written (open waits on s.ready), so
+	// it is the only writer on the websocket until then.
+	if err := ws.WriteJSON(Admitted{Session: s.ID, ExpiresAt: s.expiresAt.UTC().Format(time.RFC3339)}); err != nil {
+		s.Close()
+		return nil, err
+	}
+	close(s.ready)
 	go s.refuseIdentityAgentStreams()
 	go s.keepLeased()
 	cfg.logf("relay admission accepted aid=%q session=%s key=%s ip=%q", s.AID, s.ID, v.Key, r.RemoteAddr)
@@ -364,6 +374,13 @@ var (
 
 // open starts a stream for one request, carrying p.
 func (s *Session) open(ctx context.Context, p Preamble) (net.Conn, error) {
+	select {
+	case <-s.ready:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-s.closed:
+		return nil, errors.New("the session has ended")
+	}
 	select {
 	case s.slots <- struct{}{}:
 	case <-ctx.Done():
