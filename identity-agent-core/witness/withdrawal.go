@@ -115,7 +115,7 @@ func (s *Service) RequestWithdrawal(ctx context.Context, controllerAID string, r
 	if err != nil {
 		return err
 	}
-	if _, err := s.PostEvent(s.ownersLocalAllowedFor(ctx, contact, withdrawalURL(contact.OobiURL)), withdrawalURL(contact.OobiURL), body); err != nil {
+	if _, err := s.PostEvent(s.ownersLocalAllowedFor(ctx, *contact, withdrawalURL(contact.OobiURL)), withdrawalURL(contact.OobiURL), body); err != nil {
 		// Worth reporting rather than swallowing: the controller has not been
 		// told, so it is not going to rotate, so this agent is still on the
 		// hook. Trying again later is the remedy, and it cannot be tried if
@@ -179,7 +179,7 @@ func (s *Service) ConfirmWithdrawal(ctx context.Context, witnessAID string, conf
 	if err != nil {
 		return err
 	}
-	_, err = s.PostEvent(s.ownersLocalAllowedFor(ctx, contact, withdrawalConfirmURL(contact.OobiURL)), withdrawalConfirmURL(contact.OobiURL), body)
+	_, err = s.PostEvent(s.ownersLocalAllowedFor(ctx, *contact, withdrawalConfirmURL(contact.OobiURL)), withdrawalConfirmURL(contact.OobiURL), body)
 	return err
 }
 

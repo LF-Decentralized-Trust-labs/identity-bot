@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"identity-agent-core/drivers"
 	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
+	"identity-agent-core/witness"
 )
 
 // EnsureKeriContact is the FOUNDATIONAL LAYER under every transaction: when two Identity
@@ -59,8 +61,10 @@ func (s *CoreServer) ensureKeriContactIs(oobiURL, expected string) (*store.Conta
 		return nil, false, fmt.Errorf("oobi points to our own identity")
 	}
 
-	// Resolve the OOBI (KERI identity establishment).
-	client := &http.Client{Timeout: 15 * time.Second}
+	// Resolve the OOBI (KERI identity establishment). The address came from a
+	// peer, so it is fetched through the guarded client: the address actually
+	// dialled is checked, there is no proxy and no redirect.
+	client := witness.GuardedClient(15*time.Second, s.oobiMayBeLocal(oobiURL, expected))
 	resp, err := client.Get(oobiURL)
 	if err != nil {
 		return nil, false, fmt.Errorf("could not reach %s: %w", oobiURL, err)
@@ -240,4 +244,31 @@ func (s *CoreServer) ensureKeriContactIs(oobiURL, expected string) (*store.Conta
 	}
 	log.Printf("[identity-agent-core] EnsureKeriContact: established transactional contact %s (AID %s, kel_verified=%v)", alias, oobiData.AID, kelVerified)
 	return &contact, true, nil
+}
+
+// oobiMayBeLocal is whether an address a peer supplied may be fetched from a
+// local address: only if it is the very address of a contact the owner added or
+// accepted, so a local test peer the owner set up still works and a stranger
+// cannot point this agent at an internal service.
+func (s *CoreServer) oobiMayBeLocal(oobiURL, expected string) bool {
+	if s.DataStore == nil {
+		return false
+	}
+	if expected != "" {
+		c, _ := s.DataStore.GetContact(expected)
+		return c != nil && sameOOBIHost(c.OobiURL, oobiURL) && witness.OwnerRecordedLocal(*c, oobiURL)
+	}
+	contacts, _ := s.DataStore.GetContacts()
+	for _, c := range contacts {
+		if sameOOBIHost(c.OobiURL, oobiURL) && witness.OwnerRecordedLocal(c, oobiURL) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameOOBIHost(a, b string) bool {
+	ua, ea := url.Parse(a)
+	ub, eb := url.Parse(b)
+	return ea == nil && eb == nil && ua.Host != "" && strings.EqualFold(ua.Host, ub.Host) && ua.Scheme == ub.Scheme
 }

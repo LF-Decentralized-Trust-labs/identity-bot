@@ -81,7 +81,7 @@ func (s *Service) postWitnessRequest(ctx context.Context, c *store.ContactRecord
 	body, _ := json.Marshal(req)
 	// A local address is allowed only where the owner recorded it: one a
 	// stranger's request left behind is not called until the owner accepts.
-	ctx = context.WithValue(ctx, guardKey{}, LiteralIsLocal(hostOf(c.OobiURL)) && c.ContactSource != ContactSourceInbound)
+	ctx = s.ownersLocalAllowedFor(ctx, *c, c.OobiURL)
 	return s.PostEvent(ctx, witnessRequestURL(c.OobiURL), body)
 }
 
