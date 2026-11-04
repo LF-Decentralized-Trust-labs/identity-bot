@@ -63,6 +63,11 @@ func TestAPresentationIsReadAndAKeyEventIsNot(t *testing.T) {
 	if err := json.Unmarshal(out, &p); err != nil || p.Credential != "Ecred" || p.Holder != "Eholder" || p.Issuer != "Eissuer" {
 		t.Fatalf("read %+v %v", p, err)
 	}
+	// It says which schema a presentation made under none is under, so an app
+	// that asked for none keeps no copy of it.
+	if p.DefaultSchema != presentation.DefaultSchema || p.Schema != p.DefaultSchema {
+		t.Fatalf("the default schema is %q and the presentation's %q", p.DefaultSchema, p.Schema)
+	}
 	var withExtra map[string]any
 	json.Unmarshal(raw, &withExtra)
 	withExtra["t"] = "ixn"

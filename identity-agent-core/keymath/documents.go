@@ -62,6 +62,10 @@ type Presentation struct {
 	Holder     string `json:"holder"`
 	Issuer     string `json:"issuer"`
 	Schema     string `json:"schema"`
+	// DefaultSchema is the schema a presentation is made under when none is
+	// asked for, so an app that asked for none checks against this and keeps
+	// no copy of it.
+	DefaultSchema string `json:"default_schema"`
 }
 
 // CheckPresentation reads a presentation's bytes: exactly its one
@@ -79,5 +83,6 @@ func CheckPresentation(raw []byte) (*Presentation, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Presentation{SAID: b.D, Credential: b.A.CredentialSAID, Holder: b.I, Issuer: b.RI, Schema: b.S}, nil
+	return &Presentation{SAID: b.D, Credential: b.A.CredentialSAID, Holder: b.I, Issuer: b.RI, Schema: b.S,
+		DefaultSchema: presentation.DefaultSchema}, nil
 }

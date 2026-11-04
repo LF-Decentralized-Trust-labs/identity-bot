@@ -867,7 +867,7 @@ class LocalCoreKeriService extends KeriService {
       } else if (presented.issuer != issuerAid) {
         wrong = 'it names the issuer "${presented.issuer}", not "$issuerAid"';
       } else if (presented.schema !=
-          (schemaSaid.isEmpty ? _defaultPresentationSchema : schemaSaid)) {
+          (schemaSaid.isEmpty ? presented.defaultSchema : schemaSaid)) {
         wrong = 'it is of the schema ${presented.schema}, not $schemaSaid';
       } else if (json['presentation_said'] != presented.said) {
         wrong = 'its identifier is ${presented.said}, not the '
@@ -901,9 +901,6 @@ class LocalCoreKeriService extends KeriService {
       seed.fillRange(0, seed.length, 0);
     }
   }
-
-  /// What the core names a presentation's schema when none is asked for.
-  static const _defaultPresentationSchema = 'EpresentationSchema';
 
   static bool _sameBytes(List<int> a, List<int> b) {
     if (a.length != b.length) return false;

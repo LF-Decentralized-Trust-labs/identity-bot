@@ -199,12 +199,16 @@ class CheckedPresentation {
         credential = j['credential'] as String? ?? '',
         holder = j['holder'] as String? ?? '',
         issuer = j['issuer'] as String? ?? '',
-        schema = j['schema'] as String? ?? '';
+        schema = j['schema'] as String? ?? '',
+        defaultSchema = j['default_schema'] as String? ?? '';
   final String said;
   final String credential;
   final String holder;
   final String issuer;
   final String schema;
+
+  /// The schema a presentation is made under when none is asked for.
+  final String defaultSchema;
 }
 
 /// An event's bytes, base64, with its controller signatures, as a witness
