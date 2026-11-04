@@ -444,16 +444,21 @@ func (s *CoreServer) adoptFromParts(aid string, raw []byte, held heldEvent) erro
 		}); err != nil {
 			return err
 		}
-		schema := schemas.ControllerGrant.Schema.SAID
-		if shown.Kind == "ai_agent" {
-			schema = schemas.AIAgentGrant.Schema.SAID
-		}
-		if shown.Kind == "app" {
-			schema = schemas.AppGrant.Schema.SAID
-		}
-		return s.keepAndWithdraw(schema, shown.Holder, aid, shown.Registry, result)
+		return s.keepAndWithdraw(schemaSigned(shown), shown.Holder, aid, shown.Registry, result)
 	}
 	return s.adoptBare(aid, raw, held.Signature)
+}
+
+// schemaSigned is the schema a grant the device signed was issued under: an AI
+// agent's is kept in the version it was issued in, never in the newest.
+func schemaSigned(shown *authorisation.ToSign) string {
+	switch shown.Kind {
+	case "ai_agent":
+		return shown.Schema
+	case "app":
+		return schemas.AppGrant.Schema.SAID
+	}
+	return schemas.ControllerGrant.Schema.SAID
 }
 
 // adoptBare takes up an interaction alone, when what it anchors is not to be

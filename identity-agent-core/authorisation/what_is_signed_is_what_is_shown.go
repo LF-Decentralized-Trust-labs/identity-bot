@@ -43,6 +43,9 @@ type ToSign struct {
 	// agent's or the app's.
 	Holder string `json:"holder,omitempty"`
 	Name   string `json:"name,omitempty"`
+	// Schema is the schema the credential was issued under, kept so a grant is
+	// stored under the version it was issued in. It is not sent to a device.
+	Schema string `json:"-"`
 	// PublicKey and KeyFingerprint are the machine's key, and the short form
 	// of it the owner compares with the one shown when the machine paired.
 	PublicKey      string          `json:"public_key,omitempty"`
@@ -178,6 +181,7 @@ func grantShown(cred *keri.Credential, ixn *keri.Event) (*ToSign, error) {
 		return nil, fmt.Errorf("the credential's attributes are unreadable")
 	}
 	str := func(k string) string { return strings.TrimSpace(stringOf(a[k])) }
+	out.Schema = cred.SchemaSAID
 	out.Holder, out.Name, out.ValidUntil = str("i"), str("name"), str("valid_until")
 	switch cred.SchemaSAID {
 	case schemas.ControllerGrant.Schema.SAID:

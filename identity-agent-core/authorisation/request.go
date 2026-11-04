@@ -476,7 +476,7 @@ func checkAskedFor(cred acdc, kind, method, path string, asked map[string]json.R
 	about := stringAttr(cred.A, "about")
 	segments := strings.Split(strings.Trim(path, "/"), "/")
 	switch cred.Schema {
-	case schemas.AIAgentGrant.Schema.SAID:
+	case schemas.AIAgentGrant.Schema.SAID, schemas.AIAgentGrantV11.Schema.SAID:
 		// The routes a body signs to are the creator's own channel, and the
 		// owner's routes are not: a request to one kind of route cannot stand
 		// for the other's.

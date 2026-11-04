@@ -187,6 +187,7 @@ func TestTheEdgeLookupAcceptsAppSchemas(t *testing.T) {
 	for name, said := range map[string]string{
 		"App Grant": schemas.AppGrant.Schema.SAID, "App Body": schemas.AppBody.Schema.SAID,
 		"AI Agent Grant": schemas.AIAgentGrant.Schema.SAID, "AI Agent Body": schemas.AIAgentBody.Schema.SAID,
+		"1.1.0 AI Agent Grant": schemas.AIAgentGrantV11.Schema.SAID,
 	} {
 		if !isEdgedAssetSchema(said) {
 			t.Errorf("%s is not accepted", name)
@@ -259,5 +260,51 @@ func TestAnAppCountsAsAnAIAgentDoesForTheRecordAndTheAudit(t *testing.T) {
 	name, owner := s.describeAID(appAID)
 	if name != "Task console" || owner != s.OwnerRootAID() {
 		t.Fatalf("the audit names %q, owner %q; want the app, owned by %q", name, owner, s.OwnerRootAID())
+	}
+}
+
+// A 1.1.0 grant names who authorised it, so it counts toward when this
+// Identity Agent began issuing grants that do, and a first-version grant issued
+// after it is not honoured.
+func TestAnOlderEdgedGrantCountsAsTheFirstEdgedIssuance(t *testing.T) {
+	s := appWorld(t)
+	at := time.Now().UTC().Add(-time.Hour)
+	if err := s.DataStore.SaveCredential(store.CredentialRecord{SAID: "EOlderGrant", SchemaSAID: schemas.AIAgentGrantV11.Schema.SAID,
+		HolderAID: "EHolder", IssuedAt: at.Format("2006-01-02T15:04:05.000000000Z07:00"), Status: "issued"}); err != nil {
+		t.Fatal(err)
+	}
+	since, ok := s.firstEdgedIssuance()
+	if !ok || since.IsZero() {
+		t.Fatal("an issued 1.1.0 grant is not found as the first edged issuance")
+	}
+	late := &store.CredentialRecord{SchemaSAID: schemas.AIAgentGrantV1.Schema.SAID, HolderAID: "EHolder2",
+		IssuedAt: at.Add(time.Minute).Format("2006-01-02T15:04:05.000000000Z07:00")}
+	if !s.issuedUnderFirstVersionTooLate(late) {
+		t.Fatal("a first-version grant issued after 1.1.0 grants began was honoured")
+	}
+}
+
+// What the device signed for an AI agent is kept in the version it was issued
+// under.
+func TestASignedAIAgentGrantIsKeptUnderItsOwnVersion(t *testing.T) {
+	s := appWorld(t)
+	owner, _ := s.DataStore.GetIdentity()
+	registry, err := s.ensureRegistry(owner.AID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, schema := range []string{schemas.AIAgentGrantV11.Schema.SAID, schemas.AIAgentGrant.Schema.SAID} {
+		p, err := s.KeriDriver.(drivers.PreparedIssuer).PrepareCredentialInRegistry(owner.AID,
+			map[string]interface{}{"name": "Helper", "capabilities": []string{"system.info.read"}, "asset_type": "ai_agent"}, schema, "EHolder", nil, registry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		shown, err := authorisation.WhatSigningGrants(p.IxnRaw, p.IssRaw, p.AcdcRaw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := schemaSigned(shown); got != schema {
+			t.Errorf("a grant issued under %s is kept under %s", schema, got)
+		}
 	}
 }
