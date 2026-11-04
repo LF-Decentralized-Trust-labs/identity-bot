@@ -60,18 +60,8 @@ func (r *ipRateLimiter) allow(ip string) bool {
 	defer r.mu.Unlock()
 	now := time.Now()
 	cutoff := now.Add(-r.window)
-	if _, known := r.hits[ip]; !known && len(r.hits) >= maxRateLimitedClients {
-		// Forget callers whose every hit has aged out. If that frees nothing,
-		// the table is full of live callers: refuse the newcomer rather than
-		// grow, which is the safe side for an unauthenticated route.
-		for k, ts := range r.hits {
-			if len(ts) == 0 || !ts[len(ts)-1].After(cutoff) {
-				delete(r.hits, k)
-			}
-		}
-		if len(r.hits) >= maxRateLimitedClients {
-			return false
-		}
+	if !r.roomForLocked(ip, cutoff) {
+		return false
 	}
 	prev := r.hits[ip]
 	filtered := prev[:0]
@@ -104,10 +94,28 @@ func (r *ipRateLimiter) wouldAllow(ip string) bool {
 			n++
 		}
 	}
-	if _, known := r.hits[ip]; !known && len(r.hits) >= maxRateLimitedClients {
+	if !r.roomForLocked(ip, cutoff) {
 		return false
 	}
 	return n < r.limit
+}
+
+// roomForLocked reports whether ip can be counted: it is already known, or the
+// table has room, after forgetting callers whose every hit has aged out. If
+// that frees nothing, the table is full of live callers: refuse the newcomer
+// rather than grow, which is the safe side for an unauthenticated route. allow
+// and wouldAllow both ask it, so a table of expired callers never locks a
+// newcomer out. The caller holds r.mu.
+func (r *ipRateLimiter) roomForLocked(ip string, cutoff time.Time) bool {
+	if _, known := r.hits[ip]; known || len(r.hits) < maxRateLimitedClients {
+		return true
+	}
+	for k, ts := range r.hits {
+		if len(ts) == 0 || !ts[len(ts)-1].After(cutoff) {
+			delete(r.hits, k)
+		}
+	}
+	return len(r.hits) < maxRateLimitedClients
 }
 
 // trustedProxies are the addresses of reverse proxies this agent sits behind,

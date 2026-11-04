@@ -107,7 +107,8 @@ func (s *CoreServer) mountPublicDidWebsRoutes(r chi.Router) {
 // the stream preamble, which a visitor cannot set; each such address gets the
 // same share as a direct caller, and a burst through the relay cannot use up a
 // direct caller's share or the reverse. An IPv6 visitor's share is its /64. A
-// header such as X-Forwarded-For is never used, because a visitor can write it.
+// header such as X-Forwarded-For is used only when the connection comes from a
+// proxy named in TRUSTED_PROXIES; otherwise a visitor could write it.
 //
 // Every relayed request also counts against one larger budget of its own, so a
 // relay that names a new visitor each time still cannot exceed it. A preamble
