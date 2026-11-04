@@ -119,8 +119,8 @@ void main() {
           inner: _RecordsOwnerSignatures(core.client, ownerSignatures));
       await each(
           () async => signing.get(Uri.parse('${core.base}/api/identity')));
-      // Issuing a credential, which the core refuses for an identity whose
-      // keys the app holds until it is anchored through prepare and commit.
+      // Issuing a credential, which the app has the core build, anchors in an
+      // interaction it signs, and has the core keep.
       await each(() async =>
           keri.issueCredential(claims: {'a': 'b'}, schemaSaid: 'E'));
       await each(() async => keri.moveToANewPhrase(words: fresh.split(' ')));
@@ -144,10 +144,10 @@ void main() {
       printed.writeln(line);
     }));
 
-    // Four flows fail on purpose (the credential the core will not issue, the
-    // refused rotation, the one after it, keymath refusing a short seed);
-    // every other flow ran to the end.
-    expect(errors, hasLength(4), reason: errors.join('\n---\n'));
+    // Three flows fail on purpose (the refused rotation, the one after it,
+    // keymath refusing a short seed); every other flow, the credential's
+    // issuing among them, ran to the end.
+    expect(errors, hasLength(3), reason: errors.join('\n---\n'));
     expect(ownerSignatures, isNotEmpty);
     // What the cores wrote is read once it has all arrived.
     await Future<void>.delayed(const Duration(milliseconds: 500));
@@ -179,7 +179,7 @@ void main() {
     // The flows ran: the move and the recovery reached the second phrase.
     expect(await SecureKeyStore.loadMnemonic(), isNull,
         reason: 'the wiped device holds no phrase until it is given one');
-  });
+  }, timeout: const Timeout(Duration(minutes: 3)));
 }
 
 /// A client recording every owner signature it sends.

@@ -35,12 +35,13 @@ class AskedEvent {
 /// sequence number only. A request whose answer never arrived is dropped once
 /// the log holds a signed event at or past that number: its place is taken.
 ///
-/// A credential issuance is written down with nothing asked, because the
-/// anchor is built by the core, so until the answer arrives it is recognised
-/// only by the sequence number it must have. When the answer arrives and the
-/// device has checked the seal in it, that seal is recorded as what was asked
-/// ([added]'s `anchors`), so the event is signed late as it would have been on
-/// time.
+/// Nothing in this app writes a request any more: the one event it asked the
+/// core to add and signed afterwards was a credential's anchor, and a credential
+/// is now anchored by an interaction this device prepares, checks, signs and
+/// commits like any other (TheKeyEventsThisDeviceMakes). What is kept is the
+/// reading of requests written by an earlier version, whose event the core
+/// added and its answer never brought back: that event is still signed late,
+/// from what that version recorded, or not at all.
 ///
 /// Every read and write is serialised, so two operations at once cannot each
 /// read the list, change it and write over the other's change.

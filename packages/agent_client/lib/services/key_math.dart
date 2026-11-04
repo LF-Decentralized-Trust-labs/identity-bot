@@ -163,6 +163,45 @@ class LoggedEvent {
   bool get establishment => ilk != 'ixn';
 }
 
+/// A credential as the core's engine reads it, its identifier checked to be the
+/// digest of the whole.
+class CheckedCredential {
+  CheckedCredential.fromJson(Map<String, dynamic> j)
+      : said = j['said'] as String? ?? '',
+        issuer = j['issuer'] as String? ?? '',
+        schema = j['schema'] as String? ?? '',
+        registry = j['registry'] as String? ?? '',
+        recipient = j['recipient'] as String? ?? '',
+        attributes = Map<String, dynamic>.from(
+            (j['attributes'] as Map?) ?? const <String, dynamic>{}),
+        hasEdges = j['edges'] != null;
+  final String said;
+  final String issuer;
+  final String schema;
+  final String registry;
+  final String recipient;
+
+  /// The attribute block: its own digest `d`, the recipient `i` where there is
+  /// one, and the claims.
+  final Map<String, dynamic> attributes;
+  final bool hasEdges;
+}
+
+/// A presentation as the core's engine reads it, in its one serialisation.
+class CheckedPresentation {
+  CheckedPresentation.fromJson(Map<String, dynamic> j)
+      : said = j['said'] as String? ?? '',
+        credential = j['credential'] as String? ?? '',
+        holder = j['holder'] as String? ?? '',
+        issuer = j['issuer'] as String? ?? '',
+        schema = j['schema'] as String? ?? '';
+  final String said;
+  final String credential;
+  final String holder;
+  final String issuer;
+  final String schema;
+}
+
 /// An event's bytes, base64, with its controller signatures, as a witness
 /// holds it.
 class SignedCopy {
@@ -177,6 +216,19 @@ extension KeyMathOperations on KeyMath {
   /// Parses an event's bytes with the core's parser.
   Future<ParsedEvent> parseEvent(List<int> raw) async => ParsedEvent.fromJson(
       await run('parse_event', {'raw_b64': base64Encode(raw)}));
+
+  /// Reads a credential's bytes with the core's engine: canonical, and its
+  /// identifier the digest of the whole. Throws [KeyMathRefused] otherwise.
+  Future<CheckedCredential> checkCredential(List<int> raw) async =>
+      CheckedCredential.fromJson(
+          await run('check_credential', {'raw_b64': base64Encode(raw)}));
+
+  /// Reads a presentation's bytes with the core's engine. Throws
+  /// [KeyMathRefused] for anything else: a key event, a presentation with a
+  /// field of its own beyond the format, one whose identifiers are not digests.
+  Future<CheckedPresentation> checkPresentation(List<int> raw) async =>
+      CheckedPresentation.fromJson(
+          await run('check_presentation', {'raw_b64': base64Encode(raw)}));
 
   /// The digest an establishment event commits to for [key].
   Future<String> nextKeyDigest(String key) async =>

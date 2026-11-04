@@ -54,6 +54,18 @@ class ACoreThatMisleads extends http.BaseClient {
   /// than the event it lists would; the listing itself is left as it was.
   final Map<int, String> serveOtherBytesAt = {};
 
+  /// Every request sent through this client, as "METHOD /path".
+  final List<String> visited = [];
+
+  /// Paths this client fails on, as a stand-in for a route a signing path must
+  /// not read: a request to one throws before it is sent.
+  final Set<String> failOn = {};
+
+  /// Rewrites the JSON a path answers with before this client sees it, as a
+  /// core would that answers with another document than it was asked to make.
+  final Map<String, Map<String, Object?> Function(Map<String, Object?> answer)>
+      alterTheAnswerTo = {};
+
   /// How many commits were sent to this client, answered or not.
   int commits = 0;
 
@@ -64,6 +76,10 @@ class ACoreThatMisleads extends http.BaseClient {
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     request.headers['X-Local-Owner-Secret'] = ownerSecret;
     final path = request.url.path;
+    visited.add('${request.method} $path');
+    if (failOn.contains(path)) {
+      throw StateError('a route a signing path must not read was read: $path');
+    }
     final alter = alterThePrepare;
     if (path == '/api/events/prepare' &&
         alter != null &&
@@ -114,6 +130,13 @@ class ACoreThatMisleads extends http.BaseClient {
       }
     }
     final res = await _inner.send(request);
+    final rewrite = alterTheAnswerTo[path];
+    if (rewrite != null) {
+      final body = Map<String, Object?>.from(
+          jsonDecode(await res.stream.bytesToString()) as Map);
+      return http.StreamedResponse(
+          Stream.value(utf8.encode(jsonEncode(rewrite(body)))), res.statusCode);
+    }
     if (path == '/api/kel' && serveOtherBytesAt.isNotEmpty) {
       final body = jsonDecode(await res.stream.bytesToString()) as Map;
       final raws = body['raw_events_b64'] as List;

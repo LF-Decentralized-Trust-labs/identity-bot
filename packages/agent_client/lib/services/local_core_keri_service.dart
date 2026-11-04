@@ -10,7 +10,6 @@ import 'recovering_this_identity.dart';
 import 'secure_key_store.dart';
 import 'signing_an_event.dart';
 import 'the_event_this_device_expects.dart' show sameContent;
-import 'the_events_this_device_asked_for.dart';
 import 'the_identity_this_device_holds.dart';
 import 'the_key_events_this_device_makes.dart';
 import 'the_key_state_this_device_reads.dart';
@@ -166,7 +165,6 @@ class LocalCoreKeriService extends KeriService {
   }
 
   late final TheKeyInForce _keys = TheKeyInForce(_client, _baseUrl,
-      asked: _asked,
       keyMath: keyMath,
       // The key state an event signed late follows is read from the record,
       // which needs to name the identity: pinned once its log is checked.
@@ -187,18 +185,6 @@ class LocalCoreKeriService extends KeriService {
       readTheKeyState: (seed) =>
           TheKeyStateThisDeviceReads(_client, _km, _baseUrl, held: _held)
               .read(seed));
-  final _asked = TheEventsThisDeviceAskedFor();
-
-  /// The event the core says it added, read from the bytes it returned for
-  /// signing, which are what is signed.
-  static Map<String, dynamic> _eventIn(String rawBytesB64) {
-    try {
-      final e = jsonDecode(utf8.decode(base64Decode(rawBytesB64)));
-      if (e is Map<String, dynamic>) return e;
-    } catch (_) {}
-    throw Exception('the core returned no readable event to sign');
-  }
-
   @override
   AgentEnvironment get environment => AgentEnvironment.desktop;
 
@@ -632,29 +618,6 @@ class LocalCoreKeriService extends KeriService {
     );
   }
 
-  /// The private key in force (TheKeyInForce), with any event left unsigned
-  /// finished first. Throws where this device holds no recovery phrase: an
-  /// event the core builds would otherwise be added and never signed.
-  Future<({ed.PrivateKey key, KeyState state})> _signerInForce() async {
-    await _finishAnyMoveUnderWay();
-    final mnemonic = await SecureKeyStore.loadMnemonic();
-    if (mnemonic == null) {
-      throw Exception('No identity keys found in secure storage.');
-    }
-    final seed = Bip39.mnemonicToSeed(mnemonic);
-    try {
-      final state = await _keys.finishStrandedEvents(seed);
-      final child = KeyManager.signingSeed(seed, index: state.index);
-      try {
-        return (key: ed.newKeyFromSeed(child), state: state);
-      } finally {
-        child.fillRange(0, child.length, 0);
-      }
-    } finally {
-      seed.fillRange(0, seed.length, 0);
-    }
-  }
-
   /// The key event log of the identity held under [name], as the core serves
   /// it: the parsed events and the bytes each was published as. The core
   /// answers with a list of events, not text; this once returned that list as
@@ -694,96 +657,137 @@ class LocalCoreKeriService extends KeriService {
     String holderAid = '',
     String name = '',
   }) async {
-    // The key is worked out before the event exists, so a key log this phrase
-    // cannot sign for is refused before anything is added to it.
-    final signer = await _signerInForce();
-    final aid = signer.state.aid;
-    // Written down before it is asked for. The anchor is built by the core, so
-    // nothing about it is known yet: this entry is only ever recognised by the
-    // sequence number and digest of the answer.
-    final request = await _asked.asking(
-        t: 'ixn', aid: aid, expectedSn: signer.state.nextSequenceNumber);
-
-    final Map<String, dynamic> json;
-    final String ixnRawBytesB64;
-    // Step 1: Ask the Go backend to format the ACDC and create the IXN anchor.
-    // A request that fails in transit is NOT forgotten: the core may have
-    // added the event, and the entry, bounded by its sequence number, lets it
-    // be finished later. Only a refusal or a failed check forgets it.
-    final response = await _client.post(
-      Uri.parse('$_baseUrl/api/credential/issue'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'claims': claims,
-        'schema_said': schemaSaid,
-        'holder_aid': holderAid,
-      }),
-    );
+    // The core builds the credential and adds nothing. This device checks it is
+    // the credential it asked for, has the interaction that anchors exactly it
+    // prepared, checked, signed and committed like any other event it makes
+    // (TheKeyEventsThisDeviceMakes, which checks the interaction with
+    // ExpectedEvent), and only then asks the core to keep the credential.
+    await _finishAnyMoveUnderWay();
+    final mnemonic = await SecureKeyStore.loadMnemonic();
+    if (mnemonic == null) {
+      throw Exception('No identity keys found in secure storage.');
+    }
+    final seed = Bip39.mnemonicToSeed(mnemonic);
     try {
-      if (response.statusCode != 201 && response.statusCode != 200) {
+      var state = await _keyInForce(seed);
+      final makes = await _makesFor(seed);
+      // What this device signed and the core never acknowledged goes first, so
+      // the anchor extends a log that verifies.
+      if ((await makes.finishSigned(state.aid, witnessedBy: state.witnesses))
+          .isNotEmpty) {
+        state = await _keyInForce(seed);
+      }
+
+      final response = await _client.post(
+        Uri.parse('$_baseUrl/api/credential/prepare'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'claims': claims,
+          'schema_said': schemaSaid,
+          'holder_aid': holderAid,
+        }),
+      );
+      if (response.statusCode != 200) {
         refusedByTheCore(response, 'Credential issuance failed');
       }
-      json = jsonDecode(response.body) as Map<String, dynamic>;
-      ixnRawBytesB64 = json['ixn_raw_bytes_b64'] as String? ?? '';
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      final acdcB64 = json['acdc_json_b64'] as String? ?? '';
+      final credential = await _credentialAsked(
+          acdcB64, json['acdc_said'], state.aid, claims, schemaSaid, holderAid);
 
-      // The interaction must be this identity's, at the next sequence number,
-      // anchoring exactly the credential the core says it issued: one seal,
-      // {"i": the credential's identifier, "s": "0", "d": the same}, which is
-      // what the core anchors for a credential issued without a registry.
-      //
-      // THE LIMIT. That the identifier is the digest of the credential returned
-      // is the core's computation and is not repeated here (this package does
-      // not compute KERI digests), so a core could anchor a credential other
-      // than the one it shows. Nor does this check that the seal is a
-      // credential's: {"i": x, "s": "0", "d": x} with x chosen by the core is
-      // also what a delegator's approval of a delegate looks like (keriengine
-      // approvalIn), so a core could present an approval of a delegation here
-      // as a credential. That is not checked, and is B14's to close.
-      final acdcSaid = json['acdc_said'] as String? ?? '';
-      final anchor = _eventIn(ixnRawBytesB64);
-      if (anchor['t'] != 'ixn' ||
-          anchor['i'] != aid ||
-          anchor['s'] != signer.state.nextSequenceNumber.toRadixString(16) ||
-          acdcSaid.isEmpty ||
-          !sameContent(anchor['a'], [
-            {'i': acdcSaid, 's': '0', 'd': acdcSaid}
-          ])) {
-        throw Exception(
-            'the core returned an event that is not the anchor of the credential it issued, '
-            'so it is not signed');
+      // The seal is worked out here, from the credential's digest as this
+      // device computed it, never taken from the core: for a credential issued
+      // outside a registry it is the identifier twice, which is also what a
+      // delegator's approval of a delegate looks like, so a digest the core
+      // chose would be a delegation approved.
+      final done = await makes.interact(seed,
+          aid: state.aid,
+          generation: state.generation,
+          afterSn: state.tip.sn,
+          afterDigest: state.tip.digest,
+          anchors: [
+            {'i': credential.said, 's': '0', 'd': credential.said}
+          ],
+          witnessedBy: state.witnesses);
+
+      final recorded = await _client.post(
+        Uri.parse('$_baseUrl/api/credential/record'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'acdc_json_b64': acdcB64, 'ixn_said': done.digest}),
+      );
+      if (recorded.statusCode != 200 && recorded.statusCode != 201) {
+        refusedByTheCore(recorded, 'The credential was anchored but not kept');
       }
-      await _asked.added(request,
-          aid: aid,
-          sequenceNumber: signer.state.nextSequenceNumber,
-          digest: '${anchor['d']}',
-          // The seal checked just above: if the answer is lost after this, the
-          // event is signed late with exactly this seal and no other.
-          anchors: List<Object?>.from(anchor['a'] as List));
-    } catch (_) {
-      await _asked.forget(request);
-      rethrow;
-    }
-
-    // Step 2: Sign the IXN event bytes locally with the key in force.
-    // Private key never leaves this device (ADR-014). The core signs this
-    // anchor itself where it holds the key; this signature is handed back.
-    final List<int> rawSig;
-    try {
-      rawSig =
-          ed.sign(signer.key, Uint8List.fromList(base64Decode(ixnRawBytesB64)));
+      return CredentialIssuanceResult(
+        acdcSaid: credential.said,
+        acdcJsonB64: acdcB64,
+        ixnRawBytesB64: done.bytesB64,
+        ixnSaid: done.digest,
+        sequenceNumber: done.sn,
+        cesrSignature: done.signatures.first,
+      );
     } finally {
-      signer.key.bytes.fillRange(0, signer.key.bytes.length, 0);
+      seed.fillRange(0, seed.length, 0);
     }
-    final cesrSig = await _cesrEncode(base64Encode(rawSig));
+  }
 
-    return CredentialIssuanceResult(
-      acdcSaid: json['acdc_said'] ?? '',
-      acdcJsonB64: json['acdc_json_b64'] ?? '',
-      ixnRawBytesB64: ixnRawBytesB64,
-      ixnSaid: json['ixn_said'] ?? '',
-      sequenceNumber: json['sequence_number'] as int? ?? 0,
-      cesrSignature: cesrSig,
-    );
+  /// The credential in [acdcB64], read with the core's own parser, required to
+  /// be exactly what was asked for: issued by [aid], under [schemaSaid], to
+  /// [holderAid] (none where none was named), with the claims asked for, a
+  /// time of issue, and nothing else; no registry and no edges, which this
+  /// device did not ask for; and its identifier the digest of its bytes, which
+  /// is also what the core said it was.
+  Future<CheckedCredential> _credentialAsked(
+      String acdcB64,
+      Object? saidSaid,
+      String aid,
+      Map<String, dynamic> claims,
+      String schemaSaid,
+      String holderAid) async {
+    final CheckedCredential c;
+    try {
+      c = await _km.checkCredential(base64Decode(acdcB64));
+    } on KeyMathRefused catch (e) {
+      throw NotTheCredentialAsked('the core returned a credential that is not '
+          'well formed: ${e.reason}');
+    } on FormatException {
+      throw NotTheCredentialAsked('the core returned no credential');
+    }
+    String? wrong;
+    if (c.issuer != aid) {
+      wrong = 'it is issued by ${c.issuer}, not $aid';
+    } else if (c.schema != schemaSaid) {
+      wrong = 'it is of the schema ${c.schema}, not $schemaSaid';
+    } else if (c.recipient != holderAid) {
+      wrong = 'it is issued to "${c.recipient}", not "$holderAid"';
+    } else if (c.registry.isNotEmpty || c.hasEdges) {
+      wrong = 'it names a registry or edges, which were not asked for';
+    } else if (saidSaid != c.said) {
+      wrong = 'its identifier is ${c.said}, not the $saidSaid the core said';
+    } else {
+      // The attribute block holds its own digest, the recipient, the time of
+      // issue, and the claims asked for.
+      final held = c.attributes;
+      for (final name in claims.keys) {
+        if (!held.containsKey(name) || !sameContent(held[name], claims[name])) {
+          wrong = 'its attribute "$name" is not what was asked for';
+          break;
+        }
+      }
+      if (wrong == null) {
+        for (final name in held.keys) {
+          if (!claims.containsKey(name) &&
+              name != 'd' &&
+              name != 'i' &&
+              name != 'dt') {
+            wrong = 'it carries an attribute "$name" that was not asked for';
+            break;
+          }
+        }
+      }
+    }
+    if (wrong != null) throw NotTheCredentialAsked(wrong);
+    return c;
   }
 
   @override
@@ -793,49 +797,101 @@ class LocalCoreKeriService extends KeriService {
     String issuerAid = '',
     String schemaSaid = '',
   }) async {
-    final signer = await _signerInForce();
-
-    // Step 1: Ask the Go backend to build the presentation and compute its SAID.
-    final response = await _client.post(
-      Uri.parse('$_baseUrl/api/credential/present'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'acdc_said': acdcSaid,
-        'holder_aid': holderAid,
-        'issuer_aid': issuerAid,
-        'schema_said': schemaSaid,
-      }),
-    );
-
-    if (response.statusCode != 201 && response.statusCode != 200) {
-      final body = jsonDecode(response.body);
-      throw Exception(
-          body['error'] ?? 'Presentation failed: ${response.statusCode}');
+    await _finishAnyMoveUnderWay();
+    final mnemonic = await SecureKeyStore.loadMnemonic();
+    if (mnemonic == null) {
+      throw Exception('No identity keys found in secure storage.');
     }
-
-    final json = jsonDecode(response.body);
-    final presSaidB64 = json['pres_said_b64'] as String? ?? '';
-
-    // Step 2: Sign the presentation SAID bytes locally with the holder's key in
-    // force. This proves possession of the key bound to the holder AID.
-    // The holder signs pres_said.encode() — the UTF-8 bytes of the 44-char SAID.
-    // Private key never leaves this device (ADR-014).
-    String cesrSig = '';
+    final seed = Bip39.mnemonicToSeed(mnemonic);
     try {
-      if (presSaidB64.isNotEmpty) {
-        final saidBytes = base64Decode(presSaidB64);
-        final rawSig = ed.sign(signer.key, Uint8List.fromList(saidBytes));
-        cesrSig = await _cesrEncode(base64Encode(rawSig));
-      }
-    } finally {
-      signer.key.bytes.fillRange(0, signer.key.bytes.length, 0);
-    }
+      final state = await _keyInForce(seed);
 
-    return PresentationResult(
-      presentationSaid: json['presentation_said'] ?? '',
-      presentationJsonB64: json['presentation_json_b64'] ?? '',
-      cesrSignature: cesrSig,
-    );
+      // Step 1: Ask the Go backend to build the presentation and compute its SAID.
+      final response = await _client.post(
+        Uri.parse('$_baseUrl/api/credential/present'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'acdc_said': acdcSaid,
+          'holder_aid': holderAid,
+          'issuer_aid': issuerAid,
+          'schema_said': schemaSaid,
+        }),
+      );
+      if (response.statusCode != 201 && response.statusCode != 200) {
+        final body = jsonDecode(response.body);
+        throw Exception(
+            body['error'] ?? 'Presentation failed: ${response.statusCode}');
+      }
+      final json = jsonDecode(response.body);
+      final presSaidB64 = json['pres_said_b64'] as String? ?? '';
+      final presentedB64 = json['presentation_json_b64'] as String? ?? '';
+
+      // What is signed is the identifier of a presentation of the credential
+      // asked for, by the holder asked for, and nothing else. The bytes the
+      // core sends to be signed are checked against the presentation it sent,
+      // and that is read with the core's own parser, which refuses a key event
+      // or anything but the one serialisation of a presentation.
+      final CheckedPresentation presented;
+      try {
+        presented = await _km.checkPresentation(base64Decode(presentedB64));
+      } on KeyMathRefused catch (e) {
+        throw NotThePresentationAsked(
+            'the core returned something that is not a presentation: ${e.reason}');
+      } on FormatException {
+        throw NotThePresentationAsked('the core returned no presentation');
+      }
+      final String? wrong;
+      if (presented.credential != acdcSaid) {
+        wrong = 'it presents ${presented.credential}, not $acdcSaid';
+      } else if (presented.holder != holderAid) {
+        wrong = 'it is by ${presented.holder}, not $holderAid';
+      } else if (presented.issuer != issuerAid) {
+        wrong = 'it names the issuer "${presented.issuer}", not "$issuerAid"';
+      } else if (presented.schema !=
+          (schemaSaid.isEmpty ? _defaultPresentationSchema : schemaSaid)) {
+        wrong = 'it is of the schema ${presented.schema}, not $schemaSaid';
+      } else if (json['presentation_said'] != presented.said) {
+        wrong = 'its identifier is ${presented.said}, not the '
+            '${json['presentation_said']} the core said';
+      } else if (!_sameBytes(base64Decode(presSaidB64), utf8.encode(presented.said))) {
+        wrong = 'the bytes to sign are not its identifier';
+      } else {
+        wrong = null;
+      }
+      if (wrong != null) throw NotThePresentationAsked(wrong);
+
+      // Step 2: Sign the presentation's identifier locally with the holder's key
+      // in force. This proves possession of the key bound to the holder AID.
+      // Private key never leaves this device (ADR-014).
+      final child = KeyManager.signingSeed(seed, index: state.generation);
+      final key = ed.newKeyFromSeed(child);
+      final String cesrSig;
+      try {
+        final rawSig = ed.sign(key, Uint8List.fromList(utf8.encode(presented.said)));
+        cesrSig = await _cesrEncode(base64Encode(rawSig));
+      } finally {
+        child.fillRange(0, child.length, 0);
+        key.bytes.fillRange(0, key.bytes.length, 0);
+      }
+      return PresentationResult(
+        presentationSaid: presented.said,
+        presentationJsonB64: presentedB64,
+        cesrSignature: cesrSig,
+      );
+    } finally {
+      seed.fillRange(0, seed.length, 0);
+    }
+  }
+
+  /// What the core names a presentation's schema when none is asked for.
+  static const _defaultPresentationSchema = 'EpresentationSchema';
+
+  static bool _sameBytes(List<int> a, List<int> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 
   @override
@@ -950,4 +1006,26 @@ class TheOldPhraseNoLongerControlsTheIdentity implements Exception {
   String toString() => 'somebody else holding the old recovery phrase moved '
       'the identity to keys of their own before this move, so it is no longer '
       'controlled by that phrase and cannot be moved';
+}
+
+/// The credential the core returned is not the one this device asked it to
+/// build, so no interaction anchoring it is made.
+class NotTheCredentialAsked implements Exception {
+  NotTheCredentialAsked(this.difference);
+  final String difference;
+  @override
+  String toString() =>
+      'the core returned a credential other than the one asked for, so it '
+      'is not anchored: $difference';
+}
+
+/// The presentation the core returned is not the one this device asked for, so
+/// nothing is signed.
+class NotThePresentationAsked implements Exception {
+  NotThePresentationAsked(this.difference);
+  final String difference;
+  @override
+  String toString() =>
+      'the core returned a presentation other than the one asked for, so '
+      'nothing is signed: $difference';
 }

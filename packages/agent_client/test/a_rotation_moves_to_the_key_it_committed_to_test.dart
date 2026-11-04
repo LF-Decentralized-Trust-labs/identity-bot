@@ -78,8 +78,6 @@ class FakeCore {
   // Makes the founding or rotation the core prepares commit to somebody
   // else's next key.
   String? foreignNext;
-  // What the core anchors when it issues a credential, if not the credential.
-  List<Object?>? credentialAnchor;
   // Rewrites the rotation or interaction the core prepares, or the anchors of
   // an interaction.
   Map<String, dynamic> Function(Map<String, dynamic>)? changeRotation;
@@ -90,12 +88,8 @@ class FakeCore {
   String? dropsAnswersFrom;
   // Numbers the next event one past where it belongs.
   bool skipsASequenceNumber = false;
-  // Adds the credential's anchor and then loses the answer in transit.
-  bool losesTheAnswerToIssue = false;
   // The identifier /api/identity answers with, if not the identity's own.
   String? identityAnswers;
-  // Writes another identifier into the credential anchor it builds.
-  String? anchorsAs;
   // Adds to a founding it prepares a post-quantum next-key commitment and an
   // anchor of messaging keys of its own, as the core once did.
   bool addsItsOwn = false;
@@ -410,30 +404,6 @@ class FakeCore {
             answer = _prepare(body);
           case '/api/events/commit':
             answer = _commit(body);
-          case '/api/credential/issue':
-            add({
-              't': 'ixn',
-              'a': credentialAnchor ??
-                  [
-                    {'i': 'Ecredential', 's': '0', 'd': 'Ecredential'}
-                  ]
-            });
-            if (anchorsAs != null) {
-              final e = eventIn(raws.last)..['i'] = anchorsAs;
-              removeLast();
-              _append(saidified({...e}..remove('v')), null);
-            }
-            if (losesTheAnswerToIssue) {
-              throw http.ClientException('the answer was lost');
-            }
-            final raw = base64Encode(raws.last);
-            answer = _json({
-              'aid': aid,
-              'raw_bytes_b64': raw,
-              'ixn_raw_bytes_b64': raw,
-              'acdc_said': 'Ecredential',
-              'sequence_number': kel.length - 1,
-            }, 200);
           case '/api/cesr/encode':
             // Carries the raw signature through, so the core can check it.
             answer = _json({'cesr_sig': body['raw_sig_b64']}, 200);
@@ -474,7 +444,6 @@ void main() {
 
   late KeyMath km;
   late FakeCore core;
-  late Map<String, Map<String, dynamic>> sent;
   late LocalCoreKeriService keri;
 
   setUpAll(() async {
@@ -489,10 +458,6 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     await SecureKeyStore.saveMnemonic(words);
   }
-
-  // The signature most recently handed to the core to CESR-encode.
-  Uint8List lastSignature() =>
-      base64Decode(sent['/api/cesr/encode']!['raw_sig_b64'] as String);
 
   bool verifiesUnder(String qb64, List<int> data, List<int> sig) => ed.verify(
       ed.PublicKey(rawOf(qb64)),
@@ -521,7 +486,6 @@ void main() {
   setUp(() async {
     await freshDevice();
     core = FakeCore();
-    sent = core.sent;
     keri = serviceOver(core);
   });
 
@@ -676,12 +640,6 @@ void main() {
         reason: 'the key reported is the key in force, not the founding key');
     expect(
         verifiesUnder(inForce, data, base64Decode(result.signature)), isTrue);
-
-    await keri
-        .issueCredential(claims: {'role': 'engineer'}, schemaSaid: 'Eschema');
-    expect(verifiesUnder(inForce, core.raw(3), lastSignature()), isTrue,
-        reason:
-            'the event anchoring a credential is signed by the key in force');
   });
 
   test(
@@ -1151,19 +1109,6 @@ void main() {
     expect(core.kel, hasLength(1));
   });
 
-  test('a credential anchor that is not the credential issued is not signed',
-      () async {
-    await keri.inceptAid(name: 'me', code: words.join(' '));
-    core.credentialAnchor = [
-      {'i': 'Esomething else', 's': '0', 'd': 'Esomething else'}
-    ];
-    core.posted.clear();
-    await expectLater(keri.issueCredential(claims: {'a': 'b'}, schemaSaid: 'E'),
-        throwsException);
-    expect(core.posted, isNot(contains('/api/cesr/encode')));
-    expect(await pending(), isEmpty);
-  });
-
   // Replaces "a request refused or answered wrongly is forgotten, one lost in
   // transit is kept": what is kept now is the reservation of an event this
   // device signed, not a note of what it asked the core to add.
@@ -1524,23 +1469,6 @@ void main() {
   });
 
   test(
-      'a credential anchor of another identity, or numbered wrongly, is not signed',
-      () async {
-    await keri.inceptAid(name: 'me', code: words.join(' '));
-    core.anchorsAs = 'E${'O' * 43}';
-    core.posted.clear();
-    await expectLater(keri.issueCredential(claims: {'a': 'b'}, schemaSaid: 'E'),
-        throwsException);
-    expect(core.posted, isNot(contains('/api/cesr/encode')));
-    core.removeLast();
-    core.anchorsAs = null;
-    core.skipsASequenceNumber = true;
-    await expectLater(keri.issueCredential(claims: {'a': 'b'}, schemaSaid: 'E'),
-        throwsException);
-    expect(core.posted, isNot(contains('/api/cesr/encode')));
-  });
-
-  test(
       'an interaction whose answer never arrived is recognised only by the anchors asked for',
       () async {
     await foundedAndLeftUnsignedByAnEarlierVersion(core);
@@ -1574,52 +1502,6 @@ void main() {
     await recordTheSignedLog(core);
     await keysOver(core).finishStrandedEvents(seed);
     expect(core.kel.last['sig'], isNotNull);
-  });
-
-  test(
-      'a credential anchor the core added and this device checked is signed late, as it would have been on time',
-      () async {
-    await keri.inceptAid(name: 'me', code: words.join(' '));
-    await keri.issueCredential(claims: {'a': 'b'}, schemaSaid: 'E');
-    expect(core.kel.last['sig'], isNull,
-        reason: 'the signature never reached the core');
-    expect((await pending()).single['asked'], {
-      'anchors': core.kel.last['a']
-    }, reason: 'the seal this device checked is what was asked');
-
-    // The next issuance finishes it rather than locking the identity.
-    await keri.issueCredential(claims: {'c': 'd'}, schemaSaid: 'E');
-    expect(core.kel[1]['sig'], isNotNull);
-    expect(verifiesUnder(key(0), core.raw(1), core.sigAt(1)), isTrue);
-  });
-
-  test(
-      'a credential issuance whose answer was lost is not recognised, and is listed for the person',
-      () async {
-    await keri.inceptAid(name: 'me', code: words.join(' '));
-    core.losesTheAnswerToIssue = true;
-    await expectLater(keri.issueCredential(claims: {'a': 'b'}, schemaSaid: 'E'),
-        throwsA(isA<http.ClientException>()));
-    core.losesTheAnswerToIssue = false;
-    // The core built the anchor and this device never saw it: nothing says
-    // what it should be, so it is shown to the person, not signed.
-    await expectLater(keri.issueCredential(claims: {'c': 'd'}, schemaSaid: 'E'),
-        throwsA(isA<AnEventThisDeviceDidNotAskFor>()));
-    expect(core.kel.last['sig'], isNull);
-    expect(await keysOver(core).eventsAwaitingApproval(seed), hasLength(1));
-  });
-
-  test(
-      'a credential anchor whose seal fields are in another order than this device writes them is accepted and recognised',
-      () async {
-    await keri.inceptAid(name: 'me', code: words.join(' '));
-    core.credentialAnchor = [
-      {'d': 'Ecredential', 's': '0', 'i': 'Ecredential'}
-    ];
-    await keri.issueCredential(claims: {'a': 'b'}, schemaSaid: 'E');
-    core.credentialAnchor = null;
-    await keri.issueCredential(claims: {'c': 'd'}, schemaSaid: 'E');
-    expect(core.kel[1]['sig'], isNotNull);
   });
 
   test('an ask is recognised whichever order the listing writes the fields of a seal in',
@@ -1657,21 +1539,6 @@ void main() {
     core.identityAnswers = null;
     await keri.signPayload(name: core.aid, data: [1]);
     expect((await TheIdentityThisDeviceHolds().read())?.aid, core.aid);
-  });
-
-  test('a request is forgotten once the core has signed its event itself',
-      () async {
-    await keri.inceptAid(name: 'me', code: words.join(' '));
-    await keri.issueCredential(claims: {'a': 'b'}, schemaSaid: 'E');
-    expect(await pending(), hasLength(1),
-        reason: 'the anchor is written down until it is signed');
-    core.kel.last['sig'] = 'signed by the core';
-    // Settled the next time the core is asked to anchor a credential, the
-    // one path that still adds an event before this device signs it.
-    await keri.issueCredential(claims: {'c': 'd'}, schemaSaid: 'E');
-    final left = await pending();
-    expect([for (final p in left) p['s']], ['2'],
-        reason: 'only the new request is written down');
   });
 
   test(
