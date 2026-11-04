@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 
@@ -15,11 +14,8 @@ import (
 
 // The break-glass root rotation through the core's routes: the app has the
 // three events prepared, signs each with the key it needs, and commits them
-// in one request. With the switch off the routes answer as they did.
-//
-// IDENTITY_BOT_BREAKGLASS_OUT=/tmp/bg.json go test ./server -run TestBreakGlassRotationLogsAreWritten
-// writes the two logs it makes as cases for interop/verify_keripy.py (the
-// judge's EXPECTED set does not hold them, so it is run on a copy that does).
+// in one request. With the switch off the routes answer as they did. The two
+// logs it makes are also judged by keripy, as cases of TestKeripyJudges.
 
 func breakGlassOn(t *testing.T) {
 	t.Helper()
@@ -76,8 +72,6 @@ func (b *brokenGlass) rotate(t *testing.T) (int, map[string]any) {
 	return call(t, b.s, b.s.handleRecoveryRootAIDRotation, "/api/recovery/root-aid-rotation", b.req)
 }
 
-var breakGlassCases []keripyCase
-
 func TestBreakGlassRotationLogsAreWritten(t *testing.T) {
 	b := aRootToBreakGlassOn(t)
 	newAID := b.prepared["new_root_founding"]["hint"].(map[string]any)["i"].(string)
@@ -88,20 +82,13 @@ func TestBreakGlassRotationLogsAreWritten(t *testing.T) {
 	}
 	// Every event it wrote verifies, signed, as a log of its own identifier.
 	for label, aid := range map[string]string{"old root": b.oldAID, "new root": newAID} {
-		m, last := storedLog(t, b.s, aid)
+		m, _ := storedLog(t, b.s, aid)
 		if len(m) != 2 {
 			t.Fatalf("the %s's log is %d events, want its founding and one more", label, len(m))
 		}
 		if _, err := keri.ValidateSignedKEL(m); err != nil {
 			t.Fatalf("the %s's log does not verify: %v", label, err)
 		}
-		why := "the old root's founding, then the rotation that reveals its pre-committed key and seals the new inception"
-		name := "core/break-glass-old-root"
-		if aid == newAID {
-			why, name = "the new root's founding, then its interaction sealing the old root's log tail", "core/break-glass-new-root"
-		}
-		c := keripyCase{Label: name, Why: why, Event: b64s(last), Stream: b64s(joined(m))}
-		breakGlassCases = append(breakGlassCases, c)
 	}
 	own, err := b.s.DataStore.GetIdentity()
 	if err != nil || own == nil || own.AID != newAID || own.EventCount != 2 {
@@ -121,12 +108,6 @@ func TestBreakGlassRotationLogsAreWritten(t *testing.T) {
 	_ = json.Unmarshal(preparedBytes(t, b.prepared["old_root_rotation"]), &rot)
 	if len(rot.N) != 2 || rot.Nt != "1" || len(rot.A) != 1 || rot.A[0].D != b.prepared["new_root_founding"]["hint"].(map[string]any)["d"] {
 		t.Fatalf("the rotation is %+v", rot)
-	}
-	if p := os.Getenv("IDENTITY_BOT_BREAKGLASS_OUT"); p != "" {
-		out, _ := json.MarshalIndent(breakGlassCases, "", " ")
-		if err := os.WriteFile(p, out, 0o600); err != nil {
-			t.Fatal(err)
-		}
 	}
 }
 

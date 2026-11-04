@@ -237,6 +237,18 @@ func TestKeripyJudges(t *testing.T) {
 		record(t, "core/witnessed-founding", "a founding naming two witnesses with a threshold of two, receipted by both", m, last, receipts...)
 	})
 
+	t.Run("break-glass", func(t *testing.T) {
+		b := aRootToBreakGlassOn(t)
+		newAID := b.prepared["new_root_founding"]["hint"].(map[string]any)["i"].(string)
+		if code, out := b.rotate(t); code != http.StatusOK {
+			t.Fatalf("break-glass rotation: %d %v", code, out)
+		}
+		m, last := storedLog(t, b.s, b.oldAID)
+		record(t, "core/break-glass-old-root", "the old root's founding, then the rotation that reveals its pre-committed key and seals the new root's founding", m, last)
+		m, last = storedLog(t, b.s, newAID)
+		record(t, "core/break-glass-new-root", "the new root's founding, then its interaction sealing the old root's log tail", m, last)
+	})
+
 	if out := os.Getenv("IDENTITY_BOT_INTEROP_OUT"); out != "" {
 		b, _ := json.MarshalIndent(keripyCases, "", " ")
 		if err := os.WriteFile(out, b, 0o600); err != nil {
