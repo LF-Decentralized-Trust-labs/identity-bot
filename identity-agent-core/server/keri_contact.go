@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -278,4 +279,17 @@ func sameOOBIHost(a, b string) bool {
 	ua, ea := url.Parse(a)
 	ub, eb := url.Parse(b)
 	return ea == nil && eb == nil && ua.Host != "" && strings.EqualFold(ua.Host, ub.Host) && ua.Scheme == ub.Scheme
+}
+
+// siteClient is the client for a call to an address a stranger's QR code or
+// link chose: a site's challenge, callback, introductions and registry, an
+// Ask, an invite's redeem address. The owner starts these by scanning, but the
+// address is the sender's, so it gets the same guard as any peer address: no
+// proxy, no redirect, the address actually dialled is checked.
+//
+// A local address is reached only when the owner has said they are testing
+// against a local site, with IA_ALLOW_LOCAL_SITES=1 in this agent's own
+// environment; nothing a site or a QR code says can set it.
+func siteClient(timeout time.Duration) *http.Client {
+	return witness.GuardedClient(timeout, os.Getenv("IA_ALLOW_LOCAL_SITES") == "1")
 }

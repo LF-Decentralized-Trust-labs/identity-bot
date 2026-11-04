@@ -47,6 +47,7 @@ func TestAnAppsRequestReachesAHostedAgentWithoutTheMiddleReadingIt(t *testing.T)
 	peers[responderAID] = p
 	_ = caller.savePeers(peers)
 	didcommMu.Unlock()
+	ownerRecordsContactAt(t, caller, responderAID, front.URL)
 
 	const secret = "Alexandra Whitfield-Barnes"
 	send, _ := json.Marshal(sealedSendRequest{

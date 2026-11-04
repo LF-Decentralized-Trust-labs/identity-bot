@@ -87,3 +87,15 @@ func TestALocalPeerIsReachedOnlyWhereTheOwnerRecordedIt(t *testing.T) {
 		}
 	}
 }
+
+// ownerRecordsContactAt stands in for the owner having added the contact at a
+// local test address, which is the one case a local address is dialled.
+func ownerRecordsContactAt(t *testing.T, s *CoreServer, aid, base string) {
+	t.Helper()
+	if s.DataStore == nil {
+		s.DataStore = testDataStore(t, t.TempDir())
+	}
+	if err := s.DataStore.SaveContact(store.ContactRecord{AID: aid, OobiURL: base + "/public/oobi/" + aid, ContactSource: "keri"}); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -100,6 +100,7 @@ func TestARequestGoesOutSealedAndComesBack(t *testing.T) {
 	peers[responderAID] = p
 	_ = caller.savePeers(peers)
 	didcommMu.Unlock()
+	ownerRecordsContactAt(t, caller, responderAID, front.URL)
 
 	const secret = "this must never appear in the middle"
 	res, err := caller.SealedRequest(context.Background(), callerAID, responderAID,

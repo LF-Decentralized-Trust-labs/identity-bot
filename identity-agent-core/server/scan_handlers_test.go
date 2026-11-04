@@ -10,6 +10,7 @@ import (
 // only the trailing /i/{token} and PRESERVING any path prefix (path-based relay tunnels), and
 // reads the action `t` from the fetched Ask.
 func TestBuildAskContextPreservesPath(t *testing.T) {
+	t.Setenv("IA_ALLOW_LOCAL_SITES", "1") // the owner is testing against a local site
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/green-oak-87/i/tok123" {
 			_, _ = w.Write([]byte(`{"v":"ASK1","t":1,"site_oobi":"https://x/oobi/E1"}`))

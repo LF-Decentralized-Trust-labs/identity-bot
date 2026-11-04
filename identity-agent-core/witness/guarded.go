@@ -26,10 +26,15 @@ func ownerVouchesFor(c store.ContactRecord) bool {
 	return true
 }
 
-// ownerRecorded is whether the owner, not a stranger's message, put this
-// contact's address on record. It answers only who wrote the address down, which
-// is all that decides whether a local address may be dialled; whether the key a
-// contact claims for a witness can be believed is the stricter ownerVouchesFor.
+// ownerRecorded is whether this contact was not created by an inbound stranger:
+// it is false for a contact that arrived as a contact request and for one still
+// pending_inbound, and true for every other contact, including one created by an
+// introduction (source "keri"). It does not mean the owner typed the address.
+// What bounds it is that a local address is dialled only for a URL written as a
+// local address (ownerLocalFor) and, on the server, only when that URL has the
+// scheme, host and port the contact has on record (oobiMayBeLocal). Whether the
+// key a contact claims for a witness can be believed is the stricter
+// ownerVouchesFor.
 func ownerRecorded(c store.ContactRecord) bool {
 	return c.ContactSource != ContactSourceInbound && c.Status != "pending_inbound"
 }

@@ -21,6 +21,7 @@ import (
 // answering the way the real handler does.
 func captureRedeem(t *testing.T, got *map[string]string) *httptest.Server {
 	t.Helper()
+	t.Setenv("IA_ALLOW_LOCAL_SITES", "1") // the owner is testing against a local site
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(r.URL.Path, "/redeem") {
 			http.NotFound(w, r)
