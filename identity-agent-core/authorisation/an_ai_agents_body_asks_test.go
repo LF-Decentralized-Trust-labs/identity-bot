@@ -33,6 +33,11 @@ type creation struct {
 	grantSchema   string // the schema the edge names
 	createdSchema string
 	signedKind    string
+	// createdCaps are the capabilities the new AI agent is granted (and asked
+	// for); creatorLimits and createdLimits are the resource_constraints of the
+	// creator's grant and the new one, when set.
+	createdCaps                  []string
+	creatorLimits, createdLimits map[string]map[string][]string
 }
 
 const (
@@ -40,6 +45,7 @@ const (
 	vectorCreator = "ECreatorAIAgent0123456789ABCDEFGHIJKLMNOPQRS"
 	vectorCreated = "ECreatedAIAgent0123456789ABCDEFGHIJKLMNOPQRS"
 	vectorBodyReq = `{"name":"Worker","capabilities":["agent.message.send"]}`
+	toOnlyA       = "agent-a"
 )
 
 func vectorSeed(offset byte) []byte {
@@ -92,11 +98,23 @@ func aCreation(t *testing.T, name string, change func(*creation)) CreationCase {
 	t.Helper()
 	c := creation{
 		capabilities: []string{"agent.create", "agent.message.send"}, forIssuer: org, target: CreateAIAgentPath, method: "POST",
-		signedBody: vectorBodyReq, givenBody: vectorBodyReq, stamp: vectorBase, createdHolder: vectorCreated,
+		createdCaps: []string{"agent.message.send"}, stamp: vectorBase, createdHolder: vectorCreated,
 		grantSchema: schemas.AIAgentGrant.Schema.SAID, createdSchema: schemas.AIAgentGrant.Schema.SAID, signedKind: KindAIAgentBody,
 	}
 	if change != nil {
 		change(&c)
+	}
+	if c.signedBody == "" {
+		ask := struct {
+			Name         string                         `json:"name"`
+			Capabilities []string                       `json:"capabilities"`
+			Limits       map[string]map[string][]string `json:"resource_constraints,omitempty"`
+		}{"Worker", c.createdCaps, c.createdLimits}
+		raw, _ := json.Marshal(ask)
+		c.signedBody = string(raw)
+	}
+	if c.givenBody == "" {
+		c.givenBody = c.signedBody
 	}
 	base, _ := time.Parse(time.RFC3339, vectorBase)
 	w := &world{t: t}
@@ -111,8 +129,11 @@ func aCreation(t *testing.T, name string, change func(*creation)) CreationCase {
 	}
 
 	grantAt, bodyAt := base.Add(-24*time.Hour), base.Add(-24*time.Hour+5*time.Minute)
-	grant, grantSAID := w.build(c.grantSchema, vectorCreator, grantAt, map[string]interface{}{
-		"asset_type": "ai_agent", "name": "Orchestrator", "capabilities": c.capabilities}, nil)
+	creatorAttrs := map[string]interface{}{"asset_type": "ai_agent", "name": "Orchestrator", "capabilities": c.capabilities}
+	if c.creatorLimits != nil {
+		creatorAttrs["resource_constraints"] = c.creatorLimits
+	}
+	grant, grantSAID := w.build(c.grantSchema, vectorCreator, grantAt, creatorAttrs, nil)
 	body, bodySAID := w.build(schemas.AIAgentBody.Schema.SAID, vectorCreator, bodyAt, map[string]interface{}{
 		"asset_type": "ai_agent", "name": "Orchestrator", "host": host, "verkey": verkey,
 		"keys_digest": "EDigest", "grade": "software"}, nil)
@@ -146,8 +167,12 @@ func aCreation(t *testing.T, name string, change func(*creation)) CreationCase {
 		t.Fatal(err)
 	}
 	request := map[string]interface{}{"kind": c.signedKind, "signer": host, "signed": signed, "signature": sig, "asked": asked}
-	created, _ := w.build(c.createdSchema, c.createdHolder, base.Add(30*time.Second), map[string]interface{}{
-		"asset_type": "ai_agent", "name": "Worker", "capabilities": []string{"agent.message.send"}, "request": request},
+	createdAttrs := map[string]interface{}{
+		"asset_type": "ai_agent", "name": "Worker", "capabilities": c.createdCaps, "request": request}
+	if c.createdLimits != nil {
+		createdAttrs["resource_constraints"] = c.createdLimits
+	}
+	created, _ := w.build(c.createdSchema, c.createdHolder, base.Add(30*time.Second), createdAttrs,
 		map[string]interface{}{"authorised_by": map[string]interface{}{"n": grantSAID, "s": c.grantSchema}})
 
 	strs := func(in [][]byte) []string {
@@ -168,6 +193,11 @@ func creationCases(t *testing.T) []CreationCase {
 		c.Because = because
 		return c
 	}
+	accept := func(name string, change func(*creation)) CreationCase {
+		c := aCreation(t, name, change)
+		c.Accepted = true
+		return c
+	}
 	good := aCreation(t, "an AI agent whose grant holds agent.create asks for another", nil)
 	good.Accepted = true
 	return []CreationCase{
@@ -185,6 +215,20 @@ func creationCases(t *testing.T) []CreationCase {
 		refuse("the creator's grant was revoked before the new grant was issued", "revoked before", func(c *creation) { c.revokedAt = "2026-11-02T12:00:10Z" }),
 		refuse("the request was made long before the grant it authorised", "long before", func(c *creation) { c.stamp = "2026-11-02T11:00:00Z" }),
 		refuse("the grant is the creator's own", "own request", func(c *creation) { c.createdHolder = vectorCreator }),
+		refuse("the new AI agent would hold a capability its creator's grant does not", "which its creator's grant does not", func(c *creation) {
+			c.createdCaps = []string{"agent.message.send", "system.info.read"}
+		}),
+		refuse("the creator limits an argument that the new AI agent's grant leaves unlimited", "has no limit on", func(c *creation) {
+			c.creatorLimits = map[string]map[string][]string{"agent.message.send": {"to": {toOnlyA}}}
+		}),
+		refuse("the new AI agent may use a value its creator's limit does not allow", "does not allow", func(c *creation) {
+			c.creatorLimits = map[string]map[string][]string{"agent.message.send": {"to": {toOnlyA}}}
+			c.createdLimits = map[string]map[string][]string{"agent.message.send": {"to": {toOnlyA, "agent-b"}}}
+		}),
+		accept("the new AI agent is limited within its creator's limit", func(c *creation) {
+			c.creatorLimits = map[string]map[string][]string{"agent.message.send": {"to": {toOnlyA, "agent-b"}}}
+			c.createdLimits = map[string]map[string][]string{"agent.message.send": {"to": {toOnlyA}}}
+		}),
 		refuse("the grant is of a version that does not admit the kind", "version that admits", func(c *creation) { c.createdSchema = schemas.AIAgentGrantV11.Schema.SAID }),
 	}
 }
@@ -294,4 +338,11 @@ func TestTheCreatorsChannelIsNotTheOwners(t *testing.T) {
 	if err := w.check(cred); err == nil || !strings.Contains(err.Error(), "grants an AI agent anything") {
 		t.Fatalf("a machine's request to the creator's route: %v", err)
 	}
+}
+
+// An implementation written from the ADR's prose, in another language, agrees
+// with the vector file: that each credential is its own digest, that the body's
+// signature holds, and that each refused case breaks the one rule it is about.
+func TestAnIndependentImplementationAgreesWithTheAIAgentBodyRequestVectors(t *testing.T) {
+	contractcheck.IndependentlyWith(t, "../contracts/check_ai_agent_body_request_vectors.py", creationVectorFile, "blake3")
 }

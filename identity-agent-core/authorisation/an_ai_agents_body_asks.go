@@ -15,7 +15,7 @@ import (
 // A request an AI agent's body made.
 //
 // An AI agent whose grant holds agent.create creates AI agents, and sets their
-// repositories, over its body's own signed channel (ADR-061 of the add-ons). The
+// repositories, over its body's own signed channel (ADR-045, Amendment 3). The
 // grant issued for the AI agent it created rests on that request: the request
 // kind is "ai_agent_body", and its signer is the machine, the body, that signed
 // it. What the grant's authority then names is two credentials and a string:
@@ -30,10 +30,14 @@ import (
 //     and target, the time, and the digest of the request's body.
 //
 // What it vouches for is the same as for any request: that the creator asked for
-// this AI agent, by that name, with those capabilities and limits. What it does
-// not vouch for is that those are within the creator's own: that a created AI
-// agent is never wider than its creator is the creating Identity Agent's rule
-// and shows in the two grants, not in this check.
+// this AI agent, by that name, with those capabilities and limits. It also
+// vouches that the AI agent created is no more powerful than its creator: it
+// holds only capabilities the creator's grant holds, and where the creator's
+// grant limits the values of an argument, its own limit is within that. What it
+// does not vouch for is any count or resource limit on how many AI agents the
+// creator may create, or how much they may use: the core does not enforce
+// those, and the party that issues the creator's grant does (ADR-045,
+// Amendment 3).
 
 // KindAIAgentBody is the kind of a request an AI agent's body signed.
 const KindAIAgentBody = "ai_agent_body"
@@ -115,6 +119,10 @@ func checkCreator(in Input, cred acdc, rests RestsOn, req request, br BodyReques
 		return fmt.Errorf("the creator's grant does not hold %s", capabilityCreate)
 	}
 
+	if err := withinCreator(grant.A, cred.A); err != nil {
+		return err
+	}
+
 	b, err := keri.VerifyCredential(in.CreatorBody)
 	if err != nil {
 		return fmt.Errorf("the creator's body credential does not verify: %w", err)
@@ -143,4 +151,58 @@ func checkCreator(in Input, cred acdc, rests RestsOn, req request, br BodyReques
 		return err
 	}
 	return checkStanding(in, cred, standing{what: "the creator's body credential", said: b.SAID, attrs: body.A, log: in.CreatorBodyLog}, br.Stamp, issuedAt)
+}
+
+// withinCreator checks that what a created AI agent's grant gives is within
+// what its creator's grant gives: every capability is one the creator holds,
+// and for every argument the creator's grant limits to some values, the created
+// grant limits it to some of those. A limit the creator has and the created
+// grant leaves off is wider, and refused.
+func withinCreator(creator, created map[string]json.RawMessage) error {
+	var held, given []string
+	if err := json.Unmarshal(creator["capabilities"], &held); err != nil {
+		return fmt.Errorf("the creator's capabilities are unreadable")
+	}
+	if err := json.Unmarshal(created["capabilities"], &given); err != nil {
+		return fmt.Errorf("the capabilities of the AI agent created are unreadable")
+	}
+	holds := map[string]bool{}
+	for _, c := range held {
+		holds[c] = true
+	}
+	for _, c := range given {
+		if !holds[c] {
+			return fmt.Errorf("the AI agent created would hold %s, which its creator's grant does not", c)
+		}
+	}
+	type limits map[string]map[string][]string
+	var creatorLimits, createdLimits limits
+	if raw := creator["resource_constraints"]; len(raw) > 0 {
+		if err := json.Unmarshal(raw, &creatorLimits); err != nil {
+			return fmt.Errorf("the creator's limits are unreadable")
+		}
+	}
+	if raw := created["resource_constraints"]; len(raw) > 0 {
+		if err := json.Unmarshal(raw, &createdLimits); err != nil {
+			return fmt.Errorf("the limits of the AI agent created are unreadable")
+		}
+	}
+	for _, c := range given {
+		for arg, allowed := range creatorLimits[c] {
+			own, ok := createdLimits[c][arg]
+			if !ok {
+				return fmt.Errorf("the AI agent created has no limit on %s of %s, which its creator's grant limits", arg, c)
+			}
+			set := map[string]bool{}
+			for _, v := range allowed {
+				set[v] = true
+			}
+			for _, v := range own {
+				if !set[v] {
+					return fmt.Errorf("the AI agent created may use %q for %s of %s, which its creator's grant does not allow", v, arg, c)
+				}
+			}
+		}
+	}
+	return nil
 }
