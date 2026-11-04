@@ -174,7 +174,8 @@ class CheckedCredential {
         recipient = j['recipient'] as String? ?? '',
         attributes = Map<String, dynamic>.from(
             (j['attributes'] as Map?) ?? const <String, dynamic>{}),
-        hasEdges = j['edges'] != null;
+        hasEdges = j['edges'] != null,
+        fields = List<String>.from((j['fields'] as List?) ?? const <String>[]);
   final String said;
   final String issuer;
   final String schema;
@@ -185,6 +186,10 @@ class CheckedCredential {
   /// one, and the claims.
   final Map<String, dynamic> attributes;
   final bool hasEdges;
+
+  /// Every top-level field the credential carries, whatever the engine reads
+  /// of it: a rules block, a salt or an unknown field is named here.
+  final List<String> fields;
 }
 
 /// A presentation as the core's engine reads it, in its one serialisation.

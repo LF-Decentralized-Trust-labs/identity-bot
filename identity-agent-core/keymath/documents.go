@@ -3,6 +3,7 @@ package keymath
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	keri "github.com/grapeid/keri-go"
 
@@ -23,17 +24,35 @@ type Credential struct {
 	Recipient  string          `json:"recipient,omitempty"`
 	Attributes json.RawMessage `json:"attributes"`
 	Edges      json.RawMessage `json:"edges,omitempty"`
+	// Fields is every top-level field the credential carries, sorted: whatever
+	// it says beyond what the engine reads into the fields above (a rules
+	// block, a salt, anything unknown) is named here, so a caller can require
+	// that it holds only what it asked for.
+	Fields []string `json:"fields"`
 }
 
 // CheckCredential reads a credential's bytes: the canonical serialisation, with
-// its identifier the digest of the whole.
+// its identifier the digest of the whole. A document with an event type is a
+// key event or a registry event, not a credential.
 func CheckCredential(raw []byte) (*Credential, error) {
 	c, err := keri.VerifyCredential(raw)
 	if err != nil {
 		return nil, err
 	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		return nil, fmt.Errorf("it is not a credential: %w", err)
+	}
+	if _, isEvent := top["t"]; isEvent {
+		return nil, fmt.Errorf("it has an event type, so it is a key event or a registry event, not a credential")
+	}
+	fields := make([]string, 0, len(top))
+	for name := range top {
+		fields = append(fields, name)
+	}
+	sort.Strings(fields)
 	return &Credential{SAID: c.SAID, Issuer: c.Issuer, Schema: c.SchemaSAID, Registry: c.Registry,
-		Recipient: c.Recipient, Attributes: c.Attributes, Edges: c.Edges}, nil
+		Recipient: c.Recipient, Attributes: c.Attributes, Edges: c.Edges, Fields: fields}, nil
 }
 
 // Presentation is a presentation read the way the engine reads it.

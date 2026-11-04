@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:agent_client/crypto/owner_signature.dart';
 import 'package:agent_client/services/key_math.dart';
 import 'package:agent_client/services/local_core_keri_service.dart';
 import 'package:agent_client/services/secure_key_store.dart';
@@ -150,6 +151,95 @@ void main() {
           throwsA(isA<NotTheCredentialAsked>()));
       await nothingAnchored(aid);
     }
+  });
+
+  /// The credential [prepared] answered, changed by [change] and identified
+  /// again, as a core that wants other terms anchored would send it: its
+  /// attribute block and the whole each the digest of what they now hold.
+  Map<String, dynamic> reidentified(Map<String, dynamic> prepared,
+      void Function(Map<String, dynamic> sad) change) {
+    final sad = jsonDecode(utf8.decode(base64Decode(prepared['acdc_json_b64'])))
+        as Map<String, dynamic>;
+    change(sad);
+    String digestOf(Map<String, dynamic> m) =>
+        OwnerSignature.blake3QB64(utf8.encode(jsonEncode(m)));
+    final blank = '#' * 44;
+    final a = sad['a'] as Map<String, dynamic>;
+    a['d'] = blank;
+    a['d'] = digestOf(a);
+    sad['d'] = blank;
+    final length = utf8.encode(jsonEncode(sad)).length;
+    sad['v'] = 'ACDC10JSON${length.toRadixString(16).padLeft(6, '0')}_';
+    sad['d'] = blank;
+    sad['d'] = digestOf(sad);
+    return {
+      ...prepared,
+      'acdc_json_b64': base64Encode(utf8.encode(jsonEncode(sad))),
+      'acdc_said': sad['d'],
+    };
+  }
+
+  test(
+      'a core that adds terms the device never asked for, or dates a credential '
+      'long ago, gets nothing signed', () async {
+    final aid = await founded();
+    final real = await prepared();
+    Map<String, dynamic> put(Map<String, dynamic> sad, String name, Object v) {
+      // After the schema, as a core that wanted it read would place it.
+      final tail = Map<String, dynamic>.of(sad)
+        ..removeWhere((k, _) => const {'v', 'd', 'i', 's'}.contains(k));
+      sad.removeWhere((k, _) => !const {'v', 'd', 'i', 's'}.contains(k));
+      sad[name] = v;
+      sad.addAll(tail);
+      return sad;
+    }
+
+    final hostile = <String, Map<String, dynamic>>{
+      'a rules block': reidentified(
+          real,
+          (sad) =>
+              put(sad, 'r', {'d': '', 'waiver': 'the issuer owes nothing'})),
+      'an unknown field': reidentified(real, (sad) => put(sad, 'z', 'terms')),
+      'an event type': reidentified(real, (sad) => put(sad, 't', 'iss')),
+      'a date long ago': reidentified(
+          real,
+          (sad) => (sad['a'] as Map<String, dynamic>)['dt'] = DateTime.now()
+              .toUtc()
+              .subtract(const Duration(days: 30))
+              .toIso8601String()),
+    };
+    for (final entry in hostile.entries) {
+      core.client.alterTheAnswerTo['/api/credential/prepare'] = (a) => {
+            ...a,
+            'acdc_json_b64': entry.value['acdc_json_b64'],
+            'acdc_said': entry.value['acdc_said']
+          };
+      await expectLater(
+          service().issueCredential(
+              claims: {'name': 'Ada'}, schemaSaid: schema, holderAid: holder),
+          throwsA(isA<NotTheCredentialAsked>().having(
+              (e) => e.toString(),
+              'the reason',
+              contains(switch (entry.key) {
+                'a date long ago' => 'time of issue',
+                'an event type' => 'event type',
+                _ => 'field that was not asked for',
+              }))),
+          reason: entry.key);
+      await nothingAnchored(aid);
+    }
+
+    // The control: the same re-identifying, changing nothing, is accepted, so
+    // the refusals above are of what was changed and not of how it was made.
+    final same = reidentified(real, (_) {});
+    core.client.alterTheAnswerTo['/api/credential/prepare'] = (a) => {
+          ...a,
+          'acdc_json_b64': same['acdc_json_b64'],
+          'acdc_said': same['acdc_said']
+        };
+    final issued = await service().issueCredential(
+        claims: {'name': 'Ada'}, schemaSaid: schema, holderAid: holder);
+    expect(issued.acdcSaid, same['acdc_said']);
   });
 
   test(

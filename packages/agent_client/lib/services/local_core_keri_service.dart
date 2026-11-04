@@ -18,6 +18,14 @@ import 'the_key_in_force.dart';
 import 'the_key_is_not_held_by_the_core.dart';
 import 'the_agent_this_app_talks_to.dart';
 
+/// The top-level fields of a credential this device asks for: version,
+/// identifier, issuer, schema and attribute block. Registry, edges and rules
+/// are not asked for, so none is accepted.
+const _credentialFieldsAsked = {'v', 'd', 'i', 's', 'a'};
+
+/// How far a credential's time of issue may be from this device's clock.
+const _issuedWithin = Duration(minutes: 5);
+
 /// KERI against the Identity Agent core running on this machine.
 ///
 /// Named for what it talks to rather than what kind of computer it is on,
@@ -762,12 +770,23 @@ class LocalCoreKeriService extends KeriService {
       wrong = 'it is issued to "${c.recipient}", not "$holderAid"';
     } else if (c.registry.isNotEmpty || c.hasEdges) {
       wrong = 'it names a registry or edges, which were not asked for';
+    } else if (c.fields.any((f) => !_credentialFieldsAsked.contains(f))) {
+      // A rules block, a salt or a field nobody knows is terms this device
+      // anchors without the person having seen them.
+      wrong = 'it carries a field that was not asked for: '
+          '${c.fields.where((f) => !_credentialFieldsAsked.contains(f)).join(', ')}';
     } else if (saidSaid != c.said) {
       wrong = 'its identifier is ${c.said}, not the $saidSaid the core said';
     } else {
       // The attribute block holds its own digest, the recipient, the time of
       // issue, and the claims asked for.
       final held = c.attributes;
+      final issuedAt = DateTime.tryParse('${held['dt']}');
+      if (issuedAt == null ||
+          issuedAt.difference(DateTime.now()).abs() > _issuedWithin) {
+        throw NotTheCredentialAsked('its time of issue, ${held['dt']}, is not '
+            'now: a credential is dated when this device asked for it');
+      }
       for (final name in claims.keys) {
         if (!held.containsKey(name) || !sameContent(held[name], claims[name])) {
           wrong = 'its attribute "$name" is not what was asked for';
