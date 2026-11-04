@@ -29,7 +29,11 @@ type SignedRequest struct {
 	Signer    string `json:"signer"`
 	Signed    string `json:"signed"`
 	Signature string `json:"signature"`
-	Body      string `json:"body"`
+	// SignaturePostQuantum is an owner's second signature over Signed, kept when
+	// the owner was at stage two and so signed with both keys (ADR-061 section 6):
+	// an indexed post-quantum signature, as it was sent.
+	SignaturePostQuantum string `json:"signature_pq,omitempty"`
+	Body                 string `json:"body"`
 }
 
 // Signer is one of the people who sign for this identity, and how it knows

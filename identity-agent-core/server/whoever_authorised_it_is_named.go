@@ -98,6 +98,7 @@ func (s *CoreServer) authorityOf(r *http.Request) (coretypes.Authority, func(), 
 		stamp := strings.TrimSpace(r.Header.Get(headerOwnerTimestamp))
 		return coretypes.Authority{Request: &coretypes.SignedRequest{
 			Kind: "owner", Signer: owner, Signature: sig, Body: string(body),
+			SignaturePostQuantum: strings.TrimSpace(r.Header.Get(headerOwnerSigPostQuantum)),
 			Signed: canonicalOwnerRequest(strings.TrimSpace(r.Header.Get(headerOwnerFor)),
 				r.Method, r.URL.Path, stamp, body),
 		}}, release, nil
@@ -237,6 +238,16 @@ func (s *CoreServer) checkAuthorisationOf(acdc []byte, issuer, registry, said st
 			return fmt.Errorf("the identity's owner is not known")
 		}
 		in.OwnerKey = oa.PublicKey
+		// An owner at stage two signed with both keys, and the record holds both.
+		pqKey, at, err := s.ownerPostQuantumKey(oa)
+		if err != nil {
+			return err
+		}
+		if pqKey != "" {
+			if err := thePostQuantumSignatureOver(by.Request.SignaturePostQuantum, pqKey, at, by.Request.Signed); err != nil {
+				return fmt.Errorf("the kept request: %w", err)
+			}
+		}
 	}
 	// Asked for by a signed request, the credential must carry it: one that
 	// carries none rests on nothing that asked for it.

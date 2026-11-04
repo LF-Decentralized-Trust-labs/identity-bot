@@ -378,12 +378,24 @@ func (s *CoreServer) verifyOwnerSignature(r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	ok, err := login.VerifyString(canonicalOwnerRequestOver(target, r.Method, r.URL.Path, stamp, digest), sig, pub)
+	message := canonicalOwnerRequestOver(target, r.Method, r.URL.Path, stamp, digest)
+	ok, err := login.VerifyString(message, sig, pub)
 	if err != nil {
 		return fmt.Errorf("signature: %w", err)
 	}
 	if !ok {
 		return fmt.Errorf("signature does not match the owner key")
+	}
+	// An owner at stage two signs with both keys; checked before the signature
+	// is spent, so a request missing the second does not burn the first.
+	pqKey, pqAt, err := s.ownerPostQuantumKey(authority)
+	if err != nil {
+		return err
+	}
+	if pqKey != "" {
+		if err := thePostQuantumSignatureOfAnOwnerRequest(r, pqKey, pqAt, message); err != nil {
+			return err
+		}
 	}
 
 	// Verified, so spent NOW -- before any of the body is read. A signature is
