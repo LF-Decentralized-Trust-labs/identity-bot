@@ -20,6 +20,11 @@ import 'the_event_this_device_expects.dart';
 /// as an event this device asked for or the person approved, and a founding's
 /// witnesses are the core's choice.
 ///
+/// [ixnAnchors] are the seals an interaction must carry: what this device asked
+/// for, or, for an interaction the person approved after being shown it, what
+/// it stores. Left null, the interaction must be the anchor of a credential the
+/// core issued: one seal, `{"i": x, "s": "0", "d": x}`, and nothing else.
+///
 /// [generation] is the key this event reveals (0 for the founding).
 /// [foundingAnchors] are the seals a founding was asked to carry (the owner
 /// seal when it was made for one).
@@ -31,6 +36,7 @@ Future<ExpectedEvent> theStoredEventThisPhraseWouldHaveMade(
   required ParsedEvent? lastEstablishment,
   required int generation,
   List<Object?> foundingAnchors = const [],
+  List<Object?>? ixnAnchors,
 }) async {
   Future<List<String>> next() async =>
       [await km.nextKeyDigest(KeyManager.publicKeyAt(seed, generation + 1))];
@@ -51,11 +57,17 @@ Future<ExpectedEvent> theStoredEventThisPhraseWouldHaveMade(
           toad: lastEstablishment == null ? -1 : toadOf(lastEstablishment));
     case 'ixn':
       final a = stored['a'];
+      final seal = a is List && a.length == 1 && a.first is Map ? (a.first as Map)['i'] : null;
       return ExpectedEvent.interaction(
           aid: stored.i,
           sn: stored.s,
           prior: before?.d ?? '',
-          anchors: a is List ? List<Object?>.from(a) : const []);
+          anchors: ixnAnchors ??
+              (seal is String
+                  ? [
+                      {'i': seal, 's': '0', 'd': seal}
+                    ]
+                  : const []));
     default:
       throw NotTheEventExpected('it is a ${stored.t}, which this device does '
           'not sign late');

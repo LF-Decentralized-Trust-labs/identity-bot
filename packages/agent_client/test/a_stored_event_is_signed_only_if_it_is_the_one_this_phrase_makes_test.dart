@@ -1,0 +1,219 @@
+import 'dart:convert';
+
+import 'package:agent_client/crypto/bip39.dart';
+import 'package:agent_client/crypto/keys.dart';
+import 'package:agent_client/services/key_math.dart';
+import 'package:agent_client/services/the_event_this_device_expects.dart';
+import 'package:agent_client/services/the_events_this_device_asked_for.dart';
+import 'package:agent_client/services/the_key_in_force.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:test/test.dart';
+
+import 'support/a_core_that_misleads.dart';
+import 'support/the_core.dart';
+
+/// An event an earlier version stored without a signature is signed late only
+/// if it is exactly the event this phrase would have produced (ADR-061
+/// section 3, the signer's fence; build plan B13). Run against the real core,
+/// with the stored rows marked as the upgrade marks them.
+void main() {
+  final seed = Bip39.mnemonicToSeed(
+      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
+          .split(' '));
+  String key(int i) => KeyManager.publicKeyAt(seed, i);
+  late String bin;
+  late KeyMath km;
+  final cores = <ACore>[];
+
+  setUpAll(() async {
+    bin = await buildTheCore('late-signing-core', dev: true);
+    km = await keyMathOf(bin);
+  });
+
+  setUp(() {
+    FlutterSecureStorage.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({});
+  });
+
+  tearDown(() async {
+    for (final c in cores) {
+      await c.close();
+    }
+    cores.clear();
+  });
+
+  Future<String> digest(int i) => km.nextKeyDigest(key(i));
+
+  /// The events as an earlier version asked for them, committed signed to a
+  /// real core, then left as it left them: [bodies] are prepared in order
+  /// (each after the one before) and signed by the key the previous
+  /// establishment event named, then the events at [unsigned] lose their
+  /// signature and are marked, and the core is started again.
+  Future<(ACore, String, List<(int, String)>)> storedBy(
+      List<Map<String, Object?>> bodies, List<int> unsigned) async {
+    var core = await anotherCore(bin, km);
+    cores.add(core);
+    var aid = '';
+    final placed = <(int, String)>[];
+    var gen = 0;
+    for (final (sn, body) in bodies.indexed) {
+      final b = {...body};
+      if (sn > 0) {
+        b['aid'] = aid;
+        b['after'] = {'s': (sn - 1).toRadixString(16), 'd': placed[sn - 1].$2};
+      }
+      // A rotation is signed by the key it reveals.
+      if (body['t'] == 'rot') gen++;
+      final signed =
+          await preparedAndSigned(core.client, core.base, seed, gen, b);
+      await commitTo(core.base, signed.rawB64, signed.sigs);
+      final ev = await km.parseEvent(base64Decode(signed.rawB64));
+      if (sn == 0) aid = ev.i;
+      placed.add((sn, ev.d));
+    }
+    final data = core.dataDir!;
+    final port = Uri.parse(core.base).port;
+    await core.close();
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    await leaveUnsigned(data, aid, unsigned);
+    core = await anotherCore(bin, km, dataDir: data, port0: port);
+    cores.add(core);
+    return (core, aid, placed);
+  }
+
+  Map<String, Object?> founding({List<String> n = const [], int next = 1}) => {
+        't': 'icp',
+        'k': [key(0)],
+        'kt': '1',
+        'n': ['placeholder', ...n],
+        'nt': '1',
+        'a': <Object?>[],
+      };
+
+  Future<Map<String, Object?>> legacyFounding({List<String> more = const []}) async =>
+      {...founding(n: more), 'n': [await digest(1), ...more]};
+
+  Future<Map<String, Object?>> rotation(int to, {String? commitsTo}) async => {
+        't': 'rot',
+        'k': [key(to)],
+        'kt': '1',
+        'n': [commitsTo ?? await digest(to + 1)],
+        'nt': '1',
+        'a': <Object?>[],
+        'br': <String>[],
+        'ba': <String>[],
+        'bt': '0',
+      };
+
+  Map<String, Object?> interaction(List<Object?> anchors) =>
+      {'t': 'ixn', 'a': anchors};
+
+  Future<List<bool>> signedInTheCore(ACore core, String aid) async {
+    final res = await core.client.get(Uri.parse('${core.base}/api/kel?name=$aid'));
+    return [for (final s in (jsonDecode(res.body) as Map)['signed'] as List) s as bool];
+  }
+
+  TheKeyInForce keysOf(ACore core) => TheKeyInForce(core.client, core.base,
+      asked: TheEventsThisDeviceAskedFor(), keyMath: km);
+
+  test('a stored founding with an extra next-key digest is not signed', () async {
+    final extra = 'E${'M' * 43}';
+    final (core, aid, _) =
+        await storedBy([await legacyFounding(more: [extra])], [0]);
+    expect(await signedInTheCore(core, aid), [false]);
+
+    await expectLater(
+        keysOf(core).signApprovedEvent(seed, sequenceNumber: '0', digest: aid),
+        throwsA(isA<AStoredEventIsNotTheOneExpected>()
+            .having((e) => e.difference, 'difference', contains('"n"'))
+            .having((e) => e.stored, 'what was stored', contains(extra))
+            .having((e) => e.expected['n'], 'what was expected', [await digest(1)])));
+    expect(await signedInTheCore(core, aid), [false],
+        reason: 'nothing was recorded');
+  });
+
+  test('a stored rotation committing to another key is not signed', () async {
+    final stranger = await km.nextKeyDigest(key(7));
+    final (core, aid, placed) = await storedBy(
+        [await legacyFounding(), await rotation(1, commitsTo: stranger)], [1]);
+    expect(await signedInTheCore(core, aid), [true, false]);
+
+    await expectLater(
+        keysOf(core).signApprovedEvent(seed, sequenceNumber: '1', digest: placed[1].$2),
+        throwsA(isA<AStoredEventIsNotTheOneExpected>()
+            .having((e) => e.stored, 'what was stored', contains(stranger))
+            .having((e) => e.expected['n'], 'what was expected', [await digest(2)])));
+    expect(await signedInTheCore(core, aid), [true, false]);
+  });
+
+  test('a stored interaction anchoring something else is not signed', () async {
+    final other = 'E${'O' * 43}';
+    final theirs = 'E${'T' * 43}';
+    final (core, aid, placed) = await storedBy([
+      await legacyFounding(),
+      interaction([
+        {'i': other, 's': '0', 'd': other}
+      ]),
+    ], [1]);
+    // This device asked for an anchor of its own, and was given this event.
+    final asked = TheEventsThisDeviceAskedFor();
+    final request = await asked.asking(t: 'ixn', aid: aid, expectedSn: 1, asked: {
+      'anchors': [
+        {'i': theirs, 's': '0', 'd': theirs}
+      ]
+    });
+    await asked.added(request, aid: aid, sequenceNumber: 1, digest: placed[1].$2);
+
+    await expectLater(
+        keysOf(core).finishStrandedEvents(seed),
+        throwsA(isA<AStoredEventIsNotTheOneExpected>()
+            .having((e) => e.stored, 'what was stored', contains(other))
+            .having((e) => jsonEncode(e.expected['a']), 'what was expected', contains(theirs))));
+    expect(await signedInTheCore(core, aid), [true, false]);
+  });
+
+  test('an interaction that anchors a credential and something more is not signed',
+      () async {
+    final said = 'E${'C' * 43}';
+    final (core, aid, placed) = await storedBy([
+      await legacyFounding(),
+      interaction([
+        {'i': said, 's': '0', 'd': said},
+        {'i': said, 's': '1', 'd': said},
+      ]),
+    ], [1]);
+    final asked = TheEventsThisDeviceAskedFor();
+    final request = await asked.asking(t: 'ixn', aid: aid, expectedSn: 1);
+    await asked.added(request, aid: aid, sequenceNumber: 1, digest: placed[1].$2);
+
+    await expectLater(keysOf(core).finishStrandedEvents(seed),
+        throwsA(isA<AStoredEventIsNotTheOneExpected>()));
+    expect(await signedInTheCore(core, aid), [true, false]);
+  });
+
+  test('a stored founding, rotation and interaction that are exactly right are signed and accepted by the core',
+      () async {
+    final said = 'E${'C' * 43}';
+    final (core, aid, placed) = await storedBy([
+      await legacyFounding(),
+      await rotation(1),
+      interaction([
+        {'i': said, 's': '0', 'd': said}
+      ]),
+    ], [0, 1, 2]);
+    expect(await signedInTheCore(core, aid), [false, false, false]);
+
+    final asked = TheEventsThisDeviceAskedFor();
+    await asked.asking(t: 'icp', expectedSn: 0, asked: {'key': key(0), 'next': key(1)});
+    await asked.asking(t: 'rot', aid: aid, expectedSn: 1, asked: {'key': key(1), 'next': key(2)});
+    final request = await asked.asking(t: 'ixn', aid: aid, expectedSn: 2);
+    await asked.added(request, aid: aid, sequenceNumber: 2, digest: placed[2].$2);
+
+    final state = await keysOf(core).finishStrandedEvents(seed);
+    expect(state.index, 1);
+    expect(await signedInTheCore(core, aid), [true, true, true]);
+    expect(await keysOf(core).finishStrandedEvents(seed), isNotNull,
+        reason: 'nothing is left to sign, and asking again is harmless');
+  });
+}

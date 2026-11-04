@@ -142,6 +142,16 @@ class TheEventsThisDeviceAskedFor {
         if (entries.length != before) await _save(storageKey, entries);
       });
 
+  /// What request [id] asked for (its `asked` map), or null when it is not
+  /// written down.
+  Future<Map<String, dynamic>?> whatWasAsked(String storageKey, String id) =>
+      _serialised(() async {
+        for (final e in await _load(storageKey)) {
+          if (e['id'] == id) return Map<String, dynamic>.from(e['asked'] as Map? ?? const {});
+        }
+        return null;
+      });
+
   /// The id of the request that asked for [event] of [aid], or null if this
   /// device never asked for it. [commitmentTo] turns a key in qb64 into the
   /// digest a next-key commitment names.

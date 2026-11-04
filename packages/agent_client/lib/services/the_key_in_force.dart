@@ -165,7 +165,8 @@ class TheKeyInForce {
       if (asked == null) {
         throw AnEventThisDeviceDidNotAskFor(checked.aid, '${event['s']}', '${event['t']}');
       }
-      await _checkAndSign(seed, checked, at);
+      final wanted = (await _asked.whatWasAsked(scope, asked))?['anchors'];
+      await _checkAndSign(seed, checked, at, ixnAnchors: wanted is List ? List<Object?>.from(wanted) : null);
       await _asked.forgetId(scope, asked);
     }
     if (signed != null) await _asked.forgetSettled(scope, checked.aid, log.events, signed);
@@ -180,7 +181,7 @@ class TheKeyInForce {
   /// nothing signs late without). An event that is not is not signed: it comes
   /// back as an [AStoredEventIsNotTheOneExpected] carrying what was stored and
   /// what was expected, for the person to see.
-  Future<void> _checkAndSign(Uint8List seed, _Checked checked, int at) async {
+  Future<void> _checkAndSign(Uint8List seed, _Checked checked, int at, {List<Object?>? ixnAnchors}) async {
     final km = _keyMath;
     if (km == null) {
       throw StateError('this app has not given the client the core\'s key '
@@ -206,7 +207,8 @@ class TheKeyInForce {
         stored: stored,
         before: await parsed(at - 1),
         lastEstablishment: await parsed(lastEstablishment),
-        generation: checked.keyAt[at]);
+        generation: checked.keyAt[at],
+        ixnAnchors: ixnAnchors);
     final signingSeed = KeyManager.signingSeed(seed, index: checked.keyAt[at]);
     try {
       await signAndRecordEvent(_client, _baseUrl,
@@ -266,7 +268,10 @@ class TheKeyInForce {
       if (log.signed == null || log.signed![at]) {
         throw Exception('event $sequenceNumber of ${checked.aid} is not waiting for a signature');
       }
-      await _checkAndSign(seed, checked, at);
+      // The person has been shown the event as stored, so its seals are what
+      // they approved; everything else is checked as for any other.
+      final seals = event['a'];
+      await _checkAndSign(seed, checked, at, ixnAnchors: seals is List ? List<Object?>.from(seals) : const []);
       return;
     }
     throw Exception('the key log of ${checked.aid} has no event $sequenceNumber with digest $digest');

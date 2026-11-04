@@ -161,8 +161,12 @@ Future<void> commitTo(String base, String rawB64, List<String> sigs) async {
 
 /// Another core, for an identity of its own.
 class ACore {
-  ACore(this._process, this.base, this.client, this._km, this.logs);
+  ACore(this._process, this.base, this.client, this._km, this.logs,
+      [this.dataDir]);
   final Process _process;
+
+  /// Where this core keeps its data.
+  final Directory? dataDir;
 
   /// Everything the core wrote to its standard output and error.
   final StringBuffer logs;
@@ -186,10 +190,12 @@ class ACore {
   Future<void> close() async => _process.kill();
 }
 
-Future<ACore> anotherCore(String bin, KeyMath km) async {
-  final port = 20000 + Random().nextInt(20000);
+Future<ACore> anotherCore(String bin, KeyMath km,
+    {Directory? dataDir, int? port0}) async {
+  final port = port0 ?? 20000 + Random().nextInt(20000);
   final base = 'http://127.0.0.1:$port';
-  final data = await Directory.systemTemp.createTemp('witnessed-core-data');
+  final data =
+      dataDir ?? await Directory.systemTemp.createTemp('witnessed-core-data');
   final p = await Process.start(bin, [], environment: {
     ...Platform.environment,
     'PORT': '$port',
@@ -208,5 +214,26 @@ Future<ACore> anotherCore(String bin, KeyMath km) async {
     } catch (_) {}
     await Future<void>.delayed(const Duration(milliseconds: 100));
   }
-  return ACore(p, base, ACoreThatMisleads(http.Client()), km, logs);
+  return ACore(p, base, ACoreThatMisleads(http.Client()), km, logs, data);
+}
+
+/// Leaves the events of [aid] at [sns] in the core's data in [data] as an
+/// earlier version left them: without a signature, and marked, as the upgrade
+/// marks them. The core is not running while this is done.
+Future<void> leaveUnsigned(Directory data, String aid, List<int> sns) async {
+  final r = await Process.run('python3', [
+    '-I',
+    '-c',
+    'import sqlite3,sys\n'
+        'db=sqlite3.connect(sys.argv[1] + "/identity.db")\n'
+        'for sn in sys.argv[3:]:\n'
+        '    n=db.execute("UPDATE kel SET cesr_signature=\'\', signatures=\'\', '
+        'unsigned_at_upgrade=1 WHERE aid=? AND seq_num=?", (sys.argv[2], int(sn))).rowcount\n'
+        '    assert n==1, n\n'
+        'db.commit()\n',
+    data.path,
+    aid,
+    for (final sn in sns) '$sn',
+  ]);
+  if (r.exitCode != 0) fail('could not leave the events unsigned: ${r.stderr}');
 }
