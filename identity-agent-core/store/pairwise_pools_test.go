@@ -1,6 +1,10 @@
 package store
 
-import "testing"
+import (
+	"encoding/json"
+	"os"
+	"testing"
+)
 
 // Two pools must never hand out the same index.
 //
@@ -98,5 +102,30 @@ func TestAnUnknownPoolIsRefusedByBoth(t *testing.T) {
 	}
 	if _, err := s.AllocateNextRelationshipIndex("toaster"); err == nil {
 		t.Error("allocation invented a range for a pool nobody assigned one to")
+	}
+}
+
+// The Dart client signs a founding left unsigned by the old /api/inception only
+// if its messaging keyset is on the branch that handler allocated, which is
+// this pool's base. The client keeps that number as legacyMessagingBranches and
+// pins it to this file; a base that moves here fails this test rather than
+// silently changing which foundings the client will sign.
+func TestTheClientsLegacyMessagingBranchIsThePoolBase(t *testing.T) {
+	raw, err := os.ReadFile("../../packages/agent_client/test/support/legacy_founding_golden.json")
+	if err != nil {
+		t.Fatalf("the client's golden file is unreadable: %v", err)
+	}
+	var golden struct {
+		Base int `json:"messaging_pool_base"`
+	}
+	if err := json.Unmarshal(raw, &golden); err != nil {
+		t.Fatal(err)
+	}
+	base, err := PoolBase("messaging-keys")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if golden.Base != base {
+		t.Errorf("legacy_founding_golden.json says the messaging-keys pool starts at %d, PoolBase says %d", golden.Base, base)
 	}
 }
