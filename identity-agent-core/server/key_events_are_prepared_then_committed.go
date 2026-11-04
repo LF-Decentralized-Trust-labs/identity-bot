@@ -293,12 +293,25 @@ func (s *CoreServer) commitOwnEvent(w http.ResponseWriter, c eventCommitter, nam
 	if s.refuseAnUnheldKeySet(w, raw, keysFor) {
 		return nil, false
 	}
+	res, err := s.commitAndNote(c, name, raw, ev, sigs)
+	if err != nil {
+		writeEventError(w, err)
+		return nil, false
+	}
+	return res, true
+}
+
+// commitAndNote is the commit and what follows an added event, without the
+// answer: the engine adds the event after it is kept, then the keys it anchors
+// are filed and the witnesses brought up to date.
+func (s *CoreServer) commitAndNote(c eventCommitter, name string, raw []byte, ev *keri.Event,
+	sigs []string) (*keriengine.CommitResult, error) {
+
 	res, err := c.Commit(name, raw, sigs, func(k drivers.KELKeep) error {
 		return s.keepCommittedEvent(k, ev)
 	})
 	if err != nil {
-		writeEventError(w, err)
-		return nil, false
+		return nil, err
 	}
 	if res.Status == "recorded" {
 		if err := s.fileCommittedKeySet(raw, ev.Identifier); err != nil {
@@ -306,7 +319,7 @@ func (s *CoreServer) commitOwnEvent(w http.ResponseWriter, c eventCommitter, nam
 		}
 		s.afterCommit(ev)
 	}
-	return res, true
+	return res, nil
 }
 
 // ownerNamedIn is the owner a founding's first seal names, if it names one.

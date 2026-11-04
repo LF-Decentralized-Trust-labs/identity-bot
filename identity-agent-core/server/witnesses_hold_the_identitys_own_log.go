@@ -116,7 +116,13 @@ func (s *CoreServer) witnessOwnLog() {
 	if err != nil || owner == nil {
 		return
 	}
-	if witnesses, toad, err := keeper.WitnessConfig(owner.AID); err == nil && len(witnesses) > 0 {
-		s.witnessRecord(owner.AID, "", witnesses, toad)
+	s.witnessLogOf(keeper, owner.AID)
+}
+
+// witnessLogOf brings the witnesses of aid up to date with its log: the
+// identity kept here, or a root it was just moved on from.
+func (s *CoreServer) witnessLogOf(keeper drivers.KELKeeper, aid string) {
+	if witnesses, toad, err := keeper.WitnessConfig(aid); err == nil && len(witnesses) > 0 {
+		s.witnessRecord(aid, "", witnesses, toad)
 	}
 }
