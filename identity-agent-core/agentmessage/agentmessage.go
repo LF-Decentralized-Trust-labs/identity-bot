@@ -69,6 +69,47 @@ func AskArgs(to, text string) []byte {
 	return b
 }
 
+// CapabilityMessageOpen names the grant's limit on how often an AI agent opens
+// a conversation. It is a key in the grant's resource constraints, read only
+// by CheckOpeningGrant: {"agent.message.open": {"per_hour": 6}}. It is not a
+// capability an AI agent is granted, so it never reaches
+// permission.CheckResourceConstraints.
+const CapabilityMessageOpen = "agent.message.open"
+
+// CheckOpeningGrant refuses a grant that does not state, outright, whom an AI
+// agent may open a conversation toward and how often (ADR-047, Amendment 3).
+// permission.CheckResourceConstraints reads a missing constraint as no limit,
+// which is right for an ask inside a conversation but not for opening one, so
+// an opening fails closed: the grant's constraint on "to" must exist and name
+// the AI agent asked, and its openings per hour must be a stated, positive
+// count. The Identity Agent admitting an opening and a verifier checking one
+// later both call it.
+// MaxOpeningsPerHour is the most conversations a grant may let its AI agent
+// open in an hour: a ceiling, so a grant cannot name a count that means none.
+const MaxOpeningsPerHour = 60
+
+func CheckOpeningGrant(limits map[string]interface{}, to string) error {
+	send, _ := limits[CapabilityMessageAgent].(map[string]interface{})
+	names, _ := send["to"].([]interface{})
+	if len(names) == 0 {
+		return fmt.Errorf("the grant does not name whom its AI agent may open a conversation toward: an opening needs an explicit %q constraint on %s", "to", CapabilityMessageAgent)
+	}
+	named := false
+	for _, n := range names {
+		if s, ok := n.(string); ok && s == to {
+			named = true
+		}
+	}
+	if !named {
+		return fmt.Errorf("the grant does not let its AI agent open a conversation toward %s", to)
+	}
+	open, _ := limits[CapabilityMessageOpen].(map[string]interface{})
+	if n, ok := open["per_hour"].(float64); !ok || n < 1 || n > MaxOpeningsPerHour || n != float64(int64(n)) {
+		return fmt.Errorf("the grant states no count of conversations its AI agent may open per hour: an opening needs a whole %q from 1 to %d under %s", "per_hour", MaxOpeningsPerHour, CapabilityMessageOpen)
+	}
+	return nil
+}
+
 // PersonPrefix marks a party that is a person rather than an AI agent: the
 // identifier after it is the person's identity on the organisation's roster.
 const PersonPrefix = "person:"
@@ -128,7 +169,8 @@ func ValidTier(t string) bool {
 
 // Statement is what a body signs when its AI agent speaks.
 type Statement struct {
-	Conversation string `json:"conversation"`
+	// Conversation is empty only on an ask that opens one (see Opens).
+	Conversation string `json:"conversation,omitempty"`
 	Kind         string `json:"kind"`
 	// From is the AI agent speaking; To is the AI agent or person addressed.
 	From string `json:"from"`
@@ -152,6 +194,12 @@ type Statement struct {
 	// between can raise or lower it.
 	Tier string `json:"tier,omitempty"`
 }
+
+// Opens says whether this is an ask that acts on no message: an AI agent
+// opening a conversation toward another AI agent its grant names. Such a
+// statement signs an empty conversation line, since the Identity Agent
+// chooses the identifier.
+func (s Statement) Opens() bool { return s.Kind == KindAsk && s.InReplyTo == "" }
 
 // Bytes is the string a body signs. One field per line, in a fixed order, so
 // three implementations produce it identically without agreeing on a JSON
@@ -198,9 +246,15 @@ func HashBody(body []byte) string { return iacrypto.Blake3QB64Must(body) }
 // verified: a newline in a field would let one statement be read as another.
 func (s Statement) Check() error {
 	fields := map[string]string{
-		"conversation": s.Conversation, "kind": s.Kind, "from": s.From, "to": s.To,
+		"kind": s.Kind, "from": s.From, "to": s.To,
 		"body_hash": s.BodyHash, "host": s.Host, "host_nonce": s.HostNonce,
 		"host_time": s.HostTime, "body_credential": s.BodyCredential,
+	}
+	// An ask that acts on no message opens a conversation, and the Identity
+	// Agent chooses its identifier, so it names none (ADR-047, Amendment 3).
+	// Any other statement names the conversation it is in.
+	if !s.Opens() {
+		fields["conversation"] = s.Conversation
 	}
 	for name, v := range fields {
 		if v == "" {
@@ -227,10 +281,14 @@ func (s Statement) Check() error {
 			return fmt.Errorf("only an ask carries a tier, not a %s", s.Kind)
 		}
 	}
-	// A body only ever speaks about a message it was given: it cannot open a
-	// conversation, so even an ask names the message the AI agent was handling.
-	if s.InReplyTo == "" {
+	// A body speaks about a message it was given. The one exception is an ask
+	// that opens a conversation, which names no message and no conversation:
+	// the Identity Agent decides whether its grant lets it, and what it opens.
+	if s.InReplyTo == "" && s.Kind != KindAsk {
 		return fmt.Errorf("a %s from a body must name the message it acts on", s.Kind)
+	}
+	if s.InReplyTo == "" && s.Conversation != "" {
+		return errors.New("an ask that acts on no message opens a conversation, so it cannot name one")
 	}
 	if agentbody.CheckNonce(s.HostNonce) != nil {
 		return fmt.Errorf("the message needs a nonce of at least %d characters", agentbody.MinNonce)
@@ -414,7 +472,13 @@ func (r Record) CheckSenderProof() error {
 		return errors.New("a message carries one sender's proof, not two")
 	case r.Statement != nil:
 		st := *r.Statement
-		if st.Conversation != r.Conversation || st.Kind != r.Kind || st.From != r.From ||
+		// A statement that opens a conversation names none: the record gives
+		// the identifier the Identity Agent chose, as for a person's request.
+		// It opens only as the first entry, and it is the opener's own.
+		if st.Opens() && (r.Seq != 1 || r.OpenedBy != r.From || r.Depth != 1) {
+			return errors.New("an ask that acts on no message is the first entry of a conversation its sender opened")
+		}
+		if st.Conversation != r.Conversation && !st.Opens() || st.Kind != r.Kind || st.From != r.From ||
 			st.To != r.To || st.InReplyTo != r.InReplyTo || st.BodyHash != r.BodyHash ||
 			st.BodyCredential != r.BodyCredential {
 			return errors.New("the record does not say what its body signed")

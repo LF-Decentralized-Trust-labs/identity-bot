@@ -261,7 +261,7 @@ def check_body(v):
 def statement_bytes(s):
     b = s.get("brain", {})
     tier = s.get("tier", "")
-    return lines("IA-AGENT-MSG-V2" if tier else "IA-AGENT-MSG-V1", s["conversation"], s["kind"], s["from"], s["to"], s.get("in_reply_to", ""),
+    return lines("IA-AGENT-MSG-V2" if tier else "IA-AGENT-MSG-V1", s.get("conversation", ""), s["kind"], s["from"], s["to"], s.get("in_reply_to", ""),
                  s["body_hash"], b.get("provider", ""), b.get("model", ""), b.get("session", ""),
                  b.get("run_hash", ""), s["host"], s["host_nonce"], s["host_time"], s["body_credential"],
                  *([tier] if tier else []))
@@ -269,13 +269,18 @@ def statement_bytes(s):
 
 def statement_refused(s):
 
-    req = ("conversation", "kind", "from", "to", "body_hash", "host", "host_nonce", "host_time", "body_credential")
+    req = ("kind", "from", "to", "body_hash", "host", "host_nonce", "host_time", "body_credential")
     if any(not s.get(x) for x in req):
         return True
-    vals = [s.get(x, "") for x in req + ("in_reply_to", "tier")] + list(s.get("brain", {}).values())
+    # An ask that acts on no message opens a conversation and names none; any
+    # other statement names its conversation, and a message it acts on.
+    opens = s["kind"] == "ask" and not s.get("in_reply_to")
+    if opens == bool(s.get("conversation")):
+        return True
+    vals = [s.get(x, "") for x in req + ("conversation", "in_reply_to", "tier")] + list(s.get("brain", {}).values())
     if any("\n" in x or "\r" in x for x in vals):
         return True
-    if s["kind"] not in ("ask", "reply", "receipt", "failure", "progress") or not s.get("in_reply_to"):
+    if s["kind"] not in ("ask", "reply", "receipt", "failure", "progress") or not (s.get("in_reply_to") or opens):
         return True
     if s.get("tier") and (s["tier"] not in ("quick", "standard", "deep") or s["kind"] != "ask"):
         return True
@@ -286,6 +291,24 @@ def statement_refused(s):
     except ValueError:
         return True
     return False
+
+
+MAX_OPENINGS_PER_HOUR = 60
+
+
+def opening_allowed(constraints, to):
+    """An AI agent opens a conversation only under a grant that names, outright,
+    whom it may open toward and how many conversations it may open per hour:
+    a missing constraint is not leave to open toward anyone."""
+    send = constraints.get("agent.message.send")
+    opn = constraints.get("agent.message.open")
+    if not isinstance(send, dict) or not isinstance(opn, dict):
+        return False
+    names = send.get("to")
+    if not isinstance(names, list) or not any(isinstance(x, str) and x == to for x in names):
+        return False
+    n = opn.get("per_hour")
+    return isinstance(n, (int, float)) and not isinstance(n, bool) and 1 <= n <= MAX_OPENINGS_PER_HOUR and n == int(n)
 
 
 def jwm_of(env):
@@ -303,6 +326,11 @@ def check_message(v):
     for r in v["refused_statements"]:
         if not statement_refused(r["statement"]):
             fail(r["name"] + " is not refused by the prose's rules")
+
+    if not v.get("opening_grants"):
+        fail("there are no vectors for the grants an opening needs")
+    for g in v.get("opening_grants", []):
+        same(g["name"], opening_allowed(g["constraints"], g["to"]), g["allowed"])
 
     # A reader that does not know tiers rebuilds the V1 string from a tiered
     # ask, which is not what was signed: the signature must fail on it, and
@@ -355,7 +383,7 @@ def check_message(v):
         jwm = dict(jwm_of(r["envelope"]))
         if jwm["id"] == dict_deep(jwm["body"])["message_id"]:
             fail(r["name"] + " is not refused by the prose's rules")
-    return len(v["statements"]) + len(v.get("tier_stripped", [])) + len(v["conversation"]) + check_person(v["person"])
+    return len(v["statements"]) + len(v.get("opening_grants", [])) + len(v.get("tier_stripped", [])) + len(v["conversation"]) + check_person(v["person"])
 
 
 def check_controller_proof(where, proof, request, rec):

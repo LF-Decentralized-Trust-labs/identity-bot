@@ -9,10 +9,9 @@
       "type": "string"
     },
     "statement": {
-      "description": "A body's statement. Refused unless every required field is non-empty, no field holds a carriage return or newline, kind is one of the four, tier if not empty is quick, standard or deep and the kind is ask, in_reply_to is present (a body only ever speaks about a message it was given, so even an ask names the message it was handling), host_nonce is at least 16 characters and host_time is RFC 3339.",
+      "description": "A body's statement. Refused unless every required field is non-empty, no field holds a carriage return or newline, kind is one of the four, tier if not empty is quick, standard or deep and the kind is ask, in_reply_to is present (a body speaks about a message it was given, so even an ask inside a conversation names the message it was handling; the one exception is an ask that opens a conversation, which names no message and no conversation, and every other statement names its conversation), host_nonce is at least 16 characters and host_time is RFC 3339.",
       "type": "object",
       "required": [
-        "conversation",
         "kind",
         "from",
         "to",
@@ -27,7 +26,7 @@
       "properties": {
         "conversation": {
           "type": "string",
-          "minLength": 1
+          "description": "the conversation this is in; empty, and signed as an empty line, only on an ask that acts on no message, which opens a conversation whose identifier the Identity Agent chooses. An opening is admitted only under a grant whose resource constraints state, outright, the AI agents it may open toward (a non-empty list under agent.message.send, key to; a missing one is a refusal, not leave to open toward anyone) and a positive whole number of openings per hour (agent.message.open, key per_hour); the opening's host_nonce is remembered by the Identity Agent so one signed opening opens one conversation (ADR-047, Amendment 3)"
         },
         "kind": {
           "$ref": "#/$defs/kind"
@@ -42,7 +41,7 @@
         },
         "in_reply_to": {
           "type": "string",
-          "description": "the message this one acts on; required by the check although the field may be left out of the JSON"
+          "description": "the message this one acts on; required by the check although the field may be left out of the JSON, except on an ask that opens a conversation, which acts on none"
         },
         "body_hash": {
           "$ref": "#/$defs/digest"
@@ -277,7 +276,7 @@
         "depth": {
           "type": "integer",
           "minimum": 0,
-          "description": "how far down a chain of asks: a person's message is 0"
+          "description": "how far down a chain of asks: a person's message is 0, and an AI agent's ask that opens a conversation is 1"
         },
         "statement": {
           "$ref": "#/$defs/statement"

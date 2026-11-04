@@ -5,6 +5,28 @@
   "verkey": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
   "statements": [
     {
+      "name": "an ask that opens a conversation",
+      "statement": {
+        "kind": "ask",
+        "from": "EAGENT_A",
+        "to": "EAGENT_B",
+        "body_hash": "ELHr2qCFnpJRfkuwTAEWh_UZ-O1efUKtBngH1tNRf-Nx",
+        "brain": {
+          "provider": "example-harness",
+          "model": "example-model",
+          "session": "s-1",
+          "run_hash": "Erun"
+        },
+        "host": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+        "host_nonce": "nonce-open-00000001",
+        "host_time": "2026-10-20T11:59:20Z",
+        "body_credential": "EBODYCRED"
+      },
+      "body": "Please review the design in the repository.",
+      "signed": "IA-AGENT-MSG-V1\n\nask\nEAGENT_A\nEAGENT_B\n\nELHr2qCFnpJRfkuwTAEWh_UZ-O1efUKtBngH1tNRf-Nx\nexample-harness\nexample-model\ns-1\nErun\nBHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk\nnonce-open-00000001\n2026-10-20T11:59:20Z\nEBODYCRED",
+      "signature": "0BAPChWcsIei2Mk3MfEfDFG79qfBqd-qhzdpYLDBdsvnPZKge2zDgu1wzDJiijZUzf9mwiJkMThLPfHD6E0zH0EG"
+    },
+    {
       "name": "an ask with a tier",
       "statement": {
         "conversation": "c_vector",
@@ -185,12 +207,51 @@
       }
     },
     {
-      "name": "an ask that names no message it acts on",
+      "name": "a reply that names no message it acts on",
+      "statement": {
+        "conversation": "c_vector",
+        "kind": "reply",
+        "from": "EAGENT_B",
+        "to": "EAGENT_A",
+        "body_hash": "EHASH",
+        "brain": {
+          "provider": "example-harness",
+          "model": "example-model",
+          "session": "s-1",
+          "run_hash": "Erun"
+        },
+        "host": "BHOST",
+        "host_nonce": "nonce-0123456789abcdef",
+        "host_time": "2026-10-20T12:00:00Z",
+        "body_credential": "EBODYCRED"
+      }
+    },
+    {
+      "name": "an ask that acts on no message yet names a conversation",
       "statement": {
         "conversation": "c_vector",
         "kind": "ask",
         "from": "EAGENT_A",
         "to": "EAGENT_B",
+        "body_hash": "EHASH",
+        "brain": {
+          "provider": "example-harness",
+          "model": "example-model",
+          "session": "s-0"
+        },
+        "host": "BHOST",
+        "host_nonce": "nonce-fedcba9876543210",
+        "host_time": "2026-10-20T11:59:30Z",
+        "body_credential": "EBODYCRED"
+      }
+    },
+    {
+      "name": "an ask that acts on a message yet names no conversation",
+      "statement": {
+        "kind": "ask",
+        "from": "EAGENT_A",
+        "to": "EAGENT_B",
+        "in_reply_to": "m_person",
         "body_hash": "EHASH",
         "brain": {
           "provider": "example-harness",
@@ -265,6 +326,183 @@
         "host_time": "20 October 2026",
         "body_credential": "EBODYCRED"
       }
+    }
+  ],
+  "opening_grants": [
+    {
+      "name": "a grant that names whom it opens toward and how often",
+      "constraints": {
+        "agent.message.open": {
+          "per_hour": 6
+        },
+        "agent.message.send": {
+          "to": [
+            "EAGENT_B"
+          ]
+        }
+      },
+      "to": "EAGENT_B",
+      "allowed": true
+    },
+    {
+      "name": "a grant with no constraints at all",
+      "constraints": {},
+      "to": "EAGENT_B",
+      "allowed": false
+    },
+    {
+      "name": "a grant with no constraint on to",
+      "constraints": {
+        "agent.message.open": {
+          "per_hour": 6
+        },
+        "agent.message.send": {
+          "text": [
+            "hello"
+          ]
+        }
+      },
+      "to": "EAGENT_B",
+      "allowed": false
+    },
+    {
+      "name": "a grant with an empty list for to",
+      "constraints": {
+        "agent.message.open": {
+          "per_hour": 6
+        },
+        "agent.message.send": {
+          "to": []
+        }
+      },
+      "to": "EAGENT_B",
+      "allowed": false
+    },
+    {
+      "name": "a grant that names another AI agent",
+      "constraints": {
+        "agent.message.open": {
+          "per_hour": 6
+        },
+        "agent.message.send": {
+          "to": [
+            "EAGENT_B"
+          ]
+        }
+      },
+      "to": "EAGENT_C",
+      "allowed": false
+    },
+    {
+      "name": "a grant that states no count of openings per hour",
+      "constraints": {
+        "agent.message.send": {
+          "to": [
+            "EAGENT_B"
+          ]
+        }
+      },
+      "to": "EAGENT_B",
+      "allowed": false
+    },
+    {
+      "name": "a grant whose count of openings per hour is zero",
+      "constraints": {
+        "agent.message.open": {
+          "per_hour": 0
+        },
+        "agent.message.send": {
+          "to": [
+            "EAGENT_B"
+          ]
+        }
+      },
+      "to": "EAGENT_B",
+      "allowed": false
+    },
+    {
+      "name": "a grant whose count of openings per hour is not a whole number",
+      "constraints": {
+        "agent.message.open": {
+          "per_hour": 1.5
+        },
+        "agent.message.send": {
+          "to": [
+            "EAGENT_B"
+          ]
+        }
+      },
+      "to": "EAGENT_B",
+      "allowed": false
+    },
+    {
+      "name": "a grant whose to is a string, not a list",
+      "constraints": {
+        "agent.message.open": {
+          "per_hour": 6
+        },
+        "agent.message.send": {
+          "to": "xEAGENT_Bx"
+        }
+      },
+      "to": "EAGENT_B",
+      "allowed": false
+    },
+    {
+      "name": "a grant whose to is a wildcard",
+      "constraints": {
+        "agent.message.open": {
+          "per_hour": 6
+        },
+        "agent.message.send": {
+          "to": [
+            "*"
+          ]
+        }
+      },
+      "to": "EAGENT_B",
+      "allowed": false
+    },
+    {
+      "name": "a grant whose agent.message.send is not an object",
+      "constraints": {
+        "agent.message.open": {
+          "per_hour": 6
+        },
+        "agent.message.send": "EAGENT_B"
+      },
+      "to": "EAGENT_B",
+      "allowed": false
+    },
+    {
+      "name": "a grant with a count above the ceiling",
+      "constraints": {
+        "agent.message.open": {
+          "per_hour": 61
+        },
+        "agent.message.send": {
+          "to": [
+            "EAGENT_B"
+          ]
+        }
+      },
+      "to": "EAGENT_B",
+      "allowed": false
+    },
+    {
+      "name": "a grant at the ceiling",
+      "constraints": {
+        "agent.message.open": {
+          "per_hour": 60
+        },
+        "agent.message.send": {
+          "to": [
+            "EAGENT_B"
+          ]
+        }
+      },
+      "to": "EAGENT_B",
+      "allowed": true
     }
   ],
   "tier_stripped": [

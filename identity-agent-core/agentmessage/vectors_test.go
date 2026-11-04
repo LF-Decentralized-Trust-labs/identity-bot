@@ -59,6 +59,14 @@ func TestThePublishedMessageVectorsHold(t *testing.T) {
 			t.Fatalf("%s was accepted; it must be refused", r.Name)
 		}
 	}
+	if len(set.OpeningGrants) == 0 {
+		t.Fatal("the vector file has no opening grants")
+	}
+	for _, g := range set.OpeningGrants {
+		if err := CheckOpeningGrant(g.Constraints, g.To); (err == nil) != g.Allowed {
+			t.Fatalf("%s: allowed %v, but the check said %v", g.Name, g.Allowed, err)
+		}
+	}
 	for _, s := range set.TierStripped {
 		if s.Statement.Tier != "" || s.TierRemoved == "" {
 			t.Fatalf("%s: the statement must have no tier and name the one removed", s.Name)
@@ -324,7 +332,10 @@ func writeMessageVectors(t *testing.T) {
 		Brain: brain, HostNonce: "nonce-progress-000001", HostTime: "2026-10-20T11:59:50Z", BodyCredential: "EBODYCRED"}
 	deepAsk := ask
 	deepAsk.Tier, deepAsk.HostNonce, deepAsk.HostTime = TierDeep, "nonce-deep-0000001", "2026-10-20T11:59:40Z"
+	opening := Statement{Kind: KindAsk, From: "EAGENT_A", To: "EAGENT_B", Brain: brain,
+		HostNonce: "nonce-open-00000001", HostTime: "2026-10-20T11:59:20Z", BodyCredential: "EBODYCRED"}
 	set.Statements = []stmt{
+		{Name: "an ask that opens a conversation", Statement: opening, Body: "Please review the design in the repository."},
 		{Name: "an ask with a tier", Statement: deepAsk, Body: "Review this design for races."},
 		{Name: "a reply", Statement: reply, Body: "I run macOS 26.1 on a MacBook Pro."},
 		{Name: "an ask", Statement: ask, Body: "Which operating system are you on?"},
@@ -338,8 +349,12 @@ func writeMessageVectors(t *testing.T) {
 	withHost := func(s Statement) Statement { s.Host, s.BodyHash = "BHOST", "EHASH"; return s }
 	lineBreak := withHost(reply)
 	lineBreak.To = "EAGENT_A\nEAGENT_C"
-	noTarget := withHost(ask)
+	noTarget := withHost(reply)
 	noTarget.InReplyTo = ""
+	opensAndNames := withHost(ask)
+	opensAndNames.InReplyTo = ""
+	namesNoConversation := withHost(ask)
+	namesNoConversation.Conversation = ""
 	otherKind := withHost(reply)
 	otherKind.Kind = "order"
 	shortNonce := withHost(reply)
@@ -354,10 +369,30 @@ func writeMessageVectors(t *testing.T) {
 		{"a tier that is not quick, standard or deep", unknownTier},
 		{"a tier on a reply", tierOnReply},
 		{"a line break in a field", lineBreak},
-		{"an ask that names no message it acts on", noTarget},
+		{"a reply that names no message it acts on", noTarget},
+		{"an ask that acts on no message yet names a conversation", opensAndNames},
+		{"an ask that acts on a message yet names no conversation", namesNoConversation},
 		{"an unknown kind", otherKind},
 		{"a nonce of 15 characters", shortNonce},
 		{"a time that is not RFC 3339", badTime},
+	}
+
+	toB := map[string]interface{}{"to": []string{"EAGENT_B"}}
+	perHour := map[string]interface{}{"per_hour": 6}
+	set.OpeningGrants = []struct {
+		Name        string                 `json:"name"`
+		Constraints map[string]interface{} `json:"constraints"`
+		To          string                 `json:"to"`
+		Allowed     bool                   `json:"allowed"`
+	}{
+		{"a grant that names whom it opens toward and how often", map[string]interface{}{CapabilityMessageAgent: toB, CapabilityMessageOpen: perHour}, "EAGENT_B", true},
+		{"a grant with no constraints at all", map[string]interface{}{}, "EAGENT_B", false},
+		{"a grant with no constraint on to", map[string]interface{}{CapabilityMessageAgent: map[string]interface{}{"text": []string{"hello"}}, CapabilityMessageOpen: perHour}, "EAGENT_B", false},
+		{"a grant with an empty list for to", map[string]interface{}{CapabilityMessageAgent: map[string]interface{}{"to": []string{}}, CapabilityMessageOpen: perHour}, "EAGENT_B", false},
+		{"a grant that names another AI agent", map[string]interface{}{CapabilityMessageAgent: toB, CapabilityMessageOpen: perHour}, "EAGENT_C", false},
+		{"a grant that states no count of openings per hour", map[string]interface{}{CapabilityMessageAgent: toB}, "EAGENT_B", false},
+		{"a grant whose count of openings per hour is zero", map[string]interface{}{CapabilityMessageAgent: toB, CapabilityMessageOpen: map[string]interface{}{"per_hour": 0}}, "EAGENT_B", false},
+		{"a grant whose count of openings per hour is not a whole number", map[string]interface{}{CapabilityMessageAgent: toB, CapabilityMessageOpen: map[string]interface{}{"per_hour": 1.5}}, "EAGENT_B", false},
 	}
 
 	stripped := ask
