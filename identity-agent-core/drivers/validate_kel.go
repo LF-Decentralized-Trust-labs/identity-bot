@@ -287,6 +287,15 @@ func readControllerSignature(sig string) (controllerSignature, error) {
 	return controllerSignature{IndexedSignature: parsed, QB64: sig}, nil
 }
 
+// DecodeRawBytes is the one decoder for the base64 form of an event's bytes
+// (raw_bytes_b64). A verdict covers exactly what this returns, so everything
+// that reads those bytes decodes them here rather than with its own idea of
+// base64: a spelling accepted elsewhere but not here is a record read as
+// something the verdict never covered.
+func DecodeRawBytes(b64 string) ([]byte, error) {
+	return base64.StdEncoding.DecodeString(b64)
+}
+
 // DecodeRawEvents turns the base64 wire form into bytes, reporting which entry
 // failed rather than which index of a slice.
 func DecodeRawEvents(rawB64 []string) ([][]byte, error) {
@@ -296,7 +305,7 @@ func DecodeRawEvents(rawB64 []string) ([][]byte, error) {
 			return nil, fmt.Errorf("event %d has no canonical bytes, so the log cannot be "+
 				"verified; it can only be read", i)
 		}
-		raw, err := base64.StdEncoding.DecodeString(b)
+		raw, err := DecodeRawBytes(b)
 		if err != nil {
 			return nil, fmt.Errorf("event %d is not readable base64: %w", i, err)
 		}
@@ -351,7 +360,7 @@ func ValidateKELInputFromRecords(aid string, records []map[string]interface{}) (
 		if rawB64 == "" {
 			return ValidateKELInput{AID: aid}, false
 		}
-		raw, err := base64.StdEncoding.DecodeString(rawB64)
+		raw, err := DecodeRawBytes(rawB64)
 		if err != nil {
 			return ValidateKELInput{AID: aid}, false
 		}

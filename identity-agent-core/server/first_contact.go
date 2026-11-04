@@ -11,6 +11,7 @@ import (
 
 	"identity-agent-core/buildmode"
 	"identity-agent-core/didcomm"
+	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/store"
 )
@@ -115,7 +116,16 @@ func (s *CoreServer) identifyStranger(claimedAID string, kel []map[string]interf
 	// The identifier has to be derived from the history presented, not merely
 	// mentioned by it. ValidateKEL binds the two — an inception whose digest is
 	// not the identifier is refused — so reaching here means the claim holds.
-	icp, err := eventFromKELEntry(kel[0])
+	//
+	// And it is read from the bytes the verdict covered, not from event_json or
+	// the parsed fields beside them: those are text the stranger wrote, and a
+	// stranger can present somebody else's genuine bytes beside an event naming
+	// their own keys.
+	fromBytes, ok := drivers.RecordsFromVerifiedBytes(kel)
+	if !ok {
+		return nil, fmt.Errorf("the presented key history does not carry the bytes it would be checked by")
+	}
+	icp, err := eventFromKELEntry(fromBytes[0])
 	if err != nil {
 		return nil, "", err
 	}

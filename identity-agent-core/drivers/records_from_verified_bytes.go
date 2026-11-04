@@ -1,7 +1,6 @@
 package drivers
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -28,7 +27,7 @@ func RecordsFromVerifiedBytes(records []map[string]interface{}) ([]map[string]in
 	for _, rec := range records {
 		// Decoded exactly as the verdict decodes them.
 		rawB64, _ := rec["raw_bytes_b64"].(string)
-		raw, err := base64.StdEncoding.DecodeString(rawB64)
+		raw, err := DecodeRawBytes(rawB64)
 		if err != nil || len(raw) == 0 {
 			return nil, false
 		}
