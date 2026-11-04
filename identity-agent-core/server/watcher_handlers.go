@@ -37,7 +37,19 @@ func newIPRateLimiter(limit int, window time.Duration) *ipRateLimiter {
 	return &ipRateLimiter{hits: make(map[string][]time.Time), limit: limit, window: window}
 }
 
+// limiterKey is what a caller is counted as. An IPv6 customer holds a whole /64
+// (2^64 addresses), so keying by full address would let one caller fill the
+// table with throwaway addresses and lock newcomers out; they are one caller.
+func limiterKey(ip string) string {
+	parsed := net.ParseIP(ip)
+	if parsed == nil || parsed.To4() != nil {
+		return ip
+	}
+	return parsed.Mask(net.CIDRMask(64, 128)).String() + "/64"
+}
+
 func (r *ipRateLimiter) allow(ip string) bool {
+	ip = limiterKey(ip)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := time.Now()

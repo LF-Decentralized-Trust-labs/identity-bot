@@ -241,13 +241,16 @@ var publicRoutes = map[string]string{
 	// Safe to reach because nothing here is trusted on who sent it. The event
 	// is verified against the controller's own signature and the key log before
 	// it is stored (ReceiveEvent), and a witness that is not witnessing that
-	// identity refuses it. The reads return a public, self-verifying key log,
-	// the same data served at GET /{aid}/kel; the tip is signed with the
-	// witness's key over the asker's nonce.
+	// identity refuses it. The reads are answered from what is held only to the
+	// identity itself or the one it is delegated from, proven by a signature
+	// (witness.MayRead); everybody else gets the answer for a log not held, so
+	// the routes cannot be used to learn who this agent witnesses. That is not
+	// the same data as GET /{aid}/kel: a root identity is held here and is never
+	// published there. All four share one bounded rate limiter.
 	"POST /api/witness/event":                      "witnessing protocol — a controller sends a signed event, verified before it is stored",
-	"GET /api/witness/kel/{signer_aid}":            "the key log this witness holds — public and self-verifying",
-	"GET /api/witness/kel/{signer_aid}/tip":        "how far this witness holds an identity's key log, signed with a nonce",
-	"GET /api/witness/kel/{signer_aid}/event/{sn}": "one event of a key log this witness holds — public and self-verifying",
+	"GET /api/witness/kel/{signer_aid}":            "the key log this witness holds, to the identity itself or its delegator, signed — anybody else is told it is not held",
+	"GET /api/witness/kel/{signer_aid}/tip":        "how far this witness holds an identity's key log, signed with a nonce — to anybody else, as for a log not held",
+	"GET /api/witness/kel/{signer_aid}/event/{sn}": "one event of a key log this witness holds, to the identity itself or its delegator, signed — anybody else is told it is not held",
 	// Mounted on the root router under /public/ and never declared, so every
 	// peer cross-check got 403, which the caller records as the peer being
 	// "unavailable" — the whole peer layer degraded silently.

@@ -125,6 +125,7 @@ func (s *Service) defaultFetchEvent(ctx context.Context, url string) (SignedEven
 	if err != nil {
 		return SignedEvent{}, err
 	}
+	s.SignRead(req)
 	resp, err := s.HTTPClient.Do(req)
 	if err != nil {
 		return SignedEvent{}, err
@@ -183,6 +184,7 @@ func (s *Service) defaultFetchTip(ctx context.Context, url string) (TipAnswer, e
 	if err != nil {
 		return TipAnswer{}, err
 	}
+	s.SignRead(req)
 	resp, err := s.HTTPClient.Do(req)
 	if err != nil {
 		return TipAnswer{}, err
@@ -222,12 +224,16 @@ func TipStatement(aid, nonce string, sn int, said string) string {
 }
 
 // KelTip is this witness's signed answer for how far it holds aid's key log.
-func (s *Service) KelTip(aid, nonce string) (TipAnswer, error) {
+// When the asker may not read it (see MayRead) the answer is the one for a log
+// that is not held, signed all the same, so the two cannot be told apart.
+func (s *Service) KelTip(aid, nonce string, mayRead bool) (TipAnswer, error) {
 	if s.SignReceipt == nil {
 		return TipAnswer{}, fmt.Errorf("this agent has no witnessing key")
 	}
 	out := TipAnswer{AID: aid, Nonce: nonce, SN: -1}
-	if kel, err := s.Store.GetKelEvents(aid); err == nil && len(kel) > 0 {
+	if !mayRead {
+		// answered as if nothing were held
+	} else if kel, err := s.Store.GetKelEvents(aid); err == nil && len(kel) > 0 {
 		last := kel[len(kel)-1]
 		out.SN, out.SAID = last.SequenceNum, last.EventSAID
 	}

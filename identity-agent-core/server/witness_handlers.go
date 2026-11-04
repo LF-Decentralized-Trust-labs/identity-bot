@@ -44,7 +44,12 @@ func (s *CoreServer) handleWitnessEvent(w http.ResponseWriter, r *http.Request) 
 		EventB64      string `json:"event_b64"`
 		CesrSignature string `json:"cesr_signature"`
 	}
-	// Open to peers, so bounded: an event is a few KB, base64 of it a little more.
+	// Open to peers, so bounded: an event is a few KB, base64 of it a little more,
+	// and each one costs a validation of the whole key log.
+	if !s.witnessReadLimiter().allow(clientIP(r)) {
+		writeError(w, http.StatusTooManyRequests, "Rate limited", "")
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid body", err.Error())
@@ -89,11 +94,28 @@ func (s *CoreServer) handleWitnessEvent(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(result)
 }
 
+// The three reads of a key log below answer from what this witness holds only
+// to the identity itself or the one it is delegated from (witness.MayRead).
+// Anybody else gets exactly the answer for a log not held: these routes are
+// open to peers, and a different answer for a held log would tell a stranger
+// who this agent witnesses. That matters most for a root identity, which is
+// witnessed by the owner's contacts and is never published at /{aid}/kel
+// (errNotPublishable).
+
+// notHeld is the one answer to a read of a log that is not held, or that the
+// asker may not see.
+func notHeld(w http.ResponseWriter) {
+	writeError(w, http.StatusNotFound, "kel not found", "not_found")
+}
+
 func (s *CoreServer) handleWitnessKel(w http.ResponseWriter, r *http.Request) {
 	signerAID := chi.URLParam(r, "signer_aid")
+	if !s.witnessReadAllowed(w, r, signerAID) {
+		return
+	}
 	kel, err := s.WitnessService.GetKelReplica(signerAID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "kel not found", err.Error())
+		notHeld(w)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -111,7 +133,12 @@ func (s *CoreServer) handleWitnessKelTip(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "a nonce is required", "")
 		return
 	}
-	tip, err := s.WitnessService.KelTip(chi.URLParam(r, "signer_aid"), nonce)
+	if !s.witnessReadLimiter().allow(clientIP(r)) {
+		writeError(w, http.StatusTooManyRequests, "Rate limited", "")
+		return
+	}
+	aid := chi.URLParam(r, "signer_aid")
+	tip, err := s.WitnessService.KelTip(aid, nonce, s.WitnessService.MayRead(aid, r))
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "the tip could not be signed", err.Error())
 		return
@@ -331,11 +358,36 @@ func (s *CoreServer) handleWitnessKelEvent(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "a place in the key log is a number", "")
 		return
 	}
-	ev, err := s.WitnessService.EventAt(chi.URLParam(r, "signer_aid"), sn)
+	aid := chi.URLParam(r, "signer_aid")
+	if !s.witnessReadAllowed(w, r, aid) {
+		return
+	}
+	ev, err := s.WitnessService.EventAt(aid, sn)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "not held", err.Error())
+		notHeld(w)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(ev)
+}
+
+// witnessReadAllowed rate limits a read of a key log and answers an asker who
+// may not read it as for a log not held. It reports whether to go on.
+func (s *CoreServer) witnessReadAllowed(w http.ResponseWriter, r *http.Request, aid string) bool {
+	if !s.witnessReadLimiter().allow(clientIP(r)) {
+		writeError(w, http.StatusTooManyRequests, "Rate limited", "")
+		return false
+	}
+	if !s.WitnessService.MayRead(aid, r) {
+		notHeld(w)
+		return false
+	}
+	return true
+}
+
+// witnessReadLimiter is the one bounded limiter every peer-facing witness
+// route that costs work (a validation, a signature, a read) answers to.
+func (s *CoreServer) witnessReadLimiter() *ipRateLimiter {
+	s.witnessLimiterOnce.Do(func() { s.witnessLimiter = newIPRateLimiter(120, time.Minute) })
+	return s.witnessLimiter
 }

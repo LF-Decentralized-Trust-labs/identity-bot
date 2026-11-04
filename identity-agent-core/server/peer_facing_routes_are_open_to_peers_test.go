@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -170,15 +171,13 @@ func TestAPeerDeliversAnEventAndReadsTheLogBackThroughTheFullRouter(t *testing.T
 	if err := bob.takesAt(t, base, c.aid, rot, sig); err != nil {
 		t.Fatalf("a peer's event was refused by the router: %v", err)
 	}
+	// The controller reads its own log back, signed as itself by the key now in force.
 	for _, path := range []string{"/api/witness/kel/" + c.aid, "/api/witness/kel/" + c.aid + "/event/1",
 		"/api/witness/kel/" + c.aid + "/tip?nonce=n"} {
-		resp, err := http.Get(base + path)
-		if err != nil {
-			t.Fatal(err)
-		}
+		resp := c.signedGet(t, base+path, c.aid, c.signers[1], time.Now())
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			t.Errorf("GET %s answered a peer with %d", path, resp.StatusCode)
+			t.Errorf("GET %s answered the controller with %d", path, resp.StatusCode)
 		}
 	}
 }
@@ -194,9 +193,12 @@ func TestOversizedBodiesOnPeerRoutesAreRefused(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		got, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		if resp.StatusCode != http.StatusBadRequest && resp.StatusCode != http.StatusRequestEntityTooLarge {
-			t.Errorf("%s took a 2 MiB body (%d)", path, resp.StatusCode)
+		// A status alone cannot show the cap: a body the handler refuses for
+		// another reason is a 400 too. The cap has its own message.
+		if !strings.Contains(string(got), "too large") {
+			t.Errorf("%s took a 2 MiB body without the cap refusing it (%d: %.120s)", path, resp.StatusCode, got)
 		}
 	}
 }
