@@ -21,7 +21,7 @@ func anOwnersAddress(t *testing.T, s *CoreServer, aid, key string) string {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"aid": aid, "public_key": key, "alias": "owner",
-			"kel": []map[string]interface{}{{"t": "icp", "i": aid}},
+			"kel": withTheBytesItWasVerifiedBy(t, map[string]interface{}{"t": "icp", "s": "0", "i": aid, "d": aid}),
 		})
 	}))
 	t.Cleanup(srv.Close)
@@ -29,8 +29,15 @@ func anOwnersAddress(t *testing.T, s *CoreServer, aid, key string) string {
 }
 
 func theEngineVerifies(s *CoreServer, aid, key string) {
-	s.KeriDriver.(*driverfake.Engine).ValidateKELFunc = func(got string, _ []map[string]interface{}) (*drivers.DriverValidateKELResponse, error) {
+	verdict := func(got string) (*drivers.DriverValidateKELResponse, error) {
 		return &drivers.DriverValidateKELResponse{KelVerified: got == aid, CurrentPublicKey: key}, nil
+	}
+	e := s.KeriDriver.(*driverfake.Engine)
+	e.ValidateKELFunc = func(got string, _ []map[string]interface{}) (*drivers.DriverValidateKELResponse, error) {
+		return verdict(got)
+	}
+	e.ValidateKELBytesFunc = func(in drivers.ValidateKELInput) (*drivers.DriverValidateKELResponse, error) {
+		return verdict(in.AID)
 	}
 }
 
