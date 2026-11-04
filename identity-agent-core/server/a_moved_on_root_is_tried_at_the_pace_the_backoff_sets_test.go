@@ -153,10 +153,14 @@ func TestAnOldRootIsHeldWhenItsThresholdHoldsTheRotation(t *testing.T) {
 		return err == nil && m.Entries[0].WitnessedAt != ""
 	})
 	// Reopen the job as the old root of three witnesses, two of which are gone
-	// and one of which holds the log, with a threshold of one.
+	// and one of which holds the log, with a threshold of one. An entry is open
+	// again only after a restart, which forgets the roots ended in the run
+	// before; without it a pass that read the map before it reopened can drop
+	// this job, and nothing adds back the job of a root that run ended.
 	m := theMapOf(t, b)
 	m.Entries[0].WitnessedAt = ""
 	writeMap(t, b, m)
+	restart(b)
 	b.s.witnessRecord(b.oldAID, "", []string{w.name, "DgoneA", "DgoneB"}, 1)
 	clock.add(time.Hour)
 	eventually(t, "the entry says the old root is witnessed, not given up", func() bool {
