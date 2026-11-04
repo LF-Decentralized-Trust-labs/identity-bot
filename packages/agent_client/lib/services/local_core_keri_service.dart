@@ -9,6 +9,7 @@ import 'keri_service.dart';
 import 'recovering_this_identity.dart';
 import 'secure_key_store.dart';
 import 'signing_an_event.dart';
+import 'the_event_this_device_expects.dart' show sameContent;
 import 'the_events_this_device_asked_for.dart';
 import 'the_identity_this_device_holds.dart';
 import 'the_key_events_this_device_makes.dart';
@@ -96,9 +97,9 @@ class LocalCoreKeriService extends KeriService {
   Future<VerifiedKeyState> _keyState(Uint8List seed) async {
     final h = await _held.read();
     if (h == null || h.establishment == null) {
-      // Recorded first: the key state an event signed late follows is read
-      // from the record, which needs to name the identity.
-      if (h == null) await _held.holds(await _keys.ownIdentifier());
+      // The record is made to name the identity inside finishStrandedEvents,
+      // once the log has been checked to be this phrase's (whenTheLogIsChecked),
+      // and not from an identifier the core gave before that.
       final legacy = await _keys.finishStrandedEvents(seed);
       try {
         return await _readTheCopies(seed);
@@ -167,6 +168,20 @@ class LocalCoreKeriService extends KeriService {
   late final TheKeyInForce _keys = TheKeyInForce(_client, _baseUrl,
       asked: _asked,
       keyMath: keyMath,
+      // The key state an event signed late follows is read from the record,
+      // which needs to name the identity: pinned once its log is checked.
+      whenTheLogIsChecked: (aid) async {
+        final h = await _held.read();
+        if (h == null) await _held.holds(aid);
+      },
+      // What this device knows of its witnesses; none where it holds none.
+      witnessesThisDeviceKnows: () async {
+        final h = await _held.read();
+        if (h == null || (h.witnesses.isEmpty && h.witnessAddresses.isEmpty)) {
+          return null;
+        }
+        return WitnessSet(h.witnesses, h.toad);
+      },
       // What an event signed late follows is read from this device's record or
       // the identity's witnesses, as the key state is for any other event.
       readTheKeyState: (seed) =>
@@ -183,8 +198,6 @@ class LocalCoreKeriService extends KeriService {
     } catch (_) {}
     throw Exception('the core returned no readable event to sign');
   }
-
-  static bool _same(Object? a, Object? b) => jsonEncode(a) == jsonEncode(b);
 
   @override
   AgentEnvironment get environment => AgentEnvironment.desktop;
@@ -732,7 +745,7 @@ class LocalCoreKeriService extends KeriService {
           anchor['i'] != aid ||
           anchor['s'] != signer.state.nextSequenceNumber.toRadixString(16) ||
           acdcSaid.isEmpty ||
-          !_same(anchor['a'], [
+          !sameContent(anchor['a'], [
             {'i': acdcSaid, 's': '0', 'd': acdcSaid}
           ])) {
         throw Exception(
@@ -742,7 +755,10 @@ class LocalCoreKeriService extends KeriService {
       await _asked.added(request,
           aid: aid,
           sequenceNumber: signer.state.nextSequenceNumber,
-          digest: '${anchor['d']}');
+          digest: '${anchor['d']}',
+          // The seal checked just above: if the answer is lost after this, the
+          // event is signed late with exactly this seal and no other.
+          anchors: List<Object?>.from(anchor['a'] as List));
     } catch (_) {
       await _asked.forget(request);
       rethrow;

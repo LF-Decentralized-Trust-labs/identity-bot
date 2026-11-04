@@ -10,6 +10,7 @@ import 'key_math.dart';
 import 'owner_signing_client.dart';
 import 'signing_an_event.dart';
 import 'the_stored_event_this_phrase_would_have_made.dart';
+import 'the_witnesses_of_this_devices_events.dart' show WitnessSet;
 import '../crypto/keys.dart';
 import 'browser_session_client.dart';
 import 'the_agent_this_app_talks_to.dart';
@@ -801,14 +802,21 @@ class CoreService {
   /// this read only the second shape and therefore failed every time, because
   /// founding needs the engine and so only ever meets the first.
   ///
-  /// [nextPublicKey] is the key the founding must commit to, so that what is
-  /// signed is checked to be the founding this device would ask for
-  /// ([theStoredFoundingThisKeyWouldHaveMade], the same [ExpectedEvent] checks
-  /// a new event gets); the key it names is the one [signingSeed] makes. A
-  /// founding that is not that comes back as an
+  /// [seed] is the BIP39 seed of the recovery phrase. What is signed is checked
+  /// to be the founding that phrase makes, by the one builder that
+  /// TheKeyInForce.finishStrandedEvents uses
+  /// ([theStoredFoundingThisPhraseWouldHaveMade]: the plain founding and the two
+  /// shapes the old /api/inception stored, each exactly), so the same founding
+  /// gets the same answer here and there. One that is not that comes back as an
   /// [AStoredEventIsNotTheOneExpected], never signed.
-  Future<void> signTheFoundingOf(String aid, Uint8List signingSeed,
-      {required String nextPublicKey, String? ownerAid}) async {
+  ///
+  /// [ownerAid] must come from this device's own record of who the person named
+  /// as owner, never from a core response (the parsers in this file read an
+  /// `owner_aid` from core JSON: not those). [witnesses] are the witnesses and
+  /// threshold this device knows the identity has, if it knows them; the
+  /// founding must carry exactly those.
+  Future<void> signTheFoundingOf(String aid, Uint8List seed,
+      {String? ownerAid, WitnessSet? witnesses}) async {
     final res = await _client.get(Uri.parse('$baseUrl/api/kel?name=$aid'));
     if (res.statusCode != 200) {
       throw Exception('could not read this identity\'s founding event to sign '
@@ -852,20 +860,21 @@ class CoreService {
           'signing it, and signs nothing');
     }
     final stored = await parseTheStoredEvent(km, rawBytesB64);
-    await signAndRecordEvent(_client, baseUrl,
-        aid: aid,
-        sequenceNumber: 0,
-        rawBytesB64: rawBytesB64,
-        signingSeed: signingSeed,
-        what: 'the founding of this identity',
-        km: km,
-        expected: await theStoredFoundingThisKeyWouldHaveMade(km, stored,
-            key: KeyManager.publicKeyOf(signingSeed),
-            next: nextPublicKey,
-            anchors: [
-              if ((ownerAid ?? '').isNotEmpty)
-                {'i': ownerAid, 's': '0', 'd': ownerAid}
-            ]));
+    final expected = await theStoredFoundingThisPhraseWouldHaveMade(km, seed, stored,
+        ownerAid: ownerAid, witnesses: witnesses);
+    final signingSeed = KeyManager.signingSeed(seed, index: 0);
+    try {
+      await signAndRecordEvent(_client, baseUrl,
+          aid: aid,
+          sequenceNumber: 0,
+          rawBytesB64: rawBytesB64,
+          signingSeed: signingSeed,
+          what: 'the founding of this identity',
+          km: km,
+          expected: expected);
+    } finally {
+      signingSeed.fillRange(0, signingSeed.length, 0);
+    }
   }
 
   /// Whether an event is the founding one, in either shape.

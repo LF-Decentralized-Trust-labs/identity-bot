@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'profile_scope.dart';
+import 'the_event_this_device_expects.dart' show sameContent;
 
 /// A request this device has written down before sending: the entry's id and
 /// the profile's storage, both fixed when it was asked, so a profile switch
@@ -35,8 +36,11 @@ class AskedEvent {
 /// the log holds a signed event at or past that number: its place is taken.
 ///
 /// A credential issuance is written down with nothing asked, because the
-/// anchor is built by the core, so it is only ever recognised by the sequence
-/// number and digest of the answer.
+/// anchor is built by the core, so until the answer arrives it is recognised
+/// only by the sequence number it must have. When the answer arrives and the
+/// device has checked the seal in it, that seal is recorded as what was asked
+/// ([added]'s `anchors`), so the event is signed late as it would have been on
+/// time.
 ///
 /// Every read and write is serialised, so two operations at once cannot each
 /// read the list, change it and write over the other's change.
@@ -89,8 +93,12 @@ class TheEventsThisDeviceAskedFor {
     });
   }
 
-  /// Records which event the core added for [request].
-  Future<void> added(AskedEvent request, {required String aid, required int sequenceNumber, required String digest}) =>
+  /// Records which event the core added for [request]. [anchors] are the seals
+  /// of an interaction whose seals the core built (a credential's) and this
+  /// device then checked, recorded as what was asked so that signing the event
+  /// late accepts exactly what signing it on time accepted.
+  Future<void> added(AskedEvent request,
+          {required String aid, required int sequenceNumber, required String digest, List<Object?>? anchors}) =>
       _serialised(() async {
         final entries = await _load(request.storageKey);
         for (final e in entries) {
@@ -98,6 +106,7 @@ class TheEventsThisDeviceAskedFor {
             e['aid'] = aid;
             e['s'] = sequenceNumber.toRadixString(16);
             e['d'] = digest;
+            if (anchors != null) e['asked'] = {...Map<String, dynamic>.from(e['asked'] as Map? ?? const {}), 'anchors': anchors};
           }
         }
         await _save(request.storageKey, entries);
@@ -169,7 +178,6 @@ class TheEventsThisDeviceAskedFor {
   Future<String?> whichAskedFor(String storageKey, String aid, Map<String, dynamic> event,
           String Function(String key) commitmentTo) =>
       _serialised(() async {
-        bool same(Object? a, Object? b) => jsonEncode(a) == jsonEncode(b);
         for (final e in await _load(storageKey)) {
           if (e['t'] != event['t'] || (e['aid'] != null && e['aid'] != aid)) continue;
           if (e['s'] != null) {
@@ -188,14 +196,14 @@ class TheEventsThisDeviceAskedFor {
               // was asked is checked before it is signed.
               final n = event['n'];
               if (asked['key'] != null &&
-                  same(event['k'], [asked['key']]) &&
+                  sameContent(event['k'], [asked['key']]) &&
                   n is List &&
                   n.isNotEmpty &&
                   n.first == commitmentTo(asked['next'] as String)) {
                 return e['id'] as String;
               }
             case 'ixn':
-              if (asked.containsKey('anchors') && same(event['a'], asked['anchors'])) return e['id'] as String;
+              if (asked.containsKey('anchors') && sameContent(event['a'], asked['anchors'])) return e['id'] as String;
           }
         }
         return null;

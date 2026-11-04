@@ -90,6 +90,10 @@ class FakeCore {
   String? dropsAnswersFrom;
   // Numbers the next event one past where it belongs.
   bool skipsASequenceNumber = false;
+  // Adds the credential's anchor and then loses the answer in transit.
+  bool losesTheAnswerToIssue = false;
+  // The identifier /api/identity answers with, if not the identity's own.
+  String? identityAnswers;
   // Writes another identifier into the credential anchor it builds.
   String? anchorsAs;
   // Adds to a founding it prepares a post-quantum next-key commitment and an
@@ -368,7 +372,7 @@ class FakeCore {
               return _json(
                   kel.isEmpty
                       ? {'initialized': false}
-                      : {'initialized': true, 'aid': aid},
+                      : {'initialized': true, 'aid': identityAnswers ?? aid},
                   200);
             case '/api/kel':
               if (kel.isEmpty || req.url.queryParameters['name'] != aid) {
@@ -418,6 +422,9 @@ class FakeCore {
               final e = eventIn(raws.last)..['i'] = anchorsAs;
               removeLast();
               _append(saidified({...e}..remove('v')), null);
+            }
+            if (losesTheAnswerToIssue) {
+              throw http.ClientException('the answer was lost');
             }
             final raw = base64Encode(raws.last);
             answer = _json({
@@ -1567,6 +1574,89 @@ void main() {
     await recordTheSignedLog(core);
     await keysOver(core).finishStrandedEvents(seed);
     expect(core.kel.last['sig'], isNotNull);
+  });
+
+  test(
+      'a credential anchor the core added and this device checked is signed late, as it would have been on time',
+      () async {
+    await keri.inceptAid(name: 'me', code: words.join(' '));
+    await keri.issueCredential(claims: {'a': 'b'}, schemaSaid: 'E');
+    expect(core.kel.last['sig'], isNull,
+        reason: 'the signature never reached the core');
+    expect((await pending()).single['asked'], {
+      'anchors': core.kel.last['a']
+    }, reason: 'the seal this device checked is what was asked');
+
+    // The next issuance finishes it rather than locking the identity.
+    await keri.issueCredential(claims: {'c': 'd'}, schemaSaid: 'E');
+    expect(core.kel[1]['sig'], isNotNull);
+    expect(verifiesUnder(key(0), core.raw(1), core.sigAt(1)), isTrue);
+  });
+
+  test(
+      'a credential issuance whose answer was lost is not recognised, and is listed for the person',
+      () async {
+    await keri.inceptAid(name: 'me', code: words.join(' '));
+    core.losesTheAnswerToIssue = true;
+    await expectLater(keri.issueCredential(claims: {'a': 'b'}, schemaSaid: 'E'),
+        throwsA(isA<http.ClientException>()));
+    core.losesTheAnswerToIssue = false;
+    // The core built the anchor and this device never saw it: nothing says
+    // what it should be, so it is shown to the person, not signed.
+    await expectLater(keri.issueCredential(claims: {'c': 'd'}, schemaSaid: 'E'),
+        throwsA(isA<AnEventThisDeviceDidNotAskFor>()));
+    expect(core.kel.last['sig'], isNull);
+    expect(await keysOver(core).eventsAwaitingApproval(seed), hasLength(1));
+  });
+
+  test(
+      'a credential anchor whose seal fields are in another order than this device writes them is accepted and recognised',
+      () async {
+    await keri.inceptAid(name: 'me', code: words.join(' '));
+    core.credentialAnchor = [
+      {'d': 'Ecredential', 's': '0', 'i': 'Ecredential'}
+    ];
+    await keri.issueCredential(claims: {'a': 'b'}, schemaSaid: 'E');
+    core.credentialAnchor = null;
+    await keri.issueCredential(claims: {'c': 'd'}, schemaSaid: 'E');
+    expect(core.kel[1]['sig'], isNotNull);
+  });
+
+  test('an ask is recognised whichever order the listing writes the fields of a seal in',
+      () async {
+    final asked = TheEventsThisDeviceAskedFor();
+    final scope = await asked.scope();
+    await asked.asking(t: 'ixn', aid: 'Eaid', expectedSn: 1, asked: {
+      'anchors': [
+        {'i': 'Ex', 's': '0', 'd': 'Ex'}
+      ]
+    });
+    final id = await asked.whichAskedFor(
+        scope,
+        'Eaid',
+        {
+          't': 'ixn',
+          's': '1',
+          'a': [
+            {'d': 'Ex', 's': '0', 'i': 'Ex'}
+          ]
+        },
+        TheKeyInForce.commitmentTo);
+    expect(id, isNotNull);
+  });
+
+  test(
+      'a core that names the wrong identity once does not get it recorded as the one this device holds',
+      () async {
+    foundedByAnEarlierVersion(core);
+    core.identityAnswers = 'E${'W' * 43}';
+    await expectLater(keri.signPayload(name: core.aid, data: [1]), throwsA(anything));
+    expect(await TheIdentityThisDeviceHolds().read(), isNull,
+        reason: 'the log was not checked, so nothing is pinned');
+
+    core.identityAnswers = null;
+    await keri.signPayload(name: core.aid, data: [1]);
+    expect((await TheIdentityThisDeviceHolds().read())?.aid, core.aid);
   });
 
   test('a request is forgotten once the core has signed its event itself',

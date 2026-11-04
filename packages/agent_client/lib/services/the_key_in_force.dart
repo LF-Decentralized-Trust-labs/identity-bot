@@ -38,7 +38,11 @@ class TheKeyInForce {
   /// checked with before it is signed late. Left out, [index] works and
   /// signing an event late refuses.
   TheKeyInForce(this._client, this._baseUrl,
-      {TheEventsThisDeviceAskedFor? asked, KeyMath? keyMath, this.readTheKeyState})
+      {TheEventsThisDeviceAskedFor? asked,
+      KeyMath? keyMath,
+      this.readTheKeyState,
+      this.witnessesThisDeviceKnows,
+      this.whenTheLogIsChecked})
       : _asked = asked ?? TheEventsThisDeviceAskedFor(),
         _keyMath = keyMath {
     if (_client is OwnerSigningClient) {
@@ -60,6 +64,27 @@ class TheKeyInForce {
   /// (ADR-061 section 5). Left out, or where it cannot read, a rotation or an
   /// interaction is not signed late.
   final Future<VerifiedKeyState> Function(Uint8List seed)? readTheKeyState;
+
+  /// The witnesses and threshold this device itself knows its identity has
+  /// (what it is recorded as holding), or null where it knows none. A founding
+  /// left unsigned is signed late with exactly these where they are known; where
+  /// they are not, it is signed with the witnesses and threshold the core chose,
+  /// as it always was.
+  final Future<WitnessSet?> Function()? witnessesThisDeviceKnows;
+
+  /// Called with the identifier once the identity's log has been read and
+  /// checked to name this phrase's keys, and before any event is signed late.
+  /// The caller records there that this device holds that identity, so the key
+  /// state a late event follows can be read from the record. Nothing is recorded
+  /// from an identifier the core gave before its log was checked.
+  final Future<void> Function(String aid)? whenTheLogIsChecked;
+
+  /// [_checkedLog], then [whenTheLogIsChecked]: for what signs late.
+  Future<_Checked> _checkedForSigning(Uint8List seed) async {
+    final checked = await _checkedLog(seed);
+    await whenTheLogIsChecked?.call(checked.aid);
+    return checked;
+  }
 
   /// The digest a next-key commitment names for [keyQb64]: Blake3 over the
   /// key's qb64 text, as a validator recomputes it.
@@ -169,8 +194,14 @@ class TheKeyInForce {
   ///    ([TheKeyStateCannotBeReadToSignLate]);
   ///
   /// A core that does not say which events are signed is left as it is.
+  ///
+  /// [ownerAid] is the owner the person named for the identity, a founding
+  /// made for one sealing it. It must come from this device's own record of who
+  /// the person named, never from a response of the core (the parsers in
+  /// core_service.dart read an `owner_aid` from core JSON: not those): whatever
+  /// is passed here is what a founding left unsigned is allowed to seal.
   Future<KeyState> finishStrandedEvents(Uint8List seed, {String? ownerAid}) async {
-    final checked = await _checkedLog(seed);
+    final checked = await _checkedForSigning(seed);
     final log = checked.log;
     final signed = log.signed;
     final scope = await _asked.scope();
@@ -209,6 +240,52 @@ class TheKeyInForce {
   /// what was expected, for the person to see.
   Future<_Trusted> _checkAndSign(Uint8List seed, _Checked checked, int at, _Trusted? running,
       {required String t, required int sn, required String? digest, String? ownerAid, List<Object?>? ixnAnchors}) async {
+    final p = await _check(seed, checked, at, running,
+        t: t, sn: sn, digest: digest, ownerAid: ownerAid, ixnAnchors: ixnAnchors);
+    final km = p.km;
+    final event = p.event;
+    final raw = p.raw;
+    final expected = p.expected;
+    final stored = p.stored;
+    final trusted = p.trusted;
+    final signingSeed = KeyManager.signingSeed(seed, index: checked.keyAt[at]);
+    try {
+      await signAndRecordEvent(_client, _baseUrl,
+          aid: checked.aid,
+          sequenceNumber: sn,
+          rawBytesB64: raw,
+          signingSeed: signingSeed,
+          what: 'event ${event['s']} of this identity, left unsigned,',
+          km: km,
+          expected: expected);
+    } on EventSignatureRefused catch (e) {
+      if (e.statusCode == 404 || e.statusCode == 409) {
+        throw StrandedEventCannotBeFinished(checked.aid, '${event['s']}', e);
+      }
+      rethrow;
+    } finally {
+      signingSeed.fillRange(0, signingSeed.length, 0);
+    }
+    return _after(t, sn, stored, trusted);
+  }
+
+  /// What the event signed is followed by: the place it now holds and the
+  /// witnesses in force there. A founding sets the witnesses; no other event
+  /// signed late changes them.
+  _Trusted _after(String t, int sn, ParsedEvent stored, _Trusted? trusted) {
+    final b = stored['b'];
+    return _Trusted(
+        (sn: sn, digest: stored.d),
+        t == 'icp'
+            ? WitnessSet([if (b is List) for (final w in b) '$w'], int.tryParse('${stored['bt']}', radix: 16) ?? 0)
+            : trusted!.witnesses);
+  }
+
+  /// Every check an event must pass before it is signed late, with nothing
+  /// signed: the same code decides whether an event is signed and whether it is
+  /// shown to the person as refused.
+  Future<_Prepared> _check(Uint8List seed, _Checked checked, int at, _Trusted? running,
+      {required String t, required int sn, required String? digest, String? ownerAid, List<Object?>? ixnAnchors}) async {
     final km = _keyMath;
     if (km == null) {
       throw StateError('this app has not given the client the core\'s key '
@@ -229,6 +306,7 @@ class TheKeyInForce {
     final ExpectedEvent expected;
     try {
       expected = await theStoredEventThisPhraseWouldHaveMade(km, seed,
+          witnesses: await witnessesThisDeviceKnows?.call(),
           t: t,
           aid: checked.aid,
           sn: sn,
@@ -247,33 +325,10 @@ class TheKeyInForce {
           utf8.decode(base64Decode(raw), allowMalformed: true),
           {'t': t, 'i': checked.aid, 's': sn.toRadixString(16), if (digest != null) 'd': digest});
     }
-    final signingSeed = KeyManager.signingSeed(seed, index: checked.keyAt[at]);
-    try {
-      await signAndRecordEvent(_client, _baseUrl,
-          aid: checked.aid,
-          sequenceNumber: sn,
-          rawBytesB64: raw,
-          signingSeed: signingSeed,
-          what: 'event ${event['s']} of this identity, left unsigned,',
-          km: km,
-          expected: expected);
-    } on EventSignatureRefused catch (e) {
-      if (e.statusCode == 404 || e.statusCode == 409) {
-        throw StrandedEventCannotBeFinished(checked.aid, '${event['s']}', e);
-      }
-      rethrow;
-    } finally {
-      signingSeed.fillRange(0, signingSeed.length, 0);
-    }
-    // The event is signed, and this device checked it: what the next one
-    // follows. A founding sets the witnesses; no other event signed late
-    // changes them.
-    final b = stored['b'];
-    return _Trusted(
-        (sn: sn, digest: stored.d),
-        t == 'icp'
-            ? WitnessSet([if (b is List) for (final w in b) '$w'], int.tryParse('${stored['bt']}', radix: 16) ?? 0)
-            : trusted!.witnesses);
+    // The bytes are compared with the event expected here, as they are again
+    // when signed, so that what is shown as refused is what would be refused.
+    await expected.requireStoredIn(km, base64Decode(raw));
+    return _Prepared(km, event, raw, stored, trusted, expected);
   }
 
   /// The place the event at [sn] follows and the witnesses in force there, as
@@ -299,23 +354,62 @@ class TheKeyInForce {
     return _Trusted(state.tip, state.witnesses);
   }
 
-  /// The unsigned events of the identity's log this device did not ask for,
-  /// for the app to show the person whose identity it is.
+  /// The unsigned events of the identity's log that [finishStrandedEvents]
+  /// refuses to sign, for the app to show the person whose identity it is: one
+  /// this device did not ask for, and one it did ask for whose stored bytes are
+  /// not the event expected.
+  ///
+  /// Each is the event as the log lists it. One that was asked for and refused
+  /// also carries `refused` (the first way it differs), `stored` (the stored
+  /// bytes as text) and `expected` (the event it should have been), the same
+  /// things an [AStoredEventIsNotTheOneExpected] carries. Nothing is signed.
   ///
   /// While any is there the identity is locked: [finishStrandedEvents] refuses
-  /// to sign anything, because signing past an event nobody here asked for
+  /// to sign anything, because signing past an event that is not the one wanted
   /// would build on it. It stays locked until the person approves one with
   /// [signApprovedEvent], or it is otherwise explained and removed.
-  Future<List<Map<String, dynamic>>> eventsAwaitingApproval(Uint8List seed) async {
-    final checked = await _checkedLog(seed);
+  Future<List<Map<String, dynamic>>> eventsAwaitingApproval(Uint8List seed, {String? ownerAid}) async {
+    final checked = await _checkedForSigning(seed);
     final signed = checked.log.signed;
     if (signed == null) return const [];
     final scope = await _asked.scope();
     final out = <Map<String, dynamic>>[];
+    _Trusted? trusted;
     for (var at = 0; at < checked.log.events.length; at++) {
       if (signed[at]) continue;
       final event = checked.log.events[at];
-      if (await _asked.whichAskedFor(scope, checked.aid, event, commitmentTo) == null) out.add(event);
+      final asked = await _asked.whichAskedFor(scope, checked.aid, event, commitmentTo);
+      if (asked == null) {
+        out.add(event);
+        trusted = null;
+        continue;
+      }
+      // Without the core's key arithmetic nothing can be checked, so nothing
+      // is said about an event this device did ask for.
+      if (_keyMath == null) continue;
+      final request = await _asked.theRequest(scope, asked);
+      final wanted = (request?['asked'] as Map?)?['anchors'];
+      final sn = int.parse('${request?['s'] ?? request?['expected']}', radix: 16);
+      try {
+        final p = await _check(seed, checked, at, trusted,
+            t: '${request?['t']}',
+            sn: sn,
+            digest: request?['d'] as String?,
+            ownerAid: ownerAid,
+            ixnAnchors: wanted is List ? List<Object?>.from(wanted) : null);
+        // It would be signed, so what follows it is what it leaves.
+        trusted = _after('${request?['t']}', sn, p.stored, p.trusted);
+      } on NotTheEventExpected catch (e) {
+        trusted = null;
+        out.add({
+          ...event,
+          'refused': e.difference,
+          if (e is AStoredEventIsNotTheOneExpected) ...{'stored': e.stored, 'expected': e.expected},
+        });
+      } on TheKeyStateCannotBeReadToSignLate catch (e) {
+        trusted = null;
+        out.add({...event, 'refused': e.toString()});
+      }
     }
     return out;
   }
@@ -331,7 +425,9 @@ class TheKeyInForce {
   /// the person's devices, say, or an interaction they recognise.
   Future<void> signApprovedEvent(Uint8List seed,
       {required String sequenceNumber, required String digest, String? ownerAid}) async {
-    final checked = await _checkedLog(seed);
+    // [ownerAid] is as for [finishStrandedEvents]: from this device's own record
+    // of who the person named, never from a response of the core.
+    final checked = await _checkedForSigning(seed);
     final log = checked.log;
     for (var at = 0; at < log.events.length; at++) {
       final event = log.events[at];
@@ -412,6 +508,17 @@ class _Trusted {
   _Trusted(this.tip, this.witnesses);
   final Place tip;
   final WitnessSet witnesses;
+}
+
+/// An event that passed every check to be signed late, with what was checked.
+class _Prepared {
+  _Prepared(this.km, this.event, this.raw, this.stored, this.trusted, this.expected);
+  final KeyMath km;
+  final Map<String, dynamic> event;
+  final String raw;
+  final ParsedEvent stored;
+  final _Trusted? trusted;
+  final ExpectedEvent expected;
 }
 
 /// The identity's log as read and checked against this phrase.

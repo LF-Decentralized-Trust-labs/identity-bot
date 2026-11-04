@@ -1,11 +1,14 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:agent_client/crypto/bip39.dart';
 import 'package:agent_client/crypto/keys.dart';
 import 'package:agent_client/services/core_service.dart';
 import 'package:agent_client/services/key_math.dart';
 import 'package:agent_client/services/the_event_this_device_expects.dart';
 import 'package:agent_client/services/the_key_in_force.dart';
+import 'package:agent_client/services/the_witnesses_of_this_devices_events.dart' show WitnessSet;
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:test/test.dart';
@@ -28,11 +31,13 @@ import 'support/the_core.dart';
 /// fail every time.
 void main() {
   const agent = 'http://127.0.0.1:5050';
-  final seed = Uint8List.fromList(List<int>.generate(32, (i) => i + 1));
-  final key = AgentKeyPair.fromSigningSeed(seed).publicKeyEncoded;
-  final next = AgentKeyPair.fromSigningSeed(
-          Uint8List.fromList(List<int>.generate(32, (i) => i + 2)))
-      .publicKeyEncoded;
+  // The BIP39 seed of a phrase: the founding is checked against what that
+  // phrase makes (key 0, a commitment to key 1).
+  final seed = Bip39.mnemonicToSeed(
+      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
+          .split(' '));
+  final key = KeyManager.publicKeyAt(seed, 0);
+  final next = KeyManager.publicKeyAt(seed, 1);
   late KeyMath km;
 
   setUpAll(() async {
@@ -110,7 +115,7 @@ void main() {
     final sent = <http.BaseRequest>[];
     final bytes = foundingBytes();
     await coreThatAnswers(theEngineShape(bytes), sent)
-        .signTheFoundingOf(aidOf(bytes), seed, nextPublicKey: next);
+        .signTheFoundingOf(aidOf(bytes), seed);
 
     final attach = sent.firstWhere((r) => r.url.path == '/api/events/signature')
         as http.Request;
@@ -124,7 +129,7 @@ void main() {
     final sent = <http.BaseRequest>[];
     final bytes = foundingBytes();
     await coreThatAnswers(theEmbeddedShape(bytes), sent)
-        .signTheFoundingOf(aidOf(bytes), seed, nextPublicKey: next);
+        .signTheFoundingOf(aidOf(bytes), seed);
     expect(sent.any((r) => r.url.path == '/api/events/signature'), isTrue);
   });
 
@@ -143,7 +148,7 @@ void main() {
     });
     expect(
       coreThatAnswers(kel, sent)
-          .signTheFoundingOf('EIDENTITY', seed, nextPublicKey: next),
+          .signTheFoundingOf('EIDENTITY', seed),
       throwsA(predicate((e) => '$e'.contains('does not contain a founding'))),
     );
   });
@@ -158,7 +163,7 @@ void main() {
     });
     expect(
       coreThatAnswers(kel, sent)
-          .signTheFoundingOf('EIDENTITY', seed, nextPublicKey: next),
+          .signTheFoundingOf('EIDENTITY', seed),
       throwsA(predicate((e) => '$e'.contains('without the bytes'))),
     );
   });
@@ -168,7 +173,7 @@ void main() {
     final bytes = foundingBytes();
     expect(
       coreThatAnswers(theEngineShape(bytes), sent, attachStatus: 400)
-          .signTheFoundingOf(aidOf(bytes), seed, nextPublicKey: next),
+          .signTheFoundingOf(aidOf(bytes), seed),
       throwsA(isA<Exception>()),
     );
   });
@@ -181,7 +186,7 @@ void main() {
     final bytes = foundingBytes(commitsTo: stranger);
     await expectLater(
       coreThatAnswers(theEngineShape(bytes), sent)
-          .signTheFoundingOf(aidOf(bytes), seed, nextPublicKey: next),
+          .signTheFoundingOf(aidOf(bytes), seed),
       throwsA(isA<AStoredEventIsNotTheOneExpected>()
           .having((e) => e.stored, 'stored', utf8.decode(bytes))
           .having((e) => e.expected['n'], 'expected', [
@@ -196,7 +201,7 @@ void main() {
     final bytes = foundingBytes();
     await expectLater(
       coreThatAnswers(theEngineShape(bytes), sent)
-          .signTheFoundingOf('ESOMEBODYELSE', seed, nextPublicKey: next),
+          .signTheFoundingOf('ESOMEBODYELSE', seed),
       throwsA(isA<AStoredEventIsNotTheOneExpected>()),
     );
     expect(signed(sent), isFalse);
@@ -212,8 +217,7 @@ void main() {
     ]);
     await expectLater(
         coreThatAnswers(theEngineShape(wrong), sent).signTheFoundingOf(
-            aidOf(wrong), seed,
-            nextPublicKey: next, ownerAid: asked),
+            aidOf(wrong), seed, ownerAid: asked),
         throwsA(isA<AStoredEventIsNotTheOneExpected>()));
     expect(signed(sent), isFalse);
     sent = [];
@@ -221,8 +225,7 @@ void main() {
       {'i': asked, 's': '0', 'd': asked}
     ]);
     await coreThatAnswers(theEngineShape(right), sent).signTheFoundingOf(
-        aidOf(right), seed,
-        nextPublicKey: next, ownerAid: asked);
+        aidOf(right), seed, ownerAid: asked);
     expect(signed(sent), isTrue);
   });
 
@@ -242,7 +245,7 @@ void main() {
       final sent = <http.BaseRequest>[];
       await expectLater(
           coreThatAnswers(theEngineShape(one), sent)
-              .signTheFoundingOf(aidOf(one), seed, nextPublicKey: next),
+              .signTheFoundingOf(aidOf(one), seed),
           throwsA(isA<AStoredEventIsNotTheOneExpected>()),
           reason:
               'a commitment or anchor the core added would be a key of that machine\'s');
@@ -250,12 +253,67 @@ void main() {
     }
   });
 
+  test('a founding as the old /api/inception made it is signed here as it is when the log is finished, and one on another branch is not',
+      () async {
+    // The same builder as TheKeyInForce.finishStrandedEvents uses: the owner
+    // seal and the messaging keyset of the first allocation, committing also to
+    // the post-quantum key (Go's values: test/support/legacy_founding_golden.json).
+    final golden = jsonDecode(
+            File('test/support/legacy_founding_golden.json').readAsStringSync())
+        as Map<String, dynamic>;
+    const owner = 'EOWNERNAMEDBYTHEPERSON';
+    Map<String, dynamic> owned() => {'i': owner, 's': '0', 'd': owner};
+    var sent = <http.BaseRequest>[];
+    final old = foundingBytes(more: [
+      golden['post_quantum_digest'] as String
+    ], anchors: [
+      owned(),
+      golden['messaging_anchor_at_5000001']
+    ]);
+    await coreThatAnswers(theEngineShape(old), sent)
+        .signTheFoundingOf(aidOf(old), seed, ownerAid: owner);
+    expect(signed(sent), isTrue);
+
+    sent = [];
+    final other = foundingBytes(more: [
+      golden['post_quantum_digest'] as String
+    ], anchors: [
+      owned(),
+      golden['messaging_anchor_at_1']
+    ]);
+    await expectLater(
+        coreThatAnswers(theEngineShape(other), sent)
+            .signTheFoundingOf(aidOf(other), seed, ownerAid: owner),
+        throwsA(isA<AStoredEventIsNotTheOneExpected>()));
+    expect(signed(sent), isFalse);
+  });
+
+  test('a founding with witnesses other than the ones this device knows is never signed',
+      () async {
+    final sent = <http.BaseRequest>[];
+    final bytes = saidified({
+      't': 'icp', 'd': '', 'i': '', 's': '0', 'kt': '1', 'k': [key], 'nt': '1',
+      'n': [TheKeyInForce.commitmentTo(next)], 'bt': '1',
+      'b': ['B${'A' * 43}'], 'c': [], 'a': [],
+    });
+    await expectLater(
+        coreThatAnswers(theEngineShape(bytes), sent).signTheFoundingOf(
+            aidOf(bytes), seed,
+            witnesses: WitnessSet(['B${'Z' * 43}'], 1)),
+        throwsA(isA<AStoredEventIsNotTheOneExpected>()));
+    expect(signed(sent), isFalse);
+    await coreThatAnswers(theEngineShape(bytes), sent).signTheFoundingOf(
+        aidOf(bytes), seed,
+        witnesses: WitnessSet(['B${'A' * 43}'], 1));
+    expect(signed(sent), isTrue);
+  });
+
   test('bytes that are no event at all are never signed', () async {
     final sent = <http.BaseRequest>[];
     final bytes = utf8.encode('{"t":"icp","s":"0"}');
     await expectLater(
         coreThatAnswers(theEngineShape(bytes), sent)
-            .signTheFoundingOf('EIDENTITY', seed, nextPublicKey: next),
+            .signTheFoundingOf('EIDENTITY', seed),
         throwsA(isA<NotTheEventExpected>()));
     expect(signed(sent), isFalse);
   });

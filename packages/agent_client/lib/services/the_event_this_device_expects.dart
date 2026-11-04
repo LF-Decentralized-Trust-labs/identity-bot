@@ -300,7 +300,7 @@ class ExpectedEvent {
           return 'its "k" holds a key that is not Ed25519, and no other kind may be revealed yet';
         }
       }
-      if (!_sameValue(f.value, fields[f.name])) {
+      if (!sameContent(f.value, fields[f.name])) {
         return 'its "${f.name}" is ${jsonEncode(f.value)}, not ${jsonEncode(fields[f.name])}';
       }
     }
@@ -314,7 +314,7 @@ class ExpectedEvent {
 /// Whether two values hold the same content, the keys of an object in any
 /// order (a list keeps its order): a seal read from a listing and the same seal
 /// in the stored bytes name their fields in different orders.
-bool _sameValue(Object? a, Object? b) => jsonEncode(_sorted(a)) == jsonEncode(_sorted(b));
+bool sameContent(Object? a, Object? b) => jsonEncode(_sorted(a)) == jsonEncode(_sorted(b));
 
 Object? _sorted(Object? v) => v is Map
     ? {for (final k in (v.keys.map((k) => '$k').toList()..sort())) k: _sorted(v[k])}

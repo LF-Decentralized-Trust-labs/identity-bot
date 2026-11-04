@@ -11,6 +11,7 @@ import 'package:agent_client/services/the_identity_this_device_holds.dart';
 import 'package:agent_client/services/the_key_events_this_device_makes.dart' show KeyPaths;
 import 'package:agent_client/services/the_key_in_force.dart';
 import 'package:agent_client/services/the_key_state_this_device_reads.dart';
+import 'package:agent_client/services/the_stored_event_this_phrase_would_have_made.dart' show legacyMessagingBranches;
 import 'package:agent_client/services/the_witnesses_of_this_devices_events.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -150,10 +151,12 @@ void main() {
         toad: witnesses?.toad ?? 0);
   }
 
-  TheKeyInForce keysOf(ACore core, {TheEventsThisDeviceAskedFor? asked}) =>
+  TheKeyInForce keysOf(ACore core,
+          {TheEventsThisDeviceAskedFor? asked, WitnessSet? knows}) =>
       TheKeyInForce(core.client, core.base,
           asked: asked ?? TheEventsThisDeviceAskedFor(),
           keyMath: km,
+          witnessesThisDeviceKnows: knows == null ? null : () async => knows,
           readTheKeyState: (seed) =>
               TheKeyStateThisDeviceReads(core.client, km, core.base).read(seed));
 
@@ -213,6 +216,17 @@ void main() {
             .having((e) => e.stored, 'what was stored', contains(other))
             .having((e) => jsonEncode(e.expected['a']), 'what was expected', contains(theirs))));
     expect(await signedInTheCore(core, aid), [true, false]);
+
+    // Asked for and refused, it is still shown to the person, with what was
+    // stored and what was expected.
+    final listed = await keysOf(core).eventsAwaitingApproval(seed);
+    expect(listed, hasLength(1));
+    expect(listed.single['d'], placed[1].$2);
+    expect(listed.single['refused'], contains('"a"'));
+    expect(listed.single['stored'], contains(other));
+    expect(jsonEncode(listed.single['expected']), contains(theirs));
+    expect(await signedInTheCore(core, aid), [true, false],
+        reason: 'listing signs nothing');
   });
 
   test('an interaction that anchors a credential and something more is not signed',
@@ -331,10 +345,18 @@ void main() {
         .asking(t: 'icp', expectedSn: 0, asked: {'key': key(0), 'next': key(1)});
   }
 
+  test('the branch a legacy founding may carry is the Go side\'s messaging-keys pool base, and no other',
+      () {
+    // identity-agent-core/store checks the same value against PoolBase
+    // ("messaging-keys"), so the two cannot drift apart silently.
+    expect(legacyMessagingBranches, [golden['messaging_pool_base']]);
+    expect(golden.containsKey('messaging_anchor_at_${golden['messaging_pool_base']}'), isTrue);
+  });
+
   test('what the Go derivation made of the phrase is what this package computes', () async {
     final pq = KeyManager.slip10Ed25519(seed, KeyPaths.postQuantum(0));
     expect((await km.postQuantumNext(pq)).digest, golden['post_quantum_digest']);
-    for (final branch in [5000001, 1]) {
+    for (final branch in legacyMessagingBranches) {
       final child = KeyManager.slip10Ed25519(seed, KeyPaths.messagingOnAllocatedBranch(branch));
       expect(jsonEncode(await km.messagingKeySet(child)),
           jsonEncode(golden['messaging_anchor_at_$branch']),
@@ -352,13 +374,39 @@ void main() {
     expect(await signedInTheCore(core, aid), [true]);
   });
 
-  test('a founding as /api/inception made it from 2026-08-09, before the post-quantum commitment and on the first branch, is signed late',
+  test('a founding as /api/inception made it from 2026-08-09, before the post-quantum commitment, is signed late',
       () async {
     final (core, aid, _) = await storedByInception(
-        branch: 1, withPostQuantum: false, withOwner: false);
+        withPostQuantum: false, withOwner: false);
     await askedForTheFounding();
 
     await keysOf(core).finishStrandedEvents(seed);
+    expect(await signedInTheCore(core, aid), [true]);
+  });
+
+  test('a founding anchoring keys of branch 1 (contacts pool index 1) is not signed',
+      () async {
+    final (core, aid, _) = await storedByInception(branch: 1);
+    await askedForTheFounding();
+    await expectLater(
+        keysOf(core).finishStrandedEvents(seed, ownerAid: owner),
+        throwsA(isA<AStoredEventIsNotTheOneExpected>()
+            .having((e) => e.difference, 'difference', contains('"a"'))));
+    expect(await signedInTheCore(core, aid), [false]);
+  });
+
+  test('a founding sealing an owner other than the one passed is not signed',
+      () async {
+    final (core, aid, _) = await storedByInception();
+    await askedForTheFounding();
+    final other = 'E${'Q' * 43}';
+    await expectLater(
+        keysOf(core).finishStrandedEvents(seed, ownerAid: other),
+        throwsA(isA<AStoredEventIsNotTheOneExpected>()
+            .having((e) => e.difference, 'difference', contains('"a"'))));
+    expect(await signedInTheCore(core, aid), [false]);
+    // Passed the owner it seals, it is signed.
+    await keysOf(core).finishStrandedEvents(seed, ownerAid: owner);
     expect(await signedInTheCore(core, aid), [true]);
   });
 
@@ -539,5 +587,50 @@ void main() {
     expect(await signedInTheCore(core, aid), [true, true, true]);
     expect(await keysOf(core).finishStrandedEvents(seed), isNotNull,
         reason: 'nothing is left to sign, and asking again is harmless');
+  });
+
+  test('a founding whose witnesses are not the ones this device knows is not signed',
+      () async {
+    final (core, aid, _) =
+        await storedBy([await legacyFounding(witnesses: witnesses, toad: '2')], [0]);
+    await askedForTheFounding();
+    final mine = [for (final c in ['X', 'Y', 'Z']) 'B${c * 43}'];
+    await expectLater(
+        keysOf(core, knows: WitnessSet(mine, 2)).finishStrandedEvents(seed),
+        throwsA(isA<AStoredEventIsNotTheOneExpected>()
+            .having((e) => e.difference, 'difference', contains('"b"'))));
+    await expectLater(
+        keysOf(core, knows: WitnessSet(witnesses, 1)).finishStrandedEvents(seed),
+        throwsA(isA<AStoredEventIsNotTheOneExpected>()
+            .having((e) => e.difference, 'difference', contains('"bt"'))));
+    expect(await signedInTheCore(core, aid), [false]);
+  });
+
+  test('a founding with none of the witnesses this device knows is not signed',
+      () async {
+    final (core, aid, _) = await storedBy([await legacyFounding()], [0]);
+    await askedForTheFounding();
+    await expectLater(
+        keysOf(core, knows: WitnessSet(witnesses, 2)).finishStrandedEvents(seed),
+        throwsA(isA<AStoredEventIsNotTheOneExpected>()));
+    expect(await signedInTheCore(core, aid), [false]);
+  });
+
+  test('a founding with the witnesses this device knows is signed, in whatever order they are stored',
+      () async {
+    final (core, aid, _) = await storedBy(
+        [await legacyFounding(witnesses: witnesses.reversed.toList(), toad: '2')], [0]);
+    await askedForTheFounding();
+    await keysOf(core, knows: WitnessSet(witnesses, 2)).finishStrandedEvents(seed);
+    expect(await signedInTheCore(core, aid), [true]);
+  });
+
+  test('where this device knows no witnesses, the core\'s choice of them is accepted as it always was',
+      () async {
+    final (core, aid, _) =
+        await storedBy([await legacyFounding(witnesses: witnesses, toad: '2')], [0]);
+    await askedForTheFounding();
+    await keysOf(core).finishStrandedEvents(seed);
+    expect(await signedInTheCore(core, aid), [true]);
   });
 }

@@ -5,6 +5,7 @@ import '../crypto/keys.dart';
 import 'the_key_events_this_device_makes.dart' show KeyPaths;
 import 'key_math.dart';
 import 'the_event_this_device_expects.dart';
+import 'the_witnesses_of_this_devices_events.dart' show WitnessSet;
 
 /// The event an earlier version stored unsigned, as this phrase would have
 /// made it: the [ExpectedEvent] a stored, marked event must be before it is
@@ -40,7 +41,12 @@ import 'the_event_this_device_expects.dart';
 ///
 /// [generation] is the key this event reveals (0 for the founding).
 /// [ownerAid] is the owner the person named for the identity, whose seal a
-/// founding made for one carries.
+/// founding made for one carries. It must come from this device's own record of
+/// who the person named, never from a response of the core: whatever is passed
+/// is what the founding may seal.
+/// [witnesses] are the witnesses and threshold this device itself knows the
+/// identity has, or null where it knows none; see
+/// [theStoredFoundingThisPhraseWouldHaveMade].
 Future<ExpectedEvent> theStoredEventThisPhraseWouldHaveMade(
   KeyMath km,
   Uint8List seed, {
@@ -54,6 +60,7 @@ Future<ExpectedEvent> theStoredEventThisPhraseWouldHaveMade(
   required int generation,
   String? ownerAid,
   List<Object?>? ixnAnchors,
+  WitnessSet? witnesses,
 }) async {
   Future<List<String>> next() async =>
       [await km.nextKeyDigest(KeyManager.publicKeyAt(seed, generation + 1))];
@@ -61,7 +68,7 @@ Future<ExpectedEvent> theStoredEventThisPhraseWouldHaveMade(
   switch (t) {
     case 'icp':
       return known(await theStoredFoundingThisPhraseWouldHaveMade(km, seed, stored,
-          ownerAid: ownerAid));
+          ownerAid: ownerAid, witnesses: witnesses));
     case 'rot':
       return known(ExpectedEvent.rotation(
           aid: aid,
@@ -90,9 +97,14 @@ Future<ExpectedEvent> theStoredEventThisPhraseWouldHaveMade(
 
 /// The branches the Identity Agent allocated a founding's messaging keys on
 /// before 2026-10-31, as the first allocation of the `messaging-keys` pool: its
-/// base, 5000001 (PoolBase), and 1 in the days before the pool had a base
-/// (3869b873, until it was given one).
-const legacyMessagingBranches = [5000001, 1];
+/// base, 5000001 (PoolBase("messaging-keys") in identity-agent-core/store, which
+/// a test pins to the Go side through test/support/legacy_founding_golden.json).
+///
+/// Branch 1 is not here. Every founding on it (9 to 12 August) predates the CESR
+/// change of 9d760a24 and so cannot match a keyset computed now; accepting it
+/// would only let a core get a founding anchoring keys from
+/// m/44'/0'/0'/1'/0' (also the pairwise seed of contacts-pool index 1) signed.
+const legacyMessagingBranches = [5000001];
 
 /// The founding an earlier version stored, as this phrase would have made it.
 ///
@@ -106,12 +118,16 @@ const legacyMessagingBranches = [5000001, 1];
 ///    post-quantum key of KeyPaths.postQuantum(0) in `n`.
 /// Every part is recomputed from [seed] and the stored event must hold exactly
 /// that: the messaging keyset on the branch whose anchor it carries is derived
-/// from the phrase, so a keyset the core made itself matches none. Witnesses
-/// and their threshold are the core's designation (WitnessesForNewIdentity) and
-/// are read from [stored].
+/// from the phrase, so a keyset the core made itself matches none.
+///
+/// Witnesses and their threshold are the core's designation
+/// (WitnessesForNewIdentity). Where this device knows its identity's
+/// [witnesses] the founding's `b` and `bt` must equal them. Where it knows none
+/// they are read from [stored], as they always were: those foundings were the
+/// core's choice, and there is nothing here to hold it to.
 Future<ExpectedEvent> theStoredFoundingThisPhraseWouldHaveMade(
     KeyMath km, Uint8List seed, ParsedEvent stored,
-    {String? ownerAid}) async {
+    {String? ownerAid, WitnessSet? witnesses}) async {
   final owner = [
     if ((ownerAid ?? '').isNotEmpty) {'i': ownerAid, 's': '0', 'd': ownerAid}
   ];
@@ -121,7 +137,7 @@ Future<ExpectedEvent> theStoredFoundingThisPhraseWouldHaveMade(
   final next = KeyManager.publicKeyAt(seed, 1);
   Future<ExpectedEvent> plain(List<Object?> anchors, List<String> alsoCommitTo) =>
       theStoredFoundingThisKeyWouldHaveMade(km, stored,
-          key: key, next: next, anchors: anchors, alsoCommitTo: alsoCommitTo);
+          key: key, next: next, anchors: anchors, alsoCommitTo: alsoCommitTo, witnesses: witnesses);
   // A founding with seals beyond the owner's carries the messaging keyset.
   if (a is! List || a.length <= owner.length) return plain(owner, const []);
   final alsoCommitTo = <String>[];
@@ -158,13 +174,19 @@ Future<ExpectedEvent> theStoredFoundingThisKeyWouldHaveMade(
     {required String key,
     required String next,
     List<Object?> anchors = const [],
-    List<String> alsoCommitTo = const []}) async {
+    List<String> alsoCommitTo = const [],
+    WitnessSet? witnesses}) async {
   final b = stored['b'];
+  final inStored = b is List ? [for (final w in b) '$w'] : const <String>[];
+  // The same witnesses in another order are the same set: the order is the
+  // stored event's, and it is compared as it stands.
+  final known = witnesses?.witnesses;
+  final sameSet = known != null && known.length == inStored.length && known.toSet().containsAll(inStored);
   return ExpectedEvent.founding(
       keys: [key],
       next: [await km.nextKeyDigest(next), ...alsoCommitTo],
-      witnesses: b is List ? [for (final w in b) '$w'] : const [],
-      toad: int.tryParse('${stored['bt']}', radix: 16) ?? -1,
+      witnesses: known == null || sameSet ? inStored : known,
+      toad: witnesses?.toad ?? int.tryParse('${stored['bt']}', radix: 16) ?? -1,
       anchors: anchors);
 }
 
