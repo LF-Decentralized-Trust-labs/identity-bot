@@ -1366,8 +1366,8 @@ type DriverInfo struct {
 type InceptionRequest struct {
 	PublicKey     string `json:"public_key"`
 	NextPublicKey string `json:"next_public_key"`
-	// CesrSignature: optional — the controller's CESR '0B...' signature over the
-	// inception event body, produced by Dart local signing + /api/cesr/encode.
+	// CesrSignature: optional — the controller's signature over the inception
+	// event body, indexed (AA...) at place 0, written on the device by keymath.
 	CesrSignature string `json:"cesr_signature,omitempty"`
 	// OwnerAID names who this identity answers to, and is written into the
 	// inception event itself.
@@ -1386,8 +1386,9 @@ type InceptionRequest struct {
 type InceptionResponse struct {
 	AID            string                 `json:"aid"`
 	InceptionEvent map[string]interface{} `json:"inception_event"`
-	// RawBytesB64: base64 of the serialized event body. Sign these bytes with
-	// the Ed25519 key, then call POST /api/cesr/encode to get the CESR signature.
+	// RawBytesB64: base64 of the serialized event body. The app signs these
+	// bytes with the Ed25519 key and writes the signature itself (keymath).
+	// POST /api/cesr/encode remains for callers outside this repository.
 	RawBytesB64 string `json:"raw_bytes_b64"`
 	PublicKey   string `json:"public_key"`
 	Created     string `json:"created"`

@@ -21,8 +21,10 @@ type EventRecord struct {
 	PublicKey      string `json:"public_key"`
 	NextKeyDigest  string `json:"next_key_digest"`
 	Timestamp      string `json:"timestamp"`
-	// CesrSignature: CESR '0B...' (88-char) signature over the event body.
-	// Produced by Dart local signing + /api/cesr/encode. Empty for legacy records.
+	// CesrSignature: the signature over the event body, indexed (AA..., 88-char)
+	// at place 0, written on the device by keymath. A legacy record may hold the
+	// unindexed 0B form, which reads as the same signature at place 0. Empty for
+	// older records still.
 	CesrSignature string `json:"cesr_signature,omitempty"`
 	// RawBytesB64 is the event exactly as KERI serialised it, base64.
 	//

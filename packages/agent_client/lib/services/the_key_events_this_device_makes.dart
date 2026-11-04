@@ -177,9 +177,10 @@ class Committed {
   final String digest;
 
   /// `recorded`, or `already_recorded` when the core had it already. A core
-  /// that answers `waiting_for_signatures` is not believed (this device signs
-  /// with every key an event needs), so that is a [TheCoreWithholdsThisEvent]
-  /// or an [AnEventWasRefused], never a [Committed].
+  /// that answers `waiting_for_signatures` (202) has not recorded it: it holds
+  /// the event for more signers than it was given, as it does for an owner at
+  /// stage two whose event carries one key's signature. That is a
+  /// [TheCoreWithholdsThisEvent] or an [AnEventWasRefused], never a [Committed].
   final String status;
   final String bytesB64;
   final List<String> signatures;
@@ -934,11 +935,10 @@ class TheKeyEventsThisDeviceMakes {
     }
     final status = '${res['status'] ?? ''}';
     if (status == 'waiting_for_signatures') {
-      // This device signs with every key an event needs, so an honest core
-      // never holds one here for more signers: it is not believed. The event
-      // is not recorded, and is treated like any answer that is not
-      // "recorded", so the person is never left with a place nothing can
-      // release.
+      // The core holds the event for more signers than it was given, which
+      // this device cannot add. The event is not recorded, and is treated
+      // like any answer that is not "recorded", so the person is never left
+      // with a place nothing can release.
       return _notRecorded(
           r,
           KeyEventRefused(what, 202, 'waiting_for_signatures', jsonEncode(res)),
