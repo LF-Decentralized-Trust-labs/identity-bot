@@ -500,6 +500,9 @@ func copyTable(ctx context.Context, tx *sql.Tx, conn *sql.Conn, name string, isS
 	}
 
 	cols := strings.Join(shared, ", ")
+	if name == "duplicity_alerts" {
+		return mergeDuplicityAlerts(ctx, tx, shared)
+	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf(
 		`INSERT OR REPLACE INTO main."%s" (%s) SELECT %s FROM restored."%s"`,
 		name, cols, cols, name)); err != nil {
@@ -665,4 +668,48 @@ func hasNaturalIdentity(ctx context.Context, conn *sql.Conn, table string) bool 
 		}
 	}
 	return false
+}
+
+// mergeDuplicityAlerts adds the backup's alerts to this database's, and lets a
+// backup resolve an alert but never reopen one.
+//
+// An alert is identified by what it says and when (aid, sequence number, both
+// digests, time seen), so a backup row that matches a local one is the same
+// alert. Replacing the local row with the backup's would set an alert that was
+// dealt with after the backup was taken back to unresolved, and clear its note.
+// So a matching alert keeps everything it has locally, with one exception: if
+// it is still open here and the backup has it resolved, the backup's
+// resolution and note are taken. Alerts only the backup has are added.
+//
+// source_url is deliberately not part of the identity. Two sources reporting
+// one conflict are one conflict to resolve; keying on the source would turn it
+// into several rows that are resolved separately and reopened independently,
+// and since source_url may be NULL, which a unique index never treats as equal,
+// the same alert would also be duplicated by every restore.
+func mergeDuplicityAlerts(ctx context.Context, tx *sql.Tx, shared []string) error {
+	const same = `m.aid = r.aid AND m.sequence_num = r.sequence_num
+	          AND m.our_digest = r.our_digest AND m.their_digest = r.their_digest
+	          AND m.detected_at = r.detected_at`
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE main.duplicity_alerts AS m
+		   SET resolved = 1,
+		       resolution_note = (SELECT r.resolution_note FROM restored.duplicity_alerts r WHERE `+same+`)
+		 WHERE COALESCE(m.resolved, 0) = 0
+		   AND EXISTS (SELECT 1 FROM restored.duplicity_alerts r
+		                WHERE `+same+` AND COALESCE(r.resolved, 0) <> 0)`); err != nil {
+		return fmt.Errorf("restore the duplicity_alerts table: %w", err)
+	}
+	var kept []string
+	for _, c := range shared {
+		if c != `"id"` {
+			kept = append(kept, c)
+		}
+	}
+	cols := strings.Join(kept, ", ")
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(
+		`INSERT OR IGNORE INTO main.duplicity_alerts (%s) SELECT %s FROM restored.duplicity_alerts`,
+		cols, cols)); err != nil {
+		return fmt.Errorf("restore the duplicity_alerts table: %w", err)
+	}
+	return nil
 }

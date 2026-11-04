@@ -636,3 +636,62 @@ func TestARestoreKeepsLocalRowsThatOnlyShareACounterWithTheBackup(t *testing.T) 
 		})
 	}
 }
+
+func alertResolution(t *testing.T, s *SQLiteStore) (int, string) {
+	t.Helper()
+	var resolved int
+	var note sql.NullString
+	if err := s.db.QueryRow(`SELECT resolved, resolution_note FROM duplicity_alerts WHERE aid='AL'`).
+		Scan(&resolved, &note); err != nil {
+		t.Fatal(err)
+	}
+	return resolved, note.String
+}
+
+const alertRow = `INSERT INTO duplicity_alerts (aid, sequence_num, our_digest, their_digest, detected_at, resolved, resolution_note)
+	VALUES ('AL',1,'o','t','d1',?,?)`
+
+// An older backup holds the alert open; it was dealt with here since.
+func TestAnOlderBackupDoesNotReopenAResolvedAlert(t *testing.T) {
+	_, from := openStore(t)
+	if _, err := from.db.Exec(alertRow, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	snap := snapshotOf(t, from)
+
+	_, into := openStore(t)
+	if _, err := into.db.Exec(alertRow, 1, "rotated, confirmed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := into.ImportSnapshot(snap); err != nil {
+		t.Fatal(err)
+	}
+	if r, note := alertResolution(t, into); r != 1 || note != "rotated, confirmed" {
+		t.Fatalf("resolved=%d note=%q after the restore, want the local resolution kept", r, note)
+	}
+}
+
+// A backup taken after the alert was resolved resolves one still open here.
+func TestABackupThatResolvedAnAlertResolvesItHere(t *testing.T) {
+	_, from := openStore(t)
+	if _, err := from.db.Exec(alertRow, 1, "closed on the other machine"); err != nil {
+		t.Fatal(err)
+	}
+	snap := snapshotOf(t, from)
+
+	_, into := openStore(t)
+	if _, err := into.db.Exec(alertRow, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := into.ImportSnapshot(snap); err != nil {
+		t.Fatal(err)
+	}
+	if r, note := alertResolution(t, into); r != 1 || note != "closed on the other machine" {
+		t.Fatalf("resolved=%d note=%q after the restore, want the backup's resolution", r, note)
+	}
+	var n int
+	into.db.QueryRow(`SELECT count(*) FROM duplicity_alerts`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("%d alert rows, want 1", n)
+	}
+}
