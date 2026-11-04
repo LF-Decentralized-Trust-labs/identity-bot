@@ -26,11 +26,19 @@ func ownerVouchesFor(c store.ContactRecord) bool {
 	return true
 }
 
+// ownerRecorded is whether the owner, not a stranger's message, put this
+// contact's address on record. It answers only who wrote the address down, which
+// is all that decides whether a local address may be dialled; whether the key a
+// contact claims for a witness can be believed is the stricter ownerVouchesFor.
+func ownerRecorded(c store.ContactRecord) bool {
+	return c.ContactSource != ContactSourceInbound && c.Status != "pending_inbound"
+}
+
 // ownerLocalFor is whether a call to rawURL, which is a contact's address, may
 // reach a local address: only if the URL is itself written as one and the
-// contact is one the owner recorded.
+// owner recorded the contact.
 func ownerLocalFor(c store.ContactRecord, rawURL string) bool {
-	return ownerVouchesFor(c) && LiteralIsLocal(hostOf(rawURL))
+	return ownerRecorded(c) && LiteralIsLocal(hostOf(rawURL))
 }
 
 // guardedGet sends a GET to an address that came from a contact or a peer: no

@@ -414,6 +414,9 @@ func New(cfg Config) (*CoreServer, error) {
 
 	// Peers to cross-check with, drawn from contacts and registered services.
 	ws.PeerWatchers = s.peerWatchers
+	// A peer's address is held to the address dialled; a local one is reached
+	// only where the owner recorded that contact.
+	ws.L3.AllowLocal = func(peerBaseURL string) bool { return s.oobiMayBeLocal(peerBaseURL, "") }
 
 	// The same boundary governs watching. A registered watcher service is
 	// exempt; a contact is a peer and must be of the same kind.

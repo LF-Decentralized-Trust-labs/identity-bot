@@ -338,8 +338,7 @@ func (s *CoreServer) rememberPeerAt(aid, agentURL string) error {
 		return nil
 	}
 
-	client := &http.Client{Timeout: 20 * time.Second}
-	resp, err := client.Get(base + "/api/didcomm/did?aid=" + aid)
+	resp, err := s.peerClient(20*time.Second, base).Get(base + "/api/didcomm/did?aid=" + aid)
 	if err != nil {
 		return fmt.Errorf("could not reach %s: %w", base, err)
 	}

@@ -83,6 +83,7 @@ func newMessaging(t *testing.T) *messaging {
 	peers[receiverAID] = p
 	_ = sender.savePeers(peers)
 	didcommMu.Unlock()
+	ownerRecordsLocalPeer(t, sender, srv.URL)
 	return &messaging{sender: sender, receiver: receiver, senderAID: senderAID, receiverAID: receiverAID, url: srv.URL}
 }
 
@@ -169,6 +170,7 @@ func TestAReceivedMessageIsKeptWithItsProofAndBothEndsLogIt(t *testing.T) {
 	peers[m.receiverAID] = p
 	_ = m.sender.savePeers(peers)
 	didcommMu.Unlock()
+	ownerRecordsLocalPeer(t, m.sender, capture.URL)
 
 	n := m.send(t, `{"title":"the build passed"}`)
 	if n.SenderKeyTrust != string(didcomm.KeysAnchored) || n.SenderKELEvents != 1 {
@@ -509,5 +511,18 @@ func TestOneSendersFloodOfRefusalsSilencesOnlyItself(t *testing.T) {
 	}
 	if n := count("didcomm.message.received", other); n != 1 {
 		t.Fatalf("another sender's refusal was not recorded while one sender flooded: %d", n)
+	}
+}
+
+// ownerRecordsLocalPeer is the owner having added the agent at url as a contact,
+// which is what lets this agent call it at a local address: a test peer on
+// loopback is one the owner set up, not one a stranger pointed it at.
+func ownerRecordsLocalPeer(t *testing.T, s *CoreServer, url string) {
+	t.Helper()
+	if err := s.DataStore.SaveContact(store.ContactRecord{
+		AID: "ELocalTestPeer" + strings.NewReplacer(":", "", "/", "", ".", "").Replace(url), OobiURL: url + "/public/oobi/x",
+		ContactSource: "keri", Status: "accepted",
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -267,6 +267,13 @@ func (s *CoreServer) oobiMayBeLocal(oobiURL, expected string) bool {
 	return false
 }
 
+// peerClient is the client for any call to an address a peer or a contact
+// supplied: no proxy, no redirect, the address actually dialled is checked, and
+// a local address only where it is the address of a contact the owner recorded.
+func (s *CoreServer) peerClient(timeout time.Duration, rawURL string) *http.Client {
+	return witness.GuardedClient(timeout, s.oobiMayBeLocal(rawURL, ""))
+}
+
 func sameOOBIHost(a, b string) bool {
 	ua, ea := url.Parse(a)
 	ub, eb := url.Parse(b)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/witness"
 	"io"
 	"net/http"
 	"net/url"
@@ -22,13 +23,16 @@ import (
 // mistake in a constant.
 const DefaultL2DigestURL = "https://watcher1.grapeid.org/public/kel-digest"
 
-// L2Client queries commercial watcher /public/kel-digest endpoints.
+// L2Client queries commercial watcher /public/kel-digest endpoints. Some of
+// the addresses it is given are hints a peer's introduction carried, so its
+// client refuses an internal address (the one dialled), follows no redirect and
+// uses no proxy, and is never allowed a local address.
 type L2Client struct {
 	HTTPClient *http.Client
 }
 
 func NewL2Client() *L2Client {
-	return &L2Client{HTTPClient: &http.Client{Timeout: 5 * time.Second}}
+	return &L2Client{HTTPClient: witness.GuardedClient(5*time.Second, false)}
 }
 
 func (c *L2Client) QueryDigest(ctx context.Context, baseURL, aid string, seq int) (*DigestResponse, time.Duration, error) {
