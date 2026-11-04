@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"log"
 
 	"identity-agent-core/asset"
 	"identity-agent-core/login"
@@ -36,23 +37,26 @@ type signedOwnerName struct {
 // whose name verifies. An owner with no verified name is absent.
 //
 // WHO SHOWS NO NAME, ON PURPOSE. The name comes from the vouch an owner signed
-// when they accepted ownership through an invite (ask_add_signer.go) and that
-// this computer's roster stored. So:
-//   - an owner added through the ownership ceremony has no roster row and no
-//     key event log on file here, and shows no name;
-//   - the same holds when an overlay owns the roster (OVERLAY_OWNS_ORG_ROUTES),
-//     because this core's roster is then empty or not the one in use;
-//   - an owner who has rotated shows no name until they sign a new name vouch (today, by redeeming another invitation), because
-//     their old vouch no longer verifies against their current key.
+// when they agreed to own the organisation, by invite or by ownership ceremony,
+// and that the roster in use stored; the key it is checked against comes from
+// the owner's key event log, which AcceptFoundingSigner records
+// (recordWhatNamesAnOwner) for both. So:
+//   - an owner whose agent gave no address for its log, or whose log would not
+//     verify, shows no name;
+//   - an owner who has rotated shows no name until they sign a new name vouch (today, by redeeming another invitation),
+//     because their old vouch no longer verifies against their current key.
 //
-// All three show the key identifier the caller already has. That is the safe
+// Both show the key identifier the caller already has. That is the safe
 // outcome, and nothing here guesses a name to fill the gap.
+//
+// An overlay that owns the roster supplies it with SetOwnerRoster, and the names
+// are then checked here, by the same code, never by the overlay's own.
 func (s *CoreServer) verifiedOwnerNames(orgAID string, owners []string) map[string]signedOwnerName {
 	out := map[string]signedOwnerName{}
-	if s.assetHandler == nil {
+	rows := s.ownerRoster()
+	if len(rows) == 0 {
 		return out
 	}
-	rows := s.assetHandler.Store.ListEmployees()
 	for _, aid := range owners {
 		key := s.keyToCheckAnOwnersNameAgainst(aid)
 		if key == "" {
@@ -113,4 +117,41 @@ func signedNameOf(aid, orgAID, publicKey string, rows []asset.Employee) (signedO
 		}
 	}
 	return signedOwnerName{}, false
+}
+
+// SetOwnerRoster tells the core where the roster in use is, when an overlay
+// owns it (OVERLAY_OWNS_ORG_ROUTES) and this core's own is empty. The owner list
+// then shows the names that roster holds, but only those that verify here, so an
+// overlay serves exactly the names the core would and cannot make up its own.
+func (s *CoreServer) SetOwnerRoster(roster func() []asset.Employee) {
+	s.ownerRosterSource = roster
+}
+
+func (s *CoreServer) ownerRoster() []asset.Employee {
+	if s.ownerRosterSource != nil {
+		return s.ownerRosterSource()
+	}
+	if s.assetHandler == nil {
+		return nil
+	}
+	return s.assetHandler.Store.ListEmployees()
+}
+
+// recordWhatNamesAnOwner records, when an owner agrees to own the organisation,
+// the one thing the name they signed needs besides the signature: their key
+// event log, verified here, so that their CURRENT key is known and follows a
+// rotation (keyToCheckAnOwnersNameAgainst). The log is fetched from the address
+// the owner's agent gave and accepted only if it belongs to the identifier the
+// owner presented; nothing is written for any other identifier.
+//
+// Best effort, and deliberately not fatal: the owner is already sealed, and
+// refusing now would leave an organisation with no owner. When it fails the
+// owner is listed by identifier, which is the safe outcome.
+func (s *CoreServer) recordWhatNamesAnOwner(aid, oobi string) {
+	if aid == "" || oobi == "" || s.DataStore == nil {
+		return
+	}
+	if _, _, err := s.ensureKeriContactIs(oobi, aid); err != nil {
+		log.Printf("[signer] could not record the key log of owner %s, so no name will be shown for them: %v", aid, err)
+	}
 }

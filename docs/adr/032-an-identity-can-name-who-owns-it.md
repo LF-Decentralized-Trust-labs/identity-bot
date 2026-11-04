@@ -254,16 +254,22 @@ The response returns the vouch (`payload` and `signature`) beside each name
 (`owner_name_vouches`), so the device holding the owner's key can verify the name
 itself instead of trusting the computer.
 
-Three cases show **no name**, and show the key identifier instead:
+Agreeing to own the organisation, whether by invite, by ownership ceremony or
+by founding, records the owner's key event log from the address their agent
+gives (`AcceptFoundingSigner`), accepted only if it verifies for the identifier
+they presented. That, with the `sign_org` vouch stored beside them, is all a name
+needs, so an owner added by ceremony is named like any other.
 
-- an owner added through the ownership ceremony, which records no roster row and
-  no key event log here;
-- an owner on an organisation whose roster an overlay owns
-  (`OVERLAY_OWNS_ORG_ROUTES`), where this core's roster is not the one in use;
+An organisation whose roster an overlay owns (`OVERLAY_OWNS_ORG_ROUTES`) hands
+that roster to the core (`SetOwnerRoster`). The names shown are still the ones
+the core verifies; the overlay does not check or supply its own.
+
+Two cases show **no name**, and show the key identifier instead:
+
+- an owner whose agent gave no address for its log, or whose log does not verify;
 - an owner who has rotated, until they sign a new name vouch (today, by redeeming another invitation).
 
-Nothing guesses a name to fill the gap. Recording what the first two need is
-deferred, not decided here.
+Nothing guesses a name to fill the gap.
 
 ## What this supersedes
 
