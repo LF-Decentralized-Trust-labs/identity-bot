@@ -61,51 +61,21 @@ func (c corroboration) Corroborated() bool { return c.Asked > 0 && !c.Contradict
 // identity named no witnesses, which is a real answer: nobody was ever asked to
 // watch, so nobody can be asked now.
 func witnessKeysIn(kel []map[string]interface{}) []string {
-	for _, entry := range kel {
-		ev := keriEventBody(entry)
-		if ev == nil {
-			continue
-		}
-		if t, _ := ev["t"].(string); t != "icp" && t != "dip" {
-			continue
-		}
-		raw, _ := ev["b"].([]interface{})
-		out := make([]string, 0, len(raw))
-		for _, v := range raw {
-			if k, _ := v.(string); k != "" {
-				out = append(out, k)
-			}
-		}
-		return out
-	}
-	return nil
-}
-
-// keriEventBody gets at the actual KERI event, whichever shape it arrived in.
-//
-// A log travels in two forms and both reach here. A witness serves parsed
-// events, so the fields are at the top level. This agent's own store keeps
-// records — the event as text under event_json, alongside the signature and the
-// canonical bytes — because a KERI event's serialisation is ordered and putting
-// it through a map loses that.
-//
-// Reading only one shape is how this silently found no witnesses at all: the
-// keys were there, one level down, and every history came back "0 witnesses
-// named" rather than failing in a way anybody would notice.
-func keriEventBody(entry map[string]interface{}) map[string]interface{} {
-	if entry == nil {
+	// From the verified bytes, never from event_json text beside them: that
+	// text is not covered by the check on the claim, and blanking its "b" would
+	// otherwise leave nobody to ask.
+	ev, _, ok := witness.InceptionOf(kel)
+	if !ok {
 		return nil
 	}
-	if _, ok := entry["t"].(string); ok {
-		return entry
-	}
-	if body, ok := entry["event_json"].(string); ok && body != "" {
-		var parsed map[string]interface{}
-		if json.Unmarshal([]byte(body), &parsed) == nil {
-			return parsed
+	raw, _ := ev["b"].([]interface{})
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		if k, _ := v.(string); k != "" {
+			out = append(out, k)
 		}
 	}
-	return nil
+	return out
 }
 
 // eventCountIn counts the events in a log, however it is carried.

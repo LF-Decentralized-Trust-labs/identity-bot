@@ -1,9 +1,11 @@
 package witness
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"reflect"
 	"strings"
@@ -53,35 +55,94 @@ func ReadTarget(requestURI string) string {
 // host, so a read signed for one witness cannot be replayed to another), what it
 // asks for, and when.
 func ReadStatement(reader, host, target, stamp string) string {
-	return fmt.Sprintf("witness-kel-read/v2\n%s\n%s\n%s\n%s", reader, strings.ToLower(host), target, stamp)
+	return fmt.Sprintf("witness-kel-read/v2\n%s\n%s\n%s\n%s", reader, boundHost(host), target, stamp)
+}
+
+// boundHost is the host as signed: lower case, and without a default port, so
+// a proxy that adds or strips ":443" (or ":80") between reader and witness does
+// not change what was signed.
+func boundHost(host string) string {
+	host = strings.ToLower(host)
+	if h, port, err := net.SplitHostPort(host); err == nil && (port == "443" || port == "80") {
+		if strings.Contains(h, ":") {
+			return "[" + h + "]"
+		}
+		return h
+	}
+	return host
+}
+
+// InceptionOf finds the inception (icp or dip) in a presented key log and
+// returns it parsed, with the exact bytes the controller published when the
+// record carries them.
+//
+// The bytes are what a claim is verified by (drivers.ValidateKELInputFromRecords
+// checks raw_bytes_b64 and nothing else), so they are the only part of a record
+// that can be believed. event_json is text the claimant wrote beside them: it is
+// read only for a record that has no bytes at all, and never when it has them,
+// so changing a field there changes nothing that is acted on.
+func InceptionOf(kel []map[string]interface{}) (ev map[string]interface{}, raw []byte, ok bool) {
+	for _, entry := range kel {
+		if b64, has := entry["raw_bytes_b64"].(string); has && b64 != "" {
+			r, err := decodeAnyBase64(b64)
+			if err != nil {
+				continue
+			}
+			var parsed map[string]interface{}
+			if json.Unmarshal(r, &parsed) != nil {
+				continue
+			}
+			if t, _ := parsed["t"].(string); t == "icp" || t == "dip" {
+				return parsed, r, true
+			}
+			continue
+		}
+		parsed := entry
+		if _, has := entry["t"].(string); !has {
+			body, _ := entry["event_json"].(string)
+			parsed = nil
+			if body != "" {
+				_ = json.Unmarshal([]byte(body), &parsed)
+			}
+		}
+		if parsed == nil {
+			continue
+		}
+		if t, _ := parsed["t"].(string); t == "icp" || t == "dip" {
+			return parsed, nil, true
+		}
+	}
+	return nil, nil, false
+}
+
+func decodeAnyBase64(s string) ([]byte, error) {
+	for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding} {
+		if r, err := enc.DecodeString(s); err == nil {
+			return r, nil
+		}
+	}
+	return nil, fmt.Errorf("not base64")
 }
 
 // InceptionProof is the header value that lets a verifier holding a log read it
-// from a witness: the log's inception event, which only a party the controller
-// gave the log to has. ok is false when the log has no readable inception.
+// from a witness: the log's inception event, exactly as published, which only a
+// party the controller gave the log to has. ok is false when the log has no
+// readable inception.
 func InceptionProof(kel []map[string]interface{}) (string, bool) {
-	for _, entry := range kel {
-		ev := entry
-		if _, has := entry["t"].(string); !has {
-			body, _ := entry["event_json"].(string)
-			ev = nil
-			if body != "" {
-				_ = json.Unmarshal([]byte(body), &ev)
-			}
-		}
-		if ev == nil {
-			continue
-		}
-		if t, _ := ev["t"].(string); t != "icp" && t != "dip" {
-			continue
-		}
-		raw, err := json.Marshal(ev)
-		if err != nil || len(raw) > maxInceptionHeader*3/4 {
+	ev, raw, ok := InceptionOf(kel)
+	if !ok {
+		return "", false
+	}
+	if raw == nil { // a record with no bytes: the best that can be offered
+		var err error
+		if raw, err = json.Marshal(ev); err != nil {
 			return "", false
 		}
-		return base64.RawURLEncoding.EncodeToString(raw), true
 	}
-	return "", false
+	if len(raw) > maxInceptionHeader*3/4 {
+		return "", false
+	}
+	return base64.RawURLEncoding.EncodeToString(raw), true
 }
 
 // SignRead adds the proof of who is reading to a request for a key log.
@@ -148,15 +209,22 @@ func (s *Service) mayReadByInception(aid string, req *http.Request) bool {
 	if json.Unmarshal(raw, &presented) != nil {
 		return false
 	}
-	var held map[string]interface{}
-	if kel, err := s.Store.GetKelEvents(aid); err == nil && len(kel) > 0 {
-		_ = json.Unmarshal([]byte(kel[0].EventJSON), &held)
-	}
-	if held == nil {
-		held = map[string]interface{}{}
-	}
-	// Equal to the inception held, and an inception at that: an empty or absent
-	// one is not proof of anything.
 	t, _ := presented["t"].(string)
-	return (t == "icp" || t == "dip") && reflect.DeepEqual(presented, held)
+	if t != "icp" && t != "dip" {
+		return false
+	}
+	kel, err := s.Store.GetKelEvents(aid)
+	if err != nil || len(kel) == 0 {
+		return false
+	}
+	// Compare bytes with the bytes the controller published, which is what the
+	// verifier's claim was checked by. Only an event stored before witnesses
+	// kept bytes is compared by its parsed fields.
+	if kel[0].RawBytesB64 != "" {
+		held, err := decodeAnyBase64(kel[0].RawBytesB64)
+		return err == nil && bytes.Equal(raw, held)
+	}
+	var held map[string]interface{}
+	_ = json.Unmarshal([]byte(kel[0].EventJSON), &held)
+	return held != nil && reflect.DeepEqual(presented, held)
 }
