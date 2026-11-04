@@ -6,6 +6,7 @@ import 'package:agent_client/services/the_key_is_not_held_by_the_core.dart';
 
 import 'package:crypto/crypto.dart';
 
+import 'key_math.dart';
 import 'owner_signing_client.dart';
 import 'signing_an_event.dart';
 import 'the_key_in_force.dart';
@@ -722,6 +723,8 @@ class CoreService {
     Future<Uint8List?> Function()? ownerSeed,
     Future<OwnerKey?> Function()? ownerKey,
     Future<void> Function()? onStaleKeyState,
+    Future<Uint8List?> Function()? postQuantumSeed,
+    KeyMath? keyMath,
     String? ownerAid,
     String agentAid = '',
     http.Client? inner,
@@ -753,6 +756,8 @@ class CoreService {
           ownerSeed: ownerSeed,
           ownerKey: ownerKey,
           onStaleKeyState: onStaleKeyState,
+          postQuantumSeed: postQuantumSeed,
+          keyMath: keyMath,
           ownerAid: ownerAid,
           agentAid: agentAid,
           inner: inner),

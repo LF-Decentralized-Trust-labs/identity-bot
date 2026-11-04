@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+
 import 'key_math.dart';
 
 /// The event a signer expects to sign, worked out from its own phrase and
@@ -341,9 +343,30 @@ bool _isEd25519Key(String k) =>
 /// Whether CESR has assigned codes for an ML-DSA-65 public key and its indexed
 /// signatures. Until it has, no event that reveals a post-quantum key is
 /// signed, so none is ever published in a form nobody agreed (ADR-061
-/// section 6). Changed only by the release that adopts the assigned codes.
+/// section 6). Off. Changed only by the release that adopts the assigned codes;
+/// until then only a test turns it on ([useAssignedCodesInATest]), against a
+/// core built with the `kerigo_pqtest` tag, and nothing under `lib` calls that.
 class PostQuantumCodes {
-  static bool get assigned => false;
+  static bool _assigned = false;
+
+  static bool get assigned => _assigned;
+
+  /// Turns the setting on or off, for a test. Always put it back off. Any code
+  /// that imports this package could call it, so it refuses to turn the
+  /// setting on in a release build, where no test runs and the codes are not
+  /// assigned.
+  ///
+  /// [inARelease] is whether this is a release build; a test gives it to show
+  /// the refusal, since a test never runs in one.
+  @visibleForTesting
+  static void useAssignedCodesInATest(bool on,
+      {bool inARelease = kReleaseMode}) {
+    if (on && inARelease) {
+      throw StateError('the post-quantum codes cannot be switched on in a '
+          'release build: CESR has assigned none');
+    }
+    _assigned = on;
+  }
 
   static void require(String what) {
     if (!assigned) {

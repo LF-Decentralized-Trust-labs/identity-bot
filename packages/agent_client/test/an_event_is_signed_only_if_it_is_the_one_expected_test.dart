@@ -258,7 +258,9 @@ void main() {
   group('an event with several owners', () {
     // Sorted as ASCII: alice, bob, carol, so bob is owner 1 (k[1], n[2..3]).
     String id(String w) => 'E${w.padRight(43, w[0])}';
-    String keyOf(String w) => 'D${w.padRight(43, w[0])}';
+    // A key's second character carries its code's padding bits, which must be
+    // zero for keri-go to read it as a key: an A.
+    String keyOf(String w) => 'DA${w.padRight(42, w[0])}';
     final alice = id('alice'), bob = id('bob'), carol = id('carol');
     OwnerKeys keysOf(String w) =>
         OwnerKeys(keyOf(w), id('${w}next'), id('${w}pq'));

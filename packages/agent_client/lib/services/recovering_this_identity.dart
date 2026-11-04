@@ -137,6 +137,7 @@ class RecoveringThisIdentity {
           aid: aid,
           establishment: state.establishment,
           key: state.keyInForce,
+          keys: state.keysInForce,
           generation: state.generation,
           tip: state.tip,
           witnesses: state.witnesses.witnesses,

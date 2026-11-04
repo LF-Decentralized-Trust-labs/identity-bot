@@ -15,6 +15,7 @@ class VerifiedKeyState {
       {required this.aid,
       required this.establishment,
       required this.keyInForce,
+      required this.keysInForce,
       required this.generation,
       required this.tip,
       required this.witnesses,
@@ -28,6 +29,10 @@ class VerifiedKeyState {
   /// The newest establishment event, and the key it revealed.
   final Place establishment;
   final String keyInForce;
+
+  /// Every key that event names in `k`: the classical key alone at stage one,
+  /// the classical key and the post-quantum one at stage two.
+  final List<String> keysInForce;
 
   /// Which generation of this phrase's keys is in force: the key the next
   /// interaction is signed with is key [generation], and the next rotation
@@ -62,7 +67,8 @@ class VerifiedKeyState {
   KeyStateNow get now => (
         tip: (sn: tip.sn, digest: tip.digest),
         generation: generation,
-        witnesses: witnesses
+        witnesses: witnesses,
+        keys: keysInForce
       );
 }
 
@@ -166,15 +172,22 @@ class TheKeyStateThisDeviceReads {
     final tip = h.tip;
     final g = h.generation;
     final key = h.keyInForce;
+    // A record made before the keys were kept is of an identity at stage one:
+    // no stage-two event was ever signed by a version that kept none.
+    final keys = h.keysInForce ?? (key == null ? null : [key]);
     if (est != null &&
         tip != null &&
         g != null &&
         key != null &&
+        keys != null &&
+        keys.isNotEmpty &&
+        keys.first == key &&
         KeyManager.publicKeyAt(seed, g) == key) {
       return VerifiedKeyState(
           aid: h.aid,
           establishment: est,
           keyInForce: key,
+          keysInForce: keys,
           generation: g,
           tip: tip,
           witnesses: WitnessSet(h.witnesses, h.toad),
@@ -240,10 +253,22 @@ class TheKeyStateThisDeviceReads {
     var moving = false;
     if (g == null) {
       // Step 1 of a move to this phrase reveals the old phrase's key and
-      // commits to this phrase's key 1.
-      final first =
-          await _km.nextKeyDigest(KeyManager.publicKeyAt(seed, 1));
-      if (e.next.isEmpty || e.next.first != first) {
+      // commits to this phrase's classical key 1 and post-quantum generation 0,
+      // and to nothing else: a step 1 made by someone holding the old phrase,
+      // with another second digest, would leave the move stuck at step 2.
+      final pq0 = KeyManager.slip10Ed25519(seed, KeyPaths.postQuantum(0));
+      final List<String> commitments;
+      try {
+        commitments = [
+          await _km.nextKeyDigest(KeyManager.publicKeyAt(seed, 1)),
+          (await _km.postQuantumNext(pq0)).digest,
+        ];
+      } finally {
+        pq0.fillRange(0, pq0.length, 0);
+      }
+      if (e.next.length != commitments.length ||
+          e.next[0] != commitments[0] ||
+          e.next[1] != commitments[1]) {
         throw TheKeyInForceIsNotThisPhrases(aid, e.sn, key);
       }
       g = 0;
@@ -275,6 +300,7 @@ class TheKeyStateThisDeviceReads {
         aid: aid,
         establishment: (sn: e.sn, digest: e.digest),
         keyInForce: key,
+        keysInForce: e.keys,
         generation: g,
         tip: (sn: tip.sn, digest: tip.digest),
         witnesses: WitnessSet(tip.witnesses, tip.toad),
@@ -290,6 +316,7 @@ class TheKeyStateThisDeviceReads {
           aid: aid,
           establishment: state.establishment,
           key: key,
+          keys: e.keys,
           generation: g,
           tip: state.tip,
           witnesses: tip.witnesses,
@@ -317,9 +344,21 @@ class TheKeyStateThisDeviceReads {
       final raws = j['raw_events_b64'] as List? ?? const [];
       final sigs = j['cesr_signatures'] as List? ?? const [];
       if (raws.isEmpty || raws.length != sigs.length) return null;
+      // Each event's whole list of signatures, where the record carries them
+      // (an event several keys sign, as at stage two, has one from each);
+      // otherwise the one signature `cesr_signatures` holds.
+      final kel = j['kel'] as List? ?? const [];
+      List<String> signaturesOf(int i) {
+        final all = i < kel.length && kel[i] is Map
+            ? (kel[i] as Map)['signatures']
+            : null;
+        if (all is List && all.isNotEmpty) return [for (final x in all) '$x'];
+        return ['${sigs[i]}'];
+      }
+
       final signed = [
         for (var i = 0; i < raws.length; i++)
-          SignedCopy('${raws[i]}', ['${sigs[i]}'])
+          SignedCopy('${raws[i]}', signaturesOf(i))
       ];
       final st = await _km.verifyLog(aid, signed);
       return LogCopy('the discovery record', st.events, signed: signed);

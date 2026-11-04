@@ -7,6 +7,7 @@ import 'package:agent_client/crypto/keys.dart';
 import 'package:agent_client/services/key_math.dart';
 import 'package:agent_client/services/signing_an_event.dart';
 import 'package:agent_client/services/the_identity_this_device_holds.dart';
+import 'package:agent_client/services/the_key_state_this_device_reads.dart';
 import 'package:agent_client/services/the_key_events_this_device_makes.dart';
 import 'package:agent_client/services/the_witnesses_of_this_devices_events.dart';
 import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
@@ -38,6 +39,19 @@ class ACoreThatMisleads extends http.BaseClient {
   /// answer lost, as [loseTheNextCommitsAnswer] does for the next one.
   int? loseTheAnswerToCommitsAfter;
 
+  /// Every commit is answered `202 waiting_for_signatures`, without reaching
+  /// the core: it says it holds the event for signers that are not coming, and
+  /// adds nothing.
+  bool holdEveryCommit = false;
+
+  /// Rewrites the body of a prepare request before the core sees it, so the
+  /// core prepares another event than the one asked for; null leaves it as it
+  /// was.
+  Map<String, Object?>? Function(Map<String, Object?> asked)? alterThePrepare;
+
+  /// How many commits were sent to this client, answered or not.
+  int commits = 0;
+
   /// How many prepares to answer `tip_moved` without asking the core.
   int movePrepares = 0;
 
@@ -45,11 +59,26 @@ class ACoreThatMisleads extends http.BaseClient {
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     request.headers['X-Local-Owner-Secret'] = ownerSecret;
     final path = request.url.path;
+    final alter = alterThePrepare;
+    if (path == '/api/events/prepare' &&
+        alter != null &&
+        request is http.Request) {
+      final altered =
+          alter(Map<String, Object?>.from(jsonDecode(request.body) as Map));
+      if (altered != null) request.body = jsonEncode(altered);
+    }
+    if (path == '/api/events/commit') commits++;
     if (path == '/api/events/prepare' && movePrepares > 0) {
       movePrepares--;
       return _answer(409, 'tip_moved');
     }
     if (path == '/api/events/commit') {
+      if (holdEveryCommit) {
+        return http.StreamedResponse(
+            Stream.value(utf8.encode(jsonEncode(
+                {'status': 'waiting_for_signatures', 's': '1', 'd': 'x'}))),
+            202);
+      }
       final instead = answerTheNextCommit;
       if (instead != null) {
         answerTheNextCommit = null;
@@ -142,6 +171,18 @@ class ACore {
   final KeyMath _km;
   TheKeyEventsThisDeviceMakes makes(TheWitnessesOfThisDevicesEvents w) =>
       TheKeyEventsThisDeviceMakes(client, base, _km, witnesses: w);
+
+  /// An identity's key events as a device that keeps its own record makes them
+  /// and reads the key state from it, as an app does: after a restart the
+  /// record and the key state are read again from what was stored.
+  TheKeyEventsThisDeviceMakes makesReadingTheKeyState(Uint8List seed,
+          {KeyMath? keyMath}) =>
+      TheKeyEventsThisDeviceMakes(client, base, keyMath ?? _km,
+          held: TheIdentityThisDeviceHolds(),
+          readTheKeyState: (_) async =>
+              (await TheKeyStateThisDeviceReads(client, keyMath ?? _km, base)
+                      .read(seed))
+                  .now);
   Future<void> close() async => _process.kill();
 }
 

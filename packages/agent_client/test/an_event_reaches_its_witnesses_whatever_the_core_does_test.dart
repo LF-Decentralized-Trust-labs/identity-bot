@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:agent_client/crypto/bip39.dart';
+import 'package:agent_client/crypto/keys.dart';
 import 'package:agent_client/services/key_math.dart';
 import 'package:agent_client/services/the_events_this_device_signed.dart';
 import 'package:agent_client/services/the_identity_this_device_holds.dart';
@@ -459,7 +460,12 @@ void main() {
     final m = TheKeyEventsThisDeviceMakes(more.client, more.base, km,
         readTheKeyState: (_) async {
       reads++;
-      return (tip: at, generation: inForce, witnesses: WitnessSet.none);
+      return (
+        tip: at,
+        generation: inForce,
+        witnesses: WitnessSet.none,
+        keys: [KeyManager.publicKeyAt(s4, inForce)]
+      );
     }, retryDelays: const [Duration.zero, Duration.zero, Duration.zero]);
     final founded = await m.found(s4);
     at = (sn: 0, digest: founded.digest);
@@ -471,7 +477,8 @@ void main() {
         afterSn: 0,
         afterDigest: founded.digest,
         anchors: anchor);
-    expect((ixn.sn, reads), (1, 2));
+    // One read says the identity is at stage one, then one per retry.
+    expect((ixn.sn, reads), (1, 3));
     at = (sn: 1, digest: ixn.digest);
 
     more.client.movePrepares = 4;
@@ -485,7 +492,7 @@ void main() {
             anchors: another),
         throwsA(isA<TheLogKeepsMoving>()
             .having((e) => e.rotatedElsewhere, 'rotated elsewhere', false)));
-    expect(reads, 3);
+    expect(reads, 4);
     more.client.movePrepares = 0;
 
     // Read again, the keys in force are another generation's: another device
@@ -514,7 +521,9 @@ void main() {
             recovery: true),
         throwsA(
             isA<KeyEventRefused>().having((e) => e.code, 'code', 'tip_moved')));
-    expect(reads, 0);
+    expect(reads, 1,
+        reason: 'one read says what stage it is at, and a recovery rotation '
+            'is never moved to the tip after it');
     expect(await TheEventsThisDeviceSigned().unfinished(founded.aid), isEmpty,
         reason: 'nothing was signed for an event the core would not prepare');
   });

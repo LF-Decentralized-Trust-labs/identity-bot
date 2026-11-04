@@ -34,6 +34,14 @@ class HeldIdentity {
   String? get keyInForce => (_j['est'] as Map?)?['key'] as String?;
   int? get generation => ((_j['est'] as Map?)?['g'] as num?)?.toInt();
 
+  /// Every key that event named in `k`: one at stage one, two at stage two (the
+  /// classical key and the post-quantum one). Null in a record made before
+  /// they were kept, which cannot answer which stage the identity is at.
+  List<String>? get keysInForce {
+    final ks = (_j['est'] as Map?)?['ks'];
+    return ks is List ? [for (final k in ks) '$k'] : null;
+  }
+
   /// The newest event this device made that its core holds: where its next
   /// event follows.
   Place? get tip => _place('tip');
@@ -123,6 +131,7 @@ class TheIdentityThisDeviceHolds {
           required Place at,
           required String ilk,
           String? key,
+          List<String>? keys,
           int? generation,
           required List<String> witnesses,
           required int toad}) =>
@@ -143,12 +152,13 @@ class TheIdentityThisDeviceHolds {
               's': at.sn,
               'd': at.digest,
               'key': key,
+              if (keys != null) 'ks': keys,
               'g': generation
             };
           }
-          final keys = List<Object?>.from(j['keys'] as List? ?? const []);
-          if (key != null && !keys.contains(key)) keys.add(key);
-          j['keys'] = keys;
+          final revealed = List<Object?>.from(j['keys'] as List? ?? const []);
+          if (key != null && !revealed.contains(key)) revealed.add(key);
+          j['keys'] = revealed;
         }
       });
 
@@ -159,6 +169,7 @@ class TheIdentityThisDeviceHolds {
           {required String aid,
           required Place establishment,
           required String key,
+          required List<String> keys,
           required int generation,
           required Place tip,
           required List<String> witnesses,
@@ -171,6 +182,7 @@ class TheIdentityThisDeviceHolds {
           's': establishment.sn,
           'd': establishment.digest,
           'key': key,
+          'ks': keys,
           'g': generation
         };
         j['tip'] = {'s': tip.sn, 'd': tip.digest};

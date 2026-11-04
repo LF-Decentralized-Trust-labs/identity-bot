@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'dart:convert';
 
 import 'package:agent_client/crypto/bip39.dart';
@@ -283,5 +284,70 @@ void main() {
     expect(recovered.messagingKeysToReplace, isTrue);
     expect(await heldBy(after), aid);
     expect((await TheIdentityThisDeviceHolds().read())!.generation, 0);
+  });
+
+  /// Founds an identity on [by]'s key 0, committing to [next]: what an old
+  /// phrase's step 1 looks like to a device holding only the new phrase.
+  Future<String> aFoundingBy(Uint8List by, List<String> next) async {
+    final icp = await preparedAndSigned(before.client, before.base, by, 0, {
+      't': 'icp',
+      'k': [KeyManager.keyAt(by, 0).publicKeyEncoded],
+      'kt': '1',
+      'n': next,
+      'nt': '1',
+      'a': [],
+      'b': [w1.aid, w2.aid, w3.aid],
+      'bt': '2',
+    });
+    await commitTo(before.base, icp.rawB64, icp.sigs);
+    final ev = await km.parseEvent(base64Decode(icp.rawB64));
+    await witnesses.receipt(
+        aid: ev.i,
+        sn: 0,
+        digest: ev.d,
+        bytesB64: icp.rawB64,
+        sigs: icp.sigs,
+        set: WitnessSet([w1.aid, w2.aid, w3.aid], 2));
+    return ev.i;
+  }
+
+  test(
+      'a step 1 by the old phrase that commits to this phrase\'s classical '
+      'key but another post-quantum one is not a move to this phrase',
+      () async {
+    final old = Bip39.mnemonicToSeed(
+        'zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong'.split(' '));
+    final someOtherPq = (await km.postQuantumNext(
+            KeyManager.slip10Ed25519(old, KeyPaths.postQuantum(5))))
+        .digest;
+    final aid = await aFoundingBy(old, [
+      await km.nextKeyDigest(KeyManager.keyAt(seed, 1).publicKeyEncoded),
+      someOtherPq
+    ]);
+    await expectLater(
+        RecoveringThisIdentity(after.client, after.base, km)
+            .recover(seed, aid: aid, witnessAddresses: addresses()),
+        throwsA(isA<TheKeyInForceIsNotThisPhrases>()));
+  });
+
+  test(
+      'the same step 1 committing to this phrase\'s post-quantum generation 0 '
+      'is not refused as another phrase\'s', () async {
+    final old = Bip39.mnemonicToSeed(
+        'zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong'.split(' '));
+    final pq0 = (await km.postQuantumNext(
+            KeyManager.slip10Ed25519(seed, KeyPaths.postQuantum(0))))
+        .digest;
+    final aid = await aFoundingBy(old, [
+      await km.nextKeyDigest(KeyManager.keyAt(seed, 1).publicKeyEncoded),
+      pq0
+    ]);
+    try {
+      await RecoveringThisIdentity(after.client, after.base, km)
+          .recover(seed, aid: aid, witnessAddresses: addresses());
+    } catch (e) {
+      expect(e, isNot(isA<TheKeyInForceIsNotThisPhrases>()),
+          reason: 'the commitments are this phrase\'s: $e');
+    }
   });
 }

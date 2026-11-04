@@ -75,7 +75,12 @@ class LocalCoreKeriService extends KeriService {
         held: _held,
         witnesses: TheWitnessesOfThisDevicesEvents(
             _client, _km, KnownWitnesses(h?.witnessAddresses ?? const {})),
-        readTheKeyState: (_) async => (await _readTheCopies(seed)).now);
+        readTheKeyState: (_) async => (await _readTheCopies(seed)).now,
+        // The stage, from the key state as this device reads it: its own record
+        // where it made the newest establishment event, otherwise what the
+        // copies of the log (or, for an identity founded before the record, its
+        // core) say.
+        readTheKeysInForce: (_) async => (await _keyState(seed)).now);
   }
 
   /// The key state of this device's identity for the phrase whose BIP39 seed
@@ -103,6 +108,7 @@ class LocalCoreKeriService extends KeriService {
               digest: '${legacy.establishment['d']}'
             ),
             keyInForce: KeyManager.publicKeyAt(seed, legacy.index),
+            keysInForce: [KeyManager.publicKeyAt(seed, legacy.index)],
             generation: legacy.index,
             tip: (sn: legacy.nextSequenceNumber - 1, digest: legacy.tipDigest),
             // The witnesses and threshold the identity has, as its core
@@ -218,10 +224,12 @@ class LocalCoreKeriService extends KeriService {
   /// the new phrase's keys; the second, made with the new phrase as a recovery
   /// rotation after the first, reveals the new phrase's first key and
   /// supersedes any interaction a holder of the old phrase signed in between.
-  /// The new phrase is kept beside the old one before anything is signed, and
-  /// replaces it only once the second rotation is in the log, so a move
-  /// interrupted between the two is finished by
-  /// [finishMovingToANewPhrase] and never strands the identity.
+  /// The new phrase is kept beside the old one once step 1 is prepared and
+  /// checked and before it is signed, so a core that refuses step 1 leaves
+  /// nothing kept and the identity signs as it did; it replaces the old only
+  /// once the second rotation is in the log, so a move interrupted between the
+  /// two is finished by [finishMovingToANewPhrase] and never strands the
+  /// identity.
   ///
   /// The new phrase's messaging keys are not anchored by the move: the
   /// identity keeps the keyset it is reached on until its keys are replaced.
@@ -237,11 +245,7 @@ class LocalCoreKeriService extends KeriService {
       throw StateError('a move to another phrase is under way; it is finished '
           'first');
     }
-    if (!await SecureKeyStore.savePhraseMovingTo(words)) {
-      throw StateError('the new phrase could not be kept safely, so the move '
-          'did not start');
-    }
-    return finishMovingToANewPhrase();
+    return _finishMove(words);
   }
 
   /// Finishes a move to a new phrase, from wherever it stands: step 1 not
@@ -256,6 +260,10 @@ class LocalCoreKeriService extends KeriService {
   Future<RotationResult> finishMovingToANewPhrase() async {
     final words = await SecureKeyStore.loadPhraseMovingTo();
     if (words == null) throw StateError('no move to a new phrase is under way');
+    return _finishMove(words);
+  }
+
+  Future<RotationResult> _finishMove(List<String> words) async {
     final old = await SecureKeyStore.loadMnemonic();
     if (old == null)
       throw Exception('No identity keys found in secure storage.');
@@ -279,7 +287,7 @@ class LocalCoreKeriService extends KeriService {
     } on TheKeyInForceIsNotThisPhrases {
       // Step 1 is not in the log: the old phrase's keys are in force and
       // commit to its own next key. Step 1 is made now.
-      await _stepOne(oldSeed, newSeed);
+      await _stepOne(oldSeed, newSeed, words);
       state = await _keyState(newSeed);
     }
 
@@ -293,7 +301,8 @@ class LocalCoreKeriService extends KeriService {
           afterDigest: state.establishment.digest,
           toad: state.witnesses.toad,
           witnessedBy: state.witnesses,
-          recovery: true);
+          recovery: true,
+          afterStepOneOfAMove: true);
       signature = step2.signatures.first;
     }
     // The messaging keys came from the old phrase, so whoever holds it can
@@ -317,7 +326,8 @@ class LocalCoreKeriService extends KeriService {
   /// say is in force. Where somebody else holding the old phrase rotated
   /// first, it is made once more after their rotation; where they moved the
   /// identity to keys of their own, the move is dropped.
-  Future<void> _stepOne(Uint8List oldSeed, Uint8List newSeed) async {
+  Future<void> _stepOne(
+      Uint8List oldSeed, Uint8List newSeed, List<String> words) async {
     for (var tries = 0;; tries++) {
       final VerifiedKeyState state;
       try {
@@ -334,7 +344,19 @@ class LocalCoreKeriService extends KeriService {
             afterSn: state.tip.sn,
             afterDigest: state.tip.digest,
             toad: state.witnesses.toad,
-            witnessedBy: state.witnesses);
+            witnessedBy: state.witnesses,
+            // Kept once the core has prepared step 1 and it has been checked,
+            // before the old keys sign it: a step 1 the core refuses at prepare,
+            // or that is not the one expected, keeps nothing and leaves the
+            // identity able to sign. One refused at commit, after it was signed,
+            // stops all signing until it is let go, as any signed-then-refused
+            // key event does.
+            beforeSigning: () async {
+          if (!await SecureKeyStore.savePhraseMovingTo(words)) {
+            throw StateError('the new phrase could not be kept safely, so '
+                'the move did not start');
+          }
+        });
         return;
       } on TheKeyInForceIsNotThisPhrases {
         await SecureKeyStore.clearPhraseMovingTo();

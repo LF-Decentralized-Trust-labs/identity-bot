@@ -5,7 +5,10 @@ import 'package:http/http.dart' as http;
 
 import '../crypto/keys.dart';
 import '../crypto/owner_signature.dart';
+import 'key_math.dart';
+import 'the_event_this_device_expects.dart';
 import 'the_identity_this_device_holds.dart';
+import 'the_key_events_this_device_makes.dart';
 import 'the_key_state_this_device_reads.dart';
 import 'the_path_a_signature_covers.dart';
 import 'the_owner_at_this_computer.dart';
@@ -42,6 +45,8 @@ class OwnerSigningClient extends http.BaseClient {
     Future<Uint8List?> Function()? ownerSeed,
     this.ownerKey,
     this.onStaleKeyState,
+    this.postQuantumSeed,
+    this.keyMath,
     this.ownerAid,
     this.agentAid = '',
     http.Client? inner,
@@ -62,6 +67,16 @@ class OwnerSigningClient extends http.BaseClient {
   /// before the key is read again: the device forgets where it believed its
   /// log ends, so the reading that follows asks the witnesses.
   final Future<void> Function()? onStaleKeyState;
+
+  /// Reads the seed of the owner's post-quantum key when the identity is at
+  /// stage two, null at stage one (ADR-061 section 6). Where it gives one,
+  /// every request also carries an ML-DSA-65 signature over the same bytes in
+  /// `X-IA-Owner-Sig-PQ`, made through [keyMath], which an agent whose owner is
+  /// at stage two requires.
+  final Future<Uint8List?> Function()? postQuantumSeed;
+
+  /// The key arithmetic that signs with ML-DSA-65; needed with [postQuantumSeed].
+  final KeyMath? keyMath;
 
   /// The origin of the agent this client owns, as scheme://host:port. Requests
   /// anywhere else are passed through untouched.
@@ -166,6 +181,7 @@ class OwnerSigningClient extends http.BaseClient {
       return null;
     }
 
+    final path = pathSignatureCovers(agentOrigin, request.url);
     final signed = http.Request(request.method, request.url)
       ..headers.addAll(request.headers)
       ..bodyBytes = request.bodyBytes
@@ -183,7 +199,7 @@ class OwnerSigningClient extends http.BaseClient {
         // request, so the agent verifies `/api/…` and a prefixed signature matches
         // nothing. pathSignatureCovers removes the prefix, and leaves a bare
         // origin's path untouched.
-        path: pathSignatureCovers(agentOrigin, request.url),
+        path: path,
         body: request.bodyBytes,
         ownerSeed: seed,
         ownerAid: ownerAid,
@@ -195,12 +211,44 @@ class OwnerSigningClient extends http.BaseClient {
       // caller's.
       if (read != null) seed.fillRange(0, seed.length, 0);
     }
+    await _signAtStageTwo(signed, request, path);
     if (place != null) {
       signed.headers[keyStateHeader] =
           '${place.sn.toRadixString(16)}.${place.digest}';
     }
 
     return (response: await _inner.send(signed), place: place);
+  }
+
+  /// At stage two, adds the post-quantum signature over the bytes the first
+  /// covers. Refused ([PostQuantumNotYet]) while no code is assigned, so a
+  /// request is never sent signed by one key of two.
+  Future<void> _signAtStageTwo(
+      http.Request signed, http.Request request, String path) async {
+    final read = postQuantumSeed;
+    if (read == null) return;
+    final pqSeed = await read();
+    if (pqSeed == null) return;
+    try {
+      PostQuantumCodes.require('an owner request at stage two');
+      final km = keyMath;
+      if (km == null) {
+        throw StateError('an owner at stage two signs with the post-quantum '
+            'key too, and this client was given no key arithmetic to do it');
+      }
+      final message = OwnerSignature.canonicalStringOver(
+        target: agentAid,
+        method: request.method,
+        path: path,
+        timestamp: signed.headers[OwnerSignature.timestampHeader]!,
+        bodyDigest: signed.headers[OwnerSignature.bodyDigestHeader]!,
+      );
+      final sig = await km.signMlDsa65(pqSeed, utf8.encode(message));
+      signed.headers[OwnerSignature.postQuantumSigHeader] =
+          await km.indexMlDsa65Signature(sig, index: 1, currentOnly: true);
+    } finally {
+      pqSeed.fillRange(0, pqSeed.length, 0);
+    }
   }
 
   /// Whether a URL belongs to the agent this client owns.
@@ -238,12 +286,14 @@ typedef OwnerKey = ({Uint8List seed, Place establishment});
 /// this phrase and the move is unfinished.
 ({
   Future<OwnerKey?> Function() ownerKey,
-  Future<void> Function() onStaleKeyState
+  Future<void> Function() onStaleKeyState,
+  Future<Uint8List?> Function() postQuantumSeed
 }) ownerKeyFromThePhrase(
   Future<List<String>?> Function() loadMnemonic,
   Uint8List Function(String mnemonic) toSeed,
-  TheKeyStateThisDeviceReads reader,
-) {
+  TheKeyStateThisDeviceReads reader, {
+  KeyMath? keyMath,
+}) {
   var askTheWitnesses = false;
   return (
     ownerKey: () async {
@@ -272,6 +322,29 @@ typedef OwnerKey = ({Uint8List seed, Place establishment});
       }
     },
     onStaleKeyState: () async => askTheWitnesses = true,
+    // At stage two (the key state has the classical key and a post-quantum
+    // one in k), the seed of that post-quantum key, checked to be the one this
+    // phrase derives; null at stage one.
+    postQuantumSeed: () async {
+      final words = await loadMnemonic();
+      if (words == null || words.isEmpty) return null;
+      final seed = toSeed(words.join(' '));
+      try {
+        final state = await reader.read(seed);
+        if (state.movingToThisPhrase || state.keysInForce.length <= 1) {
+          return null;
+        }
+        final km = keyMath;
+        if (km == null) {
+          throw StateError('an owner at stage two signs with the post-quantum '
+              'key too, and no key arithmetic was given to check it');
+        }
+        return await thePostQuantumSeedInForce(
+            km, seed, state.aid, state.generation, state.keysInForce);
+      } finally {
+        seed.fillRange(0, seed.length, 0);
+      }
+    },
   );
 }
 

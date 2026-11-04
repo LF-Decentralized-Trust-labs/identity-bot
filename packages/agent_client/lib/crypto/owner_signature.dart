@@ -25,6 +25,11 @@ class OwnerSignature {
   /// Header carrying the timestamp that was signed.
   static const timestampHeader = 'X-IA-Owner-Timestamp';
 
+  /// Header carrying the post-quantum signature of an owner at stage two: an
+  /// ML-DSA-65 signature over the same bytes as [sigHeader], indexed at place 1.
+  /// Sent only when the owner's key list holds a post-quantum key.
+  static const postQuantumSigHeader = 'X-IA-Owner-Sig-PQ';
+
   /// Header naming which owner key signed, when the caller knows it.
   static const aidHeader = 'X-IA-Owner-AID';
 

@@ -220,6 +220,36 @@ extension KeyMathOperations on KeyMath {
         {'seed_hex': _hex(seed), 'msg_b64': base64Encode(message)});
     return base64Decode(a['sig_b64'] as String);
   }
+
+  /// A raw Ed25519 signature written as an indexed one, at key place [index]
+  /// and prior-next place [ondex]: how an event several keys sign names which
+  /// key made each signature.
+  /// With [currentOnly] the signature opens no prior commitment, as an
+  /// interaction's does not, and carries no prior-next place.
+  Future<String> indexEd25519Signature(List<int> signature,
+          {required int index,
+          int ondex = 0,
+          bool currentOnly = false}) async =>
+      (await run('index_ed25519_sig', {
+        'sig_b64': base64Encode(signature),
+        'index': index,
+        'ondex': ondex,
+        if (currentOnly) 'current_only': true
+      }))['sig_qb64'] as String;
+
+  /// A raw ML-DSA-65 signature written as an indexed one at [index] and
+  /// [ondex]. Only a core built for tests can: CESR has assigned no such
+  /// code, so any other refuses with [KeyMathRefused].
+  Future<String> indexMlDsa65Signature(List<int> signature,
+          {required int index,
+          int ondex = 0,
+          bool currentOnly = false}) async =>
+      (await run('index_mldsa65_sig', {
+        'sig_b64': base64Encode(signature),
+        'index': index,
+        'ondex': ondex,
+        if (currentOnly) 'current_only': true
+      }))['sig_qb64'] as String;
 }
 
 String _hex(List<int> b) =>

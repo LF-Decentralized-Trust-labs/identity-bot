@@ -15,8 +15,10 @@ class SignedByUs implements BinarySignature {
 /// Builds the core in this checkout into a new temporary directory and returns
 /// the binary's path. [dev] makes a development build, which founds an
 /// identity on a machine that cannot attest, as a production build rightly
-/// refuses to; [purpose] names the directory.
-Future<String> buildTheCore(String purpose, {bool dev = false}) async {
+/// refuses to; [purpose] names the directory. [tags] are Go build tags, such as
+/// `kerigo_pqtest`, the only build that reads post-quantum keys and signatures.
+Future<String> buildTheCore(String purpose,
+    {bool dev = false, List<String> tags = const []}) async {
   final dir = await Directory.systemTemp.createTemp(purpose);
   final bin =
       '${dir.path}/identity-agent-core${Platform.isWindows ? '.exe' : ''}';
@@ -24,6 +26,7 @@ Future<String> buildTheCore(String purpose, {bool dev = false}) async {
       'go',
       [
         'build',
+        if (tags.isNotEmpty) '-tags=${tags.join(',')}',
         if (dev) ...[
           '-ldflags',
           '-X identity-agent-core/buildmode.rawMode=dev'

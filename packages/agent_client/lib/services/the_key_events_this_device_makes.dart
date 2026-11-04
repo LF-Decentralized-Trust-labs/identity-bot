@@ -102,9 +102,70 @@ enum LetGo {
 }
 
 /// An identity's key state as this device has verified it: where the log
-/// ends, which generation of this phrase's keys is in force, and the
-/// witnesses in force.
-typedef KeyStateNow = ({Place tip, int generation, WitnessSet witnesses});
+/// ends, which generation of this phrase's keys is in force, the witnesses in
+/// force, and the keys the newest establishment event names in `k` (the
+/// classical key alone at stage one, with the post-quantum key at stage two).
+typedef KeyStateNow = ({
+  Place tip,
+  int generation,
+  WitnessSet witnesses,
+  List<String> keys
+});
+
+/// The seed of the post-quantum key in force for the phrase whose BIP-39 seed
+/// is [seed], at [generation] with [keys] in `k`, checked to be the one this
+/// phrase derives; null at stage one (`k` holds the classical key alone). At
+/// stage two `k` holds the classical key of [generation] and the post-quantum
+/// key of generation [generation] - 1, and nothing else is a stage this phrase
+/// signs for ([ThePostQuantumKeyInForceIsNotThisPhrases]).
+///
+/// The one place this stage check is made, for the events this device makes and
+/// the owner's requests alike. The seed handed back is the caller's to zero;
+/// one that fails the check is zeroed here. [derive] is how the seed is
+/// derived, given for a test to hold the buffer and see it zeroed.
+Future<Uint8List?> thePostQuantumSeedInForce(
+    KeyMath km, Uint8List seed, String aid, int generation, List<String> keys,
+    {Uint8List Function(Uint8List seed, int generation)? derive}) async {
+  if (keys.length <= 1) return null;
+  if (keys.length != 2 || generation < 1) {
+    throw ThePostQuantumKeyInForceIsNotThisPhrases(
+        aid,
+        'k holds ${keys.length} keys at generation $generation, and '
+        'only two (the classical key and the post-quantum key of the '
+        'generation before it) are a stage this phrase signs for');
+  }
+  final pq = (derive ??
+      (s, g) => KeyManager.slip10Ed25519(s, KeyPaths.postQuantum(g)))(
+    seed,
+    generation - 1,
+  );
+  // Zeroed unless it is handed over, whether the check throws or fails.
+  var handedOver = false;
+  try {
+    if ((await km.postQuantumNext(pq)).verkey != keys[1]) {
+      throw ThePostQuantumKeyInForceIsNotThisPhrases(
+          aid,
+          'the post-quantum key in k is not the one of generation '
+          '${generation - 1} this phrase derives');
+    }
+    handedOver = true;
+    return pq;
+  } finally {
+    if (!handedOver) pq.fillRange(0, pq.length, 0);
+  }
+}
+
+/// The keys in force are not a stage this phrase's keys can sign for: `k` is
+/// neither the classical key alone, nor the classical key and the
+/// post-quantum key of the generation before it. Nothing is signed.
+class ThePostQuantumKeyInForceIsNotThisPhrases implements Exception {
+  ThePostQuantumKeyInForceIsNotThisPhrases(this.aid, this.why);
+  final String aid;
+  final String why;
+  @override
+  String toString() => 'the keys in force for $aid are not ones this phrase '
+      'signs for: $why';
+}
 
 /// An event this device committed: its identifier, place and digest, and
 /// whether the core added it or holds it for further signers.
@@ -116,8 +177,10 @@ class Committed {
   final int sn;
   final String digest;
 
-  /// `recorded`, `already_recorded` when the core had it already, or `held`
-  /// while further signers' signatures are awaited.
+  /// `recorded`, or `already_recorded` when the core had it already. A core
+  /// that answers `waiting_for_signatures` is not believed (this device signs
+  /// with every key an event needs), so that is a [TheCoreWithholdsThisEvent]
+  /// or an [AnEventWasRefused], never a [Committed].
   final String status;
   final String bytesB64;
   final List<String> signatures;
@@ -164,6 +227,7 @@ class TheKeyEventsThisDeviceMakes {
       TheWitnessesOfThisDevicesEvents? witnesses,
       TheIdentityThisDeviceHolds? held,
       this.readTheKeyState,
+      this.readTheKeysInForce,
       this.retryDelays = const [
         Duration(seconds: 1),
         Duration(seconds: 2),
@@ -189,6 +253,14 @@ class TheKeyEventsThisDeviceMakes {
   /// checked as it would be before signing, never from the core's say-so.
   /// Null means a `tip_moved` is not retried.
   final Future<KeyStateNow> Function(String aid)? readTheKeyState;
+
+  /// Reads the keys the newest establishment event names in `k`, as this
+  /// device verifies them, for an identity this device's record cannot answer
+  /// for (one founded before the record kept them): the stage is read from
+  /// this, not given. Where null, [readTheKeyState] is asked. It answers with
+  /// the generation as well as the keys, so a caller whose generation is out of
+  /// date is told so on either path ([TheLogKeepsMoving]).
+  final Future<KeyStateNow> Function(String aid)? readTheKeysInForce;
 
   /// The waits before each retry of a `tip_moved`.
   final List<Duration> retryDelays;
@@ -254,31 +326,142 @@ class TheKeyEventsThisDeviceMakes {
   /// witness set in force before it. A [recovery] rotation follows the place
   /// the person chose, so it is never moved to the tip on a `tip_moved`.
   Future<Committed> rotate(Uint8List seed,
-          {required String aid,
-          required int generation,
-          required int afterSn,
-          required String afterDigest,
-          int toad = 0,
-          List<String> cuts = const [],
-          List<String> adds = const [],
-          List<Object?> anchors = const [],
-          WitnessSet? witnessedBy,
-          bool recovery = false}) =>
-      _rotate('this rotation',
-          revealing: seed,
-          revealed: generation + 1,
-          committingFrom: seed,
-          nextClassical: generation + 2,
-          nextPostQuantum: generation + 1,
-          aid: aid,
-          afterSn: afterSn,
-          afterDigest: afterDigest,
-          toad: toad,
-          cuts: cuts,
-          adds: adds,
-          anchors: anchors,
-          witnessedBy: witnessedBy,
-          recovery: recovery);
+      {required String aid,
+      required int generation,
+      required int afterSn,
+      required String afterDigest,
+      int toad = 0,
+      List<String> cuts = const [],
+      List<String> adds = const [],
+      List<Object?> anchors = const [],
+      WitnessSet? witnessedBy,
+      bool recovery = false,
+      bool afterStepOneOfAMove = false}) async {
+    // At stage two a rotation reveals both keys and commits to both again
+    // (`kt` and `nt` "2"), and both sign it: the stage is read from the key
+    // state, never taken from the caller. [afterStepOneOfAMove] is step 2 of a
+    // move to [seed]'s phrase: the keys in force are the old phrase's, and the
+    // stage is theirs.
+    final pq = await _postQuantumGenerationInForce(seed, aid, generation,
+        theKeysInForceAreAnotherPhrases: afterStepOneOfAMove);
+    return await _rotate('this rotation',
+        revealing: seed,
+        revealed: generation + 1,
+        committingFrom: seed,
+        nextClassical: generation + 2,
+        nextPostQuantum: generation + 1,
+        revealingPostQuantum: pq == null ? null : generation,
+        reCommitWitnessed: pq != null,
+        aid: aid,
+        afterSn: afterSn,
+        afterDigest: afterDigest,
+        toad: toad,
+        cuts: cuts,
+        adds: adds,
+        anchors: anchors,
+        witnessedBy: witnessedBy,
+        recovery: recovery);
+  }
+
+  /// The keys the newest establishment event of [aid] names in `k`: from this
+  /// device's own record where it made that event (a record made before keys
+  /// were kept is of stage one, which is all there was), otherwise from the key
+  /// state [readTheKeyState] reads. Null where neither can say.
+  Future<List<String>?> _keysInForce(String aid, int generation) async {
+    final h = await _held?.read();
+    final key = h?.keyInForce;
+    if (h != null &&
+        h.aid == aid &&
+        h.generation == generation &&
+        key != null) {
+      return h.keysInForce ?? [key];
+    }
+    final read = readTheKeysInForce ?? readTheKeyState;
+    if (read == null) return null;
+    final now = await read(aid);
+    if (now.generation != generation) {
+      throw TheLogKeepsMoving(aid, 0, rotatedElsewhere: true);
+    }
+    return now.keys;
+  }
+
+  /// The generation of the post-quantum key in force for [aid], read from the
+  /// key state this device verifies, or null at stage one. At stage two `k`
+  /// holds the classical key of [generation] and the post-quantum key of
+  /// generation [generation] - 1, and that key must be the one this phrase
+  /// derives, or nothing is signed. Without [readTheKeyState] nothing can say
+  /// the identity is past stage one, so stage one is what is signed for.
+  ///
+  /// With [theKeysInForceAreAnotherPhrases] (step 2 of a move to this phrase,
+  /// whose predecessor's `k` is the old phrase's), only the stage is read: the
+  /// keys in force are not this phrase's to derive, and the event is checked
+  /// against the commitment it opens before anything is signed.
+  Future<int?> _postQuantumGenerationInForce(
+      Uint8List seed, String aid, int generation,
+      {bool theKeysInForceAreAnotherPhrases = false}) async {
+    final keys = await _keysInForce(aid, generation);
+    if (keys == null || keys.length <= 1) return null;
+    // Refused before any key is derived while no code is assigned.
+    PostQuantumCodes.require('an event of an identity at stage two');
+    if (theKeysInForceAreAnotherPhrases) {
+      if (keys.length != 2) {
+        throw ThePostQuantumKeyInForceIsNotThisPhrases(
+            aid,
+            'k holds ${keys.length} keys, and only two (a classical key and a '
+            'post-quantum one) are a stage a move to this phrase is made from');
+      }
+      return generation;
+    }
+    final pq =
+        (await thePostQuantumSeedInForce(_km, seed, aid, generation, keys))!;
+    pq.fillRange(0, pq.length, 0); // only the generation was wanted
+    return generation - 1;
+  }
+
+  /// Stage two of a hybrid identity: rotates [aid], whose last establishment
+  /// event revealed the generation [generation] key and committed to the
+  /// post-quantum key of that generation, revealing both. `k` is the
+  /// generation [generation] + 1 classical key and the generation [generation]
+  /// post-quantum key, `kt` is "2", and it commits to the generation
+  /// [generation] + 2 classical key and the generation [generation] + 1
+  /// post-quantum key with `nt` "2". The classical signature is at index 0 and
+  /// the post-quantum one at index 1, each opening the prior commitment's
+  /// place of the same number. Every event after it needs both signatures.
+  ///
+  /// Refused ([PostQuantumNotYet]) while [PostQuantumCodes.assigned] is off,
+  /// which it is in every release: CESR has assigned no post-quantum code.
+  /// [reCommitWitnessed] is whether the re-commit rotation under the assigned
+  /// codes has been witnessed ([ExpectedEvent.stageTwoRotation]).
+  Future<Committed> rotateToStageTwo(Uint8List seed,
+      {required String aid,
+      required int generation,
+      required int afterSn,
+      required String afterDigest,
+      required bool reCommitWitnessed,
+      int toad = 0,
+      List<String> cuts = const [],
+      List<String> adds = const [],
+      List<Object?> anchors = const [],
+      WitnessSet? witnessedBy}) async {
+    PostQuantumCodes.require('a stage-two rotation');
+    return await _rotate('this stage-two rotation',
+        revealing: seed,
+        revealed: generation + 1,
+        committingFrom: seed,
+        nextClassical: generation + 2,
+        nextPostQuantum: generation + 1,
+        revealingPostQuantum: generation,
+        reCommitWitnessed: reCommitWitnessed,
+        aid: aid,
+        afterSn: afterSn,
+        afterDigest: afterDigest,
+        toad: toad,
+        cuts: cuts,
+        adds: adds,
+        anchors: anchors,
+        witnessedBy: witnessedBy,
+        recovery: false);
+  }
 
   /// Step 1 of moving [aid] to a new phrase (ADR-061 section 10): reveals the
   /// old phrase's key generation [generation] + 1, as a routine rotation would,
@@ -287,22 +470,35 @@ class TheKeyEventsThisDeviceMakes {
   /// which is [rotate] with [newSeed] at generation 0, made as a recovery
   /// rotation after this one so that any interaction a holder of the old
   /// phrase signed in between is superseded.
+  ///
+  /// At stage two the step reveals the old phrase's classical key and its
+  /// post-quantum key in force, commits to the new phrase's classical key 1 and
+  /// post-quantum generation 0 with `nt` "2", and is signed by both old keys;
+  /// the stage is read from the key state, never given. [beforeSigning] runs
+  /// once the core has prepared the event and it has been checked, and before
+  /// anything signs it: where the caller keeps the new phrase, so a core that
+  /// refuses the step leaves nothing kept.
   Future<Committed> moveToANewPhrase(Uint8List oldSeed, Uint8List newSeed,
       {required String aid,
       required int generation,
       required int afterSn,
       required String afterDigest,
       int toad = 0,
-      WitnessSet? witnessedBy}) async {
+      WitnessSet? witnessedBy,
+      Future<void> Function()? beforeSigning}) async {
     if (_sameBytes(oldSeed, newSeed)) {
       throw ArgumentError('the new phrase is the phrase it replaces');
     }
+    final pq = await _postQuantumGenerationInForce(oldSeed, aid, generation);
     return await _rotate('moving to a new phrase',
         revealing: oldSeed,
         revealed: generation + 1,
         committingFrom: newSeed,
         nextClassical: 1,
         nextPostQuantum: 0,
+        revealingPostQuantum: pq == null ? null : generation,
+        reCommitWitnessed: pq != null,
+        beforeSigning: beforeSigning,
         aid: aid,
         afterSn: afterSn,
         afterDigest: afterDigest,
@@ -325,6 +521,8 @@ class TheKeyEventsThisDeviceMakes {
       required Uint8List committingFrom,
       required int nextClassical,
       required int nextPostQuantum,
+      int? revealingPostQuantum,
+      bool reCommitWitnessed = false,
       required String aid,
       required int afterSn,
       required String afterDigest,
@@ -333,7 +531,8 @@ class TheKeyEventsThisDeviceMakes {
       List<String> adds = const [],
       List<Object?> anchors = const [],
       WitnessSet? witnessedBy,
-      bool recovery = false}) async {
+      bool recovery = false,
+      Future<void> Function()? beforeSigning}) async {
     return _atTheTip(
         aid,
         (afterSn: afterSn, digest: afterDigest),
@@ -345,6 +544,8 @@ class TheKeyEventsThisDeviceMakes {
             committingFrom: committingFrom,
             nextClassical: nextClassical,
             nextPostQuantum: nextPostQuantum,
+            revealingPostQuantum: revealingPostQuantum,
+            reCommitWitnessed: reCommitWitnessed,
             aid: aid,
             afterSn: tip.sn,
             afterDigest: tip.digest,
@@ -354,7 +555,8 @@ class TheKeyEventsThisDeviceMakes {
             anchors: anchors,
             set: (before ?? witnessedBy ?? WitnessSet.none)
                 .rotated(cuts: cuts, adds: adds, toad: toad),
-            recovery: recovery));
+            recovery: recovery,
+            beforeSigning: beforeSigning));
   }
 
   Future<Committed> _rotateAfter(String what,
@@ -363,6 +565,8 @@ class TheKeyEventsThisDeviceMakes {
       required Uint8List committingFrom,
       required int nextClassical,
       required int nextPostQuantum,
+      required int? revealingPostQuantum,
+      required bool reCommitWitnessed,
       required String aid,
       required int afterSn,
       required String afterDigest,
@@ -371,34 +575,57 @@ class TheKeyEventsThisDeviceMakes {
       required List<String> adds,
       required List<Object?> anchors,
       required WitnessSet set,
-      required bool recovery}) async {
+      required bool recovery,
+      Future<void> Function()? beforeSigning}) async {
     final key = KeyManager.publicKeyAt(revealing, revealed);
     final next = KeyManager.publicKeyAt(committingFrom, nextClassical);
     final pqSeed = KeyManager.slip10Ed25519(
         committingFrom, KeyPaths.postQuantum(nextPostQuantum));
+    // Stage two also reveals the post-quantum key this event's predecessor
+    // committed to, and signs with it.
+    final revealSeed = revealingPostQuantum == null
+        ? null
+        : KeyManager.slip10Ed25519(
+            revealing, KeyPaths.postQuantum(revealingPostQuantum));
     try {
       final commitments = [
         await _km.nextKeyDigest(next),
         (await _km.postQuantumNext(pqSeed)).digest
       ];
+      final revealedPq = revealSeed == null
+          ? null
+          : (await _km.postQuantumNext(revealSeed)).verkey;
       final sn = afterSn + 1;
-      final expected = ExpectedEvent.rotation(
-          aid: aid,
-          sn: sn,
-          prior: afterDigest,
-          keys: [key],
-          next: commitments,
-          toad: toad,
-          cuts: cuts,
-          adds: adds,
-          anchors: anchors);
+      final expected = revealedPq == null
+          ? ExpectedEvent.rotation(
+              aid: aid,
+              sn: sn,
+              prior: afterDigest,
+              keys: [key],
+              next: commitments,
+              toad: toad,
+              cuts: cuts,
+              adds: adds,
+              anchors: anchors)
+          : ExpectedEvent.stageTwoRotation(
+              aid: aid,
+              sn: sn,
+              prior: afterDigest,
+              classicalKey: key,
+              postQuantumKey: revealedPq,
+              next: commitments,
+              reCommitWitnessed: reCommitWitnessed,
+              toad: toad,
+              cuts: cuts,
+              adds: adds,
+              anchors: anchors);
       final prepared = await _prepare(what, {
         'aid': aid,
         't': 'rot',
-        'k': [key],
-        'kt': '1',
+        'k': [key, if (revealedPq != null) revealedPq],
+        'kt': revealedPq == null ? '1' : '2',
         'n': commitments,
-        'nt': '1',
+        'nt': revealedPq == null ? '1' : '2',
         'a': anchors,
         'br': cuts,
         'ba': adds,
@@ -407,36 +634,78 @@ class TheKeyEventsThisDeviceMakes {
       });
       return await _checkSignCommit(what, expected, prepared,
           KeyManager.signingSeed(revealing, index: revealed), set,
-          recovery: recovery, reveals: key, generation: revealed);
+          recovery: recovery,
+          reveals: key,
+          generation: revealed,
+          alsoSignedBy: revealSeed,
+          beforeSigning: beforeSigning);
     } finally {
       pqSeed.fillRange(0, pqSeed.length, 0);
+      revealSeed?.fillRange(0, revealSeed.length, 0);
     }
   }
 
   /// Anchors [anchors] in an interaction of [aid] after the event at
   /// [afterSn] with digest [afterDigest], signed by the generation
   /// [generation] key in force. [witnessedBy] is the witness set in force.
+  /// At stage two (the key state this device reads has two keys in `k`) the
+  /// interaction is signed by the post-quantum key as well, at place 1, and
+  /// refused ([PostQuantumNotYet]) while [PostQuantumCodes.assigned] is off.
+  /// The stage is read, not given: a caller that forgot a restart could not
+  /// have the interaction signed by one key and refused for good.
   Future<Committed> interact(Uint8List seed,
-          {required String aid,
-          required int generation,
-          required int afterSn,
-          required String afterDigest,
-          required List<Object?> anchors,
-          WitnessSet? witnessedBy}) =>
-      _atTheTip(
-          aid,
-          (afterSn: afterSn, digest: afterDigest),
-          generation,
-          true,
-          (tip, before) => _interactAfter(seed,
-              aid: aid,
-              generation: generation,
-              afterSn: tip.sn,
-              afterDigest: tip.digest,
-              anchors: anchors,
-              set: before ?? witnessedBy ?? WitnessSet.none));
+      {required String aid,
+      required int generation,
+      required int afterSn,
+      required String afterDigest,
+      required List<Object?> anchors,
+      WitnessSet? witnessedBy}) async {
+    final postQuantumGeneration =
+        await _postQuantumGenerationInForce(seed, aid, generation);
+    return await _atTheTip(
+        aid,
+        (afterSn: afterSn, digest: afterDigest),
+        generation,
+        true,
+        (tip, before) => _interactAfter(seed,
+            aid: aid,
+            generation: generation,
+            afterSn: tip.sn,
+            afterDigest: tip.digest,
+            anchors: anchors,
+            postQuantumGeneration: postQuantumGeneration,
+            set: before ?? witnessedBy ?? WitnessSet.none));
+  }
 
   Future<Committed> _interactAfter(Uint8List seed,
+      {required String aid,
+      required int generation,
+      required int afterSn,
+      required String afterDigest,
+      required List<Object?> anchors,
+      required int? postQuantumGeneration,
+      required WitnessSet set}) async {
+    if (postQuantumGeneration != null) {
+      PostQuantumCodes.require('an interaction signed by a post-quantum key');
+    }
+    final pqSeed = postQuantumGeneration == null
+        ? null
+        : KeyManager.slip10Ed25519(
+            seed, KeyPaths.postQuantum(postQuantumGeneration));
+    try {
+      return await _interactSigned(seed, pqSeed,
+          aid: aid,
+          generation: generation,
+          afterSn: afterSn,
+          afterDigest: afterDigest,
+          anchors: anchors,
+          set: set);
+    } finally {
+      pqSeed?.fillRange(0, pqSeed.length, 0);
+    }
+  }
+
+  Future<Committed> _interactSigned(Uint8List seed, Uint8List? pqSeed,
       {required String aid,
       required int generation,
       required int afterSn,
@@ -452,7 +721,8 @@ class TheKeyEventsThisDeviceMakes {
       'after': {'s': afterSn.toRadixString(16), 'd': afterDigest},
     });
     return _checkSignCommit('this interaction', expected, prepared,
-        KeyManager.signingSeed(seed, index: generation), set);
+        KeyManager.signingSeed(seed, index: generation), set,
+        alsoSignedBy: pqSeed);
   }
 
   /// Makes an event after [given], signed by the generation [generation] key
@@ -568,10 +838,15 @@ class TheKeyEventsThisDeviceMakes {
 
   Future<Committed> _checkSignCommit(String what, ExpectedEvent expected,
       String rawB64, Uint8List signingSeed, WitnessSet set,
-      {bool recovery = false, String? reveals, int? generation}) async {
+      {bool recovery = false,
+      String? reveals,
+      int? generation,
+      Uint8List? alsoSignedBy,
+      Future<void> Function()? beforeSigning}) async {
     try {
       final raw = base64Decode(rawB64);
       final ev = await expected.requireIn(_km, raw);
+      await beforeSigning?.call();
       // A founding names the identity this device holds from now on, with
       // where its witnesses are, before anything is signed for it.
       final witnesses = _witnesses;
@@ -603,8 +878,12 @@ class TheKeyEventsThisDeviceMakes {
         } finally {
           privateKey.bytes.fillRange(0, privateKey.bytes.length, 0);
         }
-        final cesr = await cesrEncodeSignature(_client, _baseUrl, signature);
-        await _signed.signedWith(reservation, [cesr]);
+        await _signed.signedWith(
+            reservation,
+            alsoSignedBy == null
+                ? [await cesrEncodeSignature(_client, _baseUrl, signature)]
+                : await _signedByBoth(signature, alsoSignedBy, raw,
+                    opensCommitment: ev.t != 'ixn'));
       }
       final signed = (await _signed.unfinished(ev.i))
           .firstWhere((r) => r.sn == ev.s && r.digest == ev.d);
@@ -612,6 +891,24 @@ class TheKeyEventsThisDeviceMakes {
     } finally {
       signingSeed.fillRange(0, signingSeed.length, 0);
     }
+  }
+
+  /// The signatures of an event signed by both its classical key and its
+  /// post-quantum one ([postQuantumSeed]'s): the classical signature at index 0
+  /// and the post-quantum one at index 1. A rotation's each open the place of
+  /// the same number in the prior commitment ([opensCommitment]); an
+  /// interaction opens no commitment, so its signatures are current-only (keri-go
+  /// 3Y for the post-quantum key, B for the classical one).
+  Future<List<String>> _signedByBoth(
+      List<int> classical, Uint8List postQuantumSeed, List<int> raw,
+      {required bool opensCommitment}) async {
+    final post = await _km.signMlDsa65(postQuantumSeed, raw);
+    return [
+      await _km.indexEd25519Signature(classical,
+          index: 0, ondex: 0, currentOnly: !opensCommitment),
+      await _km.indexMlDsa65Signature(post,
+          index: 1, ondex: 1, currentOnly: !opensCommitment),
+    ];
   }
 
   Future<Committed> _commit(String what, Reservation r, WitnessSet set) async {
@@ -623,23 +920,45 @@ class TheKeyEventsThisDeviceMakes {
       if (e.code == 'place_taken' || e.code == 'tip_moved') {
         return _confirmTheTakenPlace(r, e, set);
       }
-      // Whatever the core answered, the event goes to the witnesses: a core
-      // that refuses an event, or fails, after passing it on to some of them
-      // would otherwise leave it in their copies unknown to this device.
-      final (kept, w) = await _toTheWitnesses(r, set);
-      if (w != null && w.receipts.isNotEmpty) {
-        throw TheCoreWithholdsThisEvent(kept, e, w);
-      }
-      if (_forGood(e))
-        throw AnEventWasRefused(await _signed.refused(kept, e.code), e);
-      rethrow;
+      return _notRecorded(r, e, set);
     } catch (_) {
       // Not answered at all: the event is kept, signed, to commit again, and
       // goes to the witnesses meanwhile.
       await _toTheWitnesses(r, set);
       rethrow;
     }
-    return _seeItWitnessed(r, '${res['status'] ?? ''}', set, coreHasIt: true);
+    final status = '${res['status'] ?? ''}';
+    if (status == 'waiting_for_signatures') {
+      // This device signs with every key an event needs, so an honest core
+      // never holds one here for more signers: it is not believed. The event
+      // is not recorded, and is treated like any answer that is not
+      // "recorded", so the person is never left with a place nothing can
+      // release.
+      return _notRecorded(
+          r,
+          KeyEventRefused(what, 202, 'waiting_for_signatures', jsonEncode(res)),
+          set);
+    }
+    return _seeItWitnessed(r, status, set, coreHasIt: true);
+  }
+
+  /// The core did not record [r], whatever it said: [r] goes to the witnesses
+  /// anyway, and if they receipt it the core is withholding it; an answer that
+  /// will be the same however often it is sent ends the event as refused, for
+  /// the person to see and let go ([letGoOf]).
+  Future<Never> _notRecorded(
+      Reservation r, KeyEventRefused e, WitnessSet set) async {
+    // Whatever the core answered, the event goes to the witnesses: a core
+    // that refuses an event, or fails, after passing it on to some of them
+    // would otherwise leave it in their copies unknown to this device.
+    final (kept, w) = await _toTheWitnesses(r, set);
+    if (w != null && w.receipts.isNotEmpty) {
+      throw TheCoreWithholdsThisEvent(kept, e, w);
+    }
+    if (_forGood(e)) {
+      throw AnEventWasRefused(await _signed.refused(kept, e.code), e);
+    }
+    throw e;
   }
 
   /// Sends [r] to its witnesses and checks their receipts, marking it
@@ -681,11 +1000,23 @@ class TheKeyEventsThisDeviceMakes {
   Future<void> _remember(Reservation r, WitnessSet set) async {
     final held = _held;
     if (held == null || (await held.read())?.aid != r.aid) return;
+    final parsed = await _km.parseEvent(base64Decode(r.bytesB64));
+    final ilk = r.t ?? parsed.t;
+    // The keys an establishment event names, so the stage the identity is at
+    // is known from this record without asking anybody.
+    final k = ilk == 'ixn'
+        ? null
+        : [
+            for (final f in parsed.fields)
+              if (f.name == 'k')
+                for (final key in (f.value as List)) '$key'
+          ];
     await held.made(
         aid: r.aid,
         at: (sn: r.sn, digest: r.digest),
-        ilk: r.t ?? (await _km.parseEvent(base64Decode(r.bytesB64))).t,
+        ilk: ilk,
         key: r.key,
+        keys: k,
         generation: r.generation,
         witnesses: set.witnesses,
         toad: set.toad);
@@ -722,9 +1053,10 @@ class TheKeyEventsThisDeviceMakes {
   /// anything the core decided from the event itself, as opposed to a fault,
   /// a lapsed sign-in or a busy core.
   static bool _forGood(KeyEventRefused e) =>
-      e.statusCode >= 400 &&
-      e.statusCode < 500 &&
-      !const {401, 408, 409, 425, 429}.contains(e.statusCode);
+      e.code == 'waiting_for_signatures' ||
+      (e.statusCode >= 400 &&
+          e.statusCode < 500 &&
+          !const {401, 408, 409, 425, 429}.contains(e.statusCode));
 
   Future<Map<String, dynamic>> _post(
       String what, String path, Map<String, Object?> body) async {
