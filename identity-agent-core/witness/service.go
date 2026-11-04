@@ -1542,3 +1542,10 @@ func (s *Service) heldNow(aid, witnessKey string, sn int) {
 func (s *Service) ownersLocalAllowed(ctx context.Context, rawURL string) context.Context {
 	return context.WithValue(ctx, guardKey{}, LiteralIsLocal(hostOf(rawURL)))
 }
+
+// ownersLocalAllowedFor is ownersLocalAllowed for a POST to a recorded contact:
+// a local address is allowed only where it is written as one and the owner,
+// not a stranger's request, recorded it (the rule the witness request applies).
+func (s *Service) ownersLocalAllowedFor(ctx context.Context, c *store.ContactRecord, rawURL string) context.Context {
+	return context.WithValue(ctx, guardKey{}, LiteralIsLocal(hostOf(rawURL)) && c != nil && c.ContactSource != ContactSourceInbound)
+}

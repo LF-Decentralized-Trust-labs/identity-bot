@@ -4065,10 +4065,11 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 	}
 	// The owner naming this contact by address is the owner agreeing to it, as
 	// accepting a request is: the gates that act only for an accepted contact
-	// (a witness request, a first message) hold for it. A key history that
-	// was offered and did not check out stays outside, and the check result
-	// is still recorded in Verified.
-	if contactStatus == "verified" || contactStatus == "unchecked" {
+	// (a witness request, a first message, the link-verifier lookup) hold for
+	// it. Only a checked key history is promoted. An address that served none
+	// ("unchecked") gives an identifier and key that are only what that host
+	// claims, and one that was offered and did not check out stays outside too.
+	if contactStatus == "verified" {
 		contactStatus = "accepted"
 	}
 

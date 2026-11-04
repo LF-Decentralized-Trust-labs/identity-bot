@@ -13,8 +13,11 @@ import (
 	"time"
 
 	"identity-agent-core/didcomm"
+	"identity-agent-core/drivers"
+	"identity-agent-core/drivers/driverfake"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
+	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
 	"identity-agent-core/witness"
 
@@ -34,6 +37,13 @@ type ownerPeer struct {
 }
 
 func startOwnerPeer(t *testing.T, aid string) *ownerPeer {
+	t.Helper()
+	return startOwnerPeerServing(t, aid, true)
+}
+
+// startOwnerPeerServing is startOwnerPeer, with or without a key history at the
+// address it publishes.
+func startOwnerPeerServing(t *testing.T, aid string, serveKeyHistory bool) *ownerPeer {
 	t.Helper()
 	dir := t.TempDir()
 	ds, err := store.NewSQLiteStore(dir)
@@ -62,17 +72,38 @@ func startOwnerPeer(t *testing.T, aid string) *ownerPeer {
 	seed := priv.Seed()
 	svc.SignAsRequester = func(statement string) (string, error) { return login.SignString(statement, seed) }
 
+	// The agent checks a published key history and mints the relationship
+	// identifier an added contact gets, so the added contact is verified.
+	if err := secureenclave.StoreDeviceLocalSeed(dir, bytes.Repeat([]byte{7}, 32)); err != nil {
+		t.Skipf("root seed unavailable: %v", err)
+	}
+	engine := &driverfake.Engine{
+		ValidateKELFunc: func(string, []map[string]interface{}) (*drivers.DriverValidateKELResponse, error) {
+			return &drivers.DriverValidateKELResponse{KelVerified: true}, nil
+		},
+		ValidateKELBytesFunc: func(drivers.ValidateKELInput) (*drivers.DriverValidateKELResponse, error) {
+			return &drivers.DriverValidateKELResponse{KelVerified: true}, nil
+		},
+		CreateInceptionNamedFunc: func(_, _, name string) (*drivers.DriverInceptionResponse, error) {
+			return &drivers.DriverInceptionResponse{AID: "ERel" + name}, nil
+		},
+	}
+
 	p := &ownerPeer{core: &CoreServer{
-		localOwnerSecret: testOwnerSecret, DataDir: dir, DataStore: ds, WitnessService: svc, EventHub: NewEventHub(),
+		localOwnerSecret: testOwnerSecret, DataDir: dir, DataStore: ds, WitnessService: svc, EventHub: NewEventHub(), KeriDriver: engine,
 	}, svc: svc, aid: aid, witnessKey: wkey, identKey: iacrypto.NonTransferableAIDQB64(pub)}
 
 	r := chi.NewRouter()
 	// What this agent publishes about itself, for the other's owner to add.
 	r.Get("/public/oobi/{aid}", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{
+		doc := map[string]any{
 			"aid": aid, "public_key": p.identKey, "alias": "peer-" + aid[len(aid)-1:],
 			"backend_type": witness.BackendDesktop, "witness_key": wkey, "entity_type": "individual",
-		})
+		}
+		if serveKeyHistory {
+			doc["kel"] = []map[string]any{{"t": "icp", "d": aid, "i": aid, "s": "0"}}
+		}
+		json.NewEncoder(w).Encode(doc)
 	})
 	r.Route("/api", func(r chi.Router) {
 		r.Post("/contacts", p.core.handleAddContact)
@@ -189,4 +220,26 @@ func TestALocalPeerIsAnsweredOnceTheOwnerAcceptsIt(t *testing.T) {
 		c, _ := b.core.DataStore.GetContact(a.aid)
 		return c != nil && c.IsWitness
 	})
+}
+
+// An address that serves no key history gives a contact whose identifier and
+// key are only what that host claims: it is recorded as unchecked, is not
+// accepted, and gets no witness request.
+func TestAContactWhoseKeyWasNeverCheckedIsNotAccepted(t *testing.T) {
+	a := startOwnerPeer(t, "EAgentA0000000000000000000000000000000000001")
+	b := startOwnerPeerServing(t, "EAgentB0000000000000000000000000000000000002", false)
+
+	if resp := postJSON(t, a.base+"/api/contacts", map[string]any{"oobi_url": b.oobi(), "trusted": true}); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("the owner's add-contact was refused: %d", resp.StatusCode)
+	}
+	rec, _ := a.core.DataStore.GetContact(b.aid)
+	if rec == nil || rec.Status != "unchecked" || rec.Verified {
+		t.Fatalf("a contact whose address served no key history is %+v, want unchecked", rec)
+	}
+	if err := a.svc.SendWitnessRequest(context.Background(), b.aid); err == nil {
+		t.Fatal("a witness request went to a contact whose key was never checked")
+	}
+	if meta, _ := b.svc.Store.GetContactMeta(a.aid); meta != nil && meta.WitnessingFor {
+		t.Fatal("B witnesses for A without ever being asked")
+	}
 }
