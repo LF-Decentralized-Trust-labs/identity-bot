@@ -607,7 +607,7 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 	// anyone could fill the log by posting garbage. Each message's refusal is
 	// recorded once: a captured envelope replayed over and over is one fact,
 	// and recording every copy would let whoever holds it fill the log.
-	// Recorded within each sender's quota (refusalToRecord), apart from the
+	// Recorded within each sender's quota (s.refusals.toRecord), apart from the
 	// replay cache.
 	refuse := func(why string, status int) {
 		record, suppressedUntil := s.refusals.toRecord(skid, jwm.ID, time.Now())
