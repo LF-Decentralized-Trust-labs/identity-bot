@@ -8,14 +8,18 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"time"
 
 	"identity-agent-core/backup"
 	"identity-agent-core/buildmode"
 	"identity-agent-core/drivers"
+	"identity-agent-core/login"
 	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
+	"identity-agent-core/witness"
 )
 
 // EnsureKeriContact is the FOUNDATIONAL LAYER under every transaction: when two Identity
@@ -59,8 +63,12 @@ func (s *CoreServer) ensureKeriContactIs(oobiURL, expected string) (*store.Conta
 		return nil, false, fmt.Errorf("oobi points to our own identity")
 	}
 
-	// Resolve the OOBI (KERI identity establishment).
-	client := &http.Client{Timeout: 15 * time.Second}
+	// Resolve the OOBI (KERI identity establishment). The address came from a
+	// peer, so it is fetched through the guarded client: the address actually
+	// dialled is checked, there is no proxy and no redirect. A local address is
+	// reached only where the owner's own settings allow it (their relay, or
+	// IA_ALLOW_LOCAL_SITES) or it is the recorded address of this very contact.
+	client := witness.GuardedClient(15*time.Second, ownerAllowsLocal(oobiURL) || s.oobiMayBeLocal(oobiURL, expected))
 	resp, err := client.Get(oobiURL)
 	if err != nil {
 		return nil, false, fmt.Errorf("could not reach %s: %w", oobiURL, err)
@@ -240,4 +248,78 @@ func (s *CoreServer) ensureKeriContactIs(oobiURL, expected string) (*store.Conta
 	}
 	log.Printf("[identity-agent-core] EnsureKeriContact: established transactional contact %s (AID %s, kel_verified=%v)", alias, oobiData.AID, kelVerified)
 	return &contact, true, nil
+}
+
+// oobiMayBeLocal is whether an address a peer supplied may be fetched from a
+// local address: only if it is the very address of a contact the owner added or
+// accepted, so a local test peer the owner set up still works and a stranger
+// cannot point this agent at an internal service.
+func (s *CoreServer) oobiMayBeLocal(oobiURL, expected string) bool {
+	if s.DataStore == nil {
+		return false
+	}
+	if expected != "" {
+		c, _ := s.DataStore.GetContact(expected)
+		return c != nil && sameOOBIHost(c.OobiURL, oobiURL) && witness.OwnerRecordedLocal(*c, oobiURL)
+	}
+	contacts, _ := s.DataStore.GetContacts()
+	for _, c := range contacts {
+		if sameOOBIHost(c.OobiURL, oobiURL) && witness.OwnerRecordedLocal(c, oobiURL) {
+			return true
+		}
+	}
+	return false
+}
+
+// peerClient is the client for any call to an address a peer or a contact
+// supplied: no proxy, no redirect, the address actually dialled is checked, and
+// a local address only where it is the address of a contact the owner recorded.
+func (s *CoreServer) peerClient(timeout time.Duration, rawURL string) *http.Client {
+	return witness.GuardedClient(timeout, s.oobiMayBeLocal(rawURL, ""))
+}
+
+func sameOOBIHost(a, b string) bool {
+	ua, ea := url.Parse(a)
+	ub, eb := url.Parse(b)
+	return ea == nil && eb == nil && ua.Host != "" && strings.EqualFold(ua.Host, ub.Host) && ua.Scheme == ub.Scheme
+}
+
+// siteClient is the client for a call to an address a stranger's QR code or
+// link chose: a site's challenge, callback, introductions and registry, an
+// Ask, an invite's redeem address. The owner starts these by scanning, but the
+// address is the sender's, so it gets the same guard as any peer address: no
+// proxy, no redirect, the address actually dialled is checked.
+//
+// A local address is reached in two cases, both the owner's own doing and
+// neither something a site or a QR code can set: the address is the relay the
+// owner configured (IA_RELAY_URL, IA_DEV_RELAY_URL, or the development relay
+// on this machine), or the owner has said they are testing against local sites
+// with IA_ALLOW_LOCAL_SITES=1 in this agent's own environment.
+func siteClient(timeout time.Duration, rawURL string) *http.Client {
+	return witness.GuardedClient(timeout, ownerAllowsLocal(rawURL))
+}
+
+// ownerAllowsLocal is whether the owner's own settings allow a call to rawURL to
+// reach a local address.
+func ownerAllowsLocal(rawURL string) bool {
+	if os.Getenv("IA_ALLOW_LOCAL_SITES") == "1" {
+		return true
+	}
+	return isOwnerRelayLocal(rawURL, login.OwnerRelayURL())
+}
+
+// isOwnerRelayLocal is whether rawURL is at the very scheme, host and port of
+// the owner's relay, and that relay is itself written as a local address.
+func isOwnerRelayLocal(rawURL, relay string) bool {
+	u, err := url.Parse(relay)
+	return err == nil && witness.LiteralIsLocal(u.Hostname()) && sameOOBIHost(relay, rawURL)
+}
+
+// chosenAddressClient is the client for an address someone else wrote and the
+// owner only pasted or received (an OOBI, a schema URL in a credential): the
+// guard applies, and a local address is reached only where the owner's own
+// settings allow it (ownerAllowsLocal) or it is the address of a contact the
+// owner recorded (oobiMayBeLocal).
+func (s *CoreServer) chosenAddressClient(timeout time.Duration, rawURL string) *http.Client {
+	return witness.GuardedClient(timeout, ownerAllowsLocal(rawURL) || s.oobiMayBeLocal(rawURL, ""))
 }

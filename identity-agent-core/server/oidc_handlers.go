@@ -3,11 +3,11 @@ package server
 import (
 	"encoding/json"
 	"net/http"
-	"os"
 
 	"github.com/go-chi/chi/v5"
 
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/login"
 	"identity-agent-core/oidc"
 )
 
@@ -15,14 +15,7 @@ func (s *CoreServer) initOIDCHandler() error {
 	if s.loginHandler == nil {
 		return nil
 	}
-	relay := os.Getenv("IA_RELAY_URL")
-	if relay == "" {
-		relay = os.Getenv("IA_DEV_RELAY_URL")
-	}
-	if relay == "" {
-		relay = "http://127.0.0.1:8765"
-	}
-	s.oidcAdapter = oidc.NewAdapter(s.loginHandler, relay)
+	s.oidcAdapter = oidc.NewAdapter(s.loginHandler, login.OwnerRelayURL())
 	return nil
 }
 

@@ -10,7 +10,6 @@ import (
 	"identity-agent-core/store"
 	"identity-agent-core/witness"
 	"log"
-	"net/http"
 	"strings"
 	"time"
 
@@ -280,5 +279,5 @@ func (s *CoreServer) resolveSignerKey(signerOOBI string) ([]byte, error) {
 	if i := strings.LastIndex(aid, "/"); i >= 0 {
 		aid = aid[i+1:]
 	}
-	return login.KeyFromOOBI(&http.Client{Timeout: 15 * time.Second}, signerOOBI, aid)
+	return login.KeyFromOOBI(s.peerClient(15*time.Second, signerOOBI), signerOOBI, aid)
 }

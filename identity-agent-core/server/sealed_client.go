@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -81,7 +80,7 @@ func (s *CoreServer) SealedRequest(ctx context.Context, fromAID, toAID, method, 
 	if peer.Endpoint == "" {
 		return nil, fmt.Errorf("%s has no address to send to", toAID)
 	}
-	return didcomm.SendSealed(ctx, &http.Client{Timeout: 30 * time.Second}, sender, &peer.DID,
+	return didcomm.SendSealed(ctx, s.peerClient(30*time.Second, peer.Endpoint), sender, &peer.DID,
 		agentBaseFromInbox(peer.Endpoint), sealedRequest{
 			Method:  method,
 			Path:    path,

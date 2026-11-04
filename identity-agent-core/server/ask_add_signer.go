@@ -210,8 +210,7 @@ func (addSignerAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[
 		"backup_seal_public_key_b64": sealKey,
 	}))
 	redeemURL := strings.TrimRight(ctx.Base, "/") + "/api/signer/invites/" + p.InviteToken + "/redeem"
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Post(redeemURL, "application/json", strings.NewReader(string(body)))
+	resp, err := siteClient(15*time.Second, redeemURL).Post(redeemURL, "application/json", strings.NewReader(string(body)))
 	if err != nil {
 		return nil, fmt.Errorf("redeem signer invite: %w", err)
 	}

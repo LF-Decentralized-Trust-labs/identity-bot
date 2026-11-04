@@ -126,7 +126,7 @@ func (s *Service) defaultFetchEvent(ctx context.Context, url string) (SignedEven
 		return SignedEvent{}, err
 	}
 	s.SignRead(req)
-	resp, err := s.HTTPClient.Do(req)
+	resp, err := s.guardedGet(req)
 	if err != nil {
 		return SignedEvent{}, err
 	}
@@ -185,7 +185,7 @@ func (s *Service) defaultFetchTip(ctx context.Context, url string) (TipAnswer, e
 		return TipAnswer{}, err
 	}
 	s.SignRead(req)
-	resp, err := s.HTTPClient.Do(req)
+	resp, err := s.guardedGet(req)
 	if err != nil {
 		return TipAnswer{}, err
 	}
@@ -321,6 +321,12 @@ func (s *Service) designatedTargets(designated []string) map[string]witnessTarge
 	}
 	if contacts, err := s.Contacts.GetContacts(); err == nil {
 		for _, c := range contacts {
+			// Only a contact the owner added or accepted can be named by a
+			// witness key: a stranger's introduction records whatever key it
+			// claims, and mapping it here would send key events to it.
+			if !ownerVouchesFor(c) {
+				continue
+			}
 			if meta, _ := s.Store.GetContactMeta(c.AID); meta != nil && meta.WitnessKey != "" {
 				if _, pinned := known[meta.WitnessKey]; !pinned {
 					known[meta.WitnessKey] = witnessTarget{AID: c.AID, URL: c.OobiURL, WitnessKey: meta.WitnessKey}
@@ -1547,11 +1553,4 @@ func (s *Service) heldNow(aid, witnessKey string, sn int) {
 // checked regardless.
 func (s *Service) ownersLocalAllowed(ctx context.Context, rawURL string) context.Context {
 	return context.WithValue(ctx, guardKey{}, LiteralIsLocal(hostOf(rawURL)))
-}
-
-// ownersLocalAllowedFor is ownersLocalAllowed for a POST to a recorded contact:
-// a local address is allowed only where it is written as one and the owner,
-// not a stranger's request, recorded it (the rule the witness request applies).
-func (s *Service) ownersLocalAllowedFor(ctx context.Context, c *store.ContactRecord, rawURL string) context.Context {
-	return context.WithValue(ctx, guardKey{}, LiteralIsLocal(hostOf(rawURL)) && c != nil && c.ContactSource != ContactSourceInbound)
 }

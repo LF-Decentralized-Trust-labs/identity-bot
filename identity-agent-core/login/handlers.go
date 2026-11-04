@@ -36,11 +36,15 @@ func loadRelationshipSeed(h *Handler, rel *SiteRelationship) ([]byte, error) {
 }
 
 type Handler struct {
-	Store          *RelationshipStore
-	Pending        *PendingStore
-	KeriDriver     drivers.KeriEngine
-	DevRelay       string
-	HTTPClient     *http.Client
+	Store      *RelationshipStore
+	Pending    *PendingStore
+	KeriDriver drivers.KeriEngine
+	DevRelay   string
+	HTTPClient *http.Client
+	// PeerClient, when set, is the client for a call to rawURL, an address a site
+	// supplied (its challenge, callback, introductions and registry). The server
+	// sets it to the guarded client; unset, HTTPClient is used.
+	PeerClient     func(rawURL string) *http.Client
 	TrustGate      *secureenclave.TrustGate
 	dataDir        string // for secure relationship seed storage (never put raw seeds in main JSON)
 	OnLoginPending func(LoginPreviewResponse)
@@ -85,13 +89,7 @@ func NewHandler(dataDir string, keri drivers.KeriEngine) (*Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	relay := os.Getenv("IA_RELAY_URL")
-	if relay == "" {
-		relay = os.Getenv("IA_DEV_RELAY_URL")
-	}
-	if relay == "" {
-		relay = "http://127.0.0.1:8765"
-	}
+	relay := OwnerRelayURL()
 	return &Handler{
 		Store:      store,
 		Pending:    NewPendingStore(),
@@ -102,10 +100,31 @@ func NewHandler(dataDir string, keri drivers.KeriEngine) (*Handler, error) {
 	}, nil
 }
 
+// OwnerRelayURL is the relay the owner configured for this agent: IA_RELAY_URL,
+// else IA_DEV_RELAY_URL, else the development relay on this machine. It is the
+// owner's own setting, so a call to it is never a stranger's choice of address.
+func OwnerRelayURL() string {
+	if v := os.Getenv("IA_RELAY_URL"); v != "" {
+		return v
+	}
+	if v := os.Getenv("IA_DEV_RELAY_URL"); v != "" {
+		return v
+	}
+	return "http://127.0.0.1:8765"
+}
+
+// peerClient is the client for a call to rawURL, an address a site chose.
+func (h *Handler) peerClient(rawURL string) *http.Client {
+	if h.PeerClient != nil {
+		return h.PeerClient(rawURL)
+	}
+	return h.HTTPClient
+}
+
 func (h *Handler) fetchChallengeBundle(rpBase, sessionToken string) (*ChallengeBundle, error) {
 	// Minimal Ask pointer (the login contract §5.2 / the shared module): {origin}/i/{token}.
 	url := fmt.Sprintf("%s/i/%s", trimSlash(rpBase), sessionToken)
-	resp, err := h.HTTPClient.Get(url)
+	resp, err := h.peerClient(url).Get(url)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +184,7 @@ func (h *Handler) verifyDelegationAnchor(bundle *ChallengeBundle, site VerifiedI
 	// second event at the same place. So a delegator that names witnesses must
 	// show their receipts on every event, the approving seal included. One
 	// that names none cannot rotate at all (unprovableRotation).
-	delegator, err := identityFromOOBI(h.HTTPClient, bundle.RelationshipAnchorOOBI, bundle.RelationshipAnchorAID, true)
+	delegator, err := identityFromOOBI(h.peerClient(bundle.RelationshipAnchorOOBI), bundle.RelationshipAnchorOOBI, bundle.RelationshipAnchorAID, true)
 	if err != nil {
 		return fmt.Errorf("the delegator's log does not establish it: %w", err)
 	}
@@ -212,7 +231,7 @@ func (h *Handler) resolveSite(siteOOBI, siteAID string) (VerifiedIdentity, error
 	if oobi == "" {
 		oobi = OOBIFor(h.DevRelay, siteAID)
 	}
-	return IdentityFromOOBI(h.HTTPClient, oobi, siteAID)
+	return IdentityFromOOBI(h.peerClient(oobi), oobi, siteAID)
 }
 
 // GetOrCreateRelationship resolves or creates a per-RP pairwise relationship.
@@ -420,7 +439,7 @@ func (h *Handler) postAssertion(callbackURL, sessionToken string, assertion *Ass
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := h.HTTPClient.Do(req)
+	resp, err := h.peerClient(callbackURL).Do(req)
 	if err != nil {
 		return err
 	}
@@ -656,7 +675,7 @@ func (h *Handler) registerPairwiseOnDevRelay(rel *SiteRelationship, bundle *Chal
 	}
 
 	url := trimSlash(relayBase) + registerPath
-	resp, err := h.HTTPClient.Post(url, "application/json", bytes.NewReader(body))
+	resp, err := h.peerClient(url).Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
 		// Said now, with the address, rather than left to surface later at
 		// the site as a sign-in that fails for no reason anybody can see.

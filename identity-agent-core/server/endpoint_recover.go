@@ -165,8 +165,9 @@ func (s *CoreServer) RecoverContactEndpoint(contactAID string) (*recoveredEndpoi
 // they had deliberately withdrawn.
 func (s *CoreServer) askWitnessForEndpoint(base, contactAID string) (*recoveredEndpoint, error) {
 	url := base + "/api/witness/endpoint/" + contactAID
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(url)
+	// A witness's address is the one a contact recorded, and its name may have
+	// been pointed somewhere internal since: held to the address dialled.
+	resp, err := s.peerClient(10*time.Second, url).Get(url)
 	if err != nil {
 		return nil, err
 	}

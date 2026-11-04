@@ -414,6 +414,9 @@ func New(cfg Config) (*CoreServer, error) {
 
 	// Peers to cross-check with, drawn from contacts and registered services.
 	ws.PeerWatchers = s.peerWatchers
+	// A peer's address is held to the address dialled; a local one is reached
+	// only where the owner recorded that contact.
+	ws.L3.AllowLocal = func(peerBaseURL string) bool { return s.oobiMayBeLocal(peerBaseURL, "") }
 
 	// The same boundary governs watching. A registered watcher service is
 	// exempt; a contact is a peer and must be of the same kind.
@@ -2549,8 +2552,7 @@ func (s *CoreServer) handleFetchCredentialSchema(w http.ResponseWriter, r *http.
 		fetchURL = "https://schema.gleif.org/acdc/" + req.SAID
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(fetchURL)
+	resp, err := s.chosenAddressClient(10*time.Second, fetchURL).Get(fetchURL)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "Failed to fetch schema", err.Error())
 		return
@@ -3773,8 +3775,7 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 
 	log.Printf("[identity-agent-core] OOBI-RESOLVE: Resolving OOBI at %s", req.OobiURL)
 
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Get(req.OobiURL)
+	resp, err := s.chosenAddressClient(15*time.Second, req.OobiURL).Get(req.OobiURL)
 	if err != nil {
 		log.Printf("[identity-agent-core] OOBI-RESOLVE: Failed to reach %s: %v", req.OobiURL, err)
 		writeError(w, http.StatusBadGateway, "Failed to resolve OOBI", fmt.Sprintf("Could not reach %s: %v", req.OobiURL, err))
@@ -3950,8 +3951,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Get(req.OobiURL)
+	resp, err := s.chosenAddressClient(15*time.Second, req.OobiURL).Get(req.OobiURL)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "Failed to resolve OOBI", fmt.Sprintf("Could not reach %s: %v", req.OobiURL, err))
 		return

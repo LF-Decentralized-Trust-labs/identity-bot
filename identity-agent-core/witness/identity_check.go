@@ -53,7 +53,7 @@ func LiveIdentityOf(ctx context.Context, baseURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	resp, err := (&http.Client{Timeout: identityCheckTimeout}).Do(req)
+	resp, err := guardedClient(identityCheckTimeout, LiteralIsLocal(hostOf(baseURL))).Do(req)
 	if err != nil {
 		return "", fmt.Errorf("could not reach %s: %w", baseURL, err)
 	}

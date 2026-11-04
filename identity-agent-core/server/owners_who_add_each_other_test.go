@@ -45,6 +45,7 @@ func startOwnerPeer(t *testing.T, aid string) *ownerPeer {
 // address it publishes.
 func startOwnerPeerServing(t *testing.T, aid string, serveKeyHistory bool) *ownerPeer {
 	t.Helper()
+	t.Setenv("IA_ALLOW_LOCAL_SITES", "1") // the owner is adding a peer on this machine
 	dir := t.TempDir()
 	ds, err := store.NewSQLiteStore(dir)
 	if err != nil {

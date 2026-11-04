@@ -122,7 +122,7 @@ func (s *CoreServer) checkContactKEL(aid string) kelCheckResult {
 		}
 	}
 
-	events, ferr := fetchKELFromOOBI(stored.OobiURL)
+	events, ferr := s.fetchKELFromOOBI(stored.OobiURL)
 	if ferr != nil {
 		// Unreachable is not the same as wrong. Refusing outright would make
 		// any counterparty's outage look like an attack, so this is reported as
@@ -186,8 +186,8 @@ func (s *CoreServer) checkContactKEL(aid string) kelCheckResult {
 	}
 }
 
-func fetchKELFromOOBI(oobiURL string) ([]map[string]interface{}, error) {
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Get(oobiURL)
+func (s *CoreServer) fetchKELFromOOBI(oobiURL string) ([]map[string]interface{}, error) {
+	resp, err := s.peerClient(15*time.Second, oobiURL).Get(oobiURL)
 	if err != nil {
 		return nil, err
 	}

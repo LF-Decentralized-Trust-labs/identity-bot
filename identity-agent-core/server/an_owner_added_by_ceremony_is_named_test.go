@@ -25,6 +25,7 @@ func anOwnersAddress(t *testing.T, s *CoreServer, aid, key string) string {
 		})
 	}))
 	t.Cleanup(srv.Close)
+	t.Setenv("IA_ALLOW_LOCAL_SITES", "1") // the owner's agent is on this machine, and the owner said so
 	return srv.URL + "/oobi/" + aid
 }
 
