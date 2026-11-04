@@ -217,7 +217,7 @@ func TestARelayNamingNewVisitorsCannotGrowTheRecordPastTheBudget(t *testing.T) {
 		relayedCall(h, fmt.Sprintf("10.%d.%d.%d", i/62500, (i/250)%250, i%250), "")
 	}
 	g.byVisitor.mu.Lock()
-	n := len(g.byVisitor.seen)
+	n := len(g.byVisitor.hits)
 	g.byVisitor.mu.Unlock()
 	if n > keyLogChecksPerMinuteRelayed {
 		t.Fatalf("%d visitors remembered, more than the %d the relayed budget admits", n, keyLogChecksPerMinuteRelayed)

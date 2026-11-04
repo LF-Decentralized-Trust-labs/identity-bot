@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"identity-agent-core/secureenclave"
 )
@@ -43,7 +44,7 @@ func TestAChallengeIsBounded(t *testing.T) {
 // Validation happens before the firmware is asked, so a bad challenge is a
 // clear answer on any machine rather than a confusing one off sealed hardware.
 func TestABadChallengeIsRefusedOnAnyMachine(t *testing.T) {
-	s := &CoreServer{attestationLimiter: newAttestationRateLimiter(60)}
+	s := &CoreServer{attestationLimiter: newIPRateLimiter(60, time.Minute)}
 	w := httptest.NewRecorder()
 	s.handlePublicAttestation(w,
 		httptest.NewRequest(http.MethodGet, "/api/attestation?challenge=tiny", nil))

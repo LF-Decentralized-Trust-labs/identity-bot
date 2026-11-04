@@ -48,7 +48,13 @@ func limiterKey(ip string) string {
 	return parsed.Mask(net.CIDRMask(64, 128)).String() + "/64"
 }
 
+// allow records a request from ip and reports whether it is within the limit.
+// A nil limiter allows everything, so a server built without one degrades to
+// unlimited rather than to unusable.
 func (r *ipRateLimiter) allow(ip string) bool {
+	if r == nil {
+		return true
+	}
 	ip = limiterKey(ip)
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -80,6 +86,28 @@ func (r *ipRateLimiter) allow(ip string) bool {
 	}
 	r.hits[ip] = append(filtered, now)
 	return true
+}
+
+// wouldAllow reports whether allow(ip) would let a request through, without
+// counting it or remembering ip.
+func (r *ipRateLimiter) wouldAllow(ip string) bool {
+	if r == nil {
+		return true
+	}
+	ip = limiterKey(ip)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cutoff := time.Now().Add(-r.window)
+	n := 0
+	for _, t := range r.hits[ip] {
+		if t.After(cutoff) {
+			n++
+		}
+	}
+	if _, known := r.hits[ip]; !known && len(r.hits) >= maxRateLimitedClients {
+		return false
+	}
+	return n < r.limit
 }
 
 // trustedProxies are the addresses of reverse proxies this agent sits behind,

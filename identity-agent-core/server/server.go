@@ -196,7 +196,7 @@ type CoreServer struct {
 	attestationMu      sync.Mutex
 	attestationCached  *publicAttestation
 	attestationExpires time.Time
-	attestationLimiter *attestationRateLimiter
+	attestationLimiter *ipRateLimiter
 	// witnessLimiter bounds the peer-facing witness routes that cost work.
 	witnessLimiter     *ipRateLimiter
 	witnessLimiterOnce sync.Once
@@ -537,7 +537,7 @@ func New(cfg Config) (*CoreServer, error) {
 	if secureenclave.SNPAvailable() {
 		s.snpCertificates = newSNPCertificateChain(os.Getenv("SNP_PRODUCT"), cfg.DataDir)
 	}
-	s.attestationLimiter = newAttestationRateLimiter(60)
+	s.attestationLimiter = newIPRateLimiter(60, time.Minute)
 
 	// Defer router construction to Start() so overlays can register routes
 	// (MountExtraRoutes) after New() returns but before serving. Building here
