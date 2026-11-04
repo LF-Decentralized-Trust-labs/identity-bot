@@ -79,10 +79,16 @@ class TheKeyInForce {
   /// from an identifier the core gave before its log was checked.
   final Future<void> Function(String aid)? whenTheLogIsChecked;
 
-  /// [_checkedLog], then [whenTheLogIsChecked]: for what signs late.
+  /// [_checkedLog], then [whenTheLogIsChecked] where the founding is already
+  /// signed: an identifier is recorded only once its founding is accepted, so
+  /// a founding left unsigned is recorded when it is signed (in
+  /// [finishStrandedEvents]), never when it is merely listed or refused.
   Future<_Checked> _checkedForSigning(Uint8List seed) async {
     final checked = await _checkedLog(seed);
-    await whenTheLogIsChecked?.call(checked.aid);
+    final signed = checked.log.signed;
+    if (signed == null || signed.isEmpty || signed[0]) {
+      await whenTheLogIsChecked?.call(checked.aid);
+    }
     return checked;
   }
 
@@ -227,6 +233,8 @@ class TheKeyInForce {
       await _asked.forgetId(scope, asked);
     }
     if (signed != null) await _asked.forgetSettled(scope, checked.aid, log.events, signed);
+    // Every event left unsigned, the founding among them, is now signed.
+    await whenTheLogIsChecked?.call(checked.aid);
     return KeyState(checked.aid, checked.keyAt.last, establishment!, log.events.length,
         '${log.events.last['d'] ?? ''}');
   }

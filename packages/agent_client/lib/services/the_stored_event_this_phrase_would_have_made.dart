@@ -181,7 +181,11 @@ Future<ExpectedEvent> theStoredFoundingThisKeyWouldHaveMade(
   // The same witnesses in another order are the same set: the order is the
   // stored event's, and it is compared as it stands.
   final known = witnesses?.witnesses;
-  final sameSet = known != null && known.length == inStored.length && known.toSet().containsAll(inStored);
+  // A witness listed twice is not the same set, however its count compares.
+  final sameSet = known != null &&
+      inStored.toSet().length == inStored.length &&
+      known.length == inStored.length &&
+      known.toSet().containsAll(inStored);
   return ExpectedEvent.founding(
       keys: [key],
       next: [await km.nextKeyDigest(next), ...alsoCommitTo],

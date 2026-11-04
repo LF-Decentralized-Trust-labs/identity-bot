@@ -177,7 +177,7 @@ class LocalCoreKeriService extends KeriService {
       // What this device knows of its witnesses; none where it holds none.
       witnessesThisDeviceKnows: () async {
         final h = await _held.read();
-        if (h == null || (h.witnesses.isEmpty && h.witnessAddresses.isEmpty)) {
+        if (h == null || h.witnesses.isEmpty) {
           return null;
         }
         return WitnessSet(h.witnesses, h.toad);

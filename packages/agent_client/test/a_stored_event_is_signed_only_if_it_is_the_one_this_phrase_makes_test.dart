@@ -11,7 +11,8 @@ import 'package:agent_client/services/the_identity_this_device_holds.dart';
 import 'package:agent_client/services/the_key_events_this_device_makes.dart' show KeyPaths;
 import 'package:agent_client/services/the_key_in_force.dart';
 import 'package:agent_client/services/the_key_state_this_device_reads.dart';
-import 'package:agent_client/services/the_stored_event_this_phrase_would_have_made.dart' show legacyMessagingBranches;
+import 'package:agent_client/services/the_stored_event_this_phrase_would_have_made.dart'
+    show legacyMessagingBranches, theStoredFoundingThisKeyWouldHaveMade;
 import 'package:agent_client/services/the_witnesses_of_this_devices_events.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -632,5 +633,59 @@ void main() {
     await askedForTheFounding();
     await keysOf(core).finishStrandedEvents(seed);
     expect(await signedInTheCore(core, aid), [true]);
+  });
+
+  test('a founding listing one of the witnesses this device knows twice is not the founding it expects',
+      () async {
+    // The core's own prepare refuses a repeated witness, so this is a founding
+    // a core wrote itself: judged directly, as the stored bytes would be.
+    final a = witnesses[0], b = witnesses[1];
+    Future<String?> differenceFor(List<String> listed) async {
+      final stored = ParsedEvent.fromJson({
+        't': 'icp', 'd': 'E', 'i': 'E', 's': 0,
+        'fields': [
+          {'name': 'v', 'value': 'KERI10JSON000000_'},
+          {'name': 't', 'value': 'icp'},
+          {'name': 'd', 'value': 'E'},
+          {'name': 'i', 'value': 'E'},
+          {'name': 's', 'value': '0'},
+          {'name': 'kt', 'value': '1'},
+          {'name': 'k', 'value': [key(0)]},
+          {'name': 'nt', 'value': '1'},
+          {'name': 'n', 'value': [await digest(1)]},
+          {'name': 'bt', 'value': '2'},
+          {'name': 'b', 'value': listed},
+          {'name': 'c', 'value': <String>[]},
+          {'name': 'a', 'value': <Object?>[]},
+        ]
+      });
+      final expected = await theStoredFoundingThisKeyWouldHaveMade(km, stored,
+          key: key(0), next: key(1), witnesses: WitnessSet([a, b], 2));
+      return expected.differenceFrom(stored);
+    }
+    expect(await differenceFor([a, b]), isNull);
+    expect(await differenceFor([b, a]), isNull, reason: 'the same witnesses in another order');
+    expect(await differenceFor([a, a]), isNotNull, reason: 'one witness counted twice, another dropped');
+    expect(await differenceFor([a, witnesses[2]]), isNotNull);
+  });
+
+  test('an identifier is recorded only once its founding is accepted, not when it is refused or listed',
+      () async {
+    final (core, aid, _) = await storedByInception();
+    await askedForTheFounding();
+    String? pinned;
+    final k = TheKeyInForce(core.client, core.base,
+        asked: TheEventsThisDeviceAskedFor(),
+        keyMath: km,
+        whenTheLogIsChecked: (a) async => pinned = a,
+        readTheKeyState: (seed) =>
+            TheKeyStateThisDeviceReads(core.client, km, core.base).read(seed));
+    // A founding sealing an owner nobody named is refused, and nothing is recorded.
+    await expectLater(k.finishStrandedEvents(seed, ownerAid: 'E${'Q' * 43}'),
+        throwsA(isA<AStoredEventIsNotTheOneExpected>()));
+    expect(pinned, isNull, reason: 'a refused founding recorded its identifier');
+    await k.eventsAwaitingApproval(seed, ownerAid: 'E${'Q' * 43}');
+    expect(pinned, isNull, reason: 'listing a refused founding recorded its identifier');
+    expect(await signedInTheCore(core, aid), [false]);
   });
 }
