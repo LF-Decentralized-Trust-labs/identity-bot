@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,8 @@ import (
 	"identity-agent-core/asset"
 	"identity-agent-core/drivers"
 	"identity-agent-core/drivers/driverfake"
+
+	"github.com/go-chi/chi/v5"
 )
 
 // anOwnersAddress serves the owner's key event log at an address, as the
@@ -118,4 +121,72 @@ func TestAnOverlaysRosterShowsTheSameVerifiedNames(t *testing.T) {
 	if names[impostor] != "" {
 		t.Fatalf("overlay got a name the core does not verify: %v", names)
 	}
+}
+
+// The wiring, end to end through the routes: an owner's agent redeems a
+// ceremony invite at the signer route, giving its address, and the owner list
+// then shows the name it signed. Nothing here calls recordWhatNamesAnOwner:
+// the test fails if AcceptFoundingSigner stops recording the log, or if the
+// redeem route stops handing the owner's address on to it.
+func TestRedeemingACeremonyInviteThroughTheRouteNamesTheOwner(t *testing.T) {
+	const org, owner = "EORG", "EOWNER"
+	seed := seedOf(7)
+	key := keyOf(seed)
+	row := vouchRow(t, seed, owner, org, "Sam Route", "Sam Route")
+	s := anOrgWithOwners(t, []string{owner})
+	theEngineVerifies(s, owner, key)
+
+	ceremonyMu.Lock()
+	err := s.saveCeremony(collecting("Sam"))
+	ceremonyMu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.assetHandler.Store.CreateEmployeeInvite(asset.EmployeeInvite{
+		Token: "tok-a", Role: "Super Admin", IsSigner: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	r := chi.NewRouter()
+	r.Route("/api", func(r chi.Router) {
+		s.mountSignerRoutes(r)
+		s.mountOwnerCeremonyRoutes(r)
+	})
+
+	// Before redeeming, the owner list names nobody.
+	if names := ownersOnTheRoute(t, r); names[owner] != "" {
+		t.Fatalf("a name was shown before the invite was redeemed: %v", names)
+	}
+
+	body, _ := json.Marshal(map[string]string{
+		"pairwise_aid": owner, "public_key": key, "next_public_key": "DNEXT",
+		"name": row.Name, "vouch_sig": row.VouchSig, "vouch_payload": row.VouchPayload,
+		"oobi": anOwnersAddress(t, s, owner, key),
+	})
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/signer/invites/tok-a/redeem", bytes.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("redeeming: %d %s", rec.Code, rec.Body.String())
+	}
+
+	got := ownersOnTheRoute(t, r)
+	if got[owner] != "Sam Route" {
+		t.Fatalf("the owner who agreed through the route is not named on /api/owners: %v", got)
+	}
+}
+
+func ownersOnTheRoute(t *testing.T, r http.Handler) map[string]string {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/owners/", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("listing owners: %d %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Names map[string]string `json:"owner_names"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	return body.Names
 }

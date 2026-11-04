@@ -139,10 +139,14 @@ func (s *CoreServer) ownerRoster() []asset.Employee {
 
 // recordWhatNamesAnOwner records, when an owner agrees to own the organisation,
 // the one thing the name they signed needs besides the signature: their key
-// event log, verified here, so that their CURRENT key is known and follows a
-// rotation (keyToCheckAnOwnersNameAgainst). The log is fetched from the address
-// the owner's agent gave and accepted only if it belongs to the identifier the
-// owner presented; nothing is written for any other identifier.
+// event log, verified here, so that the key their name is checked against is
+// the one that log gives (keyToCheckAnOwnersNameAgainst). That key moves with a
+// rotation only when contactKeyForUse refreshes the stored log, which happens
+// when the owner's requests are checked; listing owners never triggers it, so
+// until then the name is checked against the key as of the last refresh. The
+// log is fetched from the address the owner's agent gave and accepted only if
+// it belongs to the identifier the owner presented; nothing is written for any
+// other identifier.
 //
 // Best effort, and deliberately not fatal: the owner is already sealed, and
 // refusing now would leave an organisation with no owner. When it fails the
