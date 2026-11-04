@@ -1,12 +1,16 @@
 package server
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
+	"identity-agent-core/drivers"
 	"identity-agent-core/witness"
 
 	keri "github.com/grapeid/keri-go"
@@ -60,7 +64,7 @@ func (s *CoreServer) handleWitnessWithdrawConfirm(w http.ResponseWriter, r *http
 		writeError(w, http.StatusServiceUnavailable, "no witness service", "")
 		return
 	}
-	if err := s.WitnessService.ReceiveWithdrawalConfirmation(c, stillDesignatedIn); err != nil {
+	if err := s.WitnessService.ReceiveWithdrawalConfirmation(c, s.stillDesignatedIn(c.ControllerAID)); err != nil {
 		writeError(w, http.StatusBadRequest, "confirmation_not_accepted", err.Error())
 		return
 	}
@@ -68,26 +72,99 @@ func (s *CoreServer) handleWitnessWithdrawConfirm(w http.ResponseWriter, r *http
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "stopped"})
 }
 
-// stillDesignatedIn reports whether a rotation leaves a witness designated.
+// stillDesignatedIn returns the check that a rotation really cuts a witness
+// from the given controller.
 //
-// Read from the event rather than from what the controller says about it. A
-// confirmation is a claim; the rotation is the evidence, and the two can
-// disagree — by mistake or otherwise.
-func stillDesignatedIn(rotationRawB64, witnessKey string) (bool, error) {
-	raw, err := base64.StdEncoding.DecodeString(rotationRawB64)
-	if err != nil {
-		return true, err
-	}
-	ev, err := keri.ParseEvent(raw)
-	if err != nil {
-		return true, err
-	}
-	for _, cut := range ev.WitnessCut {
-		if cut == witnessKey {
-			return false, nil
+// A confirmation is a claim; the rotation is the evidence — but only if it is
+// that controller's own rotation. Parsing the blob proves it is shaped like one
+// and nothing else: anybody can write an event that names a witness in its cut
+// list. So the event has to be one this witness already holds in the
+// controller's key log, and that log is validated from the bytes it was
+// published as, by the one validator the rest of the witness uses. That
+// establishes, in a single pass, that the log derives the controller's own
+// identifier, that every event in it (this rotation included) is signed by the
+// key in force at that point, and that the chain holds.
+//
+// The witness is still enrolled until the confirmation is accepted, so it has
+// been receiving this controller's events, the rotation among them. A rotation
+// it does not hold is refused: it cannot be shown to be in the log.
+func (s *CoreServer) stillDesignatedIn(controllerAID string) func(rotationRawB64, witnessKey string) (bool, error) {
+	return func(rotationRawB64, witnessKey string) (bool, error) {
+		raw, err := base64.StdEncoding.DecodeString(rotationRawB64)
+		if err != nil {
+			return true, err
 		}
+		ev, err := keri.ParseEvent(raw)
+		if err != nil {
+			return true, err
+		}
+		if ev.Identifier != controllerAID {
+			return true, fmt.Errorf("this rotation is for %s, not %s", ev.Identifier, controllerAID)
+		}
+		if ev.Ilk != "rot" && ev.Ilk != "drt" {
+			return true, fmt.Errorf("the event is a %q, not a rotation", ev.Ilk)
+		}
+		if s.WitnessService == nil || s.WitnessService.Store == nil {
+			return true, fmt.Errorf("no key log is held to check the rotation against")
+		}
+		held, err := s.WitnessService.Store.GetKelEvents(controllerAID)
+		if err != nil {
+			return true, err
+		}
+		in := drivers.ValidateKELInput{AID: controllerAID}
+		inLog := false
+		for _, e := range held {
+			if e.RawBytesB64 == "" {
+				return true, fmt.Errorf("the key log held for %s predates keeping published "+
+					"bytes, so it cannot be verified", controllerAID)
+			}
+			b, err := base64.StdEncoding.DecodeString(e.RawBytesB64)
+			if err != nil {
+				return true, fmt.Errorf("a stored event is unreadable: %w", err)
+			}
+			if bytes.Equal(b, raw) {
+				inLog = true
+			}
+			in.RawEvents = append(in.RawEvents, b)
+			in.CesrSignatures = append(in.CesrSignatures, e.CesrSignature)
+		}
+		if !inLog {
+			return true, fmt.Errorf("this rotation is not in the key log held for %s", controllerAID)
+		}
+		res, err := drivers.ValidateKELFromBytes(in)
+		if err != nil {
+			return true, err
+		}
+		if !res.KelVerified {
+			return true, fmt.Errorf("the key log held for %s is not verified: %s",
+				controllerAID, strings.Join(res.ValidationErrors, "; "))
+		}
+		cut := false
+		for _, c := range ev.WitnessCut {
+			if sameWitness(c, witnessKey) {
+				cut = true
+			}
+		}
+		if !cut {
+			// Genuine, but not the event that removes us.
+			return true, nil
+		}
+		// Cut by this event; still designated if a later one added it back.
+		for _, d := range res.Witnesses {
+			if sameWitness(d, witnessKey) {
+				return true, nil
+			}
+		}
+		return false, nil
 	}
-	// Not cut by this event. Reported as still designated rather than as an
-	// error: the event may be genuine and simply not the one that removes us.
-	return true, nil
+}
+
+// sameWitness compares by key, so two spellings of one witness agree.
+func sameWitness(a, b string) bool {
+	if a == b {
+		return true
+	}
+	ka, oka := drivers.WitnessKey(a)
+	kb, okb := drivers.WitnessKey(b)
+	return oka && okb && ka == kb
 }
