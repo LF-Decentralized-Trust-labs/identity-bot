@@ -123,7 +123,7 @@ func (s *CoreServer) identifyStranger(claimedAID string, kel []map[string]interf
 	// their own keys.
 	fromBytes, ok := drivers.RecordsFromVerifiedBytes(kel)
 	if !ok {
-		return nil, fmt.Errorf("the presented key history does not carry the bytes it would be checked by")
+		return nil, "", fmt.Errorf("the presented key history does not carry the bytes it would be checked by")
 	}
 	icp, err := eventFromKELEntry(fromBytes[0])
 	if err != nil {

@@ -160,8 +160,12 @@ func TestAnUnreadableEventIsRefused(t *testing.T) {
 func TestAFirstContactKeepsTheKeyItsHistoryEndsOn(t *testing.T) {
 	s := witnessWithSeed(t, 1)
 	const aid = "EKeyedStranger"
+	ks, err := didcomm.GenerateKeySet(aid)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := s.DataStore.SaveContactKEL(store.ContactKELRecord{
-		AID: aid, KelVerified: true, CurrentPublicKey: "DCurrentKey",
+		AID: aid, KEL: inceptionCommittingTo(t, aid, ks), KelVerified: true, CurrentPublicKey: "DCurrentKey",
 	}); err != nil {
 		t.Fatal(err)
 	}

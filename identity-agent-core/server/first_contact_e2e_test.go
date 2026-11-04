@@ -329,7 +329,7 @@ func TestAStrangerCannotPutTheirKeysBesideSomeoneElsesBytes(t *testing.T) {
 		"event_json":    forged[0]["event_json"],
 	}}
 
-	did, err := s.identifyStranger(victimAID, presented)
+	did, _, err := s.identifyStranger(victimAID, presented)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +342,7 @@ func TestAStrangerCannotPutTheirKeysBesideSomeoneElsesBytes(t *testing.T) {
 	}
 
 	// A history with no bytes cannot have been verified by them, so it names nobody.
-	if _, err := s.identifyStranger(victimAID, []map[string]interface{}{{"event_json": forged[0]["event_json"]}}); err == nil {
+	if _, _, err := s.identifyStranger(victimAID, []map[string]interface{}{{"event_json": forged[0]["event_json"]}}); err == nil {
 		t.Fatal("a history without bytes identified somebody")
 	}
 }

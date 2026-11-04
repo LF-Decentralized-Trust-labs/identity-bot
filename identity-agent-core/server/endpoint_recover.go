@@ -113,6 +113,11 @@ func (s *CoreServer) RecoverContactEndpoint(contactAID string) (*recoveredEndpoi
 		return nil, fmt.Errorf("no stored KEL for %s — recovery needs a contact resolved at least once", contactAID)
 	}
 
+	// The witness list is read from a log kept as verified, so it is the one the
+	// controller's own events named, not text a server served.
+	if !kelRecord.KelVerified {
+		return nil, fmt.Errorf("the stored KEL for %s is not a verified one, so it cannot say who witnesses for it", contactAID)
+	}
 	witnessAIDs := witnessesFromStoredKEL(kelRecord.KEL)
 	if len(witnessAIDs) == 0 {
 		return nil, fmt.Errorf("%s named no witnesses, so there is nowhere to ask", contactAID)
