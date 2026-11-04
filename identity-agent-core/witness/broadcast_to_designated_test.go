@@ -143,7 +143,7 @@ func TestARealDelegatedInceptionIsWitnessed(t *testing.T) {
 	}
 	sender.FetchTip = func(_ context.Context, url string) (TipAnswer, error) {
 		_, nonce, _ := strings.Cut(url, "?nonce=")
-		return witness.KelTip(d.AID, nonce)
+		return witness.KelTip(d.AID, nonce, true)
 	}
 	for _, ev := range [][]byte{dip, ixnRaw} {
 		sig, _ := login.SignString(string(ev), recSeed)

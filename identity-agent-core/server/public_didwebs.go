@@ -107,7 +107,8 @@ func (s *CoreServer) mountPublicDidWebsRoutes(r chi.Router) {
 // the stream preamble, which a visitor cannot set; each such address gets the
 // same share as a direct caller, and a burst through the relay cannot use up a
 // direct caller's share or the reverse. An IPv6 visitor's share is its /64. A
-// header such as X-Forwarded-For is never used, because a visitor can write it.
+// header such as X-Forwarded-For is used only when the connection comes from a
+// proxy named in TRUSTED_PROXIES; otherwise a visitor could write it.
 //
 // Every relayed request also counts against one larger budget of its own, so a
 // relay that names a new visitor each time still cannot exceed it. A preamble
@@ -127,18 +128,18 @@ const (
 // rate limiter the attestation route already uses, and in all, by how many
 // run at once. A caller over either is told to come back, not queued.
 type keyLogGate struct {
-	perCaller  *attestationRateLimiter
-	relayed    *attestationRateLimiter // every relayed request, whoever it names
-	byVisitor  *attestationRateLimiter // relayed callers by the address the relay passed on
+	perCaller  *ipRateLimiter
+	relayed    *ipRateLimiter // every relayed request, whoever it names
+	byVisitor  *ipRateLimiter // relayed callers by the address the relay passed on
 	running    chan struct{}
 	readWithin time.Duration
 }
 
 func newKeyLogGate() *keyLogGate {
 	return &keyLogGate{
-		perCaller:  newAttestationRateLimiter(keyLogChecksPerMinute),
-		relayed:    newAttestationRateLimiter(keyLogChecksPerMinuteRelayed),
-		byVisitor:  newAttestationRateLimiter(keyLogChecksPerMinute),
+		perCaller:  newIPRateLimiter(keyLogChecksPerMinute, time.Minute),
+		relayed:    newIPRateLimiter(keyLogChecksPerMinuteRelayed, time.Minute),
+		byVisitor:  newIPRateLimiter(keyLogChecksPerMinute, time.Minute),
 		running:    make(chan struct{}, keyLogChecksAtOnce),
 		readWithin: keyLogReadWithin,
 	}
@@ -176,7 +177,7 @@ func (g *keyLogGate) guard(next http.HandlerFunc) http.HandlerFunc {
 				allowed = g.byVisitor.allow(v)
 			}
 		} else {
-			allowed = g.perCaller.allow(callerIP(r))
+			allowed = g.perCaller.allow(clientIP(r))
 		}
 		if !allowed {
 			http.Error(w, "too many key logs from this address; try again in a minute", http.StatusTooManyRequests)

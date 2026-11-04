@@ -218,9 +218,48 @@ var publicRoutes = map[string]string{
 	// signature, the key agreement and the body hash against the sender's known
 	// DID. Expiry and replay are checked after that. A stranger who is not
 	// already a peer gets no further than the first of those.
-	"POST /didcomm":                                         "an agent we know posts an encrypted envelope, authenticated by what it carries",
-	"POST /api/witness/request":                             "witnessing protocol — a controller asks us to witness",
-	"POST /api/witness/accept":                              "witnessing protocol — a witness answers our request, signed by its key",
+	"POST /didcomm":             "an agent we know posts an encrypted envelope, authenticated by what it carries",
+	"POST /api/witness/request": "witnessing protocol — a controller asks us to witness",
+	"POST /api/witness/accept":  "witnessing protocol — a witness answers our request, signed by its key",
+	// The other half of the witnessing protocol. Enrolment above is public and
+	// standing down was not, so a peer relationship could be created remotely
+	// and never ended remotely: RequestWithdrawal got 403 from the peer it asked.
+	//
+	// Safe to reach because the request carries its own proof. A request to stop
+	// is only acknowledged, and changes nothing. A confirmation changes the
+	// witness's state only when it names a rotation that is for that
+	// controller, signed by the keys in force, and already in the key log the
+	// witness holds (T-595) — an unsigned or foreign blob is refused.
+	"POST /api/witness/withdraw":         "witnessing protocol — a witness tells the controller it wishes to stop",
+	"POST /api/witness/withdraw/confirm": "witnessing protocol — a controller sends its own signed rotation, which the witness checks against its log",
+	// A witness receives the controller's events here, and a controller (or a
+	// peer cross-checking) reads back what the witness holds. Both were owner
+	// gated, so a peer's BroadcastEvent got 403 and no witness ever stored a
+	// rotation — which made the withdrawal check above refuse every real
+	// withdrawal with "not in the key log".
+	//
+	// Safe to reach because nothing here is trusted on who sent it. The event
+	// is verified against the controller's own signature and the key log before
+	// it is stored (ReceiveEvent), and a witness that is not witnessing that
+	// identity refuses it. The reads are answered from what is held only to the
+	// identity itself or the one it is delegated from, proven by a signature
+	// (witness.MayRead); everybody else gets the answer for a log not held, so
+	// the routes cannot be used to learn who this agent witnesses. That is not
+	// the same data as GET /{aid}/kel: a root identity is held here and is never
+	// published there. All four share one bounded rate limiter.
+	"POST /api/witness/event":                      "witnessing protocol — a controller sends a signed event, verified before it is stored",
+	"GET /api/witness/kel/{signer_aid}":            "the key log this witness holds, to the identity itself or its delegator, signed — anybody else is told it is not held",
+	"GET /api/witness/kel/{signer_aid}/tip":        "how far this witness holds an identity's key log, signed with a nonce — to anybody else, as for a log not held",
+	"GET /api/witness/kel/{signer_aid}/event/{sn}": "one event of a key log this witness holds, to the identity itself or its delegator, signed — anybody else is told it is not held",
+	// Mounted on the root router under /public/ and never declared, so every
+	// peer cross-check got 403, which the caller records as the peer being
+	// "unavailable" — the whole peer layer degraded silently.
+	//
+	// Safe to reach because they answer only from the watcher's own first-seen
+	// records, are rate limited per caller, and honour an identity's opt-out.
+	// The digest of a public key log is public and self-verifying.
+	"GET /public/kel-digest":                                "a peer watcher asks what digest we first saw for an identity at a sequence number",
+	"POST /public/kel-check":                                "a peer watcher compares its digest with ours (L3 cross-check)",
 	"POST /api/backup/receive":                              "a peer pushes an opaque, already-encrypted archive",
 	"GET /api/backup/receive/{identityAID}":                 "the owning agent lists its own archives during recovery",
 	"GET /api/backup/receive/{identityAID}/download/{name}": "the owning agent retrieves an opaque archive during recovery",

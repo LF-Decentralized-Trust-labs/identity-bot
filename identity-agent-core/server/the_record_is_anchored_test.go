@@ -850,6 +850,16 @@ func TestARealWitnessWitnessesTheRecord(t *testing.T) {
 	s.ActivityLog.SetEventSigner(&invocationSigner{s: s})
 	sq := s.DataStore.(*store.SQLiteStore)
 	s.WitnessService = witness.NewService(witness.NewSQLiteStore(sq.DB()), sq, s.KeriDriver, witness.BackendDesktop)
+	// Wired as NewCoreServer wires it: the witness answers a read of a key log
+	// only to a reader that signs as the identity or the one it delegates from.
+	s.WitnessService.OurAID = func() string { id, _ := s.DataStore.GetIdentity(); return id.AID }
+	s.WitnessService.SignAsRequester = func(statement string) (string, error) {
+		seed, err := s.identitySigningSeed()
+		if err != nil {
+			return "", err
+		}
+		return login.SignString(statement, seed)
+	}
 	s.DataStore.SaveContact(store.ContactRecord{AID: "EWitnessPeer", OobiURL: peer.base, Status: "accepted"})
 	s.WitnessService.Store.SaveContactMeta(witness.ContactMeta{ContactAID: "EWitnessPeer", WitnessKey: peer.witnessKey})
 

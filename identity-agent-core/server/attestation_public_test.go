@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -33,7 +34,7 @@ func TestOpeningAttestationDidNotOpenTheOwnerStatus(t *testing.T) {
 }
 
 func TestOneCallerCannotDriveUnboundedFirmwareWork(t *testing.T) {
-	l := newAttestationRateLimiter(3)
+	l := newIPRateLimiter(3, time.Minute)
 	for i := 0; i < 3; i++ {
 		if !l.allow("10.0.0.1") {
 			t.Fatalf("refused request %d, which is within the limit", i+1)
@@ -51,29 +52,69 @@ func TestOneCallerCannotDriveUnboundedFirmwareWork(t *testing.T) {
 // The limiter's map is keyed by something an unauthenticated caller chooses, so
 // it has to forget. Otherwise it is a slow leak they control the size of.
 func TestTheLimiterForgetsOldCallers(t *testing.T) {
-	l := newAttestationRateLimiter(1)
+	l := newIPRateLimiter(1, time.Minute)
 	l.allow("10.0.0.1")
-	// Age the entry past its window and force a sweep.
+	// Age the entry past its window and fill the table so a sweep is forced.
 	l.mu.Lock()
-	l.seen["10.0.0.1"].start = time.Now().Add(-2 * time.Minute)
-	l.lastGC = time.Now().Add(-2 * time.Minute)
+	l.hits["10.0.0.1"] = []time.Time{time.Now().Add(-2 * time.Minute)}
+	for i := 0; i < maxRateLimitedClients-1; i++ {
+		l.hits["filler-"+strconv.Itoa(i)] = []time.Time{time.Now().Add(-2 * time.Minute)}
+	}
 	l.mu.Unlock()
 
 	if !l.allow("10.0.0.2") {
 		t.Fatal("a fresh caller was refused")
 	}
 	l.mu.Lock()
-	_, stillThere := l.seen["10.0.0.1"]
+	_, stillThere := l.hits["10.0.0.1"]
 	l.mu.Unlock()
 	if stillThere {
 		t.Fatal("an expired caller was kept, so the map grows without bound")
 	}
 }
 
+// The attestation route names its caller the same way every other public route
+// does: a forwarding header counts only from a configured trusted proxy.
+func TestAttestationRouteHonoursTrustedProxiesAndStaysLimited(t *testing.T) {
+	call := func(s *CoreServer, remote, xff string) int {
+		req := httptest.NewRequest(http.MethodGet, "/api/attestation", nil)
+		req.RemoteAddr = remote
+		if xff != "" {
+			req.Header.Set("X-Forwarded-For", xff)
+		}
+		rec := httptest.NewRecorder()
+		s.handlePublicAttestation(rec, req)
+		return rec.Code
+	}
+
+	// No trusted proxy: a forged header buys no new identity.
+	t.Setenv("TRUSTED_PROXIES", "")
+	s := &CoreServer{attestationLimiter: newIPRateLimiter(2, time.Minute)}
+	for i := 0; i < 2; i++ {
+		call(s, "203.0.113.9:1000", "198.51.100."+strconv.Itoa(i+1))
+	}
+	if got := call(s, "203.0.113.9:1000", "198.51.100.99"); got != http.StatusTooManyRequests {
+		t.Fatalf("a forged X-Forwarded-For escaped the limit: status %d", got)
+	}
+
+	// Behind a trusted proxy: visitors are told apart by the forwarded address.
+	t.Setenv("TRUSTED_PROXIES", "10.0.0.1")
+	s = &CoreServer{attestationLimiter: newIPRateLimiter(1, time.Minute)}
+	if got := call(s, "10.0.0.1:1000", "198.51.100.1"); got == http.StatusTooManyRequests {
+		t.Fatalf("first visitor refused: %d", got)
+	}
+	if got := call(s, "10.0.0.1:1000", "198.51.100.2"); got == http.StatusTooManyRequests {
+		t.Fatal("a second visitor behind the proxy shared the first one's quota")
+	}
+	if got := call(s, "10.0.0.1:1000", "198.51.100.1"); got != http.StatusTooManyRequests {
+		t.Fatalf("the same visitor was not limited: status %d", got)
+	}
+}
+
 // A nil limiter must not refuse everything. Any path that builds a server
 // without one should degrade to unlimited rather than to unusable.
 func TestANilLimiterAllows(t *testing.T) {
-	var l *attestationRateLimiter
+	var l *ipRateLimiter
 	if !l.allow("10.0.0.1") {
 		t.Fatal("a server with no limiter refused every request")
 	}
@@ -82,7 +123,7 @@ func TestANilLimiterAllows(t *testing.T) {
 // On a machine with no sealed hardware the honest answer is "there is nothing
 // to prove", not an error suggesting something is broken.
 func TestAnOrdinaryMachineSaysSoRatherThanFailing(t *testing.T) {
-	s := &CoreServer{attestationLimiter: newAttestationRateLimiter(60)}
+	s := &CoreServer{attestationLimiter: newIPRateLimiter(60, time.Minute)}
 	rec := httptest.NewRecorder()
 	s.handlePublicAttestation(rec, httptest.NewRequest(http.MethodGet, "/api/attestation", nil))
 
