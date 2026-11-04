@@ -291,7 +291,11 @@ class RecoveryService {
   /// none of them: the new root's founding, the old root's rotation, and the new
   /// root's first interaction. The caller checks and signs each (ADR-061).
   /// [newRoot] and [oldRoot] are `{k: [key], n: [classical digest, post-quantum
-  /// digest]}`; [oldRoot] also names `after`, the log's tip.
+  /// digest]}`. [newRoot] may also carry what any founding carries: `a` (its
+  /// anchors, the messaging keyset among them), `owner_aid`, and its witnesses
+  /// `b` with threshold `bt` (the old root's, when `b` is absent). [oldRoot]
+  /// also names `after`, the last establishment event or an interaction the
+  /// person keeps; the rotation supersedes every interaction after it.
   Future<Map<String, dynamic>> prepareRootAidRotation({
     required Map<String, dynamic> newRoot,
     required Map<String, dynamic> oldRoot,
