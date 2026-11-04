@@ -957,6 +957,14 @@ do not.
   and 4.4 KB as text), as ADR-022 accepts.
 - The app keeps a record of what it reserved and signed and depends on it.
   Losing it (a wiped device) loses nothing the witnesses do not also hold.
+- Some of this is decided here and built in stages. The multi-owner ceremony
+  through a prepare and a commit, each owner's app signing as section 5 says,
+  and a recovery rotation an app offers to undo interactions a thief anchored,
+  both need the apps to hold each owner's keys; until the ceremony is built, one
+  whose thresholds need more than the keys this Identity Agent holds is refused
+  rather than added unsigned. The break-glass root rotation is built and signed
+  and stays switched off until the people an identity deals with are told of a
+  rotation, and until the app checks its three events as section 5 says.
 
 ## Alternatives considered
 

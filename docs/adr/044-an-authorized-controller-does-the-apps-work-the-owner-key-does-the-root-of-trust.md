@@ -136,7 +136,7 @@ removed, or it is revoked directly, is withdrawn the same way: marked withdrawin
 never in force, and its revocation signed on the device; a machine re-granted there has
 its old grant's withdrawal asked for ahead of the new grant. The engine itself appends no
 interaction to a key log unless that identity's current key signed it, checked in one
-place, so no path can leave an unsigned event there. Rotations are not yet held to this: a rotation is signed by its
+place, so no path can leave an unsigned event there. *(Superseded by ADR-061, from here to "It changes once the app signs each event before it is added": every key event, rotations included, is now signed before it is added, through a prepare and a commit, so an identity whose key the app holds can rotate and interact, and no rotation is appended unsigned.)* Rotations are not yet held to this: a rotation is signed by its
 new keys, which this Identity Agent does not hold (the owner's device, a recovering
 client, or each owner in a multi-owner change), and today each of those signs it only
 after it is appended. Guarding rotations needs the rotation built, signed by the new keys
@@ -150,8 +150,8 @@ the core, as an app may hold it: the app signs an event only after the core has
 added it, which is too late, so through the core such an identity can be neither rotated
 nor extended (no interaction, no credential issued), and the core says so in those words.
 Before this the core appended those events unsigned, so the key logs they made were not
-valid. It changes once the app signs each event before it is added. *(Superseded by ADR-061: every key event, rotations included, is now signed before it is added, through a prepare and a commit, so an identity whose key the app holds can rotate and interact, and no rotation is appended unsigned.)* An Identity Agent whose key log holds events written by an earlier version
-without the key, which the device never had, asks the device for nothing and says so. Only one
+valid. It changes once the app signs each event before it is added. An Identity Agent whose key log holds events written by an earlier version
+without the key, which the device never had, asks the device for nothing and says so. *(This holds for the device that signs through its own core. Where a signer outside the core signs, ADR-061 section 3 answers a commit onto such a log `409 unsigned_history`, and the signer signs those events in place first.)* Only one
 interaction waits for the device at a time, as each extends the same tip; another is kept
 and built once the one before it is appended, refused or expired. When a signature comes back it must be over the request's own
 payload, which must be the interaction kept; the grant is derived again from what was kept
