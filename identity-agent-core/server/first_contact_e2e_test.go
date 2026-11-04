@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -47,10 +48,28 @@ func inceptionCommittingTo(t *testing.T, aid string, ks *didcomm.KeySet) []map[s
 	if err != nil {
 		t.Fatal(err)
 	}
-	return []map[string]interface{}{{
+	return withTheBytesItWasVerifiedBy(t, map[string]interface{}{
 		"v": "KERI10JSON", "t": "icp", "s": "0", "i": aid, "d": aid,
 		"a": []interface{}{anchor},
-	}}
+	})
+}
+
+// withTheBytesItWasVerifiedBy gives each event the raw bytes a verified log
+// is kept with. A log is kept as verified only if it carries them, and what is
+// read back is derived from them, so a fixture for a verified log has to.
+func withTheBytesItWasVerifiedBy(t *testing.T, events ...map[string]interface{}) []map[string]interface{} {
+	t.Helper()
+	out := make([]map[string]interface{}, 0, len(events))
+	for _, ev := range events {
+		raw, err := json.Marshal(ev)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, map[string]interface{}{
+			"event_json": string(raw), "raw_bytes_b64": base64.StdEncoding.EncodeToString(raw),
+		})
+	}
+	return out
 }
 
 // The whole point, end to end through the public endpoint: two agents that have
