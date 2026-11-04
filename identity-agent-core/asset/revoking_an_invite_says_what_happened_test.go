@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -81,7 +80,6 @@ func TestARevokeThatCannotBeSavedIsNotReportedAsRevoked(t *testing.T) {
 	if err := os.WriteFile(dir, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_ = filepath.Join(dir)
 
 	for _, p := range []string{"/assets/a1/invites/live", "/employees/invites/elive"} {
 		if got := del(r, p); got != http.StatusInternalServerError {
@@ -118,5 +116,37 @@ func TestRevokingAnotherAssetsInviteLeavesItLive(t *testing.T) {
 	}
 	if got := del(r, "/assets/a2/invites/theirs"); got != http.StatusOK {
 		t.Fatalf("revoking through its own asset = %d, want 200", got)
+	}
+}
+
+// A code redeemed as many times as it allows is closed: the revoke route says
+// so (409), and the read and redeem routes refuse it, so the 409 is true.
+func TestAUsedUpInviteCannotBeRedeemed(t *testing.T) {
+	s, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &Handler{Store: s}
+	r := chi.NewRouter()
+	r.Get("/invites/{token}", h.HandleGetInviteInfo)
+	r.Post("/invites/{token}/redeem", h.HandleRedeemInvite)
+	s.CreateInvite(AssetInvite{Token: "once", AssetID: "a1", MaxUses: 1})
+
+	do := func(method, path string) int {
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(method, path, nil))
+		return rec.Code
+	}
+	if got := do(http.MethodPost, "/invites/once/redeem"); got != http.StatusOK {
+		t.Fatalf("first redeem = %d, want 200", got)
+	}
+	if got := do(http.MethodPost, "/invites/once/redeem"); got != http.StatusBadRequest {
+		t.Errorf("redeeming a used-up code = %d, want 400", got)
+	}
+	if got := do(http.MethodGet, "/invites/once"); got != http.StatusNotFound {
+		t.Errorf("reading a used-up code = %d, want 404", got)
+	}
+	if inv, _ := s.GetInvite("once"); inv.UseCount != 1 {
+		t.Errorf("use count = %d, want 1: a refused redeem must not count", inv.UseCount)
 	}
 }

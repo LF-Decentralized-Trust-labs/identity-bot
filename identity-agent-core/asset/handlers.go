@@ -348,7 +348,7 @@ func (h *Handler) writeRevokeResult(w http.ResponseWriter, err error, ok func())
 func (h *Handler) HandleGetInviteInfo(w http.ResponseWriter, r *http.Request) {
 	token := chi.URLParam(r, "token")
 	inv, ok := h.Store.GetInvite(token)
-	if !ok || inv.Revoked {
+	if !ok || inv.Revoked || inv.usedUp() {
 		h.writeJSON(w, map[string]string{"error": "invalid"}, http.StatusNotFound)
 		return
 	}
@@ -361,6 +361,10 @@ func (h *Handler) HandleRedeemInvite(w http.ResponseWriter, r *http.Request) {
 	inv, ok := h.Store.GetInvite(token)
 	if !ok || inv.Revoked {
 		h.writeJSON(w, map[string]string{"error": "invalid"}, http.StatusBadRequest)
+		return
+	}
+	if inv.usedUp() {
+		h.writeJSON(w, map[string]string{"error": "exhausted"}, http.StatusBadRequest)
 		return
 	}
 	// create member stub (pairwise from login context later)

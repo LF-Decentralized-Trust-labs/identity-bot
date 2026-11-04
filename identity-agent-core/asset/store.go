@@ -217,6 +217,13 @@ var ErrInviteClosed = errors.New("invite is already revoked or used up")
 // A token that belongs to a different asset than assetID is reported as not
 // found, exactly like an unknown one, so a caller cannot learn which codes exist
 // on other assets.
+// usedUp is whether an invite has been redeemed as many times as it allows; a
+// MaxUses of 0 means no limit. A used-up code is closed: it can be neither
+// redeemed nor revoked.
+func (inv AssetInvite) usedUp() bool {
+	return inv.MaxUses > 0 && inv.UseCount >= inv.MaxUses
+}
+
 func (s *Store) RevokeInvite(assetID, token string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -224,7 +231,7 @@ func (s *Store) RevokeInvite(assetID, token string) error {
 	if !ok || inv.AssetID != assetID {
 		return ErrInviteNotFound
 	}
-	if inv.Revoked || (inv.MaxUses > 0 && inv.UseCount >= inv.MaxUses) {
+	if inv.Revoked || inv.usedUp() {
 		return ErrInviteClosed
 	}
 	inv.Revoked = true
