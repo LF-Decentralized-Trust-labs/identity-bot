@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"sort"
 	"sync"
+
+	"identity-agent-core/store"
 )
 
 // A break-glass run stopped part way is finished by sending the same signed
@@ -131,4 +133,27 @@ func UnfinishedRootAIDRotation(dataDir, aid string) (*RunningRootAIDRotation, er
 		}
 	}
 	return nil, nil
+}
+
+// RotationLanded reports whether the run's old-root rotation is in the old
+// root's stored log. Until it is, the run has authorised nothing (at most the
+// new root's founding is stored, which nothing points to), so it may be
+// dropped and another prepared; once it is, the old root's log authorises this
+// run's new root and only finishing this run is safe.
+func (run RunningRootAIDRotation) RotationLanded(events []store.EventRecord) bool {
+	raw := run.Request.OldRootRotation.RawB64
+	if raw == "" {
+		return false
+	}
+	for _, ev := range events {
+		if ev.RawBytesB64 == raw {
+			return true
+		}
+	}
+	return false
+}
+
+// DropUnfinishedRootAIDRotation forgets a run whose rotation has not landed.
+func DropUnfinishedRootAIDRotation(dataDir string, run RunningRootAIDRotation) error {
+	return forgetRunningRootAIDRotation(dataDir, run.OldRootAID)
 }

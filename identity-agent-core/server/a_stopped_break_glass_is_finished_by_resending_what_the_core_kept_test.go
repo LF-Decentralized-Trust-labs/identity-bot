@@ -82,3 +82,37 @@ func TestAStoppedBreakGlassIsFinishedByTheRequestTheCoreKept(t *testing.T) {
 		t.Fatalf("the identity kept is %s, not the new root", own.AID)
 	}
 }
+
+// A run stopped before the old root's rotation landed has authorised nothing,
+// so it does not block the identity: a new prepare drops it and goes ahead.
+// Only a run whose rotation is in the old root's log must be finished.
+func TestABreakGlassWhoseRotationNeverLandedDoesNotBlockAnother(t *testing.T) {
+	b := aRootToBreakGlassWith(t, breakGlassSetup{})
+	st := &stopsAtStore{Store: b.s.DataStore}
+	b.s.DataStore = st
+	st.event = func(rec store.EventRecord) bool { return rec.AID == b.oldAID && rec.EventType == "rot" }
+	if code, out := b.rotate(t); code == http.StatusOK {
+		t.Fatalf("the stop was not reported: %d %v", code, out)
+	}
+	if evs, _ := b.s.DataStore.GetEvents(b.oldAID); len(evs) != 1 {
+		t.Fatalf("the old root's log is %d events; the rotation should not have landed", len(evs))
+	}
+	if left, _ := b.status(t, true)["unfinished"].([]any); len(left) != 1 {
+		t.Fatalf("the stopped run is not kept: %v", left)
+	}
+
+	// A fresh prepare after the old root's founding, revealing the key the
+	// founding committed to (k[1]) and a new root of its own, is answered.
+	k := b.k
+	code, out := call(t, b.s, b.s.handleRecoveryRootAIDPrepare, "/api/recovery/root-aid-rotation/prepare", map[string]any{
+		"new_root": map[string]any{"k": []string{verkeyOf(k[7])}, "n": commits(t, k[8], reserveFor(k[8]))},
+		"old_root": map[string]any{"k": []string{verkeyOf(k[1])}, "n": commits(t, k[2], reserveFor(k[2])),
+			"after": map[string]any{"s": "0", "d": b.oldAID}},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("a run whose rotation never landed blocked another: %d %v", code, out)
+	}
+	if left, _ := b.status(t, true)["unfinished"].([]any); len(left) != 0 {
+		t.Fatalf("the run that authorised nothing is still kept: %v", left)
+	}
+}

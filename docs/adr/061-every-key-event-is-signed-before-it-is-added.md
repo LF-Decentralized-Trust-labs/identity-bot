@@ -405,7 +405,9 @@ a witness.
   back to the owner, and only the owner, as `unfinished` on
   `GET /api/recovery/root-aid-rotation/status`, so an app that lost its copy can
   send it again; and it refuses to prepare a new run for an identity that has
-  one unfinished, saying to resend. The continuity proof it leaves carries the
+  one unfinished whose rotation is in the old root's log, saying to resend. A
+  run that stopped before its rotation landed has authorised nothing, so a new
+  prepare drops it and goes ahead. The continuity proof it leaves carries the
   old root's log up to and including the rotation, so a verifier holding only
   the proof checks that the rotation was signed by the key the old root
   committed to, at its threshold. It stays off behind `RootAIDRotationEnabled`.

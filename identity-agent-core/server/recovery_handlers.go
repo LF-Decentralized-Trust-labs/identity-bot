@@ -458,14 +458,33 @@ func (s *CoreServer) handleRecoveryRootAIDPrepare(w http.ResponseWriter, r *http
 		writeError(w, http.StatusServiceUnavailable, "Store not available", "identity store is required")
 		return
 	}
-	// A rotation begun and not finished is finished, not begun again: a second
-	// set prepared after the rotation the first added leaves two roots the old
-	// root's log authorises.
+	// A rotation begun and not finished is finished, not begun again, once its
+	// rotation is in the old root's log: a second set prepared after it would
+	// leave two roots the old root's log authorises. A run that stopped before
+	// its rotation landed has authorised nothing, so it is dropped and another
+	// may be prepared, which keeps a run that can never land from blocking the
+	// identity for good.
 	if own, _ := s.DataStore.GetIdentity(); own != nil {
-		if run, err := recovery.UnfinishedRootAIDRotation(s.DataDir, own.AID); err != nil {
+		run, err := recovery.UnfinishedRootAIDRotation(s.DataDir, own.AID)
+		if err != nil {
 			writeError(w, http.StatusInternalServerError, "The rotations begun could not be read", err.Error())
 			return
-		} else if run != nil {
+		}
+		if run != nil {
+			events, err := s.DataStore.GetEvents(run.OldRootAID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "The old root's log could not be read", err.Error())
+				return
+			}
+			if !run.RotationLanded(events) {
+				if err := recovery.DropUnfinishedRootAIDRotation(s.DataDir, *run); err != nil {
+					writeError(w, http.StatusInternalServerError, "The unfinished rotation could not be dropped", err.Error())
+					return
+				}
+				run = nil
+			}
+		}
+		if run != nil {
 			writeError(w, http.StatusConflict, "A break-glass rotation of this identity was begun and not finished",
 				"Send the same signed request again to finish it; no new one is prepared until it is done. This agent keeps it, "+
 					"and offers it back to the owner as \"unfinished\" at GET /api/recovery/root-aid-rotation/status, for the old root "+
