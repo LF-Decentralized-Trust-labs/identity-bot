@@ -1,0 +1,629 @@
+{
+  "about": "Signed endpoint records (package endpointrecord). A record names the one origin an identifier is reached at, and is signed by the key the identifier's verified key log names now. canonical is the bytes the Ed25519 signature is over: the record's fields other than signature as a JSON object, keys sorted, no whitespace (ADR-049's form). The signature is CESR qb64, code 0B. valid says whether the record verifies against key at now, the verifier's clock. origins are in their one spelling or not; ordering says whether record A replaces record B. addresses are what a client is pointed at and the origin it signs for (empty when it has none).",
+  "seed_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+  "public_key": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
+  "other_public_key": "DE_QmczUfXiT3-nsJEFOyw2bVCAjKq0w2RxGW-M8vmXE",
+  "now": "2026-11-04T12:00:00Z",
+  "records": [
+    {
+      "name": "an origin on the default port",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": "2026-11-04T11:00:00Z",
+        "origin": "https://org.example.com:443",
+        "signature": "0BDoOdhbJ7ScWChgmNztDfXUNbIF-QzTKoDreqZvtbXoBqbu1tEuoahw8gw5Q4lYqyLZw4sPCFp6XB5wHVBHEFcP",
+        "type": "endpoint-record/1"
+      },
+      "key": "public_key",
+      "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2026-11-04T11:00:00Z\",\"origin\":\"https://org.example.com:443\",\"type\":\"endpoint-record/1\"}",
+      "valid": true
+    },
+    {
+      "name": "an origin on another port",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": "2026-11-04T11:00:00Z",
+        "origin": "https://org.example.com:8443",
+        "signature": "0BCAtbJY3AG64TtStwBk58wvJ4N6nBN6ZP-yHu5a1zoD7e49itEeCngPGsqvawFWr7aR1q42o2f6ORQSnrrQblUA",
+        "type": "endpoint-record/1"
+      },
+      "key": "public_key",
+      "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2026-11-04T11:00:00Z\",\"origin\":\"https://org.example.com:8443\",\"type\":\"endpoint-record/1\"}",
+      "valid": true
+    },
+    {
+      "name": "a plain http origin",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": "2026-11-04T11:00:00Z",
+        "origin": "http://192.0.2.7:8080",
+        "signature": "0BC1CuXm2TAJbweYCUzgdhUyHd7cqpPFV2e_pLWTXsVYRFHfU-K115LfnyLkV89WHKTBXnO8bijBBBiGuGtcoUUN",
+        "type": "endpoint-record/1"
+      },
+      "key": "public_key",
+      "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2026-11-04T11:00:00Z\",\"origin\":\"http://192.0.2.7:8080\",\"type\":\"endpoint-record/1\"}",
+      "valid": true
+    },
+    {
+      "name": "an IPv6 origin",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": "2026-11-04T11:00:00Z",
+        "origin": "https://[2001:db8::1]:443",
+        "signature": "0BCmuM9gI91Qab1KRIXqSNmu8hj3I7CL4FDgWtJQHs7f_62y4FBp1or4MId2_NAcgf45R4gTBT0tWqZRDjAw-F0L",
+        "type": "endpoint-record/1"
+      },
+      "key": "public_key",
+      "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2026-11-04T11:00:00Z\",\"origin\":\"https://[2001:db8::1]:443\",\"type\":\"endpoint-record/1\"}",
+      "valid": true
+    },
+    {
+      "name": "a withdrawal, which names no address",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": "2026-11-04T11:00:00Z",
+        "origin": "",
+        "signature": "0BAiqoiegpKM7gQlALUH0qwzCJ6PfpuR04Chh60ufhSm9e0ACbK5YeKLaKz0XRV5140pgxktBW2xibuvI_ScE_wE",
+        "type": "endpoint-record/1"
+      },
+      "key": "public_key",
+      "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2026-11-04T11:00:00Z\",\"origin\":\"\",\"type\":\"endpoint-record/1\"}",
+      "valid": true
+    },
+    {
+      "name": "issued a few minutes ahead of the verifier",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": "2026-11-04T12:05:00Z",
+        "origin": "https://org.example.com:443",
+        "signature": "0BB4eVIXAidnYCjg2-BPPXWp1tc1N4VSKlsDyZwhXF_0U5HmghLJlLuQSI9IHR7q-D1ociGak22-Zx7FhC0LsR0C",
+        "type": "endpoint-record/1"
+      },
+      "key": "public_key",
+      "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2026-11-04T12:05:00Z\",\"origin\":\"https://org.example.com:443\",\"type\":\"endpoint-record/1\"}",
+      "valid": true
+    },
+    {
+      "name": "signed by a key the identifier's log does not name",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": "2026-11-04T11:00:00Z",
+        "origin": "https://org.example.com:443",
+        "signature": "0BDoOdhbJ7ScWChgmNztDfXUNbIF-QzTKoDreqZvtbXoBqbu1tEuoahw8gw5Q4lYqyLZw4sPCFp6XB5wHVBHEFcP",
+        "type": "endpoint-record/1"
+      },
+      "key": "other_public_key",
+      "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2026-11-04T11:00:00Z\",\"origin\":\"https://org.example.com:443\",\"type\":\"endpoint-record/1\"}",
+      "valid": false,
+      "why": "signature"
+    },
+    {
+      "name": "the origin changed after signing",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": "2026-11-04T11:00:00Z",
+        "origin": "https://evil.example.com:443",
+        "signature": "0BDoOdhbJ7ScWChgmNztDfXUNbIF-QzTKoDreqZvtbXoBqbu1tEuoahw8gw5Q4lYqyLZw4sPCFp6XB5wHVBHEFcP",
+        "type": "endpoint-record/1"
+      },
+      "key": "public_key",
+      "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2026-11-04T11:00:00Z\",\"origin\":\"https://evil.example.com:443\",\"type\":\"endpoint-record/1\"}",
+      "valid": false,
+      "why": "signature"
+    },
+    {
+      "name": "the issue time changed after signing",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": "2026-11-04T11:59:00Z",
+        "origin": "https://org.example.com:443",
+        "signature": "0BDoOdhbJ7ScWChgmNztDfXUNbIF-QzTKoDreqZvtbXoBqbu1tEuoahw8gw5Q4lYqyLZw4sPCFp6XB5wHVBHEFcP",
+        "type": "endpoint-record/1"
+      },
+      "key": "public_key",
+      "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2026-11-04T11:59:00Z\",\"origin\":\"https://org.example.com:443\",\"type\":\"endpoint-record/1\"}",
+      "valid": false,
+      "why": "signature"
+    },
+    {
+      "name": "the identifier changed after signing",
+      "record": {
+        "aid": "EOtherIdentifierOtherIdentifierOtherIdentif",
+        "issued": "2026-11-04T11:00:00Z",
+        "origin": "https://org.example.com:443",
+        "signature": "0BDoOdhbJ7ScWChgmNztDfXUNbIF-QzTKoDreqZvtbXoBqbu1tEuoahw8gw5Q4lYqyLZw4sPCFp6XB5wHVBHEFcP",
+        "type": "endpoint-record/1"
+      },
+      "key": "public_key",
+      "canonical": "{\"aid\":\"EOtherIdentifierOtherIdentifierOtherIdentif\",\"issued\":\"2026-11-04T11:00:00Z\",\"origin\":\"https://org.example.com:443\",\"type\":\"endpoint-record/1\"}",
+      "valid": false,
+      "why": "signature"
+    },
+    {
+      "name": "issued further ahead of the verifier than allowed",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": "2026-11-04T12:11:00Z",
+        "origin": "https://org.example.com:443",
+        "signature": "0BDnltnEBRu90TueunGpVJ8HQN7g06rTEFFveOKK-lh33kxnx-94Lh8F-jV89exceQ2VGfRIVfcYfmTUyPmV3aAJ",
+        "type": "endpoint-record/1"
+      },
+      "key": "public_key",
+      "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2026-11-04T12:11:00Z\",\"origin\":\"https://org.example.com:443\",\"type\":\"endpoint-record/1\"}",
+      "valid": false,
+      "why": "future"
+    },
+    {
+      "name": "an origin without its port, validly signed",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": "2026-11-04T11:00:00Z",
+        "origin": "https://org.example.com",
+        "signature": "0BD1MN_f_hudQBEJQzoPFyNOh1zyxFsiI_bpjhUSrVFyqhGjO1l0K36FPFrn6XYSKw_pNcgAnooapXwYJp6nSHMC",
+        "type": "endpoint-record/1"
+      },
+      "key": "public_key",
+      "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2026-11-04T11:00:00Z\",\"origin\":\"https://org.example.com\",\"type\":\"endpoint-record/1\"}",
+      "valid": false,
+      "why": "origin"
+    },
+    {
+      "name": "an origin in upper case, validly signed",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": "2026-11-04T11:00:00Z",
+        "origin": "https://Org.Example.com:443",
+        "signature": "0BBvRFXsuF_iK0PaaD11g81STfPbHRw61wTUEMgNpz2ITakYakjbsU1XTMzLtj77yUqq_9tZtXjnvG5dTkCcTFsH",
+        "type": "endpoint-record/1"
+      },
+      "key": "public_key",
+      "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2026-11-04T11:00:00Z\",\"origin\":\"https://Org.Example.com:443\",\"type\":\"endpoint-record/1\"}",
+      "valid": false,
+      "why": "origin"
+    },
+    {
+      "name": "an origin with a path, validly signed",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": "2026-11-04T11:00:00Z",
+        "origin": "https://org.example.com:443/",
+        "signature": "0BDCvVZzqV2NNmm5W5NaBYluY1Y1ZlA8J9RnIeBmX-sU_GoLhzfs6qmYqSvzUPTNLqWiVu0PXLD8DR8Jrz5Y-Y4B",
+        "type": "endpoint-record/1"
+      },
+      "key": "public_key",
+      "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2026-11-04T11:00:00Z\",\"origin\":\"https://org.example.com:443/\",\"type\":\"endpoint-record/1\"}",
+      "valid": false,
+      "why": "origin"
+    },
+    {
+      "name": "another type, validly signed",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": "2026-11-04T11:00:00Z",
+        "origin": "https://org.example.com:443",
+        "signature": "0BAJGoBe-DruUjdOCqb-aBEyxC1_o5Kyv-RqHCTM68VAz2DsH19IRGhWnOpueok-i7iLEtIVz5kTDWHUAtde02YA",
+        "type": "endpoint-record/2"
+      },
+      "key": "public_key",
+      "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2026-11-04T11:00:00Z\",\"origin\":\"https://org.example.com:443\",\"type\":\"endpoint-record/2\"}",
+      "valid": false,
+      "why": "type"
+    },
+    {
+      "name": "an issue time with a fraction, validly signed",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": "2026-11-04T11:00:00.5Z",
+        "origin": "https://org.example.com:443",
+        "signature": "0BCVWKy9NxHjBGT2Sd24pGBtiE9P05ySgJPm1ZBs7LzsUdp3alC1SQ2s2YKaLRi-_espuhPsdSyHAvKiMQo8mVkP",
+        "type": "endpoint-record/1"
+      },
+      "key": "public_key",
+      "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2026-11-04T11:00:00.5Z\",\"origin\":\"https://org.example.com:443\",\"type\":\"endpoint-record/1\"}",
+      "valid": false,
+      "why": "issued"
+    },
+    {
+      "name": "an issue time with an offset, validly signed",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": "2026-11-04T11:00:00+00:00",
+        "origin": "https://org.example.com:443",
+        "signature": "0BCaI8YqdfAg2_DUejpXlpyCrRa2ojseT9pTT3jivWBq_rBZuorQiYbTZyTiQQuIS1qEtWdoc6S01Dc277TpdvID",
+        "type": "endpoint-record/1"
+      },
+      "key": "public_key",
+      "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2026-11-04T11:00:00+00:00\",\"origin\":\"https://org.example.com:443\",\"type\":\"endpoint-record/1\"}",
+      "valid": false,
+      "why": "issued"
+    },
+    {
+      "name": "a field the form does not have",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": "2026-11-04T11:00:00Z",
+        "note": "carried beside the signed fields",
+        "origin": "https://org.example.com:443",
+        "signature": "0BDoOdhbJ7ScWChgmNztDfXUNbIF-QzTKoDreqZvtbXoBqbu1tEuoahw8gw5Q4lYqyLZw4sPCFp6XB5wHVBHEFcP",
+        "type": "endpoint-record/1"
+      },
+      "key": "public_key",
+      "valid": false,
+      "why": "fields"
+    },
+    {
+      "name": "a record with no issue time",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "origin": "https://org.example.com:443",
+        "signature": "0BDoOdhbJ7ScWChgmNztDfXUNbIF-QzTKoDreqZvtbXoBqbu1tEuoahw8gw5Q4lYqyLZw4sPCFp6XB5wHVBHEFcP",
+        "type": "endpoint-record/1"
+      },
+      "key": "public_key",
+      "valid": false,
+      "why": "fields"
+    },
+    {
+      "name": "an issue time that is a number",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": 1762257600,
+        "origin": "https://org.example.com:443",
+        "signature": "0BDoOdhbJ7ScWChgmNztDfXUNbIF-QzTKoDreqZvtbXoBqbu1tEuoahw8gw5Q4lYqyLZw4sPCFp6XB5wHVBHEFcP",
+        "type": "endpoint-record/1"
+      },
+      "key": "public_key",
+      "valid": false,
+      "why": "fields"
+    },
+    {
+      "name": "the signature with a lead bit set",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": "2026-11-04T11:00:00Z",
+        "origin": "https://org.example.com:443",
+        "signature": "0CDoOdhbJ7ScWChgmNztDfXUNbIF-QzTKoDreqZvtbXoBqbu1tEuoahw8gw5Q4lYqyLZw4sPCFp6XB5wHVBHEFcP",
+        "type": "endpoint-record/1"
+      },
+      "key": "public_key",
+      "valid": false,
+      "why": "signature"
+    },
+    {
+      "name": "the signature without its code",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": "2026-11-04T11:00:00Z",
+        "origin": "https://org.example.com:443",
+        "signature": "DoOdhbJ7ScWChgmNztDfXUNbIF-QzTKoDreqZvtbXoBqbu1tEuoahw8gw5Q4lYqyLZw4sPCFp6XB5wHVBHEFcP",
+        "type": "endpoint-record/1"
+      },
+      "key": "public_key",
+      "valid": false,
+      "why": "signature"
+    },
+    {
+      "name": "an empty signature",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": "2026-11-04T11:00:00Z",
+        "origin": "https://org.example.com:443",
+        "signature": "",
+        "type": "endpoint-record/1"
+      },
+      "key": "public_key",
+      "valid": false,
+      "why": "signature"
+    }
+  ],
+  "origins": [
+    {
+      "origin": "https://org.example.com:443",
+      "ok": true
+    },
+    {
+      "origin": "http://org.example.com:80",
+      "ok": true
+    },
+    {
+      "origin": "https://a.b.c-d.example:65535",
+      "ok": true
+    },
+    {
+      "origin": "https://127.0.0.1:1",
+      "ok": true
+    },
+    {
+      "origin": "https://192.0.2.255:8443",
+      "ok": true
+    },
+    {
+      "origin": "https://host1.example.com:443",
+      "ok": true
+    },
+    {
+      "origin": "https://3com.example:443",
+      "ok": true
+    },
+    {
+      "origin": "https://example.1a:443",
+      "ok": true
+    },
+    {
+      "origin": "https://[::1]:443",
+      "ok": true
+    },
+    {
+      "origin": "https://[2001:db8::1]:8443",
+      "ok": true
+    },
+    {
+      "origin": "https://xn--bcher-kva.example:443",
+      "ok": true
+    },
+    {
+      "origin": "",
+      "ok": false
+    },
+    {
+      "origin": "org.example.com:443",
+      "ok": false
+    },
+    {
+      "origin": "https://org.example.com",
+      "ok": false
+    },
+    {
+      "origin": "https://org.example.com:",
+      "ok": false
+    },
+    {
+      "origin": "https://org.example.com:0",
+      "ok": false
+    },
+    {
+      "origin": "https://org.example.com:65536",
+      "ok": false
+    },
+    {
+      "origin": "https://org.example.com:0443",
+      "ok": false
+    },
+    {
+      "origin": "https://org.example.com:+443",
+      "ok": false
+    },
+    {
+      "origin": "https://org.example.com:443/",
+      "ok": false
+    },
+    {
+      "origin": "https://org.example.com:443/path",
+      "ok": false
+    },
+    {
+      "origin": "https://org.example.com:443?x=1",
+      "ok": false
+    },
+    {
+      "origin": "https://org.example.com:443#x",
+      "ok": false
+    },
+    {
+      "origin": "https://user@org.example.com:443",
+      "ok": false
+    },
+    {
+      "origin": "https://user:pw@org.example.com:443",
+      "ok": false
+    },
+    {
+      "origin": "HTTPS://org.example.com:443",
+      "ok": false
+    },
+    {
+      "origin": "ftp://org.example.com:443",
+      "ok": false
+    },
+    {
+      "origin": "https://Org.example.com:443",
+      "ok": false
+    },
+    {
+      "origin": "https://org.example.com.:443",
+      "ok": false
+    },
+    {
+      "origin": "https://-org.example.com:443",
+      "ok": false
+    },
+    {
+      "origin": "https://org..example.com:443",
+      "ok": false
+    },
+    {
+      "origin": "https://org example.com:443",
+      "ok": false
+    },
+    {
+      "origin": "https://org.example.com:443 ",
+      "ok": false
+    },
+    {
+      "origin": "https://bücher.example:443",
+      "ok": false
+    },
+    {
+      "origin": "https://org_example.com:443",
+      "ok": false
+    },
+    {
+      "origin": "https://[::1]",
+      "ok": false
+    },
+    {
+      "origin": "https://[::1]:0",
+      "ok": false
+    },
+    {
+      "origin": "https://[0:0:0:0:0:0:0:1]:443",
+      "ok": false
+    },
+    {
+      "origin": "https://[::FFFF:1.2.3.4]:443",
+      "ok": false
+    },
+    {
+      "origin": "https://[::ffff:1.2.3.4]:443",
+      "ok": false
+    },
+    {
+      "origin": "https://[fe80::1%25eth0]:443",
+      "ok": false
+    },
+    {
+      "origin": "https://::1:443",
+      "ok": false
+    },
+    {
+      "origin": "//org.example.com:443",
+      "ok": false
+    },
+    {
+      "origin": "https://:443",
+      "ok": false
+    },
+    {
+      "origin": "http://127.1:80",
+      "ok": false
+    },
+    {
+      "origin": "http://0177.0.0.1:80",
+      "ok": false
+    },
+    {
+      "origin": "http://2130706433:80",
+      "ok": false
+    },
+    {
+      "origin": "http://0x7f.1:80",
+      "ok": false
+    },
+    {
+      "origin": "http://0x7f.0x0.0x0.0x1:80",
+      "ok": false
+    },
+    {
+      "origin": "http://1.2.3:80",
+      "ok": false
+    },
+    {
+      "origin": "http://1.2.3.4.5:80",
+      "ok": false
+    },
+    {
+      "origin": "http://256.1.1.1:80",
+      "ok": false
+    },
+    {
+      "origin": "http://01.2.3.4:80",
+      "ok": false
+    },
+    {
+      "origin": "http://127.0.0.1.:80",
+      "ok": false
+    }
+  ],
+  "addresses": [
+    {
+      "address": "HTTP://192.0.2.7",
+      "origin": "http://192.0.2.7:80"
+    },
+    {
+      "address": "ftp://org.example.com:21",
+      "origin": ""
+    },
+    {
+      "address": "http://127.1",
+      "origin": ""
+    },
+    {
+      "address": "http://org.example.com/a/b?c=d#e",
+      "origin": "http://org.example.com:80"
+    },
+    {
+      "address": "https://",
+      "origin": ""
+    },
+    {
+      "address": "https://Org.Example.com",
+      "origin": "https://org.example.com:443"
+    },
+    {
+      "address": "https://[2001:DB8::1]:9",
+      "origin": "https://[2001:db8::1]:9"
+    },
+    {
+      "address": "https://bücher.example",
+      "origin": ""
+    },
+    {
+      "address": "https://org.example.com:0443",
+      "origin": ""
+    },
+    {
+      "address": "https://org.example.com:8443/",
+      "origin": "https://org.example.com:8443"
+    },
+    {
+      "address": "https://user@org.example.com",
+      "origin": ""
+    },
+    {
+      "address": "org.example.com",
+      "origin": ""
+    }
+  ],
+  "ordering": [
+    {
+      "name": "issued later replaces",
+      "a_aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+      "a_issued": "2026-11-04T10:00:01Z",
+      "b_aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+      "b_issued": "2026-11-04T10:00:00Z",
+      "newer": true
+    },
+    {
+      "name": "issued earlier is refused",
+      "a_aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+      "a_issued": "2026-11-04T10:00:00Z",
+      "b_aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+      "b_issued": "2026-11-04T10:00:01Z",
+      "newer": false
+    },
+    {
+      "name": "the same moment does not replace",
+      "a_aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+      "a_issued": "2026-11-04T10:00:00Z",
+      "b_aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+      "b_issued": "2026-11-04T10:00:00Z",
+      "newer": false
+    },
+    {
+      "name": "another identifier's record never replaces",
+      "a_aid": "EOtherIdentifierOtherIdentifierOtherIdentif",
+      "a_issued": "2026-11-04T10:00:01Z",
+      "b_aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+      "b_issued": "2026-11-04T10:00:00Z",
+      "newer": false
+    },
+    {
+      "name": "an issue time not in its spelling replaces nothing",
+      "a_aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+      "a_issued": "2026-11-04T10:00:02",
+      "b_aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+      "b_issued": "2026-11-04T10:00:00Z",
+      "newer": false
+    }
+  ]
+}
