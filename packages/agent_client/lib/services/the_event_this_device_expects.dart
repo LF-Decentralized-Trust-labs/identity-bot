@@ -240,6 +240,29 @@ class ExpectedEvent {
     return ev;
   }
 
+  /// [requireIn] for bytes the core stored earlier, which a person may be
+  /// shown: a refusal is an [AStoredEventIsNotTheOneExpected] carrying the
+  /// stored bytes as text and this event's fields, so an app can put both in
+  /// front of the person. Same checks, same code; nothing is signed on a throw.
+  Future<ParsedEvent> requireStoredIn(KeyMath km, List<int> raw) async {
+    try {
+      return await requireIn(km, raw);
+    } on NotTheEventExpected catch (e) {
+      throw AStoredEventIsNotTheOneExpected(
+          e.difference, utf8.decode(raw, allowMalformed: true), describe());
+    }
+  }
+
+  /// What this event must be, for showing a person: its type, place, the event
+  /// it follows and every other field.
+  Map<String, Object?> describe() => {
+        't': t,
+        if (aid != null) 'i': aid,
+        's': sn.toRadixString(16),
+        if (prior != null) 'p': prior,
+        ...fields,
+      };
+
   /// The first way [ev] differs from this event, or null when it is it.
   String? differenceFrom(ParsedEvent ev) {
     if (ev.t != t) return 'it is a ${ev.t}, not a $t';
@@ -384,6 +407,19 @@ class PostQuantumNotYet implements Exception {
   final String why;
   @override
   String toString() => '$what is not signed yet: $why';
+}
+
+/// An event the core stored is not the one this phrase would have produced,
+/// so it is not signed late: [stored] is the stored bytes as text and
+/// [expected] the event they should have been, both for the person to see.
+class AStoredEventIsNotTheOneExpected extends NotTheEventExpected {
+  AStoredEventIsNotTheOneExpected(super.difference, this.stored, this.expected);
+  final String stored;
+  final Map<String, Object?> expected;
+  @override
+  String toString() => 'a stored event is not the one this recovery phrase '
+      'would have produced, so it is not signed: $difference. '
+      'Stored: $stored. Expected: ${jsonEncode(expected)}';
 }
 
 /// The bytes the core prepared are not the event this device expected, so

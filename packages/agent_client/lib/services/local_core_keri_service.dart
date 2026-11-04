@@ -163,7 +163,7 @@ class LocalCoreKeriService extends KeriService {
   }
 
   late final TheKeyInForce _keys =
-      TheKeyInForce(_client, _baseUrl, asked: _asked);
+      TheKeyInForce(_client, _baseUrl, asked: _asked, keyMath: keyMath);
   final _asked = TheEventsThisDeviceAskedFor();
 
   /// The event the core says it added, read from the bytes it returned for

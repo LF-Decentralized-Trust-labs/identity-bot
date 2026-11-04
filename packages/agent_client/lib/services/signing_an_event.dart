@@ -4,6 +4,9 @@ import 'dart:typed_data';
 import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:http/http.dart' as http;
 
+import 'key_math.dart';
+import 'the_event_this_device_expects.dart';
+
 /// Has the core write a raw Ed25519 signature in CESR.
 ///
 /// Done by the core rather than here because the encoding is part of the
@@ -44,6 +47,12 @@ Future<String> cesrEncodeSignature(
 /// would surface weeks later as a stranger refusing them for no reason they
 /// can see.
 ///
+/// [expected] is the event this phrase would have produced at that place. The
+/// bytes are parsed with the core's parser through [km] and checked against it
+/// ([ExpectedEvent.requireStoredIn]) before anything is signed or sent; an
+/// event that is not it throws [AStoredEventIsNotTheOneExpected], carrying
+/// what was stored and what was expected, and the signing seed is not used.
+///
 /// Recording the same signature twice is harmless: the core checks it against
 /// the event again and stores it again.
 Future<String> signAndRecordEvent(
@@ -54,16 +63,27 @@ Future<String> signAndRecordEvent(
   required String rawBytesB64,
   required Uint8List signingSeed,
   required String what,
+  required KeyMath km,
+  required ExpectedEvent expected,
 }) async {
   if (aid.isEmpty || rawBytesB64.isEmpty || sequenceNumber is! int) {
     throw Exception(
         'the core did not say which event $what is, so it cannot be '
         'signed and nobody would be able to verify it');
   }
+  final raw = base64Decode(rawBytesB64);
+  final ev = await expected.requireStoredIn(km, raw);
+  if (ev.i != aid || ev.s != sequenceNumber) {
+    throw AStoredEventIsNotTheOneExpected(
+        'it is event ${ev.s.toRadixString(16)} of ${ev.i}, not event '
+        '${sequenceNumber.toRadixString(16)} of $aid',
+        utf8.decode(raw, allowMalformed: true),
+        expected.describe());
+  }
   final privateKey = ed.newKeyFromSeed(signingSeed);
   final List<int> signature;
   try {
-    signature = ed.sign(privateKey, base64Decode(rawBytesB64));
+    signature = ed.sign(privateKey, raw);
   } finally {
     // The seed is the caller's to zero; the key made from it is this
     // function's.

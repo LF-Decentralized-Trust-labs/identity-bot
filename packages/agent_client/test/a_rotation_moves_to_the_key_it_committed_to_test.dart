@@ -1255,7 +1255,7 @@ void main() {
       ]
     });
     final ixn = core.kel.last;
-    final keys = TheKeyInForce(core.client(), 'http://core.test');
+    final keys = TheKeyInForce(core.client(), 'http://core.test', keyMath: km);
     final awaiting = await keys.eventsAwaitingApproval(seed);
     expect(awaiting.map((e) => e['d']), [ixn['d']]);
     await expectLater(keri.signPayload(name: core.aid, data: [1]),
@@ -1273,7 +1273,7 @@ void main() {
         keys.signApprovedEvent(seed,
             sequenceNumber: core.kel.last['s'] as String,
             digest: core.kel.last['d'] as String),
-        throwsA(predicate((e) => '$e'.contains('not to the next key'))));
+        throwsA(isA<AStoredEventIsNotTheOneExpected>()));
     expect(core.posted, isNot(contains('/api/cesr/encode')));
   });
 
@@ -1303,8 +1303,7 @@ void main() {
     core.posted.clear();
     await expectLater(
         keri.signPayload(name: core.aid, data: [1]),
-        throwsA(predicate(
-            (e) => '$e'.contains('not the one this device asked for'))));
+        throwsA(isA<AStoredEventIsNotTheOneExpected>()));
     expect(core.posted, isNot(contains('/api/cesr/encode')));
   });
 
@@ -1435,7 +1434,7 @@ void main() {
     core.add(FakeCore.oldFounding(key(0), key(1), n: ['E${'M' * 43}']));
     core.posted.clear();
     await expectLater(keri.signPayload(name: core.aid, data: [1]),
-        throwsA(predicate((e) => '$e'.contains('alone'))));
+        throwsA(isA<AStoredEventIsNotTheOneExpected>()));
     expect(core.posted, isNot(contains('/api/cesr/encode')));
   });
 
@@ -1520,7 +1519,7 @@ void main() {
       'approval signs only an interaction, founding or rotation still waiting for its signature',
       () async {
     foundedByAnEarlierVersion(core);
-    final keys = TheKeyInForce(core.client(), 'http://core.test');
+    final keys = TheKeyInForce(core.client(), 'http://core.test', keyMath: km);
     // Already signed.
     await expectLater(
         keys.signApprovedEvent(seed, sequenceNumber: '0', digest: core.aid),
