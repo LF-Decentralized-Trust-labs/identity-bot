@@ -989,6 +989,35 @@ UPDATE duplicity_alerts
        resolution_note = 'raised by a sequence number read as decimal; the observation it compared against has been discarded'
  WHERE resolved = 0 AND sequence_num >= 9;
 `},
+	{
+		Version:     46,
+		Description: "Give each row that was identified only by a counter an identity of its own",
+		SQL: `
+-- A backup is merged into a database by primary key. For a table whose only
+-- key is an auto-incrementing counter, the backup's row 7 and this database's
+-- row 7 are different things that happen to share a number, so the merge has
+-- to match on what a row IS rather than on its counter. These unique indexes
+-- are that identity. (kel and witness_receipts already have one.)
+--
+-- Rows already present twice are collapsed first, keeping the oldest, or the
+-- index could not be built.
+DELETE FROM duplicity_alerts WHERE id NOT IN (
+    SELECT MIN(id) FROM duplicity_alerts
+     GROUP BY aid, sequence_num, our_digest, their_digest, detected_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_duplicity_alerts_identity
+    ON duplicity_alerts(aid, sequence_num, our_digest, their_digest, detected_at);
+
+DELETE FROM witness_receipts_issued WHERE id NOT IN (
+    SELECT MIN(id) FROM witness_receipts_issued
+     GROUP BY signer_aid, event_said, witness_aid, issued_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_witness_receipts_issued_identity
+    ON witness_receipts_issued(signer_aid, event_said, witness_aid, issued_at);
+
+DELETE FROM witness_self_heal_log WHERE id NOT IN (
+    SELECT MIN(id) FROM witness_self_heal_log GROUP BY contact_aid, attempted_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_witness_self_heal_log_identity
+    ON witness_self_heal_log(contact_aid, attempted_at);
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

@@ -476,6 +476,29 @@ func copyTable(ctx context.Context, tx *sql.Tx, conn *sql.Conn, name string, isS
 		}
 	}
 
+	// A table whose only key is a counter (INTEGER PRIMARY KEY, usually
+	// AUTOINCREMENT) is merged without that counter. The backup's row 7 and
+	// this database's row 7 are different rows that share a number, and
+	// INSERT OR REPLACE would delete the local one. Leaving the counter out
+	// gives each incoming row a fresh number and lets REPLACE conflict only on
+	// what identifies the row, a unique index. Only done where such an index
+	// exists: without one the counter may itself be the row's identity (a
+	// downstream table keyed by a number that means something), and dropping
+	// it would duplicate rows on every restore.
+	if counter, err := rowCounterOf(ctx, conn, name); err != nil {
+		return err
+	} else if counter != "" && hasNaturalIdentity(ctx, conn, name) {
+		kept := shared[:0:0]
+		for _, c := range shared {
+			if c != `"`+counter+`"` {
+				kept = append(kept, c)
+			}
+		}
+		if len(kept) > 0 {
+			shared = kept
+		}
+	}
+
 	cols := strings.Join(shared, ", ")
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf(
 		`INSERT OR REPLACE INTO main."%s" (%s) SELECT %s FROM restored."%s"`,
@@ -581,4 +604,65 @@ func columnsOn(ctx context.Context, conn *sql.Conn, schema, table string) ([]str
 		cols = append(cols, name)
 	}
 	return cols, rows.Err()
+}
+
+// rowCounterOf returns the column that is this table's whole primary key and
+// is an alias for its rowid (INTEGER PRIMARY KEY), or "" if there is none.
+// Its values say nothing about the row, so a merge must not match on them.
+func rowCounterOf(ctx context.Context, conn *sql.Conn, table string) (string, error) {
+	rows, err := conn.QueryContext(ctx, fmt.Sprintf(`PRAGMA main.table_info("%s")`, table))
+	if err != nil {
+		return "", fmt.Errorf("inspect %s: %w", table, err)
+	}
+	defer rows.Close()
+	var pkName, pkType string
+	pks := 0
+	for rows.Next() {
+		var (
+			cid       int
+			name, typ string
+			notNull   int
+			dflt      any
+			pk        int
+		)
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+			return "", fmt.Errorf("inspect %s: %w", table, err)
+		}
+		if pk > 0 {
+			pks++
+			pkName, pkType = name, typ
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	if pks == 1 && strings.EqualFold(pkType, "INTEGER") {
+		return pkName, nil
+	}
+	return "", nil
+}
+
+// hasNaturalIdentity reports whether the table has a unique index of its own,
+// apart from the primary key.
+func hasNaturalIdentity(ctx context.Context, conn *sql.Conn, table string) bool {
+	idx, err := conn.QueryContext(ctx, fmt.Sprintf(`PRAGMA main.index_list("%s")`, table))
+	if err != nil {
+		return false
+	}
+	defer idx.Close()
+	for idx.Next() {
+		var (
+			seq          int
+			name, origin string
+			unique       int
+			partial      int
+		)
+		if err := idx.Scan(&seq, &name, &unique, &origin, &partial); err != nil {
+			return false
+		}
+		if unique == 1 && partial == 0 && origin != "pk" {
+			return true
+		}
+	}
+	return false
 }

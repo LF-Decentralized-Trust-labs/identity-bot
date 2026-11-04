@@ -170,7 +170,7 @@ func (s *SQLiteStore) CountKelEvents(signerAID string) (int, error) {
 
 func (s *SQLiteStore) SaveIssuedReceipt(r IssuedReceipt) error {
 	_, err := s.db.Exec(`
-		INSERT INTO witness_receipts_issued (
+		INSERT OR IGNORE INTO witness_receipts_issued (
 			signer_aid, event_said, sequence_num, witness_aid, receipt_json, cesr_signature, issued_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		r.SignerAID, r.EventSAID, r.SequenceNum, r.WitnessAID, r.ReceiptJSON, r.CesrSignature, r.IssuedAt)
@@ -237,7 +237,7 @@ func (s *SQLiteStore) CountWitnessingFor() (int, error) {
 }
 
 func (s *SQLiteStore) RecordSelfHealAttempt(contactAID string, at string) error {
-	_, err := s.db.Exec(`INSERT INTO witness_self_heal_log (contact_aid, attempted_at) VALUES (?, ?)`, contactAID, at)
+	_, err := s.db.Exec(`INSERT OR IGNORE INTO witness_self_heal_log (contact_aid, attempted_at) VALUES (?, ?)`, contactAID, at)
 	return err
 }
 
