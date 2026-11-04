@@ -2,6 +2,8 @@ package witness
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -124,17 +126,28 @@ func (s *Service) signedBy(aid, statement, signature string) bool {
 	if signature == "" {
 		return false
 	}
-	key := s.currentKeyOf(aid)
-	if key == "" {
-		return false
-	}
-	pub, err := login.DecodeVerkey(key)
-	if err != nil {
-		return false
+	// A verification is always done, against a stand-in key when aid has none we
+	// can use, so that an identity this agent holds a log for costs a caller the
+	// same as one it does not: otherwise the time taken tells a stranger who is
+	// witnessed.
+	pub, real := noKeyAtAll, false
+	if key := s.currentKeyOf(aid); key != "" {
+		if raw, err := login.DecodeVerkey(key); err == nil {
+			pub, real = raw, true
+		}
 	}
 	ok, err := login.VerifyString(statement, signature, pub)
-	return err == nil && ok
+	return real && err == nil && ok
 }
+
+// noKeyAtAll is a well-formed public key nobody holds the private half of.
+var noKeyAtAll = func() []byte {
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	return pub
+}()
 
 // signedByWitnessKey reports whether signature is over statement by the key a
 // non-transferable witness identifier names.

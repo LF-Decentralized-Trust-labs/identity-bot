@@ -30,7 +30,7 @@ func (c *rotatingController) signedGet(t *testing.T, target, reader string, sign
 	req.Header.Set(witness.HeaderReader, reader)
 	req.Header.Set(witness.HeaderReadStamp, stamp)
 	req.Header.Set(witness.HeaderReadSignature,
-		sign(t, signer, []byte(witness.ReadStatement(reader, witness.ReadTarget(req.URL.RequestURI()), stamp))))
+		sign(t, signer, []byte(witness.ReadStatement(reader, req.URL.Host, witness.ReadTarget(req.URL.RequestURI()), stamp))))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)

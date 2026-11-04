@@ -142,7 +142,7 @@ func (s *CoreServer) askTheWitnesses(ownerAID string, presented []map[string]int
 		if base == "" {
 			continue
 		}
-		replica, err := fetchWitnessReplica(client, base, ownerAID)
+		replica, err := fetchWitnessReplica(client, base, ownerAID, presented)
 		if err != nil {
 			continue
 		}
@@ -164,14 +164,28 @@ func (s *CoreServer) askTheWitnesses(ownerAID string, presented []map[string]int
 }
 
 // fetchWitnessReplica reads one witness's copy of an identity's key log.
-func fetchWitnessReplica(client *http.Client, base, aid string) ([]map[string]interface{}, error) {
+//
+// The witness answers a stranger as for a log it does not hold (witness.MayRead),
+// so the read carries the inception event of the log being checked, which the
+// claimant had to present and which this witness can compare with its own. That
+// is the sanctioned path for a verifier that is neither the identity nor its
+// delegator.
+func fetchWitnessReplica(client *http.Client, base, aid string, presented []map[string]interface{}) ([]map[string]interface{}, error) {
 	// Commercial witnesses serve at the root; an agent acting as a witness
 	// serves the same route under /api. Try both rather than guess, because
 	// guessing wrong reads as "witness unreachable" and silently weakens the
 	// check.
 	var lastErr error
 	for _, path := range []string{"/witness/kel/", "/api/witness/kel/"} {
-		resp, err := client.Get(base + path + aid)
+		req, err := http.NewRequest(http.MethodGet, base+path+aid, nil)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if proof, ok := witness.InceptionProof(presented); ok {
+			req.Header.Set(witness.HeaderInception, proof)
+		}
+		resp, err := client.Do(req)
 		if err != nil {
 			lastErr = err
 			continue

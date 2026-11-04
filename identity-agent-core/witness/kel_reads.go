@@ -1,8 +1,11 @@
 package witness
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 )
@@ -23,6 +26,14 @@ const (
 	HeaderReadStamp     = "X-Read-Stamp"
 	HeaderReadSignature = "X-Read-Signature"
 
+	// HeaderInception carries, base64url, the inception event of the log asked
+	// for. It is how a verifier that is neither the identity nor its delegator
+	// reads a log it was shown: see MayRead.
+	HeaderInception = "X-Inception-Event"
+
+	// maxInceptionHeader bounds what is parsed from HeaderInception.
+	maxInceptionHeader = 8 << 10
+
 	readFreshness = 2 * time.Minute
 	readMarker    = "/witness/kel/"
 )
@@ -38,9 +49,39 @@ func ReadTarget(requestURI string) string {
 	return requestURI[i:]
 }
 
-// ReadStatement is what a reader signs: who it is, what it asks for, and when.
-func ReadStatement(reader, target, stamp string) string {
-	return fmt.Sprintf("witness-kel-read/v1\n%s\n%s\n%s", reader, target, stamp)
+// ReadStatement is what a reader signs: who it is, which witness it asks (by
+// host, so a read signed for one witness cannot be replayed to another), what it
+// asks for, and when.
+func ReadStatement(reader, host, target, stamp string) string {
+	return fmt.Sprintf("witness-kel-read/v2\n%s\n%s\n%s\n%s", reader, strings.ToLower(host), target, stamp)
+}
+
+// InceptionProof is the header value that lets a verifier holding a log read it
+// from a witness: the log's inception event, which only a party the controller
+// gave the log to has. ok is false when the log has no readable inception.
+func InceptionProof(kel []map[string]interface{}) (string, bool) {
+	for _, entry := range kel {
+		ev := entry
+		if _, has := entry["t"].(string); !has {
+			body, _ := entry["event_json"].(string)
+			ev = nil
+			if body != "" {
+				_ = json.Unmarshal([]byte(body), &ev)
+			}
+		}
+		if ev == nil {
+			continue
+		}
+		if t, _ := ev["t"].(string); t != "icp" && t != "dip" {
+			continue
+		}
+		raw, err := json.Marshal(ev)
+		if err != nil || len(raw) > maxInceptionHeader*3/4 {
+			return "", false
+		}
+		return base64.RawURLEncoding.EncodeToString(raw), true
+	}
+	return "", false
 }
 
 // SignRead adds the proof of who is reading to a request for a key log.
@@ -52,7 +93,7 @@ func (s *Service) SignRead(req *http.Request) {
 		return
 	}
 	stamp := time.Now().UTC().Format(time.RFC3339Nano)
-	sig, err := s.SignAsRequester(ReadStatement(reader, ReadTarget(req.URL.RequestURI()), stamp))
+	sig, err := s.SignAsRequester(ReadStatement(reader, req.URL.Host, ReadTarget(req.URL.RequestURI()), stamp))
 	if err != nil {
 		return
 	}
@@ -61,10 +102,23 @@ func (s *Service) SignRead(req *http.Request) {
 	req.Header.Set(HeaderReadSignature, sig)
 }
 
-// MayRead reports whether req is a read of aid's key log by aid itself, or by
-// the identity aid is witnessed as a delegate of, signed freshly by that
-// reader's current key.
+// MayRead reports whether req is a read of aid's key log by a party entitled to
+// it: aid itself, or the identity aid is witnessed as a delegate of, signed
+// freshly by that reader's current key; or a verifier that presents the log's
+// inception event, which this witness holds and only somebody the controller
+// gave the log to can reproduce (the withheld-rotation cross-check, see
+// server/corroborate_the_claim.go). The verifier thereby learns only that this
+// witness holds a log it already holds the start of.
+//
+// Both proofs are always evaluated, so that what a caller sends does not change
+// how much work a held and a not-held log cost.
 func (s *Service) MayRead(aid string, req *http.Request) bool {
+	signed := s.mayReadSigned(aid, req)
+	incepted := s.mayReadByInception(aid, req)
+	return signed || incepted
+}
+
+func (s *Service) mayReadSigned(aid string, req *http.Request) bool {
 	reader := req.Header.Get(HeaderReader)
 	stamp := req.Header.Get(HeaderReadStamp)
 	sig := req.Header.Get(HeaderReadSignature)
@@ -78,5 +132,31 @@ func (s *Service) MayRead(aid string, req *http.Request) bool {
 	if err != nil || time.Since(at) > readFreshness || time.Until(at) > readFreshness {
 		return false
 	}
-	return s.signedBy(reader, ReadStatement(reader, ReadTarget(req.URL.RequestURI()), stamp), sig)
+	return s.signedBy(reader, ReadStatement(reader, req.Host, ReadTarget(req.URL.RequestURI()), stamp), sig)
+}
+
+func (s *Service) mayReadByInception(aid string, req *http.Request) bool {
+	h := req.Header.Get(HeaderInception)
+	if aid == "" || h == "" || len(h) > maxInceptionHeader {
+		return false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(h)
+	if err != nil {
+		return false
+	}
+	var presented map[string]interface{}
+	if json.Unmarshal(raw, &presented) != nil {
+		return false
+	}
+	var held map[string]interface{}
+	if kel, err := s.Store.GetKelEvents(aid); err == nil && len(kel) > 0 {
+		_ = json.Unmarshal([]byte(kel[0].EventJSON), &held)
+	}
+	if held == nil {
+		held = map[string]interface{}{}
+	}
+	// Equal to the inception held, and an inception at that: an empty or absent
+	// one is not proof of anything.
+	t, _ := presented["t"].(string)
+	return (t == "icp" || t == "dip") && reflect.DeepEqual(presented, held)
 }
