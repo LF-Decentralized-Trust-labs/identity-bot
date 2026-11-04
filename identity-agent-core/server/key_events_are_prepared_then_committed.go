@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -409,7 +410,7 @@ func eventRecordOf(aid string, sn int, raw []byte, sigs []string) (store.EventRe
 // afterCommit sends the identity's witnesses what they lack, now the event is
 // in the log, and records that a backup is due after a rotation.
 func (s *CoreServer) afterCommit(ev *keri.Event) {
-	go s.witnessOwnLog()
+	s.inBackground(func(context.Context) { s.witnessOwnLog() })
 	if ev.Ilk == "rot" {
 		s.notifyBackupEvent(backup.EventKeyRotation)
 	}

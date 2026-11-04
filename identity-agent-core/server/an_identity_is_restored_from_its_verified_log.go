@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -83,7 +84,7 @@ func (s *CoreServer) handleRestoreIdentity(w http.ResponseWriter, r *http.Reques
 	}
 	s.reloadIdentityIntoDriver()
 	log.Printf("[identity-agent-core] RESTORE: installed the verified key log of %s (%d events)", req.AID, len(records))
-	go s.witnessOwnLog()
+	s.inBackground(func(context.Context) { s.witnessOwnLog() })
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
