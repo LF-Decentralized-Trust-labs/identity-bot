@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"identity-agent-core/drivers"
 	"identity-agent-core/recovery"
 )
 
@@ -25,6 +26,7 @@ func restart(b *brokenGlass) {
 	b.s.witnessing.witnessMu.Lock()
 	b.s.witnessing.witnessJobs = nil
 	b.s.witnessing.movedOnTries = nil
+	b.s.witnessing.movedOnEnded = nil
 	b.s.witnessing.witnessMu.Unlock()
 }
 
@@ -100,6 +102,41 @@ func TestTheJobForAFinishedRootEnds(t *testing.T) {
 	}
 	if got := w.holds(b.oldAID); got != 2 {
 		t.Fatalf("the old root's log changed at the witness: %d", got)
+	}
+}
+
+// A pass that read the root map while the old root was still open, and is
+// overtaken by the end of that root's witnessing before it adds the job, does
+// not add it.
+func TestAPassThatReadTheRootBeforeItEndedDoesNotAddItsJob(t *testing.T) {
+	w := newWitness()
+	b, _ := foundedWitnessed(t, w, map[string]any{"owner_aid": anOwner})
+	eventually(t, "the old root's founding reaches its witness", func() bool { return w.holds(b.oldAID) == 1 })
+	if code, out := b.rotate(t); code != http.StatusOK {
+		t.Fatalf("break-glass: %d %v", code, out)
+	}
+	eventually(t, "the entry says the old root is witnessed", func() bool {
+		m, err := recovery.LoadRootAIDMap(b.s.DataDir)
+		return err == nil && len(m.Entries) == 1 && m.Entries[0].WitnessedAt != ""
+	})
+	// Open the entry again as it was when the pass read it.
+	m := theMapOf(t, b)
+	entry := m.Entries[0]
+	m.Entries[0].WitnessedAt = ""
+	writeMap(t, b, m)
+	restart(b)
+
+	b.s.witnessing.witnessMu.Lock()
+	b.s.witnessing.afterMovedOnRead = func() { b.s.endMovedOn(entry, false) }
+	b.s.witnessing.witnessMu.Unlock()
+	keeper := b.s.KeriDriver.(drivers.KELKeeper)
+	b.s.witnessRootsMovedOn(keeper)
+
+	b.s.witnessing.witnessMu.Lock()
+	_, still := b.s.witnessing.witnessJobs[b.oldAID]
+	b.s.witnessing.witnessMu.Unlock()
+	if still {
+		t.Fatal("a finished root's job was added back")
 	}
 }
 

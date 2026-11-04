@@ -424,7 +424,7 @@ func (s *CoreServer) handleRecoveryRootAIDRotation(w http.ResponseWriter, r *htt
 			return fmt.Errorf("it is %s, so it was not added", res.Status)
 		}
 		if keeper, ok := s.KeriDriver.(drivers.KELKeeper); ok && ev.Ilk == "rot" {
-			s.inBackground(func(context.Context) { s.witnessLogOf(keeper, ev.Identifier) })
+			s.inBackground(func(context.Context) { s.witnessLogOf(keeper, ev.Identifier, true) })
 		}
 		return nil
 	}
