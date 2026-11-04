@@ -572,7 +572,7 @@ func (v *verifier) assetNamedBy(id, holder string) (authorisation.ExpectedAsset,
 	for _, c := range v.creds {
 		var this string
 		switch c.schema {
-		case schemas.AIAgentGrant.Schema.SAID, schemas.AIAgentGrantV1.Schema.SAID:
+		case schemas.AIAgentGrant.Schema.SAID, schemas.AIAgentGrantV11.Schema.SAID, schemas.AIAgentGrantV1.Schema.SAID:
 			this = authorisation.AssetKindAIAgent
 		case schemas.AppGrant.Schema.SAID:
 			this = authorisation.AssetKindApp
@@ -823,7 +823,7 @@ func (v *verifier) checkBodySpoke(where string, rec agentmessage.Record, body []
 	switch {
 	case !ok:
 		v.fault(where, "the bundle does not carry the grant %s it was sent under", rec.GrantSAID)
-	case grant.schema != schemas.AIAgentGrant.Schema.SAID && grant.schema != schemas.AIAgentGrantV1.Schema.SAID:
+	case grant.schema != schemas.AIAgentGrant.Schema.SAID && grant.schema != schemas.AIAgentGrantV11.Schema.SAID && grant.schema != schemas.AIAgentGrantV1.Schema.SAID:
 		v.fault(where, "%s is not an AI agent's grant", rec.GrantSAID)
 	case grant.holder != rec.From:
 		v.fault(where, "the grant it was sent under is %s's, not %s's", grant.holder, rec.From)

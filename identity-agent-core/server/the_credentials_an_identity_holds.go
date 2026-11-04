@@ -83,9 +83,9 @@ func issuedAt(c store.CredentialRecord) time.Time {
 var capabilityGrantSchemaSAID = schemas.AIAgentGrant.Schema.SAID
 
 // capabilityGrantSchemaSAIDs are every version of the grant schema still
-// honoured: the current one, and the first, which grants issued before edges
-// carry.
-var capabilityGrantSchemaSAIDs = []string{capabilityGrantSchemaSAID, schemas.AIAgentGrantV1.Schema.SAID}
+// honoured: the current one, the one before a grant could rest on an AI
+// agent body's request, and the first, which grants issued before edges carry.
+var capabilityGrantSchemaSAIDs = []string{capabilityGrantSchemaSAID, schemas.AIAgentGrantV11.Schema.SAID, schemas.AIAgentGrantV1.Schema.SAID}
 
 // grantSchemaSAIDsHeld are the schemas of every grant an asset can hold from
 // this identity, whether or not a gateway admits it yet: those admitted, and

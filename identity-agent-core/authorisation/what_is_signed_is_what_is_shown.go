@@ -185,7 +185,7 @@ func grantShown(cred *keri.Credential, ixn *keri.Event) (*ToSign, error) {
 		out.Name = firstNonEmpty(str("label"), out.Name)
 		out.PublicKey, out.Grade, out.Signer = str("public_key"), str("grade"), str("signer")
 		out.KeyFingerprint = KeyFingerprint(out.PublicKey)
-	case schemas.AIAgentGrant.Schema.SAID, schemas.AppGrant.Schema.SAID:
+	case schemas.AIAgentGrant.Schema.SAID, schemas.AIAgentGrantV11.Schema.SAID, schemas.AppGrant.Schema.SAID:
 		// An App Grant says what an AI Agent Grant says that an app has
 		// (capabilities and limits), so it is shown the same way, under its own kind.
 		out.Kind = "ai_agent"
