@@ -1733,6 +1733,39 @@ ON CONFLICT(said) DO NOTHING`,
 	return nil
 }
 
+// ReplaceEndpointRecord holds record as the only one of its controller and
+// route, removing the others in the same transaction.
+func (s *SQLiteStore) ReplaceEndpointRecord(record EndpointRecord) error {
+	raw, err := json.Marshal(record.Record)
+	if err != nil {
+		return fmt.Errorf("failed to marshal endpoint record: %w", err)
+	}
+	if record.ReceivedAt == "" {
+		record.ReceivedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to replace endpoint record: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM endpoint_records WHERE cid = ? AND route = ?`, record.CID, record.Route); err != nil {
+		return fmt.Errorf("failed to replace endpoint record: %w", err)
+	}
+	if _, err := tx.Exec(`
+INSERT INTO endpoint_records
+    (said, cid, eid, role, scheme, url, route, record_json, signature, stamp, received_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(said) DO UPDATE SET cid = excluded.cid, route = excluded.route, url = excluded.url,
+    record_json = excluded.record_json, signature = excluded.signature, stamp = excluded.stamp,
+    received_at = excluded.received_at`,
+		record.SAID, record.CID, record.EID, record.Role, record.Scheme,
+		record.URL, record.Route, string(raw), record.Signature,
+		record.Stamp, record.ReceivedAt); err != nil {
+		return fmt.Errorf("failed to replace endpoint record: %w", err)
+	}
+	return tx.Commit()
+}
+
 // GetEndpointRecords returns every endpoint statement held for a controller,
 // most recent first — the answer to "where is this identity now" for somebody
 // whose stored address has stopped working.

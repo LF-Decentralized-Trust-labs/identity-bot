@@ -102,6 +102,8 @@ func TestEveryWitnessProtocolRouteIsDeclaredPublic(t *testing.T) {
 		// witness ever holds the rotation a withdrawal is checked against.
 		"POST /api/witness/event", "GET /api/witness/kel/{signer_aid}",
 		"GET /api/witness/kel/{signer_aid}/tip", "GET /api/witness/kel/{signer_aid}/event/{sn}",
+		// A controller publishes where it can be reached; a counterparty asks.
+		"POST /api/witness/endpoint", "GET /api/witness/endpoint/{controller_aid}",
 	} {
 		parts := strings.SplitN(key, " ", 2)
 		if classify(parts[0], parts[1]) != accessPublic {
