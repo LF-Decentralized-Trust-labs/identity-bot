@@ -23,7 +23,7 @@ import 'support/the_core.dart';
 
 /// An event an earlier version stored without a signature is signed late only
 /// if it is exactly the event this phrase would have produced (ADR-061
-/// section 3, the signer's fence; build plan B13). Run against the real core,
+/// section 3, the signer's fence). Run against the real core,
 /// with the stored rows marked as the upgrade marks them.
 void main() {
   final seed = Bip39.mnemonicToSeed(

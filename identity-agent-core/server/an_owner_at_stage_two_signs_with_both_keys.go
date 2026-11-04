@@ -42,16 +42,16 @@ const headerOwnerSigPostQuantum = "X-IA-Owner-Sig-PQ"
 // contact log cannot be verified today (drivers/validate_kel.go refuses a
 // multi-key log), so whether such an owner is at stage two cannot be read from
 // anything this machine could trust, and a requirement read from an unverified
-// log could be made up or wound back by whoever supplied it. Task T-945 (verify
-// multi-key contact logs, then hold a paired machine's stage-two owner to both
-// keys) removes this gap.
+// log could be made up or wound back by whoever supplied it. Verifying
+// multi-key contact logs, then holding a paired machine's stage-two owner to
+// both keys, removes this gap.
 func (s *CoreServer) ownerPostQuantumKey(authority *OwnerAuthority) (string, int, error) {
 	if !keri.PostQuantumTestCodes() || authority == nil || authority.AID == "" || s.DataStore == nil {
 		return "", 0, nil
 	}
 	own, _ := s.DataStore.GetIdentity()
 	if own == nil || own.AID != authority.AID {
-		return "", 0, nil // not this core's own identity: deferred, see T-945
+		return "", 0, nil // not this core's own identity: not yet held, see above
 	}
 	keys, err := s.ownKeysInForce(authority.AID)
 	if err != nil {

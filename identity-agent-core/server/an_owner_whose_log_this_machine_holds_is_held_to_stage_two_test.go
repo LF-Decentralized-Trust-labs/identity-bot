@@ -20,13 +20,14 @@ import (
 // held to both keys there too, whatever the shape of the key list (ADR-061
 // section 6), and an owner whose log cannot be read is not let through.
 
-// deferredToT945 is why the paired-machine stage-two tests below are skipped and
-// not deleted: they are the specification T-945 (verify multi-key contact logs,
-// then hold a paired machine's stage-two owner to both keys) is to satisfy.
+// untilSeveralKeyContactLogsVerify is why the paired-machine stage-two tests
+// below are skipped and not deleted: they are the specification the work of
+// verifying multi-key contact logs, then holding a paired machine's stage-two
+// owner to both keys, is to satisfy.
 // Until then ownerPostQuantumKey asks nothing of an owner that is not this
 // core's own identity, because a stage-two contact log cannot be verified
 // (drivers/validate_kel.go refuses a multi-key log).
-const deferredToT945 = "deferred to T-945: a paired machine's stage-two owner is not held to the second key until multi-key contact logs can be verified"
+const untilSeveralKeyContactLogsVerify = "skipped: a paired machine's stage-two owner is not held to the second key until multi-key contact logs can be verified"
 
 // aPairedMachineWhoseOwnerLogIs seals a machine with no identity to owner and
 // stores the owner's log as the establishment events named, each a key list.
@@ -92,7 +93,7 @@ func aPostQuantumKey(t *testing.T, seed byte) ([]byte, string) {
 }
 
 func TestAStageTwoOwnerOfAPairedMachineIsHeldToBothKeys(t *testing.T) {
-	t.Skip(deferredToT945)
+	t.Skip(untilSeveralKeyContactLogsVerify)
 	k := appSeeds(2)
 	pq, pqKey := aPostQuantumKey(t, 0xB1)
 	s := aPairedMachineWhoseOwnerLogIs(t, k[1], []string{verkeyOf(k[0])}, []string{verkeyOf(k[1]), pqKey})
@@ -114,7 +115,7 @@ func TestAStageTwoOwnerOfAPairedMachineIsHeldToBothKeys(t *testing.T) {
 // says why. Refusing is deliberate for now; honouring a two-owner stage two
 // needs a request that carries one post-quantum signature per owner.
 func TestATwoOwnerIdentityAtStageTwoIsRefusedForWantOfTwoPostQuantumSignatures(t *testing.T) {
-	t.Skip(deferredToT945)
+	t.Skip(untilSeveralKeyContactLogsVerify)
 	k := appSeeds(2)
 	pq0, pqKey0 := aPostQuantumKey(t, 0xB1)
 	_, pqKey1 := aPostQuantumKey(t, 0xB2)
@@ -135,7 +136,7 @@ func TestATwoOwnerIdentityAtStageTwoIsRefusedForWantOfTwoPostQuantumSignatures(t
 // One owner with the classical key after other keys: the post-quantum key is
 // found wherever it is, not assumed to be key 1.
 func TestAnOwnerWithOneClassicalKeyAfterAnotherIsHeldToItsPostQuantumKeyWhereverItIs(t *testing.T) {
-	t.Skip(deferredToT945)
+	t.Skip(untilSeveralKeyContactLogsVerify)
 	k := appSeeds(2)
 	pq, pqKey := aPostQuantumKey(t, 0xB1)
 	s := aPairedMachineWhoseOwnerLogIs(t, k[0], []string{verkeyOf(k[0])}, []string{verkeyOf(k[0]), verkeyOf(k[1]), pqKey})
@@ -152,7 +153,7 @@ func TestAnOwnerWithOneClassicalKeyAfterAnotherIsHeldToItsPostQuantumKeyWherever
 }
 
 func TestAnOwnerWhoseLogCannotBeReadIsNotLetThrough(t *testing.T) {
-	t.Skip(deferredToT945)
+	t.Skip(untilSeveralKeyContactLogsVerify)
 	k := appSeeds(1)
 	// A log held of the owner that names no establishment event at all.
 	s := aPairedMachineWhoseOwnerLogIs(t, k[0])

@@ -43,8 +43,8 @@ func loadGolden(t *testing.T) goldenVector {
 	return g
 }
 
-// The recorded bytes were also checked once against keripy, by a reviewer
-// other than the author, and keripy accepted the event: it gave the SAID
+// The recorded bytes were also checked once against keripy, which accepted
+// the event: it gave the SAID
 // EB7QT2lcr4nGH0NnPnetVVa_c5Hj2e7hkFZJic9lT9OK recorded in golden_vectors.json,
 // and read the signing threshold "2" as met only by keys 0 and 1 together. That
 // is the only independent check this vector has had. The tests in this package
