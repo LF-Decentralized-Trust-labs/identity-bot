@@ -396,9 +396,19 @@ a witness.
   once the new root's keyset is filed no copy and no replacement is left.
   `POST /api/recovery/root-aid-rotation/prepare` builds the three events and
   adds none; `POST /api/recovery/root-aid-rotation` takes all three signed, for
-  a recovery session that exists. Nothing is written unless the checks pass,
-  and a run stopped part way is finished by sending the same request again. It
-  stays off behind `RootAIDRotationEnabled`.
+  a recovery session that exists. Nothing is written unless the checks pass.
+  A run stopped part way is finished by sending the same signed request again,
+  and nothing else finishes it: a second set prepared after the rotation the
+  first already added would leave two roots the old root's log authorises. So
+  the core keeps the signed request from the moment the run's first event is
+  added, keyed by the old root, until the run completes. It offers the request
+  back to the owner, and only the owner, as `unfinished` on
+  `GET /api/recovery/root-aid-rotation/status`, so an app that lost its copy can
+  send it again; and it refuses to prepare a new run for an identity that has
+  one unfinished, saying to resend. The continuity proof it leaves carries the
+  old root's log up to and including the rotation, so a verifier holding only
+  the proof checks that the rotation was signed by the key the old root
+  committed to, at its threshold. It stays off behind `RootAIDRotationEnabled`.
 - `POST /api/events/signature` attaches a signature to an event an earlier
   version added unsigned, and does nothing else. Those bytes are already in
   the log and may already be at witnesses, so signing them in place is the

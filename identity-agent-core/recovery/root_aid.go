@@ -208,8 +208,9 @@ type EventPreparer interface {
 // interaction) verify. The identity record moves from the old root to the new
 // one between 2 and 3.
 //
-// A run that stops part way is finished by sending the same request again.
-// Each event already in its log is recognised by its digest, the identity
+// A run that stops part way is finished by sending the same request again,
+// which the core keeps from the moment the first event is added until the run
+// is complete (RunningRootAIDRotations). Each event already in its log is recognised by its digest, the identity
 // record is moved only if it has not been, and the notification tasks and the
 // root map entry are written under keys the request fixes, so a repeat leaves
 // what a run that never stopped leaves.
@@ -261,6 +262,12 @@ func (s *RootAIDRotationService) RotateRootAID(
 	// committed whether or not an earlier run got to it.
 	if err := commit(checked.icpRaw, checked.icpSigs); err != nil {
 		return nil, fmt.Errorf("new root inception: %w", err)
+	}
+	// The first event of the run is in a log. From here a stop is finished by
+	// sending this request again, and the core keeps it for that.
+	if err := keepRunningRootAIDRotation(s.DataDir, RunningRootAIDRotation{
+		OldRootAID: oldRootAID, NewRootAID: newRootAID, Request: req}); err != nil {
+		return nil, err
 	}
 	if err := commit(checked.rotRaw, checked.rotSigs); err != nil {
 		return nil, fmt.Errorf("old-root authorization rotation: %w", err)
@@ -324,6 +331,9 @@ func (s *RootAIDRotationService) RotateRootAID(
 		RecoverySessionID:       req.RecoverySessionID,
 	}
 	if err := appendRootAIDMapEntry(s.DataDir, entry); err != nil {
+		return nil, err
+	}
+	if err := forgetRunningRootAIDRotation(s.DataDir, oldRootAID); err != nil {
 		return nil, err
 	}
 

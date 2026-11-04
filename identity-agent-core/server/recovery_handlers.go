@@ -458,6 +458,21 @@ func (s *CoreServer) handleRecoveryRootAIDPrepare(w http.ResponseWriter, r *http
 		writeError(w, http.StatusServiceUnavailable, "Store not available", "identity store is required")
 		return
 	}
+	// A rotation begun and not finished is finished, not begun again: a second
+	// set prepared after the rotation the first added leaves two roots the old
+	// root's log authorises.
+	if own, _ := s.DataStore.GetIdentity(); own != nil {
+		if run, err := recovery.UnfinishedRootAIDRotation(s.DataDir, own.AID); err != nil {
+			writeError(w, http.StatusInternalServerError, "The rotations begun could not be read", err.Error())
+			return
+		} else if run != nil {
+			writeError(w, http.StatusConflict, "A break-glass rotation of this identity was begun and not finished",
+				"Send the same signed request again to finish it; no new one is prepared until it is done. This agent keeps it, "+
+					"and offers it back to the owner as \"unfinished\" at GET /api/recovery/root-aid-rotation/status, for the old root "+
+					run.OldRootAID+".")
+			return
+		}
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxKeyEventBody)
 	var req recovery.PrepareRootAIDRotationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -625,6 +640,18 @@ func (s *CoreServer) handleRecoveryRootAIDStatus(w http.ResponseWriter, r *http.
 			last := m.Entries[len(m.Entries)-1]
 			resp["last_rotation_at"] = last.RotatedAt
 			resp["current_root_aid"] = last.NewRootAID
+		}
+	}
+	// The signed requests of runs begun and not finished are the owner's: an
+	// app that lost its copy sends one again to finish its run.
+	if s.theOwnerAsks(r) {
+		unfinished, err := recovery.RunningRootAIDRotations(s.DataDir)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "The rotations begun could not be read", err.Error())
+			return
+		}
+		if len(unfinished) > 0 {
+			resp["unfinished"] = unfinished
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
