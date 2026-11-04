@@ -120,6 +120,7 @@ func TestTwoWatchersCrossCheckEachOtherOverTheNetwork(t *testing.T) {
 	// Alice's watcher asks bob's. The default HTTP client reaches bob from
 	// loopback without the owner secret, i.e. as a peer.
 	alice := watcher.NewService(nil)
+	alice.L3.AllowLocal = func(string) bool { return true } // bob is on this machine, which the owner's own agent would have recorded
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 

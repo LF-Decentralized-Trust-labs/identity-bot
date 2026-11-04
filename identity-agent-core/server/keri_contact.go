@@ -65,8 +65,10 @@ func (s *CoreServer) ensureKeriContactIs(oobiURL, expected string) (*store.Conta
 
 	// Resolve the OOBI (KERI identity establishment). The address came from a
 	// peer, so it is fetched through the guarded client: the address actually
-	// dialled is checked, there is no proxy and no redirect.
-	client := witness.GuardedClient(15*time.Second, s.oobiMayBeLocal(oobiURL, expected))
+	// dialled is checked, there is no proxy and no redirect. A local address is
+	// reached only where the owner's own settings allow it (their relay, or
+	// IA_ALLOW_LOCAL_SITES) or it is the recorded address of this very contact.
+	client := witness.GuardedClient(15*time.Second, ownerAllowsLocal(oobiURL) || s.oobiMayBeLocal(oobiURL, expected))
 	resp, err := client.Get(oobiURL)
 	if err != nil {
 		return nil, false, fmt.Errorf("could not reach %s: %w", oobiURL, err)
