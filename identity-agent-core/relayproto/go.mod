@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/gorilla/websocket v1.5.3
-	github.com/grapeid/keri-go v0.4.1-0.20261103185441-8aa385fd92de
+	github.com/grapeid/keri-go v0.4.1-0.20261104151454-c39ec1d977cf
 	github.com/hashicorp/yamux v0.1.2
 )
 

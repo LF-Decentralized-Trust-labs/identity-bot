@@ -2,7 +2,7 @@ module github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/w
 
 go 1.25.0
 
-require github.com/grapeid/keri-go v0.4.1-0.20261103185441-8aa385fd92de
+require github.com/grapeid/keri-go v0.4.1-0.20261104151454-c39ec1d977cf
 
 require (
 	github.com/cloudflare/circl v1.6.3 // indirect
