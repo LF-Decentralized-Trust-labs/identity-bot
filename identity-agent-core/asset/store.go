@@ -214,11 +214,14 @@ var ErrInviteClosed = errors.New("invite is already revoked or used up")
 // RevokeInvite withdraws an asset invite. It says ErrInviteNotFound for a token
 // it does not hold and ErrInviteClosed for one already revoked or used up, so a
 // caller is never told "revoked" about a code that was not live to begin with.
-func (s *Store) RevokeInvite(token string) error {
+// A token that belongs to a different asset than assetID is reported as not
+// found, exactly like an unknown one, so a caller cannot learn which codes exist
+// on other assets.
+func (s *Store) RevokeInvite(assetID, token string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	inv, ok := s.invites[token]
-	if !ok {
+	if !ok || inv.AssetID != assetID {
 		return ErrInviteNotFound
 	}
 	if inv.Revoked || (inv.MaxUses > 0 && inv.UseCount >= inv.MaxUses) {

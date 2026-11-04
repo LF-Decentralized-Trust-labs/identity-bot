@@ -324,8 +324,9 @@ func (h *Handler) HandleListInvites(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleRevokeInvite(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
 	token := chi.URLParam(r, "token")
-	h.writeRevokeResult(w, h.Store.RevokeInvite(token), func() { h.writeJSON(w, map[string]bool{"revoked": true}, http.StatusOK) })
+	h.writeRevokeResult(w, h.Store.RevokeInvite(id, token), func() { h.writeJSON(w, map[string]bool{"revoked": true}, http.StatusOK) })
 }
 
 // writeRevokeResult turns the outcome of a revoke into the status a client can

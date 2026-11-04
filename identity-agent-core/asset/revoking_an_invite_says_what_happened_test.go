@@ -96,3 +96,27 @@ func TestARevokeThatCannotBeSavedIsNotReportedAsRevoked(t *testing.T) {
 		t.Error("an employee revoke that failed to save must not stick in memory")
 	}
 }
+
+// A code can only be withdrawn through the asset it belongs to. Naming another
+// asset in the URL answers 404, the same as an unknown code, and leaves the code live.
+func TestRevokingAnotherAssetsInviteLeavesItLive(t *testing.T) {
+	s, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := revokeRouter(&Handler{Store: s})
+	s.CreateInvite(AssetInvite{Token: "theirs", AssetID: "a2"})
+
+	if got := del(r, "/assets/a1/invites/theirs"); got != http.StatusNotFound {
+		t.Fatalf("revoking a2's code through a1 = %d, want 404", got)
+	}
+	if inv, _ := s.GetInvite("theirs"); inv.Revoked {
+		t.Fatal("a2's code was revoked through a1")
+	}
+	if got := del(r, "/assets/a1/invites/nope"); got != http.StatusNotFound {
+		t.Fatalf("unknown code = %d, want 404", got)
+	}
+	if got := del(r, "/assets/a2/invites/theirs"); got != http.StatusOK {
+		t.Fatalf("revoking through its own asset = %d, want 200", got)
+	}
+}
