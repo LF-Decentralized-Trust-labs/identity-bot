@@ -34,6 +34,26 @@ const _issuedWithin = Duration(minutes: 5);
 final _issuedAtForm = RegExp(
     r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}:\d{2})$');
 
+/// [dt] read as a time of issue, or null where it is not one: the form above,
+/// with every field in range. Dart's parser rolls a value out of range over
+/// (17:80 becomes 18:20, 30 February becomes 2 March) rather than refusing it.
+DateTime? _issuedAt(String dt) {
+  if (!_issuedAtForm.hasMatch(dt)) return null;
+  int at(int from) => int.parse(dt.substring(from, from + 2));
+  final year = int.parse(dt.substring(0, 4));
+  final month = at(5), day = at(8), hour = at(11), minute = at(14);
+  final second = at(17);
+  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) {
+    return null;
+  }
+  if (day < 1 || DateTime.utc(year, month, day).day != day) return null;
+  if (!dt.endsWith('Z')) {
+    final offset = dt.length - 5;
+    if (at(offset) > 14 || at(offset + 3) > 59) return null;
+  }
+  return DateTime.tryParse(dt);
+}
+
 /// KERI against the Identity Agent core running on this machine.
 ///
 /// Named for what it talks to rather than what kind of computer it is on,
@@ -794,12 +814,11 @@ class LocalCoreKeriService extends KeriService {
       // issue, and the claims asked for.
       final held = c.attributes;
       final dt = held['dt'];
-      final issuedAt = dt is String && _issuedAtForm.hasMatch(dt)
-          ? DateTime.tryParse(dt)
-          : null;
+      final issuedAt = dt is String ? _issuedAt(dt) : null;
       if (issuedAt == null) {
         throw NotTheCredentialAsked('its time of issue, $dt, is not an '
-            'RFC 3339 time with an explicit offset, the form the core writes');
+            'RFC 3339 time with an explicit offset and every field in range, the '
+            'form the core writes');
       }
       final apart = issuedAt.difference(DateTime.now()).abs();
       if (apart > _issuedWithin) {

@@ -258,7 +258,8 @@ void main() {
 
   test(
       'a time of issue is read only in the form the core writes: RFC 3339 with '
-      'an offset, never as this device\'s local time', () async {
+      'an offset and every field in range, never as this device\'s local time',
+      () async {
     final aid = await founded();
     final real = await prepared();
     final now = DateTime.now().toUtc();
@@ -274,6 +275,15 @@ void main() {
       'an expanded year': '+${now.year}-${two(now.month)}-${two(now.day)}'
           'T${clock}Z',
       'nanoseconds': '${day}T$clock.123456789Z',
+      // Out of range, which Dart's parser rolls over: an hour ago at minute
+      // 60 or more is now, and would pass the clock check.
+      'a minute out of range': () {
+        final hourAgo = now.subtract(const Duration(hours: 1));
+        return '${hourAgo.year}-${two(hourAgo.month)}-${two(hourAgo.day)}'
+            'T${two(hourAgo.hour)}:${now.minute + 60}:${two(now.second)}Z';
+      }(),
+      'an offset out of range': '${day}T$clock+99:99',
+      'a day the month does not have': '${now.year}-02-30T${clock}Z',
     };
     for (final entry in refused.entries) {
       await altered(reidentified(real,
