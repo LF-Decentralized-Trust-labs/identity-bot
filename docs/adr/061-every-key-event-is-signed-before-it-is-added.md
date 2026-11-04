@@ -16,7 +16,8 @@ which in practice is none. The event can reach witnesses in that state. A
 verifier that checks signatures refuses the log from that event on. This holds
 for every caller: the owner of a core-held identity, the multi-owner ceremony,
 a recovery that rotates for a client, and the break-glass root rotation, which
-is refused whole for exactly this reason.
+was refused whole for exactly this reason until it was made to commit its three
+events signed (section 3).
 
 **An identity whose key the app holds can be founded and then nothing else.**
 An app may keep the signing key, derived from the recovery phrase in its own
@@ -356,8 +357,9 @@ is how an owner whose current key was stolen undoes what the thief anchored,
 and how the post-quantum reserve is used once a classical key is broken.
 
 **Events with several signers** (an identity with several owners, a recovery
-rotation for a client, the break-glass root rotation) use the same routes.
-Each signer commits the same digest with its own signatures. The core holds
+rotation for a client) use the same routes. The break-glass root rotation does
+not: each of its three events has one signer, and it has two routes of its own
+(see "Every other write path"). Each signer commits the same digest with its own signatures. The core holds
 candidates by digest; more than one candidate may wait at a place, so one
 signer cannot block another's proposal. A candidate is added when its own
 signatures meet both the new `kt` and the prior `nt`. The other candidates at
@@ -379,11 +381,18 @@ a witness.
   rotation run through prepare and commit, carry the post-quantum commitment
   (section 6), and add nothing until signed by the keys each event reveals.
   The break-glass root rotation writes three events: the new root's founding,
-  the old root's rotation sealing it, and the new root's first interaction.
-  `POST /api/recovery/root-aid-rotation/prepare` builds them and adds none;
-  `POST /api/recovery/root-aid-rotation` takes all three signed and writes
-  nothing unless each carries a signature and both logs verify. It stays off
-  behind `RootAIDRotationEnabled`.
+  the old root's rotation sealing it, and the new root's first interaction,
+  which seals that rotation. The rotation follows the event the app names, the
+  last establishment event or an interaction it keeps, and supersedes the
+  interactions after it as a recovery rotation does (section 4), so the holder
+  of a stolen key cannot block it by adding interactions. The new root is
+  founded as an ordinary founding is: its witnesses default to the old root's,
+  and the owner seal, the messaging keyset and the founding gate apply.
+  `POST /api/recovery/root-aid-rotation/prepare` builds the three events and
+  adds none; `POST /api/recovery/root-aid-rotation` takes all three signed, for
+  a recovery session that exists. Nothing is written unless the checks pass,
+  and a run stopped part way is finished by sending the same request again. It
+  stays off behind `RootAIDRotationEnabled`.
 - `POST /api/events/signature` attaches a signature to an event an earlier
   version added unsigned, and does nothing else. Those bytes are already in
   the log and may already be at witnesses, so signing them in place is the
@@ -524,7 +533,7 @@ being signed (section 1), and *P(x)* is the digest of key *x*.
   both keys in force.
 
 **For an event with several signers** (several owners, a recovery for a
-client, the break-glass root rotation), each signer checks what is its own and
+client), each signer checks what is its own and
 what was agreed. The prepare request names every owner's identifier (`owners`).
 In the ceremony each owner gives the others its current key and its next
 classical and post-quantum digests, and each signer keeps every owner's in its
