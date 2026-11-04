@@ -220,11 +220,20 @@ func VerifyHybridSignature(
 	if len(mldsaVerkey) != MLDSA65VerkeyBytes {
 		return false
 	}
+	return VerifyMLDSA65(mldsaVerkey, msg, mldsaRaw)
+}
+
+// VerifyMLDSA65 reports whether sig is an ML-DSA-65 signature over msg under
+// the raw public key pub. A key or signature of the wrong size does not verify.
+func VerifyMLDSA65(pub, msg, sig []byte) bool {
+	if len(pub) != MLDSA65VerkeyBytes || len(sig) != mldsa65.SignatureSize {
+		return false
+	}
 	var pk mldsa65.PublicKey
 	var pkBuf [mldsa65.PublicKeySize]byte
-	copy(pkBuf[:], mldsaVerkey)
+	copy(pkBuf[:], pub)
 	pk.Unpack(&pkBuf)
-	return mldsa65.Verify(&pk, msg, nil, mldsaRaw)
+	return mldsa65.Verify(&pk, msg, nil, sig)
 }
 
 func decodeEd25519SigerRaw(sigerQB64 string) ([]byte, error) {

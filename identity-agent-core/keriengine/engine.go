@@ -184,11 +184,11 @@ func verifiedBy(aid, key string, raw []byte, sig string) error {
 		return fmt.Errorf("the key in force for %s is not known here (its log was restored without the "+
 			"bytes it was published as, and no key was given with it), so nothing is appended to it", aid)
 	}
-	sigRaw, err := iacrypto.DecodeEd25519SignatureQB64(sig)
+	c, err := drivers.ReadControllerSignature(sig)
 	if err != nil {
 		return fmt.Errorf("the signature over an event of %s is unreadable, so it is not appended: %w", aid, err)
 	}
-	if err := keri.VerifySignature(key, raw, sigRaw); err != nil {
+	if err := signatureVerifies(key, raw, c.Raw); err != nil {
 		return fmt.Errorf("an event of %s not signed by its current key is not appended: %w", aid, err)
 	}
 	return nil

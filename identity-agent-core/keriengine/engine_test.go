@@ -3,6 +3,7 @@ package keriengine
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -498,6 +499,13 @@ func TestAPresentationIsReproducible(t *testing.T) {
 // A hybrid identity whose secrets cannot be stored must not be reported as
 // created: it could never sign and could never rotate.
 func TestAHybridIdentityIsRefusedWhenItsSecretsWouldBeLost(t *testing.T) {
+	if !keri.PostQuantumTestCodes() {
+		_, err := NewWithSecretStore(keri.NewMemoryKeyStore()).CreateHybridInception("root")
+		if !errors.Is(err, ErrNoPostQuantumCodes) {
+			t.Fatalf("a default build founded a hybrid identity, or refused it for another reason: %v", err)
+		}
+		return
+	}
 	if _, err := New().CreateHybridInception("root"); err == nil {
 		t.Fatal("a hybrid identity was created with nowhere to keep its private half")
 	}

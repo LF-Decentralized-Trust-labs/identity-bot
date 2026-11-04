@@ -10,7 +10,6 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/hirochachacha/go-smb2 v1.1.0
-	github.com/jezek/xgb v1.3.1
 	github.com/mr-tron/base58 v1.2.0
 	github.com/pkg/sftp v1.13.10
 	github.com/zeebo/blake3 v0.2.4
@@ -33,7 +32,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/geoffgarside/ber v1.1.0 // indirect
 	github.com/go-stack/stack v1.8.1 // indirect
-	github.com/grapeid/keri-go v0.4.0
+	github.com/grapeid/keri-go v0.4.1-0.20261103185441-8aa385fd92de
 	github.com/inconshreveable/log15 v3.0.0-testing.5+incompatible // indirect
 	github.com/inconshreveable/log15/v3 v3.0.0-testing.5 // indirect
 	github.com/jpillora/backoff v1.0.0 // indirect

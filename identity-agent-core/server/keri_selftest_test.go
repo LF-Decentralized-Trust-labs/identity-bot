@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	keri "github.com/grapeid/keri-go"
 )
 
 func TestKeriSelfTestEndpoint(t *testing.T) {
@@ -12,6 +14,14 @@ func TestKeriSelfTestEndpoint(t *testing.T) {
 	w := httptest.NewRecorder()
 	s.handleKeriSelfTest(w, httptest.NewRequest(http.MethodGet, "/api/keri/selftest", nil))
 
+	// A build with keri-go's post-quantum test codes fails the suite on
+	// purpose, so it can never pass as a production build.
+	if keri.PostQuantumTestCodes() {
+		if w.Code == http.StatusOK {
+			t.Error("a build with the post-quantum test codes passes the conformance suite")
+		}
+		return
+	}
 	if w.Code != http.StatusOK {
 		t.Errorf("status %d — the suite reports failures", w.Code)
 	}

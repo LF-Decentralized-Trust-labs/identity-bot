@@ -1,6 +1,7 @@
 package keymath
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -99,5 +100,72 @@ func TestAnEventIsReadAsTheEngineReadsIt(t *testing.T) {
 	tampered := []byte(strings.Replace(string(raw), p, np, 1))
 	if _, err := Do("parse_event", []byte(`{"raw_b64":"`+base64.StdEncoding.EncodeToString(tampered)+`"}`)); err == nil {
 		t.Fatal("an event whose bytes no longer match its digest was read")
+	}
+}
+
+// An Ed25519 signature is written at the places it counts, and read back there.
+func TestAnEd25519SignatureIsIndexedWhereItIsAsked(t *testing.T) {
+	sig := bytes.Repeat([]byte{5}, 64)
+	req, _ := json.Marshal(map[string]any{"sig_b64": base64.StdEncoding.EncodeToString(sig), "index": 0, "ondex": 0})
+	out, err := Do("index_ed25519_sig", req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Sig string `json:"sig_qb64"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatal(err)
+	}
+	read, err := keri.ParseIndexedSignature(got.Sig)
+	if err != nil || read.At.Index != 0 || read.At.Ondex != 0 || !bytes.Equal(read.Raw, sig) {
+		t.Fatalf("read back %+v: %v", read, err)
+	}
+	if _, err := Do("index_ed25519_sig", []byte(`{"sig_b64":"AAAA","index":0,"ondex":0}`)); err == nil {
+		t.Fatal("a signature of the wrong size was indexed")
+	}
+}
+
+// The two places are written as asked, not swapped: an index that differs from
+// its prior-next place reads back with each where it was put.
+func TestAnEd25519SignatureKeepsItsIndexAndPriorNextApart(t *testing.T) {
+	sig := bytes.Repeat([]byte{5}, 64)
+	for _, at := range [][2]int{{2, 0}, {0, 3}, {1, 2}, {5, 1}} {
+		req, _ := json.Marshal(map[string]any{"sig_b64": base64.StdEncoding.EncodeToString(sig), "index": at[0], "ondex": at[1]})
+		out, err := Do("index_ed25519_sig", req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got struct {
+			Sig string `json:"sig_qb64"`
+		}
+		if err := json.Unmarshal(out, &got); err != nil {
+			t.Fatal(err)
+		}
+		read, err := keri.ParseIndexedSignature(got.Sig)
+		if err != nil || read.At.Index != at[0] || read.At.Ondex != at[1] || !bytes.Equal(read.Raw, sig) {
+			t.Fatalf("index %d, prior-next %d was read back as %+v: %v", at[0], at[1], read.At, err)
+		}
+	}
+}
+
+// A current-only Ed25519 signature carries no prior-next place, and reads back
+// as one.
+func TestACurrentOnlyEd25519SignatureOpensNothing(t *testing.T) {
+	sig := bytes.Repeat([]byte{5}, 64)
+	req, _ := json.Marshal(map[string]any{"sig_b64": base64.StdEncoding.EncodeToString(sig), "index": 1, "ondex": 7, "current_only": true})
+	out, err := Do("index_ed25519_sig", req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Sig string `json:"sig_qb64"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatal(err)
+	}
+	read, err := keri.ParseIndexedSignature(got.Sig)
+	if err != nil || read.At.Index != 1 || !read.At.CurrentOnly || !bytes.Equal(read.Raw, sig) {
+		t.Fatalf("read back %+v: %v", read.At, err)
 	}
 }

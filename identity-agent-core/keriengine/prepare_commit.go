@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	keri "github.com/grapeid/keri-go"
 
 	"identity-agent-core/drivers"
+	"identity-agent-core/iacrypto"
 )
 
 // Building an event without adding it, and adding it only with its
@@ -285,6 +287,16 @@ func prepareFounding(req PrepareRequest) (*Prepared, error) {
 	if len(req.Keys) == 0 {
 		return nil, fmt.Errorf("a founding must name its keys")
 	}
+	// A post-quantum key is published under no code CESR has assigned, so a
+	// build that cannot read one prepares no founding that names one: it would
+	// be refused at commit, after a signer had been asked to sign it.
+	if !keri.PostQuantumTestCodes() {
+		for _, key := range req.Keys {
+			if strings.HasPrefix(key, iacrypto.CESRMLDSA65Verkey) {
+				return nil, ErrNoPostQuantumCodes
+			}
+		}
+	}
 	for i, w := range req.Witnesses {
 		if len(w) != 44 || w[0] != 'B' {
 			return nil, fmt.Errorf("witness %d is %q, which is not a non-transferable identifier", i, w)
@@ -349,10 +361,14 @@ func (e *Engine) Commit(name string, raw []byte, sigs []string, keep func(driver
 		if kerr != nil {
 			return nil, kerr
 		}
-		if _, err := checkedSignatures(raw, sigs, keys); err != nil {
+		priorNext, perr := priorNextOf(entries[:sn], ev)
+		if perr != nil {
+			return nil, perr
+		}
+		if _, err := checkedSignatures(raw, sigs, keys, priorNext); err != nil {
 			return nil, &ErrNotAuthorised{AID: id.AID, SN: sn, Err: err, BadSignature: true}
 		}
-		indexed, ierr := checkedSignatures(raw, mergeSigs(entries[sn].Sigs, sigs), keys)
+		indexed, ierr := checkedSignatures(raw, mergeSigs(entries[sn].Sigs, sigs), keys, priorNext)
 		if ierr == nil && len(indexed) > len(entries[sn].Sigs) {
 			if _, err := e.judge(id.AID, entries[:sn], raw, ev, indexed); err == nil {
 				if keep != nil {
@@ -399,10 +415,14 @@ func (e *Engine) Commit(name string, raw []byte, sigs []string, keep func(driver
 	if h := e.heldAt(id, sn, ev.SAID); h != nil {
 		merged = mergeSigs(h.sigs, sigs)
 	}
-	if _, err := checkedSignatures(raw, sigs, keys); err != nil {
+	priorNext, err := priorNextOf(entries[:sn], ev)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := checkedSignatures(raw, sigs, keys, priorNext); err != nil {
 		return nil, &ErrNotAuthorised{AID: id.AID, SN: sn, Err: err, BadSignature: true}
 	}
-	indexed, err := checkedSignatures(raw, merged, keys)
+	indexed, err := checkedSignatures(raw, merged, keys, priorNext)
 	if err != nil {
 		return nil, &ErrNotAuthorised{AID: id.AID, SN: sn, Err: err, BadSignature: true}
 	}
@@ -449,7 +469,7 @@ func (e *Engine) Commit(name string, raw []byte, sigs []string, keep func(driver
 }
 
 func (e *Engine) commitFounding(name string, raw []byte, ev *keri.Event, sigs []string, keep func(drivers.KELKeep) error) (*CommitResult, error) {
-	indexed, err := checkedSignatures(raw, sigs, ev.Keys)
+	indexed, err := checkedSignatures(raw, sigs, ev.Keys, nil)
 	if err != nil {
 		return nil, &ErrNotAuthorised{AID: ev.Identifier, Err: err, BadSignature: true}
 	}
@@ -464,7 +484,7 @@ func (e *Engine) commitFounding(name string, raw []byte, ev *keri.Event, sigs []
 		e.state.mu.RLock()
 		have := append([]string(nil), held.KEL[0].Sigs...)
 		e.state.mu.RUnlock()
-		merged, err := checkedSignatures(raw, mergeSigs(have, indexed), ev.Keys)
+		merged, err := checkedSignatures(raw, mergeSigs(have, indexed), ev.Keys, nil)
 		if err == nil && len(merged) > len(have) {
 			if _, err := e.judge(ev.Identifier, nil, raw, ev, merged); err == nil {
 				if keep != nil {
@@ -726,7 +746,11 @@ func (e *Engine) AttachSignatures(name string, sn int, raw []byte, sigs []string
 	if err != nil {
 		return nil, err
 	}
-	indexed, err := checkedSignatures(raw, sigs, keys)
+	priorNext, err := priorNextOf(entries[:sn], ev)
+	if err != nil && sn > 0 {
+		return nil, err
+	}
+	indexed, err := checkedSignatures(raw, sigs, keys, priorNext)
 	if err != nil {
 		return nil, &ErrNotAuthorised{AID: id.AID, SN: sn, Err: err, BadSignature: true}
 	}

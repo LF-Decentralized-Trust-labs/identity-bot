@@ -4,10 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	keri "github.com/grapeid/keri-go"
 
 	"identity-agent-core/drivers"
+	"identity-agent-core/iacrypto"
 )
 
 // The one way an event joins a key log this engine holds.
@@ -89,6 +91,62 @@ func lastEstablishment(entries []kelEntry) (int, *keri.Event, error) {
 	return 0, nil, fmt.Errorf("no establishment event precedes this one")
 }
 
+// signatureVerifies checks one signature over raw under key: an Ed25519 key
+// as keri-go checks it, a post-quantum one (which keri-go reads only in a build
+// with the kerigo_pqtest tag, so none is ever in a production log) as ML-DSA-65,
+// and only in that build.
+func signatureVerifies(key string, raw, sig []byte) error {
+	if !keri.PostQuantumTestCodes() || !strings.HasPrefix(key, iacrypto.CESRMLDSA65Verkey) {
+		return keri.VerifySignature(key, raw, sig)
+	}
+	pub, err := keri.MatterRawSized(iacrypto.CESRMLDSA65Verkey, key, iacrypto.MLDSA65VerkeyBytes)
+	if err != nil {
+		return fmt.Errorf("%q is not a readable ML-DSA-65 public key: %w", key, err)
+	}
+	if !iacrypto.VerifyMLDSA65(pub, raw, sig) {
+		return fmt.Errorf("the signature does not verify under the post-quantum key, so whoever " +
+			"produced it did not hold that key")
+	}
+	return nil
+}
+
+// priorNextOf is the commitment a rotation opens: the one the last
+// establishment event of before made. An event that is not a rotation opens
+// none.
+func priorNextOf(before []kelEntry, ev *keri.Event) ([]string, error) {
+	if ev.Ilk != "rot" && ev.Ilk != "drt" {
+		return nil, nil
+	}
+	_, est, err := lastEstablishment(before)
+	if err != nil {
+		return nil, err
+	}
+	return est.NextDigest, nil
+}
+
+// opensPriorNext refuses a signature whose prior-next place names another
+// key's commitment than the one its key opens. keri-go reads the places a
+// post-quantum signature names without checking them against the commitment,
+// so this is checked here, for every key. A key that opens no commitment at
+// all is no business of this check: such a signature counts for nothing
+// toward the prior threshold, and whether the rotation is authorised without
+// it is the log verifier's to say.
+func opensPriorNext(key string, at keri.SignaturePlace, priorNext []string) error {
+	if priorNext == nil || at.CurrentOnly {
+		return nil
+	}
+	d, err := keri.NextDigest(key)
+	if err != nil {
+		return err
+	}
+	for j, committed := range priorNext {
+		if committed == d && j != at.Ondex {
+			return fmt.Errorf("its prior-next place is %d, and its key opens the commitment at place %d", at.Ondex, j)
+		}
+	}
+	return nil
+}
+
 // signaturesVerify reports whether every signature verifies over raw under the
 // key it names, and which key places signed. It decides nothing about
 // thresholds or commitments, which are keri-go's; it tells a signature that is
@@ -100,7 +158,7 @@ func signaturesVerify(raw []byte, sigs []string, keys []string) (signed []int, o
 		if err != nil || c.At.Index < 0 || c.At.Index >= len(keys) {
 			return nil, false
 		}
-		if keri.VerifySignature(keys[c.At.Index], raw, c.Raw) != nil {
+		if signatureVerifies(keys[c.At.Index], raw, c.Raw) != nil {
 			return nil, false
 		}
 		at[c.At.Index] = true
@@ -118,7 +176,13 @@ func signaturesVerify(raw []byte, sigs []string, keys []string) (signed []int, o
 // verify and judges the rest, which is right for a log received from
 // elsewhere; a log this engine keeps and publishes carries none, so nobody
 // can add junk to an event by sending it beside good signatures.
-func checkedSignatures(raw []byte, sigs []string, keys []string) ([]string, error) {
+//
+// In a rotation, priorNext is the commitment the last establishment event made,
+// and a signature must open the place it names: the key it is made by must be
+// the one committed to at its prior-next place. A signature that names no such
+// place (the current-only codes) opens nothing and is judged on the threshold
+// of the new keys alone. Nil for an event that opens no commitment.
+func checkedSignatures(raw []byte, sigs []string, keys []string, priorNext []string) ([]string, error) {
 	indexed, err := drivers.IndexedSignatures(sigs, len(keys))
 	if err != nil {
 		return nil, err
@@ -133,8 +197,11 @@ func checkedSignatures(raw []byte, sigs []string, keys []string) ([]string, erro
 		if c.At.Index < 0 || c.At.Index >= len(keys) {
 			return nil, fmt.Errorf("signature %d names key %d, and the event is signed by %d keys", i, c.At.Index, len(keys))
 		}
-		if err := keri.VerifySignature(keys[c.At.Index], raw, c.Raw); err != nil {
+		if err := signatureVerifies(keys[c.At.Index], raw, c.Raw); err != nil {
 			return nil, fmt.Errorf("signature %d does not verify under key %d: %w", i, c.At.Index, err)
+		}
+		if err := opensPriorNext(keys[c.At.Index], c.At, priorNext); err != nil {
+			return nil, fmt.Errorf("signature %d: %w", i, err)
 		}
 		if byPlace[c.At.Index] {
 			continue
@@ -263,7 +330,11 @@ func (e *Engine) place(id *identity, before []kelEntry, at int, raw []byte, ev *
 	if ev.Ilk == "icp" || ev.Ilk == "dip" {
 		keys = ev.Keys
 	}
-	indexed, err := checkedSignatures(raw, sigs, keys)
+	priorNext, err := priorNextOf(before[:at], ev)
+	if err != nil && at > 0 {
+		return err
+	}
+	indexed, err := checkedSignatures(raw, sigs, keys, priorNext)
 	if err != nil {
 		return &ErrNotAuthorised{AID: id.AID, SN: int(ev.SN), Err: err, BadSignature: true}
 	}
@@ -330,7 +401,7 @@ func (e *Engine) ownSignatures(aid string, keys []string, raw []byte) []string {
 			continue
 		}
 		c, err := drivers.ReadControllerSignature(sig)
-		if err != nil || keri.VerifySignature(key, raw, c.Raw) != nil {
+		if err != nil || signatureVerifies(key, raw, c.Raw) != nil {
 			continue
 		}
 		qb64, err := keri.EncodeIndexedSignature(c.Raw, keri.SamePlace(i))
@@ -370,7 +441,7 @@ func VerifiedSignatures(raws [][]byte, sigs [][]string) ([][]string, error) {
 			if c.QB64 != s && len(keys) != 1 {
 				continue // names no key, among several
 			}
-			if keri.VerifySignature(keys[c.At.Index], raw, c.Raw) != nil {
+			if signatureVerifies(keys[c.At.Index], raw, c.Raw) != nil {
 				continue
 			}
 			seen[c.At.Index] = true

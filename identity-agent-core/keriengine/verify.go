@@ -41,7 +41,7 @@ func (e *Engine) VerifySignature(dataB64, signature, publicKey string) (*drivers
 	// A failed verification is an answer, not an error: the caller asked
 	// whether the signature is good and "no" is a valid response. Only a
 	// malformed input above is an error.
-	valid := keri.VerifySignature(pub, data, sig) == nil
+	valid := signatureVerifies(pub, data, sig) == nil
 	return &drivers.DriverVerifyResponse{Valid: valid, PublicKey: pub}, nil
 }
 

@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+
+	keri "github.com/grapeid/keri-go"
 )
 
 // Do is keymath's one entry point, as the app reaches it: an operation and a
@@ -15,6 +17,12 @@ import (
 //
 //	pq_next           {"seed_hex"}               -> {"verkey","digest"}
 //	sign_mldsa65      {"seed_hex","msg_b64"}     -> {"sig_b64"}
+//	index_ed25519_sig {"sig_b64","index","ondex","current_only"} -> {"sig_qb64"}
+//	index_mldsa65_sig {"sig_b64","index","ondex","current_only"} -> {"sig_qb64"}   (test build only)
+//
+// current_only writes a signature that opens no prior commitment, as an
+// interaction's is, and ignores ondex.
+//
 //	messaging_keyset  {"seed_hex"}               -> {"anchor"}
 //	parse_event       {"raw_b64"}                -> Event
 //	next_key_digest   {"key"}                    -> {"digest"}
@@ -31,10 +39,16 @@ func Do(op string, request []byte) ([]byte, error) {
 		MsgB64  string `json:"msg_b64"`
 		RawB64  string `json:"raw_b64"`
 		Key     string `json:"key"`
-		Witness string `json:"witness"`
-		Digest  string `json:"digest"`
-		Sig     string `json:"sig"`
-		AID     string `json:"aid"`
+		Index   int    `json:"index"`
+		Ondex   int    `json:"ondex"`
+		// CurrentOnly asks for the code of a signature that opens no prior
+		// commitment, which carries no prior-next place.
+		CurrentOnly bool   `json:"current_only"`
+		SigB64      string `json:"sig_b64"`
+		Witness     string `json:"witness"`
+		Digest      string `json:"digest"`
+		Sig         string `json:"sig"`
+		AID         string `json:"aid"`
 		// Events is a key log, for verify_log.
 		Events []SignedEvent `json:"events"`
 	}
@@ -77,6 +91,34 @@ func Do(op string, request []byte) ([]byte, error) {
 			return nil, errors.New("the message could not be signed")
 		}
 		answer = map[string]string{"sig_b64": base64.StdEncoding.EncodeToString(sig)}
+	case "index_ed25519_sig":
+		// An event several keys sign takes each signature at the place of its
+		// key, which only an indexed signature names.
+		sig, err := base64.StdEncoding.DecodeString(req.SigB64)
+		if err != nil {
+			return nil, errors.New("sig_b64 is not standard base64")
+		}
+		qb64, err := keri.EncodeIndexedSignature(sig, keri.SignaturePlace{Index: req.Index, Ondex: req.Ondex, CurrentOnly: req.CurrentOnly})
+		if err != nil {
+			return nil, err
+		}
+		answer = map[string]string{"sig_qb64": qb64}
+	case "index_mldsa65_sig":
+		// Only a test build (the kerigo_pqtest tag) can write this code; any
+		// other says so. A signature is public, so the error may be specific.
+		sig, err := base64.StdEncoding.DecodeString(req.SigB64)
+		if err != nil {
+			return nil, errors.New("sig_b64 is not standard base64")
+		}
+		encode := func() (string, error) { return EncodeMLDSA65IndexedSignature(sig, req.Index, req.Ondex) }
+		if req.CurrentOnly {
+			encode = func() (string, error) { return EncodeMLDSA65CurrentOnlySignature(sig, req.Index) }
+		}
+		qb64, err := encode()
+		if err != nil {
+			return nil, err
+		}
+		answer = map[string]string{"sig_qb64": qb64}
 	case "messaging_keyset":
 		s, err := seed()
 		if err != nil {

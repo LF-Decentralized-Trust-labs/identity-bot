@@ -1,3 +1,5 @@
+//go:build kerigo_pqtest
+
 package iacrypto
 
 import (
@@ -19,6 +21,11 @@ import (
 // So before this package's builder is replaced by keri-go, the two are compared
 // on the event this package actually produces. If they agree, the swap is safe.
 // If they do not, one of them is already wrong.
+//
+// NOTE: since the builder was swapped to keri-go this compares keri-go with
+// keri-go, so it can no longer fail for disagreement between two engines. It
+// guards the swap not drifting back; the independent check, against keripy,
+// is recorded at TestTheRecordedInceptionBytesHaveNotChanged.
 func TestHybridInceptionAgreesWithKeriGo(t *testing.T) {
 	ours, err := BuildHybridInception(SyntheticHybridKeyMaterial(0))
 	if err != nil {
@@ -29,9 +36,9 @@ func TestHybridInceptionAgreesWithKeriGo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The same event, described to keri-go: two signing keys with a threshold of
-	// one, two pre-rotation commitments, and the cipher-suite anchor that marks
-	// the identity as hybrid.
+	// The same event, described to keri-go: two signing keys and a threshold of
+	// two, so neither signs alone, two pre-rotation commitments, and the
+	// cipher-suite anchor that marks the identity as hybrid.
 	anchor, err := json.Marshal(map[string]any{
 		"ia": CipherSuiteIAHybrid1,
 		"ka": []string{ours.CESR.X25519Agreement, ours.CESR.MLKEM768Encap},
@@ -42,9 +49,9 @@ func TestHybridInceptionAgreesWithKeriGo(t *testing.T) {
 
 	theirs, err := keri.BuildInception(keri.InceptionInput{
 		Keys:        []string{ours.CESR.Ed25519Signing, ours.CESR.MLDSA65Signing},
-		Isith:       json.RawMessage(`"1"`),
+		Isith:       json.RawMessage(`"2"`),
 		NextDigests: []string{ours.CESR.NextEd25519Digest, ours.CESR.NextMLDSA65Digest},
-		Nsith:       json.RawMessage(`"1"`),
+		Nsith:       json.RawMessage(`"2"`),
 		Data:        []json.RawMessage{anchor},
 	})
 	if err != nil {

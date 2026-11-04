@@ -1827,6 +1827,13 @@ func (s *CoreServer) handleHybridInception(w http.ResponseWriter, r *http.Reques
 	if s.refuseIfThisComputerMayNotFound(w) {
 		return
 	}
+	// A post-quantum key is published under no code CESR has assigned, so a
+	// build that cannot read one founds nothing here (ADR-061).
+	if !keri.PostQuantumTestCodes() {
+		writeError(w, http.StatusNotImplemented, "No identity is founded on a post-quantum key in this build",
+			iacrypto.ErrNoPostQuantumCodes.Error())
+		return
+	}
 
 	var req HybridInceptionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
