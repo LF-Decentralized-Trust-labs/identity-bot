@@ -303,7 +303,9 @@ private-use range or inside an implementation.
   "org_aid","name"}` and the signer's Ed25519 signature over its exact bytes
   (CESR qb64). `name` is the name the signer discloses for themselves.
 - **Verified:** a verifier shows `name` only if the signature verifies under the
-  signer's *current* key (from their verified key event log) and `signer_aid` and
+  signer's *current* key (from their verified key event log; for the founder only,
+  where no verified log is held, the key that also decides whether they may
+  administer the agent) and `signer_aid` and
   `org_aid` match the owner and organization being shown. A vouch with no `name`,
   or whose signer has since rotated, names nobody.
 

@@ -42,7 +42,7 @@ type signedOwnerName struct {
 //     key event log on file here, and shows no name;
 //   - the same holds when an overlay owns the roster (OVERLAY_OWNS_ORG_ROUTES),
 //     because this core's roster is then empty or not the one in use;
-//   - an owner who has rotated shows no name until they sign again, because
+//   - an owner who has rotated shows no name until they sign a new name vouch (today, by redeeming another invitation), because
 //     their old vouch no longer verifies against their current key.
 //
 // All three show the key identifier the caller already has. That is the safe

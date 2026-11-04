@@ -260,7 +260,7 @@ Three cases show **no name**, and show the key identifier instead:
   no key event log here;
 - an owner on an organisation whose roster an overlay owns
   (`OVERLAY_OWNS_ORG_ROUTES`), where this core's roster is not the one in use;
-- an owner who has rotated, until they sign again.
+- an owner who has rotated, until they sign a new name vouch (today, by redeeming another invitation).
 
 Nothing guesses a name to fill the gap. Recording what the first two need is
 deferred, not decided here.
