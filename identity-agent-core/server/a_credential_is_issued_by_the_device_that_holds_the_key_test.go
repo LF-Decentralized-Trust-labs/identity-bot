@@ -2,10 +2,13 @@ package server
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"testing"
 
 	keri "github.com/grapeid/keri-go"
+
+	"identity-agent-core/store"
 )
 
 func foundedAppHeld(t *testing.T) (*CoreServer, string, [][]byte) {
@@ -99,5 +102,49 @@ func TestACredentialOfAnAppHeldIdentityIsKeptOnceTheAppAnchorsIt(t *testing.T) {
 	if code, _ := call(t, s, s.handleRecordCredential, "/api/credential/record", map[string]any{
 		"acdc_json_b64": acdcB64, "ixn_said": ixnSaid}); code != http.StatusOK {
 		t.Fatalf("record twice: %d", code)
+	}
+}
+
+// An interaction somebody stored without the key's signature is not in the key
+// log, whatever it seals: nothing is kept on it and nothing is delivered.
+func TestACredentialIsNotKeptOnAnAnchorTheKeyDidNotSign(t *testing.T) {
+	s, aid, k := foundedAppHeld(t)
+	_, out := call(t, s, s.handlePrepareCredential, "/api/credential/prepare", map[string]any{
+		"claims": map[string]any{"name": "Mallory"}, "schema_said": "Eschema", "holder_aid": "Eholder"})
+	acdcB64, said := out["acdc_json_b64"].(string), out["acdc_said"].(string)
+	ixn, err := keri.BuildInteraction(keri.InteractionInput{Prefix: aid, PriorSAID: aid, SN: 1,
+		Data: []json.RawMessage{json.RawMessage(`{"i":"` + said + `","s":"0","d":"` + said + `"}`)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, _ := keri.ParseEvent(ixn)
+	record := func() int {
+		code, _ := call(t, s, s.handleRecordCredential, "/api/credential/record", map[string]any{
+			"acdc_json_b64": acdcB64, "ixn_said": ev.SAID})
+		return code
+	}
+	plant := func(sigs []string) {
+		if err := s.DataStore.SaveEvent(store.EventRecord{AID: aid, SequenceNumber: 1, EventType: "ixn",
+			EventJSON: string(ixn), RawBytesB64: base64.StdEncoding.EncodeToString(ixn), Signatures: sigs}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Stored as /api/store/event stores it: no signature at all.
+	plant(nil)
+	if code := record(); code != http.StatusConflict {
+		t.Fatalf("a credential was kept on an unsigned interaction: %d", code)
+	}
+	// Signed, but by a key that is not the one the log is at (the next key).
+	plant([]string{appSign(t, k[1], ixn, false)})
+	if code := record(); code != http.StatusConflict {
+		t.Fatalf("a credential was kept on an interaction another key signed: %d", code)
+	}
+	if cs, _ := s.DataStore.GetCredentialsFiltered("", ""); len(cs) != 0 {
+		t.Fatalf("%d credentials kept", len(cs))
+	}
+	// Signed by the identity's key, the same bytes are an anchor.
+	plant([]string{appSign(t, k[0], ixn, false)})
+	if code := record(); code != http.StatusCreated {
+		t.Fatalf("a credential a signed interaction anchors was refused: %d", code)
 	}
 }

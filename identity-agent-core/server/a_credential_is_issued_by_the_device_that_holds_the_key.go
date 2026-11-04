@@ -25,11 +25,13 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"sort"
 	"time"
 
 	keri "github.com/grapeid/keri-go"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/drivers"
 	"identity-agent-core/schemas"
 	"identity-agent-core/store"
 )
@@ -185,20 +187,29 @@ func (s *CoreServer) handleRecordCredential(w http.ResponseWriter, r *http.Reque
 
 // keyLogAnchors is whether aid's key log holds an interaction with digest ixn
 // that seals the credential said, as a credential issued outside a registry is
-// sealed.
+// sealed. The log up to and including that interaction is judged as every key
+// log is, signatures and all: a row somebody stored is not an event of the log
+// until it verifies as one.
 func (s *CoreServer) keyLogAnchors(aid, ixn, said string) bool {
 	events, err := s.DataStore.GetEvents(aid)
 	if err != nil {
 		return false
 	}
+	sort.SliceStable(events, func(i, j int) bool { return events[i].SequenceNumber < events[j].SequenceNumber })
 	want := map[string]string{"i": said, "s": "0", "d": said}
+	var prefix []drivers.SignedEventBytes
 	for _, rec := range events {
-		if rec.EventType != "ixn" || rec.RawBytesB64 == "" {
+		sigs := rec.ControllerSignatures()
+		if rec.RawBytesB64 == "" || len(sigs) == 0 {
+			return false
+		}
+		prefix = append(prefix, drivers.SignedEventBytes{RawB64: rec.RawBytesB64, Sigs: sigs})
+		if rec.EventType != "ixn" {
 			continue
 		}
 		raw, err := base64.StdEncoding.DecodeString(rec.RawBytesB64)
 		if err != nil {
-			continue
+			return false
 		}
 		ev, err := keri.ParseEvent(raw)
 		if err != nil || ev.SAID != ixn || ev.Identifier != aid {
@@ -208,13 +219,23 @@ func (s *CoreServer) keyLogAnchors(aid, ixn, said string) bool {
 			A []map[string]string `json:"a"`
 		}
 		if json.Unmarshal(raw, &body) != nil {
-			continue
+			return false
 		}
+		sealed := false
 		for _, seal := range body.A {
 			if len(seal) == len(want) && seal["i"] == want["i"] && seal["s"] == want["s"] && seal["d"] == want["d"] {
-				return true
+				sealed = true
 			}
 		}
+		if !sealed {
+			return false
+		}
+		messages, err := drivers.LogMessages(prefix)
+		if err != nil {
+			return false
+		}
+		_, err = drivers.VerifiedLogOf(aid, messages)
+		return err == nil
 	}
 	return false
 }
