@@ -26,6 +26,14 @@ const _credentialFieldsAsked = {'v', 'd', 'i', 's', 'a'};
 /// How far a credential's time of issue may be from this device's clock.
 const _issuedWithin = Duration(minutes: 5);
 
+/// The one form the core writes a time in: RFC 3339, to the microsecond at
+/// most, with an explicit offset or Z. Without an offset a time is read as this
+/// device's local time, which a reader in another zone reads differently; the
+/// other forms Dart's parser takes (a space for the T, compact digits, a signed
+/// expanded year, nanoseconds) are not what the core writes.
+final _issuedAtForm = RegExp(
+    r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}:\d{2})$');
+
 /// KERI against the Identity Agent core running on this machine.
 ///
 /// Named for what it talks to rather than what kind of computer it is on,
@@ -770,22 +778,35 @@ class LocalCoreKeriService extends KeriService {
       wrong = 'it is issued to "${c.recipient}", not "$holderAid"';
     } else if (c.registry.isNotEmpty || c.hasEdges) {
       wrong = 'it names a registry or edges, which were not asked for';
-    } else if (c.fields.any((f) => !_credentialFieldsAsked.contains(f))) {
+    } else if (c.fields == null) {
+      // Without the list nothing is known of what else the credential carries.
+      wrong = 'the core\'s engine did not say which fields it carries, so '
+          'none can be ruled out';
+    } else if (c.fields!.any((f) => !_credentialFieldsAsked.contains(f))) {
       // A rules block, a salt or a field nobody knows is terms this device
       // anchors without the person having seen them.
-      wrong = 'it carries a field that was not asked for: '
-          '${c.fields.where((f) => !_credentialFieldsAsked.contains(f)).join(', ')}';
+      final extra = c.fields!.where((f) => !_credentialFieldsAsked.contains(f));
+      wrong = 'it carries a field that was not asked for: ${extra.join(', ')}';
     } else if (saidSaid != c.said) {
       wrong = 'its identifier is ${c.said}, not the $saidSaid the core said';
     } else {
       // The attribute block holds its own digest, the recipient, the time of
       // issue, and the claims asked for.
       final held = c.attributes;
-      final issuedAt = DateTime.tryParse('${held['dt']}');
-      if (issuedAt == null ||
-          issuedAt.difference(DateTime.now()).abs() > _issuedWithin) {
-        throw NotTheCredentialAsked('its time of issue, ${held['dt']}, is not '
-            'now: a credential is dated when this device asked for it');
+      final dt = held['dt'];
+      final issuedAt = dt is String && _issuedAtForm.hasMatch(dt)
+          ? DateTime.tryParse(dt)
+          : null;
+      if (issuedAt == null) {
+        throw NotTheCredentialAsked('its time of issue, $dt, is not an '
+            'RFC 3339 time with an explicit offset, the form the core writes');
+      }
+      final apart = issuedAt.difference(DateTime.now()).abs();
+      if (apart > _issuedWithin) {
+        throw NotTheCredentialAsked('its time of issue, $dt, is '
+            '${apart.inMinutes} minutes from this device\'s clock, more than '
+            'the ${_issuedWithin.inMinutes} allowed: the core\'s clock and '
+            'this device\'s disagree, or it was not dated when asked for');
       }
       for (final name in claims.keys) {
         if (!held.containsKey(name) || !sameContent(held[name], claims[name])) {

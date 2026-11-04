@@ -175,7 +175,8 @@ class CheckedCredential {
         attributes = Map<String, dynamic>.from(
             (j['attributes'] as Map?) ?? const <String, dynamic>{}),
         hasEdges = j['edges'] != null,
-        fields = List<String>.from((j['fields'] as List?) ?? const <String>[]);
+        fields =
+            j['fields'] is List ? List<String>.from(j['fields'] as List) : null;
   final String said;
   final String issuer;
   final String schema;
@@ -188,8 +189,10 @@ class CheckedCredential {
   final bool hasEdges;
 
   /// Every top-level field the credential carries, whatever the engine reads
-  /// of it: a rules block, a salt or an unknown field is named here.
-  final List<String> fields;
+  /// of it: a rules block, a salt or an unknown field is named here. Null where
+  /// the answer does not say, as an older keymath's does not: nothing can then
+  /// be said of what the credential carries.
+  final List<String>? fields;
 }
 
 /// A presentation as the core's engine reads it, in its one serialisation.

@@ -242,6 +242,99 @@ void main() {
     expect(issued.acdcSaid, same['acdc_said']);
   });
 
+  /// What the core's engine says of a credential, with [change] applied: an
+  /// older keymath, or one that is lying.
+  KeyMath keyMathAnswering(
+          Map<String, dynamic> Function(Map<String, dynamic>) change) =>
+      _Answering(km, change);
+
+  Future<void> altered(Map<String, dynamic> credential) async {
+    core.client.alterTheAnswerTo['/api/credential/prepare'] = (a) => {
+          ...a,
+          'acdc_json_b64': credential['acdc_json_b64'],
+          'acdc_said': credential['acdc_said']
+        };
+  }
+
+  test(
+      'a time of issue is read only in the form the core writes: RFC 3339 with '
+      'an offset, never as this device\'s local time', () async {
+    final aid = await founded();
+    final real = await prepared();
+    final now = DateTime.now().toUtc();
+    String two(int n) => n.toString().padLeft(2, '0');
+    final day = '${now.year}-${two(now.month)}-${two(now.day)}';
+    final clock = '${two(now.hour)}:${two(now.minute)}:${two(now.second)}';
+    final compact = '${now.year}${two(now.month)}${two(now.day)}'
+        'T${two(now.hour)}${two(now.minute)}${two(now.second)}Z';
+    final refused = <String, String>{
+      'no offset, so local time': '${day}T$clock',
+      'a space for the T': '$day $clock' 'Z',
+      'compact digits': compact,
+      'an expanded year': '+${now.year}-${two(now.month)}-${two(now.day)}'
+          'T${clock}Z',
+      'nanoseconds': '${day}T$clock.123456789Z',
+    };
+    for (final entry in refused.entries) {
+      await altered(reidentified(real,
+          (sad) => (sad['a'] as Map<String, dynamic>)['dt'] = entry.value));
+      await expectLater(
+          service().issueCredential(
+              claims: {'name': 'Ada'}, schemaSaid: schema, holderAid: holder),
+          throwsA(isA<NotTheCredentialAsked>()
+              .having((e) => e.toString(), 'the reason', contains('RFC 3339'))),
+          reason: entry.key);
+      await nothingAnchored(aid);
+    }
+    // The forms the core writes are taken: an offset, and Z.
+    for (final ok in ['${day}T$clock.000000+00:00', '${day}T${clock}Z']) {
+      await altered(reidentified(
+          real, (sad) => (sad['a'] as Map<String, dynamic>)['dt'] = ok));
+      expect(
+          (await service().issueCredential(
+                  claims: {'name': 'Ada'},
+                  schemaSaid: schema,
+                  holderAid: holder))
+              .acdcSaid,
+          isNotEmpty,
+          reason: ok);
+    }
+  });
+
+  test(
+      'a time of issue far from this device\'s clock is said to be a '
+      'disagreement of clocks, not a wrong credential', () async {
+    final aid = await founded();
+    await altered(reidentified(
+        await prepared(),
+        (sad) => (sad['a'] as Map<String, dynamic>)['dt'] = DateTime.now()
+            .toUtc()
+            .add(const Duration(hours: 3))
+            .toIso8601String()));
+    await expectLater(
+        service().issueCredential(
+            claims: {'name': 'Ada'}, schemaSaid: schema, holderAid: holder),
+        throwsA(isA<NotTheCredentialAsked>()
+            .having((e) => e.toString(), 'the reason', contains('disagree'))));
+    await nothingAnchored(aid);
+  });
+
+  test(
+      'an answer that does not say which fields a credential carries is not '
+      'taken to mean it carries no more', () async {
+    final aid = await founded();
+    final withoutFields = LocalCoreKeriService(
+        baseUrl: core.base,
+        client: core.client,
+        keyMath: keyMathAnswering((a) => {...a}..remove('fields')));
+    await expectLater(
+        withoutFields.issueCredential(
+            claims: {'name': 'Ada'}, schemaSaid: schema, holderAid: holder),
+        throwsA(isA<NotTheCredentialAsked>()
+            .having((e) => e.toString(), 'the reason', contains('fields'))));
+    await nothingAnchored(aid);
+  });
+
   test(
       'the seal signed is the credential this device read, never the core\'s '
       'choice: a delegation approval is not signed as a credential', () async {
@@ -337,4 +430,18 @@ void main() {
                 v == 'POST /api/events/signature'),
         isEmpty);
   });
+}
+
+/// A keymath whose answers to check_credential are changed by [change].
+class _Answering implements KeyMath {
+  _Answering(this._real, this._change);
+  final KeyMath _real;
+  final Map<String, dynamic> Function(Map<String, dynamic>) _change;
+
+  @override
+  Future<Map<String, dynamic>> run(
+      String op, Map<String, dynamic> request) async {
+    final answer = await _real.run(op, request);
+    return op == 'check_credential' ? _change(answer) : answer;
+  }
 }
