@@ -112,9 +112,17 @@ func (addSignerAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[
 	if serr != nil {
 		return nil, fmt.Errorf("load relationship seed: %w", serr)
 	}
+	// The name the roster will show for this owner is signed here too, so that
+	// a name read back later is one this person put their key to rather than
+	// one typed into the redeem request by whoever sent it.
+	signedName := ""
+	if profile, perr := s.DataStore.GetProfile(); perr == nil {
+		signedName = disclosureValue(profile, discloseName)
+	}
 	vouchPayload, _ := json.Marshal(map[string]string{
 		"v": "VOUCH1", "action": "sign_org",
 		"signer_aid": rel.PairwiseAID, "org_aid": p.OrgAID,
+		"name": signedName,
 	})
 	vouchSig, sigErr := login.SignAsk(vouchPayload, seed)
 	if sigErr != nil {
