@@ -765,6 +765,14 @@ var sessionForbidden = map[string]string{
 	"POST /api/signing-requests/{id}/fulfil": "these exist precisely because only the key-holding device can answer them",
 	"POST /api/signing-requests/{id}/refuse": "refusing is the key-holding device's answer, and a refused withdrawal is never asked for again",
 
+	// --- what the key log says ---
+	//
+	// Nothing that writes what the authorisation decision reads may be reached
+	// by a session (ADR-050), and this stores any event it is given, signed or
+	// not. A key log row is what a credential, a presentation and every other
+	// check is read against.
+	"POST /api/store/event": controllerOwnerOnly["POST /api/store/event"],
+
 	// --- destruction ---
 	"POST /api/reset": "resetting destroys the identity, and a session should never be enough for that",
 
