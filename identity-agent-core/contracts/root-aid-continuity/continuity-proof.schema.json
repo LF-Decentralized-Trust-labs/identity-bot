@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://identity-agent.dev/contracts/root-aid-continuity/v3",
   "title": "Root AID Continuity Proof",
-  "description": "Break-glass root-AID rotation continuity artifact. The old root's rot event seals the new root's inception SAID in field a, signed by the key it reveals; the new root's first ixn seals that rot's SAID. Each event is carried as the exact bytes that were signed (standard base64 of the event, as KERI serialises it) with every indexed signature on it, so a verifier holding only this document recomputes each SAID from the bytes and checks each signature: the new root's two events as a signed log of their own, the rot's signatures against the key the rot reveals. That the revealed key opens the old root's pre-rotation commitment is checked against the old root's key log, held by witnesses, watchers and contacts. The rot follows the last establishment event or an interaction the owner kept (prior_kel_tail_said) and supersedes the interactions after it.",
+  "description": "Break-glass root-AID rotation continuity artifact. The old root's rot event seals the new root's inception SAID in field a, signed by the key it reveals; the new root's first ixn seals that rot's SAID. Each event is carried as the exact bytes that were signed (standard base64 of the event, as KERI serialises it) with every indexed signature on it, so a verifier holding only this document recomputes each SAID from the bytes and checks each signature: the new root's two events as a signed log of their own, the old root's log, carried in old_root_log up to the event the rot follows and judged with the rot from the old root's inception, so the rot is shown to be signed by the key the old root committed to, at its threshold, and to follow prior_kel_tail_said. The rot follows the last establishment event or an interaction the owner kept (prior_kel_tail_said) and supersedes the interactions after it.",
   "type": "object",
   "required": [
     "v",
@@ -11,6 +11,7 @@
     "new_inception_said",
     "new_inception_raw_b64",
     "new_inception_signatures",
+    "old_root_log",
     "authorization_event_raw_b64",
     "authorization_signatures",
     "authorization_event_said",
@@ -48,6 +49,20 @@
         "type": "string"
       },
       "description": "Every indexed CESR signature on the new root's inception event"
+    },
+    "old_root_log": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The old root's key log from its inception up to the event the authorization rot follows (prior_kel_tail_said, the last item), each event as the exact bytes signed with every indexed signature on it. With the rot it is the old root's log up to and including the rotation, which a verifier judges from the inception.",
+      "items": {
+        "type": "object",
+        "required": ["raw_b64", "sigs"],
+        "properties": {
+          "raw_b64": { "type": "string", "description": "The event, the exact bytes signed, in standard base64" },
+          "sigs": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "Every indexed CESR signature on the event" }
+        },
+        "additionalProperties": false
+      }
     },
     "authorization_event_raw_b64": {
       "type": "string",

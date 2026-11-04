@@ -58,8 +58,9 @@ type RootAIDRotationRequest struct {
 // ContinuityProof documents the old-root-signed delegation anchor authorizing the
 // new root inception. It carries each event as the bytes that were signed and
 // every signature on it, so a verifier holding only the proof recomputes each
-// digest and checks each signature (VerifyContinuityProof). The trust gate is
-// the signature on the authorization event verifiable against the old KEL.
+// digest and checks each signature (VerifyContinuityProof). It also carries the
+// old root's log up to the rotation, so the trust gate, the rotation signed by
+// the key the old root committed to, is judged from the proof alone.
 type ContinuityProof struct {
 	V                string `json:"v"`
 	OldRootAID       string `json:"old_root_aid"`
@@ -80,6 +81,12 @@ type ContinuityProof struct {
 	BackAnchorEventRawB64 string   `json:"back_anchor_event_raw_b64"`
 	BackAnchorSignatures  []string `json:"back_anchor_signatures"`
 	BackAnchorEventSAID   string   `json:"back_anchor_event_said"`
+	// OldRootLog is the old root's log from its inception up to the event the
+	// authorization rotation follows, each event as the bytes signed with its
+	// signatures. With the authorization event it is the old root's log up to
+	// and including the rotation, which is what shows the rotation was signed
+	// by the key the old root committed to, at its threshold.
+	OldRootLog []drivers.SignedEventBytes `json:"old_root_log"`
 	// PriorKelTailSAID is the event of the old root's log the authorization
 	// rotation follows: the last establishment event or an interaction the
 	// owner kept. Any interaction after it was superseded.
@@ -263,6 +270,7 @@ func (s *RootAIDRotationService) RotateRootAID(
 		BackAnchorEventRawB64:    req.NewRootInteraction.RawB64,
 		BackAnchorSignatures:     checked.ixnSigs,
 		BackAnchorEventSAID:      checked.ixn.SAID,
+		OldRootLog:               checked.oldLog,
 		PriorKelTailSAID:         checked.after,
 		RotatedAt:                rotatedAt,
 		RecoverySessionID:        req.RecoverySessionID,
@@ -451,6 +459,8 @@ type checkedRootRotation struct {
 	// The indexed signatures each event is committed and proven with.
 	icpSigs, rotSigs, ixnSigs []string
 	rotKED                    map[string]interface{}
+	// oldLog is the old root's log up to the event the rotation follows, as kept.
+	oldLog []drivers.SignedEventBytes
 	// moved is whether the identity record is already the new root, and
 	// rotatedAt the time an earlier run moved it.
 	moved     bool
@@ -581,7 +591,8 @@ func checkSignedRootRotation(req RootAIDRotationRequest, st RootRotationStore) (
 		}
 		oldLog = append(oldLog, drivers.SignedEventBytes{RawB64: rec.RawBytesB64, Sigs: sigs})
 	}
-	if err := verifyLog(c.oldRootAID, append(oldLog, req.OldRootRotation)); err != nil {
+	c.oldLog = oldLog
+	if err := verifyLog(c.oldRootAID, append(append([]drivers.SignedEventBytes(nil), oldLog...), req.OldRootRotation)); err != nil {
 		return nil, fmt.Errorf("the old root's log with the rotation does not verify: %w", err)
 	}
 	newLog := []drivers.SignedEventBytes{req.NewRootFounding, req.NewRootInteraction}
@@ -679,6 +690,7 @@ type ContinuityProofInput struct {
 	BackAnchorEventRawB64    string
 	BackAnchorSignatures     []string
 	BackAnchorEventSAID      string
+	OldRootLog               []drivers.SignedEventBytes
 	PriorKelTailSAID         string
 	RotatedAt                string
 	RecoverySessionID        string
@@ -747,6 +759,7 @@ func BuildContinuityProof(in ContinuityProofInput) ContinuityProof {
 		BackAnchorEventRawB64:    in.BackAnchorEventRawB64,
 		BackAnchorSignatures:     append([]string(nil), in.BackAnchorSignatures...),
 		BackAnchorEventSAID:      in.BackAnchorEventSAID,
+		OldRootLog:               append([]drivers.SignedEventBytes(nil), in.OldRootLog...),
 		PriorKelTailSAID:         in.PriorKelTailSAID,
 		RotatedAt:                in.RotatedAt,
 		RecoverySessionID:        in.RecoverySessionID,
@@ -756,11 +769,12 @@ func BuildContinuityProof(in ContinuityProofInput) ContinuityProof {
 }
 
 // VerifyContinuityProof checks a proof from what it carries alone: each
-// event's digest is recomputed from its bytes, the new root's two events are
-// judged as a signed log of their own, and the authorization rotation's
-// signatures are checked against the key it reveals. That the key opens the
-// old root's pre-rotation commitment is checked against the old root's log,
-// which the proof does not carry.
+// event's digest is recomputed from its bytes; the new root's two events are
+// judged as a signed log of their own; and the old root's log up to and
+// including the authorization rotation is judged from the old root's inception,
+// so the rotation is shown to be signed by the key the old root committed to,
+// at the threshold the log set, and to follow the event the proof names as the
+// tail it follows (PriorKelTailSAID).
 func VerifyContinuityProof(p ContinuityProof) error {
 	read := func(label, rawB64, ilk, said string) ([]byte, *keri.Event, error) {
 		raw, err := base64.StdEncoding.Strict().DecodeString(rawB64)
@@ -823,22 +837,27 @@ func VerifyContinuityProof(p ContinuityProof) error {
 	if _, err := keri.ValidateSignedKEL([][]byte{icpMsg, ixnMsg}); err != nil {
 		return fmt.Errorf("the new root's events do not verify: %w", err)
 	}
-	valid := 0
-	for _, q := range p.AuthorizationSignatures {
-		sig, err := keri.ParseIndexedSignature(q)
-		if err != nil {
-			return fmt.Errorf("authorization event: %w", err)
-		}
-		if sig.At.Index >= len(rot.Keys) {
-			return fmt.Errorf("authorization event: a signature is of key %d of %d", sig.At.Index, len(rot.Keys))
-		}
-		if err := keri.VerifySignature(rot.Keys[sig.At.Index], rotRaw, sig.Raw); err != nil {
-			return fmt.Errorf("authorization event: %w", err)
-		}
-		valid++
+
+	// The old root's log, from its inception, with the rotation as its last
+	// event: the rotation is judged by the log's own rules, as any verifier
+	// judges a rotation, not by the key the rotation names for itself.
+	if len(p.OldRootLog) == 0 {
+		return fmt.Errorf("the proof carries none of the old root's log, so the rotation cannot be shown to be the old root's")
 	}
-	if valid == 0 {
-		return fmt.Errorf("the authorization event carries no signature")
+	if p.PriorKelTailSAID == "" || rot.PriorSAID != p.PriorKelTailSAID || int(rot.SN) != len(p.OldRootLog) {
+		return fmt.Errorf("the authorization event follows %s at sequence number %x, not the tail the proof names (%s) of a log of %d events",
+			rot.PriorSAID, rot.SN, p.PriorKelTailSAID, len(p.OldRootLog))
+	}
+	tailRaw, err := base64.StdEncoding.Strict().DecodeString(p.OldRootLog[len(p.OldRootLog)-1].RawB64)
+	if err != nil {
+		return fmt.Errorf("the old root's log: the last event is not standard base64")
+	}
+	if tail, err := keri.ComputeSAID(tailRaw); err != nil || tail != p.PriorKelTailSAID {
+		return fmt.Errorf("the old root's log ends at %s, not at the tail the proof names (%s)", tail, p.PriorKelTailSAID)
+	}
+	authorization := drivers.SignedEventBytes{RawB64: p.AuthorizationEventRawB64, Sigs: p.AuthorizationSignatures}
+	if err := verifyLog(p.OldRootAID, append(append([]drivers.SignedEventBytes(nil), p.OldRootLog...), authorization)); err != nil {
+		return fmt.Errorf("the old root's log with the authorization event does not verify: %w", err)
 	}
 	return nil
 }
