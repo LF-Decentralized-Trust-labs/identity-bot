@@ -461,7 +461,10 @@ func TestNoHandlerUsesLoopbackAsTheOwnerTest(t *testing.T) {
 // entry passed. Walking the router is the only version of this test that can
 // fail when the map is wrong.
 func TestEveryOpenRouteIsMountedWhereItSaysItIs(t *testing.T) {
-	s := newAuthTestServer(t)
+	// With the watcher and witness services present: their peer-facing routes
+	// are only mounted then, and a router without them hides exactly the
+	// entries this test exists to check.
+	s := watcherAgent(t, "EAID", 1, "Edigest")
 	// mountAssetRoutes returns early on a nil handler, so a bare server does not
 	// mount the very routes this test exists to check. The engine is nil because
 	// nothing is called — the router is walked, not served.

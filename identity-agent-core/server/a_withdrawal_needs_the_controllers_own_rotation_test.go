@@ -133,21 +133,37 @@ func (p *peerAgent) stillWitnessing(t *testing.T, aid string) bool {
 	return m != nil && m.WitnessingFor
 }
 
-func TestAWitnessStandsDownOnlyOnTheControllersOwnSignedRotation(t *testing.T) {
+// witnessedController is a witness that has taken a controller's inception.
+func witnessedController(t *testing.T) (*peerAgent, *rotatingController) {
+	t.Helper()
 	bob := startPeer(t, "bob")
 	c := newRotatingController(t, "subject", bob.witnessKey)
 	bob.willWitnessFor(t, c.aid)
 	if err := bob.takes(t, c.aid, c.icpRaw, c.icpSig); err != nil {
 		t.Fatalf("bob would not witness the inception: %v", err)
 	}
+	return bob, c
+}
 
-	// A rotation anyone could write, never signed and never in the log.
-	crafted := c.craftedRotation(t, bob.witnessKey)
+// Each refusal is its own test, so that each can be shown to fail against the
+// old check separately rather than only as part of one long flow.
+
+func TestAnUnsignedRotationNamingTheWitnessDoesNotMakeItStandDown(t *testing.T) {
+	bob, c := witnessedController(t)
+	crafted := c.craftedRotation(t, bob.witnessKey) // anyone could write this
 	if code := bob.confirm(t, c.aid, crafted); code == http.StatusOK {
 		t.Fatal("an unsigned rotation naming the witness made it stand down")
 	}
-	// Signed by somebody else: the witness will not take it into the log, so it
-	// is not there to be pointed at.
+	if !bob.stillWitnessing(t, c.aid) {
+		t.Fatal("the witness stopped on an unsigned rotation")
+	}
+}
+
+func TestARotationSignedBySomebodyElseDoesNotMakeTheWitnessStandDown(t *testing.T) {
+	bob, c := witnessedController(t)
+	crafted := c.craftedRotation(t, bob.witnessKey)
+	// The witness will not take it into the log, so it is not there to be
+	// pointed at.
 	stranger, _ := keri.GenerateSigner(true)
 	if err := bob.takes(t, c.aid, crafted, sign(t, stranger, crafted)); err == nil {
 		t.Fatal("the witness took a rotation signed by a stranger")
@@ -155,9 +171,15 @@ func TestAWitnessStandsDownOnlyOnTheControllersOwnSignedRotation(t *testing.T) {
 	if code := bob.confirm(t, c.aid, crafted); code == http.StatusOK {
 		t.Fatal("a rotation signed by somebody else made the witness stand down")
 	}
+	if !bob.stillWitnessing(t, c.aid) {
+		t.Fatal("the witness stopped on a stranger's rotation")
+	}
+}
 
-	// A genuine rotation of another identity that bob also witnesses for. It is
-	// real, signed and in a log bob holds — but it is not this controller's.
+// A genuine rotation of another identity that bob also witnesses for. It is
+// real, signed and in a log bob holds — but it is not this controller's.
+func TestAnotherIdentitysRotationDoesNotMakeTheWitnessStandDownForThisOne(t *testing.T) {
+	bob, c := witnessedController(t)
 	other := newRotatingController(t, "other", bob.witnessKey)
 	bob.willWitnessFor(t, other.aid)
 	if err := bob.takes(t, other.aid, other.icpRaw, other.icpSig); err != nil {
@@ -173,8 +195,16 @@ func TestAWitnessStandsDownOnlyOnTheControllersOwnSignedRotation(t *testing.T) {
 	if !bob.stillWitnessing(t, c.aid) {
 		t.Fatal("the witness stopped for a controller that never rotated")
 	}
+}
 
-	// The real thing: signed by the key the inception committed to, in the log.
+// The real thing: signed by the key the inception committed to, in the log.
+func TestTheControllersOwnSignedRotationMakesTheWitnessStandDown(t *testing.T) {
+	bob, c := witnessedController(t)
+	other := newRotatingController(t, "other", bob.witnessKey)
+	bob.willWitnessFor(t, other.aid)
+	if err := bob.takes(t, other.aid, other.icpRaw, other.icpSig); err != nil {
+		t.Fatal(err)
+	}
 	rot, sig := c.rotateCutting(t, bob.witnessKey)
 	if err := bob.takes(t, c.aid, rot, sig); err != nil {
 		t.Fatalf("bob would not take the controller's real rotation: %v", err)
@@ -195,6 +225,13 @@ func TestAWitnessStandsDownOnlyOnTheControllersOwnSignedRotation(t *testing.T) {
 // witness asks to stop, the controller's agent rotates and tells it, and the
 // witness checks the rotation against the log it holds.
 func TestWithdrawalCompletesBetweenTwoAgentsOverTheirRoutes(t *testing.T) {
+	withdrawalBetweenTwoAgents(t, func(p *peerAgent) string { return p.base })
+}
+
+// withdrawalBetweenTwoAgents runs the exchange with each agent reached at the
+// address reach gives. Handed the bare witness routes it proves the protocol;
+// handed the full router it proves a peer is let in to them (T-594).
+func withdrawalBetweenTwoAgents(t *testing.T, reach func(*peerAgent) string) {
 	bob := startPeer(t, "bob")     // the witness
 	carol := startPeer(t, "carol") // the controller's agent
 	bob.svc.OurAID = func() string { return "EBob" }
@@ -206,11 +243,11 @@ func TestWithdrawalCompletesBetweenTwoAgentsOverTheirRoutes(t *testing.T) {
 	}
 	// Each knows where the other is.
 	if err := bob.svc.Contacts.SaveContact(store.ContactRecord{AID: c.aid, Status: "accepted",
-		OobiURL: carol.base + "/public/oobi/" + c.aid}); err != nil {
+		OobiURL: reach(carol) + "/public/oobi/" + c.aid}); err != nil {
 		t.Fatal(err)
 	}
 	if err := carol.svc.Contacts.SaveContact(store.ContactRecord{AID: "EBob", Status: "accepted",
-		OobiURL: bob.base + "/public/oobi/EBob"}); err != nil {
+		OobiURL: reach(bob) + "/public/oobi/EBob"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := carol.svc.Store.SaveContactMeta(witness.ContactMeta{ContactAID: "EBob"}); err != nil {

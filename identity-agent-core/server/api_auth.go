@@ -218,9 +218,29 @@ var publicRoutes = map[string]string{
 	// signature, the key agreement and the body hash against the sender's known
 	// DID. Expiry and replay are checked after that. A stranger who is not
 	// already a peer gets no further than the first of those.
-	"POST /didcomm":                                         "an agent we know posts an encrypted envelope, authenticated by what it carries",
-	"POST /api/witness/request":                             "witnessing protocol — a controller asks us to witness",
-	"POST /api/witness/accept":                              "witnessing protocol — a witness answers our request, signed by its key",
+	"POST /didcomm":             "an agent we know posts an encrypted envelope, authenticated by what it carries",
+	"POST /api/witness/request": "witnessing protocol — a controller asks us to witness",
+	"POST /api/witness/accept":  "witnessing protocol — a witness answers our request, signed by its key",
+	// The other half of the witnessing protocol. Enrolment above is public and
+	// standing down was not, so a peer relationship could be created remotely
+	// and never ended remotely: RequestWithdrawal got 403 from the peer it asked.
+	//
+	// Safe to reach because the request carries its own proof. A request to stop
+	// is only acknowledged, and changes nothing. A confirmation changes the
+	// witness's state only when it names a rotation that is for that
+	// controller, signed by the keys in force, and already in the key log the
+	// witness holds (T-595) — an unsigned or foreign blob is refused.
+	"POST /api/witness/withdraw":         "witnessing protocol — a witness tells the controller it wishes to stop",
+	"POST /api/witness/withdraw/confirm": "witnessing protocol — a controller sends its own signed rotation, which the witness checks against its log",
+	// Mounted on the root router under /public/ and never declared, so every
+	// peer cross-check got 403, which the caller records as the peer being
+	// "unavailable" — the whole peer layer degraded silently.
+	//
+	// Safe to reach because they answer only from the watcher's own first-seen
+	// records, are rate limited per caller, and honour an identity's opt-out.
+	// The digest of a public key log is public and self-verifying.
+	"GET /public/kel-digest":                                "a peer watcher asks what digest we first saw for an identity at a sequence number",
+	"POST /public/kel-check":                                "a peer watcher compares its digest with ours (L3 cross-check)",
 	"POST /api/backup/receive":                              "a peer pushes an opaque, already-encrypted archive",
 	"GET /api/backup/receive/{identityAID}":                 "the owning agent lists its own archives during recovery",
 	"GET /api/backup/receive/{identityAID}/download/{name}": "the owning agent retrieves an opaque archive during recovery",
