@@ -171,14 +171,21 @@ func (s *CoreServer) handleRecordCredential(w http.ResponseWriter, r *http.Reque
 			"no interaction with that digest in this identity's key log seals it")
 		return
 	}
-	if have, _ := s.DataStore.GetCredential(cred.SAID); have != nil {
+	// Finding whether it is kept and keeping it are one step, so two records of
+	// one credential send one delivery and one backup event.
+	s.recordingCredential.Lock()
+	have, _ := s.DataStore.GetCredential(cred.SAID)
+	if have != nil {
+		s.recordingCredential.Unlock()
+		// Already kept: what it is now, which is not "issued" once revoked.
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"acdc_said": cred.SAID, "status": "issued"})
+		json.NewEncoder(w).Encode(map[string]any{"acdc_said": cred.SAID, "status": have.Status})
 		return
 	}
 	record := s.issuedCredentialRecord(cred.SAID, cred.Issuer, cred.Recipient, cred.SchemaSAID,
 		req.AcdcJsonB64, req.IxnSaid, "")
 	s.keepIssuedCredential(record)
+	s.recordingCredential.Unlock()
 	log.Printf("[identity-agent-core] CREDENTIAL: Recorded %s for holder %s (anchored by %s)", cred.SAID, cred.Recipient, req.IxnSaid)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)

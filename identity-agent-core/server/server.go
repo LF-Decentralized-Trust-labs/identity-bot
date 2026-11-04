@@ -85,7 +85,11 @@ type CoreServer struct {
 	relayFailure *relayFailure
 	// relayRecordMu orders every read-modify-write of a relay enrolment
 	// record, which the relay manager and the owner's routes both change.
-	relayRecordMu   sync.Mutex
+	relayRecordMu sync.Mutex
+	// recordingCredential makes keeping an issued credential one step with
+	// finding whether it is kept (a_credential_is_issued_by_the_device_that_holds_the_key.go).
+	recordingCredential sync.Mutex
+
 	EndpointService *endpoint.EndpointService
 	// Vault is the credential vault: what this Identity Agent keeps for
 	// services, sealed under a key derived from the identity's root seed.
