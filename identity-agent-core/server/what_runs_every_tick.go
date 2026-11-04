@@ -22,6 +22,9 @@ func (s *CoreServer) keepAnchoring(stop <-chan struct{}) {
 			return
 		case <-t.C:
 			s.tick()
+			if s.record.afterTick != nil {
+				s.record.afterTick()
+			}
 		}
 	}
 }

@@ -170,16 +170,24 @@ func TestTheRecordIsAnchoredOnItsInterval(t *testing.T) {
 	s := recordWorld(t)
 	anchorAtLeastEvery(t, 20*time.Millisecond)
 	writeRows(t, s, 1)
-	stop := make(chan struct{})
-	go s.keepAnchoring(stop)
-	defer close(stop)
-	for i := 0; i < 100; i++ {
-		if anchors, _ := s.DataStore.GetRecordAnchors(); len(anchors) == 1 {
-			return
+	ticked := make(chan struct{}, 1)
+	s.record.afterTick = func() {
+		select {
+		case ticked <- struct{}{}:
+		default:
 		}
-		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatal("the record was not anchored on its interval")
+	stop := make(chan struct{})
+	finished := make(chan struct{})
+	go func() { s.keepAnchoring(stop); close(finished) }()
+	// The first tick has anchored the record by the time it is reported: no
+	// time is waited for, only the tick.
+	<-ticked
+	if anchors, _ := s.DataStore.GetRecordAnchors(); len(anchors) != 1 {
+		t.Fatalf("the record was not anchored on its interval: %d anchors after the first tick", len(anchors))
+	}
+	close(stop)
+	<-finished
 }
 
 // Where the identity's key is not held here, nothing is written into its key

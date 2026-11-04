@@ -597,11 +597,20 @@ func (g *Registry) remove(s *Session) {
 	}
 }
 
-// Get returns the identifier's live session.
+// Get returns the identifier's live session. A session that has ended is not
+// live even in the moment before its removal goroutine has run, so a request
+// is never routed to one.
 func (g *Registry) Get(aid string) (*Session, bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	s, ok := g.sessions[aid]
+	if ok {
+		select {
+		case <-s.closed:
+			return nil, false
+		default:
+		}
+	}
 	return s, ok
 }
 

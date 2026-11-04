@@ -652,13 +652,21 @@ func TestALeaseThatCannotBeRenewedEnds(t *testing.T) {
 	r := newRelay(t, &ServiceConfig{Lease: 1500 * time.Millisecond, RenewBefore: 1000 * time.Millisecond})
 	id := newIdentity(t)
 	a := r.connect(id, http.HandlerFunc(echo))
+	// The relay's end of the session: it is the relay's registry that must
+	// stop routing to it, and the agent's end learns of the close only after.
+	live, ok := r.registry.Get(id.aid)
+	if !ok {
+		t.Fatal("the relay does not route to a session it just admitted")
+	}
 	id.mu.Lock()
 	id.current, _ = keri.GenerateSigner(true) // no longer the key the log names
 	id.mu.Unlock()
-	select {
-	case <-a.Done():
-	case <-time.After(4 * time.Second):
-		t.Fatal("a session that could not renew outlived its lease")
+	for _, done := range []<-chan struct{}{live.Done(), a.Done()} {
+		select {
+		case <-done:
+		case <-time.After(4 * time.Second):
+			t.Fatal("a session that could not renew outlived its lease")
+		}
 	}
 	if _, ok := r.registry.Get(id.aid); ok {
 		t.Fatal("the relay still routes to a session whose lease ended")
