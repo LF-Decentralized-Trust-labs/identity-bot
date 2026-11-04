@@ -168,24 +168,32 @@ func messagingAnchorsAmong(seals []json.RawMessage) []map[string]interface{} {
 // replacement takes the earlier keyset's place, and the earlier one is kept to
 // open messages already sent to it.
 func (s *CoreServer) refuseAnUnheldKeySet(w http.ResponseWriter, raw []byte, aid string) bool {
+	if title, detail := s.unheldKeySetRefusal(raw, aid); title != "" {
+		writeError(w, http.StatusBadRequest, title, detail)
+		return true
+	}
+	return false
+}
+
+// unheldKeySetRefusal is refuseAnUnheldKeySet's judgement: the refusal's title
+// and detail, empty when raw anchors no keyset this Identity Agent lacks.
+func (s *CoreServer) unheldKeySetRefusal(raw []byte, aid string) (title, detail string) {
 	anchors := messagingAnchorsIn(raw)
 	if len(anchors) > 1 {
-		writeError(w, http.StatusBadRequest, "one_messaging_keyset_per_event",
-			"an event anchors at most one messaging keyset: the one the identity is reached on after it")
-		return true
+		return "one_messaging_keyset_per_event",
+			"an event anchors at most one messaging keyset: the one the identity is reached on after it"
 	}
 	for _, anchor := range anchors {
 		heldHere, _ := s.keySetAnchorHeld(aid, anchor)
 		pending, _ := s.keySetAnchorHeld(pendingKeySetLabel(anchor), anchor)
 		replacing, _ := s.keySetAnchorHeld(pendingReplacementLabel(aid), anchor)
 		if !heldHere && !pending && !replacing {
-			writeError(w, http.StatusBadRequest, "messaging_keyset_not_held",
-				"the event anchors messaging keys this Identity Agent does not hold; hand it the messaging seed first "+
-					"(POST /api/keystore/messaging-seed)")
-			return true
+			return "messaging_keyset_not_held",
+				"the event anchors messaging keys this Identity Agent does not hold; hand it the messaging seed first " +
+					"(POST /api/keystore/messaging-seed)"
 		}
 	}
-	return false
+	return "", ""
 }
 
 // anchoredLast reports whether anchor is the messaging keyset aid's log

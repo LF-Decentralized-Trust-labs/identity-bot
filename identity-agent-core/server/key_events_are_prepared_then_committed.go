@@ -124,30 +124,17 @@ func (s *CoreServer) handlePrepareEvent(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
 		return
 	}
-	toad, err := witnessThresholdOf(req.Bt)
+	pr, err := req.engineRequest()
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid witness threshold", err.Error())
 		return
 	}
-	pr := keriengine.PrepareRequest{Ilk: req.T, Keys: req.K, Kt: req.Kt, Next: req.N, Nt: req.Nt,
-		Anchors: req.A, Witnesses: req.B, Cuts: req.Br, Adds: req.Ba, Toad: toad}
 
 	switch req.T {
 	case "icp":
-		if !s.mayFoundHere(w, req.OwnerAID) {
+		var ok bool
+		if pr, ok = s.foundingRequest(w, req, pr, false); !ok {
 			return
-		}
-		if req.AID != "" || req.After != nil {
-			writeError(w, http.StatusBadRequest, "A founding extends nothing", "aid and after are not given for a founding")
-			return
-		}
-		if req.OwnerAID != "" {
-			seal, err := keriengine.OwnerSeal(req.OwnerAID)
-			if err != nil {
-				writeError(w, http.StatusBadRequest, "Invalid owner", err.Error())
-				return
-			}
-			pr.Anchors = append([]json.RawMessage{seal}, req.A...)
 		}
 	case "rot", "ixn":
 		own, err := s.DataStore.GetIdentity()
@@ -190,12 +177,55 @@ func (s *CoreServer) handlePrepareEvent(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(prepareEventResponse{RawB64: base64.StdEncoding.EncodeToString(p.Raw), Hint: p.Hint})
 }
 
+// engineRequest is what the engine prepares req from.
+func (req prepareEventRequest) engineRequest() (keriengine.PrepareRequest, error) {
+	toad, err := witnessThresholdOf(req.Bt)
+	if err != nil {
+		return keriengine.PrepareRequest{}, err
+	}
+	return keriengine.PrepareRequest{Ilk: req.T, Keys: req.K, Kt: req.Kt, Next: req.N, Nt: req.Nt,
+		Anchors: req.A, Witnesses: req.B, Cuts: req.Br, Adds: req.Ba, Toad: toad}, nil
+}
+
+// foundingRequest is how a founding is prepared, whichever route asks for one:
+// the founding gate, the owner's seal ahead of the anchors the app asks for,
+// and the witnesses and threshold it names. pr is req as engineRequest read it.
+// A route that founds a new root beside an identity kept here, the break-glass
+// rotation, says replacing, and the gate then does not refuse for the identity
+// already here. A refusal is answered here; ok is false then.
+func (s *CoreServer) foundingRequest(w http.ResponseWriter, req prepareEventRequest, pr keriengine.PrepareRequest,
+	replacing bool) (keriengine.PrepareRequest, bool) {
+
+	if !s.mayFound(w, req.OwnerAID, replacing) {
+		return pr, false
+	}
+	if req.AID != "" || req.After != nil {
+		writeError(w, http.StatusBadRequest, "A founding extends nothing", "aid and after are not given for a founding")
+		return pr, false
+	}
+	if req.OwnerAID != "" {
+		seal, err := keriengine.OwnerSeal(req.OwnerAID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid owner", err.Error())
+			return pr, false
+		}
+		pr.Anchors = append([]json.RawMessage{seal}, req.A...)
+	}
+	return pr, true
+}
+
 // mayFoundHere is the founding gate the inception route applies.
 func (s *CoreServer) mayFoundHere(w http.ResponseWriter, ownerAID string) bool {
+	return s.mayFound(w, ownerAID, false)
+}
+
+// mayFound is mayFoundHere, or, for a new root that replaces the identity kept
+// here, the same gate without the refusal for that identity.
+func (s *CoreServer) mayFound(w http.ResponseWriter, ownerAID string, replacing bool) bool {
 	if s.refuseIfThisComputerMayNotFound(w) {
 		return false
 	}
-	if existing, _ := s.DataStore.GetIdentity(); existing != nil {
+	if existing, _ := s.DataStore.GetIdentity(); existing != nil && !replacing {
 		writeError(w, http.StatusConflict, "Identity already exists", "AID: "+existing.AID)
 		return false
 	}
