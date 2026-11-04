@@ -44,6 +44,8 @@ class _Split extends http.BaseClient {
           // The core echoes the Identity Agent it signed for: the one asked
           // for, or the one it was told this app is a front end for.
           'for': asked.containsKey('for') ? asked['for'] : 'EToldToTheCore',
+          // A core that signs for an origin echoes it, as it does the agent.
+          if (asked.containsKey('origin')) 'origin': asked['origin'],
         }),
         200,
       );
@@ -493,5 +495,47 @@ void main() {
         reason: 'the level must be inside the signature, not beside it');
     expect(w.toTheAgent.single.headers['X-IA-Auth-Level-Vouched-By'],
         '0BTheRootDeviceSaysSo');
+  });
+
+  test('the request is signed for the origin it is going to, and says so', () async {
+    final w = _Watched();
+    final c = ControllerSigningClient(
+        agentOrigin: _agent, localCoreOrigin: () => _localCore, inner: w.client);
+    await c.get(Uri.parse('$_agent/api/profile'));
+    // Written in its one spelling, the port included, so the agent compares the
+    // same text a signature was made over.
+    expect(w.askedToSign.single['origin'], 'https://agent.example.test:443');
+    expect(w.toTheAgent.single.headers['X-IA-Controller-Origin'],
+        'https://agent.example.test:443');
+  });
+
+  test('a core that signed the older form sends no origin header', () async {
+    final sent = <http.Request>[];
+    final c = ControllerSigningClient(
+      agentOrigin: _agent,
+      localCoreOrigin: () => _localCore,
+      inner: _Scripted((r) {
+        if (r.url.path == '/api/controller/sign') {
+          return ('{"controller_aid":"B","signature":"0B","timestamp":"t"}', 200);
+        }
+        sent.add(r);
+        return ('{}', 200);
+      }),
+    );
+    await c.get(Uri.parse('$_agent/api/profile'));
+    expect(sent.single.headers.containsKey('X-IA-Controller-Origin'), isFalse);
+  });
+
+  test('an agent address that cannot be written as an origin is refused, not sent '
+      'in the form that names none', () async {
+    final w = _Watched();
+    final c = ControllerSigningClient(
+        agentOrigin: 'ftp://agent.example.test',
+        localCoreOrigin: () => _localCore,
+        inner: w.client);
+    await expectLater(c.get(Uri.parse('ftp://agent.example.test/api/profile')),
+        throwsA(isA<ThisMachineCouldNotSign>()));
+    expect(w.askedToSign, isEmpty);
+    expect(w.toTheAgent, isEmpty);
   });
 }

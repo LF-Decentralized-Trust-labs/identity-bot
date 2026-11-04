@@ -591,6 +591,10 @@ type ControllerRequest struct {
 	// only so a record or credential made before requests named their
 	// Identity Agent still checks.
 	NamesIdentityAgent bool
+	// Origin is the origin (scheme://host:port) the machine meant to reach, in
+	// the third form. The first two name none, so a request in either could be
+	// relayed through any other address.
+	Origin string
 	// BodyDigest is the digest of the request's body.
 	BodyDigest string
 }
@@ -600,6 +604,8 @@ type ControllerRequest struct {
 func ReadControllerRequest(signed string) (ControllerRequest, error) {
 	lines := strings.Split(signed, "\n")
 	switch {
+	case len(lines) == 11 && lines[0] == "IA-CONTROLLER-REQ-V3":
+		return ControllerRequest{Controller: lines[1], IdentityAgent: lines[2], NamesIdentityAgent: true, Origin: lines[3], Method: lines[4], Path: lines[5], Stamp: lines[6], BodyDigest: lines[10]}, nil
 	case len(lines) == 10 && lines[0] == "IA-CONTROLLER-REQ-V2":
 		return ControllerRequest{Controller: lines[1], IdentityAgent: lines[2], NamesIdentityAgent: true, Method: lines[3], Path: lines[4], Stamp: lines[5], BodyDigest: lines[9]}, nil
 	case len(lines) == 9 && lines[0] == "IA-CONTROLLER-REQ-V1":

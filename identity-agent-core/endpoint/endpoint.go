@@ -168,6 +168,48 @@ func (es *EndpointService) Refresh() {
 	}
 }
 
+// OwnURLs is every address this agent knows it is reached at, not only the one
+// it publishes: an explicit override, where a trusted proxy said it is reached,
+// its relay, its tunnel, a configured public URL, the address it serves on the
+// local network when it is bound there, and loopback. A request signed for an
+// origin that is none of these was not meant for this agent.
+func (es *EndpointService) OwnURLs() []string {
+	es.mu.RLock()
+	override, observed := es.overrideURL, es.observedURL
+	tm, rm, port := es.tunnelManager, es.relayManager, es.localPort
+	current := es.currentURL
+	es.mu.RUnlock()
+
+	urls := []string{override, observed, current, os.Getenv("PUBLIC_URL")}
+	if rm != nil {
+		urls = append(urls, rm.URL())
+	}
+	if tm != nil {
+		urls = append(urls, tm.URL())
+	}
+	if host := DirectIngressHost(); host != "" && !IsLoopbackHost(host) {
+		if ip := detectLocalIP(); ip != "" {
+			urls = append(urls, fmt.Sprintf("http://%s:%d", ip, port))
+			// The port the operator named for it, which need not be the one this
+			// agent's own surface listens on.
+			if _, p, err := net.SplitHostPort(strings.TrimSpace(os.Getenv("AGENT_DIRECT_INGRESS_ADDR"))); err == nil && p != "" {
+				urls = append(urls, fmt.Sprintf("http://%s:%s", ip, p), fmt.Sprintf("http://%s:%s", host, p))
+			}
+		}
+	}
+	urls = append(urls,
+		fmt.Sprintf("http://localhost:%d", port),
+		fmt.Sprintf("http://127.0.0.1:%d", port),
+		fmt.Sprintf("http://[::1]:%d", port))
+	out := urls[:0]
+	for _, u := range urls {
+		if u = strings.TrimRight(u, "/"); u != "" {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
 func (es *EndpointService) resolve() (string, string) {
 	es.mu.RLock()
 	override := es.overrideURL
