@@ -9,6 +9,7 @@ import 'key_math.dart';
 import 'keri_service.dart';
 import 'owner_signing_client.dart';
 import 'signing_an_event.dart';
+import 'the_event_this_device_expects.dart';
 import 'the_stored_event_this_phrase_would_have_made.dart';
 import 'the_events_this_device_asked_for.dart';
 import 'the_key_is_not_held_by_the_core.dart';
@@ -210,16 +211,26 @@ class TheKeyInForce {
     while (lastEstablishment >= 0 && !_establishing.contains(log.events[lastEstablishment]['t'])) {
       lastEstablishment--;
     }
-    final expected = await theStoredEventThisPhraseWouldHaveMade(km, seed,
-        t: t,
-        aid: checked.aid,
-        sn: sn,
-        digest: digest,
-        stored: stored,
-        before: await parsed(at - 1),
-        lastEstablishment: await parsed(lastEstablishment),
-        generation: checked.keyAt[at],
-        ixnAnchors: ixnAnchors);
+    final ExpectedEvent expected;
+    try {
+      expected = await theStoredEventThisPhraseWouldHaveMade(km, seed,
+          t: t,
+          aid: checked.aid,
+          sn: sn,
+          digest: digest,
+          stored: stored,
+          before: await parsed(at - 1),
+          lastEstablishment: await parsed(lastEstablishment),
+          generation: checked.keyAt[at],
+          ixnAnchors: ixnAnchors);
+    } on AStoredEventIsNotTheOneExpected {
+      rethrow;
+    } on NotTheEventExpected catch (e) {
+      // Shown to the person with the bytes as stored, not just refused.
+      throw AStoredEventIsNotTheOneExpected(e.difference,
+          utf8.decode(base64Decode(raw), allowMalformed: true),
+          {'t': t, 'i': checked.aid, 's': sn.toRadixString(16), if (digest != null) 'd': digest});
+    }
     final signingSeed = KeyManager.signingSeed(seed, index: checked.keyAt[at]);
     try {
       await signAndRecordEvent(_client, _baseUrl,

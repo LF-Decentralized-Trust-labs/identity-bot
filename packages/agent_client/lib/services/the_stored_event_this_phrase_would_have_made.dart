@@ -22,8 +22,9 @@ import 'the_event_this_device_expects.dart';
 ///
 /// [ixnAnchors] are the seals an interaction must carry: what this device asked
 /// for, or, for an interaction the person approved after being shown it, what
-/// it stores. Left null, the interaction must be the anchor of a credential the
-/// core issued: one seal, `{"i": x, "s": "0", "d": x}`, and nothing else.
+/// it stores. Left null, the interaction is refused ([NotTheEventExpected]):
+/// one this device did not ask for, or asked for without saying what it anchors
+/// (a credential's), is shown to the person and signed only when they approve.
 ///
 /// [t], [aid], [sn] and [digest] are what this device recorded when it asked
 /// for the event (or, for one the person approved, what they were shown), never
@@ -66,18 +67,17 @@ Future<ExpectedEvent> theStoredEventThisPhraseWouldHaveMade(
           next: await next(),
           toad: lastEstablishment == null ? -1 : toadOf(lastEstablishment)));
     case 'ixn':
-      final a = stored['a'];
-      final seal = a is List && a.length == 1 && a.first is Map ? (a.first as Map)['i'] : null;
+      // An interaction is signed late only with the seals this device asked
+      // for or the person was shown. A seal of the form {i: x, s: "0", d: x}
+      // is a credential's, and it is also what a delegator's approval of a
+      // delegate looks like (keriengine approvalIn), so nothing about the
+      // stored event can say which it is.
+      if (ixnAnchors == null) {
+        throw NotTheEventExpected('this device did not ask for the seals this '
+            'interaction carries, and the person has not been shown them');
+      }
       return known(ExpectedEvent.interaction(
-          aid: aid,
-          sn: sn,
-          prior: before?.d ?? '',
-          anchors: ixnAnchors ??
-              (seal is String
-                  ? [
-                      {'i': seal, 's': '0', 'd': seal}
-                    ]
-                  : const [])));
+          aid: aid, sn: sn, prior: before?.d ?? '', anchors: ixnAnchors));
     default:
       throw NotTheEventExpected('it is a $t, which this device does '
           'not sign late');

@@ -189,12 +189,43 @@ void main() {
       ]),
     ], [1]);
     final asked = TheEventsThisDeviceAskedFor();
-    final request = await asked.asking(t: 'ixn', aid: aid, expectedSn: 1);
+    final request = await asked.asking(t: 'ixn', aid: aid, expectedSn: 1, asked: {
+      'anchors': [
+        {'i': said, 's': '0', 'd': said}
+      ]
+    });
     await asked.added(request, aid: aid, sequenceNumber: 1, digest: placed[1].$2);
 
     await expectLater(keysOf(core).finishStrandedEvents(seed),
         throwsA(isA<AStoredEventIsNotTheOneExpected>()));
     expect(await signedInTheCore(core, aid), [true, false]);
+  });
+
+  test('an interaction asked for without saying what it anchors is refused, with what was stored, and signed only when the person approves it',
+      () async {
+    // {i: x, s: "0", d: x} is a credential's seal and also a delegator's
+    // approval of the delegate x, so a core choosing x cannot be told apart.
+    final x = 'E${'X' * 43}';
+    final (core, aid, placed) = await storedBy([
+      await legacyFounding(),
+      interaction([
+        {'i': x, 's': '0', 'd': x}
+      ]),
+    ], [1]);
+    final asked = TheEventsThisDeviceAskedFor();
+    final request = await asked.asking(t: 'ixn', aid: aid, expectedSn: 1);
+    await asked.added(request, aid: aid, sequenceNumber: 1, digest: placed[1].$2);
+
+    await expectLater(
+        keysOf(core).finishStrandedEvents(seed),
+        throwsA(isA<AStoredEventIsNotTheOneExpected>()
+            .having((e) => e.stored, 'what was stored', contains(x))
+            .having((e) => e.difference, 'difference', contains('did not ask'))));
+    expect(await signedInTheCore(core, aid), [true, false]);
+
+    // Shown to the person, who approves exactly this event.
+    await keysOf(core).signApprovedEvent(seed, sequenceNumber: '1', digest: placed[1].$2);
+    expect(await signedInTheCore(core, aid), [true, true]);
   });
 
   test('bytes whose digest is not the one this device recorded are not signed',
@@ -251,7 +282,11 @@ void main() {
     final asked = TheEventsThisDeviceAskedFor();
     await asked.asking(t: 'icp', expectedSn: 0, asked: {'key': key(0), 'next': key(1)});
     await asked.asking(t: 'rot', aid: aid, expectedSn: 1, asked: {'key': key(1), 'next': key(2)});
-    final request = await asked.asking(t: 'ixn', aid: aid, expectedSn: 2);
+    final request = await asked.asking(t: 'ixn', aid: aid, expectedSn: 2, asked: {
+      'anchors': [
+        {'i': said, 's': '0', 'd': said}
+      ]
+    });
     await asked.added(request, aid: aid, sequenceNumber: 2, digest: placed[2].$2);
 
     final state = await keysOf(core).finishStrandedEvents(seed);

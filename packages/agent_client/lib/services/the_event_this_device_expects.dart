@@ -300,7 +300,7 @@ class ExpectedEvent {
           return 'its "k" holds a key that is not Ed25519, and no other kind may be revealed yet';
         }
       }
-      if (jsonEncode(f.value) != jsonEncode(fields[f.name])) {
+      if (!_sameValue(f.value, fields[f.name])) {
         return 'its "${f.name}" is ${jsonEncode(f.value)}, not ${jsonEncode(fields[f.name])}';
       }
     }
@@ -310,6 +310,17 @@ class ExpectedEvent {
     return null;
   }
 }
+
+/// Whether two values hold the same content, the keys of an object in any
+/// order (a list keeps its order): a seal read from a listing and the same seal
+/// in the stored bytes name their fields in different orders.
+bool _sameValue(Object? a, Object? b) => jsonEncode(_sorted(a)) == jsonEncode(_sorted(b));
+
+Object? _sorted(Object? v) => v is Map
+    ? {for (final k in (v.keys.map((k) => '$k').toList()..sort())) k: _sorted(v[k])}
+    : v is List
+        ? [for (final e in v) _sorted(e)]
+        : v;
 
 /// The places one owner holds in an event with several (ADR-061 section 6),
 /// in stage one; stage two's layout (`k[2i]`, `k[2i+1]`) comes with stage two.

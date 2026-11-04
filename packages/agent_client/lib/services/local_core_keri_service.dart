@@ -713,7 +713,11 @@ class LocalCoreKeriService extends KeriService {
       // THE LIMIT. That the identifier is the digest of the credential returned
       // is the core's computation and is not repeated here (this package does
       // not compute KERI digests), so a core could anchor a credential other
-      // than the one it shows. What it cannot do is anchor anything else.
+      // than the one it shows. Nor does this check that the seal is a
+      // credential's: {"i": x, "s": "0", "d": x} with x chosen by the core is
+      // also what a delegator's approval of a delegate looks like (keriengine
+      // approvalIn), so a core could present an approval of a delegation here
+      // as a credential. That is not checked, and is B14's to close.
       final acdcSaid = json['acdc_said'] as String? ?? '';
       final anchor = _eventIn(ixnRawBytesB64);
       if (anchor['t'] != 'ixn' ||
