@@ -34,7 +34,7 @@ func (s *Service) SubmitToWitness(ctx context.Context, witnessURL, signerAID str
 	if err != nil {
 		return nil, err
 	}
-	resp, err := s.PostEvent(ctx, witnessURL, body)
+	resp, err := s.PostEvent(s.ownersLocalAllowed(ctx, witnessURL), witnessURL, body)
 	if err != nil {
 		return nil, err
 	}

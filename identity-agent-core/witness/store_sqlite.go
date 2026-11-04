@@ -88,6 +88,11 @@ func (s *SQLiteStore) SaveContactMeta(m ContactMeta) error {
 	return err
 }
 
+func (s *SQLiteStore) DeleteContactMeta(aid string) error {
+	_, err := s.db.Exec(`DELETE FROM witness_contact_meta WHERE contact_aid = ?`, aid)
+	return err
+}
+
 func (s *SQLiteStore) ListContactMeta() ([]ContactMeta, error) {
 	rows, err := s.db.Query(`
 		SELECT contact_aid, backend_type, witness_status, offline_count, is_mutual, is_commercial,

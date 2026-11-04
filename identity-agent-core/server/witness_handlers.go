@@ -149,6 +149,7 @@ func (s *CoreServer) handleWitnessRequest(w http.ResponseWriter, r *http.Request
 		// CoversDelegates asks for the identities the requester delegates to
 		// be witnessed too.
 		CoversDelegates bool   `json:"covers_delegates"`
+		RequestID       string `json:"request_id"`
 		Stamp           string `json:"stamp"`
 		Signature       string `json:"signature"`
 	}
@@ -170,7 +171,7 @@ func (s *CoreServer) handleWitnessRequest(w http.ResponseWriter, r *http.Request
 	}
 	result := s.WitnessService.ProcessInboundRequest(ctx, witness.WitnessRequest{
 		RequesterAID: req.RequesterAID, RequesterOOBI: req.RequesterOOBI, BackendType: req.BackendType,
-		CoversDelegates: req.CoversDelegates, Stamp: req.Stamp, Signature: req.Signature,
+		CoversDelegates: req.CoversDelegates, RequestID: req.RequestID, Stamp: req.Stamp, Signature: req.Signature,
 	})
 	status := "declined"
 	if result.Accepted {

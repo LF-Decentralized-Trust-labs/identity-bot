@@ -66,6 +66,12 @@ const (
 const (
 	ContactSourceManual        = "manual"
 	ContactSourceTransactional = "transactional"
+	// ContactSourceInbound marks a contact a stranger's request created: what
+	// it recorded about itself, its address among it, is the stranger's.
+	ContactSourceInbound = "inbound"
+	// ContactSourceInboundConfirmed is such a contact once the owner has
+	// accepted it: accepting is the owner confirming the address it gave.
+	ContactSourceInboundConfirmed = "inbound_confirmed"
 )
 
 // AidKind distinguishes Root vs Pairwise witnessing pools. The two draw from

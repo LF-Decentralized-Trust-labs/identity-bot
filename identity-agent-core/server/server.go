@@ -4063,6 +4063,15 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 	case s.KeriDriver != nil && len(oobiData.KEL) > 0:
 		contactStatus = "unverified"
 	}
+	// The owner naming this contact by address is the owner agreeing to it, as
+	// accepting a request is: the gates that act only for an accepted contact
+	// (a witness request, a first message, the link-verifier lookup) hold for
+	// it. Only a checked key history is promoted. An address that served none
+	// ("unchecked") gives an identifier and key that are only what that host
+	// claims, and one that was offered and did not check out stays outside too.
+	if contactStatus == "verified" {
+		contactStatus = "accepted"
+	}
 
 	contactCategory := "general"
 	if req.Trusted {
@@ -4240,6 +4249,11 @@ func (s *CoreServer) handleAcceptContact(w http.ResponseWriter, r *http.Request)
 	log.Printf("[identity-agent-core] CONTACT-ACCEPT: Upgrading contact %s (%s) to accepted, category=%s", contact.Alias, aid, acceptReq.ContactCategory)
 
 	contact.Status = "accepted"
+	// Accepting is the owner confirming the address the stranger gave, so it
+	// is no longer held back as one a stranger left behind.
+	if contact.ContactSource == witness.ContactSourceInbound {
+		contact.ContactSource = witness.ContactSourceInboundConfirmed
+	}
 
 	// Register the peer from the history that was already verified.
 	//

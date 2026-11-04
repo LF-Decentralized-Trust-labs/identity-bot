@@ -331,7 +331,14 @@ func (s *Service) defaultPostEvent(ctx context.Context, witnessURL string, body 
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := s.HTTPClient.Do(req)
+	// A POST carries a body that must go where it was addressed and nowhere
+	// else, so no redirect is followed; an answer to a request is also held to
+	// the address it dials (see guardedClient).
+	// Every POST is held to the address it dials, with no proxy. A local
+	// address is allowed only where the caller said so (see
+	// ownersLocalAllowed); a name that resolves inward is refused at the dial.
+	local, _ := ctx.Value(guardKey{}).(bool)
+	resp, err := guardedClient(s.HTTPClient.Timeout, local).Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -735,7 +742,7 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 					"aid": signerAID, "event_b64": e.RawBytesB64, "cesr_signature": e.CesrSignature,
 				})
 				said := eventSAID(ev)
-				resp, err := s.PostEvent(ctx, witnessEventURL(w), body)
+				resp, err := s.PostEvent(s.ownersLocalAllowed(ctx, witnessEventURL(w)), witnessEventURL(w), body)
 				if err != nil {
 					log.Printf("[witness] %s did not take event %s of %s: %v", key, said, signerAID, err)
 					return
@@ -887,10 +894,10 @@ func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, ev
 	// cancelled the post before it reached the witness.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
-	resp, err := s.PostEvent(ctx, url, body)
+	resp, err := s.PostEvent(s.ownersLocalAllowed(ctx, url), url, body)
 	if err != nil {
 		time.Sleep(BroadcastRetryDelay)
-		resp, err = s.PostEvent(ctx, url, body)
+		resp, err = s.PostEvent(s.ownersLocalAllowed(ctx, url), url, body)
 	}
 	if err != nil {
 		log.Printf("[witness] broadcast to %s failed: %v", witnessAID, err)
@@ -1267,7 +1274,7 @@ func (s *Service) PublishEndpointRecord(ctx context.Context, signerAID string, r
 		wg.Add(1)
 		go func(target witnessTarget) {
 			defer wg.Done()
-			if _, perr := s.PostEvent(ctx, witnessEndpointURL(target), body); perr != nil {
+			if _, perr := s.PostEvent(s.ownersLocalAllowed(ctx, witnessEndpointURL(target)), witnessEndpointURL(target), body); perr != nil {
 				log.Printf("[witness] endpoint record to %s failed: %v", target.AID, perr)
 				return
 			}
@@ -1526,4 +1533,19 @@ func (s *Service) confirm(aid, witnessKey string, sn int) {
 // log now: what it says, higher or lower than before.
 func (s *Service) heldNow(aid, witnessKey string, sn int) {
 	s.confirmed.Store(aid+"|"+witnessKey, confirmation{sn: sn, at: time.Now()})
+}
+
+// ownersLocalAllowed marks a POST as allowed to reach a local address when the
+// URL is itself written as one: a local test agent or witness the owner named.
+// A name is never allowed that way, and the address actually dialled is
+// checked regardless.
+func (s *Service) ownersLocalAllowed(ctx context.Context, rawURL string) context.Context {
+	return context.WithValue(ctx, guardKey{}, LiteralIsLocal(hostOf(rawURL)))
+}
+
+// ownersLocalAllowedFor is ownersLocalAllowed for a POST to a recorded contact:
+// a local address is allowed only where it is written as one and the owner,
+// not a stranger's request, recorded it (the rule the witness request applies).
+func (s *Service) ownersLocalAllowedFor(ctx context.Context, c *store.ContactRecord, rawURL string) context.Context {
+	return context.WithValue(ctx, guardKey{}, LiteralIsLocal(hostOf(rawURL)) && c != nil && c.ContactSource != ContactSourceInbound)
 }

@@ -981,7 +981,7 @@ func signedWitnessRequest(t *testing.T, s *CoreServer, to *witness.Service, aid 
 		t.Fatal(err)
 	}
 	stamp := time.Now().UTC().Format(time.RFC3339Nano)
-	sig, _ := login.SignString(witness.RequestStatement(aid, to.Identity(), covers, stamp), seed)
+	sig, _ := login.SignString(witness.RequestStatement(aid, to.Identity(), "", witness.BackendDesktop, "", covers, stamp), seed)
 	return witness.WitnessRequest{RequesterAID: aid, BackendType: witness.BackendDesktop, CoversDelegates: covers, Stamp: stamp, Signature: sig}
 }
 
