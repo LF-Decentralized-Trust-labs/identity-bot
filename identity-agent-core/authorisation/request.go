@@ -43,6 +43,13 @@ type Input struct {
 	// and its transaction log, in order. Needed for a request a machine made.
 	Grant    []byte
 	GrantLog [][]byte
+	// For a request an AI agent's body made (kind ai_agent_body), Grant and
+	// GrantLog are the creator's AI Agent Grant, the one that holds
+	// agent.create, and CreatorBody and CreatorBodyLog are the body credential
+	// of the machine that signed: the credential that says that machine's key
+	// speaks as the creator.
+	CreatorBody    []byte
+	CreatorBodyLog [][]byte
 	// OwnerKey is the key the identity's own key log named when an
 	// owner-signed request was made. Needed for a request the identity's own
 	// key signed.
@@ -226,6 +233,25 @@ func Check(in Input) error {
 		if err := checkGrant(in, cred, rests, req, stamp, issuedAt); err != nil {
 			return err
 		}
+	case KindAIAgentBody:
+		br, err := ReadBodyRequest(req.Signed)
+		if err != nil {
+			return err
+		}
+		if br.IdentityAgent != cred.Issuer {
+			return fmt.Errorf("the request was signed for %s, not for the issuer %s", br.IdentityAgent, cred.Issuer)
+		}
+		if br.Host != req.Signer {
+			return fmt.Errorf("the request was signed by %s, not %s", br.Host, req.Signer)
+		}
+		method, path, stamp, digest = br.Method, br.Target, br.Stamp, br.BodyDigest
+		rests, err := WhatItRestsOn(verified)
+		if err != nil {
+			return err
+		}
+		if err := checkCreator(in, cred, rests, req, br, issuedAt); err != nil {
+			return err
+		}
 	case "owner":
 		lines := strings.Split(req.Signed, "\n")
 		switch {
@@ -262,7 +288,7 @@ func Check(in Input) error {
 	if at.Before(issuedAt.Add(-Skew)) {
 		return fmt.Errorf("the request was made long before the credential was issued")
 	}
-	if err := checkAskedFor(cred, method, path, req.Asked, in.Asset); err != nil {
+	if err := checkAskedFor(cred, req.Kind, method, path, req.Asked, in.Asset); err != nil {
 		return err
 	}
 	if !in.HaveBody {
@@ -318,27 +344,43 @@ func checkGrant(in Input, cred acdc, rests RestsOn, req request, stamp string, i
 	if ok, err := iacrypto.VerifyMachineSignature(key, req.Signature, []byte(req.Signed)); err != nil || !ok {
 		return fmt.Errorf("the request is not signed by the key the grant names")
 	}
+	return checkStanding(in, cred, standing{what: "the machine's grant", said: g.SAID, attrs: grant.A, log: in.GrantLog}, stamp, issuedAt)
+}
+
+// standing is a credential a request rests on, whose standing when the request
+// was made and when the credential it authorised was issued is checked.
+type standing struct {
+	// what is how errors name it.
+	what  string
+	said  string
+	attrs map[string]json.RawMessage
+	log   [][]byte
+}
+
+// checkStanding checks that the credential on was in force when the request
+// was made, issued before cred, and not revoked before cred was issued.
+func checkStanding(in Input, cred acdc, on standing, stamp string, issuedAt time.Time) error {
 	at, err := time.Parse(time.RFC3339, stamp)
 	if err != nil {
 		return fmt.Errorf("the request's time is unreadable")
 	}
-	from, err := timeAttr(grant.A, "dt")
+	from, err := timeAttr(on.attrs, "dt")
 	if err != nil {
-		return fmt.Errorf("the grant's issue time: %w", err)
+		return fmt.Errorf("%s's issue time: %w", on.what, err)
 	}
 	if at.Add(Skew).Before(from) {
-		return fmt.Errorf("the request was made before the machine was granted")
+		return fmt.Errorf("the request was made before %s was granted", on.what)
 	}
-	if until, err := timeAttr(grant.A, "valid_until"); err == nil && !at.Before(until) {
-		return fmt.Errorf("the request was made after the machine's grant lapsed")
+	if until, err := timeAttr(on.attrs, "valid_until"); err == nil && !at.Before(until) {
+		return fmt.Errorf("the request was made after %s lapsed", on.what)
 	}
-	if _, err := keri.CredentialStatus(g.SAID, in.GrantLog); err != nil {
-		return fmt.Errorf("the grant's log: %w", err)
+	if _, err := keri.CredentialStatus(on.said, on.log); err != nil {
+		return fmt.Errorf("%s's log: %w", on.what, err)
 	}
 	if len(in.IssuerKEL) > 0 {
-		return checkKELOrder(in, g.SAID, cred.SAID)
+		return checkKELOrder(in, on, cred.SAID)
 	}
-	for _, ev := range in.GrantLog {
+	for _, ev := range on.log {
 		e, err := keri.VerifyTELEvent(ev)
 		if err != nil {
 			return err
@@ -346,7 +388,7 @@ func checkGrant(in Input, cred acdc, rests RestsOn, req request, stamp string, i
 		if e.Ilk == "rev" {
 			revokedAt, err := time.Parse("2006-01-02T15:04:05.000000-07:00", e.DateTime)
 			if err != nil || !revokedAt.After(issuedAt) {
-				return fmt.Errorf("the machine's grant was revoked before the credential was issued")
+				return fmt.Errorf("%s was revoked before the credential was issued", on.what)
 			}
 		}
 	}
@@ -355,7 +397,7 @@ func checkGrant(in Input, cred acdc, rests RestsOn, req request, stamp string, i
 
 // checkKELOrder reads, from where each is anchored in the issuer's key log,
 // that the grant was issued before the credential and not revoked before it.
-func checkKELOrder(in Input, grantSAID, credSAID string) error {
+func checkKELOrder(in Input, on standing, credSAID string) error {
 	place := func(log [][]byte, subject string) (iss, rev int, err error) {
 		iss, rev = -1, -1
 		for _, raw := range log {
@@ -375,7 +417,7 @@ func checkKELOrder(in Input, grantSAID, credSAID string) error {
 		}
 		return iss, rev, nil
 	}
-	gIss, gRev, err := place(in.GrantLog, grantSAID)
+	gIss, gRev, err := place(on.log, on.said)
 	if err != nil {
 		return err
 	}
@@ -387,10 +429,10 @@ func checkKELOrder(in Input, grantSAID, credSAID string) error {
 		return err
 	}
 	if gIss < 0 || cIss < 0 || gIss >= cIss {
-		return fmt.Errorf("the machine's grant was not issued before the credential")
+		return fmt.Errorf("%s was not issued before the credential", on.what)
 	}
 	if gRev >= 0 && gRev < cIss {
-		return fmt.Errorf("the machine's grant was revoked before the credential was issued")
+		return fmt.Errorf("%s was revoked before the credential was issued", on.what)
 	}
 	return nil
 }
@@ -430,12 +472,27 @@ func checkCapabilitiesAsked(cred acdc, asked map[string]json.RawMessage) error {
 }
 
 // checkAskedFor checks that what the request asked for is what was issued.
-func checkAskedFor(cred acdc, method, path string, asked map[string]json.RawMessage, resolve func(id, holder string) (ExpectedAsset, bool)) error {
+func checkAskedFor(cred acdc, kind, method, path string, asked map[string]json.RawMessage, resolve func(id, holder string) (ExpectedAsset, bool)) error {
 	about := stringAttr(cred.A, "about")
 	segments := strings.Split(strings.Trim(path, "/"), "/")
 	switch cred.Schema {
 	case schemas.AIAgentGrant.Schema.SAID:
+		// The routes a body signs to are the creator's own channel, and the
+		// owner's routes are not: a request to one kind of route cannot stand
+		// for the other's.
+		if (kind == KindAIAgentBody) != strings.HasPrefix(path, "/api/agent-host/") {
+			return fmt.Errorf("%s %s is not a request a %s signs that grants an AI agent anything", method, path, kindSigner(kind))
+		}
 		switch {
+		case method == "POST" && path == CreateAIAgentPath:
+			if stringOf(asked["name"]) != stringAttr(cred.A, "name") {
+				return fmt.Errorf("the request asked for an AI agent named differently")
+			}
+		case method == "PUT" && len(segments) == 5 && segments[1] == "agent-host" && segments[2] == "agents" && segments[4] == "github":
+			if segments[3] != about {
+				return fmt.Errorf("the request was about %s, the credential about %s", segments[3], about)
+			}
+			return checkRepositoriesAsked(cred, asked["repositories"])
 		case method == "POST" && path == "/api/mcp/agents":
 			if stringOf(asked["name"]) != stringAttr(cred.A, "name") {
 				return fmt.Errorf("the request asked for an AI agent named differently")
@@ -525,6 +582,13 @@ func checkAskedFor(cred acdc, method, path string, asked map[string]json.RawMess
 		return fmt.Errorf("the credential is not one an authorising request is checked for")
 	}
 	return nil
+}
+
+func kindSigner(kind string) string {
+	if kind == KindAIAgentBody {
+		return "body"
+	}
+	return "person or machine"
 }
 
 func stringAttr(a map[string]json.RawMessage, name string) string { return stringOf(a[name]) }
