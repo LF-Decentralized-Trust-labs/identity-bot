@@ -351,3 +351,58 @@ func TestAStoredLogIsReadWithTheSignatureAnOlderRowKeptItIn(t *testing.T) {
 		t.Fatalf("keys in force from a legacy row: %v %v", keys, err)
 	}
 }
+
+// A credential issued outside a registry is sealed {i: said, s: "0", d: said},
+// and only that seal records it: one with no digest, or another, does not.
+func TestACredentialIsKeptOnlyOnTheSealThatNamesItTwice(t *testing.T) {
+	s, aid, k := foundedAppHeld(t)
+	_, out := call(t, s, s.handlePrepareCredential, "/api/credential/prepare", map[string]any{
+		"claims": map[string]any{"name": "Ada"}, "schema_said": "Eschema", "holder_aid": "Eholder"})
+	said := out["acdc_said"].(string)
+	prior := aid
+	for n, seal := range []string{
+		`{"i":"` + said + `","s":"0"}`,
+		`{"i":"` + said + `","s":"0","d":"Eother"}`,
+	} {
+		ixn := plantSignedIxns(t, s, aid, k, prior, n+1, 1, func(int) []json.RawMessage {
+			return []json.RawMessage{json.RawMessage(seal)}
+		})
+		code, got := call(t, s, s.handleRecordCredential, "/api/credential/record", map[string]any{
+			"acdc_json_b64": out["acdc_json_b64"], "ixn_said": ixn})
+		if code != http.StatusConflict || !strings.Contains(got["details"].(string), "does not seal that credential") {
+			t.Fatalf("a credential was kept on the seal %s: %d %v", seal, code, got)
+		}
+		prior = ixn
+	}
+	ixn := plantSignedIxns(t, s, aid, k, prior, 3, 1, func(int) []json.RawMessage {
+		return []json.RawMessage{json.RawMessage(`{"i":"` + said + `","s":"0","d":"` + said + `"}`)}
+	})
+	if code, got := call(t, s, s.handleRecordCredential, "/api/credential/record", map[string]any{
+		"acdc_json_b64": out["acdc_json_b64"], "ixn_said": ixn}); code != http.StatusCreated {
+		t.Fatalf("the seal that names it twice was refused: %d %v", code, got)
+	}
+}
+
+// A credential already kept is answered from what is kept, without judging the
+// key log again, which costs work in the log's length on every record sent.
+// The log is spoiled after it is kept, so judging it again would refuse.
+func TestARecordOfAKeptCredentialDoesNotJudgeTheLogAgain(t *testing.T) {
+	s, aid, k := foundedAppHeld(t)
+	body := anchoredCredential(t, s, aid, k)
+	if code, out := call(t, s, s.handleRecordCredential, "/api/credential/record", body); code != http.StatusCreated {
+		t.Fatalf("record: %d %v", code, out)
+	}
+	s.background.wg.Wait()
+	evs, _ := s.DataStore.GetEvents(aid)
+	founding := evs[0]
+	founding.Signatures = []string{appSign(t, k[1], []byte(founding.EventJSON), true)}
+	if err := s.DataStore.SaveEvent(founding); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.keyLogAnchors(aid, body["ixn_said"].(string), ""); err == nil {
+		t.Fatal("the spoiled log still verifies, so this test proves nothing")
+	}
+	if code, out := call(t, s, s.handleRecordCredential, "/api/credential/record", body); code != http.StatusOK || out["status"] != "issued" {
+		t.Fatalf("a kept credential was judged again: %d %v", code, out)
+	}
+}

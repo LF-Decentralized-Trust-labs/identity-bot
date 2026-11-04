@@ -415,9 +415,26 @@ func anchorsIssuanceOf(events []store.EventRecord, said string) bool {
 	return anchorsSealOf(events, said, "0")
 }
 
+// anchorsExactSealOf is anchorsSealOf for a seal whose digest must also be d:
+// what a credential issued outside a registry is sealed by, {i: said, s: "0",
+// d: said}. A seal with any other digest, or none, is not that one.
+func anchorsExactSealOf(events []store.EventRecord, said, sn, d string) bool {
+	return anchorsSealMatching(events, func(seal map[string]interface{}) bool {
+		return seal["i"] == said && seal["s"] == sn && seal["d"] == d
+	})
+}
+
 // anchorsSealOf reports whether a key log anchors the event at place sn of
 // the credential said's log.
 func anchorsSealOf(events []store.EventRecord, said, sn string) bool {
+	return anchorsSealMatching(events, func(seal map[string]interface{}) bool {
+		return seal["i"] == said && seal["s"] == sn
+	})
+}
+
+// anchorsSealMatching reports whether an event of a key log carries a seal
+// that match accepts.
+func anchorsSealMatching(events []store.EventRecord, match func(map[string]interface{}) bool) bool {
 	for _, ev := range events {
 		var body struct {
 			A []map[string]interface{} `json:"a"`
@@ -426,7 +443,7 @@ func anchorsSealOf(events []store.EventRecord, said, sn string) bool {
 			continue
 		}
 		for _, seal := range body.A {
-			if seal["i"] == said && seal["s"] == sn {
+			if match(seal) {
 				return true
 			}
 		}

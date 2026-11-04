@@ -167,6 +167,13 @@ func (s *CoreServer) handleRecordCredential(w http.ResponseWriter, r *http.Reque
 			"a credential is recorded here as issued only by the identity kept here")
 		return
 	}
+	// A credential already kept was judged when it was kept, so it is answered
+	// without judging the key log again: that costs work in the log's length,
+	// and a record can be sent again by anybody who holds its bytes.
+	if have, _ := s.DataStore.GetCredential(cred.SAID); have != nil {
+		s.answerKeptCredential(w, cred.SAID, have.Status)
+		return
+	}
 	if err := s.keyLogAnchors(identity.AID, req.IxnSaid, cred.SAID); err != nil {
 		writeError(w, http.StatusConflict, "The key log does not anchor that credential", err.Error())
 		return
@@ -177,9 +184,7 @@ func (s *CoreServer) handleRecordCredential(w http.ResponseWriter, r *http.Reque
 	have, _ := s.DataStore.GetCredential(cred.SAID)
 	if have != nil {
 		s.recordingCredential.Unlock()
-		// Already kept: what it is now, which is not "issued" once revoked.
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"acdc_said": cred.SAID, "status": have.Status})
+		s.answerKeptCredential(w, cred.SAID, have.Status)
 		return
 	}
 	record := s.issuedCredentialRecord(cred.SAID, cred.Issuer, cred.Recipient, cred.SchemaSAID,
@@ -190,6 +195,13 @@ func (s *CoreServer) handleRecordCredential(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]any{"acdc_said": cred.SAID, "status": "issued"})
+}
+
+// answerKeptCredential answers a record of a credential already kept with what
+// it is now, which is not "issued" once it is revoked.
+func (s *CoreServer) answerKeptCredential(w http.ResponseWriter, said, status string) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"acdc_said": said, "status": status})
 }
 
 // keyLogAnchors is nil where aid's key log holds an interaction with digest ixn
@@ -220,7 +232,7 @@ func (s *CoreServer) keyLogAnchors(aid, ixn, said string) error {
 		}
 		// The seal is read from the bytes that are judged, not from the
 		// copy kept beside them.
-		if !anchorsSealOf([]store.EventRecord{{EventJSON: string(raw)}}, said, "0") {
+		if !anchorsExactSealOf([]store.EventRecord{{EventJSON: string(raw)}}, said, "0", said) {
 			return fmt.Errorf("the interaction %s is in this identity's key log and does not seal that credential", ixn)
 		}
 		prefix, err := store.SignedLogOf(events[:i+1])
