@@ -388,15 +388,7 @@ func TestAMessageNamingAnotherSenderIsRefused(t *testing.T) {
 
 // Recording refusals cannot fill the cache that stops replays, and one
 // sender's message ids do not stand in for another's.
-func resetRefusals(t *testing.T) {
-	t.Helper()
-	refusalsRecorded.Lock()
-	refusalsRecorded.m = map[string]*senderRefusals{}
-	refusalsRecorded.Unlock()
-}
-
 func TestRefusalsAreRecordedApartFromReplays(t *testing.T) {
-	resetRefusals(t)
 	m := newMessaging(t)
 	const second = "ESECOND"
 	ks, err := m.sender.keySetFor(second)
@@ -410,9 +402,9 @@ func TestRefusalsAreRecordedApartFromReplays(t *testing.T) {
 	_ = m.receiver.savePeers(peers)
 	didcommMu.Unlock()
 
-	didcommSeen.Lock()
-	before := len(didcommSeen.m)
-	didcommSeen.Unlock()
+	m.receiver.seen.mu.Lock()
+	before := len(m.receiver.seen.m)
+	m.receiver.seen.mu.Unlock()
 	expired := time.Now().Add(-time.Minute)
 	for i := 0; i < 20; i++ {
 		raw := m.sealed(t, m.senderAID, "expired-"+string(rune('a'+i)), "did:keri:"+m.senderAID, expired)
@@ -420,9 +412,9 @@ func TestRefusalsAreRecordedApartFromReplays(t *testing.T) {
 			t.Fatalf("an expired envelope was answered %d", code)
 		}
 	}
-	didcommSeen.Lock()
-	after := len(didcommSeen.m)
-	didcommSeen.Unlock()
+	m.receiver.seen.mu.Lock()
+	after := len(m.receiver.seen.m)
+	m.receiver.seen.mu.Unlock()
 	if after != before {
 		t.Fatalf("refused envelopes filled the replay cache: %d entries before, %d after", before, after)
 	}
@@ -469,7 +461,6 @@ func TestTrafficIsFiledUnderItsConversation(t *testing.T) {
 // up to its quota, then one row says the rest are not recorded until the
 // window ends, and another sender's refusals are still recorded.
 func TestOneSendersFloodOfRefusalsSilencesOnlyItself(t *testing.T) {
-	resetRefusals(t)
 	m := newMessaging(t)
 	const other = "EOTHERSENDER"
 	ks, err := m.sender.keySetFor(other)

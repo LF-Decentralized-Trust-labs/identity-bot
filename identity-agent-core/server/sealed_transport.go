@@ -124,7 +124,7 @@ func (s *CoreServer) handleSealedTransport(w http.ResponseWriter, r *http.Reques
 		writeSealedError(w, http.StatusForbidden, "this request claims to be valid for too long")
 		return
 	}
-	if seenBefore(jwm.ID, exp) {
+	if s.seen.seenBefore(jwm.ID, exp) {
 		writeSealedError(w, http.StatusConflict, "this request has already been carried out")
 		return
 	}

@@ -25,6 +25,14 @@ func pairableComputer(t *testing.T) (*CoreServer, *httptest.Server, string) {
 	resetExpectedClaimForTest()
 	resetPairingOfferForTest()
 	resetPairingStateForTest()
+	// The tests built on this tell the machine who may claim it, over the route,
+	// which sets process-wide state; none of it outlives the test.
+	t.Cleanup(func() {
+		resetLocalPairingOfferForTest()
+		resetExpectedClaimForTest()
+		resetPairingOfferForTest()
+		resetPairingStateForTest()
+	})
 
 	// The machine offers a report, as a sealed one does, and the owner accepts
 	// what it proves. Both of these used to be replaced by allow_unattested in

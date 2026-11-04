@@ -60,6 +60,15 @@ type CoreServer struct {
 	// localOwnerSecret is what a request from this computer must carry to be
 	// the owner's (the_owner_at_this_computer.go).
 	localOwnerSecret string
+	// nonces is the signed-request replay cache (mcp_envelope.go).
+	nonces nonceCache
+	// seen is the DIDComm replay cache and refusals the record of refusals
+	// written, each per server (didcomm_handlers.go,
+	// a_received_message_proves_its_sender.go).
+	seen     seenMessages
+	refusals refusalLog
+	// introductions bounds how many strangers are entertained (first_contact.go).
+	introductions introductionLimiter
 	// addonStates is what each add-on keeps for this server
 	// (addon_host.go).
 	addonStates addonStates
