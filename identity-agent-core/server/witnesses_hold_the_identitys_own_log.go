@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"identity-agent-core/drivers"
+	"identity-agent-core/recovery"
 	"identity-agent-core/witness"
 	"sync"
 	"time"
@@ -24,7 +25,9 @@ type witnessState struct {
 	witnessOnce sync.Once
 	witnessKick chan struct{}
 	witnessMu   sync.Mutex
-	witnessJob  witnessJob
+	// witnessJobs is what each pass brings up to date, one job per identity
+	// asked for: the identity kept here, and any root it was moved on from.
+	witnessJobs map[string]witnessJob
 }
 
 type witnessJob struct {
@@ -47,9 +50,12 @@ func (s *CoreServer) witnessRecord(ownerAID, recordAID string, witnesses []strin
 	// A request for the identity's own log alone does not drop a record
 	// identity a pass is already due to send.
 	if job.record == "" {
-		job.record = s.witnessing.witnessJob.record
+		job.record = s.witnessing.witnessJobs[ownerAID].record
 	}
-	s.witnessing.witnessJob = job
+	if s.witnessing.witnessJobs == nil {
+		s.witnessing.witnessJobs = map[string]witnessJob{}
+	}
+	s.witnessing.witnessJobs[ownerAID] = job
 	s.witnessing.witnessMu.Unlock()
 	s.witnessing.witnessOnce.Do(func() {
 		s.witnessing.witnessKick = make(chan struct{}, 1)
@@ -78,12 +84,17 @@ func (s *CoreServer) keepWitnessing(running context.Context, stop <-chan struct{
 		case <-s.witnessing.witnessKick:
 		}
 		s.witnessing.witnessMu.Lock()
-		job := s.witnessing.witnessJob
+		jobs := make([]witnessJob, 0, len(s.witnessing.witnessJobs))
+		for _, job := range s.witnessing.witnessJobs {
+			jobs = append(jobs, job)
+		}
 		s.witnessing.witnessMu.Unlock()
 		ctx, cancel := context.WithTimeout(running, time.Minute)
-		s.WitnessService.BringUpToDate(ctx, job.owner, s.signedEventsOf(job.owner), job.witnesses, job.toad)
-		if job.record != "" {
-			s.WitnessService.BringUpToDate(ctx, job.record, s.signedEventsOf(job.record), job.witnesses, job.toad)
+		for _, job := range jobs {
+			s.WitnessService.BringUpToDate(ctx, job.owner, s.signedEventsOf(job.owner), job.witnesses, job.toad)
+			if job.record != "" {
+				s.WitnessService.BringUpToDate(ctx, job.record, s.signedEventsOf(job.record), job.witnesses, job.toad)
+			}
 		}
 		cancel()
 	}
@@ -117,6 +128,24 @@ func (s *CoreServer) witnessOwnLog() {
 		return
 	}
 	s.witnessLogOf(keeper, owner.AID)
+	s.witnessRootsMovedOn(keeper)
+}
+
+// witnessRootsMovedOn brings up to date the witnesses of every root this core
+// rotated away from by break-glass. The identity kept here is the new root by
+// then, so the pass above does not reach the old one, whose last event is the
+// rotation. A witness that already holds the log is not asked again.
+func (s *CoreServer) witnessRootsMovedOn(keeper drivers.KELKeeper) {
+	if s.DataDir == "" {
+		return
+	}
+	moved, err := recovery.LoadRootAIDMap(s.DataDir)
+	if err != nil {
+		return
+	}
+	for _, entry := range moved.Entries {
+		s.witnessLogOf(keeper, entry.OldRootAID)
+	}
 }
 
 // witnessLogOf brings the witnesses of aid up to date with its log: the

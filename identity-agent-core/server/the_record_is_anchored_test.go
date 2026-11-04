@@ -945,7 +945,7 @@ func TestWitnessingTheOwnLogKeepsTheRecordDue(t *testing.T) {
 	s.witnessRecord("EOwner", "", []string{"BWitness"}, 1)
 	s.witnessing.witnessMu.Lock()
 	defer s.witnessing.witnessMu.Unlock()
-	if s.witnessing.witnessJob.record != "ERecord" {
+	if s.witnessing.witnessJobs["EOwner"].record != "ERecord" {
 		t.Fatal("the record identity due to be witnessed was dropped")
 	}
 }
