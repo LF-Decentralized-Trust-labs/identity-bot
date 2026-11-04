@@ -615,13 +615,9 @@ func checkSignedRootRotation(req RootAIDRotationRequest, st RootRotationStore) (
 			}
 		}
 	}
-	var oldLog []drivers.SignedEventBytes
-	for _, rec := range events[:at] {
-		sigs := rec.ControllerSignatures()
-		if rec.RawBytesB64 == "" || len(sigs) == 0 {
-			return nil, fmt.Errorf("the old root's event %d is kept without its signed bytes, so a rotation of it cannot be checked", rec.SequenceNumber)
-		}
-		oldLog = append(oldLog, drivers.SignedEventBytes{RawB64: rec.RawBytesB64, Sigs: sigs})
+	oldLog, err := store.SignedLogOf(events[:at])
+	if err != nil {
+		return nil, fmt.Errorf("the old root's log cannot be checked, so a rotation of it cannot be: %w", err)
 	}
 	c.oldLog = oldLog
 	if err := verifyLog(c.oldRootAID, append(append([]drivers.SignedEventBytes(nil), oldLog...), req.OldRootRotation)); err != nil {
@@ -679,7 +675,7 @@ func saidOfRecord(rec store.EventRecord) (string, error) {
 }
 
 func verifyLog(aid string, events []drivers.SignedEventBytes) error {
-	messages, err := drivers.LogMessages(events)
+	messages, err := drivers.StoredLogMessages(events)
 	if err != nil {
 		return err
 	}

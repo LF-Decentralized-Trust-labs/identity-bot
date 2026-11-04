@@ -90,7 +90,11 @@ func keyStateMessages(req keyStateRequest) ([][]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("stream_b64 is not standard base64: %w", err)
 		}
-		return keri.ParseKELStream(stream)
+		messages, err := keri.ParseKELStream(stream)
+		if err != nil {
+			return nil, err
+		}
+		return messages, drivers.CheckSentLogLength(len(messages))
 	}
 	events := make([]drivers.SignedEventBytes, 0, len(req.Events))
 	for _, ev := range req.Events {

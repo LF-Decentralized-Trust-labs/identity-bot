@@ -11,6 +11,7 @@ import (
 
 	keri "github.com/grapeid/keri-go"
 
+	"identity-agent-core/drivers"
 	"identity-agent-core/store"
 )
 
@@ -227,5 +228,126 @@ func TestTwoRecordsOfOneCredentialKeepItOnce(t *testing.T) {
 	}
 	if created != 1 {
 		t.Fatalf("%d records each kept the credential and sent it on", created)
+	}
+}
+
+// plantSignedIxns stores n signed interactions after the tip, as a log kept for
+// a long time is, and returns the last one's digest.
+func plantSignedIxns(t *testing.T, s *CoreServer, aid string, k [][]byte, prior string, from, n int, data func(i int) []json.RawMessage) string {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		ixn, err := keri.BuildInteraction(keri.InteractionInput{Prefix: aid, PriorSAID: prior, SN: from + i, Data: data(i)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ev, _ := keri.ParseEvent(ixn)
+		if err := s.DataStore.SaveEvent(store.EventRecord{AID: aid, SequenceNumber: from + i, EventType: "ixn",
+			EventJSON: string(ixn), RawBytesB64: base64.StdEncoding.EncodeToString(ixn),
+			Signatures: []string{appSign(t, k[0], ixn, false)}}); err != nil {
+			t.Fatal(err)
+		}
+		prior = ev.SAID
+	}
+	return prior
+}
+
+// An identity that has issued thousands of credentials has a key log longer
+// than a log somebody sends is judged at, and a credential it issues is still
+// recorded: the length cap is for copies sent, not for the log kept here. The
+// seal may also carry values that are not strings.
+func TestACredentialIsKeptOnALogLongerThanASentLogMayBe(t *testing.T) {
+	s, aid, k := foundedAppHeld(t)
+	_, out := call(t, s, s.handlePrepareCredential, "/api/credential/prepare", map[string]any{
+		"claims": map[string]any{"name": "Ada"}, "schema_said": "Eschema", "holder_aid": "Eholder"})
+	acdcSaid := out["acdc_said"].(string)
+	tip := plantSignedIxns(t, s, aid, k, aid, 1, drivers.MaxLogEvents, func(int) []json.RawMessage {
+		return []json.RawMessage{json.RawMessage(`{"d":"Efill"}`)}
+	})
+	// The seal beside others whose values are an array and an object.
+	last := plantSignedIxns(t, s, aid, k, tip, drivers.MaxLogEvents+1, 1, func(int) []json.RawMessage {
+		return []json.RawMessage{json.RawMessage(`{"i":"` + acdcSaid + `","s":"0","d":"` + acdcSaid + `","x":["a"],"y":{"b":1}}`)}
+	})
+	if evs, _ := s.DataStore.GetEvents(aid); len(evs) <= drivers.MaxLogEvents {
+		t.Fatalf("the log has %d events, not more than a sent log may", len(evs))
+	}
+	code, got := call(t, s, s.handleRecordCredential, "/api/credential/record", map[string]any{
+		"acdc_json_b64": out["acdc_json_b64"], "ixn_said": last})
+	if code != http.StatusCreated {
+		t.Fatalf("a credential a long log anchors was refused: %d %v", code, got)
+	}
+}
+
+// A refusal says why: the history is unsigned, the interaction is not there,
+// it seals something else, or the signature is not the key's.
+func TestAnUnanchoredCredentialIsRefusedForTheReasonItIs(t *testing.T) {
+	s, aid, k := foundedAppHeld(t)
+	_, out := call(t, s, s.handlePrepareCredential, "/api/credential/prepare", map[string]any{
+		"claims": map[string]any{"name": "Ada"}, "schema_said": "Eschema", "holder_aid": "Eholder"})
+	said := out["acdc_said"].(string)
+	sealOf := func(d string) func(int) []json.RawMessage {
+		return func(int) []json.RawMessage {
+			return []json.RawMessage{json.RawMessage(`{"i":"` + d + `","s":"0","d":"` + d + `"}`)}
+		}
+	}
+	reason := func(ixn string) string {
+		code, got := call(t, s, s.handleRecordCredential, "/api/credential/record", map[string]any{
+			"acdc_json_b64": out["acdc_json_b64"], "ixn_said": ixn})
+		if code != http.StatusConflict {
+			t.Fatalf("refused with %d %v", code, got)
+		}
+		return got["error"].(string) + " " + got["details"].(string)
+	}
+	if r := reason("Enothere"); !strings.Contains(r, "holds no interaction with digest Enothere") {
+		t.Fatalf("no interaction: %q", r)
+	}
+	other := plantSignedIxns(t, s, aid, k, aid, 1, 1, sealOf("Eother"))
+	if r := reason(other); !strings.Contains(r, "does not seal that credential") {
+		t.Fatalf("another seal: %q", r)
+	}
+	// Signed by the wrong key.
+	ixn, _ := keri.BuildInteraction(keri.InteractionInput{Prefix: aid, PriorSAID: other, SN: 2,
+		Data: sealOf(said)(0)})
+	ev, _ := keri.ParseEvent(ixn)
+	_ = s.DataStore.SaveEvent(store.EventRecord{AID: aid, SequenceNumber: 2, EventType: "ixn", EventJSON: string(ixn),
+		RawBytesB64: base64.StdEncoding.EncodeToString(ixn), Signatures: []string{appSign(t, k[1], ixn, false)}})
+	if r := reason(ev.SAID); !strings.Contains(r, "does not verify") {
+		t.Fatalf("wrong key: %q", r)
+	}
+}
+
+// A key log with an event kept unsigned before the anchor is refused as such.
+func TestAnAnchorAfterAnUnsignedEventIsRefusedAsUnsigned(t *testing.T) {
+	s, aid, k := foundedAppHeld(t)
+	_, out := call(t, s, s.handlePrepareCredential, "/api/credential/prepare", map[string]any{
+		"claims": map[string]any{"name": "Ada"}, "schema_said": "Eschema", "holder_aid": "Eholder"})
+	said := out["acdc_said"].(string)
+	first, _ := keri.BuildInteraction(keri.InteractionInput{Prefix: aid, PriorSAID: aid, SN: 1,
+		Data: []json.RawMessage{json.RawMessage(`{"d":"Efill"}`)}})
+	fev, _ := keri.ParseEvent(first)
+	_ = s.DataStore.SaveEvent(store.EventRecord{AID: aid, SequenceNumber: 1, EventType: "ixn", EventJSON: string(first),
+		RawBytesB64: base64.StdEncoding.EncodeToString(first)})
+	last := plantSignedIxns(t, s, aid, k, fev.SAID, 2, 1, func(int) []json.RawMessage {
+		return []json.RawMessage{json.RawMessage(`{"i":"` + said + `","s":"0","d":"` + said + `"}`)}
+	})
+	code, got := call(t, s, s.handleRecordCredential, "/api/credential/record", map[string]any{
+		"acdc_json_b64": out["acdc_json_b64"], "ixn_said": last})
+	if code != http.StatusConflict || !strings.Contains(got["details"].(string), "kept without its signed bytes") {
+		t.Fatalf("unsigned history: %d %v", code, got)
+	}
+}
+
+// A row kept before signatures were lists carries its one signature in
+// CesrSignature, and reads as signed everywhere a stored log is read.
+func TestAStoredLogIsReadWithTheSignatureAnOlderRowKeptItIn(t *testing.T) {
+	s, aid, k := foundedAppHeld(t)
+	ixn, _ := keri.BuildInteraction(keri.InteractionInput{Prefix: aid, PriorSAID: aid, SN: 1,
+		Data: []json.RawMessage{json.RawMessage(`{"d":"Efill"}`)}})
+	if err := s.DataStore.SaveEvent(store.EventRecord{AID: aid, SequenceNumber: 1, EventType: "ixn", EventJSON: string(ixn),
+		RawBytesB64: base64.StdEncoding.EncodeToString(ixn), CesrSignature: appSign(t, k[0], ixn, false)}); err != nil {
+		t.Fatal(err)
+	}
+	keys, err := s.ownKeysInForce(aid)
+	if err != nil || len(keys) != 1 {
+		t.Fatalf("keys in force from a legacy row: %v %v", keys, err)
 	}
 }

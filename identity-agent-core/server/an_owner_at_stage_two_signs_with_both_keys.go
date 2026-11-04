@@ -10,6 +10,7 @@ import (
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
+	"identity-agent-core/store"
 
 	keri "github.com/grapeid/keri-go"
 )
@@ -105,11 +106,11 @@ func (s *CoreServer) ownKeysInForce(aid string) ([]string, error) {
 	if len(events) == 0 {
 		return nil, nil
 	}
-	signed := make([]drivers.SignedEventBytes, 0, len(events))
-	for _, ev := range events {
-		signed = append(signed, drivers.SignedEventBytes{RawB64: ev.RawBytesB64, Sigs: ev.Signatures})
+	signed, err := store.SignedLogOf(events)
+	if err != nil {
+		return nil, err
 	}
-	messages, err := drivers.LogMessages(signed)
+	messages, err := drivers.StoredLogMessages(signed)
 	if err != nil {
 		return nil, err
 	}

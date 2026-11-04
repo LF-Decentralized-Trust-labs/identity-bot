@@ -76,7 +76,19 @@ func SignedMessageAsSent(raw []byte, sigs []string) ([]byte, error) {
 // MaxLogEvents bounds a key log judged in one go from copies somebody sent:
 // an identity's whole log, but not so long that one request holds the judge
 // for long.
+//
+// The cap belongs to a log somebody sent (LogMessages, CheckSentLogLength). A
+// log this Identity Agent keeps is its own history, which the engine reads
+// whole at any length, and is read with StoredLogMessages.
 const MaxLogEvents = 2048
+
+// CheckSentLogLength refuses a log somebody sent that is longer than is judged.
+func CheckSentLogLength(n int) error {
+	if n > MaxLogEvents {
+		return fmt.Errorf("the log has %d events; at most %d are checked", n, MaxLogEvents)
+	}
+	return nil
+}
 
 // SignedEventBytes is an event's bytes, base64, with its controller
 // signatures, as a copy of a log is sent to be judged.
@@ -87,12 +99,19 @@ type SignedEventBytes struct {
 
 // LogMessages makes events into the messages keri-go judges a log by, each
 // with its signatures attached as they are stored and sent.
+// It is for a log somebody sent, so it refuses one longer than MaxLogEvents.
 func LogMessages(events []SignedEventBytes) ([][]byte, error) {
+	if err := CheckSentLogLength(len(events)); err != nil {
+		return nil, err
+	}
+	return StoredLogMessages(events)
+}
+
+// StoredLogMessages is LogMessages for a log this Identity Agent keeps: any
+// length, as the engine reads it.
+func StoredLogMessages(events []SignedEventBytes) ([][]byte, error) {
 	if len(events) == 0 {
 		return nil, fmt.Errorf("the log has no events")
-	}
-	if len(events) > MaxLogEvents {
-		return nil, fmt.Errorf("the log has %d events; at most %d are checked", len(events), MaxLogEvents)
 	}
 	out := make([][]byte, 0, len(events))
 	for i, ev := range events {
@@ -115,9 +134,6 @@ func LogMessages(events []SignedEventBytes) ([][]byte, error) {
 // VerifiedLogOf judges messages as aid's key log, from its founding, as every
 // log is judged: a log that verifies but is another identity's is refused.
 func VerifiedLogOf(aid string, messages [][]byte) (*keri.SignedKELResult, error) {
-	if len(messages) > MaxLogEvents {
-		return nil, fmt.Errorf("the log has %d events; at most %d are checked", len(messages), MaxLogEvents)
-	}
 	res, err := keri.ValidateSignedKEL(messages)
 	if err != nil {
 		return nil, err

@@ -23,6 +23,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"sort"
@@ -166,9 +167,8 @@ func (s *CoreServer) handleRecordCredential(w http.ResponseWriter, r *http.Reque
 			"a credential is recorded here as issued only by the identity kept here")
 		return
 	}
-	if !s.keyLogAnchors(identity.AID, req.IxnSaid, cred.SAID) {
-		writeError(w, http.StatusConflict, "The key log does not anchor that credential",
-			"no interaction with that digest in this identity's key log seals it")
+	if err := s.keyLogAnchors(identity.AID, req.IxnSaid, cred.SAID); err != nil {
+		writeError(w, http.StatusConflict, "The key log does not anchor that credential", err.Error())
 		return
 	}
 	// Finding whether it is kept and keeping it are one step, so two records of
@@ -192,57 +192,49 @@ func (s *CoreServer) handleRecordCredential(w http.ResponseWriter, r *http.Reque
 	json.NewEncoder(w).Encode(map[string]any{"acdc_said": cred.SAID, "status": "issued"})
 }
 
-// keyLogAnchors is whether aid's key log holds an interaction with digest ixn
+// keyLogAnchors is nil where aid's key log holds an interaction with digest ixn
 // that seals the credential said, as a credential issued outside a registry is
 // sealed. The log up to and including that interaction is judged as every key
 // log is, signatures and all: a row somebody stored is not an event of the log
-// until it verifies as one.
-func (s *CoreServer) keyLogAnchors(aid, ixn, said string) bool {
+// until it verifies as one. Otherwise it says which of those failed.
+//
+// The log is read as it is kept (store.SignedLogOf) and judged whole, with no
+// cap on its length: that cap is for logs somebody sent.
+func (s *CoreServer) keyLogAnchors(aid, ixn, said string) error {
 	events, err := s.DataStore.GetEvents(aid)
 	if err != nil {
-		return false
+		return fmt.Errorf("this identity's key log cannot be read: %w", err)
 	}
 	sort.SliceStable(events, func(i, j int) bool { return events[i].SequenceNumber < events[j].SequenceNumber })
-	want := map[string]string{"i": said, "s": "0", "d": said}
-	var prefix []drivers.SignedEventBytes
-	for _, rec := range events {
-		sigs := rec.ControllerSignatures()
-		if rec.RawBytesB64 == "" || len(sigs) == 0 {
-			return false
-		}
-		prefix = append(prefix, drivers.SignedEventBytes{RawB64: rec.RawBytesB64, Sigs: sigs})
-		if rec.EventType != "ixn" {
+	for i, rec := range events {
+		if rec.EventType != "ixn" || rec.RawBytesB64 == "" {
 			continue
 		}
 		raw, err := base64.StdEncoding.DecodeString(rec.RawBytesB64)
 		if err != nil {
-			return false
+			continue
 		}
 		ev, err := keri.ParseEvent(raw)
 		if err != nil || ev.SAID != ixn || ev.Identifier != aid {
 			continue
 		}
-		var body struct {
-			A []map[string]string `json:"a"`
+		// The seal is read from the bytes that are judged, not from the
+		// copy kept beside them.
+		if !anchorsSealOf([]store.EventRecord{{EventJSON: string(raw)}}, said, "0") {
+			return fmt.Errorf("the interaction %s is in this identity's key log and does not seal that credential", ixn)
 		}
-		if json.Unmarshal(raw, &body) != nil {
-			return false
-		}
-		sealed := false
-		for _, seal := range body.A {
-			if len(seal) == len(want) && seal["i"] == want["i"] && seal["s"] == want["s"] && seal["d"] == want["d"] {
-				sealed = true
-			}
-		}
-		if !sealed {
-			return false
-		}
-		messages, err := drivers.LogMessages(prefix)
+		prefix, err := store.SignedLogOf(events[:i+1])
 		if err != nil {
-			return false
+			return fmt.Errorf("the key log up to %s cannot be judged: %w", ixn, err)
 		}
-		_, err = drivers.VerifiedLogOf(aid, messages)
-		return err == nil
+		messages, err := drivers.StoredLogMessages(prefix)
+		if err != nil {
+			return fmt.Errorf("the key log up to %s cannot be judged: %w", ixn, err)
+		}
+		if _, err := drivers.VerifiedLogOf(aid, messages); err != nil {
+			return fmt.Errorf("the key log up to %s does not verify: %w", ixn, err)
+		}
+		return nil
 	}
-	return false
+	return fmt.Errorf("this identity's key log holds no interaction with digest %s", ixn)
 }
