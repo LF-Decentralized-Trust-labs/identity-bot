@@ -331,6 +331,7 @@ the witnesses through `witnessOwnLog`.
 | The same event is already at that place | `200 {"status": "already_recorded"}`; any further valid signature is kept |
 | `p`/`s` follow neither the tip nor, for a rotation, a valid recovery point | `409 tip_moved`, with the tip |
 | A different establishment event holds that place | `409 place_taken`, with its `s` and `d`; the refused event and its signatures are kept as evidence of duplicity |
+| The log it would extend holds an event an earlier version added unsigned | `409 unsigned_history`, with those events' places in `unsigned`; they are signed in place first (`POST /api/events/signature`) |
 | A signature does not verify, or a threshold is not met by a single-signer event | `400`; nothing is written |
 | Thresholds partly met, for an event with several signers | `202 {"status": "waiting_for_signatures", "missing": …, "expires": …}` |
 
