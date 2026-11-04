@@ -24,7 +24,7 @@ func TestEveryCallToASitesAddressUsesThePeerClient(t *testing.T) {
 	h := &Handler{
 		DevRelay:   "http://relay.invalid",
 		HTTPClient: &http.Client{Transport: recordingTransport{"plain", &calls}},
-		PeerClient: func() *http.Client {
+		PeerClient: func(string) *http.Client {
 			return &http.Client{Transport: recordingTransport{"guarded", &calls}}
 		},
 		dataDir: t.TempDir(),
@@ -53,11 +53,11 @@ func TestTheDelegatorsIntroductionIsReadThroughThePeerClient(t *testing.T) {
 	var calls []string
 	h := &Handler{
 		HTTPClient: &http.Client{Transport: recordingTransport{"plain", &calls}},
-		PeerClient: func() *http.Client {
+		PeerClient: func(string) *http.Client {
 			return &http.Client{Transport: countingTransport{"guarded", &calls}}
 		},
 	}
-	id, err := IdentityFromOOBI(h.peerClient(), siteSrv.URL+"/oobi/"+site.aid, site.aid)
+	id, err := IdentityFromOOBI(h.peerClient(siteSrv.URL), siteSrv.URL+"/oobi/"+site.aid, site.aid)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -44,7 +44,7 @@ func (s *CoreServer) initLoginHandler() error {
 	if err != nil {
 		return err
 	}
-	h.PeerClient = func() *http.Client { return siteClient(h.HTTPClient.Timeout) }
+	h.PeerClient = func(rawURL string) *http.Client { return siteClient(h.HTTPClient.Timeout, rawURL) }
 	// Let a credential-gated login present a matching held ACDC.
 	h.HeldCredentials = func() []login.PresentedCredential {
 		recs, err := s.DataStore.GetCredentials()

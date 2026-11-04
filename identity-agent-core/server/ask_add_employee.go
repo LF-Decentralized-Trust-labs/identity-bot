@@ -118,7 +118,7 @@ func (addEmployeeAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (ma
 		"oobi":         rel.RelayOOBI,
 	}))
 	redeemURL := strings.TrimRight(ctx.Base, "/") + "/api/employees/invites/" + p.InviteToken + "/redeem"
-	resp, err := siteClient(15*time.Second).Post(redeemURL, "application/json", strings.NewReader(string(body)))
+	resp, err := siteClient(15*time.Second, redeemURL).Post(redeemURL, "application/json", strings.NewReader(string(body)))
 	if err != nil {
 		return nil, fmt.Errorf("redeem employee invite: %w", err)
 	}

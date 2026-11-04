@@ -47,7 +47,7 @@ func (s *CoreServer) buildAskContext(rawURL string) (AskContext, error) {
 		base += "/" + basePath
 	}
 
-	resp, err := siteClient(15 * time.Second).Get(rawURL)
+	resp, err := siteClient(15*time.Second, rawURL).Get(rawURL)
 	if err != nil {
 		return AskContext{}, fmt.Errorf("fetch Ask: %w", err)
 	}

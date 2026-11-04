@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"identity-agent-core/witness"
 )
 
 const headerKeystateSeq = "X-Keri-Keystate-Seq"
@@ -29,7 +31,9 @@ type Resolver struct {
 
 func NewResolver(replay KELReplayBackend) *Resolver {
 	return &Resolver{
-		HTTPClient: &http.Client{Timeout: 10 * time.Second},
+		// The URLs come from a link someone else wrote: refuse an internal
+		// address, follow no redirect, use no proxy.
+		HTTPClient: witness.GuardedClient(10*time.Second, false),
 		Replay:     replay,
 	}
 }

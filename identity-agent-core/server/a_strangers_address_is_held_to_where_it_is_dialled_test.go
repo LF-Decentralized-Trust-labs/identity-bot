@@ -63,7 +63,7 @@ func TestAnAddressAStrangerChoosesNeverReachesAnInternalService(t *testing.T) {
 	// The login engine's calls to a site go through the client the server
 	// gives it (the login package's own test shows every call uses it).
 	calls["the login engine's client"] = func() {
-		resp, err := h.PeerClient().Get(name + "/oobi/ESITE")
+		resp, err := h.PeerClient(name).Get(name + "/oobi/ESITE")
 		if err == nil {
 			resp.Body.Close()
 		}
@@ -85,14 +85,14 @@ func TestALocalSiteIsReachedOnlyWhereTheOwnerSaidSo(t *testing.T) {
 	defer srv.Close()
 
 	t.Setenv("IA_ALLOW_LOCAL_SITES", "")
-	if resp, err := siteClient(2 * time.Second).Get(srv.URL); err == nil {
+	if resp, err := siteClient(2*time.Second, srv.URL).Get(srv.URL); err == nil {
 		resp.Body.Close()
 	}
 	if hits.Load() != 0 {
 		t.Fatal("a local site was reached without the owner choosing it")
 	}
 	t.Setenv("IA_ALLOW_LOCAL_SITES", "1")
-	resp, err := siteClient(2 * time.Second).Get(srv.URL)
+	resp, err := siteClient(2*time.Second, srv.URL).Get(srv.URL)
 	if err != nil {
 		t.Fatalf("a local site the owner chose was not reached: %v", err)
 	}

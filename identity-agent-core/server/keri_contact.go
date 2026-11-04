@@ -16,6 +16,7 @@ import (
 	"identity-agent-core/backup"
 	"identity-agent-core/buildmode"
 	"identity-agent-core/drivers"
+	"identity-agent-core/login"
 	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
 	"identity-agent-core/witness"
@@ -287,9 +288,36 @@ func sameOOBIHost(a, b string) bool {
 // address is the sender's, so it gets the same guard as any peer address: no
 // proxy, no redirect, the address actually dialled is checked.
 //
-// A local address is reached only when the owner has said they are testing
-// against a local site, with IA_ALLOW_LOCAL_SITES=1 in this agent's own
-// environment; nothing a site or a QR code says can set it.
-func siteClient(timeout time.Duration) *http.Client {
-	return witness.GuardedClient(timeout, os.Getenv("IA_ALLOW_LOCAL_SITES") == "1")
+// A local address is reached in two cases, both the owner's own doing and
+// neither something a site or a QR code can set: the address is the relay the
+// owner configured (IA_RELAY_URL, IA_DEV_RELAY_URL, or the development relay
+// on this machine), or the owner has said they are testing against local sites
+// with IA_ALLOW_LOCAL_SITES=1 in this agent's own environment.
+func siteClient(timeout time.Duration, rawURL string) *http.Client {
+	return witness.GuardedClient(timeout, ownerAllowsLocal(rawURL))
+}
+
+// ownerAllowsLocal is whether the owner's own settings allow a call to rawURL to
+// reach a local address.
+func ownerAllowsLocal(rawURL string) bool {
+	if os.Getenv("IA_ALLOW_LOCAL_SITES") == "1" {
+		return true
+	}
+	return isOwnerRelayLocal(rawURL, login.OwnerRelayURL())
+}
+
+// isOwnerRelayLocal is whether rawURL is at the very scheme, host and port of
+// the owner's relay, and that relay is itself written as a local address.
+func isOwnerRelayLocal(rawURL, relay string) bool {
+	u, err := url.Parse(relay)
+	return err == nil && witness.LiteralIsLocal(u.Hostname()) && sameOOBIHost(relay, rawURL)
+}
+
+// chosenAddressClient is the client for an address someone else wrote and the
+// owner only pasted or received (an OOBI, a schema URL in a credential): the
+// guard applies, and a local address is reached only where the owner's own
+// settings allow it (ownerAllowsLocal) or it is the address of a contact the
+// owner recorded (oobiMayBeLocal).
+func (s *CoreServer) chosenAddressClient(timeout time.Duration, rawURL string) *http.Client {
+	return witness.GuardedClient(timeout, ownerAllowsLocal(rawURL) || s.oobiMayBeLocal(rawURL, ""))
 }
