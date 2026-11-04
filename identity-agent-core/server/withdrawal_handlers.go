@@ -31,6 +31,7 @@ func (s *CoreServer) withdrawalRoutes(r chi.Router) {
 // handleWitnessWithdraw receives a witness saying it intends to stop.
 func (s *CoreServer) handleWitnessWithdraw(w http.ResponseWriter, r *http.Request) {
 	var req witness.WithdrawalRequest
+	r.Body = http.MaxBytesReader(w, r.Body, maxPublicBodyBytes)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid body", err.Error())
 		return
@@ -56,6 +57,7 @@ func (s *CoreServer) handleWitnessWithdraw(w http.ResponseWriter, r *http.Reques
 // handleWitnessWithdrawConfirm receives a controller's proof that it has cut us.
 func (s *CoreServer) handleWitnessWithdrawConfirm(w http.ResponseWriter, r *http.Request) {
 	var c witness.WithdrawalConfirmation
+	r.Body = http.MaxBytesReader(w, r.Body, maxPublicBodyBytes)
 	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid body", err.Error())
 		return
@@ -150,6 +152,20 @@ func (s *CoreServer) stillDesignatedIn(controllerAID string) func(rotationRawB64
 			return true, nil
 		}
 		// Cut by this event; still designated if a later one added it back.
+		//
+		// What bounds a replay of an old cut: the rotation has to be one the
+		// controller signed, already in the log this witness holds, and the
+		// log is checked to its tip, so a re-add this witness holds is
+		// honoured. The remaining case is a re-add this witness never
+		// received (it is not sent events once cut, and the log it holds
+		// cannot have a gap). Then replaying the old cut makes the witness
+		// stand down from a controller that did once cut it and has since put
+		// it back. The effect is limited to this witness ceasing to receipt
+		// for that controller, which the controller can undo by enrolling it
+		// again; nothing is recorded or attested, and nobody who does not hold
+		// the controller's signed rotation can cause it. Refusing any cut older
+		// than the newest event held would block a legitimate withdrawal
+		// whenever the controller rotated again afterwards, so it is not done.
 		for _, d := range res.Witnesses {
 			if sameWitness(d, witnessKey) {
 				return true, nil

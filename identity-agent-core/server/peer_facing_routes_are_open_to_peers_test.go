@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -96,6 +97,10 @@ func TestEveryWitnessProtocolRouteIsDeclaredPublic(t *testing.T) {
 	for _, key := range []string{
 		"POST /api/witness/request", "POST /api/witness/accept",
 		"POST /api/witness/withdraw", "POST /api/witness/withdraw/confirm",
+		// A peer delivers events here and reads the log back; without them no
+		// witness ever holds the rotation a withdrawal is checked against.
+		"POST /api/witness/event", "GET /api/witness/kel/{signer_aid}",
+		"GET /api/witness/kel/{signer_aid}/tip", "GET /api/witness/kel/{signer_aid}/event/{sn}",
 	} {
 		parts := strings.SplitN(key, " ", 2)
 		if classify(parts[0], parts[1]) != accessPublic {
@@ -153,4 +158,76 @@ func TestWithdrawalCompletesBetweenTwoAgentsBehindTheirAuthorisation(t *testing.
 		routed[p] = u
 		return u
 	})
+}
+
+// A peer's event reaches the witness through the full router, and a peer can
+// read the key log back. Declared nowhere, the event post was a 403.
+func TestAPeerDeliversAnEventAndReadsTheLogBackThroughTheFullRouter(t *testing.T) {
+	bob, c := witnessedController(t) // inception delivered on the bare mount
+	base := servedThroughTheRealRouter(t, bob)
+
+	rot, sig := c.rotateCutting(t, bob.witnessKey)
+	if err := bob.takesAt(t, base, c.aid, rot, sig); err != nil {
+		t.Fatalf("a peer's event was refused by the router: %v", err)
+	}
+	for _, path := range []string{"/api/witness/kel/" + c.aid, "/api/witness/kel/" + c.aid + "/event/1",
+		"/api/witness/kel/" + c.aid + "/tip?nonce=n"} {
+		resp, err := http.Get(base + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("GET %s answered a peer with %d", path, resp.StatusCode)
+		}
+	}
+}
+
+// The bodies on routes open to peers are bounded.
+func TestOversizedBodiesOnPeerRoutesAreRefused(t *testing.T) {
+	s := watcherAgent(t, "EAID", 1, "Edigest")
+	base := servedThroughTheRealRouter(t, &peerAgent{core: s})
+	big := `{"aid":"` + strings.Repeat("a", 2<<20) + `"}`
+	for _, path := range []string{"/public/kel-check", "/api/witness/withdraw",
+		"/api/witness/withdraw/confirm", "/api/witness/event"} {
+		resp, err := http.Post(base+path, "application/json", strings.NewReader(big))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest && resp.StatusCode != http.StatusRequestEntityTooLarge {
+			t.Errorf("%s took a 2 MiB body (%d)", path, resp.StatusCode)
+		}
+	}
+}
+
+func TestClientIPIgnoresForwardingHeadersUnlessAProxyIsTrusted(t *testing.T) {
+	mk := func(remote, xff string) *http.Request {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.RemoteAddr = remote
+		if xff != "" {
+			r.Header.Set("X-Forwarded-For", xff)
+		}
+		return r
+	}
+	if got := clientIP(mk("203.0.113.9:5000", "1.2.3.4")); got != "203.0.113.9" {
+		t.Fatalf("a forged X-Forwarded-For chose the caller's address: %s", got)
+	}
+	t.Setenv("TRUSTED_PROXIES", "10.0.0.0/8")
+	if got := clientIP(mk("203.0.113.9:5000", "1.2.3.4")); got != "203.0.113.9" {
+		t.Fatalf("a header from an untrusted connection was believed: %s", got)
+	}
+	if got := clientIP(mk("10.0.0.2:5000", "9.9.9.9, 198.51.100.7, 10.0.0.3")); got != "198.51.100.7" {
+		t.Fatalf("behind a trusted proxy want the nearest untrusted hop, got %s", got)
+	}
+}
+
+func TestTheRateLimiterDoesNotGrowWithoutBound(t *testing.T) {
+	lim := newIPRateLimiter(60, time.Minute)
+	for i := 0; i < maxRateLimitedClients*2; i++ {
+		lim.allow(fmt.Sprintf("ip-%d", i))
+	}
+	if n := len(lim.hits); n > maxRateLimitedClients {
+		t.Fatalf("the limiter holds %d callers, over its bound of %d", n, maxRateLimitedClients)
+	}
 }

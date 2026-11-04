@@ -44,6 +44,8 @@ func (s *CoreServer) handleWitnessEvent(w http.ResponseWriter, r *http.Request) 
 		EventB64      string `json:"event_b64"`
 		CesrSignature string `json:"cesr_signature"`
 	}
+	// Open to peers, so bounded: an event is a few KB, base64 of it a little more.
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid body", err.Error())
 		return

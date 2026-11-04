@@ -232,6 +232,22 @@ var publicRoutes = map[string]string{
 	// witness holds (T-595) — an unsigned or foreign blob is refused.
 	"POST /api/witness/withdraw":         "witnessing protocol — a witness tells the controller it wishes to stop",
 	"POST /api/witness/withdraw/confirm": "witnessing protocol — a controller sends its own signed rotation, which the witness checks against its log",
+	// A witness receives the controller's events here, and a controller (or a
+	// peer cross-checking) reads back what the witness holds. Both were owner
+	// gated, so a peer's BroadcastEvent got 403 and no witness ever stored a
+	// rotation — which made the withdrawal check above refuse every real
+	// withdrawal with "not in the key log".
+	//
+	// Safe to reach because nothing here is trusted on who sent it. The event
+	// is verified against the controller's own signature and the key log before
+	// it is stored (ReceiveEvent), and a witness that is not witnessing that
+	// identity refuses it. The reads return a public, self-verifying key log,
+	// the same data served at GET /{aid}/kel; the tip is signed with the
+	// witness's key over the asker's nonce.
+	"POST /api/witness/event":                      "witnessing protocol — a controller sends a signed event, verified before it is stored",
+	"GET /api/witness/kel/{signer_aid}":            "the key log this witness holds — public and self-verifying",
+	"GET /api/witness/kel/{signer_aid}/tip":        "how far this witness holds an identity's key log, signed with a nonce",
+	"GET /api/witness/kel/{signer_aid}/event/{sn}": "one event of a key log this witness holds — public and self-verifying",
 	// Mounted on the root router under /public/ and never declared, so every
 	// peer cross-check got 403, which the caller records as the peer being
 	// "unavailable" — the whole peer layer degraded silently.

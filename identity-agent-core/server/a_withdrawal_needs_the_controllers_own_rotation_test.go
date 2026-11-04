@@ -113,6 +113,14 @@ func (p *peerAgent) takes(t *testing.T, aid string, raw []byte, sig string) erro
 	return err
 }
 
+// takesAt delivers an event to the witness at the given address, the way a
+// peer's BroadcastEvent does.
+func (p *peerAgent) takesAt(t *testing.T, base, aid string, raw []byte, sig string) error {
+	t.Helper()
+	_, err := p.svc.SubmitToWitness(context.Background(), base+"/api/witness/event", aid, raw, sig)
+	return err
+}
+
 // confirm posts a confirmation to the witness's real route and says whether it
 // was accepted.
 func (p *peerAgent) confirm(t *testing.T, aid string, rotation []byte) int {
@@ -238,7 +246,7 @@ func withdrawalBetweenTwoAgents(t *testing.T, reach func(*peerAgent) string) {
 
 	c := newRotatingController(t, "subject", bob.witnessKey)
 	bob.willWitnessFor(t, c.aid)
-	if err := bob.takes(t, c.aid, c.icpRaw, c.icpSig); err != nil {
+	if err := bob.takesAt(t, reach(bob), c.aid, c.icpRaw, c.icpSig); err != nil {
 		t.Fatal(err)
 	}
 	// Each knows where the other is.
@@ -270,7 +278,7 @@ func withdrawalBetweenTwoAgents(t *testing.T, reach func(*peerAgent) string) {
 	if err := carol.svc.ConfirmWithdrawal(ctx, "EBob", conf); err == nil {
 		t.Fatal("the witness stood down on a rotation it had never been shown")
 	}
-	if err := bob.takes(t, c.aid, rot, sig); err != nil {
+	if err := bob.takesAt(t, reach(bob), c.aid, rot, sig); err != nil {
 		t.Fatal(err)
 	}
 	if err := carol.svc.ConfirmWithdrawal(ctx, "EBob", conf); err != nil {
