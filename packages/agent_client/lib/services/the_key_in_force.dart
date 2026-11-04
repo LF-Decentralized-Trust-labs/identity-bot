@@ -12,7 +12,10 @@ import 'signing_an_event.dart';
 import 'the_event_this_device_expects.dart';
 import 'the_stored_event_this_phrase_would_have_made.dart';
 import 'the_events_this_device_asked_for.dart';
+import 'the_identity_this_device_holds.dart';
 import 'the_key_is_not_held_by_the_core.dart';
+import 'the_key_state_this_device_reads.dart';
+import 'the_witnesses_of_this_devices_events.dart';
 
 /// Which of an identity's keys is in force, read from its key log at the core
 /// that keeps it.
@@ -35,7 +38,7 @@ class TheKeyInForce {
   /// checked with before it is signed late. Left out, [index] works and
   /// signing an event late refuses.
   TheKeyInForce(this._client, this._baseUrl,
-      {TheEventsThisDeviceAskedFor? asked, KeyMath? keyMath})
+      {TheEventsThisDeviceAskedFor? asked, KeyMath? keyMath, this.readTheKeyState})
       : _asked = asked ?? TheEventsThisDeviceAskedFor(),
         _keyMath = keyMath {
     if (_client is OwnerSigningClient) {
@@ -49,6 +52,14 @@ class TheKeyInForce {
   final String _baseUrl;
   final TheEventsThisDeviceAskedFor _asked;
   final KeyMath? _keyMath;
+
+  /// Reads the key state this device trusts (its own record first, then the
+  /// identity's witnesses: TheKeyStateThisDeviceReads), never the key log the
+  /// core serves. A rotation signed late follows the event before it and keeps
+  /// the witness threshold in force, and both are taken from this
+  /// (ADR-061 section 5). Left out, or where it cannot read, a rotation or an
+  /// interaction is not signed late.
+  final Future<VerifiedKeyState> Function(Uint8List seed)? readTheKeyState;
 
   /// The digest a next-key commitment names for [keyQb64]: Blake3 over the
   /// key's qb64 text, as a validator recomputes it.
@@ -150,6 +161,12 @@ class TheKeyInForce {
   ///    at that place (ExpectedEvent, through [signAndRecordEvent]): a founding
   ///    or rotation commits to the next key of this phrase alone, a rotation
   ///    changes no witness, and nothing carries an extra key, digest or anchor.
+  ///  - what the event follows (`p`) and the witness threshold a rotation keeps
+  ///    (`bt`) are those of the key state this device trusts ([readTheKeyState]:
+  ///    its own record, then the witnesses), or of the event just before it that
+  ///    this device checked and signed in this run; never read from earlier bytes
+  ///    the core serves. Where that cannot be read the event is not signed
+  ///    ([TheKeyStateCannotBeReadToSignLate]);
   ///
   /// A core that does not say which events are signed is left as it is.
   Future<KeyState> finishStrandedEvents(Uint8List seed) async {
@@ -158,6 +175,7 @@ class TheKeyInForce {
     final signed = log.signed;
     final scope = await _asked.scope();
     Map<String, dynamic>? establishment;
+    _Trusted? trusted;
     for (var at = 0; at < log.events.length; at++) {
       final event = log.events[at];
       if (_establishing.contains(event['t'])) establishment = event;
@@ -168,7 +186,7 @@ class TheKeyInForce {
       }
       final request = await _asked.theRequest(scope, asked);
       final wanted = (request?['asked'] as Map?)?['anchors'];
-      await _checkAndSign(seed, checked, at,
+      trusted = await _checkAndSign(seed, checked, at, trusted,
           t: '${request?['t']}',
           // The place and digest this device recorded, not the bytes'.
           sn: int.parse('${request?['s'] ?? request?['expected']}', radix: 16),
@@ -188,7 +206,7 @@ class TheKeyInForce {
   /// nothing signs late without). An event that is not is not signed: it comes
   /// back as an [AStoredEventIsNotTheOneExpected] carrying what was stored and
   /// what was expected, for the person to see.
-  Future<void> _checkAndSign(Uint8List seed, _Checked checked, int at,
+  Future<_Trusted> _checkAndSign(Uint8List seed, _Checked checked, int at, _Trusted? running,
       {required String t, required int sn, required String? digest, List<Object?>? ixnAnchors}) async {
     final km = _keyMath;
     if (km == null) {
@@ -198,19 +216,15 @@ class TheKeyInForce {
     }
     final log = checked.log;
     final event = log.events[at];
-    Future<ParsedEvent?> parsed(int i) async => i >= 0 && i < log.rawEventsB64.length && log.rawEventsB64[i].isNotEmpty
-        ? await parseTheStoredEvent(km, log.rawEventsB64[i])
-        : null;
     final raw = at < log.rawEventsB64.length ? log.rawEventsB64[at] : '';
-    final stored = await parsed(at);
-    if (stored == null) {
+    if (raw.isEmpty) {
       throw Exception('event ${event['s']} of ${checked.aid} was stored without the bytes it was '
           'made from, so it is not signed');
     }
-    var lastEstablishment = at - 1;
-    while (lastEstablishment >= 0 && !_establishing.contains(log.events[lastEstablishment]['t'])) {
-      lastEstablishment--;
-    }
+    // What the event follows and the witness threshold it carries on come from
+    // the key state this device trusts, never from earlier bytes the core serves.
+    final stored = await parseTheStoredEvent(km, raw);
+    final trusted = t == 'icp' ? null : await _trustedBefore(seed, checked.aid, sn, running);
     final ExpectedEvent expected;
     try {
       expected = await theStoredEventThisPhraseWouldHaveMade(km, seed,
@@ -219,8 +233,8 @@ class TheKeyInForce {
           sn: sn,
           digest: digest,
           stored: stored,
-          before: await parsed(at - 1),
-          lastEstablishment: await parsed(lastEstablishment),
+          prior: trusted?.tip.digest ?? '',
+          toad: trusted?.witnesses.toad ?? -1,
           generation: checked.keyAt[at],
           ixnAnchors: ixnAnchors);
     } on AStoredEventIsNotTheOneExpected {
@@ -249,6 +263,38 @@ class TheKeyInForce {
     } finally {
       signingSeed.fillRange(0, signingSeed.length, 0);
     }
+    // The event is signed, and this device checked it: what the next one
+    // follows. A founding sets the witnesses; no other event signed late
+    // changes them.
+    final b = stored['b'];
+    return _Trusted(
+        (sn: sn, digest: stored.d),
+        t == 'icp'
+            ? WitnessSet([if (b is List) for (final w in b) '$w'], int.tryParse('${stored['bt']}', radix: 16) ?? 0)
+            : trusted!.witnesses);
+  }
+
+  /// The place the event at [sn] follows and the witnesses in force there, as
+  /// this device trusts them: what it has just checked and signed in this run
+  /// ([running]), otherwise [readTheKeyState]. Refuses when neither can say, or
+  /// when what it says does not end at the event before [sn].
+  Future<_Trusted> _trustedBefore(Uint8List seed, String aid, int sn, _Trusted? running) async {
+    if (running != null && running.tip.sn == sn - 1) return running;
+    final read = readTheKeyState;
+    if (read == null) {
+      throw TheKeyStateCannotBeReadToSignLate(aid, sn, 'this app gave the client no way to read it');
+    }
+    final VerifiedKeyState state;
+    try {
+      state = await read(seed);
+    } catch (e) {
+      throw TheKeyStateCannotBeReadToSignLate(aid, sn, '$e');
+    }
+    if (state.aid != aid || state.tip.sn != sn - 1) {
+      throw TheKeyStateCannotBeReadToSignLate(
+          aid, sn, 'it ends at sequence number ${state.tip.sn} of ${state.aid}, not at ${sn - 1}');
+    }
+    return _Trusted(state.tip, state.witnesses);
   }
 
   /// The unsigned events of the identity's log this device did not ask for,
@@ -293,7 +339,7 @@ class TheKeyInForce {
       // The person has been shown the event as stored, so its seals are what
       // they approved; everything else is checked as for any other.
       final seals = event['a'];
-      await _checkAndSign(seed, checked, at,
+      await _checkAndSign(seed, checked, at, null,
           t: '${event['t']}',
           sn: int.parse(sequenceNumber, radix: 16),
           digest: digest,
@@ -339,6 +385,29 @@ class StrandedEventCannotBeFinished implements Exception {
       'signature over it (${refusal.statusCode}: ${refusal.body}). Every counterparty refuses the '
       "identity's key log from that event on, so nothing more is signed until the core's record "
       'of the event is repaired.';
+}
+
+/// An event signed late follows the key state this device trusts, and nothing
+/// is signed on the core's word for what came before it: the key state could
+/// not be read, or does not end where the event stands.
+class TheKeyStateCannotBeReadToSignLate implements Exception {
+  TheKeyStateCannotBeReadToSignLate(this.aid, this.sequenceNumber, this.why);
+
+  final String aid;
+  final int sequenceNumber;
+  final String why;
+
+  @override
+  String toString() => 'the event at sequence number $sequenceNumber of $aid is not signed: the key '
+      'state it follows could not be read from this device\'s own record or the identity\'s '
+      'witnesses ($why), and the core\'s word for it is not taken';
+}
+
+/// Where the log ends as this device trusts it, and the witnesses in force there.
+class _Trusted {
+  _Trusted(this.tip, this.witnesses);
+  final Place tip;
+  final WitnessSet witnesses;
 }
 
 /// The identity's log as read and checked against this phrase.

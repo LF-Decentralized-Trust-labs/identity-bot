@@ -14,6 +14,7 @@ import 'package:agent_client/services/the_events_this_device_signed.dart';
 import 'package:agent_client/services/the_identity_this_device_holds.dart';
 import 'package:agent_client/services/the_key_events_this_device_makes.dart';
 import 'package:agent_client/services/the_key_in_force.dart';
+import 'package:agent_client/services/the_key_state_this_device_reads.dart';
 import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
@@ -527,12 +528,65 @@ void main() {
   void foundedByAnEarlierVersion(FakeCore c) =>
       c.add(FakeCore.oldFounding(key(0), key(1)), signedBy: signer(0));
 
+  // This device's own record of the events of [c] that are signed, as it holds
+  // them once it has read them: what an event signed late follows is read from
+  // it, never from the core's word.
+  Future<void> recordTheSignedLog(FakeCore c) async {
+    final held = TheIdentityThisDeviceHolds();
+    await held.holds(c.aid);
+    var generation = -1;
+    for (final (i, e) in c.kel.indexed) {
+      final establishes = e['t'] != 'ixn';
+      if (establishes) generation++;
+      if (e['sig'] == null) break;
+      await held.made(
+          aid: c.aid,
+          at: (sn: i, digest: e['d'] as String),
+          ilk: e['t'] as String,
+          key: establishes ? (e['k'] as List).first as String : null,
+          keys: establishes ? [for (final k in e['k'] as List) '$k'] : null,
+          generation: establishes ? generation : null,
+          witnesses: const [],
+          toad: 0);
+    }
+  }
+
+  // The founding an earlier version made and left unsigned, written down as it
+  // wrote it: the log starts unsigned, so what is stranded after it follows
+  // what this device itself signs late.
+  Future<void> foundedAndLeftUnsignedByAnEarlierVersion(FakeCore c) async {
+    final founding = FakeCore.oldFounding(key(0), key(1));
+    final record = TheEventsThisDeviceAskedFor();
+    final request = await record.asking(
+        t: 'icp', expectedSn: 0, asked: {'key': key(0), 'next': key(1)});
+    c.add(founding);
+    await record.added(request,
+        aid: c.aid, sequenceNumber: 0, digest: c.kel.last['d'] as String);
+  }
+
+  TheKeyInForce keysOver(FakeCore c) => TheKeyInForce(c.client(), 'http://core.test',
+      keyMath: km,
+      readTheKeyState: (s) =>
+          TheKeyStateThisDeviceReads(c.client(), km, 'http://core.test').read(s));
+
   // An event an earlier version asked the core to add, written down as it
   // wrote it, and left unsigned: its answer arrived and the signature never
   // did.
   Future<void> strandedByAnEarlierVersion(FakeCore c,
       Map<String, dynamic> event, Map<String, dynamic> asked) async {
     final record = TheEventsThisDeviceAskedFor();
+    // An earlier version stored every event unsigned from its founding on, so
+    // the events before this one are stranded too, and were asked for.
+    for (final (i, e) in c.kel.indexed) {
+      e.remove('sig');
+      final before = await record.asking(
+          t: e['t'] as String,
+          aid: i == 0 ? null : c.aid,
+          expectedSn: i,
+          asked: e['t'] == 'ixn' ? {'anchors': e['a']} : {});
+      await record.added(before,
+          aid: c.aid, sequenceNumber: i, digest: e['d'] as String);
+    }
     final request = await record.asking(
         t: event['t'] as String,
         aid: c.kel.isEmpty ? null : c.aid,
@@ -1145,8 +1199,8 @@ void main() {
     foundedByAnEarlierVersion(core);
     await strandedByAnEarlierVersion(core, FakeCore.rotation(key(1), key(2)),
         {'key': key(1), 'next': key(2)});
-    expect(await pending(), hasLength(1),
-        reason: 'the stranded rotation is written down');
+    expect(await pending(), hasLength(2),
+        reason: 'the stranded founding and rotation are written down');
     await keri.signPayload(name: core.aid, data: [1]);
     expect(await pending(), isEmpty);
   });
@@ -1178,7 +1232,7 @@ void main() {
   test(
       'a request whose answer never arrived is recognised by its keys, at its sequence number',
       () async {
-    foundedByAnEarlierVersion(core);
+    await foundedAndLeftUnsignedByAnEarlierVersion(core);
     final asked = TheEventsThisDeviceAskedFor();
     await asked.asking(
         t: 'rot',
@@ -1190,11 +1244,16 @@ void main() {
     core.posted.clear();
     await expectLater(keri.signPayload(name: core.aid, data: [1]),
         throwsA(isA<AnEventThisDeviceDidNotAskFor>()));
-    expect(core.posted, isNot(contains('/api/cesr/encode')));
+    expect(core.kel.last['sig'], isNull,
+        reason: 'the event that was not asked for is not signed');
+    expect(core.posted.where((p) => p == '/api/events/signature'), hasLength(1),
+        reason: 'only the founding, which was asked for, was signed');
     // The rotation it did ask for is finished.
     core.removeLast();
     core.add(FakeCore.rotation(key(1), key(2)));
-    await keri.signPayload(name: core.aid, data: [1]);
+    // The founding is signed now, and this device holds it.
+    await recordTheSignedLog(core);
+    await keysOver(core).finishStrandedEvents(seed);
     expect(core.kel.last['sig'], isNotNull);
   });
 
@@ -1255,18 +1314,20 @@ void main() {
       ]
     });
     final ixn = core.kel.last;
-    final keys = TheKeyInForce(core.client(), 'http://core.test', keyMath: km);
+    final keys = keysOver(core);
     final awaiting = await keys.eventsAwaitingApproval(seed);
     expect(awaiting.map((e) => e['d']), [ixn['d']]);
     await expectLater(keri.signPayload(name: core.aid, data: [1]),
         throwsA(isA<AnEventThisDeviceDidNotAskFor>()),
         reason: 'the identity is locked until somebody acts');
+    await recordTheSignedLog(core);
     await keys.signApprovedEvent(seed,
         sequenceNumber: ixn['s'] as String, digest: ixn['d'] as String);
     expect(core.kel.last['sig'], isNotNull);
     await keri.signPayload(name: core.aid, data: [1]);
 
     // Approval does not lift the rotation checks.
+    await recordTheSignedLog(core);
     core.add(FakeCore.rotation(key(1), strangersKey(0)));
     core.posted.clear();
     await expectLater(
@@ -1472,7 +1533,7 @@ void main() {
   test(
       'an interaction whose answer never arrived is recognised only by the anchors asked for',
       () async {
-    foundedByAnEarlierVersion(core);
+    await foundedAndLeftUnsignedByAnEarlierVersion(core);
     await TheEventsThisDeviceAskedFor()
         .asking(t: 'ixn', aid: core.aid, expectedSn: 1, asked: {
       'anchors': [
@@ -1488,7 +1549,10 @@ void main() {
     core.posted.clear();
     await expectLater(keri.signPayload(name: core.aid, data: [1]),
         throwsA(isA<AnEventThisDeviceDidNotAskFor>()));
-    expect(core.posted, isNot(contains('/api/cesr/encode')));
+    expect(core.kel.last['sig'], isNull,
+        reason: 'the event that was not asked for is not signed');
+    expect(core.posted.where((p) => p == '/api/events/signature'), hasLength(1),
+        reason: 'only the founding, which was asked for, was signed');
     core.removeLast();
     core.add({
       't': 'ixn',
@@ -1496,7 +1560,9 @@ void main() {
         {'d': 'Easked'}
       ]
     });
-    await keri.signPayload(name: core.aid, data: [1]);
+    // The founding is signed now, and this device holds it.
+    await recordTheSignedLog(core);
+    await keysOver(core).finishStrandedEvents(seed);
     expect(core.kel.last['sig'], isNotNull);
   });
 
@@ -1519,7 +1585,8 @@ void main() {
       'approval signs only an interaction, founding or rotation still waiting for its signature',
       () async {
     foundedByAnEarlierVersion(core);
-    final keys = TheKeyInForce(core.client(), 'http://core.test', keyMath: km);
+    await recordTheSignedLog(core);
+    final keys = keysOver(core);
     // Already signed.
     await expectLater(
         keys.signApprovedEvent(seed, sequenceNumber: '0', digest: core.aid),

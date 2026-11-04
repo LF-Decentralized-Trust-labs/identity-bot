@@ -13,8 +13,9 @@ import 'the_event_this_device_expects.dart';
 /// classical key alone, with one key at a threshold of one, no post-quantum
 /// commitment and no anchor; a rotation changes no witness. The keys and
 /// commitments come from [seed]; where the event sits and what it follows from
-/// the log's other events, parsed here ([stored], [before], [lastEstablishment]),
-/// never from fields the core reports beside the bytes. What the phrase cannot
+/// the key state this device trusts ([prior] is the digest of the event it
+/// follows, [toad] the witness threshold in force), never from fields or earlier
+/// bytes the core reports beside the event. What the phrase cannot
 /// say, the founding's witnesses and their threshold and an interaction's
 /// anchors, is read from the stored event: an interaction is signed late only
 /// as an event this device asked for or the person approved, and a founding's
@@ -42,15 +43,14 @@ Future<ExpectedEvent> theStoredEventThisPhraseWouldHaveMade(
   required int sn,
   String? digest,
   required ParsedEvent stored,
-  required ParsedEvent? before,
-  required ParsedEvent? lastEstablishment,
+  required String prior,
+  required int toad,
   required int generation,
   List<Object?> foundingAnchors = const [],
   List<Object?>? ixnAnchors,
 }) async {
   Future<List<String>> next() async =>
       [await km.nextKeyDigest(KeyManager.publicKeyAt(seed, generation + 1))];
-  int toadOf(ParsedEvent e) => int.tryParse('${e['bt']}', radix: 16) ?? -1;
   ExpectedEvent known(ExpectedEvent e) => digest == null ? e : e.withDigest(digest);
   switch (t) {
     case 'icp':
@@ -62,10 +62,10 @@ Future<ExpectedEvent> theStoredEventThisPhraseWouldHaveMade(
       return known(ExpectedEvent.rotation(
           aid: aid,
           sn: sn,
-          prior: before?.d ?? '',
+          prior: prior,
           keys: [KeyManager.publicKeyAt(seed, generation)],
           next: await next(),
-          toad: lastEstablishment == null ? -1 : toadOf(lastEstablishment)));
+          toad: toad));
     case 'ixn':
       // An interaction is signed late only with the seals this device asked
       // for or the person was shown. A seal of the form {i: x, s: "0", d: x}
@@ -77,7 +77,7 @@ Future<ExpectedEvent> theStoredEventThisPhraseWouldHaveMade(
             'interaction carries, and the person has not been shown them');
       }
       return known(ExpectedEvent.interaction(
-          aid: aid, sn: sn, prior: before?.d ?? '', anchors: ixnAnchors));
+          aid: aid, sn: sn, prior: prior, anchors: ixnAnchors));
     default:
       throw NotTheEventExpected('it is a $t, which this device does '
           'not sign late');

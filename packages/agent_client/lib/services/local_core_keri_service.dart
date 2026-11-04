@@ -96,8 +96,10 @@ class LocalCoreKeriService extends KeriService {
   Future<VerifiedKeyState> _keyState(Uint8List seed) async {
     final h = await _held.read();
     if (h == null || h.establishment == null) {
+      // Recorded first: the key state an event signed late follows is read
+      // from the record, which needs to name the identity.
+      if (h == null) await _held.holds(await _keys.ownIdentifier());
       final legacy = await _keys.finishStrandedEvents(seed);
-      if (h == null) await _held.holds(legacy.aid);
       try {
         return await _readTheCopies(seed);
       } on TheWitnessesDoNotSay {
@@ -162,8 +164,14 @@ class LocalCoreKeriService extends KeriService {
     return state;
   }
 
-  late final TheKeyInForce _keys =
-      TheKeyInForce(_client, _baseUrl, asked: _asked, keyMath: keyMath);
+  late final TheKeyInForce _keys = TheKeyInForce(_client, _baseUrl,
+      asked: _asked,
+      keyMath: keyMath,
+      // What an event signed late follows is read from this device's record or
+      // the identity's witnesses, as the key state is for any other event.
+      readTheKeyState: (seed) =>
+          TheKeyStateThisDeviceReads(_client, _km, _baseUrl, held: _held)
+              .read(seed));
   final _asked = TheEventsThisDeviceAskedFor();
 
   /// The event the core says it added, read from the bytes it returned for
