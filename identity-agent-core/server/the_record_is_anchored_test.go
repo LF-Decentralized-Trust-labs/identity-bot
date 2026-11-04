@@ -170,9 +170,11 @@ func TestTheRecordIsAnchoredOnItsInterval(t *testing.T) {
 	s := recordWorld(t)
 	anchorAtLeastEvery(t, 20*time.Millisecond)
 	writeRows(t, s, 1)
-	stop := make(chan struct{})
-	go s.keepAnchoring(stop)
-	defer close(stop)
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() { defer close(done); s.keepAnchoring(stop) }()
+	// The loop is waited for, not just told to stop: a tick in flight is still
+	// writing into the folder the test is about to remove.
+	defer func() { close(stop); <-done }()
 	for i := 0; i < 100; i++ {
 		if anchors, _ := s.DataStore.GetRecordAnchors(); len(anchors) == 1 {
 			return
@@ -1102,9 +1104,9 @@ func TestEveryIdentityAgentKeepsItsWitnessesUpToDate(t *testing.T) {
 				was := anchorInterval
 				anchorInterval = 20 * time.Millisecond
 				t.Cleanup(func() { anchorInterval = was })
-				stop := make(chan struct{})
-				go s.keepAnchoring(stop)
-				defer close(stop)
+				stop, done := make(chan struct{}), make(chan struct{})
+				go func() { defer close(done); s.keepAnchoring(stop) }()
+				defer func() { close(stop); <-done }()
 			}
 			for i := 0; i < 200; i++ {
 				mu.Lock()
