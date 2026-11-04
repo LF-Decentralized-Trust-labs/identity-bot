@@ -414,7 +414,13 @@ class _WindowsAuthenticode implements BinarySignature {
   /// The thumbprint of a file's valid Authenticode signer, or null.
   Future<String?> _signer(String path) async {
     final quoted = path.replaceAll("'", "''");
-    final r = await Process.run('powershell', [
+    // By its full path, as macOS's codesign is: a 'powershell' found on PATH
+    // could be any program placed earlier on it, and it is what decides here
+    // whether the binary is ours.
+    final windows = Platform.environment['SystemRoot'] ?? r'C:\Windows';
+    final powershell =
+        '$windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+    final r = await Process.run(powershell, [
       '-NoProfile',
       '-NonInteractive',
       '-Command',

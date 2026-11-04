@@ -19,7 +19,7 @@ import (
 func TestKeymathReachesNoNetworkOrStorage(t *testing.T) {
 	out, err := exec.Command("go", "list", "-deps", ".").Output()
 	if err != nil {
-		t.Skipf("go list unavailable: %v", err)
+		t.Fatalf("go list could not list what keymath is built from: %v", err)
 	}
 	for _, dep := range strings.Fields(string(out)) {
 		switch {

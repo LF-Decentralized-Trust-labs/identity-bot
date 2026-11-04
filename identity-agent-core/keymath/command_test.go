@@ -42,7 +42,7 @@ func TestTheCoreBinaryRunsKeymathAndWritesNothing(t *testing.T) {
 	build := exec.Command("go", "build", "-o", bin, "..")
 	build.Dir = "."
 	if out, err := build.CombinedOutput(); err != nil {
-		t.Skipf("the core binary could not be built here: %v %s", err, out)
+		t.Fatalf("the core binary could not be built: %v %s", err, out)
 	}
 	seed := hex.EncodeToString(bytes.Repeat([]byte{3}, 32))
 	cmd := exec.Command(bin, "keymath", "messaging_keyset")
