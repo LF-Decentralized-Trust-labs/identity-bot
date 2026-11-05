@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 // Signing a request to a machine you own, as the identity that owns it.
@@ -169,8 +171,7 @@ func (s *CoreServer) handleSignAsAMachineOwner(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(signAsMachineOwnerResponse{
+	jsonreply.Write(w, http.StatusOK, signAsMachineOwnerResponse{
 		OwnerAID:  ownerAID,
 		Signature: sig,
 		Timestamp: stamp,
