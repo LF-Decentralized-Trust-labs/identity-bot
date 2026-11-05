@@ -15,6 +15,19 @@ import 'the_owner_at_this_computer.dart';
 /// keystore, so the phrase alone recovers everything on any platform. The core
 /// never sees the words, only the derived 64-byte seed; the core refuses to
 /// replace an established different seed (409).
+/// The core refused to hold this person's root seed on this device (HTTP 412):
+/// its secure hardware cannot protect the seed, and a production build will not
+/// write one it cannot. Thrown by [RootSeedHandoff.register] and never
+/// swallowed, because carrying on would leave the core to keep a seed of its
+/// own unprotected, which is the thing refused. [message] is the core's reason,
+/// in words to show the person.
+class RootSeedRefused implements Exception {
+  RootSeedRefused(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
 class RootSeedHandoff {
   /// Whether a core URL is this device's own.
   ///
@@ -33,9 +46,12 @@ class RootSeedHandoff {
   }
 
   /// Posts the mnemonic-derived seed to the local core. Returns true when the
-  /// seed is established (stored now or already identical). Failures are
-  /// logged, never thrown — onboarding must not break on a keystore hiccup;
-  /// the core falls back to a device-local root until a handoff succeeds.
+  /// seed is established (stored now or already identical). Other failures are
+  /// logged, never thrown — onboarding must not break on a keystore hiccup.
+  ///
+  /// A 412 is the exception and throws [RootSeedRefused]: it is the core saying
+  /// this device cannot protect the seed, so the person has to be told rather
+  /// than the app carrying on.
   static Future<bool> register(
     List<String> mnemonic, {
     String? baseUrl,
@@ -78,12 +94,25 @@ class RootSeedHandoff {
       }
       debugPrint(
           '[RootSeedHandoff] core refused seed handoff (${resp.statusCode}): ${resp.body}');
+      if (resp.statusCode == 412) throw RootSeedRefused(_reasonIn(resp.body));
       return false;
+    } on RootSeedRefused {
+      rethrow;
     } catch (e) {
       debugPrint('[RootSeedHandoff] seed handoff failed: $e');
       return false;
     } finally {
       if (client == null) c.close();
     }
+  }
+
+  static String _reasonIn(String body) {
+    try {
+      final j = jsonDecode(body);
+      if (j is Map && j['error'] is String && (j['error'] as String).isNotEmpty) {
+        return j['error'] as String;
+      }
+    } catch (_) {}
+    return 'this device cannot protect your identity\'s root key, so none was stored';
   }
 }

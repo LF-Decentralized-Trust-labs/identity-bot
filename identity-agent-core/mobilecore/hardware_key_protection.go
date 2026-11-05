@@ -63,8 +63,10 @@ type SeedWrapHost interface {
 }
 
 // DeclareSeedWrapHost registers the app's seed wrapper. Must be called before
-// StartServer, like DeclareHardwareKeyProtection. An app that registers none
-// has its seed stored unwrapped, and the stored seed says so and why.
+// StartServer, like DeclareHardwareKeyProtection. An app that registers none is
+// refused in a production build: nothing that founds, restores or stores a seed
+// writes one, and the refusal says why. Only a development build may store the
+// seed unwrapped, and it says so.
 func DeclareSeedWrapHost(h SeedWrapHost) {
 	if h == nil {
 		secureenclave.DeclareSeedWrapHost(nil)

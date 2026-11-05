@@ -46,4 +46,28 @@ void main() {
     );
     expect(ok, isFalse);
   });
+
+  test('a 412 is the core saying this device cannot protect the seed, and is thrown', () async {
+    final client = MockClient((req) async => http.Response(
+        '{"error":"this phone\'s secure hardware is not available to this app yet, so nothing was written"}',
+        412));
+    await expectLater(
+      RootSeedHandoff.register(
+        const ['abandon', 'ability'],
+        baseUrl: 'http://127.0.0.1:5050',
+        client: client,
+      ),
+      throwsA(isA<RootSeedRefused>().having((e) => e.message, 'message',
+          contains('secure hardware is not available'))),
+    );
+  });
+
+  test('a 412 with no readable body still tells the person', () async {
+    final client = MockClient((req) async => http.Response('', 412));
+    await expectLater(
+      RootSeedHandoff.register(const ['abandon', 'ability'],
+          baseUrl: 'http://127.0.0.1:5050', client: client),
+      throwsA(isA<RootSeedRefused>()),
+    );
+  });
 }
