@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
+	keri "github.com/grapeid/keri-go"
 	"net/http"
 	"testing"
 
@@ -52,7 +54,7 @@ func TestACredentialIsNotCheckedAgainstAnUnverifiedIssuerLog(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	acdc := base64Of(`{"i":"` + issuer + `","d":"ESaid"}`)
+	acdc := aRealCredentialFrom(t, issuer)
 	ok, _, reason := s.verifyPresentedCredentialACDC(context.Background(), acdc, "EHolder", "", "", "", nil)
 	if ok || called {
 		t.Fatalf("a credential was checked against an unverified issuer log (ok=%v, driver called=%v)", ok, called)
@@ -63,3 +65,18 @@ func TestACredentialIsNotCheckedAgainstAnUnverifiedIssuerLog(t *testing.T) {
 }
 
 func base64Of(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
+
+// aRealCredentialFrom is a well-formed credential, its identifier correct, that
+// names issuer as its issuer. The server reads every credential it verifies
+// the way the engine does, so a fixture that is not one is refused unread.
+func aRealCredentialFrom(t *testing.T, issuer string) string {
+	t.Helper()
+	acdc, err := keri.BuildCredential(keri.CredentialInput{
+		SchemaSAID: "ESchema", Issuer: issuer, Recipient: "EHolder",
+		Data: json.RawMessage(`{"d":"","i":"EHolder","dt":"2026-01-01T00:00:00.000000+00:00"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base64.StdEncoding.EncodeToString(acdc)
+}

@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"identity-agent-core/internal/coretypes"
 	"net/http"
@@ -128,26 +129,90 @@ func TestALoginPresentedWithARevokedCredentialIsRefusedAndSaysWhy(t *testing.T) 
 	}
 }
 
-// The same refusal reaches the credential gate a login passes through, and the
-// declared-field fallback (no credential bytes sent) does not outweigh this
-// agent's own record of the revocation.
-func TestTheLoginGateRefusesARevokedCredentialWithOrWithoutItsBytes(t *testing.T) {
+// The credential gate admits a credential only on its bytes. A revoked one is
+// refused with its bytes, and one sent without them is refused too: the said
+// and status of a declared entry are the holder's own words, so a made-up said
+// cannot be used to step round this agent's record of a revocation.
+func TestTheLoginGateRefusesARevokedCredentialAndAnyCredentialSentWithoutItsBytes(t *testing.T) {
 	s, said, acdc, revoke := issuedThenRevoked(t)
 	const schema = "ESchemaTheSiteRequires"
-	with := []interface{}{map[string]interface{}{"said": said, "schema_said": schema, "status": "issued", "acdc_json_b64": acdc}}
-	without := []interface{}{map[string]interface{}{"said": said, "schema_said": schema, "status": "issued"}}
-
-	if ok, _ := s.credentialGateSatisfied(context.Background(), without, schema, ""); !ok {
-		t.Fatal("a live credential's declared status was refused")
-	}
-	revoke()
-	for name, presented := range map[string][]interface{}{"with bytes": with, "declared only": without} {
-		ok, reason := s.credentialGateSatisfied(context.Background(), presented, schema, "")
-		if ok {
-			t.Errorf("%s: the gate admitted a credential revoked here", name)
+	declared := func(said, body string) []interface{} {
+		m := map[string]interface{}{"said": said, "schema_said": schema, "status": "issued"}
+		if body != "" {
+			m["acdc_json_b64"] = body
 		}
-		if !strings.Contains(reason, "revoked") {
-			t.Errorf("%s: the refusal does not say why: %q", name, reason)
+		return []interface{}{m}
+	}
+
+	revoke()
+	for name, presented := range map[string][]interface{}{
+		"with bytes":                   declared(said, acdc),
+		"no bytes, its real said":      declared(said, ""),
+		"no bytes, a made-up said":     declared("EMadeUpByTheHolder", ""),
+		"no bytes, no said at all":     declared("", ""),
+		"unpadded bytes of the credit": declared(said, strings.TrimRight(acdc, "=")),
+	} {
+		if ok, reason := s.credentialGateSatisfied(context.Background(), presented, schema, ""); ok {
+			t.Errorf("%s: the gate admitted a credential revoked here (%s)", name, reason)
+		}
+	}
+	// And a credential that is not revoked is not admitted on a declared
+	// entry either.
+	s2, said2, _, _ := issuedThenRevoked(t)
+	if ok, _ := s2.credentialGateSatisfied(context.Background(), declared(said2, ""), schema, ""); ok {
+		t.Error("the gate admitted a declared entry with no credential body")
+	}
+}
+
+// The engine reads base64 in any spelling, so the server must read the same
+// credential the engine does. A revoked credential sent unpadded is revoked on
+// every path, and one the server cannot read at all is refused rather than
+// passed on with no registry to check.
+func TestARevokedCredentialInAnyBase64SpellingIsRefused(t *testing.T) {
+	s, said, acdc, revoke := issuedThenRevoked(t)
+	revoke()
+	raw, err := base64.StdEncoding.DecodeString(acdc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spellings := map[string]string{
+		"unpadded":     base64.RawStdEncoding.EncodeToString(raw),
+		"url alphabet": base64.URLEncoding.EncodeToString(raw),
+		"unpadded url": base64.RawURLEncoding.EncodeToString(raw),
+	}
+	for name, spelled := range spellings {
+		got := verifyHere(t, s, spelled)
+		if got.Verified || got.RevocationStatus != revocationRevoked {
+			t.Errorf("%s: credential/verify read %+v", name, got)
+		}
+		chain := verifyChainHere(t, s, map[string]any{"acdc_json_b64": spelled})
+		if chain.Valid || len(chain.Chain) == 0 || chain.Chain[0].RevocationStatus != revocationRevoked {
+			t.Errorf("%s: the chain verifier read %+v", name, chain)
+		}
+		if ok, _, _ := s.verifyPresentedCredentialACDC(context.Background(), spelled, "", "", "", "", nil); ok {
+			t.Errorf("%s: login accepted a credential revoked here", name)
+		}
+	}
+	_ = said
+}
+
+func TestACredentialTheServerCannotReadIsRefused(t *testing.T) {
+	s, _, _, _ := issuedThenRevoked(t)
+	junk := base64.StdEncoding.EncodeToString([]byte(`{"d":"x","i":"y","ri":"z"}`))
+
+	raw, _ := json.Marshal(map[string]any{"acdc_json": junk})
+	rec := httptest.NewRecorder()
+	s.handleVerifyCredential(rec, httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(raw)))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("credential/verify answered %d for a body it cannot read: %s", rec.Code, rec.Body.String())
+	}
+	for _, body := range []string{junk, "not base64 !!"} {
+		chain := verifyChainHere(t, s, map[string]any{"acdc_json_b64": body})
+		if chain.Valid || len(chain.Chain) == 0 || chain.Chain[0].Valid {
+			t.Errorf("the chain verifier passed an unreadable body: %+v", chain)
+		}
+		if ok, _, _ := s.verifyPresentedCredentialACDC(context.Background(), body, "", "", "", "", nil); ok {
+			t.Error("login accepted an unreadable body")
 		}
 	}
 }

@@ -384,8 +384,8 @@ func (s *CoreServer) authorizeAssetAccess(ctx context.Context, siteAID, pairwise
 // satisfies the required schema (and issuer). When the KERI driver + raw ACDC
 // bytes are available it CRYPTOGRAPHICALLY verifies the credential (SAID + issuer
 // KEL anchoring + watcher duplicity, and holder-binding if a presentation
-// signature is present). Without the driver it degrades to a declared-field
-// check so open/score-gated flows and driverless environments still work.
+// signature is present). Without the driver or the credential body nothing is
+// admitted: a declared field is not evidence.
 func (s *CoreServer) credentialGateSatisfied(ctx context.Context, presented []interface{}, schema, issuer string) (bool, string) {
 	lastReason := "required credential not presented"
 	for _, p := range presented {
@@ -400,26 +400,21 @@ func (s *CoreServer) credentialGateSatisfied(ctx context.Context, presented []in
 			lastReason = "credential from an unexpected issuer"
 			continue
 		}
+		// No credential body, no pass. A declared field (a said, a status) is
+		// whatever the holder chose to write, so it is never read as evidence
+		// about a credential this agent could have revoked.
 		acdcB64 := credStr(m["acdc_json_b64"])
-		if s.KeriDriver != nil && acdcB64 != "" {
-			verified, iss, reason := s.verifyPresentedCredentialACDC(ctx, acdcB64,
-				credStr(m["holder_aid"]), credStr(m["pres_said_b64"]),
-				credStr(m["cesr_sig"]), credStr(m["holder_public_key"]), schemaForms(schema))
-			if verified && (issuer == "" || iss == issuer) {
-				return true, ""
-			}
-			lastReason = "credential verification failed: " + reason
+		if s.KeriDriver == nil || acdcB64 == "" {
+			lastReason = "credential body not presented, so it cannot be verified"
 			continue
 		}
-		// No driver / no ACDC bytes → declared-field fallback. A declared
-		// status never outweighs this agent's own record of a revocation.
-		if why, revoked := s.recordedRevokedHere(credStr(m["said"])); revoked {
-			lastReason = "credential revoked: " + why
-			continue
-		}
-		if isUsableStatus(credStr(m["status"])) {
+		verified, iss, reason := s.verifyPresentedCredentialACDC(ctx, acdcB64,
+			credStr(m["holder_aid"]), credStr(m["pres_said_b64"]),
+			credStr(m["cesr_sig"]), credStr(m["holder_public_key"]), []string{schema})
+		if verified && (issuer == "" || iss == issuer) {
 			return true, ""
 		}
+		lastReason = "credential verification failed: " + reason
 	}
 	return false, lastReason
 }
@@ -432,21 +427,19 @@ func (s *CoreServer) verifyPresentedCredentialACDC(ctx context.Context, acdcJson
 	if s.KeriDriver == nil {
 		return false, "", "keri driver unavailable"
 	}
-	var acdcBody map[string]interface{}
 	var issuerKelEvents []map[string]interface{}
-	issuerAid := ""
-	if acdcBytes, err := base64.StdEncoding.DecodeString(acdcJsonB64); err == nil {
-		if json.Unmarshal(acdcBytes, &acdcBody) == nil {
-			if ia, ok := acdcBody["i"].(string); ok && ia != "" {
-				issuerAid = ia
-				if kelRecord, err3 := s.DataStore.GetContactKEL(issuerAid); err3 == nil && kelRecord != nil && kelRecord.KelVerified {
-					issuerKelEvents = unwrapEventJSON(kelRecord.KEL)
-				}
-				if issuerKelEvents == nil {
-					if ownEvents, err3 := s.DataStore.GetEvents(issuerAid); err3 == nil && len(ownEvents) > 0 {
-						issuerKelEvents = eventRecordsToKEDs(ownEvents)
-					}
-				}
+	cred, err := readCredentialHere(acdcJsonB64)
+	if err != nil {
+		return false, "", err.Error()
+	}
+	issuerAid := cred.Issuer
+	if issuerAid != "" {
+		if kelRecord, err3 := s.DataStore.GetContactKEL(issuerAid); err3 == nil && kelRecord != nil && kelRecord.KelVerified {
+			issuerKelEvents = unwrapEventJSON(kelRecord.KEL)
+		}
+		if issuerKelEvents == nil {
+			if ownEvents, err3 := s.DataStore.GetEvents(issuerAid); err3 == nil && len(ownEvents) > 0 {
+				issuerKelEvents = eventRecordsToKEDs(ownEvents)
 			}
 		}
 	}
@@ -461,7 +454,7 @@ func (s *CoreServer) verifyPresentedCredentialACDC(ctx context.Context, acdcJson
 		CesrSignature:      cesrSig,
 		HolderPublicKey:    holderPubKey,
 		TrustedSchemaSaids: trustedSchemas,
-	}, acdcBody)
+	}, cred)
 	if err != nil {
 		return false, issuerAid, "verify error: " + err.Error()
 	}

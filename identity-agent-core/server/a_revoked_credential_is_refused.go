@@ -1,9 +1,11 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 
 	"identity-agent-core/drivers"
+	"identity-agent-core/iacrypto"
 
 	keri "github.com/grapeid/keri-go"
 )
@@ -38,9 +40,11 @@ type revocationState struct {
 // other credential nothing is supplied and the status says so. Whether an
 // unreachable source counts against the credential is a product decision
 // (SEAM-13 OQ-3) and is not made here.
-func (s *CoreServer) localRevocationState(acdc map[string]interface{}) revocationState {
-	said, _ := acdc["d"].(string)
-	registry, _ := acdc["ri"].(string)
+func (s *CoreServer) localRevocationState(cred *keri.Credential) revocationState {
+	if cred == nil {
+		return revocationState{status: revocationNoRegistryState}
+	}
+	said, registry := cred.SAID, cred.Registry
 	if said == "" || registry == "" {
 		return revocationState{status: revocationNoRegistryState}
 	}
@@ -68,37 +72,49 @@ func (s *CoreServer) localRevocationState(acdc map[string]interface{}) revocatio
 	return revocationState{log: log, status: revocationNotRevoked}
 }
 
+// errCredentialUnreadable is returned where the credential's bytes cannot be
+// read. A credential this agent cannot read is refused, never passed on to be
+// judged by something that might read it differently.
+var errCredentialUnreadable = errors.New("the credential cannot be read")
+
+// readCredentialHere reads a credential exactly as the engine does: base64 in
+// any spelling the engine accepts (iacrypto.DecodeBase64), then the bytes
+// checked against their own identifier (keri.VerifyCredential). The credential
+// id, the issuer and the registry used for the revocation check come from this
+// and from nothing else, so they are the ones the engine is judging. A second,
+// differently-spelled decode is how a credential this agent revoked was once
+// read as "no registry state held".
+func readCredentialHere(acdcB64 string) (*keri.Credential, error) {
+	raw, err := iacrypto.DecodeBase64(acdcB64)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", errCredentialUnreadable, err)
+	}
+	cred, err := keri.VerifyCredential(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", errCredentialUnreadable, err)
+	}
+	return cred, nil
+}
+
 // verifyCredentialHere is the one way this agent asks the engine to verify a
 // credential. Every path that verifies a credential or a presentation of one
 // goes through it, so a credential revoked here cannot verify anywhere here:
 // it supplies the credential's transaction log where this agent holds the
 // registry, and folds what that shows into the engine's verdict.
 //
-// acdc is the credential's decoded body (nil where it could not be decoded;
-// the engine then refuses it as malformed and the status is "not checked").
-func (s *CoreServer) verifyCredentialHere(req *drivers.DriverVerifyCredentialRequest, acdc map[string]interface{}) (verifyReply, error) {
-	revocation := s.localRevocationState(acdc)
+// cred is the credential as readCredentialHere read it. Without one there is
+// nothing to check a revocation against, and the credential is refused.
+func (s *CoreServer) verifyCredentialHere(req *drivers.DriverVerifyCredentialRequest, cred *keri.Credential) (verifyReply, error) {
+	if cred == nil {
+		return verifyReply{}, errCredentialUnreadable
+	}
+	revocation := s.localRevocationState(cred)
 	req.RegistryEventsB64 = revocation.log
 	res, err := s.KeriDriver.VerifyCredential(req)
 	if err != nil {
 		return verifyReply{}, err
 	}
 	return revocation.applyTo(res), nil
-}
-
-// recordedRevokedHere reports whether this agent's own record says the
-// credential with this SAID was revoked (or is being withdrawn), and why. It
-// is for the paths that hold no credential bytes to verify, only a claim about
-// one: a claim is not evidence against a record this agent made itself.
-func (s *CoreServer) recordedRevokedHere(said string) (string, bool) {
-	if said == "" || s.DataStore == nil {
-		return "", false
-	}
-	rec, _ := s.DataStore.GetCredential(said)
-	if rec != nil && (rec.Status == "revoked" || rec.Status == credentialStatusWithdrawing) {
-		return fmt.Sprintf("this agent recorded the credential as %s", rec.Status), true
-	}
-	return "", false
 }
 
 // verifyReply is the credential/verify reply: everything the engine reports,
