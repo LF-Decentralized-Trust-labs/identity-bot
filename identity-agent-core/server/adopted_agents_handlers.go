@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
@@ -53,9 +54,22 @@ func (s *CoreServer) handleForgetAdoptedAgent(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadRequest, "Missing agent", "name the agent to forget")
 		return
 	}
+	ownerAID := ""
+	if agents, lerr := s.DataStore.ListAdoptedAgents(); lerr == nil {
+		for _, a := range agents {
+			if a.AID == aid {
+				ownerAID = a.OwnerAID
+			}
+		}
+	}
 	if err := s.DataStore.ForgetAdoptedAgent(aid); err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not forget the agent", err.Error())
 		return
+	}
+	// The relationship with this machine is over from this side, and the
+	// address made for the identity it answers to goes back (ADR-048 §6).
+	if ownerAID != "" {
+		s.inBackground(func(context.Context) { s.endRelationshipAddress(ownerAID) })
 	}
 	writeJSON(w, map[string]interface{}{
 		"ok": true,

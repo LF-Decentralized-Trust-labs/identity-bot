@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -280,5 +281,8 @@ func (s *CoreServer) finishCeremony(status, detail, rotationSAID string) error {
 	if status == ceremonyApplied {
 		c.AppliedAt = time.Now().UTC()
 	}
-	return s.saveCeremony(c)
+	err = s.saveCeremony(c)
+	// The ceremony is over, so the offers made for it are too.
+	s.inBackground(func(context.Context) { s.endHandle(ceremonyHandle) })
+	return err
 }

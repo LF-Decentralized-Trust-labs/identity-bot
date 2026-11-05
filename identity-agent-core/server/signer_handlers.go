@@ -48,8 +48,25 @@ func (s *CoreServer) HandleCreateSignerInvite(w http.ResponseWriter, r *http.Req
 }
 
 func (s *CoreServer) handleCreateSignerInvite(w http.ResponseWriter, r *http.Request) {
-	publicURL, ok := s.relayAddressBase(r)
-	if !ok {
+	if _, ok := s.relayAddressBase(r); !ok {
+		writeNoRelayAddress(w)
+		return
+	}
+	// The identifier the offer is signed as, and so the address every link in
+	// it names: made for this invitation alone (ADR-048 §6).
+	signer, merr := s.mintSignerIdentity()
+	if merr != nil {
+		writeRelationshipError(w, http.StatusInternalServerError, "mint signer", merr)
+		return
+	}
+	made := false
+	defer func() {
+		if !made {
+			s.endRelationshipAddress(signer.aid)
+		}
+	}()
+	publicURL, haveAddress := s.addressBaseFor(r, signer.aid)
+	if !haveAddress {
 		writeNoRelayAddress(w)
 		return
 	}
@@ -100,11 +117,13 @@ func (s *CoreServer) handleCreateSignerInvite(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	askToken, aerr := s.mintSignerAsk(orgName, orgAID, orgOOBI, inv.Token)
+	askToken, aerr := s.mintSignerAsk(signer, orgName, orgAID, orgOOBI, inv.Token)
 	if aerr != nil {
 		http.Error(w, aerr.Error(), http.StatusInternalServerError)
 		return
 	}
+	made = true
+	s.madeFor("invite:"+enrolsecret.Digest(inv.Token), signer.aid)
 
 	writeJSON(w, map[string]interface{}{
 		"invite": inv,
@@ -113,17 +132,28 @@ func (s *CoreServer) handleCreateSignerInvite(w http.ResponseWriter, r *http.Req
 	})
 }
 
+// signerIdentity is the pairwise identifier a signer's offer is signed as.
+type signerIdentity struct {
+	aid, oobi string
+	seed      []byte
+}
+
+func (s *CoreServer) mintSignerIdentity() (signerIdentity, error) {
+	aid, oobi, seed, err := s.mintPairwise("signer")
+	if err != nil {
+		return signerIdentity{}, err
+	}
+	return signerIdentity{aid: aid, oobi: oobi, seed: seed}, nil
+}
+
 // mintSignerAsk builds the signed offer a person scans, and returns the token
 // that resolves to it.
 //
 // Extracted so the founding-signer invite and the owner ceremony mint the same
 // thing. A second, parallel offer format would be one more thing to keep in
 // step, and the agent on the other side already knows how to read this one.
-func (s *CoreServer) mintSignerAsk(orgName, orgAID, orgOOBI, inviteToken string) (string, error) {
-	_, pwOOBI, seed, err := s.mintPairwise("signer")
-	if err != nil {
-		return "", fmt.Errorf("mint signer: %w", err)
-	}
+func (s *CoreServer) mintSignerAsk(signer signerIdentity, orgName, orgAID, orgOOBI, inviteToken string) (string, error) {
+	pwOOBI, seed := signer.oobi, signer.seed
 	// The organisation's own logo, carried in the Ask body so the signer sees the
 	// real business. It travels over the tunnel with the rest of the Ask, never
 	// in the scanned code, which stays a bare pointer. Absent is fine — the

@@ -894,6 +894,7 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 	}
 
 	ownerAID, ownerIdx := req.OwnerAID, 0
+	adopted := false
 	if ownerAID != "" {
 		idx, known, lErr := s.DataStore.MachineOwnerIndex(ownerAID)
 		if lErr != nil || !known {
@@ -909,10 +910,18 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		var mErr error
 		ownerAID, _, _, ownerIdx, mErr = s.mintPairwiseIn("machines", "machine-"+shortAID(offer.PairwiseAID))
 		if mErr != nil {
-			writeError(w, http.StatusInternalServerError,
-				"Could not mint an identity for this machine", mErr.Error())
+			writeRelationshipError(w, http.StatusInternalServerError,
+				"Could not mint an identity for this machine", mErr)
 			return
 		}
+		// Minted here, so if the adoption does not finish nothing else will
+		// ever end it: its address goes back (ADR-048 §6).
+		mintedHere := ownerAID
+		defer func() {
+			if !adopted {
+				s.endRelationshipAddress(mintedHere)
+			}
+		}()
 	}
 	ownerKey, err := s.pairwisePublicKey(ownerIdx)
 	if err != nil {
@@ -1102,6 +1111,7 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 	}
 
 	log.Printf("[pairing] adopted box at %s: it founded %s, owned by %s", base, identityAID, ownerAID)
+	adopted = true
 	writeJSON(w, map[string]interface{}{
 		"ok": true, "box_url": base,
 		"root_aid": identityAID, "owner_aid": ownerAID,

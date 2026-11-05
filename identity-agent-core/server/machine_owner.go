@@ -65,6 +65,14 @@ func (s *CoreServer) mintAnIdentityToClaimAMachineWith() (aid, oobi string, err 
 	if err != nil {
 		return "", "", fmt.Errorf("could not mint an identity for this machine: %w", err)
 	}
+	// Whatever fails from here, the address made for it goes back: an identity
+	// that was not recorded is one nobody will ever end (ADR-048 §6).
+	kept, minted := false, aid // aid is a named result, blank by the time a failure return runs this
+	defer func() {
+		if !kept {
+			s.endRelationshipAddress(minted)
+		}
+	}()
 	// Remembered here rather than handed out and taken back. Adoption looks it
 	// up; an index that travelled through a caller would have to be trusted or
 	// verified, and neither is needed when this side minted it.
@@ -82,6 +90,7 @@ func (s *CoreServer) mintAnIdentityToClaimAMachineWith() (aid, oobi string, err 
 		return "", "", fmt.Errorf("could not record this identity's key log, without which "+
 			"it could not prove itself to the machine later: %w", err)
 	}
+	kept = true
 	return aid, oobi, nil
 }
 

@@ -138,10 +138,13 @@ type CoreServer struct {
 	tunnelSrv *http.Server
 	router    chi.Router
 	// The direct listener (direct_ingress.go): nil unless the operator bound one.
-	directLn   net.Listener
-	directSrv  *http.Server
-	oobiOffersHeld *oobiOffers
-	directAIDs *directAllowlist
+	directLn                  net.Listener
+	directSrv                 *http.Server
+	oobiOffersHeld            *oobiOffers
+	publishEndpoint           func(ctx context.Context, aid, address string) error
+	relationshipEndsHeld      *relationshipEnds
+	relationshipPublishedHeld *relationshipPublishedSet
+	directAIDs                *directAllowlist
 
 	// See Config.RequireOwnerAtInception.
 	requireOwnerAtInception bool
@@ -3374,13 +3377,13 @@ func (s *CoreServer) handleOobiGenerate(w http.ResponseWriter, r *http.Request) 
 		func() (string, error) {
 			a, _, _, _, merr := s.mintPairwiseIn("contacts", "oobi-offer")
 			return a, merr
-		})
+		}, s.endRelationshipAddress)
 	if errors.Is(err, errTooManyOobiIdentifiers) {
 		writeError(w, http.StatusTooManyRequests, "Too many identifiers made", err.Error())
 		return
 	}
-	if err != nil && aid == "" {
-		writeError(w, http.StatusInternalServerError, "Failed to make an identifier for this counterparty", err.Error())
+	if err != nil {
+		writeRelationshipError(w, http.StatusInternalServerError, "Failed to make an identifier for this counterparty", err)
 		return
 	}
 	oobiURL, ok := s.oobiForCounterparty(r, aid)
@@ -3393,11 +3396,8 @@ func (s *CoreServer) handleOobiGenerate(w http.ResponseWriter, r *http.Request) 
 		oobiURL = fmt.Sprintf("%s?action=%s", oobiURL, url.QueryEscape(action))
 	}
 
-	if err != nil {
-		log.Printf("[identity-agent-core] oobi: %v", err)
-	}
 	out := map[string]interface{}{"oobi_url": oobiURL, "aid": aid}
-	if base, ok := s.relayAddressBase(r); ok {
+	if base, ok := s.addressBaseFor(r, aid); ok {
 		out["relay_url"] = base
 	}
 	jsonreply.Write(w, http.StatusOK, out)
@@ -4232,6 +4232,13 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 		pubB64 := iacrypto.VerkeyQB64(pub)
 		nextB64 := iacrypto.VerkeyQB64(nextPub)
 		if resp, err := s.KeriDriver.CreateInceptionNamed(pubB64, nextB64, "rel-"+oobiData.AID); err == nil && resp.AID != "" {
+			// Its own relay address, before the contact exists: a relationship
+			// the relay would not make one for is refused, not made at the
+			// shared address (ADR-048 §6).
+			if _, aerr := s.addressForNewRelationship("contacts", resp.AID); aerr != nil {
+				writeRelationshipError(w, http.StatusInternalServerError, "Failed to make an address for this relationship", aerr)
+				return
+			}
 			contact.RelationshipAID = resp.AID
 			contact.RelationshipSeedB64 = "" // no per-contact secret; re-derive from root+index
 			log.Printf("[identity-agent-core] CONTACT: HD-derived (index %d) + minted real relationship P-AID %s via local KERI driver for %s", contactIdx, resp.AID, oobiData.AID)
@@ -4242,6 +4249,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.DataStore.SaveContact(contact); err != nil {
+		s.endRelationshipAddress(contact.RelationshipAID)
 		writeError(w, http.StatusInternalServerError, "Failed to save contact", err.Error())
 		return
 	}
@@ -4251,47 +4259,8 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[identity-agent-core] CONTACT: Added %s (AID: %s) status=%s kel_verified=%v", alias, oobiData.AID, contactStatus, kelVerified)
 
-	publicURL := s.getPublicURL(r)
-	s.inBackground(func(context.Context) {
-		ourIdentity, err := s.DataStore.GetIdentity()
-		if err != nil || ourIdentity == nil {
-			log.Printf("[identity-agent-core] EXCHANGE: Cannot send introduction — no identity available")
-			return
-		}
-
-		ourOOBI := fmt.Sprintf("%s/public/oobi/%s", publicURL, ourIdentity.AID)
-		ourAlias := ourIdentity.AID[:12] + "..."
-		ourProfile, _ := s.DataStore.GetProfile()
-		// What we send about ourselves is the add_contact declaration, the same
-		// list the consent screen shows — not the whole profile.
-		fields, derr := declaredDisclosure(2)
-		if derr != nil {
-			log.Printf("[identity-agent-core] EXCHANGE: refusing to send introduction — %v", derr)
-			return
-		}
-		jc, photo := buildDisclosure(fields, ourProfile, ourIdentity.AID, ourOOBI)
-		if jc.FullName != "" {
-			ourAlias = jc.FullName
-		}
-
-		// The introduction rides the envelope, and carries no claim about who
-		// sent it. Who sent it is what the envelope establishes; a field saying
-		// so would be a field somebody could fill in.
-		payload := map[string]interface{}{
-			"alias":    ourAlias,
-			"oobi_url": ourOOBI,
-			"jcard":    jc,
-		}
-		if photo != "" {
-			payload["photo"] = photo
-		}
-		if err := s.introduceOurselvesTo(oobiData.AID, req.OobiURL, payload); err != nil {
-			log.Printf("[identity-agent-core] INTRODUCTION: could not tell %s who we are: %v — "+
-				"the contact is saved here, and they do not know about us yet",
-				oobiData.AID, err)
-			return
-		}
-	})
+	// Tell them who we are, at the address made for this relationship.
+	s.inBackground(func(context.Context) { s.sendIntroduction(oobiData.AID, req.OobiURL, 2) })
 
 	jsonreply.Write(w, http.StatusCreated, contact)
 }
@@ -4319,6 +4288,9 @@ func (s *CoreServer) handleDeleteContact(w http.ResponseWriter, r *http.Request)
 	}
 
 	log.Printf("[identity-agent-core] CONTACT: Removed %s (AID: %s)", contact.Alias, aid)
+
+	// The relationship is over, so the address made for it is too (ADR-048 §6).
+	s.endRelationshipAddress(contact.RelationshipAID)
 
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -86,8 +86,11 @@ func TestAnOobiNamesOnlyTheRelayAddressAndAPairwiseIdentifier(t *testing.T) {
 		t.Fatal(err)
 	}
 	oobi, _ := got["oobi_url"].(string)
-	if !strings.HasPrefix(oobi, strings.TrimRight(relayURL, "/")+"/public/oobi/") {
-		t.Errorf("the OOBI does not name the relay address %s: %s", relayURL, oobi)
+	// At the relay, at an address made for this counterparty alone rather than
+	// the one the agent publishes (ADR-048 §6).
+	if !strings.HasPrefix(oobi, relayHost(relayURL)+"/") || strings.HasPrefix(oobi, strings.TrimRight(relayURL, "/")+"/") ||
+		!strings.Contains(oobi, "/public/oobi/") {
+		t.Errorf("the OOBI does not name an address at the relay %s made for this counterparty: %s", relayURL, oobi)
 	}
 	if aid, _ := got["aid"].(string); aid == "" || aid == rootAIDForOobiTests {
 		t.Errorf("the OOBI names %q, not a pairwise identifier made for this counterparty", aid)
@@ -342,4 +345,11 @@ func TestInvitationsAreRefusedWithNoRelayAddress(t *testing.T) {
 			}
 		}
 	}
+}
+
+// relayHost is scheme://host of a relay address.
+func relayHost(addr string) string {
+	rest := strings.TrimPrefix(strings.TrimPrefix(addr, "https://"), "http://")
+	scheme := strings.TrimSuffix(addr, rest)
+	return scheme + strings.SplitN(rest, "/", 2)[0]
 }

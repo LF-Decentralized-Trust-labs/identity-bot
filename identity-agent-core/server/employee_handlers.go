@@ -1,11 +1,13 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/go-chi/chi/v5/middleware"
 	"net/http"
 
 	"identity-agent-core/asset"
@@ -24,7 +26,7 @@ func (s *CoreServer) mountEmployeeRoutes(r chi.Router) {
 		r.Get("/", s.assetHandler.HandleListEmployees)
 		r.Get("/invites", s.assetHandler.HandleListEmployeeInvites)
 		r.Post("/invites", s.handleCreateEmployeeInvite)
-		r.Delete("/invites/{invite}", s.assetHandler.HandleRevokeEmployeeInvite)
+		r.Delete("/invites/{invite}", s.revokeEmployeeInvite)
 		// Public: the accepting employee's agent looks up + redeems here during add_employee (t=3).
 		r.Get("/invites/{token}", s.assetHandler.HandleGetEmployeeInviteInfo)
 		r.Post("/invites/{token}/redeem", s.handleRedeemEmployeeInvite)
@@ -49,8 +51,7 @@ func (s *CoreServer) handleCreateEmployeeInvite(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	publicURL, ok := s.relayAddressBase(r)
-	if !ok {
+	if _, ok := s.relayAddressBase(r); !ok {
 		writeNoRelayAddress(w)
 		return
 	}
@@ -65,13 +66,32 @@ func (s *CoreServer) handleCreateEmployeeInvite(w http.ResponseWriter, r *http.R
 		}
 		if ok {
 			siteAID = a.PairwiseAID
-			siteOOBI = fmt.Sprintf("%s/public/oobi/%s", publicURL, a.PairwiseAID)
 		}
 	}
 	if siteAID == "" {
 		http.Error(w, "asset_id must name an existing portal asset", http.StatusBadRequest)
 		return
 	}
+
+	// The identifier this invitation is signed as, and so the address every link
+	// in it names: made for this invitation alone (ADR-048 §6).
+	pwAID, pwOOBI, seed, err := s.mintPairwise("addemployee")
+	if err != nil {
+		writeRelationshipError(w, http.StatusInternalServerError, "mint signer", err)
+		return
+	}
+	ended := false
+	defer func() {
+		if !ended {
+			s.endRelationshipAddress(pwAID)
+		}
+	}()
+	publicURL, haveAddress := s.addressBaseFor(r, pwAID)
+	if !haveAddress {
+		writeNoRelayAddress(w)
+		return
+	}
+	siteOOBI = fmt.Sprintf("%s/public/oobi/%s", publicURL, siteAID)
 
 	inv := asset.EmployeeInvite{
 		Token:    genInviteToken(),
@@ -97,13 +117,7 @@ func (s *CoreServer) handleCreateEmployeeInvite(w http.ResponseWriter, r *http.R
 		orgName = prof.FullName
 	}
 
-	// Sign the Ask with a minted pairwise (base-layer signature the accepter verifies).
-	pwAID, pwOOBI, seed, err := s.mintPairwise("addemployee")
-	if err != nil {
-		http.Error(w, "mint signer: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	_ = pwAID
+	// Sign the Ask with the pairwise made above (base-layer signature the accepter verifies).
 	ask, _ := json.Marshal(map[string]interface{}{
 		"v":            "ASK1",
 		"t":            3,
@@ -131,6 +145,8 @@ func (s *CoreServer) handleCreateEmployeeInvite(w http.ResponseWriter, r *http.R
 	mintedAsks.m[askToken] = ask
 	mintedAsks.Unlock()
 
+	ended = true
+	s.madeFor("invite:"+enrolsecret.Digest(inv.Token), pwAID)
 	writeJSON(w, map[string]interface{}{
 		"invite": inv,
 		"token":  askToken,
@@ -197,6 +213,18 @@ func (s *CoreServer) handleApproveEmployee(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, emp)
 }
 
+// revokeEmployeeInvite revokes an invitation, and with it the address its offer
+// was made at: nobody can scan a revoked invitation, so nothing is left to
+// reach (ADR-048 §6).
+func (s *CoreServer) revokeEmployeeInvite(w http.ResponseWriter, r *http.Request) {
+	ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+	s.assetHandler.HandleRevokeEmployeeInvite(ww, r)
+	if st := ww.Status(); st == 0 || st < 300 {
+		id := chi.URLParam(r, "invite")
+		s.inBackground(func(context.Context) { s.endHandle("invite:" + id) })
+	}
+}
+
 func (s *CoreServer) handleRevokeEmployee(w http.ResponseWriter, r *http.Request) {
 	aid := chi.URLParam(r, "aid")
 	emp, ok, err := s.assetHandler.Store.SetEmployeeStatus(aid, "revoked", "")
@@ -207,6 +235,12 @@ func (s *CoreServer) handleRevokeEmployee(w http.ResponseWriter, r *http.Request
 	if !ok {
 		http.Error(w, "employee not found", http.StatusNotFound)
 		return
+	}
+	// A revoked member's invitation can be scanned by nobody, so the address its
+	// offer was made at is given back (ADR-048 §6).
+	if emp.InviteToken != "" {
+		invite := emp.InviteToken
+		s.inBackground(func(context.Context) { s.endHandle("invite:" + invite) })
 	}
 	writeJSON(w, emp)
 }

@@ -36,7 +36,7 @@ func (s *CoreServer) directListenerBase() (string, bool) {
 // relay address when one is held, else on the direct listener of a Direct-mode
 // agent, whose allowlist then admits aid. False when neither exists.
 func (s *CoreServer) oobiForCounterparty(r *http.Request, aid string) (string, bool) {
-	if base, ok := s.relayAddressBase(r); ok {
+	if base, ok := s.addressBaseFor(r, aid); ok {
 		return fmt.Sprintf("%s/public/oobi/%s", base, aid), true
 	}
 	base, ok := s.directListenerBase()
@@ -96,7 +96,7 @@ func (o *oobiOffers) saveLocked() error {
 // identifierFor returns the identifier already made for counterparty, if it can
 // still be served, else makes one with mint. A counterparty of "" is not
 // recognisable and always gets a new one.
-func (o *oobiOffers) identifierFor(counterparty string, servable func(string) bool, mint func() (string, error)) (string, error) {
+func (o *oobiOffers) identifierFor(counterparty string, servable func(string) bool, mint func() (string, error), undo func(aid string)) (string, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if counterparty != "" {
@@ -116,7 +116,11 @@ func (o *oobiOffers) identifierFor(counterparty string, servable func(string) bo
 		o.For[counterparty] = aid
 	}
 	if err := o.saveLocked(); err != nil {
-		return aid, fmt.Errorf("remember the identifier made for this counterparty: %w", err)
+		// Not kept, so not given: the address made for it goes back.
+		o.Made--
+		delete(o.For, counterparty)
+		undo(aid)
+		return "", fmt.Errorf("remember the identifier made for this counterparty: %w", err)
 	}
 	return aid, nil
 }
@@ -147,4 +151,27 @@ func (s *CoreServer) heldRelayBase() (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func loadRelationshipEnds(dataDir string) *relationshipEnds {
+	e := &relationshipEnds{path: filepath.Join(dataDir, relationshipEndsFileName), Handles: map[string][]string{}}
+	if raw, err := os.ReadFile(e.path); err == nil {
+		_ = json.Unmarshal(raw, e)
+		if e.Handles == nil {
+			e.Handles = map[string][]string{}
+		}
+	}
+	return e
+}
+
+func (e *relationshipEnds) saveLocked() error {
+	raw, err := json.Marshal(e)
+	if err != nil {
+		return err
+	}
+	tmp := e.path + ".tmp"
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, e.path)
 }

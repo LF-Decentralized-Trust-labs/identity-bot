@@ -218,8 +218,14 @@ func (s *CoreServer) sendIntroduction(aid, oobiURL string, actionCode int) {
 	if err != nil || ourIdentity == nil {
 		return
 	}
-	// An introduction goes to a counterparty: it names a relay address or none.
-	publicURL, ok := s.heldRelayBase()
+	// An introduction goes to one counterparty, so it names the address made
+	// for that relationship and the identifier the relationship is given, never
+	// the shared address or the root (ADR-048 §6, ADR-036).
+	contact, cerr := s.DataStore.GetContact(aid)
+	if cerr != nil || contact == nil || contact.RelationshipAID == "" {
+		return
+	}
+	publicURL, ok := s.addressBaseFor(nil, contact.RelationshipAID)
 	if !ok {
 		return
 	}
@@ -228,7 +234,7 @@ func (s *CoreServer) sendIntroduction(aid, oobiURL string, actionCode int) {
 		log.Printf("[identity-agent-core] introduction: refusing to send, %v", derr)
 		return
 	}
-	ourOOBI := fmt.Sprintf("%s/public/oobi/%s", publicURL, ourIdentity.AID)
+	ourOOBI := fmt.Sprintf("%s/public/oobi/%s", publicURL, contact.RelationshipAID)
 	ourAlias := ourIdentity.AID
 	if len(ourAlias) >= 12 {
 		ourAlias = ourAlias[:12] + "..."

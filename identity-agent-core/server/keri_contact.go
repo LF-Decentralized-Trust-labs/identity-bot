@@ -237,6 +237,12 @@ func (s *CoreServer) ensureKeriContactIs(oobiURL, expected string) (*store.Conta
 			iacrypto.VerkeyQB64(nextPub),
 			"rel-"+oobiData.AID,
 		); ierr == nil && icp.AID != "" {
+			// Its own relay address, before the contact exists: a relationship
+			// the relay would not make one for is refused, not made at the
+			// shared address (ADR-048 §6).
+			if _, aerr := s.addressForNewRelationship("contacts", icp.AID); aerr != nil {
+				return nil, false, aerr
+			}
 			contact.RelationshipAID = icp.AID
 			log.Printf("[identity-agent-core] EnsureKeriContact: HD-derived (index %d) pairwise P-AID %s for %s", idx, icp.AID, oobiData.AID)
 		} else if ierr != nil {
@@ -245,6 +251,7 @@ func (s *CoreServer) ensureKeriContactIs(oobiURL, expected string) (*store.Conta
 	}
 
 	if err := s.DataStore.SaveContact(contact); err != nil {
+		s.endRelationshipAddress(contact.RelationshipAID)
 		return nil, false, fmt.Errorf("save contact: %w", err)
 	}
 	if contact.Verified {

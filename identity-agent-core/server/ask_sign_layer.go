@@ -175,13 +175,13 @@ func (s *CoreServer) mintPairwiseIn(pool, name string) (aid, oobi string, seed [
 		}
 	}
 
-	// The relay address when one is held. Every route that hands this OOBI to a
-	// counterparty has already refused to run without one; the direct address
-	// is the answer only for the owner's own pairing, which has no relay yet
-	// (ADR-048 §6).
-	publicURL, haveRelay := s.heldRelayBase()
-	if !haveRelay && s.EndpointService != nil {
-		publicURL = s.EndpointService.CurrentURL()
+	// Where this relationship is reached: an address made for it alone when
+	// the relay is private, and refused (retryably) when the relay will not
+	// make one. The direct address is the answer only for the owner's own
+	// pairing, which has no relay yet (ADR-048 §6).
+	publicURL, aerr := s.addressForNewRelationship(pool, icp.AID)
+	if aerr != nil {
+		return "", "", nil, 0, aerr
 	}
 	oobi = fmt.Sprintf("%s/public/oobi/%s", publicURL, icp.AID)
 	return icp.AID, oobi, seed, idx, nil

@@ -1,11 +1,13 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"identity-agent-core/enrolsecret"
 	"net/http"
 	"strings"
 	"time"
@@ -237,8 +239,13 @@ func (s *CoreServer) handleAbandonCeremony(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "Could not record it", err.Error())
 		return
 	}
+	// Nobody can scan an offer for a ceremony that is over.
+	s.inBackground(func(context.Context) { s.endHandle(ceremonyHandle) })
 	writeJSON(w, map[string]interface{}{"status": ceremonyAbandoned})
 }
+
+// ceremonyHandle is what the offers made for the ceremony under way are ended by.
+const ceremonyHandle = "ceremony"
 
 // mintOwnerInvite produces one invite and the URL that becomes its QR code.
 //
@@ -247,13 +254,26 @@ func (s *CoreServer) handleAbandonCeremony(w http.ResponseWriter, r *http.Reques
 // incoming owner's agent already knows how to walk that path, and a second
 // parallel invite format would be one more thing to keep in step.
 func (s *CoreServer) mintOwnerInvite(r *http.Request, name string) (token, url string, err error) {
-	publicURL, ok := s.relayAddressBase(r)
-	if !ok {
+	if _, ok := s.relayAddressBase(r); !ok {
 		return "", "", errNoRelayAddress
 	}
 	identity, err := s.DataStore.GetIdentity()
 	if err != nil || identity == nil {
 		return "", "", fmt.Errorf("this agent has no identity")
+	}
+	signer, err := s.mintSignerIdentity()
+	if err != nil {
+		return "", "", err
+	}
+	made := false
+	defer func() {
+		if !made {
+			s.endRelationshipAddress(signer.aid)
+		}
+	}()
+	publicURL, haveAddress := s.addressBaseFor(r, signer.aid)
+	if !haveAddress {
+		return "", "", errNoRelayAddress
 	}
 	orgAID := identity.AID
 	orgOOBI := fmt.Sprintf("%s/public/oobi/%s", publicURL, orgAID)
@@ -274,10 +294,13 @@ func (s *CoreServer) mintOwnerInvite(r *http.Request, name string) (token, url s
 		return "", "", err
 	}
 
-	askToken, err := s.mintSignerAsk(orgName, orgAID, orgOOBI, inv.Token)
+	askToken, err := s.mintSignerAsk(signer, orgName, orgAID, orgOOBI, inv.Token)
 	if err != nil {
 		return "", "", err
 	}
+	made = true
+	s.madeFor("invite:"+enrolsecret.Digest(inv.Token), signer.aid)
+	s.madeFor(ceremonyHandle, signer.aid)
 	return inv.Token, fmt.Sprintf("%s/i/%s", publicURL, askToken), nil
 }
 

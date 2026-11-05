@@ -89,19 +89,31 @@ func (s *CoreServer) handleAskCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("action t=%d is not IA-mintable (originated elsewhere)", body.T), http.StatusBadRequest)
 		return
 	}
-	publicURL, haveRelay := s.relayAddressBase(r)
-	if !haveRelay {
+	if _, haveRelay := s.relayAddressBase(r); !haveRelay {
 		writeNoRelayAddress(w)
 		return
 	}
 	ask, seed, err := minter.Mint(s)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeRelationshipError(w, http.StatusInternalServerError, "Could not make the Ask", err)
+		return
+	}
+	// The relationship this Ask offers is the one it is signed as; its link
+	// names the address made for that relationship and no other.
+	var minted struct {
+		AskerAID string `json:"asker_aid"`
+	}
+	_ = json.Unmarshal(ask, &minted)
+	publicURL, haveAddress := s.addressBaseFor(r, minted.AskerAID)
+	if !haveAddress {
+		s.endRelationshipAddress(minted.AskerAID)
+		writeNoRelayAddress(w)
 		return
 	}
 	// Base-layer signing: sign the canonical Ask with the pairwise key and attach the sig.
 	sig, serr := login.SignAsk(ask, seed)
 	if serr != nil {
+		s.endRelationshipAddress(minted.AskerAID)
 		http.Error(w, "sign ask: "+serr.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -111,6 +123,7 @@ func (s *CoreServer) handleAskCreate(w http.ResponseWriter, r *http.Request) {
 	tb := make([]byte, 16)
 	_, _ = rand.Read(tb)
 	token := hex.EncodeToString(tb)
+	s.madeFor("ask:"+token, minted.AskerAID)
 	mintedAsks.Lock()
 	mintedAsks.m[token] = ask
 	mintedAsks.Unlock()

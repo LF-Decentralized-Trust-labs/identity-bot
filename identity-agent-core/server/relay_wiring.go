@@ -332,18 +332,27 @@ func (s *CoreServer) runRelay(ctx context.Context, gen int) {
 	})
 	rm.Remember(e.record.Allocations)
 	rm.OnChange(func(string, bool) { s.EndpointService.Refresh() })
-	rm.OnAllocated(func(held []relay.Allocation) {
+	// The record of the addresses held, secrets included, must be written for an
+	// address to be kept: one whose secret was lost can neither be held again
+	// after a restart nor given back (relay.ErrNotRecorded).
+	rm.OnAllocatedMustSucceed(func(held []relay.Allocation) error {
 		// Through the record's lock: the owner's routes change the same record
 		// (a domain waiting for its DNS proof, say).
-		if err := s.updateRelayRecord(kind, func(rec *storedRelayEnrollment) {
+		err := s.updateRelayRecord(kind, func(rec *storedRelayEnrollment) {
 			if rec.AID == e.record.AID {
 				rec.Allocations = held
 			}
-		}); err != nil {
+		})
+		if err != nil {
 			log.Printf("[relay] WARNING: could not remember this Identity Agent's relay addresses, "+
 				"so a restart may move them: %v", err)
 		}
+		return err
 	})
+	// Counterparties are told where each relationship is now whenever the
+	// addresses held change or the relay comes or goes (ADR-048 §6).
+	rm.OnChange(func(string, bool) { s.republishRelationshipAddresses(rm) })
+	rm.OnAllocated(func([]relay.Allocation) { s.republishRelationshipAddresses(rm) })
 
 	// Installed under the lock Stop reads it with, and only while this is still
 	// the current generation: a newer one has stopped whatever it replaced and
