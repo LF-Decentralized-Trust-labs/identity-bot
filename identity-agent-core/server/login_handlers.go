@@ -434,14 +434,7 @@ func (s *CoreServer) verifyPresentedCredentialACDC(ctx context.Context, acdcJson
 	}
 	issuerAid := cred.Issuer
 	if issuerAid != "" {
-		if kelRecord, err3 := s.DataStore.GetContactKEL(issuerAid); err3 == nil && kelRecord != nil && kelRecord.KelVerified {
-			issuerKelEvents = unwrapEventJSON(kelRecord.KEL)
-		}
-		if issuerKelEvents == nil {
-			if ownEvents, err3 := s.DataStore.GetEvents(issuerAid); err3 == nil && len(ownEvents) > 0 {
-				issuerKelEvents = eventRecordsToKEDs(ownEvents)
-			}
-		}
+		issuerKelEvents = s.issuerLogForVerification(issuerAid)
 	}
 	if issuerKelEvents == nil {
 		return false, issuerAid, "issuer KEL not found"
