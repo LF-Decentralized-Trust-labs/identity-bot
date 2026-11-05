@@ -185,22 +185,24 @@ class WhereTheAgentWent {
   bool get couldNotBeFound => _kindOf == _Kind.notFound;
 
   /// One plain sentence for the person, or empty when there is nothing to say.
-  String get sayThis {
+  /// [thing] is what the person calls it: "organisation" or "identity".
+  String sayItAbout([String thing = 'organisation']) {
     switch (_kindOf) {
       case _Kind.movedTo:
-        return 'This organisation has moved. It was at $from and is now at '
-            '$origin. This app checked that it is the same organisation and '
+        return 'This $thing has moved. It was at $from and is now at '
+            '$origin. This app checked that it is the same $thing and '
             'switched to the new address.';
       case _Kind.notFound:
-        return 'This organisation does not answer at $origin any more. If it '
-            'has moved, use "This organisation has moved — find it again" '
-            'and enter its new address; this app will check it is the same '
-            'organisation before switching.';
+        return 'This $thing does not answer at $origin any more. If it has '
+            'moved, choose "find it again" and enter its new address; this '
+            'app will check it is the same $thing before switching.';
       case _Kind.stillThere:
       case _Kind.notAFrontEnd:
         return '';
     }
   }
+
+  String get sayThis => sayItAbout();
 }
 
 enum _Kind { notAFrontEnd, stillThere, movedTo, notFound }
