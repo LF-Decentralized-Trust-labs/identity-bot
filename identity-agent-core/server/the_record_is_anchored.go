@@ -415,7 +415,8 @@ func (s *CoreServer) recordIdentity() (recordIdentityRecord, []byte, error) {
 		}
 		return nil
 	}
-	if _, err := keeper.CreateDelegatedInceptionKept(pub, nextPub, "", owner.AID, witnesses, toad, keep); err != nil {
+	if _, err := keeper.CreateDelegatedInceptionKept(pub, nextPub, "", owner.AID, witnesses, toad, keep,
+		login.FoundingSigner(seed)); err != nil {
 		return recordIdentityRecord{}, nil, fmt.Errorf("the record identity could not be made: %w", err)
 	}
 	rec.Pending = false

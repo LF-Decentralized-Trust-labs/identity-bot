@@ -367,9 +367,19 @@ func (e *Engine) place(id *identity, before []kelEntry, at int, raw []byte, ev *
 // the core holds the key: a key it does not hold signs nothing here, and the
 // event then waits for, or is refused without, that key's signature.
 func (e *Engine) ownSignatures(aid string, keys []string, raw []byte) []string {
+	return signaturesBy(e.installedSigner(), aid, keys, raw)
+}
+
+// installedSigner is the signer SetEventSignature installed, or nil.
+func (e *Engine) installedSigner() func(aid, key string, raw []byte) (string, error) {
 	e.commitMu.Lock()
-	f := e.eventSignature
-	e.commitMu.Unlock()
+	defer e.commitMu.Unlock()
+	return e.eventSignature
+}
+
+// signaturesBy is f's signature over raw for each of keys it signs, kept only
+// where it verifies under that key.
+func signaturesBy(f func(aid, key string, raw []byte) (string, error), aid string, keys []string, raw []byte) []string {
 	if f == nil {
 		return nil
 	}
@@ -390,6 +400,14 @@ func (e *Engine) ownSignatures(aid string, keys []string, raw []byte) []string {
 		out = append(out, qb64)
 	}
 	return out
+}
+
+// firstSigner is the founding signer a variadic call gave, if any.
+func firstSigner(sign []drivers.FoundingSigner) drivers.FoundingSigner {
+	if len(sign) == 0 {
+		return nil
+	}
+	return sign[0]
 }
 
 // VerifiedSignatures keeps, for each event of a log, only the signatures that

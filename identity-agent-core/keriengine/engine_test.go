@@ -219,6 +219,7 @@ func TestAnIdentitySurvivesAReload(t *testing.T) {
 		NextKeyDigest: created.NextKeyDigest,
 		KEL:           kel.KEL,
 		RawEventsB64:  kel.RawEventsB64,
+		Signatures:    kel.Signatures,
 	})
 	if err != nil {
 		t.Fatal(err)

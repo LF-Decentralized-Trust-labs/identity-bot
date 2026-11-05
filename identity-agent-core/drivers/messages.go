@@ -409,7 +409,7 @@ type KELKeeper interface {
 	InteractKept(name string, data []interface{}, keep func(KELKeep) error) (*DriverInteractResponse, error)
 	// CreateDelegatedInceptionKept makes a delegated identity naming witnesses,
 	// when given, and how many must receipt each of its events.
-	CreateDelegatedInceptionKept(publicKey, nextPublicKey, name, delegatorName string, witnesses []string, toad int, keep func(KELKeep) error) (*DriverDelegatedInceptionResponse, error)
+	CreateDelegatedInceptionKept(publicKey, nextPublicKey, name, delegatorName string, witnesses []string, toad int, keep func(KELKeep) error, sign ...FoundingSigner) (*DriverDelegatedInceptionResponse, error)
 	// WitnessConfig is the witnesses an identity names now and its threshold.
 	WitnessConfig(name string) ([]string, int, error)
 }

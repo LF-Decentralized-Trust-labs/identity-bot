@@ -100,6 +100,7 @@ func (s *CoreServer) mintPairwiseIn(pool, name string) (aid, oobi string, seed [
 		Name:          uniqueName,
 		Witnesses:     witnesses,
 		Toad:          toad,
+		Sign:          login.FoundingSigner(seed),
 	})
 	if ierr != nil || icp.AID == "" {
 		return "", "", nil, 0, fmt.Errorf("mint pairwise inception: %w", ierr)

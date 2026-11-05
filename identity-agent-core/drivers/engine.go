@@ -23,10 +23,10 @@ type KeriEngine interface {
 	// The others are conveniences over it, kept because most callers want
 	// neither witnesses nor an owner and should not have to say so.
 	Incept(req InceptionRequest) (*DriverInceptionResponse, error)
-	CreateInception(publicKey, nextPublicKey string) (*DriverInceptionResponse, error)
-	CreateInceptionNamed(publicKey, nextPublicKey, name string) (*DriverInceptionResponse, error)
-	CreateOwnedInception(publicKey, nextPublicKey, name, ownerAID string) (*DriverInceptionResponse, error)
-	CreateDelegatedInception(publicKey, nextPublicKey, name, delegatorName string) (*DriverDelegatedInceptionResponse, error)
+	CreateInception(publicKey, nextPublicKey string, sign ...FoundingSigner) (*DriverInceptionResponse, error)
+	CreateInceptionNamed(publicKey, nextPublicKey, name string, sign ...FoundingSigner) (*DriverInceptionResponse, error)
+	CreateOwnedInception(publicKey, nextPublicKey, name, ownerAID string, sign ...FoundingSigner) (*DriverInceptionResponse, error)
+	CreateDelegatedInception(publicKey, nextPublicKey, name, delegatorName string, sign ...FoundingSigner) (*DriverDelegatedInceptionResponse, error)
 	// ReinstateDelegatedIdentity holds a delegated identity again without
 	// anchoring a second approval; the delegator's log must already carry one.
 	ReinstateDelegatedIdentity(publicKey, nextPublicKey, name, delegatorName string) (*DriverDelegatedInceptionResponse, error)
@@ -102,6 +102,13 @@ type KeriEngine interface {
 // cannot be added to an existing identity's founding afterwards, only amended
 // by a later rotation — and an identity founded with none has no observer for
 // the one event that establishes its keys.
+// FoundingSigner signs the bytes of a founding with the key it names, for a
+// caller that holds that key and the installed signer does not know it yet:
+// the identity it founds does not exist until the founding does. The engine
+// checks what it returns against the founding's key, and refuses a founding
+// no valid signature covers (ADR-061).
+type FoundingSigner func(raw []byte) (string, error)
+
 type InceptionRequest struct {
 	PublicKey     string
 	NextPublicKey string
@@ -142,6 +149,9 @@ type InceptionRequest struct {
 	// the identity unable to rotate at all, which in KERI is unable to recover
 	// from anything, ever.
 	NextThreshold string
+	// Sign signs the founding where the installed signer does not hold its
+	// key. Nil means the installed signer alone.
+	Sign FoundingSigner
 }
 
 // RotationRequest is everything a rotation can change.

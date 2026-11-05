@@ -102,7 +102,8 @@ func (h *Handler) provisionDelegated(d delegatedAsset) (*Asset, error) {
 		return nil, fmt.Errorf("derive %s key: %w", d.noun, err)
 	}
 	resp, err := h.KeriDriver.CreateDelegatedInception(
-		iacrypto.VerkeyQB64(pub), iacrypto.VerkeyQB64(nextPub), displayName, rootAID)
+		iacrypto.VerkeyQB64(pub), iacrypto.VerkeyQB64(nextPub), displayName, rootAID,
+		FoundingSigner(h.dataDir, signingIndex))
 	if err != nil {
 		return nil, fmt.Errorf("mint delegated %s AID: %w", d.noun, err)
 	}

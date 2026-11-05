@@ -5,6 +5,8 @@ import (
 	"hash/crc32"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/drivers"
+	"identity-agent-core/login"
 	"identity-agent-core/secureenclave"
 )
 
@@ -33,6 +35,18 @@ func AssetSigningSeed(dataDir string, signingIndex int) ([]byte, error) {
 		return nil, err
 	}
 	return backup.DerivePairwiseSeed(root, signingIndex, 0)
+}
+
+// FoundingSigner signs an asset's founding with the key derived at
+// signingIndex, which the engine does not hold until the asset exists.
+func FoundingSigner(dataDir string, signingIndex int) drivers.FoundingSigner {
+	return func(raw []byte) (string, error) {
+		seed, err := AssetSigningSeed(dataDir, signingIndex)
+		if err != nil {
+			return "", err
+		}
+		return login.FoundingSigner(seed)(raw)
+	}
 }
 
 // DeriveAssetKeypair re-derives an asset's current + next Ed25519 public keys

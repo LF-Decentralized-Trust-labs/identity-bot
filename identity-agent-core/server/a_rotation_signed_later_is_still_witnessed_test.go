@@ -17,6 +17,7 @@ import (
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/keriengine"
+	"identity-agent-core/login"
 	"identity-agent-core/store"
 	"identity-agent-core/witness"
 )
@@ -101,7 +102,8 @@ func foundOnDerivedKeys(t *testing.T, witnesses []string) *CoreServer {
 	seed0, pub0 := key(0)
 	_, pub1 := key(1)
 	founding := keriengine.New()
-	icp, err := founding.Incept(drivers.InceptionRequest{PublicKey: pub0, NextPublicKey: pub1, Name: "owner", Witnesses: witnesses, Toad: 1})
+	icp, err := founding.Incept(drivers.InceptionRequest{PublicKey: pub0, NextPublicKey: pub1, Name: "owner", Witnesses: witnesses, Toad: 1,
+		Sign: login.FoundingSigner(seed0)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +122,8 @@ func foundOnDerivedKeys(t *testing.T, witnesses []string) *CoreServer {
 		t.Fatal(err)
 	}
 	if _, err := e.ReloadIdentity(&drivers.DriverReloadIdentityRequest{AID: icp.AID, PublicKey: pub0,
-		NextKeyDigest: icp.NextKeyDigest, KEL: kel.KEL, RawEventsB64: kel.RawEventsB64}); err != nil {
+		NextKeyDigest: icp.NextKeyDigest, KEL: kel.KEL, RawEventsB64: kel.RawEventsB64,
+		Signatures: [][]string{icp.Signatures}}); err != nil {
 		t.Fatal(err)
 	}
 	return s

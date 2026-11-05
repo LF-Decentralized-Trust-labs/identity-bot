@@ -241,13 +241,13 @@ func (e *Engine) GetStatus() (*drivers.DriverStatus, error) {
 // The identifier is used as the name. An identity that has no name of its own
 // still has to be findable later, and its identifier is the one label
 // guaranteed to be unique and to already be known to the caller.
-func (e *Engine) CreateInception(publicKey, nextPublicKey string) (*drivers.DriverInceptionResponse, error) {
-	return e.incept(publicKey, nextPublicKey, "", nil)
+func (e *Engine) CreateInception(publicKey, nextPublicKey string, sign ...drivers.FoundingSigner) (*drivers.DriverInceptionResponse, error) {
+	return e.incept(publicKey, nextPublicKey, "", nil, firstSigner(sign))
 }
 
 // CreateInceptionNamed founds an identity under a caller-chosen name.
-func (e *Engine) CreateInceptionNamed(publicKey, nextPublicKey, name string) (*drivers.DriverInceptionResponse, error) {
-	return e.incept(publicKey, nextPublicKey, name, nil)
+func (e *Engine) CreateInceptionNamed(publicKey, nextPublicKey, name string, sign ...drivers.FoundingSigner) (*drivers.DriverInceptionResponse, error) {
+	return e.incept(publicKey, nextPublicKey, name, nil, firstSigner(sign))
 }
 
 // CreateOwnedInception founds an identity that records who owns it.
@@ -256,7 +256,7 @@ func (e *Engine) CreateInceptionNamed(publicKey, nextPublicKey, name string) (*d
 // is established by the identity's own key log rather than by a record the
 // agent keeps about it. An agent's account of who owns an identity is something
 // the agent can be wrong about or lie about; the key log is neither.
-func (e *Engine) CreateOwnedInception(publicKey, nextPublicKey, name, ownerAID string) (*drivers.DriverInceptionResponse, error) {
+func (e *Engine) CreateOwnedInception(publicKey, nextPublicKey, name, ownerAID string, sign ...drivers.FoundingSigner) (*drivers.DriverInceptionResponse, error) {
 	if ownerAID == "" {
 		return nil, fmt.Errorf("an owned identity needs an owner; without one this is an " +
 			"ordinary inception and should be created as one")
@@ -282,7 +282,7 @@ func (e *Engine) CreateOwnedInception(publicKey, nextPublicKey, name, ownerAID s
 	if err != nil {
 		return nil, err
 	}
-	return e.incept(publicKey, nextPublicKey, name, []json.RawMessage{anchor})
+	return e.incept(publicKey, nextPublicKey, name, []json.RawMessage{anchor}, firstSigner(sign))
 }
 
 // OwnerSeal is the seal a founding carries naming its owner: an event seal
@@ -318,11 +318,11 @@ func (e *Engine) Incept(req drivers.InceptionRequest) (*drivers.DriverInceptionR
 		anchors = append(anchors, raw)
 	}
 	return e.inceptWith(req.PublicKey, req.NextPublicKey, req.Name, anchors, req.Witnesses, req.Toad,
-		req.NextKeyDigests, req.NextThreshold)
+		req.NextKeyDigests, req.NextThreshold, req.Sign)
 }
 
-func (e *Engine) incept(publicKey, nextPublicKey, name string, data []json.RawMessage) (*drivers.DriverInceptionResponse, error) {
-	return e.inceptWith(publicKey, nextPublicKey, name, data, nil, 0, nil, "")
+func (e *Engine) incept(publicKey, nextPublicKey, name string, data []json.RawMessage, sign drivers.FoundingSigner) (*drivers.DriverInceptionResponse, error) {
+	return e.inceptWith(publicKey, nextPublicKey, name, data, nil, 0, nil, "", sign)
 }
 
 // inceptionOver builds the inception event of these keys: the one construction
@@ -408,7 +408,7 @@ func InceptionOf(publicKey, nextPublicKey string) ([]byte, error) {
 	return raw, err
 }
 
-func (e *Engine) inceptWith(publicKey, nextPublicKey, name string, data []json.RawMessage, witnesses []string, toad int, nextDigests []string, nextThreshold string) (*drivers.DriverInceptionResponse, error) {
+func (e *Engine) inceptWith(publicKey, nextPublicKey, name string, data []json.RawMessage, witnesses []string, toad int, nextDigests []string, nextThreshold string, sign drivers.FoundingSigner) (*drivers.DriverInceptionResponse, error) {
 	pub, nextDigest, raw, err := inceptionOver(publicKey, nextPublicKey, data, witnesses, toad, nextDigests, nextThreshold)
 	if err != nil {
 		return nil, err
@@ -429,8 +429,11 @@ func (e *Engine) inceptWith(publicKey, nextPublicKey, name string, data []json.R
 	if err != nil {
 		return nil, err
 	}
-	first.Sigs = e.foundingSignatures(ev, raw)
-	sigs := append([]string(nil), first.Sigs...)
+	sigs, err := e.signedFounding(ev, raw, sign)
+	if err != nil {
+		return nil, err
+	}
+	first.Sigs = sigs
 	e.state.put(&identity{
 		Name:            name,
 		AID:             ev.Identifier,
@@ -462,8 +465,8 @@ func (e *Engine) inceptWith(publicKey, nextPublicKey, name string, data []json.R
 // delegator's anchoring interaction is not a delegation at all — nothing has
 // approved it — and returning one alone would let a caller publish an identity
 // claiming an authority that was never granted.
-func (e *Engine) CreateDelegatedInception(publicKey, nextPublicKey, name, delegatorName string) (*drivers.DriverDelegatedInceptionResponse, error) {
-	return e.CreateDelegatedInceptionKept(publicKey, nextPublicKey, name, delegatorName, nil, 0, nil)
+func (e *Engine) CreateDelegatedInception(publicKey, nextPublicKey, name, delegatorName string, sign ...drivers.FoundingSigner) (*drivers.DriverDelegatedInceptionResponse, error) {
+	return e.CreateDelegatedInceptionKept(publicKey, nextPublicKey, name, delegatorName, nil, 0, nil, sign...)
 }
 
 // WitnessConfig is the witnesses an identity names now and how many must
@@ -485,7 +488,7 @@ func (e *Engine) WitnessConfig(name string) ([]string, int, error) {
 // witnesses and toad, when witnesses is not empty, are written into the
 // delegated inception: the witnesses it names and how many must receipt each of
 // its events.
-func (e *Engine) CreateDelegatedInceptionKept(publicKey, nextPublicKey, name, delegatorName string, witnesses []string, toad int, keep func(drivers.KELKeep) error) (*drivers.DriverDelegatedInceptionResponse, error) {
+func (e *Engine) CreateDelegatedInceptionKept(publicKey, nextPublicKey, name, delegatorName string, witnesses []string, toad int, keep func(drivers.KELKeep) error, sign ...drivers.FoundingSigner) (*drivers.DriverDelegatedInceptionResponse, error) {
 	delegator, release, err := e.holdForWriting(delegatorName)
 	if err != nil {
 		return nil, fmt.Errorf("the delegator: %w", err)
@@ -529,6 +532,12 @@ func (e *Engine) CreateDelegatedInceptionKept(publicKey, nextPublicKey, name, de
 	if err != nil {
 		return nil, err
 	}
+	// The delegated founding is signed like any other, or nothing is made: an
+	// approval kept for an identity that cannot be signed would approve nothing.
+	dipSigs, err := e.signedFounding(dipEvent, dip, firstSigner(sign))
+	if err != nil {
+		return nil, err
+	}
 	// The name must be free before anything is kept, or the store would hold a
 	// delegation the engine then refuses to.
 	heldAs := name
@@ -553,7 +562,7 @@ func (e *Engine) CreateDelegatedInceptionKept(publicKey, nextPublicKey, name, de
 	if err := e.extend(delegator, ixn, approvalSig, kept, nil); err != nil {
 		return nil, err
 	}
-	if err := e.holdDelegatedIdentity(name, pub, nextDigest, dip, dipEvent); err != nil {
+	if err := e.holdDelegatedIdentity(name, pub, nextDigest, dip, dipEvent, dipSigs); err != nil {
 		return nil, err
 	}
 
@@ -598,7 +607,7 @@ func (e *Engine) ReinstateDelegatedIdentity(publicKey, nextPublicKey, name, dele
 		return nil, fmt.Errorf("the delegator's log carries no approval of %s, so it was never "+
 			"delegated and cannot be reinstated", dipEvent.Identifier)
 	}
-	if err := e.holdDelegatedIdentity(name, pub, nextDigest, dip, dipEvent); err != nil {
+	if err := e.holdDelegatedIdentity(name, pub, nextDigest, dip, dipEvent, e.foundingSignatures(dipEvent, dip)); err != nil {
 		return nil, err
 	}
 	dipBody, err := eventMap(dip)
@@ -670,7 +679,7 @@ func delegatedInceptionOver(publicKey, nextPublicKey, delegatorAID string, witne
 	return pub, nextDigest, dip, dipEvent, nil
 }
 
-func (e *Engine) holdDelegatedIdentity(name, pub, nextDigest string, dip []byte, dipEvent *keri.Event) error {
+func (e *Engine) holdDelegatedIdentity(name, pub, nextDigest string, dip []byte, dipEvent *keri.Event, sigs []string) error {
 	if name == "" {
 		name = dipEvent.Identifier
 	}
@@ -678,7 +687,7 @@ func (e *Engine) holdDelegatedIdentity(name, pub, nextDigest string, dip []byte,
 	if err != nil {
 		return err
 	}
-	first.Sigs = e.foundingSignatures(dipEvent, dip)
+	first.Sigs = sigs
 	return e.state.claim(&identity{
 		Name:            name,
 		AID:             dipEvent.Identifier,

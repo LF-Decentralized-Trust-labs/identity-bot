@@ -685,23 +685,35 @@ func thresholdText(raw []byte, field string) json.RawMessage {
 }
 
 // foundingSignatures are the installed signer's signatures over a founding
-// this engine built, where its caller holds the founding keys, kept only if
-// they verify. Where nobody here holds them the founding is held unsigned, as
-// it always was, until its signer signs it; nothing is added after it until
-// then.
+// already in a log this engine reloads, kept only if they verify. It is for a
+// founding that was judged when it was made; a new one goes through
+// signedFounding, which refuses what has no valid signatures.
 func (e *Engine) foundingSignatures(ev *keri.Event, raw []byte) []string {
-	sigs := e.ownSignatures(ev.Identifier, ev.Keys, raw)
-	if len(sigs) == 0 {
-		return nil
-	}
-	m, err := drivers.SignedMessage(raw, sigs)
+	sigs, err := e.signedFounding(ev, raw, nil)
 	if err != nil {
 		return nil
 	}
-	if _, err := keri.ValidateSignedKEL([][]byte{m}); err != nil {
-		return nil
-	}
 	return sigs
+}
+
+// signedFounding is the signatures over a founding (sign's where given, else
+// the installed signer's), judged
+// as every other event is: the signatures must make the founding one keri-go
+// accepts. Where they do not, or nobody here holds the keys, it says why and
+// the founding is not made.
+func (e *Engine) signedFounding(ev *keri.Event, raw []byte, sign drivers.FoundingSigner) ([]string, error) {
+	f := e.installedSigner()
+	if sign != nil {
+		f = func(_, _ string, raw []byte) (string, error) { return sign(raw) }
+	}
+	sigs, err := checkedSignatures(raw, signaturesBy(f, ev.Identifier, ev.Keys, raw), ev.Keys, nil)
+	if err != nil {
+		return nil, &ErrNotAuthorised{AID: ev.Identifier, Err: err, BadSignature: true}
+	}
+	if _, err := e.judge(ev.Identifier, nil, raw, ev, sigs); err != nil {
+		return nil, err
+	}
+	return sigs, nil
 }
 
 // onlyFaults reports whether every fault in ve is of kind.

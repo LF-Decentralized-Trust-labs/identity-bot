@@ -603,7 +603,7 @@ func TestASecondRecordIdentityIsCaught(t *testing.T) {
 			return err
 		}
 		return s.DataStore.KeepEvents(approval, dip)
-	}); err != nil {
+	}, login.FoundingSigner(seed)); err != nil {
 		t.Fatal(err)
 	}
 	mustBreak(t, s, "a second record identity")

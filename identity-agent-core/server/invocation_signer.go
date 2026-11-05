@@ -14,6 +14,7 @@ import (
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/internal/atomicfile"
 	"identity-agent-core/internal/coretypes"
+	"identity-agent-core/login"
 	"identity-agent-core/secureenclave"
 )
 
@@ -130,6 +131,7 @@ func (sg *invocationSigner) init() error {
 		iacrypto.VerkeyQB64(pub),
 		iacrypto.VerkeyQB64(nextPub),
 		fmt.Sprintf("invocation-log-%d", idx),
+		login.FoundingSigner(seed),
 	)
 	if ierr != nil || icp.AID == "" {
 		return fmt.Errorf("invocation signer: mint inception: %w", ierr)

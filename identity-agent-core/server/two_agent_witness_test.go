@@ -115,7 +115,7 @@ func signedInception(t *testing.T, witnessKey string) (aid, said string, raw []b
 	pub, _ := a.PublicKey()
 	nextPub, _ := b.PublicKey()
 
-	req := drivers.InceptionRequest{PublicKey: pub, NextPublicKey: nextPub, Name: "subject"}
+	req := drivers.InceptionRequest{PublicKey: pub, NextPublicKey: nextPub, Name: "subject", Sign: signingWith(a)}
 	if witnessKey != "" {
 		req.Witnesses = []string{witnessKey}
 		req.Toad = 1

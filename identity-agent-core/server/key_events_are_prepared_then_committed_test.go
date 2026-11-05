@@ -361,12 +361,11 @@ func TestAFoundingWithAForeignNextKeyIsNotSignedHere(t *testing.T) {
 	foreign := appSeeds(1)[0]
 	code, out := call(t, s, s.handleInception, "/api/inception",
 		map[string]any{"public_key": verkeyOf(seed0), "next_public_key": verkeyOf(foreign)})
-	if code != http.StatusCreated {
-		t.Fatalf("founding: %d %v", code, out)
+	if code != http.StatusConflict || out["error"] != "key_not_held_here" {
+		t.Fatalf("a founding committing to a foreign next key was answered %d %v, not key_not_held_here", code, out)
 	}
-	evs, _ := s.DataStore.GetEvents(out["aid"].(string))
-	if len(evs) != 1 || len(evs[0].ControllerSignatures()) != 0 {
-		t.Fatalf("a founding committing to a foreign next key was signed here: %+v", evs)
+	if id, _ := s.DataStore.GetIdentity(); id != nil {
+		t.Fatalf("a founding committing to a foreign next key left an identity behind: %+v", id)
 	}
 }
 

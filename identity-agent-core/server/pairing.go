@@ -520,6 +520,7 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 			OwnerAID:      ownerAID,
 			Witnesses:     witnesses,
 			Toad:          toad,
+			Sign:          login.FoundingSigner(pairingState.seed),
 		})
 		if ierr != nil {
 			writeError(w, http.StatusInternalServerError, "Could not found the identity", ierr.Error())

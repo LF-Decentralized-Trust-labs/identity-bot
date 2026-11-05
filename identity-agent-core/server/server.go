@@ -26,7 +26,6 @@ import (
 	"identity-agent-core/avatar"
 	"identity-agent-core/backup"
 	"identity-agent-core/buildmode"
-	"identity-agent-core/didcomm"
 	"identity-agent-core/drivers"
 	"identity-agent-core/endpoint"
 	"identity-agent-core/iacrypto"
@@ -1270,8 +1269,9 @@ type DriverInfo struct {
 type InceptionRequest struct {
 	PublicKey     string `json:"public_key"`
 	NextPublicKey string `json:"next_public_key"`
-	// CesrSignature: optional — the controller's signature over the inception
-	// event body, indexed (AA...) at place 0, written on the device by keymath.
+	// CesrSignature is accepted and ignored: this route founds only with keys
+	// this agent holds and signs the founding itself. A signature made on a
+	// device goes to the commit route, which checks it.
 	CesrSignature string `json:"cesr_signature,omitempty"`
 	// OwnerAID names who this identity answers to, and is written into the
 	// inception event itself.
@@ -1504,6 +1504,13 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Refused before any key is derived: this route founds only with the keys
+	// this agent holds (ADR-061 sections 2 and 3).
+	if !s.foundingKeyIsOurs(req.PublicKey, req.NextPublicKey) {
+		writeKeyNotHeldHere(w)
+		return
+	}
+
 	// The identity commits to the keys people will encrypt to it with, in the
 	// event it is derived from.
 	//
@@ -1521,38 +1528,23 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 	// phrase has to be able to bring these back, or restoring an identity
 	// produces one that can prove who it is and can never be sent anything.
 	//
-	// ONLY FOR A KEY THIS AGENT DERIVES ITSELF. The messaging keys, and the
-	// post-quantum commitment below, come from the root seed held here. Where
-	// the identity's key is this agent's own (the root seed is the identity's
-	// phrase), they are the identity's own keys too. Where the key is held
-	// somewhere else, they would be this machine's keys written into somebody
-	// else's identity: the post-quantum commitment alone could rotate it, and
-	// the messaging keys would let this machine read what is sent to it. Such
-	// a founding carries neither, and commits only to the next key asked for.
-	var (
-		messagingKeys *didcomm.KeySet
-		keyIndex      int
-		anchors       []map[string]interface{}
-	)
-	ours := s.foundingKeyIsOurs(req.PublicKey, req.NextPublicKey)
-	if ours {
-		var err error
-		messagingKeys, keyIndex, err = s.deriveMessagingKeys("")
-		if err != nil {
-			writeError(w, statusForUnreadable(err, http.StatusInternalServerError), "Could not derive this identity's messaging keys", err.Error())
-			return
-		}
-		keyAnchor, err := messagingKeys.Anchor()
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "Could not commit to this identity's messaging keys", err.Error())
-			return
-		}
-		anchors = []map[string]interface{}{keyAnchor}
-	} else {
-		log.Printf("[identity-agent-core] INCEPTION: the founding key is not one this agent " +
-			"derives, so the identity commits to no messaging keys or post-quantum key of this " +
-			"agent's; it cannot be established as a peer by keys anchored in its founding")
+	// A key this agent does not derive is founded by the app that holds it,
+	// through the prepare and commit routes, with its own signature on the
+	// founding. Nothing enters a key log unsigned, and this route has no
+	// signature to give for a key it does not hold (ADR-061). So the messaging
+	// keys and the post-quantum commitment below, which come from the root seed
+	// held here, are always the identity's own.
+	messagingKeys, keyIndex, err := s.deriveMessagingKeys("")
+	if err != nil {
+		writeError(w, statusForUnreadable(err, http.StatusInternalServerError), "Could not derive this identity's messaging keys", err.Error())
+		return
 	}
+	keyAnchor, err := messagingKeys.Anchor()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not commit to this identity's messaging keys", err.Error())
+		return
+	}
+	anchors := []map[string]interface{}{keyAnchor}
 
 	// Designate witnesses in the event that founds the identity.
 	//
@@ -1605,13 +1597,7 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 	// it was before, with one commitment, rather than not founded at all: the
 	// post-quantum rotation is a future option, and losing a future option is
 	// not a reason to refuse somebody an identity today.
-	var (
-		nextDigests []string
-		pq          *iacrypto.PostQuantumNextKey
-	)
-	if ours {
-		nextDigests, pq = s.postQuantumPreRotation(req.NextPublicKey)
-	}
+	nextDigests, pq := s.postQuantumPreRotation(req.NextPublicKey)
 
 	result, err := s.KeriDriver.Incept(drivers.InceptionRequest{
 		PublicKey:      req.PublicKey,
@@ -1671,6 +1657,11 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
+	if len(result.Signatures) == 0 {
+		writeError(w, http.StatusInternalServerError, "Failed to create inception event",
+			"the engine returned a founding with no signature, which is not kept")
+		return
+	}
 	eventJSON, _ := json.Marshal(result.InceptionEvent)
 	eventRecord := store.EventRecord{
 		AID:            result.AID,
@@ -1681,12 +1672,10 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 		NextKeyDigest:  result.NextKeyDigest,
 		Timestamp:      now,
 		RawBytesB64:    result.RawBytesB64,
-		CesrSignature:  req.CesrSignature,
-		// Signed here where this Identity Agent holds the founding key.
-		Signatures: result.Signatures,
-	}
-	if len(result.Signatures) > 0 {
-		eventRecord.CesrSignature = result.Signatures[0]
+		// Only what the engine signed and judged; req.CesrSignature is never
+		// stored, since nobody here checked it.
+		Signatures:    result.Signatures,
+		CesrSignature: result.Signatures[0],
 	}
 	if err := s.DataStore.SaveEvent(eventRecord); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to persist inception event", err.Error())
@@ -4127,7 +4116,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 		nextPub := ed25519.NewKeyFromSeed(nextPairwiseSeed).Public().(ed25519.PublicKey)
 		pubB64 := iacrypto.VerkeyQB64(pub)
 		nextB64 := iacrypto.VerkeyQB64(nextPub)
-		if resp, err := s.KeriDriver.CreateInceptionNamed(pubB64, nextB64, "rel-"+oobiData.AID); err == nil && resp.AID != "" {
+		if resp, err := s.KeriDriver.CreateInceptionNamed(pubB64, nextB64, "rel-"+oobiData.AID, login.FoundingSigner(pairwiseSeed)); err == nil && resp.AID != "" {
 			contact.RelationshipAID = resp.AID
 			contact.RelationshipSeedB64 = "" // no per-contact secret; re-derive from root+index
 			log.Printf("[identity-agent-core] CONTACT: HD-derived (index %d) + minted real relationship P-AID %s via local KERI driver for %s", contactIdx, resp.AID, oobiData.AID)
@@ -4962,7 +4951,8 @@ func (s *CoreServer) reviveAssetIdentity(a asset.Asset) error {
 		}
 		return nil
 	}
-	resp, ierr := s.KeriDriver.CreateInceptionNamed(pubB64, nextB64, a.DisplayName)
+	resp, ierr := s.KeriDriver.CreateInceptionNamed(pubB64, nextB64, a.DisplayName,
+		asset.FoundingSigner(s.DataDir, a.SigningIndex))
 	if ierr != nil {
 		return fmt.Errorf("re-inception: %w", ierr)
 	}

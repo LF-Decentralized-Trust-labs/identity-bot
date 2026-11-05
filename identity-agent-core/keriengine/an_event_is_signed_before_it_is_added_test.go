@@ -461,6 +461,45 @@ func TestAnUnmarkedUnsignedRotationIsNeverSignedHere(t *testing.T) {
 	}
 }
 
+// A founding no valid signature covers is refused, and nothing is held: not an
+// identity whose key this engine does not hold, not one given a signature that
+// does not verify, and not a delegated identity (whose delegator is then left
+// without the approval of it).
+func TestAFoundingNoValidSignatureCoversIsRefused(t *testing.T) {
+	e := New()
+	if _, err := e.CreateInceptionNamed(newKey(t), newKey(t), "root"); err != nil {
+		t.Fatal(err)
+	}
+	foreign, _ := keri.GenerateSigner(true) // not remembered: its key is not held here
+	other, _ := keri.GenerateSigner(true)
+	fpub, npub := pubOf(t, foreign), pubOf(t, other)
+	wrongKey := func(raw []byte) (string, error) {
+		sig, err := other.Sign(raw)
+		if err != nil {
+			return "", err
+		}
+		return keri.MatterQB64(keri.CodeEd25519Sig, sig)
+	}
+	before, _ := e.GetKel("root")
+	for name, sign := range map[string]drivers.FoundingSigner{"no signer holds the key": nil, "a signature by another key": wrongKey} {
+		if _, err := e.Incept(drivers.InceptionRequest{PublicKey: fpub, NextPublicKey: npub, Name: "foreign", Sign: sign}); err == nil {
+			t.Fatalf("%s: a founding was made", name)
+		}
+		if _, err := e.GetKel("foreign"); err == nil {
+			t.Fatalf("%s: a founding was held that no signature covers", name)
+		}
+		if _, err := e.CreateDelegatedInception(fpub, npub, "child", "root", sign); err == nil {
+			t.Fatalf("%s: a delegated founding was made", name)
+		}
+		if _, err := e.GetKel("child"); err == nil {
+			t.Fatalf("%s: a delegated founding was held that no signature covers", name)
+		}
+		if after, _ := e.GetKel("root"); after.EventCount != before.EventCount {
+			t.Fatalf("%s: the delegator approved a founding that was refused", name)
+		}
+	}
+}
+
 // A rotation with several keys that cannot open the commitment however they
 // sign is refused as not committed, never held waiting for signatures that
 // could not help.

@@ -272,6 +272,7 @@ func (h *Handler) getOrCreateRelationship(siteAID string, bundle *ChallengeBundl
 			iacrypto.VerkeyQB64(pub),
 			iacrypto.VerkeyQB64(nextPub),
 			"login-rel-"+siteAID,
+			FoundingSigner(pwiseSeed),
 		)
 		if err != nil || resp.AID == "" {
 			return nil, fmt.Errorf("failed to mint real relationship AID via local engine: %w", err)

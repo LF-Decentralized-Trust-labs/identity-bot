@@ -27,7 +27,7 @@ func TestAnAgentsPublishedLogCarriesItsOwnSignature(t *testing.T) {
 	if _, err := e.CreateInceptionNamed(iacrypto.VerkeyQB64(rootPub), iacrypto.VerkeyQB64(rootNext), "owner"); err != nil {
 		t.Fatal(err)
 	}
-	dip, err := e.CreateDelegatedInception(iacrypto.VerkeyQB64(pub), iacrypto.VerkeyQB64(nextPub), "Research assistant", "owner")
+	dip, err := e.CreateDelegatedInception(iacrypto.VerkeyQB64(pub), iacrypto.VerkeyQB64(nextPub), "Research assistant", "owner", asset.FoundingSigner(s.DataDir, index))
 	if err != nil {
 		t.Fatal(err)
 	}
