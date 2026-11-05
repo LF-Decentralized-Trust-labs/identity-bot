@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'backend_process_service.dart';
 import 'mobile_core_service.dart';
 import 'profile_scope.dart';
+import 'finding_it_again.dart' show forgetWhatWasFoundForAnotherProfile;
 import 'point_this_app_at_its_agent.dart';
 
 /// One identity this installation holds, as it can be described while its
@@ -122,6 +123,7 @@ class IdentityProfiles {
       // requests to the PREVIOUS profile's agent, signed as this machine, and
       // getting entirely plausible answers about the wrong identity — until the
       // app was restarted.
+      forgetWhatWasFoundForAnotherProfile();
       await pointThisAppAtItsAgent();
       return;
     }
@@ -141,6 +143,7 @@ class IdentityProfiles {
       throw StateError('the Identity Agent core did not become ready, so this '
           'app could not tell it which half it is running');
     }
+    forgetWhatWasFoundForAnotherProfile();
     await pointThisAppAtItsAgent();
   }
 

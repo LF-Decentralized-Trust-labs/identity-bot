@@ -9,6 +9,10 @@ import 'which_half_this_app_is_running.dart';
 final ValueNotifier<WhereTheAgentWent?> whereTheAgentWent =
     ValueNotifier<WhereTheAgentWent?>(null);
 
+/// Forgets what was found for the profile that was open, so the next one is not
+/// shown its outcome. Called when a profile starts or is switched to.
+void forgetWhatWasFoundForAnotherProfile() => whereTheAgentWent.value = null;
+
 /// Settles which half this app runs, starts on the recorded address at once,
 /// and looks for a moved agent behind the app, publishing what it finds in
 /// [whereTheAgentWent]. Replaces the bare [pointThisAppAtItsAgent] at launch.
@@ -24,7 +28,12 @@ Future<WhereTheAgentWent> settleWhereTheAgentIs({
       thing: thing,
       whereItMayHaveGone: leads,
       onChecked: (outcome) async {
-        await afterwards?.call(outcome);
+        try {
+          await afterwards?.call(outcome);
+        } catch (e) {
+          debugPrint('[controller] after looking for the agent: $e');
+        }
+        // Always published, so nothing waiting on it waits for ever.
         whereTheAgentWent.value = outcome;
       },
     );
@@ -98,9 +107,6 @@ class FindingItAgain extends ChangeNotifier {
   /// Why the last typed address was refused, in words. Empty otherwise.
   String message = '';
 
-  /// Where it now answers, after a successful find, without the scheme.
-  String foundAt = '';
-
   /// Whether a "try again" is running.
   bool get tryingAgain => _tryingAgain;
 
@@ -124,14 +130,14 @@ class FindingItAgain extends ChangeNotifier {
     return WhatTheGateShows.theApp;
   }
 
-  /// A readable form of an address for a person: no scheme, no path.
-  static String inWords(String address) =>
-      Uri.tryParse(address)?.host.isNotEmpty == true
-          ? Uri.parse(address).host
-          : address;
-
   void _changed() {
     _tryingAgain = false;
+    if (_outcome.value == null) {
+      // Nothing is known (a profile started, or the person has read it): the
+      // flags that belonged to the last outcome go with it.
+      _leftAlone = false;
+      _noticeDismissed = false;
+    }
     notifyListeners();
   }
 
@@ -146,7 +152,6 @@ class FindingItAgain extends ChangeNotifier {
       final out = await finder.findAgain(current: current, hints: [address]);
       if (out.moved) {
         await (_settle ?? _defaultSettle)();
-        foundAt = inWords(out.origin);
         _found = true;
       } else if (out.isStillThere) {
         // It answers where it was recorded after all; nothing to switch.
@@ -206,6 +211,13 @@ class FindingItAgain extends ChangeNotifier {
     _noticeDismissed = false;
     notifyListeners();
     await (_settle ?? _defaultSettle)();
+    // Whatever the look does, "Checking…" does not outlast it for long.
+    Future<void>.delayed(const Duration(seconds: 30), () {
+      if (_tryingAgain) {
+        _tryingAgain = false;
+        notifyListeners();
+      }
+    });
   }
 
   @override

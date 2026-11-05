@@ -183,9 +183,10 @@ class AskingToActForAnIdentity {
       throw NothingAnsweredThere(agentOrigin);
     }
     // A relay or proxy that is up while the machine behind it is not answers
-    // 502, 503 or 504. That is the machine being off, not the address being
+    // 502, 503 or 504 (or one of Cloudflare's 52x and 530). That is the machine being off, not the address being
     // wrong, so it is reported as no answer.
-    if (const {502, 503, 504}.contains(res.statusCode)) {
+    if (const {502, 503, 504, 520, 521, 522, 523, 524, 530}
+        .contains(res.statusCode)) {
       throw NothingAnsweredThere(agentOrigin);
     }
     if (res.statusCode != 200) {

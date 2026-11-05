@@ -12,7 +12,8 @@ class _Finder implements FindingAnAgentThatMoved {
   @override
   Future<WhereTheAgentWent> findAgain(
           {required WhichHalfThisAppIsRunning current,
-          List<String> hints = const []}) async =>
+          List<String> hints = const [],
+          bool Function()? stillTheSameProfile}) async =>
       result;
 
   @override
@@ -92,7 +93,6 @@ void main() {
             from: 'https://a.test', thing: 'identity'));
     await ok.find('box.example.test');
     expect(ok.shows, WhatTheGateShows.found);
-    expect(ok.foundAt, 'box.example.test');
     ok.done();
     expect(ok.shows, WhatTheGateShows.theApp);
     expect(outcome.value, isNull);

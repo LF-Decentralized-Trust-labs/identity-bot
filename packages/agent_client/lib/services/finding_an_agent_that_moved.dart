@@ -107,6 +107,7 @@ class FindingAnAgentThatMoved {
       await _asking.confirmThisIsReally(agentAid, at);
     } catch (e) {
       debugPrint('[controller] $at did not prove it is $agentAid: $e');
+      if (_wentOffline(e)) throw _offlineMidProof();
       throw StateError('Something answers at that address, but it could not '
           'show that it is this $thing.');
     }
@@ -115,6 +116,7 @@ class FindingAnAgentThatMoved {
       told = await _asking.whatTheAgentSays(at);
     } catch (e) {
       debugPrint('[controller] $at did not answer this computer: $e');
+      if (_wentOffline(e)) throw _offlineMidProof();
       throw StateError('The $thing seems to be at that address, but it did not '
           'answer this computer.');
     }
@@ -133,6 +135,7 @@ class FindingAnAgentThatMoved {
   Future<WhereTheAgentWent> findAgain({
     required WhichHalfThisAppIsRunning current,
     List<String> hints = const [],
+    bool Function()? stillTheSameProfile,
   }) async {
     if (!current.isAController)
       return const WhereTheAgentWent.notAFrontEnd(thing: '');
@@ -152,6 +155,12 @@ class FindingAnAgentThatMoved {
         reasons.add(_plain(e));
         if (e is! _NothingAnswered) aLeadAnsweredWithSomethingElse = true;
         continue;
+      }
+      // The person may have switched profile while the proof ran; what was
+      // proven belongs to the profile that asked, so it is not written to
+      // whichever is open now.
+      if (stillTheSameProfile != null && !stillTheSameProfile()) {
+        return const WhereTheAgentWent.notAFrontEnd();
       }
       await WhichHalfThisAppIsRunning.pointAt(
           agentOrigin: at, agentAid: current.agentAid);
@@ -189,6 +198,15 @@ class FindingAnAgentThatMoved {
     return Uri(scheme: u.scheme, host: u.host, port: u.hasPort ? u.port : null)
         .toString();
   }
+
+  static bool _wentOffline(Object e) =>
+      e is NothingAnsweredThere ||
+      e is http.ClientException ||
+      e is TimeoutException;
+
+  static _NothingAnswered _offlineMidProof() => _NothingAnswered(
+      'Nothing answered at that address. Check it is spelled right and that '
+      'this computer is online.');
 
   static String _plain(Object e) =>
       e.toString().replaceFirst(RegExp(r'^(Bad state|Exception): '), '');

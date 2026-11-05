@@ -35,6 +35,7 @@ class _World {
 
   /// Hosts a relay answers for with 502, because the machine behind is off.
   final machineOff = <String>{};
+  int statusForMachineOff = 502;
 
   /// When set, a request to a dead host waits for this before failing, as an
   /// address that does not answer really does.
@@ -69,7 +70,7 @@ class _World {
           return http.Response('{}', 200); // front-end-for etc.
         }
         if (notAnAgent.contains(host)) return http.Response('not here', 404);
-        if (machineOff.contains(host)) return http.Response('bad gateway', 502);
+        if (machineOff.contains(host)) return http.Response('bad gateway', statusForMachineOff);
         if (!alive.contains(host)) {
           await holdDeadHosts?.future;
           throw http.ClientException('no route', req.url);
@@ -323,5 +324,27 @@ void main() {
     final told = world.seen
         .lastWhere((r) => r.url.path == '/api/controller/front-end-for');
     expect((jsonDecode(told.body) as Map)['agent_url'], _new);
+  });
+
+  test('a profile switched away from while the proof ran is NOT re-pointed',
+      () async {
+    world
+      ..alive.add(_new)
+      ..keyHistoryProves[_new] = _aid
+      ..recognisesUs[_new] = _aid;
+    final out = await finder.findAgain(
+        current: await recorded(),
+        hints: const [_new],
+        stillTheSameProfile: () => false);
+    expect(out.moved, isFalse);
+    expect((await recorded()).agentOrigin, _old);
+  });
+
+  test("a proxy's 52x for a machine that is off is unreachable, not gone",
+      () async {
+    world.machineOff.add(_old);
+    world.statusForMachineOff = 522;
+    final out = await finder.findAgain(current: await recorded());
+    expect(out.couldNotBeReached, isTrue);
   });
 }

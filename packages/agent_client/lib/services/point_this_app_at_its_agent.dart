@@ -106,6 +106,7 @@ Future<void> _lookAgainBehindTheApp({
     final outcome = await find.findAgain(
       current: from,
       hints: whereItMayHaveGone == null ? const [] : await whereItMayHaveGone(),
+      stillTheSameProfile: () => AgentConfig.agentAid == from.agentAid,
     );
     // The person may have switched to another profile while this ran; what was
     // found belongs to the profile that asked, not to the one open now.
