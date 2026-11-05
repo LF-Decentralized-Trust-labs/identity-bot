@@ -15,6 +15,7 @@ const (
 	issuerNotCheckedFmt   = "not checked: "
 	issuerNoLogHeld       = issuerNotCheckedFmt + "no key log is held for the issuer"
 	issuerNoLogHeldReason = "the issuer's key log is not held here, so the credential cannot be shown to come from that issuer"
+	issuerNoProof         = issuerNotCheckedFmt + "no proof of issuance"
 )
 
 // issuerLogForVerification is the one place that reads an issuer's key log for
@@ -53,6 +54,27 @@ func ownLogForVerification(events []store.EventRecord) []map[string]interface{} 
 	return out
 }
 
+// issuanceLogForVerification is the credential's transaction log as this agent
+// holds it: the events of the credential in the registry it names, as they were
+// published. Nil when the credential names no registry or none is held, in
+// which case the engine reports the issuance as not proved.
+func (s *CoreServer) issuanceLogForVerification(acdcBody map[string]interface{}) []string {
+	said, _ := acdcBody["d"].(string)
+	registry, _ := acdcBody["ri"].(string)
+	if said == "" || registry == "" {
+		return nil
+	}
+	events, err := s.DataStore.GetCredentialTEL(registry, said)
+	if err != nil || len(events) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(events))
+	for _, ev := range events {
+		out = append(out, ev.RawB64)
+	}
+	return out
+}
+
 // issuerVerdict folds what is known of the issuer's log into the engine's
 // verdict. A credential whose issuer could not be checked is never verified:
 // without the log nothing says the issuer is who the credential claims, and a
@@ -63,7 +85,14 @@ func issuerVerdict(res *drivers.DriverVerifyCredentialResponse, logHeld bool) (s
 		res = &drivers.DriverVerifyCredentialResponse{}
 	}
 	if logHeld {
-		return issuerChecked
+		// The log says who the issuer is, not that it issued this credential.
+		// The engine proves that from the credential's registry and the issuer's
+		// log, and says so in "issuance_proved"; anything but true is not proved.
+		if proved, _ := res.Checks["issuance_proved"].(bool); proved {
+			return issuerChecked
+		}
+		res.Verified = false
+		return issuerNoProof
 	}
 	if res.Checks == nil {
 		res.Checks = map[string]interface{}{}

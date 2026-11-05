@@ -163,6 +163,7 @@ func TestTheSubjectPresentingTheirOwnCredentialIsAccepted(t *testing.T) {
 		HolderPublicKey:   subject.Pub,
 		HolderKelEvents:   subject.KEL,
 		RegistryEventsB64: log,
+		IssuerKelEvents:   signedLogOf(t, e, "issuer"),
 	})
 	if err != nil {
 		t.Fatal(err)

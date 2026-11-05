@@ -84,3 +84,36 @@ func TestACredentialWhoseIssuerCannotBeCheckedIsNeverVerified(t *testing.T) {
 		t.Fatalf("the chain step does not say the issuer was not checked: %v", step)
 	}
 }
+
+// A credential is verified only with proof its issuer issued it. Each forgery
+// names an issuer whose log this agent holds, so its key log checks out; each
+// test fails if the proof of issuance is not required.
+var forgeries = map[string]howIssued{
+	"no registry":                          forgedWithNoRegistry,
+	"a registry the issuer never anchored": forgedInIssuersRegistry,
+	"a registry and no log held":           forgedWithNoLogHeld,
+}
+
+func TestAForgeryNamingAKnownIssuerIsNotVerifiedOnTheRoutes(t *testing.T) {
+	for name, how := range forgeries {
+		for _, held := range []issuerLogHeld{logHeldAsContact, logHeldAsOwn} {
+			w := aGateWorldWhere(t, true, held, how)
+			out := w.verifyRoute(t)
+			if out["verified"] == true {
+				t.Fatalf("%s: a forgery was verified: %v", name, out)
+			}
+			if out["issuer_status"] != "not checked: no proof of issuance" {
+				t.Fatalf("%s: the reply does not say there is no proof of issuance: %v", name, out)
+			}
+			chain := w.chainRoute(t)
+			if chain["valid"] == true {
+				t.Fatalf("%s: a forgery was valid on the chain route: %v", name, chain)
+			}
+			steps, _ := chain["chain"].([]interface{})
+			step, _ := steps[0].(map[string]interface{})
+			if step["issuer_status"] != "not checked: no proof of issuance" {
+				t.Fatalf("%s: the chain step does not say there is no proof of issuance: %v", name, step)
+			}
+		}
+	}
+}
