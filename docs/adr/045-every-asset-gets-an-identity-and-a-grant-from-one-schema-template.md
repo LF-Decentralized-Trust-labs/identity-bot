@@ -4,6 +4,7 @@
 **Date:** 2026-10-20
 **Amended:** 2026-11-02 — An app is a kind of asset, with a grant and a body of its own (see §Amendment 1)
 **Amended:** 2026-11-04 — A machine key's short code is 80 bits, not about 41 (see §Amendment 2)
+**Amended:** 2026-11-04 — An AI agent's body may sign the request for an AI agent it creates; version 1.2.0 of the AI Agent Grant (see §Amendment 3)
 **Relates to:** ADR-032 (An identity can name who owns it, from its first event), ADR-042 (How an agent is reached, and who may manage it), ADR-044 (An authorized controller does the app's work)
 
 ## Context
@@ -82,8 +83,9 @@ It deliberately carries nothing else:
 
 - **No role, prompt or model.** They configure the AI agent and are not authority. Changing
   one must not require a new grant.
-- **No permission to delegate onward.** This software gives an AI agent no way to create AI
-  agents of its own, so the field would assert nothing.
+- **No permission to delegate onward.** An AI agent may create AI agents only through
+  `agent.create`, whose limits are `resource_constraints` on that capability, so no field
+  of its own says whether it may (see Amendment 3).
 - **No messaging recipients or conversation limits yet.** They arrive with AI agent
   messaging, as a new version of the schema. A field nothing enforces reads as a guarantee
   the software does not give.
@@ -141,6 +143,11 @@ is used only by a build with no KERI engine.
   computed over. Only schemas whose document digests to their identifier are served.
 
 ### Who authorised it (amended 2026-10-22)
+
+*Amended 2026-11-04 (Amendment 3): a request may also be signed by an AI agent's body, for
+an AI agent it creates, and the AI Agent Grant is issued at 1.2.0 to admit it. Rules 1 to 7
+below hold for it as stated, with the signer and the grant they rest on changed as
+Amendment 3 says.*
 
 Version 1.1.0 of the template lets a credential name the credentials it rests on, in an
 edges block, and carry the `request` that authorised it exactly as it was signed: whether a
@@ -372,3 +379,60 @@ while its details show the new one. They differ visibly, which is safe: compare 
 Pinned in `identity-agent-core/authorisation/a_key_code_is_too_long_to_forge_test.go`: two
 keys with their codes, and every one-bit change of a key giving a different code. There was no
 published vector file for this code, so none is regenerated.
+
+## Amendment 3 (2026-11-04): an AI agent names its creator
+
+An AI agent whose grant holds `agent.create` may ask the Identity Agent to create another AI
+agent, and to set its repositories, over its body's own signed channel
+(`POST /api/agent-host/agents` and `PUT /api/agent-host/agents/{id}/github`). The grant
+issued for the AI agent it created must say who authorised it, as every grant does, and here
+the authority is the creating AI agent, not the owner and not a machine.
+
+**A third kind of signer.** A credential's `request` has a `kind`: `controller` (a machine,
+signed over `IA-CONTROLLER-REQ`), `owner` (the identity's own key) and now `ai_agent_body`.
+The signer of an `ai_agent_body` request is the machine, the body, that holds an AI Agent
+Body credential for the creator. The string it signs is the body request of ADR-046,
+`IA-BODY-REQ-V3`: the Identity Agent it was for, the body, the method and target, the time,
+a nonce, the digest of the request's body, then the work item, reason and session. A body's
+request is accepted only at the body's own routes (`/api/agent-host/...`), and an owner's or
+machine's request only at theirs: one kind of request cannot stand for the other's.
+
+**The creator chain.** The new grant's `authorised_by` edge names the creator's AI Agent
+Grant. The creator's AI Agent Body credential is given beside it. `authorisation.Check`
+verifies:
+
+1. the creator's grant verifies against its own identifier, is the one the edge names, was
+   issued by the same Identity Agent as the new grant, holds `agent.create`, and is not the
+   new AI agent's own;
+2. the creator's body credential verifies, was issued by that Identity Agent, is for the
+   same creator, and names the key that signed the request;
+3. the signature over the exact string, by that key, verifies, and the string names this
+   Identity Agent as the one it was for;
+4. both credentials were in force when the request was made (after they were granted, before
+   they lapsed) and neither was revoked before the new grant was issued, ordered as in rule 6
+   above;
+5. the new AI agent is no more powerful than its creator. It holds only capabilities the
+   creator's grant holds, and for every argument the creator's grant limits to some values,
+   the new grant limits it to some of those; a limit the creator has and the new grant leaves
+   off is wider, and refused. A list of values that is empty is refused in either grant, as
+   the schema refuses it. Where the creator's grant has a `valid_until`, the new grant has one
+   too, and it is no later: an AI agent cannot outlive its creator. An AI agent cannot create
+   a more powerful one.
+
+**What is not verified.** The core does not enforce any count or resource limit on how many
+AI agents a creator may create, or how much they may use, even where the creator's grant
+states one in `resource_constraints` on `agent.create`. That is enforced by the party that
+issues the creator's grant, at the time it asks
+for the new grant, and a verifier reading the credentials afterwards cannot tell whether it
+did. Only the comparison in point 5 is made here.
+
+**Version.** The AI Agent Grant is issued at 1.2.0, which admits the `ai_agent_body` request
+kind. Versions 1.0.0 and 1.1.0 remain honoured as they were: a 1.1.0 grant is checked
+against what was asked for, counts toward when this Identity Agent began issuing grants that
+name who authorised them, and is kept under the version it was issued in. Software that does
+not know 1.2.0 sees a schema it does not recognise and refuses the credential; it never
+reads one as a version it does know.
+
+Worked examples, accepted and refused, each refusal breaking one rule:
+`identity-agent-core/authorisation/ai-agent-body-request-vectors.json`, checked independently
+by `identity-agent-core/contracts/check_ai_agent_body_request_vectors.py`.

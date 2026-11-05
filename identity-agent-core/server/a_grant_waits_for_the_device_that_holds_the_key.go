@@ -107,6 +107,8 @@ func grantKindNamed(schema string) *schemas.AssetGrant {
 	switch schema {
 	case schemas.AIAgentGrant.Schema.SAID:
 		return schemas.AIAgentGrant
+	case schemas.AIAgentGrantV11.Schema.SAID:
+		return schemas.AIAgentGrantV11
 	case schemas.AppGrant.Schema.SAID:
 		return schemas.AppGrant
 	case schemas.ControllerGrant.Schema.SAID:

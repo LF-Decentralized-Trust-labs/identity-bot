@@ -12,10 +12,16 @@ import (
 // about — never something that should happen as a side effect of an edit here.
 //
 // Version 1.1.0 admits an edge to the grant of whoever authorised the AI agent,
-// and the request they signed.
+// and the request they signed. Version 1.2.0 also admits a request signed by
+// the body of the AI agent that created this one (kind ai_agent_body).
 // The first version keeps its identifier, so grants issued under it still
 // resolve; TestTheFirstVersionsKeepTheirIdentifiers holds it to that.
-const pinnedAIAgentGrantSAID = "ELQTQ_EOsA3t1fCCcho6r9r2gma-LXqoQEzQbyliqpT_"
+const pinnedAIAgentGrantSAID = "EKfsNSsWMAWPzRhwm3pzykK_nW8ByFJLG8d75CefTmR-"
+
+// pinnedAIAgentGrantV11SAID is the second version, which was current until a
+// grant could rest on a request an AI agent's body signed. Grants issued under
+// it still resolve, so it must not move.
+const pinnedAIAgentGrantV11SAID = "ELQTQ_EOsA3t1fCCcho6r9r2gma-LXqoQEzQbyliqpT_"
 
 func TestTheAIAgentGrantSchemaIsPinned(t *testing.T) {
 	if AIAgentGrant.Schema.SAID != pinnedAIAgentGrantSAID {
@@ -111,10 +117,13 @@ func TestTheFirstVersionsKeepTheirIdentifiers(t *testing.T) {
 	if AIAgentGrantV1.Schema.SAID != "ENqXDGTD_fvwwkYGtaHby3J3Oahi3LzCE-ehDJxmHrBi" {
 		t.Fatalf("the first AI agent grant schema moved to %s", AIAgentGrantV1.Schema.SAID)
 	}
+	if AIAgentGrantV11.Schema.SAID != pinnedAIAgentGrantV11SAID {
+		t.Fatalf("the second AI agent grant schema moved to %s", AIAgentGrantV11.Schema.SAID)
+	}
 	if AIAgentBodyV1.Schema.SAID != "EBjOukYuabOuiVTRLSsE_gru3xww2CWAIAsFE6DCtVr1" {
 		t.Fatalf("the first AI agent body schema moved to %s", AIAgentBodyV1.Schema.SAID)
 	}
-	for _, said := range []string{AIAgentGrantV1.Schema.SAID, AIAgentBodyV1.Schema.SAID} {
+	for _, said := range []string{AIAgentGrantV1.Schema.SAID, AIAgentGrantV11.Schema.SAID, AIAgentBodyV1.Schema.SAID} {
 		if Catalog[said] == nil {
 			t.Fatalf("%s is no longer served, so credentials issued under it cannot be resolved", said)
 		}

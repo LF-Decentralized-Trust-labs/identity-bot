@@ -289,7 +289,7 @@ func (s *CoreServer) issuedUnderFirstVersionTooLate(rec *store.CredentialRecord)
 // version (ADR-045, Amendment 1).
 func isEdgedAssetSchema(schema string) bool {
 	switch schema {
-	case schemas.AIAgentGrant.Schema.SAID, schemas.AIAgentBody.Schema.SAID,
+	case schemas.AIAgentGrant.Schema.SAID, schemas.AIAgentGrantV11.Schema.SAID, schemas.AIAgentBody.Schema.SAID,
 		schemas.AppGrant.Schema.SAID, schemas.AppBody.Schema.SAID:
 		return true
 	}
