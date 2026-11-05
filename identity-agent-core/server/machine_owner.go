@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"identity-agent-core/store"
 	"net/http"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 // The identity a machine will answer to, minted before the machine exists.
@@ -45,8 +47,7 @@ func (s *CoreServer) handleMintMachineOwner(w http.ResponseWriter, r *http.Reque
 			"Could not mint an identity for this machine", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(machineOwnerResponse{AID: aid, OOBI: oobi})
+	jsonreply.Write(w, http.StatusOK, machineOwnerResponse{AID: aid, OOBI: oobi})
 }
 
 // mintAnIdentityToClaimAMachineWith derives, records and publishes an identity
