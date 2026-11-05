@@ -357,8 +357,8 @@ void main() {
           'd': 'EAnchoredAnchoredAnchoredAnchoredAnchored12'
         }
       ]);
-      final signed = await keri.signPayload(name: founded.aid, data: [1, 2]);
-      expect(signed.publicKey, KeyManager.keyAt(seed, 1).publicKeyEncoded);
+      expect((await reader().read(seed)).keyInForce,
+          KeyManager.keyAt(seed, 1).publicKeyEncoded);
       expect(reads.reads.where((p) => !p.startsWith('/public/')), isEmpty,
           reason: 'every read of the core was of a public route: '
               '${reads.reads}');

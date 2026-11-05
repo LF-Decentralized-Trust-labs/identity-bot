@@ -111,7 +111,6 @@ void main() {
               'd': 'EAnchoredAnchoredAnchoredAnchoredAnchored12'
             }
           ]));
-      await each(() async => keri.signPayload(name: aid, data: [1, 2, 3]));
       await each(() async => keri.replaceMessagingKeys());
       // Owner-signed requests, each signature recorded so the logs can be
       // searched for it.

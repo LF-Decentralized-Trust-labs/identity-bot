@@ -51,21 +51,6 @@ class RotationResult {
   });
 }
 
-class SignatureResult {
-  // signature: raw Ed25519 signature, base64-encoded.
-  final String signature;
-  final String publicKey;
-  // cesrSignature: the same signature unindexed (0B..., 88 chars), as the core's
-  // /api/verify reads it against [publicKey]. Empty string if it was not written.
-  final String cesrSignature;
-
-  SignatureResult({
-    required this.signature,
-    required this.publicKey,
-    this.cesrSignature = '',
-  });
-}
-
 class InteractResult {
   final String aid;
   final String said;
@@ -236,11 +221,6 @@ abstract class KeriService {
   Future<InteractResult> interactAid({
     required String name,
     List<Map<String, String>> sealData,
-  });
-
-  Future<SignatureResult> signPayload({
-    required String name,
-    required List<int> data,
   });
 
   Future<KeyEventLog> getCurrentKel({

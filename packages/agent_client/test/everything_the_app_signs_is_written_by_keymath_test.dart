@@ -80,9 +80,6 @@ void main() {
     ]);
     await keri.issueCredential(
         claims: {'name': 'Ada'}, schemaSaid: 'Eschema', holderAid: 'Eholder');
-    final signed = await keri.signPayload(name: aid, data: [1, 2, 3]);
-    expect(signed.cesrSignature, startsWith('0B'),
-        reason: 'not on a key event, so not indexed');
 
     final kel = jsonDecode(
         (await core.client.get(Uri.parse('${core.base}/api/kel?name=$aid')))
@@ -94,32 +91,14 @@ void main() {
   });
 
   test(
-      'a signature handed back for a payload is the form the core\'s /api/verify '
-      'reads, and for a presentation the unindexed one, not the indexed one a key event carries',
-      () async {
+      'a signature handed back for a presentation is the unindexed form, not '
+      'the indexed one a key event carries', () async {
     final core = await anotherCore(bin, km);
     cores.add(core);
     await SecureKeyStore.saveMnemonic(words.split(' '));
     final keri = LocalCoreKeriService(
         baseUrl: core.base, client: core.client, keyMath: km);
     final aid = (await keri.inceptAid(name: 'me', code: words)).aid;
-
-    Future<Map> post(String path, Map body) async => jsonDecode((await core
-            .client
-            .post(Uri.parse('${core.base}$path'),
-                headers: const {'Content-Type': 'application/json'},
-                body: jsonEncode(body)))
-        .body) as Map;
-
-    final data = [1, 2, 3];
-    final signed = await keri.signPayload(name: aid, data: data);
-    expect(signed.cesrSignature, startsWith('0B'));
-    final verified = await post('/api/verify', {
-      'data': base64Encode(data),
-      'signature': signed.cesrSignature,
-      'public_key': signed.publicKey,
-    });
-    expect(verified['valid'], isTrue, reason: '$verified');
 
     final issued = await keri.issueCredential(
         claims: {'name': 'Ada'}, schemaSaid: 'Eschema', holderAid: aid);

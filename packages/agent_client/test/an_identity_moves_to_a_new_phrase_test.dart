@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:agent_client/crypto/bip39.dart';
 import 'package:agent_client/crypto/keys.dart';
@@ -8,6 +9,7 @@ import 'package:agent_client/services/secure_key_store.dart';
 import 'package:agent_client/services/the_identity_this_device_holds.dart';
 import 'package:agent_client/services/the_events_this_device_signed.dart';
 import 'package:agent_client/services/the_key_events_this_device_makes.dart';
+import 'package:agent_client/services/the_key_state_this_device_reads.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -49,6 +51,12 @@ void main() {
 
   LocalCoreKeriService service() => LocalCoreKeriService(
       baseUrl: core.base, client: core.client, keyMath: km);
+
+  /// The key in force of the identity this device holds, for the phrase
+  /// [seed], read from the log the core publishes and checked here.
+  Future<VerifiedKeyState> keyInForce(Uint8List seed) =>
+      TheKeyStateThisDeviceReads(core.client, km, core.base)
+          .readTheCopies(seed);
 
   Future<List<Map<String, dynamic>>> kel(String aid) async {
     final res = await http.get(Uri.parse('${core.base}/api/kel?name=$aid'),
@@ -92,8 +100,8 @@ void main() {
 
     expect(await SecureKeyStore.loadMnemonic(), fresh.split(' '));
     expect(await SecureKeyStore.loadPhraseMovingTo(), isNull);
-    final signed = await keri.signPayload(name: aid, data: [1, 2, 3]);
-    expect(signed.publicKey, KeyManager.keyAt(newSeed, 1).publicKeyEncoded);
+    expect((await keyInForce(newSeed)).keyInForce,
+        KeyManager.keyAt(newSeed, 1).publicKeyEncoded);
 
     // A holder of the old phrase cannot rotate the identity: its next key is
     // committed to nowhere.
@@ -186,10 +194,12 @@ void main() {
         throwsA(isA<KeyEventRefused>()));
     expect(await kel(aid), hasLength(2), reason: 'step 1 is not in the log');
 
-    final signed = await service().signPayload(name: aid, data: [1]);
-    expect(signed.publicKey, KeyManager.keyAt(newSeed, 1).publicKeyEncoded,
+    await service().interactAid(name: aid, sealData: anchor);
+    expect((await keyInForce(newSeed)).keyInForce,
+        KeyManager.keyAt(newSeed, 1).publicKeyEncoded,
         reason: 'the move was finished first, so the new phrase signed');
-    expect(await kel(aid), hasLength(5));
+    expect(await kel(aid), hasLength(6),
+        reason: 'step 1, step 2, the messaging keys, then the interaction');
     expect(await SecureKeyStore.loadMnemonic(), fresh.split(' '));
   });
 
@@ -275,10 +285,11 @@ void main() {
     expect(await SecureKeyStore.loadPhraseMovingTo(), fresh.split(' '),
         reason: 'the move is not finished until the messaging keys are');
 
-    final signed = await service().signPayload(name: aid, data: [1]);
-    expect(signed.publicKey, KeyManager.keyAt(newSeed, 1).publicKeyEncoded);
+    await service().interactAid(name: aid, sealData: anchor);
+    expect((await keyInForce(newSeed)).keyInForce,
+        KeyManager.keyAt(newSeed, 1).publicKeyEncoded);
     final log = await kel(aid);
-    expect([for (final e in log) e['t']], ['icp', 'rot', 'rot', 'rot', 'ixn'],
+    expect([for (final e in log) e['t']], ['icp', 'rot', 'rot', 'rot', 'ixn', 'ixn'],
         reason: 'the new keyset is anchored once');
     expect(await SecureKeyStore.loadMnemonic(), fresh.split(' '));
     expect(await SecureKeyStore.loadPhraseMovingTo(), isNull);

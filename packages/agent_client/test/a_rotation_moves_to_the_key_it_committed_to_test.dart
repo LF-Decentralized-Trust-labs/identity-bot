@@ -626,20 +626,16 @@ void main() {
         throwsArgumentError);
   });
 
-  test('a signature made as the identity reports the key that made it',
+  test('an interaction made as the identity is signed by the key in force',
       () async {
     await keri.inceptAid(name: 'me', code: words.join(' '));
-    final data = utf8.encode('hello');
-    final result = await keri.signPayload(name: 'me', data: data);
-    expect(result.publicKey, key(0));
-    final k = ed.PublicKey(rawOf(result.publicKey));
-    expect(
-        ed.verify(k, Uint8List.fromList(data), base64Decode(result.signature)),
-        isTrue);
+    await keri.interactAid(name: core.aid);
+    expect(core.kel.map((e) => e['t']), ['icp', 'ixn']);
+    expect(verifiesUnder(key(0), core.raw(1), core.sigAt(1)), isTrue);
   });
 
   test(
-      'after a rotation, an interaction and a signature are made by the rotated key',
+      'after a rotation, an interaction is made by the rotated key',
       () async {
     await keri.inceptAid(name: 'me', code: words.join(' '));
     await keri.rotateAid(name: core.aid);
@@ -651,13 +647,6 @@ void main() {
     expect(verifiesUnder(inForce, core.raw(2), core.sigAt(2)), isTrue,
         reason:
             'an interaction after a rotation is signed by the key the log says is in force');
-
-    final data = utf8.encode('after the rotation');
-    final result = await keri.signPayload(name: core.aid, data: data);
-    expect(result.publicKey, inForce,
-        reason: 'the key reported is the key in force, not the founding key');
-    expect(
-        verifiesUnder(inForce, data, base64Decode(result.signature)), isTrue);
   });
 
   test(
@@ -683,12 +672,8 @@ void main() {
 
     // A new service against the same core: nothing carried over in memory.
     final restarted = serviceOver(core);
-    final data = utf8.encode('after a restart');
-    final result = await restarted.signPayload(name: core.aid, data: data);
-    expect(result.publicKey, core.currentKey);
-    expect(
-        verifiesUnder(core.currentKey!, data, base64Decode(result.signature)),
-        isTrue);
+    await restarted.interactAid(name: core.aid);
+    expect(verifiesUnder(core.currentKey!, core.raw(2), core.sigAt(2)), isTrue);
 
     await restarted.rotateAid(name: core.aid);
     expect(core.kel.last['k'], [key(2)]);
@@ -703,7 +688,7 @@ void main() {
     // copies of the log, and none here can be read and verified.
     await TheIdentityThisDeviceHolds().forgetTheTip();
     await expectLater(
-        keri.signPayload(name: core.aid, data: [1, 2, 3]), throwsException);
+        keri.interactAid(name: core.aid), throwsException);
   });
 
   test('a rotation and an interaction end up signed in the key log', () async {
@@ -806,17 +791,17 @@ void main() {
     expect(core.kel.last['sig'], isNull,
         reason: 'the rotation is stranded: added and never signed');
 
-    final data = utf8.encode('after the upgrade');
-    final result = await keri.signPayload(name: core.aid, data: data);
-    expect(core.kel.last['sig'], isNotNull,
+    await keri.interactAid(name: core.aid);
+    expect(core.kel[1]['sig'], isNotNull,
         reason: 'the stranded rotation was finished');
     expect(verifiesUnder(key(1), core.raw(1), core.sigAt(1)), isTrue);
-    expect(result.publicKey, core.currentKey);
+    expect(verifiesUnder(key(1), core.raw(2), core.sigAt(2)), isTrue,
+        reason: 'and the interaction after it is signed by the key it revealed');
 
-    // And the next rotation, prepared and committed, builds on it.
+    // And the next rotation, prepared and committed, builds on them.
     await keri.rotateAid(name: core.aid);
     expect(core.kel.last['k'], [key(2)]);
-    expect(core.kel.last['p'], core.kel[1]['d']);
+    expect(core.kel.last['p'], core.kel[2]['d']);
   });
 
   test('a stranded event is finished before a new one is prepared after it',
@@ -864,7 +849,7 @@ void main() {
     await strandedByAnEarlierVersion(
         core, {'t': 'ixn', 'a': []}, {'anchors': []});
 
-    await keri.signPayload(name: core.aid, data: [1, 2, 3]);
+    await keri.interactAid(name: core.aid);
     final ixn = core.kel.length - 1;
     expect(core.kel[ixn]['sig'], isNotNull,
         reason: 'the stranded interaction was finished');
@@ -894,7 +879,7 @@ void main() {
       core.tamper = change;
       core.posted.clear();
       await expectLater(
-          keri.signPayload(name: core.aid, data: [1]), throwsException,
+          keri.interactAid(name: core.aid), throwsException,
           reason: what);
       expect(core.posted, isNot(contains('/api/cesr/encode')),
           reason: 'bytes that differ from the event in $what are never signed');
@@ -949,7 +934,7 @@ void main() {
     await strandedByAnEarlierVersion(
         core, {'t': 'ixn', 'a': []}, {'anchors': []});
     core.forgetsEvents = true;
-    await expectLater(keri.signPayload(name: core.aid, data: [1]),
+    await expectLater(keri.interactAid(name: core.aid),
         throwsA(isA<StrandedEventCannotBeFinished>()));
   });
 
@@ -990,8 +975,7 @@ void main() {
     core.posted.clear();
     // This device's record says key 0 is in force, and a signature by it is
     // what the identity's real log verifies; the core's rotation is not in it.
-    final signed = await keri.signPayload(name: core.aid, data: [1]);
-    expect(signed.publicKey, key(0));
+    expect((await TheIdentityThisDeviceHolds().read())!.keyInForce, key(0));
     final injected = core.kel.length - 1;
     core.posted.clear();
     await expectLater(keri.rotateAid(name: core.aid), throwsException);
@@ -1012,7 +996,6 @@ void main() {
       ]
     });
     core.posted.clear();
-    await keri.signPayload(name: core.aid, data: [1]);
     final injected = core.kel.length - 1;
     core.posted.clear();
     await expectLater(keri.interactAid(name: core.aid), throwsException);
@@ -1052,7 +1035,7 @@ void main() {
     final ixn = core.kel.length - 1;
     // A rotation added and signed since, by this device on another occasion.
     core.add(FakeCore.rotation(key(1), key(2)), signedBy: signer(1));
-    await keri.signPayload(name: core.aid, data: [1]);
+    await keri.interactAid(name: core.aid);
     expect(core.kel[ixn]['sig'], isNotNull);
     expect(verifiesUnder(key(0), core.raw(ixn), core.sigAt(ixn)), isTrue,
         reason:
@@ -1171,7 +1154,7 @@ void main() {
         {'key': key(1), 'next': key(2)});
     expect(await pending(), hasLength(2),
         reason: 'the stranded founding and rotation are written down');
-    await keri.signPayload(name: core.aid, data: [1]);
+    await keri.interactAid(name: core.aid);
     expect(await pending(), isEmpty);
   });
 
@@ -1189,12 +1172,12 @@ void main() {
     core.add({'t': 'ixn', 'a': []}, signedBy: signer(0));
     core.add(FakeCore.rotation(key(1), key(2)));
     core.posted.clear();
-    await expectLater(keri.signPayload(name: core.aid, data: [1]),
+    await expectLater(keri.interactAid(name: core.aid),
         throwsA(isA<AnEventThisDeviceDidNotAskFor>()));
     expect(core.posted, isNot(contains('/api/cesr/encode')));
     // And it is dropped once a signed event holds its place.
     core.removeLast();
-    await keri.signPayload(name: core.aid, data: [1]);
+    await keri.interactAid(name: core.aid);
     expect(await pending(), isEmpty,
         reason: 'sequence 1 is now held by a signed event');
   });
@@ -1212,7 +1195,7 @@ void main() {
     // The rotation at 1 reveals the key asked for but commits to another.
     core.add(FakeCore.rotation(key(1), strangersKey(0)));
     core.posted.clear();
-    await expectLater(keri.signPayload(name: core.aid, data: [1]),
+    await expectLater(keri.interactAid(name: core.aid),
         throwsA(isA<AnEventThisDeviceDidNotAskFor>()));
     expect(core.kel.last['sig'], isNull,
         reason: 'the event that was not asked for is not signed');
@@ -1287,14 +1270,15 @@ void main() {
     final keys = keysOver(core);
     final awaiting = await keys.eventsAwaitingApproval(seed);
     expect(awaiting.map((e) => e['d']), [ixn['d']]);
-    await expectLater(keri.signPayload(name: core.aid, data: [1]),
+    await expectLater(keri.interactAid(name: core.aid),
         throwsA(isA<AnEventThisDeviceDidNotAskFor>()),
         reason: 'the identity is locked until somebody acts');
     await recordTheSignedLog(core);
     await keys.signApprovedEvent(seed,
         sequenceNumber: ixn['s'] as String, digest: ixn['d'] as String);
     expect(core.kel.last['sig'], isNotNull);
-    await keri.signPayload(name: core.aid, data: [1]);
+    expect(await keys.eventsAwaitingApproval(seed), isEmpty,
+        reason: 'nothing is awaited any more, so the identity is unlocked');
 
     // Approval does not lift the rotation checks.
     await recordTheSignedLog(core);
@@ -1336,7 +1320,7 @@ void main() {
         {'key': key(0), 'next': key(1)});
     core.posted.clear();
     await expectLater(
-        keri.signPayload(name: core.aid, data: [1]),
+        keri.interactAid(name: core.aid),
         throwsA(isA<AStoredEventIsNotTheOneExpected>()));
     expect(core.posted, isNot(contains('/api/cesr/encode')));
   });
@@ -1467,7 +1451,7 @@ void main() {
         t: 'icp', expectedSn: 0, asked: {'key': key(0), 'next': key(1)});
     core.add(FakeCore.oldFounding(key(0), key(1), n: ['E${'M' * 43}']));
     core.posted.clear();
-    await expectLater(keri.signPayload(name: core.aid, data: [1]),
+    await expectLater(keri.interactAid(name: core.aid),
         throwsA(isA<AStoredEventIsNotTheOneExpected>()));
     expect(core.posted, isNot(contains('/api/cesr/encode')));
   });
@@ -1503,7 +1487,7 @@ void main() {
       ]
     });
     core.posted.clear();
-    await expectLater(keri.signPayload(name: core.aid, data: [1]),
+    await expectLater(keri.interactAid(name: core.aid),
         throwsA(isA<AnEventThisDeviceDidNotAskFor>()));
     expect(core.kel.last['sig'], isNull,
         reason: 'the event that was not asked for is not signed');
@@ -1550,12 +1534,12 @@ void main() {
       () async {
     foundedByAnEarlierVersion(core);
     core.identityAnswers = 'E${'W' * 43}';
-    await expectLater(keri.signPayload(name: core.aid, data: [1]), throwsA(anything));
+    await expectLater(keri.interactAid(name: core.aid), throwsA(anything));
     expect(await TheIdentityThisDeviceHolds().read(), isNull,
         reason: 'the log was not checked, so nothing is pinned');
 
     core.identityAnswers = null;
-    await keri.signPayload(name: core.aid, data: [1]);
+    await keri.interactAid(name: core.aid);
     expect((await TheIdentityThisDeviceHolds().read())?.aid, core.aid);
   });
 

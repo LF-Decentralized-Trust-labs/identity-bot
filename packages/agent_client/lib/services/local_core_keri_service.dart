@@ -619,53 +619,6 @@ class LocalCoreKeriService extends KeriService {
     }
   }
 
-  @override
-  Future<SignatureResult> signPayload({
-    required String name,
-    required List<int> data,
-  }) async {
-    // Signing is performed locally in Dart using the stored mnemonic.
-    // The private key never leaves the device and is never sent to the backend.
-    await _finishAnyMoveUnderWay();
-    final mnemonic = await SecureKeyStore.loadMnemonic();
-    if (mnemonic == null) {
-      throw Exception('No identity keys found in secure storage. '
-          'Please recreate your identity to restore signing capability.');
-    }
-
-    final seed = Bip39.mnemonicToSeed(mnemonic);
-    final String publicKey;
-    final List<int> rawSig;
-    try {
-      // The key reported is the key that signed, and it is the key the
-      // identity's log says is in force: after a rotation that is no longer
-      // the founding key, and a signature by the founding key verifies against
-      // nothing a counterparty would look up.
-      final index = (await _keyInForce(seed)).generation;
-      publicKey = KeyManager.publicKeyAt(seed, index);
-      final child = KeyManager.signingSeed(seed, index: index);
-      final privateKey = ed.newKeyFromSeed(child);
-      try {
-        rawSig = ed.sign(privateKey, Uint8List.fromList(data));
-      } finally {
-        child.fillRange(0, child.length, 0);
-        privateKey.bytes.fillRange(0, privateKey.bytes.length, 0);
-      }
-    } finally {
-      seed.fillRange(0, seed.length, 0);
-    }
-    final rawSigB64 = base64Encode(rawSig);
-
-    // CESR-encode the signature via the stateless Python driver endpoint.
-    final cesrSig = await _cesrEncode(rawSigB64);
-
-    return SignatureResult(
-      signature: rawSigB64,
-      publicKey: publicKey,
-      cesrSignature: cesrSig,
-    );
-  }
-
   /// The key event log of the identity held under [name], as the core serves
   /// it: the parsed events and the bytes each was published as. The core
   /// answers with a list of events, not text; this once returned that list as
