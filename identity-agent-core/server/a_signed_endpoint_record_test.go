@@ -47,6 +47,13 @@ func aWitnessName() string {
 // witnesses, as a contact's does.
 func holdAnIdentityNaming(t *testing.T, ws witness.Store, rotated bool, witnesses []string) heldIdentity {
 	t.Helper()
+	return holdAnIdentityRotating(t, ws, rotated, witnesses, nil, nil)
+}
+
+// holdAnIdentityRotating is holdAnIdentityNaming whose rotation cuts and adds
+// the given witnesses.
+func holdAnIdentityRotating(t *testing.T, ws witness.Store, rotated bool, witnesses, cuts, adds []string) heldIdentity {
+	t.Helper()
 	h := heldIdentity{}
 	for i := 0; i < 3; i++ {
 		_, priv, _ := ed25519.GenerateKey(rand.Reader)
@@ -79,7 +86,7 @@ func holdAnIdentityNaming(t *testing.T, ws witness.Store, rotated bool, witnesse
 	if rotated {
 		d2, _ := keri.NextDigest(h.pubs[2])
 		rot, err := keri.BuildRotation(keri.RotationInput{
-			Prefix: ev.Identifier, Keys: []string{h.pubs[1]}, PriorSAID: ev.SAID, SN: 1, NextDigests: []string{d2}, PriorWitnesses: witnesses,
+			Prefix: ev.Identifier, Keys: []string{h.pubs[1]}, PriorSAID: ev.SAID, SN: 1, NextDigests: []string{d2}, PriorWitnesses: witnesses, Cuts: cuts, Adds: adds,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -623,6 +630,55 @@ func TestRecoveryFollowsARotationTheContactMadeSinceItWasLastResolved(t *testing
 			t.Fatal("a record signed by the new key was believed against a log it does not extend")
 		}
 	})
+}
+
+// A rotation the refresh pulls in changes who is asked: the witness it adds,
+// which alone holds the newest record, is asked, and the one it cuts is not.
+func TestRecoveryAsksTheWitnessesOfTheRefreshedLog(t *testing.T) {
+	w := anEndpointWitness(t)
+	oldWitness, newWitness := aWitnessName(), aWitnessName()
+	id := holdAnIdentityRotating(t, w.core.WitnessService.Store, true,
+		[]string{oldWitness}, []string{oldWitness}, []string{newWitness})
+	if code, out := w.publish(t, id.aid, signedRecord(t, id.aid, "https://moved.example.com:443", time.Minute, id.seeds[1])); code != 200 {
+		t.Fatalf("%d %v", code, out)
+	}
+	front := httputil.NewSingleHostReverseProxy(mustParse(t, w.url))
+
+	// The witness the contact cut still serves its log, but holds no record, and
+	// counts how often it is asked for one.
+	var askedTheCutOne int
+	cut := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/witness/endpoint/") {
+			askedTheCutOne++
+			rw.WriteHeader(http.StatusNotFound)
+			return
+		}
+		front.ServeHTTP(rw, r)
+	}))
+	t.Cleanup(cut.Close)
+	// The witness it added holds the newest record and nothing else.
+	added := httptest.NewServer(front)
+	t.Cleanup(added.Close)
+
+	s := witnessWithStore(t)
+	for name, u := range map[string]string{oldWitness: cut.URL, newWitness: added.URL} {
+		if err := s.DataStore.SaveContact(store.ContactRecord{AID: name, OobiURL: u + "/public/oobi/" + name}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.DataStore.SaveContactKEL(store.ContactKELRecord{
+		AID: id.aid, KelVerified: true, CurrentPublicKey: id.pubs[0], KEL: heldAsStored(t, w.core.WitnessService.Store, id.aid, 1),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := s.RecoverContactEndpoint(id.aid)
+	if err != nil || found.Origin != "https://moved.example.com:443" || found.FoundVia != newWitness {
+		t.Fatalf("the witness the rotation added was not asked: %+v %v", found, err)
+	}
+	if askedTheCutOne != 0 {
+		t.Fatalf("a witness the contact had cut was asked for a record %d times", askedTheCutOne)
+	}
 }
 
 // A witness that has checked a log does not take its cached verdict for a log

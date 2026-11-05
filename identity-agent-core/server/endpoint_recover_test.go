@@ -4,7 +4,27 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"testing"
+
+	"identity-agent-core/store"
 )
+
+// verifiedLog is a stored log that was checked end to end.
+func aVerifiedStoredLog(kel []map[string]interface{}) *store.ContactKELRecord {
+	return &store.ContactKELRecord{KelVerified: true, KEL: kel}
+}
+
+// Witnesses to ask are chosen only from a log that was verified.
+func TestWitnessesAreOnlyReadFromAVerifiedLog(t *testing.T) {
+	kel := []map[string]interface{}{
+		storedEvent(map[string]interface{}{"t": "icp", "s": "0", "b": []interface{}{"EWit"}}),
+	}
+	if got := witnessesFromStoredKEL(&store.ContactKELRecord{KelVerified: false, KEL: kel}); len(got) != 0 {
+		t.Fatalf("an unverified log named %v", got)
+	}
+	if got := witnessesFromStoredKEL(nil); len(got) != 0 {
+		t.Fatalf("no log named %v", got)
+	}
+}
 
 // storedEvent is an event as a resolved contact's log keeps it: the bytes it
 // was published as, base64, and nothing the sender wrote beside them.
@@ -19,7 +39,7 @@ func TestWitnessesComeFromTheStoredInception(t *testing.T) {
 	kel := []map[string]interface{}{
 		storedEvent(map[string]interface{}{"t": "icp", "s": "0", "b": []interface{}{"EWitOne", "EWitTwo"}}),
 	}
-	got := witnessesFromStoredKEL(kel)
+	got := witnessesFromStoredKEL(aVerifiedStoredLog(kel))
 	if len(got) != 2 || got[0] != "EWitOne" || got[1] != "EWitTwo" {
 		t.Fatalf("expected both witnesses from the inception event, got %v", got)
 	}
@@ -31,7 +51,7 @@ func TestWitnessesAreNotTakenFromTextBesideTheBytes(t *testing.T) {
 	entry := storedEvent(map[string]interface{}{"t": "icp", "s": "0", "b": []interface{}{"EReal"}})
 	entry["b"] = []interface{}{"EPlanted"}
 	entry["event_json"] = `{"t":"icp","b":["EPlanted"]}`
-	got := witnessesFromStoredKEL([]map[string]interface{}{entry})
+	got := witnessesFromStoredKEL(aVerifiedStoredLog([]map[string]interface{}{entry}))
 	if len(got) != 1 || got[0] != "EReal" {
 		t.Fatalf("witnesses must come from the verified bytes, got %v", got)
 	}
@@ -46,7 +66,7 @@ func TestARotationCutsAndAddsWitnesses(t *testing.T) {
 		storedEvent(map[string]interface{}{"t": "ixn", "s": "1"}),
 		storedEvent(map[string]interface{}{"t": "rot", "s": "2", "br": []interface{}{"EOldWit"}, "ba": []interface{}{"ENewWitA"}}),
 	}
-	got := witnessesFromStoredKEL(kel)
+	got := witnessesFromStoredKEL(aVerifiedStoredLog(kel))
 	if len(got) != 2 || got[0] != "EKept" || got[1] != "ENewWitA" {
 		t.Fatalf("a rotation should cut br and add ba, got %v", got)
 	}
@@ -56,18 +76,18 @@ func TestARotationCutsAndAddsWitnesses(t *testing.T) {
 // every one of them leaves none. Conflating them would keep querying operators
 // a contact deliberately dropped.
 func TestAnInteractionLeavesTheSetAndACutEmptiesIt(t *testing.T) {
-	silent := witnessesFromStoredKEL([]map[string]interface{}{
+	silent := witnessesFromStoredKEL(aVerifiedStoredLog([]map[string]interface{}{
 		storedEvent(map[string]interface{}{"t": "icp", "s": "0", "b": []interface{}{"EWit"}}),
 		storedEvent(map[string]interface{}{"t": "ixn", "s": "1"}),
-	})
+	}))
 	if len(silent) != 1 {
 		t.Errorf("an interaction event should not disturb the witness set, got %v", silent)
 	}
 
-	cleared := witnessesFromStoredKEL([]map[string]interface{}{
+	cleared := witnessesFromStoredKEL(aVerifiedStoredLog([]map[string]interface{}{
 		storedEvent(map[string]interface{}{"t": "icp", "s": "0", "b": []interface{}{"EWit"}}),
 		storedEvent(map[string]interface{}{"t": "rot", "s": "1", "br": []interface{}{"EWit"}}),
-	})
+	}))
 	if len(cleared) != 0 {
 		t.Errorf("a rotation cutting every witness should clear the set, got %v", cleared)
 	}
@@ -75,7 +95,7 @@ func TestAnInteractionLeavesTheSetAndACutEmptiesIt(t *testing.T) {
 
 // An entry with no bytes cannot be believed, so it names no witness.
 func TestAnEntryWithoutBytesNamesNoWitness(t *testing.T) {
-	if got := witnessesFromStoredKEL([]map[string]interface{}{{"t": "icp", "s": "0", "b": []interface{}{"EWit"}}}); len(got) != 0 {
+	if got := witnessesFromStoredKEL(aVerifiedStoredLog([]map[string]interface{}{{"t": "icp", "s": "0", "b": []interface{}{"EWit"}}})); len(got) != 0 {
 		t.Fatalf("a bare entry named %v", got)
 	}
 }

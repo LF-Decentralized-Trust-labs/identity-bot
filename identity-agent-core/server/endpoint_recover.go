@@ -67,9 +67,13 @@ type recoveredEndpoint struct {
 // the bytes are text the sender wrote and are not looked at. The set is walked
 // the way a key log defines it (witnessesAfter): the inception names it, each
 // rotation cuts and adds. A log with an entry that has no readable bytes names
-// none.
-func witnessesFromStoredKEL(kel []map[string]interface{}) []string {
-	in, ok := drivers.ValidateKELInputFromRecords("", kel)
+// none, and neither does a log that was not verified end to end: the witnesses
+// this agent is about to ask come only from a log it has checked.
+func witnessesFromStoredKEL(rec *store.ContactKELRecord) []string {
+	if rec == nil || !rec.KelVerified {
+		return nil
+	}
+	in, ok := drivers.ValidateKELInputFromRecords("", rec.KEL)
 	if !ok {
 		return nil
 	}
@@ -114,14 +118,12 @@ func (s *CoreServer) RecoverContactEndpoint(contactAID string) (*recoveredEndpoi
 		return nil, fmt.Errorf("no stored KEL for %s — recovery needs a contact resolved at least once", contactAID)
 	}
 
-	// The witness list is read from a log kept as verified, so it is the one the
-	// controller's own events named, not text a server served.
 	if !kelRecord.KelVerified {
-		return nil, fmt.Errorf("the stored KEL for %s is not a verified one, so it cannot say who witnesses for it", contactAID)
+		return nil, fmt.Errorf("%s's key log is not verified, so no witness is chosen from it and no record can be checked against it", contactAID)
 	}
-	witnessAIDs := witnessesFromStoredKEL(kelRecord.KEL)
+	witnessAIDs := witnessesFromStoredKEL(kelRecord)
 	if len(witnessAIDs) == 0 {
-		return nil, fmt.Errorf("%s named no witnesses, so there is nowhere to ask", contactAID)
+		return nil, fmt.Errorf("%s's verified key log names no witnesses, so there is nowhere to ask", contactAID)
 	}
 
 	contacts, err := s.DataStore.GetContacts()
@@ -140,6 +142,16 @@ func (s *CoreServer) RecoverContactEndpoint(contactAID string) (*recoveredEndpoi
 	// was compromised. Checking against the copy would accept a record signed
 	// by the key it left and refuse the one signed by the key it moved to.
 	s.refreshContactKeyLog(contactAID, kelRecord, witnessAIDs, known)
+
+	// THE WITNESSES ARE READ AGAIN FROM THE LOG AS IT NOW STANDS. A rotation the
+	// refresh pulled in may have added witnesses that hold the newest record and
+	// cut ones that no longer speak for the contact; the set read before the
+	// refresh is the contact's old one.
+	if refreshed, err := s.DataStore.GetContactKEL(contactAID); err == nil {
+		if now := witnessesFromStoredKEL(refreshed); len(now) > 0 {
+			witnessAIDs = now
+		}
+	}
 
 	// WHAT THE CONTACT SIGNED IS CHECKED AGAINST THE KEY ITS VERIFIED LOG NAMES,
 	// not against anything a witness says. Without a verified log there is
