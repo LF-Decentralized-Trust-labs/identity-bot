@@ -12,6 +12,8 @@ import (
 	"identity-agent-core/store"
 
 	"github.com/go-chi/chi/v5"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 // Finding somebody whose address has stopped working.
@@ -262,8 +264,7 @@ func (s *CoreServer) handlePublishEndpoint(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "could not publish", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"published": true, "aid": req.AID, "url": req.URL})
+	jsonreply.Write(w, http.StatusOK, map[string]any{"published": true, "aid": req.AID, "url": req.URL})
 }
 
 // handleRecoverEndpoint asks a contact's witnesses where that contact is now,
@@ -284,6 +285,5 @@ func (s *CoreServer) handleRecoverEndpoint(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusNotFound, "no current address found", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(found)
+	jsonreply.Write(w, http.StatusOK, found)
 }
