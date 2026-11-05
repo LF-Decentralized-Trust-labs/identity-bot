@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-07-31
+**Amended:** 2026-11-05: the record published to the witnesses is the signed endpoint record of ADR-062, not a KERI `rpy`
 
 ## The decision
 
@@ -37,7 +38,9 @@ no way to reach them.
 The resolution path exists in the core and is not wired into any send path:
 
 - `PublishEndpointLocation` (`server/endpoint_publish.go`) publishes a
-  `/loc/scheme` reply to an AID's witnesses.
+  `/loc/scheme` reply to an AID's witnesses. *(Amended 2026-11-05 by ADR-062: it
+  signs an `endpoint-record/1` instead; the KERI `rpy` `/loc/scheme` record is no
+  longer published or read.)*
 - `RecoverContactEndpoint` (`server/endpoint_recover.go`) reads it back.
 - `SendDIDCommMessage` (`server/didcomm_agent.go`) does neither, and instead
   requires a peer registered out of band with an `endpoint` somebody typed in.
