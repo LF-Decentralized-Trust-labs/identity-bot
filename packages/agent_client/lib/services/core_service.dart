@@ -10,6 +10,7 @@ import 'owner_signing_client.dart';
 import 'signing_an_event.dart';
 import 'the_key_in_force.dart';
 import '../crypto/keys.dart';
+import '../models/public_name_rule.dart';
 import 'browser_session_client.dart';
 import 'the_agent_this_app_talks_to.dart';
 import '../config/agent_config.dart';
@@ -1308,6 +1309,11 @@ class CoreService {
   /// and the relays and name configured.
   Future<Map<String, dynamic>> getReachability() =>
       _reachability('GET', '/api/settings/reachability');
+
+  /// The rule for a public name, as this core states it with the reachability
+  /// settings. Throws if the core does not state one.
+  Future<PublicNameRule> getPublicNameRule() async =>
+      PublicNameRule.fromJson((await getReachability())['public_name_rule']);
 
   /// Saves reachability and applies it at once: the relay is brought up again
   /// in the new mode, at the new relay or with the new name. The answer's

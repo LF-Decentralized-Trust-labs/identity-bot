@@ -13,11 +13,25 @@ const NameRule = "A name is 3 to 32 lowercase letters, digits and single hyphens
 // DNS label: 3 to 32 lowercase letters, digits and hyphens, with a letter or
 // digit at each end and never two hyphens together (which would read as an
 // encoded international name).
-var nameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$`)
+var nameRE = regexp.MustCompile(NamePattern)
+
+// NamePattern is the shape of a public name as a regular expression that every
+// engine reads the same way (no look-ahead), so a screen can apply it as it is.
+// It does not say that two hyphens never sit together; NameForbids does.
+const NamePattern = `^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$`
+
+// NameForbids is the sequence that may not appear anywhere in a public name.
+const NameForbids = "--"
+
+// NameMinLen and NameMaxLen are the length limits NamePattern encodes.
+const (
+	NameMinLen = 3
+	NameMaxLen = 32
+)
 
 // ValidName reports whether n is a public name a relay accepts. A relay checks
 // it, and so does an Identity Agent before asking, so a name that cannot be had
 // is refused at once and the same way everywhere.
 func ValidName(n string) bool {
-	return nameRE.MatchString(n) && !strings.Contains(n, "--")
+	return nameRE.MatchString(n) && !strings.Contains(n, NameForbids)
 }

@@ -4636,6 +4636,15 @@ func (s *CoreServer) handleGetReachabilitySettings(w http.ResponseWriter, r *htt
 		"public_relay_operator": s.relayOperator(publicRelay),
 		"public_relay_name":     stored.PublicRelayName,
 		"notice":                stored.ReachabilityNotice,
+		// The one definition of a public name, so a screen can refuse a bad
+		// name before asking, by the same rule the relay applies.
+		"public_name_rule": map[string]interface{}{
+			"pattern":    relayproto.NamePattern,
+			"forbids":    relayproto.NameForbids,
+			"min_length": relayproto.NameMinLen,
+			"max_length": relayproto.NameMaxLen,
+			"text":       relayproto.NameRule,
+		},
 	})
 }
 
