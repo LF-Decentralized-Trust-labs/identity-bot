@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import '../crypto/endpoint_record.dart';
 import 'asking_to_act_for_an_identity.dart';
+import 'the_newest_signed_address.dart';
 import 'which_half_this_app_is_running.dart';
 
 /// Finding an Identity Agent again after it changed address.
@@ -34,26 +36,40 @@ import 'which_half_this_app_is_running.dart';
 ///     the key history in (2) is public, so (2) alone could be copied by
 ///     anything; (3) cannot.
 ///
-/// WHAT THIS DOES NOT PROVE, said plainly: the agent's answer in (3) is not
-/// itself signed by the identity's key (the root key never leaves the
-/// controller device), so a copy of the public log that also lies about
-/// recognising this machine would pass. It would then receive only requests that
-/// name the real agent and are refused by it. What closes this is a signed
-/// record, made by the agent's own key, naming the exact address; until that is
-/// checked here, an address is only as believable as the three checks above.
+///  4. The organisation SIGNED this address (ADR-062). The newest valid
+///     signed endpoint record for the identifier names exactly this origin,
+///     checked against the public key check (2) returned, never a key the
+///     record or its server brings. A host that merely relays everything to the
+///     real agent passes (1) to (3) and is refused here, because the
+///     organisation never signed it. A record older than one already held is
+///     refused, and the newest one held is kept, so a stale record cannot be
+///     replayed later. The signature is also over the origin of every request
+///     this app sends (the controller client), so a request relayed through
+///     another host is refused by the agent.
 ///
-/// Nothing is changed unless a candidate is proven. A failed search leaves the
+/// /// Nothing is changed unless a candidate is proven. A failed search leaves the
 /// record exactly as it was.
 class FindingAnAgentThatMoved {
   FindingAnAgentThatMoved({
     AskingToActForAnIdentity? asking,
     http.Client? client,
     this.thing = 'organisation',
-  })  : _asking = asking ?? AskingToActForAnIdentity(client: client),
+    EndpointRecordSource? records,
+    NewestRecordHeld? held,
+  })  : _records = records ?? WitnessesRememberedFor(client: client),
+        _held = held ?? NewestRecordInPreferences(),
+        _asking = asking ?? AskingToActForAnIdentity(client: client),
         _ownsAsking = asking == null;
 
   final AskingToActForAnIdentity _asking;
   final bool _ownsAsking;
+
+  /// Where signed endpoint records are read from. Without one nothing can be
+  /// proven, so no address is ever accepted.
+  final EndpointRecordSource? _records;
+
+  /// The newest record accepted so far for the identifier.
+  final NewestRecordHeld _held;
 
   /// What the person calls what is being looked for: "organisation" or
   /// "identity". Every sentence this produces is for that person.
@@ -103,14 +119,16 @@ class FindingAnAgentThatMoved {
         throw StateError('Something answers at that address, but it is not an '
             'Identity Agent.');
     }
+    final String key;
     try {
-      await _asking.confirmThisIsReally(agentAid, at);
+      key = await _asking.confirmThisIsReally(agentAid, at);
     } catch (e) {
       debugPrint('[controller] $at did not prove it is $agentAid: $e');
       if (_wentOffline(e)) throw _offlineMidProof();
       throw StateError('Something answers at that address, but it could not '
           'show that it is this $thing.');
     }
+    await _theOrganisationSignedThis(agentAid, at, key);
     final WhatThisMachineWasTold? told;
     try {
       told = await _asking.whatTheAgentSays(at);
@@ -129,6 +147,86 @@ class FindingAnAgentThatMoved {
     }
   }
 
+  Future<List<String>> _originsNamedBySignedRecords(String aid) async {
+    try {
+      final offered = await _records?.recordsFor(aid) ?? const [];
+      Map<String, dynamic>? newest;
+      for (final r in offered) {
+        if (r['aid'] != aid || r['origin'] is! String) continue;
+        if (originProblem(r['origin'] as String) != null &&
+            (r['origin'] as String).isNotEmpty) continue;
+        if (newest == null || endpointRecordReplaces(r, newest)) newest = r;
+      }
+      final o = newest?['origin'];
+      return o is String && o.isNotEmpty ? [o] : const [];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Throws unless the newest valid record for [agentAid] names exactly [at].
+  /// Keeps that record once it is accepted.
+  Future<void> _theOrganisationSignedThis(
+      String agentAid, String at, String key) async {
+    final source = _records;
+    final wanted = canonicalOriginOf(at);
+    if (source == null || wanted == null) {
+      throw StateError('This app cannot check that the $thing signed that '
+          'address, so it will not switch to it.');
+    }
+    List<Map<String, dynamic>> offered;
+    try {
+      offered = await source.recordsFor(agentAid);
+    } catch (e) {
+      debugPrint('[controller] could not read signed records: $e');
+      offered = const [];
+    }
+    Map<String, dynamic>? newest;
+    EndpointRecordCheck? newestCheck;
+    var sawOneNotSignedByTheKey = false;
+    for (final r in offered) {
+      final check = verifyEndpointRecord(r, key);
+      if (!check.valid || r['aid'] != agentAid) {
+        sawOneNotSignedByTheKey = true;
+        continue;
+      }
+      if (newest == null || endpointRecordReplaces(r, newest)) {
+        newest = r;
+        newestCheck = check;
+      }
+    }
+    final held = await _held.heldFor(agentAid);
+    if (newest == null || newestCheck == null) {
+      throw StateError(sawOneNotSignedByTheKey
+          ? 'The $thing did not sign any address this app can accept: a record '
+              'was offered, but it was not signed by the $thing\'s current key.'
+          : 'There is no address signed by the $thing to check that one '
+              'against, so this app will not switch to it.');
+    }
+    if (held != null && endpointRecordReplaces(held, newest)) {
+      throw StateError('The only signed address found for the $thing is older '
+          'than one this app already holds, so it will not go back to it.');
+    }
+    final heldSaysOtherwise = held != null &&
+        !endpointRecordReplaces(newest, held) &&
+        held['issued'] == newest['issued'] &&
+        held['origin'] != newest['origin'];
+    if (heldSaysOtherwise) {
+      throw StateError('Two different addresses are signed for the $thing at '
+          'the same moment, so this app will not choose between them.');
+    }
+    if (newestCheck.isWithdrawal) {
+      throw StateError('The $thing has signed that it can be reached nowhere '
+          'right now, so there is no address to switch to.');
+    }
+    if (newestCheck.origin != wanted) {
+      throw StateError('That address is not the one the $thing signed. '
+          'Something answers there, but the $thing never said it can be '
+          'reached at that address.');
+    }
+    await _held.keep(newest);
+  }
+
   /// If the recorded agent no longer answers, looks at each of [hints] in order
   /// and re-points this app at the first that is proven to be the same
   /// identity. [hints] are leads, not facts: nothing in them is believed.
@@ -145,8 +243,12 @@ class FindingAnAgentThatMoved {
     }
     final tried = <String>{current.agentOrigin};
     final reasons = <String>[];
+    // THE SIGNED RECORD IS THE LEAD. Its origin is tried first; it is still
+    // only a candidate until the key log and the signature prove it (an
+    // unproven record names an address, it does not make it believable).
+    final leads = [...await _originsNamedBySignedRecords(current.agentAid), ...hints];
     var aLeadAnsweredWithSomethingElse = false;
-    for (final hint in hints) {
+    for (final hint in leads) {
       final at = _tidy(hint) ?? hint.trim();
       if (at.isEmpty || !tried.add(at)) continue;
       try {

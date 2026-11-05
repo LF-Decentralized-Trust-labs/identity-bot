@@ -1,8 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:agent_client/config/agent_config.dart';
+import 'package:agent_client/crypto/endpoint_record.dart';
 import 'package:agent_client/services/finding_an_agent_that_moved.dart';
+import 'package:agent_client/services/the_newest_signed_address.dart';
+import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:agent_client/services/point_this_app_at_its_agent.dart';
 import 'package:agent_client/services/which_half_this_app_is_running.dart';
 import 'package:http/http.dart' as http;
@@ -21,6 +25,31 @@ const _aid = 'EORGANISATION';
 const _old = 'https://old-tunnel.example.test';
 const _new = 'https://box.example.test';
 const _impostor = 'https://impostor.example.test';
+const _witness = 'https://witness.example.test';
+
+// --- signing, the way the Go package does it (ADR-062) ----------------------
+String _b64(List<int> b) => base64Url.encode(b).replaceAll('=', '');
+String _qb64Key(ed.PublicKey k) => 'D${_b64([0, ...k.bytes]).substring(1)}';
+String _qb64Sig(List<int> sig) => '0B${_b64([0, 0, ...sig]).substring(2)}';
+
+final _orgKey = ed.generateKey();
+final _rotatedOutKey = ed.generateKey();
+
+Map<String, dynamic> _record(String origin, String issued,
+    {String aid = _aid, ed.KeyPair? signer}) {
+  final r = <String, dynamic>{
+    'type': 'endpoint-record/1',
+    'aid': aid,
+    'origin': origin,
+    'issued': issued,
+  };
+  final bytes = endpointRecordSignedBytes(r)!;
+  final sig = ed.sign(
+      (signer ?? _orgKey).privateKey, Uint8List.fromList(utf8.encode(bytes)));
+  return {...r, 'signature': _qb64Sig(sig)};
+}
+
+String _originOf(String address) => canonicalOriginOf(address)!;
 
 /// A small world: which hosts are alive, which identifier each one's published
 /// key history proves, and which of them recognise this computer.
@@ -29,6 +58,9 @@ class _World {
   final keyHistoryProves = <String, String>{};
   final recognisesUs = <String, String>{}; // host -> identifier it answers with
   final seen = <http.Request>[];
+
+  /// What the witness serves for the organisation.
+  final witnessHolds = <Map<String, dynamic>>[];
 
   /// Hosts that are up but answer with something that is not an agent.
   final notAnAgent = <String>{};
@@ -63,14 +95,22 @@ class _World {
                   200);
             }
             return http.Response(
-                jsonEncode(
-                    {'verified': true, 'aid': proves, 'public_key': 'D'}),
+                jsonEncode({
+                  'verified': true,
+                  'aid': proves,
+                  'public_key': _qb64Key(_orgKey.publicKey)
+                }),
                 200);
           }
           return http.Response('{}', 200); // front-end-for etc.
         }
+        if (host == _witness && req.url.path == '/api/witness/endpoint/$_aid') {
+          if (witnessHolds.isEmpty) return http.Response('{}', 404);
+          return http.Response(jsonEncode({'record': witnessHolds.last}), 200);
+        }
         if (notAnAgent.contains(host)) return http.Response('not here', 404);
-        if (machineOff.contains(host)) return http.Response('bad gateway', statusForMachineOff);
+        if (machineOff.contains(host))
+          return http.Response('bad gateway', statusForMachineOff);
         if (!alive.contains(host)) {
           await holdDeadHosts?.future;
           throw http.ClientException('no route', req.url);
@@ -94,7 +134,9 @@ void main() {
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
-    world = _World();
+    world = _World()
+      ..witnessHolds.add(_record(_originOf(_new), '2026-11-01T10:00:00Z'));
+    await rememberWitnessesOf(_aid, [_witness]);
     await WhichHalfThisAppIsRunning.pointAt(agentOrigin: _old, agentAid: _aid);
     finder = FindingAnAgentThatMoved(client: world.client());
   });
@@ -145,7 +187,7 @@ void main() {
     final out = await finder
         .findAgain(current: await recorded(), hints: const [_impostor]);
     expect(out.couldNotBeFound, isTrue);
-    expect(out.reasons.single,
+    expect(out.reasons.last,
         contains('could not show that it is this organisation'));
     expect((await recorded()).agentOrigin, _old);
   });
@@ -154,10 +196,10 @@ void main() {
       'a copy of the public key history is not enough: the agent must also '
       'recognise this computer', () async {
     world
-      ..alive.add(_impostor)
-      ..keyHistoryProves[_impostor] = _aid; // public, anybody can serve it
-    final out = await finder
-        .findAgain(current: await recorded(), hints: const [_impostor]);
+      ..alive.add(_new)
+      ..keyHistoryProves[_new] = _aid; // public, anybody can serve it
+    final out =
+        await finder.findAgain(current: await recorded(), hints: const [_new]);
     expect(out.couldNotBeFound, isTrue);
     expect(out.reasons.single, contains('does not recognise this computer'));
     expect((await recorded()).agentOrigin, _old);
@@ -346,5 +388,115 @@ void main() {
     world.statusForMachineOff = 522;
     final out = await finder.findAgain(current: await recorded());
     expect(out.couldNotBeReached, isTrue);
+  });
+
+  group('an address is believed only when the organisation signed it', () {
+    Future<WhereTheAgentWent> tryAt(String at) async =>
+        finder.findAgain(current: await recorded(), hints: [at]);
+
+    test(
+        'a host that forwards everything to the real agent but is not in the '
+        'record is refused, and the app is not re-pointed', () async {
+      // A reverse proxy: its key history is the real one, and it relays the
+      // real agent's answer to this computer too.
+      world
+        ..alive.addAll([_impostor, _new])
+        ..keyHistoryProves[_impostor] = _aid
+        ..recognisesUs[_impostor] = _aid;
+      final out = await tryAt(_impostor);
+      expect(out.moved, isFalse);
+      expect(out.reasons.join(' '),
+          contains('is not the one the organisation signed'));
+      expect((await recorded()).agentOrigin, _old);
+      // And it was never asked to recognise this computer, so nothing signed
+      // was sent to it.
+      expect(
+          world.seen.where((r) =>
+              r.url.host == 'impostor.example.test' &&
+              r.url.path == '/api/controller/agent'),
+          isEmpty);
+    });
+
+    test('with no signed record at all, nothing is accepted', () async {
+      world
+        ..witnessHolds.clear()
+        ..alive.add(_new)
+        ..keyHistoryProves[_new] = _aid
+        ..recognisesUs[_new] = _aid;
+      final out = await tryAt(_new);
+      expect(out.moved, isFalse);
+      expect(out.reasons.join(' '),
+          contains('no address signed by the organisation'));
+      expect((await recorded()).agentOrigin, _old);
+    });
+
+    test('a record older than one already held is refused', () async {
+      world
+        ..alive.add(_new)
+        ..keyHistoryProves[_new] = _aid
+        ..recognisesUs[_new] = _aid;
+      expect((await tryAt(_new)).moved, isTrue); // holds the 2026-11-01 record
+      await WhichHalfThisAppIsRunning.pointAt(
+          agentOrigin: _old, agentAid: _aid);
+      // The organisation later moved on; a witness that is stale now offers the
+      // earlier record again (a host that has since been handed to somebody).
+      final newer = _record(_originOf(_impostor), '2026-11-02T10:00:00Z');
+      world.witnessHolds
+        ..clear()
+        ..add(newer);
+      world
+        ..alive.add(_impostor)
+        ..keyHistoryProves[_impostor] = _aid
+        ..recognisesUs[_impostor] = _aid;
+      expect((await tryAt(_impostor)).moved, isTrue); // newest is kept
+      await WhichHalfThisAppIsRunning.pointAt(
+          agentOrigin: _old, agentAid: _aid);
+      world.witnessHolds
+        ..clear()
+        ..add(_record(_originOf(_new), '2026-11-01T10:00:00Z'));
+      final out = await tryAt(_new);
+      expect(out.moved, isFalse);
+      expect(out.reasons.join(' '),
+          contains('older than one this app already holds'));
+      expect((await recorded()).agentOrigin, _old);
+    });
+
+    test('a record signed by a rotated-out key is refused', () async {
+      world
+        ..witnessHolds.clear()
+        ..witnessHolds.add(_record(_originOf(_new), '2026-11-03T10:00:00Z',
+            signer: _rotatedOutKey))
+        ..alive.add(_new)
+        ..keyHistoryProves[_new] = _aid
+        ..recognisesUs[_new] = _aid;
+      final out = await tryAt(_new);
+      expect(out.moved, isFalse);
+      expect(out.reasons.join(' '),
+          contains('not signed by the organisation\'s current key'));
+      expect((await recorded()).agentOrigin, _old);
+    });
+
+    test('a withdrawal is not an address', () async {
+      world
+        ..witnessHolds.clear()
+        ..witnessHolds.add(_record('', '2026-11-03T10:00:00Z'))
+        ..alive.add(_new)
+        ..keyHistoryProves[_new] = _aid
+        ..recognisesUs[_new] = _aid;
+      final out = await tryAt(_new);
+      expect(out.moved, isFalse);
+      expect(out.reasons.join(' '), contains('reached nowhere'));
+    });
+
+    test('the signed record is the lead: it is followed with nothing typed',
+        () async {
+      world
+        ..alive.add(_new)
+        ..keyHistoryProves[_new] = _aid
+        ..recognisesUs[_new] = _aid;
+      final out = await finder.findAgain(current: await recorded());
+      expect(out.moved, isTrue);
+      expect((await recorded()).agentOrigin, _new);
+    });
   });
 }
