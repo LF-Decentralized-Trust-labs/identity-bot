@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,8 @@ import (
 	"testing"
 
 	"identity-agent-core/keriengine"
+	"identity-agent-core/store"
+	"identity-agent-core/witness"
 )
 
 // A computer asking to act for an identity checks who is actually there.
@@ -94,4 +97,73 @@ func TestAnIdentityElsewhereIsCheckedAgainstItsPublishedHistory(t *testing.T) {
 			}
 		}
 	})
+}
+
+// The witnesses an organisation's key log names come back with the answer, read
+// from the log that was just verified, each at the address this core holds for
+// it. An app that joins an organisation keeps them to find it again if it moves.
+func TestAnIdentityElsewhereAnswersWithTheWitnessesItsLogNames(t *testing.T) {
+	w := newStandInWitness(t)
+	prior := witness.BootstrapWitnesses
+	witness.BootstrapWitnesses = func() []witness.BootstrapWitness {
+		return []witness.BootstrapWitness{{AID: w.key, WitnessKey: w.key, URL: w.URL, Operator: "tests"}}
+	}
+	t.Cleanup(func() { witness.BootstrapWitnesses = prior })
+
+	// The identity being checked is a real one whose inception names the witness.
+	elsewhere := adoptingOwner(t)
+	aid, _, _, err := elsewhere.mintPairwise("check")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := elsewhere.DataStore.GetEvents(aid)
+	if err != nil || len(stored) == 0 {
+		t.Fatalf("no events for the identity: %v", err)
+	}
+	served := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(rw).Encode(map[string]any{"kel": stored})
+	}))
+	defer served.Close()
+
+	// The core doing the checking, which knows where that witness is reached.
+	s := adoptingOwner(t)
+	// A local address is reached only where the owner recorded a contact there.
+	if err := s.DataStore.SaveContact(store.ContactRecord{AID: aid, OobiURL: served.URL}); err != nil {
+		t.Fatal(err)
+	}
+	ask := func(aid, oobi string) verifyIdentityResponse {
+		body, _ := json.Marshal(map[string]string{"aid": aid, "oobi_url": oobi})
+		req := httptest.NewRequest(http.MethodPost, "/api/verify/identity-elsewhere",
+			bytes.NewReader(body))
+		req.RemoteAddr = "127.0.0.1:1234"
+		req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
+		rec := httptest.NewRecorder()
+		s.handleVerifyAnIdentityElsewhere(rec, req)
+		var out verifyIdentityResponse
+		json.NewDecoder(rec.Body).Decode(&out)
+		return out
+	}
+
+	out := ask(aid, served.URL)
+	if !out.Verified {
+		t.Fatalf("a real key history was not verified: %s", out.Why)
+	}
+	if len(out.Witnesses) == 0 {
+		t.Fatal("the witnesses the verified log names were not returned")
+	}
+	for _, n := range out.Witnesses {
+		if n.Key != w.key {
+			t.Errorf("a witness the log does not name came back: %+v", n)
+		}
+		if !strings.HasPrefix(n.URL, "http") {
+			t.Errorf("the named witness came back with no address this core holds: %+v", n)
+		}
+	}
+
+	// Nothing is claimed for a history that does not check out: the same
+	// witnesses served under another identifier come back unverified and bare.
+	wrong := ask("ENotTheOwnerOfThatLog", served.URL)
+	if wrong.Verified || len(wrong.Witnesses) != 0 {
+		t.Fatalf("a log that does not belong to the identifier gave leads: %+v", wrong)
+	}
 }
