@@ -185,3 +185,27 @@ func TestASealInAnUnverifiedIssuerLogIsNoProof(t *testing.T) {
 	}
 	mustNotBeVerified(t, "a credential checked against an unsigned issuer log", got)
 }
+
+// A credential with no registry cannot be revoked, so the issuer's seal of the
+// credential's own identifier is its issuance. Fails if that seal is not read.
+func TestARegistryLessCredentialTheIssuerSealedIsVerified(t *testing.T) {
+	w := anIssuerHoldingARegistry(t)
+	issued, err := w.e.IssueCredential("issuer", map[string]interface{}{"role": "engineer"}, w.schema, w.holder, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := w.verify(t, issued.AcdcJsonB64, nil)
+	if !got.Verified || got.Checks["issuance_proved"] != true {
+		t.Fatalf("a registry-less credential the issuer sealed was not verified: %v %v", got.Checks, got.Errors)
+	}
+}
+
+// The seal is of this credential and no other. Fails if any seal in the log, or
+// the absence of a registry alone, is taken as proof.
+func TestARegistryLessCredentialWithNoSealIsRefused(t *testing.T) {
+	w := anIssuerHoldingARegistry(t)
+	if _, err := w.e.IssueCredential("issuer", map[string]interface{}{"role": "engineer"}, w.schema, w.holder, nil); err != nil {
+		t.Fatal(err) // the issuer's log now holds a seal, of a different credential
+	}
+	mustNotBeVerified(t, "a registry-less forgery beside a genuine sealed credential", w.verify(t, w.forgery(t, ""), nil))
+}
