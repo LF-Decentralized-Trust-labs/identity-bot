@@ -3298,6 +3298,29 @@ func (s *CoreServer) handleDeleteShareAction(w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// relayAddressBase is the address this Identity Agent is reached at through a
+// relay, and false when it has none. An OOBI that is handed out names this and
+// nothing else: its direct address (a tunnel, a local-network or loopback URL,
+// a Host header) is never what a counterparty is given (ADR-048 §6).
+func (s *CoreServer) relayAddressBase(r *http.Request) (string, bool) {
+	if url, ok := s.relayedAddress(r); ok && url != "" {
+		return strings.TrimRight(url, "/"), true
+	}
+	if rm := s.currentRelay(); rm != nil {
+		if url := strings.TrimRight(rm.URL(), "/"); url != "" {
+			return url, true
+		}
+	}
+	return "", false
+}
+
+// handleOobiGenerate makes an OOBI to hand to one counterparty.
+//
+// It names a pairwise identifier minted for that counterparty and the relay
+// address it is reached at, and nothing else: never the root identifier, which
+// identifies a person in every relationship they have (ADR-036), and never the
+// agent's direct address (ADR-048 §6). With no relay address there is nothing
+// it may hand out, so it says so rather than falling back to a direct one.
 func (s *CoreServer) handleOobiGenerate(w http.ResponseWriter, r *http.Request) {
 	identity, err := s.DataStore.GetIdentity()
 	if err != nil {
@@ -3309,36 +3332,49 @@ func (s *CoreServer) handleOobiGenerate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	baseURL := s.getPublicURL(r)
-	oobiURL := fmt.Sprintf("%s/public/oobi/%s", baseURL, identity.AID)
+	base, ok := s.relayAddressBase(r)
+	if !ok {
+		writeError(w, http.StatusConflict, "No relay address",
+			"An OOBI names a relay address and never this agent's direct address, and no relay address is held. Set up reachability through a relay first.")
+		return
+	}
+	aid, _, _, _, err := s.mintPairwiseIn("contacts", "oobi-offer")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to make an identifier for this counterparty", err.Error())
+		return
+	}
+	oobiURL := fmt.Sprintf("%s/public/oobi/%s", base, aid)
 	// Embed action type in OOBI URL if requested (e.g. ?action=add_contact)
 	if action := r.URL.Query().Get("action"); action != "" {
-		oobiURL = fmt.Sprintf("%s?action=%s", oobiURL, action)
+		oobiURL = fmt.Sprintf("%s?action=%s", oobiURL, url.QueryEscape(action))
 	}
 
-	tunnelActive := false
-	tunnelProvider := ""
-	tunnelError := ""
-	if s.TunnelManager != nil {
-		status := s.TunnelManager.GetStatus()
-		tunnelActive = status.Active
-		tunnelProvider = string(status.Provider)
-		tunnelError = status.Error
-	}
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
+		"oobi_url":  oobiURL,
+		"aid":       aid,
+		"relay_url": base,
+	})
+}
 
-	resp := map[string]interface{}{
-		"oobi_url":        oobiURL,
-		"aid":             identity.AID,
-		"public_key":      identity.PublicKey,
-		"base_url":        baseURL,
-		"tunnel_active":   tunnelActive,
-		"tunnel_provider": tunnelProvider,
-		"tunnel_error":    tunnelError,
-		"endpoint_url":    s.EndpointService.CurrentURL(),
-		"endpoint_source": s.EndpointService.Source(),
+// rootMayBeServed says whether the root identifier's own OOBI may be answered
+// to this request. See handleOobiServe for the rule.
+func (s *CoreServer) rootMayBeServed(r *http.Request, rootAID string) bool {
+	if arrivedByRelay(r) {
+		return !s.reachedAtPrivateAddress(r)
 	}
-
-	jsonreply.Write(w, http.StatusOK, resp)
+	if s.isOwner(r) {
+		return true
+	}
+	if s.assetHandler != nil {
+		if assets, err := s.assetHandler.Store.ListAssets(); err == nil {
+			for _, a := range assets {
+				if a.DelegatorAID == rootAID {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
@@ -3353,10 +3389,16 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Failed to read identity", err.Error())
 		return
 	}
-	// A private address is made for one relationship and must not be tied to
-	// the identity behind it, so there the root identity is not known: the
-	// answer is the one any unknown identifier gets (ADR-048 §6).
-	if identity != nil && identity.AID == requestedAID && s.reachedAtPrivateAddress(r) {
+	// The root identifier is not handed to a counterparty (ADR-036): it
+	// identifies a person in every relationship they have. It is answered to
+	// this computer's own owner, at the public address its owner chose to
+	// publish (ADR-048), and where a delegate of it is published, because a
+	// delegation names its delegator by design (ADR-036). A private address is
+	// made for one relationship and must not be tied to the identity behind
+	// it, so there the root identity is not known: the answer is the one any
+	// unknown identifier gets (ADR-048 §6). A counterparty is given a pairwise
+	// identifier's OOBI by handleOobiGenerate.
+	if identity != nil && identity.AID == requestedAID && !s.rootMayBeServed(r, requestedAID) {
 		writeError(w, http.StatusNotFound, "AID not found", fmt.Sprintf("No identity found for AID: %s", requestedAID))
 		return
 	}
@@ -3397,12 +3439,9 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 							fmt.Sprintf("the log held under %q is %s's, not this asset's", a.DisplayName, kelResp.AID))
 						return
 					}
-					publicURL := s.getPublicURL(r)
-					oobiURL := fmt.Sprintf("%s/public/oobi/%s", publicURL, a.PairwiseAID)
 					rawEvents, signatures := s.assetEventsAndSignatures(a, kelResp.RawEventsB64)
-					jsonreply.Write(w, http.StatusOK, map[string]interface{}{
+					assetDoc := map[string]interface{}{
 						"aid":             a.PairwiseAID,
-						"oobi":            oobiURL,
 						"kel":             kelResp.KEL,
 						"raw_events_b64":  rawEvents,
 						"cesr_signatures": signatures,
@@ -3413,7 +3452,12 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 						// Which realm this agent runs in, so a resolver keeps a
 						// development peer and a production peer apart.
 						"realm": buildmode.Mode(),
-					})
+					}
+					// Only a relay address is ever named, never a direct one (ADR-048 §6).
+					if base, ok := s.relayAddressBase(r); ok {
+						assetDoc["oobi"] = fmt.Sprintf("%s/public/oobi/%s", base, a.PairwiseAID)
+					}
+					jsonreply.Write(w, http.StatusOK, assetDoc)
 					return
 				}
 			}
@@ -3421,10 +3465,8 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 		// Minted pairwise AID (e.g. an add-contact Ask signer): serve its OOBI from the
 		// registered KEL so a peer can resolve + add it.
 		if kel, ok := getPairwiseKEL(requestedAID); ok {
-			publicURL := s.getPublicURL(r)
 			doc := map[string]interface{}{
 				"aid":  requestedAID,
-				"oobi": fmt.Sprintf("%s/public/oobi/%s", publicURL, requestedAID),
 				"kel":  kel,
 				"type": "pairwise",
 				// Which realm this agent runs in, so a resolver keeps a
@@ -3438,6 +3480,10 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 			if raws, sigs, ok := s.fullySignedLogOf(requestedAID); ok {
 				doc["raw_events_b64"] = raws
 				doc["cesr_signatures"] = sigs
+			}
+			// Only a relay address is ever named, never a direct one (ADR-048 §6).
+			if base, ok := s.relayAddressBase(r); ok {
+				doc["oobi"] = fmt.Sprintf("%s/public/oobi/%s", base, requestedAID)
 			}
 			jsonreply.Write(w, http.StatusOK, doc)
 			return
