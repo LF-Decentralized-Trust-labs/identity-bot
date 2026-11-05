@@ -15,6 +15,8 @@ import (
 	"identity-agent-core/watcher"
 
 	"github.com/go-chi/chi/v5"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 // maxRateLimitedClients bounds the limiter's memory. Each key is a caller
@@ -212,8 +214,7 @@ func (s *CoreServer) mountWatcherPublicRoutes(r chi.Router) {
 			writeError(w, http.StatusInternalServerError, "digest lookup failed", err.Error())
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		jsonreply.Write(w, http.StatusOK, resp)
 	})
 
 	r.Post("/public/kel-check", func(w http.ResponseWriter, r *http.Request) {
@@ -232,8 +233,7 @@ func (s *CoreServer) mountWatcherPublicRoutes(r chi.Router) {
 			writeError(w, http.StatusInternalServerError, "kel-check failed", err.Error())
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		jsonreply.Write(w, http.StatusOK, resp)
 	})
 
 	if os.Getenv("WATCHER_DEBUG") == "true" {
@@ -257,8 +257,7 @@ func (s *CoreServer) handleDebugWatcherFirstSeen(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusInternalServerError, "query failed", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"aid": aid, "records": rows})
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{"aid": aid, "records": rows})
 }
 
 func (s *CoreServer) handleDebugWatcherCoverage(w http.ResponseWriter, r *http.Request) {
@@ -266,8 +265,7 @@ func (s *CoreServer) handleDebugWatcherCoverage(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusForbidden, "owner only", "")
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"status": "ok",
 		"note":   "coverage summary — extend with aggregate queries as needed",
 	})
