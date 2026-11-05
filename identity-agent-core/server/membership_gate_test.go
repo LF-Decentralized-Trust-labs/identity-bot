@@ -15,6 +15,14 @@ func (r verifyResolver) Admit(aid, _ string) (bool, string) {
 	return false, "not active"
 }
 
+// registerResolverForTest registers r for source and removes it when the test
+// ends, so the registry is empty again for whichever test runs next.
+func registerResolverForTest(t *testing.T, source string, r MembershipResolver) {
+	t.Helper()
+	RegisterMembershipResolver(source, r)
+	t.Cleanup(func() { delete(membershipResolvers, source) })
+}
+
 // Proves the core's login authorizer routes a non-default MembershipSource
 // through a registered resolver: fail-closed with none, admit/deny per resolver.
 func TestMembershipResolverGateChain(t *testing.T) {
@@ -35,7 +43,7 @@ func TestMembershipResolverGateChain(t *testing.T) {
 		t.Fatal("admitted with no resolver registered (should fail closed)")
 	}
 	// Register a resolver admitting Ealice only.
-	RegisterMembershipResolver("verify_src", verifyResolver{active: map[string]bool{"Ealice": true}})
+	registerResolverForTest(t, "verify_src", verifyResolver{active: map[string]bool{"Ealice": true}})
 	if ok, reason := s.authorizeAssetAccess(nil, "ESite", "Ealice", nil); !ok {
 		t.Fatalf("resolver-admitted AID denied: %s", reason)
 	}

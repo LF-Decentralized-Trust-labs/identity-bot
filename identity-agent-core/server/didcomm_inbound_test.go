@@ -104,21 +104,17 @@ func TestTheReplayCacheIsBounded(t *testing.T) {
 
 	// Full, with entries that are live so the sweep cannot reclaim them.
 	future := time.Now().Add(30 * time.Minute)
-	didcommSeen.Lock()
-	didcommSeen.m = map[string]time.Time{}
+	var cache seenMessages
+	cache.m = map[string]time.Time{}
 	for i := 0; i < maxSeenEntries; i++ {
-		didcommSeen.m[string(rune(i))+"-planted"] = future
+		cache.m[string(rune(i))+"-planted"] = future
 	}
-	didcommSeen.Unlock()
 
-	if seenBefore("a-genuinely-new-id", future) {
+	if cache.seenBefore("a-genuinely-new-id", future) {
 		t.Error("a new message was reported as a replay because the cache was full")
 	}
 
-	didcommSeen.Lock()
-	grew := len(didcommSeen.m) > maxSeenEntries
-	didcommSeen.m = map[string]time.Time{}
-	didcommSeen.Unlock()
+	grew := len(cache.m) > maxSeenEntries
 	if grew {
 		t.Error("the cache grew past its cap")
 	}

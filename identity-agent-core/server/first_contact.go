@@ -59,31 +59,33 @@ const (
 	firstContactBurst  = 5
 )
 
-var firstContact = struct {
-	sync.Mutex
+// introductionLimiter is one server's count of recent introductions. The zero
+// value is ready to use.
+type introductionLimiter struct {
+	mu   sync.Mutex
 	seen []time.Time
-}{}
+}
 
-// allowFirstContactAttempt reports whether another stranger may be verified now.
+// allow reports whether another stranger may be verified now.
 //
 // Deliberately global rather than per-sender: a sender identity is free to
 // invent, so counting per-sender would count nothing. The owner sees a queue of
 // requests either way, and a queue is the point at which flooding becomes
 // visible to a person.
-func allowFirstContactAttempt(now time.Time) bool {
-	firstContact.Lock()
-	defer firstContact.Unlock()
-	kept := firstContact.seen[:0]
-	for _, t := range firstContact.seen {
+func (l *introductionLimiter) allow(now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	kept := l.seen[:0]
+	for _, t := range l.seen {
 		if now.Sub(t) < firstContactWindow {
 			kept = append(kept, t)
 		}
 	}
-	firstContact.seen = kept
-	if len(firstContact.seen) >= firstContactBurst {
+	l.seen = kept
+	if len(l.seen) >= firstContactBurst {
 		return false
 	}
-	firstContact.seen = append(firstContact.seen, now)
+	l.seen = append(l.seen, now)
 	return true
 }
 
@@ -166,7 +168,7 @@ func (s *CoreServer) tryFirstContact(w http.ResponseWriter, r *http.Request,
 		jsonError(w, "the key history presented is too large to consider", http.StatusRequestEntityTooLarge)
 		return true
 	}
-	if !allowFirstContactAttempt(time.Now()) {
+	if !s.introductions.allow(time.Now()) {
 		jsonError(w, "too many introductions just now; try again shortly", http.StatusTooManyRequests)
 		return true
 	}

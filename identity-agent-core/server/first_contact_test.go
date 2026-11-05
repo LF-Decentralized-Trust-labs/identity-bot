@@ -12,14 +12,12 @@ import (
 // The rate bound is global on purpose: a sender identity is free to invent, so
 // counting per-sender counts nothing.
 func TestStrangersAreBoundedByRate(t *testing.T) {
-	firstContact.Lock()
-	firstContact.seen = nil
-	firstContact.Unlock()
+	var l introductionLimiter
 
 	now := time.Now()
 	allowed := 0
 	for i := 0; i < firstContactBurst+3; i++ {
-		if allowFirstContactAttempt(now) {
+		if l.allow(now) {
 			allowed++
 		}
 	}
@@ -28,7 +26,7 @@ func TestStrangersAreBoundedByRate(t *testing.T) {
 	}
 
 	// The window moves on, and so does the allowance.
-	if !allowFirstContactAttempt(now.Add(firstContactWindow + time.Second)) {
+	if !l.allow(now.Add(firstContactWindow + time.Second)) {
 		t.Fatal("the bound never releases, so an agent could be locked out permanently by a flood")
 	}
 }
