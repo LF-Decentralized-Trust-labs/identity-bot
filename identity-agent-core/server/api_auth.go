@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"identity-agent-core/internal/jsonreply"
 	"identity-agent-core/permission"
 )
 
@@ -495,13 +495,11 @@ const (
 
 // denyAuthorizationBecause is denyAuthorization with a reason code.
 func denyAuthorizationBecause(w http.ResponseWriter, reason, detail string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusForbidden)
 	body := map[string]string{"error": "not_authorized", "detail": detail}
 	if reason != "" {
 		body["reason"] = reason
 	}
-	_ = json.NewEncoder(w).Encode(body)
+	jsonreply.Write(w, http.StatusForbidden, body)
 }
 
 // isOwner answers the only question the default class asks: is this the person
