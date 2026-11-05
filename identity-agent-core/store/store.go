@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -477,6 +478,33 @@ type ContactKELRecord struct {
 	// what would make a second, equally well-formed history detectable as the
 	// forgery.
 	Witnessed bool `json:"witnessed"`
+}
+
+// ErrLogEndsEarlier is returned by SaveContactKEL when the record offered
+// would replace a verified log with one that ends before it.
+var ErrLogEndsEarlier = errors.New("the log offered ends before the verified log already held for this identifier")
+
+// eventsIn is how many events a record holds, by whichever count is larger so a
+// record that fills only one of the two fields is still measured.
+func eventsIn(r ContactKELRecord) int {
+	n := len(r.KEL)
+	if r.EventsValidated > n {
+		n = r.EventsValidated
+	}
+	return n
+}
+
+// refuseAnEarlierLog is the rule every store applies before it replaces a held
+// log. A verified log is a key this machine trusts, like the sealed one, so it
+// only ever moves forward: a replayed older history of the same identifier
+// verifies cleanly on its own, and letting it replace the longer one would make
+// a key the owner has since rotated away the current key again.
+func refuseAnEarlierLog(held *ContactKELRecord, offered ContactKELRecord) error {
+	if held != nil && held.KelVerified && eventsIn(offered) < eventsIn(*held) {
+		return fmt.Errorf("%w (%s: holds %d events, offered %d)",
+			ErrLogEndsEarlier, offered.AID, eventsIn(*held), eventsIn(offered))
+	}
+	return nil
 }
 
 // ShareAction defines a user-facing engagement action shown in the Share menu.
@@ -1344,6 +1372,11 @@ func (s *FileStore) SaveContactKEL(record ContactKELRecord) error {
 		kels = map[string]ContactKELRecord{}
 	}
 	record.sealFromVerifiedBytes()
+	if held, ok := kels[record.AID]; ok {
+		if err := refuseAnEarlierLog(&held, record); err != nil {
+			return err
+		}
+	}
 	kels[record.AID] = record
 	return s.writeJSON(filepath.Join(s.dir, "contact_kels.json"), kels)
 }

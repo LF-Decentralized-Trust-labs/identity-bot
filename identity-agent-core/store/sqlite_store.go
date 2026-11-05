@@ -1181,7 +1181,26 @@ func (s *SQLiteStore) SaveContactKEL(record ContactKELRecord) error {
 		return fmt.Errorf("failed to marshal validation errors: %w", err)
 	}
 
-	_, err = s.db.Exec(`
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to save contact KEL: %w", err)
+	}
+	defer tx.Rollback()
+	var heldJSON string
+	var held ContactKELRecord
+	switch qerr := tx.QueryRow(`SELECT kel_json, kel_verified, events_validated FROM contact_kels WHERE aid = ?`,
+		record.AID).Scan(&heldJSON, &held.KelVerified, &held.EventsValidated); {
+	case qerr == nil:
+		_ = json.Unmarshal([]byte(heldJSON), &held.KEL)
+		held.AID = record.AID
+		if err := refuseAnEarlierLog(&held, record); err != nil {
+			return err
+		}
+	case qerr != sql.ErrNoRows:
+		return fmt.Errorf("failed to save contact KEL: %w", qerr)
+	}
+
+	_, err = tx.Exec(`
 		INSERT INTO contact_kels (aid, kel_json, kel_verified, current_public_key, events_validated, validation_errors, validated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(aid) DO UPDATE SET
@@ -1196,6 +1215,9 @@ func (s *SQLiteStore) SaveContactKEL(record ContactKELRecord) error {
 		string(errorsJSON), record.ValidatedAt,
 	)
 	if err != nil {
+		return fmt.Errorf("failed to save contact KEL: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to save contact KEL: %w", err)
 	}
 	return nil
