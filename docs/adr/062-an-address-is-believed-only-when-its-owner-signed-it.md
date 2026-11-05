@@ -89,7 +89,7 @@ verified.
    to. It is then signed in a third form, `IA-CONTROLLER-REQ-V3`, with the
    origin on its own line after the Identity Agent, carried in
    `X-IA-Controller-Origin`. The Identity Agent refuses an origin that is not
-   one of its own: its relay, tunnel, configured public URL, direct address or
+   one of its own: its relay, tunnel, configured public URL or
    loopback. It does not compare against the `Host` header, which the forwarder
    chooses. The form differs from the second, so removing the header leaves a
    string the request was not signed over. An origin that is present and not in
@@ -97,7 +97,7 @@ verified.
 
    **The agent's own origins come only from what it was configured with**, never
    from anything a request says: `PUBLIC_URL`, an explicit override, its relay and
-   tunnel, `AGENT_DIRECT_INGRESS_ADDR` and loopback. The address a trusted proxy
+   tunnel and loopback. *(Amended 2026-11-05: `AGENT_DIRECT_INGRESS_ADDR` is gone, and the direct listener's address is not an origin: see the note at the end.)* The address a trusted proxy
    reported (`TRUST_FORWARDED_HEADERS`) is still used for the address the agent
    publishes, but it is not an origin the agent accepts a request for: a front
    proxy that appends to `X-Forwarded-Host` instead of replacing it would
@@ -125,8 +125,10 @@ b. **Configure the addresses.** Before step c every agent must be told every
    - `PUBLIC_URL` (or an explicit override) for an agent behind a reverse proxy,
      a domain or a custom name: the origin the app dials. Needed by any
      deployment reached by name.
-   - `AGENT_DIRECT_INGRESS_ADDR` for an agent reached on a LAN address or a
-     mapped Docker port, so `http://<lan ip>:<port>` is one of its own.
+   - ~~`AGENT_DIRECT_INGRESS_ADDR` for an agent reached on a LAN address or a
+     mapped Docker port~~ *(withdrawn 2026-11-05: see the note at the end. An agent
+     that still sets it refuses to start. Management of such an agent goes through
+     `PUBLIC_URL` or a relay.)*
    - A sealed instance behind its own proxy: the proxy's public origin as
      `PUBLIC_URL`.
    - Relay and tunnel addresses need nothing: the agent knows them. Loopback needs
@@ -187,3 +189,16 @@ its tests and decides every vector the same way.
 - An identifier that rotates its key publishes its record again.
 - A client that has not been updated to send the origin keeps working until the
   origin is required; until then a request it signs can still be relayed.
+
+**Amended 2026-11-05 — no direct address among the agent's own origins.** The
+whole-surface hatch `AGENT_DIRECT_INGRESS_ADDR` was removed with the second
+listener (ADR-042 §2). The direct listener (`AGENT_DIRECT_LISTEN_ADDR`) serves
+public identifier documents only and carries no management traffic, so a
+controller never signs a request for it and its address is not one of the
+agent's own origins (`EndpointService.OwnURLs`). Rollout step b no longer lists
+`AGENT_DIRECT_INGRESS_ADDR`; an agent started with it set refuses to start and
+names the variable. A deployment that was reached for management on a LAN
+address or mapped port sets `PUBLIC_URL` to that address, which keeps it an
+origin of the agent. The management listener itself stays on loopback, so such a deployment also
+needs a reverse proxy or port forward from that address to it; setting
+`PUBLIC_URL` alone accepts the origin but does not make it reachable.

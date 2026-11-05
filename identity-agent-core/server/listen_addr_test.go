@@ -10,7 +10,6 @@ import (
 // a manager-governed ingress (the relay tunnel, or a separate path-scoped bind),
 // so a public root bind would make the root URL a universal correlator.
 func TestRootListenAddrDefaultsToLoopback(t *testing.T) {
-	t.Setenv("AGENT_DIRECT_INGRESS_ADDR", "")
 	t.Setenv("AGENT_SEALED_INSTANCE_INGRESS", "")
 
 	addr := rootListenAddr(5050)
@@ -34,7 +33,6 @@ func TestRootListenAddrDefaultsToLoopback(t *testing.T) {
 // Binding the computed address actually yields a loopback socket — the property
 // the two-listener invariant depends on, verified against a real listener.
 func TestRootListenerBindsLoopback(t *testing.T) {
-	t.Setenv("AGENT_DIRECT_INGRESS_ADDR", "")
 	t.Setenv("AGENT_SEALED_INSTANCE_INGRESS", "")
 
 	// Port 0 lets the OS choose a free port; the host is what we assert on.
@@ -53,19 +51,15 @@ func TestRootListenerBindsLoopback(t *testing.T) {
 	}
 }
 
-// The dev escape hatch is the only way to reach a non-loopback bind, and it is
-// off unless explicitly set. This documents that the exposure is opt-in.
-func TestDirectIngressOverrideIsOptIn(t *testing.T) {
-	t.Setenv("AGENT_DIRECT_INGRESS_ADDR", "0.0.0.0")
+// The retired whole-surface setting binds nothing: the root surface stays on
+// loopback however it is set.
+func TestTheRetiredWholeSurfaceSettingDoesNotMoveTheRoot(t *testing.T) {
 	t.Setenv("AGENT_SEALED_INSTANCE_INGRESS", "")
-	if got := rootListenAddr(5050); got != "0.0.0.0:5050" {
-		t.Fatalf("explicit override should bind the requested host; got %q", got)
-	}
-
-	t.Setenv("AGENT_DIRECT_INGRESS_ADDR", "192.168.0.10:9999")
-	// The server's chosen port always wins over any port in the override.
-	if got := rootListenAddr(5050); got != "192.168.0.10:5050" {
-		t.Fatalf("override host with server port expected; got %q", got)
+	for _, v := range []string{"0.0.0.0", "192.168.0.10:9999"} {
+		t.Setenv("AGENT_DIRECT_INGRESS_ADDR", v)
+		if got := rootListenAddr(5050); got != "127.0.0.1:5050" {
+			t.Fatalf("AGENT_DIRECT_INGRESS_ADDR=%s moved the root to %q", v, got)
+		}
 	}
 }
 
@@ -76,7 +70,6 @@ func TestDirectIngressOverrideIsOptIn(t *testing.T) {
 // without the hatch's warning (the NAT makes every host request remote to the
 // owner gate, so there is nothing to warn about).
 func TestSealedInstanceIngressBindsTheInterface(t *testing.T) {
-	t.Setenv("AGENT_DIRECT_INGRESS_ADDR", "")
 	t.Setenv("AGENT_SEALED_INSTANCE_INGRESS", "1")
 	if got := rootListenAddr(5050); got != "0.0.0.0:5050" {
 		t.Fatalf("a sealed instance must bind its VM interface; got %q", got)
@@ -86,7 +79,6 @@ func TestSealedInstanceIngressBindsTheInterface(t *testing.T) {
 // The sealed-instance signal is opt-in: unset, the default stays loopback, so a
 // non-sealed deployment never binds the interface by accident.
 func TestSealedInstanceIngressIsOptIn(t *testing.T) {
-	t.Setenv("AGENT_DIRECT_INGRESS_ADDR", "")
 	t.Setenv("AGENT_SEALED_INSTANCE_INGRESS", "")
 	if got := rootListenAddr(5050); got != "127.0.0.1:5050" {
 		t.Fatalf("without the sealed signal the default must stay loopback; got %q", got)

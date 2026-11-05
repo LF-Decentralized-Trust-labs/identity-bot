@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"net"
@@ -136,6 +137,10 @@ type CoreServer struct {
 	httpSrv   *http.Server
 	tunnelSrv *http.Server
 	router    chi.Router
+	// The direct listener (direct_ingress.go): nil unless the operator bound one.
+	directLn   net.Listener
+	directSrv  *http.Server
+	directAIDs *directAllowlist
 
 	// See Config.RequireOwnerAtInception.
 	requireOwnerAtInception bool
@@ -629,6 +634,13 @@ func (s *CoreServer) Start() error {
 		return fmt.Errorf("failed to bind on ports %d–%d: %w", requestedPort, requestedPort+9, bindErr)
 	}
 
+	// The direct listener, if one was asked for, beside the loopback root.
+	if err := s.bindDirectListener(); err != nil {
+		s.listener.Close()
+		s.listener = nil
+		return err
+	}
+
 	// The key this agent is reached over. Loaded before anything publishes an
 	// address, because its fingerprint is what an attestation binds to and what
 	// a client checks against the connection it is on.
@@ -808,6 +820,8 @@ func (s *CoreServer) Stop() {
 	s.running = false
 	httpSrv, tunnelSrv, listener := s.httpSrv, s.tunnelSrv, s.listener
 	s.httpSrv, s.tunnelSrv, s.listener = nil, nil, nil
+	directSrv, directLn := s.directSrv, s.directLn
+	s.directSrv, s.directLn = nil, nil
 	// Read here as well: a relay start still running replaces it under mu.
 	relayManager := s.RelayManager
 	s.mu.Unlock()
@@ -862,7 +876,7 @@ func (s *CoreServer) Stop() {
 	// mobile where the core is restarted on each resume. The bare listener
 	// close stays for the case where Serve was never reached (bind succeeded,
 	// goroutine not yet scheduled).
-	for _, srv := range []*http.Server{httpSrv, tunnelSrv} {
+	for _, srv := range []*http.Server{httpSrv, tunnelSrv, directSrv} {
 		if srv == nil {
 			continue
 		}
@@ -874,6 +888,9 @@ func (s *CoreServer) Stop() {
 	}
 	if listener != nil {
 		listener.Close()
+	}
+	if directLn != nil {
+		directLn.Close()
 	}
 
 	// Wait for what was started and is still writing to the data directory,
@@ -1141,6 +1158,9 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 		r.Get("/settings/reachability", s.handleGetReachabilitySettings)
 		r.Put("/settings/reachability", s.handlePutReachabilitySettings)
 		r.Get("/settings/reachability/relay", s.handleRelayStatus)
+		r.Get("/settings/reachability/direct-aids", s.handleListDirectAIDs)
+		r.Put("/settings/reachability/direct-aids/{aid}", s.handleAllowDirectAID)
+		r.Delete("/settings/reachability/direct-aids/{aid}", s.handleRemoveDirectAID)
 		r.Post("/settings/reachability/name/release", s.handleReleaseRelayName)
 		r.Get("/settings/reachability/domains", s.handleListRelayDomains)
 		r.Post("/settings/reachability/domains", s.handleRequestRelayDomain)
@@ -3405,7 +3425,7 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 						return
 					}
 					publicURL := s.getPublicURL(r)
-					oobiURL := fmt.Sprintf("%s/public/oobi/%s", publicURL, a.PairwiseAID)
+					oobiURL := oobiLink(r, publicURL, a.PairwiseAID)
 					rawEvents, signatures := s.assetEventsAndSignatures(a, kelResp.RawEventsB64)
 					jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 						"aid":             a.PairwiseAID,
@@ -3431,7 +3451,7 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 			publicURL := s.getPublicURL(r)
 			doc := map[string]interface{}{
 				"aid":  requestedAID,
-				"oobi": fmt.Sprintf("%s/public/oobi/%s", publicURL, requestedAID),
+				"oobi": oobiLink(r, publicURL, requestedAID),
 				"kel":  kel,
 				"type": "pairwise",
 				// Which realm this agent runs in, so a resolver keeps a
@@ -3486,9 +3506,9 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 			actionLabel = "add you as a contact on Identity Agent"
 		}
 		publicURL := s.getPublicURL(r)
-		rawOobiURL := fmt.Sprintf("%s/public/oobi/%s", publicURL, identity.AID)
+		rawOobiURL := oobiLink(r, publicURL, identity.AID)
 		if action != "" {
-			rawOobiURL = fmt.Sprintf("%s?action=%s", rawOobiURL, action)
+			rawOobiURL = fmt.Sprintf("%s?action=%s", rawOobiURL, url.QueryEscape(action))
 		}
 		htmlPage := fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
@@ -3518,7 +3538,7 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
   <div class="card"><span class="oobi">%s</span></div>
   <p style="font-size:12px;color:#64748b;">This link only works while the sender's Identity Agent is running.</p>
 </body>
-</html>`, alias, alias, actionLabel, rawOobiURL)
+</html>`, alias, alias, actionLabel, html.EscapeString(rawOobiURL))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprint(w, htmlPage)
 		return

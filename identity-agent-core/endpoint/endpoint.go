@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -170,8 +171,8 @@ func (es *EndpointService) Refresh() {
 
 // OwnURLs is every address this agent has been CONFIGURED with, or holds
 // itself, not only the one it publishes: an explicit override, its relay, its
-// tunnel, a configured public URL, the address it serves on the local network
-// when it is bound there, and loopback. A request signed for an origin that is
+// tunnel, a configured public URL, and loopback. The direct listener's address is not
+// among them: it carries no management traffic. A request signed for an origin that is
 // none of these was not meant for this agent.
 //
 // NEVER an address read off a request. The address a trusted proxy reported
@@ -193,16 +194,10 @@ func (es *EndpointService) OwnURLs() []string {
 	if tm != nil {
 		urls = append(urls, tm.URL())
 	}
-	if host := DirectIngressHost(); host != "" && !IsLoopbackHost(host) {
-		if ip := detectLocalIP(); ip != "" {
-			urls = append(urls, fmt.Sprintf("http://%s:%d", ip, port))
-			// The port the operator named for it, which need not be the one this
-			// agent's own surface listens on.
-			if _, p, err := net.SplitHostPort(strings.TrimSpace(os.Getenv("AGENT_DIRECT_INGRESS_ADDR"))); err == nil && p != "" {
-				urls = append(urls, fmt.Sprintf("http://%s:%s", ip, p), fmt.Sprintf("http://%s:%s", host, p))
-			}
-		}
-	}
+	// The direct listener's address (DirectListenAddr) is left out on purpose. It
+	// serves only public identifier documents and carries no management traffic,
+	// so a controller never signs a request for it, and listing it would make a
+	// LAN address an origin the agent accepts signed management requests for.
 	urls = append(urls,
 		fmt.Sprintf("http://localhost:%d", port),
 		fmt.Sprintf("http://127.0.0.1:%d", port),
@@ -269,17 +264,17 @@ func (es *EndpointService) resolve() (string, string) {
 		return strings.TrimRight(envURL, "/"), "env:PUBLIC_URL"
 	}
 
-	// A LAN IPv4 is only worth publishing when something outside this box can
-	// actually reach the agent there. By default the root/management surface binds
-	// loopback only (see server.rootListenAddr), so nothing is listening on the
-	// LAN IP — publishing http://<LAN-IP>:port into an OOBI or pairing QR sends a
-	// counterparty to an address that answers with connection-refused, a silent
-	// break. The LAN IP is genuinely reachable only when the direct-ingress escape
-	// hatch has bound the surface to a non-loopback host (a bare LAN address, or
-	// 0.0.0.0); short of that, advertise localhost.
-	if host := DirectIngressHost(); host != "" && !IsLoopbackHost(host) {
-		if ip := detectLocalIP(); ip != "" {
-			return fmt.Sprintf("http://%s:%d", ip, port), fmt.Sprintf("local:%s", ip)
+	// A LAN address is only worth publishing when something outside this box can
+	// actually reach the agent there. The root/management surface binds loopback
+	// only (see server.rootListenAddr), so the one off-box place an agent answers
+	// directly is the path-scoped direct listener (AGENT_DIRECT_LISTEN_ADDR, ADR-042
+	// §2). Short of that, advertise localhost: publishing http://<LAN-IP>:port into
+	// an OOBI or pairing QR sends a counterparty to an address that answers with
+	// connection-refused, a silent break. The port published is the direct
+	// listener's own, never the root's.
+	if host, dport, ok := DirectListenAddr(); ok && !IsLoopbackHost(host) {
+		if ip := directAdvertiseIP(host); ip != "" {
+			return fmt.Sprintf("http://%s:%d", ip, dport), fmt.Sprintf("local:%s", ip)
 		}
 	}
 
@@ -317,22 +312,41 @@ func (es *EndpointService) load() {
 	log.Printf("[endpoint] Loaded previous state: %s (source: %s)", url, source)
 }
 
-// DirectIngressHost is the host the direct-ingress escape hatch binds the whole
-// surface to, or "" when the hatch is unset.
+// DirectListenAddr is the host and port of the direct listener, the second,
+// path-scoped listener a Direct-mode agent is reached on off-box (ADR-042 §2),
+// and false when none is configured or the setting is not a host and a port.
 //
-// It reads the SAME signal server.rootListenAddr binds on —
-// AGENT_DIRECT_INGRESS_ADDR — so the address this service advertises cannot
-// disagree with where the root actually listens. Both a bare host ("0.0.0.0",
-// "192.168.0.10") and a host:port are accepted; only the host is returned.
-func DirectIngressHost() string {
-	override := strings.TrimSpace(os.Getenv("AGENT_DIRECT_INGRESS_ADDR"))
-	if override == "" {
-		return ""
+// It reads AGENT_DIRECT_LISTEN_ADDR, the one signal both server.directListenAddr
+// binds on and the advertised address resolves on, so binding and advertising
+// cannot disagree. A port is required: the root surface has its own, and the two
+// never share a socket.
+func DirectListenAddr() (host string, port int, ok bool) {
+	v := strings.TrimSpace(os.Getenv("AGENT_DIRECT_LISTEN_ADDR"))
+	if v == "" {
+		return "", 0, false
 	}
-	if h, _, err := net.SplitHostPort(override); err == nil {
-		return h
+	h, p, err := net.SplitHostPort(v)
+	if err != nil || h == "" {
+		return "", 0, false
 	}
-	return override
+	n, err := strconv.Atoi(p)
+	if err != nil || n < 1 || n > 65535 {
+		return "", 0, false
+	}
+	return h, n, true
+}
+
+// directAdvertiseIP is the address a counterparty is given for a direct listener
+// bound to host: the host itself when it names one interface, this machine's LAN
+// address when it names all of them (0.0.0.0).
+func directAdvertiseIP(host string) string {
+	if ip := net.ParseIP(host); ip != nil && !ip.IsUnspecified() {
+		return host
+	}
+	if ip := net.ParseIP(host); ip == nil {
+		return host // a name: published as given
+	}
+	return detectLocalIP()
 }
 
 // SealedInstanceIngress reports whether this agent runs as a sealed instance
@@ -342,9 +356,8 @@ func DirectIngressHost() string {
 // guest loopback is unreachable from the host, so the agent must bind the
 // interface for the proxy (and the provisioner) to reach it at all.
 //
-// This is NOT the AGENT_DIRECT_INGRESS_ADDR dev hatch. That hatch exposes the
-// whole surface onto a real LAN where a locally-trusted owner could be
-// impersonated, so it warns loudly and is never a product default. Here the
+// This is NOT the direct listener (DirectListenAddr), which serves identifier
+// documents only. Here the
 // interface is reachable only from the host (the VM's user-mode NAT isolates it), that NAT
 // makes every host-originated request present a non-loopback source so the owner
 // gate treats it as remote-and-signed, and reaching the management surface
