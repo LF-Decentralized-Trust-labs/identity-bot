@@ -9,6 +9,8 @@ import (
 
 	"identity-agent-core/login"
 	"identity-agent-core/store"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 // Attaching the signature to a key event after the event exists.
@@ -107,8 +109,7 @@ func (s *CoreServer) handleAttachEventSignature(w http.ResponseWriter, r *http.R
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"status": "signed", "aid": req.AID,
+	jsonreply.Write(w, http.StatusOK, map[string]any{"status": "signed", "aid": req.AID,
 		"sequence_number": req.SequenceNumber})
 }
 
