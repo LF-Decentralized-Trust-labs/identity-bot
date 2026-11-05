@@ -2,9 +2,6 @@ package server
 
 import (
 	"fmt"
-	"log"
-	"os"
-	"strings"
 
 	"identity-agent-core/endpoint"
 )
@@ -25,14 +22,13 @@ import (
 // relay transports are unaffected — both dial the local server over loopback,
 // so nothing that reaches the agent through a manager-governed path is lost.
 //
-// DEV ESCAPE HATCH — a direct/LAN deployment with no tunnel (a developer
-// pairing a phone to a computer on the same network, say) still needs the agent
-// reachable off-box. The correct home for that is a separate, path-scoped,
-// manager-governed ingress listener, which is not built yet. Until it is,
-// AGENT_DIRECT_INGRESS_ADDR lets a developer explicitly opt the WHOLE surface
-// onto a reachable address (e.g. "0.0.0.0") so that flow is not silently
-// broken. It is off by default, loud when on, and dev/testing only — it exposes
-// the management API and MUST NOT be used as a product default.
+// DIRECT MODE — an agent with no tunnel or relay (a developer pairing a phone to
+// a computer on the same network, say) is reached off-box on a SECOND listener,
+// not on this one: directListenAddr / serveDirectIngress in direct_ingress.go,
+// which serves only the path-scoped /{aid}/... documents of the identifiers the
+// URL manager has allowlisted, and only while the mode is Direct (ADR-042 §2).
+// The retired AGENT_DIRECT_INGRESS_ADDR, which bound this whole surface to a
+// reachable address, is no longer read.
 //
 // SEALED INSTANCE — a hardware-sealed instance (a confidential VM) is reached
 // only through a host reverse proxy that dials the agent over the VM's network
@@ -51,19 +47,6 @@ func rootListenAddr(port int) string {
 	// owner gate — see the SEALED INSTANCE note above and ADR-042.
 	if endpoint.SealedInstanceIngress() {
 		return fmt.Sprintf("0.0.0.0:%d", port)
-	}
-	// The host the hatch names (bare "0.0.0.0"/"192.168.0.10" or a host:port; the
-	// port this server chose always wins, since it may have fallen back). This is
-	// the same signal the advertised address resolves on — endpoint.DirectIngressHost
-	// — so binding and advertising cannot disagree about where the agent listens.
-	if host := endpoint.DirectIngressHost(); host != "" {
-		if !endpoint.IsLoopbackHost(host) {
-			log.Printf("[identity-agent-core] WARNING: AGENT_DIRECT_INGRESS_ADDR=%s binds the root/"+
-				"management surface to a non-loopback address. This exposes the management API and is a "+
-				"developer/testing escape hatch only — never a product default. The governed path-scoped "+
-				"ingress is the supported way to be reachable off-box.", strings.TrimSpace(os.Getenv("AGENT_DIRECT_INGRESS_ADDR")))
-		}
-		return fmt.Sprintf("%s:%d", host, port)
 	}
 	return fmt.Sprintf("127.0.0.1:%d", port)
 }
