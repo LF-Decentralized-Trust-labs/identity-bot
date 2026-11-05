@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -9,6 +8,8 @@ import (
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
 	"identity-agent-core/oidc"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 func (s *CoreServer) initOIDCHandler() error {
@@ -50,9 +51,8 @@ func onlyForAnIdentifier(next http.HandlerFunc) http.HandlerFunc {
 func (s *CoreServer) handleOIDCDiscovery(w http.ResponseWriter, r *http.Request) {
 	aid := chi.URLParam(r, "aid")
 	doc := s.oidcAdapter.DiscoveryForPairwise(aid)
-	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "max-age=300")
-	_ = json.NewEncoder(w).Encode(doc)
+	jsonreply.Write(w, http.StatusOK, doc)
 }
 
 func (s *CoreServer) handleOIDCAuthorize(w http.ResponseWriter, r *http.Request) {
@@ -86,9 +86,7 @@ func (s *CoreServer) handleOIDCAuthorize(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *CoreServer) handleOIDCComplete(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusAccepted)
-	_ = json.NewEncoder(w).Encode(map[string]string{
+	jsonreply.Write(w, http.StatusAccepted, map[string]string{
 		"status": "pending",
 		"note":   "BLOCKED: cross-device SIOPv2 request_uri flow requires the relay broker",
 	})
