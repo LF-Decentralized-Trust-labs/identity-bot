@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"identity-agent-core/internal/jsonreply"
@@ -24,7 +23,5 @@ func writeJSONStatus(w http.ResponseWriter, status int, v interface{}) {
 }
 
 func jsonError(w http.ResponseWriter, message string, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{"error": message})
+	jsonreply.Write(w, status, map[string]string{"error": message})
 }
