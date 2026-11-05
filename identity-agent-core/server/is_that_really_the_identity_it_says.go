@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/go-chi/chi/v5"
 )
 
 // Checking that the identity answering at an address is the one it claims.
@@ -34,6 +36,13 @@ type verifyIdentityRequest struct {
 	OobiURL string `json:"oobi_url"`
 }
 
+// namedWitness is one witness the key log designates. URL is empty when this
+// computer holds no address for it.
+type namedWitness struct {
+	Key string `json:"key"`
+	URL string `json:"url,omitempty"`
+}
+
 type verifyIdentityResponse struct {
 	// Verified is the whole answer. False for every reason — unreachable, no
 	// history published, a history that did not check out, one that names a
@@ -47,6 +56,11 @@ type verifyIdentityResponse struct {
 	// PublicKey the log puts in force, for a caller that wants to check a
 	// signature against it later.
 	PublicKey string `json:"public_key,omitempty"`
+	// Witnesses are the witnesses the verified key log names, with the address
+	// this computer's own core holds for each it can place. Leads, not facts:
+	// whatever a witness later says is checked by the caller. Only present
+	// when verified.
+	Witnesses []namedWitness `json:"witnesses,omitempty"`
 	// Why, in words for a person, when it is not verified.
 	Why string `json:"why,omitempty"`
 }
@@ -113,9 +127,48 @@ func (s *CoreServer) handleVerifyAnIdentityElsewhere(w http.ResponseWriter, r *h
 		return
 	}
 
+	// The witnesses come from the log that was just verified, never from the
+	// address that served it.
+	named := s.witnessesNamedBy(events)
 	writeJSON(w, verifyIdentityResponse{
 		Verified:  true,
 		AID:       aid,
 		PublicKey: val.CurrentPublicKey,
+		Witnesses: named,
 	})
+}
+
+// witnessesNamedBy lists the witnesses a key log designates, each with the
+// address this computer's core holds for it (empty when it holds none).
+func (s *CoreServer) witnessesNamedBy(kel []map[string]interface{}) []namedWitness {
+	keys := witnessKeysIn(kel)
+	var placed map[string]string
+	if s.WitnessService != nil {
+		placed = s.WitnessService.WitnessAddressesFor(keys)
+	}
+	var named []namedWitness
+	for _, k := range keys {
+		named = append(named, namedWitness{Key: k, URL: placed[k]})
+	}
+	return named
+}
+
+// handleGetWitnessesNamedByContact answers, from the validated key log this
+// core already holds for a contact (an organisation it has met), which
+// witnesses that log names and where this core reaches them. It lets an app
+// ask an organisation's witnesses without the organisation being reachable to
+// read its log again. Only a log this core verified is used.
+func (s *CoreServer) handleGetWitnessesNamedByContact(w http.ResponseWriter, r *http.Request) {
+	aid := chi.URLParam(r, "aid")
+	rec, err := s.DataStore.GetContactKEL(aid)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to read contact KEL", err.Error())
+		return
+	}
+	if rec == nil || !rec.KelVerified {
+		writeError(w, http.StatusNotFound, "No verified KEL",
+			"this computer holds no verified key log for that identity")
+		return
+	}
+	writeJSON(w, map[string]interface{}{"aid": aid, "witnesses": s.witnessesNamedBy(rec.KEL)})
 }

@@ -341,6 +341,26 @@ func (s *Service) designatedTargets(designated []string) map[string]witnessTarge
 	return known
 }
 
+// WitnessAddressesFor returns, for each witness key this agent can place, the
+// base address where that witness is reached. It is the read an app needs to
+// ask the witnesses an identity's key log names: a key it cannot place is left
+// out, never guessed at. Only a bootstrap witness or a contact the owner
+// vouches for is placed (see designatedTargets), so the address of a stranger's
+// introduction is never returned. The address is a lead; the caller verifies
+// whatever the witness says.
+func (s *Service) WitnessAddressesFor(keys []string) map[string]string {
+	out := map[string]string{}
+	known := s.designatedTargets(keys)
+	for _, key := range keys {
+		if t, ok := known[key]; ok {
+			if base := witnessBase(t.URL); base != "" {
+				out[key] = base
+			}
+		}
+	}
+	return out
+}
+
 func (s *Service) defaultPostEvent(ctx context.Context, witnessURL string, body []byte) (map[string]interface{}, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, witnessURL, bytes.NewReader(body))
 	if err != nil {

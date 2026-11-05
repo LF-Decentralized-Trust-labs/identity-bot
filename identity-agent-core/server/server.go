@@ -1096,6 +1096,7 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 		r.Post("/contacts", s.handleAddContact)
 		r.Get("/contacts/{aid}", s.handleGetContact)
 		r.Get("/contacts/{aid}/kel", s.handleGetContactKEL)
+		r.Get("/contacts/{aid}/witnesses", s.handleGetWitnessesNamedByContact)
 		r.Delete("/contacts/{aid}", s.handleDeleteContact)
 		r.Put("/contacts/{aid}", s.handleUpdateContact)
 		r.Post("/contacts/{aid}/accept", s.handleAcceptContact)
