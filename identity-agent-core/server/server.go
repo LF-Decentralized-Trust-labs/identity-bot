@@ -4374,7 +4374,6 @@ func (s *CoreServer) handleGetAlerts(w http.ResponseWriter, r *http.Request) {
 		pendingCreds = []store.CredentialRecord{}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	// Notifications are added as a NEW top-level key rather than folded into
 	// any existing one. Every client decodes this response leniently and ignores
 	// what it does not recognise, so an added key reaches updated clients and is
@@ -4386,7 +4385,7 @@ func (s *CoreServer) handleGetAlerts(w http.ResponseWriter, r *http.Request) {
 	// with it as a required argument, so removing it breaks a build for nothing.
 	notifications := s.unreadNotifications()
 
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"alerts":              contacts,
 		"count":               len(contacts),
 		"pending_requests":    pendingReqs,
