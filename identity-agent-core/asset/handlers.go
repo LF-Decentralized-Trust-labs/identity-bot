@@ -13,6 +13,7 @@ import (
 
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/jsonreply"
 )
 
 type Handler struct {
@@ -106,9 +107,7 @@ func (h *Handler) persistDelegationAnchor(rootAID string, approval *drivers.Driv
 }
 
 func (h *Handler) writeJSON(w http.ResponseWriter, v interface{}, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	jsonreply.Write(w, status, v)
 }
 
 func (h *Handler) HandleListAssets(w http.ResponseWriter, r *http.Request) {

@@ -128,7 +128,7 @@ func (s *CoreServer) handleCreateEmployeeInvite(w http.ResponseWriter, r *http.R
 	mintedAsks.m[askToken] = ask
 	mintedAsks.Unlock()
 
-	scanWriteJSON(w, map[string]interface{}{
+	writeJSON(w, map[string]interface{}{
 		"invite": inv,
 		"token":  askToken,
 		"url":    fmt.Sprintf("%s/i/%s", publicURL, askToken),
@@ -172,7 +172,7 @@ func (s *CoreServer) handleRedeemEmployeeInvite(w http.ResponseWriter, r *http.R
 		return
 	}
 	_ = s.assetHandler.Store.IncrementEmployeeInviteUse(token)
-	scanWriteJSON(w, map[string]string{"status": "pending"})
+	writeJSON(w, map[string]string{"status": "pending"})
 }
 
 func (s *CoreServer) handleApproveEmployee(w http.ResponseWriter, r *http.Request) {
@@ -186,7 +186,7 @@ func (s *CoreServer) handleApproveEmployee(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "employee not found", http.StatusNotFound)
 		return
 	}
-	scanWriteJSON(w, emp)
+	writeJSON(w, emp)
 }
 
 func (s *CoreServer) handleRevokeEmployee(w http.ResponseWriter, r *http.Request) {
@@ -200,5 +200,5 @@ func (s *CoreServer) handleRevokeEmployee(w http.ResponseWriter, r *http.Request
 		http.Error(w, "employee not found", http.StatusNotFound)
 		return
 	}
-	scanWriteJSON(w, emp)
+	writeJSON(w, emp)
 }

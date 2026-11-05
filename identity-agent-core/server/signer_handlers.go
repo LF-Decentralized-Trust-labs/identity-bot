@@ -101,7 +101,7 @@ func (s *CoreServer) handleCreateSignerInvite(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	scanWriteJSON(w, map[string]interface{}{
+	writeJSON(w, map[string]interface{}{
 		"invite": inv,
 		"token":  askToken,
 		"url":    fmt.Sprintf("%s/i/%s", publicURL, askToken),
@@ -263,14 +263,14 @@ func (s *CoreServer) handleRedeemSignerInvite(w http.ResponseWriter, r *http.Req
 	_ = s.assetHandler.Store.IncrementEmployeeInviteUse(token)
 
 	if acc.Ceremony {
-		scanWriteJSON(w, map[string]interface{}{
+		writeJSON(w, map[string]interface{}{
 			"status":      "accepted",
 			"owner":       body.PairwiseAID,
 			"outstanding": acc.Outstanding,
 		})
 		return
 	}
-	scanWriteJSON(w, map[string]string{
+	writeJSON(w, map[string]string{
 		"status": "active",
 		"role":   "Super Admin",
 		"owner":  body.PairwiseAID,

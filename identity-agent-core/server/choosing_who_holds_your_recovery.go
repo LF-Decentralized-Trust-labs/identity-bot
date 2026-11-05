@@ -42,7 +42,7 @@ func (s *CoreServer) handleGetWhoHoldsYourRecovery(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusInternalServerError, "Could not read this setting", err.Error())
 		return
 	}
-	writeJSONResponse(w, whoHoldsYourRecovery{
+	writeJSON(w, whoHoldsYourRecovery{
 		Needed:  cfg.Split.Needed,
 		Holders: cfg.Split.Holders,
 		SayThis: whatThisChoiceCosts(cfg.Split),
@@ -69,7 +69,7 @@ func (s *CoreServer) handleSetWhoHoldsYourRecovery(w http.ResponseWriter, r *htt
 			writeError(w, http.StatusInternalServerError, "Could not save this setting", err.Error())
 			return
 		}
-		writeJSONResponse(w, whoHoldsYourRecovery{SayThis: whatThisChoiceCosts(
+		writeJSON(w, whoHoldsYourRecovery{SayThis: whatThisChoiceCosts(
 			backup.HowTheWayInIsSplit{})})
 		return
 	}
@@ -95,7 +95,7 @@ func (s *CoreServer) handleSetWhoHoldsYourRecovery(w http.ResponseWriter, r *htt
 
 	// Answered with what was stored and what it costs, so the screen shows the
 	// consequence of the choice rather than the request being echoed back.
-	writeJSONResponse(w, whoHoldsYourRecovery{
+	writeJSON(w, whoHoldsYourRecovery{
 		Needed:  split.Needed,
 		Holders: split.Holders,
 		SayThis: whatThisChoiceCosts(split),
