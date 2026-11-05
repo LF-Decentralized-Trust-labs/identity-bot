@@ -367,6 +367,15 @@ func (s *CoreServer) authorizeAssetAccess(ctx context.Context, siteAID, pairwise
 				return false, reason
 			}
 		}
+		// Score and badge gates. The core has no score or badge step, so a
+		// policy that sets one cannot be satisfied: refuse and name the gate,
+		// never pass it silently.
+		if a.Policy.RequiredOFAScore > 0 {
+			return false, "minimum score gate is not available yet"
+		}
+		if a.Policy.RequiredBadge != "" {
+			return false, "badge gate is not available yet"
+		}
 		return true, ""
 	}
 	return false, "asset not found"
