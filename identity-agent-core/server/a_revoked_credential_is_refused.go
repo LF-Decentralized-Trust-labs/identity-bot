@@ -68,6 +68,39 @@ func (s *CoreServer) localRevocationState(acdc map[string]interface{}) revocatio
 	return revocationState{log: log, status: revocationNotRevoked}
 }
 
+// verifyCredentialHere is the one way this agent asks the engine to verify a
+// credential. Every path that verifies a credential or a presentation of one
+// goes through it, so a credential revoked here cannot verify anywhere here:
+// it supplies the credential's transaction log where this agent holds the
+// registry, and folds what that shows into the engine's verdict.
+//
+// acdc is the credential's decoded body (nil where it could not be decoded;
+// the engine then refuses it as malformed and the status is "not checked").
+func (s *CoreServer) verifyCredentialHere(req *drivers.DriverVerifyCredentialRequest, acdc map[string]interface{}) (verifyReply, error) {
+	revocation := s.localRevocationState(acdc)
+	req.RegistryEventsB64 = revocation.log
+	res, err := s.KeriDriver.VerifyCredential(req)
+	if err != nil {
+		return verifyReply{}, err
+	}
+	return revocation.applyTo(res), nil
+}
+
+// recordedRevokedHere reports whether this agent's own record says the
+// credential with this SAID was revoked (or is being withdrawn), and why. It
+// is for the paths that hold no credential bytes to verify, only a claim about
+// one: a claim is not evidence against a record this agent made itself.
+func (s *CoreServer) recordedRevokedHere(said string) (string, bool) {
+	if said == "" || s.DataStore == nil {
+		return "", false
+	}
+	rec, _ := s.DataStore.GetCredential(said)
+	if rec != nil && (rec.Status == "revoked" || rec.Status == credentialStatusWithdrawing) {
+		return fmt.Sprintf("this agent recorded the credential as %s", rec.Status), true
+	}
+	return "", false
+}
+
 // verifyReply is the credential/verify reply: everything the engine reports,
 // plus the revocation status and, when it is not "not_revoked", why.
 type verifyReply struct {

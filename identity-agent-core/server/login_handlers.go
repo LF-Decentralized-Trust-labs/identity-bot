@@ -411,7 +411,12 @@ func (s *CoreServer) credentialGateSatisfied(ctx context.Context, presented []in
 			lastReason = "credential verification failed: " + reason
 			continue
 		}
-		// No driver / no ACDC bytes → declared-field fallback.
+		// No driver / no ACDC bytes → declared-field fallback. A declared
+		// status never outweighs this agent's own record of a revocation.
+		if why, revoked := s.recordedRevokedHere(credStr(m["said"])); revoked {
+			lastReason = "credential revoked: " + why
+			continue
+		}
 		if isUsableStatus(credStr(m["status"])) {
 			return true, ""
 		}
@@ -448,7 +453,7 @@ func (s *CoreServer) verifyPresentedCredentialACDC(ctx context.Context, acdcJson
 	if issuerKelEvents == nil {
 		return false, issuerAid, "issuer KEL not found"
 	}
-	result, err := s.KeriDriver.VerifyCredential(&drivers.DriverVerifyCredentialRequest{
+	result, err := s.verifyCredentialHere(&drivers.DriverVerifyCredentialRequest{
 		AcdcJson:           acdcJsonB64,
 		IssuerKelEvents:    issuerKelEvents,
 		HolderAid:          holderAid,
@@ -456,13 +461,13 @@ func (s *CoreServer) verifyPresentedCredentialACDC(ctx context.Context, acdcJson
 		CesrSignature:      cesrSig,
 		HolderPublicKey:    holderPubKey,
 		TrustedSchemaSaids: trustedSchemas,
-	})
+	}, acdcBody)
 	if err != nil {
 		return false, issuerAid, "verify error: " + err.Error()
 	}
-	if result == nil || !result.Verified {
+	if !result.Verified {
 		reason := "credential not verified"
-		if result != nil && len(result.Errors) > 0 {
+		if len(result.Errors) > 0 {
 			reason = strings.Join(result.Errors, "; ")
 		}
 		return false, issuerAid, reason

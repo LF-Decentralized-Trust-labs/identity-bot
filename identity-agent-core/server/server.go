@@ -2717,12 +2717,9 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 
 	// Revocation is read from the registry's transaction log, which this agent
 	// supplies only where it holds the registry state itself.
-	revocation := s.localRevocationState(acdcBody)
-
 	driverReq := &drivers.DriverVerifyCredentialRequest{
 		AcdcJson:           req.AcdcJson,
 		IssuerKelEvents:    issuerKelEvents,
-		RegistryEventsB64:  revocation.log,
 		HolderAid:          req.HolderAid,
 		PresentationSaid:   req.PresentationSaid,
 		CesrSignature:      req.CesrSignature,
@@ -2730,13 +2727,13 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 		TrustedSchemaSaids: req.TrustedSchemaSaids,
 	}
 
-	result, err := s.KeriDriver.VerifyCredential(driverReq)
+	result, err := s.verifyCredentialHere(driverReq, acdcBody)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Credential verification failed", err.Error())
 		return
 	}
 
-	if result != nil && issuerKelEvents != nil {
+	if issuerKelEvents != nil {
 		issuerAid := ""
 		if acdcBody != nil {
 			if ia, ok := acdcBody["i"].(string); ok {
@@ -2751,7 +2748,7 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	jsonreply.Write(w, http.StatusOK, revocation.applyTo(result))
+	jsonreply.Write(w, http.StatusOK, result)
 }
 
 // handleVerifyCredentialChain accepts a SAID or ACDC JSON, verifies the credential,
@@ -2793,6 +2790,9 @@ func (s *CoreServer) handleVerifyCredentialChain(w http.ResponseWriter, r *http.
 		Errors     []string               `json:"errors"`
 		Valid      bool                   `json:"valid"`
 		EdgeLabel  string                 `json:"edge_label,omitempty"` // label used in parent's edges block
+		// RevocationStatus and RevocationReason are as credential/verify reports them.
+		RevocationStatus string `json:"revocation_status,omitempty"`
+		RevocationReason string `json:"revocation_reason,omitempty"`
 	}
 
 	var chain []ChainStep
@@ -2830,7 +2830,7 @@ func (s *CoreServer) handleVerifyCredentialChain(w http.ResponseWriter, r *http.
 			AcdcJson:        jsonB64,
 			IssuerKelEvents: issuerKelEvents,
 		}
-		result, err := s.KeriDriver.VerifyCredential(driverReq)
+		result, err := s.verifyCredentialHere(driverReq, acdcBody)
 
 		step := ChainStep{
 			EdgeLabel: edgeLabel,
@@ -2849,6 +2849,8 @@ func (s *CoreServer) handleVerifyCredentialChain(w http.ResponseWriter, r *http.
 			step.Valid = result.Verified
 			step.Checks = result.Checks
 			step.Errors = result.Errors
+			step.RevocationStatus = result.RevocationStatus
+			step.RevocationReason = result.RevocationReason
 			if !result.Verified {
 				allErrors = append(allErrors, result.Errors...)
 			}
