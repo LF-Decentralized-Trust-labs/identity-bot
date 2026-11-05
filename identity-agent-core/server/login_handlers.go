@@ -404,7 +404,14 @@ func (s *CoreServer) credentialGateSatisfied(ctx context.Context, presented []in
 			continue
 		}
 		acdcB64 := credStr(m["acdc_json_b64"])
-		if s.KeriDriver != nil && acdcB64 != "" {
+		if s.KeriDriver != nil && acdcB64 == "" {
+			// No credential body, no pass. A declared field (schema, issuer,
+			// status) is whatever the presenter chose to write, so it is never
+			// read as evidence once the agent can check the real credential.
+			lastReason = "credential body not presented, so it cannot be verified"
+			continue
+		}
+		if s.KeriDriver != nil {
 			// The holder is the identity that signed in, never the holder the
 			// presenter declares: the driver checks it against the credential's
 			// own issuee, so a credential issued to somebody else is refused.
