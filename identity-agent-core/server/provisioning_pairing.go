@@ -226,7 +226,16 @@ func (s *CoreServer) restorePairingOffer() {
 	// Composed from where this agent is reachable NOW. Storing the address
 	// instead of rebuilding it would pin the agent to wherever it happened to be
 	// when it first started, which is the same class of bug one layer along.
-	oobi := fmt.Sprintf("%s/public/oobi/%s", s.EndpointService.CurrentURL(), stored.AID)
+	//
+	// The one who fetches this is the owner's own device adopting the machine,
+	// not a counterparty, so where no relay address is held the address that
+	// device already reached the machine at is what it can use. A relay
+	// address, once held, is what it names (ADR-048 §6).
+	base, haveRelay := s.heldRelayBase()
+	if !haveRelay {
+		base = s.EndpointService.CurrentURL()
+	}
+	oobi := fmt.Sprintf("%s/public/oobi/%s", base, stored.AID)
 	offer, oerr := newPairingOffer(stored.AID, oobi)
 	if oerr != nil {
 		log.Printf("[provisioning] WARNING: could not rebuild the published pairing offer: %v", oerr)

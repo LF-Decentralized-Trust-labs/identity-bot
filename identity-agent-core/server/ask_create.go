@@ -89,6 +89,11 @@ func (s *CoreServer) handleAskCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("action t=%d is not IA-mintable (originated elsewhere)", body.T), http.StatusBadRequest)
 		return
 	}
+	publicURL, haveRelay := s.relayAddressBase(r)
+	if !haveRelay {
+		writeNoRelayAddress(w)
+		return
+	}
 	ask, seed, err := minter.Mint(s)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -110,9 +115,5 @@ func (s *CoreServer) handleAskCreate(w http.ResponseWriter, r *http.Request) {
 	mintedAsks.m[token] = ask
 	mintedAsks.Unlock()
 
-	publicURL := s.EndpointService.CurrentURL()
-	if publicURL == "" {
-		publicURL = s.getPublicURL(r)
-	}
 	writeJSON(w, map[string]string{"token": token, "url": fmt.Sprintf("%s/i/%s", publicURL, token)})
 }

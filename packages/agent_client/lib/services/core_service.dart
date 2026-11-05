@@ -154,40 +154,32 @@ class InceptionResponse {
   }
 }
 
+/// An OOBI made for one counterparty. It names a pairwise identifier and an
+/// address the counterparty may be given: a relay address, or on a Direct-mode
+/// agent its direct listener. It carries no root key and no direct address of
+/// this agent's own (ADR-048 §6), so there is no `public_key`, `base_url`,
+/// `tunnel_*` or `endpoint_*` to read.
 class OobiResponse {
   final String oobiUrl;
+
+  /// The pairwise identifier made for this counterparty, never the root.
   final String aid;
-  final String publicKey;
-  final String baseUrl;
-  final bool tunnelActive;
-  final String tunnelProvider;
-  final String tunnelError;
-  final String endpointUrl;
-  final String endpointSource;
+
+  /// The relay address the OOBI names; empty when it names a Direct-mode
+  /// listener instead.
+  final String relayUrl;
 
   OobiResponse({
     required this.oobiUrl,
     required this.aid,
-    required this.publicKey,
-    required this.baseUrl,
-    this.tunnelActive = false,
-    this.tunnelProvider = '',
-    this.tunnelError = '',
-    this.endpointUrl = '',
-    this.endpointSource = '',
+    this.relayUrl = '',
   });
 
   factory OobiResponse.fromJson(Map<String, dynamic> json) {
     return OobiResponse(
       oobiUrl: json['oobi_url'] ?? '',
       aid: json['aid'] ?? '',
-      publicKey: json['public_key'] ?? '',
-      baseUrl: json['base_url'] ?? '',
-      tunnelActive: json['tunnel_active'] == true,
-      tunnelProvider: json['tunnel_provider'] ?? '',
-      tunnelError: json['tunnel_error'] ?? '',
-      endpointUrl: json['endpoint_url'] ?? '',
-      endpointSource: json['endpoint_source'] ?? '',
+      relayUrl: json['relay_url'] ?? '',
     );
   }
 }
@@ -1019,9 +1011,16 @@ class CoreService {
         what: 'the founding of this identity');
   }
 
-  Future<OobiResponse> getOobi({String? action}) async {
+  /// [counterparty] is any stable label for who the OOBI is for (a contact id,
+  /// a hash of a name). Asking again with the same label gives back the
+  /// identifier made the first time instead of making another.
+  Future<OobiResponse> getOobi({String? action, String? counterparty}) async {
+    final query = <String, String>{
+      if (action != null) 'action': action,
+      if (counterparty != null) 'counterparty': counterparty,
+    };
     final uri = Uri.parse('$baseUrl/api/oobi').replace(
-      queryParameters: action != null ? {'action': action} : null,
+      queryParameters: query.isEmpty ? null : query,
     );
     final response = await _client.get(uri);
     if (response.statusCode == 200) {

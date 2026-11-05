@@ -336,6 +336,21 @@ func DirectListenAddr() (host string, port int, ok bool) {
 	return h, n, true
 }
 
+// DirectAdvertisedURL is the base URL of the direct listener as a counterparty
+// would be given it ("http://192.0.2.4:5060"), and false when none is configured.
+// The path under it is the listener's, not the root surface's.
+func DirectAdvertisedURL() (string, bool) {
+	host, port, ok := DirectListenAddr()
+	if !ok {
+		return "", false
+	}
+	h := directAdvertiseIP(host)
+	if h == "" {
+		return "", false
+	}
+	return "http://" + net.JoinHostPort(h, strconv.Itoa(port)), true
+}
+
 // directAdvertiseIP is the address a counterparty is given for a direct listener
 // bound to host: the host itself when it names one interface, this machine's LAN
 // address when it names all of them (0.0.0.0).

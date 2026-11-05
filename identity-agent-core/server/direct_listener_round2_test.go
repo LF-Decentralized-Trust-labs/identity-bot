@@ -17,6 +17,9 @@ import (
 func askDirectHTML(h http.Handler, path string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest("GET", path, nil)
 	req.Header.Set("Accept", "text/html")
+	// The root router answers the root identifier's page to its owner only.
+	req.RemoteAddr = "127.0.0.1:4000"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec

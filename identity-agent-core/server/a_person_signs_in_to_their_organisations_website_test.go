@@ -37,6 +37,7 @@ type aWebsiteWorld struct {
 func anOrganisationWithAWebsite(t *testing.T, policy asset.EnrollmentPolicy) *aWebsiteWorld {
 	t.Helper()
 	s, _ := foundedWith(t, agentWithDerivedIdentity(t), nil, 0)
+	s.DeclaredEntityType = "organization"
 	return aWebsiteFor(t, s, policy)
 }
 

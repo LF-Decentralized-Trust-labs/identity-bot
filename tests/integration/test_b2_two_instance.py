@@ -61,21 +61,29 @@ def test_a_and_b_have_different_aids(identity_a, identity_b):
 
 @pytest.fixture(scope="module")
 def oobi_a(agent_a, identity_a):
-    """OOBI URL for instance A (points to A's /public/oobi/{aid})."""
-    r = requests.get(f"{agent_a}/api/oobi", timeout=TIMEOUT)
-    assert r.status_code == 200, f"OOBI endpoint failed: {r.text}"
-    body = r.json()
-    url = body.get("oobi_url", "")
-    assert url, "OOBI URL is empty"
+    """OOBI URL for instance A's root identifier (its /public/oobi/{aid}).
+
+    /api/oobi no longer names the root: it makes a pairwise identifier for one
+    counterparty, at a relay address or a Direct-mode listener, and refuses
+    with 409 when it has neither. This suite proves KERI interoperability, which
+    is about resolving and verifying a log, so it reads the root identifier's
+    OOBI directly. Both instances run on one machine, where a request from the
+    other is the machine's owner; a counterparty off the machine is refused the
+    root (tests/integration/test_b1_identity.py covers /api/oobi itself).
+    """
+    url = f"{agent_a}/public/oobi/{identity_a.aid}"
+    r = requests.get(url, timeout=TIMEOUT)
+    assert r.status_code == 200, f"A's root OOBI was not served: {r.status_code} {r.text}"
     return url
 
 
 @pytest.fixture(scope="module")
 def oobi_b(agent_b, identity_b):
-    """OOBI URL for instance B."""
-    r = requests.get(f"{agent_b}/api/oobi", timeout=TIMEOUT)
-    assert r.status_code == 200
-    return r.json()["oobi_url"]
+    """OOBI URL for instance B's root identifier."""
+    url = f"{agent_b}/public/oobi/{identity_b.aid}"
+    r = requests.get(url, timeout=TIMEOUT)
+    assert r.status_code == 200, f"B's root OOBI was not served: {r.status_code} {r.text}"
+    return url
 
 
 def test_oobi_a_contains_aid_a(oobi_a, identity_a):
@@ -84,6 +92,17 @@ def test_oobi_a_contains_aid_a(oobi_a, identity_a):
 
 def test_oobi_b_contains_aid_b(oobi_b, identity_b):
     assert identity_b.aid in oobi_b
+
+
+def test_a_counterparty_oobi_is_pairwise_or_refused(agent_a, agent_b, identity_a, identity_b):
+    """What an instance hands a counterparty is never its root identifier."""
+    for agent, root in ((agent_a, identity_a.aid), (agent_b, identity_b.aid)):
+        r = requests.get(f"{agent}/api/oobi", timeout=TIMEOUT)
+        if r.status_code == 409:
+            continue  # neither a relay address nor Direct mode: refusing is correct
+        assert r.status_code == 200, r.text
+        assert r.json()["aid"] != root
+        assert root not in r.json()["oobi_url"]
 
 
 # ---------------------------------------------------------------------------

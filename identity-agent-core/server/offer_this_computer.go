@@ -132,6 +132,11 @@ func (s *CoreServer) handleOfferThisComputer(w http.ResponseWriter, r *http.Requ
 		// It has to come from here. The screen talks to this agent over
 		// loopback, and loopback is the one address that is useless to another
 		// device — a QR carrying it would send the phone to itself.
+		//
+		// This is the one place a direct address is the right one to hand out:
+		// the route is closed to everything but this computer's own screen
+		// (isLocalOwnerRequest), and the phone that scans it is the owner's own
+		// device on the owner's network, not a counterparty (ADR-048 §6).
 		"address": s.getPublicURL(r),
 	})
 }

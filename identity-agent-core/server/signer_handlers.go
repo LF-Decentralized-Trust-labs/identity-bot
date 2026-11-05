@@ -48,9 +48,10 @@ func (s *CoreServer) HandleCreateSignerInvite(w http.ResponseWriter, r *http.Req
 }
 
 func (s *CoreServer) handleCreateSignerInvite(w http.ResponseWriter, r *http.Request) {
-	publicURL := s.EndpointService.CurrentURL()
-	if publicURL == "" {
-		publicURL = s.getPublicURL(r)
+	publicURL, ok := s.relayAddressBase(r)
+	if !ok {
+		writeNoRelayAddress(w)
+		return
 	}
 	// Mintable BEFORE the identity exists, which is the point.
 	//

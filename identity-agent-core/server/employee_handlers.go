@@ -49,9 +49,10 @@ func (s *CoreServer) handleCreateEmployeeInvite(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	publicURL := s.EndpointService.CurrentURL()
-	if publicURL == "" {
-		publicURL = s.getPublicURL(r)
+	publicURL, ok := s.relayAddressBase(r)
+	if !ok {
+		writeNoRelayAddress(w)
+		return
 	}
 
 	// Resolve the target portal (asset) → its SiteAID + OOBI.

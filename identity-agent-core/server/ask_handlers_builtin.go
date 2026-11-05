@@ -218,8 +218,9 @@ func (s *CoreServer) sendIntroduction(aid, oobiURL string, actionCode int) {
 	if err != nil || ourIdentity == nil {
 		return
 	}
-	publicURL := s.EndpointService.CurrentURL()
-	if publicURL == "" {
+	// An introduction goes to a counterparty: it names a relay address or none.
+	publicURL, ok := s.heldRelayBase()
+	if !ok {
 		return
 	}
 	fields, derr := declaredDisclosure(actionCode)

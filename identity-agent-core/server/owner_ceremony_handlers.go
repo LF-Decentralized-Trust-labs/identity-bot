@@ -247,9 +247,9 @@ func (s *CoreServer) handleAbandonCeremony(w http.ResponseWriter, r *http.Reques
 // incoming owner's agent already knows how to walk that path, and a second
 // parallel invite format would be one more thing to keep in step.
 func (s *CoreServer) mintOwnerInvite(r *http.Request, name string) (token, url string, err error) {
-	publicURL := s.EndpointService.CurrentURL()
-	if publicURL == "" {
-		publicURL = s.getPublicURL(r)
+	publicURL, ok := s.relayAddressBase(r)
+	if !ok {
+		return "", "", errNoRelayAddress
 	}
 	identity, err := s.DataStore.GetIdentity()
 	if err != nil || identity == nil {

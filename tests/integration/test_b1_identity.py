@@ -125,22 +125,55 @@ def test_kel_first_event_is_inception(agent_a, identity_a):
 # OOBI generation
 # ---------------------------------------------------------------------------
 
-def test_oobi_returns_200(agent_a, identity_a):
+def _oobi_or_skip(agent_a):
+    """GET /api/oobi, or skip when this instance has nothing it may name.
+
+    An OOBI handed out names a relay address, or on a Direct-mode agent its
+    direct listener (AGENT_DIRECT_LISTEN_ADDR), and never this agent's own
+    address. An instance with neither answers 409, which is its correct answer
+    and not a failure.
+    """
     r = requests.get(f"{agent_a}/api/oobi", timeout=TIMEOUT)
-    assert r.status_code == 200
+    if r.status_code == 409:
+        pytest.skip("instance A has no relay address and is not in Direct mode: it refuses to make an OOBI")
+    return r
 
 
-def test_oobi_contains_aid(agent_a, identity_a):
-    body = requests.get(f"{agent_a}/api/oobi", timeout=TIMEOUT).json()
-    assert body.get("aid") == identity_a.aid
+def test_oobi_is_made_or_refused_for_want_of_an_address(agent_a, identity_a):
+    r = requests.get(f"{agent_a}/api/oobi", timeout=TIMEOUT)
+    assert r.status_code in (200, 409), f"{r.status_code} {r.text}"
+    if r.status_code == 409:
+        # The refusal hands out neither the root identifier nor a direct address.
+        assert identity_a.aid not in r.text
+        assert "/public/oobi/" not in r.text
 
 
-def test_oobi_url_contains_aid(agent_a, identity_a):
-    body = requests.get(f"{agent_a}/api/oobi", timeout=TIMEOUT).json()
-    oobi_url = body.get("oobi_url", "")
-    assert identity_a.aid in oobi_url, (
-        f"AID not in OOBI URL: {oobi_url}"
-    )
+def test_oobi_names_a_pairwise_identifier_never_the_root(agent_a, identity_a):
+    body = _oobi_or_skip(agent_a).json()
+    assert body.get("aid"), body
+    assert body["aid"] != identity_a.aid, "an OOBI handed out named the root identifier"
+    assert identity_a.aid not in body.get("oobi_url", "")
+
+
+def test_oobi_url_contains_the_pairwise_aid(agent_a, identity_a):
+    body = _oobi_or_skip(agent_a).json()
+    assert body["aid"] in body.get("oobi_url", ""), f"AID not in OOBI URL: {body}"
+
+
+def test_oobi_response_carries_no_root_key_or_direct_address(agent_a):
+    body = _oobi_or_skip(agent_a).json()
+    for gone in ("public_key", "base_url", "endpoint_url", "endpoint_source",
+                 "tunnel_active", "tunnel_provider", "tunnel_error"):
+        assert gone not in body, f"/api/oobi still returns {gone}"
+
+
+def test_oobi_for_the_same_counterparty_reuses_their_identifier(agent_a):
+    first = _oobi_or_skip(agent_a)
+    q = {"counterparty": "integration-test-counterparty"}
+    one = requests.get(f"{agent_a}/api/oobi", params=q, timeout=TIMEOUT).json()
+    two = requests.get(f"{agent_a}/api/oobi", params=q, timeout=TIMEOUT).json()
+    assert one["aid"] == two["aid"]
+    assert first.json()["aid"] != one["aid"]
 
 
 def test_public_oobi_endpoint_reachable(agent_a, identity_a):
