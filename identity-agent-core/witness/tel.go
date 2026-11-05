@@ -76,6 +76,17 @@ type TELHead struct {
 // (SEAM-13 §5 T-1). The route answers 404 {"error":"no_tel"}.
 var ErrNoTEL = errors.New("no_tel")
 
+// ErrBadSubmission is a registry-event submission that is wrong whoever it is
+// for and whether or not this witness holds a log for the issuer: no events,
+// too many, or not base64. ErrTELNotAccepted is every other way a submission
+// can fail, which is the same answer for an issuer this witness holds no log
+// for and for one it does (a route open to anybody must not say which
+// identities a witness witnesses).
+var (
+	ErrBadSubmission  = errors.New("bad submission")
+	ErrTELNotAccepted = errors.New("not accepted")
+)
+
 // NotAnchoredError is an event the issuer's key log does not seal: the
 // evidence that whoever supplied it is not the issuer's witness-held record
 // (SEAM-13 §5 T-3). It is a different thing from an event that is malformed, or
@@ -227,19 +238,24 @@ func AnchoredTEL(issuer string, kelRaw [][]byte, raws [][]byte, held []TELEvent)
 // nothing. Returns how many events were new.
 func (s *Service) ReceiveTEL(issuerAID string, rawB64 []string) (int, error) {
 	if len(rawB64) == 0 || len(rawB64) > MaxTELEventsPerSubmission {
-		return 0, fmt.Errorf("rejected: a submission is between 1 and %d events", MaxTELEventsPerSubmission)
+		return 0, fmt.Errorf("%w: a submission is between 1 and %d events", ErrBadSubmission, MaxTELEventsPerSubmission)
 	}
-	kelRaw, err := s.heldKelRaw(issuerAID)
-	if err != nil {
-		return 0, err
-	}
+	// Everything that does not depend on what this witness holds is checked
+	// before anything that does.
 	raws := make([][]byte, 0, len(rawB64))
 	for i, b := range rawB64 {
 		raw, err := base64.StdEncoding.DecodeString(b)
 		if err != nil {
-			return 0, fmt.Errorf("rejected: registry event %d is not base64", i)
+			return 0, fmt.Errorf("%w: registry event %d is not base64", ErrBadSubmission, i)
 		}
 		raws = append(raws, raw)
+	}
+	kelRaw, err := s.heldKelRaw(issuerAID)
+	if err != nil {
+		if err.Error() == "not_witnessing" {
+			return 0, ErrTELNotAccepted
+		}
+		return 0, err
 	}
 	s.telMu.Lock()
 	defer s.telMu.Unlock()
@@ -249,7 +265,7 @@ func (s *Service) ReceiveTEL(issuerAID string, rawB64 []string) (int, error) {
 	}
 	fresh, err := AnchoredTEL(issuerAID, kelRaw, raws, held)
 	if err != nil {
-		return 0, fmt.Errorf("rejected: %w", err)
+		return 0, fmt.Errorf("%w: %v", ErrTELNotAccepted, err)
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	for _, ev := range fresh {
