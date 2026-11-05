@@ -102,7 +102,7 @@ func (s *CoreServer) mountAssetRoutes(r chi.Router) {
 		r.Put("/{id}/policy", s.assetHandler.HandleUpdatePolicy)
 		r.Get("/{id}/invites", s.assetHandler.HandleListInvites)
 		r.Post("/{id}/invites", s.assetHandler.HandleCreateInvite)
-		r.Delete("/{id}/invites/{token}", s.assetHandler.HandleRevokeInvite)
+		r.Delete("/{id}/invites/{invite}", s.assetHandler.HandleRevokeInvite)
 		r.Get("/{id}/requests", s.assetHandler.HandleListRequests)
 		r.Post("/{id}/requests", s.assetHandler.HandleSubmitRequest)
 		r.Post("/{id}/requests/{reqID}/approve", s.assetHandler.HandleApproveRequest)
@@ -121,7 +121,7 @@ func (s *CoreServer) mountAssetRoutes(r chi.Router) {
 	r.Route("/enrolments", func(r chi.Router) {
 		r.Get("/", s.assetHandler.HandleListEnrolments)
 		r.Post("/", s.assetHandler.HandleCreateEnrolment)
-		r.Delete("/{token}", s.assetHandler.HandleRevokeEnrolment)
+		r.Delete("/{enrolment}", s.assetHandler.HandleRevokeEnrolment)
 	})
 	r.Post("/enrol", s.assetHandler.HandleEnrol)
 

@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"time"
 
+	"identity-agent-core/enrolsecret"
+
 	"github.com/go-chi/chi/v5"
 )
 
@@ -18,8 +20,9 @@ func (h *Handler) HandleCreateEmployeeInvite(w http.ResponseWriter, r *http.Requ
 		MaxUses int    `json:"max_uses"`
 	}
 	json.NewDecoder(r.Body).Decode(&body)
+	code := genID()
 	inv := EmployeeInvite{
-		Token:     genID(),
+		Token:     code,
 		Role:      body.Role,
 		Label:     body.Label,
 		MaxUses:   body.MaxUses,
@@ -29,6 +32,7 @@ func (h *Handler) HandleCreateEmployeeInvite(w http.ResponseWriter, r *http.Requ
 		h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusInternalServerError)
 		return
 	}
+	inv.ID = enrolsecret.Digest(code)
 	h.writeJSON(w, inv, http.StatusCreated)
 }
 
@@ -37,8 +41,8 @@ func (h *Handler) HandleListEmployeeInvites(w http.ResponseWriter, r *http.Reque
 }
 
 func (h *Handler) HandleRevokeEmployeeInvite(w http.ResponseWriter, r *http.Request) {
-	token := chi.URLParam(r, "token")
-	h.writeRevokeResult(w, h.Store.RevokeEmployeeInvite(token), func() { h.writeJSON(w, map[string]string{"status": "revoked"}, http.StatusOK) })
+	id := chi.URLParam(r, "invite")
+	h.writeRevokeResult(w, h.Store.RevokeEmployeeInvite(id), func() { h.writeJSON(w, map[string]string{"status": "revoked"}, http.StatusOK) })
 }
 
 // HandleGetEmployeeInviteInfo is the unauthenticated lookup the accepting employee's

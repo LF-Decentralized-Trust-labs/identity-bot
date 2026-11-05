@@ -4,10 +4,12 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
 	"identity-agent-core/asset"
+	"identity-agent-core/enrolsecret"
 	"identity-agent-core/login"
 
 	"github.com/go-chi/chi/v5"
@@ -22,7 +24,7 @@ func (s *CoreServer) mountEmployeeRoutes(r chi.Router) {
 		r.Get("/", s.assetHandler.HandleListEmployees)
 		r.Get("/invites", s.assetHandler.HandleListEmployeeInvites)
 		r.Post("/invites", s.handleCreateEmployeeInvite)
-		r.Delete("/invites/{token}", s.assetHandler.HandleRevokeEmployeeInvite)
+		r.Delete("/invites/{invite}", s.assetHandler.HandleRevokeEmployeeInvite)
 		// Public: the accepting employee's agent looks up + redeems here during add_employee (t=3).
 		r.Get("/invites/{token}", s.assetHandler.HandleGetEmployeeInviteInfo)
 		r.Post("/invites/{token}/redeem", s.handleRedeemEmployeeInvite)
@@ -150,13 +152,18 @@ func (s *CoreServer) handleRedeemEmployeeInvite(w http.ResponseWriter, r *http.R
 		http.Error(w, "pairwise_aid required", http.StatusBadRequest)
 		return
 	}
-	inv, ok := s.assetHandler.Store.GetEmployeeInvite(token)
-	if !ok || inv.Revoked {
+	// Check and spend in one locked step; handed back below if the redeem fails.
+	inv, rerr := s.assetHandler.Store.ReserveEmployeeInvite(token, false)
+	switch {
+	case rerr == nil:
+	case errors.Is(rerr, asset.ErrInviteNotFound):
 		http.Error(w, "invalid invite", http.StatusBadRequest)
 		return
-	}
-	if inv.MaxUses > 0 && inv.UseCount >= inv.MaxUses {
+	case errors.Is(rerr, asset.ErrInviteExhausted):
 		http.Error(w, "invite exhausted", http.StatusBadRequest)
+		return
+	default:
+		http.Error(w, "the invite could not be redeemed", http.StatusInternalServerError)
 		return
 	}
 	emp := asset.Employee{
@@ -164,14 +171,14 @@ func (s *CoreServer) handleRedeemEmployeeInvite(w http.ResponseWriter, r *http.R
 		Name:        body.Name,
 		Role:        inv.Role,
 		Status:      "pending",
-		InviteToken: token,
+		InviteToken: enrolsecret.Digest(token), // the roster keeps no code
 		OOBI:        body.OOBI,
 	}
 	if err := s.assetHandler.Store.UpsertEmployee(emp); err != nil {
+		_ = s.assetHandler.Store.ReleaseEmployeeInvite(token)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	_ = s.assetHandler.Store.IncrementEmployeeInviteUse(token)
 	writeJSON(w, map[string]string{"status": "pending"})
 }
 

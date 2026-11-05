@@ -523,8 +523,16 @@ func New(cfg Config) (*CoreServer, error) {
 	if err := s.initLoginHandler(); err != nil {
 		log.Printf("[identity-agent-core] login handler init failed (non-fatal): %v", err)
 	}
-	if err := s.initAssetHandler(); err != nil {
+	if err := s.initAssetHandler(); errors.Is(err, asset.ErrSecretsNotMigrated) {
+		// Clear secrets would stay on disk: do not run.
+		return nil, err
+	} else if err != nil {
 		log.Printf("[identity-agent-core] ERROR: assets are unavailable until this is fixed; a file the asset store needs could not be read, and nothing was changed: %v", err)
+	}
+	// A ceremony record from an earlier version held its invite codes in the
+	// clear: carried to digests now, and the server does not start if it cannot be.
+	if err := s.migrateCeremony(); err != nil {
+		return nil, err
 	}
 	// What each add-on readies once the core's stores, vault and asset
 	// handler are made.
@@ -924,7 +932,7 @@ func (s *CoreServer) buildRouter() chi.Router {
 func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) chi.Router {
 	r := chi.NewRouter()
 
-	r.Use(middleware.Logger)
+	r.Use(logRequests)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
 	// Before anything else looks at the request: note where it arrived, if a

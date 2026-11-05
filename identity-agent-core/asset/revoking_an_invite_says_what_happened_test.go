@@ -6,6 +6,8 @@ import (
 	"os"
 	"testing"
 
+	"identity-agent-core/enrolsecret"
+
 	"github.com/go-chi/chi/v5"
 )
 
@@ -14,8 +16,8 @@ import (
 // up, and a 5xx when the withdrawal could not be saved.
 func revokeRouter(h *Handler) http.Handler {
 	r := chi.NewRouter()
-	r.Delete("/assets/{id}/invites/{token}", h.HandleRevokeInvite)
-	r.Delete("/employees/invites/{token}", h.HandleRevokeEmployeeInvite)
+	r.Delete("/assets/{id}/invites/{invite}", h.HandleRevokeInvite)
+	r.Delete("/employees/invites/{invite}", h.HandleRevokeEmployeeInvite)
 	return r
 }
 
@@ -43,14 +45,14 @@ func TestRevokingAnInviteSaysWhatHappened(t *testing.T) {
 		name, path string
 		want       int
 	}{
-		{"asset: unknown", "/assets/a1/invites/nope", 404},
-		{"asset: live", "/assets/a1/invites/live", 200},
-		{"asset: again", "/assets/a1/invites/live", 409},
-		{"asset: used up", "/assets/a1/invites/spent", 409},
-		{"employee: unknown", "/employees/invites/nope", 404},
-		{"employee: live", "/employees/invites/elive", 200},
-		{"employee: again", "/employees/invites/elive", 409},
-		{"employee: used up", "/employees/invites/espent", 409},
+		{"asset: unknown", "/assets/a1/invites/" + enrolsecret.Digest("nope"), 404},
+		{"asset: live", "/assets/a1/invites/" + enrolsecret.Digest("live"), 200},
+		{"asset: again", "/assets/a1/invites/" + enrolsecret.Digest("live"), 409},
+		{"asset: used up", "/assets/a1/invites/" + enrolsecret.Digest("spent"), 409},
+		{"employee: unknown", "/employees/invites/" + enrolsecret.Digest("nope"), 404},
+		{"employee: live", "/employees/invites/" + enrolsecret.Digest("elive"), 200},
+		{"employee: again", "/employees/invites/" + enrolsecret.Digest("elive"), 409},
+		{"employee: used up", "/employees/invites/" + enrolsecret.Digest("espent"), 409},
 	}
 	for _, c := range cases {
 		if got := del(r, c.path); got != c.want {
@@ -81,7 +83,7 @@ func TestARevokeThatCannotBeSavedIsNotReportedAsRevoked(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, p := range []string{"/assets/a1/invites/live", "/employees/invites/elive"} {
+	for _, p := range []string{"/assets/a1/invites/" + enrolsecret.Digest("live"), "/employees/invites/" + enrolsecret.Digest("elive")} {
 		if got := del(r, p); got != http.StatusInternalServerError {
 			t.Errorf("DELETE %s with an unwritable store = %d, want 500", p, got)
 		}
@@ -105,16 +107,16 @@ func TestRevokingAnotherAssetsInviteLeavesItLive(t *testing.T) {
 	r := revokeRouter(&Handler{Store: s})
 	s.CreateInvite(AssetInvite{Token: "theirs", AssetID: "a2"})
 
-	if got := del(r, "/assets/a1/invites/theirs"); got != http.StatusNotFound {
+	if got := del(r, "/assets/a1/invites/"+enrolsecret.Digest("theirs")); got != http.StatusNotFound {
 		t.Fatalf("revoking a2's code through a1 = %d, want 404", got)
 	}
 	if inv, _ := s.GetInvite("theirs"); inv.Revoked {
 		t.Fatal("a2's code was revoked through a1")
 	}
-	if got := del(r, "/assets/a1/invites/nope"); got != http.StatusNotFound {
+	if got := del(r, "/assets/a1/invites/"+enrolsecret.Digest("nope")); got != http.StatusNotFound {
 		t.Fatalf("unknown code = %d, want 404", got)
 	}
-	if got := del(r, "/assets/a2/invites/theirs"); got != http.StatusOK {
+	if got := del(r, "/assets/a2/invites/"+enrolsecret.Digest("theirs")); got != http.StatusOK {
 		t.Fatalf("revoking through its own asset = %d, want 200", got)
 	}
 }

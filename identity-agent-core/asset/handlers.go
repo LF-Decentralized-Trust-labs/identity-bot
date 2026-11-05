@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"identity-agent-core/enrolsecret"
 	"net/http"
 	"time"
 
@@ -321,7 +322,11 @@ func (h *Handler) HandleCreateInvite(w http.ResponseWriter, r *http.Request) {
 		UseCount:  0,
 		CreatedAt: time.Now().UTC(),
 	}
-	h.Store.CreateInvite(inv)
+	if err := h.Store.CreateInvite(inv); err != nil {
+		h.writeJSON(w, map[string]string{"error": "the invite could not be saved"}, http.StatusInternalServerError)
+		return
+	}
+	inv.ID = enrolsecret.Digest(token)
 	h.writeJSON(w, inv, http.StatusCreated)
 }
 
@@ -332,8 +337,8 @@ func (h *Handler) HandleListInvites(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) HandleRevokeInvite(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	token := chi.URLParam(r, "token")
-	h.writeRevokeResult(w, h.Store.RevokeInvite(id, token), func() { h.writeJSON(w, map[string]bool{"revoked": true}, http.StatusOK) })
+	inviteID := chi.URLParam(r, "invite")
+	h.writeRevokeResult(w, h.Store.RevokeInvite(id, inviteID), func() { h.writeJSON(w, map[string]bool{"revoked": true}, http.StatusOK) })
 }
 
 // writeRevokeResult turns the outcome of a revoke into the status a client can
@@ -365,17 +370,20 @@ func (h *Handler) HandleGetInviteInfo(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleRedeemInvite(w http.ResponseWriter, r *http.Request) {
 	token := chi.URLParam(r, "token")
 	// TODO: enforce policy.RequiredAAL >= asset.Policy.RequiredAAL before granting membership.
-	inv, ok := h.Store.GetInvite(token)
-	if !ok || inv.Revoked {
+	// Check and spend in one locked step.
+	switch _, err := h.Store.RedeemInvite(token); {
+	case err == nil:
+	case errors.Is(err, ErrInviteNotFound):
 		h.writeJSON(w, map[string]string{"error": "invalid"}, http.StatusBadRequest)
 		return
-	}
-	if inv.usedUp() {
+	case errors.Is(err, ErrInviteExhausted):
 		h.writeJSON(w, map[string]string{"error": "exhausted"}, http.StatusBadRequest)
+		return
+	default:
+		h.writeJSON(w, map[string]string{"error": "the invite could not be redeemed"}, http.StatusInternalServerError)
 		return
 	}
 	// create member stub (pairwise from login context later)
-	h.Store.IncrementInviteUse(token)
 	h.writeJSON(w, map[string]string{"status": "redeemed"}, http.StatusOK)
 }
 
