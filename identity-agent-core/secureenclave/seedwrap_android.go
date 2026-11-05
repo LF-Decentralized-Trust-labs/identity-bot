@@ -7,6 +7,6 @@ package secureenclave
 // cannot be reached from Go. See seedwrap_host.go for what the core insists on.
 func newPlatformSeedWrapper() SeedWrapper { return declaredHostSeedWrapper() }
 
-// platformUnwrappedReason is non-empty only for an app that registered no
-// wrapper at all.
-func platformUnwrappedReason() string { return phoneUnwrappedReason(declaredSeedWrapHost() != nil) }
+// platformIsAPhone: an app that registers no wrapper is refused in a production
+// build (noSeedWrapHostWhy); there is no old-app exemption.
+func platformIsAPhone() bool { return true }

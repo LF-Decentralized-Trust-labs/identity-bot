@@ -110,17 +110,6 @@ func TestNoAppWrapperMeansNoWrapper(t *testing.T) {
 	}
 }
 
-// Only an app that registered nothing is excused from wrapping; one that
-// registered a wrapper and has no working hardware is refused.
-func TestOnlyAnAppWithNoWrapperMayHoldASeedUnwrapped(t *testing.T) {
-	if phoneUnwrappedReason(false) == "" {
-		t.Fatal("an old app with no wrapper has no stated reason")
-	}
-	if phoneUnwrappedReason(true) != "" {
-		t.Fatal("an app with a wrapper was excused from using it")
-	}
-}
-
 // leaky is a wrapper that "wraps" by returning the seed inside its output.
 type leaky struct{}
 
