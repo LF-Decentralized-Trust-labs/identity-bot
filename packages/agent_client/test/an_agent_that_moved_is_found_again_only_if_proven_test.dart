@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:agent_client/config/agent_config.dart';
 import 'package:agent_client/crypto/endpoint_record.dart';
+import 'package:agent_client/services/asking_to_act_for_an_identity.dart';
 import 'package:agent_client/services/finding_an_agent_that_moved.dart';
 import 'package:agent_client/services/the_newest_signed_address.dart';
 import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
@@ -181,6 +182,22 @@ void main() {
       WhichHalfThisAppIsRunning.now();
 
   group('where the witnesses are learned', () {
+    test('joining keeps the witnesses the verified log named, once, with an address',
+        () async {
+      SharedPreferences.setMockInitialValues({});
+      await rememberWitnessesFoundIn(_aid, const [
+        NamedWitness(key: 'B1', url: _witness),
+        NamedWitness(key: 'B2'), // no address held: nothing to keep
+        NamedWitness(key: 'B1', url: _witness),
+      ]);
+      await rememberWitnessesFoundIn(_aid, const [
+        NamedWitness(key: 'B3', url: 'ftp://nope.example.test'),
+      ]);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getStringList('witness_bases/$_aid'),
+          [canonicalOriginOf(_witness)]);
+    });
+
     void aMovedOrgAtNew() => world
       ..alive.add(_new)
       ..keyHistoryProves[_new] = _aid

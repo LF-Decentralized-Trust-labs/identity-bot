@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../crypto/endpoint_record.dart';
+import 'asking_to_act_for_an_identity.dart';
 import 'the_owner_at_this_computer.dart';
 
 /// Where an organisation's signed endpoint records come from (ADR-062).
@@ -108,6 +109,24 @@ String _witnessKey(String aid) => 'witness_bases/$aid';
 Future<void> rememberWitnessesOf(String aid, List<String> bases) async {
   final prefs = await SharedPreferences.getInstance();
   await prefs.setStringList(_witnessKey(aid), bases);
+}
+
+/// Keeps the witnesses a verified key log named, at the addresses this
+/// computer's core holds for them, alongside any already remembered for [aid].
+/// Called when this computer joins an organisation, the one moment its key log
+/// has just been verified and the addresses are in hand. Nothing is removed and
+/// nothing without an address is kept.
+Future<void> rememberWitnessesFoundIn(
+    String aid, List<NamedWitness> found) async {
+  final prefs = await SharedPreferences.getInstance();
+  final kept = <String>[
+    ...?prefs.getStringList(_witnessKey(aid)),
+  ];
+  for (final w in found) {
+    final origin = canonicalOriginOf(w.url.trim());
+    if (origin != null && !kept.contains(origin)) kept.add(origin);
+  }
+  await prefs.setStringList(_witnessKey(aid), kept);
 }
 
 /// Reads the record source for one organisation from every lead this computer
