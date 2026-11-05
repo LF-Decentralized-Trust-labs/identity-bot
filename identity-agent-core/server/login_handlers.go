@@ -19,6 +19,8 @@ import (
 	"identity-agent-core/watcher"
 
 	"github.com/go-chi/chi/v5"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 func (s *CoreServer) mountLoginRoutes(r chi.Router) {
@@ -122,8 +124,7 @@ func (s *CoreServer) handleCreateAssetChallenge(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	jsonreply.Write(w, http.StatusOK, map[string]string{
 		"session_token": token,
 		"qr_url":        qrURL,
 		// Held by the browser that started this, and by nothing else.
@@ -170,8 +171,7 @@ func (s *CoreServer) handleChallengeBundleServe(w http.ResponseWriter, r *http.R
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(b)
+	jsonreply.Write(w, http.StatusOK, b)
 }
 
 // mount the /i route at root (called from buildRouter)
@@ -272,8 +272,7 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 		st["member_info"] = info
 	}
 	s.setChallengeStatus(token, st)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+	jsonreply.Write(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // memberInfoFor returns the admitting membership resolver's description of a
@@ -545,6 +544,5 @@ func (s *CoreServer) handleChallengeStatus(w http.ResponseWriter, r *http.Reques
 		// it says so.
 		st["session_binding"] = "none"
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(st)
+	jsonreply.Write(w, http.StatusOK, st)
 }
