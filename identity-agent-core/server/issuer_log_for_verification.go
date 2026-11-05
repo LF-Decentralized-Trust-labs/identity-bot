@@ -65,18 +65,21 @@ func ownLogForVerification(events []store.EventRecord) []map[string]interface{} 
 // against that key log before it is used.
 //
 // The second result is set when a witness served events the issuer's key log
-// does not seal; the caller puts it in the verification result with fold.
-func (s *CoreServer) issuanceLogForVerification(acdcBody map[string]interface{}, issuerKel []map[string]interface{}) ([]string, *telDuplicity) {
+// does not seal; the caller puts it in the verification result with fold. The
+// third is the issuer's key log to check the credential against: the one given,
+// or a longer one verified while asking the witnesses, which the caller must
+// use in place of the one it passed.
+func (s *CoreServer) issuanceLogForVerification(acdcBody map[string]interface{}, issuerKel []map[string]interface{}) ([]string, *telDuplicity, []map[string]interface{}) {
 	said, _ := acdcBody["d"].(string)
 	registry, _ := acdcBody["ri"].(string)
 	if said == "" || registry == "" {
-		return nil, nil
+		return nil, nil, issuerKel
 	}
 	events, err := s.DataStore.GetCredentialTEL(registry, said)
 	if err != nil || len(events) == 0 {
 		issuer, _ := acdcBody["i"].(string)
 		if issuer == "" || len(issuerKel) == 0 {
-			return nil, nil
+			return nil, nil, issuerKel
 		}
 		return s.registryLogFromWitnesses(telClient, issuer, registry, said, issuerKel)
 	}
@@ -84,7 +87,7 @@ func (s *CoreServer) issuanceLogForVerification(acdcBody map[string]interface{},
 	for _, ev := range events {
 		out = append(out, ev.RawB64)
 	}
-	return out, nil
+	return out, nil, issuerKel
 }
 
 // issuerVerdict folds what is known of the issuer's log into the engine's

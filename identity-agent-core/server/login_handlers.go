@@ -458,7 +458,9 @@ func (s *CoreServer) verifyPresentedCredentialACDC(ctx context.Context, acdcJson
 	if issuerKelEvents == nil {
 		return false, issuerAid, "issuer KEL not found"
 	}
-	registryLog, duplicity := s.issuanceLogForVerification(acdcBody, issuerKelEvents)
+	var registryLog []string
+	var duplicity *telDuplicity
+	registryLog, duplicity, issuerKelEvents = s.issuanceLogForVerification(acdcBody, issuerKelEvents)
 	result, err := s.KeriDriver.VerifyCredential(&drivers.DriverVerifyCredentialRequest{
 		AcdcJson:           acdcJsonB64,
 		IssuerKelEvents:    issuerKelEvents,

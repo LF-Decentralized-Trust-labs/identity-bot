@@ -215,9 +215,17 @@ type CoreServer struct {
 	// it a single step.
 	endpointRecordMu   sync.Mutex
 	witnessLimiterOnce sync.Once
-	CallerResolver     CallerResolver // resolves endpoint caller identity/scopes; nil = loopback default (delegated-identity injects the real one)
-	mu                 sync.Mutex
-	running            bool
+	// telAlarm remembers which waiting revocations have been reported.
+	telAlarm struct {
+		sync.Mutex
+		said map[string]bool
+	}
+	// telPushRetryGap overrides the gap before a failed registry event is
+	// tried again (tests); nil is telPushRetryGap.
+	telPushRetryGap func(attempts int) time.Duration
+	CallerResolver  CallerResolver // resolves endpoint caller identity/scopes; nil = loopback default (delegated-identity injects the real one)
+	mu              sync.Mutex
+	running         bool
 	// anchorStop ends the record's anchoring when the server stops.
 	anchorStop chan struct{}
 	// anchorStopMu guards anchorStop, which Stop closes while workers read it.
@@ -2679,7 +2687,9 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	registryLog, duplicity := s.issuanceLogForVerification(acdcBody, issuerKelEvents)
+	var registryLog []string
+	var duplicity *telDuplicity
+	registryLog, duplicity, issuerKelEvents = s.issuanceLogForVerification(acdcBody, issuerKelEvents)
 	driverReq := &drivers.DriverVerifyCredentialRequest{
 		AcdcJson:           req.AcdcJson,
 		IssuerKelEvents:    issuerKelEvents,
@@ -2789,7 +2799,9 @@ func (s *CoreServer) handleVerifyCredentialChain(w http.ResponseWriter, r *http.
 			}
 		}
 
-		registryLog, duplicity := s.issuanceLogForVerification(acdcBody, issuerKelEvents)
+		var registryLog []string
+		var duplicity *telDuplicity
+		registryLog, duplicity, issuerKelEvents = s.issuanceLogForVerification(acdcBody, issuerKelEvents)
 		driverReq := &drivers.DriverVerifyCredentialRequest{
 			AcdcJson:          jsonB64,
 			IssuerKelEvents:   issuerKelEvents,
