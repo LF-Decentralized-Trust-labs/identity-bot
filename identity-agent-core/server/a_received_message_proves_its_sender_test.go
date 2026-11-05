@@ -97,7 +97,7 @@ func (m *messaging) anchored(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := m.receiver.DataStore.SaveContactKEL(store.ContactKELRecord{
-		AID: m.senderAID, KEL: inceptionCommittingTo(t, m.senderAID, ks), KelVerified: true, CurrentPublicKey: "Dkey",
+		AID: m.senderAID, KEL: inceptionCommittingTo(t, m.senderAID, ks), KelVerified: true, CurrentPublicKey: fixtureKey,
 	}); err != nil {
 		t.Fatal(err)
 	}

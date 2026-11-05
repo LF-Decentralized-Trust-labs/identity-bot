@@ -502,6 +502,32 @@ func saidOfRecord(rec map[string]interface{}) string {
 	return ev.D
 }
 
+// ErrKeyNotEstablished is returned when a verified record states a current key
+// that its own events do not establish.
+var ErrKeyNotEstablished = errors.New("the current key stated does not match the key the log's own events establish")
+
+// settleCurrentKey makes a verified record's CurrentPublicKey the key its events
+// establish, worked out from the events and never from the stored column, which
+// owner_anchor.go, owner_signature.go and first_contact.go trust. A stated key
+// that is empty is filled in; one that disagrees is refused with
+// ErrKeyNotEstablished. An unverified record is left alone: nothing trusts its
+// key. Call after sealFromVerifiedBytes.
+func (r *ContactKELRecord) settleCurrentKey() error {
+	if !r.KelVerified {
+		return nil
+	}
+	key, err := drivers.KeyEstablishedBy(r.KEL)
+	if err != nil {
+		return fmt.Errorf("%w (%s: %v)", ErrKeyNotEstablished, r.AID, err)
+	}
+	if r.CurrentPublicKey != "" && r.CurrentPublicKey != key {
+		return fmt.Errorf("%w (%s: stated %s, events establish %s)",
+			ErrKeyNotEstablished, r.AID, r.CurrentPublicKey, key)
+	}
+	r.CurrentPublicKey = key
+	return nil
+}
+
 // refuseAnEarlierLog is the rule every store applies before it replaces a held
 // log; both arguments are already sealed from their bytes (sealFromVerifiedBytes).
 //
@@ -762,6 +788,11 @@ type FileStore struct {
 	counters map[string]int // persisted high-water marks for relationship indices
 }
 
+// NewFileStore is TEST-ONLY: the running agent uses SQLiteStore. FileStore does
+// not implement Store, so a restore (recovery.Service takes a Store) cannot be
+// pointed at it, and nothing writes contact_kels.json back from a backup. Its
+// SaveContactKEL applies the same rules as the SQLite one (forward-only, key
+// from the events) because tests save through it.
 func NewFileStore(dir string) (*FileStore, error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create store directory: %w", err)
@@ -1410,6 +1441,9 @@ func (s *FileStore) SaveContactKEL(record ContactKELRecord) error {
 			record.AID, filepath.Join(s.dir, "contact_kels.json"), err)
 	}
 	record.sealFromVerifiedBytes()
+	if err := record.settleCurrentKey(); err != nil {
+		return err
+	}
 	if held, ok := kels[record.AID]; ok {
 		held.sealFromVerifiedBytes()
 		if err := refuseAnEarlierLog(&held, record); err != nil {

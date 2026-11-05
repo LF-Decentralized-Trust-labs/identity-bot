@@ -135,7 +135,7 @@ func TestFirstContactRefusesAnEarlierLogAndPutsNothingInFrontOfTheOwner(t *testi
 	// This machine already trusts the history one event further along.
 	if err := receiver.DataStore.SaveContactKEL(store.ContactKELRecord{
 		AID: strangerAID, KEL: append(append([]map[string]interface{}{}, inception...), later...),
-		KelVerified: true, CurrentPublicKey: "Dkey", EventsValidated: 2,
+		KelVerified: true, CurrentPublicKey: fixtureKey, EventsValidated: 2,
 	}); err != nil {
 		t.Fatal(err)
 	}

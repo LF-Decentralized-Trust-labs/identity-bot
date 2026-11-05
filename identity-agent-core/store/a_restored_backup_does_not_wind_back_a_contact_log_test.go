@@ -133,3 +133,100 @@ func TestAnUnreadableContactLogFileRefusesTheSaveAndIsLeftAlone(t *testing.T) {
 		t.Fatalf("the unreadable file was overwritten: %q", after)
 	}
 }
+
+// The current key of a stored verified log is the one its events establish, not
+// whatever the row says. A backup holding the exact events a machine already has
+// but naming the retired K2 as current must not make K2 current again.
+//
+// Fails when mergeContactKELs copies current_public_key from the backup again.
+func TestARestoredRowIsTakenOnlyWithTheKeyItsEventsEstablish(t *testing.T) {
+	keys := signedlog.NewKeys(t, 3)
+	atK2 := signedlog.Incept(t, keys).Rotate()
+	atK3 := atK2.Fork().Rotate()
+
+	backupNaming := func(t *testing.T, key string) string {
+		_, from := openStore(t)
+		if err := from.SaveContactKEL(record(atK3, true)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := from.db.Exec(`UPDATE contact_kels SET current_public_key = ?`, key); err != nil {
+			t.Fatal(err)
+		}
+		return snapshotOf(t, from)
+	}
+
+	t.Run("the exact held events with the retired key stated are refused", func(t *testing.T) {
+		snap := backupNaming(t, keys.Pub(1))
+		_, into := openStore(t)
+		if err := into.SaveContactKEL(record(atK3, true)); err != nil {
+			t.Fatal(err)
+		}
+		report, err := into.ImportSnapshotReport(snap)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, _ := into.GetContactKEL(atK3.AID)
+		if got == nil || got.CurrentPublicKey != keys.Pub(2) {
+			t.Fatalf("the retired key became current: %+v", got)
+		}
+		if report.ContactLogsKept != 1 {
+			t.Fatalf("kept = %d, want 1", report.ContactLogsKept)
+		}
+	})
+	t.Run("a refused row is not put back when nothing is held either", func(t *testing.T) {
+		snap := backupNaming(t, keys.Pub(1))
+		_, into := openStore(t)
+		if _, err := into.ImportSnapshotReport(snap); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := into.GetContactKEL(atK3.AID); got != nil && got.CurrentPublicKey == keys.Pub(1) {
+			t.Fatalf("the retired key was restored: %+v", got)
+		}
+	})
+	t.Run("a row stating no key gets the one its events establish", func(t *testing.T) {
+		snap := backupNaming(t, "")
+		_, into := openStore(t)
+		if _, err := into.ImportSnapshotReport(snap); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := into.GetContactKEL(atK3.AID)
+		if got == nil || got.CurrentPublicKey != keys.Pub(2) {
+			t.Fatalf("got %+v", got)
+		}
+	})
+}
+
+// SaveContactKEL, in either store, does not store a key its own events do not
+// establish. Fails when settleCurrentKey is dropped from the save.
+func TestASavedLogCannotStateAKeyItsEventsDoNotEstablish(t *testing.T) {
+	keys := signedlog.NewKeys(t, 3)
+	atK3 := signedlog.Incept(t, keys).Rotate().Rotate()
+	fs, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, sq := openStore(t)
+	for name, st := range map[string]interface {
+		SaveContactKEL(ContactKELRecord) error
+		GetContactKEL(string) (*ContactKELRecord, error)
+	}{"file": fs, "sqlite": sq} {
+		t.Run(name, func(t *testing.T) {
+			bad := record(atK3, true)
+			bad.CurrentPublicKey = keys.Pub(1)
+			if err := st.SaveContactKEL(bad); !errors.Is(err, ErrKeyNotEstablished) {
+				t.Fatalf("a retired key was saved as current: %v", err)
+			}
+			if got, _ := st.GetContactKEL(atK3.AID); got != nil {
+				t.Fatalf("something was stored: %+v", got)
+			}
+			ok := record(atK3, true)
+			ok.CurrentPublicKey = ""
+			if err := st.SaveContactKEL(ok); err != nil {
+				t.Fatal(err)
+			}
+			if got, _ := st.GetContactKEL(atK3.AID); got == nil || got.CurrentPublicKey != keys.Pub(2) {
+				t.Fatalf("got %+v", got)
+			}
+		})
+	}
+}

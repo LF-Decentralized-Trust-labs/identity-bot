@@ -1172,6 +1172,9 @@ func (s *SQLiteStore) GetCredentialSchema(said string) (*CredentialSchemaRecord,
 
 func (s *SQLiteStore) SaveContactKEL(record ContactKELRecord) error {
 	record.sealFromVerifiedBytes()
+	if err := record.settleCurrentKey(); err != nil {
+		return err
+	}
 	kelJSON, err := json.Marshal(record.KEL)
 	if err != nil {
 		return fmt.Errorf("failed to marshal contact KEL: %w", err)

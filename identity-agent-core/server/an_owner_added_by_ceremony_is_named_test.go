@@ -21,7 +21,7 @@ func anOwnersAddress(t *testing.T, s *CoreServer, aid, key string) string {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"aid": aid, "public_key": key, "alias": "owner",
-			"kel": withTheBytesItWasVerifiedBy(t, map[string]interface{}{"t": "icp", "s": "0", "i": aid, "d": aid}),
+			"kel": withTheBytesItWasVerifiedBy(t, map[string]interface{}{"t": "icp", "s": "0", "i": aid, "d": aid, "k": []interface{}{key}}),
 		})
 	}))
 	t.Cleanup(srv.Close)

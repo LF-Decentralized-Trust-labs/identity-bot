@@ -112,7 +112,7 @@ func verifiedLog(t *testing.T, s *CoreServer, aid, key string) {
 	}
 	// A log is kept as verified only with the bytes it was verified by.
 	if err := s.DataStore.SaveContactKEL(store.ContactKELRecord{
-		AID: aid, KEL: inceptionCommittingTo(t, aid, ks),
+		AID: aid, KEL: inceptionCommittingTo(t, aid, ks, key),
 		KelVerified: true, CurrentPublicKey: key, EventsValidated: 1}); err != nil {
 		t.Fatal(err)
 	}

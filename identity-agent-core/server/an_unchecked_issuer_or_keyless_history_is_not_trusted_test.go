@@ -44,7 +44,7 @@ func TestResolvingAContactWhoseCheckedHistoryNamesNoKeyDoesNotVerifyIt(t *testin
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				json.NewEncoder(w).Encode(map[string]interface{}{
 					"aid": peer, "public_key": "DServedKeyNobodyChecked", "alias": "peer",
-					"kel": withTheBytesItWasVerifiedBy(t, map[string]interface{}{"t": "icp", "s": "0", "i": peer, "d": peer}),
+					"kel": withTheBytesItWasVerifiedBy(t, map[string]interface{}{"t": "icp", "s": "0", "i": peer, "d": peer, "k": []interface{}{tc.key}}),
 				})
 			}))
 			t.Cleanup(srv.Close)

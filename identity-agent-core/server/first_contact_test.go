@@ -163,7 +163,7 @@ func TestAFirstContactKeepsTheKeyItsHistoryEndsOn(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := s.DataStore.SaveContactKEL(store.ContactKELRecord{
-		AID: aid, KEL: inceptionCommittingTo(t, aid, ks), KelVerified: true, CurrentPublicKey: "DCurrentKey",
+		AID: aid, KEL: inceptionCommittingTo(t, aid, ks), KelVerified: true, CurrentPublicKey: fixtureKey,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestAFirstContactKeepsTheKeyItsHistoryEndsOn(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec, _ := s.DataStore.GetContact(aid)
-	if rec == nil || rec.PublicKey != "DCurrentKey" {
+	if rec == nil || rec.PublicKey != fixtureKey {
 		t.Fatalf("the contact does not carry the key its checked history ends on: %+v", rec)
 	}
 }
