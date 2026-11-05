@@ -1078,6 +1078,21 @@ CREATE TABLE IF NOT EXISTS tel_backfill (
     done_at TEXT NOT NULL
 );
 `},
+	{
+		Version:     50,
+		Description: "Retry registry events that cannot be sent with growing gaps, never giving one up",
+		SQL: `
+-- A stuck issuer is tried again after a gap that grows with each failure, so it
+-- does not take a pass away from every other issuer, and nothing leaves the
+-- outbox except by a witness having it: a revocation kept back for good is a
+-- revoked credential that checks as live.
+CREATE TABLE IF NOT EXISTS tel_push_retry (
+    issuer_aid      TEXT NOT NULL,
+    said            TEXT NOT NULL,
+    next_attempt_at TEXT NOT NULL,
+    PRIMARY KEY (issuer_aid, said)
+);
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

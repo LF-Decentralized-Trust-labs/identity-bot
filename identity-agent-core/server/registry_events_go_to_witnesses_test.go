@@ -35,6 +35,7 @@ func newPushWorld(t *testing.T) *pushWorld {
 	svc := witness.NewService(witness.NewSQLiteStore(s.DataStore.(*store.SQLiteStore).DB()), s.DataStore, nil, witness.BackendDesktop)
 	svc.OurEntityType = func() witness.EntityType { return witness.EntityIndividual }
 	s.WitnessService = svc
+	s.telPushRetryGap = func(int) time.Duration { return 0 } // these tests retry at once; the gaps have their own
 	bob.willWitnessFor(t, aid)
 	w := &pushWorld{t: t, s: s, bob: bob, aid: aid, eng: eng}
 	w.contactAt(bob.base)

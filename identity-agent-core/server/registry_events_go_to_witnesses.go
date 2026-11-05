@@ -29,14 +29,74 @@ import (
 // when the first attempt can succeed, and again on every tick (the worker is
 // kicked from the tick), for as long as anything waits. An event leaves the
 // outbox when every witness the key log names holds it; sending one a witness
-// already has is a no-op there. After telPushGiveUpAfter an event is dropped
-// with a log line: the log itself is kept either way, and a verifier who is
-// handed it still has it.
+// already has is a no-op there. An event that fails is tried again after a gap
+// that grows with each failure.
+//
+// NOTHING IS GIVEN UP. An event leaves the outbox only by every witness having
+// it. A revocation dropped after some days would be a revoked credential that
+// checks as live from then on, and the issuance and registry inception before
+// it cannot be left behind either: a witness refuses a revocation of a
+// credential whose issuance it does not hold. A revocation that has waited
+// longer than telRevocationAlarmAfter is reported (reportWaitingRevocations).
+//
+// IT IS FAIR. A pass takes the oldest event of every issuer in turn
+// (store PendingTELPushes), so an issuer whose witnesses are unreachable does
+// not hold up the others, and a failing issuer is tried less often.
 
 const (
-	telPushGiveUpAfter = 14 * 24 * time.Hour
-	telPushBatch       = 256
+	telPushBatch = 256
+	// telRevocationAlarmAfter is how long a revocation may wait before it is
+	// reported as not published.
+	telRevocationAlarmAfter = time.Hour
+	telPushRetryFirst       = time.Minute
+	telPushRetryMax         = 6 * time.Hour
 )
+
+// telPushTime is the form the outbox compares times in: fixed width, so that
+// the order of the text is the order of the times.
+const telPushTime = "2006-01-02T15:04:05.000000000Z"
+
+// telPushRetryGap is how long to wait after the given number of failed
+// attempts: a minute, doubling, to six hours.
+func telPushRetryGap(attempts int) time.Duration {
+	gap := telPushRetryFirst
+	for i := 1; i < attempts && gap < telPushRetryMax; i++ {
+		gap *= 2
+	}
+	if gap > telPushRetryMax {
+		gap = telPushRetryMax
+	}
+	return gap
+}
+
+// reportWaitingRevocations says, once per revocation per run and again whenever
+// the agent restarts, that a revocation has not reached the witnesses: until it
+// does, a verifier reading them cannot learn the credential is revoked. It is
+// logged and sent to the owner's screens as "revocation_not_published".
+func (s *CoreServer) reportWaitingRevocations() {
+	cutoff := time.Now().Add(-telRevocationAlarmAfter).UTC().Format(time.RFC3339Nano)
+	waiting, err := s.DataStore.WaitingRevocations(cutoff)
+	if err != nil {
+		return
+	}
+	s.telAlarm.Lock()
+	defer s.telAlarm.Unlock()
+	if s.telAlarm.said == nil {
+		s.telAlarm.said = map[string]bool{}
+	}
+	for _, p := range waiting {
+		if s.telAlarm.said[p.IssuerAID+"|"+p.SAID] {
+			continue
+		}
+		s.telAlarm.said[p.IssuerAID+"|"+p.SAID] = true
+		log.Printf("[witness] the revocation %s by %s has not reached its witnesses since %s (%d attempts, last: %s)", p.SAID, p.IssuerAID, p.CreatedAt, p.Attempts, p.LastError)
+		if s.EventHub != nil {
+			s.EventHub.Broadcast(AgentEvent{Type: "revocation_not_published", Payload: map[string]interface{}{
+				"issuer_aid": p.IssuerAID, "revocation": p.SAID, "since": p.CreatedAt, "attempts": p.Attempts, "last_error": p.LastError,
+			}})
+		}
+	}
+}
 
 // queueTELPush records an event just kept for sending and asks the witnessing
 // worker to run. A failure to queue is logged and nothing more: the event is
@@ -120,7 +180,7 @@ func (s *CoreServer) witnessIssuersOfWaitingEvents(ctx context.Context, already 
 	if !ok || s.DataStore == nil || s.WitnessService == nil {
 		return
 	}
-	pending, err := s.DataStore.PendingTELPushes(telPushBatch)
+	pending, err := s.DataStore.DueTELPushes(telPushBatch, time.Now().UTC().Format(telPushTime))
 	if err != nil {
 		return
 	}
@@ -144,10 +204,8 @@ func (s *CoreServer) pushRegistryEvents(ctx context.Context) {
 	if !ok || s.DataStore == nil || s.WitnessService == nil {
 		return
 	}
-	if n, err := s.DataStore.DropStaleTELPushes(time.Now().Add(-telPushGiveUpAfter).UTC().Format(time.RFC3339Nano)); err == nil && n > 0 {
-		log.Printf("[witness] gave up sending %d registry events that waited more than %s", n, telPushGiveUpAfter)
-	}
-	pending, err := s.DataStore.PendingTELPushes(telPushBatch)
+	s.reportWaitingRevocations()
+	pending, err := s.DataStore.DueTELPushes(telPushBatch, time.Now().UTC().Format(telPushTime))
 	if err != nil || len(pending) == 0 {
 		return
 	}
@@ -187,7 +245,11 @@ func (s *CoreServer) pushRegistryEvents(ctx context.Context) {
 		if err != nil {
 			reason = err.Error()
 		}
-		_ = s.DataStore.FailedTELPush(issuer, saids, reason)
+		gap := telPushRetryGap(events[0].Attempts + 1)
+		if s.telPushRetryGap != nil {
+			gap = s.telPushRetryGap(events[0].Attempts + 1)
+		}
+		_ = s.DataStore.FailedTELPush(issuer, saids, reason, time.Now().Add(gap).UTC().Format(telPushTime))
 		log.Printf("[witness] %d of %d witnesses hold the registry events of %s; will retry: %s", held, len(designated), issuer, reason)
 	}
 }
