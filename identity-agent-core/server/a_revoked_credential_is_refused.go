@@ -109,25 +109,26 @@ func (s *CoreServer) verifyCredentialHere(req *drivers.DriverVerifyCredentialReq
 		return verifyReply{}, errCredentialUnreadable
 	}
 	revocation := s.localRevocationState(cred)
-	if len(revocation.log) > 0 || len(req.RegistryEventsB64) == 0 {
+	// The caller may supply the credential's log as kept here (its issuer's
+	// events) for the proof of issuance. It is used only where this agent holds
+	// no registry state of its own, and only to learn of a revocation: a kept
+	// log may be partial, and nothing here proves it holds every event its
+	// issuer sealed, so it never makes a credential read "not revoked", and
+	// never overrides what this agent's own record says.
+	supplied := req.RegistryEventsB64
+	if revocation.status == revocationNoRegistryState && len(supplied) > 0 {
+		req.RegistryEventsB64 = supplied
+	} else {
 		req.RegistryEventsB64 = revocation.log
 	}
 	res, err := s.KeriDriver.VerifyCredential(req)
 	if err != nil {
 		return verifyReply{}, err
 	}
-	if len(revocation.log) == 0 && len(req.RegistryEventsB64) > 0 && res != nil {
-		// The registry is not this agent's, but the credential's own log is
-		// held (its issuer's events, kept here). The engine checked revocation
-		// against it, each event sealed in the issuer's verified key log, so
-		// its answer stands in for the registry state this agent lacks.
-		if notRevoked, ok := res.Checks["not_revoked"].(bool); ok {
-			if notRevoked {
-				revocation = revocationState{log: req.RegistryEventsB64, status: revocationNotRevoked}
-			} else {
-				revocation = revocationState{log: req.RegistryEventsB64, status: revocationRevoked,
-					reason: "the credential has been revoked by its issuer"}
-			}
+	if revocation.status == revocationNoRegistryState && len(supplied) > 0 && res != nil {
+		if notRevoked, ok := res.Checks["not_revoked"].(bool); ok && !notRevoked {
+			revocation = revocationState{log: supplied, status: revocationRevoked,
+				reason: "the credential has been revoked by its issuer"}
 		}
 	}
 	return revocation.applyTo(res), nil
