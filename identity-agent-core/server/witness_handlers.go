@@ -13,6 +13,8 @@ import (
 	"identity-agent-core/witness"
 
 	"github.com/go-chi/chi/v5"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 func (s *CoreServer) mountWitnessRoutes(r chi.Router) {
@@ -90,8 +92,7 @@ func (s *CoreServer) handleWitnessEvent(w http.ResponseWriter, r *http.Request) 
 		}
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	jsonreply.Write(w, http.StatusOK, result)
 }
 
 // The three reads of a key log below answer from what this witness holds only
@@ -118,8 +119,7 @@ func (s *CoreServer) handleWitnessKel(w http.ResponseWriter, r *http.Request) {
 		notHeld(w)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"aid": signerAID, "kel": kel, "count": len(kel),
 	})
 }
@@ -143,8 +143,7 @@ func (s *CoreServer) handleWitnessKelTip(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusServiceUnavailable, "the tip could not be signed", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(tip)
+	jsonreply.Write(w, http.StatusOK, tip)
 }
 
 func (s *CoreServer) handleWitnessStatus(w http.ResponseWriter, r *http.Request) {
@@ -157,15 +156,12 @@ func (s *CoreServer) handleWitnessStatus(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "status failed", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(st)
+	jsonreply.Write(w, http.StatusOK, st)
 }
 
 func (s *CoreServer) handleWitnessTELStub(w http.ResponseWriter, r *http.Request) {
 	issuerAID := chi.URLParam(r, "issuer_aid")
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(s.WitnessService.ServeTELStub(issuerAID))
+	jsonreply.Write(w, http.StatusNotImplemented, s.WitnessService.ServeTELStub(issuerAID))
 }
 
 // handleWitnessRequest handles inbound witness enrollment from a remote agent.
@@ -206,8 +202,7 @@ func (s *CoreServer) handleWitnessRequest(w http.ResponseWriter, r *http.Request
 	if result.Accepted {
 		status = "accepted"
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"status": status, "reason": result.Reason, "task_id": result.TaskID,
 		// Whether, after this, the identities the requester delegates are
 		// witnessed too.
@@ -234,8 +229,7 @@ func (s *CoreServer) handleWitnessAccept(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "received", "decision": req.Decision})
+	jsonreply.Write(w, http.StatusOK, map[string]string{"status": "received", "decision": req.Decision})
 }
 
 func (s *CoreServer) triggerWitnessBroadcast(signerAID string, rawEvent []byte, cesrSig string) {
@@ -319,8 +313,7 @@ func (s *CoreServer) handleWitnessEndpointRecord(w http.ResponseWriter, r *http.
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"stored": true, "said": said, "route": route})
+	jsonreply.Write(w, http.StatusOK, map[string]any{"stored": true, "said": said, "route": route})
 }
 
 // handleWitnessEndpointLookup answers "where is this identity now" for somebody
@@ -342,8 +335,7 @@ func (s *CoreServer) handleWitnessEndpointLookup(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusInternalServerError, "could not read endpoint records", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	jsonreply.Write(w, http.StatusOK, map[string]any{
 		"controller_aid": cid,
 		"records":        records,
 		"count":          len(records),
@@ -367,8 +359,7 @@ func (s *CoreServer) handleWitnessKelEvent(w http.ResponseWriter, r *http.Reques
 		notHeld(w)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(ev)
+	jsonreply.Write(w, http.StatusOK, ev)
 }
 
 // witnessReadAllowed rate limits a read of a key log and answers an asker who
