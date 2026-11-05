@@ -1188,11 +1188,14 @@ func (s *SQLiteStore) SaveContactKEL(record ContactKELRecord) error {
 	defer tx.Rollback()
 	var heldJSON string
 	var held ContactKELRecord
-	switch qerr := tx.QueryRow(`SELECT kel_json, kel_verified, events_validated FROM contact_kels WHERE aid = ?`,
-		record.AID).Scan(&heldJSON, &held.KelVerified, &held.EventsValidated); {
+	switch qerr := tx.QueryRow(`SELECT kel_json, kel_verified FROM contact_kels WHERE aid = ?`,
+		record.AID).Scan(&heldJSON, &held.KelVerified); {
 	case qerr == nil:
-		_ = json.Unmarshal([]byte(heldJSON), &held.KEL)
+		if err := json.Unmarshal([]byte(heldJSON), &held.KEL); err != nil && held.KelVerified {
+			return fmt.Errorf("the verified log held for %s cannot be read, so it cannot be replaced: %w", record.AID, err)
+		}
 		held.AID = record.AID
+		held.sealFromVerifiedBytes()
 		if err := refuseAnEarlierLog(&held, record); err != nil {
 			return err
 		}

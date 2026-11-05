@@ -480,29 +480,54 @@ type ContactKELRecord struct {
 	Witnessed bool `json:"witnessed"`
 }
 
-// ErrLogEndsEarlier is returned by SaveContactKEL when the record offered
-// would replace a verified log with one that ends before it.
-var ErrLogEndsEarlier = errors.New("the log offered ends before the verified log already held for this identifier")
+// ErrLogDoesNotExtend is returned by SaveContactKEL when the record offered would
+// replace a verified log with something that is not that log carried further.
+var ErrLogDoesNotExtend = errors.New("the log offered does not carry on from the verified log already held for this identifier")
 
-// eventsIn is how many events a record holds, by whichever count is larger so a
-// record that fills only one of the two fields is still measured.
-func eventsIn(r ContactKELRecord) int {
-	n := len(r.KEL)
-	if r.EventsValidated > n {
-		n = r.EventsValidated
+// saidOfRecord is the event identifier (d) of one log record, read from the
+// raw bytes the record carries and from nothing else: a field served beside
+// the bytes is not part of what was verified. "" means it cannot be read.
+func saidOfRecord(rec map[string]interface{}) string {
+	rawB64, _ := rec["raw_bytes_b64"].(string)
+	raw, err := drivers.DecodeRawBytes(rawB64)
+	if err != nil || len(raw) == 0 {
+		return ""
 	}
-	return n
+	var ev struct {
+		D string `json:"d"`
+	}
+	if json.Unmarshal(raw, &ev) != nil {
+		return ""
+	}
+	return ev.D
 }
 
 // refuseAnEarlierLog is the rule every store applies before it replaces a held
-// log. A verified log is a key this machine trusts, like the sealed one, so it
-// only ever moves forward: a replayed older history of the same identifier
-// verifies cleanly on its own, and letting it replace the longer one would make
-// a key the owner has since rotated away the current key again.
+// log; both arguments are already sealed from their bytes (sealFromVerifiedBytes).
+//
+// A verified log is a key this machine trusts, like the sealed one, so it only
+// ever moves forward: the log offered must hold every event the held one does,
+// the same events, in the same places, and may add to them. Counting events is
+// not enough. Someone holding a key the owner has since rotated away from can
+// sign events of their own after the rotation that key was current at; that fork
+// verifies cleanly, can be as long as the real log, and would otherwise make the
+// retired key the owner's again. It has the real log's first events and then
+// different ones, so the event identifiers (never a count the caller supplies,
+// like EventsValidated) are what tell the two apart.
 func refuseAnEarlierLog(held *ContactKELRecord, offered ContactKELRecord) error {
-	if held != nil && held.KelVerified && eventsIn(offered) < eventsIn(*held) {
-		return fmt.Errorf("%w (%s: holds %d events, offered %d)",
-			ErrLogEndsEarlier, offered.AID, eventsIn(*held), eventsIn(offered))
+	if held == nil || !held.KelVerified {
+		return nil
+	}
+	for i, h := range held.KEL {
+		want := saidOfRecord(h)
+		var got string
+		if i < len(offered.KEL) {
+			got = saidOfRecord(offered.KEL[i])
+		}
+		if want == "" || got != want {
+			return fmt.Errorf("%w (%s: event %d is not the one already held; holds %d events, offered %d)",
+				ErrLogDoesNotExtend, offered.AID, i, len(held.KEL), len(offered.KEL))
+		}
 	}
 	return nil
 }
@@ -1373,6 +1398,7 @@ func (s *FileStore) SaveContactKEL(record ContactKELRecord) error {
 	}
 	record.sealFromVerifiedBytes()
 	if held, ok := kels[record.AID]; ok {
+		held.sealFromVerifiedBytes()
 		if err := refuseAnEarlierLog(&held, record); err != nil {
 			return err
 		}
