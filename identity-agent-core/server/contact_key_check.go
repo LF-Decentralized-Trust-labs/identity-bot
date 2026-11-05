@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -176,10 +177,28 @@ func (s *CoreServer) checkContactKEL(aid string) kelCheckResult {
 	// Record what was found, so the current key survives a restart and so
 	// anything reading the history later sees the latest check rather than the
 	// first one.
-	_ = s.DataStore.SaveContactKEL(store.ContactKELRecord{
+	//
+	// A save the store REFUSES fails the check, and the key it replayed is not
+	// returned. The store holds the log this machine trusts and will not let one
+	// that does not carry on from it replace it, so a key read from the refused
+	// log is a key the store would not vouch for: answering "verified, use this
+	// key" for it is how a retired key is handed to a caller that is about to
+	// authenticate with it.
+	if serr := s.DataStore.SaveContactKEL(store.ContactKELRecord{
 		AID: aid, KEL: events, KelVerified: true, CurrentPublicKey: key,
 		EventsValidated: val.EventsValidated, ValidatedAt: now.Format(time.RFC3339),
-	})
+	}); serr != nil {
+		if errors.Is(serr, store.ErrLogDoesNotExtend) {
+			return kelCheckResult{
+				State: kelFailed, CheckedAt: now,
+				Reason: "the key history they publish does not carry on from the one this agent already trusts for them",
+			}
+		}
+		return kelCheckResult{
+			State: kelFailed, CheckedAt: now,
+			Reason: fmt.Sprintf("their key history checked out but could not be recorded: %v", serr),
+		}
+	}
 	return kelCheckResult{
 		State: kelVerifiedNow, Key: key, CheckedAt: now,
 		Witnessed: val.Witnessed, WitnessThreshold: val.WitnessThreshold,

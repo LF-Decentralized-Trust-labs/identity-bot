@@ -693,11 +693,15 @@ func (s *CoreServer) theKeyEntitledToVouch() (string, error) {
 		// The verified log first, so a rotation is followed. Nothing rewrites
 		// the sealed record when an owner rotates, so asking it first would go
 		// on believing a key the owner has replaced.
-		if key, kerr := s.ownerKeyFromAVerifiedLog(owner); kerr == nil {
+		if key, ok := s.ownerKeyThatMovesForward(owner); ok {
 			return key, nil
 		}
 		// Then the sealed record, and only for the owner the log named.
-		if sealed, serr := s.sealedOwnerAuthority(); serr == nil && sealed != nil &&
+		sealed, serr := s.sealedOwnerAuthority()
+		if theSealCannotBeRead(serr) {
+			return "", fmt.Errorf("the owner record sealed on this machine cannot be read, so nobody may speak for it: %w", serr)
+		}
+		if serr == nil && sealed != nil &&
 			sealed.AID == owner && sealed.PublicKey != "" {
 			return sealed.PublicKey, nil
 		}
@@ -709,8 +713,11 @@ func (s *CoreServer) theKeyEntitledToVouch() (string, error) {
 	// No anchor at all — a machine sealed at provisioning before it had an
 	// identity. The sealed record is the only thing there is, and it was written
 	// before the machine was reachable.
-	if sealed, err := s.sealedOwnerAuthority(); err == nil && sealed != nil &&
-		sealed.PublicKey != "" {
+	sealed, serr := s.sealedOwnerAuthority()
+	if theSealCannotBeRead(serr) {
+		return "", fmt.Errorf("the owner record sealed on this machine cannot be read, so nobody may speak for it: %w", serr)
+	}
+	if serr == nil && sealed != nil && sealed.PublicKey != "" {
 		return sealed.PublicKey, nil
 	}
 	return "", fmt.Errorf("nothing is sealed and this identity names no owner")

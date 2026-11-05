@@ -62,6 +62,11 @@ type Session struct {
 	PairwiseChecks  []PairwiseVerification `json:"pairwise_checks,omitempty"`
 	ManifestSummary map[string]interface{} `json:"manifest_summary,omitempty"`
 	Error           string                 `json:"error,omitempty"`
+	// ContactLogsKept is how many contact logs in the restored backup were not
+	// put back because this machine already held a verified log for that
+	// contact which the backup's does not carry on from. Set when the recovery
+	// is activated.
+	ContactLogsKept int `json:"contact_logs_kept,omitempty"`
 }
 
 // VerifyRequest opens and validates an archive without persisting state.
@@ -588,7 +593,8 @@ func (s *Service) Activate(sessionID string, req ActivateRequest) (*Session, err
 		return nil, err
 	}
 
-	if err := s.applyPayload(payload); err != nil {
+	var contactLogsKept int
+	if err := s.applyPayloadReporting(payload, &contactLogsKept); err != nil {
 		// Stopped before anything but files the archive holds was written,
 		// and for a reason that passes: the session is left as it was, archive
 		// and all, so finishing is asking again.
@@ -615,6 +621,7 @@ func (s *Service) Activate(sessionID string, req ActivateRequest) (*Session, err
 
 	s.mu.Lock()
 	rec.Session.State = SessionActivated
+	rec.Session.ContactLogsKept = contactLogsKept
 	sess = rec.Session
 	// The archive has served its purpose, so it stops being held anywhere:
 	// removed from disk below, and dropped from memory here. Keeping it in RAM
@@ -629,6 +636,13 @@ func (s *Service) Activate(sessionID string, req ActivateRequest) (*Session, err
 }
 
 func (s *Service) applyPayload(payload *RestoredPayload) error {
+	var kept int
+	return s.applyPayloadReporting(payload, &kept)
+}
+
+// applyPayloadReporting is applyPayload, and says in *contactLogsKept how many
+// of the backup's contact logs were left out in favour of a held verified log.
+func (s *Service) applyPayloadReporting(payload *RestoredPayload, contactLogsKept *int) error {
 	if payload == nil {
 		return fmt.Errorf("empty restored payload")
 	}
@@ -697,9 +711,11 @@ func (s *Service) applyPayload(payload *RestoredPayload) error {
 	if err := s.restoreTheKeyMaterial(payload); err != nil {
 		return err
 	}
-	if err := s.restoreTheDatabase(checked); err != nil {
+	kept, err := s.restoreTheDatabase(checked)
+	if err != nil {
 		return err
 	}
+	*contactLogsKept = kept
 	if payload.Identity != nil && s.Store != nil {
 		if err := s.Store.SaveIdentity(*payload.Identity); err != nil {
 			return fmt.Errorf("save identity: %w", err)
@@ -917,15 +933,16 @@ func (s *Service) prepareTheDatabase(payload *RestoredPayload, checked *checkedP
 // and carries across everything the parsed sections do not know about.
 //
 // See SQLiteStore.ImportSnapshot for why this is not simply a file write.
-func (s *Service) restoreTheDatabase(checked *checkedPayload) error {
+func (s *Service) restoreTheDatabase(checked *checkedPayload) (int, error) {
 	if checked.databasePath == "" {
-		return nil
+		return 0, nil
 	}
 	sqlStore, ok := s.Store.(*store.SQLiteStore)
 	if !ok {
-		return nil
+		return 0, nil
 	}
-	return sqlStore.ImportSnapshot(checked.databasePath)
+	report, err := sqlStore.ImportSnapshotReport(checked.databasePath)
+	return report.ContactLogsKept, err
 }
 
 // Retrieve loads an opaque .iab archive from backup-only device, local path, or cloud stub.

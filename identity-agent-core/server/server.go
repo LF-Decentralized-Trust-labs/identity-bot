@@ -3884,6 +3884,13 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 		}
 		if err := s.DataStore.SaveContactKEL(kelRecord); err != nil {
 			log.Printf("[identity-agent-core] OOBI-RESOLVE: Failed to store contact KEL for %s: %v", oobiData.AID, err)
+			// A log the store refuses is not an answer: nothing below may report
+			// its key, so the caller is refused rather than told "resolved".
+			if errors.Is(err, store.ErrLogDoesNotExtend) {
+				writeError(w, http.StatusConflict, "Key history does not continue",
+					"the key history at that address does not carry on from the one this agent already trusts for that identity")
+				return
+			}
 		}
 	}
 
@@ -4022,6 +4029,11 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 			}
 			if err := s.DataStore.SaveContactKEL(kelRecord); err != nil {
 				log.Printf("[identity-agent-core] CONTACT: Failed to store KEL for %s: %v", oobiData.AID, err)
+				if errors.Is(err, store.ErrLogDoesNotExtend) {
+					writeError(w, http.StatusConflict, "Key history does not continue",
+						"the key history at that address does not carry on from the one this agent already trusts for that identity")
+					return
+				}
 			}
 		}
 	}

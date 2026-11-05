@@ -17,6 +17,9 @@ import (
 // names no key it ends on: the only key left is the one the peer served beside
 // the log, which nothing checked.
 func TestResolvingAContactWhoseCheckedHistoryNamesNoKeyDoesNotVerifyIt(t *testing.T) {
+	// The peer is a local test server, which the owner allows in their own
+	// environment and a stranger's address cannot.
+	t.Setenv("IA_ALLOW_LOCAL_SITES", "1")
 	for _, tc := range []struct {
 		name         string
 		key          string
@@ -41,7 +44,7 @@ func TestResolvingAContactWhoseCheckedHistoryNamesNoKeyDoesNotVerifyIt(t *testin
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				json.NewEncoder(w).Encode(map[string]interface{}{
 					"aid": peer, "public_key": "DServedKeyNobodyChecked", "alias": "peer",
-					"kel": withTheBytesItWasVerifiedBy(t, map[string]interface{}{"t": "icp", "s": "0", "i": peer, "d": peer}),
+					"kel": withTheBytesItWasVerifiedBy(t, map[string]interface{}{"t": "icp", "s": "0", "i": peer, "d": peer, "k": []interface{}{tc.key}}),
 				})
 			}))
 			t.Cleanup(srv.Close)

@@ -1172,6 +1172,9 @@ func (s *SQLiteStore) GetCredentialSchema(said string) (*CredentialSchemaRecord,
 
 func (s *SQLiteStore) SaveContactKEL(record ContactKELRecord) error {
 	record.sealFromVerifiedBytes()
+	if err := record.settleCurrentKey(); err != nil {
+		return err
+	}
 	kelJSON, err := json.Marshal(record.KEL)
 	if err != nil {
 		return fmt.Errorf("failed to marshal contact KEL: %w", err)
@@ -1181,7 +1184,41 @@ func (s *SQLiteStore) SaveContactKEL(record ContactKELRecord) error {
 		return fmt.Errorf("failed to marshal validation errors: %w", err)
 	}
 
-	_, err = s.db.Exec(`
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to save contact KEL: %w", err)
+	}
+	defer tx.Rollback()
+	var heldJSON string
+	var held ContactKELRecord
+	switch qerr := tx.QueryRow(`SELECT kel_json, kel_verified FROM contact_kels WHERE aid = ?`,
+		record.AID).Scan(&heldJSON, &held.KelVerified); {
+	case qerr == nil:
+		if err := json.Unmarshal([]byte(heldJSON), &held.KEL); err != nil && held.KelVerified {
+			return fmt.Errorf("the verified log held for %s cannot be read, so it cannot be replaced: %w", record.AID, err)
+		}
+		held.AID = record.AID
+		held.sealFromVerifiedBytes()
+		if err := refuseAnEarlierLog(&held, record); err != nil {
+			return err
+		}
+	case qerr != sql.ErrNoRows:
+		return fmt.Errorf("failed to save contact KEL: %w", qerr)
+	}
+
+	if err := writeContactKEL(tx, record, string(kelJSON), string(errorsJSON)); err != nil {
+		return fmt.Errorf("failed to save contact KEL: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to save contact KEL: %w", err)
+	}
+	return nil
+}
+
+// writeContactKEL is the one statement that stores a contact log, used by
+// SaveContactKEL and by a restore, so the two cannot store it differently.
+func writeContactKEL(tx *sql.Tx, record ContactKELRecord, kelJSON, errorsJSON string) error {
+	_, err := tx.Exec(`
 		INSERT INTO contact_kels (aid, kel_json, kel_verified, current_public_key, events_validated, validation_errors, validated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(aid) DO UPDATE SET
@@ -1191,14 +1228,11 @@ func (s *SQLiteStore) SaveContactKEL(record ContactKELRecord) error {
 			events_validated   = excluded.events_validated,
 			validation_errors  = excluded.validation_errors,
 			validated_at       = excluded.validated_at`,
-		record.AID, string(kelJSON), record.KelVerified,
+		record.AID, kelJSON, record.KelVerified,
 		record.CurrentPublicKey, record.EventsValidated,
-		string(errorsJSON), record.ValidatedAt,
+		errorsJSON, record.ValidatedAt,
 	)
-	if err != nil {
-		return fmt.Errorf("failed to save contact KEL: %w", err)
-	}
-	return nil
+	return err
 }
 
 func (s *SQLiteStore) GetContactKEL(aid string) (*ContactKELRecord, error) {

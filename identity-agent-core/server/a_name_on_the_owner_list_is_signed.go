@@ -84,7 +84,7 @@ func (s *CoreServer) verifiedOwnerNames(orgAID string, owners []string) map[stri
 // compromised key would go on naming them, and contact rows are written by
 // routes that take an address from the caller.
 func (s *CoreServer) keyToCheckAnOwnersNameAgainst(aid string) string {
-	if key, err := s.ownerKeyFromAVerifiedLog(aid); err == nil {
+	if key, ok := s.ownerKeyThatMovesForward(aid); ok {
 		return key
 	}
 	if oa, err := s.ownerAuthority(); err == nil && oa != nil && oa.AID == aid {
