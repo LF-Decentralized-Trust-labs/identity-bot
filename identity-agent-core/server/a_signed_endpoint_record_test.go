@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -509,4 +511,125 @@ func TestRecoveryBelievesOnlyWhatTheContactSigned(t *testing.T) {
 			t.Fatalf("a rollback to an older signed address was taken: %+v %v", again, err)
 		}
 	})
+}
+
+// A contact that has rotated since it was last resolved: the log on file ends at
+// the inception, the witnesses hold the rotation.
+func aContactThatRotated(t *testing.T, oldKeyAlsoSigns bool) (*CoreServer, heldIdentity) {
+	t.Helper()
+	w := anEndpointWitness(t)
+	id := holdAnIdentity(t, w.core.WitnessService.Store, true)
+	if code, out := w.publish(t, id.aid, signedRecord(t, id.aid, "https://moved.example.com:443", time.Minute, id.seeds[1])); code != 200 {
+		t.Fatalf("%d %v", code, out)
+	}
+	front := httputil.NewSingleHostReverseProxy(mustParse(t, w.url))
+	witnessFront := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		if oldKeyAlsoSigns && strings.HasPrefix(r.URL.Path, "/api/witness/endpoint/") {
+			// What a stale or hostile witness still holds: the record the replaced
+			// key signed, issued after the rotation was made.
+			_ = json.NewEncoder(rw).Encode(map[string]any{"record": recordObject(
+				signedRecord(t, id.aid, "https://compromised.example.net:443", 0, id.seeds[0]))})
+			return
+		}
+		front.ServeHTTP(rw, r)
+	}))
+	t.Cleanup(witnessFront.Close)
+
+	held, err := w.core.WitnessService.Store.GetKelEvents(id.aid)
+	if err != nil || len(held) != 2 {
+		t.Fatalf("%d events, %v", len(held), err)
+	}
+	inception := map[string]interface{}{
+		"raw_bytes_b64": held[0].RawBytesB64, "cesr_signature": held[0].CesrSignature,
+		"event_json": held[0].EventJSON, "b": []interface{}{"EWitA"},
+	}
+	s := witnessWithStore(t)
+	if err := s.DataStore.SaveContact(store.ContactRecord{AID: "EWitA", OobiURL: witnessFront.URL + "/public/oobi/EWitA"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DataStore.SaveContactKEL(store.ContactKELRecord{
+		AID: id.aid, KelVerified: true, CurrentPublicKey: id.pubs[0], KEL: []map[string]interface{}{inception},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return s, id
+}
+
+func TestRecoveryFollowsARotationTheContactMadeSinceItWasLastResolved(t *testing.T) {
+	t.Run("the record the new key signed is the answer", func(t *testing.T) {
+		s, id := aContactThatRotated(t, false)
+		found, err := s.RecoverContactEndpoint(id.aid)
+		if err != nil || found.Origin != "https://moved.example.com:443" {
+			t.Fatalf("a record signed by the key the contact rotated to was not taken: %+v %v", found, err)
+		}
+		kept, _ := s.DataStore.GetContactKEL(id.aid)
+		if kept == nil || len(kept.KEL) != 2 || kept.CurrentPublicKey != id.pubs[1] {
+			t.Fatalf("the newer key log was not kept: %+v", kept)
+		}
+	})
+	t.Run("a record the replaced key signed is refused", func(t *testing.T) {
+		s, id := aContactThatRotated(t, true)
+		// The only witness asked still serves the record the replaced key signed.
+		found, err := s.RecoverContactEndpoint(id.aid)
+		if err == nil {
+			t.Fatalf("a record signed by a key the contact had rotated away from was taken: %+v", found)
+		}
+	})
+	t.Run("a log that does not continue the one on file is not an update", func(t *testing.T) {
+		s, id := aContactThatRotated(t, false)
+		kept, _ := s.DataStore.GetContactKEL(id.aid)
+		kept.KEL[0]["raw_bytes_b64"] = "AAAA" // not the inception the witnesses hold
+		_ = s.DataStore.SaveContactKEL(*kept)
+		if _, err := s.RecoverContactEndpoint(id.aid); err == nil {
+			// The witness will not answer for a log whose inception it does not
+			// hold, so nothing is refreshed and the old key stays; the new record
+			// then fails against it.
+			t.Fatal("a record signed by the new key was believed against a log it does not extend")
+		}
+	})
+}
+
+// A witness that has checked a log does not take its cached verdict for a log
+// that has since gained an event: the cache is by the log, not by the identifier.
+func TestAWitnessFollowsARotationAfterItHasCheckedTheLog(t *testing.T) {
+	w := anEndpointWitness(t)
+	id := holdAnIdentity(t, w.core.WitnessService.Store, false)
+	key, err := w.core.WitnessService.CurrentVerifiedKey(id.aid)
+	if err != nil || iacrypto.VerkeyQB64(key) != id.pubs[0] {
+		t.Fatalf("%v %v", key, err)
+	}
+	if again, err := w.core.WitnessService.CurrentVerifiedKey(id.aid); err != nil || !key.Equal(again) {
+		t.Fatalf("the same log asked again: %v", err)
+	}
+
+	held, _ := w.core.WitnessService.Store.GetKelEvents(id.aid)
+	d2, _ := keri.NextDigest(id.pubs[2])
+	rot, err := keri.BuildRotation(keri.RotationInput{
+		Prefix: id.aid, Keys: []string{id.pubs[1]}, PriorSAID: held[0].EventSAID, SN: 1, NextDigests: []string{d2},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rev, _ := keri.ParseEvent(rot)
+	sig, _ := login.SignString(string(rot), id.seeds[1])
+	if err := w.core.WitnessService.Store.StoreKelEvent(witness.KelEvent{
+		SignerAID: id.aid, SequenceNum: 1, EventJSON: string(rot), EventSAID: rev.SAID,
+		StoredAt:    time.Now().UTC().Format(time.RFC3339),
+		RawBytesB64: base64.StdEncoding.EncodeToString(rot), CesrSignature: sig,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	key, err = w.core.WitnessService.CurrentVerifiedKey(id.aid)
+	if err != nil || iacrypto.VerkeyQB64(key) != id.pubs[1] {
+		t.Fatalf("after the rotation the witness still named the old key: %v %v", key, err)
+	}
+}
+
+func mustParse(t *testing.T, raw string) *url.URL {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u
 }
