@@ -23,10 +23,10 @@ const endpointRecordType = 'endpoint-record/1';
 /// How far ahead of the checker's clock a record may be issued.
 const endpointRecordMaxFuture = Duration(minutes: 10);
 
-
 /// The answer to checking a record.
 class EndpointRecordCheck {
-  const EndpointRecordCheck._(this.valid, this.reason, this.origin, this.issued);
+  const EndpointRecordCheck._(
+      this.valid, this.reason, this.origin, this.issued);
 
   /// Whether the record is the identifier's own statement.
   final bool valid;
@@ -64,7 +64,8 @@ String? originProblem(String o) {
   final at = o.indexOf('://');
   if (at < 0) return 'no scheme';
   final scheme = o.substring(0, at);
-  if (scheme != 'http' && scheme != 'https') return 'the scheme is http or https';
+  if (scheme != 'http' && scheme != 'https')
+    return 'the scheme is http or https';
   final rest = o.substring(at + 3);
   String port;
   if (rest.startsWith('[')) {
@@ -74,15 +75,18 @@ String? originProblem(String o) {
     }
     final inner = rest.substring(1, end);
     port = rest.substring(end + 2);
-    if (!_isCompressedLowerIPv6(inner)) return 'the IPv6 address is not in its one spelling';
+    if (!_isCompressedLowerIPv6(inner))
+      return 'the IPv6 address is not in its one spelling';
   } else {
     final colon = rest.lastIndexOf(':');
     if (colon < 0) return 'no port; write it, even the default';
     final host = rest.substring(0, colon);
     port = rest.substring(colon + 1);
-    if (host.isEmpty || host.length > 253) return 'the host is empty or too long';
+    if (host.isEmpty || host.length > 253)
+      return 'the host is empty or too long';
     for (final l in host.split('.')) {
-      if (l.length > 63 || !_label.hasMatch(l)) return 'the host is not a DNS name in lower case';
+      if (l.length > 63 || !_label.hasMatch(l))
+        return 'the host is not a DNS name in lower case';
     }
     // A host whose last label is a number, or reads as one (0x7f), is an IPv4
     // address to a resolver ("127.1", "2130706433" and "0x7f.1" are all
@@ -102,7 +106,8 @@ bool _isDottedQuad(String h) {
   final parts = h.split('.');
   if (parts.length != 4) return false;
   for (final p in parts) {
-    if (!RegExp(r'^(0|[1-9][0-9]{0,2})$').hasMatch(p) || int.parse(p) > 255) return false;
+    if (!RegExp(r'^(0|[1-9][0-9]{0,2})$').hasMatch(p) || int.parse(p) > 255)
+      return false;
   }
   return true;
 }
@@ -180,7 +185,8 @@ String? canonicalOriginOf(String address) {
   if (colon > close && authority.substring(colon + 1) != u.port.toString()) {
     return null;
   }
-  final host = u.host.contains(':') ? '[${u.host.toLowerCase()}]' : u.host.toLowerCase();
+  final host =
+      u.host.contains(':') ? '[${u.host.toLowerCase()}]' : u.host.toLowerCase();
   final origin = '$scheme://$host:${u.port}';
   return originProblem(origin) == null ? origin : null;
 }
@@ -285,7 +291,8 @@ EndpointRecordCheck verifyEndpointRecord(
   }
   final sig = _sigRaw(record['signature'] as String);
   if (sig == null) {
-    return EndpointRecordCheck._no('the signature is not a CESR Ed25519 signature');
+    return EndpointRecordCheck._no(
+        'the signature is not a CESR Ed25519 signature');
   }
   final key = _keyRaw(currentKey);
   if (key == null) {

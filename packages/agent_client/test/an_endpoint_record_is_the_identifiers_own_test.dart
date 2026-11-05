@@ -46,7 +46,8 @@ void main() {
     expect(origins.length, greaterThan(30));
     for (final o in origins) {
       expect(originProblem(o['origin'] as String) == null, o['ok'],
-          reason: 'origin ${o['origin']}: ${originProblem(o['origin'] as String)}');
+          reason:
+              'origin ${o['origin']}: ${originProblem(o['origin'] as String)}');
     }
   });
 
@@ -62,8 +63,7 @@ void main() {
   test('every published ordering', () {
     for (final o in (v['ordering'] as List).cast<Map<String, dynamic>>()) {
       expect(
-          endpointRecordReplaces(
-              {'aid': o['a_aid'], 'issued': o['a_issued']},
+          endpointRecordReplaces({'aid': o['a_aid'], 'issued': o['a_issued']},
               {'aid': o['b_aid'], 'issued': o['b_issued']}),
           o['newer'],
           reason: o['name'] as String);
@@ -74,19 +74,26 @@ void main() {
     final records = (v['records'] as List).cast<Map<String, dynamic>>();
     final plain = records.firstWhere(
         (r) => r['name'] == 'an origin on the default port')['record'] as Map;
-    final ok = verifyEndpointRecord(Map<String, dynamic>.from(plain), keys['public_key']!, now: now);
+    final ok = verifyEndpointRecord(
+        Map<String, dynamic>.from(plain), keys['public_key']!,
+        now: now);
     expect(ok.origin, 'https://org.example.com:443');
     expect(ok.isWithdrawal, isFalse);
-    final gone = records.firstWhere(
-        (r) => r['name'] == 'a withdrawal, which names no address')['record'] as Map;
-    final w = verifyEndpointRecord(Map<String, dynamic>.from(gone), keys['public_key']!, now: now);
+    final gone = records.firstWhere((r) =>
+        r['name'] == 'a withdrawal, which names no address')['record'] as Map;
+    final w = verifyEndpointRecord(
+        Map<String, dynamic>.from(gone), keys['public_key']!,
+        now: now);
     expect(w.isWithdrawal, isTrue);
   });
 
   test('an address becomes the origin the form writes', () {
-    expect(canonicalOriginOf('https://Agent.Example.test'), 'https://agent.example.test:443');
-    expect(canonicalOriginOf('http://localhost:8080/api/x?y=1'), 'http://localhost:8080');
-    expect(canonicalOriginOf('https://[2001:DB8::1]:9'), 'https://[2001:db8::1]:9');
+    expect(canonicalOriginOf('https://Agent.Example.test'),
+        'https://agent.example.test:443');
+    expect(canonicalOriginOf('http://localhost:8080/api/x?y=1'),
+        'http://localhost:8080');
+    expect(canonicalOriginOf('https://[2001:DB8::1]:9'),
+        'https://[2001:db8::1]:9');
     expect(canonicalOriginOf('ftp://x.example'), isNull);
     expect(canonicalOriginOf('https://u:p@x.example'), isNull);
   });
