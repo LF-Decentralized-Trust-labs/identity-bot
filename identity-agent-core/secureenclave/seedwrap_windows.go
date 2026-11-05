@@ -17,7 +17,10 @@ package secureenclave
 // NCRYPT_OVERWRITE_KEY_FLAG fails on an existing name, so a misread status cannot
 // replace the key a stored seed is wrapped under.
 //
-// WRITTEN BUT NOT YET RUN ON WINDOWS. It compiles for windows/amd64 and
+// WRITTEN BUT NOT YET RUN ON WINDOWS. For that reason a seed ALREADY stored
+// unwrapped is NOT wrapped under this key on upgrade unless the operator opts in
+// (see mayWrapAnExistingSeed); a NEW seed is wrapped, because there is nothing
+// older to lose. It compiles for windows/amd64 and
 // windows/arm64; no Windows machine was available to execute it. What would
 // prove it is seedwrap_windows_test.go on a Windows 11 machine with a TPM: wrap,
 // drop the handle, unwrap, and check a wrong-user or deleted key fails.
@@ -58,43 +61,38 @@ type bcryptOAEPPaddingInfo struct {
 }
 
 type tpmSeedWrapper struct {
-	mu     sync.Mutex
-	proved bool
+	proof provenOnce
 }
 
-func newPlatformSeedWrapper() SeedWrapper { return &tpmSeedWrapper{} }
+// seedKeyMu serialises opening-or-creating the key across every caller in the
+// process (Available, Wrap, Unwrap), so two first calls cannot both find no key
+// and both try to create it.
+var seedKeyMu sync.Mutex
 
-const tpmSeedScheme = "tpm2-rsa2048-oaep"
+func newPlatformSeedWrapper() SeedWrapper { return &tpmSeedWrapper{} }
 
 func (w *tpmSeedWrapper) Scheme() string { return tpmSeedScheme }
 
 // Available is proven: the key is opened or made, and a probe is wrapped and
-// opened. A machine with no TPM fails at the provider and reports false.
+// opened. A machine with no TPM fails at the provider and reports false. The
+// proof runs once per wrapper, so concurrent first calls do not race.
 func (w *tpmSeedWrapper) Available() bool {
-	w.mu.Lock()
-	if w.proved {
-		w.mu.Unlock()
-		return true
-	}
-	w.mu.Unlock()
-	probe := bytes.Repeat([]byte{0x5a}, 32)
-	blob, err := w.Wrap(probe)
-	if err != nil {
-		return false
-	}
-	back, err := w.Unwrap(blob)
-	if err != nil || !bytes.Equal(back, probe) {
-		return false
-	}
-	w.mu.Lock()
-	w.proved = true
-	w.mu.Unlock()
-	return true
+	return w.proof.do(func() bool {
+		probe := bytes.Repeat([]byte{0x5a}, 32)
+		blob, err := w.Wrap(probe)
+		if err != nil {
+			return false
+		}
+		back, err := w.Unwrap(blob)
+		return err == nil && bytes.Equal(back, probe)
+	})
 }
 
 // openSeedKey opens the wrapping key, making it the first time. The caller frees
 // the key and the provider.
 func openSeedKey() (provider, key windows.Handle, err error) {
+	seedKeyMu.Lock()
+	defer seedKeyMu.Unlock()
 	provider, err = openProvider()
 	if err != nil {
 		return 0, 0, err

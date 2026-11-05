@@ -116,7 +116,14 @@ func phoneUnwrappedReason(hostDeclared bool) string {
 }
 
 // A wrapped blob must not carry the seed it is supposed to hide. The
-// sealed-volume scheme is the one exception and is identity on purpose.
-func wrapLeaksTheSeed(scheme string, blob, seed []byte) bool {
-	return scheme != SealedVolumeScheme && bytes.Contains(blob, seed)
+// sealedVolumeWrapper is the one exception and is identity on purpose.
+//
+// The exemption is a TYPE check, not a match on the scheme name: a wrapper from
+// anywhere else (an app's host wrapper, a test double) that merely names itself
+// "sealed-volume" is still checked for leaking the seed.
+func wrapLeaksTheSeed(w SeedWrapper, blob, seed []byte) bool {
+	if _, sealed := w.(sealedVolumeWrapper); sealed {
+		return false
+	}
+	return bytes.Contains(blob, seed)
 }

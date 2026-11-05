@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 
@@ -190,12 +191,21 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if existing, lerr := secureenclave.LoadRootSeed(s.DataDir); lerr == nil {
+	existing, lerr := secureenclave.LoadRootSeed(s.DataDir)
+	switch {
+	case lerr == nil:
 		if bytes.Equal(existing, seed) {
 			jsonResponse(w, map[string]any{"status": "unchanged"})
 			return
 		}
 		jsonError(w, "a different root seed is already established on this agent — recover with the original seed phrase, or reset the agent's data directory to start over", http.StatusConflict)
+		return
+	case !errors.Is(lerr, secureenclave.ErrNoRootSeed):
+		// A seed is stored and could not be read (a brief unwrap failure, a
+		// damaged file). Only "there is none" may be answered by writing one:
+		// anything else would replace the only copy with a different phrase.
+		log.Printf("[identity-agent-core] refusing to set a root seed: the stored one could not be read: %v", lerr)
+		jsonError(w, "a root seed is stored on this agent and could not be read just now, so it was not replaced — try again, or restore from a backup", http.StatusServiceUnavailable)
 		return
 	}
 

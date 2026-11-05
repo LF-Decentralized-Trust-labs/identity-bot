@@ -155,11 +155,15 @@ func TestAWrapperThatLeaksTheSeedIsNotRecordedAsWrapping(t *testing.T) {
 
 // The sealed-volume scheme is the one wrapper that is the identity, on purpose.
 func TestTheSealedVolumeIsNotMistakenForALeak(t *testing.T) {
-	if wrapLeaksTheSeed(SealedVolumeScheme, theSeed(), theSeed()) {
+	if wrapLeaksTheSeed(SealedVolumeSeedWrapper(), theSeed(), theSeed()) {
 		t.Fatal("the sealed volume was refused for being what it is")
 	}
-	if !wrapLeaksTheSeed("anything-else", theSeed(), theSeed()) {
+	if !wrapLeaksTheSeed(&fakeWrapper{scheme: "anything-else"}, theSeed(), theSeed()) {
 		t.Fatal("a leak was missed")
+	}
+	// Naming itself "sealed-volume" earns no exemption: only the type does.
+	if !wrapLeaksTheSeed(&fakeWrapper{scheme: SealedVolumeScheme}, theSeed(), theSeed()) {
+		t.Fatal("a wrapper that only claims the sealed-volume name was exempted from the leak check")
 	}
 }
 
