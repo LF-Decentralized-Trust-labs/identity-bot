@@ -43,6 +43,9 @@ type creation struct {
 	// existing one's grant is about.
 	creatorUntil, createdUntil string
 	about                      string
+	// bodyRevokedAt is when the creator's body credential is revoked, when set,
+	// and bodyFor is who it says the machine speaks as, when not the creator.
+	bodyRevokedAt, bodyFor string
 }
 
 const (
@@ -142,7 +145,11 @@ func aCreation(t *testing.T, name string, change func(*creation)) CreationCase {
 		creatorAttrs["valid_until"] = c.creatorUntil
 	}
 	grant, grantSAID := w.build(c.grantSchema, vectorCreator, grantAt, creatorAttrs, nil)
-	body, bodySAID := w.build(schemas.AIAgentBody.Schema.SAID, vectorCreator, bodyAt, map[string]interface{}{
+	bodyHolder := vectorCreator
+	if c.bodyFor != "" {
+		bodyHolder = c.bodyFor
+	}
+	body, bodySAID := w.build(schemas.AIAgentBody.Schema.SAID, bodyHolder, bodyAt, map[string]interface{}{
 		"asset_type": "ai_agent", "name": "Orchestrator", "host": host, "verkey": verkey,
 		"keys_digest": "EDigest", "grade": "software"}, nil)
 	logOf := func(said string, at time.Time, revokedAt string) [][]byte {
@@ -162,7 +169,7 @@ func aCreation(t *testing.T, name string, change func(*creation)) CreationCase {
 		}
 		return out
 	}
-	grantLog, bodyLog := logOf(grantSAID, grantAt, c.revokedAt), logOf(bodySAID, bodyAt, "")
+	grantLog, bodyLog := logOf(grantSAID, grantAt, c.revokedAt), logOf(bodySAID, bodyAt, c.bodyRevokedAt)
 
 	signed := string(agentbody.SignedRequest{For: c.forIssuer, Host: host, Method: c.method, Target: c.target,
 		Timestamp: c.stamp, Nonce: "request-nonce-0001", Body: []byte(c.signedBody)}.Bytes())
@@ -261,6 +268,15 @@ func creationCases(t *testing.T) []CreationCase {
 			c.createdCaps = []string{"code.repository.read"}
 			c.createdLimits = map[string]map[string][]string{"code.repository.read": {"repository": {"acme/docs"}, "repository_id": {"101"}}}
 			c.signedBody = `{"repositories":[{"repository":"acme/docs","access":"read"}]}`
+		}),
+		refuse("the creator's body credential belongs to another AI agent than the creator's grant", "the body credential is for", func(c *creation) {
+			c.bodyFor = "EAnotherAIAgent0123456789ABCDEFGHIJKLMNOPQR"
+		}),
+		refuse("the creator's body credential was revoked before the new grant was issued", "body credential was revoked before", func(c *creation) {
+			c.bodyRevokedAt = "2026-11-02T12:00:10Z"
+		}),
+		refuse("the creator's grant had lapsed when its body made the request", "after the creator's grant lapsed", func(c *creation) {
+			c.creatorUntil, c.createdUntil = "2026-11-02T11:59:00Z", "2026-11-02T11:59:00Z"
 		}),
 		refuse("the grant is of a version that does not admit the kind", "version that admits", func(c *creation) { c.createdSchema = schemas.AIAgentGrantV11.Schema.SAID }),
 	}

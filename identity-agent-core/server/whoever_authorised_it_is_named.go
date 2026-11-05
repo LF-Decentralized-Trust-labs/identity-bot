@@ -160,6 +160,16 @@ func nameAuthority(a coretypes.Authority, kind *schemas.AssetGrant, claims map[s
 			"signature": a.Request.Signature, "asked": asked,
 		}
 	}
+	// A request an AI agent's body made rests on its creator's grant, not on a
+	// Controller Grant: the edge names that, in the schema it has.
+	if a.Request != nil && a.Request.Kind == authorisation.KindAIAgentBody {
+		if a.CreatorGrant == "" || a.CreatorGrantSchema == "" {
+			return nil // nothing to name; authorisation.Check refuses it
+		}
+		return map[string]interface{}{
+			"authorised_by": map[string]interface{}{"n": a.CreatorGrant, "s": a.CreatorGrantSchema},
+		}
+	}
 	if a.ControllerGrant == "" {
 		return nil
 	}
@@ -231,6 +241,23 @@ func (s *CoreServer) checkAuthorisationOf(acdc []byte, issuer, registry, said st
 			raw, _ := base64.StdEncoding.DecodeString(ev)
 			in.GrantLog = append(in.GrantLog, raw)
 		}
+	case authorisation.KindAIAgentBody:
+		// The creator's grant (which must hold agent.create) and its body
+		// credential, each with the log that shows whether it stood.
+		grant, err := s.DataStore.GetCredential(by.CreatorGrant)
+		if err != nil || grant == nil {
+			return fmt.Errorf("the creator's grant is not on record")
+		}
+		if in.Grant, in.GrantLog, err = s.credentialAndLog(grant); err != nil {
+			return err
+		}
+		body, err := s.DataStore.GetCredential(by.CreatorBody)
+		if err != nil || body == nil {
+			return fmt.Errorf("the creator's body credential is not on record")
+		}
+		if in.CreatorBody, in.CreatorBodyLog, err = s.credentialAndLog(body); err != nil {
+			return err
+		}
 	case "owner":
 		oa, err := s.ownerAuthority()
 		if err != nil || oa == nil {
@@ -247,6 +274,24 @@ func (s *CoreServer) checkAuthorisationOf(acdc []byte, issuer, registry, said st
 		return err
 	}
 	return nil
+}
+
+// credentialAndLog is a credential as issued and its transaction log, in order.
+func (s *CoreServer) credentialAndLog(rec *store.CredentialRecord) ([]byte, [][]byte, error) {
+	acdc, err := base64.StdEncoding.DecodeString(rec.AcdcJson)
+	if err != nil {
+		return nil, nil, err
+	}
+	events, _, err := s.credentialLog(rec.RegistrySAID, rec.SAID)
+	if err != nil {
+		return nil, nil, err
+	}
+	var log [][]byte
+	for _, ev := range events {
+		raw, _ := base64.StdEncoding.DecodeString(ev)
+		log = append(log, raw)
+	}
+	return acdc, log, nil
 }
 
 // expectedAsset is the asset an authorising request's path names, from the
