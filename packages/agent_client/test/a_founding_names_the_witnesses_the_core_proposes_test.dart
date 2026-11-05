@@ -86,6 +86,20 @@ void main() {
   });
 
   test(
+      'a core that proposes a threshold below a majority of the witnesses '
+      'named gets a majority', () async {
+    core = await anotherCore(bin, km, witnesses: [w1, w2]);
+    core.client.alterTheAnswerTo['/api/events/witnesses-for-a-founding'] =
+        (a) => {...a, 'toad': 1};
+    final done = await LocalCoreKeriService(
+            baseUrl: core.base, client: core.client, keyMath: km)
+        .inceptAid(name: 'me', code: phrase);
+    expect(done.witnesses, unorderedEquals([w1.aid, w2.aid]));
+    expect(done.witnessThreshold, 2);
+    expect((await founding(done.aid))['bt'], '2');
+  });
+
+  test(
       'a proposed witness that does not answer is left out, and the threshold '
       'falls to the witnesses that remain', () async {
     w2.mute = true;

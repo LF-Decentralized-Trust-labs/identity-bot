@@ -92,8 +92,13 @@ class TheWitnessesAFoundingNames {
       return _none('none of the ${proposed.length} witnesses the core proposed '
           'answered in its own name');
     }
+    // At least a majority of the witnesses named, as the core's own choice of
+    // witnesses asks: a core that proposes a threshold of one out of several
+    // would let one witness, perhaps its own, stand for all of them.
     final asked = body is Map ? body['toad'] : null;
-    final toad = (asked is int ? asked : 1).clamp(1, chosen.length).toInt();
+    final majority = chosen.length ~/ 2 + 1;
+    final toad =
+        (asked is int ? asked : 1).clamp(majority, chosen.length).toInt();
     return WitnessesChosen(chosen, toad,
         {for (final w in chosen) w: proposed[w]!}, null);
   }
