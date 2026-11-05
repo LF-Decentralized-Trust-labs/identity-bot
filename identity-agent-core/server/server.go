@@ -2695,7 +2695,7 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 		if err2 := json.Unmarshal(acdcBytes, &acdcBody); err2 == nil {
 			if issuerAid, ok := acdcBody["i"].(string); ok && issuerAid != "" {
 				// Try contact KEL first (cross-instance: issuer is a remote contact).
-				if kelRecord, err3 := s.DataStore.GetContactKEL(issuerAid); err3 == nil && kelRecord != nil {
+				if kelRecord, err3 := s.DataStore.GetContactKEL(issuerAid); err3 == nil && kelRecord != nil && kelRecord.KelVerified {
 					issuerKelEvents = unwrapEventJSON(kelRecord.KEL)
 				}
 				// Fall back to own KEL (self-issued: issuer is this instance).
@@ -2801,7 +2801,7 @@ func (s *CoreServer) handleVerifyCredentialChain(w http.ResponseWriter, r *http.
 		if acdcBody != nil {
 			if aid, ok := acdcBody["i"].(string); ok {
 				issuerAid = aid
-				if kelRecord, err := s.DataStore.GetContactKEL(aid); err == nil && kelRecord != nil {
+				if kelRecord, err := s.DataStore.GetContactKEL(aid); err == nil && kelRecord != nil && kelRecord.KelVerified {
 					issuerKelEvents = unwrapEventJSON(kelRecord.KEL)
 				}
 				if issuerKelEvents == nil {
@@ -3874,7 +3874,9 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 			log.Printf("[identity-agent-core] OOBI-RESOLVE: KEL validation error for %s: %v", oobiData.AID, err)
 			validationErrors = []string{err.Error()}
 		} else {
-			kelVerified = valResult.KelVerified
+			// Verified with no key is not verified (see EnsureKeriContact): the
+			// fallback is the key the peer served.
+			kelVerified = valResult.KelVerified && valResult.CurrentPublicKey != ""
 			witnessed = valResult.Witnessed
 			if valResult.CurrentPublicKey != "" {
 				currentPublicKey = valResult.CurrentPublicKey
@@ -4020,7 +4022,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Printf("[identity-agent-core] CONTACT: KEL validation error for %s: %v", oobiData.AID, err)
 		} else {
-			kelVerified = valResult.KelVerified
+			kelVerified = valResult.KelVerified && valResult.CurrentPublicKey != ""
 			if valResult.CurrentPublicKey != "" {
 				currentPublicKey = valResult.CurrentPublicKey
 			}

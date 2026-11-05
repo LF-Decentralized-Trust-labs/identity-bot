@@ -283,7 +283,7 @@ func TestARotationNeitherBreaksAnOldMessageNorLetsTheRetiredKeyVouch(t *testing.
 	_, key2 := signingPair(t, 42)
 	icp := map[string]interface{}{"v": "KERI10JSON", "t": "icp", "s": "0", "i": m.senderAID, "d": "Eicp", "k": []interface{}{key1}}
 	if err := m.receiver.DataStore.SaveContactKEL(store.ContactKELRecord{
-		AID: m.senderAID, KEL: []map[string]interface{}{icp}, KelVerified: true, CurrentPublicKey: key1,
+		AID: m.senderAID, KEL: withTheBytesItWasVerifiedBy(t, icp), KelVerified: true, CurrentPublicKey: key1,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +309,7 @@ func TestARotationNeitherBreaksAnOldMessageNorLetsTheRetiredKeyVouch(t *testing.
 	// The sender rotates to a second key.
 	rot := map[string]interface{}{"v": "KERI10JSON", "t": "rot", "s": "1", "i": m.senderAID, "d": "Erot", "k": []interface{}{key2}}
 	if err := m.receiver.DataStore.SaveContactKEL(store.ContactKELRecord{
-		AID: m.senderAID, KEL: []map[string]interface{}{icp, rot}, KelVerified: true, CurrentPublicKey: key2,
+		AID: m.senderAID, KEL: withTheBytesItWasVerifiedBy(t, icp, rot), KelVerified: true, CurrentPublicKey: key2,
 	}); err != nil {
 		t.Fatal(err)
 	}

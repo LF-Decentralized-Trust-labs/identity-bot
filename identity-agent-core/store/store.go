@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"identity-agent-core/drivers"
 	"identity-agent-core/internal/atomicfile"
 )
 
@@ -1328,6 +1329,7 @@ func (s *FileStore) SaveContactKEL(record ContactKELRecord) error {
 	if err != nil {
 		kels = map[string]ContactKELRecord{}
 	}
+	record.sealFromVerifiedBytes()
 	kels[record.AID] = record
 	return s.writeJSON(filepath.Join(s.dir, "contact_kels.json"), kels)
 }
@@ -1344,7 +1346,16 @@ func (s *FileStore) GetContactKEL(aid string) (*ContactKELRecord, error) {
 	if !ok {
 		return nil, nil
 	}
+	r.sealFromVerifiedBytes()
 	return &r, nil
+}
+
+// sealFromVerifiedBytes makes a verified record say only what was verified:
+// KelVerified is a verdict on each event's raw bytes and signature, so every
+// other field of the log is derived from those bytes, on the way in and on the
+// way out (a record stored before this was kept is corrected when read).
+func (r *ContactKELRecord) sealFromVerifiedBytes() {
+	r.KEL, r.KelVerified, r.ValidationErrors = drivers.SealedKEL(r.KEL, r.KelVerified, r.ValidationErrors)
 }
 
 func (s *FileStore) loadContactKELs() (map[string]ContactKELRecord, error) {

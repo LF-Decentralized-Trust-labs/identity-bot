@@ -1171,6 +1171,7 @@ func (s *SQLiteStore) GetCredentialSchema(said string) (*CredentialSchemaRecord,
 // ── Contact KELs ──────────────────────────────────────────────────────────────
 
 func (s *SQLiteStore) SaveContactKEL(record ContactKELRecord) error {
+	record.sealFromVerifiedBytes()
 	kelJSON, err := json.Marshal(record.KEL)
 	if err != nil {
 		return fmt.Errorf("failed to marshal contact KEL: %w", err)
@@ -1221,6 +1222,7 @@ func (s *SQLiteStore) GetContactKEL(aid string) (*ContactKELRecord, error) {
 			return nil, fmt.Errorf("failed to parse validation errors JSON: %w", err)
 		}
 	}
+	r.sealFromVerifiedBytes()
 	return &r, nil
 }
 

@@ -101,10 +101,8 @@ func TestRecoveryFindsTheNewAddressViaAWitness(t *testing.T) {
 	defer witness.Close()
 
 	if err := s.DataStore.SaveContactKEL(store.ContactKELRecord{
-		AID: "EContact",
-		KEL: []map[string]interface{}{
-			{"t": "icp", "s": "0", "b": []interface{}{"EWitOne"}},
-		},
+		AID: "EContact", KelVerified: true,
+		KEL: withTheBytesItWasVerifiedBy(t, map[string]interface{}{"t": "icp", "s": "0", "b": []interface{}{"EWitOne"}}),
 	}); err != nil {
 		t.Fatalf("seed KEL: %v", err)
 	}
@@ -143,8 +141,8 @@ func TestAWitnessCannotAnswerForSomebodyElse(t *testing.T) {
 	defer witness.Close()
 
 	s.DataStore.SaveContactKEL(store.ContactKELRecord{
-		AID: "EContact",
-		KEL: []map[string]interface{}{{"t": "icp", "s": "0", "b": []interface{}{"EWitOne"}}},
+		AID: "EContact", KelVerified: true,
+		KEL: withTheBytesItWasVerifiedBy(t, map[string]interface{}{"t": "icp", "s": "0", "b": []interface{}{"EWitOne"}}),
 	})
 	s.DataStore.SaveContact(store.ContactRecord{
 		AID: "EWitOne", OobiURL: witness.URL + "/public/oobi/EWitOne",
@@ -152,5 +150,50 @@ func TestAWitnessCannotAnswerForSomebodyElse(t *testing.T) {
 
 	if found, err := s.RecoverContactEndpoint("EContact"); err == nil {
 		t.Fatalf("a record for another controller was accepted: %+v", found)
+	}
+}
+
+// The witnesses to ask are named by a log kept as verified. A stored log that
+// is not verified is text somebody served, so it does not say who to ask.
+func TestRecoveryDoesNotReadTheWitnessesFromAnUnverifiedLog(t *testing.T) {
+	s := witnessWithStore(t)
+	asked := false
+	witness := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked = true
+		json.NewEncoder(w).Encode(map[string]any{"records": []map[string]any{}})
+	}))
+	defer witness.Close()
+	if err := s.DataStore.SaveContactKEL(store.ContactKELRecord{
+		AID: "EContact", KelVerified: false,
+		KEL: []map[string]interface{}{{"t": "icp", "s": "0", "b": []interface{}{"EWitOne"}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DataStore.SaveContact(store.ContactRecord{
+		AID: "EWitOne", OobiURL: witness.URL + "/public/oobi/EWitOne",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RecoverContactEndpoint("EContact"); err == nil || asked {
+		t.Fatalf("a witness named by an unverified log was asked (err=%v, asked=%v)", err, asked)
+	}
+}
+
+// The keys a peer is checked against are read from a verified log only.
+func TestStoredKELEventsAreOnlyAVerifiedLog(t *testing.T) {
+	s := witnessWithStore(t)
+	for aid, verified := range map[string]bool{"EVerified": true, "EUnverified": false} {
+		if err := s.DataStore.SaveContactKEL(store.ContactKELRecord{
+			AID: aid, KelVerified: verified,
+			KEL: withTheBytesItWasVerifiedBy(t, map[string]interface{}{"t": "icp", "s": "0", "i": aid, "d": aid}),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(s.storedKELEvents("EVerified")) != 1 {
+		t.Fatal("a verified log was not read")
+	}
+	if got := s.storedKELEvents("EUnverified"); len(got) != 0 {
+		t.Fatalf("an unverified log was read: %v", got)
 	}
 }

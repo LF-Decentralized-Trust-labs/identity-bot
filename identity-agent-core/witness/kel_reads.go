@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"strings"
 	"time"
+
+	"identity-agent-core/drivers"
 )
 
 // Who may read a key log from a witness.
@@ -84,7 +86,7 @@ func boundHost(host string) string {
 func InceptionOf(kel []map[string]interface{}) (ev map[string]interface{}, raw []byte, ok bool) {
 	for _, entry := range kel {
 		if b64, has := entry["raw_bytes_b64"].(string); has && b64 != "" {
-			r, err := decodeAnyBase64(b64)
+			r, err := drivers.DecodeRawBytes(b64)
 			if err != nil {
 				continue
 			}
@@ -113,15 +115,6 @@ func InceptionOf(kel []map[string]interface{}) (ev map[string]interface{}, raw [
 		}
 	}
 	return nil, nil, false
-}
-
-func decodeAnyBase64(s string) ([]byte, error) {
-	for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding} {
-		if r, err := enc.DecodeString(s); err == nil {
-			return r, nil
-		}
-	}
-	return nil, fmt.Errorf("not base64")
 }
 
 // InceptionProof is the header value that lets a verifier holding a log read it
@@ -221,7 +214,7 @@ func (s *Service) mayReadByInception(aid string, req *http.Request) bool {
 	// verifier's claim was checked by. Only an event stored before witnesses
 	// kept bytes is compared by its parsed fields.
 	if kel[0].RawBytesB64 != "" {
-		held, err := decodeAnyBase64(kel[0].RawBytesB64)
+		held, err := drivers.DecodeRawBytes(kel[0].RawBytesB64)
 		return err == nil && bytes.Equal(raw, held)
 	}
 	var held map[string]interface{}

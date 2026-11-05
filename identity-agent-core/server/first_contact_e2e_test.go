@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -47,10 +48,28 @@ func inceptionCommittingTo(t *testing.T, aid string, ks *didcomm.KeySet) []map[s
 	if err != nil {
 		t.Fatal(err)
 	}
-	return []map[string]interface{}{{
+	return withTheBytesItWasVerifiedBy(t, map[string]interface{}{
 		"v": "KERI10JSON", "t": "icp", "s": "0", "i": aid, "d": aid,
 		"a": []interface{}{anchor},
-	}}
+	})
+}
+
+// withTheBytesItWasVerifiedBy gives each event the raw bytes a verified log
+// is kept with. A log is kept as verified only if it carries them, and what is
+// read back is derived from them, so a fixture for a verified log has to.
+func withTheBytesItWasVerifiedBy(t *testing.T, events ...map[string]interface{}) []map[string]interface{} {
+	t.Helper()
+	out := make([]map[string]interface{}, 0, len(events))
+	for _, ev := range events {
+		raw, err := json.Marshal(ev)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, map[string]interface{}{
+			"event_json": string(raw), "raw_bytes_b64": base64.StdEncoding.EncodeToString(raw),
+		})
+	}
+	return out
 }
 
 // The whole point, end to end through the public endpoint: two agents that have
@@ -282,5 +301,63 @@ func TestAnApprovedStrangerWithNoAddressIsNotEstablished(t *testing.T) {
 	}
 	if _, known := s.peersInTest()[strangerAID]; known {
 		t.Fatal("a peer was recorded despite having no address")
+	}
+}
+
+// A stranger can present somebody else's genuine bytes beside an event_json
+// that names their own keys. The history checks out (the verdict covers the
+// bytes), so the keys must come from the bytes, or the connect request is
+// recorded under the other person's identifier with the stranger's keys.
+func TestAStrangerCannotPutTheirKeysBesideSomeoneElsesBytes(t *testing.T) {
+	const victimAID = "EVictimWhoseBytesAreGenuine"
+	s := witnessWithSeed(t, 1)
+	s.KeriDriver = acceptingKELDriver(t)
+
+	victimKeys, err := didcomm.GenerateKeySet(victimAID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attackerKeys, err := didcomm.GenerateKeySet(victimAID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	genuine := inceptionCommittingTo(t, victimAID, victimKeys)
+	forged := inceptionCommittingTo(t, victimAID, attackerKeys)
+
+	presented := []map[string]interface{}{{
+		"raw_bytes_b64": genuine[0]["raw_bytes_b64"],
+		"event_json":    forged[0]["event_json"],
+	}}
+
+	did, _, err := s.identifyStranger(victimAID, presented)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := victimKeys.DID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if did.Ed != want.Ed || did.X25519 != want.X25519 || did.MlKem != want.MlKem || did.Dsa != want.Dsa {
+		t.Fatal("the keys were taken from the edited event text instead of the verified bytes")
+	}
+
+	// A history with no bytes cannot have been verified by them, so it names nobody.
+	if _, _, err := s.identifyStranger(victimAID, []map[string]interface{}{{"event_json": forged[0]["event_json"]}}); err == nil {
+		t.Fatal("a history without bytes identified somebody")
+	}
+}
+
+// A contact log that was not verified holds the key its peer served, which is
+// the peer's say-so about itself. It is not a key for anybody.
+func TestAnUnverifiedContactLogYieldsNoKey(t *testing.T) {
+	s := witnessWithSeed(t, 1)
+	if err := s.DataStore.SaveContactKEL(store.ContactKELRecord{
+		AID: "EServedOnly", KEL: []map[string]interface{}{{"t": "icp"}},
+		KelVerified: false, CurrentPublicKey: "DServedByThePeer",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if key, err := s.publicKeyOf("EServedOnly"); err == nil {
+		t.Fatalf("a key from an unverified log was returned: %q", key)
 	}
 }

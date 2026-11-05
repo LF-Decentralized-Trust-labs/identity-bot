@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"identity-agent-core/asset"
+	"identity-agent-core/didcomm"
 	"identity-agent-core/drivers"
 	"identity-agent-core/drivers/driverfake"
 	"identity-agent-core/iacrypto"
@@ -104,8 +105,14 @@ func anOrgWithOwners(t *testing.T, owners []string, rows ...asset.Employee) *Cor
 
 func verifiedLog(t *testing.T, s *CoreServer, aid, key string) {
 	t.Helper()
+	ks, err := didcomm.GenerateKeySet(aid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A log is kept as verified only with the bytes it was verified by.
 	if err := s.DataStore.SaveContactKEL(store.ContactKELRecord{
-		AID: aid, KelVerified: true, CurrentPublicKey: key, EventsValidated: 1}); err != nil {
+		AID: aid, KEL: inceptionCommittingTo(t, aid, ks),
+		KelVerified: true, CurrentPublicKey: key, EventsValidated: 1}); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -124,7 +124,9 @@ func (s *CoreServer) publicKeyOf(aid string) (string, error) {
 		return "", fmt.Errorf("no store to resolve %s from", aid)
 	}
 	if record, err := s.DataStore.GetContactKEL(aid); err == nil && record != nil {
-		if record.CurrentPublicKey != "" {
+		// Only a key a verified log yielded: an unverified record holds the key
+		// the peer served, which is the peer's say-so about itself.
+		if record.KelVerified && record.CurrentPublicKey != "" {
 			return record.CurrentPublicKey, nil
 		}
 	}

@@ -426,7 +426,7 @@ func (s *CoreServer) verifyPresentedCredentialACDC(ctx context.Context, acdcJson
 		if json.Unmarshal(acdcBytes, &acdcBody) == nil {
 			if ia, ok := acdcBody["i"].(string); ok && ia != "" {
 				issuerAid = ia
-				if kelRecord, err3 := s.DataStore.GetContactKEL(issuerAid); err3 == nil && kelRecord != nil {
+				if kelRecord, err3 := s.DataStore.GetContactKEL(issuerAid); err3 == nil && kelRecord != nil && kelRecord.KelVerified {
 					issuerKelEvents = unwrapEventJSON(kelRecord.KEL)
 				}
 				if issuerKelEvents == nil {
