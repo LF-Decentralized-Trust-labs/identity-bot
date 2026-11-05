@@ -199,4 +199,6 @@ agent's own origins (`EndpointService.OwnURLs`). Rollout step b no longer lists
 `AGENT_DIRECT_INGRESS_ADDR`; an agent started with it set refuses to start and
 names the variable. A deployment that was reached for management on a LAN
 address or mapped port sets `PUBLIC_URL` to that address, which keeps it an
-origin of the agent.
+origin of the agent. The management listener itself stays on loopback, so such a deployment also
+needs a reverse proxy or port forward from that address to it; setting
+`PUBLIC_URL` alone accepts the origin but does not make it reachable.
