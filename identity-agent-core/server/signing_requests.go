@@ -15,6 +15,8 @@ import (
 	"identity-agent-core/store"
 
 	"github.com/go-chi/chi/v5"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 // Asking the device that holds the keys.
@@ -215,8 +217,7 @@ func (s *CoreServer) handleListSigningRequests(w http.ResponseWriter, r *http.Re
 		}
 		out = append(out, m)
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"requests": out, "count": len(out)})
+	jsonreply.Write(w, http.StatusOK, map[string]any{"requests": out, "count": len(out)})
 }
 
 // handleFulfilSigningRequest accepts the signature the controller device made.
@@ -302,8 +303,7 @@ func (s *CoreServer) handleFulfilSigningRequest(w http.ResponseWriter, r *http.R
 	}
 	log.Printf("[signing] %s for %s was signed", req.Kind, req.AID)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"fulfilled": true, "id": id, "kind": req.Kind})
+	jsonreply.Write(w, http.StatusOK, map[string]any{"fulfilled": true, "id": id, "kind": req.Kind})
 }
 
 // handleRefuseSigningRequest records that the owner declined.
@@ -332,7 +332,6 @@ func (s *CoreServer) handleRefuseSigningRequest(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, "could not record the refusal", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
 	if req.Kind == signingKindRevocation {
 		s.withdrawalRefused(id)
 	}
@@ -340,7 +339,7 @@ func (s *CoreServer) handleRefuseSigningRequest(w http.ResponseWriter, r *http.R
 	if isGrantKind(req.Kind) {
 		s.buildNextBehind()
 	}
-	json.NewEncoder(w).Encode(map[string]any{"refused": true, "id": id})
+	jsonreply.Write(w, http.StatusOK, map[string]any{"refused": true, "id": id})
 }
 
 // handleCheckWhatIsToBeSigned is run by the device that holds the identity's
