@@ -8,6 +8,19 @@ import 'a_controller_offering_itself.dart';
 import 'controller_signing_client.dart';
 import 'the_owner_at_this_computer.dart';
 
+/// Nothing could be reached at an address: this computer is offline, the
+/// machine there is off, or a relay in front of it has nothing behind it.
+///
+/// Kept apart from "something answered that is not an agent", because the two
+/// mean different things to a person: the first may pass on its own, the second
+/// will not.
+class NothingAnsweredThere implements Exception {
+  NothingAnsweredThere(this.origin);
+  final String origin;
+  @override
+  String toString() => 'nothing answered at $origin';
+}
+
 /// The machine's own half of asking to act for an identity.
 ///
 /// Two questions, asked of two different places, and keeping them apart is the
@@ -79,7 +92,9 @@ class AskingToActForAnIdentity {
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     if (orgName.isNotEmpty) body['org_name'] = orgName;
     final offer = ControllerOffer.fromJson(body);
-    if (offer.aid.isEmpty || offer.publicKey.isEmpty || offer.signature.isEmpty) {
+    if (offer.aid.isEmpty ||
+        offer.publicKey.isEmpty ||
+        offer.signature.isEmpty) {
       throw Exception('this computer signed nothing usable, so there is '
           'nothing anybody could authorise');
     }
@@ -116,7 +131,8 @@ class AskingToActForAnIdentity {
       inner: _plain,
     );
     try {
-      final res = await client.get(Uri.parse('$agentOrigin/api/controller/agent'));
+      final res =
+          await client.get(Uri.parse('$agentOrigin/api/controller/agent'));
       if (res.statusCode == 401 || res.statusCode == 403) return null;
       if (res.statusCode != 200) {
         throw Exception('the Identity Agent at $agentOrigin answered '
@@ -164,7 +180,13 @@ class AskingToActForAnIdentity {
     try {
       res = await _plain.get(Uri.parse('$agentOrigin/api/health'));
     } catch (e) {
-      throw Exception('nothing answered at $agentOrigin — check the address');
+      throw NothingAnsweredThere(agentOrigin);
+    }
+    // A relay or proxy that is up while the machine behind it is not answers
+    // 502, 503 or 504. That is the machine being off, not the address being
+    // wrong, so it is reported as no answer.
+    if (const {502, 503, 504}.contains(res.statusCode)) {
+      throw NothingAnsweredThere(agentOrigin);
     }
     if (res.statusCode != 200) {
       throw Exception('something answered at $agentOrigin and it is not an '
@@ -209,7 +231,8 @@ class AskingToActForAnIdentity {
   /// Throws rather than returning false. There is one thing to do about every
   /// reason it fails, and a caller offered a boolean will eventually treat one
   /// of them as good enough.
-  Future<String> confirmThisIsReally(String agentAid, String agentOrigin) async {
+  Future<String> confirmThisIsReally(
+      String agentAid, String agentOrigin) async {
     final res = await _plain.post(
       Uri.parse('$_localCore/api/verify/identity-elsewhere'),
       headers: const {'Content-Type': 'application/json'},

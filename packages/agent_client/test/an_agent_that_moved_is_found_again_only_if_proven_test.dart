@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:agent_client/config/agent_config.dart';
@@ -12,13 +13,13 @@ import 'package:test/test.dart';
 /// An organisation that changed address is found again, but only at an address
 /// proven to be the same organisation.
 ///
-/// The case that started this: the app was recorded against a quick-tunnel URL;
-/// the organisation then moved to a stable relay name. The old address was dead,
+/// The case that started this: the app was recorded against a temporary
+/// address; the organisation then moved to a stable one. The old address was dead,
 /// the app pushed it to its core at every launch, and opening the organisation
 /// failed with an error that named no cause.
 const _aid = 'EORGANISATION';
 const _old = 'https://old-tunnel.example.test';
-const _new = 'https://grape-dev.example.test';
+const _new = 'https://box.example.test';
 const _impostor = 'https://impostor.example.test';
 
 /// A small world: which hosts are alive, which identifier each one's published
@@ -28,6 +29,16 @@ class _World {
   final keyHistoryProves = <String, String>{};
   final recognisesUs = <String, String>{}; // host -> identifier it answers with
   final seen = <http.Request>[];
+
+  /// Hosts that are up but answer with something that is not an agent.
+  final notAnAgent = <String>{};
+
+  /// Hosts a relay answers for with 502, because the machine behind is off.
+  final machineOff = <String>{};
+
+  /// When set, a request to a dead host waits for this before failing, as an
+  /// address that does not answer really does.
+  Completer<void>? holdDeadHosts;
 
   http.Client client() => MockClient((req) async {
         seen.add(req);
@@ -43,17 +54,26 @@ class _World {
             final proves = keyHistoryProves['${oobi.scheme}://${oobi.host}'];
             if (proves == null || proves != body['aid']) {
               return http.Response(
-                  jsonEncode({'verified': false, 'why': 'that history names '
-                      '${proves ?? 'nobody'}'}),
+                  jsonEncode({
+                    'verified': false,
+                    'why': 'that history names '
+                        '${proves ?? 'nobody'}'
+                  }),
                   200);
             }
             return http.Response(
-                jsonEncode({'verified': true, 'aid': proves, 'public_key': 'D'}),
+                jsonEncode(
+                    {'verified': true, 'aid': proves, 'public_key': 'D'}),
                 200);
           }
           return http.Response('{}', 200); // front-end-for etc.
         }
-        if (!alive.contains(host)) throw http.ClientException('no route', req.url);
+        if (notAnAgent.contains(host)) return http.Response('not here', 404);
+        if (machineOff.contains(host)) return http.Response('bad gateway', 502);
+        if (!alive.contains(host)) {
+          await holdDeadHosts?.future;
+          throw http.ClientException('no route', req.url);
+        }
         if (req.url.path == '/api/health') {
           return http.Response('{"status":"active","agent":"keri-go"}', 200);
         }
@@ -82,53 +102,61 @@ void main() {
     AgentConfig.agentAid = '';
   });
 
-  Future<WhichHalfThisAppIsRunning> recorded() => WhichHalfThisAppIsRunning.now();
+  Future<WhichHalfThisAppIsRunning> recorded() =>
+      WhichHalfThisAppIsRunning.now();
 
   test('an agent that still answers is left exactly where it is', () async {
     world.alive.add(_old);
-    final out = await finder.findAgain(
-        current: await recorded(), hints: const [_new]);
+    final out =
+        await finder.findAgain(current: await recorded(), hints: const [_new]);
     expect(out.moved, isFalse);
     expect(out.sayThis, isEmpty);
     expect((await recorded()).agentOrigin, _old);
   });
 
-  test('a dead address is replaced by a lead whose key history proves the same '
+  test(
+      'a dead address is replaced by a lead whose key history proves the same '
       'identifier AND which recognises this computer', () async {
     world
       ..alive.add(_new)
       ..keyHistoryProves[_new] = _aid
       ..recognisesUs[_new] = _aid;
-    final out = await finder.findAgain(
-        current: await recorded(), hints: const [_new]);
+    final out =
+        await finder.findAgain(current: await recorded(), hints: const [_new]);
     expect(out.moved, isTrue);
-    expect(out.sayThis, contains(_old));
-    expect(out.sayThis, contains(_new));
+    expect(out.sayThis, contains('has moved'));
+    // Said in words: no address, no identifier.
+    expect(out.sayThis, isNot(contains(_old)));
+    expect(out.sayThis, isNot(contains(_new)));
+    expect(out.sayThis, isNot(contains('https://')));
     final now = await recorded();
     expect(now.agentOrigin, _new);
     expect(now.agentAid, _aid); // the identity never changes, only where it is
   });
 
-  test('a lead whose key history names ANOTHER identifier is refused, and the '
+  test(
+      'a lead whose key history names ANOTHER identifier is refused, and the '
       'record is untouched', () async {
     world
       ..alive.add(_impostor)
       ..keyHistoryProves[_impostor] = 'EANOTHERORG'
       ..recognisesUs[_impostor] = _aid;
-    final out = await finder.findAgain(
-        current: await recorded(), hints: const [_impostor]);
+    final out = await finder
+        .findAgain(current: await recorded(), hints: const [_impostor]);
     expect(out.couldNotBeFound, isTrue);
-    expect(out.reasons.single, contains('did not prove it is this organisation'));
+    expect(out.reasons.single,
+        contains('could not show that it is this organisation'));
     expect((await recorded()).agentOrigin, _old);
   });
 
-  test('a copy of the public key history is not enough: the agent must also '
+  test(
+      'a copy of the public key history is not enough: the agent must also '
       'recognise this computer', () async {
     world
       ..alive.add(_impostor)
       ..keyHistoryProves[_impostor] = _aid; // public, anybody can serve it
-    final out = await finder.findAgain(
-        current: await recorded(), hints: const [_impostor]);
+    final out = await finder
+        .findAgain(current: await recorded(), hints: const [_impostor]);
     expect(out.couldNotBeFound, isTrue);
     expect(out.reasons.single, contains('does not recognise this computer'));
     expect((await recorded()).agentOrigin, _old);
@@ -140,13 +168,14 @@ void main() {
       ..alive.add(_impostor)
       ..keyHistoryProves[_impostor] = _aid
       ..recognisesUs[_impostor] = 'EANOTHERORG';
-    final out = await finder.findAgain(
-        current: await recorded(), hints: const [_impostor]);
+    final out = await finder
+        .findAgain(current: await recorded(), hints: const [_impostor]);
     expect(out.couldNotBeFound, isTrue);
     expect((await recorded()).agentOrigin, _old);
   });
 
-  test('a lead that is not https (or this computer) is never fetched', () async {
+  test('a lead that is not https (or this computer) is never fetched',
+      () async {
     world.alive.add('http://evil.example.test');
     final out = await finder.findAgain(
         current: await recorded(),
@@ -155,15 +184,16 @@ void main() {
     expect(world.seen.where((r) => r.url.host == 'evil.example.test'), isEmpty);
   });
 
-  test('the first proven lead wins, and a refused lead before it does not stop '
+  test(
+      'the first proven lead wins, and a refused lead before it does not stop '
       'the search', () async {
     world
       ..alive.addAll([_impostor, _new])
       ..keyHistoryProves[_impostor] = 'EANOTHERORG'
       ..keyHistoryProves[_new] = _aid
       ..recognisesUs[_new] = _aid;
-    final out = await finder.findAgain(
-        current: await recorded(), hints: const [_impostor, _new]);
+    final out = await finder
+        .findAgain(current: await recorded(), hints: const [_impostor, _new]);
     expect(out.moved, isTrue);
     expect((await recorded()).agentOrigin, _new);
   });
@@ -174,10 +204,13 @@ void main() {
       ..alive.add(_new)
       ..keyHistoryProves[_new] = _aid
       ..recognisesUs[_new] = _aid;
-    final out = await pointThisAppAtItsAgent(
+    final checked = Completer<WhereTheAgentWent>();
+    await pointThisAppAtItsAgent(
       using: world.client(),
       whereItMayHaveGone: () async => [_new],
+      onChecked: checked.complete,
     );
+    final out = await checked.future;
     expect(out.moved, isTrue);
     expect(AgentConfig.agentOrigin, _new);
     final told = world.seen
@@ -187,12 +220,108 @@ void main() {
 
   test('at launch with nothing found, the app still starts and says so',
       () async {
-    final out = await pointThisAppAtItsAgent(
+    final checked = Completer<WhereTheAgentWent>();
+    await pointThisAppAtItsAgent(
       using: world.client(),
       whereItMayHaveGone: () async => [_impostor],
+      onChecked: checked.complete,
     );
-    expect(out.couldNotBeFound, isTrue);
-    expect(out.sayThis, contains('find it again'));
+    final out = await checked.future;
+    expect(out.couldNotBeFound || out.couldNotBeReached, isTrue);
+    expect(out.sayThis, isNotEmpty);
     expect(AgentConfig.agentOrigin, _old);
+  });
+
+  test(
+      'an address that cannot be reached at all is NOT said to have moved: '
+      'this computer may be offline', () async {
+    // Nothing is alive: the recorded address and the lead both fail to connect.
+    final out =
+        await finder.findAgain(current: await recorded(), hints: const [_new]);
+    expect(out.moved, isFalse);
+    expect(out.couldNotBeFound, isFalse);
+    expect(out.couldNotBeReached, isTrue);
+    expect(out.sayThis, isNot(contains('moved')));
+    expect(out.sayThis, contains('online'));
+    expect((await recorded()).agentOrigin, _old);
+  });
+
+  test(
+      'a relay that is up while the machine behind it is off is also '
+      'unreachable, not gone', () async {
+    world.machineOff.add(_old);
+    final out = await finder.findAgain(current: await recorded());
+    expect(out.couldNotBeReached, isTrue);
+  });
+
+  test('an address that answers with something that is not the agent is gone',
+      () async {
+    world.notAnAgent.add(_old);
+    final out = await finder.findAgain(current: await recorded());
+    expect(out.couldNotBeFound, isTrue);
+    expect(out.sayThis, contains('whoever moved it'));
+    expect(out.sayThis, isNot(contains('https://')));
+  });
+
+  test('an address typed without a scheme is understood', () async {
+    world
+      ..alive.add(_new)
+      ..keyHistoryProves[_new] = _aid
+      ..recognisesUs[_new] = _aid;
+    final out = await finder.findAgain(
+        current: await recorded(), hints: const ['box.example.test']);
+    expect(out.moved, isTrue);
+  });
+
+  test('refusals are in words: no identifier, no scheme, no key history',
+      () async {
+    world
+      ..alive.add(_impostor)
+      ..keyHistoryProves[_impostor] = 'EANOTHERORG'
+      ..recognisesUs[_impostor] = _aid;
+    final out = await finder
+        .findAgain(current: await recorded(), hints: const [_impostor]);
+    for (final r in out.reasons) {
+      expect(r, isNot(contains('https://')));
+      expect(r, isNot(contains('EANOTHERORG')));
+      expect(r, isNot(contains('key history')));
+    }
+  });
+
+  test(
+      'at launch the app does not wait for a dead address: the look runs '
+      'behind it', () async {
+    world.holdDeadHosts = Completer<void>(); // dead hosts hang until released
+    final checked = Completer<WhereTheAgentWent>();
+    final started = await pointThisAppAtItsAgent(
+      using: world.client(),
+      onChecked: checked.complete,
+    ).timeout(const Duration(seconds: 2)); // returns while the look is pending
+    expect(started.stillToCheck, isTrue);
+    expect(AgentConfig.agentOrigin, _old);
+    expect(checked.isCompleted, isFalse);
+
+    world.holdDeadHosts!.complete();
+    final out = await checked.future;
+    expect(out.couldNotBeReached, isTrue);
+  });
+
+  test('a move found behind the app re-points the app and the core', () async {
+    world
+      ..alive.add(_new)
+      ..keyHistoryProves[_new] = _aid
+      ..recognisesUs[_new] = _aid;
+    final checked = Completer<WhereTheAgentWent>();
+    await pointThisAppAtItsAgent(
+      using: world.client(),
+      whereItMayHaveGone: () async => [_new],
+      onChecked: checked.complete,
+    );
+    final out = await checked.future;
+    expect(out.moved, isTrue);
+    expect(AgentConfig.agentOrigin, _new);
+    final told = world.seen
+        .lastWhere((r) => r.url.path == '/api/controller/front-end-for');
+    expect((jsonDecode(told.body) as Map)['agent_url'], _new);
   });
 }

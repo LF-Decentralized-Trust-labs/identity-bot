@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
@@ -36,28 +38,47 @@ import 'which_half_this_app_is_running.dart';
 /// itself signed by the identity's key (the root key never leaves the
 /// controller device), so a copy of the public log that also lies about
 /// recognising this machine would pass. It would then receive only requests that
-/// name the real agent and are refused by it; the signed endpoint record that
-/// closes this is recorded in strategy/1-Strategy/tasks.md.
+/// name the real agent and are refused by it. What closes this is a signed
+/// record, made by the agent's own key, naming the exact address; until that is
+/// checked here, an address is only as believable as the three checks above.
 ///
 /// Nothing is changed unless a candidate is proven. A failed search leaves the
 /// record exactly as it was.
 class FindingAnAgentThatMoved {
-  FindingAnAgentThatMoved({AskingToActForAnIdentity? asking, http.Client? client})
-      : _asking = asking ?? AskingToActForAnIdentity(client: client),
+  FindingAnAgentThatMoved({
+    AskingToActForAnIdentity? asking,
+    http.Client? client,
+    this.thing = 'organisation',
+  })  : _asking = asking ?? AskingToActForAnIdentity(client: client),
         _ownsAsking = asking == null;
 
   final AskingToActForAnIdentity _asking;
   final bool _ownsAsking;
 
+  /// What the person calls what is being looked for: "organisation" or
+  /// "identity". Every sentence this produces is for that person.
+  final String thing;
+
   /// Whether an Identity Agent answers at [origin] right now.
-  Future<bool> answersAt(String origin) async {
+  Future<bool> answersAt(String origin) async =>
+      await _lookAt(origin) == TheAnswerFromThere.anAgent;
+
+  /// What is at [origin], told apart in the way a person needs: an agent, a
+  /// place that cannot be reached at all (offline, machine off), or a place that
+  /// answers with something that is not the agent. Only the last is evidence
+  /// that the agent is not there any more.
+  Future<TheAnswerFromThere> _lookAt(String origin) async {
     try {
       await _asking.confirmAnAgentIsAt(origin).timeout(
             const Duration(seconds: 8),
           );
-      return true;
+      return TheAnswerFromThere.anAgent;
+    } on NothingAnsweredThere {
+      return TheAnswerFromThere.nothing;
+    } on TimeoutException {
+      return TheAnswerFromThere.nothing;
     } catch (_) {
-      return false;
+      return TheAnswerFromThere.somethingElse;
     }
   }
 
@@ -69,36 +90,40 @@ class FindingAnAgentThatMoved {
   }) async {
     final at = _tidy(candidate);
     if (at == null) {
-      throw StateError('"$candidate" is not an address this app will switch '
-          'to: it must start with https:// (http:// only for this computer).');
+      throw StateError('That is not an address this app will switch to. Use a '
+          'web address, such as box.example.com.');
     }
-    try {
-      await _asking.confirmAnAgentIsAt(at);
-    } catch (e) {
-      throw StateError(_plain(e));
+    switch (await _lookAt(at)) {
+      case TheAnswerFromThere.anAgent:
+        break;
+      case TheAnswerFromThere.nothing:
+        throw _NothingAnswered('Nothing answered at that address. Check it is '
+            'spelled right and that this computer is online.');
+      case TheAnswerFromThere.somethingElse:
+        throw StateError('Something answers at that address, but it is not an '
+            'Identity Agent.');
     }
     try {
       await _asking.confirmThisIsReally(agentAid, at);
     } catch (e) {
-      throw StateError(
-          'something answers at $at, but it did not prove it is this '
-          'organisation: ${_plain(e)}');
+      debugPrint('[controller] $at did not prove it is $agentAid: $e');
+      throw StateError('Something answers at that address, but it could not '
+          'show that it is this $thing.');
     }
     final WhatThisMachineWasTold? told;
     try {
       told = await _asking.whatTheAgentSays(at);
     } catch (e) {
-      throw StateError('the organisation\'s key history is published at $at, '
-          'but it did not answer this computer: ${_plain(e)}');
+      debugPrint('[controller] $at did not answer this computer: $e');
+      throw StateError('The $thing seems to be at that address, but it did not '
+          'answer this computer.');
     }
     if (told == null) {
-      throw StateError('the organisation\'s key history is published at $at, '
-          'but the agent there does not recognise this computer, so it cannot '
-          'be switched to safely');
+      throw StateError('The $thing there does not recognise this computer, so '
+          'this app cannot switch to it safely.');
     }
     if (told.agentAid != agentAid) {
-      throw StateError('the agent at $at says it is ${told.agentAid}, not '
-          '$agentAid');
+      throw StateError('What answers at that address is a different $thing.');
     }
   }
 
@@ -109,12 +134,15 @@ class FindingAnAgentThatMoved {
     required WhichHalfThisAppIsRunning current,
     List<String> hints = const [],
   }) async {
-    if (!current.isAController) return const WhereTheAgentWent.notAFrontEnd();
-    if (await answersAt(current.agentOrigin)) {
+    if (!current.isAController)
+      return const WhereTheAgentWent.notAFrontEnd(thing: '');
+    final there = await _lookAt(current.agentOrigin);
+    if (there == TheAnswerFromThere.anAgent) {
       return WhereTheAgentWent.stillThere(current.agentOrigin);
     }
     final tried = <String>{current.agentOrigin};
     final reasons = <String>[];
+    var aLeadAnsweredWithSomethingElse = false;
     for (final hint in hints) {
       final at = _tidy(hint) ?? hint.trim();
       if (at.isEmpty || !tried.add(at)) continue;
@@ -122,87 +150,138 @@ class FindingAnAgentThatMoved {
         await proveItIsStillThem(agentAid: current.agentAid, candidate: at);
       } catch (e) {
         reasons.add(_plain(e));
+        if (e is! _NothingAnswered) aLeadAnsweredWithSomethingElse = true;
         continue;
       }
       await WhichHalfThisAppIsRunning.pointAt(
           agentOrigin: at, agentAid: current.agentAid);
       debugPrint('[controller] ${current.agentAid} moved from '
           '${current.agentOrigin} to $at, and was proven to be the same');
-      return WhereTheAgentWent.movedTo(at, from: current.agentOrigin);
+      return WhereTheAgentWent.movedTo(at,
+          from: current.agentOrigin, thing: thing);
     }
-    return WhereTheAgentWent.notFound(current.agentOrigin, reasons);
+    // Nothing reached at all is NOT evidence of a move: this computer may be
+    // offline, or the machine the agent runs on switched off. Only an address
+    // that answers with something other than the agent says it is gone.
+    if (there == TheAnswerFromThere.nothing &&
+        !aLeadAnsweredWithSomethingElse) {
+      return WhereTheAgentWent.unreachable(current.agentOrigin, thing: thing);
+    }
+    return WhereTheAgentWent.notFound(current.agentOrigin, reasons,
+        thing: thing);
   }
 
   void dispose() {
     if (_ownsAsking) _asking.dispose();
   }
 
-  /// https, or http only to this computer; no path, query or credentials.
+  /// https (assumed when no scheme is typed), or http only to this computer; no path, query or credentials.
   static String? _tidy(String raw) {
-    final u = Uri.tryParse(raw.trim());
+    var text = raw.trim();
+    // A person types where it is, not how to speak to it.
+    if (text.isNotEmpty && !text.contains('://')) text = 'https://$text';
+    final u = Uri.tryParse(text);
     if (u == null || !u.hasAuthority || u.host.isEmpty) return null;
     if (u.userInfo.isNotEmpty) return null;
     final loopback =
         u.host == 'localhost' || u.host == '127.0.0.1' || u.host == '::1';
     if (u.scheme != 'https' && !(u.scheme == 'http' && loopback)) return null;
-    return Uri(
-            scheme: u.scheme,
-            host: u.host,
-            port: u.hasPort ? u.port : null)
+    return Uri(scheme: u.scheme, host: u.host, port: u.hasPort ? u.port : null)
         .toString();
   }
 
-  static String _plain(Object e) => e
-      .toString()
-      .replaceFirst(RegExp(r'^(Bad state|Exception): '), '');
+  static String _plain(Object e) =>
+      e.toString().replaceFirst(RegExp(r'^(Bad state|Exception): '), '');
 }
+
+/// Nothing could be reached at an address a person typed or was given.
+class _NothingAnswered extends StateError {
+  _NothingAnswered(super.message);
+}
+
+/// What is at an address, as far as a person needs to tell.
+enum TheAnswerFromThere { anAgent, nothing, somethingElse }
 
 /// What looking for a moved agent came to.
 @immutable
 class WhereTheAgentWent {
-  const WhereTheAgentWent._(this._kindOf, this.origin, this.from, this.reasons);
-  const WhereTheAgentWent.notAFrontEnd()
-      : this._(_Kind.notAFrontEnd, '', '', const []);
+  const WhereTheAgentWent._(
+      this._kindOf, this.origin, this.from, this.reasons, this.thing);
+  const WhereTheAgentWent.notAFrontEnd({String thing = ''})
+      : this._(_Kind.notAFrontEnd, '', '', const [], thing);
+
+  /// The look has not finished: the app has started on the recorded address
+  /// and is checking, in the background, that it still answers.
+  const WhereTheAgentWent.notCheckedYet()
+      : this._(_Kind.notCheckedYet, '', '', const [], '');
   const WhereTheAgentWent.stillThere(String origin)
-      : this._(_Kind.stillThere, origin, '', const []);
-  const WhereTheAgentWent.movedTo(String origin, {required String from})
-      : this._(_Kind.movedTo, origin, from, const []);
-  const WhereTheAgentWent.notFound(String old, List<String> reasons)
-      : this._(_Kind.notFound, old, '', reasons);
+      : this._(_Kind.stillThere, origin, '', const [], '');
+  const WhereTheAgentWent.movedTo(String origin,
+      {required String from, String thing = 'organisation'})
+      : this._(_Kind.movedTo, origin, from, const [], thing);
+  const WhereTheAgentWent.notFound(String old, List<String> reasons,
+      {String thing = 'organisation'})
+      : this._(_Kind.notFound, old, '', reasons, thing);
+
+  /// Nothing could be reached at the recorded address and no lead was proven:
+  /// this computer may be offline or the agent's machine switched off. It is
+  /// NOT said to have moved.
+  const WhereTheAgentWent.unreachable(String origin,
+      {String thing = 'organisation'})
+      : this._(_Kind.unreachable, origin, '', const [], thing);
 
   final _Kind _kindOf;
 
   /// Where the agent answers now (moved / still there), or where it used to
-  /// (not found).
+  /// (not found / unreachable).
   final String origin;
   final String from;
 
   /// Why each candidate was refused, in words for a person.
   final List<String> reasons;
 
+  /// What the person calls it: "organisation" or "identity".
+  final String thing;
+
   bool get isStillThere => _kindOf == _Kind.stillThere;
   bool get moved => _kindOf == _Kind.movedTo;
   bool get couldNotBeFound => _kindOf == _Kind.notFound;
+  bool get couldNotBeReached => _kindOf == _Kind.unreachable;
+  bool get stillToCheck => _kindOf == _Kind.notCheckedYet;
 
   /// One plain sentence for the person, or empty when there is nothing to say.
-  /// [thing] is what the person calls it: "organisation" or "identity".
-  String sayItAbout([String thing = 'organisation']) {
+  /// Never an address and never an identifier.
+  String get sayThis {
+    final t = thing.isEmpty ? 'organisation' : thing;
     switch (_kindOf) {
       case _Kind.movedTo:
-        return 'This $thing has moved. It was at $from and is now at '
-            '$origin. This app checked that it is the same $thing and '
-            'switched to the new address.';
+        return 'This $t has moved to a new address. This app checked that it '
+            'is the same $t and switched to it.';
       case _Kind.notFound:
-        return 'This $thing does not answer at $origin any more. If it has '
-            'moved, choose "find it again" and enter its new address; this '
-            'app will check it is the same $thing before switching.';
+        return 'This app cannot find this $t where it expected. If it has '
+            'moved, choose "find it again" and enter its new address, which '
+            'whoever moved it can tell you.';
+      case _Kind.unreachable:
+        return 'This app cannot reach this $t right now. Check that this '
+            'computer is online and that the machine it runs on is switched '
+            'on. Nothing has been changed.';
       case _Kind.stillThere:
       case _Kind.notAFrontEnd:
+      case _Kind.notCheckedYet:
         return '';
     }
   }
 
-  String get sayThis => sayItAbout();
+  /// Kept for callers that name the thing at the point of asking.
+  String sayItAbout(String thing) =>
+      WhereTheAgentWent._(_kindOf, origin, from, reasons, thing).sayThis;
 }
 
-enum _Kind { notAFrontEnd, stillThere, movedTo, notFound }
+enum _Kind {
+  notAFrontEnd,
+  notCheckedYet,
+  stillThere,
+  movedTo,
+  notFound,
+  unreachable
+}

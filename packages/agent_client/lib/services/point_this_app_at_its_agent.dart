@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -27,18 +28,30 @@ import 'the_owner_at_this_computer.dart';
 /// while another is local — so the answer is a property of the open profile,
 /// never of the installation.
 ///
-/// IF THE RECORDED AGENT NO LONGER ANSWERS, this looks for it again before
-/// telling the core anything — see [FindingAnAgentThatMoved]. [whereItMayHaveGone]
-/// supplies leads (an address the app was given at founding, say); none of them
-/// is believed until the identifier is proven to match, and a lead that is not
-/// proven changes nothing. What came of it is returned so the app can say so in
-/// plain words rather than failing later with an error that names no cause.
+/// WHETHER THE RECORDED AGENT STILL ANSWERS IS CHECKED AFTER THE APP HAS
+/// STARTED, never before. A look at an address that does not answer can take
+/// eight seconds, and a person whose computer is offline, or whose agent's
+/// machine is switched off, would otherwise wait that long at every launch for
+/// an answer that changes nothing. When [onChecked] is given, the app starts on
+/// the recorded address at once and the look runs behind it; [onChecked] is
+/// called with what it came to. Only an address that is truly gone
+/// ([WhereTheAgentWent.couldNotBeFound]) needs to interrupt anyone; one that
+/// cannot be reached is reported as that and nothing else (see
+/// [FindingAnAgentThatMoved]).
+///
+/// [whereItMayHaveGone] supplies leads (an address the app was given at
+/// founding, say); none of them is believed until the identifier is proven to
+/// match, and a lead that is not proven changes nothing. Without [onChecked]
+/// nothing is looked for, which is what every other caller wants. [thing] is
+/// what the person calls it: "organisation" or "identity".
 Future<WhereTheAgentWent> pointThisAppAtItsAgent({
   http.Client? using,
   Future<List<String>> Function()? whereItMayHaveGone,
   FindingAnAgentThatMoved? finder,
+  void Function(WhereTheAgentWent outcome)? onChecked,
+  String thing = 'organisation',
 }) async {
-  var half = await WhichHalfThisAppIsRunning.now();
+  final half = await WhichHalfThisAppIsRunning.now();
   if (half.couldNotTell) {
     // Nothing is changed on a non-answer. Clearing the origin would point a
     // running front end back at its own core, and telling that core to forget
@@ -49,20 +62,9 @@ Future<WhereTheAgentWent> pointThisAppAtItsAgent({
     return const WhereTheAgentWent.notAFrontEnd();
   }
   var outcome = const WhereTheAgentWent.notAFrontEnd();
-  if (half.isAController) {
-    final find = finder ?? FindingAnAgentThatMoved(client: using);
-    try {
-      outcome = await find.findAgain(
-        current: half,
-        hints: whereItMayHaveGone == null ? const [] : await whereItMayHaveGone(),
-      );
-    } catch (e) {
-      // Looking must never stop the app starting.
-      debugPrint('[controller] could not look for a moved agent: $e');
-    } finally {
-      if (finder == null) find.dispose();
-    }
-    if (outcome.moved) half = await WhichHalfThisAppIsRunning.now();
+  final startedWith = half;
+  if (half.isAController && onChecked != null) {
+    outcome = const WhereTheAgentWent.notCheckedYet();
   }
   AgentConfig.agentOrigin = half.agentOrigin;
   AgentConfig.agentAid = half.isAController ? half.agentAid : '';
@@ -75,7 +77,57 @@ Future<WhereTheAgentWent> pointThisAppAtItsAgent({
     agentOrigin: half.agentOrigin,
     using: using,
   );
+  if (startedWith.isAController && onChecked != null) {
+    unawaited(_lookAgainBehindTheApp(
+      from: startedWith,
+      using: using,
+      whereItMayHaveGone: whereItMayHaveGone,
+      finder: finder,
+      thing: thing,
+      onChecked: onChecked,
+    ));
+  }
   return outcome;
+}
+
+/// The look for a moved agent, run after the app has started. A failure here
+/// must never stop anything: it is reported as an address that could not be
+/// reached, which is all that is known.
+Future<void> _lookAgainBehindTheApp({
+  required WhichHalfThisAppIsRunning from,
+  required http.Client? using,
+  required Future<List<String>> Function()? whereItMayHaveGone,
+  required FindingAnAgentThatMoved? finder,
+  required String thing,
+  required void Function(WhereTheAgentWent) onChecked,
+}) async {
+  final find = finder ?? FindingAnAgentThatMoved(client: using, thing: thing);
+  try {
+    final outcome = await find.findAgain(
+      current: from,
+      hints: whereItMayHaveGone == null ? const [] : await whereItMayHaveGone(),
+    );
+    // The person may have switched to another profile while this ran; what was
+    // found belongs to the profile that asked, not to the one open now.
+    if (AgentConfig.agentAid != from.agentAid) return;
+    if (outcome.moved) {
+      final now = await WhichHalfThisAppIsRunning.now();
+      AgentConfig.agentOrigin = now.agentOrigin;
+      await tellThisComputerWhichHalfItIsRunning(
+        agentAid: now.agentAid,
+        agentOrigin: now.agentOrigin,
+        using: using,
+      );
+    }
+    onChecked(outcome);
+  } catch (e) {
+    debugPrint('[controller] could not look for a moved agent: $e');
+    if (AgentConfig.agentAid == from.agentAid) {
+      onChecked(WhereTheAgentWent.unreachable(from.agentOrigin, thing: thing));
+    }
+  } finally {
+    if (finder == null) find.dispose();
+  }
 }
 
 /// Tells the core on this computer which half it is running.
@@ -99,7 +151,8 @@ Future<void> tellThisComputerWhichHalfItIsRunning({
   http.Client? using,
 }) async {
   final client = ProvingThisComputer.over(using);
-  final url = Uri.parse('${AgentConfig.coreBaseUrl}/api/controller/front-end-for');
+  final url =
+      Uri.parse('${AgentConfig.coreBaseUrl}/api/controller/front-end-for');
   try {
     if (agentOrigin.isNotEmpty) {
       // Retried briefly, because this is called the moment the core is asked to
