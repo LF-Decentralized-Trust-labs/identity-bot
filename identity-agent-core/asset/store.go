@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"identity-agent-core/enrolsecret"
 	"identity-agent-core/internal/atomicfile"
 )
 
@@ -21,13 +22,18 @@ type Store struct {
 	requestsPath   string
 	empInvitesPath string
 	employeesPath  string
-	assetsErr      error // why assets.json could not be read; nil when it could
-	assets         map[string]Asset
-	invites        map[string]AssetInvite
-	members        []AssetMember
-	requests       []AssetAccessRequest
-	empInvites     map[string]EmployeeInvite
-	employees      map[string]Employee // keyed by PairwiseAID
+	// enrolSecrets holds the digests of unused enrolment secrets; the records
+	// in asset_enrolments.json say what each was issued for. enrolMigrated
+	// carries tokens an earlier version stored in the clear across, once.
+	enrolSecrets  *enrolsecret.Store
+	enrolMigrated sync.Once
+	assetsErr     error // why assets.json could not be read; nil when it could
+	assets        map[string]Asset
+	invites       map[string]AssetInvite
+	members       []AssetMember
+	requests      []AssetAccessRequest
+	empInvites    map[string]EmployeeInvite
+	employees     map[string]Employee // keyed by PairwiseAID
 }
 
 func NewStore(dataDir string) (*Store, error) {
@@ -39,6 +45,7 @@ func NewStore(dataDir string) (*Store, error) {
 		requestsPath:   filepath.Join(dataDir, "asset_requests.json"),
 		empInvitesPath: filepath.Join(dataDir, "employee_invites.json"),
 		employeesPath:  filepath.Join(dataDir, "employees.json"),
+		enrolSecrets:   enrolsecret.Open(filepath.Join(dataDir, "asset_enrolment_secrets.json")),
 		assets:         map[string]Asset{},
 		invites:        map[string]AssetInvite{},
 		members:        []AssetMember{},

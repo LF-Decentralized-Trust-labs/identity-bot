@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"identity-agent-core/buildmode"
+	"identity-agent-core/enrolsecret"
 	"identity-agent-core/secureenclave"
 
 	"github.com/go-chi/chi/v5"
@@ -108,7 +109,7 @@ func (h *Handler) HandleEnrol(w http.ResponseWriter, r *http.Request) {
 	// of the enrolment it was legitimately issued.
 	release := func() {
 		if rerr := h.Store.ReleaseEnrolment(body.Token); rerr != nil {
-			log.Printf("[asset] enrolment %s could not be released: %v", body.Token, rerr)
+			log.Printf("[asset] enrolment %s could not be released: %v", enrolsecret.Digest(body.Token), rerr)
 		}
 	}
 
@@ -213,7 +214,7 @@ func (h *Handler) HandleEnrol(w http.ResponseWriter, r *http.Request) {
 	// wrong — it would authorise a second one.
 	if err := h.Store.RecordEnrolmentAsset(body.Token, a.ID); err != nil {
 		log.Printf("[asset] enrolment %s produced asset %s but the link was not recorded: %v",
-			body.Token, a.ID, err)
+			enrolsecret.Digest(body.Token), a.ID, err)
 	}
 
 	out := map[string]interface{}{
