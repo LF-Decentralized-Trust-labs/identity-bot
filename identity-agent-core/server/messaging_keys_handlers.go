@@ -6,6 +6,8 @@ import (
 	"net/http"
 
 	"identity-agent-core/iacrypto"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 // Founding an identity somewhere other than here.
@@ -60,8 +62,7 @@ func (s *CoreServer) handlePrepareMessagingKeys(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	jsonreply.Write(w, http.StatusOK, map[string]any{
 		// Named as it appears in the event, so a caller has nothing to
 		// translate and no opportunity to translate it wrongly.
 		"anchor": anchor,
