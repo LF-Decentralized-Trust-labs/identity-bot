@@ -2,10 +2,8 @@ package agentbody
 
 import (
 	"bytes"
-	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -21,6 +19,7 @@ import (
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/internal/contractcheck"
 	"identity-agent-core/internal/fixedkeys"
+	"identity-agent-core/internal/testkeys"
 	"identity-agent-core/internal/vectorseeds"
 )
 
@@ -460,21 +459,15 @@ func writeBodyVectors(t *testing.T) {
 
 	// A fixed P-256 key; its signature is made once, here, and published.
 	d := new(big.Int).SetBytes(must(hex.DecodeString("c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721")))
-	priv := &ecdsa.PrivateKey{D: d}
-	priv.PublicKey.Curve = elliptic.P256()
-	priv.PublicKey.X, priv.PublicKey.Y = elliptic.P256().ScalarBaseMult(d.Bytes())
-	p := p256Signer{priv}
+	key := testkeys.FromD(d)
+	p := p256Signer{key.Priv}
 	set.P256.Host, set.P256.Verkey, _ = Identity(p)
 	set.P256.Signed = string(SignedRequest{For: ia, Host: set.P256.Host, Method: "GET", Target: "/api/agent-host/binding",
 		Timestamp: "2026-10-28T12:00:02Z", Nonce: "request-nonce-0003"}.Bytes())
-	sum := sha256.Sum256([]byte(set.P256.Signed))
-	r, s, err := ecdsa.Sign(rand.Reader, priv, sum[:])
+	raw, err := key.Sign([]byte(set.P256.Signed))
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := make([]byte, 64)
-	r.FillBytes(raw[:32])
-	s.FillBytes(raw[32:])
 	pub, _ := p.PublicKey()
 	if set.P256.Signature, err = iacrypto.MachineSignatureQB64(pub, raw); err != nil {
 		t.Fatal(err)
