@@ -138,32 +138,26 @@ func (k assetGrantKind) allAttributes() []grantAttribute {
 	return attrs
 }
 
-func buildAssetGrant(k assetGrantKind) (*AssetGrant, error) {
-	attrs := k.allAttributes()
-	props := make([]string, len(attrs))
-	for i, a := range attrs {
-		props[i] = fmt.Sprintf("%q: %s", a.name, a.definition)
-	}
-	required := append(append([]string{}, sharedGrantRequired...), k.required...)
-	version, edgesProperty := "1.0.0", ""
-	if k.edges {
-		version = "1.1.0"
-		if k.version != "" {
-			version = k.version
-		}
-		edgesProperty = `,
+// edgesPropertyJSON is the "e" member of a schema that admits edges.
+const edgesPropertyJSON = `,
     "e": {
       "oneOf": [
         {"description": "Edges block identifier", "type": "string"},
         {"description": "Edges: the credentials this one rests on, each by its identifier and schema", "type": "object"}
       ]
     }`
-	}
+
+// credentialSchemaDocument is the document every built-in credential schema
+// shares: the whole ACDC described (version, identifier, issuer, registry,
+// schema, attributes), the attribute block either compacted to its identifier
+// or spelled out, and nothing undeclared accepted. props are the attribute
+// block's members, each already written as a quoted name and a definition.
+func credentialSchemaDocument(title, description, version, issuer, registry string, props, required []string, edgesProperty string) string {
 	quoted := make([]string, len(required))
 	for i, r := range required {
 		quoted[i] = fmt.Sprintf("%q", r)
 	}
-	doc := fmt.Sprintf(`{
+	return fmt.Sprintf(`{
   "$id": "",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": %q,
@@ -175,8 +169,8 @@ func buildAssetGrant(k assetGrantKind) (*AssetGrant, error) {
     "v": {"description": "Credential version string", "type": "string"},
     "d": {"description": "Credential identifier", "type": "string"},
     "u": {"description": "Salt, when the credential is issued private", "type": "string"},
-    "i": {"description": "Issuer: the identity that owns the asset", "type": "string"},
-    "ri": {"description": "The registry the grant is issued in, where its revocation is recorded", "type": "string"},
+    "i": {"description": %q, "type": "string"},
+    "ri": {"description": %q, "type": "string"},
     "s": {"description": "Schema identifier", "type": "string"},
     "a": {
       "oneOf": [
@@ -195,8 +189,28 @@ func buildAssetGrant(k assetGrantKind) (*AssetGrant, error) {
   },
   "additionalProperties": false,
   "required": ["v", "d", "i", "ri", "s", "a"]
-}`, k.title, k.description, credentialTypeName(k.title), version,
+}`, title, description, credentialTypeName(title), version, issuer, registry,
 		strings.Join(props, ",\n            "), strings.Join(quoted, ", "), edgesProperty)
+}
+
+func buildAssetGrant(k assetGrantKind) (*AssetGrant, error) {
+	attrs := k.allAttributes()
+	props := make([]string, len(attrs))
+	for i, a := range attrs {
+		props[i] = fmt.Sprintf("%q: %s", a.name, a.definition)
+	}
+	required := append(append([]string{}, sharedGrantRequired...), k.required...)
+	version, edgesProperty := "1.0.0", ""
+	if k.edges {
+		version = "1.1.0"
+		if k.version != "" {
+			version = k.version
+		}
+		edgesProperty = edgesPropertyJSON
+	}
+	doc := credentialSchemaDocument(k.title, k.description, version,
+		"Issuer: the identity that owns the asset",
+		"The registry the grant is issued in, where its revocation is recorded", props, required, edgesProperty)
 
 	built, err := keri.BuildSchema(keri.SchemaInput{Schema: []byte(doc)})
 	if err != nil {

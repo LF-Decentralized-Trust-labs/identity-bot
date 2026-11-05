@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/schemas"
 	"log"
 	"net/http"
 	"time"
@@ -60,10 +61,18 @@ func (s *CoreServer) handleCreateGuardianship(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Validate required fields
-	validTypes := map[string]bool{"minor_child": true, "elderly": true, "disability": true, "temporary": true}
-	if !validTypes[req.Type] {
-		writeError(w, http.StatusBadRequest, "Invalid guardianship type", fmt.Sprintf("type must be one of: minor_child, elderly, disability, temporary; got: %s", req.Type))
+	// The credential issued for a guardianship is held to its schema before the
+	// guardianship is made, so the type is checked against the schema's own
+	// allowed values and not a second list of them kept here.
+	claims := map[string]interface{}{
+		"dependent_name": req.DependentName,
+		"guardian_type":  req.Type,
+	}
+	if req.DependentAID != "" {
+		claims["dependent_aid"] = req.DependentAID
+	}
+	if err := schemas.Guardianship.CheckClaims(claims); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid guardianship type", err.Error())
 		return
 	}
 	if req.DependentName == "" {
@@ -119,14 +128,7 @@ func (s *CoreServer) handleCreateGuardianship(w http.ResponseWriter, r *http.Req
 	// Auto-issue a Guardianship Credential ACDC so the SAID can serve as a chain-of-trust anchor.
 	// This runs synchronously — failure is non-fatal (guardianship record still created).
 	if s.KeriDriver != nil {
-		claims := map[string]interface{}{
-			"dependent_name": record.DependentName,
-			"guardian_type":  record.Type,
-		}
-		if record.DependentAID != "" {
-			claims["dependent_aid"] = record.DependentAID
-		}
-		const guardianshipSchemaSAID = "EGuardianship__placeholder__v1"
+		guardianshipSchemaSAID := schemas.Guardianship.SAID
 		if result, err := s.KeriDriver.IssueCredential(identity.AID, claims, guardianshipSchemaSAID, identity.AID, nil); err == nil {
 			record.CredentialSAID = result.AcdcSaid
 			if saveErr := s.DataStore.SaveGuardianship(record); saveErr != nil {
