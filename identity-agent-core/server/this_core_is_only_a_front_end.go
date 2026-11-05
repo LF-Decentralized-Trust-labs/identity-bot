@@ -357,10 +357,10 @@ func (s *CoreServer) handleReadFrontEndFor(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if front == nil {
-		writeJSONResponse(w, map[string]interface{}{"front_end_for": nil})
+		writeJSON(w, map[string]interface{}{"front_end_for": nil})
 		return
 	}
-	writeJSONResponse(w, map[string]interface{}{"front_end_for": front})
+	writeJSON(w, map[string]interface{}{"front_end_for": front})
 }
 
 func (s *CoreServer) handleBeAFrontEndFor(w http.ResponseWriter, r *http.Request) {
@@ -407,7 +407,7 @@ func (s *CoreServer) handleBeAFrontEndFor(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "recorded, but could not read it back", err.Error())
 		return
 	}
-	writeJSONResponse(w, map[string]interface{}{"front_end_for": front})
+	writeJSON(w, map[string]interface{}{"front_end_for": front})
 }
 
 func (s *CoreServer) handleStopBeingAFrontEnd(w http.ResponseWriter, r *http.Request) {
@@ -416,5 +416,5 @@ func (s *CoreServer) handleStopBeingAFrontEnd(w http.ResponseWriter, r *http.Req
 			"could not stop being a front end", err.Error())
 		return
 	}
-	writeJSONResponse(w, map[string]interface{}{"front_end_for": nil})
+	writeJSON(w, map[string]interface{}{"front_end_for": nil})
 }

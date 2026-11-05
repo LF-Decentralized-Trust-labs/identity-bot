@@ -114,5 +114,5 @@ func (s *CoreServer) handleAskCreate(w http.ResponseWriter, r *http.Request) {
 	if publicURL == "" {
 		publicURL = s.getPublicURL(r)
 	}
-	scanWriteJSON(w, map[string]string{"token": token, "url": fmt.Sprintf("%s/i/%s", publicURL, token)})
+	writeJSON(w, map[string]string{"token": token, "url": fmt.Sprintf("%s/i/%s", publicURL, token)})
 }

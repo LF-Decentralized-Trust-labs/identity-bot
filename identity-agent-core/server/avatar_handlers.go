@@ -53,7 +53,7 @@ func (s *CoreServer) handleGenerateAvatar(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "Could not generate an avatar", err.Error())
 		return
 	}
-	writeJSONOK(w, map[string]string{"avatar": generated})
+	writeJSON(w, map[string]string{"avatar": generated})
 }
 
 // handleStylizeAvatar turns a submitted photo into a drawing of itself. The
@@ -78,7 +78,7 @@ func (s *CoreServer) handleStylizeAvatar(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "Could not stylize that image", err.Error())
 		return
 	}
-	writeJSONOK(w, map[string]string{"avatar": drawn})
+	writeJSON(w, map[string]string{"avatar": drawn})
 }
 
 // normalizeProfileAvatar squares and scales whatever the user saved, so one
@@ -99,9 +99,4 @@ func normalizeProfileAvatar(profile *store.ProfileData) {
 		return
 	}
 	profile.Photo = normalized
-}
-
-func writeJSONOK(w http.ResponseWriter, v interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
 }

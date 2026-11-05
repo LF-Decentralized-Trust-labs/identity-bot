@@ -34,7 +34,7 @@ func (s *CoreServer) handleListAdoptedAgents(w http.ResponseWriter, r *http.Requ
 	if agents == nil {
 		agents = []store.AdoptedAgent{}
 	}
-	writeJSONResponse(w, map[string]interface{}{
+	writeJSON(w, map[string]interface{}{
 		"agents": agents,
 		"count":  len(agents),
 	})
@@ -57,7 +57,7 @@ func (s *CoreServer) handleForgetAdoptedAgent(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusInternalServerError, "Could not forget the agent", err.Error())
 		return
 	}
-	writeJSONResponse(w, map[string]interface{}{
+	writeJSON(w, map[string]interface{}{
 		"ok": true,
 		"note": "this agent is no longer listed here. Its delegation is unchanged — it was " +
 			"issued in a key event log that has already been published, and it can still sign " +
@@ -87,7 +87,7 @@ func (s *CoreServer) handleRenameAdoptedAgent(w http.ResponseWriter, r *http.Req
 				writeError(w, http.StatusInternalServerError, "Could not rename", err.Error())
 				return
 			}
-			writeJSONResponse(w, map[string]interface{}{"ok": true, "aid": aid, "label": req.Label})
+			writeJSON(w, map[string]interface{}{"ok": true, "aid": aid, "label": req.Label})
 			return
 		}
 	}
