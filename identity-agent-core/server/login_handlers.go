@@ -41,6 +41,18 @@ func (s *CoreServer) mountLoginRoutes(r chi.Router) {
 	})
 }
 
+// acdcAsBase64 is the one place that decides how a held credential's body is
+// encoded on the wire: standard base64 of the ACDC's exact bytes. Issued and
+// delivered records already keep it that way and pass through unchanged; a
+// record kept as plain JSON (one received by hand) is encoded here. Encoding a
+// base64 body again is what made a site refuse genuine credentials.
+func acdcAsBase64(stored string) string {
+	if strings.HasPrefix(strings.TrimSpace(stored), "{") {
+		return base64.StdEncoding.EncodeToString([]byte(stored))
+	}
+	return stored
+}
+
 func (s *CoreServer) initLoginHandler() error {
 	h, err := login.NewHandler(s.DataDir, s.KeriDriver)
 	if err != nil {
@@ -55,17 +67,13 @@ func (s *CoreServer) initLoginHandler() error {
 		}
 		out := make([]login.PresentedCredential, 0, len(recs))
 		for _, c := range recs {
-			acdcB64 := ""
-			if c.AcdcJson != "" {
-				acdcB64 = base64.StdEncoding.EncodeToString([]byte(c.AcdcJson))
-			}
 			out = append(out, login.PresentedCredential{
 				SAID:        c.SAID,
 				SchemaSAID:  c.SchemaSAID,
 				IssuerAID:   c.IssuerAID,
 				HolderAID:   c.HolderAID,
 				Status:      c.Status,
-				AcdcJsonB64: acdcB64,
+				AcdcJsonB64: acdcAsBase64(c.AcdcJson),
 			})
 		}
 		return out
@@ -362,7 +370,7 @@ func (s *CoreServer) authorizeAssetAccess(ctx context.Context, siteAID, pairwise
 		}
 		// Credential gate (additive).
 		if a.Policy.RequiredCredSchema != "" {
-			if ok, reason := s.credentialGateSatisfied(ctx, presented, a.Policy.RequiredCredSchema, a.Policy.RequiredCredIssuer); !ok {
+			if ok, reason := s.credentialGateSatisfied(ctx, presented, pairwiseAID, a.Policy.RequiredCredSchema, a.Policy.RequiredCredIssuer); !ok {
 				return false, reason
 			}
 		}
@@ -377,8 +385,12 @@ func (s *CoreServer) authorizeAssetAccess(ctx context.Context, siteAID, pairwise
 // KEL anchoring + watcher duplicity, and holder-binding if a presentation
 // signature is present). Without the driver it degrades to a declared-field
 // check so open/score-gated flows and driverless environments still work.
-func (s *CoreServer) credentialGateSatisfied(ctx context.Context, presented []interface{}, schema, issuer string) (bool, string) {
+func (s *CoreServer) credentialGateSatisfied(ctx context.Context, presented []interface{}, signerAID, schema, issuer string) (bool, string) {
 	lastReason := "required credential not presented"
+	if signerAID == "" {
+		// An empty holder would switch the holder check off.
+		return false, "no identity signing in to hold the credential"
+	}
 	for _, p := range presented {
 		m, ok := p.(map[string]interface{})
 		if !ok {
@@ -393,8 +405,11 @@ func (s *CoreServer) credentialGateSatisfied(ctx context.Context, presented []in
 		}
 		acdcB64 := credStr(m["acdc_json_b64"])
 		if s.KeriDriver != nil && acdcB64 != "" {
+			// The holder is the identity that signed in, never the holder the
+			// presenter declares: the driver checks it against the credential's
+			// own issuee, so a credential issued to somebody else is refused.
 			verified, iss, reason := s.verifyPresentedCredentialACDC(ctx, acdcB64,
-				credStr(m["holder_aid"]), credStr(m["pres_said_b64"]),
+				signerAID, credStr(m["pres_said_b64"]),
 				credStr(m["cesr_sig"]), credStr(m["holder_public_key"]), []string{schema})
 			if verified && (issuer == "" || iss == issuer) {
 				return true, ""
@@ -403,6 +418,10 @@ func (s *CoreServer) credentialGateSatisfied(ctx context.Context, presented []in
 			continue
 		}
 		// No driver / no ACDC bytes → declared-field fallback.
+		if credStr(m["holder_aid"]) != signerAID {
+			lastReason = "credential was issued to " + credStr(m["holder_aid"]) + ", not to the identity signing in (" + signerAID + ")"
+			continue
+		}
 		if isUsableStatus(credStr(m["status"])) {
 			return true, ""
 		}
