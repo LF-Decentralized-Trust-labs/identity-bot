@@ -170,7 +170,7 @@ func (s *CoreServer) handleAttestationLineage(w http.ResponseWriter, r *http.Req
 		out.OwnerAID = owner
 	}
 
-	writeJSONResponse(w, out)
+	writeJSON(w, out)
 }
 
 // enclaveStatus is what the platform can say about hardware key protection.

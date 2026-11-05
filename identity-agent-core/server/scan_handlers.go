@@ -105,7 +105,7 @@ func (s *CoreServer) handleScanDecode(w http.ResponseWriter, r *http.Request) {
 	// Bind this preview to the exact bytes it describes. The client echoes this
 	// back on execute so we can prove we are acting on the approved document.
 	preview.AskDigest = askDigest(ctx.AskBytes)
-	scanWriteJSON(w, preview)
+	writeJSON(w, preview)
 }
 
 func (s *CoreServer) handleScanExecute(w http.ResponseWriter, r *http.Request) {
@@ -166,12 +166,7 @@ func (s *CoreServer) handleScanExecute(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	scanWriteJSON(w, result)
-}
-
-func scanWriteJSON(w http.ResponseWriter, v interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
+	writeJSON(w, result)
 }
 
 // askExpiryFresh refuses an Ask that carries an expiry which has passed or
