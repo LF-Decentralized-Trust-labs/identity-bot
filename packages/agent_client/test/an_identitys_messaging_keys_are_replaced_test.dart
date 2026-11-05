@@ -14,12 +14,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:test/test.dart';
 
 import 'support/a_core_that_misleads.dart';
+import 'support/a_witness.dart';
 import 'support/the_core.dart';
 
 void main() {
   late String bin;
   late KeyMath km;
   late ACore core;
+  late AWitness w1, w2;
   const phrase =
       'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
   final seed = Bip39.mnemonicToSeed(phrase.split(' '));
@@ -27,12 +29,23 @@ void main() {
   setUpAll(() async {
     bin = await buildTheCore('messaging-keys-core', dev: true);
     km = await keyMathOf(bin);
+    w1 = await AWitness.start(km);
+    w2 = await AWitness.start(km);
+  });
+
+  tearDownAll(() async {
+    await w1.close();
+    await w2.close();
   });
 
   setUp(() async {
     FlutterSecureStorage.setMockInitialValues({});
     SharedPreferences.setMockInitialValues({});
-    core = await anotherCore(bin, km);
+    w1.forgetAll();
+    w2.forgetAll();
+    // Witnessed, as an identity the app founds is: an identity no witness
+    // holds is not recovered from its core's copy alone.
+    core = await anotherCore(bin, km, witnesses: [w1, w2]);
   });
 
   tearDown(() => core.close());
@@ -56,7 +69,8 @@ void main() {
   test(
       'an identity\'s messaging keys are replaced by its phrase\'s next '
       'generation, anchored in an interaction, and a wiped device recovers '
-      'onto that generation', () async {
+      'onto that generation', timeout: const Timeout(Duration(minutes: 3)),
+      () async {
     await SecureKeyStore.saveMnemonic(phrase.split(' '));
     final founded = await service().inceptAid(name: 'me', code: phrase);
     expect(await service().replaceMessagingKeys(), 1);
@@ -76,7 +90,9 @@ void main() {
     addTearDown(other.close);
     final recovered = await RecoveringThisIdentity(other.client, other.base, km)
         .recover(seed,
-            aid: founded.aid, witnessAddresses: const {}, agentBase: core.base);
+            aid: founded.aid,
+            witnessAddresses: {w1.aid: w1.base, w2.aid: w2.base},
+            agentBase: core.base);
     expect(recovered.messagingGeneration, 2);
     expect(recovered.messagingKeysToReplace, isFalse);
   });
@@ -106,6 +122,29 @@ void main() {
     expect(await service().replaceMessagingKeys(), 0);
     final log = await kel(aid);
     expect(jsonEncode(log.last['a']), jsonEncode([await keyset(0)]));
+  });
+
+  test(
+      'an identity that names no witnesses is not recovered from its core\'s '
+      'copy alone, and the device records nothing of it', () async {
+    final unwitnessed = await anotherCore(bin, km);
+    addTearDown(unwitnessed.close);
+    await SecureKeyStore.saveMnemonic(phrase.split(' '));
+    final founded = await LocalCoreKeriService(
+            baseUrl: unwitnessed.base, client: unwitnessed.client, keyMath: km)
+        .inceptAid(name: 'me', code: phrase);
+    expect(founded.witnesses, isEmpty);
+
+    FlutterSecureStorage.setMockInitialValues({});
+    final other = await anotherCore(bin, km);
+    addTearDown(other.close);
+    await expectLater(
+        RecoveringThisIdentity(other.client, other.base, km).recover(seed,
+            aid: founded.aid,
+            witnessAddresses: const {},
+            agentBase: unwitnessed.base),
+        throwsA(isA<RecoveryStopped>()));
+    expect(await TheIdentityThisDeviceHolds().read(), isNull);
   });
 
   test('a keyset the core reports differently is not anchored', () async {

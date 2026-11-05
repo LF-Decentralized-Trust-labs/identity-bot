@@ -830,7 +830,9 @@ Only a key state enough witnesses corroborate is written into the app's own
 record. Where no witness can be read at all (an identity founded before the
 app kept witness addresses), the Identity Agent's own copy may be used for the
 operation in hand, marked uncorroborated, and is never recorded as if the app
-had made it.
+had made it. So is a log whose newest establishment event names no witnesses:
+there is none to hold it, so holding it with "enough" of none is not
+corroboration, and such a log is never recovered from the core's copy alone.
 
 The app reads the witnesses when its own record cannot answer: on first use,
 after recovery, after a commit whose outcome it has to confirm, and when an

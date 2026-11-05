@@ -18,6 +18,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:test/test.dart';
 
 import 'support/a_core_that_misleads.dart';
+import 'support/a_witness.dart';
 import 'support/the_core.dart';
 
 /// Every secret a phrase gives: the words, the BIP39 seed, and the child
@@ -67,7 +68,13 @@ void main() {
   test(
       'nothing a phrase gives reaches what the app prints, any error it '
       'raises, or the core\'s logs, through every flow', () async {
-    final core = await anotherCore(bin, km);
+    // Witnessed, as an identity the app founds is: an identity no witness
+    // holds is not recovered from its core's copy alone.
+    final w1 = await AWitness.start(km);
+    final w2 = await AWitness.start(km);
+    addTearDown(w1.close);
+    addTearDown(w2.close);
+    final core = await anotherCore(bin, km, witnesses: [w1, w2]);
     final other = await anotherCore(bin, km);
     addTearDown(core.close);
     addTearDown(other.close);
@@ -135,7 +142,7 @@ void main() {
           RecoveringThisIdentity(other.client, other.base, km).recover(
               Bip39.mnemonicToSeed(fresh.split(' ')),
               aid: aid,
-              witnessAddresses: const {},
+              witnessAddresses: {w1.aid: w1.base, w2.aid: w2.base},
               agentBase: core.base));
       // keymath refusing a request names nothing it was sent: a real child
       // seed one byte short.
@@ -144,10 +151,12 @@ void main() {
       printed.writeln(line);
     }));
 
-    // Three flows fail on purpose (the refused rotation, the one after it,
-    // keymath refusing a short seed); every other flow, the credential's
-    // issuing among them, ran to the end.
-    expect(errors, hasLength(3), reason: errors.join('\n---\n'));
+    // Two flows fail on purpose (the refused rotation, keymath refusing a
+    // short seed); every other flow, the credential's issuing among them, ran
+    // to the end. The identity is witnessed, and its witnesses hold no other
+    // event where the core refused one, so the refusal is let go of and the
+    // rotation after it is made.
+    expect(errors, hasLength(2), reason: errors.join('\n---\n'));
     expect(ownerSignatures, isNotEmpty);
     // What the cores wrote is read once it has all arrived.
     await Future<void>.delayed(const Duration(milliseconds: 500));

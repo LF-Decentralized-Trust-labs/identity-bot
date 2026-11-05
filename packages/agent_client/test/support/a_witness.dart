@@ -155,7 +155,18 @@ class AWitness {
     await req.response.close();
   }
 
+  /// One event at a time: a core and an app send the same event together, and
+  /// a witness judges each against the log it holds when it comes to it.
+  Future<void> _turn = Future.value();
+
   Future<void> _event(
+      HttpResponse res, String forAid, String rawB64, List<String> sigs) {
+    final done = _turn.then((_) => _judge(res, forAid, rawB64, sigs));
+    _turn = done.catchError((_) {});
+    return done;
+  }
+
+  Future<void> _judge(
       HttpResponse res, String forAid, String rawB64, List<String> sigs) async {
     final only = witnessesOnly;
     if (only != null && !only.contains(forAid)) {

@@ -172,6 +172,30 @@ void main() {
     });
   });
 
+  group('an identity that names no witnesses is corroborated by none', () {
+    const aid = 'EAid';
+    final icp = _ev(0, 'E0', 'icp');
+    final ixn = _ev(1, 'E1', 'ixn');
+
+    test('a single copy of an unwitnessed log is uncorroborated', () {
+      final core = LogCopy('the discovery record', [icp, ixn]);
+      // Without being asked to take the core alone: an empty witness set has
+      // nothing that could hold the log, so holding "enough" of none is not
+      // corroboration.
+      final c = TheKeyStateThisDeviceReads.combine(aid, [core]);
+      expect((c.establishment.digest, c.tip.digest, c.corroborated),
+          ('E0', 'E1', false));
+    });
+
+    test('every copy of it still agreeing is not corroboration either', () {
+      final c = TheKeyStateThisDeviceReads.combine(aid, [
+        LogCopy('the discovery record', [icp, ixn]),
+        LogCopy('another', [icp]),
+      ]);
+      expect(c.corroborated, isFalse);
+    });
+  });
+
   group('against a real core and witnesses', timeout: const Timeout(Duration(minutes: 3)), () {
     late String bin;
     late KeyMath km;
@@ -355,6 +379,20 @@ void main() {
       final h = await TheIdentityThisDeviceHolds().read();
       expect((h!.establishment, h.tip), (null, null),
           reason: 'nothing the witnesses did not corroborate is recorded');
+    });
+
+    test(
+        'the core\'s copy of a log that names no witnesses is used once and '
+        'never becomes this device\'s record', () async {
+      final founded = await TheKeyEventsThisDeviceMakes(reads, core.base, km)
+          .found(seed);
+      await TheIdentityThisDeviceHolds().holds(founded.aid);
+      final read = await reader().readTheCopies(seed);
+      expect((read.tip.digest, read.corroborated), (founded.digest, false));
+      final h = await TheIdentityThisDeviceHolds().read();
+      expect((h!.establishment, h.tip), (null, null),
+          reason: 'a copy no witness holds is not recorded as if this device '
+              'had made it (ADR-061 section 9)');
     });
 
     test('two copies that differ at a rotation stop signing', () async {

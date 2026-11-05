@@ -50,7 +50,9 @@ class VerifiedKeyState {
   final bool fromItsOwnRecord;
 
   /// Whether enough of the identity's witnesses hold its newest establishment
-  /// event to meet their threshold; true where it names no witnesses.
+  /// event to meet their threshold; false where it names none, which no one
+  /// holds, and for a state read from copies the core alone supports. A state
+  /// read from this device's own record is true: it is what this device made.
   final bool corroborated;
 
   /// Whether the key in force is another phrase's, and commits to this
@@ -407,6 +409,14 @@ class TheKeyStateThisDeviceReads {
     for (final sn in candidates.keys.toList()..sort((a, b) => b - a)) {
       final e = candidates[sn]!;
       final set = WitnessSet(e.witnesses, e.toad);
+      // An event that names no witnesses has none to hold it, and holding
+      // "enough" of none is not corroboration: the newest such event is the
+      // one a copy shows, read for the operation in hand and never recorded
+      // (ADR-061 section 9).
+      if (set.witnesses.isEmpty) {
+        chosen = e;
+        break;
+      }
       final holding = {
         for (final c in copies)
           if (c.witness != null &&
