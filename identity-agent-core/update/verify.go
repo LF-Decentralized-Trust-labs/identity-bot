@@ -20,7 +20,14 @@ var (
 	ErrUntrustedSigningKey    = errors.New("untrusted_signing_key")
 	ErrChecksumMismatch       = errors.New("checksum_mismatch")
 	ErrBelowMinimumVersion    = errors.New("below_minimum_version")
+	// ErrRetiredComponent: the manifest names a component the core no longer
+	// installs. The core serves no web UI, so nothing would read it.
+	ErrRetiredComponent = errors.New("retired_component")
 )
+
+// retiredComponents are release components that no longer exist. A manifest
+// naming one is refused rather than installed somewhere nothing reads.
+var retiredComponents = []string{"flutter_web"}
 
 // TrustAnchor maps signing_key_id to compiled-in Ed25519 public keys.
 type TrustAnchor struct {
@@ -95,6 +102,14 @@ func VerifyManifest(raw []byte, ta *TrustAnchor) (*Manifest, error) {
 	m, err := ParseManifest(raw)
 	if err != nil {
 		return nil, err
+	}
+
+	for _, name := range retiredComponents {
+		_, inComponents := m.Components[name]
+		_, inCompat := m.Compatibility[name]
+		if inComponents || inCompat {
+			return nil, fmt.Errorf("%w: the manifest names %q, which this core no longer installs", ErrRetiredComponent, name)
+		}
 	}
 
 	if m.NextSigningKey != nil {

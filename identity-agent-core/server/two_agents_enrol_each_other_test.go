@@ -2,9 +2,13 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"testing"
 	"time"
 
+	"identity-agent-core/iacrypto"
+	"identity-agent-core/login"
 	"identity-agent-core/store"
 	"identity-agent-core/witness"
 )
@@ -26,10 +30,19 @@ func TestTwoAgentsEnrolEachOtherOverTheWire(t *testing.T) {
 	}
 	// Each has the other as a trusted contact, with the witness key its OOBI
 	// published.
+	// Each signs its requests with its own identity key, which the other holds
+	// from the contact record: the route is open, so the signature is the gate.
+	keys := map[*peerAgent]string{}
+	for _, p := range []*peerAgent{a, b} {
+		pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+		keys[p] = iacrypto.NonTransferableAIDQB64(pub)
+		seed := priv.Seed()
+		p.svc.SignAsRequester = func(statement string) (string, error) { return login.SignString(statement, seed) }
+	}
 	meet := func(self *peerAgent, other *peerAgent, otherAID string) {
 		if err := self.svc.Contacts.SaveContact(store.ContactRecord{
 			AID: otherAID, Alias: otherAID[:8], Status: "accepted", ContactCategory: "trusted",
-			OobiURL: other.base + "/public/oobi/" + otherAID,
+			OobiURL: other.base + "/public/oobi/" + otherAID, PublicKey: keys[other],
 		}); err != nil {
 			t.Fatal(err)
 		}

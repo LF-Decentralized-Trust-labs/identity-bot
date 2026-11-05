@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	neturl "net/url"
 	"strings"
 	"time"
 
@@ -23,27 +24,43 @@ func (s *Service) SendWitnessRequest(ctx context.Context, contactAID string) err
 		return fmt.Errorf("witness pool full")
 	}
 	covers := s.AskToCoverDelegates != nil && s.AskToCoverDelegates()
+	_, err = s.sendRecordedRequest(ctx, c, covers)
+	return err
+}
+
+// sendRecordedRequest records a witness request to c as pending, sends it, and
+// returns the witness's immediate response. A response that declines it
+// closes the request with the reason, which is what the person is shown.
+func (s *Service) sendRecordedRequest(ctx context.Context, c *store.ContactRecord, covers bool) (map[string]interface{}, error) {
 	// Recorded before the request goes out: the witness answers on a separate
 	// connection, and an answer that arrives before the request it answers is
 	// recorded is refused as one nobody asked for.
 	task := store.TaskRecord{
-		ID:   fmt.Sprintf("witness-req-%s-%d", contactAID, time.Now().UnixNano()),
-		Type: "witness_request_sent", Status: "pending", ContactAID: contactAID,
+		ID:   fmt.Sprintf("witness-req-%s-%d", c.AID, time.Now().UnixNano()),
+		Type: "witness_request_sent", Status: "pending", ContactAID: c.AID,
 		Detail: "Witness enrollment request sent", CreatedAt: NowRFC3339(), UpdatedAt: NowRFC3339(),
 	}
 	if err := s.Contacts.SaveTask(task); err != nil {
-		return err
+		return nil, err
 	}
-	if _, err := s.postWitnessRequest(ctx, c, covers); err != nil {
+	out, err := s.postWitnessRequest(ctx, c, task.ID, covers)
+	if err != nil {
 		_ = s.completeTask(task, "failed", fmt.Sprintf("The request could not be sent: %v", err))
-		return err
+		return nil, err
 	}
-	return nil
+	if out["status"] == "declined" {
+		reason, _ := out["reason"].(string)
+		if reason == "" {
+			reason = "declined"
+		}
+		_ = s.completeTask(task, "failed", fmt.Sprintf("Declined: %s", reason))
+	}
+	return out, nil
 }
 
 // postWitnessRequest sends a witness request, signed by this agent's
 // identity where it can sign, and returns the witness's answer.
-func (s *Service) postWitnessRequest(ctx context.Context, c *store.ContactRecord, covers bool) (map[string]interface{}, error) {
+func (s *Service) postWitnessRequest(ctx context.Context, c *store.ContactRecord, requestID string, covers bool) (map[string]interface{}, error) {
 	req := map[string]interface{}{
 		"requester_aid":  s.ourAID(),
 		"requester_oobi": s.ourOOBI(),
@@ -51,16 +68,20 @@ func (s *Service) postWitnessRequest(ctx context.Context, c *store.ContactRecord
 		// Whether this identity asks for the identities it delegates to be
 		// witnessed too.
 		"covers_delegates": covers,
+		"request_id":       requestID,
 	}
 	if s.SignAsRequester != nil {
 		// To the nanosecond: a witness acts only on a stamp newer than the
 		// last, and two requests in one second are not a replay.
 		stamp := time.Now().UTC().Format(time.RFC3339Nano)
-		if sig, err := s.SignAsRequester(RequestStatement(s.ourAID(), c.AID, covers, stamp)); err == nil {
+		if sig, err := s.SignAsRequester(RequestStatement(s.ourAID(), c.AID, s.ourOOBI(), s.BackendType, requestID, covers, stamp)); err == nil {
 			req["stamp"], req["signature"] = stamp, sig
 		}
 	}
 	body, _ := json.Marshal(req)
+	// A local address is allowed only where the owner recorded it: one a
+	// stranger's request left behind is not called until the owner accepts.
+	ctx = s.ownersLocalAllowedFor(ctx, *c, c.OobiURL)
 	return s.PostEvent(ctx, witnessRequestURL(c.OobiURL), body)
 }
 
@@ -81,7 +102,7 @@ func (s *Service) AskToCoverDelegatesOf(ctx context.Context, designated []string
 			declined[key] = "no contact to ask"
 			continue
 		}
-		out, err := s.postWitnessRequest(ctx, c, true)
+		out, err := s.sendRecordedRequest(ctx, c, true)
 		if err != nil {
 			declined[key] = err.Error()
 			continue
@@ -132,3 +153,11 @@ func witnessRequestURL(oobi string) string {
 // Identity is the identity this agent answers witness requests as, which a
 // requester names in what it signs.
 func (s *Service) Identity() string { return s.ourAID() }
+
+func hostOf(raw string) string {
+	u, err := neturl.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
+}

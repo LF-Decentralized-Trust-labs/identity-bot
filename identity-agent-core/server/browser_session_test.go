@@ -249,7 +249,7 @@ var conditionallyMounted = map[string]string{
 
 func TestEveryForbiddenRouteIsARealRoute(t *testing.T) {
 	s := newAuthTestServer(t)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	registered := map[string]bool{}
 	if err := chi.Walk(r, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {

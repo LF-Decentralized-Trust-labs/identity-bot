@@ -54,6 +54,7 @@ func anAgentServingIntroductions(t *testing.T) (*CoreServer, *httptest.Server) {
 	r.Get("/public/oobi/{aid}", s.handleOobiServe)
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)
+	ownerRecordsLocalPeer(t, s, srv.URL)
 	return s, srv
 }
 
@@ -93,6 +94,7 @@ func TestAnIntroductionServingAnotherIdentitysLogEstablishesNothing(t *testing.T
 	})
 	liar := httptest.NewServer(r)
 	defer liar.Close()
+	ownerRecordsLocalPeer(t, s, liar.URL)
 
 	_, err := s.resolveSignerKey(liar.URL + "/public/oobi/" + victim)
 	if err == nil {

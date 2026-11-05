@@ -162,7 +162,11 @@ func (s *CoreServer) identifyAssetFromSignature(r *http.Request) (*asset.Asset, 
 	// against the key recorded when it enrolled. The claim is only a lookup —
 	// nothing is trusted until the signature matches.
 	var found *asset.Asset
-	for _, a := range s.assetHandler.Store.ListAssets() {
+	assets, err := s.assetHandler.Store.ListAssets()
+	if err != nil {
+		return nil, fmt.Errorf("the machines this agent holds cannot be read: %w", err)
+	}
+	for _, a := range assets {
 		if a.PairwiseAID == claimedAID {
 			candidate := a
 			found = &candidate
@@ -334,8 +338,7 @@ func (s *CoreServer) rememberPeerAt(aid, agentURL string) error {
 		return nil
 	}
 
-	client := &http.Client{Timeout: 20 * time.Second}
-	resp, err := client.Get(base + "/api/didcomm/did?aid=" + aid)
+	resp, err := s.peerClient(20*time.Second, base).Get(base + "/api/didcomm/did?aid=" + aid)
 	if err != nil {
 		return fmt.Errorf("could not reach %s: %w", base, err)
 	}

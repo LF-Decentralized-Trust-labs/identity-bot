@@ -27,15 +27,14 @@ func (s *Service) runHeartbeatPass(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	client := s.HTTPClient
-	if client == nil {
-		client = &http.Client{Timeout: HeartbeatTimeout}
-	}
 	for _, c := range contacts {
 		if !c.IsWitness || c.OobiURL == "" {
 			continue
 		}
 		url := healthURL(c.OobiURL)
+		// Held to the address dialled, with no proxy and no redirect; a local
+		// address only where the owner recorded it.
+		client := guardedClient(HeartbeatTimeout, ownerLocalFor(c, url))
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			s.RecordHeartbeatResult(c.AID, false)

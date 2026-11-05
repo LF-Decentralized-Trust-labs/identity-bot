@@ -41,12 +41,14 @@
     },
     "components": {
       "type": "object",
+      "propertyNames": { "not": { "const": "flutter_web" } },
       "additionalProperties": {
         "$ref": "#/$defs/component"
       }
     },
     "compatibility": {
       "type": "object",
+      "propertyNames": { "not": { "const": "flutter_web" } },
       "additionalProperties": {
         "type": "object",
         "properties": {

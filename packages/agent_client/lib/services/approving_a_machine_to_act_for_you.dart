@@ -31,6 +31,18 @@ class ApprovingAMachineToActForYou {
 
   /// Tells the agent this machine may act, at the grade the person chose.
   ///
+  /// Name the grade one of two ways: [theyAreKeepingIt] when the person is
+  /// being asked, or [grade] (`enrolled` or `scoped`) when it is already
+  /// known, as for a machine the agent lists as waiting for approval. Exactly
+  /// one of the two.
+  ///
+  /// [expiresAt] and [signer] are sent only when given, and approving a machine
+  /// the agent already knows MUST pass back the ones it listed. Without
+  /// [expiresAt] a borrowed machine is given a brand-new full window, so
+  /// approving it would extend its time; without [signer] the agent falls back
+  /// to the organisation's only signer, which can change whom the machine
+  /// speaks for.
+  ///
   /// Returns nothing useful on purpose. What matters afterwards is what the
   /// AGENT thinks, and the machine finds that out by asking the agent — there is
   /// no channel from here to it, and inventing one would mean a push path to a
@@ -38,12 +50,20 @@ class ApprovingAMachineToActForYou {
   Future<void> approve({
     required AMachineAsking machine,
     required String label,
-    required bool theyAreKeepingIt,
+    bool? theyAreKeepingIt,
+    String? grade,
+    DateTime? expiresAt,
+    String? signer,
   }) async {
     if (label.trim().isEmpty) {
       throw ArgumentError(
           'a machine needs a name you will recognise, or you will not know '
           'which one to remove later');
+    }
+    if ((theyAreKeepingIt == null) == (grade == null)) {
+      throw ArgumentError(
+          'say the grade one way: theyAreKeepingIt, or grade, not both and '
+          'not neither');
     }
     final res = await _client.post(
       Uri.parse('$agentOrigin/api/controllers'),
@@ -55,7 +75,9 @@ class ApprovingAMachineToActForYou {
         // The two grades differ in how permanent the record is, and in nothing
         // else today. Both hold their own key, both are named the same way, both
         // can be removed.
-        'grade': theyAreKeepingIt ? 'enrolled' : 'scoped',
+        'grade': grade ?? (theyAreKeepingIt! ? 'enrolled' : 'scoped'),
+        if (expiresAt != null) 'expires_at': expiresAt.toUtc().toIso8601String(),
+        if (signer != null && signer.trim().isNotEmpty) 'signer': signer.trim(),
       }),
     );
     if (res.statusCode != 200) {

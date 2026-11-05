@@ -58,6 +58,7 @@ func withProbe(t *testing.T) *int {
 // serveAsk serves the Ask bytes at /i/probe, as a relay would.
 func serveAsk(t *testing.T, ask []byte) string {
 	t.Helper()
+	t.Setenv("IA_ALLOW_LOCAL_SITES", "1") // the owner is testing against a local site
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/i/probe" {
 			_, _ = w.Write(ask)

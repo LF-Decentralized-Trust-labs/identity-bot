@@ -194,7 +194,7 @@ func (s *CoreServer) checkAuthorisationOf(acdc []byte, issuer, registry, said st
 	if by.Request == nil {
 		return nil
 	}
-	in := authorisation.Input{Credential: acdc, Body: by.Request.Body, HaveBody: true}
+	in := authorisation.Input{Credential: acdc, Body: by.Request.Body, HaveBody: true, Asset: s.expectedAsset}
 	if said != "" {
 		// The issuer's key log and this credential's own log, so the order of
 		// issue and revocation is read from where each is anchored.
@@ -260,6 +260,25 @@ func (s *CoreServer) checkAuthorisationOf(acdc []byte, issuer, registry, said st
 	return nil
 }
 
+// expectedAsset is the asset an authorising request's path names, from the
+// same asset store the routes that serve it look in. An asset it does not hold
+// is not known, and a body approval for it is refused.
+func (s *CoreServer) expectedAsset(id, _ string) (authorisation.ExpectedAsset, bool) {
+	if s.assetHandler == nil || s.assetHandler.Store == nil {
+		return authorisation.ExpectedAsset{}, false
+	}
+	a, ok, err := s.assetHandler.Store.GetAsset(id)
+	if err != nil {
+		// Unreadable is not "not held", but either way no approval is accepted.
+		log.Printf("[identity-agent-core] asset %s cannot be looked up, the asset store is unreadable: %v", id, err)
+		return authorisation.ExpectedAsset{}, false
+	}
+	if !ok {
+		return authorisation.ExpectedAsset{}, false
+	}
+	return authorisation.ExpectedAsset{PairwiseAID: a.PairwiseAID, Kind: a.AssetType}, true
+}
+
 // issuedUnderFirstVersionTooLate reports whether rec is an AI agent grant or
 // body credential issued under the first version of the template after this
 // Identity Agent began issuing the version that names who authorised it. Such a
@@ -276,8 +295,20 @@ func (s *CoreServer) issuedUnderFirstVersionTooLate(rec *store.CredentialRecord)
 	return issuedAt(*rec).After(since)
 }
 
+// isEdgedAssetSchema reports whether a schema is a grant or body of an AI agent
+// or an app in the version that names who authorised it. An app has only that
+// version (ADR-045, Amendment 1).
+func isEdgedAssetSchema(schema string) bool {
+	switch schema {
+	case schemas.AIAgentGrant.Schema.SAID, schemas.AIAgentBody.Schema.SAID,
+		schemas.AppGrant.Schema.SAID, schemas.AppBody.Schema.SAID:
+		return true
+	}
+	return false
+}
+
 // firstEdgedIssuance is when this Identity Agent first issued an AI agent
-// grant or body credential under the version that names who authorised it.
+// or app grant or body credential under the version that names who authorised it.
 // Found once and remembered: it never moves.
 func (s *CoreServer) firstEdgedIssuance() (time.Time, bool) {
 	if t, ok := s.edgesSince.Load().(time.Time); ok {
@@ -289,7 +320,7 @@ func (s *CoreServer) firstEdgedIssuance() (time.Time, bool) {
 	}
 	var first time.Time
 	for _, c := range creds {
-		if c.SchemaSAID != schemas.AIAgentGrant.Schema.SAID && c.SchemaSAID != schemas.AIAgentBody.Schema.SAID {
+		if !isEdgedAssetSchema(c.SchemaSAID) {
 			continue
 		}
 		if t := issuedAt(c); !t.IsZero() && (first.IsZero() || t.Before(first)) {

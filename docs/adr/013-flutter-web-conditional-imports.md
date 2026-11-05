@@ -4,6 +4,8 @@
 **Date:** 2026-03-14
 **Related:** ADR-004 (FFI Bridge), ADR-012 (Sandboxed App Marketplace)
 
+> **Status note, 2026-11-02.** The core serves no UI to a browser, and no Identity Agent app is reached through one; the Go backend no longer serves a Flutter web build. The conditional-import pattern below is unchanged where code is still compiled for web, but "`flutter build web` is the authoritative check" (in "How to Add a New Native-Only Package") describes a compile check only, not a way the app is delivered.
+
 ## Context
 
 The Identity Agent's Flutter UI compiles to three targets: **web** (served by the Go backend on Replit and desktop), **native desktop** (Windows, macOS, Linux), and **native mobile** (iOS, Android). The same Dart codebase must compile cleanly for all targets.

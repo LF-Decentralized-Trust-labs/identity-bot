@@ -127,6 +127,7 @@ names the responder and its witness key, and carries `stamp` and `signature`:
   "reason": "",
   "backend_type": "desktop",
   "task_id": "...",
+  "request_id": "...",
   "stamp": "2026-10-24T18:00:00.123456789Z",
   "signature": "0B..."
 }
@@ -134,7 +135,8 @@ names the responder and its witness key, and carries `stamp` and `signature`:
 
 The signature is by the responder's witness key, the non-transferable identifier it
 receipts under and publishes with its OOBI, over the statement
-`witness-accept/v1\n<requester_aid>\n<responder_aid>\n<witness_key>\n<decision>\n<backend_type>\n<stamp>`.
+`witness-accept/v2\n<requester_aid>\n<responder_aid>\n<witness_key>\n<decision>\n<backend_type>\n<request_id>\n<stamp>`.
+`request_id` is the identifier the requester gave the request this answers; an answer is acted on only if it names a request the requester sent to that responder and has not completed.
 That key is checked from the identifier alone, every witness holds it, and it is the
 key the requester will rely on for that witness's receipts. Before anything is
 written, the requester checks that `witness_key` is the one the responder published,
@@ -160,14 +162,15 @@ switch delegate witnessing off (`witness.delegates` = `off`) or cap how many del
 delegator may have witnessed (`witness.delegates_max`). A request that does not ask covers
 no delegate.
 
-The request route is open, so the request carries a `stamp` and the requester's
-`signature`, by its current key, over `witness-request/v2`, its identifier, the identifier
-of the witness it asks, whether it covers its delegates, and the stamp, to the nanosecond. A witness changes whether a requester's delegates are
-covered, either way, only on a request whose signature verifies against the requester's
+The request route is open, so the signature is the gate. The request carries a `request_id`, a `stamp`
+and the requester's `signature`, by its current key, over `witness-request/v3`, its identifier, the identifier
+of the witness it asks, the OOBI the answer is to be sent to, the `request_id`, whether it covers its
+delegates, and the stamp, to the nanosecond. A witness enrols a requester, answers it, or changes
+whether its delegates are covered, only on a request whose signature verifies against the requester's
 current key (from the key log the witness holds, or else the key its contact resolved) and
 whose stamp is within five minutes and newer than the last such request it acted on from
-that requester; anything else, a replay or a request meant for another witness included,
-may ask to be witnessed and changes no coverage. The answer says whether the requester's delegates are now covered
+that requester. Anything else, a replay or a request meant for another witness or another
+address included, is refused as `unsigned_request`: nothing is created and nothing is sent. The answer says whether the requester's delegates are now covered
 (`covers_delegates`). An identity already witnessed for, asking again, takes no more
 capacity. An Identity Agent that anchors its record asks its witnesses when its record
 identity is made, and again once after each start, and reports the ones that will not

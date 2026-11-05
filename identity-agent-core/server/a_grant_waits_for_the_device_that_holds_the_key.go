@@ -107,6 +107,8 @@ func grantKindNamed(schema string) *schemas.AssetGrant {
 	switch schema {
 	case schemas.AIAgentGrant.Schema.SAID:
 		return schemas.AIAgentGrant
+	case schemas.AppGrant.Schema.SAID:
+		return schemas.AppGrant
 	case schemas.ControllerGrant.Schema.SAID:
 		return schemas.ControllerGrant
 	}
@@ -197,12 +199,16 @@ func summaryOf(t *authorisation.ToSign) string {
 	switch t.Kind {
 	case "machine":
 		return fmt.Sprintf("Let the machine %q (key %s) act for you", t.Name, t.KeyFingerprint)
-	case "ai_agent":
+	case "ai_agent", "app":
 		what := "nothing"
 		if len(t.Capabilities) > 0 {
 			what = strings.Join(t.Capabilities, ", ")
 		}
-		return fmt.Sprintf("Let the AI agent %q do: %s", t.Name, what)
+		noun := "AI agent"
+		if t.Kind == "app" {
+			noun = "app"
+		}
+		return fmt.Sprintf("Let the %s %q do: %s", noun, t.Name, what)
 	default:
 		return "Make the registry this identity issues its grants into"
 	}

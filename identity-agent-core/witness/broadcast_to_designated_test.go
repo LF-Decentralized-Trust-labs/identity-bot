@@ -143,7 +143,7 @@ func TestARealDelegatedInceptionIsWitnessed(t *testing.T) {
 	}
 	sender.FetchTip = func(_ context.Context, url string) (TipAnswer, error) {
 		_, nonce, _ := strings.Cut(url, "?nonce=")
-		return witness.KelTip(d.AID, nonce)
+		return witness.KelTip(d.AID, nonce, true)
 	}
 	for _, ev := range [][]byte{dip, ixnRaw} {
 		sig, _ := login.SignString(string(ev), recSeed)
@@ -286,7 +286,7 @@ func agreeToWitness(t *testing.T, w *Service, mc *memContacts, aid string, cover
 // signedRequestTo is a witness request to w, as the requester signs it.
 func signedRequestTo(w *Service, aid string, covers bool, seed []byte, at time.Time) WitnessRequest {
 	stamp := at.UTC().Format(time.RFC3339Nano)
-	sig, _ := login.SignString(RequestStatement(aid, w.Identity(), covers, stamp), seed)
+	sig, _ := login.SignString(RequestStatement(aid, w.Identity(), "", BackendDesktop, "", covers, stamp), seed)
 	return WitnessRequest{RequesterAID: aid, BackendType: BackendDesktop, CoversDelegates: covers, Stamp: stamp, Signature: sig}
 }
 

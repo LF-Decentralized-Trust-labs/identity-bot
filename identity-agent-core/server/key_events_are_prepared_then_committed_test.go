@@ -425,7 +425,7 @@ func TestOnlyAnEventMarkedAtUpgradeIsSignedInPlace(t *testing.T) {
 func TestARemoteOwnerPreparesAnEvent(t *testing.T) {
 	s := appHeldCore(t)
 	seed, _ := sealTestOwner(t, s)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 	k := appSeeds(2)
 	body, _ := json.Marshal(map[string]any{"t": "icp", "k": []string{verkeyOf(k[0])}, "kt": "1",
 		"n": []string{digestOfSeed(t, k[1])}, "nt": "1"})

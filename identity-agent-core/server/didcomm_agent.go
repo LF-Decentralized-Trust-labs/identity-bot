@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"time"
 
 	"identity-agent-core/didcomm"
@@ -74,7 +73,7 @@ func (s *CoreServer) SendDIDCommMessage(fromAID, toAID, typ string, body json.Ra
 		}
 	}
 	raw, _ := json.Marshal(env)
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Post(peer.Endpoint, "application/didcomm-envelope+json", bytes.NewReader(raw))
+	resp, err := s.peerClient(15*time.Second, peer.Endpoint).Post(peer.Endpoint, "application/didcomm-envelope+json", bytes.NewReader(raw))
 	if err != nil {
 		s.recordTraffic(fromAID, jwm.ID, conversationOf(body), "didcomm.message.sent", "error",
 			fmt.Sprintf("%s to %s could not be delivered: %v", typ, toAID, err), nil)

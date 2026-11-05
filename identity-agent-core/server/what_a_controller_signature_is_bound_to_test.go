@@ -26,7 +26,7 @@ import (
 func TestASignatureCannotBeMovedToAnotherRequest(t *testing.T) {
 	s := newAuthTestServer(t)
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	// Moved onto ORDINARY routes on purpose. An earlier version of this moved the
 	// signature onto RAISED ones, and passed for the wrong reason: the level gate
@@ -60,7 +60,7 @@ func TestASignatureCannotBeMovedToAnotherRequest(t *testing.T) {
 func TestASignatureIsSpentOnce(t *testing.T) {
 	s := newAuthTestServer(t)
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	req := asThatMachine(t, aid, "GET", "/api/profile", "", seed, "", time.Time{})
 	replay := remote("GET", "/api/profile", "")
@@ -88,7 +88,7 @@ func TestASignatureIsSpentOnce(t *testing.T) {
 func TestASignatureOutsideTheWindowIsRefused(t *testing.T) {
 	s := newAuthTestServer(t)
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	for _, skew := range []time.Duration{
 		signedRequestWindow + time.Minute,    // long past
@@ -115,7 +115,7 @@ func TestASignatureOutsideTheWindowIsRefused(t *testing.T) {
 func TestACapturedSignatureCannotBeGivenAFreshTimestamp(t *testing.T) {
 	s := newAuthTestServer(t)
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	// Signed well outside the window, as a captured one would be.
 	stale := asThatMachineAt(t, aid, "GET", "/api/identity", "", seed,
@@ -142,7 +142,7 @@ func TestASignatureCannotBePresentedUnderAnotherName(t *testing.T) {
 	if _, err := s.controllers().Grant(other, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	req := asThatMachine(t, aid, "GET", "/api/profile", "", seed, "", time.Time{})
 	req.Header.Set(headerControllerAID, other.ControllerAID)
@@ -164,7 +164,7 @@ func TestASignatureCannotBePresentedUnderAnotherName(t *testing.T) {
 func TestAValidVoucherCannotBeAttachedToASignatureForALowerLevel(t *testing.T) {
 	s := newAuthTestServer(t)
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 	at := time.Now().UTC()
 
 	req := asThatMachine(t, aid, "POST", "/api/rotation", `{}`, seed,

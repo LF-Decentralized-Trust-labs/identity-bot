@@ -76,7 +76,7 @@ func (s *CoreServer) handleVerifyAnIdentityElsewhere(w http.ResponseWriter, r *h
 		return
 	}
 
-	events, err := fetchKELFromOOBI(oobi)
+	events, err := s.fetchKELFromOOBI(oobi)
 	if err != nil {
 		writeJSON(w, verifyIdentityResponse{
 			Why: fmt.Sprintf("could not read the key history at %s: %v", oobi, err)})

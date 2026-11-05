@@ -31,6 +31,7 @@ type peerAgent struct {
 	svc        *witness.Service
 	witnessKey string
 	base       string
+	core       *CoreServer
 }
 
 // startPeer brings up one agent's witness surface on its own address.
@@ -80,7 +81,7 @@ func startPeer(t *testing.T, name string) *peerAgent {
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)
 
-	return &peerAgent{svc: svc, witnessKey: key, base: srv.URL}
+	return &peerAgent{svc: svc, witnessKey: key, base: srv.URL, core: core}
 }
 
 // willWitnessFor makes this agent willing to witness for an identity.

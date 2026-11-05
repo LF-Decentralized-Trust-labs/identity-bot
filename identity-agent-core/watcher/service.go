@@ -296,6 +296,16 @@ func (s *Service) GetPublicDigest(aid string, seq int) (*DigestResponse, error) 
 
 // KelCheck handles POST /public/kel-check (L3 peer cross-check).
 func (s *Service) KelCheck(req KelCheckRequest) (*KelCheckResponse, error) {
+	// An identity that opted out is not discussed with peers either. The answer
+	// is the one given for an identity never seen, so it does not reveal that
+	// the watcher holds a record, its digest, or when it was first seen.
+	opted, err := s.Store.IsOptedOut(req.AID)
+	if err != nil {
+		return nil, err
+	}
+	if opted {
+		return &KelCheckResponse{Match: false}, nil
+	}
 	rec, err := s.Store.GetFirstSeen(req.AID, req.Seq)
 	if err != nil {
 		return nil, err

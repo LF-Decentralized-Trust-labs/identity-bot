@@ -40,6 +40,51 @@ void main() {
     expect(rec.sent[0].url.toString(), '$_agent/api/controllers');
   });
 
+  test('a listed machine is approved with the grade, expiry and signer it was listed with',
+      () async {
+    final rec = _Recorder();
+    final approving =
+        ApprovingAMachineToActForYou(agentOrigin: _agent, client: rec);
+    await approving.approve(
+      machine: const AMachineAsking(aid: 'BBorrowed', publicKey: 'DKey'),
+      label: 'a library computer',
+      grade: 'scoped',
+      expiresAt: DateTime.utc(2026, 11, 10, 9, 30),
+      signer: 'ESigner',
+    );
+    final body = jsonDecode(rec.sent.single.body) as Map<String, dynamic>;
+    expect(body['grade'], 'scoped');
+    expect(body['expires_at'], '2026-11-10T09:30:00.000Z');
+    expect(body['signer'], 'ESigner');
+  });
+
+  test('expiry and signer are left out when there are none', () async {
+    final rec = _Recorder();
+    final approving =
+        ApprovingAMachineToActForYou(agentOrigin: _agent, client: rec);
+    await approving.approve(
+        machine: const AMachineAsking(aid: 'B', publicKey: 'D'),
+        label: 'x',
+        theyAreKeepingIt: true);
+    final body = jsonDecode(rec.sent.single.body) as Map<String, dynamic>;
+    expect(body.containsKey('expires_at'), isFalse);
+    expect(body.containsKey('signer'), isFalse);
+  });
+
+  test('the grade must be said exactly one way', () async {
+    final rec = _Recorder();
+    final approving =
+        ApprovingAMachineToActForYou(agentOrigin: _agent, client: rec);
+    const m = AMachineAsking(aid: 'B', publicKey: 'D');
+    await expectLater(approving.approve(machine: m, label: 'x'),
+        throwsA(isA<ArgumentError>()));
+    await expectLater(
+        approving.approve(
+            machine: m, label: 'x', theyAreKeepingIt: true, grade: 'enrolled'),
+        throwsA(isA<ArgumentError>()));
+    expect(rec.sent, isEmpty);
+  });
+
   test('a machine with no name is refused before anything is sent', () async {
     final rec = _Recorder();
     final approving =

@@ -32,7 +32,7 @@ func statusOf(t *testing.T, s *CoreServer, said string) string {
 // anchored in its key log; removing the machine withdraws it.
 func TestAMachinesGrantIsAnchoredAndWithdrawnWithIt(t *testing.T) {
 	s, _ := grantWorld(t)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 	g := aGrant(GradeEnrolled)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, local("POST", "/api/controllers",
@@ -66,7 +66,7 @@ func TestAMachinesGrantIsAnchoredAndWithdrawnWithIt(t *testing.T) {
 // A machine whose grant cannot be anchored is not granted.
 func TestAMachineIsNotGrantedWhenItsGrantCannotBeAnchored(t *testing.T) {
 	s, _ := grantWorld(t)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 	s.KeriDriver = nil
 	g := aGrant(GradeEnrolled)
 	w := httptest.NewRecorder()

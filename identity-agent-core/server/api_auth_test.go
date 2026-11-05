@@ -99,7 +99,6 @@ func TestCounterpartyRoutesStayPublic(t *testing.T) {
 		// A relying party in another language checks a key log here.
 		{"POST", "/public/login/key"},
 		{"GET", "/api/health"},
-		{"GET", "/*"},
 	} {
 		if got := classify(tc.method, tc.pattern); got != accessPublic {
 			t.Errorf("%s %s classified %q — a counterparty cannot reach it", tc.method, tc.pattern, got)
@@ -111,7 +110,7 @@ func TestCounterpartyRoutesStayPublic(t *testing.T) {
 // route, and the same route works from the machine the agent runs on.
 func TestRouterRefusesRemoteCallerOnOwnerRoute(t *testing.T) {
 	s := newAuthTestServer(t)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, remote("GET", "/api/profile", ""))
@@ -133,7 +132,7 @@ func TestRouterRefusesRemoteCallerOnOwnerRoute(t *testing.T) {
 // locally. It must not be mistaken for the owner.
 func TestForwardedRequestIsNotTheOwner(t *testing.T) {
 	s := newAuthTestServer(t)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 	req := local("GET", "/api/profile", "")
 	req.Header.Set("X-Forwarded-For", "203.0.113.9")
 
@@ -146,7 +145,7 @@ func TestForwardedRequestIsNotTheOwner(t *testing.T) {
 
 func TestPublicRouteReachableFromAnywhere(t *testing.T) {
 	s := newAuthTestServer(t)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, remote("GET", "/api/health", ""))
 	if w.Code == http.StatusForbidden {
@@ -158,7 +157,7 @@ func TestPublicRouteReachableFromAnywhere(t *testing.T) {
 // browser client breaks.
 func TestPreflightIsNotGated(t *testing.T) {
 	s := newAuthTestServer(t)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 	w := httptest.NewRecorder()
 	req := remote("OPTIONS", "/api/profile", "")
 	req.Header.Set("Origin", "https://example.org")
@@ -175,7 +174,7 @@ func TestPreflightIsNotGated(t *testing.T) {
 func TestSignedRemoteOwnerIsAdmitted(t *testing.T) {
 	s := newAuthTestServer(t)
 	seed, _ := sealTestOwner(t, s)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, signed(t, "GET", "/api/profile", "", seed, time.Now()))
@@ -191,7 +190,7 @@ func TestSignatureFromAnotherKeyIsRefused(t *testing.T) {
 	for i := range imposter {
 		imposter[i] = byte(200 - i)
 	}
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, signed(t, "GET", "/api/profile", "", imposter, time.Now()))
@@ -330,7 +329,7 @@ func TestVerkeyDecodesEveryEncodingWeMint(t *testing.T) {
 // reach a handler without passing a decision.
 func TestEveryRegisteredRouteResolvesToAClass(t *testing.T) {
 	s := newAuthTestServer(t)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 	count := 0
 	err := chi.Walk(r, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 		count++
@@ -463,7 +462,10 @@ func TestNoHandlerUsesLoopbackAsTheOwnerTest(t *testing.T) {
 // entry passed. Walking the router is the only version of this test that can
 // fail when the map is wrong.
 func TestEveryOpenRouteIsMountedWhereItSaysItIs(t *testing.T) {
-	s := newAuthTestServer(t)
+	// With the watcher and witness services present: their peer-facing routes
+	// are only mounted then, and a router without them hides exactly the
+	// entries this test exists to check.
+	s := watcherAgent(t, "EAID", 1, "Edigest")
 	// mountAssetRoutes returns early on a nil handler, so a bare server does not
 	// mount the very routes this test exists to check. The engine is nil because
 	// nothing is called — the router is walked, not served.
@@ -477,7 +479,7 @@ func TestEveryOpenRouteIsMountedWhereItSaysItIs(t *testing.T) {
 	s.WitnessService = &witness.Service{}
 
 	mounted := map[string]bool{}
-	if err := chi.Walk(s.buildRouter(""),
+	if err := chi.Walk(s.buildRouter(),
 		func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 			mounted[method+" "+route] = true
 			return nil
@@ -586,7 +588,7 @@ func TestASignedBodyMayBeAsLargeAsItsRouteAllows(t *testing.T) {
 			probe := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				reached, admitted = true, theGateAdmittedTheOwner(r)
 			})
-			router := s.buildRouter("")
+			router := s.buildRouter()
 			w := httptest.NewRecorder()
 			req := signed(t, tc.method, tc.path, tc.body, seed, time.Now())
 			// The larger bounds are for a request that declares its digest, so
@@ -617,7 +619,7 @@ func TestASignedBodyMayBeAsLargeAsItsRouteAllows(t *testing.T) {
 // misspelt key would silently leave it at the default.
 func TestEverySignedBodyBoundNamesAMountedRoute(t *testing.T) {
 	s := newAuthTestServer(t)
-	router := s.buildRouter("")
+	router := s.buildRouter()
 	for key := range signedBodyBounds {
 		method, path, _ := strings.Cut(key, " ")
 		req := httptest.NewRequest(method, path, nil)
@@ -639,7 +641,7 @@ func TestADeclaredOversizeBodyIsRefusedUnread(t *testing.T) {
 	req.ContentLength = body.total
 
 	w := httptest.NewRecorder()
-	s.buildRouter("").ServeHTTP(w, req)
+	s.buildRouter().ServeHTTP(w, req)
 	if w.Code != http.StatusRequestEntityTooLarge ||
 		!strings.Contains(w.Body.String(), "too large for this route") {
 		t.Fatalf("got %d, want the 413: %s", w.Code, w.Body.String())
@@ -660,7 +662,7 @@ func TestAMismatchedOwnerClaimIsNotAnSizeError(t *testing.T) {
 	req.Header.Set(headerOwnerAID, "ESOMEONEELSE")
 
 	w := httptest.NewRecorder()
-	s.buildRouter("").ServeHTTP(w, req)
+	s.buildRouter().ServeHTTP(w, req)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("got %d, want the 403 a mismatched owner always got: %s", w.Code, w.Body.String())
 	}
@@ -680,7 +682,7 @@ func TestAControllerIsCheckedAgainstTheRouteBeforeItsBodyIsRead(t *testing.T) {
 		body := &countingBody{total: 4 * maxSignedBodyBytes}
 		req.Body = body
 		w := httptest.NewRecorder()
-		s.buildRouter("").ServeHTTP(w, req)
+		s.buildRouter().ServeHTTP(w, req)
 		return w.Code, body
 	}
 

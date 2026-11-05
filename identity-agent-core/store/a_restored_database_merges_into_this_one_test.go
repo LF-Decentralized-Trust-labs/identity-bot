@@ -605,3 +605,127 @@ func TestSupersededEventsFromABackupAreAddedNotWrittenOver(t *testing.T) {
 		}
 	}
 }
+
+// A backup's row N must not replace a different local row N.
+//
+// These tables are keyed by a counter, so the merge used to match the two
+// databases' unrelated rows by number and delete the local one.
+func TestARestoreKeepsLocalRowsThatOnlyShareACounterWithTheBackup(t *testing.T) {
+	cases := []struct {
+		table, cols, local, backup, same string
+	}{
+		{"kel", "id, aid, seq_num, event_type, event_json, public_key, next_key_digest, timestamp",
+			"1,'AL',0,'icp','{}','k','d','t'", "1,'AB',0,'icp','{}','k','d','t'", "5,'AL',0,'icp','{}','k','d','t'"},
+		{"duplicity_alerts", "id, aid, sequence_num, our_digest, their_digest, detected_at",
+			"1,'AL',1,'o','t','d1'", "1,'AB',1,'o','t','d1'", "5,'AL',1,'o','t','d1'"},
+		{"witness_receipts", "id, event_said, witness_aid, cesr_signature",
+			"1,'E1','W1','s'", "1,'E2','W1','s'", "5,'E1','W1','s'"},
+		{"witness_receipts_issued", "id, signer_aid, event_said, sequence_num, witness_aid, receipt_json, issued_at",
+			"1,'S','E1',0,'W','{}','i1'", "1,'S','E2',0,'W','{}','i1'", "5,'S','E1',0,'W','{}','i1'"},
+		{"witness_self_heal_log", "id, contact_aid, attempted_at",
+			"1,'C1','t1'", "1,'C2','t1'", "5,'C1','t1'"},
+	}
+	for _, c := range cases {
+		t.Run(c.table, func(t *testing.T) {
+			_, from := openStore(t)
+			if _, err := from.db.Exec(fmt.Sprintf(`INSERT INTO %s (%s) VALUES (%s)`, c.table, c.cols, c.backup)); err != nil {
+				t.Fatal(err)
+			}
+			snap := snapshotOf(t, from)
+
+			_, into := openStore(t)
+			if _, err := into.db.Exec(fmt.Sprintf(`INSERT INTO %s (%s) VALUES (%s)`, c.table, c.cols, c.local)); err != nil {
+				t.Fatal(err)
+			}
+			if err := into.ImportSnapshot(snap); err != nil {
+				t.Fatal(err)
+			}
+			var n int
+			if err := into.db.QueryRow(fmt.Sprintf(`SELECT count(*) FROM %s`, c.table)).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			if n != 2 {
+				t.Fatalf("%s has %d rows after the restore, want 2 (the local row kept, the backup's added)", c.table, n)
+			}
+			var local int
+			if err := into.db.QueryRow(fmt.Sprintf(`SELECT count(*) FROM %s WHERE id = 1`, c.table)).Scan(&local); err != nil || local != 1 {
+				t.Fatalf("the local row 1 of %s is gone: %v", c.table, err)
+			}
+
+			// A backup holding the local row again, under another counter, is
+			// merged into it rather than doubled.
+			_, dup := openStore(t)
+			if _, err := dup.db.Exec(fmt.Sprintf(`INSERT INTO %s (%s) VALUES (%s)`, c.table, c.cols, c.same)); err != nil {
+				t.Fatal(err)
+			}
+			if err := into.ImportSnapshot(snapshotOf(t, dup)); err != nil {
+				t.Fatal(err)
+			}
+			if err := into.db.QueryRow(fmt.Sprintf(`SELECT count(*) FROM %s`, c.table)).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			if n != 2 {
+				t.Fatalf("%s has %d rows after restoring a duplicate, want 2", c.table, n)
+			}
+		})
+	}
+}
+
+func alertResolution(t *testing.T, s *SQLiteStore) (int, string) {
+	t.Helper()
+	var resolved int
+	var note sql.NullString
+	if err := s.db.QueryRow(`SELECT resolved, resolution_note FROM duplicity_alerts WHERE aid='AL'`).
+		Scan(&resolved, &note); err != nil {
+		t.Fatal(err)
+	}
+	return resolved, note.String
+}
+
+const alertRow = `INSERT INTO duplicity_alerts (aid, sequence_num, our_digest, their_digest, detected_at, resolved, resolution_note)
+	VALUES ('AL',1,'o','t','d1',?,?)`
+
+// An older backup holds the alert open; it was dealt with here since.
+func TestAnOlderBackupDoesNotReopenAResolvedAlert(t *testing.T) {
+	_, from := openStore(t)
+	if _, err := from.db.Exec(alertRow, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	snap := snapshotOf(t, from)
+
+	_, into := openStore(t)
+	if _, err := into.db.Exec(alertRow, 1, "rotated, confirmed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := into.ImportSnapshot(snap); err != nil {
+		t.Fatal(err)
+	}
+	if r, note := alertResolution(t, into); r != 1 || note != "rotated, confirmed" {
+		t.Fatalf("resolved=%d note=%q after the restore, want the local resolution kept", r, note)
+	}
+}
+
+// A backup taken after the alert was resolved resolves one still open here.
+func TestABackupThatResolvedAnAlertResolvesItHere(t *testing.T) {
+	_, from := openStore(t)
+	if _, err := from.db.Exec(alertRow, 1, "closed on the other machine"); err != nil {
+		t.Fatal(err)
+	}
+	snap := snapshotOf(t, from)
+
+	_, into := openStore(t)
+	if _, err := into.db.Exec(alertRow, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := into.ImportSnapshot(snap); err != nil {
+		t.Fatal(err)
+	}
+	if r, note := alertResolution(t, into); r != 1 || note != "closed on the other machine" {
+		t.Fatalf("resolved=%d note=%q after the restore, want the backup's resolution", r, note)
+	}
+	var n int
+	into.db.QueryRow(`SELECT count(*) FROM duplicity_alerts`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("%d alert rows, want 1", n)
+	}
+}

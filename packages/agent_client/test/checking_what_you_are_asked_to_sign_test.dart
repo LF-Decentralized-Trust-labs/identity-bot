@@ -39,7 +39,7 @@ void main() {
         'holder': 'BLaptop',
         'name': 'the laptop',
         'public_key': 'DKey',
-        'key_fingerprint': 'ABCD-EFGH',
+        'key_fingerprint': 'ABCD-EFGH-JKMN-PQRS',
         'grade': 'enrolled',
       });
     final shown =
@@ -52,7 +52,7 @@ void main() {
     expect(sent['issuance_b64'], 'aXNz');
     expect(shown.kind, 'machine');
     expect(shown.holder, 'BLaptop');
-    expect(shown.keyFingerprint, 'ABCD-EFGH');
+    expect(shown.keyFingerprint, 'ABCD-EFGH-JKMN-PQRS');
   });
 
   test('a grant the core will not vouch for is never returned to be signed',

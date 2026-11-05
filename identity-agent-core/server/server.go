@@ -126,10 +126,9 @@ type CoreServer struct {
 	// reference leaks the server and its keep-alive connections on every
 	// stop/restart — invisible on a desktop that stops once, but it accrues on
 	// mobile where the app is suspended and the core restarted over and over.
-	httpSrv       *http.Server
-	tunnelSrv     *http.Server
-	router        chi.Router
-	flutterWebDir string
+	httpSrv   *http.Server
+	tunnelSrv *http.Server
+	router    chi.Router
 
 	// See Config.RequireOwnerAtInception.
 	requireOwnerAtInception bool
@@ -137,9 +136,11 @@ type CoreServer struct {
 	// so two foundings committed at once cannot both pass it.
 	founding sync.Mutex
 
-	loginHandler   *login.Handler
-	assetHandler   *asset.Handler
-	inboundDIDComm InboundDIDCommHandler // overlay hook for inbound DIDComm messages; nil = deliver-only
+	loginHandler      *login.Handler
+	assetHandler      *asset.Handler
+	ownerRosterSource func() []asset.Employee // the roster in use when an overlay owns it; see SetOwnerRoster
+	assetStoreErr     error                   // why assetHandler is nil, when a store file could not be read
+	inboundDIDComm    InboundDIDCommHandler   // overlay hook for inbound DIDComm messages; nil = deliver-only
 
 	// Overlay-registered extra routes, mounted under /api by buildRouter. See
 	// MountExtraRoutes / extension.go — inert unless an overlay registers.
@@ -203,7 +204,10 @@ type CoreServer struct {
 	attestationMu      sync.Mutex
 	attestationCached  *publicAttestation
 	attestationExpires time.Time
-	attestationLimiter *attestationRateLimiter
+	attestationLimiter *ipRateLimiter
+	// witnessLimiter bounds the peer-facing witness routes that cost work.
+	witnessLimiter     *ipRateLimiter
+	witnessLimiterOnce sync.Once
 	CallerResolver     CallerResolver // resolves endpoint caller identity/scopes; nil = loopback default (delegated-identity injects the real one)
 	mu                 sync.Mutex
 	running            bool
@@ -250,8 +254,7 @@ type Config struct {
 	// kind. An agent that does not know what it is enrols no peers at all,
 	// which is safe and useless, so a build that leaves this empty is
 	// misconfigured and says so at startup.
-	EntityType    string
-	FlutterWebDir string
+	EntityType string
 
 	// RequireOwnerAtInception refuses to found an identity that names no owner.
 	//
@@ -286,10 +289,6 @@ func DefaultConfig() Config {
 		fmt.Sscanf(p, "%d", &port)
 	}
 
-	// A built web app to serve at "/", supplied by whichever application is
-	// built on the core. Unset, the core serves its API and a placeholder page.
-	webDir := os.Getenv("FLUTTER_WEB_DIR")
-
 	// Off unless asked for. An agent that needs it sets it in code (the
 	// organisation backend does); the variable exists so a deployment can turn
 	// it on without a rebuild.
@@ -302,7 +301,6 @@ func DefaultConfig() Config {
 		DataDir:                 dataDir,
 		Port:                    port,
 		EntityType:              os.Getenv("IDENTITY_AGENT_ENTITY_TYPE"),
-		FlutterWebDir:           webDir,
 		RequireOwnerAtInception: requireOwner,
 		LocalOwnerSecret:        takeLocalOwnerSecretFromEnv(),
 	}
@@ -423,6 +421,9 @@ func New(cfg Config) (*CoreServer, error) {
 
 	// Peers to cross-check with, drawn from contacts and registered services.
 	ws.PeerWatchers = s.peerWatchers
+	// A peer's address is held to the address dialled; a local one is reached
+	// only where the owner recorded that contact.
+	ws.L3.AllowLocal = func(peerBaseURL string) bool { return s.oobiMayBeLocal(peerBaseURL, "") }
 
 	// The same boundary governs watching. A registered watcher service is
 	// exempt; a contact is a peer and must be of the same kind.
@@ -516,7 +517,7 @@ func New(cfg Config) (*CoreServer, error) {
 		log.Printf("[identity-agent-core] login handler init failed (non-fatal): %v", err)
 	}
 	if err := s.initAssetHandler(); err != nil {
-		log.Printf("[identity-agent-core] asset handler init failed (non-fatal): %v", err)
+		log.Printf("[identity-agent-core] ERROR: assets are unavailable until this is fixed; a file the asset store needs could not be read, and nothing was changed: %v", err)
 	}
 	// What each add-on readies once the core's stores, vault and asset
 	// handler are made.
@@ -547,12 +548,11 @@ func New(cfg Config) (*CoreServer, error) {
 	if secureenclave.SNPAvailable() {
 		s.snpCertificates = newSNPCertificateChain(os.Getenv("SNP_PRODUCT"), cfg.DataDir)
 	}
-	s.attestationLimiter = newAttestationRateLimiter(60)
+	s.attestationLimiter = newIPRateLimiter(60, time.Minute)
 
 	// Defer router construction to Start() so overlays can register routes
 	// (MountExtraRoutes) after New() returns but before serving. Building here
 	// would consume an empty extraRoutes slice, silently dropping overlay routes.
-	s.flutterWebDir = cfg.FlutterWebDir
 	s.requireOwnerAtInception = cfg.RequireOwnerAtInception
 
 	// Checked as the server is made, before anything is served: no route is
@@ -561,7 +561,7 @@ func New(cfg Config) (*CoreServer, error) {
 	// can match; and an add-on makes no public or scoped entry for a route
 	// that is not its own. A server breaking any of these is not made. The
 	// routes an overlay adds later are checked by Start.
-	if err := s.addonsOpeningOthersRoutes(s.buildRouter(""), nil); err != nil {
+	if err := s.addonsOpeningOthersRoutes(s.buildRouter(), nil); err != nil {
 		panic("server.New: " + err.Error())
 	}
 	return s, nil
@@ -586,7 +586,7 @@ func (s *CoreServer) Start() error {
 	// Build the router now that all overlay routes (MountExtraRoutes) are
 	// registered. Idempotent-safe: Start guards against double-run above.
 	if s.router == nil {
-		s.router = s.buildRouter(s.flutterWebDir)
+		s.router = s.buildRouter()
 	}
 	// Checked again with every route an overlay added since New: a prefix
 	// an add-on opens must not cover one of the overlay's either.
@@ -909,13 +909,13 @@ func corsPolicy() func(http.Handler) http.Handler {
 	})
 }
 
-func (s *CoreServer) buildRouter(flutterWebDir string) chi.Router {
-	return s.buildRouterOf(flutterWebDir, registeredAddons(), s.extraRoutes)
+func (s *CoreServer) buildRouter() chi.Router {
+	return s.buildRouterOf(registeredAddons(), s.extraRoutes)
 }
 
 // buildRouterOf is the router with only addons' routes and only the overlay
 // routes extras, for telling whose a route is (add_ons.go).
-func (s *CoreServer) buildRouterOf(flutterWebDir string, addons []Addon, extras []func(chi.Router)) chi.Router {
+func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) chi.Router {
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
@@ -1083,6 +1083,10 @@ func (s *CoreServer) buildRouterOf(flutterWebDir string, addons []Addon, extras 
 		// The identity a machine will answer to, minted before the machine is
 		// asked for. Owner-only: it is this device's own key material.
 		r.Post("/machines/owner-identity", s.handleMintMachineOwner)
+		// The short code of a machine's key, for a screen to show; the one function
+		// behind it is authorisation.KeyFingerprint. A controller may reach it too,
+		// by design: it hashes the public key it is sent and reveals nothing.
+		r.Post("/machines/key-short-code", s.handleAKeysShortCode)
 		// Signing a request to a machine as the identity that owns it. Owner-only
 		// for the same reason as the line above, and closed to a controller: a
 		// machine acting for somebody must never be able to obtain the owner's
@@ -1222,106 +1226,6 @@ func (s *CoreServer) buildRouterOf(flutterWebDir string, addons []Addon, extras 
 	s.mountAskCreateRoute(r)
 	// login-web SignInButton-compatible endpoints (drop-in widget → an Identity Agent, no per-site backend).
 	s.mountLoginWidgetRoutes(r)
-
-	absWebDir, err := filepath.Abs(flutterWebDir)
-	if err != nil {
-		absWebDir = flutterWebDir
-	}
-
-	// An empty directory is checked by name, not by Stat: the absolute form of
-	// "" is the working directory, which exists and must never be served.
-	if _, err := os.Stat(absWebDir); flutterWebDir != "" && err == nil {
-		log.Printf("[identity-agent-core] Serving Flutter web from: %s", absWebDir)
-		fileServer := http.FileServer(http.Dir(absWebDir))
-		// WEB_NO_CACHE=1 opts into a maximally-aggressive dev/dogfood cache
-		// posture; default (unset) is the correct production posture.
-		webNoCache := os.Getenv("WEB_NO_CACHE") == "1"
-
-		// setCache applies the Flutter-web cache posture. The top-level
-		// entrypoints (index.html, the bootstrap/loader JS, and *.json manifests)
-		// have STABLE names — not content hashes — so serving them immutable makes
-		// a rebuilt bundle invisible to returning browsers (the "why am I still
-		// seeing an old build?" bug). They must revalidate; only genuinely
-		// content-hashed assets (assets/, canvaskit/) are cached long-term.
-		// With WEB_NO_CACHE, nothing is cached and the HTML shell also sends
-		// Clear-Site-Data to PURGE whatever a browser cached under a previous
-		// policy — recovering machines poisoned by the old immutable headers, or a
-		// different app that used to run on this port.
-		setCache := func(w http.ResponseWriter, urlPath string, isShell bool) {
-			if webNoCache {
-				w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-				w.Header().Set("Pragma", "no-cache")
-				w.Header().Set("Expires", "0")
-				if isShell {
-					w.Header().Set("Clear-Site-Data", `"cache"`)
-				}
-				return
-			}
-			base := filepath.Base(urlPath)
-			isEntrypoint := isShell ||
-				base == "main.dart.js" ||
-				base == "flutter.js" ||
-				base == "flutter_bootstrap.js" ||
-				base == "flutter_service_worker.js" ||
-				strings.HasSuffix(base, ".json")
-			if isEntrypoint {
-				w.Header().Set("Cache-Control", "no-cache, must-revalidate")
-				w.Header().Set("Pragma", "no-cache")
-			} else {
-				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-			}
-		}
-
-		r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
-			if arrivedByRelay(r) {
-				http.NotFound(w, r)
-				return
-			}
-			// The prefix this agent is being served under. Empty at the root,
-			// set when a proxy has put the UI on a subpath — see
-			// web_base_href.go for why both halves of this are needed.
-			prefix := webPathPrefix(r)
-			urlPath := stripPrefix(r.URL.Path, prefix)
-			filePath := filepath.Join(absWebDir, urlPath)
-			_, statErr := os.Stat(filePath)
-
-			// SPA fallback to index.html for unknown (client-side-routed) paths.
-			if os.IsNotExist(statErr) {
-				setCache(w, urlPath, true)
-				serveShell(w, filepath.Join(absWebDir, "index.html"), prefix)
-				return
-			}
-
-			isShell := urlPath == "/" || urlPath == "/index.html" ||
-				strings.HasSuffix(urlPath, "/index.html")
-			setCache(w, urlPath, isShell)
-			if isShell {
-				serveShell(w, filepath.Join(absWebDir, "index.html"), prefix)
-				return
-			}
-			// Serve the file the stripped path points at, not the one the
-			// original URL did, or a forwarded prefix reaches the file server
-			// and misses.
-			r2 := r.Clone(r.Context())
-			r2.URL.Path = urlPath
-			fileServer.ServeHTTP(w, r2)
-		})
-	} else {
-		r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
-			if arrivedByRelay(r) {
-				http.NotFound(w, r)
-				return
-			}
-			w.Header().Set("Content-Type", "text/html")
-			w.WriteHeader(200)
-			fmt.Fprintf(w, `<!DOCTYPE html>
-<html><head><title>Identity Agent</title>
-<style>body{background:#0A1628;color:#F0F4F8;font-family:monospace;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;}
-.c{text-align:center;}.t{color:#00E5A0;font-size:14px;margin-top:12px;}</style></head>
-<body><div class="c"><h1>IDENTITY AGENT CORE</h1><p style="color:#8B9DC3;">Go Core is running. No web app is configured.</p>
-<p class="t">Set FLUTTER_WEB_DIR to a built web app to serve it here.</p></div></body></html>`)
-		})
-	}
 
 	return r
 }
@@ -2646,8 +2550,7 @@ func (s *CoreServer) handleFetchCredentialSchema(w http.ResponseWriter, r *http.
 		fetchURL = "https://schema.gleif.org/acdc/" + req.SAID
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(fetchURL)
+	resp, err := s.chosenAddressClient(10*time.Second, fetchURL).Get(fetchURL)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "Failed to fetch schema", err.Error())
 		return
@@ -3464,7 +3367,12 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 	if identity == nil || identity.AID != requestedAID {
 		// check asset store for a matching pairwise AID (G-049: serve asset AIDs for login verify)
 		if s.assetHandler != nil {
-			for _, a := range s.assetHandler.Store.ListAssets() {
+			assets, err := s.assetHandler.Store.ListAssets()
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "Asset store unreadable", err.Error())
+				return
+			}
+			for _, a := range assets {
 				if a.PairwiseAID == requestedAID {
 					// serve a minimal OOBI response for the asset AID
 					kelResp, err := s.KeriDriver.GetKel(a.DisplayName)
@@ -3865,8 +3773,7 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 
 	log.Printf("[identity-agent-core] OOBI-RESOLVE: Resolving OOBI at %s", req.OobiURL)
 
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Get(req.OobiURL)
+	resp, err := s.chosenAddressClient(15*time.Second, req.OobiURL).Get(req.OobiURL)
 	if err != nil {
 		log.Printf("[identity-agent-core] OOBI-RESOLVE: Failed to reach %s: %v", req.OobiURL, err)
 		writeError(w, http.StatusBadGateway, "Failed to resolve OOBI", fmt.Sprintf("Could not reach %s: %v", req.OobiURL, err))
@@ -4042,8 +3949,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Get(req.OobiURL)
+	resp, err := s.chosenAddressClient(15*time.Second, req.OobiURL).Get(req.OobiURL)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "Failed to resolve OOBI", fmt.Sprintf("Could not reach %s: %v", req.OobiURL, err))
 		return
@@ -4162,6 +4068,15 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 		contactStatus = "verified"
 	case s.KeriDriver != nil && len(oobiData.KEL) > 0:
 		contactStatus = "unverified"
+	}
+	// The owner naming this contact by address is the owner agreeing to it, as
+	// accepting a request is: the gates that act only for an accepted contact
+	// (a witness request, a first message, the link-verifier lookup) hold for
+	// it. Only a checked key history is promoted. An address that served none
+	// ("unchecked") gives an identifier and key that are only what that host
+	// claims, and one that was offered and did not check out stays outside too.
+	if contactStatus == "verified" {
+		contactStatus = "accepted"
 	}
 
 	contactCategory := "general"
@@ -4340,6 +4255,11 @@ func (s *CoreServer) handleAcceptContact(w http.ResponseWriter, r *http.Request)
 	log.Printf("[identity-agent-core] CONTACT-ACCEPT: Upgrading contact %s (%s) to accepted, category=%s", contact.Alias, aid, acceptReq.ContactCategory)
 
 	contact.Status = "accepted"
+	// Accepting is the owner confirming the address the stranger gave, so it
+	// is no longer held back as one a stranger left behind.
+	if contact.ContactSource == witness.ContactSourceInbound {
+		contact.ContactSource = witness.ContactSourceInboundConfirmed
+	}
 
 	// Register the peer from the history that was already verified.
 	//

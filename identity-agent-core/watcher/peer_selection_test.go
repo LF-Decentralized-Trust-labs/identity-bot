@@ -31,6 +31,9 @@ func peer(t *testing.T, digest *string) *httptest.Server {
 func peerService(t *testing.T, peers ...*httptest.Server) *Service {
 	t.Helper()
 	s := &Service{L3: NewL3Client()}
+	// These peers are on loopback; a peer the owner recorded at a local address
+	// is one an agent may call (see TestAPeerNameThatPointsInwardIsNotCalled).
+	s.L3.AllowLocal = func(string) bool { return true }
 	s.PeerWatchers = func() []PeerWatcher {
 		var out []PeerWatcher
 		for _, p := range peers {
@@ -91,6 +94,9 @@ func TestAPeerThatHasNeverSeenTheIdentityIsNotAgreement(t *testing.T) {
 // see how thin its corroboration actually was.
 func TestAnUnreachablePeerIsRecordedRatherThanIgnored(t *testing.T) {
 	s := &Service{L3: NewL3Client()}
+	// These peers are on loopback; a peer the owner recorded at a local address
+	// is one an agent may call (see TestAPeerNameThatPointsInwardIsNotCalled).
+	s.L3.AllowLocal = func(string) bool { return true }
 	s.PeerWatchers = func() []PeerWatcher {
 		return []PeerWatcher{{URL: "http://127.0.0.1:1"}} // nothing listening
 	}

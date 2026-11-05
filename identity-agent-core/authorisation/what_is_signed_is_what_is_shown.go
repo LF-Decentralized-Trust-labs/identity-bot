@@ -20,15 +20,16 @@ import (
 	"fmt"
 	"strings"
 
-	"identity-agent-core/iacrypto"
 	"identity-agent-core/schemas"
+
+	"github.com/zeebo/blake3"
 
 	keri "github.com/grapeid/keri-go"
 )
 
 // ToSign is what signing an interaction grants, read from what it anchors.
 type ToSign struct {
-	// Kind is "machine", "ai_agent" or "registry".
+	// Kind is "machine", "ai_agent", "app" or "registry".
 	Kind string `json:"kind"`
 	// Issuer is the identity whose key log the interaction extends, at SN,
 	// after Prior.
@@ -39,7 +40,7 @@ type ToSign struct {
 	Credential string `json:"credential,omitempty"`
 	Registry   string `json:"registry,omitempty"`
 	// Holder is who the grant is to: the machine's identifier, or the AI
-	// agent's.
+	// agent's or the app's.
 	Holder string `json:"holder,omitempty"`
 	Name   string `json:"name,omitempty"`
 	// PublicKey and KeyFingerprint are the machine's key, and the short form
@@ -56,15 +57,40 @@ type ToSign struct {
 	Revokes bool `json:"revokes,omitempty"`
 }
 
-// KeyFingerprint is a machine key's short form: eight characters of its
-// digest, in two groups, the same wherever it is shown.
+// KeyFingerprint is a machine key's short code, the same wherever it is shown:
+// 16 characters of its digest in four groups of four (XXXX-XXXX-XXXX-XXXX).
+//
+// The characters are Crockford base32 of the raw digest bytes, which has no I,
+// L, O or U and is the same in either case, so reading a code aloud or typing
+// it in lower case loses nothing. Sixteen characters carry 80 bits, so making
+// a second key with the same code takes about 2^80 tries, not the 2^41 the
+// first form allowed. The domain string carries a version so a code from one
+// form can never equal a code from another.
 func KeyFingerprint(key string) string {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return ""
 	}
-	d := iacrypto.Blake3QB64Must([]byte("key-fingerprint/v1\n" + key))
-	return strings.ToUpper(d[1:5] + "-" + d[5:9])
+	sum := blake3.Sum256([]byte("key-fingerprint/v2\n" + key))
+	const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+	// 80 bits, the first ten bytes, as sixteen groups of five bits.
+	var out [19]byte
+	var acc uint16
+	var bits uint
+	n := 0
+	for _, by := range sum[:10] {
+		acc = acc<<8 | uint16(by)
+		bits += 8
+		for bits >= 5 {
+			bits -= 5
+			if n > 0 && n%4 == 0 {
+				out[n+n/4-1] = '-'
+			}
+			out[n+n/4] = alphabet[(acc>>bits)&31]
+			n++
+		}
+	}
+	return string(out[:])
 }
 
 // anchoringSeal checks that ixn is a well-formed interaction of issuer whose
@@ -159,8 +185,13 @@ func grantShown(cred *keri.Credential, ixn *keri.Event) (*ToSign, error) {
 		out.Name = firstNonEmpty(str("label"), out.Name)
 		out.PublicKey, out.Grade, out.Signer = str("public_key"), str("grade"), str("signer")
 		out.KeyFingerprint = KeyFingerprint(out.PublicKey)
-	case schemas.AIAgentGrant.Schema.SAID:
+	case schemas.AIAgentGrant.Schema.SAID, schemas.AppGrant.Schema.SAID:
+		// An App Grant says what an AI Agent Grant says that an app has
+		// (capabilities and limits), so it is shown the same way, under its own kind.
 		out.Kind = "ai_agent"
+		if cred.SchemaSAID == schemas.AppGrant.Schema.SAID {
+			out.Kind = "app"
+		}
 		_ = json.Unmarshal(a["capabilities"], &out.Capabilities)
 		if rc, ok := a["resource_constraints"]; ok {
 			out.Limits = rc

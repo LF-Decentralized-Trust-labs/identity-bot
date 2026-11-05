@@ -8,6 +8,8 @@ type Store interface {
 	GetContactMeta(aid string) (*ContactMeta, error)
 	SaveContactMeta(m ContactMeta) error
 	ListContactMeta() ([]ContactMeta, error)
+	// DeleteContactMeta removes the record, as if none had been made.
+	DeleteContactMeta(aid string) error
 
 	// StoreKelEvent stores an event at a place the log does not hold yet,
 	// and fails if it already holds one there.

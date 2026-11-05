@@ -77,7 +77,7 @@ func newLateSignedWorld(t *testing.T) *lateSignedWorld {
 		w.held = append(w.held, store.EventRecord{RawBytesB64: req["event_b64"].(string), SequenceNumber: len(w.held)})
 		return nil, nil
 	}
-	s.router = s.buildRouter("")
+	s.router = s.buildRouter()
 	return w
 }
 

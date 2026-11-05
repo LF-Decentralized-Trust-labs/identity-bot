@@ -112,7 +112,11 @@ func (h *Handler) writeJSON(w http.ResponseWriter, v interface{}, status int) {
 }
 
 func (h *Handler) HandleListAssets(w http.ResponseWriter, r *http.Request) {
-	assets := h.Store.ListAssets()
+	assets, err := h.Store.ListAssets()
+	if err != nil {
+		h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusInternalServerError)
+		return
+	}
 	type item struct {
 		Asset        Asset `json:"asset"`
 		MemberCount  int   `json:"member_count"`
@@ -254,7 +258,11 @@ func (h *Handler) HandleCreateAsset(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) HandleGetAsset(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	a, ok := h.Store.GetAsset(id)
+	a, ok, err := h.Store.GetAsset(id)
+	if err != nil {
+		h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusInternalServerError)
+		return
+	}
 	if !ok {
 		h.writeJSON(w, map[string]string{"error": "not found"}, http.StatusNotFound)
 		return
@@ -272,7 +280,11 @@ func (h *Handler) HandleUpdatePolicy(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var pol EnrollmentPolicy
 	json.NewDecoder(r.Body).Decode(&pol)
-	a, ok := h.Store.GetAsset(id)
+	a, ok, err := h.Store.GetAsset(id)
+	if err != nil {
+		h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusInternalServerError)
+		return
+	}
 	if !ok {
 		h.writeJSON(w, map[string]string{"error": "not found"}, http.StatusNotFound)
 		return

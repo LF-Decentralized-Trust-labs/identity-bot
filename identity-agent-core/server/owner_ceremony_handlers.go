@@ -41,9 +41,19 @@ func (s *CoreServer) handleListOwners(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Could not read the owners", err.Error())
 		return
 	}
+	signed := s.verifiedOwnerNames(identity.AID, owners)
+	names := map[string]string{}
+	for aid, v := range signed {
+		names[aid] = v.Name
+	}
 	writeJSONResponse(w, map[string]interface{}{
 		"aid":    identity.AID,
 		"owners": owners,
+		// Names only for owners whose name checks out; see verifiedOwnerNames.
+		"owner_names": names,
+		// The vouch each name came from, so the device holding the owner's key
+		// can verify the name itself instead of trusting this computer.
+		"owner_name_vouches": signed,
 	})
 }
 

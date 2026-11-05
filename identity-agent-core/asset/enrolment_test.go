@@ -190,7 +190,7 @@ func TestTheEnrolledAssetIsDelegatedAndRecorded(t *testing.T) {
 	if out.Asset.SigningIndex != 0 {
 		t.Errorf("a signing index was recorded (%d) for a key the owner never derived", out.Asset.SigningIndex)
 	}
-	if _, found := h.Store.GetAsset(out.Asset.ID); !found {
+	if _, found, _ := h.Store.GetAsset(out.Asset.ID); !found {
 		t.Error("the asset was returned but not stored")
 	}
 }
@@ -210,7 +210,7 @@ func TestAnUnanchorableDelegationIsNotIssued(t *testing.T) {
 	if w.Code == http.StatusCreated {
 		t.Fatal("an asset was created whose delegation was never anchored")
 	}
-	if len(h.Store.ListAssets()) != 0 {
+	if len(listAssets(t, h)) != 0 {
 		t.Error("an unverifiable asset was stored anyway")
 	}
 }
@@ -227,7 +227,7 @@ func TestEnrollingWithoutAValidTokenIsRefused(t *testing.T) {
 	if w := enrol(t, h, "not-a-real-token", newTestMachine(t)); w.Code != http.StatusForbidden {
 		t.Errorf("invented token: %d", w.Code)
 	}
-	if len(h.Store.ListAssets()) != 0 {
+	if len(listAssets(t, h)) != 0 {
 		t.Error("something enrolled without a token")
 	}
 }
@@ -246,7 +246,7 @@ func TestATokenWorksOnce(t *testing.T) {
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("a token was used twice: %d", w.Code)
 	}
-	if n := len(h.Store.ListAssets()); n != 1 {
+	if n := len(listAssets(t, h)); n != 1 {
 		t.Errorf("%d assets exist after one token", n)
 	}
 }

@@ -19,7 +19,10 @@ func TestAgentConfigListAndUpdate(t *testing.T) {
 	})
 	h.Store.UpsertAsset(Asset{ID: "d1", DisplayName: "example.com", AssetType: "domain"})
 
-	agents := h.ListAgents()
+	agents, err := h.ListAgents()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(agents) != 1 || agents[0].ID != "a1" {
 		t.Fatalf("ListAgents must return only ai_agents, got %d", len(agents))
 	}
@@ -38,7 +41,7 @@ func TestAgentConfigListAndUpdate(t *testing.T) {
 	if upd.AgentConfig.SystemPrompt != "new prompt" || upd.AgentConfig.Brain.Kind != "remote" {
 		t.Fatal("update did not apply")
 	}
-	got, _ := h.Store.GetAsset("a1")
+	got, _, _ := h.Store.GetAsset("a1")
 	if got.AgentConfig == nil || got.AgentConfig.Brain.Model != "claude-sonnet-4-6" {
 		t.Fatal("update not persisted")
 	}

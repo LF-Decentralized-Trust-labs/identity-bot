@@ -21,7 +21,7 @@ func TestAWitnessIsNotFoundLackingWhileASendToItIsInFlight(t *testing.T) {
 	_ = sender.Store.SaveContactMeta(ContactMeta{ContactAID: "EWitness", WitnessKey: d.wkey})
 	sender.FetchTip = func(_ context.Context, url string) (TipAnswer, error) {
 		_, nonce, _ := strings.Cut(url, "?nonce=")
-		return d.w.KelTip(d.org, nonce)
+		return d.w.KelTip(d.org, nonce, true)
 	}
 	release := make(chan struct{})
 	sender.PostEvent = func(_ context.Context, _ string, body []byte) (map[string]interface{}, error) {

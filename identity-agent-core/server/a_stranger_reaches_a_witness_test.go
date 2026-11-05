@@ -41,7 +41,7 @@ func TestAWitnessIsReachedWithoutThisAgentsCredentials(t *testing.T) {
 		return key, sig, err
 	}
 	s.WitnessService = svc
-	srv := httptest.NewServer(s.buildRouter(""))
+	srv := httptest.NewServer(s.buildRouter())
 	t.Cleanup(srv.Close)
 	peer := &peerAgent{svc: svc, witnessKey: key, base: srv.URL}
 
@@ -72,11 +72,38 @@ func TestAWitnessIsReachedWithoutThisAgentsCredentials(t *testing.T) {
 		t.Fatalf("the receipt is not this witness's over this event: %+v", receipt)
 	}
 
-	res, err = http.Get(srv.URL + "/api/witness/kel/" + aid + "/tip?nonce=n0nce")
-	if err != nil {
-		t.Fatal(err)
+	get := func(path string, withInception bool) *http.Response {
+		req, _ := http.NewRequest("GET", srv.URL+path, nil)
+		if withInception {
+			req.Header.Set(witness.HeaderInception, base64.RawURLEncoding.EncodeToString(raw))
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
 	}
+
+	// A stranger is answered as for a log not held: the tip is signed all the
+	// same, and says nothing is held, and the event is not found.
+	res = get("/api/witness/kel/"+aid+"/tip?nonce=n0nce", false)
 	var tip witness.TipAnswer
+	_ = json.NewDecoder(res.Body).Decode(&tip)
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK || tip.SN != -1 || tip.SAID != "" ||
+		drivers.VerifyReceipt(key, witness.TipStatement(aid, "n0nce", -1, ""), tip.Signature) != nil {
+		t.Fatalf("a stranger was told what the witness holds: %d %+v", res.StatusCode, tip)
+	}
+	res = get("/api/witness/kel/"+aid+"/event/0", false)
+	res.Body.Close()
+	if res.StatusCode != http.StatusNotFound {
+		t.Fatalf("a stranger was given an event: %d", res.StatusCode)
+	}
+
+	// Somebody who holds the log's inception, as a verifier given the log by its
+	// controller does, is answered from what is held.
+	res = get("/api/witness/kel/"+aid+"/tip?nonce=n0nce", true)
+	tip = witness.TipAnswer{}
 	_ = json.NewDecoder(res.Body).Decode(&tip)
 	res.Body.Close()
 	if res.StatusCode != http.StatusOK || tip.SN != 0 || tip.SAID != said ||
@@ -84,10 +111,7 @@ func TestAWitnessIsReachedWithoutThisAgentsCredentials(t *testing.T) {
 		t.Fatalf("the tip was not answered, signed: %d %+v", res.StatusCode, tip)
 	}
 
-	res, err = http.Get(srv.URL + "/api/witness/kel/" + aid + "/event/" + strconv.Itoa(0))
-	if err != nil {
-		t.Fatal(err)
-	}
+	res = get("/api/witness/kel/"+aid+"/event/"+strconv.Itoa(0), true)
 	var ev witness.SignedEvent
 	_ = json.NewDecoder(res.Body).Decode(&ev)
 	res.Body.Close()

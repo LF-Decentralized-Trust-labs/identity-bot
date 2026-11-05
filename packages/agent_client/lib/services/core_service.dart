@@ -2255,6 +2255,29 @@ class CoreService {
     return aid;
   }
 
+  /// A machine key's short code, as the core computes it
+  /// (`authorisation.KeyFingerprint`, ADR-045 Amendment 2): sixteen characters
+  /// in four groups, like `M8PN-ME83-7RPK-D6FF`.
+  ///
+  /// Asked of the core, never computed here, so the screen that adds a machine
+  /// and the screen that confirms it cannot show different codes.
+  Future<String> shortCodeOfAKey(String publicKey) async {
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/machines/key-short-code'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'public_key': publicKey}),
+    );
+    if (response.statusCode != 200) {
+      throw Exception(
+          'Could not get the short code of this key: ${response.statusCode}');
+    }
+    final code = (jsonDecode(response.body)['short_code'] ?? '').toString();
+    if (code.isEmpty) {
+      throw Exception('No short code came back, so there is nothing to compare');
+    }
+    return code;
+  }
+
   Future<Map<String, dynamic>> adoptAgent({
     required Uri boxUrl,
     required String adoptionCode,

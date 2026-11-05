@@ -448,6 +448,9 @@ func (s *CoreServer) adoptFromParts(aid string, raw []byte, held heldEvent) erro
 		if shown.Kind == "ai_agent" {
 			schema = schemas.AIAgentGrant.Schema.SAID
 		}
+		if shown.Kind == "app" {
+			schema = schemas.AppGrant.Schema.SAID
+		}
 		return s.keepAndWithdraw(schema, shown.Holder, aid, shown.Registry, result)
 	}
 	return s.adoptBare(aid, raw, held.Signature)

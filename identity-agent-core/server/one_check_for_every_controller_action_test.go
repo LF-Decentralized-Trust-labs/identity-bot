@@ -16,7 +16,7 @@ import (
 func TestOwnerOnlyActionsAreRefusedAtAnyScore(t *testing.T) {
 	s := newAuthTestServer(t)
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	for i, route := range []struct{ method, path string }{
 		{"POST", "/api/rotation"},
@@ -54,7 +54,7 @@ func TestAControllerActionNeedingNinetyIsRefusedAtThePlaceholder(t *testing.T) {
 
 	s := newAuthTestServer(t)
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, asThatMachine(t, aid, "GET", "/api/profile", "", seed, "", time.Time{}))
@@ -91,7 +91,7 @@ func TestAControllerActionNeedingNinetyIsRefusedAtThePlaceholder(t *testing.T) {
 func TestAVouchedStatementIsJudgedByItsOwnScore(t *testing.T) {
 	s := newAuthTestServer(t)
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
-	r := s.buildRouter("")
+	r := s.buildRouter()
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, asThatMachineScored(t, "", aid, "GET", "/api/profile", "", seed,

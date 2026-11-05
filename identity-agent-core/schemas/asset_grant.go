@@ -309,6 +309,55 @@ var ControllerGrant = mustAssetGrant(withEdges(assetGrantKind{
 	},
 }))
 
+// AppGrant says what one app may ask of the Identity Agent it runs beside.
+//
+// An app is an asset like an AI agent, but it has no brain, no model and no
+// conversation inbox, so its grant carries only what a gateway enforces when
+// the app calls: the capabilities it may invoke, its ceiling, and per
+// capability the argument values it may use. The capability ids name
+// definitions held by the issuing Identity Agent's capability registry (ADR-050).
+// There is no role, prompt, model or messaging attribute to carry, and no
+// permission to delegate onward.
+var appGrantKind = assetGrantKind{
+	assetType: "app",
+	title:     "App Grant",
+	description: "What one app may do, issued by the identity that owns it to the app's " +
+		"delegated identifier. The gateway admits the app only to the capabilities named " +
+		"here, within their constraints, while the grant is unrevoked and has not lapsed.",
+	attributes: []grantAttribute{
+		{"capabilities", `{"description": "The capability ids the app may invoke: its ceiling", "type": "array", "items": {"type": "string"}, "uniqueItems": true}`},
+		{"resource_constraints", `{"description": "Per capability id, per argument, the values the app may use. Each list names at least one value", "type": "object", "minProperties": 1, "additionalProperties": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "array", "minItems": 1, "items": {"type": "string"}}}}`},
+	},
+	required: []string{"capabilities"},
+	fields: []SchemaField{
+		{Key: "name", Label: "App name", Type: "string", Required: true},
+		{Key: "capabilities", Label: "Capabilities", Type: "string", Required: true, Placeholder: "capability ids the app may invoke"},
+		{Key: "resource_constraints", Label: "Resource Constraints", Type: "string", Placeholder: "optional per-capability limits"},
+		{Key: "valid_until", Label: "Valid until", Type: "date", Placeholder: "Leave blank for no expiry"},
+	},
+}
+
+// AppBody says that one machine key is the body of one app, exactly as
+// AIAgentBody does for an AI agent: the same attributes, the same grades, the
+// same enrolment and approval (ADR-046, ADR-059), and the same revocation. Only
+// the asset type and the words differ, so the kind is readable from the
+// credential and an app's body is never mistaken for an AI agent's.
+var appBodyKind = func() assetGrantKind {
+	k := aiAgentBodyKind
+	k.assetType = "app"
+	k.title = "App Body"
+	k.description = "That one machine key is the body of one app: requests that key signs " +
+		"speak as the app, at the grade recorded here, while this is unrevoked."
+	return k
+}()
+
+// AppGrant and AppBody are new in ADR-045's amendment of 2026-11-02, so each has
+// only the version with an edge to the grant of whoever authorised it.
+var (
+	AppGrant = mustAssetGrant(withEdges(appGrantKind))
+	AppBody  = mustAssetGrant(withEdges(appBodyKind))
+)
+
 func withEdges(k assetGrantKind) assetGrantKind {
 	k.edges = true
 	return k
@@ -317,11 +366,12 @@ func withEdges(k assetGrantKind) assetGrantKind {
 // AssetGrants are every kind's grant schema, by asset type.
 var AssetGrants = map[string]*AssetGrant{
 	AIAgentGrant.AssetType: AIAgentGrant,
+	AppGrant.AssetType:     AppGrant,
 }
 
 // assetCredentials are every schema built from the asset template, current
 // and first versions alike, so every one issued can be resolved.
-var assetCredentials = []*AssetGrant{AIAgentGrant, AIAgentGrantV1, AIAgentBody, AIAgentBodyV1, ControllerGrant}
+var assetCredentials = []*AssetGrant{AIAgentGrant, AIAgentGrantV1, AIAgentBody, AIAgentBodyV1, ControllerGrant, AppGrant, AppBody}
 
 func init() {
 	for _, g := range assetCredentials {

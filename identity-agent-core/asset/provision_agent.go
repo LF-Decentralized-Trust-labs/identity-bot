@@ -22,26 +22,74 @@ import (
 // action it takes through the endpoint is provably "owner -> this agent" in the
 // signed invocation log.
 func (h *Handler) ProvisionAgentAsset(displayName string, capabilities []string, cfg *AgentConfig, validUntil *time.Time, constraints map[string]interface{}) (*Asset, error) {
-	displayName = strings.TrimSpace(displayName)
+	return h.provisionDelegated(delegatedAsset{
+		assetType: "ai_agent", noun: "agent", originScheme: "agent", errTaken: ErrAgentNameTaken,
+		displayName: displayName, capabilities: capabilities, cfg: cfg, validUntil: validUntil, constraints: constraints,
+	})
+}
+
+// ProvisionAppAsset provisions an app as a delegated asset, the same way an AI
+// agent is (ProvisionAgentAsset): it mints a delegated AID anchored to the
+// owner's root AID, derives the signing key from the root seed at a stable
+// index, and stores the app with its capability ceiling and the argument limits
+// of its grant. The grant itself is issued by the caller, from the owner's
+// registry, as an App Grant (ADR-045, Amendment 1).
+//
+// An app has no brain, so unlike an agent it takes no AgentConfig: its grant
+// carries only capabilities and resource constraints.
+func (h *Handler) ProvisionAppAsset(displayName string, capabilities []string, validUntil *time.Time, constraints map[string]interface{}) (*Asset, error) {
+	return h.provisionDelegated(delegatedAsset{
+		assetType: "app", noun: "app", originScheme: "app", errTaken: ErrAppNameTaken,
+		displayName: displayName, capabilities: capabilities, validUntil: validUntil, constraints: constraints,
+	})
+}
+
+// delegatedAsset is what differs between the kinds of asset that are minted as
+// a delegated identifier with a capability ceiling. Everything else about
+// provisioning one is the same, and is written once in provisionDelegated.
+type delegatedAsset struct {
+	assetType    string // "ai_agent" or "app"
+	noun         string // how an error names it
+	originScheme string
+	errTaken     error
+	displayName  string
+	capabilities []string
+	cfg          *AgentConfig
+	validUntil   *time.Time
+	constraints  map[string]interface{}
+}
+
+func (h *Handler) provisionDelegated(d delegatedAsset) (*Asset, error) {
+	displayName := strings.TrimSpace(d.displayName)
 	if displayName == "" {
-		return nil, fmt.Errorf("agent display name is required")
+		return nil, fmt.Errorf("%s display name is required", d.noun)
 	}
 	// Held from the name check to the stored asset, so two requests for the same
 	// name cannot both pass the check before either is stored.
 	provisionMu.Lock()
 	defer provisionMu.Unlock()
-	if h.agentNameTaken(displayName) {
-		return nil, fmt.Errorf("%w: %q", ErrAgentNameTaken, displayName)
+	taken, err := h.delegatedNameTaken(displayName)
+	if err != nil {
+		return nil, err
+	}
+	if taken {
+		return nil, fmt.Errorf("%w: %q", d.errTaken, displayName)
+	}
+	// What the grant would say is checked before anything is minted or issued,
+	// for an app and an AI agent alike: a grant that could never be in force, or
+	// that records a limit nothing enforces, is refused here, not issued.
+	if err := checkGrantAsked(d.noun, d.capabilities, d.validUntil, d.constraints); err != nil {
+		return nil, err
 	}
 	rootAID := ""
 	if h.RootAID != nil {
 		rootAID = h.RootAID()
 	}
 	if rootAID == "" {
-		return nil, fmt.Errorf("delegated agent identity requires a root identity — complete identity setup first")
+		return nil, fmt.Errorf("delegated %s identity requires a root identity — complete identity setup first", d.noun)
 	}
 	if h.KeriDriver == nil {
-		return nil, fmt.Errorf("keri driver required to mint the delegated agent AID")
+		return nil, fmt.Errorf("keri driver required to mint the delegated %s AID", d.noun)
 	}
 
 	if err := h.mayDelegate(); err != nil {
@@ -51,14 +99,14 @@ func (h *Handler) ProvisionAgentAsset(displayName string, capabilities []string,
 	signingIndex := signingIndexForID(id)
 	pub, nextPub, err := deriveAssetKeypair(h.dataDir, signingIndex)
 	if err != nil {
-		return nil, fmt.Errorf("derive agent key: %w", err)
+		return nil, fmt.Errorf("derive %s key: %w", d.noun, err)
 	}
 	resp, err := h.KeriDriver.CreateDelegatedInception(
 		iacrypto.VerkeyQB64(pub), iacrypto.VerkeyQB64(nextPub), displayName, rootAID)
 	if err != nil {
-		return nil, fmt.Errorf("mint delegated agent AID: %w", err)
+		return nil, fmt.Errorf("mint delegated %s AID: %w", d.noun, err)
 	}
-	// Persist the owner-root anchoring event, or the agent's delegation won't
+	// Persist the owner-root anchoring event, or the asset's delegation won't
 	// survive a KEL reload and its capability grant will never verify.
 	if err := h.persistDelegationAnchor(rootAID, resp); err != nil {
 		return nil, fmt.Errorf("persist delegation anchor: %w", err)
@@ -68,16 +116,16 @@ func (h *Handler) ProvisionAgentAsset(displayName string, capabilities []string,
 	asset := Asset{
 		ID:               id,
 		DisplayName:      displayName,
-		AssetType:        "ai_agent",
-		Origin:           "agent://" + id,
+		AssetType:        d.assetType,
+		Origin:           d.originScheme + "://" + id,
 		PairwiseAID:      resp.AID,
 		DelegationModel:  "delegated",
 		DelegatorAID:     resp.DelegatorAID,
 		SigningIndex:     signingIndex,
-		Capabilities:     capabilities,
-		AgentConfig:      cfg,
-		GrantValidUntil:  validUntil,
-		GrantConstraints: constraints,
+		Capabilities:     d.capabilities,
+		AgentConfig:      d.cfg,
+		GrantValidUntil:  d.validUntil,
+		GrantConstraints: d.constraints,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
@@ -85,7 +133,8 @@ func (h *Handler) ProvisionAgentAsset(displayName string, capabilities []string,
 	return &asset, nil
 }
 
-// ErrAgentNameTaken refuses a second AI agent with a name already in use.
+// ErrAgentNameTaken refuses a second AI agent with a name already in use,
+// whether by an AI agent or by an app (see delegatedNameTaken).
 //
 // The name is not only a label. The KERI engine keys the identities it holds
 // by it, and an agent's token is filed under it, so two agents sharing a name
@@ -94,15 +143,28 @@ func (h *Handler) ProvisionAgentAsset(displayName string, capabilities []string,
 // because two agents a person cannot tell apart on screen are the same mistake.
 var ErrAgentNameTaken = errors.New("an AI agent with that name already exists")
 
+// ErrAppNameTaken refuses a second app, or an app named as an AI agent already
+// is, for the reason ErrAgentNameTaken gives: the engine keys the identities it
+// holds by name, whatever kind of asset they are.
+var ErrAppNameTaken = errors.New("an app or AI agent with that name already exists")
+
 var provisionMu sync.Mutex
 
-func (h *Handler) agentNameTaken(name string) bool {
-	for _, a := range h.ListAgents() {
-		if SameAgentName(a.DisplayName, name) {
-			return true
+// delegatedNameTaken reports whether any AI agent or app already has the name.
+// They share the engine's namespace, so a name is taken across both.
+// An unreadable store is an error, never "not taken": answering false would let
+// a duplicate name through.
+func (h *Handler) delegatedNameTaken(name string) (bool, error) {
+	assets, err := h.Store.ListAssets()
+	if err != nil {
+		return false, err
+	}
+	for _, a := range assets {
+		if (a.AssetType == "ai_agent" || a.AssetType == "app") && SameAgentName(a.DisplayName, name) {
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // SameAgentName is how two AI agent names are compared everywhere: trimmed,
@@ -116,7 +178,10 @@ func SameAgentName(a, b string) bool {
 // (role, prompt, brain, exposure) without touching its identity or grant. Returns
 // the updated asset, or an error if it isn't an ai_agent.
 func (h *Handler) UpdateAgentConfig(assetID string, cfg *AgentConfig) (*Asset, error) {
-	a, ok := h.Store.GetAsset(assetID)
+	a, ok, err := h.Store.GetAsset(assetID)
+	if err != nil {
+		return nil, err
+	}
 	if !ok {
 		return nil, fmt.Errorf("agent not found")
 	}
@@ -143,7 +208,10 @@ func (h *Handler) UpdateAgentConfig(assetID string, cfg *AgentConfig) (*Asset, e
 // grow: every caller adds, nobody subtracts, and after a while nobody can say why
 // an agent holds what it holds.
 func (h *Handler) SetAgentCapabilities(assetID string, caps []string) (*Asset, error) {
-	a, ok := h.Store.GetAsset(assetID)
+	a, ok, err := h.Store.GetAsset(assetID)
+	if err != nil {
+		return nil, err
+	}
 	if !ok {
 		return nil, fmt.Errorf("agent not found")
 	}
@@ -179,7 +247,10 @@ func NormaliseCapabilities(caps []string) []string {
 // SetAgentGrantConstraints replaces the argument limits recorded for an AI
 // agent's grant. The grant itself is re-issued by the caller.
 func (h *Handler) SetAgentGrantConstraints(assetID string, constraints map[string]interface{}) (*Asset, error) {
-	a, ok := h.Store.GetAsset(assetID)
+	a, ok, err := h.Store.GetAsset(assetID)
+	if err != nil {
+		return nil, err
+	}
 	if !ok {
 		return nil, fmt.Errorf("agent not found")
 	}
@@ -195,12 +266,16 @@ func (h *Handler) SetAgentGrantConstraints(assetID string, constraints map[strin
 }
 
 // ListAgents returns all ai_agent assets (owner-only surface; contains no secrets).
-func (h *Handler) ListAgents() []Asset {
+func (h *Handler) ListAgents() ([]Asset, error) {
+	assets, err := h.Store.ListAssets()
+	if err != nil {
+		return nil, err
+	}
 	out := make([]Asset, 0)
-	for _, a := range h.Store.ListAssets() {
+	for _, a := range assets {
 		if a.AssetType == "ai_agent" {
 			out = append(out, a)
 		}
 	}
-	return out
+	return out, nil
 }

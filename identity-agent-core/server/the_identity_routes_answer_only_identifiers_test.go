@@ -22,7 +22,7 @@ func TestTheIdentityRoutesAnswerOnlyIdentifiers(t *testing.T) {
 	if err := s.initOIDCHandler(); err != nil {
 		t.Fatal(err)
 	}
-	router := s.buildRouter("")
+	router := s.buildRouter()
 	var routes []string
 	chi.Walk(router, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 		if strings.HasPrefix(route, identifierRoutes) {
@@ -58,7 +58,7 @@ func TestAnOIDCIssuerIsAnIdentifier(t *testing.T) {
 	if err := s.initOIDCHandler(); err != nil {
 		t.Fatal(err)
 	}
-	router := s.buildRouter("")
+	router := s.buildRouter()
 	discover := func(issuer string) int {
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, local("GET", "/"+issuer+"/.well-known/openid-configuration", ""))

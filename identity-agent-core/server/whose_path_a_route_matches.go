@@ -144,9 +144,3 @@ func prefixMeetsTheCore(prefix, pattern string) (bool, error) {
 	}
 	return true, nil
 }
-
-// theWebUI is the core's catch-all for the web app's own files. Every route
-// is more specific than it and chi prefers every one, so a route of an
-// add-on's or an overlay's is never counted as taking requests from it; it
-// is only ever the files' fallback.
-const theWebUI = "/*"

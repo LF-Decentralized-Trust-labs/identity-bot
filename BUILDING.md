@@ -123,7 +123,8 @@ The core reads its configuration from the environment:
 |---|---|---|
 | `PORT` | `5050` | The port it listens on. If it is taken, the core takes the next free one. |
 | `AGENT_DATA_DIR` | `./data` | Where the identity, its keys and its records are kept. |
-| `FLUTTER_WEB_DIR` | unset | A built web app to serve at `/`. Unset, `/` is a placeholder page and only the API is served. |
+| `IA_RELAY_URL`, else `IA_DEV_RELAY_URL` | `http://127.0.0.1:8765` | The relay (a site's key registry in development) this agent uses. It is your own setting, so a call to exactly this address is allowed even when it is a local one. |
+| `IA_ALLOW_LOCAL_SITES` | unset | Set to `1` only to test against sites, Ask links or invites that live on this machine or your network. Left unset, the agent refuses to call any private, loopback or link-local address that a site, a scanned code, a credential or a pasted OOBI supplies, other than the relay above and the address of a contact you added. |
 
 ## Build the core for a phone
 

@@ -42,6 +42,14 @@ func (s *Signer) Keys(aid string) (ed25519.PublicKey, error) {
 // Sign is ev signed.
 func (s *Signer) Sign(ev activitylog.InvocationEvent) activitylog.InvocationEvent {
 	payload, _ := json.Marshal(ev)
+	return s.SignBytes(ev, payload)
+}
+
+// SignBytes is ev carrying a signature over exactly payload. A test that needs
+// signed bytes in a spelling the encoder in use does not write (a row from an
+// older Go release, say) builds those bytes itself and signs them here,
+// rather than asking the encoder for them.
+func (s *Signer) SignBytes(ev activitylog.InvocationEvent, payload []byte) activitylog.InvocationEvent {
 	ev.SignerAID = s.AID
 	ev.Signature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(s.priv, payload))
 	return ev

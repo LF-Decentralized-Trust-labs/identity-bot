@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"identity-agent-core/didcomm"
+	"identity-agent-core/store"
 )
 
 // The rate bound is global on purpose: a sender identity is free to invent, so
@@ -37,14 +38,14 @@ func TestStrangersAreBoundedByRate(t *testing.T) {
 func TestAnUnsoundKeyHistoryIdentifiesNobody(t *testing.T) {
 	s := witnessWithSeed(t, 1)
 	s.KeriDriver = nil // cannot check a history at all
-	if _, err := s.identifyStranger("EStranger", []map[string]interface{}{{"t": "icp"}}); err == nil {
+	if _, _, err := s.identifyStranger("EStranger", []map[string]interface{}{{"t": "icp"}}); err == nil {
 		t.Fatal("a stranger was identified without their history being checked")
 	}
 }
 
 func TestNoKeyHistoryIdentifiesNobody(t *testing.T) {
 	s := witnessWithSeed(t, 1)
-	if _, err := s.identifyStranger("EStranger", nil); err == nil {
+	if _, _, err := s.identifyStranger("EStranger", nil); err == nil {
 		t.Fatal("a stranger was identified having presented nothing")
 	}
 }
@@ -151,5 +152,26 @@ func TestAnUnwrappedEventIsAcceptedAsIs(t *testing.T) {
 func TestAnUnreadableEventIsRefused(t *testing.T) {
 	if _, err := eventFromKELEntry(map[string]interface{}{"event_json": "{not json"}); err == nil {
 		t.Fatal("an unreadable event was accepted")
+	}
+}
+
+// A contact made from a checked key history carries the key that history ends
+// on, so a witness request it signs can be verified against the contact record.
+func TestAFirstContactKeepsTheKeyItsHistoryEndsOn(t *testing.T) {
+	s := witnessWithSeed(t, 1)
+	const aid = "EKeyedStranger"
+	if err := s.DataStore.SaveContactKEL(store.ContactKELRecord{
+		AID: aid, KelVerified: true, CurrentPublicKey: "DCurrentKey",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.recordConnectionRequest(aid, &didcomm.JWM{
+		Type: didcomm.TypeContactRequest, Body: json.RawMessage(`{}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rec, _ := s.DataStore.GetContact(aid)
+	if rec == nil || rec.PublicKey != "DCurrentKey" {
+		t.Fatalf("the contact does not carry the key its checked history ends on: %+v", rec)
 	}
 }

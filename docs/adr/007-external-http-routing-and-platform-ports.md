@@ -4,6 +4,8 @@
 **Status:** Accepted
 **Relates to:** ADR-001 (Core Architecture), ADR-006 (Topology)
 
+> **Status note, 2026-11-02.** The core serves no UI to a browser, and no Identity Agent app is reached through one. Where this record mentions web (the empty base URL, the web stub), it describes code that still compiles for web, not a way the app is delivered.
+
 ## The Problem This Solves
 
 Two bugs were discovered and fixed that share the same root cause — Flutter making HTTP calls that bypass the Go backend:

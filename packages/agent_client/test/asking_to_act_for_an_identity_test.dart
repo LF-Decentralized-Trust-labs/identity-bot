@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:agent_client/config/agent_config.dart';
 import 'package:agent_client/services/a_controller_offering_itself.dart';
 import 'package:agent_client/services/asking_to_act_for_an_identity.dart';
+import 'package:agent_client/services/controller_signing_client.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:test/test.dart';
@@ -106,9 +107,32 @@ void main() {
       // and not worth showing anybody as one.
       final asking = AskingToActForAnIdentity(
         localCoreOrigin: localCore,
-        client: MockClient((_) async => http.Response('not authorised', 403)),
+        client: MockClient((req) async {
+          if (req.url.path == '/api/controller/sign') {
+            return http.Response(
+                jsonEncode({
+                  'controller_aid': 'BTHISMACHINE',
+                  'signature': '0BSIG',
+                  'timestamp': '2026-09-01T00:00:00Z',
+                }),
+                200);
+          }
+          return http.Response('not authorised', 403);
+        }),
       );
       expect(await asking.whatTheAgentSays(agent), isNull);
+    });
+
+    test('is an error, not "nobody has approved", when this machine cannot sign',
+        () async {
+      // An unsigned question is refused by the agent exactly like an unapproved
+      // one, so the two must not be told apart by the agent's answer.
+      final asking = AskingToActForAnIdentity(
+        localCoreOrigin: localCore,
+        client: MockClient((req) async => http.Response('no enclave', 501)),
+      );
+      await expectLater(
+          asking.whatTheAgentSays(agent), throwsA(isA<ThisMachineCouldNotSign>()));
     });
 
     test('names the identity, and what this machine was approved as', () async {

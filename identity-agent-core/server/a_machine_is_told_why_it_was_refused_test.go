@@ -42,7 +42,7 @@ const theVagueRefusal = "not authorised to act for this identity, or its authori
 func theRefusalGivenTo(t *testing.T, s *CoreServer, req *http.Request) (int, string) {
 	t.Helper()
 	w := httptest.NewRecorder()
-	s.buildRouter("").ServeHTTP(w, req)
+	s.buildRouter().ServeHTTP(w, req)
 	return w.Code, w.Body.String()
 }
 

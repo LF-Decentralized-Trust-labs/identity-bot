@@ -103,7 +103,12 @@ func (contactAck) Perform(s *CoreServer, in InboundMessage) error {
 	if err != nil || contact == nil {
 		return fmt.Errorf("%s accepted a relationship this agent has no record of starting", in.FromAID)
 	}
-	if contact.Status != "pending_outbound" && contact.Status != "pending_inbound" {
+	if contact.Status == "pending_inbound" {
+		// This agent did not start it: somebody asked to connect and the owner
+		// has not agreed. Their own acknowledgement cannot agree for the owner.
+		return fmt.Errorf("%s cannot accept itself: only the owner accepts a contact that asked to connect", in.FromAID)
+	}
+	if contact.Status != "pending_outbound" {
 		// Nothing to move. Not an error: an acceptance arriving twice, or after
 		// the relationship is already settled, is ordinary.
 		return nil

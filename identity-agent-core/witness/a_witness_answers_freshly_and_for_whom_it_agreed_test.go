@@ -187,7 +187,7 @@ func TestOnlyWhatAWitnessLacksIsSent(t *testing.T) {
 	}
 	sender.FetchTip = func(_ context.Context, url string) (TipAnswer, error) {
 		_, nonce, _ := strings.Cut(url, "?nonce=")
-		return d.w.KelTip(d.org, nonce)
+		return d.w.KelTip(d.org, nonce, true)
 	}
 	signed := func(rawB64 string) SignedEvent {
 		raw, _ := base64.StdEncoding.DecodeString(rawB64)
@@ -230,7 +230,7 @@ func TestABootstrapWitnessCannotBeRedirected(t *testing.T) {
 func TestATipAnswerIsBelievedOnlyAsAsked(t *testing.T) {
 	d := newDelegation(t)
 	d.approved(t)
-	a, err := d.w.KelTip(d.org, "n-1")
+	a, err := d.w.KelTip(d.org, "n-1", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,7 +398,7 @@ func TestAWitnessUpToDateIsNotAskedAgain(t *testing.T) {
 	sender.FetchTip = func(_ context.Context, url string) (TipAnswer, error) {
 		asked++
 		_, nonce, _ := strings.Cut(url, "?nonce=")
-		return d.w.KelTip(d.org, nonce)
+		return d.w.KelTip(d.org, nonce, true)
 	}
 	sender.PostEvent = func(_ context.Context, _ string, body []byte) (map[string]interface{}, error) {
 		var req struct {
@@ -485,7 +485,7 @@ func TestAWitnessHandsBackAnEventItHolds(t *testing.T) {
 	}
 	sender.FetchTip = func(_ context.Context, url string) (TipAnswer, error) {
 		_, nonce, _ := strings.Cut(url, "?nonce=")
-		return d.w.KelTip(d.org, nonce)
+		return d.w.KelTip(d.org, nonce, true)
 	}
 	asked := ""
 	sender.FetchEvent = func(_ context.Context, url string) (SignedEvent, error) {
@@ -530,7 +530,7 @@ func TestAPassLooksOnlyAtWhatIsNotConfirmed(t *testing.T) {
 	_ = sender.Store.SaveContactMeta(ContactMeta{ContactAID: "EWitness", WitnessKey: d.wkey})
 	sender.FetchTip = func(_ context.Context, url string) (TipAnswer, error) {
 		_, nonce, _ := strings.Cut(url, "?nonce=")
-		return d.w.KelTip(d.org, nonce)
+		return d.w.KelTip(d.org, nonce, true)
 	}
 	sender.PostEvent = func(_ context.Context, _ string, body []byte) (map[string]interface{}, error) {
 		var req struct {

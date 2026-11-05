@@ -27,7 +27,7 @@ func (s *Service) SubmitToWitness(ctx context.Context, witnessURL, signerAID str
 	}
 
 	body := eventBody(signerAID, base64.StdEncoding.EncodeToString(rawEvent), cesrSigs)
-	resp, err := s.PostEvent(ctx, witnessURL, body)
+	resp, err := s.PostEvent(s.ownersLocalAllowed(ctx, witnessURL), witnessURL, body)
 	if err != nil {
 		return nil, err
 	}

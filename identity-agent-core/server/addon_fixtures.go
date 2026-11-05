@@ -139,8 +139,8 @@ func (fixtureWrapper) HandleGrantController(s *CoreServer, w http.ResponseWriter
 	s.handleGrantController(w, r)
 }
 func (fixtureWrapper) Router(s *CoreServer) chi.Router { return s.router }
-func (fixtureWrapper) BuildRouter(s *CoreServer, flutterWebDir string) chi.Router {
-	return s.buildRouter(flutterWebDir)
+func (fixtureWrapper) BuildRouter(s *CoreServer) chi.Router {
+	return s.buildRouter()
 }
 func (fixtureWrapper) KeySignerOf(seed []byte) coretypes.KeySigner { return heldKeyOf(seed) }
 func (fixtureWrapper) KeySetFor(s *CoreServer, aid string) (*didcomm.KeySet, error) {

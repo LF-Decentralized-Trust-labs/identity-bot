@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -329,13 +330,7 @@ func (cv *CredentialVault) injectMatching(req *http.Request, eligible func(Crede
 	defer cv.mu.Unlock()
 	cv.ensureLoadedLocked()
 
-	domain := req.URL.Hostname()
-	if domain == "" {
-		domain = req.Host
-	}
-	if idx := strings.Index(domain, ":"); idx > 0 {
-		domain = domain[:idx]
-	}
+	host, port := destinationHostPort(req)
 
 	// Collect every candidate before choosing, rather than taking the first.
 	//
@@ -356,7 +351,7 @@ func (cv *CredentialVault) injectMatching(req *http.Request, eligible func(Crede
 			continue
 		}
 		for _, pattern := range entry.MatchDomains {
-			if MatchDomain(pattern, domain) {
+			if MatchHostPort(pattern, host, port) {
 				matches = append(matches, candidate{entry, pattern})
 				break
 			}
@@ -380,11 +375,11 @@ func (cv *CredentialVault) injectMatching(req *http.Request, eligible func(Crede
 		log.Printf("[credentials] REFUSING to inject for %s: %d stored credentials match it (%s). "+
 			"Nothing was sent. Narrow the request to one service — acting as an arbitrary "+
 			"one of them would authenticate as the wrong account.",
-			domain, len(matches), strings.Join(names, ", "))
+			host, len(matches), strings.Join(names, ", "))
 		if cv.tracer != nil && cv.tracer.IsEnabled() {
 			cv.tracer.Emit("credentials", "ambiguous", "egress", "", "",
-				fmt.Sprintf("Refused to inject for %s: %d credentials match", domain, len(matches)),
-				map[string]interface{}{"domain": domain, "candidates": names})
+				fmt.Sprintf("Refused to inject for %s: %d credentials match", host, len(matches)),
+				map[string]interface{}{"host": host, "candidates": names})
 		}
 		return false
 	}
@@ -397,11 +392,11 @@ func (cv *CredentialVault) injectMatching(req *http.Request, eligible func(Crede
 			injectedHeaders = append(injectedHeaders, key)
 		}
 	}
-	log.Printf("[credentials] Injected %s credentials for domain %s", m.entry.Service, domain)
+	log.Printf("[credentials] Injected %s credentials for host %s", m.entry.Service, host)
 	if cv.tracer != nil && cv.tracer.IsEnabled() {
 		cv.tracer.Emit("credentials", "inject", "egress", "", "",
-			fmt.Sprintf("Injected %s credentials for %s", m.entry.Service, domain),
-			map[string]interface{}{"service": m.entry.Service, "domain": domain,
+			fmt.Sprintf("Injected %s credentials for %s", m.entry.Service, host),
+			map[string]interface{}{"service": m.entry.Service, "host": host,
 				"pattern": m.pattern, "headers_injected": injectedHeaders})
 	}
 	return true
@@ -709,4 +704,27 @@ func decryptVault(key, data []byte) ([]CredentialEntry, error) {
 		return nil, fmt.Errorf("parse entries: %w", err)
 	}
 	return entries, nil
+}
+
+// destinationHostPort is the host a request goes to and the port it is dialled
+// on: the port the URL (or, failing that, the Host header) names, else the
+// scheme's default. The port is kept, not stripped, so a credential whose
+// match_domains entry names a port is injected on that port only.
+func destinationHostPort(req *http.Request) (host, port string) {
+	host, port = req.URL.Hostname(), req.URL.Port()
+	if host == "" {
+		host, port = req.Host, ""
+		if h, p, err := net.SplitHostPort(req.Host); err == nil {
+			host, port = h, p
+		}
+	}
+	if port == "" {
+		switch req.URL.Scheme {
+		case "https", "wss":
+			port = "443"
+		case "http", "ws":
+			port = "80"
+		}
+	}
+	return strings.ToLower(host), port
 }

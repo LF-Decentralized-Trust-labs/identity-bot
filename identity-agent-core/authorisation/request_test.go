@@ -116,6 +116,32 @@ func (w *world) check(cred []byte) error {
 	return Check(Input{Credential: cred, Grant: w.grant, GrantLog: w.log, Body: w.body, HaveBody: true})
 }
 
+// checkKnowing checks cred with the assets the route would know.
+func (w *world) checkKnowing(cred []byte, assets map[string]ExpectedAsset) error {
+	return Check(Input{Credential: cred, Grant: w.grant, GrantLog: w.log, Body: w.body, HaveBody: true,
+		Asset: func(id, _ string) (ExpectedAsset, bool) { a, ok := assets[id]; return a, ok }})
+}
+
+var (
+	knownAgent = map[string]ExpectedAsset{"agent-1": {PairwiseAID: agentAID, Kind: AssetKindAIAgent}}
+	knownApp   = map[string]ExpectedAsset{"app-1": {PairwiseAID: agentAID, Kind: AssetKindApp}}
+)
+
+// bodyOf is a body credential of the given schema, held by holder, issued on a
+// request approving machine body-1 under the asset path names.
+func (w *world) bodyOf(schema, holder, path string) []byte {
+	req := w.signs("POST", path+"/bodies/body-1/approve", "", ago(time.Minute))
+	assetType := "ai_agent"
+	if schema == schemas.AppBody.Schema.SAID {
+		assetType = "app"
+	}
+	acdc, _ := w.build(schema, holder, time.Now().UTC(), map[string]interface{}{
+		"asset_type": assetType, "name": "Thing", "host": "BHost", "verkey": "DKey",
+		"keys_digest": "EDigest", "grade": "software", "request": req, "about": "body-1",
+	}, w.edge())
+	return acdc
+}
+
 func ago(d time.Duration) time.Time { return time.Now().UTC().Add(-d) }
 
 const capBody = `{"capabilities":["system.info.read"]}`
@@ -246,11 +272,82 @@ func TestABodyApprovalMustNameTheMachineApproved(t *testing.T) {
 		}, w.edge())
 		return acdc
 	}
-	if err := w.check(approve("body-1", "body-1")); err != nil {
+	if err := w.checkKnowing(approve("body-1", "body-1"), knownAgent); err != nil {
 		t.Fatalf("a body approval that holds was refused: %v", err)
 	}
-	if err := w.check(approve("body-1", "body-2")); err == nil {
+	if err := w.checkKnowing(approve("body-1", "body-2"), knownAgent); err == nil {
 		t.Fatal("a body credential for another machine than the one approved was accepted")
+	}
+}
+
+// An app's body is approved by the same request as an AI agent's, and a body
+// credential for another machine than the one approved is refused for an app too.
+func TestAnAppBodyIsApprovedByTheSameRequest(t *testing.T) {
+	w := newWorld(t)
+	approve := func(bid, about string) []byte {
+		req := w.signs("POST", "/api/mcp/agents/app-1/bodies/"+bid+"/approve", "", ago(time.Minute))
+		acdc, _ := w.build(schemas.AppBody.Schema.SAID, agentAID, time.Now().UTC(), map[string]interface{}{
+			"asset_type": "app", "name": "Task console", "host": "BHost", "verkey": "DKey",
+			"keys_digest": "EDigest", "grade": "software", "request": req, "about": about,
+		}, w.edge())
+		return acdc
+	}
+	if err := w.checkKnowing(approve("body-1", "body-1"), knownApp); err != nil {
+		t.Fatalf("an app body approval that holds was refused: %v", err)
+	}
+	if err := w.checkKnowing(approve("body-1", "body-2"), knownApp); err == nil {
+		t.Fatal("an app body credential for another machine than the one approved was accepted")
+	}
+}
+
+// A body credential is the named asset's: held by its pairwise AID.
+func TestABodyApprovalIsForTheAssetThePathNames(t *testing.T) {
+	w := newWorld(t)
+	other := "EOther0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZa"
+	if err := w.checkKnowing(w.bodyOf(schemas.AIAgentBody.Schema.SAID, agentAID, "/api/mcp/agents/agent-1"), knownAgent); err != nil {
+		t.Fatalf("a body credential held by the asset the path names was refused: %v", err)
+	}
+	if err := w.checkKnowing(w.bodyOf(schemas.AIAgentBody.Schema.SAID, other, "/api/mcp/agents/agent-1"), knownAgent); err == nil {
+		t.Fatal("a body credential held by another asset than the path names was accepted")
+	}
+	if err := w.checkKnowing(w.bodyOf(schemas.AppBody.Schema.SAID, other, "/api/mcp/agents/app-1"), knownApp); err == nil {
+		t.Fatal("an App Body held by another asset than the path names was accepted")
+	}
+}
+
+// An approval made for an AI agent does not back an App Body, nor the reverse.
+func TestABodyApprovalIsOfTheKindOfAssetThePathNames(t *testing.T) {
+	w := newWorld(t)
+	if err := w.checkKnowing(w.bodyOf(schemas.AppBody.Schema.SAID, agentAID, "/api/mcp/agents/agent-1"), knownAgent); err == nil {
+		t.Fatal("an App Body was accepted on the approval of an AI agent's machine")
+	}
+	if err := w.checkKnowing(w.bodyOf(schemas.AIAgentBody.Schema.SAID, agentAID, "/api/mcp/agents/app-1"), knownApp); err == nil {
+		t.Fatal("an AI Agent Body was accepted on the approval of an app's machine")
+	}
+}
+
+// With nobody to say which asset the path names, a body approval is refused.
+func TestABodyApprovalWithNoExpectedAssetIsRefused(t *testing.T) {
+	w := newWorld(t)
+	cred := w.bodyOf(schemas.AIAgentBody.Schema.SAID, agentAID, "/api/mcp/agents/agent-1")
+	if err := w.check(cred); err == nil {
+		t.Fatal("a body approval was accepted with no way to know the asset it was for")
+	}
+}
+
+// An asset the lookup does not know, or knows without an identifier or a kind
+// that has a body, is refused rather than passed.
+func TestABodyApprovalForAnAssetNotKnownIsRefused(t *testing.T) {
+	w := newWorld(t)
+	cred := w.bodyOf(schemas.AIAgentBody.Schema.SAID, agentAID, "/api/mcp/agents/agent-1")
+	for name, assets := range map[string]map[string]ExpectedAsset{
+		"unknown":    {},
+		"no AID":     {"agent-1": {Kind: AssetKindAIAgent}},
+		"other kind": {"agent-1": {PairwiseAID: agentAID, Kind: "domain"}},
+	} {
+		if err := w.checkKnowing(cred, assets); err == nil {
+			t.Fatalf("a body approval was accepted for an asset that was %s", name)
+		}
 	}
 }
 
@@ -626,5 +723,60 @@ func TestAnOwnersRequestMustNameTheIssuer(t *testing.T) {
 	if err := Check(Input{Credential: grantFor("EAnotherIdentityAgent0123456789ABCDEFGHIJKLM"), OwnerKey: iacrypto.VerkeyQB64(pub),
 		Body: capBody, HaveBody: true}); err == nil {
 		t.Fatal("an owner's request signed for another Identity Agent was taken as authorising this one's credential")
+	}
+}
+
+// The path an approval is made at is the one the route is mounted at.
+func TestABodyApprovalIsAtThePathTheRouteMounts(t *testing.T) {
+	w := newWorld(t)
+	for _, path := range []string{"/api/mcp/agents/agent-1", "/x/mcp/agents/agent-1", "/api/other/agents/agent-1", "/api/mcp/apps/agent-1"} {
+		err := w.checkKnowing(w.bodyOf(schemas.AIAgentBody.Schema.SAID, agentAID, path), knownAgent)
+		if (path == "/api/mcp/agents/agent-1") != (err == nil) {
+			t.Errorf("a body approval at %s: %v", path, err)
+		}
+	}
+}
+
+// An App Grant rests on a request to grant an app, at POST /api/hosted-apps: what it
+// grants is what was asked for, and no AI agent request is turned into one.
+func TestAnAppGrantMustBeWhatWasAskedFor(t *testing.T) {
+	w := newWorld(t)
+	grant := func(req map[string]interface{}, name string, capabilities []string, about string) []byte {
+		attrs := map[string]interface{}{"asset_type": "app", "name": name, "capabilities": capabilities, "request": req}
+		if about != "" {
+			attrs["about"] = about
+		}
+		acdc, _ := w.build(schemas.AppGrant.Schema.SAID, agentAID, time.Now().UTC(), attrs, w.edge())
+		return acdc
+	}
+	prov := w.signs("POST", "/api/hosted-apps", `{"name":"Task console","capabilities":["system.info.read"]}`, ago(time.Minute))
+	if err := w.check(grant(prov, "Task console", []string{"system.info.read"}, "")); err != nil {
+		t.Fatalf("a provisioning request for an app that holds was refused: %v", err)
+	}
+	if err := w.check(grant(prov, "Another name", []string{"system.info.read"}, "")); err == nil {
+		t.Fatal("a grant to an app named differently from the one asked for was accepted")
+	}
+	if err := w.check(grant(prov, "Task console", []string{"system.info.read", "infra.zone.list"}, "")); err == nil {
+		t.Fatal("more capabilities than were asked for were accepted")
+	}
+	// The route is bound: the same request at any other path grants no app.
+	for _, c := range [][2]string{{"POST", "/api/apps"}, {"PUT", "/api/apps/app-1/capabilities"}, {"PUT", "/api/hosted-apps/app-1/capabilities"}, {"POST", "/api/hosted-apps/x"}, {"POST", "/api/mcp/agents"}} {
+		req := w.signs(c[0], c[1], `{"name":"Task console","capabilities":["system.info.read"]}`, ago(time.Minute))
+		if err := w.check(grant(req, "Task console", []string{"system.info.read"}, "")); err == nil {
+			t.Errorf("%s %s was accepted as the request for an app's grant", c[0], c[1])
+		}
+	}
+	limited := w.signs("POST", "/api/hosted-apps", `{"name":"Task console","capabilities":["system.info.read"],"resource_constraints":{"system.info.read":{"host":["a"]}}}`, ago(time.Minute))
+	if err := w.check(grant(limited, "Task console", []string{"system.info.read"}, "")); err == nil {
+		t.Fatal("a grant without the limits that were asked for was accepted")
+	}
+	// An AI agent's request grants no app anything.
+	agentReq := w.signs("PUT", "/api/mcp/agents/agent-1/capabilities", capBody, ago(time.Minute))
+	if err := w.check(grant(agentReq, "Task console", []string{"system.info.read"}, "agent-1")); err == nil {
+		t.Fatal("a request to grant an AI agent was accepted as the grant of an app")
+	}
+	// And an app's request grants no AI agent anything.
+	if err := w.check(w.aGrant(prov, []string{"system.info.read"}, "")); err == nil {
+		t.Fatal("a request to grant an app was accepted as the grant of an AI agent")
 	}
 }

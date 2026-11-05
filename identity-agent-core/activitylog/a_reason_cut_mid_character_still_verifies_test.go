@@ -47,22 +47,35 @@ func TestAReasonCutMidCharacterVerifies(t *testing.T) {
 // verifies, because the record is checked against the kept bytes, which the
 // signature fixes; and since the kept bytes are fixed, so is the record. The
 // same row with the escape respelled as the character itself fails.
+//
+// The old row is built here, byte by byte, and not by asking the encoder for
+// it: the encoder in use decides how it spells a bad byte (Go 1.26 writes the
+// escape, Go 1.27 the character), and a row written by the first has to verify
+// on a machine built with the second.
 func TestARowWrittenWithAnEscapedBadByteVerifiesInItsOneSpelling(t *testing.T) {
 	store := activitylog.NewTestLog(t)
 	ts := activitylogtest.NewSigner(t)
 	prev, _ := store.LastEventHash()
+	// What the row reads as: the bad byte is the replacement character.
 	unsigned := activitylog.InvocationEvent{TS: "2026-07-31T00:00:00Z", CapabilityID: "v.one", ResultStatus: "ok",
-		Reason: "cut mid character \xc3", PrevHash: prev}
-	payload, err := json.Marshal(unsigned)
+		Reason: "cut mid character " + string(utf8.RuneError), PrevHash: prev}
+	// What it was signed over: the same event, with that character spelled as the escape.
+	spelled, err := json.Marshal(unsigned)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(payload), escapedBadByte) {
-		t.Fatalf("the encoder no longer escapes a bad byte, so this test tests nothing: %s", payload)
+	payload := []byte(strings.Replace(string(spelled), string(utf8.RuneError), escapedBadByte, 1))
+	if strings.Count(string(payload), escapedBadByte) != 1 || string(payload) == string(spelled) {
+		t.Fatalf("the signed bytes were not built with the escape: %s", payload)
 	}
-	ev := ts.Sign(unsigned)
+	ev := ts.SignBytes(unsigned, payload)
 	ev.SignedPayload = string(payload)
 	if _, err := store.InsertInvocationEvent(ev); err != nil {
+		t.Fatal(err)
+	}
+	// The record the old row holds: the signed bytes with the signer and signature added.
+	record := strings.TrimSuffix(string(payload), "}") + `,"signer_aid":"` + ev.SignerAID + `","signature":"` + ev.Signature + `"}`
+	if _, err := store.DB().Exec(`UPDATE invocation_log SET event_json = ? WHERE id = 1`, record); err != nil {
 		t.Fatal(err)
 	}
 	if faults, err := store.VerifyChain(ts.Keys, nil); err != nil || len(faults) != 0 {

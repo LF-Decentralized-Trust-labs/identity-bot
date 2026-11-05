@@ -299,6 +299,15 @@ private-use range or inside an implementation.
 - **Outcome:** the individual signs a vouch over the org's AID (stored by the org
   as proof) and is enrolled as the active owner (the super-admin role). No
   delegated inception — the org controls its own keys; the signer only attests.
+- **Vouch:** a JSON payload `{"v":"VOUCH1","action":"sign_org","signer_aid",
+  "org_aid","name"}` and the signer's Ed25519 signature over its exact bytes
+  (CESR qb64). `name` is the name the signer discloses for themselves.
+- **Verified:** a verifier shows `name` only if the signature verifies under the
+  signer's *current* key (from their verified key event log; for the founder only,
+  where no verified log is held, the key that also decides whether they may
+  administer the agent) and `signer_aid` and
+  `org_aid` match the owner and organization being shown. A vouch with no `name`,
+  or whose signer has since rotated, names nobody.
 
 ---
 

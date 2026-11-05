@@ -62,7 +62,30 @@ type Input struct {
 	// before relying on it.
 	IssuerKEL     [][]byte
 	CredentialLog [][]byte
+	// Asset resolves the asset identifier a request's path names, and the
+	// identifier the body credential is held by (its `i`), to the asset
+	// itself: a lookup that has the asset store answers by the identifier, one
+	// that has only credentials answers by the holder. Needed for a request that approves a machine as an asset's body
+	// (POST .../bodies/{machine}/approve): the body credential must be the
+	// named asset's, which only whoever knows the asset can say. Left nil, or
+	// answering that the asset is unknown, such a credential is refused.
+	Asset func(id, holder string) (ExpectedAsset, bool)
 }
+
+// ExpectedAsset is who a request's path names: the asset's pairwise AID, which
+// a body credential for it is issued to, and its kind.
+type ExpectedAsset struct {
+	// PairwiseAID is the identifier the asset's credentials are issued to.
+	PairwiseAID string
+	// Kind is the asset's kind: AssetKindAIAgent or AssetKindApp.
+	Kind string
+}
+
+// The kinds of asset a body credential can be for.
+const (
+	AssetKindAIAgent = "ai_agent"
+	AssetKindApp     = "app"
+)
 
 // ErrBodyWithheld is a check that held in every respect it could, without the
 // request's body: the signature, the signer, the grant, the times, and that
@@ -239,7 +262,7 @@ func Check(in Input) error {
 	if at.Before(issuedAt.Add(-Skew)) {
 		return fmt.Errorf("the request was made long before the credential was issued")
 	}
-	if err := checkAskedFor(cred, method, path, req.Asked); err != nil {
+	if err := checkAskedFor(cred, method, path, req.Asked, in.Asset); err != nil {
 		return err
 	}
 	if !in.HaveBody {
@@ -394,8 +417,20 @@ func anchoredAt(kel [][]byte, subject string, sn int, said string) (int, bool) {
 	return 0, false
 }
 
+// checkCapabilitiesAsked checks that the capabilities and limits the request
+// asked for are those the grant gives, for an AI agent and an app alike.
+func checkCapabilitiesAsked(cred acdc, asked map[string]json.RawMessage) error {
+	if !sameSet(asked["capabilities"], cred.A["capabilities"]) {
+		return fmt.Errorf("the request asked for other capabilities than were granted")
+	}
+	if rc, ok := asked["resource_constraints"]; ok && !sameJSON(rc, cred.A["resource_constraints"]) {
+		return fmt.Errorf("the request asked for other limits than were granted")
+	}
+	return nil
+}
+
 // checkAskedFor checks that what the request asked for is what was issued.
-func checkAskedFor(cred acdc, method, path string, asked map[string]json.RawMessage) error {
+func checkAskedFor(cred acdc, method, path string, asked map[string]json.RawMessage, resolve func(id, holder string) (ExpectedAsset, bool)) error {
 	about := stringAttr(cred.A, "about")
 	segments := strings.Split(strings.Trim(path, "/"), "/")
 	switch cred.Schema {
@@ -417,12 +452,21 @@ func checkAskedFor(cred acdc, method, path string, asked map[string]json.RawMess
 		default:
 			return fmt.Errorf("%s %s is not a request that grants an AI agent anything", method, path)
 		}
-		if !sameSet(asked["capabilities"], cred.A["capabilities"]) {
-			return fmt.Errorf("the request asked for other capabilities than were granted")
+		return checkCapabilitiesAsked(cred, asked)
+	case schemas.AppGrant.Schema.SAID:
+		// An app's grant is asked for at the route that creates an app, never
+		// an AI agent's, so a request to grant an AI agent cannot be turned
+		// into an app's grant or the reverse. No route changes an app's
+		// capabilities yet; when one is added it is bound here with it.
+		switch {
+		case method == "POST" && path == "/api/hosted-apps":
+			if stringOf(asked["name"]) != stringAttr(cred.A, "name") {
+				return fmt.Errorf("the request asked for an app named differently")
+			}
+		default:
+			return fmt.Errorf("%s %s is not a request that grants an app anything", method, path)
 		}
-		if rc, ok := asked["resource_constraints"]; ok && !sameJSON(rc, cred.A["resource_constraints"]) {
-			return fmt.Errorf("the request asked for other limits than were granted")
-		}
+		return checkCapabilitiesAsked(cred, asked)
 	case schemas.ControllerGrant.Schema.SAID:
 		if method != "POST" || path != "/api/controllers" {
 			return fmt.Errorf("%s %s is not a request that grants a machine", method, path)
@@ -443,12 +487,39 @@ func checkAskedFor(cred acdc, method, path string, asked map[string]json.RawMess
 		if !sameInstant(strings.TrimSpace(stringOf(asked["expires_at"])), stringAttr(cred.A, "valid_until")) {
 			return fmt.Errorf("the request asked for another end to the grant than was granted")
 		}
-	case schemas.AIAgentBody.Schema.SAID:
-		if method != "POST" || len(segments) != 7 || segments[4] != "bodies" || segments[6] != "approve" {
+	case schemas.AIAgentBody.Schema.SAID, schemas.AppBody.Schema.SAID:
+		// An app's body is approved by the same request as an AI agent's
+		// (ADR-059): the machine is named in the path, whatever the asset is.
+		// Mounted at POST /api/mcp/agents/{asset}/bodies/{machine}/approve.
+		if method != "POST" || len(segments) != 7 || segments[0] != "api" || segments[1] != "mcp" || segments[2] != "agents" || segments[4] != "bodies" || segments[6] != "approve" {
 			return fmt.Errorf("%s %s is not a request that approves a machine", method, path)
 		}
 		if segments[5] != about {
 			return fmt.Errorf("the request approved machine %s, the credential is about %s", segments[5], about)
+		}
+		// The approval is of a machine as the body of the asset the path
+		// names: the credential must be that asset's, of that asset's kind.
+		if resolve == nil {
+			return fmt.Errorf("the asset %s the request approved a body for cannot be told, so the body credential is not tied to it", segments[3])
+		}
+		want, ok := resolve(segments[3], stringAttr(cred.A, "i"))
+		if !ok || want.PairwiseAID == "" {
+			return fmt.Errorf("the asset %s the request approved a body for is not known", segments[3])
+		}
+		var schema string
+		switch want.Kind {
+		case AssetKindAIAgent:
+			schema = schemas.AIAgentBody.Schema.SAID
+		case AssetKindApp:
+			schema = schemas.AppBody.Schema.SAID
+		default:
+			return fmt.Errorf("the asset %s is of a kind (%q) that has no body", segments[3], want.Kind)
+		}
+		if holder := stringAttr(cred.A, "i"); holder != want.PairwiseAID {
+			return fmt.Errorf("the request approved a body for %s, whose identifier is %s, the credential is for %s", segments[3], want.PairwiseAID, holder)
+		}
+		if cred.Schema != schema {
+			return fmt.Errorf("the request approved a body for %s, an asset of kind %s, the credential is of another kind", segments[3], want.Kind)
 		}
 	default:
 		return fmt.Errorf("the credential is not one an authorising request is checked for")

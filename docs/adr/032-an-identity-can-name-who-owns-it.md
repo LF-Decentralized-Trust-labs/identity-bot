@@ -233,6 +233,44 @@ table the enforcement *is* cryptographic — the machine does not hold enough ke
 to perform them. For anything else the terms are tamper-proof and their
 enforcement is whatever reads them.
 
+## A name on the owner list
+
+The owner list holds identifiers only. A name is shown beside an owner only if
+that owner signed it: the `sign_org` vouch an owner's agent signs on accepting
+ownership carries `name` beside `signer_aid` and `org_aid`
+(`docs/action-code-registry.md`), and `/api/owners` shows the name only when
+that vouch verifies against the owner's **current** key and says this owner,
+this organisation and this name. The roster's own name field arrives unsigned in
+the redeem request and is never shown.
+
+The current key is a key event log this agent verified, which follows a
+rotation and which a caller cannot write. For the founding owner, whose log may
+not be on file, it is the key that already decides whether they may administer
+the agent (`ownerAuthority`). The sealed record and unverified contact rows are
+not used for anyone else: the sealed key is not updated when an owner rotates,
+and contact rows are written from addresses a caller supplies.
+
+The response returns the vouch (`payload` and `signature`) beside each name
+(`owner_name_vouches`), so the device holding the owner's key can verify the name
+itself instead of trusting the computer.
+
+Agreeing to own the organisation, whether by invite, by ownership ceremony or
+by founding, records the owner's key event log from the address their agent
+gives (`AcceptFoundingSigner`), accepted only if it verifies for the identifier
+they presented. That, with the `sign_org` vouch stored beside them, is all a name
+needs, so an owner added by ceremony is named like any other.
+
+An organisation whose roster an overlay owns (`OVERLAY_OWNS_ORG_ROUTES`) hands
+that roster to the core (`SetOwnerRoster`). The names shown are still the ones
+the core verifies; the overlay does not check or supply its own.
+
+Two cases show **no name**, and show the key identifier instead:
+
+- an owner whose agent gave no address for its log, or whose log does not verify;
+- an owner who has rotated, until they sign a new name vouch (today, by redeeming another invitation).
+
+Nothing guesses a name to fill the gap.
+
 ## What this supersedes
 
 - **This ADR's own consequence** that the identity "holds its own key" as a

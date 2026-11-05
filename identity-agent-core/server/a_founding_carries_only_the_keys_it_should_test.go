@@ -32,7 +32,7 @@ func TestAFoundingCarriesOnlyTheKeysItShould(t *testing.T) {
 		}
 		b, _ := json.Marshal(body)
 		rec := httptest.NewRecorder()
-		s.buildRouter("").ServeHTTP(rec, local("POST", "/api/inception", string(b)))
+		s.buildRouter().ServeHTTP(rec, local("POST", "/api/inception", string(b)))
 		if rec.Code != http.StatusCreated {
 			t.Fatalf("founding was answered %d %s", rec.Code, rec.Body.String())
 		}

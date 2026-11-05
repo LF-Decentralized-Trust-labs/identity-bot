@@ -310,3 +310,18 @@ func TestVerifyInProcessNoContactCorrelation(t *testing.T) {
 		t.Fatal("in-process Verify must not populate contact_correlation")
 	}
 }
+
+// The link verifier's resolver is built with the guarded client: a link someone
+// else wrote cannot make it call an internal service.
+func TestTheVerifiersResolverRefusesAnInternalAddress(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { hits++ }))
+	defer srv.Close()
+	sdk := New(nil, Config{})
+	if resp, err := sdk.resolver.HTTPClient.Get(srv.URL); err == nil {
+		resp.Body.Close()
+	}
+	if hits != 0 {
+		t.Fatal("the verifier's resolver reached an internal service")
+	}
+}

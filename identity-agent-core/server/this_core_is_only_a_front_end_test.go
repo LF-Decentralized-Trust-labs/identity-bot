@@ -284,7 +284,7 @@ func TestEveryRouteAFrontEndAnswersForActuallyExists(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.UpdateService = upd
-	real := s.buildRouter("")
+	real := s.buildRouter()
 
 	registered := map[string]bool{}
 	_ = chi.Walk(real, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
@@ -369,7 +369,7 @@ func TestSettingWhichHalfAComputerRunsIsNotReachableFromElsewhere(t *testing.T) 
 // is there.
 func TestTheRealRouterRefusesWhatBelongsToTheAgent(t *testing.T) {
 	s := agentWithNoIdentity(t)
-	real := s.buildRouter("")
+	real := s.buildRouter()
 
 	if err := s.beAFrontEndFor(AFrontEndFor{
 		AgentAID: "EAGENT", AgentURL: "https://box.example.test",
@@ -399,7 +399,7 @@ func TestTheRealRouterRefusesWhatBelongsToTheAgent(t *testing.T) {
 func TestAFrontEndStillProvesItHoldsTheStartSecret(t *testing.T) {
 	s := agentWithNoIdentity(t)
 	s.Port = 5050
-	real := s.buildRouter("")
+	real := s.buildRouter()
 	if err := s.beAFrontEndFor(AFrontEndFor{
 		AgentAID: "EAGENT", AgentURL: "https://box.example.test",
 	}); err != nil {
@@ -453,7 +453,7 @@ func TestAMachineThatCannotSignIsNotMadeAFrontEnd(t *testing.T) {
 	req.RemoteAddr = "127.0.0.1:54321"
 	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
 	rec := httptest.NewRecorder()
-	s.buildRouter("").ServeHTTP(rec, req)
+	s.buildRouter().ServeHTTP(rec, req)
 
 	if rec.Code == http.StatusOK {
 		t.Fatal("a machine with no hardware key was armed as a front end, and every " +

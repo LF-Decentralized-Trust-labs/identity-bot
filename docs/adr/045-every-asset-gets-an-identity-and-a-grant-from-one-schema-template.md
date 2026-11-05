@@ -2,6 +2,8 @@
 
 **Status:** Accepted
 **Date:** 2026-10-20
+**Amended:** 2026-11-02 — An app is a kind of asset, with a grant and a body of its own (see §Amendment 1)
+**Amended:** 2026-11-04 — A machine key's short code is 80 bits, not about 41 (see §Amendment 2)
 **Relates to:** ADR-032 (An identity can name who owns it, from its first event), ADR-042 (How an agent is reached, and who may manage it), ADR-044 (An authorized controller does the app's work)
 
 ## Context
@@ -202,7 +204,7 @@ issuance event is of that credential, in its registry; the interaction is a well
 event of the credential's issuer whose one seal anchors exactly that issuance; and the
 interaction extends the identity's key log as the device holds it. What is shown is read
 from the credential: its kind, whom it grants, the machine's key and its fingerprint
-(`authorisation.KeyFingerprint`, which pairing shows too), grade, signer, end,
+(`authorisation.KeyFingerprint`, the code the owner compares, see Amendment 2), grade, signer, end,
 capabilities and limits, never text the asking Identity Agent wrote. A registry's
 inception is checked the same way (`WhatSigningRegisters`).
 
@@ -240,3 +242,133 @@ authorised to act for the identity (ADR-044).
   verified by anybody else.
 - Other credential schemas name their lapse `expiry_date` or `authorized_until`, as a date.
   Asset grants use `valid_until`, as a date and time, because a grant may lapse within a day.
+
+## Amendment 1 (2026-11-02): an app is an asset, with a grant and a body
+
+*Amended 2026-11-02. Nothing above is changed.*
+
+Each app that runs beside an Identity Agent (the task console first) runs on its own
+small machine. Like an AI agent, an app is something the identity owns and lets act for it,
+so it is an asset under this ADR: it has a delegated identifier, and a grant that is its only
+authority. Two more kinds are built from the template, each with only the newer version
+(1.1.0, with an edge to the grant of whoever authorised it):
+
+- **App Grant** (`asset_type` `app`), what the app may ask of the Identity Agent. It adds
+  `capabilities`, the ceiling, and `resource_constraints`, exactly as the AI Agent Grant does
+  and checked the same way (ADR-050). It has **no role, prompt, model, messaging recipients
+  or conversation limits**: an app has no brain, no model and no conversation inbox, so there
+  is nothing of those to grant, and a grant that carried them would be refused as declaring
+  an attribute the schema does not have.
+- **App Body** (`asset_type` `app`), that one machine key is the body of one app. Its
+  attributes are those of the AI Agent Body, the same grades and the same revocation. Only the
+  asset type, the title and the description differ, so that an app's body is never mistaken for
+  an AI agent's, and the reverse.
+
+A machine becomes an app's body by the contract it already uses to become an AI agent's body:
+the enrolment string, the sealed request, the signed requests (ADR-046) and the approval of
+its signed request by a controller or the owner (ADR-059). Nothing in that contract names a
+kind of asset, only the asset's identifier, so it is unchanged; an approving request for an
+app's body is checked as it is for an AI agent's. The approval is
+`POST /api/mcp/agents/{id}/bodies/{machine}/approve`, mounted by the AI agents add-on
+(`identity-agent-addons/aiagents`), and the body credential names that machine in `about`.
+Apps share this path under its AI-agent name for now: `{id}` is the asset's identifier, and
+the path says nothing of the asset's kind. A machine a provider made is approved for an app on the
+provider's signed vouch exactly as for an AI agent (ADR-059).
+
+The published schemas are `app-grant-1.1.0.schema.json` and `app-body-1.1.0.schema.json` in
+`identity-agent-core/contracts/asset-grants/`, byte for byte, and the body vectors include an
+enrolment for an app.
+
+**What this does not settle.** How an app's key is held (in a virtual chip or otherwise), its
+encrypted stores, a relay and sign-in are later steps and are not in this contract. The
+conversation verifier still accepts only an AI agent's body and grant: an app is not a party to
+a conversation.
+
+**Closed (2026-11-02).** The core provisions an app as it does an AI agent:
+`asset.Handler.ProvisionAppAsset(displayName string, capabilities []string, validUntil *time.Time,
+constraints map[string]interface{}) (*Asset, error)` mints an asset of type `app` with its own
+delegated identifier, and the Identity Agent issues its App Grant from the owner's registry with
+`issueCapabilityGrant`, recorded as an AI Agent Grant is (and, where the key is on another device,
+left for that device to sign). An app and an AI agent cannot share a name, since the engine keys
+identities by it. Three seams are closed with it:
+
+- `checkAskedFor` (`identity-agent-core/authorisation/request.go`) checks an App Grant against the
+  request that asked for it, exactly as it does an AI Agent Grant (name, capabilities and limits), at the route that creates an app,
+  `POST /api/hosted-apps` (mounted by the apphosting add-on), and only there: no route changes an app's capabilities yet,
+  and when one is added it is bound in `checkAskedFor` with it. A request to grant an AI agent is
+  not accepted as an app's, nor the reverse. The request does not name the app it creates, so
+  nothing ties the grant to an asset beyond its name.
+- `grantShown` (`identity-agent-core/authorisation/what_is_signed_is_what_is_shown.go`) shows an
+  App Grant, as kind `app`, with its name, capabilities, limits and end, so a device holding the
+  owner's key can be asked to sign one.
+- Looking up the grants an asset holds (`GrantsHeldBy`, `FindCapabilityGrant`) covers an app's
+  App Grant, so whatever revokes or removes an app can find and withdraw it. That is a different
+  list from the grants a gateway admits, below.
+- The edge lookup in `identity-agent-core/server/whoever_authorised_it_is_named.go` accepts the
+  App Grant and App Body when it finds when this Identity Agent first issued a credential that names
+  who authorised it.
+
+These seams are still open, and each is refused rather than half-working:
+
+- An App Grant signed on another device is kept by this Identity Agent only once an add-on
+  registers the app grant kind; until then it is not taken up. No add-on registers it yet.
+- Re-issuing an app's grant while the owner's key is on another device withdraws the old App
+  Grant before the new one is signed, which leaves the app with none until it is; no route
+  re-issues an app's grant yet, and the one that does must keep the old grant until the new one
+  is taken up.
+- No route issues an App Grant or an App Body yet. `ProvisionAppAsset` and the issuance exist; no
+  route in the Identity Agent calls them; the apphosting add-on's `POST /api/hosted-apps` is the
+  route that will, and no route yet changes an app's capabilities.
+- The Identity Agent's own list of grant schemas it honours as capability grants
+  (`CapabilityGrantSchemaSAIDs`, read by add-ons) is unchanged, so no gateway admits an app on its App
+  Grant yet. Admitting an app's grant at the gateway belongs to step 3 (apps reached through the
+  relay and making calls), and is decided there.
+
+The check of a body's approval is tied to the asset the path names: the caller gives the check
+a lookup from the path's `{id}` to that asset's pairwise AID and kind, and the body credential
+must be held by that AID and be the AI Agent Body for an AI agent or the App Body for an app.
+No lookup, or an asset it does not know, refuses.
+The lookup is given the path's `{id}` and the body credential's holder. An Identity Agent that
+keeps its assets answers by `{id}`. An offline verifier has only credentials, and a grant names
+its asset in `about` only when the request that asked for it named one, so it answers by the
+grant the holder holds: that grant gives the kind, and its `about`, where it has one, must be
+the `{id}`. The check also requires the path to be the one the route mounts,
+`/api/mcp/agents/{id}/bodies/{machine}/approve`.
+
+## Amendment 2 (2026-11-04): a machine key's short code is 80 bits
+
+`authorisation.KeyFingerprint` is the short code a person compares to confirm a machine's key.
+It was eight characters of the key's Blake3 text form (QB64), in two groups, upper-cased. The
+first character after the type code takes only 16 values and upper-casing merges letters, so
+the code carried about 41 bits. Someone who knew a person's code could make a different key
+with the same code on a GPU in hours, and the person would confirm the wrong key.
+
+It is now the first 80 bits of the raw Blake3-256 digest (not its QB64 text), written as 16
+Crockford base32 characters in four groups of four, `XXXX-XXXX-XXXX-XXXX`. Crockford has no
+I, L, O or U and is case-insensitive, so nothing is lost by upper-casing or by reading a
+code aloud. The domain string was `key-fingerprint/v1` and the version change means an old code
+never equals a new one. A key of the machine that was compared under the old form must be
+compared again.
+
+Exactly, so that another implementation reproduces it byte for byte:
+
+1. Take the public key as its QB64 text, with leading and trailing white space (space, tab,
+   CR, LF, and the other Unicode white space Go's `strings.TrimSpace` removes) trimmed. An
+   empty key has no code.
+2. Hash the UTF-8 bytes of `key-fingerprint/v2` + one LF (0x0A) + that text with plain,
+   unkeyed BLAKE3, 256-bit output.
+3. Take the first 10 bytes of the digest (80 bits). Read them most significant bit first, in
+   sixteen 5-bit groups, with no padding.
+4. Write each group as a character of `0123456789ABCDEFGHJKMNPQRSTVWXYZ` (value 0 is `0`,
+   value 31 is `Z`), and put a `-` after the 4th, 8th and 12th.
+
+Vector: the key `DAtHgj5xCV3Vm-eKwnHFdu84n4e2RWGrB8-aTrzQLSBB` has the code
+`M8PN-ME83-7RPK-D6FF`.
+
+The code is derived from the key each time it is shown, with one exception: an approval
+queued before this change keeps the old eight-character code in its stored one-line summary,
+while its details show the new one. They differ visibly, which is safe: compare the new one.
+
+Pinned in `identity-agent-core/authorisation/a_key_code_is_too_long_to_forge_test.go`: two
+keys with their codes, and every one-bit change of a key giving a different code. There was no
+published vector file for this code, so none is regenerated.

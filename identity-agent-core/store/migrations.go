@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 
 	"identity-agent-core/actions"
 )
@@ -991,6 +992,35 @@ UPDATE duplicity_alerts
 `},
 	{
 		Version:     46,
+		Description: "Give each row that was identified only by a counter an identity of its own",
+		SQL: `
+-- A backup is merged into a database by primary key. For a table whose only
+-- key is an auto-incrementing counter, the backup's row 7 and this database's
+-- row 7 are different things that happen to share a number, so the merge has
+-- to match on what a row IS rather than on its counter. These unique indexes
+-- are that identity. (kel and witness_receipts already have one.)
+--
+-- Rows already present twice are collapsed first, keeping the oldest, or the
+-- index could not be built.
+DELETE FROM duplicity_alerts WHERE id NOT IN (
+    SELECT MIN(id) FROM duplicity_alerts
+     GROUP BY aid, sequence_num, our_digest, their_digest, detected_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_duplicity_alerts_identity
+    ON duplicity_alerts(aid, sequence_num, our_digest, their_digest, detected_at);
+
+DELETE FROM witness_receipts_issued WHERE id NOT IN (
+    SELECT MIN(id) FROM witness_receipts_issued
+     GROUP BY signer_aid, event_said, witness_aid, issued_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_witness_receipts_issued_identity
+    ON witness_receipts_issued(signer_aid, event_said, witness_aid, issued_at);
+
+DELETE FROM witness_self_heal_log WHERE id NOT IN (
+    SELECT MIN(id) FROM witness_self_heal_log GROUP BY contact_aid, attempted_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_witness_self_heal_log_identity
+    ON witness_self_heal_log(contact_aid, attempted_at);
+`},
+	{
+		Version:     47,
 		Description: "Keep every signature over a key event, mark the events already unsigned, and keep what a recovery rotation supersedes",
 		SQL: `
 -- An event with several signers carries several signatures, so they are kept
@@ -1025,7 +1055,7 @@ CREATE TABLE IF NOT EXISTS kel_superseded (
 CREATE INDEX IF NOT EXISTS idx_kel_superseded_aid ON kel_superseded(aid);
 `},
 	{
-		Version:     47,
+		Version:     48,
 		Description: "Keep every signature over an event a witness holds, what a recovery rotation supersedes there, and a conflicting event as evidence",
 		SQL: `
 -- A JSON list of the controller signatures that verified; cesr_signature
@@ -1081,6 +1111,10 @@ func ApplyIdentityMigrations(db *sql.DB) error {
 		return fmt.Errorf("failed to create identity migrations table: %w", err)
 	}
 
+	if err := renumberBranchMigrations(db); err != nil {
+		return err
+	}
+
 	current, err := identityCurrentVersion(db)
 	if err != nil {
 		return fmt.Errorf("failed to get identity schema version: %w", err)
@@ -1125,6 +1159,57 @@ func ApplyIdentityMigrations(db *sql.DB) error {
 	}
 
 	return nil
+}
+
+// renumberBranchMigrations brings a database that ran the signature migrations
+// under the numbers they had before main's migration 46 landed (46 and 47) to
+// the numbers they have now (47 and 48). Left alone, such a database would count
+// main's 46 as done without ever running it, and then run the witness
+// migration a second time and fail on a column it already has.
+//
+// A database is recognised by what version 46 was recorded as, not by its
+// number. Main's 46 adds only unique indexes, guarded, and is safe to run on
+// any database, so it is run here and recorded. Does nothing for any other
+// database.
+func renumberBranchMigrations(db *sql.DB) error {
+	var desc string
+	err := db.QueryRow(`SELECT description FROM identity_schema_migrations WHERE version = 46`).Scan(&desc)
+	if err == sql.ErrNoRows || (err == nil && !strings.HasPrefix(desc, "Keep every signature over a key event")) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to read identity migration 46: %w", err)
+	}
+	var sqlText, description string
+	for _, m := range identityMigrations {
+		if m.Version == 46 {
+			sqlText, description = m.SQL, m.Description
+		}
+	}
+	if sqlText == "" {
+		return fmt.Errorf("there is no identity migration 46 to run")
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, q := range []string{
+		`UPDATE identity_schema_migrations SET version = 48 WHERE version = 47`,
+		`UPDATE identity_schema_migrations SET version = 47 WHERE version = 46`,
+	} {
+		if _, err := tx.Exec(q); err != nil {
+			return fmt.Errorf("failed to renumber identity migrations: %w", err)
+		}
+	}
+	if _, err := tx.Exec(sqlText); err != nil {
+		return fmt.Errorf("failed to apply identity migration 46: %w", err)
+	}
+	if _, err := tx.Exec(`INSERT INTO identity_schema_migrations (version, description) VALUES (?, ?)`,
+		46, description); err != nil {
+		return fmt.Errorf("failed to record identity migration 46: %w", err)
+	}
+	return tx.Commit()
 }
 
 // seedShareActionsFromRegistry inserts any share-menu actions declared in the

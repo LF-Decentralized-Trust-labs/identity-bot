@@ -3,9 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
-	"sync"
 	"time"
 )
 
@@ -91,7 +89,7 @@ const notSealedHardware = "this Identity Agent does not run on sealed hardware, 
 
 // handlePublicAttestation serves the evidence, or explains why it cannot.
 func (s *CoreServer) handlePublicAttestation(w http.ResponseWriter, r *http.Request) {
-	if !s.attestationLimiter.allow(callerIP(r)) {
+	if !s.attestationLimiter.allow(clientIP(r)) {
 		w.Header().Set("Retry-After", "1")
 		writeAttestationError(w, http.StatusTooManyRequests, "rate_limited",
 			"too many attestation requests from this address")
@@ -229,90 +227,6 @@ func (s *CoreServer) cachedAttestation() *publicAttestation {
 	s.attestationCached = out
 	s.attestationExpires = time.Now().Add(ttl)
 	return out
-}
-
-// attestationRateLimiter bounds how often one address may ask.
-//
-// Deliberately crude. The point is not to stop a determined adversary — they
-// have many addresses — but to keep one caller from turning an open endpoint
-// into firmware load or, once certificates are fetched rather than bundled,
-// into requests against somebody else's service.
-type attestationRateLimiter struct {
-	mu      sync.Mutex
-	seen    map[string]*rateBucket
-	perMin  int
-	lastGC  time.Time
-	maxKeys int
-}
-
-type rateBucket struct {
-	count int
-	start time.Time
-}
-
-func newAttestationRateLimiter(perMinute int) *attestationRateLimiter {
-	return &attestationRateLimiter{
-		seen:    map[string]*rateBucket{},
-		perMin:  perMinute,
-		lastGC:  time.Now(),
-		maxKeys: 10000,
-	}
-}
-
-func (l *attestationRateLimiter) allow(key string) bool {
-	if l == nil {
-		return true
-	}
-	now := time.Now()
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	// Forget old callers. Without this the map is a slow leak an
-	// unauthenticated caller controls the size of.
-	if now.Sub(l.lastGC) > time.Minute || len(l.seen) > l.maxKeys {
-		for k, b := range l.seen {
-			if now.Sub(b.start) > time.Minute {
-				delete(l.seen, k)
-			}
-		}
-		l.lastGC = now
-	}
-
-	b, ok := l.seen[key]
-	if !ok || now.Sub(b.start) > time.Minute {
-		l.seen[key] = &rateBucket{count: 1, start: now}
-		return true
-	}
-	if b.count >= l.perMin {
-		return false
-	}
-	b.count++
-	return true
-}
-
-// wouldAllow reports whether allow(key) would let a request through, without
-// counting it or remembering key.
-func (l *attestationRateLimiter) wouldAllow(key string) bool {
-	if l == nil {
-		return true
-	}
-	now := time.Now()
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	b, ok := l.seen[key]
-	return !ok || now.Sub(b.start) > time.Minute || b.count < l.perMin
-}
-
-// callerIP identifies the caller for rate limiting only.
-//
-// Not used for any access decision, so a forged forwarding header costs the
-// forger their own quota and buys nothing.
-func callerIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }
 
 func writeAttestationError(w http.ResponseWriter, status int, code, detail string) {

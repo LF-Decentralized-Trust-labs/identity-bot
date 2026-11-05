@@ -52,7 +52,7 @@ func TestAStaleOwnerSignatureIsSaidToBeStale(t *testing.T) {
 		KelVerified: true, CurrentPublicKey: k1}); err != nil {
 		t.Fatal(err)
 	}
-	r := s.buildRouter("")
+	r := s.buildRouter()
 	ask := func(seed []byte, state string) *httptest.ResponseRecorder {
 		resetSeenSignatures(t)
 		req := signed(t, "GET", "/api/profile", "", seed, time.Now())

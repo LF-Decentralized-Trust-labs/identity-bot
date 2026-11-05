@@ -39,7 +39,7 @@ import (
 func TestHandlersDoNotRecloseWhatTheGateOpenedToAController(t *testing.T) {
 	s := newAuthTestServer(t)
 	aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
-	router := s.buildRouter("")
+	router := s.buildRouter()
 
 	param := regexp.MustCompile(`\{[^}]*\}`)
 	checked := 0

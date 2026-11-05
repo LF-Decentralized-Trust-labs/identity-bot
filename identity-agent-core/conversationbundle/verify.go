@@ -169,6 +169,12 @@ type verifier struct {
 	// signedOnce is every sender's signature seen, by the entry it is in: a
 	// signed statement or request stands for one entry, never two.
 	signedOnce map[string]int
+	// answered is every ask a reply or failure has closed, by its message id:
+	// a progress note on an ask is valid only while the ask is still open.
+	answered map[string]bool
+	// opener is the first entry when an AI agent opened the conversation; the
+	// zero Record when a person did.
+	opener agentmessage.Record
 }
 
 func (v *verifier) fault(where, format string, args ...any) {
@@ -209,7 +215,7 @@ func Verify(b *Bundle) Report {
 	}
 	r.Conversation, r.Root = b.Conversation, b.Root
 	v := &verifier{b: b, r: &r, kels: map[string]*keyLog{}, regs: map[string]bool{}, creds: map[string]*credential{},
-		dids: map[string]*didcomm.DID{}, entries: map[string]agentmessage.Record{}, hashes: map[int]string{}, notes: map[string]bool{}, signedOnce: map[string]int{}}
+		dids: map[string]*didcomm.DID{}, entries: map[string]agentmessage.Record{}, hashes: map[int]string{}, notes: map[string]bool{}, signedOnce: map[string]int{}, answered: map[string]bool{}}
 	r.Trusts = []string{
 		"The organisation's root key log, as the bundle gives it: its inception and every key it puts in force. Every other identity, credential and anchor is checked back to it.",
 		"The times the Identity Agent stamped on each message and on each credential's issuance and revocation, which decide whether a credential was in force when a message was sent. A body's own signed time must agree with the stamp to within " + agentbody.RequestWindow.String() + ", and a person's signed request to within " + authorisation.Skew.String() + ".",
@@ -517,7 +523,7 @@ func (v *verifier) readCredential(bc Credential, c *credential) string {
 // checkAuthority applies authorisation.Check to a credential that carries the
 // request that asked for it.
 func (v *verifier) checkAuthority(bc Credential, c *credential) string {
-	in := authorisation.Input{Credential: c.raw, CredentialLog: c.log}
+	in := authorisation.Input{Credential: c.raw, CredentialLog: c.log, Asset: v.assetNamedBy}
 	if root, ok := v.kels[v.b.Root]; ok {
 		in.IssuerKEL = root.raws
 	}
@@ -549,6 +555,46 @@ func (v *verifier) checkAuthority(bc Credential, c *credential) string {
 		return ""
 	}
 	return "it does not rest on the request that authorised it: " + err.Error()
+}
+
+// assetNamedBy is the asset a body credential's holder is, read from the
+// bundle: the grant held by the body's holder (its pairwise AID) was issued for
+// the asset and says its kind. A grant that names the asset in `about` must
+// name the one the path does; one that names none (the grant POST
+// /api/mcp/agents issues, and every first-version grant) is the holder's all
+// the same. A holder with no grant in the bundle, or whose grants disagree on
+// the kind, is not known.
+func (v *verifier) assetNamedBy(id, holder string) (authorisation.ExpectedAsset, bool) {
+	if holder == "" {
+		return authorisation.ExpectedAsset{}, false
+	}
+	kind := ""
+	for _, c := range v.creds {
+		var this string
+		switch c.schema {
+		case schemas.AIAgentGrant.Schema.SAID, schemas.AIAgentGrantV1.Schema.SAID:
+			this = authorisation.AssetKindAIAgent
+		case schemas.AppGrant.Schema.SAID:
+			this = authorisation.AssetKindApp
+		default:
+			continue
+		}
+		if c.holder != holder {
+			continue
+		}
+		var about string
+		if raw, ok := c.attrs["about"]; ok && json.Unmarshal(raw, &about) == nil && about != "" && about != id {
+			return authorisation.ExpectedAsset{}, false
+		}
+		if kind != "" && kind != this {
+			return authorisation.ExpectedAsset{}, false
+		}
+		kind = this
+	}
+	if kind == "" {
+		return authorisation.ExpectedAsset{}, false
+	}
+	return authorisation.ExpectedAsset{PairwiseAID: holder, Kind: kind}, true
 }
 
 // ownerKey sets the key an owner-signed request is checked against: the
@@ -616,9 +662,7 @@ func (v *verifier) checkEntries() {
 		if ok {
 			if seq == 1 {
 				opener = rec.OpenedBy
-				if rec.ControllerProof == nil || rec.Kind != agentmessage.KindAsk || rec.From != rec.OpenedBy {
-					v.fault(where, "a conversation is opened by a person's ask, and this is not one")
-				}
+				v.checkOpening(where, rec)
 			} else if rec.OpenedBy != opener {
 				v.fault(where, "it names %s as having opened the conversation, where the first entry names %s", rec.OpenedBy, opener)
 			}
@@ -629,6 +673,31 @@ func (v *verifier) checkEntries() {
 		}
 		v.r.Messages = append(v.r.Messages, m)
 	}
+}
+
+// checkOpening checks the first entry: a conversation is opened by a person's
+// ask, or by an AI agent's ask toward another AI agent (ADR-047, Amendment 3).
+// The person's is checked as it always was. The AI agent's must be its own, name
+// no earlier message, be addressed to an AI agent and not a person, and sit at
+// depth 1 where a person's message sits at 0. That the grant names whom it may
+// open toward, and how often, is checked with the rest of the ask's grant
+// (checkAskAllowed). What no bundle can show is not checked here: that the
+// body held no unanswered message when it opened, how many conversations it
+// opened in an hour, and that depth beyond the opening stays within three.
+// Those are the Identity Agent's to enforce (ADR-047, Amendment 3).
+func (v *verifier) checkOpening(where string, rec agentmessage.Record) {
+	if rec.Kind != agentmessage.KindAsk || rec.From != rec.OpenedBy {
+		v.fault(where, "a conversation is opened by an ask from the one who opened it, and this is not one")
+		return
+	}
+	if rec.ControllerProof != nil {
+		return
+	}
+	if _, person := agentmessage.IsPerson(rec.To); person || rec.Statement == nil || !rec.Statement.Opens() || rec.Depth != 1 {
+		v.fault(where, "a conversation an AI agent opens begins with its ask to another AI agent that acts on no earlier message, and this is not one")
+		return
+	}
+	v.opener = rec
 }
 
 // checkEntry checks one entry: the countersignature, its place in the chain,
@@ -789,11 +858,24 @@ func (v *verifier) checkAskAllowed(where string, grant *credential, rec agentmes
 	if err := permission.CheckResourceConstraints(limits, agentmessage.CapabilityMessageAgent, args); err != nil {
 		v.fault(where, "the AI agent's grant does not let it ask %s: %v", rec.To, err)
 	}
+	if rec.Statement != nil && rec.Statement.Opens() {
+		if err := agentmessage.CheckOpeningGrant(limits, rec.To); err != nil {
+			v.fault(where, "the AI agent opened a conversation its grant does not let it: %v", err)
+		}
+	}
+	v.checkOpenerReach(where, rec, args)
 }
 
 // checkThread checks that a body spoke only about a message it was given, and
 // answered only whoever asked it.
 func (v *verifier) checkThread(where string, rec agentmessage.Record) {
+	if rec.Statement != nil && rec.Statement.Opens() {
+		// The only message that acts on none: the entry that opened the conversation.
+		if rec.Seq != 1 {
+			v.fault(where, "an ask that acts on no message may only open a conversation, and this is not its first entry")
+		}
+		return
+	}
 	prompt, ok := v.entries[rec.InReplyTo]
 	if !ok || prompt.MessageID == rec.MessageID {
 		v.fault(where, "it acts on message %s, which is not earlier in this conversation", rec.InReplyTo)
@@ -807,6 +889,14 @@ func (v *verifier) checkThread(where string, rec agentmessage.Record) {
 	case agentmessage.KindReply, agentmessage.KindFailure:
 		if prompt.Kind != agentmessage.KindAsk || prompt.To != rec.From || rec.To != prompt.From {
 			v.fault(where, "an answer goes only to the sender of an ask addressed to the one answering, and this does not")
+		}
+		v.answered[prompt.MessageID] = true
+	case agentmessage.KindProgress:
+		switch {
+		case prompt.Kind != agentmessage.KindAsk || prompt.To != rec.From || rec.To != prompt.From:
+			v.fault(where, "a progress note goes only to the sender of an ask addressed to the one writing it, and this does not")
+		case v.answered[prompt.MessageID]:
+			v.fault(where, "a progress note comes after the ask it is about was answered, and a note is only for an ask still being worked")
 		}
 	case agentmessage.KindAsk:
 		if prompt.To != rec.From {
@@ -1170,4 +1260,35 @@ func joinInts(ns []int) string {
 		parts[i] = strconv.Itoa(n)
 	}
 	return strings.Join(parts, ", ")
+}
+
+// checkOpenerReach applies, to an ask made inside a conversation an AI agent
+// opened, the opener's own grant as it stood then: a chain reaches no further
+// than the one who started it, as for a person (ADR-047). The opening ask itself
+// is checked against the same grant by checkAskAllowed.
+func (v *verifier) checkOpenerReach(where string, rec agentmessage.Record, args []byte) {
+	if v.opener.MessageID == "" || rec.GrantSAID == v.opener.GrantSAID {
+		return
+	}
+	grant, ok := v.creds[v.opener.GrantSAID]
+	if !ok || grant.holder != v.opener.From {
+		v.fault(where, "the grant the conversation was opened under is not in the bundle, so the opener's reach cannot be checked")
+		return
+	}
+	at, err := time.Parse(time.RFC3339Nano, rec.IATime)
+	if err != nil {
+		v.fault(where, "it carries no readable time, so whether its opener's grant was in force cannot be checked")
+		return
+	}
+	if why := grant.liveAt(at); why != "" {
+		v.fault(where, "the grant its opener %s held was not in force when this was asked: %s", v.opener.From, why)
+		return
+	}
+	var limits map[string]interface{}
+	if raw, ok := grant.attrs["resource_constraints"]; ok {
+		_ = json.Unmarshal(raw, &limits)
+	}
+	if err := permission.CheckResourceConstraints(limits, agentmessage.CapabilityMessageAgent, args); err != nil {
+		v.fault(where, "the conversation's opener, %s, could not have asked %s: %v", v.opener.From, rec.To, err)
+	}
 }

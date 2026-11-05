@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"identity-agent-core/store"
 )
 
 // An introduction that names somebody else records nobody.
@@ -33,6 +35,11 @@ func TestAnIntroductionThatNamesSomebodyElseRecordsNothing(t *testing.T) {
 	}))
 	defer oobi.Close()
 
+	// The sender is a peer the owner added at this local address, which is the
+	// only way a local address is fetched.
+	if err := s.DataStore.SaveContact(store.ContactRecord{AID: "ETHESENDER", OobiURL: oobi.URL, Status: "accepted", ContactSource: "keri"}); err != nil {
+		t.Fatal(err)
+	}
 	body, _ := json.Marshal(map[string]string{"sender_oobi": oobi.URL})
 	err := (contactRequest{}).Perform(s, InboundMessage{
 		FromAID: "ETHESENDER",
