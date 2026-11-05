@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -117,8 +118,21 @@ func (s *CoreServer) ownerAuthority() (*OwnerAuthority, error) {
 		// safe to prefer: the validators bind the log to the identifier before
 		// trusting anything in it, so forging one means forging a
 		// self-addressing identifier.
+		//
+		// A LOG MAY ONLY MOVE THE KEY FORWARD from the key this machine already
+		// trusts. Where the owner's key was sealed, a verified log is accepted
+		// only if that key appears in it, at or before the tip it names; a log
+		// cut off before the sealed key is an older history of the same
+		// identity, and anyone holding a retired key can get this machine to
+		// resolve one (an OOBI from a site or an ask) which verifies cleanly.
+		// Accepting it would make the retired key the owner and refuse the
+		// current one. Such a log is ignored and the sealed key answers.
+		sealed, serr := s.sealedOwnerAuthority()
+		haveSealed := serr == nil && sealed.AID == owner && sealed.PublicKey != ""
 		if key, kerr := s.ownerKeyFromAVerifiedLog(owner); kerr == nil {
-			return &OwnerAuthority{AID: owner, PublicKey: key}, nil
+			if !haveSealed || s.theLogReachesTheKey(owner, sealed.PublicKey) {
+				return &OwnerAuthority{AID: owner, PublicKey: key}, nil
+			}
 		}
 
 		// Then the record sealed at provisioning or pairing. This is the
@@ -126,8 +140,7 @@ func (s *CoreServer) ownerAuthority() (*OwnerAuthority, error) {
 		// a contact, so nothing has a log for them and this is the only key
 		// there is. Matched on AID, so the log still decides WHO the owner is
 		// and the file only supplies key material for the owner it named.
-		if sealed, serr := s.sealedOwnerAuthority(); serr == nil && sealed.AID == owner &&
-			sealed.PublicKey != "" {
+		if haveSealed {
 			return &OwnerAuthority{AID: owner, PublicKey: sealed.PublicKey}, nil
 		}
 
@@ -407,6 +420,32 @@ func (s *CoreServer) verifyOwnerSignature(r *http.Request) error {
 		}
 	}
 	return nil
+}
+
+// theLogReachesTheKey reports whether the verified log held for aid names key
+// in one of its events, so that the log's tip is that key or a successor of it.
+// Keys are compared as decoded bytes, since a sealed key may be written in
+// CESR, base64 or hex.
+func (s *CoreServer) theLogReachesTheKey(aid, key string) bool {
+	if s.DataStore == nil {
+		return false
+	}
+	record, err := s.DataStore.GetContactKEL(aid)
+	if err != nil || record == nil {
+		return false
+	}
+	want, err := login.DecodeVerkey(key)
+	if err != nil {
+		return false
+	}
+	for _, ev := range record.KEL {
+		for _, k := range stringsOf(ev["k"]) {
+			if got, derr := login.DecodeVerkey(k); derr == nil && bytes.Equal(got, want) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ownerKeyFromAVerifiedLog resolves the owner's signing key, accepting only a
