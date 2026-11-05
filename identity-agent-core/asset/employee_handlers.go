@@ -38,8 +38,7 @@ func (h *Handler) HandleListEmployeeInvites(w http.ResponseWriter, r *http.Reque
 
 func (h *Handler) HandleRevokeEmployeeInvite(w http.ResponseWriter, r *http.Request) {
 	token := chi.URLParam(r, "token")
-	h.Store.RevokeEmployeeInvite(token)
-	h.writeJSON(w, map[string]string{"status": "revoked"}, http.StatusOK)
+	h.writeRevokeResult(w, h.Store.RevokeEmployeeInvite(token), func() { h.writeJSON(w, map[string]string{"status": "revoked"}, http.StatusOK) })
 }
 
 // HandleGetEmployeeInviteInfo is the unauthenticated lookup the accepting employee's

@@ -39,13 +39,25 @@ func (s *Store) IncrementEmployeeInviteUse(token string) error {
 	return nil
 }
 
+// RevokeEmployeeInvite withdraws an employee invite. Like RevokeInvite it says
+// ErrInviteNotFound for an unknown token and ErrInviteClosed for one already
+// revoked or used up.
 func (s *Store) RevokeEmployeeInvite(token string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if inv, ok := s.empInvites[token]; ok {
-		inv.Revoked = true
+	inv, ok := s.empInvites[token]
+	if !ok {
+		return ErrInviteNotFound
+	}
+	if inv.Revoked || (inv.MaxUses > 0 && inv.UseCount >= inv.MaxUses) {
+		return ErrInviteClosed
+	}
+	inv.Revoked = true
+	s.empInvites[token] = inv
+	if err := s.saveLocked(s.empInvitesPath, s.empInvites); err != nil {
+		inv.Revoked = false
 		s.empInvites[token] = inv
-		return s.saveLocked(s.empInvitesPath, s.empInvites)
+		return err
 	}
 	return nil
 }

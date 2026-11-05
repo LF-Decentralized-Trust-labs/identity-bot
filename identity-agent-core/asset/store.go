@@ -204,13 +204,42 @@ func (s *Store) IncrementInviteUse(token string) error {
 	return nil
 }
 
-func (s *Store) RevokeInvite(token string) error {
+// ErrInviteNotFound is returned when a revoke names a code the store does not hold.
+var ErrInviteNotFound = errors.New("no such invite")
+
+// ErrInviteClosed is returned when a revoke names a code that is already revoked
+// or already used up, so there is nothing left to withdraw.
+var ErrInviteClosed = errors.New("invite is already revoked or used up")
+
+// RevokeInvite withdraws an asset invite. It says ErrInviteNotFound for a token
+// it does not hold and ErrInviteClosed for one already revoked or used up, so a
+// caller is never told "revoked" about a code that was not live to begin with.
+// A token that belongs to a different asset than assetID is reported as not
+// found, exactly like an unknown one, so a caller cannot learn which codes exist
+// on other assets.
+// usedUp is whether an invite has been redeemed as many times as it allows; a
+// MaxUses of 0 means no limit. A used-up code is closed: it can be neither
+// redeemed nor revoked.
+func (inv AssetInvite) usedUp() bool {
+	return inv.MaxUses > 0 && inv.UseCount >= inv.MaxUses
+}
+
+func (s *Store) RevokeInvite(assetID, token string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if inv, ok := s.invites[token]; ok {
-		inv.Revoked = true
+	inv, ok := s.invites[token]
+	if !ok || inv.AssetID != assetID {
+		return ErrInviteNotFound
+	}
+	if inv.Revoked || inv.usedUp() {
+		return ErrInviteClosed
+	}
+	inv.Revoked = true
+	s.invites[token] = inv
+	if err := s.saveLocked(s.invitesPath, s.invites); err != nil {
+		inv.Revoked = false
 		s.invites[token] = inv
-		return s.saveLocked(s.invitesPath, s.invites)
+		return err
 	}
 	return nil
 }
