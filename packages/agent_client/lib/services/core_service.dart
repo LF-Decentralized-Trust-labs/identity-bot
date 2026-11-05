@@ -3112,12 +3112,13 @@ class ServiceProvidersListResponse {
 
 // ── Asset models (credential-gated access) ───────────────────────────────────
 
-// EnrollmentPolicy is the per-asset access gate. `mode` is enforced by OSS core
-// along with `requiredAal`; the credential-gating fields (`requiredCredSchema`
-// /`requiredCredIssuer`) authorize a sign-in only when the assertion presents a
-// valid, unrevoked ACDC of that schema (and, if set, issued by that AID).
-// `requiredBadge`/`requiredOfaScore` are stored+returned but enforced by the
-// commercial layer on top.
+// EnrollmentPolicy is the per-asset access gate. `mode` is enforced by OSS core;
+// the credential-gating fields (`requiredCredSchema`/`requiredCredIssuer`)
+// authorize a sign-in only when the assertion presents a valid, unrevoked ACDC
+// of that schema (and, if set, issued by that AID). The core cannot check
+// `requiredAal`, `requiredBadge` or `requiredOfaScore`: saving a policy that
+// sets any of them is refused (400 naming the gate), and a sign-in to an asset
+// that already carries one is refused.
 class EnrollmentPolicy {
   final String mode; // "open" | "request" | "invite"
   final int requiredAal; // NIST 800-63B level 1/2/3; 0 = not required

@@ -152,6 +152,10 @@ func (h *Handler) HandleCreateAsset(w http.ResponseWriter, r *http.Request) {
 		h.writeJSON(w, map[string]string{"error": "missing fields"}, http.StatusBadRequest)
 		return
 	}
+	if g := body.Policy.UnsupportedGate(); g != "" {
+		h.writeJSON(w, map[string]string{"error": g}, http.StatusBadRequest)
+		return
+	}
 
 	// Derive the asset's signing keypair from the controller root seed (HD), keyed by a
 	// stable per-asset index. The private seed is never stored — re-derived on demand
@@ -279,6 +283,10 @@ func (h *Handler) HandleUpdatePolicy(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var pol EnrollmentPolicy
 	json.NewDecoder(r.Body).Decode(&pol)
+	if g := pol.UnsupportedGate(); g != "" {
+		h.writeJSON(w, map[string]string{"error": g}, http.StatusBadRequest)
+		return
+	}
 	a, ok, err := h.Store.GetAsset(id)
 	if err != nil {
 		h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusInternalServerError)
