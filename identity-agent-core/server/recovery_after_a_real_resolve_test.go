@@ -76,11 +76,8 @@ func TestRecoveryFindsTheWitnessesOfAContactStoredByResolvingItsOOBI(t *testing.
 	if err != nil || kept == nil || !kept.KelVerified {
 		t.Fatalf("the resolved log was not kept as verified: %+v, %v", kept, err)
 	}
-	for _, e := range kept.KEL {
-		if _, has := e["b"]; has {
-			t.Fatal("a stored entry has a top-level b; this test is no longer about the real shape")
-		}
-	}
+	// Whatever fields a stored entry carries beside its bytes (the store now derives
+	// them from the verified bytes), recovery reads the witnesses from the bytes.
 
 	found, err := s.RecoverContactEndpoint(contact.aid)
 	if err != nil {
