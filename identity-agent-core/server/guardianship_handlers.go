@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/schemas"
 	"log"
 	"net/http"
 	"time"
@@ -126,7 +127,7 @@ func (s *CoreServer) handleCreateGuardianship(w http.ResponseWriter, r *http.Req
 		if record.DependentAID != "" {
 			claims["dependent_aid"] = record.DependentAID
 		}
-		const guardianshipSchemaSAID = "EGuardianship__placeholder__v1"
+		guardianshipSchemaSAID := schemas.Guardianship.SAID
 		if result, err := s.KeriDriver.IssueCredential(identity.AID, claims, guardianshipSchemaSAID, identity.AID, nil); err == nil {
 			record.CredentialSAID = result.AcdcSaid
 			if saveErr := s.DataStore.SaveGuardianship(record); saveErr != nil {

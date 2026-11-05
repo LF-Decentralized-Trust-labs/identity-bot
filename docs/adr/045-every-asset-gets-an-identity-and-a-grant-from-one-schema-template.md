@@ -5,6 +5,7 @@
 **Amended:** 2026-11-02 — An app is a kind of asset, with a grant and a body of its own (see §Amendment 1)
 **Amended:** 2026-11-04 — A machine key's short code is 80 bits, not about 41 (see §Amendment 2)
 **Amended:** 2026-11-04 — An AI agent's body may sign the request for an AI agent it creates; version 1.2.0 of the AI Agent Grant (see §Amendment 3)
+**Amended:** 2026-11-05 — The six other built-in credential schemas get real identifiers (see §Amendment 4)
 **Relates to:** ADR-032 (An identity can name who owns it, from its first event), ADR-042 (How an agent is reached, and who may manage it), ADR-044 (An authorized controller does the app's work)
 
 ## Context
@@ -242,8 +243,8 @@ authorised to act for the identity (ADR-044).
   was written before its events were signed cannot have grants verified past those events,
   and must be founded again. The Identity Agent says so once at startup, naming the
   unsigned events.
-- The other built-in schemas still carry placeholder identifiers, and are converted the
-  same way when each is next worked on.
+- The other built-in schemas carried placeholder identifiers. They were converted the same
+  way on 2026-11-05 (see Amendment 4).
 - Where an identity's key lives on another device, the events this Identity Agent writes for
   it are stored unsigned until that device signs them. Grants anchored after them cannot be
   verified by anybody else.
@@ -436,3 +437,43 @@ reads one as a version it does know.
 Worked examples, accepted and refused, each refusal breaking one rule:
 `identity-agent-core/authorisation/ai-agent-body-request-vectors.json`, checked independently
 by `identity-agent-core/contracts/check_ai_agent_body_request_vectors.py`.
+
+## Amendment 4 (2026-11-05): the other six built-in schemas get real identifiers
+
+The Guardianship Credential, Proof of Age, Contact Attestation, Identity Attestation, School
+Pickup Authorization and Employee Authorization schemas were identified by strings such as
+`EGuardianship__placeholder__v1`, which are not digests, so a verifier could not fetch a
+document and confirm what a credential claims. Each is now built as the asset grants are: the
+whole credential described, and the identifier the Blake3-256 digest `keri.BuildSchema`
+computes. Employee Authorization is now in the catalog. All six are served at
+`/public/schemas/{said}` and published in `identity-agent-core/contracts/credential-schemas/`;
+their identifiers are pinned in `schemas/credential_schemas_test.go`, and worked examples
+(accepted and refused) are `identity-agent-core/schemas/credential-schema-vectors.json`,
+checked independently by `identity-agent-core/contracts/check_credential_schema_vectors.py`.
+A change to any of the six is a new schema with a new identifier.
+
+**Credentials already issued under a placeholder are still honoured; none is issued.** A
+credential's identifier is a digest over the credential, schema identifier included, so it
+cannot be reissued under the new identifier by anybody but its issuer, and refusing the old
+form would silently end every guardianship, attestation and employee credential issued so
+far. These six carry no capability for a gateway (unlike an AI agent's grant, which the
+section above refuses under a placeholder), so honouring them grants nothing a gateway
+enforces. Concretely:
+
+- Issuing under a placeholder is refused, with the identifier to use.
+- A credential gate (a website's required credential schema) accepts a presented credential
+  naming either form of the identifier, and verifies it trusting both. A gate set up before
+  this change, and credentials issued before it, keep working; so do credentials issued
+  after it, at an old gate.
+- A placeholder is never served as a schema: `/public/schemas/{said}` serves only a document
+  that digests to the identifier asked for. The catalog resolves a placeholder to its
+  replacement by name only, so an old credential can still be labelled.
+
+**Fetching a schema checks it.** A schema fetched from a URL or a registry is cached, and
+served from the cache, only under the identifier it digests to (`keri.VerifySchema`). One
+that does not digest to the identifier asked for, or to its own `$id`, is refused. Otherwise a
+server could answer a request for one schema with a widened one that accepts a forgery.
+
+A credential's attribute block here is declared with `additionalProperties: false`, as the
+grants' is. The issue form offers only declared attributes, and a test holds each form to its
+schema.

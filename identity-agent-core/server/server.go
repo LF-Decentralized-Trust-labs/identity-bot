@@ -2189,6 +2189,13 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "Missing required fields", "claims and schema_said are required")
 		return
 	}
+	// A placeholder identifier proves nothing about what a credential claims.
+	// Credentials already issued under one are still honoured; no new one is issued.
+	if current := schemas.Legacy(req.SchemaSaid); current != nil {
+		writeError(w, http.StatusBadRequest, "Retired schema identifier",
+			fmt.Sprintf("%s is a placeholder, not the digest of a schema. Issue %q under %s.", req.SchemaSaid, current.Name, current.SAID))
+		return
+	}
 
 	identity, err := s.DataStore.GetIdentity()
 	if err != nil || identity == nil {
@@ -2213,7 +2220,7 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
 			req.Edges = map[string]interface{}{
 				"guardianship": map[string]interface{}{
 					"n": gr.CredentialSAID,
-					"s": "EGuardianship__placeholder__v1",
+					"s": schemas.Guardianship.SAID,
 				},
 			}
 			log.Printf("[identity-agent-core] CREDENTIAL: Auto-built guardianship edges block (SAID %s) for dependent %s", gr.CredentialSAID, req.HolderAid)
@@ -2521,11 +2528,15 @@ func (s *CoreServer) handleFetchCredentialSchema(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Check cache first
+	// Check cache first. A cached document is served only if it still digests
+	// to the identifier it is cached under; one stored before that was checked
+	// is fetched again.
 	if req.SAID != "" {
 		if cached, _ := s.DataStore.GetCredentialSchema(req.SAID); cached != nil {
-			jsonreply.Write(w, http.StatusOK, cached)
-			return
+			if got, verr := keri.VerifySchema([]byte(cached.SchemaJson)); verr == nil && got == req.SAID {
+				jsonreply.Write(w, http.StatusOK, cached)
+				return
+			}
 		}
 	}
 
@@ -2553,18 +2564,18 @@ func (s *CoreServer) handleFetchCredentialSchema(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Extract SAID from response if not provided
-	said := req.SAID
-	if said == "" {
-		var schemaMap map[string]interface{}
-		if json.Unmarshal(schemaBytes, &schemaMap) == nil {
-			if d, ok := schemaMap["$id"].(string); ok {
-				said = d
-			}
-		}
+	// A schema is trusted only for the identifier it digests to. Without this a
+	// server could answer a request for one schema with a widened one that
+	// accepts a forgery, and the credential would still name the original.
+	said, verr := keri.VerifySchema(schemaBytes)
+	if verr != nil {
+		writeError(w, http.StatusBadGateway, "Fetched schema does not match its own identifier", verr.Error())
+		return
 	}
-	if said == "" {
-		said = req.URL
+	if req.SAID != "" && said != req.SAID {
+		writeError(w, http.StatusBadGateway, "Fetched schema is not the one asked for",
+			fmt.Sprintf("asked for %s, the document digests to %s", req.SAID, said))
+		return
 	}
 
 	record := store.CredentialSchemaRecord{
