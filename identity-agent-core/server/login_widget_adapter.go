@@ -15,6 +15,8 @@ import (
 	"identity-agent-core/login"
 
 	"github.com/go-chi/chi/v5"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 // createSignedAssetChallenge builds, signs, and stores a login challenge bundle for an
@@ -142,8 +144,7 @@ func (s *CoreServer) handleCreateLoginSession(w http.ResponseWriter, r *http.Req
 		http.Error(w, "could not start a login", http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{
+	jsonreply.Write(w, http.StatusOK, map[string]string{
 		"session_token":   token,
 		"relay_or_qr_url": qrURL,
 		// Held by the browser that started this, and by nothing else.
@@ -216,8 +217,7 @@ func (s *CoreServer) handleLoginSessionStatus(w http.ResponseWriter, r *http.Req
 			}
 		}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
+	jsonreply.Write(w, http.StatusOK, resp)
 }
 
 func corsHeaders(w http.ResponseWriter) {

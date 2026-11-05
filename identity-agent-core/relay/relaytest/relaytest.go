@@ -31,6 +31,8 @@ import (
 
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/relay"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 // Relay is a running test relay.
@@ -460,9 +462,7 @@ var reserved = map[string]bool{"login": true, "support": true, "admin": true, "w
 const quota = 3
 
 func refuse(w http.ResponseWriter, status int, code, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{"error": code, "message": msg})
+	jsonreply.Write(w, status, map[string]string{"error": code, "message": msg})
 }
 
 func (r *Relay) claimName(w http.ResponseWriter, aid string, f map[string]string) {

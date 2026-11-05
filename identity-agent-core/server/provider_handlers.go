@@ -7,6 +7,8 @@ import (
 	"identity-agent-core/provider"
 
 	"github.com/go-chi/chi/v5"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 // Showing somebody which operators they depend on, and letting them change it.
@@ -55,8 +57,7 @@ func (s *CoreServer) handleListProviders(w http.ResponseWriter, r *http.Request)
 			Capabilities: names, Source: p.Source,
 		})
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"providers": out, "count": len(out)})
+	jsonreply.Write(w, http.StatusOK, map[string]any{"providers": out, "count": len(out)})
 }
 
 // handleAddProvider installs or replaces one operator at runtime.
@@ -84,6 +85,5 @@ func (s *CoreServer) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "could not add provider", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"added": true, "id": p.ID})
+	jsonreply.Write(w, http.StatusOK, map[string]any{"added": true, "id": p.ID})
 }

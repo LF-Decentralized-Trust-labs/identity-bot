@@ -13,6 +13,8 @@ import (
 
 	"identity-agent-core/didcomm"
 	"identity-agent-core/internal/coretypes"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 // Carrying a request nobody in the middle can read.
@@ -171,8 +173,7 @@ func (s *CoreServer) handleSealedTransport(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(reply)
+	jsonreply.Write(w, http.StatusOK, reply)
 }
 
 // replaySealed runs the carried request through this agent's own router.
@@ -312,9 +313,7 @@ const sealedRemoteAddr = "192.0.2.1:0"
 const headerSealedFrom = "X-IA-Sealed-From"
 
 func writeSealedError(w http.ResponseWriter, status int, detail string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{
+	jsonreply.Write(w, status, map[string]string{
 		"error":  "sealed_transport",
 		"detail": detail,
 	})

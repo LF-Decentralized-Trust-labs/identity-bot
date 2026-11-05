@@ -238,7 +238,7 @@ func (s *CoreServer) handlePairingBegin(w http.ResponseWriter, r *http.Request) 
 	// a key the box had already replaced, and the box would refuse its own
 	// adoption.
 	if pairingState.offered != nil {
-		writeJSONResponse(w, pairingState.offered)
+		writeJSON(w, pairingState.offered)
 		return
 	}
 
@@ -319,7 +319,7 @@ func (s *CoreServer) handlePairingBegin(w http.ResponseWriter, r *http.Request) 
 	// from this index.
 	pairingState.derivationIndex = idx
 	pairingState.challenge = challenge
-	writeJSONResponse(w, offer)
+	writeJSON(w, offer)
 }
 
 // handlePairingComplete accepts the delegation and seals the owner.
@@ -702,7 +702,7 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 		log.Printf("[pairing] adopted without this instance's own encryption keys: %v", err)
 	}
 	response["root_aid"] = identityAID
-	writeJSONResponse(w, response)
+	writeJSON(w, response)
 }
 
 // refuseIfAlreadyPaired stops a second adoption. First pairing wins, and the
@@ -720,11 +720,6 @@ func (s *CoreServer) refuseIfAlreadyPaired(w http.ResponseWriter) error {
 		return fmt.Errorf("already paired")
 	}
 	return nil
-}
-
-func writeJSONResponse(w http.ResponseWriter, v interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
 }
 
 // resetPairingStateForTest clears the key material this process is offering.
@@ -1107,7 +1102,7 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 	}
 
 	log.Printf("[pairing] adopted box at %s: it founded %s, owned by %s", base, identityAID, ownerAID)
-	writeJSONResponse(w, map[string]interface{}{
+	writeJSON(w, map[string]interface{}{
 		"ok": true, "box_url": base,
 		"root_aid": identityAID, "owner_aid": ownerAID,
 		"box_pairwise_aid": offer.PairwiseAID, "box_response": result,

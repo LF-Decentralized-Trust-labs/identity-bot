@@ -11,6 +11,8 @@ import (
 	"github.com/google/uuid"
 
 	"identity-agent-core/store"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 // guardianshipRoutes registers /api/guardianship endpoints.
@@ -33,8 +35,7 @@ func (s *CoreServer) handleListGuardianships(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"guardianships": records,
 		"count":         len(records),
 	})
@@ -141,9 +142,7 @@ func (s *CoreServer) handleCreateGuardianship(w http.ResponseWriter, r *http.Req
 	log.Printf("[guardianship] Created guardianship %s: type=%s dependent=%s hosting=%s",
 		record.ID, record.Type, record.DependentName, record.HostingType)
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(record)
+	jsonreply.Write(w, http.StatusCreated, record)
 }
 
 // handleGetGuardianship returns a single guardianship by ID.
@@ -159,8 +158,7 @@ func (s *CoreServer) handleGetGuardianship(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(record)
+	jsonreply.Write(w, http.StatusOK, record)
 }
 
 // handleUpdateGuardianship partially updates a guardianship record.
@@ -217,8 +215,7 @@ func (s *CoreServer) handleUpdateGuardianship(w http.ResponseWriter, r *http.Req
 
 	log.Printf("[guardianship] Updated guardianship %s", id)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(existing)
+	jsonreply.Write(w, http.StatusOK, existing)
 }
 
 // handleDeleteGuardianship revokes a guardianship (sets status to "revoked").
@@ -242,8 +239,7 @@ func (s *CoreServer) handleDeleteGuardianship(w http.ResponseWriter, r *http.Req
 
 	log.Printf("[guardianship] Revoked guardianship %s for dependent %s", id, existing.DependentName)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(existing)
+	jsonreply.Write(w, http.StatusOK, existing)
 }
 
 // handleEmancipateGuardianship transitions a guardianship to "emancipated" status.
@@ -271,6 +267,5 @@ func (s *CoreServer) handleEmancipateGuardianship(w http.ResponseWriter, r *http
 
 	log.Printf("[guardianship] Emancipated guardianship %s — dependent %s is now independent", id, existing.DependentName)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(existing)
+	jsonreply.Write(w, http.StatusOK, existing)
 }

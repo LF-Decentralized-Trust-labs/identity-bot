@@ -12,6 +12,8 @@ import (
 
 	"identity-agent-core/buildmode"
 	"identity-agent-core/secureenclave"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 // How a freshly provisioned instance offers itself for pairing.
@@ -243,8 +245,7 @@ func newPairingOffer(aid, oobi string) (*pairingOffer, error) {
 }
 
 func writePairingOffer(w http.ResponseWriter, offer *pairingOffer) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(offer)
+	jsonreply.Write(w, http.StatusOK, offer)
 }
 
 // expectedClaim is what this box has been told to expect, and from whom.

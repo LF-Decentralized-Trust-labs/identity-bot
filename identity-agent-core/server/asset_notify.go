@@ -303,7 +303,7 @@ func (s *CoreServer) handleAssetNotify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSONResponse(w, map[string]string{
+	writeJSON(w, map[string]string{
 		"status":   "sent",
 		"from_aid": identity.AID,
 		"to_aid":   req.ToAID,

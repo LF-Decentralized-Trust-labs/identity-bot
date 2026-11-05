@@ -7,6 +7,8 @@ import (
 	"identity-agent-core/update"
 
 	"github.com/go-chi/chi/v5"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 func (s *CoreServer) mountUpdateRoutes(r chi.Router) {
@@ -34,8 +36,7 @@ func (s *CoreServer) handleUpdatesManifest(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *CoreServer) handleUpdatesStatus(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s.UpdateService.Status())
+	jsonreply.Write(w, http.StatusOK, s.UpdateService.Status())
 }
 
 func (s *CoreServer) handleUpdatesApply(w http.ResponseWriter, r *http.Request) {
@@ -64,19 +65,16 @@ func (s *CoreServer) handleUpdatesApply(w http.ResponseWriter, r *http.Request) 
 		}
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	jsonreply.Write(w, http.StatusOK, result)
 }
 
 func (s *CoreServer) handleUpdatesCheck(w http.ResponseWriter, r *http.Request) {
 	s.UpdateService.CheckNow()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "check_scheduled"})
+	jsonreply.Write(w, http.StatusOK, map[string]string{"status": "check_scheduled"})
 }
 
 func (s *CoreServer) handleUpdatesGetSettings(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s.UpdateService.GetSettings())
+	jsonreply.Write(w, http.StatusOK, s.UpdateService.GetSettings())
 }
 
 func (s *CoreServer) handleUpdatesPutSettings(w http.ResponseWriter, r *http.Request) {
@@ -86,6 +84,5 @@ func (s *CoreServer) handleUpdatesPutSettings(w http.ResponseWriter, r *http.Req
 		return
 	}
 	s.UpdateService.UpdateSettings(req)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s.UpdateService.GetSettings())
+	jsonreply.Write(w, http.StatusOK, s.UpdateService.GetSettings())
 }
