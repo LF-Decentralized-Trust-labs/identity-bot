@@ -693,7 +693,7 @@ func (s *CoreServer) theKeyEntitledToVouch() (string, error) {
 		// The verified log first, so a rotation is followed. Nothing rewrites
 		// the sealed record when an owner rotates, so asking it first would go
 		// on believing a key the owner has replaced.
-		if key, kerr := s.ownerKeyFromAVerifiedLog(owner); kerr == nil {
+		if key, ok := s.ownerKeyThatMovesForward(owner); ok {
 			return key, nil
 		}
 		// Then the sealed record, and only for the owner the log named.

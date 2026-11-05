@@ -105,3 +105,17 @@ func TestWithNothingSealedTheLogStillAnswersAndUnanchoredIsUnchanged(t *testing.
 		t.Fatalf("unanchored: got %v, %v", a, err)
 	}
 }
+
+// The same rule holds on the other two routes that ask which key speaks for the
+// owner: who may vouch for a controller, and who signs the owner's name.
+func TestAReplayedLogDoesNotLetARetiredKeyVouchOrSignTheOwnersName(t *testing.T) {
+	s := anchoredWithSealed(t, forwardCurrentKey)
+	saveOwnerLog(t, s, forwardRetiredKey)
+
+	if key, err := s.theKeyEntitledToVouch(); err != nil || key != forwardCurrentKey {
+		t.Fatalf("vouching key is %q (%v): the retired key was accepted from a replayed log", key, err)
+	}
+	if key := s.keyToCheckAnOwnersNameAgainst("EOWNER"); key != forwardCurrentKey {
+		t.Fatalf("owner-name key is %q: the retired key was accepted from a replayed log", key)
+	}
+}

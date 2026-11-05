@@ -128,11 +128,9 @@ func (s *CoreServer) ownerAuthority() (*OwnerAuthority, error) {
 		// Accepting it would make the retired key the owner and refuse the
 		// current one. Such a log is ignored and the sealed key answers.
 		sealed, serr := s.sealedOwnerAuthority()
-		haveSealed := serr == nil && sealed.AID == owner && sealed.PublicKey != ""
-		if key, kerr := s.ownerKeyFromAVerifiedLog(owner); kerr == nil {
-			if !haveSealed || s.theLogReachesTheKey(owner, sealed.PublicKey) {
-				return &OwnerAuthority{AID: owner, PublicKey: key}, nil
-			}
+		haveSealed := serr == nil && sealed != nil && sealed.AID == owner && sealed.PublicKey != ""
+		if key, ok := s.ownerKeyThatMovesForward(owner); ok {
+			return &OwnerAuthority{AID: owner, PublicKey: key}, nil
 		}
 
 		// Then the record sealed at provisioning or pairing. This is the
@@ -420,6 +418,25 @@ func (s *CoreServer) verifyOwnerSignature(r *http.Request) error {
 		}
 	}
 	return nil
+}
+
+// ownerKeyThatMovesForward is the one place the forward-only rule lives: the key
+// from the verified log held for aid, but only if that log does not contradict
+// the key this machine sealed for the same identifier (see ownerAuthority).
+// Every question of the form "which key speaks for this owner" goes through
+// here, so no route can be answered by a replayed older log that another route
+// would have refused.
+func (s *CoreServer) ownerKeyThatMovesForward(aid string) (string, bool) {
+	key, err := s.ownerKeyFromAVerifiedLog(aid)
+	if err != nil {
+		return "", false
+	}
+	sealed, serr := s.sealedOwnerAuthority()
+	if serr == nil && sealed != nil && sealed.AID == aid && sealed.PublicKey != "" &&
+		!s.theLogReachesTheKey(aid, sealed.PublicKey) {
+		return "", false
+	}
+	return key, true
 }
 
 // theLogReachesTheKey reports whether the verified log held for aid names key
