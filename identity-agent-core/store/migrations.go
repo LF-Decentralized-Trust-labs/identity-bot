@@ -1043,6 +1043,29 @@ CREATE TABLE IF NOT EXISTS witness_tel_events (
 CREATE INDEX IF NOT EXISTS idx_witness_tel_events_range
     ON witness_tel_events(issuer_aid, anchor_sn);
 `},
+	{
+		Version:     48,
+		Description: "Keep registry events this identity made until its witnesses have them",
+		SQL: `
+-- Every registry event this identity makes (a registry's inception, an
+-- issuance, a revocation) is sent to the witnesses its key log names, so that
+-- someone outside can read it from them. The sending can fail, and a failure
+-- must not fail the issuance, so an event waits here, in the order it was made,
+-- until every one of those witnesses has taken it, and is tried again on every
+-- tick. A row is the event as published; nothing here is a second source of
+-- truth for the log, which is credential_tel_events and credential_registries.
+CREATE TABLE IF NOT EXISTS tel_push_outbox (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    issuer_aid  TEXT NOT NULL,
+    said        TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    raw_b64     TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    last_error  TEXT NOT NULL DEFAULT '',
+    UNIQUE (issuer_aid, said)
+);
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

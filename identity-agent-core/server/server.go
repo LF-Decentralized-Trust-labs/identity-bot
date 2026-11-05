@@ -2678,10 +2678,11 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
+	registryLog, duplicity := s.issuanceLogForVerification(acdcBody, issuerKelEvents)
 	driverReq := &drivers.DriverVerifyCredentialRequest{
 		AcdcJson:           req.AcdcJson,
 		IssuerKelEvents:    issuerKelEvents,
-		RegistryEventsB64:  s.issuanceLogForVerification(acdcBody, issuerKelEvents),
+		RegistryEventsB64:  registryLog,
 		HolderAid:          req.HolderAid,
 		PresentationSaid:   req.PresentationSaid,
 		CesrSignature:      req.CesrSignature,
@@ -2694,6 +2695,7 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, "Credential verification failed", err.Error())
 		return
 	}
+	duplicity.fold(result)
 
 	if result != nil && issuerKelEvents != nil {
 		issuerAid := ""
@@ -2786,12 +2788,16 @@ func (s *CoreServer) handleVerifyCredentialChain(w http.ResponseWriter, r *http.
 			}
 		}
 
+		registryLog, duplicity := s.issuanceLogForVerification(acdcBody, issuerKelEvents)
 		driverReq := &drivers.DriverVerifyCredentialRequest{
 			AcdcJson:          jsonB64,
 			IssuerKelEvents:   issuerKelEvents,
-			RegistryEventsB64: s.issuanceLogForVerification(acdcBody, issuerKelEvents),
+			RegistryEventsB64: registryLog,
 		}
 		result, err := s.KeriDriver.VerifyCredential(driverReq)
+		if err == nil {
+			duplicity.fold(result)
+		}
 
 		step := ChainStep{
 			EdgeLabel: edgeLabel,

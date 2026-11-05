@@ -458,10 +458,11 @@ func (s *CoreServer) verifyPresentedCredentialACDC(ctx context.Context, acdcJson
 	if issuerKelEvents == nil {
 		return false, issuerAid, "issuer KEL not found"
 	}
+	registryLog, duplicity := s.issuanceLogForVerification(acdcBody, issuerKelEvents)
 	result, err := s.KeriDriver.VerifyCredential(&drivers.DriverVerifyCredentialRequest{
 		AcdcJson:           acdcJsonB64,
 		IssuerKelEvents:    issuerKelEvents,
-		RegistryEventsB64:  s.issuanceLogForVerification(acdcBody, issuerKelEvents),
+		RegistryEventsB64:  registryLog,
 		HolderAid:          holderAid,
 		PresentationSaid:   presSaidB64,
 		CesrSignature:      cesrSig,
@@ -471,6 +472,7 @@ func (s *CoreServer) verifyPresentedCredentialACDC(ctx context.Context, acdcJson
 	if err != nil {
 		return false, issuerAid, "verify error: " + err.Error()
 	}
+	duplicity.fold(result)
 	if result == nil || !result.Verified {
 		reason := "credential not verified"
 		if result != nil && len(result.Errors) > 0 {

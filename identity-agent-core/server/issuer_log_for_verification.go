@@ -16,6 +16,7 @@ const (
 	issuerNoLogHeld       = issuerNotCheckedFmt + "no key log is held for the issuer"
 	issuerNoLogHeldReason = "the issuer's key log is not held here, so the credential cannot be shown to come from that issuer"
 	issuerNoProof         = issuerNotCheckedFmt + "no proof of issuance"
+	issuerDuplicity       = "possible duplicity: a witness of the issuer served a registry log its key log does not seal"
 )
 
 // issuerLogForVerification is the one place that reads an issuer's key log for
@@ -62,17 +63,20 @@ func ownLogForVerification(events []store.EventRecord) []map[string]interface{} 
 // A log not held here is asked of the issuer's witnesses when the issuer's
 // verified key log is (registryLogFromWitnesses); what they serve is checked
 // against that key log before it is used.
-func (s *CoreServer) issuanceLogForVerification(acdcBody map[string]interface{}, issuerKel []map[string]interface{}) []string {
+//
+// The second result is set when a witness served events the issuer's key log
+// does not seal; the caller puts it in the verification result with fold.
+func (s *CoreServer) issuanceLogForVerification(acdcBody map[string]interface{}, issuerKel []map[string]interface{}) ([]string, *telDuplicity) {
 	said, _ := acdcBody["d"].(string)
 	registry, _ := acdcBody["ri"].(string)
 	if said == "" || registry == "" {
-		return nil
+		return nil, nil
 	}
 	events, err := s.DataStore.GetCredentialTEL(registry, said)
 	if err != nil || len(events) == 0 {
 		issuer, _ := acdcBody["i"].(string)
 		if issuer == "" || len(issuerKel) == 0 {
-			return nil
+			return nil, nil
 		}
 		return s.registryLogFromWitnesses(telClient, issuer, registry, said, issuerKel)
 	}
@@ -80,7 +84,7 @@ func (s *CoreServer) issuanceLogForVerification(acdcBody map[string]interface{},
 	for _, ev := range events {
 		out = append(out, ev.RawB64)
 	}
-	return out
+	return out, nil
 }
 
 // issuerVerdict folds what is known of the issuer's log into the engine's
@@ -93,6 +97,10 @@ func issuerVerdict(res *drivers.DriverVerifyCredentialResponse, logHeld bool) (s
 		res = &drivers.DriverVerifyCredentialResponse{}
 	}
 	if logHeld {
+		if dup, _ := res.Checks[checkPossibleDuplicity].(bool); dup {
+			res.Verified = false
+			return issuerDuplicity
+		}
 		// The log says who the issuer is, not that it issued this credential.
 		// The engine proves that from the credential's registry and the issuer's
 		// log, and says so in "issuance_proved"; anything but true is not proved.

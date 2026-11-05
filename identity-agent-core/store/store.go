@@ -656,6 +656,20 @@ type Store interface {
 	// KeepRegistry keeps a registry and its inception's anchor together, or neither.
 	KeepRegistry(r CredentialRegistry, anchor *EventRecord) error
 	GetCredentialTEL(registrySAID, acdcSAID string) ([]CredentialTELEvent, error)
+
+	// A registry event this identity made waits in an outbox until its
+	// witnesses have it (see TELPush). Enqueuing one already waiting changes
+	// nothing.
+	EnqueueTELPush(p TELPush) error
+	// PendingTELPushes are the events still waiting, oldest first.
+	PendingTELPushes(limit int) ([]TELPush, error)
+	// FinishTELPushes removes events every witness has taken.
+	FinishTELPushes(issuerAID string, saids []string) error
+	// FailedTELPush records one more unsuccessful attempt and why.
+	FailedTELPush(issuerAID string, saids []string, reason string) error
+	// DropStaleTELPushes gives up on events waiting since before the cutoff
+	// and returns how many it dropped.
+	DropStaleTELPushes(cutoffRFC3339 string) (int, error)
 	SaveCredentialSchema(record CredentialSchemaRecord) error
 	GetCredentialSchemas() ([]CredentialSchemaRecord, error)
 	GetCredentialSchema(said string) (*CredentialSchemaRecord, error)
@@ -1668,4 +1682,17 @@ func (s *FileStore) loadSigningRequests() (map[string]SigningRequest, error) {
 		return nil, fmt.Errorf("failed to parse signing requests: %w", err)
 	}
 	return requests, nil
+}
+
+// TELPush is a registry event (a registry inception, an issuance or a
+// revocation) this identity made, as published, waiting to be sent to the
+// witnesses its key log names.
+type TELPush struct {
+	IssuerAID string
+	SAID      string
+	Kind      string // "vcp", "iss" or "rev"
+	RawB64    string
+	CreatedAt string
+	Attempts  int
+	LastError string
 }

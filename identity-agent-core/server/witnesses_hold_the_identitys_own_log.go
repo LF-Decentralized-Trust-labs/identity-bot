@@ -85,6 +85,9 @@ func (s *CoreServer) keepWitnessing(running context.Context, stop <-chan struct{
 		if job.record != "" {
 			s.WitnessService.BringUpToDate(ctx, job.record, s.signedEventsOf(job.record), job.witnesses, job.toad)
 		}
+		// The key log is where each witness needs it to be before it will take
+		// a registry event that log seals.
+		s.pushRegistryEvents(ctx)
 		cancel()
 	}
 }

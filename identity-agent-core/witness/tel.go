@@ -1,8 +1,10 @@
 package witness
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -27,21 +29,63 @@ import (
 // log tells it only that someone reads this issuer's log, and what one reader
 // takes out of it stays with the reader.
 //
-// FRESHNESS. AnchoredSN is how far through the issuer's key log this witness
+// FRESHNESS. LatestKelSN is how far through the issuer's key log this witness
 // holds. Every event of the log anchored at or before it that the issuer gave
 // this witness is in the answer. A reader holding the key log further on than
 // that knows this witness is behind, and one holding a seal that no served
 // event answers knows an event is being kept back.
 
-// TELAnswer is what a witness says about an issuer's registry logs.
+// TELAnswer is what a witness says about an issuer's registry logs
+// (SEAM-13 §2). It is the wire form: Events are the KERI TEL events exactly as
+// the issuer published them (t, d, ri, i, dt, and p for a revocation), so a
+// reader hands each one to its own KERI library and needs nothing of ours.
+//
+//   - AID is the issuer.
+//   - RegistryPrefix is the issuer's registry. An issuer with several has them
+//     all in Registries, in the order they were founded, and RegistryPrefix is
+//     the first, which never changes as more are founded; each event names its
+//     own registry in "ri". Registries is left out when there is only one, so
+//     the common answer is exactly the contract's shape.
+//   - Events are those anchored after the since_sn asked for (-1, or none given,
+//     is all of them), including each registry's inception, which is what makes
+//     the registry the issuer's.
+//   - AnchoredSN is the issuer's key-log position of the latest event held in
+//     the log, whatever since_sn asked: the place the registry log is held to.
+//   - LatestKelSN is how far this witness holds the issuer's key log. A reader
+//     holding the key log further on than this knows the witness is behind.
 type TELAnswer struct {
-	IssuerAID string `json:"issuer_aid"`
-	// SinceSN echoes the request: events anchored after this place in the
-	// issuer's key log are given. -1 asks for all of it.
-	SinceSN int `json:"since_sn"`
-	// AnchoredSN is the last event of the issuer's key log this witness holds.
-	AnchoredSN int        `json:"anchored_sn"`
-	Events     []TELEvent `json:"events"`
+	AID            string            `json:"aid"`
+	RegistryPrefix string            `json:"registry_prefix"`
+	Registries     []string          `json:"registries,omitempty"`
+	Events         []json.RawMessage `json:"events"`
+	AnchoredSN     int               `json:"anchored_sn"`
+	LatestKelSN    int               `json:"latest_kel_sn"`
+}
+
+// TELHead is the short form of an answer (SEAM-13 §2): where the log is held
+// to and the digest of the latest event, enough to learn whether anything is
+// new without fetching it. EventDigest is the identifier of the most recently
+// anchored event held. Provisional with the seam's OQ-2.
+type TELHead struct {
+	AnchoredSN  int    `json:"anchored_sn"`
+	LatestKelSN int    `json:"latest_kel_sn"`
+	EventDigest string `json:"event_digest"`
+}
+
+// ErrNoTEL is a witness holding no registry log for the issuer asked about
+// (SEAM-13 §5 T-1). The route answers 404 {"error":"no_tel"}.
+var ErrNoTEL = errors.New("no_tel")
+
+// NotAnchoredError is an event the issuer's key log does not seal: the
+// evidence that whoever supplied it is not the issuer's witness-held record
+// (SEAM-13 §5 T-3). It is a different thing from an event that is malformed, or
+// from an answer from a witness behind the key log.
+type NotAnchoredError struct {
+	Issuer, Ilk, SAID string
+}
+
+func (e *NotAnchoredError) Error() string {
+	return fmt.Sprintf("the key log of %s holds no seal of %s %s, so it is not the issuer's", e.Issuer, e.Ilk, e.SAID)
 }
 
 // TELLimits bound a submission so that a route open to anybody costs bounded work.
@@ -130,7 +174,7 @@ func AnchoredTEL(issuer string, kelRaw [][]byte, raws [][]byte, held []TELEvent)
 		}
 		at, sealed := anchors[sealKey{te.Subject, uint64(te.SN), te.SAID}]
 		if !sealed {
-			return nil, fmt.Errorf("the key log of %s holds no seal of %s %s, so it is not the issuer's", issuer, ev.Ilk, ev.SAID)
+			return nil, &NotAnchoredError{Issuer: issuer, Ilk: ev.Ilk, SAID: ev.SAID}
 		}
 		te.AnchorSN = at
 		parsed = append(parsed, te)
@@ -241,27 +285,142 @@ func (s *Service) heldKelRaw(aid string) ([][]byte, error) {
 	return out, nil
 }
 
-// ServeTEL is the registry logs of an issuer, the events anchored after
+// ServeTEL is the registry logs of an issuer: the events anchored after
 // sinceSN in the issuer's key log (-1 for all), and how far this witness holds
-// that key log. The events are exactly what the issuer published. "not_held"
-// when this witness holds no key log for the issuer.
+// that key log. The events are exactly what the issuer published. ErrNoTEL when
+// this witness holds no registry log for the issuer.
 func (s *Service) ServeTEL(issuerAID string, sinceSN int) (TELAnswer, error) {
-	last, err := s.Store.LastKelSeq(issuerAID)
-	if err != nil {
-		return TELAnswer{}, err
-	}
-	if n, _ := s.Store.CountKelEvents(issuerAID); n == 0 {
-		return TELAnswer{}, fmt.Errorf("not_held")
-	}
 	all, err := s.Store.GetTELEvents(issuerAID)
 	if err != nil {
 		return TELAnswer{}, err
 	}
-	out := TELAnswer{IssuerAID: issuerAID, SinceSN: sinceSN, AnchoredSN: last, Events: []TELEvent{}}
+	if len(all) == 0 {
+		return TELAnswer{}, ErrNoTEL
+	}
+	last, err := s.Store.LastKelSeq(issuerAID)
+	if err != nil {
+		return TELAnswer{}, err
+	}
+	out := TELAnswer{AID: issuerAID, LatestKelSN: last, Events: []json.RawMessage{}}
+	seen := map[string]bool{}
 	for _, ev := range all {
-		if ev.AnchorSN > sinceSN {
-			out.Events = append(out.Events, ev)
+		if ev.AnchorSN > out.AnchoredSN {
+			out.AnchoredSN = ev.AnchorSN
 		}
+		if ev.Ilk == "vcp" && !seen[ev.Registry] {
+			seen[ev.Registry] = true
+			out.Registries = append(out.Registries, ev.Registry)
+		}
+		if ev.AnchorSN <= sinceSN {
+			continue
+		}
+		raw, err := base64.StdEncoding.DecodeString(ev.RawB64)
+		if err != nil || !json.Valid(raw) {
+			return TELAnswer{}, fmt.Errorf("a held registry event is unreadable")
+		}
+		out.Events = append(out.Events, json.RawMessage(raw))
+	}
+	if len(out.Registries) > 0 {
+		out.RegistryPrefix = out.Registries[0]
+	} else {
+		out.RegistryPrefix = all[0].Registry
+	}
+	if len(out.Registries) < 2 {
+		out.Registries = nil
 	}
 	return out, nil
+}
+
+// ServeTELHead is where an issuer's registry log is held to, and the digest of
+// the latest event in it. ErrNoTEL when none is held.
+func (s *Service) ServeTELHead(issuerAID string) (TELHead, error) {
+	all, err := s.Store.GetTELEvents(issuerAID)
+	if err != nil {
+		return TELHead{}, err
+	}
+	if len(all) == 0 {
+		return TELHead{}, ErrNoTEL
+	}
+	last, err := s.Store.LastKelSeq(issuerAID)
+	if err != nil {
+		return TELHead{}, err
+	}
+	tip := all[len(all)-1] // in the order of the key-log events that anchor them
+	return TELHead{AnchoredSN: tip.AnchorSN, LatestKelSN: last, EventDigest: tip.SAID}, nil
+}
+
+// PublishTEL sends registry events this agent made, in the order they were
+// made, to each of the witnesses its key log names (designated, by witness
+// key). It is how an outside verifier comes to find them (SEAM-13 §3).
+//
+// A witness stores an event only if the key log it holds seals it, and refuses
+// a batch with any event it cannot place, so a witness that has not yet been
+// given the key-log event that anchors the first refuses the whole batch. The
+// batch is therefore tried whole and, if refused, one event at a time in order
+// until the first refusal, so what can be placed is and a single bad event
+// does not hold back the ones before it.
+//
+// Returns how many of the designated witnesses now hold every event. A
+// designated witness this agent has no address for counts as not holding them.
+func (s *Service) PublishTEL(ctx context.Context, issuerAID string, raws [][]byte, designated []string) (held int, err error) {
+	if len(raws) == 0 || len(designated) == 0 {
+		return 0, nil
+	}
+	rootAID := issuerAID
+	if id, _ := s.Contacts.GetIdentity(); id != nil {
+		rootAID = id.AID
+	}
+	targets, err := s.enrolledWitnesses(ClassifyAID(issuerAID, rootAID), issuerAID)
+	if err != nil {
+		return 0, err
+	}
+	want := map[string]bool{}
+	for _, k := range designated {
+		want[k] = true
+	}
+	encoded := make([]string, 0, len(raws))
+	for _, r := range raws {
+		encoded = append(encoded, base64.StdEncoding.EncodeToString(r))
+	}
+	send := func(t witnessTarget, evs []string) error {
+		body, _ := json.Marshal(map[string]interface{}{"events": evs})
+		url := witnessBase(t.URL) + witnessPathPrefix(t.Commercial) + "/witness/tel/" + issuerAID
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		_, err := s.PostEvent(s.ownersLocalAllowed(cctx, url), url, body)
+		return err
+	}
+	var lastErr error
+	for _, t := range targets {
+		if t.WitnessKey == "" || !want[t.WitnessKey] {
+			continue
+		}
+		delete(want, t.WitnessKey)
+		complete := true
+		for from := 0; from < len(encoded) && complete; from += MaxTELEventsPerSubmission {
+			to := from + MaxTELEventsPerSubmission
+			if to > len(encoded) {
+				to = len(encoded)
+			}
+			if err := send(t, encoded[from:to]); err == nil {
+				continue
+			} else {
+				lastErr = err
+			}
+			// Refused as a batch: place what can be placed, in order.
+			for _, one := range encoded[from:to] {
+				if e := send(t, []string{one}); e != nil {
+					lastErr, complete = e, false
+					break
+				}
+			}
+		}
+		if complete {
+			held++
+		}
+	}
+	if held < len(designated) && lastErr == nil {
+		lastErr = fmt.Errorf("no address is known for %d of the %d witnesses", len(want), len(designated))
+	}
+	return held, lastErr
 }
