@@ -2715,9 +2715,14 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
+	// Revocation is read from the registry's transaction log, which this agent
+	// supplies only where it holds the registry state itself.
+	revocation := s.localRevocationState(acdcBody)
+
 	driverReq := &drivers.DriverVerifyCredentialRequest{
 		AcdcJson:           req.AcdcJson,
 		IssuerKelEvents:    issuerKelEvents,
+		RegistryEventsB64:  revocation.log,
 		HolderAid:          req.HolderAid,
 		PresentationSaid:   req.PresentationSaid,
 		CesrSignature:      req.CesrSignature,
@@ -2746,7 +2751,7 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	jsonreply.Write(w, http.StatusOK, result)
+	jsonreply.Write(w, http.StatusOK, revocation.applyTo(result))
 }
 
 // handleVerifyCredentialChain accepts a SAID or ACDC JSON, verifies the credential,
