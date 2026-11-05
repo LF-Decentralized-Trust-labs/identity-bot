@@ -52,14 +52,17 @@ func TestBadgeGateRefusesAndNamesItself(t *testing.T) {
 	}
 }
 
-func TestCredentialGateRefusesWhenNotPresentedAndAdmitsWhenPresented(t *testing.T) {
+// A credential gate is not passed by fields the presenter declares: without the
+// credential's own bytes there is nothing to verify. Admission with a genuine
+// credential is covered by the gate tests that present one.
+func TestCredentialGateRefusesWhenNotPresentedOrOnlyDeclared(t *testing.T) {
 	s := gateServer(t, asset.EnrollmentPolicy{Mode: asset.EnrollmentOpen, RequiredCredSchema: "SCH"})
 	if ok, _ := s.authorizeAssetAccess(nil, "ESite", "Ex", nil); ok {
 		t.Fatal("admitted without the credential")
 	}
 	pres := []interface{}{map[string]interface{}{"schema_said": "SCH", "status": "issued"}}
-	if ok, r := s.authorizeAssetAccess(nil, "ESite", "Ex", pres); !ok {
-		t.Fatalf("refused with credential: %s", r)
+	if ok, r := s.authorizeAssetAccess(nil, "ESite", "Ex", pres); ok || !strings.Contains(r, "credential body not presented") {
+		t.Fatalf("declared fields alone should be refused, got %v %q", ok, r)
 	}
 }
 
