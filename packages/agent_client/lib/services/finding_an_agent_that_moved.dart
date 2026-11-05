@@ -160,7 +160,7 @@ class FindingAnAgentThatMoved {
 /// What looking for a moved agent came to.
 @immutable
 class WhereTheAgentWent {
-  const WhereTheAgentWent._(this.kind, this.origin, this.from, this.reasons);
+  const WhereTheAgentWent._(this._kindOf, this.origin, this.from, this.reasons);
   const WhereTheAgentWent.notAFrontEnd()
       : this._(_Kind.notAFrontEnd, '', '', const []);
   const WhereTheAgentWent.stillThere(String origin)
@@ -170,7 +170,7 @@ class WhereTheAgentWent {
   const WhereTheAgentWent.notFound(String old, List<String> reasons)
       : this._(_Kind.notFound, old, '', reasons);
 
-  final _Kind kind;
+  final _Kind _kindOf;
 
   /// Where the agent answers now (moved / still there), or where it used to
   /// (not found).
@@ -180,12 +180,13 @@ class WhereTheAgentWent {
   /// Why each candidate was refused, in words for a person.
   final List<String> reasons;
 
-  bool get moved => kind == _Kind.movedTo;
-  bool get couldNotBeFound => kind == _Kind.notFound;
+  bool get isStillThere => _kindOf == _Kind.stillThere;
+  bool get moved => _kindOf == _Kind.movedTo;
+  bool get couldNotBeFound => _kindOf == _Kind.notFound;
 
   /// One plain sentence for the person, or empty when there is nothing to say.
   String get sayThis {
-    switch (kind) {
+    switch (_kindOf) {
       case _Kind.movedTo:
         return 'This organisation has moved. It was at $from and is now at '
             '$origin. This app checked that it is the same organisation and '
