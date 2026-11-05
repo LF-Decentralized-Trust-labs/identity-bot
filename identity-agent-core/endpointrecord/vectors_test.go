@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"strconv"
 	"sort"
 	"strings"
 	"testing"
@@ -28,6 +29,14 @@ var otherSeed = func() []byte {
 	b := make([]byte, 32)
 	for i := range b {
 		b[i] = byte(0xa0 + i)
+	}
+	return b
+}()
+
+var nextSeed = func() []byte {
+	b := make([]byte, 32)
+	for i := range b {
+		b[i] = byte(0x50 + i)
 	}
 	return b
 }()
@@ -74,11 +83,15 @@ func buildVectors(t *testing.T) VectorSet {
 			"other than signature as a JSON object, keys sorted, no whitespace (ADR-049's form). The " +
 			"signature is CESR qb64, code 0B. valid says whether the record verifies against key at " +
 			"now, the verifier's clock: a record issued more than 10 minutes after now, or more than " +
-			"90 days before it, does not verify. origins are in their one spelling or not; ordering says " +
+			"90 days before it, does not verify. next_public_key is the key the identifier's log names after a " +
+			"rotation. requests are the strings a controller signs for a request, the second form and the third, " +
+			"which names the origin: lines joined by a line feed. origins are in their one spelling or not; ordering says " +
 			"whether record A replaces record B. addresses are what a client is pointed at and the origin it signs for (empty when it has none).",
 		SeedHex:        hex.EncodeToString(vectorSeed),
 		PublicKey:      qb64Key(vectorSeed),
 		OtherPublicKey: qb64Key(otherSeed),
+		NextSeedHex:    hex.EncodeToString(nextSeed),
+		NextPublicKey:  qb64Key(nextSeed),
 		Now:            vectorNow.Format(IssuedLayout),
 	}
 	issued := vectorNow.Add(-time.Hour)
@@ -104,6 +117,15 @@ func buildVectors(t *testing.T) VectorSet {
 	add("issued a few minutes ahead of the verifier", mustSign(t, "https://org.example.com:443", vectorNow.Add(5*time.Minute)), nil, "public_key", true, "")
 
 	add("issued just inside the maximum age", mustSign(t, "https://org.example.com:443", vectorNow.Add(-MaxAge+time.Minute)), nil, "public_key", true, "")
+	// A rotation: the verified key log names the next key from now on, so what
+	// the replaced key signed, however genuine it was, is refused.
+	rotated, err := Sign(vectorAID, "https://org.example.com:443", issued, nextSeed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	add("signed by the key a rotation put in force", rotated, nil, "next_public_key", true, "")
+	add("signed by the key a rotation replaced, checked against the key in force now", good, nil, "next_public_key", false, "signature")
+	add("signed by the key in force after a rotation, checked against the key before it", rotated, nil, "public_key", false, "signature")
 	add("signed by a key the identifier's log does not name", good, nil, "other_public_key", false, "signature")
 	bad := good
 	bad.Origin = "https://evil.example.com:443"
@@ -203,6 +225,27 @@ func buildVectors(t *testing.T) VectorSet {
 		{"another identifier's record never replaces", "EOtherIdentifierOtherIdentifierOtherIdentif", t2, vectorAID, t1, false},
 		{"an issue time not in its spelling replaces nothing", vectorAID, "2026-11-04T10:00:02", vectorAID, t1, false},
 	}
+
+	body := iacrypto.Blake3QB64Must([]byte(`{"to":"EAGENT"}`))
+	request := func(name, origin, level, at string, score int) RequestVector {
+		v := RequestVector{Name: name, Controller: "BD93CNX1zCvGM7WdKzou2S50eSIMbwit4gi-vNhYCrk7", IdentityAgent: "EORGANISATION",
+			Origin: origin, Method: "POST", Path: "/api/conversations", Timestamp: "2026-10-20T11:59:00Z",
+			Level: level, MeasuredAt: at, Score: score, BodyDigest: body}
+		form, named := "IA-CONTROLLER-REQ-V2", []string{v.Controller, v.IdentityAgent}
+		if origin != "" {
+			form, named = "IA-CONTROLLER-REQ-V3", append(named, origin)
+		}
+		v.Signed = strings.Join(append(append([]string{form}, named...),
+			v.Method, v.Path, v.Timestamp, level, at, strconv.Itoa(score), body), "\n")
+		return v
+	}
+	set.Requests = []RequestVector{
+		request("the third form names the origin", "https://agent.example.com:443", "", "", 0),
+		request("the third form with an authentication vouched for", "https://agent.example.com:443", "software", "2026-10-20T11:58:30Z", 40),
+		request("the third form at an address on a port", "http://192.0.2.7:8080", "", "", 0),
+		request("the second form names none", "", "", "", 0),
+		request("the second form with an authentication vouched for", "", "software", "2026-10-20T11:58:30Z", 40),
+	}
 	return set
 }
 
@@ -220,7 +263,7 @@ func TestThePublishedEndpointRecordVectorsHold(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(set.Records) < 24 || len(set.Origins) < 30 || len(set.Ordering) < 4 || len(set.Addresses) < 10 {
+	if len(set.Records) < 27 || len(set.Origins) < 30 || len(set.Ordering) < 4 || len(set.Addresses) < 10 || len(set.Requests) < 5 {
 		t.Fatal("the vector file is missing cases")
 	}
 
@@ -236,7 +279,7 @@ func TestThePublishedEndpointRecordVectorsHold(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	keys := map[string]string{"public_key": set.PublicKey, "other_public_key": set.OtherPublicKey}
+	keys := map[string]string{"public_key": set.PublicKey, "other_public_key": set.OtherPublicKey, "next_public_key": set.NextPublicKey}
 	for _, v := range set.Records {
 		raw, _ := json.Marshal(v.Record)
 		var obj map[string]any

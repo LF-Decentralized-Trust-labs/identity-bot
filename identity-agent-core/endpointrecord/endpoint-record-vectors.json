@@ -1,8 +1,10 @@
 {
-  "about": "Signed endpoint records (package endpointrecord). A record names the one origin an identifier is reached at, and is signed by the key the identifier's verified key log names now. canonical is the bytes the Ed25519 signature is over: the record's fields other than signature as a JSON object, keys sorted, no whitespace (ADR-049's form). The signature is CESR qb64, code 0B. valid says whether the record verifies against key at now, the verifier's clock. origins are in their one spelling or not; ordering says whether record A replaces record B. addresses are what a client is pointed at and the origin it signs for (empty when it has none).",
+  "about": "Signed endpoint records (package endpointrecord). A record names the one origin an identifier is reached at, and is signed by the key the identifier's verified key log names now. canonical is the bytes the Ed25519 signature is over: the record's fields other than signature as a JSON object, keys sorted, no whitespace (ADR-049's form). The signature is CESR qb64, code 0B. valid says whether the record verifies against key at now, the verifier's clock: a record issued more than 10 minutes after now, or more than 90 days before it, does not verify. next_public_key is the key the identifier's log names after a rotation. requests are the strings a controller signs for a request, the second form and the third, which names the origin: lines joined by a line feed. origins are in their one spelling or not; ordering says whether record A replaces record B. addresses are what a client is pointed at and the origin it signs for (empty when it has none).",
   "seed_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
   "public_key": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
   "other_public_key": "DE_QmczUfXiT3-nsJEFOyw2bVCAjKq0w2RxGW-M8vmXE",
+  "next_seed_hex": "505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f",
+  "next_public_key": "DD93CNX1zCvGM7WdKzou2S50eSIMbwit4gi-vNhYCrk7",
   "now": "2026-11-04T12:00:00Z",
   "records": [
     {
@@ -84,6 +86,60 @@
       "valid": true
     },
     {
+      "name": "issued just inside the maximum age",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": "2026-08-06T12:01:00Z",
+        "origin": "https://org.example.com:443",
+        "signature": "0BBxijHXlS_CpK7NbGJoF-Y_Un2w07dh7966TPbuxAC_V05CzsXv4DTQtvNkgmYdBrDduGW14938d-KA1T0PbQUM",
+        "type": "endpoint-record/1"
+      },
+      "key": "public_key",
+      "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2026-08-06T12:01:00Z\",\"origin\":\"https://org.example.com:443\",\"type\":\"endpoint-record/1\"}",
+      "valid": true
+    },
+    {
+      "name": "signed by the key a rotation put in force",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": "2026-11-04T11:00:00Z",
+        "origin": "https://org.example.com:443",
+        "signature": "0BChZsipu5u58dYTEqUru_mJokZoTLK5mhxwTAjeQR4X5XbgYOTZppKonieQxezCq9sEUxSBA1u7noyEmaGBEngE",
+        "type": "endpoint-record/1"
+      },
+      "key": "next_public_key",
+      "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2026-11-04T11:00:00Z\",\"origin\":\"https://org.example.com:443\",\"type\":\"endpoint-record/1\"}",
+      "valid": true
+    },
+    {
+      "name": "signed by the key a rotation replaced, checked against the key in force now",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": "2026-11-04T11:00:00Z",
+        "origin": "https://org.example.com:443",
+        "signature": "0BDoOdhbJ7ScWChgmNztDfXUNbIF-QzTKoDreqZvtbXoBqbu1tEuoahw8gw5Q4lYqyLZw4sPCFp6XB5wHVBHEFcP",
+        "type": "endpoint-record/1"
+      },
+      "key": "next_public_key",
+      "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2026-11-04T11:00:00Z\",\"origin\":\"https://org.example.com:443\",\"type\":\"endpoint-record/1\"}",
+      "valid": false,
+      "why": "signature"
+    },
+    {
+      "name": "signed by the key in force after a rotation, checked against the key before it",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": "2026-11-04T11:00:00Z",
+        "origin": "https://org.example.com:443",
+        "signature": "0BChZsipu5u58dYTEqUru_mJokZoTLK5mhxwTAjeQR4X5XbgYOTZppKonieQxezCq9sEUxSBA1u7noyEmaGBEngE",
+        "type": "endpoint-record/1"
+      },
+      "key": "public_key",
+      "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2026-11-04T11:00:00Z\",\"origin\":\"https://org.example.com:443\",\"type\":\"endpoint-record/1\"}",
+      "valid": false,
+      "why": "signature"
+    },
+    {
       "name": "signed by a key the identifier's log does not name",
       "record": {
         "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
@@ -152,6 +208,20 @@
       "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2026-11-04T12:11:00Z\",\"origin\":\"https://org.example.com:443\",\"type\":\"endpoint-record/1\"}",
       "valid": false,
       "why": "future"
+    },
+    {
+      "name": "issued longer ago than the maximum age",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": "2026-08-06T11:59:00Z",
+        "origin": "https://org.example.com:443",
+        "signature": "0BCgBZ3P3tvsuwtraMPqm8yx1L4aLweMP_o2bIaRA3hiPu5SU4Eua-WkGcxXSpBkA2P00oWQ_li2R5teanzHz7QJ",
+        "type": "endpoint-record/1"
+      },
+      "key": "public_key",
+      "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2026-08-06T11:59:00Z\",\"origin\":\"https://org.example.com:443\",\"type\":\"endpoint-record/1\"}",
+      "valid": false,
+      "why": "expired"
     },
     {
       "name": "an origin without its port, validly signed",
@@ -624,6 +694,78 @@
       "b_aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
       "b_issued": "2026-11-04T10:00:00Z",
       "newer": false
+    }
+  ],
+  "requests": [
+    {
+      "name": "the third form names the origin",
+      "controller": "BD93CNX1zCvGM7WdKzou2S50eSIMbwit4gi-vNhYCrk7",
+      "identity_agent": "EORGANISATION",
+      "origin": "https://agent.example.com:443",
+      "method": "POST",
+      "path": "/api/conversations",
+      "timestamp": "2026-10-20T11:59:00Z",
+      "level": "",
+      "measured_at": "",
+      "score": 0,
+      "body_digest": "EP9Nhz_fNE50lZyXSJFbcwavonXobYR-IkEILe1A9Btr",
+      "signed": "IA-CONTROLLER-REQ-V3\nBD93CNX1zCvGM7WdKzou2S50eSIMbwit4gi-vNhYCrk7\nEORGANISATION\nhttps://agent.example.com:443\nPOST\n/api/conversations\n2026-10-20T11:59:00Z\n\n\n0\nEP9Nhz_fNE50lZyXSJFbcwavonXobYR-IkEILe1A9Btr"
+    },
+    {
+      "name": "the third form with an authentication vouched for",
+      "controller": "BD93CNX1zCvGM7WdKzou2S50eSIMbwit4gi-vNhYCrk7",
+      "identity_agent": "EORGANISATION",
+      "origin": "https://agent.example.com:443",
+      "method": "POST",
+      "path": "/api/conversations",
+      "timestamp": "2026-10-20T11:59:00Z",
+      "level": "software",
+      "measured_at": "2026-10-20T11:58:30Z",
+      "score": 40,
+      "body_digest": "EP9Nhz_fNE50lZyXSJFbcwavonXobYR-IkEILe1A9Btr",
+      "signed": "IA-CONTROLLER-REQ-V3\nBD93CNX1zCvGM7WdKzou2S50eSIMbwit4gi-vNhYCrk7\nEORGANISATION\nhttps://agent.example.com:443\nPOST\n/api/conversations\n2026-10-20T11:59:00Z\nsoftware\n2026-10-20T11:58:30Z\n40\nEP9Nhz_fNE50lZyXSJFbcwavonXobYR-IkEILe1A9Btr"
+    },
+    {
+      "name": "the third form at an address on a port",
+      "controller": "BD93CNX1zCvGM7WdKzou2S50eSIMbwit4gi-vNhYCrk7",
+      "identity_agent": "EORGANISATION",
+      "origin": "http://192.0.2.7:8080",
+      "method": "POST",
+      "path": "/api/conversations",
+      "timestamp": "2026-10-20T11:59:00Z",
+      "level": "",
+      "measured_at": "",
+      "score": 0,
+      "body_digest": "EP9Nhz_fNE50lZyXSJFbcwavonXobYR-IkEILe1A9Btr",
+      "signed": "IA-CONTROLLER-REQ-V3\nBD93CNX1zCvGM7WdKzou2S50eSIMbwit4gi-vNhYCrk7\nEORGANISATION\nhttp://192.0.2.7:8080\nPOST\n/api/conversations\n2026-10-20T11:59:00Z\n\n\n0\nEP9Nhz_fNE50lZyXSJFbcwavonXobYR-IkEILe1A9Btr"
+    },
+    {
+      "name": "the second form names none",
+      "controller": "BD93CNX1zCvGM7WdKzou2S50eSIMbwit4gi-vNhYCrk7",
+      "identity_agent": "EORGANISATION",
+      "origin": "",
+      "method": "POST",
+      "path": "/api/conversations",
+      "timestamp": "2026-10-20T11:59:00Z",
+      "level": "",
+      "measured_at": "",
+      "score": 0,
+      "body_digest": "EP9Nhz_fNE50lZyXSJFbcwavonXobYR-IkEILe1A9Btr",
+      "signed": "IA-CONTROLLER-REQ-V2\nBD93CNX1zCvGM7WdKzou2S50eSIMbwit4gi-vNhYCrk7\nEORGANISATION\nPOST\n/api/conversations\n2026-10-20T11:59:00Z\n\n\n0\nEP9Nhz_fNE50lZyXSJFbcwavonXobYR-IkEILe1A9Btr"
+    },
+    {
+      "name": "the second form with an authentication vouched for",
+      "controller": "BD93CNX1zCvGM7WdKzou2S50eSIMbwit4gi-vNhYCrk7",
+      "identity_agent": "EORGANISATION",
+      "origin": "",
+      "method": "POST",
+      "path": "/api/conversations",
+      "timestamp": "2026-10-20T11:59:00Z",
+      "level": "software",
+      "measured_at": "2026-10-20T11:58:30Z",
+      "score": 40,
+      "body_digest": "EP9Nhz_fNE50lZyXSJFbcwavonXobYR-IkEILe1A9Btr",
+      "signed": "IA-CONTROLLER-REQ-V2\nBD93CNX1zCvGM7WdKzou2S50eSIMbwit4gi-vNhYCrk7\nEORGANISATION\nPOST\n/api/conversations\n2026-10-20T11:59:00Z\nsoftware\n2026-10-20T11:58:30Z\n40\nEP9Nhz_fNE50lZyXSJFbcwavonXobYR-IkEILe1A9Btr"
     }
   ]
 }

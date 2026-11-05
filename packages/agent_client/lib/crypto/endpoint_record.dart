@@ -23,6 +23,10 @@ const endpointRecordType = 'endpoint-record/1';
 /// How far ahead of the checker's clock a record may be issued.
 const endpointRecordMaxFuture = Duration(minutes: 10);
 
+/// How long after it was issued a record is still believed (ADR-062): an old
+/// genuine record can point at a host that has lapsed.
+const endpointRecordMaxAge = Duration(days: 90);
+
 /// The answer to checking a record.
 class EndpointRecordCheck {
   const EndpointRecordCheck._(this.valid, this.reason, this.origin, this.issued);
@@ -272,6 +276,10 @@ EndpointRecordCheck verifyEndpointRecord(
   final clock = (now ?? DateTime.now()).toUtc();
   if (issued.isAfter(clock.add(endpointRecordMaxFuture))) {
     return EndpointRecordCheck._no('the record is issued in the future');
+  }
+  if (issued.isBefore(clock.subtract(endpointRecordMaxAge))) {
+    return EndpointRecordCheck._no(
+        'the record was issued longer ago than ${endpointRecordMaxAge.inDays} days');
   }
   final sig = _sigRaw(record['signature'] as String);
   if (sig == null) {

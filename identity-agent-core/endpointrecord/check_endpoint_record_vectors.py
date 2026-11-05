@@ -181,6 +181,8 @@ def verify(rec, key_qb64, now):
     issued = parse_issued(rec["issued"])
     if issued > now + datetime.timedelta(minutes=10):
         raise Refused("future")
+    if issued < now - datetime.timedelta(days=90):
+        raise Refused("expired")
     sig = sig_raw(rec["signature"])
     try:
         Ed25519PublicKey.from_public_bytes(key_raw(key_qb64)).verify(sig, canonical(rec).encode("ascii"))
@@ -208,7 +210,13 @@ def main():
     if key_raw(data["public_key"]) != derived:
         print("public_key is not the key of seed_hex")
         failures += 1
-    keys = {"public_key": data["public_key"], "other_public_key": data["other_public_key"]}
+    next_seed = bytes.fromhex(data["next_seed_hex"])
+    if key_raw(data["next_public_key"]) != Ed25519PrivateKey.from_private_bytes(next_seed).public_key().public_bytes_raw():
+        print("next_public_key is not the key of next_seed_hex")
+        failures += 1
+    keys = {"public_key": data["public_key"], "other_public_key": data["other_public_key"],
+            "next_public_key": data["next_public_key"]}
+    seeds = {"public_key": seed, "next_public_key": next_seed}
     for v in data["records"]:
         rec = v["record"]
         try:
@@ -229,8 +237,8 @@ def main():
             failures += 1
         # A record that verifies must also have been signed by the seed: the
         # file's signatures are reproducible, not merely checkable.
-        if verdict and v["key"] == "public_key":
-            again = Ed25519PrivateKey.from_private_bytes(seed).sign(canonical(rec).encode("ascii"))
+        if verdict and v["key"] in seeds:
+            again = Ed25519PrivateKey.from_private_bytes(seeds[v["key"]]).sign(canonical(rec).encode("ascii"))
             if again != sig_raw(rec["signature"]):
                 print("SIGNATURE NOT REPRODUCED %s" % v["name"])
                 failures += 1
@@ -252,9 +260,23 @@ def main():
         if newer(o["a_aid"], o["a_issued"], o["b_aid"], o["b_issued"]) != o["newer"]:
             print("ORDER MISMATCH %s" % o["name"])
             failures += 1
+    for r in data["requests"]:
+        # The third form puts the origin on a line of its own after the Identity
+        # Agent; the second names none. Built here from the parts, never read
+        # from the file's own string.
+        if r["origin"]:
+            head = ["IA-CONTROLLER-REQ-V3", r["controller"], r["identity_agent"], r["origin"]]
+        else:
+            head = ["IA-CONTROLLER-REQ-V2", r["controller"], r["identity_agent"]]
+        got = "\n".join(head + [r["method"].upper(), r["path"], r["timestamp"], r["level"], r["measured_at"],
+                               str(r["score"]), r["body_digest"]])
+        if got != r["signed"]:
+            print("REQUEST MISMATCH %s:\n  python %r\n  file   %r" % (r["name"], got, r["signed"]))
+            failures += 1
     if failures:
         sys.exit(1)
-    print("ok: %d records, %d origins, %d addresses, %d orderings" % (len(data["records"]), len(data["origins"]), len(data["addresses"]), len(data["ordering"])))
+    print("ok: %d records, %d origins, %d addresses, %d orderings, %d requests" % (
+        len(data["records"]), len(data["origins"]), len(data["addresses"]), len(data["ordering"]), len(data["requests"])))
 
 
 if __name__ == "__main__":

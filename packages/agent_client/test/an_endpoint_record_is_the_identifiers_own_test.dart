@@ -18,6 +18,7 @@ void main() {
   final keys = {
     'public_key': v['public_key'] as String,
     'other_public_key': v['other_public_key'] as String,
+    'next_public_key': v['next_public_key'] as String,
   };
 
   group('every published record', () {

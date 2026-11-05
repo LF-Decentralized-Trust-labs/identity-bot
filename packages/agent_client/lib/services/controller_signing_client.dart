@@ -43,9 +43,21 @@ class ControllerSigningClient extends SignsBeforeItSends {
     required this.localCoreOrigin,
     this.agentAid,
     this.authentication,
+    this.signsTheOrigin = false,
     super.waitAtMost = const Duration(seconds: 90),
     super.inner,
   }) : super(signedOrigin: agentOrigin);
+
+  /// Whether each request is signed for the origin it is going to (ADR-062,
+  /// the third form, IA-CONTROLLER-REQ-V3). OFF BY DEFAULT: an Identity Agent
+  /// built before the origin was signed does not read the header and checks the
+  /// older string, so an app that signs the origin is refused by it, and in
+  /// this app the agent and the controller update on their own schedules. The
+  /// apps turn it on in the release after every Identity Agent they reach
+  /// accepts it (step (c) of the rollout in ADR-062). There is deliberately no
+  /// retry in the older form after a refusal: a hostile proxy could fake the
+  /// refusal.
+  final bool signsTheOrigin;
 
   /// The agent this app is a front end for, as scheme://host:port.
   /// Requests anywhere else are passed through untouched.
@@ -90,8 +102,8 @@ class ControllerSigningClient extends SignsBeforeItSends {
     // Refused here, not sent in the older form that names no origin: a request
     // to an address this client cannot write as an origin could be relayed
     // through any host, and nothing would say so.
-    final origin = canonicalOriginOf(agentOrigin);
-    if (origin == null) {
+    final origin = signsTheOrigin ? canonicalOriginOf(agentOrigin) : null;
+    if (signsTheOrigin && origin == null) {
       throw ThisMachineCouldNotSign(
           'the agent address $agentOrigin is not an http or https address with a host, '
           'so a request to it cannot be signed for it',
@@ -120,7 +132,7 @@ class ControllerSigningClient extends SignsBeforeItSends {
         // through any other address is refused by the agent. Written in its one
         // spelling (the port always, host in lower case), because the agent
         // compares text.
-        'origin': origin,
+        if (origin != null) 'origin': origin,
       },
       request.url,
       mustHave: const {

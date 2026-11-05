@@ -10,6 +10,7 @@ import (
 	"identity-agent-core/authorisation"
 	"identity-agent-core/authprovider"
 	"identity-agent-core/endpoint"
+	"identity-agent-core/endpointrecord"
 	"identity-agent-core/login"
 )
 
@@ -183,5 +184,33 @@ func TestAnAddressAProxyReportedIsNeverTheAgentsOwn(t *testing.T) {
 				t.Fatalf("a request signed for the address a proxy reported was accepted: %d", got)
 			}
 		})
+	}
+}
+
+// The strings in the published vectors are the ones this server builds, and the
+// independent Python checker builds the same ones from the parts.
+func TestTheRequestStringsAreThePublishedVectors(t *testing.T) {
+	set, err := endpointrecord.Vectors()
+	if err != nil || len(set.Requests) == 0 {
+		t.Fatalf("%v", err)
+	}
+	for _, v := range set.Requests {
+		var res authprovider.Result
+		if v.Level != "" {
+			at, err := time.Parse(time.RFC3339, v.MeasuredAt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			res = authprovider.Result{Level: authprovider.Level(v.Level), Score: v.Score, Measured: true, At: at}
+		}
+		got := canonicalControllerRequestOver(v.Controller, v.IdentityAgent, v.Origin, v.Method, v.Path, v.Timestamp, res, v.BodyDigest)
+		if got != v.Signed {
+			t.Errorf("%s:\n got  %q\n want %q", v.Name, got, v.Signed)
+		}
+		read, err := authorisation.ReadControllerRequest(v.Signed)
+		if err != nil || read.Origin != v.Origin || read.Controller != v.Controller || read.IdentityAgent != v.IdentityAgent ||
+			read.Path != v.Path || read.BodyDigest != v.BodyDigest {
+			t.Errorf("%s: read as %+v, %v", v.Name, read, err)
+		}
 	}
 }
