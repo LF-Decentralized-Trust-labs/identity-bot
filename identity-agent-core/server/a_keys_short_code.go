@@ -5,6 +5,8 @@ import (
 	"net/http"
 
 	"identity-agent-core/authorisation"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 // A machine key's short code, from the one function that computes it.
@@ -33,6 +35,5 @@ func (s *CoreServer) handleAKeysShortCode(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "No key to give a short code for", "public_key is empty")
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(aKeysShortCodeResponse{ShortCode: code})
+	jsonreply.Write(w, http.StatusOK, aKeysShortCodeResponse{ShortCode: code})
 }
