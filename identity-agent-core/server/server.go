@@ -770,6 +770,7 @@ func (s *CoreServer) Start() error {
 	stop := s.anchorStop
 	s.anchorStopMu.Unlock()
 	s.inBackground(func(context.Context) { s.keepAnchoring(stop) })
+	s.inBackground(func(context.Context) { s.backfillRegistryEvents() })
 	s.runAddons(stop)
 
 	// Taken into locals before the goroutine starts: Stop clears the fields

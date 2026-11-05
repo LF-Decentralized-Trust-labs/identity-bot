@@ -670,6 +670,15 @@ type Store interface {
 	// DropStaleTELPushes gives up on events waiting since before the cutoff
 	// and returns how many it dropped.
 	DropStaleTELPushes(cutoffRFC3339 string) (int, error)
+	// ListRegistries is every registry this agent holds, whoever issues into it.
+	ListRegistries() ([]CredentialRegistry, error)
+	// GetRegistryTEL is every credential event kept in a registry, in the
+	// order they were kept.
+	GetRegistryTEL(registrySAID string) ([]CredentialTELEvent, error)
+	// TELBackfillDone reports whether the events made before the outbox existed
+	// have been queued; MarkTELBackfillDone records that they have.
+	TELBackfillDone() (bool, error)
+	MarkTELBackfillDone() error
 	SaveCredentialSchema(record CredentialSchemaRecord) error
 	GetCredentialSchemas() ([]CredentialSchemaRecord, error)
 	GetCredentialSchema(said string) (*CredentialSchemaRecord, error)

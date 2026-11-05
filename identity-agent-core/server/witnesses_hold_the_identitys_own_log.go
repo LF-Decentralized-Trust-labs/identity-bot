@@ -51,6 +51,12 @@ func (s *CoreServer) witnessRecord(ownerAID, recordAID string, witnesses []strin
 	}
 	s.witnessing.witnessJob = job
 	s.witnessing.witnessMu.Unlock()
+	s.kickWitnessing()
+}
+
+// kickWitnessing asks the witnessing worker for one more pass, starting it
+// the first time.
+func (s *CoreServer) kickWitnessing() {
 	s.witnessing.witnessOnce.Do(func() {
 		s.witnessing.witnessKick = make(chan struct{}, 1)
 		s.anchorStopMu.Lock()
@@ -81,12 +87,19 @@ func (s *CoreServer) keepWitnessing(running context.Context, stop <-chan struct{
 		job := s.witnessing.witnessJob
 		s.witnessing.witnessMu.Unlock()
 		ctx, cancel := context.WithTimeout(running, time.Minute)
-		s.WitnessService.BringUpToDate(ctx, job.owner, s.signedEventsOf(job.owner), job.witnesses, job.toad)
-		if job.record != "" {
-			s.WitnessService.BringUpToDate(ctx, job.record, s.signedEventsOf(job.record), job.witnesses, job.toad)
+		done := map[string]bool{}
+		if len(job.witnesses) > 0 {
+			s.WitnessService.BringUpToDate(ctx, job.owner, s.signedEventsOf(job.owner), job.witnesses, job.toad)
+			done[job.owner] = true
+			if job.record != "" {
+				s.WitnessService.BringUpToDate(ctx, job.record, s.signedEventsOf(job.record), job.witnesses, job.toad)
+				done[job.record] = true
+			}
 		}
 		// The key log is where each witness needs it to be before it will take
-		// a registry event that log seals.
+		// a registry event that log seals, for every identity that issues,
+		// pairwise ones included.
+		s.witnessIssuersOfWaitingEvents(ctx, done)
 		s.pushRegistryEvents(ctx)
 		cancel()
 	}
@@ -120,5 +133,13 @@ func (s *CoreServer) witnessOwnLog() {
 	}
 	if witnesses, toad, err := keeper.WitnessConfig(owner.AID); err == nil && len(witnesses) > 0 {
 		s.witnessRecord(owner.AID, "", witnesses, toad)
+		return
+	}
+	// The owner names no witness, but a pairwise identity's events may be
+	// waiting for theirs.
+	if s.WitnessService != nil {
+		if p, err := s.DataStore.PendingTELPushes(1); err == nil && len(p) > 0 {
+			s.kickWitnessing()
+		}
 	}
 }
