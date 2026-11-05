@@ -133,9 +133,9 @@ for slice in "$@"; do
   # it. Measured: the piped form failed here on a core that had the signer.
   symbols=$(nm "$slice" 2>/dev/null || true)
   case "$symbols" in
-    *_sep_create*) ;;
+    *_sep_create*_sepw_wrap*|*_sepw_wrap*_sep_create*) ;;
     *)
-      echo "ERROR: $slice has no Secure Enclave signer in it." >&2
+      echo "ERROR: $slice has no Secure Enclave signer and seed wrapper in it." >&2
       echo "  The core built, and it cannot keep a key. Check that the shim was" >&2
       echo "  built, that CGO_ENABLED=1, and that -tags sepblob was passed." >&2
       exit 1 ;;
