@@ -114,6 +114,11 @@ func TestAnObservationRecordedWithADecimalSequenceIsForgotten(t *testing.T) {
 	if _, err := db.Exec(`DELETE FROM identity_schema_migrations WHERE version >= 45`); err != nil {
 		t.Fatal(err)
 	}
+	// Rewinding to before 45 also means undoing what later migrations added,
+	// or they cannot be applied a second time.
+	if _, err := db.Exec(`ALTER TABLE identity DROP COLUMN keys_live`); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.ApplyIdentityMigrations(db); err != nil {
 		t.Fatal(err)
 	}

@@ -1018,6 +1018,17 @@ DELETE FROM witness_self_heal_log WHERE id NOT IN (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_witness_self_heal_log_identity
     ON witness_self_heal_log(contact_aid, attempted_at);
 `},
+	{
+		Version:     47,
+		Description: "Record where an identity's keys live, as a stored value",
+		SQL: `
+-- 'local' or 'remote'. Written by the act that makes the identity and never
+-- worked out afterwards. Every identity that exists before this migration was
+-- made on a machine that holds its keys (nothing could yet hold them
+-- elsewhere), so those rows are recorded as 'local' here, once.
+ALTER TABLE identity ADD COLUMN keys_live TEXT NOT NULL DEFAULT '';
+UPDATE identity SET keys_live = 'local';
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

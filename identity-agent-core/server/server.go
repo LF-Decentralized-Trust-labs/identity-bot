@@ -1330,6 +1330,8 @@ type IdentityResponse struct {
 	NextKeyDigest string `json:"next_key_digest,omitempty"`
 	Created       string `json:"created,omitempty"`
 	EventCount    int    `json:"event_count,omitempty"`
+	// Where the keys live: "local" or "remote". As recorded, never inferred.
+	KeysLive string `json:"keys_live,omitempty"`
 }
 
 type ErrorResponse struct {
@@ -1443,6 +1445,7 @@ func (s *CoreServer) handleIdentity(w http.ResponseWriter, r *http.Request) {
 		NextKeyDigest: identity.NextKeyDigest,
 		Created:       identity.Created,
 		EventCount:    identity.EventCount,
+		KeysLive:      identity.KeysLive,
 	}
 
 	jsonreply.Write(w, http.StatusOK, resp)
@@ -1696,6 +1699,7 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 		NextKeyDigest: result.NextKeyDigest,
 		Created:       now,
 		EventCount:    1,
+		KeysLive:      store.KeysLocal,
 	}
 	if err := s.DataStore.SaveIdentity(identityState); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to persist identity state", err.Error())
@@ -1818,6 +1822,9 @@ func (s *CoreServer) handleStoreIdentity(w http.ResponseWriter, r *http.Request)
 	if req.Created == "" {
 		req.Created = time.Now().UTC().Format(time.RFC3339)
 	}
+	// A recorded choice by this agent, not a value a caller supplies: the
+	// only place this route puts an identity's keys is here.
+	req.KeysLive = store.KeysLocal
 
 	if err := s.DataStore.SaveIdentity(req); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to persist identity state", err.Error())

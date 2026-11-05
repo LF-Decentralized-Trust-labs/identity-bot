@@ -541,6 +541,7 @@ func (s *RootAIDRotationService) persistKelAndIdentity(
 		NextKeyDigest: icp.NextKeyDigest,
 		Created:       now,
 		EventCount:    eventCount,
+		KeysLive:      store.KeysLocal,
 	})
 }
 

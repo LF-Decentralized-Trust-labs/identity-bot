@@ -603,6 +603,7 @@ func (s *CoreServer) handlePairingComplete(w http.ResponseWriter, r *http.Reques
 		// event commits to is at 1.
 		DerivationIndex: pairingState.derivationIndex,
 		KeyGeneration:   0,
+		KeysLive:        store.KeysLocal,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not persist the identity", err.Error())
 		return

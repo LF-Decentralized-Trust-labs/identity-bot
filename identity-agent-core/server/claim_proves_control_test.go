@@ -353,6 +353,9 @@ func TestTheIdentityAMachineWasPromisedToCanClaimItByProvingControl(t *testing.T
 	if err != nil || got == nil {
 		t.Fatal("the machine did not end up with an identity of its own")
 	}
+	if got.KeysLive != store.KeysLocal {
+		t.Fatalf("a paired machine did not record where its keys live: %q", got.KeysLive)
+	}
 	agents, _ := owner.DataStore.ListAdoptedAgents()
 	if len(agents) != 1 || agents[0].OwnerAID != minted.AID {
 		t.Fatalf("the machine was not recorded as owned by the identity it was promised to: %+v", agents)

@@ -73,6 +73,29 @@ type IdentityState struct {
 	// read together with the seed rather than trusted alone.
 	DerivationIndex int `json:"derivation_index,omitempty"`
 	KeyGeneration   int `json:"key_generation,omitempty"`
+
+	// KeysLive is where this identity's signing keys are held: KeysLocal or
+	// KeysRemote. It is written once, by the act that makes the identity
+	// (founding it, or being paired as it), and is never worked out afterwards
+	// from what else is present. Today the only value anything writes is
+	// KeysLocal; it is recorded anyway so that a later KeysRemote is a choice
+	// somebody made and wrote down, not a guess about a machine.
+	//
+	// Empty only on an identity stored before this field existed in a file
+	// store; the SQLite migration records KeysLocal for those rows.
+	KeysLive string `json:"keys_live,omitempty"`
+}
+
+// Where an identity's keys live.
+const (
+	KeysLocal  = "local"
+	KeysRemote = "remote"
+)
+
+// ValidKeysLive reports whether v is a recorded choice (or the unrecorded
+// empty value of an older file).
+func ValidKeysLive(v string) bool {
+	return v == "" || v == KeysLocal || v == KeysRemote
 }
 
 // ContactRecord stores a resolved contact in the Identity Agent.
@@ -924,6 +947,9 @@ func (s *FileStore) GetIdentity() (*IdentityState, error) {
 }
 
 func (s *FileStore) SaveIdentity(state IdentityState) error {
+	if !ValidKeysLive(state.KeysLive) {
+		return fmt.Errorf("keys_live must be %q or %q, not %q", KeysLocal, KeysRemote, state.KeysLive)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
