@@ -559,6 +559,15 @@ func TestRecoveryBelievesOnlyWhatTheContactSigned(t *testing.T) {
 	})
 }
 
+func aSaidOf(t *testing.T, stored map[string]interface{}) string {
+	t.Helper()
+	ev, err := keri.ParseEvent([]byte(stored["event_json"].(string)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ev.SAID
+}
+
 // A contact that has rotated since it was last resolved: the log on file ends at
 // the inception, the witnesses hold the rotation.
 func aContactThatRotated(t *testing.T, oldKeyAlsoSigns bool) (*CoreServer, heldIdentity) {
@@ -620,9 +629,30 @@ func TestRecoveryFollowsARotationTheContactMadeSinceItWasLastResolved(t *testing
 	})
 	t.Run("a log that does not continue the one on file is not an update", func(t *testing.T) {
 		s, id := aContactThatRotated(t, false)
+		// On file: a real, signed, verified log of two events, whose second is an
+		// interaction, not the rotation the witnesses hold at that place. The
+		// forward-only rule would refuse a hand-altered log, so it is a log the
+		// contact really could have signed, and it is held through the store's rule.
 		kept, _ := s.DataStore.GetContactKEL(id.aid)
-		kept.KEL[0]["raw_bytes_b64"] = "AAAA" // not the inception the witnesses hold
-		_ = s.DataStore.SaveContactKEL(*kept)
+		ixn, err := keri.BuildInteraction(keri.InteractionInput{
+			Prefix: id.aid, PriorSAID: aSaidOf(t, kept.KEL[0]), SN: 1,
+			Data: []json.RawMessage{json.RawMessage(`{"d":"not the rotation"}`)},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		sig, err := login.SignString(string(ixn), id.seeds[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		onFile := append(append([]map[string]interface{}{}, kept.KEL...), map[string]interface{}{
+			"raw_bytes_b64": base64.StdEncoding.EncodeToString(ixn), "cesr_signature": sig, "event_json": string(ixn),
+		})
+		if err := s.DataStore.SaveContactKEL(store.ContactKELRecord{
+			AID: id.aid, KelVerified: true, CurrentPublicKey: id.pubs[0], KEL: onFile,
+		}); err != nil {
+			t.Fatalf("the contact's own log was refused: %v", err)
+		}
 		if _, err := s.RecoverContactEndpoint(id.aid); err == nil {
 			// The witness will not answer for a log whose inception it does not
 			// hold, so nothing is refreshed and the old key stays; the new record

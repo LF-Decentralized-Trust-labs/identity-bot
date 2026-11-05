@@ -3,6 +3,8 @@ package server
 import (
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"identity-agent-core/store"
