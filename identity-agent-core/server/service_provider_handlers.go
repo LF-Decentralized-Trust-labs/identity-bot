@@ -11,6 +11,8 @@ import (
 	"github.com/google/uuid"
 
 	"identity-agent-core/store"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 // serviceProviderRoutes registers /api/service-providers endpoints.
@@ -48,8 +50,7 @@ func (s *CoreServer) handleListServiceProviders(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"providers": records,
 		"count":     len(records),
 	})
@@ -131,9 +132,7 @@ func (s *CoreServer) handleCreateServiceProvider(w http.ResponseWriter, r *http.
 
 	log.Printf("[service-providers] Created %s (%s): %s", record.DisplayName, record.Category, record.EndpointURL)
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(record)
+	jsonreply.Write(w, http.StatusCreated, record)
 }
 
 // handleGetServiceProvider returns a single service provider by ID.
@@ -149,8 +148,7 @@ func (s *CoreServer) handleGetServiceProvider(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(record)
+	jsonreply.Write(w, http.StatusOK, record)
 }
 
 // handleUpdateServiceProvider partially updates a service provider.
@@ -201,8 +199,7 @@ func (s *CoreServer) handleUpdateServiceProvider(w http.ResponseWriter, r *http.
 
 	log.Printf("[service-providers] Updated %s", id)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(existing)
+	jsonreply.Write(w, http.StatusOK, existing)
 }
 
 // handleDeleteServiceProvider removes a service provider entry.
@@ -225,8 +222,7 @@ func (s *CoreServer) handleDeleteServiceProvider(w http.ResponseWriter, r *http.
 
 	log.Printf("[service-providers] Deleted %s (%s)", existing.DisplayName, id)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "deleted", "id": id})
+	jsonreply.Write(w, http.StatusOK, map[string]string{"status": "deleted", "id": id})
 }
 
 // handleConnectServiceProvider activates a service provider.
@@ -254,8 +250,7 @@ func (s *CoreServer) handleConnectServiceProvider(w http.ResponseWriter, r *http
 
 	log.Printf("[service-providers] Connected %s (%s)", existing.DisplayName, existing.Category)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(existing)
+	jsonreply.Write(w, http.StatusOK, existing)
 }
 
 // handleDisconnectServiceProvider deactivates a service provider without deleting.
@@ -280,8 +275,7 @@ func (s *CoreServer) handleDisconnectServiceProvider(w http.ResponseWriter, r *h
 
 	log.Printf("[service-providers] Disconnected %s (%s)", existing.DisplayName, existing.Category)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(existing)
+	jsonreply.Write(w, http.StatusOK, existing)
 }
 
 // handleCheckServiceProviderHealth pings a provider's health endpoint.
@@ -327,6 +321,5 @@ func (s *CoreServer) handleCheckServiceProviderHealth(w http.ResponseWriter, r *
 
 	log.Printf("[service-providers] Health check for %s: %s", existing.DisplayName, existing.Health)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(existing)
+	jsonreply.Write(w, http.StatusOK, existing)
 }
