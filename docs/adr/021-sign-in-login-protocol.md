@@ -3,6 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-06-19
 **Deciders:** Rob Andersen
+**Amended by:** ADR-063 (Proposed 2026-11-05) — how a credential issued to another identity is bound to the identity signing in
 
 ---
 
