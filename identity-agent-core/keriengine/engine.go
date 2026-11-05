@@ -593,7 +593,7 @@ func (e *Engine) CreateDelegatedInceptionKept(publicKey, nextPublicKey, name, de
 // So the approval is looked for instead: the delegator's log, as reloaded, must
 // already carry a seal naming exactly this inception. If it does not, nothing
 // ever approved this identity and it is refused rather than reinstated.
-func (e *Engine) ReinstateDelegatedIdentity(publicKey, nextPublicKey, name, delegatorName string) (*drivers.DriverDelegatedInceptionResponse, error) {
+func (e *Engine) ReinstateDelegatedIdentity(publicKey, nextPublicKey, name, delegatorName string, sign ...drivers.FoundingSigner) (*drivers.DriverDelegatedInceptionResponse, error) {
 	delegator, err := e.state.get(delegatorName)
 	if err != nil {
 		return nil, fmt.Errorf("the delegator: %w", err)
@@ -607,7 +607,9 @@ func (e *Engine) ReinstateDelegatedIdentity(publicKey, nextPublicKey, name, dele
 		return nil, fmt.Errorf("the delegator's log carries no approval of %s, so it was never "+
 			"delegated and cannot be reinstated", dipEvent.Identifier)
 	}
-	if err := e.holdDelegatedIdentity(name, pub, nextDigest, dip, dipEvent, e.foundingSignatures(dipEvent, dip)); err != nil {
+	// Signed again by whoever holds the delegate's key (an asset's signer),
+	// as when it was made; the installed signer alone does not hold it.
+	if err := e.holdDelegatedIdentity(name, pub, nextDigest, dip, dipEvent, e.foundingSignatures(dipEvent, dip, sign...)); err != nil {
 		return nil, err
 	}
 	dipBody, err := eventMap(dip)

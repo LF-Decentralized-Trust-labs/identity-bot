@@ -4943,7 +4943,8 @@ func (s *CoreServer) reviveAssetIdentity(a asset.Asset) error {
 	}
 	pubB64, nextB64 := iacrypto.VerkeyQB64(pub), iacrypto.VerkeyQB64(nextPub)
 	if a.DelegationModel == "delegated" && a.DelegatorAID != "" {
-		resp, derr := s.KeriDriver.ReinstateDelegatedIdentity(pubB64, nextB64, a.DisplayName, a.DelegatorAID)
+		resp, derr := s.KeriDriver.ReinstateDelegatedIdentity(pubB64, nextB64, a.DisplayName, a.DelegatorAID,
+			asset.FoundingSigner(s.DataDir, a.SigningIndex))
 		if derr != nil {
 			return fmt.Errorf("delegated re-inception: %w", derr)
 		}

@@ -94,7 +94,7 @@ func (e *Engine) CreateDelegatedInception(publicKey, nextPublicKey, name, delega
 	return e.CreateDelegatedInceptionFunc(publicKey, nextPublicKey, name, delegatorName)
 }
 
-func (e *Engine) ReinstateDelegatedIdentity(publicKey, nextPublicKey, name, delegatorName string) (*drivers.DriverDelegatedInceptionResponse, error) {
+func (e *Engine) ReinstateDelegatedIdentity(publicKey, nextPublicKey, name, delegatorName string, sign ...drivers.FoundingSigner) (*drivers.DriverDelegatedInceptionResponse, error) {
 	if e.ReinstateDelegatedIdentityFunc == nil {
 		return nil, unset("ReinstateDelegatedIdentity")
 	}

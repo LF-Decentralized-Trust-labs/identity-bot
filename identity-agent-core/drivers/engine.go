@@ -29,7 +29,7 @@ type KeriEngine interface {
 	CreateDelegatedInception(publicKey, nextPublicKey, name, delegatorName string, sign ...FoundingSigner) (*DriverDelegatedInceptionResponse, error)
 	// ReinstateDelegatedIdentity holds a delegated identity again without
 	// anchoring a second approval; the delegator's log must already carry one.
-	ReinstateDelegatedIdentity(publicKey, nextPublicKey, name, delegatorName string) (*DriverDelegatedInceptionResponse, error)
+	ReinstateDelegatedIdentity(publicKey, nextPublicKey, name, delegatorName string, sign ...FoundingSigner) (*DriverDelegatedInceptionResponse, error)
 	RotateAid(name, newPublicKey, newNextPublicKey string) (*DriverRotationResponse, error)
 	// RotateAidWithAnchor rotates and anchors data in the same event, so that
 	// what the rotation records cannot be separated from the rotation itself.

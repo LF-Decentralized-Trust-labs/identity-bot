@@ -688,8 +688,8 @@ func thresholdText(raw []byte, field string) json.RawMessage {
 // already in a log this engine reloads, kept only if they verify. It is for a
 // founding that was judged when it was made; a new one goes through
 // signedFounding, which refuses what has no valid signatures.
-func (e *Engine) foundingSignatures(ev *keri.Event, raw []byte) []string {
-	sigs, err := e.signedFounding(ev, raw, nil)
+func (e *Engine) foundingSignatures(ev *keri.Event, raw []byte, sign ...drivers.FoundingSigner) []string {
+	sigs, err := e.signedFounding(ev, raw, firstSigner(sign))
 	if err != nil {
 		return nil
 	}
