@@ -41,7 +41,7 @@ func TestACallToAPeersAddressNeverReachesAnInternalService(t *testing.T) {
 	calls := map[string]func(){
 		"the Ask's signer":    func() { _, _ = s.resolveSignerKey(name + "/oobi/EAID") },
 		"a contact's key log": func() { _, _ = s.fetchKELFromOOBI(name + "/public/oobi/EAID") },
-		"a witness's address": func() { _, _ = s.askWitnessForEndpoint(name, "EAID") },
+		"a witness's address": func() { _, _ = s.askWitnessForEndpoint(name, "EAID", nil) },
 		"a peer's keys":       func() { _ = s.rememberPeerAt("EAID", name) },
 		"a peer's endpoint": func() {
 			resp, err := s.peerClient(2*time.Second, name+"/didcomm").Post(name+"/didcomm", "application/json", nil)

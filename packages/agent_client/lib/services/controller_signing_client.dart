@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../crypto/endpoint_record.dart';
 import '../crypto/owner_signature.dart';
 import 'signs_before_it_sends.dart';
 export 'signs_before_it_sends.dart' show ThisMachineCouldNotSign;
@@ -42,9 +43,21 @@ class ControllerSigningClient extends SignsBeforeItSends {
     required this.localCoreOrigin,
     this.agentAid,
     this.authentication,
+    this.signsTheOrigin = false,
     super.waitAtMost = const Duration(seconds: 90),
     super.inner,
   }) : super(signedOrigin: agentOrigin);
+
+  /// Whether each request is signed for the origin it is going to (ADR-062,
+  /// the third form, IA-CONTROLLER-REQ-V3). OFF BY DEFAULT: an Identity Agent
+  /// built before the origin was signed does not read the header and checks the
+  /// older string, so an app that signs the origin is refused by it, and in
+  /// this app the agent and the controller update on their own schedules. The
+  /// apps turn it on in the release after every Identity Agent they reach
+  /// accepts it (step (c) of the rollout in ADR-062). There is deliberately no
+  /// retry in the older form after a refusal: a hostile proxy could fake the
+  /// refusal.
+  final bool signsTheOrigin;
 
   /// The agent this app is a front end for, as scheme://host:port.
   /// Requests anywhere else are passed through untouched.
@@ -86,6 +99,16 @@ class ControllerSigningClient extends SignsBeforeItSends {
   /// can only answer with a refusal that blames the person.
   @override
   Future<Map<String, String>> headersFor(http.Request request) async {
+    // Refused here, not sent in the older form that names no origin: a request
+    // to an address this client cannot write as an origin could be relayed
+    // through any host, and nothing would say so.
+    final origin = signsTheOrigin ? canonicalOriginOf(agentOrigin) : null;
+    if (signsTheOrigin && origin == null) {
+      throw ThisMachineCouldNotSign(
+          'the agent address $agentOrigin is not an http or https address with a host, '
+          'so a request to it cannot be signed for it',
+          request.url);
+    }
     final vouched = await authentication?.call();
     final body = await askTheCoreToSign(
       localCoreOrigin(),
@@ -105,6 +128,11 @@ class ControllerSigningClient extends SignsBeforeItSends {
         if (vouched != null) 'auth_at': vouched.at.toUtc().toIso8601String(),
         if (vouched != null) 'auth_score': vouched.score,
         if (agentAid != null) 'for': agentAid,
+        // The origin this request is going to, signed so a copy relayed
+        // through any other address is refused by the agent. Written in its one
+        // spelling (the port always, host in lower case), because the agent
+        // compares text.
+        if (origin != null) 'origin': origin,
       },
       request.url,
       mustHave: const {
@@ -119,6 +147,10 @@ class ControllerSigningClient extends SignsBeforeItSends {
     // Which Identity Agent the core signed this for. Echoed rather than
     // filled in here, because it is inside the signature.
     final signedFor = (body['for'] ?? '').toString();
+    // The origin the core signed this for, echoed for the same reason: it is
+    // inside the signature. An old core does not echo one and signed the older
+    // form, which carries no header.
+    final signedOrigin = (body['origin'] ?? '').toString();
 
     return {
       'X-IA-Controller-AID': aid,
@@ -134,6 +166,7 @@ class ControllerSigningClient extends SignsBeforeItSends {
       OwnerSignature.bodyDigestHeader:
           OwnerSignature.blake3QB64(request.bodyBytes),
       if (signedFor.isNotEmpty) 'X-IA-Controller-For': signedFor,
+      if (signedOrigin.isNotEmpty) 'X-IA-Controller-Origin': signedOrigin,
       for (final e in {
         'X-IA-Controller-Auth-Level': (body['auth_level'] ?? '').toString(),
         'X-IA-Controller-Auth-At': (body['auth_at'] ?? '').toString(),

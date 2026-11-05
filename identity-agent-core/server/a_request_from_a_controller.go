@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"identity-agent-core/authprovider"
+	"identity-agent-core/endpointrecord"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
 )
@@ -35,6 +37,11 @@ const (
 	// its identifier. It is inside the signature, and an Identity Agent refuses
 	// a request that names anybody but itself — see theIdentityAgentItNames.
 	headerControllerFor = "X-IA-Controller-For"
+	// headerControllerOrigin names the origin (scheme://host:port) the machine
+	// meant to reach. It is inside the signature, and an Identity Agent refuses
+	// a request that names an origin that is not one of its own — see
+	// theOriginItNames.
+	headerControllerOrigin = "X-IA-Controller-Origin"
 
 	// How well the person was authenticated, and who says so.
 	//
@@ -333,6 +340,10 @@ func (s *CoreServer) theStringThisMachineSigned(
 	if err != nil {
 		return "", authprovider.Result{}, err
 	}
+	origin, err := s.theOriginItNames(r)
+	if err != nil {
+		return "", authprovider.Result{}, err
+	}
 
 	asserted := s.theAuthenticationSomebodyVouchedFor(r, aid, now)
 	// The signature covers the level as the machine sent it; what is acted on
@@ -342,7 +353,7 @@ func (s *CoreServer) theStringThisMachineSigned(
 		signedAs.Level = authprovider.Level(strings.TrimSpace(r.Header.Get(headerControllerAuthLevel)))
 	}
 	return canonicalControllerRequestOver(
-		aid, target, r.Method, r.URL.Path, stamp, signedAs, digest), asserted, nil
+		aid, target, origin, r.Method, r.URL.Path, stamp, signedAs, digest), asserted, nil
 }
 
 // theBodyAMachineSigned reads the body of a request whose signature has
@@ -393,6 +404,79 @@ func (s *CoreServer) theIdentityAgentItNames(r *http.Request) (string, error) {
 	default:
 		return "", fmt.Errorf("this request was signed for a different Identity Agent")
 	}
+}
+
+// requireControllerOrigin reports whether X-IA-Controller-Origin is mandatory,
+// set by REQUIRE_CONTROLLER_ORIGIN=1 (or true). It is OFF by default, which is
+// the grace: a client built before the origin was signed sends no such header
+// and is read in the V2 form, so it keeps working. A client that does send the
+// header can never be read as V2, because the two forms are different strings.
+//
+// WHEN IT FLIPS. The default turns to on in step (d) of the rollout in ADR-062,
+// the release after the apps start sending the origin, and the no-header path
+// is removed with it; until then an operator can switch it on as soon as every
+// app that reaches the agent sends the origin. Read at each request, so a test
+// or an operator's restart is all it takes.
+func requireControllerOrigin() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("REQUIRE_CONTROLLER_ORIGIN")))
+	return v == "1" || v == "true"
+}
+
+// theOriginItNames is the origin a controller's request is meant for, refused
+// unless it is one of this Identity Agent's own.
+//
+// A REQUEST IS SIGNED FOR ONE ADDRESS. Naming the Identity Agent in the
+// signature already makes a copy worthless at a different Identity Agent, but
+// not at a different address of the same one — and a plain reverse proxy is
+// exactly that: a host the client was led to, which relays what it is sent and
+// what comes back. A request signed for the proxy's origin is refused here,
+// because the proxy's origin is not one of ours.
+//
+// The origin is the client's own statement of where it meant to go, so it is
+// checked against what this agent knows about itself (its relay, tunnel, public
+// URL, direct address and loopback), never against the Host header, which the
+// forwarder chooses.
+//
+// No header is the older form, accepted for one version (requireControllerOrigin).
+// A header that is present but not one origin in its one spelling is an error,
+// never "absent": treating it as no header would let the sender pick the older
+// form.
+func (s *CoreServer) theOriginItNames(r *http.Request) (string, error) {
+	values := r.Header.Values(headerControllerOrigin)
+	if len(values) == 0 {
+		if requireControllerOrigin() {
+			return "", fmt.Errorf("a signed request must name the origin it is for in %s", headerControllerOrigin)
+		}
+		return "", nil
+	}
+	if len(values) > 1 {
+		return "", fmt.Errorf("%s must be sent once", headerControllerOrigin)
+	}
+	origin := values[0]
+	if origin == "" {
+		return "", fmt.Errorf("%s is empty", headerControllerOrigin)
+	}
+	if err := endpointrecord.CheckOrigin(origin); err != nil {
+		return "", fmt.Errorf("%s: %w", headerControllerOrigin, err)
+	}
+	if !s.isOneOfThisAgentsOrigins(origin) {
+		return "", fmt.Errorf("this request was signed for %s, which is not an address of this Identity Agent", origin)
+	}
+	return origin, nil
+}
+
+// isOneOfThisAgentsOrigins reports whether origin is an address this agent
+// knows it is reached at.
+func (s *CoreServer) isOneOfThisAgentsOrigins(origin string) bool {
+	if s.EndpointService == nil {
+		return false
+	}
+	for _, address := range s.EndpointService.OwnURLs() {
+		if own, err := endpointrecord.OriginOf(address); err == nil && own == origin {
+			return true
+		}
+	}
+	return false
 }
 
 // controllerLearnsWhoItActsFor is the one route a controller may sign for
@@ -514,15 +598,14 @@ func canonicalControllerRequest(
 	authenticated authprovider.Result,
 	body []byte,
 ) string {
-	return canonicalControllerRequestOver(
-		controllerAID, target, method, path, timestamp, authenticated, iacrypto.Blake3QB64Must(body))
+	return canonicalControllerRequestAt(controllerAID, target, "", method, path, timestamp, authenticated, body)
 }
 
 // canonicalControllerRequestOver is canonicalControllerRequest from the body's
 // digest, so a request can be checked before its body is read. The one place the
 // string is built.
 func canonicalControllerRequestOver(
-	controllerAID, target, method, path, timestamp string,
+	controllerAID, target, origin, method, path, timestamp string,
 	authenticated authprovider.Result,
 	bodyDigest string,
 ) string {
@@ -534,10 +617,17 @@ func canonicalControllerRequestOver(
 	if authenticated.Measured {
 		level = string(authenticated.Level)
 	}
-	return strings.Join([]string{
-		"IA-CONTROLLER-REQ-V2",
-		controllerAID,
-		target,
+	// The origin is a line of its own, and a request that names one is a
+	// different form (V3), so the two can never be mistaken for each other:
+	// stripping the origin from a signed request leaves a string it was not
+	// signed over, and the signature fails. One list, with the origin put in,
+	// so the forms cannot drift apart.
+	form, named := "IA-CONTROLLER-REQ-V2", []string{controllerAID, target}
+	if origin != "" {
+		form, named = "IA-CONTROLLER-REQ-V3", append(named, origin)
+	}
+	lines := append([]string{form}, named...)
+	lines = append(lines,
 		strings.ToUpper(method),
 		path,
 		timestamp,
@@ -545,7 +635,19 @@ func canonicalControllerRequestOver(
 		measuredAt,
 		strconv.Itoa(authenticated.Score),
 		bodyDigest,
-	}, "\n")
+	)
+	return strings.Join(lines, "\n")
+}
+
+// canonicalControllerRequestAt is canonicalControllerRequest for a request that
+// names the origin it is meant for. An empty origin is the older form.
+func canonicalControllerRequestAt(
+	controllerAID, target, origin, method, path, timestamp string,
+	authenticated authprovider.Result,
+	body []byte,
+) string {
+	return canonicalControllerRequestOver(
+		controllerAID, target, origin, method, path, timestamp, authenticated, iacrypto.Blake3QB64Must(body))
 }
 
 // theKeyEntitledToVouch is whose statement about an authentication level this

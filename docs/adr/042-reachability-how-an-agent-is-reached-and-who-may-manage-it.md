@@ -1,6 +1,6 @@
 # ADR-042 — How an agent is reached, and who may manage it
 
-**Status:** Accepted; §1, §3 and §5 amended by ADR-048 (2026-10-21): URL Relay carries both private and public addresses under one relay protocol; the Chisel tunnel provider goes, while development tunnels (Cloudflare, ngrok) stay; the core defaults every identity to URL Relay and a product sets its own per-entity default; the Identity Agent itself marks every relayed request; §3 amended 2026-10-22: a request from this computer is the owner's only with the secret the core was started with; §3 amended 2026-11-02: the signature is checked, and spent, before the body is read
+**Status:** Accepted; §1, §3 and §5 amended by ADR-048 (2026-10-21): URL Relay carries both private and public addresses under one relay protocol; the Chisel tunnel provider goes, while development tunnels (Cloudflare, ngrok) stay; the core defaults every identity to URL Relay and a product sets its own per-entity default; the Identity Agent itself marks every relayed request; §3 amended 2026-10-22: a request from this computer is the owner's only with the secret the core was started with; §3 amended 2026-11-02: the signature is checked, and spent, before the body is read; §3 amended 2026-11-05: a controller's request may name the origin it is sent to (ADR-062)
 **Date:** 2026-09-16
 **Relates to:** ADR-006 (Standardized Topology), ADR-033 (An identifier travels with an address), ADR-036 (A computer you pair with does not publish who you are), ADR-041 (One neutral scheme for the protocol's device codes)
 
@@ -206,6 +206,10 @@ Three properties make this sound:
   `X-IA-Body-Digest` — the Blake3 qb64 value (`E` and 43 characters) the signed
   string already contains, sent once. The signed string does not change:
   `IA-REQ-V2` for an owner, `IA-CONTROLLER-REQ-V2` for a controller.
+  *(Amended 2026-11-05 by ADR-062: a controller's request that names the origin
+  it is sent to is signed in a third form, `IA-CONTROLLER-REQ-V3`, with
+  `X-IA-Controller-Origin`. The second form is still read, for a client that names
+  no origin, until the agent is made to require one.)*
   - *With the header*, the agent builds the signed string from the header's digest
     and verifies the signature having read **none** of the body. Only then does it
     read the body (up to the bound of the route, `signedBodyBounds`), hashing as it

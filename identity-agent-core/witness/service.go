@@ -3,7 +3,9 @@ package witness
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -16,6 +18,7 @@ import (
 	"time"
 
 	"identity-agent-core/drivers"
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/store"
 )
 
@@ -35,6 +38,7 @@ type EventPoster func(ctx context.Context, witnessURL string, body []byte) (map[
 
 // Service is the IA-side witness engine.
 type Service struct {
+	verdicts    verifiedLogs
 	Store       Store
 	Contacts    ContactStore
 	Driver      drivers.KeriEngine
@@ -588,6 +592,87 @@ func (s *Service) verifyEventChain(signerAID string, rawEvent []byte, cesrSig st
 		return fmt.Errorf("kel_verify_failed: %s", strings.Join(res.ValidationErrors, "; "))
 	}
 	return nil
+}
+
+// CurrentVerifiedKey is the key aid signs with now, from the key log this
+// witness holds for it, checked end to end: every event is signed by the key
+// the log itself puts in force at that point, so a rotation is followed and a
+// log with an unsigned or unreadable event names no key at all. An identity
+// this witness holds no log for has none either; it is not witnessing it.
+//
+// ONE KEY. The key is the first of the log's current key set, as everywhere
+// else in this agent (drivers.ValidateKELFromBytes): a log whose current keys
+// need several signatures to act is not supported, and a record is judged
+// against its first key alone.
+//
+// The verdict is kept per log, keyed by a digest of every event and signature
+// held, so a route open to anybody does not check the whole log again for each
+// request; a log that gains an event, or changes in any byte, is a different
+// log and is checked again.
+func (s *Service) CurrentVerifiedKey(aid string) (ed25519.PublicKey, error) {
+	held, err := s.Store.GetKelEvents(aid)
+	if err != nil || len(held) == 0 {
+		return nil, fmt.Errorf("not_witnessing")
+	}
+	raws := make([][]byte, 0, len(held))
+	sigs := make([]string, 0, len(held))
+	digest := sha256.New()
+	for _, e := range held {
+		raw, derr := base64.StdEncoding.DecodeString(e.RawBytesB64)
+		if e.RawBytesB64 == "" || derr != nil || e.CesrSignature == "" {
+			return nil, fmt.Errorf("the key log held for %s cannot be verified", aid)
+		}
+		raws = append(raws, raw)
+		sigs = append(sigs, e.CesrSignature)
+		fmt.Fprintf(digest, "%d:%d:", len(raw), len(e.CesrSignature))
+		digest.Write(raw)
+		digest.Write([]byte(e.CesrSignature))
+	}
+	tip := fmt.Sprintf("%s|%x", aid, digest.Sum(nil))
+	if key, ok := s.verdicts.get(tip); ok {
+		return key, nil
+	}
+	res, err := drivers.ValidateKELFromBytes(drivers.ValidateKELInput{AID: aid, RawEvents: raws, CesrSignatures: sigs})
+	if err != nil {
+		return nil, err
+	}
+	if !res.KelVerified || res.CurrentPublicKey == "" {
+		return nil, fmt.Errorf("the key log held for %s does not verify", aid)
+	}
+	raw, _, err := iacrypto.DecodeEd25519Key(res.CurrentPublicKey, false)
+	if err != nil {
+		return nil, fmt.Errorf("the key log held for %s names no Ed25519 key: %w", aid, err)
+	}
+	key := ed25519.PublicKey(raw)
+	s.verdicts.put(tip, key)
+	return key, nil
+}
+
+// verifiedLogs remembers the key a log was verified to name, by the digest of
+// the log. Only a verified log is kept; a log that does not verify is checked
+// again, which costs what it cost before. Bounded, so identifiers sent to an
+// open route cannot grow it.
+type verifiedLogs struct {
+	mu sync.Mutex
+	m  map[string]ed25519.PublicKey
+}
+
+const maxVerifiedLogs = 1024
+
+func (v *verifiedLogs) get(tip string) (ed25519.PublicKey, bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	k, ok := v.m[tip]
+	return k, ok
+}
+
+func (v *verifiedLogs) put(tip string, key ed25519.PublicKey) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.m == nil || len(v.m) >= maxVerifiedLogs {
+		v.m = map[string]ed25519.PublicKey{}
+	}
+	v.m[tip] = key
 }
 
 // GetKelReplica implements C4.
