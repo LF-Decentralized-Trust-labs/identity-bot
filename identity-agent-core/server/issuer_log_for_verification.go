@@ -81,7 +81,11 @@ func (s *CoreServer) issuanceLogForVerification(acdcBody map[string]interface{},
 		if issuer == "" || len(issuerKel) == 0 {
 			return nil, nil, issuerKel
 		}
-		return s.registryLogFromWitnesses(telClient, issuer, registry, said, issuerKel)
+		log, dup, kel := s.registryLogFromWitnesses(telClient, issuer, registry, said, issuerKel)
+		if len(kel) > len(issuerKel) {
+			s.keepCaughtUpKeyLog(issuer, kel)
+		}
+		return log, dup, kel
 	}
 	out := make([]string, 0, len(events))
 	for _, ev := range events {
