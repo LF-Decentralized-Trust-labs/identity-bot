@@ -1401,9 +1401,13 @@ func (s *FileStore) SaveContactKEL(record ContactKELRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// A file that cannot be read says nothing about what it held. Treating it
+	// as empty skipped the guard and then wrote over every log in it, so the
+	// save is refused instead, naming the file.
 	kels, err := s.loadContactKELs()
 	if err != nil {
-		kels = map[string]ContactKELRecord{}
+		return fmt.Errorf("refusing to save the log for %s, because %s cannot be read and may hold verified logs: %w",
+			record.AID, filepath.Join(s.dir, "contact_kels.json"), err)
 	}
 	record.sealFromVerifiedBytes()
 	if held, ok := kels[record.AID]; ok {

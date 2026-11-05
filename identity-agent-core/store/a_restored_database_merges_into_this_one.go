@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -40,6 +41,26 @@ import (
 // Two kinds of table are the exception, both because adding would corrupt
 // rather than accumulate — see copyTable.
 func (s *SQLiteStore) ImportSnapshot(path string) error {
+	_, err := s.ImportSnapshotReport(path)
+	return err
+}
+
+// ImportReport says what a restore did that a person should be told about.
+type ImportReport struct {
+	// ContactLogsKept is how many contact logs the backup held that were NOT
+	// restored, because this database already holds a verified log for that
+	// contact which the backup's does not carry on from (an older log, a fork,
+	// or one that is not verified). The held log stays.
+	ContactLogsKept int
+}
+
+// ImportSnapshotReport is ImportSnapshot, and also reports what it kept.
+func (s *SQLiteStore) ImportSnapshotReport(path string) (ImportReport, error) {
+	var report ImportReport
+	return report, s.importSnapshot(path, &report)
+}
+
+func (s *SQLiteStore) importSnapshot(path string, report *ImportReport) error {
 	// Safe to have been done already: migrations skip versions the file has,
 	// and the two refusals below are pure checks. The restore runs this in its
 	// preflight so that a backup which cannot be used is refused before
@@ -150,6 +171,14 @@ func (s *SQLiteStore) ImportSnapshot(path string) error {
 	}
 
 	for _, o := range ordinary {
+		if o.name == "contact_kels" {
+			kept, err := mergeContactKELs(ctx, tx)
+			if err != nil {
+				return err
+			}
+			report.ContactLogsKept = kept
+			continue
+		}
 		if err := copyTable(ctx, tx, conn, o.name, shadow[o.name]); err != nil {
 			return err
 		}
@@ -712,4 +741,89 @@ func mergeDuplicityAlerts(ctx context.Context, tx *sql.Tx, shared []string) erro
 		return fmt.Errorf("restore the duplicity_alerts table: %w", err)
 	}
 	return nil
+}
+
+// mergeContactKELs restores the backup's contact logs through the rule
+// SaveContactKEL applies (refuseAnEarlierLog), and returns how many it kept
+// the held log over.
+//
+// INSERT OR REPLACE let a backup put back a fork signed by a retired key, or an
+// ordinary old backup wind a contact back to a key it had rotated away from. A
+// held log is kept when the backup's does not carry on from it; the backup's is
+// taken when it does, or when nothing is held.
+func mergeContactKELs(ctx context.Context, tx *sql.Tx) (int, error) {
+	type row struct {
+		rec              ContactKELRecord
+		kelJSON, errJSON string
+	}
+	var incoming []row
+	rows, err := tx.QueryContext(ctx,
+		`SELECT aid, kel_json, kel_verified, current_public_key, events_validated, validation_errors, validated_at
+		   FROM restored.contact_kels`)
+	if err != nil {
+		return 0, fmt.Errorf("read the contact logs from the backup: %w", err)
+	}
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.rec.AID, &r.kelJSON, &r.rec.KelVerified, &r.rec.CurrentPublicKey,
+			&r.rec.EventsValidated, &r.errJSON, &r.rec.ValidatedAt); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("read the contact logs from the backup: %w", err)
+		}
+		incoming = append(incoming, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("read the contact logs from the backup: %w", err)
+	}
+
+	kept := 0
+	for _, r := range incoming {
+		offered := r.rec
+		// A log that will not read carries on from nothing.
+		if json.Unmarshal([]byte(r.kelJSON), &offered.KEL) != nil {
+			offered.KEL, offered.KelVerified = nil, false
+		}
+		if r.errJSON != "" && r.errJSON != "null" {
+			_ = json.Unmarshal([]byte(r.errJSON), &offered.ValidationErrors)
+		}
+		offered.sealFromVerifiedBytes()
+
+		var heldJSON string
+		var held ContactKELRecord
+		switch qerr := tx.QueryRowContext(ctx,
+			`SELECT kel_json, kel_verified FROM main.contact_kels WHERE aid = ?`, offered.AID).
+			Scan(&heldJSON, &held.KelVerified); {
+		case qerr == nil:
+			if err := json.Unmarshal([]byte(heldJSON), &held.KEL); err != nil && held.KelVerified {
+				return 0, fmt.Errorf("the verified log held for %s cannot be read, so the backup's cannot replace it: %w",
+					offered.AID, err)
+			}
+			held.AID = offered.AID
+			held.sealFromVerifiedBytes()
+			if refuseAnEarlierLog(&held, offered) != nil {
+				kept++
+				continue
+			}
+		case qerr != sql.ErrNoRows:
+			return 0, fmt.Errorf("read the held contact log for %s: %w", offered.AID, qerr)
+		}
+		if offered.KEL == nil {
+			// Unreadable in the backup and nothing held: copy the stored text
+			// as it came rather than inventing a log.
+			offered.KEL = []map[string]interface{}{}
+		}
+		kelJSON, err := json.Marshal(offered.KEL)
+		if err != nil {
+			return 0, fmt.Errorf("restore the contact log for %s: %w", offered.AID, err)
+		}
+		errJSON, err := json.Marshal(offered.ValidationErrors)
+		if err != nil {
+			return 0, fmt.Errorf("restore the contact log for %s: %w", offered.AID, err)
+		}
+		if err := writeContactKEL(tx, offered, string(kelJSON), string(errJSON)); err != nil {
+			return 0, fmt.Errorf("restore the contact log for %s: %w", offered.AID, err)
+		}
+	}
+	return kept, nil
 }

@@ -1203,7 +1203,19 @@ func (s *SQLiteStore) SaveContactKEL(record ContactKELRecord) error {
 		return fmt.Errorf("failed to save contact KEL: %w", qerr)
 	}
 
-	_, err = tx.Exec(`
+	if err := writeContactKEL(tx, record, string(kelJSON), string(errorsJSON)); err != nil {
+		return fmt.Errorf("failed to save contact KEL: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to save contact KEL: %w", err)
+	}
+	return nil
+}
+
+// writeContactKEL is the one statement that stores a contact log, used by
+// SaveContactKEL and by a restore, so the two cannot store it differently.
+func writeContactKEL(tx *sql.Tx, record ContactKELRecord, kelJSON, errorsJSON string) error {
+	_, err := tx.Exec(`
 		INSERT INTO contact_kels (aid, kel_json, kel_verified, current_public_key, events_validated, validation_errors, validated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(aid) DO UPDATE SET
@@ -1213,17 +1225,11 @@ func (s *SQLiteStore) SaveContactKEL(record ContactKELRecord) error {
 			events_validated   = excluded.events_validated,
 			validation_errors  = excluded.validation_errors,
 			validated_at       = excluded.validated_at`,
-		record.AID, string(kelJSON), record.KelVerified,
+		record.AID, kelJSON, record.KelVerified,
 		record.CurrentPublicKey, record.EventsValidated,
-		string(errorsJSON), record.ValidatedAt,
+		errorsJSON, record.ValidatedAt,
 	)
-	if err != nil {
-		return fmt.Errorf("failed to save contact KEL: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to save contact KEL: %w", err)
-	}
-	return nil
+	return err
 }
 
 func (s *SQLiteStore) GetContactKEL(aid string) (*ContactKELRecord, error) {
