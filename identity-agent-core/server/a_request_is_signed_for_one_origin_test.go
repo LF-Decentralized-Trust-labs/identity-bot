@@ -111,8 +111,7 @@ func TestAnOriginNotInItsOneSpellingIsRefused(t *testing.T) {
 // The older form is read for one version; switched off, it is refused.
 func TestTheOlderFormIsRefusedOnceTheOriginIsRequired(t *testing.T) {
 	s, aid, seed := aServerReachedAt(t)
-	requireControllerOrigin = true
-	defer func() { requireControllerOrigin = false }()
+	t.Setenv("REQUIRE_CONTROLLER_ORIGIN", "1")
 	if got := send(s, asThatMachine(t, aid, "GET", "/api/profile", "", seed, "", time.Time{})); got != http.StatusForbidden {
 		t.Fatalf("a request naming no origin was accepted once one is required: %d", got)
 	}
@@ -144,5 +143,45 @@ func TestTheCoreRefusesToSignForAnOriginNotInItsOneSpelling(t *testing.T) {
 	w, _ := signAs(t, s, `{"method":"GET","path":"/api/profile","origin":"https://agent.example.com"}`)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("an origin without its port was not refused: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// An address a proxy reported is the sender's word, so it is never one of this
+// agent's own origins. Behind a front proxy that appends to X-Forwarded-Host
+// rather than overwriting it, a hostile proxy can make the agent "learn" its
+// address, and a request signed for that address must not pass for that reason.
+func TestAnAddressAProxyReportedIsNeverTheAgentsOwn(t *testing.T) {
+	const evil = "https://evil.example.net:443"
+	for name, withOverride := range map[string]bool{"with a configured address": true, "with none": false} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("TRUST_FORWARDED_HEADERS", "1")
+			resetSeenSignatures(t)
+			s := newAuthTestServer(t)
+			s.EndpointService = endpoint.New(nil, 8080)
+			if withOverride {
+				s.EndpointService.SetOverrideURL("https://agent.example.com")
+			}
+			aid, seed := anAuthorisedMachine(t, s, GradeEnrolled)
+
+			// The hostile proxy's request reaches the agent first and is believed
+			// as far as the address the agent publishes goes.
+			probe := httptest.NewRequest("GET", "/api/health", nil)
+			probe.Header.Set("X-Forwarded-Host", "evil.example.net")
+			probe.Header.Set("X-Forwarded-Proto", "https")
+			send(s, probe)
+
+			for _, u := range s.EndpointService.OwnURLs() {
+				if strings.Contains(u, "evil.example.net") {
+					t.Fatalf("an address read off a header is one of the agent's own: %v", s.EndpointService.OwnURLs())
+				}
+			}
+			req := asThatMachine(t, aid, "GET", "/api/profile", "", seed, "", time.Time{})
+			req = resignedForOrigin(t, req, aid, seed, evil, true)
+			req.Header.Set("X-Forwarded-Host", "evil.example.net")
+			req.Header.Set("X-Forwarded-Proto", "https")
+			if got := send(s, req); got != http.StatusForbidden {
+				t.Fatalf("a request signed for the address a proxy reported was accepted: %d", got)
+			}
+		})
 	}
 }
