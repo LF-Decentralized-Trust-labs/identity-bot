@@ -500,7 +500,10 @@ void main() {
   test('the request is signed for the origin it is going to, and says so', () async {
     final w = _Watched();
     final c = ControllerSigningClient(
-        agentOrigin: _agent, localCoreOrigin: () => _localCore, inner: w.client);
+        agentOrigin: _agent,
+        localCoreOrigin: () => _localCore,
+        signsTheOrigin: true,
+        inner: w.client);
     await c.get(Uri.parse('$_agent/api/profile'));
     // Written in its one spelling, the port included, so the agent compares the
     // same text a signature was made over.
@@ -514,6 +517,7 @@ void main() {
     final c = ControllerSigningClient(
       agentOrigin: _agent,
       localCoreOrigin: () => _localCore,
+      signsTheOrigin: true,
       inner: _Scripted((r) {
         if (r.url.path == '/api/controller/sign') {
           return ('{"controller_aid":"B","signature":"0B","timestamp":"t"}', 200);
@@ -532,10 +536,21 @@ void main() {
     final c = ControllerSigningClient(
         agentOrigin: 'ftp://agent.example.test',
         localCoreOrigin: () => _localCore,
+        signsTheOrigin: true,
         inner: w.client);
     await expectLater(c.get(Uri.parse('ftp://agent.example.test/api/profile')),
         throwsA(isA<ThisMachineCouldNotSign>()));
     expect(w.askedToSign, isEmpty);
     expect(w.toTheAgent, isEmpty);
+  });
+
+  test('by default the origin is not signed, so an agent built before it still '
+      'accepts the request', () async {
+    final w = _Watched();
+    final c = ControllerSigningClient(
+        agentOrigin: _agent, localCoreOrigin: () => _localCore, inner: w.client);
+    await c.get(Uri.parse('$_agent/api/profile'));
+    expect(w.askedToSign.single.containsKey('origin'), isFalse);
+    expect(w.toTheAgent.single.headers.containsKey('X-IA-Controller-Origin'), isFalse);
   });
 }
