@@ -257,7 +257,9 @@ func (s *Store) ClaimEnrolment(token string, now time.Time) (Enrolment, error) {
 	defer s.mu.Unlock()
 	all := s.loadEnrolments()
 	e, ok := all[entry.Digest]
-	if !ok || e.Revoked {
+	// A record already marked used is spent whatever the secret store says: a
+	// duplicate digest must never let one token mint a second identity.
+	if !ok || e.Revoked || !e.UsedAt.IsZero() {
 		return Enrolment{}, errors.New("this enrolment token cannot be used")
 	}
 	e.UsedAt = now

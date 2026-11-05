@@ -69,6 +69,50 @@ func (s *Store) IncrementEmployeeInviteUse(token string) error {
 	return nil
 }
 
+// ReserveEmployeeInvite checks an employee invite and spends one use in a
+// single locked step, so concurrent redeems cannot together exceed MaxUses.
+// With signer set the invite must be a signer invite. It fails, spending
+// nothing, if the use cannot be saved. ReleaseEmployeeInvite hands the use back
+// when the redemption then fails.
+func (s *Store) ReserveEmployeeInvite(token string, signer bool) (EmployeeInvite, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id, ok := s.findEmployeeInviteLocked(token)
+	if !ok || s.empInvites[id].Revoked || (signer && !s.empInvites[id].IsSigner) {
+		return EmployeeInvite{}, ErrInviteNotFound
+	}
+	inv := s.empInvites[id]
+	if inv.MaxUses > 0 && inv.UseCount >= inv.MaxUses {
+		return EmployeeInvite{}, ErrInviteExhausted
+	}
+	inv.UseCount++
+	s.empInvites[id] = inv
+	if err := s.saveLocked(s.empInvitesPath, s.empInvites); err != nil {
+		inv.UseCount--
+		s.empInvites[id] = inv
+		return EmployeeInvite{}, err
+	}
+	return inv, nil
+}
+
+// ReleaseEmployeeInvite gives back a use taken by ReserveEmployeeInvite whose
+// redemption did not complete.
+func (s *Store) ReleaseEmployeeInvite(token string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id, ok := s.findEmployeeInviteLocked(token)
+	if !ok {
+		return ErrInviteNotFound
+	}
+	inv := s.empInvites[id]
+	if inv.UseCount > 0 {
+		inv.UseCount--
+		s.empInvites[id] = inv
+		return s.saveLocked(s.empInvitesPath, s.empInvites)
+	}
+	return nil
+}
+
 // RevokeEmployeeInvite withdraws an employee invite, named by its ID (the
 // digest the list shows) and never by its code. Like RevokeInvite it says
 // ErrInviteNotFound for an unknown invite and ErrInviteClosed for one already

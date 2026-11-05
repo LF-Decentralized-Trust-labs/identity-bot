@@ -362,17 +362,20 @@ func (h *Handler) HandleGetInviteInfo(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleRedeemInvite(w http.ResponseWriter, r *http.Request) {
 	token := chi.URLParam(r, "token")
 	// TODO: enforce policy.RequiredAAL >= asset.Policy.RequiredAAL before granting membership.
-	inv, ok := h.Store.GetInvite(token)
-	if !ok || inv.Revoked {
+	// Check and spend in one locked step.
+	switch _, err := h.Store.RedeemInvite(token); {
+	case err == nil:
+	case errors.Is(err, ErrInviteNotFound):
 		h.writeJSON(w, map[string]string{"error": "invalid"}, http.StatusBadRequest)
 		return
-	}
-	if inv.usedUp() {
+	case errors.Is(err, ErrInviteExhausted):
 		h.writeJSON(w, map[string]string{"error": "exhausted"}, http.StatusBadRequest)
+		return
+	default:
+		h.writeJSON(w, map[string]string{"error": "the invite could not be redeemed"}, http.StatusInternalServerError)
 		return
 	}
 	// create member stub (pairwise from login context later)
-	h.Store.IncrementInviteUse(token)
 	h.writeJSON(w, map[string]string{"status": "redeemed"}, http.StatusOK)
 }
 

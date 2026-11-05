@@ -1,7 +1,6 @@
 package server
 
 import (
-	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"identity-agent-core/enrolsecret"
 	"identity-agent-core/internal/atomicfile"
 )
 
@@ -79,8 +79,13 @@ type CeremonyInvitee struct {
 	// Token is the invite they redeem, and InviteURL is what becomes their QR
 	// code. One each: a shared code could be redeemed twice by the same person
 	// and leave a place at the table unfilled.
-	Token     string `json:"token"`
-	InviteURL string `json:"invite_url"`
+	//
+	// Token is the clear code, held only on the value returned to the owner
+	// when the ceremony starts. What is saved is TokenDigest: a copy of this
+	// file must not be a way to accept in somebody's place.
+	Token       string `json:"token,omitempty"`
+	TokenDigest string `json:"token_digest,omitempty"`
+	InviteURL   string `json:"invite_url"`
 
 	// Filled in when they accept, from their own device. Both halves are
 	// public: the key they will sign with, and the one they commit to rotating
@@ -140,12 +145,52 @@ func (s *CoreServer) loadCeremony() (*OwnerCeremony, error) {
 	if jerr := json.Unmarshal(raw, &c); jerr != nil {
 		return nil, fmt.Errorf("the ceremony record is unreadable: %w", jerr)
 	}
+	// A record an earlier version saved with clear codes is carried to digests
+	// the first time it is read, and rewritten without them. If that cannot be
+	// done the read fails: clear codes are not left behind a running agent.
+	clear := false
+	for i := range c.Invited {
+		if c.Invited[i].Token != "" {
+			clear = true
+		}
+	}
+	if clear {
+		if err := s.saveCeremony(&c); err != nil {
+			return nil, fmt.Errorf("the ceremony record holds clear invite codes and could not be rewritten: %w", err)
+		}
+		// What the caller sees is what is on disk: digests, no codes.
+		for i := range c.Invited {
+			if t := c.Invited[i].Token; t != "" {
+				c.Invited[i].TokenDigest, c.Invited[i].Token = enrolsecret.Digest(t), ""
+			}
+		}
+	}
 	return &c, nil
 }
 
+// migrateCeremony makes a ceremony record from an earlier version keep digests
+// only. Called as the server is made; an error stops it starting.
+func (s *CoreServer) migrateCeremony() error {
+	ceremonyMu.Lock()
+	defer ceremonyMu.Unlock()
+	_, err := s.loadCeremony()
+	return err
+}
+
 // saveCeremony records it. Callers hold the lock.
+//
+// Invite codes are written as digests only; c itself is not changed, so the
+// caller that just minted the codes can still hand them out.
 func (s *CoreServer) saveCeremony(c *OwnerCeremony) error {
-	raw, err := json.MarshalIndent(c, "", "  ")
+	stored := *c
+	stored.Invited = append([]CeremonyInvitee(nil), c.Invited...)
+	for i := range stored.Invited {
+		if t := stored.Invited[i].Token; t != "" {
+			stored.Invited[i].TokenDigest = enrolsecret.Digest(t)
+			stored.Invited[i].Token = ""
+		}
+	}
+	raw, err := json.MarshalIndent(&stored, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -184,7 +229,7 @@ func (s *CoreServer) recordAcceptance(token, pairwiseAID, publicKey, nextPublicK
 	}
 	found := false
 	for i := range c.Invited {
-		if subtle.ConstantTimeCompare([]byte(c.Invited[i].Token), []byte(token)) != 1 {
+		if c.Invited[i].TokenDigest == "" || !enrolsecret.Equal(token, c.Invited[i].TokenDigest) {
 			continue
 		}
 		found = true

@@ -54,8 +54,11 @@ func NewStore(dataDir string) (*Store, error) {
 	// On a load error the store is returned alongside it, with the assets
 	// reads reporting that error, so a caller that holds on to it cannot
 	// mistake an unreadable store for an empty one. Never rewrites a file.
+	//
+	// A failed load also means the secrets were not migrated: clear codes may
+	// still be on disk, so the agent must not run (ErrSecretsNotMigrated).
 	if err := s.load(); err != nil {
-		return s, err
+		return s, fmt.Errorf("%w: %v", ErrSecretsNotMigrated, err)
 	}
 	// Secrets an earlier version stored in the clear are carried to digests
 	// now, before anything is served. If the rewrite fails the store does not
@@ -289,6 +292,34 @@ func (s *Store) IncrementInviteUse(token string) error {
 		return s.saveLocked(s.invitesPath, s.invites)
 	}
 	return nil
+}
+
+// ErrInviteExhausted is returned when a redeem names an invite already used as
+// many times as it allows.
+var ErrInviteExhausted = errors.New("invite is used up")
+
+// RedeemInvite checks an asset invite and spends one use in a single locked
+// step, so concurrent redeems cannot together exceed MaxUses. It fails, and
+// spends nothing, if the use cannot be saved.
+func (s *Store) RedeemInvite(token string) (AssetInvite, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id, ok := s.findInviteLocked(token)
+	if !ok || s.invites[id].Revoked {
+		return AssetInvite{}, ErrInviteNotFound
+	}
+	inv := s.invites[id]
+	if inv.usedUp() {
+		return AssetInvite{}, ErrInviteExhausted
+	}
+	inv.UseCount++
+	s.invites[id] = inv
+	if err := s.saveLocked(s.invitesPath, s.invites); err != nil {
+		inv.UseCount--
+		s.invites[id] = inv
+		return AssetInvite{}, err
+	}
+	return inv, nil
 }
 
 // ErrInviteNotFound is returned when a revoke names a code the store does not hold.

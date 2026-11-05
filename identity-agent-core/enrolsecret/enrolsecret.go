@@ -155,6 +155,16 @@ func (s *Store) Issue(subject string, window time.Duration, now time.Time) (stri
 	return secret, e, nil
 }
 
+func withoutDigest(in []Entry, digest string) []Entry {
+	out := in[:0]
+	for _, e := range in {
+		if e.Digest != digest {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 func withoutSubject(in []Entry, subject string) []Entry {
 	if subject == "" {
 		return in
@@ -257,6 +267,10 @@ func (s *Store) Adopt(e Entry, now time.Time) error {
 		return nil
 	}
 	f.Secrets = withoutSubject(f.Secrets, e.Subject)
+	// Adopting is repeatable: a crash between this and the caller rewriting the
+	// file it migrates from means the same secret is adopted again on the next
+	// start. One digest is one secret, never two.
+	f.Secrets = withoutDigest(f.Secrets, e.Digest)
 	f.Secrets = append(f.Secrets, e)
 	return s.save(f)
 }

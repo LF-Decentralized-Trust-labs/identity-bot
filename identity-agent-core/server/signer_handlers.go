@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -224,13 +225,18 @@ func (s *CoreServer) handleRedeemSignerInvite(w http.ResponseWriter, r *http.Req
 			http.StatusBadRequest)
 		return
 	}
-	inv, ok := s.assetHandler.Store.GetEmployeeInvite(token)
-	if !ok || inv.Revoked || !inv.IsSigner {
+	// Check and spend in one locked step; handed back below if the redeem fails.
+	_, rerr := s.assetHandler.Store.ReserveEmployeeInvite(token, true)
+	switch {
+	case rerr == nil:
+	case errors.Is(rerr, asset.ErrInviteNotFound):
 		http.Error(w, "invalid signer invite", http.StatusBadRequest)
 		return
-	}
-	if inv.MaxUses > 0 && inv.UseCount >= inv.MaxUses {
+	case errors.Is(rerr, asset.ErrInviteExhausted):
 		http.Error(w, "signer invite already used", http.StatusBadRequest)
+		return
+	default:
+		http.Error(w, "the invite could not be redeemed", http.StatusInternalServerError)
 		return
 	}
 	emp := asset.Employee{
@@ -255,15 +261,16 @@ func (s *CoreServer) handleRedeemSignerInvite(w http.ResponseWriter, r *http.Req
 		OOBI:                   body.OOBI,
 	})
 	if err != nil {
+		_ = s.assetHandler.Store.ReleaseEmployeeInvite(token)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	if err := s.assetHandler.Store.UpsertEmployee(emp); err != nil {
+		_ = s.assetHandler.Store.ReleaseEmployeeInvite(token)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	_ = s.assetHandler.Store.IncrementEmployeeInviteUse(token)
 
 	if acc.Ceremony {
 		writeJSON(w, map[string]interface{}{

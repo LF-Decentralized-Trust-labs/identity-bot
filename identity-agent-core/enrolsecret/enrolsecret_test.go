@@ -135,3 +135,22 @@ func TestVoidEndsOnlyThatSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Adopting the same secret twice leaves one secret, so a migration repeated
+// after a crash cannot make one token spendable twice.
+func TestAdoptingTheSameSecretTwiceKeepsOne(t *testing.T) {
+	s, _ := open(t)
+	d := Digest("legacy")
+	e := Entry{Digest: d, Expires: t0.Add(time.Hour)}
+	for i := 0; i < 2; i++ {
+		if err := s.Adopt(e, t0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.Claim("legacy", "", t0); err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	if _, err := s.Claim("legacy", "", t0); !errors.Is(err, ErrUnusable) {
+		t.Fatalf("second claim = %v; the secret was stored twice", err)
+	}
+}

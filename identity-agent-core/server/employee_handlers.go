@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -151,13 +152,18 @@ func (s *CoreServer) handleRedeemEmployeeInvite(w http.ResponseWriter, r *http.R
 		http.Error(w, "pairwise_aid required", http.StatusBadRequest)
 		return
 	}
-	inv, ok := s.assetHandler.Store.GetEmployeeInvite(token)
-	if !ok || inv.Revoked {
+	// Check and spend in one locked step; handed back below if the redeem fails.
+	inv, rerr := s.assetHandler.Store.ReserveEmployeeInvite(token, false)
+	switch {
+	case rerr == nil:
+	case errors.Is(rerr, asset.ErrInviteNotFound):
 		http.Error(w, "invalid invite", http.StatusBadRequest)
 		return
-	}
-	if inv.MaxUses > 0 && inv.UseCount >= inv.MaxUses {
+	case errors.Is(rerr, asset.ErrInviteExhausted):
 		http.Error(w, "invite exhausted", http.StatusBadRequest)
+		return
+	default:
+		http.Error(w, "the invite could not be redeemed", http.StatusInternalServerError)
 		return
 	}
 	emp := asset.Employee{
@@ -169,10 +175,10 @@ func (s *CoreServer) handleRedeemEmployeeInvite(w http.ResponseWriter, r *http.R
 		OOBI:        body.OOBI,
 	}
 	if err := s.assetHandler.Store.UpsertEmployee(emp); err != nil {
+		_ = s.assetHandler.Store.ReleaseEmployeeInvite(token)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	_ = s.assetHandler.Store.IncrementEmployeeInviteUse(token)
 	writeJSON(w, map[string]string{"status": "pending"})
 }
 
