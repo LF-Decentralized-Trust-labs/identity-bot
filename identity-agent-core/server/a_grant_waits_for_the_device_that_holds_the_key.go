@@ -65,10 +65,16 @@ type grantSpec struct {
 	About         string                   `json:"about,omitempty"`
 	Grant         string                   `json:"controller_grant,omitempty"`
 	Request       *coretypes.SignedRequest `json:"request,omitempty"`
+	// The creator's grant (with its schema) and body credential, for a request
+	// an AI agent's body made.
+	CreatorGrant       string `json:"creator_grant,omitempty"`
+	CreatorGrantSchema string `json:"creator_grant_schema,omitempty"`
+	CreatorBody        string `json:"creator_body,omitempty"`
 }
 
 func (g grantSpec) by() coretypes.Authority {
-	return coretypes.Authority{About: g.About, ControllerGrant: g.Grant, Request: g.Request}
+	return coretypes.Authority{About: g.About, ControllerGrant: g.Grant, Request: g.Request,
+		CreatorGrant: g.CreatorGrant, CreatorGrantSchema: g.CreatorGrantSchema, CreatorBody: g.CreatorBody}
 }
 
 // pendingIssuance is what waits for the device that holds the identity's key:

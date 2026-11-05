@@ -97,7 +97,8 @@ func (s *CoreServer) issueAssetCredential(
 			return "", err
 		}
 		if _, err := s.awaitRegistry(reg, grantSpec{Schema: kind.Schema.SAID, Issuer: issuer, Claims: claims, Edges: edges,
-			Holder: holder, Expiry: expiry, RequestDigest: requestDigest, About: by.About, Grant: by.ControllerGrant, Request: by.Request}); err != nil {
+			Holder: holder, Expiry: expiry, RequestDigest: requestDigest, About: by.About, Grant: by.ControllerGrant, Request: by.Request,
+			CreatorGrant: by.CreatorGrant, CreatorGrantSchema: by.CreatorGrantSchema, CreatorBody: by.CreatorBody}); err != nil {
 			return "", err
 		}
 		return "", errKeyElsewhere
@@ -134,7 +135,8 @@ func (s *CoreServer) issueAssetCredential(
 			return "", errKeyElsewhere
 		}
 		if _, err := s.awaitSignature(kind, prepared, grantSpec{Schema: kind.Schema.SAID, Issuer: issuer, Claims: claims, Edges: edges,
-			Holder: holder, Expiry: expiry, RequestDigest: requestDigest, About: by.About, Grant: by.ControllerGrant, Request: by.Request}); err != nil {
+			Holder: holder, Expiry: expiry, RequestDigest: requestDigest, About: by.About, Grant: by.ControllerGrant, Request: by.Request,
+			CreatorGrant: by.CreatorGrant, CreatorGrantSchema: by.CreatorGrantSchema, CreatorBody: by.CreatorBody}); err != nil {
 			return "", err
 		}
 		return "", errKeyElsewhere
