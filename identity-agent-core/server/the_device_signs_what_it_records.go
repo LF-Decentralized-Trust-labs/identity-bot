@@ -27,6 +27,8 @@ import (
 	"identity-agent-core/store"
 
 	keri "github.com/grapeid/keri-go"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 // signForAnotherMu makes signing for another Identity Agent one at a time on
@@ -52,9 +54,7 @@ func (s *CoreServer) handleSignForAnother(w http.ResponseWriter, r *http.Request
 	if errors.As(err, &filled) {
 		// What this device holds there, for the Identity Agent that asked to
 		// take up at once (POST /api/signing-requests/adopt there).
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusConflict)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "this place is filled", "detail": err.Error(), "held": filled.Held})
+		jsonreply.Write(w, http.StatusConflict, map[string]interface{}{"error": "this place is filled", "detail": err.Error(), "held": filled.Held})
 		return
 	}
 	if err != nil {
