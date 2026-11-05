@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"net/http"
 	"time"
 
@@ -12,6 +11,8 @@ import (
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/secureenclave"
 	"identity-agent-core/update"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 // KeyProtectionInfo is what this machine can protect a key with, and why we
@@ -244,8 +245,7 @@ func (s *CoreServer) handleSecurityEnclave(w http.ResponseWriter, r *http.Reques
 	}
 	result.SealedHardware = sealedHardwareStatus(s.attestationBinding(), s.bindingOver(), s.snpCertificates)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	jsonreply.Write(w, http.StatusOK, result)
 }
 
 // attestationBinding is what this agent asks the hardware to cover in
