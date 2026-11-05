@@ -26,7 +26,10 @@ void main() {
       test(r['name'] as String, () {
         final check = verifyEndpointRecord(
             Map<String, dynamic>.from(r['record'] as Map), keys[r['key']]!,
-            now: now);
+            now: now,
+            maxAge: r['max_age_days'] == null
+                ? null
+                : Duration(days: r['max_age_days'] as int));
         expect(check.valid, r['valid'], reason: check.reason);
         if (r['canonical'] != null) {
           expect(

@@ -35,13 +35,19 @@ verified.
    - `issued` is `YYYY-MM-DDTHH:MM:SSZ`, UTC. A record replaces another only
      when issued strictly after it; an older or equal one is refused. A record
      issued more than ten minutes ahead of the checker's clock is refused.
-   - **A record expires.** A record issued more than 90 days before the checker's
-     clock is refused (`MaxAge`), whatever its signature. The alternative, tying
-     each record to the key-log event it was signed under, was not taken: it
-     says nothing about a host that lapsed while the key log stood still, which
-     is the case that matters, and it would change the signed form. An identifier
-     that wants to stay findable signs a new record within the 90 days; a new
-     record costs one signature and replaces the old one.
+   - **A record does not expire by the clock.** A record is believed while the
+     key that signed it is the identifier's current key and while no newer record
+     has been seen. Any rotation ends it, because the checker holds the identifier's
+     verified key log and a record signed by a replaced key is refused; and an
+     older record than one already verified is refused, so a witness cannot walk
+     a reader back. An age limit was rejected as the default: it would make an
+     identifier that never moves unfindable after the limit, for a host that has
+     not lapsed. Tying each record to the key-log event it was signed under was
+     not taken either: it says nothing about a host that lapsed while the key log
+     stood still, and it would change the signed form. A verifier may still set a
+     maximum age (`VerifyNoOlderThan`, `verifyEndpointRecord(maxAge:)`); nothing
+     in this repository does, and the contract carries it as an option
+     (`max_age_days`) that a vector states when it applies.
    - `signature` is Ed25519 over the other four fields in ADR-049's form, as a
      CESR qb64 signature (code `0B`, ADR-060).
    - The signer is the key the identifier's verified key log names now, so a
@@ -145,15 +151,19 @@ d. **The agent requires the origin.** In the release after step c the default of
   it published before; a counterparty reaches its agent routes under its own
   configured prefix. Keeping the prefix needs a new record type, because the
   signed fields would change; it is left for one.
-- **Renewal.** Records expire after 90 days; the core publishes when an address
-  changes but does not yet re-sign on a schedule. Until it does, an identifier
-  that never moves must publish again within 90 days to stay findable.
+- **Renewal.** There is none to do: a record stands until the identifier
+  rotates its key or publishes a newer one (see "A record does not expire by the
+  clock"). The core publishes when an address changes and does not re-sign on a
+  schedule. What this leaves open is a host that lapses or changes hands while
+  the identifier's key log stands still and no new record is published: the old
+  record keeps pointing there. The identifier's answer is to publish a
+  withdrawal or a new record, and a reader's is the age limit above.
 
 ## Contract
 
 `identity-agent-core/endpointrecord/endpoint-record-vectors.json` holds records,
 the bytes each is signed over, whether each verifies and why not (including one
-signed by a key since rotated away from, and one past its age), the origins
+signed by a key since rotated away from, and one older than a limit a verifier sets), the origins
 that are in their one spelling and those that are not, which of two records
 replaces the other, and the strings a controller signs for a request in the
 second and third forms. `check_endpoint_record_vectors.py`, beside it, rebuilds every

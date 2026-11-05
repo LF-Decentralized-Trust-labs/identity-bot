@@ -1,5 +1,5 @@
 {
-  "about": "Signed endpoint records (package endpointrecord). A record names the one origin an identifier is reached at, and is signed by the key the identifier's verified key log names now. canonical is the bytes the Ed25519 signature is over: the record's fields other than signature as a JSON object, keys sorted, no whitespace (ADR-049's form). The signature is CESR qb64, code 0B. valid says whether the record verifies against key at now, the verifier's clock: a record issued more than 10 minutes after now, or more than 90 days before it, does not verify. next_public_key is the key the identifier's log names after a rotation. requests are the strings a controller signs for a request, the second form and the third, which names the origin: lines joined by a line feed. origins are in their one spelling or not; ordering says whether record A replaces record B. addresses are what a client is pointed at and the origin it signs for (empty when it has none).",
+  "about": "Signed endpoint records (package endpointrecord). A record names the one origin an identifier is reached at, and is signed by the key the identifier's verified key log names now. canonical is the bytes the Ed25519 signature is over: the record's fields other than signature as a JSON object, keys sorted, no whitespace (ADR-049's form). The signature is CESR qb64, code 0B. valid says whether the record verifies against key at now, the verifier's clock: a record issued more than 10 minutes after now does not verify, and one issued long before it does: a record has no age limit unless the verifier sets one, which a vector says with max_age_days. next_public_key is the key the identifier's log names after a rotation. requests are the strings a controller signs for a request, the second form and the third, which names the origin: lines joined by a line feed. origins are in their one spelling or not; ordering says whether record A replaces record B. addresses are what a client is pointed at and the origin it signs for (empty when it has none).",
   "seed_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
   "public_key": "DHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk",
   "other_public_key": "DE_QmczUfXiT3-nsJEFOyw2bVCAjKq0w2RxGW-M8vmXE",
@@ -86,16 +86,16 @@
       "valid": true
     },
     {
-      "name": "issued just inside the maximum age",
+      "name": "issued a year before the verifier",
       "record": {
         "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
-        "issued": "2026-08-06T12:01:00Z",
+        "issued": "2025-11-04T12:00:00Z",
         "origin": "https://org.example.com:443",
-        "signature": "0BBxijHXlS_CpK7NbGJoF-Y_Un2w07dh7966TPbuxAC_V05CzsXv4DTQtvNkgmYdBrDduGW14938d-KA1T0PbQUM",
+        "signature": "0BAO-8Hitw7IP7KPssRxmBgFCfKSVU0KIes8cG2aJXrS-i4pEi89J8s89eAIhbPVGoSGH45KecsgkGxSPVSQ1oEF",
         "type": "endpoint-record/1"
       },
       "key": "public_key",
-      "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2026-08-06T12:01:00Z\",\"origin\":\"https://org.example.com:443\",\"type\":\"endpoint-record/1\"}",
+      "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2025-11-04T12:00:00Z\",\"origin\":\"https://org.example.com:443\",\"type\":\"endpoint-record/1\"}",
       "valid": true
     },
     {
@@ -210,18 +210,32 @@
       "why": "future"
     },
     {
-      "name": "issued longer ago than the maximum age",
+      "name": "issued 91 days before a verifier that limits age to 90 days",
       "record": {
         "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
-        "issued": "2026-08-06T11:59:00Z",
+        "issued": "2026-08-05T12:00:00Z",
         "origin": "https://org.example.com:443",
-        "signature": "0BCgBZ3P3tvsuwtraMPqm8yx1L4aLweMP_o2bIaRA3hiPu5SU4Eua-WkGcxXSpBkA2P00oWQ_li2R5teanzHz7QJ",
+        "signature": "0BAVBsYTN9Lg78D5yMSZ6RWQTVb5I6qHPdiMTk_UL0bvklf4BKVsDmzVfd7AZVD-ov8nsuq2-w-0t61bopOsL-wP",
         "type": "endpoint-record/1"
       },
       "key": "public_key",
-      "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2026-08-06T11:59:00Z\",\"origin\":\"https://org.example.com:443\",\"type\":\"endpoint-record/1\"}",
+      "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2026-08-05T12:00:00Z\",\"origin\":\"https://org.example.com:443\",\"type\":\"endpoint-record/1\"}",
       "valid": false,
-      "why": "expired"
+      "why": "expired",
+      "max_age_days": 90
+    },
+    {
+      "name": "issued 91 days before a verifier that sets no limit",
+      "record": {
+        "aid": "EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4",
+        "issued": "2026-08-05T12:00:00Z",
+        "origin": "https://org.example.com:443",
+        "signature": "0BAVBsYTN9Lg78D5yMSZ6RWQTVb5I6qHPdiMTk_UL0bvklf4BKVsDmzVfd7AZVD-ov8nsuq2-w-0t61bopOsL-wP",
+        "type": "endpoint-record/1"
+      },
+      "key": "public_key",
+      "canonical": "{\"aid\":\"EKYLUMmNPZeEs77Zvclf0bSN5IN-mLfLpx2ySb-HDlk4\",\"issued\":\"2026-08-05T12:00:00Z\",\"origin\":\"https://org.example.com:443\",\"type\":\"endpoint-record/1\"}",
+      "valid": true
     },
     {
       "name": "an origin without its port, validly signed",
