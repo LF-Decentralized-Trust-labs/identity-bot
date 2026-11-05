@@ -982,13 +982,25 @@ func stampedClaims(claims map[string]interface{}) (json.RawMessage, error) {
 const issuanceNotProved = "no proof of issuance"
 
 // checkIssuanceProved records the "issuance_proved" check. It is true only when
-// the credential names a registry, the supplied transaction log holds the
-// issuance event of this credential in that registry, and the issuer's key log
-// (which must itself be verified, signatures included) carries a seal of
-// exactly that event. Anything less is reported as not proved and the
-// credential is never verified: a credential with no registry has no issuance
-// event to anchor, and an event the issuer never sealed is one anybody could
+// the issuer's key log, which must itself be verified (signatures included),
+// carries a seal of the credential's issuance, by one of two forms:
+//
+//   - a credential that names a registry: the supplied transaction log must hold
+//     the issuance event of this credential in that registry, and the key log
+//     must seal exactly that event;
+//   - a credential that names no registry (one that cannot be revoked): the key
+//     log must seal the credential's own identifier, which is the issuance
+//     event there is.
+//
+// Anything less is reported as not proved and the credential is never
+// verified: an event or credential the issuer never sealed is one anybody could
 // have written.
+//
+// A credential from an issuer outside this core is proved the same way, but only
+// where the caller holds that issuer's key log and, for a registry, its
+// transaction log. Fetching that log from the issuer is not built here (T-171);
+// until it is, such a credential reaches this function without the log and
+// comes out "not checked: no proof of issuance".
 func (e *Engine) checkIssuanceProved(
 	req *drivers.DriverVerifyCredentialRequest,
 	cred *keri.Credential,
@@ -998,28 +1010,28 @@ func (e *Engine) checkIssuanceProved(
 		out.Checks["issuance_proved"] = false
 		out.Errors = append(out.Errors, issuanceNotProved+": "+why)
 	}
-	if cred.Registry == "" {
-		refuse("the credential names no registry, so there is no issuance event for the issuer to have anchored")
-		return
-	}
-	issSAID := ""
-	for _, b := range req.RegistryEventsB64 {
-		raw, err := iacrypto.DecodeBase64(b)
-		if err != nil {
-			continue
+	// issSAID is the digest the issuer's seal must carry.
+	issSAID := cred.SAID
+	if cred.Registry != "" {
+		issSAID = ""
+		for _, b := range req.RegistryEventsB64 {
+			raw, err := iacrypto.DecodeBase64(b)
+			if err != nil {
+				continue
+			}
+			ev, err := keri.VerifyTELEvent(raw)
+			if err != nil {
+				continue
+			}
+			if ev.Ilk == "iss" && ev.Subject == cred.SAID && ev.Registry == cred.Registry {
+				issSAID = ev.SAID
+				break
+			}
 		}
-		ev, err := keri.VerifyTELEvent(raw)
-		if err != nil {
-			continue
+		if issSAID == "" {
+			refuse("no issuance event of this credential in registry " + cred.Registry + " is held")
+			return
 		}
-		if ev.Ilk == "iss" && ev.Subject == cred.SAID && ev.Registry == cred.Registry {
-			issSAID = ev.SAID
-			break
-		}
-	}
-	if issSAID == "" {
-		refuse("no issuance event of this credential in registry " + cred.Registry + " is held")
-		return
 	}
 	if len(req.IssuerKelEvents) == 0 {
 		refuse("the issuer's key log is not held")
