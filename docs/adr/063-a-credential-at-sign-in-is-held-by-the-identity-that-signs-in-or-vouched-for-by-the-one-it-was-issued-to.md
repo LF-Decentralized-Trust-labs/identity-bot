@@ -1,5 +1,7 @@
 # ADR-063 — A credential at sign-in is held by the identity that signs in, or vouched for by the one it was issued to
 
+> A person can use a credential issued to another of their identities at sign-in by signing, with that identity's key, a statement tied to this one sign-in; the site refuses every credential that is neither issued to the signer nor so vouched for.
+
 **Status:** Proposed
 **Date:** 2026-11-05
 **Amends:** ADR-021 (Sign in with Identity Agent — login protocol)
@@ -16,7 +18,7 @@ else's credential passes.
 
 Per ADR-021 the identity that signs a sign-in is a **per-site pairwise identity**
 (`getOrCreateRelationship`), never the person's root. So the gate now asks that
-the issuee be the identity signing in (change on `origin/credential-gate-genuine`).
+the issuee be the identity signing in (the rule below; main does not yet check this until that change lands).
 That is correct, and it fails closed for every credential that arrives from
 outside:
 
@@ -47,12 +49,20 @@ outside:
 in every other case.**
 
 1. **The issuee is the signer.** The credential's issuee equals the identity
-   (`i`) that signed this assertion. Nothing else is needed. This is today's rule.
+   (`i`) that signed this assertion. Nothing else is needed. This is the rule;
+   an implementation that does not yet check the issuee against the signer does
+   not yet conform to it.
 2. **The issuee vouches for the signer, for this sign-in only.** The assertion
    carries a **holder binding** (`HB1`): a statement signed by the issuee's
    **current** key, naming this challenge, this site and the identity signing in,
    together with the issuee's key log so the site can check the key is the
    issuee's.
+
+**No fallback.** The gate never accepts a credential on the strength of a status
+the presenter declares, or because no driver or no credential bytes are available
+to check it. If the credential cannot be read and verified, the gate refuses.
+This ADR requires any such fallback to be gone; "refuses in every other case"
+is only true with it removed.
 
 The issuee is read from the credential's own attribute block (`a.i`, what the
 engine parses as `Recipient`), never from the record's `holder_aid` field or
@@ -63,7 +73,9 @@ anything the presenter declares.
 The binding follows the assertion's canonical form (ADR-021, "Canonical
 serialization"): compact JSON, fixed field order, NFC-normalized strings,
 integer-second RFC3339 UTC times. The signed bytes are the UTF-8 of this body,
-excluding `d` and `sig`:
+including `d` and excluding `sig`, as ADR-021 signs the assertion
+(the signature covers the body without `sig`; the SAID covers the body without
+`d` and `sig`):
 
 ```
 {"v":"HB1","t":"holder-binding","i":"<issuee AID>","cred":"<credential SAID>",
@@ -71,9 +83,10 @@ excluding `d` and `sig`:
  "audience":"<RP origin>","nonce":"<challenge nonce>","dt":"<RFC3339 UTC>"}
 ```
 
-(Shown wrapped; the real body has no whitespace.) Every field is required; a body
-with a missing, extra or reordered field is refused. `d` is the Blake3-256 SAID of
-the body without `d` and `sig`; `sig` is the issuee key's Ed25519 signature over
+(Shown wrapped; the real body has no whitespace; `d` sits where ADR-021's
+assertion puts it, and the pinned vector fixes the position.) Every field is
+required; a binding with a missing or extra field is refused. `d` is the Blake3-256 SAID of
+the body without `d` and `sig`, computed first and then placed in the body; `sig` is the issuee key's Ed25519 signature over
 the same UTF-8 bytes, written as the one accepted CESR `0B…` string (ADR-060: one
 spelling per signature, so the same signature cannot be counted or recorded twice
 under two strings). The key is a qb64 `D…` Ed25519 key, again with the one
@@ -88,6 +101,16 @@ Why each field is there:
 | `site_aid`, `audience` | It cannot be replayed at another site (ADR-021 already makes `site_aid` the thing another site cannot copy). |
 | `nonce` | It is for this challenge: a captured binding does nothing on a later sign-in. |
 | `dt` | Freshness, same ±300 s window as the assertion. |
+
+**How the bytes survive the trip.** `presented_acdcs` is a list of generic JSON
+values, and re-marshalling a nested object sorts its keys, so the field order of
+a binding sent as an object would be lost. The verifier therefore never signs or
+checks the bytes it was handed: it reads the named fields and **rebuilds the
+canonical body** in the fixed order above (`canonicalHolderBindingBody`, in Go
+and TypeScript, byte-identical like ADR-021's canonicalizers). Order and
+whitespace on the wire are irrelevant; unknown or missing fields, or a value that
+is not already in its canonical form (NFC, integer-second UTC time), are
+refused, so there is one body per binding.
 
 The binding travels inside the assertion's `presented_acdcs` entry, so the
 pairwise signature on the assertion (which covers `presented_acdcs`) also covers
@@ -118,8 +141,8 @@ the verify route that exists for other callers.
 
 A binding is valid for one `(nonce, site_aid, audience, signer, cred)`. The site
 callback settles a challenge once (`challengeStatus` in `login_handlers.go`); the
-binding adds nothing to store, but the implementation must confirm a settled
-challenge refuses a second assertion, because replay protection rests on it. A binding captured by anyone, including a malicious site that received it,
+binding adds nothing to store, but the callback already refuses a challenge that has been answered once, and
+replay protection rests on that. A binding captured by anyone, including a malicious site that received it,
 is dead anywhere else and on any later sign-in, because the nonce and site differ.
 The one thing a binding does not stop is the site that received it **showing it to
 a third party as proof that the two identities are one person** (see Privacy).
@@ -143,6 +166,12 @@ invalidate the credential. The key in force is the last one in `holder_kel`.
 - A log whose end shows no key in force (abandoned, empty next-digest) gives no
   binding: refuse.
 - Multi-key issuees are refused, as ADR-021 already refuses them for `p_kel`.
+- **A delegated issuee is refused.** `KeyFromKeyLog` refuses a delegated
+  inception (`dip`), and path 2 keeps that. The log of a delegated identifier
+  names its delegator, often the person's root, which ADR-036 forbids revealing;
+  a carried log would hand the site the very identifier the pairwise scheme hides.
+  The credential can still pass by path 1, or by re-issue to a non-delegated
+  identity.
 
 ### A revoked or pairwise identity
 
@@ -185,6 +214,12 @@ What this means depends on **which identity the issuee is**:
   issuee unless the person explicitly agrees, to this site, in words that say what
   it gives away. Where possible the person should ask the issuer to re-issue to
   the site's pairwise identity, which needs no binding and reveals nothing.
+- **Downstream parties get the link too.** The OIDC adapter (`oidc/vp.go`)
+  forwards `presented_acdcs`, bindings included, into the `vc` claim of the
+  token it issues, so any party the site passes that token to receives the
+  binding and the issuee's key log, not only the site. The consent line below
+  covers them as well; a site that does not want to be a conduit must not pass
+  the token on whole.
 - **Deniability:** the signed binding is transferable proof of the link, not a
   claim only the site can verify. The site, or anyone it shows it to, can prove
   the link later. That loss is real and is the reason the consent below is not
@@ -197,10 +232,20 @@ the same person, and can prove it to others."* The person approves or declines
 per credential; declining sends the sign-in without it. A root issuee gets a
 separate, stronger line and starts declined. The consent preview
 (`CredentialRequestPreview`) gains `needs_link` so the screen knows before the
-person agrees. This is the Experience-OS "tell the truth about what is happening"
-gate, and it means the person is never linked silently.
+person agrees. The person is never linked silently.
 
 ### Alternatives considered
+
+**A W3C Verifiable Presentation, or an IPEX exchange signed by the issuee.** Path
+2 is in substance exactly that: a presentation of the credential, signed by the
+holder, bound by a challenge (the `nonce`) and a domain (`audience`, `site_aid`).
+A standard VP proof would carry the same facts; we use a custom binding because
+the sign-in already has a canonical body, SAID and golden-vector scheme (ADR-021)
+that Go and TypeScript share, and a binding in that form needs no JSON-LD or
+second signature suite. Mapping: `nonce` = VP `challenge`, `audience` = VP
+`domain`, `i` = holder, `cred` = the presented credential; an IPEX grant signed by
+the issuee carries the same statement, and an implementation may later accept one
+as an equivalent form.
 
 **Always require issuance to the site's pairwise identity.** Reveals nothing and
 needs no new protocol, but it only works for issuers who issue after the sign-in
@@ -248,7 +293,10 @@ not computed.
 | V6 | `signer` differs from the assertion's `i` | refuse |
 | V7 | `cred` differs from the credential presented | refuse |
 | V8 | `dt` outside ±300 s | refuse |
-| V9 | Field missing, extra, or reordered; `d` does not re-derive | refuse |
+| V9 | Field missing or extra; value not canonical; `d` does not re-derive | refuse |
+| V9b | Same fields in another order on the wire (object re-marshalled) | accept: the verifier rebuilds the body |
+| V9c | Delegated issuee (`dip` inception in `holder_kel`) | refuse |
+| V9d | Declared status, no driver or no credential bytes | refuse |
 | V10 | Signed by a key not in force in `holder_kel`; or log whose inception does not derive the issuee | refuse |
 | V11 | Issuee rotated, signed by the new key, log shows the rotation, issuee has witnesses | accept |
 | V12 | Same rotation for an issuee with no witnesses | refuse (ADR-021) |
@@ -257,11 +305,3 @@ not computed.
 | V15 | Signature or key in a non-canonical spelling (ADR-060 cases) | refuse |
 | V16 | Binding replayed on a later sign-in of the same site | refuse (nonce) |
 | V17 | A binding from sign-in A attached to an assertion by a different pairwise identity | refuse (`signer`) |
-
-## What this asks Rob to decide
-
-1. Accept path 2 (the link is shown to the site, with the person's consent each
-   time) rather than only "issue to the site's identity".
-2. A root issuee: refuse by default, allow only on explicit per-site consent.
-3. Accept the stated limit on rotated issuees with witnesses until witnesses are
-   queried for their newest event.
