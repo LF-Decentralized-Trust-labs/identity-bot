@@ -340,10 +340,16 @@ func TestACredentialIsIssuedAndVerifies(t *testing.T) {
 		t.Fatal("a credential issued into a registry has no issuance event, so it could never be revoked")
 	}
 
+	tel, err := e.CredentialLog("issuer", reg.RegistrySaid, issued.AcdcSaid)
+	if err != nil {
+		t.Fatal(err)
+	}
 	verified, err := e.VerifyCredential(&drivers.DriverVerifyCredentialRequest{
 		AcdcJson:           issued.AcdcJsonB64,
 		HolderAid:          holder.AID,
 		TrustedSchemaSaids: []string{schema},
+		IssuerKelEvents:    signedLogOf(t, e, "issuer"),
+		RegistryEventsB64:  tel,
 	})
 	if err != nil {
 		t.Fatal(err)

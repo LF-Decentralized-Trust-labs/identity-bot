@@ -109,10 +109,27 @@ func (s *CoreServer) verifyCredentialHere(req *drivers.DriverVerifyCredentialReq
 		return verifyReply{}, errCredentialUnreadable
 	}
 	revocation := s.localRevocationState(cred)
-	req.RegistryEventsB64 = revocation.log
+	// The caller may supply the credential's log as kept here (its issuer's
+	// events) for the proof of issuance. It is used only where this agent holds
+	// no registry state of its own, and only to learn of a revocation: a kept
+	// log may be partial, and nothing here proves it holds every event its
+	// issuer sealed, so it never makes a credential read "not revoked", and
+	// never overrides what this agent's own record says.
+	supplied := req.RegistryEventsB64
+	if revocation.status == revocationNoRegistryState && len(supplied) > 0 {
+		req.RegistryEventsB64 = supplied
+	} else {
+		req.RegistryEventsB64 = revocation.log
+	}
 	res, err := s.KeriDriver.VerifyCredential(req)
 	if err != nil {
 		return verifyReply{}, err
+	}
+	if revocation.status == revocationNoRegistryState && len(supplied) > 0 && res != nil {
+		if notRevoked, ok := res.Checks["not_revoked"].(bool); ok && !notRevoked {
+			revocation = revocationState{log: supplied, status: revocationRevoked,
+				reason: "the credential has been revoked by its issuer"}
+		}
 	}
 	return revocation.applyTo(res), nil
 }
