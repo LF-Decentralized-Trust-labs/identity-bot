@@ -78,3 +78,15 @@ func TestACredentialIssuedByThisAgentsOwnOrganisationPassesTheCredentialGate(t *
 		t.Fatalf("a credential issued by the site's own organisation was refused: %s", reason)
 	}
 }
+
+// The gate lets a credential in only with proof its issuer issued it.
+func TestAForgeryNamingAKnownIssuerDoesNotPassTheCredentialGate(t *testing.T) {
+	for name, how := range forgeries {
+		for _, held := range []issuerLogHeld{logHeldAsContact, logHeldAsOwn} {
+			w := aGateWorldWhere(t, true, held, how)
+			if ok, _ := w.gate(t); ok {
+				t.Fatalf("%s: a forged credential naming a known issuer passed the gate", name)
+			}
+		}
+	}
+}

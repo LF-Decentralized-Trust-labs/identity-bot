@@ -43,7 +43,22 @@ func aGateWorldIssuingTo(t *testing.T, issueeIsSigner, agentHoldsIssuerLog bool)
 	return aGateWorldHolding(t, issueeIsSigner, held)
 }
 
+// How the credential the agent holds came to be.
+type howIssued int
+
+const (
+	issuedByTheIssuer       howIssued = iota // issued into the issuer's registry and anchored in its log
+	forgedWithNoRegistry                     // built by anybody, naming the issuer, with no registry
+	forgedInIssuersRegistry                  // names the issuer's registry; an issuance event the issuer never anchored
+	forgedWithNoLogHeld                      // names the issuer's registry; no transaction log is held
+)
+
 func aGateWorldHolding(t *testing.T, issueeIsSigner bool, held issuerLogHeld) *aGateWorld {
+	t.Helper()
+	return aGateWorldWhere(t, issueeIsSigner, held, issuedByTheIssuer)
+}
+
+func aGateWorldWhere(t *testing.T, issueeIsSigner bool, held issuerLogHeld, how howIssued) *aGateWorld {
 	t.Helper()
 	s := witnessWithSeed(t, 1)
 	s.KeriDriver = keriengine.New()
@@ -81,6 +96,56 @@ func aGateWorldHolding(t *testing.T, issueeIsSigner bool, held issuerLogHeld) *a
 		map[string]interface{}{"role": "engineer"}, schema, issuee, nil, reg.RegistrySaid)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if how != issuedByTheIssuer {
+		// Anybody can build a credential naming any issuer. The issuer's real
+		// credential above stays unused: its log is the only thing it leaves.
+		registry := ""
+		if how != forgedWithNoRegistry {
+			registry = reg.RegistrySaid
+		}
+		acdc, err := keri.BuildCredential(keri.CredentialInput{
+			SchemaSAID: schema, Issuer: issuer.AID, Recipient: issuee, Registry: registry,
+			Data: json.RawMessage(`{"role":"engineer","dt":"2026-11-05T00:00:00.000000+00:00"}`),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		cred, err := keri.VerifyCredential(acdc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if how == forgedInIssuersRegistry {
+			iss, err := keri.BuildIssuance(keri.IssuanceInput{CredentialSAID: cred.SAID, Registry: registry, DT: "2026-11-05T00:00:00.000000+00:00"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ev, err := keri.VerifyTELEvent(iss)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.DataStore.AppendCredentialTELEvent(store.CredentialTELEvent{
+				RegistrySAID: registry, AcdcSAID: cred.SAID, Seq: 0, SAID: ev.SAID, Kind: "iss",
+				RawB64: base64.StdEncoding.EncodeToString(iss),
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		issued.AcdcSaid, issued.AcdcJsonB64 = cred.SAID, base64.StdEncoding.EncodeToString(acdc)
+	} else {
+		// The issuer's transaction log for the credential, as this core keeps it.
+		tel, err := issuerEngine.CredentialLog("issuer", reg.RegistrySaid, issued.AcdcSaid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, raw := range tel {
+			ev, _ := keri.VerifyTELEvent(mustDecode(t, raw))
+			if err := s.DataStore.AppendCredentialTELEvent(store.CredentialTELEvent{
+				RegistrySAID: reg.RegistrySaid, AcdcSAID: issued.AcdcSaid, Seq: i, SAID: ev.SAID, Kind: ev.Ilk, RawB64: raw,
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 	if held != logNotHeld {
 		kel, err := issuerEngine.GetKel("issuer")
@@ -165,4 +230,13 @@ func newKeyPair(t *testing.T) (pub, next string) {
 	}
 	gateKeys.Store(pub, a)
 	return pub, next
+}
+
+func mustDecode(t *testing.T, b64 string) []byte {
+	t.Helper()
+	raw, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
