@@ -153,6 +153,30 @@ func signTip(rec *recordIdentityRecord, seed []byte) error {
 // is gone. A second one is never made in its place.
 var errRecordGone = errors.New("this identity approved a record identity whose record here is gone; a second one is not made")
 
+// witnessesAfter is the witness set an establishment event leaves in force,
+// given the set before it: an inception (or delegated inception) names the set
+// outright in b, and a rotation (or delegated rotation) cuts those in br and
+// adds those in ba. ok is false for an event that does not touch the set.
+func witnessesAfter(current []string, ev map[string]interface{}) (next []string, ok bool) {
+	switch ev["t"] {
+	case "icp", "dip":
+		return stringsOf(ev["b"]), true
+	case "rot", "drt":
+		cut := map[string]bool{}
+		for _, w := range stringsOf(ev["br"]) {
+			cut[w] = true
+		}
+		var kept []string
+		for _, w := range current {
+			if !cut[w] {
+				kept = append(kept, w)
+			}
+		}
+		return append(kept, stringsOf(ev["ba"])...), true
+	}
+	return current, false
+}
+
 // approvedRecordIdentities are the record identities this identity's key log
 // approves. The record identity's keys are derived from the first place in the
 // record pool, always the same one, so an attempt that failed never moves it.
@@ -179,21 +203,8 @@ func (s *CoreServer) approvedRecordIdentities(owner string) ([]string, error) {
 			continue
 		}
 		switch parsed["t"] {
-		case "icp":
-			current = stringsOf(parsed["b"])
-			configs = append(configs, config{current, thresholdOf(parsed["bt"])})
-		case "rot":
-			cut := map[string]bool{}
-			for _, w := range stringsOf(parsed["br"]) {
-				cut[w] = true
-			}
-			var next []string
-			for _, w := range current {
-				if !cut[w] {
-					next = append(next, w)
-				}
-			}
-			current = append(next, stringsOf(parsed["ba"])...)
+		case "icp", "rot":
+			current, _ = witnessesAfter(current, parsed)
 			configs = append(configs, config{current, thresholdOf(parsed["bt"])})
 		}
 		seals, _ := parsed["a"].([]interface{})
