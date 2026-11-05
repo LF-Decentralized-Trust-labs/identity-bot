@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 // Letting a person reach their own agent from a browser.
@@ -313,8 +315,7 @@ func (s *CoreServer) handleSessionChallenge(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, "could not start a login", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	jsonreply.Write(w, http.StatusOK, map[string]any{
 		"challenge_id": id,
 		"code":         code,
 		"expires_at":   expires.Format(time.RFC3339),
@@ -346,8 +347,7 @@ func (s *CoreServer) handleSessionGrant(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	log.Printf("[session] a browser session was granted by the owner")
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"granted": true})
+	jsonreply.Write(w, http.StatusOK, map[string]any{"granted": true})
 }
 
 // handleSessionClaim exchanges the browser's secret for its session.
@@ -365,16 +365,13 @@ func (s *CoreServer) handleSessionClaim(w http.ResponseWriter, r *http.Request) 
 		if err == errSessionNotGranted {
 			// Distinguished so a browser can keep waiting. Collapsing it into a
 			// failure would make every poll look like a rejection.
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusAccepted)
-			json.NewEncoder(w).Encode(map[string]any{"granted": false})
+			jsonreply.Write(w, http.StatusAccepted, map[string]any{"granted": false})
 			return
 		}
 		writeError(w, http.StatusForbidden, "could not claim", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	jsonreply.Write(w, http.StatusOK, map[string]any{
 		"granted":    true,
 		"token":      token,
 		"expires_at": expires.Format(time.RFC3339),
@@ -393,6 +390,5 @@ func (s *CoreServer) handleSessionEnd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ended := s.BrowserSessions.revoke(token)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"ended": ended})
+	jsonreply.Write(w, http.StatusOK, map[string]any{"ended": ended})
 }
