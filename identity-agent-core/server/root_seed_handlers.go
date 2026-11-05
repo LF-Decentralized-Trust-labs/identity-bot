@@ -9,6 +9,8 @@ import (
 
 	"identity-agent-core/buildmode"
 	"identity-agent-core/secureenclave"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 // rootKeyMayLiveHere decides whether a root key may be stored on this machine,
@@ -221,9 +223,7 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "failed to record where this seed came from", http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]any{"status": "stored"})
+	jsonreply.Write(w, http.StatusCreated, map[string]any{"status": "stored"})
 }
 
 // handleRootSeedStatus reports whether a root seed is established (never the
