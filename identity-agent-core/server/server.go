@@ -2673,16 +2673,7 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 	if acdcBytes, err := base64.StdEncoding.DecodeString(req.AcdcJson); err == nil {
 		if err2 := json.Unmarshal(acdcBytes, &acdcBody); err2 == nil {
 			if issuerAid, ok := acdcBody["i"].(string); ok && issuerAid != "" {
-				// Try contact KEL first (cross-instance: issuer is a remote contact).
-				if kelRecord, err3 := s.DataStore.GetContactKEL(issuerAid); err3 == nil && kelRecord != nil && kelRecord.KelVerified {
-					issuerKelEvents = unwrapEventJSON(kelRecord.KEL)
-				}
-				// Fall back to own KEL (self-issued: issuer is this instance).
-				if issuerKelEvents == nil {
-					if ownEvents, err3 := s.DataStore.GetEvents(issuerAid); err3 == nil && len(ownEvents) > 0 {
-						issuerKelEvents = eventRecordsToKEDs(ownEvents)
-					}
-				}
+				issuerKelEvents = s.issuerLogForVerification(issuerAid)
 			}
 		}
 	}
@@ -2718,7 +2709,12 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	jsonreply.Write(w, http.StatusOK, result)
+	reply := struct {
+		*drivers.DriverVerifyCredentialResponse
+		IssuerStatus string `json:"issuer_status"`
+	}{result, issuerVerdict(result, issuerKelEvents != nil)}
+
+	jsonreply.Write(w, http.StatusOK, reply)
 }
 
 // handleVerifyCredentialChain accepts a SAID or ACDC JSON, verifies the credential,
@@ -2759,7 +2755,10 @@ func (s *CoreServer) handleVerifyCredentialChain(w http.ResponseWriter, r *http.
 		Checks     map[string]interface{} `json:"checks"`
 		Errors     []string               `json:"errors"`
 		Valid      bool                   `json:"valid"`
-		EdgeLabel  string                 `json:"edge_label,omitempty"` // label used in parent's edges block
+		// IssuerStatus is "checked", or "not checked: why" when the issuer's
+		// key log is not held; such a step is never valid.
+		IssuerStatus string `json:"issuer_status,omitempty"`
+		EdgeLabel    string `json:"edge_label,omitempty"` // label used in parent's edges block
 	}
 
 	var chain []ChainStep
@@ -2779,14 +2778,7 @@ func (s *CoreServer) handleVerifyCredentialChain(w http.ResponseWriter, r *http.
 		if acdcBody != nil {
 			if aid, ok := acdcBody["i"].(string); ok {
 				issuerAid = aid
-				if kelRecord, err := s.DataStore.GetContactKEL(aid); err == nil && kelRecord != nil && kelRecord.KelVerified {
-					issuerKelEvents = unwrapEventJSON(kelRecord.KEL)
-				}
-				if issuerKelEvents == nil {
-					if ownEvents, err := s.DataStore.GetEvents(aid); err == nil && len(ownEvents) > 0 {
-						issuerKelEvents = eventRecordsToKEDs(ownEvents)
-					}
-				}
+				issuerKelEvents = s.issuerLogForVerification(aid)
 				if issuerKelEvents == nil {
 					warnings = append(warnings, "No KEL found for issuer "+aid+"; issuer checks skipped")
 				}
@@ -2813,6 +2805,9 @@ func (s *CoreServer) handleVerifyCredentialChain(w http.ResponseWriter, r *http.
 			step.Errors = append(step.Errors, err.Error())
 			allErrors = append(allErrors, err.Error())
 		} else {
+			if issuerAid != "" {
+				step.IssuerStatus = issuerVerdict(result, issuerKelEvents != nil)
+			}
 			step.Valid = result.Verified
 			step.Checks = result.Checks
 			step.Errors = result.Errors
@@ -4939,25 +4934,6 @@ func oobiBase(oobiURL string) string {
 		return oobiURL[:idx]
 	}
 	return oobiURL
-}
-
-// unwrapEventJSON converts EventRecord-style dicts (with an "event_json" field containing a
-// JSON-encoded KED) to raw KED dicts. Events that are already raw KEDs are passed through unchanged.
-// This is needed because the OOBI endpoint serves EventRecord structs, so contact_kels stores
-// event_json-wrapped records, while the credential-verify path expects raw KED dicts.
-func unwrapEventJSON(events []map[string]interface{}) []map[string]interface{} {
-	out := make([]map[string]interface{}, 0, len(events))
-	for _, ev := range events {
-		if ejson, ok := ev["event_json"].(string); ok {
-			var ked map[string]interface{}
-			if err := json.Unmarshal([]byte(ejson), &ked); err == nil {
-				out = append(out, ked)
-				continue
-			}
-		}
-		out = append(out, ev)
-	}
-	return out
 }
 
 // eventRecordsToKEDs converts store.EventRecord structs to raw KED dicts by parsing EventJSON.
