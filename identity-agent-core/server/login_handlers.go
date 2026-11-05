@@ -248,8 +248,9 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 	// that person works here — and by varying the policy, where the credential
 	// and score thresholds sit. None of that requires being able to sign in.
 	//
-	// The organisation still needs the answer, so it goes into the challenge
-	// status the org's own app reads, and only a uniform refusal leaves here.
+	// The reason is kept in the challenge status, which the site's own sign-in
+	// page can read; only a uniform refusal leaves here. The owner is not shown
+	// it: a gate the core cannot check is refused when the policy is saved.
 	if allowed, reason := s.authorizeAssetAccess(r.Context(), bundle.SiteAID, res.PairwiseAID, a.PresentedACDCs); !allowed {
 		s.setChallengeStatus(token, map[string]interface{}{
 			"status": "denied",
@@ -367,14 +368,12 @@ func (s *CoreServer) authorizeAssetAccess(ctx context.Context, siteAID, pairwise
 				return false, reason
 			}
 		}
-		// Score and badge gates. The core has no score or badge step, so a
-		// policy that sets one cannot be satisfied: refuse and name the gate,
-		// never pass it silently.
-		if a.Policy.RequiredOFAScore > 0 {
-			return false, "minimum score gate is not available yet"
-		}
-		if a.Policy.RequiredBadge != "" {
-			return false, "badge gate is not available yet"
+		// Score, badge and assurance-level gates. The core has no step that
+		// checks any of them, so a policy that sets one cannot be satisfied:
+		// refuse and name the gate, never pass it silently. (Saving such a
+		// policy is refused too, so this only meets one stored earlier.)
+		if g := a.Policy.UnsupportedGate(); g != "" {
+			return false, g
 		}
 		return true, ""
 	}

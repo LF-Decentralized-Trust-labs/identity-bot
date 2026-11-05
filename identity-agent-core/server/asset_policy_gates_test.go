@@ -73,3 +73,23 @@ func TestEmployeesMembershipGate(t *testing.T) {
 		t.Fatal("non-employee admitted")
 	}
 }
+
+func TestAALGateRefusesAndNamesItself(t *testing.T) {
+	s := gateServer(t, asset.EnrollmentPolicy{Mode: asset.EnrollmentOpen, RequiredAAL: 2})
+	ok, r := s.authorizeAssetAccess(nil, "ESite", "Ex", nil)
+	if ok || !strings.Contains(r, "assurance level gate is not available") {
+		t.Fatalf("got %v %q", ok, r)
+	}
+}
+
+func TestNegativeScoreAndAALStillRefuse(t *testing.T) {
+	for _, p := range []asset.EnrollmentPolicy{
+		{Mode: asset.EnrollmentOpen, RequiredOFAScore: -1},
+		{Mode: asset.EnrollmentOpen, RequiredAAL: -1},
+	} {
+		s := gateServer(t, p)
+		if ok, _ := s.authorizeAssetAccess(nil, "ESite", "Ex", nil); ok {
+			t.Fatalf("admitted %+v", p)
+		}
+	}
+}

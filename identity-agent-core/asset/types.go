@@ -15,9 +15,10 @@ const (
 )
 
 // EnrollmentPolicy is stored in full by OSS core.
-// required_aal is enforced here (NIST 800-63B level 1/2/3).
-// required_badge / required_ofa_score are stored and returned
-// but enforcement is handled by the commercial layer on top.
+// The core has no assurance-level, badge or score step, so required_aal,
+// required_badge and required_ofa_score cannot be checked here. A policy that
+// sets any of them is refused when it is saved (see UnsupportedGate), and a
+// sign-in to an asset that already carries one is refused too, never admitted.
 type EnrollmentPolicy struct {
 	Mode EnrollmentMode `json:"mode"`
 	// MembershipSource selects which roster the membership gate consults when
@@ -37,6 +38,28 @@ type EnrollmentPolicy struct {
 	// that issuer AID (e.g. the org's own AID → an employee credential).
 	RequiredCredSchema string `json:"required_cred_schema"` // schema SAID; "" = no credential required
 	RequiredCredIssuer string `json:"required_cred_issuer"` // issuer AID; "" = any issuer
+}
+
+// Reasons a gate the core cannot check is named, at save time and at sign-in.
+const (
+	GateScoreUnavailable = "minimum score gate is not available yet"
+	GateBadgeUnavailable = "badge gate is not available yet"
+	GateAALUnavailable   = "assurance level gate is not available yet"
+)
+
+// UnsupportedGate returns the reason for the first gate set in the policy that
+// the core has no way to check, or "" if there is none. A negative score or AAL
+// counts as set: only zero means "not required".
+func (p EnrollmentPolicy) UnsupportedGate() string {
+	switch {
+	case p.RequiredOFAScore != 0:
+		return GateScoreUnavailable
+	case p.RequiredBadge != "":
+		return GateBadgeUnavailable
+	case p.RequiredAAL != 0:
+		return GateAALUnavailable
+	}
+	return ""
 }
 
 type Asset struct {
