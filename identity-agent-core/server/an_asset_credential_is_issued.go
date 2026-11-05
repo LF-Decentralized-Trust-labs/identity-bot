@@ -7,12 +7,17 @@ import (
 	"time"
 
 	"identity-agent-core/asset"
+	"identity-agent-core/authorisation"
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/schemas"
 	"identity-agent-core/store"
 )
+
+// errNoCreatorNamed refuses a request an AI agent's body made that does not name
+// the creator's grant, its schema and its body credential.
+var errNoCreatorNamed = errors.New("a request an AI agent's body made must name its creator's grant, the grant's schema and the creator's body credential")
 
 // issueAssetCredential issues one credential built from the asset template —
 // a grant, or a body binding — from the owner's registry to an asset, and does
@@ -34,6 +39,14 @@ func (s *CoreServer) issueAssetCredential(
 	identity, err := s.DataStore.GetIdentity()
 	if err != nil || identity == nil {
 		return "", fmt.Errorf("no owner identity")
+	}
+	// A request an AI agent's body made rests on its creator's grant and body
+	// credential. Refused before anything is prepared or kept, on every path:
+	// where the grant is not prepared first it would otherwise be issued and
+	// then withdrawn.
+	if by.Request != nil && by.Request.Kind == authorisation.KindAIAgentBody &&
+		(by.CreatorGrant == "" || by.CreatorGrantSchema == "" || by.CreatorBody == "") {
+		return "", errNoCreatorNamed
 	}
 	// Issuing as the identity writes into its key log, which only the holder
 	// of its key may sign. Where that is another device nothing is written
