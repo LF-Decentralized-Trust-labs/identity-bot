@@ -233,6 +233,14 @@ class AskingToActForAnIdentity {
   /// reason it fails, and a caller offered a boolean will eventually treat one
   /// of them as good enough.
   Future<String> confirmThisIsReally(
+      String agentAid, String agentOrigin) async =>
+      (await confirmThisIsReallyAndLearnItsWitnesses(agentAid, agentOrigin)).key;
+
+  /// [confirmThisIsReally], and also the witnesses the verified key log names,
+  /// with the address this computer's own core holds for each it can place.
+  /// They are leads for where to ask, never facts: whatever a witness says is
+  /// verified by the caller.
+  Future<VerifiedIdentity> confirmThisIsReallyAndLearnItsWitnesses(
       String agentAid, String agentOrigin) async {
     final res = await _plain.post(
       Uri.parse('$_localCore/api/verify/identity-elsewhere'),
@@ -259,8 +267,35 @@ class AskingToActForAnIdentity {
       throw Exception('the address $agentOrigin answers for $confirmed, not '
           'for $agentAid');
     }
-    return (body['public_key'] ?? '').toString();
+    return VerifiedIdentity(
+      key: (body['public_key'] ?? '').toString(),
+      witnesses: _witnessesIn(body['witnesses']),
+    );
   }
+
+  /// The witnesses this computer's core knows an identity it has met uses: the
+  /// ones its verified key log names (read from the log the core holds), each
+  /// with the address the core holds for it. Empty when the core holds no
+  /// verified log for the identity, or cannot be asked.
+  Future<List<NamedWitness>> witnessesTheCoreKnowsFor(String aid) async {
+    try {
+      final res = await _plain.get(Uri.parse(
+          '$_localCore/api/contacts/${Uri.encodeComponent(aid)}/witnesses'));
+      if (res.statusCode != 200) return const [];
+      final body = jsonDecode(res.body);
+      return _witnessesIn(body is Map ? body['witnesses'] : null);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  static List<NamedWitness> _witnessesIn(Object? raw) => [
+        if (raw is List)
+          for (final w in raw)
+            if (w is Map && w['key'] is String)
+              NamedWitness(
+                  key: w['key'] as String, url: (w['url'] ?? '').toString()),
+      ];
 
   /// Whether the core beside this app will actually sign for it.
   ///
@@ -353,4 +388,23 @@ class WhatThisMachineWasTold {
   final DateTime? yourAuthorisationEnds;
 
   bool get theyAreKeepingIt => yourGrade == 'enrolled';
+}
+
+/// What this computer's core established about an identity from its key log.
+class VerifiedIdentity {
+  const VerifiedIdentity({required this.key, this.witnesses = const []});
+
+  /// The public key the verified log puts in force.
+  final String key;
+
+  /// The witnesses that log names.
+  final List<NamedWitness> witnesses;
+}
+
+/// A witness a verified key log names. [url] is the address this computer's
+/// core holds for it, empty when it holds none.
+class NamedWitness {
+  const NamedWitness({required this.key, this.url = ''});
+  final String key;
+  final String url;
 }

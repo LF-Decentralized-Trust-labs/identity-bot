@@ -56,7 +56,8 @@ class FindingAnAgentThatMoved {
     this.thing = 'organisation',
     EndpointRecordSource? records,
     NewestRecordHeld? held,
-  })  : _records = records ?? WitnessesRememberedFor(client: client),
+  })  : _givenRecords = records,
+        _client = client,
         _held = held ?? NewestRecordInPreferences(),
         _asking = asking ?? AskingToActForAnIdentity(client: client),
         _ownsAsking = asking == null;
@@ -64,9 +65,19 @@ class FindingAnAgentThatMoved {
   final AskingToActForAnIdentity _asking;
   final bool _ownsAsking;
 
-  /// Where signed endpoint records are read from. Without one nothing can be
-  /// proven, so no address is ever accepted.
-  final EndpointRecordSource? _records;
+  /// Where signed endpoint records are read from: the one given, or every lead
+  /// this computer has for the organisation's witnesses (see
+  /// [WitnessesRememberedFor]). Nothing is accepted without a signed record.
+  final EndpointRecordSource? _givenRecords;
+  final http.Client? _client;
+  late final EndpointRecordSource? _records = _givenRecords ??
+      WitnessesRememberedFor(
+        client: _client,
+        coreKnows: (aid) async => [
+          for (final w in await _asking.witnessesTheCoreKnowsFor(aid))
+            if (w.url.isNotEmpty) w.url
+        ],
+      );
 
   /// The newest record accepted so far for the identifier.
   final NewestRecordHeld _held;
@@ -119,16 +130,20 @@ class FindingAnAgentThatMoved {
         throw StateError('Something answers at that address, but it is not an '
             'Identity Agent.');
     }
-    final String key;
+    final VerifiedIdentity proven;
     try {
-      key = await _asking.confirmThisIsReally(agentAid, at);
+      proven = await _asking.confirmThisIsReallyAndLearnItsWitnesses(
+          agentAid, at);
     } catch (e) {
       debugPrint('[controller] $at did not prove it is $agentAid: $e');
       if (_wentOffline(e)) throw _offlineMidProof();
       throw StateError('Something answers at that address, but it could not '
           'show that it is this $thing.');
     }
-    await _theOrganisationSignedThis(agentAid, at, key);
+    await _theOrganisationSignedThis(agentAid, at, proven.key, [
+      for (final w in proven.witnesses)
+        if (w.url.isNotEmpty) w.url
+    ]);
     final WhatThisMachineWasTold? told;
     try {
       told = await _asking.whatTheAgentSays(at);
@@ -167,7 +182,7 @@ class FindingAnAgentThatMoved {
   /// Throws unless the newest valid record for [agentAid] names exactly [at].
   /// Keeps that record once it is accepted.
   Future<void> _theOrganisationSignedThis(
-      String agentAid, String at, String key) async {
+      String agentAid, String at, String key, List<String> witnessLeads) async {
     final source = _records;
     final wanted = canonicalOriginOf(at);
     if (source == null || wanted == null) {
@@ -176,7 +191,9 @@ class FindingAnAgentThatMoved {
     }
     List<Map<String, dynamic>> offered;
     try {
-      offered = await source.recordsFor(agentAid);
+      offered = source is EndpointRecordSourceWithLeads
+          ? await source.recordsForWithLeads(agentAid, witnessLeads)
+          : await source.recordsFor(agentAid);
     } catch (e) {
       debugPrint('[controller] could not read signed records: $e');
       offered = const [];

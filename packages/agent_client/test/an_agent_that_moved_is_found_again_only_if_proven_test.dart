@@ -62,6 +62,15 @@ class _World {
   /// What the witness serves for the organisation.
   final witnessHolds = <Map<String, dynamic>>[];
 
+  /// Witness addresses the verified key log names, as the core reports them.
+  final logWitnesses = <String>[];
+
+  /// Witness addresses the core holds for the organisation's stored log.
+  final coreHoldsWitnesses = <String>[];
+
+  /// A witness that answers with a record signed by the wrong key.
+  String? hostileWitness;
+
   /// Hosts that are up but answer with something that is not an agent.
   final notAnAgent = <String>{};
 
@@ -98,11 +107,34 @@ class _World {
                 jsonEncode({
                   'verified': true,
                   'aid': proves,
-                  'public_key': _qb64Key(_orgKey.publicKey)
+                  'public_key': _qb64Key(_orgKey.publicKey),
+                  'witnesses': [
+                    for (final u in logWitnesses) {'key': 'BKEY', 'url': u}
+                  ],
                 }),
                 200);
           }
+          if (req.url.path == '/api/contacts/$_aid/witnesses') {
+            return coreHoldsWitnesses.isEmpty
+                ? http.Response('{}', 404)
+                : http.Response(
+                    jsonEncode({
+                      'witnesses': [
+                        for (final u in coreHoldsWitnesses)
+                          {'key': 'BKEY', 'url': u}
+                      ]
+                    }),
+                    200);
+          }
           return http.Response('{}', 200); // front-end-for etc.
+        }
+        if (host == hostileWitness && req.url.path == '/api/witness/endpoint/$_aid') {
+          return http.Response(
+              jsonEncode({
+                'record': _record(_originOf(_impostor), '2026-11-02T10:00:00Z',
+                    signer: _rotatedOutKey)
+              }),
+              200);
         }
         if (host == _witness && req.url.path == '/api/witness/endpoint/$_aid') {
           if (witnessHolds.isEmpty) return http.Response('{}', 404);
@@ -147,6 +179,76 @@ void main() {
 
   Future<WhichHalfThisAppIsRunning> recorded() =>
       WhichHalfThisAppIsRunning.now();
+
+  group('where the witnesses are learned', () {
+    void aMovedOrgAtNew() => world
+      ..alive.add(_new)
+      ..keyHistoryProves[_new] = _aid
+      ..recognisesUs[_new] = _aid;
+
+    test('from the witnesses the organisation\'s own key log names', () async {
+      SharedPreferences.setMockInitialValues({}); // nothing remembered
+      await WhichHalfThisAppIsRunning.pointAt(
+          agentOrigin: _old, agentAid: _aid);
+      aMovedOrgAtNew();
+      world.logWitnesses.add(_witness);
+      final out = await finder
+          .findAgain(current: await recorded(), hints: const [_new]);
+      expect(out.moved, isTrue);
+    });
+
+    test('from the addresses this computer\'s core already holds', () async {
+      SharedPreferences.setMockInitialValues({});
+      await WhichHalfThisAppIsRunning.pointAt(
+          agentOrigin: _old, agentAid: _aid);
+      aMovedOrgAtNew();
+      world.coreHoldsWitnesses.add(_witness);
+      final out = await finder
+          .findAgain(current: await recorded(), hints: const [_new]);
+      expect(out.moved, isTrue);
+    });
+
+    test('with no lead anywhere, nothing is accepted', () async {
+      SharedPreferences.setMockInitialValues({});
+      await WhichHalfThisAppIsRunning.pointAt(
+          agentOrigin: _old, agentAid: _aid);
+      aMovedOrgAtNew();
+      final out = await finder
+          .findAgain(current: await recorded(), hints: const [_new]);
+      expect(out.moved, isFalse);
+      expect((await recorded()).agentOrigin, _old);
+    });
+
+    test(
+        'a witness that answers with a record the organisation did not sign '
+        'is skipped, and the honest one still decides', () async {
+      aMovedOrgAtNew();
+      const evil = 'https://evil-witness.example.test';
+      world.hostileWitness = evil;
+      world.logWitnesses.add(evil);
+      final out = await finder
+          .findAgain(current: await recorded(), hints: const [_new]);
+      expect(out.moved, isTrue);
+      expect((await recorded()).agentOrigin, _new);
+    });
+
+    test('a lone hostile witness cannot move the app', () async {
+      SharedPreferences.setMockInitialValues({});
+      await WhichHalfThisAppIsRunning.pointAt(
+          agentOrigin: _old, agentAid: _aid);
+      world
+        ..alive.add(_impostor)
+        ..keyHistoryProves[_impostor] = _aid
+        ..recognisesUs[_impostor] = _aid;
+      const evil = 'https://evil-witness.example.test';
+      world.hostileWitness = evil;
+      world.logWitnesses.add(evil);
+      final out = await finder
+          .findAgain(current: await recorded(), hints: const [_impostor]);
+      expect(out.moved, isFalse);
+      expect((await recorded()).agentOrigin, _old);
+    });
+  });
 
   test('an agent that still answers is left exactly where it is', () async {
     world.alive.add(_old);

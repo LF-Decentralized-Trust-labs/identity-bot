@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../crypto/endpoint_record.dart';
 import 'the_owner_at_this_computer.dart';
 
 /// Where an organisation's signed endpoint records come from (ADR-062).
@@ -14,6 +15,13 @@ import 'the_owner_at_this_computer.dart';
 abstract class EndpointRecordSource {
   /// Every record the source holds for [aid], as it was signed. May be empty.
   Future<List<Map<String, dynamic>>> recordsFor(String aid);
+}
+
+/// A source that can also be told where to ask: addresses learned from the
+/// organisation's own verified key log through this computer's core.
+abstract class EndpointRecordSourceWithLeads implements EndpointRecordSource {
+  Future<List<Map<String, dynamic>>> recordsForWithLeads(
+      String aid, List<String> leads);
 }
 
 /// Asks the organisation's witnesses, the public route
@@ -102,15 +110,49 @@ Future<void> rememberWitnessesOf(String aid, List<String> bases) async {
   await prefs.setStringList(_witnessKey(aid), bases);
 }
 
-/// Reads the record source for one organisation from what was remembered.
-class WitnessesRememberedFor implements EndpointRecordSource {
-  WitnessesRememberedFor({this.client});
+/// Reads the record source for one organisation from every lead this computer
+/// has for where its witnesses are. The safety is not in where an address came
+/// from but in the verification of every record a witness returns, so every
+/// lead is used and one that is down or answers with an invalid record is
+/// skipped:
+///
+///  1. the witnesses named in the organisation's own key log, which this
+///     computer's core verified, at the address the core holds for each
+///     (`leads`, from [AskingToActForAnIdentity.confirmThisIsReallyAndLearnItsWitnesses]);
+///  2. the same, read from the verified log the core already holds for the
+///     organisation ([coreKnows], [AskingToActForAnIdentity.witnessesTheCoreKnowsFor]);
+///  3. the addresses the organisation handed over when this computer founded
+///     or joined it ([rememberWitnessesOf]).
+class WitnessesRememberedFor implements EndpointRecordSourceWithLeads {
+  WitnessesRememberedFor({this.client, this.coreKnows});
   final http.Client? client;
 
+  /// Addresses this computer's own core holds for the witnesses of [aid].
+  final Future<List<String>> Function(String aid)? coreKnows;
+
   @override
-  Future<List<Map<String, dynamic>>> recordsFor(String aid) async {
+  Future<List<Map<String, dynamic>>> recordsFor(String aid) =>
+      recordsForWithLeads(aid, const []);
+
+  @override
+  Future<List<Map<String, dynamic>>> recordsForWithLeads(
+      String aid, List<String> leads) async {
     final prefs = await SharedPreferences.getInstance();
-    final bases = prefs.getStringList(_witnessKey(aid)) ?? const <String>[];
+    var fromCore = const <String>[];
+    try {
+      fromCore = await coreKnows?.call(aid) ?? const <String>[];
+    } catch (_) {
+      // A core that cannot be asked is one lead fewer, not a failure.
+    }
+    final seen = <String>{};
+    final bases = <String>[
+      for (final b in [
+        ...leads,
+        ...fromCore,
+        ...(prefs.getStringList(_witnessKey(aid)) ?? const <String>[]),
+      ])
+        if (canonicalOriginOf(b.trim()) case final o? when seen.add(o)) o,
+    ];
     if (bases.isEmpty) return const [];
     final source =
         WitnessEndpointRecords(witnesses: () async => bases, client: client);
