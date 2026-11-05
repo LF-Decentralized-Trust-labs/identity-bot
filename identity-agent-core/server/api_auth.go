@@ -782,6 +782,9 @@ var sessionForbidden = map[string]string{
 	"POST /api/inception": "founding an identity decides what this agent is",
 	"POST /api/rotation":  "rotation replaces the keys this identity signs with",
 
+	// Who would witness a founding, which the founding names for good.
+	"GET /api/events/witnesses-for-a-founding": controllerOwnerOnly["GET /api/events/witnesses-for-a-founding"],
+
 	// --- who may act for this identity ---
 	"POST /api/signer/invites":                "inviting a signer decides who may bring this organisation into existence",
 	"POST /api/signer/invites/{token}/redeem": "redeeming a signer invite makes somebody an owner",

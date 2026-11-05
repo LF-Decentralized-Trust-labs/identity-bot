@@ -58,6 +58,10 @@ var controllerOwnerOnly = map[string]string{
 	"POST /api/owners/ceremony":            "bringing new owners in decides who the owner is",
 	"DELETE /api/owners/ceremony":          "abandoning a ceremony decides who the owner is",
 
+	// Who would witness a founding: the founding names them for good, and the
+	// owner's device confirms each before it does.
+	"GET /api/events/witnesses-for-a-founding": "the witnesses a founding names are written into the identity for good, and are the owner's to confirm",
+
 	// --- material an identity can be rebuilt from ---
 	// An archive plus a passphrase is the identity to whoever holds both, so
 	// pulling one out of this machine is close to taking the identity itself.

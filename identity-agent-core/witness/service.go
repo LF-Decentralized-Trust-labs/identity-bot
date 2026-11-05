@@ -1394,6 +1394,12 @@ func witnessPathPrefix(commercial bool) string {
 	return "/api"
 }
 
+// witnessRoot is the base [witnessEventURL] and the witness's other routes
+// resolve against, ending in a slash.
+func witnessRoot(t witnessTarget) string {
+	return witnessBase(t.URL) + witnessPathPrefix(t.Commercial) + "/"
+}
+
 func witnessEndpointURL(t witnessTarget) string {
 	return witnessBase(t.URL) + witnessPathPrefix(t.Commercial) + "/witness/endpoint"
 }

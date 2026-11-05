@@ -1150,6 +1150,7 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 		r.Post("/keystore/messaging-seed", s.handleMessagingSeed)
 		r.Post("/events/prepare", s.handlePrepareEvent)
 		r.Post("/events/commit", s.handleCommitEvent)
+		r.Get("/events/witnesses-for-a-founding", s.handleWitnessesForAFounding)
 		r.Get("/events/{s}/receipts", s.handleEventReceipts)
 		r.Post("/store/receipt", s.handleStoreReceipt)
 		r.Get("/store/receipts", s.handleGetStoreReceipts)

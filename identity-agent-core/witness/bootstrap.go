@@ -185,6 +185,16 @@ func DesignatableWitnesses(candidates []witnessTarget) (keys []string, toad int)
 // hopefully. An identity with fewer witnesses is a smaller problem than one
 // naming an observer that does not exist, because the second cannot be undone.
 func DesignatableWitnessesChecked(ctx context.Context, candidates []witnessTarget, check IdentityChecker) (keys []string, toad int) {
+	targets, toad := designatableTargetsChecked(ctx, candidates, check)
+	for _, t := range targets {
+		keys = append(keys, t.WitnessKey)
+	}
+	return keys, toad
+}
+
+// designatableTargetsChecked is DesignatableWitnessesChecked keeping where each
+// witness is reached, with the key it is named by confirmed.
+func designatableTargetsChecked(ctx context.Context, candidates []witnessTarget, check IdentityChecker) (out []witnessTarget, toad int) {
 	for _, c := range candidates {
 		if c.WitnessKey == "" {
 			continue
@@ -198,17 +208,16 @@ func DesignatableWitnessesChecked(ctx context.Context, candidates []witnessTarge
 				log.Printf("[witness] not designating %s: %v", c.URL, err)
 				continue
 			}
-			keys = append(keys, confirmed)
-			continue
+			c.WitnessKey = confirmed
 		}
-		keys = append(keys, c.WitnessKey)
+		out = append(out, c)
 	}
-	if len(keys) == 0 {
+	if len(out) == 0 {
 		return nil, 0
 	}
 	// A simple majority: enough that a minority of unavailable or dishonest
 	// witnesses can neither stall the identity nor corroborate a forgery.
-	return keys, len(keys)/2 + 1
+	return out, len(out)/2 + 1
 }
 
 // WitnessesFromRegistry adapts a provider registry's witness endpoints into the

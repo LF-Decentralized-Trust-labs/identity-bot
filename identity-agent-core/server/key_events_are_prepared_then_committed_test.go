@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
@@ -16,6 +17,7 @@ import (
 	"identity-agent-core/keriengine"
 	"identity-agent-core/recovery"
 	"identity-agent-core/store"
+	"identity-agent-core/witness"
 
 	keri "github.com/grapeid/keri-go"
 )
@@ -221,6 +223,63 @@ func TestKeyEventRoutesAreTheOwnersAlone(t *testing.T) {
 	s.handlePrepareEvent(rec, remote(http.MethodPost, "/api/events/prepare", `{"t":"icp"}`))
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("a caller who is not the owner prepared an event: %d", rec.Code)
+	}
+}
+
+// The route that proposes who would witness a founding is the owner's alone,
+// on both lists, and names each witness's key and address with the threshold.
+func TestTheWitnessesForAFoundingAreProposedToTheOwnerAlone(t *testing.T) {
+	route := "GET /api/events/witnesses-for-a-founding"
+	if _, ok := controllerOwnerOnly[route]; !ok {
+		t.Errorf("%s is open to a controller", route)
+	}
+	if _, ok := sessionForbidden[route]; !ok {
+		t.Errorf("%s is open to a browser session", route)
+	}
+
+	var pool []witness.BootstrapWitness
+	for i := byte(1); i <= 3; i++ {
+		key := iacrypto.NonTransferableAIDQB64(bytes.Repeat([]byte{i}, 32))
+		mux := http.NewServeMux()
+		mux.HandleFunc("/health", func(rw http.ResponseWriter, r *http.Request) {
+			json.NewEncoder(rw).Encode(map[string]any{"service_aid": key})
+		})
+		srv := httptest.NewServer(mux)
+		t.Cleanup(srv.Close)
+		pool = append(pool, witness.BootstrapWitness{AID: key, WitnessKey: key, URL: srv.URL, Operator: "tests"})
+	}
+	// The second answers as another witness: left out, not named.
+	pool[1].WitnessKey = iacrypto.NonTransferableAIDQB64(bytes.Repeat([]byte{9}, 32))
+	prior := witness.BootstrapWitnesses
+	witness.BootstrapWitnesses = func() []witness.BootstrapWitness { return pool }
+	t.Cleanup(func() { witness.BootstrapWitnesses = prior })
+
+	s := adoptingOwner(t)
+	rec := httptest.NewRecorder()
+	s.handleWitnessesForAFounding(rec, remote(http.MethodGet, "/api/events/witnesses-for-a-founding", ""))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("a caller who is not the owner asked: %d", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	s.handleWitnessesForAFounding(rec, ownerRequest(http.MethodGet, "/api/events/witnesses-for-a-founding", nil, s))
+	var got struct {
+		Witnesses []struct{ AID, Address string } `json:"witnesses"`
+		Toad      int                             `json:"toad"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if len(got.Witnesses) != 2 || got.Toad != 2 {
+		t.Fatalf("the proposal is %+v, want the two witnesses that answer as themselves and a threshold of 2", got)
+	}
+	for _, w := range got.Witnesses {
+		if w.AID != pool[0].WitnessKey && w.AID != pool[2].WitnessKey {
+			t.Errorf("%s was proposed", w.AID)
+		}
+		if !strings.HasSuffix(w.Address, "/") || !strings.HasPrefix(w.Address, "http://127.0.0.1:") {
+			t.Errorf("the address %q is not a base its routes resolve against", w.Address)
+		}
 	}
 }
 

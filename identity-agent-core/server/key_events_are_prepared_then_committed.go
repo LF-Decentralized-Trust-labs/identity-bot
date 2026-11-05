@@ -17,6 +17,7 @@ import (
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/keriengine"
 	"identity-agent-core/store"
+	"identity-agent-core/witness"
 
 	keri "github.com/grapeid/keri-go"
 )
@@ -175,6 +176,36 @@ func (s *CoreServer) handlePrepareEvent(w http.ResponseWriter, r *http.Request) 
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(prepareEventResponse{RawB64: base64.StdEncoding.EncodeToString(p.Raw), Hint: p.Hint})
+}
+
+// handleWitnessesForAFounding answers who this Identity Agent would name as
+// the witnesses of a new root identity, and how many must receipt its
+// founding: each one's key, the address it is reached at, and the threshold.
+// A signer that founds the identity itself asks, confirms each witness by its
+// own signed answer, and names the ones that answer in the founding it signs.
+// An empty list is a real answer: it would found the identity unwitnessed.
+func (s *CoreServer) handleWitnessesForAFounding(w http.ResponseWriter, r *http.Request) {
+	if !s.theOwnerAsks(r) {
+		writeError(w, http.StatusForbidden, "Key events are the owner's", "only the owner asks who would witness a founding")
+		return
+	}
+	type proposed struct {
+		AID     string `json:"aid"`
+		Address string `json:"address"`
+	}
+	out := struct {
+		Witnesses []proposed `json:"witnesses"`
+		Toad      int        `json:"toad"`
+	}{Witnesses: []proposed{}}
+	if s.WitnessService != nil {
+		ws, toad := s.WitnessService.ProposedWitnessesForNewIdentity(witness.AidKindRoot, "")
+		for _, p := range ws {
+			out.Witnesses = append(out.Witnesses, proposed{AID: p.Key, Address: p.Address})
+		}
+		out.Toad = toad
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(out)
 }
 
 // engineRequest is what the engine prepares req from.

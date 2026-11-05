@@ -35,7 +35,7 @@ opens them to a controller. They are:
 - the root of trust: rotating the identity's keys (directly, as a root rotation,
   or within a recovery), installing a root seed, resetting, founding the identity
   (by inception or hybrid inception), preparing the messaging keys an identity
-  commits to, and bringing new owners in;
+  commits to, asking who would witness a founding, and bringing new owners in;
 - the identity's key log: signing an interaction event, signing for the identity
   or taking up what its key device signed, fulfilling or refusing a signing request, and
   signing arbitrary data or an event as the identity;
