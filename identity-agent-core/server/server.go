@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"net"
@@ -3389,7 +3390,7 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 						return
 					}
 					publicURL := s.getPublicURL(r)
-					oobiURL := fmt.Sprintf("%s/public/oobi/%s", publicURL, a.PairwiseAID)
+					oobiURL := oobiLink(r, publicURL, a.PairwiseAID)
 					rawEvents, signatures := s.assetEventsAndSignatures(a, kelResp.RawEventsB64)
 					jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 						"aid":             a.PairwiseAID,
@@ -3415,7 +3416,7 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 			publicURL := s.getPublicURL(r)
 			doc := map[string]interface{}{
 				"aid":  requestedAID,
-				"oobi": fmt.Sprintf("%s/public/oobi/%s", publicURL, requestedAID),
+				"oobi": oobiLink(r, publicURL, requestedAID),
 				"kel":  kel,
 				"type": "pairwise",
 				// Which realm this agent runs in, so a resolver keeps a
@@ -3470,9 +3471,9 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 			actionLabel = "add you as a contact on Identity Agent"
 		}
 		publicURL := s.getPublicURL(r)
-		rawOobiURL := fmt.Sprintf("%s/public/oobi/%s", publicURL, identity.AID)
+		rawOobiURL := oobiLink(r, publicURL, identity.AID)
 		if action != "" {
-			rawOobiURL = fmt.Sprintf("%s?action=%s", rawOobiURL, action)
+			rawOobiURL = fmt.Sprintf("%s?action=%s", rawOobiURL, url.QueryEscape(action))
 		}
 		htmlPage := fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
@@ -3502,7 +3503,7 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
   <div class="card"><span class="oobi">%s</span></div>
   <p style="font-size:12px;color:#64748b;">This link only works while the sender's Identity Agent is running.</p>
 </body>
-</html>`, alias, alias, actionLabel, rawOobiURL)
+</html>`, alias, alias, actionLabel, html.EscapeString(rawOobiURL))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprint(w, htmlPage)
 		return

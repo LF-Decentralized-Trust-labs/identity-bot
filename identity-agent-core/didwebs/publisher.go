@@ -13,8 +13,11 @@ import (
 
 // PublishInput is the live keystate used to derive did:webs artifacts.
 type PublishInput struct {
-	AID              string
-	Host             string
+	AID  string
+	Host string
+	// Plain is set for a document served over plain HTTP (the direct listener),
+	// whose OOBI service endpoint is then http:// where it is otherwise https://.
+	Plain            bool
 	PublicKeyB64     string
 	SequenceNumber   int
 	KELEvents        []map[string]interface{}
@@ -30,6 +33,10 @@ func BuildDidJSON(in PublishInput) ([]byte, error) {
 	pubRaw, err := iacrypto.DecodeSized(in.PublicKeyB64, ed25519.PublicKeySize, false)
 	if err != nil {
 		return nil, fmt.Errorf("invalid ed25519 public key")
+	}
+	scheme := "https"
+	if in.Plain {
+		scheme = "http"
 	}
 	did := fmt.Sprintf("did:webs:%s:%s", colonHost(in.Host), in.AID)
 	keyID := fmt.Sprintf("%s#%s", did, keyIDFromPub(pubRaw))
@@ -51,7 +58,7 @@ func BuildDidJSON(in PublishInput) ([]byte, error) {
 		"service": []map[string]interface{}{
 			{
 				"id": fmt.Sprintf("%s#oobi", did), "type": "KERI-OOBI",
-				"serviceEndpoint": fmt.Sprintf("https://%s/%s/oobi", in.Host, in.AID),
+				"serviceEndpoint": fmt.Sprintf("%s://%s/%s/oobi", scheme, in.Host, in.AID),
 			},
 		},
 	}
@@ -69,8 +76,17 @@ func BuildCesrStream(in PublishInput) ([]byte, bool, string) {
 	return raw, complete, hdr
 }
 
+// colonHost is ColonHost with a port written as %3A, the did:web form: a colon
+// inside the host would read as a path segment.
 func colonHost(host string) string {
-	return ColonHost(host)
+	head, tail := host, ""
+	if i := strings.Index(host, "/"); i != -1 {
+		head, tail = host[:i], host[i:]
+	}
+	if i := strings.LastIndex(head, ":"); i != -1 && !strings.Contains(head[i:], "]") && strings.Count(head, ":") == 1 {
+		head = head[:i] + "%3A" + head[i+1:]
+	}
+	return ColonHost(head + tail)
 }
 
 // ColonHost maps URL host/path segments to did:webs colon form (the contract §1).

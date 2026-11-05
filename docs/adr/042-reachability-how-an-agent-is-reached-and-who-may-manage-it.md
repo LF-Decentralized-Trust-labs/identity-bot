@@ -117,7 +117,7 @@ for an identifier only when the URL manager has allowlisted that identifier
 (`/api/settings/reachability/direct-aids`, owner-only, kept in the data directory),
 and only while the resolved ingress mode is Direct; an identifier off the list gets
 the same 404 as one the agent has never heard of. The whole-surface hatch
-`AGENT_DIRECT_INGRESS_ADDR` is removed and no longer read; the address a Direct
+`AGENT_DIRECT_INGRESS_ADDR` is removed, and an agent started with it set refuses to start rather than quietly fall back to loopback; the address a Direct
 agent advertises is the direct listener's host and port.
 
 **Deviation — the sealed-instance model on a confidential-VM substrate (2026-10-18).**
@@ -356,6 +356,13 @@ Still partial, and intended to extend the same mechanisms rather than replace th
 - **DIDComm over Direct.** The direct listener serves identifier documents only;
   `POST /didcomm` is a root route and is not on it. Whether a Direct agent should
   receive first-contact messages off-box, and on what path-scoped form, is not decided here.
+- **Pairing a phone over the LAN, in Direct mode (amended 2026-11-05).** Direct mode
+  is lookup only. The pairing routes are under `/api` on the root listener, which
+  stays on loopback, so a phone on the LAN gets a 404 there; Direct mode does not
+  support LAN pairing yet. This is the reason `AGENT_DIRECT_INGRESS_ADDR` existed,
+  and it is not replaced.
+- **DIDComm in Direct mode (amended 2026-11-05).** Direct mode does not support it
+  yet; see the item above.
 
 ## Consequences
 

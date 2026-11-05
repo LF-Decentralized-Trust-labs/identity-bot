@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -41,7 +42,10 @@ import (
 //
 // Binding is the operator's explicit act: AGENT_DIRECT_LISTEN_ADDR, host:port.
 // The retired AGENT_DIRECT_INGRESS_ADDR, which put the whole surface on a
-// reachable address, is not read.
+// reachable address, stops the agent starting while it is set.
+//
+// Direct mode is lookup only: LAN phone pairing (/api) and DIDComm are not
+// served here (ADR-042, still partial).
 
 // directIngressRoutes are the routes the direct listener serves, all GET.
 // Each is a key of publicRoutes, which is where it says why it is public.
@@ -53,6 +57,26 @@ var directIngressRoutes = []struct {
 	{"/{aid}/did.json", func(s *CoreServer) http.HandlerFunc { return s.handleDidJSON }},
 	{"/{aid}/kel", func(s *CoreServer) http.HandlerFunc { return s.handleKEL }},
 	{"/{aid}/keri.cesr", func(s *CoreServer) http.HandlerFunc { return s.handleKeriCesr }},
+}
+
+// arrivedDirect marks a request that came in on the direct listener, so a
+// handler shared with the root router can write the links that listener serves
+// (/{aid}/oobi) and not the root's (/public/oobi/{aid}), and publish the port
+// the request came to. Set by the direct router only, never read off a request.
+type directCtxKey struct{}
+
+func arrivedDirect(r *http.Request) bool {
+	v, _ := r.Context().Value(directCtxKey{}).(bool)
+	return v
+}
+
+// oobiLink is the address of aid's OOBI under base, in the form the listener the
+// request arrived on serves.
+func oobiLink(r *http.Request, base, aid string) string {
+	if arrivedDirect(r) {
+		return fmt.Sprintf("%s/%s/oobi", base, aid)
+	}
+	return fmt.Sprintf("%s/public/oobi/%s", base, aid)
 }
 
 // directAllowlistFileName holds the identifiers the direct listener answers
@@ -183,6 +207,11 @@ func (s *CoreServer) directRouter() chi.Router {
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			next.ServeHTTP(w, req.WithContext(context.WithValue(req.Context(), directCtxKey{}, true)))
+		})
+	})
 	// A wrong method on a served path is the same bare 404 as no path.
 	r.MethodNotAllowed(http.NotFound)
 	r.NotFound(http.NotFound)
@@ -208,10 +237,14 @@ func (s *CoreServer) onlyForAllowlisted(next http.HandlerFunc) http.HandlerFunc 
 // configured bind that fails is an error: the operator asked for reach and
 // would otherwise be told nothing.
 func (s *CoreServer) bindDirectListener() error {
+	// A deployment still setting the retired variable asked for the whole surface
+	// on a LAN or mapped-port address. Starting with everything on loopback
+	// instead would lose that reach without a word, so it does not start.
 	if v := os.Getenv("AGENT_DIRECT_INGRESS_ADDR"); v != "" {
-		log.Printf("[identity-agent-core] AGENT_DIRECT_INGRESS_ADDR is no longer read: the management " +
-			"surface stays on loopback. Set AGENT_DIRECT_LISTEN_ADDR=host:port and use Direct mode " +
-			"(ADR-042 §2).")
+		return errors.New("AGENT_DIRECT_INGRESS_ADDR is no longer supported and the agent will not start " +
+			"while it is set: the management surface now stays on loopback in every mode. Unset it, and to be " +
+			"reached off this machine set AGENT_DIRECT_LISTEN_ADDR=host:port and use Direct mode, which serves " +
+			"identifier documents only (ADR-042 §2)")
 	}
 	addr, ok := directListenAddr()
 	if !ok {
@@ -227,7 +260,14 @@ func (s *CoreServer) bindDirectListener() error {
 	} else {
 		s.directAIDs = al
 	}
-	ln, err := net.Listen("tcp4", addr)
+	// "tcp", not "tcp4": a LAN is often IPv6 as well, and a wildcard host binds
+	// both families (a specific address binds its own family).
+	if host, port, ok := endpoint.DirectListenAddr(); ok {
+		if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
+			addr = fmt.Sprintf(":%d", port)
+		}
+	}
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("the direct listener cannot bind %s: %w", addr, err)
 	}

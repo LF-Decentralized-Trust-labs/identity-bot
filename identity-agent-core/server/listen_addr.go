@@ -28,7 +28,7 @@ import (
 // which serves only the path-scoped /{aid}/... documents of the identifiers the
 // URL manager has allowlisted, and only while the mode is Direct (ADR-042 §2).
 // The retired AGENT_DIRECT_INGRESS_ADDR, which bound this whole surface to a
-// reachable address, is no longer read.
+// reachable address, is not read: an agent started with it set refuses to start.
 //
 // SEALED INSTANCE — a hardware-sealed instance (a confidential VM) is reached
 // only through a host reverse proxy that dials the agent over the VM's network

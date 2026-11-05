@@ -89,8 +89,9 @@ func (s *CoreServer) handleAidOobi(w http.ResponseWriter, r *http.Request) {
 func (s *CoreServer) publisherInput(r *http.Request, aid string) (didwebs.PublishInput, error) {
 	// Derive host from relay allocation / active tunnel public_url (not raw r.Host).
 	// This ensures did.json for a re-randomized relay P-AID uses the stable public_url host.
+	direct := arrivedDirect(r)
 	host := r.Host
-	if idx := strings.Index(host, ":"); idx != -1 {
+	if idx := strings.Index(host, ":"); idx != -1 && !direct {
 		host = host[:idx]
 	}
 	// Through a relay, the identifier is published at the address the request
@@ -106,7 +107,9 @@ func (s *CoreServer) publisherInput(r *http.Request, aid string) (didwebs.Publis
 			if idx := strings.Index(u, "/"); idx != -1 {
 				u = u[:idx]
 			}
-			if idx := strings.Index(u, ":"); idx != -1 {
+			// The direct listener is on a port of its own and nothing else says
+			// which, so a document served there names it.
+			if idx := strings.Index(u, ":"); idx != -1 && !direct {
 				u = u[:idx]
 			}
 			if u != "" {
@@ -180,7 +183,7 @@ func (s *CoreServer) publisherInput(r *http.Request, aid string) (didwebs.Publis
 		threshold = 5
 	}
 	return didwebs.PublishInput{
-		AID: aid, Host: host, PublicKeyB64: pubKey,
+		AID: aid, Host: host, PublicKeyB64: pubKey, Plain: direct,
 		SequenceNumber: seq, KELEvents: kelEvents,
 		WitnessReceipts: receipts, WitnessThreshold: threshold,
 	}, nil

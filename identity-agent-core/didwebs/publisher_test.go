@@ -51,3 +51,19 @@ func TestBuildCesrStreamFailOpenHeader(t *testing.T) {
 		t.Fatal("empty stream")
 	}
 }
+
+func TestAPortInTheHostIsWrittenAsADidWebPort(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(nil)
+	pub := priv.Public().(ed25519.PublicKey)
+	raw, err := BuildDidJSON(PublishInput{
+		AID: "EPairwiseAID00000000000000000000000001", Host: "192.168.0.10:5060", Plain: true,
+		PublicKeyB64: base64.StdEncoding.EncodeToString(pub),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(raw)
+	if !strings.Contains(s, "did:webs:192.168.0.10%3A5060:EPairwiseAID") || !strings.Contains(s, "http://192.168.0.10:5060/EPairwiseAID") {
+		t.Errorf("port lost or colon left bare: %s", s)
+	}
+}

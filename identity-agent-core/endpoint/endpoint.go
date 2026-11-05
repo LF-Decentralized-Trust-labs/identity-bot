@@ -171,8 +171,8 @@ func (es *EndpointService) Refresh() {
 
 // OwnURLs is every address this agent has been CONFIGURED with, or holds
 // itself, not only the one it publishes: an explicit override, its relay, its
-// tunnel, a configured public URL, the address it serves on the local network
-// when it is bound there, and loopback. A request signed for an origin that is
+// tunnel, a configured public URL, and loopback. The direct listener's address is not
+// among them: it carries no management traffic. A request signed for an origin that is
 // none of these was not meant for this agent.
 //
 // NEVER an address read off a request. The address a trusted proxy reported
@@ -194,16 +194,10 @@ func (es *EndpointService) OwnURLs() []string {
 	if tm != nil {
 		urls = append(urls, tm.URL())
 	}
-	if host := DirectIngressHost(); host != "" && !IsLoopbackHost(host) {
-		if ip := detectLocalIP(); ip != "" {
-			urls = append(urls, fmt.Sprintf("http://%s:%d", ip, port))
-			// The port the operator named for it, which need not be the one this
-			// agent's own surface listens on.
-			if _, p, err := net.SplitHostPort(strings.TrimSpace(os.Getenv("AGENT_DIRECT_INGRESS_ADDR"))); err == nil && p != "" {
-				urls = append(urls, fmt.Sprintf("http://%s:%s", ip, p), fmt.Sprintf("http://%s:%s", host, p))
-			}
-		}
-	}
+	// The direct listener's address (DirectListenAddr) is left out on purpose. It
+	// serves only public identifier documents and carries no management traffic,
+	// so a controller never signs a request for it, and listing it would make a
+	// LAN address an origin the agent accepts signed management requests for.
 	urls = append(urls,
 		fmt.Sprintf("http://localhost:%d", port),
 		fmt.Sprintf("http://127.0.0.1:%d", port),
