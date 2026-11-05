@@ -58,7 +58,11 @@ func ownLogForVerification(events []store.EventRecord) []map[string]interface{} 
 // holds it: the events of the credential in the registry it names, as they were
 // published. Nil when the credential names no registry or none is held, in
 // which case the engine reports the issuance as not proved.
-func (s *CoreServer) issuanceLogForVerification(acdcBody map[string]interface{}) []string {
+//
+// A log not held here is asked of the issuer's witnesses when the issuer's
+// verified key log is (registryLogFromWitnesses); what they serve is checked
+// against that key log before it is used.
+func (s *CoreServer) issuanceLogForVerification(acdcBody map[string]interface{}, issuerKel []map[string]interface{}) []string {
 	said, _ := acdcBody["d"].(string)
 	registry, _ := acdcBody["ri"].(string)
 	if said == "" || registry == "" {
@@ -66,7 +70,11 @@ func (s *CoreServer) issuanceLogForVerification(acdcBody map[string]interface{})
 	}
 	events, err := s.DataStore.GetCredentialTEL(registry, said)
 	if err != nil || len(events) == 0 {
-		return nil
+		issuer, _ := acdcBody["i"].(string)
+		if issuer == "" || len(issuerKel) == 0 {
+			return nil
+		}
+		return s.registryLogFromWitnesses(telClient, issuer, registry, said, issuerKel)
 	}
 	out := make([]string, 0, len(events))
 	for _, ev := range events {

@@ -2681,7 +2681,7 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 	driverReq := &drivers.DriverVerifyCredentialRequest{
 		AcdcJson:           req.AcdcJson,
 		IssuerKelEvents:    issuerKelEvents,
-		RegistryEventsB64:  s.issuanceLogForVerification(acdcBody),
+		RegistryEventsB64:  s.issuanceLogForVerification(acdcBody, issuerKelEvents),
 		HolderAid:          req.HolderAid,
 		PresentationSaid:   req.PresentationSaid,
 		CesrSignature:      req.CesrSignature,
@@ -2789,7 +2789,7 @@ func (s *CoreServer) handleVerifyCredentialChain(w http.ResponseWriter, r *http.
 		driverReq := &drivers.DriverVerifyCredentialRequest{
 			AcdcJson:          jsonB64,
 			IssuerKelEvents:   issuerKelEvents,
-			RegistryEventsB64: s.issuanceLogForVerification(acdcBody),
+			RegistryEventsB64: s.issuanceLogForVerification(acdcBody, issuerKelEvents),
 		}
 		result, err := s.KeriDriver.VerifyCredential(driverReq)
 

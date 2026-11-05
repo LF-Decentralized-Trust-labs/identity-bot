@@ -39,6 +39,10 @@ CREATE TABLE IF NOT EXISTS witness_kel_events (
     signer_aid TEXT, sequence_num INTEGER, event_json TEXT, event_said TEXT, stored_at TEXT,
     raw_bytes_b64 TEXT NOT NULL DEFAULT '', cesr_signature TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (signer_aid, sequence_num));
+CREATE TABLE IF NOT EXISTS witness_tel_events (
+    issuer_aid TEXT NOT NULL, said TEXT NOT NULL, registry TEXT NOT NULL, ilk TEXT NOT NULL,
+    subject TEXT NOT NULL, sn INTEGER NOT NULL, anchor_sn INTEGER NOT NULL, raw_b64 TEXT NOT NULL,
+    stored_at TEXT NOT NULL DEFAULT '', PRIMARY KEY (issuer_aid, said));
 CREATE TABLE IF NOT EXISTS witness_receipts_issued (
     id INTEGER PRIMARY KEY AUTOINCREMENT, signer_aid TEXT, event_said TEXT, sequence_num INTEGER,
     witness_aid TEXT, receipt_json TEXT, cesr_signature TEXT, issued_at TEXT);

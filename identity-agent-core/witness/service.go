@@ -101,6 +101,9 @@ type Service struct {
 	// so the exemption is a line in a shipped file that somebody can audit.
 	IsOfficialService func(aidOrURL string) bool
 
+	// telMu serialises storing registry events, so two submissions that
+	// together complete a credential's chain are checked one after the other.
+	telMu      sync.Mutex
 	mu         sync.Mutex
 	finalizeWg map[string]chan struct{}
 }
@@ -1263,14 +1266,6 @@ func (s *Service) BuildStatus() (*StatusResponse, error) {
 	metaList, _ := s.Store.ListContactMeta()
 	_ = metaList
 	return resp, nil
-}
-
-// ServeTELStub is an interface placeholder — BLOCKED: credential/revocation-registry joint freeze.
-func (s *Service) ServeTELStub(issuerAID string) map[string]interface{} {
-	return map[string]interface{}{
-		"blocked": true, "reason": "BLOCKED: TEL-serving endpoint contract pending credential/revocation-registry joint freeze",
-		"issuer_aid": issuerAID,
-	}
 }
 
 // witnessEndpointURL is where a witness accepts endpoint records. Separate from

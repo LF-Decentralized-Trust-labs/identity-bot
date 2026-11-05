@@ -1018,6 +1018,31 @@ DELETE FROM witness_self_heal_log WHERE id NOT IN (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_witness_self_heal_log_identity
     ON witness_self_heal_log(contact_aid, attempted_at);
 `},
+	{
+		Version:     47,
+		Description: "Let a witness keep the transaction logs of the registries of the identities it witnesses",
+		SQL: `
+-- A witness serves the whole transaction log of the registries an identity it
+-- witnesses has founded, so that a verifier who is not that identity can read
+-- whether a credential was issued and whether it has been revoked. Every event
+-- is kept as the bytes the issuer published, with the place in the issuer's key
+-- log (anchor_sn) whose seal vouches for it: an event with no such seal is never
+-- stored. The witness authors none of it.
+CREATE TABLE IF NOT EXISTS witness_tel_events (
+    issuer_aid  TEXT NOT NULL,
+    said        TEXT NOT NULL,
+    registry    TEXT NOT NULL,
+    ilk         TEXT NOT NULL,
+    subject     TEXT NOT NULL,
+    sn          INTEGER NOT NULL,
+    anchor_sn   INTEGER NOT NULL,
+    raw_b64     TEXT NOT NULL,
+    stored_at   TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (issuer_aid, said)
+);
+CREATE INDEX IF NOT EXISTS idx_witness_tel_events_range
+    ON witness_tel_events(issuer_aid, anchor_sn);
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.
