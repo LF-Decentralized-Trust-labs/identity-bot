@@ -1,10 +1,11 @@
 package server
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"identity-agent-core/linkverifier"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 func (s *CoreServer) mountVerificationRoutes(r interface {
@@ -46,6 +47,5 @@ func (s *CoreServer) handleVerificationBadge(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "verify failed", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	jsonreply.Write(w, http.StatusOK, result)
 }
