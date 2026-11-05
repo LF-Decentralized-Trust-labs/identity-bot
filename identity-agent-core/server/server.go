@@ -53,6 +53,8 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	keri "github.com/grapeid/keri-go"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 type CoreServer struct {
@@ -1358,8 +1360,7 @@ func (s *CoreServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 		TunnelURL: tunnelURL,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	jsonreply.Write(w, http.StatusOK, resp)
 }
 
 func (s *CoreServer) handleInfo(w http.ResponseWriter, r *http.Request) {
@@ -1416,8 +1417,7 @@ func (s *CoreServer) handleInfo(w http.ResponseWriter, r *http.Request) {
 		Driver: driverInfo,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	jsonreply.Write(w, http.StatusOK, resp)
 }
 
 func (s *CoreServer) handleIdentity(w http.ResponseWriter, r *http.Request) {
@@ -1429,8 +1429,7 @@ func (s *CoreServer) handleIdentity(w http.ResponseWriter, r *http.Request) {
 
 	if identity == nil {
 		resp := IdentityResponse{Initialized: false}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		jsonreply.Write(w, http.StatusOK, resp)
 		return
 	}
 
@@ -1443,8 +1442,7 @@ func (s *CoreServer) handleIdentity(w http.ResponseWriter, r *http.Request) {
 		EventCount:    identity.EventCount,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	jsonreply.Write(w, http.StatusOK, resp)
 }
 
 func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
@@ -1723,9 +1721,7 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 		PostQuantumCommitted: pq != nil,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(resp)
+	jsonreply.Write(w, http.StatusCreated, resp)
 }
 
 func (s *CoreServer) handleHybridInception(w http.ResponseWriter, r *http.Request) {
@@ -1787,9 +1783,7 @@ func (s *CoreServer) handleHybridInception(w http.ResponseWriter, r *http.Reques
 		Created:        time.Now().UTC().Format(time.RFC3339),
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(resp)
+	jsonreply.Write(w, http.StatusCreated, resp)
 }
 
 func (s *CoreServer) handleStoreIdentity(w http.ResponseWriter, r *http.Request) {
@@ -1845,9 +1839,7 @@ func (s *CoreServer) handleStoreIdentity(w http.ResponseWriter, r *http.Request)
 		log.Printf("[identity-agent-core] STORE: could not generate an avatar: %v", aerr)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{"status": "saved", "aid": req.AID})
+	jsonreply.Write(w, http.StatusCreated, map[string]string{"status": "saved", "aid": req.AID})
 }
 
 func (s *CoreServer) handleStoreEvent(w http.ResponseWriter, r *http.Request) {
@@ -1893,9 +1885,7 @@ func (s *CoreServer) handleStoreEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	s.broadcastWitnessEvent(req)
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{"status": "saved", "aid": req.AID, "event_type": req.EventType})
+	jsonreply.Write(w, http.StatusCreated, map[string]string{"status": "saved", "aid": req.AID, "event_type": req.EventType})
 }
 
 func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
@@ -1976,8 +1966,7 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 	s.broadcastWitnessEvent(eventRecord)
 	s.notifyBackupEvent(backup.EventKeyRotation)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	jsonreply.Write(w, http.StatusOK, result)
 }
 
 func (s *CoreServer) handleInteract(w http.ResponseWriter, r *http.Request) {
@@ -2019,9 +2008,7 @@ func (s *CoreServer) handleInteract(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[identity-agent-core] IXN: Interaction event for AID: %s (sn: %d, said: %s)",
 		result.AID, result.SequenceNumber, result.Said)
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(result)
+	jsonreply.Write(w, http.StatusCreated, result)
 }
 
 func (s *CoreServer) handleSign(w http.ResponseWriter, r *http.Request) {
@@ -2045,8 +2032,7 @@ func (s *CoreServer) handleSign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	jsonreply.Write(w, http.StatusOK, result)
 }
 
 func (s *CoreServer) handleKel(w http.ResponseWriter, r *http.Request) {
@@ -2062,8 +2048,7 @@ func (s *CoreServer) handleKel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(kelWithSignatures{DriverKelResponse: result, Signed: s.whichEventsAreSigned(result)})
+	jsonreply.Write(w, http.StatusOK, kelWithSignatures{DriverKelResponse: result, Signed: s.whichEventsAreSigned(result)})
 }
 
 // kelWithSignatures is a key log with, beside each event, whether this Identity
@@ -2133,8 +2118,7 @@ func (s *CoreServer) handleVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	jsonreply.Write(w, http.StatusOK, result)
 }
 
 func (s *CoreServer) handleCesrEncode(w http.ResponseWriter, r *http.Request) {
@@ -2156,8 +2140,7 @@ func (s *CoreServer) handleCesrEncode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	jsonreply.Write(w, http.StatusOK, result)
 }
 
 func (s *CoreServer) handleFormatCredential(w http.ResponseWriter, r *http.Request) {
@@ -2182,8 +2165,7 @@ func (s *CoreServer) handleFormatCredential(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	jsonreply.Write(w, http.StatusOK, result)
 }
 
 func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Request) {
@@ -2291,9 +2273,7 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
 
 	log.Printf("[identity-agent-core] CREDENTIAL: Issued %s for holder %s (IXN sn=%d)", result.AcdcSaid, req.HolderAid, result.SequenceNumber)
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusCreated, map[string]interface{}{
 		"acdc_said":         result.AcdcSaid,
 		"acdc_json_b64":     result.AcdcJsonB64,
 		"ixn_raw_bytes_b64": result.IxnRawBytesB64,
@@ -2313,8 +2293,7 @@ func (s *CoreServer) handleGetCredentials(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"credentials": creds,
 		"count":       len(creds),
 	})
@@ -2331,8 +2310,7 @@ func (s *CoreServer) handleGetCredential(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusNotFound, "Credential not found", said)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(cred)
+	jsonreply.Write(w, http.StatusOK, cred)
 }
 
 // detectCredentialFormat implements server-side format auto-detection so the
@@ -2422,9 +2400,7 @@ func (s *CoreServer) handleReceiveCredential(w http.ResponseWriter, r *http.Requ
 	s.notifyBackupEvent(backup.EventCredential)
 
 	log.Printf("[identity-agent-core] CREDENTIAL: Received %s (format=%s) for holder %s", said, req.Format, identity.AID)
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]interface{}{"said": said, "status": "received"})
+	jsonreply.Write(w, http.StatusCreated, map[string]interface{}{"said": said, "status": "received"})
 }
 
 func (s *CoreServer) handleDeleteCredential(w http.ResponseWriter, r *http.Request) {
@@ -2458,8 +2434,7 @@ func (s *CoreServer) handleAcceptCredential(w http.ResponseWriter, r *http.Reque
 		Payload: map[string]interface{}{"said": said},
 	})
 	log.Printf("[identity-agent-core] CREDENTIAL: Accepted %s", said)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"said": said, "status": "received"})
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{"said": said, "status": "received"})
 }
 
 // handleRejectCredential deletes a pending_inbound credential.
@@ -2501,8 +2476,7 @@ func (s *CoreServer) deliverCredentialToContact(contact *store.ContactRecord, cr
 }
 func (s *CoreServer) handleListBuiltinSchemas(w http.ResponseWriter, r *http.Request) {
 	list := schemas.List()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"schemas": list,
 		"count":   len(list),
 	})
@@ -2515,8 +2489,7 @@ func (s *CoreServer) handleGetBuiltinSchema(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusNotFound, "Schema not found", said)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(schema)
+	jsonreply.Write(w, http.StatusOK, schema)
 }
 
 func (s *CoreServer) handleGetCredentialSchemas(w http.ResponseWriter, r *http.Request) {
@@ -2525,8 +2498,7 @@ func (s *CoreServer) handleGetCredentialSchemas(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, "Failed to read credential schemas", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"schemas": schemas,
 		"count":   len(schemas),
 	})
@@ -2549,8 +2521,7 @@ func (s *CoreServer) handleFetchCredentialSchema(w http.ResponseWriter, r *http.
 	// Check cache first
 	if req.SAID != "" {
 		if cached, _ := s.DataStore.GetCredentialSchema(req.SAID); cached != nil {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(cached)
+			jsonreply.Write(w, http.StatusOK, cached)
 			return
 		}
 	}
@@ -2602,8 +2573,7 @@ func (s *CoreServer) handleFetchCredentialSchema(w http.ResponseWriter, r *http.
 		log.Printf("[identity-agent-core] SCHEMA: Failed to cache schema %s: %v", said, err)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(record)
+	jsonreply.Write(w, http.StatusOK, record)
 }
 
 func (s *CoreServer) handlePresentCredential(w http.ResponseWriter, r *http.Request) {
@@ -2653,9 +2623,7 @@ func (s *CoreServer) handlePresentCredential(w http.ResponseWriter, r *http.Requ
 
 	log.Printf("[identity-agent-core] PRESENTATION: Created %s for credential %s", result.PresentationSaid, req.AcdcSaid)
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusCreated, map[string]interface{}{
 		"presentation_said":     result.PresentationSaid,
 		"presentation_json_b64": result.PresentationJsonB64,
 		// pres_said_b64: base64 of pres_said.encode(); Dart signs these bytes with holder key
@@ -2671,8 +2639,7 @@ func (s *CoreServer) handleGetPresentations(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"presentations": pres,
 		"count":         len(pres),
 	})
@@ -2748,8 +2715,7 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	jsonreply.Write(w, http.StatusOK, result)
 }
 
 // handleVerifyCredentialChain accepts a SAID or ACDC JSON, verifies the credential,
@@ -2903,8 +2869,7 @@ func (s *CoreServer) handleVerifyCredentialChain(w http.ResponseWriter, r *http.
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"valid":    valid,
 		"chain":    chain,
 		"warnings": warnings,
@@ -2970,8 +2935,7 @@ func (s *CoreServer) handleSubmitReceipt(w http.ResponseWriter, r *http.Request)
 				req.WitnessAID))
 		}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	jsonreply.Write(w, http.StatusOK, resp)
 }
 
 // logOfEvent is the stored key log of the identity eventSAID belongs to, as
@@ -3071,8 +3035,7 @@ func (s *CoreServer) handleGetKERL(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"event_said":    eventSAID,
 		"receipts":      entries,
 		"receipt_count": counted,
@@ -3100,8 +3063,7 @@ func (s *CoreServer) handleResolveOobi(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	jsonreply.Write(w, http.StatusOK, result)
 }
 
 func (s *CoreServer) handleGenerateMultisigEvent(w http.ResponseWriter, r *http.Request) {
@@ -3163,8 +3125,7 @@ func (s *CoreServer) handleGenerateMultisigEvent(w http.ResponseWriter, r *http.
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	jsonreply.Write(w, http.StatusOK, result)
 }
 
 func (es *CoreServer) getPublicURL(r *http.Request) string {
@@ -3201,8 +3162,7 @@ func (es *CoreServer) getPublicURL(r *http.Request) string {
 
 func (s *CoreServer) handleGetEndpoint(w http.ResponseWriter, r *http.Request) {
 	state := s.EndpointService.State()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(state)
+	jsonreply.Write(w, http.StatusOK, state)
 }
 
 // handleGetActions returns the list of available agent actions/endpoints.
@@ -3253,8 +3213,7 @@ func (s *CoreServer) handleGetActions(w http.ResponseWriter, r *http.Request) {
 			Description: "Check agent health and status.",
 			Tags:        []string{"system"}},
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"actions": actions})
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{"actions": actions})
 }
 
 // ── Share Actions ─────────────────────────────────────────────────────────────
@@ -3265,8 +3224,7 @@ func (s *CoreServer) handleGetShareActions(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "Failed to read share actions", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"actions": actions, "count": len(actions)})
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{"actions": actions, "count": len(actions)})
 }
 
 func (s *CoreServer) handleCreateShareAction(w http.ResponseWriter, r *http.Request) {
@@ -3282,9 +3240,7 @@ func (s *CoreServer) handleCreateShareAction(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "Failed to save share action", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(action)
+	jsonreply.Write(w, http.StatusCreated, action)
 }
 
 func (s *CoreServer) handleUpdateShareAction(w http.ResponseWriter, r *http.Request) {
@@ -3299,8 +3255,7 @@ func (s *CoreServer) handleUpdateShareAction(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "Failed to update share action", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(action)
+	jsonreply.Write(w, http.StatusOK, action)
 }
 
 func (s *CoreServer) handleDeleteShareAction(w http.ResponseWriter, r *http.Request) {
@@ -3352,8 +3307,7 @@ func (s *CoreServer) handleOobiGenerate(w http.ResponseWriter, r *http.Request) 
 		"endpoint_source": s.EndpointService.Source(),
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	jsonreply.Write(w, http.StatusOK, resp)
 }
 
 func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
@@ -3415,8 +3369,7 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 					publicURL := s.getPublicURL(r)
 					oobiURL := fmt.Sprintf("%s/public/oobi/%s", publicURL, a.PairwiseAID)
 					rawEvents, signatures := s.assetEventsAndSignatures(a, kelResp.RawEventsB64)
-					w.Header().Set("Content-Type", "application/json")
-					json.NewEncoder(w).Encode(map[string]interface{}{
+					jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 						"aid":             a.PairwiseAID,
 						"oobi":            oobiURL,
 						"kel":             kelResp.KEL,
@@ -3455,8 +3408,7 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 				doc["raw_events_b64"] = raws
 				doc["cesr_signatures"] = sigs
 			}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(doc)
+			jsonreply.Write(w, http.StatusOK, doc)
 			return
 		}
 		writeError(w, http.StatusNotFound, "AID not found", fmt.Sprintf("No identity found for AID: %s", requestedAID))
@@ -3596,8 +3548,7 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	jsonreply.Write(w, http.StatusOK, resp)
 }
 
 // broadcastWitnessEvent sends an event to this identity's witnesses.
@@ -3694,8 +3645,7 @@ func (s *CoreServer) handlePublicCredentialServe(w http.ResponseWriter, r *http.
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"said":            cred.SAID,
 		"acdc_json":       cred.AcdcJson,
 		"format":          cred.Format,
@@ -3714,8 +3664,7 @@ func (s *CoreServer) handleGetContacts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"contacts": contacts,
 		"count":    len(contacts),
 	})
@@ -3738,8 +3687,7 @@ func (s *CoreServer) handleGetContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(contact)
+	jsonreply.Write(w, http.StatusOK, contact)
 }
 
 func (s *CoreServer) handleGetContactKEL(w http.ResponseWriter, r *http.Request) {
@@ -3759,8 +3707,7 @@ func (s *CoreServer) handleGetContactKEL(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(kelRecord)
+	jsonreply.Write(w, http.StatusOK, kelRecord)
 }
 
 func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Request) {
@@ -3936,8 +3883,7 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 		result["photo"] = oobiData.Photo
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	jsonreply.Write(w, http.StatusOK, result)
 }
 
 func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
@@ -4202,9 +4148,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 		}
 	})
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(contact)
+	jsonreply.Write(w, http.StatusCreated, contact)
 }
 
 func (s *CoreServer) handleDeleteContact(w http.ResponseWriter, r *http.Request) {
@@ -4312,8 +4256,7 @@ func (s *CoreServer) handleAcceptContact(w http.ResponseWriter, r *http.Request)
 		})
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "accepted", "aid": aid})
+	jsonreply.Write(w, http.StatusOK, map[string]string{"status": "accepted", "aid": aid})
 }
 
 func (s *CoreServer) handleUpdateContact(w http.ResponseWriter, r *http.Request) {
@@ -4363,8 +4306,7 @@ func (s *CoreServer) handleUpdateContact(w http.ResponseWriter, r *http.Request)
 
 	log.Printf("[identity-agent-core] CONTACT: Updated %s (AID: %s) contact_category=%s", contact.Alias, aid, contact.ContactCategory)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(contact)
+	jsonreply.Write(w, http.StatusOK, contact)
 }
 
 func (s *CoreServer) countWitnesses() int {
@@ -4406,8 +4348,7 @@ func (s *CoreServer) handleRejectContact(w http.ResponseWriter, r *http.Request)
 
 	log.Printf("[identity-agent-core] CONTACT: Rejected %s (AID: %s)", contact.Alias, aid)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "rejected", "aid": aid})
+	jsonreply.Write(w, http.StatusOK, map[string]string{"status": "rejected", "aid": aid})
 }
 
 func (s *CoreServer) handleGetAlerts(w http.ResponseWriter, r *http.Request) {
@@ -4514,8 +4455,7 @@ func (s *CoreServer) handleGetTunnelSettings(w http.ResponseWriter, r *http.Requ
 		}(),
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	jsonreply.Write(w, http.StatusOK, resp)
 }
 
 func (s *CoreServer) handlePutTunnelSettings(w http.ResponseWriter, r *http.Request) {
@@ -4562,8 +4502,7 @@ func (s *CoreServer) handlePutTunnelSettings(w http.ResponseWriter, r *http.Requ
 
 	if s.TunnelManager == nil {
 		s.EndpointService.Refresh()
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 			"status":          "saved",
 			"provider":        req.Provider,
 			"tunnel":          map[string]interface{}{"active": false, "error": "tunnel manager not initialized"},
@@ -4577,8 +4516,7 @@ func (s *CoreServer) handlePutTunnelSettings(w http.ResponseWriter, r *http.Requ
 	if err := s.TunnelManager.Restart(s.AppCtx, cfg); err != nil {
 		log.Printf("[identity-agent-core] Tunnel restart after settings change failed: %v", err)
 		s.EndpointService.Refresh()
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 			"status":          "saved",
 			"provider":        req.Provider,
 			"tunnel":          map[string]interface{}{"active": false, "error": err.Error()},
@@ -4592,8 +4530,7 @@ func (s *CoreServer) handlePutTunnelSettings(w http.ResponseWriter, r *http.Requ
 	status := s.TunnelManager.GetStatus()
 	log.Printf("[identity-agent-core] Tunnel restarted after settings change: active=%v url=%s", status.Active, status.URL)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"status":          "saved",
 		"provider":        req.Provider,
 		"tunnel":          status,
@@ -4604,8 +4541,7 @@ func (s *CoreServer) handlePutTunnelSettings(w http.ResponseWriter, r *http.Requ
 
 func (s *CoreServer) handleTunnelStatus(w http.ResponseWriter, r *http.Request) {
 	status := s.TunnelManager.GetStatus()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(status)
+	jsonreply.Write(w, http.StatusOK, status)
 }
 
 // handleGetReachabilitySettings reports how this agent becomes reachable from
@@ -4624,8 +4560,7 @@ func (s *CoreServer) handleGetReachabilitySettings(w http.ResponseWriter, r *htt
 
 	resolved := s.resolveIngressMode()
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"mode":                  stored.IngressMode,
 		"resolved_mode":         string(resolved),
 		"default_mode":          string(s.defaultIngressMode()),
@@ -4730,8 +4665,7 @@ func (s *CoreServer) handlePutReachabilitySettings(w http.ResponseWriter, r *htt
 		status = s.relayStatus()
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"status":         "saved",
 		"mode":           settings.IngressMode,
 		"resolved_mode":  string(s.resolveIngressMode()),
@@ -4755,8 +4689,7 @@ func (s *CoreServer) handleTunnelRestart(w http.ResponseWriter, r *http.Request)
 	status := s.TunnelManager.GetStatus()
 	log.Printf("[identity-agent-core] Tunnel restarted: active=%v url=%s endpoint=%s", status.Active, status.URL, s.EndpointService.CurrentURL())
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"provider":        status.Provider,
 		"active":          status.Active,
 		"url":             status.URL,
@@ -4776,8 +4709,7 @@ func (s *CoreServer) handleGetProfile(w http.ResponseWriter, r *http.Request) {
 		profile = &store.ProfileData{}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(profile)
+	jsonreply.Write(w, http.StatusOK, profile)
 }
 
 func (s *CoreServer) handlePutProfile(w http.ResponseWriter, r *http.Request) {
@@ -4808,8 +4740,7 @@ func (s *CoreServer) handlePutProfile(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[identity-agent-core] Profile updated: fn=%q", profile.FullName)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"status": "saved", "profile": profile})
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{"status": "saved", "profile": profile})
 }
 
 func (s *CoreServer) handleDeletePendingRequest(w http.ResponseWriter, r *http.Request) {
@@ -4824,8 +4755,7 @@ func (s *CoreServer) handleDeletePendingRequest(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"deleted": true, "aid": aid})
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{"deleted": true, "aid": aid})
 }
 
 // reloadIdentityIntoDriver seeds the in-process KERI engine's in-memory identity
@@ -4979,8 +4909,7 @@ func (s *CoreServer) handleReset(w http.ResponseWriter, r *http.Request) {
 
 	log.Println("[identity-agent-core] All data reset — identity, contacts, settings, KEL cleared")
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"reset": true})
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{"reset": true})
 }
 
 func (s *CoreServer) newProbeHTTPClient(timeout time.Duration) *http.Client {
@@ -5033,9 +4962,7 @@ func eventRecordsToKEDs(records []store.EventRecord) []map[string]interface{} {
 }
 
 func writeError(w http.ResponseWriter, status int, errMsg string, details string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(ErrorResponse{Error: errMsg, Details: details})
+	jsonreply.Write(w, status, ErrorResponse{Error: errMsg, Details: details})
 }
 
 // handleGetTasks returns all background tasks tracked in the database.
@@ -5051,8 +4978,7 @@ func (s *CoreServer) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 	if tasks == nil {
 		tasks = []store.TaskRecord{}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"tasks": tasks,
 		"count": len(tasks),
 	})
