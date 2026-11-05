@@ -516,7 +516,7 @@ func (r *ContactKELRecord) settleCurrentKey() error {
 	if !r.KelVerified {
 		return nil
 	}
-	key, err := drivers.KeyEstablishedBy(r.KEL)
+	key, err := drivers.KeyEstablishedBy(r.AID, r.KEL)
 	if err != nil {
 		return fmt.Errorf("%w (%s: %v)", ErrKeyNotEstablished, r.AID, err)
 	}
@@ -1476,6 +1476,26 @@ func (s *FileStore) GetContactKEL(aid string) (*ContactKELRecord, error) {
 // way out (a record stored before this was kept is corrected when read).
 func (r *ContactKELRecord) sealFromVerifiedBytes() {
 	r.KEL, r.KelVerified, r.ValidationErrors = drivers.SealedKEL(r.KEL, r.KelVerified, r.ValidationErrors)
+}
+
+// reverify takes away a verified mark the log's own signatures do not earn. A
+// backup's kel_verified is a claim by whoever made the file, so a restore
+// validates the log again and believes the result: a log that fails (an event
+// not signed by the key in force, a log of another identifier) is unverified,
+// which leaves a held verified log in place under refuseAnEarlierLog.
+func (r *ContactKELRecord) reverify() {
+	if !r.KelVerified {
+		return
+	}
+	in, ok := drivers.ValidateKELInputFromRecords(r.AID, r.KEL)
+	if ok {
+		if res, err := drivers.ValidateKELFromBytes(in); err == nil && res.KelVerified {
+			return
+		}
+	}
+	r.KelVerified = false
+	r.ValidationErrors = append(append([]string(nil), r.ValidationErrors...),
+		"the backup marks the log verified, but validating it again does not verify it")
 }
 
 func (s *FileStore) loadContactKELs() (map[string]ContactKELRecord, error) {

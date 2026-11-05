@@ -788,6 +788,7 @@ func mergeContactKELs(ctx context.Context, tx *sql.Tx) (int, error) {
 			_ = json.Unmarshal([]byte(r.errJSON), &offered.ValidationErrors)
 		}
 		offered.sealFromVerifiedBytes()
+		offered.reverify()
 		// The key is whatever the backup's own events establish. A row whose
 		// stated key disagrees is not taken, and is counted with the logs kept.
 		if offered.settleCurrentKey() != nil {

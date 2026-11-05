@@ -143,6 +143,37 @@ func (l *Log) Rotate() *Log {
 	return l
 }
 
+// RotateTo appends a rotation to the first key of other, signed by that key:
+// what an attacker who does not hold the committed next key can write. It is
+// well formed and chains, but the log's own keys did not authorise it.
+func (l *Log) RotateTo(other *Keys) *Log {
+	l.t.Helper()
+	raw, err := keri.BuildRotation(keri.RotationInput{
+		Prefix: l.AID, Keys: []string{other.pubs[0]}, PriorSAID: l.saids[len(l.saids)-1],
+		SN: len(l.Raws), NextDigests: other.digest(l.t, 1),
+	})
+	if err != nil {
+		l.t.Fatal(err)
+	}
+	ev, err := keri.ParseEvent(raw)
+	if err != nil {
+		l.t.Fatal(err)
+	}
+	sig, err := other.signers[0].Sign(raw)
+	if err != nil {
+		l.t.Fatal(err)
+	}
+	qb64, err := keri.MatterQB64(keri.CodeEd25519Sig, sig)
+	if err != nil {
+		l.t.Fatal(err)
+	}
+	l.Raws = append(l.Raws, raw)
+	l.Sigs = append(l.Sigs, qb64)
+	l.saids = append(l.saids, ev.SAID)
+	l.by = append(l.by, -1)
+	return l
+}
+
 // Interact appends an interaction event, signed by the key now in force. The
 // label makes two interactions at the same place differ.
 func (l *Log) Interact(label string) *Log {

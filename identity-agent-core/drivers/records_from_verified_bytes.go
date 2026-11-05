@@ -78,8 +78,10 @@ func SealedKEL(kel []map[string]interface{}, verified bool, problems []string) (
 // key of the last establishment event, read from the raw bytes alone. It checks
 // no signature (the verdict does that); it exists so a stored "current key" can
 // be derived from the events rather than believed. It errors when the events
-// cannot be read or establish no single key.
-func KeyEstablishedBy(records []map[string]interface{}) (string, error) {
+// cannot be read or establish no single key. When aid is not empty, every
+// event must also belong to that identifier: a log of another identity
+// establishes nothing for this one.
+func KeyEstablishedBy(aid string, records []map[string]interface{}) (string, error) {
 	in, ok := ValidateKELInputFromRecords("", records)
 	if !ok {
 		return "", errors.New("the records do not all carry readable event bytes")
@@ -89,6 +91,9 @@ func KeyEstablishedBy(records []map[string]interface{}) (string, error) {
 		ev, err := keri.ParseEvent(raw)
 		if err != nil {
 			return "", fmt.Errorf("event %d does not parse: %w", i, err)
+		}
+		if aid != "" && ev.Identifier != aid {
+			return "", fmt.Errorf("event %d belongs to %s, not %s", i, ev.Identifier, aid)
 		}
 		if !ev.Establishment() {
 			continue
