@@ -67,8 +67,6 @@ def main():
         raw = r["document"].encode()
         if said_of(raw) == r["claimed_said"]:
             fail("%s: the document digests to the identifier it claims" % r["name"])
-        elif carried_id(raw) == r["claimed_said"] and said_of(raw) == r["claimed_said"]:
-            fail("%s: accepted" % r["name"])
     if failures:
         sys.exit(1)
     print("ok: %d vectors" % n)

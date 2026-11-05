@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -116,5 +117,63 @@ func TestAGateAcceptsBothFormsOfASchemaIdentifier(t *testing.T) {
 		if got != c.want {
 			t.Errorf("%s: %v, want %v", c.name, got, c.want)
 		}
+	}
+}
+
+func issueWith(t *testing.T, s *CoreServer, claims, schemaSAID string) *httptest.ResponseRecorder {
+	t.Helper()
+	w := httptest.NewRecorder()
+	s.handleIssueCredential(w, httptest.NewRequest(http.MethodPost, "/",
+		strings.NewReader(`{"claims":`+claims+`,"schema_said":"`+schemaSAID+`"}`)))
+	return w
+}
+
+// Employee Authorization needs more than an organisation name, and declares no
+// salary: a strict verifier would refuse either, so the core does not issue it.
+func TestACredentialThatFailsItsSchemaIsNotIssued(t *testing.T) {
+	s := agentWithDerivedIdentity(t)
+	emp := schemas.EmployeeAuthorization.SAID
+	w := issueWith(t, s, `{"org_name":"x"}`, emp)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), `\"org_aid\"`) {
+		t.Fatalf("missing fields: %d %s", w.Code, w.Body)
+	}
+	w = issueWith(t, s, `{"org_name":"x","org_aid":"E1","employee_name":"n","role":"r","salary":"1"}`, emp)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), `\"salary\"`) {
+		t.Fatalf("undeclared field: %d %s", w.Code, w.Body)
+	}
+}
+
+// The guardianship credential issued automatically is held to the schema too:
+// a type the schema does not allow makes no guardianship and no credential.
+func TestAGuardianshipOutsideTheSchemasValuesIsRefused(t *testing.T) {
+	s := agentWithDerivedIdentity(t)
+	w := httptest.NewRecorder()
+	s.handleCreateGuardianship(w, httptest.NewRequest(http.MethodPost, "/",
+		strings.NewReader(`{"type":"parent","dependent_name":"Kid"}`)))
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "guardian_type") {
+		t.Fatalf("got %d %s", w.Code, w.Body)
+	}
+	if recs, _ := s.DataStore.GetGuardianships(); len(recs) != 0 {
+		t.Fatalf("a guardianship was saved: %v", recs)
+	}
+}
+
+// Entries cached before fetched schemas were checked are not listed.
+func TestTheCachedSchemaListOmitsEntriesThatDoNotDigestToTheirKey(t *testing.T) {
+	s := agentWithDerivedIdentity(t)
+	good := schemas.Guardianship
+	s.DataStore.SaveCredentialSchema(store.CredentialSchemaRecord{SAID: good.SAID, SchemaJson: good.JSON})
+	s.DataStore.SaveCredentialSchema(store.CredentialSchemaRecord{SAID: schemas.ProofOfAge.SAID, SchemaJson: good.JSON})
+	w := httptest.NewRecorder()
+	s.handleGetCredentialSchemas(w, httptest.NewRequest(http.MethodGet, "/", nil))
+	var out struct {
+		Count   int                            `json:"count"`
+		Schemas []store.CredentialSchemaRecord `json:"schemas"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Count != 1 || len(out.Schemas) != 1 || out.Schemas[0].SAID != good.SAID {
+		t.Fatalf("listed %+v", out)
 	}
 }

@@ -2197,6 +2197,15 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// A claims block the schema would refuse in a strict verifier is not issued.
+	// A schema this core does not carry is the caller's to get right.
+	if built := schemas.Get(req.SchemaSaid); built != nil {
+		if err := built.CheckClaims(req.Claims); err != nil {
+			writeError(w, http.StatusBadRequest, "Claims do not match the schema", err.Error())
+			return
+		}
+	}
+
 	identity, err := s.DataStore.GetIdentity()
 	if err != nil || identity == nil {
 		writeError(w, http.StatusBadRequest, "No identity found", "Create an identity before issuing credentials")
@@ -2503,10 +2512,18 @@ func (s *CoreServer) handleGetBuiltinSchema(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *CoreServer) handleGetCredentialSchemas(w http.ResponseWriter, r *http.Request) {
-	schemas, err := s.DataStore.GetCredentialSchemas()
+	stored, err := s.DataStore.GetCredentialSchemas()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to read credential schemas", err.Error())
 		return
+	}
+	// Only an entry that digests to the identifier it is stored under is listed;
+	// one cached before that was checked is ignored, and fetched again on demand.
+	schemas := stored[:0:0]
+	for _, c := range stored {
+		if got, verr := keri.VerifySchema([]byte(c.SchemaJson)); verr == nil && got == c.SAID {
+			schemas = append(schemas, c)
+		}
 	}
 	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"schemas": schemas,
