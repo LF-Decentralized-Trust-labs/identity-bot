@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../config/agent_config.dart';
+import 'finding_an_agent_that_moved.dart';
 import 'which_half_this_app_is_running.dart';
 import 'the_owner_at_this_computer.dart';
 
@@ -25,8 +26,19 @@ import 'the_owner_at_this_computer.dart';
 /// holds more than one identity, and one of them may live on a sealed machine
 /// while another is local — so the answer is a property of the open profile,
 /// never of the installation.
-Future<void> pointThisAppAtItsAgent({http.Client? using}) async {
-  final half = await WhichHalfThisAppIsRunning.now();
+///
+/// IF THE RECORDED AGENT NO LONGER ANSWERS, this looks for it again before
+/// telling the core anything — see [FindingAnAgentThatMoved]. [whereItMayHaveGone]
+/// supplies leads (an address the app was given at founding, say); none of them
+/// is believed until the identifier is proven to match, and a lead that is not
+/// proven changes nothing. What came of it is returned so the app can say so in
+/// plain words rather than failing later with an error that names no cause.
+Future<WhereTheAgentWent> pointThisAppAtItsAgent({
+  http.Client? using,
+  Future<List<String>> Function()? whereItMayHaveGone,
+  FindingAnAgentThatMoved? finder,
+}) async {
+  var half = await WhichHalfThisAppIsRunning.now();
   if (half.couldNotTell) {
     // Nothing is changed on a non-answer. Clearing the origin would point a
     // running front end back at its own core, and telling that core to forget
@@ -34,7 +46,23 @@ Future<void> pointThisAppAtItsAgent({http.Client? using}) async {
     // that may last one read.
     debugPrint('[controller] leaving this app as it is: which half it runs '
         'could not be read');
-    return;
+    return const WhereTheAgentWent.notAFrontEnd();
+  }
+  var outcome = const WhereTheAgentWent.notAFrontEnd();
+  if (half.isAController) {
+    final find = finder ?? FindingAnAgentThatMoved(client: using);
+    try {
+      outcome = await find.findAgain(
+        current: half,
+        hints: whereItMayHaveGone == null ? const [] : await whereItMayHaveGone(),
+      );
+    } catch (e) {
+      // Looking must never stop the app starting.
+      debugPrint('[controller] could not look for a moved agent: $e');
+    } finally {
+      if (finder == null) find.dispose();
+    }
+    if (outcome.moved) half = await WhichHalfThisAppIsRunning.now();
   }
   AgentConfig.agentOrigin = half.agentOrigin;
   AgentConfig.agentAid = half.isAController ? half.agentAid : '';
@@ -47,6 +75,7 @@ Future<void> pointThisAppAtItsAgent({http.Client? using}) async {
     agentOrigin: half.agentOrigin,
     using: using,
   );
+  return outcome;
 }
 
 /// Tells the core on this computer which half it is running.
