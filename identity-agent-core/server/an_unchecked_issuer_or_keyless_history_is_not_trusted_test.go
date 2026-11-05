@@ -74,7 +74,7 @@ func TestResolvingAContactWhoseCheckedHistoryNamesNoKeyDoesNotVerifyIt(t *testin
 // otherwise; with a verified one it sees it, so the test is not vacuous.
 func TestTheVerifyRoutesGiveTheDriverOnlyAVerifiedIssuerLog(t *testing.T) {
 	const issuer = "EIssuerOfThePresentedCredential"
-	acdc := base64Of(`{"i":"` + issuer + `","d":"ESaid","s":"ESchema"}`)
+	acdc := aRealCredentialFrom(t, issuer)
 	routes := map[string]struct {
 		call func(s *CoreServer, w http.ResponseWriter, r *http.Request)
 		body map[string]any

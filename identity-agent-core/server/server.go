@@ -2695,26 +2695,29 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Extract issuer AID from the ACDC JSON (which is base64-encoded) to look up its stored KEL.
-	var acdcBody map[string]interface{}
+	// The credential is read once, as the engine reads it; the issuer and the
+	// registry both come from that. A body the server cannot read is refused.
+	cred, err := readCredentialHere(req.AcdcJson)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "The credential cannot be read", err.Error())
+		return
+	}
 	var issuerKelEvents []map[string]interface{}
-	if acdcBytes, err := base64.StdEncoding.DecodeString(req.AcdcJson); err == nil {
-		if err2 := json.Unmarshal(acdcBytes, &acdcBody); err2 == nil {
-			if issuerAid, ok := acdcBody["i"].(string); ok && issuerAid != "" {
-				// Try contact KEL first (cross-instance: issuer is a remote contact).
-				if kelRecord, err3 := s.DataStore.GetContactKEL(issuerAid); err3 == nil && kelRecord != nil && kelRecord.KelVerified {
-					issuerKelEvents = unwrapEventJSON(kelRecord.KEL)
-				}
-				// Fall back to own KEL (self-issued: issuer is this instance).
-				if issuerKelEvents == nil {
-					if ownEvents, err3 := s.DataStore.GetEvents(issuerAid); err3 == nil && len(ownEvents) > 0 {
-						issuerKelEvents = eventRecordsToKEDs(ownEvents)
-					}
-				}
+	if cred.Issuer != "" {
+		// Try contact KEL first (cross-instance: issuer is a remote contact).
+		if kelRecord, err3 := s.DataStore.GetContactKEL(cred.Issuer); err3 == nil && kelRecord != nil && kelRecord.KelVerified {
+			issuerKelEvents = unwrapEventJSON(kelRecord.KEL)
+		}
+		// Fall back to own KEL (self-issued: issuer is this instance).
+		if issuerKelEvents == nil {
+			if ownEvents, err3 := s.DataStore.GetEvents(cred.Issuer); err3 == nil && len(ownEvents) > 0 {
+				issuerKelEvents = eventRecordsToKEDs(ownEvents)
 			}
 		}
 	}
 
+	// Revocation is read from the registry's transaction log, which this agent
+	// supplies only where it holds the registry state itself.
 	driverReq := &drivers.DriverVerifyCredentialRequest{
 		AcdcJson:           req.AcdcJson,
 		IssuerKelEvents:    issuerKelEvents,
@@ -2725,19 +2728,14 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 		TrustedSchemaSaids: req.TrustedSchemaSaids,
 	}
 
-	result, err := s.KeriDriver.VerifyCredential(driverReq)
+	result, err := s.verifyCredentialHere(driverReq, cred)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Credential verification failed", err.Error())
 		return
 	}
 
-	if result != nil && issuerKelEvents != nil {
-		issuerAid := ""
-		if acdcBody != nil {
-			if ia, ok := acdcBody["i"].(string); ok {
-				issuerAid = ia
-			}
-		}
+	if issuerKelEvents != nil {
+		issuerAid := cred.Issuer
 		if issuerAid != "" {
 			if wRes := s.runWatcherOnKel(r.Context(), issuerAid, issuerKelEvents, watcher.SourceCredential, "", nil); wRes != nil && wRes.Blocked {
 				writeError(w, http.StatusConflict, "Issuer KEL duplicity detected", wRes.Reason)
@@ -2788,36 +2786,40 @@ func (s *CoreServer) handleVerifyCredentialChain(w http.ResponseWriter, r *http.
 		Errors     []string               `json:"errors"`
 		Valid      bool                   `json:"valid"`
 		EdgeLabel  string                 `json:"edge_label,omitempty"` // label used in parent's edges block
+		// RevocationStatus and RevocationReason are as credential/verify reports them.
+		RevocationStatus string `json:"revocation_status,omitempty"`
+		RevocationReason string `json:"revocation_reason,omitempty"`
 	}
 
 	var chain []ChainStep
 	var allErrors []string
 	warnings := []string{}
 
-	// verifyOne: call the driver to verify a single ACDC, add a ChainStep, return the parsed ACDC body.
-	verifyOne := func(jsonB64, edgeLabel string) (map[string]interface{}, bool) {
-		// Decode to extract issuer AID for KEL lookup.
-		var acdcBody map[string]interface{}
-		if decoded, err := base64.StdEncoding.DecodeString(jsonB64); err == nil {
-			_ = json.Unmarshal(decoded, &acdcBody)
+	// verifyOne: call the driver to verify a single ACDC, add a ChainStep, return the parsed credential.
+	verifyOne := func(jsonB64, edgeLabel string) (*keri.Credential, bool) {
+		step := ChainStep{EdgeLabel: edgeLabel, Errors: []string{}}
+		cred, err := readCredentialHere(jsonB64)
+		if err != nil {
+			// A body the server cannot read is refused, not verified on a guess.
+			step.Errors = append(step.Errors, err.Error())
+			allErrors = append(allErrors, err.Error())
+			chain = append(chain, step)
+			return nil, false
 		}
 
 		var issuerKelEvents []map[string]interface{}
-		issuerAid := ""
-		if acdcBody != nil {
-			if aid, ok := acdcBody["i"].(string); ok {
-				issuerAid = aid
-				if kelRecord, err := s.DataStore.GetContactKEL(aid); err == nil && kelRecord != nil && kelRecord.KelVerified {
-					issuerKelEvents = unwrapEventJSON(kelRecord.KEL)
+		issuerAid := cred.Issuer
+		if issuerAid != "" {
+			if kelRecord, err := s.DataStore.GetContactKEL(issuerAid); err == nil && kelRecord != nil && kelRecord.KelVerified {
+				issuerKelEvents = unwrapEventJSON(kelRecord.KEL)
+			}
+			if issuerKelEvents == nil {
+				if ownEvents, err := s.DataStore.GetEvents(issuerAid); err == nil && len(ownEvents) > 0 {
+					issuerKelEvents = eventRecordsToKEDs(ownEvents)
 				}
-				if issuerKelEvents == nil {
-					if ownEvents, err := s.DataStore.GetEvents(aid); err == nil && len(ownEvents) > 0 {
-						issuerKelEvents = eventRecordsToKEDs(ownEvents)
-					}
-				}
-				if issuerKelEvents == nil {
-					warnings = append(warnings, "No KEL found for issuer "+aid+"; issuer checks skipped")
-				}
+			}
+			if issuerKelEvents == nil {
+				warnings = append(warnings, "No KEL found for issuer "+issuerAid+"; issuer checks skipped")
 			}
 		}
 
@@ -2825,17 +2827,11 @@ func (s *CoreServer) handleVerifyCredentialChain(w http.ResponseWriter, r *http.
 			AcdcJson:        jsonB64,
 			IssuerKelEvents: issuerKelEvents,
 		}
-		result, err := s.KeriDriver.VerifyCredential(driverReq)
+		result, err := s.verifyCredentialHere(driverReq, cred)
 
-		step := ChainStep{
-			EdgeLabel: edgeLabel,
-			IssuerAid: issuerAid,
-			Errors:    []string{},
-		}
-		if acdcBody != nil {
-			step.Said, _ = acdcBody["d"].(string)
-			step.SchemaSaid, _ = acdcBody["s"].(string)
-		}
+		step.IssuerAid = issuerAid
+		step.Said = cred.SAID
+		step.SchemaSaid = cred.SchemaSAID
 		if err != nil {
 			step.Valid = false
 			step.Errors = append(step.Errors, err.Error())
@@ -2844,20 +2840,23 @@ func (s *CoreServer) handleVerifyCredentialChain(w http.ResponseWriter, r *http.
 			step.Valid = result.Verified
 			step.Checks = result.Checks
 			step.Errors = result.Errors
+			step.RevocationStatus = result.RevocationStatus
+			step.RevocationReason = result.RevocationReason
 			if !result.Verified {
 				allErrors = append(allErrors, result.Errors...)
 			}
 		}
 		chain = append(chain, step)
-		return acdcBody, step.Valid
+		return cred, step.Valid
 	}
 
 	// Verify the top-level credential.
-	topBody, _ := verifyOne(acdcJsonB64, "")
+	top, _ := verifyOne(acdcJsonB64, "")
 
 	// Walk the 'e' edges block to verify parent credentials.
-	if topBody != nil {
-		if edgesRaw, ok := topBody["e"]; ok {
+	if top != nil && len(top.Edges) > 0 {
+		var edgesRaw interface{}
+		if json.Unmarshal(top.Edges, &edgesRaw) == nil {
 			if edgesMap, ok := edgesRaw.(map[string]interface{}); ok {
 				for label, edgeRaw := range edgesMap {
 					if label == "d" {

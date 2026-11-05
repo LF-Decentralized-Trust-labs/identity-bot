@@ -199,12 +199,34 @@ class VerificationResult {
   final List<String> errors;
   final String acdcSaid;
 
+  /// What the core could establish about revocation, as it reports it:
+  /// `not_revoked`, `revoked`, or `not checked: <why>`. Null when the core
+  /// said nothing (an older core).
+  ///
+  /// [verified] can be true while this reads `not checked: ...`: the core
+  /// returns a verdict without a revocation check where it holds no registry
+  /// state for the credential. Whether that counts as acceptable is the
+  /// caller's decision; use [revocationChecked] to tell the two apart.
+  final String? revocationStatus;
+
+  /// Why [revocationStatus] is what it is, when it is not `not_revoked`.
+  final String? revocationReason;
+
   VerificationResult({
     required this.verified,
     required this.checks,
     required this.errors,
     required this.acdcSaid,
+    this.revocationStatus,
+    this.revocationReason,
   });
+
+  /// True only when the core read the credential's revocation state and found
+  /// it live. False for `revoked`, for any `not checked` and for no status.
+  bool get revocationChecked => revocationStatus == 'not_revoked';
+
+  /// True when the core says the credential has been revoked.
+  bool get revoked => revocationStatus == 'revoked';
 }
 
 abstract class KeriService {
