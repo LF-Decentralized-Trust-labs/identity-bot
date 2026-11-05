@@ -26,6 +26,7 @@ func TestResolvingAContactWhoseCheckedHistoryNamesNoKeyDoesNotVerifyIt(t *testin
 		{"the check names no key", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("IA_ALLOW_LOCAL_SITES", "1") // the peer is a test server on this machine
 			const peer = "EPeerResolvedByAddress"
 			s := witnessWithSeed(t, 1)
 			verdict := &drivers.DriverValidateKELResponse{KelVerified: true, CurrentPublicKey: tc.key}
