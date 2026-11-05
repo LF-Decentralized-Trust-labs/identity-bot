@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -341,12 +340,24 @@ func TestARotationNeitherBreaksAnOldMessageNorLetsTheRetiredKeyVouch(t *testing.
 
 	// The contact going, and its record being refetched shorter, leave the
 	// proof intact: the history it was received under is kept with it.
-	if err := m.receiver.DataStore.DeleteContact(m.senderAID); err != nil {
+	//
+	// The store no longer lets a shorter log replace the one it holds, so a
+	// shorter one arrives only where the machine's records were lost and rebuilt
+	// (a restore from an older backup, a new database): a fresh store, holding
+	// the contact's log as it stood at the first key only.
+	rebuilt, err := store.NewSQLiteStore(t.TempDir())
+	if err != nil {
 		t.Fatal(err)
 	}
-	// The store now refuses the shorter record outright; either way the proof holds.
-	if err := m.receiver.DataStore.SaveContactKEL(store.ContactKELRecord{AID: m.senderAID}); err != nil &&
-		!errors.Is(err, store.ErrLogEndsEarlier) {
+	t.Cleanup(func() { _ = rebuilt.Close() })
+	if err := rebuilt.SaveIdentity(store.IdentityState{AID: m.receiver.thisIdentityAgentsIdentifier(), PublicKey: "DPUB"}); err != nil {
+		t.Fatal(err)
+	}
+	m.receiver.DataStore = rebuilt
+	if err := rebuilt.SaveContactKEL(store.ContactKELRecord{
+		AID: m.senderAID, KelVerified: true, CurrentPublicKey: key1,
+		KEL: withTheBytesItWasVerifiedBy(t, icp),
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := m.receiver.provedSender(before); err != nil {

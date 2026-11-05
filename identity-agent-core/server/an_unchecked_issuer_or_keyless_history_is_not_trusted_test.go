@@ -17,6 +17,9 @@ import (
 // names no key it ends on: the only key left is the one the peer served beside
 // the log, which nothing checked.
 func TestResolvingAContactWhoseCheckedHistoryNamesNoKeyDoesNotVerifyIt(t *testing.T) {
+	// The peer is a local test server, which the owner allows in their own
+	// environment and a stranger's address cannot.
+	t.Setenv("IA_ALLOW_LOCAL_SITES", "1")
 	for _, tc := range []struct {
 		name         string
 		key          string

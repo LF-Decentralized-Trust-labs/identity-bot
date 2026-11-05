@@ -13,6 +13,7 @@ import (
 	"identity-agent-core/drivers/driverfake"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
+	"identity-agent-core/drivers/signedlog"
 	"identity-agent-core/store"
 )
 
@@ -155,20 +156,21 @@ func TestTheFoundersCurrentKeyNamesThem(t *testing.T) {
 }
 
 func TestAnOwnerWhoHasRotatedShowsNoNameUntilTheySignAgain(t *testing.T) {
-	oldSeed, newSeed := seedOf(1), seedOf(2)
-	s := anOrgWithOwners(t, []string{"EFOUNDER"}, vouchRow(t, oldSeed, "EFOUNDER", "EORG", "Ada", "Ada"))
+	oldSeed := seedOf(1)
+	// The founder's real signed history: founded on the old key, rotated to the
+	// new one. Its identifier is derived from the inception, so it is the
+	// founder's AID throughout.
+	log := signedlog.Incept(t, signedlog.KeysFromSeeds(t, oldSeed, seedOf(2))).Rotate()
+	founder := log.AID
+	s := anOrgWithOwners(t, []string{founder}, vouchRow(t, oldSeed, founder, "EORG", "Ada", "Ada"))
 	// Sealed at pairing with the old key; nothing updates it on rotation. The
 	// verified log knows the new one.
-	if err := s.SealOwnerAuthority(OwnerAuthority{AID: "EFOUNDER", PublicKey: keyOf(oldSeed)}); err != nil {
+	if err := s.SealOwnerAuthority(OwnerAuthority{AID: founder, PublicKey: keyOf(oldSeed)}); err != nil {
 		t.Fatal(err)
 	}
-	// A rotated log is the whole history, so it names the old key too.
 	if err := s.DataStore.SaveContactKEL(store.ContactKELRecord{
-		AID: "EFOUNDER", KelVerified: true, CurrentPublicKey: keyOf(newSeed), EventsValidated: 2,
-		KEL: []map[string]interface{}{
-			{"t": "icp", "k": []interface{}{keyOf(oldSeed)}},
-			{"t": "rot", "k": []interface{}{keyOf(newSeed)}},
-		}}); err != nil {
+		AID: founder, KelVerified: true, CurrentPublicKey: log.Key(), EventsValidated: log.Len(),
+		KEL: log.Records()}); err != nil {
 		t.Fatal(err)
 	}
 	if names, _ := listedOwners(t, s); len(names) != 0 {

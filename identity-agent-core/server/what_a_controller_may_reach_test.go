@@ -16,6 +16,7 @@ import (
 	"identity-agent-core/drivers/driverfake"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
+	"identity-agent-core/drivers/signedlog"
 	"identity-agent-core/store"
 
 	"github.com/go-chi/chi/v5"
@@ -692,6 +693,11 @@ func seedForGrant(n byte) []byte {
 func TestAnOwnerWhoRotatesIsNotLockedOutOfTheirOwnMachine(t *testing.T) {
 	s := serverWithIdentity(t, "EMACHINE")
 
+	// The owner's real signed history: founded on one key, rotated to the next.
+	keys := signedlog.NewKeys(t, 2)
+	log := signedlog.Incept(t, keys).Rotate()
+	owner := log.AID
+
 	// The machine's inception names its owner.
 	s.KeriDriver = &driverfake.Engine{
 		GetKelFunc: func(string) (*drivers.DriverKelResponse, error) {
@@ -700,30 +706,24 @@ func TestAnOwnerWhoRotatesIsNotLockedOutOfTheirOwnMachine(t *testing.T) {
 				KEL: []map[string]interface{}{{
 					"t": "icp", "i": "EMACHINE",
 					"a": []interface{}{map[string]interface{}{
-						"i": "ETHEOWNER", "s": "0", "d": "ETHEOWNER"}},
+						"i": owner, "s": "0", "d": owner}},
 				}},
 			}, nil
 		},
 	}
 
 	// Sealed at pairing: the owner's key as it was THEN.
-	old := grantFor(60, GradeEnrolled)
 	if err := s.SealOwnerAuthority(OwnerAuthority{
-		AID: "ETHEOWNER", PublicKey: old.PublicKey,
+		AID: owner, PublicKey: keys.Pub(0),
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	// The owner rotates. Their new key is recorded from a log this agent
 	// verified — the only place a rotation can honestly show up.
-	rotated := grantFor(61, GradeEnrolled)
 	if err := s.DataStore.SaveContactKEL(store.ContactKELRecord{
-		AID: "ETHEOWNER", KelVerified: true,
-		KEL: []map[string]interface{}{
-			{"t": "icp", "i": "ETHEOWNER", "k": []interface{}{old.PublicKey}},
-			{"t": "rot", "i": "ETHEOWNER", "k": []interface{}{rotated.PublicKey}},
-		},
-		CurrentPublicKey: rotated.PublicKey,
+		AID: owner, KelVerified: true, KEL: log.Records(),
+		CurrentPublicKey: log.Key(), EventsValidated: log.Len(),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -732,11 +732,11 @@ func TestAnOwnerWhoRotatesIsNotLockedOutOfTheirOwnMachine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the machine could not resolve its own owner: %v", err)
 	}
-	if authority.PublicKey == old.PublicKey {
+	if authority.PublicKey == keys.Pub(0) {
 		t.Fatal("the machine is still checking against the key its owner replaced, " +
 			"so the owner is locked out of their own machine permanently")
 	}
-	if authority.PublicKey != rotated.PublicKey {
+	if authority.PublicKey != keys.Pub(1) {
 		t.Fatalf("resolved to neither the old nor the rotated key: %q", authority.PublicKey)
 	}
 }
