@@ -517,6 +517,16 @@ are no allowances for an extra digest or an extra anchor, so a core that holds
 a different seed, or none, cannot add a key of its own, and no proof that the
 core holds the phrase's seed is needed.
 
+**A founding's `b` and `bt` are what the app confirmed.** The app asks the core
+for the witnesses it would name (`GET /api/events/witnesses-for-a-founding`,
+section 3) and names only those that answer, each by its own signed answer to a
+fresh nonce under the key it is named by. A witness that does not answer, or
+answers with another key, is left out and `bt` is lowered to what remains,
+never above the count. Where none answers, or the core proposes none, the
+founding names none, the caller is told so, and the identity's key state is
+read as uncorroborated (section 9). The app sends the founding to its witnesses
+itself and counts only receipts that verify, as for any other event.
+
 **"No other field" is this project's choice, not KERI's.** KERI does not
 require a signer to refuse fields it did not expect; this signer does, because
 a field it cannot judge is one it should not authorise. When a KERI version

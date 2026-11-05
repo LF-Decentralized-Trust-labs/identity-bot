@@ -46,6 +46,13 @@ class AWitness {
   /// Answers in another witness's name.
   bool namesAnother = false;
 
+  /// Answers who it is (a core confirms that before it proposes a witness) and
+  /// nothing else, as a witness that has since stopped does not.
+  bool mute = false;
+
+  /// Signs its answer to where its log ends with another witness's key.
+  bool tipSignedByAnother = false;
+
   /// Signs, as the end of the log it holds, a digest that is not the digest
   /// of the event its copy ends on: what a wrong address relaying a real
   /// witness's signed answer beside another copy amounts to.
@@ -72,6 +79,8 @@ class AWitness {
     _digests.clear();
     signsAnotherTip = false;
     offline = false;
+    mute = false;
+    tipSignedByAnother = false;
     forgesReceipts = false;
     namesAnother = false;
     witnessesOnly = null;
@@ -87,7 +96,11 @@ class AWitness {
     }
     final path = req.uri.pathSegments;
     try {
-      if (req.method == 'POST' && req.uri.path == '/api/witness/event') {
+      if (req.method == 'GET' && req.uri.path == '/api/health') {
+        _json(req.response, 200, {'service_aid': aid});
+      } else if (mute) {
+        req.response.statusCode = 503;
+      } else if (req.method == 'POST' && req.uri.path == '/api/witness/event') {
         sent++;
         final body = jsonDecode(await utf8.decodeStream(req)) as Map;
         await _event(
@@ -109,7 +122,14 @@ class AWitness {
           'sn': sn,
           'said': said,
           'witness_aid': aid,
-          'signature': _sign('witness-kel-tip/v1\n$a\n$nonce\n$sn\n$said'),
+          'signature': tipSignedByAnother
+              ? qb64(
+                  '0B',
+                  Uint8List.fromList(ed.sign(
+                      ed.generateKey().privateKey,
+                      Uint8List.fromList(utf8.encode(
+                          'witness-kel-tip/v1\n$a\n$nonce\n$sn\n$said')))))
+              : _sign('witness-kel-tip/v1\n$a\n$nonce\n$sn\n$said'),
         });
       } else if (req.method == 'GET' &&
           path.length == 6 &&

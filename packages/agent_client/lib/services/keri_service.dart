@@ -16,6 +16,13 @@ class InceptionResult {
   final String cesrSignature;
   // rawBytesB64: the inception event bytes that were signed (base64).
   final String rawBytesB64;
+  // The witnesses the founding names, and how many must receipt it.
+  final List<String> witnesses;
+  final int witnessThreshold;
+  // Why the founding names no witness, where it names none; null otherwise.
+  // An identity founded this way has nothing but its core's copy of its log to
+  // corroborate it, and its key state is read as uncorroborated.
+  final String? unwitnessedBecause;
 
   InceptionResult({
     required this.aid,
@@ -24,6 +31,9 @@ class InceptionResult {
     required this.created,
     this.cesrSignature = '',
     this.rawBytesB64 = '',
+    this.witnesses = const [],
+    this.witnessThreshold = 0,
+    this.unwitnessedBecause,
   });
 }
 

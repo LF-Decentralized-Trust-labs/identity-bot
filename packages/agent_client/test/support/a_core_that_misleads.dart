@@ -13,6 +13,8 @@ import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:http/http.dart' as http;
 import 'package:test/test.dart';
 
+import 'a_witness.dart';
+
 /// The secret a test's core is started with, as an app hands it the core it
 /// starts.
 const ownerSecret = 'a-secret-only-this-test-and-its-core-know';
@@ -229,12 +231,41 @@ class ACore {
   Future<void> close() async => _process.kill();
 }
 
+/// Another core, which proposes [witnesses] (at the addresses they are
+/// reached at) to the identities it founds, as a core with those witnesses in
+/// its registry does, and none by default: the registry that ships with the
+/// core names witnesses on the internet, which a test does not reach. A core
+/// confirms who answers at an address before it proposes it.
 Future<ACore> anotherCore(String bin, KeyMath km,
-    {Directory? dataDir, int? port0}) async {
+    {Directory? dataDir,
+    int? port0,
+    List<AWitness> witnesses = const []}) async {
   final port = port0 ?? 20000 + Random().nextInt(20000);
   final base = 'http://127.0.0.1:$port';
   final data =
       dataDir ?? await Directory.systemTemp.createTemp('witnessed-core-data');
+  {
+    // The operator's own registry file, which replaces the shipped entry of
+    // the same id (and with it the shipped witnesses).
+    await Directory('${data.path}/providers').create(recursive: true);
+    await File('${data.path}/providers/tests.json').writeAsString(jsonEncode({
+      'version': 1,
+      'providers': [
+        {
+          'id': 'grapeid.org',
+          'operator': 'tests',
+          'endpoints': [
+            for (final w in witnesses)
+              {
+                'capability': 'witness',
+                'url': w.base.toString().replaceFirst(RegExp(r'/$'), ''),
+                'aid': w.aid
+              }
+          ]
+        }
+      ]
+    }));
+  }
   final p = await Process.start(bin, [], environment: {
     ...Platform.environment,
     'PORT': '$port',

@@ -192,6 +192,15 @@ class TheWitnessesOfThisDevicesEvents {
     return out;
   }
 
+  /// Whether witness [w] answers at its address in its own name: its signed
+  /// answer to a fresh nonce checks under the key [w] is named by. Asked about
+  /// [w] itself, which no log is held under, so a witness answers that it holds
+  /// nothing; what is checked is who answers.
+  Future<bool> answersInItsOwnName(String w) async {
+    final base = _where.whereIs(w);
+    return base != null && await _tip(base, w, w) != null;
+  }
+
   /// The whole copy of [aid]'s log witness [w] holds, judged from the
   /// founding; null when it cannot be reached, holds nothing, or its copy does
   /// not verify. Where it ends is taken from its signed answer to a fresh

@@ -12,6 +12,7 @@ import 'the_event_this_device_expects.dart' show sameContent;
 import 'the_identity_this_device_holds.dart';
 import 'the_key_events_this_device_makes.dart';
 import 'the_key_state_this_device_reads.dart';
+import 'the_witnesses_a_founding_names.dart';
 import 'the_witnesses_of_this_devices_events.dart';
 import 'the_key_in_force.dart';
 import 'the_key_is_not_held_by_the_core.dart';
@@ -85,9 +86,12 @@ class LocalCoreKeriService extends KeriService {
 
   final KeyMath? keyMath;
 
-  /// How this device makes its identity's key events.
-  TheKeyEventsThisDeviceMakes get _makes =>
-      TheKeyEventsThisDeviceMakes(_client, _baseUrl, _km, held: _held);
+  /// How this device makes the founding of its identity, sending it to
+  /// [witnesses] as well as to its core.
+  TheKeyEventsThisDeviceMakes _makesFounding(
+          TheWitnessesOfThisDevicesEvents witnesses) =>
+      TheKeyEventsThisDeviceMakes(_client, _baseUrl, _km,
+          held: _held, witnesses: witnesses);
 
   KeyMath get _km {
     final km = keyMath;
@@ -230,10 +234,16 @@ class LocalCoreKeriService extends KeriService {
   }) async {
     // Prepared by the core, checked here against the founding this phrase
     // makes, reserved, signed and committed: the core adds nothing this
-    // device did not sign (TheKeyEventsThisDeviceMakes).
+    // device did not sign (TheKeyEventsThisDeviceMakes). It names the
+    // witnesses the core proposes that answer in their own name, and this
+    // device sends the founding to them itself.
     final seed = Bip39.mnemonicToSeed(code.split(' '));
     try {
-      final founded = await _makes.found(seed);
+      final chosen =
+          await TheWitnessesAFoundingNames(_client, _baseUrl, _km).choose();
+      final founded = await _makesFounding(TheWitnessesOfThisDevicesEvents(
+              _client, _km, KnownWitnesses(chosen.addresses)))
+          .found(seed, witnesses: chosen.witnesses, toad: chosen.toad);
       return InceptionResult(
         aid: founded.aid,
         publicKey: KeyManager.publicKeyAt(seed, 0),
@@ -241,6 +251,9 @@ class LocalCoreKeriService extends KeriService {
         created: DateTime.now().toIso8601String(),
         cesrSignature: founded.signatures.first,
         rawBytesB64: founded.bytesB64,
+        witnesses: chosen.witnesses,
+        witnessThreshold: chosen.toad,
+        unwitnessedBecause: chosen.unwitnessed,
       );
     } finally {
       seed.fillRange(0, seed.length, 0);
