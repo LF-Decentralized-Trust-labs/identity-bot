@@ -18,6 +18,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 func (s *CoreServer) mountBackupRoutes(r chi.Router) {
@@ -125,8 +127,7 @@ func (s *CoreServer) handleBackupExport(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "Export failed", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"success":        true,
 		"path":           req.DestPath,
 		"size_bytes":     result.Size,
@@ -142,8 +143,7 @@ func (s *CoreServer) handleBackupStatus(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "Status failed", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(status)
+	jsonreply.Write(w, http.StatusOK, status)
 }
 
 func (s *CoreServer) handleBackupGetConfig(w http.ResponseWriter, r *http.Request) {
@@ -152,8 +152,7 @@ func (s *CoreServer) handleBackupGetConfig(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "Load config failed", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(cfg)
+	jsonreply.Write(w, http.StatusOK, cfg)
 }
 
 func (s *CoreServer) handleBackupPutConfig(w http.ResponseWriter, r *http.Request) {
@@ -263,8 +262,7 @@ func (s *CoreServer) handleBackupPutConfig(w http.ResponseWriter, r *http.Reques
 	if cfg.Enabled {
 		s.backupService().Scheduler.StartDaily()
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	jsonreply.Write(w, http.StatusOK, map[string]bool{"success": true})
 }
 
 type backupDestinationRequest struct {
@@ -294,8 +292,7 @@ func (s *CoreServer) handleBackupUpsertDestination(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusInternalServerError, "Save failed", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(req.Destination)
+	jsonreply.Write(w, http.StatusOK, req.Destination)
 }
 
 func (s *CoreServer) handleBackupDeleteDestination(w http.ResponseWriter, r *http.Request) {
@@ -376,8 +373,7 @@ func (s *CoreServer) handleBackupReceive(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "Store failed", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(backup.PushResponse{
+	jsonreply.Write(w, http.StatusOK, backup.PushResponse{
 		Received:   true,
 		StoredPath: path,
 		Message:    "opaque archive stored",
@@ -397,8 +393,7 @@ func (s *CoreServer) handleBackupListReceived(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusInternalServerError, "List failed", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"archives": paths})
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{"archives": paths})
 }
 
 func (s *CoreServer) handleBackupTrigger(w http.ResponseWriter, r *http.Request) {
@@ -413,8 +408,7 @@ func (s *CoreServer) handleBackupTrigger(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	s.notifyBackupEvent(backup.EventManual)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "scheduled"})
+	jsonreply.Write(w, http.StatusOK, map[string]string{"status": "scheduled"})
 }
 
 type backupCredentialsRequest struct {
@@ -432,8 +426,7 @@ func (s *CoreServer) handleBackupSaveCredentials(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusInternalServerError, "Save credentials failed", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"credential_id": id})
+	jsonreply.Write(w, http.StatusOK, map[string]string{"credential_id": id})
 }
 
 func (s *CoreServer) handleBackupPull(w http.ResponseWriter, r *http.Request) {
@@ -459,8 +452,7 @@ func (s *CoreServer) handleBackupPull(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Pull failed", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"object_key":  key,
 		"size_bytes":  len(data),
 		"archive_b64": backup.EncodeB64(data),
@@ -546,8 +538,7 @@ func (s *CoreServer) handleBackupHeld(w http.ResponseWriter, r *http.Request) {
 	} else if u != nil {
 		body["unattributed"] = u
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(body)
+	jsonreply.Write(w, http.StatusOK, body)
 }
 
 func (s *CoreServer) handleBackupGetOffer(w http.ResponseWriter, r *http.Request) {
@@ -563,8 +554,7 @@ func (s *CoreServer) handleBackupGetOffer(w http.ResponseWriter, r *http.Request
 		// than as zero, because this value is shown to somebody.
 		offer.ReserveBytes = backup.DefaultOffer().ReserveBytes
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(offer)
+	jsonreply.Write(w, http.StatusOK, offer)
 }
 
 // handleBackupPutOffer is where a machine volunteers, and stops volunteering.
@@ -587,8 +577,7 @@ func (s *CoreServer) handleBackupPutOffer(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "Save config failed", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(offer)
+	jsonreply.Write(w, http.StatusOK, offer)
 }
 
 // handleBackupStopHolding removes what this machine holds for one identity.
