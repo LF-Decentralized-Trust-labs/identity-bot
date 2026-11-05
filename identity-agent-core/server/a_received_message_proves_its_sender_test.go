@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -343,7 +344,9 @@ func TestARotationNeitherBreaksAnOldMessageNorLetsTheRetiredKeyVouch(t *testing.
 	if err := m.receiver.DataStore.DeleteContact(m.senderAID); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.receiver.DataStore.SaveContactKEL(store.ContactKELRecord{AID: m.senderAID}); err != nil {
+	// The store now refuses the shorter record outright; either way the proof holds.
+	if err := m.receiver.DataStore.SaveContactKEL(store.ContactKELRecord{AID: m.senderAID}); err != nil &&
+		!errors.Is(err, store.ErrLogEndsEarlier) {
 		t.Fatal(err)
 	}
 	if _, _, err := m.receiver.provedSender(before); err != nil {

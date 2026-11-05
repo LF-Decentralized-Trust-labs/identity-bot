@@ -162,7 +162,15 @@ func TestAnOwnerWhoHasRotatedShowsNoNameUntilTheySignAgain(t *testing.T) {
 	if err := s.SealOwnerAuthority(OwnerAuthority{AID: "EFOUNDER", PublicKey: keyOf(oldSeed)}); err != nil {
 		t.Fatal(err)
 	}
-	verifiedLog(t, s, "EFOUNDER", keyOf(newSeed))
+	// A rotated log is the whole history, so it names the old key too.
+	if err := s.DataStore.SaveContactKEL(store.ContactKELRecord{
+		AID: "EFOUNDER", KelVerified: true, CurrentPublicKey: keyOf(newSeed), EventsValidated: 2,
+		KEL: []map[string]interface{}{
+			{"t": "icp", "k": []interface{}{keyOf(oldSeed)}},
+			{"t": "rot", "k": []interface{}{keyOf(newSeed)}},
+		}}); err != nil {
+		t.Fatal(err)
+	}
 	if names, _ := listedOwners(t, s); len(names) != 0 {
 		t.Fatalf("a vouch signed by a superseded key still named the owner: %v", names)
 	}
