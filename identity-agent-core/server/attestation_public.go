@@ -1,10 +1,11 @@
 package server
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 // Publishing what the machine can prove about itself, to anyone who asks.
@@ -132,11 +133,10 @@ func (s *CoreServer) handlePublicAttestation(w http.ResponseWriter, r *http.Requ
 			writeAttestationError(w, http.StatusNotFound, "not_sealed_hardware", notSealedHardware)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
 		// Bound to something the caller chose, so it is theirs alone and must
 		// not be handed to the next asker.
 		w.Header().Set("Cache-Control", "no-store")
-		_ = json.NewEncoder(w).Encode(info)
+		jsonreply.Write(w, http.StatusOK, info)
 		return
 	}
 
@@ -146,11 +146,10 @@ func (s *CoreServer) handlePublicAttestation(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	// The report changes only when the binding does, and it is public, so a
 	// short shared cache is safe and takes load off the firmware call.
 	w.Header().Set("Cache-Control", "public, max-age=30")
-	_ = json.NewEncoder(w).Encode(info)
+	jsonreply.Write(w, http.StatusOK, info)
 }
 
 // challengedAttestation produces a report bound to a value the caller chose.
@@ -230,7 +229,5 @@ func (s *CoreServer) cachedAttestation() *publicAttestation {
 }
 
 func writeAttestationError(w http.ResponseWriter, status int, code, detail string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": code, "detail": detail})
+	jsonreply.Write(w, status, map[string]string{"error": code, "detail": detail})
 }
