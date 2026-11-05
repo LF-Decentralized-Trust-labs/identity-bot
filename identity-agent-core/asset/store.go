@@ -23,17 +23,15 @@ type Store struct {
 	empInvitesPath string
 	employeesPath  string
 	// enrolSecrets holds the digests of unused enrolment secrets; the records
-	// in asset_enrolments.json say what each was issued for. enrolMigrated
-	// carries tokens an earlier version stored in the clear across, once.
-	enrolSecrets  *enrolsecret.Store
-	enrolMigrated sync.Once
-	assetsErr     error // why assets.json could not be read; nil when it could
-	assets        map[string]Asset
-	invites       map[string]AssetInvite
-	members       []AssetMember
-	requests      []AssetAccessRequest
-	empInvites    map[string]EmployeeInvite
-	employees     map[string]Employee // keyed by PairwiseAID
+	// in asset_enrolments.json say what each was issued for.
+	enrolSecrets *enrolsecret.Store
+	assetsErr    error // why assets.json could not be read; nil when it could
+	assets       map[string]Asset
+	invites      map[string]AssetInvite
+	members      []AssetMember
+	requests     []AssetAccessRequest
+	empInvites   map[string]EmployeeInvite
+	employees    map[string]Employee // keyed by PairwiseAID
 }
 
 func NewStore(dataDir string) (*Store, error) {
@@ -56,7 +54,59 @@ func NewStore(dataDir string) (*Store, error) {
 	// On a load error the store is returned alongside it, with the assets
 	// reads reporting that error, so a caller that holds on to it cannot
 	// mistake an unreadable store for an empty one. Never rewrites a file.
-	return s, s.load()
+	if err := s.load(); err != nil {
+		return s, err
+	}
+	// Secrets an earlier version stored in the clear are carried to digests
+	// now, before anything is served. If the rewrite fails the store does not
+	// start: clear secrets left on disk are what this exists to prevent.
+	if err := s.migrateSecrets(); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrSecretsNotMigrated, err)
+	}
+	return s, nil
+}
+
+// ErrSecretsNotMigrated is why a store would not start: secrets an earlier
+// version saved in the clear could not be rewritten as digests.
+var ErrSecretsNotMigrated = errors.New("asset store: clear invite or enrolment secrets could not be rewritten as digests, so it will not start")
+
+// migrateSecrets moves every secret an earlier version stored in the clear —
+// asset invites and employee invites keyed by their code, enrolments keyed by
+// their token — onto digests, and rewrites each file without them.
+func (s *Store) migrateSecrets() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	changed := false
+	for k, inv := range s.invites {
+		if inv.Token == "" {
+			continue
+		}
+		delete(s.invites, k)
+		inv.ID, inv.Token = enrolsecret.Digest(inv.Token), ""
+		s.invites[inv.ID] = inv
+		changed = true
+	}
+	if changed {
+		if err := s.saveLocked(s.invitesPath, s.invites); err != nil {
+			return err
+		}
+	}
+	changed = false
+	for k, inv := range s.empInvites {
+		if inv.Token == "" {
+			continue
+		}
+		delete(s.empInvites, k)
+		inv.ID, inv.Token = enrolsecret.Digest(inv.Token), ""
+		s.empInvites[inv.ID] = inv
+		changed = true
+	}
+	if changed {
+		if err := s.saveLocked(s.empInvitesPath, s.empInvites); err != nil {
+			return err
+		}
+	}
+	return s.migrateEnrolments()
 }
 
 // readJSON loads one store file into v. A missing file is legitimately empty
@@ -174,18 +224,47 @@ func (s *Store) DeleteAsset(id string) error {
 }
 
 // Invites
+//
+// An invite is kept under the digest of its code, never the code (package
+// enrolsecret). A code presented is found by comparing it in constant time to
+// every stored digest.
+
+// CreateInvite records an invite for the code in inv.Token. The code is not
+// stored: only its digest, which becomes the invite's ID.
 func (s *Store) CreateInvite(inv AssetInvite) error {
+	if inv.Token == "" {
+		return errors.New("an invite needs a code")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.invites[inv.Token] = inv
+	inv.ID, inv.Token = enrolsecret.Digest(inv.Token), ""
+	s.invites[inv.ID] = inv
 	return s.saveLocked(s.invitesPath, s.invites)
+}
+
+// findInviteLocked returns the ID of the invite a presented code belongs to.
+// It compares against every invite and never stops early.
+func (s *Store) findInviteLocked(token string) (string, bool) {
+	id, found := "", false
+	if token == "" {
+		return "", false
+	}
+	for key, inv := range s.invites {
+		if enrolsecret.Equal(token, inv.ID) {
+			id, found = key, true
+		}
+	}
+	return id, found
 }
 
 func (s *Store) GetInvite(token string) (AssetInvite, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	inv, ok := s.invites[token]
-	return inv, ok
+	id, ok := s.findInviteLocked(token)
+	if !ok {
+		return AssetInvite{}, false
+	}
+	return s.invites[id], true
 }
 
 func (s *Store) ListInvites(assetID string) []AssetInvite {
@@ -203,9 +282,10 @@ func (s *Store) ListInvites(assetID string) []AssetInvite {
 func (s *Store) IncrementInviteUse(token string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if inv, ok := s.invites[token]; ok {
+	if id, ok := s.findInviteLocked(token); ok {
+		inv := s.invites[id]
 		inv.UseCount++
-		s.invites[token] = inv
+		s.invites[id] = inv
 		return s.saveLocked(s.invitesPath, s.invites)
 	}
 	return nil
@@ -231,10 +311,12 @@ func (inv AssetInvite) usedUp() bool {
 	return inv.MaxUses > 0 && inv.UseCount >= inv.MaxUses
 }
 
-func (s *Store) RevokeInvite(assetID, token string) error {
+// RevokeInvite names the invite by its ID (the digest the list shows), never by
+// its code: a code in a request path is written to every access log.
+func (s *Store) RevokeInvite(assetID, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	inv, ok := s.invites[token]
+	inv, ok := s.invites[id]
 	if !ok || inv.AssetID != assetID {
 		return ErrInviteNotFound
 	}
@@ -242,10 +324,10 @@ func (s *Store) RevokeInvite(assetID, token string) error {
 		return ErrInviteClosed
 	}
 	inv.Revoked = true
-	s.invites[token] = inv
+	s.invites[id] = inv
 	if err := s.saveLocked(s.invitesPath, s.invites); err != nil {
 		inv.Revoked = false
-		s.invites[token] = inv
+		s.invites[id] = inv
 		return err
 	}
 	return nil

@@ -70,13 +70,12 @@ type Enrolment struct {
 	UsedAt  time.Time `json:"used_at,omitempty"`
 	AssetID string    `json:"asset_id,omitempty"`
 	Revoked bool      `json:"revoked,omitempty"`
-}
 
-// enrolSubject is what a token is exclusive to: issuing a second token for the
-// same kind of thing under the same name voids the first, as an old string left
-// lying around should stop working once a fresh one exists.
-func (e Enrolment) enrolSubject() string {
-	return "asset:" + e.AssetType + "/" + e.DisplayName
+	// Replaces is read when an enrolment is issued, never stored: the ID of an
+	// unused enrolment this one stands in for, which is then ended. Without it
+	// every enrolment stands alone, so two machines of the same kind and name
+	// can each have one outstanding.
+	Replaces string `json:"replaces,omitempty"`
 }
 
 // Spent reports whether this token can still be used, and why not if it cannot.
@@ -119,35 +118,32 @@ func (s *Store) loadEnrolments() map[string]Enrolment {
 }
 
 // migrateEnrolments carries tokens an earlier version stored in the clear
-// (keyed by the token itself) across to digests, once per process, and rewrites
-// the file without them. A token still good stays good.
-func (s *Store) migrateEnrolments() {
-	s.enrolMigrated.Do(func() {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		all := s.loadEnrolments()
-		changed := false
-		now := time.Now().UTC()
-		for key, e := range all {
-			if e.Token == "" {
-				continue
-			}
-			changed = true
-			delete(all, key)
-			e.ID = enrolsecret.Digest(e.Token)
-			if spent, _ := e.Spent(now); !spent {
-				_ = s.enrolSecrets.Adopt(enrolsecret.Entry{Digest: e.ID, Subject: e.enrolSubject(), Expires: e.ExpiresAt}, now)
-			}
-			e.Token = ""
-			all[e.ID] = e
+// (keyed by the token itself) across to digests and rewrites the file without
+// them. A token still good stays good. It runs once, as the store opens, and
+// fails if the file cannot be rewritten — the caller does not start.
+func (s *Store) migrateEnrolments() error {
+	all := s.loadEnrolments()
+	changed := false
+	now := time.Now().UTC()
+	for key, e := range all {
+		if e.Token == "" {
+			continue
 		}
-		if changed {
-			if err := s.saveLocked(s.enrolmentsPath(), all); err != nil {
-				// Leave the old file as it was; the next start tries again.
-				return
+		changed = true
+		delete(all, key)
+		e.ID = enrolsecret.Digest(e.Token)
+		if spent, _ := e.Spent(now); !spent {
+			if err := s.enrolSecrets.Adopt(enrolsecret.Entry{Digest: e.ID, Expires: e.ExpiresAt}, now); err != nil {
+				return err
 			}
 		}
-	})
+		e.Token = ""
+		all[e.ID] = e
+	}
+	if !changed {
+		return nil
+	}
+	return s.saveLocked(s.enrolmentsPath(), all)
 }
 
 // CreateEnrolment issues a single-use token. The token is on the returned value
@@ -159,7 +155,6 @@ func (s *Store) CreateEnrolment(e Enrolment) (Enrolment, error) {
 	if strings.TrimSpace(e.AssetType) == "" {
 		return Enrolment{}, fmt.Errorf("an enrolment token must say what kind of thing it enrols")
 	}
-	s.migrateEnrolments()
 
 	now := time.Now().UTC()
 	e.CreatedAt = now
@@ -167,23 +162,36 @@ func (s *Store) CreateEnrolment(e Enrolment) (Enrolment, error) {
 		e.ExpiresAt = now.Add(DefaultEnrolmentWindow)
 	}
 	e.UsedAt, e.AssetID, e.Revoked = time.Time{}, "", false
-
-	token, entry, err := s.enrolSecrets.Issue(e.enrolSubject(), e.ExpiresAt.Sub(now), now)
-	if err != nil {
-		return Enrolment{}, err
-	}
-	e.ID = entry.Digest
+	replaces := e.Replaces
+	e.Replaces = ""
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	all := s.loadEnrolments()
-	// A newer token voided any unused older one for the same subject; its
-	// record says so rather than leaving it looking usable.
-	for id, old := range all {
-		if id != e.ID && old.enrolSubject() == e.enrolSubject() && old.UsedAt.IsZero() && !old.Revoked {
-			old.Revoked = true
-			all[id] = old
+	// Replacing is explicit and names the enrolment replaced. It must be one
+	// that can still be used; nothing else is ended.
+	var old Enrolment
+	if replaces != "" {
+		var ok bool
+		old, ok = all[replaces]
+		if spent, _ := old.Spent(now); !ok || spent {
+			return Enrolment{}, fmt.Errorf("the enrolment to replace is not outstanding")
 		}
+	}
+
+	// Not exclusive to anything: each enrolment is its own.
+	token, entry, err := s.enrolSecrets.Issue("", e.ExpiresAt.Sub(now), now)
+	if err != nil {
+		return Enrolment{}, err
+	}
+	e.ID = entry.Digest
+	if replaces != "" {
+		if err := s.enrolSecrets.Void(replaces, now); err != nil {
+			_ = s.enrolSecrets.Void(entry.Digest, now)
+			return Enrolment{}, err
+		}
+		old.Revoked = true
+		all[replaces] = old
 	}
 	all[e.ID] = e
 	// Records of tokens that can no longer be used and produced nothing are
@@ -206,7 +214,6 @@ func (s *Store) CreateEnrolment(e Enrolment) (Enrolment, error) {
 
 // GetEnrolment finds the record a token was issued with.
 func (s *Store) GetEnrolment(token string) (Enrolment, bool) {
-	s.migrateEnrolments()
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	e, ok := s.loadEnrolments()[enrolsecret.Digest(token)]
@@ -214,7 +221,6 @@ func (s *Store) GetEnrolment(token string) (Enrolment, bool) {
 }
 
 func (s *Store) ListEnrolments() []Enrolment {
-	s.migrateEnrolments()
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	all := s.loadEnrolments()
@@ -243,7 +249,6 @@ func (s *Store) ListEnrolments() []Enrolment {
 // recoverable by issuing another, whereas an identity wrongly minted is not
 // recoverable at all.
 func (s *Store) ClaimEnrolment(token string, now time.Time) (Enrolment, error) {
-	s.migrateEnrolments()
 	entry, err := s.enrolSecrets.Claim(token, "", now)
 	if err != nil {
 		return Enrolment{}, errors.New("this enrolment token cannot be used")
@@ -266,7 +271,6 @@ func (s *Store) ClaimEnrolment(token string, now time.Time) (Enrolment, error) {
 
 // RecordEnrolmentAsset attaches the asset a claimed token produced.
 func (s *Store) RecordEnrolmentAsset(token, assetID string) error {
-	s.migrateEnrolments()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	all := s.loadEnrolments()
@@ -284,7 +288,6 @@ func (s *Store) RecordEnrolmentAsset(token, assetID string) error {
 // machine it was issued for can try again — unless a newer token has since been
 // issued for the same thing, which keeps the older one void.
 func (s *Store) ReleaseEnrolment(token string) error {
-	s.migrateEnrolments()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	all := s.loadEnrolments()
@@ -299,7 +302,7 @@ func (s *Store) ReleaseEnrolment(token string) error {
 		return fmt.Errorf("this token already produced an identity and cannot be released")
 	}
 	now := time.Now().UTC()
-	if err := s.enrolSecrets.Release(enrolsecret.Entry{Digest: id, Subject: e.enrolSubject(), Expires: e.ExpiresAt}, now); err != nil {
+	if err := s.enrolSecrets.Release(enrolsecret.Entry{Digest: id, Expires: e.ExpiresAt}, now); err != nil {
 		return err
 	}
 	e.UsedAt = time.Time{}
@@ -307,19 +310,13 @@ func (s *Store) ReleaseEnrolment(token string) error {
 	return s.saveLocked(s.enrolmentsPath(), all)
 }
 
-// RevokeEnrolment ends an unused token. ref is the enrolment's ID as listed, or
-// the token itself.
-func (s *Store) RevokeEnrolment(ref string) error {
-	s.migrateEnrolments()
+// RevokeEnrolment ends an unused token. id is the enrolment's ID as listed —
+// never the token, which would put a secret in a request path.
+func (s *Store) RevokeEnrolment(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	all := s.loadEnrolments()
-	id := enrolsecret.Digest(ref)
 	e, ok := all[id]
-	if !ok {
-		id = ref
-		e, ok = all[id]
-	}
 	if !ok {
 		return fmt.Errorf("no such enrolment token")
 	}

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"identity-agent-core/asset"
+	"identity-agent-core/enrolsecret"
 	"identity-agent-core/login"
 
 	"github.com/go-chi/chi/v5"
@@ -22,8 +23,10 @@ func (s *CoreServer) mountSignerRoutes(r chi.Router) {
 	// Under the parent "/api" router — relative paths.
 	r.Route("/signer", func(r chi.Router) {
 		r.Post("/invites", s.handleCreateSignerInvite)
-		// Public: the signing individual's agent looks up + redeems here (t=4).
-		r.Get("/invites/{token}", s.assetHandler.HandleGetEmployeeInviteInfo)
+		// Public: the signing individual's agent redeems here (t=4). There is
+		// no lookup route: the Ask already says what it is for, and a read
+		// that took the code in its path was reachable only by the owner,
+		// who has no use for it.
 		r.Post("/invites/{token}/redeem", s.handleRedeemSignerInvite)
 	})
 }
@@ -235,8 +238,8 @@ func (s *CoreServer) handleRedeemSignerInvite(w http.ResponseWriter, r *http.Req
 		MachineOwnerAID: body.MachineOwnerAID,
 		Name:            body.Name,
 		Role:            "Super Admin",
-		Status:          "active", // founding signer is active immediately
-		InviteToken:     token,
+		Status:          "active",                  // founding signer is active immediately
+		InviteToken:     enrolsecret.Digest(token), // the roster keeps no code
 		OOBI:            body.OOBI,
 		IsSigner:        true,
 		VouchSig:        body.VouchSig,

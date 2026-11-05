@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"identity-agent-core/enrolsecret"
 	"net/http"
 	"time"
 
@@ -313,7 +314,11 @@ func (h *Handler) HandleCreateInvite(w http.ResponseWriter, r *http.Request) {
 		UseCount:  0,
 		CreatedAt: time.Now().UTC(),
 	}
-	h.Store.CreateInvite(inv)
+	if err := h.Store.CreateInvite(inv); err != nil {
+		h.writeJSON(w, map[string]string{"error": "the invite could not be saved"}, http.StatusInternalServerError)
+		return
+	}
+	inv.ID = enrolsecret.Digest(token)
 	h.writeJSON(w, inv, http.StatusCreated)
 }
 
@@ -324,8 +329,8 @@ func (h *Handler) HandleListInvites(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) HandleRevokeInvite(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	token := chi.URLParam(r, "token")
-	h.writeRevokeResult(w, h.Store.RevokeInvite(id, token), func() { h.writeJSON(w, map[string]bool{"revoked": true}, http.StatusOK) })
+	inviteID := chi.URLParam(r, "invite")
+	h.writeRevokeResult(w, h.Store.RevokeInvite(id, inviteID), func() { h.writeJSON(w, map[string]bool{"revoked": true}, http.StatusOK) })
 }
 
 // writeRevokeResult turns the outcome of a revoke into the status a client can

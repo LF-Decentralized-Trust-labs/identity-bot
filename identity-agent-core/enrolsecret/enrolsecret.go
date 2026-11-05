@@ -68,6 +68,23 @@ func Digest(secret string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// Mint makes a new random secret. It is not stored anywhere: the caller shows
+// it once and keeps only Digest(secret).
+func Mint() (string, error) {
+	raw := make([]byte, 24)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(raw), nil
+}
+
+// Equal reports whether secret is the one a digest was made from, in constant
+// time. Anything that looks a presented secret up among stored digests uses
+// this against every one of them, never a map keyed by the secret.
+func Equal(secret, digest string) bool {
+	return subtle.ConstantTimeCompare([]byte(Digest(secret)), []byte(digest)) == 1
+}
+
 func (s *Store) load(now time.Time) (file, error) {
 	f, _, err := s.loadPruned(now)
 	return f, err
@@ -118,11 +135,10 @@ func prune(f *file, now time.Time) {
 // secret already issued for subject (when subject is not empty). The secret is
 // returned here and nowhere else.
 func (s *Store) Issue(subject string, window time.Duration, now time.Time) (string, Entry, error) {
-	raw := make([]byte, 24)
-	if _, err := rand.Read(raw); err != nil {
+	secret, err := Mint()
+	if err != nil {
 		return "", Entry{}, err
 	}
-	secret := base64.RawURLEncoding.EncodeToString(raw)
 	e := Entry{Digest: Digest(secret), Subject: subject, Expires: now.Add(window).UTC()}
 
 	s.mu.Lock()

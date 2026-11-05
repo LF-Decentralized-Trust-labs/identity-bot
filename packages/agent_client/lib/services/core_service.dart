@@ -1948,9 +1948,9 @@ class CoreService {
     throw Exception('Failed to create invite: ${response.statusCode}');
   }
 
-  Future<void> revokeAssetInvite(String id, String token) async {
+  Future<void> revokeAssetInvite(String id, String inviteId) async {
     final response = await _client.delete(
-      Uri.parse('$baseUrl/api/assets/${Uri.encodeComponent(id)}/invites/${Uri.encodeComponent(token)}'),
+      Uri.parse('$baseUrl/api/assets/${Uri.encodeComponent(id)}/invites/${Uri.encodeComponent(inviteId)}'),
     );
     if (response.statusCode != 200) {
       throw Exception('Failed to revoke invite: ${response.statusCode}');
@@ -2087,9 +2087,9 @@ class CoreService {
     throw Exception('Failed to list employee invites: ${response.statusCode}');
   }
 
-  Future<void> revokeEmployeeInvite(String token) async {
+  Future<void> revokeEmployeeInvite(String inviteId) async {
     final response = await _client.delete(
-      Uri.parse('$baseUrl/api/employees/invites/${Uri.encodeComponent(token)}'),
+      Uri.parse('$baseUrl/api/employees/invites/${Uri.encodeComponent(inviteId)}'),
     );
     if (response.statusCode != 200) {
       throw Exception('Failed to revoke employee invite: ${response.statusCode}');
@@ -3277,6 +3277,9 @@ class AssetDetailResponse {
 }
 
 class AssetInvite {
+  /// What the invite is called in lists and in revoking it. The code itself
+  /// ([token]) is returned only when the invite is made.
+  final String id;
   final String token;
   final String assetId;
   final String label;
@@ -3286,7 +3289,8 @@ class AssetInvite {
   final bool revoked;
 
   const AssetInvite({
-    required this.token,
+    this.id = '',
+    this.token = '',
     required this.assetId,
     this.label = '',
     this.maxUses = 0,
@@ -3296,6 +3300,7 @@ class AssetInvite {
   });
 
   factory AssetInvite.fromJson(Map<String, dynamic> json) => AssetInvite(
+    id: json['id'] as String? ?? '',
     token: json['token'] as String? ?? '',
     assetId: json['asset_id'] as String? ?? '',
     label: json['label'] as String? ?? '',

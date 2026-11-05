@@ -274,7 +274,7 @@ func TestARevokedTokenIsRefused(t *testing.T) {
 	h := newEnrolHandler(t, keri)
 	token := issueToken(t, h, "a device this agent owns", "host", "")
 
-	if err := h.Store.RevokeEnrolment(token.Token); err != nil {
+	if err := h.Store.RevokeEnrolment(token.ID); err != nil {
 		t.Fatal(err)
 	}
 	if w := enrol(t, h, token.Token, newTestMachine(t)); w.Code != http.StatusForbidden {

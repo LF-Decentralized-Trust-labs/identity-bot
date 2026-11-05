@@ -1,21 +1,50 @@
 package asset
 
-import "time"
+import (
+	"errors"
+	"time"
+
+	"identity-agent-core/enrolsecret"
+)
 
 // ---- Employee invites (org-scoped) ----
 
+// CreateEmployeeInvite records an invite for the code in inv.Token, keeping
+// only its digest (the invite's ID), never the code.
 func (s *Store) CreateEmployeeInvite(inv EmployeeInvite) error {
+	if inv.Token == "" {
+		return errors.New("an invite needs a code")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.empInvites[inv.Token] = inv
+	inv.ID, inv.Token = enrolsecret.Digest(inv.Token), ""
+	s.empInvites[inv.ID] = inv
 	return s.saveLocked(s.empInvitesPath, s.empInvites)
+}
+
+// findEmployeeInviteLocked compares a presented code to every stored digest,
+// never stopping early.
+func (s *Store) findEmployeeInviteLocked(token string) (string, bool) {
+	id, found := "", false
+	if token == "" {
+		return "", false
+	}
+	for key, inv := range s.empInvites {
+		if enrolsecret.Equal(token, inv.ID) {
+			id, found = key, true
+		}
+	}
+	return id, found
 }
 
 func (s *Store) GetEmployeeInvite(token string) (EmployeeInvite, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	inv, ok := s.empInvites[token]
-	return inv, ok
+	id, ok := s.findEmployeeInviteLocked(token)
+	if !ok {
+		return EmployeeInvite{}, false
+	}
+	return s.empInvites[id], true
 }
 
 func (s *Store) ListEmployeeInvites() []EmployeeInvite {
@@ -31,21 +60,23 @@ func (s *Store) ListEmployeeInvites() []EmployeeInvite {
 func (s *Store) IncrementEmployeeInviteUse(token string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if inv, ok := s.empInvites[token]; ok {
+	if id, ok := s.findEmployeeInviteLocked(token); ok {
+		inv := s.empInvites[id]
 		inv.UseCount++
-		s.empInvites[token] = inv
+		s.empInvites[id] = inv
 		return s.saveLocked(s.empInvitesPath, s.empInvites)
 	}
 	return nil
 }
 
-// RevokeEmployeeInvite withdraws an employee invite. Like RevokeInvite it says
-// ErrInviteNotFound for an unknown token and ErrInviteClosed for one already
+// RevokeEmployeeInvite withdraws an employee invite, named by its ID (the
+// digest the list shows) and never by its code. Like RevokeInvite it says
+// ErrInviteNotFound for an unknown invite and ErrInviteClosed for one already
 // revoked or used up.
-func (s *Store) RevokeEmployeeInvite(token string) error {
+func (s *Store) RevokeEmployeeInvite(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	inv, ok := s.empInvites[token]
+	inv, ok := s.empInvites[id]
 	if !ok {
 		return ErrInviteNotFound
 	}
@@ -53,10 +84,10 @@ func (s *Store) RevokeEmployeeInvite(token string) error {
 		return ErrInviteClosed
 	}
 	inv.Revoked = true
-	s.empInvites[token] = inv
+	s.empInvites[id] = inv
 	if err := s.saveLocked(s.empInvitesPath, s.empInvites); err != nil {
 		inv.Revoked = false
-		s.empInvites[token] = inv
+		s.empInvites[id] = inv
 		return err
 	}
 	return nil

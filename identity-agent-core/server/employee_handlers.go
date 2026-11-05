@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"identity-agent-core/asset"
+	"identity-agent-core/enrolsecret"
 	"identity-agent-core/login"
 
 	"github.com/go-chi/chi/v5"
@@ -22,7 +23,7 @@ func (s *CoreServer) mountEmployeeRoutes(r chi.Router) {
 		r.Get("/", s.assetHandler.HandleListEmployees)
 		r.Get("/invites", s.assetHandler.HandleListEmployeeInvites)
 		r.Post("/invites", s.handleCreateEmployeeInvite)
-		r.Delete("/invites/{token}", s.assetHandler.HandleRevokeEmployeeInvite)
+		r.Delete("/invites/{invite}", s.assetHandler.HandleRevokeEmployeeInvite)
 		// Public: the accepting employee's agent looks up + redeems here during add_employee (t=3).
 		r.Get("/invites/{token}", s.assetHandler.HandleGetEmployeeInviteInfo)
 		r.Post("/invites/{token}/redeem", s.handleRedeemEmployeeInvite)
@@ -164,7 +165,7 @@ func (s *CoreServer) handleRedeemEmployeeInvite(w http.ResponseWriter, r *http.R
 		Name:        body.Name,
 		Role:        inv.Role,
 		Status:      "pending",
-		InviteToken: token,
+		InviteToken: enrolsecret.Digest(token), // the roster keeps no code
 		OOBI:        body.OOBI,
 	}
 	if err := s.assetHandler.Store.UpsertEmployee(emp); err != nil {
