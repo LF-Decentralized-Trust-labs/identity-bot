@@ -142,7 +142,9 @@ void main() {
   test('a roster that cannot be read says so and is not nobody', () async {
     expect(rosterSaying(503, {'error': 'down'}).list(),
         throwsA(isA<AiAgentRosterException>()
-            .having((e) => e.statusCode, 'statusCode', 503)));
+            .having((e) => e.statusCode, 'statusCode', 503)
+            .having((e) => e.response!.body, 'refusal as it came',
+                contains('down'))));
     expect(rosterSaying(200, 'not json').list(),
         throwsA(isA<AiAgentRosterException>()));
     expect(rosterSaying(200, {'agents': 'x'}).list(),

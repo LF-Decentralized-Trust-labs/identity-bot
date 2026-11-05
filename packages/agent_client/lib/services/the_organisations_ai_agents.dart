@@ -121,7 +121,11 @@ class AiAgent {
 class AiAgentRosterException implements Exception {
   final int? statusCode;
   final String message;
-  const AiAgentRosterException(this.message, {this.statusCode});
+
+  /// The Identity Agent's refusal as it came, for an app that words refusals
+  /// its own way. Null when nothing was answered, or what was is not a refusal.
+  final http.Response? response;
+  const AiAgentRosterException(this.message, {this.statusCode, this.response});
   @override
   String toString() => message;
 }
@@ -156,7 +160,7 @@ class AiAgentRoster {
     if (resp.statusCode != 200) {
       throw AiAgentRosterException(
           'The AI agents could not be read (HTTP ${resp.statusCode}).',
-          statusCode: resp.statusCode);
+          statusCode: resp.statusCode, response: resp);
     }
     final Object? decoded;
     try {
