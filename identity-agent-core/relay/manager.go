@@ -59,6 +59,18 @@ type Allocation struct {
 	// Secret holds a private address. The relay stores only a commitment to
 	// it, so after the relay restarts this is what proves the address is ours.
 	Secret string `json:"secret,omitempty"`
+	// Ending is set on a per-relationship address whose relationship has
+	// ended. It answers nothing from then on, and is given back to the relay as
+	// soon as the relay can be asked, on a later session if not on this one.
+	Ending bool `json:"ending,omitempty"`
+}
+
+// ForRelationship reports whether this is a private address made for one
+// relationship, as opposed to the Identity Agent's primary address, which
+// serves its enrolment identifier and is shared by every relationship made
+// before addresses were per relationship (ADR-048 §6).
+func (a Allocation) ForRelationship(primary string) bool {
+	return a.Kind == KindPrivate && a.RAID != "" && a.RAID != primary
 }
 
 // Config is what an Identity Agent needs to be reachable through one relay.
@@ -213,6 +225,13 @@ type Manager struct {
 	// Identity Agent republishes where it currently is.
 	onChange    []func(url string, active bool)
 	onAllocated []func([]Allocation)
+
+	// held serialises everything that changes which addresses are held: the
+	// pass that holds them again after an admission, making one for a
+	// relationship, and giving one back. Without it a relationship's address
+	// made while a reconnection was holding the others could be dropped from
+	// the records by the reconnection finishing.
+	held sync.Mutex
 }
 
 // NewManager prepares a relay client. Nothing happens until Start.
@@ -359,11 +378,14 @@ func (m *Manager) session(ctx context.Context, endpoint string) error {
 
 	// The relay keeps which session serves which address only in memory, so
 	// every address is held again on every session.
+	m.held.Lock()
 	held, err := m.hold(ctx)
 	if err != nil {
+		m.held.Unlock()
 		return err
 	}
 	m.markActive(held)
+	m.held.Unlock()
 
 	select {
 	case err := <-served:
@@ -383,6 +405,16 @@ func (m *Manager) hold(ctx context.Context) ([]Allocation, error) {
 
 	var out []Allocation
 	for _, a := range held {
+		if a.Ending {
+			// A relationship that has ended: give its address back now if
+			// the relay can be asked, and keep asking on every session until
+			// it has been.
+			if err := client.Release(ctx, aid, a.Label, a.Secret); err != nil && !alreadyGone(err) {
+				log.Printf("[relay] could not give back %s yet: %v", a.URL, err)
+				out = append(out, a)
+			}
+			continue
+		}
 		switch a.Kind {
 		case KindPrivate:
 			err := client.Bind(ctx, aid, a.Label, a.Secret)
@@ -407,7 +439,7 @@ func (m *Manager) hold(ctx context.Context) ([]Allocation, error) {
 
 	switch m.cfg.Mode {
 	case relayproto.ModePrivate:
-		if !hasKind(out, KindPrivate) {
+		if !holdsPrimaryPrivate(out, m.cfg.RAID) {
 			secret, commitment := NewSecret()
 			label, url, err := client.Allocate(ctx, aid, commitment)
 			if err != nil {
@@ -432,13 +464,23 @@ func (m *Manager) hold(ctx context.Context) ([]Allocation, error) {
 	return out, nil
 }
 
-func hasKind(as []Allocation, k Kind) bool {
+// holdsPrimaryPrivate reports whether the address that serves primary (the
+// Identity Agent's own enrolment identifier) is among as. An address made for
+// a relationship does not count: it serves that relationship's identifier.
+func holdsPrimaryPrivate(as []Allocation, primary string) bool {
 	for _, a := range as {
-		if a.Kind == k {
+		if a.Kind == KindPrivate && !a.Ending && !a.ForRelationship(primary) {
 			return true
 		}
 	}
 	return false
+}
+
+// alreadyGone is a refusal that says the relay no longer has the address,
+// which is what giving it back wanted anyway.
+func alreadyGone(err error) bool {
+	var refused *RefusedError
+	return errors.As(err, &refused) && refused.Status == http.StatusNotFound
 }
 
 func holdsName(as []Allocation, name string) bool {
@@ -489,7 +531,7 @@ func (m *Manager) lookup(label string) *Allocation {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for i := range m.allocs {
-		if strings.EqualFold(m.allocs[i].Label, label) {
+		if strings.EqualFold(m.allocs[i].Label, label) && !m.allocs[i].Ending {
 			a := m.allocs[i]
 			return &a
 		}
@@ -641,6 +683,126 @@ func (m *Manager) Release(ctx context.Context, label string) error {
 	m.allocs = kept
 	held := append([]Allocation(nil), kept...)
 	fns := append([]func([]Allocation){}, m.onAllocated...)
+	m.mu.Unlock()
+	for _, fn := range fns {
+		fn(held)
+	}
+	return nil
+}
+
+// ErrNoSession is the answer to making or giving back a relationship's address
+// while the relay is not connected: the relay only answers a request signed by
+// an enrolment identifier that holds a live session.
+var ErrNoSession = errors.New("relay: not connected, so the relay cannot be asked for an address now")
+
+// AllocateFor makes a private address for one relationship, serving raid (the
+// pairwise identifier that relationship is given), and holds it. One already
+// held for raid is returned rather than another made.
+//
+// Each address is its own random label, never derived from raid or from
+// another address, so two counterparties given two of them cannot link them by
+// what they were handed (ADR-048 §6, ADR-036). The relay can: it sees every
+// address arrive on this one session (ADR-048 §11).
+func (m *Manager) AllocateFor(ctx context.Context, raid string) (*Allocation, error) {
+	if m.cfg.Mode != relayproto.ModePrivate {
+		return nil, fmt.Errorf("relay: only a private relay gives an address per relationship")
+	}
+	if raid == "" || raid == m.cfg.RAID {
+		return nil, fmt.Errorf("relay: an address per relationship needs the relationship's own identifier")
+	}
+	m.held.Lock()
+	defer m.held.Unlock()
+
+	m.mu.RLock()
+	client, active := m.client, m.status.Active
+	for _, a := range m.allocs {
+		if a.RAID == raid && a.Kind == KindPrivate && !a.Ending {
+			m.mu.RUnlock()
+			return &a, nil
+		}
+	}
+	m.mu.RUnlock()
+	if client == nil || !active {
+		return nil, ErrNoSession
+	}
+
+	secret, commitment := NewSecret()
+	label, url, err := client.Allocate(ctx, m.cfg.EnrollmentAID, commitment)
+	if err != nil {
+		return nil, err
+	}
+	a := Allocation{Label: label, URL: url, RAID: raid, Mode: relayproto.ModePrivate, Kind: KindPrivate, Secret: secret}
+	m.mu.Lock()
+	m.allocs = append(m.allocs, a)
+	held := append([]Allocation(nil), m.allocs...)
+	fns := append([]func([]Allocation){}, m.onAllocated...)
+	m.mu.Unlock()
+	for _, fn := range fns {
+		fn(held)
+	}
+	return &a, nil
+}
+
+// AddressFor is the private address held for one relationship's identifier;
+// nil if there is none.
+func (m *Manager) AddressFor(raid string) *Allocation {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, a := range m.allocs {
+		if a.RAID == raid && a.Kind == KindPrivate && !a.Ending {
+			a := a
+			return &a
+		}
+	}
+	return nil
+}
+
+// ReleaseFor ends the address held for a relationship's identifier. From this
+// call it answers nothing. It is given back to the relay now if the relay can
+// be asked; if not, the error says so, the address stays marked as ending and
+// is given back on a later session. Ending a relationship that has no address
+// of its own (one made before addresses were per relationship) does nothing.
+func (m *Manager) ReleaseFor(ctx context.Context, raid string) error {
+	m.held.Lock()
+	defer m.held.Unlock()
+
+	m.mu.Lock()
+	var mine *Allocation
+	for i := range m.allocs {
+		a := &m.allocs[i]
+		if a.RAID == raid && a.ForRelationship(m.cfg.RAID) && !a.Ending {
+			a.Ending = true
+			c := *a
+			mine = &c
+			break
+		}
+	}
+	if mine == nil {
+		m.mu.Unlock()
+		return nil
+	}
+	client, active := m.client, m.status.Active
+	held := append([]Allocation(nil), m.allocs...)
+	fns := append([]func([]Allocation){}, m.onAllocated...)
+	m.mu.Unlock()
+	for _, fn := range fns {
+		fn(held)
+	}
+	if client == nil || !active {
+		return ErrNoSession
+	}
+	if err := client.Release(ctx, m.cfg.EnrollmentAID, mine.Label, mine.Secret); err != nil && !alreadyGone(err) {
+		return err
+	}
+	m.mu.Lock()
+	kept := m.allocs[:0]
+	for _, x := range m.allocs {
+		if x.Label != mine.Label {
+			kept = append(kept, x)
+		}
+	}
+	m.allocs = kept
+	held = append([]Allocation(nil), kept...)
 	m.mu.Unlock()
 	for _, fn := range fns {
 		fn(held)
