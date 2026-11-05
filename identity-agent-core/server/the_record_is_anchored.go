@@ -91,6 +91,9 @@ type recordState struct {
 	// anchors once and kept up to date. Sequences, not times: a clock that
 	// steps, or an entry stamped before it is committed, cannot hide one.
 	anchoredSeq map[string]int
+	// afterTick, when set before keepAnchoring starts, is called at the end
+	// of every tick, so a test can wait for a tick rather than for a time.
+	afterTick func()
 
 	// coverAsked is whether this run has asked the identity's witnesses to
 	// witness the record identity, by consent; declined, the ones that would
