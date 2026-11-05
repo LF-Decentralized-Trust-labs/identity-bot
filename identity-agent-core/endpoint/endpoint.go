@@ -168,19 +168,25 @@ func (es *EndpointService) Refresh() {
 	}
 }
 
-// OwnURLs is every address this agent knows it is reached at, not only the one
-// it publishes: an explicit override, where a trusted proxy said it is reached,
-// its relay, its tunnel, a configured public URL, the address it serves on the
-// local network when it is bound there, and loopback. A request signed for an
-// origin that is none of these was not meant for this agent.
+// OwnURLs is every address this agent has been CONFIGURED with, or holds
+// itself, not only the one it publishes: an explicit override, its relay, its
+// tunnel, a configured public URL, the address it serves on the local network
+// when it is bound there, and loopback. A request signed for an origin that is
+// none of these was not meant for this agent.
+//
+// NEVER an address read off a request. The address a trusted proxy reported
+// (SetObservedURL) and the published address, which may be that one or one
+// saved from it, are left out on purpose: a forwarding header is the sender's,
+// and an agent that took its own origins from one could be told by a proxy that
+// the proxy's address is its own, which is the very relay this list exists to
+// refuse.
 func (es *EndpointService) OwnURLs() []string {
 	es.mu.RLock()
-	override, observed := es.overrideURL, es.observedURL
+	override := es.overrideURL
 	tm, rm, port := es.tunnelManager, es.relayManager, es.localPort
-	current := es.currentURL
 	es.mu.RUnlock()
 
-	urls := []string{override, observed, current, os.Getenv("PUBLIC_URL")}
+	urls := []string{override, os.Getenv("PUBLIC_URL")}
 	if rm != nil {
 		urls = append(urls, rm.URL())
 	}

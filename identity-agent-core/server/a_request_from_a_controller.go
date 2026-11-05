@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -405,12 +406,21 @@ func (s *CoreServer) theIdentityAgentItNames(r *http.Request) (string, error) {
 	}
 }
 
-// requireControllerOrigin makes X-IA-Controller-Origin mandatory. Off for one
-// version, as X-IA-Body-Digest was: a client built before the origin was signed
-// sends no such header and is read in the V2 form, so it keeps working. WHEN IT
-// IS SWITCHED ON the no-header path is removed. A client that does send it can
-// never be read as V2, because the two forms are different strings.
-var requireControllerOrigin = false
+// requireControllerOrigin reports whether X-IA-Controller-Origin is mandatory,
+// set by REQUIRE_CONTROLLER_ORIGIN=1 (or true). It is OFF by default, which is
+// the grace: a client built before the origin was signed sends no such header
+// and is read in the V2 form, so it keeps working. A client that does send the
+// header can never be read as V2, because the two forms are different strings.
+//
+// WHEN IT FLIPS. The default turns to on in step (d) of the rollout in ADR-062,
+// the release after the apps start sending the origin, and the no-header path
+// is removed with it; until then an operator can switch it on as soon as every
+// app that reaches the agent sends the origin. Read at each request, so a test
+// or an operator's restart is all it takes.
+func requireControllerOrigin() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("REQUIRE_CONTROLLER_ORIGIN")))
+	return v == "1" || v == "true"
+}
 
 // theOriginItNames is the origin a controller's request is meant for, refused
 // unless it is one of this Identity Agent's own.
@@ -434,7 +444,7 @@ var requireControllerOrigin = false
 func (s *CoreServer) theOriginItNames(r *http.Request) (string, error) {
 	values := r.Header.Values(headerControllerOrigin)
 	if len(values) == 0 {
-		if requireControllerOrigin {
+		if requireControllerOrigin() {
 			return "", fmt.Errorf("a signed request must name the origin it is for in %s", headerControllerOrigin)
 		}
 		return "", nil

@@ -73,7 +73,8 @@ func buildVectors(t *testing.T) VectorSet {
 			"names now. canonical is the bytes the Ed25519 signature is over: the record's fields " +
 			"other than signature as a JSON object, keys sorted, no whitespace (ADR-049's form). The " +
 			"signature is CESR qb64, code 0B. valid says whether the record verifies against key at " +
-			"now, the verifier's clock. origins are in their one spelling or not; ordering says " +
+			"now, the verifier's clock: a record issued more than 10 minutes after now, or more than " +
+			"90 days before it, does not verify. origins are in their one spelling or not; ordering says " +
 			"whether record A replaces record B. addresses are what a client is pointed at and the origin it signs for (empty when it has none).",
 		SeedHex:        hex.EncodeToString(vectorSeed),
 		PublicKey:      qb64Key(vectorSeed),
@@ -102,6 +103,7 @@ func buildVectors(t *testing.T) VectorSet {
 	add("a withdrawal, which names no address", mustSign(t, "", issued), nil, "public_key", true, "")
 	add("issued a few minutes ahead of the verifier", mustSign(t, "https://org.example.com:443", vectorNow.Add(5*time.Minute)), nil, "public_key", true, "")
 
+	add("issued just inside the maximum age", mustSign(t, "https://org.example.com:443", vectorNow.Add(-MaxAge+time.Minute)), nil, "public_key", true, "")
 	add("signed by a key the identifier's log does not name", good, nil, "other_public_key", false, "signature")
 	bad := good
 	bad.Origin = "https://evil.example.com:443"
@@ -114,6 +116,8 @@ func buildVectors(t *testing.T) VectorSet {
 	add("the identifier changed after signing", bad, nil, "public_key", false, "signature")
 	add("issued further ahead of the verifier than allowed",
 		mustSign(t, "https://org.example.com:443", vectorNow.Add(11*time.Minute)), nil, "public_key", false, "future")
+
+	add("issued longer ago than the maximum age", mustSign(t, "https://org.example.com:443", vectorNow.Add(-MaxAge-time.Minute)), nil, "public_key", false, "expired")
 
 	notDefault := Record{Type: Type, AID: vectorAID, Origin: "https://org.example.com", Issued: good.Issued}
 	add("an origin without its port, validly signed", signUnchecked(t, notDefault, vectorSeed), nil, "public_key", false, "origin")
@@ -216,7 +220,7 @@ func TestThePublishedEndpointRecordVectorsHold(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(set.Records) < 20 || len(set.Origins) < 30 || len(set.Ordering) < 4 || len(set.Addresses) < 10 {
+	if len(set.Records) < 24 || len(set.Origins) < 30 || len(set.Ordering) < 4 || len(set.Addresses) < 10 {
 		t.Fatal("the vector file is missing cases")
 	}
 
