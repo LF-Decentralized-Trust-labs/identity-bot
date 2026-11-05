@@ -11,9 +11,9 @@ import (
 	"identity-agent-core/didcomm"
 	"identity-agent-core/drivers"
 	"identity-agent-core/drivers/driverfake"
+	"identity-agent-core/drivers/signedlog"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
-	"identity-agent-core/drivers/signedlog"
 	"identity-agent-core/store"
 )
 

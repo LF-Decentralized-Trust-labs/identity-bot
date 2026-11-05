@@ -14,9 +14,9 @@ import (
 	"identity-agent-core/authprovider"
 	"identity-agent-core/drivers"
 	"identity-agent-core/drivers/driverfake"
+	"identity-agent-core/drivers/signedlog"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
-	"identity-agent-core/drivers/signedlog"
 	"identity-agent-core/store"
 
 	"github.com/go-chi/chi/v5"

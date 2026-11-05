@@ -208,13 +208,13 @@ func TestAMachineWhoseBorrowedTimeRanOutIsToldThat(t *testing.T) {
 	if _, err := s.controllers().Grant(ControllerGrant{
 		ControllerAID: aid,
 		PublicKey:     iacrypto.VerkeyQB64(pub),
-		Label: "a machine somebody borrowed",
+		Label:         "a machine somebody borrowed",
 		// SCOPED, not enrolled. An enrolled grant has its expiry forced to zero --
 		// a machine somebody keeps lasts until they say otherwise -- so only a
 		// borrowed one can lapse, and writing this with the wrong grade produces a
 		// grant that never expires and a test that proves nothing.
 		Grade:     GradeScoped,
-		ExpiresAt:     time.Now().UTC().Add(-24 * time.Hour),
+		ExpiresAt: time.Now().UTC().Add(-24 * time.Hour),
 	}, time.Now().UTC().Add(-48*time.Hour)); err != nil {
 		t.Fatalf("granting: %v", err)
 	}

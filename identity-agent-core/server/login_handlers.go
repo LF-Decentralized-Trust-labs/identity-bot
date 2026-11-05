@@ -457,7 +457,7 @@ func (s *CoreServer) verifyPresentedCredentialACDC(ctx context.Context, acdcJson
 	result, err := s.verifyCredentialHere(&drivers.DriverVerifyCredentialRequest{
 		AcdcJson:           acdcJsonB64,
 		IssuerKelEvents:    issuerKelEvents,
-		RegistryEventsB64:  s.issuanceLogForVerification(acdcBody),
+		RegistryEventsB64:  s.issuanceLogForVerification(cred),
 		HolderAid:          holderAid,
 		PresentationSaid:   presSaidB64,
 		CesrSignature:      cesrSig,

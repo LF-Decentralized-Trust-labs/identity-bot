@@ -152,14 +152,14 @@ func TestTheLoginGateRefusesARevokedCredentialAndAnyCredentialSentWithoutItsByte
 		"no bytes, no said at all":     declared("", ""),
 		"unpadded bytes of the credit": declared(said, strings.TrimRight(acdc, "=")),
 	} {
-		if ok, reason := s.credentialGateSatisfied(context.Background(), presented, schema, ""); ok {
+		if ok, reason := s.credentialGateSatisfied(context.Background(), presented, issueeOf(t, acdc), schema, ""); ok {
 			t.Errorf("%s: the gate admitted a credential revoked here (%s)", name, reason)
 		}
 	}
 	// And a credential that is not revoked is not admitted on a declared
 	// entry either.
-	s2, said2, _, _ := issuedThenRevoked(t)
-	if ok, _ := s2.credentialGateSatisfied(context.Background(), declared(said2, ""), schema, ""); ok {
+	s2, said2, acdc2, _ := issuedThenRevoked(t)
+	if ok, _ := s2.credentialGateSatisfied(context.Background(), declared(said2, ""), issueeOf(t, acdc2), schema, ""); ok {
 		t.Error("the gate admitted a declared entry with no credential body")
 	}
 }
@@ -215,4 +215,23 @@ func TestACredentialTheServerCannotReadIsRefused(t *testing.T) {
 			t.Error("login accepted an unreadable body")
 		}
 	}
+}
+
+// issueeOf is the identity a credential was issued to: the one that must be
+// signing in for the gate to look at it at all.
+func issueeOf(t *testing.T, acdcB64 string) string {
+	t.Helper()
+	cred, err := readCredentialHere(acdcB64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		A struct {
+			I string `json:"i"`
+		} `json:"a"`
+	}
+	if err := json.Unmarshal(cred.Raw, &body); err != nil || body.A.I == "" {
+		t.Fatalf("the credential names no issuee: %v", err)
+	}
+	return body.A.I
 }

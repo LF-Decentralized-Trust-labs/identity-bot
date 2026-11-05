@@ -480,7 +480,6 @@ func TestImpossibleSettingsAreRefusedBeforeSaving(t *testing.T) {
 	}
 }
 
-
 // The reachability answer carries the rule for a public name, so a screen
 // applies the core's own rule rather than keeping a copy.
 func TestReachabilityTellsTheRuleForAPublicName(t *testing.T) {

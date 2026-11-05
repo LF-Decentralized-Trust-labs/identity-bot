@@ -3,6 +3,8 @@ package server
 import (
 	"identity-agent-core/drivers"
 	"identity-agent-core/store"
+
+	keri "github.com/grapeid/keri-go"
 )
 
 // An issuer's key log is the one thing that says a credential's issuer is who
@@ -58,9 +60,11 @@ func ownLogForVerification(events []store.EventRecord) []map[string]interface{} 
 // holds it: the events of the credential in the registry it names, as they were
 // published. Nil when the credential names no registry or none is held, in
 // which case the engine reports the issuance as not proved.
-func (s *CoreServer) issuanceLogForVerification(acdcBody map[string]interface{}) []string {
-	said, _ := acdcBody["d"].(string)
-	registry, _ := acdcBody["ri"].(string)
+func (s *CoreServer) issuanceLogForVerification(cred *keri.Credential) []string {
+	if cred == nil {
+		return nil
+	}
+	said, registry := cred.SAID, cred.Registry
 	if said == "" || registry == "" {
 		return nil
 	}
