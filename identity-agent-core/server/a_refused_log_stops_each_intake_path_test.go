@@ -164,3 +164,47 @@ func TestFirstContactRefusesAnEarlierLogAndPutsNothingInFrontOfTheOwner(t *testi
 		t.Fatalf("the held log changed: %+v", held)
 	}
 }
+
+// The attack through the OOBI resolve route, which saves whatever verdict the
+// engine gives. The peer serves the real log with the engine finding a bad
+// signature in it (so it is saved as unverified), then a fork the engine passes.
+// Neither may replace the verified log held, and the owner's key stays K3.
+//
+// Fails when the `!offered.KelVerified` refusal in refuseAnEarlierLog
+// (store/store.go) is removed: the first request is answered 200 and replaces
+// the verified log, and the second then installs the fork's retired key.
+func TestOobiResolveCannotReplaceAVerifiedLogWithAnUnverifiedCopyThenAFork(t *testing.T) {
+	t.Setenv("IA_ALLOW_LOCAL_SITES", "1")
+	keys, real, fork := theRealLogAndAForkOfIt(t)
+	s := witnessWithSeed(t, 7)
+	if err := holdVerified(t, s, real); err != nil {
+		t.Fatal(err)
+	}
+	resolve := func(srv *httptest.Server) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(map[string]string{"oobi_url": srv.URL + "/oobi/" + real.AID})
+		rec := httptest.NewRecorder()
+		s.handleResolveOobiContact(rec, httptest.NewRequest(http.MethodPost, "/api/contacts/resolve", bytes.NewReader(body)))
+		return rec
+	}
+
+	// Step 2: the real events, the engine says a signature is bad.
+	s.KeriDriver = &driverfake.Engine{
+		ValidateKELBytesFunc: func(drivers.ValidateKELInput) (*drivers.DriverValidateKELResponse, error) {
+			return &drivers.DriverValidateKELResponse{KelVerified: false, CurrentPublicKey: real.Key(), EventsValidated: real.Len(),
+				ValidationErrors: []string{"event signature does not verify"}}, nil
+		},
+	}
+	if rec := resolve(aPeerServing(t, real.AID, real.Key(), real.Records())); rec.Code != http.StatusConflict {
+		t.Fatalf("an unverified copy of the held log was taken: %d %s", rec.Code, rec.Body.String())
+	}
+	if held, _ := s.DataStore.GetContactKEL(real.AID); held == nil || !held.KelVerified {
+		t.Fatalf("the verified log was replaced by an unverified one: %+v", held)
+	}
+
+	// Step 3: a fork from the retired K2 that the engine passes.
+	s.KeriDriver = anEngineThatVerifies(fork.Key(), fork.Len())
+	if rec := resolve(aPeerServing(t, real.AID, fork.Key(), fork.Records())); rec.Code != http.StatusConflict {
+		t.Fatalf("a fork was taken after the unverified copy: %d %s", rec.Code, rec.Body.String())
+	}
+	heldKeyIsStill(t, s, real.AID, keys.Pub(2), real.Len())
+}

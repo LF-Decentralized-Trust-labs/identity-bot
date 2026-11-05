@@ -118,3 +118,36 @@ func TestAnOlderHeldLogIsReplacedByTheGenuineLongerOne(t *testing.T) {
 		}
 	})
 }
+
+// A verified log is not given up for an unverified copy of itself. If it were,
+// nothing would be checked against what is held any more, and a fork could come
+// in behind it: the three steps below, in order, in each store.
+//
+// Fails when the `!offered.KelVerified` refusal in refuseAnEarlierLog
+// (store/store.go) is removed: step 2 is accepted, and step 3 then replaces the
+// log with the fork, whose tip is the retired K2.
+func TestAnUnverifiedCopyDoesNotOpenTheWayForAFork(t *testing.T) {
+	keys := signedlog.NewKeys(t, 3)
+	atK2 := signedlog.Incept(t, keys).Rotate()
+	real := atK2.Fork().Rotate()
+	fork := atK2.Fork().Interact("mine").Interact("also mine")
+
+	bothStores(t, func(t *testing.T, st contactLogs) {
+		// 1. The real K1 -> K2 -> K3 log, verified.
+		if err := st.SaveContactKEL(record(real, true)); err != nil {
+			t.Fatal(err)
+		}
+		// 2. The same events, marked unverified.
+		if err := st.SaveContactKEL(record(real, false)); !errors.Is(err, ErrLogDoesNotExtend) {
+			t.Fatalf("an unverified copy replaced the verified log, err=%v", err)
+		}
+		// 3. A verified fork of it from the retired K2.
+		if err := st.SaveContactKEL(record(fork, true)); !errors.Is(err, ErrLogDoesNotExtend) {
+			t.Fatalf("a fork got in behind an unverified copy, err=%v", err)
+		}
+		got, _ := st.GetContactKEL(real.AID)
+		if got == nil || !got.KelVerified || got.CurrentPublicKey != keys.Pub(2) || len(got.KEL) != real.Len() {
+			t.Fatalf("the held log changed: %+v", got)
+		}
+	})
+}

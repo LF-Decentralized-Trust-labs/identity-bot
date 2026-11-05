@@ -513,10 +513,19 @@ func saidOfRecord(rec map[string]interface{}) string {
 // verifies cleanly, can be as long as the real log, and would otherwise make the
 // retired key the owner's again. It has the real log's first events and then
 // different ones, so the event identifiers (never a count the caller supplies,
-// like EventsValidated) are what tell the two apart.
+// like EventsValidated) are what tell the two apart. The log offered must also
+// be verified itself: a held verified log is replaced only by a verified one.
 func refuseAnEarlierLog(held *ContactKELRecord, offered ContactKELRecord) error {
 	if held == nil || !held.KelVerified {
 		return nil
+	}
+	// Only a verified log may take the place of a verified one. A record marked
+	// unverified that repeats every held event would otherwise be accepted, and
+	// once an unverified log is held nothing is checked against it any more, so a
+	// fork could follow it in.
+	if !offered.KelVerified {
+		return fmt.Errorf("%w (%s: the log offered is not verified, and a verified one is held)",
+			ErrLogDoesNotExtend, offered.AID)
 	}
 	for i, h := range held.KEL {
 		want := saidOfRecord(h)

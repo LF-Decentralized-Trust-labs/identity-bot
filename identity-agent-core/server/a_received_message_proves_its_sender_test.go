@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -337,6 +338,25 @@ func TestARotationNeitherBreaksAnOldMessageNorLetsTheRetiredKeyVouch(t *testing.
 	tampered := before
 	tampered.SenderKEL = string(edited)
 	refusedFor(t, m.receiver, tampered, "signed log has no record")
+
+	// Refetched shorter: the sender's first event alone is offered again, as an
+	// older copy of its log would be. The store refuses it, the longer log stays,
+	// and the proof of the message received before the rotation still holds.
+	//
+	// Fails when refuseAnEarlierLog (store/store.go) is made to return nil: the
+	// shorter log replaces the held one and the current key goes back to key1.
+	if err := m.receiver.DataStore.SaveContactKEL(store.ContactKELRecord{
+		AID: m.senderAID, KEL: withTheBytesItWasVerifiedBy(t, icp), KelVerified: true, CurrentPublicKey: key1,
+	}); !errors.Is(err, store.ErrLogDoesNotExtend) {
+		t.Fatalf("a shorter refetch of the sender's log was accepted: %v", err)
+	}
+	if held, _ := m.receiver.DataStore.GetContactKEL(m.senderAID); held == nil || len(held.KEL) != 2 || held.CurrentPublicKey != key2 {
+		t.Fatalf("the refused refetch changed the held log: %+v", held)
+	}
+	if _, _, err := m.receiver.provedSender(before); err != nil {
+		t.Fatalf("a shorter refetch broke a genuine message's proof: %v", err)
+	}
+	refusedFor(t, m.receiver, after, "were not tied")
 
 	// The contact going, and its record being lost or refetched shorter than the
 	// position the message arrived at, leave the proof intact: the history it was
