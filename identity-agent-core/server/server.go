@@ -4206,6 +4206,9 @@ func (s *CoreServer) handleDeleteContact(w http.ResponseWriter, r *http.Request)
 
 	log.Printf("[identity-agent-core] CONTACT: Removed %s (AID: %s)", contact.Alias, aid)
 
+	// The relationship is over, so the address made for it is too (ADR-048 §6).
+	s.endRelationshipAddress(contact.RelationshipAID)
+
 	w.WriteHeader(http.StatusNoContent)
 }
 

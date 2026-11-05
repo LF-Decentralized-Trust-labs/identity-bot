@@ -525,6 +525,20 @@ records, never trusted from the preamble, and a private one reaches only
 own record. The earlier frame protocol and the Chisel tunnel provider are
 removed.
 
+**Built in the core, per relationship (§6, §11):** a pairwise identifier minted
+for a counterparty (any pairwise pool except the two relay enrolments) is given a
+private address of its own when the Identity Agent uses a private relay, and its
+OOBI is written at that address. Each is a fresh random label (never derived
+from the identifier or from another address), bound again on every session like
+the primary one. Deleting a contact marks its address as ending: it answers
+nothing from then on, and it is released at the relay at once, or on the next
+session if the relay cannot be asked. Cost: one `allocate` per relationship, one
+`bind` for each held address on every session, one `release` when it ends. If the
+relay cannot make an address when a relationship is made, the relationship is made
+at the shared address and the log says so. **The relay operator can still link
+every one of these addresses**, because they all arrive down the one session
+(§11); this hides relationships from each other, not from the operator.
+
 **Not built yet:**
 - **Republishing the endpoint record** when the address moves (§9). The core
   recomputes its published address; it does not yet send a signed `/loc/scheme`
@@ -533,10 +547,16 @@ removed.
   routes for the relay's status, saving and applying reachability, releasing the
   public name, and requesting and verifying a custom domain; the app here has no
   screen for them yet, and offers only development tunnels.
-- **One private address per relationship.** The core holds one private address
-  and gives it to every counterparty. The protocol allows one per relationship,
-  and the client can allocate them; handing a fresh one to each new
-  relationship is not wired in.
+- **Moving a relationship made before addresses were per relationship.**
+  *Amended 2026-11-05:* a new pairwise identifier is now given a private address
+  made for it alone, and its OOBI names that address. A relationship made earlier
+  keeps the shared address and is not moved. A move would have to reach the
+  counterparty through the signed endpoint record of ADR-062, and that record
+  names an origin (`scheme://host:port`) and never a path, while a private address
+  is a path at the relay (`https://<relay>/<label>`). The record can say which
+  relay, not which address on it. Either a record that carries a path, or a private
+  address that is a host, is an amendment to ADR-062 or this ADR, and is not
+  made here.
 
 ## Consequences
 

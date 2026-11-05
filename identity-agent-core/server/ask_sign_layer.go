@@ -175,7 +175,7 @@ func (s *CoreServer) mintPairwiseIn(pool, name string) (aid, oobi string, seed [
 		}
 	}
 
-	publicURL := s.EndpointService.CurrentURL()
+	publicURL := s.addressForNewRelationship(pool, icp.AID)
 	oobi = fmt.Sprintf("%s/public/oobi/%s", publicURL, icp.AID)
 	return icp.AID, oobi, seed, idx, nil
 }
