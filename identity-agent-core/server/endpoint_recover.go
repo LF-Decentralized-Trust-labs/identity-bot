@@ -61,30 +61,25 @@ type recoveredEndpoint struct {
 // already hold.
 //
 // This is the step that makes recovery possible without a working address: the
-// inception event's `b` field names the witnesses, so nothing here needs to
-// reach the contact first. A later rotation may change the set, so the LAST
-// event that carries one wins.
+// events name the witnesses, so nothing here needs to reach the contact first.
+// They are read from the bytes each event was published as (raw_bytes_b64), the
+// only part of a stored entry that was checked; event_json and any field beside
+// the bytes are text the sender wrote and are not looked at. The set is walked
+// the way a key log defines it (witnessesAfter): the inception names it, each
+// rotation cuts and adds. A log with an entry that has no readable bytes names
+// none.
 func witnessesFromStoredKEL(kel []map[string]interface{}) []string {
+	in, ok := drivers.ValidateKELInputFromRecords("", kel)
+	if !ok {
+		return nil
+	}
 	var witnesses []string
-	for _, event := range kel {
-		raw, ok := event["b"]
-		if !ok {
-			continue
+	for _, raw := range in.RawEvents {
+		var ev map[string]interface{}
+		if json.Unmarshal(raw, &ev) != nil {
+			return nil
 		}
-		list, ok := raw.([]interface{})
-		if !ok {
-			continue
-		}
-		var current []string
-		for _, w := range list {
-			if aid, ok := w.(string); ok && aid != "" {
-				current = append(current, aid)
-			}
-		}
-		// An empty `b` on a rotation means the witness set was cleared, which
-		// is different from the event not mentioning witnesses at all. Only a
-		// present field replaces what came before.
-		witnesses = current
+		witnesses, _ = witnessesAfter(witnesses, ev)
 	}
 	return witnesses
 }

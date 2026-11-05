@@ -1,14 +1,23 @@
 package server
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"testing"
 )
+
+// storedEvent is an event as a resolved contact's log keeps it: the bytes it
+// was published as, base64, and nothing the sender wrote beside them.
+func storedEvent(ev map[string]interface{}) map[string]interface{} {
+	raw, _ := json.Marshal(ev)
+	return map[string]interface{}{"raw_bytes_b64": base64.StdEncoding.EncodeToString(raw), "cesr_signature": "x"}
+}
 
 // The witness list comes out of the KEL already on disk. That is what makes
 // recovery possible at all: nothing here needs the address that just died.
 func TestWitnessesComeFromTheStoredInception(t *testing.T) {
 	kel := []map[string]interface{}{
-		{"t": "icp", "s": "0", "b": []interface{}{"EWitOne", "EWitTwo"}},
+		storedEvent(map[string]interface{}{"t": "icp", "s": "0", "b": []interface{}{"EWitOne", "EWitTwo"}}),
 	}
 	got := witnessesFromStoredKEL(kel)
 	if len(got) != 2 || got[0] != "EWitOne" || got[1] != "EWitTwo" {
@@ -16,39 +25,58 @@ func TestWitnessesComeFromTheStoredInception(t *testing.T) {
 	}
 }
 
-// A rotation can change the witness set, so the last event that carries one
-// wins. Using the inception forever would send recovery to operators the
-// contact has since left.
-func TestARotationReplacesTheWitnessSet(t *testing.T) {
-	kel := []map[string]interface{}{
-		{"t": "icp", "s": "0", "b": []interface{}{"EOldWit"}},
-		{"t": "ixn", "s": "1"},
-		{"t": "rot", "s": "2", "b": []interface{}{"ENewWitA", "ENewWitB"}},
-	}
-	got := witnessesFromStoredKEL(kel)
-	if len(got) != 2 || got[0] != "ENewWitA" {
-		t.Fatalf("a later rotation should replace the set, got %v", got)
+// A field the sender wrote beside the bytes decides nothing: only the bytes
+// were checked.
+func TestWitnessesAreNotTakenFromTextBesideTheBytes(t *testing.T) {
+	entry := storedEvent(map[string]interface{}{"t": "icp", "s": "0", "b": []interface{}{"EReal"}})
+	entry["b"] = []interface{}{"EPlanted"}
+	entry["event_json"] = `{"t":"icp","b":["EPlanted"]}`
+	got := witnessesFromStoredKEL([]map[string]interface{}{entry})
+	if len(got) != 1 || got[0] != "EReal" {
+		t.Fatalf("witnesses must come from the verified bytes, got %v", got)
 	}
 }
 
-// An event with no `b` field says nothing about witnesses; an event with an
-// empty one says the set was cleared. Conflating them would keep querying
-// operators a contact deliberately dropped.
-func TestAnAbsentWitnessFieldDiffersFromAnEmptyOne(t *testing.T) {
+// A rotation cuts and adds witnesses (br and ba), so the set in force is what
+// the walk of the log leaves, not whatever the last event mentioned. Using the
+// inception forever would send recovery to operators the contact has since left.
+func TestARotationCutsAndAddsWitnesses(t *testing.T) {
+	kel := []map[string]interface{}{
+		storedEvent(map[string]interface{}{"t": "icp", "s": "0", "b": []interface{}{"EOldWit", "EKept"}}),
+		storedEvent(map[string]interface{}{"t": "ixn", "s": "1"}),
+		storedEvent(map[string]interface{}{"t": "rot", "s": "2", "br": []interface{}{"EOldWit"}, "ba": []interface{}{"ENewWitA"}}),
+	}
+	got := witnessesFromStoredKEL(kel)
+	if len(got) != 2 || got[0] != "EKept" || got[1] != "ENewWitA" {
+		t.Fatalf("a rotation should cut br and add ba, got %v", got)
+	}
+}
+
+// An interaction event says nothing about witnesses, and a rotation that cuts
+// every one of them leaves none. Conflating them would keep querying operators
+// a contact deliberately dropped.
+func TestAnInteractionLeavesTheSetAndACutEmptiesIt(t *testing.T) {
 	silent := witnessesFromStoredKEL([]map[string]interface{}{
-		{"t": "icp", "s": "0", "b": []interface{}{"EWit"}},
-		{"t": "ixn", "s": "1"},
+		storedEvent(map[string]interface{}{"t": "icp", "s": "0", "b": []interface{}{"EWit"}}),
+		storedEvent(map[string]interface{}{"t": "ixn", "s": "1"}),
 	})
 	if len(silent) != 1 {
 		t.Errorf("an interaction event should not disturb the witness set, got %v", silent)
 	}
 
 	cleared := witnessesFromStoredKEL([]map[string]interface{}{
-		{"t": "icp", "s": "0", "b": []interface{}{"EWit"}},
-		{"t": "rot", "s": "1", "b": []interface{}{}},
+		storedEvent(map[string]interface{}{"t": "icp", "s": "0", "b": []interface{}{"EWit"}}),
+		storedEvent(map[string]interface{}{"t": "rot", "s": "1", "br": []interface{}{"EWit"}}),
 	})
 	if len(cleared) != 0 {
-		t.Errorf("an explicitly empty set should clear the witnesses, got %v", cleared)
+		t.Errorf("a rotation cutting every witness should clear the set, got %v", cleared)
+	}
+}
+
+// An entry with no bytes cannot be believed, so it names no witness.
+func TestAnEntryWithoutBytesNamesNoWitness(t *testing.T) {
+	if got := witnessesFromStoredKEL([]map[string]interface{}{{"t": "icp", "s": "0", "b": []interface{}{"EWit"}}}); len(got) != 0 {
+		t.Fatalf("a bare entry named %v", got)
 	}
 }
 

@@ -34,6 +34,19 @@ type heldIdentity struct {
 
 func holdAnIdentity(t *testing.T, ws witness.Store, rotated bool) heldIdentity {
 	t.Helper()
+	return holdAnIdentityNaming(t, ws, rotated, nil)
+}
+
+// aWitnessName is a real non-transferable witness identifier.
+func aWitnessName() string {
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	return iacrypto.NonTransferableAIDQB64(pub)
+}
+
+// holdAnIdentityNaming is holdAnIdentity whose inception names the given
+// witnesses, as a contact's does.
+func holdAnIdentityNaming(t *testing.T, ws witness.Store, rotated bool, witnesses []string) heldIdentity {
+	t.Helper()
 	h := heldIdentity{}
 	for i := 0; i < 3; i++ {
 		_, priv, _ := ed25519.GenerateKey(rand.Reader)
@@ -42,7 +55,7 @@ func holdAnIdentity(t *testing.T, ws witness.Store, rotated bool) heldIdentity {
 	}
 	d1, _ := keri.NextDigest(h.pubs[1])
 	icp, err := keri.BuildInception(keri.InceptionInput{
-		Keys: []string{h.pubs[0]}, NextDigests: []string{d1}, Derivation: "self-addressing",
+		Keys: []string{h.pubs[0]}, NextDigests: []string{d1}, Witnesses: witnesses, Derivation: "self-addressing",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +79,7 @@ func holdAnIdentity(t *testing.T, ws witness.Store, rotated bool) heldIdentity {
 	if rotated {
 		d2, _ := keri.NextDigest(h.pubs[2])
 		rot, err := keri.BuildRotation(keri.RotationInput{
-			Prefix: ev.Identifier, Keys: []string{h.pubs[1]}, PriorSAID: ev.SAID, SN: 1, NextDigests: []string{d2},
+			Prefix: ev.Identifier, Keys: []string{h.pubs[1]}, PriorSAID: ev.SAID, SN: 1, NextDigests: []string{d2}, PriorWitnesses: witnesses,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -380,6 +393,8 @@ type contactWithWitnesses struct {
 	core    *CoreServer
 	contact heldIdentity
 	serves  []func(contact heldIdentity) map[string]any
+	// names are the witnesses the contact's inception names, in the order of serves.
+	names []string
 }
 
 func aContactWithWitnesses(t *testing.T, verified bool, serves ...func(c heldIdentity) map[string]any) *contactWithWitnesses {
@@ -387,8 +402,12 @@ func aContactWithWitnesses(t *testing.T, verified bool, serves ...func(c heldIde
 	s := witnessWithStore(t)
 	other := anEndpointWitness(t)
 	c := &contactWithWitnesses{core: s, serves: serves}
-	c.contact = holdAnIdentity(t, other.core.WitnessService.Store, false)
-	var names []interface{}
+	var names []string
+	for range serves {
+		names = append(names, aWitnessName())
+	}
+	c.names = names
+	c.contact = holdAnIdentityNaming(t, other.core.WitnessService.Store, false, names)
 	for i := range serves {
 		i := i
 		wit := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -400,19 +419,39 @@ func aContactWithWitnesses(t *testing.T, verified bool, serves ...func(c heldIde
 			_ = json.NewEncoder(w).Encode(map[string]any{"controller_aid": c.contact.aid, "record": rec})
 		}))
 		t.Cleanup(wit.Close)
-		name := "EWit" + string(rune('A'+i))
-		names = append(names, name)
+		name := names[i]
 		if err := s.DataStore.SaveContact(store.ContactRecord{AID: name, OobiURL: wit.URL + "/public/oobi/" + name}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if err := s.DataStore.SaveContactKEL(store.ContactKELRecord{
 		AID: c.contact.aid, KelVerified: verified, CurrentPublicKey: c.contact.pubs[0],
-		KEL: []map[string]interface{}{{"t": "icp", "s": "0", "b": names}},
+		KEL: heldAsStored(t, other.core.WitnessService.Store, c.contact.aid),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	return c
+}
+
+// heldAsStored is the first n events of aid's log as a contact's log is kept
+// once resolved: each entry the bytes it was published as, its signature and
+// its text, and nothing else.
+func heldAsStored(t *testing.T, ws witness.Store, aid string, n ...int) []map[string]interface{} {
+	t.Helper()
+	held, err := ws.GetKelEvents(aid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(n) > 0 {
+		held = held[:n[0]]
+	}
+	var out []map[string]interface{}
+	for _, e := range held {
+		out = append(out, map[string]interface{}{
+			"raw_bytes_b64": e.RawBytesB64, "cesr_signature": e.CesrSignature, "event_json": e.EventJSON,
+		})
+	}
+	return out
 }
 
 func recordObject(r endpointrecord.Record) map[string]any {
@@ -431,7 +470,7 @@ func TestRecoveryBelievesOnlyWhatTheContactSigned(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if found.Origin != "https://moved.example.com:443" || found.FoundVia != "EWitA" {
+		if found.Origin != "https://moved.example.com:443" || found.FoundVia != c.names[0] {
 			t.Fatalf("got %+v", found)
 		}
 	})
@@ -518,7 +557,8 @@ func TestRecoveryBelievesOnlyWhatTheContactSigned(t *testing.T) {
 func aContactThatRotated(t *testing.T, oldKeyAlsoSigns bool) (*CoreServer, heldIdentity) {
 	t.Helper()
 	w := anEndpointWitness(t)
-	id := holdAnIdentity(t, w.core.WitnessService.Store, true)
+	witnessName := aWitnessName()
+	id := holdAnIdentityNaming(t, w.core.WitnessService.Store, true, []string{witnessName})
 	if code, out := w.publish(t, id.aid, signedRecord(t, id.aid, "https://moved.example.com:443", time.Minute, id.seeds[1])); code != 200 {
 		t.Fatalf("%d %v", code, out)
 	}
@@ -539,16 +579,12 @@ func aContactThatRotated(t *testing.T, oldKeyAlsoSigns bool) (*CoreServer, heldI
 	if err != nil || len(held) != 2 {
 		t.Fatalf("%d events, %v", len(held), err)
 	}
-	inception := map[string]interface{}{
-		"raw_bytes_b64": held[0].RawBytesB64, "cesr_signature": held[0].CesrSignature,
-		"event_json": held[0].EventJSON, "b": []interface{}{"EWitA"},
-	}
 	s := witnessWithStore(t)
-	if err := s.DataStore.SaveContact(store.ContactRecord{AID: "EWitA", OobiURL: witnessFront.URL + "/public/oobi/EWitA"}); err != nil {
+	if err := s.DataStore.SaveContact(store.ContactRecord{AID: witnessName, OobiURL: witnessFront.URL + "/public/oobi/" + witnessName}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DataStore.SaveContactKEL(store.ContactKELRecord{
-		AID: id.aid, KelVerified: true, CurrentPublicKey: id.pubs[0], KEL: []map[string]interface{}{inception},
+		AID: id.aid, KelVerified: true, CurrentPublicKey: id.pubs[0], KEL: heldAsStored(t, w.core.WitnessService.Store, id.aid, 1),
 	}); err != nil {
 		t.Fatal(err)
 	}
