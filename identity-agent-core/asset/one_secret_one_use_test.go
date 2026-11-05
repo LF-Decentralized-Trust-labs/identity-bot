@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -171,12 +172,49 @@ func TestAReleasedEmployeeInviteCanBeRedeemedAgain(t *testing.T) {
 	}
 }
 
-// A store whose files cannot be read does not start, because the migration to
-// digests could not run over them.
-func TestAStoreThatCannotLoadRefusesToStart(t *testing.T) {
+// Only a file that can hold a secret stops the store from starting, and it is
+// named. Any other unreadable file is an error on the store, not the refusal.
+func TestOnlySecretFilesRefuseToStart(t *testing.T) {
+	for _, name := range []string{"asset_invites.json", "employee_invites.json", "asset_enrolments.json"} {
+		dir := t.TempDir()
+		os.WriteFile(filepath.Join(dir, name), []byte(`{"code":{"token":"code"`), 0o600)
+		_, err := NewStore(dir)
+		if !errors.Is(err, ErrSecretsNotMigrated) || !strings.Contains(err.Error(), name) {
+			t.Errorf("%s: NewStore = %v; want ErrSecretsNotMigrated naming it", name, err)
+		}
+	}
+	for _, name := range []string{"assets.json", "asset_members.json", "asset_requests.json", "employees.json"} {
+		dir := t.TempDir()
+		os.WriteFile(filepath.Join(dir, name), []byte(`{"x":`), 0o600)
+		_, err := NewStore(dir)
+		if err == nil || errors.Is(err, ErrSecretsNotMigrated) || !strings.Contains(err.Error(), name) {
+			t.Errorf("%s: NewStore = %v; want a plain error naming it", name, err)
+		}
+	}
+}
+
+// Clear secrets in the readable files are still carried to digests when an
+// unrelated file is damaged.
+func TestSecretsAreMigratedEvenWhenAnotherFileIsDamaged(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "employee_invites.json"), []byte(`{"code":{"token":"code"`), 0o600)
-	if _, err := NewStore(dir); !errors.Is(err, ErrSecretsNotMigrated) {
-		t.Fatalf("NewStore = %v; want ErrSecretsNotMigrated", err)
+	os.WriteFile(filepath.Join(dir, "employees.json"), []byte(`{"x":`), 0o600)
+	os.WriteFile(filepath.Join(dir, "employee_invites.json"), []byte(`{"clear-code":{"token":"clear-code","max_uses":1}}`), 0o600)
+	if _, err := NewStore(dir); err == nil || errors.Is(err, ErrSecretsNotMigrated) {
+		t.Fatalf("NewStore = %v; want a plain error", err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "employee_invites.json")); strings.Contains(string(b), "clear-code") {
+		t.Fatalf("the clear code is still on disk: %s", b)
+	}
+}
+
+// IncrementEmployeeInviteUse is kept for one caller and says so.
+func TestIncrementEmployeeInviteUseIsMarkedDeprecated(t *testing.T) {
+	src, err := os.ReadFile("employee_store.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := strings.Index(string(src), "func (s *Store) IncrementEmployeeInviteUse")
+	if i < 0 || !strings.Contains(string(src)[max(0, i-600):i], "Deprecated: ") {
+		t.Fatal("IncrementEmployeeInviteUse must carry a Deprecated: paragraph")
 	}
 }

@@ -81,8 +81,15 @@ type CeremonyInvitee struct {
 	// and leave a place at the table unfilled.
 	//
 	// Token is the clear code, held only on the value returned to the owner
-	// when the ceremony starts. What is saved is TokenDigest: a copy of this
-	// file must not be a way to accept in somebody's place.
+	// when the ceremony starts. What is saved is TokenDigest, so the file no
+	// longer holds the code itself.
+	//
+	// That is not the same as a copy of the file being unable to accept in
+	// someone's place. InviteURL is saved too, and the signed offer it names
+	// (served at /i/<ask>) carries the clear code; that offer is held in memory
+	// and served until the agent restarts. So a copy of this file taken while
+	// the agent is running, and reaching it, can still be used to accept. After
+	// a restart the URL resolves to nothing, and the saved InviteURL is dead.
 	Token       string `json:"token,omitempty"`
 	TokenDigest string `json:"token_digest,omitempty"`
 	InviteURL   string `json:"invite_url"`

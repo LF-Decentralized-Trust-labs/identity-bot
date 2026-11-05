@@ -122,7 +122,11 @@ func (s *Store) loadEnrolments() map[string]Enrolment {
 // them. A token still good stays good. It runs once, as the store opens, and
 // fails if the file cannot be rewritten — the caller does not start.
 func (s *Store) migrateEnrolments() error {
-	all := s.loadEnrolments()
+	// An unreadable file is not an empty one: clear tokens may be in it.
+	all := map[string]Enrolment{}
+	if err := readJSON(s.enrolmentsPath(), &all); err != nil {
+		return err
+	}
 	changed := false
 	now := time.Now().UTC()
 	for key, e := range all {

@@ -26,6 +26,7 @@ type Store struct {
 	// in asset_enrolments.json say what each was issued for.
 	enrolSecrets *enrolsecret.Store
 	assetsErr    error // why assets.json could not be read; nil when it could
+	secretsErr   error // why a file that can hold a secret could not be read
 	assets       map[string]Asset
 	invites      map[string]AssetInvite
 	members      []AssetMember
@@ -55,10 +56,14 @@ func NewStore(dataDir string) (*Store, error) {
 	// reads reporting that error, so a caller that holds on to it cannot
 	// mistake an unreadable store for an empty one. Never rewrites a file.
 	//
-	// A failed load also means the secrets were not migrated: clear codes may
-	// still be on disk, so the agent must not run (ErrSecretsNotMigrated).
-	if err := s.load(); err != nil {
-		return s, fmt.Errorf("%w: %v", ErrSecretsNotMigrated, err)
+	loadErr := s.load()
+	// Only the three files that can hold a secret (asset_invites.json,
+	// employee_invites.json, asset_enrolments.json) stop the agent: clear
+	// codes may still be on them, and they cannot be ruled out unread. Any
+	// other unreadable file leaves the store returned with its error, so the
+	// asset routes answer 503 naming it and everything else keeps running.
+	if s.secretsErr != nil {
+		return s, fmt.Errorf("%w: %v", ErrSecretsNotMigrated, s.secretsErr)
 	}
 	// Secrets an earlier version stored in the clear are carried to digests
 	// now, before anything is served. If the rewrite fails the store does not
@@ -66,11 +71,16 @@ func NewStore(dataDir string) (*Store, error) {
 	if err := s.migrateSecrets(); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrSecretsNotMigrated, err)
 	}
+	if loadErr != nil {
+		return s, loadErr
+	}
 	return s, nil
 }
 
-// ErrSecretsNotMigrated is why a store would not start: secrets an earlier
-// version saved in the clear could not be rewritten as digests.
+// ErrSecretsNotMigrated is why a store would not start: one of the files that
+// can hold an invite or enrolment secret could not be read, or secrets an
+// earlier version saved in the clear could not be rewritten as digests. The
+// error names the file.
 var ErrSecretsNotMigrated = errors.New("asset store: clear invite or enrolment secrets could not be rewritten as digests, so it will not start")
 
 // migrateSecrets moves every secret an earlier version stored in the clear —
@@ -136,20 +146,26 @@ func (s *Store) load() error {
 	if s.assetsErr != nil {
 		s.assets = map[string]Asset{}
 	}
-	var errs []error
+	var errs, secretErrs []error
 	errs = append(errs, s.assetsErr)
 	for _, f := range []struct {
-		path string
-		v    interface{}
+		path   string
+		v      interface{}
+		secret bool
 	}{
-		{s.invitesPath, &s.invites},
-		{s.membersPath, &s.members},
-		{s.requestsPath, &s.requests},
-		{s.empInvitesPath, &s.empInvites},
-		{s.employeesPath, &s.employees},
+		{s.invitesPath, &s.invites, true},
+		{s.membersPath, &s.members, false},
+		{s.requestsPath, &s.requests, false},
+		{s.empInvitesPath, &s.empInvites, true},
+		{s.employeesPath, &s.employees, false},
 	} {
-		errs = append(errs, readJSON(f.path, f.v))
+		err := readJSON(f.path, f.v)
+		errs = append(errs, err)
+		if f.secret {
+			secretErrs = append(secretErrs, err)
+		}
 	}
+	s.secretsErr = errors.Join(secretErrs...)
 	return errors.Join(errs...)
 }
 
@@ -280,18 +296,6 @@ func (s *Store) ListInvites(assetID string) []AssetInvite {
 		}
 	}
 	return out
-}
-
-func (s *Store) IncrementInviteUse(token string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if id, ok := s.findInviteLocked(token); ok {
-		inv := s.invites[id]
-		inv.UseCount++
-		s.invites[id] = inv
-		return s.saveLocked(s.invitesPath, s.invites)
-	}
-	return nil
 }
 
 // ErrInviteExhausted is returned when a redeem names an invite already used as

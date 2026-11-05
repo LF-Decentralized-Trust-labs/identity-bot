@@ -57,6 +57,11 @@ func (s *Store) ListEmployeeInvites() []EmployeeInvite {
 	return out
 }
 
+// Deprecated: GetEmployeeInvite followed by this is a check-then-increment race
+// that lets concurrent redeems exceed MaxUses, and a caller that ignores its
+// error spends nothing when the save fails. Use ReserveEmployeeInvite, and
+// ReleaseEmployeeInvite if the redemption then fails. Kept exported only until
+// the organisation backend's signerRedeemHandler moves over.
 func (s *Store) IncrementEmployeeInviteUse(token string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
