@@ -10,9 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"identity-agent-core/drivers"
 	"identity-agent-core/endpointrecord"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/store"
+	"identity-agent-core/witness"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -131,6 +133,14 @@ func (s *CoreServer) RecoverContactEndpoint(contactAID string) (*recoveredEndpoi
 		known[c.AID] = c
 	}
 
+	// THE LOG IS BROUGHT UP TO DATE BEFORE ANYTHING IS CHECKED AGAINST IT. The
+	// copy on file is as old as the last time this contact was resolved, and a
+	// contact whose address died is by definition one this agent has not
+	// reached lately: it may have rotated since, perhaps because the key on file
+	// was compromised. Checking against the copy would accept a record signed
+	// by the key it left and refuse the one signed by the key it moved to.
+	s.refreshContactKeyLog(contactAID, kelRecord, witnessAIDs, known)
+
 	// WHAT THE CONTACT SIGNED IS CHECKED AGAINST THE KEY ITS VERIFIED LOG NAMES,
 	// not against anything a witness says. Without a verified log there is
 	// nothing to check a record against, so there is no answer: an address
@@ -201,6 +211,107 @@ func (s *CoreServer) RecoverContactEndpoint(contactAID string) (*recoveredEndpoi
 		Signature:     best.Signature,
 		FoundVia:      foundVia,
 	}, nil
+}
+
+// refreshContactKeyLog asks the witnesses the contact names for the events of
+// its key log after the last one on file, and keeps the longest log that
+// verifies end to end, so a rotation since the contact was last resolved is
+// followed. Nothing a witness says is taken on its word: the events it gives
+// are only candidates, appended to the log on file, and the whole is kept only
+// when every event is signed by the key the log itself puts in force at that
+// point (drivers.ValidateKELFromBytes). An event that does not continue the log
+// on file, a fork, fails that check. A witness that cannot be reached, answers
+// as for a log not held, or offers anything else is passed over, and the log on
+// file stays.
+//
+// The reads carry the inception event of the log on file (witness.MayRead),
+// which only a party the contact gave the log to has, so a witness answers
+// them. A device with nothing on file to prove a read with refreshes nothing.
+func (s *CoreServer) refreshContactKeyLog(aid string, onFile *store.ContactKELRecord, witnessAIDs []string, known map[string]store.ContactRecord) {
+	if onFile == nil || !onFile.KelVerified {
+		return
+	}
+	var best *store.ContactKELRecord
+	for _, witnessAID := range witnessAIDs {
+		w, ok := known[witnessAID]
+		if !ok || w.OobiURL == "" {
+			continue
+		}
+		later := s.askWitnessForLaterEvents(witnessBaseURL(w.OobiURL), aid, onFile.KEL)
+		longest := len(onFile.KEL)
+		if best != nil {
+			longest = len(best.KEL)
+		}
+		if len(onFile.KEL)+len(later) <= longest {
+			continue
+		}
+		events := append(append([]map[string]interface{}{}, onFile.KEL...), later...)
+		in, ok := drivers.ValidateKELInputFromRecords(aid, events)
+		if !ok {
+			continue
+		}
+		val, err := drivers.ValidateKELFromBytes(in)
+		if err != nil || !val.KelVerified || val.CurrentPublicKey == "" {
+			log.Printf("[endpoint] witness %s gave events for %s that do not continue its key log", witnessAID, aid)
+			continue
+		}
+		best = &store.ContactKELRecord{
+			AID: aid, KEL: events, KelVerified: true, CurrentPublicKey: val.CurrentPublicKey,
+			EventsValidated: val.EventsValidated, ValidatedAt: time.Now().UTC().Format(time.RFC3339),
+		}
+	}
+	if best == nil {
+		return
+	}
+	if err := s.DataStore.SaveContactKEL(*best); err != nil {
+		log.Printf("[endpoint] could not keep %s's newer key log: %v", aid, err)
+		return
+	}
+	log.Printf("[endpoint] %s's key log is now %d events long", aid, len(best.KEL))
+}
+
+// maxLaterEvents bounds how many events one witness is asked for in one refresh.
+const maxLaterEvents = 32
+
+// askWitnessForLaterEvents reads, one at a time, the events of aid's key log
+// that follow the ones held, as a witness holds them with the controller's
+// signature, until the witness has no more. A commercial witness serves at the
+// root and an agent acting as one under /api, so both are tried.
+func (s *CoreServer) askWitnessForLaterEvents(base, aid string, held []map[string]interface{}) []map[string]interface{} {
+	proof, ok := witness.InceptionProof(held)
+	if !ok {
+		return nil
+	}
+	var later []map[string]interface{}
+	for sn := len(held); sn < len(held)+maxLaterEvents; sn++ {
+		var got *witness.SignedEvent
+		for _, prefix := range []string{"/api/witness/kel/", "/witness/kel/"} {
+			url := fmt.Sprintf("%s%s%s/event/%d", base, prefix, aid, sn)
+			req, err := http.NewRequest(http.MethodGet, url, nil)
+			if err != nil {
+				continue
+			}
+			req.Header.Set(witness.HeaderInception, proof)
+			resp, err := s.peerClient(10*time.Second, url).Do(req)
+			if err != nil {
+				continue
+			}
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+			resp.Body.Close()
+			var ev witness.SignedEvent
+			if resp.StatusCode == http.StatusOK && json.Unmarshal(body, &ev) == nil && ev.RawBytesB64 != "" && ev.CesrSignature != "" {
+				got = &ev
+				break
+			}
+		}
+		if got == nil {
+			break
+		}
+		later = append(later, map[string]interface{}{
+			"raw_bytes_b64": got.RawBytesB64, "cesr_signature": got.CesrSignature, "sequence_number": sn,
+		})
+	}
+	return later
 }
 
 func endpointRecordObject(r endpointrecord.Record) map[string]any {
