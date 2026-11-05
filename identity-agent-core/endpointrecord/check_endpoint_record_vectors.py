@@ -166,7 +166,7 @@ def parse_issued(s):
         raise Refused("issued value")
 
 
-def verify(rec, key_qb64, now):
+def verify(rec, key_qb64, now, max_age_days=None):
     if not isinstance(rec, dict) or sorted(rec.keys()) != sorted(FIELDS):
         raise Refused("fields")
     for k in FIELDS:
@@ -181,7 +181,9 @@ def verify(rec, key_qb64, now):
     issued = parse_issued(rec["issued"])
     if issued > now + datetime.timedelta(minutes=10):
         raise Refused("future")
-    if issued < now - datetime.timedelta(days=90):
+    # No age limit unless the verifier sets one: a record stands while its key is
+    # the identifier's current key.
+    if max_age_days and issued < now - datetime.timedelta(days=max_age_days):
         raise Refused("expired")
     sig = sig_raw(rec["signature"])
     try:
@@ -228,7 +230,7 @@ def main():
         except Refused:
             pass
         try:
-            verify(rec, keys[v["key"]], now)
+            verify(rec, keys[v["key"]], now, v.get("max_age_days"))
             verdict = True
         except Refused:
             verdict = False

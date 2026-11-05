@@ -74,6 +74,9 @@ type RecordVector struct {
 	Canonical string `json:"canonical,omitempty"`
 	Valid     bool   `json:"valid"`
 	Why       string `json:"why,omitempty"`
+	// MaxAgeDays is the optional age limit the record is checked with. Absent
+	// means none, which is the default: a record does not expire.
+	MaxAgeDays int `json:"max_age_days,omitempty"`
 }
 
 // OriginVector is an origin and whether it is in its one spelling.

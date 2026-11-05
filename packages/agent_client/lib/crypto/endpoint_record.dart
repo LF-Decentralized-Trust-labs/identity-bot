@@ -23,9 +23,6 @@ const endpointRecordType = 'endpoint-record/1';
 /// How far ahead of the checker's clock a record may be issued.
 const endpointRecordMaxFuture = Duration(minutes: 10);
 
-/// How long after it was issued a record is still believed (ADR-062): an old
-/// genuine record can point at a host that has lapsed.
-const endpointRecordMaxAge = Duration(days: 90);
 
 /// The answer to checking a record.
 class EndpointRecordCheck {
@@ -242,10 +239,15 @@ String? endpointRecordSignedBytes(Map<String, dynamic> record) {
 /// rotated away from is invalid; its signer publishes again.
 ///
 /// [now] is the checker's clock, for the bound on a record issued ahead of it.
+///
+/// A record has no age limit (ADR-062): it stands while the key that signed it
+/// is the identifier's current key and no newer record has been seen. A checker
+/// that wants a limit passes [maxAge]; null, the default, is none.
 EndpointRecordCheck verifyEndpointRecord(
   Map<String, dynamic> record,
   String currentKey, {
   DateTime? now,
+  Duration? maxAge,
 }) {
   const fields = ['type', 'aid', 'origin', 'issued', 'signature'];
   if (record.length != fields.length ||
@@ -277,9 +279,9 @@ EndpointRecordCheck verifyEndpointRecord(
   if (issued.isAfter(clock.add(endpointRecordMaxFuture))) {
     return EndpointRecordCheck._no('the record is issued in the future');
   }
-  if (issued.isBefore(clock.subtract(endpointRecordMaxAge))) {
+  if (maxAge != null && issued.isBefore(clock.subtract(maxAge))) {
     return EndpointRecordCheck._no(
-        'the record was issued longer ago than ${endpointRecordMaxAge.inDays} days');
+        'the record was issued longer ago than ${maxAge.inDays} days');
   }
   final sig = _sigRaw(record['signature'] as String);
   if (sig == null) {

@@ -56,15 +56,6 @@ const IssuedLayout = "2006-01-02T15:04:05Z"
 // is refused rather than held.
 const MaxFuture = 10 * time.Minute
 
-// MaxAge is how long after it was issued a record is still believed. A record
-// is a statement about where an identifier can be reached, and an address that
-// was true years ago is the one a lapsed host, taken over by somebody else,
-// answers at. Without a limit a reader with nothing remembered can be handed
-// an old genuine record by any witness, or anything in front of one. An
-// identifier that wants to stay findable signs a new record before this runs
-// out; a new record costs a signature and replaces the old one.
-const MaxAge = 90 * 24 * time.Hour
-
 // Record is a signed endpoint record, exactly as it travels.
 type Record struct {
 	Type      string `json:"type"`
@@ -163,10 +154,23 @@ func (r Record) IssuedAt() (time.Time, error) {
 }
 
 // Verify reports whether r is aid's statement: well formed, not issued more
-// than MaxFuture after now nor more than MaxAge before it, and signed by key, the key aid's verified key log
+// than MaxFuture after now, and signed by key, the key aid's verified key log
 // names now. A record signed by a key the log has since rotated away from is
 // refused; its signer publishes again.
+//
+// A record has no age limit. It stands while the key that signed it is the
+// identifier's current key, which any rotation ends, and while no newer one has
+// been seen (Newer); an identifier that never moves is as findable in a year as
+// on the day it published (ADR-062). VerifyNoOlderThan is the same check with a
+// limit, for a verifier that wants one.
 func (r Record) Verify(key ed25519.PublicKey, now time.Time) error {
+	return r.VerifyNoOlderThan(key, now, 0)
+}
+
+// VerifyNoOlderThan is Verify that also refuses a record issued more than
+// maxAge before now. Zero means no limit, which is what Verify does; nothing in
+// this repository sets one.
+func (r Record) VerifyNoOlderThan(key ed25519.PublicKey, now time.Time, maxAge time.Duration) error {
 	if err := r.CheckShape(); err != nil {
 		return err
 	}
@@ -174,8 +178,8 @@ func (r Record) Verify(key ed25519.PublicKey, now time.Time) error {
 	if at.After(now.Add(MaxFuture)) {
 		return fmt.Errorf("the record is issued %s, in the future", r.Issued)
 	}
-	if at.Before(now.Add(-MaxAge)) {
-		return fmt.Errorf("the record was issued %s, longer ago than %d days; the identifier must sign a new one", r.Issued, int(MaxAge.Hours()/24))
+	if maxAge > 0 && at.Before(now.Add(-maxAge)) {
+		return fmt.Errorf("the record was issued %s, longer ago than %d days; the identifier must sign a new one", r.Issued, int(maxAge.Hours()/24))
 	}
 	if len(key) != ed25519.PublicKeySize {
 		return fmt.Errorf("a verifying key is %d bytes", ed25519.PublicKeySize)

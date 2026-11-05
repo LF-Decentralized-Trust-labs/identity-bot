@@ -5,8 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
-	"strconv"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -82,8 +82,9 @@ func buildVectors(t *testing.T) VectorSet {
 			"names now. canonical is the bytes the Ed25519 signature is over: the record's fields " +
 			"other than signature as a JSON object, keys sorted, no whitespace (ADR-049's form). The " +
 			"signature is CESR qb64, code 0B. valid says whether the record verifies against key at " +
-			"now, the verifier's clock: a record issued more than 10 minutes after now, or more than " +
-			"90 days before it, does not verify. next_public_key is the key the identifier's log names after a " +
+			"now, the verifier's clock: a record issued more than 10 minutes after now does not verify, " +
+			"and one issued long before it does: a record has no age limit unless the verifier sets one, which a " +
+			"vector says with max_age_days. next_public_key is the key the identifier's log names after a " +
 			"rotation. requests are the strings a controller signs for a request, the second form and the third, " +
 			"which names the origin: lines joined by a line feed. origins are in their one spelling or not; ordering says " +
 			"whether record A replaces record B. addresses are what a client is pointed at and the origin it signs for (empty when it has none).",
@@ -116,7 +117,8 @@ func buildVectors(t *testing.T) VectorSet {
 	add("a withdrawal, which names no address", mustSign(t, "", issued), nil, "public_key", true, "")
 	add("issued a few minutes ahead of the verifier", mustSign(t, "https://org.example.com:443", vectorNow.Add(5*time.Minute)), nil, "public_key", true, "")
 
-	add("issued just inside the maximum age", mustSign(t, "https://org.example.com:443", vectorNow.Add(-MaxAge+time.Minute)), nil, "public_key", true, "")
+	// No clock expiry: a record stands while its key is the current one.
+	add("issued a year before the verifier", mustSign(t, "https://org.example.com:443", vectorNow.Add(-365*24*time.Hour)), nil, "public_key", true, "")
 	// A rotation: the verified key log names the next key from now on, so what
 	// the replaced key signed, however genuine it was, is refused.
 	rotated, err := Sign(vectorAID, "https://org.example.com:443", issued, nextSeed)
@@ -139,7 +141,11 @@ func buildVectors(t *testing.T) VectorSet {
 	add("issued further ahead of the verifier than allowed",
 		mustSign(t, "https://org.example.com:443", vectorNow.Add(11*time.Minute)), nil, "public_key", false, "future")
 
-	add("issued longer ago than the maximum age", mustSign(t, "https://org.example.com:443", vectorNow.Add(-MaxAge-time.Minute)), nil, "public_key", false, "expired")
+	// The off-by-default option: a verifier that sets an age limit.
+	limited := mustSign(t, "https://org.example.com:443", vectorNow.Add(-91*24*time.Hour))
+	add("issued 91 days before a verifier that limits age to 90 days", limited, nil, "public_key", false, "expired")
+	set.Records[len(set.Records)-1].MaxAgeDays = 90
+	add("issued 91 days before a verifier that sets no limit", limited, nil, "public_key", true, "")
 
 	notDefault := Record{Type: Type, AID: vectorAID, Origin: "https://org.example.com", Issued: good.Issued}
 	add("an origin without its port, validly signed", signUnchecked(t, notDefault, vectorSeed), nil, "public_key", false, "origin")
@@ -292,7 +298,7 @@ func TestThePublishedEndpointRecordVectorsHold(t *testing.T) {
 		if r, perr := Parse(obj); perr != nil {
 			verr = perr
 		} else {
-			verr = r.Verify(key, now)
+			verr = r.VerifyNoOlderThan(key, now, time.Duration(v.MaxAgeDays)*24*time.Hour)
 		}
 		if (verr == nil) != v.Valid {
 			t.Errorf("%s: valid=%v but verification said %v", v.Name, v.Valid, verr)
