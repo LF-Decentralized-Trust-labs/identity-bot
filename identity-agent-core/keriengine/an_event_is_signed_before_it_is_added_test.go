@@ -500,6 +500,56 @@ func TestAFoundingNoValidSignatureCoversIsRefused(t *testing.T) {
 	}
 }
 
+// An interaction or a founding held without its signature is signed by the
+// engine's own signer only where it was marked unsigned when this version first
+// ran, as a rotation is. One stored unsigned since (through the store route, or
+// a backup restore), which whoever could write the store may have composed, is
+// never signed here, and the log is not extended past it.
+func TestAnUnmarkedUnsignedEventIsNeverSignedHere(t *testing.T) {
+	k0, _ := testSigner(true)
+	k1, _ := testSigner(true)
+	e := New()
+	inc, err := e.CreateInceptionNamed(pubOf(t, k0), pubOf(t, k1), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Interact("a", []interface{}{map[string]string{"d": "EA"}}); err != nil {
+		t.Fatal(err)
+	}
+	kel, _ := e.GetKel("a")
+	next := func(e *Engine) error {
+		_, err := e.Interact(inc.AID, []interface{}{map[string]string{"d": "EZ"}})
+		return err
+	}
+	for _, c := range []struct {
+		name string
+		sigs [][]string
+		// which events are marked unsigned, by sequence number
+		unsignedIx int
+	}{
+		{"an interaction", [][]string{kel.Signatures[0], nil}, 1},
+		{"a founding", [][]string{nil, kel.Signatures[1]}, 0},
+	} {
+		for _, marked := range []bool{false, true} {
+			r := New()
+			mark := []bool{false, false}
+			mark[c.unsignedIx] = marked
+			if _, err := r.ReloadIdentity(&drivers.DriverReloadIdentityRequest{AID: inc.AID, LastSAID: kel.KEL[1]["d"].(string),
+				KEL: kel.KEL, RawEventsB64: kel.RawEventsB64, Signatures: c.sigs, UnsignedAtUpgrade: mark}); err != nil {
+				t.Fatal(err)
+			}
+			err := next(r)
+			var unsigned *ErrUnsignedHistory
+			if marked && err != nil {
+				t.Fatalf("%s marked unsigned at upgrade was not signed and the log not extended: %v", c.name, err)
+			}
+			if !marked && !errors.As(err, &unsigned) {
+				t.Fatalf("%s stored unsigned after the upgrade was signed here: %v", c.name, err)
+			}
+		}
+	}
+}
+
 // A rotation with several keys that cannot open the commitment however they
 // sign is refused as not committed, never held waiting for signatures that
 // could not help.

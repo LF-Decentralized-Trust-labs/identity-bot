@@ -193,10 +193,10 @@ func checkedSignatures(raw []byte, sigs []string, keys []string, priorNext []str
 
 // signHistory obtains, from the installed signer, signatures for events in
 // entries that are held without them, where each was signed by one key the
-// signer holds: a founding (which the core's signer signs only where the whole
-// key chain is its own) or an interaction, and a rotation only where it was
-// marked unsigned when this version first ran. It changes nothing: what it returns is kept only with the next
-// event, once the whole log verifies with it.
+// signer holds (a founding, which the core's signer signs only where the whole
+// key chain is its own, a rotation or an interaction) and was marked unsigned
+// when this version first ran. It changes nothing: what it returns is kept
+// only with the next event, once the whole log verifies with it.
 func (e *Engine) signHistory(aid string, entries []kelEntry) map[int][]string {
 	e.commitMu.Lock()
 	f := e.eventSignature
@@ -220,11 +220,12 @@ func (e *Engine) signHistory(aid string, entries []kelEntry) map[int][]string {
 		if len(en.Sigs) > 0 || len(keys) != 1 {
 			continue
 		}
-		// A rotation moves control to the keys it names and the commitment
-		// it makes, so one is signed after the fact only where an earlier
-		// version of this engine added it unsigned: never one stored since,
-		// which anybody able to write the store could have composed.
-		if (ev.Ilk == "rot" || ev.Ilk == "drt") && !en.MarkedUnsigned {
+		// An event is signed after the fact only where an earlier version of
+		// this engine added it unsigned: never one stored since, which anybody
+		// able to write the store could have composed. A rotation moves
+		// control, and an interaction or founding is no less the key log's
+		// to refuse, whatever its ilk.
+		if !en.MarkedUnsigned {
 			continue
 		}
 		sig, err := f(aid, keys[0], en.Raw)
