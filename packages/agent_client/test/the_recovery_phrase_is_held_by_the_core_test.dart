@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:agent_client/services/profile_scope.dart';
 import 'package:agent_client/services/root_seed_handoff.dart';
 import 'package:agent_client/services/secure_key_store.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -15,8 +16,12 @@ const _core = 'http://127.0.0.1:5050';
 /// A core, as far as the phrase routes go. [refuse] answers every route with the
 /// root-seed refusal, as a production core does where it cannot wrap.
 class _FakeCore {
-  _FakeCore({this.refuse = false});
+  _FakeCore({this.refuse = false, this.refuseHoldOnly = false});
   final bool refuse;
+
+  /// A production core that cannot wrap: it has nothing to open (404) and
+  /// refuses only the hold, which is the only route that needs the wrapper.
+  final bool refuseHoldOnly;
   String? held;
   final seen = <String>[];
 
@@ -33,6 +38,15 @@ class _FakeCore {
         }
         switch ('${req.method} ${req.url.path}') {
           case 'PUT /api/keystore/recovery-phrase':
+            if (refuseHoldOnly) {
+              return http.Response(
+                  jsonEncode({
+                    'error': 'an identity cannot be created on this computer',
+                    'details': 'its key protection is not proven usable',
+                    'code': 'root_seed_refused'
+                  }),
+                  412);
+            }
             held = (jsonDecode(req.body) as Map)['phrase'] as String;
             return http.Response('{"held":true}', 201);
           case 'POST /api/keystore/recovery-phrase/open':
@@ -104,6 +118,15 @@ void main() {
     expect(await legacy.read(key: 'agent_mnemonic'), _phrase);
   });
 
+  test('a core that answers 404 to open and refuses only the hold never lets the old copy be served', () async {
+    FlutterSecureStorage.setMockInitialValues({'agent_mnemonic': _phrase});
+    final core = _FakeCore(refuseHoldOnly: true);
+    SecureKeyStore.holdPhraseWith(CorePhraseHolder(baseUrl: _core, client: core.client));
+
+    await expectLater(SecureKeyStore.loadMnemonic(), throwsA(isA<RootSeedRefused>()));
+    expect(await legacy.read(key: 'agent_mnemonic'), _phrase);
+  });
+
   test('confirming the words are written down removes them from the core and says so only when they are gone', () async {
     final core = _FakeCore();
     SecureKeyStore.holdPhraseWith(CorePhraseHolder(baseUrl: _core, client: core.client));
@@ -112,6 +135,42 @@ void main() {
     expect(await SecureKeyStore.forgetWordsAfterRecording(), isTrue);
     expect(core.held, isNull);
     expect(await SecureKeyStore.hasMnemonic(), isFalse);
+  });
+
+  test('confirming deletes the old copies in the app\'s own storage too', () async {
+    final scoped = await ProfileScope.key('mnemonic');
+    FlutterSecureStorage.setMockInitialValues(
+        {'agent_mnemonic': _phrase, scoped: _phrase});
+    final core = _FakeCore()..held = _phrase;
+    SecureKeyStore.holdPhraseWith(CorePhraseHolder(baseUrl: _core, client: core.client));
+
+    expect(await SecureKeyStore.forgetWordsAfterRecording(), isTrue);
+    expect(await legacy.readAll(), isEmpty,
+        reason: 'a software copy left behind defeats the hardware hold');
+    expect(core.held, isNull);
+  });
+
+  test('an old copy left by a crash after the hold is deleted on the next load', () async {
+    FlutterSecureStorage.setMockInitialValues({'agent_mnemonic': _phrase});
+    final core = _FakeCore()..held = _phrase;
+    SecureKeyStore.holdPhraseWith(CorePhraseHolder(baseUrl: _core, client: core.client));
+
+    expect(await SecureKeyStore.loadMnemonic(), _phrase.split(' '));
+    expect(await legacy.readAll(), isEmpty);
+  });
+
+  test('moving the profile-scoped phrase leaves a different unscoped one alone', () async {
+    final scoped = await ProfileScope.key('mnemonic');
+    final other = _phrase.replaceFirst('about', 'above');
+    FlutterSecureStorage.setMockInitialValues(
+        {scoped: _phrase, 'agent_mnemonic': other});
+    final core = _FakeCore();
+    SecureKeyStore.holdPhraseWith(CorePhraseHolder(baseUrl: _core, client: core.client));
+
+    expect(await SecureKeyStore.migrateLegacyMnemonic(), isFalse);
+    expect(core.held, _phrase);
+    expect(await legacy.read(key: scoped), isNull);
+    expect(await legacy.read(key: 'agent_mnemonic'), other);
   });
 
   test('an app closed before confirming finds the phrase still held, so recovery stays possible', () async {

@@ -80,6 +80,11 @@ func (s *CoreServer) holdPhrase(w http.ResponseWriter, r *http.Request, op phras
 		jsonError(w, op.what+" is for the owner of this agent", http.StatusForbidden)
 		return
 	}
+	// The phrase recreates the root seed, so a paired computer, which answers to
+	// its owner's device, takes it no more than it takes the seed.
+	if s.refuseWhenThisComputerAnswersToSomebody(w, op.what) {
+		return
+	}
 	var req recoveryPhraseBody
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil || !aPlausiblePhrase(req.Phrase) {
 		jsonError(w, "body must be {\"phrase\": \"<12 to 24 lowercase words, single-spaced>\"}", http.StatusBadRequest)

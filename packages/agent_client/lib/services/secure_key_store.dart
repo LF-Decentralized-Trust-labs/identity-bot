@@ -215,35 +215,48 @@ class SecureKeyStore {
   /// Never the other way round: this is the one value in the app where an
   /// interrupted move means an identity nobody can recover.
   ///
-  /// Returns true when nothing is left in the old place. Returns false, leaving
-  /// the original exactly where it was, when the core did not take it. Throws
-  /// [RootSeedRefused] when this computer cannot protect the phrase: the old
-  /// copy is not served in its place.
+  /// Each old key is judged on its own: one that equals what the core holds is
+  /// deleted, whenever it is found, so a crash between holding and deleting
+  /// does not leave the software copy for good. Only the key that was checked
+  /// is deleted, never its sibling.
+  ///
+  /// Returns true when nothing is left in the old places. Returns false,
+  /// leaving the original exactly where it was, when the core did not take it
+  /// or holds a different phrase. Throws [RootSeedRefused] when this computer
+  /// cannot protect the phrase: the old copy is not served in its place.
+  ///
+  /// Run it at startup, and it also runs on every [loadMnemonic].
   static Future<bool> migrateLegacyMnemonic() async {
-    final scoped = await _scopedKey();
-    final raw = await _legacyStorage.read(key: scoped) ??
-        await _legacyStorage.read(key: _legacyMnemonicKey);
-    if (raw == null || raw.trim().isEmpty) return true;
-    final found = _normalised(raw);
-
-    // The old copy is deleted only once the core is shown to hold THE SAME
-    // phrase: a different one already held is not a reason to destroy this.
-    final held = await _holder.open();
-    if (held == null) {
-      await _holder.hold(found);
-      if (await _holder.open() != found) {
-        debugPrint('[SecureKeyStore] the phrase did not survive the move — '
-            'leaving the original');
-        return false;
+    var clean = true;
+    for (final key in {await _scopedKey(), _legacyMnemonicKey}) {
+      final raw = await _legacyStorage.read(key: key);
+      if (raw == null) continue;
+      if (raw.trim().isEmpty) {
+        await _legacyStorage.delete(key: key);
+        continue;
       }
-    } else if (held != found) {
-      debugPrint('[SecureKeyStore] the core holds a different phrase — '
-          'leaving the original');
-      return false;
+      final found = _normalised(raw);
+
+      // The old copy is deleted only once the core is shown to hold THE SAME
+      // phrase: a different one already held is not a reason to destroy this.
+      final held = await _holder.open();
+      if (held == null) {
+        await _holder.hold(found);
+        if (await _holder.open() != found) {
+          debugPrint('[SecureKeyStore] the phrase did not survive the move — '
+              'leaving the original');
+          clean = false;
+          continue;
+        }
+      } else if (held != found) {
+        debugPrint('[SecureKeyStore] the core holds a different phrase — '
+            'leaving the original');
+        clean = false;
+        continue;
+      }
+      await _legacyStorage.delete(key: key);
     }
-    await _legacyStorage.delete(key: scoped);
-    await _legacyStorage.delete(key: _legacyMnemonicKey);
-    return true;
+    return clean;
   }
 
   /// Holds the phrase. Throws [RootSeedRefused] where the core will not.
@@ -256,10 +269,11 @@ class SecureKeyStore {
   }
 
   static Future<List<String>?> loadMnemonic() async {
-    var value = await _holder.open();
-    if (value == null) {
-      if (await migrateLegacyMnemonic()) value = await _holder.open();
-    }
+    // Every time, not only when the core holds nothing: an old copy left by a
+    // crash after the hold must still be deleted.
+    final settled = await migrateLegacyMnemonic();
+    final value = await _holder.open();
+    if (!settled && value == null) return null;
     if (value == null || value.isEmpty) return null;
     return value.split(' ');
   }

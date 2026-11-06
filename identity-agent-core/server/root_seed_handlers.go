@@ -56,6 +56,30 @@ type rootSeedRequest struct {
 // assertion about refusing never ran.
 var detectKeyProtection = secureenclave.DetectCapability
 
+// refuseWhenThisComputerAnswersToSomebody answers 409 and returns true when this
+// computer holds its own key and names somebody else as its owner. What is
+// refused ([what]) would put the owner's root, or the phrase that recreates it,
+// on a machine they do not carry. Shared by every route that files such a
+// thing, so they cannot drift apart.
+func (s *CoreServer) refuseWhenThisComputerAnswersToSomebody(w http.ResponseWriter, what string) bool {
+	owner, oerr := s.ownerAuthority()
+	if oerr != nil || owner == nil {
+		return false
+	}
+	self := ""
+	if identity, ierr := s.DataStore.GetIdentity(); ierr == nil && identity != nil {
+		self = identity.AID
+	}
+	if owner.AID == "" || owner.AID == self {
+		return false
+	}
+	writeError(w, http.StatusConflict, "This computer answers to somebody",
+		"it holds its own key and names "+owner.AID+" as its owner, so "+what+
+			" has no business here — that key belongs on the device its owner carries, "+
+			"and a copy of it on this machine could never be taken back")
+	return true
+}
+
 // handleSetRootSeed installs the mnemonic-derived root seed. Local owner only.
 // Idempotent for the same seed; a DIFFERENT established seed is refused — the
 // HD root of an identity must never silently rotate.
@@ -79,18 +103,8 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 	// It does not stop the case this endpoint exists for. A computer that IS
 	// the identity — no phone, keys on this machine — answers to nobody else,
 	// so it is unaffected. That is the whole distinction: whose root this is.
-	if owner, oerr := s.ownerAuthority(); oerr == nil && owner != nil {
-		self := ""
-		if identity, ierr := s.DataStore.GetIdentity(); ierr == nil && identity != nil {
-			self = identity.AID
-		}
-		if owner.AID != "" && owner.AID != self {
-			writeError(w, http.StatusConflict, "This computer answers to somebody",
-				"it holds its own key and names "+owner.AID+" as its owner, so a root seed "+
-					"has no business here — that key belongs on the device its owner carries, "+
-					"and a copy of it on this machine could never be taken back")
-			return
-		}
+	if s.refuseWhenThisComputerAnswersToSomebody(w, "a root seed") {
+		return
 	}
 
 	// A root seed only goes onto a machine that can protect it.

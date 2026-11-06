@@ -12,6 +12,7 @@ import (
 
 	"identity-agent-core/secureenclave"
 	"identity-agent-core/secureenclave/seedwraptest"
+	"identity-agent-core/store"
 )
 
 const thePhrase = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
@@ -202,5 +203,30 @@ func TestOnlyTheOwnerReachesThePhraseMovedTo(t *testing.T) {
 		if _, ok := controllerOwnerOnly[k]; !ok {
 			t.Errorf("a controller may reach %s", k)
 		}
+	}
+}
+
+// The phrase recreates the root seed, so a computer that answers to somebody
+// else holds it no more than it takes the seed (handleSetRootSeed).
+func TestAPairedComputerRefusesToHoldThePhrase(t *testing.T) {
+	s := agentWithNoIdentity(t)
+	seedwraptest.ThisMachineCannot(t, secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindTPM2}, true)
+	if err := s.DataStore.SaveIdentity(store.IdentityState{
+		AID: "EThisComputersOwnIdentity", PublicKey: "DItsOwnKey",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SealOwnerAuthority(OwnerAuthority{
+		AID:       "EThePersonWhoOwnsIt",
+		PublicKey: "ypOsFwUYcHHWe4PH_w7-gQjo7EUwV113JoeTM9vavnw",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	w := phraseCall(s, http.MethodPut, phrasePath, map[string]string{"phrase": thePhrase}, true)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "EThePersonWhoOwnsIt") {
+		t.Fatalf("a paired computer held the phrase: %d %s", w.Code, w.Body)
+	}
+	if _, err := os.Stat(filepath.Join(s.DataDir, "secureenclave", "recovery_phrase.key")); err == nil {
+		t.Fatal("written")
 	}
 }
