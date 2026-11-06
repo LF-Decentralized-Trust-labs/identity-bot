@@ -283,6 +283,7 @@ class SecureKeyStore {
     // yet deleted) is finished here without waiting for the first load.
     try {
       await migrateLegacyMnemonic();
+      await _migrateLegacyPhraseMovingTo();
     } on RootSeedRefused {
       // This computer cannot hold the phrase; the old copy stays and is not served.
     }
@@ -314,7 +315,7 @@ class SecureKeyStore {
   /// move's two rotations both phrases are needed, and losing either loses the
   /// identity. Throws [RootSeedRefused] where the core will not hold it.
   static Future<bool> savePhraseMovingTo(List<String> words) async {
-    final value = words.join(' ');
+    final value = _normalised(words.join(' '));
     await _movingToHolder.hold(value);
     return await _movingToHolder.open() == value;
   }
@@ -346,7 +347,7 @@ class SecureKeyStore {
   /// record of the move forgotten. Returns false, changing nothing it cannot
   /// confirm, when the new phrase did not survive the write.
   static Future<bool> finishMovingToThePhrase(List<String> words) async {
-    final value = words.join(' ');
+    final value = _normalised(words.join(' '));
     await _holder.hold(value);
     if (await _holder.open() != value) return false;
     // An older copy of the phrase just replaced, left in this app's own
@@ -361,16 +362,27 @@ class SecureKeyStore {
   /// storage into the core. True when nothing is left in the old place.
   static Future<bool> _migrateLegacyPhraseMovingTo() async {
     final key = await ProfileScope.key(_movingToName);
-    final found = await _legacyStorage.read(key: key);
-    if (found == null || found.isEmpty) return true;
-    // A phrase the core already holds wins; the old copy is only a copy.
-    if (!await _movingToHolder.isHeld()) {
+    final raw = await _legacyStorage.read(key: key);
+    if (raw == null) return true;
+    if (raw.trim().isEmpty) {
+      await _legacyStorage.delete(key: key);
+      return true;
+    }
+    final found = _normalised(raw);
+    // Deleted only once the core is shown to hold THE SAME phrase: a different
+    // one already held is not a reason to destroy this.
+    final held = await _movingToHolder.open();
+    if (held == null) {
       await _movingToHolder.hold(found);
       if (await _movingToHolder.open() != found) {
         debugPrint('[SecureKeyStore] the phrase being moved to did not '
             'survive the move — leaving the original');
         return false;
       }
+    } else if (held != found) {
+      debugPrint('[SecureKeyStore] the core holds a different phrase being '
+          'moved to — leaving the original');
+      return false;
     }
     await _legacyStorage.delete(key: key);
     return true;
