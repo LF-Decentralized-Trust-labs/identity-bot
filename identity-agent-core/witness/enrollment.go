@@ -322,15 +322,15 @@ func (s *Service) ProcessInboundRequest(ctx context.Context, req WitnessRequest)
 		Decision: decision, Reason: reason, BackendType: s.BackendType, TaskID: taskID, RequestID: req.RequestID,
 	}
 	if req.RequesterOOBI != "" {
-		go func() {
+		s.background(func() {
 			if err := s.SendAcceptCallback(context.Background(), req.RequesterOOBI, cb); err != nil {
 				log.Printf("[witness] accept POST-back failed: %v", err)
 			}
-		}()
+		})
 	}
 
 	if accept {
-		go s.maybeReciprocalRequest(context.Background(), req)
+		s.background(func() { s.maybeReciprocalRequest(context.Background(), req) })
 	}
 
 	return InboundResult{Accepted: accept, Reason: reason, TaskID: taskID}

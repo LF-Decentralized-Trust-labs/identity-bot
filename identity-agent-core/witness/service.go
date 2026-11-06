@@ -119,7 +119,60 @@ type Service struct {
 	// not completed.
 	sendingMu sync.Mutex
 	sending   map[string]int
+
+	// bg tracks the work this service starts on its own, which writes to the
+	// store after the call that started it has returned. See background.
+	bgMu      sync.Mutex
+	bgStopped bool
+	bgDone    chan struct{}
+	bg        sync.WaitGroup
 }
+
+// stopping is closed once Stop has been called.
+func (s *Service) stopping() <-chan struct{} {
+	s.bgMu.Lock()
+	defer s.bgMu.Unlock()
+	if s.bgDone == nil {
+		s.bgDone = make(chan struct{})
+	}
+	return s.bgDone
+}
+
+// background runs fn on its own goroutine, counted so that Wait covers it. Once
+// Stop has been called nothing more is started and it reports false: work that
+// begins after the store is closing would be lost, and the caller is told so.
+func (s *Service) background(fn func()) bool {
+	s.bgMu.Lock()
+	if s.bgStopped {
+		s.bgMu.Unlock()
+		return false
+	}
+	s.bg.Add(1)
+	s.bgMu.Unlock()
+	go func() {
+		defer s.bg.Done()
+		fn()
+	}()
+	return true
+}
+
+// Stop refuses any further background work and wakes what is only waiting. It
+// does not wait: Wait does, so the caller can bound it.
+func (s *Service) Stop() {
+	s.bgMu.Lock()
+	defer s.bgMu.Unlock()
+	if s.bgStopped {
+		return
+	}
+	s.bgStopped = true
+	if s.bgDone == nil {
+		s.bgDone = make(chan struct{})
+	}
+	close(s.bgDone)
+}
+
+// Wait returns once the background work started before Stop has finished.
+func (s *Service) Wait() { s.bg.Wait() }
 
 // sendBegun marks a send of aid's events to a witness as in flight, and
 // returns what marks it complete.
@@ -821,9 +874,9 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 	body := eventBody(signerAID, base64.StdEncoding.EncodeToString(rawEvent), cesrSigs)
 	for _, w := range witnesses {
 		url := witnessEventURL(w)
-		go s.postWithRetry(ctx, url, body, said, w.AID)
+		s.background(func() { s.postWithRetry(ctx, url, body, said, w.AID) })
 	}
-	go s.finalizeLoop(said, threshold)
+	s.background(func() { s.finalizeLoop(said, threshold) })
 	return nil
 }
 
@@ -1062,12 +1115,14 @@ func (s *Service) BroadcastToDesignated(ctx context.Context, signerAID string, r
 			continue
 		}
 		sent := s.sendBegun(signerAID)
-		go func(key string, w witnessTarget) {
+		if !s.background(func() {
 			defer sent()
 			s.postWithRetry(ctx, witnessEventURL(w), body, said, key)
-		}(key, w)
+		}) {
+			sent()
+		}
 	}
-	go s.finalizeLoop(said, threshold)
+	s.background(func() { s.finalizeLoop(said, threshold) })
 	return nil
 }
 
@@ -1173,7 +1228,21 @@ func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, ev
 	defer cancel()
 	resp, err := s.PostEvent(s.ownersLocalAllowed(ctx, url), url, body)
 	if err != nil {
-		time.Sleep(BroadcastRetryDelay)
+		// The wait before the second attempt ends when the service stops, so a
+		// post that is retrying does not hold Stop for the whole delay. Nothing
+		// is recorded about the witness then: it was not tried, it did not fail.
+		retry := time.NewTimer(BroadcastRetryDelay)
+		select {
+		case <-retry.C:
+		case <-s.stopping():
+			retry.Stop()
+			return
+		}
+		select {
+		case <-s.stopping():
+			return
+		default:
+		}
 		resp, err = s.PostEvent(s.ownersLocalAllowed(ctx, url), url, body)
 	}
 	if err != nil {
@@ -1252,7 +1321,17 @@ func (s *Service) onReceipt(eventSAID, witnessAID, cesrSig string) {
 }
 
 func (s *Service) finalizeLoop(eventSAID string, threshold int) {
-	time.Sleep(FinalizeWaitDuration)
+	select {
+	case <-time.After(FinalizeWaitDuration):
+	case <-s.stopping():
+		// Stopping: the timeout is not recorded, so the finalization stays
+		// pending in the store. It is NOT re-read on the next start: nothing
+		// at start looks for pending finalizations, and GetFinalization is
+		// called only here, in onReceipt when a receipt arrives, and by a
+		// broadcast checking whether its event already has one. So it stays
+		// pending until a receipt for that event comes in.
+		return
+	}
 	f, _ := s.Store.GetFinalization(eventSAID)
 	if f == nil || f.State == FinalizeFinalized {
 		return
@@ -1344,7 +1423,7 @@ func (s *Service) dropWitness(contactAID string) {
 	if s.OnEvent != nil {
 		s.OnEvent("witness_dropped_health", map[string]interface{}{"contact_aid": contactAID})
 	}
-	go s.trySelfHeal()
+	s.background(s.trySelfHeal)
 }
 
 func (s *Service) incrementOffline(contactAID string) {
