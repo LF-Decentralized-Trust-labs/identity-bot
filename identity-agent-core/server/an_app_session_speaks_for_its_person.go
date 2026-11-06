@@ -47,6 +47,10 @@ var talkRoutes = map[string]bool{
 // appSessionProofWindow is how far a proof's time may be from now, either way.
 const appSessionProofWindow = 2 * time.Minute
 
+// appSessionCap is the longest an app session may live from the moment it is
+// opened, however often it is renewed (RenewAppSession).
+const appSessionCap = 7 * 24 * time.Hour
+
 // AppSession is a person's session at one app, as the app's back end opened it.
 type AppSession struct {
 	// AppID is the asset id of the app the session is for, and the only app
@@ -59,6 +63,8 @@ type AppSession struct {
 	// Expires is when the session ends.
 	Expires time.Time
 
+	// cap is the latest Expires may ever be renewed to.
+	cap time.Time
 	key *ecdsa.PublicKey
 }
 
@@ -109,6 +115,9 @@ func (s *CoreServer) OpenAppSession(appID, tokenHash, x, y string, person corety
 	if !expires.After(time.Now()) {
 		return "", errors.New("an app session is opened for a time to come")
 	}
+	if expires.After(time.Now().Add(appSessionCap)) {
+		return "", errors.New("an app session is never opened past its cap")
+	}
 	if len(s.originsOfApp(appID)) == 0 {
 		return "", errors.New("an app session is for an app asset this Identity Agent hosts")
 	}
@@ -133,9 +142,38 @@ func (s *CoreServer) OpenAppSession(appID, tokenHash, x, y string, person corety
 	if _, taken := b.sessions[tokenHash]; taken {
 		return "", errors.New("an app session already exists for this token")
 	}
-	b.sessions[tokenHash] = &AppSession{AppID: appID, Person: person, Thumbprint: tp, Expires: expires, key: pub}
+	b.sessions[tokenHash] = &AppSession{AppID: appID, Person: person, Thumbprint: tp, Expires: expires, cap: now.Add(appSessionCap), key: pub}
 	return tp, nil
 }
+
+// RenewAppSession moves the end of a session that is still open to until, so a
+// session opened for a short time stays open only while its app's back end
+// keeps renewing it. It refuses a session that has ended or expired, and never
+// extends one past appSessionCap from when it was opened. It never shortens a
+// session: an until before the current end changes nothing.
+func (s *CoreServer) RenewAppSession(tokenHash string, until time.Time) error {
+	b := &s.appSessions
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := time.Now()
+	v := b.sessions[tokenHash]
+	if v == nil || !now.Before(v.Expires) {
+		if v != nil {
+			delete(b.sessions, tokenHash)
+		}
+		return ErrAppSessionGone
+	}
+	if until.After(v.cap) {
+		return errors.New("an app session is never renewed past its cap")
+	}
+	if until.After(v.Expires) {
+		v.Expires = until
+	}
+	return nil
+}
+
+// ErrAppSessionGone says the session has ended or expired, or never was.
+var ErrAppSessionGone = errors.New("this app session has ended")
 
 // EndAppSession ends the session with this token hash, if there is one.
 func (s *CoreServer) EndAppSession(tokenHash string) {
