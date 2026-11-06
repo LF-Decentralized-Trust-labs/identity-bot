@@ -66,15 +66,27 @@ func (w *pushWorld) contactAt(base string) {
 }
 
 // bobHoldsTheKeyLog gives bob the identity's key log, as the witnessing worker
-// does before the registry events can be placed.
+// does before the registry events can be placed. That worker runs in the
+// background from the issuance on and may deliver the same event at the same
+// moment, so a refusal here is not a failure: what counts is that bob ends up
+// holding the whole log, whoever delivered it.
 func (w *pushWorld) bobHoldsTheKeyLog() {
 	w.t.Helper()
-	for _, ev := range w.s.signedEventsOf(w.aid) {
+	events := w.s.signedEventsOf(w.aid)
+	var last error
+	for i := 0; i < 100; i++ {
+		held, _ := w.bob.svc.GetKelReplica(w.aid)
+		if len(held) >= len(events) {
+			return
+		}
+		ev := events[len(held)]
 		raw, _ := b64Decode(ev.RawBytesB64)
-		if err := w.bob.takes(w.t, w.aid, raw, ev.CesrSignature); err != nil {
-			w.t.Fatalf("bob would not take the key-log event: %v", err)
+		last = w.bob.takes(w.t, w.aid, raw, ev.CesrSignature)
+		if last != nil {
+			time.Sleep(20 * time.Millisecond)
 		}
 	}
+	w.t.Fatalf("bob never came to hold the identity's key log: %v", last)
 }
 
 func (w *pushWorld) issue() {
