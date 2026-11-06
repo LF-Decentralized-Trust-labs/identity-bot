@@ -2,6 +2,7 @@
 
 **Date:** 2026-02-21
 **Updated:** 2026-02-22
+**Amended:** 2026-11-06 — a remote controller holds no delegated identifier: it is named by its own non-transferable key (ADR-006, "Deviation, 2026-08-31"), and a paired computer founds its own root (ADR-036). Sentences below that said otherwise are corrected in place.
 **Status:** Accepted (mode definitions superseded by ADR-006 — Standardized Topology, revised 2026-05-01)
 **Related:** ADR-003 (Adaptive Architecture), ADR-006 (Standardized Topology)
 
@@ -119,7 +120,7 @@ This is the default mobile experience. The phone is the primary key holder and i
 This is **not** a setup option — it is a **migration path** from Standalone Mode. When the user decides to offload computing power to a dedicated server, they migrate their backend to a separate machine. When this happens:
 
 - The **keys remain on the phone**. The phone continues to be the primary key holder and identity owner.
-- The remote server creates **its own AID** that becomes a **delegated identity** acting on behalf of the phone's root identity.
+- The remote server holds **its own independent AID**, not a delegate of the phone's identity (ADR-014).
 - The phone delegates heavy computation (OOBI resolution, credential formatting, etc.) to the remote server while retaining full authority over the identity.
 - The Rust KERI bridge on the phone continues to handle all local stateful operations (signing, key rotation).
 
@@ -145,12 +146,12 @@ The phone connects to an existing Identity Agent running on another device. The 
 Both "Create New" and "Connect to Existing" on mobile require the local Rust KERI bridge:
 
 - **Create New (Standalone):** The bridge creates and manages the root identity locally.
-- **Connect to Existing (Remote Controller WITHOUT Keys):** The bridge creates a local delegated AID that connects to the parent identity on the remote server.
+- **Connect to Existing (Remote Controller WITHOUT Keys):** The device holds a controller key of its own and connects to the identity on the remote server; it holds no delegated identifier (ADR-006).
 
 The difference is in what the **remote server** provides:
 
 - **Standalone:** No remote server needed for core operations. A stateless helper handles formatting/parsing only.
-- **Remote Controller WITHOUT Keys:** The parent server provides stateless KERI operations AND is the target for delegation.
+- **Remote Controller WITHOUT Keys:** The remote server provides stateless KERI operations AND holds the identity the controller acts for.
 
 ## How Mode Selection Relates to Operating Modes (ADR-003)
 
@@ -160,12 +161,12 @@ The onboarding mode selection ("Create New" vs. "Connect to Existing") is a **us
 |---|---|---|---|
 | "Create New Identity" | Desktop | Desktop Mode | Go + Python run locally, identity created on this machine |
 | "Create New Identity" | Mobile | Mobile Standalone | Rust bridge handles KERI locally; stateless ops go to default helper |
-| "Connect to Existing" | Desktop | Desktop Remote WITHOUT Keys | `DesktopKeriService()` (local Go+Python for child AID); remote serverUrl passed to screens for backend/stateless ops |
-| "Connect to Existing" | Mobile | Mobile Remote WITHOUT Keys | `MobileRemoteKeriService` (Rust bridge for local child AID); remote parentServerUrl for backend/stateless ops |
+| "Connect to Existing" | Desktop | Desktop Remote WITHOUT Keys | `DesktopKeriService()` (local Go+Python; controller key, no delegated identifier, ADR-006); remote serverUrl passed to screens for backend/stateless ops |
+| "Connect to Existing" | Mobile | Mobile Remote WITHOUT Keys | `MobileRemoteKeriService` (local controller key, no delegated identifier, ADR-006); remote parentServerUrl for backend/stateless ops |
 
-**Desktop "Connect to Existing"** uses `DesktopKeriService()` with the LOCAL Go+Python engine to create a delegated child AID. The remote server URL is passed to screens for backend and stateless operations. Stateful KERI operations always use the local engine.
+**Desktop "Connect to Existing"** uses `DesktopKeriService()` with the LOCAL Go+Python engine to hold the controller key (no delegated identifier, ADR-006). The remote server URL is passed to screens for backend and stateless operations. Stateful KERI operations always use the local engine.
 
-**Mobile "Connect to Existing"** uses `MobileRemoteKeriService` with the Rust bridge to create a local child AID. The remote parent server URL is stored for backend delegation. If the Rust bridge is unavailable (development builds), falls back to `RemoteServerKeriService`.
+**Mobile "Connect to Existing"** uses `MobileRemoteKeriService` with a local controller key and no delegated identifier (ADR-006). The remote server URL is stored for backend operations. If the Rust bridge is unavailable (development builds), falls back to `RemoteServerKeriService`.
 
 ## Persistence
 

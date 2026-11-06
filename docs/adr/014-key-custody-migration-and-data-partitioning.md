@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-03-15
+**Amended:** 2026-11-06 — a remote controller holds no delegated identifier: it is named by its own non-transferable key (ADR-006, "Deviation, 2026-08-31"), and a paired computer founds its own root (ADR-036). The key-custody table row below is corrected in place.
 **Extends:** ADR-006 (Standardized Topology — Two Topologies, Four Configurations; revised 2026-05-01)
 
 ## Context
@@ -50,7 +51,7 @@ The Python driver's `/sign` endpoint is therefore bypassed entirely for desktop.
 |---|---|---|
 | Standalone | Holds root AID keys + BIP39. Signs locally. | — (no remote server) |
 | Remote WITH Keys | Holds root AID keys + BIP39. Signs locally. | Never receives keys. Compute only. |
-| Remote WITHOUT Keys | Holds delegated child AID keys + child BIP39. Signs locally. | Holds root AID keys + root BIP39. Root key custody belongs to this device. |
+| Remote WITHOUT Keys | Holds a controller key of its own (no delegated identifier; ADR-006). Signs locally with that key. | Holds root AID keys + root BIP39. Root key custody belongs to this device. |
 
 BIP39 mnemonic recovery applies to whichever device holds the keys for a given AID. Users who run Standalone or Remote WITH Keys on their mobile device are responsible for backing up their mobile's mnemonic. Users who connect to a hosted server (Remote WITHOUT Keys) have their root AID managed by the host's institutional key management — no user-facing BIP39 for the root in that case.
 
