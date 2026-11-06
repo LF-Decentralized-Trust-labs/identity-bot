@@ -94,6 +94,11 @@ func (s *CoreServer) handleBackupExport(w http.ResponseWriter, r *http.Request) 
 	seed := req.BIP39SeedB64
 	if req.Mnemonic == "" && seed == "" && !s.hasSealRecipients() {
 		local, err := secureenclave.LoadRootSeed(s.DataDir)
+		// A seed that exists and is refused is not "no seed": say the refusal,
+		// in the one shape every root-seed refusal has.
+		if refuseIfRootSeedRefused(w, err) {
+			return
+		}
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "no way to unlock the archive",
 				"this agent holds no root seed and has no recovery keys, so an archive it wrote could never be opened — "+

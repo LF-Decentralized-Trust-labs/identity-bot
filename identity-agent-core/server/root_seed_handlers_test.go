@@ -358,9 +358,14 @@ func TestFoundingByRootSeedOnASealedHostAndAPhoneAndNotADesktop(t *testing.T) {
 		"sealed host": {seedwraptest.ThisMachineIsASealedHost,
 			secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindSEVSNP},
 			http.StatusCreated, secureenclave.ProtectionSealedVolume},
-		"android-like phone": {seedwraptest.ThisMachineIsAPhoneWithNoWrapper,
+		"android phone with its key": {func(t testing.TB) {
+			seedwraptest.ThisMachineCannot(t, secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindAndroidTEE}, true)
+		}, secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindAndroidTEE},
+			http.StatusCreated, secureenclave.ProtectionHardwareWrapped},
+		// No old-app exemption: an app that supplies no seed wrapper is refused.
+		"android phone, app supplies no key": {seedwraptest.ThisMachineIsAPhoneWithNoWrapper,
 			secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindAndroidTEE},
-			http.StatusCreated, secureenclave.ProtectionUnwrapped},
+			http.StatusPreconditionFailed, ""},
 		// A Secure Enclave and a working wrapper, and still not a place a root
 		// identity may live: the rule is the one founding uses.
 		"production Mac": {seedwraptest.ThisMachineIsAProductionMac,
@@ -392,5 +397,64 @@ func TestFoundingByRootSeedOnASealedHostAndAPhoneAndNotADesktop(t *testing.T) {
 				t.Fatalf("envelope records %q (%v), want %q", p, err, c.protection)
 			}
 		})
+	}
+}
+
+// A root seed stored unwrapped that this build refuses to use is answered with
+// the root-seed refusal (412, the shared code), not as "could not be read".
+func TestSetRootSeedAnswersAnUnusableStoredSeedWithTheRefusal(t *testing.T) {
+	s := rootSeedServer(t)
+	restore := secureenclave.UseSeedWrapper(nil)
+	defer restore()
+	p := filepath.Join(s.DataDir, "secureenclave", "root_seed.key")
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, bytes.Repeat([]byte{7}, 64), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w := postSeed(s, base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{3}, 64)), false)
+	if w.Code != http.StatusPreconditionFailed || !strings.Contains(w.Body.String(), rootSeedRefusedCode) {
+		t.Fatalf("got %d %s, want 412 with %q", w.Code, w.Body, rootSeedRefusedCode)
+	}
+}
+
+// plantARefusedSeed stores a root seed as a plain legacy file on a machine with
+// no seed wrapper, which a production build refuses to use.
+func plantARefusedSeed(t *testing.T, dataDir string) {
+	t.Helper()
+	t.Cleanup(secureenclave.UseSeedWrapper(nil))
+	p := filepath.Join(dataDir, "secureenclave", "root_seed.key")
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, bytes.Repeat([]byte{7}, 64), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := secureenclave.LoadRootSeed(dataDir); !secureenclave.IsRootSeedRefusal(err) {
+		t.Skipf("this build serves the planted seed (a development build): %v", err)
+	}
+}
+
+// A stored seed this build refuses is reported as there and refused, never as
+// "no seed here", which would invite a handoff over the only copy.
+func TestRootSeedStatusSaysARefusedSeedIsThereAndRefused(t *testing.T) {
+	s := rootSeedServer(t)
+	plantARefusedSeed(t, s.DataDir)
+	req := httptest.NewRequest(http.MethodGet, "/api/keystore/root-seed", nil)
+	req.RemoteAddr = "127.0.0.1:9999"
+	req.Header.Set(LocalOwnerSecretHeader, testOwnerSecret)
+	w := httptest.NewRecorder()
+	s.handleRootSeedStatus(w, req)
+	var got map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("not JSON: %v %s", err, w.Body)
+	}
+	if got["established"] != true || got["refused"] != true || got["code"] != rootSeedRefusedCode {
+		t.Fatalf("a refused stored seed must read as established and refused with %q, got %v",
+			rootSeedRefusedCode, got)
+	}
+	if _, leaked := got["seed"]; leaked {
+		t.Fatalf("status leaked the seed: %v", got)
 	}
 }

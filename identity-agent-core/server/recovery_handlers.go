@@ -247,6 +247,13 @@ func (s *CoreServer) handleRecoveryRotation(w http.ResponseWriter, r *http.Reque
 	})
 }
 
+// activateRecovery finishes a recovery. A variable so a test can make it fail
+// the way a real activation does on a machine that cannot hold the root seed,
+// which would otherwise need a sealed archive built in another package.
+var activateRecovery = func(s *CoreServer, id string, req recovery.ActivateRequest) (*recovery.Session, error) {
+	return s.recoveryService().Activate(id, req)
+}
+
 func (s *CoreServer) handleRecoveryActivate(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "id")
 	// The recovery phrase again. It is not held while the waiting period runs,
@@ -260,27 +267,35 @@ func (s *CoreServer) handleRecoveryActivate(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
 		return
 	}
-	sess, err := s.recoveryService().Activate(sessionID, req)
+	sess, err := activateRecovery(s, sessionID, req)
 	if err != nil {
-		switch err.(type) {
-		case *recovery.ErrCancelWindowActive:
-			writeError(w, http.StatusConflict, "Cancel window active", err.Error())
-		case *recovery.ErrRotationMandatory:
-			writeError(w, http.StatusPreconditionFailed, "Rotation required", err.Error())
-		case *recovery.ErrHeldForDuress:
-			// Its own status, because a client has to be able to tell this from
-			// a mistyped phrase. Falling to the default made a duress hold a
-			// bad request, which threw away the "until" and "how many more
-			// approvals" this type carries precisely so a screen can say them.
-			writeError(w, http.StatusConflict, "Held", err.Error())
-		case *recovery.ErrNotAuthenticated:
-			writeError(w, http.StatusForbidden, "Not authenticated", err.Error())
-		default:
-			// A wrong phrase, a missing phrase and an archive that opens a
-			// different identity are all the caller's to fix, not this
-			// agent's failures. They were reported as 500.
-			writeError(w, http.StatusBadRequest, "Could not complete this recovery", err.Error())
+		// The status comes from statusForActivateError alone, so the handler
+		// and the function the tests pin cannot drift apart. A held recovery
+		// keeps its own status (a client must tell it from a mistyped phrase,
+		// and its "until" and "approvals" are in the message), and a machine
+		// that cannot hold the root seed is 412, not a bad request.
+		status := statusForActivateError(err)
+		title := "Could not complete this recovery"
+		switch {
+		case secureenclave.IsRootSeedRefusal(err):
+			title = rootSeedRefusalTitle
+		case status == http.StatusConflict && !isNeedsShares(err):
+			switch err.(type) {
+			case *recovery.ErrCancelWindowActive:
+				title = "Cancel window active"
+			case *recovery.ErrHeldForDuress:
+				title = "Held"
+			}
+		case status == http.StatusPreconditionFailed:
+			title = "Rotation required"
+		case status == http.StatusForbidden:
+			title = "Not authenticated"
 		}
+		if secureenclave.IsRootSeedRefusal(err) {
+			writeRootSeedRefused(w, err.Error())
+			return
+		}
+		writeError(w, status, title, err.Error())
 		return
 	}
 	jsonreply.Write(w, http.StatusOK, sess)
@@ -453,6 +468,11 @@ func statusForActivateError(err error) int {
 	default:
 		return http.StatusBadRequest
 	}
+}
+
+func isNeedsShares(err error) bool {
+	var needs *backup.ErrNeedsShares
+	return errors.As(err, &needs)
 }
 
 // --- holding a share for somebody else's identity -------------------------

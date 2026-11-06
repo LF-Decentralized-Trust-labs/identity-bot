@@ -11,8 +11,8 @@ type fakeWrap struct{ works bool }
 
 func (f fakeWrap) Available() bool               { return f.works }
 func (fakeWrap) Scheme() string                  { return "fake" }
-func (fakeWrap) Wrap(p []byte) ([]byte, error)   { return append([]byte("w"), p...), nil }
-func (fakeWrap) Unwrap(b []byte) ([]byte, error) { return b[1:], nil }
+func (fakeWrap) Wrap(p []byte) ([]byte, error)   { return xorFake(p), nil }
+func (fakeWrap) Unwrap(b []byte) ([]byte, error) { return xorFake(b), nil }
 
 func machine(t *testing.T, c Capability, wrapperWorks bool) {
 	t.Helper()
@@ -39,7 +39,7 @@ func TestRootSeedMayLiveHereCombinations(t *testing.T) {
 		{"zero value", Capability{}, true, false, false},
 		{"development build, nothing works", Capability{}, false, true, true},
 	} {
-		if got := rootSeedMayLiveHere(c.cap, c.wrapper, false, c.dev); got != c.want {
+		if got := rootSeedMayLiveHere(c.cap, c.wrapper, c.dev); got != c.want {
 			t.Errorf("%s: got %v want %v", c.name, got, c.want)
 		}
 	}
@@ -92,12 +92,30 @@ func TestIdentityRootSeedIsStoredWrappedWhereTheMachineCan(t *testing.T) {
 	}
 }
 
-// The machine's own seed is not a person's identity and is still allowed to be
-// stored where nothing can wrap it — the distinction the two names exist for.
-func TestDeviceLocalSeedMayStillBeStoredUnwrapped(t *testing.T) {
+// The machine's own seed is not a person's identity, but a production build
+// still will not store it where nothing can wrap it (owner's rule, 2026-11-05,
+// every platform). Only a development build may.
+func TestDeviceLocalSeedIsStoredUnwrappedOnlyInADevelopmentBuild(t *testing.T) {
 	machine(t, Capability{Status: Absent}, false)
-	dir := t.TempDir()
-	if _, err := EnsureRootSeed(dir); err != nil {
-		t.Fatalf("a device-local seed must not be refused: %v", err)
+	prod := t.TempDir()
+	if _, err := EnsureRootSeed(prod); !IsRootSeedRefusal(err) {
+		t.Fatalf("a production build stored its own seed unwrapped: %v", err)
 	}
+	if _, serr := os.Stat(rootSeedPath(prod)); !errors.Is(serr, os.ErrNotExist) {
+		t.Fatalf("a seed file exists after the refusal: %v", serr)
+	}
+	aDevelopmentBuild(t)
+	if _, err := EnsureRootSeed(t.TempDir()); err != nil {
+		t.Fatalf("a development build must not be refused: %v", err)
+	}
+}
+
+// xorFake is a stand-in that really changes the bytes, so a test seed is never
+// sitting in the clear inside its own "wrapped" form.
+func xorFake(p []byte) []byte {
+	out := make([]byte, len(p))
+	for i, b := range p {
+		out[i] = b ^ 0xA5
+	}
+	return out
 }

@@ -679,10 +679,13 @@ func (s *Service) applyPayloadReporting(payload *RestoredPayload, contactLogsKep
 	// refused recovering one — otherwise recovery is the way round that gate.
 	// Asked up front because restoring the files first and refusing at the seed
 	// would leave this machine half-restored.
-	if _, has := payload.Bundle.Sections["root_seed"]; has {
-		if err := secureenclave.CheckRootSeedMayLiveHere(s.DataDir); err != nil {
-			return err
-		}
+	//
+	// Asked whether or not the archive carries a root_seed section. An archive
+	// without one still restores an identity onto this machine, whose own seed
+	// then has to be protected like any other, so the section being absent is
+	// not a way round the check.
+	if err := secureenclave.CheckRootSeedMayLiveHere(s.DataDir); err != nil {
+		return err
 	}
 	checked, err := s.checkBeforeWriting(payload)
 	if err != nil {

@@ -43,6 +43,9 @@ type machineOwnerResponse struct {
 func (s *CoreServer) handleMintMachineOwner(w http.ResponseWriter, r *http.Request) {
 	aid, oobi, err := s.mintAnIdentityToClaimAMachineWith()
 	if err != nil {
+		if refuseIfRootSeedRefused(w, err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError,
 			"Could not mint an identity for this machine", err.Error())
 		return

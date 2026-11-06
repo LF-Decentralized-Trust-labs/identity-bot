@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import '../crypto/bip39.dart';
 import '../crypto/keys.dart';
 import 'keri_service.dart';
+import 'root_seed_handoff.dart';
 import 'secure_key_store.dart';
 import 'signing_an_event.dart';
 import 'the_events_this_device_asked_for.dart';
@@ -94,6 +95,10 @@ class LocalCoreKeriService extends KeriService {
       body: jsonEncode({'public_key': key, 'next_public_key': next}),
     );
     try {
+      // A root-seed refusal is this device being unable to protect the root seed: thrown as
+      // [RootSeedRefused], with the core's headline and details, so the screen
+      // can tell it from a fault.
+      RootSeedRefused.throwIfRefused(response);
       if (response.statusCode != 201 && response.statusCode != 200) {
         final body = jsonDecode(response.body);
         throw Exception(body['error'] ?? 'Inception failed: ${response.statusCode}');

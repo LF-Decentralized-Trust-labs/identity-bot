@@ -99,6 +99,9 @@ func (s *CoreServer) handleCreateEmployeeInvite(w http.ResponseWriter, r *http.R
 	// Sign the Ask with a minted pairwise (base-layer signature the accepter verifies).
 	pwAID, pwOOBI, seed, err := s.mintPairwise("addemployee")
 	if err != nil {
+		if refuseIfRootSeedRefused(w, err) {
+			return
+		}
 		http.Error(w, "mint signer: "+err.Error(), http.StatusInternalServerError)
 		return
 	}

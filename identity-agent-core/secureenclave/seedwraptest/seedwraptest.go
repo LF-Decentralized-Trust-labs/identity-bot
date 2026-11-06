@@ -9,8 +9,10 @@ import (
 	"identity-agent-core/secureenclave"
 )
 
-// Wrapper is a SeedWrapper that reverses the bytes. It is not security; it makes
-// a wrapped envelope visibly different from a plain one.
+// Wrapper is a SeedWrapper that XORs the bytes. It is not security; it makes a
+// wrapped envelope visibly different from a plain one, even for a seed of one
+// repeated byte (a reversal would leave that unchanged, and the core refuses a
+// wrapper whose output contains the seed).
 type Wrapper struct{ Works bool }
 
 func (w Wrapper) Available() bool { return w.Works }
@@ -18,7 +20,7 @@ func (Wrapper) Scheme() string    { return "test-wrap" }
 func (Wrapper) Wrap(p []byte) ([]byte, error) {
 	out := make([]byte, len(p))
 	for i, b := range p {
-		out[len(p)-1-i] = b
+		out[i] = b ^ 0xA5
 	}
 	return out, nil
 }
@@ -83,20 +85,20 @@ func ThisMachineIsASealedHost(t testing.TB) {
 		return secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindSEVSNP, Reason: "attested_execution"}
 	})
 	r2 := secureenclave.UseSeedWrapper(secureenclave.SealedVolumeSeedWrapperOn(func() error { return nil }))
-	r3 := secureenclave.UseUnwrappedPhoneStorage("")
 	r4 := thisPlatformMayFound()
-	t.Cleanup(func() { r4(); r3(); r2(); r1() })
+	t.Cleanup(func() { r4(); r2(); r1() })
 }
 
 // ThisMachineIsAPhoneWithNoWrapper stands an Android phone: its Keystore is
-// usable and reported, and no seed wrapper is written for it yet.
+// usable and reported, and its app has registered no seed wrapper. A production
+// build refuses to hold a root identity on it.
 func ThisMachineIsAPhoneWithNoWrapper(t testing.TB) {
 	t.Helper()
 	r1 := secureenclave.UseCapabilityDetector(func() secureenclave.Capability {
 		return secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindAndroidTEE}
 	})
 	r2 := secureenclave.UseSeedWrapper(nil)
-	r3 := secureenclave.UseUnwrappedPhoneStorage("android: the Keystore/StrongBox seed wrapper is not written yet")
+	r3 := secureenclave.UseThisIsAPhone()
 	r4 := thisPlatformMayFound()
 	t.Cleanup(func() { r4(); r3(); r2(); r1() })
 }

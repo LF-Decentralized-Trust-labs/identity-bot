@@ -611,6 +611,15 @@ func (s *CoreServer) Start() error {
 
 	s.removeStaleTemporaries()
 
+	// A root seed stored unwrapped before the hardware rule is wrapped now,
+	// while the hardware can be used. Until it is, an Android production build
+	// answers every use of it with the root-seed refusal (secureenclave.LoadRootSeed),
+	// and the app can read why from the key-protection state; the core stays up
+	// so it can be told.
+	if err := secureenclave.ProtectExistingSeed(s.DataDir); err != nil {
+		log.Printf("[identity-agent-core] the root seed is stored unwrapped and cannot be wrapped yet, so nothing is derived from it: %v", err)
+	}
+
 	// Build the router now that all overlay routes (MountExtraRoutes) are
 	// registered. Idempotent-safe: Start guards against double-run above.
 	if s.router == nil {
@@ -1372,6 +1381,11 @@ type IdentityResponse struct {
 type ErrorResponse struct {
 	Error   string `json:"error"`
 	Details string `json:"details,omitempty"`
+	// Code is a machine-readable name for the kind of answer, for the few
+	// answers a client must tell apart from others that share a status. A
+	// root-seed refusal is 412 and so are a rotation-required recovery, a front
+	// end arm and a guardianship refusal, so the status alone cannot name it.
+	Code string `json:"code,omitempty"`
 }
 
 func (s *CoreServer) handleHealth(w http.ResponseWriter, r *http.Request) {

@@ -32,9 +32,56 @@ import (
 type ErrRootSeedCannotLiveHere struct {
 	Capability Capability
 	Reason     string
+	// Phone is set when the machine is a phone, whose refusal is worded for the
+	// person holding it (PhoneHardwareUnavailable) rather than for an operator.
+	Phone bool
+}
+
+// PhoneHardwareUnavailable is what a phone's owner is told when the app cannot
+// yet put the root seed under the phone's StrongBox or TEE key. It is the
+// sentence an app may show as it stands; Error() carries the technical reason
+// after it.
+const PhoneHardwareUnavailable = "this phone's secure hardware is not available to this app yet"
+
+// UserMessage is the sentence an app can show a person as it is.
+func (e *ErrRootSeedCannotLiveHere) UserMessage() string {
+	if e.Phone {
+		return PhoneHardwareUnavailable
+	}
+	return "this machine cannot protect an identity's root seed, so none was written"
+}
+
+// cannotLiveHere builds the refusal, marking it as a phone's where it is one.
+func cannotLiveHere(cap Capability, reason string) *ErrRootSeedCannotLiveHere {
+	return &ErrRootSeedCannotLiveHere{Capability: cap, Reason: reason, Phone: thisIsAPhone()}
+}
+
+// isDevBuild is the compiled build mode behind a seam so a test can stand a
+// development build. It is not reachable from outside the package, and the mode
+// itself is a link-time constant (package buildmode, ADR-043), never read from
+// the environment or a setting.
+var isDevBuild = buildmode.IsDev
+
+// thisIsAPhone is whether this build is the Android core.
+var thisIsAPhone = platformIsAPhone
+
+// UseThisIsAPhone makes this process word its refusals as a phone's, for tests
+// on a host that is not one. It returns a function that undoes it. It changes
+// wording and the no-wrapper reason only; it opens no gate.
+func UseThisIsAPhone() (restore func()) {
+	prev := thisIsAPhone
+	thisIsAPhone = func() bool { return true }
+	return func() { thisIsAPhone = prev }
 }
 
 func (e *ErrRootSeedCannotLiveHere) Error() string {
+	if e.Phone {
+		msg := PhoneHardwareUnavailable + ", so no identity was created or restored on it and nothing was written: " + e.Reason
+		if e.Capability.Status != "" {
+			msg += " (" + e.Capability.String() + ")"
+		}
+		return msg + ". Update the app, or pair this phone to an identity kept elsewhere"
+	}
 	msg := "this machine cannot protect an identity's root seed, so none was written: " + e.Reason
 	if e.Capability.Status != "" {
 		msg += " (" + e.Capability.String() + ")"
@@ -67,18 +114,28 @@ func UseSeedWrapper(w SeedWrapper) (restore func()) {
 
 // rootSeedMayLiveHere is the decision, pure so every combination can be tested.
 //
-// THE RULE IS "STORED ONLY UNDER A PROTECTION THIS PLATFORM ACTUALLY HAS", not
-// "only under the iOS wrapper". A production build needs proven-usable key
-// protection AND one of:
-//   - a working seed wrapper (the iOS Secure Enclave; the sealed machine's
-//     volume, whose scheme is only available inside a sealed guest), or
-//   - to be a phone whose wrapper is owed and not yet written (Android), which
-//     holds the seed unwrapped and records that and why in the envelope.
+// THE RULE IS "STORED ONLY UNDER A PROTECTION THIS PLATFORM ACTUALLY HAS". A
+// production build needs proven-usable key protection AND a seed wrapper that
+// works (the iOS Secure Enclave, the app's StrongBox/TEE key on Android, the
+// sealed machine's volume). There is no phone exemption: an Android app that
+// registers no wrapper is refused in production like any other machine that
+// cannot wrap the seed (owner's decision, 2026-11-05).
 //
-// A development build is exempt, exactly as the root-seed route's gate is
-// (the identity it admits is a development-realm one).
-func rootSeedMayLiveHere(cap Capability, wrapperWorks, phoneWithoutWrapper, dev bool) bool {
-	return dev || (cap.RootKeyPermitted() && (wrapperWorks || phoneWithoutWrapper))
+// A development build is exempt, and says so wherever the state is shown
+// (ReportSeedProtection): it may hold the seed, never presented as protected.
+func rootSeedMayLiveHere(cap Capability, wrapperWorks, dev bool) bool {
+	return dev || (cap.RootKeyPermitted() && wrapperWorks)
+}
+
+// checkPlacement is the founding rule: a root identity lives only where the
+// machine can prove its software (a phone, a sealed machine). Having a Secure
+// Enclave and a working wrapper is not enough, or a production Mac would hold
+// a root identity it is not allowed to found.
+func checkPlacement(dataDir string) error {
+	if v := MayFoundAnIdentityHere(dataDir); !FoundingPermitted(v, isDevBuild()) {
+		return cannotLiveHere(detectCapability(), v.Why)
+	}
+	return nil
 }
 
 // CheckRootSeedMayLiveHere asks whether a person's root seed may be written on
@@ -86,23 +143,19 @@ func rootSeedMayLiveHere(cap Capability, wrapperWorks, phoneWithoutWrapper, dev 
 // the write (recovery restores files first) ask this first so a refusal
 // touches nothing.
 func CheckRootSeedMayLiveHere(dataDir string) error {
-	// FIRST, the rule founding uses: a root identity lives only where the
-	// machine can prove its software (a phone, a sealed machine). Having a Secure
-	// Enclave and a working wrapper is not enough, or a production Mac would hold
-	// a root identity it is not allowed to found.
-	if v := MayFoundAnIdentityHere(dataDir); !FoundingPermitted(v, buildmode.IsDev()) {
-		return &ErrRootSeedCannotLiveHere{Capability: detectCapability(), Reason: v.Why}
+	if err := checkPlacement(dataDir); err != nil {
+		return err
 	}
 	cap := detectCapability()
 	works := wrapperWorksAt(platformSeedWrapper(), dataDir)
-	if rootSeedMayLiveHere(cap, works, unwrappedStorageReason() != "", buildmode.IsDev()) {
+	if rootSeedMayLiveHere(cap, works, isDevBuild()) {
 		return nil
 	}
 	reason := "its key protection is not proven usable"
 	if cap.RootKeyPermitted() {
 		reason = "key hardware is usable but " + whyNotWrappedAt(dataDir)
 	}
-	return &ErrRootSeedCannotLiveHere{Capability: cap, Reason: reason}
+	return cannotLiveHere(cap, reason)
 }
 
 // StoreIdentityRootSeed persists a person's root seed. It refuses, having
@@ -114,7 +167,7 @@ func StoreIdentityRootSeed(dataDir string, seed []byte) error {
 	}
 	// Production: a wrapper is mandatory, so the check inside storeSeed is a
 	// second, independent lock on the same door.
-	return storeSeedAs(dataDir, seed, platformSeedWrapper(), !buildmode.IsDev(), holderIdentity)
+	return storeSeedAs(dataDir, seed, platformSeedWrapper(), !isDevBuild(), holderIdentity)
 }
 
 // IsRootSeedRefusal reports whether err is the refusal above.

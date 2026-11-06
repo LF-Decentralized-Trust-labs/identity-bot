@@ -101,6 +101,9 @@ func (s *CoreServer) handleCreateSignerInvite(w http.ResponseWriter, r *http.Req
 
 	askToken, aerr := s.mintSignerAsk(orgName, orgAID, orgOOBI, inv.Token)
 	if aerr != nil {
+		if refuseIfRootSeedRefused(w, aerr) {
+			return
+		}
 		http.Error(w, aerr.Error(), http.StatusInternalServerError)
 		return
 	}

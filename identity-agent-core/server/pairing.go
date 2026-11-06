@@ -244,6 +244,9 @@ func (s *CoreServer) handlePairingBegin(w http.ResponseWriter, r *http.Request) 
 
 	rootSeed, err := ensureRootSeed(s.DataDir)
 	if err != nil {
+		if refuseIfRootSeedRefused(w, err) {
+			return
+		}
 		writeError(w, http.StatusServiceUnavailable, "No key material", err.Error())
 		return
 	}
@@ -909,6 +912,9 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 		var mErr error
 		ownerAID, _, _, ownerIdx, mErr = s.mintPairwiseIn("machines", "machine-"+shortAID(offer.PairwiseAID))
 		if mErr != nil {
+			if refuseIfRootSeedRefused(w, mErr) {
+				return
+			}
 			writeError(w, http.StatusInternalServerError,
 				"Could not mint an identity for this machine", mErr.Error())
 			return
@@ -916,6 +922,9 @@ func (s *CoreServer) handlePairingAdopt(w http.ResponseWriter, r *http.Request) 
 	}
 	ownerKey, err := s.pairwisePublicKey(ownerIdx)
 	if err != nil {
+		if refuseIfRootSeedRefused(w, err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError,
 			"Could not read the key for this machine's owner", err.Error())
 		return
