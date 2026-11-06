@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"identity-agent-core/drivers"
 	"identity-agent-core/internal/coretypes"
 	"net/http"
 	"net/http/httptest"
@@ -234,4 +235,37 @@ func issueeOf(t *testing.T, acdcB64 string) string {
 		t.Fatalf("the credential names no issuee: %v", err)
 	}
 	return body.A.I
+}
+
+// A grant being withdrawn (never in force) whose kept log holds only its
+// issuance is refused on both verify routes and at login, on this agent's own
+// record. Fails if the record stops winning over a log that reads as issued.
+func TestAWithdrawingCredentialIsRefusedOnEveryPathWhateverItsLogShows(t *testing.T) {
+	s, said, acdc, _ := issuedThenRevoked(t)
+	if err := s.DataStore.UpdateCredentialStatus(said, credentialStatusWithdrawing); err != nil {
+		t.Fatal(err)
+	}
+	got := verifyHere(t, s, acdc)
+	if got.Verified || got.RevocationStatus != revocationRevoked || got.Checks["not_revoked"] != false || got.RevocationReason == "" {
+		t.Errorf("credential/verify read %+v", got)
+	}
+	chain := verifyChainHere(t, s, map[string]any{"acdc_json_b64": acdc})
+	if chain.Valid || len(chain.Chain) == 0 || chain.Chain[0].Valid || chain.Chain[0].RevocationStatus != revocationRevoked {
+		t.Errorf("the chain verifier read %+v", chain)
+	}
+	ok, _, reason := s.verifyPresentedCredentialACDC(context.Background(), acdc, "", "", "", "", nil)
+	if ok || !strings.Contains(reason, "recorded the credential as withdrawing") {
+		t.Errorf("login: ok=%v reason=%q", ok, reason)
+	}
+}
+
+// Where the status is "not checked", the reply does not read not_revoked true,
+// even if the engine said so.
+func TestNotCheckedNeverLeavesNotRevokedTrue(t *testing.T) {
+	res := revocationState{status: revocationNoRegistryState}.applyTo(
+		&drivers.DriverVerifyCredentialResponse{Checks: map[string]interface{}{"not_revoked": true}})
+	v, present := res.Checks["not_revoked"]
+	if !present || v != nil {
+		t.Fatalf("not_revoked reads %v (present %v), want null", v, present)
+	}
 }
