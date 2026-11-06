@@ -24,7 +24,11 @@ type ChallengeBundle struct {
 	// to SiteAID (the default per-RP unlinkability model).
 	RelationshipAnchorAID  string `json:"relationship_anchor_aid,omitempty"`
 	RelationshipAnchorOOBI string `json:"relationship_anchor_oobi,omitempty"`
-	Sig                    string `json:"sig,omitempty"`
+	// BrowserKey is the thumbprint (RFC 7638, SHA-256, base64url) of the key
+	// a browser holds and cannot export, when the sign-in is for that browser
+	// (ADR-066). Signed in the challenge; the person's assertion repeats it.
+	BrowserKey string `json:"browser_key,omitempty"`
+	Sig        string `json:"sig,omitempty"`
 }
 
 type RequestedCredential struct {
@@ -85,7 +89,11 @@ type Assertion struct {
 	// identity whose key signed the challenge is the one thing it cannot copy.
 	// A relying party refuses an assertion that names any site but its own.
 	SiteAID string `json:"site_aid,omitempty"`
-	Sig     string `json:"sig,omitempty"`
+	// BrowserKey repeats the thumbprint of the browser key the challenge
+	// named (ADR-066). The signature covers it, so the person approved a
+	// sign-in for that browser's key and no other.
+	BrowserKey string `json:"browser_key,omitempty"`
+	Sig        string `json:"sig,omitempty"`
 }
 
 type SiteRelationship struct {

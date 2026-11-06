@@ -1,0 +1,58 @@
+{
+  "assertion": {
+    "v": "IALOGIN10JSON",
+    "t": "login-assertion",
+    "d": "EFuBjnflrmaH4r9m4S_bZA74rwqAj1_1Rns0pNISdzvh",
+    "i": "EIQ1ViYdMzEwjQFL0L6iwx32TOOJpqtAgFndcOwny4jN",
+    "relationship_aid_oobi": "https://k7f2p.relay.grapeid.org/oobi/EIQ1ViYdMzEwjQFL0L6iwx32TOOJpqtAgFndcOwny4jN",
+    "audience": "https://app.example.com",
+    "nonce": "m29GoldenNonce0123456789ABCDEFGH",
+    "dt": "2026-06-17T12:00:00Z",
+    "disclosures": {
+      "display_name": "Alice",
+      "email": "alice@example.com"
+    },
+    "presented_acdcs": [],
+    "p_kel": "eyJyYXdfZXZlbnRzX2I2NCI6WyJleUoySWpvaVMwVlNTVEV3U2xOUFRqQXdNREV5WWw4aUxDSjBJam9pYVdOd0lpd2laQ0k2SWtWSlVURldhVmxrVFhwRmQycFJSa3d3VERacGQzZ3pNbFJQVDBwd2NYUkJaMFp1WkdOUGQyNTVOR3BPSWl3aWFTSTZJa1ZKVVRGV2FWbGtUWHBGZDJwUlJrd3dURFpwZDNnek1sUlBUMHB3Y1hSQlowWnVaR05QZDI1NU5HcE9JaXdpY3lJNklqQWlMQ0pyZENJNklqRWlMQ0pySWpwYklrUk5aWEZUYlhwck9XVmhSVXQ2TTNOdFgyVmtUVmx0TW1kRlozRlJhVEprY1VSWUxXMWZMVzFtZVRkNElsMHNJbTUwSWpvaU1TSXNJbTRpT2xzaVJVNHhSRTVKVTJrMmQxcE9RbHBIZFcxTk5uWlZWWEZUY0ZCbllqVXRaV2Q1YkdkcVMwMUViSGhXVERraVhTd2lZblFpT2lJd0lpd2lZaUk2VzEwc0ltTWlPbHRkTENKaElqcGJYWDA9Il0sImNlc3Jfc2lnbmF0dXJlcyI6WyIwQkNEczduZ0VyVEJGX2RfV3JLZ1Y4UlBIVXpMcmF2Y3hzb0hNempVMkw0QjF2ekhKR1E0RkxaOE1rQkhQYnFBVXNzZG5hdGk4VlcwUjE2Y0dPLTd3Z2tKIl19",
+    "site_aid": "EM29GoldenSiteAID0123456789ABCDEFGHIJKLMNOPQ",
+    "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U",
+    "sig": "0BAYbBWIrmdBMMEBUV_uC2sk4UTaK4dhH6HYhx2PrKFSvq4D3rMSnG4vCBmi3guGv8db9MUOr4p2r2PE4G3DMcwI"
+  },
+  "assertion_canonical_body": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EFuBjnflrmaH4r9m4S_bZA74rwqAj1_1Rns0pNISdzvh\",\"i\":\"EIQ1ViYdMzEwjQFL0L6iwx32TOOJpqtAgFndcOwny4jN\",\"relationship_aid_oobi\":\"https://k7f2p.relay.grapeid.org/oobi/EIQ1ViYdMzEwjQFL0L6iwx32TOOJpqtAgFndcOwny4jN\",\"audience\":\"https://app.example.com\",\"nonce\":\"m29GoldenNonce0123456789ABCDEFGH\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\",\"email\":\"alice@example.com\"},\"presented_acdcs\":[],\"p_kel\":\"eyJyYXdfZXZlbnRzX2I2NCI6WyJleUoySWpvaVMwVlNTVEV3U2xOUFRqQXdNREV5WWw4aUxDSjBJam9pYVdOd0lpd2laQ0k2SWtWSlVURldhVmxrVFhwRmQycFJSa3d3VERacGQzZ3pNbFJQVDBwd2NYUkJaMFp1WkdOUGQyNTVOR3BPSWl3aWFTSTZJa1ZKVVRGV2FWbGtUWHBGZDJwUlJrd3dURFpwZDNnek1sUlBUMHB3Y1hSQlowWnVaR05QZDI1NU5HcE9JaXdpY3lJNklqQWlMQ0pyZENJNklqRWlMQ0pySWpwYklrUk5aWEZUYlhwck9XVmhSVXQ2TTNOdFgyVmtUVmx0TW1kRlozRlJhVEprY1VSWUxXMWZMVzFtZVRkNElsMHNJbTUwSWpvaU1TSXNJbTRpT2xzaVJVNHhSRTVKVTJrMmQxcE9RbHBIZFcxTk5uWlZWWEZUY0ZCbllqVXRaV2Q1YkdkcVMwMUViSGhXVERraVhTd2lZblFpT2lJd0lpd2lZaUk2VzEwc0ltTWlPbHRkTENKaElqcGJYWDA9Il0sImNlc3Jfc2lnbmF0dXJlcyI6WyIwQkNEczduZ0VyVEJGX2RfV3JLZ1Y4UlBIVXpMcmF2Y3hzb0hNempVMkw0QjF2ekhKR1E0RkxaOE1rQkhQYnFBVXNzZG5hdGk4VlcwUjE2Y0dPLTd3Z2tKIl19\",\"site_aid\":\"EM29GoldenSiteAID0123456789ABCDEFGHIJKLMNOPQ\",\"browser_key\":\"oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U\"}",
+  "challenge": {
+    "v": "ASK1",
+    "t": 1,
+    "site_aid": "EM29GoldenSiteAID0123456789ABCDEFGHIJKLMNOPQ",
+    "site_oobi": "https://app.example.com/public/oobi/EM29GoldenSiteAID0123456789ABCDEFGHIJKLMNOPQ",
+    "audience": "https://app.example.com",
+    "nonce": "m29GoldenNonce0123456789ABCDEFGH",
+    "dt": "2026-06-17T12:00:00Z",
+    "expiry": "2026-06-17T12:10:00Z",
+    "requested_disclosures": [
+      "display_name"
+    ],
+    "requested_credentials": [],
+    "callback_url": "https://app.example.com/api/login/callback",
+    "session_token": "golden-session-token",
+    "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U",
+    "sig": "0BBOI5C_pkdAfz6PdvBAnzmk_aYd-841y8946BtPD2EJSRicESguS2HofQSO4q8UgERZ05UnTYtxSYCKKTKumUQC"
+  },
+  "challenge_canonical_body": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"EM29GoldenSiteAID0123456789ABCDEFGHIJKLMNOPQ\",\"site_oobi\":\"https://app.example.com/public/oobi/EM29GoldenSiteAID0123456789ABCDEFGHIJKLMNOPQ\",\"audience\":\"https://app.example.com\",\"nonce\":\"m29GoldenNonce0123456789ABCDEFGH\",\"dt\":\"2026-06-17T12:00:00Z\",\"expiry\":\"2026-06-17T12:10:00Z\",\"requested_disclosures\":[\"display_name\"],\"requested_credentials\":[],\"browser_key\":\"oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U\",\"callback_url\":\"https://app.example.com/api/login/callback\",\"session_token\":\"golden-session-token\"}",
+  "description": "Browser-key thumbprint vectors (ADR-066). The JWK is RFC 7515 appendix A.3's P-256 key. The challenge and the assertion are signed with the golden seed of golden_vectors.json.",
+  "expected_verify": {
+    "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U",
+    "site_aid": "EM29GoldenSiteAID0123456789ABCDEFGHIJKLMNOPQ"
+  },
+  "jwk": {
+    "crv": "P-256",
+    "kty": "EC",
+    "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+    "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"
+  },
+  "negative_vectors": {
+    "other_browser_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  },
+  "signing_verkey_qb64": "DMeqSmzk9eaEKz3sm_edMYm2gEgqQi2dqDX-m_-mfy7x",
+  "thumbprint": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U",
+  "thumbprint_jwk_input": "{\"crv\":\"P-256\",\"kty\":\"EC\",\"x\":\"f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU\",\"y\":\"x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0\"}"
+}

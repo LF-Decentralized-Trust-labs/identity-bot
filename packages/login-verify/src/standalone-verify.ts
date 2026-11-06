@@ -1,5 +1,6 @@
 import {
   canonicalAssertionBody,
+  isBrowserKeyThumbprint,
   parseRfc3339,
   verifyCanonical,
 } from "./canonical.js";
@@ -120,6 +121,13 @@ export async function verifyLoginAssertion(
   }
   if (!opts.expectedSiteAid || assertion.site_aid !== opts.expectedSiteAid) {
     return { valid: false, reason: "site mismatch: the assertion answers another site's challenge" };
+  }
+  const expectedBrowserKey = opts.expectedBrowserKey ?? "";
+  if ((assertion.browser_key ?? "") !== expectedBrowserKey) {
+    return { valid: false, reason: "browser key mismatch: the assertion was approved for another browser key" };
+  }
+  if (expectedBrowserKey !== "" && !isBrowserKeyThumbprint(expectedBrowserKey)) {
+    return { valid: false, reason: "browser key mismatch: a browser key thumbprint is 43 characters of base64url" };
   }
   if (!assertion.sig) {
     return { valid: false, reason: "missing sig" };

@@ -112,6 +112,7 @@ func (s *CoreServer) handleCreateAssetChallenge(w http.ResponseWriter, r *http.R
 		AssetID              string   `json:"asset_id"`
 		Audience             string   `json:"audience"`
 		RequestedDisclosures []string `json:"requested_disclosures"`
+		BrowserKey           string   `json:"browser_key"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
@@ -122,7 +123,7 @@ func (s *CoreServer) handleCreateAssetChallenge(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	token, qrURL, code, msg := s.createSignedAssetChallenge(body.AssetID, body.Audience, body.RequestedDisclosures, s.getPublicURL(r))
+	token, qrURL, code, msg := s.createSignedAssetChallenge(body.AssetID, body.Audience, body.RequestedDisclosures, body.BrowserKey, s.getPublicURL(r))
 	if code != 0 {
 		http.Error(w, msg, code)
 		return
@@ -240,7 +241,7 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 	}
 
 	// 1) Authenticate: verify the assertion signature + binding to this challenge.
-	res := login.VerifyAssertion(a, bundle.Nonce, bundle.Audience, bundle.SiteAID, 300)
+	res := login.VerifyAssertionForBrowserKey(a, bundle.Nonce, bundle.Audience, bundle.SiteAID, bundle.BrowserKey, 300)
 	if !res.Valid {
 		s.setChallengeStatus(token, map[string]interface{}{"status": "denied", "reason": res.Reason})
 		http.Error(w, "assertion verification failed: "+res.Reason, http.StatusUnauthorized)

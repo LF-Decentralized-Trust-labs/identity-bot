@@ -348,6 +348,7 @@ func (h *Handler) buildAssertion(rel *SiteRelationship, bundle *ChallengeBundle,
 		CustomData:          customData,
 		PKEL:                keyLog,
 		SiteAID:             bundle.SiteAID,
+		BrowserKey:          bundle.BrowserKey,
 	}
 	if err := SignAssertion(&a, seed); err != nil {
 		return nil, err
@@ -498,6 +499,9 @@ func (h *Handler) prepareLogin(req StartLoginRequest) (*ChallengeBundle, *SiteRe
 	ok, site, err := h.verifyChallengeSig(bundle)
 	if err != nil || !ok {
 		return nil, nil, nil, fmt.Errorf("challenge verification failed")
+	}
+	if err := CheckBrowserKeyThumbprint(bundle.BrowserKey); bundle.BrowserKey != "" && err != nil {
+		return nil, nil, nil, err
 	}
 	// The expiry is read from the bundle whose signature was just verified,
 	// never from an earlier fetch of the same session, which a relay could

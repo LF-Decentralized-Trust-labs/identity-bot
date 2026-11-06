@@ -48,6 +48,10 @@ func canonicalChallengeBody(c ChallengeBundle) string {
 			jsonField("relationship_anchor_oobi", nfc(c.RelationshipAnchorOOBI)),
 		)
 	}
+	// Omitted when empty, so a challenge for no browser key keeps its form.
+	if c.BrowserKey != "" {
+		parts = append(parts, jsonField("browser_key", c.BrowserKey))
+	}
 	parts = append(parts,
 		jsonField("callback_url", nfc(c.CallbackURL)),
 		jsonField("session_token", c.SessionToken),
@@ -84,6 +88,9 @@ func canonicalAssertionBody(a Assertion) string {
 	}
 	if a.SiteAID != "" {
 		parts = append(parts, jsonField("site_aid", nfc(a.SiteAID)))
+	}
+	if a.BrowserKey != "" {
+		parts = append(parts, jsonField("browser_key", a.BrowserKey))
 	}
 	return "{" + strings.Join(filterEmpty(parts), ",") + "}"
 }
