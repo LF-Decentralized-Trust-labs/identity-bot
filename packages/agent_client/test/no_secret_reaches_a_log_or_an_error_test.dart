@@ -62,6 +62,7 @@ void main() {
 
   setUp(() {
     FlutterSecureStorage.setMockInitialValues({});
+    SecureKeyStore.holdPhraseWith(InMemoryPhraseHolder());
     SharedPreferences.setMockInitialValues({});
   });
 
@@ -137,6 +138,7 @@ void main() {
       await each(() async => keri.rotateAid(name: aid));
       // A wiped device recovers from the new phrase.
       FlutterSecureStorage.setMockInitialValues({});
+      SecureKeyStore.holdPhraseWith(InMemoryPhraseHolder());
       await each(() async =>
           RecoveringThisIdentity(other.client, other.base, km).recover(
               Bip39.mnemonicToSeed(fresh.split(' ')),

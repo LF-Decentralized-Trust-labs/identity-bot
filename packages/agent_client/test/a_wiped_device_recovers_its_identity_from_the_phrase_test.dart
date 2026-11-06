@@ -6,6 +6,7 @@ import 'package:agent_client/crypto/keys.dart';
 import 'package:agent_client/services/key_math.dart';
 import 'package:agent_client/services/recovering_this_identity.dart';
 import 'package:agent_client/services/root_seed_handoff.dart';
+import 'package:agent_client/services/secure_key_store.dart';
 import 'package:agent_client/services/the_identity_this_device_holds.dart';
 import 'package:agent_client/services/the_key_events_this_device_makes.dart';
 import 'package:agent_client/services/the_key_state_this_device_reads.dart';
@@ -58,6 +59,7 @@ void main() {
 
   setUp(() async {
     FlutterSecureStorage.setMockInitialValues({});
+    SecureKeyStore.holdPhraseWith(InMemoryPhraseHolder());
     SharedPreferences.setMockInitialValues({});
     for (final w in [w1, w2, w3]) {
       w.forgetAll();
@@ -114,6 +116,7 @@ void main() {
     final used = await anIdentityInUse();
     // Wiped: nothing of the identity is left on the device.
     FlutterSecureStorage.setMockInitialValues({});
+    SecureKeyStore.holdPhraseWith(InMemoryPhraseHolder());
 
     final recovered = await RecoveringThisIdentity(after.client, after.base, km)
         .recover(seed,
@@ -167,7 +170,8 @@ void main() {
         await m.found(seed, witnesses: [w1.aid, w2.aid, w3.aid], toad: 2);
     // Another device with this phrase rotated at the same place, and one
     // witness took its rotation first.
-    final rival = await preparedAndSigned(before.client, before.base, before.km, seed, 1, {
+    final rival = await preparedAndSigned(
+        before.client, before.base, before.km, seed, 1, {
       'aid': founded.aid,
       't': 'rot',
       'k': [KeyManager.keyAt(seed, 1).publicKeyEncoded],
@@ -194,6 +198,7 @@ void main() {
         toad: 2,
         witnessedBy: WitnessSet([w1.aid, w2.aid, w3.aid], 2));
     FlutterSecureStorage.setMockInitialValues({});
+    SecureKeyStore.holdPhraseWith(InMemoryPhraseHolder());
 
     await expectLater(
         RecoveringThisIdentity(after.client, after.base, km)
@@ -209,6 +214,7 @@ void main() {
       'Identity Agent\'s copy alone', () async {
     final used = await anIdentityInUse();
     FlutterSecureStorage.setMockInitialValues({});
+    SecureKeyStore.holdPhraseWith(InMemoryPhraseHolder());
     w2.offline = true;
     w3.offline = true;
     await expectLater(
@@ -235,7 +241,8 @@ void main() {
   /// Founds an identity on [before] revealing this phrase's key 0 and
   /// committing to [next], anchoring nothing, witnessed by all three.
   Future<String> aFounding(List<String> next) async {
-    final icp = await preparedAndSigned(before.client, before.base, before.km, seed, 0, {
+    final icp = await preparedAndSigned(
+        before.client, before.base, before.km, seed, 0, {
       't': 'icp',
       'k': [KeyManager.keyAt(seed, 0).publicKeyEncoded],
       'kt': '1',
@@ -262,6 +269,7 @@ void main() {
       'its own reason, and installs nothing', () async {
     final used = await anIdentityInUse();
     FlutterSecureStorage.setMockInitialValues({});
+    SecureKeyStore.holdPhraseWith(InMemoryPhraseHolder());
     after.client.answerInstead['/api/identity/restore'] =
         (412, RootSeedRefused.code);
     try {
@@ -310,7 +318,8 @@ void main() {
   /// Founds an identity on [by]'s key 0, committing to [next]: what an old
   /// phrase's step 1 looks like to a device holding only the new phrase.
   Future<String> aFoundingBy(Uint8List by, List<String> next) async {
-    final icp = await preparedAndSigned(before.client, before.base, before.km, by, 0, {
+    final icp =
+        await preparedAndSigned(before.client, before.base, before.km, by, 0, {
       't': 'icp',
       'k': [KeyManager.keyAt(by, 0).publicKeyEncoded],
       'kt': '1',

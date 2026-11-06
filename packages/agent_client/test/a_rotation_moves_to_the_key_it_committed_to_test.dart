@@ -473,6 +473,7 @@ void main() {
 
   Future<void> freshDevice() async {
     FlutterSecureStorage.setMockInitialValues({});
+    SecureKeyStore.holdPhraseWith(InMemoryPhraseHolder());
     SharedPreferences.setMockInitialValues({});
     await SecureKeyStore.saveMnemonic(words);
   }

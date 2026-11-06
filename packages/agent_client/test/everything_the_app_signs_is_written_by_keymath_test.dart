@@ -33,6 +33,7 @@ void main() {
 
   setUp(() {
     FlutterSecureStorage.setMockInitialValues({});
+    SecureKeyStore.holdPhraseWith(InMemoryPhraseHolder());
     SharedPreferences.setMockInitialValues({});
   });
 

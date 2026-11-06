@@ -1079,6 +1079,18 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 		r.Post("/keystore/root-seed", s.handleSetRootSeed)
 		r.Get("/keystore/root-seed", s.handleRootSeedStatus)
 
+		r.Put("/keystore/recovery-phrase", s.handleHoldRecoveryPhrase)
+		r.Get("/keystore/recovery-phrase", s.handleRecoveryPhraseStatus)
+		r.Post("/keystore/recovery-phrase/open", s.handleOpenRecoveryPhrase)
+		r.Delete("/keystore/recovery-phrase", s.handleForgetRecoveryPhrase)
+
+		// The second phrase held while an identity moves to a new phrase
+		// (ADR-061 section 10): held exactly as the phrase in force is.
+		r.Put("/keystore/recovery-phrase/moving-to", s.handleHoldPhraseMovingTo)
+		r.Get("/keystore/recovery-phrase/moving-to", s.handlePhraseMovingToStatus)
+		r.Post("/keystore/recovery-phrase/moving-to/open", s.handleOpenPhraseMovingTo)
+		r.Delete("/keystore/recovery-phrase/moving-to", s.handleForgetPhraseMovingTo)
+
 		r.Post("/inception", s.handleInception)
 		r.Post("/hybrid-inception", s.handleHybridInception)
 		r.Post("/rotation", s.handleRotation)
@@ -5023,6 +5035,14 @@ func (s *CoreServer) handleReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The root seed (secureenclave) is not cleared here, and neither are the
+	// two held phrases (the phrase in force and, during a move, the phrase moved
+	// to), for the same reason: each may be the only copy of an identity whose
+	// log is in the hands of its witnesses, and this route clears this agent's
+	// records, not the means of recovering them. A different seed afterwards is
+	// refused (handleSetRootSeed), and a different phrase is refused until the
+	// one held is deliberately replaced or forgotten
+	// (secureenclave.ErrADifferentPhraseIsHeld).
 	if err := s.DataStore.ResetAll(); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to reset", err.Error())
 		return

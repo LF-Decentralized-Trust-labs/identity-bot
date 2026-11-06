@@ -226,6 +226,7 @@ void main() {
 
     setUp(() async {
       FlutterSecureStorage.setMockInitialValues({});
+      SecureKeyStore.holdPhraseWith(InMemoryPhraseHolder());
       SharedPreferences.setMockInitialValues({});
       for (final w in [w1, w2, w3]) {
         w.offline = false;

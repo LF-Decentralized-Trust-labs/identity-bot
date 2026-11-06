@@ -33,6 +33,7 @@ CoreService _coreAnswering(http.Response Function() answer) => CoreService(
 void main() {
   setUp(() {
     FlutterSecureStorage.setMockInitialValues({});
+    SecureKeyStore.holdPhraseWith(InMemoryPhraseHolder());
     SharedPreferences.setMockInitialValues({});
   });
 
