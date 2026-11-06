@@ -125,3 +125,17 @@ func TestAPhraseIsStillHonouredWhenOneIsGiven(t *testing.T) {
 		t.Fatalf("an explicit phrase was rejected: %d %s", w.Code, w.Body)
 	}
 }
+
+// A backup asked of an agent whose stored seed is refused is answered with the
+// root-seed refusal, not with "no way to unlock the archive", which reads as an
+// agent that holds no seed at all.
+func TestABackupOverARefusedSeedIsAnsweredWithTheRefusal(t *testing.T) {
+	dir := t.TempDir()
+	keyProtectionAnswers(t, secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindTPM2})
+	plantARefusedSeed(t, dir)
+	s := exportServer(t, dir)
+	w := exportRequest(t, s, `{"dest_path":"out.iab"}`)
+	if w.Code != http.StatusPreconditionFailed || !strings.Contains(w.Body.String(), rootSeedRefusedCode) {
+		t.Fatalf("got %d %s, want 412 with %q", w.Code, w.Body, rootSeedRefusedCode)
+	}
+}

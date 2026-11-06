@@ -185,3 +185,35 @@ func TestAProductionBuildNeverServesAnUnwrappedSeedOnAnyPlatform(t *testing.T) {
 		})
 	}
 }
+
+// The warning asks the same capability seam everything else in this package
+// asks, not the hardware directly. A machine this package has been told cannot
+// protect a key has no "could have protected it and did not" to report, so it
+// says nothing; together with TestAnUnwrappedSeedIsSaidOnceAndNotOncePerStore
+// (told it can, so it speaks) this fails on any host whose real answer
+// disagrees with one of the two, if the warning goes back to asking the hardware.
+func TestTheUnwrappedWarningAsksTheCapabilitySeamNotTheHardware(t *testing.T) {
+	for _, st := range []Status{Absent, Present, Unknown} {
+		t.Run(string(st), func(t *testing.T) {
+			aDevelopmentBuild(t)
+			r1 := UseCapabilityDetector(func() Capability { return Capability{Status: st} })
+			r2 := UseSeedWrapper(nil)
+			t.Cleanup(func() { r2(); r1() })
+
+			var out bytes.Buffer
+			prev := log.Writer()
+			log.SetOutput(&out)
+			t.Cleanup(func() { log.SetOutput(prev) })
+			unwrappedSeedWarning = sync.Once{}
+			t.Cleanup(func() { unwrappedSeedWarning = sync.Once{} })
+
+			if err := StoreDeviceLocalSeed(t.TempDir(), make([]byte, 64)); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(out.String(), "stored UNWRAPPED") {
+				t.Fatalf("told the machine cannot protect a key (%s), the warning said it could: %s",
+					st, strings.TrimSpace(out.String()))
+			}
+		})
+	}
+}

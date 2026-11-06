@@ -347,9 +347,11 @@ func aPersonsRootSeed(dataDir, holder string) bool {
 //
 // It deletes nothing: the file may be the only copy, and what to do about it is
 // the owner's decision. A machine's own seed is not this and is never reported.
-func announceRootIdentityHeldWhereItShouldNotBe(dataDir, holder string) bool {
+// It returns the placement refusal when the seed is misplaced, nil otherwise.
+// It is only ever non-nil in a production build.
+func announceRootIdentityHeldWhereItShouldNotBe(dataDir, holder string) error {
 	if isDevBuild() || !aPersonsRootSeed(dataDir, holder) {
-		return false
+		return nil
 	}
 	// PLACEMENT ONLY. A phone that holds its owner's seed unwrapped is where the
 	// seed belongs and is not protected yet; that is reported through
@@ -358,14 +360,29 @@ func announceRootIdentityHeldWhereItShouldNotBe(dataDir, holder string) bool {
 	// never re-wrapped.
 	err := checkPlacement(dataDir)
 	if err == nil {
-		return false
+		return nil
 	}
 	rootIdentityMisplacedWarning.Do(func() {
 		log.Printf("[keystore] *** A PERSON'S ROOT SEED IS STORED HERE, ON A MACHINE THAT MAY NOT HOLD ONE *** "+
 			"%v. Anyone who reads the file becomes this identity, permanently and undetectably. "+
 			"Nothing has been deleted, and it has not been re-wrapped. Move this identity to a phone or a sealed machine.", err)
 	})
-	return true
+	return err
+}
+
+// misplacedSeedRefusal is what every use of a person's root seed gets in a
+// production build when it is stored unwrapped on a machine that may not hold
+// one (owner's rule, 2026-11-05: no production running without hardware key
+// protection). It is never re-wrapped there, so unlike existingSeedRefusal it
+// does not promise that wrapping will release it: the identity has to move.
+func misplacedSeedRefusal(placement error) error {
+	reason := placement.Error()
+	var e *ErrRootSeedCannotLiveHere
+	if errors.As(placement, &e) {
+		reason = e.Reason
+	}
+	return cannotLiveHere(detectCapability(), "a person's root seed is stored unwrapped on this computer, "+
+		"which may not hold one, so it is not used. The file is left as it is: "+reason)
 }
 
 // aProductionBuild is the build the fail-closed rule for an already-stored
@@ -421,9 +438,10 @@ func LoadRootSeed(dataDir string) ([]byte, error) {
 		if holder == "" && SeedCameFromAPhrase(dataDir) {
 			holder = holderIdentity
 		}
-		if announceRootIdentityHeldWhereItShouldNotBe(dataDir, holder) {
-			// Misplaced: reported, kept as it is, never re-wrapped into looking legitimate.
-			return seed, nil
+		if perr := announceRootIdentityHeldWhereItShouldNotBe(dataDir, holder); perr != nil {
+			// Misplaced: reported, kept as it is, never re-wrapped into looking
+			// legitimate, and (this being a production build) not served.
+			return nil, misplacedSeedRefusal(perr)
 		}
 		// A production build never serves a seed it could not wrap
 		// (requireWrap), so a failed migration is a refusal, not a log line.
@@ -452,7 +470,8 @@ func LoadRootSeed(dataDir string) ([]byte, error) {
 	}
 	// A person's root seed on a machine that may not hold one is said loudly
 	// whether or not it is wrapped, and is never re-wrapped below.
-	misplaced := announceRootIdentityHeldWhereItShouldNotBe(dataDir, env.Holder)
+	placement := announceRootIdentityHeldWhereItShouldNotBe(dataDir, env.Holder)
+	misplaced := placement != nil
 	if env.Wrap == seedWrapNone {
 		if len(blob) < 32 {
 			return nil, fmt.Errorf("invalid root seed size")
@@ -479,7 +498,16 @@ func LoadRootSeed(dataDir string) ([]byte, error) {
 		// app supplies its key (ProtectExistingSeed at launch, or the next open).
 		// A development build keeps serving it and is flagged not functional yet
 		// in ReportSeedProtection.
-		if !misplaced && aProductionBuild() {
+		//
+		// A MISPLACED ONE IS REFUSED TOO. It is never re-wrapped (above), so it
+		// gets its own refusal, which says the identity has to move rather than
+		// that wrapping will release it. Only a production build reaches here
+		// with one: in development announceRootIdentityHeldWhereItShouldNotBe
+		// reports nothing and the seed is served, flagged.
+		if misplaced {
+			return nil, misplacedSeedRefusal(placement)
+		}
+		if aProductionBuild() {
 			return nil, existingSeedRefusal(whyNotWrappedAt(dataDir))
 		}
 		return blob, nil

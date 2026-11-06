@@ -244,11 +244,22 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 // handleRootSeedStatus reports whether a root seed is established (never the
 // seed itself). The owner and its controllers only. Lets the client decide whether a handoff is
 // still needed.
+//
+// A STORED SEED THIS BUILD REFUSES TO USE IS STILL A SEED. Answering
+// established:false for it told a client "no seed here", which invites a
+// handoff that would replace the only copy. It is reported as established and
+// refused, with the root-seed refusal code and reason, so a client can tell
+// "nothing here" from "something here that may not be used".
 func (s *CoreServer) handleRootSeedStatus(w http.ResponseWriter, r *http.Request) {
 	if !s.isOwnerOrItsController(r) {
 		jsonError(w, "keystore management is for the owner of this agent", http.StatusForbidden)
 		return
 	}
 	_, err := secureenclave.LoadRootSeed(s.DataDir)
+	if secureenclave.IsRootSeedRefusal(err) {
+		jsonResponse(w, map[string]any{"established": true, "refused": true,
+			"code": rootSeedRefusedCode, "details": err.Error()})
+		return
+	}
 	jsonResponse(w, map[string]any{"established": err == nil})
 }
