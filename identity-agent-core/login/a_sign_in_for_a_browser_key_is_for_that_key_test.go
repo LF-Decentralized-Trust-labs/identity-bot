@@ -132,3 +132,12 @@ func TestAThumbprintHasOneSpelling(t *testing.T) {
 		}
 	}
 }
+
+// The text a challenge is signed over is exported for a party that checks the
+// signature outside this package; it is the body the vectors pin.
+func TestTheExportedChallengeBodyIsTheOneSigned(t *testing.T) {
+	v := loadBrowserKeyVectors(t)
+	if CanonicalChallengeBody(v.Challenge) != v.ChallengeCanonicalBody {
+		t.Fatal("the exported body is not the signed one")
+	}
+}

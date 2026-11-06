@@ -276,6 +276,11 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 		"pairwise_aid": res.PairwiseAID,
 		"disclosures":  res.Disclosures,
 	}
+	// The browser key the verified assertion repeated (ADR-066), so whoever
+	// reads the result can check it is the one it asked for.
+	if bundle.BrowserKey != "" {
+		st["browser_key"] = a.BrowserKey
+	}
 	// Membership-admitted logins carry the member's info (role, display name)
 	// from the admitting resolver, so the relying party gets "who this is" in
 	// the login result instead of querying org-internal rosters.

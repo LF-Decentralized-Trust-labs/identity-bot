@@ -44,6 +44,13 @@ func TestASignInForABrowserKeyIsAdmittedWhenTheAssertionRepeatsIt(t *testing.T) 
 	if got := w.org.challenges[req.SessionToken].BrowserKey; got != aBrowserKey {
 		t.Fatalf("the challenge names %q", got)
 	}
+	// The result says which browser key the verified assertion repeated.
+	w.org.challengeMu.Lock()
+	got := w.org.challengeStatus[req.SessionToken]["browser_key"]
+	w.org.challengeMu.Unlock()
+	if got != aBrowserKey {
+		t.Fatalf("the result carries browser key %v", got)
+	}
 }
 
 // An assertion approved for another key, or for none, is refused by the

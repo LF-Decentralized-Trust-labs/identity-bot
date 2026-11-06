@@ -213,6 +213,11 @@ func (s *CoreServer) handleLoginSessionStatus(w http.ResponseWriter, r *http.Req
 			if d, ok := st["disclosures"]; ok {
 				resp["disclosures"] = d
 			}
+			// The browser key the verified assertion repeated (ADR-066): released
+			// to the collector only, like who signed in.
+			if bk, ok := st["browser_key"].(string); ok {
+				resp["browser_key"] = bk
+			}
 			// Membership-admitted logins: who the admitting roster says this is
 			// (e.g. role + display_name), so the RP needs no org-internal lookups.
 			if mi, ok := st["member_info"]; ok {

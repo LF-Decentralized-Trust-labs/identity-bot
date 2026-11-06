@@ -36,3 +36,10 @@ func ThumbprintP256(x, y string) (string, error) {
 	sum := sha256.Sum256([]byte(`{"crv":"P-256","kty":"EC","x":"` + x + `","y":"` + y + `"}`))
 	return base64.RawURLEncoding.EncodeToString(sum[:]), nil
 }
+
+// CanonicalChallengeBody is the exact text a challenge's signature covers. A
+// party that has to check a challenge's signature without this package (a
+// browser page, say) is given it beside the signature, verifies the signature
+// over those bytes, and reads the challenge from the same bytes, so what it
+// reads is what was signed.
+func CanonicalChallengeBody(c ChallengeBundle) string { return canonicalChallengeBody(c) }
