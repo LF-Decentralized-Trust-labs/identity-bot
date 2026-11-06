@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"identity-agent-core/internal/jsonreply"
 	"log"
 	"net/http"
 	"os"
@@ -12,6 +11,7 @@ import (
 	"identity-agent-core/backup"
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/jsonreply"
 	"identity-agent-core/secureenclave"
 )
 

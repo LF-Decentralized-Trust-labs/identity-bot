@@ -2,11 +2,11 @@ package server
 
 import (
 	"bytes"
-	"identity-agent-core/internal/jsonreply"
 	"io"
 	"net/http"
 	"strings"
 
+	"identity-agent-core/internal/jsonreply"
 	"identity-agent-core/login"
 )
 

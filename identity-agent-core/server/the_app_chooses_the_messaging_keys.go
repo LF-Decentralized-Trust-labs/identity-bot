@@ -4,13 +4,13 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"identity-agent-core/internal/jsonreply"
-	"identity-agent-core/messagingkeys"
 	"io"
 	"net/http"
 
 	"identity-agent-core/didcomm"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/jsonreply"
+	"identity-agent-core/messagingkeys"
 )
 
 // The app chooses the messaging keys; the core holds them (ADR-061 section 8).

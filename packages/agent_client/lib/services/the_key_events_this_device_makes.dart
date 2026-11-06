@@ -928,6 +928,13 @@ class TheKeyEventsThisDeviceMakes {
         return _confirmTheTakenPlace(r, e, set);
       }
       return _notRecorded(r, e, set);
+    } on RootSeedRefused {
+      // Answered, and for good: this device cannot protect the root seed, so
+      // committing it again changes nothing. It goes to the witnesses as any
+      // event the core refuses does.
+      final (kept, _) = await _toTheWitnesses(r, set);
+      await _signed.refused(kept, RootSeedRefused.code);
+      rethrow;
     } catch (_) {
       // Not answered at all: the event is kept, signed, to commit again, and
       // goes to the witnesses meanwhile.

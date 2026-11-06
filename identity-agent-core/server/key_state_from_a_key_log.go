@@ -4,13 +4,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"identity-agent-core/internal/jsonreply"
 	"io"
 	"net/http"
 
 	keri "github.com/grapeid/keri-go"
 
 	"identity-agent-core/drivers"
+	"identity-agent-core/internal/jsonreply"
 )
 
 // What key state a key log establishes, for whoever is holding a copy of one

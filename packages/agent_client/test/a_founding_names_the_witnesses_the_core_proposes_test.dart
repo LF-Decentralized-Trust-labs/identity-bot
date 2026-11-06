@@ -3,7 +3,9 @@ import 'dart:convert';
 import 'package:agent_client/services/key_math.dart';
 import 'package:agent_client/services/keri_service.dart';
 import 'package:agent_client/services/local_core_keri_service.dart';
+import 'package:agent_client/services/root_seed_handoff.dart';
 import 'package:agent_client/services/secure_key_store.dart';
+import 'package:agent_client/services/the_events_this_device_signed.dart';
 import 'package:agent_client/services/the_identity_this_device_holds.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
@@ -97,6 +99,21 @@ void main() {
     expect(done.witnesses, unorderedEquals([w1.aid, w2.aid]));
     expect(done.witnessThreshold, 2);
     expect((await founding(done.aid))['bt'], '2');
+  });
+
+  test(
+      'a founding the core refuses at the commit for a root seed it cannot '
+      'protect is refused for good, not kept to commit again', () async {
+    core = await anotherCore(bin, km, witnesses: [w1, w2]);
+    core.client.answerTheNextCommit = (412, RootSeedRefused.code);
+    await expectLater(
+        LocalCoreKeriService(
+                baseUrl: core.base, client: core.client, keyMath: km)
+            .inceptAid(name: 'me', code: phrase),
+        throwsA(isA<RootSeedRefused>()));
+    final aid = (await TheIdentityThisDeviceHolds().read())!.aid;
+    final kept = await TheEventsThisDeviceSigned().unfinished(aid);
+    expect([for (final r in kept) r.refusedWith], [RootSeedRefused.code]);
   });
 
   test(

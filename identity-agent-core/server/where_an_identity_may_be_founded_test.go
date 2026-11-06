@@ -1,12 +1,12 @@
 package server
 
 import (
-	"identity-agent-core/keriengine"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"identity-agent-core/keriengine"
 	"identity-agent-core/secureenclave"
 )
 
@@ -85,6 +85,19 @@ func TestAMachineThatCanProveItselfIsNotStopped(t *testing.T) {
 	}
 }
 
+// refuseFoundingHere makes this machine one that may not found an identity,
+// for the rest of the test.
+func refuseFoundingHere(t *testing.T) {
+	t.Helper()
+	restore := secureenclave.UseFoundingVerdict(func() foundingVerdict {
+		return foundingVerdict{
+			Permitted: false, Platform: "macos",
+			Why: cannotProveItsSoftware, Instead: actForOneInstead,
+		}
+	})
+	t.Cleanup(restore)
+}
+
 // EVERY WAY IN IS REFUSED, not just the one named "inception".
 //
 // A gate on one route out of several is worse than no gate, because it reads as
@@ -99,17 +112,6 @@ func TestAMachineThatCanProveItselfIsNotStopped(t *testing.T) {
 // sight, and if it is not here somebody has to notice, which is what this test
 // is for.
 func TestEveryWayAnIdentityCanBeginIsRefusedOnAMachineThatMayNotFound(t *testing.T) {
-	refuseHere := func(t *testing.T) {
-		t.Helper()
-		restore := secureenclave.UseFoundingVerdict(func() foundingVerdict {
-			return foundingVerdict{
-				Permitted: false, Platform: "macos",
-				Why: cannotProveItsSoftware, Instead: actForOneInstead,
-			}
-		})
-		t.Cleanup(restore)
-	}
-
 	for _, door := range []struct {
 		what   string
 		method string
@@ -170,7 +172,7 @@ func TestEveryWayAnIdentityCanBeginIsRefusedOnAMachineThatMayNotFound(t *testing
 			if door.engine {
 				s.KeriDriver = keriengine.New()
 			}
-			refuseHere(t)
+			refuseFoundingHere(t)
 
 			req := httptest.NewRequest(door.method, door.path, strings.NewReader(door.body))
 			req.RemoteAddr = "127.0.0.1:1234"

@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../crypto/keys.dart';
 import 'key_math.dart';
+import 'root_seed_handoff.dart' show RootSeedRefused;
 import 'the_identity_this_device_holds.dart';
 import 'the_key_events_this_device_makes.dart';
 import 'the_key_state_this_device_reads.dart';
@@ -125,6 +126,9 @@ class RecoveringThisIdentity {
                 'aid': aid,
                 'events': [for (final c in signed) c.toJson()]
               }));
+      // Refused where this device cannot protect the root seed, with the
+      // core's own reason, as every founding is.
+      RootSeedRefused.throwIfRefused(res);
       if (res.statusCode < 200 || res.statusCode > 299) {
         throw KeyEventRefused('installing the identity', res.statusCode,
             _code(res.body), res.body);

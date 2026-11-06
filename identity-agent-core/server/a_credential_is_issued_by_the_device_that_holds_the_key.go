@@ -24,7 +24,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"identity-agent-core/internal/jsonreply"
 	"log"
 	"net/http"
 	"sort"
@@ -34,6 +33,7 @@ import (
 
 	"identity-agent-core/backup"
 	"identity-agent-core/drivers"
+	"identity-agent-core/internal/jsonreply"
 	"identity-agent-core/schemas"
 	"identity-agent-core/store"
 )

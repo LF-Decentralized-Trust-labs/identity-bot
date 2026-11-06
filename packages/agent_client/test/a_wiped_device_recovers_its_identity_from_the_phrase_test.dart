@@ -5,6 +5,7 @@ import 'package:agent_client/crypto/bip39.dart';
 import 'package:agent_client/crypto/keys.dart';
 import 'package:agent_client/services/key_math.dart';
 import 'package:agent_client/services/recovering_this_identity.dart';
+import 'package:agent_client/services/root_seed_handoff.dart';
 import 'package:agent_client/services/the_identity_this_device_holds.dart';
 import 'package:agent_client/services/the_key_events_this_device_makes.dart';
 import 'package:agent_client/services/the_key_state_this_device_reads.dart';
@@ -255,6 +256,26 @@ void main() {
         set: WitnessSet([w1.aid, w2.aid, w3.aid], 2));
     return ev.i;
   }
+
+  test(
+      'a core that cannot protect the root seed refuses the identity with '
+      'its own reason, and installs nothing', () async {
+    final used = await anIdentityInUse();
+    FlutterSecureStorage.setMockInitialValues({});
+    after.client.answerInstead['/api/identity/restore'] =
+        (412, RootSeedRefused.code);
+    try {
+      await expectLater(
+          RecoveringThisIdentity(after.client, after.base, km).recover(seed,
+              aid: used.aid,
+              witnessAddresses: addresses(),
+              agentBase: before.base),
+          throwsA(isA<RootSeedRefused>()));
+    } finally {
+      after.client.answerInstead.remove('/api/identity/restore');
+    }
+    expect(await heldBy(after), isNull);
+  });
 
   test(
       'an identity whose keys in force commit to keys this phrase does not '

@@ -201,8 +201,8 @@ func (s *CoreServer) witnessOwnLog() {
 	s.dropJobsOfOtherIdentities(owner.AID)
 	s.witnessLogOf(keeper, owner.AID, false)
 	s.witnessRootsMovedOn(keeper)
-	// Where the owner names no witness, a pairwise identity's registry events
-	// may still be waiting for theirs.
+	// A pairwise identity's registry events may be waiting for its own
+	// witnesses, whether or not the owner names any.
 	if s.WitnessService != nil {
 		if p, err := s.DataStore.PendingTELPushes(1); err == nil && len(p) > 0 {
 			s.kickWitnessing()

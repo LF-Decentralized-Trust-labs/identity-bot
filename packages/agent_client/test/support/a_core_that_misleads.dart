@@ -67,6 +67,10 @@ class ACoreThatMisleads extends http.BaseClient {
   final Map<String, Map<String, Object?> Function(Map<String, Object?> answer)>
       alterTheAnswerTo = {};
 
+  /// Paths this client answers itself, with this status and error code,
+  /// without asking the core.
+  final Map<String, (int, String)> answerInstead = {};
+
   /// How many commits were sent to this client, answered or not.
   int commits = 0;
 
@@ -89,6 +93,8 @@ class ACoreThatMisleads extends http.BaseClient {
           alter(Map<String, Object?>.from(jsonDecode(request.body) as Map));
       if (altered != null) request.body = jsonEncode(altered);
     }
+    final instead = answerInstead[path];
+    if (instead != null) return _answer(instead.$1, instead.$2);
     if (path == '/api/events/commit') commits++;
     if (path == '/api/events/prepare' && movePrepares > 0) {
       movePrepares--;
@@ -150,7 +156,8 @@ class ACoreThatMisleads extends http.BaseClient {
 
   static http.StreamedResponse _answer(int status, String code) =>
       http.StreamedResponse(
-          Stream.value(utf8.encode(jsonEncode({'error': code}))), status);
+          Stream.value(utf8.encode(jsonEncode({'error': code, 'code': code}))),
+          status);
 }
 
 /// The event [body] asks the core at [base] to prepare, signed by the key

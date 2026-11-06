@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"identity-agent-core/internal/jsonreply"
 	"io"
 	"log"
 	"net/http"
 	"time"
 
+	"identity-agent-core/internal/jsonreply"
 	"identity-agent-core/keriengine"
 	"identity-agent-core/store"
 )
