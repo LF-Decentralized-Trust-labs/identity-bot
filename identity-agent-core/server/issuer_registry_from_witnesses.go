@@ -73,6 +73,9 @@ type telDuplicity struct {
 	Issuer     string
 	WitnessKey string
 	Reason     string
+	// Conflict is set when the witnesses disagree with each other, and no one
+	// of them is shown to have served an unsealed event.
+	Conflict bool
 }
 
 const checkPossibleDuplicity = "possible_duplicity"
@@ -89,6 +92,12 @@ func (d *telDuplicity) fold(res *drivers.DriverVerifyCredentialResponse) {
 	}
 	res.Verified = false
 	res.Checks[checkPossibleDuplicity] = true
+	if d.Conflict {
+		res.Errors = append(res.Errors, fmt.Sprintf(
+			"possible duplicity: the witnesses of %s (%s) do not agree on the credential's registry log (%s); no log was accepted",
+			d.Issuer, d.WitnessKey, d.Reason))
+		return
+	}
 	res.Errors = append(res.Errors, fmt.Sprintf(
 		"possible duplicity: witness %s of %s served a registry log the issuer's key log does not seal (%s); that log and witness were rejected",
 		d.WitnessKey, d.Issuer, d.Reason))
@@ -289,9 +298,21 @@ func (s *CoreServer) registryLogFromWitnesses(client *http.Client, issuer, regis
 		}
 	}
 
+	// Each witness whose answer holds up is one vote for a log: the credential's
+	// events it served and the key-log position it says it holds. The log is
+	// proven complete only when as many witnesses as the issuer's key log
+	// requires (its witness threshold) vote for the same one. Witnesses that did
+	// not answer, or are behind, count for nothing, so fewer than the threshold
+	// leaves the credential "could not check", never "not revoked" (SEAM-13 T-4).
+	type vote struct {
+		key      string
+		sn       int
+		events   []string // the credential's events, in order
+		anchor   int
+		complete bool
+	}
 	var dup *telDuplicity
-	var best []string
-	bestAnchor, bestLen := -1, -1
+	var votes []vote
 	for _, a := range answers {
 		if a.ans.LatestKelSN < lastSN {
 			continue // behind the key log this agent holds
@@ -324,34 +345,64 @@ func (s *CoreServer) registryLogFromWitnesses(client *http.Client, issuer, regis
 				mine = append(mine, ev)
 			}
 		}
-		if len(mine) == 0 {
-			continue
-		}
 		have := map[string]bool{}
 		for _, ev := range mine {
 			have[ev.SAID] = true
 		}
-		complete := true
+		complete := len(mine) > 0
 		for said := range sealed {
 			if !have[said] {
 				complete = false // the key log seals an event of this credential the answer left out
 			}
 		}
-		if !complete {
-			continue
-		}
-		if anchor < bestAnchor || (anchor == bestAnchor && len(checked) <= bestLen) {
-			continue
-		}
 		sort.Slice(mine, func(x, y int) bool { return mine[x].SN < mine[y].SN })
-		best = best[:0:0]
+		v := vote{key: a.key, sn: a.ans.LatestKelSN, anchor: anchor, complete: complete}
 		for _, ev := range mine {
-			best = append(best, ev.RawB64)
+			v.events = append(v.events, ev.RawB64)
 		}
-		bestAnchor, bestLen = anchor, len(checked)
+		votes = append(votes, v)
+	}
+
+	byLog := map[string][]vote{}
+	for _, v := range votes {
+		id := fmt.Sprintf("%d|%s", v.sn, strings.Join(v.events, ","))
+		byLog[id] = append(byLog[id], v)
+	}
+	if len(byLog) > 1 {
+		// Witnesses as far on as the key log, and not agreeing on what the
+		// credential's log is: one of them is wrong, or the issuer shows
+		// different histories. Not a verdict either way.
+		var keys []string
+		for _, v := range votes {
+			keys = append(keys, v.key)
+		}
+		if dup == nil {
+			dup = &telDuplicity{Issuer: issuer, WitnessKey: strings.Join(keys, ","), Conflict: true,
+				Reason: "the witnesses disagree on the credential's registry log or on how far the key log goes"}
+		}
+		return nil, dup, kel
+	}
+	need := keyLogToad(kelRaw)
+	for _, group := range byLog {
+		if len(group) >= need && group[0].complete {
+			return group[0].events, dup, kel
+		}
 	}
 	// A good log from one witness does not erase what another served.
-	return best, dup, kel
+	return nil, dup, kel
+}
+
+// keyLogToad is the number of the issuer's witnesses that must agree, from its
+// key log: the threshold (bt) of the last establishment event that carries one.
+// At least one: an answer from no witness proves nothing.
+func keyLogToad(kelRaw [][]byte) int {
+	toad := 0
+	for _, raw := range kelRaw {
+		if ev, err := keri.ParseEvent(raw); err == nil && ev.Establishment() && ev.HasTOAD {
+			toad = int(ev.TOAD)
+		}
+	}
+	return max(toad, 1)
 }
 
 // fetchRegistryLogs reads an issuer's whole registry log from one witness. The

@@ -55,3 +55,21 @@ func TestARegistryTheIssuerDidNotFoundIsRefusedEvenWhenItsKeyLogSealsIt(t *testi
 		t.Fatalf("the issuer's own sealed registry was refused or misplaced: %+v %v", got, err)
 	}
 }
+
+// A seal counts only in an interaction event. KERI lets a rotation carry seals
+// too, but this contract anchors every registry event in an interaction, so a
+// seal found in a rotation's data is not an anchor.
+func TestASealInARotationDoesNotAnchorARegistryEvent(t *testing.T) {
+	const issuer = "EIssuer0000000000000000000000000000000000000"
+	own, reg, said := testRegistry(t, issuer)
+	seal := json.RawMessage(fmt.Sprintf(`{"i":%q,"s":"0","d":%q}`, reg, said))
+	next, _ := keri.MatterQB64(keri.CodeBlake3_256, make([]byte, 32))
+	rot, err := keri.BuildRotation(keri.RotationInput{Prefix: issuer, Keys: []string{"DKey"}, PriorSAID: said, SN: 1,
+		NextDigests: []string{next}, Data: []json.RawMessage{seal}})
+	if err != nil {
+		t.Skipf("a rotation could not be built for the test: %v", err)
+	}
+	if _, err := AnchoredTEL(issuer, [][]byte{rot}, [][]byte{own}, nil); err == nil {
+		t.Fatal("a seal in a rotation anchored a registry event")
+	}
+}

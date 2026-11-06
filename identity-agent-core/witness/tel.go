@@ -122,7 +122,8 @@ const (
 //   - it verifies against its own digest (keri-go);
 //   - a registry inception names this issuer, and every other event belongs to
 //     a registry whose inception is in held or in the batch;
-//   - the issuer's key log seals exactly this event: the subject, the event's
+//   - the issuer's key log seals exactly this event, in an interaction (ixn)
+//     event and no other kind: the subject, the event's
 //     number in its own log, and its digest;
 //   - each credential's events chain: an issuance, then at most a revocation.
 func AnchoredTEL(issuer string, kelRaw [][]byte, raws [][]byte, held []TELEvent) ([]TELEvent, error) {
@@ -135,6 +136,15 @@ func AnchoredTEL(issuer string, kelRaw [][]byte, raws [][]byte, held []TELEvent)
 	for _, raw := range kelRaw {
 		ev, err := keri.ParseEvent(raw)
 		if err != nil {
+			continue
+		}
+		if ev.Ilk != "ixn" {
+			// KERI lets any event carry seals in "a" (keripy reads a TEL
+			// anchor from a rotation too), so the protocol does not require
+			// ixn here. This contract does: every registry event is sealed by
+			// an interaction (the engine's IxnRawBytesB64), and accepting a seal
+			// from an establishment event would let a rotation's data field
+			// vouch for a registry event no issuer of ours writes there.
 			continue
 		}
 		seals, _ := ev.Seals()
