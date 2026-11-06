@@ -517,18 +517,26 @@ var ErrLogDoesNotExtend = errors.New("the log offered does not carry on from the
 // raw bytes the record carries and from nothing else: a field served beside
 // the bytes is not part of what was verified. "" means it cannot be read.
 func saidOfRecord(rec map[string]interface{}) string {
+	said, _ := saidAndIlkOfRecord(rec)
+	return said
+}
+
+// saidAndIlkOfRecord is the event identifier (d) and type (t) of one log
+// record, read from its raw bytes alone, as saidOfRecord is.
+func saidAndIlkOfRecord(rec map[string]interface{}) (said, ilk string) {
 	rawB64, _ := rec["raw_bytes_b64"].(string)
 	raw, err := drivers.DecodeRawBytes(rawB64)
 	if err != nil || len(raw) == 0 {
-		return ""
+		return "", ""
 	}
 	var ev struct {
 		D string `json:"d"`
+		T string `json:"t"`
 	}
 	if json.Unmarshal(raw, &ev) != nil {
-		return ""
+		return "", ""
 	}
-	return ev.D
+	return ev.D, ev.T
 }
 
 // ErrKeyNotEstablished is returned when a verified record states a current key
@@ -570,6 +578,15 @@ func (r *ContactKELRecord) settleCurrentKey() error {
 // different ones, so the event identifiers (never a count the caller supplies,
 // like EventsValidated) are what tell the two apart. The log offered must also
 // be verified itself: a held verified log is replaced only by a verified one.
+//
+// The one fork that is moving forward is a recovery (ADR-061 section 10): a
+// rotation, signed by the keys the log committed to next, in place of
+// interactions a stolen current key signed. It may leave the log as long as the
+// one held, or shorter, and it is how the owner takes the identity back, so a
+// log that diverges from the held one is taken when every held event from there
+// on is an interaction and the log offered has a rotation there. Somebody
+// holding only the current key cannot make that rotation: it is signed by the
+// next keys, and the log offered is verified.
 func refuseAnEarlierLog(held *ContactKELRecord, offered ContactKELRecord) error {
 	if held == nil || !held.KelVerified {
 		return nil
@@ -582,18 +599,55 @@ func refuseAnEarlierLog(held *ContactKELRecord, offered ContactKELRecord) error 
 		return fmt.Errorf("%w (%s: the log offered is not verified, and a verified one is held)",
 			ErrLogDoesNotExtend, offered.AID)
 	}
-	for i, h := range held.KEL {
-		want := saidOfRecord(h)
-		var got string
-		if i < len(offered.KEL) {
-			got = saidOfRecord(offered.KEL[i])
-		}
-		if want == "" || got != want {
-			return fmt.Errorf("%w (%s: event %d is not the one already held; holds %d events, offered %d)",
-				ErrLogDoesNotExtend, offered.AID, i, len(held.KEL), len(offered.KEL))
-		}
+	if err := ALogMovesForward(held.KEL, offered.KEL); err != nil {
+		return fmt.Errorf("%w (%s: %v)", ErrLogDoesNotExtend, offered.AID, err)
 	}
 	return nil
+}
+
+// ALogMovesForward reports whether offered, a verified key log, may take the
+// place of held, the verified log of the same identifier already kept: it holds
+// every held event, the same events in the same places, and may add to them,
+// or it replaces held interactions by a recovery (recoversFrom). Both are logs
+// as records with their raw bytes (ContactKELRecord.KEL), compared by the event
+// identifiers in those bytes, never by how many there are: a fork can be as
+// long as the real log, and a recovery can leave it shorter. The rule for any
+// holder of somebody's log, this store's or a machine's own.
+func ALogMovesForward(held, offered []map[string]interface{}) error {
+	for i, h := range held {
+		want := saidOfRecord(h)
+		var got string
+		if i < len(offered) {
+			got = saidOfRecord(offered[i])
+		}
+		if want != "" && got == want {
+			continue
+		}
+		if want != "" && recoversFrom(held[i:], offered, i) {
+			return nil
+		}
+		return fmt.Errorf("event %d is not the one already held; holds %d events, offered %d",
+			i, len(held), len(offered))
+	}
+	return nil
+}
+
+// recoversFrom reports whether offered, which agrees with the held log before
+// position at, replaces the held events from there (heldFrom) by a recovery:
+// every one of them an interaction, and a rotation in their place.
+func recoversFrom(heldFrom, offered []map[string]interface{}, at int) bool {
+	if at >= len(offered) {
+		return false
+	}
+	if _, ilk := saidAndIlkOfRecord(offered[at]); ilk != "rot" && ilk != "drt" {
+		return false
+	}
+	for _, h := range heldFrom {
+		if said, ilk := saidAndIlkOfRecord(h); said == "" || ilk != "ixn" {
+			return false
+		}
+	}
+	return true
 }
 
 // ShareAction defines a user-facing engagement action shown in the Share menu.
