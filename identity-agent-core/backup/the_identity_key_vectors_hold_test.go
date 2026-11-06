@@ -13,6 +13,9 @@ import (
 
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/internal/contractcheck"
+	"identity-agent-core/keymath"
+
+	keri "github.com/grapeid/keri-go"
 )
 
 // identity-key-vectors.json is how an identity's keys come from its recovery
@@ -49,6 +52,39 @@ type identityKeyPhrase struct {
 	Mnemonic     string        `json:"mnemonic"`
 	BIP39SeedHex string        `json:"bip39_seed_hex"`
 	Keys         []identityKey `json:"keys"`
+	// PostQuantum are the post-quantum next keys of generations 0 to 2: the
+	// ML-DSA-65 key each child seed gives, as qb64 under the proposed code
+	// 2AAE, and the next-key digest a commitment to it is (ADR-061 section 1).
+	PostQuantum []postQuantumKey `json:"post_quantum"`
+	// Messaging are the messaging keysets of generations 0 and 1, by the
+	// anchor a key log commits to each with.
+	Messaging []messagingKeySet `json:"messaging"`
+	// SignatureForms are one signature in each indexed form KERI attaches, by
+	// key 0 over this phrase's founding: the founding committing to key 1 and
+	// post-quantum generation 0.
+	SignatureForms *signatureForms `json:"signature_forms,omitempty"`
+}
+
+type postQuantumKey struct {
+	Generation int    `json:"generation"`
+	Path       string `json:"path"`
+	SeedHex    string `json:"seed_hex"`
+	VerkeyQB64 string `json:"verkey_qb64"`
+	Digest     string `json:"digest"`
+}
+
+type messagingKeySet struct {
+	Generation int                    `json:"generation"`
+	Path       string                 `json:"path"`
+	Anchor     map[string]interface{} `json:"anchor"`
+}
+
+type signatureForms struct {
+	FoundingRaw string `json:"founding_raw"`
+	// A opens n[0] from k[0]; TwoA is index 0 and ondex 1; B is current-only.
+	A    string `json:"A"`
+	TwoA string `json:"2A"`
+	B    string `json:"B"`
 }
 
 // identityKey is key n of the identity on branch 0: n = 0 is the key it is
@@ -91,7 +127,11 @@ func computeIdentityKeyVectors(in identityKeyVectors) (identityKeyVectors, error
 		About: "How an identity's keys come from its recovery phrase: BIP39 seed (PBKDF2-HMAC-SHA512, 2048 rounds, " +
 			"salt \"mnemonic\"), then SLIP-0010 Ed25519 with every step hardened. Key n of an identity is at " +
 			"m/44'/0'/0'/0'/n': 0 founds it, 1 is what founding commits to, n+1 is what the rotation to key n commits to. " +
-			"public_key_qb64 is the key in CESR with code D. Checked by identity-agent-core/backup and by the app's key manager.",
+			"public_key_qb64 is the key in CESR with code D. post_quantum: the post-quantum next key of generation j is at " +
+			"m/44'/0'/0'/7000001'/j', ML-DSA-65 from that child seed, qb64 under 2AAE, and its commitment is Blake3-256 over " +
+			"that qb64 text, as code E. messaging: the messaging keyset of generation g is at m/44'/0'/0'/7000002'/g', " +
+			"by its anchor. signature_forms: key 0's signature over the founding, in the A, 2A and B forms. " +
+			"Checked by identity-agent-core/backup and by the app's key manager.",
 		Published: in.Published,
 	}
 	path, err := parseHardenedPath(in.Published.Path)
@@ -112,6 +152,40 @@ func computeIdentityKeyVectors(in identityKeyVectors) (identityKeyVectors, error
 			return out, fmt.Errorf("%q: %w", p.Mnemonic, err)
 		}
 		ph := identityKeyPhrase{Mnemonic: p.Mnemonic, BIP39SeedHex: hex.EncodeToString(bip39)}
+		for gen := 0; gen < 3; gen++ {
+			s, err := DerivePairwiseSeed(bip39, PostQuantumBranch, gen)
+			if err != nil {
+				return out, err
+			}
+			pq, err := keymath.PostQuantumNextKey(s)
+			if err != nil {
+				return out, err
+			}
+			ph.PostQuantum = append(ph.PostQuantum, postQuantumKey{Generation: gen,
+				Path: fmt.Sprintf("m/44'/0'/0'/%d'/%d'", PostQuantumBranch, gen), SeedHex: hex.EncodeToString(s),
+				VerkeyQB64: pq.Verkey, Digest: pq.Digest})
+		}
+		for gen := 0; gen < 2; gen++ {
+			s, err := DerivePairwiseSeed(bip39, MessagingBranch, gen)
+			if err != nil {
+				return out, err
+			}
+			anchor, err := keymath.MessagingKeySet(s)
+			if err != nil {
+				return out, err
+			}
+			// Through JSON, so the anchor reads back as the file holds it.
+			var a map[string]interface{}
+			b, _ := json.Marshal(anchor)
+			_ = json.Unmarshal(b, &a)
+			ph.Messaging = append(ph.Messaging, messagingKeySet{Generation: gen,
+				Path: fmt.Sprintf("m/44'/0'/0'/%d'/%d'", MessagingBranch, gen), Anchor: a})
+		}
+		forms, err := signatureFormsOf(bip39, ph.PostQuantum[0].Digest)
+		if err != nil {
+			return out, err
+		}
+		ph.SignatureForms = forms
 		for _, k := range p.Keys {
 			s, err := DerivePairwiseSeed(bip39, 0, k.Index)
 			if err != nil {
@@ -129,6 +203,38 @@ func computeIdentityKeyVectors(in identityKeyVectors) (identityKeyVectors, error
 		out.Phrases = append(out.Phrases, ph)
 	}
 	return out, nil
+}
+
+// signatureFormsOf signs this phrase's founding with key 0 in each indexed form.
+func signatureFormsOf(bip39 []byte, pqDigest string) (*signatureForms, error) {
+	s0, err := DerivePairwiseSeed(bip39, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+	s1, err := DerivePairwiseSeed(bip39, 0, 1)
+	if err != nil {
+		return nil, err
+	}
+	k0 := iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(s0).Public().(ed25519.PublicKey))
+	n1, err := keri.NextDigest(iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(s1).Public().(ed25519.PublicKey)))
+	if err != nil {
+		return nil, err
+	}
+	raw, err := keri.BuildInception(keri.InceptionInput{Keys: []string{k0}, NextDigests: []string{n1, pqDigest},
+		Isith: json.RawMessage(`"1"`), Nsith: json.RawMessage(`"1"`), Derivation: "self-addressing"})
+	if err != nil {
+		return nil, err
+	}
+	sig := ed25519.Sign(ed25519.NewKeyFromSeed(s0), raw)
+	enc := func(at keri.SignaturePlace) string {
+		q, err := keri.EncodeIndexedSignature(sig, at)
+		if err != nil {
+			panic(err)
+		}
+		return q
+	}
+	return &signatureForms{FoundingRaw: string(raw), A: enc(keri.SamePlace(0)),
+		TwoA: enc(keri.SignaturePlace{Index: 0, Ondex: 1}), B: enc(keri.SignaturePlace{Index: 0, CurrentOnly: true})}, nil
 }
 
 func TestTheIdentityKeyVectorsHold(t *testing.T) {

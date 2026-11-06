@@ -1,23 +1,30 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://identity-agent.dev/contracts/root-aid-continuity/v2",
+  "$id": "https://identity-agent.dev/contracts/root-aid-continuity/v3",
   "title": "Root AID Continuity Proof",
-  "description": "Break-glass root-AID rotation continuity artifact. The compromised old root must emit a signed rot event sealing the new root inception SAID (delegation anchor in field a). Verifiers check the CESR signature against the old KEL copy held by witnesses/watchers/contacts. An optional new-root IXN back-reference to the prior KEL tail is supplementary only.",
+  "description": "Break-glass root-AID rotation continuity artifact. The old root's rot event seals the new root's inception SAID in field a, signed by the key it reveals; the new root's first ixn seals that rot's SAID. Each event is carried as the exact bytes that were signed (standard base64 of the event, as KERI serialises it) with every indexed signature on it, so a verifier holding only this document recomputes each SAID from the bytes and checks each signature: the new root's two events as a signed log of their own, the old root's log, carried in old_root_log up to the event the rot follows and judged with the rot from the old root's inception, so the rot is shown to be signed by the key the old root committed to, at its threshold, and to follow prior_kel_tail_said. The rot follows the last establishment event or an interaction the owner kept (prior_kel_tail_said) and supersedes the interactions after it. The proof shows the rot is valid against the log it carries, not that this is the log the old root's witnesses hold: a verifier that must know the rotation is the old root's current one also checks old_root_log against the log its witnesses hold.",
   "type": "object",
   "required": [
     "v",
     "old_root_aid",
     "new_root_aid",
     "new_inception_said",
-    "authorization_event",
-    "authorization_cesr_signature",
+    "new_inception_raw_b64",
+    "new_inception_signatures",
+    "old_root_log",
+    "authorization_event_raw_b64",
+    "authorization_signatures",
     "authorization_event_said",
+    "back_anchor_event_raw_b64",
+    "back_anchor_signatures",
+    "back_anchor_event_said",
+    "prior_kel_tail_said",
     "rotated_at"
   ],
   "properties": {
     "v": {
       "type": "string",
-      "const": "2"
+      "const": "3"
     },
     "old_root_aid": {
       "type": "string",
@@ -25,39 +32,73 @@
     },
     "new_root_aid": {
       "type": "string",
-      "description": "Fresh root AID minted via KERI inception after break-glass recovery"
+      "description": "Fresh root AID founded by KERI inception during break-glass recovery"
     },
     "new_inception_said": {
       "type": "string",
       "description": "SAID of the new root inception event sealed in the old-root authorization rot"
     },
-    "authorization_event": {
-      "type": "object",
-      "description": "Old-root rot event with seal [{\"d\":\"<new_inception_said>\"}] in field a, signed by the pre-rotated key"
-    },
-    "authorization_cesr_signature": {
+    "new_inception_raw_b64": {
       "type": "string",
-      "description": "CESR Cigar signature over the authorization rot event raw bytes"
+      "description": "The new root's inception event, the exact bytes signed, in standard base64. Its key verifies the back-anchor event's signatures."
+    },
+    "new_inception_signatures": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      },
+      "description": "Every indexed CESR signature on the new root's inception event"
+    },
+    "old_root_log": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The old root's key log from its inception up to the event the authorization rot follows (prior_kel_tail_said, the last item), each event as the exact bytes signed with every indexed signature on it. With the rot it is the old root's log up to and including the rotation, which a verifier judges from the inception.",
+      "items": {
+        "type": "object",
+        "required": ["raw_b64", "sigs"],
+        "properties": {
+          "raw_b64": { "type": "string", "description": "The event, the exact bytes signed, in standard base64" },
+          "sigs": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "Every indexed CESR signature on the event" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "authorization_event_raw_b64": {
+      "type": "string",
+      "description": "The old-root rot event, the exact bytes signed, in standard base64. Seals [{\"d\":\"<new_inception_said>\"}] in field a."
+    },
+    "authorization_signatures": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      },
+      "description": "Every indexed CESR signature on the authorization rot event, as attached to it: the signature of the key the rot reveals, indexed by its place in the rot's key list"
     },
     "authorization_event_said": {
       "type": "string",
-      "description": "SAID of the authorization rot event"
+      "description": "SAID of the authorization rot event: the digest of authorization_event_raw_b64"
     },
-    "back_anchor_event": {
-      "type": "object",
-      "description": "Optional new-root IXN event sealing prior_kel_tail_said (bidirectional link only)"
-    },
-    "back_anchor_cesr_signature": {
+    "back_anchor_event_raw_b64": {
       "type": "string",
-      "description": "CESR signature over the optional back-anchor IXN event"
+      "description": "The new root's first ixn event, the exact bytes signed, in standard base64. Seals [{\"d\":\"<authorization_event_said>\"}]: the old root's tip after the rotation."
+    },
+    "back_anchor_signatures": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      },
+      "description": "Every indexed CESR signature on the back-anchor ixn event"
     },
     "back_anchor_event_said": {
       "type": "string",
-      "description": "SAID of the optional back-anchor IXN event"
+      "description": "SAID of the back-anchor ixn event: the digest of back_anchor_event_raw_b64"
     },
     "prior_kel_tail_said": {
       "type": "string",
-      "description": "SAID of the last event on the old root KEL before authorization rot"
+      "description": "SAID of the event of the old root's log the authorization rot follows: its last establishment event or an interaction the owner kept. Interactions after it were superseded."
     },
     "rotated_at": {
       "type": "string",
@@ -68,7 +109,9 @@
     },
     "carry_forward_aids": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "description": "Pairwise/contact AIDs the user chose to preserve across rotation"
     },
     "witness_threshold": {

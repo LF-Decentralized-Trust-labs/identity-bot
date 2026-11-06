@@ -120,6 +120,26 @@ func (s *Service) RecordContactCapability(contactAID, backendType, witnessKey, e
 // that names observers whose receipts nobody can check — in an event that can
 // never be amended.
 func (s *Service) WitnessesForNewIdentity(kind AidKind, aid string) (keys []string, toad int) {
+	proposed, toad := s.ProposedWitnessesForNewIdentity(kind, aid)
+	for _, w := range proposed {
+		keys = append(keys, w.Key)
+	}
+	return keys, toad
+}
+
+// ProposedWitness is a witness to designate in an inception event: the key an
+// event names it by, and the address a signer reaches it at.
+type ProposedWitness struct {
+	Key string
+	// Address is the base its witness routes resolve against, ending in a
+	// slash.
+	Address string
+}
+
+// ProposedWitnessesForNewIdentity is WitnessesForNewIdentity with where each
+// witness is reached, for a signer that confirms them itself before it names
+// them.
+func (s *Service) ProposedWitnessesForNewIdentity(kind AidKind, aid string) (proposed []ProposedWitness, toad int) {
 	if s == nil {
 		return nil, 0
 	}
@@ -131,7 +151,11 @@ func (s *Service) WitnessesForNewIdentity(kind AidKind, aid string) (keys []stri
 	// trust. What goes into an inception event cannot be corrected later.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return DesignatableWitnessesChecked(ctx, candidates, s.CheckIdentity)
+	targets, toad := designatableTargetsChecked(ctx, candidates, s.CheckIdentity)
+	for _, t := range targets {
+		proposed = append(proposed, ProposedWitness{Key: t.WitnessKey, Address: witnessRoot(t)})
+	}
+	return proposed, toad
 }
 
 // peerWitnessAllowed reports whether a contact may act as a peer witness for

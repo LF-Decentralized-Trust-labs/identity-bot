@@ -27,7 +27,6 @@ import (
 	"identity-agent-core/avatar"
 	"identity-agent-core/backup"
 	"identity-agent-core/buildmode"
-	"identity-agent-core/didcomm"
 	"identity-agent-core/drivers"
 	"identity-agent-core/endpoint"
 	"identity-agent-core/iacrypto"
@@ -97,7 +96,11 @@ type CoreServer struct {
 	relayFailure *relayFailure
 	// relayRecordMu orders every read-modify-write of a relay enrolment
 	// record, which the relay manager and the owner's routes both change.
-	relayRecordMu   sync.Mutex
+	relayRecordMu sync.Mutex
+	// recordingCredential makes keeping an issued credential one step with
+	// finding whether it is kept (a_credential_is_issued_by_the_device_that_holds_the_key.go).
+	recordingCredential sync.Mutex
+
 	EndpointService *endpoint.EndpointService
 	// Vault is the credential vault: what this Identity Agent keeps for
 	// services, sealed under a key derived from the identity's root seed.
@@ -144,6 +147,9 @@ type CoreServer struct {
 
 	// See Config.RequireOwnerAtInception.
 	requireOwnerAtInception bool
+	// founding is held from the founding gate to the founding being kept,
+	// so two foundings committed at once cannot both pass it.
+	founding sync.Mutex
 
 	loginHandler      *login.Handler
 	assetHandler      *asset.Handler
@@ -806,6 +812,7 @@ func (s *CoreServer) Start() error {
 	s.anchorStop = make(chan struct{})
 	stop := s.anchorStop
 	s.anchorStopMu.Unlock()
+	s.beginWitnessing()
 	s.inBackground(func(context.Context) { s.keepAnchoring(stop) })
 	s.inBackground(func(context.Context) { s.backfillRegistryEvents() })
 	s.runAddons(stop)
@@ -1087,6 +1094,8 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 		r.Post("/generate-multisig-event", s.handleGenerateMultisigEvent)
 
 		r.Post("/credential/issue", s.handleIssueCredential)
+		r.Post("/credential/prepare", s.handlePrepareCredential)
+		r.Post("/credential/record", s.handleRecordCredential)
 		r.Get("/credentials", s.handleGetCredentials)
 		r.Get("/credentials/{said}", s.handleGetCredential)
 		r.Post("/credentials/receive", s.handleReceiveCredential)
@@ -1197,6 +1206,12 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 		r.Post("/messaging-keys/prepare", s.handlePrepareMessagingKeys)
 		r.Post("/store/event", s.handleStoreEvent)
 		r.Post("/events/signature", s.handleAttachEventSignature)
+		r.Post("/identity/restore", s.handleRestoreIdentity)
+		r.Post("/keystore/messaging-seed", s.handleMessagingSeed)
+		r.Post("/events/prepare", s.handlePrepareEvent)
+		r.Post("/events/commit", s.handleCommitEvent)
+		r.Get("/events/witnesses-for-a-founding", s.handleWitnessesForAFounding)
+		r.Get("/events/{s}/receipts", s.handleEventReceipts)
 		r.Post("/store/receipt", s.handleStoreReceipt)
 		r.Get("/store/receipts", s.handleGetStoreReceipts)
 		r.Post("/store/credential", s.handleStoreCredential)
@@ -1315,8 +1330,9 @@ type DriverInfo struct {
 type InceptionRequest struct {
 	PublicKey     string `json:"public_key"`
 	NextPublicKey string `json:"next_public_key"`
-	// CesrSignature: optional — the controller's CESR '0B...' signature over the
-	// inception event body, produced by Dart local signing + /api/cesr/encode.
+	// CesrSignature is accepted and ignored: this route founds only with keys
+	// this agent holds and signs the founding itself. A signature made on a
+	// device goes to the commit route, which checks it.
 	CesrSignature string `json:"cesr_signature,omitempty"`
 	// OwnerAID names who this identity answers to, and is written into the
 	// inception event itself.
@@ -1335,8 +1351,9 @@ type InceptionRequest struct {
 type InceptionResponse struct {
 	AID            string                 `json:"aid"`
 	InceptionEvent map[string]interface{} `json:"inception_event"`
-	// RawBytesB64: base64 of the serialized event body. Sign these bytes with
-	// the Ed25519 key, then call POST /api/cesr/encode to get the CESR signature.
+	// RawBytesB64: base64 of the serialized event body. The app signs these
+	// bytes with the Ed25519 key and writes the signature itself (keymath).
+	// POST /api/cesr/encode remains for callers outside this repository.
 	RawBytesB64 string `json:"raw_bytes_b64"`
 	PublicKey   string `json:"public_key"`
 	Created     string `json:"created"`
@@ -1510,6 +1527,9 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 	if s.refuseIfThisComputerMayNotFound(w) {
 		return
 	}
+	// One founding at a time, through this route or the commit route.
+	s.founding.Lock()
+	defer s.founding.Unlock()
 	// Then whether there is an engine to found with, before anything is read
 	// or derived for a founding that cannot happen.
 	if s.KeriDriver == nil {
@@ -1546,6 +1566,13 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Refused before any key is derived: this route founds only with the keys
+	// this agent holds (ADR-061 sections 2 and 3).
+	if !s.foundingKeyIsOurs(req.PublicKey, req.NextPublicKey) {
+		writeKeyNotHeldHere(w)
+		return
+	}
+
 	// The identity commits to the keys people will encrypt to it with, in the
 	// event it is derived from.
 	//
@@ -1563,49 +1590,23 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 	// phrase has to be able to bring these back, or restoring an identity
 	// produces one that can prove who it is and can never be sent anything.
 	//
-	// ONLY FOR A KEY THIS AGENT DERIVES ITSELF. The messaging keys, and the
-	// post-quantum commitment below, come from the root seed held here. Where
-	// the identity's key is this agent's own (the root seed is the identity's
-	// phrase), they are the identity's own keys too. Where the key is held
-	// somewhere else, they would be this machine's keys written into somebody
-	// else's identity: the post-quantum commitment alone could rotate it, and
-	// the messaging keys would let this machine read what is sent to it. Such
-	// a founding carries neither, and commits only to the next key asked for.
-	var (
-		messagingKeys *didcomm.KeySet
-		keyIndex      int
-		anchors       []map[string]interface{}
-	)
-	ours := s.foundingKeyIsOurs(req.PublicKey, req.NextPublicKey)
-	if ours {
-		var err error
-		messagingKeys, keyIndex, err = s.deriveMessagingKeys("")
-		if err != nil {
-			writeError(w, statusForUnreadable(err, http.StatusInternalServerError), "Could not derive this identity's messaging keys", err.Error())
-			return
-		}
-		kemPub, err := messagingKeys.KemPub.MarshalBinary()
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "Could not encode this identity's messaging keys", err.Error())
-			return
-		}
-		dsaPub, err := messagingKeys.DsaPub.MarshalBinary()
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "Could not encode this identity's messaging keys", err.Error())
-			return
-		}
-		keyAnchor, err := iacrypto.KeySetAnchor(
-			messagingKeys.XPub[:], kemPub, messagingKeys.EdPub, dsaPub)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "Could not commit to this identity's messaging keys", err.Error())
-			return
-		}
-		anchors = []map[string]interface{}{keyAnchor}
-	} else {
-		log.Printf("[identity-agent-core] INCEPTION: the founding key is not one this agent " +
-			"derives, so the identity commits to no messaging keys or post-quantum key of this " +
-			"agent's; it cannot be established as a peer by keys anchored in its founding")
+	// A key this agent does not derive is founded by the app that holds it,
+	// through the prepare and commit routes, with its own signature on the
+	// founding. Nothing enters a key log unsigned, and this route has no
+	// signature to give for a key it does not hold (ADR-061). So the messaging
+	// keys and the post-quantum commitment below, which come from the root seed
+	// held here, are always the identity's own.
+	messagingKeys, keyIndex, err := s.deriveMessagingKeys("")
+	if err != nil {
+		writeError(w, statusForUnreadable(err, http.StatusInternalServerError), "Could not derive this identity's messaging keys", err.Error())
+		return
 	}
+	keyAnchor, err := messagingKeys.Anchor()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not commit to this identity's messaging keys", err.Error())
+		return
+	}
+	anchors := []map[string]interface{}{keyAnchor}
 
 	// Designate witnesses in the event that founds the identity.
 	//
@@ -1658,13 +1659,7 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 	// it was before, with one commitment, rather than not founded at all: the
 	// post-quantum rotation is a future option, and losing a future option is
 	// not a reason to refuse somebody an identity today.
-	var (
-		nextDigests []string
-		pq          *iacrypto.PostQuantumNextKey
-	)
-	if ours {
-		nextDigests, pq = s.postQuantumPreRotation(req.NextPublicKey)
-	}
+	nextDigests, pq := s.postQuantumPreRotation(req.NextPublicKey)
 
 	result, err := s.KeriDriver.Incept(drivers.InceptionRequest{
 		PublicKey:      req.PublicKey,
@@ -1724,6 +1719,11 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
+	if len(result.Signatures) == 0 {
+		writeError(w, http.StatusInternalServerError, "Failed to create inception event",
+			"the engine returned a founding with no signature, which is not kept")
+		return
+	}
 	eventJSON, _ := json.Marshal(result.InceptionEvent)
 	eventRecord := store.EventRecord{
 		AID:            result.AID,
@@ -1734,7 +1734,10 @@ func (s *CoreServer) handleInception(w http.ResponseWriter, r *http.Request) {
 		NextKeyDigest:  result.NextKeyDigest,
 		Timestamp:      now,
 		RawBytesB64:    result.RawBytesB64,
-		CesrSignature:  req.CesrSignature,
+		// Only what the engine signed and judged; req.CesrSignature is never
+		// stored, since nobody here checked it.
+		Signatures:    result.Signatures,
+		CesrSignature: result.Signatures[0],
 	}
 	if err := s.DataStore.SaveEvent(eventRecord); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to persist inception event", err.Error())
@@ -1783,6 +1786,13 @@ func (s *CoreServer) handleHybridInception(w http.ResponseWriter, r *http.Reques
 	// to founding through any other door. The secrets are discarded afterwards,
 	// which makes this the weakest of the ways in and not a permitted one.
 	if s.refuseIfThisComputerMayNotFound(w) {
+		return
+	}
+	// A post-quantum key is published under no code CESR has assigned, so a
+	// build that cannot read one founds nothing here (ADR-061).
+	if !keri.PostQuantumTestCodes() {
+		writeError(w, http.StatusNotImplemented, "No identity is founded on a post-quantum key in this build",
+			iacrypto.ErrNoPostQuantumCodes.Error())
 		return
 	}
 
@@ -1982,6 +1992,15 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.recordOwnRotation(result)
+
+	jsonreply.Write(w, http.StatusOK, result)
+}
+
+// recordOwnRotation stores a rotation this Identity Agent made of its own
+// identity, with the signatures the engine added it with, moves the identity's
+// record on, and brings its witnesses up to date.
+func (s *CoreServer) recordOwnRotation(result *drivers.DriverRotationResponse) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	eventJSON, _ := json.Marshal(result.RotationEvent)
 	eventRecord := store.EventRecord{
@@ -1993,7 +2012,12 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 		NextKeyDigest:  result.NewNextKeyDigest,
 		Timestamp:      now,
 		RawBytesB64:    result.RawBytesB64,
-		CesrSignature:  req.CesrSignature,
+		// What the engine added it with: a rotation is added only signed by
+		// the key it reveals, so whatever a caller sent beside it is not it.
+		Signatures: result.Signatures,
+	}
+	if len(result.Signatures) > 0 {
+		eventRecord.CesrSignature = result.Signatures[0]
 	}
 	if err := s.DataStore.SaveEvent(eventRecord); err != nil {
 		log.Printf("[identity-agent-core] Warning: failed to persist rotation event: %v", err)
@@ -2006,7 +2030,7 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 		// Without this the record still named the founding generation, and
 		// after one rotation this Identity Agent took its own key for one
 		// held elsewhere and refused to sign or rotate again.
-		gen, genErr := s.ownGenerationOf(result.NewPublicKey)
+		_, gen, genErr := s.ownKeyAt(result.NewPublicKey)
 		identity.PublicKey = result.NewPublicKey
 		identity.NextKeyDigest = result.NewNextKeyDigest
 		identity.EventCount = result.SequenceNumber + 1
@@ -2019,8 +2043,6 @@ func (s *CoreServer) handleRotation(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[identity-agent-core] ROTATION: Key rotated for AID: %s (sn: %d)", result.AID, result.SequenceNumber)
 	s.broadcastWitnessEvent(eventRecord)
 	s.notifyBackupEvent(backup.EventKeyRotation)
-
-	jsonreply.Write(w, http.StatusOK, result)
 }
 
 func (s *CoreServer) handleInteract(w http.ResponseWriter, r *http.Request) {
@@ -2297,43 +2319,9 @@ func (s *CoreServer) handleIssueCredential(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Populate credential type from builtin schema catalog
-	credType := ""
-	if schema := schemas.Get(req.SchemaSaid); schema != nil {
-		credType = schema.Name
-	}
-
-	// Populate issuer name from profile
-	issuerName := ""
-	if profile, _ := s.DataStore.GetProfile(); profile != nil {
-		issuerName = profile.FullName
-	}
-
-	// Persist the credential record
-	record := store.CredentialRecord{
-		SAID:           result.AcdcSaid,
-		IssuerAID:      issuerAID,
-		HolderAID:      req.HolderAid,
-		SchemaSAID:     req.SchemaSaid,
-		AcdcJson:       result.AcdcJsonB64,
-		IxnSAID:        result.IxnSaid,
-		CesrSignature:  req.CesrSignature,
-		IssuedAt:       time.Now().UTC().Format(time.RFC3339),
-		Status:         "issued",
-		Format:         "acdc",
-		CredentialType: credType,
-		IssuerName:     issuerName,
-	}
-	if err := s.DataStore.SaveCredential(record); err != nil {
-		log.Printf("[identity-agent-core] CREDENTIAL: Failed to persist credential %s: %v", result.AcdcSaid, err)
-	} else {
-		s.notifyBackupEvent(backup.EventCredential)
-	}
-
-	// Attempt automatic push delivery to the holder if they are a known contact
-	if contact, err := s.DataStore.GetContact(req.HolderAid); err == nil && contact != nil && contact.OobiURL != "" {
-		s.inBackground(func(context.Context) { s.deliverCredentialToContact(contact, record) })
-	}
+	record := s.issuedCredentialRecord(result.AcdcSaid, issuerAID, req.HolderAid, req.SchemaSaid,
+		result.AcdcJsonB64, result.IxnSaid, req.CesrSignature)
+	s.keepIssuedCredential(record)
 
 	// Persist the IXN event in the KEL (use the relationship AID when issuing via pairwise context)
 	if err := s.saveOwnInteraction(issuerAID, result.IxnEvent, result.IxnRawBytesB64,
@@ -3658,7 +3646,7 @@ func (s *CoreServer) broadcastWitnessEvent(record store.EventRecord) {
 			record.AID, record.SequenceNumber, err)
 		return
 	}
-	s.triggerWitnessBroadcast(record.AID, raw, record.CesrSignature)
+	s.triggerWitnessBroadcast(record.AID, raw, record.ControllerSignatures()...)
 }
 
 func (s *CoreServer) handlePublicCredentialServe(w http.ResponseWriter, r *http.Request) {
@@ -4179,7 +4167,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 		nextPub := ed25519.NewKeyFromSeed(nextPairwiseSeed).Public().(ed25519.PublicKey)
 		pubB64 := iacrypto.VerkeyQB64(pub)
 		nextB64 := iacrypto.VerkeyQB64(nextPub)
-		if resp, err := s.KeriDriver.CreateInceptionNamed(pubB64, nextB64, "rel-"+oobiData.AID); err == nil && resp.AID != "" {
+		if resp, err := s.KeriDriver.CreateInceptionNamed(pubB64, nextB64, "rel-"+oobiData.AID, login.FoundingSigner(pairwiseSeed)); err == nil && resp.AID != "" {
 			contact.RelationshipAID = resp.AID
 			contact.RelationshipSeedB64 = "" // no per-contact secret; re-derive from root+index
 			log.Printf("[identity-agent-core] CONTACT: HD-derived (index %d) + minted real relationship P-AID %s via local KERI driver for %s", contactIdx, resp.AID, oobiData.AID)
@@ -4901,13 +4889,15 @@ func (s *CoreServer) reloadIdentityIntoDriver() {
 	kel, rawEvents, lastSAID, lastSN := kelFromEvents(events)
 
 	req := &drivers.DriverReloadIdentityRequest{
-		AID:            identity.AID,
-		PublicKey:      identity.PublicKey,
-		NextKeyDigest:  identity.NextKeyDigest,
-		SequenceNumber: lastSN,
-		LastSAID:       lastSAID,
-		KEL:            kel,
-		RawEventsB64:   rawEvents,
+		AID:               identity.AID,
+		PublicKey:         identity.PublicKey,
+		NextKeyDigest:     identity.NextKeyDigest,
+		SequenceNumber:    lastSN,
+		LastSAID:          lastSAID,
+		KEL:               kel,
+		RawEventsB64:      rawEvents,
+		Signatures:        signaturesOf(events),
+		UnsignedAtUpgrade: markedUnsignedOf(events),
 	}
 
 	result, err := s.KeriDriver.ReloadIdentity(req)
@@ -4923,6 +4913,34 @@ func (s *CoreServer) reloadIdentityIntoDriver() {
 // parsed, the bytes it was published as beside it, and the tip. Bytes are
 // carried so an engine can verify the history rather than only continue it;
 // they are empty for events stored before the canonical bytes were kept.
+// markedUnsignedOf is which events were marked unsigned at upgrade, parallel to
+// the events kelFromEvents reads.
+func markedUnsignedOf(events []store.EventRecord) []bool {
+	out := make([]bool, 0, len(events))
+	for _, ev := range events {
+		var ked map[string]interface{}
+		if json.Unmarshal([]byte(ev.EventJSON), &ked) != nil {
+			continue
+		}
+		out = append(out, ev.UnsignedAtUpgrade)
+	}
+	return out
+}
+
+// signaturesOf are the signatures stored with each event, parallel to the
+// events kelFromEvents reads.
+func signaturesOf(events []store.EventRecord) [][]string {
+	out := make([][]string, 0, len(events))
+	for _, ev := range events {
+		var ked map[string]interface{}
+		if json.Unmarshal([]byte(ev.EventJSON), &ked) != nil {
+			continue
+		}
+		out = append(out, ev.ControllerSignatures())
+	}
+	return out
+}
+
 func kelFromEvents(events []store.EventRecord) ([]map[string]interface{}, []string, string, int) {
 	kel := make([]map[string]interface{}, 0, len(events))
 	raws := make([]string, 0, len(events))
@@ -4967,7 +4985,8 @@ func (s *CoreServer) reviveAssetIdentity(a asset.Asset) error {
 	}
 	pubB64, nextB64 := iacrypto.VerkeyQB64(pub), iacrypto.VerkeyQB64(nextPub)
 	if a.DelegationModel == "delegated" && a.DelegatorAID != "" {
-		resp, derr := s.KeriDriver.ReinstateDelegatedIdentity(pubB64, nextB64, a.DisplayName, a.DelegatorAID)
+		resp, derr := s.KeriDriver.ReinstateDelegatedIdentity(pubB64, nextB64, a.DisplayName, a.DelegatorAID,
+			asset.FoundingSigner(s.DataDir, a.SigningIndex))
 		if derr != nil {
 			return fmt.Errorf("delegated re-inception: %w", derr)
 		}
@@ -4976,7 +4995,8 @@ func (s *CoreServer) reviveAssetIdentity(a asset.Asset) error {
 		}
 		return nil
 	}
-	resp, ierr := s.KeriDriver.CreateInceptionNamed(pubB64, nextB64, a.DisplayName)
+	resp, ierr := s.KeriDriver.CreateInceptionNamed(pubB64, nextB64, a.DisplayName,
+		asset.FoundingSigner(s.DataDir, a.SigningIndex))
 	if ierr != nil {
 		return fmt.Errorf("re-inception: %w", ierr)
 	}

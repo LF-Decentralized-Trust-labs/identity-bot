@@ -609,7 +609,7 @@ func TestASecondRecordIdentityIsCaught(t *testing.T) {
 			return err
 		}
 		return s.DataStore.KeepEvents(approval, dip)
-	}); err != nil {
+	}, login.FoundingSigner(seed)); err != nil {
 		t.Fatal(err)
 	}
 	mustBreak(t, s, "a second record identity")
@@ -961,7 +961,7 @@ func TestWitnessingTheOwnLogKeepsTheRecordDue(t *testing.T) {
 	s.witnessRecord("EOwner", "", []string{"BWitness"}, 1)
 	s.witnessing.witnessMu.Lock()
 	defer s.witnessing.witnessMu.Unlock()
-	if s.witnessing.witnessJob.record != "ERecord" {
+	if s.witnessing.witnessJobs["EOwner"].record != "ERecord" {
 		t.Fatal("the record identity due to be witnessed was dropped")
 	}
 }
@@ -1120,9 +1120,9 @@ func TestEveryIdentityAgentKeepsItsWitnessesUpToDate(t *testing.T) {
 				was := anchorInterval
 				anchorInterval = 20 * time.Millisecond
 				t.Cleanup(func() { anchorInterval = was })
-				stop := make(chan struct{})
-				go s.keepAnchoring(stop)
-				defer close(stop)
+				stop, done := make(chan struct{}), make(chan struct{})
+				go func() { defer close(done); s.keepAnchoring(stop) }()
+				defer func() { close(stop); <-done }()
 			}
 			for i := 0; i < 200; i++ {
 				mu.Lock()

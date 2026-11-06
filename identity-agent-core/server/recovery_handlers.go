@@ -1,8 +1,11 @@
 package server
 
 import (
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"sync"
@@ -10,10 +13,12 @@ import (
 
 	"identity-agent-core/authprovider"
 	"identity-agent-core/backup"
+	"identity-agent-core/drivers"
 	"identity-agent-core/recovery"
 	"identity-agent-core/store"
 
 	"github.com/google/uuid"
+	keri "github.com/grapeid/keri-go"
 
 	"github.com/go-chi/chi/v5"
 	"identity-agent-core/secureenclave"
@@ -39,6 +44,7 @@ func (s *CoreServer) mountRecoveryRoutes(r chi.Router) {
 		r.Put("/duress-policy", s.handlePutDuressPolicy)
 		r.Post("/retrieve", s.handleRecoveryRetrieve)
 		r.Post("/root-aid-rotation", s.handleRecoveryRootAIDRotation)
+		r.Post("/root-aid-rotation/prepare", s.handleRecoveryRootAIDPrepare)
 		r.Get("/root-aid-rotation/status", s.handleRecoveryRootAIDStatus)
 
 		// Holding a share for somebody else's identity. Small on purpose: a
@@ -57,7 +63,8 @@ func (s *CoreServer) mountRecoveryRoutes(r chi.Router) {
 	})
 }
 
-// recoveryOnce guards building the recovery service exactly once.
+// recoveryMu guards building each Identity Agent's recovery service exactly
+// once.
 //
 // Two requests arriving together both saw a nil field, both built a service
 // over the same directory, both loaded the sessions, and the later assignment
@@ -65,7 +72,7 @@ func (s *CoreServer) mountRecoveryRoutes(r chi.Router) {
 // other and reported "not found" while sitting on disk. Handlers run
 // concurrently, so this was reachable by two people, or one person and a
 // retry.
-var recoveryOnce sync.Once
+var recoveryMu sync.Mutex
 
 // Built per server rather than once per process.
 //
@@ -127,7 +134,15 @@ func (s *CoreServer) holdings() *recovery.Holdings { return s.holderPairFor().ho
 func (s *CoreServer) shareHolder() *recovery.Holder { return s.holderPairFor().holder }
 
 func (s *CoreServer) recoveryService() *recovery.Service {
-	recoveryOnce.Do(func() {
+	// Made once per Identity Agent, not once per process: a second one in
+	// the same process (a test, or a core started again) would otherwise
+	// be handed none.
+	recoveryMu.Lock()
+	defer recoveryMu.Unlock()
+	if s.RecoveryService != nil {
+		return s.RecoveryService
+	}
+	func() {
 		s.RecoveryService = recovery.NewService(s.DataDir, s.DataStore, s.backupService())
 		// Sessions that were waiting out their window when this agent last
 		// stopped. Loaded here rather than in a startup hook so it happens on
@@ -139,7 +154,7 @@ func (s *CoreServer) recoveryService() *recovery.Service {
 		} else if n > 0 {
 			log.Printf("[recovery] %d recovery session(s) resumed after restart", n)
 		}
-	})
+	}()
 	return s.RecoveryService
 }
 
@@ -213,6 +228,12 @@ func (s *CoreServer) handleRecoveryRotation(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "Invalid rotation request", err.Error())
 		return
 	}
+	// The session first: a rotation is not undone, so none is made for a
+	// recovery that is not there to record it.
+	if _, err := s.recoveryService().GetSession(sessionID); err != nil {
+		writeError(w, http.StatusNotFound, "Session not found", err.Error())
+		return
+	}
 
 	if s.KeriDriver == nil {
 		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
@@ -220,20 +241,39 @@ func (s *CoreServer) handleRecoveryRotation(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if err := s.mayRotateHere(req.Name); err != nil {
-		writeKeyNotHeldHere(w)
-		return
-	}
-	result, err := s.KeriDriver.RotateAid(req.Name, req.NewPublicKey, req.NewNextPublicKey)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Rotation failed", err.Error())
-		return
-	}
-
-	rotResult := recovery.RotationResult{
-		AID:            result.AID,
-		NewPublicKey:   result.NewPublicKey,
-		SequenceNumber: result.SequenceNumber,
+	var rotResult recovery.RotationResult
+	var result any
+	if req.RawB64 != "" {
+		// Prepared and signed by whoever holds the key: committed signed,
+		// and as a recovery rotation where it follows an interaction it
+		// keeps, superseding those after it.
+		committed, ok := s.commitRecoveryRotation(w, req)
+		if !ok {
+			return
+		}
+		rotResult, result = committed, committed
+	} else {
+		if err := s.mayRotateHere(req.Name); err != nil {
+			writeKeyNotHeldHere(w)
+			return
+		}
+		// Carrying the post-quantum commitment, as every rotation does.
+		rotated, err := s.rotateCarryingTheCommitment(req.Name, req.NewPublicKey, req.NewNextPublicKey)
+		if errors.Is(err, errKeyElsewhere) {
+			writeKeyNotHeldHere(w)
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Rotation failed", err.Error())
+			return
+		}
+		s.recordOwnRotation(rotated)
+		rotResult = recovery.RotationResult{
+			AID:            rotated.AID,
+			NewPublicKey:   rotated.NewPublicKey,
+			SequenceNumber: rotated.SequenceNumber,
+		}
+		result = rotated
 	}
 	sess, err := s.recoveryService().RecordRotation(sessionID, rotResult)
 	if err != nil {
@@ -329,22 +369,40 @@ func (s *CoreServer) handleRecoveryRootAIDRotation(w http.ResponseWriter, r *htt
 	}
 	if !recovery.RootAIDRotationSigned {
 		writeError(w, http.StatusServiceUnavailable, "Root-AID rotation not available",
-			"Break-glass root-AID rotation rotates the old root and writes the new root's first interaction, "+
-				"and neither is yet signed by its key here, so it is refused before anything is made")
+			"Break-glass root-AID rotation writes events that are not yet signed by their keys, "+
+				"so it is refused before anything is made")
 		return
 	}
+	// Three signed events: the bound is theirs, as the prepare route's is one's.
+	r.Body = http.MaxBytesReader(w, r.Body, maxRootRotationBody)
 	var req recovery.RootAIDRotationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
 		return
 	}
-	if s.KeriDriver == nil {
-		writeError(w, http.StatusServiceUnavailable, "KERI driver not available",
-			"Root-AID rotation requires the KERI driver on desktop, or the embedded Go core on mobile")
+	if req.RecoverySessionID == "" {
+		writeError(w, http.StatusBadRequest, "Invalid request", "recovery_session_id is required")
+		return
+	}
+	// The session first, as the recovery rotation does: a new root is not
+	// undone, so none is founded for a recovery that is not there to record it.
+	if _, err := s.recoveryService().GetSession(req.RecoverySessionID); err != nil {
+		writeError(w, http.StatusNotFound, "Session not found", err.Error())
+		return
+	}
+	c, ok := s.committer(w)
+	if !ok {
 		return
 	}
 	if s.DataStore == nil {
 		writeError(w, http.StatusServiceUnavailable, "Store not available", "identity store is required")
+		return
+	}
+	// A founding is made one at a time, as /api/events/commit makes one.
+	s.founding.Lock()
+	defer s.founding.Unlock()
+	oldRootAID, ok := s.theNewRootMayBeFounded(w, req)
+	if !ok {
 		return
 	}
 
@@ -353,19 +411,257 @@ func (s *CoreServer) handleRecoveryRootAIDRotation(w http.ResponseWriter, r *htt
 		watcherHints = s.WatcherService.WatcherHints()
 	}
 
-	if identity, err := s.DataStore.GetIdentity(); err == nil && identity != nil {
-		if err := s.mayRotateHere(identity.AID); err != nil {
-			writeKeyNotHeldHere(w)
-			return
+	// Each event goes through the one commit path, signed. The old root's is
+	// also sent to its own witnesses by name: once the identity record moves
+	// to the new root, the identity-wide witnessing no longer reaches it.
+	commit := func(raw []byte, sigs []string) error {
+		ev, err := keri.ParseEvent(raw)
+		if err != nil {
+			return err
 		}
+		// Each event is of the log it extends, whichever identity is kept here
+		// by now: the rotation is of the old root after the record has moved to
+		// the new one, as it is when a repeat finishes the run.
+		name := ev.Identifier
+		if ev.Ilk == "icp" {
+			name = ""
+		}
+		res, err := s.commitAndNote(c, name, raw, ev, sigs)
+		if err != nil {
+			return err
+		}
+		if res.Status != "recorded" && res.Status != "already_recorded" {
+			return fmt.Errorf("it is %s, so it was not added", res.Status)
+		}
+		if keeper, ok := s.KeriDriver.(drivers.KELKeeper); ok && ev.Ilk == "rot" {
+			s.inBackground(func(context.Context) { s.witnessLogOf(keeper, ev.Identifier, true) })
+		}
+		return nil
 	}
-	adapter := &recovery.KeriDriverAdapter{Driver: s.KeriDriver}
-	result, err := recovery.RotateRootAID(req, adapter, s.DataStore, s.DataDir, watcherHints)
+	result, err := recovery.RotateRootAID(req, commit, s.DataStore, s.DataDir, watcherHints)
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, "Root-AID rotation failed", err.Error())
 		return
 	}
+	s.theMessagingKeysAreTheNewRoots(req, oldRootAID, result.NewRootAID)
+	// The run's end: its root map entry is written, so the old root is now a
+	// root moved on from and its witnesses are brought up to date for it.
+	s.inBackground(func(context.Context) { s.witnessOwnLog() })
 	jsonreply.Write(w, http.StatusOK, result)
+}
+
+// handleRecoveryRootAIDPrepare builds the three events of a break-glass root
+// rotation and adds none of them, for the app that holds the root keys to
+// check and sign (ADR-061 section 3).
+func (s *CoreServer) handleRecoveryRootAIDPrepare(w http.ResponseWriter, r *http.Request) {
+	if s.refuseIfThisComputerMayNotFound(w) {
+		return
+	}
+	if !recovery.RootAIDRotationAvailable() || !recovery.RootAIDRotationSigned {
+		writeError(w, http.StatusServiceUnavailable, "Root-AID rotation not available",
+			"Break-glass root-AID rotation is gated pending security review of the signed old-root delegation anchor")
+		return
+	}
+	c, ok := s.committer(w)
+	if !ok {
+		return
+	}
+	if s.DataStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "Store not available", "identity store is required")
+		return
+	}
+	// One at a time with the rotation route, which holds this lock for a whole
+	// run: a prepare must not judge a run "not landed" while that run is between
+	// keeping its request and committing its rotation.
+	s.founding.Lock()
+	defer s.founding.Unlock()
+	// A rotation begun and not finished is finished, not begun again, once its
+	// rotation is in the old root's log: a second set prepared after it would
+	// leave two roots the old root's log authorises. A run that stopped before
+	// its rotation landed has authorised nothing, so it is dropped and another
+	// may be prepared, which keeps a run that can never land from blocking the
+	// identity for good.
+	if own, _ := s.DataStore.GetIdentity(); own != nil {
+		run, err := recovery.UnfinishedRootAIDRotation(s.DataDir, own.AID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "The rotations begun could not be read", err.Error())
+			return
+		}
+		if run != nil {
+			events, err := s.DataStore.GetEvents(run.OldRootAID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "The old root's log could not be read", err.Error())
+				return
+			}
+			if !run.RotationLanded(events) {
+				if err := recovery.DropUnfinishedRootAIDRotation(s.DataDir, *run); err != nil {
+					writeError(w, http.StatusInternalServerError, "The unfinished rotation could not be dropped", err.Error())
+					return
+				}
+				run = nil
+			}
+		}
+		if run != nil {
+			writeError(w, http.StatusConflict, "A break-glass rotation of this identity was begun and not finished",
+				"Send the same signed request again to finish it; no new one is prepared until it is done. This agent keeps it, "+
+					"and offers it back to the owner as \"unfinished\" at GET /api/recovery/root-aid-rotation/status, for the old root "+
+					run.OldRootAID+".")
+			return
+		}
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxKeyEventBody)
+	var req recovery.PrepareRootAIDRotationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+	// The new root is founded as an ordinary founding is (POST
+	// /api/events/prepare): the same preparation, and the same gate except for
+	// the identity kept here, which it replaces.
+	founding := prepareEventRequest{T: "icp", K: req.NewRoot.K, Kt: one, N: req.NewRoot.N, Nt: one,
+		A: req.NewRoot.A, OwnerAID: req.NewRoot.OwnerAID, B: req.NewRoot.B, Bt: req.NewRoot.Bt}
+	if founding.B == nil {
+		// Unless the app names others, the new root keeps the old root's witnesses.
+		founding.B, founding.Bt = s.witnessesOfTheIdentityKept(founding.Bt)
+	}
+	if founding.OwnerAID == "" {
+		// And its owner: a new root that named none would drop the owner of an
+		// owned identity, which a core that does not require one would not notice.
+		founding.OwnerAID = s.ownerOfTheIdentityKept()
+	}
+	pr, err := founding.engineRequest()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid witness threshold", err.Error())
+		return
+	}
+	pr, ok = s.foundingRequest(w, founding, pr, true)
+	if !ok {
+		return
+	}
+	prepared, err := recovery.PrepareRootAIDRotation(req, pr, c, s.DataStore)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "Root-AID rotation could not be prepared", err.Error())
+		return
+	}
+	jsonreply.Write(w, http.StatusOK, prepared)
+}
+
+// ownerOfTheIdentityKept is the owner the identity kept here was founded with,
+// if its founding names one: the owner seal is written into the inception event.
+func (s *CoreServer) ownerOfTheIdentityKept() string {
+	own, err := s.DataStore.GetIdentity()
+	if err != nil || own == nil {
+		return ""
+	}
+	events, err := s.DataStore.GetEvents(own.AID)
+	if err != nil || len(events) == 0 {
+		return ""
+	}
+	raw, err := base64.StdEncoding.DecodeString(events[0].RawBytesB64)
+	if err != nil {
+		return ""
+	}
+	return ownerNamedIn(raw)
+}
+
+// maxRootRotationBody bounds a break-glass rotation: three signed events, each
+// as large as a prepared or committed one may be.
+const maxRootRotationBody = 3 * maxKeyEventBody
+
+var one = json.RawMessage(`"1"`)
+
+// witnessesOfTheIdentityKept are the witnesses and threshold the identity kept
+// here names now, for a new root that is to keep them. bt, if the app named a
+// threshold, is kept as it named it.
+func (s *CoreServer) witnessesOfTheIdentityKept(bt *json.RawMessage) ([]string, *json.RawMessage) {
+	keeper, ok := s.KeriDriver.(drivers.KELKeeper)
+	own, err := s.DataStore.GetIdentity()
+	if !ok || err != nil || own == nil {
+		return nil, bt
+	}
+	witnesses, toad, err := keeper.WitnessConfig(own.AID)
+	if err != nil || len(witnesses) == 0 {
+		return nil, bt
+	}
+	if bt == nil {
+		threshold := json.RawMessage(fmt.Sprintf("%q", fmt.Sprintf("%x", toad)))
+		bt = &threshold
+	}
+	return witnesses, bt
+}
+
+// theNewRootMayBeFounded applies to the new root of a break-glass rotation
+// what a founding is held to when it is committed: the founding gate itself
+// (mayFound, as /api/events/commit applies it to an icp), and the messaging
+// keyset it anchors being one this Identity Agent holds. The keyset the app
+// handed over while the old root was kept here is held aside as the old root's
+// replacement; it is held for the new root's founding instead, and only once
+// the request has passed every other check, so a refused request writes
+// nothing. The caller holds s.founding. A refusal is answered here, before
+// anything is written; ok is false then.
+func (s *CoreServer) theNewRootMayBeFounded(w http.ResponseWriter, req recovery.RootAIDRotationRequest) (oldRootAID string, ok bool) {
+	raw, err := base64.StdEncoding.Strict().DecodeString(req.NewRootFounding.RawB64)
+	if err != nil {
+		return "", true // the rotation's own checks refuse what is not the event
+	}
+	ev, err := keri.ParseEvent(raw)
+	if err != nil || ev.Ilk != "icp" {
+		return "", true
+	}
+	if !s.mayFound(w, ownerNamedIn(raw), true) {
+		return "", false
+	}
+	oldRootAID, err = recovery.CheckRootAIDRotation(req, s.DataStore)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "Root-AID rotation failed", err.Error())
+		return "", false
+	}
+	if len(messagingAnchorsIn(raw)) > 1 {
+		title, detail := s.unheldKeySetRefusal(raw, ev.Identifier)
+		writeError(w, http.StatusBadRequest, title, detail)
+		return "", false
+	}
+	for _, anchor := range messagingAnchorsIn(raw) {
+		if held, _ := s.keySetAnchorHeld(ev.Identifier, anchor); held {
+			continue // an earlier run filed it under the new root
+		}
+		if held, _ := s.keySetAnchorHeld(pendingKeySetLabel(anchor), anchor); held {
+			continue
+		}
+		if held, _ := s.keySetAnchorHeld(pendingReplacementLabel(oldRootAID), anchor); !held {
+			continue // not held anywhere: refused below
+		}
+		ks, err := s.keySetFor(pendingReplacementLabel(oldRootAID))
+		if err == nil {
+			err = s.putKeySet(pendingKeySetLabel(anchor), ks)
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "The messaging keys could not be kept", err.Error())
+			return "", false
+		}
+	}
+	if title, detail := s.unheldKeySetRefusal(raw, ev.Identifier); title != "" {
+		writeError(w, http.StatusBadRequest, title, detail)
+		return "", false
+	}
+	return oldRootAID, true
+}
+
+// theMessagingKeysAreTheNewRoots is what a finished rotation leaves of the
+// keyset handed over: filed under the new root, with no copy waiting for a
+// founding that is done and no replacement still held for the old root.
+func (s *CoreServer) theMessagingKeysAreTheNewRoots(req recovery.RootAIDRotationRequest, oldRootAID, newRootAID string) {
+	raw, err := base64.StdEncoding.Strict().DecodeString(req.NewRootFounding.RawB64)
+	if err != nil {
+		return
+	}
+	for _, anchor := range messagingAnchorsIn(raw) {
+		if held, _ := s.keySetAnchorHeld(newRootAID, anchor); !held {
+			continue
+		}
+		_ = s.forgetKeySet(pendingKeySetLabel(anchor))
+		_ = s.forgetKeySet(pendingReplacementLabel(oldRootAID))
+	}
 }
 
 func (s *CoreServer) handleRecoveryRootAIDStatus(w http.ResponseWriter, r *http.Request) {
@@ -379,6 +675,18 @@ func (s *CoreServer) handleRecoveryRootAIDStatus(w http.ResponseWriter, r *http.
 			last := m.Entries[len(m.Entries)-1]
 			resp["last_rotation_at"] = last.RotatedAt
 			resp["current_root_aid"] = last.NewRootAID
+		}
+	}
+	// The signed requests of runs begun and not finished are the owner's: an
+	// app that lost its copy sends one again to finish its run.
+	if s.theOwnerAsks(r) {
+		unfinished, err := recovery.RunningRootAIDRotations(s.DataDir)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "The rotations begun could not be read", err.Error())
+			return
+		}
+		if len(unfinished) > 0 {
+			resp["unfinished"] = unfinished
 		}
 	}
 	jsonreply.Write(w, http.StatusOK, resp)
@@ -663,4 +971,43 @@ func writeShareRefusal(w http.ResponseWriter, err error) {
 		return
 	}
 	writeError(w, http.StatusForbidden, "This share was not released", err.Error())
+}
+
+// commitRecoveryRotation commits a recovery's rotation that the identity's key
+// holder prepared and signed, through the one commit path.
+func (s *CoreServer) commitRecoveryRotation(w http.ResponseWriter, req recovery.RotationRequest) (recovery.RotationResult, bool) {
+	c, ok := s.committer(w)
+	if !ok {
+		return recovery.RotationResult{}, false
+	}
+	raw, err := base64.StdEncoding.Strict().DecodeString(req.RawB64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "raw_b64 is not the event", err.Error())
+		return recovery.RotationResult{}, false
+	}
+	ev, err := keri.ParseEvent(raw)
+	if err != nil || ev.Ilk != "rot" {
+		writeError(w, http.StatusBadRequest, "That is not a rotation", fmt.Sprint(err))
+		return recovery.RotationResult{}, false
+	}
+	own, err := s.DataStore.GetIdentity()
+	if err != nil || own == nil || own.AID != ev.Identifier {
+		writeError(w, http.StatusBadRequest, "That is not this Identity Agent's identity",
+			"a recovery rotates the identity kept here")
+		return recovery.RotationResult{}, false
+	}
+	res, ok := s.commitOwnEvent(w, c, own.AID, raw, ev, req.Sigs)
+	if !ok {
+		return recovery.RotationResult{}, false
+	}
+	switch res.Status {
+	case "recorded", "already_recorded":
+	default:
+		// Not yet added, so the recovery's rotation is not done: said as the
+		// commit route says it, and nothing is recorded against the session.
+		jsonreply.Write(w, http.StatusAccepted, map[string]any{"status": res.Status, "s": fmt.Sprintf("%x", res.SN),
+			"d": res.SAID, "signed": res.Signed, "keys": res.Keys, "expires": res.Expires.UTC().Format(time.RFC3339)})
+		return recovery.RotationResult{}, false
+	}
+	return recovery.RotationResult{AID: own.AID, NewPublicKey: ev.Keys[0], SequenceNumber: res.SN}, true
 }

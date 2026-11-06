@@ -67,6 +67,7 @@ var publicRoutes = map[string]string{
 	// instead of keeping a second implementation of the check. Pure
 	// computation over what it is sent: nothing fetched, nothing stored.
 	"POST /public/login/key":        "a verifier asking what key an identity's own key log establishes",
+	"POST /public/key-state":        "a signer asking what key state a copy of a key log establishes, before it can sign as anyone",
 	"GET /public/credential/{said}": "a credential the user chose to publish at a shareable link",
 	// A credential names its schema by digest; a verifier fetches the document to
 	// confirm what the credential claims. Schemas are public by nature.
@@ -415,6 +416,10 @@ func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handle
 				if served := s.controllerActsForTheOwner(w, r, pattern, next); served {
 					return
 				}
+				if s.ownerKeyStateIsStale(r) {
+					writeStaleKeyState(w)
+					return
+				}
 				denyAuthorization(w, "this endpoint needs a token carrying the capability scope for it")
 			default:
 				how, proofErr := s.theProofOfTheOwner(r)
@@ -446,6 +451,10 @@ func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handle
 						return
 					}
 					next.ServeHTTP(w, r)
+					return
+				}
+				if s.ownerKeyStateIsStale(r) {
+					writeStaleKeyState(w)
 					return
 				}
 				denyAuthorization(w, "this endpoint is for the owner of this agent; sign the request with the owner key or call it locally")
@@ -744,6 +753,10 @@ var sessionForbidden = map[string]string{
 	// archive plus later possession of the phrase, is the identity.
 	"POST /api/recovery/retrieve":          "retrieval hands back an archive, and an archive is the identity to anyone who can open it",
 	"POST /api/recovery/root-aid-rotation": "rotating the root AID replaces the identity's controlling key",
+
+	// The events the root rotation is signed over, built before they are added.
+	"POST /api/recovery/root-aid-rotation/prepare": "preparing the rotation of the root AID replaces the identity's controlling key",
+
 	// The keys this device holds for the machines it owns. A session that
 	// could ask for a signature, or for a new owning identity, would hold the
 	// owner's authority over every machine this device adopted.
@@ -785,6 +798,9 @@ var sessionForbidden = map[string]string{
 	"POST /api/inception": "founding an identity decides what this agent is",
 	"POST /api/rotation":  "rotation replaces the keys this identity signs with",
 
+	// Who would witness a founding, which the founding names for good.
+	"GET /api/events/witnesses-for-a-founding": controllerOwnerOnly["GET /api/events/witnesses-for-a-founding"],
+
 	// --- who may act for this identity ---
 	"POST /api/signer/invites":                "inviting a signer decides who may bring this organisation into existence",
 	"POST /api/signer/invites/{token}/redeem": "redeeming a signer invite makes somebody an owner",
@@ -794,6 +810,14 @@ var sessionForbidden = map[string]string{
 	// --- answering for the key ---
 	"POST /api/signing-requests/{id}/fulfil": "these exist precisely because only the key-holding device can answer them",
 	"POST /api/signing-requests/{id}/refuse": "refusing is the key-holding device's answer, and a refused withdrawal is never asked for again",
+
+	// --- what the key log says ---
+	//
+	// Nothing that writes what the authorisation decision reads may be reached
+	// by a session (ADR-050), and this stores any event it is given, signed or
+	// not. A key log row is what a credential, a presentation and every other
+	// check is read against.
+	"POST /api/store/event": controllerOwnerOnly["POST /api/store/event"],
 
 	// --- destruction ---
 	"POST /api/reset": "resetting destroys the identity, and a session should never be enough for that",

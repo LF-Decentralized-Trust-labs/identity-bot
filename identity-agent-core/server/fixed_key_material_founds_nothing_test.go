@@ -1,3 +1,5 @@
+//go:build kerigo_pqtest
+
 package server
 
 import (

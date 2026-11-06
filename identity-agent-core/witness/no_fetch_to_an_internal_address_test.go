@@ -99,7 +99,7 @@ func TestAStrangerClaimingAWitnessKeyGetsNoEvents(t *testing.T) {
 				return nil, nil
 			}
 			raw := []byte(`{"v":"KERI10JSON000000_","t":"ixn","d":"ESAID","i":"ERecord","s":"1"}`)
-			_ = s.BroadcastToDesignated(context.Background(), "ERecord", raw, "0Bsig", []string{key}, 1)
+			_ = s.BroadcastToDesignated(context.Background(), "ERecord", raw, []string{"0Bsig"}, []string{key}, 1)
 			s.BringUpToDate(context.Background(), "ERecord", []SignedEvent{{RawBytesB64: "AAAA", CesrSignature: "0B"}}, []string{key}, 1)
 			if n := atomic.LoadInt32(&posted); n != 0 {
 				t.Fatalf("%d events were posted to a stranger", n)

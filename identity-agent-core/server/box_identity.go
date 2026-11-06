@@ -9,6 +9,8 @@ import (
 	"identity-agent-core/didcomm"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/internal/atomicfile"
+
+	keri "github.com/grapeid/keri-go"
 )
 
 // The identity a sealed machine makes for itself.
@@ -53,6 +55,10 @@ type boxIdentity struct {
 // hardware first and then signing it — in that order, because signing first
 // would mean vouching for whatever keys were handed over.
 func newBoxIdentity(delegatorAID string) (*boxIdentity, error) {
+	// Nothing is made in a build that cannot read a post-quantum key (ADR-061).
+	if !keri.PostQuantumTestCodes() {
+		return nil, iacrypto.ErrNoPostQuantumCodes
+	}
 	if delegatorAID == "" {
 		return nil, fmt.Errorf("a machine cannot make an identity without knowing who it acts for")
 	}

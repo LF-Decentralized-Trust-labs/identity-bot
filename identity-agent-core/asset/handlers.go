@@ -212,7 +212,8 @@ func (h *Handler) HandleCreateAsset(w http.ResponseWriter, r *http.Request) {
 			h.writeJSON(w, map[string]string{"error": err.Error()}, delegationRefusalStatus(err))
 			return
 		}
-		resp, err := h.KeriDriver.CreateDelegatedInception(pubB64, nextB64, body.DisplayName, rootAID)
+		resp, err := h.KeriDriver.CreateDelegatedInception(pubB64, nextB64, body.DisplayName, rootAID,
+			FoundingSigner(h.dataDir, signingIndex))
 		if err != nil {
 			h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusInternalServerError)
 			return
@@ -226,7 +227,8 @@ func (h *Handler) HandleCreateAsset(w http.ResponseWriter, r *http.Request) {
 		pairwise = resp.AID
 		delegator = resp.DelegatorAID
 	} else {
-		resp, err := h.KeriDriver.CreateInceptionNamed(pubB64, nextB64, body.DisplayName)
+		resp, err := h.KeriDriver.CreateInceptionNamed(pubB64, nextB64, body.DisplayName,
+			FoundingSigner(h.dataDir, signingIndex))
 		if err != nil {
 			h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusInternalServerError)
 			return

@@ -134,7 +134,7 @@ func TestAnUncheckedLogDoesNotNameTheKeyInForce(t *testing.T) {
 		t.Fatal(err)
 	}
 	ownKey := New()
-	if _, err := ownKey.ReloadIdentity(&drivers.DriverReloadIdentityRequest{AID: kel.AID, KEL: kel.KEL, RawEventsB64: kel.RawEventsB64}); err != nil {
+	if _, err := ownKey.ReloadIdentity(&drivers.DriverReloadIdentityRequest{AID: kel.AID, KEL: kel.KEL, RawEventsB64: kel.RawEventsB64, Signatures: kel.Signatures}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ownKey.InteractKept(kel.AID, seal, nil); err != nil {

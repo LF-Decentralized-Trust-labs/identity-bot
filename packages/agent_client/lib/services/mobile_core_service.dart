@@ -221,34 +221,6 @@ class MobileCoreService {
     }
   }
 
-  Future<void> storeEvent({
-    required String aid,
-    required String eventType,
-    required int sequenceNumber,
-    String? eventJson,
-    String? publicKey,
-    String? nextKeyDigest,
-  }) async {
-    final response = await _http.post(
-      Uri.parse('$baseUrl/api/store/event'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'aid': aid,
-        'event_type': eventType,
-        'sequence_number': sequenceNumber,
-        if (eventJson != null) 'event_json': eventJson,
-        if (publicKey != null) 'public_key': publicKey,
-        if (nextKeyDigest != null) 'next_key_digest': nextKeyDigest,
-      }),
-    );
-
-    if (response.statusCode != 201) {
-      final body = jsonDecode(response.body);
-      throw Exception(
-          body['error'] ?? 'Store event failed: ${response.statusCode}');
-    }
-  }
-
   void dispose() {
     _coreClient?.dispose();
     _coreClient = null;

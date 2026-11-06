@@ -5,11 +5,17 @@ import 'package:http/http.dart' as http;
 
 import '../crypto/keys.dart';
 import '../crypto/owner_signature.dart';
+import 'key_math.dart';
 import 'keri_service.dart';
 import 'owner_signing_client.dart';
 import 'signing_an_event.dart';
+import 'the_event_this_device_expects.dart';
+import 'the_stored_event_this_phrase_would_have_made.dart';
 import 'the_events_this_device_asked_for.dart';
+import 'the_identity_this_device_holds.dart';
 import 'the_key_is_not_held_by_the_core.dart';
+import 'the_key_state_this_device_reads.dart';
+import 'the_witnesses_of_this_devices_events.dart';
 
 /// Which of an identity's keys is in force, read from its key log at the core
 /// that keeps it.
@@ -28,12 +34,17 @@ class TheKeyInForce {
   /// owner-signing transport asks this which key to sign with, so reading the
   /// key log through it would ask again, without end. Give it the transport's
   /// inner client.
-  ///
-  /// [theCoreWasGivenThisPhrase] is as for [requireTheFoundingIsThisDevices],
-  /// and applies when a stranded founding is finished.
+  /// [keyMath] is the core's key arithmetic, which an event left unsigned is
+  /// checked with before it is signed late. Left out, [index] works and
+  /// signing an event late refuses.
   TheKeyInForce(this._client, this._baseUrl,
-      {TheEventsThisDeviceAskedFor? asked, this.theCoreWasGivenThisPhrase = false})
-      : _asked = asked ?? TheEventsThisDeviceAskedFor() {
+      {TheEventsThisDeviceAskedFor? asked,
+      KeyMath? keyMath,
+      this.readTheKeyState,
+      this.witnessesThisDeviceKnows,
+      this.whenTheLogIsChecked})
+      : _asked = asked ?? TheEventsThisDeviceAskedFor(),
+        _keyMath = keyMath {
     if (_client is OwnerSigningClient) {
       throw ArgumentError.value(_client, 'client',
           'the key in force is read through a plain client; the owner-signing '
@@ -44,131 +55,46 @@ class TheKeyInForce {
   final http.Client _client;
   final String _baseUrl;
   final TheEventsThisDeviceAskedFor _asked;
-  final bool theCoreWasGivenThisPhrase;
+  final KeyMath? _keyMath;
+
+  /// Reads the key state this device trusts (its own record first, then the
+  /// identity's witnesses: TheKeyStateThisDeviceReads), never the key log the
+  /// core serves. A rotation signed late follows the event before it and keeps
+  /// the witness threshold in force, and both are taken from this
+  /// (ADR-061 section 5). Left out, or where it cannot read, a rotation or an
+  /// interaction is not signed late.
+  final Future<VerifiedKeyState> Function(Uint8List seed)? readTheKeyState;
+
+  /// The witnesses and threshold this device itself knows its identity has
+  /// (what it is recorded as holding), or null where it knows none. A founding
+  /// left unsigned is signed late with exactly these where they are known; where
+  /// they are not, it is signed with the witnesses and threshold the core chose,
+  /// as it always was.
+  final Future<WitnessSet?> Function()? witnessesThisDeviceKnows;
+
+  /// Called with the identifier once the identity's log has been read and
+  /// checked to name this phrase's keys, and before any event is signed late.
+  /// The caller records there that this device holds that identity, so the key
+  /// state a late event follows can be read from the record. Nothing is recorded
+  /// from an identifier the core gave before its log was checked.
+  final Future<void> Function(String aid)? whenTheLogIsChecked;
+
+  /// [_checkedLog], then [whenTheLogIsChecked] where the founding is already
+  /// signed: an identifier is recorded only once its founding is accepted, so
+  /// a founding left unsigned is recorded when it is signed (in
+  /// [finishStrandedEvents]), never when it is merely listed or refused.
+  Future<_Checked> _checkedForSigning(Uint8List seed) async {
+    final checked = await _checkedLog(seed);
+    final signed = checked.log.signed;
+    if (signed == null || signed.isEmpty || signed[0]) {
+      await whenTheLogIsChecked?.call(checked.aid);
+    }
+    return checked;
+  }
 
   /// The digest a next-key commitment names for [keyQb64]: Blake3 over the
   /// key's qb64 text, as a validator recomputes it.
   static String commitmentTo(String keyQb64) => OwnerSignature.blake3QB64(utf8.encode(keyQb64));
-
-  /// Refuses a rotation this device would sign unless it is exactly the one it
-  /// asks for: it reveals key [j] of this phrase (checked by the caller), commits
-  /// to exactly key j + 1 with one key and a threshold of one ("kt" and "nt"
-  /// "1"), anchors nothing, changes no witness and keeps the witness threshold
-  /// [priorBt] the identity had. A core choosing what a rotation commits to
-  /// would otherwise choose who can rotate the identity next.
-  static void requireTheRotationIsThisDevices(
-      Map<String, dynamic> event, Uint8List seed, int j, {Object? priorBt}) {
-    bool empty(Object? v) => v == null || (v is List && v.isEmpty);
-    final next = commitmentTo(KeyManager.keyAt(seed, j + 1).publicKeyEncoded);
-    final n = event['n'];
-    String? why;
-    if (n is! List || n.length != 1 || n.first != next) {
-      why = 'it commits to $n, not to the next key of this recovery phrase ($next)';
-    } else if (event['kt'] != '1' || event['nt'] != '1') {
-      why = 'its signing thresholds are ${event['kt']} and ${event['nt']}, not 1 and 1';
-    } else if (!empty(event['a'])) {
-      why = 'it anchors ${event['a']}, which this device did not ask for';
-    } else if (!empty(event['br']) || !empty(event['ba'])) {
-      why = 'it changes the witnesses, which this device did not ask for';
-    } else if (priorBt != null && event['bt'] != priorBt) {
-      why = 'it changes the witness threshold from $priorBt to ${event['bt']}, which this device did not ask for';
-    }
-    if (why != null) {
-      throw Exception('event ${event['s']} is not the rotation this device asked for, so it is not signed: $why');
-    }
-  }
-
-  /// Refuses the founding event of an identity this device would sign unless
-  /// it is the one it asks for:
-  ///  - a founding ("t" icp, sequence 0) whose identifier is its own digest
-  ///    ("i" equal to "d"), and is [aid] when the device knows it;
-  ///  - naming one key, [key], with a threshold of one ("kt" "1");
-  ///  - committing to [next] with a threshold of one ("nt" "1");
-  ///  - with no configuration traits ("c" empty);
-  ///  - anchoring nothing, after an owner seal naming [ownerAid] when the
-  ///    device asked for one.
-  /// The witnesses ("b", "bt") are the core's choice at founding.
-  ///
-  /// Where [theCoreWasGivenThisPhrase] — this same core accepted this phrase's
-  /// seed in a RootSeedHandoff.register that returned true, before founding, as
-  /// an app does that keeps its identity's keys in the core too — the core adds
-  /// two things of its own, derived from that seed and so the identity's own
-  /// keys: one more next-key commitment, to
-  /// a post-quantum key, and one anchor of the identity's messaging keys (an
-  /// IA-HYBRID-1 keyset: "ia", "ka" and "sa" and nothing else). Only then are
-  /// they accepted. A core adds them only for a key it derives itself, so from
-  /// a core this device did not give the phrase, either one would be a key of
-  /// that machine's in this identity — the post-quantum one alone could rotate
-  /// it — and the founding is refused.
-  ///
-  /// The flag is the caller's statement and is not checked here. Set true for
-  /// a core that was not given the phrase, it lets that core plant its own
-  /// post-quantum key, which alone could rotate the identity.
-  static void requireTheFoundingIsThisDevices(Map<String, dynamic> event,
-      {required String key,
-      required String next,
-      String? aid,
-      String? ownerAid,
-      bool theCoreWasGivenThisPhrase = false}) {
-    // Compared as JSON text, so the order of a map's keys counts: the engine
-    // writes a seal as {"i", "s", "d"} and a keyset anchor as {"ia", "ka",
-    // "sa"} (keriengine), the order these are written in below, and an event
-    // with the same fields in another order is refused rather than read.
-    bool same(Object? a, Object? b) => jsonEncode(a) == jsonEncode(b);
-    String? why;
-    final n = event['n'];
-    final want = commitmentTo(next);
-    final extraCommitments = theCoreWasGivenThisPhrase ? 1 : 0;
-    if (event['t'] != 'icp' || event['s'] != '0') {
-      why = 'it is not a founding event';
-    } else if (event['i'] == null || event['i'] != event['d']) {
-      why = 'its identifier ${event['i']} is not its own digest ${event['d']}';
-    } else if (aid != null && event['i'] != aid) {
-      why = 'it founds ${event['i']}, not $aid';
-    } else if (!same(event['k'], [key])) {
-      why = 'it names ${event['k']}, not this device\'s key $key';
-    } else if (event['kt'] != '1' || event['nt'] != '1') {
-      why = 'its signing thresholds are ${event['kt']} and ${event['nt']}, not 1 and 1';
-    } else if (!same(event['c'] ?? const [], const [])) {
-      why = 'it sets configuration traits ${event['c']} this device did not ask for';
-    } else if (n is! List || n.isEmpty || n.length > 1 + extraCommitments || n.first != want) {
-      why = theCoreWasGivenThisPhrase
-          ? 'it commits to $n, not to this device\'s next key ($want) with at most one more'
-          : 'it commits to $n, not to this device\'s next key ($want) alone; this core was not given '
-              'this phrase, so any other commitment would be a key of that machine\'s';
-    } else {
-      why = _foundingAnchorProblem(event['a'], ownerAid: ownerAid, keysetAllowed: theCoreWasGivenThisPhrase);
-    }
-    if (why != null) {
-      throw Exception('the founding event is not the one this device asked for, so it is not signed: $why');
-    }
-  }
-
-  static String? _foundingAnchorProblem(Object? a, {String? ownerAid, required bool keysetAllowed}) {
-    if (a != null && a is! List) return 'its anchors are not a list';
-    final anchors = a is List ? List<Object?>.from(a) : <Object?>[];
-    if (ownerAid != null) {
-      // In the engine's order: {"i", "s", "d"}.
-      final seal = {'i': ownerAid, 's': '0', 'd': ownerAid};
-      if (anchors.isEmpty || jsonEncode(anchors.first) != jsonEncode(seal)) {
-        return 'it does not name the owner this device asked for ($ownerAid) first';
-      }
-      anchors.removeAt(0);
-    }
-    if (anchors.isEmpty) return null;
-    final keyset = anchors.first;
-    final isKeyset = keyset is Map &&
-        keyset['ia'] == 'IA-HYBRID-1' &&
-        keyset['ka'] is List &&
-        keyset['sa'] is List &&
-        keyset.keys.length == 3;
-    if (anchors.length > 1 || !isKeyset) return 'it anchors $anchors, which this device did not ask for';
-    if (!keysetAllowed) {
-      return 'it anchors messaging keys, and this core was not given this phrase, so they would be '
-          'keys of that machine\'s';
-    }
-    return null;
-  }
 
   /// The identifier of the identity the core holds, which is the name its key
   /// log is kept under. The recovery phrase in secure storage is that
@@ -216,7 +142,7 @@ class TheKeyInForce {
         current++;
         final keys = event['k'];
         final named = keys is List && keys.isNotEmpty ? keys.first : null;
-        if (named != KeyManager.keyAt(seed, current).publicKeyEncoded) {
+        if (named != KeyManager.publicKeyAt(seed, current)) {
           throw Exception('the key log of $aid names $named in its establishment event '
               '${event['s']}, which is not key $current of this recovery phrase, so nothing '
               'signed here would verify against it');
@@ -262,93 +188,236 @@ class TheKeyInForce {
   ///  - this device asked for the event (TheEventsThisDeviceAskedFor). Any
   ///    other unsigned event is refused, never signed: a core appending one of
   ///    its own and marking it unsigned would otherwise have it signed here;
-  ///  - the bytes are the event the log lists at that place: this identity's,
-  ///    with the same type, sequence number, digest and keys;
-  ///  - a founding or rotation commits to exactly the next key of this phrase,
-  ///    and a rotation changes no witness
-  ///    ([requireTheEstablishmentIsThisDevices]).
+  ///  - the stored bytes are exactly the event this phrase would have produced
+  ///    at that place (ExpectedEvent, through [signAndRecordEvent]): a founding
+  ///    or rotation commits to the next key of this phrase alone, a rotation
+  ///    changes no witness, and nothing carries an extra key, digest or anchor.
+  ///  - what the event follows (`p`) and the witness threshold a rotation keeps
+  ///    (`bt`) are those of the key state this device trusts ([readTheKeyState]:
+  ///    its own record, then the witnesses), or of the event just before it that
+  ///    this device checked and signed in this run; never read from earlier bytes
+  ///    the core serves. Where that cannot be read the event is not signed
+  ///    ([TheKeyStateCannotBeReadToSignLate]);
   ///
   /// A core that does not say which events are signed is left as it is.
-  Future<KeyState> finishStrandedEvents(Uint8List seed) async {
-    final checked = await _checkedLog(seed);
+  ///
+  /// [ownerAid] is the owner the person named for the identity, a founding
+  /// made for one sealing it. It must come from this device's own record of who
+  /// the person named, never from a response of the core (the parsers in
+  /// core_service.dart read an `owner_aid` from core JSON: not those): whatever
+  /// is passed here is what a founding left unsigned is allowed to seal.
+  Future<KeyState> finishStrandedEvents(Uint8List seed, {String? ownerAid}) async {
+    final checked = await _checkedForSigning(seed);
     final log = checked.log;
     final signed = log.signed;
     final scope = await _asked.scope();
     Map<String, dynamic>? establishment;
-    Object? priorBt;
-    var j = -1;
+    _Trusted? trusted;
     for (var at = 0; at < log.events.length; at++) {
       final event = log.events[at];
-      final establishing = _establishing.contains(event['t']);
-      final bt = priorBt;
-      if (establishing) {
-        j++;
-        establishment = event;
-        priorBt = event['bt'];
-      }
+      if (_establishing.contains(event['t'])) establishment = event;
       if (signed == null || signed[at]) continue;
       final asked = await _asked.whichAskedFor(scope, checked.aid, event, commitmentTo);
       if (asked == null) {
         throw AnEventThisDeviceDidNotAskFor(checked.aid, '${event['s']}', '${event['t']}');
       }
-      await _checkAndSign(seed, checked, at, j, priorBt: bt);
+      final request = await _asked.theRequest(scope, asked);
+      final wanted = (request?['asked'] as Map?)?['anchors'];
+      trusted = await _checkAndSign(seed, checked, at, trusted,
+          t: '${request?['t']}',
+          // The place and digest this device recorded, not the bytes'.
+          sn: int.parse('${request?['s'] ?? request?['expected']}', radix: 16),
+          digest: request?['d'] as String?,
+          ownerAid: ownerAid,
+          ixnAnchors: wanted is List ? List<Object?>.from(wanted) : null);
       await _asked.forgetId(scope, asked);
     }
     if (signed != null) await _asked.forgetSettled(scope, checked.aid, log.events, signed);
-    return KeyState(checked.aid, checked.keyAt.last, establishment!, log.events.length);
+    // Every event left unsigned, the founding among them, is now signed.
+    await whenTheLogIsChecked?.call(checked.aid);
+    return KeyState(checked.aid, checked.keyAt.last, establishment!, log.events.length,
+        '${log.events.last['d'] ?? ''}');
   }
 
   /// The checks every event this device signs late must pass, then the
-  /// signature: the bytes are the event listed, a founding or rotation is the
-  /// one this device would ask for, and the key is the one in force at it.
-  Future<void> _checkAndSign(Uint8List seed, _Checked checked, int at, int j, {Object? priorBt}) async {
-    final log = checked.log;
-    final event = log.events[at];
-    final raw = at < log.rawEventsB64.length ? log.rawEventsB64[at] : '';
-    _requireTheBytesAreTheEvent(checked.aid, event, raw);
-    if (event['t'] == 'rot') requireTheRotationIsThisDevices(event, seed, j, priorBt: priorBt);
-    if (event['t'] == 'icp') {
-      requireTheFoundingIsThisDevices(event,
-          key: KeyManager.keyAt(seed, 0).publicKeyEncoded,
-          next: KeyManager.keyAt(seed, 1).publicKeyEncoded,
-          aid: checked.aid,
-          theCoreWasGivenThisPhrase: theCoreWasGivenThisPhrase);
-    }
-    if (event['t'] != 'rot' && event['t'] != 'icp' && event['t'] != 'ixn') {
-      throw Exception('event ${event['s']} is a ${event['t']}, which this device does not sign late');
-    }
+  /// signature. The stored bytes are parsed with the core's parser and must be
+  /// exactly the event this phrase would have produced at that place, the same
+  /// [ExpectedEvent] checks a new event gets (in [signAndRecordEvent], which
+  /// nothing signs late without). An event that is not is not signed: it comes
+  /// back as an [AStoredEventIsNotTheOneExpected] carrying what was stored and
+  /// what was expected, for the person to see.
+  Future<_Trusted> _checkAndSign(Uint8List seed, _Checked checked, int at, _Trusted? running,
+      {required String t, required int sn, required String? digest, String? ownerAid, List<Object?>? ixnAnchors}) async {
+    final p = await _check(seed, checked, at, running,
+        t: t, sn: sn, digest: digest, ownerAid: ownerAid, ixnAnchors: ixnAnchors);
+    final km = p.km;
+    final event = p.event;
+    final raw = p.raw;
+    final expected = p.expected;
+    final stored = p.stored;
+    final trusted = p.trusted;
+    final signingSeed = KeyManager.signingSeed(seed, index: checked.keyAt[at]);
     try {
       await signAndRecordEvent(_client, _baseUrl,
           aid: checked.aid,
-          sequenceNumber: int.tryParse('${event['s']}', radix: 16),
+          sequenceNumber: sn,
           rawBytesB64: raw,
-          signingSeed: KeyManager.signingSeed(seed, index: checked.keyAt[at]),
-          what: 'event ${event['s']} of this identity, left unsigned,');
+          signingSeed: signingSeed,
+          what: 'event ${event['s']} of this identity, left unsigned,',
+          km: km,
+          expected: expected);
     } on EventSignatureRefused catch (e) {
       if (e.statusCode == 404 || e.statusCode == 409) {
         throw StrandedEventCannotBeFinished(checked.aid, '${event['s']}', e);
       }
       rethrow;
+    } finally {
+      signingSeed.fillRange(0, signingSeed.length, 0);
     }
+    return _after(t, sn, stored, trusted);
   }
 
-  /// The unsigned events of the identity's log this device did not ask for,
-  /// for the app to show the person whose identity it is.
+  /// What the event signed is followed by: the place it now holds and the
+  /// witnesses in force there. A founding sets the witnesses; no other event
+  /// signed late changes them.
+  _Trusted _after(String t, int sn, ParsedEvent stored, _Trusted? trusted) {
+    final b = stored['b'];
+    return _Trusted(
+        (sn: sn, digest: stored.d),
+        t == 'icp'
+            ? WitnessSet([if (b is List) for (final w in b) '$w'], int.tryParse('${stored['bt']}', radix: 16) ?? 0)
+            : trusted!.witnesses);
+  }
+
+  /// Every check an event must pass before it is signed late, with nothing
+  /// signed: the same code decides whether an event is signed and whether it is
+  /// shown to the person as refused.
+  Future<_Prepared> _check(Uint8List seed, _Checked checked, int at, _Trusted? running,
+      {required String t, required int sn, required String? digest, String? ownerAid, List<Object?>? ixnAnchors}) async {
+    final km = _keyMath;
+    if (km == null) {
+      throw StateError('this app has not given the client the core\'s key '
+          'arithmetic (KeyMath), so it cannot check an event before signing '
+          'it, and signs nothing');
+    }
+    final log = checked.log;
+    final event = log.events[at];
+    final raw = at < log.rawEventsB64.length ? log.rawEventsB64[at] : '';
+    if (raw.isEmpty) {
+      throw Exception('event ${event['s']} of ${checked.aid} was stored without the bytes it was '
+          'made from, so it is not signed');
+    }
+    // What the event follows and the witness threshold it carries on come from
+    // the key state this device trusts, never from earlier bytes the core serves.
+    final stored = await parseTheStoredEvent(km, raw);
+    final trusted = t == 'icp' ? null : await _trustedBefore(seed, checked.aid, sn, running);
+    final ExpectedEvent expected;
+    try {
+      expected = await theStoredEventThisPhraseWouldHaveMade(km, seed,
+          witnesses: await witnessesThisDeviceKnows?.call(),
+          t: t,
+          aid: checked.aid,
+          sn: sn,
+          digest: digest,
+          stored: stored,
+          prior: trusted?.tip.digest ?? '',
+          toad: trusted?.witnesses.toad ?? -1,
+          generation: checked.keyAt[at],
+          ownerAid: ownerAid,
+          ixnAnchors: ixnAnchors);
+    } on AStoredEventIsNotTheOneExpected {
+      rethrow;
+    } on NotTheEventExpected catch (e) {
+      // Shown to the person with the bytes as stored, not just refused.
+      throw AStoredEventIsNotTheOneExpected(e.difference,
+          utf8.decode(base64Decode(raw), allowMalformed: true),
+          {'t': t, 'i': checked.aid, 's': sn.toRadixString(16), if (digest != null) 'd': digest});
+    }
+    // The bytes are compared with the event expected here, as they are again
+    // when signed, so that what is shown as refused is what would be refused.
+    await expected.requireStoredIn(km, base64Decode(raw));
+    return _Prepared(km, event, raw, stored, trusted, expected);
+  }
+
+  /// The place the event at [sn] follows and the witnesses in force there, as
+  /// this device trusts them: what it has just checked and signed in this run
+  /// ([running]), otherwise [readTheKeyState]. Refuses when neither can say, or
+  /// when what it says does not end at the event before [sn].
+  Future<_Trusted> _trustedBefore(Uint8List seed, String aid, int sn, _Trusted? running) async {
+    if (running != null && running.tip.sn == sn - 1) return running;
+    final read = readTheKeyState;
+    if (read == null) {
+      throw TheKeyStateCannotBeReadToSignLate(aid, sn, 'this app gave the client no way to read it');
+    }
+    final VerifiedKeyState state;
+    try {
+      state = await read(seed);
+    } catch (e) {
+      throw TheKeyStateCannotBeReadToSignLate(aid, sn, '$e');
+    }
+    if (state.aid != aid || state.tip.sn != sn - 1) {
+      throw TheKeyStateCannotBeReadToSignLate(
+          aid, sn, 'it ends at sequence number ${state.tip.sn} of ${state.aid}, not at ${sn - 1}');
+    }
+    return _Trusted(state.tip, state.witnesses);
+  }
+
+  /// The unsigned events of the identity's log that [finishStrandedEvents]
+  /// refuses to sign, for the app to show the person whose identity it is: one
+  /// this device did not ask for, and one it did ask for whose stored bytes are
+  /// not the event expected.
+  ///
+  /// Each is the event as the log lists it. One that was asked for and refused
+  /// also carries `refused` (the first way it differs), `stored` (the stored
+  /// bytes as text) and `expected` (the event it should have been), the same
+  /// things an [AStoredEventIsNotTheOneExpected] carries. Nothing is signed.
   ///
   /// While any is there the identity is locked: [finishStrandedEvents] refuses
-  /// to sign anything, because signing past an event nobody here asked for
+  /// to sign anything, because signing past an event that is not the one wanted
   /// would build on it. It stays locked until the person approves one with
   /// [signApprovedEvent], or it is otherwise explained and removed.
-  Future<List<Map<String, dynamic>>> eventsAwaitingApproval(Uint8List seed) async {
-    final checked = await _checkedLog(seed);
+  Future<List<Map<String, dynamic>>> eventsAwaitingApproval(Uint8List seed, {String? ownerAid}) async {
+    final checked = await _checkedForSigning(seed);
     final signed = checked.log.signed;
     if (signed == null) return const [];
     final scope = await _asked.scope();
     final out = <Map<String, dynamic>>[];
+    _Trusted? trusted;
     for (var at = 0; at < checked.log.events.length; at++) {
       if (signed[at]) continue;
       final event = checked.log.events[at];
-      if (await _asked.whichAskedFor(scope, checked.aid, event, commitmentTo) == null) out.add(event);
+      final asked = await _asked.whichAskedFor(scope, checked.aid, event, commitmentTo);
+      if (asked == null) {
+        out.add(event);
+        trusted = null;
+        continue;
+      }
+      // Without the core's key arithmetic nothing can be checked, so nothing
+      // is said about an event this device did ask for.
+      if (_keyMath == null) continue;
+      final request = await _asked.theRequest(scope, asked);
+      final wanted = (request?['asked'] as Map?)?['anchors'];
+      final sn = int.parse('${request?['s'] ?? request?['expected']}', radix: 16);
+      try {
+        final p = await _check(seed, checked, at, trusted,
+            t: '${request?['t']}',
+            sn: sn,
+            digest: request?['d'] as String?,
+            ownerAid: ownerAid,
+            ixnAnchors: wanted is List ? List<Object?>.from(wanted) : null);
+        // It would be signed, so what follows it is what it leaves.
+        trusted = _after('${request?['t']}', sn, p.stored, p.trusted);
+      } on NotTheEventExpected catch (e) {
+        trusted = null;
+        out.add({
+          ...event,
+          'refused': e.difference,
+          if (e is AStoredEventIsNotTheOneExpected) ...{'stored': e.stored, 'expected': e.expected},
+        });
+      } on TheKeyStateCannotBeReadToSignLate catch (e) {
+        trusted = null;
+        out.add({...event, 'refused': e.toString()});
+      }
     }
     return out;
   }
@@ -362,46 +431,30 @@ class TheKeyInForce {
   /// would ask for, committing to its own next key. What it permits is an
   /// event this device has no record of asking for: one made on another of
   /// the person's devices, say, or an interaction they recognise.
-  Future<void> signApprovedEvent(Uint8List seed, {required String sequenceNumber, required String digest}) async {
-    final checked = await _checkedLog(seed);
+  Future<void> signApprovedEvent(Uint8List seed,
+      {required String sequenceNumber, required String digest, String? ownerAid}) async {
+    // [ownerAid] is as for [finishStrandedEvents]: from this device's own record
+    // of who the person named, never from a response of the core.
+    final checked = await _checkedForSigning(seed);
     final log = checked.log;
-    var j = -1;
-    Object? priorBt;
     for (var at = 0; at < log.events.length; at++) {
       final event = log.events[at];
-      final bt = priorBt;
-      if (_establishing.contains(event['t'])) {
-        j++;
-        priorBt = event['bt'];
-      }
       if (event['s'] != sequenceNumber || event['d'] != digest) continue;
       if (log.signed == null || log.signed![at]) {
         throw Exception('event $sequenceNumber of ${checked.aid} is not waiting for a signature');
       }
-      await _checkAndSign(seed, checked, at, j, priorBt: bt);
+      // The person has been shown the event as stored, so its seals are what
+      // they approved; everything else is checked as for any other.
+      final seals = event['a'];
+      await _checkAndSign(seed, checked, at, null,
+          t: '${event['t']}',
+          sn: int.parse(sequenceNumber, radix: 16),
+          digest: digest,
+          ownerAid: ownerAid,
+          ixnAnchors: seals is List ? List<Object?>.from(seals) : const []);
       return;
     }
     throw Exception('the key log of ${checked.aid} has no event $sequenceNumber with digest $digest');
-  }
-
-
-  static void _requireTheBytesAreTheEvent(String aid, Map<String, dynamic> event, String rawB64) {
-    Object? parsed;
-    try {
-      parsed = jsonDecode(utf8.decode(base64Decode(rawB64)));
-    } catch (_) {
-      parsed = null;
-    }
-    bool same(Object? a, Object? b) => jsonEncode(a) == jsonEncode(b);
-    if (parsed is! Map ||
-        parsed['i'] != aid ||
-        parsed['t'] != event['t'] ||
-        parsed['s'] != event['s'] ||
-        parsed['d'] != event['d'] ||
-        !same(parsed['k'], event['k'])) {
-      throw Exception('the bytes the core gave for event ${event['s']} of $aid are not that '
-          'event, so they are not signed');
-    }
   }
 }
 
@@ -442,6 +495,40 @@ class StrandedEventCannotBeFinished implements Exception {
       'of the event is repaired.';
 }
 
+/// An event signed late follows the key state this device trusts, and nothing
+/// is signed on the core's word for what came before it: the key state could
+/// not be read, or does not end where the event stands.
+class TheKeyStateCannotBeReadToSignLate implements Exception {
+  TheKeyStateCannotBeReadToSignLate(this.aid, this.sequenceNumber, this.why);
+
+  final String aid;
+  final int sequenceNumber;
+  final String why;
+
+  @override
+  String toString() => 'the event at sequence number $sequenceNumber of $aid is not signed: the key '
+      'state it follows could not be read from this device\'s own record or the identity\'s '
+      'witnesses ($why), and the core\'s word for it is not taken';
+}
+
+/// Where the log ends as this device trusts it, and the witnesses in force there.
+class _Trusted {
+  _Trusted(this.tip, this.witnesses);
+  final Place tip;
+  final WitnessSet witnesses;
+}
+
+/// An event that passed every check to be signed late, with what was checked.
+class _Prepared {
+  _Prepared(this.km, this.event, this.raw, this.stored, this.trusted, this.expected);
+  final KeyMath km;
+  final Map<String, dynamic> event;
+  final String raw;
+  final ParsedEvent stored;
+  final _Trusted? trusted;
+  final ExpectedEvent expected;
+}
+
 /// The identity's log as read and checked against this phrase.
 class _Checked {
   _Checked(this.aid, this.log, this.keyAt);
@@ -454,7 +541,7 @@ class _Checked {
 
 /// Where the identity's keys stand after any stranded event is finished.
 class KeyState {
-  KeyState(this.aid, this.index, this.establishment, this.nextSequenceNumber);
+  KeyState(this.aid, this.index, this.establishment, this.nextSequenceNumber, this.tipDigest);
 
   final String aid;
 
@@ -466,4 +553,7 @@ class KeyState {
 
   /// The sequence number the next event will have: the tip plus one.
   final int nextSequenceNumber;
+
+  /// The digest of the tip, which the next event follows.
+  final String tipDigest;
 }

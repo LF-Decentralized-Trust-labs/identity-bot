@@ -116,7 +116,7 @@ func TestAdoptAnswersTheRootSeedRefusal(t *testing.T) {
 	theRefusalWasAnswered(t, "adopt", adoptFrom(t, s, box.URL))
 }
 
-// The refusal survives identitySigningSeed and ownGenerationOf: it is still the
+// The refusal survives identitySigningSeed and ownKeyAt: it is still the
 // root-seed refusal (so a route can answer 412) as well as errKeyUnavailable.
 // Wrapping with %v instead of %w turned it into a bare errKeyUnavailable.
 func TestTheRefusalSurvivesTheSigningKeyLookups(t *testing.T) {
@@ -133,9 +133,9 @@ func TestTheRefusalSurvivesTheSigningKeyLookups(t *testing.T) {
 	if !secureenclave.IsRootSeedRefusal(err) || !errors.Is(err, errKeyUnavailable) {
 		t.Fatalf("identitySigningSeed lost the refusal: %v", err)
 	}
-	_, err = s.ownGenerationOf("DAnyKey")
+	_, _, err = s.ownKeyAt("DAnyKey")
 	if !secureenclave.IsRootSeedRefusal(err) || !errors.Is(err, errKeyUnavailable) {
-		t.Fatalf("ownGenerationOf lost the refusal: %v", err)
+		t.Fatalf("ownKeyAt lost the refusal: %v", err)
 	}
 	if err := s.keyCanSign(); !secureenclave.IsRootSeedRefusal(err) {
 		t.Fatalf("keyCanSign lost the refusal: %v", err)

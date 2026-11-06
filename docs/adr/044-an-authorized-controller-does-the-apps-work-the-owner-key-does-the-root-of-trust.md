@@ -1,8 +1,8 @@
 # ADR-044 — An authorized controller does the application's work; the owner key does the root of trust
 
-**Status:** Accepted, amended by ADR-050
+**Status:** Accepted, amended by ADR-050 and ADR-061
 **Date:** 2026-10-18
-**Amended by:** ADR-050 (One check for a controller's actions and an AI agent's capability calls, 2026-10-26)
+**Amended by:** ADR-050 (One check for a controller's actions and an AI agent's capability calls, 2026-10-26), ADR-061 (Every key event is signed before it is added, 2026-10-31)
 **Relates to:** ADR-042 (How an agent is reached, and who may manage it), ADR-038 (Who claims a machine is not who owns what it founds), ADR-027 (Hardware-gated signing-key custody)
 
 ## Context
@@ -119,7 +119,7 @@ at a place already filled, or from the identity's witnesses, verified against th
 identity's current key. It does so whether the request still waits, was refused or
 expired, or was withdrawn, before it builds any grant and on every tick, so the two key
 logs never diverge; signing is never split into a prepare and a commit, which would
-reopen the duplicity it prevents. A grant taken up that is no longer wanted (its machine
+reopen the duplicity it prevents. *(Scope, per ADR-061: this holds for the device that signs through its own core. Where a signer outside the core signs an event the core prepared, ADR-061 splits signing into a prepare and a commit and keeps duplicity out by having the signer reserve each place before it signs.)* A grant taken up that is no longer wanted (its machine
 removed, its request withdrawn or changed) is kept so the registry's log is whole, is
 never in force, and is withdrawn at once by a revocation the device signs on the same
 queue, ahead of anything else; the device signs a revocation only of a grant its own key
@@ -136,7 +136,7 @@ removed, or it is revoked directly, is withdrawn the same way: marked withdrawin
 never in force, and its revocation signed on the device; a machine re-granted there has
 its old grant's withdrawal asked for ahead of the new grant. The engine itself appends no
 interaction to a key log unless that identity's current key signed it, checked in one
-place, so no path can leave an unsigned event there. Rotations are not yet held to this: a rotation is signed by its
+place, so no path can leave an unsigned event there. *(Superseded by ADR-061, from here to "It changes once the app signs each event before it is added": every key event, rotations included, is now signed before it is added, through a prepare and a commit, so an identity whose key the app holds can rotate and interact, and no rotation is appended unsigned.)* Rotations are not yet held to this: a rotation is signed by its
 new keys, which this Identity Agent does not hold (the owner's device, a recovering
 client, or each owner in a multi-owner change), and today each of those signs it only
 after it is appended. Guarding rotations needs the rotation built, signed by the new keys
@@ -151,7 +151,7 @@ added it, which is too late, so through the core such an identity can be neither
 nor extended (no interaction, no credential issued), and the core says so in those words.
 Before this the core appended those events unsigned, so the key logs they made were not
 valid. It changes once the app signs each event before it is added. An Identity Agent whose key log holds events written by an earlier version
-without the key, which the device never had, asks the device for nothing and says so. Only one
+without the key, which the device never had, asks the device for nothing and says so. *(This holds for the device that signs through its own core. Where a signer outside the core signs, ADR-061 section 3 answers a commit onto such a log `409 unsigned_history`, and the signer signs those events in place first.)* Only one
 interaction waits for the device at a time, as each extends the same tip; another is kept
 and built once the one before it is appended, refused or expired. When a signature comes back it must be over the request's own
 payload, which must be the interaction kept; the grant is derived again from what was kept

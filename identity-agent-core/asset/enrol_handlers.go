@@ -168,7 +168,9 @@ func (h *Handler) HandleEnrol(w http.ResponseWriter, r *http.Request) {
 		body.PublicKey, body.NextPublicKey, enrolment.DisplayName, rootAID)
 	if err != nil {
 		release()
-		h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusInternalServerError)
+		// The key is the machine's, so this core has no signature to give the
+		// delegated founding and the engine refuses it unsigned (ADR-061).
+		h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusConflict)
 		return
 	}
 	// The delegation is only real once our own KEL records it. Persisting the

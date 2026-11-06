@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 
@@ -66,6 +67,17 @@ func TestTheCoreRecognisesAKeyTheAppDerived(t *testing.T) {
 
 	// And the engine founds and rotates on keys written this way.
 	e := keriengine.New()
+	// Each event is signed by the key it names, from the seeds the vectors
+	// hold, as the app would sign it: nothing is added unsigned.
+	e.SetEventSignature(func(aid, key string, raw []byte) (string, error) {
+		for _, k := range ph.Keys {
+			if k.PublicKeyQB64 == key {
+				seed, _ := hex.DecodeString(k.SeedHex)
+				return signEventBytes(raw, seed)
+			}
+		}
+		return "", fmt.Errorf("no seed for %s", key)
+	})
 	icp, err := e.Incept(drivers.InceptionRequest{PublicKey: ph.Keys[0].PublicKeyQB64, NextPublicKey: ph.Keys[1].PublicKeyQB64})
 	if err != nil {
 		t.Fatalf("founding on the app's keys: %v", err)

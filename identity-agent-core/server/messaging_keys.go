@@ -68,26 +68,34 @@ func (s *CoreServer) deriveMessagingKeys(aid string) (*didcomm.KeySet, int, erro
 	if rerr != nil {
 		return nil, 0, rerr
 	}
+	// An identity founded before the fixed branch keeps the branch its
+	// record names until its keyset is replaced (ADR-061 section 8).
 	if found && rec.Index > 0 {
 		ks, derr := s.keysAtIndex(rootSeed, aid, rec.Index)
 		return ks, rec.Index, derr
 	}
 
-	if s.DataStore == nil {
-		return nil, 0, fmt.Errorf("no store to allocate a branch for messaging keys")
+	// Every other identity's messaging keys come from the fixed branch, so
+	// the phrase alone finds them: generation 0 of m/44'/0'/0'/7000002'/g'.
+	// Index 0 in the record means this branch; no allocated branch is 0.
+	ks, err := fixedBranchMessagingKeys(rootSeed, aid, 0)
+	if err != nil {
+		return nil, 0, err
 	}
-	idx, aerr := s.DataStore.AllocateNextRelationshipIndex(messagingKeysPurpose)
-	if aerr != nil {
-		return nil, 0, fmt.Errorf("could not allocate a branch for messaging keys: %w", aerr)
-	}
-	ks, derr := s.keysAtIndex(rootSeed, aid, idx)
-	if derr != nil {
-		return nil, 0, derr
-	}
-	if werr := s.recordMessagingKeyIndex(aid, idx); werr != nil {
+	if werr := s.recordMessagingKeyIndex(aid, 0); werr != nil {
 		return nil, 0, werr
 	}
-	return ks, idx, nil
+	return ks, 0, nil
+}
+
+// fixedBranchMessagingKeys is the messaging keyset of generation g on the fixed
+// branch, the one an app derives for an identity whose key it holds.
+func fixedBranchMessagingKeys(rootSeed []byte, aid string, g int) (*didcomm.KeySet, error) {
+	seed, err := backup.DerivePairwiseSeed(rootSeed, backup.MessagingBranch, g)
+	if err != nil {
+		return nil, fmt.Errorf("could not derive the messaging-key seed: %w", err)
+	}
+	return didcomm.DeriveKeySet(aid, seed)
 }
 
 func (s *CoreServer) keysAtIndex(rootSeed []byte, aid string, idx int) (*didcomm.KeySet, error) {

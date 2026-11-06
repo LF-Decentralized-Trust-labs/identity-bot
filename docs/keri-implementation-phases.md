@@ -9,6 +9,14 @@ Each phase has a corresponding interoperability test in `tests/` that proves the
 > and mobile embeds via `gomobile`. The phases below are kept as the record of what was
 > built and when — read the bridge rows as history, not as the current architecture.
 
+> **Superseded where it names `/api/cesr/encode` or `0B` as the app's signing path
+> (ADR-061).** The app writes every signature itself with keymath, in the core's own
+> code: a signature on a key event is indexed (`AA...`, place 0), and a signature that
+> is not on a key event (a signed payload, a credential presentation) is unindexed
+> (`0B...`), which is the form `/api/verify` and `/api/credential/verify` read against a
+> bare public key. `/api/cesr/encode` stays for apps outside this repository. The
+> phases below are the record of how it was proved, not the current signing path.
+
 ---
 
 ## Phase 1 — CESR Signing ✓ COMPLETE

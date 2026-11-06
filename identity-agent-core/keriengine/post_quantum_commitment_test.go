@@ -84,7 +84,10 @@ func bytes32(fill byte) []byte { return fillBytes(32, fill) }
 // keyFrom is the public key made from a seed of fill: a key has to be a point
 // on the curve, which 32 arbitrary bytes are not.
 func keyFrom(fill byte) []byte {
-	return ed25519.NewKeyFromSeed(bytes32(fill)).Public().(ed25519.PublicKey)
+	priv := ed25519.NewKeyFromSeed(bytes32(fill))
+	pub := priv.Public().(ed25519.PublicKey)
+	rememberKey(iacrypto.VerkeyQB64(pub), priv)
+	return pub
 }
 func bytes64(fill byte) []byte { return fillBytes(64, fill) }
 func fillBytes(n int, fill byte) []byte {

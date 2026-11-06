@@ -75,12 +75,16 @@ func aGateWorldWhere(t *testing.T, issueeIsSigner bool, held issuerLogHeld, how 
 		t.Fatal(err)
 	}
 	hpub, hnext := newKeyPair(t)
-	holder, err := keriengine.New().CreateInceptionNamed(hpub, hnext, "holder")
+	holderEngine := keriengine.New()
+	holderEngine.SetEventSignature(signsWithTheKeysMadeHere)
+	holder, err := holderEngine.CreateInceptionNamed(hpub, hnext, "holder")
 	if err != nil {
 		t.Fatal(err)
 	}
 	opub, onext := newKeyPair(t)
-	other, err := keriengine.New().CreateInceptionNamed(opub, onext, "other")
+	otherEngine := keriengine.New()
+	otherEngine.SetEventSignature(signsWithTheKeysMadeHere)
+	other, err := otherEngine.CreateInceptionNamed(opub, onext, "other")
 	if err != nil {
 		t.Fatal(err)
 	}

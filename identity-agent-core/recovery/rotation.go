@@ -21,6 +21,11 @@ type RotationRequest struct {
 	NewPublicKey     string `json:"new_public_key"`
 	NewNextPublicKey string `json:"new_next_public_key"`
 	CesrSignature    string `json:"cesr_signature,omitempty"`
+	// RawB64 and Sigs are a rotation the identity's key holder prepared and
+	// signed itself (ADR-061), committed in place of one built here. A
+	// rotation following an interaction it keeps supersedes those after it.
+	RawB64 string   `json:"raw_b64,omitempty"`
+	Sigs   []string `json:"sigs,omitempty"`
 }
 
 // RotationResult is the outcome of a mandatory post-restore rotation.
@@ -92,8 +97,14 @@ func (t *RotationTracker) RequireCompleted(sessionID string) error {
 
 // ValidateRotationRequest ensures required rotation fields are present.
 func ValidateRotationRequest(req RotationRequest) error {
+	if req.RawB64 != "" {
+		if len(req.Sigs) == 0 {
+			return fmt.Errorf("a rotation the key holder prepared is committed with its signatures (sigs)")
+		}
+		return nil
+	}
 	if req.Name == "" || req.NewPublicKey == "" || req.NewNextPublicKey == "" {
-		return fmt.Errorf("name, new_public_key, and new_next_public_key are required")
+		return fmt.Errorf("name, new_public_key, and new_next_public_key are required, or raw_b64 and sigs")
 	}
 	return nil
 }

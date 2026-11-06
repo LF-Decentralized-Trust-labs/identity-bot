@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"identity-agent-core/keriengine"
 	"identity-agent-core/secureenclave"
 )
 
@@ -84,6 +85,19 @@ func TestAMachineThatCanProveItselfIsNotStopped(t *testing.T) {
 	}
 }
 
+// refuseFoundingHere makes this machine one that may not found an identity,
+// for the rest of the test.
+func refuseFoundingHere(t *testing.T) {
+	t.Helper()
+	restore := secureenclave.UseFoundingVerdict(func() foundingVerdict {
+		return foundingVerdict{
+			Permitted: false, Platform: "macos",
+			Why: cannotProveItsSoftware, Instead: actForOneInstead,
+		}
+	})
+	t.Cleanup(restore)
+}
+
 // EVERY WAY IN IS REFUSED, not just the one named "inception".
 //
 // A gate on one route out of several is worse than no gate, because it reads as
@@ -98,23 +112,13 @@ func TestAMachineThatCanProveItselfIsNotStopped(t *testing.T) {
 // sight, and if it is not here somebody has to notice, which is what this test
 // is for.
 func TestEveryWayAnIdentityCanBeginIsRefusedOnAMachineThatMayNotFound(t *testing.T) {
-	refuseHere := func(t *testing.T) {
-		t.Helper()
-		restore := secureenclave.UseFoundingVerdict(func() foundingVerdict {
-			return foundingVerdict{
-				Permitted: false, Platform: "macos",
-				Why: cannotProveItsSoftware, Instead: actForOneInstead,
-			}
-		})
-		t.Cleanup(restore)
-	}
-
 	for _, door := range []struct {
 		what   string
 		method string
 		path   string
 		body   string
 		call   func(*CoreServer, http.ResponseWriter, *http.Request)
+		engine bool // the route prepares through the in-process engine
 	}{
 		{
 			what: "founding directly", method: http.MethodPost, path: "/api/inception",
@@ -148,10 +152,27 @@ func TestEveryWayAnIdentityCanBeginIsRefusedOnAMachineThatMayNotFound(t *testing
 			body: `{"aid":"EWHATEVER","event_type":"icp","sequence_number":0}`,
 			call: (*CoreServer).handleStoreEvent,
 		},
+		{
+			// The founding an app holds the key of: prepared here, signed by
+			// the app, committed here.
+			what:   "preparing a founding",
+			method: http.MethodPost, path: "/api/events/prepare",
+			body:   `{"t":"icp","k":["D1"],"kt":"1","n":["E2"],"nt":"1"}`,
+			call:   (*CoreServer).handlePrepareEvent,
+			engine: true,
+		},
+		{
+			what:   "asking who would witness a founding",
+			method: http.MethodGet, path: "/api/events/witnesses-for-a-founding",
+			call: (*CoreServer).handleWitnessesForAFounding,
+		},
 	} {
 		t.Run(door.what, func(t *testing.T) {
 			s := agentWithNoIdentity(t)
-			refuseHere(t)
+			if door.engine {
+				s.KeriDriver = keriengine.New()
+			}
+			refuseFoundingHere(t)
 
 			req := httptest.NewRequest(door.method, door.path, strings.NewReader(door.body))
 			req.RemoteAddr = "127.0.0.1:1234"

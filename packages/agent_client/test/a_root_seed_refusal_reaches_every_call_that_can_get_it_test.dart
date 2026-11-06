@@ -11,6 +11,8 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:test/test.dart';
 
+import 'support/the_core.dart';
+
 // The core's refusal, as its refuseIfRootSeedRefused writes it.
 const _title = 'an identity cannot be created on this computer';
 const _why = 'this phone\'s secure hardware is not available to this app yet';
@@ -35,9 +37,13 @@ void main() {
   });
 
   test('founding through the local core throws the refusal, not a bare Exception', () async {
+    // The founding is prepared by the core and checked here before anything
+    // is signed, which takes the core's key arithmetic.
+    final km = await keyMathOf(await buildTheCore('root-seed-refusal'));
     final keri = LocalCoreKeriService(
       baseUrl: 'http://core.test',
       client: MockClient((req) async => _refusal()),
+      keyMath: km,
     );
     await SecureKeyStore.saveMnemonic(
         'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'.split(' '));
@@ -49,12 +55,20 @@ void main() {
         _theRefusal());
   });
 
-  test('founding through CoreService throws the refusal', () async {
-    final core = _coreAnswering(_refusal);
-    await expectLater(
-        core.createInception(
-            publicKey: 'Dk', nextPublicKey: 'Dn', signingSeed: Uint8List(32)),
-        _theRefusal());
+  test('a founding refused when it is prepared throws the refusal', () async {
+    final km = await keyMathOf(await buildTheCore('root-seed-refusal-prepare'));
+    final keri = LocalCoreKeriService(
+      baseUrl: 'http://core.test',
+      client: MockClient((req) async =>
+          req.url.path == '/api/events/witnesses-for-a-founding'
+              ? http.Response(jsonEncode({'witnesses': [], 'toad': 0}), 200)
+              : _refusal()),
+      keyMath: km,
+    );
+    const phrase =
+        'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+    await SecureKeyStore.saveMnemonic(phrase.split(' '));
+    await expectLater(keri.inceptAid(name: 'x', code: phrase), _theRefusal());
   });
 
   test('minting the identity that owns a machine throws the refusal', () async {

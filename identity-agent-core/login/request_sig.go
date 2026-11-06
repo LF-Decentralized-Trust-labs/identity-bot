@@ -3,6 +3,7 @@ package login
 import (
 	"fmt"
 
+	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
 )
 
@@ -11,6 +12,12 @@ import (
 // The Ask helpers above sign a canonicalised JSON document. Authorising an HTTP
 // request needs the same Ed25519 + CESR qb64 primitives over a string the caller
 // composes itself, so these expose them without inventing a second crypto path.
+
+// FoundingSigner signs the bytes of a founding with seed, for the engine to
+// found an identity whose key the caller holds (drivers.FoundingSigner).
+func FoundingSigner(seed []byte) drivers.FoundingSigner {
+	return func(raw []byte) (string, error) { return SignString(string(raw), seed) }
+}
 
 // SignString signs body with a 32-byte Ed25519 seed and returns a CESR qb64
 // signature (code 0B).

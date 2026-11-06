@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 
 	"identity-agent-core/actions"
 )
@@ -1093,12 +1094,100 @@ CREATE TABLE IF NOT EXISTS tel_push_retry (
     PRIMARY KEY (issuer_aid, said)
 );
 `},
+	{
+		Version:     51,
+		Description: "Keep every signature over a key event, mark the events already unsigned, and keep what a recovery rotation supersedes",
+		SQL: `
+-- An event with several signers carries several signatures, so they are kept
+-- as a JSON list; cesr_signature stays the first, for readers of one.
+ALTER TABLE kel ADD COLUMN signatures TEXT NOT NULL DEFAULT '';
+
+-- Every event already in a log without a signature is marked, once, here.
+-- Only a marked event may have a signature attached after it was added; an
+-- event added from now on is added signed or not at all.
+ALTER TABLE kel ADD COLUMN unsigned_at_upgrade INTEGER NOT NULL DEFAULT 0;
+UPDATE kel SET unsigned_at_upgrade = 1 WHERE cesr_signature = '';
+
+-- Interactions a recovery rotation supersedes are moved here, never deleted.
+-- Keyed by the event itself, not a counter, so a restored backup's rows are
+-- added beside this machine's rather than written over rows that happen to
+-- share a number.
+CREATE TABLE IF NOT EXISTS kel_superseded (
+    aid                 TEXT NOT NULL,
+    seq_num             INTEGER NOT NULL,
+    event_type          TEXT NOT NULL,
+    event_json          TEXT NOT NULL,
+    public_key          TEXT NOT NULL DEFAULT '',
+    next_key_digest     TEXT NOT NULL DEFAULT '',
+    timestamp           TEXT NOT NULL DEFAULT '',
+    cesr_signature      TEXT NOT NULL DEFAULT '',
+    raw_bytes_b64       TEXT NOT NULL DEFAULT '',
+    signatures          TEXT NOT NULL DEFAULT '',
+    unsigned_at_upgrade INTEGER NOT NULL DEFAULT 0,
+    superseded_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    PRIMARY KEY (aid, seq_num, event_json)
+);
+CREATE INDEX IF NOT EXISTS idx_kel_superseded_aid ON kel_superseded(aid);
+`},
+	{
+		Version:     52,
+		Description: "Keep every signature over an event a witness holds, what a recovery rotation supersedes there, and a conflicting event as evidence",
+		SQL: `
+-- A JSON list of the controller signatures that verified; cesr_signature
+-- stays the first, for readers of one.
+ALTER TABLE witness_kel_events ADD COLUMN signatures TEXT NOT NULL DEFAULT '';
+
+-- Interactions a recovery rotation supersedes at a witness, never deleted;
+-- keyed by the event, so a restored backup's rows are added, not written over.
+CREATE TABLE IF NOT EXISTS witness_kel_superseded (
+    signer_aid     TEXT NOT NULL,
+    sequence_num   INTEGER NOT NULL,
+    event_said     TEXT NOT NULL,
+    raw_bytes_b64  TEXT NOT NULL DEFAULT '',
+    signatures     TEXT NOT NULL DEFAULT '',
+    superseded_by  TEXT NOT NULL,
+    superseded_at  TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (signer_aid, event_said)
+);
+CREATE INDEX IF NOT EXISTS idx_witness_kel_superseded_aid ON witness_kel_superseded(signer_aid);
+
+-- A correctly signed event at a place the witness already holds a different
+-- one at, which may not replace it: with the held event, that is evidence of
+-- duplicity, kept once per event.
+CREATE TABLE IF NOT EXISTS witness_kel_conflicts (
+    signer_aid     TEXT NOT NULL,
+    sequence_num   INTEGER NOT NULL,
+    event_said     TEXT NOT NULL,
+    raw_bytes_b64  TEXT NOT NULL,
+    signatures     TEXT NOT NULL DEFAULT '',
+    held_said      TEXT NOT NULL,
+    seen_at        TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (signer_aid, event_said)
+);
+`},
+}
+
+// ReapplyIdentityMigration runs one identity migration's SQL again, for a test
+// that proves what that migration does to data it did not see the first time.
+// It records nothing, and no later migration is involved.
+func ReapplyIdentityMigration(db *sql.DB, version int) error {
+	for _, m := range identityMigrations {
+		if m.Version == version {
+			_, err := db.Exec(m.SQL)
+			return err
+		}
+	}
+	return fmt.Errorf("there is no identity migration %d", version)
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.
 func ApplyIdentityMigrations(db *sql.DB) error {
 	if err := ensureIdentityMigrationsTable(db); err != nil {
 		return fmt.Errorf("failed to create identity migrations table: %w", err)
+	}
+
+	if err := renumberBranchMigrations(db); err != nil {
+		return err
 	}
 
 	current, err := identityCurrentVersion(db)
@@ -1145,6 +1234,118 @@ func ApplyIdentityMigrations(db *sql.DB) error {
 	}
 
 	return nil
+}
+
+// signatureMigrations are the two migrations that keep every signature over a
+// key event, by the start of their description. They were recorded under other
+// numbers on installs made before main's migrations 46 to 50 landed: 46 and 47,
+// then 47 and 48.
+var signatureMigrations = []string{
+	"Keep every signature over a key event",
+	"Keep every signature over an event a witness holds",
+}
+
+// renumberBranchMigrations brings a database that ran the signature migrations
+// under an earlier number to the numbers they have now. Left alone, such a
+// database would count main's migrations at those numbers as done without
+// ever running them, and then run a signature migration a second time and fail
+// on a column it already has.
+//
+// A migration is recognised by what it was recorded as, not by its number. The
+// signature migrations' records move to their numbers, and every other
+// migration below the newest of them that has no record at its number is run
+// and recorded: each of those adds only tables and indexes, guarded, so it
+// is safe on any database. Does nothing for any other database.
+func renumberBranchMigrations(db *sql.DB) error {
+	rows, err := db.Query(`SELECT version, description FROM identity_schema_migrations`)
+	if err != nil {
+		return fmt.Errorf("failed to read identity migrations: %w", err)
+	}
+	recorded := map[int]string{}
+	for rows.Next() {
+		var v int
+		var d string
+		if err := rows.Scan(&v, &d); err != nil {
+			rows.Close()
+			return fmt.Errorf("failed to read identity migrations: %w", err)
+		}
+		recorded[v] = d
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("failed to read identity migrations: %w", err)
+	}
+
+	numberOf := func(prefix string) int {
+		for _, m := range identityMigrations {
+			if strings.HasPrefix(m.Description, prefix) {
+				return m.Version
+			}
+		}
+		return 0
+	}
+	moves := map[int]int{} // recorded number -> number now
+	newest := 0
+	for _, prefix := range signatureMigrations {
+		now := numberOf(prefix)
+		if now == 0 {
+			return fmt.Errorf("there is no identity migration %q", prefix)
+		}
+		for v, d := range recorded {
+			if strings.HasPrefix(d, prefix) && v != now {
+				moves[v] = now
+				if now > newest {
+					newest = now
+				}
+			}
+		}
+	}
+	if len(moves) == 0 {
+		return nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// Moved, not rewritten, so each keeps when it was applied. Every number a
+	// record moves to is above every number one moves from, so no move lands
+	// on a record still to be moved.
+	for from, to := range moves {
+		if _, err := tx.Exec(`UPDATE identity_schema_migrations SET version = ? WHERE version = ?`, to, from); err != nil {
+			return fmt.Errorf("failed to renumber identity migrations: %w", err)
+		}
+		delete(recorded, from)
+	}
+	for _, m := range identityMigrations {
+		if m.Version >= newest {
+			break
+		}
+		// A number with a record is done, whatever its description says: the
+		// descriptions of some early migrations were reworded after installs
+		// recorded them.
+		if _, done := recorded[m.Version]; done || isSignatureMigration(m.Description) {
+			continue
+		}
+		if _, err := tx.Exec(m.SQL); err != nil {
+			return fmt.Errorf("failed to apply identity migration %d: %w", m.Version, err)
+		}
+		if _, err := tx.Exec(`INSERT INTO identity_schema_migrations (version, description) VALUES (?, ?)`,
+			m.Version, m.Description); err != nil {
+			return fmt.Errorf("failed to record identity migration %d: %w", m.Version, err)
+		}
+	}
+	return tx.Commit()
+}
+
+func isSignatureMigration(description string) bool {
+	for _, prefix := range signatureMigrations {
+		if strings.HasPrefix(description, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // seedShareActionsFromRegistry inserts any share-menu actions declared in the

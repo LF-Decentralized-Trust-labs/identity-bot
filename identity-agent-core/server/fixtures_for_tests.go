@@ -612,6 +612,18 @@ func everyEntry(core map[string]string, addons func(Addon) map[string]string) ma
 	return out
 }
 
+// signingWith signs a founding with a software signer a test generated, which
+// is how a key the engine under test does not hold signs its own founding.
+func signingWith(s *keri.SoftwareSigner) drivers.FoundingSigner {
+	return func(raw []byte) (string, error) {
+		sig, err := s.Sign(raw)
+		if err != nil {
+			return "", err
+		}
+		return keri.MatterQB64(keri.CodeEd25519Sig, sig)
+	}
+}
+
 // foundedWith founds the organisation in s, naming witnesses when given, and
 // delegates an AI agent from it.
 func foundedWith(t coretypes.TB, s *CoreServer, witnesses []string, toad int) (*CoreServer, *asset.Asset) {
@@ -621,7 +633,7 @@ func foundedWith(t coretypes.TB, s *CoreServer, witnesses []string, toad int) (*
 	aNext, _ := keri.GenerateSigner(true)
 	aPub, _ := aSigner.PublicKey()
 	aNextPub, _ := aNext.PublicKey()
-	dip, err := e.CreateDelegatedInception(aPub, aNextPub, "Research assistant", rootAID)
+	dip, err := e.CreateDelegatedInception(aPub, aNextPub, "Research assistant", rootAID, signingWith(aSigner))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -708,6 +720,7 @@ func foundOrganisation(t coretypes.TB, s *CoreServer, witnesses []string, toad i
 	founding := keriengine.New()
 	root, err := founding.Incept(drivers.InceptionRequest{
 		PublicKey: owner.PublicKey, NextPublicKey: nextPub, Name: "owner", Witnesses: witnesses, Toad: toad,
+		Sign: func(raw []byte) (string, error) { return signEventBytes(raw, seed) },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -731,7 +744,7 @@ func foundOrganisation(t coretypes.TB, s *CoreServer, witnesses []string, toad i
 	}
 	if _, err := e.ReloadIdentity(&drivers.DriverReloadIdentityRequest{
 		AID: root.AID, PublicKey: root.PublicKey, NextKeyDigest: root.NextKeyDigest,
-		KEL: kel.KEL, RawEventsB64: kel.RawEventsB64,
+		KEL: kel.KEL, RawEventsB64: kel.RawEventsB64, Signatures: [][]string{root.Signatures},
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -9,6 +9,11 @@ import (
 	keri "github.com/grapeid/keri-go"
 )
 
+// ErrNoPostQuantumCodes is the refusal of a post-quantum key in a build that
+// cannot read one: CESR has assigned no code for it yet. It is iacrypto's, so
+// every path that would publish such a key refuses with the same error.
+var ErrNoPostQuantumCodes = iacrypto.ErrNoPostQuantumCodes
+
 // CreateHybridInception founds an identity holding classical and post-quantum
 // keys together.
 //
@@ -22,7 +27,14 @@ import (
 // half anyone can rebuild from its seed, so an identity founded on it would
 // belong to everyone; it is for test vectors only
 // (iacrypto.SyntheticHybridKeyMaterial).
+//
+// It names a post-quantum key in k, under a code CESR has not assigned, so only
+// a build with keri-go's kerigo_pqtest tag can read the event. Any other build
+// refuses here rather than found an identity whose log no verifier accepts.
 func (e *Engine) CreateHybridInception(name string) (*drivers.DriverHybridInceptionResponse, error) {
+	if !keri.PostQuantumTestCodes() {
+		return nil, ErrNoPostQuantumCodes
+	}
 	material, secrets, err := iacrypto.GenerateHybridKeyMaterial()
 	if err != nil {
 		return nil, fmt.Errorf("generating hybrid key material: %w", err)

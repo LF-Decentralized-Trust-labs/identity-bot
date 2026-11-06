@@ -86,23 +86,73 @@ class KeyManager {
   /// seed" over [seed], and each step of [path] — every one hardened, the only
   /// kind Ed25519 has — is HMAC-SHA512 under the chain code over 0x00, the
   /// parent key and the index, big-endian. Returns the 32-byte private key.
+  ///
+  /// This function's own copies of every intermediate key, chain code and
+  /// HMAC input are zeroed before it returns. The hashing libraries keep
+  /// copies of their own, which Dart gives no way to reach; nor can a Dart
+  /// string be zeroed, so a phrase or seed that passes through one (the words
+  /// from secure storage, a seed in a JSON body to the core) lingers until the
+  /// memory is reused. Bytes are kept as bytes wherever an interface allows.
   static Uint8List slip10Ed25519(Uint8List seed, List<int> path) {
+    for (final step in path) {
+      if (step < _hardened || step > 0xFFFFFFFF) {
+        throw ArgumentError.value(
+            step, 'path', 'every Ed25519 step is hardened');
+      }
+    }
+    void wipe(List<int> b) => b.fillRange(0, b.length, 0);
     var i = Hmac(sha512, utf8.encode('ed25519 seed')).convert(seed).bytes;
     var key = i.sublist(0, 32);
     var chain = i.sublist(32);
+    wipe(i);
     for (final step in path) {
-      if (step < _hardened || step > 0xFFFFFFFF) {
-        throw ArgumentError.value(step, 'path', 'every Ed25519 step is hardened');
-      }
       final data = Uint8List(37)
         ..[0] = 0
         ..setRange(1, 33, key)
         ..buffer.asByteData().setUint32(33, step);
       i = Hmac(sha512, chain).convert(data).bytes;
+      wipe(data);
+      wipe(key);
+      wipe(chain);
       key = i.sublist(0, 32);
       chain = i.sublist(32);
+      wipe(i);
     }
-    return Uint8List.fromList(key);
+    final out = Uint8List.fromList(key);
+    wipe(key);
+    wipe(chain);
+    return out;
+  }
+
+  /// The public key of the child seed [signingSeed], in qb64, with the private
+  /// key made from it zeroed. The seed itself is the caller's.
+  static String publicKeyOf(Uint8List signingSeed) {
+    final privateKey = ed.newKeyFromSeed(signingSeed);
+    try {
+      return AgentKeyPair(
+        publicKey: Uint8List.fromList(ed.public(privateKey).bytes),
+        privateKey: Uint8List(0),
+      ).publicKeyEncoded;
+    } finally {
+      privateKey.bytes.fillRange(0, privateKey.bytes.length, 0);
+    }
+  }
+
+  /// The public key at [index] in the identity's chain, in qb64, with the
+  /// child seed and private key it was derived from zeroed: for every place
+  /// that needs a key's public half and not its private one.
+  static String publicKeyAt(Uint8List seed, int index) {
+    final child = signingSeed(seed, index: index);
+    final privateKey = ed.newKeyFromSeed(child);
+    try {
+      return AgentKeyPair(
+        publicKey: Uint8List.fromList(ed.public(privateKey).bytes),
+        privateKey: Uint8List(0),
+      ).publicKeyEncoded;
+    } finally {
+      child.fillRange(0, child.length, 0);
+      privateKey.bytes.fillRange(0, privateKey.bytes.length, 0);
+    }
   }
 
   /// The key pair at [index] in the identity's chain (see [signingSeed]).

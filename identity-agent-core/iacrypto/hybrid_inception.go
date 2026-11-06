@@ -5,6 +5,7 @@ import (
 	"crypto/sha3"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	keri "github.com/grapeid/keri-go"
 )
@@ -152,7 +153,15 @@ func BuildHybridDelegatedInception(m HybridKeyMaterial, delegatorAID string) (*H
 	return buildHybrid(m, delegatorAID)
 }
 
+// ErrNoPostQuantumCodes is the refusal of a post-quantum key in a build that
+// cannot read one: CESR has assigned no code for it yet (ADR-061, amending
+// ADR-022), so a default build publishes none.
+var ErrNoPostQuantumCodes = errors.New("this build cannot found an identity on a post-quantum key: CESR has assigned no code for one yet")
+
 func buildHybrid(m HybridKeyMaterial, delegatorAID string) (*HybridInceptionResult, error) {
+	if !keri.PostQuantumTestCodes() {
+		return nil, ErrNoPostQuantumCodes
+	}
 	cesr, err := materialToCESR(m)
 	if err != nil {
 		return nil, err
@@ -177,18 +186,18 @@ func buildHybrid(m HybridKeyMaterial, delegatorAID string) (*HybridInceptionResu
 	if delegatorAID != "" {
 		raw, err = keri.BuildDelegatedInception(keri.DelegationInput{
 			Keys:        []string{cesr.Ed25519Signing, cesr.MLDSA65Signing},
-			Isith:       json.RawMessage(`"1"`),
+			Isith:       json.RawMessage(`"2"`),
 			NextDigests: []string{cesr.NextEd25519Digest, cesr.NextMLDSA65Digest},
-			Nsith:       json.RawMessage(`"1"`),
+			Nsith:       json.RawMessage(`"2"`),
 			Data:        []json.RawMessage{anchor},
 			Delegator:   delegatorAID,
 		})
 	} else {
 		raw, err = keri.BuildInception(keri.InceptionInput{
 			Keys:        []string{cesr.Ed25519Signing, cesr.MLDSA65Signing},
-			Isith:       json.RawMessage(`"1"`),
+			Isith:       json.RawMessage(`"2"`),
 			NextDigests: []string{cesr.NextEd25519Digest, cesr.NextMLDSA65Digest},
-			Nsith:       json.RawMessage(`"1"`),
+			Nsith:       json.RawMessage(`"2"`),
 			Data:        []json.RawMessage{anchor},
 		})
 	}

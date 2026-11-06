@@ -188,7 +188,7 @@ func (s *CoreServer) tryFirstContact(w http.ResponseWriter, r *http.Request,
 		return true
 	}
 	kid := env.Recipients[0].Header.Kid
-	has, err := s.hasKeySet(kid)
+	has, err := s.hasRecipientKeySet(kid)
 	if err != nil {
 		jsonError(w, "recipient keys unavailable", http.StatusServiceUnavailable)
 		return true
@@ -202,7 +202,11 @@ func (s *CoreServer) tryFirstContact(w http.ResponseWriter, r *http.Request,
 		jsonError(w, "recipient keyset error", statusForUnreadable(err, http.StatusInternalServerError))
 		return true
 	}
-	jwm, err := didcomm.UnpackAuthcrypt(rcpt, did, env)
+	var jwm *didcomm.JWM
+	err = s.openWithRecipientKeys(kid, rcpt, func(ks *didcomm.KeySet) (e error) {
+		jwm, e = didcomm.UnpackAuthcrypt(ks, did, env)
+		return e
+	})
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusUnauthorized)
 		return true

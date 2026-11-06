@@ -236,6 +236,7 @@ func (s *CoreServer) ensureKeriContactIs(oobiURL, expected string) (*store.Conta
 			iacrypto.VerkeyQB64(pub),
 			iacrypto.VerkeyQB64(nextPub),
 			"rel-"+oobiData.AID,
+			login.FoundingSigner(pwSeed),
 		); ierr == nil && icp.AID != "" {
 			contact.RelationshipAID = icp.AID
 			log.Printf("[identity-agent-core] EnsureKeriContact: HD-derived (index %d) pairwise P-AID %s for %s", idx, icp.AID, oobiData.AID)

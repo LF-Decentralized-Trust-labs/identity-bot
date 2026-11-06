@@ -194,6 +194,7 @@ func TestASessionCannotChangeTheIdentityItself(t *testing.T) {
 		{"POST", "/api/signer/invites"},
 		{"POST", "/api/signing-requests/{id}/fulfil"},
 		{"POST", "/api/reset"},
+		{"POST", "/api/store/event"},
 	} {
 		reason, forbidden := requiresTheKeyItself(route.method, route.pattern)
 		if !forbidden {

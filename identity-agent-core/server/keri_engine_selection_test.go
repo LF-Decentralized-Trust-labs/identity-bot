@@ -2,6 +2,8 @@ package server
 
 import (
 	"testing"
+
+	keri "github.com/grapeid/keri-go"
 )
 
 // Every core comes up with a working KERI engine, on every platform.
@@ -40,9 +42,11 @@ func TestEveryCoreGetsAWorkingKeriEngine(t *testing.T) {
 	}
 
 	// It must actually work, not merely exist.
-	pub := "DIqI4910CfGV_VLbLTy6XXLKZwm_HZQSG_N0iAG0D29c"
-	next := "DIE5dw6ofRdfVqNUZsNMfszLjYqRtO43ol32D1uPybOU"
-	got, err := s.KeriDriver.CreateInceptionNamed(pub, next, "mobile-test")
+	holder, _ := keri.GenerateSigner(true)
+	spare, _ := keri.GenerateSigner(true)
+	pub, _ := holder.PublicKey()
+	next, _ := spare.PublicKey()
+	got, err := s.KeriDriver.CreateInceptionNamed(pub, next, "mobile-test", signingWith(holder))
 	if err != nil {
 		t.Fatalf("the engine could not create an identity: %v", err)
 	}

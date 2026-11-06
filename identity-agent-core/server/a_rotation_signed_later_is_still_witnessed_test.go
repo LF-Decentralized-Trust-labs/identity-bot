@@ -17,6 +17,7 @@ import (
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/keriengine"
+	"identity-agent-core/login"
 	"identity-agent-core/store"
 	"identity-agent-core/witness"
 )
@@ -101,7 +102,8 @@ func foundOnDerivedKeys(t *testing.T, witnesses []string) *CoreServer {
 	seed0, pub0 := key(0)
 	_, pub1 := key(1)
 	founding := keriengine.New()
-	icp, err := founding.Incept(drivers.InceptionRequest{PublicKey: pub0, NextPublicKey: pub1, Name: "owner", Witnesses: witnesses, Toad: 1})
+	icp, err := founding.Incept(drivers.InceptionRequest{PublicKey: pub0, NextPublicKey: pub1, Name: "owner", Witnesses: witnesses, Toad: 1,
+		Sign: login.FoundingSigner(seed0)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +122,8 @@ func foundOnDerivedKeys(t *testing.T, witnesses []string) *CoreServer {
 		t.Fatal(err)
 	}
 	if _, err := e.ReloadIdentity(&drivers.DriverReloadIdentityRequest{AID: icp.AID, PublicKey: pub0,
-		NextKeyDigest: icp.NextKeyDigest, KEL: kel.KEL, RawEventsB64: kel.RawEventsB64}); err != nil {
+		NextKeyDigest: icp.NextKeyDigest, KEL: kel.KEL, RawEventsB64: kel.RawEventsB64,
+		Signatures: [][]string{icp.Signatures}}); err != nil {
 		t.Fatal(err)
 	}
 	return s
@@ -134,7 +137,8 @@ func (w *lateSignedWorld) strand(t *testing.T, sn int) string {
 	for _, ev := range events {
 		if ev.SequenceNumber == sn {
 			sq := w.s.DataStore.(*store.SQLiteStore)
-			if _, err := sq.DB().Exec(`UPDATE kel SET cesr_signature = '' WHERE aid = ? AND seq_num = ?`, w.aid, sn); err != nil {
+			// As an earlier version left it: unsigned, and so marked at upgrade.
+			if _, err := sq.DB().Exec(`UPDATE kel SET cesr_signature = '', signatures = '', unsigned_at_upgrade = 1 WHERE aid = ? AND seq_num = ?`, w.aid, sn); err != nil {
 				t.Fatal(err)
 			}
 			return ev.CesrSignature
@@ -220,10 +224,26 @@ func (w *lateSignedWorld) rotate(t *testing.T) (int, string) {
 	if err := w.s.DataStore.SaveEvent(store.EventRecord{
 		AID: w.aid, SequenceNumber: res.SequenceNumber, EventType: "rot", EventJSON: string(body),
 		PublicKey: res.NewPublicKey, NextKeyDigest: res.NewNextKeyDigest, RawBytesB64: res.RawBytesB64,
+		UnsignedAtUpgrade: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if sq, ok := w.s.DataStore.(*store.SQLiteStore); ok {
+		if _, err := sq.DB().Exec(`UPDATE kel SET unsigned_at_upgrade = 1 WHERE aid = ? AND seq_num = ?`, w.aid, res.SequenceNumber); err != nil {
+			t.Fatal(err)
+		}
+	}
 	return res.SequenceNumber, sig
+}
+
+// restart is this Identity Agent started again over what it stored, with an
+// engine that holds only that.
+func (w *lateSignedWorld) restart(t *testing.T) {
+	t.Helper()
+	e := keriengine.New()
+	w.s.KeriDriver = e
+	w.s.engineSigns()
+	w.s.reloadIdentityIntoDriver()
 }
 
 func TestEventsSignedLaterReachTheWitnessesInOrder(t *testing.T) {
@@ -236,6 +256,7 @@ func TestEventsSignedLaterReachTheWitnessesInOrder(t *testing.T) {
 		t.Fatalf("the key log does not say the stranded interaction is unsigned: %v", got)
 	}
 	rot, rotSig := w.rotate(t)
+	w.restart(t)
 
 	w.attach(t, ixn, ixnSig)
 	w.waitFor(t, len(before)+1)

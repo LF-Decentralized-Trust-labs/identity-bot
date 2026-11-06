@@ -429,7 +429,8 @@ func (s *CoreServer) recordIdentity() (recordIdentityRecord, []byte, error) {
 		}
 		return nil
 	}
-	if _, err := keeper.CreateDelegatedInceptionKept(pub, nextPub, "", owner.AID, witnesses, toad, keep); err != nil {
+	if _, err := keeper.CreateDelegatedInceptionKept(pub, nextPub, "", owner.AID, witnesses, toad, keep,
+		login.FoundingSigner(seed)); err != nil {
 		return recordIdentityRecord{}, nil, fmt.Errorf("the record identity could not be made: %w", err)
 	}
 	rec.Pending = false
@@ -490,6 +491,7 @@ func (s *CoreServer) reloadRecordIdentity() {
 	}
 	if _, err := s.KeriDriver.ReloadIdentity(&drivers.DriverReloadIdentityRequest{
 		AID: rec.AID, PublicKey: pub, SequenceNumber: lastSN, LastSAID: lastSAID, KEL: kel, RawEventsB64: raws,
+		Signatures: signaturesOf(events), UnsignedAtUpgrade: markedUnsignedOf(events),
 	}); err != nil {
 		log.Printf("[record] the record identity %s could not be reloaded: %v", rec.AID, err)
 	}

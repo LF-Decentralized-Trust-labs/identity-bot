@@ -9,6 +9,7 @@ import (
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/keriengine"
+	"identity-agent-core/login"
 	"identity-agent-core/store"
 	"identity-agent-core/witness"
 
@@ -30,6 +31,7 @@ func (w *pushWorld) pairwiseIssuer() string {
 	founding := keriengine.New()
 	icp, err := founding.Incept(drivers.InceptionRequest{
 		PublicKey: pub, NextPublicKey: nextPub, Name: "pairwise", Witnesses: []string{w.bob.witnessKey}, Toad: 1,
+		Sign: login.FoundingSigner(seed),
 	})
 	if err != nil {
 		w.t.Fatal(err)
@@ -43,13 +45,13 @@ func (w *pushWorld) pairwiseIssuer() string {
 	ev, _ := json.Marshal(kel.KEL[0])
 	if err := w.s.DataStore.SaveEvent(store.EventRecord{
 		AID: icp.AID, SequenceNumber: 0, EventType: "icp", EventJSON: string(ev),
-		PublicKey: pub, RawBytesB64: icp.RawBytesB64, CesrSignature: sig,
+		PublicKey: pub, RawBytesB64: icp.RawBytesB64, CesrSignature: sig, Signatures: icp.Signatures,
 	}); err != nil {
 		w.t.Fatal(err)
 	}
 	if _, err := w.eng.ReloadIdentity(&drivers.DriverReloadIdentityRequest{
 		AID: icp.AID, PublicKey: icp.PublicKey, NextKeyDigest: icp.NextKeyDigest,
-		KEL: kel.KEL, RawEventsB64: kel.RawEventsB64,
+		KEL: kel.KEL, RawEventsB64: kel.RawEventsB64, Signatures: [][]string{icp.Signatures},
 	}); err != nil {
 		w.t.Fatal(err)
 	}

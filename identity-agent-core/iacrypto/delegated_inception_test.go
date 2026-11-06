@@ -1,3 +1,5 @@
+//go:build kerigo_pqtest
+
 package iacrypto
 
 import (
@@ -101,5 +103,24 @@ func TestADelegatedIdentityIsNotTheStandaloneOne(t *testing.T) {
 func TestADelegatedInceptionMustNameItsDelegator(t *testing.T) {
 	if _, err := BuildHybridDelegatedInception(SyntheticHybridKeyMaterial(1), ""); err == nil {
 		t.Fatal("a delegated inception was built with no delegator")
+	}
+}
+
+// A delegated founding needs both its keys too: kt and nt are "2" on the
+// delegated event as on the ordinary one, so a sealed machine's identity cannot
+// be signed for, or rotated, by its classical key alone.
+func TestADelegatedHybridFoundingNeedsBothItsKeys(t *testing.T) {
+	res, err := BuildHybridDelegatedInception(SyntheticHybridKeyMaterial(21), "EOWNER-AID")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev := asEvent(t, res)
+	if ev["t"] != "dip" {
+		t.Fatalf("not a delegated inception: %v", ev["t"])
+	}
+	for _, field := range []string{"kt", "nt"} {
+		if got, _ := ev[field].(string); got != "2" {
+			t.Errorf("%s is %q on the delegated founding: both keys must be needed, so it is \"2\"", field, got)
+		}
 	}
 }

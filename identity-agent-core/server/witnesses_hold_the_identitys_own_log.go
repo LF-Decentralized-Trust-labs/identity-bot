@@ -3,7 +3,9 @@ package server
 import (
 	"context"
 	"identity-agent-core/drivers"
+	"identity-agent-core/recovery"
 	"identity-agent-core/witness"
+	"log"
 	"sync"
 	"time"
 )
@@ -24,8 +26,38 @@ type witnessState struct {
 	witnessOnce sync.Once
 	witnessKick chan struct{}
 	witnessMu   sync.Mutex
-	witnessJob  witnessJob
+	// witnessJobs is what each pass brings up to date, one job per identity
+	// asked for: the identity kept here, and any root it was moved on from.
+	witnessJobs map[string]witnessJob
+	// movedOnTries is how often, and until when not again, the witnesses of a
+	// root this core rotated away from have been tried and not held its log.
+	movedOnTries map[string]movedOnTry
+	// movedOnEnded are the roots whose witnessing finished in this run, marked
+	// under witnessMu before the job goes, so a pass that read the root map
+	// before it finished cannot add the job back.
+	movedOnEnded map[string]bool
+	// afterMovedOnRead is called by a test between a pass reading the root map
+	// and acting on it.
+	afterMovedOnRead func()
 }
+
+type movedOnTry struct {
+	attempts  int
+	notBefore time.Time
+}
+
+// A witness of a root that was moved on from may be gone for good, and it is
+// not contacted for ever: each pass that finds the log not held waits longer
+// than the one before, up to movedOnLongestBackoff, and after
+// movedOnGiveUpAfter such passes this core stops and records that it did.
+var (
+	movedOnBackoff        = 30 * time.Second
+	movedOnLongestBackoff = time.Hour
+	movedOnGiveUpAfter    = 12
+)
+
+// witnessClock is the time the backoff is judged by; a test replaces it.
+var witnessClock = time.Now
 
 type witnessJob struct {
 	owner, record string
@@ -39,17 +71,30 @@ type witnessJob struct {
 // the approval witnesses the record identity from its inception. Nothing to
 // do where it names none.
 func (s *CoreServer) witnessRecord(ownerAID, recordAID string, witnesses []string, toad int) {
+	s.addWitnessJob(ownerAID, recordAID, witnesses, toad, false)
+}
+
+// addWitnessJob is witnessRecord; with movedOn it adds nothing for a root whose
+// witnessing has ended, judged under the lock the job is added under.
+func (s *CoreServer) addWitnessJob(ownerAID, recordAID string, witnesses []string, toad int, movedOn bool) {
 	if len(witnesses) == 0 || s.WitnessService == nil {
 		return
 	}
 	s.witnessing.witnessMu.Lock()
+	if movedOn && s.witnessing.movedOnEnded[ownerAID] {
+		s.witnessing.witnessMu.Unlock()
+		return
+	}
 	job := witnessJob{owner: ownerAID, record: recordAID, witnesses: witnesses, toad: toad}
 	// A request for the identity's own log alone does not drop a record
 	// identity a pass is already due to send.
 	if job.record == "" {
-		job.record = s.witnessing.witnessJob.record
+		job.record = s.witnessing.witnessJobs[ownerAID].record
 	}
-	s.witnessing.witnessJob = job
+	if s.witnessing.witnessJobs == nil {
+		s.witnessing.witnessJobs = map[string]witnessJob{}
+	}
+	s.witnessing.witnessJobs[ownerAID] = job
 	s.witnessing.witnessMu.Unlock()
 	s.kickWitnessing()
 }
@@ -84,16 +129,37 @@ func (s *CoreServer) keepWitnessing(running context.Context, stop <-chan struct{
 		case <-s.witnessing.witnessKick:
 		}
 		s.witnessing.witnessMu.Lock()
-		job := s.witnessing.witnessJob
+		jobs := make([]witnessJob, 0, len(s.witnessing.witnessJobs))
+		for _, job := range s.witnessing.witnessJobs {
+			jobs = append(jobs, job)
+		}
 		s.witnessing.witnessMu.Unlock()
+		movedOn := s.rootsMovedOnToWitness()
 		ctx, cancel := context.WithTimeout(running, time.Minute)
 		done := map[string]bool{}
-		if len(job.witnesses) > 0 {
-			s.WitnessService.BringUpToDate(ctx, job.owner, s.signedEventsOf(job.owner), job.witnesses, job.toad)
+		for _, job := range jobs {
+			events := s.signedEventsOf(job.owner)
+			held := s.WitnessService.BringUpToDate(ctx, job.owner, events, job.witnesses, job.toad)
 			done[job.owner] = true
 			if job.record != "" {
 				s.WitnessService.BringUpToDate(ctx, job.record, s.signedEventsOf(job.record), job.witnesses, job.toad)
 				done[job.record] = true
+			}
+			if entry, ok := movedOn[job.owner]; ok {
+				// An old root's rotation is held once the witnesses its
+				// threshold asks for hold it; one of three gone for good is
+				// not a reason to go on trying, or to give up.
+				held = held || s.WitnessService.HoldsThreshold(job.owner, events, job.witnesses, job.toad)
+				// A try counts as not held only once no send to these
+				// witnesses is in flight and their own tips say so; while
+				// one is, nothing is concluded and the job stays.
+				settled := true
+				if !held {
+					held, settled = s.WitnessService.HeldThrough(ctx, job.owner, events, job.witnesses, job.toad)
+				}
+				if settled {
+					s.endOrDelayMovedOn(entry, held)
+				}
 			}
 		}
 		// The key log is where each witness needs it to be before it will take
@@ -113,7 +179,8 @@ func (s *CoreServer) signedEventsOf(aid string) []witness.SignedEvent {
 	}
 	out := make([]witness.SignedEvent, 0, len(events))
 	for _, ev := range events {
-		out = append(out, witness.SignedEvent{RawBytesB64: ev.RawBytesB64, CesrSignature: ev.CesrSignature})
+		out = append(out, witness.SignedEvent{RawBytesB64: ev.RawBytesB64,
+			CesrSignature: ev.CesrSignature, Signatures: ev.ControllerSignatures()})
 	}
 	return out
 }
@@ -131,15 +198,183 @@ func (s *CoreServer) witnessOwnLog() {
 	if err != nil || owner == nil {
 		return
 	}
-	if witnesses, toad, err := keeper.WitnessConfig(owner.AID); err == nil && len(witnesses) > 0 {
-		s.witnessRecord(owner.AID, "", witnesses, toad)
-		return
-	}
-	// The owner names no witness, but a pairwise identity's events may be
-	// waiting for theirs.
+	s.dropJobsOfOtherIdentities(owner.AID)
+	s.witnessLogOf(keeper, owner.AID, false)
+	s.witnessRootsMovedOn(keeper)
+	// A pairwise identity's registry events may be waiting for its own
+	// witnesses, whether or not the owner names any.
 	if s.WitnessService != nil {
 		if p, err := s.DataStore.PendingTELPushes(1); err == nil && len(p) > 0 {
 			s.kickWitnessing()
 		}
+	}
+}
+
+// dropJobsOfOtherIdentities removes the own-log job of an identity that is no
+// longer the one kept here (a restore replaced it in this process), so it is
+// not sent on every pass until restart. A root moved on from has its own job
+// and stays while that is open.
+func (s *CoreServer) dropJobsOfOtherIdentities(kept string) {
+	// The runs are read before the map: a run writes its map entry before it
+	// forgets itself, so a root that is in neither list here had its entry
+	// written and is in the map read next, never in neither.
+	running := s.rootsInAnUnfinishedRun()
+	open := s.rootsMovedOnToWitness()
+	s.witnessing.witnessMu.Lock()
+	defer s.witnessing.witnessMu.Unlock()
+	for aid := range s.witnessing.witnessJobs {
+		_, moved := open[aid]
+		if aid != kept && !moved && !running[aid] {
+			delete(s.witnessing.witnessJobs, aid)
+		}
+	}
+}
+
+// rootsInAnUnfinishedRun are the old roots of the break-glass runs begun and
+// not finished. The identity record moves to the new root partway through a
+// run and the root map entry is written at its end, so for that while the old
+// root is neither the identity kept here nor yet a root moved on from, and its
+// job is not dropped.
+func (s *CoreServer) rootsInAnUnfinishedRun() map[string]bool {
+	out := map[string]bool{}
+	runs, err := recovery.RunningRootAIDRotations(s.DataDir)
+	if err != nil {
+		return out
+	}
+	for _, run := range runs {
+		out[run.OldRootAID] = true
+	}
+	return out
+}
+
+// beginWitnessing is what a start does: a root this core gave up on is tried
+// again, because its rotation is what tells that root's witnesses the old key is
+// retired, and the tries already counted are forgotten.
+func (s *CoreServer) beginWitnessing() {
+	s.witnessing.witnessMu.Lock()
+	s.witnessing.movedOnTries = nil
+	s.witnessing.movedOnEnded = nil
+	s.witnessing.witnessMu.Unlock()
+	if s.DataDir == "" {
+		return
+	}
+	if err := recovery.ClearRootAIDWitnessingGaveUp(s.DataDir); err != nil {
+		log.Printf("[witness] could not reopen the witnessing of the roots given up on: %v", err)
+	}
+}
+
+// rootsMovedOnToWitness are the roots this core rotated away from by
+// break-glass whose witnesses are still to be brought up to date, by old root.
+// Only an entry the signed rotation wrote counts: break-glass was ungated, and
+// wrote this file with no signature on the rotation, before 746602a8
+// (2026-06-21), and an install from then would otherwise start sending
+// witnesses the possibly unsigned logs of those old roots on every tick.
+func (s *CoreServer) rootsMovedOnToWitness() map[string]recovery.RootAIDMapEntry {
+	out := map[string]recovery.RootAIDMapEntry{}
+	if s.DataDir == "" {
+		return out
+	}
+	moved, err := recovery.LoadRootAIDMap(s.DataDir)
+	if err != nil {
+		return out
+	}
+	for _, entry := range moved.Entries {
+		if entry.WitnessingIsOpen() {
+			out[entry.OldRootAID] = entry
+		}
+	}
+	return out
+}
+
+// witnessRootsMovedOn brings up to date the witnesses of every root this core
+// rotated away from by break-glass, until they hold the rotation. The identity
+// kept here is the new root by then, so the pass above does not reach the old
+// one, whose last event is the rotation. A witness that already holds the log
+// is not asked again, a root that names no witness has nothing to send, and
+// one whose witnesses never hold the log is given up on (movedOnGiveUpAfter).
+func (s *CoreServer) witnessRootsMovedOn(keeper drivers.KELKeeper) {
+	open := s.rootsMovedOnToWitness()
+	s.witnessing.witnessMu.Lock()
+	hook := s.witnessing.afterMovedOnRead
+	s.witnessing.witnessMu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	for aid, entry := range open {
+		s.witnessing.witnessMu.Lock()
+		waiting := witnessClock().Before(s.witnessing.movedOnTries[aid].notBefore)
+		s.witnessing.witnessMu.Unlock()
+		if waiting {
+			continue
+		}
+		witnesses, toad, err := keeper.WitnessConfig(aid)
+		if err != nil {
+			continue
+		}
+		if len(witnesses) == 0 {
+			s.endMovedOn(entry, false)
+			continue
+		}
+		s.addWitnessJob(aid, "", witnesses, toad, true)
+	}
+}
+
+// endOrDelayMovedOn is what a pass that tried a moved-on root's witnesses
+// concludes: they hold the log and the job ends, or they do not and it is tried
+// again later, or no more.
+func (s *CoreServer) endOrDelayMovedOn(entry recovery.RootAIDMapEntry, held bool) {
+	if held {
+		s.endMovedOn(entry, false)
+		return
+	}
+	s.witnessing.witnessMu.Lock()
+	if s.witnessing.movedOnTries == nil {
+		s.witnessing.movedOnTries = map[string]movedOnTry{}
+	}
+	try := s.witnessing.movedOnTries[entry.OldRootAID]
+	try.attempts++
+	gaveUp := try.attempts >= movedOnGiveUpAfter
+	wait := movedOnBackoff
+	for i := 1; i < try.attempts && wait < movedOnLongestBackoff; i++ {
+		wait *= 2
+	}
+	if wait > movedOnLongestBackoff {
+		wait = movedOnLongestBackoff
+	}
+	try.notBefore = witnessClock().Add(wait)
+	// The job leaves the list now and is added again only after notBefore, so
+	// passes that other work asks for do not count as tries.
+	delete(s.witnessing.witnessJobs, entry.OldRootAID)
+	s.witnessing.movedOnTries[entry.OldRootAID] = try
+	s.witnessing.witnessMu.Unlock()
+	if gaveUp {
+		log.Printf("[witness] the witnesses of %s, which this core rotated away from, still do not hold its log after %d tries; giving up",
+			entry.OldRootAID, try.attempts)
+		s.endMovedOn(entry, true)
+	}
+}
+
+// endMovedOn ends the job that sends a moved-on root's log to its witnesses and
+// records, in the root map, why it ended.
+func (s *CoreServer) endMovedOn(entry recovery.RootAIDMapEntry, gaveUp bool) {
+	s.witnessing.witnessMu.Lock()
+	if s.witnessing.movedOnEnded == nil {
+		s.witnessing.movedOnEnded = map[string]bool{}
+	}
+	s.witnessing.movedOnEnded[entry.OldRootAID] = true
+	delete(s.witnessing.witnessJobs, entry.OldRootAID)
+	delete(s.witnessing.movedOnTries, entry.OldRootAID)
+	s.witnessing.witnessMu.Unlock()
+	if err := recovery.RecordRootAIDWitnessing(s.DataDir, entry.OldRootAID, entry.AuthorizationEventSAID, gaveUp, time.Now()); err != nil {
+		log.Printf("[witness] could not record how the witnessing of %s ended: %v", entry.OldRootAID, err)
+	}
+}
+
+// witnessLogOf brings the witnesses of aid up to date with its log: the
+// identity kept here, or, with movedOn, a root it was just moved on from, whose
+// job is not added once its witnessing has ended.
+func (s *CoreServer) witnessLogOf(keeper drivers.KELKeeper, aid string, movedOn bool) {
+	if witnesses, toad, err := keeper.WitnessConfig(aid); err == nil && len(witnesses) > 0 {
+		s.addWitnessJob(aid, "", witnesses, toad, movedOn)
 	}
 }

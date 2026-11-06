@@ -58,6 +58,10 @@ var controllerOwnerOnly = map[string]string{
 	"POST /api/owners/ceremony":            "bringing new owners in decides who the owner is",
 	"DELETE /api/owners/ceremony":          "abandoning a ceremony decides who the owner is",
 
+	// Who would witness a founding: the founding names them for good, and the
+	// owner's device confirms each before it does.
+	"GET /api/events/witnesses-for-a-founding": "the witnesses a founding names are written into the identity for good, and are the owner's to confirm",
+
 	// --- material an identity can be rebuilt from ---
 	// An archive plus a passphrase is the identity to whoever holds both, so
 	// pulling one out of this machine is close to taking the identity itself.
@@ -75,6 +79,10 @@ var controllerOwnerOnly = map[string]string{
 	// said something.
 	"POST /api/sign":                         "this signs as the identity, and anything it signs cannot be unsaid",
 	"POST /api/events/signature":             "this attaches this identity's signature to an event",
+	"POST /api/events/prepare":               "a key event writes the state that decides who the owner is",
+	"POST /api/identity/restore":             "installing an identity decides what this Identity Agent is",
+	"POST /api/keystore/messaging-seed":      "this installs the keys an identity is reached on",
+	"POST /api/events/commit":                "a key event writes the state that decides who the owner is",
 	"POST /api/signing-requests/{id}/fulfil": "this signs as the identity, and what is signed cannot be unsaid",
 	// Refusing is the key device's answer too, and a refused withdrawal is left
 	// to the owner for good: one controller could keep another's revoked grant
@@ -211,6 +219,9 @@ var controllerOwnerOnly = map[string]string{
 	// holding the key.
 	"DELETE /api/controllers/{aid}": "removing a machine's authorisation is the owner's decision, made from " +
 		"the device holding the key",
+
+	// The events the root rotation is signed over, built before they are added.
+	"POST /api/recovery/root-aid-rotation/prepare": "preparing the rotation of the root identifier replaces the identity's controlling key",
 }
 
 // controllerMinimumScore names the actions that need a score other than the

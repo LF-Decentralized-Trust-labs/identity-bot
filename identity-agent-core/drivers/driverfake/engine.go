@@ -66,35 +66,35 @@ func (e *Engine) Incept(req drivers.InceptionRequest) (*drivers.DriverInceptionR
 	return e.InceptFunc(req)
 }
 
-func (e *Engine) CreateInception(publicKey, nextPublicKey string) (*drivers.DriverInceptionResponse, error) {
+func (e *Engine) CreateInception(publicKey, nextPublicKey string, _ ...drivers.FoundingSigner) (*drivers.DriverInceptionResponse, error) {
 	if e.CreateInceptionFunc == nil {
 		return nil, unset("CreateInception")
 	}
 	return e.CreateInceptionFunc(publicKey, nextPublicKey)
 }
 
-func (e *Engine) CreateInceptionNamed(publicKey, nextPublicKey, name string) (*drivers.DriverInceptionResponse, error) {
+func (e *Engine) CreateInceptionNamed(publicKey, nextPublicKey, name string, _ ...drivers.FoundingSigner) (*drivers.DriverInceptionResponse, error) {
 	if e.CreateInceptionNamedFunc == nil {
 		return nil, unset("CreateInceptionNamed")
 	}
 	return e.CreateInceptionNamedFunc(publicKey, nextPublicKey, name)
 }
 
-func (e *Engine) CreateOwnedInception(publicKey, nextPublicKey, name, ownerAID string) (*drivers.DriverInceptionResponse, error) {
+func (e *Engine) CreateOwnedInception(publicKey, nextPublicKey, name, ownerAID string, _ ...drivers.FoundingSigner) (*drivers.DriverInceptionResponse, error) {
 	if e.CreateOwnedInceptionFunc == nil {
 		return nil, unset("CreateOwnedInception")
 	}
 	return e.CreateOwnedInceptionFunc(publicKey, nextPublicKey, name, ownerAID)
 }
 
-func (e *Engine) CreateDelegatedInception(publicKey, nextPublicKey, name, delegatorName string) (*drivers.DriverDelegatedInceptionResponse, error) {
+func (e *Engine) CreateDelegatedInception(publicKey, nextPublicKey, name, delegatorName string, _ ...drivers.FoundingSigner) (*drivers.DriverDelegatedInceptionResponse, error) {
 	if e.CreateDelegatedInceptionFunc == nil {
 		return nil, unset("CreateDelegatedInception")
 	}
 	return e.CreateDelegatedInceptionFunc(publicKey, nextPublicKey, name, delegatorName)
 }
 
-func (e *Engine) ReinstateDelegatedIdentity(publicKey, nextPublicKey, name, delegatorName string) (*drivers.DriverDelegatedInceptionResponse, error) {
+func (e *Engine) ReinstateDelegatedIdentity(publicKey, nextPublicKey, name, delegatorName string, sign ...drivers.FoundingSigner) (*drivers.DriverDelegatedInceptionResponse, error) {
 	if e.ReinstateDelegatedIdentityFunc == nil {
 		return nil, unset("ReinstateDelegatedIdentity")
 	}

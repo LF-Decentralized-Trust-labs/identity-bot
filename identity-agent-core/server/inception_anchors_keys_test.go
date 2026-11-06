@@ -45,6 +45,7 @@ func fakeInceptionDriver(t *testing.T, aid string, seen *map[string]interface{})
 				InceptionEvent: event,
 				PublicKey:      req.PublicKey,
 				NextKeyDigest:  "Enext",
+				Signatures:     []string{"AAfakeSignatureTheFakeEngineReturns"},
 			}, nil
 		},
 	}

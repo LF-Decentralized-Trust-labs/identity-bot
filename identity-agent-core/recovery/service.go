@@ -719,15 +719,20 @@ func (s *Service) applyPayloadReporting(payload *RestoredPayload, contactLogsKep
 		return err
 	}
 	*contactLogsKept = kept
-	if payload.Identity != nil && s.Store != nil {
-		if err := s.Store.SaveIdentity(*payload.Identity); err != nil {
-			return fmt.Errorf("save identity: %w", err)
-		}
-	}
+	// The key events are written BEFORE the identity row. A restore that stops
+	// part-way then leaves events with no identity, which is an identity not
+	// yet restored, and never an identity whose log stops before its rotations
+	// (which an owner check would read as a stage it is not at). Neither store
+	// offers one transaction across the two, so the order is the guarantee.
 	if s.Store != nil {
 		for _, ev := range payload.KelEvents {
 			if err := s.Store.SaveEvent(ev); err != nil {
 				return fmt.Errorf("save kel event: %w", err)
+			}
+		}
+		if payload.Identity != nil {
+			if err := s.Store.SaveIdentity(*payload.Identity); err != nil {
+				return fmt.Errorf("save identity: %w", err)
 			}
 		}
 		for _, c := range payload.Contacts {

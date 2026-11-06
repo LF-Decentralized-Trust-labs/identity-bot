@@ -15,7 +15,7 @@ import (
 
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
-	"identity-agent-core/store"
+	"identity-agent-core/witness"
 
 	"github.com/go-chi/chi/v5"
 
@@ -272,32 +272,33 @@ func TestSignedRequestBodySurvivesVerification(t *testing.T) {
 // With nothing sealed — an agent on its owner's own machine — the agent's own
 // identity is the authority, so signing works there too with no extra setup.
 func TestUnsealedAgentFallsBackToItsOwnIdentity(t *testing.T) {
-	dir := t.TempDir()
-	ds, err := store.NewSQLiteStore(dir)
-	if err != nil {
-		t.Skipf("data store unavailable: %v", err)
+	// A founded identity, with its inception in its log: an identity row with no
+	// key event is not one whose key state can be told (where post-quantum keys
+	// are read, it is refused).
+	s := appHeldCore(t)
+	k := appSeeds(2)
+	seed := k[0]
+	code, out := call(t, s, s.handlePrepareEvent, "/api/events/prepare", map[string]any{
+		"t": "icp", "k": []string{verkeyOf(k[0])}, "kt": "1",
+		"n": []string{digestOfSeed(t, k[1])}, "nt": "1"})
+	if code != http.StatusOK {
+		t.Fatalf("prepare founding: %d %v", code, out)
 	}
-	seed := make([]byte, ed25519.SeedSize)
-	for i := range seed {
-		seed[i] = byte(i + 9)
+	icp := preparedBytes(t, out)
+	if code, out = call(t, s, s.handleCommitEvent, "/api/events/commit", map[string]any{
+		"raw_b64": base64.StdEncoding.EncodeToString(icp), "sigs": []string{appSign(t, k[0], icp, true)}}); code != http.StatusCreated {
+		t.Fatalf("commit founding: %d %v", code, out)
 	}
-	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
-	if err := ds.SaveIdentity(store.IdentityState{
-		AID:       "ESELFOWNED",
-		PublicKey: base64.RawURLEncoding.EncodeToString(pub),
-	}); err != nil {
-		t.Skipf("cannot save identity: %v", err)
-	}
-	s := &CoreServer{localOwnerSecret: testOwnerSecret, DataDir: dir, DataStore: ds}
+	own, _ := s.DataStore.GetIdentity()
 
 	authority, err := s.ownerAuthority()
 	if err != nil {
 		t.Fatalf("owner authority: %v", err)
 	}
-	if authority.AID != "ESELFOWNED" {
+	if authority.AID != own.AID {
 		t.Errorf("expected the agent's own identity as authority, got %q", authority.AID)
 	}
-	if err := s.verifyOwnerSignature(signedFor(t, "ESELFOWNED", "GET", "/api/profile", "", seed, time.Now())); err != nil {
+	if err := s.verifyOwnerSignature(signedFor(t, own.AID, "GET", "/api/profile", "", seed, time.Now())); err != nil {
 		t.Errorf("self-owned agent rejected its own owner: %v", err)
 	}
 }
@@ -473,6 +474,9 @@ func TestEveryOpenRouteIsMountedWhereItSaysItIs(t *testing.T) {
 		t.Fatalf("asset handler: %v", err)
 	}
 	s.assetHandler = ah
+	// The witness routes are mounted only on an agent with a witness service;
+	// an empty one mounts them, and nothing here calls it.
+	s.WitnessService = &witness.Service{}
 
 	mounted := map[string]bool{}
 	if err := chi.Walk(s.buildRouter(),

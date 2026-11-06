@@ -69,7 +69,7 @@ func aWebsiteFor(t *testing.T, s *CoreServer, policy asset.EnrollmentPolicy) *aW
 	if err != nil {
 		t.Fatal(err)
 	}
-	dip, err := s.KeriDriver.CreateDelegatedInception(iacrypto.VerkeyQB64(pub), iacrypto.VerkeyQB64(next), "the-website", root)
+	dip, err := s.KeriDriver.CreateDelegatedInception(iacrypto.VerkeyQB64(pub), iacrypto.VerkeyQB64(next), "the-website", root, asset.FoundingSigner(s.DataDir, index))
 	if err != nil {
 		t.Fatal(err)
 	}

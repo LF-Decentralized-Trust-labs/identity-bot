@@ -1,3 +1,5 @@
+//go:build kerigo_pqtest
+
 package iacrypto_test
 
 import (
@@ -41,6 +43,17 @@ func loadGolden(t *testing.T) goldenVector {
 	return g
 }
 
+// The recorded bytes were also checked once against keripy, which accepted
+// the event: it gave the SAID
+// EB7QT2lcr4nGH0NnPnetVVa_c5Hj2e7hkFZJic9lT9OK recorded in golden_vectors.json,
+// and read the signing threshold "2" as met only by keys 0 and 1 together. That
+// is the only independent check this vector has had. The tests in this package
+// do not repeat it: this one compares the code with its own earlier output, and
+// TestHybridInceptionAgreesWithKeriGo (kerigo_agreement_test.go) compares keri-go
+// with keri-go, since the builder now uses it. Neither is evidence of agreement
+// with another engine, and a regenerated vector has to be checked against keripy
+// again by hand.
+//
 // The recorded bytes are a tripwire, not a conformance check.
 //
 // The vector is this implementation's own output, so it proves the bytes have
@@ -177,6 +190,21 @@ func TestTheRecordedInceptionHoldsRealKeys(t *testing.T) {
 	for name, k := range map[string][]byte{"current": mat.Ed25519SigningRaw, "next": mat.NextEd25519SigningRaw} {
 		if err := iacrypto.CheckEd25519PublicKey(k); err != nil {
 			t.Errorf("the synthetic %s Ed25519 key is not a key: %v", name, err)
+		}
+	}
+}
+
+// A hybrid founding needs both its keys: with a threshold of one the classical
+// key alone could sign, and the post-quantum key would be a key nobody has to
+// hold. The next keys it commits to are held to the same.
+func TestAHybridFoundingNeedsBothItsKeys(t *testing.T) {
+	res, err := iacrypto.BuildHybridInception(iacrypto.SyntheticHybridKeyMaterial(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"kt", "nt"} {
+		if got, _ := res.InceptionEvent[field].(string); got != "2" {
+			t.Errorf("%s is %q: both keys must be needed, so it is \"2\"", field, got)
 		}
 	}
 }

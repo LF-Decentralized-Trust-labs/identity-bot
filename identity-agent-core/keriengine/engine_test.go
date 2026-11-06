@@ -3,6 +3,7 @@ package keriengine
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -218,6 +219,7 @@ func TestAnIdentitySurvivesAReload(t *testing.T) {
 		NextKeyDigest: created.NextKeyDigest,
 		KEL:           kel.KEL,
 		RawEventsB64:  kel.RawEventsB64,
+		Signatures:    kel.Signatures,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -252,8 +254,8 @@ func TestAnIdentitySurvivesAReload(t *testing.T) {
 	}
 }
 
-// A log restored without canonical bytes can be continued and has not been
-// verified. Reporting it as verified would be the dangerous answer, and
+// A log restored without canonical bytes is held, is not claimed verified, and
+// is not extended. Reporting it as verified would be the dangerous answer, and
 // re-encoding the parsed events to manufacture bytes would produce exactly
 // that.
 func TestALogWithoutCanonicalBytesIsRestoredButNotClaimedVerified(t *testing.T) {
@@ -285,17 +287,10 @@ func TestALogWithoutCanonicalBytesIsRestoredButNotClaimedVerified(t *testing.T) 
 		t.Fatalf("the engine did not report that the history was unverified: %q", resp.Status)
 	}
 
-	// It can still extend the log, and the event it produces is real.
-	ixn, err := restored.Interact(created.AID, []interface{}{map[string]string{"note": "x"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, err := base64.StdEncoding.DecodeString(ixn.RawBytesB64)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := keri.ValidateEvent(raw); err != nil {
-		t.Fatalf("the event produced after an unverified reload is malformed: %v", err)
+	// It cannot be extended: an event added after one whose bytes were not
+	// kept could be checked by nobody, so nothing is added (ADR-061).
+	if _, err := restored.Interact(created.AID, []interface{}{map[string]string{"note": "x"}}); err == nil {
+		t.Fatal("an event was added to a log whose history cannot be verified")
 	}
 
 	// And GetKel must not present a re-encoding as though it were canonical.
@@ -511,6 +506,13 @@ func TestAPresentationIsReproducible(t *testing.T) {
 // A hybrid identity whose secrets cannot be stored must not be reported as
 // created: it could never sign and could never rotate.
 func TestAHybridIdentityIsRefusedWhenItsSecretsWouldBeLost(t *testing.T) {
+	if !keri.PostQuantumTestCodes() {
+		_, err := NewWithSecretStore(keri.NewMemoryKeyStore()).CreateHybridInception("root")
+		if !errors.Is(err, ErrNoPostQuantumCodes) {
+			t.Fatalf("a default build founded a hybrid identity, or refused it for another reason: %v", err)
+		}
+		return
+	}
 	if _, err := New().CreateHybridInception("root"); err == nil {
 		t.Fatal("a hybrid identity was created with nowhere to keep its private half")
 	}

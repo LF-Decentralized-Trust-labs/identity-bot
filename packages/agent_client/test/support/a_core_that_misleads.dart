@@ -1,0 +1,316 @@
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
+import 'dart:typed_data';
+
+import 'package:agent_client/crypto/keys.dart';
+import 'package:agent_client/services/key_math.dart';
+import 'package:agent_client/services/the_identity_this_device_holds.dart';
+import 'package:agent_client/services/the_key_state_this_device_reads.dart';
+import 'package:agent_client/services/the_key_events_this_device_makes.dart';
+import 'package:agent_client/services/the_witnesses_of_this_devices_events.dart';
+import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
+import 'package:http/http.dart' as http;
+import 'package:test/test.dart';
+
+import 'a_witness.dart';
+
+/// The secret a test's core is started with, as an app hands it the core it
+/// starts.
+const ownerSecret = 'a-secret-only-this-test-and-its-core-know';
+
+/// The client an app reaches its core through, with the ways a core can
+/// mislead it set on it.
+class ACoreThatMisleads extends http.BaseClient {
+  ACoreThatMisleads(this._inner);
+  final http.Client _inner;
+
+  /// The next commit is not sent to the core, and is answered with this
+  /// status and refusal code instead.
+  (int, String)? answerTheNextCommit;
+
+  /// The next commit is sent, and its answer replaced with this one.
+  (int, String)? replaceTheNextCommitsAnswer;
+
+  /// The next commit reaches the core and its answer is lost, as when the
+  /// connection drops after the core has the request.
+  bool loseTheNextCommitsAnswer = false;
+
+  /// Counts down one per commit; the commit that brings it to zero has its
+  /// answer lost, as [loseTheNextCommitsAnswer] does for the next one.
+  int? loseTheAnswerToCommitsAfter;
+
+  /// Every commit is answered `202 waiting_for_signatures`, without reaching
+  /// the core: it says it holds the event for signers that are not coming, and
+  /// adds nothing.
+  bool holdEveryCommit = false;
+
+  /// Rewrites the body of a prepare request before the core sees it, so the
+  /// core prepares another event than the one asked for; null leaves it as it
+  /// was.
+  Map<String, Object?>? Function(Map<String, Object?> asked)? alterThePrepare;
+
+  /// The stored bytes the key log serves at these places (index in
+  /// `raw_events_b64`) are replaced by these, as a core serving other bytes
+  /// than the event it lists would; the listing itself is left as it was.
+  final Map<int, String> serveOtherBytesAt = {};
+
+  /// Every request sent through this client, as "METHOD /path".
+  final List<String> visited = [];
+
+  /// Paths this client fails on, as a stand-in for a route a signing path must
+  /// not read: a request to one throws before it is sent.
+  final Set<String> failOn = {};
+
+  /// Rewrites the JSON a path answers with before this client sees it, as a
+  /// core would that answers with another document than it was asked to make.
+  final Map<String, Map<String, Object?> Function(Map<String, Object?> answer)>
+      alterTheAnswerTo = {};
+
+  /// Paths this client answers itself, with this status and error code,
+  /// without asking the core.
+  final Map<String, (int, String)> answerInstead = {};
+
+  /// How many commits were sent to this client, answered or not.
+  int commits = 0;
+
+  /// How many prepares to answer `tip_moved` without asking the core.
+  int movePrepares = 0;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    request.headers['X-Local-Owner-Secret'] = ownerSecret;
+    final path = request.url.path;
+    visited.add('${request.method} $path');
+    if (failOn.contains(path)) {
+      throw StateError('a route a signing path must not read was read: $path');
+    }
+    final alter = alterThePrepare;
+    if (path == '/api/events/prepare' &&
+        alter != null &&
+        request is http.Request) {
+      final altered =
+          alter(Map<String, Object?>.from(jsonDecode(request.body) as Map));
+      if (altered != null) request.body = jsonEncode(altered);
+    }
+    final instead = answerInstead[path];
+    if (instead != null) return _answer(instead.$1, instead.$2);
+    if (path == '/api/events/commit') commits++;
+    if (path == '/api/events/prepare' && movePrepares > 0) {
+      movePrepares--;
+      return _answer(409, 'tip_moved');
+    }
+    if (path == '/api/events/commit') {
+      if (holdEveryCommit) {
+        return http.StreamedResponse(
+            Stream.value(utf8.encode(jsonEncode(
+                {'status': 'waiting_for_signatures', 's': '1', 'd': 'x'}))),
+            202);
+      }
+      final instead = answerTheNextCommit;
+      if (instead != null) {
+        answerTheNextCommit = null;
+        return _answer(instead.$1, instead.$2);
+      }
+      final after = loseTheAnswerToCommitsAfter;
+      if (after != null) {
+        if (after == 0) {
+          loseTheAnswerToCommitsAfter = null;
+          loseTheNextCommitsAnswer = true;
+        } else {
+          loseTheAnswerToCommitsAfter = after - 1;
+        }
+      }
+      if (loseTheNextCommitsAnswer) {
+        loseTheNextCommitsAnswer = false;
+        final res = await _inner.send(request);
+        await res.stream.drain<void>();
+        throw http.ClientException(
+            'the connection dropped before the answer arrived', request.url);
+      }
+      final replaced = replaceTheNextCommitsAnswer;
+      if (replaced != null) {
+        replaceTheNextCommitsAnswer = null;
+        final res = await _inner.send(request);
+        await res.stream.drain<void>();
+        return _answer(replaced.$1, replaced.$2);
+      }
+    }
+    final res = await _inner.send(request);
+    final rewrite = alterTheAnswerTo[path];
+    if (rewrite != null) {
+      final body = Map<String, Object?>.from(
+          jsonDecode(await res.stream.bytesToString()) as Map);
+      return http.StreamedResponse(
+          Stream.value(utf8.encode(jsonEncode(rewrite(body)))), res.statusCode);
+    }
+    if (path == '/api/kel' && serveOtherBytesAt.isNotEmpty) {
+      final body = jsonDecode(await res.stream.bytesToString()) as Map;
+      final raws = body['raw_events_b64'] as List;
+      serveOtherBytesAt.forEach((at, raw) => raws[at] = raw);
+      return http.StreamedResponse(
+          Stream.value(utf8.encode(jsonEncode(body))), res.statusCode);
+    }
+    return res;
+  }
+
+  static http.StreamedResponse _answer(int status, String code) =>
+      http.StreamedResponse(
+          Stream.value(utf8.encode(jsonEncode({'error': code, 'code': code}))),
+          status);
+}
+
+/// The event [body] asks the core at [base] to prepare, signed by the key
+/// [seed] derives at generation [gen]: what another device holding the
+/// phrase would make.
+Future<SignedCopy> preparedAndSigned(
+    http.Client client, String base, KeyMath km, Uint8List seed, int gen, Map<String, Object?> body) async {
+  final res = await client.post(Uri.parse('$base/api/events/prepare'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode(body));
+  final raw = (jsonDecode(res.body) as Map)['raw_b64'] as String;
+  final sig = ed.sign(
+      ed.newKeyFromSeed(KeyManager.signingSeed(seed, index: gen)),
+      base64Decode(raw));
+  return SignedCopy(raw, [await km.signatureByTheOnlyKey(sig)]);
+}
+
+/// An interaction of [aid] after [after], prepared by the core and signed by
+/// the key [seed] derives at generation [gen].
+Future<SignedCopy> signedInteraction(
+        http.Client client,
+        String base,
+        KeyMath km,
+        Uint8List seed,
+        String aid,
+        int gen,
+        Place after,
+        List<Object?> anchors) =>
+    preparedAndSigned(client, base, km, seed, gen, {
+      'aid': aid,
+      't': 'ixn',
+      'a': anchors,
+      'after': {'s': after.sn.toRadixString(16), 'd': after.digest},
+    });
+
+/// Commits a signed event to the core at [base] directly.
+Future<void> commitTo(String base, String rawB64, List<String> sigs) async {
+  final res = await http.post(Uri.parse('$base/api/events/commit'),
+      headers: const {
+        'Content-Type': 'application/json',
+        'X-Local-Owner-Secret': ownerSecret
+      },
+      body: jsonEncode({'raw_b64': rawB64, 'sigs': sigs}));
+  expect(res.statusCode, anyOf(200, 201), reason: res.body);
+}
+
+/// Another core, for an identity of its own.
+class ACore {
+  ACore(this._process, this.base, this.client, this._km, this.logs,
+      [this.dataDir]);
+  final Process _process;
+
+  /// Where this core keeps its data.
+  final Directory? dataDir;
+
+  /// Everything the core wrote to its standard output and error.
+  final StringBuffer logs;
+  final String base;
+  final ACoreThatMisleads client;
+  final KeyMath _km;
+
+  /// The key arithmetic this core's tests use.
+  KeyMath get km => _km;
+  TheKeyEventsThisDeviceMakes makes(TheWitnessesOfThisDevicesEvents w) =>
+      TheKeyEventsThisDeviceMakes(client, base, _km, witnesses: w);
+
+  /// An identity's key events as a device that keeps its own record makes them
+  /// and reads the key state from it, as an app does: after a restart the
+  /// record and the key state are read again from what was stored.
+  TheKeyEventsThisDeviceMakes makesReadingTheKeyState(Uint8List seed,
+          {KeyMath? keyMath}) =>
+      TheKeyEventsThisDeviceMakes(client, base, keyMath ?? _km,
+          held: TheIdentityThisDeviceHolds(),
+          readTheKeyState: (_) async =>
+              (await TheKeyStateThisDeviceReads(client, keyMath ?? _km, base)
+                      .read(seed))
+                  .now);
+  Future<void> close() async => _process.kill();
+}
+
+/// Another core, which proposes [witnesses] (at the addresses they are
+/// reached at) to the identities it founds, as a core with those witnesses in
+/// its registry does, and none by default: the registry that ships with the
+/// core names witnesses on the internet, which a test does not reach. A core
+/// confirms who answers at an address before it proposes it.
+Future<ACore> anotherCore(String bin, KeyMath km,
+    {Directory? dataDir,
+    int? port0,
+    List<AWitness> witnesses = const []}) async {
+  final port = port0 ?? 20000 + Random().nextInt(20000);
+  final base = 'http://127.0.0.1:$port';
+  final data =
+      dataDir ?? await Directory.systemTemp.createTemp('witnessed-core-data');
+  {
+    // The operator's own registry file, which replaces the shipped entry of
+    // the same id (and with it the shipped witnesses).
+    await Directory('${data.path}/providers').create(recursive: true);
+    await File('${data.path}/providers/tests.json').writeAsString(jsonEncode({
+      'version': 1,
+      'providers': [
+        {
+          'id': 'grapeid.org',
+          'operator': 'tests',
+          'endpoints': [
+            for (final w in witnesses)
+              {
+                'capability': 'witness',
+                'url': w.base.toString().replaceFirst(RegExp(r'/$'), ''),
+                'aid': w.aid
+              }
+          ]
+        }
+      ]
+    }));
+  }
+  final p = await Process.start(bin, [], environment: {
+    ...Platform.environment,
+    'PORT': '$port',
+    'HOST': '127.0.0.1',
+    'AGENT_DATA_DIR': data.path,
+    'IDENTITY_AGENT_LOCAL_OWNER_SECRET': ownerSecret,
+  });
+  final logs = StringBuffer();
+  p.stdout.transform(utf8.decoder).listen(logs.write);
+  p.stderr.transform(utf8.decoder).listen(logs.write);
+  for (var i = 0; i < 100; i++) {
+    try {
+      if ((await http.get(Uri.parse('$base/api/health'))).statusCode == 200) {
+        break;
+      }
+    } catch (_) {}
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+  }
+  return ACore(p, base, ACoreThatMisleads(http.Client()), km, logs, data);
+}
+
+/// Leaves the events of [aid] at [sns] in the core's data in [data] as an
+/// earlier version left them: without a signature, and marked, as the upgrade
+/// marks them. The core is not running while this is done.
+Future<void> leaveUnsigned(Directory data, String aid, List<int> sns) async {
+  final r = await Process.run('python3', [
+    '-I',
+    '-c',
+    'import sqlite3,sys\n'
+        'db=sqlite3.connect(sys.argv[1] + "/identity.db")\n'
+        'for sn in sys.argv[3:]:\n'
+        '    n=db.execute("UPDATE kel SET cesr_signature=\'\', signatures=\'\', '
+        'unsigned_at_upgrade=1 WHERE aid=? AND seq_num=?", (sys.argv[2], int(sn))).rowcount\n'
+        '    assert n==1, n\n'
+        'db.commit()\n',
+    data.path,
+    aid,
+    for (final sn in sns) '$sn',
+  ]);
+  if (r.exitCode != 0) fail('could not leave the events unsigned: ${r.stderr}');
+}

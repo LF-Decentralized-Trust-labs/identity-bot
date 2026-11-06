@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -72,6 +73,20 @@ func newRotatingControllerWitnessedByToad(t *testing.T, name string, toad int, w
 		c.signers = append(c.signers, s)
 		pubs = append(pubs, p)
 	}
+	// The controller's engine adds an event only signed, so it signs with the
+	// keys this controller holds.
+	c.eng.SetEventSignature(func(_, key string, raw []byte) (string, error) {
+		for i, p := range pubs {
+			if p == key {
+				rs, err := c.signers[i].Sign(raw)
+				if err != nil {
+					return "", err
+				}
+				return keri.MatterQB64(keri.CodeEd25519Sig, rs)
+			}
+		}
+		return "", fmt.Errorf("no key %s", key)
+	})
 	icp, err := c.eng.Incept(drivers.InceptionRequest{PublicKey: pubs[0], NextPublicKey: pubs[1],
 		Name: name, Witnesses: witnessKeys, Toad: toad})
 	if err != nil {

@@ -8,6 +8,7 @@ import (
 
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/presentation"
 
 	keri "github.com/grapeid/keri-go"
 )
@@ -178,11 +179,11 @@ func (e *Engine) appendPreparedRegistry(id *identity, p *drivers.PreparedRegistr
 	if err != nil {
 		return nil, err
 	}
-	sig, err := e.commit(id, ixnEvent.SN, ixn, vcp)
+	sig, kept, err := e.commit(id, ixnEvent.SN, ixn, vcp)
 	if err != nil {
 		return nil, err
 	}
-	if err := e.extend(id, ixn, sig, func() {
+	if err := e.extend(id, ixn, sig, kept, func() {
 		if id.Registries == nil {
 			id.Registries = map[string]*registry{}
 		}
@@ -266,17 +267,29 @@ func (e *Engine) AppendPreparedIssuance(name string, p *drivers.PreparedIssuance
 	return e.appendPrepared(id, p)
 }
 
-func (e *Engine) prepare(id *identity, claims map[string]interface{}, schemaSaid, holderAid string, edges map[string]interface{}, registrySaid string) (*drivers.PreparedIssuance, error) {
+// BuildCredential builds a credential of issuer's, and anchors nothing: the
+// bytes, for whoever holds the issuer's key to check and anchor in an
+// interaction of their own making (the credential's seal is eventSeal of its
+// identifier, twice, where it is issued outside a registry).
+func (e *Engine) BuildCredential(issuer string, claims map[string]interface{}, schemaSaid, holderAid string, edges map[string]interface{}) ([]byte, string, error) {
+	acdc, cred, err := buildCredential(issuer, claims, schemaSaid, holderAid, edges, "")
+	if err != nil {
+		return nil, "", err
+	}
+	return acdc, cred.SAID, nil
+}
+
+func buildCredential(issuer string, claims map[string]interface{}, schemaSaid, holderAid string, edges map[string]interface{}, registrySaid string) ([]byte, *keri.Credential, error) {
 	if schemaSaid == "" {
-		return nil, fmt.Errorf("a credential needs the identifier of the schema it satisfies")
+		return nil, nil, fmt.Errorf("a credential needs the identifier of the schema it satisfies")
 	}
 	data, err := stampedClaims(claims)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	in := keri.CredentialInput{
 		SchemaSAID: schemaSaid,
-		Issuer:     id.AID,
+		Issuer:     issuer,
 		Recipient:  holderAid,
 		Registry:   registrySaid,
 		Data:       data,
@@ -287,17 +300,25 @@ func (e *Engine) prepare(id *identity, claims map[string]interface{}, schemaSaid
 		// altered after issue without becoming a different credential.
 		src, err := json.Marshal(edges)
 		if err != nil {
-			return nil, fmt.Errorf("the credential's edges cannot be encoded: %w", err)
+			return nil, nil, fmt.Errorf("the credential's edges cannot be encoded: %w", err)
 		}
 		in.Source = src
 	}
 	acdc, err := keri.BuildCredential(in)
 	if err != nil {
-		return nil, fmt.Errorf("building the credential: %w", err)
+		return nil, nil, fmt.Errorf("building the credential: %w", err)
 	}
 	cred, err := keri.VerifyCredential(acdc)
 	if err != nil {
-		return nil, fmt.Errorf("the credential this engine built does not verify: %w", err)
+		return nil, nil, fmt.Errorf("the credential this engine built does not verify: %w", err)
+	}
+	return acdc, cred, nil
+}
+
+func (e *Engine) prepare(id *identity, claims map[string]interface{}, schemaSaid, holderAid string, edges map[string]interface{}, registrySaid string) (*drivers.PreparedIssuance, error) {
+	acdc, cred, err := buildCredential(id.AID, claims, schemaSaid, holderAid, edges, registrySaid)
+	if err != nil {
+		return nil, err
 	}
 	// What gets anchored depends on whether there is a registry. With one, the
 	// issuance event is anchored and the credential's status is readable from
@@ -375,12 +396,13 @@ func (e *Engine) appendPrepared(id *identity, p *drivers.PreparedIssuance) (*dri
 		return nil, fmt.Errorf("the prepared interaction does not anchor the prepared issuance")
 	}
 	var sig string
+	var kept func(drivers.KELKeep) error
 	if p.Registry != "" {
 		issEvent, err := keri.VerifyTELEvent(p.IssRaw)
 		if err != nil || issEvent.SAID != p.IssSAID || issEvent.Subject != p.AcdcSAID {
 			return nil, fmt.Errorf("the prepared issuance event is not this credential's")
 		}
-		if sig, err = e.commit(id, ixnEvent.SN, p.IxnRaw, p.IssRaw); err != nil {
+		if sig, kept, err = e.commit(id, ixnEvent.SN, p.IxnRaw, p.IssRaw); err != nil {
 			return nil, err
 		}
 	} else if sig, err = e.signed(id, p.IxnRaw); err != nil {
@@ -394,7 +416,7 @@ func (e *Engine) appendPrepared(id *identity, p *drivers.PreparedIssuance) (*dri
 	if err != nil {
 		return nil, err
 	}
-	if err := e.extend(id, p.IxnRaw, sig, func() {
+	if err := e.extend(id, p.IxnRaw, sig, kept, func() {
 		if p.Registry == "" {
 			return
 		}
@@ -559,11 +581,11 @@ func (e *Engine) appendPreparedRevocation(id *identity, p *drivers.PreparedRevoc
 	if err != nil {
 		return nil, err
 	}
-	sig, err := e.commit(id, ixnEvent.SN, p.IxnRaw, p.RevRaw)
+	sig, kept, err := e.commit(id, ixnEvent.SN, p.IxnRaw, p.RevRaw)
 	if err != nil {
 		return nil, err
 	}
-	if err := e.extend(id, p.IxnRaw, sig, func() {
+	if err := e.extend(id, p.IxnRaw, sig, kept, func() {
 		if reg := id.Registries[p.Registry]; reg != nil {
 			reg.TEL[p.AcdcSAID] = append(reg.TEL[p.AcdcSAID], p.RevRaw)
 		}
@@ -788,7 +810,11 @@ func (e *Engine) checkPresentation(
 		return nil
 	}
 
-	body, said, err := reduceePresentation(req.PresentationBody)
+	body, err := presentation.ReadFields(req.PresentationBody)
+	said := ""
+	if body != nil {
+		said = body.D
+	}
 	if err != nil {
 		out.Checks["presentation_intact"] = false
 		out.Errors = append(out.Errors, fmt.Sprintf("the presentation does not hold together: %v", err))
@@ -873,52 +899,6 @@ func (e *Engine) checkPresentation(
 			"so whoever presented this credential has not shown they control it")
 	}
 	return nil
-}
-
-// reduceePresentation reads a presentation back into the shape it was built in
-// and recomputes its identifier.
-//
-// Going through the struct rather than the map is deliberate: the identifier is
-// a digest over the fields in a fixed order, and a map has no order. Anything
-// that re-serialised the map directly would compute a digest nobody else does
-// and report every genuine presentation as altered.
-func reduceePresentation(raw map[string]interface{}) (presentationBody, string, error) {
-	encoded, err := json.Marshal(raw)
-	if err != nil {
-		return presentationBody{}, "", err
-	}
-	var body presentationBody
-	if err := json.Unmarshal(encoded, &body); err != nil {
-		return presentationBody{}, "", fmt.Errorf("it is not shaped like a presentation: %w", err)
-	}
-	claimed := body.D
-	if claimed == "" {
-		return presentationBody{}, "", fmt.Errorf("it carries no identifier")
-	}
-
-	// Recompute exactly as it was built: the attribute block's own identifier
-	// first, then the body with its identifier blanked.
-	attrs := body.A
-	attrs.D = ""
-	attrSAID, err := saidOfCompact(attrs)
-	if err != nil {
-		return presentationBody{}, "", err
-	}
-	if attrSAID != body.A.D {
-		return presentationBody{}, "", fmt.Errorf("its attributes do not match the identifier " +
-			"they carry, so what it says about the credential or the holder has been changed")
-	}
-	check := body
-	check.D = ""
-	recomputed, err := saidOfCompact(check)
-	if err != nil {
-		return presentationBody{}, "", err
-	}
-	if recomputed != claimed {
-		return presentationBody{}, "", fmt.Errorf("it claims to be %s but its contents derive %s",
-			claimed, recomputed)
-	}
-	return body, claimed, nil
 }
 
 func firstNonEmpty(vals ...string) string {

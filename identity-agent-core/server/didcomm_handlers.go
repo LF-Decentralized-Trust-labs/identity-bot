@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -164,6 +165,133 @@ func (s *CoreServer) storeKeySetFor(aid string, ks *didcomm.KeySet) error {
 
 // hasKeySet reports whether a keyset already exists for aid (no minting). The
 // error is the key file being unreadable, and then nothing is known either way.
+// previousKeySetLabel is where an identity's messaging keyset is kept once a
+// later one replaces it (ADR-061 section 8): until counterparties have read
+// the replacement, they still encrypt to the earlier keys, and messages they
+// send are opened with it, for [previousKeySetGrace].
+func previousKeySetLabel(aid string) string { return "previous-messaging:" + aid }
+
+// previousKeySetSinceLabel records when aid's previous keyset was replaced.
+func previousKeySetSinceLabel(aid string) string { return "previous-messaging-since:" + aid }
+
+// pendingReplacementLabel holds the one replacement keyset an identity may
+// have handed over and not yet anchored: a later hand-over takes its place,
+// so an abandoned replacement leaves no key material behind it.
+func pendingReplacementLabel(aid string) string { return "replacement-messaging:" + aid }
+
+// previousKeySetGrace is how long a replaced keyset still opens messages:
+// long enough for counterparties to read the replacement from the
+// identity's witnessed log, and no longer, since after a move to a new phrase
+// the earlier keys are ones the old phrase's holder can derive.
+const previousKeySetGrace = 30 * 24 * time.Hour
+
+// isInternalKeySetLabel reports whether kid names a keyset this Identity
+// Agent keeps aside rather than an identity: never a message's recipient.
+func isInternalKeySetLabel(kid string) bool {
+	for _, p := range []string{"pending-messaging:", "previous-messaging:",
+		"previous-messaging-since:", "replacement-messaging:"} {
+		if strings.HasPrefix(kid, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasRecipientKeySet reports whether a message may be addressed to kid here:
+// an identity whose keyset this Identity Agent holds.
+func (s *CoreServer) hasRecipientKeySet(kid string) (bool, error) {
+	if isInternalKeySetLabel(kid) {
+		return false, nil
+	}
+	return s.hasKeySet(kid)
+}
+
+// putKeySet files ks under label, in place of whatever was there.
+func (s *CoreServer) putKeySet(label string, ks *didcomm.KeySet) error {
+	didcommMu.Lock()
+	defer didcommMu.Unlock()
+	keys, err := s.loadDIDCommKeys()
+	if err != nil {
+		return err
+	}
+	blob, err := ks.Marshal()
+	if err != nil {
+		return err
+	}
+	keys[label] = blob
+	return s.saveDIDCommKeys(keys)
+}
+
+// openWithRecipientKeys opens a message to kid with current, and where that
+// fails, with the keyset a replacement took out of use, while it is kept.
+func (s *CoreServer) openWithRecipientKeys(kid string, current *didcomm.KeySet,
+	open func(*didcomm.KeySet) error) error {
+	err := open(current)
+	if err == nil {
+		return nil
+	}
+	if prev := s.previousKeySetFor(kid); prev != nil {
+		if open(prev) == nil {
+			return nil
+		}
+	}
+	return err
+}
+
+// replaceKeySetFor files ks as aid's messaging keyset, keeping the one it
+// replaces as aid's previous keyset.
+func (s *CoreServer) replaceKeySetFor(aid string, ks *didcomm.KeySet) error {
+	if aid == "" {
+		return fmt.Errorf("a keyset must be filed under an identifier")
+	}
+	didcommMu.Lock()
+	defer didcommMu.Unlock()
+	keys, err := s.loadDIDCommKeys()
+	if err != nil {
+		return err
+	}
+	if old, ok := keys[aid]; ok {
+		keys[previousKeySetLabel(aid)] = old
+		since, _ := json.Marshal(time.Now().UTC().Format(time.RFC3339))
+		keys[previousKeySetSinceLabel(aid)] = since
+	}
+	ks.AID = aid
+	blob, err := ks.Marshal()
+	if err != nil {
+		return err
+	}
+	keys[aid] = blob
+	return s.saveDIDCommKeys(keys)
+}
+
+// previousKeySetFor is the messaging keyset a later one replaced for aid, or
+// nil where none was replaced or its grace has passed, when it is forgotten.
+func (s *CoreServer) previousKeySetFor(aid string) *didcomm.KeySet {
+	didcommMu.Lock()
+	defer didcommMu.Unlock()
+	keys, err := s.loadDIDCommKeys()
+	if err != nil {
+		return nil
+	}
+	blob, ok := keys[previousKeySetLabel(aid)]
+	if !ok {
+		return nil
+	}
+	var since string
+	_ = json.Unmarshal(keys[previousKeySetSinceLabel(aid)], &since)
+	if t, err := time.Parse(time.RFC3339, since); err != nil || time.Since(t) > previousKeySetGrace {
+		delete(keys, previousKeySetLabel(aid))
+		delete(keys, previousKeySetSinceLabel(aid))
+		_ = s.saveDIDCommKeys(keys)
+		return nil
+	}
+	ks, err := didcomm.UnmarshalKeySet(blob)
+	if err != nil {
+		return nil
+	}
+	return ks
+}
+
 func (s *CoreServer) hasKeySet(aid string) (bool, error) {
 	didcommMu.Lock()
 	defer didcommMu.Unlock()
@@ -582,7 +710,7 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 		return
 	}
 	kid := env.Recipients[0].Header.Kid
-	has, err := s.hasKeySet(kid)
+	has, err := s.hasRecipientKeySet(kid)
 	if err != nil {
 		jsonError(w, "recipient keys unavailable", http.StatusServiceUnavailable)
 		return
@@ -596,7 +724,12 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 		jsonError(w, "recipient keyset error", statusForUnreadable(err, http.StatusInternalServerError))
 		return
 	}
-	jwm, signed, err := didcomm.UnpackAuthcryptKeeping(rcpt, &peer.DID, &env)
+	var jwm *didcomm.JWM
+	var signed []byte
+	err = s.openWithRecipientKeys(kid, rcpt, func(ks *didcomm.KeySet) (e error) {
+		jwm, signed, e = didcomm.UnpackAuthcryptKeeping(ks, &peer.DID, &env)
+		return e
+	})
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusUnauthorized) // signature_invalid / key_agreement_failed / body_hash_mismatch
 		return

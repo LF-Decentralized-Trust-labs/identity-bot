@@ -1,6 +1,7 @@
 package didcomm
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -31,6 +32,46 @@ func TestARespelledHybridSignatureIsRefused(t *testing.T) {
 		mutate(&e)
 		if _, err := UnpackSigned(aliceDID, &e); err == nil {
 			t.Errorf("%s: the respelled signature verified", name)
+		}
+	}
+}
+
+// A known peer's envelope is never accepted on its classical signature alone.
+// What admits a sealed request as the owner's (isSealedOwnerRequest in the
+// server package) is the sender this check names, and the check needs the
+// Ed25519 signature AND the ML-DSA-65 one under the sender's published keys.
+// So a stage-two owner cannot be admitted on a known-peer envelope signed
+// classically: one with the second signature missing, empty, or made by
+// another key is refused here, whatever the first says.
+func TestAKnownPeersMessageNeedsBothSignatures(t *testing.T) {
+	alice, _ := GenerateKeySet("EAlice")
+	bob, _ := GenerateKeySet("EBob")
+	other, _ := GenerateKeySet("EOther")
+	aliceDID, _ := alice.DID()
+	bobDID, _ := bob.DID()
+	env, err := PackAuthcrypt(alice, bobDID, mkJWM(t, "EAlice", "EBob", TypeContactRequest, map[string]string{"hi": "there"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, signed, err := UnpackAuthcryptKeeping(bob, aliceDID, env)
+	if err != nil {
+		t.Fatalf("the whole message did not verify: %v", err)
+	}
+	var sj signedJWM
+	if err := json.Unmarshal(signed, &sj); err != nil {
+		t.Fatal(err)
+	}
+	otherSigned, _ := PackSigned(other, mkJWM(t, "EAlice", "EBob", TypeContactRequest, map[string]string{"hi": "there"}))
+	for name, dsa := range map[string]string{
+		"missing":          "",
+		"another key's":    otherSigned.DsaSig,
+		"the wrong length": sj.DsaSig[:len(sj.DsaSig)-4],
+	} {
+		forged := sj
+		forged.DsaSig = dsa
+		raw, _ := json.Marshal(forged)
+		if _, err := VerifySignedMessage(aliceDID, raw); err == nil {
+			t.Errorf("a message with its post-quantum signature %s was accepted on the classical one", name)
 		}
 	}
 }

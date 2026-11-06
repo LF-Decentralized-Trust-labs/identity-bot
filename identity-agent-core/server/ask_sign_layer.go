@@ -100,6 +100,7 @@ func (s *CoreServer) mintPairwiseIn(pool, name string) (aid, oobi string, seed [
 		Name:          uniqueName,
 		Witnesses:     witnesses,
 		Toad:          toad,
+		Sign:          login.FoundingSigner(seed),
 	})
 	if ierr != nil || icp.AID == "" {
 		return "", "", nil, 0, fmt.Errorf("mint pairwise inception: %w", ierr)
@@ -166,7 +167,7 @@ func (s *CoreServer) mintPairwiseIn(pool, name string) (aid, oobi string, seed [
 				s.inBackground(func(ctx context.Context) {
 					ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 					defer cancel()
-					if berr := s.WitnessService.BroadcastToDesignated(ctx, aid, raw, sig, named, toad); berr != nil {
+					if berr := s.WitnessService.BroadcastToDesignated(ctx, aid, raw, []string{sig}, named, toad); berr != nil {
 						log.Printf("[pairwise] %s designated witnesses but its inception was not "+
 							"accepted by them (%v) — its history is uncorroborated until it is", aid, berr)
 					}

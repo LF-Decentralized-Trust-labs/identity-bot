@@ -55,7 +55,8 @@ class SecureKeyStore {
 
     await _storage.write(key: scoped, value: legacy);
     if (await _storage.read(key: scoped) != legacy) {
-      debugPrint('[SecureKeyStore] the phrase did not survive the copy — leaving the original');
+      debugPrint(
+          '[SecureKeyStore] the phrase did not survive the copy — leaving the original');
       return false;
     }
     await _storage.delete(key: _legacyMnemonicKey);
@@ -78,6 +79,47 @@ class SecureKeyStore {
 
   static Future<void> clearMnemonic() async {
     await _storage.delete(key: await _scopedKey());
+  }
+
+  /// The name within a profile of the phrase an identity is moving to, kept
+  /// beside the phrase in force until the move is finished (ADR-061 section
+  /// 10): between its two rotations both are needed, and losing either then
+  /// loses the identity.
+  static const _movingToName = 'mnemonic_moving_to';
+
+  /// Keeps the phrase the identity is moving to, and reads it back: the move
+  /// starts only once it is safely kept.
+  static Future<bool> savePhraseMovingTo(List<String> words) async {
+    final key = await ProfileScope.key(_movingToName);
+    final value = words.join(' ');
+    await _storage.write(key: key, value: value);
+    return await _storage.read(key: key) == value;
+  }
+
+  /// The phrase the identity is moving to, or null when no move is under way.
+  static Future<List<String>?> loadPhraseMovingTo() async {
+    final value =
+        await _storage.read(key: await ProfileScope.key(_movingToName));
+    if (value == null || value.isEmpty) return null;
+    return value.split(' ');
+  }
+
+  /// Drops a move that cannot happen, keeping the phrase in force.
+  static Future<void> clearPhraseMovingTo() async {
+    await _storage.delete(key: await ProfileScope.key(_movingToName));
+  }
+
+  /// Makes the phrase moved to the phrase in force, once the move's second
+  /// rotation is in the log: written and read back first, and only then is
+  /// the record of the move forgotten. Returns false, changing nothing it
+  /// cannot confirm, when the new phrase did not survive the write.
+  static Future<bool> finishMovingToThePhrase(List<String> words) async {
+    final value = words.join(' ');
+    final scoped = await _scopedKey();
+    await _storage.write(key: scoped, value: value);
+    if (await _storage.read(key: scoped) != value) return false;
+    await _storage.delete(key: await ProfileScope.key(_movingToName));
+    return true;
   }
 
   /// Forgets the words, once their owner has confirmed they are written down.

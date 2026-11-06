@@ -4,30 +4,8 @@ import 'dart:typed_data';
 import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:http/http.dart' as http;
 
-/// Has the core write a raw Ed25519 signature in CESR.
-///
-/// Done by the core rather than here because the encoding is part of the
-/// protocol, and there is one implementation of it. Throws if no encoded
-/// signature comes back.
-Future<String> cesrEncodeSignature(
-    http.Client client, String baseUrl, List<int> rawSignature) async {
-  final res = await client.post(
-    Uri.parse('$baseUrl/api/cesr/encode'),
-    headers: const {'Content-Type': 'application/json'},
-    body: jsonEncode({'raw_sig_b64': base64Encode(rawSignature)}),
-  );
-  if (res.statusCode != 200) {
-    throw Exception('the signature could not be encoded '
-        '(${res.statusCode}): ${res.body}');
-  }
-  final decoded = jsonDecode(res.body);
-  final cesr = decoded is Map ? (decoded['cesr_sig'] ?? '').toString() : '';
-  if (cesr.isEmpty) {
-    throw Exception(
-        'the signature was sent to be encoded and nothing came back');
-  }
-  return cesr;
-}
+import 'key_math.dart';
+import 'the_event_this_device_expects.dart';
 
 /// Signs an event of an identity's key log and records the signature against
 /// it in the core: its founding, a rotation, an interaction.
@@ -44,6 +22,12 @@ Future<String> cesrEncodeSignature(
 /// would surface weeks later as a stranger refusing them for no reason they
 /// can see.
 ///
+/// [expected] is the event this phrase would have produced at that place. The
+/// bytes are parsed with the core's parser through [km] and checked against it
+/// ([ExpectedEvent.requireStoredIn]) before anything is signed or sent; an
+/// event that is not it throws [AStoredEventIsNotTheOneExpected], carrying
+/// what was stored and what was expected, and the signing seed is not used.
+///
 /// Recording the same signature twice is harmless: the core checks it against
 /// the event again and stores it again.
 Future<String> signAndRecordEvent(
@@ -54,17 +38,36 @@ Future<String> signAndRecordEvent(
   required String rawBytesB64,
   required Uint8List signingSeed,
   required String what,
+  required KeyMath km,
+  required ExpectedEvent expected,
 }) async {
   if (aid.isEmpty || rawBytesB64.isEmpty || sequenceNumber is! int) {
     throw Exception(
         'the core did not say which event $what is, so it cannot be '
         'signed and nobody would be able to verify it');
   }
-  final signature =
-      ed.sign(ed.newKeyFromSeed(signingSeed), base64Decode(rawBytesB64));
+  final raw = base64Decode(rawBytesB64);
+  final ev = await expected.requireStoredIn(km, raw);
+  if (ev.i != aid || ev.s != sequenceNumber) {
+    throw AStoredEventIsNotTheOneExpected(
+        'it is event ${ev.s.toRadixString(16)} of ${ev.i}, not event '
+        '${sequenceNumber.toRadixString(16)} of $aid',
+        utf8.decode(raw, allowMalformed: true),
+        expected.describe());
+  }
+  final privateKey = ed.newKeyFromSeed(signingSeed);
+  final List<int> signature;
+  try {
+    signature = ed.sign(privateKey, raw);
+  } finally {
+    // The seed is the caller's to zero; the key made from it is this
+    // function's.
+    privateKey.bytes.fillRange(0, privateKey.bytes.length, 0);
+  }
   final String cesr;
   try {
-    cesr = await cesrEncodeSignature(client, baseUrl, signature);
+    // The core is not asked to write it (ADR-061): keymath writes it here.
+    cesr = await km.signatureByTheOnlyKey(signature);
   } catch (e) {
     throw Exception('$what could not be signed: $e');
   }
@@ -93,5 +96,6 @@ class EventSignatureRefused implements Exception {
   final String body;
 
   @override
-  String toString() => 'the signature over $what was refused ($statusCode): $body';
+  String toString() =>
+      'the signature over $what was refused ($statusCode): $body';
 }

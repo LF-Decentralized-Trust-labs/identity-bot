@@ -103,7 +103,7 @@ func TestWitnessesSurviveADelegationAndAReload(t *testing.T) {
 	}
 	kel, _ := e.GetKel("root")
 	again := New()
-	if _, err := again.ReloadIdentity(&drivers.DriverReloadIdentityRequest{AID: kel.AID, KEL: kel.KEL, RawEventsB64: kel.RawEventsB64}); err != nil {
+	if _, err := again.ReloadIdentity(&drivers.DriverReloadIdentityRequest{AID: kel.AID, KEL: kel.KEL, RawEventsB64: kel.RawEventsB64, Signatures: kel.Signatures}); err != nil {
 		t.Fatal(err)
 	}
 	got, toad, err := again.WitnessConfig(kel.AID)

@@ -295,31 +295,50 @@ class RecoveryService {
         jsonDecode(resp.body) as Map<String, dynamic>);
   }
 
+  /// Has the core build the three events of a break-glass root rotation and add
+  /// none of them: the new root's founding, the old root's rotation, and the new
+  /// root's first interaction. The caller checks and signs each (ADR-061).
+  /// [newRoot] and [oldRoot] are `{k: [key], n: [classical digest, post-quantum
+  /// digest]}`. [newRoot] may also carry what any founding carries: `a` (its
+  /// anchors, the messaging keyset among them), `owner_aid`, and its witnesses
+  /// `b` with threshold `bt` (the old root's, when `b` is absent). [oldRoot]
+  /// also names `after`, the last establishment event or an interaction the
+  /// person keeps; the rotation supersedes every interaction after it.
+  Future<Map<String, dynamic>> prepareRootAidRotation({
+    required Map<String, dynamic> newRoot,
+    required Map<String, dynamic> oldRoot,
+  }) async {
+    final resp = await _client.post(
+      Uri.parse('$_base/root-aid-rotation/prepare'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'new_root': newRoot, 'old_root': oldRoot}),
+    );
+    if (resp.statusCode != 200) {
+      throw Exception(_errorMessage(resp));
+    }
+    return jsonDecode(resp.body) as Map<String, dynamic>;
+  }
+
+  /// Commits the three prepared events, each `{raw_b64, sigs}`, signed by the
+  /// key it needs. The core adds nothing unless all three are signed.
   Future<RootAidRotationResult> rotateRootAid({
     required String recoverySessionId,
-    required String newRootPublicKey,
-    required String newRootNextPublicKey,
-    required String preRotationPublicKey,
-    required String preRotationNextPublicKey,
-    required String authorizationCesrSignature,
+    required Map<String, dynamic> newRootFounding,
+    required Map<String, dynamic> oldRootRotation,
+    required Map<String, dynamic> newRootInteraction,
     List<String> carryForwardAids = const [],
     int witnessThreshold = 0,
-    String? backAnchorCesrSignature,
   }) async {
     final resp = await _client.post(
       Uri.parse('$_base/root-aid-rotation'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
         'recovery_session_id': recoverySessionId,
-        'new_root_public_key': newRootPublicKey,
-        'new_root_next_public_key': newRootNextPublicKey,
-        'pre_rotation_public_key': preRotationPublicKey,
-        'pre_rotation_next_public_key': preRotationNextPublicKey,
-        'authorization_cesr_signature': authorizationCesrSignature,
+        'new_root_founding': newRootFounding,
+        'old_root_rotation': oldRootRotation,
+        'new_root_interaction': newRootInteraction,
         if (carryForwardAids.isNotEmpty) 'carry_forward_aids': carryForwardAids,
         if (witnessThreshold > 0) 'witness_threshold': witnessThreshold,
-        if (backAnchorCesrSignature != null)
-          'back_anchor_cesr_signature': backAnchorCesrSignature,
       }),
     );
     if (resp.statusCode != 200) {
