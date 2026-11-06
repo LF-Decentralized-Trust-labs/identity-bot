@@ -245,6 +245,13 @@ var conditionallyMounted = map[string]string{
 	"POST /api/signer/invites/{token}/redeem": "mounts only with an asset handler, i.e. on an organisation agent",
 	"POST /api/employees/{aid}/approve":       "mounts unless an overlay has taken the employee routes",
 	"POST /api/employees/{aid}/revoke":        "mounts unless an overlay has taken the employee routes",
+	"POST /api/owners/ceremony":               "mounts only with an asset handler, i.e. on an organisation agent",
+	"DELETE /api/owners/ceremony":             "mounts only with an asset handler, i.e. on an organisation agent",
+	// Closed to a controller, and so to a session, by the core's list, and
+	// mounted by an add-on rather than the core (the sandboxed-apps one).
+	"POST /api/capability-registry/packs":        "mounted by an add-on, not the core",
+	"POST /api/capability-registry/{id}/enabled": "mounted by an add-on, not the core",
+	"DELETE /api/capability-registry/{id}":       "mounted by an add-on, not the core",
 }
 
 func TestEveryForbiddenRouteIsARealRoute(t *testing.T) {
@@ -269,7 +276,7 @@ func TestEveryForbiddenRouteIsARealRoute(t *testing.T) {
 		if _, known := conditionallyMounted[key]; known {
 			continue
 		}
-		t.Errorf("sessionForbidden names %q, which is not a registered route and is not "+
+		t.Errorf("a browser session is refused %q, which is not a registered route and is not "+
 			"listed as conditionally mounted. A browser session is therefore NOT blocked "+
 			"from whatever that was meant to cover — the entry looks like protection and "+
 			"is none.", key)
@@ -280,8 +287,8 @@ func TestEveryForbiddenRouteIsARealRoute(t *testing.T) {
 	// next genuine rot hides behind it.
 	for key := range conditionallyMounted {
 		if _, forbidden := everySessionForbidden()[key]; !forbidden {
-			t.Errorf("%q is excused as conditionally mounted but is no longer in "+
-				"sessionForbidden — remove the excuse", key)
+			t.Errorf("%q is excused as conditionally mounted but is no longer refused "+
+				"to a browser session — remove the excuse", key)
 		}
 	}
 }

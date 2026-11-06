@@ -40,8 +40,11 @@ import (
 // have authorised a stranger while watching their own screen.
 //
 // WHAT A SESSION IS ALLOWED TO DO is deliberately less than what the key can do.
-// A session reads everything and performs the day-to-day; anything that changes
-// the identity itself — its keys, who may sign for it, who witnesses it — goes
+// A session reads everything and performs the day-to-day. It may do nothing a
+// controller may not (ADR-050): nothing that changes the identity itself (its
+// keys, who may sign or act for it, who witnesses it), nothing that writes what
+// deciding who the owner is reads (contacts, and the doors that write them),
+// nothing that signs or speaks as the identity, and no archive of it. Those go
 // back to the phone. A browser session is a convenience, and a convenience
 // should not be able to give the identity away.
 //
