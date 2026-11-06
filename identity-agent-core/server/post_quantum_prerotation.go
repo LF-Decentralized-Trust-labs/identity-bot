@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/internal/jsonreply"
 	"log"
 	"net/http"
 	"os"
@@ -219,9 +220,7 @@ const keyNotHeldHere = "This identity's key is not held by this Identity Agent: 
 // It names the routes a signer that holds the key uses instead: the event is
 // prepared there, signed by that signer, and committed signed (ADR-061).
 func writeKeyNotHeldHere(w http.ResponseWriter) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusConflict)
-	json.NewEncoder(w).Encode(map[string]string{
+	jsonreply.Write(w, http.StatusConflict, map[string]string{
 		"error":   "key_not_held_here",
 		"details": keyNotHeldHere,
 		"prepare": "POST /api/events/prepare",

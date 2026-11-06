@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"identity-agent-core/internal/jsonreply"
 	"log"
 	"net/http"
 	"time"
@@ -174,8 +175,7 @@ func (s *CoreServer) handlePrepareEvent(w http.ResponseWriter, r *http.Request) 
 		writeEventError(w, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(prepareEventResponse{RawB64: base64.StdEncoding.EncodeToString(p.Raw), Hint: p.Hint})
+	jsonreply.Write(w, http.StatusOK, prepareEventResponse{RawB64: base64.StdEncoding.EncodeToString(p.Raw), Hint: p.Hint})
 }
 
 // handleWitnessesForAFounding answers who this Identity Agent would name as
@@ -204,8 +204,7 @@ func (s *CoreServer) handleWitnessesForAFounding(w http.ResponseWriter, r *http.
 		}
 		out.Toad = toad
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(out)
+	jsonreply.Write(w, http.StatusOK, out)
 }
 
 // engineRequest is what the engine prepares req from.
@@ -323,19 +322,16 @@ func (s *CoreServer) handleCommitEvent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
 	switch res.Status {
 	case "waiting_for_signatures":
-		w.WriteHeader(http.StatusAccepted)
-		json.NewEncoder(w).Encode(map[string]any{"status": res.Status, "s": fmt.Sprintf("%x", res.SN),
+		jsonreply.Write(w, http.StatusAccepted, map[string]any{"status": res.Status, "s": fmt.Sprintf("%x", res.SN),
 			"d": res.SAID, "signed": res.Signed, "keys": res.Keys, "expires": res.Expires.UTC().Format(time.RFC3339)})
 		return
 	case "already_recorded":
-		json.NewEncoder(w).Encode(map[string]any{"status": res.Status, "s": fmt.Sprintf("%x", res.SN), "d": res.SAID})
+		jsonreply.Write(w, http.StatusOK, map[string]any{"status": res.Status, "s": fmt.Sprintf("%x", res.SN), "d": res.SAID})
 		return
 	}
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]any{"status": res.Status, "s": fmt.Sprintf("%x", res.SN), "d": res.SAID})
+	jsonreply.Write(w, http.StatusCreated, map[string]any{"status": res.Status, "s": fmt.Sprintf("%x", res.SN), "d": res.SAID})
 }
 
 // commitOwnEvent commits raw, an event of this Identity Agent's identity, with
@@ -516,29 +512,22 @@ func writeEventError(w http.ResponseWriter, err error) {
 		notAuth    *keriengine.ErrNotAuthorised
 		unsignedLg *keriengine.ErrUnsignedHistory
 	)
-	w.Header().Set("Content-Type", "application/json")
 	switch {
 	case errors.As(err, &moved):
-		w.WriteHeader(http.StatusConflict)
-		json.NewEncoder(w).Encode(map[string]any{"error": "tip_moved", "details": err.Error(),
+		jsonreply.Write(w, http.StatusConflict, map[string]any{"error": "tip_moved", "details": err.Error(),
 			"tip": map[string]string{"s": fmt.Sprintf("%x", moved.Tip.SN), "d": moved.Tip.SAID}})
 	case errors.As(err, &taken):
-		w.WriteHeader(http.StatusConflict)
-		json.NewEncoder(w).Encode(map[string]any{"error": "place_taken", "details": err.Error(),
+		jsonreply.Write(w, http.StatusConflict, map[string]any{"error": "place_taken", "details": err.Error(),
 			"s": fmt.Sprintf("%x", taken.Held.SN), "d": taken.Held.SAID})
 	case errors.As(err, &notCommit):
-		w.WriteHeader(http.StatusUnprocessableEntity)
-		json.NewEncoder(w).Encode(map[string]any{"error": "not_committed", "details": err.Error()})
+		jsonreply.Write(w, http.StatusUnprocessableEntity, map[string]any{"error": "not_committed", "details": err.Error()})
 	case errors.As(err, &unsignedLg):
-		w.WriteHeader(http.StatusConflict)
-		json.NewEncoder(w).Encode(map[string]any{"error": "unsigned_history", "details": err.Error(),
+		jsonreply.Write(w, http.StatusConflict, map[string]any{"error": "unsigned_history", "details": err.Error(),
 			"unsigned": unsignedLg.SNs})
 	case errors.As(err, &notAuth):
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]any{"error": "not_authorised", "details": err.Error()})
+		jsonreply.Write(w, http.StatusBadRequest, map[string]any{"error": "not_authorised", "details": err.Error()})
 	default:
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]any{"error": "refused", "details": err.Error()})
+		jsonreply.Write(w, http.StatusBadRequest, map[string]any{"error": "refused", "details": err.Error()})
 	}
 }
 
@@ -572,8 +561,7 @@ func (s *CoreServer) handleEventReceipts(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "Could not read the receipts", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"s": fmt.Sprintf("%x", sn), "d": parsed.D, "receipts": receipts})
+	jsonreply.Write(w, http.StatusOK, map[string]any{"s": fmt.Sprintf("%x", sn), "d": parsed.D, "receipts": receipts})
 }
 
 // theOwnerAsks is whether r is the owner's: admitted as the owner by the gate,

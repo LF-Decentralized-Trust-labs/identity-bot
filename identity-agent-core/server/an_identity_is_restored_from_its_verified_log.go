@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"identity-agent-core/internal/jsonreply"
 	"io"
 	"log"
 	"net/http"
@@ -86,9 +87,7 @@ func (s *CoreServer) handleRestoreIdentity(w http.ResponseWriter, r *http.Reques
 	log.Printf("[identity-agent-core] RESTORE: installed the verified key log of %s (%d events)", req.AID, len(records))
 	s.inBackground(func(context.Context) { s.witnessOwnLog() })
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]any{"status": "restored", "aid": req.AID, "key_state": state})
+	jsonreply.Write(w, http.StatusCreated, map[string]any{"status": "restored", "aid": req.AID, "key_state": state})
 }
 
 func firstOr(xs []string) string {

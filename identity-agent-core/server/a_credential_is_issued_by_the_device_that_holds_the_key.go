@@ -24,6 +24,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/internal/jsonreply"
 	"log"
 	"net/http"
 	"sort"
@@ -120,8 +121,7 @@ func (s *CoreServer) handlePrepareCredential(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "Credential build failed", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	jsonreply.Write(w, http.StatusOK, map[string]any{
 		"issuer_aid":    identity.AID,
 		"acdc_said":     said,
 		"acdc_json_b64": base64.StdEncoding.EncodeToString(acdc),
@@ -192,16 +192,13 @@ func (s *CoreServer) handleRecordCredential(w http.ResponseWriter, r *http.Reque
 	s.keepIssuedCredential(record)
 	s.recordingCredential.Unlock()
 	log.Printf("[identity-agent-core] CREDENTIAL: Recorded %s for holder %s (anchored by %s)", cred.SAID, cred.Recipient, req.IxnSaid)
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]any{"acdc_said": cred.SAID, "status": "issued"})
+	jsonreply.Write(w, http.StatusCreated, map[string]any{"acdc_said": cred.SAID, "status": "issued"})
 }
 
 // answerKeptCredential answers a record of a credential already kept with what
 // it is now, which is not "issued" once it is revoked.
 func (s *CoreServer) answerKeptCredential(w http.ResponseWriter, said, status string) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"acdc_said": said, "status": status})
+	jsonreply.Write(w, http.StatusOK, map[string]any{"acdc_said": said, "status": status})
 }
 
 // keyLogAnchors is nil where aid's key log holds an interaction with digest ixn

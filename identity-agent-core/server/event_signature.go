@@ -89,8 +89,7 @@ func (s *CoreServer) handleAttachEventSignature(w http.ResponseWriter, r *http.R
 		// The same signature recorded again, as an older caller does with
 		// the one it is handed back, changes nothing and is not refused.
 		if signaturesHeld(held, sigs) {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{"status": "signed", "aid": req.AID,
+			jsonreply.Write(w, http.StatusOK, map[string]any{"status": "signed", "aid": req.AID,
 				"sequence_number": req.SequenceNumber})
 			return
 		}

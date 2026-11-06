@@ -528,8 +528,7 @@ func (s *CoreServer) handleRecoveryRootAIDPrepare(w http.ResponseWriter, r *http
 		writeError(w, http.StatusUnprocessableEntity, "Root-AID rotation could not be prepared", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(prepared)
+	jsonreply.Write(w, http.StatusOK, prepared)
 }
 
 // ownerOfTheIdentityKept is the owner the identity kept here was founded with,
@@ -986,9 +985,7 @@ func (s *CoreServer) commitRecoveryRotation(w http.ResponseWriter, req recovery.
 	default:
 		// Not yet added, so the recovery's rotation is not done: said as the
 		// commit route says it, and nothing is recorded against the session.
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusAccepted)
-		json.NewEncoder(w).Encode(map[string]any{"status": res.Status, "s": fmt.Sprintf("%x", res.SN),
+		jsonreply.Write(w, http.StatusAccepted, map[string]any{"status": res.Status, "s": fmt.Sprintf("%x", res.SN),
 			"d": res.SAID, "signed": res.Signed, "keys": res.Keys, "expires": res.Expires.UTC().Format(time.RFC3339)})
 		return recovery.RotationResult{}, false
 	}

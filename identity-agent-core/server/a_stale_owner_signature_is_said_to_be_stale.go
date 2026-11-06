@@ -2,7 +2,7 @@ package server
 
 import (
 	"bytes"
-	"encoding/json"
+	"identity-agent-core/internal/jsonreply"
 	"io"
 	"net/http"
 	"strings"
@@ -103,8 +103,6 @@ func establishmentsOf(kel []map[string]interface{}) []keyStatePlace {
 // writeStaleKeyState answers a request signed under an owner's earlier key
 // state.
 func writeStaleKeyState(w http.ResponseWriter) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusUnauthorized)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": "stale_key_state",
+	jsonreply.Write(w, http.StatusUnauthorized, map[string]string{"error": "stale_key_state",
 		"detail": "this request was signed under a key state of the owner's that is not the one in force here; read the key state again"})
 }
