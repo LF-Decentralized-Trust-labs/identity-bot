@@ -28,6 +28,17 @@ class KeyMathRefused implements Exception {
   String toString() => 'keymath $op refused: $reason';
 }
 
+/// The core's key arithmetic could not be reached at all: the app's bridge to
+/// it is missing or failed. Not a verdict on the request, so it is never read
+/// as one, unlike [KeyMathRefused].
+class KeyMathUnavailable implements Exception {
+  KeyMathUnavailable(this.op, this.reason);
+  final String op;
+  final String reason;
+  @override
+  String toString() => 'keymath $op could not be reached: $reason';
+}
+
 /// The core binary did not pass the checks made before it is run.
 class KeyMathBinaryRefused implements Exception {
   KeyMathBinaryRefused(this.reason);
@@ -347,6 +358,10 @@ class BridgeKeyMath implements KeyMath {
     final String answer;
     try {
       answer = await call(op, jsonEncode(request));
+    } on KeyMathRefused {
+      rethrow;
+    } on KeyMathUnavailable {
+      rethrow;
     } catch (e) {
       throw KeyMathRefused(op, '$e');
     }
