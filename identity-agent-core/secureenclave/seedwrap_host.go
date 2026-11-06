@@ -61,8 +61,9 @@ import (
 // private half right now comes from storeSeedAs's round trip: the core seals to
 // the attested public key, the app must decrypt that inside the hardware, and
 // the seed is stored only when what comes back opens to the seed. (Why no
-// revocation, app-identity or boot-state check is needed either: see
-// seedWrapKeyPolicy.)
+// boot-state check is needed: see seedWrapKeyPolicy. What the chain is held to
+// besides that, Google's revocation list and the app's declared identity, is in
+// attested.)
 const SeedWrapAttestationChallenge = "identity-agent-seed-wrap-v1"
 
 const seedWrapAAD = "identity-agent-seed-wrap/v1"
@@ -98,6 +99,9 @@ var (
 	// recorded with a seed comes from it, never from a second read of the app's
 	// chain, which the app could change between the check and the label.
 	verifiedLevel string
+	// verifiedCaveat is what the last successful check let through unchecked
+	// (a development build with no revocation list), "" when nothing.
+	verifiedCaveat string
 )
 
 // DeclareSeedWrapHost registers the app's wrapper. Called through mobilecore
@@ -105,7 +109,7 @@ var (
 func DeclareSeedWrapHost(h SeedWrapHost) {
 	seedWrapHostMu.Lock()
 	seedWrapHost = h
-	verifiedLevel = ""
+	verifiedLevel, verifiedCaveat = "", ""
 	seedWrapHostMu.Unlock()
 }
 
@@ -129,8 +133,11 @@ func declaredHostSeedWrapper() SeedWrapper {
 }
 
 // attested is what the attestation proves about the key, or why it proves
-// nothing. Checked afresh each time: it is a signature check and a parse, and a
-// cached answer is one more thing to go stale.
+// nothing: the chain to Google's root, the key's policy, the app it was made
+// for (android_app_identity.go) and Google's revocation list
+// (android_attestation_status.go). Checked afresh each time: the chain is a
+// signature check and a parse. The revocation list is the one input that is not
+// recomputed: it is held in memory and fetched at most once a day, never per call.
 func (w hostedSeedWrapper) attested() (*AndroidKeyFacts, error) {
 	chain := w.host.AttestationChain()
 	if len(chain) == 0 {
@@ -143,10 +150,25 @@ func (w hostedSeedWrapper) attested() (*AndroidKeyFacts, error) {
 	if err := seedWrapKeyPolicy(f); err != nil {
 		return nil, err
 	}
+	if err := checkAppIdentity(f); err != nil {
+		return nil, err
+	}
+	if err := checkRevocation(f, attestationClock()); err != nil {
+		return nil, err
+	}
 	seedWrapHostMu.Lock()
 	verifiedLevel = f.LevelName()
+	verifiedCaveat = f.RevocationNote
 	seedWrapHostMu.Unlock()
 	return f, nil
+}
+
+// caveat is what the check that licensed this wrapper let through unchecked:
+// storeSeedAs records it in the envelope, so the file says it.
+func (w hostedSeedWrapper) caveat() string {
+	seedWrapHostMu.RLock()
+	defer seedWrapHostMu.RUnlock()
+	return verifiedCaveat
 }
 
 // Scheme says which hardware holds the key: the level the last successful check

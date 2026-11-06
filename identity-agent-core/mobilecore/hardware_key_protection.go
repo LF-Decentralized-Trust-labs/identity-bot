@@ -84,3 +84,18 @@ func DeclareSeedWrapHost(h SeedWrapHost) {
 	}
 	secureenclave.DeclareSeedWrapHost(h)
 }
+
+// DeclareAppIdentity says which app this is, so the core can hold the seed key's
+// attestation to it: the key must have been made for this package, signed with
+// one of these certificates. [signerDigests] are the SHA-256 digests of the
+// app's signing certificates in hex, separated by commas (more than one lets a
+// signing key be rotated); on Android take them from PackageInfo's signing
+// certificate history. An app that declares nothing, or declares a package the
+// attestation does not name, is refused. Must be called before StartServer.
+func DeclareAppIdentity(packageName, signerDigests string) error {
+	digests, err := secureenclave.ParseSignerDigests(signerDigests)
+	if err != nil {
+		return err
+	}
+	return secureenclave.DeclareAppIdentity(packageName, digests)
+}

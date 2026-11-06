@@ -9,6 +9,7 @@ import (
 
 	keri "github.com/grapeid/keri-go"
 
+	"identity-agent-core/secureenclave"
 	"identity-agent-core/server"
 )
 
@@ -24,6 +25,9 @@ func StartServer(dataDir string, port int) error {
 	if instance != nil {
 		return fmt.Errorf("server already running")
 	}
+
+	// Where the core keeps its copy of Google's attestation revocation list.
+	secureenclave.DeclareAttestationStatusDir(dataDir)
 
 	cfg := server.Config{
 		DataDir:          dataDir,
