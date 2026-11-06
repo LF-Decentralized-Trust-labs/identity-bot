@@ -33,7 +33,8 @@ actions are done with the owner's keys, on the device holding them, and no score
 opens them to a controller. They are:
 
 - the root of trust: rotating the identity's keys (directly, as a root rotation,
-  or within a recovery), installing a root seed, resetting, founding the identity
+  or within a recovery), installing a root seed, holding, reading or forgetting the
+  recovery phrase that recreates it, resetting, founding the identity
   (by inception or hybrid inception), preparing the messaging keys an identity
   commits to, asking who would witness a founding, and bringing new owners in;
 - the identity's key log: signing an interaction event, signing for the identity

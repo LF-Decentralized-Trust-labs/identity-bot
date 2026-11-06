@@ -1079,6 +1079,18 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 		r.Post("/keystore/root-seed", s.handleSetRootSeed)
 		r.Get("/keystore/root-seed", s.handleRootSeedStatus)
 
+		r.Put("/keystore/recovery-phrase", s.handleHoldRecoveryPhrase)
+		r.Get("/keystore/recovery-phrase", s.handleRecoveryPhraseStatus)
+		r.Post("/keystore/recovery-phrase/open", s.handleOpenRecoveryPhrase)
+		r.Delete("/keystore/recovery-phrase", s.handleForgetRecoveryPhrase)
+
+		// The second phrase held while an identity moves to a new phrase
+		// (ADR-061 section 10): held exactly as the phrase in force is.
+		r.Put("/keystore/recovery-phrase/moving-to", s.handleHoldPhraseMovingTo)
+		r.Get("/keystore/recovery-phrase/moving-to", s.handlePhraseMovingToStatus)
+		r.Post("/keystore/recovery-phrase/moving-to/open", s.handleOpenPhraseMovingTo)
+		r.Delete("/keystore/recovery-phrase/moving-to", s.handleForgetPhraseMovingTo)
+
 		r.Post("/inception", s.handleInception)
 		r.Post("/hybrid-inception", s.handleHybridInception)
 		r.Post("/rotation", s.handleRotation)

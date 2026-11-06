@@ -738,7 +738,15 @@ func rememberSignature(sig string, now time.Time) (alreadyUsed bool) {
 // Keyed by "METHOD /chi/pattern", the same way publicRoutes is.
 var sessionForbidden = map[string]string{
 	// --- the root of trust ---
-	"POST /api/keystore/root-seed": "installing a root seed decides what this identity is",
+	"POST /api/keystore/root-seed":                      "installing a root seed decides what this identity is",
+	"PUT /api/keystore/recovery-phrase":                 "whoever reads the recovery phrase becomes the identity",
+	"GET /api/keystore/recovery-phrase":                 "whoever reads the recovery phrase becomes the identity",
+	"POST /api/keystore/recovery-phrase/open":           "whoever reads the recovery phrase becomes the identity",
+	"DELETE /api/keystore/recovery-phrase":              "whoever reads the recovery phrase becomes the identity",
+	"PUT /api/keystore/recovery-phrase/moving-to":       "whoever reads the phrase being moved to becomes the identity",
+	"GET /api/keystore/recovery-phrase/moving-to":       "whoever reads the phrase being moved to becomes the identity",
+	"POST /api/keystore/recovery-phrase/moving-to/open": "whoever reads the phrase being moved to becomes the identity",
+	"DELETE /api/keystore/recovery-phrase/moving-to":    "whoever reads the phrase being moved to becomes the identity",
 	// Which half this computer is running. A browser is not the app on this
 	// machine, and this decides whether this core answers about an identity at
 	// all — a session that could set it would make the machine refuse its own

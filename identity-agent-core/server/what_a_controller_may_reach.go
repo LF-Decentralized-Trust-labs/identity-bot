@@ -48,15 +48,23 @@ import (
 // sessionForbidden are.
 var controllerOwnerOnly = map[string]string{
 	// --- the root of trust ---
-	"POST /api/keystore/root-seed":         "installing a root seed decides what this identity is",
-	"POST /api/recovery/root-aid-rotation": "rotating the root identifier replaces the identity's controlling key",
-	"POST /api/rotation":                   "rotating keys replaces what signs for this identity",
-	"POST /api/reset":                      "resetting destroys this identity",
-	"POST /api/inception":                  "this creates the identity itself",
-	"POST /api/hybrid-inception":           "this creates the identity itself",
-	"POST /api/messaging-keys/prepare":     "this derives the keys an identity commits to from the root seed, before it is founded",
-	"POST /api/owners/ceremony":            "bringing new owners in decides who the owner is",
-	"DELETE /api/owners/ceremony":          "abandoning a ceremony decides who the owner is",
+	"POST /api/keystore/root-seed":                      "installing a root seed decides what this identity is",
+	"PUT /api/keystore/recovery-phrase":                 "whoever reads the recovery phrase becomes the identity",
+	"GET /api/keystore/recovery-phrase":                 "whoever reads the recovery phrase becomes the identity",
+	"POST /api/keystore/recovery-phrase/open":           "whoever reads the recovery phrase becomes the identity",
+	"DELETE /api/keystore/recovery-phrase":              "whoever reads the recovery phrase becomes the identity",
+	"PUT /api/keystore/recovery-phrase/moving-to":       "whoever reads the phrase being moved to becomes the identity",
+	"GET /api/keystore/recovery-phrase/moving-to":       "whoever reads the phrase being moved to becomes the identity",
+	"POST /api/keystore/recovery-phrase/moving-to/open": "whoever reads the phrase being moved to becomes the identity",
+	"DELETE /api/keystore/recovery-phrase/moving-to":    "whoever reads the phrase being moved to becomes the identity",
+	"POST /api/recovery/root-aid-rotation":              "rotating the root identifier replaces the identity's controlling key",
+	"POST /api/rotation":                                "rotating keys replaces what signs for this identity",
+	"POST /api/reset":                                   "resetting destroys this identity",
+	"POST /api/inception":                               "this creates the identity itself",
+	"POST /api/hybrid-inception":                        "this creates the identity itself",
+	"POST /api/messaging-keys/prepare":                  "this derives the keys an identity commits to from the root seed, before it is founded",
+	"POST /api/owners/ceremony":                         "bringing new owners in decides who the owner is",
+	"DELETE /api/owners/ceremony":                       "abandoning a ceremony decides who the owner is",
 
 	// Who would witness a founding: the founding names them for good, and the
 	// owner's device confirms each before it does.
