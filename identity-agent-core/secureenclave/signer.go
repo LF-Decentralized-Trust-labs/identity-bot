@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/internal/atomicfile"
 	"os"
 	"path/filepath"
 	"sync"
@@ -111,7 +112,7 @@ func (s *softwareSigner) ensureKey() error {
 		return err
 	}
 	seed := priv.Seed()
-	if err := os.WriteFile(s.keyPath(), seed, 0600); err != nil {
+	if err := atomicfile.Write(s.keyPath(), seed, 0600); err != nil {
 		return err
 	}
 	s.priv = priv

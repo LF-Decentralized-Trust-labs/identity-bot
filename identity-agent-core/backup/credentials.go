@@ -5,7 +5,10 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"identity-agent-core/internal/atomicfile"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
@@ -63,7 +66,14 @@ func (cs *CredentialStore) loadOrCreateMasterKey() ([]byte, error) {
 	if _, err := rand.Read(key); err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(path, key, 0600); err != nil {
+	// Create, not Write: if another caller made the key first, adopt theirs
+	// rather than replace a key that may already have sealed something.
+	if err := atomicfile.Create(path, key, 0600); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			if data, rerr := os.ReadFile(path); rerr == nil && len(data) == 32 {
+				return data, nil
+			}
+		}
 		return nil, err
 	}
 	return key, nil
@@ -83,7 +93,7 @@ func (cs *CredentialStore) Save(id string, cred RemoteCredentialSecrets) error {
 	}
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
-	return os.WriteFile(cs.credPath(id), enc, 0600)
+	return atomicfile.Write(cs.credPath(id), enc, 0600)
 }
 
 func (cs *CredentialStore) Load(id string) (RemoteCredentialSecrets, error) {

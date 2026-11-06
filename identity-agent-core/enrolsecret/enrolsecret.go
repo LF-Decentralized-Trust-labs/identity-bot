@@ -29,6 +29,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"identity-agent-core/internal/atomicfile"
 	"os"
 	"sync"
 	"time"
@@ -113,11 +114,7 @@ func (s *Store) save(f file) error {
 	if err != nil {
 		return err
 	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.path)
+	return atomicfile.Write(s.path, b, 0o600)
 }
 
 // prune drops what can never be used again.

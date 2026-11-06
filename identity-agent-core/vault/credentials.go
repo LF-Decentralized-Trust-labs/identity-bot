@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/internal/atomicfile"
 	"log"
 	"net"
 	"net/http"
@@ -420,23 +421,17 @@ func (cv *CredentialVault) SetCredential(service string, domains []string, heade
 		return fmt.Errorf("credential vault is locked — complete identity setup first (vault key unavailable): %w", err)
 	}
 
-	updated := false
+	entry := CredentialEntry{Service: service, MatchDomains: domains, Headers: headers}
 	for i, e := range cv.entries {
 		if e.Service == service {
-			cv.entries[i].MatchDomains = domains
-			cv.entries[i].Headers = headers
-			updated = true
-			break
+			// Keep the other fields the entry already had, as before.
+			entry = e
+			entry.MatchDomains = domains
+			entry.Headers = headers
+			return cv.commitLocked(key, cv.withEntry(i, entry))
 		}
 	}
-	if !updated {
-		cv.entries = append(cv.entries, CredentialEntry{
-			Service:      service,
-			MatchDomains: domains,
-			Headers:      headers,
-		})
-	}
-	return cv.persistLocked(key)
+	return cv.commitLocked(key, cv.withEntry(-1, entry))
 }
 
 func (cv *CredentialVault) RemoveCredential(service string) error {
@@ -453,8 +448,10 @@ func (cv *CredentialVault) RemoveCredential(service string) error {
 			if err != nil {
 				return fmt.Errorf("credential vault is locked — complete identity setup first (vault key unavailable): %w", err)
 			}
-			cv.entries = append(cv.entries[:i], cv.entries[i+1:]...)
-			return cv.persistLocked(key)
+			next := make([]CredentialEntry, 0, len(cv.entries)-1)
+			next = append(next, cv.entries[:i]...)
+			next = append(next, cv.entries[i+1:]...)
+			return cv.commitLocked(key, next)
 		}
 	}
 	return nil
@@ -552,12 +549,10 @@ func (cv *CredentialVault) SetBrainSignIn(ref string, rec json.RawMessage) error
 	entry := CredentialEntry{Service: ref, MatchDomains: []string{}, Headers: map[string]string{}, BrainSignIn: rec}
 	for i, e := range cv.entries {
 		if e.Service == ref {
-			cv.entries[i] = entry
-			return cv.persistLocked(key)
+			return cv.commitLocked(key, cv.withEntry(i, entry))
 		}
 	}
-	cv.entries = append(cv.entries, entry)
-	return cv.persistLocked(key)
+	return cv.commitLocked(key, cv.withEntry(-1, entry))
 }
 
 // BrainSignIn is the sign-in kept under ref, with its secret, as it was
@@ -616,12 +611,10 @@ func (cv *CredentialVault) SetKept(ref, kind string, v any) error {
 		Kept: &KeptSecret{Kind: kind, Data: data}}
 	for i, e := range cv.entries {
 		if e.Service == ref {
-			cv.entries[i] = entry
-			return cv.persistLocked(key)
+			return cv.commitLocked(key, cv.withEntry(i, entry))
 		}
 	}
-	cv.entries = append(cv.entries, entry)
-	return cv.persistLocked(key)
+	return cv.commitLocked(key, cv.withEntry(-1, entry))
 }
 
 // Kept reads the secret kept under ref into out, and reports whether one of
@@ -652,6 +645,38 @@ func (cv *CredentialVault) RemoveKept(ref string) error {
 	return cv.RemoveCredential(ref)
 }
 
+// writeVaultFile is how the sealed vault reaches disk: the core's atomic write,
+// so a crash leaves the old vault or the new one. A variable so tests can make
+// the write fail.
+var writeVaultFile = atomicfile.Write
+
+// withEntry returns a copy of the entries with entry replacing the one at i,
+// or appended when i is negative. The vault's own slice is not touched: memory
+// changes only once the write has succeeded (commitLocked).
+func (cv *CredentialVault) withEntry(i int, entry CredentialEntry) []CredentialEntry {
+	next := make([]CredentialEntry, len(cv.entries), len(cv.entries)+1)
+	copy(next, cv.entries)
+	if i < 0 {
+		return append(next, entry)
+	}
+	next[i] = entry
+	return next
+}
+
+// commitLocked writes next to disk and, only if that succeeded, makes it the
+// vault's entries. A failed write leaves memory as the disk still is, so a
+// retry sees the true state rather than reporting success for a change the
+// disk never took.
+func (cv *CredentialVault) commitLocked(key []byte, next []CredentialEntry) error {
+	prev := cv.entries
+	cv.entries = next
+	if err := cv.persistLocked(key); err != nil {
+		cv.entries = prev
+		return err
+	}
+	return nil
+}
+
 // persistLocked seals the entries with AES-256-GCM and writes the envelope.
 // The vault never writes plaintext.
 func (cv *CredentialVault) persistLocked(key []byte) error {
@@ -676,7 +701,7 @@ func (cv *CredentialVault) persistLocked(key []byte) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(cv.vaultPath(), data, 0600)
+	return writeVaultFile(cv.vaultPath(), data, 0600)
 }
 
 func decryptVault(key, data []byte) ([]CredentialEntry, error) {
