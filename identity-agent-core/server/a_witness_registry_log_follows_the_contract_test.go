@@ -200,16 +200,17 @@ func TestAnEventTheKeyLogDoesNotSealIsReportedAsPossibleDuplicity(t *testing.T) 
 	}
 }
 
-func TestAWitnessAheadOfTheVerifiersKeyLogIsNotAccusedOfDuplicity(t *testing.T) {
+func TestAWitnessAheadOfTheVerifiersKeyLogIsBelievedAfterTheVerifierCatchesUp(t *testing.T) {
 	w := newRegistryWorld(t)
 	reg := w.inceptRegistry(true)
 	iss := w.issue(reg.RegistrySaid, true)
 	w.post(vcpB64(reg), iss.IssRawBytesB64)
-	// The verifier's copy stops before the interaction that seals the issuance.
+	// The verifier's copy stops before the interaction that seals the issuance;
+	// the witness holds it, and the verifier extends its copy from the witness.
 	w.kel = w.kel[:2]
 	res := w.verifyOutside(iss)
-	if res.Verified {
-		t.Fatalf("an issuance sealed beyond the verifier's key log was proved: %+v", res.Checks)
+	if !res.Verified {
+		t.Fatalf("an issuance sealed beyond the verifier's key log was not proved after the log was caught up: %+v %v", res.Checks, res.Errors)
 	}
 	if res.Checks["possible_duplicity"] == true {
 		t.Fatalf("a witness that is ahead was accused of duplicity: %+v %v", res.Checks, res.Errors)

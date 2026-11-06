@@ -35,6 +35,13 @@ type registryWorld struct {
 func newRegistryWorld(t *testing.T) *registryWorld {
 	t.Helper()
 	bob, c := witnessedController(t)
+	return registryWorldOf(t, bob, c)
+}
+
+// registryWorldOf is a registry world for a controller one of whose witnesses
+// is bob, who has taken its inception and is the one events are given to.
+func registryWorldOf(t *testing.T, bob *peerAgent, c *rotatingController) *registryWorld {
+	t.Helper()
 	w := &registryWorld{t: t, bob: bob, c: c, base: servedThroughTheRealRouter(t, bob)}
 	c.eng.SetEventSignature(func(_, _ string, raw []byte) (string, error) { return sign(t, c.signers[0], raw), nil })
 	w.schema, _ = keri.Blake3SAID([]byte("a test schema"))
@@ -129,6 +136,12 @@ func vcpB64(r *drivers.DriverRegistryInceptResponse) string { return r.VcpJsonB6
 func (w *registryWorld) verifyOutside(iss *drivers.DriverIssueCredentialResponse) *drivers.DriverVerifyCredentialResponse {
 	w.t.Helper()
 	pointTheBootstrapPoolAt(w.t, w.bob.witnessKey, w.base)
+	return w.verifyWithThePool(iss)
+}
+
+// verifyWithThePool is verifyOutside with the witness pool as it stands.
+func (w *registryWorld) verifyWithThePool(iss *drivers.DriverIssueCredentialResponse) *drivers.DriverVerifyCredentialResponse {
+	w.t.Helper()
 	s := agentWithNoIdentity(w.t)
 	cred, err := readCredentialHere(iss.AcdcJsonB64)
 	if err != nil {
@@ -137,7 +150,7 @@ func (w *registryWorld) verifyOutside(iss *drivers.DriverIssueCredentialResponse
 	log := s.issuanceLogForVerification(cred, w.kel)
 	res, err := keriengine.New().VerifyCredential(&drivers.DriverVerifyCredentialRequest{
 		AcdcJson:          iss.AcdcJsonB64,
-		IssuerKelEvents:   w.kel,
+		IssuerKelEvents:   log.issuerKel,
 		RegistryEventsB64: log.events,
 	})
 	if err != nil {

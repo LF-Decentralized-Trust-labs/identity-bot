@@ -71,6 +71,10 @@ type issuanceLog struct {
 	// duplicity is set when a witness served events the issuer's key log does
 	// not seal; verifyCredentialHere puts it in the verification result.
 	duplicity *telDuplicity
+	// issuerKel is the issuer's key log to check the credential against: the
+	// one given, or a longer one verified while asking the witnesses, which the
+	// caller must use in place of the one it passed.
+	issuerKel []map[string]interface{}
 }
 
 // issuanceLogForVerification is the credential's transaction log: the events
@@ -83,25 +87,25 @@ type issuanceLog struct {
 // against that key log before it is used, and only that log is proven complete.
 func (s *CoreServer) issuanceLogForVerification(cred *keri.Credential, issuerKel []map[string]interface{}) issuanceLog {
 	if cred == nil {
-		return issuanceLog{}
+		return issuanceLog{issuerKel: issuerKel}
 	}
 	said, registry := cred.SAID, cred.Registry
 	if said == "" || registry == "" {
-		return issuanceLog{}
+		return issuanceLog{issuerKel: issuerKel}
 	}
 	events, err := s.DataStore.GetCredentialTEL(registry, said)
 	if err != nil || len(events) == 0 {
 		if cred.Issuer == "" || len(issuerKel) == 0 {
-			return issuanceLog{}
+			return issuanceLog{issuerKel: issuerKel}
 		}
-		fetched, dup := s.registryLogFromWitnesses(telClient, cred.Issuer, registry, said, issuerKel)
-		return issuanceLog{events: fetched, provenComplete: len(fetched) > 0, duplicity: dup}
+		fetched, dup, kel := s.registryLogFromWitnesses(telClient, cred.Issuer, registry, said, issuerKel)
+		return issuanceLog{events: fetched, provenComplete: len(fetched) > 0, duplicity: dup, issuerKel: kel}
 	}
 	out := make([]string, 0, len(events))
 	for _, ev := range events {
 		out = append(out, ev.RawB64)
 	}
-	return issuanceLog{events: out}
+	return issuanceLog{events: out, issuerKel: issuerKel}
 }
 
 // issuerVerdict folds what is known of the issuer's log into the engine's

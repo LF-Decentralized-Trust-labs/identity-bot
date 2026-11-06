@@ -143,25 +143,143 @@ func keyLogBytes(kel []map[string]interface{}) [][]byte {
 	return out
 }
 
+// A witness answer, and whose it is.
+type witnessAnswer struct {
+	key  string
+	base string
+	ans  witness.TELAnswer
+}
+
+// maxCatchUpRounds bounds how many times one check extends the issuer's key log.
+const maxCatchUpRounds = 8
+
+// keyLogSN is the sequence number of the last event of a key log (-1 for none).
+func keyLogSN(kelRaw [][]byte) int {
+	last := -1
+	for _, raw := range kelRaw {
+		if ev, err := keri.ParseEvent(raw); err == nil && int(ev.SN) > last {
+			last = int(ev.SN)
+		}
+	}
+	return last
+}
+
+// catchUpKeyLog extends the issuer's key log from the witnesses that say they
+// hold more of it. A witness's latest_kel_sn is only a reason to look: what is
+// kept is the longest log that verifies end to end, event by event, from the
+// signatures the log itself puts in force (drivers.ValidateKELFromBytes), so a
+// witness cannot lengthen the log by saying it is longer. The log given back is
+// the one given when nothing verified.
+func catchUpKeyLog(client *http.Client, issuer string, kel []map[string]interface{}, answers []witnessAnswer) []map[string]interface{} {
+	clientFor := func(string) *http.Client { return client }
+	for round := 0; round < maxCatchUpRounds; round++ {
+		have := keyLogSN(keyLogBytes(kel))
+		var best []map[string]interface{}
+		for _, a := range answers {
+			if a.ans.LatestKelSN <= have {
+				continue
+			}
+			later := askWitnessForLaterEventsWith(clientFor, a.base, issuer, kel)
+			if len(kel)+len(later) <= max(len(kel), len(best)) {
+				continue
+			}
+			events := append(append([]map[string]interface{}{}, kel...), later...)
+			in, ok := drivers.ValidateKELInputFromRecords(issuer, events)
+			if !ok {
+				continue
+			}
+			if val, err := drivers.ValidateKELFromBytes(in); err != nil || !val.KelVerified {
+				continue
+			}
+			best = events
+		}
+		if best == nil {
+			return kel
+		}
+		kel = best
+	}
+	return kel
+}
+
 // registryLogFromWitnesses is the events of one credential in its registry, in
-// order, as the issuer's witnesses
-// serve them, checked. Nil when no witness gave a log that holds up; the second
-// result is set when one served events the key log does not seal.
-func (s *CoreServer) registryLogFromWitnesses(client *http.Client, issuer, registry, credential string, issuerKel []map[string]interface{}) ([]string, *telDuplicity) {
+// order, as the issuer's witnesses serve them, checked. Nil when no witness
+// gave a log that holds up, which is "not checked", never "not revoked". The
+// second result is set when one served events the key log does not seal. The
+// third is the issuer's key log as it now stands: the one given, or a longer
+// one this check verified, which the caller must check the credential against
+// (a revocation anchored after the log it held is sealed only in the longer).
+//
+// THE KEY LOG THIS IS CHECKED AGAINST IS CAUGHT UP FIRST. The verifier's copy
+// of the issuer's key log is only as new as the last time anything refreshed
+// it, and nothing on this path does. Every witness is asked; when any says it
+// holds the key log further than this agent does, the key log is extended from
+// those witnesses and verified (catchUpKeyLog) before any answer is weighed. If
+// a witness holds further than could be verified, the check ends as not
+// checked: its answer cannot be tested against a log this agent cannot reach,
+// and a revocation may be in it. Of the witnesses whose answer holds up, the
+// one that anchors furthest is taken (SEAM-13 section 2 and T-2); one whose
+// answer fails anchoring against the caught-up log is T-3: rejected and
+// reported as possible duplicity. A verifier whose copy and every witness are
+// all behind together cannot know it; that is what asking several witnesses is
+// for.
+//
+// READING A WITNESS DIRECTLY IS THE FALLBACK. SEAM-13 sends this question to
+// the blinded registry service (T-inv-6, section 4) and reads a witness
+// directly only when that service cannot be reached. That is why the question
+// below reveals as little as it does (see the top of this file).
+func (s *CoreServer) registryLogFromWitnesses(client *http.Client, issuer, registry, credential string, issuerKel []map[string]interface{}) ([]string, *telDuplicity, []map[string]interface{}) {
 	kelRaw := keyLogBytes(issuerKel)
 	if len(kelRaw) == 0 {
-		return nil, nil
+		return nil, nil, issuerKel
 	}
-	var dup *telDuplicity
-	lastSN := -1
+	kel := issuerKel
+	pool := witness.BootstrapPool()
+	asked := map[string]bool{}
+	var answers []witnessAnswer
+	askAll := func(raw [][]byte) {
+		for _, key := range currentWitnessKeys(raw) {
+			if asked[key] {
+				continue
+			}
+			base := ""
+			for _, b := range pool {
+				if b.WitnessKey == key && b.URL != "" {
+					base = strings.TrimRight(b.URL, "/")
+					break
+				}
+			}
+			if base == "" || witnessRejected(issuer, key) {
+				continue
+			}
+			asked[key] = true
+			if ans, err := fetchRegistryLogs(client, base, issuer, kel); err == nil {
+				answers = append(answers, witnessAnswer{key: key, base: base, ans: ans})
+			}
+		}
+	}
+	askAll(kelRaw)
+
+	claimed := -1
+	for _, a := range answers {
+		claimed = max(claimed, a.ans.LatestKelSN)
+	}
+	if claimed > keyLogSN(kelRaw) {
+		kel = catchUpKeyLog(client, issuer, kel, answers)
+		kelRaw = keyLogBytes(kel)
+		askAll(kelRaw) // a rotation in what was caught up may name witnesses not yet asked
+	}
+	lastSN := keyLogSN(kelRaw)
+	for _, a := range answers {
+		if a.ans.LatestKelSN > lastSN {
+			return nil, nil, kel // holds the key log further than could be verified: not checked
+		}
+	}
+
 	sealed := map[string]bool{} // digests the key log seals for this credential
 	for _, raw := range kelRaw {
 		ev, err := keri.ParseEvent(raw)
 		if err != nil {
 			continue
-		}
-		if int(ev.SN) > lastSN {
-			lastSN = int(ev.SN)
 		}
 		seals, _ := ev.Seals()
 		for _, sl := range seals {
@@ -170,35 +288,27 @@ func (s *CoreServer) registryLogFromWitnesses(client *http.Client, issuer, regis
 			}
 		}
 	}
-	pool := witness.BootstrapPool()
-	for _, key := range currentWitnessKeys(kelRaw) {
-		base := ""
-		for _, b := range pool {
-			if b.WitnessKey == key && b.URL != "" {
-				base = strings.TrimRight(b.URL, "/")
-				break
-			}
+
+	var dup *telDuplicity
+	var best []string
+	bestAnchor, bestLen := -1, -1
+	for _, a := range answers {
+		if a.ans.LatestKelSN < lastSN {
+			continue // behind the key log this agent holds
 		}
-		if base == "" || witnessRejected(issuer, key) {
-			continue
-		}
-		ans, err := fetchRegistryLogs(client, base, issuer, issuerKel)
-		if err != nil || ans.LatestKelSN < lastSN {
-			continue // unreachable, or behind the key log this agent already holds
-		}
-		raws := make([][]byte, 0, len(ans.Events))
-		for _, ev := range ans.Events {
+		raws := make([][]byte, 0, len(a.ans.Events))
+		for _, ev := range a.ans.Events {
 			raws = append(raws, []byte(ev))
 		}
 		checked, err := witness.AnchoredTEL(issuer, kelRaw, raws, nil)
 		if err != nil {
 			var unsealed *witness.NotAnchoredError
-			if errors.As(err, &unsealed) && ans.LatestKelSN <= lastSN {
-				// Not behind, not ahead, and still serving what this key log
-				// does not seal: not an honest gap.
-				rejectWitness(issuer, key)
+			if errors.As(err, &unsealed) {
+				// As far on as the key log, and still serving what it does not
+				// seal: not an honest gap.
+				rejectWitness(issuer, a.key)
 				if dup == nil {
-					dup = &telDuplicity{Issuer: issuer, WitnessKey: key, Reason: err.Error()}
+					dup = &telDuplicity{Issuer: issuer, WitnessKey: a.key, Reason: err.Error()}
 				}
 			}
 			continue
@@ -207,7 +317,9 @@ func (s *CoreServer) registryLogFromWitnesses(client *http.Client, issuer, regis
 		// by AnchoredTEL for any event in it. What goes on is the credential's
 		// own events: the engine reads them as one credential's log.
 		var mine []witness.TELEvent
+		anchor := -1
 		for _, ev := range checked {
+			anchor = max(anchor, ev.AnchorSN)
 			if ev.Subject == credential && ev.Registry == registry {
 				mine = append(mine, ev)
 			}
@@ -228,14 +340,18 @@ func (s *CoreServer) registryLogFromWitnesses(client *http.Client, issuer, regis
 		if !complete {
 			continue
 		}
-		sort.Slice(mine, func(a, b int) bool { return mine[a].SN < mine[b].SN })
-		var res []string
-		for _, ev := range mine {
-			res = append(res, ev.RawB64)
+		if anchor < bestAnchor || (anchor == bestAnchor && len(checked) <= bestLen) {
+			continue
 		}
-		return res, dup // a good log from another witness does not erase what the first one served
+		sort.Slice(mine, func(x, y int) bool { return mine[x].SN < mine[y].SN })
+		best = best[:0:0]
+		for _, ev := range mine {
+			best = append(best, ev.RawB64)
+		}
+		bestAnchor, bestLen = anchor, len(checked)
 	}
-	return nil, dup
+	// A good log from one witness does not erase what another served.
+	return best, dup, kel
 }
 
 // fetchRegistryLogs reads an issuer's whole registry log from one witness. The
