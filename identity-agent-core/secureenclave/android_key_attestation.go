@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -62,6 +63,7 @@ const (
 	kmTagCreationTime   = 701
 	kmTagOrigin         = 702
 	kmTagRootOfTrust    = 704
+	kmTagAppID          = 709
 )
 
 const (
@@ -123,6 +125,35 @@ type AndroidKeyFacts struct {
 	// the chain carried no root of trust. DeviceLocked is the bootloader state.
 	BootState    string
 	DeviceLocked bool
+	// Serials are the serial numbers of every certificate in the chain, leaf
+	// first, as Google's status list spells them: lower-case hex, no leading zeros.
+	Serials []string
+	// AppPackages and AppSignerDigests are the application the Keystore says
+	// asked for the key (attestationApplicationId): its package names and the
+	// SHA-256 digests of its signing certificates. AppIDPresent is false when the
+	// attestation did not carry one.
+	AppPackages      []string
+	AppSignerDigests [][]byte
+	AppIDPresent     bool
+	// RevocationNote is set, in a development build only, when Google's status
+	// list could not be had and the chain was let through unchecked. Empty when
+	// the chain was checked against a list.
+	RevocationNote string
+	// AppIdentityNote is set, in a development build only, when the app the
+	// chain was held to is the app's own runtime declaration rather than an
+	// identity built into the core. Empty otherwise.
+	AppIdentityNote string
+}
+
+// caveat is every check a development build let through unchecked, or "".
+func (f AndroidKeyFacts) caveat() string {
+	var notes []string
+	for _, n := range []string{f.RevocationNote, f.AppIdentityNote} {
+		if n != "" {
+			notes = append(notes, n)
+		}
+	}
+	return strings.Join(notes, "; ")
 }
 
 // LevelName is "strongbox" or "tee".
@@ -225,6 +256,9 @@ func verifyAndroidKeyAttestation(blob, wantChallenge []byte, now time.Time, root
 		if i > 0 && (at.Before(chain[i].NotBefore) || at.After(chain[i].NotAfter)) {
 			return nil, notAttested("certificate %d was not valid when the key was made", i)
 		}
+	}
+	for _, c := range chain {
+		facts.Serials = append(facts.Serials, serialKey(c.SerialNumber))
 	}
 	root := chain[len(chain)-1]
 	h := sha256.Sum256(root.RawSubjectPublicKeyInfo)
@@ -349,6 +383,14 @@ func readKeyDescription(leaf *x509.Certificate) (*AndroidKeyFacts, error) {
 	if v, ok := hw[kmTagRootOfTrust]; ok {
 		f.BootState, f.DeviceLocked = readRootOfTrust(v)
 	}
+	// The application id is stated by the Keystore service, so it sits in the
+	// software-enforced list; an attestation made by the TEE signs over it all the same.
+	if v, ok := sw[kmTagAppID]; ok {
+		if f.AppPackages, f.AppSignerDigests, err = readAppID(v); err != nil {
+			return nil, err
+		}
+		f.AppIDPresent = true
+	}
 	return f, nil
 }
 
@@ -450,14 +492,17 @@ func readRootOfTrust(b []byte) (state string, locked bool) {
 // Digests only need to include SHA-256, because the digest names the OAEP hash
 // and an extra one changes nothing about what the key will open.
 //
-// WHAT THIS CHECK DOES NOT DO, AND WHY IT DOES NOT NEED TO. The key needs no
-// person to use it, so anyone with root on the phone when the key is made could
-// already ask it to decrypt the seed; forging an attestation for such a phone
-// would gain them nothing they do not already have. So there is no check of
-// Google's revocation list, no binding to the app's signing identity, and no
-// refusal of an unlocked bootloader or unverified boot state: each answers an
-// attacker this key is not meant to stop. What the attestation is for is proving
-// the key lives in StrongBox or the TEE, so it cannot be copied off the phone.
+// WHAT THIS CHECK DOES NOT DO. It does not refuse an unlocked bootloader or an
+// unverified boot state: the key needs no person to use it, so anyone with root
+// on the phone could already ask it to decrypt the seed, and refusing the state
+// would stop no one. What the attestation is for is proving the key lives in
+// StrongBox or the TEE, so it cannot be copied off the phone.
+//
+// It also does not look at the chain's REVOCATION or at WHICH APP asked for the
+// key. Both are checked where the chain is, in hostedSeedWrapper.attested
+// (android_attestation_status.go and android_app_identity.go): a leaked Google
+// attestation key lets someone sign a chain for a software key and have it read
+// as hardware, and a chain made for another app is not this app's key.
 func seedWrapKeyPolicy(f *AndroidKeyFacts) error {
 	if !f.Generated {
 		return notAttested("the key was imported, not generated in the hardware, so someone else may hold a copy")
@@ -501,4 +546,45 @@ func hasInt(xs []int, x int) bool {
 		}
 	}
 	return false
+}
+
+// readAppID reads attestationApplicationId: the explicit tag holds an OCTET
+// STRING whose contents are
+//
+//	AttestationApplicationId ::= SEQUENCE {
+//	    package_infos     SET OF AttestationPackageInfo,   -- { package_name OCTET STRING, version INTEGER }
+//	    signature_digests SET OF OCTET STRING }            -- SHA-256 of each signing certificate
+func readAppID(v []byte) (packages []string, digests [][]byte, err error) {
+	var wrapped []byte
+	if rest, e := asn1.Unmarshal(v, &wrapped); e != nil || len(rest) != 0 {
+		return nil, nil, notAttested("the application id does not parse")
+	}
+	var id struct {
+		Packages asn1.RawValue
+		Digests  asn1.RawValue
+	}
+	if rest, e := asn1.Unmarshal(wrapped, &id); e != nil || len(rest) != 0 ||
+		id.Packages.Tag != asn1.TagSet || id.Digests.Tag != asn1.TagSet {
+		return nil, nil, notAttested("the application id does not parse")
+	}
+	for rest := id.Packages.Bytes; len(rest) > 0; {
+		var info struct {
+			Name    []byte
+			Version int64
+		}
+		var e error
+		if rest, e = asn1.Unmarshal(rest, &info); e != nil {
+			return nil, nil, notAttested("the application id's package list does not parse")
+		}
+		packages = append(packages, string(info.Name))
+	}
+	for rest := id.Digests.Bytes; len(rest) > 0; {
+		var d []byte
+		var e error
+		if rest, e = asn1.Unmarshal(rest, &d); e != nil {
+			return nil, nil, notAttested("the application id's signer digests do not parse")
+		}
+		digests = append(digests, d)
+	}
+	return packages, digests, nil
 }

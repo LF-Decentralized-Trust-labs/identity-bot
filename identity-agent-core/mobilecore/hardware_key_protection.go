@@ -84,3 +84,24 @@ func DeclareSeedWrapHost(h SeedWrapHost) {
 	}
 	secureenclave.DeclareSeedWrapHost(h)
 }
+
+// DeclareAppIdentity says, at runtime, which app this is. It counts only in a
+// development build whose core has no app identity built in, and the seed file
+// and the log then say so. A production build ignores it: the package name and
+// signing-certificate digests the seed key's attestation is held to are built
+// into the core with linker flags, because an app that reads them from the
+// system at runtime gets whatever app is running, a repackaged copy included:
+//
+//	gomobile bind -ldflags "-X identity-agent-core/secureenclave.builtAppPackage=<package name> -X identity-agent-core/secureenclave.builtAppSignerDigests=<sha256 hex>[,<sha256 hex>...]" ...
+//
+// A production core built without them refuses the attestation and says how to
+// set them. [signerDigests] are the SHA-256 digests of the app's signing
+// certificates in hex, separated by commas (more than one lets a signing key be
+// rotated). Must be called before StartServer.
+func DeclareAppIdentity(packageName, signerDigests string) error {
+	digests, err := secureenclave.ParseSignerDigests(signerDigests)
+	if err != nil {
+		return err
+	}
+	return secureenclave.DeclareAppIdentity(packageName, digests)
+}

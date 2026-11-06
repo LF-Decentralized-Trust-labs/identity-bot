@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"strings"
@@ -42,12 +43,17 @@ func theApp(t *testing.T, spec chainSpec, works bool) *theAppsKeystore {
 	h := &theAppsKeystore{works: works, chain: chain, decryptWith: k}
 	DeclareSeedWrapHost(h)
 	t.Cleanup(func() { DeclareSeedWrapHost(nil); attestationRoots = pinned })
+	// The core is built for this app, and Google's list is a clean one unless a
+	// test puts something on it.
+	coreBuiltFor(t, testAppPackage, hex.EncodeToString(testAppDigest))
+	googleStatusListIs(t, statusListJSON())
 	return h
 }
 
 func aKeyIn(level int) chainSpec {
 	return chainSpec{level: level, challenge: SeedWrapAttestationChallenge, purposes: []int{kmPurposeDecrypt},
-		noAuth: true, created: time.Now().Add(-time.Hour)}
+		noAuth: true, created: time.Now().Add(-time.Hour),
+		appPackage: testAppPackage, appDigests: [][]byte{testAppDigest}}
 }
 
 func usablePhone(t *testing.T, c Capability) {

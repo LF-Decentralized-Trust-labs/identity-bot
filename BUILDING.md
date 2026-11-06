@@ -150,6 +150,34 @@ gomobile bind -target=android/arm64 -androidapi 23 -o mobilecore.aar ./mobilecor
 Add more Android targets (`android/arm`, `android/amd64`) to `-target` for older
 devices or the emulator.
 
+### Build the app's identity into an Android core
+
+On Android the core holds the seed key's attestation to the app the key was
+made for: its package name and the SHA-256 digests of the certificates it is
+signed with. That identity is built into the core with two linker flags, not
+read by the app at runtime, because the system answers a running app with that
+app's own name and signer, so a repackaged copy would pass:
+
+```bash
+gomobile bind -target=android/arm64 -androidapi 23 -o mobilecore.aar \
+  -ldflags "-X identity-agent-core/secureenclave.builtAppPackage=<package name> -X identity-agent-core/secureenclave.builtAppSignerDigests=<sha256 hex>[,<sha256 hex>...]" \
+  ./mobilecore
+```
+
+- `builtAppPackage` is the app's package name.
+- `builtAppSignerDigests` is the SHA-256 digest, in hex, of each certificate the
+  app may be signed with, separated by commas and no spaces (colons inside a
+  digest are ignored). List the old and the new certificate while a signing key
+  is rotated. `apksigner verify --print-certs` prints the digest.
+
+A production core built without them refuses the attestation, so the phone
+cannot hold a root identity, and says how to set them. A development core
+(`-X identity-agent-core/buildmode.rawMode=dev`, in the same `-ldflags`) built
+without them accepts the app's runtime `DeclareAppIdentity(packageName,
+signerDigests)` instead, and the seed file and the log say the identity was
+declared at runtime. When the identity is built in, a runtime declaration is
+ignored.
+
 The app's native side starts the core through the library's exported functions
 (`identity-agent-core/mobilecore/`). Everything it declares is read once, when
 the server starts, so the order matters:

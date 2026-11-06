@@ -33,7 +33,26 @@ type chainSpec struct {
 	noOAEP       bool
 	unlockedOnly bool
 	dupPurpose   bool
-	extraPadding int // a second hardware-enforced padding beside OAEP; 0 none
+	extraPadding int      // a second hardware-enforced padding beside OAEP; 0 none
+	appPackage   string   // attestationApplicationId: the package; "" states none
+	appDigests   [][]byte // ... and the signing certificate digests
+}
+
+// appIDDER is attestationApplicationId as the Keystore writes it.
+func appIDDER(pkg string, digests [][]byte) []byte {
+	set := func(body []byte) asn1.RawValue {
+		return asn1.RawValue{Class: asn1.ClassUniversal, Tag: asn1.TagSet, IsCompound: true, Bytes: body}
+	}
+	info := mustDER(struct {
+		Name    []byte
+		Version int64
+	}{[]byte(pkg), 1})
+	var ds []byte
+	for _, d := range digests {
+		ds = append(ds, mustDER(d)...)
+	}
+	inner := mustDER(struct{ P, D asn1.RawValue }{set(info), set(ds)})
+	return mustDER(inner) // an OCTET STRING holding the SEQUENCE
 }
 
 func explicit(tag int, inner []byte) asn1.RawValue {
@@ -92,6 +111,9 @@ func keyDescription(s chainSpec) []byte {
 	}
 	hw = append(hw, explicit(kmTagOrigin, mustDER(origin)))
 	sw := []asn1.RawValue{explicit(kmTagCreationTime, mustDER(s.created.UnixMilli()))}
+	if s.appPackage != "" {
+		sw = append(sw, explicit(kmTagAppID, appIDDER(s.appPackage, s.appDigests)))
+	}
 
 	al := s.level
 	if s.attestSoft {

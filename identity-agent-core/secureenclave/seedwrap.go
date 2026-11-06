@@ -283,6 +283,11 @@ func storeSeedAs(dataDir string, seed []byte, w SeedWrapper, requireWrap bool, h
 		}
 		env = seedEnvelope{V: 1, Wrap: w.Scheme(), Blob: base64.StdEncoding.EncodeToString(blob),
 			Protection: protection, Holder: holder}
+		// A check that let something through unchecked (a development build with
+		// no revocation list) says so in the file.
+		if c, ok := w.(interface{ caveat() string }); ok {
+			env.Why = c.caveat()
+		}
 	}
 	if requireWrap && env.Wrap == seedWrapNone {
 		return cannotLiveHere(detectCapability(), "the seed would have been written unwrapped")
