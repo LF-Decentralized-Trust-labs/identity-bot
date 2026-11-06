@@ -165,7 +165,7 @@ func (s *Service) ReceiveWithdrawalRequest(req WithdrawalRequest) error {
 	// Look for a replacement now rather than after the rotation, so the same
 	// event can cut one and add the other and the identity is never briefly
 	// below its own threshold.
-	go s.trySelfHeal()
+	s.background(s.trySelfHeal)
 	return nil
 }
 

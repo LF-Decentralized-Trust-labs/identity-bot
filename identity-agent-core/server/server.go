@@ -178,8 +178,10 @@ type CoreServer struct {
 	// browser that asked for it, never put in the bundle the Identity Agent reads.
 	challengeCollector map[string][32]byte
 
-	oidcAdapter       *oidc.Adapter
-	WatcherService    *watcher.Service
+	oidcAdapter    *oidc.Adapter
+	WatcherService *watcher.Service
+	// stopPruning ends the watcher's retention loop, waiting for a prune under way.
+	stopPruning       func()
 	WitnessService    *witness.Service
 	LinkVerifier      *linkverifier.SDK
 	BackupService     *backup.Service
@@ -406,7 +408,7 @@ func New(cfg Config) (*CoreServer, error) {
 		s.EventHub.Broadcast(AgentEvent{Type: eventType, Payload: payload})
 	}
 	s.WatcherService = ws
-	watcher.StartPruneLoop(ws, 24*time.Hour)
+	s.stopPruning = watcher.StartPruneLoop(ws, 24*time.Hour)
 
 	backendType := witness.BackendDesktop
 	if os.Getenv("IA_BACKEND_TYPE") != "" {
@@ -885,8 +887,10 @@ func (s *CoreServer) Stop() {
 	// What add-ons started when the server was made ends here, before the
 	// activity log they write to closes.
 	s.stopAddons()
-	if s.ActivityLog != nil {
-		s.ActivityLog.Close()
+	// Refuse new witness work now, so none starts while the servers drain;
+	// what was started is waited for below, before the stores close.
+	if s.WitnessService != nil {
+		s.WitnessService.Stop()
 	}
 
 	if s.TunnelManager != nil {
@@ -936,10 +940,23 @@ func (s *CoreServer) Stop() {
 		waitWithin(s.BackupService.Scheduler.Wait, backgroundStopWait, "a backup")
 	}
 
+	if s.WitnessService != nil {
+		waitWithin(s.WitnessService.Wait, backgroundStopWait, "witness sends")
+	}
+	if s.stopPruning != nil {
+		waitWithin(s.stopPruning, backgroundStopWait, "the watcher prune")
+	}
+
 	if s.KeriDriver != nil {
 		s.KeriDriver.Stop()
 	}
 
+	// The stores close last, after every writer above has stopped or been
+	// given its time. The activity log used to close before the servers
+	// drained, so a request finishing in that window wrote to a closed log.
+	if s.ActivityLog != nil {
+		s.ActivityLog.Close()
+	}
 	if s.DataStore != nil {
 		s.DataStore.Close()
 	}
