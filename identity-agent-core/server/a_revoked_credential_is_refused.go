@@ -49,24 +49,34 @@ func (s *CoreServer) localRevocationState(cred *keri.Credential) revocationState
 	if said == "" || registry == "" {
 		return revocationState{status: revocationNoRegistryState}
 	}
-	reg, err := s.DataStore.GetRegistry(registry)
+	// This agent's own record of a revocation, or of a grant it is withdrawing
+	// (never in force), wins over any log, whether or not the log can be read,
+	// shows the credential as issued, or this agent holds the registry at all.
+	// It is read before anything else, so no early return below can skip it.
+	// This is the one place that is decided. A record that cannot be read is
+	// not an absent record: no log decides then (fail closed).
+	rec, err := s.DataStore.GetCredential(said)
 	if err != nil {
+		return revocationState{status: revocationNotCheckedPrefix + "this agent's record of the credential could not be read: " + err.Error()}
+	}
+	own := rec != nil && (rec.Status == "revoked" || rec.Status == credentialStatusWithdrawing)
+
+	reg, err := s.DataStore.GetRegistry(registry)
+	if err != nil && !own {
 		return revocationState{status: revocationNotCheckedPrefix + "the registry could not be read: " + err.Error()}
+	}
+	if own {
+		var log []string
+		if err == nil && reg != nil {
+			log, _, _ = s.credentialLog(registry, said)
+		}
+		return revocationState{log: log, status: revocationRevoked,
+			reason: fmt.Sprintf("this agent recorded the credential as %s", rec.Status)}
 	}
 	if reg == nil {
 		return revocationState{status: revocationNoRegistryState}
 	}
-
-	// This agent's own record of a revocation, or of a grant it is withdrawing
-	// (never in force), wins over any log, whether or not the log can be read
-	// or shows the credential as issued. This is the one place that is decided.
-	rec, _ := s.DataStore.GetCredential(said)
-	own := rec != nil && (rec.Status == "revoked" || rec.Status == credentialStatusWithdrawing)
 	log, state, err := s.credentialLog(registry, said)
-	if own {
-		return revocationState{log: log, status: revocationRevoked,
-			reason: fmt.Sprintf("this agent recorded the credential as %s", rec.Status)}
-	}
 	if err != nil {
 		return revocationState{status: revocationNotCheckedPrefix + "the registry state held here cannot be shown: " + err.Error()}
 	}
