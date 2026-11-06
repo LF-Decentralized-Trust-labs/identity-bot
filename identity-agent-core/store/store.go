@@ -749,15 +749,21 @@ type Store interface {
 	// witnesses have it (see TELPush). Enqueuing one already waiting changes
 	// nothing.
 	EnqueueTELPush(p TELPush) error
-	// PendingTELPushes are the events still waiting, oldest first.
+	// PendingTELPushes are the events still waiting, whether or not they are due,
+	// at most limit of them, taken fairly: the oldest of every issuer in turn, so
+	// that one issuer with a great many waiting does not crowd out the others.
 	PendingTELPushes(limit int) ([]TELPush, error)
-	// FinishTELPushes removes events every witness has taken.
+	// DueTELPushes are the waiting events whose next attempt is not after now
+	// (RFC 3339), taken as PendingTELPushes takes them.
+	DueTELPushes(limit int, nowRFC3339 string) ([]TELPush, error)
+	// FinishTELPushes removes events every witness has taken. It is the only
+	// way an event leaves the outbox.
 	FinishTELPushes(issuerAID string, saids []string) error
-	// FailedTELPush records one more unsuccessful attempt and why.
-	FailedTELPush(issuerAID string, saids []string, reason string) error
-	// DropStaleTELPushes gives up on events waiting since before the cutoff
-	// and returns how many it dropped.
-	DropStaleTELPushes(cutoffRFC3339 string) (int, error)
+	// FailedTELPush records one more unsuccessful attempt, why, and when the
+	// next may be made.
+	FailedTELPush(issuerAID string, saids []string, reason, nextAttemptRFC3339 string) error
+	// WaitingRevocations are the revocations waiting since before the cutoff.
+	WaitingRevocations(cutoffRFC3339 string) ([]TELPush, error)
 	// ListRegistries is every registry this agent holds, whoever issues into it.
 	ListRegistries() ([]CredentialRegistry, error)
 	// GetRegistryTEL is every credential event kept in a registry, in the
@@ -1830,4 +1836,6 @@ type TELPush struct {
 	CreatedAt string
 	Attempts  int
 	LastError string
+	// NextAttemptAt is when it may be tried again (RFC 3339); empty is now.
+	NextAttemptAt string
 }
