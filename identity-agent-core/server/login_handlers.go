@@ -350,31 +350,8 @@ func (s *CoreServer) authorizeAssetAccess(ctx context.Context, siteAID, pairwise
 		if a.PairwiseAID != siteAID {
 			continue
 		}
-		// Enrollment mode gate. A non-default MembershipSource is resolved by a
-		// registered MembershipResolver (org overlays register e.g. "employees");
-		// the default ("" / "asset") checks this asset's own member list. An
-		// unrecognized source with no resolver fails closed.
-		if a.Policy.Mode != asset.EnrollmentOpen {
-			if src := a.Policy.MembershipSource; src != "" && src != "asset" {
-				r := membershipResolverFor(src)
-				if r == nil {
-					return false, "no membership resolver for source: " + src
-				}
-				if ok, reason := r.Admit(pairwiseAID, a.ID); !ok {
-					return false, reason
-				}
-			} else {
-				member := false
-				for _, m := range s.assetHandler.Store.ListMembers(a.ID) {
-					if m.PairwiseAID == pairwiseAID {
-						member = true
-						break
-					}
-				}
-				if !member {
-					return false, "not a member of this asset"
-				}
-			}
+		if ok, reason := s.admitsMember(a, pairwiseAID); !ok {
+			return false, reason
 		}
 		// Credential gate (additive).
 		if a.Policy.RequiredCredSchema != "" {
@@ -392,6 +369,40 @@ func (s *CoreServer) authorizeAssetAccess(ctx context.Context, siteAID, pairwise
 		return true, ""
 	}
 	return false, "asset not found"
+}
+
+// admitsMember is the enrolment-mode gate of an asset's policy: whether the
+// pairwise identifier is one the asset's policy lets in, by membership. It is
+// the part of authorizeAssetAccess that does not depend on what a person
+// presented, so it can be asked again later of someone already signed in.
+func (s *CoreServer) admitsMember(a asset.Asset, pairwiseAID string) (bool, string) {
+	// Enrollment mode gate. A non-default MembershipSource is resolved by a
+	// registered MembershipResolver (org overlays register e.g. "employees");
+	// the default ("" / "asset") checks this asset's own member list. An
+	// unrecognized source with no resolver fails closed.
+	if a.Policy.Mode != asset.EnrollmentOpen {
+		if src := a.Policy.MembershipSource; src != "" && src != "asset" {
+			r := membershipResolverFor(src)
+			if r == nil {
+				return false, "no membership resolver for source: " + src
+			}
+			if ok, reason := r.Admit(pairwiseAID, a.ID); !ok {
+				return false, reason
+			}
+		} else {
+			member := false
+			for _, m := range s.assetHandler.Store.ListMembers(a.ID) {
+				if m.PairwiseAID == pairwiseAID {
+					member = true
+					break
+				}
+			}
+			if !member {
+				return false, "not a member of this asset"
+			}
+		}
+	}
+	return true, ""
 }
 
 // credentialGateSatisfied returns true if the presented ACDCs include one that
@@ -543,19 +554,13 @@ func (s *CoreServer) handleChallengeStatus(w http.ResponseWriter, r *http.Reques
 		offered = r.URL.Query().Get("collector")
 	}
 
-	s.challengeMu.Lock()
-	want, bound := s.challengeCollector[token]
-	st := s.challengeStatus[token]
-	s.challengeMu.Unlock()
-
-	if bound {
-		got := sha256.Sum256([]byte(offered))
-		if subtle.ConstantTimeCompare(got[:], want[:]) != 1 {
-			// Uniform: a wrong secret and an unknown token answer the same, so
-			// this cannot be used to discover which sign-ins are in progress.
-			http.Error(w, "not found", http.StatusNotFound)
-			return
-		}
+	bound, held := s.collectorHeld(token, offered)
+	st := s.challengeStatusOf(token)
+	if bound && !held {
+		// Uniform: a wrong secret and an unknown token answer the same, so
+		// this cannot be used to discover which sign-ins are in progress.
+		http.Error(w, "not found", http.StatusNotFound)
+		return
 	}
 
 	if st == nil {
@@ -591,4 +596,33 @@ func sameSchema(presented, required string) bool {
 		}
 	}
 	return false
+}
+
+// collectorHeld says whether offered is the collector secret minted for the
+// sign-in token (bound), and whether the offer matches it (held). A sign-in
+// with no secret minted is not bound.
+func (s *CoreServer) collectorHeld(token, offered string) (bound, held bool) {
+	s.challengeMu.Lock()
+	want, bound := s.challengeCollector[token]
+	s.challengeMu.Unlock()
+	if !bound {
+		return false, false
+	}
+	got := sha256.Sum256([]byte(offered))
+	return true, subtle.ConstantTimeCompare(got[:], want[:]) == 1
+}
+
+// challengeStatusOf is a copy of the sign-in's status, nil when there is none.
+func (s *CoreServer) challengeStatusOf(token string) map[string]interface{} {
+	s.challengeMu.Lock()
+	defer s.challengeMu.Unlock()
+	st := s.challengeStatus[token]
+	if st == nil {
+		return nil
+	}
+	cp := make(map[string]interface{}, len(st))
+	for k, v := range st {
+		cp[k] = v
+	}
+	return cp
 }
