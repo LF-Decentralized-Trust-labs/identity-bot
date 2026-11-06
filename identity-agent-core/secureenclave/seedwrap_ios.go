@@ -1,4 +1,16 @@
-//go:build darwin && cgo && arm64
+//go:build ios && cgo && arm64
+
+// The iPhone's seed wrapper: a Secure Enclave key held in the keychain.
+//
+// This is the only wrapper that needs the keychain, and the only place it works:
+// an iOS app is a bundle with its own keychain access group, so the entitlement
+// problem that stops a bare macOS helper does not arise. macOS uses
+// seedwrap_darwin_sep.go instead, which holds the enclave's wrapped key itself.
+//
+// GOOS=ios satisfies the `darwin` build tag, so this file's earlier tag
+// (darwin && cgo && arm64) did cover iOS — and it also covered macOS arm64,
+// where the keychain path cannot persist its key. Tagging it `ios` says which
+// one it is for.
 
 package secureenclave
 

@@ -31,10 +31,12 @@ section for the system the binary will run on.
 
 ### macOS
 
-The macOS core keeps its signing key in the Secure Enclave. Only CryptoKit can
+The macOS core keeps its signing key, and wraps the root seed, in the Secure
+Enclave (on Apple silicon and on Intel Macs with a T2). Only CryptoKit can
 do that, and cgo cannot compile Swift, so a small Swift shim is built into a
 static library first and the core links it. Without the shim, cgo and the
-`sepblob` tag, the core still builds but cannot keep a key.
+`sepblob` tag, the core still builds but cannot keep a key or wrap a seed, and
+says so.
 
 ```bash
 # From the repository root
