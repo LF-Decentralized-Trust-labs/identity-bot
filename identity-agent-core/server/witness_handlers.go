@@ -241,8 +241,8 @@ func writeTELJSON(w http.ResponseWriter, v interface{}) {
 // handleWitnessTELSubmit takes registry events from the issuer that made them.
 // Nothing is trusted on who sends it: each event is stored only when the key
 // log this witness holds for the issuer seals exactly that event
-// (witness.ReceiveTEL), and a witness that does not hold the log answers as for
-// one not held.
+// (witness.ReceiveTEL). A witness that does not hold the log, and one that
+// holds it and does not seal the events, give the same answer (notHeld).
 func (s *CoreServer) handleWitnessTELSubmit(w http.ResponseWriter, r *http.Request) {
 	if !s.witnessReadLimiter().allow(clientIP(r)) {
 		writeError(w, http.StatusTooManyRequests, "Rate limited", "")
@@ -257,11 +257,19 @@ func (s *CoreServer) handleWitnessTELSubmit(w http.ResponseWriter, r *http.Reque
 	}
 	n, err := s.WitnessService.ReceiveTEL(chi.URLParam(r, "issuer_aid"), req.Events)
 	if err != nil {
-		if err.Error() == "not_witnessing" {
+		switch {
+		case errors.Is(err, witness.ErrBadSubmission):
+			// Wrong whoever it is for, so it says nothing about what is held.
+			writeError(w, http.StatusBadRequest, "rejected", err.Error())
+		case errors.Is(err, witness.ErrTELNotAccepted):
+			// No log held for the identity, and a log held that does not seal
+			// these events, get the one answer: the route is open to anybody,
+			// and telling them apart would say which identities this witness
+			// witnesses, which the read routes hide through MayRead.
 			notHeld(w)
-			return
+		default:
+			writeError(w, http.StatusInternalServerError, "registry events could not be stored", "")
 		}
-		writeError(w, http.StatusBadRequest, "rejected", err.Error())
 		return
 	}
 	jsonreply.Write(w, http.StatusOK, map[string]interface{}{"stored": n})
