@@ -996,11 +996,11 @@ const issuanceNotProved = "no proof of issuance"
 // verified: an event or credential the issuer never sealed is one anybody could
 // have written.
 //
-// A credential from an issuer outside this core is proved the same way, but only
-// where the caller holds that issuer's key log and, for a registry, its
-// transaction log. Fetching that log from the issuer is not built here (T-171);
-// until it is, such a credential reaches this function without the log and
-// comes out "not checked: no proof of issuance".
+// A credential from an issuer outside this core is proved the same way, from
+// the issuer's key log and, for a registry, its transaction log. The caller
+// reads that log from the issuer's witnesses and checks it against the key log
+// before handing it here (server registryLogFromWitnesses); with no log, such a
+// credential comes out "not checked: no proof of issuance".
 func (e *Engine) checkIssuanceProved(
 	req *drivers.DriverVerifyCredentialRequest,
 	cred *keri.Credential,

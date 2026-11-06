@@ -220,9 +220,17 @@ type CoreServer struct {
 	// it a single step.
 	endpointRecordMu   sync.Mutex
 	witnessLimiterOnce sync.Once
-	CallerResolver     CallerResolver // resolves endpoint caller identity/scopes; nil = loopback default (delegated-identity injects the real one)
-	mu                 sync.Mutex
-	running            bool
+	// telAlarm remembers which waiting revocations have been reported.
+	telAlarm struct {
+		sync.Mutex
+		said map[string]bool
+	}
+	// telPushRetryGap overrides the gap before a failed registry event is
+	// tried again (tests); nil is telPushRetryGap.
+	telPushRetryGap func(attempts int) time.Duration
+	CallerResolver  CallerResolver // resolves endpoint caller identity/scopes; nil = loopback default (delegated-identity injects the real one)
+	mu              sync.Mutex
+	running         bool
 	// anchorStop ends the record's anchoring when the server stops.
 	anchorStop chan struct{}
 	// anchorStopMu guards anchorStop, which Stop closes while workers read it.
@@ -790,6 +798,7 @@ func (s *CoreServer) Start() error {
 	stop := s.anchorStop
 	s.anchorStopMu.Unlock()
 	s.inBackground(func(context.Context) { s.keepAnchoring(stop) })
+	s.inBackground(func(context.Context) { s.backfillRegistryEvents() })
 	s.runAddons(stop)
 
 	// Taken into locals before the goroutine starts: Stop clears the fields
@@ -2735,12 +2744,14 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 		issuerKelEvents = s.issuerLogForVerification(cred.Issuer)
 	}
 
-	// Revocation is read from the registry's transaction log, which this agent
-	// supplies only where it holds the registry state itself.
+	issuance := s.issuanceLogForVerification(cred, issuerKelEvents)
+	issuerKelEvents = issuance.issuerKel
+
+	// Revocation is read from the registry's transaction log where this agent
+	// holds the registry state itself (see verifyCredentialHere).
 	driverReq := &drivers.DriverVerifyCredentialRequest{
 		AcdcJson:           req.AcdcJson,
 		IssuerKelEvents:    issuerKelEvents,
-		RegistryEventsB64:  s.issuanceLogForVerification(cred),
 		HolderAid:          req.HolderAid,
 		PresentationSaid:   req.PresentationSaid,
 		CesrSignature:      req.CesrSignature,
@@ -2748,7 +2759,7 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 		TrustedSchemaSaids: req.TrustedSchemaSaids,
 	}
 
-	result, err := s.verifyCredentialHere(driverReq, cred)
+	result, err := s.verifyCredentialHere(driverReq, cred, issuance)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Credential verification failed", err.Error())
 		return
@@ -2844,12 +2855,13 @@ func (s *CoreServer) handleVerifyCredentialChain(w http.ResponseWriter, r *http.
 			}
 		}
 
+		issuance := s.issuanceLogForVerification(cred, issuerKelEvents)
+		issuerKelEvents = issuance.issuerKel
 		driverReq := &drivers.DriverVerifyCredentialRequest{
-			AcdcJson:          jsonB64,
-			IssuerKelEvents:   issuerKelEvents,
-			RegistryEventsB64: s.issuanceLogForVerification(cred),
+			AcdcJson:        jsonB64,
+			IssuerKelEvents: issuerKelEvents,
 		}
-		result, err := s.verifyCredentialHere(driverReq, cred)
+		result, err := s.verifyCredentialHere(driverReq, cred, issuance)
 
 		step.IssuerAid = issuerAid
 		step.Said = cred.SAID

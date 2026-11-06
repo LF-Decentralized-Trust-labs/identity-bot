@@ -24,10 +24,9 @@ func TestAPartialKeptLogDoesNotUndoARevocationThisAgentRecorded(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := s.verifyCredentialHere(&drivers.DriverVerifyCredentialRequest{
-		AcdcJson:          acdc,
-		IssuerKelEvents:   s.issuerLogForVerification(cred.Issuer),
-		RegistryEventsB64: s.issuanceLogForVerification(cred),
-	}, cred)
+		AcdcJson:        acdc,
+		IssuerKelEvents: s.issuerLogForVerification(cred.Issuer),
+	}, cred, s.issuanceLogForVerification(cred, nil))
 	if err != nil {
 		t.Fatal(err)
 	}

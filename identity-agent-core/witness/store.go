@@ -14,6 +14,13 @@ type Store interface {
 	StoreKelEvent(ev KelEvent) error
 	GetKelEvents(signerAID string) ([]KelEvent, error)
 	LastKelSeq(signerAID string) (int, error)
+
+	// StoreTELEvent keeps one event of an issuer's registry log. Storing an
+	// event already held is not an error and changes nothing.
+	StoreTELEvent(ev TELEvent) error
+	// GetTELEvents is every registry event held for an issuer, in the order of
+	// the key-log events that anchor them.
+	GetTELEvents(issuerAID string) ([]TELEvent, error)
 	CountKelEvents(signerAID string) (int, error)
 
 	SaveIssuedReceipt(r IssuedReceipt) error

@@ -1018,6 +1018,81 @@ DELETE FROM witness_self_heal_log WHERE id NOT IN (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_witness_self_heal_log_identity
     ON witness_self_heal_log(contact_aid, attempted_at);
 `},
+	{
+		Version:     47,
+		Description: "Let a witness keep the transaction logs of the registries of the identities it witnesses",
+		SQL: `
+-- A witness serves the whole transaction log of the registries an identity it
+-- witnesses has founded, so that a verifier who is not that identity can read
+-- whether a credential was issued and whether it has been revoked. Every event
+-- is kept as the bytes the issuer published, with the place in the issuer's key
+-- log (anchor_sn) whose seal vouches for it: an event with no such seal is never
+-- stored. The witness authors none of it.
+CREATE TABLE IF NOT EXISTS witness_tel_events (
+    issuer_aid  TEXT NOT NULL,
+    said        TEXT NOT NULL,
+    registry    TEXT NOT NULL,
+    ilk         TEXT NOT NULL,
+    subject     TEXT NOT NULL,
+    sn          INTEGER NOT NULL,
+    anchor_sn   INTEGER NOT NULL,
+    raw_b64     TEXT NOT NULL,
+    stored_at   TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (issuer_aid, said)
+);
+CREATE INDEX IF NOT EXISTS idx_witness_tel_events_range
+    ON witness_tel_events(issuer_aid, anchor_sn);
+`},
+	{
+		Version:     48,
+		Description: "Keep registry events this identity made until its witnesses have them",
+		SQL: `
+-- Every registry event this identity makes (a registry's inception, an
+-- issuance, a revocation) is sent to the witnesses its key log names, so that
+-- someone outside can read it from them. The sending can fail, and a failure
+-- must not fail the issuance, so an event waits here, in the order it was made,
+-- until every one of those witnesses has taken it, and is tried again on every
+-- tick. A row is the event as published; nothing here is a second source of
+-- truth for the log, which is credential_tel_events and credential_registries.
+CREATE TABLE IF NOT EXISTS tel_push_outbox (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    issuer_aid  TEXT NOT NULL,
+    said        TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    raw_b64     TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    last_error  TEXT NOT NULL DEFAULT '',
+    UNIQUE (issuer_aid, said)
+);
+`},
+	{
+		Version:     49,
+		Description: "Remember that the registry events made before the outbox existed were queued",
+		SQL: `
+-- Those events are queued once, on the first start that has the outbox; the
+-- outbox empties as witnesses take them, so without this the whole log would
+-- be queued again at every start.
+CREATE TABLE IF NOT EXISTS tel_backfill (
+    id      INTEGER PRIMARY KEY CHECK (id = 1),
+    done_at TEXT NOT NULL
+);
+`},
+	{
+		Version:     50,
+		Description: "Retry registry events that cannot be sent with growing gaps, never giving one up",
+		SQL: `
+-- A stuck issuer is tried again after a gap that grows with each failure, so it
+-- does not take a pass away from every other issuer, and nothing leaves the
+-- outbox except by a witness having it: a revocation kept back for good is a
+-- revoked credential that checks as live.
+CREATE TABLE IF NOT EXISTS tel_push_retry (
+    issuer_aid      TEXT NOT NULL,
+    said            TEXT NOT NULL,
+    next_attempt_at TEXT NOT NULL,
+    PRIMARY KEY (issuer_aid, said)
+);
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.

@@ -454,16 +454,17 @@ func (s *CoreServer) verifyPresentedCredentialACDC(ctx context.Context, acdcJson
 	if issuerKelEvents == nil {
 		return false, issuerAid, "issuer KEL not found"
 	}
+	issuance := s.issuanceLogForVerification(cred, issuerKelEvents)
+	issuerKelEvents = issuance.issuerKel
 	result, err := s.verifyCredentialHere(&drivers.DriverVerifyCredentialRequest{
 		AcdcJson:           acdcJsonB64,
 		IssuerKelEvents:    issuerKelEvents,
-		RegistryEventsB64:  s.issuanceLogForVerification(cred),
 		HolderAid:          holderAid,
 		PresentationSaid:   presSaidB64,
 		CesrSignature:      cesrSig,
 		HolderPublicKey:    holderPubKey,
 		TrustedSchemaSaids: trustedSchemas,
-	}, cred)
+	}, cred, issuance)
 	if err != nil {
 		return false, issuerAid, "verify error: " + err.Error()
 	}

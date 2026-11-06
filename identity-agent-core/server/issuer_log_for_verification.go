@@ -18,6 +18,7 @@ const (
 	issuerNoLogHeld       = issuerNotCheckedFmt + "no key log is held for the issuer"
 	issuerNoLogHeldReason = "the issuer's key log is not held here, so the credential cannot be shown to come from that issuer"
 	issuerNoProof         = issuerNotCheckedFmt + "no proof of issuance"
+	issuerDuplicity       = "possible duplicity: a witness of the issuer served a registry log its key log does not seal"
 )
 
 // issuerLogForVerification is the one place that reads an issuer's key log for
@@ -56,27 +57,58 @@ func ownLogForVerification(events []store.EventRecord) []map[string]interface{} 
 	return out
 }
 
-// issuanceLogForVerification is the credential's transaction log as this agent
-// holds it: the events of the credential in the registry it names, as they were
-// published. Nil when the credential names no registry or none is held, in
-// which case the engine reports the issuance as not proved.
-func (s *CoreServer) issuanceLogForVerification(cred *keri.Credential) []string {
+// issuanceLog is a credential's transaction log as handed to the verifier,
+// with whether it is proven to hold every event its issuer sealed. That is a
+// property of the type, not of where a caller got the log from: only a log
+// proven complete may stand for "not revoked".
+type issuanceLog struct {
+	events []string
+	// provenComplete is true only for a log fetched from the issuer's
+	// witnesses and checked seal-for-seal against the issuer's caught-up key
+	// log (registryLogFromWitnesses). A log kept here may be partial, so it is
+	// never proven, and can only add a revocation.
+	provenComplete bool
+	// duplicity is set when a witness served events the issuer's key log does
+	// not seal; verifyCredentialHere puts it in the verification result.
+	duplicity *telDuplicity
+	// issuerKel is the issuer's key log to check the credential against: the
+	// one given, or a longer one verified while asking the witnesses, which the
+	// caller must use in place of the one it passed.
+	issuerKel []map[string]interface{}
+}
+
+// issuanceLogForVerification is the credential's transaction log: the events
+// of the credential in the registry it names, as they were published. Empty
+// when the credential names no registry or none is held, in which case the
+// engine reports the issuance as not proved.
+//
+// A log not held here is asked of the issuer's witnesses when the issuer's
+// verified key log is (registryLogFromWitnesses); what they serve is checked
+// against that key log before it is used, and only that log is proven complete.
+func (s *CoreServer) issuanceLogForVerification(cred *keri.Credential, issuerKel []map[string]interface{}) issuanceLog {
 	if cred == nil {
-		return nil
+		return issuanceLog{issuerKel: issuerKel}
 	}
 	said, registry := cred.SAID, cred.Registry
 	if said == "" || registry == "" {
-		return nil
+		return issuanceLog{issuerKel: issuerKel}
 	}
 	events, err := s.DataStore.GetCredentialTEL(registry, said)
 	if err != nil || len(events) == 0 {
-		return nil
+		if cred.Issuer == "" || len(issuerKel) == 0 {
+			return issuanceLog{issuerKel: issuerKel}
+		}
+		fetched, dup, kel := s.registryLogFromWitnesses(telClient, cred.Issuer, registry, said, issuerKel)
+		if len(kel) > len(issuerKel) {
+			s.keepCaughtUpKeyLog(cred.Issuer, kel)
+		}
+		return issuanceLog{events: fetched, provenComplete: len(fetched) > 0, duplicity: dup, issuerKel: kel}
 	}
 	out := make([]string, 0, len(events))
 	for _, ev := range events {
 		out = append(out, ev.RawB64)
 	}
-	return out
+	return issuanceLog{events: out, issuerKel: issuerKel}
 }
 
 // issuerVerdict folds what is known of the issuer's log into the engine's
@@ -89,6 +121,10 @@ func issuerVerdict(res *drivers.DriverVerifyCredentialResponse, logHeld bool) (s
 		res = &drivers.DriverVerifyCredentialResponse{}
 	}
 	if logHeld {
+		if dup, _ := res.Checks[checkPossibleDuplicity].(bool); dup {
+			res.Verified = false
+			return issuerDuplicity
+		}
 		// The log says who the issuer is, not that it issued this credential.
 		// The engine proves that from the credential's registry and the issuer's
 		// log, and says so in "issuance_proved"; anything but true is not proved.

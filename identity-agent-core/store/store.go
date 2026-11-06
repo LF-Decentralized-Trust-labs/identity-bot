@@ -744,6 +744,35 @@ type Store interface {
 	// KeepRegistry keeps a registry and its inception's anchor together, or neither.
 	KeepRegistry(r CredentialRegistry, anchor *EventRecord) error
 	GetCredentialTEL(registrySAID, acdcSAID string) ([]CredentialTELEvent, error)
+
+	// A registry event this identity made waits in an outbox until its
+	// witnesses have it (see TELPush). Enqueuing one already waiting changes
+	// nothing.
+	EnqueueTELPush(p TELPush) error
+	// PendingTELPushes are the events still waiting, whether or not they are due,
+	// at most limit of them, taken fairly: the oldest of every issuer in turn, so
+	// that one issuer with a great many waiting does not crowd out the others.
+	PendingTELPushes(limit int) ([]TELPush, error)
+	// DueTELPushes are the waiting events whose next attempt is not after now
+	// (RFC 3339), taken as PendingTELPushes takes them.
+	DueTELPushes(limit int, nowRFC3339 string) ([]TELPush, error)
+	// FinishTELPushes removes events every witness has taken. It is the only
+	// way an event leaves the outbox.
+	FinishTELPushes(issuerAID string, saids []string) error
+	// FailedTELPush records one more unsuccessful attempt, why, and when the
+	// next may be made.
+	FailedTELPush(issuerAID string, saids []string, reason, nextAttemptRFC3339 string) error
+	// WaitingRevocations are the revocations waiting since before the cutoff.
+	WaitingRevocations(cutoffRFC3339 string) ([]TELPush, error)
+	// ListRegistries is every registry this agent holds, whoever issues into it.
+	ListRegistries() ([]CredentialRegistry, error)
+	// GetRegistryTEL is every credential event kept in a registry, in the
+	// order they were kept.
+	GetRegistryTEL(registrySAID string) ([]CredentialTELEvent, error)
+	// TELBackfillDone reports whether the events made before the outbox existed
+	// have been queued; MarkTELBackfillDone records that they have.
+	TELBackfillDone() (bool, error)
+	MarkTELBackfillDone() error
 	SaveCredentialSchema(record CredentialSchemaRecord) error
 	GetCredentialSchemas() ([]CredentialSchemaRecord, error)
 	GetCredentialSchema(said string) (*CredentialSchemaRecord, error)
@@ -1794,4 +1823,19 @@ func (s *FileStore) loadSigningRequests() (map[string]SigningRequest, error) {
 		return nil, fmt.Errorf("failed to parse signing requests: %w", err)
 	}
 	return requests, nil
+}
+
+// TELPush is a registry event (a registry inception, an issuance or a
+// revocation) this identity made, as published, waiting to be sent to the
+// witnesses its key log names.
+type TELPush struct {
+	IssuerAID string
+	SAID      string
+	Kind      string // "vcp", "iss" or "rev"
+	RawB64    string
+	CreatedAt string
+	Attempts  int
+	LastError string
+	// NextAttemptAt is when it may be tried again (RFC 3339); empty is now.
+	NextAttemptAt string
 }

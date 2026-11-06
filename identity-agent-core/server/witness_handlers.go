@@ -1,10 +1,12 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
@@ -30,7 +32,9 @@ func (s *CoreServer) mountWitnessRoutes(r chi.Router) {
 	r.Get("/witness/status", s.handleWitnessStatus)
 	r.Post("/witness/endpoint", s.handleWitnessEndpointRecord)
 	r.Get("/witness/endpoint/{controller_aid}", s.handleWitnessEndpointLookup)
-	r.Get("/witness/tel/{issuer_aid}", s.handleWitnessTELStub)
+	r.Get("/witness/tel/{issuer_aid}", s.handleWitnessTELRead)
+	r.Get("/witness/tel/{issuer_aid}/head", s.handleWitnessTELHead)
+	r.Post("/witness/tel/{issuer_aid}", s.handleWitnessTELSubmit)
 	s.withdrawalRoutes(r)
 }
 
@@ -161,9 +165,114 @@ func (s *CoreServer) handleWitnessStatus(w http.ResponseWriter, r *http.Request)
 	jsonreply.Write(w, http.StatusOK, st)
 }
 
-func (s *CoreServer) handleWitnessTELStub(w http.ResponseWriter, r *http.Request) {
-	issuerAID := chi.URLParam(r, "issuer_aid")
-	jsonreply.Write(w, http.StatusNotImplemented, s.WitnessService.ServeTELStub(issuerAID))
+// handleWitnessTELRead serves the registry logs of an identity this witness
+// witnesses: every event anchored after since_sn in the identity's key log, and
+// anchored_sn, how far that key log is held. It is asked for by issuer only;
+// there is no way to ask by credential or by registry (witness.AnchoredTEL).
+//
+// Answered on the same terms as a read of the key log (witness.MayRead): the
+// identity, its delegator, or a verifier who presents the log's inception.
+// Anybody else is told it is not held.
+func (s *CoreServer) handleWitnessTELRead(w http.ResponseWriter, r *http.Request) {
+	issuer := chi.URLParam(r, "issuer_aid")
+	if !s.witnessReadAllowed(w, r, issuer) {
+		return
+	}
+	since := -1
+	if v := r.URL.Query().Get("since_sn"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < -1 {
+			writeError(w, http.StatusBadRequest, "since_sn is a place in the key log, or -1 for all of it", "")
+			return
+		}
+		since = n
+	}
+	ans, err := s.WitnessService.ServeTEL(issuer, since)
+	if err != nil {
+		writeNoTEL(w, err)
+		return
+	}
+	writeTELJSON(w, ans)
+}
+
+// handleWitnessTELHead is where the registry log of an identity is held to and
+// the digest of its latest event, without the log (SEAM-13 §2). Answered on the
+// same terms as the log itself.
+func (s *CoreServer) handleWitnessTELHead(w http.ResponseWriter, r *http.Request) {
+	issuer := chi.URLParam(r, "issuer_aid")
+	if !s.witnessReadAllowed(w, r, issuer) {
+		return
+	}
+	head, err := s.WitnessService.ServeTELHead(issuer)
+	if err != nil {
+		writeNoTEL(w, err)
+		return
+	}
+	writeTELJSON(w, head)
+}
+
+// writeNoTEL answers a read the asker may make but there is nothing to give:
+// 404 {"error":"no_tel"} (SEAM-13 §5 T-1), which a reader tells apart from an
+// unreachable witness. Any other failure is a server error.
+func writeNoTEL(w http.ResponseWriter, err error) {
+	if errors.Is(err, witness.ErrNoTEL) {
+		jsonreply.Write(w, http.StatusNotFound, map[string]string{"error": "no_tel"})
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "registry log unreadable", "")
+}
+
+// writeTELJSON writes an answer carrying events as published. The events are
+// KERI events whose bytes are what their digests are over, so the encoder must
+// not rewrite "<", ">" or "&" inside them, which the default one does.
+func writeTELJSON(w http.ResponseWriter, v interface{}) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		writeError(w, http.StatusInternalServerError, "registry log unreadable", "")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(buf.Bytes())
+}
+
+// handleWitnessTELSubmit takes registry events from the issuer that made them.
+// Nothing is trusted on who sends it: each event is stored only when the key
+// log this witness holds for the issuer seals exactly that event
+// (witness.ReceiveTEL). A witness that does not hold the log, and one that
+// holds it and does not seal the events, give the same answer (notHeld).
+func (s *CoreServer) handleWitnessTELSubmit(w http.ResponseWriter, r *http.Request) {
+	if !s.witnessReadLimiter().allow(clientIP(r)) {
+		writeError(w, http.StatusTooManyRequests, "Rate limited", "")
+		return
+	}
+	var req struct {
+		Events []string `json:"events"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+	n, err := s.WitnessService.ReceiveTEL(chi.URLParam(r, "issuer_aid"), req.Events)
+	if err != nil {
+		switch {
+		case errors.Is(err, witness.ErrBadSubmission):
+			// Wrong whoever it is for, so it says nothing about what is held.
+			writeError(w, http.StatusBadRequest, "rejected", err.Error())
+		case errors.Is(err, witness.ErrTELNotAccepted):
+			// No log held for the identity, and a log held that does not seal
+			// these events, get the one answer: the route is open to anybody,
+			// and telling them apart would say which identities this witness
+			// witnesses, which the read routes hide through MayRead.
+			notHeld(w)
+		default:
+			writeError(w, http.StatusInternalServerError, "registry events could not be stored", "")
+		}
+		return
+	}
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{"stored": n})
 }
 
 // handleWitnessRequest handles inbound witness enrollment from a remote agent.
