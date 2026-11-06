@@ -80,7 +80,7 @@ func (s *CoreServer) verifyRequestEnvelope(r *http.Request, method string, param
 	}
 
 	// Anti-replay: reject a nonce already seen within the window (scoped per signer).
-	if nonceSeen(signerAID + ":" + nonce) {
+	if s.nonces.seen(signerAID + ":" + nonce) {
 		return fmt.Errorf("signed request replay detected")
 	}
 
@@ -108,31 +108,34 @@ func canonicalRequestPayload(method string, params []byte, nonce, ts string) str
 	return method + "\n" + hex.EncodeToString(ph[:]) + "\n" + nonce + "\n" + ts
 }
 
-// nonceGuard is the per-process anti-replay cache: sha256(nonce key) -> expiry.
-// Package-level to match the existing pairwiseKeys pattern and avoid threading
-// state through CoreServer; a single server process shares one endpoint.
-var nonceGuard = struct {
-	sync.Mutex
-	m map[string]time.Time
-}{m: map[string]time.Time{}}
+// nonceCache is one server's anti-replay cache: sha256(nonce key) -> expiry.
+// It belongs to the CoreServer that verifies requests, so two servers (or two
+// tests) never share what has been seen. The zero value is ready to use.
+type nonceCache struct {
+	mu sync.Mutex
+	m  map[string]time.Time
+}
 
-// nonceSeen reports whether key was already presented within the freshness window
+// seen reports whether key was already presented within the freshness window
 // and records it. Expired entries are evicted opportunistically so the map only
 // ever holds roughly one freshness window of nonces.
-func nonceSeen(key string) bool {
-	nonceGuard.Lock()
-	defer nonceGuard.Unlock()
+func (c *nonceCache) seen(key string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.m == nil {
+		c.m = map[string]time.Time{}
+	}
 	now := time.Now()
-	for k, exp := range nonceGuard.m {
+	for k, exp := range c.m {
 		if now.After(exp) {
-			delete(nonceGuard.m, k)
+			delete(c.m, k)
 		}
 	}
 	h := sha256.Sum256([]byte(key))
 	hk := hex.EncodeToString(h[:])
-	if exp, ok := nonceGuard.m[hk]; ok && now.Before(exp) {
+	if exp, ok := c.m[hk]; ok && now.Before(exp) {
 		return true
 	}
-	nonceGuard.m[hk] = now.Add(envFreshness)
+	c.m[hk] = now.Add(envFreshness)
 	return false
 }

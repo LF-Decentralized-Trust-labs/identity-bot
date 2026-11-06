@@ -2,13 +2,11 @@ package server
 
 import (
 	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	"crypto/sha256"
 	"testing"
 	"time"
 
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/testkeys"
 )
 
 // A controller signs an offer the owner's device can trust — and only that.
@@ -23,11 +21,12 @@ import (
 // the enclave signs one on real hardware (which a test cannot reach).
 func aSignedOffer(t *testing.T, agent, timestamp string) (ControllerOffer, *ecdsa.PrivateKey) {
 	t.Helper()
-	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key, err := testkeys.New()
 	if err != nil {
 		t.Fatal(err)
 	}
-	pub := elliptic.MarshalCompressed(elliptic.P256(), priv.X, priv.Y)
+	priv := key.Priv
+	pub := key.Compressed()
 	verkey, err := iacrypto.MachineVerkeyForKey(pub)
 	if err != nil {
 		t.Fatal(err)
@@ -36,14 +35,10 @@ func aSignedOffer(t *testing.T, agent, timestamp string) (ControllerOffer, *ecds
 	if err != nil {
 		t.Fatal(err)
 	}
-	sum := sha256.Sum256([]byte(canonicalControllerOffer(verkey, agent, timestamp)))
-	r, s, err := ecdsa.Sign(rand.Reader, priv, sum[:])
+	raw, err := key.Sign([]byte(canonicalControllerOffer(verkey, agent, timestamp)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := make([]byte, 64)
-	r.FillBytes(raw[:32])
-	s.FillBytes(raw[32:])
 	sig, err := iacrypto.MachineSignatureQB64(pub, raw)
 	if err != nil {
 		t.Fatal(err)
@@ -158,16 +153,12 @@ func TestASignatureOverOtherBytesDoesNotVerify(t *testing.T) {
 	now := time.Now().UTC()
 	good, priv := aSignedOffer(t, "https://agent.example/x", now.Format(time.RFC3339))
 	// Re-sign a DIFFERENT canonical string, keep everything else.
-	sum := sha256.Sum256([]byte("not the canonical offer"))
-	r, s, _ := ecdsa.Sign(rand.Reader, priv, sum[:])
-	raw := make([]byte, 64)
-	r.FillBytes(raw[:32])
-	s.FillBytes(raw[32:])
-	pub := elliptic.MarshalCompressed(elliptic.P256(), priv.X, priv.Y)
+	key := &testkeys.Key{Priv: priv}
+	raw, _ := key.Sign([]byte("not the canonical offer"))
+	pub := key.Compressed()
 	bad, _ := iacrypto.MachineSignatureQB64(pub, raw)
 	good.Signature = bad
 	if err := (&CoreServer{}).checkControllerOffer(good, now); err == nil {
 		t.Fatal("a signature made over other bytes must not verify")
 	}
 }
-

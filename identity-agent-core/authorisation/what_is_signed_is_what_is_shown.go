@@ -43,6 +43,9 @@ type ToSign struct {
 	// agent's or the app's.
 	Holder string `json:"holder,omitempty"`
 	Name   string `json:"name,omitempty"`
+	// Schema is the schema the credential was issued under, kept so a grant is
+	// stored under the version it was issued in. It is not sent to a device.
+	Schema string `json:"-"`
 	// PublicKey and KeyFingerprint are the machine's key, and the short form
 	// of it the owner compares with the one shown when the machine paired.
 	PublicKey      string          `json:"public_key,omitempty"`
@@ -178,6 +181,7 @@ func grantShown(cred *keri.Credential, ixn *keri.Event) (*ToSign, error) {
 		return nil, fmt.Errorf("the credential's attributes are unreadable")
 	}
 	str := func(k string) string { return strings.TrimSpace(stringOf(a[k])) }
+	out.Schema = cred.SchemaSAID
 	out.Holder, out.Name, out.ValidUntil = str("i"), str("name"), str("valid_until")
 	switch cred.SchemaSAID {
 	case schemas.ControllerGrant.Schema.SAID:
@@ -185,7 +189,7 @@ func grantShown(cred *keri.Credential, ixn *keri.Event) (*ToSign, error) {
 		out.Name = firstNonEmpty(str("label"), out.Name)
 		out.PublicKey, out.Grade, out.Signer = str("public_key"), str("grade"), str("signer")
 		out.KeyFingerprint = KeyFingerprint(out.PublicKey)
-	case schemas.AIAgentGrant.Schema.SAID, schemas.AppGrant.Schema.SAID:
+	case schemas.AIAgentGrant.Schema.SAID, schemas.AIAgentGrantV11.Schema.SAID, schemas.AppGrant.Schema.SAID:
 		// An App Grant says what an AI Agent Grant says that an app has
 		// (capabilities and limits), so it is shown the same way, under its own kind.
 		out.Kind = "ai_agent"

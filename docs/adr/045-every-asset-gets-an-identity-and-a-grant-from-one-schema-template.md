@@ -4,6 +4,8 @@
 **Date:** 2026-10-20
 **Amended:** 2026-11-02 — An app is a kind of asset, with a grant and a body of its own (see §Amendment 1)
 **Amended:** 2026-11-04 — A machine key's short code is 80 bits, not about 41 (see §Amendment 2)
+**Amended:** 2026-11-04 — An AI agent's body may sign the request for an AI agent it creates; version 1.2.0 of the AI Agent Grant (see §Amendment 3)
+**Amended:** 2026-11-05 — The six other built-in credential schemas get real identifiers (see §Amendment 4)
 **Relates to:** ADR-032 (An identity can name who owns it, from its first event), ADR-042 (How an agent is reached, and who may manage it), ADR-044 (An authorized controller does the app's work)
 
 ## Context
@@ -82,8 +84,9 @@ It deliberately carries nothing else:
 
 - **No role, prompt or model.** They configure the AI agent and are not authority. Changing
   one must not require a new grant.
-- **No permission to delegate onward.** This software gives an AI agent no way to create AI
-  agents of its own, so the field would assert nothing.
+- **No permission to delegate onward.** An AI agent may create AI agents only through
+  `agent.create`, whose limits are `resource_constraints` on that capability, so no field
+  of its own says whether it may (see Amendment 3).
 - **No messaging recipients or conversation limits yet.** They arrive with AI agent
   messaging, as a new version of the schema. A field nothing enforces reads as a guarantee
   the software does not give.
@@ -141,6 +144,11 @@ is used only by a build with no KERI engine.
   computed over. Only schemas whose document digests to their identifier are served.
 
 ### Who authorised it (amended 2026-10-22)
+
+*Amended 2026-11-04 (Amendment 3): a request may also be signed by an AI agent's body, for
+an AI agent it creates, and the AI Agent Grant is issued at 1.2.0 to admit it. Rules 1 to 7
+below hold for it as stated, with the signer and the grant they rest on changed as
+Amendment 3 says.*
 
 Version 1.1.0 of the template lets a credential name the credentials it rests on, in an
 edges block, and carry the `request` that authorised it exactly as it was signed: whether a
@@ -235,8 +243,8 @@ authorised to act for the identity (ADR-044).
   was written before its events were signed cannot have grants verified past those events,
   and must be founded again. The Identity Agent says so once at startup, naming the
   unsigned events.
-- The other built-in schemas still carry placeholder identifiers, and are converted the
-  same way when each is next worked on.
+- The other built-in schemas carried placeholder identifiers. They were converted the same
+  way on 2026-11-05 (see Amendment 4).
 - Where an identity's key lives on another device, the events this Identity Agent writes for
   it are stored unsigned until that device signs them. Grants anchored after them cannot be
   verified by anybody else.
@@ -372,3 +380,100 @@ while its details show the new one. They differ visibly, which is safe: compare 
 Pinned in `identity-agent-core/authorisation/a_key_code_is_too_long_to_forge_test.go`: two
 keys with their codes, and every one-bit change of a key giving a different code. There was no
 published vector file for this code, so none is regenerated.
+
+## Amendment 3 (2026-11-04): an AI agent names its creator
+
+An AI agent whose grant holds `agent.create` may ask the Identity Agent to create another AI
+agent, and to set its repositories, over its body's own signed channel
+(`POST /api/agent-host/agents` and `PUT /api/agent-host/agents/{id}/github`). The grant
+issued for the AI agent it created must say who authorised it, as every grant does, and here
+the authority is the creating AI agent, not the owner and not a machine.
+
+**A third kind of signer.** A credential's `request` has a `kind`: `controller` (a machine,
+signed over `IA-CONTROLLER-REQ`), `owner` (the identity's own key) and now `ai_agent_body`.
+The signer of an `ai_agent_body` request is the machine, the body, that holds an AI Agent
+Body credential for the creator. The string it signs is the body request of ADR-046,
+`IA-BODY-REQ-V3`: the Identity Agent it was for, the body, the method and target, the time,
+a nonce, the digest of the request's body, then the work item, reason and session. A body's
+request is accepted only at the body's own routes (`/api/agent-host/...`), and an owner's or
+machine's request only at theirs: one kind of request cannot stand for the other's.
+
+**The creator chain.** The new grant's `authorised_by` edge names the creator's AI Agent
+Grant. The creator's AI Agent Body credential is given beside it. `authorisation.Check`
+verifies:
+
+1. the creator's grant verifies against its own identifier, is the one the edge names, was
+   issued by the same Identity Agent as the new grant, holds `agent.create`, and is not the
+   new AI agent's own;
+2. the creator's body credential verifies, was issued by that Identity Agent, is for the
+   same creator, and names the key that signed the request;
+3. the signature over the exact string, by that key, verifies, and the string names this
+   Identity Agent as the one it was for;
+4. both credentials were in force when the request was made (after they were granted, before
+   they lapsed) and neither was revoked before the new grant was issued, ordered as in rule 6
+   above;
+5. the new AI agent is no more powerful than its creator. It holds only capabilities the
+   creator's grant holds, and for every argument the creator's grant limits to some values,
+   the new grant limits it to some of those; a limit the creator has and the new grant leaves
+   off is wider, and refused. A list of values that is empty is refused in either grant, as
+   the schema refuses it. Where the creator's grant has a `valid_until`, the new grant has one
+   too, and it is no later: an AI agent cannot outlive its creator. An AI agent cannot create
+   a more powerful one.
+
+**What is not verified.** The core does not enforce any count or resource limit on how many
+AI agents a creator may create, or how much they may use, even where the creator's grant
+states one in `resource_constraints` on `agent.create`. That is enforced by the party that
+issues the creator's grant, at the time it asks
+for the new grant, and a verifier reading the credentials afterwards cannot tell whether it
+did. Only the comparison in point 5 is made here.
+
+**Version.** The AI Agent Grant is issued at 1.2.0, which admits the `ai_agent_body` request
+kind. Versions 1.0.0 and 1.1.0 remain honoured as they were: a 1.1.0 grant is checked
+against what was asked for, counts toward when this Identity Agent began issuing grants that
+name who authorised them, and is kept under the version it was issued in. Software that does
+not know 1.2.0 sees a schema it does not recognise and refuses the credential; it never
+reads one as a version it does know.
+
+Worked examples, accepted and refused, each refusal breaking one rule:
+`identity-agent-core/authorisation/ai-agent-body-request-vectors.json`, checked independently
+by `identity-agent-core/contracts/check_ai_agent_body_request_vectors.py`.
+
+## Amendment 4 (2026-11-05): the other six built-in schemas get real identifiers
+
+The Guardianship Credential, Proof of Age, Contact Attestation, Identity Attestation, School
+Pickup Authorization and Employee Authorization schemas were identified by strings such as
+`EGuardianship__placeholder__v1`, which are not digests, so a verifier could not fetch a
+document and confirm what a credential claims. Each is now built as the asset grants are: the
+whole credential described, and the identifier the Blake3-256 digest `keri.BuildSchema`
+computes. Employee Authorization is now in the catalog. All six are served at
+`/public/schemas/{said}` and published in `identity-agent-core/contracts/credential-schemas/`;
+their identifiers are pinned in `schemas/credential_schemas_test.go`, and worked examples
+(accepted and refused) are `identity-agent-core/schemas/credential-schema-vectors.json`,
+checked independently by `identity-agent-core/contracts/check_credential_schema_vectors.py`.
+A change to any of the six is a new schema with a new identifier.
+
+**Credentials already issued under a placeholder are still honoured; none is issued.** A
+credential's identifier is a digest over the credential, schema identifier included, so it
+cannot be reissued under the new identifier by anybody but its issuer, and refusing the old
+form would silently end every guardianship, attestation and employee credential issued so
+far. These six carry no capability for a gateway (unlike an AI agent's grant, which the
+section above refuses under a placeholder), so honouring them grants nothing a gateway
+enforces. Concretely:
+
+- Issuing under a placeholder is refused, with the identifier to use.
+- A credential gate (a website's required credential schema) accepts a presented credential
+  naming either form of the identifier, and verifies it trusting both. A gate set up before
+  this change, and credentials issued before it, keep working; so do credentials issued
+  after it, at an old gate.
+- A placeholder is never served as a schema: `/public/schemas/{said}` serves only a document
+  that digests to the identifier asked for. The catalog resolves a placeholder to its
+  replacement by name only, so an old credential can still be labelled.
+
+**Fetching a schema checks it.** A schema fetched from a URL or a registry is cached, and
+served from the cache, only under the identifier it digests to (`keri.VerifySchema`). One
+that does not digest to the identifier asked for, or to its own `$id`, is refused. Otherwise a
+server could answer a request for one schema with a widened one that accepts a forgery.
+
+A credential's attribute block here is declared with `additionalProperties: false`, as the
+grants' is. The issue form offers only declared attributes, and a test holds each form to its
+schema.

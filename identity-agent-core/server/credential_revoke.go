@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -10,6 +9,8 @@ import (
 	"identity-agent-core/store"
 
 	"github.com/go-chi/chi/v5"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 // handleRevokeCredential revokes a credential. For a registry-backed credential it
@@ -30,8 +31,7 @@ func (s *CoreServer) handleRevokeCredential(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if rec.Status == "revoked" {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"said": said, "status": "revoked", "already": true})
+		jsonreply.Write(w, http.StatusOK, map[string]any{"said": said, "status": "revoked", "already": true})
 		return
 	}
 
@@ -41,8 +41,7 @@ func (s *CoreServer) handleRevokeCredential(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	log.Printf("[credential] %s %s (schema %s, holder %s, tel=%v)", status, said, rec.SchemaSAID, rec.HolderAID, telRevoked)
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"said": said, "status": status, "tel_revoked": telRevoked})
+	jsonreply.Write(w, http.StatusOK, map[string]any{"said": said, "status": status, "tel_revoked": telRevoked})
 }
 
 // revokeIssuedCredential writes the revocation of a credential this identity

@@ -8,6 +8,7 @@ import 'package:test/test.dart';
 /// The settings screen's calls reach the routes the core serves, with the
 /// fields it reads, and a refusal comes back in the relay's own words.
 void main() {
+  publicNameRuleTests();
   late List<http.Request> sent;
   late CoreService core;
 
@@ -99,5 +100,43 @@ void main() {
         inner: MockClient((_) async => throw http.ClientException('refused')));
     await expectLater(c.getReachability(),
         throwsA(predicate((e) => '$e'.contains('Couldn\'t reach your Identity Agent'))));
+  });
+}
+
+/// A screen is given the core's rule for a public name and applies it.
+void publicNameRuleTests() {
+  const rule = {
+    'pattern': r'^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$',
+    'forbids': '--',
+    'min_length': 3,
+    'max_length': 32,
+    'text': 'A name is 3 to 32 lowercase letters.',
+  };
+
+  test('the rule is read from the reachability settings and applied', () async {
+    final core = CoreService(
+      baseUrl: 'http://127.0.0.1:5050',
+      inner: MockClient((req) async {
+        expect(req.url.path, '/api/settings/reachability');
+        return http.Response(jsonEncode({'public_name_rule': rule}), 200);
+      }),
+    );
+    final r = await core.getPublicNameRule();
+    expect(r.text, rule['text']);
+    expect([r.minLength, r.maxLength], [3, 32]);
+    for (final ok in ['abc', 'acme-labs', 'a' * 32]) {
+      expect(r.isValid(ok), isTrue, reason: ok);
+    }
+    for (final bad in ['', 'ab', 'Acme', '-acme', 'acme-', 'ac--me', 'a' * 33, 'acme_x']) {
+      expect(r.isValid(bad), isFalse, reason: bad);
+    }
+  });
+
+  test('a core that states no rule is an error, so the caller can fall back', () async {
+    final core = CoreService(
+      baseUrl: 'http://127.0.0.1:5050',
+      inner: MockClient((req) async => http.Response(jsonEncode({'mode': ''}), 200)),
+    );
+    expect(core.getPublicNameRule(), throwsFormatException);
   });
 }

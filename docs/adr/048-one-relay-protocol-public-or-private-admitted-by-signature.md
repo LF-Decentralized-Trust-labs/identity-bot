@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-10-21
-**Amended:** 2026-10-22: an address carries the protocol and never a page (§12)
+**Amended:** 2026-10-22: an address carries the protocol and never a page (§12); 2026-11-05: §9's record is the signed endpoint record of ADR-062
 **Supersedes:** ADR-008 (the Chisel tunnel provider); the transport and enrolment-token parts of ADR-024's relay client
 **Amends:** ADR-042 §1 (ingress modes), §3 (how a relayed request is recognised) and §5 (what a relay does); ADR-007's tunnel-name rows
 **Relates to:** ADR-033 (An identifier travels with an address), ADR-036 (A computer you pair with does not publish who you are), ADR-037 (One KERI engine on every platform)
@@ -374,6 +374,12 @@ it publishes a signed KERI endpoint record (`rpy` with route `/loc/scheme`) and
 gives it to its witnesses and watchers. Hosts and apps re-resolve from there, never
 from the address that just moved. An address is a property of the identifier's
 current state, not a string handed out once (ADR-033).
+
+*Amended 2026-11-05 by ADR-062:* **the record that is published is no longer a KERI
+`rpy`.** It is an `endpoint-record/1`, five strings signed by the identifier's own
+key and checked against its verified key log by whoever reads it. Everything else
+here stands: it goes to the identifier's witnesses, and hosts and apps re-resolve
+from there.
 
 ### 10. Proxies between the two ends
 

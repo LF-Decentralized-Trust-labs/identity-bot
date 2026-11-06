@@ -68,6 +68,41 @@ type assetGrantKind struct {
 	// version of the template, kept so credentials issued under it still
 	// resolve and verify.
 	edges bool
+	// requestKinds are the kinds of authorising request the credential's
+	// request attribute admits. Empty means the two the first edged versions
+	// admitted: a machine acting for a signer, and the identity's own key.
+	requestKinds []string
+	// version overrides the template's version for a kind whose schema has
+	// had to change again.
+	version string
+}
+
+// defaultRequestKinds are the kinds of authorising request every edged schema
+// admitted before an AI agent's body could authorise a grant.
+var defaultRequestKinds = []string{"controller", "owner"}
+
+// requestAttribute fills the request attribute's definition with the kinds of
+// request k admits.
+func requestAttribute(k assetGrantKind, def string) grantAttribute {
+	signers := "a machine acting for a signer, or the identity's own key"
+	if len(k.requestKinds) > 0 {
+		signers = "a machine acting for a signer, the identity's own key, or the body of an AI agent whose grant lets it create AI agents"
+	}
+	def = strings.Replace(def, "@KINDS@", k.kindsOfRequest(), 1)
+	def = strings.Replace(def, "@SIGNERS@", signers, 1)
+	return grantAttribute{"request", def}
+}
+
+func (k assetGrantKind) kindsOfRequest() string {
+	kinds := k.requestKinds
+	if len(kinds) == 0 {
+		kinds = defaultRequestKinds
+	}
+	quoted := make([]string, len(kinds))
+	for i, x := range kinds {
+		quoted[i] = fmt.Sprintf("%q", x)
+	}
+	return strings.Join(quoted, ", ")
 }
 
 // sharedGrantAttributes are the attributes every asset grant carries, in order.
@@ -97,35 +132,32 @@ func (k assetGrantKind) allAttributes() []grantAttribute {
 		// device signed it, beside the edge to their own grant: the edge says
 		// whose authority this rests on, the request shows they used it.
 		attrs = append(attrs,
-			grantAttribute{"request", `{"description": "The request that authorised this, as it was signed: who signed it (a machine acting for a signer, or the identity's own key), the exact string signed, which carries the digest of the request's body, the signature, and what the request asked for, taken from that body. The body itself is not here: it can hold what is nobody else's business, and is kept with the issuer's record", "type": "object", "properties": {"kind": {"type": "string", "enum": ["controller", "owner"]}, "signer": {"type": "string"}, "signed": {"type": "string"}, "signature": {"type": "string"}, "asked": {"type": "object"}}, "required": ["kind", "signer", "signed", "signature", "asked"], "additionalProperties": false}`},
+			requestAttribute(k, `{"description": "The request that authorised this, as it was signed: who signed it (@SIGNERS@), the exact string signed, which carries the digest of the request's body, the signature, and what the request asked for, taken from that body. The body itself is not here: it can hold what is nobody else's business, and is kept with the issuer's record", "type": "object", "properties": {"kind": {"type": "string", "enum": [@KINDS@]}, "signer": {"type": "string"}, "signed": {"type": "string"}, "signature": {"type": "string"}, "asked": {"type": "object"}}, "required": ["kind", "signer", "signed", "signature", "asked"], "additionalProperties": false}`),
 			grantAttribute{"about", `{"description": "What the authorising request named as the thing it acts on: the asset whose grant changes, or the machine waiting to become its body", "type": "string"}`})
 	}
 	return attrs
 }
 
-func buildAssetGrant(k assetGrantKind) (*AssetGrant, error) {
-	attrs := k.allAttributes()
-	props := make([]string, len(attrs))
-	for i, a := range attrs {
-		props[i] = fmt.Sprintf("%q: %s", a.name, a.definition)
-	}
-	required := append(append([]string{}, sharedGrantRequired...), k.required...)
-	version, edgesProperty := "1.0.0", ""
-	if k.edges {
-		version = "1.1.0"
-		edgesProperty = `,
+// edgesPropertyJSON is the "e" member of a schema that admits edges.
+const edgesPropertyJSON = `,
     "e": {
       "oneOf": [
         {"description": "Edges block identifier", "type": "string"},
         {"description": "Edges: the credentials this one rests on, each by its identifier and schema", "type": "object"}
       ]
     }`
-	}
+
+// credentialSchemaDocument is the document every built-in credential schema
+// shares: the whole ACDC described (version, identifier, issuer, registry,
+// schema, attributes), the attribute block either compacted to its identifier
+// or spelled out, and nothing undeclared accepted. props are the attribute
+// block's members, each already written as a quoted name and a definition.
+func credentialSchemaDocument(title, description, version, issuer, registry string, props, required []string, edgesProperty string) string {
 	quoted := make([]string, len(required))
 	for i, r := range required {
 		quoted[i] = fmt.Sprintf("%q", r)
 	}
-	doc := fmt.Sprintf(`{
+	return fmt.Sprintf(`{
   "$id": "",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": %q,
@@ -137,8 +169,8 @@ func buildAssetGrant(k assetGrantKind) (*AssetGrant, error) {
     "v": {"description": "Credential version string", "type": "string"},
     "d": {"description": "Credential identifier", "type": "string"},
     "u": {"description": "Salt, when the credential is issued private", "type": "string"},
-    "i": {"description": "Issuer: the identity that owns the asset", "type": "string"},
-    "ri": {"description": "The registry the grant is issued in, where its revocation is recorded", "type": "string"},
+    "i": {"description": %q, "type": "string"},
+    "ri": {"description": %q, "type": "string"},
     "s": {"description": "Schema identifier", "type": "string"},
     "a": {
       "oneOf": [
@@ -157,8 +189,28 @@ func buildAssetGrant(k assetGrantKind) (*AssetGrant, error) {
   },
   "additionalProperties": false,
   "required": ["v", "d", "i", "ri", "s", "a"]
-}`, k.title, k.description, credentialTypeName(k.title), version,
+}`, title, description, credentialTypeName(title), version, issuer, registry,
 		strings.Join(props, ",\n            "), strings.Join(quoted, ", "), edgesProperty)
+}
+
+func buildAssetGrant(k assetGrantKind) (*AssetGrant, error) {
+	attrs := k.allAttributes()
+	props := make([]string, len(attrs))
+	for i, a := range attrs {
+		props[i] = fmt.Sprintf("%q: %s", a.name, a.definition)
+	}
+	required := append(append([]string{}, sharedGrantRequired...), k.required...)
+	version, edgesProperty := "1.0.0", ""
+	if k.edges {
+		version = "1.1.0"
+		if k.version != "" {
+			version = k.version
+		}
+		edgesProperty = edgesPropertyJSON
+	}
+	doc := credentialSchemaDocument(k.title, k.description, version,
+		"Issuer: the identity that owns the asset",
+		"The registry the grant is issued in, where its revocation is recorded", props, required, edgesProperty)
 
 	built, err := keri.BuildSchema(keri.SchemaInput{Schema: []byte(doc)})
 	if err != nil {
@@ -213,9 +265,9 @@ func mustAssetGrant(k assetGrantKind) *AssetGrant {
 //
 //   - the role, prompt or model. Those configure the AI agent; they are not
 //     authority, and changing them must not require a new grant;
-//   - permission to delegate onward. This software offers an AI agent no way to
-//     create AI agents of its own, so a field saying whether it may would assert
-//     nothing;
+//   - permission to delegate onward. An AI agent may create AI agents only
+//     through agent.create, whose limits are resource_constraints on that
+//     capability, so no field of its own says whether it may;
 //   - whom it may message, and conversation limits. Messaging another AI agent
 //     is a capability like any other, agent.message.send, and whom it may
 //     message is that capability's constraint on "to" — so it needs no field
@@ -240,12 +292,18 @@ var aiAgentGrantKind = assetGrantKind{
 	},
 }
 
-// AIAgentGrant is issued with an edge to the grant of whoever authorised it,
-// and AIAgentGrantV1, the first version, without one. Credentials issued under
+// AIAgentGrant is issued with an edge to the grant of whoever authorised it, and
+// may rest on a request signed by the body of the AI agent that created this
+// one. AIAgentGrantV11 is the version before that, and AIAgentGrantV1, the
+// first, has no edge at all. Credentials issued under
 // the first version still resolve and are still honoured.
 var (
-	AIAgentGrant   = mustAssetGrant(withEdges(aiAgentGrantKind))
+	AIAgentGrant   = mustAssetGrant(withAIAgentBodyRequests(aiAgentGrantKind))
 	AIAgentGrantV1 = mustAssetGrant(aiAgentGrantKind)
+	// AIAgentGrantV11 is the second version, which admitted an edge and a
+	// request signed by a machine for a signer or by the identity's own key. It
+	// is still honoured.
+	AIAgentGrantV11 = mustAssetGrant(withEdges(aiAgentGrantKind))
 )
 
 // AIAgentBody says that one machine key is the body of one AI agent: requests
@@ -358,6 +416,15 @@ var (
 	AppBody  = mustAssetGrant(withEdges(appBodyKind))
 )
 
+// withAIAgentBodyRequests is the version of an AI agent's grant whose request
+// may be one signed by the body of an AI agent that holds agent.create.
+func withAIAgentBodyRequests(k assetGrantKind) assetGrantKind {
+	k = withEdges(k)
+	k.version = "1.2.0"
+	k.requestKinds = []string{"controller", "owner", "ai_agent_body"}
+	return k
+}
+
 func withEdges(k assetGrantKind) assetGrantKind {
 	k.edges = true
 	return k
@@ -371,7 +438,7 @@ var AssetGrants = map[string]*AssetGrant{
 
 // assetCredentials are every schema built from the asset template, current
 // and first versions alike, so every one issued can be resolved.
-var assetCredentials = []*AssetGrant{AIAgentGrant, AIAgentGrantV1, AIAgentBody, AIAgentBodyV1, ControllerGrant, AppGrant, AppBody}
+var assetCredentials = []*AssetGrant{AIAgentGrant, AIAgentGrantV11, AIAgentGrantV1, AIAgentBody, AIAgentBodyV1, ControllerGrant, AppGrant, AppBody}
 
 func init() {
 	for _, g := range assetCredentials {

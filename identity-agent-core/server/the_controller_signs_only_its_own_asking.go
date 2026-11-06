@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"identity-agent-core/authprovider"
+	"identity-agent-core/endpointrecord"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/secureenclave"
 )
@@ -64,6 +65,13 @@ func (s *CoreServer) handleSignAsThisController(w http.ResponseWriter, r *http.R
 		// machine makes before it knows, and one that must not name whichever
 		// Identity Agent this computer happened to be pointed at before.
 		For *string `json:"for"`
+
+		// Origin is the origin (scheme://host:port) the request will be sent
+		// to, signed so a copy relayed through any other address is refused by
+		// the Identity Agent (theOriginItNames). Left out, the request is signed
+		// in the older form that names none, which an Identity Agent still
+		// accepts for one version; a client that can send it should.
+		Origin *string `json:"origin"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxSignedBodyBytes+1024)).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "body must be JSON", err.Error())
@@ -84,6 +92,20 @@ func (s *CoreServer) handleSignAsThisController(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadRequest,
 			"the path must start with / — it is signed exactly as the agent will see it", "")
 		return
+	}
+
+	// Exactly as given. An origin that is present and blank, or padded, is
+	// refused rather than trimmed into "none": that would sign the older form,
+	// which can be relayed, for a caller that asked for the newer one.
+	origin := ""
+	if req.Origin != nil {
+		origin = *req.Origin
+		// In its one spelling, so the Identity Agent compares the same text.
+		if err := endpointrecord.CheckOrigin(origin); err != nil {
+			writeError(w, http.StatusBadRequest,
+				"origin must be scheme://host:port in lower case, with the port written", err.Error())
+			return
+		}
 	}
 
 	body, err := base64.StdEncoding.DecodeString(req.BodyB64)
@@ -145,7 +167,7 @@ func (s *CoreServer) handleSignAsThisController(w http.ResponseWriter, r *http.R
 	// Built here, from the parts, so the only string this key ever signs is a
 	// controller asking an agent for something.
 	sig, err := signer.Sign([]byte(
-		canonicalControllerRequest(me.AID, target, method, path, stamp, asserted, body)))
+		canonicalControllerRequestAt(me.AID, target, origin, method, path, stamp, asserted, body)))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError,
 			"this computer's secure hardware would not sign", err.Error())
@@ -177,6 +199,9 @@ func (s *CoreServer) handleSignAsThisController(w http.ResponseWriter, r *http.R
 		// Echoed for the same reason: it is inside the signature, and the
 		// Identity Agent reads it from the header the caller sets from this.
 		"for": target,
+		// Echoed for the same reason: it is inside the signature, and the
+		// Identity Agent reads it from the header the caller sets from this.
+		"origin": origin,
 		// Echoed so the caller sends exactly what was signed rather than
 		// reformatting a time and breaking its own signature.
 		"auth_level": headerValueFor(asserted, func(a authprovider.Result) string {

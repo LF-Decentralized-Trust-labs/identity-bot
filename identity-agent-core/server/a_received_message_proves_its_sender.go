@@ -336,27 +336,32 @@ type senderRefusals struct {
 	notified bool
 }
 
-var refusalsRecorded = struct {
-	sync.Mutex
-	m map[string]*senderRefusals
-}{m: map[string]*senderRefusals{}}
+// refusalLog is one server's record of which refusals it has written. The
+// zero value is ready to use.
+type refusalLog struct {
+	mu sync.Mutex
+	m  map[string]*senderRefusals
+}
 
-// refusalToRecord says whether this sender's refusal of this message should
+// toRecord says whether this sender's refusal of this message should
 // be recorded. When the sender has used its quota, it returns the end of the
 // window once, so one row can say that sender's further refusals are not
 // recorded until then; after that, nothing until the window ends.
-func refusalToRecord(sender, messageID string, now time.Time) (record bool, suppressedUntil time.Time) {
-	refusalsRecorded.Lock()
-	defer refusalsRecorded.Unlock()
-	for k, r := range refusalsRecorded.m {
+func (l *refusalLog) toRecord(sender, messageID string, now time.Time) (record bool, suppressedUntil time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.m == nil {
+		l.m = map[string]*senderRefusals{}
+	}
+	for k, r := range l.m {
 		if now.Sub(r.start) >= refusalWindow {
-			delete(refusalsRecorded.m, k)
+			delete(l.m, k)
 		}
 	}
-	r := refusalsRecorded.m[sender]
+	r := l.m[sender]
 	if r == nil {
 		r = &senderRefusals{start: now, seen: map[string]bool{}}
-		refusalsRecorded.m[sender] = r
+		l.m[sender] = r
 	}
 	if r.seen[messageID] {
 		return false, time.Time{}

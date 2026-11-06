@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/schemas"
 	"log"
 	"net/http"
 	"time"
@@ -11,6 +12,8 @@ import (
 	"github.com/google/uuid"
 
 	"identity-agent-core/store"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 // guardianshipRoutes registers /api/guardianship endpoints.
@@ -33,8 +36,7 @@ func (s *CoreServer) handleListGuardianships(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"guardianships": records,
 		"count":         len(records),
 	})
@@ -59,10 +61,18 @@ func (s *CoreServer) handleCreateGuardianship(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Validate required fields
-	validTypes := map[string]bool{"minor_child": true, "elderly": true, "disability": true, "temporary": true}
-	if !validTypes[req.Type] {
-		writeError(w, http.StatusBadRequest, "Invalid guardianship type", fmt.Sprintf("type must be one of: minor_child, elderly, disability, temporary; got: %s", req.Type))
+	// The credential issued for a guardianship is held to its schema before the
+	// guardianship is made, so the type is checked against the schema's own
+	// allowed values and not a second list of them kept here.
+	claims := map[string]interface{}{
+		"dependent_name": req.DependentName,
+		"guardian_type":  req.Type,
+	}
+	if req.DependentAID != "" {
+		claims["dependent_aid"] = req.DependentAID
+	}
+	if err := schemas.Guardianship.CheckClaims(claims); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid guardianship type", err.Error())
 		return
 	}
 	if req.DependentName == "" {
@@ -118,14 +128,7 @@ func (s *CoreServer) handleCreateGuardianship(w http.ResponseWriter, r *http.Req
 	// Auto-issue a Guardianship Credential ACDC so the SAID can serve as a chain-of-trust anchor.
 	// This runs synchronously — failure is non-fatal (guardianship record still created).
 	if s.KeriDriver != nil {
-		claims := map[string]interface{}{
-			"dependent_name": record.DependentName,
-			"guardian_type":  record.Type,
-		}
-		if record.DependentAID != "" {
-			claims["dependent_aid"] = record.DependentAID
-		}
-		const guardianshipSchemaSAID = "EGuardianship__placeholder__v1"
+		guardianshipSchemaSAID := schemas.Guardianship.SAID
 		if result, err := s.KeriDriver.IssueCredential(identity.AID, claims, guardianshipSchemaSAID, identity.AID, nil); err == nil {
 			record.CredentialSAID = result.AcdcSaid
 			if saveErr := s.DataStore.SaveGuardianship(record); saveErr != nil {
@@ -141,9 +144,7 @@ func (s *CoreServer) handleCreateGuardianship(w http.ResponseWriter, r *http.Req
 	log.Printf("[guardianship] Created guardianship %s: type=%s dependent=%s hosting=%s",
 		record.ID, record.Type, record.DependentName, record.HostingType)
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(record)
+	jsonreply.Write(w, http.StatusCreated, record)
 }
 
 // handleGetGuardianship returns a single guardianship by ID.
@@ -159,8 +160,7 @@ func (s *CoreServer) handleGetGuardianship(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(record)
+	jsonreply.Write(w, http.StatusOK, record)
 }
 
 // handleUpdateGuardianship partially updates a guardianship record.
@@ -217,8 +217,7 @@ func (s *CoreServer) handleUpdateGuardianship(w http.ResponseWriter, r *http.Req
 
 	log.Printf("[guardianship] Updated guardianship %s", id)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(existing)
+	jsonreply.Write(w, http.StatusOK, existing)
 }
 
 // handleDeleteGuardianship revokes a guardianship (sets status to "revoked").
@@ -242,8 +241,7 @@ func (s *CoreServer) handleDeleteGuardianship(w http.ResponseWriter, r *http.Req
 
 	log.Printf("[guardianship] Revoked guardianship %s for dependent %s", id, existing.DependentName)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(existing)
+	jsonreply.Write(w, http.StatusOK, existing)
 }
 
 // handleEmancipateGuardianship transitions a guardianship to "emancipated" status.
@@ -271,6 +269,5 @@ func (s *CoreServer) handleEmancipateGuardianship(w http.ResponseWriter, r *http
 
 	log.Printf("[guardianship] Emancipated guardianship %s — dependent %s is now independent", id, existing.DependentName)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(existing)
+	jsonreply.Write(w, http.StatusOK, existing)
 }

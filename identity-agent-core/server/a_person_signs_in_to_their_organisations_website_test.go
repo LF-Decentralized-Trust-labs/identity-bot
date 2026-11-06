@@ -91,7 +91,7 @@ func aWebsiteFor(t *testing.T, s *CoreServer, policy asset.EnrollmentPolicy) *aW
 	s.challenges = map[string]login.ChallengeBundle{}
 
 	w := &aWebsiteWorld{org: s, roster: map[string]bool{}}
-	RegisterMembershipResolver("roster_the_website", rosterResolver{active: w.roster})
+	registerResolverForTest(t, "roster_the_website", rosterResolver{active: w.roster})
 
 	r := chi.NewRouter()
 	r.Get("/public/oobi/{aid}", s.handleOobiServe)

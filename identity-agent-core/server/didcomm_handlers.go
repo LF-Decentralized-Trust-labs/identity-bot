@@ -369,21 +369,27 @@ const maxEnvelopeLifetime = time.Hour
 // everything in it replayable again.
 const maxSeenEntries = 50000
 
-var didcommSeen = struct {
-	sync.Mutex
-	m map[string]time.Time
-}{m: map[string]time.Time{}}
+// seenMessages is one server's replay cache: message id -> expiry. It belongs
+// to the CoreServer, so two servers (or two tests) never share what has been
+// seen. The zero value is ready to use.
+type seenMessages struct {
+	mu sync.Mutex
+	m  map[string]time.Time
+}
 
-func seenBefore(id string, exp time.Time) bool {
-	didcommSeen.Lock()
-	defer didcommSeen.Unlock()
+func (c *seenMessages) seenBefore(id string, exp time.Time) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.m == nil {
+		c.m = map[string]time.Time{}
+	}
 	now := time.Now()
-	for k, e := range didcommSeen.m {
+	for k, e := range c.m {
 		if now.After(e) {
-			delete(didcommSeen.m, k)
+			delete(c.m, k)
 		}
 	}
-	if _, ok := didcommSeen.m[id]; ok {
+	if _, ok := c.m[id]; ok {
 		return true
 	}
 	// Full after the sweep means live entries alone have filled it. Refusing to
@@ -391,10 +397,10 @@ func seenBefore(id string, exp time.Time) bool {
 	// worst case is that a duplicate of it is accepted later. Evicting a live
 	// entry instead would make a chosen message replayable on demand, which is
 	// the attack this cache exists to stop.
-	if len(didcommSeen.m) >= maxSeenEntries {
+	if len(c.m) >= maxSeenEntries {
 		return false
 	}
-	didcommSeen.m[id] = exp
+	c.m[id] = exp
 	return false
 }
 
@@ -734,10 +740,10 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 	// anyone could fill the log by posting garbage. Each message's refusal is
 	// recorded once: a captured envelope replayed over and over is one fact,
 	// and recording every copy would let whoever holds it fill the log.
-	// Recorded within each sender's quota (refusalToRecord), apart from the
+	// Recorded within each sender's quota (s.refusals.toRecord), apart from the
 	// replay cache.
 	refuse := func(why string, status int) {
-		record, suppressedUntil := refusalToRecord(skid, jwm.ID, time.Now())
+		record, suppressedUntil := s.refusals.toRecord(skid, jwm.ID, time.Now())
 		switch {
 		case record:
 			s.recordTraffic(skid, jwm.ID, "", "didcomm.message.received", "denied", jwm.Type+" to "+kid+": "+why, nil)
@@ -766,7 +772,7 @@ func (s *CoreServer) handleDIDCommInbound(w http.ResponseWriter, r *http.Request
 		refuse("envelope_lifetime_too_long", http.StatusForbidden)
 		return
 	}
-	if seenBefore(jwm.ID, exp) {
+	if s.seen.seenBefore(jwm.ID, exp) {
 		refuse("replay_detected", http.StatusConflict)
 		return
 	}

@@ -73,6 +73,14 @@ import pysodium
 from keri.core import coring, eventing
 from keri.core.coring import MtrDex
 
+# keri 1.1.x (what Python 3.11 resolves to) defines Signer and Salter in
+# keri.core.coring; keri 1.2 and later (Python 3.12.6+) moved them to
+# keri.core.signing. Tests import them from here so both work.
+try:
+    from keri.core.signing import Salter, Signer
+except ImportError:
+    from keri.core.coring import Salter, Signer
+
 
 # ---------------------------------------------------------------------------
 # Deterministic test seeds — never change these; they are canonical inputs

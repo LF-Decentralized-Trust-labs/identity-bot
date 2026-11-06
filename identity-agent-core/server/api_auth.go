@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"identity-agent-core/internal/jsonreply"
 	"identity-agent-core/permission"
 )
 
@@ -252,6 +252,21 @@ var publicRoutes = map[string]string{
 	"GET /api/witness/kel/{signer_aid}":            "the key log this witness holds, to the identity itself or its delegator, signed — anybody else is told it is not held",
 	"GET /api/witness/kel/{signer_aid}/tip":        "how far this witness holds an identity's key log, signed with a nonce — to anybody else, as for a log not held",
 	"GET /api/witness/kel/{signer_aid}/event/{sn}": "one event of a key log this witness holds, to the identity itself or its delegator, signed — anybody else is told it is not held",
+	// A controller publishes where it can be reached, and a counterparty whose
+	// stored address has died asks where it is now. Both were owner gated, so a
+	// witness never held a record and nobody could ask for one; and the
+	// publishing route stored whatever it was handed without checking any
+	// signature, which is why it could not simply be opened.
+	//
+	// Safe to reach because nothing here is trusted on who sent it. A record is
+	// stored only when it is the identifier's own statement: the one spelling of
+	// the form (endpointrecord), signed by the key the key log this witness holds
+	// for it names now, issued after the record already held, for an identifier
+	// this witness holds a verifiable log for. The read serves that record as it
+	// was signed, and the asker checks it against the identifier's own key log,
+	// so a witness cannot move anybody. Both share the witness reads' limiter.
+	"POST /api/witness/endpoint":                 "witnessing protocol — a controller publishes where it can be reached, a signed record verified against its key log before it is stored",
+	"GET /api/witness/endpoint/{controller_aid}": "the newest signed record of where an identity can be reached, which the asker verifies against the identity's own key log",
 	// Mounted on the root router under /public/ and never declared, so every
 	// peer cross-check got 403, which the caller records as the peer being
 	// "unavailable" — the whole peer layer degraded silently.
@@ -489,13 +504,11 @@ const (
 
 // denyAuthorizationBecause is denyAuthorization with a reason code.
 func denyAuthorizationBecause(w http.ResponseWriter, reason, detail string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusForbidden)
 	body := map[string]string{"error": "not_authorized", "detail": detail}
 	if reason != "" {
 		body["reason"] = reason
 	}
-	_ = json.NewEncoder(w).Encode(body)
+	jsonreply.Write(w, http.StatusForbidden, body)
 }
 
 // isOwner answers the only question the default class asks: is this the person

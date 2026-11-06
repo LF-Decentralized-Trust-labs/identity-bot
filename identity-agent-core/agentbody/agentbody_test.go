@@ -5,10 +5,11 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/sha256"
 	"strings"
 	"testing"
 	"time"
+
+	"identity-agent-core/internal/testkeys"
 )
 
 func TestAnEnrolmentStringRoundTrips(t *testing.T) {
@@ -53,17 +54,7 @@ type p256Signer struct{ priv *ecdsa.PrivateKey }
 func (s p256Signer) PublicKey() ([]byte, error) {
 	return elliptic.MarshalCompressed(elliptic.P256(), s.priv.X, s.priv.Y), nil
 }
-func (s p256Signer) Sign(d []byte) ([]byte, error) {
-	sum := sha256.Sum256(d)
-	r, ss, err := ecdsa.Sign(rand.Reader, s.priv, sum[:])
-	if err != nil {
-		return nil, err
-	}
-	out := make([]byte, 64)
-	r.FillBytes(out[:32])
-	ss.FillBytes(out[32:])
-	return out, nil
-}
+func (s p256Signer) Sign(d []byte) ([]byte, error) { return (&testkeys.Key{Priv: s.priv}).Sign(d) }
 
 // Both kinds of machine key sign and verify: P-256, which is what secure
 // hardware holds, and Ed25519, the software key where a machine has none.

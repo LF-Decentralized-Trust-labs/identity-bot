@@ -15,7 +15,7 @@ import pysodium
 from keri.core import coring, eventing
 from keri.core.coring import MtrDex
 
-from conftest import SEED_ISSUER, derive_key
+from conftest import SEED_ISSUER, Signer, derive_key
 
 
 # ---------------------------------------------------------------------------
@@ -24,7 +24,7 @@ from conftest import SEED_ISSUER, derive_key
 
 @pytest.fixture(scope="module")
 def keripy_signer():
-    return coring.Signer(raw=SEED_ISSUER, code=MtrDex.Ed25519_Seed)
+    return Signer(raw=SEED_ISSUER, code=MtrDex.Ed25519_Seed)
 
 
 @pytest.fixture(scope="module")

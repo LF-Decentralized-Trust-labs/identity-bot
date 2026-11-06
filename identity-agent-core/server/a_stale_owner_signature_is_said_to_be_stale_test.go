@@ -2,7 +2,7 @@ package server
 
 import (
 	"crypto/ed25519"
-	"encoding/json"
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,7 +21,10 @@ import (
 // about the owner's key state.
 func TestAStaleOwnerSignatureIsSaidToBeStale(t *testing.T) {
 	s := appHeldCore(t)
-	seedNow, aid := sealTestOwner(t, s)
+	seedNow := make([]byte, ed25519.SeedSize)
+	for i := range seedNow {
+		seedNow[i] = byte(i + 1)
+	}
 	earlier := make([]byte, ed25519.SeedSize)
 	for i := range earlier {
 		earlier[i] = byte(90 + i)
@@ -45,9 +48,16 @@ func TestAStaleOwnerSignatureIsSaidToBeStale(t *testing.T) {
 		t.Fatal(err)
 	}
 	rotEv, _ := keri.ParseEvent(rot)
-	var a, b map[string]interface{}
-	_ = json.Unmarshal(icp, &a)
-	_ = json.Unmarshal(rot, &b)
+	// The owner is the identifier this log founds: a kept log is read only as
+	// the log of the identifier its own events name.
+	aid := icpEv.Identifier
+	if err := s.SealOwnerAuthority(OwnerAuthority{AID: aid,
+		PublicKey: base64.RawURLEncoding.EncodeToString(ed25519.NewKeyFromSeed(seedNow).Public().(ed25519.PublicKey))}); err != nil {
+		t.Fatal(err)
+	}
+	// Kept as its bytes, the only form a log is read as verified in.
+	a := map[string]interface{}{"raw_bytes_b64": base64.StdEncoding.EncodeToString(icp)}
+	b := map[string]interface{}{"raw_bytes_b64": base64.StdEncoding.EncodeToString(rot)}
 	if err := s.DataStore.SaveContactKEL(store.ContactKELRecord{AID: aid, KEL: []map[string]interface{}{a, b},
 		KelVerified: true, CurrentPublicKey: k1}); err != nil {
 		t.Fatal(err)

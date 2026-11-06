@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"identity-agent-core/schemas"
 	"io"
 	"log"
 	"net/http"
@@ -19,6 +20,8 @@ import (
 	"identity-agent-core/watcher"
 
 	"github.com/go-chi/chi/v5"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 func (s *CoreServer) mountLoginRoutes(r chi.Router) {
@@ -122,8 +125,7 @@ func (s *CoreServer) handleCreateAssetChallenge(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	jsonreply.Write(w, http.StatusOK, map[string]string{
 		"session_token": token,
 		"qr_url":        qrURL,
 		// Held by the browser that started this, and by nothing else.
@@ -170,8 +172,7 @@ func (s *CoreServer) handleChallengeBundleServe(w http.ResponseWriter, r *http.R
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(b)
+	jsonreply.Write(w, http.StatusOK, b)
 }
 
 // mount the /i route at root (called from buildRouter)
@@ -248,8 +249,9 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 	// that person works here — and by varying the policy, where the credential
 	// and score thresholds sit. None of that requires being able to sign in.
 	//
-	// The organisation still needs the answer, so it goes into the challenge
-	// status the org's own app reads, and only a uniform refusal leaves here.
+	// The reason is kept in the challenge status, which the site's own sign-in
+	// page can read; only a uniform refusal leaves here. The owner is not shown
+	// it: a gate the core cannot check is refused when the policy is saved.
 	if allowed, reason := s.authorizeAssetAccess(r.Context(), bundle.SiteAID, res.PairwiseAID, a.PresentedACDCs); !allowed {
 		s.setChallengeStatus(token, map[string]interface{}{
 			"status": "denied",
@@ -272,8 +274,7 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 		st["member_info"] = info
 	}
 	s.setChallengeStatus(token, st)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+	jsonreply.Write(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // memberInfoFor returns the admitting membership resolver's description of a
@@ -367,6 +368,13 @@ func (s *CoreServer) authorizeAssetAccess(ctx context.Context, siteAID, pairwise
 				return false, reason
 			}
 		}
+		// Score, badge and assurance-level gates. The core has no step that
+		// checks any of them, so a policy that sets one cannot be satisfied:
+		// refuse and name the gate, never pass it silently. (Saving such a
+		// policy is refused too, so this only meets one stored earlier.)
+		if g := a.Policy.UnsupportedGate(); g != "" {
+			return false, g
+		}
 		return true, ""
 	}
 	return false, "asset not found"
@@ -385,7 +393,7 @@ func (s *CoreServer) credentialGateSatisfied(ctx context.Context, presented []in
 		if !ok {
 			continue
 		}
-		if credStr(m["schema_said"]) != schema {
+		if !sameSchema(credStr(m["schema_said"]), schema) {
 			continue
 		}
 		if issuer != "" && credStr(m["issuer_aid"]) != issuer {
@@ -396,7 +404,7 @@ func (s *CoreServer) credentialGateSatisfied(ctx context.Context, presented []in
 		if s.KeriDriver != nil && acdcB64 != "" {
 			verified, iss, reason := s.verifyPresentedCredentialACDC(ctx, acdcB64,
 				credStr(m["holder_aid"]), credStr(m["pres_said_b64"]),
-				credStr(m["cesr_sig"]), credStr(m["holder_public_key"]), []string{schema})
+				credStr(m["cesr_sig"]), credStr(m["holder_public_key"]), schemaForms(schema))
 			if verified && (issuer == "" || iss == issuer) {
 				return true, ""
 			}
@@ -426,7 +434,7 @@ func (s *CoreServer) verifyPresentedCredentialACDC(ctx context.Context, acdcJson
 		if json.Unmarshal(acdcBytes, &acdcBody) == nil {
 			if ia, ok := acdcBody["i"].(string); ok && ia != "" {
 				issuerAid = ia
-				if kelRecord, err3 := s.DataStore.GetContactKEL(issuerAid); err3 == nil && kelRecord != nil {
+				if kelRecord, err3 := s.DataStore.GetContactKEL(issuerAid); err3 == nil && kelRecord != nil && kelRecord.KelVerified {
 					issuerKelEvents = unwrapEventJSON(kelRecord.KEL)
 				}
 				if issuerKelEvents == nil {
@@ -486,7 +494,7 @@ func presentsRequiredCredential(presented []interface{}, schemaSAID, issuerAID s
 		if !ok {
 			continue
 		}
-		if credStr(m["schema_said"]) != schemaSAID {
+		if !sameSchema(credStr(m["schema_said"]), schemaSAID) {
 			continue
 		}
 		if issuerAID != "" && credStr(m["issuer_aid"]) != issuerAID {
@@ -545,6 +553,28 @@ func (s *CoreServer) handleChallengeStatus(w http.ResponseWriter, r *http.Reques
 		// it says so.
 		st["session_binding"] = "none"
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(st)
+	jsonreply.Write(w, http.StatusOK, st)
+}
+
+// schemaForms are the identifiers a credential of one schema may carry: the
+// identifier itself and, where the schema's identifier was once a placeholder,
+// the other form. A credential issued before the identifier was real names the
+// placeholder, and a gate set up before names it too, so neither is refused for
+// the other (ADR-045, amendment of 2026-11-05).
+func schemaForms(said string) []string {
+	if other := schemas.Equivalent(said); other != "" {
+		return []string{said, other}
+	}
+	return []string{said}
+}
+
+// sameSchema reports whether a presented credential's schema identifier is the
+// required one, in either of its forms.
+func sameSchema(presented, required string) bool {
+	for _, f := range schemaForms(required) {
+		if presented == f {
+			return true
+		}
+	}
+	return false
 }

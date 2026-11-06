@@ -14,6 +14,8 @@ import (
 	"identity-agent-core/witness"
 
 	keri "github.com/grapeid/keri-go"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 // The two ends of standing down as a witness.
@@ -44,10 +46,9 @@ func (s *CoreServer) handleWitnessWithdraw(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "withdrawal_not_accepted", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
 	// Acknowledged, not agreed. The witness keeps receipting until a rotation
 	// cuts it, and saying so here is what stops it stopping early.
-	_ = json.NewEncoder(w).Encode(map[string]string{
+	jsonreply.Write(w, http.StatusOK, map[string]string{
 		"status": "acknowledged",
 		"note": "keep witnessing until a rotation cuts you; you will be sent the event " +
 			"that does it",
@@ -70,8 +71,7 @@ func (s *CoreServer) handleWitnessWithdrawConfirm(w http.ResponseWriter, r *http
 		writeError(w, http.StatusBadRequest, "confirmation_not_accepted", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "stopped"})
+	jsonreply.Write(w, http.StatusOK, map[string]string{"status": "stopped"})
 }
 
 // stillDesignatedIn returns the check that a rotation really cuts a witness

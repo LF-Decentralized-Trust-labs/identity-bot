@@ -17,6 +17,11 @@ type RestsOn struct {
 	GrantSchema string
 	// OwnerSigned is a credential issued on a request the owner signed.
 	OwnerSigned bool
+	// RequestKind is the kind of the authorising request the credential
+	// carries: controller, owner or ai_agent_body. Empty where it carries none.
+	// For ai_agent_body, Grant is the creator's AI Agent Grant, and the
+	// request is the one the creator's body signed.
+	RequestKind string
 }
 
 // WhatItRestsOn reads what a credential that verified rests on. It is the one
@@ -52,6 +57,9 @@ func WhatItRestsOn(c *keri.Credential) (RestsOn, error) {
 			return r, fmt.Errorf("the attributes are unreadable: %w", err)
 		}
 		r.OwnerSigned = a.Request != nil && a.Request.Kind == "owner"
+		if a.Request != nil {
+			r.RequestKind = a.Request.Kind
+		}
 	}
 	return r, nil
 }

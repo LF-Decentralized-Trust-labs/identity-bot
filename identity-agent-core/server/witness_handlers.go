@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"log"
@@ -9,10 +10,13 @@ import (
 	"strconv"
 	"time"
 
+	"identity-agent-core/endpointrecord"
 	"identity-agent-core/store"
 	"identity-agent-core/witness"
 
 	"github.com/go-chi/chi/v5"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 func (s *CoreServer) mountWitnessRoutes(r chi.Router) {
@@ -100,8 +104,7 @@ func (s *CoreServer) handleWitnessEvent(w http.ResponseWriter, r *http.Request) 
 		}
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	jsonreply.Write(w, http.StatusOK, result)
 }
 
 // The three reads of a key log below answer from what this witness holds only
@@ -128,8 +131,7 @@ func (s *CoreServer) handleWitnessKel(w http.ResponseWriter, r *http.Request) {
 		notHeld(w)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"aid": signerAID, "kel": kel, "count": len(kel),
 	})
 }
@@ -153,8 +155,7 @@ func (s *CoreServer) handleWitnessKelTip(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusServiceUnavailable, "the tip could not be signed", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(tip)
+	jsonreply.Write(w, http.StatusOK, tip)
 }
 
 func (s *CoreServer) handleWitnessStatus(w http.ResponseWriter, r *http.Request) {
@@ -167,15 +168,12 @@ func (s *CoreServer) handleWitnessStatus(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "status failed", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(st)
+	jsonreply.Write(w, http.StatusOK, st)
 }
 
 func (s *CoreServer) handleWitnessTELStub(w http.ResponseWriter, r *http.Request) {
 	issuerAID := chi.URLParam(r, "issuer_aid")
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(s.WitnessService.ServeTELStub(issuerAID))
+	jsonreply.Write(w, http.StatusNotImplemented, s.WitnessService.ServeTELStub(issuerAID))
 }
 
 // handleWitnessRequest handles inbound witness enrollment from a remote agent.
@@ -216,8 +214,7 @@ func (s *CoreServer) handleWitnessRequest(w http.ResponseWriter, r *http.Request
 	if result.Accepted {
 		status = "accepted"
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"status": status, "reason": result.Reason, "task_id": result.TaskID,
 		// Whether, after this, the identities the requester delegates are
 		// witnessed too.
@@ -244,8 +241,7 @@ func (s *CoreServer) handleWitnessAccept(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "received", "decision": req.Decision})
+	jsonreply.Write(w, http.StatusOK, map[string]string{"status": "received", "decision": req.Decision})
 }
 
 func (s *CoreServer) triggerWitnessBroadcast(signerAID string, rawEvent []byte, cesrSigs ...string) {
@@ -270,11 +266,26 @@ func (s *CoreServer) triggerWitnessBroadcast(signerAID string, rawEvent []byte, 
 // that string is stranded. A witness is the natural place to keep the current
 // answer, because it is already named in the KEL and is already the thing that
 // does not change when infrastructure does.
+//
+// THE ROUTE IS OPEN TO ANYBODY, SO NOTHING IN IT IS TRUSTED ON WHO SENT IT.
+// A record is kept only when it is the identifier's own statement
+// (endpointrecord): signed by the key the key log this witness holds for the
+// identifier names now, in the one spelling of the form, issued after the one
+// already held. A witness that stored what it was handed would let a stranger
+// say where an organisation is, which is exactly what a computer that follows a
+// moved organisation must not be made to believe. An identifier this witness
+// holds no log for is refused outright, so the store cannot be filled with
+// records under identifiers nobody asked it to witness.
 func (s *CoreServer) handleWitnessEndpointRecord(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		AID    string                 `json:"aid"`
-		Record map[string]interface{} `json:"record"`
+	if !s.witnessReadLimiter().allow(clientIP(r)) {
+		writeError(w, http.StatusTooManyRequests, "Rate limited", "")
+		return
 	}
+	var req struct {
+		AID    string         `json:"aid"`
+		Record map[string]any `json:"record"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid body", err.Error())
 		return
@@ -283,81 +294,152 @@ func (s *CoreServer) handleWitnessEndpointRecord(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, "aid and record required", "")
 		return
 	}
-
-	said, _ := req.Record["d"].(string)
-	route, _ := req.Record["r"].(string)
-	if said == "" || route == "" {
-		writeError(w, http.StatusBadRequest, "record must carry a SAID and a route", "")
+	record, err := endpointrecord.Parse(req.Record)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "not an endpoint record", err.Error())
 		return
 	}
-	// Only endpoint statements belong here. A key event routed to this handler
-	// would bypass the KEL's sequence and duplicity checks entirely, so the
-	// route is checked rather than assumed.
-	if route != "/end/role/add" && route != "/end/role/cut" && route != "/loc/scheme" {
-		writeError(w, http.StatusBadRequest, "unsupported route",
-			"expected /end/role/add, /end/role/cut or /loc/scheme")
+	// The envelope's AID is not trusted over the record's own: a record signed
+	// by one identifier must not be filed under another's name.
+	if record.AID != req.AID {
+		writeError(w, http.StatusBadRequest, "aid mismatch",
+			"the record speaks for a different identifier than the request")
+		return
+	}
+	// ONE ANSWER FOR EVERY REASON THE RECORD IS NOT KEPT THAT DEPENDS ON THIS
+	// WITNESS'S KEY LOG. An identifier this witness holds no log for and one it
+	// holds but whose record does not verify are told apart only by somebody who
+	// holds the identifier's key: anybody else is told the same thing, as the
+	// key log reads are, so the route cannot be used to learn who this agent
+	// witnesses (witness.MayRead).
+	notAccepted := func() {
+		writeError(w, http.StatusForbidden, "not_accepted",
+			"this witness does not hold a record from this identifier's current key")
+	}
+	key, err := s.WitnessService.CurrentVerifiedKey(req.AID)
+	if err != nil {
+		notAccepted()
+		return
+	}
+	if err := record.Verify(key, time.Now()); err != nil {
+		notAccepted()
 		return
 	}
 
-	rec := store.EndpointRecord{
-		SAID:       said,
-		CID:        req.AID,
-		Route:      route,
-		Record:     req.Record,
-		ReceivedAt: time.Now().UTC().Format(time.RFC3339),
+	// Checked and stored in one step, so two records arriving together cannot
+	// both pass the check against the one held.
+	s.endpointRecordMu.Lock()
+	defer s.endpointRecordMu.Unlock()
+	held, err := s.newestEndpointRecord(store.EndpointRecordHeld, req.AID, key)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not read endpoint records", err.Error())
+		return
 	}
-	if attrs, ok := req.Record["a"].(map[string]interface{}); ok {
-		rec.EID, _ = attrs["eid"].(string)
-		rec.Role, _ = attrs["role"].(string)
-		rec.Scheme, _ = attrs["scheme"].(string)
-		rec.URL, _ = attrs["url"].(string)
-		// A /end/role record names the controller it speaks for. Trusting the
-		// envelope's AID over the record's own cid would let one identity
-		// publish endpoints under another's name.
-		if cid, ok := attrs["cid"].(string); ok && cid != "" && cid != req.AID {
-			writeError(w, http.StatusBadRequest, "cid mismatch",
-				"the record names a different controller than the request")
+	if held != nil {
+		if *held == record {
+			// The same statement again changes nothing.
+			writeJSON(w, map[string]any{"stored": true, "unchanged": true})
+			return
+		}
+		if !endpointrecord.Newer(record, *held) {
+			writeError(w, http.StatusConflict, "stale_record",
+				"a record issued at "+held.Issued+" is already held; a record replaces it only when issued later")
 			return
 		}
 	}
-	if stamp, ok := req.Record["dt"].(string); ok {
-		rec.Stamp = stamp
-	}
-
-	if err := s.DataStore.SaveEndpointRecord(rec); err != nil {
+	if err := s.keepEndpointRecord(store.EndpointRecordHeld, record, req.Record); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not store endpoint record", err.Error())
 		return
 	}
+	writeJSON(w, map[string]any{"stored": true, "issued": record.Issued})
+}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"stored": true, "said": said, "route": route})
+// keepEndpointRecord holds record as the only one of its kind for its
+// identifier. Held records are not accumulated: a route open to anybody must not
+// keep a row for every record ever sent, and the one that is newest is the only
+// one anybody asks for.
+func (s *CoreServer) keepEndpointRecord(kind string, record endpointrecord.Record, raw map[string]any) error {
+	return s.DataStore.ReplaceEndpointRecord(store.EndpointRecord{
+		SAID:       record.Signature,
+		CID:        record.AID,
+		Route:      kind,
+		URL:        record.Origin,
+		Signature:  record.Signature,
+		Stamp:      record.Issued,
+		ReceivedAt: time.Now().UTC().Format(time.RFC3339),
+		Record:     raw,
+	})
+}
+
+// newestEndpointRecord is the record issued latest among those of one kind held
+// for an identifier that is that identifier's own statement under key, or nil.
+// Ordered by when each says it was issued, never by when it arrived: arrival
+// order is the order an attacker replaying old records picks. A record signed by
+// a key the identifier has since rotated away from is not ranked at all, so it
+// cannot keep a legitimate newer one out. Rows of any other form (the unsigned
+// records this route used to keep) are not records and are passed over.
+func (s *CoreServer) newestEndpointRecord(kind, aid string, key ed25519.PublicKey) (*endpointrecord.Record, error) {
+	held, err := s.DataStore.GetEndpointRecords(aid)
+	if err != nil {
+		return nil, err
+	}
+	var newest *endpointrecord.Record
+	for _, h := range held {
+		if h.Route != kind {
+			continue
+		}
+		rec, err := endpointrecord.Parse(h.Record)
+		if err != nil || rec.AID != aid || rec.Verify(key, time.Now()) != nil {
+			continue
+		}
+		if newest == nil || endpointrecord.Newer(rec, *newest) {
+			r := rec
+			newest = &r
+		}
+	}
+	return newest, nil
 }
 
 // handleWitnessEndpointLookup answers "where is this identity now" for somebody
-// whose stored address has stopped working.
+// whose stored address has stopped working: the newest signed record held for
+// it, exactly as its controller signed it.
 //
 // Public on purpose. A counterparty holding a dead URL has, by definition, no
 // authenticated channel left to ask through — requiring one would make this
-// reachable only by people who do not need it. The records are individually
-// signed by the controller, so serving them to anybody discloses nothing the
-// controller did not choose to publish.
+// reachable only by people who do not need it. It discloses nothing the
+// controller did not choose to publish, and nothing here is believed on this
+// witness's word: the asker checks the record against the identifier's own
+// verified key log (endpointrecord.Record.Verify), so a witness that withholds
+// or serves an old record can fail the asker but cannot move it — and an asker
+// that asks every witness and keeps what it has seen (RecoverContactEndpoint)
+// cannot be rolled back to an old address either.
 func (s *CoreServer) handleWitnessEndpointLookup(w http.ResponseWriter, r *http.Request) {
+	if !s.witnessReadLimiter().allow(clientIP(r)) {
+		writeError(w, http.StatusTooManyRequests, "Rate limited", "")
+		return
+	}
 	cid := chi.URLParam(r, "controller_aid")
 	if cid == "" {
 		writeError(w, http.StatusBadRequest, "controller_aid required", "")
 		return
 	}
-	records, err := s.DataStore.GetEndpointRecords(cid)
+	// Not held, not witnessed and no record from the current key are one
+	// answer.
+	key, err := s.WitnessService.CurrentVerifiedKey(cid)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "no endpoint record held", "not_found")
+		return
+	}
+	newest, err := s.newestEndpointRecord(store.EndpointRecordHeld, cid, key)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not read endpoint records", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
-		"controller_aid": cid,
-		"records":        records,
-		"count":          len(records),
-	})
+	if newest == nil {
+		writeError(w, http.StatusNotFound, "no endpoint record held", "not_found")
+		return
+	}
+	writeJSON(w, map[string]any{"controller_aid": cid, "record": newest})
 }
 
 // handleWitnessKelEvent answers one event of a key log this witness holds,
@@ -377,8 +459,7 @@ func (s *CoreServer) handleWitnessKelEvent(w http.ResponseWriter, r *http.Reques
 		notHeld(w)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(ev)
+	jsonreply.Write(w, http.StatusOK, ev)
 }
 
 // witnessReadAllowed rate limits a read of a key log and answers an asker who

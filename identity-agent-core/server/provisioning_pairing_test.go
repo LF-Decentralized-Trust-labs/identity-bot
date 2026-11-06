@@ -126,6 +126,7 @@ func TestABoxNobodyToldRefusesEveryClaim(t *testing.T) {
 // not be able to point it at a claim of their own.
 func TestOnlyTheFirstClaimExpectationIsAccepted(t *testing.T) {
 	resetExpectedClaimForTest()
+	t.Cleanup(resetExpectedClaimForTest)
 	if err := SetExpectedClaim("TOKEN-FROM-THE-PROVISIONER", "EIntendedOwner"); err != nil {
 		t.Fatalf("first write refused: %v", err)
 	}
@@ -140,6 +141,7 @@ func TestOnlyTheFirstClaimExpectationIsAccepted(t *testing.T) {
 
 // Half an expectation is not an expectation.
 func TestAClaimExpectationNeedsBothHalves(t *testing.T) {
+	t.Cleanup(resetExpectedClaimForTest)
 	for _, tc := range []struct{ token, owner string }{
 		{"", "EIntendedOwner"}, {"TOKEN", ""}, {"", ""},
 	} {

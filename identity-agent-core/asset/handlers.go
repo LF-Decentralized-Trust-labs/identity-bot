@@ -13,6 +13,7 @@ import (
 
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/jsonreply"
 )
 
 type Handler struct {
@@ -106,9 +107,7 @@ func (h *Handler) persistDelegationAnchor(rootAID string, approval *drivers.Driv
 }
 
 func (h *Handler) writeJSON(w http.ResponseWriter, v interface{}, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	jsonreply.Write(w, status, v)
 }
 
 func (h *Handler) HandleListAssets(w http.ResponseWriter, r *http.Request) {
@@ -151,6 +150,10 @@ func (h *Handler) HandleCreateAsset(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.DisplayName == "" || body.Origin == "" || body.AssetType == "" {
 		h.writeJSON(w, map[string]string{"error": "missing fields"}, http.StatusBadRequest)
+		return
+	}
+	if g := body.Policy.UnsupportedGate(); g != "" {
+		h.writeJSON(w, map[string]string{"error": g}, http.StatusBadRequest)
 		return
 	}
 
@@ -282,6 +285,10 @@ func (h *Handler) HandleUpdatePolicy(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var pol EnrollmentPolicy
 	json.NewDecoder(r.Body).Decode(&pol)
+	if g := pol.UnsupportedGate(); g != "" {
+		h.writeJSON(w, map[string]string{"error": g}, http.StatusBadRequest)
+		return
+	}
 	a, ok, err := h.Store.GetAsset(id)
 	if err != nil {
 		h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusInternalServerError)
@@ -326,15 +333,31 @@ func (h *Handler) HandleListInvites(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleRevokeInvite(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
 	token := chi.URLParam(r, "token")
-	h.Store.RevokeInvite(token)
-	h.writeJSON(w, map[string]bool{"revoked": true}, http.StatusOK)
+	h.writeRevokeResult(w, h.Store.RevokeInvite(id, token), func() { h.writeJSON(w, map[string]bool{"revoked": true}, http.StatusOK) })
+}
+
+// writeRevokeResult turns the outcome of a revoke into the status a client can
+// trust: 404 for a code nobody holds, 409 for one already revoked or used up,
+// 500 when the withdrawal could not be saved. ok runs only on a real revoke.
+func (h *Handler) writeRevokeResult(w http.ResponseWriter, err error, ok func()) {
+	switch {
+	case err == nil:
+		ok()
+	case errors.Is(err, ErrInviteNotFound):
+		h.writeJSON(w, map[string]string{"error": "no such invite"}, http.StatusNotFound)
+	case errors.Is(err, ErrInviteClosed):
+		h.writeJSON(w, map[string]string{"error": "invite is already revoked or used up"}, http.StatusConflict)
+	default:
+		h.writeJSON(w, map[string]string{"error": "the invite could not be revoked"}, http.StatusInternalServerError)
+	}
 }
 
 func (h *Handler) HandleGetInviteInfo(w http.ResponseWriter, r *http.Request) {
 	token := chi.URLParam(r, "token")
 	inv, ok := h.Store.GetInvite(token)
-	if !ok || inv.Revoked {
+	if !ok || inv.Revoked || inv.usedUp() {
 		h.writeJSON(w, map[string]string{"error": "invalid"}, http.StatusNotFound)
 		return
 	}
@@ -347,6 +370,10 @@ func (h *Handler) HandleRedeemInvite(w http.ResponseWriter, r *http.Request) {
 	inv, ok := h.Store.GetInvite(token)
 	if !ok || inv.Revoked {
 		h.writeJSON(w, map[string]string{"error": "invalid"}, http.StatusBadRequest)
+		return
+	}
+	if inv.usedUp() {
+		h.writeJSON(w, map[string]string{"error": "exhausted"}, http.StatusBadRequest)
 		return
 	}
 	// create member stub (pairwise from login context later)

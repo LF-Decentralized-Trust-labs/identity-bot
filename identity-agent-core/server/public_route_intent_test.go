@@ -47,6 +47,9 @@ func TestTheRoutesThatWereSilentlyUnreachableAreDeclared(t *testing.T) {
 		"POST /api/witness/event":                      "an app sending its own events to its witnesses",
 		"GET /api/witness/kel/{signer_aid}/tip":        "an app or a peer learning how far a witness holds a log",
 		"GET /api/witness/kel/{signer_aid}/event/{sn}": "an app or a peer reading a witness's copy of a log",
+		"POST /api/witness/endpoint":                   "publishing where an organisation can be reached",
+		"GET /api/witness/endpoint/{controller_aid}":   "finding an organisation that has moved",
+		"GET /api/witness/kel/{signer_aid}":            "reading back the key log a witness holds",
 	} {
 		if _, ok := everyPublicRoute()[route]; !ok {
 			t.Errorf("%s is not in publicRoutes, so %s does not work — "+

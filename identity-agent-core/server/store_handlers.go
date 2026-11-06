@@ -14,6 +14,8 @@ import (
 	"identity-agent-core/backup"
 	"identity-agent-core/drivers"
 	"identity-agent-core/store"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 // handleStoreReceipt accepts a pre-validated witness receipt and persists it.
@@ -57,9 +59,7 @@ func (s *CoreServer) handleStoreReceipt(w http.ResponseWriter, r *http.Request) 
 
 	log.Printf("[identity-agent-core] STORE: Receipt saved for event %s from witness %s", req.EventSAID, req.WitnessAID)
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]interface{}{"status": "saved"})
+	jsonreply.Write(w, http.StatusCreated, map[string]interface{}{"status": "saved"})
 }
 
 // handleGetStoreReceipts retrieves all stored witness receipts for an event SAID.
@@ -102,8 +102,7 @@ func (s *CoreServer) handleGetStoreReceipts(w http.ResponseWriter, r *http.Reque
 		})
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"event_said":    eventSAID,
 		"receipts":      entries,
 		"receipt_count": counted,
@@ -150,9 +149,7 @@ func (s *CoreServer) handleStoreCredential(w http.ResponseWriter, r *http.Reques
 	log.Printf("[identity-agent-core] STORE: Credential saved - SAID: %s issuer: %s", req.SAID, req.IssuerAID)
 	s.notifyBackupEvent(backup.EventCredential)
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]interface{}{"status": "saved", "said": req.SAID})
+	jsonreply.Write(w, http.StatusCreated, map[string]interface{}{"status": "saved", "said": req.SAID})
 }
 
 // receiptsAgainstItsLog counts the designated witnesses of eventSAID, in the

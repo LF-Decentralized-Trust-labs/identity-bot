@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"identity-agent-core/internal/jsonreply"
 	"identity-agent-core/messagingkeys"
 	"io"
 	"net/http"
@@ -77,11 +78,11 @@ func (s *CoreServer) handleMessagingSeed(w http.ResponseWriter, r *http.Request)
 				writeError(w, statusForUnreadable(err, http.StatusInternalServerError), "The messaging keys could not be kept", err.Error())
 				return
 			}
-			writeJSONResponse(w, map[string]any{"anchor": anchor, "filed": "pending"})
+			jsonreply.Write(w, http.StatusOK, map[string]any{"anchor": anchor, "filed": "pending"})
 			return
 		}
 		if held, _ := s.keySetAnchorHeld(own.AID, anchor); held {
-			writeJSONResponse(w, map[string]any{"anchor": anchor, "filed": "identity"})
+			jsonreply.Write(w, http.StatusOK, map[string]any{"anchor": anchor, "filed": "identity"})
 			return
 		}
 		// The log anchors these keys last and the identity holds others: a
@@ -93,7 +94,7 @@ func (s *CoreServer) handleMessagingSeed(w http.ResponseWriter, r *http.Request)
 				return
 			}
 			_ = s.forgetKeySet(pendingReplacementLabel(own.AID))
-			writeJSONResponse(w, map[string]any{"anchor": anchor, "filed": "identity"})
+			jsonreply.Write(w, http.StatusOK, map[string]any{"anchor": anchor, "filed": "identity"})
 			return
 		}
 		label, filed = own.AID, "identity"
@@ -107,7 +108,7 @@ func (s *CoreServer) handleMessagingSeed(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-	writeJSONResponse(w, map[string]any{"anchor": anchor, "filed": filed})
+	jsonreply.Write(w, http.StatusOK, map[string]any{"anchor": anchor, "filed": filed})
 }
 
 // keySetAnchorHeld reports whether the keyset filed under label is the one

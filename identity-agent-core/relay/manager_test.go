@@ -245,8 +245,8 @@ func TestAReconnectKeepsTheAddress(t *testing.T) {
 	if m.URL() != first {
 		t.Fatalf("the address moved on reconnect: %s then %s", first, m.URL())
 	}
-	if code, _ := get(t, rl.Caller(), "GET", m.URL()+"/oobi/"+e.aid, ""); code != 200 {
-		t.Fatalf("not reachable after reconnect: %d", code)
+	if code, body := get(t, rl.Caller(), "GET", m.URL()+"/oobi/"+e.aid, ""); code != 200 {
+		t.Fatalf("not reachable after reconnect: %d %q", code, body)
 	}
 }
 

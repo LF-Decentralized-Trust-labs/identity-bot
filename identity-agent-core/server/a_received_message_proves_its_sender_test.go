@@ -283,7 +283,7 @@ func TestARotationNeitherBreaksAnOldMessageNorLetsTheRetiredKeyVouch(t *testing.
 	_, key2 := signingPair(t, 42)
 	icp := map[string]interface{}{"v": "KERI10JSON", "t": "icp", "s": "0", "i": m.senderAID, "d": "Eicp", "k": []interface{}{key1}}
 	if err := m.receiver.DataStore.SaveContactKEL(store.ContactKELRecord{
-		AID: m.senderAID, KEL: []map[string]interface{}{icp}, KelVerified: true, CurrentPublicKey: key1,
+		AID: m.senderAID, KEL: withTheBytesItWasVerifiedBy(t, icp), KelVerified: true, CurrentPublicKey: key1,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +309,7 @@ func TestARotationNeitherBreaksAnOldMessageNorLetsTheRetiredKeyVouch(t *testing.
 	// The sender rotates to a second key.
 	rot := map[string]interface{}{"v": "KERI10JSON", "t": "rot", "s": "1", "i": m.senderAID, "d": "Erot", "k": []interface{}{key2}}
 	if err := m.receiver.DataStore.SaveContactKEL(store.ContactKELRecord{
-		AID: m.senderAID, KEL: []map[string]interface{}{icp, rot}, KelVerified: true, CurrentPublicKey: key2,
+		AID: m.senderAID, KEL: withTheBytesItWasVerifiedBy(t, icp, rot), KelVerified: true, CurrentPublicKey: key2,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -388,15 +388,7 @@ func TestAMessageNamingAnotherSenderIsRefused(t *testing.T) {
 
 // Recording refusals cannot fill the cache that stops replays, and one
 // sender's message ids do not stand in for another's.
-func resetRefusals(t *testing.T) {
-	t.Helper()
-	refusalsRecorded.Lock()
-	refusalsRecorded.m = map[string]*senderRefusals{}
-	refusalsRecorded.Unlock()
-}
-
 func TestRefusalsAreRecordedApartFromReplays(t *testing.T) {
-	resetRefusals(t)
 	m := newMessaging(t)
 	const second = "ESECOND"
 	ks, err := m.sender.keySetFor(second)
@@ -410,9 +402,9 @@ func TestRefusalsAreRecordedApartFromReplays(t *testing.T) {
 	_ = m.receiver.savePeers(peers)
 	didcommMu.Unlock()
 
-	didcommSeen.Lock()
-	before := len(didcommSeen.m)
-	didcommSeen.Unlock()
+	m.receiver.seen.mu.Lock()
+	before := len(m.receiver.seen.m)
+	m.receiver.seen.mu.Unlock()
 	expired := time.Now().Add(-time.Minute)
 	for i := 0; i < 20; i++ {
 		raw := m.sealed(t, m.senderAID, "expired-"+string(rune('a'+i)), "did:keri:"+m.senderAID, expired)
@@ -420,9 +412,9 @@ func TestRefusalsAreRecordedApartFromReplays(t *testing.T) {
 			t.Fatalf("an expired envelope was answered %d", code)
 		}
 	}
-	didcommSeen.Lock()
-	after := len(didcommSeen.m)
-	didcommSeen.Unlock()
+	m.receiver.seen.mu.Lock()
+	after := len(m.receiver.seen.m)
+	m.receiver.seen.mu.Unlock()
 	if after != before {
 		t.Fatalf("refused envelopes filled the replay cache: %d entries before, %d after", before, after)
 	}
@@ -469,7 +461,6 @@ func TestTrafficIsFiledUnderItsConversation(t *testing.T) {
 // up to its quota, then one row says the rest are not recorded until the
 // window ends, and another sender's refusals are still recorded.
 func TestOneSendersFloodOfRefusalsSilencesOnlyItself(t *testing.T) {
-	resetRefusals(t)
 	m := newMessaging(t)
 	const other = "EOTHERSENDER"
 	ks, err := m.sender.keySetFor(other)

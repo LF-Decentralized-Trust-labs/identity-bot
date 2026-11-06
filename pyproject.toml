@@ -14,6 +14,12 @@ dependencies = [
     "simplejson>=3.20.2",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "requests>=2.32",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]

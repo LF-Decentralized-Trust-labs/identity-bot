@@ -2,13 +2,12 @@ package iacrypto
 
 import (
 	"bytes"
-	"crypto/ecdsa"
 	"crypto/elliptic"
-	"crypto/rand"
-	"crypto/sha256"
 	"math/big"
 	"strings"
 	"testing"
+
+	"identity-agent-core/internal/testkeys"
 )
 
 // A machine's own key is secp256r1, and it has to be named the way the rest of
@@ -152,34 +151,22 @@ func TestAMachineNamesItselfTheWayKeripyDoes(t *testing.T) {
 // the right length, an identifier that round-trips. They are pinned here because
 // the next person to touch the verifier will not rediscover them.
 func TestWhatAMachineSignatureRefuses(t *testing.T) {
-	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key, err := testkeys.New()
 	if err != nil {
 		t.Fatal(err)
 	}
-	pub := elliptic.Marshal(elliptic.P256(), priv.PublicKey.X, priv.PublicKey.Y)
+	pub := key.Uncompressed()
 	verkey, err := MachineVerkeyForKey(pub)
 	if err != nil {
 		t.Fatal(err)
 	}
 	msg := []byte("this machine is asking to act for you")
-	sum := sha256.Sum256(msg)
 
 	// A signature in the low-s form, which is what any honest signer emits.
-	var r, s *big.Int
-	for {
-		r, s, err = ecdsa.Sign(rand.Reader, priv, sum[:])
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !isHighS(s) {
-			break
-		}
-		s = new(big.Int).Sub(elliptic.P256().Params().N, s)
-		break
+	sig, err := key.Sign(msg)
+	if err != nil {
+		t.Fatal(err)
 	}
-	sig := make([]byte, 64)
-	r.FillBytes(sig[:32])
-	s.FillBytes(sig[32:])
 	good, err := MachineSignatureQB64(pub, sig)
 	if err != nil {
 		t.Fatal(err)
@@ -193,9 +180,9 @@ func TestWhatAMachineSignatureRefuses(t *testing.T) {
 		// message has two valid signature strings. A request is remembered by its
 		// signature so it cannot be replayed — under the malleable form somebody
 		// who watched a request go past can negate s and spend it again.
-		neg := new(big.Int).Sub(elliptic.P256().Params().N, s)
+		neg := new(big.Int).Sub(elliptic.P256().Params().N, new(big.Int).SetBytes(sig[32:]))
 		other := make([]byte, 64)
-		r.FillBytes(other[:32])
+		copy(other[:32], sig[:32])
 		neg.FillBytes(other[32:])
 		// Encoded WITHOUT going through MachineSignatureQB64, because that
 		// normalises — which is the fix. An attacker replaying a request does not

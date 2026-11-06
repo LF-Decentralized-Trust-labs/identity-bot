@@ -355,7 +355,7 @@ func inceptionOver(publicKey, nextPublicKey string, data []json.RawMessage, witn
 	// in. An inception event is permanent, so an unverifiable observer in it is
 	// a mistake with no way back.
 	for i, w := range witnesses {
-		if len(w) != 44 || w[0] != 'B' {
+		if code, ok := iacrypto.Ed25519KeyCode(w); !ok || code != "B" {
 			return "", "", nil, fmt.Errorf("witness %d is %q, which is not a non-transferable "+
 				"identifier; its receipts could not be checked without resolving a key log", i, w)
 		}
@@ -787,7 +787,7 @@ func (e *Engine) Rotate(req drivers.RotationRequest) (*drivers.DriverRotationRes
 	// A witness being added must be nameable, for the same reason it must be at
 	// inception: what the event carries is the key its receipts verify against.
 	for i, w := range req.AddWitnesses {
-		if len(w) != 44 || w[0] != 'B' {
+		if code, ok := iacrypto.Ed25519KeyCode(w); !ok || code != "B" {
 			return nil, fmt.Errorf("witness %d being added is %q, which is not a "+
 				"non-transferable identifier; its receipts could not be checked", i, w)
 		}

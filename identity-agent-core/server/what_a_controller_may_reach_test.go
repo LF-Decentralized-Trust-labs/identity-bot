@@ -719,6 +719,9 @@ func TestAnOwnerWhoRotatesIsNotLockedOutOfTheirOwnMachine(t *testing.T) {
 	rotated := grantFor(61, GradeEnrolled)
 	if err := s.DataStore.SaveContactKEL(store.ContactKELRecord{
 		AID: "ETHEOWNER", KelVerified: true,
+		KEL: withTheBytesItWasVerifiedBy(t, map[string]interface{}{
+			"v": "KERI10JSON", "t": "icp", "s": "0", "i": "ETHEOWNER", "d": "ETHEOWNER",
+		}),
 		CurrentPublicKey: rotated.PublicKey,
 	}); err != nil {
 		t.Fatal(err)

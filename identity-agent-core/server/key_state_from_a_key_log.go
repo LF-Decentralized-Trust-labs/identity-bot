@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/internal/jsonreply"
 	"io"
 	"net/http"
 
@@ -78,7 +79,7 @@ func (s *CoreServer) handleKeyState(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, "The key log does not establish a key state", err.Error())
 		return
 	}
-	writeJSONResponse(w, state)
+	jsonreply.Write(w, http.StatusOK, state)
 }
 
 func keyStateMessages(req keyStateRequest) ([][]byte, error) {

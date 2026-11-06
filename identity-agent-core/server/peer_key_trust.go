@@ -24,13 +24,15 @@ func checkPeerKeys(did *didcomm.DID, kelEvents []map[string]interface{}, current
 }
 
 // storedKELEvents returns the key history recorded for an identifier, which is
-// what a freshly-run check wrote there.
+// what a freshly-run check wrote there. Only a log kept as verified counts (so
+// it is the rebuilt one, see store.ContactKELRecord): an unverified one is text
+// somebody served, and the keys are not tied to the identifier by it.
 func (s *CoreServer) storedKELEvents(aid string) []map[string]interface{} {
 	if s.DataStore == nil {
 		return nil
 	}
 	rec, err := s.DataStore.GetContactKEL(aid)
-	if err != nil || rec == nil {
+	if err != nil || rec == nil || !rec.KelVerified {
 		return nil
 	}
 	var out []map[string]interface{}

@@ -46,7 +46,7 @@ func (s *CoreServer) handleListOwners(w http.ResponseWriter, r *http.Request) {
 	for aid, v := range signed {
 		names[aid] = v.Name
 	}
-	writeJSONResponse(w, map[string]interface{}{
+	writeJSON(w, map[string]interface{}{
 		"aid":    identity.AID,
 		"owners": owners,
 		// Names only for owners whose name checks out; see verifiedOwnerNames.
@@ -66,10 +66,10 @@ func (s *CoreServer) handleGetCeremony(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if c == nil {
-		writeJSONResponse(w, map[string]interface{}{"ceremony": nil})
+		writeJSON(w, map[string]interface{}{"ceremony": nil})
 		return
 	}
-	writeJSONResponse(w, map[string]interface{}{
+	writeJSON(w, map[string]interface{}{
 		"ceremony":    c,
 		"outstanding": c.Outstanding(),
 	})
@@ -206,7 +206,7 @@ func (s *CoreServer) handleStartCeremony(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	writeJSONResponse(w, map[string]interface{}{
+	writeJSON(w, map[string]interface{}{
 		"ceremony": c,
 		"note": "each invited owner scans their own code. Nothing changes until " +
 			"every one of them has, and no key material leaves their device.",
@@ -237,7 +237,7 @@ func (s *CoreServer) handleAbandonCeremony(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "Could not record it", err.Error())
 		return
 	}
-	writeJSONResponse(w, map[string]interface{}{"status": ceremonyAbandoned})
+	writeJSON(w, map[string]interface{}{"status": ceremonyAbandoned})
 }
 
 // mintOwnerInvite produces one invite and the URL that becomes its QR code.
@@ -416,10 +416,10 @@ func (s *CoreServer) handleOwnerAuthority(w http.ResponseWriter, r *http.Request
 		// An answer, not a failure. An agent nobody has claimed is a real and
 		// ordinary state, and it is the state a screen most needs to tell apart
 		// from an error.
-		writeJSONResponse(w, map[string]interface{}{"owner": nil})
+		writeJSON(w, map[string]interface{}{"owner": nil})
 		return
 	}
-	writeJSONResponse(w, map[string]interface{}{
+	writeJSON(w, map[string]interface{}{
 		"owner": map[string]string{
 			"aid":        owner.AID,
 			"public_key": owner.PublicKey,

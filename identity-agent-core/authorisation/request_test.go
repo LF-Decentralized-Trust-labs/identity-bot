@@ -780,3 +780,25 @@ func TestAnAppGrantMustBeWhatWasAskedFor(t *testing.T) {
 		t.Fatal("a request to grant an app was accepted as the grant of an AI agent")
 	}
 }
+
+// A grant issued under the 1.1.0 version of the AI agent grant is still checked
+// against what was asked for, so a conversation bundle that holds one verifies.
+func TestAnOlderAIAgentGrantIsStillCheckedAgainstTheRequest(t *testing.T) {
+	w := newWorld(t)
+	older := func(req map[string]interface{}, capabilities []string) []byte {
+		attrs := map[string]interface{}{"asset_type": "ai_agent", "name": "Research assistant", "capabilities": capabilities, "request": req, "about": "agent-1"}
+		acdc, _ := w.build(schemas.AIAgentGrantV11.Schema.SAID, agentAID, time.Now().UTC(), attrs, w.edge())
+		return acdc
+	}
+	req := w.signs("PUT", "/api/mcp/agents/agent-1/capabilities", capBody, ago(time.Minute))
+	if err := w.check(older(req, []string{"system.info.read"})); err != nil {
+		t.Fatalf("a 1.1.0 grant that holds was refused: %v", err)
+	}
+	if err := w.check(older(req, []string{"system.info.read", "infra.zone.list"})); err == nil {
+		t.Fatal("a 1.1.0 grant with more than was asked for was accepted")
+	}
+	other := w.signs("PUT", "/api/mcp/agents/agent-2/capabilities", capBody, ago(time.Minute))
+	if err := w.check(older(other, []string{"system.info.read"})); err == nil {
+		t.Fatal("a 1.1.0 grant about another AI agent than the request named was accepted")
+	}
+}

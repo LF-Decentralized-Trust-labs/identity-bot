@@ -12,6 +12,7 @@ import 'signing_an_event.dart';
 import 'the_stored_event_this_phrase_would_have_made.dart';
 import 'the_witnesses_of_this_devices_events.dart' show WitnessSet;
 import '../crypto/keys.dart';
+import '../models/public_name_rule.dart';
 import 'browser_session_client.dart';
 import 'the_agent_this_app_talks_to.dart';
 import '../config/agent_config.dart';
@@ -1181,6 +1182,11 @@ class CoreService {
   /// and the relays and name configured.
   Future<Map<String, dynamic>> getReachability() =>
       _reachability('GET', '/api/settings/reachability');
+
+  /// The rule for a public name, as this core states it with the reachability
+  /// settings. Throws if the core does not state one.
+  Future<PublicNameRule> getPublicNameRule() async =>
+      PublicNameRule.fromJson((await getReachability())['public_name_rule']);
 
   /// Saves reachability and applies it at once: the relay is brought up again
   /// in the new mode, at the new relay or with the new name. The answer's
@@ -2979,12 +2985,13 @@ class ServiceProvidersListResponse {
 
 // ── Asset models (credential-gated access) ───────────────────────────────────
 
-// EnrollmentPolicy is the per-asset access gate. `mode` is enforced by OSS core
-// along with `requiredAal`; the credential-gating fields (`requiredCredSchema`
-// /`requiredCredIssuer`) authorize a sign-in only when the assertion presents a
-// valid, unrevoked ACDC of that schema (and, if set, issued by that AID).
-// `requiredBadge`/`requiredOfaScore` are stored+returned but enforced by the
-// commercial layer on top.
+// EnrollmentPolicy is the per-asset access gate. `mode` is enforced by OSS core;
+// the credential-gating fields (`requiredCredSchema`/`requiredCredIssuer`)
+// authorize a sign-in only when the assertion presents a valid, unrevoked ACDC
+// of that schema (and, if set, issued by that AID). The core cannot check
+// `requiredAal`, `requiredBadge` or `requiredOfaScore`: saving a policy that
+// sets any of them is refused (400 naming the gate), and a sign-in to an asset
+// that already carries one is refused.
 class EnrollmentPolicy {
   final String mode; // "open" | "request" | "invite"
   final int requiredAal; // NIST 800-63B level 1/2/3; 0 = not required

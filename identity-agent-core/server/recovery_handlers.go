@@ -22,6 +22,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"identity-agent-core/secureenclave"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 func (s *CoreServer) mountRecoveryRoutes(r chi.Router) {
@@ -179,8 +181,7 @@ func (s *CoreServer) handleRecoveryVerify(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusUnprocessableEntity, "Verify failed", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	jsonreply.Write(w, http.StatusOK, result)
 }
 
 func (s *CoreServer) handleRecoveryStart(w http.ResponseWriter, r *http.Request) {
@@ -202,9 +203,7 @@ func (s *CoreServer) handleRecoveryStart(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusUnprocessableEntity, "Start failed", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(sess)
+	jsonreply.Write(w, http.StatusCreated, sess)
 }
 
 func (s *CoreServer) handleRecoveryGetSession(w http.ResponseWriter, r *http.Request) {
@@ -214,8 +213,7 @@ func (s *CoreServer) handleRecoveryGetSession(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusNotFound, "Not found", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(sess)
+	jsonreply.Write(w, http.StatusOK, sess)
 }
 
 func (s *CoreServer) handleRecoveryRotation(w http.ResponseWriter, r *http.Request) {
@@ -283,8 +281,7 @@ func (s *CoreServer) handleRecoveryRotation(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"session":         sess,
 		"rotation_result": result,
 	})
@@ -326,8 +323,7 @@ func (s *CoreServer) handleRecoveryActivate(w http.ResponseWriter, r *http.Reque
 		}
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(sess)
+	jsonreply.Write(w, http.StatusOK, sess)
 }
 
 func (s *CoreServer) handleRecoveryRetrieve(w http.ResponseWriter, r *http.Request) {
@@ -341,8 +337,7 @@ func (s *CoreServer) handleRecoveryRetrieve(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "Retrieve failed", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	jsonreply.Write(w, http.StatusOK, resp)
 }
 
 func (s *CoreServer) handleRecoveryRootAIDRotation(w http.ResponseWriter, r *http.Request) {
@@ -437,8 +432,7 @@ func (s *CoreServer) handleRecoveryRootAIDRotation(w http.ResponseWriter, r *htt
 	// The run's end: its root map entry is written, so the old root is now a
 	// root moved on from and its witnesses are brought up to date for it.
 	s.inBackground(func(context.Context) { s.witnessOwnLog() })
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	jsonreply.Write(w, http.StatusOK, result)
 }
 
 // handleRecoveryRootAIDPrepare builds the three events of a break-glass root
@@ -681,8 +675,7 @@ func (s *CoreServer) handleRecoveryRootAIDStatus(w http.ResponseWriter, r *http.
 			resp["unfinished"] = unfinished
 		}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	jsonreply.Write(w, http.StatusOK, resp)
 }
 
 // maxRecoveryBody bounds what a recovery request can make this agent hold.
@@ -703,13 +696,11 @@ func (s *CoreServer) handleRecoveryCancel(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "Could not cancel this recovery", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(sess)
+	jsonreply.Write(w, http.StatusOK, sess)
 }
 
 func (s *CoreServer) handleGetDuressPolicy(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s.recoveryService().LoadDuressPolicy())
+	jsonreply.Write(w, http.StatusOK, s.recoveryService().LoadDuressPolicy())
 }
 
 // handlePutDuressPolicy records what an identity wants to happen when somebody
@@ -728,8 +719,7 @@ func (s *CoreServer) handlePutDuressPolicy(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "That setting would not work", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s.recoveryService().LoadDuressPolicy())
+	jsonreply.Write(w, http.StatusOK, s.recoveryService().LoadDuressPolicy())
 }
 
 // handleRecoveryListSessions answers what recoveries are in progress.
@@ -738,8 +728,7 @@ func (s *CoreServer) handlePutDuressPolicy(w http.ResponseWriter, r *http.Reques
 // restarting but not the screen closing is not something anybody can actually
 // wait out.
 func (s *CoreServer) handleRecoveryListSessions(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"sessions": s.recoveryService().InProgress(),
 	})
 }
@@ -796,8 +785,7 @@ func (s *CoreServer) handleAgreeToHold(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "This machine cannot hold that", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(agreed)
+	jsonreply.Write(w, http.StatusOK, agreed)
 }
 
 // handleWhatThisMachineHolds lists what somebody has taken on, without keys.
@@ -812,8 +800,7 @@ func (s *CoreServer) handleWhatThisMachineHolds(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, "Could not read what has been asked", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 		"holding": held,
 		"asked":   asked,
 	})
@@ -858,8 +845,7 @@ func (s *CoreServer) handleReleaseShare(w http.ResponseWriter, r *http.Request) 
 		writeShareRefusal(w, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"share_b64": backup.EncodeB64(share)})
+	jsonreply.Write(w, http.StatusOK, map[string]string{"share_b64": backup.EncodeB64(share)})
 }
 
 // handleStopHolding is somebody deciding they no longer want to hold a share.
@@ -883,8 +869,7 @@ func (s *CoreServer) handleStopHolding(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "That could not be given up", err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	jsonreply.Write(w, http.StatusOK, map[string]string{
 		"stopped_holding": req.HolderID,
 		"tell_them": "Every backup already sealed to this machine can no longer be opened " +
 			"by it. Whoever this was helping needs to take a fresh backup.",
@@ -954,9 +939,7 @@ func (s *CoreServer) handleApproveShare(w http.ResponseWriter, r *http.Request) 
 func writeShareRefusal(w http.ResponseWriter, err error) {
 	var held *recovery.ErrHeldForWait
 	if errors.As(err, &held) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusConflict)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		jsonreply.Write(w, http.StatusConflict, map[string]interface{}{
 			"error":         "This share is being held",
 			"detail":        err.Error(),
 			"release_after": held.Until.UTC().Format(time.RFC3339),

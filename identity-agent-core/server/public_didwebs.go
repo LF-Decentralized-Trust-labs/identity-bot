@@ -23,6 +23,8 @@ import (
 	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
 	"github.com/go-chi/chi/v5"
 	keri "github.com/grapeid/keri-go"
+
+	"identity-agent-core/internal/jsonreply"
 )
 
 // An Org/Identity Agent is a public entity for the AIDs it owns, so it serves their did.json
@@ -508,8 +510,7 @@ func (s *CoreServer) handleRegisterPairwise(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "refused: "+err.Error(), code)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+	jsonreply.Write(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // handleKeyFromKeyLog answers, for a verifier that cannot check a key log
@@ -528,13 +529,11 @@ func (s *CoreServer) handleKeyFromKeyLog(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	pub, err := login.KeyFromKeyLog(body.AID, body.KeyLog)
-	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
-		w.WriteHeader(http.StatusUnprocessableEntity)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		jsonreply.Write(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 		return
 	}
-	_ = json.NewEncoder(w).Encode(map[string]string{
+	jsonreply.Write(w, http.StatusOK, map[string]string{
 		"aid":            body.AID,
 		"public_key_b64": base64.RawURLEncoding.EncodeToString(pub),
 	})

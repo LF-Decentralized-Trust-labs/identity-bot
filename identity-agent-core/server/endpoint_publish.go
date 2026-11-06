@@ -2,13 +2,13 @@ package server
 
 import (
 	"context"
-	"crypto/ed25519"
-	"encoding/base64"
 	"fmt"
 	"log"
+	"sync"
+	"time"
 
 	"identity-agent-core/backup"
-	"identity-agent-core/drivers"
+	"identity-agent-core/endpointrecord"
 	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
 )
@@ -69,48 +69,57 @@ func (s *CoreServer) signingSeedForAID(aid string) ([]byte, error) {
 	return backup.DerivePairwiseSeed(root, match.RelationshipIndex, 0)
 }
 
-// PublishEndpointLocation signs a location record for one of this agent's
-// pairwise AIDs and sends it to that AID's witnesses.
+// lastIssued is when the last record for each identifier was issued from here,
+// so two changes inside one second still make two records, the second later.
+var (
+	lastIssuedMu sync.Mutex
+	lastIssued   = map[string]time.Time{}
+)
+
+func issueTimeFor(aid string) time.Time {
+	lastIssuedMu.Lock()
+	defer lastIssuedMu.Unlock()
+	now := time.Now().UTC().Truncate(time.Second)
+	if last, ok := lastIssued[aid]; ok && !now.After(last) {
+		now = last.Add(time.Second)
+	}
+	lastIssued[aid] = now
+	return now
+}
+
+// PublishEndpointLocation signs an endpoint record (endpointrecord) for one of
+// this agent's pairwise AIDs and sends it to that AID's witnesses.
 //
-// An empty url is meaningful and is passed through: it nullifies the location,
+// address is where the identity can be reached; only its origin is signed. An
+// empty address is meaningful and is passed through: it signs a withdrawal,
 // which is how an identity says "not here any more" rather than leaving a dead
 // address published behind it.
-func (s *CoreServer) PublishEndpointLocation(ctx context.Context, aid, url string) error {
-	if s.KeriDriver == nil {
-		return fmt.Errorf("KERI driver unavailable")
-	}
+func (s *CoreServer) PublishEndpointLocation(ctx context.Context, aid, address string) error {
 	if s.WitnessService == nil {
 		return fmt.Errorf("witness service unavailable — nowhere to publish")
+	}
+	origin := ""
+	if address != "" {
+		var err error
+		if origin, err = endpointrecord.OriginOf(address); err != nil {
+			return err
+		}
 	}
 
 	seed, err := s.signingSeedForAID(aid)
 	if err != nil {
 		return err
 	}
-
-	built, err := s.KeriDriver.EndpointLocation(&drivers.DriverEndpointLocationRequest{
-		EID: aid, URL: url, Scheme: "https",
-	})
+	record, err := endpointrecord.Sign(aid, origin, issueTimeFor(aid), seed)
 	if err != nil {
 		return err
 	}
-
-	raw, err := base64.StdEncoding.DecodeString(built.RawBytesB64)
-	if err != nil {
-		return fmt.Errorf("endpoint record was not decodable: %w", err)
-	}
-	sig := ed25519.Sign(ed25519.NewKeyFromSeed(seed), raw)
-
-	record := built.RpyEvent
-	if record == nil {
-		return fmt.Errorf("driver returned no record body")
-	}
-	// The signature travels beside the record rather than inside it: the SAID
-	// is computed over the body, so folding a signature in would change the
-	// thing being identified.
-	record["signature"] = secureenclave.EncodeSignature(sig)
-
-	return s.WitnessService.PublishEndpointRecord(ctx, aid, record)
+	// The signature is inside the record, over the rest of it, so what a
+	// witness stores and serves is exactly what was signed.
+	return s.WitnessService.PublishEndpointRecord(ctx, aid, map[string]interface{}{
+		"type": record.Type, "aid": record.AID, "origin": record.Origin,
+		"issued": record.Issued, "signature": record.Signature,
+	})
 }
 
 // onRelayEndpointChanged republishes an address when the relay reports it

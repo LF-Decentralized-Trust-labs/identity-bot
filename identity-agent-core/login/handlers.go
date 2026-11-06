@@ -16,6 +16,7 @@ import (
 	"identity-agent-core/backup"
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/jsonreply"
 	"identity-agent-core/secureenclave"
 
 	keri "github.com/grapeid/keri-go"
@@ -733,7 +734,7 @@ func (h *Handler) completeLogin(p *pendingLogin) (map[string]interface{}, error)
 func (h *Handler) HandleStart(w http.ResponseWriter, r *http.Request) {
 	var req StartLoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		jsonreply.Write(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -746,7 +747,7 @@ func (h *Handler) HandleStart(w http.ResponseWriter, r *http.Request) {
 				status = http.StatusUnauthorized
 			}
 		}
-		writeJSON(w, status, map[string]string{"error": err.Error()})
+		jsonreply.Write(w, status, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -754,7 +755,7 @@ func (h *Handler) HandleStart(w http.ResponseWriter, r *http.Request) {
 	if h.OnLoginPending != nil {
 		h.OnLoginPending(*preview)
 	}
-	writeJSON(w, http.StatusOK, preview)
+	jsonreply.Write(w, http.StatusOK, preview)
 }
 
 // HandlePreview returns login consent details without completing the flow.
@@ -766,7 +767,7 @@ func (h *Handler) HandlePreview(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleApprove(w http.ResponseWriter, r *http.Request) {
 	var req StartLoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		jsonreply.Write(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -775,36 +776,36 @@ func (h *Handler) HandleApprove(w http.ResponseWriter, r *http.Request) {
 		// Allow approve without prior start when mobile scans QR directly.
 		bundle, rel, preview, prepErr := h.prepareLogin(req)
 		if prepErr != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": prepErr.Error()})
+			jsonreply.Write(w, http.StatusBadRequest, map[string]string{"error": prepErr.Error()})
 			return
 		}
 		h.storePending(req, bundle, rel)
 		_ = preview
 		p, err = h.loadPending(req)
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			jsonreply.Write(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
 	}
 
 	result, err := h.completeLogin(p)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		jsonreply.Write(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	jsonreply.Write(w, http.StatusOK, result)
 }
 
 // HandleDecline rejects a pending login.
 func (h *Handler) HandleDecline(w http.ResponseWriter, r *http.Request) {
 	var req StartLoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		jsonreply.Write(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	key := req.SessionToken + "|" + req.RPSessionURL
 	h.Pending.Delete(key)
-	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "declined": true})
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{"ok": true, "declined": true})
 }
 
 // HandlePendingList returns queued login sessions awaiting consent.
@@ -827,13 +828,7 @@ func (h *Handler) HandlePendingList(w http.ResponseWriter, _ *http.Request) {
 			RPSessionURL:         p.RPSessionURL,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"pending": out})
-}
-
-func writeJSON(w http.ResponseWriter, status int, v interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	jsonreply.Write(w, http.StatusOK, map[string]interface{}{"pending": out})
 }
 
 func trimSlash(s string) string {

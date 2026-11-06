@@ -480,3 +480,17 @@ func TestImpossibleSettingsAreRefusedBeforeSaving(t *testing.T) {
 	}
 }
 
+
+// The reachability answer carries the rule for a public name, so a screen
+// applies the core's own rule rather than keeping a copy.
+func TestReachabilityTellsTheRuleForAPublicName(t *testing.T) {
+	s, _, _, cancel := relayWorld(t, relayproto.ModePublic)
+	defer cancel()
+	code, out := asOwner(t, s, "GET", "/api/settings/reachability", "")
+	rule, _ := out["public_name_rule"].(map[string]interface{})
+	if code != http.StatusOK || rule["pattern"] != relayproto.NamePattern || rule["forbids"] != relayproto.NameForbids ||
+		rule["min_length"] != float64(relayproto.NameMinLen) || rule["max_length"] != float64(relayproto.NameMaxLen) ||
+		rule["text"] != relayproto.NameRule {
+		t.Fatalf("the rule: %d %v", code, out)
+	}
+}

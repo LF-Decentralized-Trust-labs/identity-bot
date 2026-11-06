@@ -6,10 +6,10 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"identity-agent-core/childenv"
 	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/internal/jsonreply"
 	"identity-agent-core/permission"
 	"log"
 	"net"
@@ -160,9 +160,8 @@ func (s *CoreServer) handleLocalOwnerProof(w http.ResponseWriter, r *http.Reques
 			"ask with a fresh nonce of 16 to 128 characters")
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	jsonreply.Write(w, http.StatusOK, map[string]any{
 		"port":  s.Port,
 		"proof": LocalOwnerProof(s.localOwnerSecret, nonce, s.Port),
 	})

@@ -155,7 +155,7 @@ func theirOrganisation(t *testing.T, roster map[string]bool) *CoreServer {
 	}); err != nil {
 		t.Fatalf("seed asset: %v", err)
 	}
-	RegisterMembershipResolver("roster_e2e", rosterResolver{active: roster})
+	registerResolverForTest(t, "roster_e2e", rosterResolver{active: roster})
 
 	s := &CoreServer{challenges: map[string]login.ChallengeBundle{}}
 	s.assetHandler = ah

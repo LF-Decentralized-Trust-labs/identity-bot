@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -70,6 +71,7 @@ func startOwnerPeerServing(t *testing.T, aid string, serveKeyHistory bool) *owne
 		return wkey, sig, err
 	}
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	ownerPeerKeys.Store(aid, iacrypto.NonTransferableAIDQB64(pub))
 	seed := priv.Seed()
 	svc.SignAsRequester = func(statement string) (string, error) { return login.SignString(statement, seed) }
 
@@ -79,11 +81,11 @@ func startOwnerPeerServing(t *testing.T, aid string, serveKeyHistory bool) *owne
 		t.Skipf("root seed unavailable: %v", err)
 	}
 	engine := &driverfake.Engine{
-		ValidateKELFunc: func(string, []map[string]interface{}) (*drivers.DriverValidateKELResponse, error) {
-			return &drivers.DriverValidateKELResponse{KelVerified: true}, nil
+		ValidateKELFunc: func(aid string, _ []map[string]interface{}) (*drivers.DriverValidateKELResponse, error) {
+			return &drivers.DriverValidateKELResponse{KelVerified: true, CurrentPublicKey: ownerPeerKey(aid)}, nil
 		},
-		ValidateKELBytesFunc: func(drivers.ValidateKELInput) (*drivers.DriverValidateKELResponse, error) {
-			return &drivers.DriverValidateKELResponse{KelVerified: true}, nil
+		ValidateKELBytesFunc: func(in drivers.ValidateKELInput) (*drivers.DriverValidateKELResponse, error) {
+			return &drivers.DriverValidateKELResponse{KelVerified: true, CurrentPublicKey: ownerPeerKey(in.AID)}, nil
 		},
 		CreateInceptionNamedFunc: func(_, _, name string) (*drivers.DriverInceptionResponse, error) {
 			return &drivers.DriverInceptionResponse{AID: "ERel" + name}, nil
@@ -102,7 +104,9 @@ func startOwnerPeerServing(t *testing.T, aid string, serveKeyHistory bool) *owne
 			"backend_type": witness.BackendDesktop, "witness_key": wkey, "entity_type": "individual",
 		}
 		if serveKeyHistory {
-			doc["kel"] = []map[string]any{{"t": "icp", "d": aid, "i": aid, "s": "0"}}
+			// With the bytes it is checked by: a log without them is not kept as verified.
+			kel := withTheBytesItWasVerifiedBy(t, map[string]interface{}{"t": "icp", "d": aid, "i": aid, "s": "0"})
+			doc["kel"] = kel
 		}
 		json.NewEncoder(w).Encode(doc)
 	})
@@ -119,6 +123,16 @@ func startOwnerPeerServing(t *testing.T, aid string, serveKeyHistory bool) *owne
 	svc.OurAID = func() string { return aid }
 	svc.OurOOBI = func() string { return p.base + "/public/oobi/" + aid }
 	return p
+}
+
+// The key each fake peer's checked history ends on: a log is verified with a
+// key, or it is not verified.
+var ownerPeerKeys sync.Map
+
+func ownerPeerKey(aid string) string {
+	k, _ := ownerPeerKeys.Load(aid)
+	key, _ := k.(string)
+	return key
 }
 
 func (p *ownerPeer) oobi() string { return p.base + "/public/oobi/" + p.aid }
