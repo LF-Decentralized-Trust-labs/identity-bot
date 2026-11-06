@@ -6,6 +6,7 @@ import (
 
 	"identity-agent-core/didcomm"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/login"
 )
 
 // anchoringKeys is an event at sn anchoring ks's keyset, the founding (icp at
@@ -89,6 +90,19 @@ func TestAnAnchorWithNoSigningKeysTiesNoSigningKeys(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "no signing keys") {
 		t.Fatalf("signing keys tied to nothing were accepted: %v", err)
 	}
+	// Signed by the identity's current key, they are tied after all.
+	seed, verkey := signingPair(t, 31)
+	vouched := didOf(t, ks)
+	vouched.KelSig, _ = login.SignString(string(vouched.SigningInput()), seed)
+	if _, err := checkPeerKeys(vouched, log, verkey); err != nil {
+		t.Fatalf("signing keys the identity signed for were refused: %v", err)
+	}
+	// And offering no signing keys takes nothing untied.
+	encryptionOnly := didOf(t, ks)
+	encryptionOnly.Ed, encryptionOnly.Dsa = "", ""
+	if _, err := checkPeerKeys(encryptionOnly, log, ""); err != nil {
+		t.Fatalf("the committed encryption keys alone were refused: %v", err)
+	}
 }
 
 // The one walk, as both the key check and the core's own messaging keyset
@@ -106,5 +120,17 @@ func TestTheKeysetInForceIsTheLastAnchored(t *testing.T) {
 	}
 	if _, err := iacrypto.KeySetInForce(log[2:]); err != iacrypto.ErrNotAnchored {
 		t.Fatalf("a log anchoring no keyset answered %v", err)
+	}
+	// A rotation can anchor the replacement as well as an interaction can.
+	other, err := didcomm.GenerateKeySet("EWALK")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotated := append(log, anchoringKeys(t, "EWALK", other, "rot", "3"))
+	if _, err := checkPeerKeys(didOf(t, other), rotated, ""); err != nil {
+		t.Fatalf("a keyset a rotation anchored was refused: %v", err)
+	}
+	if _, err := checkPeerKeys(didOf(t, ks), rotated, ""); err == nil {
+		t.Fatal("the keyset a rotation replaced was still accepted")
 	}
 }

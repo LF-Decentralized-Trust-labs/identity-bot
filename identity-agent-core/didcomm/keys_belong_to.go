@@ -67,14 +67,16 @@ func CheckKeysBelongTo(did *DID, kelEvents []map[string]interface{}, currentKey 
 				return KeysUntied, fmt.Errorf("the keys offered for %s are not the ones that "+
 					"identifier commits to: %w", did.AID, merr)
 			}
-			// The signing keys too, which every keyset anchor carries.
+			// The signing keys too, where the anchor commits to them.
 			//
 			// Confidentiality and authenticity are separate halves of the same
 			// keyset, and checking only the first accepts a set whose signing
-			// keys belong to somebody else. An anchor that commits to agreement
-			// keys and no signing keys is not one this software makes
-			// (iacrypto.KeySetAnchor), so any signing keys served beside it
-			// are tied to nothing, and the set is refused.
+			// keys belong to somebody else. A keyset anchor commits to both
+			// (iacrypto.KeySetAnchor); one that commits to encryption keys
+			// alone (a hybrid inception's, built only for tests) ties no
+			// signing key, so signing keys offered beside it count only where
+			// the identity's current key signed them, and are refused
+			// otherwise. Offering none is fine: then nothing untied is taken.
 			ed, dsa, serr := iacrypto.AnchoredSigningKeys(anchoring)
 			switch {
 			case serr == nil:
@@ -83,8 +85,10 @@ func CheckKeysBelongTo(did *DID, kelEvents []map[string]interface{}, currentKey 
 						"the ones that identifier commits to: %w", did.AID, merr)
 				}
 			case isNotAnchored(serr):
-				return KeysUntied, fmt.Errorf("%s commits to encryption keys and no signing "+
-					"keys, so the signing keys offered are tied to nothing", did.AID)
+				if (did.Ed != "" || did.Dsa != "") && vouchedBy(did, currentKey) != nil {
+					return KeysUntied, fmt.Errorf("%s commits to encryption keys and no signing "+
+						"keys, and the signing keys offered are not signed by it", did.AID)
+				}
 			default:
 				return KeysUntied, fmt.Errorf("this identifier's committed signing keys "+
 					"are unusable: %w", serr)
@@ -103,19 +107,31 @@ func CheckKeysBelongTo(did *DID, kelEvents []map[string]interface{}, currentKey 
 		return KeysUntied, fmt.Errorf("%s neither commits to these keys nor signs for them, "+
 			"so nothing connects them to that identity", did.AID)
 	}
+	if err := vouchedBy(did, currentKey); err != nil {
+		return KeysUntied, err
+	}
+	return KeysVouched, nil
+}
+
+// vouchedBy reports, as an error naming why not, whether the identity's current
+// signing key signed the keys did offers.
+func vouchedBy(did *DID, currentKey string) error {
+	if did.KelSig == "" {
+		return fmt.Errorf("the keys offered for %s are not signed by that identity", did.AID)
+	}
 	if currentKey == "" {
-		return KeysUntied, fmt.Errorf("there is no verified signing key for %s to check "+
+		return fmt.Errorf("there is no verified signing key for %s to check "+
 			"the signature against", did.AID)
 	}
 	pub, err := login.DecodeVerkey(currentKey)
 	if err != nil {
-		return KeysUntied, fmt.Errorf("the signing key on file for %s cannot be read: %w", did.AID, err)
+		return fmt.Errorf("the signing key on file for %s cannot be read: %w", did.AID, err)
 	}
 	ok, verr := login.VerifyString(string(did.SigningInput()), did.KelSig, pub)
 	if verr != nil || !ok {
-		return KeysUntied, fmt.Errorf("the keys offered for %s are not signed by that identity", did.AID)
+		return fmt.Errorf("the keys offered for %s are not signed by that identity", did.AID)
 	}
-	return KeysVouched, nil
+	return nil
 }
 
 func isNotAnchored(err error) bool {

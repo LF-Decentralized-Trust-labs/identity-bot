@@ -634,12 +634,14 @@ func ALogMovesForward(held, offered []map[string]interface{}) error {
 
 // recoversFrom reports whether offered, which agrees with the held log before
 // position at, replaces the held events from there (heldFrom) by a recovery:
-// every one of them an interaction, and a rotation in their place.
+// every one of them an interaction, and a rotation in their place. A delegated
+// rotation (drt) is not taken: its recovery needs the delegator's approval,
+// which nothing here checks.
 func recoversFrom(heldFrom, offered []map[string]interface{}, at int) bool {
 	if at >= len(offered) {
 		return false
 	}
-	if _, ilk := saidAndIlkOfRecord(offered[at]); ilk != "rot" && ilk != "drt" {
+	if _, ilk := saidAndIlkOfRecord(offered[at]); ilk != "rot" {
 		return false
 	}
 	for _, h := range heldFrom {

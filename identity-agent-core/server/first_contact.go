@@ -128,7 +128,7 @@ func (s *CoreServer) identifyStranger(claimedAID string, kel []map[string]interf
 	if !ok {
 		return nil, "", fmt.Errorf("the presented key history does not carry the bytes it would be checked by")
 	}
-	icp, err := eventFromKELEntry(fromBytes[0])
+	icp, err := keySetEventOf(fromBytes)
 	if err != nil {
 		return nil, "", err
 	}
@@ -393,7 +393,7 @@ func (s *CoreServer) registerPeerFromVerifiedHistory(aid, oobiURL string) error 
 		return fmt.Errorf("the stored key history for %s cannot be read", aid)
 	}
 
-	icp, err := eventFromKELEntry(kel[0])
+	icp, err := keySetEventOf(kel)
 	if err != nil {
 		return err
 	}
@@ -446,6 +446,31 @@ func (s *CoreServer) registerPeerFromVerifiedHistory(aid, oobiURL string) error 
 // genuinely commits to nothing.
 //
 // Accepts either shape, because a history built in memory is already the event.
+// keySetEventOf is the event of a verified key history, entries as kept or
+// presented, that anchors the keyset in force: the last to anchor one
+// (iacrypto.KeySetInForce). Not the founding: after a move to a new recovery
+// phrase the founding's keys derive from a phrase that may have leaked, and
+// whoever holds it could otherwise present the identity's genuine log and be
+// taken for it. When none anchors a keyset, the founding is answered, and its
+// missing anchor is what the caller refuses.
+func keySetEventOf(kel []map[string]interface{}) (map[string]interface{}, error) {
+	events := make([]map[string]interface{}, 0, len(kel))
+	for _, entry := range kel {
+		ev, err := eventFromKELEntry(entry)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, ev)
+	}
+	if len(events) == 0 {
+		return eventFromKELEntry(nil)
+	}
+	if ev, err := iacrypto.KeySetInForce(events); err == nil {
+		return ev, nil
+	}
+	return events[0], nil
+}
+
 func eventFromKELEntry(entry map[string]interface{}) (map[string]interface{}, error) {
 	if entry == nil {
 		return nil, fmt.Errorf("the key history has no first event")
