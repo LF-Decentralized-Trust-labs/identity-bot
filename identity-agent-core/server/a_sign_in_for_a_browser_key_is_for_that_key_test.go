@@ -152,3 +152,23 @@ func TestAnAddOnStartsASignInForABrowserKeyAndReadsItsResultWithTheSecret(t *tes
 		t.Fatalf("a malformed key: %v", err)
 	}
 }
+
+// A person who was let in and is removed from the roster is no longer admitted
+// when asked again.
+func TestAPersonRemovedFromTheRosterIsNoLongerAdmitted(t *testing.T) {
+	w := anOrganisationWithAWebsite(t, asset.EnrollmentPolicy{Mode: asset.EnrollmentOpen})
+	if ok, err := w.org.assetStillAdmits("the-website", "Epat"); err != nil || !ok {
+		t.Fatalf("an open asset: %v %v", ok, err)
+	}
+	a, _, _ := w.org.assetHandler.Store.GetAsset("the-website")
+	a.Policy.Mode = asset.EnrollmentInvite
+	if err := w.org.assetHandler.Store.UpsertAsset(a); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := w.org.assetStillAdmits("the-website", "Epat"); err != nil || ok {
+		t.Fatalf("a person on no roster of a closed asset: %v %v", ok, err)
+	}
+	if ok, _ := w.org.assetStillAdmits("no-such-asset", "Epat"); ok {
+		t.Fatal("an unknown asset admitted someone")
+	}
+}

@@ -78,6 +78,9 @@ func (h hostWrapper) GetPublicURL(r *http.Request) string { return h.s.getPublic
 func (h hostWrapper) StartBrowserKeySignIn(assetID, audience, browserKey, publicURL string) (BrowserKeySignIn, error) {
 	return h.s.startBrowserKeySignIn(assetID, audience, browserKey, publicURL)
 }
+func (h hostWrapper) AssetStillAdmits(assetID, pairwiseAID string) (bool, error) {
+	return h.s.assetStillAdmits(assetID, pairwiseAID)
+}
 func (h hostWrapper) BrowserKeySignInResult(session, collector string) (BrowserKeySignInResult, error) {
 	return h.s.browserKeySignInResult(session, collector)
 }

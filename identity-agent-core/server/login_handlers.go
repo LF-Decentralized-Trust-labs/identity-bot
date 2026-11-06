@@ -350,31 +350,8 @@ func (s *CoreServer) authorizeAssetAccess(ctx context.Context, siteAID, pairwise
 		if a.PairwiseAID != siteAID {
 			continue
 		}
-		// Enrollment mode gate. A non-default MembershipSource is resolved by a
-		// registered MembershipResolver (org overlays register e.g. "employees");
-		// the default ("" / "asset") checks this asset's own member list. An
-		// unrecognized source with no resolver fails closed.
-		if a.Policy.Mode != asset.EnrollmentOpen {
-			if src := a.Policy.MembershipSource; src != "" && src != "asset" {
-				r := membershipResolverFor(src)
-				if r == nil {
-					return false, "no membership resolver for source: " + src
-				}
-				if ok, reason := r.Admit(pairwiseAID, a.ID); !ok {
-					return false, reason
-				}
-			} else {
-				member := false
-				for _, m := range s.assetHandler.Store.ListMembers(a.ID) {
-					if m.PairwiseAID == pairwiseAID {
-						member = true
-						break
-					}
-				}
-				if !member {
-					return false, "not a member of this asset"
-				}
-			}
+		if ok, reason := s.admitsMember(a, pairwiseAID); !ok {
+			return false, reason
 		}
 		// Credential gate (additive).
 		if a.Policy.RequiredCredSchema != "" {
@@ -392,6 +369,40 @@ func (s *CoreServer) authorizeAssetAccess(ctx context.Context, siteAID, pairwise
 		return true, ""
 	}
 	return false, "asset not found"
+}
+
+// admitsMember is the enrolment-mode gate of an asset's policy: whether the
+// pairwise identifier is one the asset's policy lets in, by membership. It is
+// the part of authorizeAssetAccess that does not depend on what a person
+// presented, so it can be asked again later of someone already signed in.
+func (s *CoreServer) admitsMember(a asset.Asset, pairwiseAID string) (bool, string) {
+	// Enrollment mode gate. A non-default MembershipSource is resolved by a
+	// registered MembershipResolver (org overlays register e.g. "employees");
+	// the default ("" / "asset") checks this asset's own member list. An
+	// unrecognized source with no resolver fails closed.
+	if a.Policy.Mode != asset.EnrollmentOpen {
+		if src := a.Policy.MembershipSource; src != "" && src != "asset" {
+			r := membershipResolverFor(src)
+			if r == nil {
+				return false, "no membership resolver for source: " + src
+			}
+			if ok, reason := r.Admit(pairwiseAID, a.ID); !ok {
+				return false, reason
+			}
+		} else {
+			member := false
+			for _, m := range s.assetHandler.Store.ListMembers(a.ID) {
+				if m.PairwiseAID == pairwiseAID {
+					member = true
+					break
+				}
+			}
+			if !member {
+				return false, "not a member of this asset"
+			}
+		}
+	}
+	return true, ""
 }
 
 // credentialGateSatisfied returns true if the presented ACDCs include one that

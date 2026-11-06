@@ -107,6 +107,10 @@ type Host interface {
 	// releases its result. The person's Identity Agent answers it at the
 	// core's own routes.
 	StartBrowserKeySignIn(assetID, audience, browserKey, publicURL string) (server.BrowserKeySignIn, error)
+	// AssetStillAdmits is whether the asset's enrolment policy lets in the
+	// person known to it as pairwiseAID now: the membership check the sign-in
+	// made, asked again, so a person removed since can be signed out.
+	AssetStillAdmits(assetID, pairwiseAID string) (bool, error)
 	// BrowserKeySignInResult is how that sign-in stands, given the session and
 	// secret StartBrowserKeySignIn returned. "Verified" carries the browser key
 	// the person's signed assertion repeated.

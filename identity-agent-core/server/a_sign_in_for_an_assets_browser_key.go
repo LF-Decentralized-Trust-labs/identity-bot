@@ -101,3 +101,23 @@ func (s *CoreServer) browserKeySignInResult(session, collector string) (BrowserK
 	}
 	return BrowserKeySignInResult{State: "pending"}, nil
 }
+
+// assetStillAdmits says whether the asset's enrolment policy lets this person
+// (by the identifier they signed in with) in now: the same membership gate the
+// callback applied when they signed in, asked again, so someone removed from
+// the roster since is no longer admitted. An error means the asset could not be
+// read, which is not an answer either way.
+func (s *CoreServer) assetStillAdmits(assetID, pairwiseAID string) (bool, error) {
+	if s.assetHandler == nil {
+		return false, errors.New("the assets are not open")
+	}
+	a, found, err := s.assetHandler.Store.GetAsset(assetID)
+	if err != nil {
+		return false, err
+	}
+	if !found || pairwiseAID == "" {
+		return false, nil
+	}
+	ok, _ := s.admitsMember(a, pairwiseAID)
+	return ok, nil
+}
