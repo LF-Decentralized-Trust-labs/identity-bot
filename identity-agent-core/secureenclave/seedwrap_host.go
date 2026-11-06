@@ -2,8 +2,12 @@ package secureenclave
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
 	"fmt"
 	"sync"
+	"time"
 )
 
 // A seed wrapper that the app supplies, for the platform where the hardware
@@ -11,40 +15,89 @@ import (
 //
 // Android's Keystore is a Java API. Go has no path to it, which is why the app
 // reports what the Keystore can do (capability_android.go) and why the key that
-// wraps the seed has to be driven from the app as well. The core still decides
-// what the answer means:
+// protects the seed has to live in the app's process as well. The core still
+// decides what the answer means, and it does not take the app's word for where
+// the key is:
 //
-//   - the host's wrapper counts as hardware protection ONLY while the key
-//     protection the app declared is proven usable, so an app cannot make a
-//     software keystore look like StrongBox or a TEE by registering a wrapper;
-//   - its scheme cannot be "none" or the sealed-volume scheme, either of which
-//     would make the envelope claim a protection that is not the Keystore;
+//   - the app hands over the key's ATTESTATION CHAIN, and the core checks it
+//     back to Google's root (android_key_attestation.go). The hardware that
+//     holds the key signed a statement of where it lives; "StrongBox" or "TEE"
+//     is read out of that, never declared by the app. The scheme recorded in
+//     the envelope comes from it too;
+//   - the core does the WRAPPING ITSELF, to the public key the attestation
+//     proves belongs to that hardware, and the app only decrypts inside the
+//     hardware. An app that attested a real StrongBox key and wrapped under a
+//     software key of its own would otherwise pass every check above; here the
+//     seed is encrypted to the attested key, and storeSeedAs's round-trip check
+//     then proves the hardware holds the private half;
+//   - the wrapper counts as hardware protection ONLY while the key protection
+//     the app declared is proven usable;
 //   - whatever it returns is checked by storeSeedAs like any other wrapper: the
 //     seed is not in the output, and the output opens back to the seed.
+//
+// WHY RSA AND NOT AES. Android attests only asymmetric keys, so an AES key
+// cannot say where it lives. The seed is wrapped as a hybrid: a random data key
+// seals it with AES-256-GCM, and the data key is sealed with RSA-OAEP under the
+// attested key. The blob is
+//
+//	0x01 | u16 length of the sealed data key | sealed data key | 12-byte nonce | GCM output
+//
+// with the label seedWrapAAD as additional data.
+//
+// WHY OAEP WITH SHA-256 AND A SHA-1 MASK (seedwrap_oaep.go). The Android
+// Keystore masks with SHA-1 before API 34 whatever the Java spec says, and
+// StrongBox is guaranteed only SHA-256 as a digest, so this is the one pairing
+// that works in StrongBox and on every phone this app installs on.
 //
 // Same shape as DeclareHardwareKeyProtection: the app registers before the
 // server starts, and an app that registers nothing has no wrapper, said plainly.
 
-// SeedWrapHost is what an app implements to wrap the root seed under a key it
-// holds in the platform's hardware. On Android: an AES-256-GCM key in the
-// Keystore, in StrongBox where the phone has it and in the TEE otherwise, never
-// exportable, with no user-authentication requirement because the agent runs
-// without a person present.
+// SeedWrapAttestationChallenge is what the app must put in the key's attestation
+// request. It names the purpose, so a chain made for something else is refused.
+//
+// It is a FIXED string, so it does not prove the attestation is fresh: a chain
+// recorded earlier for the same key passes just as well. That is fine here,
+// because freshness is not what is relied on. Proof that the hardware holds the
+// private half right now comes from storeSeedAs's round trip: the core seals to
+// the attested public key, the app must decrypt that inside the hardware, and
+// the seed is stored only when what comes back opens to the seed. (Why no
+// revocation, app-identity or boot-state check is needed either: see
+// seedWrapKeyPolicy.)
+const SeedWrapAttestationChallenge = "identity-agent-seed-wrap-v1"
+
+const seedWrapAAD = "identity-agent-seed-wrap/v1"
+
+// SeedWrapHost is what an app implements to hold the key that protects the root
+// seed in the platform's hardware. On Android: a 2048-bit RSA key in the
+// Keystore, generated in StrongBox where the phone has it and in the TEE
+// otherwise, never exportable, with no user-authentication requirement because
+// the agent runs without a person present, generated with the attestation
+// challenge SeedWrapAttestationChallenge.
 type SeedWrapHost interface {
 	// Available reports whether the key exists or can be made, right now.
 	Available() bool
-	// Scheme names the wrap format and which hardware held the key, for example
-	// "android-keystore-strongbox-aes256gcm" or "android-keystore-tee-aes256gcm".
-	// It is recorded in the envelope, and it is how a seed made on one kind of
-	// hardware is recognised as such later.
-	Scheme() string
-	Wrap(plain []byte) ([]byte, error)
-	Unwrap(blob []byte) ([]byte, error)
+	// AttestationChain is the key's attestation certificate chain, leaf first,
+	// each certificate's DER preceded by its length as 4 bytes big-endian (see
+	// JoinAttestationChain). Empty when the key cannot be attested.
+	AttestationChain() []byte
+	// UnwrapKey decrypts a data key that was RSA-OAEP (SHA-256, SHA-1 mask) encrypted to the
+	// key's public half, inside the hardware.
+	UnwrapKey(wrapped []byte) ([]byte, error)
 }
 
 var (
 	seedWrapHostMu sync.RWMutex
 	seedWrapHost   SeedWrapHost
+
+	// attestationRoots and attestationClock are what the check is made against.
+	// Tests replace them; nothing else does.
+	attestationRoots = googleAttestationRoots
+	attestationClock = time.Now
+
+	// verifiedLevel is the level the last SUCCESSFUL check found. The scheme
+	// recorded with a seed comes from it, never from a second read of the app's
+	// chain, which the app could change between the check and the label.
+	verifiedLevel string
 )
 
 // DeclareSeedWrapHost registers the app's wrapper. Called through mobilecore
@@ -52,6 +105,7 @@ var (
 func DeclareSeedWrapHost(h SeedWrapHost) {
 	seedWrapHostMu.Lock()
 	seedWrapHost = h
+	verifiedLevel = ""
 	seedWrapHostMu.Unlock()
 }
 
@@ -74,33 +128,159 @@ func declaredHostSeedWrapper() SeedWrapper {
 	return hostedSeedWrapper{host: h}
 }
 
-func (w hostedSeedWrapper) Scheme() string { return w.host.Scheme() }
-
-func (w hostedSeedWrapper) schemeIsHonest() bool {
-	s := w.host.Scheme()
-	return s != "" && s != seedWrapNone && s != SealedVolumeScheme
+// attested is what the attestation proves about the key, or why it proves
+// nothing. Checked afresh each time: it is a signature check and a parse, and a
+// cached answer is one more thing to go stale.
+func (w hostedSeedWrapper) attested() (*AndroidKeyFacts, error) {
+	chain := w.host.AttestationChain()
+	if len(chain) == 0 {
+		return nil, notAttested("the app supplied no attestation chain")
+	}
+	f, err := verifyAndroidKeyAttestation(chain, []byte(SeedWrapAttestationChallenge), attestationClock(), attestationRoots)
+	if err != nil {
+		return nil, err
+	}
+	if err := seedWrapKeyPolicy(f); err != nil {
+		return nil, err
+	}
+	seedWrapHostMu.Lock()
+	verifiedLevel = f.LevelName()
+	seedWrapHostMu.Unlock()
+	return f, nil
 }
 
-// Available is true only when the app says its key works AND the app has proven
-// the phone's key protection usable. The second half is the core's own check on
-// the first: a wrapper cannot be hardware on a phone whose hardware the app
-// itself did not prove.
+// Scheme says which hardware holds the key: the level the last successful check
+// of the attestation found. Wrap and Available run that check, and storeSeedAs
+// asks for the scheme only after one of them has, so the label on a stored seed
+// is always one that was verified.
+//
+// When no check has succeeded in this process (a stored seed being opened before
+// anything was stored), it reads the level out of the chain WITHOUT checking it.
+// That reading only helps a stored seed find the wrapper that opens it, and
+// opensScheme below accepts any level there, so a chain that can no longer be
+// verified or read cannot make a stored seed unreadable.
+func (w hostedSeedWrapper) Scheme() string {
+	seedWrapHostMu.RLock()
+	level := verifiedLevel
+	seedWrapHostMu.RUnlock()
+	if level == "" {
+		level = "unattested"
+		if chain, err := splitChain(w.host.AttestationChain()); err == nil {
+			if f, err := readKeyDescription(chain[0]); err == nil {
+				level = f.LevelName()
+			}
+		}
+	}
+	return hostedSchemePrefix + level + hostedSchemeSuffix
+}
+
+const (
+	hostedSchemePrefix = "android-keystore-"
+	hostedSchemeSuffix = "-rsa2048oaep-aes256gcm"
+)
+
+// opensScheme: this wrapper opens any seed it wrote, whichever hardware level
+// its label names. The hardware itself decides whether it can decrypt.
+func (w hostedSeedWrapper) opensScheme(scheme string) bool {
+	return len(scheme) > len(hostedSchemePrefix)+len(hostedSchemeSuffix) &&
+		scheme[:len(hostedSchemePrefix)] == hostedSchemePrefix &&
+		scheme[len(scheme)-len(hostedSchemeSuffix):] == hostedSchemeSuffix
+}
+
+// Available is true only when the app says its key works, the app has proven
+// the phone's key protection usable, AND the key's attestation proves it was
+// generated in a TEE or StrongBox and suits the seed.
 func (w hostedSeedWrapper) Available() bool {
-	return w.schemeIsHonest() && detectCapability().RootKeyPermitted() && w.host.Available()
+	if !detectCapability().RootKeyPermitted() || !w.host.Available() {
+		return false
+	}
+	_, err := w.attested()
+	return err == nil
+}
+
+// WhyUnavailable says why the attestation was not accepted, for the report.
+func (w hostedSeedWrapper) whyNotAttested() string {
+	if _, err := w.attested(); err != nil {
+		return err.Error()
+	}
+	return ""
 }
 
 func (w hostedSeedWrapper) Wrap(plain []byte) ([]byte, error) {
-	if !w.Available() {
+	if !detectCapability().RootKeyPermitted() || !w.host.Available() {
 		return nil, fmt.Errorf("the app's seed wrapper is not usable")
 	}
-	return w.host.Wrap(plain)
+	f, err := w.attested()
+	if err != nil {
+		return nil, err
+	}
+	dek := make([]byte, 32)
+	if _, err := rand.Read(dek); err != nil {
+		return nil, err
+	}
+	sealedKey, err := oaepEncryptSHA256MGF1SHA1(f.PublicKey, dek)
+	if err != nil {
+		return nil, fmt.Errorf("seal the data key to the attested key: %w", err)
+	}
+	if len(sealedKey) > 0xFFFF {
+		return nil, fmt.Errorf("sealed data key too long")
+	}
+	gcm, err := newSeedGCM(dek)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, err
+	}
+	out := []byte{seedWrapFormat, byte(len(sealedKey) >> 8), byte(len(sealedKey))}
+	out = append(out, sealedKey...)
+	out = append(out, nonce...)
+	return gcm.Seal(out, nonce, plain, []byte(seedWrapAAD)), nil
 }
 
+// Unwrap does not re-verify the attestation: a seed that was written under a
+// checked key must stay readable if Google reissues its roots, and the
+// hardware's own refusal to decrypt for a key it does not hold is the check
+// that matters here.
 func (w hostedSeedWrapper) Unwrap(blob []byte) ([]byte, error) {
-	if w.host == nil || !w.schemeIsHonest() {
+	if w.host == nil {
 		return nil, fmt.Errorf("the app's seed wrapper is not usable")
 	}
-	return w.host.Unwrap(blob)
+	if len(blob) < 3 || blob[0] != seedWrapFormat {
+		return nil, fmt.Errorf("not a seed wrapped by an app's Keystore key")
+	}
+	n := int(blob[1])<<8 | int(blob[2])
+	if len(blob) < 3+n+12+16 {
+		return nil, fmt.Errorf("the wrapped seed is cut off")
+	}
+	sealedKey, rest := blob[3:3+n], blob[3+n:]
+	dek, err := w.host.UnwrapKey(sealedKey)
+	if err != nil {
+		return nil, fmt.Errorf("the hardware key would not open the data key: %w", err)
+	}
+	gcm, err := newSeedGCM(dek)
+	if err != nil {
+		return nil, err
+	}
+	plain, err := gcm.Open(nil, rest[:gcm.NonceSize()], rest[gcm.NonceSize():], []byte(seedWrapAAD))
+	if err != nil {
+		return nil, fmt.Errorf("the wrapped seed did not authenticate: %w", err)
+	}
+	return plain, nil
+}
+
+const seedWrapFormat = 1
+
+func newSeedGCM(key []byte) (cipher.AEAD, error) {
+	if len(key) != 32 {
+		return nil, fmt.Errorf("the data key is %d bytes, not 32", len(key))
+	}
+	b, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	return cipher.NewGCM(b)
 }
 
 // noSeedWrapHostWhy is the reason when the app registered no seed wrapper. It is

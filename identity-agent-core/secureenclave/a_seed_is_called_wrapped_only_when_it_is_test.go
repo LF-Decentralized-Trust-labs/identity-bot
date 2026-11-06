@@ -2,24 +2,52 @@ package secureenclave
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
 	"errors"
 	"os"
+	"strings"
 	"testing"
+	"time"
 )
 
-// hostFor stands the app's Keystore wrapper: a real AES-GCM wrap under a key the
-// test holds, which is what a Keystore key does from the core's side.
-type hostFor struct {
-	*fakeWrapper
-	scheme string
+// theAppsKeystore stands the app's Keystore key: an RSA key the test holds, whose
+// attestation chain is built by builtChain (a root the test pins in place of
+// Google's), and which decrypts the way the hardware would.
+type theAppsKeystore struct {
+	works       bool
+	chain       []byte
+	decryptWith *rsa.PrivateKey
 }
 
-func (h hostFor) Scheme() string { return h.scheme }
+func (h *theAppsKeystore) Available() bool          { return h.works }
+func (h *theAppsKeystore) AttestationChain() []byte { return h.chain }
+func (h *theAppsKeystore) UnwrapKey(w []byte) ([]byte, error) {
+	return oaepDecryptSHA256MGF1SHA1(h.decryptWith, w)
+}
 
-func theApp(t *testing.T, scheme string, works bool) {
+// theApp registers an app whose key is attested as spec says, and makes the test
+// trust the test root in place of Google's.
+func theApp(t *testing.T, spec chainSpec, works bool) *theAppsKeystore {
 	t.Helper()
-	DeclareSeedWrapHost(hostFor{&fakeWrapper{key: bytes.Repeat([]byte{7}, 32), available: works}, scheme})
-	t.Cleanup(func() { DeclareSeedWrapHost(nil) })
+	k, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec.leafKey = &k.PublicKey
+	chain, root := builtChain(t, spec)
+	pinned := attestationRoots
+	attestationRoots = [][sha256.Size]byte{root}
+	h := &theAppsKeystore{works: works, chain: chain, decryptWith: k}
+	DeclareSeedWrapHost(h)
+	t.Cleanup(func() { DeclareSeedWrapHost(nil); attestationRoots = pinned })
+	return h
+}
+
+func aKeyIn(level int) chainSpec {
+	return chainSpec{level: level, challenge: SeedWrapAttestationChallenge, purposes: []int{kmPurposeDecrypt},
+		noAuth: true, created: time.Now().Add(-time.Hour)}
 }
 
 func usablePhone(t *testing.T, c Capability) {
@@ -28,31 +56,39 @@ func usablePhone(t *testing.T, c Capability) {
 	t.Cleanup(r)
 }
 
-// The app's wrapper is used, the envelope says hardware-wrapped under the app's
-// scheme, and the file holds no seed.
+// The app's key protects the seed, the envelope says which hardware as the
+// attestation says it, and the file holds no seed. This is the round trip: the
+// core encrypts to the attested key, the "hardware" decrypts.
 func TestAnAppsKeystoreWrapperProtectsTheSeed(t *testing.T) {
-	usablePhone(t, Capability{Status: Usable, Kind: "android_strongbox"})
-	theApp(t, "android-keystore-strongbox-aes256gcm", true)
-	r := UseSeedWrapper(declaredHostSeedWrapper())
-	defer r()
+	for level, scheme := range map[int]string{
+		attestStrongBox:          "android-keystore-strongbox-rsa2048oaep-aes256gcm",
+		attestTrustedEnvironment: "android-keystore-tee-rsa2048oaep-aes256gcm",
+	} {
+		t.Run(scheme, func(t *testing.T) {
+			usablePhone(t, Capability{Status: Usable, Kind: "android_strongbox"})
+			theApp(t, aKeyIn(level), true)
+			r := UseSeedWrapper(declaredHostSeedWrapper())
+			defer r()
 
-	dir := t.TempDir()
-	if err := StoreDeviceLocalSeed(dir, theSeed()); err != nil {
-		t.Fatal(err)
-	}
-	p, scheme, _, err := RootSeedProtection(dir)
-	if err != nil || p != ProtectionHardwareWrapped || scheme != "android-keystore-strongbox-aes256gcm" {
-		t.Fatalf("envelope says %q/%q (%v)", p, scheme, err)
-	}
-	raw, _ := os.ReadFile(rootSeedPath(dir))
-	if bytes.Contains(raw, theSeed()) {
-		t.Fatal("the wrapped seed file contains the seed")
-	}
-	if got, err := LoadRootSeed(dir); err != nil || !bytes.Equal(got, theSeed()) {
-		t.Fatalf("round trip: %v", err)
-	}
-	if !SeedWrapAvailable() || SeedWrapScheme() != scheme {
-		t.Fatalf("the route would report %v/%q", SeedWrapAvailable(), SeedWrapScheme())
+			dir := t.TempDir()
+			if err := StoreDeviceLocalSeed(dir, theSeed()); err != nil {
+				t.Fatal(err)
+			}
+			p, got, _, err := RootSeedProtection(dir)
+			if err != nil || p != ProtectionHardwareWrapped || got != scheme {
+				t.Fatalf("envelope says %q/%q (%v)", p, got, err)
+			}
+			raw, _ := os.ReadFile(rootSeedPath(dir))
+			if bytes.Contains(raw, theSeed()) {
+				t.Fatal("the wrapped seed file contains the seed")
+			}
+			if got, err := LoadRootSeed(dir); err != nil || !bytes.Equal(got, theSeed()) {
+				t.Fatalf("round trip: %v", err)
+			}
+			if !SeedWrapAvailable() || SeedWrapScheme() != scheme {
+				t.Fatalf("the route would report %v/%q", SeedWrapAvailable(), SeedWrapScheme())
+			}
+		})
 	}
 }
 
@@ -66,7 +102,7 @@ func TestAnAppWrapperDoesNotCountWhereTheHardwareWasNotProven(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			usablePhone(t, c)
-			theApp(t, "android-keystore-tee-aes256gcm", true)
+			theApp(t, aKeyIn(attestTrustedEnvironment), true)
 			r := UseSeedWrapper(declaredHostSeedWrapper())
 			defer r()
 			if SeedWrapAvailable() || SeedWrapScheme() != "none" {
@@ -82,21 +118,150 @@ func TestAnAppWrapperDoesNotCountWhereTheHardwareWasNotProven(t *testing.T) {
 	}
 }
 
-// A scheme that would make the envelope claim something the Keystore did not do.
-func TestAnAppWrapperCannotNameItselfNoneOrTheSealedVolume(t *testing.T) {
-	usablePhone(t, Capability{Status: Usable, Kind: KindAndroidTEE})
-	for _, scheme := range []string{"", "none", SealedVolumeScheme} {
-		theApp(t, scheme, true)
-		if w := declaredHostSeedWrapper(); w.Available() {
-			t.Fatalf("scheme %q accepted", scheme)
+// THE POINT OF THE CHECK: an app cannot simply declare StrongBox. Every way it
+// could try to makes the wrapper unavailable, and nothing is written.
+func TestAnAppCannotDeclareHardwareItsKeyDoesNotProve(t *testing.T) {
+	usablePhone(t, Capability{Status: Usable, Kind: "android_strongbox"})
+	for name, c := range map[string]struct {
+		spec  func() chainSpec
+		chain func(h *theAppsKeystore) []byte
+		why   string
+	}{
+		"no attestation at all": {spec: func() chainSpec { return aKeyIn(attestStrongBox) },
+			chain: func(*theAppsKeystore) []byte { return nil }, why: "no attestation chain"},
+		"a key held in software": {spec: func() chainSpec { return aKeyIn(attestSoftware) }, why: "software"},
+		"a chain for another purpose": {spec: func() chainSpec {
+			s := aKeyIn(attestStrongBox)
+			s.challenge = "challenge"
+			return s
+		}, why: "challenge"},
+		"an imported key": {spec: func() chainSpec {
+			s := aKeyIn(attestStrongBox)
+			s.imported = true
+			return s
+		}, why: "imported"},
+		"a key that needs a person": {spec: func() chainSpec {
+			s := aKeyIn(attestStrongBox)
+			s.noAuth = false
+			return s
+		}, why: "authenticate"},
+		"a chain nobody trusts": {spec: func() chainSpec { return aKeyIn(attestStrongBox) },
+			chain: func(h *theAppsKeystore) []byte {
+				other, _ := builtChain(t, chainSpec{level: attestStrongBox, challenge: SeedWrapAttestationChallenge,
+					purposes: []int{kmPurposeDecrypt}, noAuth: true, created: time.Now().Add(-time.Hour), leafKey: &h.decryptWith.PublicKey})
+				return other
+			}, why: "Google attestation root"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := theApp(t, c.spec(), true)
+			if c.chain != nil {
+				h.chain = c.chain(h)
+			}
+			w := declaredHostSeedWrapper()
+			if w.Available() {
+				t.Fatal("an unproven key was available")
+			}
+			if _, err := w.Wrap(theSeed()); err == nil {
+				t.Fatal("wrapped under a key that proves nothing")
+			}
+			if why := whyNotWrapped(); !strings.Contains(why, c.why) {
+				// whyNotWrapped goes through platformSeedWrapper.
+				r := UseSeedWrapper(w)
+				why = whyNotWrapped()
+				r()
+				if !strings.Contains(why, c.why) {
+					t.Fatalf("the refusal does not say why (%q)", why)
+				}
+			}
+			r := UseSeedWrapper(w)
+			defer r()
+			dir := t.TempDir()
+			if err := StoreDeviceLocalSeed(dir, theSeed()); err == nil {
+				if p, _, _, _ := RootSeedProtection(dir); p == ProtectionHardwareWrapped {
+					t.Fatal("recorded as hardware-wrapped")
+				}
+			}
+		})
+	}
+}
+
+// An app that attests a REAL hardware key and then decrypts with a different,
+// software one: the core encrypted to the attested key, so the software key
+// cannot open it and the store is refused with nothing written.
+func TestAnAppThatAttestsOneKeyAndHoldsAnotherStoresNothing(t *testing.T) {
+	usablePhone(t, Capability{Status: Usable, Kind: "android_strongbox"})
+	h := theApp(t, aKeyIn(attestStrongBox), true)
+	h.decryptWith = softwareRSA(t)
+	r := UseSeedWrapper(declaredHostSeedWrapper())
+	defer r()
+	dir := t.TempDir()
+	if err := StoreDeviceLocalSeed(dir, theSeed()); err == nil {
+		t.Fatal("stored")
+	}
+	if _, err := os.Stat(rootSeedPath(dir)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("a seed file exists after the refusal")
+	}
+}
+
+// A seed written under a checked key stays readable when the attestation can no
+// longer be checked (Google reissues its roots, the chain's certificates expire).
+func TestAStoredSeedStaysReadableWhenTheChainCanNoLongerBeChecked(t *testing.T) {
+	usablePhone(t, Capability{Status: Usable, Kind: "android_strongbox"})
+	theApp(t, aKeyIn(attestStrongBox), true)
+	r := UseSeedWrapper(declaredHostSeedWrapper())
+	defer r()
+	dir := t.TempDir()
+	if err := StoreDeviceLocalSeed(dir, theSeed()); err != nil {
+		t.Fatal(err)
+	}
+	attestationRoots = nil // the build no longer trusts what signed the chain
+	if declaredHostSeedWrapper().Available() {
+		t.Fatal("still available")
+	}
+	if got, err := LoadRootSeed(dir); err != nil || !bytes.Equal(got, theSeed()) {
+		t.Fatalf("the seed became unreadable: %v", err)
+	}
+}
+
+// A blob the hardware did not make, or one that was altered, is not opened.
+func TestAHostWrapBlobThatWasTamperedWithIsNotOpened(t *testing.T) {
+	usablePhone(t, Capability{Status: Usable, Kind: "android_strongbox"})
+	theApp(t, aKeyIn(attestTrustedEnvironment), true)
+	w := declaredHostSeedWrapper()
+	blob, err := w.Wrap(theSeed())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, at := range []int{0, 1, 3, 40, len(blob) - 1} {
+		bad := bytes.Clone(blob)
+		bad[at] ^= 1
+		if got, err := w.Unwrap(bad); err == nil && bytes.Equal(got, theSeed()) {
+			t.Fatalf("a blob altered at byte %d still opened", at)
 		}
 	}
+	for _, b := range [][]byte{nil, {1}, {1, 0xff, 0xff}, blob[:10]} {
+		if _, err := w.Unwrap(b); err == nil {
+			t.Fatalf("opened %d bytes", len(b))
+		}
+	}
+	if a, b := mustWrap(t, w), mustWrap(t, w); bytes.Equal(a, b) {
+		t.Fatal("two wraps of one seed were identical")
+	}
+}
+
+func mustWrap(t *testing.T, w SeedWrapper) []byte {
+	t.Helper()
+	b, err := w.Wrap(theSeed())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }
 
 // A wrapper that works but whose key cannot be used right now is not available.
 func TestAnAppWrapperThatSaysItCannotWorkIsNotAvailable(t *testing.T) {
 	usablePhone(t, Capability{Status: Usable, Kind: KindAndroidTEE})
-	theApp(t, "android-keystore-tee-aes256gcm", false)
+	theApp(t, aKeyIn(attestTrustedEnvironment), false)
 	if declaredHostSeedWrapper().Available() {
 		t.Fatal("available")
 	}
@@ -181,5 +346,43 @@ func TestTheTPMWrapFrameRoundTripsAndRefusesTheMalformed(t *testing.T) {
 		if _, _, err := unpackTPMWrap(b); err == nil {
 			t.Errorf("%s accepted", name)
 		}
+	}
+}
+
+// A seed stays readable when the app can no longer hand over its chain at all
+// (a failed Keystore call, a changed key's metadata) and in a new process, where
+// nothing has been verified yet. The label names the level that was verified.
+func TestAStoredSeedOpensWhenTheChainCannotBeReadAtAll(t *testing.T) {
+	usablePhone(t, Capability{Status: Usable, Kind: "android_strongbox"})
+	h := theApp(t, aKeyIn(attestStrongBox), true)
+	r := UseSeedWrapper(declaredHostSeedWrapper())
+	defer r()
+	dir := t.TempDir()
+	if err := StoreDeviceLocalSeed(dir, theSeed()); err != nil {
+		t.Fatal(err)
+	}
+	h.chain = nil
+	DeclareSeedWrapHost(h) // a new process: nothing verified yet
+	if got, err := LoadRootSeed(dir); err != nil || !bytes.Equal(got, theSeed()) {
+		t.Fatalf("the seed became unreadable: %v", err)
+	}
+}
+
+// The label is the level the CHECK found, not whatever the app's chain says by
+// the time the label is read.
+func TestTheStoredSchemeIsTheVerifiedLevelNotASecondReading(t *testing.T) {
+	usablePhone(t, Capability{Status: Usable, Kind: KindAndroidTEE})
+	h := theApp(t, aKeyIn(attestTrustedEnvironment), true)
+	w := declaredHostSeedWrapper()
+	if _, err := w.Wrap(theSeed()); err != nil {
+		t.Fatal(err)
+	}
+	// The app now offers a chain that claims StrongBox.
+	lie := aKeyIn(attestStrongBox)
+	lie.leafKey = &h.decryptWith.PublicKey
+	other, _ := builtChain(t, lie)
+	h.chain = other
+	if got := w.Scheme(); got != "android-keystore-tee-rsa2048oaep-aes256gcm" {
+		t.Fatalf("the label followed the app's second chain: %s", got)
 	}
 }
