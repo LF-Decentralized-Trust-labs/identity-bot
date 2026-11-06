@@ -91,6 +91,9 @@ func TestAForkedKeyLogIsNotKept(t *testing.T) {
 		t.Fatal(err)
 	}
 	caughtUp := s.issuanceLogForVerification(cred, held).issuerKel
+	// That check kept the caught-up log, and a held log only moves forward, so
+	// the held one cannot be put back in this store: start from a fresh one.
+	s = agentWithNoIdentity(t)
 	if len(caughtUp) <= len(held) {
 		t.Fatal("setup: the check did not catch up")
 	}
@@ -103,7 +106,7 @@ func TestAForkedKeyLogIsNotKept(t *testing.T) {
 	altered["raw_bytes_b64"] = "AAAA" + altered["raw_bytes_b64"].(string)
 	fork[len(held)-1] = altered
 
-	// Put the held log back, then offer the fork.
+	// Hold the shorter log, then offer the fork.
 	if err := s.DataStore.SaveContactKEL(storeRecord(w.c.aid, held)); err != nil {
 		t.Fatal(err)
 	}
