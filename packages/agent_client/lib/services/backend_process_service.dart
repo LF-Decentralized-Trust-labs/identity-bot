@@ -122,6 +122,10 @@ class BackendProcessService {
     }
   }
 
+  /// Where this app's bundled core binary is, or null where there is none.
+  /// The same binary the app starts as its backend, and runs as `keymath`.
+  String? bundledCoreBinary() => _findBackendBinary();
+
   String? _findBackendBinary() {
     final exePath = Platform.resolvedExecutable;
     final exeDir = File(exePath).parent.path;

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'backend_process_service.dart';
 import 'core_service.dart';
+import 'key_math.dart';
 import '../config/agent_config.dart';
 import 'the_owner_at_this_computer.dart';
 
@@ -13,6 +14,39 @@ class MobileCoreService {
   /// Every request to the core goes through the one transport, which carries
   /// the secret this app started the core with.
   static final http.Client _http = ProvingThisComputer();
+
+  /// One keymath operation through the core linked into this app
+  /// (`mobilecore.KeyMath`): [request] is the operation's JSON, and the answer
+  /// is the JSON the core returned, unchanged.
+  ///
+  /// The app's native side answers the channel method `keyMath` with
+  /// `{op, request}`, off the main thread, logging neither, and fails it with
+  /// code `keymath_refused` and the core's reason as the message when the core
+  /// refuses: that is a [KeyMathRefused], carrying the message alone. Anything
+  /// else (no handler, another failure, no answer) is a [KeyMathUnavailable],
+  /// never mistaken for a verdict on the request.
+  ///
+  /// [invoke] stands in for the channel in a test.
+  static Future<String> keyMath(String op, String request,
+      {Future<String?> Function(String method, Object? arguments)?
+          invoke}) async {
+    final String? answer;
+    try {
+      answer = await (invoke ?? _channel.invokeMethod<String>)(
+          'keyMath', {'op': op, 'request': request});
+    } on PlatformException catch (e) {
+      if (e.code == 'keymath_refused') {
+        throw KeyMathRefused(op, e.message ?? 'refused');
+      }
+      throw KeyMathUnavailable(op, 'the app\'s bridge failed (${e.code})');
+    } on MissingPluginException {
+      throw KeyMathUnavailable(op, 'this app has no keyMath bridge to its core');
+    }
+    if (answer == null) {
+      throw KeyMathUnavailable(op, 'this app\'s core answered nothing');
+    }
+    return answer;
+  }
 
   int _port = defaultPort;
   bool _started = false;
