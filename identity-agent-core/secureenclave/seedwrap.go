@@ -26,13 +26,16 @@ import (
 //     seam later). The hardware key never leaves its element; the seed file alone
 //     is useless off-device.
 //
-//     CORRECTED 2026-08-31: that is the intent and it is not what happens. Only
-//     darwin arm64 with cgo has a wrapper at all, and on macOS it cannot persist
-//     its key because a nested helper binary carries no keychain entitlement —
-//     so the seed is stored in the clear on every target but iOS, and the file
-//     alone is exactly as useful off-device as the seed. Reported rather than
-//     refused, because writing the wrappers is our work and not a fault in
-//     anybody's hardware; announceIfStoredInTheClear below is what says so.
+//     CORRECTED 2026-08-31, AND CLOSED SINCE: until then only darwin arm64 with
+//     cgo had a wrapper, and on macOS it could not persist its key, so the seed
+//     was stored in the clear on every target but iOS. Now each supported
+//     target has one behind this seam: iOS (keychain-held Secure Enclave key,
+//     seedwrap_ios.go), macOS (Secure Enclave key blob we hold ourselves,
+//     seedwrap_darwin_sep.go), Windows (TPM RSA key via the Platform Crypto
+//     Provider, seedwrap_windows.go) and Android (the app's StrongBox/TEE
+//     Keystore key, seedwrap_host.go). A target without one, or a machine whose
+//     hardware does not work, says so: announceIfStoredInTheClear below is what
+//     reports a seed that could have been protected and was not.
 //  2. Hardware is a device-local confidentiality layer, NEVER part of recovery.
 //     The seed is included (plaintext, inside the encrypted payload) in backup
 //     archives, so recovery = mnemonic -> open archive -> reseat seed on the new
@@ -248,6 +251,13 @@ func storeSeedAs(dataDir string, seed []byte, w SeedWrapper, requireWrap bool, h
 		blob, err := w.Wrap(toStore)
 		if err != nil {
 			return fmt.Errorf("wrap root seed (%s): %w", w.Scheme(), err)
+		}
+		// A wrapper that hands the seed back inside its output has protected
+		// nothing, and recording it as hardware-wrapped would be the false
+		// statement this layer exists to stop. Refused with nothing written.
+		if len(blob) == 0 || wrapLeaksTheSeed(w.Scheme(), blob, toStore) {
+			return fmt.Errorf("the %s wrapper returned the seed in the clear, "+
+				"so it is not recorded as wrapped", w.Scheme())
 		}
 		// Never trust a wrap we can't open: verify the round trip before the
 		// wrapped form becomes the only copy on disk.

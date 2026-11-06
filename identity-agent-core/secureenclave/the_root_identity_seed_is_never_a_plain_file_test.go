@@ -11,8 +11,8 @@ type fakeWrap struct{ works bool }
 
 func (f fakeWrap) Available() bool               { return f.works }
 func (fakeWrap) Scheme() string                  { return "fake" }
-func (fakeWrap) Wrap(p []byte) ([]byte, error)   { return append([]byte("w"), p...), nil }
-func (fakeWrap) Unwrap(b []byte) ([]byte, error) { return b[1:], nil }
+func (fakeWrap) Wrap(p []byte) ([]byte, error)   { return xorFake(p), nil }
+func (fakeWrap) Unwrap(b []byte) ([]byte, error) { return xorFake(b), nil }
 
 func machine(t *testing.T, c Capability, wrapperWorks bool) {
 	t.Helper()
@@ -100,4 +100,14 @@ func TestDeviceLocalSeedMayStillBeStoredUnwrapped(t *testing.T) {
 	if _, err := EnsureRootSeed(dir); err != nil {
 		t.Fatalf("a device-local seed must not be refused: %v", err)
 	}
+}
+
+// xorFake is a stand-in that really changes the bytes, so a test seed is never
+// sitting in the clear inside its own "wrapped" form.
+func xorFake(p []byte) []byte {
+	out := make([]byte, len(p))
+	for i, b := range p {
+		out[i] = b ^ 0xA5
+	}
+	return out
 }

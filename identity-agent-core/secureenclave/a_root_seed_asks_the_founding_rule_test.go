@@ -35,8 +35,8 @@ type fakeWorkingWrapper struct{}
 
 func (fakeWorkingWrapper) Available() bool                 { return true }
 func (fakeWorkingWrapper) Scheme() string                  { return "fake-se" }
-func (fakeWorkingWrapper) Wrap(p []byte) ([]byte, error)   { return append([]byte("w"), p...), nil }
-func (fakeWorkingWrapper) Unwrap(b []byte) ([]byte, error) { return b[1:], nil }
+func (fakeWorkingWrapper) Wrap(p []byte) ([]byte, error)   { return xorFake(p), nil }
+func (fakeWorkingWrapper) Unwrap(b []byte) ([]byte, error) { return xorFake(b), nil }
 
 // A production Mac has a usable enclave and a working wrapper, and still may not
 // hold a person's root seed: it is refused by the rule founding uses.

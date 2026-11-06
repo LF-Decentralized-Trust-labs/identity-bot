@@ -9,8 +9,10 @@ import (
 	"identity-agent-core/secureenclave"
 )
 
-// Wrapper is a SeedWrapper that reverses the bytes. It is not security; it makes
-// a wrapped envelope visibly different from a plain one.
+// Wrapper is a SeedWrapper that XORs the bytes. It is not security; it makes a
+// wrapped envelope visibly different from a plain one, even for a seed of one
+// repeated byte (a reversal would leave that unchanged, and the core refuses a
+// wrapper whose output contains the seed).
 type Wrapper struct{ Works bool }
 
 func (w Wrapper) Available() bool { return w.Works }
@@ -18,7 +20,7 @@ func (Wrapper) Scheme() string    { return "test-wrap" }
 func (Wrapper) Wrap(p []byte) ([]byte, error) {
 	out := make([]byte, len(p))
 	for i, b := range p {
-		out[len(p)-1-i] = b
+		out[i] = b ^ 0xA5
 	}
 	return out, nil
 }
