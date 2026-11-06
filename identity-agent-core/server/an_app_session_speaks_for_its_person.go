@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/internal/jsonreply"
 	"identity-agent-core/login"
@@ -101,8 +103,14 @@ func (s *CoreServer) OpenAppSession(appID, tokenHash, x, y string, person corety
 	if raw, err := base64.RawURLEncoding.Strict().DecodeString(tokenHash); err != nil || len(raw) != 32 {
 		return "", errors.New("an app session is opened with the SHA-256 of its token")
 	}
+	if person.Standing == "owner" {
+		return "", errors.New("an app session never speaks as the owner")
+	}
 	if !expires.After(time.Now()) {
 		return "", errors.New("an app session is opened for a time to come")
+	}
+	if len(s.originsOfApp(appID)) == 0 {
+		return "", errors.New("an app session is for an app asset this Identity Agent hosts")
 	}
 	pub, tp, err := login.BrowserKeyFromJWK(x, y)
 	if err != nil {
@@ -113,6 +121,17 @@ func (s *CoreServer) OpenAppSession(appID, tokenHash, x, y string, person corety
 	defer b.mu.Unlock()
 	if b.sessions == nil {
 		b.sessions = map[string]*AppSession{}
+	}
+	// Sessions that have ended are dropped here, so ones never looked up again
+	// do not accumulate.
+	now := time.Now()
+	for k, v := range b.sessions {
+		if !now.Before(v.Expires) {
+			delete(b.sessions, k)
+		}
+	}
+	if _, taken := b.sessions[tokenHash]; taken {
+		return "", errors.New("an app session already exists for this token")
 	}
 	b.sessions[tokenHash] = &AppSession{AppID: appID, Person: person, Thumbprint: tp, Expires: expires, key: pub}
 	return tp, nil
@@ -212,17 +231,18 @@ func (s *CoreServer) anAppListsThisOrigin(origin string) bool {
 	return false
 }
 
-// isATalkPath says a path is one of the talk routes', whatever its method, for
-// the CORS preflight, which carries neither a session nor a route match.
-func isATalkPath(p string) bool {
-	parts := strings.Split(strings.Trim(p, "/"), "/")
-	switch len(parts) {
-	case 4: // api/mcp/conversations/{cid}
-		return parts[0] == "api" && parts[1] == "mcp" && parts[2] == "conversations" && parts[3] != ""
-	case 5: // api/mcp/agents/{id}/conversations
-		return parts[0] == "api" && parts[1] == "mcp" && parts[2] == "agents" && parts[3] != "" && parts[4] == "conversations"
+// isATalkRequest says the router would serve this request on one of the talk
+// routes, by the route pattern it matches and the method as the gate keys it
+// (talkRoutes), so a path spelled to look like one never matches. A CORS
+// preflight carries the method it asks about in Access-Control-Request-Method.
+func isATalkRequest(routes chi.Routes, r *http.Request) bool {
+	method := r.Method
+	if method == http.MethodOptions {
+		method = r.Header.Get("Access-Control-Request-Method")
 	}
-	return false
+	probe := r.Clone(r.Context())
+	probe.Method = method
+	return talkRoutes[method+" "+matchedRoutePattern(routes, probe)]
 }
 
 // anAppSessionSpeaks admits a request from an app session onto a talk route.
@@ -286,7 +306,7 @@ func (s *CoreServer) anAppSessionSpeaks(w http.ResponseWriter, r *http.Request, 
 	if raw, err := base64.RawURLEncoding.Strict().DecodeString(nonce); err != nil || len(nonce) < 8 || len(nonce) > 64 || len(raw) == 0 {
 		return refuse(http.StatusUnauthorized, "the proof carries no usable nonce")
 	}
-	signed := login.BrowserProofString(r.Method, r.URL.RequestURI(), ts, nonce, binding, body)
+	signed := login.BrowserProofString(r.Method, r.Host, r.URL.RequestURI(), ts, nonce, binding, body)
 	if !login.VerifyBrowserSignature(sess.key, signed, sig) {
 		return refuse(http.StatusUnauthorized, "the proof was not made with the browser key this session is bound to")
 	}

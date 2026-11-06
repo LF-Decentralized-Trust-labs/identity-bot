@@ -178,7 +178,10 @@ routes (`POST` and `GET /api/mcp/agents/{id}/conversations`, `GET
 /api/mcp/conversations/{cid}`) then accept, besides a paired controller, a
 request that carries the token as a bearer **and** is signed by that key
 (`login.BrowserProofString`: fresh within two minutes, used once, covering the
-method, target and body). Such a request is never a controller and has no
+method, host, target and body, so a proof made for one Identity Agent is
+no proof at another). `OpenAppSession` refuses a person who stands as the
+owner, an app id that is not an `app` asset this core hosts, and a token hash
+already in use; it also drops sessions that have ended. Such a request is never a controller and has no
 grant; `TheAppSessionThatAsked` tells a handler it came this way so it can show
 that person only what is theirs. A request whose `Origin` is not the session's
 app, a session for something that is not an `app` asset, an ended or expired

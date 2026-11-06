@@ -111,7 +111,7 @@ func (w *anAppWorld) request(method, path, body, origin string, key *ecdsa.Priva
 	}
 	ts := time.Now().UTC().Format(time.RFC3339)
 	nonce := login.BrowserSessionBinding(ts + path + body + origin)[:20]
-	signed := login.BrowserProofString(method, r.URL.RequestURI(), ts, nonce, login.BrowserSessionBinding(w.token), []byte(body))
+	signed := login.BrowserProofString(method, r.Host, r.URL.RequestURI(), ts, nonce, login.BrowserSessionBinding(w.token), []byte(body))
 	// WebCrypto's ECDSA signature: r then s, 32 bytes each.
 	rr, ss, err := ecdsa.Sign(rand.Reader, key, hashOf(signed))
 	if err != nil {
@@ -214,17 +214,7 @@ func TestASessionOfOneAppDoesNotSpeakFromAnother(t *testing.T) {
 	if rec := w.serve(w.request(http.MethodGet, talk, "", "https://evil.example", w.key)); rec.Code != http.StatusForbidden {
 		t.Fatalf("from an unlisted origin = %d, want 403", rec.Code)
 	}
-	// A session opened for something that is not an app the organisation hosts.
-	w.token = "for-a-website"
-	w.open("site", w.who, time.Now().Add(time.Hour))
-	if rec := w.serve(w.request(http.MethodGet, talk, "", "https://site.example", w.key)); rec.Code != http.StatusForbidden {
-		t.Fatalf("a session for a website = %d, want 403", rec.Code)
-	}
-	w.token = "for-nothing"
-	w.open("gone", w.who, time.Now().Add(time.Hour))
-	if rec := w.serve(w.request(http.MethodGet, talk, "", chatOrigin, w.key)); rec.Code != http.StatusForbidden {
-		t.Fatalf("a session for an app that is not there = %d, want 403", rec.Code)
-	}
+	// A session for a non-app or an unknown app cannot be opened at all (TestOpenAppSessionRefusesWhatAnAppSessionMayNotBe).
 }
 
 func TestAnExpiredOrEndedSessionIsRefused(t *testing.T) {
@@ -256,9 +246,13 @@ func TestAPersonWhoNoLongerStandsSpeaksNoMore(t *testing.T) {
 func TestACorsAnswerIsForAnAppsOwnOriginOnTheTalkRoutesOnly(t *testing.T) {
 	w := anAppSessionWorld(t)
 	preflight := func(origin, path string) *httptest.ResponseRecorder {
+		method := "POST"
+		if strings.HasPrefix(path, "/api/mcp/conversations/") {
+			method = "GET"
+		}
 		r := httptest.NewRequest(http.MethodOptions, path, nil)
 		r.Header.Set("Origin", origin)
-		r.Header.Set("Access-Control-Request-Method", "POST")
+		r.Header.Set("Access-Control-Request-Method", method)
 		r.Header.Set("Access-Control-Request-Headers", "authorization,x-browser-proof,x-browser-proof-time,x-browser-proof-nonce,content-type")
 		return w.serve(r)
 	}
@@ -332,3 +326,80 @@ func TestAControllerStillWorksOnTheTalkRoutes(t *testing.T) {
 }
 
 func hashOf(s string) []byte { d := sha256.Sum256([]byte(s)); return d[:] }
+
+func TestOpenAppSessionRefusesWhatAnAppSessionMayNotBe(t *testing.T) {
+	w := anAppSessionWorld(t)
+	x := base64.RawURLEncoding.EncodeToString(w.key.PublicKey.X.FillBytes(make([]byte, 32)))
+	y := base64.RawURLEncoding.EncodeToString(w.key.PublicKey.Y.FillBytes(make([]byte, 32)))
+	till := time.Now().Add(time.Hour)
+	hash := login.BrowserSessionBinding("fresh-token")
+	if _, err := w.s.OpenAppSession("chat", hash, x, y, coretypes.Signer{AID: "Eown", Standing: "owner"}, till); err == nil {
+		t.Fatal("a session as the owner was opened")
+	}
+	for _, app := range []string{"nonexistent", "site"} {
+		if _, err := w.s.OpenAppSession(app, hash, x, y, w.who, till); err == nil {
+			t.Fatalf("a session for %q, which is not an app asset, was opened", app)
+		}
+	}
+	if _, err := w.s.OpenAppSession("chat", login.BrowserSessionBinding(w.token), x, y, coretypes.Signer{AID: "Eother", Standing: "signer"}, till); err == nil {
+		t.Fatal("a token hash already registered was overwritten")
+	}
+	// The original session is untouched and still speaks as Ann.
+	if rec := w.serve(w.request(http.MethodGet, talk, "", chatOrigin, w.key)); rec.Code != http.StatusOK {
+		t.Fatalf("the original session = %d: %s", rec.Code, rec.Body)
+	}
+	if _, err := w.s.OpenAppSession("chat", hash, x, y, w.who, till); err != nil {
+		t.Fatalf("a good session was refused: %v", err)
+	}
+}
+
+func TestTheProofCoversTheHost(t *testing.T) {
+	w := anAppSessionWorld(t)
+	r := w.request(http.MethodGet, talk, "", chatOrigin, w.key)
+	r.Host = "elsewhere.example"
+	if rec := w.serve(r); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("a proof replayed at another host = %d, want 401", rec.Code)
+	}
+}
+
+func TestExpiredSessionsAreDroppedWhenAnotherIsOpened(t *testing.T) {
+	w := anAppSessionWorld(t)
+	w.token = "short-lived"
+	w.open("chat", w.who, time.Now().Add(30*time.Millisecond))
+	time.Sleep(60 * time.Millisecond)
+	w.token = "later"
+	w.open("chat", w.who, time.Now().Add(time.Hour))
+	w.s.appSessions.mu.Lock()
+	n := len(w.s.appSessions.sessions)
+	w.s.appSessions.mu.Unlock()
+	if n != 2 { // the world's own session and the new one; the expired one is gone
+		t.Fatalf("%d sessions held, want 2", n)
+	}
+}
+
+func TestACorsAnswerKeysOnTheMatchedRouteAndMethod(t *testing.T) {
+	w := anAppSessionWorld(t)
+	preflight := func(path, method string) string {
+		r := httptest.NewRequest(http.MethodOptions, "/", nil)
+		r.URL.Path, r.URL.RawPath = path, ""
+		r.Header.Set("Origin", chatOrigin)
+		r.Header.Set("Access-Control-Request-Method", method)
+		return w.serve(r).Header().Get("Access-Control-Allow-Origin")
+	}
+	if got := preflight(talk, "POST"); got != chatOrigin {
+		t.Fatalf("POST on the talk route = %q", got)
+	}
+	if got := preflight(talk, "DELETE"); got != "" {
+		t.Fatalf("DELETE on the talk route was answered: %q", got)
+	}
+	if got := preflight("/api/mcp/conversations/c1", "POST"); got != "" {
+		t.Fatalf("POST on the conversation route was answered: %q", got)
+	}
+	// Spelled to look like a talk path, but not a route the router serves.
+	if got := preflight(talk+"/", "POST"); got != "" {
+		t.Fatalf("a trailing-slash spelling was answered: %q", got)
+	}
+	if got := preflight("/api/mcp//agents/a/conversations", "POST"); got != "" {
+		t.Fatalf("a doubled-slash spelling was answered: %q", got)
+	}
+}

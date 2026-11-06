@@ -16,7 +16,7 @@ import (
 
 // BrowserProofLabel opens every proof, so a signature made for one purpose is
 // not another's.
-const BrowserProofLabel = "IABK1"
+const BrowserProofLabel = "IABK2"
 
 // Headers a request made with a browser key carries beside its session token.
 const (
@@ -28,15 +28,16 @@ const (
 // BrowserProofString is what a browser signs (ECDSA P-256 with SHA-256, the
 // signature as WebCrypto gives it: r then s, 32 bytes each):
 //
-//	IABK1 \n METHOD \n TARGET \n TIMESTAMP \n NONCE \n BINDING \n BODYHASH
+//	IABK2 \n METHOD \n HOST \n TARGET \n TIMESTAMP \n NONCE \n BINDING \n BODYHASH
 //
-// TARGET is the request's path and raw query as sent, BODYHASH the unpadded
+// HOST is the request's host as sent (the Host header, port included), so a
+// proof made for one Identity Agent is no proof at another. TARGET is the request's path and raw query as sent, BODYHASH the unpadded
 // base64url SHA-256 of the body (of nothing, when there is none), so a request
 // changed in flight no longer matches its proof. BINDING is the SHA-256 of the
-// session token, unpadded base64url. TIMESTAMP is RFC 3339 UTC.
-func BrowserProofString(method, target, ts, nonce, binding string, body []byte) string {
+// session token, unpadded base64url. HOST is lower-cased when signed. TIMESTAMP is RFC 3339 UTC.
+func BrowserProofString(method, host, target, ts, nonce, binding string, body []byte) string {
 	h := sha256.Sum256(body)
-	return strings.Join([]string{BrowserProofLabel, method, target, ts, nonce, binding,
+	return strings.Join([]string{BrowserProofLabel, method, strings.ToLower(host), target, ts, nonce, binding,
 		base64.RawURLEncoding.EncodeToString(h[:])}, "\n")
 }
 
