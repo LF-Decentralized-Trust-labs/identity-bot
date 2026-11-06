@@ -193,8 +193,14 @@ func whyNotWrapped() string {
 // It must never be given the seed that is a PERSON's root identity — the one
 // their recovery phrase reproduces. That goes through StoreIdentityRootSeed,
 // which refuses to write it where it cannot be protected.
+//
+// ON A PHONE IN A PRODUCTION BUILD IT MUST BE WRAPPED TOO (owner's rule,
+// 2026-11-05: block any production running without it). A phone paired to an
+// identity kept elsewhere still holds a seed of its own, and a plain file there
+// is the failure this layer exists to stop. It is refused, with nothing written,
+// where the app has registered no working wrapper.
 func StoreDeviceLocalSeed(dataDir string, seed []byte) error {
-	return storeSeedAs(dataDir, seed, platformSeedWrapper(), false, holderDevice)
+	return storeSeedAs(dataDir, seed, platformSeedWrapper(), thisIsAPhone() && !isDevBuild(), holderDevice)
 }
 
 // storeSeed writes the seed envelope. With requireWrap, a seed that cannot be

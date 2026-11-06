@@ -214,3 +214,29 @@ func TestRecoveryOntoAPhoneWhoseAppSuppliesNoKeyIsRefusedInProduction(t *testing
 		t.Fatalf("a seed was written despite the refusal: %v", lerr)
 	}
 }
+
+// An archive with NO root_seed section still restores an identity onto this
+// machine, so it is refused where the machine cannot protect a seed, having
+// written nothing, and it restores where it can.
+func TestRecoveryOfAnArchiveWithNoSeedSectionIsCheckedToo(t *testing.T) {
+	if buildmode.IsDev() {
+		t.Skip("a development build is exempt")
+	}
+	noSeed := func() *backup.PayloadBundle {
+		return &backup.PayloadBundle{Sections: map[string][]byte{"login_relationships": []byte(`{"a":1}`)}}
+	}
+	seedwraptest.ThisMachineIsAPhoneWithNoWrapper(t)
+	dir := t.TempDir()
+	err := (&Service{DataDir: dir}).applyPayload(&RestoredPayload{Bundle: noSeed()})
+	if !secureenclave.IsRootSeedRefusal(err) {
+		t.Fatalf("want a refusal, got %v", err)
+	}
+	if entries, _ := filepath.Glob(filepath.Join(dir, "*")); len(entries) != 0 {
+		t.Fatalf("refused recovery still wrote: %v", entries)
+	}
+
+	seedwraptest.ThisMachineCanProtectASeed(t)
+	if err := (&Service{DataDir: t.TempDir()}).applyPayload(&RestoredPayload{Bundle: noSeed()}); err != nil {
+		t.Fatalf("a capable machine was refused: %v", err)
+	}
+}

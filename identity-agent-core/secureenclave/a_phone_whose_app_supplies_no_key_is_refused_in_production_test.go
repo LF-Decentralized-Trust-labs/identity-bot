@@ -164,3 +164,45 @@ func TestAnExistingUnwrappedPhoneIdentityStaysReadableAndGetsWrappedWhenTheAppSu
 		t.Fatalf("state after wrapping %+v", st)
 	}
 }
+
+// EnsureRootSeed makes the machine's own seed, which on a phone in a production
+// build must be wrapped as well: a phone paired to an identity kept elsewhere
+// still has one (owner's rule, 2026-11-05). Nothing is written without a wrapper.
+func TestProductionRefusesAPhonesOwnSeedUnwrapped(t *testing.T) {
+	standAPhone(t, false)
+	dir := t.TempDir()
+	_, err := EnsureRootSeed(dir)
+	if !IsRootSeedRefusal(err) {
+		t.Fatalf("want a refusal, got %v", err)
+	}
+	if _, serr := os.Stat(rootSeedPath(dir)); !errors.Is(serr, os.ErrNotExist) {
+		t.Fatalf("a seed file exists after the refusal: %v", serr)
+	}
+	if err := StoreDeviceLocalSeed(dir, theSeed()); !IsRootSeedRefusal(err) {
+		t.Fatalf("StoreDeviceLocalSeed: want a refusal, got %v", err)
+	}
+
+	// With a working wrapper the phone's own seed is made, wrapped.
+	r := UseSeedWrapper(fakeWrap{works: true})
+	defer r()
+	if _, err := EnsureRootSeed(dir); err != nil {
+		t.Fatal(err)
+	}
+	if p, _, _, _ := RootSeedProtection(dir); p != ProtectionHardwareWrapped {
+		t.Fatalf("protection %q, want hardware-wrapped", p)
+	}
+}
+
+// A development build, and every machine that is not a phone, still may keep a
+// device-local seed unwrapped.
+func TestDevelopmentAndNonPhonesMayStillKeepTheirOwnSeedUnwrapped(t *testing.T) {
+	standAPhone(t, true)
+	if _, err := EnsureRootSeed(t.TempDir()); err != nil {
+		t.Fatalf("development build: %v", err)
+	}
+	standAPhone(t, false)
+	thisIsAPhone = func() bool { return false }
+	if _, err := EnsureRootSeed(t.TempDir()); err != nil {
+		t.Fatalf("not a phone: %v", err)
+	}
+}

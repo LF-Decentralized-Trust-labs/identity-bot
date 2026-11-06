@@ -2778,6 +2778,10 @@ class EnclaveStatusResponse {
   // gates fail-closed on this: only `true` proceeds.
   final bool? trustAllowed;
 
+  /// What this machine can protect a key with and what protects the root seed
+  /// (the core's keyProtection). Null when the core did not report it.
+  final KeyProtectionDto? keyProtection;
+
   EnclaveStatusResponse({
     required this.hardwareBacked,
     required this.backingType,
@@ -2785,6 +2789,7 @@ class EnclaveStatusResponse {
     this.tpmPresent,
     this.tpmEnabled,
     this.trustAllowed,
+    this.keyProtection,
   });
 
   factory EnclaveStatusResponse.fromJson(Map<String, dynamic> json) {
@@ -2795,8 +2800,83 @@ class EnclaveStatusResponse {
       tpmPresent: json['tpmPresent'] as bool?,
       tpmEnabled: json['tpmEnabled'] as bool?,
       trustAllowed: json['trustAllowed'] as bool?,
+      keyProtection: json['keyProtection'] is Map
+          ? KeyProtectionDto.fromJson(Map<String, dynamic>.from(json['keyProtection'] as Map))
+          : null,
     );
   }
+}
+
+/// The core's keyProtection: what this machine can protect a key with, and
+/// what protects the root seed.
+class KeyProtectionDto {
+  const KeyProtectionDto({
+    required this.status,
+    this.kind = '',
+    this.rootKeyPermitted = false,
+    this.seedWrapped = false,
+    this.seedWrapScheme = '',
+    this.rootKeyRefusal = '',
+    this.seedProtection,
+  });
+
+  final String status;
+  final String kind;
+  final bool rootKeyPermitted;
+  final bool seedWrapped;
+  final String seedWrapScheme;
+
+  /// Why a root key is refused although the hardware could hold one, in words
+  /// to show a person. On a development build it reads that the seed is not
+  /// hardware-protected. Empty when nothing is refused.
+  final String rootKeyRefusal;
+  final SeedProtectionDto? seedProtection;
+
+  factory KeyProtectionDto.fromJson(Map<String, dynamic> j) => KeyProtectionDto(
+        status: j['status'] as String? ?? '',
+        kind: j['kind'] as String? ?? '',
+        rootKeyPermitted: j['rootKeyPermitted'] as bool? ?? false,
+        seedWrapped: j['seedWrapped'] as bool? ?? false,
+        seedWrapScheme: j['seedWrapScheme'] as String? ?? '',
+        rootKeyRefusal: j['rootKeyRefusal'] as String? ?? '',
+        seedProtection: j['seedProtection'] is Map
+            ? SeedProtectionDto.fromJson(Map<String, dynamic>.from(j['seedProtection'] as Map))
+            : null,
+      );
+}
+
+/// What protects the root seed, stored or about to be.
+class SeedProtectionDto {
+  const SeedProtectionDto({
+    this.stored = false,
+    this.protection = '',
+    this.hardwareProtected = false,
+    this.notProtectedWhy = '',
+    this.howItGetsProtected = '',
+    this.developmentBuild = false,
+  });
+
+  final bool stored;
+  final String protection;
+
+  /// False means the seed is NOT under hardware. Never present it as protected.
+  final bool hardwareProtected;
+  final String notProtectedWhy;
+  final String howItGetsProtected;
+
+  /// True for a development build, the only kind that may hold a seed that is
+  /// not hardware-protected. An app shows "not hardware-protected
+  /// (development build)" when this is set and [hardwareProtected] is not.
+  final bool developmentBuild;
+
+  factory SeedProtectionDto.fromJson(Map<String, dynamic> j) => SeedProtectionDto(
+        stored: j['stored'] as bool? ?? false,
+        protection: j['protection'] as String? ?? '',
+        hardwareProtected: j['hardwareProtected'] as bool? ?? false,
+        notProtectedWhy: j['notProtectedWhy'] as String? ?? '',
+        howItGetsProtected: j['howItGetsProtected'] as String? ?? '',
+        developmentBuild: j['developmentBuild'] as bool? ?? false,
+      );
 }
 
 // ShareAction represents a user-facing engagement action in the Share menu.

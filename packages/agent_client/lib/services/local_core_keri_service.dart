@@ -96,7 +96,11 @@ class LocalCoreKeriService extends KeriService {
     try {
       if (response.statusCode != 201 && response.statusCode != 200) {
         final body = jsonDecode(response.body);
-        throw Exception(body['error'] ?? 'Inception failed: ${response.statusCode}');
+        // A 412 is this device being unable to protect the root seed, and its
+        // reason is in the details, so the person is given both.
+        final detail = body['details'];
+        final said = body['error'] ?? 'Inception failed: ${response.statusCode}';
+        throw Exception(response.statusCode == 412 && detail is String && detail.isNotEmpty ? '$said: $detail' : said);
       }
       json = jsonDecode(response.body) as Map<String, dynamic>;
       rawBytesB64 = json['raw_bytes_b64'] as String? ?? '';

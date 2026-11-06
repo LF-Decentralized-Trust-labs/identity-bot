@@ -33,6 +33,18 @@ const (
 func (s *CoreServer) refuseIfThisComputerMayNotFound(w http.ResponseWriter) bool {
 	v := secureenclave.MayFoundAnIdentityHere(s.DataDir)
 	if secureenclave.FoundingPermitted(v, buildmode.IsDev()) {
+		// WHERE IT RUNS IS NOT ENOUGH; THE ROOT SEED HAS TO BE ABLE TO BE
+		// PROTECTED TOO. A phone always passes the question above and can still
+		// have no wrapper for the seed (an app that registers none), and founding
+		// there would write the person's root as a plain file. The same check
+		// handleSetRootSeed, StoreIdentityRootSeed and recovery make, asked here
+		// so every way of founding makes it, before anything is generated.
+		// A development build passes it, and says so in ReportSeedProtection.
+		if err := secureenclave.CheckRootSeedMayLiveHere(s.DataDir); err != nil {
+			writeError(w, http.StatusPreconditionFailed,
+				"an identity cannot be created on this computer", err.Error())
+			return true
+		}
 		if !v.Permitted {
 			// Permitted only by the development-build relaxation. Loud on purpose:
 			// an identity founded on a machine that cannot attest is exactly what
