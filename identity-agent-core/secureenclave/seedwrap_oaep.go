@@ -20,6 +20,10 @@ import (
 // here and only the public-key exponentiation, which has no secret in it, is
 // left to math/big. It is checked against OpenSSL in the tests, and is used
 // only to seal a random data key.
+//
+// When go.mod moves to Go 1.26 or later, replace oaepEncryptSHA256MGF1SHA1 with
+// rsa.EncryptOAEPWithOptions (Hash SHA-256, MGFHash SHA-1) and delete this file;
+// the OpenSSL test vector in seedwrap_oaep_test.go stays as the check.
 
 const oaepHashLen = sha256.Size
 

@@ -33,6 +33,7 @@ type chainSpec struct {
 	noOAEP       bool
 	unlockedOnly bool
 	dupPurpose   bool
+	extraPadding int // a second hardware-enforced padding beside OAEP; 0 none
 }
 
 func explicit(tag int, inner []byte) asn1.RawValue {
@@ -68,7 +69,12 @@ func keyDescription(s chainSpec) []byte {
 		return mustDER(asn1.RawValue{Class: asn1.ClassUniversal, Tag: asn1.TagSet, IsCompound: true, Bytes: mustDER(v)})
 	}
 	if !s.noOAEP {
-		hw = append(hw, explicit(kmTagDigest, set(kmDigestSHA256)), explicit(kmTagPadding, set(kmPaddingOAEP)))
+		paddings := mustDER(kmPaddingOAEP)
+		if s.extraPadding != 0 {
+			paddings = append(paddings, mustDER(s.extraPadding)...)
+		}
+		hw = append(hw, explicit(kmTagDigest, set(kmDigestSHA256)),
+			explicit(kmTagPadding, mustDER(asn1.RawValue{Class: asn1.ClassUniversal, Tag: asn1.TagSet, IsCompound: true, Bytes: paddings})))
 	}
 	if s.unlockedOnly {
 		hw = append(hw, explicit(kmTagUnlockedDevice, mustDER(asn1.NullRawValue)))

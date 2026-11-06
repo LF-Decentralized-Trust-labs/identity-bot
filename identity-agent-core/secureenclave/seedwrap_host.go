@@ -54,6 +54,15 @@ import (
 
 // SeedWrapAttestationChallenge is what the app must put in the key's attestation
 // request. It names the purpose, so a chain made for something else is refused.
+//
+// It is a FIXED string, so it does not prove the attestation is fresh: a chain
+// recorded earlier for the same key passes just as well. That is fine here,
+// because freshness is not what is relied on. Proof that the hardware holds the
+// private half right now comes from storeSeedAs's round trip: the core seals to
+// the attested public key, the app must decrypt that inside the hardware, and
+// the seed is stored only when what comes back opens to the seed. (Why no
+// revocation, app-identity or boot-state check is needed either: see
+// seedWrapKeyPolicy.)
 const SeedWrapAttestationChallenge = "identity-agent-seed-wrap-v1"
 
 const seedWrapAAD = "identity-agent-seed-wrap/v1"

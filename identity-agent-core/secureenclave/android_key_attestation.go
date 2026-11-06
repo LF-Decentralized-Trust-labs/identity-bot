@@ -439,18 +439,35 @@ func readRootOfTrust(b []byte) (state string, locked bool) {
 
 // seedWrapKeyPolicy is what a key must be, beyond being in hardware, to be the
 // key a root seed is wrapped under: made by the hardware (not imported, so no
-// one else holds a copy), able to decrypt, usable with nobody present, and big
-// enough.
+// one else holds a copy), able to decrypt and to do nothing else, padded only
+// with OAEP, usable with nobody present, and big enough.
+//
+// Purposes and paddings must be EXACTLY {DECRYPT} and {OAEP}, not merely
+// include them. The key that guards the seed does one job: a key that may also
+// sign could be turned to signing things, and one that may also decrypt with no
+// padding or with PKCS#1 v1.5 answers as a raw or padding-checking RSA oracle,
+// which is a weaker footing than the OAEP the core seals with.
+// Digests only need to include SHA-256, because the digest names the OAEP hash
+// and an extra one changes nothing about what the key will open.
+//
+// WHAT THIS CHECK DOES NOT DO, AND WHY IT DOES NOT NEED TO. The key needs no
+// person to use it, so anyone with root on the phone when the key is made could
+// already ask it to decrypt the seed; forging an attestation for such a phone
+// would gain them nothing they do not already have. So there is no check of
+// Google's revocation list, no binding to the app's signing identity, and no
+// refusal of an unlocked bootloader or unverified boot state: each answers an
+// attacker this key is not meant to stop. What the attestation is for is proving
+// the key lives in StrongBox or the TEE, so it cannot be copied off the phone.
 func seedWrapKeyPolicy(f *AndroidKeyFacts) error {
 	if !f.Generated {
 		return notAttested("the key was imported, not generated in the hardware, so someone else may hold a copy")
 	}
-	if !hasInt(f.Purposes, kmPurposeDecrypt) {
-		return notAttested("the key is not one that decrypts")
+	if !onlyInt(f.Purposes, kmPurposeDecrypt) {
+		return notAttested("the key is not limited to decrypting in the hardware, so it could be used for something else")
 	}
-	if !hasInt(f.Digests, kmDigestSHA256) || !hasInt(f.Paddings, kmPaddingOAEP) {
+	if !hasInt(f.Digests, kmDigestSHA256) || !onlyInt(f.Paddings, kmPaddingOAEP) {
 		return notAttested("the key is not limited to RSA-OAEP with SHA-256 in the hardware, " +
-			"so it may not open what the core seals to it")
+			"so it may not open what the core seals to it, or may open it some weaker way")
 	}
 	if f.NeedsUnlockedDevice {
 		return notAttested("the key works only while the phone is unlocked, and the agent runs with nobody present")
@@ -462,6 +479,19 @@ func seedWrapKeyPolicy(f *AndroidKeyFacts) error {
 		return notAttested("the key is under 2048 bits")
 	}
 	return nil
+}
+
+// onlyInt reports whether xs holds x and nothing else (repeats of x allowed).
+func onlyInt(xs []int, x int) bool {
+	if len(xs) == 0 {
+		return false
+	}
+	for _, v := range xs {
+		if v != x {
+			return false
+		}
+	}
+	return true
 }
 
 func hasInt(xs []int, x int) bool {

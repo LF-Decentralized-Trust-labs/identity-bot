@@ -196,6 +196,9 @@ func TestABuiltChainIsAcceptedOnlyWhereTheHardwareHoldsAGoodKey(t *testing.T) {
 		"wrong challenge":                        {mod: func(s *chainSpec) { s.challenge = "something else" }, fail: true},
 		"imported key":                           {mod: func(s *chainSpec) { s.imported = true }, pol: true},
 		"signing key":                            {mod: func(s *chainSpec) { s.purposes = []int{2} }, pol: true},
+		"decrypts and also signs":                {mod: func(s *chainSpec) { s.purposes = []int{kmPurposeDecrypt, 2} }, pol: true},
+		"oaep and also no padding":               {mod: func(s *chainSpec) { s.extraPadding = 1 }, pol: true},
+		"oaep and also pkcs1":                    {mod: func(s *chainSpec) { s.extraPadding = 4 }, pol: true},
 		"needs a person":                         {mod: func(s *chainSpec) { s.noAuth = false }, pol: true},
 	} {
 		t.Run(name, func(t *testing.T) {
