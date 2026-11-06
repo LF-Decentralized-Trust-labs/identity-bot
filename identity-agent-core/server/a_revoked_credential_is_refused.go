@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
@@ -56,14 +57,17 @@ func (s *CoreServer) localRevocationState(cred *keri.Credential) revocationState
 		return revocationState{status: revocationNoRegistryState}
 	}
 
+	// This agent's own record of a revocation, or of a grant it is withdrawing
+	// (never in force), wins over any log, whether or not the log can be read
+	// or shows the credential as issued. This is the one place that is decided.
+	rec, _ := s.DataStore.GetCredential(said)
+	own := rec != nil && (rec.Status == "revoked" || rec.Status == credentialStatusWithdrawing)
 	log, state, err := s.credentialLog(registry, said)
+	if own {
+		return revocationState{log: log, status: revocationRevoked,
+			reason: fmt.Sprintf("this agent recorded the credential as %s", rec.Status)}
+	}
 	if err != nil {
-		// A revocation this agent recorded is not undone by a log it cannot
-		// now prove: refuse on its own record.
-		if rec, _ := s.DataStore.GetCredential(said); rec != nil && (rec.Status == "revoked" || rec.Status == credentialStatusWithdrawing) {
-			return revocationState{status: revocationRevoked,
-				reason: fmt.Sprintf("this agent recorded the credential as %s", rec.Status)}
-		}
 		return revocationState{status: revocationNotCheckedPrefix + "the registry state held here cannot be shown: " + err.Error()}
 	}
 	if state == keri.StatusRevoked {
@@ -157,6 +161,14 @@ func (r revocationState) applyTo(res *drivers.DriverVerifyCredentialResponse) ve
 		if r.reason != "" && !containsString(res.Errors, r.reason) {
 			res.Errors = append(res.Errors, r.reason)
 		}
+	}
+	if strings.HasPrefix(r.status, revocationNotCheckedPrefix) {
+		// Not checked is not "not revoked": say nothing, as the engine does
+		// when it cannot check.
+		if res.Checks == nil {
+			res.Checks = map[string]interface{}{}
+		}
+		res.Checks["not_revoked"] = nil
 	}
 	return verifyReply{DriverVerifyCredentialResponse: res, RevocationStatus: r.status, RevocationReason: r.reason}
 }
