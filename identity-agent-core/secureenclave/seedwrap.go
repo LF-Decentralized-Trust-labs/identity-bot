@@ -59,6 +59,19 @@ type SeedWrapper interface {
 	Unwrap(blob []byte) ([]byte, error)
 }
 
+// wrapperOpensScheme says whether w opens a seed stored under scheme. Normally
+// that is its own scheme; a wrapper whose label names the hardware level (the
+// app's Keystore key) opens any level it wrote.
+func wrapperOpensScheme(w SeedWrapper, scheme string) bool {
+	if w.Scheme() == scheme {
+		return true
+	}
+	if o, ok := w.(interface{ opensScheme(string) bool }); ok {
+		return o.opensScheme(scheme)
+	}
+	return false
+}
+
 // platformSeedWrapper is provided per-platform (nil where no hardware wrapper
 // exists). Tests may override.
 var platformSeedWrapper = newPlatformSeedWrapper
@@ -178,6 +191,11 @@ func whyNotWrapped() string {
 		return "this build has no hardware seed wrapper for this platform, and the " +
 			"sealed-volume protection applies only inside a sealed machine"
 	case !w.Available():
+		if hw, ok := w.(hostedSeedWrapper); ok {
+			if why := hw.whyNotAttested(); why != "" {
+				return "the app's Keystore key cannot be used for the seed: " + why
+			}
+		}
 		return "the " + w.Scheme() + " wrapper is compiled in and cannot use the hardware"
 	default:
 		return "the " + w.Scheme() + " wrapper is available and this seed was not put through it"
@@ -514,7 +532,7 @@ func LoadRootSeed(dataDir string) ([]byte, error) {
 	}
 
 	w := platformSeedWrapper()
-	if w == nil || w.Scheme() != env.Wrap {
+	if w == nil || !wrapperOpensScheme(w, env.Wrap) {
 		return nil, fmt.Errorf("root seed is wrapped with %q, which this build/platform cannot open — restore from a backup archive with the seed phrase", env.Wrap)
 	}
 	seed, err := w.Unwrap(blob)
