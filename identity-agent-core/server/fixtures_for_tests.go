@@ -175,8 +175,14 @@ func everyPublicRoute() map[string]string {
 	return everyEntry(publicRoutes, func(a Addon) map[string]string { return a.PublicRoutes })
 }
 
+// everySessionForbidden is every route a browser session is refused: what a
+// controller is refused, and what a session alone is.
 func everySessionForbidden() map[string]string {
-	return everyEntry(sessionForbidden, func(a Addon) map[string]string { return a.SessionForbidden })
+	out := everyEntry(controllerOwnerOnly, func(a Addon) map[string]string { return a.ControllerOwnerOnly })
+	for k, v := range everyEntry(sessionForbidden, func(a Addon) map[string]string { return a.SessionForbidden }) {
+		out[k] = v
+	}
+	return out
 }
 
 // agentWithDerivedIdentity builds an agent whose identity was created from its

@@ -238,7 +238,7 @@ func TestTheWitnessesForAFoundingAreProposedToTheOwnerAlone(t *testing.T) {
 	if _, ok := controllerOwnerOnly[route]; !ok {
 		t.Errorf("%s is open to a controller", route)
 	}
-	if _, ok := sessionForbidden[route]; !ok {
+	if _, ok := everySessionForbidden()[route]; !ok {
 		t.Errorf("%s is open to a browser session", route)
 	}
 

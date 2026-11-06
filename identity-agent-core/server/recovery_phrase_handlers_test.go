@@ -106,7 +106,7 @@ func TestOnlyTheOwnerReachesThePhrase(t *testing.T) {
 	// and none is open to a browser session or to a controller (ADR-050)
 	for _, k := range []string{"PUT /api/keystore/recovery-phrase", "GET /api/keystore/recovery-phrase",
 		"POST /api/keystore/recovery-phrase/open", "DELETE /api/keystore/recovery-phrase"} {
-		if _, ok := sessionForbidden[k]; !ok {
+		if _, ok := everySessionForbidden()[k]; !ok {
 			t.Errorf("a browser session may reach %s", k)
 		}
 		if _, ok := controllerOwnerOnly[k]; !ok {
@@ -197,7 +197,7 @@ func TestOnlyTheOwnerReachesThePhraseMovedTo(t *testing.T) {
 	}
 	for _, k := range []string{"PUT /api/keystore/recovery-phrase/moving-to", "GET /api/keystore/recovery-phrase/moving-to",
 		"POST /api/keystore/recovery-phrase/moving-to/open", "DELETE /api/keystore/recovery-phrase/moving-to"} {
-		if _, ok := sessionForbidden[k]; !ok {
+		if _, ok := everySessionForbidden()[k]; !ok {
 			t.Errorf("a browser session may reach %s", k)
 		}
 		if _, ok := controllerOwnerOnly[k]; !ok {

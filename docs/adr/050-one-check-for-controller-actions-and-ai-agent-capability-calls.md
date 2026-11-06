@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-10-26
+**Amended:** 2026-11-06: a browser session may do nothing a controller may not (Decision)
 **Amends:** ADR-044 (An authorized controller does the application's work; the owner key does the root of trust)
 **Relates to:** ADR-043 (A developer mode rooted in a separate trust anchor), ADR-045 (Every asset gets an identity and a grant from one schema template)
 
@@ -102,6 +103,14 @@ attestation and its trust anchor (ADR-043), and nothing else.
 never automatically.** This is unchanged from ADR-044 as amended on 2026-10-22:
 nothing in the grants file tells such a machine apart from a row somebody added
 to it, so start-up grants nothing.
+
+**Amended 2026-11-06: a browser session may do nothing a controller may not.**
+A browser session, granted by the owner from the device holding the key and then
+carried by software that holds none, is refused every route closed to a
+controller, for the same reason, and the few routes closed to a session alone.
+The session's list holds only those few, so it cannot fall behind the
+controller's: it had, by 33 routes, and a session could set which identity an
+agent is (`POST /api/store/identity`).
 
 ## Consequences
 

@@ -44,6 +44,10 @@ import (
 // controllerOwnerOnly names the actions closed to a controller at any score,
 // each with the reason a person stopped by it is told.
 //
+// Each is closed to a browser session too (requiresTheKeyItself, ADR-050), so
+// a reason is written for a person at either, and removing an entry opens the
+// route to both.
+//
 // Keyed by "METHOD /chi/pattern", the same way publicRoutes and
 // sessionForbidden are.
 var controllerOwnerOnly = map[string]string{
@@ -150,15 +154,15 @@ var controllerOwnerOnly = map[string]string{
 	// could reach it would obtain owner signatures, which is the entire gate
 	// this file exists to hold. Reached by the app on this computer as the
 	// local owner, which is a different caller and unaffected.
-	"POST /api/machines/owner/sign": "signing as the identity that owns a machine is the owner's own key, and a " +
-		"machine acting for somebody is not that person",
-	"POST /api/machines/owner-identity": "minting the identity that owns a machine makes a key that signs as its owner, and " +
-		"a machine acting for somebody is not that person",
+	"POST /api/machines/owner/sign": "signing as the identity that owns a machine is the owner's own key, used only " +
+		"from the device that holds it",
+	"POST /api/machines/owner-identity": "minting the identity that owns a machine makes a key that signs as its owner, " +
+		"made only from the device that holds the owner's key",
 	// Adopting a machine mints its owner identity, signs a claim with it, and
 	// accepts the measurements the caller says the machine may run: the same
 	// door as the two above.
-	"POST /api/pairing/adopt": "adopting a machine mints the identity that owns it and signs as that owner, and " +
-		"a machine acting for somebody is not that person",
+	"POST /api/pairing/adopt": "adopting a machine mints the identity that owns it and signs as that owner, " +
+		"done only from the device that holds the owner's key",
 
 	// --- the state that decides WHO THE OWNER IS ---
 	//

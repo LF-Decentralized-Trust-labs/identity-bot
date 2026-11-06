@@ -122,7 +122,7 @@ type Addon struct {
 	// The add-on's rules for a machine acting for the owner (a controller),
 	// beside the core's (what_a_controller_may_reach.go), keyed the same way.
 	// ControllerOwnerOnly are its routes no controller may take, at any
-	// score, with why. ControllerMinimumScore are the scores its routes need
+	// score, with why; a browser session may not take them either. ControllerMinimumScore are the scores its routes need
 	// other than the default. An add-on can only make an action harder to
 	// take: a minimum below what the core asks counts for nothing, and a
 	// negative one refuses everybody, as it does in the core.
