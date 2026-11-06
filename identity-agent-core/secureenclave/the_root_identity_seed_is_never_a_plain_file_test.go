@@ -39,7 +39,7 @@ func TestRootSeedMayLiveHereCombinations(t *testing.T) {
 		{"zero value", Capability{}, true, false, false},
 		{"development build, nothing works", Capability{}, false, true, true},
 	} {
-		if got := rootSeedMayLiveHere(c.cap, c.wrapper, false, c.dev); got != c.want {
+		if got := rootSeedMayLiveHere(c.cap, c.wrapper, c.dev); got != c.want {
 			t.Errorf("%s: got %v want %v", c.name, got, c.want)
 		}
 	}

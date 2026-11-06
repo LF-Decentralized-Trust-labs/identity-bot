@@ -358,9 +358,14 @@ func TestFoundingByRootSeedOnASealedHostAndAPhoneAndNotADesktop(t *testing.T) {
 		"sealed host": {seedwraptest.ThisMachineIsASealedHost,
 			secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindSEVSNP},
 			http.StatusCreated, secureenclave.ProtectionSealedVolume},
-		"android-like phone": {seedwraptest.ThisMachineIsAPhoneWithNoWrapper,
+		"android phone with its key": {func(t testing.TB) {
+			seedwraptest.ThisMachineCannot(t, secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindAndroidTEE}, true)
+		}, secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindAndroidTEE},
+			http.StatusCreated, secureenclave.ProtectionHardwareWrapped},
+		// No old-app exemption: an app that supplies no seed wrapper is refused.
+		"android phone, app supplies no key": {seedwraptest.ThisMachineIsAPhoneWithNoWrapper,
 			secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindAndroidTEE},
-			http.StatusCreated, secureenclave.ProtectionUnwrapped},
+			http.StatusPreconditionFailed, ""},
 		// A Secure Enclave and a working wrapper, and still not a place a root
 		// identity may live: the rule is the one founding uses.
 		"production Mac": {seedwraptest.ThisMachineIsAProductionMac,

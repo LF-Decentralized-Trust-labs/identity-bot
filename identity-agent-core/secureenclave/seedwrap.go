@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"sync"
 
-	"identity-agent-core/buildmode"
 	"identity-agent-core/internal/atomicfile"
 )
 
@@ -126,19 +125,6 @@ const (
 	ProtectionUnwrapped       = "unwrapped"
 )
 
-// unwrappedStorageReason is non-empty only on a platform where a root identity
-// may be held unwrapped in production because a wrapper is owed and not yet
-// written (Android). A var so tests can stand such a phone on any host.
-var unwrappedStorageReason = platformUnwrappedReason
-
-// UseUnwrappedPhoneStorage makes this process behave as a phone whose seed
-// wrapper is not written yet, for tests. It returns a function that undoes it.
-func UseUnwrappedPhoneStorage(reason string) (restore func()) {
-	prev := unwrappedStorageReason
-	unwrappedStorageReason = func() string { return reason }
-	return func() { unwrappedStorageReason = prev }
-}
-
 // RootSeedProtection reports what the stored seed's envelope says protects it:
 // the protection kind, the scheme and, for an unwrapped seed, why. It reads the
 // envelope only; it does not open the seed.
@@ -181,6 +167,9 @@ func whyNotWrapped() string {
 	w := platformSeedWrapper()
 	switch {
 	case w == nil:
+		if thisIsAPhone() {
+			return noSeedWrapHostWhy
+		}
 		return "no seed wrapper is compiled in for this platform"
 	case !w.Available() && w.Scheme() == SealedVolumeScheme:
 		if sv, ok := w.(sealedVolumeWrapper); ok {
@@ -226,15 +215,12 @@ func storeSeedAs(dataDir string, seed []byte, w SeedWrapper, requireWrap bool, h
 	}
 
 	// Why an unwrapped envelope is being written, said in the file itself.
-	why := unwrappedStorageReason()
-	if why == "" {
-		why = whyNotWrapped()
-	}
+	why := whyNotWrapped()
 	env := seedEnvelope{V: 1, Wrap: seedWrapNone, Blob: base64.StdEncoding.EncodeToString(toStore),
 		Protection: ProtectionUnwrapped, Why: why, Holder: holder}
-	if requireWrap && !wrapperWorksAt(w, dataDir) && unwrappedStorageReason() == "" {
-		return &ErrRootSeedCannotLiveHere{Reason: "this machine has no working seed wrapper, " +
-			"so the seed could only be written as a plain file"}
+	if requireWrap && !wrapperWorksAt(w, dataDir) {
+		return cannotLiveHere(detectCapability(), "this machine has no working seed wrapper, "+
+			"so the seed could only be written as a plain file")
 	}
 
 	// SAY WHICH ONE HAPPENED. Storing wrapped and storing in the clear look
@@ -272,8 +258,8 @@ func storeSeedAs(dataDir string, seed []byte, w SeedWrapper, requireWrap bool, h
 		env = seedEnvelope{V: 1, Wrap: w.Scheme(), Blob: base64.StdEncoding.EncodeToString(blob),
 			Protection: protection, Holder: holder}
 	}
-	if requireWrap && env.Wrap == seedWrapNone && unwrappedStorageReason() == "" {
-		return &ErrRootSeedCannotLiveHere{Reason: "the seed would have been written unwrapped"}
+	if requireWrap && env.Wrap == seedWrapNone {
+		return cannotLiveHere(detectCapability(), "the seed would have been written unwrapped")
 	}
 
 	data, err := json.Marshal(env)
@@ -354,10 +340,15 @@ func aPersonsRootSeed(dataDir, holder string) bool {
 // It deletes nothing: the file may be the only copy, and what to do about it is
 // the owner's decision. A machine's own seed is not this and is never reported.
 func announceRootIdentityHeldWhereItShouldNotBe(dataDir, holder string) bool {
-	if buildmode.IsDev() || !aPersonsRootSeed(dataDir, holder) {
+	if isDevBuild() || !aPersonsRootSeed(dataDir, holder) {
 		return false
 	}
-	err := CheckRootSeedMayLiveHere(dataDir)
+	// PLACEMENT ONLY. A phone that holds its owner's seed unwrapped is where the
+	// seed belongs and is not protected yet; that is reported through
+	// ReportSeedProtection and mended by the upgrade in LoadRootSeed, and must
+	// not be mistaken for a seed on a machine that may not hold one, which is
+	// never re-wrapped.
+	err := checkPlacement(dataDir)
 	if err == nil {
 		return false
 	}

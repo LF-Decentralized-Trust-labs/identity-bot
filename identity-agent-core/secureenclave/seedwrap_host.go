@@ -103,17 +103,10 @@ func (w hostedSeedWrapper) Unwrap(blob []byte) ([]byte, error) {
 	return w.host.Unwrap(blob)
 }
 
-// phoneUnwrappedReason is the one reason a phone may hold a root identity's seed
-// unwrapped: the app that is running predates the wrapper and registered none.
-// An app that registered a wrapper gets no such allowance, so a phone whose
-// wrapper cannot work (no hardware Keystore) is refused rather than excused.
-func phoneUnwrappedReason(hostDeclared bool) string {
-	if hostDeclared {
-		return ""
-	}
-	return "android: this app registered no Keystore/StrongBox seed wrapper, " +
-		"so this seed is stored unwrapped under the app's private storage"
-}
+// noSeedWrapHostWhy is the reason when the app registered no seed wrapper. It is
+// declared here, untagged, so every host can test the wording.
+const noSeedWrapHostWhy = "this app has not supplied its StrongBox/TEE Keystore key for the seed yet " +
+	"(no seed wrapper is registered)"
 
 // A wrapped blob must not carry the seed it is supposed to hide. The
 // sealedVolumeWrapper is the one exception and is identity on purpose.

@@ -43,6 +43,19 @@ type KeyProtectionInfo struct {
 	// SeedWrapScheme names what protects it, and reads "none" when nothing
 	// does — not empty, which is why omitempty never fires on it.
 	SeedWrapScheme string `json:"seedWrapScheme,omitempty"`
+
+	// RootKeyRefusal says why rootKeyPermitted is false although the hardware
+	// could hold a key: the app has not supplied the key that wraps the seed. On
+	// a phone it reads "this phone's secure hardware is not available to this
+	// app yet". Empty when permitted, or when the hardware itself is the reason
+	// (status and reason say that).
+	RootKeyRefusal string `json:"rootKeyRefusal,omitempty"`
+
+	// SeedProtection is what protects the root seed, stored or about to be:
+	// seedProtection.hardwareProtected false means the seed is NOT under
+	// hardware, and seedProtection.notProtectedWhy says why. An app must show
+	// that plainly and never present such a seed as protected.
+	SeedProtection *secureenclave.SeedProtectionState `json:"seedProtection,omitempty"`
 }
 
 // EnclaveStatusResponse describes the hardware security backing available on this device.
@@ -195,14 +208,19 @@ func (s *CoreServer) handleSecurityEnclave(w http.ResponseWriter, r *http.Reques
 	// questions and both are needed to explain a refusal to somebody.
 	cap := secureenclave.DetectCapability()
 	result.KeyProtection = &KeyProtectionInfo{
-		Status:           string(cap.Status),
-		Kind:             string(cap.Kind),
-		Reason:           cap.Reason,
-		Detail:           cap.Detail,
-		RootKeyPermitted: cap.RootKeyPermitted(),
-		SeedWrapped:      secureenclave.SeedWrapAvailable(),
-		SeedWrapScheme:   secureenclave.SeedWrapScheme(),
+		Status:         string(cap.Status),
+		Kind:           string(cap.Kind),
+		Reason:         cap.Reason,
+		Detail:         cap.Detail,
+		SeedWrapped:    secureenclave.SeedWrapAvailable(),
+		SeedWrapScheme: secureenclave.SeedWrapScheme(),
 	}
+	// Whether a root key may live here is the hardware's answer AND the seed
+	// being wrappable: otherwise a phone whose app has not supplied its key
+	// would read "permitted" and then refuse.
+	result.KeyProtection.RootKeyPermitted, result.KeyProtection.RootKeyRefusal = secureenclave.RootKeyPermittedHere(s.DataDir)
+	sp := secureenclave.ReportSeedProtection(s.DataDir)
+	result.KeyProtection.SeedProtection = &sp
 
 	if s.AttestationRunner != nil {
 		// Only let a USABLE signer refine the platform detection. An

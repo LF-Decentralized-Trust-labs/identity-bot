@@ -85,20 +85,20 @@ func ThisMachineIsASealedHost(t testing.TB) {
 		return secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindSEVSNP, Reason: "attested_execution"}
 	})
 	r2 := secureenclave.UseSeedWrapper(secureenclave.SealedVolumeSeedWrapperOn(func() error { return nil }))
-	r3 := secureenclave.UseUnwrappedPhoneStorage("")
 	r4 := thisPlatformMayFound()
-	t.Cleanup(func() { r4(); r3(); r2(); r1() })
+	t.Cleanup(func() { r4(); r2(); r1() })
 }
 
 // ThisMachineIsAPhoneWithNoWrapper stands an Android phone: its Keystore is
-// usable and reported, and no seed wrapper is written for it yet.
+// usable and reported, and its app has registered no seed wrapper. A production
+// build refuses to hold a root identity on it.
 func ThisMachineIsAPhoneWithNoWrapper(t testing.TB) {
 	t.Helper()
 	r1 := secureenclave.UseCapabilityDetector(func() secureenclave.Capability {
 		return secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindAndroidTEE}
 	})
 	r2 := secureenclave.UseSeedWrapper(nil)
-	r3 := secureenclave.UseUnwrappedPhoneStorage("android: the Keystore/StrongBox seed wrapper is not written yet")
+	r3 := secureenclave.UseThisIsAPhone()
 	r4 := thisPlatformMayFound()
 	t.Cleanup(func() { r4(); r3(); r2(); r1() })
 }
