@@ -15,6 +15,8 @@
 #                  identity in the keychain. "-" signs ad-hoc, which names no
 #                  team, so an app built that way signs no key events; it is
 #                  said so on standard error.
+#   CODESIGN_ARGS  further codesign arguments, word-split, for a release build:
+#                  "--keychain <path> --timestamp --options runtime".
 #
 # Prints the hash alone on standard output; everything else goes to standard
 # error. macOS only: a Windows build signs with signtool and hashes the signed
@@ -36,6 +38,7 @@ if [ -z "$IDENTITY" ] || [ "$IDENTITY" = "-" ]; then
   echo "         it runs no core that a team did not sign. Set SIGN_IDENTITY." >&2
 fi
 
-codesign --force --sign "$IDENTITY" "$BIN" >&2
+# shellcheck disable=SC2086 # CODESIGN_ARGS is a list of arguments.
+codesign --force ${CODESIGN_ARGS:-} --sign "$IDENTITY" "$BIN" >&2
 codesign --verify --strict "$BIN" >&2
 shasum -a 256 "$BIN" | awk '{print $1}'
