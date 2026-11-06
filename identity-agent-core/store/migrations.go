@@ -1253,8 +1253,8 @@ var signatureMigrations = []string{
 //
 // A migration is recognised by what it was recorded as, not by its number. The
 // signature migrations' records move to their numbers, and every other
-// migration below the newest of them that such a database never recorded is
-// run and recorded: each of those adds only tables and indexes, guarded, so it
+// migration below the newest of them that has no record at its number is run
+// and recorded: each of those adds only tables and indexes, guarded, so it
 // is safe on any database. Does nothing for any other database.
 func renumberBranchMigrations(db *sql.DB) error {
 	rows, err := db.Query(`SELECT version, description FROM identity_schema_migrations`)
@@ -1309,14 +1309,11 @@ func renumberBranchMigrations(db *sql.DB) error {
 		return err
 	}
 	defer tx.Rollback()
-	for from := range moves {
-		if _, err := tx.Exec(`DELETE FROM identity_schema_migrations WHERE version = ?`, from); err != nil {
-			return fmt.Errorf("failed to renumber identity migrations: %w", err)
-		}
-	}
+	// Moved, not rewritten, so each keeps when it was applied. Every number a
+	// record moves to is above every number one moves from, so no move lands
+	// on a record still to be moved.
 	for from, to := range moves {
-		if _, err := tx.Exec(`INSERT INTO identity_schema_migrations (version, description) VALUES (?, ?)`,
-			to, recorded[from]); err != nil {
+		if _, err := tx.Exec(`UPDATE identity_schema_migrations SET version = ? WHERE version = ?`, to, from); err != nil {
 			return fmt.Errorf("failed to renumber identity migrations: %w", err)
 		}
 		delete(recorded, from)
@@ -1325,7 +1322,10 @@ func renumberBranchMigrations(db *sql.DB) error {
 		if m.Version >= newest {
 			break
 		}
-		if recorded[m.Version] == m.Description || isSignatureMigration(m.Description) {
+		// A number with a record is done, whatever its description says: the
+		// descriptions of some early migrations were reworded after installs
+		// recorded them.
+		if _, done := recorded[m.Version]; done || isSignatureMigration(m.Description) {
 			continue
 		}
 		if _, err := tx.Exec(m.SQL); err != nil {

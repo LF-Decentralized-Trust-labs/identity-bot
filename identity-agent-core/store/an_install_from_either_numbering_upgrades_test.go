@@ -148,8 +148,20 @@ func TestAnInstallThatRanTheSignatureMigrationsUnderEarlierNumbersStillUpgrades(
 			if hasTable(t, db, "witness_tel_events") {
 				t.Fatal("the install under test already has main's 47")
 			}
+			// An early migration recorded under the wording it had then: its
+			// number says it ran, and running it again would fail.
+			if _, err := db.Exec(`UPDATE identity_schema_migrations SET description = 'an earlier wording' WHERE version = 2`); err != nil {
+				t.Fatal(err)
+			}
 			if err := ApplyIdentityMigrations(db); err != nil {
 				t.Fatalf("%s, ranBoth=%v: %v", numbering.name, ranBoth, err)
+			}
+			var applied string
+			if err := db.QueryRow(`SELECT applied_at FROM identity_schema_migrations WHERE version = 51`).Scan(&applied); err != nil || applied != "2026-01-01" {
+				t.Errorf("%s: the moved record was rewritten, not moved (applied_at %q, %v)", numbering.name, applied, err)
+			}
+			if _, err := db.Exec(`UPDATE identity_schema_migrations SET description = ? WHERE version = 2`, mustDescription(t, 2)); err != nil {
+				t.Fatal(err)
 			}
 			requireFullyMigrated(t, db)
 			// And a second start finds nothing to do.
@@ -159,4 +171,10 @@ func TestAnInstallThatRanTheSignatureMigrationsUnderEarlierNumbersStillUpgrades(
 			db.Close()
 		}
 	}
+}
+
+func mustDescription(t *testing.T, version int) string {
+	t.Helper()
+	_, d := migrationSQL(t, version)
+	return d
 }
