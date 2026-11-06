@@ -444,6 +444,11 @@ func TestAnExpiredOrEndedAppSessionCannotBeRenewedNorPastItsCap(t *testing.T) {
 	if err := w.s.RenewAppSession(hash, time.Now().Add(2*time.Hour)); err == nil {
 		t.Fatal("an ended session was renewed")
 	}
+	x := base64.RawURLEncoding.EncodeToString(w.key.PublicKey.X.FillBytes(make([]byte, 32)))
+	y := base64.RawURLEncoding.EncodeToString(w.key.PublicKey.Y.FillBytes(make([]byte, 32)))
+	if _, err := w.s.OpenAppSession("chat", login.BrowserSessionBinding("too-long"), x, y, w.who, time.Now().Add(appSessionCap+time.Hour)); err == nil {
+		t.Fatal("a session was opened past its cap")
+	}
 	w.token = "capped"
 	w.open("chat", w.who, time.Now().Add(time.Minute))
 	hash = login.BrowserSessionBinding(w.token)

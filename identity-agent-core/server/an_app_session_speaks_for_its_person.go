@@ -115,6 +115,9 @@ func (s *CoreServer) OpenAppSession(appID, tokenHash, x, y string, person corety
 	if !expires.After(time.Now()) {
 		return "", errors.New("an app session is opened for a time to come")
 	}
+	if expires.After(time.Now().Add(appSessionCap)) {
+		return "", errors.New("an app session is never opened past its cap")
+	}
 	if len(s.originsOfApp(appID)) == 0 {
 		return "", errors.New("an app session is for an app asset this Identity Agent hosts")
 	}
