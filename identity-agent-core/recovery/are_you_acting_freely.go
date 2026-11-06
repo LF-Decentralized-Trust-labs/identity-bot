@@ -3,6 +3,7 @@ package recovery
 import (
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/internal/atomicfile"
 	"os"
 	"path/filepath"
 	"time"
@@ -249,7 +250,7 @@ func (s *Service) SaveDuressPolicy(p DuressPolicy) error {
 	if err := os.MkdirAll(s.DataDir, 0700); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(s.DataDir, "duress_policy.json"), body, 0600)
+	return atomicfile.Write(filepath.Join(s.DataDir, "duress_policy.json"), body, 0600)
 }
 
 // duressPolicyFrom reads what the identity chose, out of the archive that

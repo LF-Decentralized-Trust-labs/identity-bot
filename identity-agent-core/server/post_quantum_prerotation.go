@@ -3,9 +3,9 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/internal/atomicfile"
 	"log"
 	"net/http"
-	"os"
 	"path/filepath"
 
 	"identity-agent-core/backup"
@@ -142,7 +142,7 @@ func (s *CoreServer) recordPostQuantumCommitment(pq *iacrypto.PostQuantumNextKey
 	if err != nil {
 		return fmt.Errorf("could not encode the post-quantum commitment: %w", err)
 	}
-	if err := os.WriteFile(s.postQuantumCommitmentPath(), data, 0600); err != nil {
+	if err := atomicfile.Write(s.postQuantumCommitmentPath(), data, 0600); err != nil {
 		return fmt.Errorf("could not record the post-quantum commitment: %w", err)
 	}
 	return nil

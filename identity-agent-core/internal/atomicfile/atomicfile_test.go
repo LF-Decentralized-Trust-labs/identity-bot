@@ -2,10 +2,15 @@ package atomicfile
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -141,5 +146,182 @@ func TestStaleTemporariesAreRemovedAndFreshOnesKept(t *testing.T) {
 		if _, err := os.Stat(p); err != nil {
 			t.Fatalf("%s was removed: %v", p, err)
 		}
+	}
+}
+
+// noHardLinks makes Create's os.Link fail the way a filesystem without hard
+// links does, for the length of the test.
+func noHardLinks(t *testing.T) {
+	t.Helper()
+	old := link
+	link = func(string, string) error { return &os.LinkError{Op: "link", Err: syscall.EPERM} }
+	t.Cleanup(func() { link = old })
+}
+
+func TestCreateWithoutHardLinksStillCreatesWhole(t *testing.T) {
+	noHardLinks(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "master.key")
+	if err := Create(path, []byte("key"), 0o600); err != nil {
+		t.Fatalf("Create failed where links are unsupported: %v", err)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "key" {
+		t.Fatalf("read back %q", b)
+	}
+	if runtime.GOOS != "windows" {
+		if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
+			t.Fatalf("mode %v, want 0600", fi.Mode().Perm())
+		}
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Fatalf("left beside it: %v", entries)
+	}
+}
+
+func TestCreateWithoutHardLinksNeverReplaces(t *testing.T) {
+	noHardLinks(t)
+	path := filepath.Join(t.TempDir(), "master.key")
+	if err := os.WriteFile(path, []byte("winner"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := Create(path, []byte("loser"), 0o600)
+	if !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("got %v, want fs.ErrExist", err)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "winner" {
+		t.Fatalf("the existing file was replaced: %q", b)
+	}
+	if entries, _ := os.ReadDir(filepath.Dir(path)); len(entries) != 1 {
+		t.Fatalf("left beside it: %v", entries)
+	}
+}
+
+// Several Creates of one path at once: one wins, the rest see it exist, and
+// whoever reads afterwards sees the winner's whole content.
+func TestCreateWithoutHardLinksHasOneWinner(t *testing.T) {
+	noHardLinks(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "master.key")
+	const n = 16
+	var wins, exists atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			switch err := Create(path, []byte(fmt.Sprintf("writer-%02d", i)), 0o600); {
+			case err == nil:
+				wins.Add(1)
+			case errors.Is(err, fs.ErrExist):
+				exists.Add(1)
+			default:
+				t.Errorf("writer %d: %v", i, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	if wins.Load() != 1 || exists.Load() != n-1 {
+		t.Fatalf("%d winners, %d saw it exist; want 1 and %d", wins.Load(), exists.Load(), n-1)
+	}
+	if b, _ := os.ReadFile(path); len(b) != len("writer-00") {
+		t.Fatalf("torn content %q", b)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Fatalf("left beside it: %v", entries)
+	}
+}
+
+// A lock left by a process that died must not block a Create for ever.
+func TestCreateWithoutHardLinksReclaimsAStaleLock(t *testing.T) {
+	noHardLinks(t)
+	path := filepath.Join(t.TempDir(), "master.key")
+	lock := path + ".lock"
+	if err := os.WriteFile(lock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(lock, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := Create(path, []byte("key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(lock); err == nil {
+		t.Fatal("lock left behind")
+	}
+}
+
+// Only "this filesystem has no hard links" falls back to the lock-and-rename
+// way; any other failure from os.Link is returned and nothing is placed.
+func TestCreateFallsBackOnlyWhereLinksAreUnsupported(t *testing.T) {
+	old := link
+	t.Cleanup(func() { link = old })
+	for _, e := range []syscall.Errno{syscall.EPERM, syscall.ENOTSUP, syscall.EXDEV, syscall.EOPNOTSUPP} {
+		link = func(string, string) error { return &os.LinkError{Op: "link", Err: e} }
+		path := filepath.Join(t.TempDir(), "master.key")
+		if err := Create(path, []byte("key"), 0o600); err != nil {
+			t.Fatalf("%v: should fall back, got %v", e, err)
+		}
+		if b, _ := os.ReadFile(path); string(b) != "key" {
+			t.Fatalf("%v: read back %q", e, b)
+		}
+	}
+	for _, e := range []syscall.Errno{syscall.ENOSPC, syscall.EACCES, syscall.EIO} {
+		link = func(string, string) error { return &os.LinkError{Op: "link", Err: e} }
+		dir := t.TempDir()
+		path := filepath.Join(dir, "master.key")
+		err := Create(path, []byte("key"), 0o600)
+		if !errors.Is(err, e) {
+			t.Fatalf("%v: got %v, want that error returned", e, err)
+		}
+		if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+			t.Fatalf("%v: left behind %v", e, entries)
+		}
+	}
+}
+
+func deadPid(t *testing.T) int {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^$")
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+	return cmd.Process.Pid
+}
+
+// A lock whose holder's pid is gone is reclaimed at once, however young,
+// not after the stale age or the 10 second wait.
+func TestCreateWithoutHardLinksReclaimsADeadHoldersLockAtOnce(t *testing.T) {
+	noHardLinks(t)
+	path := filepath.Join(t.TempDir(), "master.key")
+	host, _ := os.Hostname()
+	if err := os.WriteFile(path+".lock", []byte(fmt.Sprintf("%d %s", deadPid(t), host)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if err := Create(path, []byte("key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("stalled %v behind a dead holder's lock", d)
+	}
+	if _, err := os.Stat(path + ".lock"); err == nil {
+		t.Fatal("lock left behind")
+	}
+}
+
+// A young lock held by a live process, this one, is not stale.
+func TestALiveHoldersLockIsNotStale(t *testing.T) {
+	lock := filepath.Join(t.TempDir(), "master.key.lock")
+	if err := os.WriteFile(lock, lockBody(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if lockIsStale(lock) {
+		t.Fatal("a live holder's lock was taken as stale")
+	}
+	old := time.Now().Add(-time.Hour)
+	os.Chtimes(lock, old, old)
+	if lockIsStale(lock) {
+		t.Fatal("a live holder's old lock was taken as stale; only its pid decides")
 	}
 }

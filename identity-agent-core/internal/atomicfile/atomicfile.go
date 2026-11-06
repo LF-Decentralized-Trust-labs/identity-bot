@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -54,10 +55,117 @@ func Create(path string, data []byte, perm fs.FileMode) error {
 	if err := beforePlacing(); err != nil {
 		return err
 	}
-	if err := os.Link(tmp, path); err != nil {
+	if err := link(tmp, path); err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return fmt.Errorf("%s: %w", filepath.Base(path), fs.ErrExist)
 		}
+		if !linksUnsupported(err) {
+			// Any other failure (no space, permission on the directory, a
+			// vanished directory) is the caller's to see, not a reason to
+			// try a second way that would fail the same.
+			return err
+		}
+		// No hard links here (FAT, some network and container mounts). Place
+		// the file another way that still never shows a partial file.
+		return createWithoutLink(tmp, path)
+	}
+	return syncDir(filepath.Dir(path))
+}
+
+// link is os.Link; tests replace it to stand in for a filesystem without
+// hard links.
+var link = os.Link
+
+// linksUnsupported reports whether err from os.Link means this filesystem
+// cannot make hard links, as opposed to any other failure.
+func linksUnsupported(err error) bool {
+	return errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.ENOTSUP) ||
+		errors.Is(err, syscall.EXDEV) || errors.Is(err, syscall.EOPNOTSUPP) ||
+		linkUnsupportedPlatform(err)
+}
+
+const (
+	// lockWait is how long a Create waits for another Create of the same
+	// path before giving up.
+	lockWait = 10 * time.Second
+	// lockStale is how old a lock must be before it is taken as left behind
+	// when its holder cannot be identified (no readable pid, or one written
+	// on another machine sharing the directory). A lock is held only across
+	// a check and a rename, so a few seconds is generous. A lock whose
+	// holder is a pid on this machine that no longer exists is stale at
+	// once, however young.
+	lockStale = 5 * time.Second
+)
+
+// lockBody is what a Create writes into its lock: pid and host, so a waiter
+// can tell a dead holder from a slow one.
+func lockBody() []byte {
+	host, _ := os.Hostname()
+	return []byte(fmt.Sprintf("%d %s", os.Getpid(), host))
+}
+
+// lockIsStale reports whether the lock file at lock was left by a process
+// that is gone.
+func lockIsStale(lock string) bool {
+	fi, err := os.Lstat(lock)
+	if err != nil {
+		return false
+	}
+	if b, err := os.ReadFile(lock); err == nil {
+		var pid int
+		var host string
+		if n, _ := fmt.Sscanf(string(b), "%d %s", &pid, &host); n >= 1 && pid > 0 {
+			here, _ := os.Hostname()
+			if n == 1 || host == here {
+				return processGone(pid)
+			}
+		}
+	}
+	return time.Since(fi.ModTime()) > lockStale
+}
+
+// createWithoutLink places the already-written, flushed tmp at path if nothing
+// is there, for a filesystem where os.Link fails. A rename would replace an
+// existing file, so exclusivity comes from a lock file made with O_EXCL, held
+// only across the check-and-rename; the content still arrives whole in one
+// rename. It excludes other Creates of the same path, which is every writer of
+// such a file.
+func createWithoutLink(tmp, path string) error {
+	lock := path + ".lock"
+	deadline := time.Now().Add(lockWait)
+	for {
+		f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			_, werr := f.Write(lockBody())
+			f.Close()
+			if werr != nil {
+				os.Remove(lock)
+				return werr
+			}
+			break
+		}
+		if !errors.Is(err, fs.ErrExist) {
+			return err
+		}
+		if _, serr := os.Lstat(path); serr == nil {
+			return fmt.Errorf("%s: %w", filepath.Base(path), fs.ErrExist)
+		}
+		if lockIsStale(lock) {
+			os.Remove(lock)
+			continue
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("%s: another writer holds %s", filepath.Base(path), filepath.Base(lock))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	defer os.Remove(lock)
+	if _, err := os.Lstat(path); err == nil {
+		return fmt.Errorf("%s: %w", filepath.Base(path), fs.ErrExist)
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
 		return err
 	}
 	return syncDir(filepath.Dir(path))

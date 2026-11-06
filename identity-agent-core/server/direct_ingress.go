@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"identity-agent-core/internal/atomicfile"
 	"log"
 	"net"
 	"net/http"
@@ -136,22 +137,25 @@ func (l *directAllowlist) List() []string {
 
 // save writes the list whole, to a temporary file renamed over the old one.
 // Callers hold mu.
-func (l *directAllowlist) save() error {
-	raw, err := json.Marshal(l.sortedLocked())
+func (l *directAllowlist) save(aids []string) error {
+	raw, err := json.Marshal(aids)
 	if err != nil {
 		return err
 	}
-	tmp := l.path + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, l.path)
+	return atomicfile.Write(l.path, raw, 0o600)
 }
 
-func (l *directAllowlist) sortedLocked() []string {
-	out := make([]string, 0, len(l.aids))
+// sortedWithLocked is the sorted list as it would be with aid added (add) or
+// removed, without touching the set: memory changes only once it is on disk.
+func (l *directAllowlist) sortedWithLocked(aid string, add bool) []string {
+	out := make([]string, 0, len(l.aids)+1)
 	for a := range l.aids {
-		out = append(out, a)
+		if a != aid {
+			out = append(out, a)
+		}
+	}
+	if add {
+		out = append(out, aid)
 	}
 	sort.Strings(out)
 	return out
@@ -167,11 +171,10 @@ func (l *directAllowlist) Allow(aid string) error {
 	if _, ok := l.aids[aid]; ok {
 		return nil
 	}
-	l.aids[aid] = struct{}{}
-	if err := l.save(); err != nil {
-		delete(l.aids, aid)
+	if err := l.save(l.sortedWithLocked(aid, true)); err != nil {
 		return err
 	}
+	l.aids[aid] = struct{}{}
 	return nil
 }
 
@@ -181,11 +184,10 @@ func (l *directAllowlist) Remove(aid string) error {
 	if _, ok := l.aids[aid]; !ok {
 		return nil
 	}
-	delete(l.aids, aid)
-	if err := l.save(); err != nil {
-		l.aids[aid] = struct{}{}
+	if err := l.save(l.sortedWithLocked(aid, false)); err != nil {
 		return err
 	}
+	delete(l.aids, aid)
 	return nil
 }
 

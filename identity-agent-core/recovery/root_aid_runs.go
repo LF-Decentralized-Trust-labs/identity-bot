@@ -10,6 +10,7 @@ import (
 	"sort"
 	"sync"
 
+	"identity-agent-core/internal/atomicfile"
 	"identity-agent-core/store"
 
 	keri "github.com/grapeid/keri-go"
@@ -65,11 +66,9 @@ func keepRunningRootAIDRotation(dataDir string, run RunningRootAIDRotation) erro
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("keep the running rotation: %w", err)
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, body, 0o600); err != nil {
-		return fmt.Errorf("keep the running rotation: %w", err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
+	// Flushed, then renamed: a crash leaves the old request or this one, and
+	// the signed request is the only way to finish a half-done rotation.
+	if err := atomicfile.Write(path, body, 0o600); err != nil {
 		return fmt.Errorf("keep the running rotation: %w", err)
 	}
 	return nil

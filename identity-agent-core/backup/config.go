@@ -3,6 +3,7 @@ package backup
 import (
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/internal/atomicfile"
 	"os"
 	"path/filepath"
 	"sync"
@@ -202,7 +203,7 @@ func (s *ConfigStore) SaveDeltaState(ds DeltaState) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.deltaStatePath(), data, 0600)
+	return atomicfile.Write(s.deltaStatePath(), data, 0600)
 }
 
 func DefaultConfig() Config {
@@ -258,7 +259,7 @@ func (s *ConfigStore) SaveConfig(cfg Config) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.configPath(), data, 0600)
+	return atomicfile.Write(s.configPath(), data, 0600)
 }
 
 func (s *ConfigStore) LoadHistory() ([]HistoryEntry, error) {
@@ -290,7 +291,7 @@ func (s *ConfigStore) AppendHistory(entry HistoryEntry) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.historyPath(), data, 0600)
+	return atomicfile.Write(s.historyPath(), data, 0600)
 }
 
 func (s *ConfigStore) loadHistoryLocked() ([]HistoryEntry, error) {
