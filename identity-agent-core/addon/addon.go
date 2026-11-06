@@ -101,6 +101,16 @@ type Host interface {
 	FindAgentAssetByAID(aid string) *AgentRef
 	FindCapabilityGrant(aid string) *GrantRef
 	GetPublicURL(r *http.Request) string
+	// StartBrowserKeySignIn is a sign-in as the asset with this id, for the
+	// browser key with this RFC 7638 thumbprint (ADR-066): the core's signed
+	// challenge, the one POST /api/login/challenge makes, with the secret that
+	// releases its result. The person's Identity Agent answers it at the
+	// core's own routes.
+	StartBrowserKeySignIn(assetID, audience, browserKey, publicURL string) (server.BrowserKeySignIn, error)
+	// BrowserKeySignInResult is how that sign-in stands, given the session and
+	// secret StartBrowserKeySignIn returned. "Verified" carries the browser key
+	// the person's signed assertion repeated.
+	BrowserKeySignInResult(session, collector string) (server.BrowserKeySignInResult, error)
 	GrantController(g server.ControllerGrant, now time.Time, by Authority) (server.ControllerGrant, error)
 	GrantsHeldBy(agentAID string, usableOnly bool) []store.CredentialRecord
 	HasBrowserSession(r *http.Request) bool

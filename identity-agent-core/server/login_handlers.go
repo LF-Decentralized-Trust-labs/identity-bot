@@ -543,19 +543,13 @@ func (s *CoreServer) handleChallengeStatus(w http.ResponseWriter, r *http.Reques
 		offered = r.URL.Query().Get("collector")
 	}
 
-	s.challengeMu.Lock()
-	want, bound := s.challengeCollector[token]
-	st := s.challengeStatus[token]
-	s.challengeMu.Unlock()
-
-	if bound {
-		got := sha256.Sum256([]byte(offered))
-		if subtle.ConstantTimeCompare(got[:], want[:]) != 1 {
-			// Uniform: a wrong secret and an unknown token answer the same, so
-			// this cannot be used to discover which sign-ins are in progress.
-			http.Error(w, "not found", http.StatusNotFound)
-			return
-		}
+	bound, held := s.collectorHeld(token, offered)
+	st := s.challengeStatusOf(token)
+	if bound && !held {
+		// Uniform: a wrong secret and an unknown token answer the same, so
+		// this cannot be used to discover which sign-ins are in progress.
+		http.Error(w, "not found", http.StatusNotFound)
+		return
 	}
 
 	if st == nil {
@@ -591,4 +585,33 @@ func sameSchema(presented, required string) bool {
 		}
 	}
 	return false
+}
+
+// collectorHeld says whether offered is the collector secret minted for the
+// sign-in token (bound), and whether the offer matches it (held). A sign-in
+// with no secret minted is not bound.
+func (s *CoreServer) collectorHeld(token, offered string) (bound, held bool) {
+	s.challengeMu.Lock()
+	want, bound := s.challengeCollector[token]
+	s.challengeMu.Unlock()
+	if !bound {
+		return false, false
+	}
+	got := sha256.Sum256([]byte(offered))
+	return true, subtle.ConstantTimeCompare(got[:], want[:]) == 1
+}
+
+// challengeStatusOf is a copy of the sign-in's status, nil when there is none.
+func (s *CoreServer) challengeStatusOf(token string) map[string]interface{} {
+	s.challengeMu.Lock()
+	defer s.challengeMu.Unlock()
+	st := s.challengeStatus[token]
+	if st == nil {
+		return nil
+	}
+	cp := make(map[string]interface{}, len(st))
+	for k, v := range st {
+		cp[k] = v
+	}
+	return cp
 }

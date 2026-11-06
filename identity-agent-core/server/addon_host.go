@@ -75,6 +75,12 @@ func (h hostWrapper) FindCapabilityGrant(aid string) *coretypes.GrantRef {
 	return h.s.findCapabilityGrant(aid)
 }
 func (h hostWrapper) GetPublicURL(r *http.Request) string { return h.s.getPublicURL(r) }
+func (h hostWrapper) StartBrowserKeySignIn(assetID, audience, browserKey, publicURL string) (BrowserKeySignIn, error) {
+	return h.s.startBrowserKeySignIn(assetID, audience, browserKey, publicURL)
+}
+func (h hostWrapper) BrowserKeySignInResult(session, collector string) (BrowserKeySignInResult, error) {
+	return h.s.browserKeySignInResult(session, collector)
+}
 func (h hostWrapper) GrantController(g ControllerGrant, now time.Time, by coretypes.Authority) (ControllerGrant, error) {
 	return h.s.grantController(g, now, by)
 }

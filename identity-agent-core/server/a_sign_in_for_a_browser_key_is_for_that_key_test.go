@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -99,5 +100,55 @@ func TestAChallengeNamingAMalformedBrowserKeyIsNotIssued(t *testing.T) {
 	_, _, code, _ := w.org.createSignedAssetChallenge("the-website", "https://portal.example", nil, "not-a-thumbprint", w.srv.URL)
 	if code != http.StatusBadRequest {
 		t.Fatalf("code %d, want 400", code)
+	}
+}
+
+// An add-on starts a sign-in for an asset's browser key and reads its result
+// with the secret it was given, and with nothing else.
+func TestAnAddOnStartsASignInForABrowserKeyAndReadsItsResultWithTheSecret(t *testing.T) {
+	w := anOrganisationWithAWebsite(t, asset.EnrollmentPolicy{Mode: asset.EnrollmentOpen})
+	h := aPersonsIdentityAgent(t)
+	in, err := w.org.startBrowserKeySignIn("the-website", "https://portal.example", aBrowserKey, w.srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c login.ChallengeBundle
+	if err := json.Unmarshal([]byte(in.CanonicalBody), &c); err != nil || c.BrowserKey != aBrowserKey || in.Sig == "" || in.Collector == "" {
+		t.Fatalf("the challenge handed over does not name the key, or is unsigned: %+v %v", in, err)
+	}
+	if in.Pointer != w.srv.URL+"/i/"+in.Session {
+		t.Fatalf("the pointer is %q", in.Pointer)
+	}
+	if res, err := w.org.browserKeySignInResult(in.Session, in.Collector); err != nil || res.State != "pending" {
+		t.Fatalf("before the person answers: %+v %v", res, err)
+	}
+	for _, wrong := range []string{"", "not-the-secret"} {
+		if _, err := w.org.browserKeySignInResult(in.Session, wrong); err == nil {
+			t.Fatalf("the result was given for the secret %q", wrong)
+		}
+	}
+	if _, err := h.Approve(login.StartLoginRequest{SessionToken: in.Session, RPSessionURL: w.srv.URL}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := w.org.browserKeySignInResult(in.Session, in.Collector)
+	if err != nil || res.State != "verified" || res.BrowserKey != aBrowserKey || res.Pairwise == "" {
+		t.Fatalf("after the person approved: %+v %v", res, err)
+	}
+	// A sign-in that was not for a browser's key is not read this way, even with its secret.
+	token, _, code, msg := w.org.createSignedAssetChallenge("the-website", "https://portal.example", nil, "", w.srv.URL)
+	if code != 0 {
+		t.Fatal(msg)
+	}
+	secret, _ := w.org.mintCollectorSecret(token)
+	if _, err := w.org.browserKeySignInResult(token, secret); err == nil {
+		t.Fatal("a sign-in with no browser key was read as one")
+	}
+	// An unknown asset and a malformed key are refused as the core's route refuses them.
+	var refused *SignInRefused
+	if _, err := w.org.startBrowserKeySignIn("no-such-asset", "x", aBrowserKey, w.srv.URL); !errors.As(err, &refused) || refused.Code != http.StatusNotFound {
+		t.Fatalf("an unknown asset: %v", err)
+	}
+	if _, err := w.org.startBrowserKeySignIn("the-website", "x", "bad", w.srv.URL); !errors.As(err, &refused) || refused.Code != http.StatusBadRequest {
+		t.Fatalf("a malformed key: %v", err)
 	}
 }
