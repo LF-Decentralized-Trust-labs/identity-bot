@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"identity-agent-core/authprovider"
+	"identity-agent-core/internal/atomicfile"
 	"io"
 	"log"
 	"net/http"
@@ -797,7 +798,7 @@ func (s *Service) restoreTheKeyMaterial(payload *RestoredPayload) error {
 	}
 	if raw, ok := payload.Bundle.Sections["login_relationships"]; ok && len(raw) > 0 {
 		path := filepath.Join(s.DataDir, "login_relationships.json")
-		if err := os.WriteFile(path, raw, 0600); err != nil {
+		if err := atomicfile.Write(path, raw, 0600); err != nil {
 			return fmt.Errorf("write login_relationships: %w", err)
 		}
 	}
@@ -921,7 +922,7 @@ func (s *Service) prepareTheDatabase(payload *RestoredPayload, checked *checkedP
 	}
 
 	path := filepath.Join(dir, "identity.db")
-	if err := os.WriteFile(path, raw, 0600); err != nil {
+	if err := unpackTheDatabase(path, raw); err != nil {
 		return fmt.Errorf("unpack the backed-up database: %w", err)
 	}
 	if err := store.PrepareSnapshotForImport(path); err != nil {
@@ -929,6 +930,12 @@ func (s *Service) prepareTheDatabase(payload *RestoredPayload, checked *checkedP
 	}
 	checked.databasePath = path
 	return nil
+}
+
+// unpackTheDatabase puts the archive's copy of the identity database at path
+// whole: a crash leaves the whole file or none of it, never a torn one.
+func unpackTheDatabase(path string, raw []byte) error {
+	return atomicfile.Write(path, raw, 0600)
 }
 
 // restoreTheDatabase brings back the identity database the archive carries.

@@ -54,10 +54,66 @@ func Create(path string, data []byte, perm fs.FileMode) error {
 	if err := beforePlacing(); err != nil {
 		return err
 	}
-	if err := os.Link(tmp, path); err != nil {
+	if err := link(tmp, path); err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return fmt.Errorf("%s: %w", filepath.Base(path), fs.ErrExist)
 		}
+		// No hard links here (FAT, some network and container mounts). Place
+		// the file another way that still never shows a partial file.
+		return createWithoutLink(tmp, path)
+	}
+	return syncDir(filepath.Dir(path))
+}
+
+// link is os.Link; tests replace it to stand in for a filesystem without
+// hard links.
+var link = os.Link
+
+const (
+	// lockWait is how long a Create waits for another Create of the same
+	// path before giving up, and lockStale how old a lock must be before it
+	// is taken to be left by a process that died.
+	lockWait  = 10 * time.Second
+	lockStale = 30 * time.Second
+)
+
+// createWithoutLink places the already-written, flushed tmp at path if nothing
+// is there, for a filesystem where os.Link fails. A rename would replace an
+// existing file, so exclusivity comes from a lock file made with O_EXCL, held
+// only across the check-and-rename; the content still arrives whole in one
+// rename. It excludes other Creates of the same path, which is every writer of
+// such a file.
+func createWithoutLink(tmp, path string) error {
+	lock := path + ".lock"
+	deadline := time.Now().Add(lockWait)
+	for {
+		f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			f.Close()
+			break
+		}
+		if !errors.Is(err, fs.ErrExist) {
+			return err
+		}
+		if _, serr := os.Lstat(path); serr == nil {
+			return fmt.Errorf("%s: %w", filepath.Base(path), fs.ErrExist)
+		}
+		if fi, serr := os.Lstat(lock); serr == nil && time.Since(fi.ModTime()) > lockStale {
+			os.Remove(lock)
+			continue
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("%s: another writer holds %s", filepath.Base(path), filepath.Base(lock))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	defer os.Remove(lock)
+	if _, err := os.Lstat(path); err == nil {
+		return fmt.Errorf("%s: %w", filepath.Base(path), fs.ErrExist)
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
 		return err
 	}
 	return syncDir(filepath.Dir(path))
