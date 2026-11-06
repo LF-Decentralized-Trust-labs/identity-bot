@@ -291,6 +291,10 @@ func (s *CoreServer) handleRecoveryActivate(w http.ResponseWriter, r *http.Reque
 		case status == http.StatusForbidden:
 			title = "Not authenticated"
 		}
+		if secureenclave.IsRootSeedRefusal(err) {
+			writeRootSeedRefused(w, err.Error())
+			return
+		}
 		writeError(w, status, title, err.Error())
 		return
 	}

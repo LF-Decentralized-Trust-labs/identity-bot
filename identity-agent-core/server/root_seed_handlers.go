@@ -169,7 +169,7 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 		// The way to run a PRODUCTION build on hardware this route refuses is to
 		// fix the hardware, or to hold the identity somewhere else and control
 		// it from here. It is not to tell the Identity Agent to stop checking.
-		jsonError(w, refusalFor(cap), http.StatusPreconditionFailed)
+		writeRootSeedRefused(w, refusalFor(cap))
 		return
 	}
 	if !s.isOwner(r) {
@@ -219,7 +219,7 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := secureenclave.StoreIdentityRootSeed(s.DataDir, seed); err != nil {
 		if secureenclave.IsRootSeedRefusal(err) {
-			jsonError(w, err.Error(), http.StatusPreconditionFailed)
+			writeRootSeedRefused(w, err.Error())
 			return
 		}
 		jsonError(w, "failed to store root seed", http.StatusInternalServerError)

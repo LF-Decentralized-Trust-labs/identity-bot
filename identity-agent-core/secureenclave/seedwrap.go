@@ -194,13 +194,15 @@ func whyNotWrapped() string {
 // their recovery phrase reproduces. That goes through StoreIdentityRootSeed,
 // which refuses to write it where it cannot be protected.
 //
-// ON A PHONE IN A PRODUCTION BUILD IT MUST BE WRAPPED TOO (owner's rule,
-// 2026-11-05: block any production running without it). A phone paired to an
+// IN A PRODUCTION BUILD IT MUST BE WRAPPED TOO, ON EVERY PLATFORM (owner's rule,
+// 2026-11-05: block any production running without it). A machine paired to an
 // identity kept elsewhere still holds a seed of its own, and a plain file there
-// is the failure this layer exists to stop. It is refused, with nothing written,
-// where the app has registered no working wrapper.
+// is the failure this layer exists to stop: a Windows machine with no TPM, a
+// macOS build without the Secure Enclave wrapper, a phone whose app registers
+// no key. It is refused, with nothing written, where there is no working
+// wrapper. A development build may store it unwrapped, and says so.
 func StoreDeviceLocalSeed(dataDir string, seed []byte) error {
-	return storeSeedAs(dataDir, seed, platformSeedWrapper(), thisIsAPhone() && !isDevBuild(), holderDevice)
+	return storeSeedAs(dataDir, seed, platformSeedWrapper(), !isDevBuild(), holderDevice)
 }
 
 // storeSeed writes the seed envelope. With requireWrap, a seed that cannot be
@@ -366,6 +368,30 @@ func announceRootIdentityHeldWhereItShouldNotBe(dataDir, holder string) bool {
 	return true
 }
 
+// aProductionPhone is the build the fail-closed rule for an already-stored
+// unwrapped seed applies to: Android, not a development build.
+func aProductionPhone() bool { return thisIsAPhone() && !isDevBuild() }
+
+// existingSeedRefusal is what every use of an unwrapped seed gets in a
+// production build on a phone until the seed is wrapped.
+func existingSeedRefusal(reason string) error {
+	return cannotLiveHere(detectCapability(), "the root seed on this phone was stored unwrapped and is "+
+		"not used until it is under the phone's hardware key: "+reason)
+}
+
+// ProtectExistingSeed is called once when the core launches. A root seed stored
+// unwrapped before the hardware rule is wrapped now, when the hardware is usable.
+// It returns the root-seed refusal while the seed is still unwrapped in a
+// production build on a phone, so the caller can say so; it returns nil when
+// there is no seed, when the seed is protected, and in every other build (which
+// keeps running, flagged by ReportSeedProtection).
+func ProtectExistingSeed(dataDir string) error {
+	if _, err := LoadRootSeed(dataDir); err != nil && IsRootSeedRefusal(err) {
+		return err
+	}
+	return nil
+}
+
 // LoadRootSeed reads the root keystore seed, unwrapping it when stored under a
 // platform key. A legacy raw-bytes file is migrated to the envelope form (and
 // wrapped, when hardware is usable) on first load.
@@ -397,11 +423,21 @@ func LoadRootSeed(dataDir string) ([]byte, error) {
 			// Misplaced: reported, kept as it is, never re-wrapped into looking legitimate.
 			return seed, nil
 		}
+		// A phone in a production build never serves a seed it could not wrap
+		// (requireWrap), so a failed migration is a refusal, not a log line.
+		requireWrap := aProductionPhone()
 		if w := platformSeedWrapper(); !mayWrapAnExistingSeed(w) {
 			log.Printf("[secureenclave] legacy root seed left as it is: %s", whyAnExistingSeedIsNotWrapped(w))
-		} else if merr := storeSeedAs(dataDir, seed, w, false, holder); merr != nil {
-			// Keep serving the legacy file rather than risk the only copy.
+			if requireWrap {
+				return nil, existingSeedRefusal(whyAnExistingSeedIsNotWrapped(w))
+			}
+		} else if merr := storeSeedAs(dataDir, seed, w, requireWrap, holder); merr != nil {
+			// Keep serving the legacy file rather than risk the only copy,
+			// except where production forbids serving it unwrapped.
 			log.Printf("[secureenclave] root seed migration deferred: %v", merr)
+			if requireWrap {
+				return nil, existingSeedRefusal(merr.Error())
+			}
 		} else {
 			log.Printf("[secureenclave] root seed migrated to envelope storage")
 		}
@@ -421,7 +457,8 @@ func LoadRootSeed(dataDir string) ([]byte, error) {
 		}
 		// Opportunistic upgrade: if hardware became usable since the seed was
 		// stored (e.g. a signed build replacing a dev build), wrap it now.
-		if w := platformSeedWrapper(); !misplaced && wrapperWorksAt(w, dataDir) && mayWrapAnExistingSeed(w) {
+		w := platformSeedWrapper()
+		if !misplaced && wrapperWorksAt(w, dataDir) && mayWrapAnExistingSeed(w) {
 			holder := env.Holder
 			if holder == "" && SeedCameFromAPhrase(dataDir) {
 				holder = holderIdentity
@@ -430,7 +467,18 @@ func LoadRootSeed(dataDir string) ([]byte, error) {
 				log.Printf("[secureenclave] root seed wrap upgrade deferred: %v", merr)
 			} else {
 				log.Printf("[secureenclave] root seed upgraded to %s wrapping", w.Scheme())
+				return blob, nil
 			}
+		}
+		// FAIL CLOSED (owner's rule, 2026-11-05): a seed stored unwrapped before
+		// the rule is not served by an Android production build until it has been
+		// wrapped. Every use of it gets the root-seed refusal, so nothing is minted
+		// or signed from a seed that is a plain file; it is wrapped as soon as the
+		// app supplies its key (ProtectExistingSeed at launch, or the next open).
+		// A development build keeps serving it and is flagged not functional yet
+		// in ReportSeedProtection.
+		if !misplaced && aProductionPhone() {
+			return nil, existingSeedRefusal(whyNotWrappedAt(dataDir))
 		}
 		return blob, nil
 	}

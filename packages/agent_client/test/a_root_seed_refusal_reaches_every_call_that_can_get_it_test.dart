@@ -15,7 +15,7 @@ import 'package:test/test.dart';
 const _title = 'an identity cannot be created on this computer';
 const _why = 'this phone\'s secure hardware is not available to this app yet';
 http.Response _refusal() =>
-    http.Response(jsonEncode({'error': _title, 'details': _why}), 412);
+    http.Response(jsonEncode({'error': _title, 'details': _why, 'code': 'root_seed_refused'}), 412);
 
 Matcher _theRefusal() => throwsA(isA<RootSeedRefused>().having(
     (e) => e.message, 'message', allOf(contains(_title), contains(_why))));
@@ -60,6 +60,13 @@ void main() {
   test('minting the identity that owns a machine throws the refusal', () async {
     final core = _coreAnswering(_refusal);
     await expectLater(core.mintMachineOwner(), _theRefusal());
+  });
+
+  test('a 412 that is not the root-seed refusal is not thrown as one', () async {
+    final core = _coreAnswering(() => http.Response(
+        jsonEncode({'error': 'Rotation required', 'details': 'x'}), 412));
+    await expectLater(core.mintMachineOwner(),
+        throwsA(isNot(isA<RootSeedRefused>())));
   });
 
   test('a fault that is not the refusal is still an ordinary failure', () async {

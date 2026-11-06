@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"identity-agent-core/buildmode"
+	"identity-agent-core/internal/jsonreply"
 	"identity-agent-core/secureenclave"
 )
 
@@ -18,21 +19,21 @@ const (
 	actForOneInstead       = secureenclave.ActForOneInstead
 )
 
-// refuseIfThisComputerMayNotFound writes the refusal and reports whether it did.
-//
-// EVERY WAY IN GOES THROUGH THIS. A gate on one route out of several is worse
-// than no gate, because it reads as closed: somebody adds a second path, nobody
-// notices it was never covered, and the first one goes on looking like the
-// answer. There is more than one way to bring an identity into being here and
-// they do not resemble each other — founding directly, a computer founding its
-// own root as it is paired, a recovery minting a new one, and storing one
-// somebody else made.
-//
-// Placed before anything is read or generated, so a machine that may not found
-// never produces key material it would then have to throw away.
 // rootSeedRefusalTitle is the headline of every answer that says this computer
 // cannot hold a root seed.
 const rootSeedRefusalTitle = "an identity cannot be created on this computer"
+
+// rootSeedRefusedCode is the machine-readable name of that answer. 412 alone
+// does not say it (a rotation-required recovery, a front-end arm and a
+// guardianship refusal are 412 too), so a client keys on this.
+const rootSeedRefusedCode = "root_seed_refused"
+
+// writeRootSeedRefused is the one body every root-seed refusal is answered
+// with: 412, the title, the reason and the code.
+func writeRootSeedRefused(w http.ResponseWriter, detail string) {
+	jsonreply.Write(w, http.StatusPreconditionFailed, ErrorResponse{
+		Error: rootSeedRefusalTitle, Details: detail, Code: rootSeedRefusedCode})
+}
 
 // refuseIfRootSeedRefused answers 412 with the refusal body when err is the
 // root-seed refusal, and reports whether it did.
@@ -46,10 +47,22 @@ func refuseIfRootSeedRefused(w http.ResponseWriter, err error) bool {
 	if !secureenclave.IsRootSeedRefusal(err) {
 		return false
 	}
-	writeError(w, http.StatusPreconditionFailed, rootSeedRefusalTitle, err.Error())
+	writeRootSeedRefused(w, err.Error())
 	return true
 }
 
+// refuseIfThisComputerMayNotFound writes the refusal and reports whether it did.
+//
+// EVERY WAY IN GOES THROUGH THIS. A gate on one route out of several is worse
+// than no gate, because it reads as closed: somebody adds a second path, nobody
+// notices it was never covered, and the first one goes on looking like the
+// answer. There is more than one way to bring an identity into being here and
+// they do not resemble each other — founding directly, a computer founding its
+// own root as it is paired, a recovery minting a new one, and storing one
+// somebody else made.
+//
+// Placed before anything is read or generated, so a machine that may not found
+// never produces key material it would then have to throw away.
 func (s *CoreServer) refuseIfThisComputerMayNotFound(w http.ResponseWriter) bool {
 	v := secureenclave.MayFoundAnIdentityHere(s.DataDir)
 	if secureenclave.FoundingPermitted(v, buildmode.IsDev()) {
@@ -61,7 +74,7 @@ func (s *CoreServer) refuseIfThisComputerMayNotFound(w http.ResponseWriter) bool
 		// so every way of founding makes it, before anything is generated.
 		// A development build passes it, and says so in ReportSeedProtection.
 		if err := secureenclave.CheckRootSeedMayLiveHere(s.DataDir); err != nil {
-			writeError(w, http.StatusPreconditionFailed, rootSeedRefusalTitle, err.Error())
+			writeRootSeedRefused(w, err.Error())
 			return true
 		}
 		if !v.Permitted {

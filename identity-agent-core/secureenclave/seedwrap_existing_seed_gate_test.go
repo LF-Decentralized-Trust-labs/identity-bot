@@ -32,6 +32,7 @@ func envelopeWrap(t *testing.T, dir string) string {
 // Windows to open after a reboot or as the service user, and a failed open would
 // leave every derived key unreadable.
 func TestAnExistingSeedIsNotWrappedUnderTheTPMWithoutOptIn(t *testing.T) {
+	aDevelopmentBuild(t)
 	t.Setenv(TPMWrapExistingSeedEnv, "")
 	seed := testSeed()
 
@@ -72,6 +73,7 @@ func TestAnExistingSeedIsNotWrappedUnderTheTPMWithoutOptIn(t *testing.T) {
 
 // With the opt-in set, the same upgrade happens.
 func TestAnExistingSeedIsWrappedUnderTheTPMWithOptIn(t *testing.T) {
+	aDevelopmentBuild(t)
 	t.Setenv(TPMWrapExistingSeedEnv, "1")
 	withWrapper(t, nil)
 	dir := t.TempDir()

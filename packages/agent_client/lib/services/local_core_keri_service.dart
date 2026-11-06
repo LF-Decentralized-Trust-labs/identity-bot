@@ -95,7 +95,7 @@ class LocalCoreKeriService extends KeriService {
       body: jsonEncode({'public_key': key, 'next_public_key': next}),
     );
     try {
-      // A 412 is this device being unable to protect the root seed: thrown as
+      // A root-seed refusal is this device being unable to protect the root seed: thrown as
       // [RootSeedRefused], with the core's headline and details, so the screen
       // can tell it from a fault.
       RootSeedRefused.throwIfRefused(response);

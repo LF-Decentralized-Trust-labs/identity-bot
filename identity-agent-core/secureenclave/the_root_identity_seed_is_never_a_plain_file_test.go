@@ -92,13 +92,21 @@ func TestIdentityRootSeedIsStoredWrappedWhereTheMachineCan(t *testing.T) {
 	}
 }
 
-// The machine's own seed is not a person's identity and is still allowed to be
-// stored where nothing can wrap it — the distinction the two names exist for.
-func TestDeviceLocalSeedMayStillBeStoredUnwrapped(t *testing.T) {
+// The machine's own seed is not a person's identity, but a production build
+// still will not store it where nothing can wrap it (owner's rule, 2026-11-05,
+// every platform). Only a development build may.
+func TestDeviceLocalSeedIsStoredUnwrappedOnlyInADevelopmentBuild(t *testing.T) {
 	machine(t, Capability{Status: Absent}, false)
-	dir := t.TempDir()
-	if _, err := EnsureRootSeed(dir); err != nil {
-		t.Fatalf("a device-local seed must not be refused: %v", err)
+	prod := t.TempDir()
+	if _, err := EnsureRootSeed(prod); !IsRootSeedRefusal(err) {
+		t.Fatalf("a production build stored its own seed unwrapped: %v", err)
+	}
+	if _, serr := os.Stat(rootSeedPath(prod)); !errors.Is(serr, os.ErrNotExist) {
+		t.Fatalf("a seed file exists after the refusal: %v", serr)
+	}
+	aDevelopmentBuild(t)
+	if _, err := EnsureRootSeed(t.TempDir()); err != nil {
+		t.Fatalf("a development build must not be refused: %v", err)
 	}
 }
 

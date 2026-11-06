@@ -7,15 +7,8 @@ import '../config/agent_config.dart';
 import '../crypto/bip39.dart';
 import 'the_owner_at_this_computer.dart';
 
-/// One root of trust: the mnemonic. The client generates and holds the phrase;
-/// the local core derives every HD key (pairwise contacts, login relationships,
-/// asset signing, audit signing, the credential vault) from a root seed. This
-/// handoff makes those the SAME root: after identity creation or recovery, the
-/// standard BIP39 seed of the phrase is posted once to the local core's
-/// keystore, so the phrase alone recovers everything on any platform. The core
-/// never sees the words, only the derived 64-byte seed; the core refuses to
-/// replace an established different seed (409).
-/// The core refused to hold this person's root seed on this device (HTTP 412):
+/// The core refused to hold this person's root seed on this device (HTTP 412,
+/// code `root_seed_refused`):
 /// its secure hardware cannot protect the seed, and a production build will not
 /// write one it cannot. Thrown by [RootSeedHandoff.register] and by every call
 /// that can be answered with the refusal (founding, minting the identity that
@@ -29,15 +22,38 @@ class RootSeedRefused implements Exception {
   @override
   String toString() => message;
 
-  /// Throws [RootSeedRefused] when [response] is the core's 412 refusal, and
-  /// does nothing for any other answer. The reason is the core's headline and
-  /// its details together, so the person is given both.
+  /// The machine-readable code the core puts in every root-seed refusal.
+  static const code = 'root_seed_refused';
+
+  /// Throws [RootSeedRefused] when [response] is the core's root-seed refusal,
+  /// and does nothing for any other answer. It keys on the body's `code`, not
+  /// on the status: 412 is also a rotation-required recovery, a front-end arm
+  /// and a guardianship refusal, and none of those is this. The reason is the
+  /// core's headline and its details together, so the person is given both.
   static void throwIfRefused(http.Response response) {
-    if (response.statusCode != 412) return;
+    if (!isRefusal(response)) return;
     throw RootSeedRefused(RootSeedHandoff._reasonIn(response.body));
+  }
+
+  /// Whether [response] carries the root-seed refusal code.
+  static bool isRefusal(http.Response response) {
+    try {
+      final j = jsonDecode(response.body);
+      return j is Map && j['code'] == code;
+    } catch (_) {
+      return false;
+    }
   }
 }
 
+/// One root of trust: the mnemonic. The client generates and holds the phrase;
+/// the local core derives every HD key (pairwise contacts, login relationships,
+/// asset signing, audit signing, the credential vault) from a root seed. This
+/// handoff makes those the SAME root: after identity creation or recovery, the
+/// standard BIP39 seed of the phrase is posted once to the local core's
+/// keystore, so the phrase alone recovers everything on any platform. The core
+/// never sees the words, only the derived 64-byte seed; the core refuses to
+/// replace an established different seed (409).
 class RootSeedHandoff {
   /// Whether a core URL is this device's own.
   ///
@@ -59,7 +75,7 @@ class RootSeedHandoff {
   /// seed is established (stored now or already identical). Other failures are
   /// logged, never thrown — onboarding must not break on a keystore hiccup.
   ///
-  /// A 412 is the exception and throws [RootSeedRefused]: it is the core saying
+  /// A root-seed refusal is the exception and throws [RootSeedRefused]: it is the core saying
   /// this device cannot protect the seed, so the person has to be told rather
   /// than the app carrying on.
   static Future<bool> register(
@@ -104,7 +120,7 @@ class RootSeedHandoff {
       }
       debugPrint(
           '[RootSeedHandoff] core refused seed handoff (${resp.statusCode}): ${resp.body}');
-      if (resp.statusCode == 412) throw RootSeedRefused(_reasonIn(resp.body));
+      RootSeedRefused.throwIfRefused(resp);
       return false;
     } on RootSeedRefused {
       rethrow;
