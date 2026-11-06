@@ -416,35 +416,147 @@ class _MacCodeSignature implements BinarySignature {
 class _WindowsAuthenticode implements BinarySignature {
   @override
   Future<void> requireSameSigner(String binary, String app) async {
-    final mine = await _signer(app);
-    final its = await _signer(binary);
-    if (its == null)
-      throw KeyMathBinaryRefused('its Authenticode signature is not valid');
-    if (mine == null || mine != its) {
-      throw KeyMathBinaryRefused(
-          'it is not signed by the certificate that signed this app');
-    }
+    final why = windowsSignerRefusal(
+        app: await _signature(app), binary: await _signature(binary));
+    if (why != null) throw KeyMathBinaryRefused(why);
   }
 
-  /// The thumbprint of a file's valid Authenticode signer, or null.
-  Future<String?> _signer(String path) async {
-    final quoted = path.replaceAll("'", "''");
+  /// A file's Authenticode signature as Windows judges it, read by
+  /// PowerShell. The path goes in through the environment, never into the
+  /// command, so no character in it can change what the command does.
+  Future<WindowsSignature> _signature(String path) async {
     // By its full path, as macOS's codesign is: a 'powershell' found on PATH
     // could be any program placed earlier on it, and it is what decides here
     // whether the binary is ours.
     final windows = Platform.environment['SystemRoot'] ?? r'C:\Windows';
     final powershell =
         '$windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
-    final r = await Process.run(powershell, [
-      '-NoProfile',
-      '-NonInteractive',
-      '-Command',
-      "\$s = Get-AuthenticodeSignature -LiteralPath '$quoted'; "
-          "if (\$s.Status -eq 'Valid') { \$s.SignerCertificate.Thumbprint }",
-    ]);
-    final out = '${r.stdout}'.trim();
-    return r.exitCode == 0 && out.isNotEmpty ? out : null;
+    final r = await Process.run(
+        powershell,
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          "\$s = Get-AuthenticodeSignature -LiteralPath \$env:IA_SIGNED_FILE; "
+              "\$c = \$s.SignerCertificate; \$e = @(); "
+              "if (\$c) { \$e = @(\$c.Extensions | Where-Object { \$_ -is "
+              "[System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension] } | "
+              "ForEach-Object { \$_.EnhancedKeyUsages } | ForEach-Object { \$_.Value }) }; "
+              "[pscustomobject]@{ status = [string]\$s.Status; "
+              "thumbprint = [string]\$c.Thumbprint; subject = [string]\$c.Subject; "
+              "issuer = [string]\$c.Issuer; ekus = (\$e -join ',') } | "
+              "ConvertTo-Json -Compress",
+        ],
+        environment: {'IA_SIGNED_FILE': path});
+    if (r.exitCode != 0) return const WindowsSignature.unreadable();
+    try {
+      return WindowsSignature.fromJson(
+          jsonDecode('${r.stdout}'.trim()) as Map<String, dynamic>);
+    } catch (_) {
+      return const WindowsSignature.unreadable();
+    }
   }
+}
+
+/// A file's Authenticode signature as Windows judges it.
+class WindowsSignature {
+  const WindowsSignature(
+      {required this.status,
+      this.thumbprint = '',
+      this.subject = '',
+      this.issuer = '',
+      this.ekus = const []});
+  const WindowsSignature.unreadable()
+      : status = 'Unreadable',
+        thumbprint = '',
+        subject = '',
+        issuer = '',
+        ekus = const [];
+
+  /// As PowerShell writes it: the EKUs joined with commas, or a list.
+  factory WindowsSignature.fromJson(Map<String, dynamic> j) {
+    final e = j['ekus'];
+    return WindowsSignature(
+        status: '${j['status'] ?? ''}',
+        thumbprint: '${j['thumbprint'] ?? ''}',
+        subject: '${j['subject'] ?? ''}',
+        issuer: '${j['issuer'] ?? ''}',
+        ekus: e is List
+            ? [for (final x in e) '$x']
+            : e is String
+                ? [
+                    for (final x in e.split(','))
+                      if (x.trim().isNotEmpty) x.trim()
+                  ]
+                : const []);
+  }
+
+  /// `Valid`, `NotSigned`, or another verdict: a signature that does not
+  /// verify (`HashMismatch`, `NotTrusted`, ...).
+  final String status;
+  final String thumbprint;
+  final String subject;
+  final String issuer;
+  final List<String> ekus;
+
+  bool get valid => status == 'Valid';
+  bool get unsigned => status == 'NotSigned';
+
+  /// The marker every Azure Artifact Signing certificate carries.
+  static const artifactSigningMarker = '1.3.6.1.4.1.311.97.1.0';
+
+  /// Who signed it, as it stays from one certificate to the next.
+  ///
+  /// Azure Artifact Signing issues a certificate that lasts three days and is
+  /// replaced every day, so its thumbprint names the day as much as the
+  /// signer. What stays is the durable identity value of the certificate
+  /// profile, an EKU under 1.3.6.1.4.1.311.97 that no other profile has, with
+  /// the subject it was validated for: the same for every certificate the one
+  /// profile issues, and different for another profile of the same publisher.
+  /// It is taken as such only from a certificate Microsoft issued with the
+  /// Artifact Signing marker. Any other certificate is named by its thumbprint.
+  String get signer {
+    if (ekus.contains(artifactSigningMarker) &&
+        issuer.contains('O=Microsoft Corporation')) {
+      final durable = [
+        for (final e in ekus)
+          if (e.startsWith('1.3.6.1.4.1.311.97.') && e != artifactSigningMarker)
+            e
+      ]..sort();
+      if (durable.isNotEmpty)
+        return 'artifact-signing|$subject|${durable.join(',')}';
+    }
+    return 'thumbprint|${thumbprint.toUpperCase()}';
+  }
+}
+
+/// Why Windows refuses to run [binary] for the app [app], or null when it may.
+///
+/// The binary's hash, compiled into the app, is checked first and always
+/// (CommandKeyMath.requireTheBinaryIsOurs); this is the signature check after
+/// it (ADR-061 section 7):
+/// - an app with a valid signature runs only a binary validly signed by the
+///   same signer, the same durable identity for Azure Artifact Signing;
+/// - an app with no signature at all runs the binary on its hash alone. On
+///   Windows the hash lives in the app's compiled Dart code, which Authenticode
+///   does not cover even in a signed app, so the signer adds nothing the hash
+///   does not already give there, and an unsigned build can still sign key
+///   events;
+/// - an app whose signature does not verify runs nothing: it has been changed
+///   since it was signed.
+String? windowsSignerRefusal(
+    {required WindowsSignature app, required WindowsSignature binary}) {
+  if (app.unsigned) return null;
+  if (!app.valid) {
+    return 'this app\'s own signature does not verify (${app.status})';
+  }
+  if (!binary.valid) {
+    return 'its Authenticode signature is not valid (${binary.status})';
+  }
+  if (app.signer != binary.signer) {
+    return 'it is not signed by the signer that signed this app';
+  }
+  return null;
 }
 
 class _NoDesktopApp implements BinarySignature {
