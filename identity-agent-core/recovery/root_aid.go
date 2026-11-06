@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/internal/atomicfile"
 	"os"
 	"path/filepath"
 	"sort"
@@ -1034,14 +1035,9 @@ func writeRootAIDMap(dataDir string, m *RootAIDMap) error {
 	if err != nil {
 		return fmt.Errorf("marshal root aid map: %w", err)
 	}
-	// Written whole beside the file and renamed over it: the witnessing worker
-	// reads the map while the rotation or the worker writes it.
-	path := filepath.Join(dataDir, rootAIDMapFileName)
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, out, 0600); err != nil {
-		return fmt.Errorf("write root aid map: %w", err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
+	// Written whole and renamed over the file: the witnessing worker reads the
+	// map while the rotation or the worker writes it.
+	if err := atomicfile.Write(filepath.Join(dataDir, rootAIDMapFileName), out, 0600); err != nil {
 		return fmt.Errorf("write root aid map: %w", err)
 	}
 	return nil

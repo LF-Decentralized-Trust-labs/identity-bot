@@ -89,16 +89,18 @@ func TestRecoveryOntoAMachineThatCanProtectASeedStillWorks(t *testing.T) {
 	}
 }
 
-// The black box and an Android phone are where a root identity is meant to
-// live: recovery onto either succeeds, and the envelope records what protects
-// the seed.
+// The black box and an Android phone whose app supplies its Keystore key are
+// where a root identity is meant to live: recovery onto either succeeds, and the
+// envelope records what protects the seed.
 func TestRecoveryOntoASealedHostOrAPhoneWorksAndRecordsTheProtection(t *testing.T) {
 	for name, c := range map[string]struct {
 		stand      func(testing.TB)
 		protection string
 	}{
-		"sealed host":        {seedwraptest.ThisMachineIsASealedHost, secureenclave.ProtectionSealedVolume},
-		"android-like phone": {seedwraptest.ThisMachineIsAPhoneWithNoWrapper, secureenclave.ProtectionUnwrapped},
+		"sealed host": {seedwraptest.ThisMachineIsASealedHost, secureenclave.ProtectionSealedVolume},
+		"android phone with its key": {func(t testing.TB) {
+			seedwraptest.ThisMachineCannot(t, secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindAndroidTEE}, true)
+		}, secureenclave.ProtectionHardwareWrapped},
 	} {
 		t.Run(name, func(t *testing.T) {
 			c.stand(t)
@@ -191,5 +193,50 @@ func TestARefusedActivationOnTheWrongMachineLeavesTheSessionToFinishElsewhere(t 
 	}
 	if done == nil || done.State != SessionActivated {
 		t.Fatalf("session not activated: %+v", done)
+	}
+}
+
+// An Android app that registers no seed wrapper gets no exemption in a
+// production build: recovery onto it is refused, nothing is written, and the
+// refusal is the sentence the app shows. (Fails if the old-app allowance returns.)
+func TestRecoveryOntoAPhoneWhoseAppSuppliesNoKeyIsRefusedInProduction(t *testing.T) {
+	if buildmode.IsDev() {
+		t.Skip("a development build is exempt")
+	}
+	seedwraptest.ThisMachineIsAPhoneWithNoWrapper(t)
+	bundle, _ := archiveWithARootSeed(t)
+	dir := t.TempDir()
+	err := (&Service{DataDir: dir}).applyPayload(&RestoredPayload{Bundle: bundle})
+	if !secureenclave.IsRootSeedRefusal(err) {
+		t.Fatalf("want refusal, got %v", err)
+	}
+	if _, lerr := secureenclave.LoadRootSeed(dir); !errors.Is(lerr, secureenclave.ErrNoRootSeed) {
+		t.Fatalf("a seed was written despite the refusal: %v", lerr)
+	}
+}
+
+// An archive with NO root_seed section still restores an identity onto this
+// machine, so it is refused where the machine cannot protect a seed, having
+// written nothing, and it restores where it can.
+func TestRecoveryOfAnArchiveWithNoSeedSectionIsCheckedToo(t *testing.T) {
+	if buildmode.IsDev() {
+		t.Skip("a development build is exempt")
+	}
+	noSeed := func() *backup.PayloadBundle {
+		return &backup.PayloadBundle{Sections: map[string][]byte{"login_relationships": []byte(`{"a":1}`)}}
+	}
+	seedwraptest.ThisMachineIsAPhoneWithNoWrapper(t)
+	dir := t.TempDir()
+	err := (&Service{DataDir: dir}).applyPayload(&RestoredPayload{Bundle: noSeed()})
+	if !secureenclave.IsRootSeedRefusal(err) {
+		t.Fatalf("want a refusal, got %v", err)
+	}
+	if entries, _ := filepath.Glob(filepath.Join(dir, "*")); len(entries) != 0 {
+		t.Fatalf("refused recovery still wrote: %v", entries)
+	}
+
+	seedwraptest.ThisMachineCanProtectASeed(t)
+	if err := (&Service{DataDir: t.TempDir()}).applyPayload(&RestoredPayload{Bundle: noSeed()}); err != nil {
+		t.Fatalf("a capable machine was refused: %v", err)
 	}
 }

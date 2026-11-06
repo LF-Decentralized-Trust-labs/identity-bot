@@ -11,6 +11,7 @@ import (
 // this, so a mismatch here is a false security indicator — the kind somebody
 // relies on instead of going to check.
 func TestTheWrapClaimMatchesWhatIsOnDisk(t *testing.T) {
+	aDevelopmentBuild(t)
 	readEnvelope := func(t *testing.T, dir string) seedEnvelope {
 		t.Helper()
 		b, err := os.ReadFile(rootSeedPath(dir))

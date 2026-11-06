@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import 'key_math.dart';
+import 'root_seed_handoff.dart' show RootSeedRefused;
 import 'the_key_events_this_device_makes.dart' show KeyEventRefused;
 import 'the_witnesses_of_this_devices_events.dart';
 
@@ -47,6 +48,7 @@ class TheWitnessesAFoundingNames {
     if (res.statusCode == 404) {
       return _none('this core does not propose witnesses');
     }
+    RootSeedRefused.throwIfRefused(res);
     if (res.statusCode < 200 || res.statusCode > 299) {
       throw KeyEventRefused('the witnesses of the founding', res.statusCode,
           '', res.body);

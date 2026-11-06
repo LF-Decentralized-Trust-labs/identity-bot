@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"identity-agent-core/buildmode"
+	"identity-agent-core/internal/jsonreply"
 	"identity-agent-core/secureenclave"
 )
 
@@ -17,6 +18,38 @@ const (
 	cannotProveItsSoftware = secureenclave.CannotProveItsSoftware
 	actForOneInstead       = secureenclave.ActForOneInstead
 )
+
+// rootSeedRefusalTitle is the headline of every answer that says this computer
+// cannot hold a root seed.
+const rootSeedRefusalTitle = "an identity cannot be created on this computer"
+
+// rootSeedRefusedCode is the machine-readable name of that answer. 412 alone
+// does not say it (a rotation-required recovery, a front-end arm and a
+// guardianship refusal are 412 too), so a client keys on this.
+const rootSeedRefusedCode = "root_seed_refused"
+
+// writeRootSeedRefused is the one body every root-seed refusal is answered
+// with: 412, the title, the reason and the code.
+func writeRootSeedRefused(w http.ResponseWriter, detail string) {
+	jsonreply.Write(w, http.StatusPreconditionFailed, ErrorResponse{
+		Error: rootSeedRefusalTitle, Details: detail, Code: rootSeedRefusedCode})
+}
+
+// refuseIfRootSeedRefused answers 412 with the refusal body when err is the
+// root-seed refusal, and reports whether it did.
+//
+// The refusal comes out of ensureRootSeed on any path that needs key material
+// (pairing a non-root computer, minting an owner or pairwise identity). Left to
+// each caller's own error branch it surfaced as an untyped 500 or 503, which a
+// client cannot tell from a fault. Same status and body as
+// refuseIfThisComputerMayNotFound, so a client handles one shape.
+func refuseIfRootSeedRefused(w http.ResponseWriter, err error) bool {
+	if !secureenclave.IsRootSeedRefusal(err) {
+		return false
+	}
+	writeRootSeedRefused(w, err.Error())
+	return true
+}
 
 // refuseIfThisComputerMayNotFound writes the refusal and reports whether it did.
 //
@@ -33,6 +66,17 @@ const (
 func (s *CoreServer) refuseIfThisComputerMayNotFound(w http.ResponseWriter) bool {
 	v := secureenclave.MayFoundAnIdentityHere(s.DataDir)
 	if secureenclave.FoundingPermitted(v, buildmode.IsDev()) {
+		// WHERE IT RUNS IS NOT ENOUGH; THE ROOT SEED HAS TO BE ABLE TO BE
+		// PROTECTED TOO. A phone always passes the question above and can still
+		// have no wrapper for the seed (an app that registers none), and founding
+		// there would write the person's root as a plain file. The same check
+		// handleSetRootSeed, StoreIdentityRootSeed and recovery make, asked here
+		// so every way of founding makes it, before anything is generated.
+		// A development build passes it, and says so in ReportSeedProtection.
+		if err := secureenclave.CheckRootSeedMayLiveHere(s.DataDir); err != nil {
+			writeRootSeedRefused(w, err.Error())
+			return true
+		}
 		if !v.Permitted {
 			// Permitted only by the development-build relaxation. Loud on purpose:
 			// an identity founded on a machine that cannot attest is exactly what

@@ -45,6 +45,15 @@ func (f *fakeWrapper) Unwrap(blob []byte) ([]byte, error) {
 	return gcm.Open(nil, blob[:gcm.NonceSize()], blob[gcm.NonceSize():], nil)
 }
 
+// aDevelopmentBuild stands a development build, the only kind that may keep a
+// device-local seed unwrapped (a production build refuses, on every platform).
+func aDevelopmentBuild(t *testing.T) {
+	t.Helper()
+	prev := isDevBuild
+	isDevBuild = func() bool { return true }
+	t.Cleanup(func() { isDevBuild = prev })
+}
+
 func withWrapper(t *testing.T, w SeedWrapper) {
 	t.Helper()
 	orig := platformSeedWrapper
@@ -62,6 +71,7 @@ func testSeed() []byte {
 
 // Without a hardware wrapper, the seed round-trips through the envelope form.
 func TestSeedEnvelopeRoundTripNoWrapper(t *testing.T) {
+	aDevelopmentBuild(t)
 	withWrapper(t, nil)
 	dir := t.TempDir()
 	seed := testSeed()
@@ -134,6 +144,7 @@ func TestLegacySeedFileMigrates(t *testing.T) {
 
 // A seed stored unwrapped upgrades to wrapped when hardware becomes usable.
 func TestSeedUpgradesWhenWrapperAppears(t *testing.T) {
+	aDevelopmentBuild(t)
 	withWrapper(t, nil)
 	dir := t.TempDir()
 	seed := testSeed()

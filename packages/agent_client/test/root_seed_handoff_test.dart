@@ -46,4 +46,40 @@ void main() {
     );
     expect(ok, isFalse);
   });
+
+  test('the refusal code is the core saying this device cannot protect the seed, and is thrown', () async {
+    final client = MockClient((req) async => http.Response(
+        '{"error":"this phone\'s secure hardware is not available to this app yet, so nothing was written","code":"root_seed_refused"}',
+        412));
+    await expectLater(
+      RootSeedHandoff.register(
+        const ['abandon', 'ability'],
+        baseUrl: 'http://127.0.0.1:5050',
+        client: client,
+      ),
+      throwsA(isA<RootSeedRefused>().having((e) => e.message, 'message',
+          contains('secure hardware is not available'))),
+    );
+  });
+
+  test('a 412 without the refusal code is not the refusal', () async {
+    // A rotation-required recovery, a front-end arm and a guardianship refusal
+    // are 412 as well; none of them is the core refusing the root seed.
+    for (final body in ['', '{"error":"Rotation required"}', 'not json']) {
+      final client = MockClient((req) async => http.Response(body, 412));
+      final ok = await RootSeedHandoff.register(const ['abandon', 'ability'],
+          baseUrl: 'http://127.0.0.1:5050', client: client);
+      expect(ok, isFalse, reason: body);
+    }
+  });
+
+  test('the refusal code with a status that is not 412 is still the refusal', () async {
+    final client = MockClient((req) async => http.Response(
+        '{"error":"refused","code":"root_seed_refused"}', 400));
+    await expectLater(
+      RootSeedHandoff.register(const ['abandon', 'ability'],
+          baseUrl: 'http://127.0.0.1:5050', client: client),
+      throwsA(isA<RootSeedRefused>()),
+    );
+  });
 }

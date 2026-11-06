@@ -1,6 +1,7 @@
 package server
 
 import (
+	"identity-agent-core/keriengine"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -115,6 +116,7 @@ func TestEveryWayAnIdentityCanBeginIsRefusedOnAMachineThatMayNotFound(t *testing
 		path   string
 		body   string
 		call   func(*CoreServer, http.ResponseWriter, *http.Request)
+		engine bool // the route prepares through the in-process engine
 	}{
 		{
 			what: "founding directly", method: http.MethodPost, path: "/api/inception",
@@ -148,9 +150,26 @@ func TestEveryWayAnIdentityCanBeginIsRefusedOnAMachineThatMayNotFound(t *testing
 			body: `{"aid":"EWHATEVER","event_type":"icp","sequence_number":0}`,
 			call: (*CoreServer).handleStoreEvent,
 		},
+		{
+			// The founding an app holds the key of: prepared here, signed by
+			// the app, committed here.
+			what:   "preparing a founding",
+			method: http.MethodPost, path: "/api/events/prepare",
+			body:   `{"t":"icp","k":["D1"],"kt":"1","n":["E2"],"nt":"1"}`,
+			call:   (*CoreServer).handlePrepareEvent,
+			engine: true,
+		},
+		{
+			what:   "asking who would witness a founding",
+			method: http.MethodGet, path: "/api/events/witnesses-for-a-founding",
+			call: (*CoreServer).handleWitnessesForAFounding,
+		},
 	} {
 		t.Run(door.what, func(t *testing.T) {
 			s := agentWithNoIdentity(t)
+			if door.engine {
+				s.KeriDriver = keriengine.New()
+			}
 			refuseHere(t)
 
 			req := httptest.NewRequest(door.method, door.path, strings.NewReader(door.body))

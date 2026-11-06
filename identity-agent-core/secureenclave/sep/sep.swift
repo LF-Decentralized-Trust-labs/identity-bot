@@ -112,3 +112,102 @@ public func sep_sign(_ blob: UnsafePointer<UInt8>, _ blen: Int,
     n.pointee = raw.count
     return 0
 }
+
+// ---------------------------------------------------------------------------
+// Wrapping the root seed.
+//
+// The signing key above cannot encrypt, so the seed is wrapped with a second kind
+// of enclave key, one that does key agreement (ECDH on P-256). The shape is the
+// standard hybrid one: a fresh software key agrees a secret with the enclave
+// key, HKDF turns it into an AES-256 key, AES-GCM seals the seed.
+//
+// EVERY WRAP MAKES ITS OWN ENCLAVE KEY and puts that key's wrapped blob inside
+// the output. There is no key file to keep beside the seed, nothing to lose
+// separately from it, and no state to carry between wrap and unwrap: the seed
+// file is self-contained and openable only by the chip that made it. The blob is
+// the same kind of thing the signer holds — useless on any other processor.
+//
+// Layout of the output, all lengths fixed by the key type except the first:
+//   [2 bytes big-endian: enclave blob length][enclave key blob]
+//   [65 bytes: the ephemeral public key, X9.63][AES-GCM combined: nonce|ct|tag]
+//
+// NOT YET RUN: written against CryptoKit's documented API on a machine with no
+// Swift toolchain. What proves it is `go test -tags sepblob` on a Mac, which
+// wraps, restarts the process, and unwraps (see seedwrap_darwin_sep_test.go).
+// ---------------------------------------------------------------------------
+
+private let seedWrapInfo = Data("identity-agent seed wrap v1 (se-ecdh-p256-aes256gcm)".utf8)
+
+// Measured once, for the same reason sep_blob_size is: restoring a key from a
+// blob of the wrong length TRAPS inside CryptoKit rather than throwing, so the
+// length must be judged before the call.
+private var cachedAgreementBlobSize: Int32 = 0
+
+@_cdecl("sepw_blob_size")
+public func sepw_blob_size() -> Int32 {
+    if cachedAgreementBlobSize > 0 { return cachedAgreementBlobSize }
+    guard let k = try? SecureEnclave.P256.KeyAgreement.PrivateKey() else { return -1 }
+    cachedAgreementBlobSize = Int32(k.dataRepresentation.count)
+    return cachedAgreementBlobSize
+}
+
+private func wrapKey(secret: SharedSecret, ephemeral: Data, enclave: Data) -> SymmetricKey {
+    // Both public keys go into the derivation, so the key is bound to this exact
+    // pair and a ciphertext cannot be replayed against another enclave key.
+    return secret.hkdfDerivedSymmetricKey(using: SHA256.self, salt: Data(),
+                                          sharedInfo: seedWrapInfo + ephemeral + enclave,
+                                          outputByteCount: 32)
+}
+
+@_cdecl("sepw_wrap")
+public func sepw_wrap(_ plain: UnsafePointer<UInt8>, _ plen: Int,
+                      _ out: UnsafeMutablePointer<UInt8>, _ cap: Int,
+                      _ n: UnsafeMutablePointer<Int>) -> Int32 {
+    guard plen > 0 else { return -1 }
+    guard let enclaveKey = try? SecureEnclave.P256.KeyAgreement.PrivateKey() else { return -1 }
+    let blob = enclaveKey.dataRepresentation
+    let ephemeral = P256.KeyAgreement.PrivateKey()
+    let ephemeralPub = ephemeral.publicKey.x963Representation          // 65 bytes
+    let enclavePub = enclaveKey.publicKey.x963Representation
+    guard let secret = try? ephemeral.sharedSecretFromKeyAgreement(with: enclaveKey.publicKey) else { return -3 }
+    let key = wrapKey(secret: secret, ephemeral: ephemeralPub, enclave: enclavePub)
+    guard let box = try? AES.GCM.seal(Data(bytes: plain, count: plen), using: key),
+          let combined = box.combined else { return -3 }
+
+    var result = Data()
+    result.append(UInt8((blob.count >> 8) & 0xff))
+    result.append(UInt8(blob.count & 0xff))
+    result.append(blob)
+    result.append(ephemeralPub)
+    result.append(combined)
+    guard result.count <= cap else { return -2 }
+    result.copyBytes(to: out, count: result.count)
+    n.pointee = result.count
+    return 0
+}
+
+@_cdecl("sepw_unwrap")
+public func sepw_unwrap(_ blob: UnsafePointer<UInt8>, _ blen: Int,
+                        _ out: UnsafeMutablePointer<UInt8>, _ cap: Int,
+                        _ n: UnsafeMutablePointer<Int>) -> Int32 {
+    guard blen > 2 else { return -1 }
+    let all = Data(bytes: blob, count: blen)
+    let klen = (Int(all[all.startIndex]) << 8) | Int(all[all.startIndex + 1])
+    // Judged before restore, because restore traps on a wrong length.
+    guard klen > 0, klen == Int(sepw_blob_size()), blen > 2 + klen + 65 else { return -1 }
+    let keyBlob = all.subdata(in: (all.startIndex + 2)..<(all.startIndex + 2 + klen))
+    let ephemeralPub = all.subdata(in: (all.startIndex + 2 + klen)..<(all.startIndex + 2 + klen + 65))
+    let combined = all.subdata(in: (all.startIndex + 2 + klen + 65)..<all.endIndex)
+
+    guard let enclaveKey = try? SecureEnclave.P256.KeyAgreement.PrivateKey(dataRepresentation: keyBlob),
+          let peer = try? P256.KeyAgreement.PublicKey(x963Representation: ephemeralPub),
+          let secret = try? enclaveKey.sharedSecretFromKeyAgreement(with: peer) else { return -1 }
+    let key = wrapKey(secret: secret, ephemeral: ephemeralPub,
+                      enclave: enclaveKey.publicKey.x963Representation)
+    guard let box = try? AES.GCM.SealedBox(combined: combined),
+          let plain = try? AES.GCM.open(box, using: key) else { return -3 }
+    guard plain.count <= cap else { return -2 }
+    plain.copyBytes(to: out, count: plain.count)
+    n.pointee = plain.count
+    return 0
+}

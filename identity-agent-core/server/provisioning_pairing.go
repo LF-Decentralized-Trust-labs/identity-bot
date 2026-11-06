@@ -98,6 +98,9 @@ func (s *CoreServer) handleProvisioningPairing(w http.ResponseWriter, r *http.Re
 
 	aid, oobi, _, err := s.mintPairwise("provisioning-pairing")
 	if err != nil {
+		if refuseIfRootSeedRefused(w, err) {
+			return
+		}
 		writeError(w, http.StatusServiceUnavailable, "Could not offer pairing", err.Error())
 		return
 	}

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"os"
-	"strings"
 	"testing"
 )
 
@@ -21,8 +20,7 @@ func asPhoneWithNoWrapper(t *testing.T) {
 	t.Helper()
 	r1 := UseCapabilityDetector(func() Capability { return Capability{Status: Usable, Kind: KindAndroidTEE} })
 	r2 := UseSeedWrapper(nil)
-	r3 := UseUnwrappedPhoneStorage("android: wrapper not written yet")
-	t.Cleanup(func() { r3(); r2(); r1() })
+	t.Cleanup(func() { r2(); r1() })
 }
 
 // The black box holds the seed on its sealed volume and the envelope says so.
@@ -68,22 +66,6 @@ func TestTheSealedVolumeSchemeIsNotAvailableOutsideASealedMachine(t *testing.T) 
 	}
 }
 
-// Android keeps working as before: stored unwrapped, and the file says that and why.
-func TestAPhoneWithNoWrapperStoresTheSeedAndRecordsItIsUnwrappedAndWhy(t *testing.T) {
-	asPhoneWithNoWrapper(t)
-	dir := t.TempDir()
-	if err := StoreIdentityRootSeed(dir, theSeed()); err != nil {
-		t.Fatalf("a phone was refused: %v", err)
-	}
-	p, scheme, why, err := RootSeedProtection(dir)
-	if err != nil || p != ProtectionUnwrapped || scheme != seedWrapNone || !strings.Contains(why, "android") {
-		t.Fatalf("envelope says %q/%q/%q (%v)", p, scheme, why, err)
-	}
-	if got, err := LoadRootSeed(dir); err != nil || !bytes.Equal(got, theSeed()) {
-		t.Fatalf("round trip: %v", err)
-	}
-}
-
 // A phone whose Keystore was never reported is still Unknown, and is refused.
 func TestAPhoneThatNeverReportedItsKeystoreIsRefused(t *testing.T) {
 	asPhoneWithNoWrapper(t)
@@ -98,8 +80,7 @@ func TestAPhoneThatNeverReportedItsKeystoreIsRefused(t *testing.T) {
 func TestAProductionDesktopStillRefusesToHoldARootIdentity(t *testing.T) {
 	r1 := UseCapabilityDetector(func() Capability { return Capability{Status: Usable, Kind: KindTPM2} })
 	r2 := UseSeedWrapper(nil)
-	r3 := UseUnwrappedPhoneStorage("")
-	defer func() { r3(); r2(); r1() }()
+	defer func() { r2(); r1() }()
 	dir := t.TempDir()
 	if err := CheckRootSeedMayLiveHere(t.TempDir()); !IsRootSeedRefusal(err) {
 		t.Fatalf("check: want refusal, got %v", err)

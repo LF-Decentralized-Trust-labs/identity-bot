@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 
@@ -168,7 +169,7 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 		// The way to run a PRODUCTION build on hardware this route refuses is to
 		// fix the hardware, or to hold the identity somewhere else and control
 		// it from here. It is not to tell the Identity Agent to stop checking.
-		jsonError(w, refusalFor(cap), http.StatusPreconditionFailed)
+		writeRootSeedRefused(w, refusalFor(cap))
 		return
 	}
 	if !s.isOwner(r) {
@@ -190,12 +191,26 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if existing, lerr := secureenclave.LoadRootSeed(s.DataDir); lerr == nil {
+	existing, lerr := secureenclave.LoadRootSeed(s.DataDir)
+	switch {
+	case lerr == nil:
 		if bytes.Equal(existing, seed) {
 			jsonResponse(w, map[string]any{"status": "unchanged"})
 			return
 		}
 		jsonError(w, "a different root seed is already established on this agent — recover with the original seed phrase, or reset the agent's data directory to start over", http.StatusConflict)
+		return
+	case secureenclave.IsRootSeedRefusal(lerr):
+		// A seed is stored and this build refuses to use it (unwrapped, in
+		// production). Not replaced either: the answer is the refusal.
+		writeRootSeedRefused(w, lerr.Error())
+		return
+	case !errors.Is(lerr, secureenclave.ErrNoRootSeed):
+		// A seed is stored and could not be read (a brief unwrap failure, a
+		// damaged file). Only "there is none" may be answered by writing one:
+		// anything else would replace the only copy with a different phrase.
+		log.Printf("[identity-agent-core] refusing to set a root seed: the stored one could not be read: %v", lerr)
+		jsonError(w, "a root seed is stored on this agent and could not be read just now, so it was not replaced — try again, or restore from a backup", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -209,7 +224,7 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := secureenclave.StoreIdentityRootSeed(s.DataDir, seed); err != nil {
 		if secureenclave.IsRootSeedRefusal(err) {
-			jsonError(w, err.Error(), http.StatusPreconditionFailed)
+			writeRootSeedRefused(w, err.Error())
 			return
 		}
 		jsonError(w, "failed to store root seed", http.StatusInternalServerError)
@@ -229,11 +244,22 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 // handleRootSeedStatus reports whether a root seed is established (never the
 // seed itself). The owner and its controllers only. Lets the client decide whether a handoff is
 // still needed.
+//
+// A STORED SEED THIS BUILD REFUSES TO USE IS STILL A SEED. Answering
+// established:false for it told a client "no seed here", which invites a
+// handoff that would replace the only copy. It is reported as established and
+// refused, with the root-seed refusal code and reason, so a client can tell
+// "nothing here" from "something here that may not be used".
 func (s *CoreServer) handleRootSeedStatus(w http.ResponseWriter, r *http.Request) {
 	if !s.isOwnerOrItsController(r) {
 		jsonError(w, "keystore management is for the owner of this agent", http.StatusForbidden)
 		return
 	}
 	_, err := secureenclave.LoadRootSeed(s.DataDir)
+	if secureenclave.IsRootSeedRefusal(err) {
+		jsonResponse(w, map[string]any{"established": true, "refused": true,
+			"code": rootSeedRefusedCode, "details": err.Error()})
+		return
+	}
 	jsonResponse(w, map[string]any{"established": err == nil})
 }

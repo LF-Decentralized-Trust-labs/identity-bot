@@ -35,8 +35,8 @@ type fakeWorkingWrapper struct{}
 
 func (fakeWorkingWrapper) Available() bool                 { return true }
 func (fakeWorkingWrapper) Scheme() string                  { return "fake-se" }
-func (fakeWorkingWrapper) Wrap(p []byte) ([]byte, error)   { return append([]byte("w"), p...), nil }
-func (fakeWorkingWrapper) Unwrap(b []byte) ([]byte, error) { return b[1:], nil }
+func (fakeWorkingWrapper) Wrap(p []byte) ([]byte, error)   { return xorFake(p), nil }
+func (fakeWorkingWrapper) Unwrap(b []byte) ([]byte, error) { return xorFake(b), nil }
 
 // A production Mac has a usable enclave and a working wrapper, and still may not
 // hold a person's root seed: it is refused by the rule founding uses.
@@ -201,8 +201,11 @@ func inProduction(t *testing.T) {
 }
 
 // A person's root seed on a production Mac, where the wrapper WORKS, is reported
-// loudly and once whether it is plaintext or already wrapped, is kept, and a
-// plaintext one is never re-wrapped into looking legitimate.
+// loudly and once whether it is plaintext or already wrapped, and is kept. A
+// plaintext one is never re-wrapped into looking legitimate and is never served
+// (owner's rule, 2026-11-05: no production running without hardware key
+// protection): every use of it gets the root-seed refusal. A wrapped one is
+// under the hardware key and is served.
 func TestAPersonsRootSeedOnAProductionMacIsSaidLoudlyOnceWhateverItsWrapping(t *testing.T) {
 	inProduction(t)
 	for _, wrapped := range []bool{false, true} {
@@ -223,8 +226,18 @@ func TestAPersonsRootSeedOnAProductionMacIsSaidLoudlyOnceWhateverItsWrapping(t *
 			}
 			before, _ := os.ReadFile(rootSeedPath(dir))
 			for i := 0; i < 3; i++ {
-				if _, err := LoadRootSeed(dir); err != nil {
-					t.Fatal(err)
+				seed, err := LoadRootSeed(dir)
+				if wrapped {
+					if err != nil {
+						t.Fatal(err)
+					}
+					continue
+				}
+				if !IsRootSeedRefusal(err) || seed != nil {
+					t.Fatalf("production served a misplaced unwrapped root seed (%d bytes): %v", len(seed), err)
+				}
+				if !strings.Contains(err.Error(), "may not hold one") {
+					t.Fatalf("the refusal should say the machine may not hold it: %v", err)
 				}
 			}
 			if n := strings.Count(out.String(), "A PERSON'S ROOT SEED IS STORED HERE"); n != 1 {
@@ -241,6 +254,42 @@ func TestAPersonsRootSeedOnAProductionMacIsSaidLoudlyOnceWhateverItsWrapping(t *
 	}
 }
 
+// The pre-envelope file (the raw seed bytes) is the same case: a person's root
+// seed on a production Mac is refused, left byte-for-byte as it is, and a
+// development build keeps serving it (flagged in ReportSeedProtection).
+func TestALegacyRootSeedOnAProductionMacIsRefusedAndADevelopmentBuildServesIt(t *testing.T) {
+	productionMac(t)
+	pd := isDevBuild
+	t.Cleanup(func() { isDevBuild = pd })
+	captureLog(t)
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Dir(rootSeedPath(dir)), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootSeedPath(dir), theSeed(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecordSeedOrigin(dir, SeedFromPhrase); err != nil {
+		t.Fatal(err)
+	}
+
+	isDevBuild = func() bool { return false }
+	if seed, err := LoadRootSeed(dir); !IsRootSeedRefusal(err) || seed != nil {
+		t.Fatalf("production served a legacy root seed on a Mac (%d bytes): %v", len(seed), err)
+	}
+	if raw, _ := os.ReadFile(rootSeedPath(dir)); !bytes.Equal(raw, theSeed()) {
+		t.Fatalf("the refused legacy file was changed: %q", raw)
+	}
+
+	// The same file through an unwrapped envelope, in development: served.
+	plain := t.TempDir()
+	plainEnvelopeFor(t, plain, holderIdentity)
+	isDevBuild = func() bool { return true }
+	if seed, err := LoadRootSeed(plain); err != nil || !bytes.Equal(seed, theSeed()) {
+		t.Fatalf("a development build must keep serving it: %v", err)
+	}
+}
+
 // An envelope written before `holder` existed is recognised as a person's root by
 // the origin the machine recorded.
 func TestAnOlderEnvelopeIsRecognisedAsARootSeedByItsRecordedOrigin(t *testing.T) {
@@ -254,8 +303,8 @@ func TestAnOlderEnvelopeIsRecognisedAsARootSeedByItsRecordedOrigin(t *testing.T)
 	if err := RecordSeedOrigin(dir, SeedFromPhrase); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadRootSeed(dir); err != nil {
-		t.Fatal(err)
+	if _, err := LoadRootSeed(dir); !IsRootSeedRefusal(err) {
+		t.Fatalf("production served an older, unwrapped root seed on a Mac: %v", err)
 	}
 	if !strings.Contains(out.String(), "A PERSON'S ROOT SEED IS STORED HERE") {
 		t.Fatalf("an older root seed was not reported:\n%s", out.String())
@@ -309,7 +358,8 @@ func TestTheDirectoryBeingWrittenIsTheOneChecked(t *testing.T) {
 }
 
 // A machine's own seed, held unwrapped on a desktop, is not a root identity and
-// is not reported.
+// is not reported as a misplaced one. In production it is still refused, as every
+// unwrapped seed is.
 func TestAMachinesOwnPlaintextSeedIsNotReported(t *testing.T) {
 	inProduction(t)
 	productionMac(t)
@@ -317,8 +367,8 @@ func TestAMachinesOwnPlaintextSeedIsNotReported(t *testing.T) {
 	out := captureLog(t)
 	dir := t.TempDir()
 	plainEnvelopeFor(t, dir, holderDevice)
-	if _, err := LoadRootSeed(dir); err != nil {
-		t.Fatal(err)
+	if _, err := LoadRootSeed(dir); !IsRootSeedRefusal(err) {
+		t.Fatalf("a production build served an unwrapped seed: %v", err)
 	}
 	if strings.Contains(out.String(), "ROOT SEED IS STORED HERE") {
 		t.Fatalf("reported a machine's own seed:\n%s", out.String())

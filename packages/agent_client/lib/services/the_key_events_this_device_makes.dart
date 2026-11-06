@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 
 import '../crypto/keys.dart';
 import 'key_math.dart';
+import 'root_seed_handoff.dart' show RootSeedRefused;
 import 'the_event_this_device_expects.dart';
 import 'the_events_this_device_signed.dart';
 import 'the_identity_this_device_holds.dart';
@@ -1073,6 +1074,9 @@ class TheKeyEventsThisDeviceMakes {
       final d = jsonDecode(res.body);
       if (d is Map<String, dynamic>) decoded = d;
     } catch (_) {}
+    // A founding this device cannot protect the root seed for is refused with
+    // the core's own reason, as every founding route refuses it.
+    RootSeedRefused.throwIfRefused(res);
     if (res.statusCode < 200 || res.statusCode > 299) {
       throw KeyEventRefused(
           what, res.statusCode, '${decoded['error'] ?? ''}', res.body);

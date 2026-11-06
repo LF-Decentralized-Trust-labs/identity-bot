@@ -2,11 +2,11 @@
 
 package secureenclave
 
-// A phone is one of the places a root identity is meant to live, and the
-// Android Keystore/StrongBox seed wrapper is not written yet. Until it is, a
-// seed on Android is stored unwrapped, as it always was, and the envelope says
-// exactly that and why. Replacing this with a wrapper is its own task.
-func platformUnwrappedReason() string {
-	return "android: the Keystore/StrongBox seed wrapper is not written yet, " +
-		"so this seed is stored unwrapped under the app's private storage"
-}
+// Android's seed is wrapped by the app's Keystore key (StrongBox where the phone
+// has one, the TEE otherwise), driven through SeedWrapHost because the Keystore
+// cannot be reached from Go. See seedwrap_host.go for what the core insists on.
+func newPlatformSeedWrapper() SeedWrapper { return declaredHostSeedWrapper() }
+
+// platformIsAPhone: an app that registers no wrapper is refused in a production
+// build (noSeedWrapHostWhy); there is no old-app exemption.
+func platformIsAPhone() bool { return true }

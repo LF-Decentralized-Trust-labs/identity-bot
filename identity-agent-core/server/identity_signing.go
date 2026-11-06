@@ -44,11 +44,11 @@ func (s *CoreServer) identitySigningSeed() ([]byte, error) {
 	// means the key is held on another device.
 	rootSeed, err := ensureRootSeed(s.DataDir)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", errKeyUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", errKeyUnavailable, err)
 	}
 	seed, err := backup.DerivePairwiseSeed(rootSeed, identity.DerivationIndex, identity.KeyGeneration)
 	if err != nil {
-		return nil, fmt.Errorf("%w: could not derive this identity's signing key: %v", errKeyUnavailable, err)
+		return nil, fmt.Errorf("%w: could not derive this identity's signing key: %w", errKeyUnavailable, err)
 	}
 	derived := iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey))
 	if identity.PublicKey != "" && derived != identity.PublicKey {
@@ -79,12 +79,12 @@ func (s *CoreServer) ownKeyAt(key string) ([]byte, int, error) {
 	}
 	rootSeed, err := ensureRootSeed(s.DataDir)
 	if err != nil {
-		return nil, 0, fmt.Errorf("%w: %v", errKeyUnavailable, err)
+		return nil, 0, fmt.Errorf("%w: %w", errKeyUnavailable, err)
 	}
 	for gen := 0; gen <= identity.KeyGeneration+2; gen++ {
 		seed, err := backup.DerivePairwiseSeed(rootSeed, identity.DerivationIndex, gen)
 		if err != nil {
-			return nil, 0, fmt.Errorf("%w: %v", errKeyUnavailable, err)
+			return nil, 0, fmt.Errorf("%w: %w", errKeyUnavailable, err)
 		}
 		if iacrypto.VerkeyQB64(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)) == key {
 			return seed, gen, nil
@@ -154,7 +154,7 @@ func (s *CoreServer) keyCanSign() error {
 	case errors.Is(err, errKeyUnavailable):
 		return err
 	}
-	return fmt.Errorf("%w: %v", errKeyUnavailable, err)
+	return fmt.Errorf("%w: %w", errKeyUnavailable, err)
 }
 
 // keyIsElsewhere reports whether the identity's key is genuinely held on

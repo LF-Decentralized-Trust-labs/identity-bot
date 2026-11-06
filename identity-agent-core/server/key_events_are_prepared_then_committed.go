@@ -189,6 +189,10 @@ func (s *CoreServer) handleWitnessesForAFounding(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusForbidden, "Key events are the owner's", "only the owner asks who would witness a founding")
 		return
 	}
+	// The first step of a founding, so it is refused where a founding is.
+	if s.refuseIfThisComputerMayNotFound(w) {
+		return
+	}
 	type proposed struct {
 		AID     string `json:"aid"`
 		Address string `json:"address"`

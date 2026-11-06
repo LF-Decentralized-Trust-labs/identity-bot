@@ -9,6 +9,7 @@ import (
 // A seed that is stored and cannot be read right now is reported, and never
 // replaced: replacing it would destroy every key derived from it.
 func TestAStoredSeedThatCannotBeReadIsNeverReplaced(t *testing.T) {
+	aDevelopmentBuild(t)
 	dir := t.TempDir()
 	first, err := EnsureRootSeed(dir)
 	if err != nil {
