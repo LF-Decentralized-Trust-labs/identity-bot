@@ -1,7 +1,7 @@
 # ADR-066: A Sign-In Can Be for a Key a Browser Holds
 
 **Status:** Proposed
-**Date:** 2026-11-06
+**Date:** 2026-11-05
 **Deciders:** Rob Andersen
 **Amends:** ADR-021 (Sign In with Identity Agent — Login Protocol)
 
@@ -118,6 +118,16 @@ signatures), and a thumbprint that must be refused. Go
 - `login.VerifyAssertion` callers that have a challenge naming a browser key
   must move to `VerifyAssertionForBrowserKey`; until they do, they refuse such
   assertions (the safe direction).
+- **Older person agents refuse a challenge that names a browser key.**
+  `ReadChallengeBundle` reads a challenge strictly and rejects a field it does
+  not know, so an Identity Agent that predates this ADR will not show or sign
+  such a challenge. That fails safe: nothing is signed for the wrong key. But
+  the challenge's version stays "ASK1", so nothing tells a relying party in
+  advance, and a relying party that asks for a browser key locks out every
+  person whose agent has not updated. A relying party should ask for a browser
+  key only when the person's agent is known to support it (for example because
+  the agent advertises support), and otherwise fall back to a challenge that
+  names none, accepting the weaker, bearer-token session for that person.
 
 ## Implementation notes
 

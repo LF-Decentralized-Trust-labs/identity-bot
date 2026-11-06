@@ -31,6 +31,14 @@ assert.equal(canonicalChallengeBody(v.challenge), v.challenge_canonical_body, "c
 assert.equal(assertionDigest({ ...v.assertion, d: undefined, sig: undefined }), v.assertion.d, "the SAID is the core's");
 assert.ok(await verifyCanonical(v.assertion_canonical_body, v.assertion.sig, key), "assertion signature");
 assert.ok(await verifyCanonical(v.challenge_canonical_body, v.challenge.sig, key), "challenge signature");
+assert.equal(canonicalChallengeBody(v.challenge_with_anchor), v.challenge_with_anchor_canonical_body, "anchor challenge body is the core's");
+{
+  const b = v.challenge_with_anchor_canonical_body;
+  const [a, k, c] = ['"relationship_anchor_oobi"', '"browser_key"', '"callback_url"'].map((f) => b.indexOf(f));
+  assert.ok(0 < a && a < k && k < c, "browser_key sits after the anchor fields and before callback_url");
+  assert.ok(await verifyCanonical(b, v.challenge_with_anchor.sig, key), "anchor challenge signature");
+  assert.equal(readChallenge(JSON.stringify(v.challenge_with_anchor)).browser_key, v.thumbprint);
+}
 assert.equal(readChallenge(JSON.stringify(v.challenge)).browser_key, v.thumbprint);
 assert.equal(readAssertion(JSON.stringify(v.assertion)).browser_key, v.thumbprint);
 

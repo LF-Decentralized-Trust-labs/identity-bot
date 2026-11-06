@@ -25,7 +25,8 @@
         "callback_url": { "type": "string", "required": false, "kind": "open" },
         "session_token": { "type": "string", "required": false, "kind": "open" },
         "relationship_anchor_aid": { "type": "string", "required": false, "kind": "open" },
-        "relationship_anchor_oobi": { "type": "string", "required": false, "kind": "open" }
+        "relationship_anchor_oobi": { "type": "string", "required": false, "kind": "open" },
+        "browser_key": { "type": "string", "required": false, "kind": "open" }
       },
       "preview_contract": { "title": "Sign in to {site}", "conveys": ["site", "requested data/credentials/score"] },
       "discloses": [],

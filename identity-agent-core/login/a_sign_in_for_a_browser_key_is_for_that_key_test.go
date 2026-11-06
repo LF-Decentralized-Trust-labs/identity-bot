@@ -20,6 +20,8 @@ type browserKeyVectors struct {
 	AssertionCanonicalBody string            `json:"assertion_canonical_body"`
 	Challenge              ChallengeBundle   `json:"challenge"`
 	ChallengeCanonicalBody string            `json:"challenge_canonical_body"`
+	AnchorChallenge        ChallengeBundle   `json:"challenge_with_anchor"`
+	AnchorChallengeBody    string            `json:"challenge_with_anchor_canonical_body"`
 	SigningVerkey          string            `json:"signing_verkey_qb64"`
 	Negative               struct {
 		OtherBrowserKey string `json:"other_browser_key"`
@@ -68,6 +70,20 @@ func TestTheBrowserKeyVectorsAreTheSameInGoAndTypeScript(t *testing.T) {
 	}
 	if ok, err := VerifyString(v.ChallengeCanonicalBody, v.Challenge.Sig, key); err != nil || !ok {
 		t.Fatalf("the challenge signature does not verify: %v", err)
+	}
+	// browser_key sits after the relationship anchor fields and before callback_url.
+	if v.AnchorChallenge.RelationshipAnchorAID == "" || v.AnchorChallenge.RelationshipAnchorOOBI == "" || v.AnchorChallenge.BrowserKey != v.Thumbprint {
+		t.Fatal("the anchor vector does not carry the anchor fields and the thumbprint")
+	}
+	if got := canonicalChallengeBody(v.AnchorChallenge); got != v.AnchorChallengeBody {
+		t.Fatalf("anchor challenge body differs:\n go: %s\n ts: %s", got, v.AnchorChallengeBody)
+	}
+	ai, bi, ci := strings.Index(v.AnchorChallengeBody, `"relationship_anchor_oobi"`), strings.Index(v.AnchorChallengeBody, `"browser_key"`), strings.Index(v.AnchorChallengeBody, `"callback_url"`)
+	if !(0 < ai && ai < bi && bi < ci) {
+		t.Fatal("browser_key is not between the anchor fields and callback_url")
+	}
+	if ok, err := VerifyString(v.AnchorChallengeBody, v.AnchorChallenge.Sig, key); err != nil || !ok {
+		t.Fatalf("the anchor challenge signature does not verify: %v", err)
 	}
 	// Strictly read, the way a verifier reads what it receives.
 	raw, _ := json.Marshal(v.Challenge)

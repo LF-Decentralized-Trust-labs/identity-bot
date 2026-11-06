@@ -38,7 +38,28 @@
     "sig": "0BBOI5C_pkdAfz6PdvBAnzmk_aYd-841y8946BtPD2EJSRicESguS2HofQSO4q8UgERZ05UnTYtxSYCKKTKumUQC"
   },
   "challenge_canonical_body": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"EM29GoldenSiteAID0123456789ABCDEFGHIJKLMNOPQ\",\"site_oobi\":\"https://app.example.com/public/oobi/EM29GoldenSiteAID0123456789ABCDEFGHIJKLMNOPQ\",\"audience\":\"https://app.example.com\",\"nonce\":\"m29GoldenNonce0123456789ABCDEFGH\",\"dt\":\"2026-06-17T12:00:00Z\",\"expiry\":\"2026-06-17T12:10:00Z\",\"requested_disclosures\":[\"display_name\"],\"requested_credentials\":[],\"browser_key\":\"oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U\",\"callback_url\":\"https://app.example.com/api/login/callback\",\"session_token\":\"golden-session-token\"}",
-  "description": "Browser-key thumbprint vectors (ADR-066). The JWK is RFC 7515 appendix A.3's P-256 key. The challenge and the assertion are signed with the golden seed of golden_vectors.json.",
+  "challenge_with_anchor": {
+    "v": "ASK1",
+    "t": 1,
+    "site_aid": "EM29GoldenSiteAID0123456789ABCDEFGHIJKLMNOPQ",
+    "site_oobi": "https://app.example.com/public/oobi/EM29GoldenSiteAID0123456789ABCDEFGHIJKLMNOPQ",
+    "audience": "https://app.example.com",
+    "nonce": "m29GoldenNonce0123456789ABCDEFGH",
+    "dt": "2026-06-17T12:00:00Z",
+    "expiry": "2026-06-17T12:10:00Z",
+    "requested_disclosures": [
+      "display_name"
+    ],
+    "requested_credentials": [],
+    "callback_url": "https://app.example.com/api/login/callback",
+    "session_token": "golden-session-token",
+    "relationship_anchor_aid": "EIQ1ViYdMzEwjQFL0L6iwx32TOOJpqtAgFndcOwny4jN",
+    "relationship_anchor_oobi": "https://k7f2p.relay.grapeid.org/oobi/EIQ1ViYdMzEwjQFL0L6iwx32TOOJpqtAgFndcOwny4jN",
+    "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U",
+    "sig": "0BAbF0sW0krhLDn17QrUUr5svLx228aTjt8MtQBKpCnDYir9r3ZOR6EyoU8aoqpE1_aih4DeseJ0RTJzpW2vlaEH"
+  },
+  "challenge_with_anchor_canonical_body": "{\"v\":\"ASK1\",\"t\":1,\"site_aid\":\"EM29GoldenSiteAID0123456789ABCDEFGHIJKLMNOPQ\",\"site_oobi\":\"https://app.example.com/public/oobi/EM29GoldenSiteAID0123456789ABCDEFGHIJKLMNOPQ\",\"audience\":\"https://app.example.com\",\"nonce\":\"m29GoldenNonce0123456789ABCDEFGH\",\"dt\":\"2026-06-17T12:00:00Z\",\"expiry\":\"2026-06-17T12:10:00Z\",\"requested_disclosures\":[\"display_name\"],\"requested_credentials\":[],\"relationship_anchor_aid\":\"EIQ1ViYdMzEwjQFL0L6iwx32TOOJpqtAgFndcOwny4jN\",\"relationship_anchor_oobi\":\"https://k7f2p.relay.grapeid.org/oobi/EIQ1ViYdMzEwjQFL0L6iwx32TOOJpqtAgFndcOwny4jN\",\"browser_key\":\"oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U\",\"callback_url\":\"https://app.example.com/api/login/callback\",\"session_token\":\"golden-session-token\"}",
+  "description": "Browser-key thumbprint vectors (ADR-066). The JWK is RFC 7515 appendix A.3's P-256 key. The challenge and the assertion are signed with the golden seed of golden_vectors.json. challenge_with_anchor carries browser_key together with relationship_anchor_* fields and pins that browser_key is written after them and before callback_url.",
   "expected_verify": {
     "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U",
     "site_aid": "EM29GoldenSiteAID0123456789ABCDEFGHIJKLMNOPQ"
