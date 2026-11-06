@@ -95,6 +95,25 @@ func AnchoredSigningKeys(event map[string]interface{}) (ed25519Pub, mldsa65Pub [
 	return nil, nil, ErrNotAnchored
 }
 
+// KeySetInForce returns the event of events, an identity's whole verified key
+// log in order, that anchors the keyset the identity is reached on: the last
+// one carrying an IA-HYBRID-1 keyset seal (ADR-061 sections 8 and 9). The
+// founding anchors the first keyset; a move to a new recovery phrase anchors
+// its replacement, and from then on the founding's keys are out of use, since
+// the phrase they derive from may have leaked. ErrNotAnchored when no event
+// anchors one. The seal's contents are read by AnchoredAgreementKeys and
+// AnchoredSigningKeys on the event returned.
+func KeySetInForce(events []map[string]interface{}) (map[string]interface{}, error) {
+	for i := len(events) - 1; i >= 0; i-- {
+		for _, seal := range anchorList(events[i]["a"]) {
+			if suite, _ := seal["ia"].(string); suite == CipherSuiteIAHybrid1 {
+				return events[i], nil
+			}
+		}
+	}
+	return nil, ErrNotAnchored
+}
+
 // ErrNotAnchored means the event carries no key-agreement anchor.
 //
 // Distinguished from a malformed one because the two have different causes: an

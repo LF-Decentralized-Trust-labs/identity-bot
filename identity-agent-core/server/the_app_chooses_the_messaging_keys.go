@@ -206,19 +206,33 @@ func (s *CoreServer) anchoredLast(aid string, anchor map[string]interface{}) boo
 	if err != nil || len(events) == 0 {
 		return false
 	}
-	var last map[string]interface{}
+	log := make([]map[string]interface{}, 0, len(events))
 	for _, ev := range events {
 		raw, err := base64.StdEncoding.DecodeString(ev.RawBytesB64)
 		if err != nil {
 			return false
 		}
-		if found := messagingAnchorsIn(raw); len(found) > 0 {
-			last = found[len(found)-1]
+		var e map[string]interface{}
+		if json.Unmarshal(raw, &e) != nil {
+			return false
 		}
+		log = append(log, e)
 	}
-	if last == nil {
+	// The one walk to the keyset in force, shared with the check of whether
+	// keys belong to an identifier (didcomm.CheckKeysBelongTo).
+	anchoring, err := iacrypto.KeySetInForce(log)
+	if err != nil {
 		return false
 	}
+	raw, err := json.Marshal(anchoring)
+	if err != nil {
+		return false
+	}
+	found := messagingAnchorsIn(raw)
+	if len(found) == 0 {
+		return false
+	}
+	last := found[len(found)-1]
 	want, _ := json.Marshal(anchor)
 	got, _ := json.Marshal(last)
 	return string(got) == string(want)
