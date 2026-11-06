@@ -99,6 +99,9 @@ func (s *CoreServer) issuanceLogForVerification(cred *keri.Credential, issuerKel
 			return issuanceLog{issuerKel: issuerKel}
 		}
 		fetched, dup, kel := s.registryLogFromWitnesses(telClient, cred.Issuer, registry, said, issuerKel)
+		if len(kel) > len(issuerKel) {
+			s.keepCaughtUpKeyLog(cred.Issuer, kel)
+		}
 		return issuanceLog{events: fetched, provenComplete: len(fetched) > 0, duplicity: dup, issuerKel: kel}
 	}
 	out := make([]string, 0, len(events))
