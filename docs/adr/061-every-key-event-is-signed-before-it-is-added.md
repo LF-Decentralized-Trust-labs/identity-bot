@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-10-31
+**Amended:** 2026-11-06: the core's hash is compiled into the app, and on Windows the signer is the Artifact Signing certificate profile and an unsigned app relies on the hash (§7)
 **Amends:** ADR-044 (the paragraphs on rotations appended unsigned and on keys held by the app, and the sentence that signing is never split into a prepare and a commit), ADR-022 (how post-quantum pre-rotation is committed and revealed)
 **Relates to:** ADR-016 (Witness protocol), ADR-029 (Backing up without the recovery phrase), ADR-031 (Who witnesses what), ADR-037 (One KERI engine on every platform), ADR-039 (A backup is of an identity), ADR-049 (One signing form), ADR-060 (One accepted string per spelling)
 
@@ -730,10 +731,26 @@ processes can read, unlike a command-line argument, which any process can.
 
 **The binary is checked before it is run.** On macOS the app checks that the
 `keymath` binary carries a valid code signature by the same signer as the app;
-on Windows, a valid Authenticode signature by the same signer; and on both, a
-hash recorded at build time. If a check fails the app does not run it and
-reports an error; there is no fallback. On iOS and Android `keymath` is linked
-into the app's own signed binary.
+on Windows, a valid Authenticode signature by the same signer where the app is
+itself signed; and on both, a hash recorded at build time. If a check fails the
+app does not run it and reports an error; there is no fallback. On iOS and
+Android `keymath` is linked into the app's own signed binary.
+
+**Amended 2026-11-06: the hash is compiled in, and on Windows an unsigned app
+relies on it alone.** The hash is compiled into the app
+(`IDENTITY_AGENT_CORE_SHA256`), so a build signs the binary first and builds the
+app with the hash of that signed binary, and never signs the binary again. On
+Windows the same signer is the same certificate profile where the signer is
+Azure Artifact Signing, whose certificates last three days and are replaced
+daily: the profile's durable identity value, an EKU under 1.3.6.1.4.1.311.97,
+taken only from a certificate Microsoft issued with the Artifact Signing
+marker. Any other certificate is compared whole. Such a signature carries an
+RFC 3161 timestamp, or it stops verifying when its certificate expires. A
+Windows app with no Authenticode signature at all runs the binary on its hash
+alone: on Windows the hash lives in the app's compiled Dart code, which
+Authenticode does not cover even in a signed app, so the signer check adds
+nothing there that the hash does not. A Windows app whose own signature does
+not verify runs nothing.
 
 **Seeds are held as briefly as the platform allows.** The app zeroes every
 buffer holding a seed or child seed after use, and `keymath` zeroes its copies.
