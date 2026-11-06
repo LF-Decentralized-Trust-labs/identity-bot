@@ -91,6 +91,9 @@ func (s *CoreServer) handleAskCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	ask, seed, err := minter.Mint(s)
 	if err != nil {
+		if refuseIfRootSeedRefused(w, err) {
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

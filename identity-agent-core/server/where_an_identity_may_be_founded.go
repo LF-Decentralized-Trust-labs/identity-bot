@@ -30,6 +30,26 @@ const (
 //
 // Placed before anything is read or generated, so a machine that may not found
 // never produces key material it would then have to throw away.
+// rootSeedRefusalTitle is the headline of every answer that says this computer
+// cannot hold a root seed.
+const rootSeedRefusalTitle = "an identity cannot be created on this computer"
+
+// refuseIfRootSeedRefused answers 412 with the refusal body when err is the
+// root-seed refusal, and reports whether it did.
+//
+// The refusal comes out of ensureRootSeed on any path that needs key material
+// (pairing a non-root computer, minting an owner or pairwise identity). Left to
+// each caller's own error branch it surfaced as an untyped 500 or 503, which a
+// client cannot tell from a fault. Same status and body as
+// refuseIfThisComputerMayNotFound, so a client handles one shape.
+func refuseIfRootSeedRefused(w http.ResponseWriter, err error) bool {
+	if !secureenclave.IsRootSeedRefusal(err) {
+		return false
+	}
+	writeError(w, http.StatusPreconditionFailed, rootSeedRefusalTitle, err.Error())
+	return true
+}
+
 func (s *CoreServer) refuseIfThisComputerMayNotFound(w http.ResponseWriter) bool {
 	v := secureenclave.MayFoundAnIdentityHere(s.DataDir)
 	if secureenclave.FoundingPermitted(v, buildmode.IsDev()) {
@@ -41,8 +61,7 @@ func (s *CoreServer) refuseIfThisComputerMayNotFound(w http.ResponseWriter) bool
 		// so every way of founding makes it, before anything is generated.
 		// A development build passes it, and says so in ReportSeedProtection.
 		if err := secureenclave.CheckRootSeedMayLiveHere(s.DataDir); err != nil {
-			writeError(w, http.StatusPreconditionFailed,
-				"an identity cannot be created on this computer", err.Error())
+			writeError(w, http.StatusPreconditionFailed, rootSeedRefusalTitle, err.Error())
 			return true
 		}
 		if !v.Permitted {

@@ -9,6 +9,7 @@ import 'package:crypto/crypto.dart';
 import 'owner_signing_client.dart';
 import 'signing_an_event.dart';
 import 'the_key_in_force.dart';
+import 'root_seed_handoff.dart';
 import '../crypto/keys.dart';
 import '../models/public_name_rule.dart';
 import 'browser_session_client.dart';
@@ -870,6 +871,7 @@ class CoreService {
       }),
     );
 
+    RootSeedRefused.throwIfRefused(response);
     if (response.statusCode != 201) {
       final body = jsonDecode(response.body);
       throw Exception(body['error'] ?? 'Inception failed: ${response.statusCode}');
@@ -2377,6 +2379,7 @@ class CoreService {
       headers: {'Content-Type': 'application/json'},
       body: '{}',
     );
+    RootSeedRefused.throwIfRefused(response);
     if (response.statusCode != 200) {
       throw Exception(
           'Could not create an identity for this machine: ${response.statusCode}');
@@ -2461,6 +2464,7 @@ class CoreService {
     if (response.statusCode == 200) {
       return jsonDecode(response.body) as Map<String, dynamic>;
     }
+    RootSeedRefused.throwIfRefused(response);
     // The agent's refusals are already written for a person; this only strips
     // the JSON wrapper so a screen does not have to.
     try {
@@ -2827,8 +2831,10 @@ class KeyProtectionDto {
   final String seedWrapScheme;
 
   /// Why a root key is refused although the hardware could hold one, in words
-  /// to show a person. On a development build it reads that the seed is not
-  /// hardware-protected. Empty when nothing is refused.
+  /// to show a person. Empty when nothing is refused, and empty on a
+  /// development build, which is not refused: it reads
+  /// [SeedProtectionDto] instead for the fact that the seed is not
+  /// hardware-protected.
   final String rootKeyRefusal;
   final SeedProtectionDto? seedProtection;
 

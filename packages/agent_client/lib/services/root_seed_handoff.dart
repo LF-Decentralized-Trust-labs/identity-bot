@@ -17,15 +17,25 @@ import 'the_owner_at_this_computer.dart';
 /// replace an established different seed (409).
 /// The core refused to hold this person's root seed on this device (HTTP 412):
 /// its secure hardware cannot protect the seed, and a production build will not
-/// write one it cannot. Thrown by [RootSeedHandoff.register] and never
-/// swallowed, because carrying on would leave the core to keep a seed of its
-/// own unprotected, which is the thing refused. [message] is the core's reason,
-/// in words to show the person.
+/// write one it cannot. Thrown by [RootSeedHandoff.register] and by every call
+/// that can be answered with the refusal (founding, minting the identity that
+/// owns a machine, adopting a machine), through [RootSeedRefused.throwIfRefused],
+/// and never swallowed, because carrying on would leave the core to keep a seed
+/// of its own unprotected, which is the thing refused. [message] is the core's
+/// reason, in words to show the person.
 class RootSeedRefused implements Exception {
   RootSeedRefused(this.message);
   final String message;
   @override
   String toString() => message;
+
+  /// Throws [RootSeedRefused] when [response] is the core's 412 refusal, and
+  /// does nothing for any other answer. The reason is the core's headline and
+  /// its details together, so the person is given both.
+  static void throwIfRefused(http.Response response) {
+    if (response.statusCode != 412) return;
+    throw RootSeedRefused(RootSeedHandoff._reasonIn(response.body));
+  }
 }
 
 class RootSeedHandoff {
@@ -106,11 +116,16 @@ class RootSeedHandoff {
     }
   }
 
+  @visibleForTesting
+  static String reasonIn(String body) => _reasonIn(body);
+
   static String _reasonIn(String body) {
     try {
       final j = jsonDecode(body);
       if (j is Map && j['error'] is String && (j['error'] as String).isNotEmpty) {
-        return j['error'] as String;
+        final said = j['error'] as String;
+        final detail = j['details'];
+        return detail is String && detail.isNotEmpty ? '$said: $detail' : said;
       }
     } catch (_) {}
     return 'this device cannot protect your identity\'s root key, so none was stored';
