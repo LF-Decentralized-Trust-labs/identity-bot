@@ -258,7 +258,7 @@ private-use range or inside an implementation.
 - **Request schema (ChallengeBundle):** `site_aid`, `site_oobi`, `audience`, `nonce`,
   `dt`, `expiry`, `requested_disclosures[]`, `requested_credentials[]`,
   `requested_score?`, `callback_url`, `session_token`, `relationship_anchor_aid?`,
-  `relationship_anchor_oobi?`.
+  `relationship_anchor_oobi?`, `browser_key?`.
 - **Preview:** "Sign in to {site}" + what's being requested (data/credentials/score).
 - **Outcome:** the agent presents a pairwise AID (per-RP by default; anchored to a
   chosen identity when `relationship_anchor_aid` is set), signs the challenge, and
@@ -266,6 +266,10 @@ private-use range or inside an implementation.
 - **Notes:** `relationship_anchor_*` is a **general** mechanism — anchor the login
   relationship to a specified identity instead of a fresh per-RP one. (Grape uses
   it for employee-gated org portals, but the mechanism itself is universal.)
+  `browser_key` is the RFC 7638 thumbprint (43 characters of unpadded base64url) of a
+  key the sign-in's browser holds and cannot export. When present it is signed in the
+  challenge, after the relationship anchor fields and before `callback_url`, and the
+  assertion repeats it (ADR-066).
 
 ### `t = 2` · `add_contact`
 - **Summary:** a mutual, front-facing "we know each other" contact ceremony between two agents.

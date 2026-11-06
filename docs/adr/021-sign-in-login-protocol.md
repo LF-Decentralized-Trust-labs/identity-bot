@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-06-19
+**Amended by:** ADR-066 (Proposed) — a challenge and assertion may carry a browser key thumbprint
 **Deciders:** Rob Andersen
 
 ---

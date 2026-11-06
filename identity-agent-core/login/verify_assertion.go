@@ -50,6 +50,16 @@ func freshnessWindow(maxSkewSeconds int) time.Duration {
 // name it: an assertion naming another site was approved for that site's
 // challenge, carrying this one's nonce and audience copied into it.
 func VerifyAssertion(a Assertion, expectedNonce, expectedAudience, expectedSiteAID string, maxSkewSeconds int) AssertionVerifyResult {
+	return VerifyAssertionForBrowserKey(a, expectedNonce, expectedAudience, expectedSiteAID, "", maxSkewSeconds)
+}
+
+// VerifyAssertionForBrowserKey is VerifyAssertion for a sign-in made for a
+// browser's key (ADR-066). expectedBrowserKey is the thumbprint the challenge
+// named, and the signed assertion must repeat exactly it: a different
+// thumbprint, none, or one where the challenge named none are all refused,
+// so an approval made for one browser's key cannot let in another. Empty
+// means the challenge named no key and the assertion must name none.
+func VerifyAssertionForBrowserKey(a Assertion, expectedNonce, expectedAudience, expectedSiteAID, expectedBrowserKey string, maxSkewSeconds int) AssertionVerifyResult {
 	window := freshnessWindow(maxSkewSeconds)
 
 	dt, err := parseRFC3339(a.Dt)
@@ -67,6 +77,14 @@ func VerifyAssertion(a Assertion, expectedNonce, expectedAudience, expectedSiteA
 	}
 	if expectedSiteAID == "" || a.SiteAID != expectedSiteAID {
 		return AssertionVerifyResult{Reason: "site mismatch: the assertion answers another site's challenge"}
+	}
+	if a.BrowserKey != expectedBrowserKey {
+		return AssertionVerifyResult{Reason: "browser key mismatch: the assertion was approved for another browser key"}
+	}
+	if expectedBrowserKey != "" {
+		if err := CheckBrowserKeyThumbprint(expectedBrowserKey); err != nil {
+			return AssertionVerifyResult{Reason: "browser key mismatch: " + err.Error()}
+		}
 	}
 	if a.Sig == "" {
 		return AssertionVerifyResult{Reason: "missing sig"}

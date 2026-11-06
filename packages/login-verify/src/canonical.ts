@@ -178,12 +178,12 @@ function isMap(v: unknown): v is Record<string, unknown> {
 
 const ASSERTION_FIELDS = new Set([
   "v", "t", "d", "i", "relationship_aid_oobi", "audience", "nonce", "dt",
-  "disclosures", "presented_acdcs", "custom_data", "p_kel", "site_aid", "sig",
+  "disclosures", "presented_acdcs", "custom_data", "p_kel", "site_aid", "browser_key", "sig",
 ]);
 const CHALLENGE_FIELDS = new Set([
   "v", "t", "site_aid", "site_oobi", "audience", "nonce", "dt", "expiry",
   "requested_disclosures", "requested_credentials", "requested_score",
-  "relationship_anchor_aid", "relationship_anchor_oobi", "callback_url", "session_token", "sig",
+  "relationship_anchor_aid", "relationship_anchor_oobi", "browser_key", "callback_url", "session_token", "sig",
 ]);
 const REQUESTED_CREDENTIAL_FIELDS = new Set(["schema_said", "required"]);
 const REQUESTED_SCORE_FIELDS = new Set(["min_band", "min_score", "required"]);
@@ -278,6 +278,8 @@ export function canonicalChallengeBody(challenge: LoginChallenge): string {
       textField("relationship_anchor_oobi", c.relationship_anchor_oobi),
     );
   }
+  // The browser key a sign-in is for (ADR-066), omitted when the challenge names none.
+  if (str(c.browser_key, "browser_key") !== "") parts.push(textField("browser_key", c.browser_key));
   parts.push(textField("callback_url", c.callback_url), textField("session_token", c.session_token));
   return `{${parts.join(",")}}`;
 }
@@ -309,6 +311,7 @@ export function canonicalAssertionBody(assertion: LoginAssertion): string {
   }
   if (str(a.p_kel, "p_kel") !== "") parts.push(textField("p_kel", a.p_kel));
   if (str(a.site_aid, "site_aid") !== "") parts.push(textField("site_aid", a.site_aid));
+  if (str(a.browser_key, "browser_key") !== "") parts.push(textField("browser_key", a.browser_key));
   return `{${parts.join(",")}}`;
 }
 
@@ -363,6 +366,22 @@ export async function verifyEd25519(
   } catch {
     return false;
   }
+}
+
+/** The RFC 7638 thumbprint of a P-256 public key given as JWK coordinates:
+ *  base64url(SHA-256 of {"crv":"P-256","kty":"EC","x":..,"y":..}). It names a
+ *  browser key in a challenge and an assertion (ADR-066). Coordinates that are
+ *  not 32 bytes in one spelling are refused (null). */
+export function thumbprintP256(x: unknown, y: unknown): string | null {
+  if (decodeBase64UrlStrict(x, 32) === null || decodeBase64UrlStrict(y, 32) === null) return null;
+  const input = `{"crv":"P-256","kty":"EC","x":"${x}","y":"${y}"}`;
+  return createHash("sha256").update(input).digest("base64url");
+}
+
+/** True for exactly one spelling of a thumbprint: 43 characters of base64url
+ *  that are a 32-byte digest. */
+export function isBrowserKeyThumbprint(s: unknown): s is string {
+  return decodeBase64UrlStrict(s, 32) !== null;
 }
 
 export function randomToken(bytes = 32): string {

@@ -7,6 +7,9 @@ export interface SignInButtonProps {
   sessionEndpoint: string;
   requestDisclosures: string[];
   requestCredentials?: Array<{ schemaSaid: string; required?: boolean }>;
+  /** Thumbprint of a key this browser holds and cannot export (ADR-066). The
+   *  challenge names it and the person's approval is for that key. */
+  browserKey?: string;
   requestScore?: { minBand?: "red" | "amber" | "green"; minScore?: number; required?: boolean };
   theme?: "light" | "dark" | "auto";
   size?: "small" | "medium" | "large";
@@ -41,6 +44,7 @@ export function SignInButton({
   requestDisclosures,
   requestCredentials = [],
   requestScore,
+  browserKey,
   theme = "auto",
   size = "medium",
   qrFallback = true,
@@ -77,6 +81,7 @@ export function SignInButton({
             schema_said: c.schemaSaid,
             required: c.required ?? false,
           })),
+          browserKey,
           requestScore: requestScore
             ? {
                 min_band: requestScore.minBand,
@@ -118,7 +123,7 @@ export function SignInButton({
     } finally {
       setBusy(false);
     }
-  }, [sessionEndpoint, requestDisclosures, requestCredentials, requestScore, qrFallback, onError]);
+  }, [sessionEndpoint, requestDisclosures, requestCredentials, requestScore, browserKey, qrFallback, onError]);
 
   const isDark =
     theme === "dark" ||

@@ -3,6 +3,7 @@ import {
   assertionDigest,
   canonicalAssertionBody,
   canonicalChallengeBody,
+  isBrowserKeyThumbprint,
   nonTransferableAidQb64,
   randomToken,
   rfc3339Utc,
@@ -84,6 +85,10 @@ export class IdentityAgentVerifier {
     if (opts.requestScore) {
       challenge.requested_score = opts.requestScore;
     }
+    if (opts.browserKey) {
+      if (!isBrowserKeyThumbprint(opts.browserKey)) throw new Error("browserKey must be a browser key thumbprint");
+      challenge.browser_key = opts.browserKey;
+    }
 
     const body = canonicalChallengeBody(challenge);
     challenge.sig = await signCanonical(body, this.site.privateKey);
@@ -130,6 +135,7 @@ export class IdentityAgentVerifier {
       expectedAudience: opts.expectedAudience,
       expectedNonce: opts.expectedNonce,
       expectedSiteAid: opts.expectedSiteAid,
+      expectedBrowserKey: opts.expectedBrowserKey,
       maxSkewSeconds: opts.maxSkewSeconds,
       resolveKey: this.resolveKey,
     });
@@ -155,6 +161,7 @@ export class IdentityAgentVerifier {
       expectedAudience: rec.challenge.audience,
       expectedNonce: rec.challenge.nonce,
       expectedSiteAid: rec.challenge.site_aid,
+      expectedBrowserKey: rec.challenge.browser_key,
     });
     if (!result.valid || !result.pairwiseAID) {
       return { ok: false, reason: result.reason };

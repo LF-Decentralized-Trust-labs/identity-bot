@@ -54,6 +54,10 @@ export interface LoginChallenge {
    * one the org enrolled. Signed as part of the canonical body. */
   relationship_anchor_aid?: string;
   relationship_anchor_oobi?: string;
+  /** The thumbprint (RFC 7638, SHA-256, base64url) of the key a browser holds
+   *  and cannot export, when the sign-in is for that browser (ADR-066).
+   *  Signed; the assertion repeats it. */
+  browser_key?: string;
   callback_url: string;
   session_token: string;
   sig?: string;
@@ -86,6 +90,9 @@ export interface LoginAssertion {
    *  nonce are text another site can copy, the key that signed its challenge
    *  is not. */
   site_aid?: string;
+  /** Repeats the challenge's `browser_key` (ADR-066): the person approved a
+   *  sign-in for that browser key and no other. */
+  browser_key?: string;
   sig?: string;
 }
 
@@ -96,6 +103,8 @@ export interface CreateChallengeOptions {
   requestScore?: RequestedScore;
   callbackUrl: string;
   sessionToken?: string;
+  /** Thumbprint of the browser key this sign-in is for (ADR-066). */
+  browserKey?: string;
 }
 
 export interface VerifyAssertionOptions {
@@ -103,6 +112,10 @@ export interface VerifyAssertionOptions {
   expectedNonce: string;
   /** This site's own identifier: the assertion must name it (`site_aid`). */
   expectedSiteAid: string;
+  /** The thumbprint the challenge named (ADR-066); omit when it named none. The
+   *  assertion must repeat exactly it, and an assertion naming a browser key
+   *  is refused when none was expected. */
+  expectedBrowserKey?: string;
   maxSkewSeconds?: number;
 }
 

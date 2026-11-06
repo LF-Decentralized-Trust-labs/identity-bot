@@ -57,6 +57,7 @@ app.post("/verify", async (req, res) => {
     const expectedAudience = req.body?.expected_audience ?? req.body?.expectedAudience;
     const expectedNonce = req.body?.expected_nonce ?? req.body?.expectedNonce;
     const expectedSiteAid = req.body?.expected_site_aid ?? req.body?.expectedSiteAid;
+    const expectedBrowserKey = req.body?.expected_browser_key ?? req.body?.expectedBrowserKey;
     const maxSkewSeconds = req.body?.max_skew_seconds ?? req.body?.maxSkewSeconds;
     const referenceNow =
       req.body?.reference_now_rfc3339 ?? req.body?.referenceNowRfc3339;
@@ -86,6 +87,7 @@ app.post("/verify", async (req, res) => {
       expectedAudience,
       expectedNonce,
       expectedSiteAid,
+      expectedBrowserKey,
       maxSkewSeconds,
       resolveKey,
     };
