@@ -108,8 +108,10 @@ type Host interface {
 	// core's own routes.
 	StartBrowserKeySignIn(assetID, audience, browserKey, publicURL string) (server.BrowserKeySignIn, error)
 	// AssetStillAdmits is whether the asset's enrolment policy lets in the
-	// person known to it as pairwiseAID now: the membership check the sign-in
-	// made, asked again, so a person removed since can be signed out.
+	// person known to it as pairwiseAID now, by MEMBERSHIP only: the
+	// membership check the sign-in made, asked again, so a person removed
+	// since can be signed out. It does not re-check a required credential
+	// (RequiredCredSchema), which needs what the person presented.
 	AssetStillAdmits(assetID, pairwiseAID string) (bool, error)
 	// BrowserKeySignInResult is how that sign-in stands, given the session and
 	// secret StartBrowserKeySignIn returned. "Verified" carries the browser key

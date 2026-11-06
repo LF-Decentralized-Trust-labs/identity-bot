@@ -172,3 +172,91 @@ func TestAPersonRemovedFromTheRosterIsNoLongerAdmitted(t *testing.T) {
 		t.Fatal("an unknown asset admitted someone")
 	}
 }
+
+// browserKeyHost is the three methods of addon.Host an add-on calls (that
+// package imports this one, so the interface is restated here: the test fails
+// to compile if hostWrapper stops satisfying it, as it would for addon.Host).
+type browserKeyHost interface {
+	StartBrowserKeySignIn(assetID, audience, browserKey, publicURL string) (BrowserKeySignIn, error)
+	AssetStillAdmits(assetID, pairwiseAID string) (bool, error)
+	BrowserKeySignInResult(session, collector string) (BrowserKeySignInResult, error)
+}
+
+// The three methods an add-on calls, reached through the host wrapper
+// as an add-on reaches them, carrying a disclosure the person chose to show.
+func TestAnAddOnReachesTheBrowserKeySignInThroughTheHost(t *testing.T) {
+	w := anOrganisationWithAWebsite(t, asset.EnrollmentPolicy{Mode: asset.EnrollmentOpen})
+	var host browserKeyHost = hostWrapper{s: w.org}
+	h := aPersonsIdentityAgent(t)
+
+	// A challenge that asks for a disclosure, started and read through the host.
+	req := aBrowserKeyChallenge(t, w, aBrowserKey)
+	secret, err := w.org.mintCollectorSecret(req.SessionToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := host.BrowserKeySignInResult(req.SessionToken, "wrong"); err == nil {
+		t.Fatal("the host gave a result for a wrong secret")
+	}
+	if _, err := h.Approve(req); err != nil {
+		t.Fatal(err)
+	}
+	res, err := host.BrowserKeySignInResult(req.SessionToken, secret)
+	if err != nil || res.State != "verified" || res.BrowserKey != aBrowserKey {
+		t.Fatalf("through the host: %+v %v", res, err)
+	}
+	if res.Disclosures["display_name"] == "" {
+		t.Fatalf("the disclosure the person showed was dropped: %+v", res.Disclosures)
+	}
+	if ok, err := host.AssetStillAdmits("the-website", res.Pairwise); err != nil || !ok {
+		t.Fatalf("an open asset through the host: %v %v", ok, err)
+	}
+
+	// StartBrowserKeySignIn through the host refuses as the route does.
+	in, err := host.StartBrowserKeySignIn("the-website", "https://portal.example", aBrowserKey, w.srv.URL)
+	if err != nil || in.Session == "" || in.Collector == "" {
+		t.Fatalf("start through the host: %+v %v", in, err)
+	}
+	var refused *SignInRefused
+	if _, err := host.StartBrowserKeySignIn("no-such-asset", "x", aBrowserKey, w.srv.URL); !errors.As(err, &refused) || refused.Code != http.StatusNotFound {
+		t.Fatalf("an unknown asset through the host: %v", err)
+	}
+}
+
+// A verified result whose stored disclosures are not the map the callback
+// stores is an error, not a verified sign-in that shows nothing.
+func TestAVerifiedResultWithDisclosuresOfTheWrongTypeIsAnError(t *testing.T) {
+	w := anOrganisationWithAWebsite(t, asset.EnrollmentPolicy{Mode: asset.EnrollmentOpen})
+	in, err := w.org.startBrowserKeySignIn("the-website", "https://portal.example", aBrowserKey, w.srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, d := range map[string]interface{}{
+		"right type": map[string]string{"email": "a@example.com"},
+		"nil":        nil,
+		"wrong type": map[string]interface{}{"email": "a@example.com"},
+	} {
+		w.org.setChallengeStatus(in.Session, map[string]interface{}{
+			"status": "complete", "pairwise_aid": "Epat", "browser_key": aBrowserKey, "disclosures": d,
+		})
+		res, err := w.org.browserKeySignInResult(in.Session, in.Collector)
+		switch name {
+		case "right type":
+			if err != nil || res.Disclosures["email"] != "a@example.com" {
+				t.Fatalf("%s: %+v %v", name, res, err)
+			}
+		case "nil":
+			if err != nil || res.State != "verified" {
+				t.Fatalf("%s: %+v %v", name, res, err)
+			}
+		default:
+			if err == nil {
+				t.Fatalf("%s: read as %+v", name, res)
+			}
+		}
+	}
+	w.org.setChallengeStatus(in.Session, map[string]interface{}{"status": "complete", "browser_key": aBrowserKey})
+	if _, err := w.org.browserKeySignInResult(in.Session, in.Collector); err == nil {
+		t.Fatal("a verified sign-in with no identifier for the person was read")
+	}
+}

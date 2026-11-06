@@ -140,3 +140,30 @@ signatures), and a thumbprint that must be refused. Go
   `CreateChallengeOptions.browserKey`, `VerifyAssertionOptions.expectedBrowserKey`),
   `services/login-verify-ms` (`expected_browser_key`), `packages/login-web`
   (`SignInButton`'s `browserKey`).
+- Add-ons (`addon.Host`, `identity-agent-core/addon/addon.go`). An add-on that
+  fronts an asset (an app that serves pages) starts and reads a sign-in for a
+  browser's key through three Host methods; it is the same challenge and
+  result `POST /api/login/challenge` and `GET /api/login/challenge/{token}/status`
+  serve to a caller of the core's API, for a caller that is code in the core's
+  process. The person's Identity Agent fetches the challenge at `/i/{session}`
+  and answers at `/api/login/callback`; none of that is the add-on's.
+  - `StartBrowserKeySignIn(assetID, audience, browserKey, publicURL)` returns a
+    `server.BrowserKeySignIn`: `CanonicalBody` and `Sig` (the exact text the
+    asset signed, and the signature, so a party outside the process can check
+    them), `Pointer` (what the Identity Agent opens), `Session` and `Collector`.
+    Keep `Session` and `Collector` on the server; show the browser neither.
+    `browserKey` is the 43-character thumbprint. It fails with a
+    `*server.SignInRefused` carrying the status the route would have answered
+    (400 for no key or a malformed one, 404 for an unknown asset).
+  - `BrowserKeySignInResult(session, collector)` returns a
+    `server.BrowserKeySignInResult`: `State` is `pending`, `declined` or
+    `verified`; when verified, `Pairwise` is the person's identifier at the
+    asset, `BrowserKey` the thumbprint the assertion repeated (compare it to the
+    one asked for) and `Disclosures` what the person chose to show. A wrong
+    `collector`, an unknown session and a sign-in that was not for a browser's
+    key all return the same error.
+  - `AssetStillAdmits(assetID, pairwiseAID)` asks again whether the asset's
+    enrolment policy admits that person, by **membership only**: it does not
+    re-check a required credential, which needs what the person presented. An
+    error means the asset could not be read, which is not an answer either way.
+    Use it to sign out someone removed from the roster since they signed in.

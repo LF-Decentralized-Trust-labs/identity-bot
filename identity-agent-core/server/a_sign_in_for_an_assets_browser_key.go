@@ -92,9 +92,23 @@ func (s *CoreServer) browserKeySignInResult(session, collector string) (BrowserK
 	st := s.challengeStatusOf(session)
 	switch st["status"] {
 	case "complete":
+		// The callback stores a login.AssertionVerifyResult's fields: a string
+		// pairwise identifier and a map[string]string of disclosures. Anything
+		// else is not read as "verified with nothing disclosed", which would
+		// quietly drop what the person chose to show: it is an error.
 		out := BrowserKeySignInResult{State: "verified", BrowserKey: fmt.Sprint(st["browser_key"])}
-		out.Pairwise, _ = st["pairwise_aid"].(string)
-		out.Disclosures, _ = st["disclosures"].(map[string]string)
+		pairwise, ok := st["pairwise_aid"].(string)
+		if !ok || pairwise == "" {
+			return BrowserKeySignInResult{}, errors.New("the verified sign-in carries no identifier for the person")
+		}
+		out.Pairwise = pairwise
+		if d, present := st["disclosures"]; present && d != nil {
+			m, ok := d.(map[string]string)
+			if !ok {
+				return BrowserKeySignInResult{}, fmt.Errorf("the verified sign-in's disclosures are a %T, not the map the callback stores", d)
+			}
+			out.Disclosures = m
+		}
 		return out, nil
 	case "denied":
 		return BrowserKeySignInResult{State: "declined"}, nil
@@ -103,9 +117,11 @@ func (s *CoreServer) browserKeySignInResult(session, collector string) (BrowserK
 }
 
 // assetStillAdmits says whether the asset's enrolment policy lets this person
-// (by the identifier they signed in with) in now: the same membership gate the
+// (by the identifier they signed in with) in now: the same MEMBERSHIP gate the
 // callback applied when they signed in, asked again, so someone removed from
-// the roster since is no longer admitted. An error means the asset could not be
+// the roster since is no longer admitted. It does not re-check the policy's
+// required credential (RequiredCredSchema): that needs what the person
+// presented, which is not kept after the sign-in. An error means the asset could not be
 // read, which is not an answer either way.
 func (s *CoreServer) assetStillAdmits(assetID, pairwiseAID string) (bool, error) {
 	if s.assetHandler == nil {
