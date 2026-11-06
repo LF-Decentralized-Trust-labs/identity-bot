@@ -105,14 +105,20 @@ reachable.
      deployment has opted in with `TRUST_FORWARDED_HEADERS=1` — records that as its
      published address (`observedPublicBase` → `EndpointService.SetObservedURL`).
 
-A developer who needs Direct reach off-box today uses an explicit escape hatch
-(`AGENT_DIRECT_INGRESS_ADDR`, read by both `rootListenAddr` and
-`endpoint.DirectIngressHost` so bind and advertise cannot disagree). It binds the
-**whole** surface to a reachable address and is loud about exposing the management
-API; it is developer/testing only. A dedicated, path-scoped, manager-governed
-ingress listener that exposes reach *without* exposing the management surface is
-the intended home for Direct mode and is not built yet (see the partial-work note
-below).
+**Direct mode is reached on a second listener (amended 2026-11-05).** An agent in
+Direct mode with no relay or tunnel is reached off-box on a listener of its own,
+bound by `AGENT_DIRECT_LISTEN_ADDR=host:port` (`bindDirectListener` in
+`server/direct_ingress.go`); the root surface does not move. That listener serves
+only the `GET /{aid}/oobi`, `/{aid}/did.json`, `/{aid}/kel` and `/{aid}/keri.cesr`
+routes (`directIngressRoutes`), each already a public route by design in
+`publicRoutes`, and nothing else: a router with no other route, so the management
+API, the sealed carrier, DIDComm and the OIDC routes answer a bare 404. It answers
+for an identifier only when the URL manager has allowlisted that identifier
+(`/api/settings/reachability/direct-aids`, owner-only, kept in the data directory),
+and only while the resolved ingress mode is Direct; an identifier off the list gets
+the same 404 as one the agent has never heard of. The whole-surface hatch
+`AGENT_DIRECT_INGRESS_ADDR` is removed, and an agent started with it set refuses to start rather than quietly fall back to loopback; the address a Direct
+agent advertises is the direct listener's host and port.
 
 **Deviation — the sealed-instance model on a confidential-VM substrate (2026-10-18).**
 Point 2 above describes the sealed instance as a reverse proxy that "dials the
@@ -135,9 +141,7 @@ remote-and-signed and there is no local caller inside the guest to impersonate (
 agent is the only thing the VM runs); and reaching the management surface through the
 host proxy by owner/controller signature is the whole point of a sealed instance —
 hiding it would break remote owner management. The signal rides the measured image,
-so an owner verifies the posture in the launch measurement. The dev hatch
-(`AGENT_DIRECT_INGRESS_ADDR`) stays a separate, loud, dev-only path for LAN exposure,
-where there IS a local caller to protect and the warning is right.
+so an owner verifies the posture in the launch measurement. LAN exposure was once a separate dev hatch (`AGENT_DIRECT_INGRESS_ADDR`), because there IS a local caller to protect there. *(Amended 2026-11-05: that hatch is gone; LAN reach is the second listener above.)*
 
 ### 3. Who is the owner — the management gate
 
@@ -275,7 +279,7 @@ local. This is why every supported reachability path adds one: a reverse proxy a
 `X-Forwarded-*`, the relay adds its `X-IA-Via-Ingress` marker, and a managed tunnel
 adds its provider header. A deployment that puts an un-marking forwarder in front of
 the loopback port would defeat the gate, and must not; `TRUST_FORWARDED_HEADERS`
-and the direct-ingress hatch are the two places a deployment states its own shape,
+and `AGENT_DIRECT_LISTEN_ADDR` are the two places a deployment states its own shape,
 and both are off by default.
 
 ### 4. Per-need allocation
@@ -349,10 +353,16 @@ Still partial, and intended to extend the same mechanisms rather than replace th
   request it; the wired path makes one foundational allocation. Driving a distinct
   opaque allocation per Pairwise AID is the remaining step to full URL-layer
   unlinkability across counterparties.
-- **A dedicated path-scoped ingress listener for Direct mode.** Today Direct reach
-  off-box uses an explicit whole-surface escape hatch that also exposes the
-  management API. The supported end state is a separate, manager-governed, path-
-  scoped ingress that exposes reach without exposing the management surface.
+- **DIDComm over Direct.** The direct listener serves identifier documents only;
+  `POST /didcomm` is a root route and is not on it. Whether a Direct agent should
+  receive first-contact messages off-box, and on what path-scoped form, is not decided here.
+- **Pairing a phone over the LAN, in Direct mode (amended 2026-11-05).** Direct mode
+  is lookup only. The pairing routes are under `/api` on the root listener, which
+  stays on loopback, so a phone on the LAN gets a 404 there; Direct mode does not
+  support LAN pairing yet. This is the reason `AGENT_DIRECT_INGRESS_ADDR` existed,
+  and it is not replaced.
+- **DIDComm in Direct mode (amended 2026-11-05).** Direct mode does not support it
+  yet; see the item above.
 
 ## Consequences
 

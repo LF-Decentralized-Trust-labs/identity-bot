@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"identity-agent-core/witness"
 	"log"
@@ -245,6 +246,10 @@ func (s *CoreServer) tryFirstContact(w http.ResponseWriter, r *http.Request,
 		ValidatedAt:     time.Now().UTC().Format(time.RFC3339),
 	}); err != nil {
 		log.Printf("[first-contact] could not keep the key history for %s: %v", claimedAID, err)
+		if errors.Is(err, store.ErrLogDoesNotExtend) {
+			jsonError(w, "the key history offered does not carry on from the one already trusted for this identity", http.StatusConflict)
+			return true
+		}
 	}
 
 	if err := s.recordConnectionRequest(claimedAID, jwm); err != nil {

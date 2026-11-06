@@ -1001,6 +1001,8 @@ class LocalCoreKeriService extends KeriService {
         checks: (json['checks'] as Map<String, dynamic>?) ?? {},
         errors: List<String>.from(json['errors'] ?? []),
         acdcSaid: json['acdc_said'] ?? '',
+        revocationStatus: json['revocation_status'] as String?,
+        revocationReason: json['revocation_reason'] as String?,
       );
     } else {
       final body = jsonDecode(response.body);

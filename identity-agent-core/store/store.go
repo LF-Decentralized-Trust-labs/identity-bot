@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -508,6 +509,93 @@ type ContactKELRecord struct {
 	Witnessed bool `json:"witnessed"`
 }
 
+// ErrLogDoesNotExtend is returned by SaveContactKEL when the record offered would
+// replace a verified log with something that is not that log carried further.
+var ErrLogDoesNotExtend = errors.New("the log offered does not carry on from the verified log already held for this identifier")
+
+// saidOfRecord is the event identifier (d) of one log record, read from the
+// raw bytes the record carries and from nothing else: a field served beside
+// the bytes is not part of what was verified. "" means it cannot be read.
+func saidOfRecord(rec map[string]interface{}) string {
+	rawB64, _ := rec["raw_bytes_b64"].(string)
+	raw, err := drivers.DecodeRawBytes(rawB64)
+	if err != nil || len(raw) == 0 {
+		return ""
+	}
+	var ev struct {
+		D string `json:"d"`
+	}
+	if json.Unmarshal(raw, &ev) != nil {
+		return ""
+	}
+	return ev.D
+}
+
+// ErrKeyNotEstablished is returned when a verified record states a current key
+// that its own events do not establish.
+var ErrKeyNotEstablished = errors.New("the current key stated does not match the key the log's own events establish")
+
+// settleCurrentKey makes a verified record's CurrentPublicKey the key its events
+// establish, worked out from the events and never from the stored column, which
+// owner_anchor.go, owner_signature.go and first_contact.go trust. A stated key
+// that is empty is filled in; one that disagrees is refused with
+// ErrKeyNotEstablished. An unverified record is left alone: nothing trusts its
+// key. Call after sealFromVerifiedBytes.
+func (r *ContactKELRecord) settleCurrentKey() error {
+	if !r.KelVerified {
+		return nil
+	}
+	key, err := drivers.KeyEstablishedBy(r.AID, r.KEL)
+	if err != nil {
+		return fmt.Errorf("%w (%s: %v)", ErrKeyNotEstablished, r.AID, err)
+	}
+	if r.CurrentPublicKey != "" && r.CurrentPublicKey != key {
+		return fmt.Errorf("%w (%s: stated %s, events establish %s)",
+			ErrKeyNotEstablished, r.AID, r.CurrentPublicKey, key)
+	}
+	r.CurrentPublicKey = key
+	return nil
+}
+
+// refuseAnEarlierLog is the rule every store applies before it replaces a held
+// log; both arguments are already sealed from their bytes (sealFromVerifiedBytes).
+//
+// A verified log is a key this machine trusts, like the sealed one, so it only
+// ever moves forward: the log offered must hold every event the held one does,
+// the same events, in the same places, and may add to them. Counting events is
+// not enough. Someone holding a key the owner has since rotated away from can
+// sign events of their own after the rotation that key was current at; that fork
+// verifies cleanly, can be as long as the real log, and would otherwise make the
+// retired key the owner's again. It has the real log's first events and then
+// different ones, so the event identifiers (never a count the caller supplies,
+// like EventsValidated) are what tell the two apart. The log offered must also
+// be verified itself: a held verified log is replaced only by a verified one.
+func refuseAnEarlierLog(held *ContactKELRecord, offered ContactKELRecord) error {
+	if held == nil || !held.KelVerified {
+		return nil
+	}
+	// Only a verified log may take the place of a verified one. A record marked
+	// unverified that repeats every held event would otherwise be accepted, and
+	// once an unverified log is held nothing is checked against it any more, so a
+	// fork could follow it in.
+	if !offered.KelVerified {
+		return fmt.Errorf("%w (%s: the log offered is not verified, and a verified one is held)",
+			ErrLogDoesNotExtend, offered.AID)
+	}
+	for i, h := range held.KEL {
+		want := saidOfRecord(h)
+		var got string
+		if i < len(offered.KEL) {
+			got = saidOfRecord(offered.KEL[i])
+		}
+		if want == "" || got != want {
+			return fmt.Errorf("%w (%s: event %d is not the one already held; holds %d events, offered %d)",
+				ErrLogDoesNotExtend, offered.AID, i, len(held.KEL), len(offered.KEL))
+		}
+	}
+	return nil
+}
+
 // ShareAction defines a user-facing engagement action shown in the Share menu.
 // The list is managed by the Data Manager sandbox app and persisted in identity.db.
 // Actions with IsEnabled=false appear in the UI as "Coming Soon".
@@ -696,6 +784,35 @@ type Store interface {
 	// KeepRegistry keeps a registry and its inception's anchor together, or neither.
 	KeepRegistry(r CredentialRegistry, anchor *EventRecord) error
 	GetCredentialTEL(registrySAID, acdcSAID string) ([]CredentialTELEvent, error)
+
+	// A registry event this identity made waits in an outbox until its
+	// witnesses have it (see TELPush). Enqueuing one already waiting changes
+	// nothing.
+	EnqueueTELPush(p TELPush) error
+	// PendingTELPushes are the events still waiting, whether or not they are due,
+	// at most limit of them, taken fairly: the oldest of every issuer in turn, so
+	// that one issuer with a great many waiting does not crowd out the others.
+	PendingTELPushes(limit int) ([]TELPush, error)
+	// DueTELPushes are the waiting events whose next attempt is not after now
+	// (RFC 3339), taken as PendingTELPushes takes them.
+	DueTELPushes(limit int, nowRFC3339 string) ([]TELPush, error)
+	// FinishTELPushes removes events every witness has taken. It is the only
+	// way an event leaves the outbox.
+	FinishTELPushes(issuerAID string, saids []string) error
+	// FailedTELPush records one more unsuccessful attempt, why, and when the
+	// next may be made.
+	FailedTELPush(issuerAID string, saids []string, reason, nextAttemptRFC3339 string) error
+	// WaitingRevocations are the revocations waiting since before the cutoff.
+	WaitingRevocations(cutoffRFC3339 string) ([]TELPush, error)
+	// ListRegistries is every registry this agent holds, whoever issues into it.
+	ListRegistries() ([]CredentialRegistry, error)
+	// GetRegistryTEL is every credential event kept in a registry, in the
+	// order they were kept.
+	GetRegistryTEL(registrySAID string) ([]CredentialTELEvent, error)
+	// TELBackfillDone reports whether the events made before the outbox existed
+	// have been queued; MarkTELBackfillDone records that they have.
+	TELBackfillDone() (bool, error)
+	MarkTELBackfillDone() error
 	SaveCredentialSchema(record CredentialSchemaRecord) error
 	GetCredentialSchemas() ([]CredentialSchemaRecord, error)
 	GetCredentialSchema(said string) (*CredentialSchemaRecord, error)
@@ -740,6 +857,11 @@ type FileStore struct {
 	counters map[string]int // persisted high-water marks for relationship indices
 }
 
+// NewFileStore is TEST-ONLY: the running agent uses SQLiteStore. FileStore does
+// not implement Store, so a restore (recovery.Service takes a Store) cannot be
+// pointed at it, and nothing writes contact_kels.json back from a backup. Its
+// SaveContactKEL applies the same rules as the SQLite one (forward-only, key
+// from the events) because tests save through it.
 func NewFileStore(dir string) (*FileStore, error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create store directory: %w", err)
@@ -1436,11 +1558,24 @@ func (s *FileStore) SaveContactKEL(record ContactKELRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// A file that cannot be read says nothing about what it held. Treating it
+	// as empty skipped the guard and then wrote over every log in it, so the
+	// save is refused instead, naming the file.
 	kels, err := s.loadContactKELs()
 	if err != nil {
-		kels = map[string]ContactKELRecord{}
+		return fmt.Errorf("refusing to save the log for %s, because %s cannot be read and may hold verified logs: %w",
+			record.AID, filepath.Join(s.dir, "contact_kels.json"), err)
 	}
 	record.sealFromVerifiedBytes()
+	if err := record.settleCurrentKey(); err != nil {
+		return err
+	}
+	if held, ok := kels[record.AID]; ok {
+		held.sealFromVerifiedBytes()
+		if err := refuseAnEarlierLog(&held, record); err != nil {
+			return err
+		}
+	}
 	kels[record.AID] = record
 	return s.writeJSON(filepath.Join(s.dir, "contact_kels.json"), kels)
 }
@@ -1467,6 +1602,26 @@ func (s *FileStore) GetContactKEL(aid string) (*ContactKELRecord, error) {
 // way out (a record stored before this was kept is corrected when read).
 func (r *ContactKELRecord) sealFromVerifiedBytes() {
 	r.KEL, r.KelVerified, r.ValidationErrors = drivers.SealedKEL(r.KEL, r.KelVerified, r.ValidationErrors)
+}
+
+// reverify takes away a verified mark the log's own signatures do not earn. A
+// backup's kel_verified is a claim by whoever made the file, so a restore
+// validates the log again and believes the result: a log that fails (an event
+// not signed by the key in force, a log of another identifier) is unverified,
+// which leaves a held verified log in place under refuseAnEarlierLog.
+func (r *ContactKELRecord) reverify() {
+	if !r.KelVerified {
+		return
+	}
+	in, ok := drivers.ValidateKELInputFromRecords(r.AID, r.KEL)
+	if ok {
+		if res, err := drivers.ValidateKELFromBytes(in); err == nil && res.KelVerified {
+			return
+		}
+	}
+	r.KelVerified = false
+	r.ValidationErrors = append(append([]string(nil), r.ValidationErrors...),
+		"the backup marks the log verified, but validating it again does not verify it")
 }
 
 func (s *FileStore) loadContactKELs() (map[string]ContactKELRecord, error) {
@@ -1765,4 +1920,19 @@ func (s *FileStore) loadSigningRequests() (map[string]SigningRequest, error) {
 		return nil, fmt.Errorf("failed to parse signing requests: %w", err)
 	}
 	return requests, nil
+}
+
+// TELPush is a registry event (a registry inception, an issuance or a
+// revocation) this identity made, as published, waiting to be sent to the
+// witnesses its key log names.
+type TELPush struct {
+	IssuerAID string
+	SAID      string
+	Kind      string // "vcp", "iss" or "rev"
+	RawB64    string
+	CreatedAt string
+	Attempts  int
+	LastError string
+	// NextAttemptAt is when it may be tried again (RFC 3339); empty is now.
+	NextAttemptAt string
 }

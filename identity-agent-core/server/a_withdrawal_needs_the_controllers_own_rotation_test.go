@@ -48,6 +48,20 @@ func sign(t *testing.T, s keri.Signer, raw []byte) string {
 
 func newRotatingController(t *testing.T, name, witnessKey string) *rotatingController {
 	t.Helper()
+	return newRotatingControllerWitnessedBy(t, name, witnessKey)
+}
+
+// newRotatingControllerWitnessedBy is a controller whose inception names the
+// given witnesses, any one of which is enough.
+func newRotatingControllerWitnessedBy(t *testing.T, name string, witnessKeys ...string) *rotatingController {
+	t.Helper()
+	return newRotatingControllerWitnessedByToad(t, name, 1, witnessKeys...)
+}
+
+// newRotatingControllerWitnessedByToad is that, with the number of its
+// witnesses that must agree (the key log's toad) given.
+func newRotatingControllerWitnessedByToad(t *testing.T, name string, toad int, witnessKeys ...string) *rotatingController {
+	t.Helper()
 	c := &rotatingController{name: name, eng: keriengine.New()}
 	var pubs []string
 	for i := 0; i < 3; i++ {
@@ -74,7 +88,7 @@ func newRotatingController(t *testing.T, name, witnessKey string) *rotatingContr
 		return "", fmt.Errorf("no key %s", key)
 	})
 	icp, err := c.eng.Incept(drivers.InceptionRequest{PublicKey: pubs[0], NextPublicKey: pubs[1],
-		Name: name, Witnesses: []string{witnessKey}, Toad: 1})
+		Name: name, Witnesses: witnessKeys, Toad: toad})
 	if err != nil {
 		t.Fatal(err)
 	}

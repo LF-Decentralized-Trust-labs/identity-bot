@@ -22,7 +22,7 @@ func acceptingKELDriver(t *testing.T) *driverfake.Engine {
 	t.Helper()
 	accept := func(string, []map[string]interface{}) (*drivers.DriverValidateKELResponse, error) {
 		return &drivers.DriverValidateKELResponse{
-			KelVerified: true, EventsValidated: 1, CurrentPublicKey: "Dkey",
+			KelVerified: true, EventsValidated: 1, CurrentPublicKey: fixtureKey,
 		}, nil
 	}
 	return &driverfake.Engine{
@@ -34,7 +34,10 @@ func acceptingKELDriver(t *testing.T) *driverfake.Engine {
 }
 
 // A stranger's inception event, committing to the keys it will actually use.
-func inceptionCommittingTo(t *testing.T, aid string, ks *didcomm.KeySet) []map[string]interface{} {
+// fixtureKey is the key a fixture log's establishment event names when it names none.
+const fixtureKey = "DFixtureEstablishedKey0000000000000000000000"
+
+func inceptionCommittingTo(t *testing.T, aid string, ks *didcomm.KeySet, key ...string) []map[string]interface{} {
 	t.Helper()
 	kem, err := ks.KemPub.MarshalBinary()
 	if err != nil {
@@ -48,10 +51,14 @@ func inceptionCommittingTo(t *testing.T, aid string, ks *didcomm.KeySet) []map[s
 	if err != nil {
 		t.Fatal(err)
 	}
-	return withTheBytesItWasVerifiedBy(t, map[string]interface{}{
+	ev := map[string]interface{}{
 		"v": "KERI10JSON", "t": "icp", "s": "0", "i": aid, "d": aid,
 		"a": []interface{}{anchor},
-	})
+	}
+	if len(key) > 0 {
+		ev["k"] = []interface{}{key[0]}
+	}
+	return withTheBytesItWasVerifiedBy(t, ev)
 }
 
 // withTheBytesItWasVerifiedBy gives each event the raw bytes a verified log
@@ -61,6 +68,19 @@ func withTheBytesItWasVerifiedBy(t *testing.T, events ...map[string]interface{})
 	t.Helper()
 	out := make([]map[string]interface{}, 0, len(events))
 	for _, ev := range events {
+		// A kept log's current key is worked out from its events, so an
+		// establishment event that names no key gets the fixture's.
+		switch ev["t"] {
+		case "icp", "rot", "dip", "drt":
+			if _, has := ev["k"]; !has {
+				keyed := make(map[string]interface{}, len(ev)+1)
+				for k, v := range ev {
+					keyed[k] = v
+				}
+				keyed["k"] = []interface{}{fixtureKey}
+				ev = keyed
+			}
+		}
 		raw, err := json.Marshal(ev)
 		if err != nil {
 			t.Fatal(err)

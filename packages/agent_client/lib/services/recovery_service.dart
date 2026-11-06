@@ -60,6 +60,12 @@ class RecoverySession {
   final String assuranceBand;
   final bool rotationDone;
 
+  /// How many contact logs in the restored backup were not put back, because
+  /// this machine already held a verified log for that contact (or the backup's
+  /// row stated a key its own events do not establish). Set once the recovery
+  /// is activated; 0 otherwise. A restore result screen should show it.
+  final int contactLogsKept;
+
   RecoverySession({
     required this.id,
     required this.state,
@@ -69,6 +75,7 @@ class RecoverySession {
     required this.cancelWindow,
     required this.assuranceBand,
     required this.rotationDone,
+    this.contactLogsKept = 0,
   });
 
   factory RecoverySession.fromJson(Map<String, dynamic> json) {
@@ -81,6 +88,7 @@ class RecoverySession {
       cancelWindow: json['cancel_window'] ?? '',
       assuranceBand: json['assurance_band'] ?? '',
       rotationDone: json['rotation_done'] ?? false,
+      contactLogsKept: json['contact_logs_kept'] ?? 0,
     );
   }
 }

@@ -11,6 +11,7 @@ import (
 	"identity-agent-core/didcomm"
 	"identity-agent-core/drivers"
 	"identity-agent-core/drivers/driverfake"
+	"identity-agent-core/drivers/signedlog"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
 	"identity-agent-core/store"
@@ -111,7 +112,7 @@ func verifiedLog(t *testing.T, s *CoreServer, aid, key string) {
 	}
 	// A log is kept as verified only with the bytes it was verified by.
 	if err := s.DataStore.SaveContactKEL(store.ContactKELRecord{
-		AID: aid, KEL: inceptionCommittingTo(t, aid, ks),
+		AID: aid, KEL: inceptionCommittingTo(t, aid, ks, key),
 		KelVerified: true, CurrentPublicKey: key, EventsValidated: 1}); err != nil {
 		t.Fatal(err)
 	}
@@ -155,14 +156,23 @@ func TestTheFoundersCurrentKeyNamesThem(t *testing.T) {
 }
 
 func TestAnOwnerWhoHasRotatedShowsNoNameUntilTheySignAgain(t *testing.T) {
-	oldSeed, newSeed := seedOf(1), seedOf(2)
-	s := anOrgWithOwners(t, []string{"EFOUNDER"}, vouchRow(t, oldSeed, "EFOUNDER", "EORG", "Ada", "Ada"))
+	oldSeed := seedOf(1)
+	// The founder's real signed history: founded on the old key, rotated to the
+	// new one. Its identifier is derived from the inception, so it is the
+	// founder's AID throughout.
+	log := signedlog.Incept(t, signedlog.KeysFromSeeds(t, oldSeed, seedOf(2))).Rotate()
+	founder := log.AID
+	s := anOrgWithOwners(t, []string{founder}, vouchRow(t, oldSeed, founder, "EORG", "Ada", "Ada"))
 	// Sealed at pairing with the old key; nothing updates it on rotation. The
 	// verified log knows the new one.
-	if err := s.SealOwnerAuthority(OwnerAuthority{AID: "EFOUNDER", PublicKey: keyOf(oldSeed)}); err != nil {
+	if err := s.SealOwnerAuthority(OwnerAuthority{AID: founder, PublicKey: keyOf(oldSeed)}); err != nil {
 		t.Fatal(err)
 	}
-	verifiedLog(t, s, "EFOUNDER", keyOf(newSeed))
+	if err := s.DataStore.SaveContactKEL(store.ContactKELRecord{
+		AID: founder, KelVerified: true, CurrentPublicKey: log.Key(), EventsValidated: log.Len(),
+		KEL: log.Records()}); err != nil {
+		t.Fatal(err)
+	}
 	if names, _ := listedOwners(t, s); len(names) != 0 {
 		t.Fatalf("a vouch signed by a superseded key still named the owner: %v", names)
 	}

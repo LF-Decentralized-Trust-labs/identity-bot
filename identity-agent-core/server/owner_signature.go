@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -117,7 +118,21 @@ func (s *CoreServer) ownerAuthority() (*OwnerAuthority, error) {
 		// safe to prefer: the validators bind the log to the identifier before
 		// trusting anything in it, so forging one means forging a
 		// self-addressing identifier.
-		if key, kerr := s.ownerKeyFromAVerifiedLog(owner); kerr == nil {
+		//
+		// A LOG MAY ONLY MOVE THE KEY FORWARD from the key this machine already
+		// trusts. Where the owner's key was sealed, a verified log is accepted
+		// only if that key appears in it, at or before the tip it names; a log
+		// cut off before the sealed key is an older history of the same
+		// identity, and anyone holding a retired key can get this machine to
+		// resolve one (an OOBI from a site or an ask) which verifies cleanly.
+		// Accepting it would make the retired key the owner and refuse the
+		// current one. Such a log is ignored and the sealed key answers.
+		sealed, serr := s.sealedOwnerAuthority()
+		if theSealCannotBeRead(serr) {
+			return nil, fmt.Errorf("this machine has an owner sealed and the record cannot be read, so nobody may speak for it: %w", serr)
+		}
+		haveSealed := serr == nil && sealed != nil && sealed.AID == owner && sealed.PublicKey != ""
+		if key, ok := s.ownerKeyThatMovesForward(owner); ok {
 			return &OwnerAuthority{AID: owner, PublicKey: key}, nil
 		}
 
@@ -126,8 +141,7 @@ func (s *CoreServer) ownerAuthority() (*OwnerAuthority, error) {
 		// a contact, so nothing has a log for them and this is the only key
 		// there is. Matched on AID, so the log still decides WHO the owner is
 		// and the file only supplies key material for the owner it named.
-		if sealed, serr := s.sealedOwnerAuthority(); serr == nil && sealed.AID == owner &&
-			sealed.PublicKey != "" {
+		if haveSealed {
 			return &OwnerAuthority{AID: owner, PublicKey: sealed.PublicKey}, nil
 		}
 
@@ -152,7 +166,11 @@ func (s *CoreServer) ownerAuthority() (*OwnerAuthority, error) {
 	// No anchor. That is the ordinary case for a person's own agent, and for a
 	// box provisioned for an owner whose identity is delegated rather than
 	// anchored — which is what the sealed file was written for.
-	if sealed, serr := s.sealedOwnerAuthority(); serr == nil {
+	sealed, serr := s.sealedOwnerAuthority()
+	if theSealCannotBeRead(serr) {
+		return nil, fmt.Errorf("the owner record sealed on this machine cannot be read, so nobody may speak for it: %w", serr)
+	}
+	if serr == nil {
 		return sealed, nil
 	}
 	return &OwnerAuthority{AID: identity.AID, PublicKey: identity.PublicKey}, nil
@@ -164,6 +182,14 @@ func (s *CoreServer) ownerAuthority() (*OwnerAuthority, error) {
 // hold, sealed before the box ever reaches the network, where there is no
 // identity yet to carry an anchor. It is no longer consulted for an identity
 // that names its own owner.
+// theSealCannotBeRead is whether sealedOwnerAuthority failed for any reason
+// other than there being no seal. Callers that go on to ask a log or a contact
+// row who the owner is must refuse instead, since they would be answering in
+// the seal's place.
+func theSealCannotBeRead(serr error) bool {
+	return serr != nil && !errors.Is(serr, errNoOwnerSealed)
+}
+
 // errNoOwnerSealed means nobody has claimed this agent yet.
 //
 // A distinct value because it is not a fault and the two callers want opposite
@@ -175,7 +201,14 @@ var errNoOwnerSealed = errors.New("no owner authority is sealed")
 func (s *CoreServer) sealedOwnerAuthority() (*OwnerAuthority, error) {
 	raw, err := os.ReadFile(filepath.Join(s.DataDir, ownerAuthorityFile))
 	if err != nil {
-		return nil, errNoOwnerSealed
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, errNoOwnerSealed
+		}
+		// A seal that is there and cannot be read is not "nothing sealed":
+		// treating it so would let a log or a contact row decide who the owner
+		// is on a machine that has an owner, and a read fault should not be
+		// something anybody can use.
+		return nil, fmt.Errorf("owner authority record cannot be read: %w", err)
 	}
 	var oa OwnerAuthority
 	if jerr := json.Unmarshal(raw, &oa); jerr != nil {
@@ -419,6 +452,54 @@ func (s *CoreServer) verifyOwnerSignature(r *http.Request) error {
 		}
 	}
 	return nil
+}
+
+// ownerKeyThatMovesForward is the one place the forward-only rule lives: the key
+// from the verified log held for aid, but only if that log does not contradict
+// the key this machine sealed for the same identifier (see ownerAuthority).
+// Every question of the form "which key speaks for this owner" goes through
+// here, so no route can be answered by a replayed older log that another route
+// would have refused.
+func (s *CoreServer) ownerKeyThatMovesForward(aid string) (string, bool) {
+	key, err := s.ownerKeyFromAVerifiedLog(aid)
+	if err != nil {
+		return "", false
+	}
+	sealed, serr := s.sealedOwnerAuthority()
+	if theSealCannotBeRead(serr) {
+		return "", false
+	}
+	if serr == nil && sealed != nil && sealed.AID == aid && sealed.PublicKey != "" &&
+		!s.theLogReachesTheKey(aid, sealed.PublicKey) {
+		return "", false
+	}
+	return key, true
+}
+
+// theLogReachesTheKey reports whether the verified log held for aid names key
+// in one of its events, so that the log's tip is that key or a successor of it.
+// Keys are compared as decoded bytes, since a sealed key may be written in
+// CESR, base64 or hex.
+func (s *CoreServer) theLogReachesTheKey(aid, key string) bool {
+	if s.DataStore == nil {
+		return false
+	}
+	record, err := s.DataStore.GetContactKEL(aid)
+	if err != nil || record == nil {
+		return false
+	}
+	want, err := login.DecodeVerkey(key)
+	if err != nil {
+		return false
+	}
+	for _, ev := range record.KEL {
+		for _, k := range stringsOf(ev["k"]) {
+			if got, derr := login.DecodeVerkey(k); derr == nil && bytes.Equal(got, want) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ownerKeyFromAVerifiedLog resolves the owner's signing key, accepting only a

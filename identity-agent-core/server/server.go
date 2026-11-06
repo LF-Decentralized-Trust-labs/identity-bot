@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"net"
@@ -139,6 +140,10 @@ type CoreServer struct {
 	httpSrv   *http.Server
 	tunnelSrv *http.Server
 	router    chi.Router
+	// The direct listener (direct_ingress.go): nil unless the operator bound one.
+	directLn   net.Listener
+	directSrv  *http.Server
+	directAIDs *directAllowlist
 
 	// See Config.RequireOwnerAtInception.
 	requireOwnerAtInception bool
@@ -221,9 +226,17 @@ type CoreServer struct {
 	// it a single step.
 	endpointRecordMu   sync.Mutex
 	witnessLimiterOnce sync.Once
-	CallerResolver     CallerResolver // resolves endpoint caller identity/scopes; nil = loopback default (delegated-identity injects the real one)
-	mu                 sync.Mutex
-	running            bool
+	// telAlarm remembers which waiting revocations have been reported.
+	telAlarm struct {
+		sync.Mutex
+		said map[string]bool
+	}
+	// telPushRetryGap overrides the gap before a failed registry event is
+	// tried again (tests); nil is telPushRetryGap.
+	telPushRetryGap func(attempts int) time.Duration
+	CallerResolver  CallerResolver // resolves endpoint caller identity/scopes; nil = loopback default (delegated-identity injects the real one)
+	mu              sync.Mutex
+	running         bool
 	// anchorStop ends the record's anchoring when the server stops.
 	anchorStop chan struct{}
 	// anchorStopMu guards anchorStop, which Stop closes while workers read it.
@@ -529,8 +542,16 @@ func New(cfg Config) (*CoreServer, error) {
 	if err := s.initLoginHandler(); err != nil {
 		log.Printf("[identity-agent-core] login handler init failed (non-fatal): %v", err)
 	}
-	if err := s.initAssetHandler(); err != nil {
+	if err := s.initAssetHandler(); errors.Is(err, asset.ErrSecretsNotMigrated) {
+		// Clear secrets would stay on disk: do not run.
+		return nil, err
+	} else if err != nil {
 		log.Printf("[identity-agent-core] ERROR: assets are unavailable until this is fixed; a file the asset store needs could not be read, and nothing was changed: %v", err)
+	}
+	// A ceremony record from an earlier version held its invite codes in the
+	// clear: carried to digests now, and the server does not start if it cannot be.
+	if err := s.migrateCeremony(); err != nil {
+		return nil, err
 	}
 	// What each add-on readies once the core's stores, vault and asset
 	// handler are made.
@@ -625,6 +646,13 @@ func (s *CoreServer) Start() error {
 	}
 	if s.listener == nil {
 		return fmt.Errorf("failed to bind on ports %d–%d: %w", requestedPort, requestedPort+9, bindErr)
+	}
+
+	// The direct listener, if one was asked for, beside the loopback root.
+	if err := s.bindDirectListener(); err != nil {
+		s.listener.Close()
+		s.listener = nil
+		return err
 	}
 
 	// The key this agent is reached over. Loaded before anything publishes an
@@ -777,6 +805,7 @@ func (s *CoreServer) Start() error {
 	s.anchorStopMu.Unlock()
 	s.beginWitnessing()
 	s.inBackground(func(context.Context) { s.keepAnchoring(stop) })
+	s.inBackground(func(context.Context) { s.backfillRegistryEvents() })
 	s.runAddons(stop)
 
 	// Taken into locals before the goroutine starts: Stop clears the fields
@@ -807,6 +836,8 @@ func (s *CoreServer) Stop() {
 	s.running = false
 	httpSrv, tunnelSrv, listener := s.httpSrv, s.tunnelSrv, s.listener
 	s.httpSrv, s.tunnelSrv, s.listener = nil, nil, nil
+	directSrv, directLn := s.directSrv, s.directLn
+	s.directSrv, s.directLn = nil, nil
 	// Read here as well: a relay start still running replaces it under mu.
 	relayManager := s.RelayManager
 	s.mu.Unlock()
@@ -861,7 +892,7 @@ func (s *CoreServer) Stop() {
 	// mobile where the core is restarted on each resume. The bare listener
 	// close stays for the case where Serve was never reached (bind succeeded,
 	// goroutine not yet scheduled).
-	for _, srv := range []*http.Server{httpSrv, tunnelSrv} {
+	for _, srv := range []*http.Server{httpSrv, tunnelSrv, directSrv} {
 		if srv == nil {
 			continue
 		}
@@ -873,6 +904,9 @@ func (s *CoreServer) Stop() {
 	}
 	if listener != nil {
 		listener.Close()
+	}
+	if directLn != nil {
+		directLn.Close()
 	}
 
 	// Wait for what was started and is still writing to the data directory,
@@ -931,7 +965,7 @@ func (s *CoreServer) buildRouter() chi.Router {
 func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) chi.Router {
 	r := chi.NewRouter()
 
-	r.Use(middleware.Logger)
+	r.Use(logRequests)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
 	// Before anything else looks at the request: note where it arrived, if a
@@ -1142,6 +1176,9 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 		r.Get("/settings/reachability", s.handleGetReachabilitySettings)
 		r.Put("/settings/reachability", s.handlePutReachabilitySettings)
 		r.Get("/settings/reachability/relay", s.handleRelayStatus)
+		r.Get("/settings/reachability/direct-aids", s.handleListDirectAIDs)
+		r.Put("/settings/reachability/direct-aids/{aid}", s.handleAllowDirectAID)
+		r.Delete("/settings/reachability/direct-aids/{aid}", s.handleRemoveDirectAID)
 		r.Post("/settings/reachability/name/release", s.handleReleaseRelayName)
 		r.Get("/settings/reachability/domains", s.handleListRelayDomains)
 		r.Post("/settings/reachability/domains", s.handleRequestRelayDomain)
@@ -2683,26 +2720,23 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Extract issuer AID from the ACDC JSON (which is base64-encoded) to look up its stored KEL.
-	var acdcBody map[string]interface{}
+	// The credential is read once, as the engine reads it; the issuer and the
+	// registry both come from that. A body the server cannot read is refused.
+	cred, err := readCredentialHere(req.AcdcJson)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "The credential cannot be read", err.Error())
+		return
+	}
 	var issuerKelEvents []map[string]interface{}
-	if acdcBytes, err := base64.StdEncoding.DecodeString(req.AcdcJson); err == nil {
-		if err2 := json.Unmarshal(acdcBytes, &acdcBody); err2 == nil {
-			if issuerAid, ok := acdcBody["i"].(string); ok && issuerAid != "" {
-				// Try contact KEL first (cross-instance: issuer is a remote contact).
-				if kelRecord, err3 := s.DataStore.GetContactKEL(issuerAid); err3 == nil && kelRecord != nil && kelRecord.KelVerified {
-					issuerKelEvents = unwrapEventJSON(kelRecord.KEL)
-				}
-				// Fall back to own KEL (self-issued: issuer is this instance).
-				if issuerKelEvents == nil {
-					if ownEvents, err3 := s.DataStore.GetEvents(issuerAid); err3 == nil && len(ownEvents) > 0 {
-						issuerKelEvents = eventRecordsToKEDs(ownEvents)
-					}
-				}
-			}
-		}
+	if cred.Issuer != "" {
+		issuerKelEvents = s.issuerLogForVerification(cred.Issuer)
 	}
 
+	issuance := s.issuanceLogForVerification(cred, issuerKelEvents)
+	issuerKelEvents = issuance.issuerKel
+
+	// Revocation is read from the registry's transaction log where this agent
+	// holds the registry state itself (see verifyCredentialHere).
 	driverReq := &drivers.DriverVerifyCredentialRequest{
 		AcdcJson:           req.AcdcJson,
 		IssuerKelEvents:    issuerKelEvents,
@@ -2713,19 +2747,14 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 		TrustedSchemaSaids: req.TrustedSchemaSaids,
 	}
 
-	result, err := s.KeriDriver.VerifyCredential(driverReq)
+	result, err := s.verifyCredentialHere(driverReq, cred, issuance)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Credential verification failed", err.Error())
 		return
 	}
 
-	if result != nil && issuerKelEvents != nil {
-		issuerAid := ""
-		if acdcBody != nil {
-			if ia, ok := acdcBody["i"].(string); ok {
-				issuerAid = ia
-			}
-		}
+	if issuerKelEvents != nil {
+		issuerAid := cred.Issuer
 		if issuerAid != "" {
 			if wRes := s.runWatcherOnKel(r.Context(), issuerAid, issuerKelEvents, watcher.SourceCredential, "", nil); wRes != nil && wRes.Blocked {
 				writeError(w, http.StatusConflict, "Issuer KEL duplicity detected", wRes.Reason)
@@ -2734,7 +2763,12 @@ func (s *CoreServer) handleVerifyCredential(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	jsonreply.Write(w, http.StatusOK, result)
+	reply := struct {
+		verifyReply
+		IssuerStatus string `json:"issuer_status"`
+	}{result, issuerVerdict(result.DriverVerifyCredentialResponse, issuerKelEvents != nil)}
+
+	jsonreply.Write(w, http.StatusOK, reply)
 }
 
 // handleVerifyCredentialChain accepts a SAID or ACDC JSON, verifies the credential,
@@ -2776,76 +2810,78 @@ func (s *CoreServer) handleVerifyCredentialChain(w http.ResponseWriter, r *http.
 		Errors     []string               `json:"errors"`
 		Valid      bool                   `json:"valid"`
 		EdgeLabel  string                 `json:"edge_label,omitempty"` // label used in parent's edges block
+		// IssuerStatus is "checked", or "not checked: why" when the issuer's
+		// key log is not held; such a step is never valid.
+		IssuerStatus string `json:"issuer_status,omitempty"`
+		// RevocationStatus and RevocationReason are as credential/verify reports them.
+		RevocationStatus string `json:"revocation_status,omitempty"`
+		RevocationReason string `json:"revocation_reason,omitempty"`
 	}
 
 	var chain []ChainStep
 	var allErrors []string
 	warnings := []string{}
 
-	// verifyOne: call the driver to verify a single ACDC, add a ChainStep, return the parsed ACDC body.
-	verifyOne := func(jsonB64, edgeLabel string) (map[string]interface{}, bool) {
-		// Decode to extract issuer AID for KEL lookup.
-		var acdcBody map[string]interface{}
-		if decoded, err := base64.StdEncoding.DecodeString(jsonB64); err == nil {
-			_ = json.Unmarshal(decoded, &acdcBody)
+	// verifyOne: call the driver to verify a single ACDC, add a ChainStep, return the parsed credential.
+	verifyOne := func(jsonB64, edgeLabel string) (*keri.Credential, bool) {
+		step := ChainStep{EdgeLabel: edgeLabel, Errors: []string{}}
+		cred, err := readCredentialHere(jsonB64)
+		if err != nil {
+			// A body the server cannot read is refused, not verified on a guess.
+			step.Errors = append(step.Errors, err.Error())
+			allErrors = append(allErrors, err.Error())
+			chain = append(chain, step)
+			return nil, false
 		}
 
 		var issuerKelEvents []map[string]interface{}
-		issuerAid := ""
-		if acdcBody != nil {
-			if aid, ok := acdcBody["i"].(string); ok {
-				issuerAid = aid
-				if kelRecord, err := s.DataStore.GetContactKEL(aid); err == nil && kelRecord != nil && kelRecord.KelVerified {
-					issuerKelEvents = unwrapEventJSON(kelRecord.KEL)
-				}
-				if issuerKelEvents == nil {
-					if ownEvents, err := s.DataStore.GetEvents(aid); err == nil && len(ownEvents) > 0 {
-						issuerKelEvents = eventRecordsToKEDs(ownEvents)
-					}
-				}
-				if issuerKelEvents == nil {
-					warnings = append(warnings, "No KEL found for issuer "+aid+"; issuer checks skipped")
-				}
+		issuerAid := cred.Issuer
+		if issuerAid != "" {
+			issuerKelEvents = s.issuerLogForVerification(issuerAid)
+			if issuerKelEvents == nil {
+				warnings = append(warnings, "No KEL found for issuer "+issuerAid+"; issuer checks skipped")
 			}
 		}
 
+		issuance := s.issuanceLogForVerification(cred, issuerKelEvents)
+		issuerKelEvents = issuance.issuerKel
 		driverReq := &drivers.DriverVerifyCredentialRequest{
 			AcdcJson:        jsonB64,
 			IssuerKelEvents: issuerKelEvents,
 		}
-		result, err := s.KeriDriver.VerifyCredential(driverReq)
+		result, err := s.verifyCredentialHere(driverReq, cred, issuance)
 
-		step := ChainStep{
-			EdgeLabel: edgeLabel,
-			IssuerAid: issuerAid,
-			Errors:    []string{},
-		}
-		if acdcBody != nil {
-			step.Said, _ = acdcBody["d"].(string)
-			step.SchemaSaid, _ = acdcBody["s"].(string)
-		}
+		step.IssuerAid = issuerAid
+		step.Said = cred.SAID
+		step.SchemaSaid = cred.SchemaSAID
 		if err != nil {
 			step.Valid = false
 			step.Errors = append(step.Errors, err.Error())
 			allErrors = append(allErrors, err.Error())
 		} else {
+			if issuerAid != "" {
+				step.IssuerStatus = issuerVerdict(result.DriverVerifyCredentialResponse, issuerKelEvents != nil)
+			}
 			step.Valid = result.Verified
 			step.Checks = result.Checks
 			step.Errors = result.Errors
+			step.RevocationStatus = result.RevocationStatus
+			step.RevocationReason = result.RevocationReason
 			if !result.Verified {
 				allErrors = append(allErrors, result.Errors...)
 			}
 		}
 		chain = append(chain, step)
-		return acdcBody, step.Valid
+		return cred, step.Valid
 	}
 
 	// Verify the top-level credential.
-	topBody, _ := verifyOne(acdcJsonB64, "")
+	top, _ := verifyOne(acdcJsonB64, "")
 
 	// Walk the 'e' edges block to verify parent credentials.
-	if topBody != nil {
-		if edgesRaw, ok := topBody["e"]; ok {
+	if top != nil && len(top.Edges) > 0 {
+		var edgesRaw interface{}
+		if json.Unmarshal(top.Edges, &edgesRaw) == nil {
 			if edgesMap, ok := edgesRaw.(map[string]interface{}); ok {
 				for label, edgeRaw := range edgesMap {
 					if label == "d" {
@@ -3386,7 +3422,7 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 						return
 					}
 					publicURL := s.getPublicURL(r)
-					oobiURL := fmt.Sprintf("%s/public/oobi/%s", publicURL, a.PairwiseAID)
+					oobiURL := oobiLink(r, publicURL, a.PairwiseAID)
 					rawEvents, signatures := s.assetEventsAndSignatures(a, kelResp.RawEventsB64)
 					jsonreply.Write(w, http.StatusOK, map[string]interface{}{
 						"aid":             a.PairwiseAID,
@@ -3412,7 +3448,7 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 			publicURL := s.getPublicURL(r)
 			doc := map[string]interface{}{
 				"aid":  requestedAID,
-				"oobi": fmt.Sprintf("%s/public/oobi/%s", publicURL, requestedAID),
+				"oobi": oobiLink(r, publicURL, requestedAID),
 				"kel":  kel,
 				"type": "pairwise",
 				// Which realm this agent runs in, so a resolver keeps a
@@ -3467,9 +3503,9 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
 			actionLabel = "add you as a contact on Identity Agent"
 		}
 		publicURL := s.getPublicURL(r)
-		rawOobiURL := fmt.Sprintf("%s/public/oobi/%s", publicURL, identity.AID)
+		rawOobiURL := oobiLink(r, publicURL, identity.AID)
 		if action != "" {
-			rawOobiURL = fmt.Sprintf("%s?action=%s", rawOobiURL, action)
+			rawOobiURL = fmt.Sprintf("%s?action=%s", rawOobiURL, url.QueryEscape(action))
 		}
 		htmlPage := fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
@@ -3499,7 +3535,7 @@ func (s *CoreServer) handleOobiServe(w http.ResponseWriter, r *http.Request) {
   <div class="card"><span class="oobi">%s</span></div>
   <p style="font-size:12px;color:#64748b;">This link only works while the sender's Identity Agent is running.</p>
 </body>
-</html>`, alias, alias, actionLabel, rawOobiURL)
+</html>`, alias, alias, actionLabel, html.EscapeString(rawOobiURL))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprint(w, htmlPage)
 		return
@@ -3873,6 +3909,13 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 		}
 		if err := s.DataStore.SaveContactKEL(kelRecord); err != nil {
 			log.Printf("[identity-agent-core] OOBI-RESOLVE: Failed to store contact KEL for %s: %v", oobiData.AID, err)
+			// A log the store refuses is not an answer: nothing below may report
+			// its key, so the caller is refused rather than told "resolved".
+			if errors.Is(err, store.ErrLogDoesNotExtend) {
+				writeError(w, http.StatusConflict, "Key history does not continue",
+					"the key history at that address does not carry on from the one this agent already trusts for that identity")
+				return
+			}
 		}
 	}
 
@@ -4011,6 +4054,11 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 			}
 			if err := s.DataStore.SaveContactKEL(kelRecord); err != nil {
 				log.Printf("[identity-agent-core] CONTACT: Failed to store KEL for %s: %v", oobiData.AID, err)
+				if errors.Is(err, store.ErrLogDoesNotExtend) {
+					writeError(w, http.StatusConflict, "Key history does not continue",
+						"the key history at that address does not carry on from the one this agent already trusts for that identity")
+					return
+				}
 			}
 		}
 	}
@@ -4987,25 +5035,6 @@ func oobiBase(oobiURL string) string {
 		return oobiURL[:idx]
 	}
 	return oobiURL
-}
-
-// unwrapEventJSON converts EventRecord-style dicts (with an "event_json" field containing a
-// JSON-encoded KED) to raw KED dicts. Events that are already raw KEDs are passed through unchanged.
-// This is needed because the OOBI endpoint serves EventRecord structs, so contact_kels stores
-// event_json-wrapped records, while the credential-verify path expects raw KED dicts.
-func unwrapEventJSON(events []map[string]interface{}) []map[string]interface{} {
-	out := make([]map[string]interface{}, 0, len(events))
-	for _, ev := range events {
-		if ejson, ok := ev["event_json"].(string); ok {
-			var ked map[string]interface{}
-			if err := json.Unmarshal([]byte(ejson), &ked); err == nil {
-				out = append(out, ked)
-				continue
-			}
-		}
-		out = append(out, ev)
-	}
-	return out
 }
 
 // eventRecordsToKEDs converts store.EventRecord structs to raw KED dicts by parsing EventJSON.

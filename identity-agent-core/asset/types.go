@@ -224,8 +224,12 @@ type Exposure struct {
 	DirectAPI bool `json:"direct_api,omitempty"` // a plain HTTPS endpoint for non-MCP callers
 }
 
+// The invite code is a secret the holder presents; the store keeps only its
+// digest (package enrolsecret), which is ID. Token is set only on the value
+// returned when the invite is made, the one time it can be shown.
 type AssetInvite struct {
-	Token     string    `json:"token"`
+	ID        string    `json:"id"`
+	Token     string    `json:"token,omitempty"`
 	AssetID   string    `json:"asset_id"`
 	Label     string    `json:"label,omitempty"`
 	MaxUses   int       `json:"max_uses"` // 0 = unlimited (Slack-style default)
@@ -254,8 +258,12 @@ type AssetAccessRequest struct {
 // as an employee. Redeeming it via the add_employee (t=3) action creates a
 // pending Employee. MaxUses mirrors AssetInvite (0 = unlimited; 1 = a single
 // named hire). The token is rendered as a QR code / link by the org app.
+//
+// As with AssetInvite, the store keeps only the digest of the code (ID); Token
+// is set only on the value returned when the invite is made.
 type EmployeeInvite struct {
-	Token   string `json:"token"`
+	ID      string `json:"id"`
+	Token   string `json:"token,omitempty"`
 	Role    string `json:"role"`
 	Label   string `json:"label,omitempty"`
 	MaxUses int    `json:"max_uses"` // 0 = unlimited

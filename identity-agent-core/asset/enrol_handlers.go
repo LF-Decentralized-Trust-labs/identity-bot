@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"identity-agent-core/buildmode"
+	"identity-agent-core/enrolsecret"
 	"identity-agent-core/secureenclave"
 
 	"github.com/go-chi/chi/v5"
@@ -22,6 +23,8 @@ func (h *Handler) HandleCreateEnrolment(w http.ResponseWriter, r *http.Request) 
 		AssetType   string `json:"asset_type"`
 		Origin      string `json:"origin"`
 		ExpiresInS  int    `json:"expires_in_seconds"`
+		// Replaces is the ID of an unused enrolment this one stands in for.
+		Replaces string `json:"replaces"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		h.writeJSON(w, map[string]string{"error": "bad request"}, http.StatusBadRequest)
@@ -32,6 +35,7 @@ func (h *Handler) HandleCreateEnrolment(w http.ResponseWriter, r *http.Request) 
 		DisplayName: strings.TrimSpace(body.DisplayName),
 		AssetType:   strings.TrimSpace(body.AssetType),
 		Origin:      strings.TrimSpace(body.Origin),
+		Replaces:    strings.TrimSpace(body.Replaces),
 	}
 	if body.ExpiresInS > 0 {
 		e.ExpiresAt = time.Now().UTC().Add(time.Duration(body.ExpiresInS) * time.Second)
@@ -50,7 +54,7 @@ func (h *Handler) HandleListEnrolments(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleRevokeEnrolment(w http.ResponseWriter, r *http.Request) {
-	if err := h.Store.RevokeEnrolment(chi.URLParam(r, "token")); err != nil {
+	if err := h.Store.RevokeEnrolment(chi.URLParam(r, "enrolment")); err != nil {
 		h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusNotFound)
 		return
 	}
@@ -108,7 +112,7 @@ func (h *Handler) HandleEnrol(w http.ResponseWriter, r *http.Request) {
 	// of the enrolment it was legitimately issued.
 	release := func() {
 		if rerr := h.Store.ReleaseEnrolment(body.Token); rerr != nil {
-			log.Printf("[asset] enrolment %s could not be released: %v", body.Token, rerr)
+			log.Printf("[asset] enrolment %s could not be released: %v", enrolsecret.Digest(body.Token), rerr)
 		}
 	}
 
@@ -215,7 +219,7 @@ func (h *Handler) HandleEnrol(w http.ResponseWriter, r *http.Request) {
 	// wrong — it would authorise a second one.
 	if err := h.Store.RecordEnrolmentAsset(body.Token, a.ID); err != nil {
 		log.Printf("[asset] enrolment %s produced asset %s but the link was not recorded: %v",
-			body.Token, a.ID, err)
+			enrolsecret.Digest(body.Token), a.ID, err)
 	}
 
 	out := map[string]interface{}{

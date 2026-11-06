@@ -1,0 +1,592 @@
+{
+ "about": "Registry-log answers of a witness (SEAM-13 \u00a72): GET /witness/tel/{aid}[?since_sn=N] answers 200 with the object in 'answer'; the same route's /head answers with a 'head'; a witness holding no registry log for the aid answers 404 {\"error\":\"no_tel\"}. SHAPE ONLY: the identifiers are real-looking and their digests are not computed, so this file says what a conforming answer looks like and says nothing about whether an event is the issuer's: that is the key log's seal, which a reader checks itself (SEAM-13 \u00a75). 'conforms' says whether the answer has the shape; 'why' says what is wrong when it does not. anchored_sn is the issuer's key-log position of the latest event held in the registry log and latest_kel_sn is how far the witness holds the key log, so anchored_sn is never above latest_kel_sn. since_sn is a position in the issuer's key log, exclusive: -1, or none given, asks for all. An issuer with several registries has them all in 'registries', in the order they were founded, only when there are two or more; registry_prefix is the first and each event names its own in ri (a registry inception names itself in i). The answer carries registry inceptions as well as issuances and revocations, which is what shows the registry is the issuer's.",
+ "answers": [
+  {
+   "name": "one registry, issued",
+   "answer": {
+    "aid": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+    "registry_prefix": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+    "events": [
+     {
+      "v": "KERI10JSON00010f_",
+      "t": "vcp",
+      "d": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "i": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "ii": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+      "s": "0",
+      "c": [],
+      "bt": "0",
+      "b": [],
+      "n": "EMmwuIELycMXfXOTpYUtd25XFTF0ESNE8K0Yjh9QvhFH"
+     },
+     {
+      "v": "KERI10JSON0000ed_",
+      "t": "iss",
+      "d": "EDYk4quo-g_jC023Ix7yWnDMZTHdrJUNbykWMRL6szEu",
+      "i": "EL4TpPnW-G-EPEhxizDFQhWZ18gL41pHXYuyS8QbNoqD",
+      "s": "0",
+      "ri": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "dt": "2026-11-05T21:23:57.512046+00:00"
+     }
+    ],
+    "anchored_sn": 2,
+    "latest_kel_sn": 2
+   },
+   "conforms": true
+  },
+  {
+   "name": "one registry, issued then revoked",
+   "answer": {
+    "aid": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+    "registry_prefix": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+    "events": [
+     {
+      "v": "KERI10JSON00010f_",
+      "t": "vcp",
+      "d": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "i": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "ii": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+      "s": "0",
+      "c": [],
+      "bt": "0",
+      "b": [],
+      "n": "EMmwuIELycMXfXOTpYUtd25XFTF0ESNE8K0Yjh9QvhFH"
+     },
+     {
+      "v": "KERI10JSON0000ed_",
+      "t": "iss",
+      "d": "EDYk4quo-g_jC023Ix7yWnDMZTHdrJUNbykWMRL6szEu",
+      "i": "EL4TpPnW-G-EPEhxizDFQhWZ18gL41pHXYuyS8QbNoqD",
+      "s": "0",
+      "ri": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "dt": "2026-11-05T21:23:57.512046+00:00"
+     },
+     {
+      "v": "KERI10JSON000120_",
+      "t": "rev",
+      "d": "EMrnIrsIGzsRqUGt9zvaNr84bdZ2OrgEuo73m8_WPIdD",
+      "i": "EL4TpPnW-G-EPEhxizDFQhWZ18gL41pHXYuyS8QbNoqD",
+      "s": "1",
+      "ri": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "p": "EDYk4quo-g_jC023Ix7yWnDMZTHdrJUNbykWMRL6szEu",
+      "dt": "2026-11-05T21:23:57.516915+00:00"
+     }
+    ],
+    "anchored_sn": 3,
+    "latest_kel_sn": 3
+   },
+   "conforms": true
+  },
+  {
+   "name": "since_sn=2 leaves out what is anchored at or before 2",
+   "answer": {
+    "aid": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+    "registry_prefix": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+    "events": [
+     {
+      "v": "KERI10JSON000120_",
+      "t": "rev",
+      "d": "EMrnIrsIGzsRqUGt9zvaNr84bdZ2OrgEuo73m8_WPIdD",
+      "i": "EL4TpPnW-G-EPEhxizDFQhWZ18gL41pHXYuyS8QbNoqD",
+      "s": "1",
+      "ri": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "p": "EDYk4quo-g_jC023Ix7yWnDMZTHdrJUNbykWMRL6szEu",
+      "dt": "2026-11-05T21:23:57.516915+00:00"
+     }
+    ],
+    "anchored_sn": 3,
+    "latest_kel_sn": 4
+   },
+   "conforms": true
+  },
+  {
+   "name": "nothing new since the place asked for",
+   "answer": {
+    "aid": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+    "registry_prefix": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+    "events": [],
+    "anchored_sn": 2,
+    "latest_kel_sn": 2
+   },
+   "conforms": true
+  },
+  {
+   "name": "two registries, listed in the order founded",
+   "answer": {
+    "aid": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+    "registry_prefix": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+    "events": [
+     {
+      "v": "KERI10JSON00010f_",
+      "t": "vcp",
+      "d": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "i": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "ii": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+      "s": "0",
+      "c": [],
+      "bt": "0",
+      "b": [],
+      "n": "EMmwuIELycMXfXOTpYUtd25XFTF0ESNE8K0Yjh9QvhFH"
+     },
+     {
+      "v": "KERI10JSON0000ed_",
+      "t": "iss",
+      "d": "EDYk4quo-g_jC023Ix7yWnDMZTHdrJUNbykWMRL6szEu",
+      "i": "EL4TpPnW-G-EPEhxizDFQhWZ18gL41pHXYuyS8QbNoqD",
+      "s": "0",
+      "ri": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "dt": "2026-11-05T21:23:57.512046+00:00"
+     },
+     {
+      "v": "KERI10JSON00010f_",
+      "t": "vcp",
+      "d": "EBdwkQNo5jtsyV3F7M6lt2jmK0ZTb0Qmcys5mZKRzSlx",
+      "i": "EBdwkQNo5jtsyV3F7M6lt2jmK0ZTb0Qmcys5mZKRzSlx",
+      "ii": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+      "s": "0",
+      "c": [],
+      "bt": "0",
+      "b": [],
+      "n": "EMmwuIELycMXfXOTpYUtd25XFTF0ESNE8K0Yjh9QvhFH"
+     },
+     {
+      "v": "KERI10JSON0000ed_",
+      "t": "iss",
+      "d": "EDYk4quo-g_jC023Ix7yWnDMZTHdrJUNbykWMRL6szEu",
+      "i": "EL4TpPnW-G-EPEhxizDFQhWZ18gL41pHXYuyS8QbNoqD",
+      "s": "0",
+      "ri": "EBdwkQNo5jtsyV3F7M6lt2jmK0ZTb0Qmcys5mZKRzSlx",
+      "dt": "2026-11-05T21:23:57.512046+00:00"
+     }
+    ],
+    "anchored_sn": 4,
+    "latest_kel_sn": 5,
+    "registries": [
+     "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+     "EBdwkQNo5jtsyV3F7M6lt2jmK0ZTb0Qmcys5mZKRzSlx"
+    ]
+   },
+   "conforms": true
+  },
+  {
+   "name": "the key log is held further on than the registry log",
+   "answer": {
+    "aid": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+    "registry_prefix": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+    "events": [
+     {
+      "v": "KERI10JSON00010f_",
+      "t": "vcp",
+      "d": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "i": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "ii": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+      "s": "0",
+      "c": [],
+      "bt": "0",
+      "b": [],
+      "n": "EMmwuIELycMXfXOTpYUtd25XFTF0ESNE8K0Yjh9QvhFH"
+     },
+     {
+      "v": "KERI10JSON0000ed_",
+      "t": "iss",
+      "d": "EDYk4quo-g_jC023Ix7yWnDMZTHdrJUNbykWMRL6szEu",
+      "i": "EL4TpPnW-G-EPEhxizDFQhWZ18gL41pHXYuyS8QbNoqD",
+      "s": "0",
+      "ri": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "dt": "2026-11-05T21:23:57.512046+00:00"
+     }
+    ],
+    "anchored_sn": 2,
+    "latest_kel_sn": 9
+   },
+   "conforms": true
+  },
+  {
+   "name": "registries given for a single registry",
+   "answer": {
+    "aid": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+    "registry_prefix": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+    "events": [
+     {
+      "v": "KERI10JSON00010f_",
+      "t": "vcp",
+      "d": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "i": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "ii": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+      "s": "0",
+      "c": [],
+      "bt": "0",
+      "b": [],
+      "n": "EMmwuIELycMXfXOTpYUtd25XFTF0ESNE8K0Yjh9QvhFH"
+     },
+     {
+      "v": "KERI10JSON0000ed_",
+      "t": "iss",
+      "d": "EDYk4quo-g_jC023Ix7yWnDMZTHdrJUNbykWMRL6szEu",
+      "i": "EL4TpPnW-G-EPEhxizDFQhWZ18gL41pHXYuyS8QbNoqD",
+      "s": "0",
+      "ri": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "dt": "2026-11-05T21:23:57.512046+00:00"
+     }
+    ],
+    "anchored_sn": 2,
+    "latest_kel_sn": 2,
+    "registries": [
+     "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc"
+    ]
+   },
+   "conforms": false,
+   "why": "registries is left out unless there are two or more"
+  },
+  {
+   "name": "registry_prefix is not the first registry",
+   "answer": {
+    "aid": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+    "registry_prefix": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+    "events": [
+     {
+      "v": "KERI10JSON00010f_",
+      "t": "vcp",
+      "d": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "i": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "ii": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+      "s": "0",
+      "c": [],
+      "bt": "0",
+      "b": [],
+      "n": "EMmwuIELycMXfXOTpYUtd25XFTF0ESNE8K0Yjh9QvhFH"
+     },
+     {
+      "v": "KERI10JSON0000ed_",
+      "t": "iss",
+      "d": "EDYk4quo-g_jC023Ix7yWnDMZTHdrJUNbykWMRL6szEu",
+      "i": "EL4TpPnW-G-EPEhxizDFQhWZ18gL41pHXYuyS8QbNoqD",
+      "s": "0",
+      "ri": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "dt": "2026-11-05T21:23:57.512046+00:00"
+     },
+     {
+      "v": "KERI10JSON00010f_",
+      "t": "vcp",
+      "d": "EBdwkQNo5jtsyV3F7M6lt2jmK0ZTb0Qmcys5mZKRzSlx",
+      "i": "EBdwkQNo5jtsyV3F7M6lt2jmK0ZTb0Qmcys5mZKRzSlx",
+      "ii": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+      "s": "0",
+      "c": [],
+      "bt": "0",
+      "b": [],
+      "n": "EMmwuIELycMXfXOTpYUtd25XFTF0ESNE8K0Yjh9QvhFH"
+     }
+    ],
+    "anchored_sn": 3,
+    "latest_kel_sn": 2,
+    "registries": [
+     "EBdwkQNo5jtsyV3F7M6lt2jmK0ZTb0Qmcys5mZKRzSlx",
+     "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc"
+    ]
+   },
+   "conforms": false,
+   "why": "registry_prefix is the first registry founded"
+  },
+  {
+   "name": "an event of a registry the answer does not name",
+   "answer": {
+    "aid": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+    "registry_prefix": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+    "events": [
+     {
+      "v": "KERI10JSON00010f_",
+      "t": "vcp",
+      "d": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "i": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "ii": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+      "s": "0",
+      "c": [],
+      "bt": "0",
+      "b": [],
+      "n": "EMmwuIELycMXfXOTpYUtd25XFTF0ESNE8K0Yjh9QvhFH"
+     },
+     {
+      "v": "KERI10JSON0000ed_",
+      "t": "iss",
+      "d": "EDYk4quo-g_jC023Ix7yWnDMZTHdrJUNbykWMRL6szEu",
+      "i": "EL4TpPnW-G-EPEhxizDFQhWZ18gL41pHXYuyS8QbNoqD",
+      "s": "0",
+      "ri": "EBdwkQNo5jtsyV3F7M6lt2jmK0ZTb0Qmcys5mZKRzSlx",
+      "dt": "2026-11-05T21:23:57.512046+00:00"
+     }
+    ],
+    "anchored_sn": 2,
+    "latest_kel_sn": 2
+   },
+   "conforms": false,
+   "why": "ri names a registry that is neither registry_prefix nor in registries"
+  },
+  {
+   "name": "a revocation that names no issuance",
+   "answer": {
+    "aid": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+    "registry_prefix": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+    "events": [
+     {
+      "v": "KERI10JSON00010f_",
+      "t": "vcp",
+      "d": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "i": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "ii": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+      "s": "0",
+      "c": [],
+      "bt": "0",
+      "b": [],
+      "n": "EMmwuIELycMXfXOTpYUtd25XFTF0ESNE8K0Yjh9QvhFH"
+     },
+     {
+      "v": "KERI10JSON0000ed_",
+      "t": "iss",
+      "d": "EDYk4quo-g_jC023Ix7yWnDMZTHdrJUNbykWMRL6szEu",
+      "i": "EL4TpPnW-G-EPEhxizDFQhWZ18gL41pHXYuyS8QbNoqD",
+      "s": "0",
+      "ri": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "dt": "2026-11-05T21:23:57.512046+00:00"
+     },
+     {
+      "v": "KERI10JSON000120_",
+      "t": "rev",
+      "d": "EMrnIrsIGzsRqUGt9zvaNr84bdZ2OrgEuo73m8_WPIdD",
+      "i": "EL4TpPnW-G-EPEhxizDFQhWZ18gL41pHXYuyS8QbNoqD",
+      "s": "1",
+      "ri": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "dt": "2026-11-05T21:23:57.516915+00:00"
+     }
+    ],
+    "anchored_sn": 3,
+    "latest_kel_sn": 3
+   },
+   "conforms": false,
+   "why": "a rev carries p, the event it revokes"
+  },
+  {
+   "name": "an event of another kind",
+   "answer": {
+    "aid": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+    "registry_prefix": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+    "events": [
+     {
+      "v": "KERI10JSON00010f_",
+      "t": "vcp",
+      "d": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "i": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "ii": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+      "s": "0",
+      "c": [],
+      "bt": "0",
+      "b": [],
+      "n": "EMmwuIELycMXfXOTpYUtd25XFTF0ESNE8K0Yjh9QvhFH"
+     },
+     {
+      "v": "KERI10JSON0000ed_",
+      "t": "ixn",
+      "d": "EDYk4quo-g_jC023Ix7yWnDMZTHdrJUNbykWMRL6szEu",
+      "i": "EL4TpPnW-G-EPEhxizDFQhWZ18gL41pHXYuyS8QbNoqD",
+      "s": "0",
+      "ri": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "dt": "2026-11-05T21:23:57.512046+00:00"
+     }
+    ],
+    "anchored_sn": 2,
+    "latest_kel_sn": 2
+   },
+   "conforms": false,
+   "why": "t is vcp, iss or rev"
+  },
+  {
+   "name": "anchored past the key log held",
+   "answer": {
+    "aid": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+    "registry_prefix": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+    "events": [
+     {
+      "v": "KERI10JSON00010f_",
+      "t": "vcp",
+      "d": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "i": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "ii": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+      "s": "0",
+      "c": [],
+      "bt": "0",
+      "b": [],
+      "n": "EMmwuIELycMXfXOTpYUtd25XFTF0ESNE8K0Yjh9QvhFH"
+     },
+     {
+      "v": "KERI10JSON0000ed_",
+      "t": "iss",
+      "d": "EDYk4quo-g_jC023Ix7yWnDMZTHdrJUNbykWMRL6szEu",
+      "i": "EL4TpPnW-G-EPEhxizDFQhWZ18gL41pHXYuyS8QbNoqD",
+      "s": "0",
+      "ri": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "dt": "2026-11-05T21:23:57.512046+00:00"
+     }
+    ],
+    "anchored_sn": 5,
+    "latest_kel_sn": 2
+   },
+   "conforms": false,
+   "why": "an event cannot be anchored at a place in the key log the witness does not hold"
+  },
+  {
+   "name": "latest_kel_sn missing",
+   "answer": {
+    "aid": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+    "registry_prefix": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+    "events": [
+     {
+      "v": "KERI10JSON00010f_",
+      "t": "vcp",
+      "d": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "i": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "ii": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+      "s": "0",
+      "c": [],
+      "bt": "0",
+      "b": [],
+      "n": "EMmwuIELycMXfXOTpYUtd25XFTF0ESNE8K0Yjh9QvhFH"
+     },
+     {
+      "v": "KERI10JSON0000ed_",
+      "t": "iss",
+      "d": "EDYk4quo-g_jC023Ix7yWnDMZTHdrJUNbykWMRL6szEu",
+      "i": "EL4TpPnW-G-EPEhxizDFQhWZ18gL41pHXYuyS8QbNoqD",
+      "s": "0",
+      "ri": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "dt": "2026-11-05T21:23:57.512046+00:00"
+     }
+    ],
+    "anchored_sn": 2
+   },
+   "conforms": false,
+   "why": "latest_kel_sn is required"
+  },
+  {
+   "name": "anchored_sn missing",
+   "answer": {
+    "aid": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+    "registry_prefix": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+    "events": [
+     {
+      "v": "KERI10JSON00010f_",
+      "t": "vcp",
+      "d": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "i": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "ii": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+      "s": "0",
+      "c": [],
+      "bt": "0",
+      "b": [],
+      "n": "EMmwuIELycMXfXOTpYUtd25XFTF0ESNE8K0Yjh9QvhFH"
+     },
+     {
+      "v": "KERI10JSON0000ed_",
+      "t": "iss",
+      "d": "EDYk4quo-g_jC023Ix7yWnDMZTHdrJUNbykWMRL6szEu",
+      "i": "EL4TpPnW-G-EPEhxizDFQhWZ18gL41pHXYuyS8QbNoqD",
+      "s": "0",
+      "ri": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "dt": "2026-11-05T21:23:57.512046+00:00"
+     }
+    ],
+    "latest_kel_sn": 2
+   },
+   "conforms": false,
+   "why": "anchored_sn is required"
+  },
+  {
+   "name": "issuer given as issuer_aid",
+   "answer": {
+    "registry_prefix": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+    "events": [
+     {
+      "v": "KERI10JSON00010f_",
+      "t": "vcp",
+      "d": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "i": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "ii": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+      "s": "0",
+      "c": [],
+      "bt": "0",
+      "b": [],
+      "n": "EMmwuIELycMXfXOTpYUtd25XFTF0ESNE8K0Yjh9QvhFH"
+     },
+     {
+      "v": "KERI10JSON0000ed_",
+      "t": "iss",
+      "d": "EDYk4quo-g_jC023Ix7yWnDMZTHdrJUNbykWMRL6szEu",
+      "i": "EL4TpPnW-G-EPEhxizDFQhWZ18gL41pHXYuyS8QbNoqD",
+      "s": "0",
+      "ri": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+      "dt": "2026-11-05T21:23:57.512046+00:00"
+     }
+    ],
+    "anchored_sn": 2,
+    "latest_kel_sn": 2,
+    "issuer_aid": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A"
+   },
+   "conforms": false,
+   "why": "the issuer is aid, and nothing else is added"
+  },
+  {
+   "name": "events as base64 records",
+   "answer": {
+    "aid": "EH1FyoHUydKtK-x7474u3jpe4QeqxNcI8bKGUyXo7J6A",
+    "registry_prefix": "ECMfqIOQV33uLQN0MBQfJ93CjOSCe0RxNWdEvW0XNWfc",
+    "events": [
+     {
+      "said": "EDYk4quo-g_jC023Ix7yWnDMZTHdrJUNbykWMRL6szEu",
+      "ilk": "iss",
+      "raw_b64": "e30="
+     }
+    ],
+    "anchored_sn": 2,
+    "latest_kel_sn": 2
+   },
+   "conforms": false,
+   "why": "events are the KERI events themselves"
+  }
+ ],
+ "heads": [
+  {
+   "name": "a head",
+   "head": {
+    "anchored_sn": 3,
+    "latest_kel_sn": 4,
+    "event_digest": "EMrnIrsIGzsRqUGt9zvaNr84bdZ2OrgEuo73m8_WPIdD"
+   },
+   "conforms": true
+  },
+  {
+   "name": "a head with no digest",
+   "head": {
+    "anchored_sn": 3,
+    "latest_kel_sn": 4
+   },
+   "conforms": false,
+   "why": "event_digest is required"
+  },
+  {
+   "name": "a head with extras",
+   "head": {
+    "anchored_sn": 3,
+    "latest_kel_sn": 4,
+    "event_digest": "EMrnIrsIGzsRqUGt9zvaNr84bdZ2OrgEuo73m8_WPIdD",
+    "events": []
+   },
+   "conforms": false,
+   "why": "nothing else is added"
+  }
+ ],
+ "no_tel": {
+  "status": 404,
+  "body": {
+   "error": "no_tel"
+  }
+ }
+}

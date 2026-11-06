@@ -42,6 +42,18 @@ func (s *CoreServer) mountLoginRoutes(r chi.Router) {
 	})
 }
 
+// acdcAsBase64 is the one place that decides how a held credential's body is
+// encoded on the wire: standard base64 of the ACDC's exact bytes. Issued and
+// delivered records already keep it that way and pass through unchanged; a
+// record kept as plain JSON (one received by hand) is encoded here. Encoding a
+// base64 body again is what made a site refuse genuine credentials.
+func acdcAsBase64(stored string) string {
+	if strings.HasPrefix(strings.TrimSpace(stored), "{") {
+		return base64.StdEncoding.EncodeToString([]byte(stored))
+	}
+	return stored
+}
+
 func (s *CoreServer) initLoginHandler() error {
 	h, err := login.NewHandler(s.DataDir, s.KeriDriver)
 	if err != nil {
@@ -56,17 +68,13 @@ func (s *CoreServer) initLoginHandler() error {
 		}
 		out := make([]login.PresentedCredential, 0, len(recs))
 		for _, c := range recs {
-			acdcB64 := ""
-			if c.AcdcJson != "" {
-				acdcB64 = base64.StdEncoding.EncodeToString([]byte(c.AcdcJson))
-			}
 			out = append(out, login.PresentedCredential{
 				SAID:        c.SAID,
 				SchemaSAID:  c.SchemaSAID,
 				IssuerAID:   c.IssuerAID,
 				HolderAID:   c.HolderAID,
 				Status:      c.Status,
-				AcdcJsonB64: acdcB64,
+				AcdcJsonB64: acdcAsBase64(c.AcdcJson),
 			})
 		}
 		return out
@@ -104,6 +112,7 @@ func (s *CoreServer) handleCreateAssetChallenge(w http.ResponseWriter, r *http.R
 		AssetID              string   `json:"asset_id"`
 		Audience             string   `json:"audience"`
 		RequestedDisclosures []string `json:"requested_disclosures"`
+		BrowserKey           string   `json:"browser_key"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
@@ -114,7 +123,7 @@ func (s *CoreServer) handleCreateAssetChallenge(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	token, qrURL, code, msg := s.createSignedAssetChallenge(body.AssetID, body.Audience, body.RequestedDisclosures, s.getPublicURL(r))
+	token, qrURL, code, msg := s.createSignedAssetChallenge(body.AssetID, body.Audience, body.RequestedDisclosures, body.BrowserKey, s.getPublicURL(r))
 	if code != 0 {
 		http.Error(w, msg, code)
 		return
@@ -232,7 +241,7 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 	}
 
 	// 1) Authenticate: verify the assertion signature + binding to this challenge.
-	res := login.VerifyAssertion(a, bundle.Nonce, bundle.Audience, bundle.SiteAID, 300)
+	res := login.VerifyAssertionForBrowserKey(a, bundle.Nonce, bundle.Audience, bundle.SiteAID, bundle.BrowserKey, 300)
 	if !res.Valid {
 		s.setChallengeStatus(token, map[string]interface{}{"status": "denied", "reason": res.Reason})
 		http.Error(w, "assertion verification failed: "+res.Reason, http.StatusUnauthorized)
@@ -266,6 +275,11 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 		"status":       "complete",
 		"pairwise_aid": res.PairwiseAID,
 		"disclosures":  res.Disclosures,
+	}
+	// The browser key the verified assertion repeated (ADR-066), so whoever
+	// reads the result can check it is the one it asked for.
+	if bundle.BrowserKey != "" {
+		st["browser_key"] = a.BrowserKey
 	}
 	// Membership-admitted logins carry the member's info (role, display name)
 	// from the admitting resolver, so the relying party gets "who this is" in
@@ -364,7 +378,7 @@ func (s *CoreServer) authorizeAssetAccess(ctx context.Context, siteAID, pairwise
 		}
 		// Credential gate (additive).
 		if a.Policy.RequiredCredSchema != "" {
-			if ok, reason := s.credentialGateSatisfied(ctx, presented, a.Policy.RequiredCredSchema, a.Policy.RequiredCredIssuer); !ok {
+			if ok, reason := s.credentialGateSatisfied(ctx, presented, pairwiseAID, a.Policy.RequiredCredSchema, a.Policy.RequiredCredIssuer); !ok {
 				return false, reason
 			}
 		}
@@ -384,10 +398,14 @@ func (s *CoreServer) authorizeAssetAccess(ctx context.Context, siteAID, pairwise
 // satisfies the required schema (and issuer). When the KERI driver + raw ACDC
 // bytes are available it CRYPTOGRAPHICALLY verifies the credential (SAID + issuer
 // KEL anchoring + watcher duplicity, and holder-binding if a presentation
-// signature is present). Without the driver it degrades to a declared-field
-// check so open/score-gated flows and driverless environments still work.
-func (s *CoreServer) credentialGateSatisfied(ctx context.Context, presented []interface{}, schema, issuer string) (bool, string) {
+// signature is present). Without the driver or the credential body nothing is
+// admitted: a declared field is not evidence.
+func (s *CoreServer) credentialGateSatisfied(ctx context.Context, presented []interface{}, signerAID, schema, issuer string) (bool, string) {
 	lastReason := "required credential not presented"
+	if signerAID == "" {
+		// An empty holder would switch the holder check off.
+		return false, "no identity signing in to hold the credential"
+	}
 	for _, p := range presented {
 		m, ok := p.(map[string]interface{})
 		if !ok {
@@ -400,21 +418,24 @@ func (s *CoreServer) credentialGateSatisfied(ctx context.Context, presented []in
 			lastReason = "credential from an unexpected issuer"
 			continue
 		}
+		// No credential body, no pass. A declared field (a said, a status) is
+		// whatever the holder chose to write, so it is never read as evidence
+		// about a credential this agent could have revoked.
 		acdcB64 := credStr(m["acdc_json_b64"])
-		if s.KeriDriver != nil && acdcB64 != "" {
-			verified, iss, reason := s.verifyPresentedCredentialACDC(ctx, acdcB64,
-				credStr(m["holder_aid"]), credStr(m["pres_said_b64"]),
-				credStr(m["cesr_sig"]), credStr(m["holder_public_key"]), schemaForms(schema))
-			if verified && (issuer == "" || iss == issuer) {
-				return true, ""
-			}
-			lastReason = "credential verification failed: " + reason
+		if s.KeriDriver == nil || acdcB64 == "" {
+			lastReason = "credential body not presented, so it cannot be verified"
 			continue
 		}
-		// No driver / no ACDC bytes → declared-field fallback.
-		if isUsableStatus(credStr(m["status"])) {
+		// The holder is the identity that signed in, never the holder the
+		// presenter declares: the driver checks it against the credential's
+		// own issuee, so a credential issued to somebody else is refused.
+		verified, iss, reason := s.verifyPresentedCredentialACDC(ctx, acdcB64,
+			signerAID, credStr(m["pres_said_b64"]),
+			credStr(m["cesr_sig"]), credStr(m["holder_public_key"]), schemaForms(schema))
+		if verified && (issuer == "" || iss == issuer) {
 			return true, ""
 		}
+		lastReason = "credential verification failed: " + reason
 	}
 	return false, lastReason
 }
@@ -427,28 +448,21 @@ func (s *CoreServer) verifyPresentedCredentialACDC(ctx context.Context, acdcJson
 	if s.KeriDriver == nil {
 		return false, "", "keri driver unavailable"
 	}
-	var acdcBody map[string]interface{}
 	var issuerKelEvents []map[string]interface{}
-	issuerAid := ""
-	if acdcBytes, err := base64.StdEncoding.DecodeString(acdcJsonB64); err == nil {
-		if json.Unmarshal(acdcBytes, &acdcBody) == nil {
-			if ia, ok := acdcBody["i"].(string); ok && ia != "" {
-				issuerAid = ia
-				if kelRecord, err3 := s.DataStore.GetContactKEL(issuerAid); err3 == nil && kelRecord != nil && kelRecord.KelVerified {
-					issuerKelEvents = unwrapEventJSON(kelRecord.KEL)
-				}
-				if issuerKelEvents == nil {
-					if ownEvents, err3 := s.DataStore.GetEvents(issuerAid); err3 == nil && len(ownEvents) > 0 {
-						issuerKelEvents = eventRecordsToKEDs(ownEvents)
-					}
-				}
-			}
-		}
+	cred, err := readCredentialHere(acdcJsonB64)
+	if err != nil {
+		return false, "", err.Error()
+	}
+	issuerAid := cred.Issuer
+	if issuerAid != "" {
+		issuerKelEvents = s.issuerLogForVerification(issuerAid)
 	}
 	if issuerKelEvents == nil {
 		return false, issuerAid, "issuer KEL not found"
 	}
-	result, err := s.KeriDriver.VerifyCredential(&drivers.DriverVerifyCredentialRequest{
+	issuance := s.issuanceLogForVerification(cred, issuerKelEvents)
+	issuerKelEvents = issuance.issuerKel
+	result, err := s.verifyCredentialHere(&drivers.DriverVerifyCredentialRequest{
 		AcdcJson:           acdcJsonB64,
 		IssuerKelEvents:    issuerKelEvents,
 		HolderAid:          holderAid,
@@ -456,13 +470,13 @@ func (s *CoreServer) verifyPresentedCredentialACDC(ctx context.Context, acdcJson
 		CesrSignature:      cesrSig,
 		HolderPublicKey:    holderPubKey,
 		TrustedSchemaSaids: trustedSchemas,
-	})
+	}, cred, issuance)
 	if err != nil {
 		return false, issuerAid, "verify error: " + err.Error()
 	}
-	if result == nil || !result.Verified {
+	if !result.Verified {
 		reason := "credential not verified"
-		if result != nil && len(result.Errors) > 0 {
+		if len(result.Errors) > 0 {
 			reason = strings.Join(result.Errors, "; ")
 		}
 		return false, issuerAid, reason

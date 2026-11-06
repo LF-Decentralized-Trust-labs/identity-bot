@@ -16,6 +16,15 @@ type Authority struct {
 	// from. Empty for an owner-signed request, and for a machine whose grant
 	// is waiting for the device that holds the identity's key.
 	ControllerGrant string
+	// CreatorGrant is, for a request an AI agent's body signed (kind
+	// ai_agent_body), the creator's AI Agent Grant: the credential the grant
+	// being issued names as what authorised it, which must hold agent.create.
+	// CreatorGrantSchema is the schema that credential has, as the edge states
+	// it. CreatorBody is the creator's body credential, the one that says the
+	// machine that signed speaks as the creator. All empty for any other request.
+	CreatorGrant       string
+	CreatorGrantSchema string
+	CreatorBody        string
 	// Request is the request as it was signed. Nil when the identity's own
 	// device asked without signing.
 	Request *SignedRequest

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -96,7 +97,7 @@ func (m *messaging) anchored(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := m.receiver.DataStore.SaveContactKEL(store.ContactKELRecord{
-		AID: m.senderAID, KEL: inceptionCommittingTo(t, m.senderAID, ks), KelVerified: true, CurrentPublicKey: "Dkey",
+		AID: m.senderAID, KEL: inceptionCommittingTo(t, m.senderAID, ks), KelVerified: true, CurrentPublicKey: fixtureKey,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -338,13 +339,43 @@ func TestARotationNeitherBreaksAnOldMessageNorLetsTheRetiredKeyVouch(t *testing.
 	tampered.SenderKEL = string(edited)
 	refusedFor(t, m.receiver, tampered, "signed log has no record")
 
-	// The contact going, and its record being refetched shorter, leave the
-	// proof intact: the history it was received under is kept with it.
-	if err := m.receiver.DataStore.DeleteContact(m.senderAID); err != nil {
+	// Refetched shorter: the sender's first event alone is offered again, as an
+	// older copy of its log would be. The store refuses it, the longer log stays,
+	// and the proof of the message received before the rotation still holds.
+	//
+	// Fails when refuseAnEarlierLog (store/store.go) is made to return nil: the
+	// shorter log replaces the held one and the current key goes back to key1.
+	if err := m.receiver.DataStore.SaveContactKEL(store.ContactKELRecord{
+		AID: m.senderAID, KEL: withTheBytesItWasVerifiedBy(t, icp), KelVerified: true, CurrentPublicKey: key1,
+	}); !errors.Is(err, store.ErrLogDoesNotExtend) {
+		t.Fatalf("a shorter refetch of the sender's log was accepted: %v", err)
+	}
+	if held, _ := m.receiver.DataStore.GetContactKEL(m.senderAID); held == nil || len(held.KEL) != 2 || held.CurrentPublicKey != key2 {
+		t.Fatalf("the refused refetch changed the held log: %+v", held)
+	}
+	if _, _, err := m.receiver.provedSender(before); err != nil {
+		t.Fatalf("a shorter refetch broke a genuine message's proof: %v", err)
+	}
+	refusedFor(t, m.receiver, after, "were not tied")
+
+	// The contact going, and its record being lost or refetched shorter than the
+	// position the message arrived at, leave the proof intact: the history it was
+	// received under is kept with it, not read back from the contact's log.
+	//
+	// The store no longer lets a shorter log replace the one it holds, so the log
+	// is cleared the way it is lost in practice: the machine's records rebuilt (a
+	// restore, a new database) with nothing held for the contact.
+	rebuilt, err := store.NewSQLiteStore(t.TempDir())
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := m.receiver.DataStore.SaveContactKEL(store.ContactKELRecord{AID: m.senderAID}); err != nil {
+	t.Cleanup(func() { _ = rebuilt.Close() })
+	if err := rebuilt.SaveIdentity(store.IdentityState{AID: m.receiver.thisIdentityAgentsIdentifier(), PublicKey: "DPUB"}); err != nil {
 		t.Fatal(err)
+	}
+	m.receiver.DataStore = rebuilt
+	if held, _ := rebuilt.GetContactKEL(m.senderAID); held != nil {
+		t.Fatalf("the rebuilt store should hold no log for the sender: %+v", held)
 	}
 	if _, _, err := m.receiver.provedSender(before); err != nil {
 		t.Fatalf("removing the contact broke a genuine message's proof: %v", err)

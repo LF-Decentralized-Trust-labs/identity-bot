@@ -4,12 +4,14 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"strings"
 
 	"identity-agent-core/asset"
+	"identity-agent-core/enrolsecret"
 	"identity-agent-core/login"
 
 	"github.com/go-chi/chi/v5"
@@ -22,8 +24,10 @@ func (s *CoreServer) mountSignerRoutes(r chi.Router) {
 	// Under the parent "/api" router — relative paths.
 	r.Route("/signer", func(r chi.Router) {
 		r.Post("/invites", s.handleCreateSignerInvite)
-		// Public: the signing individual's agent looks up + redeems here (t=4).
-		r.Get("/invites/{token}", s.assetHandler.HandleGetEmployeeInviteInfo)
+		// Public: the signing individual's agent redeems here (t=4). There is
+		// no lookup route: the Ask already says what it is for, and a read
+		// that took the code in its path was reachable only by the owner,
+		// who has no use for it.
 		r.Post("/invites/{token}/redeem", s.handleRedeemSignerInvite)
 	})
 }
@@ -221,13 +225,18 @@ func (s *CoreServer) handleRedeemSignerInvite(w http.ResponseWriter, r *http.Req
 			http.StatusBadRequest)
 		return
 	}
-	inv, ok := s.assetHandler.Store.GetEmployeeInvite(token)
-	if !ok || inv.Revoked || !inv.IsSigner {
+	// Check and spend in one locked step; handed back below if the redeem fails.
+	_, rerr := s.assetHandler.Store.ReserveEmployeeInvite(token, true)
+	switch {
+	case rerr == nil:
+	case errors.Is(rerr, asset.ErrInviteNotFound):
 		http.Error(w, "invalid signer invite", http.StatusBadRequest)
 		return
-	}
-	if inv.MaxUses > 0 && inv.UseCount >= inv.MaxUses {
+	case errors.Is(rerr, asset.ErrInviteExhausted):
 		http.Error(w, "signer invite already used", http.StatusBadRequest)
+		return
+	default:
+		http.Error(w, "the invite could not be redeemed", http.StatusInternalServerError)
 		return
 	}
 	emp := asset.Employee{
@@ -235,8 +244,8 @@ func (s *CoreServer) handleRedeemSignerInvite(w http.ResponseWriter, r *http.Req
 		MachineOwnerAID: body.MachineOwnerAID,
 		Name:            body.Name,
 		Role:            "Super Admin",
-		Status:          "active", // founding signer is active immediately
-		InviteToken:     token,
+		Status:          "active",                  // founding signer is active immediately
+		InviteToken:     enrolsecret.Digest(token), // the roster keeps no code
 		OOBI:            body.OOBI,
 		IsSigner:        true,
 		VouchSig:        body.VouchSig,
@@ -252,15 +261,16 @@ func (s *CoreServer) handleRedeemSignerInvite(w http.ResponseWriter, r *http.Req
 		OOBI:                   body.OOBI,
 	})
 	if err != nil {
+		_ = s.assetHandler.Store.ReleaseEmployeeInvite(token)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	if err := s.assetHandler.Store.UpsertEmployee(emp); err != nil {
+		_ = s.assetHandler.Store.ReleaseEmployeeInvite(token)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	_ = s.assetHandler.Store.IncrementEmployeeInviteUse(token)
 
 	if acc.Ceremony {
 		writeJSON(w, map[string]interface{}{

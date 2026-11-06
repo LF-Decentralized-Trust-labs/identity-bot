@@ -292,6 +292,14 @@ const maxLaterEvents = 32
 // signature, until the witness has no more. A commercial witness serves at the
 // root and an agent acting as one under /api, so both are tried.
 func (s *CoreServer) askWitnessForLaterEvents(base, aid string, held []map[string]interface{}) []map[string]interface{} {
+	return askWitnessForLaterEventsWith(func(u string) *http.Client { return s.peerClient(10*time.Second, u) }, base, aid, held)
+}
+
+// askWitnessForLaterEventsWith is askWitnessForLaterEvents with the client for
+// each address chosen by the caller: a contact's witness address is the
+// contact's to set and gets the guarded client, a service witness the operator
+// configured does not.
+func askWitnessForLaterEventsWith(clientFor func(url string) *http.Client, base, aid string, held []map[string]interface{}) []map[string]interface{} {
 	proof, ok := witness.InceptionProof(held)
 	if !ok {
 		return nil
@@ -306,7 +314,7 @@ func (s *CoreServer) askWitnessForLaterEvents(base, aid string, held []map[strin
 				continue
 			}
 			req.Header.Set(witness.HeaderInception, proof)
-			resp, err := s.peerClient(10*time.Second, url).Do(req)
+			resp, err := clientFor(url).Do(req)
 			if err != nil {
 				continue
 			}

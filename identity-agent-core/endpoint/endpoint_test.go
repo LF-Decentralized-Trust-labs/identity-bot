@@ -76,7 +76,7 @@ func TestAnAgentWithNoProxyIsUnaffected(t *testing.T) {
 	}
 }
 
-// With no tunnel, no relay and no direct-ingress hatch, the agent binds loopback
+// With no tunnel, no relay and no direct listener, the agent binds loopback
 // only — so it must advertise localhost, NOT the LAN IP.
 //
 // Ranking the LAN IP first was a silent break: the address went into the OOBI and
@@ -84,7 +84,7 @@ func TestAnAgentWithNoProxyIsUnaffected(t *testing.T) {
 // connection-refused. The address published has to match where the agent actually
 // answers.
 func TestALoopbackOnlyAgentAdvertisesLocalhostNotADeadLANIP(t *testing.T) {
-	t.Setenv("AGENT_DIRECT_INGRESS_ADDR", "")
+	t.Setenv("AGENT_DIRECT_LISTEN_ADDR", "")
 	t.Setenv("PUBLIC_URL", "")
 
 	es := New(nil, 5050)
@@ -99,39 +99,39 @@ func TestALoopbackOnlyAgentAdvertisesLocalhostNotADeadLANIP(t *testing.T) {
 	}
 }
 
-// A loopback host in the escape hatch is still loopback: it does not make the LAN
+// A loopback host for the direct listener is still loopback: it does not make the LAN
 // IP reachable, so the agent still advertises localhost.
-func TestALoopbackIngressHatchStillAdvertisesLocalhost(t *testing.T) {
-	t.Setenv("AGENT_DIRECT_INGRESS_ADDR", "127.0.0.1")
+func TestALoopbackDirectListenerStillAdvertisesLocalhost(t *testing.T) {
+	t.Setenv("AGENT_DIRECT_LISTEN_ADDR", "127.0.0.1:5060")
 	t.Setenv("PUBLIC_URL", "")
 
 	es := New(nil, 5050)
 	if _, source := es.resolve(); source != "localhost" {
-		t.Fatalf("a hatch bound to loopback published source %q, want localhost", source)
+		t.Fatalf("a direct listener bound to loopback published source %q, want localhost", source)
 	}
 }
 
-// When the direct-ingress hatch binds the surface to a non-loopback host
+// When the direct listener binds a non-loopback host
 // (0.0.0.0 here), the LAN IP is genuinely reachable, so it is advertised.
 //
 // Guarded on there actually being a LAN interface: a host with none correctly
 // falls back to localhost, and asserting a LAN IP there would fail for the right
 // reason in the wrong test.
-func TestAReachableIngressHatchAdvertisesTheLANIP(t *testing.T) {
+func TestAReachableDirectListenerAdvertisesTheLANIPAndItsOwnPort(t *testing.T) {
 	if detectLocalIP() == "" {
 		t.Skip("no non-loopback interface on this host; the LAN-IP branch cannot be exercised")
 	}
-	t.Setenv("AGENT_DIRECT_INGRESS_ADDR", "0.0.0.0")
+	t.Setenv("AGENT_DIRECT_LISTEN_ADDR", "0.0.0.0:5060")
 	t.Setenv("PUBLIC_URL", "")
 
 	es := New(nil, 5050)
 	url, source := es.resolve()
 
 	if !strings.HasPrefix(source, "local:") {
-		t.Fatalf("with the surface bound off-box the agent published source %q (%q) — the reachable LAN IP should win over localhost",
+		t.Fatalf("with the direct listener bound off-box the agent published source %q (%q) — the reachable LAN IP should win over localhost",
 			source, url)
 	}
-	if want := "http://" + detectLocalIP() + ":5050"; url != want {
+	if want := "http://" + detectLocalIP() + ":5060"; url != want {
 		t.Errorf("published %q, want %q", url, want)
 	}
 }
@@ -149,5 +149,31 @@ func TestTheSourceIsWhatMakesFirstAnswerWinsWork(t *testing.T) {
 	es.SetObservedURL("https://first.example")
 	if es.Source() != "observed:proxy" {
 		t.Fatalf("source is %q, so the middleware would never see that it had already learned an address", es.Source())
+	}
+}
+
+// The direct listener setting needs a host and a port; anything else is no
+// listener, so nothing is advertised for it.
+func TestTheDirectListenerSettingNeedsAHostAndAPort(t *testing.T) {
+	for _, v := range []string{"", "0.0.0.0", "0.0.0.0:", ":5060", "0.0.0.0:0", "0.0.0.0:70000", "0.0.0.0:abc"} {
+		t.Setenv("AGENT_DIRECT_LISTEN_ADDR", v)
+		if h, p, ok := DirectListenAddr(); ok {
+			t.Errorf("%q read as a listener at %s:%d", v, h, p)
+		}
+	}
+	t.Setenv("AGENT_DIRECT_LISTEN_ADDR", "192.168.0.10:5060")
+	if h, p, ok := DirectListenAddr(); !ok || h != "192.168.0.10" || p != 5060 {
+		t.Errorf("got %q %d %v", h, p, ok)
+	}
+}
+
+// The retired whole-surface setting changes nothing: it neither binds nor is
+// advertised.
+func TestTheRetiredWholeSurfaceSettingIsIgnored(t *testing.T) {
+	t.Setenv("AGENT_DIRECT_LISTEN_ADDR", "")
+	t.Setenv("AGENT_DIRECT_INGRESS_ADDR", "0.0.0.0")
+	t.Setenv("PUBLIC_URL", "")
+	if _, source := New(nil, 5050).resolve(); source != "localhost" {
+		t.Fatalf("the retired setting still moved the published address: source %q", source)
 	}
 }

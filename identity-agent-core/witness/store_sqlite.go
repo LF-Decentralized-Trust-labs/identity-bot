@@ -284,6 +284,36 @@ func (s *SQLiteStore) GetKelConflicts(signerAID string) ([]KelConflict, error) {
 	return out, rows.Err()
 }
 
+func (s *SQLiteStore) StoreTELEvent(ev TELEvent) error {
+	_, err := s.db.Exec(`
+		INSERT INTO witness_tel_events (issuer_aid, said, registry, ilk, subject, sn, anchor_sn, raw_b64, stored_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(issuer_aid, said) DO NOTHING`,
+		ev.IssuerAID, ev.SAID, ev.Registry, ev.Ilk, ev.Subject, ev.SN, ev.AnchorSN, ev.RawB64, ev.StoredAt)
+	return err
+}
+
+func (s *SQLiteStore) GetTELEvents(issuerAID string) ([]TELEvent, error) {
+	rows, err := s.db.Query(`
+		SELECT issuer_aid, said, registry, ilk, subject, sn, anchor_sn, raw_b64, stored_at
+		FROM witness_tel_events WHERE issuer_aid = ?
+		ORDER BY anchor_sn, CASE ilk WHEN 'vcp' THEN 0 WHEN 'iss' THEN 1 ELSE 2 END, sn, said`, issuerAID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TELEvent
+	for rows.Next() {
+		var ev TELEvent
+		if err := rows.Scan(&ev.IssuerAID, &ev.SAID, &ev.Registry, &ev.Ilk, &ev.Subject, &ev.SN,
+			&ev.AnchorSN, &ev.RawB64, &ev.StoredAt); err != nil {
+			return nil, err
+		}
+		out = append(out, ev)
+	}
+	return out, rows.Err()
+}
+
 func (s *SQLiteStore) LastKelSeq(signerAID string) (int, error) {
 	var seq sql.NullInt64
 	err := s.db.QueryRow(`SELECT MAX(sequence_num) FROM witness_kel_events WHERE signer_aid = ?`, signerAID).Scan(&seq)

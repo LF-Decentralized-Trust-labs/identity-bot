@@ -81,6 +81,15 @@ func (s *CoreServer) keepTELCommit(c drivers.TELCommit) error {
 	if err != nil {
 		return fmt.Errorf("the transaction-log event does not verify: %w", err)
 	}
+	if err := s.keepVerifiedTELCommit(c, ev); err != nil {
+		return err
+	}
+	// Kept; now it is to go to the witnesses, which never fails what is kept.
+	s.queueTELPush(c.AID, ev.SAID, ev.Ilk, c.TELRaw)
+	return nil
+}
+
+func (s *CoreServer) keepVerifiedTELCommit(c drivers.TELCommit, ev *keri.TELEvent) error {
 	var ixn map[string]interface{}
 	if err := json.Unmarshal(c.KELRaw, &ixn); err != nil {
 		return fmt.Errorf("the anchoring event does not parse: %w", err)

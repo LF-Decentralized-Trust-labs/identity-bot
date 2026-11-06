@@ -23,7 +23,7 @@ import (
 // asset, returning the session token + the QR/bundle URL. errCode==0 means success;
 // otherwise (errCode, errMsg) is an HTTP error to surface. Shared by the native
 // /api/login/challenge endpoint and the widget-compatible /api/login/session endpoint.
-func (s *CoreServer) createSignedAssetChallenge(assetID, audience string, disclosures []string, publicURL string) (sessionToken, qrURL string, errCode int, errMsg string) {
+func (s *CoreServer) createSignedAssetChallenge(assetID, audience string, disclosures []string, browserKey, publicURL string) (sessionToken, qrURL string, errCode int, errMsg string) {
 	if s.assetHandler == nil || s.KeriDriver == nil {
 		return "", "", http.StatusServiceUnavailable, "asset or keri driver not available"
 	}
@@ -44,6 +44,14 @@ func (s *CoreServer) createSignedAssetChallenge(assetID, audience string, disclo
 	}
 	if found.SigningIndex == 0 {
 		return "", "", http.StatusConflict, "asset has no signing key (re-create the asset to provision one)"
+	}
+
+	// A sign-in for a browser's key names its thumbprint in the signed
+	// challenge, so the person's approval is for that key (ADR-066).
+	if browserKey != "" {
+		if err := login.CheckBrowserKeyThumbprint(browserKey); err != nil {
+			return "", "", http.StatusBadRequest, err.Error()
+		}
 	}
 
 	nonceB := make([]byte, 32)
@@ -74,6 +82,7 @@ func (s *CoreServer) createSignedAssetChallenge(assetID, audience string, disclo
 		RequestedCredentials: reqCreds,
 		CallbackURL:          fmt.Sprintf("%s/api/login/callback", publicURL),
 		SessionToken:         sessionToken,
+		BrowserKey:           browserKey,
 	}
 	// Membership-gated asset: anchor the relationship to the asset's CONTROLLER
 	// (its delegator — an organization or an individual), not the per-asset AID,
@@ -132,9 +141,10 @@ func (s *CoreServer) handleCreateLoginSession(w http.ResponseWriter, r *http.Req
 	var body struct {
 		RequestDisclosures []string `json:"requestDisclosures"`
 		Audience           string   `json:"audience"`
+		BrowserKey         string   `json:"browserKey"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body) // tolerate empty body
-	token, qrURL, code, msg := s.createSignedAssetChallenge(assetID, body.Audience, body.RequestDisclosures, s.getPublicURL(r))
+	token, qrURL, code, msg := s.createSignedAssetChallenge(assetID, body.Audience, body.RequestDisclosures, body.BrowserKey, s.getPublicURL(r))
 	if code != 0 {
 		http.Error(w, msg, code)
 		return
@@ -202,6 +212,11 @@ func (s *CoreServer) handleLoginSessionStatus(w http.ResponseWriter, r *http.Req
 			}
 			if d, ok := st["disclosures"]; ok {
 				resp["disclosures"] = d
+			}
+			// The browser key the verified assertion repeated (ADR-066): released
+			// to the collector only, like who signed in.
+			if bk, ok := st["browser_key"].(string); ok {
+				resp["browser_key"] = bk
 			}
 			// Membership-admitted logins: who the admitting roster says this is
 			// (e.g. role + display_name), so the RP needs no org-internal lookups.

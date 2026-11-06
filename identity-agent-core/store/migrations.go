@@ -1021,6 +1021,81 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_witness_self_heal_log_identity
 `},
 	{
 		Version:     47,
+		Description: "Let a witness keep the transaction logs of the registries of the identities it witnesses",
+		SQL: `
+-- A witness serves the whole transaction log of the registries an identity it
+-- witnesses has founded, so that a verifier who is not that identity can read
+-- whether a credential was issued and whether it has been revoked. Every event
+-- is kept as the bytes the issuer published, with the place in the issuer's key
+-- log (anchor_sn) whose seal vouches for it: an event with no such seal is never
+-- stored. The witness authors none of it.
+CREATE TABLE IF NOT EXISTS witness_tel_events (
+    issuer_aid  TEXT NOT NULL,
+    said        TEXT NOT NULL,
+    registry    TEXT NOT NULL,
+    ilk         TEXT NOT NULL,
+    subject     TEXT NOT NULL,
+    sn          INTEGER NOT NULL,
+    anchor_sn   INTEGER NOT NULL,
+    raw_b64     TEXT NOT NULL,
+    stored_at   TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (issuer_aid, said)
+);
+CREATE INDEX IF NOT EXISTS idx_witness_tel_events_range
+    ON witness_tel_events(issuer_aid, anchor_sn);
+`},
+	{
+		Version:     48,
+		Description: "Keep registry events this identity made until its witnesses have them",
+		SQL: `
+-- Every registry event this identity makes (a registry's inception, an
+-- issuance, a revocation) is sent to the witnesses its key log names, so that
+-- someone outside can read it from them. The sending can fail, and a failure
+-- must not fail the issuance, so an event waits here, in the order it was made,
+-- until every one of those witnesses has taken it, and is tried again on every
+-- tick. A row is the event as published; nothing here is a second source of
+-- truth for the log, which is credential_tel_events and credential_registries.
+CREATE TABLE IF NOT EXISTS tel_push_outbox (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    issuer_aid  TEXT NOT NULL,
+    said        TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    raw_b64     TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    last_error  TEXT NOT NULL DEFAULT '',
+    UNIQUE (issuer_aid, said)
+);
+`},
+	{
+		Version:     49,
+		Description: "Remember that the registry events made before the outbox existed were queued",
+		SQL: `
+-- Those events are queued once, on the first start that has the outbox; the
+-- outbox empties as witnesses take them, so without this the whole log would
+-- be queued again at every start.
+CREATE TABLE IF NOT EXISTS tel_backfill (
+    id      INTEGER PRIMARY KEY CHECK (id = 1),
+    done_at TEXT NOT NULL
+);
+`},
+	{
+		Version:     50,
+		Description: "Retry registry events that cannot be sent with growing gaps, never giving one up",
+		SQL: `
+-- A stuck issuer is tried again after a gap that grows with each failure, so it
+-- does not take a pass away from every other issuer, and nothing leaves the
+-- outbox except by a witness having it: a revocation kept back for good is a
+-- revoked credential that checks as live.
+CREATE TABLE IF NOT EXISTS tel_push_retry (
+    issuer_aid      TEXT NOT NULL,
+    said            TEXT NOT NULL,
+    next_attempt_at TEXT NOT NULL,
+    PRIMARY KEY (issuer_aid, said)
+);
+`},
+	{
+		Version:     51,
 		Description: "Keep every signature over a key event, mark the events already unsigned, and keep what a recovery rotation supersedes",
 		SQL: `
 -- An event with several signers carries several signatures, so they are kept
@@ -1055,7 +1130,7 @@ CREATE TABLE IF NOT EXISTS kel_superseded (
 CREATE INDEX IF NOT EXISTS idx_kel_superseded_aid ON kel_superseded(aid);
 `},
 	{
-		Version:     48,
+		Version:     52,
 		Description: "Keep every signature over an event a witness holds, what a recovery rotation supersedes there, and a conflicting event as evidence",
 		SQL: `
 -- A JSON list of the controller signatures that verified; cesr_signature
@@ -1161,55 +1236,116 @@ func ApplyIdentityMigrations(db *sql.DB) error {
 	return nil
 }
 
+// signatureMigrations are the two migrations that keep every signature over a
+// key event, by the start of their description. They were recorded under other
+// numbers on installs made before main's migrations 46 to 50 landed: 46 and 47,
+// then 47 and 48.
+var signatureMigrations = []string{
+	"Keep every signature over a key event",
+	"Keep every signature over an event a witness holds",
+}
+
 // renumberBranchMigrations brings a database that ran the signature migrations
-// under the numbers they had before main's migration 46 landed (46 and 47) to
-// the numbers they have now (47 and 48). Left alone, such a database would count
-// main's 46 as done without ever running it, and then run the witness
-// migration a second time and fail on a column it already has.
+// under an earlier number to the numbers they have now. Left alone, such a
+// database would count main's migrations at those numbers as done without
+// ever running them, and then run a signature migration a second time and fail
+// on a column it already has.
 //
-// A database is recognised by what version 46 was recorded as, not by its
-// number. Main's 46 adds only unique indexes, guarded, and is safe to run on
-// any database, so it is run here and recorded. Does nothing for any other
-// database.
+// A migration is recognised by what it was recorded as, not by its number. The
+// signature migrations' records move to their numbers, and every other
+// migration below the newest of them that such a database never recorded is
+// run and recorded: each of those adds only tables and indexes, guarded, so it
+// is safe on any database. Does nothing for any other database.
 func renumberBranchMigrations(db *sql.DB) error {
-	var desc string
-	err := db.QueryRow(`SELECT description FROM identity_schema_migrations WHERE version = 46`).Scan(&desc)
-	if err == sql.ErrNoRows || (err == nil && !strings.HasPrefix(desc, "Keep every signature over a key event")) {
-		return nil
-	}
+	rows, err := db.Query(`SELECT version, description FROM identity_schema_migrations`)
 	if err != nil {
-		return fmt.Errorf("failed to read identity migration 46: %w", err)
+		return fmt.Errorf("failed to read identity migrations: %w", err)
 	}
-	var sqlText, description string
-	for _, m := range identityMigrations {
-		if m.Version == 46 {
-			sqlText, description = m.SQL, m.Description
+	recorded := map[int]string{}
+	for rows.Next() {
+		var v int
+		var d string
+		if err := rows.Scan(&v, &d); err != nil {
+			rows.Close()
+			return fmt.Errorf("failed to read identity migrations: %w", err)
+		}
+		recorded[v] = d
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("failed to read identity migrations: %w", err)
+	}
+
+	numberOf := func(prefix string) int {
+		for _, m := range identityMigrations {
+			if strings.HasPrefix(m.Description, prefix) {
+				return m.Version
+			}
+		}
+		return 0
+	}
+	moves := map[int]int{} // recorded number -> number now
+	newest := 0
+	for _, prefix := range signatureMigrations {
+		now := numberOf(prefix)
+		if now == 0 {
+			return fmt.Errorf("there is no identity migration %q", prefix)
+		}
+		for v, d := range recorded {
+			if strings.HasPrefix(d, prefix) && v != now {
+				moves[v] = now
+				if now > newest {
+					newest = now
+				}
+			}
 		}
 	}
-	if sqlText == "" {
-		return fmt.Errorf("there is no identity migration 46 to run")
+	if len(moves) == 0 {
+		return nil
 	}
+
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	for _, q := range []string{
-		`UPDATE identity_schema_migrations SET version = 48 WHERE version = 47`,
-		`UPDATE identity_schema_migrations SET version = 47 WHERE version = 46`,
-	} {
-		if _, err := tx.Exec(q); err != nil {
+	for from := range moves {
+		if _, err := tx.Exec(`DELETE FROM identity_schema_migrations WHERE version = ?`, from); err != nil {
 			return fmt.Errorf("failed to renumber identity migrations: %w", err)
 		}
 	}
-	if _, err := tx.Exec(sqlText); err != nil {
-		return fmt.Errorf("failed to apply identity migration 46: %w", err)
+	for from, to := range moves {
+		if _, err := tx.Exec(`INSERT INTO identity_schema_migrations (version, description) VALUES (?, ?)`,
+			to, recorded[from]); err != nil {
+			return fmt.Errorf("failed to renumber identity migrations: %w", err)
+		}
+		delete(recorded, from)
 	}
-	if _, err := tx.Exec(`INSERT INTO identity_schema_migrations (version, description) VALUES (?, ?)`,
-		46, description); err != nil {
-		return fmt.Errorf("failed to record identity migration 46: %w", err)
+	for _, m := range identityMigrations {
+		if m.Version >= newest {
+			break
+		}
+		if recorded[m.Version] == m.Description || isSignatureMigration(m.Description) {
+			continue
+		}
+		if _, err := tx.Exec(m.SQL); err != nil {
+			return fmt.Errorf("failed to apply identity migration %d: %w", m.Version, err)
+		}
+		if _, err := tx.Exec(`INSERT INTO identity_schema_migrations (version, description) VALUES (?, ?)`,
+			m.Version, m.Description); err != nil {
+			return fmt.Errorf("failed to record identity migration %d: %w", m.Version, err)
+		}
 	}
 	return tx.Commit()
+}
+
+func isSignatureMigration(description string) bool {
+	for _, prefix := range signatureMigrations {
+		if strings.HasPrefix(description, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // seedShareActionsFromRegistry inserts any share-menu actions declared in the

@@ -54,9 +54,21 @@ func migrationSQL(t *testing.T, version int) (string, string) {
 	return "", ""
 }
 
+func hasTable(t *testing.T, db *sql.DB, name string) bool {
+	t.Helper()
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name = ?`, name).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n == 1
+}
+
 func requireFullyMigrated(t *testing.T, db *sql.DB) {
 	t.Helper()
 	got := versionsRecorded(t, db)
+	if len(got) != len(identityMigrations) {
+		t.Errorf("%d migrations recorded, want %d", len(got), len(identityMigrations))
+	}
 	for _, m := range identityMigrations {
 		if got[m.Version] != m.Description {
 			t.Errorf("migration %d recorded as %q, want %q", m.Version, got[m.Version], m.Description)
@@ -68,19 +80,25 @@ func requireFullyMigrated(t *testing.T, db *sql.DB) {
 	if !hasIndex(t, db, "idx_duplicity_alerts_identity") {
 		t.Error("the counter-identity indexes (migration 46) were never applied")
 	}
+	for _, table := range []string{"witness_tel_events", "tel_push_outbox", "tel_backfill", "tel_push_retry"} {
+		if !hasTable(t, db, table) {
+			t.Errorf("%s (migrations 47 to 50) was never created", table)
+		}
+	}
 	if !hasIndex(t, db, "idx_kel_superseded_aid") || !hasIndex(t, db, "idx_witness_kel_superseded_aid") {
 		t.Error("the superseded-event tables are missing")
 	}
 }
 
-// An install that ran main's migration 46 runs this branch's two, now 47 and 48.
-func TestAnInstallThatRanMainsMigration46RunsTheSignatureMigrations(t *testing.T) {
+// An install that ran main's migrations to 50 runs the signature migrations,
+// now 51 and 52.
+func TestAnInstallThatRanMainsMigrationsRunsTheSignatureMigrations(t *testing.T) {
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "id.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if err := applyMigrationsUpTo(db, 46); err != nil {
+	if err := applyMigrationsUpTo(db, 50); err != nil {
 		t.Fatal(err)
 	}
 	if hasColumn(t, db, "kel", "signatures") {
@@ -92,44 +110,53 @@ func TestAnInstallThatRanMainsMigration46RunsTheSignatureMigrations(t *testing.T
 	requireFullyMigrated(t, db)
 }
 
-// An install from this branch ran the signature migrations as 46 and 47 and
-// never ran main's 46. It must not fail, must not be left without main's 46,
-// and must not run the witness migration a second time.
-func TestAnInstallFromThisBranchBeforeRenumberingStillUpgrades(t *testing.T) {
-	for _, ranBoth := range []bool{true, false} {
-		db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "id.db"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := applyMigrationsUpTo(db, 45); err != nil {
-			t.Fatal(err)
-		}
-		// What the branch ran, under the numbers it had then.
-		old := map[int]int{47: 46, 48: 47}
-		for _, nw := range []int{47, 48} {
-			if nw == 48 && !ranBoth {
-				break
-			}
-			q, d := migrationSQL(t, nw)
-			if _, err := db.Exec(q); err != nil {
+// An install from before main's migrations landed ran the signature
+// migrations under the numbers they had then: 46 and 47 on one that never ran
+// main's 46, 47 and 48 on one that did. Either must upgrade without failing,
+// without being left short of any of main's migrations, and without running a
+// signature migration a second time, whether it ran one of them or both.
+func TestAnInstallThatRanTheSignatureMigrationsUnderEarlierNumbersStillUpgrades(t *testing.T) {
+	for _, numbering := range []struct {
+		name    string
+		upTo    int
+		numbers [2]int
+	}{
+		{"before main's 46", 45, [2]int{46, 47}},
+		{"before main's 47 to 50", 46, [2]int{47, 48}},
+	} {
+		for _, ranBoth := range []bool{true, false} {
+			db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "id.db"))
+			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := db.Exec(`INSERT INTO identity_schema_migrations (version, description, applied_at)
-				VALUES (?, ?, '2026-01-01')`, old[nw], d); err != nil {
+			if err := applyMigrationsUpTo(db, numbering.upTo); err != nil {
 				t.Fatal(err)
 			}
+			for i, now := range []int{51, 52} {
+				if i == 1 && !ranBoth {
+					break
+				}
+				q, d := migrationSQL(t, now)
+				if _, err := db.Exec(q); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.Exec(`INSERT INTO identity_schema_migrations (version, description, applied_at)
+					VALUES (?, ?, '2026-01-01')`, numbering.numbers[i], d); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if hasTable(t, db, "witness_tel_events") {
+				t.Fatal("the install under test already has main's 47")
+			}
+			if err := ApplyIdentityMigrations(db); err != nil {
+				t.Fatalf("%s, ranBoth=%v: %v", numbering.name, ranBoth, err)
+			}
+			requireFullyMigrated(t, db)
+			// And a second start finds nothing to do.
+			if err := ApplyIdentityMigrations(db); err != nil {
+				t.Fatalf("%s, second start: %v", numbering.name, err)
+			}
+			db.Close()
 		}
-		if hasIndex(t, db, "idx_duplicity_alerts_identity") {
-			t.Fatal("the install under test already has main's 46")
-		}
-		if err := ApplyIdentityMigrations(db); err != nil {
-			t.Fatalf("ranBoth=%v: %v", ranBoth, err)
-		}
-		requireFullyMigrated(t, db)
-		// And a second start finds nothing to do.
-		if err := ApplyIdentityMigrations(db); err != nil {
-			t.Fatalf("second start: %v", err)
-		}
-		db.Close()
 	}
 }

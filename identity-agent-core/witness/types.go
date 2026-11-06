@@ -162,6 +162,29 @@ type KelConflict struct {
 	SeenAt      string
 }
 
+// TELEvent is one event of a registry's transaction log as a witness holds it:
+// a registry inception, an issuance or a revocation, as the issuer published it.
+type TELEvent struct {
+	IssuerAID string `json:"-"`
+	// SAID is the event's own identifier.
+	SAID string `json:"said"`
+	// Registry is the registry the event belongs to.
+	Registry string `json:"registry"`
+	// Ilk is "vcp", "iss" or "rev".
+	Ilk string `json:"ilk"`
+	// Subject is what the event is about: the registry for "vcp", the
+	// credential otherwise.
+	Subject string `json:"-"`
+	// SN is the event's place in its own log (a credential's, or 0 for a registry).
+	SN int `json:"sn"`
+	// AnchorSN is the sequence number of the event in the issuer's key log whose
+	// seal vouches for this one.
+	AnchorSN int `json:"anchor_sn"`
+	// RawB64 is the event exactly as published, base64.
+	RawB64   string `json:"raw_b64"`
+	StoredAt string `json:"-"`
+}
+
 // IssuedReceipt is a CESR receipt this agent issued as witness.
 type IssuedReceipt struct {
 	SignerAID     string

@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"identity-agent-core/iacrypto"
 	"io"
@@ -152,7 +153,7 @@ func (s *CoreServer) ensureKeriContactIs(oobiURL, expected string) (*store.Conta
 			if valResult.CurrentPublicKey != "" {
 				currentPublicKey = valResult.CurrentPublicKey
 			}
-			_ = s.DataStore.SaveContactKEL(store.ContactKELRecord{
+			if serr := s.DataStore.SaveContactKEL(store.ContactKELRecord{
 				AID:              oobiData.AID,
 				KEL:              oobiData.KEL,
 				KelVerified:      kelVerified,
@@ -160,7 +161,10 @@ func (s *CoreServer) ensureKeriContactIs(oobiURL, expected string) (*store.Conta
 				EventsValidated:  len(oobiData.KEL),
 				ValidationErrors: valResult.ValidationErrors,
 				ValidatedAt:      time.Now().UTC().Format(time.RFC3339),
-			})
+			}); errors.Is(serr, store.ErrLogDoesNotExtend) {
+				return nil, false, fmt.Errorf("the key history at %s does not carry on from the one already trusted for %s, so nothing was recorded",
+					oobiURL, oobiData.AID)
+			}
 		}
 	}
 

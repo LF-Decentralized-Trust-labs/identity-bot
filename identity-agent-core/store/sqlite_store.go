@@ -1271,6 +1271,9 @@ func (s *SQLiteStore) GetCredentialSchema(said string) (*CredentialSchemaRecord,
 
 func (s *SQLiteStore) SaveContactKEL(record ContactKELRecord) error {
 	record.sealFromVerifiedBytes()
+	if err := record.settleCurrentKey(); err != nil {
+		return err
+	}
 	kelJSON, err := json.Marshal(record.KEL)
 	if err != nil {
 		return fmt.Errorf("failed to marshal contact KEL: %w", err)
@@ -1280,7 +1283,41 @@ func (s *SQLiteStore) SaveContactKEL(record ContactKELRecord) error {
 		return fmt.Errorf("failed to marshal validation errors: %w", err)
 	}
 
-	_, err = s.db.Exec(`
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to save contact KEL: %w", err)
+	}
+	defer tx.Rollback()
+	var heldJSON string
+	var held ContactKELRecord
+	switch qerr := tx.QueryRow(`SELECT kel_json, kel_verified FROM contact_kels WHERE aid = ?`,
+		record.AID).Scan(&heldJSON, &held.KelVerified); {
+	case qerr == nil:
+		if err := json.Unmarshal([]byte(heldJSON), &held.KEL); err != nil && held.KelVerified {
+			return fmt.Errorf("the verified log held for %s cannot be read, so it cannot be replaced: %w", record.AID, err)
+		}
+		held.AID = record.AID
+		held.sealFromVerifiedBytes()
+		if err := refuseAnEarlierLog(&held, record); err != nil {
+			return err
+		}
+	case qerr != sql.ErrNoRows:
+		return fmt.Errorf("failed to save contact KEL: %w", qerr)
+	}
+
+	if err := writeContactKEL(tx, record, string(kelJSON), string(errorsJSON)); err != nil {
+		return fmt.Errorf("failed to save contact KEL: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to save contact KEL: %w", err)
+	}
+	return nil
+}
+
+// writeContactKEL is the one statement that stores a contact log, used by
+// SaveContactKEL and by a restore, so the two cannot store it differently.
+func writeContactKEL(tx *sql.Tx, record ContactKELRecord, kelJSON, errorsJSON string) error {
+	_, err := tx.Exec(`
 		INSERT INTO contact_kels (aid, kel_json, kel_verified, current_public_key, events_validated, validation_errors, validated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(aid) DO UPDATE SET
@@ -1290,14 +1327,11 @@ func (s *SQLiteStore) SaveContactKEL(record ContactKELRecord) error {
 			events_validated   = excluded.events_validated,
 			validation_errors  = excluded.validation_errors,
 			validated_at       = excluded.validated_at`,
-		record.AID, string(kelJSON), record.KelVerified,
+		record.AID, kelJSON, record.KelVerified,
 		record.CurrentPublicKey, record.EventsValidated,
-		string(errorsJSON), record.ValidatedAt,
+		errorsJSON, record.ValidatedAt,
 	)
-	if err != nil {
-		return fmt.Errorf("failed to save contact KEL: %w", err)
-	}
-	return nil
+	return err
 }
 
 func (s *SQLiteStore) GetContactKEL(aid string) (*ContactKELRecord, error) {
@@ -2068,4 +2102,151 @@ func (s *SQLiteStore) ListPendingIssuances() (map[string]string, error) {
 		out[id] = body
 	}
 	return out, rows.Err()
+}
+
+func (s *SQLiteStore) EnqueueTELPush(p TELPush) error {
+	if p.IssuerAID == "" || p.SAID == "" || p.RawB64 == "" {
+		return fmt.Errorf("a registry event to send needs its issuer, digest and bytes")
+	}
+	if p.CreatedAt == "" {
+		p.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	_, err := s.db.Exec(`INSERT INTO tel_push_outbox (issuer_aid, said, kind, raw_b64, created_at)
+		VALUES (?, ?, ?, ?, ?) ON CONFLICT(issuer_aid, said) DO NOTHING`,
+		p.IssuerAID, p.SAID, p.Kind, p.RawB64, p.CreatedAt)
+	return err
+}
+
+func (s *SQLiteStore) PendingTELPushes(limit int) ([]TELPush, error) {
+	return s.fairTELPushes(limit, "")
+}
+
+func (s *SQLiteStore) DueTELPushes(limit int, now string) ([]TELPush, error) {
+	return s.fairTELPushes(limit, now)
+}
+
+// fairTELPushes numbers each issuer's waiting events from 1 in the order they
+// were made and takes them by that number, then by age: the first of every
+// issuer, then the second of every issuer, and so on, up to limit. With only
+// the oldest by id, one issuer with limit events waiting would hold every other
+// issuer's out of the pass.
+func (s *SQLiteStore) fairTELPushes(limit int, now string) ([]TELPush, error) {
+	rows, err := s.db.Query(`SELECT issuer_aid, said, kind, raw_b64, created_at, attempts, last_error, next_attempt_at
+		FROM (SELECT o.id, o.issuer_aid, o.said, o.kind, o.raw_b64, o.created_at, o.attempts, o.last_error,
+		             COALESCE(r.next_attempt_at, '') AS next_attempt_at,
+		             ROW_NUMBER() OVER (PARTITION BY o.issuer_aid ORDER BY o.id) AS place
+		      FROM tel_push_outbox o
+		      LEFT JOIN tel_push_retry r ON r.issuer_aid = o.issuer_aid AND r.said = o.said
+		      WHERE ? = '' OR COALESCE(r.next_attempt_at, '') <= ?)
+		ORDER BY place, id LIMIT ?`, now, now, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TELPush
+	for rows.Next() {
+		var p TELPush
+		if err := rows.Scan(&p.IssuerAID, &p.SAID, &p.Kind, &p.RawB64, &p.CreatedAt, &p.Attempts, &p.LastError, &p.NextAttemptAt); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteStore) WaitingRevocations(cutoff string) ([]TELPush, error) {
+	rows, err := s.db.Query(`SELECT o.issuer_aid, o.said, o.kind, o.raw_b64, o.created_at, o.attempts, o.last_error,
+		       COALESCE(r.next_attempt_at, '')
+		FROM tel_push_outbox o
+		LEFT JOIN tel_push_retry r ON r.issuer_aid = o.issuer_aid AND r.said = o.said
+		WHERE o.kind = 'rev' AND o.created_at < ? ORDER BY o.id`, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TELPush
+	for rows.Next() {
+		var p TELPush
+		if err := rows.Scan(&p.IssuerAID, &p.SAID, &p.Kind, &p.RawB64, &p.CreatedAt, &p.Attempts, &p.LastError, &p.NextAttemptAt); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteStore) FinishTELPushes(issuerAID string, saids []string) error {
+	for _, said := range saids {
+		if _, err := s.db.Exec(`DELETE FROM tel_push_outbox WHERE issuer_aid = ? AND said = ?`, issuerAID, said); err != nil {
+			return err
+		}
+		if _, err := s.db.Exec(`DELETE FROM tel_push_retry WHERE issuer_aid = ? AND said = ?`, issuerAID, said); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *SQLiteStore) FailedTELPush(issuerAID string, saids []string, reason, next string) error {
+	for _, said := range saids {
+		if _, err := s.db.Exec(`UPDATE tel_push_outbox SET attempts = attempts + 1, last_error = ?
+			WHERE issuer_aid = ? AND said = ?`, reason, issuerAID, said); err != nil {
+			return err
+		}
+		if _, err := s.db.Exec(`INSERT INTO tel_push_retry (issuer_aid, said, next_attempt_at) VALUES (?, ?, ?)
+			ON CONFLICT(issuer_aid, said) DO UPDATE SET next_attempt_at = excluded.next_attempt_at`, issuerAID, said, next); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *SQLiteStore) ListRegistries() ([]CredentialRegistry, error) {
+	rows, err := s.db.Query(`SELECT ` + registryCols + ` FROM credential_registries ORDER BY created_at, registry_said`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list registries: %w", err)
+	}
+	defer rows.Close()
+	var out []CredentialRegistry
+	for rows.Next() {
+		var r CredentialRegistry
+		if err := rows.Scan(&r.RegistrySAID, &r.IssuerAID, &r.VcpJson, &r.VcpRawB64, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteStore) GetRegistryTEL(registrySAID string) ([]CredentialTELEvent, error) {
+	rows, err := s.db.Query(`
+		SELECT registry_said, acdc_said, seq, said, kind, raw_b64, recorded_at
+		FROM credential_tel_events WHERE registry_said = ? ORDER BY rowid`, registrySAID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the registry's log: %w", err)
+	}
+	defer rows.Close()
+	var out []CredentialTELEvent
+	for rows.Next() {
+		var ev CredentialTELEvent
+		if err := rows.Scan(&ev.RegistrySAID, &ev.AcdcSAID, &ev.Seq, &ev.SAID, &ev.Kind, &ev.RawB64, &ev.RecordedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, ev)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteStore) TELBackfillDone() (bool, error) {
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM tel_backfill`).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+func (s *SQLiteStore) MarkTELBackfillDone() error {
+	_, err := s.db.Exec(`INSERT INTO tel_backfill (id, done_at) VALUES (1, ?) ON CONFLICT(id) DO NOTHING`,
+		time.Now().UTC().Format(time.RFC3339Nano))
+	return err
 }
