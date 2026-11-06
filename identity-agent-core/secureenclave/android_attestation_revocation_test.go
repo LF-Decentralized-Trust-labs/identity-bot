@@ -3,6 +3,7 @@ package secureenclave
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -330,6 +331,8 @@ func TestSomethingThatIsNotTheListIsNotTakenForIt(t *testing.T) {
 		"html":            "<html>Sign in to the network</html>",
 		"empty":           "",
 		"no entries":      `{"other": {}}`,
+		"empty entries":   `{"entries": {}}`,
+		"null entries":    `{"entries": null}`,
 		"bad serial":      `{"entries": {"not hex": {"status": "REVOKED"}}}`,
 		"entry no status": `{"entries": {"abc": {}}}`,
 		"truncated":       `{"entries": {"abc": {"status": "REVO`,
@@ -362,6 +365,88 @@ func TestACorruptOrFutureCopyOnDiskIsNotUsed(t *testing.T) {
 	aCopyKeptFor(t, -48*time.Hour, statusListJSON()) // "fetched" two days from now
 	if declaredHostSeedWrapper().Available() {
 		t.Fatal("a copy from the future was used")
+	}
+}
+
+// A fetched list under half the length of a usable copy is not believed: the
+// copy is kept and applied. Once the copy is past its seven days, the shorter
+// list is taken.
+func TestAListMuchShorterThanTheCopyKeptIsNotBelieved(t *testing.T) {
+	aProductionPhone(t, false)
+	theApp(t, aKeyIn(attestStrongBox), true)
+	short := []byte(`{"entries": {"abc": {"status": "REVOKED"}}}`)
+	googleStatusListIs(t, short)
+	aCopyKeptFor(t, 2*24*time.Hour, statusListJSON(serialLeaf, "REVOKED"))
+	if !errors.Is(mustErr(t), ErrAttestationRevoked) {
+		t.Fatal("the short list replaced the copy that names the leaf")
+	}
+	if l := readStatusCache(attestationStatusDir()); l == nil || len(l.Entries) < 20 {
+		t.Fatalf("the short list was kept: %+v", l)
+	}
+	aCopyKeptFor(t, 8*24*time.Hour, statusListJSON(serialLeaf, "REVOKED"))
+	if !declaredHostSeedWrapper().Available() {
+		t.Fatalf("a short list was refused against an expired copy: %s", whyRefused(t))
+	}
+	// A list that grew, or shrank a little, is taken.
+	l, _ := parseStatusList(statusListJSON(), time.Now())
+	held, _ := parseStatusList(statusListJSON("ff1", "REVOKED", "ff2", "REVOKED"), time.Now().Add(-time.Hour))
+	if l.shrankFrom(held, time.Now()) {
+		t.Fatal("a list two entries shorter was refused")
+	}
+}
+
+// A copy whose fetch time is even a minute ahead of the clock is not used.
+func TestACopyFetchedInTheFutureIsNotUsed(t *testing.T) {
+	aProductionPhone(t, false)
+	theApp(t, aKeyIn(attestStrongBox), true)
+	googleIsUnreachable(t)
+	aCopyKeptFor(t, -time.Minute, statusListJSON())
+	if !errors.Is(mustErr(t), ErrNoStatusList) {
+		t.Fatal("a copy from a minute ahead was used")
+	}
+}
+
+// statusHTTPClient itself follows no redirect: a list one hop away is not fetched.
+func TestTheStatusClientFollowsNoRedirect(t *testing.T) {
+	var followed atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/moved" {
+			http.Redirect(w, r, "/list", http.StatusFound)
+			return
+		}
+		followed.Add(1)
+		w.Write(statusListJSON())
+	}))
+	defer srv.Close()
+	if _, err := fetchStatusListFrom(context.Background(), statusHTTPClient, srv.URL+"/moved"); err == nil {
+		t.Fatal("a redirect answered as the list")
+	}
+	if followed.Load() != 0 {
+		t.Fatal("the redirect was followed")
+	}
+	if statusHTTPClient.Jar != nil {
+		t.Fatal("the client keeps cookies")
+	}
+}
+
+// A phone that already holds a wrapped seed opens it with no list to be had:
+// the list governs whether a key may be trusted to wrap, not whether the seed
+// it already wraps can be read.
+func TestAWrappedSeedStillOpensWithNoStatusList(t *testing.T) {
+	aProductionPhone(t, false)
+	theApp(t, aKeyIn(attestStrongBox), true)
+	r := UseSeedWrapper(declaredHostSeedWrapper())
+	defer r()
+	dir := t.TempDir()
+	if err := StoreDeviceLocalSeed(dir, theSeed()); err != nil {
+		t.Fatal(err)
+	}
+	googleIsUnreachable(t) // a fresh data directory: no copy kept, and no network
+	if !errors.Is(mustErr(t), ErrNoStatusList) {
+		t.Fatal("a list was available")
+	}
+	if got, err := LoadRootSeed(dir); err != nil || !bytes.Equal(got, theSeed()) {
+		t.Fatalf("the wrapped seed did not open: %v", err)
 	}
 }
 
@@ -438,12 +523,111 @@ func TestAKeyMadeForAnotherAppIsRefused(t *testing.T) {
 	}
 }
 
-func TestAnAppThatDeclaredNothingIsRefused(t *testing.T) {
+// coreBuiltFor stands the linker flags that build the app's identity into the
+// core: builtAppPackage and builtAppSignerDigests.
+func coreBuiltFor(t *testing.T, pkg, digests string) {
+	t.Helper()
+	pp, pd := builtAppPackage, builtAppSignerDigests
+	builtAppPackage, builtAppSignerDigests = pkg, digests
+	t.Cleanup(func() { builtAppPackage, builtAppSignerDigests = pp, pd; ClearAppIdentity() })
+}
+
+// A production core built with no app identity refuses, says so and says how
+// to build one in, even when the app declares itself at runtime.
+func TestAProductionCoreWithNoBuiltInAppIdentityRefuses(t *testing.T) {
 	aProductionPhone(t, false)
 	theApp(t, aKeyIn(attestStrongBox), true)
-	ClearAppIdentity()
-	if why := whyRefused(t); !strings.Contains(why, "has not declared") {
-		t.Fatalf("reason: %s", why)
+	coreBuiltFor(t, "", "")
+	if err := DeclareAppIdentity(testAppPackage, [][]byte{testAppDigest}); err != nil {
+		t.Fatal(err)
+	}
+	why := whyRefused(t)
+	for _, want := range []string{"production build has no app identity built in",
+		"-X identity-agent-core/secureenclave.builtAppPackage=", "-X identity-agent-core/secureenclave.builtAppSignerDigests="} {
+		if !strings.Contains(why, want) {
+			t.Fatalf("the reason does not say %q: %s", want, why)
+		}
+	}
+}
+
+// A development core with no identity built in takes the app's runtime word
+// for it, and says so in the facts and in the seed file.
+func TestADevelopmentCoreAcceptsARuntimeDeclarationFlagged(t *testing.T) {
+	aProductionPhone(t, true)
+	theApp(t, aKeyIn(attestStrongBox), true)
+	coreBuiltFor(t, "", "")
+	if why := whyRefused(t); !strings.Contains(why, "has not declared") || !strings.Contains(why, "-ldflags") {
+		t.Fatalf("nothing declared, reason: %s", why)
+	}
+	if err := DeclareAppIdentity(testAppPackage, [][]byte{testAppDigest}); err != nil {
+		t.Fatal(err)
+	}
+	f, err := declaredHostSeedWrapper().(hostedSeedWrapper).attested()
+	if err != nil || !strings.Contains(f.AppIdentityNote, "declared by the app at runtime") {
+		t.Fatalf("not accepted, or not flagged: %v %+v", err, f)
+	}
+	r := UseSeedWrapper(declaredHostSeedWrapper())
+	defer r()
+	dir := t.TempDir()
+	if err := StoreDeviceLocalSeed(dir, theSeed()); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, why, _ := RootSeedProtection(dir); !strings.Contains(why, "declared by the app at runtime") {
+		t.Fatalf("the seed file does not carry the flag: %q", why)
+	}
+}
+
+// The identity built in is the one held to: an app that declares something else
+// at runtime (a repackaged copy reading its own PackageInfo) changes nothing.
+func TestTheBuiltInIdentityWinsOverARuntimeDeclaration(t *testing.T) {
+	for _, dev := range []bool{false, true} {
+		aProductionPhone(t, dev)
+		s := aKeyIn(attestStrongBox)
+		s.appPackage, s.appDigests = "org.example.repackaged", [][]byte{bytes.Repeat([]byte{0x33}, 32)}
+		theApp(t, s, true)
+		if err := DeclareAppIdentity(s.appPackage, s.appDigests); err != nil {
+			t.Fatal(err)
+		}
+		if why := whyRefused(t); !strings.Contains(why, "org.example.repackaged") {
+			t.Fatalf("dev=%v: a repackaged app's key was accepted, or the reason is wrong: %s", dev, why)
+		}
+	}
+}
+
+func TestABadlyBuiltInAppIdentityRefuses(t *testing.T) {
+	aProductionPhone(t, false)
+	theApp(t, aKeyIn(attestStrongBox), true)
+	for name, c := range map[string][2]string{
+		"no digests": {testAppPackage, ""},
+		"no package": {"", hex.EncodeToString(testAppDigest)},
+		"short":      {testAppPackage, "a7a7"},
+		"not hex":    {testAppPackage, "zz"},
+	} {
+		coreBuiltFor(t, c[0], c[1])
+		if why := whyRefused(t); !strings.Contains(why, "built into this core is not usable") {
+			t.Fatalf("%s: %s", name, why)
+		}
+	}
+}
+
+// An attestation that names more than one package (apps sharing a user id) is
+// refused even when the expected package is among them: the key may be any of
+// theirs.
+func TestAKeyForSeveralPackagesIsRefused(t *testing.T) {
+	coreBuiltFor(t, testAppPackage, hex.EncodeToString(testAppDigest))
+	for name, pkgs := range map[string][]string{
+		"ours first":  {testAppPackage, "org.example.other"},
+		"ours second": {"org.example.other", testAppPackage},
+		"ours twice":  {testAppPackage, testAppPackage},
+	} {
+		f := &AndroidKeyFacts{AppIDPresent: true, AppPackages: pkgs, AppSignerDigests: [][]byte{testAppDigest}}
+		if err := checkAppIdentity(f); err == nil {
+			t.Errorf("%s: a key for %v was accepted", name, pkgs)
+		}
+	}
+	f := &AndroidKeyFacts{AppIDPresent: true, AppPackages: []string{testAppPackage}, AppSignerDigests: [][]byte{testAppDigest}}
+	if err := checkAppIdentity(f); err != nil {
+		t.Fatalf("the one package refused: %v", err)
 	}
 }
 
@@ -451,16 +635,12 @@ func TestAnAppThatDeclaredNothingIsRefused(t *testing.T) {
 func TestAnAppMayDeclareSeveralSigningCertificates(t *testing.T) {
 	aProductionPhone(t, false)
 	theApp(t, aKeyIn(attestStrongBox), true)
-	other := bytes.Repeat([]byte{0x22}, 32)
-	if err := DeclareAppIdentity(testAppPackage, [][]byte{other, testAppDigest}); err != nil {
-		t.Fatal(err)
-	}
+	other := strings.Repeat("22", 32)
+	coreBuiltFor(t, testAppPackage, other+","+hex.EncodeToString(testAppDigest))
 	if !declaredHostSeedWrapper().Available() {
 		t.Fatal(whyRefused(t))
 	}
-	if err := DeclareAppIdentity(testAppPackage, [][]byte{other}); err != nil {
-		t.Fatal(err)
-	}
+	coreBuiltFor(t, testAppPackage, other)
 	if declaredHostSeedWrapper().Available() {
 		t.Fatal("accepted with a certificate that is not the app's")
 	}

@@ -65,9 +65,12 @@ const (
 	statusFetchBackoff = 15 * time.Minute
 	statusFetchTimeout = 15 * time.Second
 	statusListMaxBytes = 16 << 20
-	// statusClockSlack is how far in the future a copy's fetch time may be
-	// before the copy is not believed (a clock that has gone backwards).
-	statusClockSlack = 10 * time.Minute
+	// statusListShrinkLimit: a fetched list with fewer entries than this
+	// fraction of the copy held is not believed while that copy is usable.
+	// Google's list only grows in practice, so a list that has lost more than
+	// half its entries is a truncated or substituted answer, not a mass
+	// un-revocation.
+	statusListShrinkLimit = 0.5
 
 	statusCacheFile = "android_attestation_status.json"
 )
@@ -143,7 +146,9 @@ func parseStatusList(body []byte, fetched time.Time) (*statusList, error) {
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, fmt.Errorf("not Google's list: %w", err)
 	}
-	if raw.Entries == nil {
+	if len(raw.Entries) == 0 {
+		// Google's list has never been empty; an empty one would revoke nothing
+		// and read as "every chain is clean".
 		return nil, errors.New("not Google's list: it has no entries")
 	}
 	l := &statusList{Fetched: fetched, Entries: make(map[string]statusEntry, len(raw.Entries))}
@@ -178,8 +183,25 @@ func (l *statusList) check(serials []string) error {
 }
 
 // usableAt says whether this copy may be used at now.
+//
+// THE LIMIT OF THIS CHECK. now is the phone's own clock, and nothing here can
+// tell it is wrong. A phone whose clock has been set back, and whose fetches are
+// blocked, will take an old copy for a young one: a copy kept from a month ago
+// looks a day old to a clock set back a month, so a certificate Google revoked
+// since then is not refused. The list itself is unsigned and carries no time
+// of its own to check the clock against. What this check does refuse is a copy
+// whose fetch time is ahead of the clock, which no copy honestly fetched on
+// this phone can have: it was written by a clock that has since gone back, or
+// it was not written by this core.
 func (l *statusList) usableAt(now time.Time) bool {
-	return l != nil && !l.Fetched.After(now.Add(statusClockSlack)) && now.Sub(l.Fetched) < statusListUsableFor
+	return l != nil && !l.Fetched.After(now) && now.Sub(l.Fetched) < statusListUsableFor
+}
+
+// shrankFrom says whether fetched is so much shorter than held that it is not
+// believed: held is still usable at now and fetched has fewer than
+// statusListShrinkLimit of its entries.
+func (fetched *statusList) shrankFrom(held *statusList, now time.Time) bool {
+	return held.usableAt(now) && float64(len(fetched.Entries)) < statusListShrinkLimit*float64(len(held.Entries))
 }
 
 var (
@@ -273,6 +295,16 @@ func currentStatusList(now time.Time) (*statusList, error) {
 		var l *statusList
 		if err == nil {
 			l, err = parseStatusList(body, now)
+		}
+		if err == nil {
+			held := statusMem
+			if d := readStatusCache(dir); d != nil && (held == nil || d.Fetched.After(held.Fetched)) {
+				held = d
+			}
+			if held != nil && l.shrankFrom(held, now) {
+				err = fmt.Errorf("the list fetched has %d entries, under half of the %d in the copy kept from %s, so it is not believed",
+					len(l.Entries), len(held.Entries), held.Fetched.UTC().Format(time.RFC3339))
+			}
 		}
 		if err == nil {
 			if werr := writeStatusCache(dir, l); werr != nil {

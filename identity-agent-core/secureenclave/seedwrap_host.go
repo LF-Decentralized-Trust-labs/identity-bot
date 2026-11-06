@@ -158,7 +158,7 @@ func (w hostedSeedWrapper) attested() (*AndroidKeyFacts, error) {
 	}
 	seedWrapHostMu.Lock()
 	verifiedLevel = f.LevelName()
-	verifiedCaveat = f.RevocationNote
+	verifiedCaveat = f.caveat()
 	seedWrapHostMu.Unlock()
 	return f, nil
 }

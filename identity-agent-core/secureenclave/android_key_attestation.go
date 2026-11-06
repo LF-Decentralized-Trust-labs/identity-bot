@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -138,6 +139,21 @@ type AndroidKeyFacts struct {
 	// list could not be had and the chain was let through unchecked. Empty when
 	// the chain was checked against a list.
 	RevocationNote string
+	// AppIdentityNote is set, in a development build only, when the app the
+	// chain was held to is the app's own runtime declaration rather than an
+	// identity built into the core. Empty otherwise.
+	AppIdentityNote string
+}
+
+// caveat is every check a development build let through unchecked, or "".
+func (f AndroidKeyFacts) caveat() string {
+	var notes []string
+	for _, n := range []string{f.RevocationNote, f.AppIdentityNote} {
+		if n != "" {
+			notes = append(notes, n)
+		}
+	}
+	return strings.Join(notes, "; ")
 }
 
 // LevelName is "strongbox" or "tee".

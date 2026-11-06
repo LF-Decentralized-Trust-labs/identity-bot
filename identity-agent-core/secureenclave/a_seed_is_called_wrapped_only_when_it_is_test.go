@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"strings"
@@ -42,12 +43,9 @@ func theApp(t *testing.T, spec chainSpec, works bool) *theAppsKeystore {
 	h := &theAppsKeystore{works: works, chain: chain, decryptWith: k}
 	DeclareSeedWrapHost(h)
 	t.Cleanup(func() { DeclareSeedWrapHost(nil); attestationRoots = pinned })
-	// The app declares who it is, and Google's list is a clean one unless a test
-	// puts something on it.
-	if err := DeclareAppIdentity(testAppPackage, [][]byte{testAppDigest}); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(ClearAppIdentity)
+	// The core is built for this app, and Google's list is a clean one unless a
+	// test puts something on it.
+	coreBuiltFor(t, testAppPackage, hex.EncodeToString(testAppDigest))
 	googleStatusListIs(t, statusListJSON())
 	return h
 }
