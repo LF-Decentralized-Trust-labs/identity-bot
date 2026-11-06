@@ -39,3 +39,36 @@ import "identity-agent-core/secureenclave"
 func DeclareHardwareKeyProtection(status, kind, reason, detail string) {
 	secureenclave.DeclareHardwareKeyProtection(status, kind, reason, detail)
 }
+
+// SeedWrapHost is the app's half of protecting the root seed on a phone: it
+// wraps and unwraps the seed under a key it holds in the Keystore, because Go
+// cannot reach the Keystore.
+//
+// On Android implement it with a non-exportable AES-256-GCM key in the Android
+// Keystore, requested from StrongBox first (setIsStrongBoxBacked(true)) and from
+// the TEE if the phone has no StrongBox, with no user-authentication requirement
+// because the agent runs with nobody present. Return the nonce with the
+// ciphertext. [Scheme] must say which hardware held the key, for example
+// "android-keystore-strongbox-aes256gcm" or "android-keystore-tee-aes256gcm";
+// it is written into the stored seed and may not be "none".
+//
+// The core uses it only while the key protection declared through
+// DeclareHardwareKeyProtection is "usable", so a phone with no proven hardware
+// Keystore is refused instead of being given a wrapper that is not hardware.
+type SeedWrapHost interface {
+	Available() bool
+	Scheme() string
+	Wrap(plain []byte) ([]byte, error)
+	Unwrap(blob []byte) ([]byte, error)
+}
+
+// DeclareSeedWrapHost registers the app's seed wrapper. Must be called before
+// StartServer, like DeclareHardwareKeyProtection. An app that registers none
+// has its seed stored unwrapped, and the stored seed says so and why.
+func DeclareSeedWrapHost(h SeedWrapHost) {
+	if h == nil {
+		secureenclave.DeclareSeedWrapHost(nil)
+		return
+	}
+	secureenclave.DeclareSeedWrapHost(h)
+}
