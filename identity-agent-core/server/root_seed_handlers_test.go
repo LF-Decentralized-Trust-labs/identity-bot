@@ -399,3 +399,22 @@ func TestFoundingByRootSeedOnASealedHostAndAPhoneAndNotADesktop(t *testing.T) {
 		})
 	}
 }
+
+// A root seed stored unwrapped that this build refuses to use is answered with
+// the root-seed refusal (412, the shared code), not as "could not be read".
+func TestSetRootSeedAnswersAnUnusableStoredSeedWithTheRefusal(t *testing.T) {
+	s := rootSeedServer(t)
+	restore := secureenclave.UseSeedWrapper(nil)
+	defer restore()
+	p := filepath.Join(s.DataDir, "secureenclave", "root_seed.key")
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, bytes.Repeat([]byte{7}, 64), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w := postSeed(s, base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{3}, 64)), false)
+	if w.Code != http.StatusPreconditionFailed || !strings.Contains(w.Body.String(), rootSeedRefusedCode) {
+		t.Fatalf("got %d %s, want 412 with %q", w.Code, w.Body, rootSeedRefusedCode)
+	}
+}

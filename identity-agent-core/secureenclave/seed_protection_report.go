@@ -7,9 +7,10 @@ import "os"
 // A seed that is not under StrongBox/TEE/Secure Enclave must never be presented
 // as protected, anywhere the state is shown. Production refuses to hold such a
 // seed at all (CheckRootSeedMayLiveHere), so in production this report can show
-// "not protected" for exactly one thing: an identity that was stored unwrapped
-// before that rule and is still readable (see LoadRootSeed). A development build
-// may hold one on purpose, and says so here.
+// "not protected" for exactly one thing: a seed that was stored unwrapped before
+// that rule. It is still on disk, untouched, and in production every use of it is
+// refused until it is wrapped (see LoadRootSeed). A development build may hold
+// and use one on purpose, and says so here.
 
 // SeedProtectionState is the answer, in plain terms.
 type SeedProtectionState struct {
@@ -34,9 +35,10 @@ type SeedProtectionState struct {
 
 // HowAnUnprotectedSeedGetsProtected is told to the app beside an unprotected
 // stored seed.
-const HowAnUnprotectedSeedGetsProtected = "the seed is still readable and still works; once the app " +
-	"supplies its StrongBox/TEE key the core wraps it automatically the next time it opens the seed, " +
-	"and this state then reads hardware-wrapped"
+const HowAnUnprotectedSeedGetsProtected = "a production build refuses every use of this seed until it is " +
+	"wrapped (a development build still uses it); the seed itself is not touched. Once the hardware key is " +
+	"usable (on a phone, once the app supplies its StrongBox/TEE key; on Windows, with the TPM " +
+	"wrap-existing-seed opt-in set) the core wraps it the next time it opens the seed, and this state then reads hardware-wrapped"
 
 // ReportSeedProtection says what protects the root seed in dataDir, or what
 // would. It reads the envelope only and never opens the seed.

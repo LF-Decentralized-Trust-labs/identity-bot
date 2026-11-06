@@ -3,6 +3,7 @@ package backup
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -130,8 +131,20 @@ func (c *Collector) collectTier1(bundle *PayloadBundle) error {
 	// device must be mnemonic -> archive -> seed, never depend on the old
 	// device's secure element. Without this section, device loss loses every
 	// derived key even with a backup in hand.
-	if seed, err := secureenclave.LoadRootSeed(c.DataDir); err == nil {
+	//
+	// ONLY "there is no seed here" may leave the section out. Any other failure
+	// (a production build refusing an unwrapped seed, an unwrap that failed, a
+	// damaged file) means a seed exists and its recovery path cannot be written,
+	// and an archive without it is valid and incomplete: nobody learns which until
+	// they try to recover. So the backup fails, and says why.
+	seed, err := secureenclave.LoadRootSeed(c.DataDir)
+	switch {
+	case err == nil:
 		c.addRawSection(bundle, "root_seed", seed)
+	case errors.Is(err, secureenclave.ErrNoRootSeed):
+		// Nothing was ever stored here; there is nothing to carry.
+	default:
+		return fmt.Errorf("root seed: the backup was not made, because the seed it must carry could not be read: %w", err)
 	}
 
 	// What this identity chose about being coerced, in tier 1.

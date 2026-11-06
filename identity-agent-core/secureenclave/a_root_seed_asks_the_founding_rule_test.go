@@ -309,7 +309,8 @@ func TestTheDirectoryBeingWrittenIsTheOneChecked(t *testing.T) {
 }
 
 // A machine's own seed, held unwrapped on a desktop, is not a root identity and
-// is not reported.
+// is not reported as a misplaced one. In production it is still refused, as every
+// unwrapped seed is.
 func TestAMachinesOwnPlaintextSeedIsNotReported(t *testing.T) {
 	inProduction(t)
 	productionMac(t)
@@ -317,8 +318,8 @@ func TestAMachinesOwnPlaintextSeedIsNotReported(t *testing.T) {
 	out := captureLog(t)
 	dir := t.TempDir()
 	plainEnvelopeFor(t, dir, holderDevice)
-	if _, err := LoadRootSeed(dir); err != nil {
-		t.Fatal(err)
+	if _, err := LoadRootSeed(dir); !IsRootSeedRefusal(err) {
+		t.Fatalf("a production build served an unwrapped seed: %v", err)
 	}
 	if strings.Contains(out.String(), "ROOT SEED IS STORED HERE") {
 		t.Fatalf("reported a machine's own seed:\n%s", out.String())

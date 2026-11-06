@@ -200,6 +200,11 @@ func (s *CoreServer) handleSetRootSeed(w http.ResponseWriter, r *http.Request) {
 		}
 		jsonError(w, "a different root seed is already established on this agent — recover with the original seed phrase, or reset the agent's data directory to start over", http.StatusConflict)
 		return
+	case secureenclave.IsRootSeedRefusal(lerr):
+		// A seed is stored and this build refuses to use it (unwrapped, in
+		// production). Not replaced either: the answer is the refusal.
+		writeRootSeedRefused(w, lerr.Error())
+		return
 	case !errors.Is(lerr, secureenclave.ErrNoRootSeed):
 		// A seed is stored and could not be read (a brief unwrap failure, a
 		// damaged file). Only "there is none" may be answered by writing one:
