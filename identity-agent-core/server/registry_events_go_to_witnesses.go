@@ -55,6 +55,88 @@ func (s *CoreServer) queueTELPush(aid, said, kind string, raw []byte) {
 	s.witnessOwnLog()
 }
 
+// backfillRegistryEvents queues, once, every registry event this agent kept
+// before the outbox existed, so the witnesses of each issuer come to hold the
+// whole of its log and not only what it makes from now on. It is the same
+// queue as any other event, so it is retried, and sending an event a witness
+// already holds is a no-op there; running it twice would only queue what is
+// already queued, and the mark kept in the store stops it being run again.
+// Every issuer is covered, a pairwise identity's registry as much as the
+// owner's (SEAM-13 section 2). A registry kept without its inception's bytes
+// cannot be sent and is left out.
+func (s *CoreServer) backfillRegistryEvents() {
+	if s.DataStore == nil {
+		return
+	}
+	if done, err := s.DataStore.TELBackfillDone(); err != nil || done {
+		return
+	}
+	regs, err := s.DataStore.ListRegistries()
+	if err != nil {
+		log.Printf("[witness] registry events made earlier could not be listed: %v", err)
+		return
+	}
+	for _, r := range regs {
+		if r.VcpRawB64 == "" {
+			continue
+		}
+		raw, err := base64.StdEncoding.DecodeString(r.VcpRawB64)
+		if err != nil {
+			continue
+		}
+		ev, err := keri.VerifyTELEvent(raw)
+		if err != nil {
+			continue
+		}
+		queue := []store.TELPush{{IssuerAID: r.IssuerAID, SAID: ev.SAID, Kind: "vcp", RawB64: r.VcpRawB64}}
+		events, err := s.DataStore.GetRegistryTEL(r.RegistrySAID)
+		if err != nil {
+			log.Printf("[witness] the log of registry %s could not be read: %v", r.RegistrySAID, err)
+			return // not marked done: the next start tries again
+		}
+		for _, e := range events {
+			queue = append(queue, store.TELPush{IssuerAID: r.IssuerAID, SAID: e.SAID, Kind: e.Kind, RawB64: e.RawB64})
+		}
+		for _, p := range queue {
+			if err := s.DataStore.EnqueueTELPush(p); err != nil {
+				log.Printf("[witness] event %s could not be queued: %v", p.SAID, err)
+				return
+			}
+		}
+	}
+	if err := s.DataStore.MarkTELBackfillDone(); err != nil {
+		log.Printf("[witness] could not record that earlier registry events were queued: %v", err)
+	}
+	s.witnessOwnLog()
+}
+
+// witnessIssuersOfWaitingEvents brings the witnesses of every identity that
+// has a registry event waiting up to date with that identity's key log: the
+// owner's, and a pairwise identity's too, whose TEL is served by that
+// identity's own witnesses (SEAM-13 section 2). A witness refuses a registry
+// event whose sealing key-log event it does not hold.
+func (s *CoreServer) witnessIssuersOfWaitingEvents(ctx context.Context, already map[string]bool) {
+	keeper, ok := s.KeriDriver.(drivers.KELKeeper)
+	if !ok || s.DataStore == nil || s.WitnessService == nil {
+		return
+	}
+	pending, err := s.DataStore.PendingTELPushes(telPushBatch)
+	if err != nil {
+		return
+	}
+	for _, p := range pending {
+		if already[p.IssuerAID] {
+			continue
+		}
+		already[p.IssuerAID] = true
+		witnesses, toad, err := keeper.WitnessConfig(p.IssuerAID)
+		if err != nil || len(witnesses) == 0 {
+			continue
+		}
+		s.WitnessService.BringUpToDate(ctx, p.IssuerAID, s.signedEventsOf(p.IssuerAID), witnesses, toad)
+	}
+}
+
 // pushRegistryEvents sends what waits in the outbox to the issuer's witnesses.
 // It reports to the log and returns; nothing waits on it.
 func (s *CoreServer) pushRegistryEvents(ctx context.Context) {

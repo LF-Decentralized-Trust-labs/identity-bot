@@ -2063,3 +2063,53 @@ func (s *SQLiteStore) DropStaleTELPushes(cutoff string) (int, error) {
 	n, _ := res.RowsAffected()
 	return int(n), nil
 }
+
+func (s *SQLiteStore) ListRegistries() ([]CredentialRegistry, error) {
+	rows, err := s.db.Query(`SELECT ` + registryCols + ` FROM credential_registries ORDER BY created_at, registry_said`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list registries: %w", err)
+	}
+	defer rows.Close()
+	var out []CredentialRegistry
+	for rows.Next() {
+		var r CredentialRegistry
+		if err := rows.Scan(&r.RegistrySAID, &r.IssuerAID, &r.VcpJson, &r.VcpRawB64, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteStore) GetRegistryTEL(registrySAID string) ([]CredentialTELEvent, error) {
+	rows, err := s.db.Query(`
+		SELECT registry_said, acdc_said, seq, said, kind, raw_b64, recorded_at
+		FROM credential_tel_events WHERE registry_said = ? ORDER BY rowid`, registrySAID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the registry's log: %w", err)
+	}
+	defer rows.Close()
+	var out []CredentialTELEvent
+	for rows.Next() {
+		var ev CredentialTELEvent
+		if err := rows.Scan(&ev.RegistrySAID, &ev.AcdcSAID, &ev.Seq, &ev.SAID, &ev.Kind, &ev.RawB64, &ev.RecordedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, ev)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteStore) TELBackfillDone() (bool, error) {
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM tel_backfill`).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+func (s *SQLiteStore) MarkTELBackfillDone() error {
+	_, err := s.db.Exec(`INSERT INTO tel_backfill (id, done_at) VALUES (1, ?) ON CONFLICT(id) DO NOTHING`,
+		time.Now().UTC().Format(time.RFC3339Nano))
+	return err
+}

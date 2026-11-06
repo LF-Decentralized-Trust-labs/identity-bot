@@ -1066,6 +1066,18 @@ CREATE TABLE IF NOT EXISTS tel_push_outbox (
     UNIQUE (issuer_aid, said)
 );
 `},
+	{
+		Version:     49,
+		Description: "Remember that the registry events made before the outbox existed were queued",
+		SQL: `
+-- Those events are queued once, on the first start that has the outbox; the
+-- outbox empties as witnesses take them, so without this the whole log would
+-- be queued again at every start.
+CREATE TABLE IF NOT EXISTS tel_backfill (
+    id      INTEGER PRIMARY KEY CHECK (id = 1),
+    done_at TEXT NOT NULL
+);
+`},
 }
 
 // ApplyIdentityMigrations creates the migrations table and applies any pending migrations.
