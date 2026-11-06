@@ -153,7 +153,12 @@ func TestAnAppHeldIdentityIsFoundedRotatedAndExtendedThroughTheCore(t *testing.T
 	}
 	rotSAID := out["d"].(string)
 
-	// Restart: a fresh engine reloaded from the store.
+	// Restart: a fresh engine reloaded from the store. A restart ends the old
+	// engine's background work first (the witnessing the commits started),
+	// which otherwise still reads the engine being replaced.
+	if !s.endBackground(backgroundStopWait) {
+		t.Fatal("the background work did not stop for the restart")
+	}
 	s.KeriDriver = keriengine.New()
 	s.reloadIdentityIntoDriver()
 
