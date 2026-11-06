@@ -40,6 +40,7 @@ void main() {
 
   setUp(() async {
     FlutterSecureStorage.setMockInitialValues({});
+    SecureKeyStore.holdPhraseWith(InMemoryPhraseHolder());
     SharedPreferences.setMockInitialValues({});
     w1.forgetAll();
     w2.forgetAll();
@@ -86,6 +87,7 @@ void main() {
     // messaging keys are the last ones anchored, and the new core takes their
     // seed.
     FlutterSecureStorage.setMockInitialValues({});
+    SecureKeyStore.holdPhraseWith(InMemoryPhraseHolder());
     final other = await anotherCore(bin, km);
     addTearDown(other.close);
     final recovered = await RecoveringThisIdentity(other.client, other.base, km)
@@ -136,6 +138,8 @@ void main() {
     expect(founded.witnesses, isEmpty);
 
     FlutterSecureStorage.setMockInitialValues({});
+
+    SecureKeyStore.holdPhraseWith(InMemoryPhraseHolder());
     final other = await anotherCore(bin, km);
     addTearDown(other.close);
     await expectLater(

@@ -5,6 +5,7 @@ import 'package:agent_client/crypto/bip39.dart';
 import 'package:agent_client/crypto/keys.dart';
 import 'package:agent_client/services/key_math.dart';
 import 'package:agent_client/services/the_events_this_device_signed.dart';
+import 'package:agent_client/services/secure_key_store.dart';
 import 'package:agent_client/services/the_identity_this_device_holds.dart';
 import 'package:agent_client/services/the_key_events_this_device_makes.dart';
 import 'package:agent_client/services/the_witnesses_of_this_devices_events.dart';
@@ -71,6 +72,7 @@ void main() {
 
   setUp(() {
     FlutterSecureStorage.setMockInitialValues({});
+    SecureKeyStore.holdPhraseWith(InMemoryPhraseHolder());
     SharedPreferences.setMockInitialValues({});
   });
 

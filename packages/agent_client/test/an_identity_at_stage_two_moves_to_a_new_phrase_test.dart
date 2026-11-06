@@ -43,6 +43,7 @@ void main() {
 
   setUp(() async {
     FlutterSecureStorage.setMockInitialValues({});
+    SecureKeyStore.holdPhraseWith(InMemoryPhraseHolder());
     SharedPreferences.setMockInitialValues({});
     PostQuantumCodes.useAssignedCodesInATest(true);
     core = await anotherCore(bin, km);
