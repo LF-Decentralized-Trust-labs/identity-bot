@@ -760,9 +760,15 @@ func (s *CoreServer) theOwner() (string, bool) {
 var errNoProvablePerson = errors.New("a person speaks to an AI agent from an app paired to this " +
 	"organisation, so the record can show which person asked")
 
-// thePersonAsking is the person behind a request a controller signed, and the
-// controller's signature as proof of what they said.
+// thePersonAsking is the person behind a request a controller signed, or a
+// person's session at an app signed with its browser key, and that signature as
+// proof of what they said.
 func (s *CoreServer) thePersonAsking(r *http.Request) (coretypes.Signer, *coretypes.ControllerProof, error) {
+	// A person at an app, whose request the gate admitted on a session and the
+	// browser key's signature, is never a controller and has no grant.
+	if person, proof, ok := thePersonAnAppSessionIs(r); ok {
+		return person, proof, nil
+	}
 	grant, ok := TheControllerThatAsked(r)
 	if !ok {
 		return coretypes.Signer{}, nil, errNoProvablePerson

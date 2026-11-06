@@ -167,3 +167,20 @@ signatures), and a thumbprint that must be refused. Go
     re-check a required credential, which needs what the person presented. An
     error means the asset could not be read, which is not an answer either way.
     Use it to sign out someone removed from the roster since they signed in.
+
+### A signed-in person speaks to an AI agent from the app's page
+
+The app's back end opens a session here with the Host's `OpenAppSession(appID,
+tokenHash, x, y, person, expires)`: the SHA-256 of the session token
+(`login.BrowserSessionBinding`; never the token), the P-256 key the sign-in
+approved, the person the organisation can prove, and when it ends. The talk
+routes (`POST` and `GET /api/mcp/agents/{id}/conversations`, `GET
+/api/mcp/conversations/{cid}`) then accept, besides a paired controller, a
+request that carries the token as a bearer **and** is signed by that key
+(`login.BrowserProofString`: fresh within two minutes, used once, covering the
+method, target and body). Such a request is never a controller and has no
+grant; `TheAppSessionThatAsked` tells a handler it came this way so it can show
+that person only what is theirs. A request whose `Origin` is not the session's
+app, a session for something that is not an `app` asset, an ended or expired
+session, and a person who no longer stands are refused. The router answers CORS
+for an origin an `app` asset lists, on those routes only.

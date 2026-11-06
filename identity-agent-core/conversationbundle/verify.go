@@ -936,6 +936,13 @@ func (v *verifier) checkPersonSpoke(where string, rec agentmessage.Record, at ti
 			v.fault(where, "it answers message %s, which is not an earlier message addressed to this person", rec.InReplyTo)
 		}
 	}
+	if p.Scheme != "" {
+		// Spoken from an app's page with the browser key of a person's session
+		// (ADR-066). The key proves the request, but nothing a bundle carries
+		// yet shows which person held it, so it is not passed as a controller's.
+		v.fault(where, "it was spoken from an app's page with a browser key, and a bundle cannot yet show which person held that key")
+		return
+	}
 	cr, err := authorisation.ReadControllerRequest(p.SignedString)
 	if err != nil || cr.Controller != p.Controller || cr.Method != "POST" || !strings.HasSuffix(cr.Path, "/conversations") {
 		v.fault(where, "what the app signed is not a request to speak in a conversation")
