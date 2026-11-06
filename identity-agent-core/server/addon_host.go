@@ -81,6 +81,9 @@ func (h hostWrapper) StartBrowserKeySignIn(assetID, audience, browserKey, public
 func (h hostWrapper) OpenAppSession(appID, tokenHash, x, y string, person coretypes.Signer, expires time.Time) (string, error) {
 	return h.s.OpenAppSession(appID, tokenHash, x, y, person, expires)
 }
+func (h hostWrapper) RenewAppSession(tokenHash string, until time.Time) error {
+	return h.s.RenewAppSession(tokenHash, until)
+}
 func (h hostWrapper) EndAppSession(tokenHash string)        { h.s.EndAppSession(tokenHash) }
 func (h hostWrapper) EndAppSessionsOf(personAID string) int { return h.s.EndAppSessionsOf(personAID) }
 func (h hostWrapper) AssetStillAdmits(assetID, pairwiseAID string) (bool, error) {

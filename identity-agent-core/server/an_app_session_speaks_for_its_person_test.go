@@ -403,3 +403,61 @@ func TestACorsAnswerKeysOnTheMatchedRouteAndMethod(t *testing.T) {
 		t.Fatalf("a doubled-slash spelling was answered: %q", got)
 	}
 }
+
+func TestRenewingAnAppSessionExtendsItAndALapsedLeaseIsNotAdmitted(t *testing.T) {
+	w := anAppSessionWorld(t)
+	w.token = "lease"
+	w.open("chat", w.who, time.Now().Add(300*time.Millisecond))
+	hash := login.BrowserSessionBinding(w.token)
+	if err := w.s.RenewAppSession(hash, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(400 * time.Millisecond)
+	if rec := w.serve(w.request(http.MethodGet, talk, "", chatOrigin, w.key)); rec.Code != http.StatusOK {
+		t.Fatalf("a renewed session = %d, want 200: %s", rec.Code, rec.Body)
+	}
+	// A lease nobody renews stops being admitted.
+	w.token = "unrenewed"
+	w.open("chat", w.who, time.Now().Add(150*time.Millisecond))
+	time.Sleep(250 * time.Millisecond)
+	if rec := w.serve(w.request(http.MethodGet, talk, "", chatOrigin, w.key)); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("a lease not renewed = %d, want 401", rec.Code)
+	}
+}
+
+func TestAnExpiredOrEndedAppSessionCannotBeRenewedNorPastItsCap(t *testing.T) {
+	w := anAppSessionWorld(t)
+	w.token = "gone"
+	w.open("chat", w.who, time.Now().Add(30*time.Millisecond))
+	hash := login.BrowserSessionBinding(w.token)
+	time.Sleep(60 * time.Millisecond)
+	if err := w.s.RenewAppSession(hash, time.Now().Add(time.Hour)); err == nil {
+		t.Fatal("an expired session was renewed")
+	}
+	if rec := w.serve(w.request(http.MethodGet, talk, "", chatOrigin, w.key)); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("a session renewed after it expired = %d, want 401", rec.Code)
+	}
+	w.token = "ended-2"
+	w.open("chat", w.who, time.Now().Add(time.Hour))
+	hash = login.BrowserSessionBinding(w.token)
+	w.s.EndAppSession(hash)
+	if err := w.s.RenewAppSession(hash, time.Now().Add(2*time.Hour)); err == nil {
+		t.Fatal("an ended session was renewed")
+	}
+	w.token = "capped"
+	w.open("chat", w.who, time.Now().Add(time.Minute))
+	hash = login.BrowserSessionBinding(w.token)
+	if err := w.s.RenewAppSession(hash, time.Now().Add(appSessionCap+time.Hour)); err == nil {
+		t.Fatal("a session was renewed past its cap")
+	}
+	if err := w.s.RenewAppSession(hash, time.Now().Add(appSessionCap-time.Hour)); err != nil {
+		t.Fatalf("renewing within the cap: %v", err)
+	}
+	// A shorter until never shortens it.
+	if err := w.s.RenewAppSession(hash, time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := w.s.appSessions.get(hash, time.Now().Add(time.Hour)); !ok {
+		t.Fatal("a renewal to an earlier time shortened the session")
+	}
+}

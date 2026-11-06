@@ -126,6 +126,13 @@ type Host interface {
 	// request signed by that key, only from that app's origin, and never as a
 	// controller. person must be someone the organisation can prove.
 	OpenAppSession(appID, tokenHash, x, y string, person Signer, expires time.Time) (string, error)
+	// RenewAppSession moves the end of a session still open to until: the app's
+	// back end opens a session for a few minutes and renews it while the
+	// session lives, so one nobody renews (a crash, a restart, an unreachable
+	// app machine) ends here by itself. It refuses (server.ErrAppSessionGone) a
+	// session that has ended or expired, never extends one past seven days from
+	// when it was opened, and never shortens one.
+	RenewAppSession(tokenHash string, until time.Time) error
 	// EndAppSession ends one session, and EndAppSessionsOf every session of a
 	// person (returning how many).
 	EndAppSession(tokenHash string)
