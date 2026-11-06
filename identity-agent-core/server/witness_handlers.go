@@ -1,10 +1,12 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
@@ -31,6 +33,7 @@ func (s *CoreServer) mountWitnessRoutes(r chi.Router) {
 	r.Post("/witness/endpoint", s.handleWitnessEndpointRecord)
 	r.Get("/witness/endpoint/{controller_aid}", s.handleWitnessEndpointLookup)
 	r.Get("/witness/tel/{issuer_aid}", s.handleWitnessTELRead)
+	r.Get("/witness/tel/{issuer_aid}/head", s.handleWitnessTELHead)
 	r.Post("/witness/tel/{issuer_aid}", s.handleWitnessTELSubmit)
 	s.withdrawalRoutes(r)
 }
@@ -186,10 +189,53 @@ func (s *CoreServer) handleWitnessTELRead(w http.ResponseWriter, r *http.Request
 	}
 	ans, err := s.WitnessService.ServeTEL(issuer, since)
 	if err != nil {
-		notHeld(w)
+		writeNoTEL(w, err)
 		return
 	}
-	jsonreply.Write(w, http.StatusOK, ans)
+	writeTELJSON(w, ans)
+}
+
+// handleWitnessTELHead is where the registry log of an identity is held to and
+// the digest of its latest event, without the log (SEAM-13 §2). Answered on the
+// same terms as the log itself.
+func (s *CoreServer) handleWitnessTELHead(w http.ResponseWriter, r *http.Request) {
+	issuer := chi.URLParam(r, "issuer_aid")
+	if !s.witnessReadAllowed(w, r, issuer) {
+		return
+	}
+	head, err := s.WitnessService.ServeTELHead(issuer)
+	if err != nil {
+		writeNoTEL(w, err)
+		return
+	}
+	writeTELJSON(w, head)
+}
+
+// writeNoTEL answers a read the asker may make but there is nothing to give:
+// 404 {"error":"no_tel"} (SEAM-13 §5 T-1), which a reader tells apart from an
+// unreachable witness. Any other failure is a server error.
+func writeNoTEL(w http.ResponseWriter, err error) {
+	if errors.Is(err, witness.ErrNoTEL) {
+		jsonreply.Write(w, http.StatusNotFound, map[string]string{"error": "no_tel"})
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "registry log unreadable", "")
+}
+
+// writeTELJSON writes an answer carrying events as published. The events are
+// KERI events whose bytes are what their digests are over, so the encoder must
+// not rewrite "<", ">" or "&" inside them, which the default one does.
+func writeTELJSON(w http.ResponseWriter, v interface{}) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		writeError(w, http.StatusInternalServerError, "registry log unreadable", "")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(buf.Bytes())
 }
 
 // handleWitnessTELSubmit takes registry events from the issuer that made them.

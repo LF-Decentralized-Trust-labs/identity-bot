@@ -134,14 +134,16 @@ func (w *registryWorld) verifyOutside(iss *drivers.DriverIssueCredentialResponse
 	if err != nil {
 		w.t.Fatal(err)
 	}
+	log := s.issuanceLogForVerification(cred, w.kel)
 	res, err := keriengine.New().VerifyCredential(&drivers.DriverVerifyCredentialRequest{
 		AcdcJson:          iss.AcdcJsonB64,
 		IssuerKelEvents:   w.kel,
-		RegistryEventsB64: s.issuanceLogForVerification(cred, w.kel).events,
+		RegistryEventsB64: log.events,
 	})
 	if err != nil {
 		w.t.Fatal(err)
 	}
+	log.duplicity.fold(res)
 	return res
 }
 
@@ -156,12 +158,12 @@ func TestAWitnessServesAnIssuersWholeRegistryLogRangedBySince(t *testing.T) {
 	if code != http.StatusOK || len(all.Events) != 2 {
 		t.Fatalf("the whole log was not served: %d %+v", code, all)
 	}
-	if all.AnchoredSN != 2 {
-		t.Errorf("anchored_sn = %d, but the witness holds the issuer's key log through 2", all.AnchoredSN)
+	if all.AnchoredSN != 2 || all.LatestKelSN != 2 {
+		t.Errorf("anchored_sn, latest_kel_sn = %d, %d; the issuance is sealed at 2 and the witness holds the key log through 2", all.AnchoredSN, all.LatestKelSN)
 	}
 	// vcp is sealed at 1, iss at 2: from 1 on, only the issuance.
 	_, part := w.get("/api/witness/tel/"+w.c.aid+"?since_sn=1", true)
-	if len(part.Events) != 1 || part.Events[0].Ilk != "iss" {
+	if len(part.Events) != 1 || telType(t, part.Events[0]) != "iss" {
 		t.Fatalf("since_sn=1 did not leave out the registry inception: %+v", part.Events)
 	}
 	_, none := w.get("/api/witness/tel/"+w.c.aid+"?since_sn=2", true)
@@ -278,7 +280,8 @@ func TestAWitnessCannotMakeUpARevocation(t *testing.T) {
 	}
 	real := w.base
 	_, honest := w.get("/api/witness/tel/"+w.c.aid+"?since_sn=-1", true)
-	honest.Events = append(honest.Events, witness.TELEvent{RawB64: rev.RevRawBytesB64})
+	revRaw, _ := base64.StdEncoding.DecodeString(rev.RevRawBytesB64)
+	honest.Events = append(honest.Events, json.RawMessage(revRaw))
 	liar := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(r.URL.Path, "/witness/tel/") {
 			http.NotFound(rw, r)
@@ -312,4 +315,16 @@ func TestAnAnswerFromAWitnessBehindTheVerifiersKeyLogIsNotBelieved(t *testing.T)
 	if res.Verified {
 		t.Fatalf("an answer from a witness behind the key log the verifier holds proved an issuance: %+v", res.Checks)
 	}
+}
+
+// telType is the "t" of a served event.
+func telType(t *testing.T, ev json.RawMessage) string {
+	t.Helper()
+	var e struct {
+		T string `json:"t"`
+	}
+	if err := json.Unmarshal(ev, &e); err != nil {
+		t.Fatalf("a served event is not a KERI event: %s", ev)
+	}
+	return e.T
 }

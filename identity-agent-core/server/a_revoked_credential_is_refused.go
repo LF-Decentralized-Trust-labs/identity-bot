@@ -127,6 +127,7 @@ func (s *CoreServer) verifyCredentialHere(req *drivers.DriverVerifyCredentialReq
 	if err != nil {
 		return verifyReply{}, err
 	}
+	log.duplicity.fold(res)
 	if useSupplied && res != nil {
 		if notRevoked, ok := res.Checks["not_revoked"].(bool); ok {
 			switch {

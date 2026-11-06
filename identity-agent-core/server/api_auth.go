@@ -251,6 +251,7 @@ var publicRoutes = map[string]string{
 	"GET /api/witness/kel/{signer_aid}":            "the key log this witness holds, to the identity itself or its delegator, signed — anybody else is told it is not held",
 	"GET /api/witness/kel/{signer_aid}/tip":        "how far this witness holds an identity's key log, signed with a nonce — to anybody else, as for a log not held",
 	"GET /api/witness/tel/{issuer_aid}":            "the registry logs of an identity this witness witnesses, from a place in its key log, to the identity, its delegator or a verifier presenting its inception — anybody else is told it is not held; never by credential",
+	"GET /api/witness/tel/{issuer_aid}/head":       "where an identity's registry log is held to and the digest of its latest event, on the same terms as the log — never by credential",
 	"POST /api/witness/tel/{issuer_aid}":           "an issuer's registry events, each stored only when the key log this witness holds for it seals exactly that event",
 	"GET /api/witness/kel/{signer_aid}/event/{sn}": "one event of a key log this witness holds, to the identity itself or its delegator, signed — anybody else is told it is not held",
 	// A controller publishes where it can be reached, and a counterparty whose

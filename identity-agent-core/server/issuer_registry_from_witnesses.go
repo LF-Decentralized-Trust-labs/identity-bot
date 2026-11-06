@@ -3,14 +3,17 @@ package server
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
+	"identity-agent-core/drivers"
 	"identity-agent-core/witness"
 
 	keri "github.com/grapeid/keri-go"
@@ -40,6 +43,56 @@ import (
 // credential unproved ("not checked"), never proved and never revoked.
 
 const maxTELAnswerBytes = 8 << 20
+
+// rejectedWitnessFor is how long a witness that served an unsealed event is not
+// asked about that issuer again.
+const rejectedWitnessFor = 24 * time.Hour
+
+var rejectedWitnesses = struct {
+	sync.Mutex
+	until map[string]time.Time
+}{until: map[string]time.Time{}}
+
+func witnessRejected(issuer, key string) bool {
+	rejectedWitnesses.Lock()
+	defer rejectedWitnesses.Unlock()
+	t, ok := rejectedWitnesses.until[issuer+"|"+key]
+	return ok && time.Now().Before(t)
+}
+
+func rejectWitness(issuer, key string) {
+	rejectedWitnesses.Lock()
+	defer rejectedWitnesses.Unlock()
+	rejectedWitnesses.until[issuer+"|"+key] = time.Now().Add(rejectedWitnessFor)
+}
+
+// telDuplicity is what a witness did that makes it possible the issuer is
+// showing different histories to different parties, or that the witness is
+// lying (SEAM-13 §5 T-3).
+type telDuplicity struct {
+	Issuer     string
+	WitnessKey string
+	Reason     string
+}
+
+const checkPossibleDuplicity = "possible_duplicity"
+
+// fold puts the finding into a verification result: the credential is not
+// verified, the check is named, and the error says which witness and why. Safe
+// on nil.
+func (d *telDuplicity) fold(res *drivers.DriverVerifyCredentialResponse) {
+	if d == nil || res == nil {
+		return
+	}
+	if res.Checks == nil {
+		res.Checks = map[string]interface{}{}
+	}
+	res.Verified = false
+	res.Checks[checkPossibleDuplicity] = true
+	res.Errors = append(res.Errors, fmt.Sprintf(
+		"possible duplicity: witness %s of %s served a registry log the issuer's key log does not seal (%s); that log and witness were rejected",
+		d.WitnessKey, d.Issuer, d.Reason))
+}
 
 // currentWitnessKeys is the witness set the issuer's key log has in force at its
 // end: the inception's, with each rotation's cuts and additions applied.
@@ -92,12 +145,14 @@ func keyLogBytes(kel []map[string]interface{}) [][]byte {
 
 // registryLogFromWitnesses is the events of one credential in its registry, in
 // order, as the issuer's witnesses
-// serve them, checked. Nil when no witness gave a log that holds up.
-func (s *CoreServer) registryLogFromWitnesses(client *http.Client, issuer, registry, credential string, issuerKel []map[string]interface{}) []string {
+// serve them, checked. Nil when no witness gave a log that holds up; the second
+// result is set when one served events the key log does not seal.
+func (s *CoreServer) registryLogFromWitnesses(client *http.Client, issuer, registry, credential string, issuerKel []map[string]interface{}) ([]string, *telDuplicity) {
 	kelRaw := keyLogBytes(issuerKel)
 	if len(kelRaw) == 0 {
-		return nil
+		return nil, nil
 	}
+	var dup *telDuplicity
 	lastSN := -1
 	sealed := map[string]bool{} // digests the key log seals for this credential
 	for _, raw := range kelRaw {
@@ -124,27 +179,28 @@ func (s *CoreServer) registryLogFromWitnesses(client *http.Client, issuer, regis
 				break
 			}
 		}
-		if base == "" {
+		if base == "" || witnessRejected(issuer, key) {
 			continue
 		}
 		ans, err := fetchRegistryLogs(client, base, issuer, issuerKel)
-		if err != nil || ans.AnchoredSN < lastSN {
+		if err != nil || ans.LatestKelSN < lastSN {
 			continue // unreachable, or behind the key log this agent already holds
 		}
 		raws := make([][]byte, 0, len(ans.Events))
 		for _, ev := range ans.Events {
-			raw, err := base64.StdEncoding.DecodeString(ev.RawB64)
-			if err != nil {
-				raws = nil
-				break
-			}
-			raws = append(raws, raw)
-		}
-		if raws == nil && len(ans.Events) > 0 {
-			continue
+			raws = append(raws, []byte(ev))
 		}
 		checked, err := witness.AnchoredTEL(issuer, kelRaw, raws, nil)
 		if err != nil {
+			var unsealed *witness.NotAnchoredError
+			if errors.As(err, &unsealed) && ans.LatestKelSN <= lastSN {
+				// Not behind, not ahead, and still serving what this key log
+				// does not seal: not an honest gap.
+				rejectWitness(issuer, key)
+				if dup == nil {
+					dup = &telDuplicity{Issuer: issuer, WitnessKey: key, Reason: err.Error()}
+				}
+			}
 			continue
 		}
 		// The registry's inception was required, and checked as the issuer's,
@@ -177,9 +233,9 @@ func (s *CoreServer) registryLogFromWitnesses(client *http.Client, issuer, regis
 		for _, ev := range mine {
 			res = append(res, ev.RawB64)
 		}
-		return res
+		return res, dup // a good log from another witness does not erase what the first one served
 	}
-	return nil
+	return nil, dup
 }
 
 // fetchRegistryLogs reads an issuer's whole registry log from one witness. The
@@ -212,7 +268,7 @@ func fetchRegistryLogs(client *http.Client, base, issuer string, issuerKel []map
 			lastErr = err
 			continue
 		}
-		if ans.IssuerAID != issuer {
+		if ans.AID != issuer {
 			lastErr = fmt.Errorf("the answer is about another identity")
 			continue
 		}

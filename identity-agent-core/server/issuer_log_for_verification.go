@@ -18,6 +18,7 @@ const (
 	issuerNoLogHeld       = issuerNotCheckedFmt + "no key log is held for the issuer"
 	issuerNoLogHeldReason = "the issuer's key log is not held here, so the credential cannot be shown to come from that issuer"
 	issuerNoProof         = issuerNotCheckedFmt + "no proof of issuance"
+	issuerDuplicity       = "possible duplicity: a witness of the issuer served a registry log its key log does not seal"
 )
 
 // issuerLogForVerification is the one place that reads an issuer's key log for
@@ -67,6 +68,9 @@ type issuanceLog struct {
 	// log (registryLogFromWitnesses). A log kept here may be partial, so it is
 	// never proven, and can only add a revocation.
 	provenComplete bool
+	// duplicity is set when a witness served events the issuer's key log does
+	// not seal; verifyCredentialHere puts it in the verification result.
+	duplicity *telDuplicity
 }
 
 // issuanceLogForVerification is the credential's transaction log: the events
@@ -90,8 +94,8 @@ func (s *CoreServer) issuanceLogForVerification(cred *keri.Credential, issuerKel
 		if cred.Issuer == "" || len(issuerKel) == 0 {
 			return issuanceLog{}
 		}
-		fetched := s.registryLogFromWitnesses(telClient, cred.Issuer, registry, said, issuerKel)
-		return issuanceLog{events: fetched, provenComplete: len(fetched) > 0}
+		fetched, dup := s.registryLogFromWitnesses(telClient, cred.Issuer, registry, said, issuerKel)
+		return issuanceLog{events: fetched, provenComplete: len(fetched) > 0, duplicity: dup}
 	}
 	out := make([]string, 0, len(events))
 	for _, ev := range events {
@@ -110,6 +114,10 @@ func issuerVerdict(res *drivers.DriverVerifyCredentialResponse, logHeld bool) (s
 		res = &drivers.DriverVerifyCredentialResponse{}
 	}
 	if logHeld {
+		if dup, _ := res.Checks[checkPossibleDuplicity].(bool); dup {
+			res.Verified = false
+			return issuerDuplicity
+		}
 		// The log says who the issuer is, not that it issued this credential.
 		// The engine proves that from the credential's registry and the issuer's
 		// log, and says so in "issuance_proved"; anything but true is not proved.

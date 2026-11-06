@@ -2004,3 +2004,62 @@ func (s *SQLiteStore) ListPendingIssuances() (map[string]string, error) {
 	}
 	return out, rows.Err()
 }
+
+func (s *SQLiteStore) EnqueueTELPush(p TELPush) error {
+	if p.IssuerAID == "" || p.SAID == "" || p.RawB64 == "" {
+		return fmt.Errorf("a registry event to send needs its issuer, digest and bytes")
+	}
+	if p.CreatedAt == "" {
+		p.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	_, err := s.db.Exec(`INSERT INTO tel_push_outbox (issuer_aid, said, kind, raw_b64, created_at)
+		VALUES (?, ?, ?, ?, ?) ON CONFLICT(issuer_aid, said) DO NOTHING`,
+		p.IssuerAID, p.SAID, p.Kind, p.RawB64, p.CreatedAt)
+	return err
+}
+
+func (s *SQLiteStore) PendingTELPushes(limit int) ([]TELPush, error) {
+	rows, err := s.db.Query(`SELECT issuer_aid, said, kind, raw_b64, created_at, attempts, last_error
+		FROM tel_push_outbox ORDER BY id LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TELPush
+	for rows.Next() {
+		var p TELPush
+		if err := rows.Scan(&p.IssuerAID, &p.SAID, &p.Kind, &p.RawB64, &p.CreatedAt, &p.Attempts, &p.LastError); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteStore) FinishTELPushes(issuerAID string, saids []string) error {
+	for _, said := range saids {
+		if _, err := s.db.Exec(`DELETE FROM tel_push_outbox WHERE issuer_aid = ? AND said = ?`, issuerAID, said); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *SQLiteStore) FailedTELPush(issuerAID string, saids []string, reason string) error {
+	for _, said := range saids {
+		if _, err := s.db.Exec(`UPDATE tel_push_outbox SET attempts = attempts + 1, last_error = ?
+			WHERE issuer_aid = ? AND said = ?`, reason, issuerAID, said); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *SQLiteStore) DropStaleTELPushes(cutoff string) (int, error) {
+	res, err := s.db.Exec(`DELETE FROM tel_push_outbox WHERE created_at < ?`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
