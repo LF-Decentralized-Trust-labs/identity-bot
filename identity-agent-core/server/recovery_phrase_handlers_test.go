@@ -229,4 +229,55 @@ func TestAPairedComputerRefusesToHoldThePhrase(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(s.DataDir, "secureenclave", "recovery_phrase.key")); err == nil {
 		t.Fatal("written")
 	}
+	// The phrase being moved to recreates a root seed just the same.
+	w = movingToCall(s, http.MethodPut, map[string]string{"phrase": thePhrase}, true)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "EThePersonWhoOwnsIt") {
+		t.Fatalf("a paired computer held the phrase being moved to: %d %s", w.Code, w.Body)
+	}
+	if _, err := os.Stat(filepath.Join(s.DataDir, "secureenclave", "recovery_phrase_moving_to.key")); err == nil {
+		t.Fatal("written")
+	}
+}
+
+// A different phrase over the one held is refused (409) and leaves it, as the
+// root-seed route refuses a different seed. Only a caller that says it is
+// replacing (finishing a move, a deliberate reset) replaces it.
+func TestADifferentPhraseIsRefusedUnlessTheCallerIsReplacing(t *testing.T) {
+	s := rootSeedServer(t)
+	seedwraptest.ThisMachineCannot(t, secureenclave.Capability{Status: secureenclave.Usable, Kind: secureenclave.KindTPM2}, true)
+	const other = "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong"
+	opened := func(call func(method, path string, body any) *httptest.ResponseRecorder, path string) string {
+		var got recoveryPhraseBody
+		_ = json.Unmarshal(call(http.MethodPost, path, nil).Body.Bytes(), &got)
+		return got.Phrase
+	}
+	for name, c := range map[string]struct {
+		call func(method, path string, body any) *httptest.ResponseRecorder
+		open string
+	}{
+		"in force":  {func(m, p string, b any) *httptest.ResponseRecorder { return phraseCall(s, m, p, b, true) }, phrasePath + "/open"},
+		"moving to": {func(m, _ string, b any) *httptest.ResponseRecorder { return movingToCall(s, m, b, true) }, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if w := c.call(http.MethodPut, phrasePath, map[string]string{"phrase": thePhrase}); w.Code != http.StatusCreated {
+				t.Fatalf("hold: %d %s", w.Code, w.Body)
+			}
+			if w := c.call(http.MethodPut, phrasePath, map[string]string{"phrase": thePhrase}); w.Code != http.StatusCreated {
+				t.Fatalf("the same phrase again: %d %s", w.Code, w.Body)
+			}
+			if w := c.call(http.MethodPut, phrasePath, map[string]any{"phrase": other}); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), aDifferentPhraseIsHeldCode) ||
+				strings.Contains(w.Body.String(), "abandon") || strings.Contains(w.Body.String(), "zoo") {
+				t.Fatalf("a different phrase: %d %s", w.Code, w.Body)
+			}
+			if got := opened(c.call, c.open); got != thePhrase {
+				t.Fatalf("the phrase held changed: %q", got)
+			}
+			if w := c.call(http.MethodPut, phrasePath, map[string]any{"phrase": other, "replace": true}); w.Code != http.StatusCreated {
+				t.Fatalf("replacing: %d %s", w.Code, w.Body)
+			}
+			if got := opened(c.call, c.open); got != other {
+				t.Fatalf("not replaced: %q", got)
+			}
+		})
+	}
 }

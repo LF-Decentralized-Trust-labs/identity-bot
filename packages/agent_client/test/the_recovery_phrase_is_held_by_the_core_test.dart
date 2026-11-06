@@ -47,7 +47,12 @@ class _FakeCore {
                   }),
                   412);
             }
-            held = (jsonDecode(req.body) as Map)['phrase'] as String;
+            final body = jsonDecode(req.body) as Map;
+            final phrase = body['phrase'] as String;
+            if (held != null && held != phrase && body['replace'] != true) {
+              return _aDifferentPhraseIsHeld();
+            }
+            held = phrase;
             return http.Response('{"held":true}', 201);
           case 'POST /api/keystore/recovery-phrase/open':
             return held == null
@@ -226,6 +231,32 @@ void main() {
     expect(await SecureKeyStore.loadMnemonic(), _phrase.split(' '));
   });
 
+  test(
+      'a second, different phrase is refused, and the phrase held is still the one held',
+      () async {
+    final core = _FakeCore();
+    SecureKeyStore.holdPhraseWith(
+        CorePhraseHolder(baseUrl: _core, client: core.client));
+    await SecureKeyStore.saveMnemonic(_phrase.split(' '));
+
+    await expectLater(SecureKeyStore.saveMnemonic(_movingTo.split(' ')),
+        throwsA(isA<ADifferentPhraseIsHeld>()));
+    expect(core.held, _phrase);
+    // the same phrase again is not a change
+    await SecureKeyStore.saveMnemonic(_phrase.split(' '));
+    expect(core.held, _phrase);
+  });
+
+  test('a core that does not answer is "unknown" at startup, never "no phrase"',
+      () async {
+    SecureKeyStore.holdPhraseWith(CorePhraseHolder(
+        baseUrl: _core,
+        client: MockClient(
+            (_) async => throw http.ClientException('connection refused'))));
+    await expectLater(SecureKeyStore.hasMnemonic(),
+        throwsA(isA<WhetherAPhraseIsHeldIsUnknown>()));
+  });
+
   test('a core that is not on this computer is never sent the phrase',
       () async {
     final core = _FakeCore();
@@ -266,17 +297,38 @@ void migrationSafety() {
 
 const _movingTo = 'zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong';
 
+/// The core's answer to a different phrase held, as the core gives it.
+http.Response _aDifferentPhraseIsHeld() => http.Response(
+    jsonEncode({
+      'error': 'a different phrase is already held on this agent',
+      'code': 'a_different_phrase_is_held'
+    }),
+    409);
+
 /// A core with both slots: the phrase in force, and the phrase moved to.
 class _TwoSlotCore {
   String? inForce;
   String? movingTo;
+
+  /// Runs once, when the first PUT arrives and before it is answered: what
+  /// another app process did between this one's open and its hold.
+  Future<void> Function()? beforeFirstPut;
+
   MockClient get client => MockClient((req) async {
         final moving = req.url.path.contains('/moving-to');
         String? get() => moving ? movingTo : inForce;
         void set(String? v) => moving ? movingTo = v : inForce = v;
         switch (req.method) {
           case 'PUT':
-            set((jsonDecode(req.body) as Map)['phrase'] as String);
+            final meanwhile = beforeFirstPut;
+            beforeFirstPut = null;
+            if (meanwhile != null) await meanwhile();
+            final body = jsonDecode(req.body) as Map;
+            final phrase = body['phrase'] as String;
+            if (get() != null && get() != phrase && body['replace'] != true) {
+              return _aDifferentPhraseIsHeld();
+            }
+            set(phrase);
             return http.Response('{"held":true}', 201);
           case 'POST':
             return get() == null
@@ -337,6 +389,23 @@ void phraseBeingMovedTo() {
     expect(await SecureKeyStore.loadPhraseMovingTo(), isNull);
     expect((await storage.readAll()).values.where((v) => v.contains('zoo')),
         isEmpty);
+  });
+
+  // Two app processes: this one moves an old software copy of the phrase to
+  // the core, reads "none held", and before its hold arrives the other
+  // finishes a phrase move. The phrase now in force must survive.
+  test(
+      'a migration racing a finished move leaves the phrase the move made in force',
+      () async {
+    await storage.write(key: 'agent_mnemonic', value: _phrase);
+    core.movingTo = _movingTo;
+    core.beforeFirstPut =
+        () => SecureKeyStore.finishMovingToThePhrase(_movingTo.split(' '));
+
+    expect(await SecureKeyStore.migrateLegacyMnemonic(), isFalse);
+    expect(core.inForce, _movingTo,
+        reason: 'the migration overwrote the phrase in force');
+    expect(core.movingTo, isNull);
   });
 
   test('clearing a move that cannot happen keeps the phrase in force',

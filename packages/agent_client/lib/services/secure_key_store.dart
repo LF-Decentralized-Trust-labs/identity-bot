@@ -21,8 +21,13 @@ import 'the_owner_at_this_computer.dart';
 /// so ([PhraseHolder.protection]).
 abstract class PhraseHolder {
   /// Holds [phrase]. Throws [RootSeedRefused] when this computer cannot protect
-  /// it, and [StateError] when the core could not be reached or did not take it.
-  Future<void> hold(String phrase);
+  /// it, [ADifferentPhraseIsHeld] when a different phrase is held and
+  /// [replacing] is false, and [StateError] when the core could not be reached
+  /// or did not take it.
+  ///
+  /// [replacing] is for finishing a phrase move and for a deliberate reset,
+  /// and nothing else: the phrase held may be the only copy of an identity.
+  Future<void> hold(String phrase, {bool replacing = false});
 
   /// The held phrase, or null when none is held. Throws [RootSeedRefused] when
   /// one is held and this build refuses to serve it.
@@ -37,6 +42,36 @@ abstract class PhraseHolder {
 
   /// Deletes the held phrase. True only when it is gone.
   Future<bool> forget();
+}
+
+/// The core holds a different phrase, and the caller did not say it is
+/// replacing it. Nothing was written: the phrase held is still the one held.
+///
+/// The root seed is refused the same way. A re-onboarding, or a second app
+/// process that read "none held" a moment before another one finished a phrase
+/// move, would otherwise overwrite the only copy of an identity.
+class ADifferentPhraseIsHeld implements Exception {
+  const ADifferentPhraseIsHeld();
+
+  /// The code the core puts on its 409 for this, which tells it apart from the
+  /// 409 a paired computer answers with.
+  static const code = 'a_different_phrase_is_held';
+
+  @override
+  String toString() => 'a different recovery phrase is already held here';
+}
+
+/// Whether a phrase is held could not be learned: the core did not answer.
+///
+/// Never read as "none held": that answer leads an app to onboarding, and an
+/// onboarding writes a phrase.
+class WhetherAPhraseIsHeldIsUnknown implements Exception {
+  WhetherAPhraseIsHeldIsUnknown(this.cause);
+  final Object cause;
+
+  @override
+  String toString() =>
+      'whether a recovery phrase is held could not be learned: $cause';
 }
 
 /// The phrase held by the local core, over `/api/keystore/recovery-phrase`.
@@ -84,8 +119,12 @@ class CorePhraseHolder implements PhraseHolder {
   }
 
   @override
-  Future<void> hold(String phrase) async {
-    final r = await _send('PUT', '', {'phrase': phrase});
+  Future<void> hold(String phrase, {bool replacing = false}) async {
+    final r = await _send(
+        'PUT', '', {'phrase': phrase, if (replacing) 'replace': true});
+    if (r.statusCode == 409 && _carries(r, ADifferentPhraseIsHeld.code)) {
+      throw const ADifferentPhraseIsHeld();
+    }
     if (r.statusCode != 200 && r.statusCode != 201) {
       throw StateError('the core did not take the recovery phrase '
           '(${r.statusCode})');
@@ -102,6 +141,15 @@ class CorePhraseHolder implements PhraseHolder {
     }
     final p = (jsonDecode(r.body) as Map)['phrase'];
     return p is String && p.isNotEmpty ? p : null;
+  }
+
+  static bool _carries(http.Response r, String code) {
+    try {
+      final j = jsonDecode(r.body);
+      return j is Map && j['code'] == code;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<Map?> _state() async {
@@ -135,7 +183,14 @@ class CorePhraseHolder implements PhraseHolder {
 class InMemoryPhraseHolder implements PhraseHolder {
   String? _phrase;
   @override
-  Future<void> hold(String phrase) async => _phrase = phrase;
+  Future<void> hold(String phrase, {bool replacing = false}) async {
+    // As the core does: a different phrase is not written over the one held.
+    if (!replacing && _phrase != null && _phrase != phrase) {
+      throw const ADifferentPhraseIsHeld();
+    }
+    _phrase = phrase;
+  }
+
   @override
   Future<String?> open() async => _phrase;
   @override
@@ -241,7 +296,17 @@ class SecureKeyStore {
       // phrase: a different one already held is not a reason to destroy this.
       final held = await _holder.open();
       if (held == null) {
-        await _holder.hold(found);
+        // Never replacing: another process may have made a different phrase
+        // the phrase in force since the open above (a move finishing), and the
+        // core then refuses this one rather than lose that.
+        try {
+          await _holder.hold(found);
+        } on ADifferentPhraseIsHeld {
+          debugPrint('[SecureKeyStore] the core came to hold a different '
+              'phrase — leaving the original');
+          clean = false;
+          continue;
+        }
         if (await _holder.open() != found) {
           debugPrint('[SecureKeyStore] the phrase did not survive the move — '
               'leaving the original');
@@ -259,7 +324,10 @@ class SecureKeyStore {
     return clean;
   }
 
-  /// Holds the phrase. Throws [RootSeedRefused] where the core will not.
+  /// Holds the phrase. Throws [RootSeedRefused] where the core will not, and
+  /// [ADifferentPhraseIsHeld] where a different phrase is already held: an
+  /// onboarding never replaces one. A deliberate reset forgets it first
+  /// ([clearMnemonic]).
   static Future<void> saveMnemonic(List<String> words) async {
     final phrase = _normalised(words.join(' '));
     await _holder.hold(phrase);
@@ -278,6 +346,9 @@ class SecureKeyStore {
     return value.split(' ');
   }
 
+  /// Whether a phrase is held. Throws [WhetherAPhraseIsHeldIsUnknown] when the
+  /// core cannot be asked: an unreachable core is "unknown", never "none",
+  /// because "none" sends an app to onboarding, which writes a phrase.
   static Future<bool> hasMnemonic() async {
     // An app asks this at startup, so an interrupted move (held, old copy not
     // yet deleted) is finished here without waiting for the first load.
@@ -286,10 +357,22 @@ class SecureKeyStore {
       await _migrateLegacyPhraseMovingTo();
     } on RootSeedRefused {
       // This computer cannot hold the phrase; the old copy stays and is not served.
+    } catch (e) {
+      // The core did not answer: the old copy stays, and the question below
+      // says whether anything is known.
+      debugPrint('[SecureKeyStore] the old phrase was not moved just now: $e');
     }
-    if (await _holder.isHeld()) return true;
-    return await _legacyStorage.containsKey(key: await _scopedKey()) ||
-        await _legacyStorage.containsKey(key: _legacyMnemonicKey);
+    if (await _legacyStorage.containsKey(key: await _scopedKey()) ||
+        await _legacyStorage.containsKey(key: _legacyMnemonicKey)) {
+      return true;
+    }
+    try {
+      return await _holder.isHeld();
+    } on RootSeedRefused {
+      rethrow;
+    } catch (e) {
+      throw WhetherAPhraseIsHeldIsUnknown(e);
+    }
   }
 
   /// What protects the held phrase, for a screen to show: `hardware-wrapped`,
@@ -348,7 +431,9 @@ class SecureKeyStore {
   /// confirm, when the new phrase did not survive the write.
   static Future<bool> finishMovingToThePhrase(List<String> words) async {
     final value = _normalised(words.join(' '));
-    await _holder.hold(value);
+    // The one caller that replaces the phrase in force: the move's second
+    // rotation is in the log, so the old phrase no longer controls anything.
+    await _holder.hold(value, replacing: true);
     if (await _holder.open() != value) return false;
     // An older copy of the phrase just replaced, left in this app's own
     // storage, is no longer the phrase in force.
@@ -373,7 +458,13 @@ class SecureKeyStore {
     // one already held is not a reason to destroy this.
     final held = await _movingToHolder.open();
     if (held == null) {
-      await _movingToHolder.hold(found);
+      try {
+        await _movingToHolder.hold(found);
+      } on ADifferentPhraseIsHeld {
+        debugPrint('[SecureKeyStore] the core came to hold a different phrase '
+            'being moved to — leaving the original');
+        return false;
+      }
       if (await _movingToHolder.open() != found) {
         debugPrint('[SecureKeyStore] the phrase being moved to did not '
             'survive the move — leaving the original');

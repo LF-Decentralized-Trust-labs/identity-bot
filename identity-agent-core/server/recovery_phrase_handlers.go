@@ -27,6 +27,21 @@ type recoveryPhraseBody struct {
 	Phrase string `json:"phrase"`
 }
 
+// aDifferentPhraseIsHeldCode is the code on the 409 for a different phrase
+// held, so the app tells it apart from the paired-computer 409.
+const aDifferentPhraseIsHeldCode = "a_different_phrase_is_held"
+
+// holdPhraseBody is what PUT takes. Replace says the caller means to replace a
+// different phrase already held: the app sets it only when a phrase move
+// finishes, and for a deliberate reset. Without it a different phrase held is
+// refused (409), as the root-seed route refuses a different seed, so a
+// re-onboarding or a migration racing another app process cannot overwrite the
+// only copy of an identity.
+type holdPhraseBody struct {
+	Phrase  string `json:"phrase"`
+	Replace bool   `json:"replace,omitempty"`
+}
+
 // aPlausiblePhrase is whether s is shaped like a BIP39 phrase: 12 to 24
 // lowercase words. It does not check the wordlist or the checksum — the app
 // that made it did — only that this is not an arbitrary blob being filed here.
@@ -55,6 +70,7 @@ func aPlausiblePhrase(s string) bool {
 type phraseSlotOps struct {
 	what       string // for messages
 	store      func(dataDir string, phrase []byte) error
+	replace    func(dataDir string, phrase []byte) error
 	load       func(dataDir string) ([]byte, error)
 	protection func(dataDir string) (protection, scheme string, ok bool)
 	forget     func(dataDir string) error
@@ -62,9 +78,9 @@ type phraseSlotOps struct {
 
 var (
 	inForcePhrase = phraseSlotOps{"the recovery phrase", secureenclave.StoreRecoveryPhrase,
-		secureenclave.LoadRecoveryPhrase, secureenclave.RecoveryPhraseProtection, secureenclave.ForgetRecoveryPhrase}
+		secureenclave.ReplaceRecoveryPhrase, secureenclave.LoadRecoveryPhrase, secureenclave.RecoveryPhraseProtection, secureenclave.ForgetRecoveryPhrase}
 	movingToPhrase = phraseSlotOps{"the phrase being moved to", secureenclave.StorePhraseMovingTo,
-		secureenclave.LoadPhraseMovingTo, secureenclave.PhraseMovingToProtection, secureenclave.ForgetPhraseMovingTo}
+		secureenclave.ReplacePhraseMovingTo, secureenclave.LoadPhraseMovingTo, secureenclave.PhraseMovingToProtection, secureenclave.ForgetPhraseMovingTo}
 )
 
 func (s *CoreServer) handleHoldRecoveryPhrase(w http.ResponseWriter, r *http.Request) {
@@ -85,14 +101,26 @@ func (s *CoreServer) holdPhrase(w http.ResponseWriter, r *http.Request, op phras
 	if s.refuseWhenThisComputerAnswersToSomebody(w, op.what) {
 		return
 	}
-	var req recoveryPhraseBody
+	var req holdPhraseBody
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil || !aPlausiblePhrase(req.Phrase) {
 		jsonError(w, "body must be {\"phrase\": \"<12 to 24 lowercase words, single-spaced>\"}", http.StatusBadRequest)
 		return
 	}
-	if err := op.store(s.DataDir, []byte(req.Phrase)); err != nil {
+	store := op.store
+	if req.Replace {
+		store = op.replace
+	}
+	if err := store(s.DataDir, []byte(req.Phrase)); err != nil {
 		if secureenclave.IsRootSeedRefusal(err) {
 			writeRootSeedRefused(w, err.Error())
+			return
+		}
+		if errors.Is(err, secureenclave.ErrADifferentPhraseIsHeld) {
+			log.Printf("[identity-agent-core] refused to replace %s: %v", op.what, err)
+			jsonreply.Write(w, http.StatusConflict, ErrorResponse{
+				Error:   "a different phrase is already held on this agent (" + op.what + ")",
+				Details: "it is replaced only by a caller that says it is replacing it",
+				Code:    aDifferentPhraseIsHeldCode})
 			return
 		}
 		log.Printf("[identity-agent-core] could not hold %s: %v", op.what, err)

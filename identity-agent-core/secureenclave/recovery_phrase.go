@@ -42,12 +42,21 @@ import (
 // protects that key. Opening the phrase needs the hardware exactly as opening
 // the seed does.
 
-// ErrNoRecoveryPhrase is LoadRecoveryPhrase's answer when none is held. Any
-// other failure means one is held and could not be read.
 // phraseMu serialises store, load and forget: one file, several requests.
 var phraseMu sync.Mutex
 
+// ErrNoRecoveryPhrase is LoadRecoveryPhrase's answer when none is held. Any
+// other failure means one is held and could not be read.
 var ErrNoRecoveryPhrase = errors.New("no recovery phrase is held here")
+
+// ErrADifferentPhraseIsHeld is the answer to holding a phrase where a different
+// one is already held, by a caller that did not say it is replacing it. The
+// root seed is refused the same way (handleSetRootSeed): the phrase held may be
+// the only copy of an identity, and a re-onboarding, or a second app process
+// that read "none" a moment before another one finished a phrase move, would
+// otherwise overwrite it without a word. Only finishing a move, and a
+// deliberate reset, replace a held phrase (ReplaceRecoveryPhrase).
+var ErrADifferentPhraseIsHeld = errors.New("a different recovery phrase is already held here")
 
 const holderRecoveryPhrase = "recovery-phrase"
 
@@ -95,21 +104,54 @@ var (
 // StoreRecoveryPhrase holds a person's recovery phrase. It refuses, having
 // written nothing, wherever StoreIdentityRootSeed would refuse, and outside a
 // development build it cannot write the phrase unwrapped.
+//
+// Holding the phrase already held is a no-op. A different phrase already held
+// is refused with ErrADifferentPhraseIsHeld, as is any held phrase that cannot
+// be opened to compare: it is not replaced unless the caller says so
+// (ReplaceRecoveryPhrase).
 func StoreRecoveryPhrase(dataDir string, phrase []byte) error {
-	return storeRecoveryPhrase(slotInForce, dataDir, phrase, platformSeedWrapper(), !isDevBuild())
+	return storeRecoveryPhrase(slotInForce, dataDir, phrase, platformSeedWrapper(), !isDevBuild(), false)
+}
+
+// ReplaceRecoveryPhrase holds phrase in place of whatever is held. For
+// finishing a phrase move, when the phrase moved to becomes the phrase in
+// force, and for a deliberate reset; never for a migration or an onboarding.
+func ReplaceRecoveryPhrase(dataDir string, phrase []byte) error {
+	return storeRecoveryPhrase(slotInForce, dataDir, phrase, platformSeedWrapper(), !isDevBuild(), true)
 }
 
 // StorePhraseMovingTo holds the phrase an identity is moving to, beside the
-// phrase in force, under the same wrapper and with the same refusals.
+// phrase in force, under the same wrapper and with the same refusals,
+// including ErrADifferentPhraseIsHeld: a move already under way is dropped
+// first (ForgetPhraseMovingTo), never overwritten.
 func StorePhraseMovingTo(dataDir string, phrase []byte) error {
-	return storeRecoveryPhrase(slotMovingTo, dataDir, phrase, platformSeedWrapper(), !isDevBuild())
+	return storeRecoveryPhrase(slotMovingTo, dataDir, phrase, platformSeedWrapper(), !isDevBuild(), false)
 }
 
-func storeRecoveryPhrase(slot phraseSlot, dataDir string, phrase []byte, w SeedWrapper, requireWrap bool) error {
+// ReplacePhraseMovingTo is ReplaceRecoveryPhrase for the phrase moved to.
+func ReplacePhraseMovingTo(dataDir string, phrase []byte) error {
+	return storeRecoveryPhrase(slotMovingTo, dataDir, phrase, platformSeedWrapper(), !isDevBuild(), true)
+}
+
+func storeRecoveryPhrase(slot phraseSlot, dataDir string, phrase []byte, w SeedWrapper, requireWrap, replacing bool) error {
 	phraseMu.Lock()
 	defer phraseMu.Unlock()
 	if len(phrase) == 0 || len(phrase) > maxRecoveryPhraseBytes {
 		return fmt.Errorf("a recovery phrase is between 1 and %d bytes", maxRecoveryPhraseBytes)
+	}
+	if !replacing {
+		held, err := loadPhraseLocked(slot, dataDir)
+		switch {
+		case err == nil && bytes.Equal(held, phrase):
+			return nil
+		case err == nil:
+			return ErrADifferentPhraseIsHeld
+		case errors.Is(err, ErrNoRecoveryPhrase):
+		case IsRootSeedRefusal(err):
+			return err
+		default:
+			return fmt.Errorf("%w: the one held could not be opened to compare (%v)", ErrADifferentPhraseIsHeld, err)
+		}
 	}
 	// The protection rule the seed is held to (key protection proven usable AND
 	// a wrapper that works), not its founding rule: where an identity may be
@@ -190,6 +232,10 @@ func LoadPhraseMovingTo(dataDir string) ([]byte, error) {
 func loadPhrase(slot phraseSlot, dataDir string) ([]byte, error) {
 	phraseMu.Lock()
 	defer phraseMu.Unlock()
+	return loadPhraseLocked(slot, dataDir)
+}
+
+func loadPhraseLocked(slot phraseSlot, dataDir string) ([]byte, error) {
 	raw, err := os.ReadFile(slot.path(dataDir))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("%w: %w", ErrNoRecoveryPhrase, err)

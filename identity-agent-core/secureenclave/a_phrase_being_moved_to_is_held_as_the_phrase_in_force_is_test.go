@@ -79,3 +79,61 @@ func TestOneHeldPhraseCannotBeCopiedOverTheOther(t *testing.T) {
 		t.Fatalf("the phrase moved to opened as the phrase in force: %q", got)
 	}
 }
+
+// A different phrase is never written over the one held unless the caller says
+// it is replacing it: the one held may be the only copy of an identity. The
+// same phrase again is not a change. Both places a phrase is held behave alike.
+func TestADifferentPhraseIsNotWrittenOverTheOneHeld(t *testing.T) {
+	for name, slot := range map[string]struct {
+		store, replace func(string, []byte) error
+		load           func(string) ([]byte, error)
+	}{
+		"in force":  {StoreRecoveryPhrase, ReplaceRecoveryPhrase, LoadRecoveryPhrase},
+		"moving to": {StorePhraseMovingTo, ReplacePhraseMovingTo, LoadPhraseMovingTo},
+	} {
+		t.Run(name, func(t *testing.T) {
+			asBuild(t, false)
+			machine(t, Capability{Status: Usable, Kind: KindTPM2}, true)
+			dir := t.TempDir()
+			if err := slot.store(dir, []byte(aPhrase)); err != nil {
+				t.Fatal(err)
+			}
+			if err := slot.store(dir, []byte(aPhrase)); err != nil {
+				t.Fatalf("the same phrase again: %v", err)
+			}
+			if err := slot.store(dir, []byte(anotherPhrase)); !errors.Is(err, ErrADifferentPhraseIsHeld) {
+				t.Fatalf("a different phrase: got %v", err)
+			}
+			if got, err := slot.load(dir); err != nil || string(got) != aPhrase {
+				t.Fatalf("the phrase held changed: %q, %v", got, err)
+			}
+			if err := slot.replace(dir, []byte(anotherPhrase)); err != nil {
+				t.Fatalf("replacing: %v", err)
+			}
+			if got, err := slot.load(dir); err != nil || string(got) != anotherPhrase {
+				t.Fatalf("not replaced: %q, %v", got, err)
+			}
+		})
+	}
+}
+
+// A phrase held that cannot be opened to compare is not overwritten either: a
+// damaged or briefly unopenable file is not "none held".
+func TestAHeldPhraseThatCannotBeOpenedIsNotOverwritten(t *testing.T) {
+	asBuild(t, false)
+	machine(t, Capability{Status: Usable, Kind: KindTPM2}, true)
+	dir := t.TempDir()
+	if err := StoreRecoveryPhrase(dir, []byte(aPhrase)); err != nil {
+		t.Fatal(err)
+	}
+	damaged := []byte(`{"v":1,"wrap":"fake","key":"!!","sealed":"","holder":"recovery-phrase"}`)
+	if err := os.WriteFile(recoveryPhrasePath(dir), damaged, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := StoreRecoveryPhrase(dir, []byte(anotherPhrase)); !errors.Is(err, ErrADifferentPhraseIsHeld) {
+		t.Fatalf("got %v", err)
+	}
+	if raw, _ := os.ReadFile(recoveryPhrasePath(dir)); !bytes.Equal(raw, damaged) {
+		t.Fatal("overwritten")
+	}
+}
