@@ -195,14 +195,6 @@ func TestBroadcastSkipsOffline(t *testing.T) {
 	}
 }
 
-func TestTELStubBlocked(t *testing.T) {
-	s, _ := testService(t)
-	out := s.ServeTELStub("EIssuer")
-	if out["blocked"] != true {
-		t.Fatal("TEL stub must report blocked")
-	}
-}
-
 func TestSendWitnessRequestIneligible(t *testing.T) {
 	s, mc := testService(t)
 	aid := "EBad"

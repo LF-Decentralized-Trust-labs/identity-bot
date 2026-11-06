@@ -56,27 +56,48 @@ func ownLogForVerification(events []store.EventRecord) []map[string]interface{} 
 	return out
 }
 
-// issuanceLogForVerification is the credential's transaction log as this agent
-// holds it: the events of the credential in the registry it names, as they were
-// published. Nil when the credential names no registry or none is held, in
-// which case the engine reports the issuance as not proved.
-func (s *CoreServer) issuanceLogForVerification(cred *keri.Credential) []string {
+// issuanceLog is a credential's transaction log as handed to the verifier,
+// with whether it is proven to hold every event its issuer sealed. That is a
+// property of the type, not of where a caller got the log from: only a log
+// proven complete may stand for "not revoked".
+type issuanceLog struct {
+	events []string
+	// provenComplete is true only for a log fetched from the issuer's
+	// witnesses and checked seal-for-seal against the issuer's caught-up key
+	// log (registryLogFromWitnesses). A log kept here may be partial, so it is
+	// never proven, and can only add a revocation.
+	provenComplete bool
+}
+
+// issuanceLogForVerification is the credential's transaction log: the events
+// of the credential in the registry it names, as they were published. Empty
+// when the credential names no registry or none is held, in which case the
+// engine reports the issuance as not proved.
+//
+// A log not held here is asked of the issuer's witnesses when the issuer's
+// verified key log is (registryLogFromWitnesses); what they serve is checked
+// against that key log before it is used, and only that log is proven complete.
+func (s *CoreServer) issuanceLogForVerification(cred *keri.Credential, issuerKel []map[string]interface{}) issuanceLog {
 	if cred == nil {
-		return nil
+		return issuanceLog{}
 	}
 	said, registry := cred.SAID, cred.Registry
 	if said == "" || registry == "" {
-		return nil
+		return issuanceLog{}
 	}
 	events, err := s.DataStore.GetCredentialTEL(registry, said)
 	if err != nil || len(events) == 0 {
-		return nil
+		if cred.Issuer == "" || len(issuerKel) == 0 {
+			return issuanceLog{}
+		}
+		fetched := s.registryLogFromWitnesses(telClient, cred.Issuer, registry, said, issuerKel)
+		return issuanceLog{events: fetched, provenComplete: len(fetched) > 0}
 	}
 	out := make([]string, 0, len(events))
 	for _, ev := range events {
 		out = append(out, ev.RawB64)
 	}
-	return out
+	return issuanceLog{events: out}
 }
 
 // issuerVerdict folds what is known of the issuer's log into the engine's

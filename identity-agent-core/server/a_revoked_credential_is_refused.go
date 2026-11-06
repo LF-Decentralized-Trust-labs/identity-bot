@@ -104,20 +104,22 @@ func readCredentialHere(acdcB64 string) (*keri.Credential, error) {
 //
 // cred is the credential as readCredentialHere read it. Without one there is
 // nothing to check a revocation against, and the credential is refused.
-func (s *CoreServer) verifyCredentialHere(req *drivers.DriverVerifyCredentialRequest, cred *keri.Credential) (verifyReply, error) {
+//
+// log is the credential's transaction log as the caller found it (the
+// RegistryEventsB64 of req is ignored). Where this agent holds the registry
+// state itself, that record wins and log is not used. Otherwise a log that is
+// not provenComplete is used only to learn of a revocation: a log kept here
+// may be partial, so it never makes a credential read "not revoked". Only a
+// log proven complete (fetched from the issuer's witnesses and checked
+// seal-for-seal against the issuer's caught-up key log) may stand for it.
+func (s *CoreServer) verifyCredentialHere(req *drivers.DriverVerifyCredentialRequest, cred *keri.Credential, log issuanceLog) (verifyReply, error) {
 	if cred == nil {
 		return verifyReply{}, errCredentialUnreadable
 	}
 	revocation := s.localRevocationState(cred)
-	// The caller may supply the credential's log as kept here (its issuer's
-	// events) for the proof of issuance. It is used only where this agent holds
-	// no registry state of its own, and only to learn of a revocation: a kept
-	// log may be partial, and nothing here proves it holds every event its
-	// issuer sealed, so it never makes a credential read "not revoked", and
-	// never overrides what this agent's own record says.
-	supplied := req.RegistryEventsB64
-	if revocation.status == revocationNoRegistryState && len(supplied) > 0 {
-		req.RegistryEventsB64 = supplied
+	useSupplied := revocation.status == revocationNoRegistryState && len(log.events) > 0
+	if useSupplied {
+		req.RegistryEventsB64 = log.events
 	} else {
 		req.RegistryEventsB64 = revocation.log
 	}
@@ -125,10 +127,15 @@ func (s *CoreServer) verifyCredentialHere(req *drivers.DriverVerifyCredentialReq
 	if err != nil {
 		return verifyReply{}, err
 	}
-	if revocation.status == revocationNoRegistryState && len(supplied) > 0 && res != nil {
-		if notRevoked, ok := res.Checks["not_revoked"].(bool); ok && !notRevoked {
-			revocation = revocationState{log: supplied, status: revocationRevoked,
-				reason: "the credential has been revoked by its issuer"}
+	if useSupplied && res != nil {
+		if notRevoked, ok := res.Checks["not_revoked"].(bool); ok {
+			switch {
+			case !notRevoked:
+				revocation = revocationState{log: log.events, status: revocationRevoked,
+					reason: "the credential has been revoked by its issuer"}
+			case log.provenComplete:
+				revocation = revocationState{log: log.events, status: revocationNotRevoked}
+			}
 		}
 	}
 	return revocation.applyTo(res), nil
