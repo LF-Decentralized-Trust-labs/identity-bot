@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/internal/atomicfile"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -91,7 +92,7 @@ func (r *Runner) persistLocked(rec *AttestationRecord) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(r.statePath, raw, 0600)
+	return atomicfile.Write(r.statePath, raw, 0600)
 }
 
 // RunOnce measures the component chain and signs a fresh attestation payload.

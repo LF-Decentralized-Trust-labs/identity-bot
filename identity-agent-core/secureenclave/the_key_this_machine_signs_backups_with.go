@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"fmt"
+	"identity-agent-core/internal/atomicfile"
 	"os"
 	"path/filepath"
 	"strings"
@@ -101,7 +102,7 @@ func RecordSeedOrigin(dataDir, origin string) error {
 	if err := os.MkdirAll(filepath.Dir(seedOriginPath(dataDir)), 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(seedOriginPath(dataDir), []byte(origin), 0o600)
+	return atomicfile.Write(seedOriginPath(dataDir), []byte(origin), 0o600)
 }
 
 // SeedCameFromAPhrase reports whether the recovery words reproduce this

@@ -3,6 +3,7 @@ package recovery
 import (
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/internal/atomicfile"
 	"os"
 	"path/filepath"
 	"sort"
@@ -597,7 +598,7 @@ func appendRootAIDMapEntry(dataDir string, entry RootAIDMapEntry) error {
 	if err != nil {
 		return fmt.Errorf("marshal root aid map: %w", err)
 	}
-	if err := os.WriteFile(path, out, 0600); err != nil {
+	if err := atomicfile.Write(path, out, 0600); err != nil {
 		return fmt.Errorf("write root aid map: %w", err)
 	}
 	return nil

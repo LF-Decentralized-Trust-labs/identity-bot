@@ -46,7 +46,7 @@ func (s *RelationshipStore) loadHighWater() {
 
 func (s *RelationshipStore) saveHighWaterLocked() error {
 	hpath := s.path + ".highwater"
-	return os.WriteFile(hpath, []byte(fmt.Sprintf("%d\n", s.highWater)), 0600)
+	return atomicfile.Write(hpath, []byte(fmt.Sprintf("%d\n", s.highWater)), 0600)
 }
 
 func (s *RelationshipStore) Get(siteAID string) (SiteRelationship, bool) {
