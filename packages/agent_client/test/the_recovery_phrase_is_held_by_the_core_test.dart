@@ -159,6 +159,15 @@ void main() {
     expect(await legacy.readAll(), isEmpty);
   });
 
+  test('an old copy left by a crash after the hold is deleted at startup, before any load', () async {
+    FlutterSecureStorage.setMockInitialValues({'agent_mnemonic': _phrase});
+    final core = _FakeCore()..held = _phrase;
+    SecureKeyStore.holdPhraseWith(CorePhraseHolder(baseUrl: _core, client: core.client));
+
+    expect(await SecureKeyStore.hasMnemonic(), isTrue);
+    expect(await legacy.readAll(), isEmpty);
+  });
+
   test('moving the profile-scoped phrase leaves a different unscoped one alone', () async {
     final scoped = await ProfileScope.key('mnemonic');
     final other = _phrase.replaceFirst('about', 'above');

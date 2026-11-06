@@ -225,7 +225,7 @@ class SecureKeyStore {
   /// or holds a different phrase. Throws [RootSeedRefused] when this computer
   /// cannot protect the phrase: the old copy is not served in its place.
   ///
-  /// Run it at startup, and it also runs on every [loadMnemonic].
+  /// [hasMnemonic] runs it (apps ask that at startup), and so does every [loadMnemonic].
   static Future<bool> migrateLegacyMnemonic() async {
     var clean = true;
     for (final key in {await _scopedKey(), _legacyMnemonicKey}) {
@@ -279,6 +279,13 @@ class SecureKeyStore {
   }
 
   static Future<bool> hasMnemonic() async {
+    // An app asks this at startup, so an interrupted move (held, old copy not
+    // yet deleted) is finished here without waiting for the first load.
+    try {
+      await migrateLegacyMnemonic();
+    } on RootSeedRefused {
+      // This computer cannot hold the phrase; the old copy stays and is not served.
+    }
     if (await _holder.isHeld()) return true;
     return await _legacyStorage.containsKey(key: await _scopedKey()) ||
         await _legacyStorage.containsKey(key: _legacyMnemonicKey);
