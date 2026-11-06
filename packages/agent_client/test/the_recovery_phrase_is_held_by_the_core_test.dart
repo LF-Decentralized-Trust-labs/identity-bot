@@ -54,6 +54,7 @@ class _FakeCore {
 }
 
 void main() {
+  group("migration safety", migrationSafety);
   late FlutterSecureStorage legacy;
   setUp(() {
     FlutterSecureStorage.setMockInitialValues({});
@@ -129,5 +130,26 @@ void main() {
         CorePhraseHolder(baseUrl: 'https://agent.example.com', client: core.client));
     await expectLater(SecureKeyStore.saveMnemonic(_phrase.split(' ')), throwsStateError);
     expect(core.seen, isEmpty);
+  });
+}
+
+void migrationSafety() {
+  setUp(() => FlutterSecureStorage.setMockInitialValues({}));
+  tearDown(SecureKeyStore.holdPhraseInTheCore);
+
+  test('an old phrase that differs from the one the core holds is not deleted', () async {
+    FlutterSecureStorage.setMockInitialValues({'agent_mnemonic': _phrase});
+    final core = _FakeCore()..held = _phrase.replaceFirst('about', 'above');
+    SecureKeyStore.holdPhraseWith(CorePhraseHolder(baseUrl: _core, client: core.client));
+    expect(await SecureKeyStore.migrateLegacyMnemonic(), isFalse);
+    expect(await const FlutterSecureStorage().read(key: 'agent_mnemonic'), _phrase);
+  });
+
+  test('an old phrase with stray whitespace is moved in its normal form', () async {
+    FlutterSecureStorage.setMockInitialValues({'agent_mnemonic': '$_phrase \n'});
+    final core = _FakeCore();
+    SecureKeyStore.holdPhraseWith(CorePhraseHolder(baseUrl: _core, client: core.client));
+    expect(await SecureKeyStore.migrateLegacyMnemonic(), isTrue);
+    expect(core.held, _phrase);
   });
 }

@@ -12,6 +12,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"identity-agent-core/internal/atomicfile"
 )
@@ -43,6 +44,9 @@ import (
 
 // ErrNoRecoveryPhrase is LoadRecoveryPhrase's answer when none is held. Any
 // other failure means one is held and could not be read.
+// phraseMu serialises store, load and forget: one file, several requests.
+var phraseMu sync.Mutex
+
 var ErrNoRecoveryPhrase = errors.New("no recovery phrase is held here")
 
 const holderRecoveryPhrase = "recovery-phrase"
@@ -102,6 +106,8 @@ func StorePhraseMovingTo(dataDir string, phrase []byte) error {
 }
 
 func storeRecoveryPhrase(slot phraseSlot, dataDir string, phrase []byte, w SeedWrapper, requireWrap bool) error {
+	phraseMu.Lock()
+	defer phraseMu.Unlock()
 	if len(phrase) == 0 || len(phrase) > maxRecoveryPhraseBytes {
 		return fmt.Errorf("a recovery phrase is between 1 and %d bytes", maxRecoveryPhraseBytes)
 	}
@@ -182,6 +188,8 @@ func LoadPhraseMovingTo(dataDir string) ([]byte, error) {
 }
 
 func loadPhrase(slot phraseSlot, dataDir string) ([]byte, error) {
+	phraseMu.Lock()
+	defer phraseMu.Unlock()
 	raw, err := os.ReadFile(slot.path(dataDir))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("%w: %w", ErrNoRecoveryPhrase, err)
@@ -252,6 +260,8 @@ func ForgetPhraseMovingTo(dataDir string) error {
 }
 
 func forgetPhrase(slot phraseSlot, dataDir string) error {
+	phraseMu.Lock()
+	defer phraseMu.Unlock()
 	p := slot.path(dataDir)
 	if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err

@@ -202,6 +202,10 @@ class SecureKeyStore {
   /// wrote it.
   static const _mnemonicName = 'mnemonic';
 
+  /// Single-spaced, trimmed: the shape the core accepts and compares.
+  static String _normalised(String s) =>
+      s.trim().split(RegExp(r'\s+')).join(' ');
+
   static Future<String> _scopedKey() => ProfileScope.key(_mnemonicName);
 
   /// Moves a phrase an earlier version left in this app's own storage (software
@@ -217,18 +221,25 @@ class SecureKeyStore {
   /// copy is not served in its place.
   static Future<bool> migrateLegacyMnemonic() async {
     final scoped = await _scopedKey();
-    final found = await _legacyStorage.read(key: scoped) ??
+    final raw = await _legacyStorage.read(key: scoped) ??
         await _legacyStorage.read(key: _legacyMnemonicKey);
-    if (found == null || found.isEmpty) return true;
+    if (raw == null || raw.trim().isEmpty) return true;
+    final found = _normalised(raw);
 
-    // A phrase the core already holds wins; the old copy is only a copy.
-    if (!await _holder.isHeld()) {
+    // The old copy is deleted only once the core is shown to hold THE SAME
+    // phrase: a different one already held is not a reason to destroy this.
+    final held = await _holder.open();
+    if (held == null) {
       await _holder.hold(found);
       if (await _holder.open() != found) {
         debugPrint('[SecureKeyStore] the phrase did not survive the move — '
             'leaving the original');
         return false;
       }
+    } else if (held != found) {
+      debugPrint('[SecureKeyStore] the core holds a different phrase — '
+          'leaving the original');
+      return false;
     }
     await _legacyStorage.delete(key: scoped);
     await _legacyStorage.delete(key: _legacyMnemonicKey);
@@ -237,7 +248,7 @@ class SecureKeyStore {
 
   /// Holds the phrase. Throws [RootSeedRefused] where the core will not.
   static Future<void> saveMnemonic(List<String> words) async {
-    final phrase = words.join(' ');
+    final phrase = _normalised(words.join(' '));
     await _holder.hold(phrase);
     if (await _holder.open() != phrase) {
       throw StateError('the recovery phrase did not read back from the core');
