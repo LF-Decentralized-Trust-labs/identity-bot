@@ -80,3 +80,33 @@ func TestTheUnpackedDatabaseIsWrittenWhole(t *testing.T) {
 	}
 	requireWrittenWhole(t, path, victim, "db bytes")
 }
+
+func TestTheRunningRotationIsWrittenWhole(t *testing.T) {
+	dir := t.TempDir()
+	run := RunningRootAIDRotation{OldRootAID: "Eold", NewRootAID: "Enew"}
+	path, err := rootAIDRunPath(dir, run.OldRootAID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	victim := plantALinkAt(t, path)
+	if err := keepRunningRootAIDRotation(dir, run); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(victim); string(b) != "untouched" {
+		t.Fatalf("the running rotation was written in place: victim now %q", b)
+	}
+	if fi, err := os.Lstat(path); err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("want a regular 0600 file, got %v (%v)", fi, err)
+	}
+	got, err := RunningRootAIDRotations(dir)
+	if err != nil || len(got) != 1 || got[0].NewRootAID != "Enew" {
+		t.Fatalf("run did not survive: %+v %v", got, err)
+	}
+	entries, _ := os.ReadDir(filepath.Dir(path))
+	if len(entries) != 1 {
+		t.Fatalf("left beside it: %v", entries)
+	}
+}

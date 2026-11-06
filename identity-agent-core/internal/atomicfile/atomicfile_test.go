@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sync"
@@ -247,5 +248,80 @@ func TestCreateWithoutHardLinksReclaimsAStaleLock(t *testing.T) {
 	}
 	if _, err := os.Stat(lock); err == nil {
 		t.Fatal("lock left behind")
+	}
+}
+
+// Only "this filesystem has no hard links" falls back to the lock-and-rename
+// way; any other failure from os.Link is returned and nothing is placed.
+func TestCreateFallsBackOnlyWhereLinksAreUnsupported(t *testing.T) {
+	old := link
+	t.Cleanup(func() { link = old })
+	for _, e := range []syscall.Errno{syscall.EPERM, syscall.ENOTSUP, syscall.EXDEV, syscall.EOPNOTSUPP} {
+		link = func(string, string) error { return &os.LinkError{Op: "link", Err: e} }
+		path := filepath.Join(t.TempDir(), "master.key")
+		if err := Create(path, []byte("key"), 0o600); err != nil {
+			t.Fatalf("%v: should fall back, got %v", e, err)
+		}
+		if b, _ := os.ReadFile(path); string(b) != "key" {
+			t.Fatalf("%v: read back %q", e, b)
+		}
+	}
+	for _, e := range []syscall.Errno{syscall.ENOSPC, syscall.EACCES, syscall.EIO} {
+		link = func(string, string) error { return &os.LinkError{Op: "link", Err: e} }
+		dir := t.TempDir()
+		path := filepath.Join(dir, "master.key")
+		err := Create(path, []byte("key"), 0o600)
+		if !errors.Is(err, e) {
+			t.Fatalf("%v: got %v, want that error returned", e, err)
+		}
+		if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+			t.Fatalf("%v: left behind %v", e, entries)
+		}
+	}
+}
+
+func deadPid(t *testing.T) int {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^$")
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+	return cmd.Process.Pid
+}
+
+// A lock whose holder's pid is gone is reclaimed at once, however young,
+// not after the stale age or the 10 second wait.
+func TestCreateWithoutHardLinksReclaimsADeadHoldersLockAtOnce(t *testing.T) {
+	noHardLinks(t)
+	path := filepath.Join(t.TempDir(), "master.key")
+	host, _ := os.Hostname()
+	if err := os.WriteFile(path+".lock", []byte(fmt.Sprintf("%d %s", deadPid(t), host)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if err := Create(path, []byte("key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("stalled %v behind a dead holder's lock", d)
+	}
+	if _, err := os.Stat(path + ".lock"); err == nil {
+		t.Fatal("lock left behind")
+	}
+}
+
+// A young lock held by a live process, this one, is not stale.
+func TestALiveHoldersLockIsNotStale(t *testing.T) {
+	lock := filepath.Join(t.TempDir(), "master.key.lock")
+	if err := os.WriteFile(lock, lockBody(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if lockIsStale(lock) {
+		t.Fatal("a live holder's lock was taken as stale")
+	}
+	old := time.Now().Add(-time.Hour)
+	os.Chtimes(lock, old, old)
+	if lockIsStale(lock) {
+		t.Fatal("a live holder's old lock was taken as stale; only its pid decides")
 	}
 }

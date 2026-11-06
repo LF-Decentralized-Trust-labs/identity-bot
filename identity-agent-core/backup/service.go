@@ -304,6 +304,7 @@ func (s *Service) exportWithReason(mnemonic, seedB64, passphrase, destPath strin
 			s.recordFailure(opts.Tiers, err, time.Since(start))
 			return nil, err
 		}
+		// Plain write on purpose: this is backup output the user chose to export, not secret state the core must keep whole.
 		if err := os.WriteFile(destPath, result.Bytes, 0600); err != nil {
 			s.recordFailure(opts.Tiers, err, time.Since(start))
 			return nil, err

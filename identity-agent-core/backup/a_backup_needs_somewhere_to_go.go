@@ -196,6 +196,7 @@ func (s *Service) pushLocalDestination(d Destination, result *ExportResult) erro
 	name := fmt.Sprintf("backup-%s-%s.iab", result.SnapshotType,
 		time.Now().UTC().Format("20060102-150405"))
 	full := filepath.Join(d.LocalPath, name)
+	// Plain write on purpose: this is backup output the user chose to export, not secret state the core must keep whole.
 	if err := os.WriteFile(full, result.Bytes, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", full, err)
 	}
