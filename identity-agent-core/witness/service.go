@@ -1228,7 +1228,21 @@ func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, ev
 	defer cancel()
 	resp, err := s.PostEvent(s.ownersLocalAllowed(ctx, url), url, body)
 	if err != nil {
-		time.Sleep(BroadcastRetryDelay)
+		// The wait before the second attempt ends when the service stops, so a
+		// post that is retrying does not hold Stop for the whole delay. Nothing
+		// is recorded about the witness then: it was not tried, it did not fail.
+		retry := time.NewTimer(BroadcastRetryDelay)
+		select {
+		case <-retry.C:
+		case <-s.stopping():
+			retry.Stop()
+			return
+		}
+		select {
+		case <-s.stopping():
+			return
+		default:
+		}
 		resp, err = s.PostEvent(s.ownersLocalAllowed(ctx, url), url, body)
 	}
 	if err != nil {
@@ -1311,7 +1325,11 @@ func (s *Service) finalizeLoop(eventSAID string, threshold int) {
 	case <-time.After(FinalizeWaitDuration):
 	case <-s.stopping():
 		// Stopping: the timeout is not recorded, so the finalization stays
-		// pending and is read as such on the next start.
+		// pending in the store. It is NOT re-read on the next start: nothing
+		// at start looks for pending finalizations, and GetFinalization is
+		// called only here, in onReceipt when a receipt arrives, and by a
+		// broadcast checking whether its event already has one. So it stays
+		// pending until a receipt for that event comes in.
 		return
 	}
 	f, _ := s.Store.GetFinalization(eventSAID)
