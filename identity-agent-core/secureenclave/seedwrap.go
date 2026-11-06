@@ -255,7 +255,7 @@ func storeSeedAs(dataDir string, seed []byte, w SeedWrapper, requireWrap bool, h
 		// A wrapper that hands the seed back inside its output has protected
 		// nothing, and recording it as hardware-wrapped would be the false
 		// statement this layer exists to stop. Refused with nothing written.
-		if len(blob) == 0 || wrapLeaksTheSeed(w.Scheme(), blob, toStore) {
+		if len(blob) == 0 || wrapLeaksTheSeed(w, blob, toStore) {
 			return fmt.Errorf("the %s wrapper returned the seed in the clear, "+
 				"so it is not recorded as wrapped", w.Scheme())
 		}
@@ -266,7 +266,7 @@ func storeSeedAs(dataDir string, seed []byte, w SeedWrapper, requireWrap bool, h
 			return fmt.Errorf("wrap verification failed (%s): %v", w.Scheme(), err)
 		}
 		protection := ProtectionHardwareWrapped
-		if w.Scheme() == SealedVolumeScheme {
+		if _, sealed := w.(sealedVolumeWrapper); sealed {
 			protection = ProtectionSealedVolume
 		}
 		env = seedEnvelope{V: 1, Wrap: w.Scheme(), Blob: base64.StdEncoding.EncodeToString(blob),
@@ -400,7 +400,9 @@ func LoadRootSeed(dataDir string) ([]byte, error) {
 			// Misplaced: reported, kept as it is, never re-wrapped into looking legitimate.
 			return seed, nil
 		}
-		if merr := storeSeedAs(dataDir, seed, platformSeedWrapper(), false, holder); merr != nil {
+		if w := platformSeedWrapper(); !mayWrapAnExistingSeed(w) {
+			log.Printf("[secureenclave] legacy root seed left as it is: %s", whyAnExistingSeedIsNotWrapped(w))
+		} else if merr := storeSeedAs(dataDir, seed, w, false, holder); merr != nil {
 			// Keep serving the legacy file rather than risk the only copy.
 			log.Printf("[secureenclave] root seed migration deferred: %v", merr)
 		} else {
@@ -422,7 +424,7 @@ func LoadRootSeed(dataDir string) ([]byte, error) {
 		}
 		// Opportunistic upgrade: if hardware became usable since the seed was
 		// stored (e.g. a signed build replacing a dev build), wrap it now.
-		if w := platformSeedWrapper(); !misplaced && wrapperWorksAt(w, dataDir) {
+		if w := platformSeedWrapper(); !misplaced && wrapperWorksAt(w, dataDir) && mayWrapAnExistingSeed(w) {
 			holder := env.Holder
 			if holder == "" && SeedCameFromAPhrase(dataDir) {
 				holder = holderIdentity
