@@ -57,8 +57,8 @@ A retry after *not kept* is a new entry with a new id and a new nonce.
 
 ### The order of a write
 
-1. **Prove an author.** The statement must be well formed, its signature must
-   be its signer's, and the Identity Agent's own records must say that key
+1. **Prove an author.** The statement must be well formed, name this Identity
+   Agent (ADR-067), its signature must be its signer's, and the Identity Agent's own records must say that key
    speaks for the person. If not, nothing joins the trail: nobody can be
    recorded as having tried. The caller's governance record says it happened.
 2. **An id already seen** (scoped to the conversation and the author): the same
@@ -106,8 +106,9 @@ key history (a later change), which is what catches a cut-off end.
 ### Offline verification
 
 A reader with only an exported trail checks: the sequence and ids, the chain,
-every author signature, that each statement names this conversation, and that
-an outcome is allowed. **A committed entry, a not-kept entry and a refusal all
+every author signature, that each statement names this conversation and one
+Identity Agent throughout, that no version 0 entry follows a version 1 entry
+(ADR-067), and that an outcome is allowed. **A committed entry, a not-kept entry and a refusal all
 verify alike**, since each keeps its fingerprint and signature and none keeps
 words. With the words and salts an app exports, a reader also recomputes every
 committed entry's fingerprint; words offered for an entry that was not kept

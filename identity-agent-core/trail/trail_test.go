@@ -115,12 +115,14 @@ func newFixture(t *testing.T) *fixture {
 		id, _, _ := agentbody.Identity(signerOf(byte(i + 1)))
 		f.roster.keys[p] = id
 	}
-	f.tr = New(f.roster, f.app, Options{ForwardTimeout: 50 * time.Millisecond, Now: func() time.Time { return f.now }})
+	f.tr = New(f.roster, f.app, Options{Agent: testAgent, ForwardTimeout: 50 * time.Millisecond, Now: func() time.Time { return f.now }})
 	if err := f.tr.Open("c1", alice, true); err != nil {
 		t.Fatal(err)
 	}
 	return f
 }
+
+const testAgent = "EIDENTITYAGENT"
 
 var keyIndex = map[string]byte{alice: 1, bob: 2, boss: 3}
 
@@ -137,7 +139,7 @@ func (f *fixture) say(from, kind, to, words string, edit func(*agentmessage.Pers
 		f.t.Fatal(err)
 	}
 	s := agentmessage.PersonStatement{
-		Conversation: "c1", MessageID: fmt.Sprintf("m%d", f.n), Kind: kind, From: from, Signer: id, To: to,
+		Agent: testAgent, Conversation: "c1", MessageID: fmt.Sprintf("m%d", f.n), Kind: kind, From: from, Signer: id, To: to,
 		Nonce: fmt.Sprintf("nonce-%016d", f.n), Time: "2026-11-06T12:00:00Z",
 		FingerprintVersion: agentmessage.FingerprintV1, Fingerprint: fp,
 	}
@@ -307,6 +309,39 @@ func TestAnIDRefusedOrNotKeptReturnsThatResultOnRetry(t *testing.T) {
 }
 
 // A not-kept entry and a refusal verify offline, beside a committed entry.
+func TestAStatementForAnotherIdentityAgentIsRefused(t *testing.T) {
+	f := newFixture(t)
+	w := f.say(alice, "message", bot, "hello", func(s *agentmessage.PersonStatement) { s.Agent = "EOTHERAGENT" })
+	if _, err := f.tr.Write(context.Background(), w); err == nil {
+		t.Fatal("a statement for another Identity Agent's conversation c1 was accepted")
+	}
+	if len(f.tr.Entries("c1")) != 0 || f.app.keepCalls != 0 {
+		t.Fatal("it left a trace or reached the app")
+	}
+}
+
+func TestAnExportedTrailNamingTwoIdentityAgentsOrAnUnsaltedEntryAfterASaltedOneFails(t *testing.T) {
+	f := newFixture(t)
+	f.write(f.say(alice, "message", bot, "one", nil))
+	f.write(f.say(alice, "message", bot, "two", nil))
+	raw, _ := json.Marshal(f.tr.Entries("c1"))
+	es, _ := Read(raw)
+	if r := Verify(es); !r.Verified {
+		t.Fatalf("a good trail failed: %v", r.Faults)
+	}
+	other := append([]Entry(nil), es...)
+	other[1].Statement.Agent = "EOTHERAGENT"
+	if Verify(other).Verified {
+		t.Fatal("a trail naming two Identity Agents verified")
+	}
+	late := append([]Entry(nil), es...)
+	late[1].Statement.FingerprintVersion = agentmessage.FingerprintV0
+	r := Verify(late)
+	if r.Verified || !strings.Contains(strings.Join(r.Faults, "\n"), "after a salted one") {
+		t.Fatalf("an unsalted entry after a salted one was not named: %v", r.Faults)
+	}
+}
+
 func TestANotKeptEntryAndARefusalVerifyOffline(t *testing.T) {
 	f := newFixture(t)
 	f.write(f.say(alice, "message", bot, "one", nil)) // committed

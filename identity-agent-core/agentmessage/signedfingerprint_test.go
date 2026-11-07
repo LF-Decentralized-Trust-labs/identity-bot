@@ -20,7 +20,7 @@ func personFixture(t *testing.T, words string) (PersonStatement, []byte, ed25519
 		t.Fatal(err)
 	}
 	return PersonStatement{
-		Conversation: "c_1", MessageID: "m_1", Kind: PersonKindMessage, From: "EPERSON",
+		Agent: "EAGENTHOST", Conversation: "c_1", MessageID: "m_1", Kind: PersonKindMessage, From: "EPERSON",
 		Signer: id, To: "EAGENT", Nonce: "nonce-0123456789abcdef", Time: "2026-11-06T10:00:00Z",
 		FingerprintVersion: FingerprintV1, Fingerprint: fp,
 	}, salt, signer
@@ -148,6 +148,7 @@ func TestAMalformedStatementIsRefused(t *testing.T) {
 	for name, mutate := range map[string]func(*PersonStatement){
 		"a line break":       func(p *PersonStatement) { p.To = "A\nB" },
 		"no message id":      func(p *PersonStatement) { p.MessageID = "" },
+		"no identity agent":  func(p *PersonStatement) { p.Agent = "" },
 		"a short nonce":      func(p *PersonStatement) { p.Nonce = "short" },
 		"a bad time":         func(p *PersonStatement) { p.Time = "yesterday" },
 		"an unknown kind":    func(p *PersonStatement) { p.Kind = "shout" },
@@ -169,5 +170,24 @@ func TestASignerMustBeTheKeyTheStatementNames(t *testing.T) {
 	s.Signer = "Dsomeoneelse"
 	if _, err := SignPerson(vectorSigner(), s); err == nil {
 		t.Fatal("a key signed a statement naming another key")
+	}
+}
+
+func TestVersionZeroIsOldOnlyBeforeTheFirstSaltedEntry(t *testing.T) {
+	for name, ok := range map[string]struct {
+		versions []int
+		fine     bool
+	}{
+		"nothing":                             {nil, true},
+		"only unsalted, a record made before": {[]int{0, 0, 0}, true},
+		"unsalted and then salted":            {[]int{0, 0, 1, 1}, true},
+		"only salted":                         {[]int{1, 1}, true},
+		"unsalted after salted":               {[]int{0, 1, 0}, false},
+		"unsalted straight after":             {[]int{1, 0}, false},
+		"an unknown version":                  {[]int{0, 2}, false},
+	} {
+		if err := CheckVersionOrder(ok.versions); (err == nil) != ok.fine {
+			t.Errorf("%s: fine=%v, got %v", name, ok.fine, err)
+		}
 	}
 }

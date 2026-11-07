@@ -93,6 +93,9 @@ func (t *Trail) Write(ctx context.Context, w Write) (Result, error) {
 	if err := agentmessage.VerifyPerson(s, w.Verkey, w.Signature); err != nil {
 		return Result{}, &Rejected{err.Error()}
 	}
+	if s.Agent != t.agent {
+		return Result{}, &Rejected{"the statement is for another Identity Agent"}
+	}
 	if !t.roster.KeySpeaksFor(s.From, s.Signer, w.Verkey) {
 		return Result{}, &Rejected{"the key does not speak for " + s.From}
 	}
