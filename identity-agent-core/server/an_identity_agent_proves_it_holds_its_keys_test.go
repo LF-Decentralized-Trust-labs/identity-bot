@@ -135,3 +135,22 @@ func TestOnlyWhatItCanSignIsAnswered(t *testing.T) {
 		t.Error("asking made this agent mint keys")
 	}
 }
+
+// A new agent has no keyset until something needs one, yet is asked about its
+// own identifier first; it answers rather than 404ing, as handleGetDIDCommDID does.
+func TestANewAgentAnswersForItsOwnIdentifier(t *testing.T) {
+	s := agentWithNoIdentity(t)
+	s.EndpointService = endpoint.New(nil, 8080)
+	s.EndpointService.SetOverrideURL(proofAgentURL)
+	s.proofLimiter = newIPRateLimiter(600, time.Minute)
+	if err := s.DataStore.SaveIdentity(store.IdentityState{AID: proofAgentAID}); err != nil {
+		t.Fatal(err)
+	}
+	if has, _ := s.hasKeySet(proofAgentAID); has {
+		t.Fatal("the test needs an agent with no keyset yet")
+	}
+	p := theProofIn(t, askForProof(s, proofAgentOrg, proofFresh))
+	if p.DID.AID != proofAgentAID {
+		t.Fatalf("answered for %q", p.DID.AID)
+	}
+}

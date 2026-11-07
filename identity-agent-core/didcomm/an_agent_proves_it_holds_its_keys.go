@@ -142,6 +142,12 @@ func CheckKeyProof(p *KeyProof, aid, origin, challenge string, kelEvents []map[s
 		return fmt.Errorf("the answer is dated %s ahead of this clock", (-age).Round(time.Second))
 	}
 
+	// The log must be the named identifier's own: an inception naming another
+	// identifier would let that identifier's keys pass as this one's.
+	if len(kelEvents) == 0 || kelEvents[0]["i"] != aid {
+		return fmt.Errorf("the key log given is not the log of %s", aid)
+	}
+
 	// The keys are the identifier's, in force now.
 	if _, err := CheckKeysBelongTo(&p.DID, kelEvents, currentKey); err != nil {
 		return err

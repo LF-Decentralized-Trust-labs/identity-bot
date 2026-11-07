@@ -137,3 +137,21 @@ func TestAnAnswerForAnotherIdentifierIsRefused(t *testing.T) {
 		t.Fatal("an answer for one identifier was accepted for another")
 	}
 }
+
+func TestALogOfAnotherIdentifierIsRefused(t *testing.T) {
+	ks := aProofKeySet(t)
+	now := time.Now()
+	p, err := ProveKeysInForce(ks, "", proofOrigin, proofAsk, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := logAnchoring(t, ks)
+	log[0]["i"] = "EAnotherIdentifier"
+	err = CheckKeyProof(p, proofAID, proofOrigin, proofAsk, log, "", now)
+	if err == nil || !strings.Contains(err.Error(), "not the log of") {
+		t.Fatalf("a log of another identifier must be refused, got %v", err)
+	}
+	if err := CheckKeyProof(p, proofAID, proofOrigin, proofAsk, nil, "", now); err == nil {
+		t.Fatal("an empty log must be refused")
+	}
+}

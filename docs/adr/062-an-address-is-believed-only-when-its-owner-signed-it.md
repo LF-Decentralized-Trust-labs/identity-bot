@@ -243,9 +243,19 @@ against the log it already verified.
 **Not covered.** The keys signed with are the agent's messaging keyset, not the
 identifier's KERI controlling key, which does not live on the agent. The proof
 shows that whoever answered holds the keys the identifier committed to in its
-log; rotation and witnessing remain what show the log itself is the latest. A
-client that cannot verify ML-DSA (the Dart `agent_client` and AI Chat have
-Ed25519 only) checks the Ed25519 half and the anchored keys, and the reference
-check above remains the one that requires both; that gap is recorded in AI
-Chat's `TODO.md`. An identifier whose log anchors no keyset is checked by the
-identity's signature over the keys, as before (`CheckKeysBelongTo`, "vouched").
+log; rotation and witnessing remain what show the log itself is the latest.
+
+The proof is not bound to later traffic. It shows that whoever answered at that
+moment holds the keys; it does not tie the connection that follows to that
+answer. Anything at a genuine origin of the agent (its URL relay, or a reverse
+proxy that decrypts the agent's traffic) can pass the proof, by forwarding the
+question to the agent, and then alter later responses.
+
+No Dart verifier exists yet: `packages/agent_client` has no key-proof check at
+all, so an app built on it does not make this check. A verifier written there
+must check that the log's inception names the identifier asked, send the origin
+built from the URL it dialled spelled as `endpointrecord.CheckOrigin` expects
+(an explicit port, `:443` for https), and require both signatures, which needs
+ML-DSA-65 as well as Ed25519. An identifier whose log anchors no keyset is
+checked by the identity's signature over the keys, as before
+(`CheckKeysBelongTo`, "vouched").

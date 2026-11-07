@@ -71,8 +71,14 @@ func (s *CoreServer) handleIdentityProof(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if !has {
-		jsonError(w, "no messaging keys are held for that aid", http.StatusNotFound)
-		return
+		// The same one exception handleGetDIDCommDID makes: this agent's own
+		// identity has a keyset the moment anything is asked of it, so a new
+		// agent is not answered 404 for its own identifier. Any other
+		// identifier still mints nothing.
+		if err != nil || identity == nil || identity.AID != aid {
+			jsonError(w, "no messaging keys are held for that aid", http.StatusNotFound)
+			return
+		}
 	}
 	ks, kerr := s.keySetFor(aid)
 	if kerr != nil {
