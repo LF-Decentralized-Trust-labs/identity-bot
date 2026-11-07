@@ -627,6 +627,22 @@
     {
       "name": "the nonce as a number",
       "json": "{\"agent\":\"EIDENTITYAGENT\",\"conversation\":\"c_vector\",\"message_id\":\"m_1\",\"kind\":\"message\",\"from\":\"EPERSON\",\"signer\":\"DSIGNER\",\"to\":\"EAGENT\",\"nonce\":1234567890123456,\"time\":\"2026-11-06T10:00:00Z\",\"fingerprint_version\":1,\"fingerprint\":\"EFINGERPRINT\"}"
+    },
+    {
+      "name": "an optional field spelt in capitals",
+      "json": "{\"agent\":\"EIDENTITYAGENT\",\"conversation\":\"c_vector\",\"message_id\":\"m_1\",\"kind\":\"message\",\"IN_REPLY_TO\":\"e1\",\"from\":\"EPERSON\",\"signer\":\"DSIGNER\",\"to\":\"EAGENT\",\"nonce\":\"nonce-0123456789abcdef\",\"time\":\"2026-11-06T10:00:00Z\",\"fingerprint_version\":1,\"fingerprint\":\"EFINGERPRINT\"}"
+    },
+    {
+      "name": "an optional field spelt with a capital",
+      "json": "{\"agent\":\"EIDENTITYAGENT\",\"conversation\":\"c_vector\",\"message_id\":\"m_1\",\"kind\":\"message\",\"In_reply_to\":\"e1\",\"from\":\"EPERSON\",\"signer\":\"DSIGNER\",\"to\":\"EAGENT\",\"nonce\":\"nonce-0123456789abcdef\",\"time\":\"2026-11-06T10:00:00Z\",\"fingerprint_version\":1,\"fingerprint\":\"EFINGERPRINT\"}"
+    },
+    {
+      "name": "an optional field as null",
+      "json": "{\"agent\":\"EIDENTITYAGENT\",\"conversation\":\"c_vector\",\"message_id\":\"m_1\",\"kind\":\"message\",\"in_reply_to\":null,\"from\":\"EPERSON\",\"signer\":\"DSIGNER\",\"to\":\"EAGENT\",\"nonce\":\"nonce-0123456789abcdef\",\"time\":\"2026-11-06T10:00:00Z\",\"fingerprint_version\":1,\"fingerprint\":\"EFINGERPRINT\"}"
+    },
+    {
+      "name": "a field twice",
+      "json": "{\"agent\":\"EIDENTITYAGENT\",\"conversation\":\"c_vector\",\"message_id\":\"m_1\",\"kind\":\"message\",\"kind\":\"message\",\"from\":\"EPERSON\",\"signer\":\"DSIGNER\",\"to\":\"EAGENT\",\"nonce\":\"nonce-0123456789abcdef\",\"time\":\"2026-11-06T10:00:00Z\",\"fingerprint_version\":1,\"fingerprint\":\"EFINGERPRINT\"}"
     }
   ]
 }

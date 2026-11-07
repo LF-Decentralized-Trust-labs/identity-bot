@@ -4,16 +4,22 @@
 **Date:** 2026-11-06
 **Deciders:** Rob Andersen
 **Builds on:** ADR-067 (a person signs a salted fingerprint of their words, not the words)
+**Extends:** ADR-047 (AI agents talk through the Identity Agent that holds them) — its countersigned, chained conversation record, which this ADR makes the trail rather than sitting beside it
 
 ---
 
-## Why a new ADR
+## One record, not two
 
 ADR-067 defines what is *signed*: the fingerprint and the person's statement.
 This ADR defines what the Identity Agent *keeps* and the order in which it
-keeps it: a record of its own, with its own states, chain and rules. It does
-not amend ADR-067; ADR-067 says these rules "land with the work that uses this
-format", and this is that work.
+keeps it. It does not keep it in a record of its own. **A conversation already
+has one chain**: ADR-047's countersigned entries (`agentmessage.Record`, hashed
+by `agentmessage.Hash`), checked offline by `conversationbundle.Verify`. The
+trail is that chain, extended with the entries below. There is no second chain
+and no second verifier, so one conversation never has two heads to disagree.
+
+ADR-067 says these rules "land with the work that uses this format"; this is
+that work.
 
 ## Context
 
@@ -27,20 +33,36 @@ conversation that did not happen.
 
 ### The trail
 
-For each conversation the Identity Agent keeps a **trail**: its opener, its
-owner, whether it is open or closed, every hand-off with who made it, and an
-ordered list of entries. **An entry holds no words, no salt and no preview.** It
-holds:
+For each conversation the Identity Agent keeps its opener, its owner, whether
+it is open or closed, every hand-off with who made it, and **the chain**: the
+ordered, countersigned entries of ADR-047's record. Four things are entries of
+it, and **none holds words, a salt or a preview**:
 
-- a sequence number counting from 1 and an id derived from it (`e1`, `e2`…),
-  under which the app keeps the words;
-- the author's statement (ADR-067), the key that signed it and the signature,
-  so the fingerprint, the kind, the recipient, the sender's message id and the
-  nonce are all inside what the author signed;
-- the chain hash of the entry before it, and the time it was recorded;
-- for an entry the Identity Agent holds only as ciphertext, the
-  `ciphertext_hash`, which is the statement's fingerprint;
-- either a **refusal reason** or, once known, an **outcome**.
+- **A person's entry.** A record whose sender's proof is the person's
+  statement (ADR-067), the key that signed it and the signature
+  (`person_proof`), in place of the signed request of a paired app. The
+  statement holds the fingerprint, the kind, the recipient, the sender's message
+  id and the nonce, so all are inside what the author signed. The record's id is
+  `e` and its place in the chain (`e1`, `e3`…): the id the app keeps the words
+  under. For an entry the Identity Agent holds only as ciphertext, it also
+  carries `ciphertext_hash`, which is the statement's fingerprint.
+- **A refusal.** The same record with `refusal` set to the reason. It records who
+  tried, when and why.
+- **An outcome.** A record of kind `outcome`, from the Identity Agent, saying
+  how an earlier entry ended (`committed`, or `not-kept` with a reason). It
+  carries no sender's proof; its countersignature is the proof.
+- **An AI agent's entry.** The record ADR-047 already makes: countersigned by the
+  AI agent, in the same chain, **committed by being countersigned**. The trail
+  takes it in at the head of the chain (`Trail.AppendAgent`) without forwarding
+  it, and the rules below do not apply to it: ADR-047's do. Its statement
+  (`IA-AGENT-MSG-V1/V2`) does not name a fingerprint version yet, so it keeps
+  the unsalted `body_hash`, and it is not counted by the version rule (below). Moving an
+  AI agent's words to salted fingerprints, its hand-off and the turn limit
+  are a later change.
+
+An entry is never changed. A person's entry is **pending** until an outcome
+entry follows it; a refusal never has one. The state of an entry is therefore
+read from the chain itself.
 
 ### Four states
 
@@ -89,41 +111,64 @@ cannot both be forwarded.
 
 ### The chain
 
-Each entry carries the hash of the one before it:
-
-```
-chain_hash = Blake3-256( "IA-TRAIL-ENTRY-V1" \n seq \n id \n prev \n recorded \n
-                         refusal \n ciphertext_hash \n verkey \n signature \n
-                         Blake3-256( statement bytes ) )
-```
-
-(one field per line, no trailing newline). It covers everything but the
-outcome, so an outcome follows without breaking the chain, and nothing can be
-slipped in, reordered, removed or have a refusal's reason rewritten unnoticed.
-The Identity Agent records the latest entry's chain hash, the **head**, in its
-key history (a later change), which is what catches a cut-off end.
+Each entry carries the hash of the one before it, exactly as ADR-047 has it:
+`agentmessage.Hash` over the countersigned entry and its signatures. The
+Identity Agent records the latest entry's hash, the **head**, in its key history
+(a later change), which is what catches a cut-off end. Because an outcome is an
+entry of its own, nothing already in the chain is rewritten to say how an entry
+ended, and nothing can be slipped in, reordered, removed or have a refusal's
+reason rewritten unnoticed.
 
 ### Offline verification
 
-A reader with only an exported trail checks: the sequence and ids, the chain,
-every author signature, that each statement names this conversation and one
-Identity Agent throughout, that no version 0 entry follows a version 1 entry
-(ADR-067), and that an outcome is allowed. **A committed entry, a not-kept entry and a refusal all
-verify alike**, since each keeps its fingerprint and signature and none keeps
-words. With the words and salts an app exports, a reader also recomputes every
-committed entry's fingerprint; words offered for an entry that was not kept
-are a fault. A trail with a field it does not know is refused, since it has
-nowhere to carry words.
+`conversationbundle.Verify` is the only verifier. For a person's statement entry
+it checks that the statement is signed by the key it names, names the Identity
+Agent that holds the conversation, and is dated within the stated skew of the
+Identity Agent's stamp; that the record says what was signed; that an entry
+which answers another answers one that was kept at that point; that an entry the
+Identity Agent allowed does not reuse an id or a nonce its author used before (a
+refusal may, and uses them up); that an outcome is the Identity Agent's, is about
+an earlier entry that was pending, and ends it once; and that the entry's id is
+its place in the chain. **A kept entry, a not-kept entry and a refusal verify
+alike**, since each keeps its fingerprint and signature and none keeps words.
+With the words and salts an app exports (`body` and `salt` of the bundle's
+entry), a reader also recomputes every kept entry's fingerprint; words offered
+for an entry that was refused or not kept are a fault; words left out are listed
+as something the check could not rule out. The bundle format refuses a field it
+does not know, since it has nowhere to carry words.
+
+**The cut-over (ADR-067).** A person's words are version 0 when they are in the
+signed request of a paired app (ADR-047), which holds them unsalted, and version
+1 when they are a statement's fingerprint. `conversationbundle.Verify` faults a
+version 0 entry that follows a version 1 entry of the same conversation
+(`agentmessage.CheckVersionOrder`, tried on the published genuine export's own
+records). An AI agent's entry and an outcome are not a person's words and are not
+counted.
+
+What the offline check cannot show, it says: which person a device's or session's
+key speaks for, and whether the Identity Agent's rules allowed a write, are the
+Identity Agent's word.
 
 ## What this ADR does not do
 
-- It does not cover an **AI agent's** entries (the host statement and the
-  Identity Agent's countersignature over a salted `body_hash`, the turn limit
-  and an agent's onward ask). Those need the agent's statement to name its
-  fingerprint version, which `IA-AGENT-MSG-V1/V2` does not yet; a later change.
-- It does not store the trail durably, record the head in the key history,
-  or rate-limit. The package keeps the trail in memory behind the rules above
-  and below; the Identity Agent's table and routes use it.
+- It does not change how an **AI agent's** entries are made or checked (the host
+  statement, the Identity Agent's countersignature over `body_hash`, the turn
+  limit, an agent's onward ask). They are in the same chain, as above. Salting
+  them needs the agent's statement to name its fingerprint version, which
+  `IA-AGENT-MSG-V1/V2` does not yet; a later change.
+- It does not store the chain durably, record the head in the key history, or
+  rate-limit. The `trail` package keeps the chain in memory behind the rules
+  above and below; the Identity Agent's table and routes use it.
+
+## A message id is used up by a refusal
+
+A refusal takes the sender's message id and nonce. A message refused only
+because the app could not be reached is therefore **not retried under the same
+id**: the same statement returns the same refusal, whatever the app's state
+now, so the sender **resends it under a new message id** (and a new nonce, and
+so a new statement and signature). The same holds for any other refusal whose
+cause has passed. A message that was *not kept* is the same: a retry is a new
+entry with a new id.
 
 ## Reads and `@agent`
 
@@ -156,5 +201,6 @@ nowhere to carry words.
 
 ## Reversing it
 
-Nothing yet depends on this: no route uses the trail. The tag in the chain
-hash is versioned.
+Nothing yet depends on this: no route uses the trail, and no export carries a
+person's statement entry. The fields it adds to the record are optional, so a
+record without them verifies as before.

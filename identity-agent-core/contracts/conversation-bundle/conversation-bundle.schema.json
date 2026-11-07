@@ -112,7 +112,7 @@
       }
     },
     "entry": {
-      "description": "One conversation entry: the envelope the Identity Agent countersigned (see contracts/agent-message), and the words whose digest its record carries.",
+      "description": "One conversation entry: the envelope the Identity Agent countersigned (see contracts/agent-message), and the words whose digest its record carries. For an entry a person signed as a statement over a fingerprint (ADR-068) the words are the app's to keep: body is empty and salt absent when the bundle does not carry them, and body is empty for an outcome, a refusal and an entry that was not kept.",
       "type": "object",
       "required": [
         "envelope",
@@ -126,6 +126,10 @@
         "body": {
           "type": "string",
           "description": "the words, base64"
+        },
+        "salt": {
+          "type": "string",
+          "description": "the salt of the fingerprint of body, base64: present exactly when the words of a person's statement entry are"
         }
       }
     },

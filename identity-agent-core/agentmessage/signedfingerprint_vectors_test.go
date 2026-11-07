@@ -349,6 +349,13 @@ func writeFingerprintVectors(t *testing.T) {
 		{"the fingerprint version missing", strings.Replace(rawStatement("1"), `"fingerprint_version":1,`, "", 1)},
 		{"a field the statement does not have", strings.Replace(rawStatement("1"), `"kind":"message",`, `"kind":"message","words":"hello",`, 1)},
 		{"the nonce as a number", strings.Replace(rawStatement("1"), `"nonce":"nonce-0123456789abcdef"`, `"nonce":1234567890123456`, 1)},
+		// Go's decoder reads these four without complaint (a key in any case,
+		// a null, a key twice), each in a statement that is otherwise good, so
+		// the Go reader here refuses them itself.
+		{"an optional field spelt in capitals", strings.Replace(rawStatement("1"), `"kind":"message",`, `"kind":"message","IN_REPLY_TO":"e1",`, 1)},
+		{"an optional field spelt with a capital", strings.Replace(rawStatement("1"), `"kind":"message",`, `"kind":"message","In_reply_to":"e1",`, 1)},
+		{"an optional field as null", strings.Replace(rawStatement("1"), `"kind":"message",`, `"kind":"message","in_reply_to":null,`, 1)},
+		{"a field twice", strings.Replace(rawStatement("1"), `"kind":"message",`, `"kind":"message","kind":"message",`, 1)},
 	}
 	out, err := computeFingerprintVectors(set)
 	if err != nil {

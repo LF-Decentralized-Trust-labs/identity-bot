@@ -86,7 +86,10 @@ type Message struct {
 	From      string `json:"from"`
 	To        string `json:"to"`
 	// Sender is whose own signature the entry carries: "body" for an AI
-	// agent's machine, "controller" for the app a person spoke from.
+	// agent's machine, "controller" for the app a person spoke from,
+	// "statement" for a device or session that signed a fingerprint of a
+	// person's words, and "identity agent" for an outcome, which only the
+	// Identity Agent speaks.
 	Sender string `json:"sender"`
 	// Grade is how strongly the body's key is held, as the body credential
 	// records it.
@@ -175,6 +178,12 @@ type verifier struct {
 	// opener is the first entry when an AI agent opened the conversation; the
 	// zero Record when a person did.
 	opener agentmessage.Record
+	// people is what is known, entry by entry, of the entries a person signed
+	// as a statement over a fingerprint (ADR-068): where each stands, what the
+	// chain has used up, and the versions of a person's words so far.
+	people   map[string]*personEntry
+	used     map[string]bool
+	versions []int
 }
 
 func (v *verifier) fault(where, format string, args ...any) {
@@ -660,6 +669,7 @@ func (v *verifier) checkEntries() {
 		m := Message{Seq: seq}
 		rec, ok := v.checkEntry(where, seq, prev, e, &m)
 		if ok {
+			v.checkVersionOrder(where, rec)
 			if seq == 1 {
 				opener = rec.OpenedBy
 				v.checkOpening(where, rec)
@@ -673,6 +683,7 @@ func (v *verifier) checkEntries() {
 		}
 		v.r.Messages = append(v.r.Messages, m)
 	}
+	v.finishPeople()
 }
 
 // checkOpening checks the first entry: a conversation is opened by a person's
@@ -686,11 +697,19 @@ func (v *verifier) checkEntries() {
 // opened in an hour, and that depth beyond the opening stays within three.
 // Those are the Identity Agent's to enforce (ADR-047, Amendment 3).
 func (v *verifier) checkOpening(where string, rec agentmessage.Record) {
+	if rec.PersonProof != nil {
+		// A person's statement opens a conversation of their own, whatever it
+		// says: a refusal may be the first thing recorded.
+		if rec.From != rec.OpenedBy {
+			v.fault(where, "a conversation is opened by the one who opened it, and this is not their entry")
+		}
+		return
+	}
 	if rec.Kind != agentmessage.KindAsk || rec.From != rec.OpenedBy {
 		v.fault(where, "a conversation is opened by an ask from the one who opened it, and this is not one")
 		return
 	}
-	if rec.ControllerProof != nil {
+	if rec.ControllerProof != nil || rec.PersonProof != nil {
 		return
 	}
 	if _, person := agentmessage.IsPerson(rec.To); person || rec.Statement == nil || !rec.Statement.Opens() || rec.Depth != 1 {
@@ -748,7 +767,9 @@ func (v *verifier) checkEntry(where string, seq int, prev string, e Entry, m *Me
 		v.fault(where, "it does not follow from the entry before it")
 	}
 	body, err := decode(e.Body)
-	if err != nil || len(body) > agentmessage.MaxBody || agentmessage.HashBody(body) != rec.BodyHash {
+	if rec.PersonProof != nil {
+		v.notePersonEntry(where, rec, e, body, err)
+	} else if err != nil || len(body) > agentmessage.MaxBody || agentmessage.HashBody(body) != rec.BodyHash || e.Salt != "" {
 		v.fault(where, "the words carried are not the words it was signed over")
 	}
 	if err := rec.CheckSenderProof(); err != nil {
@@ -756,7 +777,11 @@ func (v *verifier) checkEntry(where string, seq int, prev string, e Entry, m *Me
 		return rec, true
 	}
 	once := []string{}
-	if rec.Statement != nil {
+	if rec.Outcome != nil {
+		// Nothing a sender signed: the countersignature is the whole proof.
+	} else if rec.PersonProof != nil {
+		once = append(once, "signature "+rec.PersonProof.Signature)
+	} else if rec.Statement != nil {
 		once = append(once, "signature "+rec.HostSignature, "nonce "+rec.Statement.Host+" "+rec.Statement.HostNonce)
 	} else {
 		once = append(once, "signature "+rec.ControllerProof.Signature)
@@ -773,12 +798,17 @@ func (v *verifier) checkEntry(where string, seq int, prev string, e Entry, m *Me
 		v.fault(where, "the time the Identity Agent stamped on it is unreadable")
 		return rec, true
 	}
-	if rec.Statement != nil {
+	switch {
+	case rec.Outcome != nil:
+		v.checkOutcome(where, rec, m)
+	case rec.PersonProof != nil:
+		v.checkPersonStatement(where, rec, at, m)
+	case rec.Statement != nil:
 		v.checkBodySpoke(where, rec, body, at, m)
-	} else {
+	default:
 		v.checkPersonSpoke(where, rec, at, m)
 	}
-	if t := rec.To; t != "" {
+	if t := rec.To; t != "" && rec.PersonProof == nil {
 		if _, person := agentmessage.IsPerson(t); !person {
 			if why := v.delegatedFromRoot(t); why != "" {
 				v.fault(where, "it is addressed to %s: %s", t, why)
