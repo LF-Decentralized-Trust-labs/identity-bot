@@ -228,7 +228,11 @@ func (addSignerAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[
 
 	// Remembered so the inviting app can be asked, under this same key, for
 	// anything it publishes for this invite -- see handleWhatTheInvitingAppPublished.
-	s.redeemedInvites.remember(p.InviteToken, redeemedInvite{base: ctx.Base, siteAID: p.SiteAID, siteOOBI: p.SiteOOBI})
+	answer, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+	s.redeemedInvites.remember(p.InviteToken, redeemedInvite{
+		base: ctx.Base, siteAID: p.SiteAID, siteOOBI: p.SiteOOBI,
+		publishedPath: publishedPathFrom(answer),
+	})
 
 	org := p.OrgName
 	if org == "" {

@@ -200,5 +200,15 @@ waiting.
   which key, it redeemed; it signs the ask with that key and sends it to that
   address. The caller names neither, so an invite code alone lets nobody else ask.
 - The route is on the owner-only list (ADR-050), as redeeming is.
-- The inviting app decides what, if anything, it has published; the seam is the
-  invite's own route and carries no new obligation on an app that publishes nothing.
+- The inviting app decides what, if anything, it has published, and where it
+  answers: its reply to the redeem may carry `published_at`, a plain absolute path
+  under the address the invite was redeemed at. An app that carries none is not
+  polled, so there is no obligation on an app that publishes nothing.
+- The ask is a `GET` to that path signed over a fixed domain string, the invite's
+  code, the agent's clock and a nonce it chose for that one ask, sent in the
+  `X-Invite-Poll-Timestamp`, `X-Invite-Poll-Nonce` and `X-Invite-Poll-Signature`
+  headers. `server.InvitePollText` and `server.VerifyInvitePoll` are the one
+  definition of that text and its check; the app refuses a nonce it has already seen.
+- A route an overlay mounts is owner-only unless the overlay names it with
+  `CoreServer.OpenExtraRoutes`, with the reason; the server refuses to start if a
+  name matches nothing the overlay mounts.

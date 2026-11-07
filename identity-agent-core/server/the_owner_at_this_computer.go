@@ -227,3 +227,7 @@ func isLocalConnection(r *http.Request) bool {
 		!hasForwardingHeaders(r) &&
 		!isBrowserOriginated(r)
 }
+
+// IsLocalConnection is isLocalConnection for an app built on the core: that a
+// request came from a program on this computer, and nothing about who sent it.
+func IsLocalConnection(r *http.Request) bool { return isLocalConnection(r) }

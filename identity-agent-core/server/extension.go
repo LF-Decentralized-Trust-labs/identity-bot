@@ -2,6 +2,8 @@ package server
 
 import (
 	"net/http"
+	"sort"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -98,3 +100,47 @@ func StoreAsk(token string, ask []byte) {
 	mintedAsks.m[token] = ask
 	mintedAsks.Unlock()
 }
+
+// OpenExtraRoutes declares routes an overlay mounts (MountExtraRoutes) that a
+// caller who is not the owner may reach, each with the reason it is open. Keyed
+// "METHOD /chi/pattern" with the full path, /api included, like the core's own
+// table. Everything an overlay mounts is owner-only unless named here, and only
+// a route the overlay itself mounts may be named: Start refuses an entry nothing
+// mounts, because that opens nothing and answers 403 before the handler runs.
+func (s *CoreServer) OpenExtraRoutes(routes map[string]string) {
+	if s.extraOpen == nil {
+		s.extraOpen = map[string]string{}
+	}
+	for k, why := range routes {
+		s.extraOpen[k] = why
+	}
+}
+
+// extraOpenNotMounted lists the entries of OpenExtraRoutes that the overlays'
+// routes do not include, or that carry no reason.
+func (s *CoreServer) extraOpenNotMounted() []string {
+	if len(s.extraOpen) == 0 {
+		return nil
+	}
+	r := chi.NewRouter()
+	r.Route("/api", func(r chi.Router) {
+		for _, fn := range s.extraRoutes {
+			fn(r)
+		}
+	})
+	mounted := routesIn(r)
+	var out []string
+	for k, why := range s.extraOpen {
+		if !mounted[k] || strings.TrimSpace(why) == "" {
+			out = append(out, k)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Handler is the whole router the server serves, the access gate included, for
+// an overlay to test its routes through the same path a request takes. Routes
+// registered with MountExtraRoutes after the first call are not in the router a
+// caller already holds.
+func (s *CoreServer) Handler() http.Handler { return s.buildRouter() }

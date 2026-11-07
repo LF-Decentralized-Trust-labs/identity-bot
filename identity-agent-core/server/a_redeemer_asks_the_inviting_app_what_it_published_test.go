@@ -10,8 +10,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-
-	"identity-agent-core/login"
 )
 
 // A stand-in for an app that issues invites. It records the key the redeem was
@@ -24,12 +22,14 @@ type anInvitingApp struct {
 	published string // "" until it has something
 	polls     int
 	refuse    int // when non-zero, answer every poll with this status
+	namesPath bool
+	nonces    []string
 }
 
 func newInvitingApp(t *testing.T) *anInvitingApp {
 	t.Helper()
 	t.Setenv("IA_ALLOW_LOCAL_SITES", "1")
-	a := &anInvitingApp{}
+	a := &anInvitingApp{namesPath: true}
 	a.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
 		defer a.mu.Unlock()
@@ -38,29 +38,25 @@ func newInvitingApp(t *testing.T) *anInvitingApp {
 			var b map[string]string
 			_ = json.NewDecoder(r.Body).Decode(&b)
 			a.key = b["public_key"]
-			_ = json.NewEncoder(w).Encode(map[string]any{"status": "accepted"})
-		case strings.HasSuffix(r.URL.Path, "/machine"):
+			answer := map[string]any{"status": "accepted"}
+			if a.namesPath {
+				answer["published_at"] = "/some/app/own/path/tok/ready"
+			}
+			_ = json.NewEncoder(w).Encode(answer)
+		case strings.HasPrefix(r.URL.Path, "/some/app/own/path/"):
 			a.polls++
 			if a.refuse != 0 {
 				http.Error(w, "refused on purpose", a.refuse)
 				return
 			}
-			token := chi.URLParam(r, "token")
-			if token == "" {
-				parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-				token = parts[len(parts)-2]
-			}
-			ts := r.Header.Get(HeaderInvitePollTimestamp)
-			pub, err := login.DecodeVerkey(a.key)
-			stamp, terr := time.Parse(time.RFC3339, ts)
-			if err != nil || terr != nil || time.Since(stamp) > time.Minute {
-				http.Error(w, "not signed", http.StatusForbidden)
+			parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+			token := parts[len(parts)-2]
+			nonce, err := VerifyInvitePoll(r, token, a.key, time.Now())
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusForbidden)
 				return
 			}
-			if ok, verr := login.VerifyString(invitePollText(token, ts), r.Header.Get(HeaderInvitePollSignature), pub); verr != nil || !ok {
-				http.Error(w, "not the redeemer", http.StatusForbidden)
-				return
-			}
+			a.nonces = append(a.nonces, nonce)
 			if a.published == "" {
 				w.WriteHeader(http.StatusAccepted)
 				_, _ = w.Write([]byte(`{"ready":false}`))
@@ -205,5 +201,77 @@ func TestTheRedeemNamesTheInviteAndTheIdentityMintedForAMachine(t *testing.T) {
 	// "no identity to claim a machine with" and says so.
 	if _, present := res["machine_owner_aid"]; !present {
 		t.Fatalf("redeem result has no machine_owner_aid field: %v", res)
+	}
+}
+
+// Every ask carries a nonce of its own, so one captured in transit cannot be sent
+// again as though it were fresh.
+func TestEveryPollCarriesANonceOfItsOwn(t *testing.T) {
+	app := newInvitingApp(t)
+	s := redeemedAgent(t, app)
+	askWhatWasPublished(s, "tok")
+	askWhatWasPublished(s, "tok")
+	if len(app.nonces) != 2 || app.nonces[0] == app.nonces[1] || app.nonces[0] == "" {
+		t.Fatalf("nonces seen by the inviting app: %q", app.nonces)
+	}
+}
+
+// The path is the inviting app's to name. An app that names none is not polled at
+// all, and one that names a path that could leave its own address is treated as
+// naming none.
+func TestAnAppThatNamesNoPathIsNotPolled(t *testing.T) {
+	app := newInvitingApp(t)
+	app.namesPath = false
+	s := redeemedAgent(t, app)
+	if w := askWhatWasPublished(s, "tok"); w.Code != http.StatusNotFound || app.polls != 0 {
+		t.Fatalf("an app that publishes nothing: %d, %d polls", w.Code, app.polls)
+	}
+	for _, bad := range []string{"https://elsewhere.example/x", "//elsewhere.example/x", "/a/../b", "/a?x=1", "relative/path", "/a#f", ""} {
+		if got := publishedPathFrom([]byte(`{"published_at":"` + bad + `"}`)); got != "" {
+			t.Errorf("published_at %q was accepted as %q", bad, got)
+		}
+	}
+	if got := publishedPathFrom([]byte(`{"published_at":"/api/x/abc/ready"}`)); got != "/api/x/abc/ready" {
+		t.Errorf("a plain path was refused: %q", got)
+	}
+}
+
+// An overlay's own route is owner-only unless the overlay declares it open, and
+// declaring it is checked through the real gate, not a bare router: a forwarded
+// request from a stranger reaches the handler of the declared route and none
+// other.
+func TestAnOverlayRouteIsOpenOnlyWhenTheOverlayDeclaresIt(t *testing.T) {
+	for _, declare := range []bool{false, true} {
+		s := agentWithDerivedIdentity(t)
+		s.MountExtraRoutes(func(r chi.Router) {
+			r.Get("/theirs/{token}/ready", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusAccepted) })
+			r.Get("/theirs/{token}/other", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusAccepted) })
+		})
+		if declare {
+			s.OpenExtraRoutes(map[string]string{"GET /api/theirs/{token}/ready": "the redeemer polls"})
+		}
+		get := func(path string) int {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req.RemoteAddr = "203.0.113.9:5000"
+			req.Header.Set("X-Forwarded-For", "203.0.113.9")
+			w := httptest.NewRecorder()
+			s.buildRouter().ServeHTTP(w, req)
+			return w.Code
+		}
+		want := http.StatusForbidden
+		if declare {
+			want = http.StatusAccepted
+		}
+		if got := get("/api/theirs/abc/ready"); got != want {
+			t.Errorf("declared=%v: stranger got %d, want %d", declare, got, want)
+		}
+		if got := get("/api/theirs/abc/other"); got != http.StatusForbidden {
+			t.Errorf("declared=%v: an undeclared overlay route answered a stranger with %d", declare, got)
+		}
+	}
+	s := agentWithDerivedIdentity(t)
+	s.OpenExtraRoutes(map[string]string{"GET /api/nothing/mounts/this": "x"})
+	if len(s.extraOpenNotMounted()) != 1 {
+		t.Error("an entry no overlay mounts was not reported")
 	}
 }

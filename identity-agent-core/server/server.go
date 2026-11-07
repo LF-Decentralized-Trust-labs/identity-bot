@@ -163,6 +163,8 @@ type CoreServer struct {
 	// Overlay-registered extra routes, mounted under /api by buildRouter. See
 	// MountExtraRoutes / extension.go — inert unless an overlay registers.
 	extraRoutes []func(chi.Router)
+	// extraOpen are the overlay routes a non-owner may reach; see OpenExtraRoutes.
+	extraOpen map[string]string
 
 	// appSessions are the people signed in at an app, who may speak on the talk
 	// routes (an_app_session_speaks_for_its_person.go).
@@ -642,6 +644,9 @@ func (s *CoreServer) Start() error {
 	// an add-on opens must not cover one of the overlay's either.
 	if err := s.addonsOpeningOthersRoutes(s.router, s.extraRoutes); err != nil {
 		return err
+	}
+	if bad := s.extraOpenNotMounted(); len(bad) > 0 {
+		return fmt.Errorf("OpenExtraRoutes names routes no overlay mounts, or gives no reason: %v", bad)
 	}
 
 	// Try the configured port first, then fallback to 5051–5059
