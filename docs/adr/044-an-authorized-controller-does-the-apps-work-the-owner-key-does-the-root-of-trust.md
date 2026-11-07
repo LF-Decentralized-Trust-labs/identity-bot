@@ -17,9 +17,8 @@ The router-wide authorization gate (`authorize` in `server/api_auth.go`) already
 accounts for it: an owner-level route is served when the request is the owner
 (`isOwner`), **or** when it comes from the owner's authorized controller
 (`controllerActsForTheOwner`, gated by the deny-list in
-`server/what_a_controller_may_reach.go`), or from a browser session the owner
-approved. The controller model is a **deny-list**: a controller may reach any
-route that is not explicitly closed, so a route added later works for the owner's
+`server/what_a_controller_may_reach.go`). The controller model is a
+**deny-list**: a controller may reach any route that is not explicitly closed, so a route added later works for the owner's
 own front end without anyone granting it — the opposite of an allow-list, and
 deliberately so (an owner's front end should never be the one caller that cannot
 use a capability an outside AI agent can).
@@ -72,9 +71,9 @@ application operations create a credential that outlives the request that made i
 provisioning an AI agent and minting its bearer token, re-issuing an AI agent's
 capability grant, and changing its configuration — which model it reaches, with which
 stored key. These are reached only by a controller that has proven the verified
-authentication level, and never by a browser session — matching how issuing a
-credential is treated, because a time-bounded session or controller compromise must
-not be able to leave behind standing access that survives it. This is a
+authentication level — matching how issuing a credential is treated, because a
+time-bounded controller compromise must not be able to leave behind standing
+access that survives it. This is a
 strength-of-authentication requirement, not a narrowing of what the controller may
 do: the owner's authorized controller reaches that level the same way it does to
 issue a credential.

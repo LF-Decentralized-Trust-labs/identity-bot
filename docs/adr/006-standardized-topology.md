@@ -1,6 +1,6 @@
 # ADR 006: Standardized Topology — Two Topologies, Four Configurations
 
-**Date:** 2026-02-22 (revised 2026-05-01)
+**Date:** 2026-02-22 (revised 2026-05-01, amended 2026-11-07)
 **Status:** Accepted (revised)
 **Supersedes:** Mode definitions in ADR-003 and ADR-005; the original "3 states × 2 device types" formulation in this same ADR (2026-02-22).
 
@@ -243,6 +243,27 @@ meant "runs an inception of its own rather than a delegated one" and reads as
   and a browser has no enclave to hold a key in. Browser access is deferred
   entirely, as a single capability rather than a question re-asked for each
   feature.
+
+  *Amended 2026-11-07:* withdrawn, not deferred. No browser reaches the core,
+  for anything: not to manage it, not as a controller, not to sign as any
+  identity it holds, not to read it. The browser login built before this
+  decision (`/api/session/*`) is removed, and
+  `server/no_browser_reaches_this_core_test.go` fails if a route signs a
+  browser in, takes a browser's token as the owner, or answers a browser's
+  origin. Three places do not conform yet, and are named here so that
+  nobody reads them as allowed:
+  - the four routes under `/api/login/session` that a website's embedded
+    sign-in button calls from the visitor's browser (ADR-021), named in that
+    test on a list that may only shrink;
+  - a person's session at an app on the talk routes (ADR-066), which is being
+    reworked so that the app asks from its own server;
+  - the app display at `/apps/{app_id}/` (ADR-012), which a browser loads
+    through the core. The test does not walk wildcard routes, so it is
+    outside it.
+
+  A person's own apps are reached from a browser: the browser talks to
+  the app, and the app, enrolled with its own credential, asks the core from
+  its own server.
 - **Both kinds of identity use the same mechanism.** What differs is only where
   the application runs.
 

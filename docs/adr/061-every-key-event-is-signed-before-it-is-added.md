@@ -259,9 +259,8 @@ founding is refused while an identity exists.
 **`GET /api/events/witnesses-for-a-founding`** answers who this Identity Agent
 would name as the witnesses of a new root identity: each witness's key and the
 address it is reached at, and the threshold, as `{"witnesses": [{"aid",
-"address"}], "toad"}`. It is the owner's alone and closed to a browser session
-too. An empty list is a real answer: the identity would be founded unwitnessed.
-The app confirms each witness by its own signed answer (section 9) and names
+"address"}], "toad"}`. It is the owner's alone. An empty list is a real
+answer: the identity would be founded unwitnessed. The app confirms each witness by its own signed answer (section 9) and names
 those that answer in the founding it signs (section 5).
 
 **`POST /api/events/prepare`** builds an event and returns its bytes. It adds

@@ -54,8 +54,7 @@ gets a new identity, so nothing it does can be mistaken for the old one's.
 
 **Who may do it.** Revoking takes nothing from the owner, so it is not owner-only. A
 controller may do it after the one check (ADR-050), and it is recorded against that
-controller. A browser session may not, because revoking cannot be undone and outlives
-the session.
+controller.
 
 ## Consequences
 
