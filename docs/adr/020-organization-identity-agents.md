@@ -187,3 +187,18 @@ its own Data Domain per ADR-026).
 mount your endpoints via `MountExtraRoutes`; mint invites/QRs as Asks and publish
 them with `StoreAsk`; store your org data in its own domain database. How you
 model and run any of that is yours to decide.
+
+## Addendum, 2026-11-07: a redeemer may ask the inviting app what it published
+
+An agent that redeemed an invite may later ask the app that issued the invite for
+what that app has published against it (for example the identity it minted for a
+machine). The ask is a poll: the agent calls `POST /api/redeemed-invites/published`
+with the invite's code in the body, and gets the answer, or "not yet", without
+waiting.
+
+- Only the agent that redeemed the invite can ask. It remembers where, and with
+  which key, it redeemed; it signs the ask with that key and sends it to that
+  address. The caller names neither, so an invite code alone lets nobody else ask.
+- The route is on the owner-only list (ADR-050), as redeeming is.
+- The inviting app decides what, if anything, it has published; the seam is the
+  invite's own route and carries no new obligation on an app that publishes nothing.

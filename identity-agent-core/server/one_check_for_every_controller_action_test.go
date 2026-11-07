@@ -167,6 +167,9 @@ func TestTheOwnerOnlyListIsTheOneTheADRRecords(t *testing.T) {
 		"POST /api/recovery/holdings/stop",
 		"POST /api/signer/invites",
 		"POST /api/signer/invites/{token}/redeem",
+		// Asking the inviting app what it published for an invite this agent
+		// redeemed: the same redeeming agent, signed with the redeem key (ADR-020).
+		"POST /api/redeemed-invites/published",
 		"POST /api/recovery/retrieve",
 		"POST /api/backup/export",
 		"POST /api/backup/pull/{destID}",
