@@ -105,7 +105,7 @@ It defines the statement, the fingerprint and their vectors, and the checks a
 verifier can make from them. It does not say who may write, what the Identity
 Agent keeps, or when an entry is committed; those rules, and the gateway's
 refusal of version 0 for new writes, land with the work that uses this format
-(a later change). Until the gateway accepts this statement, a person's
+(ADR-068 for the trail and the order of a write; the gateway route is a later change). Until the gateway accepts this statement, a person's
 message is still the controller's signed request.
 
 ## Consequences
