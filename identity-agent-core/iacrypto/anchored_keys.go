@@ -1,6 +1,7 @@
 package iacrypto
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 )
@@ -72,7 +73,7 @@ func KeySetAnchor(x25519, mlkem768, ed25519Pub, mldsa65Pub []byte) (map[string]i
 // that has them and will not parse.
 func AnchoredSigningKeys(event map[string]interface{}) (ed25519Pub, mldsa65Pub []byte, err error) {
 	for _, seal := range anchorList(event["a"]) {
-		if suite, _ := seal["ia"].(string); suite != CipherSuiteIAHybrid1 {
+		if !IsKeysetSeal(seal) {
 			continue
 		}
 		sa := keyList(seal["sa"])
@@ -152,7 +153,7 @@ func AnchoredAgreementKeys(event map[string]interface{}) (x25519, mlkem768 []byt
 	}
 
 	for _, seal := range anchors {
-		if suite, _ := seal["ia"].(string); suite != CipherSuiteIAHybrid1 {
+		if !IsKeysetSeal(seal) {
 			// Some other kind of seal. An anchor list is general and carries
 			// whatever an identifier needed to commit to; ours is the one
 			// labelled with the suite it belongs to.
@@ -176,6 +177,28 @@ func AnchoredAgreementKeys(event map[string]interface{}) (x25519, mlkem768 []byt
 		return x, k, nil
 	}
 	return nil, nil, ErrNotAnchored
+}
+
+// IsKeysetSeal is the one decision on whether an anchor is an IA-HYBRID-1
+// keyset seal: its "ia" member, matched by exact name, is a string equal to the
+// suite. Every reader of anchors asks this, so none can judge a seal differently
+// from another.
+func IsKeysetSeal(seal map[string]interface{}) bool {
+	suite, _ := seal["ia"].(string)
+	return suite == CipherSuiteIAHybrid1
+}
+
+// KeysetSealsAmong are the keyset seals among an event's seals as carried on
+// the wire, unchanged. A seal that is not a JSON object is not one.
+func KeysetSealsAmong(seals []json.RawMessage) []json.RawMessage {
+	var out []json.RawMessage
+	for _, raw := range seals {
+		var seal map[string]interface{}
+		if json.Unmarshal(raw, &seal) == nil && IsKeysetSeal(seal) {
+			out = append(out, raw)
+		}
+	}
+	return out
 }
 
 // anchorList normalises the anchor field to one shape.
