@@ -472,6 +472,14 @@ type PersonRef struct {
 	Name       string `json:"name,omitempty"`
 }
 
+// MayTalkToAnAIAgent says whether a person standing so may talk to the
+// organisation's AI agents: a signer or the owner may talk to every AI agent of
+// the organisation they sign for, and an employee to none. It is the one rule
+// the talk routes and an app session's list of AI agents both ask.
+func (p PersonRef) MayTalkToAnAIAgent() bool {
+	return p.Standing == "signer" || p.Standing == "owner"
+}
+
 // Record is one entry in a conversation, as the Identity Agent signs it.
 type Record struct {
 	MessageID    string `json:"message_id"`

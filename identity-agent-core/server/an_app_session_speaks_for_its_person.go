@@ -44,6 +44,19 @@ var talkRoutes = map[string]bool{
 	"GET /api/mcp/conversations/{cid}":        true,
 }
 
+// listRoute is the one other route an app session may take: the AI agents its
+// person may talk to (an_app_session_lists_the_ai_agents_it_may_talk_to.go).
+const listRoute = "GET /api/app-session/agents"
+
+// appSessionRoutes are all the routes an app session is admitted on.
+var appSessionRoutes = func() map[string]bool {
+	m := map[string]bool{listRoute: true}
+	for k := range talkRoutes {
+		m[k] = true
+	}
+	return m
+}()
+
 // appSessionProofWindow is how far a proof's time may be from now, either way.
 const appSessionProofWindow = 2 * time.Minute
 
@@ -231,18 +244,18 @@ func (s *CoreServer) anAppListsThisOrigin(origin string) bool {
 	return false
 }
 
-// isATalkRequest says the router would serve this request on one of the talk
-// routes, by the route pattern it matches and the method as the gate keys it
-// (talkRoutes), so a path spelled to look like one never matches. A CORS
+// isAnAppSessionRequest says the router would serve this request on one of the
+// routes an app session may take, by the route pattern it matches and the
+// method as the gate keys it (appSessionRoutes), so a path spelled to look like one never matches. A CORS
 // preflight carries the method it asks about in Access-Control-Request-Method.
-func isATalkRequest(routes chi.Routes, r *http.Request) bool {
+func isAnAppSessionRequest(routes chi.Routes, r *http.Request) bool {
 	method := r.Method
 	if method == http.MethodOptions {
 		method = r.Header.Get("Access-Control-Request-Method")
 	}
 	probe := r.Clone(r.Context())
 	probe.Method = method
-	return talkRoutes[method+" "+matchedRoutePattern(routes, probe)]
+	return appSessionRoutes[method+" "+matchedRoutePattern(routes, probe)]
 }
 
 // anAppSessionSpeaks admits a request from an app session onto a talk route.
@@ -252,7 +265,7 @@ func isATalkRequest(routes chi.Routes, r *http.Request) bool {
 // here, served or refused, and never falls through to be judged as something
 // else.
 func (s *CoreServer) anAppSessionSpeaks(w http.ResponseWriter, r *http.Request, pattern string, next http.Handler) bool {
-	if !talkRoutes[r.Method+" "+pattern] {
+	if !appSessionRoutes[r.Method+" "+pattern] {
 		return false
 	}
 	token := bearerToken(r)
