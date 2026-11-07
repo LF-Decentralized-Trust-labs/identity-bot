@@ -2,7 +2,6 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 
 import '../config/agent_config.dart';
-import 'browser_session_client.dart';
 import 'controller_signing_client.dart';
 import 'signing_as_the_identity_that_owns_a_machine.dart';
 import 'the_owner_at_this_computer.dart';
@@ -45,14 +44,14 @@ class TheAgentThisAppTalksTo {
   /// gets a plausible answer about nobody.
   static String get origin => AgentConfig.agentBaseUrl;
 
-  /// Just the client, for the services that do not carry a session.
+  /// The client, for a service that takes an address of its own.
   ///
   /// Takes the caller's own nullable address so the client is built for the
   /// SAME place the service will send to. A service that defaulted the two
   /// separately could sign for one agent and call another, which is a signature
   /// handed to whoever is at the second.
   static http.Client clientFor([String? origin, http.Client? inner]) =>
-      theAgent(origin: origin, inner: inner).client;
+      theAgent(origin: origin, inner: inner);
 
   /// A client that proves who is sending, for requests to [origin].
   ///
@@ -71,7 +70,7 @@ class TheAgentThisAppTalksTo {
   /// stand in for the network — a test, a client with its own timeouts — and
   /// still cannot send unsigned: which wrapper goes on top is decided here and
   /// nowhere else, which is the whole reason this function exists.
-  static HowThisAppReaches theAgent({String? origin, http.Client? inner}) {
+  static http.Client theAgent({String? origin, http.Client? inner}) {
     final to = origin ?? TheAgentThisAppTalksTo.origin;
 
     // One transport under every choice below, so choosing at send time builds
@@ -83,33 +82,25 @@ class TheAgentThisAppTalksTo {
     // — not the root, whose signature verifies here and nowhere else.
     //
     // The ordinary case otherwise: the core on this computer, which recognises
-    // a request that originated on the machine it runs on. A browser holds no
-    // key, so where this build is a page it carries a session instead.
-    final BrowserSessionClient? session;
-    final http.Client otherwise;
-    if (!kIsWeb && to != AgentConfig.coreBaseUrl) {
-      session = null;
-      otherwise = SigningAsTheIdentityThatOwnsAMachine(
-        machineOrigin: to,
-        localCoreOrigin: () => AgentConfig.coreBaseUrl,
-        ownerAid: theIdentityThatAdopted(to,
-            localCoreOrigin: () => AgentConfig.coreBaseUrl, using: transport),
-        inner: transport,
-      );
-    } else {
-      session = BrowserSessionClient(agentOrigin: to, inner: transport);
-      otherwise = session;
-    }
+    // a request that originated on the machine it runs on. No browser reaches
+    // an Identity Agent (ADR-006), so there is no third way in.
+    final http.Client? otherwise = !kIsWeb && to != AgentConfig.coreBaseUrl
+        ? SigningAsTheIdentityThatOwnsAMachine(
+            machineOrigin: to,
+            localCoreOrigin: () => AgentConfig.coreBaseUrl,
+            ownerAid: theIdentityThatAdopted(to,
+                localCoreOrigin: () => AgentConfig.coreBaseUrl,
+                using: transport),
+            inner: transport,
+          )
+        : null;
 
-    return HowThisAppReaches._(
-      _ChoosesWhenItSends(
-        asked: origin,
-        to: to,
-        otherwise: otherwise,
-        transport: transport,
-        ownsTransport: inner == null,
-      ),
-      session,
+    return _ChoosesWhenItSends(
+      asked: origin,
+      to: to,
+      otherwise: otherwise,
+      transport: transport,
+      ownsTransport: inner == null,
     );
   }
 }
@@ -142,7 +133,10 @@ class _ChoosesWhenItSends extends http.BaseClient {
 
   /// Where the non-controller client was built to talk.
   final String to;
-  final http.Client otherwise;
+
+  /// What signs for a machine this device owns, or null for the core on this
+  /// computer, which needs nothing but the transport.
+  final http.Client? otherwise;
   final http.Client transport;
   final bool ownsTransport;
 
@@ -161,29 +155,13 @@ class _ChoosesWhenItSends extends http.BaseClient {
         inner: transport, // borrowed: closing this wrapper leaves it open
       ).send(request);
     }
-    return otherwise.send(request);
+    return (otherwise ?? transport).send(request);
   }
 
   @override
   void close() {
-    otherwise.close();
+    otherwise?.close();
     if (ownsTransport) transport.close();
     super.close();
   }
-}
-
-/// The client to send with, and the session it carries when it carries one.
-///
-/// Two fields rather than one because adopting a token has to change the client
-/// that actually sends requests, so the caller needs the same object rather than
-/// a second one built the same way.
-class HowThisAppReaches {
-  const HowThisAppReaches._(this.client, this.session);
-
-  final http.Client client;
-
-  /// Non-null only where this app proves itself with a session rather than a
-  /// key. A key beats a session: wiring both would leave two answers to "who is
-  /// this" and the agent choosing between them.
-  final BrowserSessionClient? session;
 }
