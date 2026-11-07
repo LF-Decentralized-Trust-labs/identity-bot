@@ -102,6 +102,12 @@ var publicRoutes = map[string]string{
 	// tenant, and REPORT_DATA is one-way.
 	"GET /api/attestation": "hardware attestation — the evidence a stranger needs to verify this machine",
 
+	// --- proving an address is the agent and not a proxy of its public log ---
+	// The asker is deciding whether to trust an address and holds nothing yet.
+	// It signs only a fixed form over what the asker chose, for an origin that
+	// is this agent's own, with keys the identifier already publishes.
+	"GET /api/identity/proof": "proof this address holds the identifier's keys in force — a signed answer to a challenge the asker chose, checked against the identifier's own key log",
+
 	// --- the sign-in handshake: the relying party and the browser drive these ---
 	"GET /i/{token}":                                "the scanned pointer — the QR resolves to a signed challenge",
 	"POST /api/login/challenge":                     "a site mints a challenge for its own sign-in page",

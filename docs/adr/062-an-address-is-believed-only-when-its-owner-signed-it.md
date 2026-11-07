@@ -202,3 +202,50 @@ address or mapped port sets `PUBLIC_URL` to that address, which keeps it an
 origin of the agent. The management listener itself stays on loopback, so such a deployment also
 needs a reverse proxy or port forward from that address to it; setting
 `PUBLIC_URL` alone accepts the origin but does not make it reachable.
+
+**Amended 2026-11-06 — an address also shows it holds the keys.** Reading an
+identifier's key log from an address shows only that the address can copy a
+public document: a proxy in front of the real agent serves the same log. An
+Identity Agent therefore answers a challenge, and the asker checks the answer
+against the log it already verified.
+
+1. **The question.** `GET /api/identity/proof?origin=&challenge=[&aid=]`, open to
+   anybody and rate-limited, as `/api/attestation` is, because the asker is
+   deciding whether to trust the address and holds nothing yet. `challenge` is
+   16 to 512 printable characters the asker made up for this question;
+   `origin` is the origin the asker dialled, in its one spelling. `aid` defaults
+   to the agent's own identifier, and only an identifier the agent already holds
+   messaging keys for is answered, so asking mints nothing.
+2. **The answer.** A `KeyProof`: the keys signed with (a `DID`, plus the
+   identity's signature over them where this agent can make one), the `origin`,
+   `challenge` and `issued` (the UTC time, as in an endpoint record), and two
+   signatures, Ed25519 and ML-DSA-65, over `IA-KEYS-IN-FORCE-PROOF-V1` followed
+   by the identifier, origin, challenge and issued time, each as a four-byte
+   length and then its bytes. The agent signs only that form, never a string a
+   caller supplies. Both signatures are required.
+3. **The agent signs only for an origin that is its own**, the same set a
+   controller's request is checked against (`PUBLIC_URL`, relay, tunnel,
+   loopback). An agent not told its public address answers 403 and names
+   `PUBLIC_URL`.
+4. **The asker's check** (`didcomm.CheckKeyProof`): the answer names the
+   identifier, origin and challenge asked, and is dated within two minutes
+   before to one minute after the asker's clock; the keys belong to the
+   identifier by `didcomm.CheckKeysBelongTo` over the identifier's **whole**
+   verified log, so keys the log has since replaced are refused; and both
+   signatures verify under those keys.
+5. **What each part stops.** The challenge stops a replay: an answer to another
+   challenge, or one with the challenge rewritten, does not verify. The origin
+   stops a relay of the whole exchange: the agent will not sign for the
+   proxy's origin, and a proxy that asks for the agent's own gets an answer the
+   asker refuses because it is not the address it dialled. The log stops an
+   address with keys of its own.
+
+**Not covered.** The keys signed with are the agent's messaging keyset, not the
+identifier's KERI controlling key, which does not live on the agent. The proof
+shows that whoever answered holds the keys the identifier committed to in its
+log; rotation and witnessing remain what show the log itself is the latest. A
+client that cannot verify ML-DSA (the Dart `agent_client` and AI Chat have
+Ed25519 only) checks the Ed25519 half and the anchored keys, and the reference
+check above remains the one that requires both; that gap is recorded in AI
+Chat's `TODO.md`. An identifier whose log anchors no keyset is checked by the
+identity's signature over the keys, as before (`CheckKeysBelongTo`, "vouched").
