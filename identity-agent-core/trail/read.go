@@ -60,8 +60,9 @@ type Governance struct {
 }
 
 // MayRead says who may read a conversation, from the trail and the roster
-// alone: the opener, the owner, anyone who owned it or handed it on, anyone
-// who wrote or was addressed in a committed entry, and a signer.
+// alone: whoever opened it, its current owner, and a signer. A former owner
+// loses access when they hand it on, and nobody else is admitted by having
+// written, been addressed or been named in a hand-off (M83-ARCH §4, §8).
 func (t *Trail) MayRead(conversation, person string) bool {
 	c := t.get(conversation)
 	if c == nil || person == "" {
@@ -73,20 +74,7 @@ func (t *Trail) MayRead(conversation, person string) bool {
 }
 
 func (t *Trail) mayRead(c *conversation, person string) bool {
-	if person == c.opener || person == c.owner || t.roster.IsSigner(person) {
-		return true
-	}
-	for _, h := range c.handOffs {
-		if person == h.From || person == h.To || person == h.By {
-			return true
-		}
-	}
-	for _, e := range c.entries {
-		if e.State() == Committed && (person == e.Statement.From || person == e.Statement.To) {
-			return true
-		}
-	}
-	return false
+	return person == c.opener || person == c.owner || t.roster.IsSigner(person)
 }
 
 // Read serves a range of a conversation for person. The Identity Agent decides
@@ -99,7 +87,10 @@ func (t *Trail) mayRead(c *conversation, person string) bool {
 //     does not have, one out of order or repeated, or a committed entry the app
 //     left out, refuse the whole read.
 //
-// first and last are entry ids; empty means from the start or to the end.
+// first and last are entry ids of a person's entries; empty means from the
+// start or to the end. An AI agent's entries are not served by Read (ADR-068):
+// words the app returns for one are refused as an entry the trail lacks, and
+// a range bounded by one is refused.
 func (t *Trail) Read(ctx context.Context, person, conversation, first, last string) ([]Passed, error) {
 	g := Governance{Person: person, Conversation: conversation, First: first, Last: last}
 	out, err := t.read(ctx, &g, person, conversation, first, last)

@@ -70,12 +70,23 @@ type conversation struct {
 
 func newConversation(t *testing.T) *conversation {
 	t.Helper()
+	return newConversationWith(t, allowAll{}, nil)
+}
+
+// newConversationWith is newConversation with another roster, and with an app
+// that can also be read when backend is given a constructor for it.
+func newConversationWith(t *testing.T, roster trail.Roster, backend func(*conversation) trail.Backend) *conversation {
+	t.Helper()
 	keys, err := didcomm.GenerateKeySet(rootAID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	c := &conversation{t: t, keys: keys, app: &keepingApp{}, now: time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC), words: map[string]kept{}}
-	c.tr = trail.New(allowAll{}, c.app, trail.Options{Agent: rootAID, Now: func() time.Time { c.now = c.now.Add(time.Second); return c.now },
+	var be trail.Backend = c.app
+	if backend != nil {
+		be = backend(c)
+	}
+	c.tr = trail.New(roster, be, trail.Options{Agent: rootAID, Now: func() time.Time { c.now = c.now.Add(time.Second); return c.now },
 		Countersign: func(r agentmessage.Record) (*didcomm.Envelope, error) { return agentmessage.Countersign(keys, r) }})
 	if err := c.tr.Open("c1", "EALICE", true); err != nil {
 		t.Fatal(err)
@@ -86,6 +97,16 @@ func newConversation(t *testing.T) *conversation {
 // say writes one message from a person. edit changes the statement before it
 // is signed.
 func (c *conversation) say(from, words string, edit func(*agentmessage.PersonStatement)) trail.Result {
+	c.t.Helper()
+	res, err := c.trySay(from, words, edit)
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	return res
+}
+
+// trySay is say, returning the error a rejected write gives.
+func (c *conversation) trySay(from, words string, edit func(*agentmessage.PersonStatement)) (trail.Result, error) {
 	c.t.Helper()
 	c.n++
 	signer := edSigner{ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, ed25519.SeedSize))}
@@ -107,14 +128,14 @@ func (c *conversation) say(from, words string, edit func(*agentmessage.PersonSta
 	}
 	res, err := c.tr.Write(context.Background(), trail.Write{Statement: s, Verkey: verkey, Signature: sig, Salt: salt, Words: []byte(words)})
 	if err != nil {
-		c.t.Fatal(err)
+		return res, err
 	}
 	if res.State == trail.Committed {
 		// The app keeps the words of a kept entry only: a refusal never reached
 		// it, and it was told to discard what it did not keep.
 		c.words[res.EntryID] = kept{salt, []byte(words)}
 	}
-	return res
+	return res, nil
 }
 
 // bundle is the conversation as an export carries it. withWords puts the
