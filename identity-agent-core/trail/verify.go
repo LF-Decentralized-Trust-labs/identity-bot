@@ -39,11 +39,18 @@ func Read(raw []byte) ([]Entry, error) {
 // their signature and none keeps words.
 func Verify(es []Entry) Report {
 	var r Report
-	var prev, conv string
+	var prev, conv, agent string
+	versions := make([]int, len(es))
+	for i, e := range es {
+		versions[i] = e.Statement.FingerprintVersion
+	}
+	if err := agentmessage.CheckVersionOrder(versions); err != nil {
+		r.fault("%v", err)
+	}
 	for i, e := range es {
 		at := fmt.Sprintf("entry %d", i+1)
 		if i == 0 {
-			conv = e.Statement.Conversation
+			conv, agent = e.Statement.Conversation, e.Statement.Agent
 		}
 		if e.Seq != i+1 || e.ID != EntryID(i+1) {
 			r.fault("%s: out of order (seq %d, id %q)", at, e.Seq, e.ID)
@@ -53,6 +60,9 @@ func Verify(es []Entry) Report {
 		}
 		if e.Statement.Conversation != conv {
 			r.fault("%s: it belongs to another conversation", at)
+		}
+		if e.Statement.Agent != agent {
+			r.fault("%s: it names another Identity Agent", at)
 		}
 		if err := agentmessage.VerifyPerson(e.Statement, e.Verkey, e.Signature); err != nil {
 			r.fault("%s: %v", at, err)

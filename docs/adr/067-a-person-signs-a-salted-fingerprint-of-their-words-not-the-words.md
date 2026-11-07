@@ -60,15 +60,26 @@ The statement names the fingerprint's version, so it cannot be swapped.
 
 Any other version is refused.
 
+**When version 0 is old.** A verifier treats a version 0 fingerprint as made
+before this change only if it comes **before the first version 1 entry** of the
+record it is in. Once a record has a salted entry, a later version 0 entry is a
+fault, so a version 0 fingerprint cannot be written into a record that has
+moved on (`agentmessage.CheckVersionOrder`; the verifier passes
+`recorded=true` to `CheckFingerprint` only for an entry that rule accepts as
+old). A conversation's trail, which starts at version 1, uses the same rule
+offline (ADR-068).
+
 ### The person signs a statement
 
 `IA-PERSON-MSG-V1`, signed with the key of the person's device or session
-(`agentbody.Sign`, so the same signature form as a body's). One field per line,
+(a session key is the one a sign-in is bound to, ADR-066; `agentbody.Sign`, so
+the same signature form as a body's). One field per line,
 in this order, joined by a newline (0x0a), no trailing newline, as
 `IA-AGENT-MSG-V1` is:
 
 ```
 IA-PERSON-MSG-V1
+agent               the Identity Agent that holds the conversation
 conversation        the conversation it is in
 message_id          the sender's own id for this message
 kind                message | ask | split | hand-off | close | reopen
@@ -78,12 +89,17 @@ to                  the AI agent addressed, the new owner, or a split's owner
 in_reply_to         the message it answers, or empty
 range_first         a split's first entry id, else empty
 range_last          a split's last entry id, else empty
-nonce               fresh, at least 16 characters
+nonce               fresh, at least 16 bytes
 time                RFC 3339
 fingerprint_version 1
 fingerprint         the salted fingerprint of the words
 ```
 
+- **It names the Identity Agent.** A conversation id is made by whoever opens
+  the conversation and nothing makes it unique across Identity Agents, and a
+  close or reopen has no recipient, so the id alone would scope it to nothing.
+  Naming the Identity Agent keeps a statement signed for one Identity Agent's
+  conversation from being replayed into another's of the same id.
 - **It names the recipient and the kind**, so one signed statement cannot be
   replayed as another kind or re-threaded to somebody else.
 - **`message_id` is the sender's own, bound into the signature.** The Identity

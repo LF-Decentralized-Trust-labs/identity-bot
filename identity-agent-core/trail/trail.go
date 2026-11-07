@@ -132,6 +132,7 @@ type conversation struct {
 type Trail struct {
 	mu      sync.Mutex
 	convs   map[string]*conversation
+	agent   string
 	roster  Roster
 	backend Backend
 	timeout time.Duration
@@ -143,13 +144,17 @@ const DefaultTimeout = 10 * time.Second
 
 // Options adjust a Trail; the zero value is the defaults.
 type Options struct {
+	// Agent is the Identity Agent that holds these conversations. A statement
+	// names it, so one made for another Identity Agent's conversation of the
+	// same id is refused (ADR-067).
+	Agent          string
 	ForwardTimeout time.Duration
 	Now            func() time.Time
 }
 
 // New makes an empty Trail.
 func New(roster Roster, backend Backend, o Options) *Trail {
-	t := &Trail{convs: map[string]*conversation{}, roster: roster, backend: backend,
+	t := &Trail{convs: map[string]*conversation{}, agent: o.Agent, roster: roster, backend: backend,
 		timeout: o.ForwardTimeout, now: o.Now}
 	if t.timeout == 0 {
 		t.timeout = DefaultTimeout

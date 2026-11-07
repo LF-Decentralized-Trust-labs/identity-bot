@@ -90,6 +90,28 @@ func CheckFingerprint(version int, salt, words []byte, fingerprint string, recor
 	return nil
 }
 
+// CheckVersionOrder says whether the fingerprint versions of an ordered record
+// (a conversation's entries, oldest first) respect the cut-over: version 0 is
+// legitimate only before the first version 1 entry, so once a record has a
+// salted fingerprint no unsalted one may follow it (ADR-067). A verifier passes
+// recorded=true to CheckFingerprint only for an entry this accepts as old.
+func CheckVersionOrder(versions []int) error {
+	salted := false
+	for i, v := range versions {
+		switch v {
+		case FingerprintV0:
+			if salted {
+				return fmt.Errorf("entry %d has an unsalted fingerprint (version 0) after a salted one", i+1)
+			}
+		case FingerprintV1:
+			salted = true
+		default:
+			return fmt.Errorf("entry %d: %d is not a fingerprint version", i+1, v)
+		}
+	}
+	return nil
+}
+
 // Kinds of entry a person signs.
 const (
 	PersonKindMessage = "message"
@@ -103,6 +125,11 @@ const (
 // PersonStatement is what a person's device or session signs: a statement
 // over the fingerprint of their words, never the words (ADR-067).
 type PersonStatement struct {
+	// Agent is the Identity Agent that holds the conversation. A conversation
+	// id is made by whoever opens it, so it is unique only within one Identity
+	// Agent; naming the Identity Agent keeps a statement from being replayed
+	// into another's conversation of the same id (ADR-067).
+	Agent        string `json:"agent"`
 	Conversation string `json:"conversation"`
 	// MessageID is the sender's own id for the message, bound into the
 	// signature.
@@ -126,11 +153,11 @@ type PersonStatement struct {
 }
 
 // Bytes is the string a person signs: IA-PERSON-MSG-V1 and then one field per
-// line in a fixed order, joined by a newline, no trailing newline.
+// line in a fixed order (agent first), joined by a newline, no trailing newline.
 func (s PersonStatement) Bytes() []byte {
 	return []byte(strings.Join([]string{
 		"IA-PERSON-MSG-V1",
-		s.Conversation, s.MessageID, s.Kind, s.From, s.Signer, s.To, s.InReplyTo,
+		s.Agent, s.Conversation, s.MessageID, s.Kind, s.From, s.Signer, s.To, s.InReplyTo,
 		s.RangeFirst, s.RangeLast, s.Nonce, s.Time,
 		fmt.Sprint(s.FingerprintVersion), s.Fingerprint,
 	}, "\n"))
@@ -141,7 +168,7 @@ func (s PersonStatement) Bytes() []byte {
 // salted.
 func (s PersonStatement) Check() error {
 	for name, v := range map[string]string{
-		"conversation": s.Conversation, "message_id": s.MessageID, "kind": s.Kind,
+		"agent": s.Agent, "conversation": s.Conversation, "message_id": s.MessageID, "kind": s.Kind,
 		"from": s.From, "signer": s.Signer, "nonce": s.Nonce, "time": s.Time,
 		"fingerprint": s.Fingerprint,
 	} {
@@ -149,7 +176,7 @@ func (s PersonStatement) Check() error {
 			return fmt.Errorf("the statement has no %s", name)
 		}
 	}
-	for _, v := range []string{s.Conversation, s.MessageID, s.Kind, s.From, s.Signer, s.To,
+	for _, v := range []string{s.Agent, s.Conversation, s.MessageID, s.Kind, s.From, s.Signer, s.To,
 		s.InReplyTo, s.RangeFirst, s.RangeLast, s.Nonce, s.Time, s.Fingerprint} {
 		if strings.ContainsAny(v, "\r\n") {
 			return errors.New("a statement field may not contain a line break")

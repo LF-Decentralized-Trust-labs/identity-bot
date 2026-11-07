@@ -9,10 +9,10 @@ the ones check_ai_agent_vectors.py already holds, imported rather than copied.
 Run: python3 -I check_signed_fingerprint_vectors.py <signed-fingerprint-vectors.json>
 Needs the blake3 module (pip install blake3).
 """
-import datetime
 import importlib.util
 import json
 import os
+import re
 import sys
 
 here = os.path.dirname(os.path.abspath(__file__))
@@ -41,17 +41,52 @@ def fingerprint(salt, words):
 
 KINDS = ("message", "ask", "split", "hand-off", "close", "reopen")
 
+FIELDS = ("agent", "conversation", "message_id", "kind", "from", "signer", "to", "in_reply_to",
+          "range_first", "range_last", "nonce", "time", "fingerprint_version", "fingerprint")
+
+# RFC 3339 as Go's time.Parse reads it (an hour may be one digit): ASCII digits only, a capital T, a zone
+# that is Z or a signed hh:mm, and a fraction of one or more digits after a "."
+# or ",". Nothing else: no date alone, no basic form, no space, no spaces around.
+RFC3339 = re.compile(
+    r"([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{1,2}):([0-9]{2}):([0-9]{2})([.,][0-9]+)?(Z|[+-]([0-9]{2}):([0-9]{2}))",
+    re.ASCII)
+
+
+def rfc3339(t):
+    m = RFC3339.fullmatch(t)
+    if not m:
+        return False
+    y, mo, d, h, mi, sec = (int(m.group(i)) for i in range(1, 7))
+    leap = y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)
+    days = [31, 29 if leap else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    if not (1 <= mo <= 12 and 1 <= d <= days[mo - 1] and h <= 23 and mi <= 59 and sec <= 59):
+        return False
+    if m.group(9) is not None and (int(m.group(9)) > 24 or int(m.group(10)) > 60):
+        return False
+    return True
+
 
 def statement_bytes(s):
-    return "\n".join(["IA-PERSON-MSG-V1", s["conversation"], s["message_id"], s["kind"], s["from"],
-                      s["signer"], s.get("to", ""), s.get("in_reply_to", ""), s.get("range_first", ""),
-                      s.get("range_last", ""), s["nonce"], s["time"], str(s["fingerprint_version"]),
-                      s["fingerprint"]]).encode()
+    """IA-PERSON-MSG-V1 and then the fields in FIELDS order, one per line."""
+    return "\n".join(["IA-PERSON-MSG-V1"] + [str(s.get(f, 0)) if f == "fingerprint_version" else s.get(f, "")
+                                              for f in FIELDS]).encode()
 
 
 def refused(s):
-    """The reason a statement is refused, or None."""
-    for f in ("conversation", "message_id", "kind", "from", "signer", "nonce", "time", "fingerprint"):
+    """The reason a statement is refused, or None. Go decodes a statement into
+    a struct, so an unknown field or a field of the wrong JSON type is refused
+    before any rule is applied; a missing field is its zero value."""
+    if not isinstance(s, dict):
+        return "not an object"
+    for k, v in s.items():
+        if k not in FIELDS:
+            return "unknown field " + k
+        if k == "fingerprint_version":
+            if type(v) is not int:  # not true, not 1.0, not "1"
+                return "fingerprint_version is not a JSON integer"
+        elif not isinstance(v, str):
+            return k + " is not a string"
+    for f in ("agent", "conversation", "message_id", "kind", "from", "signer", "nonce", "time", "fingerprint"):
         if not s.get(f):
             return "no " + f
     for v in s.values():
@@ -69,13 +104,11 @@ def refused(s):
         return "split range"
     if k != "split" and (first or last):
         return "range on a " + k
-    if s["fingerprint_version"] != 1:
+    if s.get("fingerprint_version", 0) != 1:
         return "fingerprint version"
-    if len(s["nonce"]) < 16:
+    if len(s["nonce"].encode("utf-8")) < 16:  # bytes, as Go counts them
         return "nonce"
-    try:
-        datetime.datetime.fromisoformat(s["time"].replace("Z", "+00:00"))
-    except ValueError:
+    if not rfc3339(s["time"]):
         return "time"
     return None
 
@@ -107,10 +140,17 @@ def main():
     for r in v["refused_statements"]:
         if refused(r["statement"]) is None:
             fail(r["name"] + " was accepted")
+    for r in v["refused_raw_statements"]:
+        try:
+            st = json.loads(r["json"])
+        except ValueError:
+            continue  # not even JSON: refused
+        if refused(st) is None:
+            fail(r["name"] + " was accepted")
     if failures:
         sys.exit(1)
-    print("ok: %d fingerprints, %d statements, %d refused" % (
-        len(v["fingerprints"]), len(v["statements"]), len(v["refused_statements"])))
+    print("ok: %d fingerprints, %d statements, %d refused, %d refused as raw JSON" % (
+        len(v["fingerprints"]), len(v["statements"]), len(v["refused_statements"]), len(v["refused_raw_statements"])))
 
 
 if __name__ == "__main__":
