@@ -78,11 +78,6 @@ func (h hostWrapper) GetPublicURL(r *http.Request) string { return h.s.getPublic
 func (h hostWrapper) StartBrowserKeySignIn(assetID, audience, browserKey, publicURL string) (BrowserKeySignIn, error) {
 	return h.s.startBrowserKeySignIn(assetID, audience, browserKey, publicURL)
 }
-func (h hostWrapper) OpenAppSession(appID, tokenHash, x, y string, person coretypes.Signer, expires time.Time) (string, error) {
-	return h.s.OpenAppSession(appID, tokenHash, x, y, person, expires)
-}
-func (h hostWrapper) EndAppSession(tokenHash string)        { h.s.EndAppSession(tokenHash) }
-func (h hostWrapper) EndAppSessionsOf(personAID string) int { return h.s.EndAppSessionsOf(personAID) }
 func (h hostWrapper) AssetStillAdmits(assetID, pairwiseAID string) (bool, error) {
 	return h.s.assetStillAdmits(assetID, pairwiseAID)
 }

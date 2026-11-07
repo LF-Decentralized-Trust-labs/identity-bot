@@ -169,24 +169,25 @@ signatures), and a thumbprint that must be refused. Go
     error means the asset could not be read, which is not an answer either way.
     Use it to sign out someone removed from the roster since they signed in.
 
-### A signed-in person speaks to an AI agent from the app's page
+### A signed-in person speaks to an AI agent from the app's page — SUPERSEDED
 
-*Amended 2026-11-09 by ADR-072:* withdrawn as the target. A page does not call the core. The app's back end passes the page's signed request on inside its own signed call, and the core answers no app's browser origin. What this note describes is built, and it is one of the places ADR-006 lists as not conforming yet. It moves behind the app's back end.
+**Superseded 2026-11-07 by the owner's ruling, citing ADR-006, and by ADR-072.** An Identity
+Agent core is never reached from a browser, by anyone, for anything, on any
+route: a browser cannot check the code it is served, cannot verify the machine,
+and has no enclave. This section described the opposite: an app's back end
+opened a session in the core (`OpenAppSession`, `EndAppSession`,
+`EndAppSessionsOf`), and the core admitted a request carrying the session token
+and a browser-key proof from the app's origin on the talk routes, answering
+CORS for that origin. All of it is removed: the core keeps no app-session
+registry, admits no browser credential, and answers no browser origin on any
+route.
 
-The app's back end opens a session here with the Host's `OpenAppSession(appID,
-tokenHash, x, y, person, expires)`: the SHA-256 of the session token
-(`login.BrowserSessionBinding`; never the token), the P-256 key the sign-in
-approved, the person the organisation can prove, and when it ends. The talk
-routes (`POST` and `GET /api/mcp/agents/{id}/conversations`, `GET
-/api/mcp/conversations/{cid}`) then accept, besides a paired controller, a
-request that carries the token as a bearer **and** is signed by that key
-(`login.BrowserProofString`: fresh within two minutes, used once, covering the
-method, host, target and body, so a proof made for one Identity Agent is
-no proof at another). `OpenAppSession` refuses a person who stands as the
-owner, an app id that is not an `app` asset this core hosts, and a token hash
-already in use; it also drops sessions that have ended. Such a request is never a controller and has no
-grant; `TheAppSessionThatAsked` tells a handler it came this way so it can show
-that person only what is theirs. A request whose `Origin` is not the session's
-app, a session for something that is not an `app` asset, an ended or expired
-session, and a person who no longer stands are refused. The router answers CORS
-for an origin an `app` asset lists, on those routes only.
+What stays is the sign-in above, which is browser -> app: the browser key named
+in the challenge and repeated in the person's assertion, and the app's own
+session layer that makes the browser prove it holds the key. A person talks to
+an AI agent from the app's page by the browser talking to the app and the app
+talking to the core: the app's back end, an enrolled machine, asks as any
+controller does, naming the person and carrying the person's own signed
+statement over a salted fingerprint of their words (ADR-067). The core checks
+that statement as well as the app's signature, so the app cannot speak for a
+person who did not sign, nor for one it does not serve.

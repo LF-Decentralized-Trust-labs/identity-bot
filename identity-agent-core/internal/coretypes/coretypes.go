@@ -66,15 +66,12 @@ type ControllerProof struct {
 	Signature       string
 	RequestBytes    []byte
 	ControllerGrant string
-	// Scheme says how Signature was made. Empty is a controller's Ed25519
-	// signature; BrowserKeyScheme is a key a browser holds (ADR-066), in which
-	// case Controller is "browser:" and the key's thumbprint, PublicKey the
-	// key's uncompressed point in unpadded base64url and ControllerGrant empty.
-	Scheme string
+	// PersonStatement is, when an app's back end spoke for a person, that
+	// person's own signed statement over a fingerprint of their words
+	// (agentmessage.PersonProof as JSON, ADR-067). Empty when the controller
+	// spoke as the signer it belongs to.
+	PersonStatement []byte
 }
-
-// BrowserKeyScheme is a ControllerProof made with a browser's P-256 key.
-const BrowserKeyScheme = "browser-key-p256"
 
 // AgentRef is an AI agent an identity holds, as its asset names it.
 type AgentRef struct {

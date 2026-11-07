@@ -433,12 +433,6 @@ func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handle
 					next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), theGateAdmittedTheOwnerKey{}, how)))
 					return
 				}
-				// A person's session at an app, signed with the browser key it is
-				// bound to, on the talk routes only. Never a controller, so it is
-				// asked before one and answers for itself.
-				if s.anAppSessionSpeaks(w, r, pattern, next) {
-					return
-				}
 				if served := s.controllerActsForTheOwner(w, r, pattern, next); served {
 					return
 				}

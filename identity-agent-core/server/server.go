@@ -163,10 +163,6 @@ type CoreServer struct {
 	// extraOpen are the overlay routes a non-owner may reach; see OpenExtraRoutes.
 	extraOpen map[string]string
 
-	// appSessions are the people signed in at an app, who may speak on the talk
-	// routes (an_app_session_speaks_for_its_person.go).
-	appSessions appSessionBook
-
 	// G-052: asset login challenge store (per-session bundles for /i/{token})
 	challengeMu     sync.Mutex
 	challenges      map[string]login.ChallengeBundle  // keyed by session_token
@@ -986,22 +982,12 @@ func (s *CoreServer) IsRunning() bool {
 // corsPolicy is the router's cross-origin policy, in one place so a test can
 // exercise the same value the router uses rather than a copy of it.
 func corsPolicy() func(http.Handler) http.Handler {
-	return corsPolicyFor(nil, func(string) bool { return false })
-}
-
-// corsPolicyFor is corsPolicy that also lets a browser read the answer on the
-// talk routes (and only those) for an origin an app the organisation hosts
-// lists. Every other route, and every other origin, is answered as before.
-func corsPolicyFor(routes chi.Routes, appOrigin func(origin string) bool) func(http.Handler) http.Handler {
 	return cors.Handler(cors.Options{
-		AllowOriginFunc: func(r *http.Request, origin string) bool {
-			return routes != nil && isATalkRequest(routes, r) && appOrigin(origin)
-		},
-		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowOriginFunc: func(*http.Request, string) bool { return false },
+		AllowedMethods:  []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders: []string{
 			"Accept", "Authorization", "Content-Type", "X-CSRF-Token",
 			headerOwnerSig, headerOwnerTimestamp, headerOwnerAID, headerOwnerFor, headerBodyDigest,
-			login.HeaderBrowserProofTime, login.HeaderBrowserProofNonce, login.HeaderBrowserProof,
 		},
 		ExposedHeaders:   []string{"Link"},
 		AllowCredentials: false,
@@ -1036,7 +1022,7 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 	// that is not a style choice: in this library an empty list means allow
 	// ALL origins (cors.go, "Default is all origins"). An empty slice here
 	// would read as a denial and behave as a wildcard.
-	r.Use(corsPolicyFor(r, s.anAppListsThisOrigin))
+	r.Use(corsPolicy())
 
 	// Everything below is owner-only unless api_auth.go names it otherwise.
 	// Registered here, before any route, so no route can be added outside it.

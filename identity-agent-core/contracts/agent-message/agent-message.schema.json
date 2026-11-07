@@ -201,12 +201,6 @@
         "controller_grant": {
           "type": "string",
           "description": "the controller's Controller Grant credential, when it has one"
-        },
-        "scheme": {
-          "description": "How signature was made. Absent: a controller's Ed25519 signature, the signed string's last line the Blake3-256 of the request bytes. \"browser-key-p256\": a key a browser holds (ADR-066): controller is \"browser:\" and the key's RFC 7638 thumbprint, public_key its uncompressed P-256 point in unpadded base64url, signature ECDSA P-256 over SHA-256 of the signed string (r then s, unpadded base64url), the signed string's last line the unpadded base64url SHA-256 of the request bytes, and there is no controller_grant.",
-          "enum": [
-            "browser-key-p256"
-          ]
         }
       }
     },

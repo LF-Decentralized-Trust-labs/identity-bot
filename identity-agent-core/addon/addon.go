@@ -117,19 +117,6 @@ type Host interface {
 	// secret StartBrowserKeySignIn returned. "Verified" carries the browser key
 	// the person's signed assertion repeated.
 	BrowserKeySignInResult(session, collector string) (server.BrowserKeySignInResult, error)
-	// OpenAppSession lets a person who signed in at the app with this asset id
-	// speak to an AI agent from its pages: a session bound to the P-256 browser
-	// key whose JWK coordinates are x and y (the key the sign-in approved),
-	// named by tokenHash (login.BrowserSessionBinding of the session token; the
-	// token is never given here), ending at expires. It returns the key's
-	// thumbprint. The session reaches the talk routes only, only with each
-	// request signed by that key, only from that app's origin, and never as a
-	// controller. person must be someone the organisation can prove.
-	OpenAppSession(appID, tokenHash, x, y string, person Signer, expires time.Time) (string, error)
-	// EndAppSession ends one session, and EndAppSessionsOf every session of a
-	// person (returning how many).
-	EndAppSession(tokenHash string)
-	EndAppSessionsOf(personAID string) int
 	GrantController(g server.ControllerGrant, now time.Time, by Authority) (server.ControllerGrant, error)
 	GrantsHeldBy(agentAID string, usableOnly bool) []store.CredentialRecord
 	HoldTheRecord() (string, bool, bool, func(), error)

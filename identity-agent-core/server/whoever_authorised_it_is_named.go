@@ -760,15 +760,10 @@ func (s *CoreServer) theOwner() (string, bool) {
 var errNoProvablePerson = errors.New("a person speaks to an AI agent from an app paired to this " +
 	"organisation, so the record can show which person asked")
 
-// thePersonAsking is the person behind a request a controller signed, or a
-// person's session at an app signed with its browser key, and that signature as
-// proof of what they said.
+// thePersonAsking is the person behind a request a controller signed, or one an
+// app signed for a person who signed too (an_app_speaks_for_a_person_who_signed.go), and the
+// controller's signature as proof of what they said.
 func (s *CoreServer) thePersonAsking(r *http.Request) (coretypes.Signer, *coretypes.ControllerProof, error) {
-	// A person at an app, whose request the gate admitted on a session and the
-	// browser key's signature, is never a controller and has no grant.
-	if person, proof, ok := thePersonAnAppSessionIs(r); ok {
-		return person, proof, nil
-	}
 	grant, ok := TheControllerThatAsked(r)
 	if !ok {
 		return coretypes.Signer{}, nil, errNoProvablePerson
@@ -806,9 +801,19 @@ func (s *CoreServer) thePersonAsking(r *http.Request) (coretypes.Signer, *corety
 	if err != nil {
 		return coretypes.Signer{}, nil, err
 	}
+	// An app's back end may speak for the person it serves, with that person's
+	// own signed statement. Judged after the machine itself is known to stand.
+	named, statement, speaking, err := s.thePersonAnAppSpeaksFor(r, person)
+	if err != nil {
+		return coretypes.Signer{}, nil, err
+	}
+	if speaking {
+		person = named
+	}
 	return person, &coretypes.ControllerProof{
 		Controller: grant.ControllerAID, PublicKey: grant.PublicKey, SignedString: signed,
 		Signature: sig, RequestBytes: body, ControllerGrant: grant.CredentialSAID,
+		PersonStatement: statement,
 	}, nil
 }
 

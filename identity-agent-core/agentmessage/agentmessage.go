@@ -35,7 +35,6 @@ import (
 	"identity-agent-core/agentbody"
 	"identity-agent-core/didcomm"
 	"identity-agent-core/iacrypto"
-	"identity-agent-core/login"
 )
 
 // Kinds of message.
@@ -342,18 +341,10 @@ type ControllerProof struct {
 	// rather than by this Identity Agent's word. Empty for a controller granted
 	// before machines were given one.
 	ControllerGrant string `json:"controller_grant,omitempty"`
-	// Scheme says how Signature was made. Empty is a controller's Ed25519
-	// signature. "browser-key-p256" is a key a browser holds (ADR-066): Controller
-	// is "browser:" and the key's thumbprint, PublicKey its uncompressed point in
-	// unpadded base64url, and the signed string is login.BrowserProofString.
-	Scheme string `json:"scheme,omitempty"`
 }
 
 // Verify checks the controller signed this request.
 func (p ControllerProof) Verify() error {
-	if p.Scheme != "" {
-		return p.verifyBrowserKey()
-	}
 	ok, err := iacrypto.VerifyMachineSignature(p.PublicKey, p.Signature, []byte(p.SignedString))
 	if err != nil || !ok {
 		return errors.New("the request is not signed by the controller it names")
@@ -361,35 +352,6 @@ func (p ControllerProof) Verify() error {
 	lines := strings.Split(p.SignedString, "\n")
 	if len(lines) < 2 || lines[1] != p.Controller {
 		return errors.New("the signed request names a different controller")
-	}
-	_, err = p.SignedRequest()
-	return err
-}
-
-// verifyBrowserKey checks a proof made with a key a browser holds: the
-// signature is by the key named, the key is the one the proof's controller
-// name carries the thumbprint of, and the signed string commits to the body.
-func (p ControllerProof) verifyBrowserKey() error {
-	if p.Scheme != "browser-key-p256" || p.ControllerGrant != "" {
-		return errors.New("the proof names a way of signing this Identity Agent does not know")
-	}
-	raw, err := base64.RawURLEncoding.Strict().DecodeString(p.PublicKey)
-	if err != nil || len(raw) != 65 || raw[0] != 4 {
-		return errors.New("the proof's browser key is not a P-256 point")
-	}
-	x, y := base64.RawURLEncoding.EncodeToString(raw[1:33]), base64.RawURLEncoding.EncodeToString(raw[33:])
-	pub, tp, err := login.BrowserKeyFromJWK(x, y)
-	if err != nil {
-		return err
-	}
-	if p.Controller != "browser:"+tp {
-		return errors.New("the signed request names a different browser key")
-	}
-	if !login.VerifyBrowserSignature(pub, p.SignedString, p.Signature) {
-		return errors.New("the request is not signed by the browser key it names")
-	}
-	if !strings.HasPrefix(p.SignedString, login.BrowserProofLabel+"\n") {
-		return errors.New("the signed string is not a browser key's proof")
 	}
 	_, err = p.SignedRequest()
 	return err
@@ -412,11 +374,7 @@ func (p ControllerProof) SignedRequest() ([]byte, error) {
 	case len(p.RequestBytes) > 0 && len(p.Request) > 0:
 		return nil, errors.New("the proof carries the request twice")
 	case len(p.RequestBytes) > 0:
-		if p.Scheme != "" {
-			if login.BrowserProofBodyHash(p.RequestBytes) == signed {
-				return p.RequestBytes, nil
-			}
-		} else if iacrypto.Blake3QB64Must(p.RequestBytes) == signed {
+		if iacrypto.Blake3QB64Must(p.RequestBytes) == signed {
 			return p.RequestBytes, nil
 		}
 	case len(p.Request) > 0:
