@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -816,5 +817,30 @@ func TestAnUnreachableRefusalNamesNoProductAndUsesUpItsID(t *testing.T) {
 	}
 	if r := f.write(f.say(alice, "message", bot, "hello", nil)); r.State != Committed {
 		t.Fatalf("the message under a new id got %+v", r)
+	}
+}
+
+// CheckAuthor is the one check that a statement is its author's: Write runs it
+// first, and a caller that admits words before they reach Write runs the same.
+func TestCheckAuthorIsWhatWriteRunsFirst(t *testing.T) {
+	f := newFixture(t)
+	w := f.say(alice, agentmessage.PersonKindMessage, bot, "hello", nil)
+	if err := CheckAuthor(w, testAgent, f.roster); err != nil {
+		t.Fatalf("an honest statement was refused: %v", err)
+	}
+	if err := CheckAuthor(w, "EOTHER", f.roster); err == nil {
+		t.Fatal("a statement for another Identity Agent was admitted")
+	}
+	f.roster.keys[alice] = "EOTHERKEY"
+	err := CheckAuthor(w, testAgent, f.roster)
+	var rej *Rejected
+	if !errors.As(err, &rej) {
+		t.Fatalf("a key that does not speak for the person = %v", err)
+	}
+	if _, werr := f.tr.Write(context.Background(), w); !errors.As(werr, &rej) {
+		t.Fatalf("Write admitted what CheckAuthor refused: %v", werr)
+	}
+	if err := CheckFresh(w.Statement, f.now.Add(6*time.Minute)); err == nil {
+		t.Fatal("a statement six minutes old was fresh")
 	}
 }

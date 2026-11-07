@@ -94,6 +94,10 @@ type Host interface {
 	AuthorityOf(r *http.Request) (Authority, func(), error)
 	AwaitingFor(holder string, pending bool) string
 	BindSigner(aid string, signer string) (server.ControllerGrant, error)
+	// BindAppAsset binds a machine to the app asset it is the back end of, once.
+	// It then speaks only for the people that asset admits, each with their own
+	// signed statement, and as no signer of its own.
+	BindAppAsset(aid string, assetID string) (server.ControllerGrant, error)
 	CredentialLog(registrySAID string, acdcSAID string) ([]string, string, error)
 	DelegatedFromHere(aid string, e OwnEvidence) error
 	EngineSigns()

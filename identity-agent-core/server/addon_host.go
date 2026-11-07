@@ -1,6 +1,8 @@
 package server
 
 import (
+	"errors"
+	"fmt"
 	"sync"
 
 	"context"
@@ -57,6 +59,17 @@ func (h hostWrapper) AwaitingFor(holder string, pending bool) string {
 }
 func (h hostWrapper) BindSigner(aid string, signer string) (ControllerGrant, error) {
 	return h.s.bindSigner(aid, signer)
+}
+func (h hostWrapper) BindAppAsset(aid string, assetID string) (ControllerGrant, error) {
+	h.s.grantsMu.Lock()
+	defer h.s.grantsMu.Unlock()
+	if h.s.assetHandler == nil {
+		return ControllerGrant{}, errors.New("the assets are not open")
+	}
+	if _, found, err := h.s.assetHandler.Store.GetAsset(assetID); err != nil || !found {
+		return ControllerGrant{}, fmt.Errorf("no such app asset")
+	}
+	return h.s.controllers().BindAppAsset(aid, assetID)
 }
 func (h hostWrapper) CredentialLog(registrySAID string, acdcSAID string) ([]string, string, error) {
 	return h.s.credentialLog(registrySAID, acdcSAID)

@@ -784,9 +784,14 @@ func (s *CoreServer) thePersonAsking(r *http.Request) (coretypes.Signer, *corety
 		}
 		grant = current
 	}
-	person, err := s.signerOf(grant)
-	if err != nil {
-		return coretypes.Signer{}, nil, err
+	// A machine bound to an app has no signer of its own to speak as: it speaks
+	// for the people its asset admits, each by their own statement, below.
+	var person coretypes.Signer
+	if grant.AppAsset == "" {
+		var err error
+		if person, err = s.signerOf(grant); err != nil {
+			return coretypes.Signer{}, nil, err
+		}
 	}
 	// Settling the signer re-issues the machine's grant, so the grant named is
 	// read again rather than taken from before.
@@ -803,7 +808,7 @@ func (s *CoreServer) thePersonAsking(r *http.Request) (coretypes.Signer, *corety
 	}
 	// An app's back end may speak for the person it serves, with that person's
 	// own signed statement. Judged after the machine itself is known to stand.
-	named, statement, speaking, err := s.thePersonAnAppSpeaksFor(r, person)
+	named, statement, salt, speaking, err := s.thePersonAnAppSpeaksFor(r, grant, body)
 	if err != nil {
 		return coretypes.Signer{}, nil, err
 	}
@@ -813,7 +818,7 @@ func (s *CoreServer) thePersonAsking(r *http.Request) (coretypes.Signer, *corety
 	return person, &coretypes.ControllerProof{
 		Controller: grant.ControllerAID, PublicKey: grant.PublicKey, SignedString: signed,
 		Signature: sig, RequestBytes: body, ControllerGrant: grant.CredentialSAID,
-		PersonStatement: statement,
+		PersonStatement: statement, PersonSalt: salt,
 	}, nil
 }
 

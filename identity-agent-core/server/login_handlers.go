@@ -301,6 +301,25 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// The person's own assertion named this browser key (ADR-066): keep that the
+	// key speaks for them at this asset, which is what later lets a statement
+	// signed by the key be taken as theirs (trail.CheckAuthor).
+	if bundle.BrowserKey != "" {
+		assetID, found := s.assetIDOfSite(bundle.SiteAID)
+		if !found {
+			s.setChallengeStatus(token, map[string]interface{}{"status": "denied", "reason": "the asset this sign-in was for is gone"})
+			http.Error(w, "not authorized", http.StatusForbidden)
+			return
+		}
+		now := time.Now().UTC()
+		if err := s.browserKeys().Record(assetID, res.PairwiseAID, a.BrowserKey, now.Add(browserKeyLife), now); err != nil {
+			log.Printf("[identity-agent-core] a browser key's sign-in could not be kept: %v", err)
+			s.setChallengeStatus(token, map[string]interface{}{"status": "denied", "reason": "the sign-in could not be recorded"})
+			http.Error(w, "could not record the sign-in", http.StatusInternalServerError)
+			return
+		}
+	}
+
 	st := map[string]interface{}{
 		"status":       "complete",
 		"pairwise_aid": res.PairwiseAID,

@@ -71,6 +71,10 @@ type ControllerProof struct {
 	// (agentmessage.PersonProof as JSON, ADR-067). Empty when the controller
 	// spoke as the signer it belongs to.
 	PersonStatement []byte
+	// PersonSalt is the salt that statement's fingerprint is over, checked
+	// against the words in the request body. The trail keeps neither; the app
+	// that keeps the words keeps the salt (ADR-067, ADR-068).
+	PersonSalt []byte
 }
 
 // AgentRef is an AI agent an identity holds, as its asset names it.

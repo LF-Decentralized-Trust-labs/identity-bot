@@ -184,10 +184,45 @@ route.
 
 What stays is the sign-in above, which is browser -> app: the browser key named
 in the challenge and repeated in the person's assertion, and the app's own
-session layer that makes the browser prove it holds the key. A person talks to
-an AI agent from the app's page by the browser talking to the app and the app
-talking to the core: the app's back end, an enrolled machine, asks as any
-controller does, naming the person and carrying the person's own signed
-statement over a salted fingerprint of their words (ADR-067). The core checks
-that statement as well as the app's signature, so the app cannot speak for a
-person who did not sign, nor for one it does not serve.
+session layer that makes the browser prove it holds the key.
+
+**What the core keeps from the sign-in.** When the callback verifies an
+assertion that repeats the challenge's `browser_key`, the core records, itself,
+"key K speaks for person P at asset A until T" (P is the pairwise identifier
+the assertion proved, T is 12 hours on). The app does not write it and cannot.
+It is the only way the core learns whose a browser key is.
+
+**How a person talks to an AI agent from the app's page.** The browser talks to
+the app, and the app's back end, an enrolled machine bound to the app's asset,
+talks to the core with its own signed request, naming the person and carrying
+the statement the person's browser key signed over a salted fingerprint of
+their words (ADR-067) and that fingerprint's salt. The machine's grant is the
+app's, not one person's: it may speak for whoever the asset admits now
+(`assetStillAdmits`), so an organisation's chat app can serve all its
+employees. The core admits the request only when all of these hold, and an app
+machine that sends no statement is refused:
+
+- the statement is checked by `trail.CheckAuthor`, the same function
+  `trail.Write` runs first: well formed, the signature holds, it is for this
+  Identity Agent, and the recorded sign-in says that key speaks for that person
+  at that asset, has not lapsed, and the asset still admits them;
+- it is fresh to within `authorisation.Skew` (`trail.CheckFresh`), the rule the
+  trail and the conversation bundle hold every statement to;
+- it is for this request: its fingerprint is of the words in the body under the
+  salt, and its conversation, kind (a message or an ask), recipient, reply and
+  message id (the body's `nonce`) are the route's and the body's;
+- it has not been used before.
+
+**The browser key is P-256 and stays P-256.** The statement's signer is the
+browser key itself, in the machine-key form every other key in the core has
+(`agentbody.Verify` verifies P-256 as well as Ed25519, low-s), and the key is
+matched to the sign-in by its RFC 7638 thumbprint
+(`login.BrowserKeyThumbprintOfMachineKey`). The alternative, a sign-in naming an
+Ed25519 key, would change this ADR's wire format, its vectors and its
+TypeScript packages, and a non-extractable Ed25519 key is not available in
+every browser's WebCrypto. An Ed25519 key has no thumbprint here and speaks for
+no one.
+
+Nothing in this path reaches the core from a browser. The core's other browser
+routes, and the login widget's `/api/login/session/*` CORS, are not changed by
+it.

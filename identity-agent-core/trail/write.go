@@ -88,18 +88,46 @@ type Rejected struct{ Reason string }
 
 func (r *Rejected) Error() string { return "rejected: " + r.Reason }
 
+// CheckAuthor is the one check that a person's statement is the person's: it is
+// well formed, its signature holds under the key it names, it is for this
+// Identity Agent, and the Identity Agent's own records say that key speaks for
+// the person. Write runs it first, and anything that admits a person's words
+// before they reach Write (an app speaking for a person, whose request is
+// refused at the door) runs this same function, so there is not a second
+// reader of what makes a statement a person's. The failure is a *Rejected.
+func CheckAuthor(w Write, agent string, keys KeyRoster) error {
+	s := w.Statement
+	if err := agentmessage.VerifyPerson(s, w.Verkey, w.Signature); err != nil {
+		return &Rejected{err.Error()}
+	}
+	if s.Agent != agent {
+		return &Rejected{"the statement is for another Identity Agent"}
+	}
+	if keys == nil || !keys.KeySpeaksFor(s.From, s.Signer, w.Verkey) {
+		return &Rejected{"the key does not speak for " + s.From}
+	}
+	return nil
+}
+
+// CheckFresh holds a statement to the rule the verifier holds every person's
+// entry to: signed within authorisation.Skew of now.
+func CheckFresh(s agentmessage.PersonStatement, now time.Time) error {
+	signed, err := time.Parse(time.RFC3339, s.Time)
+	if err != nil {
+		return &Rejected{ReasonStale}
+	}
+	if d := now.Sub(signed); d > authorisation.Skew || -d > authorisation.Skew {
+		return &Rejected{ReasonStale}
+	}
+	return nil
+}
+
 // Write checks a write against the trail and, if it is allowed, keeps it:
 // pending, forwarded, and committed once the app confirms the fingerprint.
 func (t *Trail) Write(ctx context.Context, w Write) (Result, error) {
 	s := w.Statement
-	if err := agentmessage.VerifyPerson(s, w.Verkey, w.Signature); err != nil {
-		return Result{}, &Rejected{err.Error()}
-	}
-	if s.Agent != t.agent {
-		return Result{}, &Rejected{"the statement is for another Identity Agent"}
-	}
-	if !t.roster.KeySpeaksFor(s.From, s.Signer, w.Verkey) {
-		return Result{}, &Rejected{"the key does not speak for " + s.From}
+	if err := CheckAuthor(w, t.agent, t.roster); err != nil {
+		return Result{}, err
 	}
 	c := t.get(s.Conversation)
 	if c == nil {
@@ -190,16 +218,7 @@ func (t *Trail) Write(ctx context.Context, w Write) (Result, error) {
 // checkTime holds a statement to the rule the verifier holds every person's
 // entry to: signed within authorisation.Skew of when the Identity Agent takes
 // it. One that is not proves no timely author, so nothing joins the chain.
-func (t *Trail) checkTime(s agentmessage.PersonStatement) error {
-	signed, err := time.Parse(time.RFC3339, s.Time)
-	if err != nil {
-		return &Rejected{ReasonStale}
-	}
-	if d := t.now().Sub(signed); d > authorisation.Skew || -d > authorisation.Skew {
-		return &Rejected{ReasonStale}
-	}
-	return nil
-}
+func (t *Trail) checkTime(s agentmessage.PersonStatement) error { return CheckFresh(s, t.now()) }
 
 // ExpirePending marks every entry still pending after the forwarding timeout
 // as not kept, as when the process stopped before the app answered. It

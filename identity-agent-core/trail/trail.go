@@ -87,12 +87,17 @@ func (e Entry) State() State {
 // EntryID is the id of the entry at a place in a conversation.
 func EntryID(seq int) string { return agentmessage.EntryID(seq) }
 
-// Roster is what the Identity Agent knows from its own records, never from the
-// app: who a key speaks for, and who may use whom.
-type Roster interface {
+// KeyRoster is the part of the Roster that says whose a key is.
+type KeyRoster interface {
 	// KeySpeaksFor says whether the key (signer identifier and verkey) was
 	// approved to act as the person.
 	KeySpeaksFor(person, signer, verkey string) bool
+}
+
+// Roster is what the Identity Agent knows from its own records, never from the
+// app: who a key speaks for, and who may use whom.
+type Roster interface {
+	KeyRoster
 	IsAIAgent(id string) bool
 	// MayUseAgent says whether the person's reach includes the AI agent.
 	MayUseAgent(person, agent string) bool

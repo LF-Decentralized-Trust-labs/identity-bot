@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"identity-agent-core/asset"
 	"identity-agent-core/login"
@@ -264,5 +265,32 @@ func TestAVerifiedResultWithDisclosuresOfTheWrongTypeIsAnError(t *testing.T) {
 	w.org.setChallengeStatus(in.Session, map[string]interface{}{"status": "complete", "browser_key": aBrowserKey})
 	if _, err := w.org.browserKeySignInResult(in.Session, in.Collector); err == nil {
 		t.Fatal("a verified sign-in with no identifier for the person was read")
+	}
+}
+
+// The sign-in is what the core keeps as "this key speaks for this person at
+// this asset": made by the callback from the person's own signed assertion,
+// and by nothing the app says.
+func TestAVerifiedSignInForABrowserKeyIsKeptAsWhoseTheKeyIs(t *testing.T) {
+	w := anOrganisationWithAWebsite(t, asset.EnrollmentPolicy{Mode: asset.EnrollmentOpen})
+	h := aPersonsIdentityAgent(t)
+	if _, ok := w.org.browserKeys().Whose("the-website", aBrowserKey, time.Now()); ok {
+		t.Fatal("a key spoke for someone before any sign-in")
+	}
+	req := aBrowserKeyChallenge(t, w, aBrowserKey)
+	if _, err := h.Approve(req); err != nil {
+		t.Fatal(err)
+	}
+	w.org.challengeMu.Lock()
+	pairwise, _ := w.org.challengeStatus[req.SessionToken]["pairwise_aid"].(string)
+	w.org.challengeMu.Unlock()
+	if who, ok := w.org.browserKeys().Whose("the-website", aBrowserKey, time.Now()); !ok || who != pairwise || pairwise == "" {
+		t.Fatalf("the key speaks for %q (%v), the person who signed in is %q", who, ok, pairwise)
+	}
+	if _, ok := w.org.browserKeys().Whose("another-asset", aBrowserKey, time.Now()); ok {
+		t.Fatal("the key speaks at an asset the person did not sign in to")
+	}
+	if _, ok := w.org.browserKeys().Whose("the-website", aBrowserKey, time.Now().Add(browserKeyLife+time.Second)); ok {
+		t.Fatal("the key still speaks after the sign-in's time")
 	}
 }
