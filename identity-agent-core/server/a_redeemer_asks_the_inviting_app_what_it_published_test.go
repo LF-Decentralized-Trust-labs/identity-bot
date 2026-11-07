@@ -24,6 +24,7 @@ type anInvitingApp struct {
 	refuse    int // when non-zero, answer every poll with this status
 	namesPath bool
 	nonces    []string
+	lastHeads http.Header // the headers of the last signed ask it received
 }
 
 func newInvitingApp(t *testing.T) *anInvitingApp {
@@ -57,6 +58,7 @@ func newInvitingApp(t *testing.T) *anInvitingApp {
 				return
 			}
 			a.nonces = append(a.nonces, nonce)
+			a.lastHeads = r.Header.Clone()
 			if a.published == "" {
 				w.WriteHeader(http.StatusAccepted)
 				_, _ = w.Write([]byte(`{"ready":false}`))
@@ -213,6 +215,32 @@ func TestEveryPollCarriesANonceOfItsOwn(t *testing.T) {
 	askWhatWasPublished(s, "tok")
 	if len(app.nonces) != 2 || app.nonces[0] == app.nonces[1] || app.nonces[0] == "" {
 		t.Fatalf("nonces seen by the inviting app: %q", app.nonces)
+	}
+}
+
+// The nonce is part of what is signed. Without that, a poll captured in transit
+// could be sent again with a fresh nonce and pass the app's replay check, which
+// is the only thing the nonce is for. Fails if the nonce is left out of
+// InvitePollText: the altered request would still verify.
+func TestTheNonceIsCoveredByThePollsSignature(t *testing.T) {
+	app := newInvitingApp(t)
+	s := redeemedAgent(t, app)
+	askWhatWasPublished(s, "tok")
+	if app.lastHeads == nil {
+		t.Fatal("the inviting app received no signed ask")
+	}
+	asked := func(nonce string) *http.Request {
+		r := httptest.NewRequest(http.MethodGet, "/some/app/own/path/tok/ready", nil)
+		r.Header = app.lastHeads.Clone()
+		r.Header.Set(HeaderInvitePollNonce, nonce)
+		return r
+	}
+	original := app.lastHeads.Get(HeaderInvitePollNonce)
+	if _, err := VerifyInvitePoll(asked(original), "tok", app.key, time.Now()); err != nil {
+		t.Fatalf("the ask as sent did not verify: %v", err)
+	}
+	if _, err := VerifyInvitePoll(asked(original+"x"), "tok", app.key, time.Now()); err == nil {
+		t.Fatal("an ask with a different nonce still verified, so the nonce is not signed")
 	}
 }
 
