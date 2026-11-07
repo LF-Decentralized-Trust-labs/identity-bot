@@ -295,7 +295,7 @@ func (t *Trail) decide(c *conversation, w Write) string {
 		if !r.IsAIAgent(s.To) {
 			return "a message is addressed to an AI agent"
 		}
-		if !r.MayUseAgent(s.From, s.To) {
+		if !r.MayUseAgent(s.From, s.To) || !r.AgentGrantAllows(s.To, s.From) {
 			return "you may not use that AI agent"
 		}
 	case agentmessage.PersonKindHandOff:
@@ -328,7 +328,7 @@ func (t *Trail) decide(c *conversation, w Write) string {
 func (t *Trail) newOwnerOK(by, to string) string {
 	switch {
 	case t.roster.IsAIAgent(to):
-		if !t.roster.MayUseAgent(by, to) {
+		if !t.roster.MayUseAgent(by, to) || !t.roster.AgentGrantAllows(to, by) {
 			return "you may not use that AI agent"
 		}
 	case t.roster.ActiveEmployee(to):

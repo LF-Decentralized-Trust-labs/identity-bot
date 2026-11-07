@@ -31,11 +31,13 @@ type roster struct {
 	reach     map[string]bool // person+"\n"+agent
 	employees map[string]bool
 	signers   map[string]bool
+	noGrant   map[string]bool // person+"\n"+agent the agent's grant refuses
 }
 
 func (r *roster) KeySpeaksFor(person, signer, _ string) bool { return r.keys[person] == signer }
 func (r *roster) IsAIAgent(id string) bool                   { return r.agents[id] }
 func (r *roster) MayUseAgent(p, a string) bool               { return r.reach[p+"\n"+a] }
+func (r *roster) AgentGrantAllows(a, p string) bool          { return !r.noGrant[p+"\n"+a] }
 func (r *roster) ActiveEmployee(p string) bool               { return r.employees[p] }
 func (r *roster) IsSigner(p string) bool                     { return r.signers[p] }
 
@@ -49,6 +51,7 @@ type app struct {
 	kept      map[string]Forward
 	keepCalls int
 	discarded []string
+	extra     map[string]Stored
 }
 
 func (a *app) Reachable(context.Context) error {
@@ -110,6 +113,7 @@ func newFixture(t *testing.T) *fixture {
 		reach:     map[string]bool{alice + "\n" + bot: true, bob + "\n" + bot: true},
 		employees: map[string]bool{bob: true},
 		signers:   map[string]bool{boss: true},
+		noGrant:   map[string]bool{},
 	}
 	for i, p := range []string{alice, bob, boss} {
 		id, _, _ := agentbody.Identity(signerOf(byte(i + 1)))
@@ -626,5 +630,152 @@ func TestConcurrentRetriesOfOneIDAreKeptOnce(t *testing.T) {
 	wg.Wait()
 	if f.app.keepCalls != 1 || len(f.tr.Entries("c1")) != 1 {
 		t.Fatalf("kept %d times, %d entries", f.app.keepCalls, len(f.tr.Entries("c1")))
+	}
+}
+
+// Read is the app answering a read: everything it holds, in entry order,
+// whatever range was asked, since the trail checks the answer and not the app.
+func (a *app) Read(_ context.Context, _, _, _ string) ([]Stored, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.down {
+		return nil, ErrUnreachable
+	}
+	var out []Stored
+	for i := 1; i <= len(a.kept)+len(a.extra)+8; i++ {
+		id := EntryID(i)
+		if f, ok := a.kept[id]; ok {
+			out = append(out, Stored{EntryID: id, Salt: f.Salt, Words: f.Words})
+		} else if s, ok := a.extra[id]; ok {
+			out = append(out, s)
+		}
+	}
+	return out, nil
+}
+
+func (f *fixture) read(person string) ([]Passed, error) {
+	return f.tr.Read(context.Background(), person, "c1", "", "")
+}
+
+func TestARangeWhoseWordsDoNotHashToTheTrailIsRefused(t *testing.T) {
+	f := newFixture(t)
+	var gov []Governance
+	f.tr.record = func(g Governance) { gov = append(gov, g) }
+	f.write(f.say(alice, "message", bot, "one", nil))
+	f.write(f.say(alice, "message", bot, "two", nil))
+	if got, err := f.read(alice); err != nil || len(got) != 2 || string(got[1].Words) != "two" {
+		t.Fatalf("an honest read failed: %v %v", got, err)
+	}
+	for name, tamper := range map[string]func(){
+		"changed words": func() { k := f.app.kept["e2"]; k.Words = []byte("TWO"); f.app.kept["e2"] = k },
+		"changed salt": func() {
+			k := f.app.kept["e2"]
+			k.Salt = bytes.Repeat([]byte{9}, agentmessage.MinSalt)
+			f.app.kept["e2"] = k
+		},
+		"a gap": func() { delete(f.app.kept, "e2") },
+		"an unknown entry": func() {
+			f.app.extra = map[string]Stored{"e9": {EntryID: "e9", Words: []byte("x"), Salt: bytes.Repeat([]byte{1}, agentmessage.MinSalt)}}
+		},
+	} {
+		saved := map[string]Forward{}
+		for k, v := range f.app.kept {
+			saved[k] = v
+		}
+		tamper()
+		got, err := f.read(alice)
+		if err == nil || got != nil || err.Error() != ReasonMismatch {
+			t.Fatalf("%s: passed on %v, %v", name, got, err)
+		}
+		if g := gov[len(gov)-1]; g.Outcome != ReadMismatch || g.Person != alice || g.Conversation != "c1" {
+			t.Fatalf("%s: governance %+v", name, g)
+		}
+		f.app.kept, f.app.extra = saved, nil
+	}
+}
+
+func TestAReadWhileAnEntryIsPendingPassesOnlyCommittedEntriesAndLogsNoMismatch(t *testing.T) {
+	f := newFixture(t)
+	var gov []Governance
+	f.tr.record = func(g Governance) { gov = append(gov, g) }
+	f.write(f.say(alice, "message", bot, "one", nil))
+	// A second entry the app has already stored but not yet confirmed.
+	w := f.say(alice, "message", bot, "two", nil)
+	c := f.tr.get("c1")
+	e := f.tr.append(c, w, "")
+	c.indexAllowed(e)
+	f.app.kept[e.ID] = Forward{Salt: w.Salt, Words: w.Words}
+	got, err := f.read(alice)
+	if err != nil || len(got) != 1 || got[0].Entry.ID != "e1" || string(got[0].Words) != "one" {
+		t.Fatalf("got %v, %v", got, err)
+	}
+	if g := gov[len(gov)-1]; g.Outcome != ReadPassed || g.Dropped != 1 || g.Passed != 1 {
+		t.Fatalf("governance %+v", g)
+	}
+	// A not-kept entry's words are dropped the same way.
+	f.now = f.now.Add(time.Second)
+	f.tr.ExpirePending(context.Background(), "c1")
+	if got, err := f.read(alice); err != nil || len(got) != 1 {
+		t.Fatalf("after expiry: %v %v", got, err)
+	}
+	for _, g := range gov {
+		if g.Outcome == ReadMismatch {
+			t.Fatalf("a mismatch was logged: %+v", g)
+		}
+	}
+}
+
+func TestAPrivateAgentsEntryIsCheckedByItsCiphertextHash(t *testing.T) {
+	f := newFixture(t)
+	w := f.say(alice, "message", bot, "sealed-bytes", nil)
+	w.Private = true
+	f.write(w)
+	if got, err := f.read(alice); err != nil || len(got) != 1 || got[0].Entry.CiphertextHash == "" {
+		t.Fatalf("a private entry was not passed on: %v %v", got, err)
+	}
+	k := f.app.kept["e1"]
+	k.Words = []byte("sealed-bytez")
+	f.app.kept["e1"] = k
+	if _, err := f.read(alice); err == nil || err.Error() != ReasonMismatch {
+		t.Fatalf("altered ciphertext passed: %v", err)
+	}
+	// The kept ciphertext_hash is the fingerprint of the ciphertext.
+	e := f.tr.get("c1").entries[0]
+	if e.CiphertextHash != e.Statement.Fingerprint {
+		t.Fatal("ciphertext_hash is not the fingerprint of the ciphertext")
+	}
+}
+
+func TestOnlyThoseInAConversationMayReadIt(t *testing.T) {
+	f := newFixture(t)
+	f.write(f.say(alice, "message", bot, "one", nil))
+	if _, err := f.read(bob); err == nil || err.Error() != ReasonMayNotRead {
+		t.Fatalf("a stranger read it: %v", err)
+	}
+	if _, err := f.read(boss); err != nil {
+		t.Fatalf("a signer was refused: %v", err)
+	}
+	if _, err := f.tr.Read(context.Background(), alice, "c1", "e9", ""); err == nil {
+		t.Fatal("a range outside the conversation was served")
+	}
+}
+
+func TestAnAgentIsAddressedOnlyWhenItsGrantAndTheTurnStartersReachBothAllow(t *testing.T) {
+	f := newFixture(t)
+	f.write(f.say(alice, "message", bot, "one", nil))
+	// bot's reply answers e1; its onward ask to bot2 uses alice's reach.
+	if ok, _ := f.tr.MayAddress("c1", "e1", bot2); ok {
+		t.Fatal("alice has no reach to bot2")
+	}
+	f.roster.reach[alice+"\n"+bot2] = true
+	if ok, err := f.tr.MayAddress("c1", "e1", bot2); !ok || err != nil {
+		t.Fatalf("both allow: %v %v", ok, err)
+	}
+	f.roster.noGrant[alice+"\n"+bot2] = true
+	if ok, _ := f.tr.MayAddress("c1", "e1", bot2); ok {
+		t.Fatal("the agent's own grant refuses, yet it was addressed")
+	}
+	if r := f.write(f.say(alice, "message", bot2, "hi", nil)); r.State != Refused {
+		t.Fatalf("a write to an agent whose grant refuses: %v", r)
 	}
 }

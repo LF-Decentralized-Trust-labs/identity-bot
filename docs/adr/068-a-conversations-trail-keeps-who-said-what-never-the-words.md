@@ -122,9 +122,28 @@ nowhere to carry words.
   and an agent's onward ask). Those need the agent's statement to name its
   fingerprint version, which `IA-AGENT-MSG-V1/V2` does not yet; a later change.
 - It does not store the trail durably, record the head in the key history,
-  rate-limit, or serve reads. The package keeps the trail in memory behind the
-  rules above; the Identity Agent's table and routes use it.
-- It does not decide `@agent` reach beyond "an AI agent the writer may use".
+  or rate-limit. The package keeps the trail in memory behind the rules above
+  and below; the Identity Agent's table and routes use it.
+
+## Reads and `@agent`
+
+- **An `@agent` needs two yeses.** An AI agent may be addressed only if its own
+  grant allows the person and the reach of the person who started the turn
+  includes it (`Roster.AgentGrantAllows`, `Roster.MayUseAgent`). An onward ask
+  uses the turn starter's reach, found by following what each entry answers
+  (`Trail.TurnStarter`, `Trail.MayAddress`), never the asking agent's.
+- **Who may read** is decided from the trail and the roster: the opener, the
+  owner, anyone who owned or handed on the conversation, anyone who wrote or
+  was addressed in a committed entry, and a signer. Nothing the app says is
+  used.
+- **What the app returns is checked before it is passed on** (`Trail.Read`).
+  Each committed entry's words and salt must hash to its fingerprint (a private
+  agent's entry, to its `ciphertext_hash`), in the trail's order. Words for an
+  entry that is pending or not kept are dropped and are not a mismatch. Words
+  that do not hash, an entry the trail lacks, a repeat, one out of order, or a
+  committed entry left out refuse the whole read with "the stored conversation
+  does not match its record". Every read hands the governance record the
+  person, the range and the outcome, and no words.
 
 ## Consequences
 

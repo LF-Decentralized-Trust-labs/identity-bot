@@ -100,6 +100,9 @@ type Roster interface {
 	IsAIAgent(id string) bool
 	// MayUseAgent says whether the person's reach includes the AI agent.
 	MayUseAgent(person, agent string) bool
+	// AgentGrantAllows says whether the AI agent's own grant lets the person
+	// address it. Reach and grant must both allow (an @agent, M83 addition 3).
+	AgentGrantAllows(agent, person string) bool
 	ActiveEmployee(person string) bool
 	IsSigner(person string) bool
 }
@@ -137,6 +140,7 @@ type Trail struct {
 	backend Backend
 	timeout time.Duration
 	now     func() time.Time
+	record  func(Governance)
 }
 
 // DefaultTimeout is how long a forwarded call to the app may take (a probe).
@@ -150,12 +154,14 @@ type Options struct {
 	Agent          string
 	ForwardTimeout time.Duration
 	Now            func() time.Time
+	// Record receives what every read leaves in the governance record.
+	Record func(Governance)
 }
 
 // New makes an empty Trail.
 func New(roster Roster, backend Backend, o Options) *Trail {
 	t := &Trail{convs: map[string]*conversation{}, agent: o.Agent, roster: roster, backend: backend,
-		timeout: o.ForwardTimeout, now: o.Now}
+		timeout: o.ForwardTimeout, now: o.Now, record: o.Record}
 	if t.timeout == 0 {
 		t.timeout = DefaultTimeout
 	}
