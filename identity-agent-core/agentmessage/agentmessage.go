@@ -29,6 +29,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"identity-agent-core/asset"
 	"strings"
 	"time"
 
@@ -470,6 +471,19 @@ type PersonRef struct {
 	// signature with which they founded the organisation.
 	Credential string `json:"credential,omitempty"`
 	Name       string `json:"name,omitempty"`
+}
+
+// MayTalkToAnAIAgent says whether a person standing so may talk to this AI
+// agent of the organisation: a signer or the owner may talk to every AI agent
+// of the organisation they sign for, and an employee to none.
+//
+// It is the one rule, asked by every route that lets a person talk to an AI
+// agent (the add-on's talk routes) and by the list an app session is given
+// (GET /api/app-session/agents), so that list can never show an AI agent the
+// talk routes refuse. The AI agent is a parameter so that a rule about which
+// AI agent can be added here, once, for both.
+func (p PersonRef) MayTalkToAnAIAgent(_ asset.Asset) bool {
+	return p.Standing == "signer" || p.Standing == "owner"
 }
 
 // Record is one entry in a conversation, as the Identity Agent signs it.

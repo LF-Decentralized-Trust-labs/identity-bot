@@ -965,7 +965,7 @@ func corsPolicy() func(http.Handler) http.Handler {
 func corsPolicyFor(routes chi.Routes, appOrigin func(origin string) bool) func(http.Handler) http.Handler {
 	return cors.Handler(cors.Options{
 		AllowOriginFunc: func(r *http.Request, origin string) bool {
-			return routes != nil && isATalkRequest(routes, r) && appOrigin(origin)
+			return routes != nil && isAnAppSessionRequest(routes, r) && appOrigin(origin)
 		},
 		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders: []string{
@@ -1030,6 +1030,9 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/health", s.handleHealth)
+		// The AI agents an app session's person may talk to; only an app session
+		// is admitted (an_app_session_lists_the_ai_agents_it_may_talk_to.go).
+		r.Get("/app-session/agents", s.handleAppSessionListsAgents)
 		// The core proves it holds the local owner secret before an app sends
 		// it (the_owner_at_this_computer.go).
 		r.Get("/local-owner/proof", s.handleLocalOwnerProof)

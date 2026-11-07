@@ -187,3 +187,25 @@ that person only what is theirs. A request whose `Origin` is not the session's
 app, a session for something that is not an `app` asset, an ended or expired
 session, and a person who no longer stands are refused. The router answers CORS
 for an origin an `app` asset lists, on those routes only.
+
+*Added 2026-11-06:* an app session also reads which AI agents its person may
+talk to, at `GET /api/app-session/agents`, so an app can show them before
+anyone speaks. It is admitted exactly as the talk routes are (the token as a
+bearer, every request signed by the session's key, from the app's listed
+origin only), and it is the only route besides them that an app session
+reaches. It answers `{"agents": [...]}` for the person the session names, by
+the rule the talk routes ask: `agentmessage.PersonRef.MayTalkToAnAIAgent`,
+asked once for each AI agent, which the AI-agent add-on's talk routes call too
+and which nothing else repeats (a signer or the owner may talk to every AI
+agent of the organisation, an employee to none, who is answered an empty
+list). Of each AI agent it says only
+`id`, `name`, `agent_aid`, `person_aid` (the signer of the machine that made it,
+else the owner) and `organisation_aid` (the organisation that delegated it):
+nothing of its brain, machine, capabilities or grant. A caller that is not an
+app session is refused, and a controller's `GET /api/mcp/agents` is unchanged.
+
+It leaves out an AI agent a talk would not reach. A revoked one is refused by
+the talk route (409); revocation is recorded by the AI-agent add-on alone, so
+the core asks the add-ons (`Addon.AIAgentRevoked`). One not yet enrolled, with
+no `agent_aid` to address a message to, is left out rather than listed with an
+empty one.
