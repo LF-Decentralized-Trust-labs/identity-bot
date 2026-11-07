@@ -76,8 +76,15 @@ type Bundle struct {
 // countersigned, and the words it carries the digest of.
 type Entry struct {
 	Envelope *didcomm.Envelope `json:"envelope"`
-	// Body is the words, base64 (standard encoding).
+	// Body is the words, base64 (standard encoding). For an entry a person
+	// signed as a statement over a fingerprint (ADR-068) the words are the
+	// app's to keep, so they may be left out, and Body is empty for an outcome,
+	// a refusal and an entry that was not kept.
 	Body string `json:"body"`
+	// Salt is the salt of the fingerprint of Body, base64 (standard encoding):
+	// carried with the words, never in the record (ADR-067). Present exactly
+	// when the words of a person's statement entry are.
+	Salt string `json:"salt,omitempty"`
 }
 
 // KeyLog is one identity's key log.

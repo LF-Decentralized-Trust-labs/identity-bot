@@ -495,6 +495,19 @@ type Record struct {
 	HostSignature   string           `json:"host_signature,omitempty"`
 	HostVerkey      string           `json:"host_verkey,omitempty"`
 	ControllerProof *ControllerProof `json:"controller_proof,omitempty"`
+	// PersonProof is a person's statement over the fingerprint of their words,
+	// with no words in it (ADR-067, ADR-068). The same record, in the same
+	// chain, holds a person's entry whichever way they signed it.
+	PersonProof *PersonProof `json:"person_proof,omitempty"`
+	// Refusal is why the Identity Agent refused a person's write before
+	// forwarding anything. A refusal is an entry of the chain with a person's
+	// proof, so it records who tried, when and why, and holds no words.
+	Refusal string `json:"refusal,omitempty"`
+	// CiphertextHash is, for an entry the Identity Agent holds only as
+	// ciphertext, the fingerprint over the ciphertext (the statement's own).
+	CiphertextHash string `json:"ciphertext_hash,omitempty"`
+	// Outcome, on an entry of kind KindOutcome, is how an earlier entry ended.
+	Outcome *Outcome `json:"outcome,omitempty"`
 
 	// What the Identity Agent vouches for.
 	GrantSAID      string     `json:"grant_said,omitempty"`
@@ -510,6 +523,12 @@ type Record struct {
 // it agrees with what the record says.
 func (r Record) CheckSenderProof() error {
 	switch {
+	case r.Outcome != nil:
+		return r.checkOutcome()
+	case r.Kind == KindOutcome:
+		return errors.New("an outcome names the entry it is about")
+	case r.PersonProof != nil:
+		return r.checkPersonProof()
 	case r.Statement != nil && r.ControllerProof != nil:
 		return errors.New("a message carries one sender's proof, not two")
 	case r.Statement != nil:
@@ -583,6 +602,11 @@ func CountersignWith(as string, pack func(m *didcomm.JWM) (*didcomm.Envelope, er
 	to := r.To
 	if aid, ok := IsPerson(to); ok {
 		to = aid
+	}
+	if to == "" {
+		// A close, a reopen and an outcome name no recipient: the envelope is
+		// addressed to the one who signed it.
+		to = as
 	}
 	return pack(&didcomm.JWM{
 		ID: r.MessageID, Type: TypeRecord,

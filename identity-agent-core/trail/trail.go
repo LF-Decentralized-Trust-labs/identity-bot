@@ -1,17 +1,24 @@
 // Package trail is what the Identity Agent keeps about a conversation an app
 // holds the words of: who said what, in what order, signed, and whether the
 // app kept it. It keeps no words, no salts and no previews (ADR-068).
+//
+// The trail is not a record of its own. It writes a person's entries, their
+// refusals and how each ended into the conversation's one chain of
+// countersigned entries (agentmessage.Record, hashed by agentmessage.Hash,
+// checked offline by conversationbundle.Verify), beside an AI agent's entries
+// as ADR-047 keeps them. Entry here is the view of one of a person's entries
+// that the rules read; it is derived from the chain and never stored apart.
 package trail
 
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"identity-agent-core/agentmessage"
+	"identity-agent-core/didcomm"
 )
 
 // State is where an entry stands.
@@ -31,24 +38,25 @@ const (
 	Refused State = "refused"
 )
 
-// Outcome is how a pending entry ended. It is not part of the chain: the
-// chain commits to what was signed and allowed, and the outcome follows.
+// Outcome is how a pending entry ended. In the chain it is an entry of its own
+// that follows the pending one (agentmessage.Outcome), so no entry is ever
+// changed.
 type Outcome struct {
 	State  State  `json:"state"` // Committed or NotKept
 	Reason string `json:"reason,omitempty"`
 	Time   string `json:"time"`
 }
 
-// Entry is one line of a conversation's trail.
+// Entry is a person's entry of a conversation as the rules read it: derived
+// from the chain's records, never stored apart from them.
 type Entry struct {
-	// Seq counts from 1 in the order entries joined the trail, refusals
-	// included. ID is "e" and the decimal Seq; the app keeps the words under it.
-	Seq int    `json:"seq"`
-	ID  string `json:"id"`
-	// Prev is the chain hash of the entry before it, empty for the first.
-	Prev     string `json:"prev"`
+	// Seq is the entry's place in the conversation's chain, an AI agent's
+	// entries and outcomes included. ID is "e" and the decimal Seq; the app
+	// keeps the words under it.
+	Seq      int    `json:"seq"`
+	ID       string `json:"id"`
 	Recorded string `json:"recorded"`
-	// Refusal is why the write was refused. Set at birth, so inside the chain.
+	// Refusal is why the write was refused.
 	Refusal string `json:"refusal,omitempty"`
 	// CiphertextHash is, for a private agent's entry, the fingerprint over its
 	// ciphertext (the same value as the statement's fingerprint).
@@ -76,20 +84,8 @@ func (e Entry) State() State {
 	}
 }
 
-// ChainHash is the hash the next entry carries as its Prev. It covers
-// everything but the outcome, so an outcome can follow without breaking the
-// chain, and a refusal's reason cannot be changed after the fact.
-func (e Entry) ChainHash() string {
-	pre := strings.Join([]string{
-		"IA-TRAIL-ENTRY-V1",
-		strconv.Itoa(e.Seq), e.ID, e.Prev, e.Recorded, e.Refusal, e.CiphertextHash,
-		e.Verkey, e.Signature, agentmessage.HashBody(e.Statement.Bytes()),
-	}, "\n")
-	return agentmessage.HashBody([]byte(pre))
-}
-
-// EntryID is the id of the nth entry of a conversation.
-func EntryID(seq int) string { return "e" + strconv.Itoa(seq) }
+// EntryID is the id of the entry at a place in a conversation.
+func EntryID(seq int) string { return agentmessage.EntryID(seq) }
 
 // Roster is what the Identity Agent knows from its own records, never from the
 // app: who a key speaks for, and who may use whom.
@@ -123,8 +119,13 @@ type conversation struct {
 	closed   bool
 	standing bool
 	handOffs []HandOff
-	entries  []Entry
-	// byMessage finds the first entry for a sender's message id.
+	// chain is the conversation's one record: every entry, countersigned, in
+	// order. entries is the view of a person's entries in it, which the rules
+	// read.
+	chain   []agentmessage.Entry
+	entries []Entry
+	// byMessage finds the first entry (an index into entries) for a sender's
+	// message id.
 	byMessage map[string]int
 	// refusedReuse finds an id-reuse refusal by the digest of its statement.
 	refusedReuse map[string]int
@@ -141,6 +142,7 @@ type Trail struct {
 	timeout time.Duration
 	now     func() time.Time
 	record  func(Governance)
+	sign    func(agentmessage.Record) (*didcomm.Envelope, error)
 }
 
 // DefaultTimeout is how long a forwarded call to the app may take (a probe).
@@ -156,12 +158,18 @@ type Options struct {
 	Now            func() time.Time
 	// Record receives what every read leaves in the governance record.
 	Record func(Governance)
+	// Countersign countersigns an entry of the chain as the Identity Agent
+	// (agentmessage.Countersign with its keys). Required.
+	Countersign func(agentmessage.Record) (*didcomm.Envelope, error)
 }
 
 // New makes an empty Trail.
 func New(roster Roster, backend Backend, o Options) *Trail {
 	t := &Trail{convs: map[string]*conversation{}, agent: o.Agent, roster: roster, backend: backend,
-		timeout: o.ForwardTimeout, now: o.Now, record: o.Record}
+		timeout: o.ForwardTimeout, now: o.Now, record: o.Record, sign: o.Countersign}
+	if t.sign == nil {
+		panic("trail: Options.Countersign is required")
+	}
 	if t.timeout == 0 {
 		t.timeout = DefaultTimeout
 	}
@@ -225,7 +233,8 @@ func (t *Trail) HandOffs(id string) []HandOff {
 	return append([]HandOff(nil), c.handOffs...)
 }
 
-// Entries is a copy of the whole trail, in order.
+// Entries is a copy of the view of a person's entries, in order. Chain is the
+// whole record.
 func (t *Trail) Entries(id string) []Entry {
 	c := t.get(id)
 	if c == nil {
@@ -248,14 +257,61 @@ func (t *Trail) Committed(id string) []Entry {
 	return out
 }
 
-// Head is the chain hash of the latest entry, which the Identity Agent records
-// in its key history. Empty for an empty trail.
+// Chain is the conversation's one record: every entry, countersigned, in
+// order. It is what an export hands conversationbundle.Verify.
+func (t *Trail) Chain(id string) []agentmessage.Entry {
+	c := t.get(id)
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]agentmessage.Entry(nil), c.chain...)
+}
+
+// Head is the hash of the latest entry of the chain (agentmessage.Hash), which
+// the Identity Agent records in its key history. Empty for an empty chain.
 func (t *Trail) Head(id string) string {
-	es := t.Entries(id)
-	if len(es) == 0 {
+	c := t.get(id)
+	if c == nil {
 		return ""
 	}
-	return es[len(es)-1].ChainHash()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.head()
+}
+
+func (c *conversation) head() string {
+	if n := len(c.chain); n > 0 {
+		return c.chain[n-1].Hash
+	}
+	return ""
+}
+
+// AppendAgent takes an entry of an AI agent into the chain, countersigned as
+// ADR-047 has it. It is checked to follow the chain's head and nothing else:
+// the AI agent's own rules are enforced where it is made. It is committed by
+// being countersigned, and the trail never forwards it.
+func (t *Trail) AppendAgent(conversation string, e agentmessage.Entry) error {
+	c := t.get(conversation)
+	if c == nil {
+		return errors.New(ReasonNoConv)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	rec, err := agentmessage.Read(e.Envelope)
+	if err != nil {
+		return err
+	}
+	if rec.Conversation != conversation || rec.Seq != len(c.chain)+1 || rec.PrevHash != c.head() ||
+		e.Seq != rec.Seq || e.Hash != agentmessage.Hash(e.Envelope) {
+		return errors.New("the entry does not follow the end of this conversation's chain")
+	}
+	if rec.PersonProof != nil || rec.Outcome != nil || rec.Refusal != "" {
+		return errors.New("a person's entry is written by Write, not appended")
+	}
+	c.chain = append(c.chain, e)
+	return nil
 }
 
 func copyEntries(in []Entry) []Entry {

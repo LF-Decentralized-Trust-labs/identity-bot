@@ -64,10 +64,12 @@ Any other version is refused.
 before this change only if it comes **before the first version 1 entry** of the
 record it is in. Once a record has a salted entry, a later version 0 entry is a
 fault, so a version 0 fingerprint cannot be written into a record that has
-moved on (`agentmessage.CheckVersionOrder`; the verifier passes
-`recorded=true` to `CheckFingerprint` only for an entry that rule accepts as
-old). A conversation's trail, which starts at version 1, uses the same rule
-offline (ADR-068).
+moved on (`agentmessage.CheckVersionOrder`). The one offline verifier,
+`conversationbundle.Verify`, applies it to a conversation's entries: a version 0
+entry is the words of a person's signed request from a paired app (ADR-047),
+which holds them unsalted, and one that follows a version 1 entry is a fault
+(ADR-068). An AI agent's entry is not counted, since its statement does not
+name a fingerprint version yet.
 
 ### The person signs a statement
 

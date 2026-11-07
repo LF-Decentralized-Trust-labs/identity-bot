@@ -72,6 +72,14 @@ def statement_bytes(s):
                                               for f in FIELDS]).encode()
 
 
+def no_repeats(pairs):
+    """Go's strict reader (PersonStatement.UnmarshalJSON) refuses a key named twice, where json.loads keeps the last."""
+    keys = [k for k, _ in pairs]
+    if len(set(keys)) != len(keys):
+        raise ValueError("a key twice")
+    return dict(pairs)
+
+
 def refused(s):
     """The reason a statement is refused, or None. Go decodes a statement into
     a struct, so an unknown field or a field of the wrong JSON type is refused
@@ -142,7 +150,7 @@ def main():
             fail(r["name"] + " was accepted")
     for r in v["refused_raw_statements"]:
         try:
-            st = json.loads(r["json"])
+            st = json.loads(r["json"], object_pairs_hook=no_repeats)
         except ValueError:
             continue  # not even JSON: refused
         if refused(st) is None:

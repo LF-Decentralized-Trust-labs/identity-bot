@@ -31,7 +31,8 @@ an `IA-AGENT-MSG-V1` statement is.
 ## Refused
 
 A statement is read as JSON with exactly the fields above: a field not listed,
-a string field that is not a JSON string, or a `fingerprint_version` that is not
+a key spelt in any case but the lower case shown (`Agent`, `IN_REPLY_TO`), a key
+named twice, a `null` (leave the field out instead), a string field that is not a JSON string, or a `fingerprint_version` that is not
 a JSON integer (`true`, `1.0`, `"1"`) is refused; a field left out is empty (0
 for the version). It is then refused if: `agent`, `conversation`, `message_id`, `kind`, `from`,
 `signer`, `nonce`, `time` or `fingerprint` is empty; any field holds a CR or

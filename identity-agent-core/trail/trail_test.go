@@ -13,6 +13,7 @@ import (
 
 	"identity-agent-core/agentbody"
 	"identity-agent-core/agentmessage"
+	"identity-agent-core/didcomm"
 )
 
 type edSigner struct{ priv ed25519.PrivateKey }
@@ -90,6 +91,7 @@ func (a *app) Discard(_ context.Context, _, id string) error {
 
 type fixture struct {
 	t      *testing.T
+	keys   *didcomm.KeySet
 	tr     *Trail
 	app    *app
 	roster *roster
@@ -119,7 +121,13 @@ func newFixture(t *testing.T) *fixture {
 		id, _, _ := agentbody.Identity(signerOf(byte(i + 1)))
 		f.roster.keys[p] = id
 	}
-	f.tr = New(f.roster, f.app, Options{Agent: testAgent, ForwardTimeout: 50 * time.Millisecond, Now: func() time.Time { return f.now }})
+	keys, err := didcomm.GenerateKeySet(testAgent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.keys = keys
+	f.tr = New(f.roster, f.app, Options{Agent: testAgent, ForwardTimeout: 50 * time.Millisecond, Now: func() time.Time { return f.now },
+		Countersign: func(r agentmessage.Record) (*didcomm.Envelope, error) { return agentmessage.Countersign(keys, r) }})
 	if err := f.tr.Open("c1", alice, true); err != nil {
 		t.Fatal(err)
 	}
@@ -206,8 +214,8 @@ func TestARefusedMessageNeverReachesTheApp(t *testing.T) {
 			if bytes.Contains(raw, []byte(secret)) {
 				t.Fatal("the words of a refused message are in the trail")
 			}
-			if rep := Verify(es); !rep.Verified {
-				t.Fatalf("a refusal does not verify offline: %v", rep.Faults)
+			if recs := f.chainOf("c1"); len(recs) != 1 || recs[0].Refusal == "" || recs[0].CheckSenderProof() != nil {
+				t.Fatal("a refusal is not an entry of the chain with its author's proof")
 			}
 			if len(f.tr.Committed("c1")) != 0 {
 				t.Fatal("a refusal is delivered")
@@ -324,112 +332,115 @@ func TestAStatementForAnotherIdentityAgentIsRefused(t *testing.T) {
 	}
 }
 
-func TestAnExportedTrailNamingTwoIdentityAgentsOrAnUnsaltedEntryAfterASaltedOneFails(t *testing.T) {
+// chainOf opens every entry of the conversation's chain with the Identity
+// Agent's keys and checks each follows the one before: the one chain that
+// conversationbundle.Verify reads, not a record of the trail's own.
+func (f *fixture) chainOf(conv string) []agentmessage.Record {
+	f.t.Helper()
+	did, err := f.keys.DID()
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	var recs []agentmessage.Record
+	prev := ""
+	for i, e := range f.tr.Chain(conv) {
+		rec, err := agentmessage.Open(did, e.Envelope)
+		if err != nil {
+			f.t.Fatalf("entry %d is not countersigned by the Identity Agent: %v", i+1, err)
+		}
+		if rec.Seq != i+1 || rec.PrevHash != prev || e.Hash != agentmessage.Hash(e.Envelope) {
+			f.t.Fatalf("entry %d does not follow the one before it", i+1)
+		}
+		prev = e.Hash
+		recs = append(recs, rec)
+	}
+	if prev != f.tr.Head(conv) {
+		f.t.Fatal("the head is not the last entry's hash")
+	}
+	return recs
+}
+
+// A person's entries, their refusals and how each ended are all entries of the
+// conversation's one chain, beside an AI agent's, and none holds a word.
+func TestAPersonsEntriesRefusalsAndOutcomesAreInTheOneChain(t *testing.T) {
 	f := newFixture(t)
-	f.write(f.say(alice, "message", bot, "one", nil))
-	f.write(f.say(alice, "message", bot, "two", nil))
-	raw, _ := json.Marshal(f.tr.Entries("c1"))
-	es, _ := Read(raw)
-	if r := Verify(es); !r.Verified {
-		t.Fatalf("a good trail failed: %v", r.Faults)
+	f.write(f.say(alice, "message", bot, "one-words", nil)) // e1 pending, e2 committed
+	f.write(f.say(bob, "message", bot, "two-words", nil))   // e3 refused: not the owner
+	f.app.wrongFP = true
+	f.write(f.say(alice, "message", bot, "three-words", nil)) // e4 pending, e5 not kept
+	f.app.wrongFP = false
+	recs := f.chainOf("c1")
+	wantKinds := []string{"message", "outcome", "message", "message", "outcome"}
+	if len(recs) != len(wantKinds) {
+		t.Fatalf("the chain holds %d entries, want %d", len(recs), len(wantKinds))
 	}
-	other := append([]Entry(nil), es...)
-	other[1].Statement.Agent = "EOTHERAGENT"
-	if Verify(other).Verified {
-		t.Fatal("a trail naming two Identity Agents verified")
+	for i, k := range wantKinds {
+		if recs[i].Kind != k {
+			t.Fatalf("entry %d is a %s, want %s", i+1, recs[i].Kind, k)
+		}
 	}
-	late := append([]Entry(nil), es...)
-	late[1].Statement.FingerprintVersion = agentmessage.FingerprintV0
-	r := Verify(late)
-	if r.Verified || !strings.Contains(strings.Join(r.Faults, "\n"), "after a salted one") {
-		t.Fatalf("an unsalted entry after a salted one was not named: %v", r.Faults)
+	if recs[1].Outcome.State != agentmessage.OutcomeCommitted || recs[1].Outcome.Entry != "e1" ||
+		recs[4].Outcome.State != agentmessage.OutcomeNotKept || recs[4].Outcome.Entry != "e4" {
+		t.Fatalf("the outcomes name the wrong entries: %+v %+v", recs[1].Outcome, recs[4].Outcome)
+	}
+	if recs[2].Refusal == "" || recs[0].PersonProof == nil || recs[0].MessageID != "e1" {
+		t.Fatal("the entries are not a person's statement and a refusal")
+	}
+	raw, _ := json.Marshal(f.tr.Chain("c1"))
+	for _, w := range []string{"one-words", "two-words", "three-words"} {
+		if bytes.Contains(raw, []byte(w)) {
+			t.Fatalf("%q is in the chain", w)
+		}
+	}
+	for _, r := range recs {
+		raw, _ := json.Marshal(r)
+		for _, w := range []string{"one-words", "two-words", "three-words"} {
+			if bytes.Contains(raw, []byte(w)) {
+				t.Fatalf("%q is in a record", w)
+			}
+		}
+	}
+	// The states the view reports are the chain's.
+	got := []State{}
+	for _, e := range f.tr.Entries("c1") {
+		got = append(got, e.State())
+	}
+	if fmt.Sprint(got) != fmt.Sprint([]State{Committed, Refused, NotKept}) {
+		t.Fatalf("states %v", got)
 	}
 }
 
-func TestANotKeptEntryAndARefusalVerifyOffline(t *testing.T) {
+// An AI agent's entry is countersigned as ADR-047 has it and joins the same
+// chain; a person's entry follows it, and an entry that does not follow the
+// end of the chain is refused.
+func TestAnAIAgentsEntryJoinsTheSameChain(t *testing.T) {
 	f := newFixture(t)
-	f.write(f.say(alice, "message", bot, "one", nil)) // committed
-	f.write(f.say(bob, "message", bot, "two", nil))   // refused: not the owner
-	f.app.wrongFP = true
-	nk := f.write(f.say(alice, "message", bot, "three", nil)) // not kept
-	f.app.wrongFP = false
-	if nk.State != NotKept || nk.Reason != ReasonNoConfirm {
-		t.Fatalf("got %+v", nk)
+	f.write(f.say(alice, "message", bot, "hello", nil)) // e1, e2
+	agentRec := agentmessage.Record{
+		MessageID: "m-agent", Conversation: "c1", Seq: 3, PrevHash: f.tr.Head("c1"), IATime: "2026-11-06T12:00:00Z",
+		Kind: agentmessage.KindReply, From: bot, To: agentmessage.Person(alice), InReplyTo: "e1",
+		BodyHash: agentmessage.HashBody([]byte("reply")), OpenedBy: agentmessage.Person(alice),
 	}
-	if len(f.app.discarded) != 1 || f.app.discarded[0] != nk.EntryID {
-		t.Fatalf("the app was not told to discard: %v", f.app.discarded)
-	}
-	f.write(f.say(alice, "message", bot, "four", nil)) // committed
-
-	raw, _ := json.Marshal(f.tr.Entries("c1"))
-	es, err := Read(raw)
+	env, err := agentmessage.Countersign(f.keys, agentRec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rep := Verify(es)
-	if !rep.Verified || rep.Head != f.tr.Head("c1") {
-		t.Fatalf("does not verify: %v", rep.Faults)
+	entry := agentmessage.Entry{Conversation: "c1", Seq: 3, MessageID: "m-agent", Envelope: env, Hash: agentmessage.Hash(env)}
+	if err := f.tr.AppendAgent("c1", entry); err != nil {
+		t.Fatal(err)
 	}
-	states := []State{Committed, Refused, NotKept, Committed}
-	for i, e := range es {
-		if e.State() != states[i] {
-			t.Fatalf("entry %d is %s, want %s", i+1, e.State(), states[i])
-		}
+	if err := f.tr.AppendAgent("c1", entry); err == nil {
+		t.Fatal("the same entry was appended twice")
 	}
-
-	// Each kind of tampering is caught without the app.
-	for name, change := range map[string]func(es []Entry){
-		"a refusal's reason rewritten":       func(es []Entry) { es[1].Refusal = "no reason" },
-		"a not-kept entry's signature":       func(es []Entry) { es[2].Signature = es[0].Signature },
-		"a not-kept entry's fingerprint":     func(es []Entry) { es[2].Statement.Fingerprint = es[0].Statement.Fingerprint },
-		"an entry removed":                   func(es []Entry) { es[2] = es[3] },
-		"a refusal turned into an entry":     func(es []Entry) { es[1].Refusal = "" },
-		"a not-kept entry made to have none": func(es []Entry) { es[2].Outcome.Reason = "" },
-	} {
-		t.Run(name, func(t *testing.T) {
-			c := copyEntries(es)
-			change(c)
-			if Verify(c).Verified {
-				t.Fatal("tampering went unnoticed")
-			}
-		})
+	res := f.write(f.say(alice, "message", bot, "again", nil))
+	if res.EntryID != "e4" || res.State != Committed {
+		t.Fatalf("got %+v: a person's entry did not follow the AI agent's", res)
 	}
-	// A trail cut short still verifies as far as it goes, but its head is not
-	// the recorded one, which is what the key history catches.
-	if short := Verify(es[:3]); short.Head == f.tr.Head("c1") {
-		t.Fatal("a cut trail has the head of the whole")
+	if recs := f.chainOf("c1"); len(recs) != 5 || recs[2].MessageID != "m-agent" {
+		t.Fatalf("the chain is %d entries long", len(recs))
 	}
-}
-
-func TestWordsAreCheckedAgainstTheTrailOffline(t *testing.T) {
-	f := newFixture(t)
-	w := f.say(alice, "message", bot, "one", nil)
-	f.write(w)
-	f.write(f.say(bob, "message", bot, "refused words", nil))
-	es := f.tr.Entries("c1")
-	good := map[string]Kept{"e1": {Salt: w.Salt, Words: w.Words}}
-	if r := VerifyWords(es, good); !r.Verified {
-		t.Fatalf("%v", r.Faults)
-	}
-	if r := VerifyWords(es, map[string]Kept{"e1": {Salt: w.Salt, Words: []byte("changed")}}); r.Verified {
-		t.Fatal("changed words verified")
-	}
-	if r := VerifyWords(es, nil); r.Verified {
-		t.Fatal("a committed entry with no words verified")
-	}
-	good["e2"] = Kept{Salt: w.Salt, Words: []byte("refused words")}
-	if r := VerifyWords(es, good); r.Verified {
-		t.Fatal("words for a refusal verified")
-	}
-}
-
-func TestReadRefusesAFieldCarryingWords(t *testing.T) {
-	f := newFixture(t)
-	f.write(f.say(alice, "message", bot, "one", nil))
-	raw, _ := json.Marshal(f.tr.Entries("c1"))
-	bad := strings.Replace(string(raw), `"seq":1`, `"seq":1,"words":"hello"`, 1)
-	if _, err := Read([]byte(bad)); err == nil {
-		t.Fatal("a trail with a words field was read")
+	if len(f.tr.Entries("c1")) != 2 {
+		t.Fatal("an AI agent's entry is in the view of a person's entries")
 	}
 }
 
@@ -463,7 +474,10 @@ func TestWhatTheAppDoesNotConfirmIsNotKept(t *testing.T) {
 func TestAnEntryLeftPendingExpiresAsNotKept(t *testing.T) {
 	f := newFixture(t)
 	w := f.say(alice, "message", bot, "hello", nil)
-	e := f.tr.append(f.tr.get("c1"), w, "")
+	e, err := f.tr.add(f.tr.get("c1"), w, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	f.tr.get("c1").indexAllowed(e)
 	if f.tr.ExpirePending(context.Background(), "c1") != 0 {
 		t.Fatal("an entry expired inside the timeout")
@@ -614,8 +628,8 @@ func TestAPrivateAgentsEntryKeepsItsCiphertextHash(t *testing.T) {
 	if e.CiphertextHash != w.Statement.Fingerprint {
 		t.Fatal("the ciphertext hash is not kept")
 	}
-	if !Verify(f.tr.Entries("c1")).Verified {
-		t.Fatal("does not verify")
+	if recs := f.chainOf("c1"); recs[0].CiphertextHash != w.Statement.Fingerprint || recs[0].CheckSenderProof() != nil {
+		t.Fatal("the chain's record does not keep the ciphertext hash")
 	}
 }
 
@@ -667,13 +681,13 @@ func TestARangeWhoseWordsDoNotHashToTheTrailIsRefused(t *testing.T) {
 		t.Fatalf("an honest read failed: %v %v", got, err)
 	}
 	for name, tamper := range map[string]func(){
-		"changed words": func() { k := f.app.kept["e2"]; k.Words = []byte("TWO"); f.app.kept["e2"] = k },
+		"changed words": func() { k := f.app.kept["e3"]; k.Words = []byte("TWO"); f.app.kept["e3"] = k },
 		"changed salt": func() {
-			k := f.app.kept["e2"]
+			k := f.app.kept["e3"]
 			k.Salt = bytes.Repeat([]byte{9}, agentmessage.MinSalt)
-			f.app.kept["e2"] = k
+			f.app.kept["e3"] = k
 		},
-		"a gap": func() { delete(f.app.kept, "e2") },
+		"a gap": func() { delete(f.app.kept, "e3") },
 		"an unknown entry": func() {
 			f.app.extra = map[string]Stored{"e9": {EntryID: "e9", Words: []byte("x"), Salt: bytes.Repeat([]byte{1}, agentmessage.MinSalt)}}
 		},
@@ -702,7 +716,10 @@ func TestAReadWhileAnEntryIsPendingPassesOnlyCommittedEntriesAndLogsNoMismatch(t
 	// A second entry the app has already stored but not yet confirmed.
 	w := f.say(alice, "message", bot, "two", nil)
 	c := f.tr.get("c1")
-	e := f.tr.append(c, w, "")
+	e, err := f.tr.add(c, w, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	c.indexAllowed(e)
 	f.app.kept[e.ID] = Forward{Salt: w.Salt, Words: w.Words}
 	got, err := f.read(alice)
@@ -777,5 +794,27 @@ func TestAnAgentIsAddressedOnlyWhenItsGrantAndTheTurnStartersReachBothAllow(t *t
 	}
 	if r := f.write(f.say(alice, "message", bot2, "hi", nil)); r.State != Refused {
 		t.Fatalf("a write to an agent whose grant refuses: %v", r)
+	}
+}
+
+// The open core names no product, and a refusal uses up its message id: a
+// message refused only because the app was unreachable is resent under a new
+// id (ADR-068).
+func TestAnUnreachableRefusalNamesNoProductAndUsesUpItsID(t *testing.T) {
+	if strings.Contains(ReasonUnreachable, "AI Chat") {
+		t.Fatalf("the reason names a product: %q", ReasonUnreachable)
+	}
+	f := newFixture(t)
+	f.app.down = true
+	w := f.say(alice, "message", bot, "hello", nil)
+	if r := f.write(w); r.State != Refused || r.Reason != ReasonUnreachable {
+		t.Fatalf("got %+v", r)
+	}
+	f.app.down = false
+	if r := f.write(w); r.State != Refused || !r.Replayed {
+		t.Fatalf("the same id, once the app was back, got %+v: it must return the same refusal", r)
+	}
+	if r := f.write(f.say(alice, "message", bot, "hello", nil)); r.State != Committed {
+		t.Fatalf("the message under a new id got %+v", r)
 	}
 }
