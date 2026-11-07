@@ -25,10 +25,12 @@ type edSigner struct{ priv ed25519.PrivateKey }
 func (s edSigner) PublicKey() ([]byte, error)    { return s.priv.Public().(ed25519.PublicKey), nil }
 func (s edSigner) Sign(d []byte) ([]byte, error) { return ed25519.Sign(s.priv, d), nil }
 
-type allowAll struct{ owner string }
+// allowAll lets everything through; bot, when set, is the AI agent that
+// IsAIAgent knows beside EBOT.
+type allowAll struct{ bot string }
 
 func (allowAll) KeySpeaksFor(string, string, string) bool { return true }
-func (allowAll) IsAIAgent(id string) bool                 { return id == "EBOT" }
+func (a allowAll) IsAIAgent(id string) bool               { return id == "EBOT" || a.bot != "" && id == a.bot }
 func (allowAll) MayUseAgent(string, string) bool          { return true }
 func (allowAll) AgentGrantAllows(string, string) bool     { return true }
 func (allowAll) ActiveEmployee(string) bool               { return true }
@@ -66,6 +68,11 @@ type conversation struct {
 	now   time.Time
 	n     int
 	words map[string]kept
+	// root is the Identity Agent's identifier, and bot the AI agent a person
+	// addresses. They are the placeholders rootAID and EBOT unless the
+	// conversation is written in a whole world (aWorld), where they are real.
+	root, bot string
+	world     *theWorld
 }
 
 func newConversation(t *testing.T) *conversation {
@@ -77,16 +84,23 @@ func newConversation(t *testing.T) *conversation {
 // that can also be read when backend is given a constructor for it.
 func newConversationWith(t *testing.T, roster trail.Roster, backend func(*conversation) trail.Backend) *conversation {
 	t.Helper()
-	keys, err := didcomm.GenerateKeySet(rootAID)
+	return newConversationIn(t, roster, backend, rootAID, "EBOT")
+}
+
+// newConversationIn is newConversationWith for an Identity Agent named root,
+// and an AI agent named bot.
+func newConversationIn(t *testing.T, roster trail.Roster, backend func(*conversation) trail.Backend, root, bot string) *conversation {
+	t.Helper()
+	keys, err := didcomm.GenerateKeySet(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := &conversation{t: t, keys: keys, app: &keepingApp{}, now: time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC), words: map[string]kept{}}
+	c := &conversation{t: t, keys: keys, app: &keepingApp{}, now: time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC), words: map[string]kept{}, root: root, bot: bot}
 	var be trail.Backend = c.app
 	if backend != nil {
 		be = backend(c)
 	}
-	c.tr = trail.New(roster, be, trail.Options{Agent: rootAID, Now: func() time.Time { c.now = c.now.Add(time.Second); return c.now },
+	c.tr = trail.New(roster, be, trail.Options{Agent: root, Now: func() time.Time { c.now = c.now.Add(time.Second); return c.now },
 		Countersign: func(r agentmessage.Record) (*didcomm.Envelope, error) { return agentmessage.Countersign(keys, r) }})
 	if err := c.tr.Open("c1", "EALICE", true); err != nil {
 		t.Fatal(err)
@@ -116,8 +130,8 @@ func (c *conversation) trySay(from, words string, edit func(*agentmessage.Person
 	if err != nil {
 		c.t.Fatal(err)
 	}
-	s := agentmessage.PersonStatement{Agent: rootAID, Conversation: "c1", MessageID: fmt.Sprintf("m%d", c.n), Kind: "message", From: from,
-		Signer: id, To: "EBOT", Nonce: fmt.Sprintf("nonce-%016d", c.n), Time: c.now.Add(time.Second).Format(time.RFC3339),
+	s := agentmessage.PersonStatement{Agent: c.root, Conversation: "c1", MessageID: fmt.Sprintf("m%d", c.n), Kind: "message", From: from,
+		Signer: id, To: c.bot, Nonce: fmt.Sprintf("nonce-%016d", c.n), Time: c.now.Add(time.Second).Format(time.RFC3339),
 		FingerprintVersion: agentmessage.FingerprintV1, Fingerprint: fp}
 	if edit != nil {
 		edit(&s)
@@ -141,7 +155,7 @@ func (c *conversation) trySay(from, words string, edit func(*agentmessage.Person
 // bundle is the conversation as an export carries it. withWords puts the
 // words in beside the entries that have them.
 func (c *conversation) bundle(withWords bool) *Bundle {
-	b := &Bundle{Format: Format, Conversation: "c1", Root: rootAID}
+	b := &Bundle{Format: Format, Conversation: "c1", Root: c.root}
 	for _, e := range c.tr.Chain("c1") {
 		x := Entry{Envelope: e.Envelope}
 		if k, ok := c.words[e.MessageID]; ok && withWords {
@@ -162,7 +176,7 @@ func (c *conversation) check(b *Bundle) *verifier {
 	}
 	v := newVerifier()
 	v.b, v.hashes, v.signedOnce, v.answered, v.notes = b, map[int]string{}, map[string]int{}, map[string]bool{}, map[string]bool{}
-	v.dids = map[string]*didcomm.DID{rootAID: did}
+	v.dids = map[string]*didcomm.DID{c.root: did}
 	v.checkEntries()
 	return v
 }
