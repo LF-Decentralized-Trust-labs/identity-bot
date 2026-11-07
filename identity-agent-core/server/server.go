@@ -151,7 +151,10 @@ type CoreServer struct {
 	// so two foundings committed at once cannot both pass it.
 	founding sync.Mutex
 
-	loginHandler      *login.Handler
+	loginHandler *login.Handler
+	// redeemedInvites remembers where, and as whom, this agent redeemed an invite,
+	// so it can later ask the inviting app what it published for it.
+	redeemedInvites   redeemedInviteBook
 	assetHandler      *asset.Handler
 	ownerRosterSource func() []asset.Employee // the roster in use when an overlay owns it; see SetOwnerRoster
 	assetStoreErr     error                   // why assetHandler is nil, when a store file could not be read
@@ -1308,6 +1311,8 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 	s.mountPublicDidWebsRoutes(r)
 	// Dumb-router scan gate: forward a scanned Ask pointer here; Go decodes + dispatches by t.
 	s.mountScanRoutes(r)
+	// Ask the app that issued an invite this agent redeemed what it published for it.
+	s.mountRedeemedInviteRoutes(r)
 	// Mint IA-originated Asks (e.g. an add-contact "add me" QR) hosted at /i/{token}.
 	s.mountAskCreateRoute(r)
 	// login-web SignInButton-compatible endpoints (drop-in widget → an Identity Agent, no per-site backend).

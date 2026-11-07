@@ -2286,6 +2286,38 @@ class CoreService {
     return code;
   }
 
+  /// Asks the app that issued an invite this agent redeemed what it has published
+  /// for that invite, once. Returns null while it has published nothing.
+  ///
+  /// The agent signs the request with the key the redeem was made with and sends
+  /// it to the address the invite was redeemed at; neither is the caller's to
+  /// name. The caller polls, and decides what to do with what comes back.
+  ///
+  /// Throws [InvitingAppRefused] when it cannot be answered: a 4xx is final (the
+  /// window ended, the invite is not one this agent redeemed) so a poll that can
+  /// never succeed stops, and a 5xx is [InvitingAppRefused.retryable].
+  Future<Map<String, dynamic>?> whatTheInvitingAppPublished(
+      String inviteToken) async {
+    // The code is a secret, so it goes in the body and never in a path.
+    final response = await _client.post(
+      Uri.parse('$baseUrl/api/redeemed-invites/published'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'invite_token': inviteToken}),
+    );
+    if (response.statusCode == 202) return null;
+    if (response.statusCode == 200) {
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      return (body['published'] as Map?)?.cast<String, dynamic>() ??
+          <String, dynamic>{};
+    }
+    final reason = response.body.trim();
+    throw InvitingAppRefused(
+        response.statusCode,
+        reason.isNotEmpty
+            ? reason
+            : 'The inviting app could not be asked: ${response.statusCode}');
+  }
+
   Future<Map<String, dynamic>> adoptAgent({
     required Uri boxUrl,
     required String adoptionCode,
@@ -3622,4 +3654,20 @@ class ThisComputersPairing {
 
   /// Where another device can reach this computer.
   final String address;
+}
+
+
+/// The inviting app could not be asked, or refused. [statusCode] and [message]
+/// are the reason, written for the person.
+class InvitingAppRefused implements Exception {
+  const InvitingAppRefused(this.statusCode, this.message);
+  final int statusCode;
+  final String message;
+
+  /// A server-side or network failure that a later ask may not repeat. A 4xx is
+  /// an answer, and asking again gets the same one.
+  bool get retryable => statusCode >= 500;
+
+  @override
+  String toString() => message;
 }
