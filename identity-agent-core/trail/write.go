@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"identity-agent-core/agentmessage"
+	"identity-agent-core/authorisation"
 )
 
 // Backend is the app that keeps the words. The trail forwards an allowed write
@@ -53,6 +54,7 @@ const (
 	ReasonNoConfirm     = "the app's confirmation did not match what was sent"
 	ReasonTimeout       = "the app did not answer in time"
 	ReasonNonceUsed     = "that nonce was already used"
+	ReasonStale         = "the statement was not signed within 5 minutes of now"
 )
 
 // Write is what a sender asks to be kept.
@@ -119,14 +121,23 @@ func (t *Trail) Write(ctx context.Context, w Write) (Result, error) {
 		if j, seen := c.refusedReuse[digest]; seen {
 			return resultOf(c.entries[j], true), nil
 		}
+		if err := t.checkTime(s); err != nil {
+			return Result{}, err
+		}
 		e, err := t.add(c, w, ReasonIDUsed)
 		if err != nil {
 			return Result{}, err
 		}
 		c.refusedReuse[digest] = len(c.entries) - 1
+		// A refusal uses up its author's nonce as well as its id, which is how
+		// conversationbundle.Verify reads every refusal.
+		c.nonces[s.From+"\n"+s.Nonce] = true
 		return resultOf(e, false), nil
 	}
 
+	if err := t.checkTime(s); err != nil {
+		return Result{}, err
+	}
 	refuse := func(reason string) (Result, error) {
 		e, err := t.addRefusal(c, w, reason)
 		if err != nil {
@@ -174,6 +185,20 @@ func (t *Trail) Write(ctx context.Context, w Write) (Result, error) {
 		return Result{}, err
 	}
 	return resultOf(c.entries[i], false), nil
+}
+
+// checkTime holds a statement to the rule the verifier holds every person's
+// entry to: signed within authorisation.Skew of when the Identity Agent takes
+// it. One that is not proves no timely author, so nothing joins the chain.
+func (t *Trail) checkTime(s agentmessage.PersonStatement) error {
+	signed, err := time.Parse(time.RFC3339, s.Time)
+	if err != nil {
+		return &Rejected{ReasonStale}
+	}
+	if d := t.now().Sub(signed); d > authorisation.Skew || -d > authorisation.Skew {
+		return &Rejected{ReasonStale}
+	}
+	return nil
 }
 
 // ExpirePending marks every entry still pending after the forwarding timeout

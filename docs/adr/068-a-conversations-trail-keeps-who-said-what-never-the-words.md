@@ -178,9 +178,20 @@ entry with a new id.
   uses the turn starter's reach, found by following what each entry answers
   (`Trail.TurnStarter`, `Trail.MayAddress`), never the asking agent's.
 - **Who may read** is decided from the trail and the roster: the opener, the
-  owner, anyone who owned or handed on the conversation, anyone who wrote or
-  was addressed in a committed entry, and a signer. Nothing the app says is
-  used.
+  current owner, and a signer. A former owner loses access when they hand the
+  conversation on; having written, been addressed or been named in a hand-off
+  admits nobody. An AI agent addressed with `@agent` is therefore refused by
+  `Trail.Read`: reading only the thread it was asked in is a later, separate
+  read. Nothing the app says is used.
+- **`Trail.Read` serves a person's entries only.** An AI agent's entries are
+  in the chain but not in the read: words the app returns for one are refused
+  as an entry the trail lacks, and a range bounded by one is refused. Reading
+  them is left to the part that adds the agent's thread.
+- **A write is held to the verifier's two rules about a refusal and time.**
+  Every refusal, an id-reuse refusal included, uses up its author's id and
+  nonce, as `conversationbundle.Verify` reads it. A statement signed more than
+  `authorisation.Skew` (5 minutes) from when the Identity Agent takes it is
+  rejected and joins nothing, because the verifier would fault it.
 - **What the app returns is checked before it is passed on** (`Trail.Read`).
   Each committed entry's words and salt must hash to its fingerprint (a private
   agent's entry, to its `ciphertext_hash`), in the trail's order. Words for an
