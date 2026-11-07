@@ -93,7 +93,7 @@ func TestHandlersDoNotRecloseWhatTheGateOpenedToAController(t *testing.T) {
 
 // The helper every such handler now uses answers yes for the two callers the
 // gate admits as acting for the owner, and no for the two it admits as
-// somebody else: a browser session and a caller holding a scoped token.
+// somebody else: a bearer token it does not know and a caller holding a scoped token.
 func TestOwnerOrItsControllerAdmitsNobodyElse(t *testing.T) {
 	s := newAuthTestServer(t)
 
@@ -112,9 +112,9 @@ func TestOwnerOrItsControllerAdmitsNobodyElse(t *testing.T) {
 	}
 
 	session := remote("GET", "/api/vault/credentials", "")
-	session.Header.Set("Authorization", "Bearer some-browser-session")
+	session.Header.Set("Authorization", "Bearer an-unknown-token")
 	if s.isOwnerOrItsController(session) {
-		t.Error("a browser session was treated as the owner or its controller")
+		t.Error("a bearer token was treated as the owner or its controller")
 	}
 	scoped := withResolvedCaller(remote("GET", "/api/vault/credentials", ""), permission.CallerContext{CallerAID: "an-ai-agent", Scopes: []string{"vault.read"}, Remote: true})
 	if s.isOwnerOrItsController(scoped) {

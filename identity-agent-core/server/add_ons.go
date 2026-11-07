@@ -111,13 +111,12 @@ type Addon struct {
 
 	// The add-on's entries in the core's route tables (api_auth.go), keyed
 	// "METHOD /chi/pattern" with the reason, as the core's own are: routes
-	// open to anyone, routes open to a caller holding scopes, path prefixes
-	// open to a caller holding scopes, and routes a browser session must not
-	// take. A route the add-on does not list is the owner's.
-	PublicRoutes     map[string]string
-	ScopedRoutes     map[string]string
-	ScopedPrefixes   []string
-	SessionForbidden map[string]string
+	// open to anyone, routes open to a caller holding scopes, and path
+	// prefixes open to a caller holding scopes. A route the add-on does not
+	// list is the owner's.
+	PublicRoutes   map[string]string
+	ScopedRoutes   map[string]string
+	ScopedPrefixes []string
 
 	// The add-on's rules for a machine acting for the owner (a controller),
 	// beside the core's (what_a_controller_may_reach.go), keyed the same way.
@@ -682,7 +681,6 @@ func (s *CoreServer) addonEntriesNotItsOwn(served chi.Routes, loosening bool) []
 			}
 		}
 		if !loosening {
-			check("SessionForbidden", keysOf(a.SessionForbidden))
 			check("ControllerOwnerOnly", keysOf(a.ControllerOwnerOnly))
 			var mins []string
 			for k := range a.ControllerMinimumScore {

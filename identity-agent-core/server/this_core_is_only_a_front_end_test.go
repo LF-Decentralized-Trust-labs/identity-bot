@@ -335,8 +335,8 @@ func TestWhatIsRememberedFollowsWhatIsWritten(t *testing.T) {
 // It decides whether this core answers about an identity at all, so it is one
 // step further out than the rest of that list: not what a machine acting for
 // somebody may do, but whether the door is open. Left unnamed it is permitted
-// by default to any authorised controller and any browser session, and either
-// could make somebody else's machine refuse its own owner from a distance.
+// by default to any authorised controller, which could make somebody else's
+// machine refuse its own owner from a distance.
 func TestSettingWhichHalfAComputerRunsIsNotReachableFromElsewhere(t *testing.T) {
 	for _, route := range []string{
 		"POST /api/controller/front-end-for",
@@ -345,10 +345,6 @@ func TestSettingWhichHalfAComputerRunsIsNotReachableFromElsewhere(t *testing.T) 
 		if _, ok := isOwnerOnly(strings.SplitN(route, " ", 2)[0], strings.SplitN(route, " ", 2)[1]); !ok {
 			t.Errorf("%s is reachable by a machine acting for somebody, so it could "+
 				"flip that gate on a computer it is not sitting at", route)
-		}
-		if _, ok := everySessionForbidden()[route]; !ok {
-			t.Errorf("%s is reachable from a browser session, which is not the app "+
-				"on this machine", route)
 		}
 	}
 

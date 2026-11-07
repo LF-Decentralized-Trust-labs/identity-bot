@@ -95,7 +95,6 @@ func (h hostWrapper) GrantController(g ControllerGrant, now time.Time, by corety
 func (h hostWrapper) GrantsHeldBy(agentAID string, usableOnly bool) []store.CredentialRecord {
 	return h.s.grantsHeldBy(agentAID, usableOnly)
 }
-func (h hostWrapper) HasBrowserSession(r *http.Request) bool { return h.s.hasBrowserSession(r) }
 func (h hostWrapper) HoldTheRecord() (string, bool, bool, func(), error) {
 	return h.s.holdTheRecord()
 }
@@ -228,10 +227,7 @@ func (hostWrapper) ReadSignedBody(r *http.Request) ([]byte, error) { return read
 func (hostWrapper) RememberSignature(sig string, now time.Time) bool {
 	return rememberSignature(sig, now)
 }
-func (hostWrapper) RequestCorrelationID(r *http.Request) string { return requestCorrelationID(r) }
-func (hostWrapper) RequiresTheKeyItself(method string, pattern string) (string, bool) {
-	return requiresTheKeyItself(method, pattern)
-}
+func (hostWrapper) RequestCorrelationID(r *http.Request) string     { return requestCorrelationID(r) }
 func (hostWrapper) SameJSONValue(a interface{}, b interface{}) bool { return sameJSONValue(a, b) }
 func (hostWrapper) SealedRemoteAddr() string                        { return sealedRemoteAddr }
 func (hostWrapper) TheGateAdmittedTheOwner(r *http.Request) bool    { return theGateAdmittedTheOwner(r) }
@@ -243,8 +239,7 @@ func (hostWrapper) WriteJSON(w http.ResponseWriter, v interface{}) { writeJSON(w
 func (hostWrapper) WriteJSONStatus(w http.ResponseWriter, status int, v interface{}) {
 	writeJSONStatus(w, status, v)
 }
-func (hostWrapper) AnchorTick() time.Duration                { return anchorTick() }
-func (h hostWrapper) IsLiveBrowserSession(token string) bool { return h.s.isLiveBrowserSession(token) }
+func (hostWrapper) AnchorTick() time.Duration { return anchorTick() }
 func (h hostWrapper) ResolveBearerToken(r *http.Request, token string, cc permission.CallerContext) (permission.CallerContext, bool) {
 	return h.s.resolveBearerToken(r, token, cc)
 }

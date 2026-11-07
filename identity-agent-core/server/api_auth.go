@@ -102,16 +102,6 @@ var publicRoutes = map[string]string{
 	// tenant, and REPORT_DATA is one-way.
 	"GET /api/attestation": "hardware attestation — the evidence a stranger needs to verify this machine",
 
-	// --- reaching your own agent from a browser ---
-	// Nobody is authenticated yet, which is the entire problem these solve. The
-	// flow's security is not in gating these: it is that granting requires the
-	// owner key, and that collecting requires a secret the browser never
-	// displayed. Gating the start of a login behind being logged in would be
-	// the deadlock this exists to break.
-	"POST /api/session/challenge": "starts a browser login; the caller cannot be authenticated yet, by definition",
-	"POST /api/session/claim":     "collects a session the owner already granted, and needs the browser's own secret to do it",
-	"POST /api/session/end":       "signing out must work with the session itself, not the device that started it",
-
 	// --- the sign-in handshake: the relying party and the browser drive these ---
 	"GET /i/{token}":                                "the scanned pointer — the QR resolves to a signed challenge",
 	"POST /api/login/challenge":                     "a site mints a challenge for its own sign-in page",
@@ -135,8 +125,7 @@ var publicRoutes = map[string]string{
 	// Safe to reach because the token IS the credential: it is unguessable, the
 	// record it returns contains only what its holder already knows, and an
 	// invalid or revoked token discloses nothing. Gating them on being the owner
-	// is the same deadlock the browser-login routes above describe — the person
-	// joining is not the person who published.
+	// would be a deadlock: the person joining is not the person who published.
 	"GET /api/invites/{token}":         "somebody holding an invite reads what they were invited to",
 	"POST /api/invites/{token}/redeem": "somebody holding an invite accepts it",
 	// Asking is public; granting is not. This only queues a request for the
@@ -152,8 +141,8 @@ var publicRoutes = map[string]string{
 	//
 	// The token gates both, the invite carries a use limit, and redeeming only
 	// creates a PENDING employee — the owner still has to approve it, and that
-	// approval is owner-only and additionally refused to browser sessions. So
-	// what a stranger with a valid token can do is put themselves in a queue.
+	// approval is owner-only. So what a stranger with a valid token can do is
+	// put themselves in a queue.
 	"GET /api/employees/invites/{token}":         "the invited person's agent reads what they were invited to",
 	"POST /api/employees/invites/{token}/redeem": "the invited person's agent accepts, becoming a pending member",
 
@@ -443,24 +432,7 @@ func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handle
 				if s.anAppSessionSpeaks(w, r, pattern, next) {
 					return
 				}
-				// Tried before the browser session because a request can carry
-				// both, and the controller signature is the stronger claim: it
-				// proves this request came from that machine, where a session
-				// proves only that somebody holds a cookie.
 				if served := s.controllerActsForTheOwner(w, r, pattern, next); served {
-					return
-				}
-				// A browser session stands in for the owner on everything
-				// except the routes that change the identity itself. Those go
-				// back to the device holding the key — a convenience should not
-				// be able to give the identity away.
-				if s.hasBrowserSession(r) {
-					if reason, forbidden := requiresTheKeyItself(r.Method, pattern); forbidden {
-						denyAuthorizationBecause(w, reasonBrowserSession, "a browser session cannot do this: "+reason+
-							". Use the device that holds this identity's key")
-						return
-					}
-					next.ServeHTTP(w, r)
 					return
 				}
 				if s.ownerKeyStateIsStale(r) {
@@ -504,8 +476,6 @@ func denyAuthorization(w http.ResponseWriter, detail string) {
 // The reason codes a refusal at the gate can carry, for an app to turn into
 // its own words rather than read the detail.
 const (
-	// reasonBrowserSession is a route a browser session may not reach.
-	reasonBrowserSession = "browser_session"
 	// reasonScoreTooLow is a controller whose person has not proved enough
 	// for the action.
 	reasonScoreTooLow = "score_too_low"
@@ -549,8 +519,8 @@ func (s *CoreServer) isOwner(r *http.Request) bool {
 // its own stored keys that way. A route that must stay closed to a controller
 // belongs on controllerOwnerOnly, where the gate refuses it with the reason.
 //
-// No to a browser session and to a caller holding a scoped token, which the
-// gate admits too but which are not the owner acting.
+// No to a caller holding a scoped token, which the gate admits too but which
+// is not the owner acting.
 //
 // Where a handler records WHO acted, it names the controller rather than the
 // owner (TheControllerThatAsked, as whoDecided does).
@@ -730,127 +700,11 @@ func rememberSignature(sig string, now time.Time) (alreadyUsed bool) {
 	return false
 }
 
-// sessionForbidden names what a browser session may NOT do, and why.
-//
-// The list is the point of having sessions at all. A session is a convenience
-// carried by software that holds no key, granted once and then usable for
-// hours by whoever has the browser. What it must not be able to do is change
-// who this identity IS — its keys, who may sign for it, who witnesses it, or
-// where its root of trust lives. Those need the device holding the key, every
-// time, because that is the only proof that survives a stolen session.
-//
-// Deliberately a list of what is forbidden rather than a list of what is
-// allowed. An allow-list would mean a route added tomorrow is unreachable from
-// a browser until somebody remembers to add it, and the pressure to fix that
-// quickly is pressure to add things without thinking. A deny-list means a new
-// route is reachable — and the ones that matter are already named here.
-//
-// Keyed by "METHOD /chi/pattern", the same way publicRoutes is.
-var sessionForbidden = map[string]string{
-	// --- the root of trust ---
-	"POST /api/keystore/root-seed":                      "installing a root seed decides what this identity is",
-	"PUT /api/keystore/recovery-phrase":                 "whoever reads the recovery phrase becomes the identity",
-	"GET /api/keystore/recovery-phrase":                 "whoever reads the recovery phrase becomes the identity",
-	"POST /api/keystore/recovery-phrase/open":           "whoever reads the recovery phrase becomes the identity",
-	"DELETE /api/keystore/recovery-phrase":              "whoever reads the recovery phrase becomes the identity",
-	"PUT /api/keystore/recovery-phrase/moving-to":       "whoever reads the phrase being moved to becomes the identity",
-	"GET /api/keystore/recovery-phrase/moving-to":       "whoever reads the phrase being moved to becomes the identity",
-	"POST /api/keystore/recovery-phrase/moving-to/open": "whoever reads the phrase being moved to becomes the identity",
-	"DELETE /api/keystore/recovery-phrase/moving-to":    "whoever reads the phrase being moved to becomes the identity",
-	// Which half this computer is running. A browser is not the app on this
-	// machine, and this decides whether this core answers about an identity at
-	// all — a session that could set it would make the machine refuse its own
-	// owner, and one that could clear it would put a front end back to giving
-	// answers about nobody.
-	"POST /api/controller/front-end-for":   "which half a computer is running is set on that computer, by the app on it",
-	"DELETE /api/controller/front-end-for": "which half a computer is running is set on that computer, by the app on it",
-	// Retrieval hands back the bytes of an archive. A browser session is
-	// something the owner grants for a while and that whoever holds the browser
-	// then has; it must not be enough to pull an identity's sealed backups out
-	// of this machine, because the archive plus a guessable passphrase, or the
-	// archive plus later possession of the phrase, is the identity.
-	"POST /api/recovery/retrieve":          "retrieval hands back an archive, and an archive is the identity to anyone who can open it",
-	"POST /api/recovery/root-aid-rotation": "rotating the root AID replaces the identity's controlling key",
-
-	// The events the root rotation is signed over, built before they are added.
-	"POST /api/recovery/root-aid-rotation/prepare": "preparing the rotation of the root AID replaces the identity's controlling key",
-
-	// The keys this device holds for the machines it owns. A session that
-	// could ask for a signature, or for a new owning identity, would hold the
-	// owner's authority over every machine this device adopted.
-	"POST /api/machines/owner/sign":     "a signature as a machine's owner is the owner's authority over that machine",
-	"POST /api/machines/owner-identity": "minting the identity that owns a machine is the owner's to do",
-	// Everything that starts, finishes, stops or weakens a recovery.
-	//
-	// A recovery replaces this identity's key material and everything it held,
-	// so it belongs on this list for the same reason installing a root seed
-	// does — a browser session is something the owner grants for a while and
-	// that whoever holds the browser then has.
-	//
-	// The duress policy is the sharpest of these. It is the control that says
-	// what must happen if the owner may be being forced, and a session that
-	// could turn it off could disable the protection and then use the recovery
-	// it was protecting against.
-	"PUT /api/recovery/duress-policy":           "this decides what happens if the owner is being coerced",
-	"POST /api/recovery/start":                  "starting a recovery begins replacing this identity",
-	"POST /api/recovery/sessions/{id}/activate": "activating a recovery replaces this identity and everything it held",
-	"POST /api/recovery/sessions/{id}/cancel":   "stopping a recovery decides whether it happens",
-	"POST /api/recovery/sessions/{id}/rotation": "this rotates the identity's keys",
-	// Reading is forbidden too, which the writes above are not enough for.
-	//
-	// A recovery in progress is the fact that somebody is taking this identity
-	// over, and when it can be completed. Anything holding a browser session
-	// could watch the clock and time itself against the window, or simply
-	// learn that a recovery is running — which is exactly what the window
-	// exists to give the owner, and nobody else, a chance to act on.
-	// Agreeing to hold a share, and approving a release, are the owner's
-	// decisions about their own machine.
-	"POST /api/recovery/holdings":         "agreeing to hold part of somebody's recovery is a commitment",
-	"POST /api/recovery/holdings/approve": "approving a recovery is the whole of what a human gate decides",
-	"POST /api/recovery/holdings/stop":    "giving up a share makes somebody else's backups unopenable by this machine",
-	"PUT /api/recovery/who-holds-this":    "this decides what it takes to get back into this identity",
-
-	"GET /api/recovery/sessions":      "a recovery in progress says this identity is being taken over, and when",
-	"GET /api/recovery/sessions/{id}": "a recovery in progress says this identity is being taken over, and when",
-	// Founding and rotation outside recovery, for the same reason.
-	"POST /api/inception": "founding an identity decides what this agent is",
-	"POST /api/rotation":  "rotation replaces the keys this identity signs with",
-
-	// Who would witness a founding, which the founding names for good.
-	"GET /api/events/witnesses-for-a-founding": controllerOwnerOnly["GET /api/events/witnesses-for-a-founding"],
-
-	// --- who may act for this identity ---
-	"POST /api/signer/invites":                "inviting a signer decides who may bring this organisation into existence",
-	"POST /api/signer/invites/{token}/redeem": "redeeming a signer invite makes somebody an owner",
-	"POST /api/employees/{aid}/approve":       "approving a member decides who may act as this organisation",
-	"POST /api/employees/{aid}/revoke":        "revoking a member decides who may act as this organisation",
-
-	// --- answering for the key ---
-	"POST /api/signing-requests/{id}/fulfil": "these exist precisely because only the key-holding device can answer them",
-	"POST /api/signing-requests/{id}/refuse": "refusing is the key-holding device's answer, and a refused withdrawal is never asked for again",
-
-	// --- what the key log says ---
-	//
-	// Nothing that writes what the authorisation decision reads may be reached
-	// by a session (ADR-050), and this stores any event it is given, signed or
-	// not. A key log row is what a credential, a presentation and every other
-	// check is read against.
-	"POST /api/store/event": controllerOwnerOnly["POST /api/store/event"],
-
-	// --- destruction ---
-	"POST /api/reset": "resetting destroys the identity, and a session should never be enough for that",
-
-	// A session is software holding a cookie. Letting it drive this machine's
-	// enclave would make the enclave reachable by whatever holds that cookie,
-	// which is the opposite of what keeping the key in hardware is for.
-	"POST /api/controller/sign": "asking this computer's secure hardware to sign is for the app running on it",
-}
-
-// requiresTheKeyItself reports whether a route is one a browser session must
-// not perform, and the reason to tell the person.
-func requiresTheKeyItself(method, pattern string) (string, bool) {
-	if reason, forbidden := sessionForbidden[method+" "+pattern]; forbidden {
-		return reason, true
+// bearerToken pulls a token out of the Authorization header.
+func bearerToken(r *http.Request) string {
+	h := r.Header.Get("Authorization")
+	if len(h) > 7 && strings.EqualFold(h[:7], "bearer ") {
+		return strings.TrimSpace(h[7:])
 	}
-	return addonRouteEntry(func(a Addon) map[string]string { return a.SessionForbidden }, method+" "+pattern)
+	return ""
 }

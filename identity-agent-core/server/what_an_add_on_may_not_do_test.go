@@ -166,11 +166,10 @@ func TestTheControllerRulesAnAddOnIsGivenAreCopies(t *testing.T) {
 func TestAnAddOnsEntriesForACoreRouteAreFound(t *testing.T) {
 	ok := func(w http.ResponseWriter, r *http.Request) {}
 	own := Addon{ID: "own",
-		Routes:           func(s *CoreServer, r chi.Router) { r.Get("/own", ok) },
-		RootRoutes:       func(s *CoreServer, r chi.Router) { r.HandleFunc("/own-prefix/*", ok) },
-		PublicRoutes:     map[string]string{"GET /api/own": "its own"},
-		ScopedPrefixes:   []string{"/own-prefix/"},
-		SessionForbidden: map[string]string{"GET /api/own": "its own"},
+		Routes:         func(s *CoreServer, r chi.Router) { r.Get("/own", ok) },
+		RootRoutes:     func(s *CoreServer, r chi.Router) { r.HandleFunc("/own-prefix/*", ok) },
+		PublicRoutes:   map[string]string{"GET /api/own": "its own"},
+		ScopedPrefixes: []string{"/own-prefix/"},
 	}
 	onlyAddons(t, own)
 	s := &CoreServer{DataDir: t.TempDir()}

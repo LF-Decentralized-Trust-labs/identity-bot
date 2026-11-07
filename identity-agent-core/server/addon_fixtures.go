@@ -70,9 +70,8 @@ func (fixtureWrapper) ControllerRow(s *CoreServer, aid string) (ControllerGrant,
 func (fixtureWrapper) CredentialsOf(t coretypes.TB, s *CoreServer, holder string) []store.CredentialRecord {
 	return credentialsOf(t, s, holder)
 }
-func (fixtureWrapper) EveryPublicRoute() map[string]string      { return everyPublicRoute() }
-func (fixtureWrapper) EverySessionForbidden() map[string]string { return everySessionForbidden() }
-func (fixtureWrapper) EverythingRuns(s *CoreServer)             { everythingRuns(s) }
+func (fixtureWrapper) EveryPublicRoute() map[string]string { return everyPublicRoute() }
+func (fixtureWrapper) EverythingRuns(s *CoreServer)        { everythingRuns(s) }
 func (fixtureWrapper) Fulfil(t coretypes.TB, s *CoreServer, req store.SigningRequest, seed []byte) *httptest.ResponseRecorder {
 	return fulfil(t, s, req, seed)
 }
@@ -117,9 +116,6 @@ func (fixtureWrapper) SealTestOwner(t coretypes.TB, s *CoreServer) ([]byte, stri
 	return sealTestOwner(t, s)
 }
 func (fixtureWrapper) SetRouter(s *CoreServer, r chi.Router) { setRouter(s, r) }
-func (fixtureWrapper) SignInABrowser(t coretypes.TB, s *CoreServer, secret string) string {
-	return signInABrowser(t, s, secret)
-}
 func (fixtureWrapper) Signed(t coretypes.TB, method string, path string, body string, seed []byte, at time.Time) *http.Request {
 	return signed(t, method, path, body, seed, at)
 }

@@ -44,8 +44,7 @@ import (
 // controllerOwnerOnly names the actions closed to a controller at any score,
 // each with the reason a person stopped by it is told.
 //
-// Keyed by "METHOD /chi/pattern", the same way publicRoutes and
-// sessionForbidden are.
+// Keyed by "METHOD /chi/pattern", the same way publicRoutes is.
 var controllerOwnerOnly = map[string]string{
 	// --- the root of trust ---
 	"POST /api/keystore/root-seed":                      "installing a root seed decides what this identity is",
@@ -99,9 +98,6 @@ var controllerOwnerOnly = map[string]string{
 	"POST /api/signing-requests/sign-for-another": "this signs with the identity's key and records it in its key log",
 	"POST /api/signing-requests/adopt":            "this takes events into the identity's key log",
 	"POST /api/interact":                          "this signs an interaction event with the identity's key, and key events are the owner's",
-	// Approving a browser login lets a session act for the owner; the handler
-	// already refuses anybody but the owner, and the gate says so too.
-	"POST /api/session/grant": "approving a login lets a browser act for the owner",
 
 	// --- what it takes to get back in, and taking the identity over ---
 	// The duress policy is the sharpest of these: it says what must happen if

@@ -154,7 +154,6 @@ func TestTheOwnerOnlyListIsTheOneTheADRRecords(t *testing.T) {
 		"POST /api/owners/ceremony",
 		"DELETE /api/owners/ceremony",
 		"POST /api/interact",
-		"POST /api/session/grant",
 		"POST /api/recovery/verify",
 		"POST /api/recovery/start",
 		"POST /api/recovery/sessions/{id}/activate",

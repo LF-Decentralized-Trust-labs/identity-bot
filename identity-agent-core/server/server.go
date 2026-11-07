@@ -76,13 +76,10 @@ type CoreServer struct {
 	addonStates addonStates
 	// Providers is the registry of operators this agent can draw services from.
 	// Loaded once at startup; the owner may add to it at runtime.
-	Providers *provider.Registry
-	// BrowserSessions lets somebody reach this agent from a browser, having
-	// proved ownership once on the device that holds the key.
-	BrowserSessions *browserSessions
-	KeriDriver      drivers.KeriEngine
-	TunnelManager   *tunnel.Manager
-	RelayManager    *relay.Manager
+	Providers     *provider.Registry
+	KeriDriver    drivers.KeriEngine
+	TunnelManager *tunnel.Manager
+	RelayManager  *relay.Manager
 	// relayTLS and relayClient override how a relay is reached; nil uses the
 	// system's trust store. Tests set them to trust an in-process relay.
 	relayTLS    *tls.Config
@@ -395,7 +392,6 @@ func New(cfg Config) (*CoreServer, error) {
 		// Loaded eagerly: an agent that cannot name an operator cannot become
 		// reachable, so failing here is better found at startup than at first use.
 		Providers:          provider.Load(cfg.DataDir),
-		BrowserSessions:    newBrowserSessions(),
 		EndpointService:    endpointSvc,
 		EventHub:           eventHub,
 		StartTime:          time.Now(),
@@ -1296,7 +1292,6 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 		s.mountOwnerCeremonyRoutes(r)
 		s.mountVerificationRoutes(r)
 		s.mountWitnessRoutes(r)
-		s.mountBrowserSessionRoutes(r)
 		s.mountEndpointRoutes(r)
 		s.mountProviderRoutes(r)
 		s.mountSigningRequestRoutes(r)
