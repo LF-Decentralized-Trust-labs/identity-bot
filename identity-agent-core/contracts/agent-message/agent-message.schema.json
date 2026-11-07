@@ -201,6 +201,10 @@
         "controller_grant": {
           "type": "string",
           "description": "the controller's Controller Grant credential, when it has one"
+        },
+        "person_statement": {
+          "description": "When the controller was an app's back end speaking for a person: that person's own signed statement over a fingerprint of their words, as the app carried it. Absent when the controller spoke as the signer it belongs to. The salt of the fingerprint is not here.",
+          "$ref": "#/$defs/person_proof"
         }
       }
     },

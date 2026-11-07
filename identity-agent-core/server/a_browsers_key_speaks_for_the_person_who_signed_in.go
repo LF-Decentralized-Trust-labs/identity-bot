@@ -1,9 +1,11 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -36,6 +38,11 @@ type browserKeyRecord struct {
 	Person     string    `json:"person"`
 	Thumbprint string    `json:"thumbprint"`
 	Until      time.Time `json:"until"`
+	// Presented is what the person presented at sign-in that the asset's
+	// required credential was judged on (nil when the asset requires none), kept
+	// so the same gate can be asked again whenever the key is used: a credential
+	// that has lapsed or been revoked since stops the key speaking.
+	Presented []interface{} `json:"presented,omitempty"`
 }
 
 // browserKeys is the record, kept in a file of its own beside the others so a
@@ -71,7 +78,7 @@ func browserKeyEntry(asset, thumbprint string) string { return asset + "\n" + th
 // Record keeps that the key with this thumbprint speaks for person at asset
 // until the time given. A key speaks for one person at one asset: recording it
 // again replaces the earlier, so a key cannot speak for two people.
-func (b *browserKeys) Record(asset, person, thumbprint string, until, now time.Time) error {
+func (b *browserKeys) Record(asset, person, thumbprint string, until, now time.Time, presented []interface{}) error {
 	if asset == "" || person == "" {
 		return errors.New("a browser key speaks for a person at an asset")
 	}
@@ -89,7 +96,11 @@ func (b *browserKeys) Record(asset, person, thumbprint string, until, now time.T
 			delete(all, k)
 		}
 	}
-	all[browserKeyEntry(asset, thumbprint)] = browserKeyRecord{Asset: asset, Person: person, Thumbprint: thumbprint, Until: until}
+	all[browserKeyEntry(asset, thumbprint)] = browserKeyRecord{Asset: asset, Person: person, Thumbprint: thumbprint, Until: until, Presented: presented}
+	return b.save(all)
+}
+
+func (b *browserKeys) save(all map[string]browserKeyRecord) error {
 	raw, err := json.MarshalIndent(all, "", "  ")
 	if err != nil {
 		return err
@@ -100,25 +111,79 @@ func (b *browserKeys) Record(asset, person, thumbprint string, until, now time.T
 	return atomicfile.Write(b.path(), raw, 0o600)
 }
 
-// Whose is the person the key speaks for at the asset, if it still does.
-func (b *browserKeys) Whose(asset, thumbprint string, now time.Time) (string, bool) {
+// Get is the live record for the key at the asset, if there is one.
+func (b *browserKeys) Get(asset, thumbprint string, now time.Time) (browserKeyRecord, bool) {
 	browserKeysLock.Lock()
 	defer browserKeysLock.Unlock()
 	all, err := b.load()
 	if err != nil {
-		return "", false
+		return browserKeyRecord{}, false
 	}
 	r, ok := all[browserKeyEntry(asset, thumbprint)]
 	if !ok || !now.Before(r.Until) {
-		return "", false
+		return browserKeyRecord{}, false
 	}
-	return r.Person, true
+	return r, true
+}
+
+// Whose is the person the key speaks for at the asset, if it still does.
+func (b *browserKeys) Whose(asset, thumbprint string, now time.Time) (string, bool) {
+	r, ok := b.Get(asset, thumbprint, now)
+	return r.Person, ok
+}
+
+// Of are the live records of the person at the asset.
+func (b *browserKeys) Of(asset, person string, now time.Time) []browserKeyRecord {
+	browserKeysLock.Lock()
+	defer browserKeysLock.Unlock()
+	all, err := b.load()
+	if err != nil {
+		return nil
+	}
+	var out []browserKeyRecord
+	for _, r := range all {
+		if r.Asset == asset && r.Person == person && now.Before(r.Until) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// End ends the records at the asset of the key with this thumbprint, or, when
+// thumbprint is empty, of every key the person holds there. It reports how many
+// it ended. A record is ended before its time when the person signs out or the
+// app signs them out; a key whose record is gone speaks for no one, and speaking
+// again takes a new sign-in.
+func (b *browserKeys) End(asset, thumbprint, person string) (int, error) {
+	if asset == "" || (thumbprint == "" && person == "") {
+		return 0, errors.New("ending a browser key names the asset and the key or the person")
+	}
+	browserKeysLock.Lock()
+	defer browserKeysLock.Unlock()
+	all, err := b.load()
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for k, r := range all {
+		if r.Asset != asset {
+			continue
+		}
+		if (thumbprint != "" && r.Thumbprint == thumbprint) || (thumbprint == "" && r.Person == person) {
+			delete(all, k)
+			n++
+		}
+	}
+	if n == 0 {
+		return 0, nil
+	}
+	return n, b.save(all)
 }
 
 // keysSpeakingAt is the trail.KeyRoster for one app asset: a key speaks for a
 // person when a sign-in at this asset named it, it has not lapsed, and the
-// asset still admits that person (assetStillAdmits, so someone removed since
-// is no longer spoken for).
+// asset still stands behind that person (assetStillStands: membership and, where
+// the policy requires one, the credential, asked again on each use).
 type keysSpeakingAt struct {
 	s     *CoreServer
 	asset string
@@ -131,12 +196,74 @@ func (k keysSpeakingAt) KeySpeaksFor(person, signer, verkey string) bool {
 	if err != nil {
 		return false
 	}
-	who, ok := k.s.browserKeys().Whose(k.asset, tp, time.Now())
-	if !ok || who != person {
+	rec, ok := k.s.browserKeys().Get(k.asset, tp, time.Now())
+	if !ok || rec.Person != person {
 		return false
 	}
-	admitted, err := k.s.assetStillAdmits(k.asset, person)
-	return err == nil && admitted
+	return k.s.assetStillStands(rec)
+}
+
+// assetStillStands asks the asset the question it asked at sign-in, now: the
+// enrolment policy's membership gate and, where the policy requires a
+// credential, that credential as the person presented it, verified again. Who
+// is on the employee list is not the asset's answer. An asset that cannot be
+// read admits nobody.
+func (s *CoreServer) assetStillStands(rec browserKeyRecord) bool {
+	if s.assetHandler == nil {
+		return false
+	}
+	a, found, err := s.assetHandler.Store.GetAsset(rec.Asset)
+	if err != nil || !found {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	ok, _ := s.authorizeAssetAccess(ctx, a.PairwiseAID, rec.Person, rec.Presented)
+	return ok
+}
+
+// personStandsAtAsset is whether the asset still stands behind the person: by
+// a live key's sign-in, asked again with what they presented, or, with no live
+// key (it lapsed or they signed out), by the asset's gate on its own, which an
+// asset that requires a credential cannot pass because nothing presented is
+// kept past the key. Used for a conversation the person opened and an AI agent
+// still asks in their name; speaking needs the live key (KeySpeaksFor).
+func (s *CoreServer) personStandsAtAsset(assetID, person string) bool {
+	recs := s.browserKeys().Of(assetID, person, time.Now())
+	for _, rec := range recs {
+		if s.assetStillStands(rec) {
+			return true
+		}
+	}
+	if len(recs) > 0 {
+		return false
+	}
+	return s.assetStillStands(browserKeyRecord{Asset: assetID, Person: person})
+}
+
+// endBrowserKeys ends the browser-key records of the app's own asset: the asset
+// the machine that signed this request is the back end of, and no other. The
+// key is named by its thumbprint, or the person by their identifier at the
+// asset when every key of theirs is to end. Ending only takes power away, so
+// the app, which signed the person in, may do it when it signs them out.
+func (s *CoreServer) endBrowserKeys(r *http.Request, thumbprint, person string) (int, error) {
+	grant, ok := TheControllerThatAsked(r)
+	if !ok {
+		return 0, errNoProvablePerson
+	}
+	current, had, err := s.controllers().Get(grant.ControllerAID)
+	if err != nil {
+		return 0, err
+	}
+	if !had || current.AppAsset == "" {
+		return 0, errors.New("this machine is not the back end of an app, so it has no sign-ins to end")
+	}
+	if thumbprint != "" {
+		if err := login.CheckBrowserKeyThumbprint(thumbprint); err != nil {
+			return 0, err
+		}
+	}
+	return s.browserKeys().End(current.AppAsset, thumbprint, person)
 }
 
 // assetIDOfSite is the id of the asset whose pairwise identifier is siteAID.

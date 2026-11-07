@@ -226,3 +226,48 @@ no one.
 Nothing in this path reaches the core from a browser. The core's other browser
 routes, and the login widget's `/api/login/session/*` CORS, are not changed by
 it.
+
+### How long a key speaks, and what ends it early
+
+A sign-in lets its key speak for at most twelve hours (`browserKeyLife`), and
+three things can end that sooner. Each is checked when the key is used, not
+only when the person signed in.
+
+- **The app signs the person out.** The app's back end calls
+  `Host.EndBrowserKeys` with the request it signs as any controller does, naming
+  a key by its thumbprint or a person by their identifier at the asset (every key
+  of theirs ends). The asset is the one the calling machine is bound to
+  (`ControllerGrant.AppAsset`), never one the caller names, so an app can end
+  only its own asset's records. Ending only takes power away, so the app that
+  signed the person in may do it. A key whose record is gone speaks for no one;
+  speaking again takes a new sign-in.
+- **The asset stops standing behind the person.** `keysSpeakingAt` asks the
+  asset's whole gate again (`assetStillStands`): the enrolment policy's
+  membership gate and, where the policy requires a credential, that credential
+  as the person presented it at sign-in, verified again. The record keeps what
+  was presented for that (`browserKeyRecord.Presented`, only the entries of the
+  required schema). A person whose required credential has lapsed or been
+  revoked stops speaking on the next use, not at the end of the twelve hours.
+  The employee list is not the asset's answer and is not consulted.
+- **A statement works once, across a restart.** What has been used is kept in
+  `person_statements_used.json` in the data directory for as long as a statement
+  could still be fresh, so restarting the core does not make a used statement
+  usable again. A statement that cannot be marked used is refused.
+
+A statement names the conversation it is for, and the request names the same
+one: a request that names none (it would open a new conversation) matches no
+statement. A statement is for the AI agent it names, and is accepted only on
+that agent's route. A person an app spoke for is `Signer{Standing: "member",
+Asset: <asset>}`, and whether they still stand for a conversation they opened is
+the asset's answer (`personStandsAtAsset`).
+
+**What the conversation bundle shows of it.** A controller entry carries the
+person's statement (`agentmessage.ControllerProof.PersonStatement`), and the
+record is held to it: signed by the key it names, from the person the entry is
+from, naming this entry's conversation, kind, recipient, reply and message id.
+The bundle also checks it names this organisation and was signed within
+`authorisation.Skew` of when the Identity Agent took it. It cannot show that
+the machine is the back end of an app, or that the key is the person's: the
+asset is not in the machine's Controller Grant credential, so the bundle says
+that is the Identity Agent's word. Carrying it in the credential is a new
+version of the Controller Grant schema and is not part of this change.

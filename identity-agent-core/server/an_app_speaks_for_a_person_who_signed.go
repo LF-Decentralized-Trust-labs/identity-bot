@@ -122,8 +122,19 @@ func (s *CoreServer) thePersonAnAppSpeaksFor(r *http.Request, grant ControllerGr
 	if st.Kind != agentmessage.PersonKindMessage && st.Kind != agentmessage.PersonKindAsk {
 		return refuse(fmt.Errorf("a statement of kind %q is not what this route takes: it takes a message or an ask", st.Kind))
 	}
-	if msg.Conversation != "" && st.Conversation != msg.Conversation {
-		return refuse(errors.New("the statement is for another conversation than the request's"))
+	// The conversation is compared when the request names none too: a statement
+	// is always for one conversation (its id is the person's to choose), so a
+	// request that names none, which opens a new one, is not what any statement
+	// said. The statement a person signed for c1 cannot open another.
+	if st.Conversation != msg.Conversation {
+		return refuse(errors.New("the statement is for another conversation than the request's, " +
+			"and a request that opens one names the conversation the person signed for"))
+	}
+	// The AI agent is the one on the route the app called: a statement to agent
+	// A is not delivered on agent B's route, whatever the body says.
+	agent := strings.Split(strings.Trim(r.URL.Path, "/"), "/")[3]
+	if st.To != agent {
+		return refuse(errors.New("the statement is to another AI agent than the one the request is sent to"))
 	}
 	if st.To != msg.To || st.InReplyTo != msg.InReplyTo {
 		return refuse(errors.New("the statement is to someone else than the request's, or answers something else"))
@@ -145,8 +156,10 @@ func (s *CoreServer) thePersonAnAppSpeaksFor(r *http.Request, grant ControllerGr
 	if cerr := agentmessage.CheckFingerprint(st.FingerprintVersion, salt, words, st.Fingerprint, false); cerr != nil {
 		return refuse(fmt.Errorf("the statement is for other words than the request's: %w", cerr))
 	}
-	if rememberSignature("person:"+proof.Signature, time.Now().UTC()) {
+	if used, uerr := s.rememberPersonStatement(proof.Signature, time.Now().UTC()); uerr != nil {
+		return refuse(uerr)
+	} else if used {
 		return refuse(errors.New("this statement was already used"))
 	}
-	return coretypes.Signer{AID: who, Standing: "member"}, js, salt, true, nil
+	return coretypes.Signer{AID: who, Standing: "member", Asset: grant.AppAsset}, js, salt, true, nil
 }

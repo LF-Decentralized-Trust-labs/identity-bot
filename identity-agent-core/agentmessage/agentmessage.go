@@ -341,6 +341,12 @@ type ControllerProof struct {
 	// rather than by this Identity Agent's word. Empty for a controller granted
 	// before machines were given one.
 	ControllerGrant string `json:"controller_grant,omitempty"`
+	// PersonStatement is, when the controller was an app's back end speaking for
+	// a person, that person's own signed statement over a fingerprint of their
+	// words, as the app carried it (ADR-066, ADR-067). Absent when the
+	// controller spoke as the signer it belongs to. The salt is not here: the
+	// app that keeps the words keeps it.
+	PersonStatement *PersonProof `json:"person_statement,omitempty"`
 }
 
 // Verify checks the controller signed this request.
@@ -521,9 +527,31 @@ func (r Record) CheckSenderProof() error {
 			req.Conversation != r.Conversation && req.Conversation != "" || req.InReplyTo != r.InReplyTo {
 			return errors.New("the record does not say what the person's controller signed")
 		}
-		return nil
+		return r.ControllerProof.checkPersonStatement(r, req)
 	}
 	return errors.New("the message carries no proof from its sender")
+}
+
+// checkPersonStatement checks, when an app's back end spoke for a person, that
+// the person's own statement is theirs and for this very entry: signed by the
+// key it names, from the person the record is from, and naming the
+// conversation, kind, recipient, reply and message the record and the app's
+// signed request have. Whose the key is, and that the words are the ones the
+// fingerprint is over (the salt is not kept), are not shown by the record.
+func (p ControllerProof) checkPersonStatement(r Record, req PersonMessage) error {
+	if p.PersonStatement == nil {
+		return nil
+	}
+	if err := p.PersonStatement.Verify(); err != nil {
+		return fmt.Errorf("the person's statement does not hold: %w", err)
+	}
+	st := p.PersonStatement.Statement
+	if (st.Kind != PersonKindMessage && st.Kind != PersonKindAsk) || r.From != Person(st.From) ||
+		st.Kind != r.Kind || st.To != r.To || st.InReplyTo != r.InReplyTo ||
+		st.Conversation != r.Conversation || st.MessageID != req.Nonce {
+		return errors.New("the record does not say what the person signed")
+	}
+	return nil
 }
 
 // PersonMessage is what a person's controller signs to say something to an AI

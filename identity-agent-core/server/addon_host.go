@@ -60,6 +60,9 @@ func (h hostWrapper) AwaitingFor(holder string, pending bool) string {
 func (h hostWrapper) BindSigner(aid string, signer string) (ControllerGrant, error) {
 	return h.s.bindSigner(aid, signer)
 }
+func (h hostWrapper) EndBrowserKeys(r *http.Request, thumbprint, person string) (int, error) {
+	return h.s.endBrowserKeys(r, thumbprint, person)
+}
 func (h hostWrapper) BindAppAsset(aid string, assetID string) (ControllerGrant, error) {
 	h.s.grantsMu.Lock()
 	defer h.s.grantsMu.Unlock()

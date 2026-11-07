@@ -455,8 +455,11 @@ func (c *controllerGrants) BindSigner(aid, signer string) (ControllerGrant, erro
 	return g, nil
 }
 
-// BindAppAsset records which app asset a machine is the back end of. Set once:
-// a machine already bound to an app is left as it is.
+// BindAppAsset records which app asset a machine is the back end of. Set once,
+// and only for a machine that speaks as no signer: a machine already bound to a
+// signer speaks as that person and is refused, so it can never be both the
+// person's and an app's. Binding it again to the same asset changes nothing;
+// to another is refused.
 func (c *controllerGrants) BindAppAsset(aid, assetID string) (ControllerGrant, error) {
 	grantsLock.Lock()
 	defer grantsLock.Unlock()
@@ -467,6 +470,12 @@ func (c *controllerGrants) BindAppAsset(aid, assetID string) (ControllerGrant, e
 	g, ok := all[strings.TrimSpace(aid)]
 	if !ok {
 		return ControllerGrant{}, fmt.Errorf("no such machine")
+	}
+	if g.AppAsset != "" && g.AppAsset != assetID {
+		return ControllerGrant{}, fmt.Errorf("this machine is already the back end of another app")
+	}
+	if g.Signer != "" {
+		return ControllerGrant{}, fmt.Errorf("this machine already speaks as a signer of the organisation, so it cannot be the back end of an app")
 	}
 	if g.AppAsset == "" && assetID != "" {
 		g.AppAsset = assetID

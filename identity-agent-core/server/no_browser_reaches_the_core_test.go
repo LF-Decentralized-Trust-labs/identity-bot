@@ -145,7 +145,7 @@ func (w *anAppWorld) signedIn(t *testing.T, person string, key agentbody.Signer,
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := w.cw.s.browserKeys().Record("chat", person, tp, time.Now().Add(until), time.Now()); err != nil {
+	if err := w.cw.s.browserKeys().Record("chat", person, tp, time.Now().Add(until), time.Now(), nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -161,8 +161,13 @@ type aSpokenRequest struct {
 	noSalt  bool
 	noState bool
 	noWho   bool
-	// conversation is what the body names, when it names one.
+	// conversation is what the body names, "c1" when not said: the id the person
+	// signed for, which a request that opens one names too.
 	conversation string
+	// none sends a body that names no conversation.
+	none bool
+	// path is the route it is sent on, the talk route of agent-1 when not said.
+	path string
 }
 
 // say sends it as the app's back end does, and reports the answer.
@@ -183,11 +188,19 @@ func (w *anAppWorld) request(t *testing.T, q aSpokenRequest) *http.Request {
 	if sent == "" {
 		sent = q.words
 	}
-	body := fmt.Sprintf(`{"to":"agent-1","body":%q,"nonce":%q}`, sent, nonce)
-	if q.conversation != "" {
-		body = fmt.Sprintf(`{"conversation":%q,"to":"agent-1","body":%q,"nonce":%q}`, q.conversation, sent, nonce)
+	convo := q.conversation
+	if convo == "" && !q.none {
+		convo = "c1"
 	}
-	r := asThatMachineTo(t, w.target, w.cw.ctlAID, http.MethodPost, talkPath, body, w.cw.ctlSeed, authprovider.Level(""), time.Now())
+	body := fmt.Sprintf(`{"to":"agent-1","body":%q,"nonce":%q}`, sent, nonce)
+	if convo != "" {
+		body = fmt.Sprintf(`{"conversation":%q,"to":"agent-1","body":%q,"nonce":%q}`, convo, sent, nonce)
+	}
+	path := q.path
+	if path == "" {
+		path = talkPath
+	}
+	r := asThatMachineTo(t, w.target, w.cw.ctlAID, http.MethodPost, path, body, w.cw.ctlSeed, authprovider.Level(""), time.Now())
 	salt, _ := agentmessage.NewSalt()
 	fp, _ := agentmessage.Fingerprint(salt, []byte(q.words))
 	id, vk, _ := agentbody.Identity(q.key)
@@ -377,6 +390,10 @@ func TestAnAppCannotSpeakForAPersonWhoDidNotSign(t *testing.T) {
 			q.conversation = "c1"
 			q.mutate = func(s *agentmessage.PersonStatement) { s.Conversation = "other" }
 		}),
+		"a statement for c1 opening a new conversation": with(func(q *aSpokenRequest) { q.none = true }),
+		"a statement to agent-1 delivered on agent-2's route": with(func(q *aSpokenRequest) {
+			q.path = "/api/mcp/agents/agent-2/conversations"
+		}),
 		"another kind": with(func(q *aSpokenRequest) {
 			q.mutate = func(s *agentmessage.PersonStatement) { s.Kind = agentmessage.PersonKindClose; s.To = "" }
 		}),
@@ -502,5 +519,168 @@ func TestAMachineBoundToNoAppStillSpeaksAsItsSigner(t *testing.T) {
 	w.h.ServeHTTP(rec, r)
 	if rec.Code == http.StatusOK {
 		t.Fatal("a machine bound to no app spoke for a named person")
+	}
+}
+
+func TestAnAppCannotKeepAPersonSpeakingAfterTheyAreSignedOut(t *testing.T) {
+	w := newAnAppWorld(t)
+	s := w.cw.s
+	end := func(w http.ResponseWriter, r *http.Request) {
+		body, _ := readSignedBody(r)
+		var q struct{ Key, Person string }
+		_ = json.Unmarshal(body, &q)
+		n, err := s.endBrowserKeys(r, q.Key, q.Person)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
+		fmt.Fprint(w, n)
+	}
+	s.MountExtraRoutes(func(r chi.Router) { r.Post("/mcp/browser-keys/end", end) })
+	s.router = s.buildRouter()
+	w.h = s.router
+	ends := func(body string) *httptest.ResponseRecorder {
+		w.calls++
+		r := asThatMachineTo(t, w.target, w.cw.ctlAID, http.MethodPost, "/api/mcp/browser-keys/end", body, w.cw.ctlSeed, authprovider.Level(""), time.Now())
+		rec := httptest.NewRecorder()
+		w.h.ServeHTTP(rec, r)
+		return rec
+	}
+	tpOf := func(k agentbody.Signer) string {
+		_, vk, _ := agentbody.Identity(k)
+		tp, err := login.BrowserKeyThumbprintOfMachineKey(vk)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tp
+	}
+	ann, bob, ann2 := newBrowsersKey(t), newBrowsersKey(t), newBrowsersKey(t)
+	w.signedIn(t, "Eann", ann, time.Hour)
+	w.signedIn(t, "Eann", ann2, time.Hour)
+	w.signedIn(t, "Ebob", bob, time.Hour)
+	speaks := func(who string, k agentbody.Signer) bool {
+		return w.say(t, aSpokenRequest{who: who, key: k, words: "hello"}).Code == http.StatusOK
+	}
+	if !speaks("Eann", ann) {
+		t.Fatal("a signed-in person was refused")
+	}
+	// The app signs Ann out of one browser: that key stops, her other one and Bob's do not.
+	if rec := ends(`{"key":"` + tpOf(ann) + `"}`); rec.Code != http.StatusOK || rec.Body.String() != "1" {
+		t.Fatalf("ending a key = %d %s", rec.Code, rec.Body)
+	}
+	if speaks("Eann", ann) {
+		t.Fatal("a key spoke after the app signed it out")
+	}
+	if !speaks("Eann", ann2) || !speaks("Ebob", bob) {
+		t.Fatal("ending one key ended another")
+	}
+	// Signing a person out ends every key of theirs.
+	if rec := ends(`{"person":"Eann"}`); rec.Code != http.StatusOK || rec.Body.String() != "1" {
+		t.Fatalf("ending a person = %d %s", rec.Code, rec.Body)
+	}
+	if speaks("Eann", ann2) {
+		t.Fatal("a person spoke after being signed out")
+	}
+	// An end names a key or a person.
+	if rec := ends(`{}`); rec.Code == http.StatusOK {
+		t.Fatalf("an end that names nothing was taken: %s", rec.Body)
+	}
+	// It reaches only the app's own asset: the same key recorded at another
+	// asset is untouched.
+	if err := s.browserKeys().Record("other-asset", "Eann", tpOf(bob), time.Now().Add(time.Hour), time.Now(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if rec := ends(`{"key":"` + tpOf(bob) + `"}`); rec.Code != http.StatusOK {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	if _, ok := s.browserKeys().Whose("other-asset", tpOf(bob), time.Now()); !ok {
+		t.Fatal("an app ended a sign-in at an asset that is not its own")
+	}
+	// A machine that is not an app's back end ends nothing.
+	grantsLock.Lock()
+	c := s.controllers()
+	all, _ := c.load()
+	g := all[w.cw.ctlAID]
+	g.AppAsset = ""
+	all[w.cw.ctlAID] = g
+	_ = c.save(all)
+	grantsLock.Unlock()
+	if rec := ends(`{"person":"Ebob"}`); rec.Code == http.StatusOK {
+		t.Fatal("a machine bound to no app ended a sign-in")
+	}
+}
+
+func TestAKeyStopsSpeakingWhenTheAssetNoLongerStandsBehindThePerson(t *testing.T) {
+	w := newAnAppWorld(t)
+	key := newBrowsersKey(t)
+	w.signedIn(t, "Eann", key, time.Hour)
+	if rec := w.say(t, aSpokenRequest{who: "Eann", key: key, words: "hello"}); rec.Code != http.StatusOK {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	// Still a member, but the asset now requires a credential the sign-in did
+	// not present: membership alone is no longer the asset's answer.
+	st := w.cw.s.assetHandler.Store
+	a, _, _ := st.GetAsset("chat")
+	a.Policy.RequiredCredSchema = "Eschema-the-person-never-presented"
+	if err := st.UpsertAsset(a); err != nil {
+		t.Fatal(err)
+	}
+	w.mustBeRefused(t, "a person whose required credential is not there", aSpokenRequest{who: "Eann", key: key, words: "hello"})
+	if w.cw.s.personStillStands(coretypes.Signer{AID: "Eann", Standing: "member", Asset: "chat"}) {
+		t.Fatal("the asset's answer was not used for a person an app spoke for")
+	}
+	a.Policy.RequiredCredSchema = ""
+	_ = st.UpsertAsset(a)
+	if !w.cw.s.personStillStands(coretypes.Signer{AID: "Eann", Standing: "member", Asset: "chat"}) {
+		t.Fatal("a member of the asset was not found standing")
+	}
+	if w.cw.s.personStillStands(coretypes.Signer{AID: "Estranger", Standing: "member", Asset: "chat"}) {
+		t.Fatal("somebody the asset does not admit was found standing")
+	}
+}
+
+func TestAUsedStatementStaysUsedAcrossARestart(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().UTC()
+	first := &CoreServer{DataDir: dir}
+	if used, err := first.rememberPersonStatement("sig-1", now); used || err != nil {
+		t.Fatalf("first use: %v %v", used, err)
+	}
+	restarted := &CoreServer{DataDir: dir}
+	if used, err := restarted.rememberPersonStatement("sig-1", now.Add(time.Minute)); !used || err != nil {
+		t.Fatalf("a used statement was usable again after a restart: %v %v", used, err)
+	}
+	if used, _ := restarted.rememberPersonStatement("sig-1", now.Add(statementsUsedFor+time.Second)); used {
+		t.Fatal("a statement was remembered after it could no longer be fresh")
+	}
+}
+
+func TestAMachineBoundToASignerCannotBecomeAnAppsBackEnd(t *testing.T) {
+	w := newAnAppWorld(t)
+	s := w.cw.s
+	grantsLock.Lock()
+	c := s.controllers()
+	all, _ := c.load()
+	g := all[w.cw.ctlAID]
+	g.AppAsset, g.Signer = "", talkSigner
+	all[w.cw.ctlAID] = g
+	_ = c.save(all)
+	grantsLock.Unlock()
+	if _, err := c.BindAppAsset(w.cw.ctlAID, "chat"); err == nil {
+		t.Fatal("a machine that speaks as a signer was bound to an app")
+	}
+	g.Signer = ""
+	grantsLock.Lock()
+	all[w.cw.ctlAID] = g
+	_ = c.save(all)
+	grantsLock.Unlock()
+	if _, err := c.BindAppAsset(w.cw.ctlAID, "chat"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.BindAppAsset(w.cw.ctlAID, "another"); err == nil {
+		t.Fatal("an app's machine was rebound to another app")
+	}
+	if _, err := s.bindSigner(w.cw.ctlAID, talkSigner); err == nil {
+		t.Fatal("an app's machine was given a signer")
 	}
 }

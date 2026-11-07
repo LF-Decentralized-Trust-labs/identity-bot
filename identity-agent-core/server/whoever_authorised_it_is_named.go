@@ -518,6 +518,9 @@ func (s *CoreServer) bindSigner(aid, signer string) (ControllerGrant, error) {
 	if g.Signer != "" {
 		return g, nil
 	}
+	if g.AppAsset != "" {
+		return ControllerGrant{}, fmt.Errorf("this machine is the back end of an app, which speaks as no signer")
+	}
 	bound := g
 	bound.Signer = signer
 	if g.CredentialSAID != "" {
@@ -857,6 +860,10 @@ func (s *CoreServer) signerOf(g ControllerGrant) (coretypes.Signer, error) {
 func (s *CoreServer) personStillStands(p coretypes.Signer) bool {
 	if p.AID == "" {
 		return false
+	}
+	if p.Asset != "" {
+		// A person an app spoke for stands where the asset says they do.
+		return s.personStandsAtAsset(p.Asset, p.AID)
 	}
 	if p.Standing == "owner" {
 		owner, ok := s.theOwner()

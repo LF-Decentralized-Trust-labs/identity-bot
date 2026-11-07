@@ -1007,6 +1007,20 @@ func (v *verifier) checkPersonSpoke(where string, rec agentmessage.Record, at ti
 			v.fault(where, "the app's Controller Grant was not in force when the request was signed: %s", why)
 		}
 		switch signer := g.attr("signer"); {
+		case p.PersonStatement != nil && signer != "":
+			v.fault(where, "the entry carries a person's own statement, which an app's back end carries, but the machine's Controller Grant names %s as the person it acts as", signer)
+		case p.PersonStatement != nil:
+			// An app's back end spoke for the person with their own signed
+			// statement. What the bundle can show is that the statement is
+			// theirs to the key that signed it, is for this entry, this
+			// organisation and this time; that the machine is the back end of an
+			// app, and that the key is the person's, is not in any credential.
+			if st := p.PersonStatement.Statement; st.Agent != v.b.Root {
+				v.fault(where, "the person signed it for Identity Agent %q, not for this organisation %s", st.Agent, v.b.Root)
+			} else if stAt, err := time.Parse(time.RFC3339, st.Time); err != nil || absDuration(at.Sub(stAt)) > authorisation.Skew {
+				v.fault(where, "the person's statement was not signed within %s of when the Identity Agent took it", authorisation.Skew)
+			}
+			v.cannotRuleOut("Which app's back end carried a person's own statement, and which person a browser's key speaks for, is the Identity Agent's word: the machine's Controller Grant does not name the app's asset, and no credential shows the key is the person's.")
 		case signer == "":
 			v.cannotRuleOut("Some apps' Controller Grants name no signer, so which person spoke from them is the Identity Agent's word.")
 		case signer != aid:

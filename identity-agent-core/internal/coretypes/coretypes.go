@@ -53,6 +53,10 @@ type Signer struct {
 	Standing   string
 	Credential string
 	Name       string
+	// Asset is, for a person an app's back end speaks for, the app asset whose
+	// sign-in the person stands on: whether they still stand is that asset's
+	// answer, not the employee list's. Empty for every other signer.
+	Asset string
 }
 
 // ControllerProof is a controller's signature over a request, as proof of what
