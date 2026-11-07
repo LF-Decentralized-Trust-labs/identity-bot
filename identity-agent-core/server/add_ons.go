@@ -89,6 +89,12 @@ type Addon struct {
 	// for one of its parties.
 	ConversationParty func(s *CoreServer, id, party string) (held, isParty bool, err error)
 
+	// AIAgentRevoked says whether the AI agent with this identifier has been
+	// revoked, which the add-on that keeps AI agents alone records. A revoked
+	// AI agent can be asked nothing, so a list of the AI agents a person may
+	// talk to leaves it out. An add-on that keeps none leaves it nil.
+	AIAgentRevoked func(s *CoreServer, agentAID string) bool
+
 	// Who is calling. The core detects that a caller presented a bearer
 	// token or a body's signature, and asks the add-ons, in the order they
 	// registered, who that is. A credential no add-on recognises is refused
@@ -438,6 +444,17 @@ var errNoConversations = errors.New("no add-on here keeps conversations")
 // errConversationHeldTwice is a conversation more than one add-on says it
 // holds: whose it is cannot be told, so it is filed under neither.
 var errConversationHeldTwice = errors.New("more than one add-on says it holds this conversation")
+
+// aiAgentRevoked asks the add-ons whether the AI agent is revoked: it is if any
+// says so.
+func (s *CoreServer) aiAgentRevoked(agentAID string) bool {
+	for _, a := range registeredAddons() {
+		if a.AIAgentRevoked != nil && a.AIAgentRevoked(s, agentAID) {
+			return true
+		}
+	}
+	return false
+}
 
 // conversationParty asks the add-ons about conversation id. With none that
 // keeps conversations it fails, as the conversations failing to open did; an

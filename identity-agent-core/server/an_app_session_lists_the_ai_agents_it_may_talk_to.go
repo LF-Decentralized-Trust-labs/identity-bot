@@ -9,8 +9,9 @@ import (
 
 // An app session (ADR-066) can read which AI agents its person may talk to, so
 // an app can show them before anyone speaks. The answer is decided by the rule
-// the talk routes ask (agentmessage.PersonRef.MayTalkToAnAIAgent), for the
-// person the session names, and says of each AI agent only its name, its own
+// the talk routes ask, for each AI agent
+// (agentmessage.PersonRef.MayTalkToAnAIAgent, which the AI-agent add-on's talk
+// routes call and no one repeats), for the person the session names, and says of each AI agent only its name, its own
 // identifier, and the identifiers of the person and the organisation behind
 // it. It carries nothing about the AI agent's brain, machine, capabilities or
 // grant, which GET /api/mcp/agents (a controller's) goes on answering as it
@@ -52,31 +53,36 @@ func (s *CoreServer) handleAppSessionListsAgents(w http.ResponseWriter, r *http.
 	}
 	person := agentmessage.PersonRef{AID: asking.Person.AID, Standing: asking.Person.Standing}
 	out := []anAIAgentToTalkTo{}
-	if person.MayTalkToAnAIAgent() {
-		assets, err := s.assetHandler.Store.ListAssets()
-		if err != nil {
-			writeError(w, http.StatusServiceUnavailable, "Could not read the AI agents", err.Error())
-			return
+	// Of the person's reach, the same rule as the talk routes ask. And only an
+	// AI agent a talk would reach: one not yet enrolled has no identifier of
+	// its own to address a message to, and a revoked one is refused by the
+	// talk route with a 409, so neither is listed.
+	assets, err := s.assetHandler.Store.ListAssets()
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "Could not read the AI agents", err.Error())
+		return
+	}
+	owner, _ := s.theOwner()
+	for _, a := range assets {
+		if a.AssetType != "ai_agent" || !person.MayTalkToAnAIAgent(a) {
+			continue
 		}
-		owner, _ := s.theOwner()
-		for _, a := range assets {
-			if a.AssetType != "ai_agent" {
-				continue
-			}
-			behind := owner
-			if a.MadeByController != "" {
-				if g, had, err := s.controllers().Get(a.MadeByController); err == nil && had && g.Signer != "" {
-					behind = g.Signer
-				}
-			}
-			name := a.DisplayName
-			if name == "" {
-				name = a.ID
-			}
-			out = append(out, anAIAgentToTalkTo{
-				ID: a.ID, Name: name, AgentAID: a.PairwiseAID, PersonAID: behind, OrganisationAID: a.DelegatorAID,
-			})
+		if a.PairwiseAID == "" || s.aiAgentRevoked(a.PairwiseAID) {
+			continue
 		}
+		behind := owner
+		if a.MadeByController != "" {
+			if g, had, err := s.controllers().Get(a.MadeByController); err == nil && had && g.Signer != "" {
+				behind = g.Signer
+			}
+		}
+		name := a.DisplayName
+		if name == "" {
+			name = a.ID
+		}
+		out = append(out, anAIAgentToTalkTo{
+			ID: a.ID, Name: name, AgentAID: a.PairwiseAID, PersonAID: behind, OrganisationAID: a.DelegatorAID,
+		})
 	}
 	// The store holds assets unordered; the same roster is always answered in the same order.
 	sort.Slice(out, func(i, j int) bool {

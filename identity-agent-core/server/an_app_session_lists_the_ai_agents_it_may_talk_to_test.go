@@ -158,3 +158,48 @@ func TestAControllersListOfAIAgentsIsUnchanged(t *testing.T) {
 		t.Fatalf("a controller on the app session's list = %d, want 404 and no roster: %s", rec.Code, rec.Body)
 	}
 }
+
+// A revoked AI agent is refused by the talk route (409), so the list that
+// says whom a person may talk to leaves it out. Revocation is recorded by the
+// AI-agent add-on alone, so the core asks the add-ons.
+func TestTheListLeavesOutARevokedAIAgent(t *testing.T) {
+	onlyAddons(t, Addon{ID: "ai_agents", Name: "test",
+		AIAgentRevoked: func(_ *CoreServer, aid string) bool { return aid == "Eagent2" }})
+	w := anAppSessionWorld(t)
+	withTwoAIAgents(t, w)
+	agents := listedBy(t, w.serve(w.request(http.MethodGet, listPath, "", chatOrigin, w.key)))
+	if len(agents) != 1 || agents[0]["agent_aid"] != "Eagent1" {
+		t.Fatalf("the list = %v, want only the AI agent that is not revoked", agents)
+	}
+}
+
+// With no add-on that records revocation, nothing is revoked: the list is the
+// whole roster, as before.
+func TestTheListIsWholeWhereNoAddOnRecordsRevocation(t *testing.T) {
+	onlyAddons(t)
+	w := anAppSessionWorld(t)
+	withTwoAIAgents(t, w)
+	if n := len(listedBy(t, w.serve(w.request(http.MethodGet, listPath, "", chatOrigin, w.key)))); n != 2 {
+		t.Fatalf("the list has %d AI agents, want 2", n)
+	}
+}
+
+// An AI agent not yet enrolled has no identifier of its own to address a
+// message to, so a talk could not reach it: it is left out, not listed with an
+// empty agent_aid.
+func TestTheListLeavesOutAnAIAgentNotYetEnrolled(t *testing.T) {
+	w := anAppSessionWorld(t)
+	withTwoAIAgents(t, w)
+	if err := w.s.assetHandler.Store.UpsertAsset(asset.Asset{ID: "agent-3", DisplayName: "Newcomer", AssetType: "ai_agent", DelegatorAID: "Eorg"}); err != nil {
+		t.Fatal(err)
+	}
+	agents := listedBy(t, w.serve(w.request(http.MethodGet, listPath, "", chatOrigin, w.key)))
+	for _, a := range agents {
+		if a["agent_aid"] == "" || a["id"] == "agent-3" {
+			t.Fatalf("an AI agent with no identifier is listed: %v", agents)
+		}
+	}
+	if len(agents) != 2 {
+		t.Fatalf("the list = %v, want the 2 enrolled AI agents", agents)
+	}
+}

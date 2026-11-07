@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"identity-agent-core/asset"
+
 	"identity-agent-core/agentbody"
 	"identity-agent-core/didcomm"
 )
@@ -260,5 +262,16 @@ func TestAProgressNoteIsAMessageButNotAnAsk(t *testing.T) {
 	st.Tier = TierQuick
 	if st.Check() == nil {
 		t.Fatal("a progress note carrying a tier was accepted")
+	}
+}
+
+// The one rule for who may talk to an AI agent, asked with the AI agent so a
+// rule about which one can be added here and reach every route that asks.
+func TestWhoMayTalkToAnAIAgent(t *testing.T) {
+	a := asset.Asset{ID: "agent-1", AssetType: "ai_agent", PairwiseAID: "Eagent1"}
+	for standing, want := range map[string]bool{"owner": true, "signer": true, "employee": false, "": false, "visitor": false} {
+		if got := (PersonRef{AID: "Eme", Standing: standing}).MayTalkToAnAIAgent(a); got != want {
+			t.Errorf("a %q may talk to an AI agent = %v, want %v", standing, got, want)
+		}
 	}
 }
