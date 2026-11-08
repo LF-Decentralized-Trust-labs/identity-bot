@@ -85,8 +85,9 @@ func (s *CoreServer) authorityOf(r *http.Request) (coretypes.Authority, func(), 
 			return coretypes.Authority{}, func() {}, err
 		}
 		return coretypes.Authority{
-			ControllerGrant: current.CredentialSAID,
-			Request:         &coretypes.SignedRequest{Kind: "controller", Signer: grant.ControllerAID, Signed: signed, Signature: sig, Body: string(body)},
+			ControllerGrant:       current.CredentialSAID,
+			ControllerGrantSchema: s.schemaOfCredential(current.CredentialSAID),
+			Request:               &coretypes.SignedRequest{Kind: "controller", Signer: grant.ControllerAID, Signed: signed, Signature: sig, Body: string(body)},
 		}, release, nil
 	}
 	// Admitted by the identity's own key, the request kept as it was signed.
@@ -175,7 +176,7 @@ func nameAuthority(a coretypes.Authority, kind *schemas.AssetGrant, claims map[s
 		return nil
 	}
 	return map[string]interface{}{
-		"authorised_by": map[string]interface{}{"n": a.ControllerGrant, "s": schemas.ControllerGrant.Schema.SAID},
+		"authorised_by": map[string]interface{}{"n": a.ControllerGrant, "s": edgeSchema(a.ControllerGrantSchema)},
 	}
 }
 
@@ -453,6 +454,18 @@ func (s *CoreServer) grantController(g ControllerGrant, now time.Time, by corety
 	return checked, nil
 }
 
+// schemaOfCredential is the schema a credential on record was issued under, or
+// empty when it is not on record.
+func (s *CoreServer) schemaOfCredential(said string) string {
+	if said == "" {
+		return ""
+	}
+	if rec, err := s.DataStore.GetCredential(said); err == nil && rec != nil {
+		return rec.SchemaSAID
+	}
+	return ""
+}
+
 // issueControllerGrant issues the credential for a grant.
 func (s *CoreServer) issueControllerGrant(g ControllerGrant, by coretypes.Authority) (string, error) {
 	if s.DataStore == nil || s.KeriDriver == nil {
@@ -470,6 +483,9 @@ func (s *CoreServer) issueControllerGrant(g ControllerGrant, by coretypes.Author
 	}
 	if g.Signer != "" {
 		claims["signer"] = g.Signer
+	}
+	if g.AppAsset != "" {
+		claims["app_asset"] = g.AppAsset
 	}
 	expiry := ""
 	if !g.ExpiresAt.IsZero() {
@@ -552,6 +568,68 @@ func (s *CoreServer) bindSigner(aid, signer string) (ControllerGrant, error) {
 	return bound, nil
 }
 
+// bindAppAsset records which app asset a machine is the back end of and, where
+// the machine has a Controller Grant and this device holds the identity's key,
+// re-issues the grant to name it (Controller Grant 1.2.0), so what a person said
+// through the machine can show which app spoke. Issued and withdrawn the way
+// bindSigner does: if either fails nothing changes. Where the key is on another
+// device the row is bound and the grant is left as it is, and the app is named
+// by it only once the machine is next granted: the bundle then says the app is
+// the Identity Agent's word (conversationbundle checkPersonSpoke).
+func (s *CoreServer) bindAppAsset(aid, assetID string) (ControllerGrant, error) {
+	s.grantsMu.Lock()
+	defer s.grantsMu.Unlock()
+	if s.assetHandler == nil {
+		return ControllerGrant{}, errors.New("the assets are not open")
+	}
+	if _, found, err := s.assetHandler.Store.GetAsset(assetID); err != nil || !found {
+		return ControllerGrant{}, fmt.Errorf("no such app asset")
+	}
+	before, had, err := s.controllers().Get(aid)
+	if err != nil {
+		return ControllerGrant{}, err
+	}
+	if !had {
+		return ControllerGrant{}, fmt.Errorf("no such machine")
+	}
+	if before.AppAsset == assetID {
+		return before, nil
+	}
+	bound, err := s.controllers().BindAppAsset(aid, assetID)
+	if err != nil || before.CredentialSAID == "" || s.keyCanSign() != nil {
+		return bound, err
+	}
+	// Re-issued from what the grant says, never from a row changed since.
+	if err := s.rowIsItsGrant(before); err != nil {
+		s.undoBind(before)
+		return before, err
+	}
+	said, err := s.issueControllerGrant(bound, coretypes.Authority{About: bound.ControllerAID})
+	if err != nil {
+		s.undoBind(before)
+		return before, fmt.Errorf("the machine's grant could not be re-issued to name its app: %w", err)
+	}
+	if err := s.withdrawControllerGrant(before.CredentialSAID); err != nil {
+		s.withdrawOrSay(said)
+		s.undoBind(before)
+		return before, fmt.Errorf("the machine's grant could not be withdrawn to name its app: %w", err)
+	}
+	bound.CredentialSAID = said
+	if err := s.controllers().Put(bound); err != nil {
+		s.withdrawOrSay(said)
+		s.undoBind(before)
+		return before, err
+	}
+	return bound, nil
+}
+
+// undoBind puts a machine's row back as it was.
+func (s *CoreServer) undoBind(before ControllerGrant) {
+	if err := s.controllers().Put(before); err != nil {
+		log.Printf("[controller] %s could not be put back as it was: %v", before.ControllerAID, err)
+	}
+}
+
 // withdrawControllerGrant revokes a Controller Grant credential in the
 // registry and marks it revoked.
 func (s *CoreServer) withdrawControllerGrant(said string) error {
@@ -599,6 +677,12 @@ func (s *CoreServer) rowIsItsGrant(g ControllerGrant) error {
 	if str("i") != g.ControllerAID || str("public_key") != strings.TrimSpace(g.PublicKey) ||
 		str("grade") != string(g.Grade) || str("label") != strings.TrimSpace(g.Label) || str("signer") != g.Signer {
 		return fmt.Errorf("this machine's record no longer says what its grant does")
+	}
+	// A grant may name no app the row now has (the machine was bound to its app
+	// after the grant, and the grant has not been re-issued yet), but never an
+	// app the row does not.
+	if app := str("app_asset"); app != "" && app != g.AppAsset {
+		return fmt.Errorf("this machine's record no longer says which app its grant names")
 	}
 	if !sameMoment(str("valid_until"), g.ExpiresAt) {
 		return fmt.Errorf("this machine's record no longer says when its grant ends")
@@ -878,4 +962,13 @@ func (s *CoreServer) personStillStands(p coretypes.Signer) bool {
 		}
 	}
 	return false
+}
+
+// edgeSchema is the schema an edge to a Controller Grant states: the one the
+// grant was issued under, or the current one where that is not known.
+func edgeSchema(issuedUnder string) string {
+	if issuedUnder != "" {
+		return issuedUnder
+	}
+	return schemas.ControllerGrant.Schema.SAID
 }

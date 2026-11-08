@@ -184,7 +184,7 @@ func grantShown(cred *keri.Credential, ixn *keri.Event) (*ToSign, error) {
 	out.Schema = cred.SchemaSAID
 	out.Holder, out.Name, out.ValidUntil = str("i"), str("name"), str("valid_until")
 	switch cred.SchemaSAID {
-	case schemas.ControllerGrant.Schema.SAID:
+	case schemas.ControllerGrant.Schema.SAID, schemas.ControllerGrantV11.Schema.SAID:
 		out.Kind = "machine"
 		out.Name = firstNonEmpty(str("label"), out.Name)
 		out.PublicKey, out.Grade, out.Signer = str("public_key"), str("grade"), str("signer")

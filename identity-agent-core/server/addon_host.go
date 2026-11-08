@@ -1,8 +1,6 @@
 package server
 
 import (
-	"errors"
-	"fmt"
 	"sync"
 
 	"context"
@@ -64,15 +62,7 @@ func (h hostWrapper) EndBrowserKeys(r *http.Request, thumbprint, person string) 
 	return h.s.endBrowserKeys(r, thumbprint, person)
 }
 func (h hostWrapper) BindAppAsset(aid string, assetID string) (ControllerGrant, error) {
-	h.s.grantsMu.Lock()
-	defer h.s.grantsMu.Unlock()
-	if h.s.assetHandler == nil {
-		return ControllerGrant{}, errors.New("the assets are not open")
-	}
-	if _, found, err := h.s.assetHandler.Store.GetAsset(assetID); err != nil || !found {
-		return ControllerGrant{}, fmt.Errorf("no such app asset")
-	}
-	return h.s.controllers().BindAppAsset(aid, assetID)
+	return h.s.bindAppAsset(aid, assetID)
 }
 func (h hostWrapper) CredentialLog(registrySAID string, acdcSAID string) ([]string, string, error) {
 	return h.s.credentialLog(registrySAID, acdcSAID)

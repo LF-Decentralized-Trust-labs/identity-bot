@@ -22,14 +22,15 @@ const grantContracts = "../contracts/asset-grants"
 // asset template is published, current and first versions alike, because a
 // credential issued under either can be presented.
 var publishedGrantFiles = map[*AssetGrant]string{
-	AIAgentGrant:    "ai-agent-grant-1.2.0.schema.json",
-	AIAgentGrantV11: "ai-agent-grant-1.1.0.schema.json",
-	AIAgentGrantV1:  "ai-agent-grant-1.0.0.schema.json",
-	AIAgentBody:     "ai-agent-body-1.1.0.schema.json",
-	AIAgentBodyV1:   "ai-agent-body-1.0.0.schema.json",
-	ControllerGrant: "controller-grant-1.1.0.schema.json",
-	AppGrant:        "app-grant-1.1.0.schema.json",
-	AppBody:         "app-body-1.1.0.schema.json",
+	AIAgentGrant:       "ai-agent-grant-1.2.0.schema.json",
+	AIAgentGrantV11:    "ai-agent-grant-1.1.0.schema.json",
+	AIAgentGrantV1:     "ai-agent-grant-1.0.0.schema.json",
+	AIAgentBody:        "ai-agent-body-1.1.0.schema.json",
+	AIAgentBodyV1:      "ai-agent-body-1.0.0.schema.json",
+	ControllerGrant:    "controller-grant-1.2.0.schema.json",
+	ControllerGrantV11: "controller-grant-1.1.0.schema.json",
+	AppGrant:           "app-grant-1.1.0.schema.json",
+	AppBody:            "app-body-1.1.0.schema.json",
 }
 
 func TestThePublishedGrantSchemasAreTheOnesBuilt(t *testing.T) {

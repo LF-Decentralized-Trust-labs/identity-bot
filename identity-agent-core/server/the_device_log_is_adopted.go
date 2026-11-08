@@ -467,6 +467,9 @@ func schemaSigned(shown *authorisation.ToSign) string {
 	case "app":
 		return schemas.AppGrant.Schema.SAID
 	}
+	if schemas.IsControllerGrantSchema(shown.Schema) {
+		return shown.Schema // a machine's, in the version it was issued in
+	}
 	return schemas.ControllerGrant.Schema.SAID
 }
 

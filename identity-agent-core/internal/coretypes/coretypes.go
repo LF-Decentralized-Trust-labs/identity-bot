@@ -16,6 +16,9 @@ type Authority struct {
 	// from. Empty for an owner-signed request, and for a machine whose grant
 	// is waiting for the device that holds the identity's key.
 	ControllerGrant string
+	// ControllerGrantSchema is the schema that grant was issued under, as the
+	// edge states it. Empty means the current Controller Grant.
+	ControllerGrantSchema string
 	// CreatorGrant is, for a request an AI agent's body signed (kind
 	// ai_agent_body), the creator's AI Agent Grant: the credential the grant
 	// being issued names as what authorised it, which must hold agent.create.

@@ -95,7 +95,11 @@ type Message struct {
 	// records it.
 	Grade string `json:"grade,omitempty"`
 	// Person is the person a controller acted for, as its grant names them.
-	Person   string `json:"person,omitempty"`
+	Person string `json:"person,omitempty"`
+	// App is the app asset whose back end carried a person's own statement, as
+	// the machine's Controller Grant (1.2.0) names it. Empty where the grant
+	// names none, which a bundle cannot tell from the Identity Agent's word.
+	App      string `json:"app_asset,omitempty"`
 	Anchored bool   `json:"anchored"`
 	Holds    bool   `json:"holds"`
 }
@@ -989,7 +993,7 @@ func (v *verifier) checkPersonSpoke(where string, rec agentmessage.Record, at ti
 	switch {
 	case !ok:
 		v.fault(where, "the bundle does not carry the Controller Grant %s of the app it was sent from", p.ControllerGrant)
-	case g.schema != schemas.ControllerGrant.Schema.SAID:
+	case !schemas.IsControllerGrantSchema(g.schema):
 		v.fault(where, "%s is not a Controller Grant", p.ControllerGrant)
 	case g.holder != p.Controller || g.attr("public_key") != strings.TrimSpace(p.PublicKey):
 		v.fault(where, "the request is signed by a key the Controller Grant does not name")
@@ -1006,21 +1010,32 @@ func (v *verifier) checkPersonSpoke(where string, rec agentmessage.Record, at ti
 		if why := g.liveBetween(issuedBy, at); why != "" {
 			v.fault(where, "the app's Controller Grant was not in force when the request was signed: %s", why)
 		}
+		app := g.attr("app_asset")
+		m.App = app
 		switch signer := g.attr("signer"); {
+		case app != "" && signer != "":
+			v.fault(where, "the machine's Controller Grant names both an app, %s, and a signer, %s, but a machine is one or the other", app, signer)
+		case app != "" && p.PersonStatement == nil:
+			v.fault(where, "the machine's Controller Grant names it the back end of app %s, which speaks only with a person's own statement, and the entry carries none", app)
 		case p.PersonStatement != nil && signer != "":
 			v.fault(where, "the entry carries a person's own statement, which an app's back end carries, but the machine's Controller Grant names %s as the person it acts as", signer)
 		case p.PersonStatement != nil:
 			// An app's back end spoke for the person with their own signed
 			// statement. What the bundle can show is that the statement is
 			// theirs to the key that signed it, is for this entry, this
-			// organisation and this time; that the machine is the back end of an
-			// app, and that the key is the person's, is not in any credential.
+			// organisation and this time, and, from a Controller Grant of the
+			// version that names it, which app's back end carried it. That the
+			// key is the person's is not in any credential.
 			if st := p.PersonStatement.Statement; st.Agent != v.b.Root {
 				v.fault(where, "the person signed it for Identity Agent %q, not for this organisation %s", st.Agent, v.b.Root)
 			} else if stAt, err := time.Parse(time.RFC3339, st.Time); err != nil || absDuration(at.Sub(stAt)) > authorisation.Skew {
 				v.fault(where, "the person's statement was not signed within %s of when the Identity Agent took it", authorisation.Skew)
 			}
-			v.cannotRuleOut("Which app's back end carried a person's own statement, and which person a browser's key speaks for, is the Identity Agent's word: the machine's Controller Grant does not name the app's asset, and no credential shows the key is the person's.")
+			if app == "" {
+				v.cannotRuleOut("Which app's back end carried a person's own statement is the Identity Agent's word where the machine's Controller Grant names no app (it is in version 1.2.0 of the grant), and which person a browser's key speaks for is the Identity Agent's word: no credential shows the key is the person's.")
+			} else {
+				v.cannotRuleOut("Which person a browser's key speaks for is the Identity Agent's word: no credential shows the key is the person's.")
+			}
 		case signer == "":
 			v.cannotRuleOut("Some apps' Controller Grants name no signer, so which person spoke from them is the Identity Agent's word.")
 		case signer != aid:

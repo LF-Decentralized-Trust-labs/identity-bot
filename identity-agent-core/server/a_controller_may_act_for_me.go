@@ -127,7 +127,8 @@ type ControllerGrant struct {
 	// own signed statement (an_app_speaks_for_a_person_who_signed.go), and for
 	// no one else. A machine bound to an app has no signer it speaks as. It is
 	// set once, by the add-on that runs the app (BindAppAsset), never by a
-	// controller, and is not in the machine's Controller Grant credential.
+	// controller. Binding re-issues the machine's Controller Grant (1.2.0),
+	// which names it in app_asset, so a bundle shows which app spoke.
 	AppAsset string `json:"app_asset,omitempty"`
 
 	// CredentialSAID is the Controller Grant credential this identity issued

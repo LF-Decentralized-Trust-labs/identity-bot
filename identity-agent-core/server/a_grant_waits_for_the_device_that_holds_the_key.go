@@ -64,6 +64,7 @@ type grantSpec struct {
 	RequestDigest string                   `json:"request_digest,omitempty"`
 	About         string                   `json:"about,omitempty"`
 	Grant         string                   `json:"controller_grant,omitempty"`
+	GrantSchema   string                   `json:"controller_grant_schema,omitempty"`
 	Request       *coretypes.SignedRequest `json:"request,omitempty"`
 	// The creator's grant (with its schema) and body credential, for a request
 	// an AI agent's body made.
@@ -73,7 +74,7 @@ type grantSpec struct {
 }
 
 func (g grantSpec) by() coretypes.Authority {
-	return coretypes.Authority{About: g.About, ControllerGrant: g.Grant, Request: g.Request,
+	return coretypes.Authority{About: g.About, ControllerGrant: g.Grant, ControllerGrantSchema: g.GrantSchema, Request: g.Request,
 		CreatorGrant: g.CreatorGrant, CreatorGrantSchema: g.CreatorGrantSchema, CreatorBody: g.CreatorBody}
 }
 
@@ -125,6 +126,8 @@ func grantKindNamed(schema string) *schemas.AssetGrant {
 		return schemas.AppGrant
 	case schemas.ControllerGrant.Schema.SAID:
 		return schemas.ControllerGrant
+	case schemas.ControllerGrantV11.Schema.SAID:
+		return schemas.ControllerGrantV11
 	}
 	return nil
 }
@@ -396,7 +399,7 @@ func sameJSONValue(a, b interface{}) bool {
 // anything meanwhile.
 func (s *CoreServer) stillWhatItGrants(kind *schemas.AssetGrant, shown *authorisation.ToSign) error {
 	switch kind {
-	case schemas.ControllerGrant:
+	case schemas.ControllerGrant, schemas.ControllerGrantV11:
 		g, had, err := s.controllers().Get(shown.Holder)
 		if err != nil || !had {
 			return fmt.Errorf("the machine has been removed")
@@ -509,7 +512,7 @@ func (s *CoreServer) completeRegistry(requestID string, pending pendingIssuance,
 // grantArrived stops a machine or AI agent waiting for its grant.
 func (s *CoreServer) grantArrived(kind *schemas.AssetGrant, spec grantSpec, said string) {
 	switch kind {
-	case schemas.ControllerGrant:
+	case schemas.ControllerGrant, schemas.ControllerGrantV11:
 		s.grantsMu.Lock()
 		defer s.grantsMu.Unlock()
 		g, had, err := s.controllers().Get(spec.Holder)
