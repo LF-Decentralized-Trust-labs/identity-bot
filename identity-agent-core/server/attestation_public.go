@@ -158,20 +158,8 @@ func (s *CoreServer) handlePublicAttestation(w http.ResponseWriter, r *http.Requ
 // before the caller asked, so serving a stored one would answer a different
 // question while looking identical.
 func (s *CoreServer) challengedAttestation(challenge string) (*publicAttestation, error) {
-	// Bounded and printable. The value ends up inside a hash, so nothing here
-	// is a safety property — it is to keep a caller from using this endpoint to
-	// push arbitrary bulk through, and to make a mistyped parameter fail
-	// loudly rather than attest to nonsense.
-	if len(challenge) < 16 {
-		return nil, fmt.Errorf("a challenge must be at least 16 characters, so it cannot be guessed in advance")
-	}
-	if len(challenge) > 512 {
-		return nil, fmt.Errorf("a challenge must be at most 512 characters")
-	}
-	for _, c := range challenge {
-		if c < 0x21 || c > 0x7e {
-			return nil, fmt.Errorf("a challenge must be printable ASCII with no spaces")
-		}
+	if err := checkChallengeShape(challenge); err != nil {
+		return nil, err
 	}
 
 	sh := sealedHardwareStatus(challenge, "challenge", s.snpCertificates)
@@ -230,4 +218,27 @@ func (s *CoreServer) cachedAttestation() *publicAttestation {
 
 func writeAttestationError(w http.ResponseWriter, status int, code, detail string) {
 	jsonreply.Write(w, status, map[string]string{"error": code, "detail": detail})
+}
+
+// checkChallengeShape is what a caller-chosen challenge must look like, whatever
+// it is put to: this endpoint's attestation, and the proof that this agent
+// holds its keys (an_identity_agent_proves_it_holds_its_keys.go).
+//
+// Bounded and printable. The value ends up inside a hash or a signed string, so
+// nothing here is a safety property: it keeps a caller from using an open
+// endpoint to push arbitrary bulk through, and makes a mistyped parameter fail
+// loudly rather than be signed as nonsense.
+func checkChallengeShape(challenge string) error {
+	if len(challenge) < 16 {
+		return fmt.Errorf("a challenge must be at least 16 characters, so it cannot be guessed in advance")
+	}
+	if len(challenge) > 512 {
+		return fmt.Errorf("a challenge must be at most 512 characters")
+	}
+	for _, c := range challenge {
+		if c < 0x21 || c > 0x7e {
+			return fmt.Errorf("a challenge must be printable ASCII with no spaces")
+		}
+	}
+	return nil
 }

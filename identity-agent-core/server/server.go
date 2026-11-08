@@ -228,6 +228,8 @@ type CoreServer struct {
 	attestationCached  *publicAttestation
 	attestationExpires time.Time
 	attestationLimiter *ipRateLimiter
+	// proofLimiter bounds the open proof that this agent holds its keys.
+	proofLimiter *ipRateLimiter
 	// witnessLimiter bounds the peer-facing witness routes that cost work.
 	witnessLimiter *ipRateLimiter
 	// endpointRecordMu makes checking a record against the one held and keeping
@@ -590,6 +592,7 @@ func New(cfg Config) (*CoreServer, error) {
 		s.snpCertificates = newSNPCertificateChain(os.Getenv("SNP_PRODUCT"), cfg.DataDir)
 	}
 	s.attestationLimiter = newIPRateLimiter(60, time.Minute)
+	s.proofLimiter = newIPRateLimiter(60, time.Minute)
 
 	// Defer router construction to Start() so overlays can register routes
 	// (MountExtraRoutes) after New() returns but before serving. Building here
@@ -1062,6 +1065,7 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 		// and a stranger should not.
 		r.Get("/security/lineage", s.handleAttestationLineage)
 		r.Get("/attestation", s.handlePublicAttestation)
+		r.Get("/identity/proof", s.handleIdentityProof)
 		r.Get("/keri/selftest", s.handleKeriSelfTest)
 
 		// What THIS computer would offer if it were to act for an identity.
