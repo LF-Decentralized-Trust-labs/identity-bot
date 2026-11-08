@@ -140,22 +140,46 @@ type ProposedWitness struct {
 // witness is reached, for a signer that confirms them itself before it names
 // them.
 func (s *Service) ProposedWitnessesForNewIdentity(kind AidKind, aid string) (proposed []ProposedWitness, toad int) {
+	p := s.ProposeWitnessesForNewIdentity(kind, aid)
+	return p.Witnesses, p.Toad
+}
+
+// WitnessProposal is what a new identity would designate, and what it would
+// not.
+type WitnessProposal struct {
+	Witnesses []ProposedWitness
+	Toad      int
+	// NotDesignated are candidates left out because the service answering at
+	// its address could not be confirmed as the one pinned. Reported so the
+	// person founding the identity is told, not left to read a log.
+	NotDesignated []NotDesignated
+}
+
+// AddWitnessLater says how a witness left out of an inception is added: the
+// inception cannot be amended, but a rotation can add one.
+const AddWitnessLater = "A witness can be added later by a rotation that adds it, " +
+	"once the service answers as the identity it is pinned to."
+
+// ProposeWitnessesForNewIdentity is ProposedWitnessesForNewIdentity that also
+// reports the candidates it left out and why.
+func (s *Service) ProposeWitnessesForNewIdentity(kind AidKind, aid string) WitnessProposal {
 	if s == nil {
-		return nil, 0
+		return WitnessProposal{}
 	}
 	candidates, err := s.enrolledWitnesses(kind, aid)
 	if err != nil {
-		return nil, 0
+		return WitnessProposal{}
 	}
 	// Confirmed against the services themselves, not taken from the registry on
 	// trust. What goes into an inception event cannot be corrected later.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	targets, toad := designatableTargetsChecked(ctx, candidates, s.CheckIdentity)
+	targets, toad, skipped := designatableWithReasons(ctx, candidates, s.CheckIdentity)
+	p := WitnessProposal{Toad: toad, NotDesignated: skipped}
 	for _, t := range targets {
-		proposed = append(proposed, ProposedWitness{Key: t.WitnessKey, Address: witnessRoot(t)})
+		p.Witnesses = append(p.Witnesses, ProposedWitness{Key: t.WitnessKey, Address: witnessRoot(t)})
 	}
-	return proposed, toad
+	return p
 }
 
 // peerWitnessAllowed reports whether a contact may act as a peer witness for

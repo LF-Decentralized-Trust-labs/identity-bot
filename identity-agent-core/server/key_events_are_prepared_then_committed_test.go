@@ -251,6 +251,7 @@ func TestTheWitnessesForAFoundingAreProposedToTheOwnerAlone(t *testing.T) {
 	}
 	// The second answers as another witness: left out, not named.
 	pool[1].WitnessKey = iacrypto.NonTransferableAIDQB64(aWitnessKey(9))
+	pool[0].Default = true
 	prior := witness.BootstrapWitnesses
 	witness.BootstrapWitnesses = func() []witness.BootstrapWitness { return pool }
 	t.Cleanup(func() { witness.BootstrapWitnesses = prior })
@@ -272,7 +273,7 @@ func TestTheWitnessesForAFoundingAreProposedToTheOwnerAlone(t *testing.T) {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 	// One default witness service is one endpoint: of the three listed, exactly
-	// one is proposed (the smallest key), with the matching threshold of 1.
+	// one is proposed (the one marked default), with the matching threshold of 1.
 	if len(got.Witnesses) != 1 || got.Toad != 1 {
 		t.Fatalf("the proposal is %+v, want the one default endpoint and a threshold of 1", got)
 	}
@@ -519,4 +520,40 @@ func storedLog(t *testing.T, s *CoreServer, aid string) (messages [][]byte, last
 		t.Fatalf("the last event of %s is not base64: %v", aid, err)
 	}
 	return messages, last
+}
+
+// When the default witness cannot be confirmed, the founding result says so and
+// why, and how one is added later, instead of leaving the identity unwitnessed
+// behind a log line.
+func TestAFoundingSaysWhenItsWitnessWasNotDesignated(t *testing.T) {
+	key := iacrypto.NonTransferableAIDQB64(aWitnessKey(1))
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(rw http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(rw).Encode(map[string]any{"service_aid": iacrypto.NonTransferableAIDQB64(aWitnessKey(9))})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	prior := witness.BootstrapWitnesses
+	witness.BootstrapWitnesses = func() []witness.BootstrapWitness {
+		return []witness.BootstrapWitness{{AID: key, WitnessKey: key, URL: srv.URL, Operator: "tests", Default: true}}
+	}
+	t.Cleanup(func() { witness.BootstrapWitnesses = prior })
+
+	s := adoptingOwner(t)
+	rec := httptest.NewRecorder()
+	s.handleWitnessesForAFounding(rec, ownerRequest(http.MethodGet, "/api/events/witnesses-for-a-founding", nil, s))
+	var got struct {
+		Witnesses     []any `json:"witnesses"`
+		NotDesignated []struct {
+			AID, Reason string
+		} `json:"not_designated"`
+		AddLater string `json:"add_later"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if len(got.Witnesses) != 0 || len(got.NotDesignated) != 1 || got.NotDesignated[0].AID != key ||
+		got.NotDesignated[0].Reason == "" || got.AddLater == "" {
+		t.Fatalf("the founding result is %s, want the witness named as not designated, why, and how to add one", rec.Body.String())
+	}
 }

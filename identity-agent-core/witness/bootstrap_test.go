@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
+	"time"
 )
 
 // The bootstrap pool exists to cover one gap: a new identity has no contacts,
@@ -263,5 +265,98 @@ func TestARootIdentityDesignatesExactlyOneBootstrapEndpoint(t *testing.T) {
 	keys, toad := DesignatableWitnessesChecked(context.Background(), first, same)
 	if len(keys) != 1 || toad != 1 {
 		t.Fatalf("inception would record %d witnesses with toad %d, want 1 and 1", len(keys), toad)
+	}
+}
+
+// The default a new root identity gets is the provider's explicit choice, not
+// whichever key sorts first, and every other listed witness stays resolvable.
+func TestTheInceptionDefaultIsTheProvidersChoiceNotTheSmallestKey(t *testing.T) {
+	saved := BootstrapWitnesses
+	defer func() { BootstrapWitnesses = saved }()
+	pool := []BootstrapWitness{
+		{AID: "BDsmallest", WitnessKey: "BDsmallest", URL: "https://small.example"},
+		{AID: "BMchosen", WitnessKey: "BMchosen", URL: "https://chosen.example", Default: true},
+		{AID: "BZlargest", WitnessKey: "BZlargest", URL: "https://large.example"},
+	}
+	BootstrapWitnesses = func() []BootstrapWitness { return pool }
+
+	got := withBootstrap(nil, 3)
+	if len(got) != 1 || got[0].WitnessKey != "BMchosen" {
+		t.Fatalf("a new identity got %+v, want only the marked default", got)
+	}
+	if len(BootstrapPool()) != 3 {
+		t.Fatalf("the address book holds %d witnesses, want all 3 kept", len(BootstrapPool()))
+	}
+}
+
+// An identity founded when three witnesses were listed designated all three. It
+// still reaches all three, and is finalized against its own threshold of 2, not
+// the agent-wide floor (at least 5) that one or two witnesses can never meet.
+func TestAnExistingThreeWitnessIdentityKeepsWorking(t *testing.T) {
+	saved := BootstrapWitnesses
+	defer func() { BootstrapWitnesses = saved }()
+	keys := []string{"BAwitnessOne", "BBwitnessTwo", "BCwitnessThree"}
+	BootstrapWitnesses = func() []BootstrapWitness {
+		var out []BootstrapWitness
+		for i, k := range keys {
+			out = append(out, BootstrapWitness{AID: k, WitnessKey: k, URL: fmt.Sprintf("https://w%d.example", i+1), Default: i == 1})
+		}
+		return out
+	}
+
+	s, mc := testService(t)
+	aid := mc.identity.AID
+	var mu sync.Mutex
+	posted := map[string]bool{}
+	s.PostEvent = func(_ context.Context, url string, _ []byte) (map[string]interface{}, error) {
+		mu.Lock()
+		posted[url] = true
+		mu.Unlock()
+		return map[string]interface{}{}, nil
+	}
+	s.DesignationAfter = func(string, map[string]interface{}) ([]string, int) { return keys, 2 }
+
+	// Every designated key resolves to an address.
+	if known := s.designatedTargets(keys); len(known) != 3 {
+		t.Fatalf("only %d of 3 designated witnesses resolve", len(known))
+	}
+
+	ev := []byte(`{"t":"ixn","i":"` + aid + `","s":"1","d":"EixnSAID"}`)
+	if err := s.BroadcastEvent(t.Context(), aid, ev, "AAsig"); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		mu.Lock()
+		n := len(posted)
+		mu.Unlock()
+		if n == 3 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the event reached %d of the 3 designated witnesses: %v", n, posted)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	f, _ := s.Store.GetFinalization("EixnSAID")
+	if f == nil || f.Threshold != 2 {
+		t.Fatalf("finalization %+v, want it held to the identity's own threshold of 2", f)
+	}
+}
+
+// A witness the identity's check could not confirm is reported with its reason,
+// and how one is added later, rather than only logged.
+func TestAWitnessLeftOutOfAnInceptionIsReportedWithWhy(t *testing.T) {
+	cands := []witnessTarget{{AID: "BMdefault", WitnessKey: "BMdefault", URL: "https://w.example", Commercial: true}}
+	wrong := func(context.Context, string) (string, error) { return "BSomeoneElse", nil }
+	out, toad, skipped := designatableWithReasons(context.Background(), cands, wrong)
+	if len(out) != 0 || toad != 0 {
+		t.Fatalf("designated %v with toad %d", out, toad)
+	}
+	if len(skipped) != 1 || skipped[0].Key != "BMdefault" || skipped[0].Reason == "" {
+		t.Fatalf("skipped = %+v, want the witness and why", skipped)
+	}
+	if AddWitnessLater == "" {
+		t.Fatal("no word on how a witness is added later")
 	}
 }

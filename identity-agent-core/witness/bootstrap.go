@@ -54,6 +54,10 @@ type BootstrapWitness struct {
 	// Operator names who runs it, so somebody deciding whether to rely on it
 	// knows whom they are relying on.
 	Operator string
+	// Default marks the one endpoint a new root identity designates at
+	// inception. Every other entry is the address book: kept resolvable for an
+	// identity that already designates it, never picked for a new one.
+	Default bool
 }
 
 // BootstrapWitnesses is what a freshly incepted identity uses until its own
@@ -75,7 +79,10 @@ type BootstrapWitness struct {
 // registry simply has no bootstrap witnesses, which it reports honestly.
 var BootstrapWitnesses func() []BootstrapWitness
 
-// BootstrapPool returns the service witnesses available to a new identity.
+// BootstrapPool returns every service witness this agent can resolve: the
+// address book. It is wider than what a NEW identity designates (see
+// defaultBootstrapWitness), because an identity founded earlier may designate
+// any of them and must keep reaching them.
 func BootstrapPool() []BootstrapWitness {
 	if BootstrapWitnesses == nil {
 		return nil
@@ -89,9 +96,9 @@ func BootstrapPool() []BootstrapWitness {
 // One default witness service means one provider and one endpoint. Once a root
 // identity designates its bootstrap witness, that same endpoint serves for the
 // life of the identity until a rotation changes it, so the choice must be the
-// same every time it is made: the endpoint is picked by its witness key (the
-// smallest), never by the registry's listing order or by how many entries it
-// holds today.
+// same every time it is made: the endpoint is the registry's marked default
+// (defaultBootstrapWitness), never chosen by listing order or by how many
+// entries it holds today.
 //
 // Appended rather than preferred, so an identity with enough contacts of its own
 // leans on them and not on us. `want` is a floor rather than a target: a contact
@@ -116,20 +123,28 @@ func withBootstrap(contactWitnesses []witnessTarget, want int) []witnessTarget {
 }
 
 // defaultBootstrapWitness is the one endpoint a root identity designates at
-// inception: the pool entry with the smallest witness key. Order-independent,
-// so every reselection for an identifier lands on the same endpoint.
+// inception: the entry the registry marks as the default. That is an explicit
+// choice by the provider, not a property of key ordering.
+//
+// A registry that marks none (a user-added provider, say) still gets one stable
+// answer: the smallest witness key. If several are marked, the smallest of those.
+// Neither depends on listing order, so every reselection lands on the same one.
 func defaultBootstrapWitness() (BootstrapWitness, bool) {
-	var best BootstrapWitness
-	found := false
-	for _, b := range BootstrapPool() {
-		if b.WitnessKey == "" {
-			continue
+	pick := func(onlyDefault bool) (best BootstrapWitness, found bool) {
+		for _, b := range BootstrapPool() {
+			if b.WitnessKey == "" || (onlyDefault && !b.Default) {
+				continue
+			}
+			if !found || b.WitnessKey < best.WitnessKey {
+				best, found = b, true
+			}
 		}
-		if !found || b.WitnessKey < best.WitnessKey {
-			best, found = b, true
-		}
+		return best, found
 	}
-	return best, found
+	if b, ok := pick(true); ok {
+		return b, true
+	}
+	return pick(false)
 }
 
 // oneBootstrapFor picks a single bootstrap witness for a pairwise AID.
@@ -203,9 +218,24 @@ func DesignatableWitnessesChecked(ctx context.Context, candidates []witnessTarge
 	return keys, toad
 }
 
+// NotDesignated is a candidate that was left out of an inception, and why.
+type NotDesignated struct {
+	Key    string `json:"aid"`
+	URL    string `json:"url"`
+	Reason string `json:"reason"`
+}
+
 // designatableTargetsChecked is DesignatableWitnessesChecked keeping where each
 // witness is reached, with the key it is named by confirmed.
 func designatableTargetsChecked(ctx context.Context, candidates []witnessTarget, check IdentityChecker) (out []witnessTarget, toad int) {
+	out, toad, _ = designatableWithReasons(ctx, candidates, check)
+	return out, toad
+}
+
+// designatableWithReasons is designatableTargetsChecked that also says which
+// candidates were left out because they could not be confirmed, and why, so
+// the person founding an identity is told rather than left with a log line.
+func designatableWithReasons(ctx context.Context, candidates []witnessTarget, check IdentityChecker) (out []witnessTarget, toad int, skipped []NotDesignated) {
 	for _, c := range candidates {
 		if c.WitnessKey == "" {
 			continue
@@ -217,6 +247,7 @@ func designatableTargetsChecked(ctx context.Context, candidates []witnessTarget,
 			confirmed, err := ConfirmWitnessIdentity(ctx, check, c.URL, c.WitnessKey)
 			if err != nil {
 				log.Printf("[witness] not designating %s: %v", c.URL, err)
+				skipped = append(skipped, NotDesignated{Key: c.WitnessKey, URL: c.URL, Reason: err.Error()})
 				continue
 			}
 			c.WitnessKey = confirmed
@@ -224,11 +255,17 @@ func designatableTargetsChecked(ctx context.Context, candidates []witnessTarget,
 		out = append(out, c)
 	}
 	if len(out) == 0 {
-		return nil, 0
+		return nil, 0, skipped
 	}
 	// A simple majority: enough that a minority of unavailable or dishonest
 	// witnesses can neither stall the identity nor corroborate a forgery.
-	return out, len(out)/2 + 1
+	return out, len(out)/2 + 1, skipped
+}
+
+// RegistryWitness is one witness endpoint as the provider registry lists it.
+type RegistryWitness struct {
+	Operator, URL, AID string
+	Default            bool
 }
 
 // WitnessesFromRegistry adapts a provider registry's witness endpoints into the
@@ -241,7 +278,7 @@ func designatableTargetsChecked(ctx context.Context, candidates []witnessTarget,
 // An endpoint with no witness key is skipped. What an event names is the key its
 // receipts verify against, so an entry without one could be reached and never
 // designated, and writing it into an inception would be permanent.
-func WitnessesFromRegistry(offering func() []struct{ Operator, URL, AID string }) func() []BootstrapWitness {
+func WitnessesFromRegistry(offering func() []RegistryWitness) func() []BootstrapWitness {
 	return func() []BootstrapWitness {
 		var out []BootstrapWitness
 		for _, e := range offering() {
@@ -253,6 +290,7 @@ func WitnessesFromRegistry(offering func() []struct{ Operator, URL, AID string }
 				WitnessKey: e.AID,
 				URL:        e.URL,
 				Operator:   e.Operator,
+				Default:    e.Default,
 			})
 		}
 		return out

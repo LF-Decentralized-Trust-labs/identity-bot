@@ -45,10 +45,13 @@ it looks stronger than it is.
 
 **A root identity designates exactly one bootstrap witness endpoint.** One default
 witness service is one provider and one endpoint (the owner's ruling of
-2026-10-15). The endpoint is picked by witness key, not by listing order, so every
-reselection for an identifier lands on the same one; it serves for the life of the
-identity until a rotation changes it, and the inception records the matching
-threshold.
+2026-10-15). The provider marks that endpoint as its default, so every
+reselection for an identifier lands on the same one; it serves for the life of
+the identity until a rotation changes it, and the inception records the matching
+threshold. The other witnesses a provider lists stay resolvable, so an identity
+that already designates one keeps reaching it and is finalized against its own
+threshold. If the default cannot be confirmed at founding, the founding result
+says it was not designated and why; a witness is added later by a rotation.
 
 **A pairwise AID takes commercial witnesses only, permanently.** A commercially
 operated witness serves a large population, so naming one says almost nothing

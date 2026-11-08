@@ -396,7 +396,7 @@ func (s *Service) PublishTEL(ctx context.Context, issuerAID string, raws [][]byt
 	if id, _ := s.Contacts.GetIdentity(); id != nil {
 		rootAID = id.AID
 	}
-	targets, err := s.enrolledWitnesses(ClassifyAID(issuerAID, rootAID), issuerAID)
+	targets, err := s.witnessesToReach(ClassifyAID(issuerAID, rootAID), issuerAID, designated)
 	if err != nil {
 		return 0, err
 	}
