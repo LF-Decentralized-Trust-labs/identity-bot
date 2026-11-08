@@ -74,6 +74,11 @@ type Relay struct {
 	domains  map[string]string
 	verified map[string]bool
 	txt      map[string]string
+	// LegacySubdomains, when true, also serves a private address at the retired
+	// form https://<label>.<relay>/..., as a relay mid-transition does
+	// (ADR-048 §8). It never hands out that form for a new allocation.
+	LegacySubdomains bool
+	sni              []string
 	// Binds counts bind requests answered, and Claims claim-name requests.
 	Binds  int
 	Claims int
@@ -86,7 +91,13 @@ func New(mode relayproto.Mode) *Relay {
 		nonces: map[string]bool{}, aliases: map[string]string{},
 		domains: map[string]string{}, verified: map[string]bool{}, txt: map[string]string{}}
 	r.Server = httptest.NewUnstartedServer(http.HandlerFunc(r.handleCaller))
-	r.Server.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
+	r.Server.TLS = &tls.Config{MinVersion: tls.VersionTLS13,
+		GetConfigForClient: func(h *tls.ClientHelloInfo) (*tls.Config, error) {
+			r.mu.Lock()
+			r.sni = append(r.sni, h.ServerName)
+			r.mu.Unlock()
+			return nil, nil
+		}}
 	r.Server.StartTLS()
 	r.Connect = httptest.NewUnstartedServer(http.HandlerFunc(r.handle))
 	r.Connect.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
@@ -114,6 +125,14 @@ func (r *Relay) remember(v *relayproto.Verified) error {
 	r.enrolled[v.AID] = v.KEL
 	r.keys[v.AID] = v.Key
 	return nil
+}
+
+// ServerNames are the host names callers sent in the clear in their TLS
+// handshakes at the caller-facing door: all that anyone on the wire can read.
+func (r *Relay) ServerNames() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.sni...)
 }
 
 // URL is the relay's https:// root.
@@ -277,6 +296,9 @@ func (r *Relay) forward(w http.ResponseWriter, req *http.Request) {
 		r.forwardName(w, req)
 		return
 	}
+	if r.LegacySubdomains && r.forwardLegacy(w, req) {
+		return
+	}
 	seg, tail, _ := strings.Cut(strings.TrimPrefix(req.URL.Path, "/"), "/")
 	r.mu.Lock()
 	target := seg
@@ -303,6 +325,32 @@ func (r *Relay) forward(w http.ResponseWriter, req *http.Request) {
 	out.RequestURI = ""
 	out.Header.Set("X-Forwarded-Prefix", "/"+seg)
 	sess.Forward(w, out, relayproto.Preamble{Allocation: seg, Mode: mode, Host: req.Host})
+}
+
+// forwardLegacy carries a request for https://<label>.<relay>/... to the
+// holder of the label, unchanged, and reports whether the host was one.
+func (r *Relay) forwardLegacy(w http.ResponseWriter, req *http.Request) bool {
+	host := req.Host
+	if h, _, ok := strings.Cut(host, ":"); ok {
+		host = h
+	}
+	label, ok := strings.CutSuffix(host, "."+r.service)
+	if !ok {
+		return false
+	}
+	r.mu.Lock()
+	aid := r.bound[label]
+	r.mu.Unlock()
+	sess, connected := r.cfg.Registry.Get(aid)
+	if aid == "" || !connected {
+		http.NotFound(w, req)
+		return true
+	}
+	out := req.Clone(req.Context())
+	out.RequestURI = ""
+	out.Header.Del("X-Forwarded-Prefix")
+	sess.Forward(w, out, relayproto.Preamble{Allocation: label, Mode: relayproto.ModePrivate, Host: req.Host})
+	return true
 }
 
 // forwardName carries a request for https://<name>.<relay>/... to the holder

@@ -148,6 +148,9 @@ func (c *Client) Allocate(ctx context.Context, aid, commitment string) (label, u
 	if out.Allocation == "" || out.PublicURL == "" {
 		return "", "", fmt.Errorf("allocate: the relay named no address")
 	}
+	if err := relayproto.CheckPrivateURL(out.PublicURL, out.Allocation); err != nil {
+		return "", "", fmt.Errorf("allocate: %w", err)
+	}
 	return out.Allocation, strings.TrimRight(out.PublicURL, "/"), nil
 }
 
