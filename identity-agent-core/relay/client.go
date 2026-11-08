@@ -93,20 +93,27 @@ func CheckConnectHost(baseURL string, d *ServiceDescriptor) error {
 	if err != nil || base.Host == "" {
 		return fmt.Errorf("the relay %q is not a URL", baseURL)
 	}
+	// The descriptor named the connect host itself, and it is the host this
+	// client was pointed at: the relay is being reached at its connect host.
+	namedConnect := d.ConnectHost != "" && hostName(d.ConnectHost) == strings.ToLower(base.Hostname())
 	if d.ConnectHost == "" {
 		d.ConnectHost = base.Host
 	}
 	if d.CallerHost != "" {
-		// The caller host may be the relay's apex while this client was pointed
-		// at its connect host, so it may be the base's parent as well as a name
-		// under it. Any other host is somebody else's.
+		// The caller host is the relay's own name or a name under it. A client
+		// pointed at the connect host may also be given the connect host's
+		// immediate parent (the apex, with connect.<apex> as the connect host),
+		// and no other ancestor: example.com or com are somebody else's.
 		caller := strings.ToLower(d.CallerHost)
-		callerName := caller
-		if h, _, err := net.SplitHostPort(caller); err == nil {
-			callerName = h
-		}
+		callerName := hostName(caller)
 		bn := strings.ToLower(base.Hostname())
-		if callerName != bn && !strings.HasSuffix(callerName, "."+bn) && !strings.HasSuffix(bn, "."+callerName) {
+		parent := ""
+		if namedConnect {
+			if i := strings.Index(bn, "."); i > 0 {
+				parent = bn[i+1:]
+			}
+		}
+		if callerName != bn && !strings.HasSuffix(callerName, "."+bn) && (parent == "" || callerName != parent) {
 			return fmt.Errorf("the relay at %s names %s as its caller host, which is not under its own name", bn, caller)
 		}
 	}
@@ -132,6 +139,30 @@ func CheckConnectHost(baseURL string, d *ServiceDescriptor) error {
 		}
 	}
 	return nil
+}
+
+// hostName is a host without its port, lowercased.
+func hostName(hostport string) string {
+	h := strings.ToLower(hostport)
+	if n, _, err := net.SplitHostPort(h); err == nil {
+		return n
+	}
+	return h
+}
+
+// sameHost reports whether two hosts are one, with the scheme's default port
+// the same as no port: relay.example:443 is relay.example for https.
+func sameHost(scheme, a, b string) bool {
+	norm := func(h string) string {
+		h = strings.ToLower(h)
+		if n, p, err := net.SplitHostPort(h); err == nil {
+			if (scheme == "https" && p == "443") || (scheme == "http" && p == "80") {
+				return n
+			}
+		}
+		return h
+	}
+	return norm(a) == norm(b)
 }
 
 // NewSecret makes the secret a private address is held by, and the commitment
@@ -180,7 +211,7 @@ func (c *Client) Allocate(ctx context.Context, aid, commitment string) (label, a
 	if c.Descriptor != nil && c.Descriptor.CallerHost != "" {
 		callerHost = c.Descriptor.CallerHost
 	}
-	if !strings.EqualFold(got.Host, callerHost) {
+	if !sameHost(got.Scheme, got.Host, callerHost) {
 		return "", "", fmt.Errorf("allocate: the relay gave an address at %q, not at its own host %q", out.PublicURL, callerHost)
 	}
 	return out.Allocation, strings.TrimRight(out.PublicURL, "/"), nil
