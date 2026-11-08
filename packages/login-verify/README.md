@@ -35,6 +35,14 @@ const result = await verifyLoginAssertion(assertion, {
 });
 ```
 
+An assertion is spent once it is accepted. `IdentityAgentVerifier` remembers the
+assertions it has accepted (`consumedAssertions`, a store for the process by
+default) and refuses a second presentation with "assertion already used". Pass
+`consume: inMemoryConsumedNonces()` to `verifyLoginAssertion` to get the same
+there. A site on more than one process gives them one shared store (anything
+with `claim(key, keepUntilMs?)` that answers false for a key it has seen), or an
+assertion spent on one process still spends on the others.
+
 An assertion is read by the Identity Agent core's rules, so the two accept
 exactly the same ones. A repeated key, and a whole number written as `1.0`,
 can only be seen in the text, which `JSON.parse` discards: where you receive an

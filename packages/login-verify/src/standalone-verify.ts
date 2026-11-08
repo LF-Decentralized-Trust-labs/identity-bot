@@ -29,18 +29,31 @@ export interface StandaloneVerifyOptions extends VerifyAssertionOptions {
 
 /** Remembers which assertions have already been accepted. */
 export interface ConsumedNonces {
-  /** True if this assertion had NOT been seen, and records it. False if it had. */
-  claim(key: string): Promise<boolean> | boolean;
+  /** True if this assertion had NOT been seen, and records it. False if it had.
+   *  `keepUntilMs` (epoch milliseconds) is the earliest the entry may be
+   *  forgotten: after it the assertion is too old to verify anyway, so a store
+   *  may drop it to stay small. A store that ignores it is also correct. */
+  claim(key: string, keepUntilMs?: number): Promise<boolean> | boolean;
 }
+
+/** The most a default store holds. A full store forgets its oldest entries
+ *  first; an entry that old is outside every freshness window already. */
+const MOST_CONSUMED_IN_MEMORY = 100_000;
 
 /** A store for one process. A deployment with more than one verifier needs a
  *  shared one, or an assertion spent on one of them still spends on the others. */
 export function inMemoryConsumedNonces(): ConsumedNonces {
-  const seen = new Set<string>();
+  const seen = new Map<string, number>();
   return {
-    claim(key: string) {
+    claim(key: string, keepUntilMs?: number) {
+      const now = Date.now();
+      // Insertion order is claim order, so expired entries gather at the front.
+      for (const [k, until] of seen) {
+        if (until > now && seen.size < MOST_CONSUMED_IN_MEMORY) break;
+        seen.delete(k);
+      }
       if (seen.has(key)) return false;
-      seen.add(key);
+      seen.set(key, keepUntilMs ?? Number.POSITIVE_INFINITY);
       return true;
     },
   };
@@ -153,7 +166,10 @@ export async function verifyLoginAssertion(
   // Burnt only once everything else has passed, so a malformed or badly signed
   // assertion cannot be used to spend a nonce the real one still needs.
   if (opts.consume) {
-    const fresh = await opts.consume.claim(`${assertion.audience}|${assertion.nonce}|${assertion.i}`);
+    // Kept for as long as the assertion could still pass the time check.
+    const window = freshnessWindowSeconds(opts.maxSkewSeconds) ?? LONGEST_MAX_SKEW_SECONDS;
+    const keepUntil = (opts.nowMs ?? Date.now()) + (window + 60) * 1000;
+    const fresh = await opts.consume.claim(`${assertion.audience}|${assertion.nonce}|${assertion.i}`, keepUntil);
     if (!fresh) {
       return { valid: false, reason: "assertion already used" };
     }

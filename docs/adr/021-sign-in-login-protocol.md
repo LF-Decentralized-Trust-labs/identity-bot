@@ -41,6 +41,8 @@ A login is a two-message exchange between the RP and the user's Identity Agent (
 
 2. **Assertion (IA → RP).** The IA fetches and verifies the challenge, asks the user to grant or decline the requested disclosures, then builds a signed `login.Assertion`. The assertion is issued from a **pairwise AID** — a per-RP identity, never the user's root AID — and carries only the granted disclosures, any presented credentials, and an optional signed score attestation. Its `D` field is a Blake3-256 SAID over the canonical body; the body is then Ed25519-signed with the pairwise key. `login.Handler.BuildAssertion` (`identity-agent-core/login/handlers.go`) is the canonical builder.
 
+*(Amended 2026-11-08: a website's server starts a sign-in with `startLoginSession` and confirms it with `confirmLoginSession` from `packages/login-web/src/server.ts`; a verifier that checks assertions itself spends each one it accepts, `consumedAssertions` in `IdentityAgentVerifier` and `consume` in `verifyLoginAssertion`.)*
+
 Verification (`IdentityAgentVerifier.verifyAssertion`, `login.VerifyAssertion`) checks the nonce and audience bind to the original challenge, the assertion names this site (`site_aid`), the timestamp is fresh (default ±300s), takes the pairwise public key from the key log the assertion carries (`p_kel`), and verifies the Ed25519 signature over the canonical body.
 
 #### A relying party has an organisation Identity Agent

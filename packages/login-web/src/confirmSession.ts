@@ -23,6 +23,13 @@ export interface ConfirmSessionOptions {
   collectorSecret?: string | null;
   /** Optional fetch override (testing / custom agents). */
   fetchFn?: typeof fetch;
+  /** Spends a verified session so the same one signs nobody in twice. Without
+   *  it, anybody holding this session's token and your secret's response can
+   *  have it confirmed again for as long as the Identity Agent keeps it; a
+   *  site that issues its own session on `verified` should pass one. Any store
+   *  of the shape `inMemoryConsumedNonces()` in `@identity-agent/login-verify`
+   *  returns will do; a site on more than one process shares one. */
+  consume?: { claim(key: string): Promise<boolean> | boolean };
 }
 
 export type ConfirmedSession =
@@ -74,6 +81,10 @@ export async function confirmLoginSession(opts: ConfirmSessionOptions): Promise<
     );
   }
   if (body.state === "verified" && body.app_session_token) {
+    if (opts.consume) {
+      const fresh = await opts.consume.claim(`${base}|${opts.assetId}|${opts.sessionToken}`);
+      if (!fresh) throw new Error("login: this sign-in has already been used");
+    }
     return {
       state: "verified",
       pairwiseAid: body.app_session_token,
