@@ -180,11 +180,11 @@ func TestAMessageHeldSevenDaysIsRefusedBackAndDeleted(t *testing.T) {
 	q := New(small(), c.now)
 	q.Enqueue(msg(1, "c", "s", 10))
 	c.t = c.t.Add(7*24*time.Hour - time.Second)
-	if n := q.Expire(); len(n) != 0 {
+	if n, _ := q.Expire(); len(n) != 0 {
 		t.Fatalf("expired early: %v", n)
 	}
 	c.t = c.t.Add(time.Second)
-	got := q.Expire()
+	got, _ := q.Expire()
 	if len(got) != 1 || got[0].Sender != "s" || got[0].Reason != "the recipient was not reachable for 7 days" {
 		t.Fatalf("got %+v", got)
 	}

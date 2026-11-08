@@ -1,6 +1,7 @@
 package limits
 
 import (
+	"math"
 	"testing"
 	"time"
 )
@@ -101,5 +102,21 @@ func TestAPartFilledLimitsTakesTheDefaultsForWhatIsUnset(t *testing.T) {
 	want.MaxTurns, want.QueueBytes = 7, 5
 	if got != want {
 		t.Fatalf("an unset field did not take its default:\n got %+v\nwant %+v", got, want)
+	}
+}
+
+// A rate of nothing would divide by zero in Try, so no entry point lets one in.
+func TestNoRateIsEverZero(t *testing.T) {
+	now := time.Unix(1000, 0)
+	for _, l := range []Limits{{}, {RateBurst: 1}, {RatePerSecond: -2, RateBurst: 1}, {RatePerSecond: math.NaN(), RateBurst: 1}} {
+		if got := l.WithDefaults(); !(got.RatePerSecond > 0) || got.RateBurst <= 0 {
+			t.Fatalf("%+v", got)
+		}
+		r := NewRate(l, func() time.Time { return now })
+		for i := 0; i < 1000; i++ {
+			if ok, wait := r.Try("a", 0); !ok && (wait <= 0 || wait > time.Hour*24) {
+				t.Fatalf("refused with a wait of %v for %+v", wait, l)
+			}
+		}
 	}
 }

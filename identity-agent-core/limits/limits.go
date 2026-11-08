@@ -70,13 +70,14 @@ func (l Limits) ForPhone() Limits {
 	return l
 }
 
-// WithDefaults fills every field left at zero with its default, so a part-filled
-// Limits does not refuse every write with a limit of nothing. A field that is
-// set is kept as it is.
+// WithDefaults fills every field that is zero (or negative, or for a rate not a
+// positive number) with its default, so a part-filled Limits does not refuse
+// every write with a limit of nothing, and no rate is ever zero. A field that
+// is set is kept as it is. Every entry point that takes a Limits applies it.
 func (l Limits) WithDefaults() Limits {
 	d := Defaults()
 	fill := func(v *time.Duration, def time.Duration) {
-		if *v == 0 {
+		if *v <= 0 {
 			*v = def
 		}
 	}
@@ -84,31 +85,31 @@ func (l Limits) WithDefaults() Limits {
 	fill(&l.BackoffStart, d.BackoffStart)
 	fill(&l.BackoffMax, d.BackoffMax)
 	fill(&l.QueueMaxAge, d.QueueMaxAge)
-	if l.ReadBytes == 0 {
+	if l.ReadBytes <= 0 {
 		l.ReadBytes = d.ReadBytes
 	}
-	if l.RatePerSecond == 0 {
+	if !(l.RatePerSecond > 0) { // also NaN: a rate of nothing would divide by zero
 		l.RatePerSecond = d.RatePerSecond
 	}
-	if l.RateBurst == 0 {
+	if l.RateBurst <= 0 {
 		l.RateBurst = d.RateBurst
 	}
-	if l.EntriesPerConversation == 0 {
+	if l.EntriesPerConversation <= 0 {
 		l.EntriesPerConversation = d.EntriesPerConversation
 	}
-	if l.MessagesPerPersonPerHour == 0 {
+	if l.MessagesPerPersonPerHour <= 0 {
 		l.MessagesPerPersonPerHour = d.MessagesPerPersonPerHour
 	}
-	if l.MaxTurns == 0 {
+	if l.MaxTurns <= 0 {
 		l.MaxTurns = d.MaxTurns
 	}
-	if l.QueueMessages == 0 {
+	if l.QueueMessages <= 0 {
 		l.QueueMessages = d.QueueMessages
 	}
-	if l.QueueBytes == 0 {
+	if l.QueueBytes <= 0 {
 		l.QueueBytes = d.QueueBytes
 	}
-	if l.QueueSharePercent == 0 {
+	if l.QueueSharePercent <= 0 {
 		l.QueueSharePercent = d.QueueSharePercent
 	}
 	return l
@@ -143,6 +144,7 @@ type bucket struct {
 
 // NewRate makes a limiter; now may be nil.
 func NewRate(l Limits, now func() time.Time) *Rate {
+	l = l.WithDefaults()
 	if now == nil {
 		now = time.Now
 	}

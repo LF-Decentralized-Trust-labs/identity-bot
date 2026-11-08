@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -28,8 +29,11 @@ func TestAnAppPastItsRateIsRefusedWithAWait(t *testing.T) {
 	}
 	served := *w.served
 	rec := w.say(t, aSpokenRequest{who: "Eann", key: key, words: "hi", conversation: "c1"})
-	if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), "too many requests") || *w.served != served {
-		t.Fatalf("a request past the rate got %d %s", rec.Code, rec.Body)
+	if rec.Code != http.StatusTooManyRequests || !strings.Contains(rec.Body.String(), "too many requests") || *w.served != served {
+		t.Fatalf("a request past the rate got %d %s, want 429", rec.Code, rec.Body)
+	}
+	if secs, err := strconv.Atoi(rec.Header().Get("Retry-After")); err != nil || secs < 1 {
+		t.Fatalf("a refused rate must say when to try again: Retry-After %q", rec.Header().Get("Retry-After"))
 	}
 	if err := w.cw.s.holdAppToItsRate("another app"); err != nil {
 		t.Fatalf("another app was held back: %v", err)
@@ -64,6 +68,37 @@ func TestTheDeliveryQueueIsKeptInTheDataDirectoryAcrossARestart(t *testing.T) {
 	s3 := &CoreServer{DataDir: dir}
 	s3.SetLimits(limits.Defaults().ForPhone())
 	if got := s3.AppLimits(); got.QueueMessages != limits.Defaults().QueueMessages/10 || got.ForwardTimeout != limits.Defaults().ForwardTimeout {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// Limits set with only some fields, and none at all, never give an app a rate of
+// nothing or a queue that refuses every message, however they were passed in.
+func TestPartFilledLimitsNeverMakeARateOfNothing(t *testing.T) {
+	for name, l := range map[string]limits.Limits{
+		"zero":     {},
+		"queue":    {QueueMessages: 5},
+		"negative": {RatePerSecond: -1, RateBurst: -3},
+	} {
+		s := &CoreServer{DataDir: t.TempDir()}
+		s.SetLimits(l)
+		got := s.AppLimits()
+		if got.RatePerSecond <= 0 || got.RateBurst <= 0 || got.QueueBytes <= 0 || got.QueueSharePercent <= 0 || got.QueueMaxAge <= 0 {
+			t.Fatalf("%s: %+v", name, got)
+		}
+		if err := s.holdAppToItsRate("chat"); err != nil {
+			t.Fatalf("%s: the first request of an app was refused: %v", name, err)
+		}
+		q, err := s.DeliveryQueue()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := q.Enqueue(mediation.Message{ID: "m", Conversation: "c", Sender: "s", Recipient: "r", Sealed: []byte("x")}); err != nil {
+			t.Fatalf("%s: the queue refused a first message: %v", name, err)
+		}
+	}
+	// A server never given limits serves the defaults too.
+	if got := (&CoreServer{}).AppLimits(); got != limits.Defaults() {
 		t.Fatalf("%+v", got)
 	}
 }

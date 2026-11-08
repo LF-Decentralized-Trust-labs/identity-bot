@@ -32,10 +32,13 @@ func New(limit int, span time.Duration, maxKeys int, now func() time.Time) *Wind
 
 // Allow counts a hit for key and reports whether it is within the limit. A hit
 // over the limit, or for a key there is no room for, is not counted.
-func (w *Window) Allow(key string) bool {
+func (w *Window) Allow(key string) bool { return w.AllowAt(key, w.now()) }
+
+// AllowAt is Allow judged at the moment now, for a caller that already holds
+// the time it is deciding by.
+func (w *Window) AllowAt(key string, now time.Time) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	now := w.now()
 	cutoff := now.Add(-w.span)
 	if !w.roomFor(key, cutoff) {
 		return false

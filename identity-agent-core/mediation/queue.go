@@ -89,6 +89,7 @@ type share struct {
 
 // New makes an empty queue held to l; now may be nil.
 func New(l limits.Limits, now func() time.Time) *Queue {
+	l = l.WithDefaults()
 	if now == nil {
 		now = time.Now
 	}
@@ -151,14 +152,24 @@ func Open(path string, l limits.Limits, now func() time.Time) (*Queue, error) {
 }
 
 // save writes the queue, if it is kept anywhere. The caller holds q.mu.
-func (q *Queue) save() error {
+func (q *Queue) save() error { return q.saveAs(nil) }
+
+// saveAs writes the queue as it would be after a change that has not been made
+// to memory yet: view is given each message's stored form and may change it or
+// return false to leave it out. A change is saved first and made in memory only
+// once the save has succeeded, so memory and disk never disagree.
+func (q *Queue) saveAs(view func(*storedItem) bool) error {
 	if q.path == "" {
 		return nil
 	}
 	st := stored{Version: 1, Messages: make([]storedItem, 0, len(q.byID))}
 	for _, h := range q.byID {
-		st.Messages = append(st.Messages, storedItem{ID: h.ID, Conversation: h.Conversation, Sender: h.Sender,
-			Recipient: h.Recipient, Sealed: h.Sealed, Queued: h.queued, Delivered: h.delivered, Kept: h.kept})
+		it := storedItem{ID: h.ID, Conversation: h.Conversation, Sender: h.Sender,
+			Recipient: h.Recipient, Sealed: h.Sealed, Queued: h.queued, Delivered: h.delivered, Kept: h.kept}
+		if view != nil && !view(&it) {
+			continue
+		}
+		st.Messages = append(st.Messages, it)
 	}
 	sort.Slice(st.Messages, func(i, j int) bool { return st.Messages[i].ID < st.Messages[j].ID })
 	b, err := json.Marshal(st)
@@ -256,28 +267,40 @@ func (q *Queue) Bytes() int64 { q.mu.Lock(); defer q.mu.Unlock(); return q.bytes
 
 // Delivered says the recipient has the message. The sealed copy is deleted as
 // soon as it is also kept.
-func (q *Queue) Delivered(id string) error { return q.mark(id, func(h *held) { h.delivered = true }) }
+func (q *Queue) Delivered(id string) error { return q.mark(id, true, false) }
 
 // Kept says the message's entry is committed. The sealed copy is deleted as
 // soon as it is also delivered.
-func (q *Queue) Kept(id string) error { return q.mark(id, func(h *held) { h.kept = true }) }
+func (q *Queue) Kept(id string) error { return q.mark(id, false, true) }
 
-func (q *Queue) mark(id string, f func(*held)) error {
+func (q *Queue) mark(id string, delivered, kept bool) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	h := q.byID[id]
 	if h == nil {
 		return ErrNothingHeld
 	}
-	f(h)
-	if h.delivered && h.kept {
+	d, k := h.delivered || delivered, h.kept || kept
+	err := q.saveAs(func(it *storedItem) bool {
+		if it.ID == id {
+			it.Delivered, it.Kept = d, k
+			return !(d && k)
+		}
+		return true
+	})
+	if err != nil {
+		return err
+	}
+	h.delivered, h.kept = d, k
+	if d && k {
 		q.unhold(h)
 	}
-	return q.save()
+	return nil
 }
 
 // Discard deletes the sealed copy of a message that will not be delivered, as
-// when its entry was not kept.
+// when its entry was not kept. If the queue cannot be saved the message is
+// still held, in memory as on disk.
 func (q *Queue) Discard(id string) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -285,8 +308,11 @@ func (q *Queue) Discard(id string) error {
 	if h == nil {
 		return ErrNothingHeld
 	}
+	if err := q.saveAs(func(it *storedItem) bool { return it.ID != id }); err != nil {
+		return err
+	}
 	q.unhold(h)
-	return q.save()
+	return nil
 }
 
 func (q *Queue) unhold(h *held) {
@@ -298,19 +324,47 @@ func (q *Queue) unhold(h *held) {
 	h.Sealed = nil
 }
 
-// Expire deletes every sealed copy held for its whole age and returns what to
-// tell each sender: the message is refused back to them.
-func (q *Queue) Expire() []Expired {
+// Due is the messages held for their whole age, which Expire would refuse back
+// to their senders, without changing anything.
+func (q *Queue) Due() []Expired {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	return q.due()
+}
+
+func (q *Queue) due() []Expired {
 	var out []Expired
+	now := q.now()
 	for _, h := range q.byID {
-		if q.now().Sub(h.queued) >= q.l.QueueMaxAge {
+		if now.Sub(h.queued) >= q.l.QueueMaxAge {
 			out = append(out, Expired{ID: h.ID, Conversation: h.Conversation, Sender: h.Sender, Recipient: h.Recipient, Reason: ReasonExpired})
-			q.unhold(h)
 		}
 	}
-	_ = q.save() // a failed save is retried by the next change; expiry is re-found
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
+}
+
+// Expire deletes every sealed copy held for its whole age and returns what to
+// tell each sender: the message is refused back to them. The deletion is saved
+// before it is made, so if the save fails nothing is deleted and nothing is
+// returned to tell: a sender is told once, for a message that is gone from disk
+// as well as from memory, and the next Expire finds the same messages again.
+func (q *Queue) Expire() ([]Expired, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	out := q.due()
+	if len(out) == 0 {
+		return nil, nil
+	}
+	gone := make(map[string]bool, len(out))
+	for _, e := range out {
+		gone[e.ID] = true
+	}
+	if err := q.saveAs(func(it *storedItem) bool { return !gone[it.ID] }); err != nil {
+		return nil, err
+	}
+	for id := range gone {
+		q.unhold(q.byID[id])
+	}
+	return out, nil
 }

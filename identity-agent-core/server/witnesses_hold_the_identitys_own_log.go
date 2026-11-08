@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"identity-agent-core/drivers"
+	"identity-agent-core/internal/backoff"
 	"identity-agent-core/recovery"
 	"identity-agent-core/witness"
 	"log"
@@ -392,13 +393,7 @@ func (s *CoreServer) endOrDelayMovedOn(entry recovery.RootAIDMapEntry, held bool
 	try := s.witnessing.movedOnTries[entry.OldRootAID]
 	try.attempts++
 	gaveUp := try.attempts >= movedOnGiveUpAfter
-	wait := movedOnBackoff
-	for i := 1; i < try.attempts && wait < movedOnLongestBackoff; i++ {
-		wait *= 2
-	}
-	if wait > movedOnLongestBackoff {
-		wait = movedOnLongestBackoff
-	}
+	wait := backoff.Wait(movedOnBackoff, movedOnLongestBackoff, try.attempts-1)
 	try.notBefore = witnessClock().Add(wait)
 	// The job leaves the list now and is added again only after notBefore, so
 	// passes that other work asks for do not count as tries.

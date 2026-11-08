@@ -86,6 +86,9 @@ func newAnAppWorld(t *testing.T) *anAppWorld {
 		person, proof, err := s.thePersonAsking(r)
 		aw.proof = proof
 		if err != nil {
+			if RefuseAnAppOverItsRate(w, err) {
+				return
+			}
 			http.Error(w, err.Error(), http.StatusForbidden)
 			return
 		}

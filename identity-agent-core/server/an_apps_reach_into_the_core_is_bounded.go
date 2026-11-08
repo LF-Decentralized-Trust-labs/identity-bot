@@ -3,8 +3,11 @@ package server
 import (
 	"errors"
 	"fmt"
+	"math"
 	"math/rand/v2"
+	"net/http"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -43,17 +46,14 @@ type appLimitState struct {
 func (s *CoreServer) SetLimits(l limits.Limits) {
 	s.limitsMu.Lock()
 	defer s.limitsMu.Unlock()
-	s.limits = l
+	s.limits = l.WithDefaults()
 }
 
 // AppLimits is the limits apps are held to.
 func (s *CoreServer) AppLimits() limits.Limits {
 	s.limitsMu.Lock()
 	defer s.limitsMu.Unlock()
-	if s.limits == (limits.Limits{}) {
-		return limits.Defaults()
-	}
-	return s.limits
+	return s.limits.WithDefaults()
 }
 
 func (s *CoreServer) appLimitState() *appLimitState {
@@ -102,4 +102,19 @@ func TheAppIsOverItsRate(err error) (time.Duration, bool) {
 		return e.Wait, true
 	}
 	return 0, false
+}
+
+// RefuseAnAppOverItsRate answers a request with 429 and a Retry-After in whole
+// seconds (at least one), when err is the refusal for an app's rate, and says
+// so. A route that asks ThePersonAsking calls it first with the error, and goes
+// on to its own errors only when it returns false.
+func RefuseAnAppOverItsRate(w http.ResponseWriter, err error) bool {
+	wait, ok := TheAppIsOverItsRate(err)
+	if !ok {
+		return false
+	}
+	secs := max(1, int(math.Ceil(wait.Seconds())))
+	w.Header().Set("Retry-After", strconv.Itoa(secs))
+	writeError(w, http.StatusTooManyRequests, err.Error(), "")
+	return true
 }

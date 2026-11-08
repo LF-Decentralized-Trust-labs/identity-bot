@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"identity-agent-core/limits"
 )
 
 // A message the sender was told was queued is still queued after a restart,
@@ -69,7 +71,10 @@ func TestAMessageKeepsItsAgeAcrossARestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := r.Expire()
+	got, err := r.Expire()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 1 || got[0].ID != "m1" || got[0].Reason != ReasonExpired {
 		t.Fatalf("got %+v", got)
 	}
@@ -125,5 +130,115 @@ func TestTheQueueFileIsPrivate(t *testing.T) {
 	}
 	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm()&0o077 != 0 {
 		t.Fatalf("%v %v", fi, err)
+	}
+}
+
+// A queue whose file can no longer be written, with one message held and its
+// clock past the message's age.
+func unwritableQueue(t *testing.T) (*Queue, string, func()) {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "d")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "q.json")
+	start := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	clk := &clock{t: start}
+	q, err := Open(path, small(), clk.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Enqueue(msg(1, "c", "s", 10)); err != nil {
+		t.Fatal(err)
+	}
+	clk.t = start.Add(small().QueueMaxAge + time.Minute)
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	return q, path, func() {}
+}
+
+// If the queue cannot be saved, a change is not made: memory still agrees with
+// the disk, so a crash cannot bring back a message that memory had dropped, and
+// a sender is not told twice.
+func TestAFailedSaveLeavesDiscardMarkAndExpireUnmade(t *testing.T) {
+	for name, change := range map[string]func(*Queue) error{
+		"discard":   func(q *Queue) error { return q.Discard("m1") },
+		"delivered": func(q *Queue) error { return q.Delivered("m1") },
+		"expire":    func(q *Queue) error { _, err := q.Expire(); return err },
+	} {
+		t.Run(name, func(t *testing.T) {
+			q, _, _ := unwritableQueue(t)
+			if err := change(q); err == nil {
+				t.Fatal("a change that could not be saved was reported as made")
+			}
+			if q.Len() != 1 || q.Bytes() != 10 {
+				t.Fatalf("memory changed though the save failed: %d held, %d bytes", q.Len(), q.Bytes())
+			}
+			if got := q.Held("r"); len(got) != 1 {
+				t.Fatalf("the message is no longer waiting: %v", got)
+			}
+			if due := q.Due(); len(due) != 1 {
+				t.Fatalf("the message is not still due: %v", due)
+			}
+		})
+	}
+	// The mark that completes a message (delivered and kept) must not delete it
+	// while the disk still has it.
+	q, _, _ := unwritableQueue(t)
+	if err := q.Kept("m1"); err == nil {
+		t.Fatal("not saved but reported made")
+	}
+	if err := q.Delivered("m1"); err == nil || q.Len() != 1 {
+		t.Fatalf("a mark that could not be saved changed the queue: %v %d", err, q.Len())
+	}
+}
+
+// A failed Expire is retried and tells each sender once.
+func TestExpireTellsEachSenderOnceAcrossAFailedSave(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "q.json")
+	start := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	clk := &clock{t: start}
+	q, _ := Open(path, small(), clk.now)
+	q.Enqueue(msg(1, "c", "s", 10))
+	clk.t = start.Add(small().QueueMaxAge)
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path, 0o700); err != nil { // a directory where the file goes: the write fails
+		t.Fatal(err)
+	}
+	if got, err := q.Expire(); err == nil || len(got) != 0 {
+		t.Fatalf("expired with no save: %v %v", got, err)
+	}
+	os.Remove(path)
+	first, err := q.Expire()
+	if err != nil || len(first) != 1 {
+		t.Fatalf("%v %v", first, err)
+	}
+	if second, _ := q.Expire(); len(second) != 0 {
+		t.Fatalf("told twice: %v", second)
+	}
+}
+
+// A part-filled Limits takes the defaults for the rest, at the queue's own entry
+// points: it must not refuse every message.
+func TestAQueueMadeWithPartFilledLimitsTakesTheDefaults(t *testing.T) {
+	dir := t.TempDir()
+	for name, mk := range map[string]func() *Queue{
+		"New": func() *Queue { return New(limits.Limits{QueueMessages: 5}, nil) },
+		"Open": func() *Queue {
+			q, _ := Open(filepath.Join(dir, "q.json"), limits.Limits{QueueMessages: 5}, nil)
+			return q
+		},
+		"zero": func() *Queue { return New(limits.Limits{}, nil) },
+	} {
+		q := mk()
+		if err := q.Enqueue(msg(1, "c", "s", 10)); err != nil {
+			t.Fatalf("%s: a part-filled limit refused a message: %v", name, err)
+		}
+		if due, _ := q.Expire(); len(due) != 0 {
+			t.Fatalf("%s: a queue with no age expired a new message", name)
+		}
 	}
 }

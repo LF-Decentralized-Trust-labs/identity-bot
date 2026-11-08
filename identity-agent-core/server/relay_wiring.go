@@ -17,6 +17,7 @@ import (
 	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/internal/backoff"
 	"identity-agent-core/relay"
 	"identity-agent-core/secureenclave"
 )
@@ -246,6 +247,9 @@ func (s *CoreServer) startRelay() {
 // it doubles up to five minutes.
 var relayRetryWait = 5 * time.Second
 
+// relayRetryLongest is the longest wait between tries.
+const relayRetryLongest = 5 * time.Minute
+
 // relayFailure is why a relay generation has no relay: what a screen shows
 // when there is nothing running to ask.
 type relayFailure struct {
@@ -362,8 +366,8 @@ func (s *CoreServer) runRelay(ctx context.Context, gen int) {
 
 	// Keep trying. A relay that cannot be reached at start-up (the network is
 	// down, the machine just woke) is reached later without a restart.
-	backoff := relayRetryWait
-	for {
+	for attempt := 0; ; attempt++ {
+		wait := backoff.Wait(relayRetryWait, relayRetryLongest, attempt)
 		err := rm.Start(ctx)
 		if err == nil || ctx.Err() != nil || errors.Is(err, relay.ErrStopped) {
 			return
@@ -373,14 +377,11 @@ func (s *CoreServer) runRelay(ctx context.Context, gen int) {
 			log.Printf("[relay] %s refused: %s", base, st.Reason)
 			return
 		}
-		log.Printf("[relay] could not reach %s yet, trying again in %s: %v", base, backoff, err)
+		log.Printf("[relay] could not reach %s yet, trying again in %s: %v", base, wait, err)
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(backoff):
-		}
-		if backoff < 5*time.Minute {
-			backoff *= 2
+		case <-time.After(wait):
 		}
 	}
 }

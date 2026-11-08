@@ -78,6 +78,13 @@ type (
 // OpenSealedTo return it, wrapped, for that and for nothing else.
 var ErrKeysUnavailable = coretypes.ErrKeysUnavailable
 
+// RefuseAnAppOverItsRate answers 429 with a Retry-After when err, from
+// ThePersonAsking, says the app is over its request rate, and reports whether
+// it did. Every route that asks ThePersonAsking calls it before its own errors.
+func RefuseAnAppOverItsRate(w http.ResponseWriter, err error) bool {
+	return server.RefuseAnAppOverItsRate(w, err)
+}
+
 // Of is the handle on s.
 func Of(s *server.CoreServer) Host { return server.AddonHost(s, hostlink.New()).(Host) }
 

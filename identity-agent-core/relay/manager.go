@@ -309,8 +309,10 @@ func (m *Manager) Start(parent context.Context) error {
 // lasted longer than steadySession resets it, so a relay that drops now and
 // then is retried promptly rather than after the longest wait.
 var (
-	minBackoff    = time.Second
-	maxBackoff    = time.Minute
+	minBackoff = time.Second
+	// 64s, not 60s: the wait doubled until it reached the cap, and 32s is
+	// under a minute, so the last wait has always been 64s.
+	maxBackoff    = 64 * time.Second
 	steadySession = time.Minute
 )
 
