@@ -954,6 +954,11 @@ do not.
     of KERI's defined seal types. To any other implementation it is ordinary
     data in an event's anchor list, covered by the event's digest and
     signatures like anything else there;
+    this project tells it from any other anchor by one rule (added 2026-11-07):
+    the anchor is a JSON object whose member named exactly `ia` (case-sensitive,
+    so `IA` is a different member and does not count) is the string
+    `IA-HYBRID-1`, compared exactly. The core decides this in one place,
+    `iacrypto.IsKeysetSeal`, and every reader of anchors asks it;
   - the derivation paths and positions of section 1 decide which keys are used,
     and nobody else needs to know them;
   - the owner signature that names its establishment event is this project's
