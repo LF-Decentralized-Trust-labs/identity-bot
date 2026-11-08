@@ -99,11 +99,16 @@ class RecoveryRetrieveResult {
   final int sizeBytes;
   final String? path;
 
+  /// The name the archive had where it was found. Hand it to [verify] and
+  /// [start] so it is checked against what the archive says of itself.
+  final String? archiveName;
+
   RecoveryRetrieveResult({
     required this.source,
     required this.archiveB64,
     required this.sizeBytes,
     this.path,
+    this.archiveName,
   });
 
   factory RecoveryRetrieveResult.fromJson(Map<String, dynamic> json) {
@@ -112,6 +117,7 @@ class RecoveryRetrieveResult {
       archiveB64: json['archive_b64'] ?? '',
       sizeBytes: json['size_bytes'] ?? 0,
       path: json['path'],
+      archiveName: json['archive_name'],
     );
   }
 }
@@ -207,6 +213,7 @@ class RecoveryService {
     required String mnemonic,
     required String archiveB64,
     String? passphrase,
+    String? archiveName,
   }) async {
     final resp = await _client.post(
       Uri.parse('$_base/verify'),
@@ -215,6 +222,7 @@ class RecoveryService {
         'mnemonic': mnemonic,
         if (passphrase != null) 'passphrase': passphrase,
         'archive_b64': archiveB64,
+        if (archiveName != null) 'archive_name': archiveName,
       }),
     );
     if (resp.statusCode != 200) {
@@ -228,6 +236,7 @@ class RecoveryService {
     required String mnemonic,
     required String archiveB64,
     String? passphrase,
+    String? archiveName,
   }) async {
     final resp = await _client.post(
       Uri.parse('$_base/start'),
@@ -236,6 +245,7 @@ class RecoveryService {
         'mnemonic': mnemonic,
         if (passphrase != null) 'passphrase': passphrase,
         'archive_b64': archiveB64,
+        if (archiveName != null) 'archive_name': archiveName,
       }),
     );
     if (resp.statusCode != 201) {

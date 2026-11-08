@@ -58,10 +58,10 @@ func (s *Service) keepFetched(path, objectKey string, done func()) string {
 // archiveFrom resolves what a request names: the archive itself, or a reference
 // to one this agent fetched. It also returns the name the archive had in the
 // destination it came from, when it came from one.
-func (s *Service) archiveFrom(archiveB64, ref string) (raw []byte, objectKey string, err error) {
+func (s *Service) archiveFrom(archiveB64, ref, name string) (raw []byte, objectKey string, err error) {
 	if ref == "" {
 		raw, err = decodeArchiveInput(archiveB64)
-		return raw, "", err
+		return raw, name, err
 	}
 	if archiveB64 != "" {
 		return nil, "", fmt.Errorf("give archive_b64 or archive_ref, not both")

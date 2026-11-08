@@ -79,8 +79,12 @@ type VerifyRequest struct {
 	// ArchiveRef names an archive this agent fetched from a destination, in
 	// place of ArchiveB64.
 	ArchiveRef string `json:"archive_ref,omitempty"`
-	Mnemonic   string `json:"mnemonic"`
-	Passphrase string `json:"passphrase,omitempty"`
+	// ArchiveName is the name the archive had where it was kept, as Retrieve
+	// reported it, for an archive given as ArchiveB64. It is only compared with
+	// what the archive says of itself; nothing is trusted from it.
+	ArchiveName string `json:"archive_name,omitempty"`
+	Mnemonic    string `json:"mnemonic"`
+	Passphrase  string `json:"passphrase,omitempty"`
 	// SharesB64 is what the holders returned, keyed by holder id, for an
 	// archive that needs them.
 	SharesB64 map[string]string `json:"shares_b64,omitempty"`
@@ -104,11 +108,13 @@ type VerifyResponse struct {
 
 // StartRequest begins a gated recovery session after successful verify.
 type StartRequest struct {
-	ArchiveB64 string            `json:"archive_b64,omitempty"`
-	ArchiveRef string            `json:"archive_ref,omitempty"`
-	Mnemonic   string            `json:"mnemonic"`
-	Passphrase string            `json:"passphrase,omitempty"`
-	SharesB64  map[string]string `json:"shares_b64,omitempty"`
+	ArchiveB64 string `json:"archive_b64,omitempty"`
+	ArchiveRef string `json:"archive_ref,omitempty"`
+	// ArchiveName: see VerifyRequest.
+	ArchiveName string            `json:"archive_name,omitempty"`
+	Mnemonic    string            `json:"mnemonic"`
+	Passphrase  string            `json:"passphrase,omitempty"`
+	SharesB64   map[string]string `json:"shares_b64,omitempty"`
 	whoWroteItFields
 }
 
@@ -129,8 +135,12 @@ type RetrieveResponse struct {
 	// ArchiveRef stands for an archive too large to send back: the cloud ones.
 	// Give it to Verify and Start as archive_ref.
 	ArchiveRef string `json:"archive_ref,omitempty"`
-	SizeBytes  int    `json:"size_bytes"`
-	Message    string `json:"message,omitempty"`
+	// ArchiveName is the name the archive had where it was found. Give it back
+	// to Verify and Start as archive_name so the name can be checked against
+	// what the archive says of itself.
+	ArchiveName string `json:"archive_name,omitempty"`
+	SizeBytes   int    `json:"size_bytes"`
+	Message     string `json:"message,omitempty"`
 }
 
 // Service orchestrates recovery restore, verify, delay, and rotation gates.
@@ -206,7 +216,7 @@ func NewService(dataDir string, st store.Store, backupSvc *backup.Service) *Serv
 
 // Verify decrypts and integrity-checks an archive, then verifies HD pairwise keys.
 func (s *Service) Verify(req VerifyRequest) (*VerifyResponse, error) {
-	raw, objectKey, err := s.archiveFrom(req.ArchiveB64, req.ArchiveRef)
+	raw, objectKey, err := s.archiveFrom(req.ArchiveB64, req.ArchiveRef, req.ArchiveName)
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +262,7 @@ func (s *Service) Verify(req VerifyRequest) (*VerifyResponse, error) {
 
 // Start creates a recovery session with assurance-graduated cancel-window delay.
 func (s *Service) Start(req StartRequest) (*Session, error) {
-	raw, objectKey, err := s.archiveFrom(req.ArchiveB64, req.ArchiveRef)
+	raw, objectKey, err := s.archiveFrom(req.ArchiveB64, req.ArchiveRef, req.ArchiveName)
 	if err != nil {
 		return nil, err
 	}
@@ -1035,10 +1045,11 @@ func (s *Service) retrieveFromBackupOnly(req RetrieveRequest) (*RetrieveResponse
 		return nil, err
 	}
 	return &RetrieveResponse{
-		Source:     SourceBackupOnlyDevice,
-		Path:       path,
-		ArchiveB64: base64.StdEncoding.EncodeToString(raw),
-		SizeBytes:  len(raw),
+		Source:      SourceBackupOnlyDevice,
+		Path:        path,
+		ArchiveName: filepath.Base(path),
+		ArchiveB64:  base64.StdEncoding.EncodeToString(raw),
+		SizeBytes:   len(raw),
 	}, nil
 }
 
@@ -1094,10 +1105,11 @@ func (s *Service) retrieveFromLocal(req RetrieveRequest) (*RetrieveResponse, err
 			"and returning anything else would make this a way to read any file on this machine")
 	}
 	return &RetrieveResponse{
-		Source:     SourceLocalFile,
-		Path:       clean,
-		ArchiveB64: base64.StdEncoding.EncodeToString(raw),
-		SizeBytes:  len(raw),
+		Source:      SourceLocalFile,
+		Path:        clean,
+		ArchiveName: filepath.Base(clean),
+		ArchiveB64:  base64.StdEncoding.EncodeToString(raw),
+		SizeBytes:   len(raw),
 	}, nil
 }
 

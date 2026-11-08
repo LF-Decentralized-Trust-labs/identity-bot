@@ -53,3 +53,42 @@ func TestRestoreShowsWhenTheArchiveWasMadeAndWarnsOfARenamedOldOne(t *testing.T)
 		t.Fatal("a made-up reference was accepted")
 	}
 }
+
+// A local folder and a backup server hand the archive over directly, so the
+// name it was found under comes back with it and is checked the same way.
+func TestAnArchiveFromAFolderOrABackupServerIsHeldToItsOwnTimeToo(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewService(dir, nil, backup.NewService(dir, nil))
+	archive := buildTestArchive(t, testMnemonic, nil)
+
+	local := filepath.Join(t.TempDir(), "backup-full-20310101-000000.iab")
+	if err := os.WriteFile(local, archive, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := svc.Retrieve(RetrieveRequest{Source: SourceLocalFile, LocalPath: local})
+	if err != nil || got.ArchiveName != "backup-full-20310101-000000.iab" {
+		t.Fatalf("the name the archive was found under is not reported: %+v %v", got, err)
+	}
+	v, err := svc.Verify(VerifyRequest{ArchiveB64: got.ArchiveB64, ArchiveName: got.ArchiveName, Mnemonic: testMnemonic})
+	if err != nil || len(v.Warnings) != 1 || !strings.Contains(v.Warnings[0], "renamed") {
+		t.Fatalf("a renamed archive from a folder went unremarked: %v %v", v, err)
+	}
+
+	// The backup server's newest-by-name choice.
+	aid := "E" + strings.Repeat("a", 43)
+	held := filepath.Join(dir, "backup_receive", aid)
+	if err := os.MkdirAll(held, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(held, "20310101-000000.iab"), archive, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err = svc.Retrieve(RetrieveRequest{Source: SourceBackupOnlyDevice, IdentityAID: aid})
+	if err != nil || got.ArchiveName != "20310101-000000.iab" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	v, err = svc.Verify(VerifyRequest{ArchiveB64: got.ArchiveB64, ArchiveName: got.ArchiveName, Mnemonic: testMnemonic})
+	if err != nil || len(v.Warnings) != 1 || !strings.Contains(v.Warnings[0], "renamed") {
+		t.Fatalf("a renamed archive from a backup server went unremarked: %v %v", v, err)
+	}
+}

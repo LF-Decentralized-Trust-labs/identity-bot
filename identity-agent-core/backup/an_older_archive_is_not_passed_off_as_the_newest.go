@@ -29,7 +29,10 @@ import (
 // and the archive a little earlier, as it is built.
 const freshnessSlack = 10 * time.Minute
 
-var archiveNameTime = regexp.MustCompile(`backup-(?:full|delta)-(\d{8}-\d{6})\.iab$`)
+// Every name this agent gives an archive carries its time: "backup-full-<time>.iab"
+// in a destination or a local folder, "<time>[-n].iab" on a machine holding it
+// for someone else. The same rule reads all of them.
+var archiveNameTime = regexp.MustCompile(`(?:^|[/\\])(?:backup-(?:full|delta)-)?(\d{8}-\d{6})(?:-\d+)?\.iab$`)
 
 // ArchiveFreshnessWarnings returns what a person restoring from an archive
 // should be told about when it was made. createdAt is the archive's own,
