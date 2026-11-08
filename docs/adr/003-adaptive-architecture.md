@@ -6,6 +6,7 @@
 ADR-037 (2026-08-18) — every reference below to a Rust bridge on mobile is
 historical. That engine is removed; mobile runs the embedded Go core.
 **Amended:** 2026-11-02 — the core serves no UI to a browser (see "Amendment, 2026-11-02" at the end)
+**Amended:** 2026-11-06 — a remote controller holds no delegated identifier: it is named by its own non-transferable key (ADR-006, "Deviation, 2026-08-31"), and a paired computer founds its own root (ADR-036). Sentences below that said otherwise are corrected in place.
 **Context:** Phase 3 (Connectivity) — OOBI serving, contact management, and tunneling
 
 > **Note:** The four-mode model described in this ADR has been superseded twice: first by the 3-state × 2-device-type model in ADR-006 (2026-02-22), then by the two-topology + four-configuration model in ADR-006's 2026-05-01 revision. This ADR remains the authoritative source for OOBI serving, contact management, tunneling, endpoint naming conventions, trust boundaries, and configuration variables. The terms "Mobile Standalone," "Mobile Remote WITHOUT Keys," and "Mobile Remote WITH Keys" used below are historical — the current model is "Phone + Computer" / "Computer only" (with auto-detection of key location). See ADR-006 for the current architectural topology.
@@ -22,7 +23,7 @@ The answer is **four operating modes**. Each mode is a different strategy for co
 |---|---|---|---|
 | **Desktop Mode** | Laptops, servers (Linux/macOS/Windows) | Python keripy runs locally on the same machine | Go Core runs locally |
 | **Mobile Standalone Mode** | Phones with no personal server ("Create New Identity" onboarding) | Rust KERI bridge runs directly on the phone via FFI | Go Core runs embedded on the phone via gomobile platform channels |
-| **Mobile Remote Controller WITHOUT Keys** | Phones connecting to an existing server ("Connect to Existing Identity" onboarding) | Rust bridge creates a delegated child AID locally; remote server handles parent AID operations | Remote server provides backend services |
+| **Mobile Remote Controller WITHOUT Keys** | Phones connecting to an existing server ("Connect to Existing Identity" onboarding) | Phone holds a controller key of its own, not a delegated identifier (ADR-006); remote server holds the identity | Remote server provides backend services |
 | **Mobile Remote Controller WITH Keys** | Phones migrated from Standalone mode ("Migrate to External Server" dashboard button) | Rust bridge manages the primary parent AID locally (keys stay on phone) | Remote server provides compute-heavy backend services |
 
 All four modes present the same user interface through the abstract `KeriService` interface. The user chooses their mode during onboarding (or via migration), and the app configures the correct service implementation.
@@ -95,9 +96,9 @@ The Go Core's KERI driver is **disabled** on mobile (`ServerConfig.EnableKeriDri
 
 **Used on:** iOS or Android phones, when the user chooses "Connect to Existing Identity" during onboarding.
 
-**What happens:** The user has a personal server somewhere (a laptop, a home server, a cloud VM) running the Identity Agent in Desktop Mode. Their phone connects to that server by entering the server's URL during onboarding. The Rust bridge creates a **delegated child AID** locally — the phone holds only the child AID's keys, while the parent AID and its keys remain on the remote server.
+**What happens:** The user has a personal server somewhere (a laptop, a home server, a cloud VM) running the Identity Agent in Desktop Mode. Their phone connects to that server by entering the server's URL during onboarding. The phone holds a controller key of its own and no delegated identifier (ADR-006, "Deviation, 2026-08-31"); the identity and its keys remain on the remote server.
 
-Backend operations (data persistence, OOBI serving, contacts) are handled by the remote server. The phone is acting as a remote controller with a limited, delegated identity.
+Backend operations (data persistence, OOBI serving, contacts) are handled by the remote server. The phone is acting as a remote controller with a limited grant of authority, not an identity of its own (ADR-006).
 
 ```
 ┌───────────────────────────┐       ┌──────────────────────────────────┐
@@ -105,7 +106,7 @@ Backend operations (data persistence, OOBI serving, contacts) are handled by the
 │  (iOS / Android)          │       │                                  │
 │                           │ HTTPS │  Go Backend ──→ Python KERI      │
 │  Rust Bridge (FFI)        │──────→│  (port 5050)    Driver (9999)    │
-│  Creates delegated child  │       │                                  │
+│  Holds a controller key   │       │                                  │
 │  AID locally. Phone has   │       │  Parent AID and full KEL live    │
 │  child keys only.         │       │  here. User owns and controls    │
 │                           │       │  this server.                    │
@@ -162,7 +163,7 @@ The user's choice is persisted via `PreferencesService` (SharedPreferences). On 
 The `_initializeServiceForMode()` method in `main.dart` handles the topology-to-service mapping:
 - Desktop (all topologies): `DesktopKeriService()` (local Go+Python for KERI ops; remote serverUrl passed to screens for backend ops in Remote topologies)
 - Mobile Standalone: `MobileStandaloneKeriService` (Rust bridge + embedded Go Core)
-- Mobile Remote WITHOUT Keys: `MobileRemoteKeriService` (Rust bridge for local child AID + remote parent server URL)
+- Mobile Remote WITHOUT Keys: `MobileRemoteKeriService` (local controller key + remote server URL; no delegated identifier, ADR-006)
 - Fallback (Rust bridge unavailable): `RemoteServerKeriService` (all ops forwarded to remote server)
 
 ## Trust Boundaries
@@ -187,7 +188,7 @@ Different components in the system have different levels of trust, depending on 
 
 ### Remote Server (in Remote Controller modes)
 - **Trust level:** Full trust for "WITHOUT Keys" (server holds parent AID keys). Partial trust for "WITH Keys" (server only provides backend services, no keys).
-- **Access (WITHOUT Keys):** Server manages the parent AID and provides backend services. Phone has a delegated child AID.
+- **Access (WITHOUT Keys):** Server manages the parent AID and provides backend services. Phone holds a controller key, not a delegated identifier (ADR-006).
 - **Access (WITH Keys):** Server provides OOBI, contacts, and tunneling only. Phone retains the primary AID and all keys.
 
 ### Remote Helper (stateless fallback)
