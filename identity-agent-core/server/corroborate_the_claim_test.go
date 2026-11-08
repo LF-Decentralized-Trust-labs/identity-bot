@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -36,7 +35,7 @@ func newStandInWitness(t *testing.T) *standInWitness {
 		// refuses to designate anything else, because a receipt from a
 		// transferable identifier could not be checked without first resolving
 		// that witness's own key log.
-		key: iacrypto.NonTransferableAIDQB64(bytes.Repeat([]byte{7}, 32)), held: map[string][]map[string]interface{}{}}
+		key: iacrypto.NonTransferableAIDQB64(aWitnessKey(7)), held: map[string][]map[string]interface{}{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(rw http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(rw).Encode(map[string]any{"service_aid": w.key})

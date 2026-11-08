@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -23,7 +22,7 @@ func TestAPairwiseInceptionGoesToTheWitnessesItNames(t *testing.T) {
 	got := map[string][]string{} // witness key -> identities sent to it
 	var pool []witness.BootstrapWitness
 	for i := byte(1); i <= 3; i++ {
-		key := iacrypto.NonTransferableAIDQB64(bytes.Repeat([]byte{i}, 32))
+		key := iacrypto.NonTransferableAIDQB64(aWitnessKey(i))
 		mux := http.NewServeMux()
 		mux.HandleFunc("/health", func(rw http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(rw).Encode(map[string]any{"service_aid": key})

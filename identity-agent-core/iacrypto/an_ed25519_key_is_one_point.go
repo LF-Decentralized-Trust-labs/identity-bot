@@ -1,10 +1,7 @@
 package iacrypto
 
 import (
-	"bytes"
-	"fmt"
-
-	"filippo.io/edwards25519"
+	keri "github.com/grapeid/keri-go"
 )
 
 // CheckEd25519PublicKey refuses an Ed25519 public key that names no single
@@ -18,19 +15,10 @@ import (
 // as different bytes. Refusing them where a key is read, rather than leaving
 // it to whichever verifier sees it, gives every verifier the same set of keys
 // to disagree over: none.
+//
+// The rule is written once, in keri-go (keri.CheckEd25519PublicKey), which
+// reads every key in a key event log through it; this is that rule for the
+// keys identity-bot reads without keri-go.
 func CheckEd25519PublicKey(raw []byte) error {
-	if len(raw) != Ed25519PubkeyBytes {
-		return fmt.Errorf("an Ed25519 public key is %d bytes, not %d", Ed25519PubkeyBytes, len(raw))
-	}
-	p, err := new(edwards25519.Point).SetBytes(raw)
-	if err != nil {
-		return fmt.Errorf("the Ed25519 public key is not a point on the curve")
-	}
-	if !bytes.Equal(p.Bytes(), raw) {
-		return fmt.Errorf("the Ed25519 public key is not in its canonical encoding")
-	}
-	if new(edwards25519.Point).MultByCofactor(p).Equal(edwards25519.NewIdentityPoint()) == 1 {
-		return fmt.Errorf("the Ed25519 public key is of small order, so a signature under it proves nothing")
-	}
-	return nil
+	return keri.CheckEd25519PublicKey(raw)
 }

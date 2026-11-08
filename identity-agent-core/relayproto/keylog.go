@@ -15,7 +15,8 @@ import (
 //   - the log is at most MaxKELBytes and MaxKELEvents;
 //   - keri-go validates every event and its signatures;
 //   - the log is aid's: its inception derives aid;
-//   - it names exactly one signing key, an Ed25519 key.
+//   - it names exactly one signing key, an Ed25519 key that is a point of the
+//     curve in its canonical encoding and not of small order.
 //
 // One key, not one of several: a service enrols a single signer. Accepting any
 // member of a multi-key identity would let one member of a group act as the
@@ -47,6 +48,12 @@ func CurrentKey(aid string, kel []byte) (ed25519.PublicKey, error) {
 	raw, err := keri.MatterRaw(keri.CodeEd25519, state.Keys[0], ed25519.PublicKeySize)
 	if err != nil {
 		return nil, fmt.Errorf("%q's signing key is not an Ed25519 key: %w", aid, err)
+	}
+	// keri-go already refuses an off-curve, non-canonical or small-order key
+	// when it reads one; the rule is applied here as well so the key this
+	// function hands out is a point whatever route it took.
+	if err := keri.CheckEd25519PublicKey(raw); err != nil {
+		return nil, fmt.Errorf("%q's signing key is not a usable Ed25519 key: %w", aid, err)
 	}
 	return ed25519.PublicKey(raw), nil
 }

@@ -650,7 +650,7 @@ func TestAMachinesGrantHasTheSignerAndEndAskedFor(t *testing.T) {
 // A registry with backers is not one the device signs: its state would be set
 // by parties the owner is not shown.
 func TestARegistryWithBackersIsNotSigned(t *testing.T) {
-	vcp, err := keri.BuildRegistryInception(keri.RegistryInput{Issuer: "EIssuer000000000000000000000000000000000000", Nonce: "0AAx", Toad: 1, Backers: []string{"BBacker0000000000000000000000000000000000000"}})
+	vcp, err := keri.BuildRegistryInception(keri.RegistryInput{Issuer: "EIssuer000000000000000000000000000000000000", Nonce: "0AAx", Toad: 1, Backers: []string{iacrypto.NonTransferableAIDQB64(ed25519.NewKeyFromSeed(make([]byte, 32)).Public().(ed25519.PublicKey))}})
 	if err != nil {
 		t.Fatal(err)
 	}
