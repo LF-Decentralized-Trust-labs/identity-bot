@@ -104,7 +104,9 @@ func DecodeIndexedMLDSASig(wire string) (int, []byte, error) {
 	return index, raw, nil
 }
 
-// IsHybridIdentity returns true when a[0].ia == IA-HYBRID-1.
+// IsHybridIdentity returns true when an inception event's first anchor, a[0], is
+// a keyset seal (IsKeysetSeal). Only a[0] is asked because inception places the
+// identity's own keyset there; later anchors are read by KeySetInForce.
 func IsHybridIdentity(inception map[string]interface{}) bool {
 	raw, ok := inception["a"]
 	if !ok {
@@ -128,7 +130,7 @@ func IsHybridIdentity(inception map[string]interface{}) bool {
 	if !ok && seal == nil {
 		return false
 	}
-	return seal["ia"] == CipherSuiteIAHybrid1
+	return IsKeysetSeal(seal)
 }
 
 // SigningKeyCount returns len(k) for hybrid inception validation.

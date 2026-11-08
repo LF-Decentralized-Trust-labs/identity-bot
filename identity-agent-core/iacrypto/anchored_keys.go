@@ -107,7 +107,7 @@ func AnchoredSigningKeys(event map[string]interface{}) (ed25519Pub, mldsa65Pub [
 func KeySetInForce(events []map[string]interface{}) (map[string]interface{}, error) {
 	for i := len(events) - 1; i >= 0; i-- {
 		for _, seal := range anchorList(events[i]["a"]) {
-			if suite, _ := seal["ia"].(string); suite == CipherSuiteIAHybrid1 {
+			if IsKeysetSeal(seal) {
 				return events[i], nil
 			}
 		}
