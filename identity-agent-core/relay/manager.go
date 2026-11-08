@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto"
+	"identity-agent-core/internal/backoff"
 )
 
 // A relay is how an Identity Agent that only dials out stays reachable at an
@@ -315,7 +316,7 @@ var (
 
 // run keeps the session up until ctx ends.
 func (m *Manager) run(ctx context.Context, endpoint string) {
-	backoff := minBackoff
+	attempt := 0
 	for ctx.Err() == nil {
 		started := time.Now()
 		err := m.session(ctx, endpoint)
@@ -328,16 +329,14 @@ func (m *Manager) run(ctx context.Context, endpoint string) {
 			return
 		}
 		if time.Since(started) > steadySession {
-			backoff = minBackoff
+			attempt = 0
 		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(backoff):
+		case <-time.After(backoff.Wait(minBackoff, maxBackoff, attempt)):
 		}
-		if backoff < maxBackoff {
-			backoff *= 2
-		}
+		attempt++
 	}
 }
 

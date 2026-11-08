@@ -521,24 +521,10 @@ func (t *Trail) overLimit(c *conversation, s agentmessage.PersonStatement) strin
 	if len(c.chain) >= t.lim.EntriesPerConversation {
 		return ReasonEntryLimit
 	}
-	if startsTurn(s.Kind) && t.sentInHour(s.From) >= t.lim.MessagesPerPersonPerHour {
+	if startsTurn(s.Kind) && t.sent.Count(s.From) >= t.lim.MessagesPerPersonPerHour {
 		return ReasonRateLimit
 	}
 	return ""
-}
-
-func (t *Trail) sentInHour(person string) int {
-	t.rateMu.Lock()
-	defer t.rateMu.Unlock()
-	cut := t.now().Add(-time.Hour)
-	kept := t.sent[person][:0]
-	for _, at := range t.sent[person] {
-		if at.After(cut) {
-			kept = append(kept, at)
-		}
-	}
-	t.sent[person] = kept
-	return len(kept)
 }
 
 // countAllowed takes an allowed write into the limits: a message starts a new
@@ -548,7 +534,5 @@ func (t *Trail) countAllowed(c *conversation, s agentmessage.PersonStatement) {
 		return
 	}
 	c.turns = 0
-	t.rateMu.Lock()
-	t.sent[s.From] = append(t.sent[s.From], t.now())
-	t.rateMu.Unlock()
+	t.sent.Record(s.From)
 }

@@ -52,22 +52,19 @@ func TestOneCallerCannotDriveUnboundedFirmwareWork(t *testing.T) {
 // The limiter's map is keyed by something an unauthenticated caller chooses, so
 // it has to forget. Otherwise it is a slow leak they control the size of.
 func TestTheLimiterForgetsOldCallers(t *testing.T) {
-	l := newIPRateLimiter(1, time.Minute)
+	at := time.Now()
+	l := newIPRateLimiterAt(1, time.Minute, func() time.Time { return at })
 	l.allow("10.0.0.1")
-	// Age the entry past its window and fill the table so a sweep is forced.
-	l.mu.Lock()
-	l.hits["10.0.0.1"] = []time.Time{time.Now().Add(-2 * time.Minute)}
+	// Fill the table, then age every entry past its window so a sweep is forced.
 	for i := 0; i < maxRateLimitedClients-1; i++ {
-		l.hits["filler-"+strconv.Itoa(i)] = []time.Time{time.Now().Add(-2 * time.Minute)}
+		l.allow("filler-" + strconv.Itoa(i))
 	}
-	l.mu.Unlock()
+	at = at.Add(2 * time.Minute)
 
 	if !l.allow("10.0.0.2") {
 		t.Fatal("a fresh caller was refused")
 	}
-	l.mu.Lock()
-	_, stillThere := l.hits["10.0.0.1"]
-	l.mu.Unlock()
+	stillThere := l.w.Remembers("10.0.0.1")
 	if stillThere {
 		t.Fatal("an expired caller was kept, so the map grows without bound")
 	}

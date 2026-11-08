@@ -97,3 +97,23 @@ func TestAPhonesTrailKeepsTheForwardingTimeout(t *testing.T) {
 		t.Fatalf("timeout %v entries %d", phone.ForwardTimeout(), phone.lim.EntriesPerConversation)
 	}
 }
+
+// Limits set in part leave the other fields at zero; a trail built from them
+// must still accept a write, with the unset limits at their defaults.
+func TestAPartFilledLimitsStillAcceptsWrites(t *testing.T) {
+	f := newFixture(t)
+	f.tr = New(f.roster, f.app, Options{Agent: testAgent, Limits: limits.Limits{MaxTurns: 5},
+		Now:         func() time.Time { return f.now },
+		Countersign: func(r agentmessage.Record) (*didcomm.Envelope, error) { return agentmessage.Countersign(f.keys, r) }})
+	if err := f.tr.Open("c1", alice, true); err != nil {
+		t.Fatal(err)
+	}
+	if r := f.write(f.say(alice, "message", bot, "hello", nil)); r.State != Committed {
+		t.Fatalf("a part-filled Limits refused a write: %+v", r)
+	}
+	want := limits.Defaults()
+	want.MaxTurns = 5
+	if f.tr.lim != want {
+		t.Fatalf("unset limits did not take their defaults: %+v", f.tr.lim)
+	}
+}

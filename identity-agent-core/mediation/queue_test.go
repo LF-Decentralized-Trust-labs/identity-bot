@@ -124,6 +124,56 @@ func TestOneConversationOrSenderCannotFillTheQueue(t *testing.T) {
 	}
 }
 
+// The share is in bytes as well as messages: a few large messages cannot take
+// more of the queue than their share while the count is far from its own.
+func TestOneConversationOrSenderCannotTakeMoreThanItsShareOfBytes(t *testing.T) {
+	l := small()             // 1000 bytes, 10 messages
+	l.QueueSharePercent = 30 // 300 bytes, 3 messages
+	var r *Refusal
+
+	q := New(l, nil)
+	for i, n := range []int{150, 149} {
+		if err := q.Enqueue(msg(i, "busy", fmt.Sprintf("s%d", i), n)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 299 held in two messages: one byte more is the share exactly, two is over.
+	if err := q.Enqueue(msg(2, "busy", "s2", 2)); !errors.As(err, &r) || r.Reason != ReasonConversation {
+		t.Fatalf("a conversation past its byte share got %v", err)
+	}
+	if err := q.Enqueue(msg(3, "busy", "s3", 1)); err != nil {
+		t.Fatalf("a conversation filling its byte share exactly was refused: %v", err)
+	}
+	if q.Len() != 3 || q.Bytes() != 300 {
+		t.Fatalf("a refusal changed what is held: %d messages, %d bytes", q.Len(), q.Bytes())
+	}
+	if err := q.Enqueue(msg(4, "quiet", "quiet", 300)); err != nil {
+		t.Fatalf("another conversation was crowded out: %v", err)
+	}
+
+	// The same for a sender across conversations.
+	q = New(l, nil)
+	for i, n := range []int{150, 149} {
+		if err := q.Enqueue(msg(i, fmt.Sprintf("c%d", i), "loud", n)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := q.Enqueue(msg(2, "c2", "loud", 2)); !errors.As(err, &r) || r.Reason != ReasonSender {
+		t.Fatalf("a sender past its byte share got %v", err)
+	}
+	if err := q.Enqueue(msg(3, "c3", "loud", 1)); err != nil {
+		t.Fatalf("a sender filling its byte share exactly was refused: %v", err)
+	}
+
+	// Bytes come back to the share when a message is deleted.
+	if err := q.Discard("m0"); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Enqueue(msg(5, "c5", "loud", 150)); err != nil {
+		t.Fatalf("a deleted message's bytes were not returned to its sender's share: %v", err)
+	}
+}
+
 // After seven days the sealed copy is deleted and the sender is told.
 func TestAMessageHeldSevenDaysIsRefusedBackAndDeleted(t *testing.T) {
 	c := &clock{time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)}

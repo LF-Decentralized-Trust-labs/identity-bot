@@ -87,3 +87,19 @@ func TestAnAppOverItsRateIsToldToBackOff(t *testing.T) {
 		t.Fatalf("the count was not cleared: ok=%v wait=%v", ok, wait)
 	}
 }
+
+func TestAPartFilledLimitsTakesTheDefaultsForWhatIsUnset(t *testing.T) {
+	d := Defaults()
+	if got := (Limits{}).WithDefaults(); got != d {
+		t.Fatalf("empty Limits must become the defaults: %+v", got)
+	}
+	got := Limits{MaxTurns: 7, QueueBytes: 5}.WithDefaults()
+	if got.MaxTurns != 7 || got.QueueBytes != 5 {
+		t.Fatalf("a field that was set was overwritten: %+v", got)
+	}
+	want := d
+	want.MaxTurns, want.QueueBytes = 7, 5
+	if got != want {
+		t.Fatalf("an unset field did not take its default:\n got %+v\nwant %+v", got, want)
+	}
+}

@@ -19,6 +19,7 @@ import (
 
 	"identity-agent-core/agentmessage"
 	"identity-agent-core/didcomm"
+	"identity-agent-core/internal/ratewindow"
 	"identity-agent-core/limits"
 )
 
@@ -154,9 +155,9 @@ type Trail struct {
 	backend Backend
 	timeout time.Duration
 	lim     limits.Limits
-	// sent is when each person's allowed messages were taken, for the hourly limit.
-	rateMu sync.Mutex
-	sent   map[string][]time.Time
+	// sent counts each person's allowed messages over the last hour, for the
+	// hourly limit.
+	sent   *ratewindow.Window
 	now    func() time.Time
 	record func(Governance)
 	sign   func(agentmessage.Record) (*didcomm.Envelope, error)
@@ -173,7 +174,7 @@ type Options struct {
 	Agent          string
 	ForwardTimeout time.Duration
 	// Limits bound what an app can ask of the Identity Agent; the zero value is
-	// limits.Defaults(). A phone passes Defaults().ForPhone().
+	// limits.Defaults(), and a field left unset takes its default. A phone passes Defaults().ForPhone().
 	Limits limits.Limits
 	Now    func() time.Time
 	// Record receives what every read leaves in the governance record.
@@ -186,11 +187,8 @@ type Options struct {
 // New makes an empty Trail.
 func New(roster Roster, backend Backend, o Options) *Trail {
 	t := &Trail{convs: map[string]*conversation{}, agent: o.Agent, roster: roster, backend: backend,
-		timeout: o.ForwardTimeout, lim: o.Limits, sent: map[string][]time.Time{},
-		now: o.Now, record: o.Record, sign: o.Countersign}
-	if t.lim == (limits.Limits{}) {
-		t.lim = limits.Defaults()
-	}
+		timeout: o.ForwardTimeout, lim: o.Limits, now: o.Now, record: o.Record, sign: o.Countersign}
+	t.lim = t.lim.WithDefaults()
 	if t.sign == nil {
 		panic("trail: Options.Countersign is required")
 	}
@@ -200,6 +198,9 @@ func New(roster Roster, backend Backend, o Options) *Trail {
 	if t.now == nil {
 		t.now = time.Now
 	}
+	// Persons are vouched for by the roster before a write is counted, so the
+	// table is not open to a caller choosing its own keys.
+	t.sent = ratewindow.New(t.lim.MessagesPerPersonPerHour, time.Hour, 0, func() time.Time { return t.now() })
 	return t
 }
 

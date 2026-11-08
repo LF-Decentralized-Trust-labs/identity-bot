@@ -10,6 +10,8 @@ package limits
 import (
 	"sync"
 	"time"
+
+	"identity-agent-core/internal/backoff"
 )
 
 // Limits is every number that bounds an app's reach into the Identity Agent.
@@ -68,6 +70,50 @@ func (l Limits) ForPhone() Limits {
 	return l
 }
 
+// WithDefaults fills every field left at zero with its default, so a part-filled
+// Limits does not refuse every write with a limit of nothing. A field that is
+// set is kept as it is.
+func (l Limits) WithDefaults() Limits {
+	d := Defaults()
+	fill := func(v *time.Duration, def time.Duration) {
+		if *v == 0 {
+			*v = def
+		}
+	}
+	fill(&l.ForwardTimeout, d.ForwardTimeout)
+	fill(&l.BackoffStart, d.BackoffStart)
+	fill(&l.BackoffMax, d.BackoffMax)
+	fill(&l.QueueMaxAge, d.QueueMaxAge)
+	if l.ReadBytes == 0 {
+		l.ReadBytes = d.ReadBytes
+	}
+	if l.RatePerSecond == 0 {
+		l.RatePerSecond = d.RatePerSecond
+	}
+	if l.RateBurst == 0 {
+		l.RateBurst = d.RateBurst
+	}
+	if l.EntriesPerConversation == 0 {
+		l.EntriesPerConversation = d.EntriesPerConversation
+	}
+	if l.MessagesPerPersonPerHour == 0 {
+		l.MessagesPerPersonPerHour = d.MessagesPerPersonPerHour
+	}
+	if l.MaxTurns == 0 {
+		l.MaxTurns = d.MaxTurns
+	}
+	if l.QueueMessages == 0 {
+		l.QueueMessages = d.QueueMessages
+	}
+	if l.QueueBytes == 0 {
+		l.QueueBytes = d.QueueBytes
+	}
+	if l.QueueSharePercent == 0 {
+		l.QueueSharePercent = d.QueueSharePercent
+	}
+	return l
+}
+
 func atLeastOne(n int) int { return max(1, n) }
 
 // Backoff is how long a sender told to retry waits before attempt n (0 first):
@@ -75,13 +121,7 @@ func atLeastOne(n int) int { return max(1, n) }
 // off, so a crowd of senders does not retry together; the result never
 // exceeds BackoffMax.
 func (l Limits) Backoff(attempt int, jitter float64) time.Duration {
-	d := l.BackoffStart
-	for i := 0; i < attempt && d < l.BackoffMax; i++ {
-		d *= 2
-	}
-	if d > l.BackoffMax {
-		d = l.BackoffMax
-	}
+	d := backoff.Wait(l.BackoffStart, l.BackoffMax, attempt)
 	return d - time.Duration(float64(d)*0.25*jitter)
 }
 

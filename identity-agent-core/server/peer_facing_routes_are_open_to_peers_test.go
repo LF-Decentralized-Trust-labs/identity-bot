@@ -232,7 +232,7 @@ func TestTheRateLimiterDoesNotGrowWithoutBound(t *testing.T) {
 	for i := 0; i < maxRateLimitedClients*2; i++ {
 		lim.allow(fmt.Sprintf("ip-%d", i))
 	}
-	if n := len(lim.hits); n > maxRateLimitedClients {
+	if n := lim.w.Keys(); n > maxRateLimitedClients {
 		t.Fatalf("the limiter holds %d callers, over its bound of %d", n, maxRateLimitedClients)
 	}
 }

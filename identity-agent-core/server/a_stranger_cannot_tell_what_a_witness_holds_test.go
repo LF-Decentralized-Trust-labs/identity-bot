@@ -159,7 +159,7 @@ func TestAnIPv6CallerCannotFillTheLimiterWithAddresses(t *testing.T) {
 	for i := 0; i < maxRateLimitedClients*2; i++ {
 		lim.allow(fmt.Sprintf("2001:db8:1:2:%x::%x", i, i+1)) // all in 2001:db8:1:2::/64
 	}
-	if n := len(lim.hits); n != 1 {
+	if n := lim.w.Keys(); n != 1 {
 		t.Fatalf("one /64 held %d slots in the limiter", n)
 	}
 	if !lim.allow("2001:db8:ffff::1") {
@@ -168,7 +168,7 @@ func TestAnIPv6CallerCannotFillTheLimiterWithAddresses(t *testing.T) {
 	// A v4 address still counts as itself.
 	lim.allow("203.0.113.9")
 	lim.allow("203.0.113.10")
-	if n := len(lim.hits); n != 4 {
+	if n := lim.w.Keys(); n != 4 {
 		t.Fatalf("want 4 callers, got %d", n)
 	}
 }

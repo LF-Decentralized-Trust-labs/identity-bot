@@ -9,7 +9,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"identity-agent-core/watcher"
@@ -17,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"identity-agent-core/internal/jsonreply"
+	"identity-agent-core/internal/ratewindow"
 )
 
 // maxRateLimitedClients bounds the limiter's memory. Each key is a caller
@@ -28,15 +28,15 @@ const maxRateLimitedClients = 10000
 // Every legitimate body on them is a few hundred bytes.
 const maxPublicBodyBytes = 64 << 10
 
-type ipRateLimiter struct {
-	mu     sync.Mutex
-	hits   map[string][]time.Time
-	limit  int
-	window time.Duration
-}
+type ipRateLimiter struct{ w *ratewindow.Window }
 
 func newIPRateLimiter(limit int, window time.Duration) *ipRateLimiter {
-	return &ipRateLimiter{hits: make(map[string][]time.Time), limit: limit, window: window}
+	return newIPRateLimiterAt(limit, window, nil)
+}
+
+// newIPRateLimiterAt is newIPRateLimiter on a given clock (nil is time.Now).
+func newIPRateLimiterAt(limit int, window time.Duration, now func() time.Time) *ipRateLimiter {
+	return &ipRateLimiter{w: ratewindow.New(limit, window, maxRateLimitedClients, now)}
 }
 
 // limiterKey is what a caller is counted as. An IPv6 customer holds a whole /64
@@ -57,27 +57,7 @@ func (r *ipRateLimiter) allow(ip string) bool {
 	if r == nil {
 		return true
 	}
-	ip = limiterKey(ip)
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	now := time.Now()
-	cutoff := now.Add(-r.window)
-	if !r.roomForLocked(ip, cutoff) {
-		return false
-	}
-	prev := r.hits[ip]
-	filtered := prev[:0]
-	for _, t := range prev {
-		if t.After(cutoff) {
-			filtered = append(filtered, t)
-		}
-	}
-	if len(filtered) >= r.limit {
-		r.hits[ip] = filtered
-		return false
-	}
-	r.hits[ip] = append(filtered, now)
-	return true
+	return r.w.Allow(limiterKey(ip))
 }
 
 // wouldAllow reports whether allow(ip) would let a request through, without
@@ -86,38 +66,7 @@ func (r *ipRateLimiter) wouldAllow(ip string) bool {
 	if r == nil {
 		return true
 	}
-	ip = limiterKey(ip)
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	cutoff := time.Now().Add(-r.window)
-	n := 0
-	for _, t := range r.hits[ip] {
-		if t.After(cutoff) {
-			n++
-		}
-	}
-	if !r.roomForLocked(ip, cutoff) {
-		return false
-	}
-	return n < r.limit
-}
-
-// roomForLocked reports whether ip can be counted: it is already known, or the
-// table has room, after forgetting callers whose every hit has aged out. If
-// that frees nothing, the table is full of live callers: refuse the newcomer
-// rather than grow, which is the safe side for an unauthenticated route. allow
-// and wouldAllow both ask it, so a table of expired callers never locks a
-// newcomer out. The caller holds r.mu.
-func (r *ipRateLimiter) roomForLocked(ip string, cutoff time.Time) bool {
-	if _, known := r.hits[ip]; known || len(r.hits) < maxRateLimitedClients {
-		return true
-	}
-	for k, ts := range r.hits {
-		if len(ts) == 0 || !ts[len(ts)-1].After(cutoff) {
-			delete(r.hits, k)
-		}
-	}
-	return len(r.hits) < maxRateLimitedClients
+	return r.w.Would(limiterKey(ip))
 }
 
 // trustedProxies are the addresses of reverse proxies this agent sits behind,
