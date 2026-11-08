@@ -2,6 +2,7 @@ package recovery
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,7 +18,8 @@ import (
 // the app inside two more: the archive in memory several times over, which for a
 // gigabyte ends a phone's process. Now it is streamed to a file in one of this
 // agent's own working directories, and the app is given a reference to it that
-// Verify and Start accept in place of archive_b64.
+// Verify and Start accept in place of archive_b64. Only the download streams;
+// opening the archive reads it once, whole, from that file (see readWhole).
 //
 // A reference is NOT a path. It names an entry in a table this agent keeps in
 // memory, made only by a fetch this agent did itself, so it cannot be made to
@@ -72,8 +74,30 @@ func (s *Service) archiveFrom(archiveB64, ref, name string) (raw []byte, objectK
 	if !ok || !strings.HasPrefix(ref, backup.RestoringPrefix) {
 		return nil, "", fmt.Errorf("that fetched archive is gone; fetch it again")
 	}
-	raw, err = os.ReadFile(f.path)
+	raw, err = readWhole(f.path)
 	return raw, f.objectKey, err
+}
+
+// readWhole reads the file into one buffer of exactly its size. Opening an
+// archive needs all of it at once (it is one authenticated ciphertext, so no
+// byte of it can be trusted before the last has been checked), so this is the
+// one copy the open holds. The download, which is what used to hold several, is
+// the part that streams: see backup.PullLatestArchiveToFile.
+func readWhole(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	raw := make([]byte, info.Size())
+	if _, err := io.ReadFull(f, raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
 }
 
 // finishedWith removes a fetched archive once nothing needs it.

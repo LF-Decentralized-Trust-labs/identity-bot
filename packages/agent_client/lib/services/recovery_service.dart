@@ -96,6 +96,11 @@ class RecoverySession {
 class RecoveryRetrieveResult {
   final String source;
   final String archiveB64;
+
+  /// Stands for an archive the agent fetched from a cloud destination and kept
+  /// on its own disk, in place of [archiveB64] (which is then empty). Hand it
+  /// to [RecoveryService.verify] and [RecoveryService.start] as `archiveRef`.
+  final String? archiveRef;
   final int sizeBytes;
   final String? path;
 
@@ -106,6 +111,7 @@ class RecoveryRetrieveResult {
   RecoveryRetrieveResult({
     required this.source,
     required this.archiveB64,
+    this.archiveRef,
     required this.sizeBytes,
     this.path,
     this.archiveName,
@@ -115,6 +121,7 @@ class RecoveryRetrieveResult {
     return RecoveryRetrieveResult(
       source: json['source'] ?? '',
       archiveB64: json['archive_b64'] ?? '',
+      archiveRef: json['archive_ref'],
       sizeBytes: json['size_bytes'] ?? 0,
       path: json['path'],
       archiveName: json['archive_name'],
@@ -209,19 +216,33 @@ class RecoveryService {
 
   String get _base => '$baseUrl/api/recovery';
 
+  /// An archive is given either whole ([archiveB64]) or by the reference the
+  /// agent made when it fetched it ([archiveRef]), never both and never neither.
+  static void _exactlyOneArchive(String? archiveB64, String? archiveRef) {
+    final hasB64 = archiveB64 != null && archiveB64.isNotEmpty;
+    final hasRef = archiveRef != null && archiveRef.isNotEmpty;
+    if (hasB64 == hasRef) {
+      throw ArgumentError(
+          'give archiveB64 or archiveRef (from retrieve), not both and not neither');
+    }
+  }
+
   Future<RecoveryVerifyResult> verify({
     required String mnemonic,
-    required String archiveB64,
+    String? archiveB64,
+    String? archiveRef,
     String? passphrase,
     String? archiveName,
   }) async {
+    _exactlyOneArchive(archiveB64, archiveRef);
     final resp = await _client.post(
       Uri.parse('$_base/verify'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
         'mnemonic': mnemonic,
         if (passphrase != null) 'passphrase': passphrase,
-        'archive_b64': archiveB64,
+        if (archiveB64 != null) 'archive_b64': archiveB64,
+        if (archiveRef != null) 'archive_ref': archiveRef,
         if (archiveName != null) 'archive_name': archiveName,
       }),
     );
@@ -234,17 +255,20 @@ class RecoveryService {
 
   Future<RecoverySession> start({
     required String mnemonic,
-    required String archiveB64,
+    String? archiveB64,
+    String? archiveRef,
     String? passphrase,
     String? archiveName,
   }) async {
+    _exactlyOneArchive(archiveB64, archiveRef);
     final resp = await _client.post(
       Uri.parse('$_base/start'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
         'mnemonic': mnemonic,
         if (passphrase != null) 'passphrase': passphrase,
-        'archive_b64': archiveB64,
+        if (archiveB64 != null) 'archive_b64': archiveB64,
+        if (archiveRef != null) 'archive_ref': archiveRef,
         if (archiveName != null) 'archive_name': archiveName,
       }),
     );
