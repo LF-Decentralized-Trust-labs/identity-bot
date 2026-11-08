@@ -181,13 +181,7 @@ var browserSessionWords = regexp.MustCompile(`(?i)browser.?(session|login)|sessi
 
 // stillNamingABrowserSession are the files outside the tests allowed to name
 // one, each with why. The list may only shrink.
-var stillNamingABrowserSession = map[string]string{
-	// A person's session at an app is named by the hash of its token
-	// (login.BrowserSessionBinding, ADR-066). It reaches the talk routes only,
-	// never as the owner or a controller, and is being reworked so that the app
-	// asks from its own server.
-	"an_app_session_speaks_for_its_person.go": "an app session is named by the hash of its token (ADR-066)",
-}
+var stillNamingABrowserSession = map[string]string{}
 
 // Nothing in the core keeps a browser session or a browser login, whatever
 // the route that would reach it is called. A login brought back would admit
