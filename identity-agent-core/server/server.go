@@ -405,6 +405,10 @@ func New(cfg Config) (*CoreServer, error) {
 		cancel:             cancel,
 	}
 	s.checkEntityTypeDeclared()
+	if err := s.loadChallengeState(cfg.DataDir); err != nil {
+		cancel()
+		return nil, fmt.Errorf("load login challenges: %w", err)
+	}
 
 	ws := watcher.NewService(watcher.NewSQLiteStore(dataStore.DB()))
 	ws.OnEvent = func(eventType string, payload map[string]interface{}) {

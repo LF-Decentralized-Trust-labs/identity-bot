@@ -44,12 +44,17 @@ export function consumedKey(a: { audience: string; nonce: string; i: string }): 
   return `${a.audience}|${a.nonce}|${a.i}`;
 }
 
-/** The most a default store holds. A full store forgets its oldest entries
- *  first; an entry that old is outside every freshness window already. */
+/** The most a default store holds. */
 const MOST_CONSUMED_IN_MEMORY = 100_000;
 
-/** A store for one process. A deployment with more than one verifier needs a
- *  shared one, or an assertion spent on one of them still spends on the others. */
+/** A store for one process, lost on restart. A deployment with more than one
+ *  verifier, or one that restarts inside a freshness window, needs a shared and
+ *  durable one (`fileConsumedNonces` in `@identity-agent/login-verify/consumed-in-files`),
+ *  or an assertion spent here is still good after a restart and on the others.
+ *
+ *  Full, it refuses new claims rather than forgetting old ones: every entry in
+ *  it can still be replayed, so dropping one to make room would accept a
+ *  captured assertion. `claim` then throws, and the verifier refuses the sign-in. */
 export function inMemoryConsumedNonces(): ConsumedNonces {
   const seen = new Map<string, number>();
   let sweptAt = 0;
@@ -62,9 +67,10 @@ export function inMemoryConsumedNonces(): ConsumedNonces {
         sweptAt = now;
         for (const [k, until] of seen) if (until <= now) seen.delete(k);
       }
-      // Over the bound the oldest go first: unsafe, but better than unbounded.
-      while (seen.size >= MOST_CONSUMED_IN_MEMORY) seen.delete(seen.keys().next().value as string);
       if (seen.has(key)) return false;
+      if (seen.size >= MOST_CONSUMED_IN_MEMORY) {
+        throw new Error("the replay store is full of assertions that can still be replayed");
+      }
       seen.set(key, keepUntilMs ?? Number.POSITIVE_INFINITY);
       return true;
     },
@@ -188,7 +194,14 @@ export async function verifyLoginAssertion(
     const dtMs = parseRfc3339(assertion.dt);
     const base = Math.max(Date.now(), opts.nowMs ?? 0, Number.isNaN(dtMs) ? 0 : dtMs);
     const keepUntil = opts.skipDtCheck === true ? undefined : base + (window + 60) * 1000;
-    const fresh = await opts.consume.claim(consumedKey(assertion), keepUntil);
+    // A store that cannot say is a refusal: accepting what cannot be recorded
+    // is accepting a replay.
+    let fresh: boolean;
+    try {
+      fresh = await opts.consume.claim(consumedKey(assertion), keepUntil);
+    } catch (err) {
+      return { valid: false, reason: `replay store unavailable: ${(err as Error).message}` };
+    }
     if (!fresh) {
       return { valid: false, reason: "assertion already used" };
     }

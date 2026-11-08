@@ -157,6 +157,7 @@ func (s *CoreServer) mintCollectorSecret(token string) (string, error) {
 		s.challengeCollector = map[string][32]byte{}
 	}
 	s.challengeCollector[token] = sum
+	s.saveChallengeStateLocked()
 	s.challengeMu.Unlock()
 	return secret, nil
 }
@@ -329,6 +330,7 @@ func (s *CoreServer) setChallengeStatus(token string, st map[string]interface{})
 		s.challengeStatus = make(map[string]map[string]interface{})
 	}
 	s.challengeStatus[token] = st
+	s.saveChallengeStateLocked()
 	s.challengeMu.Unlock()
 }
 

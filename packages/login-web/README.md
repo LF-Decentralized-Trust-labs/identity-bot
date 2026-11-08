@@ -14,7 +14,10 @@ answered, asks again who signed in:
 ```ts
 import { startLoginSession, confirmLoginSession } from "@identity-agent/login-web/server";
 // Any store with claim(key): boolean. @identity-agent/login-verify has an
-// in-memory one (inMemoryConsumedNonces); share one across processes if you have several.
+// in-memory one (inMemoryConsumedNonces) and a durable, shareable one
+// (fileConsumedNonces, from @identity-agent/login-verify/consumed-in-files). An in-memory
+// store forgets on restart; use the durable one if you restart or run several processes.
+// The claim carries a keep-until time (consumeForSeconds, default one hour).
 const spent = { claim: (k) => !seen.has(k) && (seen.add(k), true) };
 const seen = new Set();
 

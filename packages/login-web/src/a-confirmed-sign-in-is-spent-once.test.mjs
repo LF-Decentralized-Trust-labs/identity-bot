@@ -19,6 +19,15 @@ const pending = { ...opts, sessionToken: "tok3", fetchFn: async () => ({ ok: tru
 assert.equal((await confirmLoginSession(pending)).state, "pending");
 assert.equal((await confirmLoginSession({ ...pending, fetchFn: verified })).state, "verified");
 
+// Every claim carries the time it may be forgotten at.
+const untils = [];
+const recording = { claim: (k, until) => (untils.push(until), true) };
+const t0 = Date.now();
+await confirmLoginSession({ ...opts, sessionToken: "t4", consume: recording });
+await confirmLoginSession({ ...opts, sessionToken: "t5", consume: recording, consumeForSeconds: 60 });
+assert.ok(untils[0] >= t0 + 3600_000 && untils[0] <= Date.now() + 3600_000, "default window is an hour");
+assert.ok(untils[1] >= t0 + 60_000 && untils[1] <= Date.now() + 60_000, "the window can be set");
+
 // Starting: the request names the asset and the site's audience; the secret comes back.
 let seen;
 const s = await startLoginSession({

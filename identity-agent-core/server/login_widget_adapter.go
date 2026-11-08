@@ -113,11 +113,14 @@ func (s *CoreServer) createSignedAssetChallenge(assetID, audience string, disclo
 	if len(s.challenges) > 1000 {
 		for k := range s.challenges {
 			delete(s.challenges, k)
+			delete(s.challengeStatus, k)
+			delete(s.challengeCollector, k)
 			break
 		}
 	}
 	s.challenges[sessionToken] = bundle
 	s.challengeStatus[sessionToken] = map[string]interface{}{"status": "pending"}
+	s.saveChallengeStateLocked()
 	s.challengeMu.Unlock()
 
 	return sessionToken, fmt.Sprintf("%s/i/%s", publicURL, sessionToken), 0, ""

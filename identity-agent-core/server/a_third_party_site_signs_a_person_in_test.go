@@ -100,8 +100,8 @@ func TestAThirdPartysSiteSignsAPersonInThroughTheSDK(t *testing.T) {
 	// The same sign-in is not accepted by the site a second time.
 	finish(token, 409)
 
-	// The assertion the person sent verifies against the key state the
-	// organisation's Identity Agent publishes, once, and not again.
+	// The assertion the person sent verifies against the person's own key
+	// log, checked by the organisation's Identity Agent, once, and not again.
 	mu.Lock()
 	assertion := string(posted[len(posted)-1])
 	mu.Unlock()
@@ -114,7 +114,7 @@ func TestAThirdPartysSiteSignsAPersonInThroughTheSDK(t *testing.T) {
 	var first map[string]any
 	siteCall(t, "POST", site+"/login/verify-assertion", string(check), 200, &first)
 	if first["valid"] != true || first["pairwiseAID"] != preview.PairwiseAID {
-		t.Fatalf("a genuine assertion did not verify against published key state: %v", first)
+		t.Fatalf("a genuine assertion did not verify against the person's key log: %v", first)
 	}
 	var replay map[string]any
 	siteCall(t, "POST", site+"/login/verify-assertion", string(check), 401, &replay)

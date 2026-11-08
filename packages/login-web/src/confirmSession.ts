@@ -31,8 +31,16 @@ export interface ConfirmSessionOptions {
    *  the sign-in again. Any store with this shape will do, such as
    *  `inMemoryConsumedNonces()` from `@identity-agent/login-verify`; a site on
    *  more than one process shares one. */
-  consume?: { claim(key: string): Promise<boolean> | boolean };
+  consume?: { claim(key: string, keepUntilMs?: number): Promise<boolean> | boolean };
+  /** How long a spent sign-in is remembered, in seconds, counted from the
+   *  claim. The claim carries it as `keepUntilMs`, so a store may forget the
+   *  entry after it. Default one hour: the Identity Agent offers a challenge
+   *  for ten minutes, so the sign-in cannot be answered later than that and
+   *  confirmed later still than the poll that follows. */
+  consumeForSeconds?: number;
 }
+
+const DEFAULT_CLAIM_SECONDS = 3600;
 
 export type ConfirmedSession =
   | {
@@ -84,7 +92,8 @@ export async function confirmLoginSession(opts: ConfirmSessionOptions): Promise<
   }
   if (body.state === "verified" && body.app_session_token) {
     if (opts.consume) {
-      const fresh = await opts.consume.claim(`${base}|${opts.assetId}|${opts.sessionToken}`);
+      const keepUntil = Date.now() + (opts.consumeForSeconds ?? DEFAULT_CLAIM_SECONDS) * 1000;
+      const fresh = await opts.consume.claim(`${base}|${opts.assetId}|${opts.sessionToken}`, keepUntil);
       if (!fresh) throw new Error("login: this sign-in has already been used");
     }
     return {

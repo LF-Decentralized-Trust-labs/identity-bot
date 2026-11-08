@@ -39,9 +39,23 @@ An assertion is spent once it is accepted. `IdentityAgentVerifier` remembers the
 assertions it has accepted (`consumedAssertions`, a store for the process by
 default) and refuses a second presentation with "assertion already used". Pass
 `consume: inMemoryConsumedNonces()` to `verifyLoginAssertion` to get the same
-there. A site on more than one process gives them one shared store (anything
-with `claim(key, keepUntilMs?)` that answers false for a key it has seen), or an
-assertion spent on one process still spends on the others.
+there. The default store lives in one process and is lost on restart, so an
+assertion spent there is good again after a restart and on every other instance.
+A site that restarts or runs more than one process passes a store they share:
+
+```ts
+import { fileConsumedNonces } from "@identity-agent/login-verify/consumed-in-files";
+const verifier = new IdentityAgentVerifier({ /* ... */ consumedAssertions: fileConsumedNonces("/var/lib/site/spent") });
+```
+
+`fileConsumedNonces` keeps one small file per accepted assertion in a directory
+(a shared volume for several instances; the filesystem lets only one of two
+simultaneous claims win) and sweeps files past their keep-until time. Any store
+with `claim(key, keepUntilMs?)` (false for a key it has seen) and optional
+`release(key)` works; on Redis `claim` is `SET key 1 NX PXAT keepUntilMs`. A
+store that throws, or the default one when it holds 100,000 live entries, makes
+the verifier refuse the sign-in ("replay store unavailable"): an assertion that
+cannot be recorded is never accepted.
 
 An assertion is read by the Identity Agent core's rules, so the two accept
 exactly the same ones. A repeated key, and a whole number written as `1.0`,
