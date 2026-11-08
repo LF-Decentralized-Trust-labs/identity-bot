@@ -1,6 +1,7 @@
 package witness
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"testing"
@@ -229,5 +230,38 @@ func TestPeersNeverDisplaceCommercialOnPairwise(t *testing.T) {
 	// witnessing has no path to displace anything anywhere.
 	if !ContactWitnessAllowedForAID(AidKindRoot, false) {
 		t.Error("a root AID must accept contact witnesses — that is the design")
+	}
+}
+
+// One default witness service means one provider and one endpoint. Even when a
+// registry lists several witnesses, a new root identity designates exactly one,
+// and its inception threshold is the matching one.
+func TestARootIdentityDesignatesExactlyOneBootstrapEndpoint(t *testing.T) {
+	saved := BootstrapWitnesses
+	defer func() { BootstrapWitnesses = saved }()
+	pool := []BootstrapWitness{
+		{AID: "BDYkziwUKiadQAQa4uX3ssib9g5REqzo6aejWmi10X00", WitnessKey: "BDYkziwUKiadQAQa4uX3ssib9g5REqzo6aejWmi10X00", URL: "https://w3.example", Operator: "example.org"},
+		{AID: "BErokYIbJDqV1Ewr3QMHKWokln2aIVRGwTZ3E502pz_v", WitnessKey: "BErokYIbJDqV1Ewr3QMHKWokln2aIVRGwTZ3E502pz_v", URL: "https://w2.example", Operator: "example.org"},
+		{AID: "BMtfjviEMpF2xWVW0CRPKoVPX1mOMzNurvUjD-0RN_Jl", WitnessKey: "BMtfjviEMpF2xWVW0CRPKoVPX1mOMzNurvUjD-0RN_Jl", URL: "https://w1.example", Operator: "example.org"},
+	}
+	BootstrapWitnesses = func() []BootstrapWitness { return pool }
+
+	first := withBootstrap(nil, 3)
+	if len(first) != 1 {
+		t.Fatalf("a root identity got %d bootstrap endpoints, want exactly 1", len(first))
+	}
+	// The same endpoint on every reselection, whatever order the registry lists.
+	for i := 0; i < 5; i++ {
+		pool[0], pool[1], pool[2] = pool[1], pool[2], pool[0]
+		again := withBootstrap(nil, 3)
+		if len(again) != 1 || again[0].URL != first[0].URL {
+			t.Fatalf("reselection changed the endpoint: %v then %v", first, again)
+		}
+	}
+
+	same := func(context.Context, string) (string, error) { return first[0].WitnessKey, nil }
+	keys, toad := DesignatableWitnessesChecked(context.Background(), first, same)
+	if len(keys) != 1 || toad != 1 {
+		t.Fatalf("inception would record %d witnesses with toad %d, want 1 and 1", len(keys), toad)
 	}
 }

@@ -271,11 +271,13 @@ func TestTheWitnessesForAFoundingAreProposedToTheOwnerAlone(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
-	if len(got.Witnesses) != 2 || got.Toad != 2 {
-		t.Fatalf("the proposal is %+v, want the two witnesses that answer as themselves and a threshold of 2", got)
+	// One default witness service is one endpoint: of the three listed, exactly
+	// one is proposed (the smallest key), with the matching threshold of 1.
+	if len(got.Witnesses) != 1 || got.Toad != 1 {
+		t.Fatalf("the proposal is %+v, want the one default endpoint and a threshold of 1", got)
 	}
 	for _, w := range got.Witnesses {
-		if w.AID != pool[0].WitnessKey && w.AID != pool[2].WitnessKey {
+		if w.AID != pool[0].WitnessKey {
 			t.Errorf("%s was proposed", w.AID)
 		}
 		if !strings.HasSuffix(w.Address, "/") || !strings.HasPrefix(w.Address, "http://127.0.0.1:") {

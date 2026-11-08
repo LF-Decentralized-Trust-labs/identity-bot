@@ -83,42 +83,53 @@ func BootstrapPool() []BootstrapWitness {
 	return BootstrapWitnesses()
 }
 
-// withBootstrap tops a contact-derived witness list up to a workable size.
+// withBootstrap tops a contact-derived witness list up with ONE bootstrap
+// witness while there are too few contacts to reach a threshold worth having.
 //
-// Bootstrap witnesses are APPENDED rather than preferred, so an identity with
-// enough contacts of its own leans on them and not on us. They fill in only
-// while there are too few to reach a threshold worth having — which is the
-// whole point of them, and also why this shrinks to nothing on its own as
-// somebody accumulates contacts.
+// One default witness service means one provider and one endpoint. Once a root
+// identity designates its bootstrap witness, that same endpoint serves for the
+// life of the identity until a rotation changes it, so the choice must be the
+// same every time it is made: the endpoint is picked by its witness key (the
+// smallest), never by the registry's listing order or by how many entries it
+// holds today.
 //
-// `want` is the number of witnesses that would make a threshold meaningful. It
-// is a floor rather than a target: a contact list that already exceeds it is
-// left entirely alone.
+// Appended rather than preferred, so an identity with enough contacts of its own
+// leans on them and not on us. `want` is a floor rather than a target: a contact
+// list that already reaches it is left entirely alone. A contact who happens to
+// be the chosen endpoint is not a second witness, so nothing is added then.
 func withBootstrap(contactWitnesses []witnessTarget, want int) []witnessTarget {
 	if len(contactWitnesses) >= want {
 		return contactWitnesses
 	}
-
-	have := make(map[string]bool, len(contactWitnesses))
-	for _, w := range contactWitnesses {
-		have[w.AID] = true
+	b, ok := defaultBootstrapWitness()
+	if !ok {
+		return contactWitnesses
 	}
-
-	out := contactWitnesses
-	for _, b := range BootstrapPool() {
-		if len(out) >= want {
-			break
-		}
-		// A contact who happens to be one of these is not two witnesses.
+	for _, w := range contactWitnesses {
 		// Counting it twice would inflate the threshold while adding no
-		// independent observer, which is worse than a smaller honest pool
-		// because it looks stronger than it is.
-		if have[b.AID] {
+		// independent observer.
+		if w.AID == b.AID || (b.WitnessKey != "" && w.WitnessKey == b.WitnessKey) {
+			return contactWitnesses
+		}
+	}
+	return append(contactWitnesses, witnessTarget{AID: b.AID, WitnessKey: b.WitnessKey, URL: b.URL, Commercial: true})
+}
+
+// defaultBootstrapWitness is the one endpoint a root identity designates at
+// inception: the pool entry with the smallest witness key. Order-independent,
+// so every reselection for an identifier lands on the same endpoint.
+func defaultBootstrapWitness() (BootstrapWitness, bool) {
+	var best BootstrapWitness
+	found := false
+	for _, b := range BootstrapPool() {
+		if b.WitnessKey == "" {
 			continue
 		}
-		out = append(out, witnessTarget{AID: b.AID, WitnessKey: b.WitnessKey, URL: b.URL, Commercial: true})
+		if !found || b.WitnessKey < best.WitnessKey {
+			best, found = b, true
+		}
 	}
-	return out
+	return best, found
 }
 
 // oneBootstrapFor picks a single bootstrap witness for a pairwise AID.
