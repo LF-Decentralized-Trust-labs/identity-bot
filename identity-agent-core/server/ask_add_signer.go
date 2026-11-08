@@ -226,16 +226,29 @@ func (addSignerAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[
 		return nil, fmt.Errorf("the organization declined: %s", reason)
 	}
 
+	// Remembered so the inviting app can be asked, under this same key, for
+	// anything it publishes for this invite -- see handleWhatTheInvitingAppPublished.
+	answer, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+	s.redeemedInvites.remember(p.InviteToken, redeemedInvite{
+		base: ctx.Base, siteAID: p.SiteAID, siteOOBI: p.SiteOOBI,
+		publishedPath: publishedPathFrom(answer),
+	})
+
 	org := p.OrgName
 	if org == "" {
 		org = p.OrgAID
 	}
 	return map[string]interface{}{
 		"ok":           true,
-		"employer":     org,
-		"role":         "Super Admin",
-		"pairwise_aid": rel.PairwiseAID,
-		"status":       "active", // the signer is active immediately
+		"invite_token": p.InviteToken,
+		// The inviting app, and the identity minted for a machine at this redeem,
+		// so the caller can act on what the app later publishes.
+		"invited_by":        strings.TrimRight(ctx.Base, "/"),
+		"machine_owner_aid": machineOwnerAID,
+		"employer":          org,
+		"role":              "Super Admin",
+		"pairwise_aid":      rel.PairwiseAID,
+		"status":            "active", // the signer is active immediately
 	}, nil
 }
 

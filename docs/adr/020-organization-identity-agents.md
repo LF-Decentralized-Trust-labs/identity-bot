@@ -187,3 +187,28 @@ its own Data Domain per ADR-026).
 mount your endpoints via `MountExtraRoutes`; mint invites/QRs as Asks and publish
 them with `StoreAsk`; store your org data in its own domain database. How you
 model and run any of that is yours to decide.
+
+## Addendum, 2026-11-07: a redeemer may ask the inviting app what it published
+
+An agent that redeemed an invite may later ask the app that issued the invite for
+what that app has published against it (for example the identity it minted for a
+machine). The ask is a poll: the agent calls `POST /api/redeemed-invites/published`
+with the invite's code in the body, and gets the answer, or "not yet", without
+waiting.
+
+- Only the agent that redeemed the invite can ask. It remembers where, and with
+  which key, it redeemed; it signs the ask with that key and sends it to that
+  address. The caller names neither, so an invite code alone lets nobody else ask.
+- The route is on the owner-only list (ADR-050), as redeeming is.
+- The inviting app decides what, if anything, it has published, and where it
+  answers: its reply to the redeem may carry `published_at`, a plain absolute path
+  under the address the invite was redeemed at. An app that carries none is not
+  polled, so there is no obligation on an app that publishes nothing.
+- The ask is a `GET` to that path signed over a fixed domain string, the invite's
+  code, the agent's clock and a nonce it chose for that one ask, sent in the
+  `X-Invite-Poll-Timestamp`, `X-Invite-Poll-Nonce` and `X-Invite-Poll-Signature`
+  headers. `server.InvitePollText` and `server.VerifyInvitePoll` are the one
+  definition of that text and its check; the app refuses a nonce it has already seen.
+- A route an overlay mounts is owner-only unless the overlay names it with
+  `CoreServer.OpenExtraRoutes`, with the reason; the server refuses to start if a
+  name matches nothing the overlay mounts.

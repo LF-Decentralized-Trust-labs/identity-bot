@@ -383,7 +383,11 @@ func (s *CoreServer) authorize(routes chi.Routes) func(http.Handler) http.Handle
 
 			r = withSignedBodyBound(r, pattern)
 
-			switch classify(r.Method, pattern) {
+			class := classify(r.Method, pattern)
+			if _, ok := s.extraOpen[r.Method+" "+pattern]; ok && class == accessOwner {
+				class = accessPublic
+			}
+			switch class {
 			case accessPublic:
 				next.ServeHTTP(w, r)
 			case accessScoped:

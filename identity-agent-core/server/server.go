@@ -151,7 +151,10 @@ type CoreServer struct {
 	// so two foundings committed at once cannot both pass it.
 	founding sync.Mutex
 
-	loginHandler      *login.Handler
+	loginHandler *login.Handler
+	// redeemedInvites remembers where, and as whom, this agent redeemed an invite,
+	// so it can later ask the inviting app what it published for it.
+	redeemedInvites   redeemedInviteBook
 	assetHandler      *asset.Handler
 	ownerRosterSource func() []asset.Employee // the roster in use when an overlay owns it; see SetOwnerRoster
 	assetStoreErr     error                   // why assetHandler is nil, when a store file could not be read
@@ -160,6 +163,8 @@ type CoreServer struct {
 	// Overlay-registered extra routes, mounted under /api by buildRouter. See
 	// MountExtraRoutes / extension.go — inert unless an overlay registers.
 	extraRoutes []func(chi.Router)
+	// extraOpen are the overlay routes a non-owner may reach; see OpenExtraRoutes.
+	extraOpen map[string]string
 
 	// appSessions are the people signed in at an app, who may speak on the talk
 	// routes (an_app_session_speaks_for_its_person.go).
@@ -641,6 +646,9 @@ func (s *CoreServer) Start() error {
 	// an add-on opens must not cover one of the overlay's either.
 	if err := s.addonsOpeningOthersRoutes(s.router, s.extraRoutes); err != nil {
 		return err
+	}
+	if bad := s.extraOpenNotMounted(); len(bad) > 0 {
+		return fmt.Errorf("OpenExtraRoutes names routes no overlay mounts, or gives no reason: %v", bad)
 	}
 
 	// Try the configured port first, then fallback to 5051–5059
@@ -1325,6 +1333,8 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 	s.mountPublicDidWebsRoutes(r)
 	// Dumb-router scan gate: forward a scanned Ask pointer here; Go decodes + dispatches by t.
 	s.mountScanRoutes(r)
+	// Ask the app that issued an invite this agent redeemed what it published for it.
+	s.mountRedeemedInviteRoutes(r)
 	// Mint IA-originated Asks (e.g. an add-contact "add me" QR) hosted at /i/{token}.
 	s.mountAskCreateRoute(r)
 	// login-web SignInButton-compatible endpoints (drop-in widget → an Identity Agent, no per-site backend).
