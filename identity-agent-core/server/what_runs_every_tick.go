@@ -40,6 +40,9 @@ func (s *CoreServer) tick() {
 	}
 	s.askAgainForWithdrawals()
 	s.witnessOwnLog()
+	if _, err := s.forgetUncollectedResults(time.Now()); err != nil {
+		log.Printf("[login] forgetting uncollected sign-in results: %v", err)
+	}
 }
 
 var (

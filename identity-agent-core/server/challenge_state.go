@@ -158,3 +158,44 @@ func (s *CoreServer) collectSignIn(token, offered string, now time.Time) (st map
 	}
 	return st, bound, held, nil
 }
+
+// forgetUncollectedResults forgets every settled sign-in whose result nobody
+// collected within signInResultWindow, the same way collectSignIn forgets one
+// read too late. Without it a result is forgotten only when the holder of the
+// collector secret asks, so one never asked for stays in memory and in the
+// state file until the cap evicts it. It returns how many it forgot.
+func (s *CoreServer) forgetUncollectedResults(now time.Time) (int, error) {
+	s.challengeMu.Lock()
+	defer s.challengeMu.Unlock()
+	return s.forgetUncollectedResultsLocked(now)
+}
+
+// forgetUncollectedResultsLocked is forgetUncollectedResults for a caller that
+// holds challengeMu. If the forgetting cannot be recorded nothing changes.
+func (s *CoreServer) forgetUncollectedResultsLocked(now time.Time) (int, error) {
+	was := map[string]map[string]interface{}{}
+	for token, cur := range s.challengeStatus {
+		if cur == nil || cur["status"] == "pending" || cur["released"] == true {
+			continue
+		}
+		if at := settledAt(cur); !at.IsZero() && now.Sub(at) <= signInResultWindow {
+			continue
+		}
+		forgotten := map[string]interface{}{"status": cur["status"], "released": true}
+		if t, ok := cur["settled_at"]; ok {
+			forgotten["settled_at"] = t
+		}
+		was[token] = cur
+		s.challengeStatus[token] = forgotten
+	}
+	if len(was) == 0 {
+		return 0, nil
+	}
+	if err := s.saveChallengeStateLocked(); err != nil {
+		for token, cur := range was {
+			s.challengeStatus[token] = cur
+		}
+		return 0, err
+	}
+	return len(was), nil
+}

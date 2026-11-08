@@ -248,7 +248,10 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 	// 1) Authenticate: verify the assertion signature + binding to this challenge.
 	res := login.VerifyAssertionForBrowserKey(a, bundle.Nonce, bundle.Audience, bundle.SiteAID, bundle.BrowserKey, 300)
 	if !res.Valid {
-		s.setChallengeStatus(token, map[string]interface{}{"status": "denied", "reason": res.Reason})
+		if err := s.setChallengeStatus(token, map[string]interface{}{"status": "denied", "reason": res.Reason}); err != nil {
+			http.Error(w, "could not record the answer", http.StatusInternalServerError)
+			return
+		}
 		http.Error(w, "assertion verification failed: "+res.Reason, http.StatusUnauthorized)
 		return
 	}
@@ -267,11 +270,14 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 	// page can read; only a uniform refusal leaves here. The owner is not shown
 	// it: a gate the core cannot check is refused when the policy is saved.
 	if allowed, reason := s.authorizeAssetAccess(r.Context(), bundle.SiteAID, res.PairwiseAID, a.PresentedACDCs); !allowed {
-		s.setChallengeStatus(token, map[string]interface{}{
+		if err := s.setChallengeStatus(token, map[string]interface{}{
 			"status": "denied",
 			// For the organisation, which is entitled to know.
 			"reason": reason,
-		})
+		}); err != nil {
+			http.Error(w, "could not record the answer", http.StatusInternalServerError)
+			return
+		}
 		http.Error(w, "not authorized", http.StatusForbidden)
 		return
 	}
@@ -292,7 +298,10 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 	if info := s.memberInfoFor(bundle.SiteAID, res.PairwiseAID); len(info) > 0 {
 		st["member_info"] = info
 	}
-	s.setChallengeStatus(token, st)
+	if err := s.setChallengeStatus(token, st); err != nil {
+		http.Error(w, "could not record the answer", http.StatusInternalServerError)
+		return
+	}
 	jsonreply.Write(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -328,21 +337,32 @@ func (s *CoreServer) memberInfoFor(siteAID, pairwiseAID string) map[string]strin
 }
 
 // setChallengeStatus stores a session's status under the challenge lock.
-func (s *CoreServer) setChallengeStatus(token string, st map[string]interface{}) {
+//
+// It fails closed. If the status cannot be written, the file still says
+// pending and a restart would accept the same assertion again inside its
+// freshness window, so the status is put back as it was and the error returned;
+// the caller answers 500 and admits nobody.
+func (s *CoreServer) setChallengeStatus(token string, st map[string]interface{}) error {
 	s.challengeMu.Lock()
+	defer s.challengeMu.Unlock()
 	if s.challengeStatus == nil {
 		s.challengeStatus = make(map[string]map[string]interface{})
 	}
 	if st["status"] != "pending" {
 		st["settled_at"] = time.Now().Unix()
 	}
+	prev, had := s.challengeStatus[token]
 	s.challengeStatus[token] = st
-	// The mark stays in memory if it cannot be written, so this run still
-	// refuses a second answer; a restart would lose it, so say so.
 	if err := s.saveChallengeStateLocked(); err != nil {
-		log.Printf("[identity-agent-core] %v", err)
+		if had {
+			s.challengeStatus[token] = prev
+		} else {
+			delete(s.challengeStatus, token)
+		}
+		log.Printf("[identity-agent-core] refusing to settle a sign-in: %v", err)
+		return err
 	}
-	s.challengeMu.Unlock()
+	return nil
 }
 
 // authorizeAssetAccess enforces an asset's enrollment policy for an asserter.

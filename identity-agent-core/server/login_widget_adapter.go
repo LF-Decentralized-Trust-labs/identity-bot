@@ -109,6 +109,12 @@ func (s *CoreServer) createSignedAssetChallenge(assetID, audience string, disclo
 	if s.challengeStatus == nil {
 		s.challengeStatus = make(map[string]map[string]interface{})
 	}
+	// Results nobody collected within their window are forgotten first. A
+	// failure to record that is not a reason to refuse a new sign-in; the
+	// tick tries again.
+	if _, err := s.forgetUncollectedResultsLocked(time.Now()); err != nil {
+		log.Printf("[identity-agent-core] could not forget uncollected sign-in results: %v", err)
+	}
 	if len(s.challenges) > 1000 {
 		for k := range s.challenges {
 			delete(s.challenges, k)
