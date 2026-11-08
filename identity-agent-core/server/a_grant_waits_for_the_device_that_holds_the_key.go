@@ -85,6 +85,10 @@ type pendingIssuance struct {
 	Spec     grantSpec                 `json:"spec"`
 	Prepared *drivers.PreparedIssuance `json:"prepared,omitempty"`
 	Registry *drivers.PreparedRegistry `json:"registry,omitempty"`
+	// Delegation, with the asset it is for, is a delegated identity's
+	// approval; AssetID alone, on a row kept behind, is one still to be built.
+	Delegation *drivers.PreparedDelegation `json:"delegation,omitempty"`
+	AssetID    string                      `json:"asset_id,omitempty"`
 	// Revocation, with the credential it withdraws, is a grant the device
 	// signed that is not wanted here. Revokes names that credential.
 	Revocation  *drivers.PreparedRevocation `json:"revocation,omitempty"`
@@ -103,6 +107,8 @@ func (p pendingIssuance) interaction() []byte {
 		return p.Prepared.IxnRaw
 	case p.Registry != nil:
 		return p.Registry.IxnRaw
+	case p.Delegation != nil:
+		return p.Delegation.IxnRaw
 	case p.Revocation != nil:
 		return p.Revocation.IxnRaw
 	}
@@ -175,7 +181,7 @@ func (s *CoreServer) queueForTheKey(kind string, pending pendingIssuance, payloa
 	// device for two events at one place. Another is kept behind it and built
 	// once it lands.
 	if s.anInteractionWaits() {
-		behind := pendingIssuance{Kind: waitingBehind, Spec: pending.Spec}
+		behind := pendingIssuance{Kind: waitingBehind, Spec: pending.Spec, AssetID: pending.AssetID}
 		body, err := json.Marshal(behind)
 		if err != nil {
 			return "", err
@@ -217,6 +223,8 @@ func summaryOf(t *authorisation.ToSign) string {
 			noun = "app"
 		}
 		return fmt.Sprintf("Let the %s %q do: %s", noun, t.Name, what)
+	case "delegation":
+		return fmt.Sprintf("Let the new identity %s (key %s) act for you, delegated from yours", t.Holder, t.KeyFingerprint)
 	default:
 		return "Make the registry this identity issues its grants into"
 	}
@@ -303,7 +311,7 @@ func (s *CoreServer) completeWaiting(req store.SigningRequest, signature string)
 	if err := json.Unmarshal([]byte(body), &pending); err != nil {
 		return err
 	}
-	if pending.Spec.Request == nil && pending.Kind != signingKindRevocation {
+	if pending.Spec.Request == nil && pending.Kind != signingKindRevocation && pending.Kind != signingKindDelegation {
 		return errNeedsSignedRequest
 	}
 	// The signature is over the request's own payload, which is the
@@ -320,6 +328,8 @@ func (s *CoreServer) completeWaiting(req store.SigningRequest, signature string)
 		kept = pending.Registry.IxnRaw
 	case pending.Kind == signingKindRevocation && pending.Revocation != nil:
 		kept = pending.Revocation.IxnRaw
+	case pending.Kind == signingKindDelegation && pending.Delegation != nil:
+		kept = pending.Delegation.IxnRaw
 	default:
 		return fmt.Errorf("what waits is of no kind this agent completes")
 	}
@@ -339,6 +349,9 @@ func (s *CoreServer) completeWaiting(req store.SigningRequest, signature string)
 	}
 	if pending.Kind == signingKindRegistry {
 		return s.completeRegistry(req.ID, pending, signature)
+	}
+	if pending.Kind == signingKindDelegation {
+		return s.completeDelegation(req.ID, pending, signature)
 	}
 	if pending.Kind == signingKindRevocation {
 		return s.completeRevocation(req.ID, pending, signature)
@@ -556,6 +569,8 @@ func (s *CoreServer) queuedParts(id string) map[string]string {
 		}
 	case p.Registry != nil:
 		return map[string]string{"registry_b64": base64.StdEncoding.EncodeToString(p.Registry.VcpRaw)}
+	case p.Delegation != nil:
+		return map[string]string{"delegated_inception_b64": base64.StdEncoding.EncodeToString(p.Delegation.DipRaw)}
 	case p.Revocation != nil:
 		return map[string]string{
 			"credential_b64": base64.StdEncoding.EncodeToString(p.RevokedAcdc),
@@ -603,8 +618,21 @@ func (s *CoreServer) buildNextBehind() {
 		}
 		return
 	}
+	// An approval of a delegated identity goes before the grants kept behind
+	// it: they are for an identity that cannot act until it has landed.
+	for _, row := range s.waitingRows() {
+		if row.Pending.Kind != waitingBehind || row.Pending.AssetID == "" {
+			continue
+		}
+		_ = s.DataStore.DeletePendingIssuance(row.ID)
+		if err := s.askApprovalAgain(row.Pending.AssetID); err != nil {
+			log.Printf("[grants] the approval kept for %s could not be asked for: %v", row.Pending.AssetID, err)
+			continue
+		}
+		return
+	}
 	for _, row := range s.waitingRows() { // in the order they were kept
-		if row.Pending.Kind != waitingBehind || row.Pending.Revokes != "" {
+		if row.Pending.Kind != waitingBehind || row.Pending.Revokes != "" || row.Pending.AssetID != "" {
 			continue
 		}
 		_ = s.DataStore.DeletePendingIssuance(row.ID)

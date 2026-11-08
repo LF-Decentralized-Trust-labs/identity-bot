@@ -202,7 +202,7 @@ func (s *CoreServer) heldAt(ev store.EventRecord) heldEvent {
 // anchors, and nothing else from it.
 func shownParts(in map[string]string) map[string]string {
 	out := map[string]string{}
-	for _, k := range []string{"credential_b64", "issuance_b64", "registry_b64", "revocation_b64"} {
+	for _, k := range []string{"credential_b64", "issuance_b64", "registry_b64", "revocation_b64", "delegated_inception_b64"} {
 		if in[k] != "" {
 			out[k] = in[k]
 		}

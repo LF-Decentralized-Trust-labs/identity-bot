@@ -89,11 +89,17 @@ type Asset struct {
 	// so. Absent is a legitimate state — a machine without the hardware still
 	// enrols — and it must stay distinguishable from identified, which is why
 	// nothing here is ever filled in with a placeholder.
-	MachineIDKind   string           `json:"machine_id_kind,omitempty"`
-	MachineIDValue  string           `json:"machine_id_value,omitempty"`
-	MachineIDWhy    string           `json:"machine_id_why,omitempty"`
-	DelegationModel string           `json:"delegation_model"` // "delegated" | "standalone"
-	DelegatorAID    string           `json:"delegator_aid,omitempty"`
+	MachineIDKind   string `json:"machine_id_kind,omitempty"`
+	MachineIDValue  string `json:"machine_id_value,omitempty"`
+	MachineIDWhy    string `json:"machine_id_why,omitempty"`
+	DelegationModel string `json:"delegation_model"` // "delegated" | "standalone"
+	DelegatorAID    string `json:"delegator_aid,omitempty"`
+	// ApprovalPending is set on a delegated asset whose delegator's approval is
+	// not yet in the delegator's key log, because the key that signs it is held
+	// on another device and has not yet signed. The asset exists, so it can be
+	// listed and removed, and it cannot act: nothing speaks or signs as it
+	// until its approval is appended.
+	ApprovalPending bool             `json:"approval_pending,omitempty"`
 	Policy          EnrollmentPolicy `json:"policy"`
 	// SigningIndex is the HD derivation index (from the controller root seed) for this
 	// asset's signing key. Re-derive the seed on demand (root + SigningIndex) — the

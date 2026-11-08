@@ -494,90 +494,11 @@ func (e *Engine) CreateDelegatedInceptionKept(publicKey, nextPublicKey, name, de
 		return nil, fmt.Errorf("the delegator: %w", err)
 	}
 	defer release()
-	pub, nextDigest, dip, dipEvent, err := delegatedInceptionOver(publicKey, nextPublicKey, delegator.AID, witnesses, toad)
+	p, err := e.prepareDelegation(delegator, publicKey, nextPublicKey, witnesses, toad)
 	if err != nil {
 		return nil, err
 	}
-
-	// The delegator anchors a seal naming the delegated event exactly: its
-	// identifier, its sequence number and its digest. A seal that named only
-	// the identifier would approve any event that identity ever produced.
-	seal, err := eventSeal(dipEvent.Identifier, fmt.Sprintf("%x", dipEvent.SN), dipEvent.SAID)
-	if err != nil {
-		return nil, err
-	}
-	ixn, err := keri.BuildInteraction(keri.InteractionInput{
-		Prefix:    delegator.AID,
-		PriorSAID: delegator.LastSAID,
-		SN:        delegator.SN + 1,
-		Data:      []json.RawMessage{seal},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("building the delegator's approval: %w", err)
-	}
-	if _, err := keri.ParseEvent(ixn); err != nil {
-		return nil, err
-	}
-
-	dipBody, err := eventMap(dip)
-	if err != nil {
-		return nil, err
-	}
-	ixnBody, err := eventMap(ixn)
-	if err != nil {
-		return nil, err
-	}
-
-	approvalSig, err := e.signed(delegator, ixn)
-	if err != nil {
-		return nil, err
-	}
-	// The delegated founding is signed like any other, or nothing is made: an
-	// approval kept for an identity that cannot be signed would approve nothing.
-	dipSigs, err := e.signedFounding(dipEvent, dip, firstSigner(sign))
-	if err != nil {
-		return nil, err
-	}
-	// The name must be free before anything is kept, or the store would hold a
-	// delegation the engine then refuses to.
-	heldAs := name
-	if heldAs == "" {
-		heldAs = dipEvent.Identifier
-	}
-	if held, err := e.state.get(heldAs); err == nil && held.AID != dipEvent.Identifier {
-		return nil, fmt.Errorf("the name %q already holds %s", heldAs, held.AID)
-	}
-	var kept func(drivers.KELKeep) error
-	if keep != nil {
-		kept = func(k drivers.KELKeep) error {
-			k.Delegated = dip
-			if err := keep(k); err != nil {
-				return fmt.Errorf("the delegation was not kept, so it was not made: %w", err)
-			}
-			return nil
-		}
-	}
-	// The delegator's approval first, kept once the delegator's log with it
-	// has been judged; only then is the delegated identity held.
-	if err := e.extend(delegator, ixn, approvalSig, kept, nil); err != nil {
-		return nil, err
-	}
-	if err := e.holdDelegatedIdentity(name, pub, nextDigest, dip, dipEvent, dipSigs); err != nil {
-		return nil, err
-	}
-
-	return &drivers.DriverDelegatedInceptionResponse{
-		AID:          dipEvent.Identifier,
-		DelegatorAID: delegator.AID,
-		Said:         dipEvent.SAID,
-		DipEvent:     dipBody,
-		DelegatorIxn: ixnBody,
-		RawBytesB64:  b64(dip),
-
-		DelegatorIxnRawBytesB64: b64(ixn),
-		PublicKey:               pub,
-		NextKeyDigest:           nextDigest,
-	}, nil
+	return e.appendDelegation(delegator, name, p, keep, sign...)
 }
 
 // ReinstateDelegatedIdentity holds a delegated identity again, after a restart,

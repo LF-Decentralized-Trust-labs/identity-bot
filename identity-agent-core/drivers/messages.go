@@ -373,6 +373,39 @@ type PreparedIssuer interface {
 	AppendPreparedRegistry(name string, p *PreparedRegistry) (*DriverRegistryInceptResponse, error)
 }
 
+// PreparedDelegation is a delegated identity's inception, built but not yet
+// held, with the interaction in the delegator's key log that approves it. The
+// interaction's one seal names the inception exactly: its identifier, place 0
+// and digest.
+type PreparedDelegation struct {
+	Delegator string `json:"delegator"`
+	// AID is the delegated identity's identifier, which its inception derives.
+	AID           string `json:"aid"`
+	DipRaw        []byte `json:"dip_raw"`
+	DipSAID       string `json:"dip_said"`
+	PublicKey     string `json:"public_key"`
+	NextKeyDigest string `json:"next_key_digest"`
+	IxnRaw        []byte `json:"ixn_raw"`
+	IxnSAID       string `json:"ixn_said"`
+	SN            int    `json:"sn"`
+	Prior         string `json:"prior"`
+}
+
+// PreparedDelegator is an engine that can build a delegated identity's
+// inception with the delegator's approval of it, and add both later exactly as
+// built, so the approval can be signed elsewhere in between (as
+// PreparedIssuer's issuance is).
+type PreparedDelegator interface {
+	// PrepareDelegatedInception builds the inception over these keys and the
+	// delegator's interaction approving it, on the delegator's key log as it
+	// stands now. Nothing is added or held.
+	PrepareDelegatedInception(delegatorName, publicKey, nextPublicKey string, witnesses []string, toad int) (*PreparedDelegation, error)
+	// AppendPreparedDelegation adds the approval to the delegator's key log,
+	// signed as the engine has its events signed, and then holds the delegated
+	// identity under name, exactly as CreateDelegatedInceptionKept does.
+	AppendPreparedDelegation(delegatorName, name string, p *PreparedDelegation, keep func(KELKeep) error, sign ...FoundingSigner) (*DriverDelegatedInceptionResponse, error)
+}
+
 // KELKeep is an event an engine is about to append to an identity's key log,
 // offered to be kept first.
 type KELKeep struct {

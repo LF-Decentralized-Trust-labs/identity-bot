@@ -97,6 +97,8 @@ var controllerOwnerOnly = map[string]string{
 	"POST /api/signing-requests/{id}/refuse":      "refusing is the key device's answer, and a refused withdrawal is never asked for again",
 	"POST /api/signing-requests/sign-for-another": "this signs with the identity's key and records it in its key log",
 	"POST /api/signing-requests/adopt":            "this takes events into the identity's key log",
+	"POST /api/key-log/unsigned-events/discard":   "this rewinds the identity's key log, setting events aside that it holds",
+	"POST /api/assets/{id}/approval":              "this asks the device that holds the identity's key to approve an identity delegated from it",
 	"POST /api/interact":                          "this signs an interaction event with the identity's key, and key events are the owner's",
 
 	// --- what it takes to get back in, and taking the identity over ---

@@ -53,6 +53,7 @@ func (s *CoreServer) initAssetHandler() error {
 			return fmt.Errorf("%w: %v", asset.ErrKeyUnavailable, err)
 		}
 	}
+	h.AskApproval = s.askApproval
 	s.assetHandler = h
 	return nil
 }
@@ -109,6 +110,7 @@ func (s *CoreServer) mountAssetRoutes(r chi.Router) {
 		r.Post("/{id}/requests/{reqID}/deny", s.assetHandler.HandleDenyRequest)
 		r.Get("/{id}/members", s.assetHandler.HandleListMembers)
 		r.Delete("/{id}/members/{aid}", s.assetHandler.HandleRemoveMember)
+		r.Post("/{id}/approval", s.handleAskApprovalAgain)
 	})
 	// Public invite routes — declared in publicRoutes, which is what actually
 	// makes them reachable. The login SDK calls these from a relying party's
@@ -143,7 +145,7 @@ func (s *CoreServer) lookupAgentAssetByAID(aid string) (*coretypes.AgentRef, err
 		return nil, err
 	}
 	for _, a := range assets {
-		if a.AssetType == "ai_agent" && a.PairwiseAID == aid {
+		if a.AssetType == "ai_agent" && a.PairwiseAID == aid && !a.ApprovalPending {
 			return &coretypes.AgentRef{ID: a.ID, PairwiseAID: a.PairwiseAID, DelegatorAID: a.DelegatorAID, Capabilities: a.Capabilities}, nil
 		}
 	}

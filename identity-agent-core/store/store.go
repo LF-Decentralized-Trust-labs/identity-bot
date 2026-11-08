@@ -745,6 +745,11 @@ type Store interface {
 	// sequence number on out of the key log, into the record of what was
 	// superseded. Nothing is deleted, and either both happen or neither.
 	SaveSupersedingEvent(record EventRecord) error
+	// SetAsideEventsFrom moves the events of aid from sequence number fromSN
+	// on out of its key log, into the record of what was set aside (the one
+	// SupersededEvents reads), for events the log should never have held.
+	// Nothing is deleted, and either all move or none.
+	SetAsideEventsFrom(aid string, fromSN int) error
 	// SaveRestoredIdentity saves an identity's whole key log and its record
 	// together: all of it or none.
 	SaveRestoredIdentity(events []EventRecord, state IdentityState) error
@@ -1013,6 +1018,39 @@ func (s *FileStore) SaveSupersedingEvent(record EventRecord) error {
 		return err
 	}
 	return s.writeJSON(filepath.Join(s.dir, "kel.json"), append(kept, record))
+}
+
+// SetAsideEventsFrom is SaveSupersedingEvent without the event that takes the
+// place: the record of what was set aside is written first and the log second,
+// so a crash between the two leaves the events in both places rather than in
+// neither.
+func (s *FileStore) SetAsideEventsFrom(aid string, fromSN int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	events, err := s.loadEvents()
+	if err != nil {
+		return err
+	}
+	var aside []EventRecord
+	if b, err := os.ReadFile(filepath.Join(s.dir, "kel_superseded.json")); err == nil {
+		_ = json.Unmarshal(b, &aside)
+	}
+	var kept []EventRecord
+	moved := false
+	for _, e := range events {
+		if e.AID == aid && e.SequenceNumber >= fromSN {
+			aside, moved = append(aside, e), true
+			continue
+		}
+		kept = append(kept, e)
+	}
+	if !moved {
+		return nil
+	}
+	if err := s.writeJSON(filepath.Join(s.dir, "kel_superseded.json"), aside); err != nil {
+		return err
+	}
+	return s.writeJSON(filepath.Join(s.dir, "kel.json"), kept)
 }
 
 func (s *FileStore) SupersededEvents(aid string) ([]EventRecord, error) {

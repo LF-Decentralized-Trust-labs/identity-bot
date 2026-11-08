@@ -58,6 +58,11 @@ type Handler struct {
 	// another device nothing is delegated here, rather than an approval
 	// written unsigned.
 	KeyCheck func() error
+	// AskApproval, where the key is on another device, asks that device to
+	// sign the approval of a delegated identity built but not yet held, once
+	// the asset it is for is stored with its approval pending. An error is
+	// returned if it could not be asked, and the asset is then removed.
+	AskApproval func(a Asset, p *drivers.PreparedDelegation) error
 }
 
 func NewHandler(dataDir string, keri drivers.KeriEngine) (*Handler, error) {
@@ -206,26 +211,41 @@ func (h *Handler) HandleCreateAsset(w http.ResponseWriter, r *http.Request) {
 
 	var pairwise string
 	var delegator string
+	var approvalPending bool
+	var awaiting *drivers.PreparedDelegation
 
 	if model == "delegated" {
-		if err := h.mayDelegate(); err != nil {
+		elsewhere, err := h.mustAskTheKeyDevice()
+		if err != nil {
 			h.writeJSON(w, map[string]string{"error": err.Error()}, delegationRefusalStatus(err))
 			return
 		}
-		resp, err := h.KeriDriver.CreateDelegatedInception(pubB64, nextB64, body.DisplayName, rootAID,
-			FoundingSigner(h.dataDir, signingIndex))
-		if err != nil {
-			h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusInternalServerError)
-			return
+		if elsewhere {
+			// The key that approves it is on another device: the asset is
+			// stored, unable to act, and that device is asked.
+			prepared, err := h.prepareApproval(rootAID, pubB64, nextB64)
+			if err != nil {
+				h.writeJSON(w, map[string]string{"error": err.Error()}, delegationRefusalStatus(err))
+				return
+			}
+			pairwise, delegator, approvalPending = prepared.AID, rootAID, true
+			awaiting = prepared
+		} else {
+			resp, err := h.KeriDriver.CreateDelegatedInception(pubB64, nextB64, body.DisplayName, rootAID,
+				FoundingSigner(h.dataDir, signingIndex))
+			if err != nil {
+				h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusInternalServerError)
+				return
+			}
+			// Persist the root's anchoring event, or the delegation won't survive a KEL
+			// reload. Fail creation rather than mint a delegated asset that can't verify.
+			if err := h.persistDelegationAnchor(rootAID, resp); err != nil {
+				h.writeJSON(w, map[string]string{"error": "persist delegation anchor: " + err.Error()}, http.StatusInternalServerError)
+				return
+			}
+			pairwise = resp.AID
+			delegator = resp.DelegatorAID
 		}
-		// Persist the root's anchoring event, or the delegation won't survive a KEL
-		// reload. Fail creation rather than mint a delegated asset that can't verify.
-		if err := h.persistDelegationAnchor(rootAID, resp); err != nil {
-			h.writeJSON(w, map[string]string{"error": "persist delegation anchor: " + err.Error()}, http.StatusInternalServerError)
-			return
-		}
-		pairwise = resp.AID
-		delegator = resp.DelegatorAID
 	} else {
 		resp, err := h.KeriDriver.CreateInceptionNamed(pubB64, nextB64, body.DisplayName,
 			FoundingSigner(h.dataDir, signingIndex))
@@ -244,13 +264,21 @@ func (h *Handler) HandleCreateAsset(w http.ResponseWriter, r *http.Request) {
 		PairwiseAID:     pairwise,
 		DelegationModel: model,
 		DelegatorAID:    delegator,
+		ApprovalPending: approvalPending,
 		Policy:          body.Policy,
 		SigningIndex:    signingIndex,
 		CreatedAt:       time.Now().UTC(),
 		UpdatedAt:       time.Now().UTC(),
 	}
 
-	h.Store.UpsertAsset(asset)
+	if awaiting != nil {
+		if err := h.storeAwaitingApproval(asset, awaiting); err != nil {
+			h.writeJSON(w, map[string]string{"error": err.Error()}, http.StatusInternalServerError)
+			return
+		}
+	} else {
+		h.Store.UpsertAsset(asset)
+	}
 
 	sdk := map[string]string{
 		"SITE_PAIRWISE_AID": asset.PairwiseAID,

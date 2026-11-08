@@ -1120,6 +1120,7 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 		r.Delete("/controllers/{aid}", s.handleRevokeController)
 		r.Get("/grants/awaiting-approval", s.handleGrantsAwaitingApproval)
 		r.Post("/grants/withdrawing/{said}/ask", s.handleAskAgainToWithdraw)
+		r.Post("/key-log/unsigned-events/discard", s.handleDiscardUnsignedEvents)
 
 		r.Post("/keystore/root-seed", s.handleSetRootSeed)
 		r.Get("/keystore/root-seed", s.handleRootSeedStatus)
@@ -5036,6 +5037,9 @@ func (s *CoreServer) reviveAssetIdentity(a asset.Asset) error {
 	}
 	if a.SigningIndex == 0 {
 		return fmt.Errorf("asset has no signing index")
+	}
+	if a.ApprovalPending {
+		return fmt.Errorf("%q has not been approved by the device that holds the identity's key yet, so it is not revived", a.DisplayName)
 	}
 	pub, nextPub, err := asset.DeriveAssetKeypair(s.DataDir, a.SigningIndex)
 	if err != nil {

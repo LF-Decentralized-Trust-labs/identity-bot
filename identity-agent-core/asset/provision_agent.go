@@ -92,7 +92,8 @@ func (h *Handler) provisionDelegated(d delegatedAsset) (*Asset, error) {
 		return nil, fmt.Errorf("keri driver required to mint the delegated %s AID", d.noun)
 	}
 
-	if err := h.mayDelegate(); err != nil {
+	elsewhere, err := h.mustAskTheKeyDevice()
+	if err != nil {
 		return nil, err
 	}
 	id := genID()
@@ -100,6 +101,9 @@ func (h *Handler) provisionDelegated(d delegatedAsset) (*Asset, error) {
 	pub, nextPub, err := deriveAssetKeypair(h.dataDir, signingIndex)
 	if err != nil {
 		return nil, fmt.Errorf("derive %s key: %w", d.noun, err)
+	}
+	if elsewhere {
+		return h.provisionAwaitingApproval(d, id, signingIndex, rootAID, displayName, pub, nextPub)
 	}
 	resp, err := h.KeriDriver.CreateDelegatedInception(
 		iacrypto.VerkeyQB64(pub), iacrypto.VerkeyQB64(nextPub), displayName, rootAID,
