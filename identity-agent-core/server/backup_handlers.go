@@ -42,6 +42,10 @@ func (s *CoreServer) mountBackupRoutes(r chi.Router) {
 		r.Post("/trigger", s.handleBackupTrigger)
 		r.Post("/credentials", s.handleBackupSaveCredentials)
 		r.Post("/pull/{destID}", s.handleBackupPull)
+		// Sign in to Google Drive. The app opens the browser and catches the
+		// redirect; the core only issues the address and takes the code.
+		r.Post("/google/start", s.handleBackupGoogleStart)
+		r.Post("/google/complete", s.handleBackupGoogleComplete)
 	})
 }
 
@@ -621,4 +625,49 @@ func (s *CoreServer) mayHold(aid string) error {
 	}
 	held, _ := s.backupService().ListReceived(aid)
 	return cfg.Offer.MayAccept(aid, len(held) > 0)
+}
+
+type backupGoogleStartRequest struct {
+	RedirectURI string `json:"redirect_uri"`
+}
+
+// handleBackupGoogleStart returns the Google address the app opens for the
+// person to sign in at.
+func (s *CoreServer) handleBackupGoogleStart(w http.ResponseWriter, r *http.Request) {
+	var req backupGoogleStartRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
+		return
+	}
+	authURL, state, err := s.backupService().StartGoogleSignIn(req.RedirectURI)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Cannot start Google sign-in", err.Error())
+		return
+	}
+	jsonreply.Write(w, http.StatusOK, map[string]string{"auth_url": authURL, "state": state})
+}
+
+type backupGoogleCompleteRequest struct {
+	State       string `json:"state"`
+	Code        string `json:"code"`
+	RedirectURI string `json:"redirect_uri"`
+}
+
+// handleBackupGoogleComplete takes the code Google returned to the app and
+// makes the Drive destination. It works on a machine with no destinations, which
+// is what restoring onto a different machine is.
+func (s *CoreServer) handleBackupGoogleComplete(w http.ResponseWriter, r *http.Request) {
+	var req backupGoogleCompleteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
+		return
+	}
+	dest, err := s.backupService().CompleteGoogleSignIn(req.State, req.Code, req.RedirectURI)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Google sign-in failed", err.Error())
+		return
+	}
+	// The credential id is a file name, not something the app needs.
+	dest.CredentialID = ""
+	jsonreply.Write(w, http.StatusOK, map[string]any{"destination": dest})
 }

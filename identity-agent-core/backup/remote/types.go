@@ -19,4 +19,10 @@ type CredentialSecrets struct {
 	Password           string
 	AccountName        string
 	ServiceAccountJSON string
+
+	// OAuth sign-in (Google Drive): the long-lived grant and the client it was
+	// made to.
+	OAuthRefreshToken string
+	OAuthClientID     string
+	OAuthClientSecret string
 }

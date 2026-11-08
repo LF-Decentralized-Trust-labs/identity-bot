@@ -21,6 +21,8 @@ func NewBackend(dest DestinationConfig, creds CredentialSecrets) (Backend, error
 	switch provider {
 	case "s3", "s3_compatible", "minio":
 		return NewS3Backend(dest, creds)
+	case "google_drive":
+		return NewGoogleDriveBackend(dest, creds, GoogleEndpoints{}, nil)
 	case "gcs":
 		return NewGCSBackend(dest, creds)
 	case "azure", "azure_blob":

@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"sort"
 	"strings"
+	"sync"
 )
 
 type remoteBackend interface {
@@ -50,6 +51,9 @@ func toRemoteCredentials(creds RemoteCredentialSecrets) remote.CredentialSecrets
 		Password:           creds.Password,
 		AccountName:        creds.AccountName,
 		ServiceAccountJSON: creds.ServiceAccountJSON,
+		OAuthRefreshToken:  creds.OAuthRefreshToken,
+		OAuthClientID:      creds.OAuthClientID,
+		OAuthClientSecret:  creds.OAuthClientSecret,
 	}
 }
 
@@ -62,6 +66,11 @@ type Service struct {
 	Pusher          *PairedPusher
 	Scheduler       *Scheduler
 	failures        int
+
+	// Google is the app's OAuth client and where its endpoints are; nil reads
+	// the client from the environment.
+	Google     *GoogleSignIn
+	googleOnce sync.Once
 }
 
 func NewService(dataDir string, st store.Store) *Service {
@@ -476,6 +485,15 @@ func (s *Service) PullLatestArchive(dest Destination) ([]byte, string, error) {
 		return nil, "", err
 	}
 	ctx := context.Background()
+	if dest.CloudProvider == GoogleProviderName && dest.CloudPrefix == "" {
+		keys, err := backend.List(ctx, "")
+		if err != nil {
+			return nil, "", err
+		}
+		if err := onlyOneArchiveOwner(keys); err != nil {
+			return nil, "", err
+		}
+	}
 	key, err := remote.LatestArchiveKey(ctx, backend, dest.CloudPrefix)
 	if err != nil {
 		return nil, "", err

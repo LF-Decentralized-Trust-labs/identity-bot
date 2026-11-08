@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/secureenclave"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -23,6 +25,15 @@ type RemoteCredentialSecrets struct {
 	Password           string `json:"password,omitempty"`
 	AccountName        string `json:"account_name,omitempty"`
 	ServiceAccountJSON string `json:"service_account_json,omitempty"`
+
+	// OAuth sign-in to a consumer cloud drive (Google Drive). The refresh token
+	// is the long-lived grant and the one that matters; the access token is
+	// short-lived and is renewed from it, so it is not kept here. The client id
+	// and secret are the ones the grant was made to — a refresh token only works
+	// with the client that obtained it.
+	OAuthRefreshToken string `json:"oauth_refresh_token,omitempty"`
+	OAuthClientID     string `json:"oauth_client_id,omitempty"`
+	OAuthClientSecret string `json:"oauth_client_secret,omitempty"`
 }
 
 // CredentialStore persists destination credentials encrypted in the data directory.
@@ -53,30 +64,77 @@ func (cs *CredentialStore) credPath(id string) string {
 	return filepath.Join(cs.dir, "credentials_"+id+".enc")
 }
 
+// masterKeyUse names this key to the platform wrapper, so the envelope it
+// writes does not open as some other use's.
+const masterKeyUse = "backup-credentials"
+
+// loadOrCreateMasterKey returns the key that seals every stored credential.
+//
+// The key is held the way the root seed is: under the platform wrapper where
+// this machine has one (secureenclave.KeyToHoldUnderTheWrapper), so the files
+// beside it — which now include a sign-in token to somebody's cloud drive — are
+// not opened by the disk alone. A key written before this was a bare 32-byte
+// file; it is read as before and put through the wrapper when one works.
 func (cs *CredentialStore) loadOrCreateMasterKey() ([]byte, error) {
 	path := cs.masterKeyPath()
+	dataDir := filepath.Dir(cs.dir)
 	data, err := os.ReadFile(path)
-	if err == nil && len(data) == 32 {
-		return data, nil
+	if err == nil {
+		key, wrapped, oerr := secureenclave.OpenKeyHeldUnderTheWrapper(masterKeyUse, data)
+		switch {
+		case oerr == nil:
+			if !wrapped && secureenclave.TheWrapperWorksHere(dataDir) {
+				cs.rewrap(path, dataDir, key)
+			}
+			return key, nil
+		case errors.Is(oerr, secureenclave.ErrNotAHeldKey) && len(data) == 32:
+			// Written before keys were wrapped.
+			if secureenclave.TheWrapperWorksHere(dataDir) {
+				cs.rewrap(path, dataDir, data)
+			}
+			return data, nil
+		default:
+			// Do not make a new key: it would orphan every credential sealed
+			// by this one.
+			return nil, fmt.Errorf("backup credential key not available: %w", oerr)
+		}
 	}
-	if err != nil && !os.IsNotExist(err) {
+	if !os.IsNotExist(err) {
 		return nil, err
 	}
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
 		return nil, err
 	}
+	held, err := secureenclave.KeyToHoldUnderTheWrapper(dataDir, masterKeyUse, key)
+	if err != nil {
+		return nil, err
+	}
 	// Create, not Write: if another caller made the key first, adopt theirs
 	// rather than replace a key that may already have sealed something.
-	if err := atomicfile.Create(path, key, 0600); err != nil {
+	if err := atomicfile.Create(path, held, 0600); err != nil {
 		if errors.Is(err, fs.ErrExist) {
-			if data, rerr := os.ReadFile(path); rerr == nil && len(data) == 32 {
-				return data, nil
+			if data, rerr := os.ReadFile(path); rerr == nil {
+				if k, _, oerr := secureenclave.OpenKeyHeldUnderTheWrapper(masterKeyUse, data); oerr == nil {
+					return k, nil
+				}
 			}
 		}
 		return nil, err
 	}
 	return key, nil
+}
+
+// rewrap puts an existing key through the wrapper. A failure leaves the file
+// as it was and is logged: the key still opens, and it is tried again next time.
+func (cs *CredentialStore) rewrap(path, dataDir string, key []byte) {
+	held, err := secureenclave.KeyToHoldUnderTheWrapper(dataDir, masterKeyUse, key)
+	if err == nil {
+		err = atomicfile.Write(path, held, 0600)
+	}
+	if err != nil {
+		log.Printf("[backup] credential key left as it was, not yet wrapped: %v", err)
+	}
 }
 
 func (cs *CredentialStore) Save(id string, cred RemoteCredentialSecrets) error {
