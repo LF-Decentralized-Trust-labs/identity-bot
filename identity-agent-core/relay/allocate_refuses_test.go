@@ -150,6 +150,11 @@ func TestOnlyTheConnectHostsImmediateParentIsAcceptedAsCallerHost(t *testing.T) 
 			t.Fatalf("the ancestor %s was accepted as caller host", caller)
 		}
 	}
+	// Pointed at the apex, with the connect host under it, the apex's parent is
+	// somebody else's.
+	if err := check("https://relay.example.com", "connect.relay.example.com", "example.com"); err == nil {
+		t.Fatal("a client pointed at the apex accepted example.com as caller host")
+	}
 	// Pointed at the connect host but with none named, the parent is not allowed.
 	d := &relay.ServiceDescriptor{Service: "x", CallerHost: "relay.example.com",
 		TunnelEndpoint: "wss://connect.relay.example.com/tunnel",
@@ -175,3 +180,37 @@ func TestAllocateTreatsTheDefaultPortAsNoPort(t *testing.T) {
 		t.Fatal("a non-default port was accepted")
 	}
 }
+
+// A host that names itself as connect host gets its parent accepted by the
+// name rules alone (alice.herokuapp.com could claim herokuapp.com), so the
+// parent must serve the same service descriptor.
+func TestAParentCallerHostMustServeTheSameDescriptor(t *testing.T) {
+	fetch := func(parentService string, parentStatus int) error {
+		c := relay.NewClient("https://alice.herokuapp.example", stubSigner{})
+		c.HTTPClient = &http.Client{Transport: roundTripperFunc(func(r *http.Request) *http.Response {
+			body := `{"protocol":"` + relayproto.ProtocolVersion + `","service":"alice","connect_host":"alice.herokuapp.example",` +
+				`"caller_host":"herokuapp.example","tunnel_endpoint":"wss://alice.herokuapp.example/tunnel",` +
+				`"endpoints":{"` + relay.OpAllocate + `":"https://alice.herokuapp.example/allocate"}}`
+			status := 200
+			if r.URL.Host == "herokuapp.example" {
+				body, status = `{"protocol":"`+relayproto.ProtocolVersion+`","service":"`+parentService+`"}`, parentStatus
+			}
+			return &http.Response{StatusCode: status, Header: http.Header{}, Request: r, Body: io.NopCloser(strings.NewReader(body))}
+		})}
+		_, err := c.FetchDescriptor(context.Background())
+		return err
+	}
+	if err := fetch("alice", 200); err != nil {
+		t.Fatalf("a parent serving the same service was refused: %v", err)
+	}
+	if err := fetch("herokuapp", 200); err == nil {
+		t.Fatal("a parent serving a different service was accepted as caller host")
+	}
+	if err := fetch("", 404); err == nil {
+		t.Fatal("a parent serving no descriptor was accepted as caller host")
+	}
+}
+
+type roundTripperFunc func(*http.Request) *http.Response
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r), nil }

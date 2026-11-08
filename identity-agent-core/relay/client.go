@@ -76,6 +76,9 @@ func (c *Client) FetchDescriptor(ctx context.Context) (*ServiceDescriptor, error
 	if err := CheckConnectHost(c.BaseURL, &d); err != nil {
 		return nil, err
 	}
+	if err := c.checkParentCallerHost(ctx, &d); err != nil {
+		return nil, err
+	}
 	c.Descriptor = &d
 	return &d, nil
 }
@@ -137,6 +140,42 @@ func CheckConnectHost(baseURL string, d *ServiceDescriptor) error {
 		if !at(ep, "https") {
 			return fmt.Errorf("the relay's %s endpoint %q is not at its connect host %s", op, ep, connect)
 		}
+	}
+	return nil
+}
+
+// checkParentCallerHost holds a caller host above the relay's own name to the
+// parent's own word. A host can name itself as connect host and so have its
+// parent accepted (alice.herokuapp.com could claim herokuapp.com), so the
+// parent must itself publish a descriptor for the same service.
+func (c *Client) checkParentCallerHost(ctx context.Context, d *ServiceDescriptor) error {
+	base, err := url.Parse(c.BaseURL)
+	if err != nil || d.CallerHost == "" {
+		return err
+	}
+	bn := strings.ToLower(base.Hostname())
+	callerName := hostName(d.CallerHost)
+	if callerName == bn || strings.HasSuffix(callerName, "."+bn) {
+		return nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base.Scheme+"://"+d.CallerHost+"/.well-known/url-relay-service.json", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("the caller host %s could not be asked whether it is this relay: %w", d.CallerHost, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("the caller host %s does not serve this relay's descriptor (%d)", d.CallerHost, resp.StatusCode)
+	}
+	var parent ServiceDescriptor
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxAnswer)).Decode(&parent); err != nil {
+		return fmt.Errorf("the caller host %s serves no readable descriptor: %w", d.CallerHost, err)
+	}
+	if parent.Service == "" || parent.Service != d.Service {
+		return fmt.Errorf("the caller host %s is a different service (%q), not %q", d.CallerHost, parent.Service, d.Service)
 	}
 	return nil
 }
