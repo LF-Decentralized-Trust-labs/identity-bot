@@ -1,7 +1,6 @@
 package secureenclave
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -50,22 +49,11 @@ func KeyToHoldUnderTheWrapper(dataDir, what string, key []byte) ([]byte, error) 
 	env := heldKeyEnvelope{V: 1, Wrap: seedWrapNone, Key: base64.StdEncoding.EncodeToString(key),
 		Protection: ProtectionUnwrapped, Why: whyNotWrappedAt(dataDir), Holder: holderHeldKey + ":" + what}
 	if wrapperWorksAt(w, dataDir) {
-		blob, err := w.Wrap(key)
+		blob, protection, why, err := wrapAndCheck(w, what+" key", key)
 		if err != nil {
-			return nil, fmt.Errorf("wrap %s key (%s): %w", what, w.Scheme(), err)
+			return nil, err
 		}
-		if len(blob) == 0 || wrapLeaksTheSeed(w, blob, key) {
-			return nil, fmt.Errorf("the %s wrapper returned the %s key in the clear, so it is not recorded as wrapped", w.Scheme(), what)
-		}
-		// Never keep a wrap that cannot be opened.
-		if back, err := w.Unwrap(blob); err != nil || !bytes.Equal(back, key) {
-			return nil, fmt.Errorf("wrap verification failed (%s): %v", w.Scheme(), err)
-		}
-		protection := ProtectionHardwareWrapped
-		if _, sealed := w.(sealedVolumeWrapper); sealed {
-			protection = ProtectionSealedVolume
-		}
-		env.Wrap, env.Key, env.Protection, env.Why = w.Scheme(), base64.StdEncoding.EncodeToString(blob), protection, ""
+		env.Wrap, env.Key, env.Protection, env.Why = w.Scheme(), base64.StdEncoding.EncodeToString(blob), protection, why
 	} else {
 		log.Printf("[secureenclave] the %s key is held UNWRAPPED: %s", what, env.Why)
 	}

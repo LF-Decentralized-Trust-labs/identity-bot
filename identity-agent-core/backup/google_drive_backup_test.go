@@ -389,3 +389,46 @@ func mustCreds(t *testing.T, svc *Service, dest Destination) RemoteCredentialSec
 	}
 	return c
 }
+
+func TestAnArchiveIsFetchedToDiskAndLeavesNothingWhenItFails(t *testing.T) {
+	d := fakedrive.New(driveTestClient)
+	defer d.Close()
+	svc, dest := aServiceSignedInTo(t, d)
+	archive := aSealedArchive(t)
+	if err := svc.pushCloudDestination(dest, &ExportResult{Bytes: archive, SnapshotType: SnapshotFull, Size: len(archive)}); err != nil {
+		t.Fatal(err)
+	}
+	path, key, size, done, err := svc.PullLatestArchiveToFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	onDisk, _ := os.ReadFile(path)
+	if !bytes.Equal(onDisk, archive) || size != int64(len(archive)) || !strings.HasSuffix(key, ".iab") {
+		t.Fatal("what was written to disk is not the archive")
+	}
+	if skipReason(filepath.ToSlash(mustRel(t, svc.DataDir, path))) == "" {
+		t.Fatal("the fetched archive would be carried by the next backup")
+	}
+	done()
+	if _, err := os.Stat(filepath.Dir(path)); !os.IsNotExist(err) {
+		t.Fatal("done did not remove the working directory")
+	}
+
+	d.Tamper(d.Names()[0], []byte("not it"))
+	if _, _, _, _, err := svc.PullLatestArchiveToFile(dest); !errors.Is(err, remote.ErrArchiveChanged) {
+		t.Fatalf("a changed archive must be refused: %v", err)
+	}
+	left, _ := filepath.Glob(filepath.Join(svc.DataDir, RestoringPrefix+"fetch-*"))
+	if len(left) != 0 {
+		t.Fatalf("a refused download left %v behind", left)
+	}
+}
+
+func mustRel(t *testing.T, base, p string) string {
+	t.Helper()
+	r, err := filepath.Rel(base, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}

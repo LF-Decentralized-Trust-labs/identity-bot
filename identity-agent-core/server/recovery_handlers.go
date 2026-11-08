@@ -171,7 +171,7 @@ func (s *CoreServer) handleRecoveryVerify(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "mnemonic required", "Provide seed phrase to decrypt archive")
 		return
 	}
-	if req.ArchiveB64 == "" {
+	if req.ArchiveB64 == "" && req.ArchiveRef == "" {
 		writeError(w, http.StatusBadRequest, "archive_b64 required", "Provide encrypted .iab archive")
 		return
 	}
@@ -193,7 +193,7 @@ func (s *CoreServer) handleRecoveryStart(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
 		return
 	}
-	if req.Mnemonic == "" || req.ArchiveB64 == "" {
+	if req.Mnemonic == "" || (req.ArchiveB64 == "" && req.ArchiveRef == "") {
 		writeError(w, http.StatusBadRequest, "Missing fields", "mnemonic and archive_b64 are required")
 		return
 	}

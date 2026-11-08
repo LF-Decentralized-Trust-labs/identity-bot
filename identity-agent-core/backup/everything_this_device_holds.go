@@ -152,6 +152,27 @@ func skipReason(rel string) string {
 		return "not carried: this machine's own key, usable only in this processor"
 	}
 
+	if slashed == "backup_config.json" || strings.HasPrefix(slashed, "backup_config.json.") ||
+		slashed == "backup_history.json" || slashed == "backup_newest_seen.json" || slashed == "backup_delta_state.json" ||
+		strings.HasPrefix(slashed, "backup/credentials_") {
+		// WHERE THIS MACHINE BACKS UP TO, and the keys that open the sign-ins
+		// to them. They belong to the machine, not to the identity, like
+		// machine_key.sep above.
+		//
+		// The credential files are sealed by a key that is itself wrapped by
+		// this machine's hardware. Restored onto another machine the key cannot
+		// be opened, loadOrCreateMasterKey refuses to make a new one beside
+		// files it cannot read, and the credential store fails for good: every
+		// backup from the new machine stops and signing in to Drive again
+		// fails. The destinations and the history and delta state that describe
+		// them are the same: a restored delta state would tell the new machine
+		// its destinations already hold sections they have never seen.
+		//
+		// A restore therefore keeps the destinations the new machine already
+		// has, and the person signs in to Drive again on it.
+		return "not carried: where this machine backs up to, and the keys to its sign-ins, belong to this machine"
+	}
+
 	// SQLite's write-ahead log and shared-memory files are only meaningful
 	// beside the exact database they belong to, mid-transaction. Restoring a
 	// stale one next to a restored database is worse than not having it.

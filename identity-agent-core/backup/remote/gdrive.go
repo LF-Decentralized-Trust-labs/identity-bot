@@ -3,6 +3,8 @@ package remote
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,9 +23,13 @@ import (
 // holds nothing of the person's own files — and which the app can see nothing
 // outside of. drive.file would also work and shows the files in the person's
 // Drive; the hidden folder is the narrower grant and is what is used. The
-// consequence is that the archive is only reachable with the SAME OAuth client
-// id, so every build of the app that should be able to restore must carry the
-// same client (see GoogleAppDataScope).
+// consequence is that the archive is only reachable by the same "app" as
+// Google counts it. Google's documentation says the folder is created per
+// third-party app and does not say whether that means per OAuth client id or per
+// Cloud project; a community report says per project. UNVERIFIED: until a file
+// written with the desktop client has been listed with the iOS and Android
+// clients on one account, assume nothing, and keep every client in ONE Cloud
+// project (see GoogleAppDataScope).
 //
 // WHAT IS UPLOADED is the archive the core already made, encrypted before it
 // reaches this file. Nothing here can read it and nothing here needs to.
@@ -36,6 +42,14 @@ import (
 
 // GoogleAppDataScope is the one scope this backend uses.
 const maxArchiveBytes = 1 << 30
+
+// A listing is bounded, as a download is. The folder is the person's account to
+// write to, and a listing that follows pages without end is memory without end.
+// A backup folder holds one file per backup, so these are far above any real one.
+const (
+	maxListedFiles = 20000
+	maxListPages   = 50
+)
 
 const GoogleAppDataScope = "https://www.googleapis.com/auth/drive.appdata"
 
@@ -286,7 +300,7 @@ type driveFile struct {
 func (b *googleDriveBackend) files(ctx context.Context, q string) ([]driveFile, error) {
 	var all []driveFile
 	pageToken := ""
-	for {
+	for pages := 1; ; pages++ {
 		v := url.Values{
 			"spaces":   {"appDataFolder"},
 			"fields":   {"nextPageToken,files(id,name,modifiedTime,appProperties)"},
@@ -320,6 +334,10 @@ func (b *googleDriveBackend) files(ctx context.Context, q string) ([]driveFile, 
 		if page.NextPageToken == "" {
 			return all, nil
 		}
+		if pages >= maxListPages || len(all) >= maxListedFiles {
+			return nil, fmt.Errorf("google drive: the folder lists more than %d files over %d pages, "+
+				"which is not a backup folder; refusing to read further", maxListedFiles, maxListPages)
+		}
 		pageToken = page.NextPageToken
 	}
 }
@@ -344,11 +362,23 @@ func (b *googleDriveBackend) List(ctx context.Context, prefix string) ([]string,
 	return keys, nil
 }
 
+// Pull returns the archive in memory. Large restores use PullTo.
 func (b *googleDriveBackend) Pull(ctx context.Context, objectKey string) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := b.PullTo(ctx, objectKey, &buf); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// PullTo streams the archive to w, never holding it in memory, and checks it
+// against the digest recorded when it was uploaded. On any error, including a
+// digest that does not match, what was already written to w is not to be used.
+func (b *googleDriveBackend) PullTo(ctx context.Context, objectKey string, w io.Writer) error {
 	esc := strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(objectKey)
 	files, err := b.files(ctx, "trashed=false and name='"+esc+"'")
 	if err != nil {
-		return nil, err
+		return err
 	}
 	var newest *driveFile
 	for i := range files {
@@ -357,32 +387,33 @@ func (b *googleDriveBackend) Pull(ctx context.Context, objectKey string) ([]byte
 		}
 	}
 	if newest == nil {
-		return nil, fmt.Errorf("google drive: %q not found", objectKey)
+		return fmt.Errorf("google drive: %q not found", objectKey)
 	}
 	resp, err := b.do(ctx, func() (*http.Request, error) {
 		return http.NewRequestWithContext(ctx, http.MethodGet,
 			b.ep.API+"/files/"+url.PathEscape(newest.ID)+"?alt=media", nil)
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, driveError("download", resp)
+		return driveError("download", resp)
 	}
 	// An archive is megabytes; a gigabyte is not one.
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxArchiveBytes+1))
+	h := sha256.New()
+	n, err := io.Copy(io.MultiWriter(w, h), io.LimitReader(resp.Body, maxArchiveBytes+1))
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if len(data) > maxArchiveBytes {
-		return nil, fmt.Errorf("google drive: %q is larger than any archive this agent writes", objectKey)
+	if n > maxArchiveBytes {
+		return fmt.Errorf("google drive: %q is larger than any archive this agent writes", objectKey)
 	}
 	// An archive with no recorded digest was not written by this backend, and
 	// is not accepted as if it were.
 	want := newest.AppProperties["sha256"]
-	if want == "" || want != sha256Hex(data) {
-		return nil, fmt.Errorf("%w: %q", ErrArchiveChanged, objectKey)
+	if want == "" || want != hex.EncodeToString(h.Sum(nil)) {
+		return fmt.Errorf("%w: %q", ErrArchiveChanged, objectKey)
 	}
-	return data, nil
+	return nil
 }

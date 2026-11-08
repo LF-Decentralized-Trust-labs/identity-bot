@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
 
@@ -154,5 +156,46 @@ func TestDriveNamesWithQuotesAreFoundExactly(t *testing.T) {
 func TestDriveNeedsASignIn(t *testing.T) {
 	if _, err := remote.NewGoogleDriveBackend(remote.DestinationConfig{}, remote.CredentialSecrets{}, remote.GoogleEndpoints{}, nil); err == nil {
 		t.Fatal("a Drive destination with no sign-in must not construct")
+	}
+}
+
+func TestDriveStreamsAnArchiveAndStillChecksItsDigest(t *testing.T) {
+	d, b := newDrive(t)
+	ctx := context.Background()
+	key := "a/backup-full-1.iab"
+	archive := bytes.Repeat([]byte{7, 9}, 5000)
+	if err := b.Push(ctx, key, archive); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := b.(interface {
+		PullTo(context.Context, string, io.Writer) error
+	}).PullTo(ctx, key, &out); err != nil || !bytes.Equal(out.Bytes(), archive) {
+		t.Fatalf("streamed archive differs: %v", err)
+	}
+	d.Tamper(key, append([]byte{0}, archive[1:]...))
+	out.Reset()
+	if err := b.(interface {
+		PullTo(context.Context, string, io.Writer) error
+	}).PullTo(ctx, key, &out); !errors.Is(err, remote.ErrArchiveChanged) {
+		t.Fatalf("a streamed archive must still be checked: %v", err)
+	}
+}
+
+func TestDriveStopsReadingAListingThatNeverEnds(t *testing.T) {
+	d, b := newDrive(t)
+	ctx := context.Background()
+	d.PageSize = 1
+	for i := 0; i < 60; i++ {
+		if err := b.Push(ctx, fmt.Sprintf("a/backup-full-%02d.iab", i), []byte("x")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := b.List(ctx, "a"); err == nil || !strings.Contains(err.Error(), "refusing to read further") {
+		t.Fatalf("a folder of endless pages must be refused, got %v", err)
+	}
+	d.PageSize = 0
+	if keys, err := b.List(ctx, "a"); err != nil || len(keys) != 60 {
+		t.Fatalf("a normal folder must still list: %d %v", len(keys), err)
 	}
 }

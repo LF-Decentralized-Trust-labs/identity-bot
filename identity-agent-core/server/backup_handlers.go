@@ -8,9 +8,11 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"time"
 
 	"identity-agent-core/backup"
@@ -305,21 +307,11 @@ func (s *CoreServer) handleBackupUpsertDestination(w http.ResponseWriter, r *htt
 }
 
 func (s *CoreServer) handleBackupDeleteDestination(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	cfg, err := s.backupService().LoadConfig()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Load config failed", err.Error())
-		return
-	}
-	filtered := []backup.Destination{}
-	for _, d := range cfg.Destinations {
-		if d.ID != id {
-			filtered = append(filtered, d)
-		}
-	}
-	cfg.Destinations = filtered
-	if err := s.backupService().SaveConfig(cfg); err != nil {
-		writeError(w, http.StatusInternalServerError, "Save failed", err.Error())
+	// RemoveDestination, not a filter over the config: a Google Drive
+	// destination's sign-in must be cancelled at Google and its credential file
+	// deleted, or removing it here leaves the grant live.
+	if _, err := s.backupService().RemoveDestination(chi.URLParam(r, "id")); err != nil {
+		writeError(w, http.StatusInternalServerError, "Remove failed", err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -456,17 +448,32 @@ func (s *CoreServer) handleBackupPull(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Destination not found", destID)
 		return
 	}
-	data, key, err := s.backupService().PullLatestArchive(*dest)
+	// Streamed from a file this agent wrote it to, as the archive's own bytes.
+	// It used to be read whole and base64-encoded into a JSON body, which put
+	// the archive in memory three times over — about 3 GB for the largest one
+	// accepted, which ends a phone's process.
+	path, key, size, done, err := s.backupService().PullLatestArchiveToFile(*dest)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Pull failed", err.Error())
 		return
 	}
-	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
-		"object_key":  key,
-		"size_bytes":  len(data),
-		"archive_b64": backup.EncodeB64(data),
-	})
+	defer done()
+	f, err := os.Open(path)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Pull failed", err.Error())
+		return
+	}
+	defer f.Close()
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+	w.Header().Set(ArchiveObjectKeyHeader, url.PathEscape(key))
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, f)
 }
+
+// ArchiveObjectKeyHeader carries the name an archive had in the destination it
+// was pulled from, path-escaped.
+const ArchiveObjectKeyHeader = "X-Archive-Object-Key"
 
 // handleBackupDownload serves a received opaque archive back to its owner.
 //

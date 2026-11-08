@@ -1,10 +1,12 @@
 package backup
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"identity-agent-core/secureenclave"
+	"io"
 	"io/fs"
 	"log"
 	"os"
@@ -469,42 +471,109 @@ func (s *Service) pushCloudDestination(dest Destination, result *ExportResult) e
 	return backend.Push(context.Background(), key, result.Bytes)
 }
 
-// PullLatestArchive downloads the newest encrypted .iab from a user-managed destination.
+// PullLatestArchive downloads the newest encrypted .iab from a user-managed
+// destination into memory. A restore uses PullLatestArchiveTo instead, which
+// never holds the archive.
 func (s *Service) PullLatestArchive(dest Destination) ([]byte, string, error) {
+	var buf bytes.Buffer
+	key, err := s.PullLatestArchiveTo(dest, &buf)
+	if err != nil {
+		return nil, "", err
+	}
+	return buf.Bytes(), key, nil
+}
+
+// PullLatestArchiveToFile streams the newest archive from a destination to a
+// file in a private working directory of this agent's, and returns where it is.
+// Neither the archive nor a base64 copy of it is ever held in memory, which is
+// what a phone cannot afford for an archive of a gigabyte.
+//
+// The directory is one of this agent's own working directories (RestoringPrefix),
+// so a backup never carries it and a start of the core sweeps it if the caller
+// dies. done removes it; call it when the file has been read.
+func (s *Service) PullLatestArchiveToFile(dest Destination) (path, key string, size int64, done func(), err error) {
+	dir, err := os.MkdirTemp(s.DataDir, RestoringPrefix+"fetch-")
+	if err != nil {
+		return "", "", 0, nil, fmt.Errorf("make room for the archive: %w", err)
+	}
+	InUse(dir)
+	done = func() {
+		NoLongerInUse(dir)
+		os.RemoveAll(dir)
+	}
+	path = filepath.Join(dir, "archive.iab")
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		done()
+		return "", "", 0, nil, err
+	}
+	key, err = s.PullLatestArchiveTo(dest, f)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		done()
+		return "", "", 0, nil, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		done()
+		return "", "", 0, nil, err
+	}
+	return path, key, info.Size(), done, nil
+}
+
+// archiveStreamer is a backend that can hand an archive to a writer as it
+// arrives, so a large one is never held whole. Those that cannot fall back to
+// Pull.
+type archiveStreamer interface {
+	PullTo(ctx context.Context, objectKey string, w io.Writer) error
+}
+
+// PullLatestArchiveTo streams the newest encrypted .iab from a user-managed
+// destination to w and returns its object key. On an error, whatever reached w
+// is not an archive and must be thrown away.
+func (s *Service) PullLatestArchiveTo(dest Destination, w io.Writer) (string, error) {
 	if dest.Type != DestCloudUser {
-		return nil, "", fmt.Errorf("pull only supported for cloud_user_managed destinations")
+		return "", fmt.Errorf("pull only supported for cloud_user_managed destinations")
 	}
 	if s.CredentialStore == nil {
-		return nil, "", fmt.Errorf("credential store unavailable")
+		return "", fmt.Errorf("credential store unavailable")
 	}
 	creds, err := s.CredentialStore.Load(dest.CredentialID)
 	if err != nil {
-		return nil, "", err
+		return "", err
 	}
 	backend, err := remoteBackendFactory(dest, creds)
 	if err != nil {
-		return nil, "", err
+		return "", err
 	}
 	dest = s.withOwnPrefix(dest)
 	ctx := context.Background()
 	if dest.CloudProvider == GoogleProviderName && dest.CloudPrefix == "" {
 		keys, err := backend.List(ctx, "")
 		if err != nil {
-			return nil, "", err
+			return "", err
 		}
 		if err := onlyOneArchiveOwner(keys); err != nil {
-			return nil, "", err
+			return "", err
 		}
 	}
 	key, err := remote.LatestArchiveKey(ctx, backend, dest.CloudPrefix)
 	if err != nil {
-		return nil, "", err
+		return "", err
+	}
+	if st, ok := backend.(archiveStreamer); ok {
+		return key, st.PullTo(ctx, key, w)
 	}
 	data, err := backend.Pull(ctx, key)
 	if err != nil {
-		return nil, "", err
+		return "", err
 	}
-	return data, key, nil
+	if _, err := w.Write(data); err != nil {
+		return "", err
+	}
+	return key, nil
 }
 
 // SaveDestinationCredentials stores encrypted remote credentials and returns the credential ID.

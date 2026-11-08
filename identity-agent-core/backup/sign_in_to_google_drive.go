@@ -306,6 +306,47 @@ func (s *Service) CompleteGoogleSignIn(state, code, redirectURI string) (Destina
 	return dest, nil
 }
 
+// RemoveDestination takes a destination out of the configuration and lets go of
+// what was given to reach it: the sign-in is cancelled at Google, where
+// removing it here alone would leave the grant live in the person's account,
+// and the credential file is deleted. Cancelling is best effort — an
+// unreachable Google must not make it impossible to remove a destination — and
+// the person can always remove the app in their Google account.
+//
+// Reports whether there was such a destination.
+func (s *Service) RemoveDestination(id string) (bool, error) {
+	cfg, err := s.ConfigStore.LoadConfig()
+	if err != nil {
+		return false, err
+	}
+	var gone *Destination
+	kept := []Destination{}
+	for i := range cfg.Destinations {
+		if cfg.Destinations[i].ID == id {
+			d := cfg.Destinations[i]
+			gone = &d
+			continue
+		}
+		kept = append(kept, cfg.Destinations[i])
+	}
+	cfg.Destinations = kept
+	if err := s.ConfigStore.SaveConfig(cfg); err != nil {
+		return false, err
+	}
+	if gone == nil || gone.CredentialID == "" || s.CredentialStore == nil {
+		return gone != nil, nil
+	}
+	if gone.CloudProvider == GoogleProviderName {
+		if creds, lerr := s.CredentialStore.Load(gone.CredentialID); lerr == nil {
+			g := s.googleSignIn()
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			remote.RevokeGoogleToken(ctx, g.Endpoints, g.HTTP, creds.OAuthRefreshToken)
+		}
+	}
+	return true, s.CredentialStore.Delete(gone.CredentialID)
+}
+
 func (s *Service) googleSignIn() *GoogleSignIn {
 	s.googleOnce.Do(func() {
 		if s.Google == nil {
