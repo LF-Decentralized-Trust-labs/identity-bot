@@ -250,6 +250,12 @@ var relayRetryWait = 5 * time.Second
 // relayRetryLongest is the longest wait between tries.
 const relayRetryLongest = 5 * time.Minute
 
+// relayStartWait is the wait after attempt failed tries to start the relay
+// manager (0 first): relayRetryWait, doubling to relayRetryLongest.
+func relayStartWait(attempt int) time.Duration {
+	return backoff.Wait(relayRetryWait, relayRetryLongest, attempt)
+}
+
 // relayFailure is why a relay generation has no relay: what a screen shows
 // when there is nothing running to ask.
 type relayFailure struct {
@@ -367,7 +373,7 @@ func (s *CoreServer) runRelay(ctx context.Context, gen int) {
 	// Keep trying. A relay that cannot be reached at start-up (the network is
 	// down, the machine just woke) is reached later without a restart.
 	for attempt := 0; ; attempt++ {
-		wait := backoff.Wait(relayRetryWait, relayRetryLongest, attempt)
+		wait := relayStartWait(attempt)
 		err := rm.Start(ctx)
 		if err == nil || ctx.Err() != nil || errors.Is(err, relay.ErrStopped) {
 			return

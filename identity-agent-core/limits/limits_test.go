@@ -108,7 +108,7 @@ func TestAPartFilledLimitsTakesTheDefaultsForWhatIsUnset(t *testing.T) {
 // A rate of nothing would divide by zero in Try, so no entry point lets one in.
 func TestNoRateIsEverZero(t *testing.T) {
 	now := time.Unix(1000, 0)
-	for _, l := range []Limits{{}, {RateBurst: 1}, {RatePerSecond: -2, RateBurst: 1}, {RatePerSecond: math.NaN(), RateBurst: 1}} {
+	for _, l := range []Limits{{}, {RateBurst: 1}, {RatePerSecond: -2, RateBurst: 1}, {RatePerSecond: 5, RateBurst: -3}, {RatePerSecond: math.NaN(), RateBurst: 1}} {
 		if got := l.WithDefaults(); !(got.RatePerSecond > 0) || got.RateBurst <= 0 {
 			t.Fatalf("%+v", got)
 		}

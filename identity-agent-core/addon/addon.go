@@ -43,6 +43,7 @@ import (
 	"identity-agent-core/schemas"
 	"identity-agent-core/server"
 	"identity-agent-core/store"
+	"identity-agent-core/trail"
 	"net/http"
 	"time"
 )
@@ -101,6 +102,9 @@ type Host interface {
 	AppLimits() limits.Limits
 	// DeliveryQueue is the sealed-message queue, kept across a restart.
 	DeliveryQueue() (*mediation.Queue, error)
+	// KeepExpiryIn names the trail the core marks an expired delivery in, on its
+	// own tick (ADR-069). Call it once with the trail built from AppLimits.
+	KeepExpiryIn(t *trail.Trail)
 
 	AnchorRecord() (bool, error)
 	AssetHandler() *asset.Handler

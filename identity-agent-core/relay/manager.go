@@ -336,10 +336,16 @@ func (m *Manager) run(ctx context.Context, endpoint string) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(backoff.Wait(minBackoff, maxBackoff, attempt)):
+		case <-time.After(reconnectWait(attempt)):
 		}
 		attempt++
 	}
+}
+
+// reconnectWait is how long to wait before reconnecting after attempt failed
+// tries (0 first): a second, doubling to 64 seconds.
+func reconnectWait(attempt int) time.Duration {
+	return backoff.Wait(minBackoff, maxBackoff, attempt)
 }
 
 // session holds one admitted session: dial, serve, claim the address, and

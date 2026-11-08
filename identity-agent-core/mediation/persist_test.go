@@ -242,3 +242,30 @@ func TestAQueueMadeWithPartFilledLimitsTakesTheDefaults(t *testing.T) {
 		}
 	}
 }
+
+// A mark that could not be saved is not made, so a later mark that can be saved
+// does not complete a message on the strength of the one that was not: kept
+// (not saved) then delivered (saved) leaves the message held, because it was
+// only delivered.
+func TestAMarkThatCouldNotBeSavedIsNotCountedWhenTheNextOneIs(t *testing.T) {
+	for name, order := range map[string][2]func(*Queue, string) error{
+		"kept then delivered": {(*Queue).Kept, (*Queue).Delivered},
+		"delivered then kept": {(*Queue).Delivered, (*Queue).Kept},
+	} {
+		t.Run(name, func(t *testing.T) {
+			q, path, _ := unwritableQueue(t)
+			if err := order[0](q, "m1"); err == nil {
+				t.Fatal("not saved but reported made")
+			}
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := order[1](q, "m1"); err != nil {
+				t.Fatal(err)
+			}
+			if q.Len() != 1 || q.Bytes() != 10 {
+				t.Fatalf("the unsaved mark was counted: %d held", q.Len())
+			}
+		})
+	}
+}

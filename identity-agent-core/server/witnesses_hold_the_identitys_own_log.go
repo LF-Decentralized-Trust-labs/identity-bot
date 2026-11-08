@@ -378,6 +378,12 @@ func (s *CoreServer) witnessRootsMovedOn(keeper drivers.KELKeeper) {
 	}
 }
 
+// movedOnWait is how long to wait after the given number of tries (1 first):
+// movedOnBackoff, doubling to movedOnLongestBackoff.
+func movedOnWait(attempts int) time.Duration {
+	return backoff.Wait(movedOnBackoff, movedOnLongestBackoff, max(0, attempts-1))
+}
+
 // endOrDelayMovedOn is what a pass that tried a moved-on root's witnesses
 // concludes: they hold the log and the job ends, or they do not and it is tried
 // again later, or no more.
@@ -393,7 +399,7 @@ func (s *CoreServer) endOrDelayMovedOn(entry recovery.RootAIDMapEntry, held bool
 	try := s.witnessing.movedOnTries[entry.OldRootAID]
 	try.attempts++
 	gaveUp := try.attempts >= movedOnGiveUpAfter
-	wait := backoff.Wait(movedOnBackoff, movedOnLongestBackoff, try.attempts-1)
+	wait := movedOnWait(try.attempts)
 	try.notBefore = witnessClock().Add(wait)
 	// The job leaves the list now and is added again only after notBefore, so
 	// passes that other work asks for do not count as tries.

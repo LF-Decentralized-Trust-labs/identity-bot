@@ -107,7 +107,7 @@ type Roster interface {
 	// MayUseAgent says whether the person's reach includes the AI agent.
 	MayUseAgent(person, agent string) bool
 	// AgentGrantAllows says whether the AI agent's own grant lets the person
-	// address it. Reach and grant must both allow (an @agent, M83 addition 3).
+	// address it. Reach and grant must both allow (an @agent needs both yeses, ADR-068).
 	AgentGrantAllows(agent, person string) bool
 	ActiveEmployee(person string) bool
 	IsSigner(person string) bool

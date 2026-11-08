@@ -3,6 +3,12 @@
 // recipient's host is briefly offline it holds an already committed message,
 // sealed to the recipient, until the message is delivered and kept.
 //
+// The Identity Agent's core owns the queue and its limits: it keeps the queue
+// across a restart and expires what has been held for the whole age on its own
+// tick, marking each expired message's entry not delivered, whatever an add-on
+// does (ADR-069). An add-on holds and delivers through the queue; it does not
+// enforce the age.
+//
 // It is transport only. What it holds is sealed bytes it cannot read, never the
 // words of a conversation an app keeps; once a message is delivered and kept
 // the sealed copy is deleted. It is bounded in size and age, with a share per

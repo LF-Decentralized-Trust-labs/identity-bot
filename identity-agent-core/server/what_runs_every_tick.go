@@ -9,7 +9,8 @@ import (
 
 // What the Identity Agent does on every tick, until it stops: anchor its record
 // where it anchors one, adopt what the device that holds the key has signed,
-// ask again for withdrawals still waiting, and keep its witnesses up to date.
+// ask again for withdrawals still waiting, keep its witnesses up to date, and refuse what the delivery queue has held for
+// its whole age.
 // Every Identity Agent runs this loop, whatever add-ons it includes.
 
 // keepAnchoring runs a tick every anchorTick until stop closes.
@@ -43,6 +44,7 @@ func (s *CoreServer) tick() {
 	if _, err := s.forgetUncollectedResults(time.Now()); err != nil {
 		log.Printf("[login] forgetting uncollected sign-in results: %v", err)
 	}
+	s.refuseExpiredDeliveries()
 }
 
 var (

@@ -24,7 +24,9 @@ import (
 	"identity-agent-core/authprovider"
 	"identity-agent-core/didcomm"
 	"identity-agent-core/internal/coretypes"
+	"identity-agent-core/limits"
 	"identity-agent-core/login"
+	"identity-agent-core/mediation"
 	"identity-agent-core/trail"
 )
 
@@ -353,6 +355,61 @@ func TestAValidStatementIsAdmittedAndLandsInTheTrail(t *testing.T) {
 	})
 	if err != nil || res.State != trail.Committed {
 		t.Fatalf("the trail did not keep what the app carried: %+v %v", res, err)
+	}
+}
+
+// The core expires a held delivery on its own tick, once the core has been told
+// which record to mark: the entry is marked not delivered, the sealed copy is
+// gone, and an add-on did nothing to make it so.
+func TestTheCoresTickExpiresADeliveryAndMarksItsEntry(t *testing.T) {
+	w := newAnAppWorld(t)
+	l := limits.Defaults()
+	l.QueueMaxAge = 30 * time.Millisecond
+	w.cw.s.SetLimits(l)
+	keys, err := didcomm.GenerateKeySet(w.cw.s.thisIdentityAgentsIdentifier())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := trail.New(permissiveRoster{keysSpeakingAt{s: w.cw.s, asset: "chat"}}, &keepingApp{}, trail.Options{
+		Agent:       w.cw.s.thisIdentityAgentsIdentifier(),
+		Countersign: func(r agentmessage.Record) (*didcomm.Envelope, error) { return agentmessage.Countersign(keys, r) },
+	})
+	key := newBrowsersKey(t)
+	w.signedIn(t, "Eann", key, time.Hour)
+	if rec := w.say(t, aSpokenRequest{who: "Eann", key: key, words: "hello", conversation: "c1"}); rec.Code != http.StatusOK {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	pp, salt, ok := ThePersonStatementThatSpoke(w.proof)
+	if !ok {
+		t.Fatal("no statement")
+	}
+	if err := tr.Open("c1", "Eann", false); err != nil {
+		t.Fatal(err)
+	}
+	res, err := tr.Write(context.Background(), trail.Write{Statement: pp.Statement, Verkey: pp.Verkey, Signature: pp.Signature, Salt: salt, Words: []byte("hello")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, err := w.cw.s.DeliveryQueue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Enqueue(mediation.Message{ID: trail.QueueID("c1", res.EntryID), Conversation: "c1", Sender: "Eann", Recipient: "r", Sealed: []byte("x")}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(60 * time.Millisecond)
+
+	w.cw.s.tick() // nothing is told which record to mark: the copy is kept
+	if q.Len() != 1 {
+		t.Fatal("expired without a record to mark")
+	}
+	w.cw.s.KeepExpiryIn(tr)
+	w.cw.s.tick()
+	if q.Len() != 0 {
+		t.Fatal("the core's tick left an expired copy held")
+	}
+	if es := tr.Entries("c1"); len(es) != 1 || es[0].NotDelivered == nil {
+		t.Fatalf("the entry was not marked not delivered: %+v", es)
 	}
 }
 

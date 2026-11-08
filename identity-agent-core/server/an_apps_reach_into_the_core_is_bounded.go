@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"math/rand/v2"
 	"net/http"
@@ -13,10 +14,10 @@ import (
 
 	"identity-agent-core/limits"
 	"identity-agent-core/mediation"
+	"identity-agent-core/trail"
 )
 
-// An app is held to limits that protect the Identity Agent from it (M83-ARCH
-// addition 14), at the one place an app's back end meets the routes people talk
+// An app is held to limits that protect the Identity Agent from it (ADR-069), at the one place an app's back end meets the routes people talk
 // through: thePersonAsking, which every request an app's back end signs for a
 // person passes before any route acts on it.
 //
@@ -72,6 +73,39 @@ func (s *CoreServer) appLimitState() *appLimitState {
 func (s *CoreServer) DeliveryQueue() (*mediation.Queue, error) {
 	st := s.appLimitState()
 	return st.queue, st.qerr
+}
+
+// KeepExpiryIn names the conversation record the core marks an expired
+// delivery in. From then on every tick of the core's loop refuses what the
+// delivery queue has held for its whole age: the entry is marked not delivered,
+// then the sealed copy is deleted. The age is the core's to enforce, so it holds
+// whatever an add-on does.
+func (s *CoreServer) KeepExpiryIn(t *trail.Trail) {
+	s.expiryMu.Lock()
+	s.expiryTrail = t
+	s.expiryMu.Unlock()
+}
+
+// refuseExpiredDeliveries is the core's part of each tick.
+func (s *CoreServer) refuseExpiredDeliveries() {
+	s.expiryMu.Lock()
+	t := s.expiryTrail
+	s.expiryMu.Unlock()
+	if t == nil {
+		return
+	}
+	q, err := s.DeliveryQueue()
+	if err != nil {
+		log.Printf("[delivery] queue: %v", err)
+		return
+	}
+	told, err := t.RefuseExpired(q)
+	if err != nil {
+		log.Printf("[delivery] expiring: %v", err)
+	}
+	for _, d := range told {
+		log.Printf("[delivery] %s was not delivered in time and is refused", d.ID)
+	}
 }
 
 // AppOverItsRate is what a request from an app's back end is refused with when

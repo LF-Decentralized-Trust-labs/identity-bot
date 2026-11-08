@@ -63,7 +63,7 @@ type Governance struct {
 // MayRead says who may read a conversation, from the trail and the roster
 // alone: whoever opened it, its current owner, and a signer. A former owner
 // loses access when they hand it on, and nobody else is admitted by having
-// written, been addressed or been named in a hand-off (M83-ARCH §4, §8).
+// written, been addressed or been named in a hand-off (ADR-068).
 func (t *Trail) MayRead(conversation, person string) bool {
 	c := t.get(conversation)
 	if c == nil || person == "" {
