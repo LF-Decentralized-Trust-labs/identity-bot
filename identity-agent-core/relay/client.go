@@ -96,6 +96,20 @@ func CheckConnectHost(baseURL string, d *ServiceDescriptor) error {
 	if d.ConnectHost == "" {
 		d.ConnectHost = base.Host
 	}
+	if d.CallerHost != "" {
+		// The caller host may be the relay's apex while this client was pointed
+		// at its connect host, so it may be the base's parent as well as a name
+		// under it. Any other host is somebody else's.
+		caller := strings.ToLower(d.CallerHost)
+		callerName := caller
+		if h, _, err := net.SplitHostPort(caller); err == nil {
+			callerName = h
+		}
+		bn := strings.ToLower(base.Hostname())
+		if callerName != bn && !strings.HasSuffix(callerName, "."+bn) && !strings.HasSuffix(bn, "."+callerName) {
+			return fmt.Errorf("the relay at %s names %s as its caller host, which is not under its own name", bn, caller)
+		}
+	}
 	connect := strings.ToLower(d.ConnectHost)
 	connectName := connect
 	if h, _, err := net.SplitHostPort(connect); err == nil {
@@ -154,10 +168,20 @@ func (c *Client) Allocate(ctx context.Context, aid, commitment string) (label, a
 	// One host for every relationship: the relay's own, which this client was
 	// pointed at. A host of its own per identity would still show each one in
 	// the TLS handshake, whatever the label.
+	// The relay's own host is the descriptor's caller host: a client pointed at
+	// the connect host is given addresses at the caller-facing one. Without a
+	// descriptor naming one, it is the host this client was pointed at.
 	base, berr := url.Parse(c.BaseURL)
 	got, gerr := url.Parse(out.PublicURL)
-	if berr != nil || gerr != nil || !strings.EqualFold(got.Host, base.Host) {
+	if berr != nil || gerr != nil {
 		return "", "", fmt.Errorf("allocate: the relay gave an address at %q, not at its own host %q", out.PublicURL, c.BaseURL)
+	}
+	callerHost := base.Host
+	if c.Descriptor != nil && c.Descriptor.CallerHost != "" {
+		callerHost = c.Descriptor.CallerHost
+	}
+	if !strings.EqualFold(got.Host, callerHost) {
+		return "", "", fmt.Errorf("allocate: the relay gave an address at %q, not at its own host %q", out.PublicURL, callerHost)
 	}
 	return out.Allocation, strings.TrimRight(out.PublicURL, "/"), nil
 }

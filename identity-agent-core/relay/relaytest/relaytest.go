@@ -260,6 +260,7 @@ func (r *Relay) handle(w http.ResponseWriter, req *http.Request) {
 		}
 		json.NewEncoder(w).Encode(relay.ServiceDescriptor{
 			Protocol: relayproto.ProtocolVersion, Service: r.service, Mode: r.Mode, ConnectHost: connect,
+			CallerHost:     strings.TrimPrefix(r.Server.URL, "https://"),
 			TunnelEndpoint: "wss://" + connect + "/tunnel", Endpoints: eps,
 		})
 		return

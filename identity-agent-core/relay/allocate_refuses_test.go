@@ -56,3 +56,52 @@ func TestAllocateRefusesAnAddressThatIsNotAPathAtTheRelaysOwnHost(t *testing.T) 
 		t.Fatalf("a path at the relay's own host was refused: %v %q", err, u)
 	}
 }
+
+const callerLabel = "q7Zk2mV9xW4pLr8sTn3uYa"
+
+// A client pointed at the relay's connect host is handed addresses at the
+// caller-facing host, as the real relay does. The descriptor's caller host is
+// what Allocate holds the address to, so discovery and Allocate agree.
+func TestAClientPointedAtTheConnectHostIsGivenAddressesAtTheCallerHost(t *testing.T) {
+	desc := func() *relay.ServiceDescriptor {
+		return &relay.ServiceDescriptor{Service: "relay.example", ConnectHost: "connect.relay.example",
+			CallerHost:     "relay.example",
+			TunnelEndpoint: "wss://connect.relay.example/tunnel",
+			Endpoints:      map[string]string{relay.OpAllocate: "https://connect.relay.example/allocate"}}
+	}
+	d := desc()
+	if err := relay.CheckConnectHost("https://connect.relay.example", d); err != nil {
+		t.Fatalf("discovery refused a client pointed at the connect host: %v", err)
+	}
+	c := allocatingClient("https://relay.example/"+callerLabel, callerLabel)
+	c.BaseURL = "https://connect.relay.example"
+	c.Descriptor = d
+	if l, _, err := c.Allocate(context.Background(), "Eaid", "commitment"); err != nil || l != callerLabel {
+		t.Fatalf("Allocate refused an address at the descriptor's caller host: %v", err)
+	}
+	// The connect host is not where callers are: an address there is refused.
+	c = allocatingClient("https://connect.relay.example/"+callerLabel, callerLabel)
+	c.BaseURL = "https://connect.relay.example"
+	c.Descriptor = desc()
+	if _, _, err := c.Allocate(context.Background(), "Eaid", "commitment"); err == nil {
+		t.Fatal("Allocate accepted an address at the connect host, not the caller host")
+	}
+}
+
+// A descriptor that names a caller host outside the relay's name, as one
+// rewritten by a proxy would, is refused at discovery; and Allocate holds an
+// address to the caller host the descriptor names, not to one it was not given.
+func TestAForeignCallerHostIsRefused(t *testing.T) {
+	d := &relay.ServiceDescriptor{Service: "relay.example", ConnectHost: "relay.example", CallerHost: "other.example",
+		TunnelEndpoint: "wss://relay.example/tunnel",
+		Endpoints:      map[string]string{relay.OpAllocate: "https://relay.example/allocate"}}
+	if err := relay.CheckConnectHost("https://relay.example", d); err == nil ||
+		!strings.Contains(err.Error(), "caller host") {
+		t.Fatalf("a foreign caller host was accepted: %v", err)
+	}
+	c := allocatingClient("https://relay.example/"+callerLabel, callerLabel)
+	c.Descriptor.CallerHost = "other.example"
+	if _, _, err := c.Allocate(context.Background(), "Eaid", "commitment"); err == nil {
+		t.Fatal("Allocate accepted an address away from the descriptor's caller host")
+	}
+}
