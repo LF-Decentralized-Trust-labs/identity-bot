@@ -137,7 +137,7 @@ func Commitment(secret []byte) string {
 }
 
 // Allocate makes a private address held by the secret behind commitment.
-func (c *Client) Allocate(ctx context.Context, aid, commitment string) (label, url string, err error) {
+func (c *Client) Allocate(ctx context.Context, aid, commitment string) (label, address string, err error) {
 	var out struct {
 		Allocation string `json:"allocation"`
 		PublicURL  string `json:"public_url"`
@@ -150,6 +150,14 @@ func (c *Client) Allocate(ctx context.Context, aid, commitment string) (label, u
 	}
 	if err := relayproto.CheckPrivateURL(out.PublicURL, out.Allocation); err != nil {
 		return "", "", fmt.Errorf("allocate: %w", err)
+	}
+	// One host for every relationship: the relay's own, which this client was
+	// pointed at. A host of its own per identity would still show each one in
+	// the TLS handshake, whatever the label.
+	base, berr := url.Parse(c.BaseURL)
+	got, gerr := url.Parse(out.PublicURL)
+	if berr != nil || gerr != nil || !strings.EqualFold(got.Host, base.Host) {
+		return "", "", fmt.Errorf("allocate: the relay gave an address at %q, not at its own host %q", out.PublicURL, c.BaseURL)
 	}
 	return out.Allocation, strings.TrimRight(out.PublicURL, "/"), nil
 }
