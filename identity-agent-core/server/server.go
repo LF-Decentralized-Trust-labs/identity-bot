@@ -407,6 +407,7 @@ func New(cfg Config) (*CoreServer, error) {
 	s.checkEntityTypeDeclared()
 
 	ws := watcher.NewService(watcher.NewSQLiteStore(dataStore.DB()))
+	ws.SignDigest = s.signWitnessReceipt
 	ws.OnEvent = func(eventType string, payload map[string]interface{}) {
 		s.EventHub.Broadcast(AgentEvent{Type: eventType, Payload: payload})
 	}

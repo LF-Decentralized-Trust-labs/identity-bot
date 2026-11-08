@@ -1,0 +1,6 @@
+[
+  {"name": "a seen event", "aid": "EAlice", "seq": 0, "digest": "ab12", "first_seen_at": "2026-01-02T03:04:05Z", "observed_since": "2026-01-02T03:04:05Z",
+   "statement": "kel-digest-response/v1\naid=EAlice\nseq=0\ndigest=ab12\nfirst_seen_at=2026-01-02T03:04:05Z\nobserved_since=2026-01-02T03:04:05Z\n"},
+  {"name": "an event never seen", "aid": "EAlice", "seq": 17, "digest": null, "first_seen_at": null, "observed_since": null,
+   "statement": "kel-digest-response/v1\naid=EAlice\nseq=17\ndigest=-\nfirst_seen_at=-\nobserved_since=-\n"}
+]
