@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
+	"identity-agent-core/internal/boundedread"
 	"net/http"
 	"time"
 )
@@ -52,7 +52,10 @@ func ProvisionAgent(ctx context.Context, baseURL, name string, capabilities []st
 		return nil, err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
+	raw, err := boundedread.All(resp.Body, boundedread.Document)
+	if err != nil {
+		return nil, fmt.Errorf("read provision response (%d): %w", resp.StatusCode, err)
+	}
 	if resp.StatusCode != http.StatusCreated {
 		return nil, fmt.Errorf("provision failed (%d): %s", resp.StatusCode, string(raw))
 	}

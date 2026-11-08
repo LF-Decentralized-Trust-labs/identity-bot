@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -30,6 +29,7 @@ import (
 	"identity-agent-core/drivers"
 	"identity-agent-core/endpoint"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/boundedread"
 	"identity-agent-core/keriengine"
 	"identity-agent-core/linkverifier"
 	"identity-agent-core/login"
@@ -2672,9 +2672,9 @@ func (s *CoreServer) handleFetchCredentialSchema(w http.ResponseWriter, r *http.
 		return
 	}
 
-	schemaBytes, err := io.ReadAll(resp.Body)
+	schemaBytes, err := boundedread.All(resp.Body, boundedread.Document)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to read schema response", err.Error())
+		writeError(w, http.StatusBadGateway, "Failed to read schema response", err.Error())
 		return
 	}
 
@@ -3867,7 +3867,7 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body := boundedread.Snippet(resp.Body)
 		log.Printf("[identity-agent-core] OOBI-RESOLVE: Remote returned %d: %s", resp.StatusCode, string(body))
 		writeError(w, http.StatusBadGateway, "OOBI resolution failed", fmt.Sprintf("Remote returned %d: %s", resp.StatusCode, string(body)))
 		return
@@ -3897,7 +3897,7 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 		// across the two realms either.
 		Realm string `json:"realm,omitempty"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&oobiData); err != nil {
+	if err := json.NewDecoder(boundedread.Reader(resp.Body, boundedread.Document)).Decode(&oobiData); err != nil {
 		writeError(w, http.StatusBadGateway, "Invalid OOBI response", fmt.Sprintf("Could not parse response: %v", err))
 		return
 	}
@@ -4050,7 +4050,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body := boundedread.Snippet(resp.Body)
 		writeError(w, http.StatusBadGateway, "OOBI resolution failed", fmt.Sprintf("Remote returned %d: %s", resp.StatusCode, string(body)))
 		return
 	}
@@ -4070,7 +4070,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 		// below before anything is recorded, the same as the other resolve paths.
 		Realm string `json:"realm,omitempty"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&oobiData); err != nil {
+	if err := json.NewDecoder(boundedread.Reader(resp.Body, boundedread.Document)).Decode(&oobiData); err != nil {
 		writeError(w, http.StatusBadGateway, "Invalid OOBI response", fmt.Sprintf("Could not parse response: %v", err))
 		return
 	}

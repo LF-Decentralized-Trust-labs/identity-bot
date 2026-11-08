@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"identity-agent-core/internal/boundedread"
 	"identity-agent-core/internal/jsonreply"
 	"identity-agent-core/login"
 )
@@ -65,7 +66,11 @@ func (s *CoreServer) ownerKeyStateIsStale(r *http.Request) bool {
 	}
 	var body []byte
 	if r.Body != nil {
-		body, _ = io.ReadAll(r.Body)
+		var rerr error
+		body, rerr = boundedread.All(r.Body, boundedread.Request)
+		if rerr != nil {
+			return false
+		}
 		r.Body = io.NopCloser(bytes.NewReader(body))
 	}
 	target, err := s.theIdentityAgentAnOwnerNames(r)

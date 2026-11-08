@@ -8,7 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
+	"identity-agent-core/internal/boundedread"
 	"net/http"
 	"strconv"
 	"time"
@@ -104,7 +104,10 @@ func (c *Client) Invoke(ctx context.Context, capabilityID string, args map[strin
 		return nil, err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
+	raw, err := boundedread.All(resp.Body, boundedread.Document)
+	if err != nil {
+		return nil, fmt.Errorf("read response (%d): %w", resp.StatusCode, err)
+	}
 
 	var rpc struct {
 		Result *struct {

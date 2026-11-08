@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"identity-agent-core/internal/boundedread"
 	"identity-agent-core/login"
 )
 
@@ -31,6 +31,10 @@ func (s *CoreServer) mountScanRoutes(r chi.Router) {
 // buildAskContext parses a scanned Ask pointer (.../i/{token}), fetches the signed Ask, and
 // reads its action `t`. The base is the URL minus the trailing /i/{token} WITH the path prefix
 // preserved (so path-based relay tunnels like https://host/green-oak-87 work).
+// maxAskBytes is the most of a scanned Ask the core will read from whoever
+// serves it.
+const maxAskBytes = boundedread.Document
+
 func (s *CoreServer) buildAskContext(rawURL string) (AskContext, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -55,7 +59,12 @@ func (s *CoreServer) buildAskContext(rawURL string) (AskContext, error) {
 	if resp.StatusCode != http.StatusOK {
 		return AskContext{}, fmt.Errorf("fetch Ask: status %d", resp.StatusCode)
 	}
-	askBytes, _ := io.ReadAll(resp.Body)
+	// An Ask is a small signed document. One over the limit is refused, never
+	// cut short: half a document can still parse as a different one.
+	askBytes, err := boundedread.All(resp.Body, maxAskBytes)
+	if err != nil {
+		return AskContext{}, fmt.Errorf("read Ask: %w", err)
+	}
 	t, err := askActionType(askBytes)
 	if err != nil {
 		return AskContext{}, fmt.Errorf("read action t: %w", err)
@@ -64,10 +73,15 @@ func (s *CoreServer) buildAskContext(rawURL string) (AskContext, error) {
 }
 
 func (s *CoreServer) handleScanDecode(w http.ResponseWriter, r *http.Request) {
+	boundedread.LimitRequest(w, r, boundedread.Request)
 	var body struct {
 		URL string `json:"url"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.URL == "" {
+		if err != nil && boundedread.Status(err) == http.StatusRequestEntityTooLarge {
+			http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "url required", http.StatusBadRequest)
 		return
 	}
@@ -109,6 +123,7 @@ func (s *CoreServer) handleScanDecode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *CoreServer) handleScanExecute(w http.ResponseWriter, r *http.Request) {
+	boundedread.LimitRequest(w, r, boundedread.Request)
 	// Surface handler panics as a readable 500 body (mobile has no attached
 	// console; the recovered stack is the only way to see what broke).
 	defer func() {
@@ -125,6 +140,10 @@ func (s *CoreServer) handleScanExecute(w http.ResponseWriter, r *http.Request) {
 		AskDigest string `json:"ask_digest"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.URL == "" {
+		if err != nil && boundedread.Status(err) == http.StatusRequestEntityTooLarge {
+			http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "url required", http.StatusBadRequest)
 		return
 	}
