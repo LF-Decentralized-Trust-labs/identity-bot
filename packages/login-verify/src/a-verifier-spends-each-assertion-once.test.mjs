@@ -89,7 +89,8 @@ if (kept[0] < Date.parse(ahead.dt) + 300_000) fail("forgotten while it can still
 
 // 5. The default store forgets what is too old to matter, and holds a bounded number.
 const store = inMemoryConsumedNonces();
-await store.claim("old", Date.now() - 1);
+await store.claim("old", Date.now() + 50);
+await new Promise((r) => setTimeout(r, 1100)); // the store sweeps at most once a second
 if (!(await store.claim("old", Date.now() + 60_000))) fail("an expired entry was still held");
 
 console.log("verifier: each accepted assertion is spent once, directly or via the callback; refusals spend nothing");
