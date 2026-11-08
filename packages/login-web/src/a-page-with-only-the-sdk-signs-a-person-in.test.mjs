@@ -32,7 +32,7 @@ assert.equal(got.pairwise_aid, alice.aid);
 assert.equal(got.claimed_by_agent, alice.aid, "what the agent said and what the page checked agree");
 assert.equal(ia.asked.at(-1).key_log, alice.keyLog, "the person's own key log is what the Identity Agent was asked about");
 
-// 2. The back end's rule, not a second one: the assertion is claimed with a
+// 2. The same claim call a back end makes (advisory in a page: one page load, skippable): the assertion is claimed with a
 // keep-until time, and presented again it is refused as already used.
 assert.equal(claims.length, 1);
 assert.ok(claims[0].until > Date.now(), "the claim carries a keep-until time");
@@ -104,4 +104,4 @@ ia.decline(s8.session_token);
 assert.equal((await p8.poll()).state, "declined");
 
 await ia.close();
-console.log("a page with only the SDK signs a person in, checks the assertion in the page, and refuses a replay by the back end's rule");
+console.log("a page with only the SDK signs a person in, checks the assertion in the page, and refuses a second presentation in the same page load (advisory)");
