@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -216,5 +217,149 @@ func TestAFreshAgentReachesTheShippedWatcherAddress(t *testing.T) {
 	}
 	if got := ws.DefaultL2URL(); got != DefaultL2DigestURL || !strings.Contains(got, "watcher1.") {
 		t.Fatalf("%q", got)
+	}
+}
+
+// The binding of an answer to the question asked is a check of its own: the
+// signature is genuine here, so only the identifier and sequence comparison
+// stands between a replayed answer and a block. Each case is a genuinely
+// signed answer from a trusted watcher, for something other than what was asked.
+func TestAGenuineAnswerForAnotherQuestionIsNotAnAnswerToThisOne(t *testing.T) {
+	trusted := newTestWatcherKey(1)
+	aid := "EHonest000000000000000000000000000000000000"
+	other := "EOther0000000000000000000000000000000000000"
+	// asked is what the client asks (aid at seq 2); the watcher answers with
+	// the signed answer for (answerAID, answerSeq), where it holds a digest that
+	// conflicts with the identity's own key log.
+	cases := []struct {
+		name      string
+		answerAID string
+		answerSeq int
+	}{
+		{"the same sequence of another identity", other, 2},
+		{"another sequence of the same identity", aid, 1},
+	}
+	for _, tc := range cases {
+		serving, _ := migratedWatcher(t)
+		serving.SignDigest = trusted.sign
+		seen(t, serving, tc.answerAID, tc.answerSeq, "ffff")
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			resp, err := serving.GetPublicDigest(tc.answerAID, tc.answerSeq) // whatever was asked
+			if err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+		}))
+		defer srv.Close()
+
+		// The answer is genuine: asked for what it is about, it is believed.
+		if got, _, err := clientTrusting(trusted).QueryDigest(context.Background(), srv.URL, tc.answerAID, tc.answerSeq); err != nil || got.Digest == nil {
+			t.Fatalf("%s: control: %+v, %v", tc.name, got, err)
+		}
+		// Asked about another question, it is refused, not read as an answer.
+		if got, _, err := clientTrusting(trusted).QueryDigest(context.Background(), srv.URL, aid, 2); err == nil || got != nil {
+			t.Errorf("%s: a replayed answer was accepted: %+v", tc.name, got)
+		}
+		// And it cannot make the identity look duplicitous.
+		ws, _ := migratedWatcher(t)
+		ws.L2 = clientTrusting(trusted)
+		if err := ws.Store.SetConfig("default_l2_url", srv.URL); err != nil {
+			t.Fatal(err)
+		}
+		res, err := ws.VerifyKel(context.Background(), VerifyKelInput{AID: aid, KEL: keyLog(aid, 3), SourceType: SourceOOBI})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Blocked || !res.OK {
+			t.Errorf("%s: a replayed answer pushed the identity to %q (%s)", tc.name, res.OverallOutcome, res.Reason)
+		}
+	}
+}
+
+func TestTheTrustedWatchersAreTheShippedOnesPlusWhatTheOwnerAdded(t *testing.T) {
+	a, b, shipped := newTestWatcherKey(1), newTestWatcherKey(2), newTestWatcherKey(3)
+	old := DefaultL2SignerAIDs
+	t.Cleanup(func() { DefaultL2SignerAIDs = old })
+
+	ws, _ := migratedWatcher(t)
+	if len(old) == 0 {
+		if got := ws.TrustedL2Signers(); len(got) != 0 {
+			t.Fatalf("nothing shipped and nothing added, yet %v is trusted", got)
+		}
+	}
+	DefaultL2SignerAIDs = []string{shipped.aid}
+	if got := ws.TrustedL2Signers(); len(got) != 1 || got[0] != shipped.aid {
+		t.Fatalf("shipped only: %v", got)
+	}
+	list, _ := json.Marshal([]string{a.aid, b.aid})
+	if err := ws.Store.SetConfig("l2_signer_aids", string(list)); err != nil {
+		t.Fatal(err)
+	}
+	got := ws.TrustedL2Signers()
+	if len(got) != 3 || got[0] != shipped.aid || got[1] != a.aid || got[2] != b.aid {
+		t.Fatalf("shipped plus added: %v", got)
+	}
+	// A stored row never replaces the shipped list, and rubbish is ignored.
+	if err := ws.Store.SetConfig("l2_signer_aids", "not json"); err != nil {
+		t.Fatal(err)
+	}
+	if got := ws.TrustedL2Signers(); len(got) != 1 || got[0] != shipped.aid {
+		t.Fatalf("a malformed row: %v", got)
+	}
+
+	// The client the service builds reads that same list: an owner-added
+	// watcher's answer is believed, one nobody listed is not.
+	if err := ws.Store.SetConfig("l2_signer_aids", string(list)); err != nil {
+		t.Fatal(err)
+	}
+	ws.L2.HTTPClient = http.DefaultClient // the test server is on loopback
+	url, serving := servedBy(t, &a, nil)
+	seen(t, serving, "EAlice", 0, "abcd")
+	if got, _, err := ws.L2.QueryDigest(context.Background(), url, "EAlice", 0); err != nil || got.Digest == nil {
+		t.Fatalf("an owner-added watcher: %+v, %v", got, err)
+	}
+	if err := ws.Store.SetConfig("l2_signer_aids", "[]"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, err := ws.L2.QueryDigest(context.Background(), url, "EAlice", 0); err == nil {
+		t.Fatalf("a watcher nobody listed was believed: %+v", got)
+	}
+}
+
+// The shared vectors carry a key and signature, so a second implementation can
+// check its signing; this implementation's verifier must accept every one.
+func TestTheSharedVectorSignaturesVerifyThroughTheClientsOwnCheck(t *testing.T) {
+	raw, err := os.ReadFile("../witnessproto/kel-digest-statement-vectors.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vs []struct {
+		Name      string  `json:"name"`
+		AID       string  `json:"aid"`
+		Seq       int     `json:"seq"`
+		Digest    *string `json:"digest"`
+		FirstSeen *string `json:"first_seen_at"`
+		Observed  *string `json:"observed_since"`
+		SignedBy  string  `json:"signed_by"`
+		Signature string  `json:"signature"`
+	}
+	if err := json.Unmarshal(raw, &vs); err != nil {
+		t.Fatal(err)
+	}
+	if len(vs) < 2 {
+		t.Fatal("the vectors have lost cases")
+	}
+	for _, v := range vs {
+		c := &L2Client{TrustedSigners: func() []string { return []string{v.SignedBy} }}
+		r := &DigestResponse{AID: v.AID, SequenceNumber: v.Seq, Digest: v.Digest, FirstSeenAt: v.FirstSeen, ObservedSince: v.Observed, SignedBy: v.SignedBy, Signature: v.Signature}
+		if err := c.verifyAnswer(r, v.AID, v.Seq); err != nil {
+			t.Errorf("%s: %v", v.Name, err)
+		}
+		d := "ffff"
+		r.Digest = &d
+		if err := c.verifyAnswer(r, v.AID, v.Seq); err == nil {
+			t.Errorf("%s: a changed digest still verified", v.Name)
+		}
 	}
 }

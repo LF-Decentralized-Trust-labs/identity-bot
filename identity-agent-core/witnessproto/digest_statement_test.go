@@ -1,6 +1,8 @@
 package witnessproto
 
 import (
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"strings"
@@ -57,5 +59,48 @@ func TestAFieldThatCouldBlurTwoAnswersIsRefused(t *testing.T) {
 	a, _ := DigestStatement("E", 1, nil, nil, nil)
 	if !strings.HasPrefix(a, DigestStatementTag+"\n") {
 		t.Error("the statement does not open with its tag")
+	}
+}
+
+// A second implementation can check its signature, not only its text: every
+// vector carries the signer (a non-transferable identifier, so itself the
+// key) and its Ed25519 signature over the statement. The key is a test key
+// (seed 0x01..0x20) and must never be trusted anywhere.
+func TestTheSharedVectorsCarrySignaturesThatVerify(t *testing.T) {
+	raw, err := os.ReadFile("kel-digest-statement-vectors.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vs []struct {
+		Name      string `json:"name"`
+		SignedBy  string `json:"signed_by"`
+		Signature string `json:"signature"`
+		Statement string `json:"statement"`
+	}
+	if err := json.Unmarshal(raw, &vs); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range vs {
+		// Both are CESR qb64: decode the whole text, then drop the bytes that
+		// carry the code (one for the 44-character key "B...", two for the
+		// 88-character signature "0B...").
+		kb, err := base64.RawURLEncoding.DecodeString(v.SignedBy)
+		if err != nil || len(kb) != 33 || v.SignedBy[0] != 'B' {
+			t.Fatalf("%s: signed_by %q is not a key: %v", v.Name, v.SignedBy, err)
+		}
+		pub := kb[1:]
+		if len(pub) != ed25519.PublicKeySize {
+			t.Fatalf("%s: signed_by %q is not a key: %v", v.Name, v.SignedBy, err)
+		}
+		sigBytes, err := base64.RawURLEncoding.DecodeString(v.Signature)
+		if err != nil || len(sigBytes) != 66 || !strings.HasPrefix(v.Signature, "0B") {
+			t.Fatalf("%s: signature %q is not a 0B signature: %v", v.Name, v.Signature, err)
+		}
+		if !ed25519.Verify(pub, []byte(v.Statement), sigBytes[2:]) {
+			t.Errorf("%s: the signature does not verify over the statement", v.Name)
+		}
+		if ed25519.Verify(pub, []byte(v.Statement+" "), sigBytes[2:]) {
+			t.Errorf("%s: the signature verifies over altered text", v.Name)
+		}
 	}
 }

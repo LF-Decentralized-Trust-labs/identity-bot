@@ -39,8 +39,8 @@ func NewService(store Store) *Service {
 }
 
 // DefaultL2SignerAIDs are the watchers whose signed answers ship trusted. It is
-// empty until the default watcher has an identity of its own (tracker T-583);
-// until then an agent trusts only what its owner adds under "l2_signer_aids".
+// empty until the default watcher has an identifier of its own; until then an
+// agent trusts only what its owner adds under "l2_signer_aids".
 var DefaultL2SignerAIDs = []string{}
 
 // TrustedL2Signers is every watcher whose signature on a digest answer is
