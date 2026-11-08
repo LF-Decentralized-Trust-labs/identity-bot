@@ -58,7 +58,7 @@ if (replay.ok || !String(replay.reason).includes("already used")) fail(`a replay
 
 // 3. A refused assertion spends nothing.
 const a4 = await assertionFor("n4");
-const bad = { ...a4, sig: a4.sig.slice(0, -2) + "AA" };
+const bad = { ...a4, sig: (a4.sig[0] === "A" ? "B" : "A") + a4.sig.slice(1) };
 await v.verifyAssertion(bad, expect(a4));
 if (!(await v.verifyAssertion(a4, expect(a4))).valid) fail("a forged copy spent the genuine assertion");
 
@@ -69,6 +69,23 @@ const p2 = new IdentityAgentVerifier({ siteIdentity: site, resolveKey, consumedA
 const a5 = await assertionFor("n5");
 if (!(await p1.verifyAssertion(a5, expect(a5))).valid) fail("first process refused");
 if ((await p2.verifyAssertion(a5, expect(a5))).valid) fail("the second process accepted what the first spent");
+
+// 4b. A site that cannot finish the sign-in gets the assertion back to try again.
+const a6 = await assertionFor("n6");
+const { session_token: t6 } = await v.createChallenge({ audience: a6.audience, requestedDisclosures: [], callbackUrl: "x" });
+v.sessionStore.get(t6).challenge.nonce = "n6";
+await v.handleCallback(a6, t6, () => { throw new Error("database down"); }).then(() => fail("the failure was swallowed"), () => {});
+if (!(await v.handleCallback(a6, t6, () => "s6")).ok) fail("an assertion was lost to a failure after it was accepted");
+
+// 4c. An assertion dated ahead of now is remembered until it can no longer pass.
+const ahead = await assertionFor("n7");
+ahead.dt = new Date(Date.now() + 290_000).toISOString().replace(/\.\d{3}Z$/, "Z");
+ahead.d = assertionDigest(ahead); delete ahead.sig; ahead.sig = await signCanonical(canonicalAssertionBody(ahead), priv);
+const kept = [];
+const probe = { claim: (k, until) => (kept.push(until), true) };
+const pv = new IdentityAgentVerifier({ siteIdentity: site, resolveKey, consumedAssertions: probe });
+if (!(await pv.verifyAssertion(ahead, expect(ahead))).valid) fail("a slightly future assertion was refused");
+if (kept[0] < Date.parse(ahead.dt) + 300_000) fail("forgotten while it can still pass the time check");
 
 // 5. The default store forgets what is too old to matter, and holds a bounded number.
 const store = inMemoryConsumedNonces();

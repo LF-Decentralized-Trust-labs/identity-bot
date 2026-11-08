@@ -13,9 +13,10 @@ answered, asks again who signed in:
 
 ```ts
 import { startLoginSession, confirmLoginSession } from "@identity-agent/login-web/server";
-import { inMemoryConsumedNonces } from "@identity-agent/login-verify";
-
-const spent = inMemoryConsumedNonces(); // shared across processes if you have several
+// Any store with claim(key): boolean. @identity-agent/login-verify has an
+// in-memory one (inMemoryConsumedNonces); share one across processes if you have several.
+const spent = { claim: (k) => !seen.has(k) && (seen.add(k), true) };
+const seen = new Set();
 
 // 1. The person asks to sign in. Show them `pointerUrl`; keep `collectorSecret` on the server.
 const s = await startLoginSession({ agentUrl, assetId, audience: "https://your-site.example" });
@@ -26,6 +27,6 @@ const r = await confirmLoginSession({ agentUrl, assetId, sessionToken: s.session
 if (r.state === "verified") issueYourSession(r.pairwiseAid);
 ```
 
-`consume` makes a verified sign-in sign nobody in a second time. The Identity
+`consume` makes a verified sign-in sign nobody in a second time (it is spent when `verified` comes back, so if your own session issue fails, start the sign-in again). The Identity
 Agent has already checked the person's key log, the audience, the nonce and the
 organisation's policy.

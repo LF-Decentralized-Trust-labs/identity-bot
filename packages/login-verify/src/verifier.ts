@@ -10,7 +10,7 @@ import {
   signCanonical,
 } from "./canonical.js";
 import type { KeyResolver } from "./resolver.js";
-import { inMemoryConsumedNonces, verifyLoginAssertion, type ConsumedNonces } from "./standalone-verify.js";
+import { consumedKey, inMemoryConsumedNonces, verifyLoginAssertion, type ConsumedNonces } from "./standalone-verify.js";
 import { InMemorySessionStore } from "./session-store.js";
 import { buildLoginQrUrl } from "./qr-url.js";
 import { AskAction } from "./types.js";
@@ -177,8 +177,15 @@ export class IdentityAgentVerifier {
       return { ok: false, reason: result.reason };
     }
 
-    const appToken = issueAppSession(result.pairwiseAID, result.disclosures ?? {});
-    this.store.markVerified(sessionToken, result, result.pairwiseAID, appToken);
+    // The assertion is spent by now. If the site cannot finish the sign-in, give
+    // it back so the person's Identity Agent can post it again.
+    try {
+      const appToken = issueAppSession(result.pairwiseAID, result.disclosures ?? {});
+      this.store.markVerified(sessionToken, result, result.pairwiseAID, appToken);
+    } catch (err) {
+      await this.consumed.release?.(consumedKey(assertion));
+      throw err;
+    }
     return { ok: true };
   }
 }

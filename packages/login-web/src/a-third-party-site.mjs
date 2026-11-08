@@ -1,3 +1,9 @@
+// ILLUSTRATIVE ONLY, for the end-to-end test; not a model to copy whole. A real
+// site binds /login/finish to the browser that started the sign-in (a cookie),
+// issues an unguessable session, takes the audience from its own configuration
+// rather than the Host header, keeps the expected nonce and site from its own
+// record of the challenge, and does not expose /login/verify-assertion.
+//
 // A third party's website, as its server would be written with this SDK.
 //
 // It holds no key of its own. It asks its organisation's Identity Agent to

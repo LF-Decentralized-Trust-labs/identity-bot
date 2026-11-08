@@ -34,6 +34,14 @@ export interface ConsumedNonces {
    *  forgotten: after it the assertion is too old to verify anyway, so a store
    *  may drop it to stay small. A store that ignores it is also correct. */
   claim(key: string, keepUntilMs?: number): Promise<boolean> | boolean;
+  /** Forgets a claim made by mistake, so the same assertion can be tried again:
+   *  the verifier calls it when accepting an assertion failed after the claim. */
+  release?(key: string): Promise<void> | void;
+}
+
+/** The key an assertion is remembered under. */
+export function consumedKey(a: { audience: string; nonce: string; i: string }): string {
+  return `${a.audience}|${a.nonce}|${a.i}`;
 }
 
 /** The most a default store holds. A full store forgets its oldest entries
@@ -44,17 +52,24 @@ const MOST_CONSUMED_IN_MEMORY = 100_000;
  *  shared one, or an assertion spent on one of them still spends on the others. */
 export function inMemoryConsumedNonces(): ConsumedNonces {
   const seen = new Map<string, number>();
+  let sweptAt = 0;
   return {
     claim(key: string, keepUntilMs?: number) {
       const now = Date.now();
-      // Insertion order is claim order, so expired entries gather at the front.
-      for (const [k, until] of seen) {
-        if (until > now && seen.size < MOST_CONSUMED_IN_MEMORY) break;
-        seen.delete(k);
+      // Entries do not expire in claim order (windows differ), so look at all
+      // of them, at most once a second.
+      if (now - sweptAt >= 1000) {
+        sweptAt = now;
+        for (const [k, until] of seen) if (until <= now) seen.delete(k);
       }
+      // Over the bound the oldest go first: unsafe, but better than unbounded.
+      while (seen.size >= MOST_CONSUMED_IN_MEMORY) seen.delete(seen.keys().next().value as string);
       if (seen.has(key)) return false;
       seen.set(key, keepUntilMs ?? Number.POSITIVE_INFINITY);
       return true;
+    },
+    release(key: string) {
+      seen.delete(key);
     },
   };
 }
@@ -166,10 +181,14 @@ export async function verifyLoginAssertion(
   // Burnt only once everything else has passed, so a malformed or badly signed
   // assertion cannot be used to spend a nonce the real one still needs.
   if (opts.consume) {
-    // Kept for as long as the assertion could still pass the time check.
+    // Kept until the assertion can no longer pass the time check: its dt may
+    // be a window ahead of now, and is good for a window after that. With the
+    // check off it never stops being good.
     const window = freshnessWindowSeconds(opts.maxSkewSeconds) ?? LONGEST_MAX_SKEW_SECONDS;
-    const keepUntil = (opts.nowMs ?? Date.now()) + (window + 60) * 1000;
-    const fresh = await opts.consume.claim(`${assertion.audience}|${assertion.nonce}|${assertion.i}`, keepUntil);
+    const dtMs = parseRfc3339(assertion.dt);
+    const base = Math.max(Date.now(), opts.nowMs ?? 0, Number.isNaN(dtMs) ? 0 : dtMs);
+    const keepUntil = opts.skipDtCheck === true ? undefined : base + (window + 60) * 1000;
+    const fresh = await opts.consume.claim(consumedKey(assertion), keepUntil);
     if (!fresh) {
       return { valid: false, reason: "assertion already used" };
     }

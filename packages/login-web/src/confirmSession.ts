@@ -24,11 +24,13 @@ export interface ConfirmSessionOptions {
   /** Optional fetch override (testing / custom agents). */
   fetchFn?: typeof fetch;
   /** Spends a verified session so the same one signs nobody in twice. Without
-   *  it, anybody holding this session's token and your secret's response can
-   *  have it confirmed again for as long as the Identity Agent keeps it; a
-   *  site that issues its own session on `verified` should pass one. Any store
-   *  of the shape `inMemoryConsumedNonces()` in `@identity-agent/login-verify`
-   *  returns will do; a site on more than one process shares one. */
+   *  it the Identity Agent confirms the same session again for as long as it
+   *  keeps it, to whoever holds both the token and your secret. A site that
+   *  issues its own session on `verified` should pass one. The session is spent
+   *  when `verified` comes back: if your own session issue then fails, start
+   *  the sign-in again. Any store with this shape will do, such as
+   *  `inMemoryConsumedNonces()` from `@identity-agent/login-verify`; a site on
+   *  more than one process shares one. */
   consume?: { claim(key: string): Promise<boolean> | boolean };
 }
 
