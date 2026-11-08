@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
@@ -241,7 +240,7 @@ func TestTheWitnessesForAFoundingAreProposedToTheOwnerAlone(t *testing.T) {
 
 	var pool []witness.BootstrapWitness
 	for i := byte(1); i <= 3; i++ {
-		key := iacrypto.NonTransferableAIDQB64(bytes.Repeat([]byte{i}, 32))
+		key := iacrypto.NonTransferableAIDQB64(aWitnessKey(i))
 		mux := http.NewServeMux()
 		mux.HandleFunc("/health", func(rw http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(rw).Encode(map[string]any{"service_aid": key})
@@ -251,7 +250,7 @@ func TestTheWitnessesForAFoundingAreProposedToTheOwnerAlone(t *testing.T) {
 		pool = append(pool, witness.BootstrapWitness{AID: key, WitnessKey: key, URL: srv.URL, Operator: "tests"})
 	}
 	// The second answers as another witness: left out, not named.
-	pool[1].WitnessKey = iacrypto.NonTransferableAIDQB64(bytes.Repeat([]byte{9}, 32))
+	pool[1].WitnessKey = iacrypto.NonTransferableAIDQB64(aWitnessKey(9))
 	prior := witness.BootstrapWitnesses
 	witness.BootstrapWitnesses = func() []witness.BootstrapWitness { return pool }
 	t.Cleanup(func() { witness.BootstrapWitnesses = prior })
