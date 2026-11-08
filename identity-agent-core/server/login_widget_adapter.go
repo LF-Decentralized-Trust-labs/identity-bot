@@ -2,12 +2,11 @@ package server
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -120,7 +119,15 @@ func (s *CoreServer) createSignedAssetChallenge(assetID, audience string, disclo
 	}
 	s.challenges[sessionToken] = bundle
 	s.challengeStatus[sessionToken] = map[string]interface{}{"status": "pending"}
-	s.saveChallengeStateLocked()
+	if err := s.saveChallengeStateLocked(); err != nil {
+		// Fail closed: a sign-in the agent cannot record is one a restart
+		// forgets, along with whether it was answered.
+		delete(s.challenges, sessionToken)
+		delete(s.challengeStatus, sessionToken)
+		s.challengeMu.Unlock()
+		log.Printf("[identity-agent-core] refusing to start a sign-in: %v", err)
+		return "", "", http.StatusInternalServerError, "could not record the sign-in"
+	}
 	s.challengeMu.Unlock()
 
 	return sessionToken, fmt.Sprintf("%s/i/%s", publicURL, sessionToken), 0, ""
@@ -185,18 +192,14 @@ func (s *CoreServer) handleLoginSessionStatus(w http.ResponseWriter, r *http.Req
 		offered = r.URL.Query().Get("collector")
 	}
 
-	s.challengeMu.Lock()
-	st := s.challengeStatus[token]
-	want, bound := s.challengeCollector[token]
-	s.challengeMu.Unlock()
-
+	st, bound, held, cerr := s.collectSignIn(token, offered, time.Now())
+	if cerr != nil {
+		http.Error(w, "could not read this sign-in", http.StatusInternalServerError)
+		return
+	}
 	// A session created before this existed has nothing to check against, and
 	// refusing it would break sign-ins already in flight across an upgrade.
-	mayCollect := !bound
-	if bound {
-		got := sha256.Sum256([]byte(offered))
-		mayCollect = subtle.ConstantTimeCompare(got[:], want[:]) == 1
-	}
+	mayCollect := !bound || held
 
 	resp := map[string]interface{}{"state": "connecting"}
 	if st != nil {
@@ -207,6 +210,11 @@ func (s *CoreServer) handleLoginSessionStatus(w http.ResponseWriter, r *http.Req
 				// Say so rather than looking like a sign-in that carried no
 				// identity, which is what a caller that has lost its secret
 				// would otherwise conclude.
+				resp["identity_withheld"] = true
+				break
+			}
+			if st["released"] == true {
+				// Collected already, or not collected in time: forgotten.
 				resp["identity_withheld"] = true
 				break
 			}

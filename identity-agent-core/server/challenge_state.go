@@ -2,13 +2,15 @@ package server
 
 import (
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
-	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"identity-agent-core/internal/atomicfile"
 	"identity-agent-core/login"
@@ -68,9 +70,13 @@ func (s *CoreServer) loadChallengeState(dataDir string) error {
 
 // saveChallengeStateLocked writes the state; the caller holds challengeMu.
 // The write is atomic, so a crash leaves the old state or the new, never part.
-func (s *CoreServer) saveChallengeStateLocked() {
+//
+// It returns the error rather than logging it. Whoever is about to hand out a
+// new sign-in must not do so if it could not be recorded: a restart would
+// forget it was ever issued, or ever answered.
+func (s *CoreServer) saveChallengeStateLocked() error {
 	if s.DataDir == "" {
-		return
+		return nil
 	}
 	st := challengeState{
 		Challenges: s.challenges,
@@ -85,7 +91,70 @@ func (s *CoreServer) saveChallengeStateLocked() {
 		err = atomicfile.Write(filepath.Join(s.DataDir, challengeStateFile), raw, 0o600)
 	}
 	if err != nil {
-		// Memory is still right for this run; only a restart would lose it.
-		log.Printf("[identity-agent-core] could not save login challenge state: %v", err)
+		return fmt.Errorf("could not save login challenge state: %w", err)
 	}
+	return nil
+}
+
+// signInResultWindow is how long after a sign-in settles its result can still
+// be collected. It matches the life of the challenge itself.
+const signInResultWindow = 10 * time.Minute
+
+// settledAt is when a sign-in's status was settled; zero if unknown. It is a
+// number in memory and a float64 after a restart, and both are read.
+func settledAt(st map[string]interface{}) time.Time {
+	switch v := st["settled_at"].(type) {
+	case int64:
+		return time.Unix(v, 0)
+	case float64:
+		return time.Unix(int64(v), 0)
+	}
+	return time.Time{}
+}
+
+// collectSignIn is how a settled sign-in's result is read by the holder of its
+// collector secret. The result is handed over ONCE and then forgotten: the
+// identifier, the disclosures, the browser key and the member info are removed
+// from what the agent keeps, leaving only that the sign-in ended and how. A
+// result not collected within signInResultWindow of settling is forgotten
+// unread. Nobody who holds the secret later, however they came by it, gets the
+// person's identity.
+//
+// Anyone else, and anyone reading a sign-in with no collector secret minted,
+// gets a copy of the status and takes nothing. If the forgetting cannot be
+// recorded the result is not released (fail closed), so it cannot be
+// collected again after a restart.
+func (s *CoreServer) collectSignIn(token, offered string, now time.Time) (st map[string]interface{}, bound, held bool, err error) {
+	s.challengeMu.Lock()
+	defer s.challengeMu.Unlock()
+	cur := s.challengeStatus[token]
+	want, bound := s.challengeCollector[token]
+	if bound {
+		got := sha256.Sum256([]byte(offered))
+		held = subtle.ConstantTimeCompare(got[:], want[:]) == 1
+	}
+	if cur == nil {
+		return nil, bound, held, nil
+	}
+	st = make(map[string]interface{}, len(cur))
+	for k, v := range cur {
+		st[k] = v
+	}
+	if !held || cur["status"] == "pending" || cur["released"] == true {
+		return st, bound, held, nil
+	}
+	forgotten := map[string]interface{}{"status": cur["status"], "released": true}
+	if t, ok := cur["settled_at"]; ok {
+		forgotten["settled_at"] = t
+	}
+	if at := settledAt(cur); at.IsZero() || now.Sub(at) > signInResultWindow {
+		// Too late: forget it, and release none of it.
+		st = forgotten
+	}
+	s.challengeStatus[token] = forgotten
+	if err := s.saveChallengeStateLocked(); err != nil {
+		s.challengeStatus[token] = cur
+		return nil, bound, held, err
+	}
+	return st, bound, held, nil
 }

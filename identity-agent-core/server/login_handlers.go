@@ -157,7 +157,11 @@ func (s *CoreServer) mintCollectorSecret(token string) (string, error) {
 		s.challengeCollector = map[string][32]byte{}
 	}
 	s.challengeCollector[token] = sum
-	s.saveChallengeStateLocked()
+	if err := s.saveChallengeStateLocked(); err != nil {
+		delete(s.challengeCollector, token)
+		s.challengeMu.Unlock()
+		return "", err
+	}
 	s.challengeMu.Unlock()
 	return secret, nil
 }
@@ -329,8 +333,15 @@ func (s *CoreServer) setChallengeStatus(token string, st map[string]interface{})
 	if s.challengeStatus == nil {
 		s.challengeStatus = make(map[string]map[string]interface{})
 	}
+	if st["status"] != "pending" {
+		st["settled_at"] = time.Now().Unix()
+	}
 	s.challengeStatus[token] = st
-	s.saveChallengeStateLocked()
+	// The mark stays in memory if it cannot be written, so this run still
+	// refuses a second answer; a restart would lose it, so say so.
+	if err := s.saveChallengeStateLocked(); err != nil {
+		log.Printf("[identity-agent-core] %v", err)
+	}
 	s.challengeMu.Unlock()
 }
 
@@ -556,8 +567,11 @@ func (s *CoreServer) handleChallengeStatus(w http.ResponseWriter, r *http.Reques
 		offered = r.URL.Query().Get("collector")
 	}
 
-	bound, held := s.collectorHeld(token, offered)
-	st := s.challengeStatusOf(token)
+	st, bound, held, cerr := s.collectSignIn(token, offered, time.Now())
+	if cerr != nil {
+		http.Error(w, "could not read this sign-in", http.StatusInternalServerError)
+		return
+	}
 	if bound && !held {
 		// Uniform: a wrong secret and an unknown token answer the same, so
 		// this cannot be used to discover which sign-ins are in progress.

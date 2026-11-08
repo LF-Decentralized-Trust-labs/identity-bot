@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -431,6 +432,7 @@ func TestTheWidgetEndpointWithholdsIdentityWithoutTheSecret(t *testing.T) {
 		challengeStatus: map[string]map[string]interface{}{
 			token: {
 				"status":       "complete",
+				"settled_at":   time.Now().Unix(),
 				"pairwise_aid": "EPairwiseOfARealPerson",
 				"disclosures":  map[string]string{"email": "alice@example.com"},
 				"member_info":  map[string]string{"role": "editor"},
