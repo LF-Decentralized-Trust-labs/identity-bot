@@ -64,9 +64,13 @@ import { checkSignInInPage } from "@identity-agent/login-verify/browser";
 `checkSignInInPage` asks the Identity Agent to check the person's key log
 (`POST /public/login/key`, so the page carries no KERI code), then checks the
 signature, that the audience is this page's origin, the challenge's nonce and
-site, and freshness, and spends the assertion with the same rule the back end
-uses (`consume.claim(key, keepUntilMs)`; the default is a store shared by the
-page, forgotten with it). A second presentation is refused as already used.
+site, and freshness, and spends the assertion with the same rule a back end uses
+(`consume.claim(key, keepUntilMs)`; the default is a store shared by the
+page, forgotten with it). A second presentation to the same page load is refused
+as already used. That is advisory, not a replay defence: the nonce and site come
+in the same reply as the assertion, the store lasts one page load, and a user can
+skip the check. The replay refusal is the website's own Identity Agent's, which
+checked the assertion once when the person's Identity Agent called back.
 
 What this does not give you: the audience binding to the website asset holds only if the asset names its website's origin (`origin`), otherwise any page's origin is accepted as the audience; the page trusts its Identity Agent for the
 challenge's nonce and site (pin `expectedSiteAid`, and the audience is always

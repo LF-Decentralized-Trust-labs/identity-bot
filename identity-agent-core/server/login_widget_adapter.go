@@ -143,7 +143,13 @@ func (s *CoreServer) createSignedAssetChallenge(assetID, audience, askedFrom str
 		}
 	}
 	s.challenges[sessionToken] = bundle
-	s.challengeStatus[sessionToken] = map[string]interface{}{"status": "pending"}
+	pending := map[string]interface{}{"status": "pending"}
+	if askedFrom != "" {
+		// Remembered with the sign-in, because only a page with no back end
+		// is handed the assertion (see handleLoginSessionStatus).
+		pending["asked_from_page"] = true
+	}
+	s.challengeStatus[sessionToken] = pending
 	if err := s.saveChallengeStateLocked(); err != nil {
 		// Fail closed: a sign-in the agent cannot record is one a restart
 		// forgets, along with whether it was answered.
@@ -246,10 +252,17 @@ func (s *CoreServer) handleLoginSessionStatus(w http.ResponseWriter, r *http.Req
 			if p, ok := st["pairwise_aid"].(string); ok {
 				resp["app_session_token"] = p
 			}
+			if d, ok := st["disclosures"]; ok {
+				resp["disclosures"] = d
+			}
 			// What a page with no back end of its own checks the answer
 			// against: the assertion, and the nonce and site of the
-			// challenge it answers. Released with the identity, once.
-			if a, ok := st["assertion"].(string); ok && held {
+			// challenge it answers. Released with the identity, once, and
+			// only when the sign-in was started from a page. The assertion
+			// carries the credentials the person showed, and a collector that
+			// is a page is any script in it; a server that asked keeps what
+			// it always had.
+			if a, ok := st["assertion"].(string); ok && held && st["asked_from_page"] == true {
 				resp["assertion"] = a
 				resp["nonce"] = st["nonce"]
 				resp["site_aid"] = st["site_aid"]

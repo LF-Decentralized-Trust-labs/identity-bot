@@ -33,8 +33,8 @@ export interface CheckInPageOptions {
    *  refuses an assertion for any other site even if the Identity Agent
    *  handed that one over. */
   expectedSiteAid?: string;
-  /** Spends the assertion so it passes this check once. The same rule the back
-   *  end uses: `claim(key, keepUntilMs)` is true the first time. Without one,
+  /** Spends the assertion so it passes this check once. The same rule a back
+   *  end uses, but advisory here: it lasts one page load and a user can skip it: `claim(key, keepUntilMs)` is true the first time. Without one,
    *  a store shared by every check in this page is used; it is forgotten when
    *  the page is, which is as long as the page can hold a sign-in anyway. */
   consume?: ConsumedNonces;
