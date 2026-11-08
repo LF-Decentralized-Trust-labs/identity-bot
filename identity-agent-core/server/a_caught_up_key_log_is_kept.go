@@ -14,13 +14,21 @@ import (
 // agent's own view of the issuer is no longer stale. It is forward-only, and
 // the rule is the store's, not a copy of it: SaveContactKEL refuses a log that
 // forks from, or does not carry on from, the verified one held
-// (store.ErrLogDoesNotExtend), and the held record is left as it was. This
+// (store.ErrLogDoesNotExtend), and the held record is left as it was. That
+// rule also takes a recovery, which can leave the log as long as the one held or
+// shorter (store.ALogMovesForward), so nothing here judges by length. This
 // function adds only that the new log must verify end to end by itself and must
-// be longer than the one held, and saves nothing for an issuer that is not a
-// held contact. Reports whether the record was replaced.
+// differ from the one held, and saves nothing for an issuer that is not a held
+// contact. Reports whether the record was replaced.
 func (s *CoreServer) keepCaughtUpKeyLog(issuer string, kel []map[string]interface{}) bool {
 	held, err := s.DataStore.GetContactKEL(issuer)
-	if err != nil || held == nil || !held.KelVerified || len(kel) <= len(held.KEL) {
+	if err != nil || held == nil || !held.KelVerified || len(kel) == 0 {
+		return false
+	}
+	// The same log, event for event: each carries the other on, which only
+	// the same events do.
+	if len(kel) == len(held.KEL) && store.ALogMovesForward(held.KEL, kel) == nil &&
+		store.ALogMovesForward(kel, held.KEL) == nil {
 		return false
 	}
 	in, ok := drivers.ValidateKELInputFromRecords(issuer, kel)
