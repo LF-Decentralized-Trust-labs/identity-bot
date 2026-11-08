@@ -271,3 +271,5 @@ the machine is the back end of an app, or that the key is the person's: the
 asset is not in the machine's Controller Grant credential, so the bundle says
 that is the Identity Agent's word. Carrying it in the credential is a new
 version of the Controller Grant schema and is not part of this change.
+
+**Naming the app where the key is on another device.** Binding a machine to its app asks that device for a Controller Grant 1.2.0 naming the app, with no signed request behind it, only where it is the machine's own current 1.2.0 grant with `app_asset` added and nothing else changed (schema, holder, issuer, claims compared both ways, and edges, which are none). It is checked when asked for and again when signed. The grant it replaces is withdrawn by a second signing request asked right behind the first, since each request signs one key-log event; until the device signs that, both are in the key log and the old one is shown as withdrawing. A machine still holding a Controller Grant 1.1.0 is not covered: it falls back to the old path, where a grant waits only on a signed request.

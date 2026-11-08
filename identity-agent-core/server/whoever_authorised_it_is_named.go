@@ -667,8 +667,18 @@ func (s *CoreServer) withdrawOrSay(said string) {
 		log.Printf("[controller] grant credential %s: its revocation was not recorded in the registry: %v", said, err)
 		// Not in force here either way; where the key is on another device it
 		// stays withdrawing, which says so, rather than reading as revoked.
-		if rec, _ := s.DataStore.GetCredential(said); rec == nil || rec.Status != credentialStatusWithdrawing {
+		rec, _ := s.DataStore.GetCredential(said)
+		if rec == nil || rec.Status != credentialStatusWithdrawing {
 			_ = s.DataStore.UpdateCredentialStatus(said, "revoked")
+			return
+		}
+		// Withdrawing, and its withdrawal was not asked of the device: kept
+		// behind, so it is asked for as soon as nothing else waits and shows
+		// as queued rather than as nothing at all.
+		if s.withdrawalState(said) == "expired" {
+			if kerr := s.keepBehind(pendingIssuance{Kind: waitingBehind, Spec: grantSpec{Issuer: rec.IssuerAID}, Revokes: said}); kerr != nil {
+				log.Printf("[controller] grant credential %s: its withdrawal could not be kept to ask for later: %v", said, kerr)
+			}
 		}
 	}
 }

@@ -148,6 +148,12 @@ var errNeedsSignedRequest = errors.New("where the identity's key is on another d
 // machine's row is bound to. Checked when it is asked for and again when it is
 // signed, so what the device signs and what is adopted are both that and
 // nothing wider. Anything else with no request is refused.
+//
+// The grant replaced must itself be a Controller Grant 1.2.0. A machine that
+// still holds a 1.1.0 one (schemas.ControllerGrantV11) is not covered: it falls
+// back to the old path, where a grant is asked for by a signed request or not
+// at all (docs/adr, the ADR for asking the key device for a grant naming the
+// app).
 func (s *CoreServer) mayWaitWithoutARequest(kind string, spec grantSpec) error {
 	if spec.Request != nil {
 		return nil
@@ -164,15 +170,24 @@ func (s *CoreServer) mayWaitWithoutARequest(kind string, spec grantSpec) error {
 	if err != nil || rec == nil || rec.Status != "issued" || rec.HolderAID != spec.Holder || rec.IssuerAID != spec.Issuer {
 		return fmt.Errorf("%w: the grant to replace is not this machine's grant in force", errNeedsSignedRequest)
 	}
+	if rec.SchemaSAID != schemas.ControllerGrant.Schema.SAID {
+		return fmt.Errorf("%w: the grant to replace is not a Controller Grant 1.2.0", errNeedsSignedRequest)
+	}
 	raw, err := base64.StdEncoding.DecodeString(rec.AcdcJson)
 	if err != nil {
 		return err
 	}
 	var acdc struct {
 		A map[string]interface{} `json:"a"`
+		E map[string]interface{} `json:"e"`
 	}
 	if json.Unmarshal(raw, &acdc) != nil || acdc.A == nil {
 		return fmt.Errorf("%w: the grant to replace is unreadable", errNeedsSignedRequest)
+	}
+	// The edges are none today, and the rule says so: a re-grant carries the
+	// edges of the grant it replaces, and neither may have any.
+	if len(acdc.E) > 0 || len(spec.Edges) > 0 {
+		return fmt.Errorf("%w: the grant to replace, or the one asked for, has edges", errNeedsSignedRequest)
 	}
 	// What the grant says besides these is not compared: its digest and date are
 	// its own, and the request it was first asked by is not carried into a
@@ -588,6 +603,13 @@ func (s *CoreServer) grantArrived(kind *schemas.AssetGrant, spec grantSpec, said
 			return
 		}
 		// The grant that named no app is withdrawn once the one that does stands.
+		// Where the key is on another device that is a second signing request,
+		// asked right behind the first and not in the same approval: each
+		// request signs one event of the key log, and the revocation is the
+		// event after the grant's, so the two cannot be one signature. Until
+		// the device signs it the old grant is "withdrawing" (never in force
+		// here), and the withdrawal shows as waiting or queued in the key log
+		// report (withdrawalState).
 		if replaced != "" {
 			s.withdrawOrSay(replaced)
 		}
