@@ -406,9 +406,20 @@ const RFC3339 = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(?:
  *  exist, so 2026-02-30, 31 April and 24:00 are refused rather than rolled
  *  over. A fraction finer than a millisecond is truncated. */
 export function parseRfc3339(dt: unknown): number {
-  if (typeof dt !== "string") return NaN;
+  const at = parseRfc3339Exact(dt);
+  return at === null ? NaN : at.ms;
+}
+
+/** An RFC 3339 timestamp as whole milliseconds since the epoch and the
+ *  nanoseconds of the fraction beyond them (0 to 999999), or null for anything
+ *  `parseRfc3339` refuses. The core compares times to the nanosecond; a
+ *  comparison that drops the rest of the fraction accepts a dt the core
+ *  refuses (a dt a nanosecond past the edge of the freshness window). A
+ *  fraction finer than a nanosecond is truncated, as in the core. */
+export function parseRfc3339Exact(dt: unknown): { ms: number; subMsNs: number } | null {
+  if (typeof dt !== "string") return null;
   const m = RFC3339.exec(dt);
-  if (!m) return NaN;
+  if (!m) return null;
   const [y, mo, d, h, mi, s] = m.slice(1, 7).map(Number);
   const at = new Date(0);
   at.setUTCFullYear(y, mo - 1, d);
@@ -417,16 +428,18 @@ export function parseRfc3339(dt: unknown): number {
     at.getUTCFullYear() !== y || at.getUTCMonth() !== mo - 1 || at.getUTCDate() !== d ||
     at.getUTCHours() !== h || at.getUTCMinutes() !== mi || at.getUTCSeconds() !== s
   ) {
-    return NaN;
+    return null;
   }
-  let ms = at.getTime() + (m[7] ? Number((m[7] + "00").slice(0, 3)) : 0);
+  const fraction = (m[7] ?? "").slice(0, 9).padEnd(9, "0");
+  let ms = at.getTime() + Number(fraction.slice(0, 3));
+  const subMsNs = Number(fraction.slice(3));
   if (m[8]) {
     const oh = Number(m[9]);
     const om = Number(m[10]);
-    if (oh > 23 || om > 59) return NaN;
+    if (oh > 23 || om > 59) return null;
     ms -= (m[8] === "-" ? -1 : 1) * (oh * 60 + om) * 60_000;
   }
-  return ms;
+  return { ms, subMsNs };
 }
 
 /** Thrown by `parseStrictJson` for text that two JSON readers could read

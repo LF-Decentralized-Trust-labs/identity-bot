@@ -1,0 +1,1243 @@
+{
+  "description": "Produced by the Go core: the decisions a login verifier makes, each from a document signed here and a clock and a key fixed here. The TypeScript verifier must make every one alike, reason for reason. Regenerated and checked by TestThePublishedVerifyDecisionsAreTheCores in identity-agent-core/login.",
+  "freshness_windows": [
+    {
+      "name": "a window of -2147483648",
+      "max_skew_seconds": -2147483648,
+      "seconds": 300
+    },
+    {
+      "name": "a window of -1",
+      "max_skew_seconds": -1,
+      "seconds": 300
+    },
+    {
+      "name": "a window of 0",
+      "max_skew_seconds": 0,
+      "seconds": 300
+    },
+    {
+      "name": "a window of 1",
+      "max_skew_seconds": 1,
+      "seconds": 1
+    },
+    {
+      "name": "a window of 10",
+      "max_skew_seconds": 10,
+      "seconds": 10
+    },
+    {
+      "name": "a window of 299",
+      "max_skew_seconds": 299,
+      "seconds": 299
+    },
+    {
+      "name": "a window of 300",
+      "max_skew_seconds": 300,
+      "seconds": 300
+    },
+    {
+      "name": "a window of 301",
+      "max_skew_seconds": 301,
+      "seconds": 301
+    },
+    {
+      "name": "a window of 3599",
+      "max_skew_seconds": 3599,
+      "seconds": 3599
+    },
+    {
+      "name": "a window of 3600",
+      "max_skew_seconds": 3600,
+      "seconds": 3600
+    },
+    {
+      "name": "a window of 3601",
+      "max_skew_seconds": 3601,
+      "seconds": 3600
+    },
+    {
+      "name": "a window of 86400",
+      "max_skew_seconds": 86400,
+      "seconds": 3600
+    },
+    {
+      "name": "a window of 2147483647",
+      "max_skew_seconds": 2147483647,
+      "seconds": 3600
+    }
+  ],
+  "browser_key_thumbprints": [
+    {
+      "name": "an RFC 7638 thumbprint",
+      "value": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U",
+      "go_accepts": true
+    },
+    {
+      "name": "all zero bytes",
+      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "go_accepts": true
+    },
+    {
+      "name": "all one bits",
+      "value": "__________________________________________8",
+      "go_accepts": true
+    },
+    {
+      "name": "empty",
+      "value": "",
+      "go_accepts": false
+    },
+    {
+      "name": "one character short",
+      "value": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-",
+      "go_accepts": false
+    },
+    {
+      "name": "one character long",
+      "value": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-UA",
+      "go_accepts": false
+    },
+    {
+      "name": "padding",
+      "value": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U=",
+      "go_accepts": false
+    },
+    {
+      "name": "unused bits set",
+      "value": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-V",
+      "go_accepts": false
+    },
+    {
+      "name": "the standard alphabet",
+      "value": "oKIywvGUpTVTyxMQ3bwIIeQUudfr/CkLMjCE19ECD+U",
+      "go_accepts": false
+    },
+    {
+      "name": "a character outside the alphabet",
+      "value": "oKIywvGUpT.TyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U",
+      "go_accepts": false
+    },
+    {
+      "name": "a space",
+      "value": "oKIywvGUpT TyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U",
+      "go_accepts": false
+    },
+    {
+      "name": "a newline at the end",
+      "value": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U\n",
+      "go_accepts": false
+    },
+    {
+      "name": "a thumbprint of the wrong length, 64 hex characters",
+      "value": "abababababababababababababababababababababababababababababababab",
+      "go_accepts": false
+    },
+    {
+      "name": "a non-ASCII character",
+      "value": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-é",
+      "go_accepts": false
+    }
+  ],
+  "p256_thumbprints": [
+    {
+      "name": "RFC 7515 appendix A.3's key",
+      "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+      "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0",
+      "go_accepts": true,
+      "thumbprint": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U"
+    },
+    {
+      "name": "a coordinate of zeroes, which is not on the curve and is not checked",
+      "x": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "y": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "go_accepts": true,
+      "thumbprint": "Yf7dxNA4Y2zUqbqNw2eswKWsk1wLRG_DGF3vCttT2XQ"
+    },
+    {
+      "name": "x one character short",
+      "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVE",
+      "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0",
+      "go_accepts": false
+    },
+    {
+      "name": "y one character long",
+      "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+      "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0A",
+      "go_accepts": false
+    },
+    {
+      "name": "x with padding",
+      "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU=",
+      "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0",
+      "go_accepts": false
+    },
+    {
+      "name": "y with unused bits set",
+      "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+      "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5ab",
+      "go_accepts": false
+    },
+    {
+      "name": "x in the standard alphabet",
+      "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVE/",
+      "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0",
+      "go_accepts": false
+    },
+    {
+      "name": "x empty",
+      "x": "",
+      "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0",
+      "go_accepts": false
+    },
+    {
+      "name": "y empty",
+      "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+      "y": "",
+      "go_accepts": false
+    },
+    {
+      "name": "x and y swapped is a different key with a different thumbprint",
+      "x": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0",
+      "y": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+      "go_accepts": true,
+      "thumbprint": "pYawip7rcS5WUdgjdqyA-QSJQnBWt3F_PFqN7OMAnM4"
+    },
+    {
+      "name": "a quote in x cannot break out of the thumbprint input",
+      "x": "f83OJ3D2xF1Bg8vub9tL\"1gHMzV76e8Tus9uPHvRVEU",
+      "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0",
+      "go_accepts": false
+    },
+    {
+      "name": "a coordinate that is hex",
+      "x": "abababababababababababababababababababababababababababababababab",
+      "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0",
+      "go_accepts": false
+    }
+  ],
+  "verifications": [
+    {
+      "name": "an assertion that answers its challenge",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EA3FqbevS9jeaLa-Hpd6PPizQZwznlJa1dOT3lzNrFU-\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCOr-eEVSljskrQlXWc5UxyFUvExI7pgUCyJGY6S80tiqPcyxtJJ-svtIdkma82PNInK7k6b0E7-WTJoJX2HB4D\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": true
+    },
+    {
+      "name": "a sign-in for a browser key, repeating that key",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EByA49HGkdlDKeI3qQn24YUXjOBA7h4MUB_uZMAA3f9H\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"browser_key\":\"oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U\",\"sig\":\"0BBoqAbW_RqjyMrL9lC1EZZZm3uRCYrid4uc-KNDpJ1johOkzVZx2At41dPjfLQPwCZDQWGadoRZjDH6iWpbBrsJ\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U"
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": true
+    },
+    {
+      "name": "dt 300 seconds before the clock is inside the default window",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EPVF__qbkzVApa2-sugdLd89kQogSLBlwbz9a908bQYE\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T11:55:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCuEn4424UklhfgdFiltwI1gJkjzZG7ASLZMbpszhmok7HhdHJliDr4vHdLJ9SVfaZLS6Asmdck_keaQZakaYQC\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": true
+    },
+    {
+      "name": "dt 301 seconds before the clock is outside it",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EChecN4lnXsmmKf2IpO33b7Uol3r1gIt8SvdAvNqgptc\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T11:54:59Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BA4_Vpk9DAmHHiIeQF2Q7ujhnR3NuhT0sAh4rlnrotXKfPn6afPvsWkRLkvSVFilMPLPvdeRa4VNU8SYkw0zcAB\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "dt outside freshness window"
+    },
+    {
+      "name": "dt 300 seconds after the clock is inside it",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EMnn63WIHOOZzoEeLVXzhyEorH9XfWFV_ifl4_ydxIjX\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:05:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BBqO8bbtU6NDbJFLz4NnfBSPSC49Mo2ORS1PDl_OTWI1azEv4X_NDzCgwi-ldXx2-ePqUPzFNERiMNkGn8vzaMJ\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": true
+    },
+    {
+      "name": "dt 301 seconds after the clock is outside it",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"ENOJTILS_qk5Wk7fGZSj_wUQOJaerobzHmEN3MkvEmd3\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:05:01Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BD2vxwxrUp-xtiv8uZSvA_wV0I5LYo0h6ZUzHx8norNmRzbZmQLKPiAvjO3lpLAFHp4qRkpsYlYArexOt_bSpoE\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "dt outside freshness window"
+    },
+    {
+      "name": "a window of 10 seconds takes 10",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EDt5w9TF9w0SDbSurJ4g27V4HmDYPOpnglEKbW7YBkmn\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T11:59:50Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BChr07zX92qiRjt83qU2cre9YLZLgL4NmV0iQU8bkxsKOCOzVpm0TBxcXTYWUxsWG9FJM4Dl71mIrVVKYs2S-oF\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 10,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": true
+    },
+    {
+      "name": "a window of 10 seconds refuses 11",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"ENwz0tdUwu_ouIwo3I3GKqalmlxOn_jyjGSbytFnoNuo\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T11:59:49Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BDVHJSynni9EUeL46FXA4KDaQFsVQ-NE9jWb8uDBULV4RU0M_80KY5OBWxjy1E6GYtQVym1HZVOp8XrlIkfRqgP\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 10,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "dt outside freshness window"
+    },
+    {
+      "name": "a window of zero is the default, so 300 is inside",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EPVF__qbkzVApa2-sugdLd89kQogSLBlwbz9a908bQYE\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T11:55:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCuEn4424UklhfgdFiltwI1gJkjzZG7ASLZMbpszhmok7HhdHJliDr4vHdLJ9SVfaZLS6Asmdck_keaQZakaYQC\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": true
+    },
+    {
+      "name": "a window of zero is the default, so 301 is outside",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EChecN4lnXsmmKf2IpO33b7Uol3r1gIt8SvdAvNqgptc\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T11:54:59Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BA4_Vpk9DAmHHiIeQF2Q7ujhnR3NuhT0sAh4rlnrotXKfPn6afPvsWkRLkvSVFilMPLPvdeRa4VNU8SYkw0zcAB\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "dt outside freshness window"
+    },
+    {
+      "name": "a negative window is the default, so 301 is outside",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EChecN4lnXsmmKf2IpO33b7Uol3r1gIt8SvdAvNqgptc\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T11:54:59Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BA4_Vpk9DAmHHiIeQF2Q7ujhnR3NuhT0sAh4rlnrotXKfPn6afPvsWkRLkvSVFilMPLPvdeRa4VNU8SYkw0zcAB\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": -5,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "dt outside freshness window"
+    },
+    {
+      "name": "a negative window is the default, so 300 is inside",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EPVF__qbkzVApa2-sugdLd89kQogSLBlwbz9a908bQYE\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T11:55:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCuEn4424UklhfgdFiltwI1gJkjzZG7ASLZMbpszhmok7HhdHJliDr4vHdLJ9SVfaZLS6Asmdck_keaQZakaYQC\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": -5,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": true
+    },
+    {
+      "name": "a window of an hour takes an hour",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EOGeM0s4WaWzJ3g4MPH2U65CYpiDmwg_p36tAUCOptB1\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T11:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BC3yJBkKMhFBQqj95lVJMaRY-rkQKoX7S9FM5PCsWQnly9IZ6vjMztBt9kJQUkvVmOMhJGxAy2ArPAnalZgsTwE\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 3600,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": true
+    },
+    {
+      "name": "a window of an hour refuses an hour and a second",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EOqtvARuAELM95_uOg5JG0lh5R4V13NERnjgNa7vK9I1\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T10:59:59Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BAqj4ZPLT3_kI8_paQuZ58pK0K_PztpXPj4FUhFMa6ubCEzkxrNP_Zx5mEOG-wUih5GAF_y2K2JMLXLTbaNfSMJ\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 3600,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "dt outside freshness window"
+    },
+    {
+      "name": "a wider window than an hour is narrowed, so an hour is inside",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EOGeM0s4WaWzJ3g4MPH2U65CYpiDmwg_p36tAUCOptB1\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T11:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BC3yJBkKMhFBQqj95lVJMaRY-rkQKoX7S9FM5PCsWQnly9IZ6vjMztBt9kJQUkvVmOMhJGxAy2ArPAnalZgsTwE\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 100000,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": true
+    },
+    {
+      "name": "a wider window than an hour is narrowed, so an hour and a second is outside",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EOqtvARuAELM95_uOg5JG0lh5R4V13NERnjgNa7vK9I1\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T10:59:59Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BAqj4ZPLT3_kI8_paQuZ58pK0K_PztpXPj4FUhFMa6ubCEzkxrNP_Zx5mEOG-wUih5GAF_y2K2JMLXLTbaNfSMJ\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 100000,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "dt outside freshness window"
+    },
+    {
+      "name": "a wider window than an hour is narrowed, in the future too",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EP_b3ihLNO1WHKyox_fWX6-VfX4ucWu-AcTY5pNXRyd3\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T13:00:01Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCuwRpORjWcNvluYK-PZRNwK1bgXwcLAOLWqd0tMBx-zqWeaK55vvl4AM3HH5iDISPOjTsCVt4HE5KJedp8eGME\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 2147483647,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "dt outside freshness window"
+    },
+    {
+      "name": "a dt written in another offset is the instant it names",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EJE5GEZISaCFnsFAdQxSmg_pCjACCBZH2CGWn2_Ha9zr\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T14:00:00+02:00\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BD1FiQvVyLR5wHSQOe8nIII2QvVamKpic2OSdjgUbenB2ELFRPCH-EEjADf3twFN4i2WTYUlA4rPiTalBWGpSAL\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": true
+    },
+    {
+      "name": "a dt in another offset that names a stale instant is refused",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EEREGzxPjG83ZPAqCIvcJgm0c1W_sZOiPI6gIysNvALF\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T14:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BBn73Zj-V3-b-XzTONN8G3jOjtpL1OgoG3rBIlkMJclVF1nISlJ_8Jfhzt4d_Pe1lhfb9QOmOdlrvgl_bYI8pYD\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "dt outside freshness window"
+    },
+    {
+      "name": "a dt with a fraction just inside the window",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EA5hO4Ud6Jxh_Hpdaq0X5ltr5QmRCbqbSYeh7JKs8XDF\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T11:55:00.5Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCfx_6AV2MDltG5VZsdV11vzBWD77M8eIy0kUzMeqifacAciH1IJ5yA8W5n1QLXF0kNLEwiY2gCR3txcZPFhN0O\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": true
+    },
+    {
+      "name": "a dt with a fraction just outside the window",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EIiza55E8DzOmvXr00WHQnwgzGrrHQ0LDzFQPbNr_mKO\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T11:54:59.999Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BB55Vkgs06Rt_rX5fBOcL4xBNuh2n8q0mQahBCJmpgQaJuk9EZpkSKHV2igdQLO74IK3aLMT8cLqHaFTBz3kuQF\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "dt outside freshness window"
+    },
+    {
+      "name": "a dt a nanosecond outside the window is outside",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"ELNjbmFKB4fXrfZpFK8RZpPl6uXEX3FbCOfa784hpu-l\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:05:00.000000001Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCyTeVdlrqZFPP3donV3N9jAmIn51I5uUJBHpT6h7XWBO8M0Al1zaFTjUwNVFD6gA_xNL7M7Cl-ofTGDAiqrb4N\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "dt outside freshness window"
+    },
+    {
+      "name": "a dt a nanosecond inside the window is inside",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EIimgkMb6MyhGI2Gn34JVIYRcxUho-zFPrxTVjvY5NEN\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:04:59.999999999Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCgq_iSDHCimlreu5f2nbSvOtfEa9DA85ARhNP-rJ4VI-nNgK0sbTy6BP-xQvA5PiV7BpacrkRtEwrphESKg-UK\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": true
+    },
+    {
+      "name": "an unreadable dt is refused, not compared",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EHr0Eef_NbN5TlY59HjDlbcVDPsF-RkiVXSJZi330KcT\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"not a time\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BACp8x290aiFLwNL-EzOE9MlJEhOkgBD03taiW3duDD5rgSclCqOamWSHZLWToa8Fb82Ahl1y3f10VBiF-ZGo0P\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "bad dt"
+    },
+    {
+      "name": "an empty dt is refused",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EI0g_dLGcwxou9ThB24_wsGD2mNOKpb9WZiYqP_Le0A_\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCetWJZDBFnQOHleBVMPMTa0qQrscHE_yWvdI_1rEsZYrhIP84l05Dqhr8fGhQadhPsAWOHnIsnVrvD3tq0VBsL\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "bad dt"
+    },
+    {
+      "name": "a dt with a comma before the fraction is refused",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EG2SuuzWLMM05pn2Mn32RQ8h-OeXJHq5TlRSYsh9snTU\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00,5Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BD0DW8o-E-IzKEu2dv-S1PxDacDHVcsfYKEyLZsd0INv361eFTgRoNGFQI83bpWUCMUWybHAKk5iKZ1blqwXxMB\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "bad dt"
+    },
+    {
+      "name": "a dt on a day that does not exist is refused",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EF6cyIkMT2YyKPbQBQK7gQ_0wNmIGUivwMDUCxTIPtD4\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-02-30T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BC2jk6KRKZocl-F6CZnJFEoTeNdtEyRRh6FAP--B3D_lgu1cON_ZJUnPgadMA7e2DB-ehaCpOluEVsw2jrmU5AH\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "bad dt"
+    },
+    {
+      "name": "a dt in 2001 is refused",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EOzKLqUMPNO0u1PzAoYgals9JWVg3Ko3KbKPKB9V_Mx5\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2001-01-01T00:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BA0rl1_kx_TVtGtaqXevZRtngoT2ZROuWbi71CMTdpMjI8OxhgIPEuUTF67ECTj_3xeOXBt5LH15D3mkrgAnvIE\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "dt outside freshness window"
+    },
+    {
+      "name": "a stale dt is refused before the nonce and audience are looked at",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EK9a9bljPD-HtoFEJ_AODa2UrgYGSDiRj0i34lOrP5ha\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://other.example\",\"nonce\":\"other\",\"dt\":\"2026-06-17T09:13:21Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BASrv8FCfVObphgbgXCkomXR3RvyMqeN2bCCQeLFWrwl3RdABCiyPQigtea5FfeT0j9FSBy1fKotUCUgyPmR3MI\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "dt outside freshness window"
+    },
+    {
+      "name": "a different nonce is refused",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EA3FqbevS9jeaLa-Hpd6PPizQZwznlJa1dOT3lzNrFU-\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCOr-eEVSljskrQlXWc5UxyFUvExI7pgUCyJGY6S80tiqPcyxtJJ-svtIdkma82PNInK7k6b0E7-WTJoJX2HB4D\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-2",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "nonce mismatch"
+    },
+    {
+      "name": "a different audience is refused",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EA3FqbevS9jeaLa-Hpd6PPizQZwznlJa1dOT3lzNrFU-\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCOr-eEVSljskrQlXWc5UxyFUvExI7pgUCyJGY6S80tiqPcyxtJJ-svtIdkma82PNInK7k6b0E7-WTJoJX2HB4D\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://other.example",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "audience mismatch"
+    },
+    {
+      "name": "another site's challenge is refused",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EA3FqbevS9jeaLa-Hpd6PPizQZwznlJa1dOT3lzNrFU-\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCOr-eEVSljskrQlXWc5UxyFUvExI7pgUCyJGY6S80tiqPcyxtJJ-svtIdkma82PNInK7k6b0E7-WTJoJX2HB4D\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "EOtherSite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "site mismatch: the assertion answers another site's challenge"
+    },
+    {
+      "name": "an expected site that is empty is refused",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EA3FqbevS9jeaLa-Hpd6PPizQZwznlJa1dOT3lzNrFU-\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCOr-eEVSljskrQlXWc5UxyFUvExI7pgUCyJGY6S80tiqPcyxtJJ-svtIdkma82PNInK7k6b0E7-WTJoJX2HB4D\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "site mismatch: the assertion answers another site's challenge"
+    },
+    {
+      "name": "a nonce wins over a wrong audience",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EA3FqbevS9jeaLa-Hpd6PPizQZwznlJa1dOT3lzNrFU-\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCOr-eEVSljskrQlXWc5UxyFUvExI7pgUCyJGY6S80tiqPcyxtJJ-svtIdkma82PNInK7k6b0E7-WTJoJX2HB4D\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-2",
+        "audience": "https://other.example",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "nonce mismatch"
+    },
+    {
+      "name": "an audience wins over a wrong site",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EA3FqbevS9jeaLa-Hpd6PPizQZwznlJa1dOT3lzNrFU-\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCOr-eEVSljskrQlXWc5UxyFUvExI7pgUCyJGY6S80tiqPcyxtJJ-svtIdkma82PNInK7k6b0E7-WTJoJX2HB4D\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://other.example",
+        "site_aid": "EOtherSite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "audience mismatch"
+    },
+    {
+      "name": "a wrong site wins over a wrong browser key",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EA3FqbevS9jeaLa-Hpd6PPizQZwznlJa1dOT3lzNrFU-\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCOr-eEVSljskrQlXWc5UxyFUvExI7pgUCyJGY6S80tiqPcyxtJJ-svtIdkma82PNInK7k6b0E7-WTJoJX2HB4D\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "EOtherSite",
+        "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U"
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "site mismatch: the assertion answers another site's challenge"
+    },
+    {
+      "name": "a browser key the assertion does not repeat is refused",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EA3FqbevS9jeaLa-Hpd6PPizQZwznlJa1dOT3lzNrFU-\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCOr-eEVSljskrQlXWc5UxyFUvExI7pgUCyJGY6S80tiqPcyxtJJ-svtIdkma82PNInK7k6b0E7-WTJoJX2HB4D\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U"
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "browser key mismatch: the assertion was approved for another browser key"
+    },
+    {
+      "name": "a browser key where the challenge named none is refused",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EByA49HGkdlDKeI3qQn24YUXjOBA7h4MUB_uZMAA3f9H\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"browser_key\":\"oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U\",\"sig\":\"0BBoqAbW_RqjyMrL9lC1EZZZm3uRCYrid4uc-KNDpJ1johOkzVZx2At41dPjfLQPwCZDQWGadoRZjDH6iWpbBrsJ\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "browser key mismatch: the assertion was approved for another browser key"
+    },
+    {
+      "name": "a different browser key is refused",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EByA49HGkdlDKeI3qQn24YUXjOBA7h4MUB_uZMAA3f9H\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"browser_key\":\"oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U\",\"sig\":\"0BBoqAbW_RqjyMrL9lC1EZZZm3uRCYrid4uc-KNDpJ1johOkzVZx2At41dPjfLQPwCZDQWGadoRZjDH6iWpbBrsJ\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "browser key mismatch: the assertion was approved for another browser key"
+    },
+    {
+      "name": "a wrong browser key wins over a missing signature",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"browser_key\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "browser key mismatch: the assertion was approved for another browser key"
+    },
+    {
+      "name": "a challenge's browser key with padding is refused though the assertion repeats it",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EORug8ig1D3cNz2-MTUvIhdoxfvdKt0qVCECNuKhU0bO\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"browser_key\":\"oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U=\",\"sig\":\"0BAUBuLia_5lfMKNbJKmB7ldhUu9GC2gC6mmSNVDqrv8MymC3ZUT7CTf2-bQX9FE_1ja5KF7I2f3AGqFYqS8C6AM\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U="
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "browser key mismatch: a browser key thumbprint is 43 characters of base64url (an RFC 7638 SHA-256 digest)"
+    },
+    {
+      "name": "a challenge's browser key one character short is refused though the assertion repeats it",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EEiyMuCSc3yiG6w-jW81eefuPEFJhYxaYrmkTFvuOVPQ\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"browser_key\":\"oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-\",\"sig\":\"0BDRzs14Km8_jGZbl-70edRfQ1Gby12UkQ4cZ9YepXmvhUOxaB47XMrUXRpO3rUsMsreUjydHPBSbwKTSTtfQMYJ\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-"
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "browser key mismatch: a browser key thumbprint is 43 characters of base64url (an RFC 7638 SHA-256 digest)"
+    },
+    {
+      "name": "a challenge's browser key in the standard alphabet is refused though the assertion repeats it",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EBFjtwR6Yz_nVGrW7rLJxdBq2UHvH18hdfn-jxarUAR5\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"browser_key\":\"oKIywvGUpTVTyxMQ3bwIIeQUudfr/CkLMjCE19ECD+U\",\"sig\":\"0BA-XkP4FHIz1P6s0h_9HTNToIZYWQG3hrhrCpeh3kVa03zdWMC4RX0S-lWLiGQ2xyws9UHtt5Jzt0HaORTahLYE\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr/CkLMjCE19ECD+U"
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "browser key mismatch: a browser key thumbprint is 43 characters of base64url (an RFC 7638 SHA-256 digest)"
+    },
+    {
+      "name": "a challenge's browser key with unused bits set is refused though the assertion repeats it",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EEurHDMUKodxr1s5D7K3oNBANOdslWsI88mtbL0gQ8uZ\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"browser_key\":\"oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-V\",\"sig\":\"0BAd_MDBoXYXE6N5m5N9k62m-xWaRj7zy3hoVz2nd1l9Kr_1qx8sEZXAkwn4Z5x0gqk7IeYnsEHma2gHizL7GiwB\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-V"
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "browser key mismatch: a browser key thumbprint is 43 characters of base64url (an RFC 7638 SHA-256 digest)"
+    },
+    {
+      "name": "a challenge's browser key with a space is refused though the assertion repeats it",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EEoIerHPgd0nTzFqg_8sP4JJ_jyFfZMMrs8zzq3KY0hP\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"browser_key\":\"oKIywvGUpTVTyxMQ3bwI eQUudfr_CkLMjCE19ECD-U\",\"sig\":\"0BBX1eGISaK4TMz9Jk7vlbFWD04S7TLTETfGCdCNcDn7HNHp7OgLq4dHnmRBfnM26psSUyubm-fh-QXmdLeTTHUC\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": "oKIywvGUpTVTyxMQ3bwI eQUudfr_CkLMjCE19ECD-U"
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "browser key mismatch: a browser key thumbprint is 43 characters of base64url (an RFC 7638 SHA-256 digest)"
+    },
+    {
+      "name": "an assertion with no signature is refused",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "missing sig"
+    },
+    {
+      "name": "a body changed after signing is refused",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EA3FqbevS9jeaLa-Hpd6PPizQZwznlJa1dOT3lzNrFU-\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Mallory\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCOr-eEVSljskrQlXWc5UxyFUvExI7pgUCyJGY6S80tiqPcyxtJJ-svtIdkma82PNInK7k6b0E7-WTJoJX2HB4D\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "invalid signature"
+    },
+    {
+      "name": "an assertion signed by another key is refused",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EA3FqbevS9jeaLa-Hpd6PPizQZwznlJa1dOT3lzNrFU-\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BBRQrux3zZu9IkNk39HYUFvAdPDgPIWKO-efipJaN5IbMD_lcZfQ_GqpVTqUzhwq-NoCmLnkHrhqRjZpWof0L0G\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "invalid signature"
+    },
+    {
+      "name": "an assertion checked under another key is refused",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EA3FqbevS9jeaLa-Hpd6PPizQZwznlJa1dOT3lzNrFU-\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCOr-eEVSljskrQlXWc5UxyFUvExI7pgUCyJGY6S80tiqPcyxtJJ-svtIdkma82PNInK7k6b0E7-WTJoJX2HB4D\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "invalid signature"
+    },
+    {
+      "name": "a signature with padding is refused",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EA3FqbevS9jeaLa-Hpd6PPizQZwznlJa1dOT3lzNrFU-\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCOr-eEVSljskrQlXWc5UxyFUvExI7pgUCyJGY6S80tiqPcyxtJJ-svtIdkma82PNInK7k6b0E7-WTJoJX2HB4D=\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "invalid signature"
+    },
+    {
+      "name": "a digest that is not the body's does not change the verdict, the signature covers it",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EG_cHUI0SD-MBeGHZn2v4YklTwBkwLSQGOA459pZcwZ_\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCOr-eEVSljskrQlXWc5UxyFUvExI7pgUCyJGY6S80tiqPcyxtJJ-svtIdkma82PNInK7k6b0E7-WTJoJX2HB4D\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": false,
+      "go_reason": "invalid signature"
+    },
+    {
+      "name": "a signed assertion read as written",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EA3FqbevS9jeaLa-Hpd6PPizQZwznlJa1dOT3lzNrFU-\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCOr-eEVSljskrQlXWc5UxyFUvExI7pgUCyJGY6S80tiqPcyxtJJ-svtIdkma82PNInK7k6b0E7-WTJoJX2HB4D\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": true,
+      "go_valid": true
+    },
+    {
+      "name": "a repeated field is not read",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EA3FqbevS9jeaLa-Hpd6PPizQZwznlJa1dOT3lzNrFU-\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"nonce\":\"nonce-2\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCOr-eEVSljskrQlXWc5UxyFUvExI7pgUCyJGY6S80tiqPcyxtJJ-svtIdkma82PNInK7k6b0E7-WTJoJX2HB4D\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": false,
+      "go_valid": false
+    },
+    {
+      "name": "a field in another case is not read",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EA3FqbevS9jeaLa-Hpd6PPizQZwznlJa1dOT3lzNrFU-\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"Nonce\":\"nonce-2\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCOr-eEVSljskrQlXWc5UxyFUvExI7pgUCyJGY6S80tiqPcyxtJJ-svtIdkma82PNInK7k6b0E7-WTJoJX2HB4D\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": false,
+      "go_valid": false
+    },
+    {
+      "name": "an unknown field is not read",
+      "assertion_json": "{\"extra\":\"x\",\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EA3FqbevS9jeaLa-Hpd6PPizQZwznlJa1dOT3lzNrFU-\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCOr-eEVSljskrQlXWc5UxyFUvExI7pgUCyJGY6S80tiqPcyxtJJ-svtIdkma82PNInK7k6b0E7-WTJoJX2HB4D\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": false,
+      "go_valid": false
+    },
+    {
+      "name": "a number where a string is expected is not read",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EA3FqbevS9jeaLa-Hpd6PPizQZwznlJa1dOT3lzNrFU-\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":1,\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCOr-eEVSljskrQlXWc5UxyFUvExI7pgUCyJGY6S80tiqPcyxtJJ-svtIdkma82PNInK7k6b0E7-WTJoJX2HB4D\"}",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": false,
+      "go_valid": false
+    },
+    {
+      "name": "a document that is a list is not read",
+      "assertion_json": "[]",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": false,
+      "go_valid": false
+    },
+    {
+      "name": "a document that is null is not read",
+      "assertion_json": "null",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": false,
+      "go_valid": false
+    },
+    {
+      "name": "text that is not JSON is not read",
+      "assertion_json": "not json",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": false,
+      "go_valid": false
+    },
+    {
+      "name": "trailing text after the document is not read",
+      "assertion_json": "{\"v\":\"IALOGIN10JSON\",\"t\":\"login-assertion\",\"d\":\"EA3FqbevS9jeaLa-Hpd6PPizQZwznlJa1dOT3lzNrFU-\",\"i\":\"EAsserter\",\"relationship_aid_oobi\":\"https://r.example/oobi/EAsserter\",\"audience\":\"https://app.example.com\",\"nonce\":\"nonce-1\",\"dt\":\"2026-06-17T12:00:00Z\",\"disclosures\":{\"display_name\":\"Alice\"},\"presented_acdcs\":[],\"site_aid\":\"ESite\",\"sig\":\"0BCOr-eEVSljskrQlXWc5UxyFUvExI7pgUCyJGY6S80tiqPcyxtJJ-svtIdkma82PNInK7k6b0E7-WTJoJX2HB4D\"} x",
+      "now": "2026-06-17T12:00:00Z",
+      "expect": {
+        "nonce": "nonce-1",
+        "audience": "https://app.example.com",
+        "site_aid": "ESite",
+        "browser_key": ""
+      },
+      "max_skew_seconds": 0,
+      "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+      "go_reads": false,
+      "go_valid": false
+    }
+  ],
+  "spending_sequences": [
+    {
+      "name": "the same assertion presented twice",
+      "steps": [
+        {
+          "case": "an assertion that answers its challenge",
+          "accepted": true
+        },
+        {
+          "case": "an assertion that answers its challenge",
+          "accepted": false,
+          "reason": "assertion already used"
+        }
+      ]
+    },
+    {
+      "name": "a forged copy first does not spend the real assertion",
+      "steps": [
+        {
+          "case": "a body changed after signing is refused",
+          "accepted": false,
+          "reason": "invalid signature"
+        },
+        {
+          "case": "an assertion that answers its challenge",
+          "accepted": true
+        },
+        {
+          "case": "an assertion that answers its challenge",
+          "accepted": false,
+          "reason": "assertion already used"
+        }
+      ]
+    },
+    {
+      "name": "a copy checked under the wrong key first does not spend it",
+      "steps": [
+        {
+          "case": "an assertion checked under another key is refused",
+          "accepted": false,
+          "reason": "invalid signature"
+        },
+        {
+          "case": "an assertion that answers its challenge",
+          "accepted": true
+        }
+      ]
+    },
+    {
+      "name": "a stale copy first does not spend it",
+      "steps": [
+        {
+          "case": "dt 301 seconds before the clock is outside it",
+          "accepted": false,
+          "reason": "dt outside freshness window"
+        },
+        {
+          "case": "an assertion that answers its challenge",
+          "accepted": true
+        }
+      ]
+    },
+    {
+      "name": "assertions that share an audience, a nonce and an asserter are one assertion",
+      "steps": [
+        {
+          "case": "an assertion that answers its challenge",
+          "accepted": true
+        },
+        {
+          "case": "a sign-in for a browser key, repeating that key",
+          "accepted": false,
+          "reason": "assertion already used"
+        },
+        {
+          "case": "dt 300 seconds after the clock is inside it",
+          "accepted": false,
+          "reason": "assertion already used"
+        }
+      ]
+    }
+  ],
+  "spending_rule": "An assertion the verifier accepts is spent under audience|nonce|i, and a later presentation under the same three is refused with \"assertion already used\". An assertion refused for any other reason spends nothing."
+}
