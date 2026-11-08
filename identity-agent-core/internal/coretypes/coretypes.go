@@ -33,6 +33,10 @@ type Authority struct {
 	Request *SignedRequest
 	// About is what the request named as the thing it acts on.
 	About string
+	// RegrantOf is, for a machine's Controller Grant re-issued only to name its
+	// app, the SAID of the grant it replaces. It stands in for a signed request
+	// and only for that (server mayWaitWithoutARequest). Empty otherwise.
+	RegrantOf string
 }
 
 // SignedRequest is a request exactly as it was signed, with its body.

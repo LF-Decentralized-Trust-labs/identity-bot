@@ -279,7 +279,7 @@ func (s *CoreServer) adoptGrant(row waitingRow, signature string) error {
 	if asked && kind != nil {
 		shown, err := sameAsBuilt(p)
 		if err == nil {
-			err = s.stillWhatItGrants(kind, shown)
+			err = s.stillWhatItGrants(kind, shown, p.Spec.RegrantOf)
 		}
 		if err == nil {
 			err = s.checkAuthorisationOf(p.Prepared.AcdcRaw, p.Spec.Issuer, "", "", p.Spec.by())

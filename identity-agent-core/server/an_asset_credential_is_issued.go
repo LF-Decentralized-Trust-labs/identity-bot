@@ -115,7 +115,7 @@ func (s *CoreServer) issueAssetCredential(
 			return "", err
 		}
 		if _, err := s.awaitRegistry(reg, grantSpec{Schema: kind.Schema.SAID, Issuer: issuer, Claims: claims, Edges: edges,
-			Holder: holder, Expiry: expiry, RequestDigest: requestDigest, About: by.About, Grant: by.ControllerGrant, GrantSchema: by.ControllerGrantSchema, Request: by.Request,
+			Holder: holder, Expiry: expiry, RequestDigest: requestDigest, About: by.About, Grant: by.ControllerGrant, GrantSchema: by.ControllerGrantSchema, RegrantOf: by.RegrantOf, Request: by.Request,
 			CreatorGrant: by.CreatorGrant, CreatorGrantSchema: by.CreatorGrantSchema, CreatorBody: by.CreatorBody}); err != nil {
 			return "", err
 		}
@@ -153,7 +153,7 @@ func (s *CoreServer) issueAssetCredential(
 			return "", errKeyElsewhere
 		}
 		if _, err := s.awaitSignature(kind, prepared, grantSpec{Schema: kind.Schema.SAID, Issuer: issuer, Claims: claims, Edges: edges,
-			Holder: holder, Expiry: expiry, RequestDigest: requestDigest, About: by.About, Grant: by.ControllerGrant, GrantSchema: by.ControllerGrantSchema, Request: by.Request,
+			Holder: holder, Expiry: expiry, RequestDigest: requestDigest, About: by.About, Grant: by.ControllerGrant, GrantSchema: by.ControllerGrantSchema, RegrantOf: by.RegrantOf, Request: by.Request,
 			CreatorGrant: by.CreatorGrant, CreatorGrantSchema: by.CreatorGrantSchema, CreatorBody: by.CreatorBody}); err != nil {
 			return "", err
 		}

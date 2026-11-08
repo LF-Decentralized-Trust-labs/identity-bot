@@ -596,8 +596,27 @@ func (s *CoreServer) bindAppAsset(aid, assetID string) (ControllerGrant, error) 
 		return before, nil
 	}
 	bound, err := s.controllers().BindAppAsset(aid, assetID)
-	if err != nil || before.CredentialSAID == "" || s.keyCanSign() != nil {
+	if err != nil || before.CredentialSAID == "" {
 		return bound, err
+	}
+	if keyErr := s.keyCanSign(); keyErr != nil {
+		if !errors.Is(keyErr, errKeyElsewhere) {
+			return bound, nil
+		}
+		// The key is on another device: the grant naming the app is asked of
+		// it, by the signing request every grant there waits on. The machine
+		// keeps the grant it has until that is signed, when this replaces it
+		// (grantArrived).
+		if err := s.rowIsItsGrant(before); err != nil {
+			s.undoBind(before)
+			return before, err
+		}
+		_, err := s.issueControllerGrant(bound, coretypes.Authority{About: bound.ControllerAID, RegrantOf: before.CredentialSAID})
+		if err != nil && !errors.Is(err, errKeyElsewhere) && !errors.Is(err, errAlreadyAsked) {
+			s.undoBind(before)
+			return before, fmt.Errorf("the machine's grant could not be asked for to name its app: %w", err)
+		}
+		return bound, nil
 	}
 	// Re-issued from what the grant says, never from a row changed since.
 	if err := s.rowIsItsGrant(before); err != nil {

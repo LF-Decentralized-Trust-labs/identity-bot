@@ -55,17 +55,20 @@ const (
 
 // grantSpec is everything a grant is built from, so it can be built again.
 type grantSpec struct {
-	Schema        string                   `json:"schema"`
-	Issuer        string                   `json:"issuer"`
-	Claims        map[string]interface{}   `json:"claims"`
-	Edges         map[string]interface{}   `json:"edges,omitempty"`
-	Holder        string                   `json:"holder"`
-	Expiry        string                   `json:"expiry,omitempty"`
-	RequestDigest string                   `json:"request_digest,omitempty"`
-	About         string                   `json:"about,omitempty"`
-	Grant         string                   `json:"controller_grant,omitempty"`
-	GrantSchema   string                   `json:"controller_grant_schema,omitempty"`
-	Request       *coretypes.SignedRequest `json:"request,omitempty"`
+	Schema        string                 `json:"schema"`
+	Issuer        string                 `json:"issuer"`
+	Claims        map[string]interface{} `json:"claims"`
+	Edges         map[string]interface{} `json:"edges,omitempty"`
+	Holder        string                 `json:"holder"`
+	Expiry        string                 `json:"expiry,omitempty"`
+	RequestDigest string                 `json:"request_digest,omitempty"`
+	About         string                 `json:"about,omitempty"`
+	Grant         string                 `json:"controller_grant,omitempty"`
+	GrantSchema   string                 `json:"controller_grant_schema,omitempty"`
+	// RegrantOf is the grant this one replaces by only adding the app a machine
+	// is the back end of; the one case that waits with no signed request.
+	RegrantOf string                   `json:"regrant_of,omitempty"`
+	Request   *coretypes.SignedRequest `json:"request,omitempty"`
 	// The creator's grant (with its schema) and body credential, for a request
 	// an AI agent's body made.
 	CreatorGrant       string `json:"creator_grant,omitempty"`
@@ -74,7 +77,7 @@ type grantSpec struct {
 }
 
 func (g grantSpec) by() coretypes.Authority {
-	return coretypes.Authority{About: g.About, ControllerGrant: g.Grant, ControllerGrantSchema: g.GrantSchema, Request: g.Request,
+	return coretypes.Authority{About: g.About, ControllerGrant: g.Grant, ControllerGrantSchema: g.GrantSchema, RegrantOf: g.RegrantOf, Request: g.Request,
 		CreatorGrant: g.CreatorGrant, CreatorGrantSchema: g.CreatorGrantSchema, CreatorBody: g.CreatorBody}
 }
 
@@ -137,12 +140,63 @@ func grantKindNamed(schema string) *schemas.AssetGrant {
 // device as the authority for it.
 var errNeedsSignedRequest = errors.New("where the identity's key is on another device, a grant is asked for only by a signed request")
 
+// mayWaitWithoutARequest says whether a grant may wait for the device that holds
+// the key. It may when a signed request is behind it. The one grant that may
+// without is a machine's own current Controller Grant re-issued only to name
+// the app the machine is the back end of: the same holder, issuer, key, grade,
+// label, signer and end, nothing added but app_asset, and that app the one the
+// machine's row is bound to. Checked when it is asked for and again when it is
+// signed, so what the device signs and what is adopted are both that and
+// nothing wider. Anything else with no request is refused.
+func (s *CoreServer) mayWaitWithoutARequest(kind string, spec grantSpec) error {
+	if spec.Request != nil {
+		return nil
+	}
+	if kind != signingKindGrant || spec.RegrantOf == "" || spec.Schema != schemas.ControllerGrant.Schema.SAID {
+		return errNeedsSignedRequest
+	}
+	app, _ := spec.Claims["app_asset"].(string)
+	g, had, err := s.controllers().Get(spec.Holder)
+	if err != nil || !had || app == "" || g.AppAsset != app || g.CredentialSAID != spec.RegrantOf {
+		return fmt.Errorf("%w: the machine is not bound to the app the grant names, or has another grant", errNeedsSignedRequest)
+	}
+	rec, err := s.DataStore.GetCredential(spec.RegrantOf)
+	if err != nil || rec == nil || rec.Status != "issued" || rec.HolderAID != spec.Holder || rec.IssuerAID != spec.Issuer {
+		return fmt.Errorf("%w: the grant to replace is not this machine's grant in force", errNeedsSignedRequest)
+	}
+	raw, err := base64.StdEncoding.DecodeString(rec.AcdcJson)
+	if err != nil {
+		return err
+	}
+	var acdc struct {
+		A map[string]interface{} `json:"a"`
+	}
+	if json.Unmarshal(raw, &acdc) != nil || acdc.A == nil {
+		return fmt.Errorf("%w: the grant to replace is unreadable", errNeedsSignedRequest)
+	}
+	// What the grant says besides these is not compared: its digest and date are
+	// its own, and the request it was first asked by is not carried into a
+	// re-issue.
+	skip := map[string]bool{"d": true, "dt": true, "u": true, "request": true, "about": true, "app_asset": true}
+	for k, v := range acdc.A {
+		if !skip[k] && !sameJSONValue(v, spec.Claims[k]) {
+			return fmt.Errorf("%w: the grant says %s differently from the one it replaces", errNeedsSignedRequest, k)
+		}
+	}
+	for k, v := range spec.Claims {
+		if !skip[k] && !sameJSONValue(acdc.A[k], v) {
+			return fmt.Errorf("%w: the grant says %s, which the one it replaces does not", errNeedsSignedRequest, k)
+		}
+	}
+	return nil
+}
+
 // awaitSignature keeps a prepared grant and asks the device that holds the
 // identity's key to sign its anchoring interaction, withdrawing any grant
 // already waiting for the same machine or AI agent.
 func (s *CoreServer) awaitSignature(kind *schemas.AssetGrant, p *drivers.PreparedIssuance, spec grantSpec) (string, error) {
-	if spec.Request == nil {
-		return "", errNeedsSignedRequest
+	if err := s.mayWaitWithoutARequest(signingKindGrant, spec); err != nil {
+		return "", err
 	}
 	shown, err := authorisation.WhatSigningGrants(p.IxnRaw, p.IssRaw, p.AcdcRaw)
 	if err != nil {
@@ -314,8 +368,10 @@ func (s *CoreServer) completeWaiting(req store.SigningRequest, signature string)
 	if err := json.Unmarshal([]byte(body), &pending); err != nil {
 		return err
 	}
-	if pending.Spec.Request == nil && pending.Kind != signingKindRevocation && pending.Kind != signingKindDelegation {
-		return errNeedsSignedRequest
+	if pending.Kind != signingKindRevocation && pending.Kind != signingKindDelegation {
+		if err := s.mayWaitWithoutARequest(pending.Kind, pending.Spec); err != nil {
+			return err
+		}
 	}
 	// The signature is over the request's own payload, which is the
 	// interaction kept: neither can have been swapped for the other's.
@@ -397,7 +453,7 @@ func sameJSONValue(a, b interface{}) bool {
 // stillWhatItGrants checks that the machine or AI agent a waiting grant is
 // for is still there, is still what the grant says, and has not been granted
 // anything meanwhile.
-func (s *CoreServer) stillWhatItGrants(kind *schemas.AssetGrant, shown *authorisation.ToSign) error {
+func (s *CoreServer) stillWhatItGrants(kind *schemas.AssetGrant, shown *authorisation.ToSign, regrantOf string) error {
 	switch kind {
 	case schemas.ControllerGrant, schemas.ControllerGrantV11:
 		g, had, err := s.controllers().Get(shown.Holder)
@@ -407,7 +463,9 @@ func (s *CoreServer) stillWhatItGrants(kind *schemas.AssetGrant, shown *authoris
 		if live, why := g.Live(time.Now()); !live {
 			return fmt.Errorf("the machine's authorisation no longer stands: %s", why)
 		}
-		if g.CredentialSAID != "" {
+		// A re-grant to name the app replaces the grant the machine has; any
+		// other grant waits for a machine that has none.
+		if g.CredentialSAID != "" && g.CredentialSAID != regrantOf {
 			return fmt.Errorf("the machine has been granted meanwhile")
 		}
 		if strings.TrimSpace(g.PublicKey) != shown.PublicKey || strings.TrimSpace(g.Label) != shown.Name ||
@@ -520,9 +578,18 @@ func (s *CoreServer) grantArrived(kind *schemas.AssetGrant, spec grantSpec, said
 			log.Printf("[grants] machine %s was granted %s and is no longer paired", spec.Holder, said)
 			return
 		}
+		replaced := ""
+		if spec.RegrantOf != "" && g.CredentialSAID == spec.RegrantOf && said != spec.RegrantOf {
+			replaced = spec.RegrantOf
+		}
 		g.CredentialSAID, g.CredentialPending = said, false
 		if err := s.controllers().Put(g); err != nil {
 			log.Printf("[grants] machine %s was granted %s and could not be marked so: %v", spec.Holder, said, err)
+			return
+		}
+		// The grant that named no app is withdrawn once the one that does stands.
+		if replaced != "" {
+			s.withdrawOrSay(replaced)
 		}
 	default:
 		if g, ok := grantKind(kind); ok && g.Arrived != nil {
