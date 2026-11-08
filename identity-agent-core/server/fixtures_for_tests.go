@@ -175,10 +175,6 @@ func everyPublicRoute() map[string]string {
 	return everyEntry(publicRoutes, func(a Addon) map[string]string { return a.PublicRoutes })
 }
 
-func everySessionForbidden() map[string]string {
-	return everyEntry(sessionForbidden, func(a Addon) map[string]string { return a.SessionForbidden })
-}
-
 // agentWithDerivedIdentity builds an agent whose identity was created from its
 // own root seed, so it can sign as itself.
 //
@@ -798,25 +794,6 @@ func resolveWithTokens(s *CoreServer, r *http.Request) permission.CallerContext 
 
 // logEventSigner is what signs s's governance log.
 func logEventSigner(s *CoreServer) activitylog.EventSigner { return &invocationSigner{s: s} }
-
-// signInABrowser gives s browser sessions of its own and signs one in with
-// secret, approved, returning that session's token.
-func signInABrowser(t coretypes.TB, s *CoreServer, secret string) string {
-	t.Helper()
-	s.BrowserSessions = newBrowserSessions()
-	id, code, _, err := s.BrowserSessions.newChallenge(hashSecret(secret))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.BrowserSessions.grant(code); err != nil {
-		t.Fatal(err)
-	}
-	token, _, err := s.BrowserSessions.claim(id, secret)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return token
-}
 
 // withOwnerSecret sets what a request from this computer must carry to be the
 // owner's.

@@ -232,14 +232,11 @@ func TestKeyEventRoutesAreTheOwnersAlone(t *testing.T) {
 }
 
 // The route that proposes who would witness a founding is the owner's alone,
-// on both lists, and names each witness's key and address with the threshold.
+// and names each witness's key and address with the threshold.
 func TestTheWitnessesForAFoundingAreProposedToTheOwnerAlone(t *testing.T) {
 	route := "GET /api/events/witnesses-for-a-founding"
 	if _, ok := controllerOwnerOnly[route]; !ok {
 		t.Errorf("%s is open to a controller", route)
-	}
-	if _, ok := sessionForbidden[route]; !ok {
-		t.Errorf("%s is open to a browser session", route)
 	}
 
 	var pool []witness.BootstrapWitness

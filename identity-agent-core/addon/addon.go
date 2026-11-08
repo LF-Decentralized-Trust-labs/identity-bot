@@ -132,11 +132,9 @@ type Host interface {
 	EndAppSessionsOf(personAID string) int
 	GrantController(g server.ControllerGrant, now time.Time, by Authority) (server.ControllerGrant, error)
 	GrantsHeldBy(agentAID string, usableOnly bool) []store.CredentialRecord
-	HasBrowserSession(r *http.Request) bool
 	HoldTheRecord() (string, bool, bool, func(), error)
 	InBackground(fn func(ctx context.Context))
 	InitAssetHandler() error
-	IsLiveBrowserSession(token string) bool
 	IsVaultEntry(name string) bool
 	IssueAssetCredential(kind *schemas.AssetGrant, holder string, issuer string, claims map[string]interface{}, expiry string, by Authority) (string, error)
 	IssueCapabilityGrant(agent *asset.Asset, by Authority) (string, error)
@@ -228,7 +226,6 @@ type Helpers interface {
 	ReadSignedBody(r *http.Request) ([]byte, error)
 	RememberSignature(sig string, now time.Time) bool
 	RequestCorrelationID(r *http.Request) string
-	RequiresTheKeyItself(method string, pattern string) (string, bool)
 	SameJSONValue(a interface{}, b interface{}) bool
 	SealedRemoteAddr() string
 	TheGateAdmittedTheOwner(r *http.Request) bool

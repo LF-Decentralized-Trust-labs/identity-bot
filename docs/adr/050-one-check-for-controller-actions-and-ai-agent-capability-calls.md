@@ -45,8 +45,8 @@ opens them to a controller. They are:
   hold, approving or giving up a share of somebody else's recovery;
 - backups: retrieving, exporting or pulling back an archive;
 - who may act: inviting and redeeming signers, asking the inviting app what it
-  published for an invite this agent redeemed, adding or removing a controller,
-  and approving a browser login;
+  published for an invite this agent redeemed, and adding or removing a
+  controller;
 - who the owner is: the identity record, key events, contact records and the
   routes that write them, the peer records a sealed request's sender is read
   from, the machine-owner identity, its signatures and adopting a machine, this

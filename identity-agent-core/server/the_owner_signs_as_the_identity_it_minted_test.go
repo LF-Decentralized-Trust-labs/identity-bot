@@ -190,13 +190,3 @@ func TestASignatureCannotBeMadeForLater(t *testing.T) {
 		t.Fatalf("a signature for three days from now was made: %s", rec.Body.String())
 	}
 }
-
-// A browser session cannot ask for a machine owner's signature, nor mint the
-// identity that owns a machine.
-func TestABrowserSessionCannotSignAsAMachinesOwner(t *testing.T) {
-	for _, route := range []string{"/api/machines/owner/sign", "/api/machines/owner-identity"} {
-		if reason, forbidden := requiresTheKeyItself("POST", route); !forbidden || reason == "" {
-			t.Errorf("a browser session may POST %s", route)
-		}
-	}
-}

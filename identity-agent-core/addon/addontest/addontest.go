@@ -65,7 +65,6 @@ type Fixtures interface {
 	ControllerNeedsScore(t TB, route string, score int)
 	EntriesForRoutesNotItsOwn(s *server.CoreServer) []string
 	EveryPublicRoute() map[string]string
-	EverySessionForbidden() map[string]string
 	EverythingRuns(s *server.CoreServer)
 	Fulfil(t TB, s *server.CoreServer, req store.SigningRequest, seed []byte) *httptest.ResponseRecorder
 	GrantControllerRow(s *server.CoreServer, g server.ControllerGrant, now time.Time) (server.ControllerGrant, error)
@@ -96,7 +95,6 @@ type Fixtures interface {
 	RevokeControllerRow(s *server.CoreServer, aid string) error
 	SealTestOwner(t TB, s *server.CoreServer) ([]byte, string)
 	SetRouter(s *server.CoreServer, r chi.Router)
-	SignInABrowser(t TB, s *server.CoreServer, secret string) string
 	Signed(t TB, method string, path string, body string, seed []byte, at time.Time) *http.Request
 	SignedFor(t TB, target string, method string, path string, body string, seed []byte, at time.Time) *http.Request
 	SigningPair(t TB, b byte) ([]byte, string)

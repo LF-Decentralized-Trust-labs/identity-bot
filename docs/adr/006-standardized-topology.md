@@ -1,6 +1,6 @@
 # ADR 006: Standardized Topology — Two Topologies, Four Configurations
 
-**Date:** 2026-02-22 (revised 2026-05-01)
+**Date:** 2026-02-22 (revised 2026-05-01, amended 2026-11-07)
 **Status:** Accepted (revised)
 **Supersedes:** Mode definitions in ADR-003 and ADR-005; the original "3 states × 2 device types" formulation in this same ADR (2026-02-22).
 
@@ -243,6 +243,35 @@ meant "runs an inception of its own rather than a delegated one" and reads as
   and a browser has no enclave to hold a key in. Browser access is deferred
   entirely, as a single capability rather than a question re-asked for each
   feature.
+
+  *Amended 2026-11-07:* withdrawn, not deferred. No browser manages the core,
+  acts as a controller, signs as any identity it holds, or reads what only
+  its owner may. The browser login built before this decision
+  (`/api/session/*`) is removed, and
+  `server/no_browser_reaches_this_core_test.go` fails if a route signs a
+  browser in, takes a browser's token as the owner, or answers a browser's
+  origin other than as listed there.
+
+  Signing in to a website is not reaching the core. A website's embedded
+  sign-in button (ADR-021) calls the four routes under `/api/login/session`
+  of the Identity Agent that holds the website as an asset: it starts a
+  challenge signed with the asset's key and collects who signed in. The
+  browser carries no credential and gains nothing over any identity, and the
+  person approves on their own Identity Agent. Those routes, and the public
+  answers any party may read, are what a browser may call.
+
+  Three places do not conform yet, and are named here so that nobody reads
+  them as allowed:
+  - a person's session at an app on the talk routes (ADR-066), which is being
+    reworked so that the app asks from its own server;
+  - the app display at `/apps/{app_id}/` (ADR-012), which a browser loads
+    through the core;
+  - a sandboxed app's page calling a model at `/sandbox/llm/v1` (ADR-012,
+    ADR-013), which answers any origin.
+
+  A person's own apps are reached from a browser: the browser talks to
+  the app, and the app, enrolled with its own credential, asks the core from
+  its own server.
 - **Both kinds of identity use the same mechanism.** What differs is only where
   the application runs.
 

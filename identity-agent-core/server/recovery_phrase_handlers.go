@@ -20,7 +20,7 @@ import (
 // and deletes it on confirmation. A production build refuses to hold it where
 // it cannot be wrapped, with the root-seed refusal (secureenclave.StoreRecoveryPhrase).
 //
-// Owner only, and never a controller or a browser session: whoever reads the
+// Owner only, and never a controller: whoever reads the
 // phrase becomes the identity. The phrase is never in a log line or a URL.
 
 type recoveryPhraseBody struct {
