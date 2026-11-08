@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
+
+	"identity-agent-core/internal/boundedread"
 )
 
 // Checking that a witness is who the registry says it is, before designating it.
@@ -61,7 +62,7 @@ func LiveIdentityOf(ctx context.Context, baseURL string) (string, error) {
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("%s answered %d", baseURL, resp.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	body, err := boundedread.All(resp.Body, 1<<16)
 	if err != nil {
 		return "", err
 	}

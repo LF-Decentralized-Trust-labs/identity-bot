@@ -12,6 +12,7 @@ import (
 
 	"identity-agent-core/asset"
 	"identity-agent-core/didcomm"
+	"identity-agent-core/internal/boundedread"
 	"identity-agent-core/login"
 )
 
@@ -348,7 +349,7 @@ func (s *CoreServer) rememberPeerAt(aid, agentURL string) error {
 	}
 
 	var did didcomm.DID
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&did); err != nil {
+	if err := boundedread.Decode(resp.Body, boundedread.Document, &did); err != nil {
 		return fmt.Errorf("could not read the keys %s published: %w", base, err)
 	}
 	// The identifier the keys are for must be the one we asked about. Without

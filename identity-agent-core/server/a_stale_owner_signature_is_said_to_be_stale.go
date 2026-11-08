@@ -67,7 +67,7 @@ func (s *CoreServer) ownerKeyStateIsStale(r *http.Request) bool {
 	var body []byte
 	if r.Body != nil {
 		var rerr error
-		body, rerr = boundedread.All(r.Body, boundedread.Request)
+		body, rerr = boundedread.All(r.Body, signedBodyBoundFor(r))
 		if rerr != nil {
 			return false
 		}

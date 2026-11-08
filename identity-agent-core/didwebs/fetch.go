@@ -4,17 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"identity-agent-core/internal/boundedread"
 	"identity-agent-core/witness"
 )
 
 const headerKeystateSeq = "X-Keri-Keystate-Seq"
 const headerCesrComplete = "X-Keri-Cesr-Complete"
+
+// maxKeyLogAnswer is the most of a key log, in any form, that is read from a
+// host. A longer answer is refused, not cut: a CESR log cut at the limit can
+// still parse as a shorter, valid log.
+const maxKeyLogAnswer int64 = 8 << 20
 
 type fetchResult struct {
 	body         []byte
@@ -105,7 +110,7 @@ func (r *Resolver) fetch(ctx context.Context, u string) (*fetchResult, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	body, err := boundedread.All(resp.Body, maxKeyLogAnswer)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +136,11 @@ func (r *Resolver) fetchOOBIKEL(ctx context.Context, oobiURL string) ([]map[stri
 		KEL []map[string]interface{} `json:"kel"`
 		AID string                   `json:"aid"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+	raw, err := boundedread.All(resp.Body, maxKeyLogAnswer)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(raw, &data); err != nil {
 		return nil, err
 	}
 	return data.KEL, nil

@@ -5,8 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"identity-agent-core/internal/boundedread"
 	"identity-agent-core/witness"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -47,7 +47,7 @@ func (c *L3Client) CrossCheck(ctx context.Context, peerBaseURL string, req KelCh
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := boundedread.All(resp.Body, boundedread.Document)
 	if err != nil {
 		return nil, err
 	}

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto"
 	"identity-agent-core/drivers"
+	"identity-agent-core/internal/boundedread"
 	"identity-agent-core/witness"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -67,7 +67,7 @@ func (c *L2Client) QueryDigest(ctx context.Context, baseURL, aid string, seq int
 		return nil, time.Since(start), err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := boundedread.All(resp.Body, boundedread.Document)
 	if err != nil {
 		return nil, time.Since(start), err
 	}

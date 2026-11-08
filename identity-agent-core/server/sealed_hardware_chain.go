@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/internal/boundedread"
 )
 
 // Obtaining the certificates that let somebody else check this machine's
@@ -156,7 +156,7 @@ func (c *snpCertificateChain) fetch(ctx context.Context, url string) ([]byte, er
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := boundedread.All(resp.Body, boundedread.Document)
 	if err != nil {
 		return nil, err
 	}

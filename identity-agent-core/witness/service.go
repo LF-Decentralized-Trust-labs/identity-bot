@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
-	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -21,6 +20,7 @@ import (
 
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/boundedread"
 	"identity-agent-core/store"
 )
 
@@ -242,7 +242,11 @@ func (s *Service) defaultFetchEvent(ctx context.Context, url string) (SignedEven
 		return SignedEvent{}, fmt.Errorf("witness GET %d", resp.StatusCode)
 	}
 	var out SignedEvent
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil {
+	raw, err := boundedread.All(resp.Body, boundedread.Document)
+	if err != nil {
+		return SignedEvent{}, err
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
 		return SignedEvent{}, err
 	}
 	return out, nil
@@ -301,7 +305,11 @@ func (s *Service) defaultFetchTip(ctx context.Context, url string) (TipAnswer, e
 		return TipAnswer{}, fmt.Errorf("witness GET %d", resp.StatusCode)
 	}
 	var out TipAnswer
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<16)).Decode(&out); err != nil {
+	raw, err := boundedread.All(resp.Body, 1<<16)
+	if err != nil {
+		return TipAnswer{}, err
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
 		return TipAnswer{}, err
 	}
 	return out, nil
@@ -465,7 +473,10 @@ func (s *Service) defaultPostEvent(ctx context.Context, witnessURL string, body 
 		return nil, err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	raw, err := boundedread.All(resp.Body, boundedread.Document)
+	if err != nil {
+		return nil, err
+	}
 	if resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("witness POST %d: %s", resp.StatusCode, string(raw))
 	}

@@ -7,11 +7,12 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"identity-agent-core/internal/boundedread"
 )
 
 type azureBackend struct {
@@ -62,7 +63,7 @@ func (b *azureBackend) Push(ctx context.Context, objectKey string, data []byte) 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
+		body := boundedread.Snippet(resp.Body)
 		return fmt.Errorf("azure push %d: %s", resp.StatusCode, string(body))
 	}
 	return nil
@@ -82,10 +83,10 @@ func (b *azureBackend) Pull(ctx context.Context, objectKey string) ([]byte, erro
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body := boundedread.Snippet(resp.Body)
 		return nil, fmt.Errorf("azure pull %d: %s", resp.StatusCode, string(body))
 	}
-	return io.ReadAll(resp.Body)
+	return boundedread.All(resp.Body, boundedread.Archive)
 }
 
 func (b *azureBackend) List(ctx context.Context, prefix string) ([]string, error) {
@@ -105,10 +106,10 @@ func (b *azureBackend) List(ctx context.Context, prefix string) ([]string, error
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body := boundedread.Snippet(resp.Body)
 		return nil, fmt.Errorf("azure list %d: %s", resp.StatusCode, string(body))
 	}
-	body, err := io.ReadAll(resp.Body)
+	body, err := boundedread.All(resp.Body, maxListBytes)
 	if err != nil {
 		return nil, err
 	}

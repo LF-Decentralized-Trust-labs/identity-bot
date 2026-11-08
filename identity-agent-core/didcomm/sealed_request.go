@@ -6,10 +6,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
+
+	"identity-agent-core/internal/boundedread"
 )
 
 // A request carried inside an envelope, so nothing between the two ends can
@@ -90,7 +91,7 @@ func SendSealed(ctx context.Context, client *http.Client, sender *KeySet, to *DI
 		return nil, fmt.Errorf("could not reach %s: %w", to.AID, err)
 	}
 	defer resp.Body.Close()
-	answer, err := io.ReadAll(io.LimitReader(resp.Body, SealedMaxBody))
+	answer, err := boundedread.All(resp.Body, SealedMaxBody)
 	if err != nil {
 		return nil, fmt.Errorf("could not read the answer: %w", err)
 	}

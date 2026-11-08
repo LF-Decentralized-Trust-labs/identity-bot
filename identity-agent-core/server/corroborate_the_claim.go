@@ -3,11 +3,11 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
 
+	"identity-agent-core/internal/boundedread"
 	"identity-agent-core/witness"
 )
 
@@ -160,8 +160,12 @@ func fetchWitnessReplica(client *http.Client, base, aid string, presented []map[
 			lastErr = err
 			continue
 		}
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		body, rerr := boundedread.All(resp.Body, boundedread.Document)
 		resp.Body.Close()
+		if rerr != nil {
+			lastErr = rerr
+			continue
+		}
 		if resp.StatusCode != http.StatusOK {
 			lastErr = fmt.Errorf("status %d", resp.StatusCode)
 			continue

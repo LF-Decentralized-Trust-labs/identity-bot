@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"identity-agent-core/drivers"
 	"identity-agent-core/witness"
@@ -23,6 +24,7 @@ import (
 
 	"identity-agent-core/didcomm"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/boundedread"
 	"identity-agent-core/login"
 	"identity-agent-core/secureenclave"
 	"identity-agent-core/store"
@@ -1149,7 +1151,7 @@ func boxPairingBegin(client *http.Client, base string) (*pairingBeginResponse, e
 		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	var offer pairingBeginResponse
-	if err := json.NewDecoder(resp.Body).Decode(&offer); err != nil {
+	if err := boundedread.Decode(resp.Body, boundedread.Document, &offer); err != nil {
 		return nil, err
 	}
 	if offer.PublicKey == "" {
@@ -1170,7 +1172,9 @@ func boxPairingComplete(client *http.Client, base string, body pairingCompleteRe
 		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))
 	}
 	var out map[string]interface{}
-	_ = json.NewDecoder(resp.Body).Decode(&out)
+	if err := boundedread.Decode(resp.Body, boundedread.Document, &out); err != nil && errors.Is(err, boundedread.ErrTooLarge) {
+		return nil, err
+	}
 	return out, nil
 }
 

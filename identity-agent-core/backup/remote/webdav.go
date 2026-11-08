@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"path"
 	"strings"
 	"time"
+
+	"identity-agent-core/internal/boundedread"
 )
 
 type webdavBackend struct {
@@ -50,7 +51,7 @@ func (b *webdavBackend) Push(ctx context.Context, objectKey string, data []byte)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
+		body := boundedread.Snippet(resp.Body)
 		return fmt.Errorf("webdav push %d: %s", resp.StatusCode, string(body))
 	}
 	return nil
@@ -71,10 +72,10 @@ func (b *webdavBackend) Pull(ctx context.Context, objectKey string) ([]byte, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body := boundedread.Snippet(resp.Body)
 		return nil, fmt.Errorf("webdav pull %d: %s", resp.StatusCode, string(body))
 	}
-	return io.ReadAll(resp.Body)
+	return boundedread.All(resp.Body, boundedread.Archive)
 }
 
 func (b *webdavBackend) List(ctx context.Context, prefix string) ([]string, error) {
@@ -96,10 +97,10 @@ func (b *webdavBackend) List(ctx context.Context, prefix string) ([]string, erro
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
+		body := boundedread.Snippet(resp.Body)
 		return nil, fmt.Errorf("webdav list %d: %s", resp.StatusCode, string(body))
 	}
-	body, err := io.ReadAll(resp.Body)
+	body, err := boundedread.All(resp.Body, maxListBytes)
 	if err != nil {
 		return nil, err
 	}

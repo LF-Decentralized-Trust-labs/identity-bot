@@ -10,11 +10,12 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"net/http"
 	"sync"
 	"time"
+
+	"identity-agent-core/internal/boundedread"
 )
 
 // Proving a report came from a genuine AMD part.
@@ -283,7 +284,7 @@ func (v *AMDKDSVerifier) fetch(ctx context.Context, url string) ([]byte, error) 
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := boundedread.All(resp.Body, boundedread.Document)
 	if err != nil {
 		return nil, err
 	}

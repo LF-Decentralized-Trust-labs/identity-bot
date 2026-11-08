@@ -3,7 +3,7 @@ package keriengine
 import (
 	"encoding/json"
 	"fmt"
-	"io"
+	"identity-agent-core/internal/boundedread"
 	"net/http"
 	"net/url"
 	"strings"
@@ -41,7 +41,7 @@ const oobiTimeout = 15 * time.Second
 
 // maxOOBIBody bounds what will be read. Without it, whoever serves the URL
 // decides how much memory this agent spends.
-const maxOOBIBody = 8 << 20
+const maxOOBIBody = boundedread.OOBI
 
 // ResolveOobi fetches an introduction and reports what it could establish.
 func (e *Engine) ResolveOobi(oobiURL string) (*drivers.DriverResolveOobiResponse, error) {
@@ -80,7 +80,7 @@ func ResolveOobiWith(client HTTPClient, oobiURL string) (*drivers.DriverResolveO
 		return nil, fmt.Errorf("%s answered %d", oobiURL, resp.StatusCode)
 	}
 
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxOOBIBody))
+	raw, err := boundedread.All(resp.Body, maxOOBIBody)
 	if err != nil {
 		return nil, fmt.Errorf("could not read the response from %s: %w", oobiURL, err)
 	}

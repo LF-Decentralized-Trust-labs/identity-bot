@@ -97,7 +97,7 @@ func (s *CoreServer) ensureKeriContactIs(oobiURL, expected string) (*store.Conta
 		// and a production agent do not form a relationship by accident.
 		Realm string `json:"realm,omitempty"`
 	}
-	if err := json.NewDecoder(boundedread.Reader(resp.Body, boundedread.Document)).Decode(&oobiData); err != nil {
+	if err := json.NewDecoder(boundedread.Reader(resp.Body, boundedread.OOBI)).Decode(&oobiData); err != nil {
 		return nil, false, fmt.Errorf("invalid oobi response: %w", err)
 	}
 	if oobiData.AID == "" {

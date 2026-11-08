@@ -8,6 +8,7 @@
 package boundedread
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,10 +19,19 @@ import (
 const (
 	// Document is a signed Ask, an OOBI answer, a schema, a login bundle.
 	Document int64 = 1 << 20
+	// OOBI is an OOBI answer: a key log and what is needed to check it. The
+	// one limit for it, whoever reads it, so no reader refuses what another
+	// accepts.
+	OOBI int64 = 8 << 20
 	// Request is a JSON request body sent to the core's own API.
 	Request int64 = 1 << 20
-	// Archive is a whole backup archive fetched from a paired agent.
-	Archive int64 = 512 << 20
+	// ArchiveUploadBase64 is the most base64 text the core accepts for one
+	// backup archive sent to it.
+	ArchiveUploadBase64 int64 = 2 << 30
+	// Archive is the most a whole backup archive can be, fetched from a paired
+	// agent or a remote store: what the core accepts to store (that much base64
+	// is this much archive), so what can be stored can be fetched back.
+	Archive int64 = ArchiveUploadBase64 / 4 * 3
 	// Diagnostic is how much of an error body is quoted back in an error message.
 	Diagnostic int64 = 512
 )
@@ -40,6 +50,16 @@ func All(r io.Reader, limit int64) ([]byte, error) {
 		return nil, fmt.Errorf("%w (limit %d bytes)", ErrTooLarge, limit)
 	}
 	return b, nil
+}
+
+// Decode reads r under limit and unmarshals it into v. A body over the limit is
+// ErrTooLarge, and one with anything after the JSON value is an error too.
+func Decode(r io.Reader, limit int64, v any) error {
+	b, err := All(r, limit)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(b, v)
 }
 
 // Reader wraps r so a stream consumer (a json.Decoder) fails with ErrTooLarge

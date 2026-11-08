@@ -10,6 +10,7 @@ import (
 
 	"identity-agent-core/backup"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/boundedread"
 	"identity-agent-core/store"
 )
 
@@ -180,7 +181,7 @@ func askAMachineToHold(client *http.Client, url, target string, sign SignAsOwner
 		return nil, fmt.Errorf("that machine did not agree to hold a share")
 	}
 	var agreed AgreedToHold
-	if err := json.NewDecoder(resp.Body).Decode(&agreed); err != nil {
+	if err := boundedread.Decode(resp.Body, boundedread.Document, &agreed); err != nil {
 		return nil, fmt.Errorf("that machine answered with something unreadable")
 	}
 	if agreed.PublicKeyB64 == "" {

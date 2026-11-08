@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
+
+	"identity-agent-core/internal/boundedread"
 )
 
 // PushRequest is the paired-device backup push protocol.
@@ -75,11 +76,10 @@ func (p *PairedPusher) Push(pairedURL, identityAID string, archive []byte) error
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("push failed %d: %s", resp.StatusCode, string(b))
+		return fmt.Errorf("push failed %d: %s", resp.StatusCode, boundedread.Snippet(resp.Body))
 	}
 	var receipt PushResponse
-	if err := json.NewDecoder(resp.Body).Decode(&receipt); err != nil {
+	if err := boundedread.Decode(resp.Body, boundedread.Document, &receipt); err != nil {
 		return err
 	}
 	if !receipt.Received {

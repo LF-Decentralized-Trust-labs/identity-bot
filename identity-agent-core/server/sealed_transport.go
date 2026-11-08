@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +13,7 @@ import (
 	"identity-agent-core/didcomm"
 	"identity-agent-core/internal/coretypes"
 
+	"identity-agent-core/internal/boundedread"
 	"identity-agent-core/internal/jsonreply"
 )
 
@@ -58,9 +58,9 @@ const (
 // handleSealedTransport opens an envelope, runs the request inside it, and
 // seals the answer back.
 func (s *CoreServer) handleSealedTransport(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, sealedMaxBody))
+	body, err := boundedread.All(r.Body, sealedMaxBody)
 	if err != nil {
-		writeSealedError(w, http.StatusBadRequest, "could not read the envelope")
+		writeSealedError(w, boundedread.Status(err), "could not read the envelope")
 		return
 	}
 

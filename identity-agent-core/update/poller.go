@@ -3,12 +3,13 @@ package update
 import (
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"math/rand"
 	"net/http"
 	"sync"
 	"time"
+
+	"identity-agent-core/internal/boundedread"
 )
 
 const (
@@ -165,7 +166,7 @@ func (p *Poller) fetchAnonymous(ctx context.Context) ([]byte, error) {
 
 	switch resp.StatusCode {
 	case http.StatusOK:
-		body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+		body, err := boundedread.All(resp.Body, 4<<20)
 		if err != nil {
 			return nil, err
 		}

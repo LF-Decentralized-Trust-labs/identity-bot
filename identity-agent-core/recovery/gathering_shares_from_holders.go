@@ -3,6 +3,7 @@ package recovery
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/internal/boundedread"
 )
 
 // Gathering shares, which is what a recovering machine spends the wait doing.
@@ -148,7 +150,9 @@ func askOneHolder(client *http.Client, h backup.ShareHolder, knownAs string,
 		Error        string `json:"error"`
 		ReleaseAfter string `json:"release_after"`
 	}
-	_ = json.NewDecoder(resp.Body).Decode(&answer)
+	if err := boundedread.Decode(resp.Body, boundedread.Document, &answer); errors.Is(err, boundedread.ErrTooLarge) {
+		return nil, "", fmt.Errorf("this holder answered with something too large")
+	}
 
 	if resp.StatusCode == http.StatusOK && answer.ShareB64 != "" {
 		raw, derr := backup.DecodeB64(answer.ShareB64)

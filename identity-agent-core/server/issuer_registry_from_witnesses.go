@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"identity-agent-core/drivers"
+	"identity-agent-core/internal/boundedread"
 	"identity-agent-core/witness"
 
 	keri "github.com/grapeid/keri-go"
@@ -424,8 +424,12 @@ func fetchRegistryLogs(client *http.Client, base, issuer string, issuerKel []map
 			lastErr = err
 			continue
 		}
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxTELAnswerBytes))
+		body, rerr := boundedread.All(resp.Body, maxTELAnswerBytes)
 		resp.Body.Close()
+		if rerr != nil {
+			lastErr = rerr
+			continue
+		}
 		if resp.StatusCode != http.StatusOK {
 			lastErr = fmt.Errorf("status %d", resp.StatusCode)
 			continue

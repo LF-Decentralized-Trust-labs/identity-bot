@@ -12,14 +12,20 @@ import (
 
 // oversized is a JSON document larger than any limit the core reads under, whose
 // first part is valid, so a reader that cut it at the limit would still parse it.
-func oversized() []byte {
-	return []byte(`{"v":"ASK1","t":1,"aid":"E1","alias":"` + strings.Repeat("a", int(boundedread.Document)+10) + `"}`)
+func oversized() []byte { return oversizedBy(boundedread.Document) }
+
+func oversizedBy(limit int64) []byte {
+	return []byte(`{"v":"ASK1","t":1,"aid":"E1","alias":"` + strings.Repeat("a", int(limit)+10) + `"}`)
 }
 
 func servesOversized(t *testing.T) *httptest.Server {
+	return servesOversizedBy(t, boundedread.Document)
+}
+
+func servesOversizedBy(t *testing.T, limit int64) *httptest.Server {
 	t.Helper()
 	t.Setenv("IA_ALLOW_LOCAL_SITES", "1")
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(oversized()) }))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(oversizedBy(limit)) }))
 	t.Cleanup(srv.Close)
 	return srv
 }
@@ -52,7 +58,7 @@ func TestAnOversizedScanRequestIsRefused(t *testing.T) {
 
 // An OOBI answer larger than the limit is refused on every route that fetches one.
 func TestAnOversizedOOBIAnswerIsRefused(t *testing.T) {
-	srv := servesOversized(t)
+	srv := servesOversizedBy(t, boundedread.OOBI)
 	s := serverWithIdentity(t, "EUS")
 	if _, _, err := s.EnsureKeriContact(srv.URL + "/oobi/E1"); err == nil || !strings.Contains(err.Error(), "size limit") {
 		t.Fatalf("EnsureKeriContact accepted an oversized answer: %v", err)

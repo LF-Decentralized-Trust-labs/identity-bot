@@ -1,9 +1,9 @@
 package recovery
 
 import (
-	"encoding/json"
 	"fmt"
 	"identity-agent-core/authprovider"
+	"identity-agent-core/internal/boundedread"
 	"net/http"
 	"os"
 	"time"
@@ -108,7 +108,7 @@ func (g *StubAuthProviderGate) CurrentBand() (AssuranceBand, int, error) {
 		Band  string `json:"band"`
 		Score int    `json:"score"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	if err := boundedread.Decode(resp.Body, boundedread.Document, &body); err != nil {
 		return BandUnknown, 0, err
 	}
 	return AssuranceBand(body.Band), body.Score, nil

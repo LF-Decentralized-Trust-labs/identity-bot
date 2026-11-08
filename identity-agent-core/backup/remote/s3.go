@@ -7,12 +7,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"sort"
 	"strings"
 	"time"
+
+	"identity-agent-core/internal/boundedread"
 )
 
 type s3Backend struct {
@@ -68,7 +69,7 @@ func (b *s3Backend) Push(ctx context.Context, objectKey string, data []byte) err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
+		body := boundedread.Snippet(resp.Body)
 		return fmt.Errorf("s3 push %d: %s", resp.StatusCode, string(body))
 	}
 	return nil
@@ -87,10 +88,10 @@ func (b *s3Backend) Pull(ctx context.Context, objectKey string) ([]byte, error) 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body := boundedread.Snippet(resp.Body)
 		return nil, fmt.Errorf("s3 pull %d: %s", resp.StatusCode, string(body))
 	}
-	return io.ReadAll(resp.Body)
+	return boundedread.All(resp.Body, boundedread.Archive)
 }
 
 func (b *s3Backend) List(ctx context.Context, prefix string) ([]string, error) {
@@ -115,10 +116,10 @@ func (b *s3Backend) List(ctx context.Context, prefix string) ([]string, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body := boundedread.Snippet(resp.Body)
 		return nil, fmt.Errorf("s3 list %d: %s", resp.StatusCode, string(body))
 	}
-	body, err := io.ReadAll(resp.Body)
+	body, err := boundedread.All(resp.Body, maxListBytes)
 	if err != nil {
 		return nil, err
 	}

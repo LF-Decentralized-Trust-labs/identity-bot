@@ -3897,7 +3897,7 @@ func (s *CoreServer) handleResolveOobiContact(w http.ResponseWriter, r *http.Req
 		// across the two realms either.
 		Realm string `json:"realm,omitempty"`
 	}
-	if err := json.NewDecoder(boundedread.Reader(resp.Body, boundedread.Document)).Decode(&oobiData); err != nil {
+	if err := json.NewDecoder(boundedread.Reader(resp.Body, boundedread.OOBI)).Decode(&oobiData); err != nil {
 		writeError(w, http.StatusBadGateway, "Invalid OOBI response", fmt.Sprintf("Could not parse response: %v", err))
 		return
 	}
@@ -4070,7 +4070,7 @@ func (s *CoreServer) handleAddContact(w http.ResponseWriter, r *http.Request) {
 		// below before anything is recorded, the same as the other resolve paths.
 		Realm string `json:"realm,omitempty"`
 	}
-	if err := json.NewDecoder(boundedread.Reader(resp.Body, boundedread.Document)).Decode(&oobiData); err != nil {
+	if err := json.NewDecoder(boundedread.Reader(resp.Body, boundedread.OOBI)).Decode(&oobiData); err != nil {
 		writeError(w, http.StatusBadGateway, "Invalid OOBI response", fmt.Sprintf("Could not parse response: %v", err))
 		return
 	}

@@ -4,7 +4,6 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -12,6 +11,7 @@ import (
 
 	"identity-agent-core/backup"
 	"identity-agent-core/iacrypto"
+	"identity-agent-core/internal/boundedread"
 	"identity-agent-core/login"
 	"identity-agent-core/secureenclave"
 )
@@ -218,8 +218,7 @@ func (addSignerAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		// Carry the org's explanation through (e.g. "signer invite already
 		// used") so the person sees a real reason, not a status code.
-		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
-		reason := strings.TrimSpace(string(msg))
+		reason := strings.TrimSpace(boundedread.Snippet(resp.Body))
 		if reason == "" {
 			reason = fmt.Sprintf("status %d", resp.StatusCode)
 		}
@@ -228,7 +227,10 @@ func (addSignerAsk) Execute(s *CoreServer, ctx AskContext, d ScanDecision) (map[
 
 	// Remembered so the inviting app can be asked, under this same key, for
 	// anything it publishes for this invite -- see handleWhatTheInvitingAppPublished.
-	answer, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+	answer, err := boundedread.All(resp.Body, 4<<10)
+	if err != nil {
+		return nil, fmt.Errorf("the organization's answer: %w", err)
+	}
 	s.redeemedInvites.remember(p.InviteToken, redeemedInvite{
 		base: ctx.Base, siteAID: p.SiteAID, siteOOBI: p.SiteOOBI,
 		publishedPath: publishedPathFrom(answer),
