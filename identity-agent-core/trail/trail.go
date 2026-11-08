@@ -19,6 +19,7 @@ import (
 
 	"identity-agent-core/agentmessage"
 	"identity-agent-core/didcomm"
+	"identity-agent-core/limits"
 )
 
 // State is where an entry stands.
@@ -135,6 +136,10 @@ type conversation struct {
 	// refusedReuse finds an id-reuse refusal by the digest of its statement.
 	refusedReuse map[string]int
 	nonces       map[string]bool
+	// turns is how many entries of AI agents have followed the latest allowed
+	// message of a person. Every entry counts the moment it is in the chain,
+	// kept or not, so a back end that is down cannot lift the limit.
+	turns int
 }
 
 // Trail holds the conversations.
@@ -145,13 +150,17 @@ type Trail struct {
 	roster  Roster
 	backend Backend
 	timeout time.Duration
-	now     func() time.Time
-	record  func(Governance)
-	sign    func(agentmessage.Record) (*didcomm.Envelope, error)
+	lim     limits.Limits
+	// sent is when each person's allowed messages were taken, for the hourly limit.
+	rateMu sync.Mutex
+	sent   map[string][]time.Time
+	now    func() time.Time
+	record func(Governance)
+	sign   func(agentmessage.Record) (*didcomm.Envelope, error)
 }
 
 // DefaultTimeout is how long a forwarded call to the app may take (a probe).
-const DefaultTimeout = 10 * time.Second
+const DefaultTimeout = 10 * time.Second // equal to limits.Defaults().ForwardTimeout (tested)
 
 // Options adjust a Trail; the zero value is the defaults.
 type Options struct {
@@ -160,7 +169,10 @@ type Options struct {
 	// same id is refused (ADR-067).
 	Agent          string
 	ForwardTimeout time.Duration
-	Now            func() time.Time
+	// Limits bound what an app can ask of the Identity Agent; the zero value is
+	// limits.Defaults(). A phone passes Defaults().ForPhone().
+	Limits limits.Limits
+	Now    func() time.Time
 	// Record receives what every read leaves in the governance record.
 	Record func(Governance)
 	// Countersign countersigns an entry of the chain as the Identity Agent
@@ -171,18 +183,25 @@ type Options struct {
 // New makes an empty Trail.
 func New(roster Roster, backend Backend, o Options) *Trail {
 	t := &Trail{convs: map[string]*conversation{}, agent: o.Agent, roster: roster, backend: backend,
-		timeout: o.ForwardTimeout, now: o.Now, record: o.Record, sign: o.Countersign}
+		timeout: o.ForwardTimeout, lim: o.Limits, sent: map[string][]time.Time{},
+		now: o.Now, record: o.Record, sign: o.Countersign}
+	if t.lim == (limits.Limits{}) {
+		t.lim = limits.Defaults()
+	}
 	if t.sign == nil {
 		panic("trail: Options.Countersign is required")
 	}
 	if t.timeout == 0 {
-		t.timeout = DefaultTimeout
+		t.timeout = t.lim.ForwardTimeout
 	}
 	if t.now == nil {
 		t.now = time.Now
 	}
 	return t
 }
+
+// ForwardTimeout is how long a forwarded call to the app may take.
+func (t *Trail) ForwardTimeout() time.Duration { return t.timeout }
 
 // Open starts a conversation. Whoever opens it owns it.
 func (t *Trail) Open(id, opener string, standing bool) error {
@@ -315,7 +334,11 @@ func (t *Trail) AppendAgent(conversation string, e agentmessage.Entry) error {
 	if rec.PersonProof != nil || rec.Outcome != nil || rec.Refusal != "" {
 		return errors.New("a person's entry is written by Write, not appended")
 	}
+	if c.turns >= t.lim.MaxTurns {
+		return errors.New(ReasonTurnLimit)
+	}
 	c.chain = append(c.chain, e)
+	c.turns++
 	return nil
 }
 

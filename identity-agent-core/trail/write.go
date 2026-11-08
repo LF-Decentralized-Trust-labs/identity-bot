@@ -55,6 +55,9 @@ const (
 	ReasonTimeout       = "the app did not answer in time"
 	ReasonNonceUsed     = "that nonce was already used"
 	ReasonStale         = "the statement was not signed within 5 minutes of now"
+	ReasonTurnLimit     = "the limit on turns after one message has been reached"
+	ReasonEntryLimit    = "the conversation holds the most entries it may"
+	ReasonRateLimit     = "the limit on messages an hour for this person has been reached"
 )
 
 // Write is what a sender asks to be kept.
@@ -179,6 +182,9 @@ func (t *Trail) Write(ctx context.Context, w Write) (Result, error) {
 	if reason := t.decide(c, w); reason != "" {
 		return refuse(reason)
 	}
+	if reason := t.overLimit(c, s); reason != "" {
+		return refuse(reason)
+	}
 	if t.backend == nil {
 		return refuse(ReasonUnreachable)
 	}
@@ -192,6 +198,7 @@ func (t *Trail) Write(ctx context.Context, w Write) (Result, error) {
 		return Result{}, err
 	}
 	c.indexAllowed(e)
+	t.countAllowed(c, s)
 	i := len(c.entries) - 1
 	fctx, cancel := context.WithTimeout(ctx, t.timeout)
 	defer cancel()
@@ -460,4 +467,49 @@ func (c *conversation) byID(id string) (Entry, bool) {
 		}
 	}
 	return Entry{}, false
+}
+
+// startsTurn says whether a person's entry of this kind sets an AI agent
+// working, which is what the turn limit and the hourly limit count.
+func startsTurn(kind string) bool {
+	return kind == agentmessage.PersonKindMessage || kind == agentmessage.PersonKindAsk
+}
+
+// overLimit applies the limits that protect the Identity Agent: the entries one
+// conversation may hold, and the messages one person may write in an hour. A
+// refusal names the limit. It runs after the rules, before anything is forwarded.
+func (t *Trail) overLimit(c *conversation, s agentmessage.PersonStatement) string {
+	if len(c.chain) >= t.lim.EntriesPerConversation {
+		return ReasonEntryLimit
+	}
+	if startsTurn(s.Kind) && t.sentInHour(s.From) >= t.lim.MessagesPerPersonPerHour {
+		return ReasonRateLimit
+	}
+	return ""
+}
+
+func (t *Trail) sentInHour(person string) int {
+	t.rateMu.Lock()
+	defer t.rateMu.Unlock()
+	cut := t.now().Add(-time.Hour)
+	kept := t.sent[person][:0]
+	for _, at := range t.sent[person] {
+		if at.After(cut) {
+			kept = append(kept, at)
+		}
+	}
+	t.sent[person] = kept
+	return len(kept)
+}
+
+// countAllowed takes an allowed write into the limits: a message starts a new
+// turn count, and counts toward its author's hour.
+func (t *Trail) countAllowed(c *conversation, s agentmessage.PersonStatement) {
+	if !startsTurn(s.Kind) {
+		return
+	}
+	c.turns = 0
+	t.rateMu.Lock()
+	t.sent[s.From] = append(t.sent[s.From], t.now())
+	t.rateMu.Unlock()
 }
