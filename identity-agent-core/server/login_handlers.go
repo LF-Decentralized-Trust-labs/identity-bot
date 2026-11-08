@@ -123,7 +123,7 @@ func (s *CoreServer) handleCreateAssetChallenge(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	token, qrURL, code, msg := s.createSignedAssetChallenge(body.AssetID, body.Audience, body.RequestedDisclosures, body.BrowserKey, s.getPublicURL(r))
+	token, qrURL, code, msg := s.createSignedAssetChallenge(body.AssetID, body.Audience, "", body.RequestedDisclosures, body.BrowserKey, s.getPublicURL(r))
 	if code != 0 {
 		http.Error(w, msg, code)
 		return
@@ -286,6 +286,13 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 		"status":       "complete",
 		"pairwise_aid": res.PairwiseAID,
 		"disclosures":  res.Disclosures,
+		// The assertion as sent, so a page with no back end can check it
+		// itself. Handed to the collector once with the rest, then forgotten.
+		"assertion": string(body),
+		// Kept with it, so they are released with it even if the challenge
+		// has been evicted by then.
+		"nonce":    bundle.Nonce,
+		"site_aid": bundle.SiteAID,
 	}
 	// The browser key the verified assertion repeated (ADR-066), so whoever
 	// reads the result can check it is the one it asked for.
@@ -602,6 +609,10 @@ func (s *CoreServer) handleChallengeStatus(w http.ResponseWriter, r *http.Reques
 	if st == nil {
 		st = map[string]interface{}{"status": "pending"}
 	}
+	// The assertion is for a page with no back end, through the widget route.
+	delete(st, "assertion")
+	delete(st, "nonce")
+	delete(st, "site_aid")
 	if !bound {
 		// A challenge created before this existed, or by a path that does not
 		// mint one. An unbound status is indistinguishable from a bound one, so

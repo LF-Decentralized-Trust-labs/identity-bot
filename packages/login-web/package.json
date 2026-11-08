@@ -17,6 +17,10 @@
     "./server": {
       "types": "./dist/server.d.ts",
       "import": "./dist/server.js"
+    },
+    "./page": {
+      "types": "./dist/page.d.ts",
+      "import": "./dist/page.js"
     }
   },
   "publishConfig": {
@@ -30,7 +34,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "npm run build && node src/the-secret-travels-with-the-question.test.mjs && node src/a-confirmed-sign-in-is-spent-once.test.mjs",
+    "test": "npm run build && node src/the-secret-travels-with-the-question.test.mjs && node src/a-confirmed-sign-in-is-spent-once.test.mjs && node src/a-page-with-only-the-sdk-signs-a-person-in.test.mjs",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

@@ -1,14 +1,16 @@
-import { createHash } from "node:crypto";
 import { blake3 } from "@noble/hashes/blake3";
+import { sha256 } from "@noble/hashes/sha256";
+import { sha512 } from "@noble/hashes/sha512";
 import * as ed from "@noble/ed25519";
 import type { LoginAssertion, LoginChallenge } from "./types.js";
+import { bytesToBase64Url, base64UrlToBytes, compareBytes, concatBytes } from "./bytes.js";
 
 /** keri 1.1.17 Matter fixed-size qb64 (matches the core hybrid PQC CESR encoding). */
 export function matterFixedQb64(code: string, raw: Uint8Array): string {
   const ps = (3 - (raw.length % 3)) % 3;
   const padded = new Uint8Array(ps + raw.length);
   padded.set(raw, ps);
-  const b64 = Buffer.from(padded).toString("base64url");
+  const b64 = bytesToBase64Url(padded);
   return code + b64.slice(code.length % 4);
 }
 
@@ -43,10 +45,10 @@ const BASE64URL = /^[A-Za-z0-9_-]*$/;
  *  Anything else is refused rather than read leniently. */
 export function decodeBase64UrlStrict(s: unknown, size?: number): Uint8Array | null {
   if (typeof s !== "string" || !BASE64URL.test(s) || s.length % 4 === 1) return null;
-  const raw = Buffer.from(s, "base64url");
+  const raw = base64UrlToBytes(s);
   if (size !== undefined && raw.length !== size) return null;
-  if (raw.toString("base64url") !== s) return null;
-  return new Uint8Array(raw);
+  if (bytesToBase64Url(raw) !== s) return null;
+  return raw;
 }
 
 /** Decodes fixed-size CESR material under exactly one code, as the core does:
@@ -61,10 +63,10 @@ export function decodeMatterRaw(qb64: unknown, code: string, expectedLen: number
   if (code.length % 4 !== ps) return null;
   if (qb64.length !== ((ps + expectedLen) / 3) * 4 + code.length - ps) return null;
   if (!qb64.startsWith(code) || !BASE64URL.test(qb64)) return null;
-  const paw = Buffer.from("A".repeat(ps) + qb64.slice(code.length), "base64url");
+  const paw = base64UrlToBytes("A".repeat(ps) + qb64.slice(code.length));
   if (paw.length !== ps + expectedLen) return null;
   for (let k = 0; k < ps; k++) if (paw[k] !== 0) return null;
-  const raw = new Uint8Array(paw.subarray(ps));
+  const raw = paw.slice(ps);
   if (matterFixedQb64(code, raw) !== qb64) return null;
   // An Ed25519 key, transferable or not, must also be one point.
   if ((code === "D" || code === "B") && expectedLen === 32 && !ed25519KeyPoint(raw)) return null;
@@ -146,7 +148,8 @@ function goNumber(n: number): string {
 }
 
 function utf8Order(a: string, b: string): number {
-  return Buffer.compare(Buffer.from(wellFormed(a)), Buffer.from(wellFormed(b)));
+  const enc = new TextEncoder();
+  return compareBytes(enc.encode(wellFormed(a)), enc.encode(wellFormed(b)));
 }
 
 /** Any JSON value, as encoding/json writes an `interface{}` holding it. */
@@ -358,8 +361,7 @@ export async function verifyEd25519(
   const S = littleEndian(sig.subarray(32));
   if (S >= ED25519_L) return false;
   const k =
-    littleEndian(new Uint8Array(createHash("sha512").update(R).update(publicKey).update(message).digest())) %
-    ED25519_L;
+    littleEndian(sha512(concatBytes(R, publicKey, message))) % ED25519_L;
   try {
     const check = ed.Point.BASE.multiply(S, false).add(A.multiply(k, false).negate());
     return sameBytes(check.toBytes(), R);
@@ -375,7 +377,7 @@ export async function verifyEd25519(
 export function thumbprintP256(x: unknown, y: unknown): string | null {
   if (decodeBase64UrlStrict(x, 32) === null || decodeBase64UrlStrict(y, 32) === null) return null;
   const input = `{"crv":"P-256","kty":"EC","x":"${x}","y":"${y}"}`;
-  return createHash("sha256").update(input).digest("base64url");
+  return bytesToBase64Url(sha256(new TextEncoder().encode(input)));
 }
 
 /** True for exactly one spelling of a thumbprint: 43 characters of base64url
@@ -387,7 +389,7 @@ export function isBrowserKeyThumbprint(s: unknown): s is string {
 export function randomToken(bytes = 32): string {
   const buf = new Uint8Array(bytes);
   crypto.getRandomValues(buf);
-  return Buffer.from(buf).toString("base64url");
+  return bytesToBase64Url(buf);
 }
 
 export function rfc3339Utc(secondsFromNow = 0): string {

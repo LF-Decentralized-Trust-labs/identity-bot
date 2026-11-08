@@ -43,6 +43,8 @@ A login is a two-message exchange between the RP and the user's Identity Agent (
 
 *(Amended 2026-11-08: a website's server starts a sign-in with `startLoginSession` and confirms it with `confirmLoginSession` from `packages/login-web/src/server.ts`; a verifier that checks assertions itself spends each one it accepts, `consumedAssertions` in `IdentityAgentVerifier` and `consume` in `verifyLoginAssertion`; the default store is for one process, bounded, and forgets an assertion once it can no longer pass the time check, and `verifyAssertion` now spends as it verifies.)*
 
+*(Amended 2026-11-08: a page with only the login SDK and no back end of its own signs a person in too. It talks to the website owner's Identity Agent on its public login routes only, a sign-in to a website asset and never access to an identity. The Identity Agent takes the audience from the `Origin` the page's browser sends, refuses a page that names another or an asset that names a different origin, hands the collector the assertion with the identity, once, and answers a browser at `POST /public/login/key`; the page checks the assertion with `checkSignInInPage` from `@identity-agent/login-verify/browser`, which spends it with the same `consume` rule as the back end.)*
+
 Verification (`IdentityAgentVerifier.verifyAssertion`, `login.VerifyAssertion`) checks the nonce and audience bind to the original challenge, the assertion names this site (`site_aid`), the timestamp is fresh (default ±300s), takes the pairwise public key from the key log the assertion carries (`p_kel`), and verifies the Ed25519 signature over the canonical body.
 
 #### A relying party has an organisation Identity Agent

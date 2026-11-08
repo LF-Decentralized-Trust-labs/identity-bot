@@ -33,3 +33,44 @@ if (r.state === "verified") issueYourSession(r.pairwiseAid);
 `consume` makes a verified sign-in sign nobody in a second time (it is spent when `verified` comes back, so if your own session issue fails, start the sign-in again). The Identity
 Agent has already checked the person's key log, the audience, the nonce and the
 organisation's policy.
+
+## From a page with no back end
+
+A page with only the SDK can sign a person in. It talks to the website owner's
+Identity Agent on its public login routes only, which is a sign-in to a website
+asset and never access to an identity. The audience is the page's own origin,
+which the Identity Agent reads from the `Origin` the browser sends; the page
+cannot name another.
+
+```ts
+import { SignInButton } from "@identity-agent/login-web";           // or startPageSession/readPageSession from "@identity-agent/login-web/page"
+import { checkSignInInPage } from "@identity-agent/login-verify/browser";
+
+<SignInButton
+  sessionEndpoint="https://ia.example.com/api/login/session/the-website"
+  requestDisclosures={["display_name"]}
+  onSuccess={async ({ signIn }) => {
+    // The Identity Agent hands the page the assertion once, with the identity.
+    const r = await checkSignInInPage(signIn!, {
+      agentUrl: "https://ia.example.com",
+      expectedSiteAid: "E…",   // optional: pin your website asset's identifier
+      // consume: your own store, same shape as the back end's: claim(key, keepUntilMs)
+    });
+    if (r.valid) showSignedIn(r.pairwiseAID);
+  }}
+/>
+```
+
+`checkSignInInPage` asks the Identity Agent to check the person's key log
+(`POST /public/login/key`, so the page carries no KERI code), then checks the
+signature, that the audience is this page's origin, the challenge's nonce and
+site, and freshness, and spends the assertion with the same rule the back end
+uses (`consume.claim(key, keepUntilMs)`; the default is a store shared by the
+page, forgotten with it). A second presentation is refused as already used.
+
+What this does not give you: the audience binding to the website asset holds only if the asset names its website's origin (`origin`), otherwise any page's origin is accepted as the audience; the page trusts its Identity Agent for the
+challenge's nonce and site (pin `expectedSiteAid`, and the audience is always
+the page's own), and the key log is checked by the same Identity Agent that handed over the assertion, so the page's own checks are the audience, the pinned site and the replay store, not independence from that agent; a page's script is whatever the page serves, so a page
+cannot keep a secret from a person who reads it. If the Identity Agent hands the
+result over and the page's check then fails to complete (for example the key
+check could not be reached), the result is gone: start the sign-in again.

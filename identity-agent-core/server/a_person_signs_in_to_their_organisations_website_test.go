@@ -112,7 +112,7 @@ func aPersonsIdentityAgent(t *testing.T) *login.Handler {
 
 func (w *aWebsiteWorld) challenge(t *testing.T) login.StartLoginRequest {
 	t.Helper()
-	token, _, code, msg := w.org.createSignedAssetChallenge("the-website", "https://portal.example",
+	token, _, code, msg := w.org.createSignedAssetChallenge("the-website", "https://portal.example", "",
 		[]string{"display_name"}, "", w.srv.URL)
 	if code != 0 {
 		t.Fatalf("the organisation could not issue a challenge: %d %s", code, msg)

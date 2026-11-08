@@ -22,7 +22,13 @@ import (
 // asset, returning the session token + the QR/bundle URL. errCode==0 means success;
 // otherwise (errCode, errMsg) is an HTTP error to surface. Shared by the native
 // /api/login/challenge endpoint and the widget-compatible /api/login/session endpoint.
-func (s *CoreServer) createSignedAssetChallenge(assetID, audience string, disclosures []string, browserKey, publicURL string) (sessionToken, qrURL string, errCode int, errMsg string) {
+//
+// askedFrom is the origin of the web page that asked, from the Origin header its
+// browser sent, or "" when a server asked. A page cannot choose its Origin, so
+// it is the audience: a sign-in asked for from a page is for that page and no
+// other, and an asset that names the origin of its website is not signed in to
+// from any other page.
+func (s *CoreServer) createSignedAssetChallenge(assetID, audience, askedFrom string, disclosures []string, browserKey, publicURL string) (sessionToken, qrURL string, errCode int, errMsg string) {
 	if s.assetHandler == nil || s.KeriDriver == nil {
 		return "", "", http.StatusServiceUnavailable, "asset or keri driver not available"
 	}
@@ -43,6 +49,19 @@ func (s *CoreServer) createSignedAssetChallenge(assetID, audience string, disclo
 	}
 	if found.SigningIndex == 0 {
 		return "", "", http.StatusConflict, "asset has no signing key (re-create the asset to provision one)"
+	}
+
+	if askedFrom != "" {
+		if askedFrom == "null" {
+			return "", "", http.StatusBadRequest, "this page has no origin to sign in to"
+		}
+		if audience != "" && audience != askedFrom {
+			return "", "", http.StatusBadRequest, "a page signs in to its own origin only"
+		}
+		audience = askedFrom
+		if found.Origin != "" && !sameOrigin(found.Origin, askedFrom) {
+			return "", "", http.StatusForbidden, "this website asset is not for this page"
+		}
 	}
 
 	// A sign-in for a browser's key names its thumbprint in the signed
@@ -160,7 +179,7 @@ func (s *CoreServer) handleCreateLoginSession(w http.ResponseWriter, r *http.Req
 		BrowserKey         string   `json:"browserKey"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body) // tolerate empty body
-	token, qrURL, code, msg := s.createSignedAssetChallenge(assetID, body.Audience, body.RequestDisclosures, body.BrowserKey, s.getPublicURL(r))
+	token, qrURL, code, msg := s.createSignedAssetChallenge(assetID, body.Audience, r.Header.Get("Origin"), body.RequestDisclosures, body.BrowserKey, s.getPublicURL(r))
 	if code != 0 {
 		http.Error(w, msg, code)
 		return
@@ -227,8 +246,13 @@ func (s *CoreServer) handleLoginSessionStatus(w http.ResponseWriter, r *http.Req
 			if p, ok := st["pairwise_aid"].(string); ok {
 				resp["app_session_token"] = p
 			}
-			if d, ok := st["disclosures"]; ok {
-				resp["disclosures"] = d
+			// What a page with no back end of its own checks the answer
+			// against: the assertion, and the nonce and site of the
+			// challenge it answers. Released with the identity, once.
+			if a, ok := st["assertion"].(string); ok && held {
+				resp["assertion"] = a
+				resp["nonce"] = st["nonce"]
+				resp["site_aid"] = st["site_aid"]
 			}
 			// The browser key the verified assertion repeated (ADR-066): released
 			// to the collector only, like who signed in.

@@ -126,6 +126,12 @@ var answeringABrowser = map[string]string{
 	"POST /api/login/session/{asset_id}":            "the sign-in button a website embeds starts a sign-in",
 	"OPTIONS /api/login/session/{asset_id}/{token}": "the sign-in button a website embeds waits for the answer",
 	"GET /api/login/session/{asset_id}/{token}":     "the sign-in button a website embeds waits for the answer",
+	// A website with no back end of its own checks the assertion it was handed
+	// in the page. The key log is checked here, once, instead of in a second
+	// implementation in the page (ADR-021). The route takes no credential and
+	// answers only what the log it is sent establishes.
+	"OPTIONS /public/login/key": "a page with only the login SDK checks the assertion it was handed",
+	"POST /public/login/key":    "a page with only the login SDK checks the assertion it was handed",
 }
 
 // No route lets a browser read its answer: neither a preflight nor the request
