@@ -464,6 +464,7 @@ func (s *Service) pushCloudDestination(dest Destination, result *ExportResult) e
 	if err != nil {
 		return err
 	}
+	dest = s.withOwnPrefix(dest)
 	key := remote.ArchiveObjectKey(toRemoteDestination(dest), result.SnapshotType)
 	return backend.Push(context.Background(), key, result.Bytes)
 }
@@ -484,6 +485,7 @@ func (s *Service) PullLatestArchive(dest Destination) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
+	dest = s.withOwnPrefix(dest)
 	ctx := context.Background()
 	if dest.CloudProvider == GoogleProviderName && dest.CloudPrefix == "" {
 		keys, err := backend.List(ctx, "")
@@ -696,4 +698,16 @@ func (s *Service) ListReceived(identityAID string) ([]string, error) {
 	}
 	sort.Strings(paths)
 	return paths, nil
+}
+
+// withOwnPrefix files a Drive destination's archives under this identity even
+// when the destination was made before the identity existed, which is what
+// signing in on a machine being restored is. Left at the Drive root, the next
+// backup would sit beside the old machine's archives under another name and
+// look like a second identity.
+func (s *Service) withOwnPrefix(dest Destination) Destination {
+	if dest.CloudProvider == GoogleProviderName && dest.CloudPrefix == "" {
+		dest.CloudPrefix = s.ownAID()
+	}
+	return dest
 }

@@ -105,6 +105,15 @@ func redirectAllowed(raw string) error {
 		}
 		return fmt.Errorf("redirect_uri over http must be a loopback address")
 	}
+	// An app's own scheme is reverse-DNS (com.example.app), which no browser
+	// treats as a built-in one.
+	switch u.Scheme {
+	case "javascript", "file", "data", "ftp", "blob", "about":
+		return fmt.Errorf("redirect_uri scheme %q is not an app's own", u.Scheme)
+	}
+	if !strings.Contains(u.Scheme, ".") {
+		return fmt.Errorf("redirect_uri must use a reverse-DNS app scheme (like com.example.app)")
+	}
 	return nil
 }
 
@@ -228,6 +237,7 @@ func (s *Service) CompleteGoogleSignIn(state, code, redirectURI string) (Destina
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	var tok struct {
+		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
 		Scope        string `json:"scope"`
 		Error        string `json:"error"`
@@ -236,7 +246,16 @@ func (s *Service) CompleteGoogleSignIn(state, code, redirectURI string) (Destina
 	if resp.StatusCode != http.StatusOK {
 		return Destination{}, fmt.Errorf("google refused the sign-in: %s", tok.Error)
 	}
+	// Whatever is received and then refused is cancelled at Google, so a refused
+	// grant does not stay live in the person's account.
+	refuse := func() {
+		rctx, rcancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer rcancel()
+		remote.RevokeGoogleToken(rctx, g.Endpoints, g.HTTP, tok.RefreshToken)
+		remote.RevokeGoogleToken(rctx, g.Endpoints, g.HTTP, tok.AccessToken)
+	}
 	if tok.RefreshToken == "" {
+		refuse()
 		return Destination{}, fmt.Errorf("google gave no long-lived sign-in, so backups could not continue after an hour; try again")
 	}
 	// The person can untick a scope on the consent screen, and a client can be
@@ -244,6 +263,7 @@ func (s *Service) CompleteGoogleSignIn(state, code, redirectURI string) (Destina
 	// what a backup needs: able to do the job, and nothing wider.
 	granted := strings.Fields(tok.Scope)
 	if len(granted) != 1 || granted[0] != remote.GoogleAppDataScope {
+		refuse()
 		return Destination{}, fmt.Errorf("the sign-in was not for exactly the app's own backup folder (got %q), so it was not kept", tok.Scope)
 	}
 

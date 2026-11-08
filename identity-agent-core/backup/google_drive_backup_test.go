@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -303,4 +304,88 @@ func TestAnArchiveChangedInTheDriveIsRefusedOnRestore(t *testing.T) {
 	if _, _, err := OpenArchive(got, OpenRequest{Mnemonic: testMnemonic}); err == nil {
 		t.Fatal("an archive altered in the drive, digest and all, opened")
 	}
+}
+
+func TestARefusedGrantIsCancelledAtGoogle(t *testing.T) {
+	d := fakedrive.New(driveTestClient)
+	defer d.Close()
+	d.GrantedScope = "https://www.googleapis.com/auth/drive"
+	svc := NewService(t.TempDir(), nil)
+	svc.Google = &GoogleSignIn{ClientID: driveTestClient, Endpoints: d.Endpoints()}
+	redirect := "http://127.0.0.1:1/cb"
+	authURL, state, _ := svc.StartGoogleSignIn(redirect)
+	u, _ := url.Parse(authURL)
+	if _, err := svc.CompleteGoogleSignIn(state, d.IssueCode(u.Query().Get("code_challenge")), redirect); err == nil {
+		t.Fatal("a wider grant was kept")
+	}
+	if len(d.Revoked) != 2 {
+		t.Fatalf("the refused refresh and access tokens must both be cancelled at Google, revoked %v", d.Revoked)
+	}
+}
+
+func TestARestoredMachineFilesItsNextBackupWithTheOldOnes(t *testing.T) {
+	d := fakedrive.New(driveTestClient)
+	defer d.Close()
+	// Signed in before any identity exists on this machine: the prefix is empty.
+	svc, dest := aServiceSignedInTo(t, d)
+	if dest.CloudPrefix != "" {
+		t.Fatalf("test needs a machine with no identity yet, prefix %q", dest.CloudPrefix)
+	}
+	be, _ := remoteBackendFactory(dest, mustCreds(t, svc, dest))
+	if err := be.Push(context.Background(), "Eold/backup-full-20250101-000000.iab", []byte("old")); err != nil {
+		t.Fatal(err)
+	}
+	// The identity is restored here, then a backup runs.
+	svc.Store = aCollectorForAnIdentity(t, "Eold").Store
+	archive := aSealedArchive(t)
+	if err := svc.pushCloudDestination(dest, &ExportResult{Bytes: archive, SnapshotType: SnapshotFull, Size: len(archive)}); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range d.Names() {
+		if !strings.HasPrefix(n, "Eold/") {
+			t.Fatalf("a backup was filed outside the identity's prefix: %q (all: %v)", n, d.Names())
+		}
+	}
+	if _, key, err := svc.PullLatestArchive(dest); err != nil || !strings.HasPrefix(key, "Eold/") {
+		t.Fatalf("restore after that: %q %v", key, err)
+	}
+}
+
+func TestDriveListingFollowsEveryPage(t *testing.T) {
+	d := fakedrive.New(driveTestClient)
+	defer d.Close()
+	d.PageSize = 2
+	svc, dest := aServiceSignedInTo(t, d)
+	be, _ := remoteBackendFactory(dest, mustCreds(t, svc, dest))
+	for i := 1; i <= 5; i++ {
+		if err := be.Push(context.Background(), fmt.Sprintf("Ea/backup-full-%d.iab", i), []byte{byte(i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keys, err := be.List(context.Background(), "Ea")
+	if err != nil || len(keys) != 5 {
+		t.Fatalf("five archives over three pages: %v %v", keys, err)
+	}
+}
+
+func TestOnlyAnAppsOwnSchemeOrLoopbackIsARedirect(t *testing.T) {
+	for _, bad := range []string{"javascript:alert(1)", "file:///etc/passwd", "data:text/html,x", "myapp:/cb", "http://localhost@evil.example/cb"} {
+		if redirectAllowed(bad) == nil {
+			t.Errorf("%q must be refused", bad)
+		}
+	}
+	for _, ok := range []string{"http://127.0.0.1:5/cb", "http://[::1]:5/cb", "com.example.agent:/oauth2redirect"} {
+		if err := redirectAllowed(ok); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+}
+
+func mustCreds(t *testing.T, svc *Service, dest Destination) RemoteCredentialSecrets {
+	t.Helper()
+	c, err := svc.CredentialStore.Load(dest.CredentialID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
 }

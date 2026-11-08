@@ -35,6 +35,8 @@ import (
 // further in, because the archive is authenticated and does not open.
 
 // GoogleAppDataScope is the one scope this backend uses.
+const maxArchiveBytes = 1 << 30
+
 const GoogleAppDataScope = "https://www.googleapis.com/auth/drive.appdata"
 
 // Errors a caller can tell apart, because each needs a different thing said to
@@ -58,6 +60,7 @@ type GoogleEndpoints struct {
 	Token  string // OAuth token endpoint
 	API    string // Drive v3 base, e.g. https://www.googleapis.com/drive/v3
 	Upload string // Drive upload base, e.g. https://www.googleapis.com/upload/drive/v3
+	Revoke string // OAuth revoke endpoint
 }
 
 func (e GoogleEndpoints) withDefaults() GoogleEndpoints {
@@ -70,7 +73,31 @@ func (e GoogleEndpoints) withDefaults() GoogleEndpoints {
 	if e.Upload == "" {
 		e.Upload = "https://www.googleapis.com/upload/drive/v3"
 	}
+	if e.Revoke == "" {
+		e.Revoke = "https://oauth2.googleapis.com/revoke"
+	}
 	return e
+}
+
+// RevokeGoogleToken asks Google to cancel a token, best effort. Used when a
+// grant is received and then refused, so a refused grant does not stay live in
+// the person's account.
+func RevokeGoogleToken(ctx context.Context, ep GoogleEndpoints, client *http.Client, token string) {
+	if token == "" {
+		return
+	}
+	if client == nil {
+		client = &http.Client{Timeout: 15 * time.Second}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ep.withDefaults().Revoke,
+		strings.NewReader(url.Values{"token": {token}}.Encode()))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if resp, err := client.Do(req); err == nil {
+		resp.Body.Close()
+	}
 }
 
 type googleDriveBackend struct {
@@ -92,7 +119,7 @@ func NewGoogleDriveBackend(dest DestinationConfig, creds CredentialSecrets, ep G
 		return nil, fmt.Errorf("google_drive destination requires a signed-in Google account")
 	}
 	if client == nil {
-		client = &http.Client{Timeout: 120 * time.Second}
+		client = &http.Client{Timeout: 15 * time.Minute}
 	}
 	return &googleDriveBackend{ep: ep.withDefaults(), creds: creds, client: client, now: time.Now}, nil
 }
@@ -343,9 +370,13 @@ func (b *googleDriveBackend) Pull(ctx context.Context, objectKey string) ([]byte
 	if resp.StatusCode != http.StatusOK {
 		return nil, driveError("download", resp)
 	}
-	data, err := io.ReadAll(resp.Body)
+	// An archive is megabytes; a gigabyte is not one.
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxArchiveBytes+1))
 	if err != nil {
 		return nil, err
+	}
+	if len(data) > maxArchiveBytes {
+		return nil, fmt.Errorf("google drive: %q is larger than any archive this agent writes", objectKey)
 	}
 	// An archive with no recorded digest was not written by this backend, and
 	// is not accepted as if it were.

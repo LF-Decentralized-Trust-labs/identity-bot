@@ -49,12 +49,17 @@ type Drive struct {
 
 	// Counters, for tests that check what was asked of Google.
 	Refreshes, Uploads, Downloads int
+	// Revoked are the tokens the app asked Google to cancel.
+	Revoked []string
+	// PageSize, when set, makes listings come in pages of this size.
+	PageSize int
 }
 
 func New(clientID string) *Drive {
 	d := &Drive{ClientID: clientID, GrantedScope: Scope, accessTokens: map[string]bool{}, codes: map[string]string{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/token", d.token)
+	mux.HandleFunc("/revoke", d.revoke)
 	mux.HandleFunc("/drive/v3/files", d.list)
 	mux.HandleFunc("/drive/v3/files/", d.download)
 	mux.HandleFunc("/upload/drive/v3/files", d.startUpload)
@@ -66,7 +71,7 @@ func New(clientID string) *Drive {
 func (d *Drive) Close() { d.Server.Close() }
 
 func (d *Drive) Endpoints() remote.GoogleEndpoints {
-	return remote.GoogleEndpoints{Token: d.Server.URL + "/token", API: d.Server.URL + "/drive/v3", Upload: d.Server.URL + "/upload/drive/v3"}
+	return remote.GoogleEndpoints{Token: d.Server.URL + "/token", API: d.Server.URL + "/drive/v3", Upload: d.Server.URL + "/upload/drive/v3", Revoke: d.Server.URL + "/revoke"}
 }
 
 // IssueCode is the person signing in and Google returning a code to the app.
@@ -172,6 +177,19 @@ func jsonOut(w http.ResponseWriter, code int, v any) {
 func driveErr(w http.ResponseWriter, code int, reason, msg string) {
 	jsonOut(w, code, map[string]any{"error": map[string]any{
 		"code": code, "message": msg, "errors": []map[string]string{{"reason": reason}}}})
+}
+
+func (d *Drive) revoke(w http.ResponseWriter, r *http.Request) {
+	_ = r.ParseForm()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	t := r.Form.Get("token")
+	d.Revoked = append(d.Revoked, t)
+	if t == d.refreshToken {
+		d.refreshToken = ""
+	}
+	delete(d.accessTokens, t)
+	w.WriteHeader(200)
 }
 
 func (d *Drive) token(w http.ResponseWriter, r *http.Request) {
@@ -304,7 +322,26 @@ func (d *Drive) list(w http.ResponseWriter, r *http.Request) {
 		out = append(out, map[string]any{"id": f.ID, "name": f.Name,
 			"modifiedTime": f.Modified.UTC().Format(time.RFC3339Nano), "appProperties": f.Props})
 	}
-	jsonOut(w, 200, map[string]any{"files": out})
+	next := ""
+	if d.PageSize > 0 {
+		start := 0
+		fmt.Sscanf(r.URL.Query().Get("pageToken"), "p%d", &start)
+		if start > len(out) {
+			start = len(out)
+		}
+		end := start + d.PageSize
+		if end < len(out) {
+			next = fmt.Sprintf("p%d", end)
+		} else {
+			end = len(out)
+		}
+		out = out[start:end]
+	}
+	resp := map[string]any{"files": out}
+	if next != "" {
+		resp["nextPageToken"] = next
+	}
+	jsonOut(w, 200, resp)
 }
 
 func (d *Drive) download(w http.ResponseWriter, r *http.Request) {
