@@ -37,6 +37,8 @@ import (
 	"identity-agent-core/didcomm"
 	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/internal/hostlink"
+	"identity-agent-core/limits"
+	"identity-agent-core/mediation"
 	"identity-agent-core/permission"
 	"identity-agent-core/schemas"
 	"identity-agent-core/server"
@@ -88,6 +90,10 @@ type Host interface {
 	// make the first time it is asked for. Keep a key of an unexported type
 	// of the add-on's own, so no two add-ons share one.
 	AddonState(key any, make func() any) any
+	// AppLimits is what apps are held to; pass it to trail.New as Options.Limits.
+	AppLimits() limits.Limits
+	// DeliveryQueue is the sealed-message queue, kept across a restart.
+	DeliveryQueue() (*mediation.Queue, error)
 
 	AnchorRecord() (bool, error)
 	AssetHandler() *asset.Handler

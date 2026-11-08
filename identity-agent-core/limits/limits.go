@@ -96,6 +96,9 @@ type Rate struct {
 type bucket struct {
 	tokens float64
 	at     time.Time
+	// refused is how many requests in a row were turned away; it sets how long
+	// the app is told to wait, and clears when one is taken.
+	refused int
 }
 
 // NewRate makes a limiter; now may be nil.
@@ -104,6 +107,25 @@ func NewRate(l Limits, now func() time.Time) *Rate {
 		now = time.Now
 	}
 	return &Rate{l: l, now: now, b: map[string]*bucket{}}
+}
+
+// Try takes one request for the app. When the app is over its rate it says how
+// long to wait before the next try: the backoff for as many refusals in a row,
+// but never less than the time the bucket needs to hold one request again.
+// jitter is in [0,1).
+func (r *Rate) Try(app string, jitter float64) (ok bool, wait time.Duration) {
+	if r.Allow(app) {
+		return true, 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	b := r.b[app]
+	wait = r.l.Backoff(b.refused, jitter)
+	b.refused++
+	if need := time.Duration((1 - b.tokens) / r.l.RatePerSecond * float64(time.Second)); need > wait {
+		wait = need
+	}
+	return false, wait
 }
 
 // Allow takes one request for the app, or says it is over its rate. A batched
@@ -123,5 +145,6 @@ func (r *Rate) Allow(app string) bool {
 		return false
 	}
 	b.tokens--
+	b.refused = 0
 	return true
 }

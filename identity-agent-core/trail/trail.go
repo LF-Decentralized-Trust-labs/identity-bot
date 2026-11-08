@@ -68,6 +68,9 @@ type Entry struct {
 	Verkey    string                       `json:"verkey"`
 	Signature string                       `json:"signature"`
 	Outcome   *Outcome                     `json:"outcome,omitempty"`
+	// NotDelivered is set when the entry's sealed message waited in the
+	// delivery queue until its age ran out. The entry stays committed.
+	NotDelivered *Outcome `json:"not_delivered,omitempty"`
 }
 
 // Author is who the entry is from.
@@ -348,6 +351,10 @@ func copyEntries(in []Entry) []Entry {
 		if e.Outcome != nil {
 			o := *e.Outcome
 			e.Outcome = &o
+		}
+		if e.NotDelivered != nil {
+			n := *e.NotDelivered
+			e.NotDelivered = &n
 		}
 		out[i] = e
 	}

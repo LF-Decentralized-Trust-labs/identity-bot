@@ -36,6 +36,7 @@ const (
 	ReasonMayNotRead = "you may not read this conversation"
 	ReasonBadRange   = "that range is not in this conversation"
 	ReasonNoReader   = "the app cannot be read"
+	ReasonTooLarge   = "the app returned more than one read may carry"
 )
 
 // How a read ended, as the governance record names it.
@@ -140,6 +141,16 @@ func (t *Trail) read(ctx context.Context, g *Governance, person, conversation, f
 		return refuse(ReadRefused, ReasonTimeoutOrDown(rctx))
 	}
 
+	// A read carries at most limits.ReadBytes of words; more than that from the
+	// app is refused before any of it is looked at or passed on.
+	total := 0
+	for _, s := range got {
+		total += len(s.Words) + len(s.Salt)
+	}
+	if total > t.lim.ReadBytes {
+		return refuse(ReadRefused, ReasonTooLarge)
+	}
+
 	byID := map[string]Entry{}
 	for _, e := range entries {
 		byID[e.ID] = e
@@ -233,4 +244,49 @@ func (t *Trail) MayAddress(conversation, entry, agent string) (bool, error) {
 
 func (t *Trail) addressable(person, agent string) bool {
 	return t.roster.IsAIAgent(agent) && t.roster.MayUseAgent(person, agent) && t.roster.AgentGrantAllows(agent, person)
+}
+
+// ReadPage serves the committed entries of a conversation from first (empty is
+// the start) up to last (empty is the end), but no more than one read may
+// carry: when the range is longer, it asks the app for fewer entries until
+// what comes back fits, and returns next, the id of the first entry not yet
+// served, to read from. An empty next means the range is served to its end.
+// Every page is checked against the trail exactly as Read checks it. A single
+// entry that does not fit in one read is refused.
+func (t *Trail) ReadPage(ctx context.Context, person, conversation, first, last string) (page []Passed, next string, err error) {
+	entries := t.Entries(conversation)
+	lo, hi := 0, len(entries)-1
+	if first != "" {
+		var ok bool
+		if lo, ok = indexOfID(entries, first); !ok {
+			_, err = t.Read(ctx, person, conversation, first, last) // refused and recorded
+			return nil, "", err
+		}
+	}
+	if last != "" {
+		var ok bool
+		if hi, ok = indexOfID(entries, last); !ok {
+			_, err = t.Read(ctx, person, conversation, first, last)
+			return nil, "", err
+		}
+	}
+	for n := hi - lo + 1; n >= 1; n = n / 2 {
+		end := entries[lo+n-1].ID
+		if lo+n-1 == hi && last == "" {
+			end = ""
+		}
+		page, err = t.Read(ctx, person, conversation, first, end)
+		if err == nil {
+			if lo+n-1 < hi {
+				next = entries[lo+n].ID
+			}
+			return page, next, nil
+		}
+		if err.Error() != ReasonTooLarge || n == 1 {
+			return nil, "", err
+		}
+	}
+	// An empty or backwards range: Read refuses it, or serves nothing, and records it.
+	page, err = t.Read(ctx, person, conversation, first, last)
+	return page, "", err
 }

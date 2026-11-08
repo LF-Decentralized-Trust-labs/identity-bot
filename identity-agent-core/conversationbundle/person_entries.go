@@ -25,6 +25,9 @@ type personEntry struct {
 	// it carries any.
 	salt, words []byte
 	hasWords    bool
+	// notDelivered is set by the one note that a committed entry's message was
+	// not delivered; the entry stays committed.
+	notDelivered bool
 }
 
 func (v *verifier) person() {
@@ -134,6 +137,14 @@ func (v *verifier) checkOutcome(where string, rec agentmessage.Record, m *Messag
 	switch {
 	case !ok || pe.rec.Seq >= rec.Seq:
 		v.fault(where, "it says how %s ended, which is not an earlier entry of a person's", rec.Outcome.Entry)
+		return
+	case rec.Outcome.State == agentmessage.OutcomeNotDelivered:
+		// Only a kept entry's message is carried, and it fails to arrive once.
+		if pe.state != agentmessage.OutcomeCommitted || pe.notDelivered {
+			v.fault(where, "it says %s was not delivered, but only a kept entry is delivered, and its delivery fails once", rec.Outcome.Entry)
+			return
+		}
+		pe.notDelivered = true
 		return
 	case pe.state != "pending":
 		v.fault(where, "it says how %s ended, but that entry was already %s", rec.Outcome.Entry, pe.state)

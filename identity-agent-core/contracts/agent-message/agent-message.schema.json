@@ -577,12 +577,13 @@
         "state": {
           "enum": [
             "committed",
-            "not-kept"
+            "not-kept",
+            "not-delivered"
           ]
         },
         "reason": {
           "type": "string",
-          "description": "required for not-kept, absent for committed"
+          "description": "required for not-kept and not-delivered, absent for committed. not-delivered follows a committed entry once, when the message was not delivered before the delivery queue's age ran out"
         }
       }
     }

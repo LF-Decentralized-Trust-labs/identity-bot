@@ -53,3 +53,37 @@ func TestAnAppIsHeldToItsRateWithBursts(t *testing.T) {
 		t.Fatalf("refilled %d in a second", n)
 	}
 }
+
+// An app that keeps asking past its rate is told to wait longer each time, up
+// to the backoff's ceiling, and is let in again, with the count cleared, once it
+// has waited.
+func TestAnAppOverItsRateIsToldToBackOff(t *testing.T) {
+	l := Defaults()
+	l.RatePerSecond, l.RateBurst = 1, 1
+	now := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	r := NewRate(l, func() time.Time { return now })
+	if ok, _ := r.Try("app", 0); !ok {
+		t.Fatal("the first request was refused")
+	}
+	var last time.Duration
+	for i := 0; i < 12; i++ {
+		ok, wait := r.Try("app", 0)
+		if ok || wait < last || wait > l.BackoffMax {
+			t.Fatalf("refusal %d: ok=%v wait=%v after %v", i, ok, wait, last)
+		}
+		last = wait
+	}
+	if last != l.BackoffMax {
+		t.Fatalf("the wait never reached the ceiling: %v", last)
+	}
+	if ok, _ := r.Try("other", 0); !ok {
+		t.Fatal("one app's rate held another back")
+	}
+	now = now.Add(2 * time.Second)
+	if ok, _ := r.Try("app", 0); !ok {
+		t.Fatal("the app was not let in after it waited")
+	}
+	if ok, wait := r.Try("app", 0); ok || wait > l.BackoffStart+time.Second {
+		t.Fatalf("the count was not cleared: ok=%v wait=%v", ok, wait)
+	}
+}

@@ -386,3 +386,46 @@ func recordsOf(t *testing.T, c *conversation) []agentmessage.Record {
 	}
 	return rs
 }
+
+// An entry whose message was not delivered is noted once, after a kept entry, by
+// the Identity Agent, and the conversation still verifies; a note about an entry
+// that was not kept, or a second note, is a fault.
+func TestANotDeliveredNoteFollowsAKeptEntryOnce(t *testing.T) {
+	c := newConversation(t)
+	writeMixed(c) // e1 committed, e3 refused, e4 not kept, e6 committed
+	if err := c.tr.MarkNotDelivered("c1", "e1", "the recipient was not reachable for 7 days"); err != nil {
+		t.Fatal(err)
+	}
+	if got := openingFaults(c.check(c.bundle(true))); got != "" {
+		t.Fatalf("a not-delivered note is a fault: %s", got)
+	}
+	// The trail refuses what the verifier would, so the bad chains are built by hand.
+	records := func() []agentmessage.Record {
+		var rs []agentmessage.Record
+		for _, e := range c.tr.Chain("c1") {
+			rs = append(rs, mustRead(t, e.Envelope))
+		}
+		return rs
+	}
+	extra := func(entry string) []agentmessage.Record {
+		rs := records()
+		n := rs[len(rs)-1] // the real note, copied
+		o := *n.Outcome
+		o.Entry = entry
+		n.Outcome, n.InReplyTo, n.MessageID = &o, entry, agentmessage.EntryID(len(rs)+1)
+		return append(rs, n)
+	}
+	for name, tc := range map[string]struct {
+		rs   []agentmessage.Record
+		want string
+	}{
+		"a second note":        {extra("e1"), "delivery fails once"},
+		"an entry refused":     {extra("e3"), "delivery fails once"},
+		"an entry not kept":    {extra("e4"), "delivery fails once"},
+		"an entry not written": {extra("e90"), "not an earlier entry"},
+	} {
+		if got := openingFaults(c.check(c.rebuilt(tc.rs))); !strings.Contains(got, tc.want) {
+			t.Errorf("%s: want a fault containing %q, got %q", name, tc.want, got)
+		}
+	}
+}

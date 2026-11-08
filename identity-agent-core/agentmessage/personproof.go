@@ -26,6 +26,11 @@ const KindOutcome = "outcome"
 const (
 	OutcomeCommitted = "committed"
 	OutcomeNotKept   = "not-kept"
+	// OutcomeNotDelivered follows a committed entry whose sealed copy waited
+	// in the delivery queue until its age ran out and was refused back to its
+	// sender. The entry stays committed and readable; this says it did not
+	// reach its recipient.
+	OutcomeNotDelivered = "not-delivered"
 )
 
 // PersonProof is the sender's own proof for an entry a person signed as a
@@ -45,7 +50,7 @@ func (p PersonProof) Verify() error { return VerifyPerson(p.Statement, p.Verkey,
 type Outcome struct {
 	// Entry is the id of the entry it is about ("e" and its seq).
 	Entry string `json:"entry"`
-	// State is OutcomeCommitted or OutcomeNotKept.
+	// State is OutcomeCommitted, OutcomeNotKept or OutcomeNotDelivered.
 	State string `json:"state"`
 	// Reason is why an entry was not kept; empty for a committed one.
 	Reason string `json:"reason,omitempty"`
@@ -117,6 +122,10 @@ func (r Record) checkOutcome() error {
 	case OutcomeNotKept:
 		if o.Reason == "" {
 			return errors.New("a not-kept entry gives its reason")
+		}
+	case OutcomeNotDelivered:
+		if o.Reason == "" {
+			return errors.New("a not-delivered entry gives its reason")
 		}
 	default:
 		return fmt.Errorf("%q is not an outcome", o.State)

@@ -900,6 +900,10 @@ func (s *CoreServer) thePersonAsking(r *http.Request) (coretypes.Signer, *corety
 		}
 		grant = current
 	}
+	// An app's back end is held to its request rate before anything is done for it.
+	if err := s.holdAppToItsRate(grant.AppAsset); err != nil {
+		return coretypes.Signer{}, nil, err
+	}
 	// A machine bound to an app has no signer of its own to speak as: it speaks
 	// for the people its asset admits, each by their own statement, below.
 	var person coretypes.Signer

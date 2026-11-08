@@ -355,6 +355,45 @@ func (t *Trail) notKept(ctx context.Context, c *conversation, i int, reason stri
 	return err
 }
 
+// MarkNotDelivered records, after a committed entry, that its message was not
+// delivered: the delivery queue held the sealed copy for its whole age and
+// refused it back to its sender. The entry stays committed and readable. Only
+// a committed entry can be marked, and only once.
+func (t *Trail) MarkNotDelivered(conversation, entryID, reason string) error {
+	c := t.get(conversation)
+	if c == nil {
+		return errors.New(ReasonNoConv)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i := range c.entries {
+		e := c.entries[i]
+		if e.ID != entryID {
+			continue
+		}
+		if e.State() != Committed || e.NotDelivered != nil {
+			return errors.New("only a kept entry that has not been marked can be marked not delivered")
+		}
+		return t.noteNotDelivered(c, i, reason)
+	}
+	return errors.New("there is no such entry")
+}
+
+func (t *Trail) noteNotDelivered(c *conversation, i int, reason string) error {
+	e := c.entries[i]
+	rec := agentmessage.Record{
+		MessageID: EntryID(len(c.chain) + 1), Kind: agentmessage.KindOutcome, From: t.agent, InReplyTo: e.ID,
+		BodyHash: agentmessage.HashBody(nil),
+		Outcome:  &agentmessage.Outcome{Entry: e.ID, State: agentmessage.OutcomeNotDelivered, Reason: reason},
+	}
+	ce, err := t.countersign(c, rec)
+	if err != nil {
+		return err
+	}
+	c.entries[i].NotDelivered = &Outcome{State: State(agentmessage.OutcomeNotDelivered), Reason: reason, Time: ce.CreatedAt.Format(time.RFC3339Nano)}
+	return nil
+}
+
 // commit marks the entry committed and applies what it did to the conversation.
 func (t *Trail) commit(c *conversation, i int) error {
 	if err := t.outcome(c, i, agentmessage.OutcomeCommitted, ""); err != nil {

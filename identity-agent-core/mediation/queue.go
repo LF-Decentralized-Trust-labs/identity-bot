@@ -11,11 +11,16 @@
 package mediation
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io/fs"
+	"os"
 	"sort"
 	"sync"
 	"time"
 
+	"identity-agent-core/internal/atomicfile"
 	"identity-agent-core/limits"
 )
 
@@ -26,6 +31,7 @@ const (
 	ReasonSender       = "this sender holds its share of the delivery queue"
 	ReasonExpired      = "the recipient was not reachable for 7 days"
 	ReasonDuplicate    = "that message is already queued"
+	ReasonNotSaved     = "the delivery queue could not be saved, so the message was not accepted"
 )
 
 // Refusal is why Enqueue turned a message away.
@@ -65,6 +71,10 @@ type Queue struct {
 	l   limits.Limits
 	now func() time.Time
 
+	// path is where the queue is kept across a restart; empty keeps it in
+	// memory only.
+	path string
+
 	mu    sync.Mutex
 	byID  map[string]*held
 	bytes int64
@@ -85,6 +95,79 @@ func New(l limits.Limits, now func() time.Time) *Queue {
 	return &Queue{l: l, now: now, byID: map[string]*held{}, byCv: map[string]*share{}, bySn: map[string]*share{}}
 }
 
+// stored is the queue as it is written: every message held, with the state of
+// its delivery. The sealed bytes are the only content, and the queue cannot
+// open them.
+type stored struct {
+	Version  int          `json:"version"`
+	Messages []storedItem `json:"messages"`
+}
+
+type storedItem struct {
+	ID           string    `json:"id"`
+	Conversation string    `json:"conversation"`
+	Sender       string    `json:"sender"`
+	Recipient    string    `json:"recipient"`
+	Sealed       []byte    `json:"sealed"`
+	Queued       time.Time `json:"queued"`
+	Delivered    bool      `json:"delivered,omitempty"`
+	Kept         bool      `json:"kept,omitempty"`
+}
+
+// Open makes a queue held to l that is kept in the file at path (written whole
+// and atomically, as the Identity Agent's other secret files are) and reads
+// back what it held when it last stopped. A file that is not there is an empty
+// queue. One that cannot be read is an error, never an empty queue: dropping
+// accepted messages without saying so is what the queue promises not to do.
+// Messages that outlived their age while the process was down are still held
+// until Expire refuses them back to their senders.
+func Open(path string, l limits.Limits, now func() time.Time) (*Queue, error) {
+	q := New(l, now)
+	q.path = path
+	b, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return q, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("the delivery queue could not be read: %w", err)
+	}
+	var st stored
+	if err := json.Unmarshal(b, &st); err != nil || st.Version != 1 {
+		return nil, fmt.Errorf("the delivery queue file %s is damaged or from a newer version; it was left as it is", path)
+	}
+	for _, it := range st.Messages {
+		if _, dup := q.byID[it.ID]; dup || it.ID == "" {
+			return nil, fmt.Errorf("the delivery queue file %s is damaged; it was left as it is", path)
+		}
+		h := &held{Message: Message{ID: it.ID, Conversation: it.Conversation, Sender: it.Sender,
+			Recipient: it.Recipient, Sealed: it.Sealed}, queued: it.Queued, delivered: it.Delivered, kept: it.Kept}
+		n := int64(len(h.Sealed))
+		q.byID[h.ID] = h
+		q.bytes += n
+		add(q.byCv, h.Conversation, n)
+		add(q.bySn, h.Sender, n)
+	}
+	return q, nil
+}
+
+// save writes the queue, if it is kept anywhere. The caller holds q.mu.
+func (q *Queue) save() error {
+	if q.path == "" {
+		return nil
+	}
+	st := stored{Version: 1, Messages: make([]storedItem, 0, len(q.byID))}
+	for _, h := range q.byID {
+		st.Messages = append(st.Messages, storedItem{ID: h.ID, Conversation: h.Conversation, Sender: h.Sender,
+			Recipient: h.Recipient, Sealed: h.Sealed, Queued: h.queued, Delivered: h.delivered, Kept: h.kept})
+	}
+	sort.Slice(st.Messages, func(i, j int) bool { return st.Messages[i].ID < st.Messages[j].ID })
+	b, err := json.Marshal(st)
+	if err != nil {
+		return err
+	}
+	return atomicfile.Write(q.path, b, 0o600)
+}
+
 // Enqueue holds a message, or refuses it with the reason. A refusal changes
 // nothing that is already held.
 func (q *Queue) Enqueue(m Message) error {
@@ -103,10 +186,17 @@ func (q *Queue) Enqueue(m Message) error {
 	if q.over(q.bySn[m.Sender], n) {
 		return &Refusal{ReasonSender}
 	}
-	q.byID[m.ID] = &held{Message: m, queued: q.now()}
+	h := &held{Message: m, queued: q.now()}
+	q.byID[m.ID] = h
 	q.bytes += n
 	add(q.byCv, m.Conversation, n)
 	add(q.bySn, m.Sender, n)
+	// A message is accepted only once it is on disk: one the sender was told was
+	// queued must survive a restart.
+	if err := q.save(); err != nil {
+		q.unhold(h)
+		return &Refusal{ReasonNotSaved}
+	}
 	return nil
 }
 
@@ -181,9 +271,9 @@ func (q *Queue) mark(id string, f func(*held)) error {
 	}
 	f(h)
 	if h.delivered && h.kept {
-		q.remove(h)
+		q.unhold(h)
 	}
-	return nil
+	return q.save()
 }
 
 // Discard deletes the sealed copy of a message that will not be delivered, as
@@ -195,11 +285,11 @@ func (q *Queue) Discard(id string) error {
 	if h == nil {
 		return ErrNothingHeld
 	}
-	q.remove(h)
-	return nil
+	q.unhold(h)
+	return q.save()
 }
 
-func (q *Queue) remove(h *held) {
+func (q *Queue) unhold(h *held) {
 	n := int64(len(h.Sealed))
 	delete(q.byID, h.ID)
 	q.bytes -= n
@@ -217,9 +307,10 @@ func (q *Queue) Expire() []Expired {
 	for _, h := range q.byID {
 		if q.now().Sub(h.queued) >= q.l.QueueMaxAge {
 			out = append(out, Expired{ID: h.ID, Conversation: h.Conversation, Sender: h.Sender, Recipient: h.Recipient, Reason: ReasonExpired})
-			q.remove(h)
+			q.unhold(h)
 		}
 	}
+	_ = q.save() // a failed save is retried by the next change; expiry is re-found
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }
