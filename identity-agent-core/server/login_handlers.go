@@ -237,10 +237,14 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// A challenge that has already been answered is finished, whether the
-	// answer admitted somebody or refused them. Without this, a copy of an
-	// assertion already sent once can be posted again inside the freshness
-	// window, needing no key and no forgery.
+	// A challenge that has already been ACCEPTED is finished. Without this, a
+	// copy of an assertion already accepted can be posted again inside the
+	// freshness window, needing no key and no forgery.
+	//
+	// A challenge whose answers have all been REFUSED is not finished: it stays
+	// open until its window ends. Settling on the first answer of any kind let
+	// anyone who had seen the QR code post garbage and burn the person's
+	// sign-in. This check is only the early exit; the settle below decides.
 	if settled {
 		http.Error(w, "this sign-in has already been answered", http.StatusConflict)
 		return
@@ -249,10 +253,7 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 	// 1) Authenticate: verify the assertion signature + binding to this challenge.
 	res := login.VerifyAssertionForBrowserKey(a, bundle.Nonce, bundle.Audience, bundle.SiteAID, bundle.BrowserKey, 300)
 	if !res.Valid {
-		if err := s.setChallengeStatus(token, map[string]interface{}{"status": "denied", "reason": res.Reason}); err != nil {
-			http.Error(w, "could not record the answer", http.StatusInternalServerError)
-			return
-		}
+		s.recordRefusal(token, res.Reason)
 		http.Error(w, "assertion verification failed: "+res.Reason, http.StatusUnauthorized)
 		return
 	}
@@ -271,12 +272,22 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 	// page can read; only a uniform refusal leaves here. The owner is not shown
 	// it: a gate the core cannot check is refused when the policy is saved.
 	if allowed, reason := s.authorizeAssetAccess(r.Context(), bundle.SiteAID, res.PairwiseAID, a.PresentedACDCs); !allowed {
-		if err := s.setChallengeStatus(token, map[string]interface{}{
-			"status": "denied",
-			// For the organisation, which is entitled to know.
-			"reason": reason,
-		}); err != nil {
+		// For the organisation, which is entitled to know.
+		//
+		// This answer WAS authenticated: a person the policy knows, refused. It
+		// is not the forged or garbled kind that leaves the sign-in open
+		// (above), and it still settles it, so the refused cannot keep posting
+		// until a policy change lets them in (TestARefusedSignInCannotBeRetried).
+		// Whether that is worth the cost, that anyone with an identity of their
+		// own who has seen the QR code can still end the sign-in this way, is
+		// a question for a later change, not decided here.
+		spent, err := s.settleIfOpen(token, map[string]interface{}{"status": "denied", "reason": reason})
+		if err != nil {
 			http.Error(w, "could not record the answer", http.StatusInternalServerError)
+			return
+		}
+		if !spent {
+			http.Error(w, "this sign-in has already been answered", http.StatusConflict)
 			return
 		}
 		http.Error(w, "not authorized", http.StatusForbidden)
@@ -311,8 +322,15 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 	if info := s.memberInfoFor(bundle.SiteAID, res.PairwiseAID); len(info) > 0 {
 		st["member_info"] = info
 	}
-	if err := s.setChallengeStatus(token, st); err != nil {
+	// Accepting is what spends the sign-in, and it is decided here, under the
+	// lock: of two accepted answers arriving together, one settles it.
+	spent, err := s.settleIfOpen(token, st)
+	if err != nil {
 		http.Error(w, "could not record the answer", http.StatusInternalServerError)
+		return
+	}
+	if !spent {
+		http.Error(w, "this sign-in has already been answered", http.StatusConflict)
 		return
 	}
 	jsonreply.Write(w, http.StatusOK, map[string]bool{"ok": true})
@@ -349,6 +367,41 @@ func (s *CoreServer) memberInfoFor(siteAID, pairwiseAID string) map[string]strin
 	return nil
 }
 
+// recordRefusal notes that an answer was refused and leaves the sign-in open.
+// Only the last reason and a count are kept, so a flood of bad answers cannot
+// grow the record. Nothing is written to the state file: a refusal forgotten
+// in a restart loses nothing, and rewriting the whole file for every forged
+// post would let anyone who has seen the QR code make the agent do so. Once the
+// sign-in has settled, a refusal changes nothing.
+func (s *CoreServer) recordRefusal(token, reason string) {
+	s.challengeMu.Lock()
+	defer s.challengeMu.Unlock()
+	cur := s.challengeStatus[token]
+	if cur == nil || cur["status"] != "pending" {
+		return
+	}
+	n := 0
+	switch v := cur["refusals"].(type) {
+	case int:
+		n = v
+	case float64: // read back from the state file
+		n = int(v)
+	}
+	cur["refusals"] = n + 1
+	cur["last_refusal"] = reason
+}
+
+// settleIfOpen settles a sign-in with st only if it has not been settled yet,
+// and says whether it did. It is the one place a sign-in is spent.
+func (s *CoreServer) settleIfOpen(token string, st map[string]interface{}) (bool, error) {
+	s.challengeMu.Lock()
+	defer s.challengeMu.Unlock()
+	if cur := s.challengeStatus[token]; cur != nil && cur["status"] != "pending" {
+		return false, nil
+	}
+	return true, s.setChallengeStatusLocked(token, st)
+}
+
 // setChallengeStatus stores a session's status under the challenge lock.
 //
 // It fails closed. If the status cannot be written, the file still says
@@ -358,6 +411,11 @@ func (s *CoreServer) memberInfoFor(siteAID, pairwiseAID string) map[string]strin
 func (s *CoreServer) setChallengeStatus(token string, st map[string]interface{}) error {
 	s.challengeMu.Lock()
 	defer s.challengeMu.Unlock()
+	return s.setChallengeStatusLocked(token, st)
+}
+
+// setChallengeStatusLocked is setChallengeStatus for a caller holding challengeMu.
+func (s *CoreServer) setChallengeStatusLocked(token string, st map[string]interface{}) error {
 	if s.challengeStatus == nil {
 		s.challengeStatus = make(map[string]map[string]interface{})
 	}

@@ -173,8 +173,18 @@ export class IdentityAgentVerifier {
       expectedSiteAid: rec.challenge.site_aid,
       expectedBrowserKey: rec.challenge.browser_key,
     });
+    // A refused answer spends nothing: the sign-in stays as it was, and so does
+    // the assertion (it is only claimed once everything else has passed).
     if (!result.valid || !result.pairwiseAID) {
       return { ok: false, reason: result.reason };
+    }
+
+    // Verifying took time, and another accepted answer may have settled this
+    // sign-in meanwhile. From here to markVerified nothing waits, so the sign-in
+    // is spent by exactly one accepted answer; the loser gives its assertion back.
+    if (!CALLBACK_STATES.has(this.store.get(sessionToken)?.state as SessionState)) {
+      await this.consumed.release?.(consumedKey(assertion));
+      return { ok: false, reason: "this sign-in has already been answered" };
     }
 
     // The assertion is spent by now. If the site cannot finish the sign-in, give

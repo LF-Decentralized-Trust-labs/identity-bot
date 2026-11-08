@@ -55,7 +55,7 @@ func TestASignInForABrowserKeyIsAdmittedWhenTheAssertionRepeatsIt(t *testing.T) 
 }
 
 // An assertion approved for another key, or for none, is refused by the
-// callback, and the session is denied.
+// callback, and the session stays open with the refusal recorded.
 func TestAnAssertionForAnotherBrowserKeyIsRefusedAtTheCallback(t *testing.T) {
 	for name, wrong := range map[string]string{"another key": anotherBrowserKey, "no key": ""} {
 		t.Run(name, func(t *testing.T) {
@@ -85,9 +85,9 @@ func TestAnAssertionForAnotherBrowserKeyIsRefusedAtTheCallback(t *testing.T) {
 				t.Fatalf("the callback answered %d, not 401", resp.StatusCode)
 			}
 			w.org.challengeMu.Lock()
-			reason := w.org.challengeStatus[req.SessionToken]["reason"]
+			reason := w.org.challengeStatus[req.SessionToken]["last_refusal"]
 			w.org.challengeMu.Unlock()
-			if r, _ := reason.(string); !strings.Contains(r, "browser key mismatch") || theStatus(w, req.SessionToken) != "denied" {
+			if r, _ := reason.(string); !strings.Contains(r, "browser key mismatch") || theStatus(w, req.SessionToken) != "pending" {
 				t.Fatalf("session %v, reason %v", theStatus(w, req.SessionToken), reason)
 			}
 		})
