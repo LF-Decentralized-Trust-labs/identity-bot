@@ -112,15 +112,16 @@ func TestABrowsersTokenIsNotTheOwner(t *testing.T) {
 	}
 }
 
-// stillAnsweringABrowser are the routes that answer a browser's origin today,
-// each with why. The list may only shrink: a route that stops answering must
-// be taken off it, and one not on it must never answer.
-var stillAnsweringABrowser = map[string]string{
-	// The sign-in button a website embeds (packages/login-web, ADR-021) asks
-	// the site's own Identity Agent for a challenge and polls for the answer
-	// from the site's page, so that a site needs no back end of its own. It
-	// signs nobody in to this core, but it is a browser reaching it, and is
-	// awaiting a ruling on whether it moves behind the site's own server.
+// answeringABrowser are the routes that answer a browser's origin, each with
+// why. It is exact: a route not on it must never answer, and one on it that
+// stops answering must be taken off it.
+var answeringABrowser = map[string]string{
+	// Signing in to a website is not reaching this core. The sign-in button a
+	// website embeds (packages/login-web, ADR-021) asks the Identity Agent that
+	// holds the website as an asset for a challenge signed with the asset's
+	// key, and collects who signed in. The browser carries no credential and
+	// gains nothing over any identity; the person approves on their own
+	// Identity Agent, on their own device.
 	"OPTIONS /api/login/session/{asset_id}":         "the sign-in button a website embeds starts a sign-in",
 	"POST /api/login/session/{asset_id}":            "the sign-in button a website embeds starts a sign-in",
 	"OPTIONS /api/login/session/{asset_id}/{token}": "the sign-in button a website embeds waits for the answer",
@@ -156,14 +157,14 @@ func TestTheCoreAnswersNoBrowserOrigin(t *testing.T) {
 		}
 	})
 	for key := range answering {
-		if _, known := stillAnsweringABrowser[key]; !known {
+		if _, known := answeringABrowser[key]; !known {
 			t.Errorf("%s lets a browser read its answer; no browser reaches an Identity Agent (ADR-006). "+
 				"A browser reaches the person's app, and the app asks this core from its own server", key)
 		}
 	}
-	for key := range stillAnsweringABrowser {
+	for key := range answeringABrowser {
 		if !answering[key] {
-			t.Errorf("%s no longer answers a browser: take it off stillAnsweringABrowser", key)
+			t.Errorf("%s no longer answers a browser: take it off answeringABrowser", key)
 		}
 	}
 }
@@ -173,7 +174,7 @@ func TestTheCoreAnswersNoBrowserOrigin(t *testing.T) {
 var browserSessionWords = regexp.MustCompile(`(?i)browser.?(session|login)|session.?forbidden|requires.?the.?key.?itself`)
 
 // stillNamingABrowserSession are the files outside the tests allowed to name
-// one, each with why. Like stillAnsweringABrowser, the list may only shrink.
+// one, each with why. The list may only shrink.
 var stillNamingABrowserSession = map[string]string{
 	// A person's session at an app is named by the hash of its token
 	// (login.BrowserSessionBinding, ADR-066). It reaches the talk routes only,
