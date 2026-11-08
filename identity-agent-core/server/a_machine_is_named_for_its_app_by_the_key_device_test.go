@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"identity-agent-core/asset"
+	"identity-agent-core/drivers"
 	"identity-agent-core/internal/coretypes"
 	"identity-agent-core/schemas"
 )
@@ -202,8 +203,14 @@ func TestTheOldGrantsWithdrawalIsAskedRightBehindTheRegrant(t *testing.T) {
 	keyLogVerifies(t, w.s)
 }
 
+// An engine that cannot prepare a revocation: embedding the interface alone
+// hides the engine's PreparedRevoker methods, so asking the device to sign a
+// withdrawal fails.
+type engineThatCannotPrepare struct{ drivers.KeriEngine }
+
 // A withdrawal that could not be asked of the device is kept, and shows as
-// queued rather than as nothing.
+// queued rather than as nothing. This goes through withdrawOrSay with the
+// signing request failing, so it fails if that branch is removed.
 func TestAWithdrawalThatCouldNotBeAskedIsKeptQueued(t *testing.T) {
 	w := newControllerWorld(t)
 	g := aGrant(GradeEnrolled)
@@ -213,17 +220,13 @@ func TestAWithdrawalThatCouldNotBeAskedIsKeptQueued(t *testing.T) {
 	}
 	w.s.localOwnerSecret = testOwnerSecret
 	moveTheKeyElsewhere(t, w.s)
-	if err := w.s.DataStore.UpdateCredentialStatus(granted.CredentialSAID, credentialStatusWithdrawing); err != nil {
-		t.Fatal(err)
-	}
-	// Failing as an unsigned event in the key log would; here the withdrawal
-	// is simply not asked, as after a failed attempt.
+	w.s.KeriDriver = engineThatCannotPrepare{w.s.KeriDriver}
+
+	w.s.withdrawOrSay(granted.CredentialSAID)
+
 	rec, _ := w.s.DataStore.GetCredential(granted.CredentialSAID)
-	if rec == nil || w.s.withdrawalState(granted.CredentialSAID) != "expired" {
-		t.Fatalf("setup: %+v %s", rec, w.s.withdrawalState(granted.CredentialSAID))
-	}
-	if err := w.s.keepBehind(pendingIssuance{Kind: waitingBehind, Spec: grantSpec{Issuer: rec.IssuerAID}, Revokes: granted.CredentialSAID}); err != nil {
-		t.Fatal(err)
+	if rec == nil || rec.Status != credentialStatusWithdrawing {
+		t.Fatalf("a grant whose withdrawal could not be asked is not left withdrawing: %+v", rec)
 	}
 	if state := w.s.withdrawalState(granted.CredentialSAID); state != "queued" {
 		t.Fatalf("a kept withdrawal is %q, not queued", state)
