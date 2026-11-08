@@ -133,8 +133,10 @@ func TestAThirdPartysSiteSignsAPersonInThroughTheSDK(t *testing.T) {
 	if _, err := h.Approve(req2); err == nil {
 		t.Fatal("somebody off the roster was admitted")
 	}
-	if out := finish(token2, 403); out["state"] != "declined" {
-		t.Fatalf("the site did not report the refusal: %v", out)
+	// The refusal leaves the sign-in open, so the person can try again
+	// after a policy change; the site signs nobody in meanwhile.
+	if out := finish(token2, 202); out["state"] == "signed-in" {
+		t.Fatalf("the site signed in somebody the organisation refused: %v", out)
 	}
 }
 

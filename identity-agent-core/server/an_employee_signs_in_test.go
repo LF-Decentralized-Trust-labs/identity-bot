@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 
@@ -175,9 +176,11 @@ func signIn(t *testing.T, s *CoreServer, h *login.Handler, rel *login.SiteRelati
 		Nonce:                "a-nonce-the-site-invented",
 		RequestedDisclosures: []string{"display_name", "email"},
 		SessionToken:         token,
+		Expiry:               time.Now().Add(10 * time.Minute).UTC().Format(time.RFC3339),
 	}
 	s.challengeMu.Lock()
 	s.challenges[token] = bundle
+	s.challengeStatus = map[string]map[string]interface{}{token: {"status": "pending"}}
 	s.challengeMu.Unlock()
 
 	rel.RelayOOBI = relayURL + "/oobi/" + rel.PairwiseAID
@@ -274,7 +277,7 @@ func TestAForgedSignatureNeverReachesTheGate(t *testing.T) {
 	// else: the employee's own key log, a stranger's signature.
 	const token = "session-1"
 	bundle := login.ChallengeBundle{SiteAID: "ESiteAID", Audience: "https://portal.example",
-		Nonce: "a-nonce", SessionToken: token}
+		Nonce: "a-nonce", SessionToken: token, Expiry: time.Now().Add(10 * time.Minute).UTC().Format(time.RFC3339)}
 	s.challengeMu.Lock()
 	s.challenges[token] = bundle
 	s.challengeMu.Unlock()
@@ -317,7 +320,7 @@ func TestARefusalTellsTheCallerNothingAndTheOrganisationEverything(t *testing.T)
 	s.challengeMu.Lock()
 	st := s.challengeStatus["session-1"]
 	s.challengeMu.Unlock()
-	if got, _ := st["reason"].(string); !strings.Contains(got, "not an active employee") {
+	if got, _ := st["last_refusal"].(string); !strings.Contains(got, "not an active employee") {
 		t.Errorf("the organisation was not told why either, which is the other failure: %v", st)
 	}
 }
@@ -400,9 +403,11 @@ func TestAnAssertionCannotBePostedTwice(t *testing.T) {
 	}
 }
 
-// A refusal is also an answer, so it cannot be retried either — otherwise
-// somebody refused now could keep posting until a policy change let them in.
-func TestARefusedSignInCannotBeRetried(t *testing.T) {
+// A refusal by policy leaves the sign-in open. Settling it would let anyone
+// with a free identity who has seen the QR code end the person's sign-in, and
+// being admitted after a policy change is correct. The reason is kept, cut to
+// a fixed length, for the person's page.
+func TestARefusedSignInStaysOpenForARetry(t *testing.T) {
 	h, rel, _ := theirAgent(t, 1000007)
 	relay := nothingIsFetched(t)
 	roster := map[string]bool{}
@@ -411,11 +416,62 @@ func TestARefusedSignInCannotBeRetried(t *testing.T) {
 	if code, _ := signIn(t, s, h, rel, relay.URL); code != http.StatusForbidden {
 		t.Fatalf("expected the first attempt to be refused, got %d", code)
 	}
+	s.challengeMu.Lock()
+	st := s.challengeStatus["session-1"]
+	s.challengeMu.Unlock()
+	if st["status"] != "pending" || st["last_refusal"] == nil {
+		t.Fatalf("a refused sign-in must stay pending and say why: %v", st)
+	}
 
 	roster[rel.PairwiseAID] = true // the policy changes in their favour
 
-	if code, _ := signInReusingSession(t, s, h, rel, relay.URL); code == http.StatusOK {
-		t.Fatal("a refused sign-in was retried into an admission after the policy changed")
+	if code, body := signInReusingSession(t, s, h, rel, relay.URL); code != http.StatusOK {
+		t.Fatalf("a refused sign-in could not be retried after the policy changed: %d %s", code, body)
+	}
+}
+
+func TestALastRefusalIsCutToAFixedLength(t *testing.T) {
+	s := &CoreServer{challengeStatus: map[string]map[string]interface{}{"t": {"status": "pending"}}}
+	s.recordRefusal("t", strings.Repeat("é", 5000))
+	got := s.challengeStatus["t"]["last_refusal"].(string)
+	if len(got) > maxRefusalLen || !utf8.ValidString(got) {
+		t.Fatalf("last_refusal is %d bytes (valid utf8: %v), want at most %d", len(got), utf8.ValidString(got), maxRefusalLen)
+	}
+}
+
+// The core ends a sign-in at its expiry itself; it does not wait for the
+// person's agent to notice, or for the cap on open sign-ins to evict it.
+func TestASignInIsRefusedAfterItsWindow(t *testing.T) {
+	h, rel, _ := theirAgent(t, 1000008)
+	relay := nothingIsFetched(t)
+	s := theirOrganisation(t, map[string]bool{rel.PairwiseAID: true})
+
+	if code, _ := signIn(t, s, h, rel, relay.URL); code != http.StatusOK {
+		t.Fatalf("setup: sign-in refused: %d", code)
+	}
+	// A second sign-in, window over.
+	const token = "session-expired"
+	bundle := login.ChallengeBundle{
+		SiteAID: "ESiteAID", Audience: "https://portal.example", Nonce: "another-nonce",
+		RequestedDisclosures: []string{"display_name"}, SessionToken: token,
+		Expiry: time.Now().Add(-time.Hour).UTC().Format(time.RFC3339),
+	}
+	s.challengeMu.Lock()
+	s.challenges[token] = bundle
+	s.challengeMu.Unlock()
+	rel.RelayOOBI = relay.URL + "/oobi/" + rel.PairwiseAID
+	a, err := h.BuildAssertion(rel, &bundle, nil)
+	if err != nil {
+		t.Fatalf("build assertion: %v", err)
+	}
+	if code, _ := postAssertion(t, s, token, a); code != http.StatusGone {
+		t.Fatalf("an answer after the window got %d, want 410", code)
+	}
+	s.challengeMu.Lock()
+	st := s.challengeStatus[token]
+	s.challengeMu.Unlock()
+	if st != nil && st["status"] == "complete" {
+		t.Fatal("an expired sign-in was completed")
 	}
 }
 
@@ -487,5 +543,44 @@ func TestTheWidgetEndpointWithholdsIdentityWithoutTheSecret(t *testing.T) {
 	// A guessed secret is no better than none.
 	if _, present := poll("not-the-secret")["app_session_token"]; present {
 		t.Error("a wrong collector secret still collected the identity")
+	}
+}
+
+// The person's page is told why an answer was refused while the sign-in is
+// still open, and only when it holds the collector secret.
+func TestThePageIsToldWhyAnAnswerWasRefused(t *testing.T) {
+	const token = "session-refused"
+	s := &CoreServer{
+		localOwnerSecret: testOwnerSecret,
+		challengeStatus: map[string]map[string]interface{}{
+			token: {"status": "pending"},
+		},
+	}
+	secret, err := s.mintCollectorSecret(token)
+	if err != nil {
+		t.Fatalf("mint collector secret: %v", err)
+	}
+	s.recordRefusal(token, "not on the roster")
+
+	poll := func(offered string) map[string]interface{} {
+		r := chi.NewRouter()
+		s.mountLoginWidgetRoutes(r)
+		req := httptest.NewRequest(http.MethodGet, "/api/login/session/the-website/"+token, nil)
+		if offered != "" {
+			req.Header.Set("X-Collector-Secret", offered)
+		}
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		var got map[string]interface{}
+		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return got
+	}
+	if got := poll(secret); got["last_refusal"] != "not on the roster" {
+		t.Errorf("the collector was not told why: %v", got)
+	}
+	if got := poll(""); got["last_refusal"] != nil {
+		t.Errorf("someone with only the token was told the reason: %v", got)
 	}
 }

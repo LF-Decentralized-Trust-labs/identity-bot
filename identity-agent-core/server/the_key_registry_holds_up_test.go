@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	keri "github.com/grapeid/keri-go"
 
@@ -230,7 +231,8 @@ func TestAnAssertionApprovedForAnotherSiteDoesNotSignInHere(t *testing.T) {
 	s := theirOrganisation(t, map[string]bool{rel.PairwiseAID: true})
 	const token = "session-1"
 	real := login.ChallengeBundle{SiteAID: "ESiteAID", Audience: "https://portal.example",
-		Nonce: "the-real-nonce", SessionToken: token}
+		Nonce: "the-real-nonce", SessionToken: token,
+		Expiry: time.Now().Add(10 * time.Minute).UTC().Format(time.RFC3339)}
 	s.challengeMu.Lock()
 	s.challenges[token] = real
 	s.challengeMu.Unlock()

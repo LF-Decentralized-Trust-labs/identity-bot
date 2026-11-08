@@ -164,6 +164,12 @@ export function SignInButton({
         {label}
       </button>
 
+      {poll.lastRefusal && poll.state !== "verified" && (
+        <p role="alert" style={{ fontSize: dims.font, margin: "8px 0 0" }}>
+          That answer was refused: {poll.lastRefusal}. The sign-in is still open; try again.
+        </p>
+      )}
+
       {showQr && (qrUrl ?? relayUrl) && (
         <LoginQrCode
           url={qrUrl ?? relayUrl!}

@@ -235,6 +235,14 @@ func (s *CoreServer) handleLoginSessionStatus(w http.ResponseWriter, r *http.Req
 	resp := map[string]interface{}{"state": "connecting"}
 	if st != nil {
 		switch st["status"] {
+		case "pending":
+			// An answer was refused and the sign-in is still open: tell the
+			// person's page why, so they can fix it and try again. The reason
+			// can name the policy that refused, so it is held to the same
+			// standard as the identity.
+			if reason, ok := st["last_refusal"].(string); ok && mayCollect {
+				resp["last_refusal"] = reason
+			}
 		case "complete":
 			resp["state"] = "verified"
 			if !mayCollect {

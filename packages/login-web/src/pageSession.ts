@@ -69,6 +69,8 @@ export interface PageSessionRead {
   siteAid?: string;
   browserKey?: string;
   reason?: string;
+  /** Why the last answer was refused while the sign-in is still open, so the person can fix it and try again. */
+  lastRefusal?: string;
   /** Verified, but this caller was not given the identity: it has lost its secret, or already read it. */
   identityWithheld?: boolean;
 }
@@ -94,6 +96,7 @@ export async function readPageSession(opts: {
     siteAid: d.site_aid as string | undefined,
     browserKey: d.browser_key as string | undefined,
     reason: d.reason as string | undefined,
+    lastRefusal: d.last_refusal as string | undefined,
     identityWithheld: d.identity_withheld === true ? true : undefined,
   };
 }

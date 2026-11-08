@@ -22,12 +22,13 @@ export function useSessionPoll(
   sessionEndpoint: string,
   sessionToken: string | null,
   opts: number | SessionPollOptions = 1500,
-): { state: PollState; appSessionToken?: string; result?: PageSessionRead; error?: string } {
+): { state: PollState; appSessionToken?: string; result?: PageSessionRead; error?: string; lastRefusal?: string } {
   const { intervalMs = 1500, collectorSecret = null } =
     typeof opts === "number" ? { intervalMs: opts } : opts;
   const [state, setState] = useState<PollState>("idle");
   const [appSessionToken, setAppSessionToken] = useState<string | undefined>();
   const [result, setResult] = useState<PageSessionRead | undefined>();
+  const [lastRefusal, setLastRefusal] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>();
   const timer = useRef<ReturnType<typeof setInterval>>();
 
@@ -36,6 +37,7 @@ export function useSessionPoll(
     try {
       const data = await readPageSession({ sessionEndpoint, sessionToken, collectorSecret });
       const s = data.state;
+      setLastRefusal(data.lastRefusal);
       if (s === "verified") {
         setState("verified");
         setResult(data);
@@ -68,5 +70,5 @@ export function useSessionPoll(
     };
   }, [sessionToken, poll, intervalMs]);
 
-  return { state, appSessionToken, result, error };
+  return { state, appSessionToken, result, error, lastRefusal };
 }

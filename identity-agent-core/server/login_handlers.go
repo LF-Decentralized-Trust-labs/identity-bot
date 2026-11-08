@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"identity-agent-core/asset"
 	"identity-agent-core/drivers"
@@ -250,6 +251,14 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// A sign-in is open only for its window. The person's agent checks the
+	// expiry too, but the core must not rely on that: without this a refused
+	// sign-in stays open until the cap on open sign-ins evicts it.
+	if err := login.CheckExpiry(bundle.Expiry, time.Now()); err != nil {
+		http.Error(w, "this sign-in is no longer open", http.StatusGone)
+		return
+	}
+
 	// 1) Authenticate: verify the assertion signature + binding to this challenge.
 	res := login.VerifyAssertionForBrowserKey(a, bundle.Nonce, bundle.Audience, bundle.SiteAID, bundle.BrowserKey, 300)
 	if !res.Valid {
@@ -274,22 +283,13 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 	if allowed, reason := s.authorizeAssetAccess(r.Context(), bundle.SiteAID, res.PairwiseAID, a.PresentedACDCs); !allowed {
 		// For the organisation, which is entitled to know.
 		//
-		// This answer WAS authenticated: a person the policy knows, refused. It
-		// is not the forged or garbled kind that leaves the sign-in open
-		// (above), and it still settles it, so the refused cannot keep posting
-		// until a policy change lets them in (TestARefusedSignInCannotBeRetried).
-		// Whether that is worth the cost, that anyone with an identity of their
-		// own who has seen the QR code can still end the sign-in this way, is
-		// a question for a later change, not decided here.
-		spent, err := s.settleIfOpen(token, map[string]interface{}{"status": "denied", "reason": reason})
-		if err != nil {
-			http.Error(w, "could not record the answer", http.StatusInternalServerError)
-			return
-		}
-		if !spent {
-			http.Error(w, "this sign-in has already been answered", http.StatusConflict)
-			return
-		}
+		// This answer was authenticated, and it still leaves the sign-in
+		// open, like a forged one. Settling it let anyone with a free
+		// identity of their own who had seen the QR code end the person's
+		// sign-in by posting a refused answer, and blocking a retry protects
+		// nothing: being admitted after a policy change is correct. The
+		// reason is kept so the person's page can show it.
+		s.recordRefusal(token, reason)
 		http.Error(w, "not authorized", http.StatusForbidden)
 		return
 	}
@@ -367,12 +367,18 @@ func (s *CoreServer) memberInfoFor(siteAID, pairwiseAID string) map[string]strin
 	return nil
 }
 
+// maxRefusalLen is the longest last_refusal kept, in bytes. The reason can
+// hold text the sender chose (the identifier they sent).
+const maxRefusalLen = 200
+
 // recordRefusal notes that an answer was refused and leaves the sign-in open.
-// Only the last reason and a count are kept, so a flood of bad answers cannot
-// grow the record. Nothing is written to the state file: a refusal forgotten
-// in a restart loses nothing, and rewriting the whole file for every forged
-// post would let anyone who has seen the QR code make the agent do so. Once the
-// sign-in has settled, a refusal changes nothing.
+// Only the last reason, cut to maxRefusalLen, and a count are kept, so a flood
+// of bad answers cannot grow the record. The refusal is not saved on its own:
+// the rewrite of the whole state file is not done for every forged post, which
+// would let anyone who has seen the QR code make the agent do so. It is in the
+// map, so the next save of the state file (any other change) writes it, and a
+// restart before that forgets it, which loses nothing. Once the sign-in has
+// settled, a refusal changes nothing.
 func (s *CoreServer) recordRefusal(token, reason string) {
 	s.challengeMu.Lock()
 	defer s.challengeMu.Unlock()
@@ -388,7 +394,7 @@ func (s *CoreServer) recordRefusal(token, reason string) {
 		n = int(v)
 	}
 	cur["refusals"] = n + 1
-	cur["last_refusal"] = reason
+	cur["last_refusal"] = truncateUTF8(reason, maxRefusalLen)
 }
 
 // settleIfOpen settles a sign-in with st only if it has not been settled yet,
@@ -737,4 +743,15 @@ func (s *CoreServer) challengeStatusOf(token string) map[string]interface{} {
 		cp[k] = v
 	}
 	return cp
+}
+
+// truncateUTF8 cuts s to at most n bytes without splitting a character.
+func truncateUTF8(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
