@@ -520,17 +520,41 @@ func (s *CoreServer) admitsMember(a asset.Asset, pairwiseAID string) (bool, stri
 	return true, ""
 }
 
+// The wording a person's browser is given when a required credential is
+// refused. Whoever starts a sign-in can read it, and a credential can name any
+// issuer, so what the check found out (whether this agent holds a key log for
+// the issuer, what the engine said, what a watcher saw) must never be in it:
+// that would tell a stranger which identifiers this agent knows. The detail
+// goes to this agent's own log only.
+const (
+	refusalCredentialMissing    = "the required credential was not presented"
+	refusalCredentialUnchecked  = "the credential could not be checked"
+	refusalCredentialNotAllowed = "the credential is not accepted here"
+)
+
 // credentialGateSatisfied returns true if the presented ACDCs include one that
-// satisfies the required schema (and issuer). When the KERI driver + raw ACDC
-// bytes are available it CRYPTOGRAPHICALLY verifies the credential (SAID + issuer
-// KEL anchoring + watcher duplicity, and holder-binding if a presentation
-// signature is present). Without the driver or the credential body nothing is
-// admitted: a declared field is not evidence.
+// satisfies the required schema (and issuer). When the refusal is false the
+// string is fixed wording, safe to show a browser; credentialGate returns the
+// detail as well, for this agent's log and its tests.
 func (s *CoreServer) credentialGateSatisfied(ctx context.Context, presented []interface{}, signerAID, schema, issuer string) (bool, string) {
-	lastReason := "required credential not presented"
+	ok, public, detail := s.credentialGate(ctx, presented, signerAID, schema, issuer)
+	if !ok {
+		log.Printf("[identity-agent-core] required credential refused: %s", detail)
+	}
+	return ok, public
+}
+
+// credentialGate is the check behind credentialGateSatisfied. When the KERI
+// driver + raw ACDC bytes are available it CRYPTOGRAPHICALLY verifies the
+// credential (SAID + issuer KEL anchoring + watcher duplicity, and
+// holder-binding if a presentation signature is present). Without the driver or
+// the credential body nothing is admitted: a declared field is not evidence.
+// It returns (ok, fixed wording for the browser, detail for the log).
+func (s *CoreServer) credentialGate(ctx context.Context, presented []interface{}, signerAID, schema, issuer string) (bool, string, string) {
+	public, detail := refusalCredentialMissing, "required credential not presented"
 	if signerAID == "" {
 		// An empty holder would switch the holder check off.
-		return false, "no identity signing in to hold the credential"
+		return false, refusalCredentialNotAllowed, "no identity signing in to hold the credential"
 	}
 	for _, p := range presented {
 		m, ok := p.(map[string]interface{})
@@ -541,7 +565,7 @@ func (s *CoreServer) credentialGateSatisfied(ctx context.Context, presented []in
 			continue
 		}
 		if issuer != "" && credStr(m["issuer_aid"]) != issuer {
-			lastReason = "credential from an unexpected issuer"
+			public, detail = refusalCredentialNotAllowed, "credential from an unexpected issuer"
 			continue
 		}
 		// No credential body, no pass. A declared field (a said, a status) is
@@ -549,7 +573,7 @@ func (s *CoreServer) credentialGateSatisfied(ctx context.Context, presented []in
 		// about a credential this agent could have revoked.
 		acdcB64 := credStr(m["acdc_json_b64"])
 		if s.KeriDriver == nil || acdcB64 == "" {
-			lastReason = "credential body not presented, so it cannot be verified"
+			public, detail = refusalCredentialUnchecked, "credential body not presented, so it cannot be verified"
 			continue
 		}
 		// The holder is the identity that signed in, never the holder the
@@ -559,11 +583,13 @@ func (s *CoreServer) credentialGateSatisfied(ctx context.Context, presented []in
 			signerAID, credStr(m["pres_said_b64"]),
 			credStr(m["cesr_sig"]), credStr(m["holder_public_key"]), schemaForms(schema))
 		if verified && (issuer == "" || iss == issuer) {
-			return true, ""
+			return true, "", ""
 		}
-		lastReason = "credential verification failed: " + reason
+		// One phrase for every way the check can fail: telling "no key log for
+		// that issuer" from "key log found, credential bad" is the oracle.
+		public, detail = refusalCredentialNotAllowed, "credential verification failed: "+reason
 	}
-	return false, lastReason
+	return false, public, detail
 }
 
 // verifyPresentedCredentialACDC cryptographically verifies a presented ACDC via
@@ -694,6 +720,8 @@ func (s *CoreServer) handleChallengeStatus(w http.ResponseWriter, r *http.Reques
 		// mint one. An unbound status is indistinguishable from a bound one, so
 		// it says so.
 		st["session_binding"] = "none"
+		// Nobody holds a secret to show it to, so it is not shown.
+		delete(st, "last_refusal")
 	}
 	jsonreply.Write(w, http.StatusOK, st)
 }

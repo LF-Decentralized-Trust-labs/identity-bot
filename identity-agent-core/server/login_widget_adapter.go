@@ -239,8 +239,9 @@ func (s *CoreServer) handleLoginSessionStatus(w http.ResponseWriter, r *http.Req
 			// An answer was refused and the sign-in is still open: tell the
 			// person's page why, so they can fix it and try again. The reason
 			// can name the policy that refused, so it is held to the same
-			// standard as the identity.
-			if reason, ok := st["last_refusal"].(string); ok && mayCollect {
+			// standard as the identity. A session with no collector secret has
+			// nobody to show it to: whoever holds the token would read it.
+			if reason, ok := st["last_refusal"].(string); ok && bound && held {
 				resp["last_refusal"] = reason
 			}
 		case "complete":

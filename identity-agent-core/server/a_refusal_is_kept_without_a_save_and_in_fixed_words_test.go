@@ -47,3 +47,41 @@ func TestAnUnreadableAssetStoreIsRefusedInFixedWords(t *testing.T) {
 		t.Fatalf("the reason names the internal error: %q", reason)
 	}
 }
+
+// Whoever starts a sign-in can read last_refusal, and a credential can name any
+// issuer. So the reason for a refused credential is the same few phrases
+// however the check failed, and nothing the check found out reaches the browser:
+// not the error text, not whether this agent holds a key log for the issuer.
+func TestARefusedCredentialIsReportedInFixedWordsWhateverTheCheckFound(t *testing.T) {
+	internal := []string{"verify error", "KEL", "issuer", "subject", "watcher", "duplicity", "driver", "engine", "credential verification failed"}
+	allowed := map[string]bool{refusalCredentialMissing: true, refusalCredentialUnchecked: true, refusalCredentialNotAllowed: true}
+	cases := map[string]*aGateWorld{
+		"issuer log not held":     aGateWorldIssuingTo(t, true, false),
+		"issued to somebody else": aGateWorldIssuingTo(t, false, true),
+	}
+	var got []string
+	for name, w := range cases {
+		ok, reason := w.gate(t)
+		if ok {
+			t.Fatalf("%s: admitted", name)
+		}
+		if !allowed[reason] {
+			t.Errorf("%s: the browser was given %q", name, reason)
+		}
+		for _, bad := range internal {
+			if strings.Contains(reason, bad) {
+				t.Errorf("%s: %q contains %q", name, reason, bad)
+			}
+		}
+		got = append(got, reason)
+	}
+	// An issuer this agent holds a log for and one it does not look the same.
+	if got[0] != got[1] {
+		t.Errorf("the reason tells the two failures apart: %q vs %q", got[0], got[1])
+	}
+	// Presenting nothing is the presenter's own news and says so.
+	s := gateServer(t, asset.EnrollmentPolicy{Mode: asset.EnrollmentOpen, RequiredCredSchema: "SCH"})
+	if ok, r := s.authorizeAssetAccess(nil, "ESite", "Ex", nil); ok || r != refusalCredentialMissing {
+		t.Errorf("nothing presented: %v %q", ok, r)
+	}
+}

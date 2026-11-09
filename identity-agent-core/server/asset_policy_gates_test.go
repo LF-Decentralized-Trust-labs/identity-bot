@@ -61,7 +61,7 @@ func TestCredentialGateRefusesWhenNotPresentedOrOnlyDeclared(t *testing.T) {
 		t.Fatal("admitted without the credential")
 	}
 	pres := []interface{}{map[string]interface{}{"schema_said": "SCH", "status": "issued"}}
-	if ok, r := s.authorizeAssetAccess(nil, "ESite", "Ex", pres); ok || !strings.Contains(r, "credential body not presented") {
+	if ok, r := s.authorizeAssetAccess(nil, "ESite", "Ex", pres); ok || r != refusalCredentialUnchecked {
 		t.Fatalf("declared fields alone should be refused, got %v %q", ok, r)
 	}
 }
