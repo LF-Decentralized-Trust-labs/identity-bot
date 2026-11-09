@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -84,10 +85,15 @@ func TestAnAssertionForAnotherBrowserKeyIsRefusedAtTheCallback(t *testing.T) {
 			if resp.StatusCode != http.StatusUnauthorized {
 				t.Fatalf("the callback answered %d, not 401", resp.StatusCode)
 			}
+			// The poster is told why; the person's page is given fixed wording.
+			body, _ := io.ReadAll(resp.Body)
+			if !strings.Contains(string(body), "browser key mismatch") {
+				t.Fatalf("the poster was not told why: %s", body)
+			}
 			w.org.challengeMu.Lock()
 			reason := w.org.challengeStatus[req.SessionToken]["last_refusal"]
 			w.org.challengeMu.Unlock()
-			if r, _ := reason.(string); !strings.Contains(r, "browser key mismatch") || theStatus(w, req.SessionToken) != "pending" {
+			if reason != refusalAnswerNotVerified || theStatus(w, req.SessionToken) != "pending" {
 				t.Fatalf("session %v, reason %v", theStatus(w, req.SessionToken), reason)
 			}
 		})

@@ -262,7 +262,11 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 	// 1) Authenticate: verify the assertion signature + binding to this challenge.
 	res := login.VerifyAssertionForBrowserKey(a, bundle.Nonce, bundle.Audience, bundle.SiteAID, bundle.BrowserKey, 300)
 	if !res.Valid {
-		s.recordRefusal(token, res.Reason)
+		// The reason can carry text the poster chose (the identifier it sent),
+		// and the browser that started the sign-in shows what is recorded, so
+		// the person sees fixed wording and the detail stays in this log.
+		log.Printf("[login] an answer to a sign-in was not verified: %s", res.Reason)
+		s.recordRefusal(token, refusalAnswerNotVerified)
 		http.Error(w, "assertion verification failed: "+res.Reason, http.StatusUnauthorized)
 		return
 	}
@@ -526,6 +530,11 @@ func (s *CoreServer) admitsMember(a asset.Asset, pairwiseAID string) (bool, stri
 // the issuer, what the engine said, what a watcher saw) must never be in it:
 // that would tell a stranger which identifiers this agent knows. The detail
 // goes to this agent's own log only.
+// refusalAnswerNotVerified is what the person's browser is shown when an
+// answer fails verification. The verifier's own reason can quote what the
+// poster sent, so it is never shown.
+const refusalAnswerNotVerified = "an answer could not be verified, and was not accepted"
+
 const (
 	refusalCredentialMissing    = "the required credential was not presented"
 	refusalCredentialUnchecked  = "the credential could not be checked"
