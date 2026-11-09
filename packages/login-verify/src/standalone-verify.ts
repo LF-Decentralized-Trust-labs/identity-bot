@@ -29,19 +29,53 @@ export interface StandaloneVerifyOptions extends VerifyAssertionOptions {
 
 /** Remembers which assertions have already been accepted. */
 export interface ConsumedNonces {
-  /** True if this assertion had NOT been seen, and records it. False if it had. */
-  claim(key: string): Promise<boolean> | boolean;
+  /** True if this assertion had NOT been seen, and records it. False if it had.
+   *  `keepUntilMs` (epoch milliseconds) is the earliest the entry may be
+   *  forgotten: after it the assertion is too old to verify anyway, so a store
+   *  may drop it to stay small. A store that ignores it is also correct. */
+  claim(key: string, keepUntilMs?: number): Promise<boolean> | boolean;
+  /** Forgets a claim made by mistake, so the same assertion can be tried again:
+   *  the verifier calls it when accepting an assertion failed after the claim. */
+  release?(key: string): Promise<void> | void;
 }
 
-/** A store for one process. A deployment with more than one verifier needs a
- *  shared one, or an assertion spent on one of them still spends on the others. */
+/** The key an assertion is remembered under. */
+export function consumedKey(a: { audience: string; nonce: string; i: string }): string {
+  return `${a.audience}|${a.nonce}|${a.i}`;
+}
+
+/** The most a default store holds. */
+const MOST_CONSUMED_IN_MEMORY = 100_000;
+
+/** A store for one process, lost on restart. A deployment with more than one
+ *  verifier, or one that restarts inside a freshness window, needs a shared and
+ *  durable one (`fileConsumedNonces` in `@identity-agent/login-verify/consumed-in-files`),
+ *  or an assertion spent here is still good after a restart and on the others.
+ *
+ *  Full, it refuses new claims rather than forgetting old ones: every entry in
+ *  it can still be replayed, so dropping one to make room would accept a
+ *  captured assertion. `claim` then throws, and the verifier refuses the sign-in. */
 export function inMemoryConsumedNonces(): ConsumedNonces {
-  const seen = new Set<string>();
+  const seen = new Map<string, number>();
+  let sweptAt = 0;
   return {
-    claim(key: string) {
+    claim(key: string, keepUntilMs?: number) {
+      const now = Date.now();
+      // Entries do not expire in claim order (windows differ), so look at all
+      // of them, at most once a second.
+      if (now - sweptAt >= 1000) {
+        sweptAt = now;
+        for (const [k, until] of seen) if (until <= now) seen.delete(k);
+      }
       if (seen.has(key)) return false;
-      seen.add(key);
+      if (seen.size >= MOST_CONSUMED_IN_MEMORY) {
+        throw new Error("the replay store is full of assertions that can still be replayed");
+      }
+      seen.set(key, keepUntilMs ?? Number.POSITIVE_INFINITY);
       return true;
+    },
+    release(key: string) {
+      seen.delete(key);
     },
   };
 }
@@ -153,7 +187,21 @@ export async function verifyLoginAssertion(
   // Burnt only once everything else has passed, so a malformed or badly signed
   // assertion cannot be used to spend a nonce the real one still needs.
   if (opts.consume) {
-    const fresh = await opts.consume.claim(`${assertion.audience}|${assertion.nonce}|${assertion.i}`);
+    // Kept until the assertion can no longer pass the time check: its dt may
+    // be a window ahead of now, and is good for a window after that. With the
+    // check off it never stops being good.
+    const window = freshnessWindowSeconds(opts.maxSkewSeconds) ?? LONGEST_MAX_SKEW_SECONDS;
+    const dtMs = parseRfc3339(assertion.dt);
+    const base = Math.max(Date.now(), opts.nowMs ?? 0, Number.isNaN(dtMs) ? 0 : dtMs);
+    const keepUntil = opts.skipDtCheck === true ? undefined : base + (window + 60) * 1000;
+    // A store that cannot say is a refusal: accepting what cannot be recorded
+    // is accepting a replay.
+    let fresh: boolean;
+    try {
+      fresh = await opts.consume.claim(consumedKey(assertion), keepUntil);
+    } catch (err) {
+      return { valid: false, reason: `replay store unavailable: ${(err as Error).message}` };
+    }
     if (!fresh) {
       return { valid: false, reason: "assertion already used" };
     }

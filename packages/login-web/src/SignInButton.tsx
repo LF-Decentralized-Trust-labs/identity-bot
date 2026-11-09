@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from "react";
 import { detectLocalAgent, openDesktopLoginDeepLink, triggerLocalLogin } from "./agentDetect.js";
 import { useSessionPoll } from "./useSessionPoll.js";
+import { startPageSession, type PageSessionRead } from "./pageSession.js";
 import { LoginQrCode } from "./LoginQrCode.js";
 
 export interface SignInButtonProps {
@@ -14,12 +15,15 @@ export interface SignInButtonProps {
   theme?: "light" | "dark" | "auto";
   size?: "small" | "medium" | "large";
   qrFallback?: boolean;
-  /** `collectorSecret` must be forwarded to your own backend and passed to
-   *  confirmLoginSession — the Identity Agent will not name the person without it. */
+  /** With a back end: forward `collectorSecret` to it and have it call
+   *  confirmLoginSession — the Identity Agent will not name the person without it.
+   *  With no back end: `signIn` is what the Identity Agent handed this page, and
+   *  `checkSignInInPage` (`@identity-agent/login-verify/browser`) checks it. */
   onSuccess?: (session: {
     sessionToken: string;
     appSessionToken?: string;
     collectorSecret?: string | null;
+    signIn?: PageSessionRead;
   }) => void;
   onError?: (err: Error) => void;
 }
@@ -62,20 +66,19 @@ export function SignInButton({
 
   React.useEffect(() => {
     if (poll.state === "verified" && sessionToken) {
-      onSuccess?.({ sessionToken, appSessionToken: poll.appSessionToken, collectorSecret });
+      onSuccess?.({ sessionToken, appSessionToken: poll.appSessionToken, collectorSecret, signIn: poll.result });
     }
     if (poll.state === "declined" || poll.state === "expired" || poll.state === "error") {
       onError?.(new Error(poll.error ?? poll.state));
     }
-  }, [poll.state, poll.appSessionToken, poll.error, sessionToken, collectorSecret, onSuccess, onError]);
+  }, [poll.state, poll.appSessionToken, poll.result, poll.error, sessionToken, collectorSecret, onSuccess, onError]);
 
   const startLogin = useCallback(async () => {
     setBusy(true);
     try {
-      const resp = await fetch(sessionEndpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const data = await startPageSession({
+        sessionEndpoint,
+        body: {
           requestDisclosures,
           requestCredentials: requestCredentials.map((c) => ({
             schema_said: c.schemaSaid,
@@ -89,14 +92,12 @@ export function SignInButton({
                 required: requestScore.required,
               }
             : undefined,
-        }),
+        },
       });
-      if (!resp.ok) throw new Error(`session create failed: ${resp.status}`);
-      const data = await resp.json();
-      setSessionToken(data.session_token);
-      setCollectorSecret(data.collector_secret ?? null);
-      setRelayUrl(data.relay_or_qr_url);
-      setQrUrl(data.qr_url ?? data.relay_or_qr_url);
+      setSessionToken(data.sessionToken);
+      setCollectorSecret(data.collectorSecret);
+      setRelayUrl(data.pointerUrl);
+      setQrUrl(data.qrUrl);
 
       if (qrFallback) {
         setShowQr(true);
@@ -106,14 +107,14 @@ export function SignInButton({
       const rpBase = window.location.origin;
       if (hasAgent) {
         const ok = await triggerLocalLogin({
-          sessionToken: data.session_token,
+          sessionToken: data.sessionToken,
           rpBaseUrl: rpBase,
         });
         if (!ok) {
           openDesktopLoginDeepLink({
             siteAid: "",
-            sessionToken: data.session_token,
-            serverOobiUrl: data.relay_or_qr_url,
+            sessionToken: data.sessionToken,
+            serverOobiUrl: data.pointerUrl,
             rpSessionUrl: rpBase,
           });
         }
@@ -162,6 +163,12 @@ export function SignInButton({
         <IALogo size={dims.logo} />
         {label}
       </button>
+
+      {poll.lastRefusal && poll.state !== "verified" && (
+        <p role="alert" style={{ fontSize: dims.font, margin: "8px 0 0" }}>
+          That answer was refused: {poll.lastRefusal}. The sign-in is still open; try again.
+        </p>
+      )}
 
       {showQr && (qrUrl ?? relayUrl) && (
         <LoginQrCode

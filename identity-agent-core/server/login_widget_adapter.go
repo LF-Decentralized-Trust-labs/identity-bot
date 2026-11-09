@@ -2,12 +2,11 @@ package server
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -23,7 +22,13 @@ import (
 // asset, returning the session token + the QR/bundle URL. errCode==0 means success;
 // otherwise (errCode, errMsg) is an HTTP error to surface. Shared by the native
 // /api/login/challenge endpoint and the widget-compatible /api/login/session endpoint.
-func (s *CoreServer) createSignedAssetChallenge(assetID, audience string, disclosures []string, browserKey, publicURL string) (sessionToken, qrURL string, errCode int, errMsg string) {
+//
+// askedFrom is the origin of the web page that asked, from the Origin header its
+// browser sent, or "" when a server asked. A page cannot choose its Origin, so
+// it is the audience: a sign-in asked for from a page is for that page and no
+// other, and an asset that names the origin of its website is not signed in to
+// from any other page.
+func (s *CoreServer) createSignedAssetChallenge(assetID, audience, askedFrom string, disclosures []string, browserKey, publicURL string) (sessionToken, qrURL string, errCode int, errMsg string) {
 	if s.assetHandler == nil || s.KeriDriver == nil {
 		return "", "", http.StatusServiceUnavailable, "asset or keri driver not available"
 	}
@@ -44,6 +49,19 @@ func (s *CoreServer) createSignedAssetChallenge(assetID, audience string, disclo
 	}
 	if found.SigningIndex == 0 {
 		return "", "", http.StatusConflict, "asset has no signing key (re-create the asset to provision one)"
+	}
+
+	if askedFrom != "" {
+		if askedFrom == "null" {
+			return "", "", http.StatusBadRequest, "this page has no origin to sign in to"
+		}
+		if audience != "" && audience != askedFrom {
+			return "", "", http.StatusBadRequest, "a page signs in to its own origin only"
+		}
+		audience = askedFrom
+		if found.Origin != "" && !sameOrigin(found.Origin, askedFrom) {
+			return "", "", http.StatusForbidden, "this website asset is not for this page"
+		}
 	}
 
 	// A sign-in for a browser's key names its thumbprint in the signed
@@ -110,14 +128,37 @@ func (s *CoreServer) createSignedAssetChallenge(assetID, audience string, disclo
 	if s.challengeStatus == nil {
 		s.challengeStatus = make(map[string]map[string]interface{})
 	}
+	// Results nobody collected within their window are forgotten first. A
+	// failure to record that is not a reason to refuse a new sign-in; the
+	// tick tries again.
+	if _, err := s.forgetUncollectedResultsLocked(time.Now()); err != nil {
+		log.Printf("[identity-agent-core] could not forget uncollected sign-in results: %v", err)
+	}
 	if len(s.challenges) > 1000 {
 		for k := range s.challenges {
 			delete(s.challenges, k)
+			delete(s.challengeStatus, k)
+			delete(s.challengeCollector, k)
 			break
 		}
 	}
 	s.challenges[sessionToken] = bundle
-	s.challengeStatus[sessionToken] = map[string]interface{}{"status": "pending"}
+	pending := map[string]interface{}{"status": "pending"}
+	if askedFrom != "" {
+		// Remembered with the sign-in, because only a page with no back end
+		// is handed the assertion (see handleLoginSessionStatus).
+		pending["asked_from_page"] = true
+	}
+	s.challengeStatus[sessionToken] = pending
+	if err := s.saveChallengeStateLocked(); err != nil {
+		// Fail closed: a sign-in the agent cannot record is one a restart
+		// forgets, along with whether it was answered.
+		delete(s.challenges, sessionToken)
+		delete(s.challengeStatus, sessionToken)
+		s.challengeMu.Unlock()
+		log.Printf("[identity-agent-core] refusing to start a sign-in: %v", err)
+		return "", "", http.StatusInternalServerError, "could not record the sign-in"
+	}
 	s.challengeMu.Unlock()
 
 	return sessionToken, fmt.Sprintf("%s/i/%s", publicURL, sessionToken), 0, ""
@@ -144,7 +185,7 @@ func (s *CoreServer) handleCreateLoginSession(w http.ResponseWriter, r *http.Req
 		BrowserKey         string   `json:"browserKey"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body) // tolerate empty body
-	token, qrURL, code, msg := s.createSignedAssetChallenge(assetID, body.Audience, body.RequestDisclosures, body.BrowserKey, s.getPublicURL(r))
+	token, qrURL, code, msg := s.createSignedAssetChallenge(assetID, body.Audience, r.Header.Get("Origin"), body.RequestDisclosures, body.BrowserKey, s.getPublicURL(r))
 	if code != 0 {
 		http.Error(w, msg, code)
 		return
@@ -182,22 +223,26 @@ func (s *CoreServer) handleLoginSessionStatus(w http.ResponseWriter, r *http.Req
 		offered = r.URL.Query().Get("collector")
 	}
 
-	s.challengeMu.Lock()
-	st := s.challengeStatus[token]
-	want, bound := s.challengeCollector[token]
-	s.challengeMu.Unlock()
-
+	st, bound, held, cerr := s.collectSignIn(token, offered, time.Now())
+	if cerr != nil {
+		http.Error(w, "could not read this sign-in", http.StatusInternalServerError)
+		return
+	}
 	// A session created before this existed has nothing to check against, and
 	// refusing it would break sign-ins already in flight across an upgrade.
-	mayCollect := !bound
-	if bound {
-		got := sha256.Sum256([]byte(offered))
-		mayCollect = subtle.ConstantTimeCompare(got[:], want[:]) == 1
-	}
+	mayCollect := !bound || held
 
 	resp := map[string]interface{}{"state": "connecting"}
 	if st != nil {
 		switch st["status"] {
+		case "pending":
+			// An answer was refused and the sign-in is still open: tell the
+			// person's page why, so they can fix it and try again. The reason
+			// can name the policy that refused, so it is held to the same
+			// standard as the identity.
+			if reason, ok := st["last_refusal"].(string); ok && mayCollect {
+				resp["last_refusal"] = reason
+			}
 		case "complete":
 			resp["state"] = "verified"
 			if !mayCollect {
@@ -207,11 +252,28 @@ func (s *CoreServer) handleLoginSessionStatus(w http.ResponseWriter, r *http.Req
 				resp["identity_withheld"] = true
 				break
 			}
+			if st["released"] == true {
+				// Collected already, or not collected in time: forgotten.
+				resp["identity_withheld"] = true
+				break
+			}
 			if p, ok := st["pairwise_aid"].(string); ok {
 				resp["app_session_token"] = p
 			}
 			if d, ok := st["disclosures"]; ok {
 				resp["disclosures"] = d
+			}
+			// What a page with no back end of its own checks the answer
+			// against: the assertion, and the nonce and site of the
+			// challenge it answers. Released with the identity, once, and
+			// only when the sign-in was started from a page. The assertion
+			// carries the credentials the person showed, and a collector that
+			// is a page is any script in it; a server that asked keeps what
+			// it always had.
+			if a, ok := st["assertion"].(string); ok && held && st["asked_from_page"] == true {
+				resp["assertion"] = a
+				resp["nonce"] = st["nonce"]
+				resp["site_aid"] = st["site_aid"]
 			}
 			// The browser key the verified assertion repeated (ADR-066): released
 			// to the collector only, like who signed in.

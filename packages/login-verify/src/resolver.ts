@@ -1,4 +1,5 @@
 import { decodeBase64UrlStrict } from "./canonical.js";
+import { bytesToBase64Url } from "./bytes.js";
 
 
 export interface DidWebsDocument {
@@ -92,7 +93,7 @@ export function buildDidWebsDocument(aid: string, relayHost: string, publicKey: 
         publicKeyJwk: {
           kty: "OKP",
           crv: "Ed25519",
-          x: Buffer.from(publicKey).toString("base64url"),
+          x: bytesToBase64Url(publicKey),
         },
       },
     ],

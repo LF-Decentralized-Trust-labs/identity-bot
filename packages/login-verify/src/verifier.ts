@@ -10,7 +10,7 @@ import {
   signCanonical,
 } from "./canonical.js";
 import type { KeyResolver } from "./resolver.js";
-import { verifyLoginAssertion } from "./standalone-verify.js";
+import { consumedKey, inMemoryConsumedNonces, verifyLoginAssertion, type ConsumedNonces } from "./standalone-verify.js";
 import { InMemorySessionStore } from "./session-store.js";
 import { buildLoginQrUrl } from "./qr-url.js";
 import { AskAction } from "./types.js";
@@ -32,6 +32,12 @@ export interface VerifierConfig {
   /** Establishes an asserter's key from the key log its assertion carries.
    *  Without one every assertion is refused; see `keyFromIdentityAgent`. */
   resolveKey?: KeyResolver;
+  /** Remembers the assertions this verifier has accepted, so the same one is
+   *  not accepted twice (a captured assertion is otherwise good for its whole
+   *  freshness window). Defaults to a store for this process; a site served by
+   *  more than one process gives them one shared store, or an assertion spent
+   *  on one still spends on the others. */
+  consumedAssertions?: ConsumedNonces;
 }
 
 /** The states in which a sign-in is still waiting for its answer. */
@@ -43,6 +49,7 @@ export class IdentityAgentVerifier {
   private challengeTtl: number;
   private devRelayBaseUrl?: string;
   private resolveKey?: KeyResolver;
+  private consumed: ConsumedNonces;
 
   constructor(config: VerifierConfig) {
     this.site = config.siteIdentity;
@@ -50,6 +57,7 @@ export class IdentityAgentVerifier {
     this.challengeTtl = config.challengeTtlSeconds ?? 300;
     this.devRelayBaseUrl = config.devRelayBaseUrl;
     this.resolveKey = config.resolveKey;
+    this.consumed = config.consumedAssertions ?? inMemoryConsumedNonces();
   }
 
   get sessionStore(): InMemorySessionStore {
@@ -138,6 +146,8 @@ export class IdentityAgentVerifier {
       expectedBrowserKey: opts.expectedBrowserKey,
       maxSkewSeconds: opts.maxSkewSeconds,
       resolveKey: this.resolveKey,
+      // Accepting an assertion spends it, whichever way it reached here.
+      consume: this.consumed,
     });
   }
 
@@ -163,12 +173,29 @@ export class IdentityAgentVerifier {
       expectedSiteAid: rec.challenge.site_aid,
       expectedBrowserKey: rec.challenge.browser_key,
     });
+    // A refused answer spends nothing: the sign-in stays as it was, and so does
+    // the assertion (it is only claimed once everything else has passed).
     if (!result.valid || !result.pairwiseAID) {
       return { ok: false, reason: result.reason };
     }
 
-    const appToken = issueAppSession(result.pairwiseAID, result.disclosures ?? {});
-    this.store.markVerified(sessionToken, result, result.pairwiseAID, appToken);
+    // Verifying took time, and another accepted answer may have settled this
+    // sign-in meanwhile. From here to markVerified nothing waits, so the sign-in
+    // is spent by exactly one accepted answer; the loser gives its assertion back.
+    if (!CALLBACK_STATES.has(this.store.get(sessionToken)?.state as SessionState)) {
+      await this.consumed.release?.(consumedKey(assertion));
+      return { ok: false, reason: "this sign-in has already been answered" };
+    }
+
+    // The assertion is spent by now. If the site cannot finish the sign-in, give
+    // it back so the person's Identity Agent can post it again.
+    try {
+      const appToken = issueAppSession(result.pairwiseAID, result.disclosures ?? {});
+      this.store.markVerified(sessionToken, result, result.pairwiseAID, appToken);
+    } catch (err) {
+      await this.consumed.release?.(consumedKey(assertion));
+      throw err;
+    }
     return { ok: true };
   }
 }

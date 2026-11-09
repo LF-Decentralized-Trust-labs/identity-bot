@@ -97,7 +97,15 @@ func (s *CoreServer) mountPublicDidWebsRoutes(r chi.Router) {
 	keyLogs := newKeyLogGate()
 	r.Post("/public/_register", keyLogs.guard(s.handleRegisterPairwise))
 	r.Post("/_register", keyLogs.guard(s.handleRegisterPairwise))
-	r.Post("/public/login/key", keyLogs.guard(s.handleKeyFromKeyLog))
+	// A web page with only the login SDK asks this to check the assertion it
+	// was handed, so the page answers its own browser (see corsHeaders): it
+	// takes no credential and returns nothing but what the log it was sent
+	// establishes. The headers come before the gate so a refusal can be read.
+	r.Options("/public/login/key", corsPreflight)
+	r.Post("/public/login/key", func(w http.ResponseWriter, r *http.Request) {
+		corsHeaders(w)
+		keyLogs.guard(s.handleKeyFromKeyLog)(w, r)
+	})
 	r.Post("/public/key-state", keyLogs.guard(s.handleKeyState))
 }
 

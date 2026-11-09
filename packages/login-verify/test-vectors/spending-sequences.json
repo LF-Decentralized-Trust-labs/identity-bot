@@ -1,0 +1,49 @@
+{
+  "about": "A sign-in is spent only by an ACCEPTED answer. A refused answer (forged, garbled, for another challenge) is recorded and the sign-in stays open until its window ends, so nobody who has seen a QR code can burn a person's sign-in by posting to it. Run from Go (identity-agent-core/server, the callback route) and TypeScript (IdentityAgentVerifier.handleCallback).",
+  "answers": {
+    "genuine": "the person's own signed answer to this challenge",
+    "tampered-signature": "the genuine answer with its signature altered",
+    "wrong-nonce": "signed by the person, but for a nonce this challenge did not issue",
+    "wrong-audience": "signed by the person, but for another audience"
+  },
+  "outcomes": {
+    "accepted": "the answer is taken and the sign-in is spent",
+    "refused": "the answer is turned away and the sign-in is as it was",
+    "already-spent": "the sign-in was already spent by an accepted answer, so nothing more is taken"
+  },
+  "sequences": [
+    { "name": "a genuine answer alone is accepted",
+      "steps": [ { "answer": "genuine", "outcome": "accepted", "after": "spent" } ] },
+    { "name": "a forged answer does not burn the sign-in",
+      "steps": [
+        { "answer": "tampered-signature", "outcome": "refused", "after": "open" },
+        { "answer": "genuine", "outcome": "accepted", "after": "spent" } ] },
+    { "name": "an answer for another challenge does not burn the sign-in",
+      "steps": [
+        { "answer": "wrong-nonce", "outcome": "refused", "after": "open" },
+        { "answer": "wrong-audience", "outcome": "refused", "after": "open" },
+        { "answer": "genuine", "outcome": "accepted", "after": "spent" } ] },
+    { "name": "any number of refused answers leave it open",
+      "steps": [
+        { "answer": "tampered-signature", "outcome": "refused", "after": "open" },
+        { "answer": "tampered-signature", "outcome": "refused", "after": "open" },
+        { "answer": "wrong-nonce", "outcome": "refused", "after": "open" },
+        { "answer": "tampered-signature", "outcome": "refused", "after": "open" },
+        { "answer": "genuine", "outcome": "accepted", "after": "spent" } ] },
+    { "name": "an accepted answer cannot be accepted again",
+      "steps": [
+        { "answer": "genuine", "outcome": "accepted", "after": "spent" },
+        { "answer": "genuine", "outcome": "already-spent", "after": "spent" } ] },
+    { "name": "once spent, a refused answer changes nothing",
+      "steps": [
+        { "answer": "genuine", "outcome": "accepted", "after": "spent" },
+        { "answer": "tampered-signature", "outcome": "already-spent", "after": "spent" },
+        { "answer": "wrong-nonce", "outcome": "already-spent", "after": "spent" } ] },
+    { "name": "a refused answer before and after an accepted one",
+      "steps": [
+        { "answer": "tampered-signature", "outcome": "refused", "after": "open" },
+        { "answer": "genuine", "outcome": "accepted", "after": "spent" },
+        { "answer": "tampered-signature", "outcome": "already-spent", "after": "spent" },
+        { "answer": "genuine", "outcome": "already-spent", "after": "spent" } ] }
+  ]
+}

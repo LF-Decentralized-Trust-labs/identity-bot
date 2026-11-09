@@ -105,7 +105,8 @@ func TestNobodyCanSignInAsAnEmployeeByPublishingAKeyForThem(t *testing.T) {
 	// does not get them in, whatever log it carries and wherever it points.
 	const token = "session-1"
 	bundle := login.ChallengeBundle{SiteAID: "ESiteAID", Audience: "https://portal.example",
-		Nonce: "a-nonce", SessionToken: token}
+		Nonce: "a-nonce", SessionToken: token,
+		Expiry: time.Now().Add(10 * time.Minute).UTC().Format(time.RFC3339)}
 	s.challengeMu.Lock()
 	s.challenges[token] = bundle
 	s.challengeMu.Unlock()

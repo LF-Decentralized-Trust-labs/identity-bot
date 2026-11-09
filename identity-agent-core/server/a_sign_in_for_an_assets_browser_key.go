@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"identity-agent-core/login"
 )
@@ -58,7 +59,7 @@ func (s *CoreServer) startBrowserKeySignIn(assetID, audience, browserKey, public
 	if browserKey == "" {
 		return BrowserKeySignIn{}, &SignInRefused{http.StatusBadRequest, "a sign-in for a browser's key names the key"}
 	}
-	token, qr, code, msg := s.createSignedAssetChallenge(assetID, audience, nil, browserKey, publicURL)
+	token, qr, code, msg := s.createSignedAssetChallenge(assetID, audience, "", nil, browserKey, publicURL)
 	if code != 0 {
 		return BrowserKeySignIn{}, &SignInRefused{code, msg}
 	}
@@ -89,9 +90,15 @@ func (s *CoreServer) browserKeySignInResult(session, collector string) (BrowserK
 	if !ok || b.BrowserKey == "" {
 		return BrowserKeySignInResult{}, errUnknown
 	}
-	st := s.challengeStatusOf(session)
+	st, _, _, cerr := s.collectSignIn(session, collector, time.Now())
+	if cerr != nil {
+		return BrowserKeySignInResult{}, errors.New("could not read this sign-in")
+	}
 	switch st["status"] {
 	case "complete":
+		if st["released"] == true {
+			return BrowserKeySignInResult{}, errors.New("this sign-in's result was collected already, or not collected in time")
+		}
 		// The callback stores a login.AssertionVerifyResult's fields: a string
 		// pairwise identifier and a map[string]string of disclosures. Anything
 		// else is not read as "verified with nothing disclosed", which would

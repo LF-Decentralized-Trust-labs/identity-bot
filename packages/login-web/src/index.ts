@@ -9,6 +9,9 @@ export { useSessionPoll } from "./useSessionPoll.js";
 export { confirmLoginSession } from "./confirmSession.js";
 export type { ConfirmSessionOptions, ConfirmedSession } from "./confirmSession.js";
 
+export { startPageSession, readPageSession } from "./pageSession.js";
+export type { PageSessionStart, PageSessionRead } from "./pageSession.js";
+
 // G-051: imperative API for script-tag / CommonJS embed (no bundler dep)
 export function createLoginButton(options: any = {}) {
   // Renders "Sign in with Identity Agent" button; on click opens modal / handshake.

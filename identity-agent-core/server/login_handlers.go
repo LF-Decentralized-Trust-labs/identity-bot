@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"identity-agent-core/asset"
 	"identity-agent-core/drivers"
@@ -123,7 +124,7 @@ func (s *CoreServer) handleCreateAssetChallenge(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	token, qrURL, code, msg := s.createSignedAssetChallenge(body.AssetID, body.Audience, body.RequestedDisclosures, body.BrowserKey, s.getPublicURL(r))
+	token, qrURL, code, msg := s.createSignedAssetChallenge(body.AssetID, body.Audience, "", body.RequestedDisclosures, body.BrowserKey, s.getPublicURL(r))
 	if code != 0 {
 		http.Error(w, msg, code)
 		return
@@ -157,6 +158,11 @@ func (s *CoreServer) mintCollectorSecret(token string) (string, error) {
 		s.challengeCollector = map[string][32]byte{}
 	}
 	s.challengeCollector[token] = sum
+	if err := s.saveChallengeStateLocked(); err != nil {
+		delete(s.challengeCollector, token)
+		s.challengeMu.Unlock()
+		return "", err
+	}
 	s.challengeMu.Unlock()
 	return secret, nil
 }
@@ -225,25 +231,38 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 	bundle, ok := s.challenges[token]
 	settled := s.challengeStatus[token] != nil &&
 		s.challengeStatus[token]["status"] != "pending"
+	askedFromPage := s.challengeStatus[token]["asked_from_page"] == true
 	s.challengeMu.Unlock()
 	if !ok {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
 
-	// A challenge that has already been answered is finished, whether the
-	// answer admitted somebody or refused them. Without this, a copy of an
-	// assertion already sent once can be posted again inside the freshness
-	// window, needing no key and no forgery.
+	// A challenge that has already been ACCEPTED is finished. Without this, a
+	// copy of an assertion already accepted can be posted again inside the
+	// freshness window, needing no key and no forgery.
+	//
+	// A challenge whose answers have all been REFUSED is not finished: it stays
+	// open until its window ends. Settling on the first answer of any kind let
+	// anyone who had seen the QR code post garbage and burn the person's
+	// sign-in. This check is only the early exit; the settle below decides.
 	if settled {
 		http.Error(w, "this sign-in has already been answered", http.StatusConflict)
+		return
+	}
+
+	// A sign-in is open only for its window. The person's agent checks the
+	// expiry too, but the core must not rely on that: without this a refused
+	// sign-in stays open until the cap on open sign-ins evicts it.
+	if err := login.CheckExpiry(bundle.Expiry, time.Now()); err != nil {
+		http.Error(w, "this sign-in is no longer open", http.StatusGone)
 		return
 	}
 
 	// 1) Authenticate: verify the assertion signature + binding to this challenge.
 	res := login.VerifyAssertionForBrowserKey(a, bundle.Nonce, bundle.Audience, bundle.SiteAID, bundle.BrowserKey, 300)
 	if !res.Valid {
-		s.setChallengeStatus(token, map[string]interface{}{"status": "denied", "reason": res.Reason})
+		s.recordRefusal(token, res.Reason)
 		http.Error(w, "assertion verification failed: "+res.Reason, http.StatusUnauthorized)
 		return
 	}
@@ -262,11 +281,15 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 	// page can read; only a uniform refusal leaves here. The owner is not shown
 	// it: a gate the core cannot check is refused when the policy is saved.
 	if allowed, reason := s.authorizeAssetAccess(r.Context(), bundle.SiteAID, res.PairwiseAID, a.PresentedACDCs); !allowed {
-		s.setChallengeStatus(token, map[string]interface{}{
-			"status": "denied",
-			// For the organisation, which is entitled to know.
-			"reason": reason,
-		})
+		// For the organisation, which is entitled to know.
+		//
+		// This answer was authenticated, and it still leaves the sign-in
+		// open, like a forged one. Settling it let anyone with a free
+		// identity of their own who had seen the QR code end the person's
+		// sign-in by posting a refused answer, and blocking a retry protects
+		// nothing: being admitted after a policy change is correct. The
+		// reason is kept so the person's page can show it.
+		s.recordRefusal(token, reason)
 		http.Error(w, "not authorized", http.StatusForbidden)
 		return
 	}
@@ -275,6 +298,18 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 		"status":       "complete",
 		"pairwise_aid": res.PairwiseAID,
 		"disclosures":  res.Disclosures,
+	}
+	if askedFromPage {
+		// The assertion as sent, so a page with no back end can check it
+		// itself. Kept only for a sign-in a page started: it carries the
+		// credentials the person showed, and nobody else is handed it.
+		// Released to the collector once with the rest, then forgotten.
+		st["asked_from_page"] = true
+		st["assertion"] = string(body)
+		// Kept with it, so they are released with it even if the challenge
+		// has been evicted by then.
+		st["nonce"] = bundle.Nonce
+		st["site_aid"] = bundle.SiteAID
 	}
 	// The browser key the verified assertion repeated (ADR-066), so whoever
 	// reads the result can check it is the one it asked for.
@@ -287,7 +322,17 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 	if info := s.memberInfoFor(bundle.SiteAID, res.PairwiseAID); len(info) > 0 {
 		st["member_info"] = info
 	}
-	s.setChallengeStatus(token, st)
+	// Accepting is what spends the sign-in, and it is decided here, under the
+	// lock: of two accepted answers arriving together, one settles it.
+	spent, err := s.settleIfOpen(token, st)
+	if err != nil {
+		http.Error(w, "could not record the answer", http.StatusInternalServerError)
+		return
+	}
+	if !spent {
+		http.Error(w, "this sign-in has already been answered", http.StatusConflict)
+		return
+	}
 	jsonreply.Write(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -322,14 +367,79 @@ func (s *CoreServer) memberInfoFor(siteAID, pairwiseAID string) map[string]strin
 	return nil
 }
 
-// setChallengeStatus stores a session's status under the challenge lock.
-func (s *CoreServer) setChallengeStatus(token string, st map[string]interface{}) {
+// maxRefusalLen is the longest last_refusal kept, in bytes. The reason can
+// hold text the sender chose (the identifier they sent).
+const maxRefusalLen = 200
+
+// recordRefusal notes that an answer was refused and leaves the sign-in open.
+// Only the last reason, cut to maxRefusalLen, and a count are kept, so a flood
+// of bad answers cannot grow the record. The refusal is not saved on its own:
+// the rewrite of the whole state file is not done for every forged post, which
+// would let anyone who has seen the QR code make the agent do so. It is in the
+// map, so the next save of the state file (any other change) writes it, and a
+// restart before that forgets it, which loses nothing. Once the sign-in has
+// settled, a refusal changes nothing.
+func (s *CoreServer) recordRefusal(token, reason string) {
 	s.challengeMu.Lock()
+	defer s.challengeMu.Unlock()
+	cur := s.challengeStatus[token]
+	if cur == nil || cur["status"] != "pending" {
+		return
+	}
+	n := 0
+	switch v := cur["refusals"].(type) {
+	case int:
+		n = v
+	case float64: // read back from the state file
+		n = int(v)
+	}
+	cur["refusals"] = n + 1
+	cur["last_refusal"] = truncateUTF8(reason, maxRefusalLen)
+}
+
+// settleIfOpen settles a sign-in with st only if it has not been settled yet,
+// and says whether it did. It is the one place a sign-in is spent.
+func (s *CoreServer) settleIfOpen(token string, st map[string]interface{}) (bool, error) {
+	s.challengeMu.Lock()
+	defer s.challengeMu.Unlock()
+	if cur := s.challengeStatus[token]; cur != nil && cur["status"] != "pending" {
+		return false, nil
+	}
+	return true, s.setChallengeStatusLocked(token, st)
+}
+
+// setChallengeStatus stores a session's status under the challenge lock.
+//
+// It fails closed. If the status cannot be written, the file still says
+// pending and a restart would accept the same assertion again inside its
+// freshness window, so the status is put back as it was and the error returned;
+// the caller answers 500 and admits nobody.
+func (s *CoreServer) setChallengeStatus(token string, st map[string]interface{}) error {
+	s.challengeMu.Lock()
+	defer s.challengeMu.Unlock()
+	return s.setChallengeStatusLocked(token, st)
+}
+
+// setChallengeStatusLocked is setChallengeStatus for a caller holding challengeMu.
+func (s *CoreServer) setChallengeStatusLocked(token string, st map[string]interface{}) error {
 	if s.challengeStatus == nil {
 		s.challengeStatus = make(map[string]map[string]interface{})
 	}
+	if st["status"] != "pending" {
+		st["settled_at"] = time.Now().Unix()
+	}
+	prev, had := s.challengeStatus[token]
 	s.challengeStatus[token] = st
-	s.challengeMu.Unlock()
+	if err := s.saveChallengeStateLocked(); err != nil {
+		if had {
+			s.challengeStatus[token] = prev
+		} else {
+			delete(s.challengeStatus, token)
+		}
+		log.Printf("[identity-agent-core] refusing to settle a sign-in: %v", err)
+		return err
+	}
+	return nil
 }
 
 // authorizeAssetAccess enforces an asset's enrollment policy for an asserter.
@@ -554,8 +664,11 @@ func (s *CoreServer) handleChallengeStatus(w http.ResponseWriter, r *http.Reques
 		offered = r.URL.Query().Get("collector")
 	}
 
-	bound, held := s.collectorHeld(token, offered)
-	st := s.challengeStatusOf(token)
+	st, bound, held, cerr := s.collectSignIn(token, offered, time.Now())
+	if cerr != nil {
+		http.Error(w, "could not read this sign-in", http.StatusInternalServerError)
+		return
+	}
 	if bound && !held {
 		// Uniform: a wrong secret and an unknown token answer the same, so
 		// this cannot be used to discover which sign-ins are in progress.
@@ -566,6 +679,11 @@ func (s *CoreServer) handleChallengeStatus(w http.ResponseWriter, r *http.Reques
 	if st == nil {
 		st = map[string]interface{}{"status": "pending"}
 	}
+	// The assertion is for a page with no back end, through the widget route.
+	delete(st, "assertion")
+	delete(st, "nonce")
+	delete(st, "site_aid")
+	delete(st, "asked_from_page")
 	if !bound {
 		// A challenge created before this existed, or by a path that does not
 		// mint one. An unbound status is indistinguishable from a bound one, so
@@ -625,4 +743,15 @@ func (s *CoreServer) challengeStatusOf(token string) map[string]interface{} {
 		cp[k] = v
 	}
 	return cp
+}
+
+// truncateUTF8 cuts s to at most n bytes without splitting a character.
+func truncateUTF8(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }

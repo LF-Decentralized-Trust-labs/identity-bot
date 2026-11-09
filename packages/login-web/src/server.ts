@@ -7,3 +7,5 @@
  */
 export { confirmLoginSession } from "./confirmSession.js";
 export type { ConfirmSessionOptions, ConfirmedSession } from "./confirmSession.js";
+export { startLoginSession } from "./startSession.js";
+export type { StartSessionOptions, StartedSession } from "./startSession.js";

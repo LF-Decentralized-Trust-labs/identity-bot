@@ -61,7 +61,10 @@ async function run() {
   const body = canonicalAssertionBody(assertion);
   assertion.sig = await signCanonical(body, pairwiseSeed);
 
-  const result = await verifier.verifyAssertion(assertion, {
+  // Direct checks go to a verifier of their own: accepting an assertion spends
+  // it, and the callback below must still find this one unspent.
+  const checker = new IdentityAgentVerifier({ siteIdentity: site, resolveKey: keyFromIdentityAgent(ia.url) });
+  const result = await checker.verifyAssertion(assertion, {
     expectedAudience: bundle.audience,
     expectedNonce: bundle.nonce,
     expectedSiteAid: site.aid,
@@ -74,7 +77,7 @@ async function run() {
   delete relayed.sig;
   relayed.d = assertionDigest(relayed);
   relayed.sig = await signCanonical(canonicalAssertionBody(relayed), pairwiseSeed);
-  const refused = await verifier.verifyAssertion(relayed, {
+  const refused = await checker.verifyAssertion(relayed, {
     expectedAudience: bundle.audience,
     expectedNonce: bundle.nonce,
     expectedSiteAid: site.aid,
