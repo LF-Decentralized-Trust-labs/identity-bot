@@ -962,6 +962,11 @@ func (s *SQLiteStore) getRegistryWhere(where string, arg string) (*CredentialReg
 	return &r, nil
 }
 
+func (s *SQLiteStore) ForgetRegistryInception(registrySAID string) error {
+	_, err := s.db.Exec(`UPDATE credential_registries SET vcp_raw_b64 = '' WHERE registry_said = ?`, registrySAID)
+	return err
+}
+
 // GetRegistryByIssuer returns the registry an issuer issues into, or nil. An
 // issuer whose first registry predates kept inceptions has a newer one beside
 // it, and the newer one, whose inception can be proved, is the one returned.

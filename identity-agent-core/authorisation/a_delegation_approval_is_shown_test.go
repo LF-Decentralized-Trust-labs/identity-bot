@@ -95,3 +95,47 @@ func TestADelegationApprovalThatApprovesAnythingElseIsNotSigned(t *testing.T) {
 		}
 	}
 }
+
+// Only the delegated inception itself, of one key committed to one next key,
+// is approved: a later event of a delegated identity, or an inception of
+// several keys, is not.
+func TestOnlyADelegatedInceptionOfOneKeyIsApproved(t *testing.T) {
+	_, id, said, _ := aDelegation(t)
+	nextDigest := func() string {
+		pub, _, _ := ed25519.GenerateKey(rand.Reader)
+		d, err := iacrypto.NextKeyDigest(iacrypto.VerkeyQB64(pub))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	newKey := func() string { pub, _, _ := ed25519.GenerateKey(rand.Reader); return iacrypto.VerkeyQB64(pub) }
+
+	// A delegated rotation of that identity, sealed by the same interaction a
+	// dip would be: it is a delegated event, and at sequence 1, not 0.
+	drt, err := keri.BuildDelegatedRotation(keri.DelegationInput{Prefix: id, PriorSAID: said, SN: 1,
+		Keys: []string{newKey()}, NextDigests: []string{nextDigest()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drtEvent, err := keri.ParseEvent(drt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WhatSigningApproves(anApproval(t, `{"i":"`+id+`","s":"0","d":"`+drtEvent.SAID+`"}`), drt); err == nil ||
+		!strings.Contains(err.Error(), "not a delegated inception") {
+		t.Fatalf("a delegated rotation was signed as an inception: %v", err)
+	}
+
+	// Two keys: not the kind approved here.
+	two, err := keri.BuildDelegatedInception(keri.DelegationInput{Keys: []string{newKey(), newKey()},
+		NextDigests: []string{nextDigest(), nextDigest()}, Delegator: aDelegator})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, _ := keri.ParseEvent(two)
+	if _, err := WhatSigningApproves(anApproval(t, `{"i":"`+ev.Identifier+`","s":"0","d":"`+ev.SAID+`"}`), two); err == nil ||
+		!strings.Contains(err.Error(), "one key") {
+		t.Fatalf("an inception of several keys was signed: %v", err)
+	}
+}

@@ -255,8 +255,9 @@ func WhatSigningRegisters(ixnRaw, vcpRaw []byte) (*ToSign, error) {
 // and digest), and the inception derives its own identifier, so what is shown
 // is read from the inception and nothing written beside it. An inception says
 // nothing of what the identity is for, so nothing is shown of that: the owner
-// is shown the identifier and the key it will act with, the same short code
-// the machine that holds the key shows.
+// is shown the identifier and the key it will act with, as a short code. The
+// code is the identity's own and is for the owner to recognise, not to compare
+// with another device: for an AI agent nothing independent holds the key.
 func WhatSigningApproves(ixnRaw, dipRaw []byte) (*ToSign, error) {
 	if err := keri.ValidateEvent(dipRaw); err != nil {
 		return nil, fmt.Errorf("the delegated inception is not what it says it is: %w", err)

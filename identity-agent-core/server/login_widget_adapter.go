@@ -47,6 +47,9 @@ func (s *CoreServer) createSignedAssetChallenge(assetID, audience, askedFrom str
 	if found == nil {
 		return "", "", http.StatusNotFound, "asset not found"
 	}
+	if found.ApprovalPending {
+		return "", "", http.StatusConflict, "this asset is waiting for the device that holds the identity's key to approve it, so it cannot sign anything yet"
+	}
 	if found.SigningIndex == 0 {
 		return "", "", http.StatusConflict, "asset has no signing key (re-create the asset to provision one)"
 	}

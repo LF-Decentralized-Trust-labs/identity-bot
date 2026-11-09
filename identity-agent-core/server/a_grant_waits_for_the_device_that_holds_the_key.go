@@ -224,7 +224,7 @@ func summaryOf(t *authorisation.ToSign) string {
 		}
 		return fmt.Sprintf("Let the %s %q do: %s", noun, t.Name, what)
 	case "delegation":
-		return fmt.Sprintf("Let the new identity %s (key %s) act for you, delegated from yours", t.Holder, t.KeyFingerprint)
+		return fmt.Sprintf("Approve the new identity %s (key %s), delegated from yours. It can do nothing until its grant is signed", t.Holder, t.KeyFingerprint)
 	default:
 		return "Make the registry this identity issues its grants into"
 	}

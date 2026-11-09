@@ -3,6 +3,7 @@
 **Status:** Accepted, amended by ADR-050 and ADR-061
 **Date:** 2026-10-18
 **Amended by:** ADR-050 (One check for a controller's actions and an AI agent's capability calls, 2026-10-26), ADR-061 (Every key event is signed before it is added, 2026-10-31)
+**Amended:** 2026-11-08 — A delegated identity is approved by the device that holds the key, and events written without it may be discarded where no witness can have seen them (see the two paragraphs before "What a Controller Grant shows")
 **Relates to:** ADR-042 (How an agent is reached, and who may manage it), ADR-038 (Who claims a machine is not who owns what it founds), ADR-027 (Hardware-gated signing-key custody)
 
 ## Context
@@ -163,9 +164,10 @@ again, or removing the machine, withdraws the one waiting, and a grant the devic
 or let expire is listed so, for the owner to ask again. Until a grant is appended, the
 machine or AI agent may do nothing it would allow, and nothing is written unsigned. A
 machine or AI agent that already holds a grant is not re-granted from there, since its
-grant could not be withdrawn there; approving an AI agent's body, and making any identity
-delegated from this one (an AI agent, an enrolled machine, any delegated asset) need the
-key and are refused there with that reason. The key is elsewhere only where a seed is held
+grant could not be withdrawn there; approving an AI agent's body needs the
+key and is refused there with that reason. *(Amended 2026-11-08: making an identity
+delegated from this one, an AI agent, an app or another delegated asset, is no longer refused
+there. See the paragraph below, which replaces the refusal.)* The key is elsewhere only where a seed is held
 here and derives another key; a seed held here that cannot be read is a fault, answered as
 unavailable, and nothing waits on it. A mark that a grant waits for another device is
 believed only where the key really is elsewhere. A machine's signer is one of the identity's active signers. A machine
@@ -174,6 +176,39 @@ signer, end) is neither acted on, nor re-issued from, nor taken as saying who is
 from it. A credential is issued
 on a machine's grant only while the grant is in force in the registry, and the grant
 cannot be revoked while one is being issued on it.
+
+*Amended 2026-11-08: a delegated identity is approved by the device that holds the key.*
+Making an AI agent, an app or any other identity delegated from this one writes the
+identity's approval of it into this identity's key log, as an interaction only its key can
+sign. Where that key is on another device nothing is refused and nothing is written here:
+the delegated inception and the approval are built here and kept, the asset is stored unable
+to act (`approval_pending`), and the approval is asked of the device as a signing request of
+the kind `delegation-approval`, carrying the inception so the device can check what it signs.
+The interaction must anchor exactly that inception, which derives its own identifier, and
+the device is shown that identifier and its key, with the name and kind this Identity Agent
+gave it marked as this Identity Agent's own words (they are in no signed byte), and is told
+the identity can do nothing until its grant is signed. The approval is chained ahead of the
+registry and the grant: what is asked for the identity meanwhile is kept behind it. When the
+signature comes back it must be over the approval kept, for the identity the asset is; the
+request is checked again, and only then is the approval appended and the asset let act. While
+the approval is pending, and once no request for it is open, the identity is issued nothing,
+signs no sign-in challenge, publishes no key and has no messaging keys; the owner asks again
+(`POST /api/assets/{id}/approval`). An approval the device refuses removes the asset.
+
+*Discarding events written without the key.* An Identity Agent that holds interactions an
+earlier version wrote into this key log without the key, which is now on another device,
+cannot ask that device for anything, since it never had them. The owner may discard them
+(`POST /api/key-log/unsigned-events/discard`), which sets them aside, never deleting, and
+undoes what they anchored: a grant they issued is no longer in force, a registry whose
+inception they anchored is not used and is made again on next use, and an identity whose
+approval was among them waits for its approval afresh. Only where no witness can have seen
+any of them: no receipt is held for any of them, and every witness the identity names has
+answered, signed by itself, that it holds the log only below the first. A witness that does
+not answer is not one that holds nothing. An earlier version sent unsigned events to
+witnesses (ADR-061), and an interaction may not supersede an event, so a fresh event at the
+same place would read as duplicity to whoever first saw the discarded one. Otherwise the
+answer is `409`, pointing to signing them in place (`POST /api/events/signature`, ADR-061
+section 3).
 
 What a Controller Grant shows: that this Identity Agent, at that time, recorded the machine
 as authorised and as whom, in a log anybody can check. It is issued on the word of the

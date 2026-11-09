@@ -280,14 +280,25 @@ func (h *Handler) HandleCreateAsset(w http.ResponseWriter, r *http.Request) {
 		h.Store.UpsertAsset(asset)
 	}
 
-	sdk := map[string]string{
-		"SITE_PAIRWISE_AID": asset.PairwiseAID,
-		"SITE_OOBI":         fmt.Sprintf("http://127.0.0.1:5050/public/oobi/%s", asset.PairwiseAID),
-		"ASSET_ID":          asset.ID,
-		"ENROLLMENT_MODE":   string(asset.Policy.Mode),
-	}
+	h.writeJSON(w, map[string]interface{}{"asset": asset, "sdk_config": SDKConfigOf(asset)}, http.StatusCreated)
+}
 
-	h.writeJSON(w, map[string]interface{}{"asset": asset, "sdk_config": sdk}, http.StatusCreated)
+// SDKConfigOf is what an app on this asset is configured with. An asset still
+// waiting for the device that holds the identity's key to approve it is in no
+// key log yet and cannot be resolved by anyone, so its identifier and OOBI are
+// left out and it says it is pending, rather than being handed out as usable.
+func SDKConfigOf(a Asset) map[string]string {
+	sdk := map[string]string{
+		"ASSET_ID":        a.ID,
+		"ENROLLMENT_MODE": string(a.Policy.Mode),
+	}
+	if a.ApprovalPending {
+		sdk["APPROVAL_PENDING"] = "true"
+		return sdk
+	}
+	sdk["SITE_PAIRWISE_AID"] = a.PairwiseAID
+	sdk["SITE_OOBI"] = fmt.Sprintf("http://127.0.0.1:5050/public/oobi/%s", a.PairwiseAID)
+	return sdk
 }
 
 func (h *Handler) HandleGetAsset(w http.ResponseWriter, r *http.Request) {
@@ -301,13 +312,7 @@ func (h *Handler) HandleGetAsset(w http.ResponseWriter, r *http.Request) {
 		h.writeJSON(w, map[string]string{"error": "not found"}, http.StatusNotFound)
 		return
 	}
-	sdk := map[string]string{
-		"SITE_PAIRWISE_AID": a.PairwiseAID,
-		"SITE_OOBI":         fmt.Sprintf("http://127.0.0.1:5050/public/oobi/%s", a.PairwiseAID),
-		"ASSET_ID":          a.ID,
-		"ENROLLMENT_MODE":   string(a.Policy.Mode),
-	}
-	h.writeJSON(w, map[string]interface{}{"asset": a.ForDisplay(h.VaultHas), "sdk_config": sdk}, http.StatusOK)
+	h.writeJSON(w, map[string]interface{}{"asset": a.ForDisplay(h.VaultHas), "sdk_config": SDKConfigOf(a)}, http.StatusOK)
 }
 
 func (h *Handler) HandleUpdatePolicy(w http.ResponseWriter, r *http.Request) {

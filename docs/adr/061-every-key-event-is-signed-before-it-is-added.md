@@ -3,6 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-10-31
 **Amended:** 2026-11-06: the core's hash is compiled into the app, and on Windows the signer is the Artifact Signing certificate profile and an unsigned app relies on the hash (§7)
+**Amended:** 2026-11-08: signing in place is not the only migration of events added unsigned; they may be discarded where no witness can have seen them (§3, ADR-044)
 **Amends:** ADR-044 (the paragraphs on rotations appended unsigned and on keys held by the app, and the sentence that signing is never split into a prepare and a commit), ADR-022 (how post-quantum pre-rotation is committed and revealed)
 **Relates to:** ADR-016 (Witness protocol), ADR-029 (Backing up without the recovery phrase), ADR-031 (Who witnesses what), ADR-037 (One KERI engine on every platform), ADR-039 (A backup is of an identity), ADR-049 (One signing form), ADR-060 (One accepted string per spelling)
 
@@ -423,7 +424,10 @@ a witness.
 - `POST /api/events/signature` attaches a signature to an event an earlier
   version added unsigned, and does nothing else. Those bytes are already in
   the log and may already be at witnesses, so signing them in place is the
-  only migration; the fence is on both sides:
+  migration for them. *(Amended 2026-11-08: not the only one. Where the key is on
+  another device and no witness can have seen them, they may be discarded instead,
+  ADR-044. A witness that may hold one, or that cannot be asked, keeps signing in place
+  as the only way.)* The fence is on both sides:
   - **the core:** at upgrade, every event then in the log without a signature
     is marked as such, once. The route accepts only a marked event, only a
     signature that verifies over its stored bytes and meets the section 2 rule

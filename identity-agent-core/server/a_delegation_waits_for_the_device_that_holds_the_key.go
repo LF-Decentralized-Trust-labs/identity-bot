@@ -46,8 +46,55 @@ func (s *CoreServer) askApproval(a asset.Asset, p *drivers.PreparedDelegation) e
 		return err
 	}
 	_, err = s.queueForTheKey(signingKindDelegation, pendingIssuance{Kind: signingKindDelegation,
-		Spec: grantSpec{Issuer: p.Delegator}, Delegation: p, AssetID: a.ID}, p.IxnRaw, summaryOf(shown))
+		Spec: grantSpec{Issuer: p.Delegator}, Delegation: p, AssetID: a.ID}, p.IxnRaw, delegationSummaryOf(shown, a))
 	return err
+}
+
+// delegationSummaryOf is the one line shown for a delegated identity's
+// approval. The name and the kind are this Identity Agent's own and appear in
+// no signed byte, so they are marked as its words: what the signature
+// vouches for is the identifier and key. Nothing is said of acting for the
+// owner, because signing the approval grants nothing; it can do nothing until
+// a grant to it is signed.
+func delegationSummaryOf(t *authorisation.ToSign, a asset.Asset) string {
+	kind := map[string]string{"ai_agent": "AI agent", "app": "app", "machine": "machine"}[a.AssetType]
+	if kind == "" {
+		kind = "identity"
+	}
+	return fmt.Sprintf("Approve the new identity %s (key %s), which this Identity Agent names %q, a %s. It can do nothing until its grant is signed",
+		t.Holder, t.KeyFingerprint, a.DisplayName, kind)
+}
+
+// errApprovalPending refuses to issue to an identity the device that holds the
+// key has not approved, once nothing asks it to: a grant to it is in no key log
+// that anyone could resolve, and an identity that cannot act is not given the
+// means to.
+var errApprovalPending = errors.New("this identity is waiting for the device that holds the identity's key to approve it, and no request for that is open: ask for it again (POST /api/assets/{id}/approval) before it is granted anything")
+
+// refuseWhileApprovalIsNotAsked is nil for anything but a delegated identity
+// still waiting for its approval. While the request for that approval is open,
+// what is asked for the identity is kept behind it (queueForTheKey), and is
+// built when the approval has landed; once it is not open, nothing is issued.
+func (s *CoreServer) refuseWhileApprovalIsNotAsked(holder string) error {
+	if s.assetHandler == nil || holder == "" {
+		return nil
+	}
+	assets, err := s.assetHandler.Store.ListAssets()
+	if err != nil {
+		return fmt.Errorf("the assets could not be read to check whether %s has been approved: %w", holder, err)
+	}
+	for _, a := range assets {
+		if a.PairwiseAID != holder || !a.ApprovalPending {
+			continue
+		}
+		for _, row := range s.waitingRows() {
+			if row.Pending.Delegation != nil && row.Pending.AssetID == a.ID && s.stillAsked(row) {
+				return nil
+			}
+		}
+		return errApprovalPending
+	}
+	return nil
 }
 
 // askApprovalAgain builds again, and asks for, the approval of an asset whose
@@ -97,6 +144,11 @@ func (s *CoreServer) adoptDelegation(row waitingRow, signature string) error {
 			return err
 		}
 	} else {
+		// The approval is let act only for the identity it approves: one kept
+		// for another identifier must not release this asset.
+		if a.PairwiseAID != p.Delegation.AID || a.DelegatorAID != p.Delegation.Delegator {
+			return fmt.Errorf("the approval kept is for %s, which is not the identity %q is", p.Delegation.AID, a.DisplayName)
+		}
 		keep := func(k drivers.KELKeep) error {
 			var parsed map[string]interface{}
 			if err := json.Unmarshal(k.Raw, &parsed); err != nil {

@@ -811,6 +811,11 @@ type Store interface {
 	DeleteCredential(said string) error
 	SaveRegistry(r CredentialRegistry) error
 	GetRegistryByIssuer(issuerAID string) (*CredentialRegistry, error)
+	// ForgetRegistryInception clears the kept inception of a registry whose
+	// anchor was removed from the key log, which makes it a registry that is
+	// not used (a saved registry never loses an inception it has, so this is
+	// the one way). The registry stays named, and what was issued into it.
+	ForgetRegistryInception(registrySAID string) error
 	GetRegistry(registrySAID string) (*CredentialRegistry, error)
 	// KeepEvents keeps several events together or none of them.
 	KeepEvents(events ...EventRecord) error

@@ -14,6 +14,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -389,29 +390,47 @@ func heldTipOf(aid, witnessKey, nonce string, a TipAnswer) (HeldTip, bool) {
 // does not sign, with its own key, the tip together with the nonce it was
 // asked with, is left out: so an answer is fresh and the witness's own.
 func (s *Service) KelHeldBy(ctx context.Context, aid string, designated []string) map[string]HeldTip {
+	held, _ := s.KelHeldByEach(ctx, aid, designated)
+	for key, tip := range held {
+		if tip.SN < 0 {
+			delete(held, key)
+		}
+	}
+	return held
+}
+
+// KelHeldByEach is KelHeldBy that also says which designated witnesses did not
+// give a signed answer (unreachable, unknown here, or not theirs), and keeps a
+// witness that answered it holds nothing, with a tip of -1. A witness that did
+// not answer is not one that holds nothing: a caller that needs to know the
+// log is not at a witness cannot take silence for it.
+func (s *Service) KelHeldByEach(ctx context.Context, aid string, designated []string) (held map[string]HeldTip, silent []string) {
 	known := s.designatedTargets(designated)
-	out := map[string]HeldTip{}
+	held = map[string]HeldTip{}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for _, key := range designated {
 		w, ok := known[key]
 		if !ok {
+			silent = append(silent, key)
 			continue
 		}
 		wg.Add(1)
 		go func(key string, w witnessTarget) {
 			defer wg.Done()
 			tip, ok := s.askTip(ctx, w, key, aid)
-			if !ok || tip.SN < 0 {
+			mu.Lock()
+			defer mu.Unlock()
+			if !ok {
+				silent = append(silent, key)
 				return
 			}
-			mu.Lock()
-			out[key] = tip
-			mu.Unlock()
+			held[key] = tip
 		}(key, w)
 	}
 	wg.Wait()
-	return out
+	sort.Strings(silent)
+	return held, silent
 }
 
 // HeldTip is the newest event a witness holds for an identity.

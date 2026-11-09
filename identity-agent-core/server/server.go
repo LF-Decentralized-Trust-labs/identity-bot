@@ -4926,21 +4926,24 @@ func (s *CoreServer) reloadKeyLogs() {
 	s.reloadRecordIdentity()
 }
 
-func (s *CoreServer) reloadIdentityIntoDriver() {
+// reloadIdentityIntoDriver hands the engine the identity's key log as stored,
+// and returns why it could not where it could not: an engine left holding a
+// log the store no longer has is not something a caller may go on from.
+func (s *CoreServer) reloadIdentityIntoDriver() error {
 	if s.KeriDriver == nil {
-		return
+		return nil
 	}
 	s.engineSigns()
 	identity, err := s.DataStore.GetIdentity()
 	if err != nil || identity == nil {
 		log.Printf("[identity-agent-core] KERI driver reload: no existing identity in DB")
-		return
+		return errors.New("no identity is stored to reload")
 	}
 
 	events, err := s.DataStore.GetEvents(identity.AID)
 	if err != nil {
 		log.Printf("[identity-agent-core] KERI driver reload: failed to load KEL events: %v", err)
-		return
+		return fmt.Errorf("the key log could not be read: %w", err)
 	}
 
 	warnAboutUnprovableEvents(identity.AID, events)
@@ -4962,10 +4965,11 @@ func (s *CoreServer) reloadIdentityIntoDriver() {
 	result, err := s.KeriDriver.ReloadIdentity(req)
 	if err != nil {
 		log.Printf("[identity-agent-core] KERI driver reload failed (non-fatal — issuing will require fresh inception): %v", err)
-		return
+		return fmt.Errorf("the engine could not reload the key log: %w", err)
 	}
 	log.Printf("[identity-agent-core] KERI driver: reloaded identity %s (sn=%d, %d KEL events)",
 		result.AID, result.SequenceNumber, result.KelEvents)
+	return nil
 }
 
 // kelFromEvents is a stored key log in the form an engine reloads: each event

@@ -40,6 +40,11 @@ func (s *CoreServer) issueAssetCredential(
 	if err != nil || identity == nil {
 		return "", fmt.Errorf("no owner identity")
 	}
+	// An identity still waiting for its approval is granted nothing unless
+	// that approval is asked for: then the grant is kept behind it.
+	if err := s.refuseWhileApprovalIsNotAsked(holder); err != nil {
+		return "", err
+	}
 	// A request an AI agent's body made rests on its creator's grant and body
 	// credential. Refused before anything is prepared or kept, on every path:
 	// where the grant is not prepared first it would otherwise be issued and
