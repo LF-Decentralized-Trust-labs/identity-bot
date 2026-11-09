@@ -539,12 +539,21 @@ class BackupService {
   }
 
   /// Fetches back what a destination is holding, for a restore.
+  ///
+  /// The archive comes as its own bytes, not base64 inside JSON, so it is not
+  /// held three times over. `archive_bytes` is the sealed archive and
+  /// `object_key` the name it had in the destination.
   static Future<Map<String, dynamic>> pullFrom(String destId) async {
     final resp = await _client.post(Uri.parse('$_base/pull/$destId'));
     if (resp.statusCode != 200) {
       throw Exception('Could not fetch from that destination: ${resp.body}');
     }
-    return jsonDecode(resp.body) as Map<String, dynamic>;
+    final key = resp.headers['x-archive-object-key'];
+    return {
+      'object_key': key == null ? '' : Uri.decodeComponent(key),
+      'size_bytes': resp.bodyBytes.length,
+      'archive_bytes': resp.bodyBytes,
+    };
   }
 
   /// What this machine is holding for one identity you already know of.

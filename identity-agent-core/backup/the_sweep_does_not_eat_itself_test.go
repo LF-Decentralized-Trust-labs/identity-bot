@@ -144,3 +144,29 @@ func TestAWindowsDeviceOrStreamIsNoPath(t *testing.T) {
 		}
 	}
 }
+
+// Where this machine backs up to, and the keys to those sign-ins, belong to the
+// machine: carried to another, the key cannot be opened and the credential
+// store never works there again.
+func TestWhereAMachineBacksUpToIsNotCarriedToAnother(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "backup"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"backup/credentials_master.key", "backup/credentials_drive.enc",
+		"backup_config.json", "backup_history.json", "backup_delta_state.json"} {
+		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(name)), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "profile.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bundle := &PayloadBundle{Sections: map[string][]byte{}}
+	if _, err := (&Collector{DataDir: dir}).collectEveryOtherFile(bundle); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := bundle.Sections["file:profile.json"]; !ok || len(bundle.Sections) != 1 {
+		t.Fatalf("expected only the identity's own file to be carried, got %v", bundle.Sections)
+	}
+}

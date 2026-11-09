@@ -8,9 +8,11 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"time"
 
 	"identity-agent-core/backup"
@@ -42,6 +44,10 @@ func (s *CoreServer) mountBackupRoutes(r chi.Router) {
 		r.Post("/trigger", s.handleBackupTrigger)
 		r.Post("/credentials", s.handleBackupSaveCredentials)
 		r.Post("/pull/{destID}", s.handleBackupPull)
+		// Sign in to Google Drive. The app opens the browser and catches the
+		// redirect; the core only issues the address and takes the code.
+		r.Post("/google/start", s.handleBackupGoogleStart)
+		r.Post("/google/complete", s.handleBackupGoogleComplete)
 	})
 }
 
@@ -301,21 +307,11 @@ func (s *CoreServer) handleBackupUpsertDestination(w http.ResponseWriter, r *htt
 }
 
 func (s *CoreServer) handleBackupDeleteDestination(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	cfg, err := s.backupService().LoadConfig()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Load config failed", err.Error())
-		return
-	}
-	filtered := []backup.Destination{}
-	for _, d := range cfg.Destinations {
-		if d.ID != id {
-			filtered = append(filtered, d)
-		}
-	}
-	cfg.Destinations = filtered
-	if err := s.backupService().SaveConfig(cfg); err != nil {
-		writeError(w, http.StatusInternalServerError, "Save failed", err.Error())
+	// RemoveDestination, not a filter over the config: a Google Drive
+	// destination's sign-in must be cancelled at Google and its credential file
+	// deleted, or removing it here leaves the grant live.
+	if _, err := s.backupService().RemoveDestination(chi.URLParam(r, "id")); err != nil {
+		writeError(w, http.StatusInternalServerError, "Remove failed", err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -452,17 +448,32 @@ func (s *CoreServer) handleBackupPull(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Destination not found", destID)
 		return
 	}
-	data, key, err := s.backupService().PullLatestArchive(*dest)
+	// Streamed from a file this agent wrote it to, as the archive's own bytes.
+	// It used to be read whole and base64-encoded into a JSON body, which put
+	// the archive in memory three times over — about 3 GB for the largest one
+	// accepted, which ends a phone's process.
+	path, key, size, done, err := s.backupService().PullLatestArchiveToFile(*dest)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Pull failed", err.Error())
 		return
 	}
-	jsonreply.Write(w, http.StatusOK, map[string]interface{}{
-		"object_key":  key,
-		"size_bytes":  len(data),
-		"archive_b64": backup.EncodeB64(data),
-	})
+	defer done()
+	f, err := os.Open(path)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Pull failed", err.Error())
+		return
+	}
+	defer f.Close()
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+	w.Header().Set(ArchiveObjectKeyHeader, url.PathEscape(key))
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, f)
 }
+
+// ArchiveObjectKeyHeader carries the name an archive had in the destination it
+// was pulled from, path-escaped.
+const ArchiveObjectKeyHeader = "X-Archive-Object-Key"
 
 // handleBackupDownload serves a received opaque archive back to its owner.
 //
@@ -621,4 +632,49 @@ func (s *CoreServer) mayHold(aid string) error {
 	}
 	held, _ := s.backupService().ListReceived(aid)
 	return cfg.Offer.MayAccept(aid, len(held) > 0)
+}
+
+type backupGoogleStartRequest struct {
+	RedirectURI string `json:"redirect_uri"`
+}
+
+// handleBackupGoogleStart returns the Google address the app opens for the
+// person to sign in at.
+func (s *CoreServer) handleBackupGoogleStart(w http.ResponseWriter, r *http.Request) {
+	var req backupGoogleStartRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
+		return
+	}
+	authURL, state, err := s.backupService().StartGoogleSignIn(req.RedirectURI)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Cannot start Google sign-in", err.Error())
+		return
+	}
+	jsonreply.Write(w, http.StatusOK, map[string]string{"auth_url": authURL, "state": state})
+}
+
+type backupGoogleCompleteRequest struct {
+	State       string `json:"state"`
+	Code        string `json:"code"`
+	RedirectURI string `json:"redirect_uri"`
+}
+
+// handleBackupGoogleComplete takes the code Google returned to the app and
+// makes the Drive destination. It works on a machine with no destinations, which
+// is what restoring onto a different machine is.
+func (s *CoreServer) handleBackupGoogleComplete(w http.ResponseWriter, r *http.Request) {
+	var req backupGoogleCompleteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request", err.Error())
+		return
+	}
+	dest, err := s.backupService().CompleteGoogleSignIn(req.State, req.Code, req.RedirectURI)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Google sign-in failed", err.Error())
+		return
+	}
+	// The credential id is a file name, not something the app needs.
+	dest.CredentialID = ""
+	jsonreply.Write(w, http.StatusOK, map[string]any{"destination": dest})
 }

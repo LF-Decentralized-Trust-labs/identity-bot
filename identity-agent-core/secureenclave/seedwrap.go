@@ -260,34 +260,12 @@ func storeSeedAs(dataDir string, seed []byte, w SeedWrapper, requireWrap bool, h
 	// first and fail the second, which is the case this warns about: our gap,
 	// on somebody's hardware, and silent until now.
 	if wrapperWorksAt(w, dataDir) {
-		blob, err := w.Wrap(toStore)
+		blob, protection, why, err := wrapAndCheck(w, "root seed", toStore)
 		if err != nil {
-			return fmt.Errorf("wrap root seed (%s): %w", w.Scheme(), err)
-		}
-		// A wrapper that hands the seed back inside its output has protected
-		// nothing, and recording it as hardware-wrapped would be the false
-		// statement this layer exists to stop. Refused with nothing written.
-		if len(blob) == 0 || wrapLeaksTheSeed(w, blob, toStore) {
-			return fmt.Errorf("the %s wrapper returned the seed in the clear, "+
-				"so it is not recorded as wrapped", w.Scheme())
-		}
-		// Never trust a wrap we can't open: verify the round trip before the
-		// wrapped form becomes the only copy on disk.
-		back, err := w.Unwrap(blob)
-		if err != nil || !bytes.Equal(back, toStore) {
-			return fmt.Errorf("wrap verification failed (%s): %v", w.Scheme(), err)
-		}
-		protection := ProtectionHardwareWrapped
-		if _, sealed := w.(sealedVolumeWrapper); sealed {
-			protection = ProtectionSealedVolume
+			return err
 		}
 		env = seedEnvelope{V: 1, Wrap: w.Scheme(), Blob: base64.StdEncoding.EncodeToString(blob),
-			Protection: protection, Holder: holder}
-		// A check that let something through unchecked (a development build with
-		// no revocation list) says so in the file.
-		if c, ok := w.(interface{ caveat() string }); ok {
-			env.Why = c.caveat()
-		}
+			Protection: protection, Why: why, Holder: holder}
 	}
 	if requireWrap && env.Wrap == seedWrapNone {
 		return cannotLiveHere(detectCapability(), "the seed would have been written unwrapped")
@@ -319,6 +297,44 @@ func storeSeedAs(dataDir string, seed []byte, w SeedWrapper, requireWrap bool, h
 	// this whole line exists to say about a seed in the clear.
 	announceIfStoredInTheClear(env.Wrap)
 	return nil
+}
+
+// wrapAndCheck wraps secret under w and refuses a wrap that cannot be trusted:
+// one that hands the secret back inside its output, or that does not open to the
+// same bytes. Nothing is written by it, so a caller that gets an error has
+// stored nothing. what names the secret in the errors. why is the wrapper's own
+// caveat, when a check let something through unchecked (a development build
+// with no revocation list), for the caller to record beside the wrapped bytes.
+//
+// The one place this is done: the root seed and every small key held under the
+// wrapper (KeyToHoldUnderTheWrapper) go through it, so a check added here
+// reaches both.
+func wrapAndCheck(w SeedWrapper, what string, secret []byte) (blob []byte, protection, why string, err error) {
+	blob, err = w.Wrap(secret)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("wrap %s (%s): %w", what, w.Scheme(), err)
+	}
+	// A wrapper that hands the secret back inside its output has protected
+	// nothing, and recording it as hardware-wrapped would be the false
+	// statement this layer exists to stop.
+	if len(blob) == 0 || wrapLeaksTheSeed(w, blob, secret) {
+		return nil, "", "", fmt.Errorf("the %s wrapper returned the %s in the clear, "+
+			"so it is not recorded as wrapped", w.Scheme(), what)
+	}
+	// Never trust a wrap we can't open: verify the round trip before the
+	// wrapped form becomes the only copy on disk.
+	back, err := w.Unwrap(blob)
+	if err != nil || !bytes.Equal(back, secret) {
+		return nil, "", "", fmt.Errorf("wrap verification failed (%s): %v", w.Scheme(), err)
+	}
+	protection = ProtectionHardwareWrapped
+	if _, sealed := w.(sealedVolumeWrapper); sealed {
+		protection = ProtectionSealedVolume
+	}
+	if c, ok := w.(interface{ caveat() string }); ok {
+		why = c.caveat()
+	}
+	return blob, protection, why, nil
 }
 
 // announceIfStoredInTheClear says, once per process, that a machine which could
