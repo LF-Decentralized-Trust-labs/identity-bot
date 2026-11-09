@@ -270,7 +270,10 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 	// 2) Authorize: enforce the asset's enrollment policy for the asserter,
 	// including any required credential presented in the (verified) assertion.
 	//
-	// The SPECIFIC reason goes to the organisation, never to the caller.
+	// The SPECIFIC reason is never sent back to whoever posted the answer.
+	// It is kept for the browser that started this sign-in (it holds the
+	// collector secret), so the person can see why and fix it. Because of
+	// that, a reason is fixed wording, never an internal error string.
 	//
 	// "not an active employee" told to whoever asked is an oracle: anybody who
 	// can reach this endpoint learns, for an identifier they nominate, whether
@@ -454,7 +457,9 @@ func (s *CoreServer) authorizeAssetAccess(ctx context.Context, siteAID, pairwise
 	assets, err := s.assetHandler.Store.ListAssets()
 	if err != nil {
 		// Fail closed: an asset store that cannot be read admits nobody.
-		return false, "asset store unreadable: " + err.Error()
+		// The reason reaches the browser that started the sign-in, so it is
+		// fixed wording: the error itself could name paths or internals.
+		return false, "the website's settings could not be read"
 	}
 	for _, a := range assets {
 		if a.PairwiseAID != siteAID {
