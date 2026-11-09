@@ -26,7 +26,8 @@
         {
           "capability": "witness",
           "url": "https://witness1.grapeid.org",
-          "aid": "BMtfjviEMpF2xWVW0CRPKoVPX1mOMzNurvUjD-0RN_Jl"
+          "aid": "BMtfjviEMpF2xWVW0CRPKoVPX1mOMzNurvUjD-0RN_Jl",
+          "default": true
         },
         {
           "capability": "witness",

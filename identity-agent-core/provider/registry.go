@@ -105,6 +105,11 @@ type Endpoint struct {
 	// one. A witness must have it — the witness set in a KEL names AIDs, not
 	// URLs, so an entry without one cannot be designated.
 	AID string `json:"aid,omitempty"`
+	// Default marks the one witness endpoint a new root identity designates at
+	// inception. Every witness listed stays resolvable so an identity that
+	// already designates it keeps working; this picks only what a NEW identity
+	// starts with.
+	Default bool `json:"default,omitempty"`
 }
 
 // Provider is one operator and everything it offers.

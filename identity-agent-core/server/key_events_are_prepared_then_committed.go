@@ -200,13 +200,21 @@ func (s *CoreServer) handleWitnessesForAFounding(w http.ResponseWriter, r *http.
 	out := struct {
 		Witnesses []proposed `json:"witnesses"`
 		Toad      int        `json:"toad"`
+		// NotDesignated are witnesses left out because they could not be
+		// confirmed, with why; AddLater says how one is added afterwards.
+		NotDesignated []witness.NotDesignated `json:"not_designated,omitempty"`
+		AddLater      string                  `json:"add_later,omitempty"`
 	}{Witnesses: []proposed{}}
 	if s.WitnessService != nil {
-		ws, toad := s.WitnessService.ProposedWitnessesForNewIdentity(witness.AidKindRoot, "")
-		for _, p := range ws {
-			out.Witnesses = append(out.Witnesses, proposed{AID: p.Key, Address: p.Address})
+		p := s.WitnessService.ProposeWitnessesForNewIdentity(witness.AidKindRoot, "")
+		for _, w := range p.Witnesses {
+			out.Witnesses = append(out.Witnesses, proposed{AID: w.Key, Address: w.Address})
 		}
-		out.Toad = toad
+		out.Toad = p.Toad
+		if len(p.NotDesignated) > 0 {
+			out.NotDesignated = p.NotDesignated
+			out.AddLater = witness.AddWitnessLater
+		}
 	}
 	jsonreply.Write(w, http.StatusOK, out)
 }

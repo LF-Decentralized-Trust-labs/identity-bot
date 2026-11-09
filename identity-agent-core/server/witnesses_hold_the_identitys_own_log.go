@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"identity-agent-core/drivers"
 	"identity-agent-core/recovery"
 	"identity-agent-core/witness"
@@ -183,6 +185,46 @@ func (s *CoreServer) signedEventsOf(aid string) []witness.SignedEvent {
 			CesrSignature: ev.CesrSignature, Signatures: ev.ControllerSignatures()})
 	}
 	return out
+}
+
+// designationAfter is the witnesses an identity's key log designates, and the
+// threshold it asks of them, once ev is in it. Read from the log by the same
+// rule everything else uses (witnessesAfter), so an identity founded when the
+// registry listed more witnesses keeps reaching, and counting receipts from,
+// every one it designates. ev may already be in the log, or be the next event
+// to go in; it is applied once either way. A nil ev reads the log as it stands.
+func (s *CoreServer) designationAfter(aid string, ev map[string]interface{}) ([]string, int) {
+	if s.DataStore == nil {
+		return nil, 0
+	}
+	events, _ := s.DataStore.GetEvents(aid)
+	evD, _ := ev["d"].(string)
+	var current []string
+	toad := 0
+	apply := func(parsed map[string]interface{}) {
+		if next, ok := witnessesAfter(current, parsed); ok {
+			current = next
+			toad = thresholdOf(parsed["bt"])
+		}
+	}
+	for _, e := range events {
+		raw, _ := base64.StdEncoding.DecodeString(e.RawBytesB64)
+		var parsed map[string]interface{}
+		if json.Unmarshal(raw, &parsed) != nil {
+			continue
+		}
+		if d, _ := parsed["d"].(string); evD != "" && d == evD {
+			break
+		}
+		apply(parsed)
+	}
+	if ev != nil {
+		apply(ev)
+	}
+	if toad < 0 {
+		toad = 0
+	}
+	return current, toad
 }
 
 // witnessOwnLog brings the identity's witnesses up to date with its own key

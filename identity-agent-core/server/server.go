@@ -441,14 +441,15 @@ func New(cfg Config) (*CoreServer, error) {
 	wsvc.IsOfficialService = func(aidOrURL string) bool {
 		return s.Providers.IsOfficialService(provider.CapabilityWitness, aidOrURL)
 	}
+	wsvc.DesignationAfter = s.designationAfter
 	// The bootstrap witnesses come from the provider registry, so there is one
 	// list of operators rather than one here and another in the witness engine.
 	witness.BootstrapWitnesses = witness.WitnessesFromRegistry(
-		func() []struct{ Operator, URL, AID string } {
-			var out []struct{ Operator, URL, AID string }
+		func() []witness.RegistryWitness {
+			var out []witness.RegistryWitness
 			for _, p := range s.Providers.Offering(provider.CapabilityWitness) {
 				for _, e := range p.EndpointsFor(provider.CapabilityWitness) {
-					out = append(out, struct{ Operator, URL, AID string }{p.Operator, e.URL, e.AID})
+					out = append(out, witness.RegistryWitness{Operator: p.Operator, URL: e.URL, AID: e.AID, Default: e.Default})
 				}
 			}
 			return out

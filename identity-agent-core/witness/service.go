@@ -109,6 +109,16 @@ type Service struct {
 	// so the exemption is a line in a shipped file that somebody can audit.
 	IsOfficialService func(aidOrURL string) bool
 
+	// DesignationAfter reports the witnesses an identity's key log designates,
+	// and the threshold it asks of them, once ev (an event of that log, or the
+	// next one) is in it. Nil, or an answer with no keys, means the log designates
+	// none this agent can read.
+	//
+	// It is what lets an identity founded when the registry listed more
+	// witnesses keep reaching all of them, and be finalized against its own
+	// threshold, whatever a NEW identity would be given today.
+	DesignationAfter func(aid string, ev map[string]interface{}) (keys []string, toad int)
+
 	// telMu serialises storing registry events, so two submissions that
 	// together complete a credential's chain are checked one after the other.
 	telMu      sync.Mutex
@@ -857,13 +867,19 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 		rootAID = id.AID
 	}
 	kind := ClassifyAID(signerAID, rootAID)
-	witnesses, err := s.enrolledWitnesses(kind, signerAID)
+	designated, toad := s.designationAfter(signerAID, event)
+	witnesses, err := s.witnessesToReach(kind, signerAID, designated)
 	if err != nil {
 		return err
 	}
 	said := eventSAID(event)
 	seq, _ := eventSeq(event)
+	// Finalized against the identity's own threshold: the receipts it asked
+	// for, not a floor that a smaller witness set can never reach.
 	threshold := s.Threshold()
+	if len(designated) > 0 && toad > 0 {
+		threshold = toad
+	}
 	now := NowRFC3339()
 	_ = s.Store.SaveFinalization(FinalizationState{
 		EventSAID: said, SignerAID: signerAID, SequenceNum: seq,
@@ -1136,6 +1152,44 @@ type witnessTarget struct {
 	Commercial bool
 }
 
+// designationAfter is DesignationAfter, safe when it is not set.
+func (s *Service) designationAfter(aid string, ev map[string]interface{}) ([]string, int) {
+	if s.DesignationAfter == nil {
+		return nil, 0
+	}
+	return s.DesignationAfter(aid, ev)
+}
+
+// witnessesToReach is every witness an event or record for aid should be sent
+// to: the ones enrolledWitnesses gives (contacts, and the one default endpoint
+// for a root with too few of them) plus every witness the identity's key log
+// already designates and this agent can address. The second set is what keeps an
+// identity founded with several witnesses reaching all of them; enrolledWitnesses
+// alone answers only for what a NEW identity would be given.
+func (s *Service) witnessesToReach(kind AidKind, aid string, designated []string) ([]witnessTarget, error) {
+	out, err := s.enrolledWitnesses(kind, aid)
+	if err != nil || len(designated) == 0 {
+		return out, err
+	}
+	have := map[string]bool{}
+	for _, t := range out {
+		have[t.AID] = true
+		if t.WitnessKey != "" {
+			have[t.WitnessKey] = true
+		}
+	}
+	known := s.designatedTargets(designated)
+	for _, key := range designated {
+		t, ok := known[key]
+		if !ok || have[key] || have[t.AID] {
+			continue
+		}
+		have[key], have[t.AID] = true, true
+		out = append(out, t)
+	}
+	return out, nil
+}
+
 func (s *Service) enrolledWitnesses(kind AidKind, aid string) ([]witnessTarget, error) {
 	contacts, err := s.Contacts.GetContacts()
 	if err != nil {
@@ -1181,15 +1235,16 @@ func (s *Service) enrolledWitnesses(kind AidKind, aid string) ([]witnessTarget, 
 			AID: c.AID, URL: c.OobiURL, WitnessKey: witnessKey, Commercial: commercial,
 		})
 	}
-	// Top up from the bootstrap pool while there are too few contacts to reach
-	// a threshold worth having. Appended rather than preferred, so somebody
-	// with enough contacts of their own leans on those and not on us — and so
-	// this contribution shrinks to nothing on its own as contacts accumulate.
+	// Top up with the one default bootstrap endpoint while there are too few
+	// contacts to reach a threshold worth having. Appended rather than
+	// preferred, so somebody with enough contacts of their own leans on those
+	// and not on us — and so this contribution shrinks to nothing on its own as
+	// contacts accumulate.
 	//
 	// Root identities only, and the reason is structural rather than a policy
 	// choice: a pairwise AID exists BECAUSE there is a contact, so it never has
 	// the problem bootstrap solves. Extending it there would also mean the same
-	// three operators witnessing every one of somebody's pairwise identities,
+	// operator witnessing every one of somebody's pairwise identities,
 	// which is the correlation the pairwise design exists to prevent — witness
 	// lists are public, and one operator seeing all of them could reassemble
 	// the contact graph from its own logs.
@@ -1603,7 +1658,8 @@ func (s *Service) PublishEndpointRecord(ctx context.Context, signerAID string, r
 		rootAID = id.AID
 	}
 	kind := ClassifyAID(signerAID, rootAID)
-	witnesses, err := s.enrolledWitnesses(kind, signerAID)
+	designated, _ := s.designationAfter(signerAID, nil)
+	witnesses, err := s.witnessesToReach(kind, signerAID, designated)
 	if err != nil {
 		return err
 	}
