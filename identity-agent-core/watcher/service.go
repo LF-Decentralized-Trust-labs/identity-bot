@@ -22,14 +22,41 @@ type Service struct {
 	PeerWatchers PeerWatcherSource
 	L3           *L3Client
 	OnEvent      func(eventType string, payload map[string]interface{})
+	// SignDigest signs the statement of a digest answer with this agent's
+	// watcher key and names that key. Unset, answers go out unsigned, which no
+	// verifier accepts.
+	SignDigest func(statement string) (signerAID, cesrSig string, err error)
 }
 
 func NewService(store Store) *Service {
-	return &Service{
+	s := &Service{
 		Store: store,
 		L2:    NewL2Client(),
 		L3:    NewL3Client(),
 	}
+	s.L2.TrustedSigners = s.TrustedL2Signers
+	return s
+}
+
+// DefaultL2SignerAIDs are the watchers whose signed answers ship trusted. It is
+// empty until the default watcher has an identifier of its own; until then an
+// agent trusts only what its owner adds under "l2_signer_aids".
+var DefaultL2SignerAIDs = []string{}
+
+// TrustedL2Signers is every watcher whose signature on a digest answer is
+// accepted: the shipped ones plus any the owner added, as a JSON list in
+// watcher_config "l2_signer_aids". A stored row never replaces the shipped list.
+func (s *Service) TrustedL2Signers() []string {
+	out := append([]string{}, DefaultL2SignerAIDs...)
+	if s.Store != nil {
+		if raw, _ := s.Store.GetConfig("l2_signer_aids"); raw != "" {
+			var extra []string
+			if json.Unmarshal([]byte(raw), &extra) == nil {
+				out = append(out, extra...)
+			}
+		}
+	}
+	return out
 }
 
 func (s *Service) DefaultL2URL() string {
@@ -283,6 +310,7 @@ func (s *Service) GetPublicDigest(aid string, seq int) (*DigestResponse, error) 
 	}
 	resp := DigestResponse{AID: aid, SequenceNumber: seq}
 	if rec == nil {
+		s.signDigest(&resp)
 		return &resp, nil
 	}
 	d := rec.KelDigest
@@ -291,7 +319,24 @@ func (s *Service) GetPublicDigest(aid string, seq int) (*DigestResponse, error) 
 	resp.Digest = &d
 	resp.FirstSeenAt = &fs
 	resp.ObservedSince = &os
+	s.signDigest(&resp)
 	return &resp, nil
+}
+
+// signDigest signs the answer over the one statement witnessproto defines. If it
+// cannot, the answer goes out unsigned: that is refused by every client, which
+// is the honest outcome for a watcher that cannot prove who it is.
+func (s *Service) signDigest(r *DigestResponse) {
+	if s.SignDigest == nil {
+		return
+	}
+	stmt, err := witnessproto.DigestStatement(r.AID, r.SequenceNumber, r.Digest, r.FirstSeenAt, r.ObservedSince)
+	if err != nil {
+		return
+	}
+	if by, sig, err := s.SignDigest(stmt); err == nil {
+		r.SignedBy, r.Signature = by, sig
+	}
 }
 
 // KelCheck handles POST /public/kel-check (L3 peer cross-check).

@@ -1,0 +1,4 @@
+[
+  {"name": "a seen event", "aid": "EAlice", "seq": 0, "digest": "ab12", "first_seen_at": "2026-01-02T03:04:05Z", "observed_since": "2026-01-02T03:04:05Z", "statement": "kel-digest-response/v1\naid=EAlice\nseq=0\ndigest=ab12\nfirst_seen_at=2026-01-02T03:04:05Z\nobserved_since=2026-01-02T03:04:05Z\n", "signed_by": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk", "signature": "0BCrGoyxqznCfFP7b0Er8TPgcsL4GSyK1B8ovYkXXRbh8oRtdtIN3DY6QJOu9NusYJMbbdaU1wSc9HryltAqqf0C"},
+  {"name": "an event never seen", "aid": "EAlice", "seq": 17, "digest": null, "first_seen_at": null, "observed_since": null, "statement": "kel-digest-response/v1\naid=EAlice\nseq=17\ndigest=-\nfirst_seen_at=-\nobserved_since=-\n", "signed_by": "BHm1Vi6P5lT5QHixEuipi6eQH4U65pW-1-DjkQutBJZk", "signature": "0BBvzlUkhRdkzOWv8jZ509f-9rRp42nJcb9Kr1lmIa37s22wMspTW21U998YUmRwTd8ja1lwmfTMCwQwsoTq3eAA"}
+]

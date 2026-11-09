@@ -1165,6 +1165,20 @@ CREATE TABLE IF NOT EXISTS witness_kel_conflicts (
     PRIMARY KEY (signer_aid, event_said)
 );
 `},
+	{
+		Version:     53,
+		Description: "Stop an old seeded default L2 watcher address from shadowing the shipped one",
+		SQL: `
+-- Migration 12 seeded a host with no DNS and INSERT OR IGNORE kept it, so the
+-- shipped address never took effect. The row is removed only where it still
+-- holds that seeded value (or its trailing-slash spelling): an address an owner
+-- chose is left alone. With the row gone the shipped constant answers, and a
+-- later correction to it reaches this agent too.
+DELETE FROM watcher_config
+ WHERE key = 'default_l2_url'
+   AND value IN ('https://watcher.grapeid.org/public/kel-digest',
+                 'https://watcher.grapeid.org/public/kel-digest/');
+`},
 }
 
 // ReapplyIdentityMigration runs one identity migration's SQL again, for a test

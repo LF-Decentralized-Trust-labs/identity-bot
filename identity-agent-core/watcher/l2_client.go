@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/witnessproto"
+	"identity-agent-core/drivers"
 	"identity-agent-core/witness"
 	"io"
 	"net/http"
@@ -27,8 +29,15 @@ const DefaultL2DigestURL = "https://watcher1.grapeid.org/public/kel-digest"
 // the addresses it is given are hints a peer's introduction carried, so its
 // client refuses an internal address (the one dialled), follows no redirect and
 // uses no proxy, and is never allowed a local address.
+//
+// An answer is used only if a watcher this agent trusts signed it. TrustedSigners
+// names those watchers; with none, no answer is ever accepted, so a client that
+// was not told whom to trust fails closed into "unavailable".
 type L2Client struct {
 	HTTPClient *http.Client
+	// TrustedSigners returns the non-transferable identifiers whose signature
+	// on a digest answer is accepted.
+	TrustedSigners func() []string
 }
 
 func NewL2Client() *L2Client {
@@ -69,5 +78,40 @@ func (c *L2Client) QueryDigest(ctx context.Context, baseURL, aid string, seq int
 	if err := json.Unmarshal(body, &out); err != nil {
 		return nil, time.Since(start), err
 	}
+	if err := c.verifyAnswer(&out, aid, seq); err != nil {
+		// Unavailable, never evidence: an answer nobody can prove a trusted
+		// watcher gave is not allowed to say anything about an identity.
+		return nil, time.Since(start), fmt.Errorf("L2 answer from %s not accepted: %w", u.Host, err)
+	}
 	return &out, time.Since(start), nil
+}
+
+// verifyAnswer checks that the answer is for the question asked and was signed,
+// over the statement both sides build, by a watcher this client trusts. The
+// signer is a non-transferable identifier, so it is itself the key.
+func (c *L2Client) verifyAnswer(r *DigestResponse, aid string, seq int) error {
+	if r.AID != aid || r.SequenceNumber != seq {
+		return fmt.Errorf("it answers for %s at %d, not %s at %d", r.AID, r.SequenceNumber, aid, seq)
+	}
+	if r.SignedBy == "" || r.Signature == "" {
+		return fmt.Errorf("it is not signed")
+	}
+	trusted := false
+	if c.TrustedSigners != nil {
+		// Compared by key, so one watcher is one watcher however it is spelt.
+		want, ok := drivers.WitnessKey(r.SignedBy)
+		for _, t := range c.TrustedSigners() {
+			if k, kok := drivers.WitnessKey(t); ok && kok && k == want {
+				trusted = true
+			}
+		}
+	}
+	if !trusted {
+		return fmt.Errorf("%s is not a watcher this agent trusts", r.SignedBy)
+	}
+	stmt, err := witnessproto.DigestStatement(r.AID, r.SequenceNumber, r.Digest, r.FirstSeenAt, r.ObservedSince)
+	if err != nil {
+		return err
+	}
+	return drivers.VerifyReceipt(r.SignedBy, stmt, r.Signature)
 }
