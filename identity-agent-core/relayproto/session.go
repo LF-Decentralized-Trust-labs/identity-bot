@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto/boundedread"
 	"github.com/gorilla/websocket"
 	"github.com/hashicorp/yamux"
 )
@@ -313,7 +314,7 @@ func (s *Session) renew() error {
 		return err
 	}
 	var a Admission
-	if err := json.NewDecoder(io.LimitReader(st, MaxAdmissionBytes)).Decode(&a); err != nil {
+	if err := json.NewDecoder(boundedread.Reader(st, MaxAdmissionBytes)).Decode(&a); err != nil {
 		return fmt.Errorf("read the renewal: %w", err)
 	}
 	if a.Statement.AID != s.AID {

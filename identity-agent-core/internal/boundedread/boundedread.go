@@ -8,6 +8,8 @@
 package boundedread
 
 import (
+	relayread "github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto/boundedread"
+
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,7 +39,7 @@ const (
 )
 
 // ErrTooLarge is returned when a body is larger than the limit it was read under.
-var ErrTooLarge = errors.New("body exceeds the size limit")
+var ErrTooLarge = relayread.ErrTooLarge
 
 // All reads r to the end and returns it, or ErrTooLarge if it holds more than limit bytes.
 // A read error is returned, never ignored.
@@ -63,29 +65,10 @@ func Decode(r io.Reader, limit int64, v any) error {
 }
 
 // Reader wraps r so a stream consumer (a json.Decoder) fails with ErrTooLarge
-// rather than reading past limit bytes.
+// rather than reading past limit bytes. It is the relay protocol's reader, so
+// the core and the relay refuse a stream in the same way.
 func Reader(r io.Reader, limit int64) io.Reader {
-	return &limited{r: r, left: limit}
-}
-
-type limited struct {
-	r    io.Reader
-	left int64
-}
-
-func (l *limited) Read(p []byte) (int, error) {
-	if l.left < 0 {
-		return 0, ErrTooLarge
-	}
-	if int64(len(p)) > l.left+1 {
-		p = p[:l.left+1]
-	}
-	n, err := l.r.Read(p)
-	l.left -= int64(n)
-	if l.left < 0 {
-		return n - int(-l.left), ErrTooLarge
-	}
-	return n, err
+	return relayread.Reader(r, limit)
 }
 
 // Snippet returns at most Diagnostic bytes of an error body for quoting in a

@@ -1,10 +1,10 @@
 package server
 
 import (
+	"identity-agent-core/internal/boundedread"
+
 	"context"
 	"encoding/base64"
-	"encoding/json"
-	"io"
 	"log"
 	"net/http"
 	"time"
@@ -29,8 +29,8 @@ func (s *CoreServer) handleRestoreIdentity(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var req keyStateRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, maxKeyStateBody)).Decode(&req); err != nil || req.AID == "" {
-		writeError(w, http.StatusBadRequest, "aid and events are required", "")
+	if err := boundedread.Decode(r.Body, maxKeyStateBody, &req); err != nil || req.AID == "" {
+		writeError(w, boundedread.Status(err), "aid and events are required", "")
 		return
 	}
 	if req.StreamB64 != "" {

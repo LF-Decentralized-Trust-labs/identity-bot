@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -15,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/LF-Decentralized-Trust-labs/identity-bot/identity-agent-core/relayproto/boundedread"
 	"github.com/gorilla/websocket"
 	"github.com/hashicorp/yamux"
 )
@@ -196,7 +196,7 @@ func (a *AgentSession) Serve(handler http.Handler) error {
 func (a *AgentSession) renew(st net.Conn) {
 	defer st.Close()
 	st.SetDeadline(time.Now().Add(HandshakeTimeout))
-	r := bufio.NewReader(io.LimitReader(st, MaxControlBytes))
+	r := bufio.NewReader(boundedread.Reader(st, MaxControlBytes))
 	var ch Challenge
 	if err := json.NewDecoder(r).Decode(&ch); err != nil || !ch.Renewal {
 		return
