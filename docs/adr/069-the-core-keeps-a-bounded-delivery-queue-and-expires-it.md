@@ -25,9 +25,12 @@ limits:
   finishes it, and each entry is marked once.
 - **An add-on holds and delivers through it.** An add-on enqueues a sealed
   message and delivers it by the queue's own calls (`Enqueue`, `Held`,
-  `Delivered`, `Kept`). It does not enforce the age and cannot lengthen it. It
-  tells the core which trail to mark by calling `KeepExpiryIn` once; until it
-  does, the core expires nothing, because it has no record to mark first.
+  `Delivered`, `Kept`). It does not enforce the age and cannot lengthen it. The
+  queue is not given without the trail the core marks in: the add-on names it
+  when it takes the queue (`DeliveryQueue(trail)`), and a nil trail is refused.
+  Each add-on names its own. A message is marked in the one trail that keeps its
+  conversation; one that no trail keeps, or that several do, is left held and
+  logged, never deleted unmarked.
 
 The queue's numbers are the same limits an app is held to elsewhere
 (`limits.Limits`); a phone scales the capacity and not the age.
@@ -36,7 +39,8 @@ The queue's numbers are the same limits an app is held to elsewhere
 
 An age limit that an add-on enforces holds only as long as every add-on does.
 A sealed message cannot be read by the core, so the limit that matters is on
-how long it stays, and that has to hold whatever an add-on does or fails to do.
+how long it stays, and that has to hold whatever an add-on does or fails to do:
+the queue is therefore never given without the record the core marks in.
 Marking the entry not delivered is a statement in the record about what
 happened, so it is made by the part that keeps the record.
 
@@ -45,5 +49,7 @@ happened, so it is made by the part that keeps the record.
 - A message undelivered after seven days is never silently lost: its entry says
   it was not delivered, and the sender is told.
 - Every Identity Agent runs the expiry, whatever add-ons it includes.
-- An add-on that never calls `KeepExpiryIn` leaves its messages held past their
-  age. Nothing is deleted without being marked first.
+- No add-on can hold a message the core cannot expire, because holding one
+  needs a trail. Nothing is deleted without being marked first, and a message
+  whose record is not unambiguously one trail's is kept, not dropped; the queue's
+  own bounds still limit what such a message costs.

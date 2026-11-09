@@ -93,3 +93,51 @@ func TestAnExpiredMessageWhoseEntryIsNotKeptStaysHeld(t *testing.T) {
 		t.Fatalf("%v %v %d", got, err, q.Len())
 	}
 }
+
+// A conversation this trail does not keep is refused, not treated as marked:
+// the message is another record's to mark, so its copy stays held.
+func TestAMessageForAConversationThisTrailDoesNotKeepIsLeftHeld(t *testing.T) {
+	f := newFixture(t)
+	f.write(f.say(alice, "message", bot, "hello", nil))
+	if err := f.tr.markNotDeliveredIfNot("elsewhere", "e1", mediation.ReasonExpired); err == nil {
+		t.Fatal("an unknown conversation was reported as marked")
+	}
+	q, _ := queuedFor(t, f, filepath.Join(t.TempDir(), "q.json"), "e1")
+	if err := q.Enqueue(mediation.Message{ID: QueueID("elsewhere", "e1"), Conversation: "elsewhere", Sender: alice, Recipient: bot, Sealed: []byte("s")}); err != nil {
+		t.Fatal(err)
+	}
+	f.now = f.now.Add(limits.Defaults().QueueMaxAge)
+	got, err := f.tr.RefuseExpired(q, QueueID("elsewhere", "e1"))
+	if err == nil || len(got) != 0 || len(q.Held(bot)) == 0 {
+		t.Fatalf("%v %v", got, err)
+	}
+	for _, m := range q.Held(bot) {
+		if m.Conversation == "elsewhere" {
+			return
+		}
+	}
+	t.Fatal("the unowned copy was deleted")
+}
+
+// An AI agent's entry is marked not delivered too, once, in the chain; an entry
+// the chain does not hold has nothing to mark.
+func TestAnAgentsExpiredEntryIsMarkedOnceInTheChain(t *testing.T) {
+	f := newFixture(t)
+	f.write(f.say(alice, "message", bot, "hello", nil))
+	if err := f.tr.AppendAgent("c1", f.agentEntry(1)); err != nil {
+		t.Fatal(err)
+	}
+	id := EntryID(len(f.tr.Chain("c1")))
+	n := len(f.tr.Chain("c1"))
+	for range 2 {
+		if err := f.tr.markNotDeliveredIfNot("c1", id, mediation.ReasonExpired); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := len(f.tr.Chain("c1")); got != n+1 {
+		t.Fatalf("the chain grew by %d, want 1", got-n)
+	}
+	if err := f.tr.markNotDeliveredIfNot("c1", "e99", mediation.ReasonExpired); err != nil || len(f.tr.Chain("c1")) != n+1 {
+		t.Fatalf("an entry that is not there was marked: %v", err)
+	}
+}

@@ -358,8 +358,8 @@ func TestAValidStatementIsAdmittedAndLandsInTheTrail(t *testing.T) {
 	}
 }
 
-// The core expires a held delivery on its own tick, once the core has been told
-// which record to mark: the entry is marked not delivered, the sealed copy is
+// The core expires a held delivery on its own tick, which the add-on named
+// when it took the queue: the entry is marked not delivered, the sealed copy is
 // gone, and an add-on did nothing to make it so.
 func TestTheCoresTickExpiresADeliveryAndMarksItsEntry(t *testing.T) {
 	w := newAnAppWorld(t)
@@ -390,7 +390,7 @@ func TestTheCoresTickExpiresADeliveryAndMarksItsEntry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	q, err := w.cw.s.DeliveryQueue()
+	q, err := w.cw.s.DeliveryQueue(tr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,11 +399,6 @@ func TestTheCoresTickExpiresADeliveryAndMarksItsEntry(t *testing.T) {
 	}
 	time.Sleep(60 * time.Millisecond)
 
-	w.cw.s.tick() // nothing is told which record to mark: the copy is kept
-	if q.Len() != 1 {
-		t.Fatal("expired without a record to mark")
-	}
-	w.cw.s.KeepExpiryIn(tr)
 	w.cw.s.tick()
 	if q.Len() != 0 {
 		t.Fatal("the core's tick left an expired copy held")

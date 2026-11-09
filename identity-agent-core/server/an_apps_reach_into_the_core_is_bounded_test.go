@@ -7,8 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"identity-agent-core/agentmessage"
+	"identity-agent-core/didcomm"
 	"identity-agent-core/limits"
 	"identity-agent-core/mediation"
+	"identity-agent-core/trail"
 )
 
 // An app's back end that asks past its rate is turned away before anything is
@@ -52,7 +55,7 @@ func TestAnAppPastItsRateIsRefusedWithAWait(t *testing.T) {
 func TestTheDeliveryQueueIsKeptInTheDataDirectoryAcrossARestart(t *testing.T) {
 	dir := t.TempDir()
 	s1 := &CoreServer{DataDir: dir}
-	q, err := s1.DeliveryQueue()
+	q, err := s1.DeliveryQueue(anEmptyTrail())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +63,7 @@ func TestTheDeliveryQueueIsKeptInTheDataDirectoryAcrossARestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	s2 := &CoreServer{DataDir: dir}
-	q2, err := s2.DeliveryQueue()
+	q2, err := s2.DeliveryQueue(anEmptyTrail())
 	if err != nil || q2.Len() != 1 || len(q2.Held("r")) != 1 {
 		t.Fatalf("after a restart: %v %v", q2, err)
 	}
@@ -89,7 +92,7 @@ func TestPartFilledLimitsNeverMakeARateOfNothing(t *testing.T) {
 		if err := s.holdAppToItsRate("chat"); err != nil {
 			t.Fatalf("%s: the first request of an app was refused: %v", name, err)
 		}
-		q, err := s.DeliveryQueue()
+		q, err := s.DeliveryQueue(anEmptyTrail())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -100,5 +103,49 @@ func TestPartFilledLimitsNeverMakeARateOfNothing(t *testing.T) {
 	// A server never given limits serves the defaults too.
 	if got := (&CoreServer{}).AppLimits(); got != limits.Defaults() {
 		t.Fatalf("%+v", got)
+	}
+}
+
+func anEmptyTrail() *trail.Trail {
+	return trail.New(permissiveRoster{}, &keepingApp{}, trail.Options{Countersign: func(agentmessage.Record) (*didcomm.Envelope, error) { return nil, nil }})
+}
+
+// A queue is not given without the trail the core marks an expired delivery in,
+// so nothing can be held that the core cannot expire (ADR-069).
+func TestTheDeliveryQueueIsNotGivenWithoutATrail(t *testing.T) {
+	s := &CoreServer{DataDir: t.TempDir()}
+	if q, err := s.DeliveryQueue(nil); err == nil || q != nil {
+		t.Fatalf("a queue was given with no trail: %v %v", q, err)
+	}
+}
+
+// Two add-ons each name their own trail; a message past its age is marked in the
+// trail that keeps its conversation, and one that no trail keeps is left held.
+func TestEachAddonsExpiredMessageIsMarkedInItsOwnTrail(t *testing.T) {
+	s := &CoreServer{DataDir: t.TempDir()}
+	l := limits.Defaults()
+	l.QueueMaxAge = 20 * time.Millisecond
+	s.SetLimits(l)
+	a, b := anEmptyTrail(), anEmptyTrail()
+	q, err := s.DeliveryQueue(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DeliveryQueue(b); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Open("cb", "Eann", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Enqueue(mediation.Message{ID: trail.QueueID("cb", "e1"), Conversation: "cb", Sender: "s", Recipient: "r", Sealed: []byte("x")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Enqueue(mediation.Message{ID: trail.QueueID("nobody", "e1"), Conversation: "nobody", Sender: "s", Recipient: "r", Sealed: []byte("x")}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(40 * time.Millisecond)
+	s.refuseExpiredDeliveries()
+	if q.Len() != 1 || len(q.Held("r")) != 1 || q.Held("r")[0].Conversation != "nobody" {
+		t.Fatalf("the unowned message must stay held and the owned one go: %d", q.Len())
 	}
 }

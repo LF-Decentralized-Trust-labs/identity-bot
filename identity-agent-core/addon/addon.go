@@ -100,11 +100,11 @@ type Host interface {
 	AddonState(key any, make func() any) any
 	// AppLimits is what apps are held to; pass it to trail.New as Options.Limits.
 	AppLimits() limits.Limits
-	// DeliveryQueue is the sealed-message queue, kept across a restart.
-	DeliveryQueue() (*mediation.Queue, error)
-	// KeepExpiryIn names the trail the core marks an expired delivery in, on its
-	// own tick (ADR-069). Call it once with the trail built from AppLimits.
-	KeepExpiryIn(t *trail.Trail)
+	// DeliveryQueue is the sealed-message queue, kept across a restart, for the
+	// add-on whose conversation record is t (build it with trail.New from
+	// AppLimits). The core marks an expired delivery in t on its own tick
+	// (ADR-069), so a queue is not given without one. Each add-on passes its own.
+	DeliveryQueue(t *trail.Trail) (*mediation.Queue, error)
 
 	AnchorRecord() (bool, error)
 	AssetHandler() *asset.Handler

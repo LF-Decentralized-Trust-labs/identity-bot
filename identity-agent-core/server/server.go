@@ -82,10 +82,10 @@ type CoreServer struct {
 	limitsMu  sync.Mutex
 	limits    limits.Limits
 	appLimits appLimitState
-	// expiryTrail is the record the core marks an expired delivery in; see
-	// KeepExpiryIn.
-	expiryMu    sync.Mutex
-	expiryTrail *trail.Trail
+	// expiryTrails are the records the core marks an expired delivery in, one
+	// per add-on that holds messages; see DeliveryQueue.
+	expiryMu     sync.Mutex
+	expiryTrails []*trail.Trail
 	// Providers is the registry of operators this agent can draw services from.
 	// Loaded once at startup; the owner may add to it at runtime.
 	Providers     *provider.Registry

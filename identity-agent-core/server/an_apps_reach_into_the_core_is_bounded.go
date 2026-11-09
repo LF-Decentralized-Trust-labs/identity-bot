@@ -68,43 +68,75 @@ func (s *CoreServer) appLimitState() *appLimitState {
 }
 
 // DeliveryQueue is the queue of sealed messages held for a recipient that is
-// briefly offline, as it was when this server last stopped. A queue file that
-// cannot be read is an error, and is left as it is.
-func (s *CoreServer) DeliveryQueue() (*mediation.Queue, error) {
+// briefly offline, as it was when this server last stopped, for an add-on whose
+// conversation record is t. Naming the trail is the price of the queue: the core
+// marks an expired delivery in it, on every tick, so nothing can be held that the
+// core cannot expire. A nil trail is refused. Each add-on names its own trail;
+// the queue is one. A queue file that cannot be read is an error, and is left as
+// it is.
+func (s *CoreServer) DeliveryQueue(t *trail.Trail) (*mediation.Queue, error) {
+	if t == nil {
+		return nil, errors.New("the delivery queue needs the trail an expired delivery is marked in")
+	}
+	st := s.appLimitState()
+	if st.qerr != nil {
+		return nil, st.qerr
+	}
+	s.expiryMu.Lock()
+	known := false
+	for _, k := range s.expiryTrails {
+		known = known || k == t
+	}
+	if !known {
+		s.expiryTrails = append(s.expiryTrails, t)
+	}
+	s.expiryMu.Unlock()
+	return st.queue, nil
+}
+
+// theQueue is the queue without naming a trail, for the core's own tick, which
+// holds nothing in it.
+func (s *CoreServer) theQueue() (*mediation.Queue, error) {
 	st := s.appLimitState()
 	return st.queue, st.qerr
 }
 
-// KeepExpiryIn names the conversation record the core marks an expired
-// delivery in. From then on every tick of the core's loop refuses what the
-// delivery queue has held for its whole age: the entry is marked not delivered,
-// then the sealed copy is deleted. The age is the core's to enforce, so it holds
-// whatever an add-on does.
-func (s *CoreServer) KeepExpiryIn(t *trail.Trail) {
-	s.expiryMu.Lock()
-	s.expiryTrail = t
-	s.expiryMu.Unlock()
-}
-
-// refuseExpiredDeliveries is the core's part of each tick.
+// refuseExpiredDeliveries is the core's part of each tick. Every message the
+// queue has held for its whole age is marked not delivered in the trail that
+// keeps its conversation, then deleted. A message whose conversation no trail
+// keeps, or more than one does, is left held and logged: it is never deleted
+// ahead of the record that explains it.
 func (s *CoreServer) refuseExpiredDeliveries() {
 	s.expiryMu.Lock()
-	t := s.expiryTrail
+	trails := append([]*trail.Trail(nil), s.expiryTrails...)
 	s.expiryMu.Unlock()
-	if t == nil {
+	if len(trails) == 0 {
 		return
 	}
-	q, err := s.DeliveryQueue()
+	q, err := s.theQueue()
 	if err != nil {
 		log.Printf("[delivery] queue: %v", err)
 		return
 	}
-	told, err := t.RefuseExpired(q)
-	if err != nil {
-		log.Printf("[delivery] expiring: %v", err)
-	}
-	for _, d := range told {
-		log.Printf("[delivery] %s was not delivered in time and is refused", d.ID)
+	for _, d := range q.Due() {
+		var owner *trail.Trail
+		n := 0
+		for _, t := range trails {
+			if t.Keeps(d.Conversation) {
+				owner, n = t, n+1
+			}
+		}
+		if n != 1 {
+			log.Printf("[delivery] %s is past its age and %d trails keep its conversation: left held", d.ID, n)
+			continue
+		}
+		told, err := owner.RefuseExpired(q, d.ID)
+		if err != nil {
+			log.Printf("[delivery] expiring: %v", err)
+		}
+		for _, x := range told {
+			log.Printf("[delivery] %s was not delivered in time and is refused", x.ID)
+		}
 	}
 }
 
