@@ -112,7 +112,7 @@ func TestEventsAWitnessHasReceiptedAreNotDiscarded(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := discardIt(s)
-	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "/api/events/signature") {
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "recovery rotation") {
 		t.Fatalf("a receipted event: %d %s", rec.Code, rec.Body.String())
 	}
 	nothingWasDiscarded(t, s, length, grant, agentID)
@@ -161,7 +161,7 @@ func TestEventsAWitnessMayHoldAreNotDiscarded(t *testing.T) {
 		"it holds a later event":   events[:first+2],
 	} {
 		held = at
-		if rec := discardIt(s); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "/api/events/signature") {
+		if rec := discardIt(s); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "recovery rotation") {
 			t.Fatalf("%s: %d %s", name, rec.Code, rec.Body.String())
 		}
 		nothingWasDiscarded(t, s, length, grant, agentID)

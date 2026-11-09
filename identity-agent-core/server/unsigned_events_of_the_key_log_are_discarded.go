@@ -156,12 +156,24 @@ var errDiscardWouldFork = errors.New("not discarded")
 // is held for any event to be discarded, and every witness the identity names
 // has answered, signed by itself, that its tip is below the first of them.
 // A witness that does not answer is not one that holds nothing, so silence
-// refuses. The refusal points to POST /api/events/signature, which signs them
-// in place and is the migration for events that may already be at witnesses.
+// refuses. The refusal says what can be done instead: an event marked at the
+// upgrade is signed in place (POST /api/events/signature); one added unsigned
+// after the upgrade is not accepted there, so it is superseded by a recovery
+// rotation made on the device that holds the key.
 func (s *CoreServer) nothingDiscardedIsAtWitnesses(aid string, tail []store.EventRecord) error {
+	marked := false
+	for _, ev := range tail {
+		if ev.UnsignedAtUpgrade {
+			marked = true
+		}
+	}
 	refuse := func(why string) error {
+		instead := "they are superseded instead by a recovery rotation made on the device that holds the key"
+		if marked {
+			instead = "they are signed in place instead, POST /api/events/signature"
+		}
 		return fmt.Errorf("%w: %s; events that may be at witnesses are not discarded, because a different event at the same place would read as duplicity "+
-			"(they are signed in place instead, POST /api/events/signature)", errDiscardWouldFork, why)
+			"(%s)", errDiscardWouldFork, why, instead)
 	}
 	for _, ev := range tail {
 		// An event marked as unsigned at the upgrade is one ADR-061 says may be
