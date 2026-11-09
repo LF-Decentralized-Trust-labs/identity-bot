@@ -109,6 +109,11 @@ func (s *CoreServer) discardUnsignedOwnEvents() (*discardedUnsignedEvents, error
 		seals = append(seals, body.A...)
 		out.Discarded = append(out.Discarded, ev.SequenceNumber)
 	}
+	// No send of the key log to its witnesses is in flight from here to the
+	// set-aside: one that had read these events could reach a witness after it
+	// was asked what it holds, and the discard would then fork the log.
+	s.witnessing.sendMu.Lock()
+	defer s.witnessing.sendMu.Unlock()
 	if err := s.nothingDiscardedIsAtWitnesses(identity.AID, events[from:]); err != nil {
 		return nil, err
 	}
@@ -159,6 +164,12 @@ func (s *CoreServer) nothingDiscardedIsAtWitnesses(aid string, tail []store.Even
 			"(they are signed in place instead, POST /api/events/signature)", errDiscardWouldFork, why)
 	}
 	for _, ev := range tail {
+		// An event marked as unsigned at the upgrade is one ADR-061 says may be
+		// at witnesses: it is signed in place and never discarded, whatever the
+		// receipts held here and the witnesses asked say.
+		if ev.UnsignedAtUpgrade {
+			return refuse(fmt.Sprintf("event %d was already in the log, unsigned, when this version took it over, and may be at witnesses", ev.SequenceNumber))
+		}
 		var body struct {
 			D string `json:"d"`
 		}

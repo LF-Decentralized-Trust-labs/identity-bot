@@ -193,7 +193,7 @@ func (s *CoreServer) witnessIssuersOfWaitingEvents(ctx context.Context, already 
 		if err != nil || len(witnesses) == 0 {
 			continue
 		}
-		s.WitnessService.BringUpToDate(ctx, p.IssuerAID, s.signedEventsOf(p.IssuerAID), witnesses, toad)
+		s.sendLogToWitnesses(ctx, p.IssuerAID, witnesses, toad)
 	}
 }
 

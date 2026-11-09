@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
@@ -277,4 +278,63 @@ type unreloadable struct{ *keriengine.Engine }
 
 func (unreloadable) ReloadIdentity(*drivers.DriverReloadIdentityRequest) (*drivers.DriverReloadIdentityResponse, error) {
 	return nil, errors.New("no")
+}
+
+// An event marked as unsigned when this version took the log over is one
+// ADR-061 says may be at witnesses: it is never discarded, even where no
+// receipt is held and no witness is named, and the owner is pointed to signing
+// it in place.
+func TestAnEventMarkedUnsignedAtUpgradeIsNeverDiscarded(t *testing.T) {
+	s, agentID, grant, first, _ := discardWorld(t)
+	owner, _ := s.DataStore.GetIdentity()
+	length := keyLogLength(s)
+	if _, err := recordDB(t, s).Exec(`UPDATE kel SET unsigned_at_upgrade = 1 WHERE aid = ? AND seq_num = ?`, owner.AID, first); err != nil {
+		t.Fatal(err)
+	}
+	rec := discardIt(s)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "/api/events/signature") {
+		t.Fatalf("an event marked unsigned at the upgrade: %d %s", rec.Code, rec.Body.String())
+	}
+	nothingWasDiscarded(t, s, length, grant, agentID)
+}
+
+// A send of the key log to its witnesses that is in flight holds the discard
+// back: the discard cannot ask the witnesses what they hold, and set the events
+// aside, while a send that read them may still be on its way.
+func TestASendInFlightBlocksTheDiscard(t *testing.T) {
+	s, agentID, grant, _, _ := discardWorld(t)
+	length := keyLogLength(s)
+	s.witnessing.sendMu.Lock() // what sendLogToWitnesses holds while it sends
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- discardIt(s) }()
+	select {
+	case rec := <-done:
+		s.witnessing.sendMu.Unlock()
+		t.Fatalf("the discard went ahead of a send in flight: %d %s", rec.Code, rec.Body.String())
+	case <-time.After(300 * time.Millisecond):
+	}
+	nothingWasDiscarded(t, s, length, grant, agentID)
+	s.witnessing.sendMu.Unlock()
+	if rec := <-done; rec.Code != http.StatusOK {
+		t.Fatalf("the discard once the send was done: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// Every send of a key log to witnesses takes that lock, so the test above holds
+// for them all: sendLogToWitnesses does not read or send while it is held.
+func TestSendingTheLogWaitsForADiscardInProgress(t *testing.T) {
+	s := appWorld(t)
+	s.witnessing.sendMu.Lock()
+	returned := make(chan struct{})
+	go func() {
+		s.sendLogToWitnesses(context.Background(), "E-none", nil, 0)
+		close(returned)
+	}()
+	select {
+	case <-returned:
+		t.Fatal("a send went ahead while the key log was being discarded from")
+	case <-time.After(200 * time.Millisecond):
+	}
+	s.witnessing.sendMu.Unlock()
+	<-returned
 }
