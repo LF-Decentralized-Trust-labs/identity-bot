@@ -3,7 +3,7 @@
 **Status:** Accepted, amended by ADR-050 and ADR-061
 **Date:** 2026-10-18
 **Amended by:** ADR-050 (One check for a controller's actions and an AI agent's capability calls, 2026-10-26), ADR-061 (Every key event is signed before it is added, 2026-10-31)
-**Amended:** 2026-11-08 — A delegated identity is approved by the device that holds the key, and events written without it may be discarded where no witness can have seen them (see the two paragraphs before "What a Controller Grant shows")
+**Amended:** 2026-11-08 — A delegated identity is approved by the device that holds the key, and events written without it after the upgrade may be discarded where no witness can have seen them; an event marked unsigned at the upgrade is never discarded, only signed in place (see the two paragraphs before "What a Controller Grant shows")
 **Relates to:** ADR-042 (How an agent is reached, and who may manage it), ADR-038 (Who claims a machine is not who owns what it founds), ADR-027 (Hardware-gated signing-key custody)
 
 ## Context
@@ -201,7 +201,9 @@ cannot ask that device for anything, since it never had them. The owner may disc
 (`POST /api/key-log/unsigned-events/discard`), which sets them aside, never deleting, and
 undoes what they anchored: a grant they issued is no longer in force, a registry whose
 inception they anchored is not used and is made again on next use, and an identity whose
-approval was among them waits for its approval afresh. Only where no witness can have seen
+approval was among them waits for its approval afresh. An event marked unsigned at the
+upgrade (ADR-061 §3) is never discarded: it may already be at witnesses, so it is only ever
+signed in place. An unmarked one is discarded only where no witness can have seen
 any of them: no receipt is held for any of them, and every witness the identity names has
 answered, signed by itself, that it holds the log only below the first. A witness that does
 not answer is not one that holds nothing. An earlier version sent unsigned events to
