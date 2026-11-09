@@ -297,6 +297,13 @@
       "message": "anything",
       "sig": "0BABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
       "go_accepts": false
+    },
+    {
+      "name": "a key that is not a point on the curve",
+      "public_key_hex": "0200000000000000000000000000000000000000000000000000000000000000",
+      "message": "a login body",
+      "sig": "0BBgbv7M5lXCtjB6v1fdjaEuu7-QxBMULztM0BOolfbkzz7gghXS8wtJOq1thaxzyWPjHAxlf3nz4K7bAeAbq7sB",
+      "go_accepts": false
     }
   ],
   "non_transferable_aid": [
@@ -329,6 +336,11 @@
     {
       "name": "a key in a second encoding",
       "value": "BPD_______________________________________9_",
+      "go_accepts": false
+    },
+    {
+      "name": "an identifier whose key is not a point on the curve",
+      "value": "BAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
       "go_accepts": false
     }
   ],
@@ -666,6 +678,11 @@
     {
       "name": "a key in a second encoding",
       "value": "DPD_______________________________________9_",
+      "go_accepts": false
+    },
+    {
+      "name": "a key that is not a point on the curve",
+      "value": "DAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
       "go_accepts": false
     }
   ]

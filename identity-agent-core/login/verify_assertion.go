@@ -60,13 +60,20 @@ func VerifyAssertion(a Assertion, expectedNonce, expectedAudience, expectedSiteA
 // so an approval made for one browser's key cannot let in another. Empty
 // means the challenge named no key and the assertion must name none.
 func VerifyAssertionForBrowserKey(a Assertion, expectedNonce, expectedAudience, expectedSiteAID, expectedBrowserKey string, maxSkewSeconds int) AssertionVerifyResult {
+	return verifyAssertionAt(a, expectedNonce, expectedAudience, expectedSiteAID, expectedBrowserKey, maxSkewSeconds, time.Now(), KeyFromKeyLog)
+}
+
+// verifyAssertionAt is the whole check with the clock and the key's source
+// given, so the published decision vectors (packages/login-verify/test-vectors)
+// can fix both. Nothing else differs from VerifyAssertionForBrowserKey.
+func verifyAssertionAt(a Assertion, expectedNonce, expectedAudience, expectedSiteAID, expectedBrowserKey string, maxSkewSeconds int, now time.Time, keyOf func(aid, keyLog string) ([]byte, error)) AssertionVerifyResult {
 	window := freshnessWindow(maxSkewSeconds)
 
 	dt, err := parseRFC3339(a.Dt)
 	if err != nil {
 		return AssertionVerifyResult{Reason: "bad dt"}
 	}
-	if d := time.Since(dt); d > window || d < -window {
+	if d := now.Sub(dt); d > window || d < -window {
 		return AssertionVerifyResult{Reason: "dt outside freshness window"}
 	}
 	if a.Nonce != expectedNonce {
@@ -90,7 +97,7 @@ func VerifyAssertionForBrowserKey(a Assertion, expectedNonce, expectedAudience, 
 		return AssertionVerifyResult{Reason: "missing sig"}
 	}
 
-	pub, err := KeyFromKeyLog(a.I, a.PKEL)
+	pub, err := keyOf(a.I, a.PKEL)
 	if err != nil {
 		return AssertionVerifyResult{Reason: "key resolve failed: " + err.Error()}
 	}

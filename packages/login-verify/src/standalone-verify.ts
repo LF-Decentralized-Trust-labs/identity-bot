@@ -2,6 +2,7 @@ import {
   canonicalAssertionBody,
   isBrowserKeyThumbprint,
   parseRfc3339,
+  parseRfc3339Exact,
   verifyCanonical,
 } from "./canonical.js";
 import { NO_KEY_RESOLVER, type KeyResolver } from "./resolver.js";
@@ -138,12 +139,16 @@ export async function verifyLoginAssertion(
     if (!Number.isFinite(now)) {
       return { valid: false, reason: "bad reference time" };
     }
-    const dtMs = parseRfc3339(assertion.dt);
+    const dt = parseRfc3339Exact(assertion.dt);
     // An unreadable time is refused, not compared: NaN is never "outside" a window.
-    if (Number.isNaN(dtMs)) {
+    if (dt === null) {
       return { valid: false, reason: "bad dt" };
     }
-    if (Math.abs(now - dtMs) > maxSkew * 1000) {
+    // To the nanosecond, as the core compares: dt is `dt.ms` milliseconds and
+    // `dt.subMsNs` nanoseconds past the epoch, and the clock is whole milliseconds.
+    const apartNs = (BigInt(Math.floor(now)) - BigInt(dt.ms)) * 1_000_000n - BigInt(dt.subMsNs);
+    const windowNs = BigInt(maxSkew) * 1_000_000_000n;
+    if (apartNs > windowNs || apartNs < -windowNs) {
       return { valid: false, reason: "dt outside freshness window" };
     }
   }
@@ -161,7 +166,7 @@ export async function verifyLoginAssertion(
     return { valid: false, reason: "browser key mismatch: the assertion was approved for another browser key" };
   }
   if (expectedBrowserKey !== "" && !isBrowserKeyThumbprint(expectedBrowserKey)) {
-    return { valid: false, reason: "browser key mismatch: a browser key thumbprint is 43 characters of base64url" };
+    return { valid: false, reason: "browser key mismatch: a browser key thumbprint is 43 characters of base64url (an RFC 7638 SHA-256 digest)" };
   }
   if (!assertion.sig) {
     return { valid: false, reason: "missing sig" };
