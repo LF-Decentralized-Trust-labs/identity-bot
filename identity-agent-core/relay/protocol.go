@@ -23,6 +23,11 @@ type ServiceDescriptor struct {
 	// (ADR-048 §10). It is the relay's own host or a name under it. Empty means
 	// the relay's own host.
 	ConnectHost string `json:"connect_host,omitempty"`
+	// CallerHost is the host the relay's private addresses are on: the one
+	// callers reach, which Allocate holds every address to. It may differ from
+	// the host this Identity Agent was pointed at, which can be the connect
+	// host. Empty means the host this Identity Agent was pointed at.
+	CallerHost string `json:"caller_host,omitempty"`
 	// TunnelEndpoint is the wss:// address of the session websocket, at the
 	// connect host.
 	TunnelEndpoint string `json:"tunnel_endpoint"`

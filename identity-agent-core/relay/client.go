@@ -76,6 +76,9 @@ func (c *Client) FetchDescriptor(ctx context.Context) (*ServiceDescriptor, error
 	if err := CheckConnectHost(c.BaseURL, &d); err != nil {
 		return nil, err
 	}
+	if err := c.checkParentCallerHost(ctx, &d); err != nil {
+		return nil, err
+	}
 	c.Descriptor = &d
 	return &d, nil
 }
@@ -93,8 +96,29 @@ func CheckConnectHost(baseURL string, d *ServiceDescriptor) error {
 	if err != nil || base.Host == "" {
 		return fmt.Errorf("the relay %q is not a URL", baseURL)
 	}
+	// The descriptor named the connect host itself, and it is the host this
+	// client was pointed at: the relay is being reached at its connect host.
+	namedConnect := d.ConnectHost != "" && hostName(d.ConnectHost) == strings.ToLower(base.Hostname())
 	if d.ConnectHost == "" {
 		d.ConnectHost = base.Host
+	}
+	if d.CallerHost != "" {
+		// The caller host is the relay's own name or a name under it. A client
+		// pointed at the connect host may also be given the connect host's
+		// immediate parent (the apex, with connect.<apex> as the connect host),
+		// and no other ancestor: example.com or com are somebody else's.
+		caller := strings.ToLower(d.CallerHost)
+		callerName := hostName(caller)
+		bn := strings.ToLower(base.Hostname())
+		parent := ""
+		if namedConnect {
+			if i := strings.Index(bn, "."); i > 0 {
+				parent = bn[i+1:]
+			}
+		}
+		if callerName != bn && !strings.HasSuffix(callerName, "."+bn) && (parent == "" || callerName != parent) {
+			return fmt.Errorf("the relay at %s names %s as its caller host, which is not under its own name", bn, caller)
+		}
 	}
 	connect := strings.ToLower(d.ConnectHost)
 	connectName := connect
@@ -120,6 +144,66 @@ func CheckConnectHost(baseURL string, d *ServiceDescriptor) error {
 	return nil
 }
 
+// checkParentCallerHost holds a caller host above the relay's own name to the
+// parent's own word. A host can name itself as connect host and so have its
+// parent accepted (alice.herokuapp.com could claim herokuapp.com), so the
+// parent must itself publish a descriptor for the same service.
+func (c *Client) checkParentCallerHost(ctx context.Context, d *ServiceDescriptor) error {
+	base, err := url.Parse(c.BaseURL)
+	if err != nil || d.CallerHost == "" {
+		return err
+	}
+	bn := strings.ToLower(base.Hostname())
+	callerName := hostName(d.CallerHost)
+	if callerName == bn || strings.HasSuffix(callerName, "."+bn) {
+		return nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base.Scheme+"://"+d.CallerHost+"/.well-known/url-relay-service.json", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("the caller host %s could not be asked whether it is this relay: %w", d.CallerHost, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("the caller host %s does not serve this relay's descriptor (%d)", d.CallerHost, resp.StatusCode)
+	}
+	var parent ServiceDescriptor
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxAnswer)).Decode(&parent); err != nil {
+		return fmt.Errorf("the caller host %s serves no readable descriptor: %w", d.CallerHost, err)
+	}
+	if parent.Service == "" || parent.Service != d.Service {
+		return fmt.Errorf("the caller host %s is a different service (%q), not %q", d.CallerHost, parent.Service, d.Service)
+	}
+	return nil
+}
+
+// hostName is a host without its port, lowercased.
+func hostName(hostport string) string {
+	h := strings.ToLower(hostport)
+	if n, _, err := net.SplitHostPort(h); err == nil {
+		return n
+	}
+	return h
+}
+
+// sameHost reports whether two hosts are one, with the scheme's default port
+// the same as no port: relay.example:443 is relay.example for https.
+func sameHost(scheme, a, b string) bool {
+	norm := func(h string) string {
+		h = strings.ToLower(h)
+		if n, p, err := net.SplitHostPort(h); err == nil {
+			if (scheme == "https" && p == "443") || (scheme == "http" && p == "80") {
+				return n
+			}
+		}
+		return h
+	}
+	return norm(a) == norm(b)
+}
+
 // NewSecret makes the secret a private address is held by, and the commitment
 // the relay stores in its place: base64url SHA-256 of the secret.
 func NewSecret() (secret, commitment string) {
@@ -137,7 +221,7 @@ func Commitment(secret []byte) string {
 }
 
 // Allocate makes a private address held by the secret behind commitment.
-func (c *Client) Allocate(ctx context.Context, aid, commitment string) (label, url string, err error) {
+func (c *Client) Allocate(ctx context.Context, aid, commitment string) (label, address string, err error) {
 	var out struct {
 		Allocation string `json:"allocation"`
 		PublicURL  string `json:"public_url"`
@@ -147,6 +231,27 @@ func (c *Client) Allocate(ctx context.Context, aid, commitment string) (label, u
 	}
 	if out.Allocation == "" || out.PublicURL == "" {
 		return "", "", fmt.Errorf("allocate: the relay named no address")
+	}
+	if err := relayproto.CheckPrivateURL(out.PublicURL, out.Allocation); err != nil {
+		return "", "", fmt.Errorf("allocate: %w", err)
+	}
+	// One host for every relationship: the relay's own, which this client was
+	// pointed at. A host of its own per identity would still show each one in
+	// the TLS handshake, whatever the label.
+	// The relay's own host is the descriptor's caller host: a client pointed at
+	// the connect host is given addresses at the caller-facing one. Without a
+	// descriptor naming one, it is the host this client was pointed at.
+	base, berr := url.Parse(c.BaseURL)
+	got, gerr := url.Parse(out.PublicURL)
+	if berr != nil || gerr != nil {
+		return "", "", fmt.Errorf("allocate: the relay gave an address at %q, not at its own host %q", out.PublicURL, c.BaseURL)
+	}
+	callerHost := base.Host
+	if c.Descriptor != nil && c.Descriptor.CallerHost != "" {
+		callerHost = c.Descriptor.CallerHost
+	}
+	if !sameHost(got.Scheme, got.Host, callerHost) {
+		return "", "", fmt.Errorf("allocate: the relay gave an address at %q, not at its own host %q", out.PublicURL, callerHost)
 	}
 	return out.Allocation, strings.TrimRight(out.PublicURL, "/"), nil
 }

@@ -313,6 +313,23 @@ everybody else reaches them. They may be different hosts.
 | public name | a host under the public relay: `https://<name>.<public-relay>/...` | the request unchanged |
 | custom domain | `https://<domain>/...` | the request unchanged |
 
+**Amended 2026-11-08: a private address is never a host of its own, and the retired subdomain form has a stated transition.**
+The host name is in clear in every TLS handshake (SNI), where the relay's network, the
+caller's ISP and anyone on the wire read it, so a per-relationship host would show a
+distinct name for each relationship every time it is used. A private label lives in the
+path, inside the encryption, at the relay's one host. An Identity Agent refuses a new
+private address whose label is in the host or whose URL is not `https://<relay>/<label>`
+(`relayproto.CheckPrivateURL`). A public name is a host on purpose: it is one stable
+address anybody may find, so it is not a per-relationship name.
+
+*Transition from per-relationship subdomains.* An address an Identity Agent already
+holds as `https://<label>.<relay>` keeps working, unchanged: it is never rewritten,
+because the URL is the identifier counterparties hold (`did:webs`). A relay that served
+that form keeps serving it for addresses already made, and makes no new one, until the
+operator ends it. The Identity Agent holds both forms the same way. The form is not
+removed by this ADR; the operator names the end date, and until then those relationships
+remain visible by name in the handshake.
+
 The stream's preamble names the label, name or domain. The Identity Agent
 takes what an address is, and the URL it writes about itself there, from its
 own record of the addresses it holds (§6), never from a header a caller could

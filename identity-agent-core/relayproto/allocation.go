@@ -3,6 +3,8 @@ package relayproto
 import (
 	"crypto/rand"
 	"encoding/base32"
+	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -69,4 +71,32 @@ func (l *AllocationLimiter) Allow(allocation string) bool {
 	}
 	w.count++
 	return true
+}
+
+// CheckPrivateURL says whether publicURL is where a private allocation named
+// label may be reached: a path at the relay's one host,
+// https://<relay>/<label>, and never a host of its own (ADR-048 §8).
+//
+// The host name travels in clear in every TLS handshake (SNI), where the
+// relay's network, the caller's ISP and anyone on the wire read it. A label
+// in the host would show them a distinct name for each relationship every
+// time it is used; in the path it is inside the encryption. An Identity Agent
+// checks this before it holds a new private address, so a relay cannot hand
+// it an address that gives the relationship away.
+//
+// It is for NEW allocations. An address an Identity Agent already holds in
+// the retired subdomain form (https://<label>.<relay>) keeps working as it
+// is; see ADR-048 §8, "Transition from per-relationship subdomains".
+func CheckPrivateURL(publicURL, label string) error {
+	u, err := url.Parse(publicURL)
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" {
+		return fmt.Errorf("a private address must be an https:// URL, not %q", publicURL)
+	}
+	if label == "" || strings.Contains(strings.ToLower(u.Hostname()), strings.ToLower(label)) {
+		return fmt.Errorf("a private address must not carry its label in the host name, where the TLS handshake shows it")
+	}
+	if !strings.EqualFold(strings.TrimRight(u.EscapedPath(), "/"), "/"+label) || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("a private address must be a path at the relay: https://<relay>/<label>")
+	}
+	return nil
 }
