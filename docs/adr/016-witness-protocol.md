@@ -1,6 +1,6 @@
 # ADR-016: Witness Protocol — Inter-Agent Witness Request Workflow
 
-**Status:** Stub (endpoints defined, full implementation deferred to Sprint 4)
+**Status:** Superseded by ADR-069 (2026-10-24). Was marked a stub; the protocol below is built, and ADR-069 records the witness classes and the receipt form.
 **Date:** 2026-03-21
 
 ## Context
@@ -79,7 +79,7 @@ Receives a witness request from a remote Identity Agent.
 
 **Behavior (Sprint 4):**
 1. Verify requester AID is a known contact with `status = accepted`.
-2. Check witness capacity (max 3 witnesses concurrently).
+2. Check witness capacity (at most `MaxOutgoingWitnessing` (15) identities witnessed for concurrently; corrected by ADR-069, which found 3 contradicted by the code).
 3. Evaluate policy (future: configurable rules).
 4. Create task `witness_request_received` with status `in_progress`.
 5. Call `POST <requester_oobi>/api/witness/accept` with decision.
