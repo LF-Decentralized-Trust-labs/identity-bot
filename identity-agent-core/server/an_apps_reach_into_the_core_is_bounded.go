@@ -71,7 +71,8 @@ func (s *CoreServer) appLimitState() *appLimitState {
 // briefly offline, as it was when this server last stopped, for an add-on whose
 // conversation record is t. Naming the trail is the price of the queue: the core
 // marks an expired delivery in it, on every tick, so nothing can be held that the
-// core cannot expire. A nil trail is refused. Each add-on names its own trail;
+// core cannot expire. A nil trail is refused, and the queue given refuses a message for a
+// conversation that trail does not keep. Each add-on names its own trail;
 // the queue is one. A queue file that cannot be read is an error, and is left as
 // it is.
 func (s *CoreServer) DeliveryQueue(t *trail.Trail) (*mediation.Queue, error) {
@@ -91,7 +92,7 @@ func (s *CoreServer) DeliveryQueue(t *trail.Trail) (*mediation.Queue, error) {
 		s.expiryTrails = append(s.expiryTrails, t)
 	}
 	s.expiryMu.Unlock()
-	return st.queue, nil
+	return st.queue.Admitting(t.Keeps), nil
 }
 
 // theQueue is the queue without naming a trail, for the core's own tick, which

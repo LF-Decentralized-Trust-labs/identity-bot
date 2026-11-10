@@ -144,6 +144,25 @@ func TestAnAgentsExpiredEntryIsMarkedOnceInTheChain(t *testing.T) {
 	}
 }
 
+// The Identity Agent's own outcome record is not a message, so its id is not an
+// entry that can be marked not delivered.
+func TestAnOutcomeRecordIsNotMarkedNotDelivered(t *testing.T) {
+	f := newFixture(t)
+	if err := f.tr.AppendAgent("c1", f.agentEntry(1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.tr.markNotDeliveredIfNot("c1", "e1", mediation.ReasonExpired); err != nil {
+		t.Fatal(err)
+	}
+	n := len(f.tr.Chain("c1"))
+	if err := f.tr.markNotDeliveredIfNot("c1", EntryID(n), mediation.ReasonExpired); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(f.tr.Chain("c1")); got != n {
+		t.Fatalf("an outcome record was marked not delivered: the chain grew from %d to %d", n, got)
+	}
+}
+
 // A trail rebuilt from the record that holds the chain takes the not-delivered
 // mark back in as the Identity Agent's own note, so the entry is not marked a
 // second time and later entries still follow it. Any other entry that carries

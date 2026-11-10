@@ -82,15 +82,18 @@ func (t *Trail) markNotDeliveredIfNot(conversation, entryID, reason string) erro
 }
 
 // markAnAgentsEntry marks an entry of an AI agent, which the chain holds and
-// c.entries does not. An id the chain does not hold is gone and has nothing to
+// c.entries does not. An id the chain does not hold as an agent's statement
+// (an outcome record's id, say) is gone and has nothing to
 // mark; an entry already marked is left as it is.
 func (t *Trail) markAnAgentsEntry(c *conversation, entryID, reason string) error {
 	var held bool
 	for _, ce := range c.chain {
-		if agentmessage.EntryID(ce.Seq) == entryID {
+		rec, err := agentmessage.Read(ce.Envelope)
+		// Only an AI agent's own statement is a message that can be undelivered:
+		// an outcome the Identity Agent wrote, or a person's entry, is not.
+		if err == nil && agentmessage.EntryID(ce.Seq) == entryID && rec.Kind != agentmessage.KindOutcome && rec.PersonProof == nil {
 			held = true
 		}
-		rec, err := agentmessage.Read(ce.Envelope)
 		if err == nil && rec.Outcome != nil && rec.Outcome.Entry == entryID && rec.Outcome.State == agentmessage.OutcomeNotDelivered {
 			return nil
 		}

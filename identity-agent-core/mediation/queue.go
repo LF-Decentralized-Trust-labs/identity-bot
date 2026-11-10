@@ -72,8 +72,29 @@ type Expired struct {
 	Reason                              string
 }
 
-// Queue holds sealed messages.
+// ReasonNotKept is why a view of the queue turned a message away: the conversation
+// is not one the holder of the view keeps a record of.
+const ReasonNotKept = "this add-on keeps no record of that conversation, so the core could not expire its message"
+
+// Queue holds sealed messages. A queue made by New or Open is one store; Admitting
+// gives a view of the same store that takes only some conversations.
 type Queue struct {
+	*store
+	// admit, when set, says whether a message for a conversation may be held
+	// through this view.
+	admit func(conversation string) bool
+}
+
+// Admitting is a view of the same queue that refuses to hold a message for a
+// conversation keeps does not name. Everything else (what is held, its limits, its
+// file) is shared with the queue it was made from.
+func (q *Queue) Admitting(keeps func(conversation string) bool) *Queue {
+	return &Queue{store: q.store, admit: func(c string) bool {
+		return keeps(c) && (q.admit == nil || q.admit(c))
+	}}
+}
+
+type store struct {
 	l   limits.Limits
 	now func() time.Time
 
@@ -99,7 +120,7 @@ func New(l limits.Limits, now func() time.Time) *Queue {
 	if now == nil {
 		now = time.Now
 	}
-	return &Queue{l: l, now: now, byID: map[string]*held{}, byCv: map[string]*share{}, bySn: map[string]*share{}}
+	return &Queue{store: &store{l: l, now: now, byID: map[string]*held{}, byCv: map[string]*share{}, bySn: map[string]*share{}}}
 }
 
 // stored is the queue as it is written: every message held, with the state of
@@ -188,6 +209,9 @@ func (q *Queue) saveAs(view func(*storedItem) bool) error {
 // Enqueue holds a message, or refuses it with the reason. A refusal changes
 // nothing that is already held.
 func (q *Queue) Enqueue(m Message) error {
+	if q.admit != nil && !q.admit(m.Conversation) {
+		return &Refusal{ReasonNotKept}
+	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if _, ok := q.byID[m.ID]; ok {

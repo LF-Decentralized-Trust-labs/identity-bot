@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -55,7 +56,7 @@ func TestAnAppPastItsRateIsRefusedWithAWait(t *testing.T) {
 func TestTheDeliveryQueueIsKeptInTheDataDirectoryAcrossARestart(t *testing.T) {
 	dir := t.TempDir()
 	s1 := &CoreServer{DataDir: dir}
-	q, err := s1.DeliveryQueue(anEmptyTrail())
+	q, err := s1.DeliveryQueue(aTrailKeeping(t, "c"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +64,7 @@ func TestTheDeliveryQueueIsKeptInTheDataDirectoryAcrossARestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	s2 := &CoreServer{DataDir: dir}
-	q2, err := s2.DeliveryQueue(anEmptyTrail())
+	q2, err := s2.DeliveryQueue(aTrailKeeping(t, "c"))
 	if err != nil || q2.Len() != 1 || len(q2.Held("r")) != 1 {
 		t.Fatalf("after a restart: %v %v", q2, err)
 	}
@@ -92,7 +93,7 @@ func TestPartFilledLimitsNeverMakeARateOfNothing(t *testing.T) {
 		if err := s.holdAppToItsRate("chat"); err != nil {
 			t.Fatalf("%s: the first request of an app was refused: %v", name, err)
 		}
-		q, err := s.DeliveryQueue(anEmptyTrail())
+		q, err := s.DeliveryQueue(aTrailKeeping(t, "c"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -104,6 +105,17 @@ func TestPartFilledLimitsNeverMakeARateOfNothing(t *testing.T) {
 	if got := (&CoreServer{}).AppLimits(); got != limits.Defaults() {
 		t.Fatalf("%+v", got)
 	}
+}
+
+// aTrailKeeping is a trail that keeps conversation c, the only kind of trail an
+// add-on's queue takes a message for.
+func aTrailKeeping(t *testing.T, c string) *trail.Trail {
+	t.Helper()
+	tr := anEmptyTrail()
+	if err := tr.Open(c, "Eann", false); err != nil {
+		t.Fatal(err)
+	}
+	return tr
 }
 
 func anEmptyTrail() *trail.Trail {
@@ -120,14 +132,40 @@ func TestTheDeliveryQueueIsNotGivenWithoutATrail(t *testing.T) {
 }
 
 // Two add-ons each name their own trail; a message past its age is marked in the
-// trail that keeps its conversation, and one that no trail keeps is left held.
+// trail that keeps its conversation.
 func TestEachAddonsExpiredMessageIsMarkedInItsOwnTrail(t *testing.T) {
 	s := &CoreServer{DataDir: t.TempDir()}
 	l := limits.Defaults()
 	l.QueueMaxAge = 20 * time.Millisecond
 	s.SetLimits(l)
 	a, b := anEmptyTrail(), anEmptyTrail()
-	q, err := s.DeliveryQueue(a)
+	if _, err := s.DeliveryQueue(a); err != nil {
+		t.Fatal(err)
+	}
+	qb, err := s.DeliveryQueue(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Open("cb", "Eann", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := qb.Enqueue(mediation.Message{ID: trail.QueueID("cb", "e1"), Conversation: "cb", Sender: "s", Recipient: "r", Sealed: []byte("x")}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(40 * time.Millisecond)
+	s.refuseExpiredDeliveries()
+	if qb.Len() != 0 {
+		t.Fatalf("the owned message was not expired: %d held", qb.Len())
+	}
+}
+
+// An add-on cannot queue a message for a conversation its own trail does not
+// keep: the core could never expire it (ADR-069). Another add-on's conversation
+// is no exception.
+func TestAnAddonCannotQueueForAConversationItsTrailDoesNotKeep(t *testing.T) {
+	s := &CoreServer{DataDir: t.TempDir()}
+	a, b := anEmptyTrail(), anEmptyTrail()
+	qa, err := s.DeliveryQueue(a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,15 +175,41 @@ func TestEachAddonsExpiredMessageIsMarkedInItsOwnTrail(t *testing.T) {
 	if err := b.Open("cb", "Eann", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := q.Enqueue(mediation.Message{ID: trail.QueueID("cb", "e1"), Conversation: "cb", Sender: "s", Recipient: "r", Sealed: []byte("x")}); err != nil {
+	for _, c := range []string{"nobody", "cb"} {
+		err := qa.Enqueue(mediation.Message{ID: trail.QueueID(c, "e1"), Conversation: c, Sender: "s", Recipient: "r", Sealed: []byte("x")})
+		var ref *mediation.Refusal
+		if !errors.As(err, &ref) || ref.Reason != mediation.ReasonNotKept || qa.Len() != 0 {
+			t.Fatalf("%s: queued for a conversation this trail does not keep: %v", c, err)
+		}
+	}
+}
+
+// A message whose conversation two trails keep is nobody's to mark, so it stays
+// held, and neither trail marks it.
+func TestAMessageForAConversationTwoTrailsKeepIsLeftHeld(t *testing.T) {
+	s := &CoreServer{DataDir: t.TempDir()}
+	l := limits.Defaults()
+	l.QueueMaxAge = 20 * time.Millisecond
+	s.SetLimits(l)
+	a, b := anEmptyTrail(), anEmptyTrail()
+	qa, err := s.DeliveryQueue(a)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := q.Enqueue(mediation.Message{ID: trail.QueueID("nobody", "e1"), Conversation: "nobody", Sender: "s", Recipient: "r", Sealed: []byte("x")}); err != nil {
+	if _, err := s.DeliveryQueue(b); err != nil {
+		t.Fatal(err)
+	}
+	for _, tr := range []*trail.Trail{a, b} {
+		if err := tr.Open("shared", "Eann", false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := qa.Enqueue(mediation.Message{ID: trail.QueueID("shared", "e1"), Conversation: "shared", Sender: "s", Recipient: "r", Sealed: []byte("x")}); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(40 * time.Millisecond)
 	s.refuseExpiredDeliveries()
-	if q.Len() != 1 || len(q.Held("r")) != 1 || q.Held("r")[0].Conversation != "nobody" {
-		t.Fatalf("the unowned message must stay held and the owned one go: %d", q.Len())
+	if qa.Len() != 1 {
+		t.Fatalf("a message two trails keep was deleted: %d held", qa.Len())
 	}
 }

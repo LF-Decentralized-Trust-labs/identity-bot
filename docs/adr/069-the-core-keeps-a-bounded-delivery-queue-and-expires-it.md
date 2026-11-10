@@ -50,6 +50,7 @@ happened, so it is made by the part that keeps the record.
   it was not delivered, and the sender is told.
 - Every Identity Agent runs the expiry, whatever add-ons it includes.
 - No add-on can hold a message the core cannot expire, because holding one
-  needs a trail. Nothing is deleted without being marked first, and a message
+  needs a trail, and the queue it is given refuses a message for a conversation
+  that trail does not keep. Nothing is deleted without being marked first, and a message
   whose record is not unambiguously one trail's is kept, not dropped; the queue's
   own bounds still limit what such a message costs.
