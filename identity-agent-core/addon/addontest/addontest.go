@@ -58,6 +58,10 @@ type Fixtures interface {
 	AsThatMachineScored(t TB, target string, aid string, method string, path string, body string, seed []byte, level authprovider.Level, measuredAt time.Time, score int) *http.Request
 	AsThatMachineTo(t TB, target string, aid string, method string, path string, body string, seed []byte, level authprovider.Level, measuredAt time.Time) *http.Request
 	Awaiting(t TB, s *server.CoreServer) (map[string]string, map[string]string)
+	// BrowserKeySignedIn records, as the person's own sign-in does, that the
+	// browser key with this RFC 7638 thumbprint speaks for person at the app
+	// asset for the next until.
+	BrowserKeySignedIn(t TB, s *server.CoreServer, assetID, person, thumbprint string, until time.Duration)
 	ChainSays(t TB, s *server.CoreServer) map[string]any
 	CheckAsTheDevice(t TB, s *server.CoreServer, req store.SigningRequest) (map[string]interface{}, error)
 	ControllerRow(s *server.CoreServer, aid string) (server.ControllerGrant, bool, error)
