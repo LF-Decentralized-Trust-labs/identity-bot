@@ -673,6 +673,10 @@ type WitnessReceiptRecord struct {
 	WitnessAID    string `json:"witness_aid"`
 	CesrSignature string `json:"cesr_signature"`
 	ReceivedAt    string `json:"received_at"`
+	// Event is the serialised event the receipt is of, when the caller has it.
+	// It is read when the receipt is saved and not kept: a receipt signed over
+	// the event is checked against it then, and by whoever reads the event later.
+	Event []byte `json:"-"`
 }
 
 // KerlEntry is a Key Event Receipt Log entry: one event plus all its receipts.

@@ -33,10 +33,10 @@ func (s *Service) SubmitToWitness(ctx context.Context, witnessURL, signerAID str
 	}
 	// Checked, not assumed. A reply that does not carry a receipt covering this
 	// event is a witness that has not witnessed, whatever its status code said.
-	sig, wit, err := receiptFromResponse(resp, said)
+	sig, wit, err := receiptFromResponse(resp, rawEvent, said)
 	if err != nil {
 		return nil, err
 	}
-	s.onReceipt(said, wit, sig)
+	s.onReceipt(said, wit, sig, rawEvent)
 	return resp, nil
 }

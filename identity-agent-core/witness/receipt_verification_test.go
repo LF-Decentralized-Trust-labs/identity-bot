@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/store"
 
 	keri "github.com/grapeid/keri-go"
@@ -43,6 +44,14 @@ func enrolled(t *testing.T) (s *Service, aid string, raw []byte, sig string) {
 			return "", "", serr
 		}
 		sig, serr := keri.MatterQB64(keri.CodeEd25519Sig, raw)
+		return wkey, sig, serr
+	}
+	s.SignEventReceipt = func(rawEvent []byte, _ []string) (string, string, error) {
+		raw, serr := wsigner.Sign(rawEvent)
+		if serr != nil {
+			return "", "", serr
+		}
+		sig, serr := iacrypto.MatterIndexedSigQB64("A", 0, raw, 88)
 		return wkey, sig, serr
 	}
 
@@ -193,4 +202,41 @@ func TestBroadcastingAnUnsignedEventIsRefusedLocally(t *testing.T) {
 	if err := s.BroadcastEvent(t.Context(), aid, raw, ""); err == nil {
 		t.Fatal("an unsigned event was broadcast to witnesses")
 	}
+}
+
+// The receipt a witness issues is the one keripy makes: it names the
+// controller, carries an indexed signature over the event's bytes, and checks
+// out against those bytes and no others. A witness still answering in the
+// earlier form (a signature over the SAID string) is read too, which
+// TestAGenuineReceiptIsAccepted covers.
+func TestTheIssuedReceiptIsSignedOverTheEventBytes(t *testing.T) {
+	s, aid, raw, sig := enrolled(t)
+	out, err := s.ReceiveEvent(aid, raw, sig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	said := out["event_said"].(string)
+	wit := out["witness_aid"].(string)
+	rsig := out["cesr_signature"].(string)
+	if !strings.HasPrefix(rsig, "AA") {
+		t.Fatalf("the receipt signature is not an indexed Ed25519 signature: %.4s", rsig)
+	}
+	rct := out["receipt"].(map[string]interface{})
+	if rct["i"] != aid || rct["d"] != said || rct["s"] != "0" || rct["t"] != "rct" {
+		t.Fatalf("not keripy's receipt of the inception: %v", rct)
+	}
+	if err := receiptCheck(out, raw, said); err != nil {
+		t.Fatalf("the issued receipt does not check out: %v", err)
+	}
+	tampered := append([]byte(nil), raw...)
+	tampered[len(tampered)-3] ^= 1
+	if err := receiptCheck(out, tampered, said); err == nil {
+		t.Fatal("the receipt checked out against bytes it did not sign")
+	}
+	_ = wit
+}
+
+func receiptCheck(resp map[string]interface{}, raw []byte, said string) error {
+	_, _, err := receiptFromResponse(resp, raw, said)
+	return err
 }

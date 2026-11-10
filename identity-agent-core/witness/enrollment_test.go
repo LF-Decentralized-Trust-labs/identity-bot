@@ -159,6 +159,7 @@ func signingAgent(t *testing.T, aid string, mc *memContacts) (*Service, string, 
 		sig, err := login.SignString(statement, seed)
 		return key, sig, err
 	}
+	s.SignEventReceipt = eventSignerFor(seed)
 	s.OurWitnessAID = func() (string, error) { return key, nil }
 	return s, key, seed
 }

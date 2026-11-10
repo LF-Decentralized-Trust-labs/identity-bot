@@ -56,6 +56,9 @@ func Do(op string, request []byte) ([]byte, error) {
 		Witness     string `json:"witness"`
 		Digest      string `json:"digest"`
 		Sig         string `json:"sig"`
+		// EventB64 is the serialised event a receipt is of, for verify_receipt.
+		// A receipt signed over the event cannot be checked without it.
+		EventB64 string `json:"event_b64"`
 		AID         string `json:"aid"`
 		// Events is a key log, for verify_log.
 		Events []SignedEvent `json:"events"`
@@ -187,7 +190,7 @@ func Do(op string, request []byte) ([]byte, error) {
 		}
 		answer = map[string]string{"digest": d}
 	case "verify_receipt":
-		if err := VerifyReceipt(req.Witness, req.Digest, req.Sig); err != nil {
+		if err := VerifyEventReceipt(req.Witness, req.EventB64, req.Digest, req.Sig); err != nil {
 			return nil, err
 		}
 		answer = map[string]bool{"ok": true}

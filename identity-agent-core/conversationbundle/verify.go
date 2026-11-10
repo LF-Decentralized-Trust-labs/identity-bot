@@ -281,7 +281,7 @@ func (v *verifier) checkKeyLogs() {
 			for _, rc := range ev.Receipts {
 				// A receipt that does not verify is not a missing receipt: it is
 				// one that was changed.
-				if err := drivers.VerifyReceipt(rc.Witness, said, rc.Signature); err != nil {
+				if err := drivers.VerifyEventReceipt(rc.Witness, raw, said, rc.Signature, nil); err != nil {
 					v.fault(where, "a witness receipt for event %d does not verify: %v", i, err)
 					continue
 				}

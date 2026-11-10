@@ -66,7 +66,7 @@ func acceptOneEvent(t *testing.T, s *Service) (map[string]interface{}, error) {
 // be checked. The controller has to be able to tell its event was not witnessed.
 func TestAWitnessWithNoKeyRefusesToReceipt(t *testing.T) {
 	s, _ := testService(t)
-	s.SignReceipt = nil
+	s.SignEventReceipt = nil
 
 	if _, err := acceptOneEvent(t, s); err == nil {
 		t.Fatal("issued a receipt with no key to sign it with")
@@ -86,8 +86,8 @@ func TestAReceiptDependsOnTheWitnessKeyAndNotOnlyOnTheEvent(t *testing.T) {
 		seed := make([]byte, ed25519.SeedSize)
 		seed[0] = secret
 		key := ed25519.NewKeyFromSeed(seed)
-		s.SignReceipt = func(said string) (string, string, error) {
-			return "BWitness", "0B" + string(ed25519.Sign(key, []byte(said))[:8]), nil
+		s.SignEventReceipt = func(raw []byte, _ []string) (string, string, error) {
+			return "BWitness", "0B" + string(ed25519.Sign(key, raw)[:8]), nil
 		}
 		out, err := acceptOneEvent(t, s)
 		if err != nil {
@@ -109,7 +109,7 @@ func TestAReceiptDependsOnTheWitnessKeyAndNotOnlyOnTheEvent(t *testing.T) {
 // knows which key to check against.
 func TestTheReceiptCarriesTheWitnessIdentifier(t *testing.T) {
 	s, _ := testService(t)
-	s.SignReceipt = func(said string) (string, string, error) {
+	s.SignEventReceipt = func(raw []byte, _ []string) (string, string, error) {
 		return "BWitnessIdentifier", "0Bsig", nil
 	}
 	out, err := acceptOneEvent(t, s)
@@ -120,15 +120,26 @@ func TestTheReceiptCarriesTheWitnessIdentifier(t *testing.T) {
 		t.Errorf("witness_aid is %v", out["witness_aid"])
 	}
 	rct, _ := out["receipt"].(map[string]interface{})
-	if rct["i"] != "BWitnessIdentifier" {
-		t.Errorf("the receipt names %v as the witness", rct["i"])
+	if rct["i"] == "BWitnessIdentifier" {
+		t.Errorf("the receipt names the witness as the controller: i is %v", rct["i"])
+	}
+	for _, f := range []string{"v", "t", "d", "i", "s"} {
+		if _, ok := rct[f]; !ok {
+			t.Errorf("the receipt has no %q, which keripy's receipt has", f)
+		}
+	}
+	if len(rct) != 5 {
+		t.Errorf("the receipt has %d fields, keripy's has 5: %v", len(rct), rct)
+	}
+	if v, _ := rct["v"].(string); !strings.HasPrefix(v, "KERI10JSON") || !strings.HasSuffix(v, "_") || len(v) != 17 {
+		t.Errorf("v is not a version string with a size: %q", v)
 	}
 }
 
 // A signer that fails must stop the receipt, not produce a blank one.
 func TestAFailedSignatureIsNotIssuedAsAReceipt(t *testing.T) {
 	s, _ := testService(t)
-	s.SignReceipt = func(said string) (string, string, error) {
+	s.SignEventReceipt = func(raw []byte, _ []string) (string, string, error) {
 		return "", "", errTest
 	}
 	if _, err := acceptOneEvent(t, s); err == nil {

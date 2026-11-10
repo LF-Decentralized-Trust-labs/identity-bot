@@ -60,6 +60,7 @@ func startPeer(t *testing.T, name string) *peerAgent {
 		t.Fatal(err)
 	}
 	svc.OurWitnessAID = func() (string, error) { return key, nil }
+	svc.SignEventReceipt = receiptSignerFor(signer, key)
 	svc.SignReceipt = func(said string) (string, string, error) {
 		raw, err := signer.Sign([]byte(said))
 		if err != nil {

@@ -480,6 +480,7 @@ func New(cfg Config) (*CoreServer, error) {
 		s.EventHub.Broadcast(AgentEvent{Type: eventType, Payload: payload})
 	}
 	wsvc.SignReceipt = s.signWitnessReceipt
+	wsvc.SignEventReceipt = s.signWitnessEventReceipt
 	// An Identity Agent that anchors its record through a delegated record
 	// identity asks its witnesses to witness that identity too.
 	wsvc.AskToCoverDelegates = s.anchorsItsRecord
@@ -3029,20 +3030,28 @@ func (s *CoreServer) handleSubmitReceipt(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "Missing required fields", "event_said, witness_aid, cesr_signature are required")
 		return
 	}
-	if err := drivers.VerifyReceipt(req.WitnessAID, req.EventSAID, req.CesrSignature); err != nil {
-		writeError(w, http.StatusUnprocessableEntity, "The receipt does not verify", err.Error())
-		return
-	}
 	in, ok := s.logOfEvent(req.EventSAID)
 	if !ok {
 		writeError(w, http.StatusNotFound, "Not an event of a key log kept here",
 			"a receipt is kept here only for an event in a key log this Identity Agent keeps")
 		return
 	}
+	// The event bytes the receipt is of, from the log it belongs to.
+	var rawEvent []byte
+	for _, raw := range in.RawEvents {
+		if ev, err := keri.ParseEvent(raw); err == nil && ev.SAID == req.EventSAID {
+			rawEvent = raw
+		}
+	}
+	if err := drivers.VerifyEventReceipt(req.WitnessAID, rawEvent, req.EventSAID, req.CesrSignature, nil); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "The receipt does not verify", err.Error())
+		return
+	}
 	if err := s.DataStore.SaveWitnessReceipt(store.WitnessReceiptRecord{
 		EventSAID:     req.EventSAID,
 		WitnessAID:    req.WitnessAID,
 		CesrSignature: req.CesrSignature,
+		Event:         rawEvent,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to store receipt", err.Error())
 		return

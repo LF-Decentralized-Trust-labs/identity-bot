@@ -27,6 +27,22 @@ import (
 var ErrReceiptDoesNotVerify = fmt.Errorf("the receipt does not verify")
 
 func checkReceipt(r WitnessReceiptRecord) error {
+	if drivers.IsEventSignedReceipt(r.CesrSignature) {
+		// Signed over the event's bytes, which this record carries when it is
+		// saved and not when it is read back. Read back, what is checked is that
+		// it is a receipt at all; the signature is checked against the event
+		// wherever the event is, which is where receipts are counted.
+		if len(r.Event) > 0 {
+			if err := drivers.VerifyEventReceipt(r.WitnessAID, r.Event, r.EventSAID, r.CesrSignature, nil); err != nil {
+				return fmt.Errorf("%w: %v", ErrReceiptDoesNotVerify, err)
+			}
+			return nil
+		}
+		if err := drivers.CheckReceiptShape(r.WitnessAID, r.CesrSignature); err != nil {
+			return fmt.Errorf("%w: %v", ErrReceiptDoesNotVerify, err)
+		}
+		return nil
+	}
 	if err := drivers.VerifyReceipt(r.WitnessAID, r.EventSAID, r.CesrSignature); err != nil {
 		return fmt.Errorf("%w: %v", ErrReceiptDoesNotVerify, err)
 	}

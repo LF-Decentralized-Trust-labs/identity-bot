@@ -85,6 +85,11 @@ type Service struct {
 	// ReceiveEvent refuses rather than issuing something that looks like a
 	// receipt and proves nothing.
 	SignReceipt func(said string) (witnessAID, cesrSig string, err error)
+	// SignEventReceipt signs a key event's serialised bytes as this witness, with
+	// an indexed signature, for the event's witness list: the form keripy's
+	// Hab.witness makes. It finds this witness's own place in the list, and
+	// refuses when it is not in it. Unset means this agent cannot receipt events.
+	SignEventReceipt func(rawEvent []byte, designated []string) (witnessAID, cesrSig string, err error)
 	// OurWitnessAID reports the identifier this agent witnesses under, without
 	// signing anything.
 	//
@@ -713,18 +718,26 @@ func (s *Service) ReceiveSignedEvent(signerAID string, rawEvent []byte, sigs []s
 	// say, and saying it anyway is what made this dangerous rather than merely
 	// incomplete — the controller believed its event was witnessed and it was
 	// not.
-	if s.SignReceipt == nil {
+	if s.SignEventReceipt == nil {
 		return nil, fmt.Errorf("this agent has no witnessing key, so it cannot receipt anything")
 	}
-	witnessAID, sig, serr := s.SignReceipt(said)
+	var designated []string
+	if got.State != nil {
+		designated = got.State.Witnesses()
+	}
+	witnessAID, sig, serr := s.SignEventReceipt(rawEvent, designated)
 	if serr != nil {
 		return nil, fmt.Errorf("could not sign a receipt: %w", serr)
 	}
-	receipt := map[string]interface{}{
-		"v": "KERI10JSON", "t": "rct", "d": said, "i": witnessAID,
-		"aid": signerAID, "seq": seq, "dt": now,
+	// The five fields keripy's receipt has, naming the controller and not this
+	// witness; who signed is the attached signature.
+	rct, rerr := drivers.ReceiptMessage(signerAID, uint64(seq), said)
+	if rerr != nil {
+		return nil, rerr
 	}
-	receiptJSON, _ := json.Marshal(receipt)
+	var receipt map[string]interface{}
+	_ = json.Unmarshal(rct, &receipt)
+	receiptJSON := rct
 
 	_ = s.Store.SaveIssuedReceipt(IssuedReceipt{
 		SignerAID: signerAID, EventSAID: said, SequenceNum: seq,
@@ -1035,8 +1048,8 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 					log.Printf("[witness] %s did not take event %s of %s: %v", key, said, signerAID, err)
 					return
 				}
-				if sig, wit, verr := receiptFromResponse(resp, said); verr == nil && wit == key {
-					s.onReceipt(said, key, sig)
+				if sig, wit, verr := receiptFromResponse(resp, raw, said); verr == nil && wit == key {
+					s.onReceipt(said, key, sig, raw)
 					if sn, err := eventSeq(ev); err == nil {
 						s.confirm(signerAID, key, sn)
 					}
@@ -1347,7 +1360,7 @@ func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, ev
 	//
 	// A receipt that does not check out is worse than a witness being down,
 	// because being down is visible in the count and a bad receipt is not.
-	sig, wit, verr := receiptFromResponse(resp, eventSAID)
+	sig, wit, verr := receiptFromResponse(resp, rawEventOf(body), eventSAID)
 	if verr != nil {
 		log.Printf("[witness] %s answered but its receipt does not check out: %v", witnessAID, verr)
 		return
@@ -1359,7 +1372,7 @@ func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, ev
 		log.Printf("[witness] asked %s for a receipt and %s answered; not counted", witnessAID, wit)
 		return
 	}
-	s.onReceipt(eventSAID, witnessAID, sig)
+	s.onReceipt(eventSAID, witnessAID, sig, rawEventOf(body))
 }
 
 // receiptFromResponse pulls a verified receipt out of a witness's reply.
@@ -1367,7 +1380,7 @@ func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, ev
 // A witness is named by a non-transferable identifier, so the identifier IS the
 // key this checks against — there is nothing to fetch and nothing that could
 // answer the fetch wrongly.
-func receiptFromResponse(resp map[string]interface{}, eventSAID string) (sig, witnessAID string, err error) {
+func receiptFromResponse(resp map[string]interface{}, rawEvent []byte, eventSAID string) (sig, witnessAID string, err error) {
 	if resp == nil {
 		return "", "", fmt.Errorf("the witness returned nothing to check")
 	}
@@ -1376,13 +1389,13 @@ func receiptFromResponse(resp map[string]interface{}, eventSAID string) (sig, wi
 	if sig == "" || witnessAID == "" {
 		return "", "", fmt.Errorf("the reply carries no signed receipt")
 	}
-	if err := drivers.VerifyReceipt(witnessAID, eventSAID, sig); err != nil {
+	if err := drivers.VerifyEventReceipt(witnessAID, rawEvent, eventSAID, sig, nil); err != nil {
 		return "", "", err
 	}
 	return sig, witnessAID, nil
 }
 
-func (s *Service) onReceipt(eventSAID, witnessAID, cesrSig string) {
+func (s *Service) onReceipt(eventSAID, witnessAID, cesrSig string, rawEvent []byte) {
 	f, _ := s.Store.GetFinalization(eventSAID)
 	if f == nil {
 		return
@@ -1390,7 +1403,7 @@ func (s *Service) onReceipt(eventSAID, witnessAID, cesrSig string) {
 	// Counted only once it is kept, so the count never runs ahead of the
 	// receipts anyone can be shown.
 	if err := s.Contacts.SaveWitnessReceipt(store.WitnessReceiptRecord{
-		EventSAID: eventSAID, WitnessAID: witnessAID, CesrSignature: cesrSig,
+		EventSAID: eventSAID, WitnessAID: witnessAID, CesrSignature: cesrSig, Event: rawEvent,
 	}); err != nil {
 		log.Printf("[witness] receipt from %s for %s not kept: %v", witnessAID, eventSAID, err)
 		return
@@ -1996,4 +2009,17 @@ func (s *Service) heldNow(aid, witnessKey string, sn int) {
 // checked regardless.
 func (s *Service) ownersLocalAllowed(ctx context.Context, rawURL string) context.Context {
 	return context.WithValue(ctx, guardKey{}, LiteralIsLocal(hostOf(rawURL)))
+}
+
+// rawEventOf is the event bytes inside a body made by eventBody: what a
+// receipt is signed over, and so what it is checked against.
+func rawEventOf(body []byte) []byte {
+	var b struct {
+		EventB64 string `json:"event_b64"`
+	}
+	if json.Unmarshal(body, &b) != nil {
+		return nil
+	}
+	raw, _ := base64.StdEncoding.DecodeString(b.EventB64)
+	return raw
 }
