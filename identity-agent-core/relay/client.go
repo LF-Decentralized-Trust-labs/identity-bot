@@ -175,8 +175,12 @@ func (c *Client) checkParentCallerHost(ctx context.Context, d *ServiceDescriptor
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("the caller host %s does not serve this relay's descriptor (%d)", d.CallerHost, resp.StatusCode)
 	}
+	raw, err := boundedread.All(resp.Body, maxAnswer)
+	if err != nil {
+		return fmt.Errorf("the caller host %s serves no readable descriptor: %w", d.CallerHost, err)
+	}
 	var parent ServiceDescriptor
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxAnswer)).Decode(&parent); err != nil {
+	if err := json.Unmarshal(raw, &parent); err != nil {
 		return fmt.Errorf("the caller host %s serves no readable descriptor: %w", d.CallerHost, err)
 	}
 	if parent.Service == "" || parent.Service != d.Service {
