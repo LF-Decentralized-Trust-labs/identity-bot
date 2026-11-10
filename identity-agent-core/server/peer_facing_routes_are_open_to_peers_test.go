@@ -19,7 +19,7 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// T-594. classify exact-matches "METHOD /pattern" against publicRoutes and
+// classify exact-matches "METHOD /pattern" against publicRoutes and
 // falls through to owner-only, so a route mounted as peer-facing and never
 // declared answers 403 to the peer it exists for, before its handler runs.
 // That broke the watcher cross-check (recorded as the peer being "unavailable")
@@ -151,7 +151,7 @@ func TestTwoWatchersCrossCheckEachOtherOverTheNetwork(t *testing.T) {
 	}
 }
 
-// The T-595 exchange again, but each agent is reached through its full router.
+// The withdrawal exchange again, but each agent is reached through its full router.
 func TestWithdrawalCompletesBetweenTwoAgentsBehindTheirAuthorisation(t *testing.T) {
 	routed := map[*peerAgent]string{}
 	withdrawalBetweenTwoAgents(t, func(p *peerAgent) string {
