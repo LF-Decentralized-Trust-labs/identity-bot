@@ -33,9 +33,10 @@ type chainSpec struct {
 	noOAEP       bool
 	unlockedOnly bool
 	dupPurpose   bool
-	extraPadding int      // a second hardware-enforced padding beside OAEP; 0 none
-	appPackage   string   // attestationApplicationId: the package; "" states none
-	appDigests   [][]byte // ... and the signing certificate digests
+	extraPadding int       // a second hardware-enforced padding beside OAEP; 0 none
+	appPackage   string    // attestationApplicationId: the package; "" states none
+	appDigests   [][]byte  // ... and the signing certificate digests
+	caValidFrom  time.Time // the CA certificates' first valid moment; zero: a day before created
 }
 
 // appIDDER is attestationApplicationId as the Keystore writes it.
@@ -151,9 +152,13 @@ func builtChain(t *testing.T, s chainSpec) (chain []byte, root [sha256.Size]byte
 		}
 		return c
 	}
+	from := s.caValidFrom
+	if from.IsZero() {
+		from = s.created.Add(-24 * time.Hour)
+	}
 	ca := func(n int64, cn string) *x509.Certificate {
 		return &x509.Certificate{SerialNumber: big.NewInt(n), Subject: pkix.Name{CommonName: cn},
-			NotBefore: s.created.Add(-24 * time.Hour), NotAfter: s.created.Add(24 * time.Hour),
+			NotBefore: from, NotAfter: from.Add(48 * time.Hour),
 			IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
 	}
 	rootTpl := ca(1, "test attestation root")

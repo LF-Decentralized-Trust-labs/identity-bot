@@ -215,6 +215,10 @@ func JoinAttestationChain(ders ...[]byte) []byte {
 	return b.Bytes()
 }
 
+// attestationClockSkew is how far a phone's clock and a certificate issuer's
+// may disagree about when a key was made.
+const attestationClockSkew = 24 * time.Hour
+
 // VerifyAndroidKeyAttestation checks that blob (see splitChain) is a chain from
 // Google's attestation root down to a key, that the key was generated in a TEE
 // or StrongBox, and that it was asked for with wantChallenge. It says nothing
@@ -244,17 +248,31 @@ func verifyAndroidKeyAttestation(blob, wantChallenge []byte, now time.Time, root
 
 	// Each certificate must be signed by the next, and each (but the leaf, whose
 	// dates the app sets, and the pinned root, which is trusted by its key) must
-	// have been valid when the key was made.
-	at := facts.Created
-	if at.IsZero() || at.After(now) {
-		at = now
+	// have been valid when the key was made, or be valid now.
+	//
+	// When the key was made, because a phone that provisions its attestation
+	// certificates remotely gets ones that last weeks while its key lasts for
+	// years, and the key is checked again on every use. But the key's creation
+	// time is the phone's clock and the certificate's dates are the issuer's, so
+	// a key made minutes after a fresh certificate arrived can read as made
+	// before it: allow attestationClockSkew either side. And now, because some
+	// Keystores state a creation time nothing else agrees with; a chain that is
+	// valid today is what Google's own guidance checks.
+	made, madeSaid := facts.Created, facts.Created.UTC().Format(time.RFC3339)
+	if made.IsZero() || made.After(now) {
+		made, madeSaid = now, "not stated"
+	}
+	validAt := func(c *x509.Certificate, at time.Time) bool {
+		return !at.Before(c.NotBefore.Add(-attestationClockSkew)) && !at.After(c.NotAfter.Add(attestationClockSkew))
 	}
 	for i := 0; i+1 < len(chain); i++ {
 		if err := chain[i].CheckSignatureFrom(chain[i+1]); err != nil {
 			return nil, notAttested("certificate %d is not signed by certificate %d: %v", i, i+1, err)
 		}
-		if i > 0 && (at.Before(chain[i].NotBefore) || at.After(chain[i].NotAfter)) {
-			return nil, notAttested("certificate %d was not valid when the key was made", i)
+		validNow := !now.Before(chain[i].NotBefore) && !now.After(chain[i].NotAfter)
+		if i > 0 && !validAt(chain[i], made) && !validNow {
+			return nil, notAttested("certificate %d was valid neither when the key was made (%s) nor now (it is valid %s to %s)", i,
+				madeSaid, chain[i].NotBefore.UTC().Format(time.RFC3339), chain[i].NotAfter.UTC().Format(time.RFC3339))
 		}
 	}
 	for _, c := range chain {
