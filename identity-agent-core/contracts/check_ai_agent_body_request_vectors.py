@@ -233,6 +233,9 @@ def judge(v, case, ids):
             rules.add("not-issued")
         if stamp + SKEW < when(c["a"]["dt"]):
             rules.add("before-granted")
+        ends_at = c["a"].get("valid_until")
+        if ends_at is not None and not stamp < when(ends_at):
+            rules.add("lapsed")
         for kind, at in events:
             if kind == "rev" and not at > issued:
                 rules.add("revoked-before")
@@ -300,6 +303,9 @@ REFUSED_FOR = {
     "the creator's grant was revoked before the new grant was issued": "revoked-before",
     "the request was made long before the grant it authorised": "long-before",
     "the grant is the creator's own": "own-request",
+    "the creator's body credential belongs to another AI agent than the creator's grant": "body-creator",
+    "the creator's body credential was revoked before the new grant was issued": "revoked-before",
+    "the creator's grant had lapsed when its body made the request": "lapsed",
     "the grant is of a version that does not admit the kind": "version",
     "the new AI agent would hold a capability its creator's grant does not": "wider-capability",
     "the creator's grant lapses and the new AI agent's grant has no end": "outlives-creator",
