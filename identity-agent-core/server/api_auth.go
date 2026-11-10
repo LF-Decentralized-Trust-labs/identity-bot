@@ -226,7 +226,7 @@ var publicRoutes = map[string]string{
 	// is only acknowledged, and changes nothing. A confirmation changes the
 	// witness's state only when it names a rotation that is for that
 	// controller, signed by the keys in force, and already in the key log the
-	// witness holds (T-595) — an unsigned or foreign blob is refused.
+	// witness holds — an unsigned or foreign blob is refused.
 	"POST /api/witness/withdraw":         "witnessing protocol — a witness tells the controller it wishes to stop",
 	"POST /api/witness/withdraw/confirm": "witnessing protocol — a controller sends its own signed rotation, which the witness checks against its log",
 	// A witness receives the controller's events here, and a controller (or a

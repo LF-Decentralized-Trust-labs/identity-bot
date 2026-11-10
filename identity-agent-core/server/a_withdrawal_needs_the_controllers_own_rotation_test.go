@@ -267,7 +267,7 @@ func TestWithdrawalCompletesBetweenTwoAgentsOverTheirRoutes(t *testing.T) {
 
 // withdrawalBetweenTwoAgents runs the exchange with each agent reached at the
 // address reach gives. Handed the bare witness routes it proves the protocol;
-// handed the full router it proves a peer is let in to them (T-594).
+// handed the full router it proves a peer is let in to them.
 func withdrawalBetweenTwoAgents(t *testing.T, reach func(*peerAgent) string) {
 	bob := startPeer(t, "bob")     // the witness
 	carol := startPeer(t, "carol") // the controller's agent
