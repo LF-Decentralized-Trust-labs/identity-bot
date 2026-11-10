@@ -38,6 +38,7 @@ func TestAnAppsStartUpRunsInOrder(t *testing.T) {
 	t.Setenv("PORT", "")
 	t.Setenv(server.LocalOwnerSecretEnv, "")
 	var happened []string
+	var core *server.CoreServer
 	served := 0
 	err := start(Options{
 		Name: "an-app",
@@ -54,6 +55,7 @@ func TestAnAppsStartUpRunsInOrder(t *testing.T) {
 		},
 		Prepare: func(s *server.CoreServer, cfg server.Config) (func(), error) {
 			happened = append(happened, "prepare")
+			core = s
 			s.MountExtraRoutes(func(r chi.Router) {
 				r.Get("/an-apps-own", func(w http.ResponseWriter, r *http.Request) { served++ })
 			})
@@ -61,8 +63,10 @@ func TestAnAppsStartUpRunsInOrder(t *testing.T) {
 		},
 	}, nil, func() {
 		happened = append(happened, "serving")
-		// While serving, the app's own route is there.
-		req, _ := http.NewRequest("GET", fmt.Sprintf("http://127.0.0.1:%d/api/an-apps-own", port), nil)
+		// While serving, the app's own route is there. The port is the one the
+		// server bound: when the one asked for was taken by then, it falls back
+		// to the next, and asking the first would reach somebody else.
+		req, _ := http.NewRequest("GET", fmt.Sprintf("http://127.0.0.1:%d/api/an-apps-own", core.Port), nil)
 		req.Header.Set(server.LocalOwnerSecretHeader, ownerSecret)
 		if resp, err := http.DefaultClient.Do(req); err == nil {
 			resp.Body.Close()
