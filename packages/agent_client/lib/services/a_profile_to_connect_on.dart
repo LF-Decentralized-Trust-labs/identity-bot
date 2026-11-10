@@ -4,7 +4,8 @@ import 'core_service.dart';
 import 'identity_profiles.dart';
 import 'the_core_is_settled.dart';
 
-/// Making room, before this app is connected to an Identity Agent elsewhere,
+/// Making room, before this app founds an identity or is connected to an
+/// Identity Agent elsewhere,
 /// so that what is recorded lands on a profile of its own.
 ///
 /// An installation that already holds an identity must not be turned into a
@@ -22,7 +23,7 @@ import 'the_core_is_settled.dart';
 /// Returns whether a new profile was begun. Throws when one was needed and could
 /// not be, and the caller must NOT go on to connect: the connection would land
 /// on the profile that holds the identity.
-Future<bool> makeRoomToConnectToAnAgentElsewhere({
+Future<bool> makeRoomOnAProfile({
   Future<bool> Function()? holdsAnIdentity,
   Future<void> Function()? beginAProfile,
 }) async {
