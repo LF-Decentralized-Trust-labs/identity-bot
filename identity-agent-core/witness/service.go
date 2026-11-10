@@ -32,6 +32,7 @@ type ContactStore interface {
 	SaveContact(contact store.ContactRecord) error
 	GetIdentity() (*store.IdentityState, error)
 	SaveWitnessReceipt(rec store.WitnessReceiptRecord) error
+	GetWitnessReceipts(eventSAID string) ([]store.WitnessReceiptRecord, error)
 	SaveTask(task store.TaskRecord) error
 	GetTasks() ([]store.TaskRecord, error)
 }
@@ -42,6 +43,7 @@ type EventPoster func(ctx context.Context, witnessURL string, body []byte) (map[
 // Service is the IA-side witness engine.
 type Service struct {
 	verdicts    verifiedLogs
+	receiptMu   sync.Mutex
 	Store       Store
 	Contacts    ContactStore
 	Driver      drivers.KeriEngine
@@ -931,9 +933,10 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 	})
 
 	body := eventBody(signerAID, base64.StdEncoding.EncodeToString(rawEvent), cesrSigs)
+	designated := s.designatedInForce(signerAID, rawEvent)
 	for _, w := range witnesses {
 		url := witnessEventURL(w)
-		s.background(func() { s.postWithRetry(ctx, url, body, said, w.AID, drivers.DesignatedByInception(rawEvent)) })
+		s.background(func() { s.postWithRetry(ctx, url, body, said, w.AID, designated) })
 	}
 	s.background(func() { s.finalizeLoop(said, threshold) })
 	return nil
@@ -1405,7 +1408,6 @@ func receiptFromResponse(resp map[string]interface{}, rawEvent []byte, eventSAID
 	return sig, witnessAID, nil
 }
 
-//
 // designated is the witness list in force at the event, where it is known. The
 // index of a receipt sits outside what the witness signed, so a copy of a
 // genuine receipt can carry another one; checked here, at every arrival, a
@@ -1413,9 +1415,22 @@ func receiptFromResponse(resp map[string]interface{}, rawEvent []byte, eventSAID
 // one the key log check makes. Nil means the list is not known here, and the
 // index is then checked where the log is judged.
 func (s *Service) onReceipt(eventSAID, witnessAID, cesrSig string, rawEvent []byte, designated []string) {
+	// One witness is one receipt per event, however often it arrives: a
+	// retry, a replay, or a witness answering twice must never add to the
+	// count, or one witness could reach the threshold alone. Held under a lock
+	// so two arrivals of the same receipt cannot both see it as new.
+	s.receiptMu.Lock()
+	defer s.receiptMu.Unlock()
 	f, _ := s.Store.GetFinalization(eventSAID)
 	if f == nil {
 		return
+	}
+	if held, _ := s.Contacts.GetWitnessReceipts(eventSAID); len(held) > 0 {
+		for _, r := range held {
+			if r.WitnessAID == witnessAID {
+				return
+			}
+		}
 	}
 	if len(rawEvent) > 0 {
 		if err := drivers.VerifyEventReceipt(witnessAID, rawEvent, eventSAID, cesrSig, designated); err != nil {
@@ -2046,6 +2061,43 @@ func rawEventOf(body []byte) []byte {
 	}
 	raw, _ := base64.StdEncoding.DecodeString(b.EventB64)
 	return raw
+}
+
+// designatedInForce is the witness list in force once rawEvent is applied to
+// the log this agent holds for signerAID: an inception's own list, or, for a
+// rotation, the list after it (the new b), which only the log can say. Nil when
+// it cannot be read, in which case the index of a receipt is not checked on
+// arrival and is checked where the log is judged.
+func (s *Service) designatedInForce(signerAID string, rawEvent []byte) []string {
+	if d := drivers.DesignatedByInception(rawEvent); d != nil {
+		return d
+	}
+	var ev map[string]interface{}
+	if json.Unmarshal(rawEvent, &ev) != nil {
+		return nil
+	}
+	said := eventSAID(ev)
+	kel, err := s.Store.GetKelEvents(signerAID)
+	if err != nil {
+		return nil
+	}
+	var allRaw [][]byte
+	seen := false
+	for _, e := range kel {
+		raw, derr := base64.StdEncoding.DecodeString(e.RawBytesB64)
+		if derr != nil || len(raw) == 0 {
+			return nil
+		}
+		var k map[string]interface{}
+		if json.Unmarshal(raw, &k) == nil && eventSAID(k) == said {
+			seen = true
+		}
+		allRaw = append(allRaw, raw)
+	}
+	if !seen {
+		allRaw = append(allRaw, rawEvent)
+	}
+	return designatedAt(allRaw, said)
 }
 
 // designatedAt is the witness list in force at the event with eventSAID in the

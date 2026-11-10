@@ -32,6 +32,18 @@ func (k *keepingContacts) SaveWitnessReceipt(r store.WitnessReceiptRecord) error
 	return nil
 }
 
+func (k *keepingContacts) GetWitnessReceipts(said string) ([]store.WitnessReceiptRecord, error) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	var out []store.WitnessReceiptRecord
+	for _, r := range k.kept {
+		if r.EventSAID == said {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
 // An event goes to exactly the witnesses its identity names, found by their
 // keys, and each one's verified receipt is kept.
 func TestAnEventGoesToTheWitnessesItsIdentityNames(t *testing.T) {

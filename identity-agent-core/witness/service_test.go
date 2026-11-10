@@ -49,6 +49,9 @@ func (m *memContacts) GetIdentity() (*store.IdentityState, error) {
 }
 
 func (m *memContacts) SaveWitnessReceipt(store.WitnessReceiptRecord) error { return nil }
+func (m *memContacts) GetWitnessReceipts(string) ([]store.WitnessReceiptRecord, error) {
+	return nil, nil
+}
 func (m *memContacts) SaveTask(t store.TaskRecord) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
