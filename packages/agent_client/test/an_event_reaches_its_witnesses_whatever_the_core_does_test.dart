@@ -126,6 +126,22 @@ void main() {
     expect(w.enough, isTrue);
     expect(await TheEventsThisDeviceSigned().unfinished(aid), isEmpty,
         reason: 'two of three receipts meet the threshold of two');
+
+    // A receipt carries its witness's place in the list, outside what the
+    // witness signed. One at another place is a copy keripy files under
+    // another witness, and is not counted.
+    w2.misindexesReceipts = true;
+    final again = await witnesses.receipt(
+        aid: aid,
+        sn: 0,
+        digest: founded.digest,
+        bytesB64: founded.bytesB64,
+        sigs: founded.signatures,
+        set: set);
+    w2.misindexesReceipts = false;
+    expect(again.receipts.keys, unorderedEquals([w1.aid, w3.aid]),
+        reason: 'w2 signed the event, at the wrong place in the list');
+    expect(again.unreached, {w2.aid});
   });
 
   test(
@@ -157,6 +173,11 @@ void main() {
               for (final w in [w1, w2, w3, w4]) w.aid: w.base
             })));
     final wider = WitnessSet([w1.aid, w2.aid, w4.aid], 3);
+    // The witnesses are asked about a list their logs do not have, so each
+    // issues its receipt at its place in that one.
+    for (final w in [w1, w2, w4]) {
+      w.listInForce = wider.witnesses;
+    }
     final next = await four.interact(seed,
         aid: aid,
         generation: generation,
@@ -177,6 +198,9 @@ void main() {
     expect(again.single.witnessed!.receipts.keys,
         unorderedEquals([w1.aid, w2.aid, w4.aid]));
     expect(await TheEventsThisDeviceSigned().unfinished(aid), isEmpty);
+    for (final w in [w1, w2, w4]) {
+      w.listInForce = null;
+    }
     // Bring the identity's own witnesses up to date for what follows.
     await witnesses.receipt(
         aid: aid,
@@ -439,6 +463,11 @@ void main() {
     final s =
         WitnessSet([w1.aid, w1.aid, 'D${w2.aid.substring(1)}', w2.aid], 0);
     expect(s.witnesses, [w1.aid, w2.aid]);
+    // Every entry keeps its place in the list a receipt's index points into,
+    // the one that is not a witness included, as in Go's WitnessPosition.
+    expect(s.designated,
+        [w1.aid, w1.aid, 'D${w2.aid.substring(1)}', w2.aid]);
+    expect(s.designated.indexOf(w2.aid), 3);
     expect((s.toEstablish, s.toRuleOut), (1, 2));
     expect((WitnessSet.none.toEstablish, WitnessSet.none.toRuleOut), (0, 1));
     final four = WitnessSet([w1.aid, w2.aid, w3.aid, 'B${'A' * 43}'], 2);

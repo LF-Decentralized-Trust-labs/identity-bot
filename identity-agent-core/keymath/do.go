@@ -56,7 +56,14 @@ func Do(op string, request []byte) ([]byte, error) {
 		Witness     string `json:"witness"`
 		Digest      string `json:"digest"`
 		Sig         string `json:"sig"`
-		AID         string `json:"aid"`
+		// EventB64 is the serialised event a receipt is of, for verify_receipt.
+		// A receipt signed over the event cannot be checked without it.
+		EventB64 string `json:"event_b64"`
+		// Designated is the witness list in force at that event, when the caller
+		// has it: a receipt carries its witness's place in it, and the place is
+		// checked against it.
+		Designated []string `json:"designated"`
+		AID        string   `json:"aid"`
 		// Events is a key log, for verify_log.
 		Events []SignedEvent `json:"events"`
 	}
@@ -187,7 +194,7 @@ func Do(op string, request []byte) ([]byte, error) {
 		}
 		answer = map[string]string{"digest": d}
 	case "verify_receipt":
-		if err := VerifyReceipt(req.Witness, req.Digest, req.Sig); err != nil {
+		if err := VerifyEventReceipt(req.Witness, req.EventB64, req.Digest, req.Sig, req.Designated); err != nil {
 			return nil, err
 		}
 		answer = map[string]bool{"ok": true}

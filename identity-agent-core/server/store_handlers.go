@@ -48,6 +48,29 @@ func (s *CoreServer) handleStoreReceipt(w http.ResponseWriter, r *http.Request) 
 		CesrSignature: req.CesrSignature,
 		ReceivedAt:    time.Now().UTC().Format(time.RFC3339),
 	}
+	// A receipt signed over the event is checked against the event, found as
+	// handleSubmitReceipt finds it, and its index against the witness list in
+	// force at that event. One for an event no key log kept here holds cannot
+	// be checked and is refused.
+	if drivers.IsEventSignedReceipt(req.CesrSignature) {
+		in, ok := s.logOfEvent(req.EventSAID)
+		if !ok {
+			writeError(w, http.StatusNotFound, "Not an event of a key log kept here",
+				"a receipt signed over the event is kept here only for an event in a key log this Identity Agent keeps")
+			return
+		}
+		raw, designated, ok := eventAndWitnessesIn(in, req.EventSAID)
+		if !ok {
+			writeError(w, http.StatusUnprocessableEntity, "The receipt cannot be checked",
+				"the witness list in force at this event cannot be read from its key log")
+			return
+		}
+		if err := drivers.VerifyEventReceipt(req.WitnessAID, raw, req.EventSAID, req.CesrSignature, designated); err != nil {
+			writeError(w, http.StatusUnprocessableEntity, "The receipt does not verify", err.Error())
+			return
+		}
+		record.Event = raw
+	}
 	if err := s.DataStore.SaveWitnessReceipt(record); err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, store.ErrReceiptDoesNotVerify) {

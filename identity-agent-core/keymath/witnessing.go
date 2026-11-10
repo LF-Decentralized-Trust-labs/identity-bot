@@ -2,6 +2,7 @@ package keymath
 
 import (
 	"encoding/json"
+	"errors"
 
 	keri "github.com/grapeid/keri-go"
 
@@ -55,6 +56,22 @@ type LoggedEvent struct {
 // and nothing has to be looked up to check it.
 func VerifyReceipt(witness, digest, sig string) error {
 	return drivers.VerifyReceipt(witness, digest, sig)
+}
+
+// VerifyEventReceipt is VerifyReceipt for either form of receipt: one signed
+// over the serialised event, which is given in base64 and is needed to check
+// it, or the earlier one over the digest. designated is the witness list in
+// force at the event, when it is known: the receipt's index must be its
+// witness's place in it.
+func VerifyEventReceipt(witness, eventB64, digest, sig string, designated []string) error {
+	var raw []byte
+	if eventB64 != "" {
+		var err error
+		if raw, err = drivers.DecodeRawBytes(eventB64); err != nil {
+			return errors.New("the event is not readable base64")
+		}
+	}
+	return drivers.VerifyEventReceipt(witness, raw, digest, sig, designated)
 }
 
 // VerifyLog judges events as one identity's key log, from its founding, as

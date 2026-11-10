@@ -482,6 +482,7 @@ func New(cfg Config) (*CoreServer, error) {
 		s.EventHub.Broadcast(AgentEvent{Type: eventType, Payload: payload})
 	}
 	wsvc.SignReceipt = s.signWitnessReceipt
+	wsvc.SignEventReceipt = s.signWitnessEventReceipt
 	// An Identity Agent that anchors its record through a delegated record
 	// identity asks its witnesses to witness that identity too.
 	wsvc.AskToCoverDelegates = s.anchorsItsRecord
@@ -3024,20 +3025,29 @@ func (s *CoreServer) handleSubmitReceipt(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "Missing required fields", "event_said, witness_aid, cesr_signature are required")
 		return
 	}
-	if err := drivers.VerifyReceipt(req.WitnessAID, req.EventSAID, req.CesrSignature); err != nil {
-		writeError(w, http.StatusUnprocessableEntity, "The receipt does not verify", err.Error())
-		return
-	}
 	in, ok := s.logOfEvent(req.EventSAID)
 	if !ok {
 		writeError(w, http.StatusNotFound, "Not an event of a key log kept here",
 			"a receipt is kept here only for an event in a key log this Identity Agent keeps")
 		return
 	}
+	// The event bytes the receipt is of, from the log it belongs to, and the
+	// witness list in force at that event, which the receipt's index is a place in.
+	rawEvent, designated, ok := eventAndWitnessesIn(in, req.EventSAID)
+	if !ok {
+		writeError(w, http.StatusUnprocessableEntity, "The receipt cannot be checked",
+			"the witness list in force at this event cannot be read from its key log")
+		return
+	}
+	if err := drivers.VerifyEventReceipt(req.WitnessAID, rawEvent, req.EventSAID, req.CesrSignature, designated); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "The receipt does not verify", err.Error())
+		return
+	}
 	if err := s.DataStore.SaveWitnessReceipt(store.WitnessReceiptRecord{
 		EventSAID:     req.EventSAID,
 		WitnessAID:    req.WitnessAID,
 		CesrSignature: req.CesrSignature,
+		Event:         rawEvent,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to store receipt", err.Error())
 		return
@@ -3059,6 +3069,29 @@ func (s *CoreServer) handleSubmitReceipt(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	jsonreply.Write(w, http.StatusOK, resp)
+}
+
+// eventAndWitnessesIn is the bytes of the event with eventSAID and the witness
+// list in force at it, read from the key log it is in by the one rule for both
+// (drivers.WitnessingOf). False when the log does not hold the event or cannot
+// be read as far as it.
+func eventAndWitnessesIn(in drivers.ValidateKELInput, eventSAID string) ([]byte, []string, bool) {
+	row, found := drivers.WitnessingOf(in, eventSAID)
+	if !found {
+		return nil, nil, false
+	}
+	for _, raw := range in.RawEvents {
+		if ev, err := keri.ParseEvent(raw); err == nil && ev.SAID == eventSAID {
+			// An event that designates nobody has an empty list, not no list:
+			// nil means the list is not known and its index is not checked.
+			designated := row.Designated
+			if designated == nil {
+				designated = []string{}
+			}
+			return raw, designated, true
+		}
+	}
+	return nil, nil, false
 }
 
 // logOfEvent is the stored key log of the identity eventSAID belongs to, as

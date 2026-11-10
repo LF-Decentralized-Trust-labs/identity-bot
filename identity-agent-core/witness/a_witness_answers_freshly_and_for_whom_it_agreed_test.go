@@ -41,6 +41,7 @@ func newDelegation(t *testing.T) *delegation {
 		sig, err := login.SignString(msg, wpriv.Seed())
 		return wkey, sig, err
 	}
+	w.SignEventReceipt = eventSignerFor(wpriv.Seed())
 	w.OurWitnessAID = func() (string, error) { return wkey, nil }
 	w.OurAID = func() string { return "E" + wkey[1:] }
 	e, key, _ := signedEngine()

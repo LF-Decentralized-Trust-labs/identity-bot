@@ -25,14 +25,18 @@ type receiptWorld struct {
 
 // witnessedIdentity is an Identity Agent whose identity names two witnesses
 // and needs both of their receipts.
-func witnessedIdentity(t *testing.T) receiptWorld {
+func witnessedIdentity(t *testing.T) receiptWorld { return witnessedIdentityOf(t, 2) }
+
+// witnessedIdentityOf is a stored identity whose inception designates n
+// witnesses, with a threshold of n.
+func witnessedIdentityOf(t *testing.T, n int) receiptWorld {
 	t.Helper()
 	ds, err := store.NewSQLiteStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	w := receiptWorld{s: &CoreServer{DataStore: ds, localOwnerSecret: testOwnerSecret, DataDir: t.TempDir()}}
-	for i := 0; i < 2; i++ {
+	for i := 0; i < n; i++ {
 		pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 		w.keys = append(w.keys, priv)
 		w.witnesses = append(w.witnesses, iacrypto.NonTransferableAIDQB64(pub))
@@ -42,7 +46,7 @@ func witnessedIdentity(t *testing.T) receiptWorld {
 	pub, _ := signer.PublicKey()
 	nextPub, _ := next.PublicKey()
 	digest, _ := keri.NextDigest(nextPub)
-	toad := 2
+	toad := n
 	raw, err := keri.BuildInception(keri.InceptionInput{
 		Keys: []string{pub}, NextDigests: []string{digest},
 		Witnesses: w.witnesses, Toad: &toad, Derivation: "self-addressing",

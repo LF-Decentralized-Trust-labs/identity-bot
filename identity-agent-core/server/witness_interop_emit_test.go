@@ -20,9 +20,15 @@ func TestEmitWitnessReceiptForCrossCheck(t *testing.T) {
 	}
 	s := witnessWithSeed(t, 1)
 	const said = "EEventSAID0123456789ABCDEFGHIJKLMNOPQRSTUVW"
-	aid, sig, err := s.signWitnessReceipt(said)
+	event := []byte(`{"v":"KERI10JSON000000_","t":"icp","d":"` + said + `"}`)
+	_, aid, err := s.witnessSigningKey()
 	if err != nil {
 		t.Fatalf("witness: %v", err)
 	}
-	fmt.Printf("VECTOR %s %s %s\n", aid, said, sig)
+	// Signed over the event's bytes with an indexed signature, as keripy reads it.
+	_, sig, err := s.signWitnessEventReceipt(event, []string{aid})
+	if err != nil {
+		t.Fatalf("witness: %v", err)
+	}
+	fmt.Printf("VECTOR %s %s %s %s\n", aid, said, sig, event)
 }

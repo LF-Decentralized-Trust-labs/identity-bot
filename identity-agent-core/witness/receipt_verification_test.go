@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"identity-agent-core/iacrypto"
 	"identity-agent-core/store"
 
 	keri "github.com/grapeid/keri-go"
@@ -43,6 +44,14 @@ func enrolled(t *testing.T) (s *Service, aid string, raw []byte, sig string) {
 			return "", "", serr
 		}
 		sig, serr := keri.MatterQB64(keri.CodeEd25519Sig, raw)
+		return wkey, sig, serr
+	}
+	s.SignEventReceipt = func(rawEvent []byte, _ []string) (string, string, error) {
+		raw, serr := wsigner.Sign(rawEvent)
+		if serr != nil {
+			return "", "", serr
+		}
+		sig, serr := iacrypto.MatterIndexedSigQB64("A", 0, raw, 88)
 		return wkey, sig, serr
 	}
 
@@ -192,5 +201,112 @@ func TestBroadcastingAnUnsignedEventIsRefusedLocally(t *testing.T) {
 
 	if err := s.BroadcastEvent(t.Context(), aid, raw, ""); err == nil {
 		t.Fatal("an unsigned event was broadcast to witnesses")
+	}
+}
+
+// The receipt a witness issues is the one keripy makes: it names the
+// controller, carries an indexed signature over the event's bytes, and checks
+// out against those bytes and no others. A witness still answering in the
+// earlier form (a signature over the SAID string) is read too, which
+// TestAGenuineReceiptIsAccepted covers.
+func TestTheIssuedReceiptIsSignedOverTheEventBytes(t *testing.T) {
+	s, aid, raw, sig := enrolled(t)
+	out, err := s.ReceiveEvent(aid, raw, sig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	said := out["event_said"].(string)
+	wit := out["witness_aid"].(string)
+	rsig := out["cesr_signature"].(string)
+	if !strings.HasPrefix(rsig, "AA") {
+		t.Fatalf("the receipt signature is not an indexed Ed25519 signature: %.4s", rsig)
+	}
+	rct := out["receipt"].(map[string]interface{})
+	if rct["i"] != aid || rct["d"] != said || rct["s"] != "0" || rct["t"] != "rct" {
+		t.Fatalf("not keripy's receipt of the inception: %v", rct)
+	}
+	if err := receiptCheck(out, raw, said); err != nil {
+		t.Fatalf("the issued receipt does not check out: %v", err)
+	}
+	tampered := append([]byte(nil), raw...)
+	tampered[len(tampered)-3] ^= 1
+	if err := receiptCheck(out, tampered, said); err == nil {
+		t.Fatal("the receipt checked out against bytes it did not sign")
+	}
+	_ = wit
+}
+
+func receiptCheck(resp map[string]interface{}, raw []byte, said string) error {
+	_, _, err := receiptFromResponse(resp, raw, said, nil)
+	return err
+}
+
+// A reply's receipt is held to the witness list it is checked against: its
+// index is the witness's place in that list, so a list that puts the witness
+// elsewhere refuses it, and one that puts it where the index says takes it.
+func TestAReceiptIsHeldToTheWitnessListItIsCheckedAgainst(t *testing.T) {
+	s, aid, raw, sig := enrolled(t)
+	out, err := s.ReceiveEvent(aid, raw, sig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	said := out["event_said"].(string)
+	wit := out["witness_aid"].(string)
+	_, at, _, err := iacrypto.DecodeIndexedEd25519SignatureQB64(out["cesr_signature"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := "BOtherWitnessKey0123456789ABCDEFGHIJKLMNOPQ"
+	right := make([]string, at+1)
+	for i := range right {
+		right[i] = other
+	}
+	right[at] = wit
+	if _, _, err := receiptFromResponse(out, raw, said, right); err != nil {
+		t.Fatalf("a receipt at its place in the list was refused: %v", err)
+	}
+	wrong := append([]string{other, other}, right...)
+	if _, _, err := receiptFromResponse(out, raw, said, wrong); err == nil {
+		t.Fatal("a receipt was accepted at an index that is not the witness's place in the list")
+	}
+}
+
+// A receipt whose index is not its witness's place in the list in force is not
+// kept and not counted when it arrives: the index sits outside the signature,
+// so a copy of a genuine receipt can carry another, and the count must be the
+// one the key log check makes.
+func TestAMisIndexedReceiptIsNeitherKeptNorCountedOnArrival(t *testing.T) {
+	s, aid, raw, sig := enrolled(t)
+	out, err := s.ReceiveEvent(aid, raw, sig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	said := out["event_said"].(string)
+	wit := out["witness_aid"].(string)
+	good := out["cesr_signature"].(string)
+	_, at, _, err := iacrypto.DecodeIndexedEd25519SignatureQB64(good)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, rawSig, _ := iacrypto.DecodeIndexedEd25519SignatureQB64(good)
+	moved, err := iacrypto.MatterIndexedSigQB64("A", at+1, rawSig, 88)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list := make([]string, at+1)
+	for i := range list {
+		list[i] = "BOtherWitnessKey0123456789ABCDEFGHIJKLMNOPQ"
+	}
+	list[at] = wit
+
+	now := NowRFC3339()
+	_ = s.Store.SaveFinalization(FinalizationState{EventSAID: said, SignerAID: aid, State: FinalizePending, Threshold: 1, StartedAt: now, UpdatedAt: now})
+	s.onReceipt(said, wit, moved, raw, list)
+	if f, _ := s.Store.GetFinalization(said); f.ReceiptCount != 0 {
+		t.Fatalf("a mis-indexed copy was counted: %d", f.ReceiptCount)
+	}
+	s.onReceipt(said, wit, good, raw, list)
+	if f, _ := s.Store.GetFinalization(said); f.ReceiptCount != 1 {
+		t.Fatalf("the genuine receipt was not counted: %d", f.ReceiptCount)
 	}
 }

@@ -1416,7 +1416,7 @@ func (s *SQLiteStore) SaveEndpoint(url, source string) error {
 // SaveWitnessReceipt keeps a receipt that verifies, replacing whatever was held
 // for that event and witness. See a_receipt_is_kept_only_if_it_verifies.go.
 func (s *SQLiteStore) SaveWitnessReceipt(record WitnessReceiptRecord) error {
-	if err := checkReceipt(record); err != nil {
+	if err := checkReceiptToSave(record); err != nil {
 		return err
 	}
 	if record.ReceivedAt == "" {

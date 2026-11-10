@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:agent_client/services/key_math.dart';
@@ -37,11 +38,19 @@ class AWitness {
   final Map<String, List<SignedCopy>> held = {};
   final Map<String, List<String>> _digests = {};
 
+  /// The witness list in force after each event of the log it holds for each
+  /// identity: the inception names it, a rotation cuts and adds.
+  final Map<String, List<List<String>>> _lists = {};
+
   /// Answers nothing at all.
   bool offline = false;
 
   /// Signs its receipts with another key.
   bool forgesReceipts = false;
+
+  /// Writes its receipts at the place after its own, as a copy of a genuine
+  /// receipt with another index would be.
+  bool misindexesReceipts = false;
 
   /// Answers in another witness's name.
   bool namesAnother = false;
@@ -63,6 +72,11 @@ class AWitness {
   /// with `403 not_witnessing`.
   Set<String>? witnessesOnly;
 
+  /// The witness list it takes to be in force, for a test that asks witnesses
+  /// about a list the log it holds does not have. Null: the list its held log
+  /// defines.
+  List<String>? listInForce;
+
   /// How many events it was sent.
   int sent = 0;
 
@@ -71,12 +85,30 @@ class AWitness {
     final ev = await _km.parseEvent(base64Decode(copy.rawB64));
     (held[aid] ??= []).add(copy);
     (_digests[aid] ??= []).add(ev.d);
+    List<String> names(Object? v) =>
+        v is List ? [for (final x in v) x as String] : const <String>[];
+    final lists = _lists[aid] ??= [];
+    var list = lists.isEmpty ? <String>[] : lists.last;
+    if (ev.t == 'icp' || ev.t == 'dip') {
+      list = names(ev['b']);
+    } else if (ev.t == 'rot' || ev.t == 'drt') {
+      final cuts = names(ev['br']);
+      list = [
+        for (final w in list)
+          if (!cuts.contains(w)) w
+      ];
+      for (final w in names(ev['ba'])) {
+        if (!list.contains(w)) list.add(w);
+      }
+    }
+    lists.add(list);
   }
 
   /// Forgets every log it holds and behaves again, as a new witness would.
   void forgetAll() {
     held.clear();
     _digests.clear();
+    _lists.clear();
     signsAnotherTip = false;
     offline = false;
     mute = false;
@@ -194,6 +226,7 @@ class AWitness {
       await _km.verifyLog(forAid, [...log.sublist(0, ev.s), copy]);
       held[forAid] = [...log.sublist(0, ev.s)];
       _digests[forAid] = [...digests.sublist(0, ev.s)];
+      _lists[forAid] = [..._lists[forAid]!.sublist(0, ev.s)];
       await hold(forAid, copy);
     } else if (ev.s < log.length) {
       // A repeat: answered with the receipt it already issued.
@@ -207,17 +240,42 @@ class AWitness {
       'event_said': ev.d,
       'witness_aid': namesAnother ? qb64('B', Uint8List(32)) : aid,
       'sequence_number': ev.s,
-      'cesr_signature': forgesReceipts
-          ? qb64(
-              '0B',
-              Uint8List.fromList(ed.sign(ed.generateKey().privateKey,
-                  Uint8List.fromList(utf8.encode(ev.d)))))
-          : _sign(ev.d),
+      'cesr_signature': _receipt(
+          forgesReceipts ? ed.generateKey().privateKey : _key.privateKey,
+          base64Decode(rawB64),
+          _place(forAid, ev.s)),
     });
+  }
+
+  /// Where this witness stands in the witness list in force at the event at
+  /// [sn] of [forAid], from the log it holds. A receipt carries this place as
+  /// its index, as keripy's Hab.witness writes it. Zero when it is not in the
+  /// list.
+  int _place(String forAid, int sn) {
+    final stated = listInForce;
+    if (misindexesReceipts) return min(63, _truePlace(forAid, sn) + 1);
+    return _truePlace(forAid, sn);
+  }
+
+  int _truePlace(String forAid, int sn) {
+    final stated = listInForce;
+    if (stated != null) return max(0, stated.indexOf(aid));
+    final lists = _lists[forAid] ?? const <List<String>>[];
+    final at = sn < lists.length ? lists[sn].indexOf(aid) : -1;
+    return at < 0 ? 0 : at;
   }
 
   Future<String> _ilk(SignedCopy c) async =>
       (await _km.parseEvent(base64Decode(c.rawB64))).t;
+
+  /// A receipt as keripy's Hab.witness makes one: an indexed Ed25519 signature
+  /// (code `A`, with [index] its witness's place in the list) over the
+  /// serialised event.
+  String _receipt(ed.PrivateKey key, Uint8List event, int index) {
+    const digits =
+        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    return qb64('A${digits[index]}', Uint8List.fromList(ed.sign(key, event)));
+  }
 
   String _sign(String message) => qb64(
       '0B',

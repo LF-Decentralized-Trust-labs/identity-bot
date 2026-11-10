@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"identity-agent-core/backup"
+	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/internal/atomicfile"
 	"identity-agent-core/internal/coretypes"
@@ -117,14 +118,9 @@ func (s *CoreServer) witnessSigningKey() (seed []byte, aid string, err error) {
 	return seed, aid, nil
 }
 
-// signWitnessReceipt signs a key event's SAID as this agent's witnessing
-// identity.
-//
-// The SAID rather than the event bytes: the identifier of an event is a digest
-// of it, so signing the digest commits to the event just as signing the bytes
-// would, and it does not depend on both sides reproducing an identical
-// serialisation. Noted as a deviation from the wire form an external witness
-// would use, which signs the serialised event.
+// signWitnessReceipt signs a short statement as this agent's witnessing
+// identity: a tip statement or an answer to a witness request. It does not sign
+// receipts of events; signWitnessEventReceipt does, in the form keripy reads.
 func (s *CoreServer) signWitnessReceipt(said string) (witnessAID, cesrSig string, err error) {
 	if said == "" {
 		return "", "", fmt.Errorf("there is no event to receipt")
@@ -136,6 +132,26 @@ func (s *CoreServer) signWitnessReceipt(said string) (witnessAID, cesrSig string
 	sig, err := login.SignString(said, seed)
 	if err != nil {
 		return "", "", fmt.Errorf("could not sign the receipt: %w", err)
+	}
+	return aid, sig, nil
+}
+
+// signWitnessEventReceipt receipts a key event as this agent's witnessing
+// identity, in the form keripy's Hab.witness makes: an indexed signature over
+// the serialised event, indexed by this witness's place in the controller's
+// witness list. It refuses when this witness is not in the list, as keripy does.
+func (s *CoreServer) signWitnessEventReceipt(rawEvent []byte, designated []string) (witnessAID, cesrSig string, err error) {
+	seed, aid, err := s.witnessSigningKey()
+	if err != nil {
+		return "", "", err
+	}
+	at := drivers.WitnessPosition(designated, aid)
+	if at < 0 {
+		return "", "", fmt.Errorf("this witness is not in the witness list of the event, so it cannot receipt it")
+	}
+	sig, err := drivers.SignEventReceipt(rawEvent, seed, at)
+	if err != nil {
+		return "", "", err
 	}
 	return aid, sig, nil
 }

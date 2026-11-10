@@ -491,7 +491,7 @@ func witnessingReport(in ValidateKELInput) ([]EventWitnessing, bool) {
 			if !ok || counted[key] {
 				continue
 			}
-			if err := VerifyReceipt(r.WitnessAID, ev.SAID, r.CesrSignature); err != nil {
+			if err := VerifyEventReceipt(r.WitnessAID, raw, ev.SAID, r.CesrSignature, designated); err != nil {
 				continue
 			}
 			counted[key] = true
