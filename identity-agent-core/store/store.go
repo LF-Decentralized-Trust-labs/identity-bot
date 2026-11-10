@@ -673,6 +673,10 @@ type WitnessReceiptRecord struct {
 	WitnessAID    string `json:"witness_aid"`
 	CesrSignature string `json:"cesr_signature"`
 	ReceivedAt    string `json:"received_at"`
+	// Event is the serialised event the receipt is of, when the caller has it.
+	// It is read when the receipt is saved and not kept: a receipt signed over
+	// the event is checked against it then, and by whoever reads the event later.
+	Event []byte `json:"-"`
 }
 
 // KerlEntry is a Key Event Receipt Log entry: one event plus all its receipts.
@@ -1742,7 +1746,7 @@ func (s *FileStore) loadContactKELs() (map[string]ContactKELRecord, error) {
 // SaveWitnessReceipt keeps a receipt that verifies, replacing whatever was held
 // for that event and witness. See a_receipt_is_kept_only_if_it_verifies.go.
 func (s *FileStore) SaveWitnessReceipt(record WitnessReceiptRecord) error {
-	if err := checkReceipt(record); err != nil {
+	if err := checkReceiptToSave(record); err != nil {
 		return err
 	}
 	s.mu.Lock()

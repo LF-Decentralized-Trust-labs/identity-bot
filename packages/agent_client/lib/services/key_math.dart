@@ -270,10 +270,22 @@ extension KeyMathOperations on KeyMath {
 
   /// Whether [sig] is the witness [witness]'s receipt over the event whose
   /// digest is [digest]. A witness's name is its key, so nothing is fetched.
-  Future<bool> isReceipt(String witness, String digest, String sig) async {
+  ///
+  /// A receipt signed over the serialised event, which is the form keripy
+  /// makes, can be checked only with the event: pass it as [eventB64]. Its
+  /// index is its witness's place in the witness list in force at the event,
+  /// so pass that list as [designated] wherever it is known; without it the
+  /// index is not checked.
+  Future<bool> isReceipt(String witness, String digest, String sig,
+      {String? eventB64, List<String>? designated}) async {
     try {
-      await run(
-          'verify_receipt', {'witness': witness, 'digest': digest, 'sig': sig});
+      await run('verify_receipt', {
+        'witness': witness,
+        'digest': digest,
+        'sig': sig,
+        if (eventB64 != null) 'event_b64': eventB64,
+        if (designated != null) 'designated': designated,
+      });
       return true;
     } on KeyMathRefused {
       return false;

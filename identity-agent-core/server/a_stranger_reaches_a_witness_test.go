@@ -32,6 +32,7 @@ func TestAWitnessIsReachedWithoutThisAgentsCredentials(t *testing.T) {
 	}
 	key, _ := signer.PublicKey()
 	svc.OurWitnessAID = func() (string, error) { return key, nil }
+	svc.SignEventReceipt = receiptSignerFor(signer, key)
 	svc.SignReceipt = func(msg string) (string, string, error) {
 		raw, err := signer.Sign([]byte(msg))
 		if err != nil {
@@ -68,7 +69,7 @@ func TestAWitnessIsReachedWithoutThisAgentsCredentials(t *testing.T) {
 		t.Fatalf("the event was not taken: %d", res.StatusCode)
 	}
 	if receipt.EventSAID != said || receipt.WitnessAID != key ||
-		drivers.VerifyReceipt(key, said, receipt.Sig) != nil {
+		drivers.VerifyEventReceipt(key, raw, said, receipt.Sig, nil) != nil {
 		t.Fatalf("the receipt is not this witness's over this event: %+v", receipt)
 	}
 

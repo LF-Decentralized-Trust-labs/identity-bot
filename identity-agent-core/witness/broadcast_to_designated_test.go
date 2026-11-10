@@ -102,6 +102,7 @@ func TestARealDelegatedInceptionIsWitnessed(t *testing.T) {
 		sig, err := login.SignString(said, wpriv.Seed())
 		return wkey, sig, err
 	}
+	witness.SignEventReceipt = eventSignerFor(wpriv.Seed())
 
 	// The delegated identity, made by the engine that ships.
 	e, key, _ := signedEngine()
@@ -184,6 +185,7 @@ func TestAWitnessFollowsAKeyLogPastItsSixteenthEvent(t *testing.T) {
 		sig, err := login.SignString(said, wpriv.Seed())
 		return wkey, sig, err
 	}
+	witness.SignEventReceipt = eventSignerFor(wpriv.Seed())
 	e, _, remember := signedEngine()
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	remember(iacrypto.VerkeyQB64(pub), priv.Seed())
@@ -226,6 +228,7 @@ func TestAWitnessTakesOnADelegateOnlyFromItsApproval(t *testing.T) {
 		sig, err := login.SignString(said, wpriv.Seed())
 		return wkey, sig, err
 	}
+	witness.SignEventReceipt = eventSignerFor(wpriv.Seed())
 	e, key, _ := signedEngine()
 	orgPub, orgSeed := key()
 	orgNext, _ := key()

@@ -62,6 +62,7 @@ func startOwnerPeerServing(t *testing.T, aid string, serveKeyHistory bool) *owne
 	}
 	wkey, _ := signer.PublicKey()
 	svc.OurWitnessAID = func() (string, error) { return wkey, nil }
+	svc.SignEventReceipt = receiptSignerFor(signer, wkey)
 	svc.SignReceipt = func(said string) (string, string, error) {
 		raw, err := signer.Sign([]byte(said))
 		if err != nil {

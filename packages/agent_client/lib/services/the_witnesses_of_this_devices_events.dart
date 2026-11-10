@@ -32,11 +32,21 @@ class KnownWitnesses implements WitnessDirectory {
 /// the core accepts, ADR-060) is counted, each once: a name in any other
 /// spelling, or a second copy of one, could otherwise be counted twice.
 class WitnessSet {
-  WitnessSet(List<String> witnesses, this.toad)
-      : witnesses = List.unmodifiable({
-          for (final w in witnesses)
+  WitnessSet(List<String> listed, this.toad)
+      : designated = List.unmodifiable(listed),
+        witnesses = List.unmodifiable({
+          for (final w in listed)
             if (_canonical.hasMatch(w)) w
         });
+
+  /// The witness list as the event wrote it, every entry in its place. A
+  /// receipt's index is a position in this list, so an entry that is not a
+  /// canonical witness still holds its place, as it does in the Go
+  /// `WitnessPosition`; a witness is matched in it by its key, which has one
+  /// canonical spelling.
+  final List<String> designated;
+
+  /// The canonical witnesses of [designated], the ones that can be asked.
   final List<String> witnesses;
   final int toad;
 
@@ -62,7 +72,7 @@ class WitnessSet {
           List<String> adds = const [],
           required int toad}) =>
       WitnessSet([
-        for (final w in witnesses)
+        for (final w in designated)
           if (!cuts.contains(w)) w,
         ...adds
       ], toad);
@@ -229,17 +239,21 @@ class TheWitnessesOfThisDevicesEvents {
       int sn, String digest, String bytesB64, List<String> sigs) async {
     final base = _where.whereIs(w);
     if (base == null) return (_Answer.unreached, null);
-    var answer = await _send(base, w, aid, digest, bytesB64, sigs);
+    var answer = await _send(base, w, aid, digest, bytesB64, sigs, set);
     if (answer.$1 == _Answer.gap) {
       await _fillUpTo(w, base, set, aid, sn);
-      answer = await _send(base, w, aid, digest, bytesB64, sigs);
+      answer = await _send(base, w, aid, digest, bytesB64, sigs, set);
     }
     return answer.$1 == _Answer.gap ? (_Answer.unreached, null) : answer;
   }
 
   /// Sends one signed event to witness [w] and checks its answer.
+  ///
+  /// The receipt's index must be [w]'s place in [set], the witness list in
+  /// force at the event: a receipt with another index is one keripy files under
+  /// another witness, and is not counted.
   Future<(_Answer, String?)> _send(Uri base, String w, String aid,
-      String digest, String bytesB64, List<String> sigs) async {
+      String digest, String bytesB64, List<String> sigs, WitnessSet set) async {
     final http.Response res;
     try {
       res = await _client
@@ -267,7 +281,8 @@ class TheWitnessesOfThisDevicesEvents {
     if (body['witness_aid'] != w ||
         body['event_said'] != digest ||
         sig is! String ||
-        !await _km.isReceipt(w, digest, sig)) {
+        !await _km.isReceipt(w, digest, sig,
+            eventB64: bytesB64, designated: set.designated)) {
       return (_Answer.unreached, null);
     }
     return (_Answer.receipted, sig);

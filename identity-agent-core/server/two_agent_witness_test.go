@@ -32,6 +32,7 @@ type peerAgent struct {
 	witnessKey string
 	base       string
 	core       *CoreServer
+	store      *store.SQLiteStore
 }
 
 // startPeer brings up one agent's witness surface on its own address.
@@ -47,6 +48,9 @@ func startPeer(t *testing.T, name string) *peerAgent {
 
 	svc := witness.NewService(witness.NewSQLiteStore(dataStore.DB()), dataStore, nil, witness.BackendDesktop)
 	svc.OurEntityType = func() witness.EntityType { return witness.EntityIndividual }
+	// The witness list in force after an event is read from the key log by the core's own rule, as the
+	// core wires it; the events this agent sends are kept in that log first (see keep).
+	svc.DesignationAfter = (&CoreServer{DataStore: dataStore}).designationAfter
 
 	// The witnessing key belongs to the agent, not to the witness package, so
 	// the host supplies both signing and the identifier. Each agent gets its
@@ -60,6 +64,7 @@ func startPeer(t *testing.T, name string) *peerAgent {
 		t.Fatal(err)
 	}
 	svc.OurWitnessAID = func() (string, error) { return key, nil }
+	svc.SignEventReceipt = receiptSignerFor(signer, key)
 	svc.SignReceipt = func(said string) (string, string, error) {
 		raw, err := signer.Sign([]byte(said))
 		if err != nil {
@@ -81,7 +86,7 @@ func startPeer(t *testing.T, name string) *peerAgent {
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)
 
-	return &peerAgent{svc: svc, witnessKey: key, base: srv.URL, core: core}
+	return &peerAgent{svc: svc, witnessKey: key, base: srv.URL, core: core, store: dataStore}
 }
 
 // willWitnessFor makes this agent willing to witness for an identity.

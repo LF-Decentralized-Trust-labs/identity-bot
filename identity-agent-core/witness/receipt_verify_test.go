@@ -32,7 +32,7 @@ const testSAID = "EEventSAID0123456789ABCDEFGHIJKLMNOPQRSTUVW"
 // witness we addressed all count the same as one that witnessed properly.
 func TestAGenuineReceiptIsAccepted(t *testing.T) {
 	resp, aid := witnessReply(t, testSAID, 1)
-	sig, got, err := receiptFromResponse(resp, testSAID)
+	sig, got, err := receiptFromResponse(resp, nil, testSAID, nil)
 	if err != nil {
 		t.Fatalf("a genuine receipt was rejected: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestAReplyWithNoReceiptIsNotCounted(t *testing.T) {
 		{"status": "accepted"},
 		{"witness_aid": "BSomeWitness"},
 	} {
-		if _, _, err := receiptFromResponse(resp, testSAID); err == nil {
+		if _, _, err := receiptFromResponse(resp, nil, testSAID, nil); err == nil {
 			t.Fatalf("a reply carrying no receipt was counted: %v", resp)
 		}
 	}
@@ -58,7 +58,7 @@ func TestAReplyWithNoReceiptIsNotCounted(t *testing.T) {
 // signature by a real witness and still says nothing about this one.
 func TestAReceiptForAnotherEventIsRefused(t *testing.T) {
 	resp, _ := witnessReply(t, "EDifferentEvent6789ABCDEFGHIJKLMNOPQRSTUVWX", 1)
-	if _, _, err := receiptFromResponse(resp, testSAID); err == nil {
+	if _, _, err := receiptFromResponse(resp, nil, testSAID, nil); err == nil {
 		t.Fatal("a receipt issued for a different event was accepted")
 	}
 }
@@ -68,7 +68,7 @@ func TestAReceiptForAnotherEventIsRefused(t *testing.T) {
 func TestAWitnessNotNamedByAKeyIsRefused(t *testing.T) {
 	resp, _ := witnessReply(t, testSAID, 1)
 	resp["witness_aid"] = "EvRHjssG5WJjwq5c2AA8yOfY7VT3keG0XOtdRLz195P8" // the old, unparseable shape
-	_, _, err := receiptFromResponse(resp, testSAID)
+	_, _, err := receiptFromResponse(resp, nil, testSAID, nil)
 	if err == nil {
 		t.Fatal("a witness whose name is not a key was accepted")
 	}
@@ -83,7 +83,7 @@ func TestASignatureFromAnotherKeyIsRefused(t *testing.T) {
 	impostor, _ := witnessReply(t, testSAID, 9)
 	_, designated := witnessReply(t, testSAID, 1)
 	impostor["witness_aid"] = designated
-	if _, _, err := receiptFromResponse(impostor, testSAID); err == nil {
+	if _, _, err := receiptFromResponse(impostor, nil, testSAID, nil); err == nil {
 		t.Fatal("a signature by a different key passed under the designated witness's name")
 	}
 }

@@ -291,10 +291,16 @@ func (v *verifier) checkKeyLogs() {
 			in.RawEvents = append(in.RawEvents, raw)
 			in.CesrSignatures = append(in.CesrSignatures, ev.Signature)
 			said, _ := parsed["d"].(string)
+			// A receipt's index is its witness's place in the list in force at
+			// its event, which the events read so far define.
+			var designated []string
+			if row, found := drivers.WitnessingOf(drivers.ValidateKELInput{RawEvents: in.RawEvents}, said); found {
+				designated = row.Designated
+			}
 			for _, rc := range ev.Receipts {
 				// A receipt that does not verify is not a missing receipt: it is
 				// one that was changed.
-				if err := drivers.VerifyReceipt(rc.Witness, said, rc.Signature); err != nil {
+				if err := drivers.VerifyEventReceipt(rc.Witness, raw, said, rc.Signature, designated); err != nil {
 					v.fault(where, "a witness receipt for event %d does not verify: %v", i, err)
 					continue
 				}
