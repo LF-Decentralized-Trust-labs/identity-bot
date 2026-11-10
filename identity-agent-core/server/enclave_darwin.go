@@ -4,20 +4,9 @@ package server
 
 import "runtime"
 
-func detectEnclave() EnclaveStatusResponse {
-	if runtime.GOARCH == "arm64" {
-		// Apple Silicon — Secure Enclave is always present and always active
-		return EnclaveStatusResponse{
-			HardwareBacked: true,
-			BackingType:    "secure_enclave",
-			BackingLabel:   "Apple Secure Enclave",
-		}
-	}
-
-	// Intel Mac — Keychain uses software AES encryption (no dedicated secure enclave)
-	return EnclaveStatusResponse{
-		HardwareBacked: false,
-		BackingType:    "keychain_software",
-		BackingLabel:   "macOS Keychain (software)",
-	}
+// A Mac: whether the root seed is under the Secure Enclave is the seed
+// wrapper's answer (macEnclaveStatus). An Apple-silicon CPU says only that the
+// hardware is there.
+func detectEnclave(wrap seedWrapFacts) EnclaveStatusResponse {
+	return macEnclaveStatus(runtime.GOARCH == "arm64", wrap)
 }

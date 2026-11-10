@@ -6,7 +6,10 @@ import (
 	"golang.org/x/sys/windows/registry"
 )
 
-func detectEnclave() EnclaveStatusResponse {
+// detectEnclave reads the TPM from the registry and reports it as found; whether
+// the root seed is under it is the seed wrapper's answer (windowsEnclaveStatus).
+// A TPM in the registry is not a key the TPM will open.
+func detectEnclave(wrap seedWrapFacts) EnclaveStatusResponse {
 	present := false
 	enabled := false
 
@@ -29,34 +32,5 @@ func detectEnclave() EnclaveStatusResponse {
 		}
 	}
 
-	if present && enabled {
-		return EnclaveStatusResponse{
-			HardwareBacked: true,
-			BackingType:    "tpm2",
-			BackingLabel:   "Windows TPM 2.0",
-			TpmPresent:     &present,
-			TpmEnabled:     &enabled,
-		}
-	}
-
-	// TPM present but not enabled by OS
-	if present && !enabled {
-		return EnclaveStatusResponse{
-			HardwareBacked: false,
-			BackingType:    "dpapi",
-			BackingLabel:   "Windows DPAPI (TPM present but not enabled)",
-			TpmPresent:     &present,
-			TpmEnabled:     &enabled,
-		}
-	}
-
-	// No TPM — fall back to DPAPI (software-backed)
-	hardwareBacked := false
-	return EnclaveStatusResponse{
-		HardwareBacked: hardwareBacked,
-		BackingType:    "dpapi",
-		BackingLabel:   "Windows DPAPI (software)",
-		TpmPresent:     &present,
-		TpmEnabled:     &enabled,
-	}
+	return windowsEnclaveStatus(present, enabled, wrap)
 }

@@ -61,7 +61,7 @@ type KeyProtectionInfo struct {
 // EnclaveStatusResponse describes the hardware security backing available on this device.
 type EnclaveStatusResponse struct {
 	HardwareBacked bool             `json:"hardwareBacked"`
-	BackingType    string           `json:"backingType"`  // "tpm2", "secure_enclave", "dpapi", "keychain_software", "software"
+	BackingType    string           `json:"backingType"`  // "tpm2", "secure_enclave", "dpapi", "keychain_software", "libsecret", or the seed-wrap scheme (Linux, Android)
 	BackingLabel   string           `json:"backingLabel"` // Human-readable, e.g. "Apple Secure Enclave"
 	TpmPresent     *bool            `json:"tpmPresent"`   // Windows/Linux only: TPM chip detected
 	TpmEnabled     *bool            `json:"tpmEnabled"`   // Windows/Linux only: TPM accessible to OS
@@ -71,16 +71,14 @@ type EnclaveStatusResponse struct {
 	TrustAllowed   *bool            `json:"trustAllowed,omitempty"`
 
 	// KeyProtection is what DetectCapability established about this machine's
-	// ability to hold a key, which is a different question from the signer
-	// fields above and was previously not reported anywhere.
+	// ability to hold a key, which is a different question from the fields
+	// above and was previously not reported anywhere.
 	//
-	// The two disagree on purpose. BackingType names the signer this build
-	// happens to be using — on a phone that is the software fallback, because
-	// the identity's keys live in the on-device KERI engine and not in that
-	// signer. KeyProtection names what the HARDWARE can do, which is what
-	// decides whether a root key may live here. A phone reporting a software
-	// signer and StrongBox key protection is not a contradiction; it is those
-	// two facts.
+	// The two can disagree, and both are true. HardwareBacked and BackingType
+	// say whether the root seed is under hardware right now, which is the seed
+	// wrapper's answer (enclave_seed_wrapper.go). KeyProtection names what the
+	// HARDWARE can do. A machine whose hardware is usable while its seed is not
+	// wrapped (seedProtection.notProtectedWhy says why) reports both facts.
 	KeyProtection *KeyProtectionInfo `json:"keyProtection,omitempty"`
 
 	// SealedHardware is the bottom rung of the chain, and it is present only
@@ -198,22 +196,25 @@ type CurrencyInfo struct {
 	Message          string `json:"message,omitempty"`
 }
 
-// detectEnclave is implemented per-platform in enclave_windows.go / enclave_linux.go / enclave_darwin.go
+// detectEnclave is implemented per-platform in enclave_windows.go / enclave_linux.go /
+// enclave_android.go / enclave_darwin.go / enclave_ios.go
 
 func (s *CoreServer) handleSecurityEnclave(w http.ResponseWriter, r *http.Request) {
-	result := detectEnclave()
+	// One check of the seed wrapper, for every field below that reports it.
+	wrap := readSeedWrap()
+	result := detectEnclave(wrap)
 
 	// What the hardware can do, as established by asking it. Reported alongside
-	// the signer rather than instead of it, because they answer different
-	// questions and both are needed to explain a refusal to somebody.
+	// the seed wrapper's answer rather than instead of it, because they answer
+	// different questions and both are needed to explain a refusal to somebody.
 	cap := secureenclave.DetectCapability()
 	result.KeyProtection = &KeyProtectionInfo{
 		Status:         string(cap.Status),
 		Kind:           string(cap.Kind),
 		Reason:         cap.Reason,
 		Detail:         cap.Detail,
-		SeedWrapped:    secureenclave.SeedWrapAvailable(),
-		SeedWrapScheme: secureenclave.SeedWrapScheme(),
+		SeedWrapped:    wrap.Wrapped,
+		SeedWrapScheme: wrap.Scheme,
 	}
 	// Whether a root key may live here is the hardware's answer AND the seed
 	// being wrappable: otherwise a phone whose app has not supplied its key
@@ -222,19 +223,6 @@ func (s *CoreServer) handleSecurityEnclave(w http.ResponseWriter, r *http.Reques
 	sp := secureenclave.ReportSeedProtection(s.DataDir)
 	result.KeyProtection.SeedProtection = &sp
 
-	if s.AttestationRunner != nil {
-		// Only let a USABLE signer refine the platform detection. An
-		// uninitializable signer (e.g. the Security-framework key create failing
-		// in a mobile app context) must not downgrade the device's hardware
-		// capability — on mobile the keys live in the on-device KERI engine, not
-		// this signer, and reporting "no secure enclave" on an iPhone that has
-		// one blocks onboarding with a falsehood.
-		if signer := s.AttestationRunner.Signer(); signer != nil && signer.Available() {
-			result.HardwareBacked = signer.Platform() != "software"
-			result.BackingType = signer.Platform()
-			result.BackingLabel = signer.Label()
-		}
-	}
 	if s.TrustGate != nil {
 		st := s.TrustGate.State()
 		allowed := st.TrustAllowed

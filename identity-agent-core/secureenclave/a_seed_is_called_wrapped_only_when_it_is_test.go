@@ -392,3 +392,26 @@ func TestTheStoredSchemeIsTheVerifiedLevelNotASecondReading(t *testing.T) {
 		t.Fatalf("the label followed the app's second chain: %s", got)
 	}
 }
+
+// A check that fails forgets the level the last one found, so nothing goes on
+// naming hardware the latest check did not prove.
+func TestAFailedCheckForgetsTheLevelTheLastOneFound(t *testing.T) {
+	usablePhone(t, Capability{Status: Usable, Kind: KindAndroidTEE})
+	h := theApp(t, aKeyIn(attestTrustedEnvironment), true)
+	w := declaredHostSeedWrapper()
+	level := func() string {
+		seedWrapHostMu.RLock()
+		defer seedWrapHostMu.RUnlock()
+		return verifiedLevel
+	}
+	if !w.Available() || level() != "tee" {
+		t.Fatalf("the first check did not pass: available=%v level=%q", w.Available(), level())
+	}
+	h.chain = nil
+	if w.Available() {
+		t.Fatal("a wrapper with no chain read as available")
+	}
+	if got := level(); got != "" {
+		t.Fatalf("a failed check kept the level %q", got)
+	}
+}

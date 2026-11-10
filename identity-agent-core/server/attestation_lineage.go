@@ -178,7 +178,7 @@ func (s *CoreServer) handleAttestationLineage(w http.ResponseWriter, r *http.Req
 // The same detection the enclave endpoint serves, so the two never disagree
 // about the machine they are both running on.
 func (s *CoreServer) enclaveStatus() *EnclaveStatusResponse {
-	got := detectEnclave()
+	got := detectEnclave(readSeedWrap())
 	return &got
 }
 

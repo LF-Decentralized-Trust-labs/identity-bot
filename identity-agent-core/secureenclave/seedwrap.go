@@ -105,6 +105,18 @@ func SeedWrapScheme() string {
 
 const seedWrapNone = "none"
 
+// SeedWrapNow is SeedWrapAvailable and SeedWrapScheme from one check of the
+// wrapper, so the two describe the same moment. Asking them separately checks
+// twice, which on a phone is two attestation verifications, and the answer can
+// change in between.
+func SeedWrapNow() (available bool, scheme string) {
+	w := platformSeedWrapper()
+	if w == nil || !w.Available() {
+		return false, seedWrapNone
+	}
+	return true, w.Scheme()
+}
+
 // seedEnvelope is the self-describing on-disk form of root_seed.key. A legacy
 // file (raw seed bytes, pre-envelope) is detected by failing to parse as this
 // envelope and is migrated on first load.
