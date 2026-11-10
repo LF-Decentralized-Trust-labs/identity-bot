@@ -141,13 +141,7 @@ func (s *CoreServer) stillDesignatedIn(controllerAID string) func(rotationRawB64
 			return true, fmt.Errorf("the key log held for %s is not verified: %s",
 				controllerAID, strings.Join(res.ValidationErrors, "; "))
 		}
-		cut := false
-		for _, c := range ev.WitnessCut {
-			if sameWitness(c, witnessKey) {
-				cut = true
-			}
-		}
-		if !cut {
+		if !drivers.Designates(ev.WitnessCut, witnessKey) {
 			// Genuine, but not the event that removes us.
 			return true, nil
 		}
@@ -166,21 +160,6 @@ func (s *CoreServer) stillDesignatedIn(controllerAID string) func(rotationRawB64
 		// the controller's signed rotation can cause it. Refusing any cut older
 		// than the newest event held would block a legitimate withdrawal
 		// whenever the controller rotated again afterwards, so it is not done.
-		for _, d := range res.Witnesses {
-			if sameWitness(d, witnessKey) {
-				return true, nil
-			}
-		}
-		return false, nil
+		return drivers.Designates(res.Witnesses, witnessKey), nil
 	}
-}
-
-// sameWitness compares by key, so two spellings of one witness agree.
-func sameWitness(a, b string) bool {
-	if a == b {
-		return true
-	}
-	ka, oka := drivers.WitnessKey(a)
-	kb, okb := drivers.WitnessKey(b)
-	return oka && okb && ka == kb
 }

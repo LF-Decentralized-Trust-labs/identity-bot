@@ -314,14 +314,14 @@ func TestAnExistingThreeWitnessIdentityKeepsWorking(t *testing.T) {
 		mu.Unlock()
 		return map[string]interface{}{}, nil
 	}
-	s.DesignationAfter = func(string, map[string]interface{}) ([]string, int) { return keys, 2 }
+	s.KeyLogOf = keyLog(aid, inceptionOf(aid, keys, 2))
 
 	// Every designated key resolves to an address.
 	if known := s.designatedTargets(keys); len(known) != 3 {
 		t.Fatalf("only %d of 3 designated witnesses resolve", len(known))
 	}
 
-	ev := []byte(`{"t":"ixn","i":"` + aid + `","s":"1","d":"EixnSAID"}`)
+	ev := interactionOf(aid, 1)
 	if err := s.BroadcastEvent(t.Context(), aid, ev, "AAsig"); err != nil {
 		t.Fatal(err)
 	}
@@ -338,7 +338,7 @@ func TestAnExistingThreeWitnessIdentityKeepsWorking(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	f, _ := s.Store.GetFinalization("EixnSAID")
+	f, _ := s.Store.GetFinalization(saidOf(ev))
 	if f == nil || f.Threshold != 2 {
 		t.Fatalf("finalization %+v, want it held to the identity's own threshold of 2", f)
 	}

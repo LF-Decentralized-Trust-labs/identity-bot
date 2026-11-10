@@ -26,6 +26,14 @@ import (
 // inception from that signer.
 func enrolled(t *testing.T) (s *Service, aid string, raw []byte, sig string) {
 	t.Helper()
+	return enrolledListing(t, false)
+}
+
+// enrolledListing is enrolled, with the inception naming this agent's own
+// witnessing key as the one witness when listed is true, and the service
+// reading that log as the key log.
+func enrolledListing(t *testing.T, listed bool) (s *Service, aid string, raw []byte, sig string) {
+	t.Helper()
 	s, mc := testService(t)
 	// The witnessing key belongs to the agent, so the host supplies it. Each
 	// test agent gets its own, which is what makes two of them two observers.
@@ -77,6 +85,7 @@ func enrolled(t *testing.T) (s *Service, aid string, raw []byte, sig string) {
 	}
 	raw, err = keri.BuildInception(keri.InceptionInput{
 		Keys: []string{pubA}, NextDigests: []string{next}, Derivation: "self-addressing",
+		Witnesses: witnessesListed(listed, wkey),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -96,6 +105,9 @@ func enrolled(t *testing.T) (s *Service, aid string, raw []byte, sig string) {
 		t.Fatal(err)
 	}
 
+	if listed {
+		s.KeyLogOf = keyLog(aid, raw)
+	}
 	mc.contacts[aid] = store.ContactRecord{AID: aid, Status: "accepted"}
 	if err := s.Store.SaveContactMeta(ContactMeta{
 		ContactAID: aid, WitnessingFor: true, BackendType: BackendDesktop,
@@ -103,6 +115,13 @@ func enrolled(t *testing.T) (s *Service, aid string, raw []byte, sig string) {
 		t.Fatal(err)
 	}
 	return s, aid, raw, sig
+}
+
+func witnessesListed(listed bool, wkey string) []string {
+	if !listed {
+		return nil
+	}
+	return []string{wkey}
 }
 
 // The ordinary case: a properly signed event is receipted, and the witness
@@ -276,7 +295,7 @@ func TestAReceiptIsHeldToTheWitnessListItIsCheckedAgainst(t *testing.T) {
 // so a copy of a genuine receipt can carry another, and the count must be the
 // one the key log check makes.
 func TestAMisIndexedReceiptIsNeitherKeptNorCountedOnArrival(t *testing.T) {
-	s, aid, raw, sig := enrolled(t)
+	s, aid, raw, sig := enrolledListing(t, true)
 	out, err := s.ReceiveEvent(aid, raw, sig)
 	if err != nil {
 		t.Fatal(err)
@@ -293,19 +312,23 @@ func TestAMisIndexedReceiptIsNeitherKeptNorCountedOnArrival(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	list := make([]string, at+1)
-	for i := range list {
-		list[i] = "BOtherWitnessKey0123456789ABCDEFGHIJKLMNOPQ"
-	}
-	list[at] = wit
 
 	now := NowRFC3339()
 	_ = s.Store.SaveFinalization(FinalizationState{EventSAID: said, SignerAID: aid, State: FinalizePending, Threshold: 1, StartedAt: now, UpdatedAt: now})
-	s.onReceipt(said, wit, moved, raw, list)
+	if err := s.receive(said, wit, moved, raw); err == nil {
+		t.Fatal("a mis-indexed copy was taken")
+	}
+	// The count is the key log check's own, so only what is held shows that
+	// the check was made on arrival.
+	if held, _ := s.Contacts.GetWitnessReceipts(said); len(held) != 0 {
+		t.Fatalf("a mis-indexed copy was kept: %+v", held)
+	}
 	if f, _ := s.Store.GetFinalization(said); f.ReceiptCount != 0 {
 		t.Fatalf("a mis-indexed copy was counted: %d", f.ReceiptCount)
 	}
-	s.onReceipt(said, wit, good, raw, list)
+	if err := s.receive(said, wit, good, raw); err != nil {
+		t.Fatal(err)
+	}
 	if f, _ := s.Store.GetFinalization(said); f.ReceiptCount != 1 {
 		t.Fatalf("the genuine receipt was not counted: %d", f.ReceiptCount)
 	}

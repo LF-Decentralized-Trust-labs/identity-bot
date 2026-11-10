@@ -448,7 +448,7 @@ func New(cfg Config) (*CoreServer, error) {
 	wsvc.IsOfficialService = func(aidOrURL string) bool {
 		return s.Providers.IsOfficialService(provider.CapabilityWitness, aidOrURL)
 	}
-	wsvc.DesignationAfter = s.designationAfter
+	wsvc.KeyLogOf = s.keyLogOf
 	// The bootstrap witnesses come from the provider registry, so there is one
 	// list of operators rather than one here and another in the witness engine.
 	witness.BootstrapWitnesses = witness.WitnessesFromRegistry(
@@ -3032,11 +3032,19 @@ func (s *CoreServer) handleSubmitReceipt(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	// The event bytes the receipt is of, from the log it belongs to, and the
-	// witness list in force at that event, which the receipt's index is a place in.
+	// witness list in force at that event, which the receipt's index is a place
+	// in. When the log cannot be read as far as that event the list is not known,
+	// and a receipt is not kept against a list nobody could read.
 	rawEvent, designated, ok := eventAndWitnessesIn(in, req.EventSAID)
 	if !ok {
 		writeError(w, http.StatusUnprocessableEntity, "The receipt cannot be checked",
 			"the witness list in force at this event cannot be read from its key log")
+		return
+	}
+	if !drivers.Designates(designated, req.WitnessAID) {
+		// The same rule the witness service keeps a receipt by (Service.receive).
+		writeError(w, http.StatusUnprocessableEntity, "The receipt is not from a designated witness",
+			"the key log does not designate this witness at this event")
 		return
 	}
 	if err := drivers.VerifyEventReceipt(req.WitnessAID, rawEvent, req.EventSAID, req.CesrSignature, designated); err != nil {
@@ -3052,6 +3060,7 @@ func (s *CoreServer) handleSubmitReceipt(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "Failed to store receipt", err.Error())
 		return
 	}
+	s.recountReceipts(req.EventSAID)
 	held, _ := s.DataStore.GetWitnessReceipts(req.EventSAID)
 	in.Receipts = map[string][]drivers.WitnessReceipt{}
 	for _, h := range held {
@@ -3062,11 +3071,6 @@ func (s *CoreServer) handleSubmitReceipt(w http.ResponseWriter, r *http.Request)
 	if row, found := drivers.WitnessingOf(in, req.EventSAID); found {
 		resp.ReceiptCount = row.Verified
 		resp.ThresholdMet = row.Met
-		if !slices.Contains(row.Designated, req.WitnessAID) {
-			resp.Errors = append(resp.Errors, fmt.Sprintf(
-				"%s is not a designated witness for this event, so its receipt is kept and not counted",
-				req.WitnessAID))
-		}
 	}
 	jsonreply.Write(w, http.StatusOK, resp)
 }
@@ -3077,7 +3081,7 @@ func (s *CoreServer) handleSubmitReceipt(w http.ResponseWriter, r *http.Request)
 // be read as far as it.
 func eventAndWitnessesIn(in drivers.ValidateKELInput, eventSAID string) ([]byte, []string, bool) {
 	row, found := drivers.WitnessingOf(in, eventSAID)
-	if !found {
+	if !found || !row.Known {
 		return nil, nil, false
 	}
 	for _, raw := range in.RawEvents {
@@ -3092,6 +3096,17 @@ func eventAndWitnessesIn(in drivers.ValidateKELInput, eventSAID string) ([]byte,
 		}
 	}
 	return nil, nil, false
+}
+
+// recountReceipts brings the finalization of an event, if it has one, in line
+// with the receipts kept for it, for a receipt kept by a route that does not
+// pass through the witness service. The event is counted against the witness
+// list in force at its own place in its log, which is not the list as it stands
+// now once the log has rotated past it.
+func (s *CoreServer) recountReceipts(eventSAID string) {
+	if s.WitnessService != nil {
+		s.WitnessService.RecountReceipts(eventSAID)
+	}
 }
 
 // logOfEvent is the stored key log of the identity eventSAID belongs to, as
@@ -3118,39 +3133,45 @@ func (s *CoreServer) logOfEvent(eventSAID string) (drivers.ValidateKELInput, boo
 		return drivers.ValidateKELInput{}, false
 	}
 	var claimant string
-	var claimed []store.EventRecord
+	var claimed [][]byte
 	for _, aid := range candidates {
 		events, err := s.DataStore.GetEvents(aid)
 		if err != nil {
 			return drivers.ValidateKELInput{}, false
 		}
-		if !slices.ContainsFunc(events, func(ev store.EventRecord) bool { return claimsEvent(ev, aid, eventSAID) }) {
+		// Each stored event is decoded once, here, and the bytes are what the
+		// claim is judged on and what is returned.
+		raws, err := rawEventsOf(events)
+		if err != nil {
+			if !slices.ContainsFunc(events, func(ev store.EventRecord) bool { return claimsEvent(ev, aid, eventSAID) }) {
+				continue // an unreadable log that does not hold the event is nobody's
+			}
+			return drivers.ValidateKELInput{}, false
+		}
+		if !slices.ContainsFunc(raws, func(raw []byte) bool { return claimsRaw(raw, aid, eventSAID) }) {
 			continue
 		}
 		if claimant != "" {
 			return drivers.ValidateKELInput{}, false // claimed by two
 		}
-		claimant, claimed = aid, events
+		claimant, claimed = aid, raws
 	}
 	if claimant == "" {
 		return drivers.ValidateKELInput{}, false
 	}
-	in := drivers.ValidateKELInput{AID: claimant}
-	for _, ev := range claimed {
-		raw, err := base64.StdEncoding.DecodeString(ev.RawBytesB64)
-		if err != nil || len(raw) == 0 {
-			return drivers.ValidateKELInput{}, false
-		}
-		in.RawEvents = append(in.RawEvents, raw)
-	}
-	return in, true
+	return drivers.ValidateKELInput{AID: claimant, RawEvents: claimed}, true
 }
 
 // claimsEvent reports whether a stored row of aid's log holds the event said:
 // its published bytes parse to an event with that identifier and that prefix.
 func claimsEvent(ev store.EventRecord, aid, said string) bool {
-	raw, err := base64.StdEncoding.DecodeString(ev.RawBytesB64)
-	if err != nil || len(raw) == 0 {
+	raw, err := drivers.DecodeRawBytes(ev.RawBytesB64)
+	return err == nil && claimsRaw(raw, aid, said)
+}
+
+// claimsRaw is claimsEvent for bytes already decoded.
+func claimsRaw(raw []byte, aid, said string) bool {
+	if len(raw) == 0 {
 		return false
 	}
 	parsed, err := keri.ParseEvent(raw)

@@ -19,6 +19,8 @@ import (
 
 	"identity-agent-core/internal/boundedread"
 	"identity-agent-core/internal/jsonreply"
+
+	keri "github.com/grapeid/keri-go"
 )
 
 // Finding somebody whose address has stopped working.
@@ -67,7 +69,7 @@ type recoveredEndpoint struct {
 // They are read from the bytes each event was published as (raw_bytes_b64), the
 // only part of a stored entry that was checked; event_json and any field beside
 // the bytes are text the sender wrote and are not looked at. The set is walked
-// the way a key log defines it (witnessesAfter): the inception names it, each
+// the way a key log defines it (drivers.WitnessesAfter): the inception names it, each
 // rotation cuts and adds. A log with an entry that has no readable bytes names
 // none, and neither does a log that was not verified end to end: the witnesses
 // this agent is about to ask come only from a log it has checked.
@@ -81,11 +83,11 @@ func witnessesFromStoredKEL(rec *store.ContactKELRecord) []string {
 	}
 	var witnesses []string
 	for _, raw := range in.RawEvents {
-		var ev map[string]interface{}
-		if json.Unmarshal(raw, &ev) != nil {
+		ev, err := keri.ParseEvent(raw)
+		if err != nil {
 			return nil
 		}
-		witnesses, _ = witnessesAfter(witnesses, ev)
+		witnesses, _ = drivers.WitnessesAfter(witnesses, ev)
 	}
 	return witnesses
 }

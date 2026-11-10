@@ -104,37 +104,16 @@ func (d *telDuplicity) fold(res *drivers.DriverVerifyCredentialResponse) {
 }
 
 // currentWitnessKeys is the witness set the issuer's key log has in force at its
-// end: the inception's, with each rotation's cuts and additions applied.
+// end, by the one rule for it (drivers.WitnessesAfter). A log with an event that
+// does not parse says nothing about who its witnesses are, so asks nobody.
 func currentWitnessKeys(kelRaw [][]byte) []string {
 	var set []string
-	has := func(k string) int {
-		for i, v := range set {
-			if v == k {
-				return i
-			}
-		}
-		return -1
-	}
 	for _, raw := range kelRaw {
 		ev, err := keri.ParseEvent(raw)
 		if err != nil {
-			continue
+			return nil
 		}
-		switch ev.Ilk {
-		case "icp", "dip":
-			set = append([]string(nil), ev.Witnesses...)
-		case "rot", "drt":
-			for _, c := range ev.WitnessCut {
-				if i := has(c); i >= 0 {
-					set = append(set[:i], set[i+1:]...)
-				}
-			}
-			for _, a := range ev.WitnessAdd {
-				if has(a) < 0 {
-					set = append(set, a)
-				}
-			}
-		}
+		set, _ = drivers.WitnessesAfter(set, ev)
 	}
 	return set
 }

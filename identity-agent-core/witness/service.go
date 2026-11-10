@@ -19,6 +19,8 @@ import (
 	"sync"
 	"time"
 
+	keri "github.com/grapeid/keri-go"
+
 	"identity-agent-core/drivers"
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/internal/boundedread"
@@ -32,6 +34,7 @@ type ContactStore interface {
 	SaveContact(contact store.ContactRecord) error
 	GetIdentity() (*store.IdentityState, error)
 	SaveWitnessReceipt(rec store.WitnessReceiptRecord) error
+	GetWitnessReceipts(eventSAID string) ([]store.WitnessReceiptRecord, error)
 	SaveTask(task store.TaskRecord) error
 	GetTasks() ([]store.TaskRecord, error)
 }
@@ -42,6 +45,7 @@ type EventPoster func(ctx context.Context, witnessURL string, body []byte) (map[
 // Service is the IA-side witness engine.
 type Service struct {
 	verdicts    verifiedLogs
+	receiptMu   sync.Mutex
 	Store       Store
 	Contacts    ContactStore
 	Driver      drivers.KeriEngine
@@ -117,15 +121,18 @@ type Service struct {
 	// so the exemption is a line in a shipped file that somebody can audit.
 	IsOfficialService func(aidOrURL string) bool
 
-	// DesignationAfter reports the witnesses an identity's key log designates,
-	// and the threshold it asks of them, once ev (an event of that log, or the
-	// next one) is in it. Nil, or an answer with no keys, means the log designates
-	// none this agent can read.
+	// KeyLogOf reads an identity's key log as this agent keeps it: the bytes
+	// each event was published as, in order. An identity founded when the
+	// registry listed more witnesses keeps reaching all of them, and is
+	// finalized against its own threshold, because the witnesses and the
+	// threshold are read from this log (drivers.WitnessingOf) whatever a NEW
+	// identity would be given today.
 	//
-	// It is what lets an identity founded when the registry listed more
-	// witnesses keep reaching all of them, and be finalized against its own
-	// threshold, whatever a NEW identity would be given today.
-	DesignationAfter func(aid string, ev map[string]interface{}) (keys []string, toad int)
+	// An error means the log cannot be read now, and then no receipt is
+	// counted: a list this agent cannot read is not an empty one, and not a
+	// list nobody checks either. Nil means this agent keeps no log to ask, and
+	// is the same.
+	KeyLogOf func(aid string) ([][]byte, error)
 
 	// telMu serialises storing registry events, so two submissions that
 	// together complete a credential's chain are checked one after the other.
@@ -912,25 +919,32 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 		rootAID = id.AID
 	}
 	kind := ClassifyAID(signerAID, rootAID)
-	designated, toad := s.designationAfter(signerAID, event)
-	witnesses, err := s.witnessesToReach(kind, signerAID, designated)
+	said := eventSAID(event)
+	// A key log that cannot be read leaves the list in force unknown. The event
+	// still goes to the witnesses this agent has, and what comes back is kept,
+	// but nothing is counted until the log can be read: a damaged rotation
+	// must not leave the witnesses it cut in force.
+	row, lerr := s.witnessing(signerAID, said, rawEvent)
+	if lerr != nil {
+		log.Printf("[witness] the key log of %s cannot be read, so receipts for %s are kept and not counted: %v",
+			signerAID, said, lerr)
+	}
+	// The list a receipt's index is checked against; nil while the log cannot be read.
+	designated := designatedIn(row)
+	witnesses, err := s.witnessesToReach(kind, signerAID, row.Designated)
 	if err != nil {
 		return err
 	}
-	said := eventSAID(event)
 	seq, _ := eventSeq(event)
 	// Finalized against the identity's own threshold: the receipts it asked
-	// for, not a floor that a smaller witness set can never reach.
+	// for, not a floor that a smaller witness set can never reach. A log that
+	// was read and designates nobody has its own threshold, 0; only a log that
+	// could not be read falls back to the floor.
 	threshold := s.Threshold()
-	if len(designated) > 0 && toad > 0 {
-		threshold = toad
+	if lerr == nil {
+		threshold = row.Threshold
 	}
-	now := NowRFC3339()
-	_ = s.Store.SaveFinalization(FinalizationState{
-		EventSAID: said, SignerAID: signerAID, SequenceNum: seq,
-		State: FinalizePending, ReceiptCount: 0, Threshold: threshold,
-		StartedAt: now, UpdatedAt: now,
-	})
+	s.begin(said, signerAID, seq, threshold, rawEvent)
 
 	body := eventBody(signerAID, base64.StdEncoding.EncodeToString(rawEvent), cesrSigs)
 	for _, w := range witnesses {
@@ -975,7 +989,19 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 		return true
 	}
 	// Each event's receipts are counted against its threshold, so each has a
-	// finalisation to count them on.
+	// finalisation to count them on. The threshold is the one in force at the
+	// event's own place in the log, not today's: an event from before a
+	// rotation asked of its witnesses what the log said then.
+	var logRaw [][]byte
+	for _, e := range events {
+		raw, err := base64.StdEncoding.DecodeString(e.RawBytesB64)
+		if err != nil {
+			logRaw = nil
+			break
+		}
+		logRaw = append(logRaw, raw)
+	}
+	atPlace := drivers.WitnessingByEvent(drivers.ValidateKELInput{AID: signerAID, RawEvents: logRaw})
 	for _, e := range events {
 		raw, _ := base64.StdEncoding.DecodeString(e.RawBytesB64)
 		var ev map[string]interface{}
@@ -988,22 +1014,12 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 		said := eventSAID(ev)
 		if f, _ := s.Store.GetFinalization(said); f == nil {
 			seq, _ := eventSeq(ev)
-			now := NowRFC3339()
-			_ = s.Store.SaveFinalization(FinalizationState{
-				EventSAID: said, SignerAID: signerAID, SequenceNum: seq,
-				State: FinalizePending, Threshold: threshold, StartedAt: now, UpdatedAt: now,
-			})
+			at := threshold
+			if row, ok := atPlace[said]; ok && row.Known {
+				at = row.Threshold
+			}
+			s.startFinalization(said, signerAID, seq, at, "", raw)
 		}
-	}
-	// A receipt's index is a position in the list in force at its event, which
-	// is not the current list for an event from before a rotation.
-	var allRaw [][]byte
-	for _, e := range events {
-		raw, err := base64.StdEncoding.DecodeString(e.RawBytesB64)
-		if err != nil {
-			break
-		}
-		allRaw = append(allRaw, raw)
 	}
 	var wg sync.WaitGroup
 	for _, key := range designated {
@@ -1060,8 +1076,17 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 					log.Printf("[witness] %s did not take event %s of %s: %v", key, said, signerAID, err)
 					return
 				}
-				if sig, wit, verr := receiptFromResponse(resp, raw, said, designatedAt(allRaw, said)); verr == nil && wit == key {
-					s.onReceipt(said, key, sig, raw, designatedAt(allRaw, said))
+				// A witness that took an event the log gives no list for (it
+				// designates nobody, so this one is a bootstrap witness, or the
+				// log cannot be read) still holds it, so its tip is confirmed
+				// whatever place its receipt carries. Whether the receipt is kept
+				// and counted is receive's rule, which holds it to the list.
+				at := designatedIn(atPlace[said])
+				if len(at) == 0 {
+					at = nil
+				}
+				if sig, wit, verr := receiptFromResponse(resp, raw, said, at); verr == nil && wit == key {
+					_ = s.receive(said, key, sig, raw)
 					if sn, err := eventSeq(ev); err == nil {
 						s.confirm(signerAID, key, sn)
 					}
@@ -1173,11 +1198,7 @@ func (s *Service) BroadcastToDesignated(ctx context.Context, signerAID string, r
 	known := s.designatedTargets(designated)
 	said := eventSAID(event)
 	seq, _ := eventSeq(event)
-	now := NowRFC3339()
-	_ = s.Store.SaveFinalization(FinalizationState{
-		EventSAID: said, SignerAID: signerAID, SequenceNum: seq,
-		State: FinalizePending, Threshold: threshold, StartedAt: now, UpdatedAt: now,
-	})
+	s.begin(said, signerAID, seq, threshold, rawEvent)
 	body := eventBody(signerAID, base64.StdEncoding.EncodeToString(rawEvent), cesrSigs)
 	for _, key := range designated {
 		w, ok := known[key]
@@ -1207,12 +1228,71 @@ type witnessTarget struct {
 	Commercial bool
 }
 
-// designationAfter is DesignationAfter, safe when it is not set.
-func (s *Service) designationAfter(aid string, ev map[string]interface{}) ([]string, int) {
-	if s.DesignationAfter == nil {
-		return nil, 0
+// ErrNoKeyLog is what witnessing answers when this agent keeps no key log to
+// ask.
+var ErrNoKeyLog = errors.New("this agent keeps no key log to read")
+
+// witnessing is what the key log of aid says of one of its events, by the one
+// rule for it (drivers.WitnessingOf): who is designated to witness it, how
+// many receipts it needs, and how many of the receipts kept for it count. The
+// event is judged at its own place in the log, so a rotation after it changes
+// nothing about it.
+//
+// rawEvent is the event as published, for an event the log may not hold yet:
+// it is read as the log's next one (drivers.AppendEvent), and refused when it
+// is not, a rotation to a log with nothing before it or one that does not
+// follow the last event. An event already in the log is not added again. Nil
+// means the event is in the log already. An empty eventSAID means the last
+// event of the log.
+//
+// An inception into a log with no events is read only if KeyLogOf answers an
+// empty log. The core's does not: it answers an error for an identifier with no
+// events, and its events are broadcast only once stored, so through the core an
+// inception is witnessed as an event already in the log.
+//
+// An error means the answer is not known, never that it is empty: a log that
+// cannot be read, an event that is not in it, or a witness threshold in it
+// that cannot be read. A log that is read and designates nobody answers an
+// empty list and the log's own threshold.
+func (s *Service) witnessing(aid, eventSAID string, rawEvent []byte) (drivers.EventWitnessing, error) {
+	if s.KeyLogOf == nil {
+		return drivers.EventWitnessing{}, ErrNoKeyLog
 	}
-	return s.DesignationAfter(aid, ev)
+	events, err := s.KeyLogOf(aid)
+	if err != nil {
+		return drivers.EventWitnessing{}, err
+	}
+	if len(rawEvent) > 0 {
+		if events, err = drivers.AppendEvent(events, rawEvent); err != nil {
+			return drivers.EventWitnessing{}, err
+		}
+	}
+	if len(events) == 0 {
+		return drivers.EventWitnessing{}, fmt.Errorf("the key log of %s holds no events", aid)
+	}
+	if eventSAID == "" {
+		last, perr := keri.ParseEvent(events[len(events)-1])
+		if perr != nil {
+			return drivers.EventWitnessing{}, fmt.Errorf("the last event of the key log of %s is not readable: %w", aid, perr)
+		}
+		eventSAID = last.SAID
+	}
+	// Only this event's receipts are read: the report walks the whole log for
+	// the list and the threshold, and counts receipts for the event asked about.
+	in := drivers.ValidateKELInput{AID: aid, RawEvents: events, Receipts: map[string][]drivers.WitnessReceipt{}}
+	held, _ := s.Contacts.GetWitnessReceipts(eventSAID)
+	for _, h := range held {
+		in.Receipts[eventSAID] = append(in.Receipts[eventSAID],
+			drivers.WitnessReceipt{WitnessAID: h.WitnessAID, CesrSignature: h.CesrSignature})
+	}
+	row, found := drivers.WitnessingOf(in, eventSAID)
+	if !found {
+		return drivers.EventWitnessing{}, fmt.Errorf("event %s is not in the key log of %s", eventSAID, aid)
+	}
+	if !row.Known {
+		return drivers.EventWitnessing{}, fmt.Errorf("the key log of %s cannot be read as far as event %s", aid, eventSAID)
+	}
+	return row, nil
 }
 
 // witnessesToReach is every witness an event or record for aid should be sent
@@ -1321,6 +1401,21 @@ func (s *Service) enrolledWitnesses(kind AidKind, aid string) ([]witnessTarget, 
 	return out, nil
 }
 
+// designatedIn is the witness list a receipt's index is a place in, from the
+// row the key log gives for its event (witnessing): the list in force at that
+// event. Nil when the row is not known, which means the index is not checked
+// here; a log that designates nobody is an empty list, which is checked, and
+// no index fits it.
+func designatedIn(row drivers.EventWitnessing) []string {
+	if !row.Known {
+		return nil
+	}
+	if row.Designated == nil {
+		return []string{}
+	}
+	return row.Designated
+}
+
 // postWithRetry submits an event to one witness and records the receipt it
 // returns.
 //
@@ -1385,7 +1480,7 @@ func (s *Service) postWithRetry(ctx context.Context, url string, body []byte, ev
 		log.Printf("[witness] asked %s for a receipt and %s answered; not counted", witnessAID, wit)
 		return
 	}
-	s.onReceipt(eventSAID, witnessAID, sig, rawEvent, designated)
+	_ = s.receive(eventSAID, witnessAID, sig, rawEvent)
 }
 
 // receiptFromResponse pulls a verified receipt out of a witness's reply.
@@ -1408,24 +1503,63 @@ func receiptFromResponse(resp map[string]interface{}, rawEvent []byte, eventSAID
 	return sig, witnessAID, nil
 }
 
-// onReceipt keeps a receipt a witness returned and counts it. rawEvent is the
-// event the receipt is of: a receipt signed over the event is kept only with
-// the event it was checked against.
+// receive keeps the receipt a witness returned for an event and counts it.
 //
-// designated is the witness list in force at the event, where it is known. The
-// index of a receipt sits outside what the witness signed, so a copy of a
-// genuine receipt can carry another one; checked here, at every arrival, a
-// mis-indexed copy is neither kept nor counted. Nil means the list is not known
-// here, and the index is then checked where the log is judged.
-func (s *Service) onReceipt(eventSAID, witnessAID, cesrSig string, rawEvent []byte, designated []string) {
+// A witness is counted once per event, however often its receipt arrives: a
+// retry, a replay, or a witness answering twice never adds to the count, or one
+// witness could reach the threshold alone. The count is not added to. It is
+// taken from the receipts kept, by the one rule the key log is judged by
+// (witnessing), against the list in force at the event's own place in the log.
+//
+// A receipt from a witness the log does not designate at that event is refused:
+// neither kept nor counted. When the log cannot be read the receipt is kept and
+// nothing is counted, for when it can be. A receipt already held for the same
+// witness stays unless it does not count (a receipt kept while the log could
+// not be read, which the log turns out not to take), and is then replaced by
+// this one, so a bad one kept early never locks its witness out.
+//
+// rawEvent is the event as published, which the log may not hold yet.
+func (s *Service) receive(eventSAID, witnessAID, cesrSig string, rawEvent []byte) error {
+	// Held under a lock so two arrivals of the same receipt cannot both see it
+	// as new.
+	s.receiptMu.Lock()
+	defer s.receiptMu.Unlock()
 	f, _ := s.Store.GetFinalization(eventSAID)
-	if f == nil {
-		return
+	// Whose log the event is in: its finalization says, and an event with none
+	// says itself.
+	var signerAID string
+	if f != nil {
+		signerAID = f.SignerAID
+	} else if ev, perr := keri.ParseEvent(rawEvent); perr == nil {
+		signerAID = ev.Identifier
 	}
+	row, lerr := s.witnessing(signerAID, eventSAID, rawEvent)
+	if lerr == nil && !drivers.Designates(row.Designated, witnessAID) {
+		log.Printf("[witness] receipt from %s for %s not kept: it is not a witness the key log designates there", witnessAID, eventSAID)
+		return fmt.Errorf("%s is not a witness the key log designates for this event", witnessAID)
+	}
+	if f == nil {
+		return nil
+	}
+	// A receipt signed over the event is kept only with the event it was checked
+	// against, and only if its index is a place in the list in force at the event
+	// (the index sits outside what the witness signed, so a copy of a genuine
+	// receipt can carry another). Where the log cannot be read the index is
+	// checked where the log is judged.
 	if len(rawEvent) > 0 {
-		if err := drivers.VerifyEventReceipt(witnessAID, rawEvent, eventSAID, cesrSig, designated); err != nil {
+		var at []string
+		if lerr == nil {
+			at = designatedIn(row)
+		}
+		if err := drivers.VerifyEventReceipt(witnessAID, rawEvent, eventSAID, cesrSig, at); err != nil {
 			log.Printf("[witness] receipt from %s for %s not counted: %v", witnessAID, eventSAID, err)
-			return
+			return err
+		}
+	}
+	held, _ := s.Contacts.GetWitnessReceipts(eventSAID)
+	for _, h := range held {
+		if drivers.Designates([]string{h.WitnessAID}, witnessAID) && (lerr != nil || drivers.Designates(row.Counted, witnessAID)) {
+			return nil
 		}
 	}
 	// Counted only once it is kept, so the count never runs ahead of the
@@ -1434,16 +1568,90 @@ func (s *Service) onReceipt(eventSAID, witnessAID, cesrSig string, rawEvent []by
 		EventSAID: eventSAID, WitnessAID: witnessAID, CesrSignature: cesrSig, Event: rawEvent,
 	}); err != nil {
 		log.Printf("[witness] receipt from %s for %s not kept: %v", witnessAID, eventSAID, err)
+		return err
+	}
+	s.settle(f, rawEvent)
+	_ = s.Store.SaveFinalization(*f)
+	return nil
+}
+
+// settle sets a finalization's count to the receipts that count now, and its
+// state to match. A count taken from the receipts, not added to, is what lets
+// an event broadcast again keep the receipts it already has: a witness already
+// held is not counted twice, so a count that restarted at 0 would never reach
+// the threshold. rawEvent is the event as published when it may not be in the
+// key log yet, else nil.
+//
+// When the key log cannot be read now, nothing is counted: the receipts stay
+// kept, for when it can be.
+func (s *Service) settle(f *FinalizationState, rawEvent []byte) {
+	f.ReceiptCount = 0
+	if row, err := s.witnessing(f.SignerAID, f.EventSAID, rawEvent); err == nil {
+		f.ReceiptCount = row.Verified
+	}
+	f.UpdatedAt = NowRFC3339()
+	switch {
+	// Zero of zero is met: a log that asks no witness for a receipt (bt 0) has
+	// nothing to wait for, so it is finalized, not pending for ever.
+	case f.ReceiptCount >= f.Threshold && (f.ReceiptCount > 0 || f.Threshold == 0):
+		f.State = FinalizeFinalized
+	case f.ReceiptCount > 0:
+		f.State = FinalizePartial
+	default:
+		f.State = FinalizePending
+	}
+}
+
+// begin records that an event is being sent to its witnesses, keeping the
+// receipts already held for it (a re-broadcast of an event some witnesses have
+// already receipted) and when it was first sent.
+func (s *Service) begin(eventSAID, signerAID string, seq, threshold int, rawEvent []byte) {
+	startedAt := ""
+	if old, _ := s.Store.GetFinalization(eventSAID); old != nil {
+		startedAt = old.StartedAt
+	}
+	s.startFinalization(eventSAID, signerAID, seq, threshold, startedAt, rawEvent)
+}
+
+// startFinalization saves the finalization of an event with the count of the
+// receipts kept for it (see settle).
+func (s *Service) startFinalization(eventSAID, signerAID string, seq, threshold int, startedAt string, rawEvent []byte) {
+	s.receiptMu.Lock()
+	defer s.receiptMu.Unlock()
+	if startedAt == "" {
+		startedAt = NowRFC3339()
+	}
+	f := FinalizationState{EventSAID: eventSAID, SignerAID: signerAID, SequenceNum: seq, Threshold: threshold, StartedAt: startedAt}
+	s.settle(&f, rawEvent)
+	_ = s.Store.SaveFinalization(f)
+}
+
+// RecountReceipts brings an event's finalization, if it has one, in line with
+// the receipts kept for it, for a receipt that was kept without passing through
+// receive (one submitted to the core's own receipt route). The event is
+// counted at its own place in the key log, wherever the log has got to since.
+func (s *Service) RecountReceipts(eventSAID string) {
+	s.receiptMu.Lock()
+	defer s.receiptMu.Unlock()
+	f, _ := s.Store.GetFinalization(eventSAID)
+	if f == nil {
 		return
 	}
-	f.ReceiptCount++
-	f.UpdatedAt = NowRFC3339()
-	if f.ReceiptCount >= f.Threshold {
-		f.State = FinalizeFinalized
-	} else if f.ReceiptCount > 0 {
-		f.State = FinalizePartial
-	}
+	s.settle(f, nil)
 	_ = s.Store.SaveFinalization(*f)
+}
+
+// rawEventOf is the event bytes inside a body made by eventBody: what a
+// receipt is of, and so what it is counted against.
+func rawEventOf(body []byte) []byte {
+	var b struct {
+		EventB64 string `json:"event_b64"`
+	}
+	if json.Unmarshal(body, &b) != nil {
+		return nil
+	}
+	raw, _ := base64.StdEncoding.DecodeString(b.EventB64)
+	return raw
 }
 
 func (s *Service) finalizeLoop(eventSAID string, threshold int) {
@@ -1730,8 +1938,13 @@ func (s *Service) PublishEndpointRecord(ctx context.Context, signerAID string, r
 		rootAID = id.AID
 	}
 	kind := ClassifyAID(signerAID, rootAID)
-	designated, _ := s.designationAfter(signerAID, nil)
-	witnesses, err := s.witnessesToReach(kind, signerAID, designated)
+	row, lerr := s.witnessing(signerAID, "", nil)
+	if lerr != nil && !errors.Is(lerr, ErrNoKeyLog) {
+		// Nothing is counted here, so the endpoint record still goes to the
+		// witnesses this agent has; it just cannot add the ones the log names.
+		log.Printf("[witness] the key log of %s cannot be read, so its endpoint record goes to enrolled witnesses only: %v", signerAID, lerr)
+	}
+	witnesses, err := s.witnessesToReach(kind, signerAID, row.Designated)
 	if err != nil {
 		return err
 	}
@@ -2038,28 +2251,4 @@ func (s *Service) heldNow(aid, witnessKey string, sn int) {
 // checked regardless.
 func (s *Service) ownersLocalAllowed(ctx context.Context, rawURL string) context.Context {
 	return context.WithValue(ctx, guardKey{}, LiteralIsLocal(hostOf(rawURL)))
-}
-
-// rawEventOf is the event bytes inside a body made by eventBody: what a
-// receipt is signed over, and so what it is checked against.
-func rawEventOf(body []byte) []byte {
-	var b struct {
-		EventB64 string `json:"event_b64"`
-	}
-	if json.Unmarshal(body, &b) != nil {
-		return nil
-	}
-	raw, _ := base64.StdEncoding.DecodeString(b.EventB64)
-	return raw
-}
-
-// designatedAt is the witness list in force at the event with eventSAID in the
-// log allRaw, or nil when that cannot be read, in which case the index of a
-// receipt is not checked here and is checked where the log is judged.
-func designatedAt(allRaw [][]byte, eventSAID string) []string {
-	row, ok := drivers.WitnessingOf(drivers.ValidateKELInput{RawEvents: allRaw}, eventSAID)
-	if !ok {
-		return nil
-	}
-	return row.Designated
 }

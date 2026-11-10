@@ -433,7 +433,7 @@ func (e *Engine) Commit(name string, raw []byte, sigs []string, keep func(driver
 	}
 	err = e.place(id, entries, sn, raw, ev, indexed, keep, func(ev *keri.Event) {
 		if ev.Ilk == "rot" {
-			id.Witnesses = witnessesAfter(id.Witnesses, ev)
+			id.Witnesses, _ = drivers.WitnessesAfter(id.Witnesses, ev)
 			id.Toad = witnessThreshold(ev)
 		}
 	})
