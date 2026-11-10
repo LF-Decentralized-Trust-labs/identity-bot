@@ -216,7 +216,7 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "bad json", boundedread.Status(err))
 		return
 	}
-	// The assertion, and beside it any credentials the person showed (ADR-069).
+	// The assertion, and beside it any credentials the person showed (ADR-071).
 	assertionText, a, posted, err := login.ReadSignInPost(body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -311,7 +311,7 @@ func (s *CoreServer) handleLoginCallback(w http.ResponseWriter, r *http.Request)
 		st["asked_from_page"] = true
 		// The assertion as sent, so a page with no back end can check it
 		// itself. Kept only for a sign-in a page started, and only when it
-		// names its credentials by digest (ADR-069): an assertion in the
+		// names its credentials by digest (ADR-071): an assertion in the
 		// older form carries them whole, and a page's collector is any
 		// script in the page. The credentials posted beside it are never
 		// kept. Released to the collector once with the rest, then forgotten.
@@ -547,7 +547,7 @@ const (
 )
 
 // boundCredentials are the credentials an assertion presents, as the policy
-// gate reads them (ADR-069). The assertion signs a digest for each; the
+// gate reads them (ADR-071). The assertion signs a digest for each; the
 // credentials arrive beside it, unsigned, so one counts only if its SAID is a
 // digest the assertion names and the body it carries has that SAID. A
 // credential posted but not named is left out, and a digest with no credential

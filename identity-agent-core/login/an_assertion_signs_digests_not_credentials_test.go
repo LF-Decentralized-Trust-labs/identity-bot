@@ -7,7 +7,7 @@ import (
 	"identity-agent-core/secureenclave"
 )
 
-// ADR-069. The assertion a person's Identity Agent signs names each credential
+// ADR-071. The assertion a person's Identity Agent signs names each credential
 // it presents by digest, so the text a page is handed holds none; the
 // credentials themselves go in the post, beside it.
 func TestAnAssertionSignsTheDigestsOfTheCredentialsAndTheCredentialsTravelBesideIt(t *testing.T) {
@@ -74,7 +74,7 @@ func TestAnAssertionSignsTheDigestsOfTheCredentialsAndTheCredentialsTravelBeside
 	if _, _, got, err := ReadSignInPost(bare); err != nil || got != nil {
 		t.Errorf("a bare assertion read as %v, %v", got, err)
 	}
-	// An assertion in the form before ADR-069 is still read, and is not digests only.
+	// An assertion in the form before ADR-071 is still read, and is not digests only.
 	old := read
 	old.PresentedACDCs = []interface{}{map[string]interface{}{"said": "ECredA"}}
 	if DigestsOnly(old) {

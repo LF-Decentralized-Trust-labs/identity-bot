@@ -584,7 +584,7 @@ export function readAssertion(text: string): LoginAssertion {
   return a;
 }
 
-/** What a callback is posted (ADR-069): the assertion, which names each
+/** What a callback is posted (ADR-071): the assertion, which names each
  *  credential it presents by digest, and the credentials themselves, which are
  *  for the website owner's Identity Agent alone and are not signed. An
  *  assertion that presented nothing is posted bare, as is every one from an

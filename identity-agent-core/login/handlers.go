@@ -86,7 +86,7 @@ func (h *Handler) presentedHeld(bundle *ChallengeBundle) []PresentedCredential {
 }
 
 // credentialDigests are what an assertion signs of the credentials it presents
-// (ADR-069): the SAID of each, never the credential.
+// (ADR-071): the SAID of each, never the credential.
 func credentialDigests(creds []PresentedCredential) []interface{} {
 	out := make([]interface{}, 0, len(creds))
 	for _, c := range creds {
@@ -333,7 +333,7 @@ func (h *Handler) getOrCreateRelationship(siteAID string, bundle *ChallengeBundl
 }
 
 // BuildAssertion signs a login assertion (exported for OIDC adapter).
-// The assertion names the credentials it presents by digest only (ADR-069).
+// The assertion names the credentials it presents by digest only (ADR-071).
 func (h *Handler) BuildAssertion(rel *SiteRelationship, bundle *ChallengeBundle, customData map[string]interface{}) (*Assertion, error) {
 	a, _, err := h.buildAssertionWithCredentials(rel, bundle, customData)
 	return a, err

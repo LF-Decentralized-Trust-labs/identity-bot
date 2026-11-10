@@ -1,4 +1,4 @@
-# ADR-069: A Sign-In Signs the Digests of the Credentials It Presents
+# ADR-071: A Sign-In Signs the Digests of the Credentials It Presents
 
 **Status:** Proposed
 **Date:** 2026-11-08

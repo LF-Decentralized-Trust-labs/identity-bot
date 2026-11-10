@@ -8,7 +8,7 @@ import (
 )
 
 // SignInPost is what a person's Identity Agent posts to a callback when it
-// presented credentials (ADR-069): the signed assertion, which names each
+// presented credentials (ADR-071): the signed assertion, which names each
 // credential by digest, and the credentials themselves, which are for the
 // website owner's Identity Agent alone. An assertion that presented nothing is
 // posted bare, as before.
@@ -56,7 +56,7 @@ func ReadSignInPost(body []byte) (raw []byte, a Assertion, creds []PresentedCred
 }
 
 // DigestsOnly reports whether every credential an assertion presents is named
-// by digest. An assertion in the form before ADR-069 carries the credentials
+// by digest. An assertion in the form before ADR-071 carries the credentials
 // themselves, and must go to no page.
 func DigestsOnly(a Assertion) bool {
 	for _, p := range a.PresentedACDCs {

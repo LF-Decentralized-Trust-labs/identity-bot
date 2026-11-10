@@ -1,4 +1,4 @@
-// ADR-069: a callback is posted either the bare assertion (nothing presented,
+// ADR-071: a callback is posted either the bare assertion (nothing presented,
 // or an Identity Agent that has not updated) or {assertion, credentials}, the
 // credentials being for the website owner's Identity Agent alone. Both are read
 // as the core reads them, and the assertion names its credentials by digest.
@@ -23,7 +23,7 @@ const bare = readSignInPost(JSON.stringify(assertion([])));
 assert.deepEqual(bare.credentials, []);
 assert.deepEqual(bare.assertion.presented_acdcs, []);
 
-// The form before ADR-069 is still read for its window.
+// The form before ADR-071 is still read for its window.
 const old = readSignInPost(JSON.stringify(assertion([credential])));
 assert.deepEqual(old.assertion.presented_acdcs, [credential]);
 assert.deepEqual(old.credentials, []);

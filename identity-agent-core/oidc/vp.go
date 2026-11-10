@@ -36,7 +36,7 @@ type VPToken struct {
 }
 
 // BuildVPToken packages credentials + Grape Score per negotiated format.
-// The assertion names its credentials by digest (ADR-069); credentials are the
+// The assertion names its credentials by digest (ADR-071); credentials are the
 // full ones it names, which go into the token for the relying party that asked.
 func BuildVPToken(format string, assertion *login.Assertion, credentials []login.PresentedCredential) (*VPToken, error) {
 	shown := make([]interface{}, 0, len(credentials))

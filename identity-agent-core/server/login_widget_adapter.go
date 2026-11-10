@@ -272,7 +272,7 @@ func (s *CoreServer) handleLoginSessionStatus(w http.ResponseWriter, r *http.Req
 			// challenge it answers. Released with the identity, once, and
 			// only when the sign-in was started from a page. A collector that
 			// is a page is any script in it, so the assertion is kept only if it
-			// names its credentials by digest (ADR-069, see handleLoginCallback);
+			// names its credentials by digest (ADR-071, see handleLoginCallback);
 			// a server that asked keeps what it always had.
 			if a, ok := st["assertion"].(string); ok && held && st["asked_from_page"] == true {
 				resp["assertion"] = a

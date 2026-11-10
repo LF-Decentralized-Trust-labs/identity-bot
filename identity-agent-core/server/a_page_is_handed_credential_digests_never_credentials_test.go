@@ -12,7 +12,7 @@ import (
 	"identity-agent-core/login"
 )
 
-// ADR-069. A page's collector is any script in the page. Whatever form the
+// ADR-071. A page's collector is any script in the page. Whatever form the
 // assertion arrives in, what reaches that collector never holds a credential's
 // body, and the credentials posted beside the assertion are kept nowhere.
 func TestAPageIsHandedTheDigestsOfTheCredentialsNeverTheCredentials(t *testing.T) {
@@ -28,7 +28,7 @@ func TestAPageIsHandedTheDigestsOfTheCredentialsNeverTheCredentials(t *testing.T
 		{"digests in the assertion, credentials beside it", false, true},
 		// The older Identity Agent's form still signs a person in, and is
 		// never handed to a page: it would carry the credential with it.
-		{"credentials inside the assertion (the form before ADR-069)", true, false},
+		{"credentials inside the assertion (the form before ADR-071)", true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := anOrganisationWithAWebsite(t, asset.EnrollmentPolicy{Mode: asset.EnrollmentOpen})
@@ -128,7 +128,7 @@ func TestAPageIsHandedTheDigestsOfTheCredentialsNeverTheCredentials(t *testing.T
 	}
 }
 
-// ADR-069. A credential posted beside the assertion counts only if the
+// ADR-071. A credential posted beside the assertion counts only if the
 // assertion's signature names it and its body has the digest named.
 func TestACredentialPostedBesideTheAssertionCountsOnlyIfTheAssertionNamesIt(t *testing.T) {
 	w := aGateWorldIssuingTo(t, true, true)
@@ -166,6 +166,6 @@ func TestACredentialPostedBesideTheAssertionCountsOnlyIfTheAssertionNamesIt(t *t
 	var whole []interface{}
 	_ = json.Unmarshal(raw, &whole)
 	if !gate(whole, nil) {
-		t.Error("an assertion in the form before ADR-069 was no longer read")
+		t.Error("an assertion in the form before ADR-071 was no longer read")
 	}
 }
