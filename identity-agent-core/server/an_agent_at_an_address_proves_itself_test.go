@@ -108,3 +108,12 @@ func TestNothingAnsweringIsNotTheSameAsSomethingElseAnswering(t *testing.T) {
 		t.Fatalf("an address nothing answers at: %+v", out)
 	}
 }
+
+// A computer that is only the front end for an agent kept elsewhere still makes
+// this check: it is how it notices, on every launch, that something else now
+// answers where its agent was. Refused by its own core, it would be unable to.
+func TestAFrontEndCoreStillChecksWhoIsAtTheAddress(t *testing.T) {
+	if _, ok := whatAFrontEndAnswersFor["POST /api/verify/agent-at-address"]; !ok {
+		t.Fatal("a front end refuses to check who is at the address it fronts for")
+	}
+}

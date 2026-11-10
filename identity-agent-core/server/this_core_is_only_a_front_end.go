@@ -224,6 +224,13 @@ var whatAFrontEndAnswersFor = map[string]string{
 	"POST /api/controller/sign":        "signing this computer's own asking with its enclave key",
 	"GET /api/controller/agent":        "which identity this computer is a front end for",
 
+	// Checking that what answers at the address this computer is a front end
+	// for still holds that identity's keys. It is the front end's own question,
+	// asked of its own core on every launch, and it is about the far side, not
+	// about an identity held here, so refusing it would leave a front end unable
+	// to notice that something else now answers where its agent was.
+	"POST /api/verify/agent-at-address": "checking that what answers at an address holds the keys of the identity it names",
+
 	// The app that started this core asks it to prove it holds the secret the
 	// app gave it before sending that secret anywhere. A front end is started
 	// by that app the same way, so it is asked the same question, and a core
