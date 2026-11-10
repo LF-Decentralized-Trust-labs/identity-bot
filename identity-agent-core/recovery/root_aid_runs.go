@@ -10,7 +10,7 @@ import (
 	"sort"
 	"sync"
 
-	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/atomicfile"
 	"identity-agent-core/store"
 
 	keri "github.com/grapeid/keri-go"

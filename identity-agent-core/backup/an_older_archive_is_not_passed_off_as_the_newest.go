@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"time"
 
-	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/atomicfile"
 )
 
 // An older archive put back under a later name.

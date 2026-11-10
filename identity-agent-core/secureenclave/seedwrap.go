@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/atomicfile"
 )
 
 // Root-seed protection at rest.

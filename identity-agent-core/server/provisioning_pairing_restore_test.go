@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"identity-agent-core/atomicfile"
 	"identity-agent-core/endpoint"
-	"identity-agent-core/internal/atomicfile"
 	"identity-agent-core/store"
 )
 

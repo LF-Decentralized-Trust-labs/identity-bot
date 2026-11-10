@@ -29,7 +29,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/atomicfile"
 	"os"
 	"sync"
 	"time"

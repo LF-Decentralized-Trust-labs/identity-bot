@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/atomicfile"
 	"identity-agent-core/relay"
 )
 

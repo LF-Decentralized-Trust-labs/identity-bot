@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/atomicfile"
 	"identity-agent-core/login"
 	"identity-agent-core/trail"
 )

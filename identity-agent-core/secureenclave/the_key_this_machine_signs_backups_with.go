@@ -4,7 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"fmt"
-	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/atomicfile"
 	"os"
 	"path/filepath"
 	"strings"

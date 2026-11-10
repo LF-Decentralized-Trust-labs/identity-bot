@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/atomicfile"
 )
 
 type RelationshipStore struct {

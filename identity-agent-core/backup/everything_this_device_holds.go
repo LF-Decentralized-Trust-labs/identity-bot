@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"identity-agent-core/internal/atomicfile"
+	"identity-agent-core/atomicfile"
 )
 
 // Everything on this device, rather than everything somebody remembered to list.

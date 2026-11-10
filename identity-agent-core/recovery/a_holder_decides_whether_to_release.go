@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"identity-agent-core/atomicfile"
 	"identity-agent-core/authprovider"
 	"identity-agent-core/backup"
-	"identity-agent-core/internal/atomicfile"
 )
 
 // Holding somebody else's share, and deciding whether to hand it back.
