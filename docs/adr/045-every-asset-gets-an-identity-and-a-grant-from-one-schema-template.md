@@ -6,6 +6,7 @@
 **Amended:** 2026-11-04 — A machine key's short code is 80 bits, not about 41 (see §Amendment 2)
 **Amended:** 2026-11-04 — An AI agent's body may sign the request for an AI agent it creates; version 1.2.0 of the AI Agent Grant (see §Amendment 3)
 **Amended:** 2026-11-05 — The six other built-in credential schemas get real identifiers (see §Amendment 4)
+**Amended:** 2026-11-08 — Where the key is on another device nothing is stored for it unsigned (see §Consequences)
 **Relates to:** ADR-032 (An identity can name who owns it, from its first event), ADR-042 (How an agent is reached, and who may manage it), ADR-044 (An authorized controller does the app's work)
 
 ## Context
@@ -245,9 +246,13 @@ authorised to act for the identity (ADR-044).
   unsigned events.
 - The other built-in schemas carried placeholder identifiers. They were converted the same
   way on 2026-11-05 (see Amendment 4).
-- Where an identity's key lives on another device, the events this Identity Agent writes for
-  it are stored unsigned until that device signs them. Grants anchored after them cannot be
-  verified by anybody else.
+- Where an identity's key lives on another device, no event is stored for it until that
+  device has signed it: a grant, a registry's inception and a delegated identity's approval
+  are built here, asked of that device, and appended only with its signature. *(Amended
+  2026-11-08. This replaces "the events this Identity Agent writes for it are stored unsigned
+  until that device signs them, so grants anchored after them cannot be verified by anybody
+  else". An earlier version did that, and the events it left are discarded or signed in place,
+  ADR-044 and ADR-061 section 3.)*
 - Other credential schemas name their lapse `expiry_date` or `authorized_until`, as a date.
   Asset grants use `valid_until`, as a date and time, because a grant may lapse within a day.
 

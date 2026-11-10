@@ -29,7 +29,7 @@ import (
 
 // ToSign is what signing an interaction grants, read from what it anchors.
 type ToSign struct {
-	// Kind is "machine", "ai_agent", "app" or "registry".
+	// Kind is "machine", "ai_agent", "app", "registry" or "delegation".
 	Kind string `json:"kind"`
 	// Issuer is the identity whose key log the interaction extends, at SN,
 	// after Prior.
@@ -245,6 +245,39 @@ func WhatSigningRegisters(ixnRaw, vcpRaw []byte) (*ToSign, error) {
 		return nil, err
 	}
 	return &ToSign{Kind: "registry", Issuer: body.II, SN: int(ixn.SN), Prior: ixn.PriorSAID, Registry: registry}, nil
+}
+
+// WhatSigningApproves checks that ixn is the delegator's approval of exactly
+// the delegated inception dip, and says what signing it does: it lets the
+// identity dip derives act as a delegate of the signer.
+//
+// The interaction's one seal is the inception itself (its identifier, place 0
+// and digest), and the inception derives its own identifier, so what is shown
+// is read from the inception and nothing written beside it. An inception says
+// nothing of what the identity is for, so nothing is shown of that: the owner
+// is shown the identifier and the key it will act with, as a short code. The
+// code is the identity's own and is for the owner to recognise, not to compare
+// with another device: for an AI agent nothing independent holds the key.
+func WhatSigningApproves(ixnRaw, dipRaw []byte) (*ToSign, error) {
+	if err := keri.ValidateEvent(dipRaw); err != nil {
+		return nil, fmt.Errorf("the delegated inception is not what it says it is: %w", err)
+	}
+	dip, err := keri.ParseEvent(dipRaw)
+	if err != nil {
+		return nil, err
+	}
+	if dip.Ilk != "dip" || dip.Delegator == "" || dip.SN != 0 {
+		return nil, fmt.Errorf("the event is not a delegated inception")
+	}
+	if len(dip.Keys) != 1 || len(dip.NextDigest) != 1 {
+		return nil, fmt.Errorf("the delegated identity does not act with one key committed to one next key, which is the only kind approved here")
+	}
+	ixn, err := anchoringSeal(ixnRaw, dip.Delegator, dip.Identifier, "0", dip.SAID)
+	if err != nil {
+		return nil, err
+	}
+	return &ToSign{Kind: "delegation", Issuer: dip.Delegator, SN: int(ixn.SN), Prior: ixn.PriorSAID,
+		Holder: dip.Identifier, PublicKey: dip.Keys[0], KeyFingerprint: KeyFingerprint(dip.Keys[0])}, nil
 }
 
 func firstNonEmpty(xs ...string) string {

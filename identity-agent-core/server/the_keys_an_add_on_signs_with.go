@@ -43,6 +43,9 @@ func (s *CoreServer) assetSigner(aid string) (coretypes.KeySigner, error) {
 	}
 	for _, a := range assets {
 		if a.PairwiseAID == aid {
+			if a.ApprovalPending {
+				return nil, fmt.Errorf("%s has not been approved yet, so it cannot act", aid)
+			}
 			seed, err := asset.AssetSigningSeed(s.DataDir, a.SigningIndex)
 			if err != nil {
 				return nil, fmt.Errorf("the signing key of %s is unavailable: %w", aid, err)
@@ -92,7 +95,7 @@ func (s *CoreServer) heldKeySet(aid string) (*didcomm.KeySet, error) {
 			return nil, fmt.Errorf("the assets held here cannot be read: %w", lerr)
 		}
 		for _, a := range assets {
-			if a.PairwiseAID == aid {
+			if a.PairwiseAID == aid && !a.ApprovalPending {
 				held = true
 				break
 			}

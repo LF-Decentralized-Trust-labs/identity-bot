@@ -165,6 +165,26 @@ func (s *SQLiteStore) SaveSupersedingEvent(record EventRecord) error {
 	return tx.Commit()
 }
 
+func (s *SQLiteStore) SetAsideEventsFrom(aid string, fromSN int) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`
+		INSERT OR IGNORE INTO kel_superseded (aid, seq_num, event_type, event_json, public_key, next_key_digest,
+		                            timestamp, cesr_signature, raw_bytes_b64, signatures, unsigned_at_upgrade)
+		SELECT aid, seq_num, event_type, event_json, public_key, next_key_digest,
+		       timestamp, cesr_signature, raw_bytes_b64, signatures, unsigned_at_upgrade
+		  FROM kel WHERE aid = ? AND seq_num >= ?`, aid, fromSN); err != nil {
+		return fmt.Errorf("could not keep the events set aside: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM kel WHERE aid = ? AND seq_num >= ?`, aid, fromSN); err != nil {
+		return fmt.Errorf("could not move the events out of the log: %w", err)
+	}
+	return tx.Commit()
+}
+
 func (s *SQLiteStore) SupersededEvents(aid string) ([]EventRecord, error) {
 	rows, err := s.db.Query(
 		`SELECT aid, seq_num, event_type, event_json, public_key, next_key_digest,
@@ -940,6 +960,11 @@ func (s *SQLiteStore) getRegistryWhere(where string, arg string) (*CredentialReg
 		return nil, fmt.Errorf("failed to get registry: %w", err)
 	}
 	return &r, nil
+}
+
+func (s *SQLiteStore) ForgetRegistryInception(registrySAID string) error {
+	_, err := s.db.Exec(`UPDATE credential_registries SET vcp_raw_b64 = '' WHERE registry_said = ?`, registrySAID)
+	return err
 }
 
 // GetRegistryByIssuer returns the registry an issuer issues into, or nil. An

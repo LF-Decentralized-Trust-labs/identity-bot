@@ -28,6 +28,12 @@ type witnessState struct {
 	witnessOnce sync.Once
 	witnessKick chan struct{}
 	witnessMu   sync.Mutex
+	// sendMu is held while a key log is read and sent to its witnesses, and by
+	// whatever must know no send is in flight: discarding unsigned events asks
+	// the witnesses what they hold and sets the events aside under it, so a
+	// send that read them cannot reach a witness between the answer and the
+	// discard.
+	sendMu sync.Mutex
 	// witnessJobs is what each pass brings up to date, one job per identity
 	// asked for: the identity kept here, and any root it was moved on from.
 	witnessJobs map[string]witnessJob
@@ -140,11 +146,10 @@ func (s *CoreServer) keepWitnessing(running context.Context, stop <-chan struct{
 		ctx, cancel := context.WithTimeout(running, time.Minute)
 		done := map[string]bool{}
 		for _, job := range jobs {
-			events := s.signedEventsOf(job.owner)
-			held := s.WitnessService.BringUpToDate(ctx, job.owner, events, job.witnesses, job.toad)
+			events, held := s.sendLogToWitnesses(ctx, job.owner, job.witnesses, job.toad)
 			done[job.owner] = true
 			if job.record != "" {
-				s.WitnessService.BringUpToDate(ctx, job.record, s.signedEventsOf(job.record), job.witnesses, job.toad)
+				s.sendLogToWitnesses(ctx, job.record, job.witnesses, job.toad)
 				done[job.record] = true
 			}
 			if entry, ok := movedOn[job.owner]; ok {
@@ -171,6 +176,17 @@ func (s *CoreServer) keepWitnessing(running context.Context, stop <-chan struct{
 		s.pushRegistryEvents(ctx)
 		cancel()
 	}
+}
+
+// sendLogToWitnesses reads an identity's key log and brings its witnesses up to
+// date with it, as one step under sendMu: what was read is what is sent, and
+// nothing that must know no send is in flight can overlap it. It returns the
+// log it sent and whether the witnesses hold it.
+func (s *CoreServer) sendLogToWitnesses(ctx context.Context, aid string, witnesses []string, toad int) ([]witness.SignedEvent, bool) {
+	s.witnessing.sendMu.Lock()
+	defer s.witnessing.sendMu.Unlock()
+	events := s.signedEventsOf(aid)
+	return events, s.WitnessService.BringUpToDate(ctx, aid, events, witnesses, toad)
 }
 
 // signedEventsOf is an identity's key log as published and signed.

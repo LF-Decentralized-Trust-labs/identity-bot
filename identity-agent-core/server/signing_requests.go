@@ -335,6 +335,9 @@ func (s *CoreServer) handleRefuseSigningRequest(w http.ResponseWriter, r *http.R
 	if req.Kind == signingKindRevocation {
 		s.withdrawalRefused(id)
 	}
+	if req.Kind == signingKindDelegation {
+		s.delegationRefused(id)
+	}
 	// A grant refused frees its place: the one kept behind it is built.
 	if isGrantKind(req.Kind) {
 		s.buildNextBehind()
@@ -375,6 +378,8 @@ func (s *CoreServer) whatIsToBeSigned(payloadB64 string, parts map[string]string
 	switch {
 	case parts["registry_b64"] != "":
 		shown, err = authorisation.WhatSigningRegisters(dec(payloadB64), dec(parts["registry_b64"]))
+	case parts["delegated_inception_b64"] != "":
+		shown, err = authorisation.WhatSigningApproves(dec(payloadB64), dec(parts["delegated_inception_b64"]))
 	case parts["revocation_b64"] != "":
 		shown, err = authorisation.WhatSigningRevokes(dec(payloadB64), dec(parts["revocation_b64"]), dec(parts["credential_b64"]))
 	default:
@@ -453,5 +458,5 @@ func anchorsSealMatching(events []store.EventRecord, match func(map[string]inter
 // isGrantKind is a signing request whose interaction extends the identity's
 // key log for a grant: its issuance, its registry, or its withdrawal.
 func isGrantKind(kind string) bool {
-	return kind == signingKindGrant || kind == signingKindRegistry || kind == signingKindRevocation
+	return kind == signingKindGrant || kind == signingKindRegistry || kind == signingKindRevocation || kind == signingKindDelegation
 }

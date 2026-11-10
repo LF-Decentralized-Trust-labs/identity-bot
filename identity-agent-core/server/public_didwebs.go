@@ -603,6 +603,12 @@ func (s *CoreServer) publicDidWebsPubKey(aid string) string {
 			if a.PairwiseAID != aid {
 				continue
 			}
+			// An identity whose approval has not been signed by the device
+			// that holds the key is in no key log yet: it has no key to
+			// publish, and serving one would present it as something it is not.
+			if a.ApprovalPending {
+				return ""
+			}
 			// An asset that brought its own key: the public half was recorded at
 			// enrolment and the private half never reached us. Authoritative.
 			//

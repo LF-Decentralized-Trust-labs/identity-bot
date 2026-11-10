@@ -191,6 +191,11 @@ func TestTheOwnerOnlyListIsTheOneTheADRRecords(t *testing.T) {
 		"POST /api/signing-requests/{id}/refuse",
 		"POST /api/signing-requests/sign-for-another",
 		"POST /api/signing-requests/adopt",
+		// Rewinding the key log to what the device that holds the key has, and
+		// asking that device to approve an identity delegated from it: both
+		// are the owner's, as the key events they stand in for are.
+		"POST /api/key-log/unsigned-events/discard",
+		"POST /api/assets/{id}/approval",
 		"POST /api/didcomm/peers",
 		"POST /api/providers",
 		"POST /api/capability-registry/packs",

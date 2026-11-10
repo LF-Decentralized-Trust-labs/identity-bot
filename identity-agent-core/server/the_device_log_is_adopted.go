@@ -212,6 +212,8 @@ func (s *CoreServer) adoptOne(aid string, raw []byte, held heldEvent) error {
 			err = s.adoptGrant(row, held.Signature)
 		case row.Pending.Registry != nil:
 			err = s.adoptRegistry(row, held.Signature)
+		case row.Pending.Delegation != nil:
+			err = s.adoptDelegation(row, held.Signature)
 		case row.Pending.Revocation != nil:
 			err = s.adoptRevocation(row.ID, row.Pending.Revocation, held.Signature)
 		}
@@ -403,6 +405,13 @@ func (s *CoreServer) adoptFromParts(aid string, raw []byte, held heldEvent) erro
 		}
 		return s.adoptRevocation("", &drivers.PreparedRevocation{Issuer: aid, Registry: shown.Registry, AcdcSAID: shown.Credential,
 			IssSAID: rev.Prior, RevRaw: dec("revocation_b64"), RevSAID: rev.SAID, IxnRaw: raw, IxnSAID: ev.SAID, SN: int(ev.SN), Prior: ev.PriorSAID}, held.Signature)
+	case held.Parts["delegated_inception_b64"] != "":
+		// An approval the device signed for an asset no longer asked for here:
+		// its key log has it, so this one takes it up as it is.
+		if _, err := authorisation.WhatSigningApproves(raw, dec("delegated_inception_b64")); err != nil {
+			return err
+		}
+		return s.adoptBare(aid, raw, held.Signature)
 	case held.Parts["registry_b64"] != "":
 		shown, err := authorisation.WhatSigningRegisters(raw, dec("registry_b64"))
 		if err != nil {
@@ -698,7 +707,7 @@ func (s *CoreServer) unsignedOwnEvents() []int {
 // errUnsignedKeyLog is a key log here holding events the device that holds
 // the key never signed: nothing can be asked of that device until they are
 // discarded or signed.
-var errUnsignedKeyLog = errors.New("this Identity Agent's key log holds events written by an earlier version without the identity's key, which the device that holds the key never had; nothing can be signed there until they are discarded or signed")
+var errUnsignedKeyLog = errors.New("this Identity Agent's key log holds events written by an earlier version without the identity's key, which the device that holds the key never had; nothing can be signed there until they are discarded (POST /api/key-log/unsigned-events/discard)")
 
 // handleAdoptSigned takes up an event the device that holds the key signed,
 // as it answered when asked to sign at a place it had already filled.
