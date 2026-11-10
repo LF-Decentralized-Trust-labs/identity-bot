@@ -24,6 +24,13 @@ func (w *aGateWorld) gate(t *testing.T) (bool, string) {
 	return w.s.credentialGateSatisfied(context.Background(), w.presented(t), w.holder, w.schema, w.issuer)
 }
 
+// gateDetail is the check with the detail kept for the log, which a test may
+// read; what the browser is given is checked separately.
+func (w *aGateWorld) gateDetail(t *testing.T) (bool, string, string) {
+	t.Helper()
+	return w.s.credentialGate(context.Background(), w.presented(t), w.holder, w.schema, w.issuer)
+}
+
 // A genuine held credential, as the agent presents it, passes the gate. Fails if
 // the held body is encoded a second time on its way out.
 func TestAGenuineHeldCredentialPassesTheCredentialGate(t *testing.T) {
@@ -48,7 +55,7 @@ func TestAHeldBodyIsEncodedOnceWhetherKeptEncodedOrPlain(t *testing.T) {
 // The credential's issuee must be the identity signing in.
 func TestACredentialIssuedToSomebodyElseIsRefusedAtTheGate(t *testing.T) {
 	w := aGateWorldIssuingTo(t, false, true)
-	ok, reason := w.gate(t)
+	ok, _, reason := w.gateDetail(t)
 	if ok {
 		t.Fatal("a credential issued to somebody other than the identity signing in was accepted")
 	}
@@ -60,12 +67,15 @@ func TestACredentialIssuedToSomebodyElseIsRefusedAtTheGate(t *testing.T) {
 // The issuer's key log must be one the agent holds.
 func TestACredentialWhoseIssuerLogIsNotHeldIsRefusedAtTheGate(t *testing.T) {
 	w := aGateWorldIssuingTo(t, true, false)
-	ok, reason := w.gate(t)
+	ok, public, reason := w.gateDetail(t)
 	if ok {
 		t.Fatal("a credential was accepted with no key log for its issuer")
 	}
 	if !strings.Contains(reason, "issuer KEL not found") {
 		t.Fatalf("unexpected reason: %q", reason)
+	}
+	if public != refusalCredentialNotAllowed {
+		t.Fatalf("the browser was given %q", public)
 	}
 }
 

@@ -172,3 +172,28 @@ func TestARefusedAnswerIsRecordedOnTheOpenSignIn(t *testing.T) {
 		t.Fatalf("the person's own answer was refused after a forged one: %v", err)
 	}
 }
+
+// Whoever holds the QR token can post an answer, and the person's page shows
+// what a refusal recorded. An answer naming an identifier made of a message is
+// refused in fixed wording, so a stranger cannot put words on the page.
+func TestARefusedAnswerPutsNoPostedTextOnThePage(t *testing.T) {
+	w := anOrganisationWithAWebsite(t, asset.EnrollmentPolicy{Mode: asset.EnrollmentOpen})
+	h := aPersonsIdentityAgent(t)
+	req := aBrowserKeyChallenge(t, w, aBrowserKey)
+	bundle := w.org.challenges[req.SessionToken]
+	rel, _ := h.GetOrCreateRelationship(bundle.SiteAID, &bundle)
+	a, _ := h.BuildAssertion(rel, &bundle, nil)
+	raw, _ := json.Marshal(a)
+	var m map[string]interface{}
+	_ = json.Unmarshal(raw, &m)
+	const planted = "your account is locked, call +1-555-0100"
+	m["i"] = planted
+	raw, _ = json.Marshal(m)
+	if code := postAnswer(t, w, req.SessionToken, raw); code != http.StatusUnauthorized {
+		t.Fatalf("answered %d", code)
+	}
+	st := w.org.challengeStatusOf(req.SessionToken)
+	if st["last_refusal"] != refusalAnswerNotVerified {
+		t.Fatalf("the page would show %q", st["last_refusal"])
+	}
+}

@@ -18,7 +18,7 @@ func TestAnEntryWithNoCredentialBytesIsRefusedWhenADriverIsLoaded(t *testing.T) 
 		"holder_aid":  w.holder,
 		"status":      "issued",
 	}}
-	ok, reason := w.s.credentialGateSatisfied(context.Background(), declared, w.holder, w.schema, w.issuer)
+	ok, _, reason := w.s.credentialGate(context.Background(), declared, w.holder, w.schema, w.issuer)
 	if ok {
 		t.Fatal("an entry with no credential bytes passed the gate on its declared fields")
 	}
