@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/agent_config.dart';
+import 'an_agent_address.dart';
 import 'profile_scope.dart';
 
 /// Whether this installation holds the identity, or is a front end for one held
@@ -27,12 +28,16 @@ class WhichHalfThisAppIsRunning {
   const WhichHalfThisAppIsRunning._({
     required this.agentOrigin,
     required this.agentAid,
+    this.agentSequence,
+    this.agentKey,
   }) : couldNotTell = false;
 
   /// This installation holds the identity: the local core is the agent.
   const WhichHalfThisAppIsRunning.itHoldsTheIdentity()
       : agentOrigin = '',
         agentAid = '',
+        agentSequence = null,
+        agentKey = null,
         couldNotTell = false;
 
   /// The settings could not be read, so this is not an answer.
@@ -47,6 +52,8 @@ class WhichHalfThisAppIsRunning {
   const WhichHalfThisAppIsRunning.couldNotBeRead()
       : agentOrigin = '',
         agentAid = '',
+        agentSequence = null,
+        agentKey = null,
         couldNotTell = true;
 
   /// The origin of the agent this app is a front end for, empty when this
@@ -61,6 +68,13 @@ class WhichHalfThisAppIsRunning {
   /// the identifier is what makes the next launch safe rather than trusting
   /// whatever answers.
   final String agentAid;
+
+  /// The last key state proved for that agent: the sequence number of the last
+  /// event of its history and the key it put in force. An identifier's history
+  /// only moves forward, so one that ends earlier is refused. Null until a first
+  /// proof has been kept.
+  final int? agentSequence;
+  final String? agentKey;
 
   /// True when the settings could not be read, so nothing below is an answer.
   ///
@@ -83,6 +97,8 @@ class WhichHalfThisAppIsRunning {
 
   static const _originKey = 'controller_agent_origin';
   static const _aidKey = 'controller_agent_aid';
+  static const _seqKey = 'controller_agent_seq';
+  static const _keyKey = 'controller_agent_key';
 
   /// Records that this app is a front end for an agent elsewhere.
   ///
@@ -92,18 +108,39 @@ class WhichHalfThisAppIsRunning {
   static Future<void> pointAt({
     required String agentOrigin,
     required String agentAid,
+    int? provedSequence,
+    String? provedKey,
   }) async {
-    final origin = agentOrigin.trim();
+    // Only an origin that passes the one address rule is ever remembered: plain
+    // http to another host is refused here too, not only where it is proved.
     final aid = agentAid.trim();
-    if (origin.isEmpty || aid.isEmpty) {
+    if (agentOrigin.trim().isEmpty || aid.isEmpty) {
       throw ArgumentError(
           'pointing this app at an agent needs both where it is and which '
           'identity it is — an address alone would mean trusting whatever answers');
     }
+    final origin = AnAgentAddress.asAnOrigin(agentOrigin);
     final prefs = await SharedPreferences.getInstance();
     final scope = await ProfileScope.activeId();
     await prefs.setString('$scope.$_originKey', origin);
     await prefs.setString('$scope.$_aidKey', aid);
+    await prefs.remove('$scope.$_seqKey');
+    await prefs.remove('$scope.$_keyKey');
+    if (provedSequence != null && provedKey != null) {
+      await prefs.setInt('$scope.$_seqKey', provedSequence);
+      await prefs.setString('$scope.$_keyKey', provedKey);
+    }
+  }
+
+  /// Keeps the key state a proof just showed, never moving it backwards.
+  static Future<void> rememberTheProvedState(
+      {required int sequence, required String key}) async {
+    final prefs = await SharedPreferences.getInstance();
+    final scope = await ProfileScope.activeId();
+    final had = prefs.getInt('$scope.$_seqKey');
+    if (had != null && had > sequence) return;
+    await prefs.setInt('$scope.$_seqKey', sequence);
+    await prefs.setString('$scope.$_keyKey', key);
   }
 
   /// Stops being a front end: this installation goes back to its own core.
@@ -112,6 +149,8 @@ class WhichHalfThisAppIsRunning {
     final scope = await ProfileScope.activeId();
     await prefs.remove('$scope.$_originKey');
     await prefs.remove('$scope.$_aidKey');
+    await prefs.remove('$scope.$_seqKey');
+    await prefs.remove('$scope.$_keyKey');
   }
 
   /// What this installation is, for the profile that is open.
@@ -128,7 +167,11 @@ class WhichHalfThisAppIsRunning {
       if (origin.isEmpty || aid.isEmpty) {
         return const WhichHalfThisAppIsRunning.itHoldsTheIdentity();
       }
-      return WhichHalfThisAppIsRunning._(agentOrigin: origin, agentAid: aid);
+      return WhichHalfThisAppIsRunning._(
+          agentOrigin: origin,
+          agentAid: aid,
+          agentSequence: prefs.getInt('$scope.$_seqKey'),
+          agentKey: prefs.getString('$scope.$_keyKey'));
     } catch (e) {
       // Unreadable settings mean this app does not know what it is. The safe
       // answer is the ordinary one: talk to the local core, which will simply

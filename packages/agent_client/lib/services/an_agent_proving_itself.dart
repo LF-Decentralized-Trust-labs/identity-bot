@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../config/agent_config.dart';
+import 'an_agent_address.dart';
 import 'the_owner_at_this_computer.dart';
 
 /// Checking that what answers at an address holds the keys of the identity it
@@ -24,13 +25,19 @@ import 'the_owner_at_this_computer.dart';
 
 /// An agent that proved it holds its identifier's keys.
 class ProvedAgent {
-  const ProvedAgent({required this.aid, required this.publicKey});
+  const ProvedAgent(
+      {required this.aid, required this.publicKey, this.sequence});
 
   /// Which identity answers there.
   final String aid;
 
   /// The key its history ends with.
   final String publicKey;
+
+  /// The sequence number of the last event of the history that was proved, to
+  /// be kept and handed back next time ([proveTheAgentAt]'s `knownSequence`) so
+  /// a history that goes backwards is refused. Null when the core did not say.
+  final int? sequence;
 }
 
 /// Why an agent could not be proved. Three kinds, because they call for
@@ -47,6 +54,11 @@ enum NotProved {
   /// This computer could not run the check at all (its own core is down or has
   /// no key engine). Not a verdict on the far side.
   couldNotTell,
+
+  /// The address is plain http to somewhere that is not this computer (or is
+  /// not an address at all). Nothing was asked of it: the proof is not tied to
+  /// the traffic that follows, so it does not make http safe.
+  notSecure,
 }
 
 /// An agent at an address could not be proved. [words] is for the screen;
@@ -70,9 +82,21 @@ class AnAgentCouldNotBeProved implements Exception {
 Future<ProvedAgent> proveTheAgentAt(
   String agentOrigin, {
   String? aid,
+  int? knownSequence,
+  String? knownKey,
   String? localCoreOrigin,
   http.Client? client,
 }) async {
+  // EVERY ORIGIN, given or stored, is tidied and held to https-except-this-
+  // computer here, at the one place that proves, so no caller can skip it. The
+  // proof says nothing about the traffic that follows, so plain http to another
+  // host is refused whatever the host answers.
+  try {
+    agentOrigin = AnAgentAddress.asAnOrigin(agentOrigin);
+  } on ThatIsNotAnAddress catch (e) {
+    throw AnAgentCouldNotBeProved(NotProved.notSecure, e.words,
+        'the address $agentOrigin was refused before anything was asked');
+  }
   // The route is the owner's: it asks this core to dial an address on this
   // person's behalf, so the request carries the owner's secret like every other
   // request this app makes to the core beside it.
@@ -86,7 +110,13 @@ Future<ProvedAgent> proveTheAgentAt(
             Uri.parse(
                 '${localCoreOrigin ?? AgentConfig.coreBaseUrl}/api/verify/agent-at-address'),
             headers: const {'Content-Type': 'application/json'},
-            body: jsonEncode({'address': agentOrigin, 'aid': aid ?? ''}),
+            body: jsonEncode({
+              'address': agentOrigin,
+              'aid': aid ?? '',
+              if (knownSequence != null) 'known_sequence': knownSequence,
+              if (knownSequence != null && knownKey != null)
+                'known_key': knownKey,
+            }),
           )
           // The core allows itself 15 seconds per read it makes, and makes two.
           .timeout(const Duration(seconds: 40));
@@ -120,13 +150,19 @@ Future<ProvedAgent> proveTheAgentAt(
     final key = (body['public_key'] ?? '').toString();
     if (proved && provedAid.isNotEmpty && key.isNotEmpty &&
         (aid == null || aid.isEmpty || aid == provedAid)) {
-      return ProvedAgent(aid: provedAid, publicKey: key);
+      final seq = body['sequence'];
+      return ProvedAgent(
+          aid: provedAid, publicKey: key, sequence: seq is int ? seq : null);
     }
     final why = (body['why'] ?? 'no reason given').toString();
     switch ((body['kind'] ?? '').toString()) {
       case 'no-answer':
         throw AnAgentCouldNotBeProved(NotProved.noAnswer,
             'Nothing answered at that address. Check it and try again.', why);
+      case 'not-secure':
+        throw AnAgentCouldNotBeProved(NotProved.notSecure,
+            'That address is not encrypted. Use the one that starts with '
+            'https://.', why);
       case 'could-not-tell':
         throw AnAgentCouldNotBeProved(NotProved.couldNotTell,
             'This computer could not check who is at that address.', why);

@@ -23,11 +23,16 @@ import 'the_core_is_settled.dart';
 /// Returns whether a new profile was begun. Throws when one was needed and could
 /// not be, and the caller must NOT go on to connect: the connection would land
 /// on the profile that holds the identity.
+/// For widget tests, which have no core beside them to ask: replaces the
+/// question "does the open profile hold an identity". Never set outside a test.
+@visibleForTesting
+Future<bool> Function()? theOpenProfileHoldsAnIdentityForTests;
+
 Future<bool> makeRoomOnAProfile({
   Future<bool> Function()? holdsAnIdentity,
   Future<void> Function()? beginAProfile,
 }) async {
-  if (!await (holdsAnIdentity ?? _theOpenProfileHoldsAnIdentity)()) {
+  if (!await (holdsAnIdentity ?? theOpenProfileHoldsAnIdentityForTests ?? _theOpenProfileHoldsAnIdentity)()) {
     return false;
   }
   await TheCoreIsSettled.during(
@@ -35,18 +40,27 @@ Future<bool> makeRoomOnAProfile({
   return true;
 }
 
-Future<bool> _theOpenProfileHoldsAnIdentity() async {
-  final core = CoreService();
+/// Whether the open profile holds an identity. A failure to find out is NOT
+/// "no identity held": connecting on a profile that does hold one hides it
+/// behind the connection, so this throws and nothing is connected (the callers
+/// say so in plain words and nothing was changed). An agent that answers that it
+/// is not this person's is one that exists, so room is made.
+Future<bool> _theOpenProfileHoldsAnIdentity() =>
+    theOpenProfileHoldsAnIdentity();
+
+/// [makeCore] is a seam for tests, which have no core.
+@visibleForTesting
+Future<bool> theOpenProfileHoldsAnIdentity({CoreService Function()? makeCore}) async {
+  final core = (makeCore ?? CoreService.new)();
   try {
     final identity = await core.getIdentity();
     return identity.initialized && (identity.aid ?? '').isNotEmpty;
+  } on AgentNotYoursException {
+    return true;
   } catch (e) {
-    // Nothing answering is not a reason to abandon this profile: the core may
-    // simply not be up yet, and starting a second profile would strand the
-    // first.
     debugPrint('[connect] could not tell whether this profile holds an '
-        'identity, so it is used as it is: $e');
-    return false;
+        'identity, so nothing is connected: $e');
+    rethrow;
   } finally {
     core.dispose();
   }

@@ -17,11 +17,12 @@ import 'which_half_this_app_is_running.dart';
 /// the far side refusing a machine it does not know, which a different agent
 /// will not do for a request it cannot read.
 ///
-/// ONLY A DIFFERENT AGENT STOPS THE APP. An agent that does not answer — the
-/// server is down, this computer is offline — is [TheRememberedAgent.cannotTell]
-/// and the app goes on, as it always has when the network is off. Treating
-/// "unreachable" as "swapped" would lock people out of their own organisation
-/// whenever the wifi dropped.
+/// NOTHING IS SHOWN FROM AN ADDRESS THAT HAS NOT JUST PROVED ITSELF. An agent
+/// that does not answer — or whose check hangs or drops — is
+/// [TheRememberedAgent.cannotTell], which is not "swapped" and not "fine": the
+/// gate shows and sends nothing from that address, says so, and retries. Letting
+/// the app carry on over a check that did not finish would let a swapped agent
+/// through by making the check fail.
 enum TheRememberedAgent {
   /// This installation holds its own identity, so there is nothing to check.
   nothingRemembered,
@@ -36,6 +37,11 @@ enum TheRememberedAgent {
   /// Nothing could be established either way: no answer, or this computer could
   /// not run the check.
   cannotTell,
+
+  /// The remembered address is plain http to somewhere that is not this
+  /// computer (the first flow stored such addresses). It is not asked, nothing
+  /// is shown from it or sent to it, and the person connects again.
+  addressNotSecure,
 }
 
 Future<TheRememberedAgent> checkTheRememberedAgent({
@@ -47,14 +53,33 @@ Future<TheRememberedAgent> checkTheRememberedAgent({
   if (half.couldNotTell) return TheRememberedAgent.cannotTell;
   if (!half.isAController) return TheRememberedAgent.nothingRemembered;
   try {
-    await proveTheAgentAt(half.agentOrigin,
-        aid: half.agentAid, localCoreOrigin: localCoreOrigin, client: client);
+    final proved = await proveTheAgentAt(half.agentOrigin,
+        aid: half.agentAid,
+        knownSequence: half.agentSequence,
+        knownKey: half.agentKey,
+        localCoreOrigin: localCoreOrigin,
+        client: client);
+    // Kept, so the next launch refuses a history that goes backwards.
+    if (proved.sequence != null) {
+      try {
+        await WhichHalfThisAppIsRunning.rememberTheProvedState(
+            sequence: proved.sequence!, key: proved.publicKey);
+      } catch (e) {
+        debugPrint('[controller] could not keep the proved key state: $e');
+      }
+    }
     return TheRememberedAgent.stillThere;
   } on AnAgentCouldNotBeProved catch (e) {
     debugPrint('[controller] the agent at ${half.agentOrigin} was not proved '
         'to be ${half.agentAid}: ${e.kind} ${e.detail}');
-    return e.kind == NotProved.somethingElse
-        ? TheRememberedAgent.somethingElseAnswers
-        : TheRememberedAgent.cannotTell;
+    switch (e.kind) {
+      case NotProved.somethingElse:
+        return TheRememberedAgent.somethingElseAnswers;
+      case NotProved.notSecure:
+        return TheRememberedAgent.addressNotSecure;
+      case NotProved.noAnswer:
+      case NotProved.couldNotTell:
+        return TheRememberedAgent.cannotTell;
+    }
   }
 }
