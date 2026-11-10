@@ -31,7 +31,7 @@ func TestEveryCallToASitesAddressUsesThePeerClient(t *testing.T) {
 	}
 	const site = "http://site.invalid"
 	_, _ = h.fetchChallengeBundle(site, "tok")
-	_ = h.postAssertion(site+"/callback", "tok", &Assertion{})
+	_ = h.postAssertion(site+"/callback", "tok", &Assertion{}, nil)
 	_ = h.registerPairwiseOnDevRelay(&SiteRelationship{RelayOOBI: site + "/oobi/EPW"}, &ChallengeBundle{SiteOOBI: site + "/oobi/ESITE"})
 	_, _ = h.resolveSiteKey(site+"/oobi/ESITE", "ESITE")
 

@@ -60,7 +60,7 @@ func (a *Adapter) CompleteAuthorization(
 			return nil, err
 		}
 	}
-	assertion, err := a.Login.BuildAssertion(rel, bundle, customData)
+	assertion, creds, err := a.Login.BuildAssertionWithCredentials(rel, bundle, customData)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +72,7 @@ func (a *Adapter) CompleteAuthorization(
 	if err != nil {
 		return nil, err
 	}
-	vpToken, err := BuildVPToken(auth.VPFormat, assertion)
+	vpToken, err := BuildVPToken(auth.VPFormat, assertion, creds)
 	if err != nil {
 		return nil, err
 	}

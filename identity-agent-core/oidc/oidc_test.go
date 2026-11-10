@@ -102,11 +102,11 @@ func TestVPFormatsNegotiation(t *testing.T) {
 			"score_attestation": map[string]interface{}{"band": "green", "score": 75},
 		},
 	}
-	sdjwt, err := BuildVPToken(VPFormatSDJWT, assertion)
+	sdjwt, err := BuildVPToken(VPFormatSDJWT, assertion, nil)
 	if err != nil || sdjwt.Format != VPFormatSDJWT {
 		t.Fatalf("sdjwt: %v %v", sdjwt, err)
 	}
-	acdc, err := BuildVPToken(VPFormatACDC, assertion)
+	acdc, err := BuildVPToken(VPFormatACDC, assertion, nil)
 	if err != nil || acdc.Format != VPFormatACDC {
 		t.Fatalf("acdc: %v %v", acdc, err)
 	}

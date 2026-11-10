@@ -10,8 +10,10 @@ import {
   parseRfc3339,
   readAssertion,
   readChallenge,
+  readSignInPost,
   verifyCanonical,
 } from "../dist/canonical.js";
+import { boundCredentials } from "../dist/credentials.js";
 import { verifyLoginAssertion } from "../dist/standalone-verify.js";
 
 // Every expectation here was produced by the Go core (its login canonicaliser
@@ -58,6 +60,28 @@ for (const c of V.canonical_challenges) {
   if (c.go_reads && got.reads) {
     check(got.body === c.canonical_body, `challenge "${c.name}":\n  ts: ${got.body}\n  go: ${c.canonical_body}`);
   }
+}
+
+// A callback's body: whether it is read, and which credentials it presents
+// that the assertion's signature names and whose bodies have the SAID signed.
+for (const c of V.sign_in_posts) {
+  let reads = true;
+  let bound = [];
+  let schemas = [];
+  let issuers = [];
+  try {
+    const post = readSignInPost(c.post);
+    const counted = boundCredentials(post.assertion.presented_acdcs, post.credentials);
+    bound = counted.map((x) => x.said);
+    schemas = counted.map((x) => x.schema_said);
+    issuers = counted.map((x) => x.issuer_aid);
+  } catch {
+    reads = false;
+  }
+  check(reads === c.go_reads, `sign-in post "${c.name}": read ${reads}, the core ${c.go_reads}`);
+  check(JSON.stringify(bound) === JSON.stringify(c.bound_saids), `sign-in post "${c.name}": counts ${bound}, the core ${c.bound_saids}`);
+  check(JSON.stringify(schemas) === JSON.stringify(c.bound_schema_saids), `sign-in post "${c.name}": schemas ${schemas}, the core ${c.bound_schema_saids}`);
+  check(JSON.stringify(issuers) === JSON.stringify(c.bound_issuer_aids), `sign-in post "${c.name}": issuers ${issuers}, the core ${c.bound_issuer_aids}`);
 }
 
 function decided(cases, decode, label) {
@@ -135,5 +159,5 @@ if (failures) {
 console.log(
   `core agreement: ${V.canonical_assertions.length} assertion and ${V.canonical_challenges.length} challenge bodies, ` +
     `${V.verkey_qb64.length + V.non_transferable_aid.length} key spellings, ${s.signatures.length} signature spellings, ` +
-    `${V.times.length} times, ${V.ed25519_signatures.length} Ed25519 cases`,
+    `${V.sign_in_posts.length} sign-in posts, ${V.times.length} times, ${V.ed25519_signatures.length} Ed25519 cases`,
 );

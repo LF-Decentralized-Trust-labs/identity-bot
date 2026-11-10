@@ -1,5 +1,6 @@
 export * from "./types.js";
 export * from "./canonical.js";
+export * from "./credentials.js";
 export * from "./resolver.js";
 export * from "./session-store.js";
 export * from "./verifier.js";
