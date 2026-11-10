@@ -3058,6 +3058,10 @@ func (s *CoreServer) handleSubmitReceipt(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "Failed to store receipt", err.Error())
 		return
 	}
+	// The event's finalization counts the receipts kept, this one included.
+	if s.WitnessService != nil {
+		s.WitnessService.RecountReceipts(req.EventSAID)
+	}
 	held, _ := s.DataStore.GetWitnessReceipts(req.EventSAID)
 	in.Receipts = map[string][]drivers.WitnessReceipt{}
 	for _, h := range held {

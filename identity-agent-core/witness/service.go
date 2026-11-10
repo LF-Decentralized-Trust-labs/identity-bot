@@ -925,15 +925,9 @@ func (s *Service) BroadcastEvent(ctx context.Context, signerAID string, rawEvent
 	if len(designated) > 0 && toad > 0 {
 		threshold = toad
 	}
-	now := NowRFC3339()
-	_ = s.Store.SaveFinalization(FinalizationState{
-		EventSAID: said, SignerAID: signerAID, SequenceNum: seq,
-		State: FinalizePending, ReceiptCount: 0, Threshold: threshold,
-		StartedAt: now, UpdatedAt: now,
-	})
+	s.begin(said, signerAID, seq, threshold)
 
 	body := eventBody(signerAID, base64.StdEncoding.EncodeToString(rawEvent), cesrSigs)
-	designated := s.designatedInForce(signerAID, rawEvent)
 	for _, w := range witnesses {
 		url := witnessEventURL(w)
 		s.background(func() { s.postWithRetry(ctx, url, body, said, w.AID, designated) })
@@ -989,11 +983,7 @@ func (s *Service) BringUpToDate(ctx context.Context, signerAID string, events []
 		said := eventSAID(ev)
 		if f, _ := s.Store.GetFinalization(said); f == nil {
 			seq, _ := eventSeq(ev)
-			now := NowRFC3339()
-			_ = s.Store.SaveFinalization(FinalizationState{
-				EventSAID: said, SignerAID: signerAID, SequenceNum: seq,
-				State: FinalizePending, Threshold: threshold, StartedAt: now, UpdatedAt: now,
-			})
+			s.startFinalization(said, signerAID, seq, threshold, "")
 		}
 	}
 	// A receipt's index is a position in the list in force at its event, which
@@ -1174,11 +1164,7 @@ func (s *Service) BroadcastToDesignated(ctx context.Context, signerAID string, r
 	known := s.designatedTargets(designated)
 	said := eventSAID(event)
 	seq, _ := eventSeq(event)
-	now := NowRFC3339()
-	_ = s.Store.SaveFinalization(FinalizationState{
-		EventSAID: said, SignerAID: signerAID, SequenceNum: seq,
-		State: FinalizePending, Threshold: threshold, StartedAt: now, UpdatedAt: now,
-	})
+	s.begin(said, signerAID, seq, threshold)
 	body := eventBody(signerAID, base64.StdEncoding.EncodeToString(rawEvent), cesrSigs)
 	for _, key := range designated {
 		w, ok := known[key]
@@ -1446,13 +1432,75 @@ func (s *Service) onReceipt(eventSAID, witnessAID, cesrSig string, rawEvent []by
 		log.Printf("[witness] receipt from %s for %s not kept: %v", witnessAID, eventSAID, err)
 		return
 	}
-	f.ReceiptCount++
-	f.UpdatedAt = NowRFC3339()
-	if f.ReceiptCount >= f.Threshold {
-		f.State = FinalizeFinalized
-	} else if f.ReceiptCount > 0 {
-		f.State = FinalizePartial
+	s.settle(f)
+	_ = s.Store.SaveFinalization(*f)
+}
+
+// storedReceiptCount is the number of distinct witnesses whose receipt for the
+// event is kept: the count a finalization is made of, so it can neither run
+// ahead of the receipts anyone can be shown nor fall behind them.
+func (s *Service) storedReceiptCount(eventSAID string) int {
+	held, _ := s.Contacts.GetWitnessReceipts(eventSAID)
+	seen := map[string]struct{}{}
+	for _, r := range held {
+		seen[r.WitnessAID] = struct{}{}
 	}
+	return len(seen)
+}
+
+// settle sets a finalization's count to the receipts kept now, and its state
+// to match. A count taken from the receipts, not added to, is what lets an
+// event broadcast again keep the receipts it already has: onReceipt does not
+// count a witness it already holds, so a count that restarted at 0 would never
+// reach the threshold.
+func (s *Service) settle(f *FinalizationState) {
+	f.ReceiptCount = s.storedReceiptCount(f.EventSAID)
+	f.UpdatedAt = NowRFC3339()
+	switch {
+	case f.ReceiptCount >= f.Threshold && f.ReceiptCount > 0:
+		f.State = FinalizeFinalized
+	case f.ReceiptCount > 0:
+		f.State = FinalizePartial
+	default:
+		f.State = FinalizePending
+	}
+}
+
+// begin records that an event is being sent to its witnesses, keeping the
+// receipts already held for it (a re-broadcast of an event some witnesses
+// have already receipted).
+func (s *Service) begin(eventSAID, signerAID string, seq, threshold int) {
+	startedAt := ""
+	if old, _ := s.Store.GetFinalization(eventSAID); old != nil {
+		startedAt = old.StartedAt
+	}
+	s.startFinalization(eventSAID, signerAID, seq, threshold, startedAt)
+}
+
+// startFinalization saves the finalization of an event with the count of the
+// receipts kept for it (see settle).
+func (s *Service) startFinalization(eventSAID, signerAID string, seq, threshold int, startedAt string) {
+	s.receiptMu.Lock()
+	defer s.receiptMu.Unlock()
+	if startedAt == "" {
+		startedAt = NowRFC3339()
+	}
+	f := FinalizationState{EventSAID: eventSAID, SignerAID: signerAID, SequenceNum: seq, Threshold: threshold, StartedAt: startedAt}
+	s.settle(&f)
+	_ = s.Store.SaveFinalization(f)
+}
+
+// RecountReceipts brings an event's finalization, if it has one, in line with
+// the receipts kept for it, for a receipt that was kept without passing through
+// onReceipt (one submitted to the core's own receipt route).
+func (s *Service) RecountReceipts(eventSAID string) {
+	s.receiptMu.Lock()
+	defer s.receiptMu.Unlock()
+	f, _ := s.Store.GetFinalization(eventSAID)
+	if f == nil {
+		return
+	}
+	s.settle(f)
 	_ = s.Store.SaveFinalization(*f)
 }
 
@@ -2061,43 +2109,6 @@ func rawEventOf(body []byte) []byte {
 	}
 	raw, _ := base64.StdEncoding.DecodeString(b.EventB64)
 	return raw
-}
-
-// designatedInForce is the witness list in force once rawEvent is applied to
-// the log this agent holds for signerAID: an inception's own list, or, for a
-// rotation, the list after it (the new b), which only the log can say. Nil when
-// it cannot be read, in which case the index of a receipt is not checked on
-// arrival and is checked where the log is judged.
-func (s *Service) designatedInForce(signerAID string, rawEvent []byte) []string {
-	if d := drivers.DesignatedByInception(rawEvent); d != nil {
-		return d
-	}
-	var ev map[string]interface{}
-	if json.Unmarshal(rawEvent, &ev) != nil {
-		return nil
-	}
-	said := eventSAID(ev)
-	kel, err := s.Store.GetKelEvents(signerAID)
-	if err != nil {
-		return nil
-	}
-	var allRaw [][]byte
-	seen := false
-	for _, e := range kel {
-		raw, derr := base64.StdEncoding.DecodeString(e.RawBytesB64)
-		if derr != nil || len(raw) == 0 {
-			return nil
-		}
-		var k map[string]interface{}
-		if json.Unmarshal(raw, &k) == nil && eventSAID(k) == said {
-			seen = true
-		}
-		allRaw = append(allRaw, raw)
-	}
-	if !seen {
-		allRaw = append(allRaw, rawEvent)
-	}
-	return designatedAt(allRaw, said)
 }
 
 // designatedAt is the witness list in force at the event with eventSAID in the

@@ -13,6 +13,7 @@ type memContacts struct {
 	// reciprocal witness request, while a test is still writing them.
 	mu       sync.Mutex
 	contacts map[string]store.ContactRecord
+	receipts []store.WitnessReceiptRecord
 	identity *store.IdentityState
 	tasks    []store.TaskRecord
 }
@@ -48,9 +49,22 @@ func (m *memContacts) GetIdentity() (*store.IdentityState, error) {
 	return m.identity, nil
 }
 
-func (m *memContacts) SaveWitnessReceipt(store.WitnessReceiptRecord) error { return nil }
-func (m *memContacts) GetWitnessReceipts(string) ([]store.WitnessReceiptRecord, error) {
-	return nil, nil
+func (m *memContacts) SaveWitnessReceipt(r store.WitnessReceiptRecord) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.receipts = append(m.receipts, r)
+	return nil
+}
+func (m *memContacts) GetWitnessReceipts(said string) ([]store.WitnessReceiptRecord, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []store.WitnessReceiptRecord
+	for _, r := range m.receipts {
+		if r.EventSAID == said {
+			out = append(out, r)
+		}
+	}
+	return out, nil
 }
 func (m *memContacts) SaveTask(t store.TaskRecord) error {
 	m.mu.Lock()

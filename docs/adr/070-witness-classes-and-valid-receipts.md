@@ -1,7 +1,7 @@
 # ADR-070 — Witness classes, and a receipt any KERI verifier can check
 
 **Status:** Accepted. Supersedes three statements of ADR-016 (its "stub" status, its "max 3" cap, and its description of the receipt); the rest of ADR-016, including its endpoints and request workflow, stands. Corrects a statement in ADR-024.
-**Date:** 2026-10-24 (decisions recorded from Rob Andersen, 2026-10-15)
+**Date:** 2026-10-24 (decisions of 2026-10-15)
 
 This records decisions already made. It does not reopen them.
 
@@ -26,9 +26,9 @@ The class is used in code, on the wire and in the interface, and is the thing a 
 
 ### The peer cluster is the point
 
-Rob: *"ideally we want people to use their own cluster of witnesses (other identity agents that also serve as witnesses) because it removes centralized dependence on large witness service providers."*
+The owner of the project: *"ideally we want people to use their own cluster of witnesses (other identity agents that also serve as witnesses) because it removes centralized dependence on large witness service providers."*
 
-Commercial witnesses exist for **continuity**: confidence when a person deals with people new to their network, who have no peers yet. They are explicitly **not** architecturally required for a mature Identity Agent with many contacts. That is ADR-031's "appended, never preferred" with its reason stated: a person leans on their own peers first, and a commercial witness is a dependency to be grown out of, not one to be built on. ADR-031 also gives a lasting reason to keep a commercial witness: on a pairwise AID the peer list is what leaks, so it takes commercial witnesses only, permanently. (ADR-031's pairwise exception stands: a pairwise AID takes commercial witnesses only, permanently, because on a pairwise AID the peer list is what leaks.)
+Commercial witnesses exist for **continuity**: confidence when a person deals with people new to their network, who have no peers yet. They are explicitly **not** architecturally required for a mature Identity Agent with many contacts. That is ADR-031's "appended, never preferred" with its reason stated: a person leans on their own peers first, and a commercial witness is a dependency to be grown out of, not one to be built on. ADR-031's pairwise exception stands: a pairwise AID takes commercial witnesses only, permanently, because on a pairwise AID the peer list is what leaks.
 
 ### Where conformance binds
 
@@ -44,13 +44,13 @@ This is not negotiable, because it is what makes a receipt mean anything to anyo
 
 **Transport layer: may differ.** The route and envelope. Peers keep the optimised path (`/api/witness/*`, JSON envelope). The outside world gets keripy's (`POST /receipts`, `application/cesr+json`, signatures in `CESR-ATTACHMENT` headers).
 
-**Why this split.** It gives **one receipt format and two thin transports**, not two receipt formats joined by a semantic adapter. An adapter translates between two things that mean subtly different things, and that is where trust gaps and bugs live. A transport shim is routing and framing only. It keeps what Rob asked for, which is simplicity, no adapters, and an optimised internal architecture where an Identity Agent can be simpler than KERI has to be, while every receipt an Identity Agent produces is verifiable by any KERI verifier.
+**Why this split.** It gives **one receipt format and two thin transports**, not two receipt formats joined by a semantic adapter. An adapter translates between two things that mean subtly different things, and that is where trust gaps and bugs live. A transport shim is routing and framing only. It keeps the stated aims, which are simplicity, no adapters, and an optimised internal architecture where an Identity Agent can be simpler than KERI has to be, while every receipt an Identity Agent produces is verifiable by any KERI verifier.
 
 The keripy-style transport for the outside world is **not built by this ADR**; it is the transport half of this decision and is a separate piece of work. The envelope the agents use today carries the same receipt.
 
 ### Both directions must work
 
-An Identity Agent consumes witness services and provides them. It must be able to (a) designate and use a third-party KERI witness such as KERI Health as a commercial witness, and (b) serve as a witness to other agents. Rob: *"anyone should be able to be used as long as it is KERI protocol."* A witness is therefore chosen by whether it speaks KERI, not by who runs it.
+An Identity Agent consumes witness services and provides them. It must be able to (a) designate and use a third-party KERI witness such as KERI Health as a commercial witness, and (b) serve as a witness to other agents. The owner of the project: *"anyone should be able to be used as long as it is KERI protocol."* A witness is therefore chosen by whether it speaks KERI, not by who runs it.
 
 ### Default pool size
 

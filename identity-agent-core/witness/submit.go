@@ -33,7 +33,12 @@ func (s *Service) SubmitToWitness(ctx context.Context, witnessURL, signerAID str
 	}
 	// Checked, not assumed. A reply that does not carry a receipt covering this
 	// event is a witness that has not witnessed, whatever its status code said.
-	designated := s.designatedInForce(signerAID, rawEvent)
+	designated, _ := s.designationAfter(signerAID, ked)
+	// A rotation that leaves no witness in force leaves an empty list, which the hook reports as it reports a
+	// log it cannot read: nil. For a rotation the list is known, and the cut witness's receipt is not in it.
+	if t, _ := ked["t"].(string); designated == nil && s.DesignationAfter != nil && (t == "rot" || t == "drt") {
+		designated = []string{}
+	}
 	sig, wit, err := receiptFromResponse(resp, rawEvent, said, designated)
 	if err != nil {
 		return nil, err

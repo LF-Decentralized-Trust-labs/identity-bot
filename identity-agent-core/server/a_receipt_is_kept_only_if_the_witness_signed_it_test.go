@@ -12,6 +12,7 @@ import (
 	"identity-agent-core/iacrypto"
 	"identity-agent-core/login"
 	"identity-agent-core/store"
+	"identity-agent-core/witness"
 
 	keri "github.com/grapeid/keri-go"
 )
@@ -162,5 +163,32 @@ func TestAReceiptForSomebodyElsesEventIsNotKept(t *testing.T) {
 		"event_said": other, "witness_aid": w.witnesses[0], "cesr_signature": sig,
 	}); code != http.StatusNotFound {
 		t.Fatalf("a receipt for an event not in this identity's log answered %d, want 404", code)
+	}
+}
+
+// A receipt submitted here is counted on the event's finalization, as one that
+// came back in a witness's answer is: the count is the receipts kept, so a
+// repeat does not move it and a second witness completes it.
+func TestASubmittedReceiptIsCountedOnTheEventsFinalization(t *testing.T) {
+	w := witnessedIdentity(t)
+	sq := w.s.DataStore.(*store.SQLiteStore)
+	w.s.WitnessService = witness.NewService(witness.NewSQLiteStore(sq.DB()), sq, nil, witness.BackendDesktop)
+	now := witness.NowRFC3339()
+	_ = w.s.WitnessService.Store.SaveFinalization(witness.FinalizationState{
+		EventSAID: w.said, SignerAID: "ERoot", State: witness.FinalizePending, Threshold: 2, StartedAt: now, UpdatedAt: now,
+	})
+	got := func() witness.FinalizationState {
+		f, _ := w.s.WitnessService.Store.GetFinalization(w.said)
+		return *f
+	}
+	for i := 0; i < 2; i++ { // the second is a repeat
+		w.submit(t, map[string]interface{}{"event_said": w.said, "witness_aid": w.witnesses[0], "cesr_signature": w.sign(0)})
+	}
+	if f := got(); f.ReceiptCount != 1 || f.State != witness.FinalizePartial {
+		t.Fatalf("one witness, twice: %+v", f)
+	}
+	w.submit(t, map[string]interface{}{"event_said": w.said, "witness_aid": w.witnesses[1], "cesr_signature": w.sign(1)})
+	if f := got(); f.ReceiptCount != 2 || f.State != witness.FinalizeFinalized {
+		t.Fatalf("two witnesses: %+v", f)
 	}
 }
