@@ -10,10 +10,20 @@ void main() {
     expect(ok('agent.example.com'), 'https://agent.example.com');
   });
 
-  test('a trailing slash and a query go, a path stays', () {
+  test('a trailing slash and a query go', () {
     expect(ok('https://agent.example.com/'), 'https://agent.example.com');
-    expect(ok('https://host.example.com/org-a/?x=1#y'),
-        'https://host.example.com/org-a');
+    expect(ok('https://agent.example.com/?x=1#y'), 'https://agent.example.com');
+  });
+
+  test('a path is refused: the proof is made for the origin, not for a prefix',
+      () {
+    expect(() => ok('https://shared-host.example/~somebody'),
+        throwsA(isA<ThatIsNotAnAddress>()));
+  });
+
+  test('an address that only looks like this computer is not it', () {
+    expect(() => ok('http://127.999.1.1:5151'),
+        throwsA(isA<ThatIsNotAnAddress>()));
   });
 
   test('a port is kept', () {

@@ -7,8 +7,8 @@
 /// nobody types one. Neither is a mistake on their part. The address is
 /// REBUILT FROM ITS PARTS, so nothing depends on an expression matching (the
 /// one this replaced matched a literal dollar sign, did nothing, and looked
-/// right in a diff for weeks). The path is kept — an agent served under a
-/// prefix is a real deployment — and a query and fragment go.
+/// right in a diff for weeks). A trailing slash, a query and a fragment go; a
+/// path is refused (see below).
 ///
 /// Second, and this is the security rule: **https, except for this computer.**
 /// Nothing the agent answers is secret to a person on the path unless the
@@ -29,7 +29,16 @@ class AnAgentAddress {
     return h == 'localhost' ||
         h == '::1' ||
         h == '[::1]' ||
-        RegExp(r'^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$').hasMatch(h);
+        _isA127Address(h);
+  }
+
+  static bool _isA127Address(String h) {
+    final parts = h.split('.');
+    if (parts.length != 4 || parts.first != '127') return false;
+    return parts.every((p) {
+      final n = int.tryParse(p);
+      return n != null && n >= 0 && n <= 255 && p == '$n';
+    });
   }
 
   /// The origin for [typed], or throws [ThatIsNotAnAddress] with words for the
@@ -59,15 +68,20 @@ class AnAgentAddress {
           'https://, so nobody between this computer and the server can read '
           'or change what is sent.');
     }
-    var path = parsed.path;
-    while (path.endsWith('/')) {
-      path = path.substring(0, path.length - 1);
+    // NO PATH. The proof is made for an origin (scheme, host, port) and an agent
+    // proves itself at the root of it, so an address with a path would prove
+    // whatever is at the root and then talk to something else under the path,
+    // which on a shared host is somebody else's. An agent is reached at its own
+    // origin.
+    if (parsed.path.replaceAll('/', '').isNotEmpty) {
+      throw const ThatIsNotAnAddress(
+          'Use the address of the server itself, with nothing after it. It '
+          'should look like https://agent.example.com');
     }
     return Uri(
       scheme: parsed.scheme,
       host: parsed.host,
       port: parsed.hasPort ? parsed.port : null,
-      path: path.isEmpty ? null : path,
     ).toString();
   }
 }

@@ -117,3 +117,15 @@ func TestAFrontEndCoreStillChecksWhoIsAtTheAddress(t *testing.T) {
 		t.Fatal("a front end refuses to check who is at the address it fronts for")
 	}
 }
+
+// A host that answers the proof and then will not show its history has not "not
+// answered": reporting it so would let a swapped agent look like a dropped
+// network, and the app would carry on.
+func TestAHostThatAnswersTheProofButHidesItsHistoryIsADifferentOne(t *testing.T) {
+	agent, _ := anAgentHoldingKeys(t)
+	origin := theHostOfAnAgent(t, agent, func() []map[string]interface{} { return nil })
+	out := askWhoIsAt(t, theAsker(t), origin, "")
+	if out.Verified || out.Kind != KindDifferent {
+		t.Fatalf("a host answering the proof with no history behind it was reported %+v", out)
+	}
+}

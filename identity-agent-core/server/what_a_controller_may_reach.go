@@ -65,6 +65,11 @@ var controllerOwnerOnly = map[string]string{
 	"POST /api/owners/ceremony":                         "bringing new owners in decides who the owner is",
 	"DELETE /api/owners/ceremony":                       "abandoning a ceremony decides who the owner is",
 
+	// Dialling an address the caller names, from this machine. It is the asking
+	// computer's own check of the agent it fronts for, never a thing a
+	// controller does through the agent it was granted.
+	"POST /api/verify/agent-at-address": "it makes this machine dial an address the caller chooses",
+
 	// Who would witness a founding: the founding names them for good, and the
 	// owner's device confirms each before it does.
 	"GET /api/events/witnesses-for-a-founding": "the witnesses a founding names are written into the identity for good, and are the owner's to confirm",

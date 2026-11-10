@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -82,6 +83,8 @@ const (
 	KindCouldNotTell = "could-not-tell"
 )
 
+var anIdentifierShape = regexp.MustCompile(`^[A-Za-z0-9_-]{20,128}$`)
+
 type notProved struct{ why, kind string }
 
 // proveAnAgentAt asks the agent at origin to sign a fresh challenge and checks
@@ -115,19 +118,22 @@ func (s *CoreServer) proveAnAgentAt(origin, wantAID string) (aid, key string, no
 		return "", "", &notProved{why: "what answers at that address did not prove it holds an identity's keys", kind: KindDifferent}
 	}
 	aid = proof.DID.AID
+	// The far side's own words go into a URL below: only an identifier's shape.
+	if !anIdentifierShape.MatchString(aid) {
+		return "", "", &notProved{why: "what answers at that address named something that is not an identifier", kind: KindDifferent}
+	}
 	if aid == "" || (wantAID != "" && aid != wantAID) {
 		return "", "", &notProved{why: "what answers at that address is not the identity this computer was connected to", kind: KindDifferent}
 	}
 
 	events, currentKey, why := s.verifiedKeyLogAt(aid, origin+"/public/oobi/"+aid)
 	if why != "" {
-		// A history that cannot be read is not the same as one that does not
-		// check out: the first says nothing about who is there.
-		kind := KindDifferent
-		if strings.HasPrefix(why, "could not read the key history") {
-			kind = KindNoAnswer
-		}
-		return "", "", &notProved{why: why, kind: kind}
+		// SOMETHING ANSWERED THE PROOF, so whatever goes wrong next is not
+		// "nothing answered": a host that names an identifier and then refuses to
+		// show its history is the far side choosing to look unreachable, and
+		// treating that as a dropped network would let a swapped agent carry on
+		// unnoticed. Only a failure to reach the proof route at all is no-answer.
+		return "", "", &notProved{why: why, kind: KindDifferent}
 	}
 	// The history is published as records that carry each event as text;
 	// CheckKeyProof reads the events themselves.
