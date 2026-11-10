@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // Checking that the identity answering at an address is the one it claims.
@@ -49,6 +50,9 @@ type verifyIdentityResponse struct {
 	PublicKey string `json:"public_key,omitempty"`
 	// Why, in words for a person, when it is not verified.
 	Why string `json:"why,omitempty"`
+	// Kind, for the agent-at-address check only: "no-answer", "different" or
+	// "could-not-tell". Empty when verified.
+	Kind string `json:"kind,omitempty"`
 }
 
 func (s *CoreServer) handleVerifyAnIdentityElsewhere(w http.ResponseWriter, r *http.Request) {
@@ -76,46 +80,49 @@ func (s *CoreServer) handleVerifyAnIdentityElsewhere(w http.ResponseWriter, r *h
 		return
 	}
 
-	events, err := s.fetchKELFromOOBI(oobi)
-	if err != nil {
-		writeJSON(w, verifyIdentityResponse{
-			Why: fmt.Sprintf("could not read the key history at %s: %v", oobi, err)})
+	_, currentKey, why := s.verifiedKeyLogAt(aid, oobi)
+	if why != "" {
+		writeJSON(w, verifyIdentityResponse{Why: why})
 		return
+	}
+	writeJSON(w, verifyIdentityResponse{
+		Verified:  true,
+		AID:       aid,
+		PublicKey: currentKey,
+	})
+}
+
+// verifiedKeyLogAt reads the key history published at oobi and checks it end to
+// end for aid. It returns the events and the key the history ends with, or, when
+// the history cannot be relied on, why, in words for a person. Used by every
+// check that starts from a key history, so there is one reading of "this history
+// checks out".
+func (s *CoreServer) verifiedKeyLogAt(aid, oobi string) (events []map[string]interface{}, currentKey, why string) {
+	events, err := fetchKELFrom(s.chosenAddressClient(15*time.Second, oobi), oobi)
+	if err != nil {
+		return nil, "", fmt.Sprintf("could not read the key history at %s: %v", oobi, err)
 	}
 	if len(events) == 0 {
-		writeJSON(w, verifyIdentityResponse{
-			Why: "that address published no key history, so nothing there can be checked"})
-		return
+		return nil, "", "that address published no key history, so nothing there can be checked"
 	}
-
 	val, verr := s.KeriDriver.ValidateKEL(aid, events)
 	if verr != nil {
-		writeJSON(w, verifyIdentityResponse{
-			Why: fmt.Sprintf("the check could not run: %v", verr)})
-		return
+		return nil, "", fmt.Sprintf("the check could not run: %v", verr)
 	}
 	if !val.KelVerified {
 		why := "that key history did not check out"
 		if len(val.ValidationErrors) > 0 {
 			why = val.ValidationErrors[0]
 		}
-		writeJSON(w, verifyIdentityResponse{Why: why})
-		return
+		return nil, "", why
 	}
 	// VERIFIED WITH NO KEY IS NOT VERIFIED, the same rule as the contact check
 	// next door and for the same reason: an answer of yes with nothing to check
 	// signatures against is one nobody can act on, and it would be acted on
 	// anyway.
 	if val.CurrentPublicKey == "" {
-		writeJSON(w, verifyIdentityResponse{
-			Why: "that key history checked out and named no current key, which is " +
-				"not something this computer can act on"})
-		return
+		return nil, "", "that key history checked out and named no current key, which is " +
+			"not something this computer can act on"
 	}
-
-	writeJSON(w, verifyIdentityResponse{
-		Verified:  true,
-		AID:       aid,
-		PublicKey: val.CurrentPublicKey,
-	})
+	return events, val.CurrentPublicKey, ""
 }

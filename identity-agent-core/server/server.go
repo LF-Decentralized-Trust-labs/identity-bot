@@ -1110,6 +1110,7 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 		// party with an engine it controls — asking the agent to verify itself
 		// would be asking the thing under question to answer for itself.
 		r.Post("/verify/identity-elsewhere", s.handleVerifyAnIdentityElsewhere)
+		r.Post("/verify/agent-at-address", s.handleVerifyAnAgentAtAnAddress)
 
 		// Which machines may act for this identity. Unlisted, so the public and
 		// capability holders cannot reach them; granting and removing a machine

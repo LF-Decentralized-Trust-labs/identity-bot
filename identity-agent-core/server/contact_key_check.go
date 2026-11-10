@@ -205,7 +205,14 @@ func (s *CoreServer) checkContactKEL(aid string) kelCheckResult {
 }
 
 func (s *CoreServer) fetchKELFromOOBI(oobiURL string) ([]map[string]interface{}, error) {
-	resp, err := s.peerClient(15*time.Second, oobiURL).Get(oobiURL)
+	return fetchKELFrom(s.peerClient(15*time.Second, oobiURL), oobiURL)
+}
+
+// fetchKELFrom is fetchKELFromOOBI with the caller's choice of client, because
+// who may be dialled differs: a contact's address is held to the contacts the
+// owner recorded, an address the owner typed is held to what they allow.
+func fetchKELFrom(c *http.Client, oobiURL string) ([]map[string]interface{}, error) {
+	resp, err := c.Get(oobiURL)
 	if err != nil {
 		return nil, err
 	}
