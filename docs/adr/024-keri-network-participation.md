@@ -2,6 +2,7 @@
 
 **Status:** Accepted; the relay client's transport and enrolment token are superseded by ADR-048 (2026-10-21)
 **Date:** 2026-06-19
+**Amended:** 2026-11-09 — the owner can opt an identity out of what the watcher tells others (see "Amendment, 2026-11-09" at the end)
 **Deciders:** Rob Andersen
 
 ---
@@ -32,7 +33,7 @@ The watcher (`watcher.Service`, `identity-agent-core/watcher/`) detects duplicit
 | **L2** | Since-inception / standing: query a shared commercial watcher for the consensus digest | `watcher.grapeid.org/public/kel-digest` |
 | **L3** | Peer duplicity detection: cross-check the digest with peer agents | a peer's `/public/kel-check` |
 
-L1 records first-seen digests (`RecordFirstSeen`) and compares incoming digests against them (`DetectDuplicity`). L2 (`L2Client.QueryDigest`) fetches a signed standing digest from a shared watcher. L3 (`L3Client.CrossCheck`) asks peers whether their first-seen digest matches.
+L1 records first-seen digests (`RecordFirstSeen`) and compares incoming digests against them (`VerifyKel`). L2 (`L2Client.QueryDigest`) fetches a signed standing digest from a shared watcher. L3 (`L3Client.CrossCheck`) asks peers whether their first-seen digest matches.
 
 The blocking rule is deliberately conservative: duplicity **blocks** only on (a) a repeat L1 mismatch — a different digest at a sequence we've already seen — or (b) a first-contact conflict between L1 and the L2 standing digest. L2/L3 mismatches alone never block; they only raise an escalation. Detected duplicity is recorded as a `DuplicityAlert` and anchored to the agent's own KEL (default-on) so the alert itself is tamper-evident. The verdict is a `VerifyKelResult` carrying the per-source outcomes and any alert.
 
@@ -85,3 +86,45 @@ Only pairwise AIDs are published — never the agent's root AID — keeping the 
 - Watcher: `identity-agent-core/watcher/` (`service.go` = L1, `l2_client.go`, `l3_client.go`, `types.go`); public URLs `watcher.grapeid.org`.
 - Relay client: `identity-agent-core/relay/` (`client.go`, `manager.go`, `protocol.go`) on `relayproto` (ADR-048), which removed the frame protocol and its schema; public URL `relay.grapeid.org`.
 - did:webs publisher: `identity-agent-core/didwebs/publisher.go`, `urls.go`, served by `server/didwebs_handlers.go`. The resolver / verification side is ADR-023.
+
+---
+
+## Amendment, 2026-11-09: opting an identity out of the watcher
+
+**What it means.** The owner can opt an identity out of what this agent's
+watcher says about it. From then on every answer the watcher gives about that
+identity, on its public routes and in the owner's own debug listing, is the
+same as the answer for an identity it has never seen: `/public/kel-digest` returns
+the same signed empty digest, `/public/kel-check` returns no match and no
+digest, and the owner's debug listing returns no records. Status code, body
+and the store queries behind the answer are the same in both cases.
+
+**Who may set and read it.** Only the owner may set or clear it
+(`PUT /api/watcher/opt-out`, on the owner-only list of ADR-050). The owner and
+its paired controllers may read it (`GET /api/watcher/opt-out`).
+
+**What keeps happening.** First-seen records are still written for an
+opted-out identity. The opt-out hides what the watcher says; it does not stop
+the watcher remembering, because a watcher that stopped recording could not
+catch a later fork of that identity's key log.
+
+**How it is enforced.** The watcher's reads of first-seen records and
+duplicity alerts are unexported, and the only exported ways to read them are
+`Service.Disclosable`, `DisclosableAll` and `DisclosableAlerts`, which apply the
+opt-out. A test fails on any other exported method returning an observation,
+and a second test walks every route a non-owner can reach and fails on one
+nobody has classified. This keeps another package from skipping the check; it
+does not stop code inside the watcher package from reading its own store, and
+the owner's event stream still reports each verification's outcome.
+
+**The one outside consequence.** Verification still uses what the watcher has
+seen. A credential whose issuer's key log is a fork of one this agent has
+already recorded is refused with the reason "L1 digest mismatch at same
+sequence": `handleVerifyCredential` returns that reason, and
+`verifyPresentedCredentialACDC` refuses the sign-in with its one fixed phrase
+and logs it. So a caller
+who holds a validly signed fork of an identity's key log, and presents a
+credential from it, learns that this agent has seen that identity. It does not
+learn whether the identity opted out, because the refusal is the same either
+way. Refusing a forked issuer is the purpose of the watcher, so this is
+accepted rather than closed.

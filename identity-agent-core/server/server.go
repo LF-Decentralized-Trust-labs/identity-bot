@@ -1061,6 +1061,9 @@ func (s *CoreServer) buildRouterOf(addons []Addon, extras []func(chi.Router)) ch
 		// it (the_owner_at_this_computer.go).
 		r.Get("/local-owner/proof", s.handleLocalOwnerProof)
 		r.Get("/info", s.handleInfo)
+		// The owner's say over whether this agent's watcher discusses an identity.
+		r.Get("/watcher/opt-out", s.handleWatcherOptOutGet)
+		r.Put("/watcher/opt-out", s.handleWatcherOptOutSet)
 		r.Get("/identity", s.handleIdentity)
 		r.Get("/security/enclave", s.handleSecurityEnclave)
 		// Everything this agent's trust rests on, assembled into one answer for

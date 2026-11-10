@@ -214,6 +214,13 @@ var controllerOwnerOnly = map[string]string{
 	// keys for, so it is the owner's signature by another door.
 	"POST /api/sealed/send": "this speaks as the identity to another Identity Agent, which serves it as that identity's own request",
 
+	// --- what this agent says about other identities ---
+	//
+	// Turning the watcher's silence on or off for an identity decides what the
+	// owner's agent discloses to every peer that asks, so it is the owner's
+	// choice, not a paired machine's at the score every action needs.
+	"PUT /api/watcher/opt-out": "this decides whether this agent's watcher tells peers what it has seen of an identity",
+
 	// --- who else may act for this identity ---
 	//
 	// Enrolling a controller from a controller is how an attacker who briefly
